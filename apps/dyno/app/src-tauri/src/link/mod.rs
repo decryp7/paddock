@@ -221,6 +221,7 @@ pub struct AgentLink {
     inbox: Mutex<Option<Receiver<Event>>>,
     transitions: Transitions<Snapshot>,
     pace: Duration,
+    tuning: machine::Tuning,
     /// `quit` was called (its answer is for the first call only).
     quit_called: AtomicBool,
 }
@@ -234,6 +235,19 @@ impl AgentLink {
     /// A link that looks at the world every `pace` (tests shorten it; the thresholds are counted in ticks, so the pace
     /// changes how fast, never what).
     pub fn paced(dirs: Dirs, app_version: &str, sink: Arc<dyn Sink>, launcher: Box<dyn Launcher>, pace: Duration) -> Arc<AgentLink> {
+        AgentLink::tuned(dirs, app_version, sink, launcher, pace, machine::Tuning::default())
+    }
+
+    /// [`AgentLink::paced`] with other counts (see [`machine::Tuning`]): a test that must not meet a stall, however loaded the
+    /// machine is, counts a wait as long.
+    pub fn tuned(
+        dirs: Dirs,
+        app_version: &str,
+        sink: Arc<dyn Sink>,
+        launcher: Box<dyn Launcher>,
+        pace: Duration,
+        tuning: machine::Tuning,
+    ) -> Arc<AgentLink> {
         let (events, inbox) = channel();
         Arc::new(AgentLink {
             dirs,
@@ -249,6 +263,7 @@ impl AgentLink {
             inbox: Mutex::new(Some(inbox)),
             transitions: Transitions::new(Supervisor::new().snapshot_now()),
             pace,
+            tuning,
             quit_called: AtomicBool::new(false),
         })
     }
@@ -345,6 +360,13 @@ impl AgentLink {
     /// (the window asks for data the moment it opens, usually before the agent has answered; the wait is on the state, not
     /// on a clock). After a first connection, requests fail fast instead.
     fn peer_or_wait(&self) -> Option<Arc<Peer<Message>>> {
+        // A connection the supervisor has published (`UsePeer`) is used at once. Its snapshot follows the step that made it,
+        // so a request that starts in between (the worker that subscribes right after a connect) must not read the older
+        // snapshot, which may say "settled, not connected" (a stall had been shown) and fail it as unavailable.
+        let live = || lock(&self.peer).clone().filter(|p| !p.is_closed());
+        if let Some(p) = live() {
+            return Some(p);
+        }
         // (a link that was spawned but has not taken its first step is still Idle: that is not an answer)
         let spawned = lock(&self.inbox).is_none();
         let snapshot = self
@@ -353,7 +375,7 @@ impl AgentLink {
         if !snapshot.connected() {
             return None;
         }
-        lock(&self.peer).clone().filter(|p| !p.is_closed())
+        live()
     }
 
     /// A window's wish for the live detail; the connection asks for the most any window wants.

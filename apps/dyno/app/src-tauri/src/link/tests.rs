@@ -304,7 +304,21 @@ impl Launcher for Shared {
     }
 }
 
+/// Counts that never show a stall within a test: the pace is 1 ms, so the production note (50 ticks) would be 50 ms of wall
+/// time, which a loaded machine easily exceeds, and a request that waits "for the connection or a stall" would then fail by
+/// design. Tests about a stall use the production counts.
+fn patient() -> super::machine::Tuning {
+    super::machine::Tuning {
+        note_after: u32::MAX,
+        ..super::machine::Tuning::default()
+    }
+}
+
 fn rig(fail: bool) -> Rig {
+    rig_with(fail, patient())
+}
+
+fn rig_with(fail: bool, tuning: super::machine::Tuning) -> Rig {
     let tmp = tempfile::tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let (tx, rx) = channel();
@@ -356,7 +370,7 @@ fn it_starts_an_agent_when_none_runs_forwards_requests_and_stops_what_it_started
     let r = rig(false);
     let handle = r.link.spawn().unwrap();
     running(&r.link, &r.statuses);
-    assert!(r.link.started_by_this_app());
+    assert!(r.link.started_by_this_app(), "{:?}", r.link.transitions().current());
     assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 1);
     // A request round-trips.
     match r.link.call(Request::Settings).unwrap() {
@@ -916,7 +930,7 @@ fn another_agent_that_holds_the_folder_without_answering_is_reported_with_retry(
 
 #[test]
 fn a_login_service_that_starts_no_agent_is_waited_for_then_replaced_by_the_apps_own_with_a_note() {
-    let r = rig(false);
+    let r = rig_with(false, super::machine::Tuning::default());
     // It says it supervises; nothing ever runs (switched off in Login Items, a job launchd dropped, a unit that fails).
     let manager = FakeServiceManager::new(r.link.dirs.clone(), true, true);
     r.link.set_service_probe(manager.probe());
@@ -1074,4 +1088,22 @@ fn a_quit_is_taken_at_once_while_the_shell_is_blocked_on_a_notification() {
     handle.join().unwrap();
     *lock(&gate.0) = true;
     gate.1.notify_all();
+}
+
+#[test]
+fn a_request_uses_the_connection_that_was_just_published_even_before_the_state_that_says_so() {
+    // The step that makes a connection publishes it (`UsePeer`) before its snapshot; the worker that subscribes to the live
+    // stream starts in between and used to read the older snapshot, which was already "settled" without a connection (a
+    // stall had been shown), so its request failed as unavailable and the subscription was never made.
+    let r = rig(false);
+    r.launcher.launch().unwrap();
+    let found = Discovery::read(&r.link.dirs.discovery()).expect("the in-process agent wrote its file");
+    let peer = ports::connect(&found, &(r.sink.clone() as Arc<dyn Sink>)).unwrap();
+    *lock(&r.link.peer) = Some(peer);
+    assert!(
+        !r.link.connected() && r.link.transitions().current().settled(),
+        "the link has not published a connection (never spawned: settled, not connected)"
+    );
+    assert!(r.link.call(Request::Settings).is_ok(), "a published connection is used at once");
+    r.launcher.finish(Duration::ZERO);
 }

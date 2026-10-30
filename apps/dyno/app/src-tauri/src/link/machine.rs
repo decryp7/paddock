@@ -536,7 +536,15 @@ impl Supervisor {
         }
     }
 
-    /// A supervisor with other counts (the model check).
+    /// A supervisor with other counts than the production ones (a test that must not meet a stall).
+    pub fn with_tuning(tuning: Tuning) -> Supervisor {
+        Supervisor {
+            tuning,
+            ..Supervisor::new()
+        }
+    }
+
+    /// A supervisor with other counts and a fault put back (the model check).
     #[cfg(test)]
     pub fn tuned(tuning: Tuning, mutant: Mutant) -> Supervisor {
         Supervisor {

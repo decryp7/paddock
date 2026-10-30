@@ -12,6 +12,61 @@ use std::time::{Duration, Instant};
 
 /// Set by SIGINT/SIGTERM.
 static SIGNALLED: AtomicBool = AtomicBool::new(false);
+/// `run` has finished starting: from here its own loop sees [`SIGNALLED`] and stops the agent cleanly.
+static RUNNING: AtomicBool = AtomicBool::new(false);
+/// `run` has stopped the agent and is about to return.
+static STOPPED: AtomicBool = AtomicBool::new(false);
+
+/// How long a stop after a signal may take before the process ends anyway (ADR 0031 class S: a signal means the system is
+/// ending the process, and macOS follows TERM with KILL; ending must not depend on a store that will not close).
+// cap: the one deliberate time limit of the agent's stop.
+const SIGNAL_STOP_GRACE: Duration = Duration::from_secs(10);
+
+/// What to do about a signal that arrived: end now (the agent is still starting, so nothing is open to close and the main
+/// thread is in a start that does not look at the flag), wait for the clean stop, or end because the clean stop took too long.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnSignal {
+    EndNow,
+    WaitForStop,
+    EndAnyway,
+}
+
+fn on_signal_decision(running: bool, stopped: bool, waited_too_long: bool) -> OnSignal {
+    match (running, stopped) {
+        (_, true) => OnSignal::WaitForStop,
+        (false, false) => OnSignal::EndNow,
+        (true, false) if waited_too_long => OnSignal::EndAnyway,
+        (true, false) => OnSignal::WaitForStop,
+    }
+}
+
+/// Watches for a signal on a thread of its own, so that TERM ends a slow start too (the main thread only looks at the flag once
+/// the agent runs). Once the agent runs, the main loop stops it cleanly (store closed, lock released, discovery file removed);
+/// this thread only makes sure the process ends if that stop hangs.
+fn spawn_signal_watch() {
+    let _ = std::thread::Builder::new().name("dyno-signal".into()).spawn(|| {
+        while !SIGNALLED.load(Ordering::SeqCst) {
+            // pace: how often the flag is looked at (a signal handler cannot wake a thread).
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let signalled_at = Instant::now();
+        loop {
+            let late = signalled_at.elapsed() >= SIGNAL_STOP_GRACE;
+            match on_signal_decision(RUNNING.load(Ordering::SeqCst), STOPPED.load(Ordering::SeqCst), late) {
+                OnSignal::EndNow => {
+                    eprintln!("dyno-agent: ended by a signal while starting");
+                    std::process::exit(143);
+                }
+                OnSignal::EndAnyway => {
+                    eprintln!("dyno-agent: ended by a signal; the stop did not finish in time");
+                    std::process::exit(143);
+                }
+                OnSignal::WaitForStop if STOPPED.load(Ordering::SeqCst) => return,
+                OnSignal::WaitForStop => std::thread::sleep(Duration::from_millis(100)),
+            }
+        }
+    });
+}
 
 const USAGE: &str = "dyno-agent — measures your computer and keeps its history\n\n\
 usage:\n  dyno-agent run                 run in the foreground (what the service starts)\n  dyno-agent status              is an agent running?\n  \
@@ -158,14 +213,17 @@ fn run_exit_code(out: Result<(), StartError>) -> i32 {
 fn run() -> Result<(), StartError> {
     let dirs = Dirs::current();
     install_signal_handlers();
+    spawn_signal_watch();
     let (platform, details) = platforms();
     // Takes the data folder's agent lock first: a second agent exits here, before it opens or writes anything.
     let running = Running::start_os(dirs, platform, details, reveal())?;
     eprintln!("dyno-agent {} running (pid {})", env!("CARGO_PKG_VERSION"), running.discovery.pid);
+    RUNNING.store(true, Ordering::SeqCst);
     while !running.stopped() && !SIGNALLED.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(200));
     }
     running.stop();
+    STOPPED.store(true, Ordering::SeqCst);
     Ok(())
 }
 
@@ -315,5 +373,18 @@ mod tests {
         );
         assert_eq!(run_exit_code(Err(held)), EXIT_ALREADY_RUNNING);
         assert_eq!(run_exit_code(Err(StartError::Failed("boom".into()))), 1);
+    }
+
+    #[test]
+    fn a_signal_ends_a_start_at_once_and_a_running_agent_stops_cleanly_with_a_bound() {
+        use super::{on_signal_decision, OnSignal};
+        // Still starting: the main thread is in a start that does not look at the flag, so the watch ends the process.
+        assert_eq!(on_signal_decision(false, false, false), OnSignal::EndNow);
+        // Running: the main loop stops it cleanly; the watch only waits...
+        assert_eq!(on_signal_decision(true, false, false), OnSignal::WaitForStop);
+        // ...and ends the process if that stop hangs.
+        assert_eq!(on_signal_decision(true, false, true), OnSignal::EndAnyway);
+        // Stopped: nothing left to do, however late.
+        assert_eq!(on_signal_decision(true, true, true), OnSignal::WaitForStop);
     }
 }
