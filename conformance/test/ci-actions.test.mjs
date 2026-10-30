@@ -825,8 +825,10 @@ test('a kit app lists the OS legs its old workflow had, keeps its build folder o
       assert.equal(existsSync(join(PADDOCK, 'apps', app, copy)), false, `${app}: ${copy} is the kit's (rule 42/43)`);
     }
     const wf = read(join(WORKFLOWS, `${app}-release.yml`));
-    // A release never publishes past skipped gates on a tag: skipped is fine only when there is no tag to publish.
-    assert.match(wf, /if: \$\{\{ !cancelled\(\) && needs\.plan\.outputs\.run == 'true' && \(needs\.gates\.result == 'success' \|\| \(needs\.gates\.result == 'skipped' && !startsWith\(github\.ref, 'refs\/tags\/'\)\)\) \}\}/, `${app}: the release job needs green gates on a tag`);
+    // A release never publishes past red or skipped gates on a tag; the installers of a push or a dispatch wait on nothing that can be skipped
+    // (Gitea 28.2 skips a job whose need was skipped, whatever its `if`).
+    assert.match(wf, new RegExp(`\\n  release:\\n(?:.*\\n)*?    needs: \\[plan, gates\\]\\n    if: \\$\\{\\{ needs\\.plan\\.outputs\\.run == 'true' && startsWith\\(github\\.ref, 'refs/tags/${app}-v'\\) && needs\\.gates\\.result == 'success' \\}\\}`), `${app}: the release job needs green gates on a tag`);
+    assert.match(wf, /\n  installers:\n(?:.*\n)*?    needs: \[plan\]\n    if: \$\{\{ needs\.plan\.outputs\.run == 'true' && !startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/, `${app}: the installers wait only on the plan`);
     assert.match(wf, new RegExp(`gates:\\n(?:.*\\n)*?\\s+if: .*startsWith\\(github\\.ref, 'refs/tags/${app}-v'\\)`), `${app}: a tag always runs the gates`);
     assert.match(wf, /cancel-in-progress: true/, `${app}: a newer push supersedes (a tag has its own ref)`);
     // Every sidecar the bundle carries (bundle.externalBin) is started from the built macOS app.

@@ -46,5 +46,6 @@
         "app"
       ]
     }
-  ]
+  ],
+  "settleWhy": "Default 20 s: no timer of this app's own start path was derived yet; raise it when the app gets a spawn-retry timer longer than that."
 }

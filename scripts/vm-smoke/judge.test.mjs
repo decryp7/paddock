@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { describeTree, etimeSeconds, instancesOf, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs, peakCounts, renderResult } from './judge.mjs';
+import { describeTree, distinctCounts, etimeSeconds, instancesOf, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs, peakCounts, renderResult } from './judge.mjs';
 
 const BUNDLE = '/Applications/Dyno.app';
 const config = {
@@ -81,6 +81,16 @@ test('the observation window catches a respawn that arrives late', () => {
   assert.match(bad.checks.find((c) => !c.ok).detail, /peak 2 over 3 snapshots/);
 });
 
+test('distinctCounts counts processes by pid and start time over a whole step, not per snapshot', () => {
+  const a = { at: 10_000, procs: ps([[11, 10, '00:05', `${AGENT} run`]]) };
+  const b = { at: 14_000, procs: ps([[11, 10, '00:09', `${AGENT} run`], [12, 10, '00:01', `${AGENT} run`]]) };
+  const c = { at: 30_000, procs: ps([[12, 10, '00:17', `${AGENT} run`]]) };
+  assert.equal(distinctCounts([a, b, c], config, BUNDLE)['dyno-agent'], 2, 'pid 11 (seen twice, same start) and pid 12');
+  assert.equal(distinctCounts([a, { at: 20_000, procs: ps([[11, 10, '00:15', `${AGENT} run`]]) }], config, BUNDLE)['dyno-agent'], 1);
+  // The same pid with a start 60 s apart is a different process (pid reuse).
+  assert.equal(distinctCounts([a, { at: 90_000, procs: ps([[11, 10, '00:05', `${AGENT} run`]]) }], config, BUNDLE)['dyno-agent'], 2);
+});
+
 test('describeTree prints pid, age and parent for the evidence', () => {
   const lines = describeTree(ps([[10, 1, '00:30', APP], [11, 10, '00:29', `${AGENT} run`]]), config, BUNDLE);
   assert.deepEqual(lines, ['dyno-app pid 10 age 00:30 parent 1 (launchd)', 'dyno-agent pid 11 age 00:29 parent 10 (dyno-app)']);
@@ -138,6 +148,8 @@ test('every app config lists an app process, only known keys, and helpers whose 
       for (const parent of p.parents ?? []) assert.ok(['app', 'launchd'].includes(parent), `${app}: parent ${parent}`);
     }
     assert.ok(Number.isInteger(c.readyTimeoutSec) && c.readyTimeoutSec > 0, `${app}: readyTimeoutSec`);
+    assert.ok(Number.isInteger(c.settleSec) && c.settleSec >= 20 && typeof c.settleWhy === 'string', `${app}: the observation window and why`);
+    if (app === 'dyno') assert.ok(c.settleSec >= 30, 'Dyno respawns after 5 s + 8 s timers: 30 s');
     if (c.loginService) assert.match(c.loginService.label, /^net\.decryptology\./);
   }
   assert.ok(seen.includes('dyno'), `configs found: ${seen}`);

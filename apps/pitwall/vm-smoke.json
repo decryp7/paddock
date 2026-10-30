@@ -34,6 +34,7 @@
     "on": null,
     "off": null,
     "status": null,
-    "approval": "The app registers the service with SMAppService from its Settings; no scripted toggle yet, so the Launch at login handover is a manual row."
-  }
+    "manualReason": "The app registers the service with SMAppService from its Settings; no scripted toggle yet, so the Launch at login handover is a manual row."
+  },
+  "settleWhy": "Default 20 s: no timer of this app's own start path was derived yet; raise it when the app gets a spawn-retry timer longer than that."
 }

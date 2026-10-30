@@ -4,7 +4,7 @@
 // installer, issues research 2026-10-30, X4). The verdict job of every release workflow and of the nightly runs this and
 // writes one line to the job summary: "installers: built" or "installers: not built (why)".
 //
-// A run that was ASKED to build installers (a nightly, a manual run, a tag) and did not fails. A push to main whose change does
+// A nightly skipped by its change gate says why. A run that was ASKED to build installers (a nightly, a manual run, a tag) and did not fails. A push to main whose change does
 // not reach the app is allowed to build nothing and says so. A push the plan said to build, with no installers, warns: it is
 // the shape of the original gap.
 //
@@ -23,6 +23,8 @@ export function verdict({ app, event, ref = '', planRun = '', releaseResult = ''
   if (releaseResult === 'cancelled') return { ok: true, level: 'notice', line: `installers: not built (${app}): the run was cancelled` };
   if (releaseResult === 'failure') return { ok: false, level: 'error', line: `installers: build FAILED (${app}); see the bundle jobs` };
   // skipped, or no such job
+  // A nightly whose gate found main and the toolchain image unchanged since the last nightly that built the installers (rule 50).
+  if (planRun === 'false' && event === 'schedule') return { ok: true, level: 'notice', line: `installers: not built (${app}): main and the toolchain image are unchanged since the last nightly that built them` };
   if (planRun === 'false' && !asked) return { ok: true, level: 'notice', line: `installers: not built (${app}): the change does not reach ${app}; nothing was asked for` };
   if (asked) {
     const why = event === 'schedule' ? 'a nightly run builds them' : event === 'workflow_dispatch' ? 'a manual run builds them' : 'a tag builds them';

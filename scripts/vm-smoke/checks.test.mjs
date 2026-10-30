@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
 import { parseArgs } from './run.mjs';
 
-const config = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'apps', 'dyno', 'vm-smoke.json'), 'utf8'));
+const dynoConfig = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'apps', 'dyno', 'vm-smoke.json'), 'utf8'));
+// Dyno's own config has no scripted Launch-at-login toggle (SMAppService needs an Aqua session); the handover logic is tested with one.
+const config = { ...dynoConfig, loginService: { ...dynoConfig.loginService, on: ['Contents/MacOS/dyno-agent', 'service', 'install'], off: ['Contents/MacOS/dyno-agent', 'service', 'uninstall'] } };
 const B = '/Applications/Dyno.app';
 
 /** A small fake guest: a process table, an agent.json, and the few commands the check issues. `bug` picks a seeded fault. */
@@ -19,6 +21,10 @@ function fakeGuest({ bug = null } = {}) {
     const agent = spawn('dyno-agent', loginOn ? 1 : app.pid, ' run');
     agentJson = JSON.stringify({ pid: agent.pid });
     if (bug === 'second-agent') setTimeout_(10, () => spawn('dyno-agent', app.pid, ' run'));
+    // A duplicate that is gone before the app is ready, so no snapshot after ready shows two.
+    if (bug === 'dup-before-ready') { const dup = spawn('dyno-agent', app.pid, ' run'); setTimeout_(4, () => { procs = procs.filter((p) => p !== dup); }); }
+    // The first agent dies and a second takes over (discovery file rewritten): one at a time, two over the step.
+    if (bug === 'replaced') setTimeout_(8, () => { procs = procs.filter((p) => p !== agent); const a3 = spawn('dyno-agent', app.pid, ' run'); agentJson = JSON.stringify({ pid: a3.pid }); });
   };
   const timers = [];
   const setTimeout_ = (after, fn) => timers.push({ at: clock + after, fn });
@@ -39,14 +45,16 @@ function fakeGuest({ bug = null } = {}) {
       if (bug === 'orphan-agent') { for (const a of procs) a.ppid = 1; } else agentJson = null;
       return app ? ok() : { code: 1, stdout: '', stderr: 'not running' };
     }
-    const kill = /^ps -p (\d+) -o command= \| grep .* && kill \d+$/.exec(cmd);
+    if (cmd.startsWith('ps -o lstart= -p')) return ok('Fri Oct 30 14:25:12 2026\n');
+    const kill = /^\[ "\$\(ps -o lstart= -p (\d+)\)" = '.*' \] && ps -p \d+ -o command= \| grep -qxF -- .* && kill \d+$/.exec(cmd);
     if (kill) { procs = procs.filter((p) => p.pid !== Number(kill[1])); return ok(); }
     if (cmd.includes('dyno-agent') && cmd.includes('status') && !cmd.includes('service')) return procs.some((p) => p.command.includes('dyno-agent')) ? ok('running') : { code: 1, stdout: '', stderr: '' };
     if (cmd.includes("'service' 'install'")) { loginOn = true; const a = procs.find((p) => p.command.includes('dyno-agent')); if (a) a.ppid = 1; return ok('installed and started'); }
     if (cmd.includes("'service' 'uninstall'")) { loginOn = false; const app = procs.find((p) => p.command.includes('dyno-app')); const a = procs.find((p) => p.command.includes('dyno-agent')); if (a && app) a.ppid = app.pid; return ok('removed'); }
     if (cmd.startsWith('launchctl print')) return bug === 'no-launchd' ? { code: 113, stdout: 'Could not find service', stderr: '' } : ok('\tstate = running\n\tpid = 7\n');
     if (cmd.startsWith('defaults read')) return ok('1.0.0\n');
-    if (cmd.startsWith('sudo sh -c')) return ok('4242\n');
+    if (cmd.includes('vmsmoke-blackhole.pl >')) return ok('4242\n');
+    if (cmd.startsWith('cat /tmp/vmsmoke-blackhole.log')) return ok(bug === 'contacted' ? 'listening 2\ncontact 127.0.0.1\ncontact ::1\n' : 'listening 2\n');
     if (cmd.startsWith('tail')) return ok('log line\n');
     return ok(); // hdiutil, codesign, sudo purge, sed, ps -p ... nc
   };
@@ -66,6 +74,7 @@ test('a healthy app passes every step and lists the manual ones apart', async ()
   const bad = r.steps.filter((s) => s.status === 'fail');
   assert.deepEqual(bad.map((s) => `${s.title}: ${s.summary}`), []);
   assert.equal(byTitle(r, /Cold start/).status, 'pass');
+  assert.equal(byTitle(r, /Cold start/).title, 'Cold start (disk cache dropped)');
   assert.equal(byTitle(r, /Launch at login/).status, 'pass');
   assert.equal(byTitle(r, /Gatekeeper/).status, 'manual');
   assert.equal(r.version, '1.0.0');
@@ -83,13 +92,13 @@ test('an agent left running after Quit is reported as an orphan of launchd, and 
   const q = byTitle(r, /Quit with a window open/);
   assert.equal(q.status, 'fail');
   assert.ok(q.checks.some((c) => /an orphan of launchd/.test(c.detail)), JSON.stringify(q.checks));
-  assert.ok(r.calls.some((c) => /^ps -p \d+ -o command= \| grep -qxF -- .* && kill \d+$/.test(c)), 'identity check and kill in one guest command');
+  assert.ok(r.calls.some((c) => /^\[ "\$\(ps -o lstart= -p \d+\)" = '.*' \] && ps -p \d+ -o command= \| grep -qxF -- .* && kill \d+$/.test(c)), 'pid, start time and command line checked in the same guest command as the kill');
 });
 
 test('an app that never starts fails on the guard instead of passing', async () => {
   const r = await run('no-start');
   assert.equal(byTitle(r, /Cold start/).status, 'fail');
-  assert.match(byTitle(r, /Cold start/).checks[0].detail, /not ready within the 30 s guard/);
+  assert.ok(byTitle(r, /Cold start/).checks.some((c) => /not ready within the 30 s guard/.test(c.detail)));
 });
 
 test('Launch at login whose launchd job never loads is reported as not proven, not as a pass', async () => {
@@ -98,6 +107,35 @@ test('Launch at login whose launchd job never loads is reported as not proven, n
   assert.equal(s.status, 'skip');
   assert.match(s.summary, /NOT proven/);
   assert.equal(r.steps.some((x) => x.status === 'fail'), false);
+});
+
+test('a duplicate agent that is gone before the app is ready still fails the start (distinct processes over the whole step)', async () => {
+  const s = byTitle(await run('dup-before-ready'), /Cold start/);
+  assert.equal(s.status, 'fail');
+  assert.match(s.checks.filter((c) => !c.ok).map((c) => c.detail).join(' '), /dyno-agent: peak 2|dyno-agent: 2 distinct/);
+});
+
+test('an agent that dies and is replaced fails the start although only one runs at a time', async () => {
+  const s = byTitle(await run('replaced'), /Cold start/);
+  assert.equal(s.status, 'fail');
+  assert.match(s.checks.find((c) => !c.ok).detail, /dyno-agent: 2 distinct/);
+});
+
+test('the black-holed start passes only when the app contacted the listener; otherwise it says NOT EXERCISED', async () => {
+  const none = byTitle(await run(null), /black-holed/);
+  assert.equal(none.status, 'skip');
+  assert.match(none.summary, /NOT EXERCISED/);
+  const hit = byTitle(await run('contacted'), /black-holed/);
+  assert.equal(hit.status, 'pass');
+  assert.match(hit.summary, /contacted the black hole 2x/);
+});
+
+test('Dyno has no scripted Launch at login toggle: the step is a manual SKIP that says why', async () => {
+  const f = fakeGuest();
+  const c = new Check(f.guest, { ...dynoConfig, settleSec: 12, readyTimeoutSec: 30 });
+  const s = await c.loginHandover();
+  assert.equal(s.status, 'skip');
+  assert.match(s.summary, /SMAppService/);
 });
 
 test('arguments: one app, exactly one installer source, macOS only', () => {
