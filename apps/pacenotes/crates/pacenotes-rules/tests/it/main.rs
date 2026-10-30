@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! The integration tests of this crate are modules of this one binary (conformance C37).
 
+mod alloc;
 mod baseline;
 mod engine;
 mod misc;
@@ -10,3 +11,6 @@ mod rules;
 mod sarif;
 mod shared_copy;
 mod support;
+
+#[global_allocator]
+static COUNTING: alloc::Counting = alloc::Counting;

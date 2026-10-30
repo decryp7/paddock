@@ -346,3 +346,56 @@ fn binding_a_run_is_linear_in_counted_steps() {
     assert!(large <= small * 5, "4x the arguments took {large} steps against {small}");
     assert!(large <= 2000 * 8, "{large} steps for 2000 arguments");
 }
+
+/// A step count cannot see a copy; the bytes allocated can. Binding a run shares the sibling list, so 4x the arguments allocate about 4x
+/// the bytes (the parse, the matches), not 16x (a copy of every prefix is quadratic). A mutant that copies the prefix in `seq` fails this.
+#[test]
+fn binding_a_run_allocates_linearly_in_the_arguments() {
+    let bytes = |n: usize| {
+        let args = (0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
+        let code = format!("fn g() {{ f({args}, z); }}");
+        let p = Pattern::compile(ParseLanguage::Rust, "f($$$A, z)").unwrap();
+        let (found, bytes) = crate::alloc::allocated_by(|| p.find_all(code.as_bytes(), &MatchLimits::default(), &CancelToken::new()));
+        assert_eq!(found.matches.len(), 1);
+        bytes
+    };
+    let (small, large) = (bytes(500), bytes(2000));
+    assert!(large <= small * 5, "4x the arguments allocated {large} bytes against {small}");
+}
+
+/// Starting to compare an already bound run must not cost the size of the run: `f($$$A, $$$A)` against 64,000 arguments with a small step
+/// budget ends by its steps, and neither the steps nor the bytes allocated run away.
+#[test]
+fn rebinding_a_run_is_bounded_by_steps_in_work_and_in_bytes() {
+    let args = (0..64_000).map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
+    let code = format!("fn g() {{ f({args}); }}");
+    let p = Pattern::compile(ParseLanguage::Rust, "f($$$A, $$$A)").unwrap();
+    let limits = MatchLimits {
+        max_steps: 100_000,
+        ..MatchLimits::default()
+    };
+    let (found, bytes) = crate::alloc::allocated_by(|| p.find_all(code.as_bytes(), &limits, &CancelToken::new()));
+    assert_eq!(found.truncated, Some(Truncated::Steps));
+    assert!(found.steps <= limits.max_steps + 1_000, "{} steps", found.steps);
+    let parse_and_tree = {
+        let small = format!(
+            "fn g() {{ f({}); }}",
+            (0..64_000).map(|i| i.to_string()).collect::<Vec<_>>().join(", ")
+        );
+        crate::alloc::allocated_by(|| {
+            p.find_all(
+                small.as_bytes(),
+                &MatchLimits {
+                    max_steps: 1,
+                    ..MatchLimits::default()
+                },
+                &CancelToken::new(),
+            )
+        })
+        .1
+    };
+    assert!(
+        bytes <= parse_and_tree * 4 + 8 * 1024 * 1024,
+        "{bytes} bytes against {parse_and_tree} for a search of one step"
+    );
+}
