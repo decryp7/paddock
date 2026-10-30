@@ -162,6 +162,8 @@ fn windows<R: Runtime>(app: &tauri::AppHandle<R>, installed: bool) -> Windows<R>
                 link.quit();
             }
         });
+    // A test cannot exit the mock runtime: Quit begins the quit (`Windows::quitting`) and the exit is left out.
+    let b = if installed { b } else { b.exit_app(|_, _| ()) };
     match app.path().app_data_dir() {
         Ok(dir) if installed => b.bounds_file(dir.join("window-state.json")).build(),
         _ => b.build(),

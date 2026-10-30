@@ -1178,6 +1178,7 @@ dependencies = [
  "paddock-download",
  "paddock-health",
  "paddock-jobs",
+ "paddock-menu",
  "paddock-settings",
  "paddock-shell",
  "paddock-startup",
