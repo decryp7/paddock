@@ -158,7 +158,7 @@ export function parseLaunchctlPrint(text) {
   const t = String(text ?? '');
   const field = (re) => re.exec(t)?.[1] ?? null;
   const pid = field(/^\s*pid = (\d+)\s*$/m);
-  return { state: field(/^\s*state = (\S+)\s*$/m), pid: pid === null ? null : Number(pid), program: field(/^\s*program = (.+?)\s*$/m) };
+  return { state: field(/^\s*state = (.+?)\s*$/m), pid: pid === null ? null : Number(pid), program: field(/^\s*program = (.+?)\s*$/m) };
 }
 
 /**
