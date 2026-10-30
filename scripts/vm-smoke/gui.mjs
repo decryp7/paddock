@@ -313,13 +313,27 @@ export class GuiCheck {
     return this.step(title, checks, { evidence: [`launchd ${l.label}: state=${job.state} pid=${job.pid}`, ...describeTree(procs, this.config, this.bundle), '--- app log since the reboot', ...since.trimEnd().split('\n').slice(-30)], passSummary: 'started hidden at login, one helper with the expected parent' });
   }
 
-  /** With the app running and no window (after the login start), a Finder double-click on the app must open its window. */
+  /**
+   * A Finder double-click on the app must show its window. The start state is the one a person meets: the app running without a
+   * window (left so by the login start, or else started with the family's tray start `--hidden` when the config says the app has
+   * one, gui.hiddenStart), or not running at all for an app without a tray start.
+   */
   async finderDoubleClick() {
     const title = 'Finder double-click opens a window';
     const owner = this.gui.windowOwner;
     const appSpec = this.config.processes.find((s) => s.role === 'app');
-    const running = instancesOf(await this.core.snapshot(), appSpec, this.bundle).length > 0;
-    if (!running || appWindows(await this.windows(), owner).length) return this.step(title, [], { skip: running ? 'NOT TESTABLE: the app already shows a window (see the login start step)' : 'NOT TESTABLE: the app is not running without a window' });
+    const running = async () => instancesOf(await this.core.snapshot(), appSpec, this.bundle).length > 0;
+    const shown = async () => appWindows(await this.windows(), owner).length > 0;
+    let from = 'running without a window after the login start';
+    if (!(await running()) || (await shown())) {
+      if (await running()) await this.core.quit('(quit before the double-click)');
+      if (this.gui.hiddenStart) {
+        await this.core.start({ hidden: true });
+        const up = await this.until(async () => (await running()) && !(await shown()), 2 * this.guard());
+        if (!up.ok) return this.step(title, [{ ok: false, detail: 'the --hidden start did not leave the app running without a window' }]);
+        from = 'running without a window after `open --args --hidden`';
+      } else from = 'not running';
+    }
     const name = this.config.bundle.replace(/\.app$/, '');
     await this.g.exec('open /Applications');
     const icon = await this.until(() => this.center('Finder', `^${name}( \\||$)`, 'AXImage'), this.guard());
@@ -328,7 +342,7 @@ export class GuiCheck {
     const win = await this.windowWithContent();
     const one = instancesOf(await this.core.snapshot(), appSpec, this.bundle).length === 1;
     await this.g.exec(`osascript -e 'tell application "Finder" to close every window' >/dev/null 2>&1`);
-    return this.step(title, [...win.checks, { ok: one, detail: one ? 'still one app process (the running instance took it)' : 'a second app process' }], { passSummary: 'the running app showed its window' });
+    return this.step(title, [{ ok: true, detail: `before: ${from}` }, ...win.checks, { ok: one, detail: one ? 'one app process' : 'a second app process' }], { passSummary: `from "${from}", the window with its content` });
   }
 
   /**

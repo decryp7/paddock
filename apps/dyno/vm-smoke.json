@@ -59,6 +59,7 @@
     "windowOwner": "Dyno",
     "contentRegex": "^Dashboard( \\||$)",
     "guardSec": 60,
+    "hiddenStart": true,
     "launchAtLogin": {
       "label": "net.decryptology.dyno.agent",
       "open": [

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -25,9 +25,9 @@ function fakeGui({ bug = null } = {}) {
     ...(st.app ? [`${st.app.pid} 1 00:10 Fri Oct 30 14:00:00 2026 ${bug === 'translocated' ? '/private/var/folders/x/T/AppTranslocation/1/d/Dyno.app/Contents/MacOS/dyno-app' : `${B}/Contents/MacOS/dyno-app`}`] : []),
     ...st.agents.map((a) => `${a.pid} ${a.ppid} 00:09 Fri Oct 30 14:00:01 2026 ${a.ppid === 1 ? 'dyno-agent run' : `${B}/Contents/MacOS/dyno-agent run`}`),
   ].join('\n');
-  const startApp = ({ login = false } = {}) => {
+  const startApp = ({ login = false, hidden = false } = {}) => {
     st.app = { pid: ++pid };
-    st.window = !login || bug === 'login-window';
+    st.window = hidden ? false : !login || bug === 'login-window';
     st.log += login && bug !== 'login-window' ? 'started hidden (flag or login item)\n' : 'started with a window\n';
     st.agents = [{ pid: ++pid, ppid: st.job && login ? 1 : st.app.pid }];
     if (bug === 'second-agent' && login) st.agents.push({ pid: ++pid, ppid: st.app.pid });
@@ -95,6 +95,7 @@ function fakeGui({ bug = null } = {}) {
     if (cmd.startsWith('launchctl managername')) return ok('Aqua');
     if (cmd.startsWith('printf %s "$HOME"')) return ok('/Users/admin');
     if (cmd.includes('open -a Safari')) { st.downloaded = true; return ok(); }
+    if (cmd.startsWith(`open -a '${B}'`)) { if (!st.app) startApp({ hidden: cmd.includes('--hidden') }); return ok(); }
     if (cmd.startsWith('[ -f ')) return st.downloaded ? ok('0083;6ae4;Safari;U') : no;
     if (cmd.startsWith('xattr -p')) { const q = cmd.includes('Downloads') ? '0083;6ae4;Safari;U' : st.installed ? st.quarantine : null; return q ? ok(q) : no; }
     if (cmd.startsWith('shasum')) return ok('feed');
@@ -182,11 +183,12 @@ test('an unidentified legacy row in Login Items fails the rows check', async () 
   assert.match(r.by['Launch at login on: Login Items rows'].summary, /dyno-app/);
 });
 
-test('a login start that shows a window fails, and the double-click is then not testable', async () => {
+test('a login start that shows a window fails; the double-click then starts from the --hidden start', async () => {
   const r = await run('login-window');
   assert.equal(r.by['Reboot: login start hidden, one agent'].status, 'fail');
   assert.match(r.by['Reboot: login start hidden, one agent'].summary, /started with a window/);
-  assert.equal(r.by['Finder double-click opens a window'].status, 'skip');
+  assert.equal(r.by['Finder double-click opens a window'].status, 'pass', 'it quits and uses the --hidden start instead');
+  assert.match(r.by['Finder double-click opens a window'].checks[0].detail, /--hidden/);
 });
 
 test('a second agent after the login fails the reboot step', async () => {
@@ -200,4 +202,25 @@ test('Gatekeeper off in the guest stops the GUI run before anything is installed
   const r = await runGui(new GuiCheck(f.guest, config, f.host));
   assert.equal(r.steps[0].status, 'fail');
   assert.equal(f.st.downloaded, false);
+});
+
+test('every app config has a valid gui block (window owner, content regex, tray start, Launch at login null or complete)', () => {
+  const apps = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'apps');
+  for (const app of readdirSync(apps)) {
+    const f = join(apps, app, 'vm-smoke.json');
+    if (!existsSync(f)) continue;
+    const g = JSON.parse(readFileSync(f, 'utf8')).gui;
+    assert.ok(g, `${app}: no gui block`);
+    assert.equal(typeof g.windowOwner, 'string', app);
+    assert.doesNotThrow(() => new RegExp(g.contentRegex), app);
+    assert.equal(typeof g.hiddenStart, 'boolean', app);
+    if (g.launchAtLogin === null) continue;
+    const l = g.launchAtLogin;
+    assert.match(l.label, /^[a-z0-9.-]+$/, app);
+    for (const a of [...l.open, ['press', ...l.switch]]) assert.ok(a[0] === 'press' && typeof a[1] === 'string' && new RegExp(a[2]), `${app}: ${JSON.stringify(a)}`);
+    assert.ok(Array.isArray(l.rows.openAtLogin) && Array.isArray(l.rows.background) && l.rows.background.length >= 1, app);
+    assert.doesNotThrow(() => new RegExp(l.needsApprovalText), app);
+    assert.ok(['launchd', 'app'].includes(l.helperParentAfterLogin), app);
+    assert.ok(g.loginStart && new RegExp(g.loginStart.hidden) && new RegExp(g.loginStart.shown) && g.loginStart.log, `${app}: loginStart`);
+  }
 });
