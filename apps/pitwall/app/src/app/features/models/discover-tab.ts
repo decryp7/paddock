@@ -5,9 +5,10 @@ import { MatFormField, MatPrefix } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInput } from '@angular/material/input';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { Fit, QuantVariant, Recommendation } from '../../core/api.types';
-import { ago, bytes, compact, concurrencyText } from '../../shared/format';
+import { ago, bytes, bytesIn, bytesUnit, compact, concurrencyText } from '../../shared/format';
 import { fitLook } from '../../shared/labels';
 import { Panel } from '../../shared/ui/panel';
 import { contextText } from './library-tab';
@@ -26,7 +27,7 @@ export function fitDetail(f: Fit): string {
 /** Hugging Face search (GGUF) and a repo's quantisation variants, each with a "will this fit?" verdict. */
 @Component({
   selector: 'pw-discover-tab',
-  imports: [MatButton, MatIconButton, MatChipListbox, MatChipOption, MatFormField, MatPrefix, MatInput, MatIconModule, MatTooltipModule, MatSlideToggleModule, Panel, SuEmptyState],
+  imports: [MatButton, MatIconButton, MatChipListbox, MatChipOption, MatFormField, MatPrefix, MatInput, MatIconModule, MatTooltipModule, MatSlideToggleModule, MatTableModule, Panel, SuEmptyState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel class="recs" heading="Recommended for this machine" icon="sparkles" [sub]="recsSub()" [flush]="true" [loading]="store.packsLoading()" [error]="store.packsError()" [ready]="!!store.packs()" [skeletonLines]="3" (retry)="store.loadPacks()">
@@ -136,47 +137,44 @@ export function fitDetail(f: Fit): string {
               <span id="lbl-proj">Include the vision projector <span class="mono">{{ repo.projectors[0]!.file }}</span> ({{ size(repo.projectors[0]!.sizeBytes) }}) for image input</span>
             </div>
           }
-          <table class="table">
-            <thead>
-              <tr>
-                <th scope="col">Quant</th>
-                <th scope="col" class="right">Size</th>
-                <th scope="col">Will it fit?</th>
-                <th scope="col">Needs</th>
-                <th scope="col"><span class="sr-only">Download</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (v of repo.variants; track v.file) {
-                <tr>
-                  <td>
-                    <span class="q mono">{{ v.quant ?? v.file }}</span>
-                    @if (v.parts > 1) {
-                      <span class="faint parts">{{ v.parts }} parts</span>
-                    }
-                  </td>
-                  <td class="right num">{{ size(v.sizeBytes) }}</td>
-                  <td>
-                    <span class="status" [attr.data-tone]="look(v).tone" [matTooltip]="v.fit.message">{{ look(v).label }}</span>
-                    @if (v.fit.verdict !== 'wontFit' && v.fit.verdict !== 'unknown') {
-                      <span class="faint parts">{{ concurrency(v.maxSlots) }}</span>
-                    }
-                  </td>
-                  <td class="needs" [matTooltip]="v.fit.message">{{ detail(v.fit) }}</td>
-                  <td class="act">
-                    @if (v.downloaded) {
-                      <span class="faint in-lib">In library</span>
-                    } @else {
-                      <span class="row-actions">
-                        <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()('download:' + v.file)" [attr.aria-label]="'Download ' + v.file" matTooltip="Download" (click)="download(v)">
-                          <mat-icon svgIcon="pw:download" aria-hidden="true" />
-                        </button>
-                      </span>
-                    }
-                  </td>
-                </tr>
-              }
-            </tbody>
+          <table mat-table class="quants" [dataSource]="repo.variants" [trackBy]="byFile" [fixedLayout]="true" [attr.aria-label]="'Quantisations of ' + repo.repo">
+            <ng-container matColumnDef="quant">
+              <th mat-header-cell *matHeaderCellDef scope="col">Quant</th>
+              <td mat-cell *matCellDef="let v" [matTooltip]="v.parts > 1 ? (v.quant ?? v.file) + ', ' + v.parts + ' parts' : (v.quant ?? v.file)" matTooltipShowDelay="600">
+                <span class="q mono">{{ v.quant ?? v.file }}</span>
+                @if (v.parts > 1) {
+                  <span class="faint parts">{{ v.parts }} parts</span>
+                }
+              </td>
+            </ng-container>
+            <ng-container matColumnDef="size">
+              <th mat-header-cell *matHeaderCellDef scope="col" class="right">Size {{ sizeUnit() }}</th>
+              <td mat-cell *matCellDef="let v" class="right num">{{ sizeIn(v.sizeBytes, sizeUnit()) }}</td>
+            </ng-container>
+            <ng-container matColumnDef="fit">
+              <th mat-header-cell *matHeaderCellDef scope="col">Will it fit?</th>
+              <td mat-cell *matCellDef="let v">
+                <span class="status" [attr.data-tone]="look(v).tone" [matTooltip]="v.fit.message">{{ look(v).label }}</span>
+              </td>
+            </ng-container>
+            <ng-container matColumnDef="needs">
+              <th mat-header-cell *matHeaderCellDef scope="col">Needs</th>
+              <td mat-cell *matCellDef="let v" class="needs" [matTooltip]="needsText(v)">{{ needsText(v) }}</td>
+            </ng-container>
+            <ng-container matColumnDef="act">
+              <th mat-header-cell *matHeaderCellDef scope="col" class="act"><span class="sr-only">Download</span></th>
+              <td mat-cell *matCellDef="let v" class="act">
+                @if (v.downloaded) {
+                  <span class="faint in-lib">In library</span>
+                } @else {
+                  <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()('download:' + v.file)" [attr.aria-label]="'Download ' + v.file" matTooltip="Download" (click)="download(v)">
+                    <mat-icon svgIcon="pw:download" aria-hidden="true" />
+                  </button>
+                }
+              </td>
+            </ng-container>
+            <tr mat-header-row *matHeaderRowDef="columns; sticky: true"></tr>
+            <tr mat-row *matRowDef="let v; columns: columns"></tr>
           </table>
         }
       </pw-panel>
@@ -269,6 +267,12 @@ export function fitDetail(f: Fit): string {
       gap: var(--pd-space-3);
       align-items: start;
     }
+    /* Under 1100 px the quantisations take the full width below the results, so their table keeps every column whole. */
+    @media (max-width: 1100px) {
+      .cols {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
     .list {
       list-style: none;
       margin: var(--pd-space-2) 0 0;
@@ -329,17 +333,19 @@ export function fitDetail(f: Fit): string {
       font-size: var(--pd-text-label);
       color: var(--pd-text-muted);
     }
-    .table {
+    /* Edge to edge in its panel. */
+    .quants {
       margin: 0 calc(-1 * var(--pd-space-4));
       width: calc(100% + 2 * var(--pd-space-4));
-      th:first-child,
-      td:first-child {
-        padding-left: var(--pd-space-4);
-      }
-      th:last-child,
-      td:last-child {
-        padding-right: var(--pd-space-4);
-      }
+    }
+    .mat-column-size {
+      width: 80px;
+    }
+    .mat-column-fit {
+      width: 104px;
+    }
+    .mat-column-act {
+      width: 96px;
     }
     .q {
       font-weight: var(--pd-weight-medium);
@@ -348,15 +354,7 @@ export function fitDetail(f: Fit): string {
       margin-left: var(--pd-space-2);
       font-size: var(--pd-text-label);
     }
-    .table td.act {
-      width: 1%;
-      text-align: right;
-    }
     .needs {
-      max-width: 340px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
       font-size: var(--pd-text-label);
       color: var(--pd-text-muted);
     }
@@ -375,6 +373,17 @@ export class DiscoverTab implements OnInit {
   protected readonly detail = fitDetail;
   protected readonly concurrency = concurrencyText;
   protected readonly look = (v: QuantVariant) => fitLook(v.fit.verdict);
+  protected readonly columns = ['quant', 'size', 'fit', 'needs', 'act'];
+  protected readonly byFile = (_: number, v: QuantVariant) => v.file;
+  protected readonly sizeIn = bytesIn;
+  /** The quantisations' Size column unit, in its header. */
+  protected readonly sizeUnit = computed(() => bytesUnit(this.store.repo()?.variants.map((v) => v.sizeBytes) ?? []));
+
+  /** What a quantisation needs and, when it fits, how many requests it serves at once. */
+  protected needsText(v: QuantVariant): string {
+    const fits = v.fit.verdict !== 'wontFit' && v.fit.verdict !== 'unknown';
+    return fits ? `${fitDetail(v.fit)} · ${concurrencyText(v.maxSlots)}` : fitDetail(v.fit);
+  }
 
   ngOnInit(): void {
     if (!this.store.packs() && !this.store.packsLoading()) void this.store.loadPacks();

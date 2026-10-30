@@ -2,8 +2,9 @@ import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject
 import { MatButton } from '@angular/material/button';
 import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
 import { MatSlider, MatSliderThumb } from '@angular/material/slider';
+import { MatTableModule } from '@angular/material/table';
 import type { FitVerdict, LocalModel, SlotChoice } from '../../core/api.types';
-import { bytes, concurrencyText, slotsText, tokensText } from '../../shared/format';
+import { bytes, bytesIn, bytesUnit, concurrencyText, int, slotsText, tokensText, varies } from '../../shared/format';
 import { fitLook } from '../../shared/labels';
 import { ModelsStore } from './models.store';
 import { SlotsStore, contextSteps, nearestStep } from './slots.store';
@@ -14,7 +15,7 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
 /** Parallel slots of one model: pick a count, see what each slot costs and how much context or concurrency fits. */
 @Component({
   selector: 'pw-slots-panel',
-  imports: [MatButton, MatButtonToggleGroup, MatButtonToggle, MatSlider, MatSliderThumb],
+  imports: [MatButton, MatButtonToggleGroup, MatButtonToggle, MatSlider, MatSliderThumb, MatTableModule],
   providers: [SlotsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -54,31 +55,31 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
         {{ f.message }}
       </p>
       @if (f.choices.length) {
-        <div class="scroll">
-          <table class="table fit-table">
-            <caption class="sr-only">Memory and largest context for each number of slots</caption>
-            <thead>
-              <tr>
-                <th scope="col">Slots</th>
-                <th scope="col" class="right">Memory</th>
-                <th scope="col" class="right">Adds</th>
-                <th scope="col" class="right">Longest context each</th>
-                <th scope="col">Fits?</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (c of f.choices; track c.slots) {
-                <tr [class.sel]="c.slots === slots()">
-                  <td class="num">{{ c.slots }}</td>
-                  <td class="right num">{{ size(c.needBytes) }}</td>
-                  <td class="right num">{{ c.extraBytes ? '+' + size(c.extraBytes) : '—' }}</td>
-                  <td class="right num">{{ c.maxContext ? tokens(c.maxContext) : 'none' }}</td>
-                  <td><span class="status" [attr.data-tone]="look(c.verdict).tone">{{ look(c.verdict).label }}</span></td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </div>
+        <table mat-table class="choices" [dataSource]="f.choices" [trackBy]="bySlots" [fixedLayout]="true">
+          <caption class="sr-only">Memory and largest context for each number of slots</caption>
+          <ng-container matColumnDef="slots">
+            <th mat-header-cell *matHeaderCellDef scope="col" class="right">Slots</th>
+            <td mat-cell *matCellDef="let c" class="right num">{{ c.slots }}</td>
+          </ng-container>
+          <ng-container matColumnDef="memory">
+            <th mat-header-cell *matHeaderCellDef scope="col" class="right">Memory {{ unitOf(f.choices) }}</th>
+            <td mat-cell *matCellDef="let c" class="right num">{{ sizeIn(c.needBytes, unitOf(f.choices)) }}</td>
+          </ng-container>
+          <ng-container matColumnDef="adds">
+            <th mat-header-cell *matHeaderCellDef scope="col" class="right">Adds {{ unitOf(f.choices) }}</th>
+            <td mat-cell *matCellDef="let c" class="right num">{{ c.extraBytes ? '+' + sizeIn(c.extraBytes, unitOf(f.choices)) : '—' }}</td>
+          </ng-container>
+          <ng-container matColumnDef="context">
+            <th mat-header-cell *matHeaderCellDef scope="col" class="right">Context tokens</th>
+            <td mat-cell *matCellDef="let c" class="right num">{{ c.maxContext ? intText(c.maxContext) : 'none' }}</td>
+          </ng-container>
+          <ng-container matColumnDef="fits">
+            <th mat-header-cell *matHeaderCellDef scope="col">Fits?</th>
+            <td mat-cell *matCellDef="let c"><span class="status" [attr.data-tone]="look(c.verdict).tone">{{ look(c.verdict).label }}</span></td>
+          </ng-container>
+          <tr mat-header-row *matHeaderRowDef="columnsOf(f.choices); sticky: true"></tr>
+          <tr mat-row *matRowDef="let c; columns: columnsOf(f.choices)" [class.selected]="c.slots === slots()"></tr>
+        </table>
         <p class="sum">At {{ tokens(f.context) }} per slot this machine runs {{ concurrency(f.maxSlots) }}. {{ f.kvExact ? '' : 'The memory per slot is an estimate: the model file does not describe its layout.' }}</p>
       }
     } @else if (fits.loading()) {
@@ -189,11 +190,22 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
     .err {
       color: var(--pd-danger);
     }
-    .scroll {
-      overflow-x: auto;
-    }
-    .fit-table tr.sel td {
-      background: color-mix(in srgb, var(--pd-accent) 10%, transparent);
+    /* On the popover's raised surface: the rows are see-through, the header that sticks to the popover's scroll is opaque. */
+    .choices {
+      --mat-table-background-color: transparent;
+      .mat-mdc-header-cell {
+        background: var(--pd-surface-3);
+      }
+      .mat-column-slots {
+        width: 72px;
+      }
+      .mat-column-memory,
+      .mat-column-adds {
+        width: 112px;
+      }
+      .mat-column-fits {
+        width: 88px;
+      }
     }
     .foot {
       display: flex;
@@ -208,8 +220,18 @@ export class SlotsPanel implements OnInit, OnDestroy {
 
   protected readonly store = inject(ModelsStore);
   protected readonly fits = inject(SlotsStore);
-  protected readonly size = bytes;
   protected readonly tokens = tokensText;
+  protected readonly intText = int;
+  protected readonly sizeIn = bytesIn;
+  protected readonly bySlots = (_: number, c: SlotChoice) => c.slots;
+  /** The memory columns' unit, from the largest need. */
+  protected unitOf(choices: readonly SlotChoice[]) {
+    return bytesUnit(choices.map((c) => c.needBytes));
+  }
+  /** "Fits?" only when the counts differ in it (UI review 2 rule 7); the answer above already says the verdict. */
+  protected columnsOf(choices: readonly SlotChoice[]): string[] {
+    return ['slots', 'memory', 'adds', 'context', ...(varies(choices, (c) => c.verdict) ? ['fits'] : [])];
+  }
   protected readonly concurrency = concurrencyText;
   protected readonly slotsLabelOf = slotsText;
   protected readonly look = (v: FitVerdict) => fitLook(v);

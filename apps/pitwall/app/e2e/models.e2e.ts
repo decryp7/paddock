@@ -30,10 +30,10 @@ test.describe('models', () => {
     const panel = page.locator('pw-slots-panel');
     await expect(panel).toContainText('Parallel slots · Qwen3.5 9B');
     await expect(panel.getByRole('radio', { name: /^4 adds ~/ })).toBeVisible();
-    await expect(panel.locator('.fit-table tbody tr')).toHaveCount(4);
+    await expect(panel.locator('table.choices tbody tr')).toHaveCount(4);
     await expect(panel.locator('.sum')).toContainText('requests at once');
     await panel.getByRole('radio', { name: /^8 / }).click();
-    await expect(panel.locator('.fit-table tr.sel')).toContainText('8');
+    await expect(panel.locator('table.choices tr.selected')).toContainText('8');
     await panel.getByRole('button', { name: 'Save 8 slots' }).click();
     await expect(page.getByText(/8 slots saved\. Qwen3.5 9B keeps 2 slots until it loads again/)).toBeVisible();
     await expect(page.getByRole('button', { name: /^Parallel slots for Qwen3.5 9B: 8 slots/ })).toBeVisible();

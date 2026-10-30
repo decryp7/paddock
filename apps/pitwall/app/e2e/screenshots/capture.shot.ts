@@ -47,7 +47,7 @@ const SCREENS: Screen[] = [
     prepare: async (p) => {
       await p.getByRole('row', { name: /Qwen3.5 9B/ }).click();
       await p.getByRole('button', { name: /^Parallel slots for Qwen3.5 9B/ }).click();
-      await expect(p.locator('pw-slots-panel .fit-table tbody tr').first()).toBeVisible();
+      await expect(p.locator('pw-slots-panel table.choices tbody tr').first()).toBeVisible();
     },
   },
   {
