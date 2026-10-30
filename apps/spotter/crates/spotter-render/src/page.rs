@@ -721,6 +721,50 @@ mod tests {
         }
     }
 
+    /// How often the fake session looks at its socket and at `finish`.
+    const TICK: Duration = Duration::from_millis(10);
+    /// The longest the fake waits for a client's upgrade request.
+    const HANDSHAKE: Duration = Duration::from_secs(10);
+
+    /// The fake's side of the WebSocket upgrade (bounded by `HANDSHAKE`), then the session's tick: the tick is set only after
+    /// the handshake.
+    /// A tick during the handshake gave up on a client whose upgrade request came later than one tick (a loaded runner) and
+    /// dropped the connection, which the client saw as a refused handshake (Windows CI runs 19116 and 19657, os error 10053).
+    fn handshake(stream: std::net::TcpStream) -> Option<Ws> {
+        // Bounded far above any scheduling delay, so a client that never sends its upgrade request cannot hold the thread.
+        let _ = stream.set_read_timeout(Some(HANDSHAKE));
+        let ws = tungstenite::accept(stream).ok()?;
+        let _ = ws.get_ref().set_read_timeout(Some(TICK));
+        Some(ws)
+    }
+
+    /// Regression: a client that sends its upgrade request many ticks after connecting still gets its session. The quiet
+    /// spell makes the old failure certain (the fake gave up after one tick and closed the connection); the client's read
+    /// timeout only ends the quiet spell, it is not a wait for the server.
+    #[test]
+    fn the_fake_waits_for_a_late_handshake_and_then_ticks() {
+        use std::io::Read;
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let mut raw = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let (server, _) = l.accept().unwrap();
+        let served = std::thread::spawn(move || handshake(server).map(|ws| ws.get_ref().read_timeout().ok().flatten()));
+        raw.set_read_timeout(Some(TICK * 50)).unwrap();
+        let quiet = raw.read(&mut [0u8; 1]);
+        assert!(
+            matches!(&quiet, Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)),
+            "the fake ended the connection before the client's handshake: {quiet:?}"
+        );
+        raw.set_read_timeout(Some(TICK * 500)).unwrap(); // hang guard only
+        let url = format!("ws://127.0.0.1:{port}/devtools/browser/fake");
+        tungstenite::client(url.as_str(), raw).expect("the late handshake completes");
+        assert_eq!(
+            served.join().unwrap(),
+            Some(Some(TICK)),
+            "the session ticks once the handshake is done"
+        );
+    }
+
     /// What the scripted endpoint does (see [`FakeCdp`]).
     #[derive(Clone, Copy)]
     struct Script {
@@ -745,8 +789,7 @@ mod tests {
             let (fin, log) = (finish.clone(), calls.clone());
             std::thread::spawn(move || {
                 let Ok((stream, _)) = l.accept() else { return };
-                let _ = stream.set_read_timeout(Some(Duration::from_millis(10)));
-                if let Ok(ws) = tungstenite::accept(stream) {
+                if let Some(ws) = handshake(stream) {
                     fake_session(ws, script, &fin, &log);
                 }
             });
