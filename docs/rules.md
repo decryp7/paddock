@@ -186,14 +186,23 @@ changes here, every app's copy is updated in the same change.
     waits on through a lock, a download, anything a person started) uses the gentle level instead: `QOS_CLASS_UTILITY`
     on macOS, nice 10 (with best-effort I/O) on Linux, `THREAD_PRIORITY_BELOW_NORMAL` on Windows (Debrief's
     `debrief_core::threads::lower_priority`; family ADR 0020's `Background` class). A busy machine slows such work but
-    never stops it. A starvable level is only for work nobody waits on (ADR 0020's `Idle` class), and each use says why
-    with a `conformance: background-qos — <why nobody waits on it>` comment (check C54). (`THREAD_PRIORITY_LOWEST` is
-    not on the list: it is one step below `BELOW_NORMAL`, in the band where the scheduler's dynamic boosts let it run
-    between normal threads, so it is slowed, not starved; `THREAD_PRIORITY_IDLE` sits below all of that band.) *Why:* at
+    never stops it. **Live work stays at the normal level on Windows:** what someone is watching or waiting on right now
+    (the sampler behind a live view, the threads that answer the app's requests, a request the user is waiting on)
+    keeps `THREAD_PRIORITY_NORMAL` there; only bulk background work (walks, scans, compaction, exports) is lowered to
+    `BELOW_NORMAL`. Windows always runs a ready thread of a higher priority before a lower one, and a lowered thread
+    behind busy normal threads only runs when a starvation boost comes, seconds later
+    ([Scheduling Priorities](https://learn.microsoft.com/en-us/windows/win32/procthread/scheduling-priorities),
+    [Priority Boosts](https://learn.microsoft.com/en-us/windows/win32/procthread/priority-boosts)); macOS QoS and Linux
+    nice share the CPU by weight, so live work may use their gentle levels. A starvable level is only for work nobody
+    waits on (ADR 0020's `Idle` class), and each use says why with a `conformance: background-qos — <why nobody waits on
+    it>` comment (check C54). (`THREAD_PRIORITY_LOWEST` is not on the list, but like `BELOW_NORMAL` it waits behind busy
+    normal threads, so it is for bulk work only; `THREAD_PRIORITY_IDLE` sits below all of the dynamic band.) *Why:* at
     these levels a thread gets the CPU or the disk only after all other work at higher levels, for as long as there is
     any (macOS `BACKGROUND` also keeps it to the efficiency cores), so a caller waiting on it waits as long as the
     machine is busy. Debrief's mining pool ran in QoS `BACKGROUND`, and on the loaded CI Mac `debrief report` waited
-    minutes for its analyses and timed out (Debrief ADR 0052, amended 2026-10-30; lessons 2026-10-30).
+    minutes for its analyses and timed out (Debrief ADR 0052, amended 2026-10-30; lessons 2026-10-30). On the Windows CI
+    runner Dyno's sampler and counters listing, lowered to `BELOW_NORMAL`, did not run for seconds while tests filled the
+    cores (CI runs 7166 and 7168; lessons 2026-10-30).
 
 ## Process identity (user, 2026-10-30)
 53. **Never act on a reusable OS name read earlier.** A process id, a port or a temp path read earlier may name something

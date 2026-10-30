@@ -21,5 +21,6 @@
   `PRIO_DARWIN_BG`, `taskpolicy -b`/`-c background`/`-c maintenance`/`-d throttle` and `IOPOL_THROTTLE`; Windows
   background modes, idle priorities and EcoQoS; Linux `SCHED_IDLE` and idle I/O; for a service, launchd `ProcessType`
   `Background` (or `Adaptive` without XPC) and `LowPriorityIO`, systemd `CPUSchedulingPolicy=idle` and
-  `IOSchedulingClass=idle`): lowered work uses `QOS_CLASS_UTILITY`, nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`; a
-  starvable level only for work nobody waits on, with a `conformance: background-qos — <why>` comment (C54).
+  `IOSchedulingClass=idle`): lowered work uses `QOS_CLASS_UTILITY`, nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`, and on
+  Windows live work (a sampler behind a live view, request threads, a request the user waits on) stays at the normal
+  level; a starvable level only for work nobody waits on, with a `conformance: background-qos — <why>` comment (C54).

@@ -888,6 +888,19 @@ On Linux the same goes for the idle I/O class: Dyno's systemd unit now says `IOS
 and the shared `paddock-service` renderer's `low_priority()` output moves off the starvable levels then: the systemd
 text (`IOSchedulingClass=idle`) to best effort 7, and the launchd text's `LowPriorityIO` (I/O throttled like the background
 band), both still in its golden files.
+## 2026-10-30: on Windows a `BELOW_NORMAL` thread does not run while normal threads are ready (Dyno)
+The batch that lowered every Dyno agent thread to `THREAD_PRIORITY_BELOW_NORMAL` (rule 52's gentle Windows level) turned
+three Windows CI tests red (runs 7166 and 7168): the baselines test found no sample because the sampler had not ticked
+yet, and the counters listing passed its 10 s deadline (2.5 to 7.4 s at normal priority on main). Windows schedules
+strictly by priority: a ready thread of a higher priority always runs first, and a lower one is preempted the moment one
+becomes ready ([Scheduling Priorities](https://learn.microsoft.com/en-us/windows/win32/procthread/scheduling-priorities));
+the dynamic boosts ([Priority Boosts](https://learn.microsoft.com/en-us/windows/win32/procthread/priority-boosts)) and
+the balance-set manager's starvation boost (Windows Internals; seconds, not milliseconds, not on Microsoft Learn) do not
+make it share the CPU the way macOS QoS or Linux nice do. So on a machine whose cores are busy with normal work, a lowered
+thread waits seconds at a time. **Rule (rule 52, amended):** on Windows, live work (the sampler behind a live view, the
+threads that answer requests, a request a person waits on) stays at `THREAD_PRIORITY_NORMAL`; only bulk background work
+is lowered. Dyno decides it in one place, `dyno_platform::priority::level(ThreadRole, Os)`, with a test over the mapping.
+
 ## 2026-10-30: a stored UTC offset nobody filled in made every "local" day a UTC day (Dyno)
 The Issues e2e test failed on CI at 00:07 UTC: it ran on the wall clock against mock issues dated relative to it (the newest
 35 minutes ago), so there was nothing "Today" in the first 35 minutes after midnight (a test bug, fixed by pinning the clock
