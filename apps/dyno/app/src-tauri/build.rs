@@ -19,8 +19,6 @@ fn main() {
         windows = tauri_build::WindowsAttributes::new_without_app_manifest();
     }
     println!("cargo:rerun-if-env-changed=TAURI_UPDATER_PUBKEY");
-    println!("cargo:rerun-if-env-changed=PADDOCK_BUILD_COMMIT");
-    println!("cargo:rerun-if-env-changed=PADDOCK_BUILD_DATE");
     // tauri-build requires the sidecars (bundle.externalBin: the agent and the dyno command) to exist even for `cargo check` and tests. Bundles
     // always build the real one first (scripts/sidecar.mjs in beforeBuildCommand); elsewhere an empty placeholder stands
     // in, which the app treats as "missing" (it then looks for a dyno-agent next to itself, or DYNO_AGENT_BIN).

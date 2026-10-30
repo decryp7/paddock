@@ -1,31 +1,41 @@
 // C56: every app that shows the build's commit and date reads the names the build-env action sets (ER-21). Dyno 1.0 called
-// `.build_info(option_env!("DYNO_COMMIT"), option_env!("DYNO_BUILT"))` while `.gitea/actions/build-env` sets
-// PADDOCK_BUILD_COMMIT and PADDOCK_BUILD_DATE, so its About page showed no commit and no date. The names are read from the
-// action itself; an app's `.build_info(` call (any Rust file under apps/) must pass `option_env!` of exactly those two, in
-// the order commit, date.
+// `.build_info(option_env!("DYNO_COMMIT"), option_env!("DYNO_BUILT"))` while build-env sets PADDOCK_BUILD_COMMIT and
+// PADDOCK_BUILD_DATE, so its About page showed no commit and no date; the shell-demo's `AppInfo::new` commit had the same
+// bug. The names come from the code that sets them (`buildEnv` in conformance/ci/build-env.mjs, in order commit, date).
+// Checked in the production Rust of an app's `src-tauri/` (so it works from the repo root and from one app's folder):
+// `.build_info(` must pass `option_env!` of exactly those two names, and `AppInfo::new(` may read only the commit name.
+// Not looked at: comments, strings, `tests/`, benches and everything from the first `#[cfg(test)]` of a file on (as C45).
+import { buildEnv } from '../../ci/build-env.mjs';
 import { error } from '../finding.mjs';
+import { maskRust } from './C39-freed-port.mjs';
 
-const ACTION = '.gitea/actions/build-env/action.yml';
-const code = (text) => text.replace(/\/\/.*$/gm, '');
+/** The names build-env sets, in order: [commit, date]. */
+export const buildEnvNames = () => Object.keys(buildEnv({ env: {}, head: () => null, now: () => new Date(0) }));
 
-/** The build-env names the action sets: the `PADDOCK_BUILD_*` words of its description, in order (commit, then date). */
-export function actionNames(yml) {
-  return [...new Set(yml.match(/\bPADDOCK_BUILD_[A-Z]+\b/g) ?? [])];
-}
+const SRC_TAURI = /(^|\/)src-tauri\/.*\.rs$/;
+const TEST_FILE = /(^|\/)(?:tests?|benches)(?:\.rs$|\/)/;
 
-/** What is wrong with each `.build_info(` call in `src`: the `option_env!` names it reads differ from `names`. */
-export function buildInfoProblems(src, names) {
+/** Problems in the production part of a Rust source: [{ line, message }]. */
+export function buildInfoProblems(source, names = buildEnvNames()) {
+  const mask = maskRust(source);
+  const cut = mask.search(/#\[\s*cfg\s*\(\s*test\s*\)\s*\]/);
+  const end = cut < 0 ? mask.length : cut;
   const out = [];
-  const text = code(src);
-  for (const m of text.matchAll(/\.build_info\s*\(/g)) {
-    // The call's arguments: up to the parenthesis that closes the call.
+  for (const m of mask.slice(0, end).matchAll(/\.build_info\s*\(|\bAppInfo::new\s*\(/g)) {
     let depth = 1;
-    let end = m.index + m[0].length;
-    for (; end < text.length && depth > 0; end++) depth += text[end] === '(' ? 1 : text[end] === ')' ? -1 : 0;
-    const args = text.slice(m.index + m[0].length, end);
-    const read = [...args.matchAll(/option_env!\s*\(\s*"([^"]*)"\s*\)/g)].map((x) => x[1]);
-    if (read.length !== names.length || read.some((n, i) => n !== names[i])) {
-      out.push(`.build_info reads ${read.length ? read.join(' and ') : 'no option_env! names'}, but build-env sets ${names.join(' and ')}: the About page shows no commit or date`);
+    let i = m.index + m[0].length;
+    const from = i;
+    for (; i < mask.length && depth > 0; i++) depth += mask[i] === '(' ? 1 : mask[i] === ')' ? -1 : 0;
+    // Names are read from the original text; the mask has the same offsets with string insides blanked.
+    const read = [...source.slice(from, i).matchAll(/option_env!\s*\(\s*"([^"]*)"\s*\)/g)].map((x) => x[1]);
+    const line = mask.slice(0, m.index).split('\n').length + (mask[m.index] === '\n' ? 1 : 0);
+    const info = m[0].startsWith('.build_info');
+    const ok = info ? read.length === names.length && read.every((n, k) => n === names[k]) : read.every((n) => n === names[0]);
+    if (!ok) {
+      out.push({
+        line,
+        message: `${info ? '.build_info' : 'AppInfo::new'} reads ${read.length ? read.join(' and ') : 'no option_env! names'}, but build-env sets ${info ? names.join(' and ') : names[0]}: the About page shows no commit${info ? ' or date' : ''}`,
+      });
     }
   }
   return out;
@@ -36,16 +46,16 @@ export default {
   title: 'Every app reads the build commit and date under the names build-env sets',
   rule: 43,
   run(ctx) {
-    const callers = ctx.files().filter((f) => f.startsWith('apps/') && f.endsWith('.rs') && /\.build_info\s*\(/.test(code(ctx.read(f) ?? '')));
-    if (!callers.length) return [];
-    const names = actionNames(ctx.read(ACTION) ?? '');
-    if (names.length !== 2) {
-      return [error('C56', 43, ACTION, 1, 'cannot read the two PADDOCK_BUILD_* names from the build-env action', 'Name PADDOCK_BUILD_COMMIT and PADDOCK_BUILD_DATE in the action description.')];
+    const names = buildEnvNames();
+    const out = [];
+    for (const f of ctx.files()) {
+      if (!SRC_TAURI.test(f) || TEST_FILE.test(f)) continue;
+      const text = ctx.read(f);
+      if (!text || !/\.build_info\s*\(|\bAppInfo::new\s*\(/.test(text)) continue;
+      for (const p of buildInfoProblems(text, names)) {
+        out.push(error('C56', 43, f, p.line, p.message, `Use option_env!("${names[0]}") for the commit and option_env!("${names[1]}") for the date (build-env sets them).`));
+      }
     }
-    return callers.flatMap((f) =>
-      buildInfoProblems(ctx.read(f) ?? '', names).map((message) =>
-        error('C56', 43, f, 1, message, `Use .build_info(option_env!("${names[0]}"), option_env!("${names[1]}")) (and rerun-if-env-changed for both in build.rs).`),
-      ),
-    );
+    return out;
   },
 };
