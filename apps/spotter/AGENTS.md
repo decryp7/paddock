@@ -99,8 +99,8 @@ registered as literals (no icon fonts, no runtime URLs). Never run `prettier --w
 - Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
   `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
 - Specs never wait a fixed number of event-loop turns and never leave a patch behind (rule 49): wait on the condition
-  (Debrief: `openDialog()`), never let an optional chain perform a test's action, and patch a prototype only with
-  `vi.spyOn` (restored after each test).
+  (Debrief's `openDialog()`, once `fix/debrief-import-range-flake` lands), never let an optional chain perform a test's
+  action, and patch a prototype only with `vi.spyOn` (restored after each test).
 - Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
   branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.
 - A change that touches an app's release path builds that app's installers before it lands on main (rule 54): the batch
@@ -112,7 +112,7 @@ registered as literals (no icon fonts, no runtime URLs). Never run `prettier --w
   start time, `paddock_proc::ProcessId`) immediately before acting; kills go through `paddock_proc` (Clippy
   `disallowed-methods` and C53 check it, ADR 0033). A discovery file that names a pid or port (Dyno's `agent.json`) is
   only a hint: act on it after a held lock or a live connection proves the process is there, and remove it only if it is
-  still the same file (same pid and start).
+  still the same file (same pid and start time).
 - Work a person waits for never runs at an OS's starvable background level (rule 52: macOS QoS `BACKGROUND`,
   `PRIO_DARWIN_BG`, `taskpolicy -b`/`-c background`/`-c maintenance`/`-d throttle` and `IOPOL_THROTTLE`; Windows
   background modes, idle priorities and EcoQoS; Linux `SCHED_IDLE` and idle I/O; for a service, launchd `ProcessType`

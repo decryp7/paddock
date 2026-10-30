@@ -17,10 +17,12 @@ changes here, every app's copy is updated in the same change.
    Lint and type-check the touched files before every push.
 5. **Every bug fix starts with a failing regression test.** A test-only failure is fixed properly (deterministic, no
    sleeps), never silently skipped.
-   A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30): `cargo mutants --in-diff <diff>` for Rust where
-   it is available, otherwise revert the fix and run the new test, and reports whether the test fails without the fix. A
-   test that still passes proves nothing and is sent back. (A `cargo mutants --in-diff` CI job on the shared crates comes
-   after the releases; see [lessons.md](lessons.md#a-bug-fix-review-runs-a-mutation-check-2026-10-30).)
+   A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30), in their own worktree: for Rust,
+   `cargo mutants --in-diff <diff> -p <crate> --timeout-multiplier 3` with `CARGO_BUILD_JOBS=2` (install once with
+   `cargo install cargo-mutants --locked`); for TypeScript, revert the fix and run the new test. The review reports whether
+   the new test fails without the fix; a test that still passes proves nothing and is sent back. (A `cargo mutants
+   --in-diff` CI job on the shared crates comes after the releases; see
+   [lessons.md](lessons.md#a-bug-fix-review-runs-a-mutation-check-2026-10-30).)
 6. **Tests never hard-code the app version;** they read it from its single source and check its shape.
 7. **Tests never touch the user's machine:** no real launchd/Login Items/services, no installed apps, never the
    installed Google Chrome (pinned Chrome for Testing or an explicit env var only), no `~/Documents`, `~/Desktop`,
@@ -156,11 +158,11 @@ changes here, every app's copy is updated in the same change.
 ## Test isolation (user, 2026-10-29)
 49. **Specs never wait a fixed number of event-loop turns and never leave a patch behind.** Specs of one bundle share a
     page (the Angular builder runs Vitest with `isolate: false`), so: (a) wait on the condition, never on a count of
-    turns or timers: Debrief's `openDialog()` (`testing/helpers.ts`) waits with `vi.waitFor` for a lazily loaded dialog and
-    fails when none opens; (b) an optional chain never performs a test's action (no `stack().at(-1)?.ref.close()`): a
+    turns or timers: once `fix/debrief-import-range-flake` lands, Debrief's `openDialog()` (`testing/helpers.ts`) waits with
+    `vi.waitFor` for a lazily loaded dialog and fails when none opens; (b) an optional chain never performs a test's action (no `stack().at(-1)?.ref.close()`): a
     missing thing must fail the test; (c) a patch on a prototype is a `vi.spyOn`, put back by `restoreMocks` and by a
     global `afterEach(vi.restoreAllMocks)`, never an assignment, `Object.defineProperty` or `Object.assign` on it.
-    Debrief's ESLint (`no-restricted-syntax` for specs) enforces (b) and (c) today; the other apps follow. *Why:* a fixed
+    Once that branch lands, Debrief's ESLint (`no-restricted-syntax` for specs) enforces (b) and (c); the other apps follow. *Why:* a fixed
     wait and a leaked patch each made a spec fail now and then, only in the full run
     ([lessons.md](lessons.md#test-isolation-debrief-2026-10-29)).
 
@@ -234,7 +236,7 @@ changes here, every app's copy is updated in the same change.
     is the same rule for ports.
     A discovery file, a file that names a pid or a port (Dyno's `agent.json`), is only a hint: act on it only after a held
     lock or a live connection proves the process is there, and remove it only if it is still the same file (same pid and
-    start), never because it was the file read earlier.
+    start time), never because it was the file read earlier.
     *Why:* Windows hands a freed pid on at once. `kill_tree` killed the pids of a stale snapshot, which can end another
     test's Chrome helper; the same mistake was in four shapes in five apps. (It was suspected of causing the Windows
     `ERR_ABORTED` failures; the suspected cause was disproved by run 7158; the flake has another cause, ADR 0033 WP-4.)
