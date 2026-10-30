@@ -104,7 +104,7 @@ expires = "2026-12-31"
 # C54 (rule 52), service level: launchd ProcessType Background / LowPriorityIO and systemd IOSchedulingClass=idle. The
 # shared renderer applies them to every Background or low_priority() service; the fix is ADR 0020's priority helper
 # deciding per class (a service someone waits on renders at User), not a per-app patch. Each file is waived separately so
-# a new use is still caught.
+# a new use is still caught. Golden files under tests/ are not checked for service settings.
 [[waiver]]
 check = "C54"
 path = "crates/paddock-service/src/render.rs"
@@ -125,14 +125,10 @@ expires = "2026-12-31"
 
 [[waiver]]
 check = "C54"
-path = "crates/paddock-service/tests/golden/*"
-reason = "paddock-service: golden outputs of the renderer (ProcessType Background, LowPriorityIO, IOSchedulingClass=idle); regenerated with the ADR 0020 helper follow-up"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C54"
 path = "apps/debrief/crates/debrief-agent/src/service/launchd.rs"
-reason = "Debrief: the headless diagnostics agent's daemon plist is ProcessType Background; scheduled collection nobody watches, but triggered captures may be waited on; to decide with the ADR 0020 helper"
+reason = "Debrief: the headless diagnostics agent's daemon plist is ProcessType Background. Scheduled collection is work nobody waits on, but a person may wait for a triggered capture, so this is a known violation of rule 52"
+owner = "debrief"
+follow_up = "Debrief 1.2: render the agent's plist at Standard (or Adaptive with an XPC trigger) and keep Background only for scheduled collection, through the ADR 0020 priority helper; delete this waiver then"
 expires = "2026-12-31"
 
 [[waiver]]
@@ -155,6 +151,12 @@ expires = "2026-12-31"
 
 [[waiver]]
 check = "C54"
-path = "apps/shell-demo/src-tauri/*"
-reason = "shell demo: its heartbeat agent is a Background, low_priority service (plist and paddock-service spec); follows the ADR 0020 helper"
+path = "apps/shell-demo/src-tauri/agent/src/lib.rs"
+reason = "shell demo: its heartbeat agent asks paddock-service for a Background, low_priority service; follows the ADR 0020 helper"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C54"
+path = "apps/shell-demo/src-tauri/macos/agent.plist"
+reason = "shell demo: the heartbeat agent's plist (ProcessType Background, LowPriorityIO) as paddock-service renders it; follows the ADR 0020 helper"
 expires = "2026-12-31"
