@@ -539,17 +539,37 @@ test.describe('network', () => {
 });
 
 test.describe('issues', () => {
-  test('shows the stability score, the apps with trouble and the events grouped by day; a row opens its evidence as plain text', async ({ page }) => {
-    await page.goto(url('/issues'));
-    await expect(page.getByRole('heading', { name: 'Issues', exact: true })).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Stability' })).toBeVisible();
-    const table = page.getByRole('treegrid', { name: 'Issues', exact: true });
-    await expect(table.getByText('Today').first()).toBeVisible();
-    await table.getByRole('row', { name: /Safari/ }).click();
-    const detail = page.getByRole('complementary', { name: 'Issue details' });
-    await expect(detail.getByText('What the system said')).toBeVisible();
-    await expect(detail.getByText('Safari stopped responding')).toBeVisible();
-    await page.keyboard.press('Escape');
+  test.describe('grouped by the local day', () => {
+    // The mock dates its issues relative to the clock (the newest 35 minutes ago), so the day headings depend on the
+    // time of day: pin the zone (UTC+8, no daylight saving) and the clock, or the test fails in the first 35 minutes
+    // after the runner's midnight.
+    test.use({ timezoneId: 'Asia/Singapore' });
+    const AFTERNOON = Date.parse('2026-10-22T14:30:00+08:00');
+    const JUST_AFTER_MIDNIGHT = Date.parse('2026-10-23T00:10:00+08:00');
+
+    test('shows the stability score, the apps with trouble and the events grouped by day; a row opens its evidence as plain text', async ({ page }) => {
+      await page.clock.setFixedTime(AFTERNOON);
+      await page.goto(url('/issues'));
+      await expect(page.getByRole('heading', { name: 'Issues', exact: true })).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Stability' })).toBeVisible();
+      const table = page.getByRole('treegrid', { name: 'Issues', exact: true });
+      await expect(table.getByText('Today').first()).toBeVisible();
+      await table.getByRole('row', { name: /Safari/ }).click();
+      const detail = page.getByRole('complementary', { name: 'Issue details' });
+      await expect(detail.getByText('What the system said')).toBeVisible();
+      await expect(detail.getByText('Safari stopped responding')).toBeVisible();
+      await page.keyboard.press('Escape');
+    });
+
+    test('just after local midnight nothing happened today yet: the newest issues are under Yesterday, not by the UTC date', async ({ page }) => {
+      // 00:10 in UTC+8 is 16:10 UTC of the day before, the same UTC day as the newest issue (23:35 local): grouping by
+      // the UTC date would put it under Today.
+      await page.clock.setFixedTime(JUST_AFTER_MIDNIGHT);
+      await page.goto(url('/issues'));
+      const table = page.getByRole('treegrid', { name: 'Issues', exact: true });
+      await expect(table.getByText('Yesterday').first()).toBeVisible();
+      await expect(table.getByText('Today')).toHaveCount(0);
+    });
   });
 
   test('a row\'s context menu opens with Shift+F10, reaches every action, and Escape gives the focus back to the row', async ({ page }) => {
