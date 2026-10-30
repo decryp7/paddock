@@ -116,8 +116,6 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['benchmarks', (b) => b.benchmarks(), 'benchmarks', undefined],
   ['settings', (b) => b.settings(), 'settings', undefined],
   ['saveSettings', (b) => b.saveSettings(SETTINGS), 'save_settings', { settings: SETTINGS }],
-  ['appUpdateStatus', (b) => b.appUpdateStatus(), 'app_update_status', undefined],
-  ['checkAppUpdate', (b) => b.checkAppUpdate(), 'check_app_update', undefined],
   ['serviceState', (b) => b.serviceState(), 'service_state', undefined],
   ['declineService', (b) => b.declineService(), 'decline_service', undefined],
   ['openLoginItems', (b) => b.openLoginItems(), 'open_service_login_items', undefined],
@@ -133,7 +131,6 @@ const JOBS: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<str
   ['installService', (b) => b.installService(), 'start_install_service', {}],
   ['uninstallService', (b) => b.uninstallService(), 'start_uninstall_service', {}],
   ['repairService', (b) => b.repairService(), 'start_repair_service', {}],
-  ['installAppUpdate', (b) => b.installAppUpdate(), 'start_app_update', {}],
 ];
 
 describe('TauriBackend', () => {
@@ -289,9 +286,9 @@ describe('TauriBackend', () => {
       await expect(c).rejects.toMatchObject({ code: 'cancelled', message: expect.stringContaining('may still be working') });
     });
 
-    it('rejects when the job cannot start (for example offline mode refuses the update)', async () => {
+    it('rejects when the job cannot start (for example offline mode refuses a model update check)', async () => {
       const { bridge } = fakeBridge(() => Promise.reject({ code: 'offline', message: 'Offline mode is on.' }));
-      await expect(new TauriBackend(bridge).installAppUpdate()).rejects.toEqual({ code: 'offline', message: 'Offline mode is on.' });
+      await expect(new TauriBackend(bridge).checkUpdatesNow()).rejects.toEqual({ code: 'offline', message: 'Offline mode is on.' });
     });
 
     it('drops events of an unknown shape, survives a throwing listener and ignores events of another job', async () => {

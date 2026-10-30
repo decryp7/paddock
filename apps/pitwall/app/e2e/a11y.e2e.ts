@@ -2,9 +2,12 @@ import { expect, test } from '@playwright/test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { axeInThemes } from '../../../../ui/projects/paddock-e2e/src/axe.ts';
+import { axeEveryDialog } from '../../../../ui/projects/paddock-e2e/src/a11y.ts';
 import { openApp } from './app';
+import { CONTRACT_FILES, INPUTS } from './dialog-fixtures';
 
-// axe (WCAG 2.2 A/AA) over every route in the light and the dark theme (rule 17). a11y.baseline.json holds the exact
+// axe (WCAG 2.2 A/AA) over every route of the main window, the tray popover and every dialog window (the Settings window
+// among them, C33) in the light and the dark theme (rule 17). a11y.baseline.json holds the exact
 // violations measured when this spec was added, per project and route: a violation not in it fails the test, and one that is
 // gone fails it too (delete its entry). WP-2/WP-3 own the fixes. Re-record with
 // `PW_RECORD_BASELINE=1 npx playwright test e2e/a11y.e2e.ts --project=chromium` and review the diff.
@@ -17,7 +20,6 @@ const ROUTES = [
   { name: 'requests', hash: '/requests' },
   { name: 'playground', hash: '/playground' },
   { name: 'benchmarks', hash: '/benchmarks' },
-  { name: 'settings', hash: '/settings' },
   { name: 'tray', hash: '/tray' },
 ] as const;
 
@@ -50,3 +52,10 @@ for (const route of ROUTES) {
     expect(found, id).toEqual([...(baseline[id] ?? [])].sort());
   });
 }
+
+// Every dialog window as Rust opens it (by URL), the Settings window, Pitwall's four dialogs, the shared confirmation, About,
+// Updates and What's new: no violation at all (a new dialog is checked the moment it is in a contract table).
+test('every dialog window has no axe violations in light and dark', async ({ page }) => {
+  test.setTimeout(600_000);
+  expect(await axeEveryDialog(page, CONTRACT_FILES, { inputs: INPUTS })).toEqual({});
+});

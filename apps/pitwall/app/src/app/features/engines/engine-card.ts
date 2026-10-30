@@ -7,7 +7,8 @@ import type { BuildCapability, Engine, InstalledBuild } from '../../core/api.typ
 import { LiveStore } from '../../core/live.store';
 import { ago, bytes, percent } from '../../shared/format';
 import { availabilityLook, capabilityLook, downloadActive, healthLook, selfTestLook } from '../../shared/labels';
-import { Confirm } from '../../shared/ui/confirm';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
 import { EnginesStore } from './engines.store';
 import { MatButton, MatIconButton } from '@angular/material/button';
@@ -451,7 +452,7 @@ export class EngineCard {
   readonly now = input.required<number>();
   protected readonly store = inject(EnginesStore);
   private readonly live = inject(LiveStore);
-  private readonly confirm = inject(Confirm);
+  private readonly dialogs = inject(DialogService);
   protected readonly size = bytes;
   protected readonly when = ago;
   protected readonly pct = percent;
@@ -533,17 +534,17 @@ export class EngineCard {
   }
 
   protected async remove(b: InstalledBuild): Promise<void> {
-    const ok = await this.confirm.ask({ title: `Remove ${b.label} ${b.tag}?`, message: `Frees ${bytes(b.sizeBytes)}. You can install it again from the catalog.`, confirm: 'Remove', danger: true });
+    const ok = await confirm(this.dialogs, { heading: `Remove ${b.label} ${b.tag}?`, message: `Frees ${bytes(b.sizeBytes)}. You can install it again from the catalog.`, confirm: { label: 'Remove build', destructive: true } });
     if (ok) await this.store.remove(b);
   }
 
   protected async rollback(): Promise<void> {
     const to = this.rollbackTarget();
     if (!to) return;
-    const ok = await this.confirm.ask({
-      title: `Roll back to ${to.label} ${to.tag}?`,
+    const ok = await confirm(this.dialogs, {
+      heading: `Roll back to ${to.label} ${to.tag}?`,
       message: `${to.label} ${to.tag} is pinned for all models until you unpin it. Models that are loaded keep running; they use it from their next load.`,
-      confirm: 'Roll back',
+      confirm: { label: 'Roll back' },
     });
     if (ok) await this.store.rollback();
   }

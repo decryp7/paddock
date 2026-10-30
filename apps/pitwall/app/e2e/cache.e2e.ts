@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, openSettings, settingsDialog } from './app';
 
 test.describe('caching', () => {
   test('settings: sets an expiry, sees the figures and clears a cache after confirming', async ({ page }) => {
-    await openApp(page, '/settings');
-    const card = page.locator('#set-cache');
+    await openSettings(page);
+    const card = settingsDialog(page).locator('#set-cache');
     await expect(card).toContainText('never sent anywhere');
     await expect(card.locator('.cache-stats').first()).toContainText('90 days since last use');
     await card.getByRole('combobox', { name: 'Cached answers expiry' }).click();
@@ -15,7 +15,7 @@ test.describe('caching', () => {
     await expect(card.getByRole('combobox', { name: 'Cached answers expiry' })).toContainText('30 days after it is stored');
 
     await card.getByRole('button', { name: 'Clear now' }).nth(1).click();
-    await page.getByRole('alertdialog').getByRole('button', { name: 'Clear now' }).click();
+    await page.getByRole('alertdialog').filter({ hasText: 'Clear cached answers?' }).getByRole('button', { name: 'Clear cache' }).click();
     await expect(card.locator('.cache-stats').nth(1)).toContainText('none');
   });
 
