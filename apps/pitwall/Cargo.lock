@@ -3527,6 +3527,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tauri",
+ "tauri-plugin-updater",
 ]
 
 [[package]]
@@ -3776,6 +3777,7 @@ dependencies = [
  "paddock-shell",
  "paddock-startup",
  "paddock-testkit",
+ "paddock-updater",
  "paddock-window",
  "pitwall-core",
  "pitwall-loopback",
