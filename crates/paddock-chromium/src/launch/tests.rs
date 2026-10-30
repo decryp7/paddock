@@ -334,6 +334,25 @@ fn the_first_load_waits_until_the_tabs_own_first_navigation_has_settled() {
         .unwrap();
 }
 
+/// Regression (review P2-16): a network service that restarted while the page sat idle, between two loads, is not
+/// blamed on a later abort: the process is looked up right before each load, so the evidence for "restarted" is always
+/// about the load that was cancelled.
+#[test]
+fn a_restart_between_loads_is_not_blamed_on_the_next_abort() {
+    let f = Fixture::new(Mode::Obey, 1);
+    let b = f.launch();
+    let p = b.new_page().unwrap();
+    p.navigate("https://a.test/", Duration::from_secs(10))
+        .unwrap();
+    f.fake.act(UserAction::RestartNetworkService).unwrap();
+    f.fake.act(UserAction::AbortLoads).unwrap();
+    let e = p
+        .navigate("https://b.test/", Duration::from_secs(10))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("network service unchanged (process 101)"), "{e}");
+}
+
 /// The events that would show the first navigation settled can leave the bounded event log (a busy page sends more than
 /// it keeps); the page then counts it as settled instead of waiting out the caller's whole timeout for an event it can no
 /// longer see.
