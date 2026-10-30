@@ -10,12 +10,8 @@
   "display": true,
   "testBrowser": {
     "envPrefix": "SPOTTER",
-    "catalogue": "apps/spotter/crates/spotter-render/src/chromium-manifest.toml",
     "noSandboxOnLinux": true
   },
-  "processPatterns": [
-    "[/\\\\]test-browser-spotter[/\\\\]"
-  ],
   "checks": [
     "cd apps/spotter",
     "node --test scripts/pin-chromium.test.mjs scripts/install-test-browser.test.mjs scripts/style-guard.test.mjs scripts/ci/check-icons.test.mjs",

@@ -546,7 +546,7 @@ describe('matrix legs', () => {
   });
 
   test("an app's test browser and display reach every leg; the sandbox flag is Linux-only", () => {
-    const testBrowser = { envPrefix: 'DEMO', catalogue: 'apps/x/chromium.toml', noSandboxOnLinux: true };
+    const testBrowser = { envPrefix: 'DEMO', noSandboxOnLinux: true };
     const apps = new Map([['x', { dir: 'apps/x', cargo: '.', os: [LINUX, 'windows-latest', 'macos-latest'], display: true, testBrowser }]]);
     const legs = matrix({ apps: ['x'], kinds: { x: ['rust'] }, packages: {} }, { cargo: new Map(), apps });
     assert.deepEqual(legs.map((l) => [l.os, l.test_browser_prefix, l.test_browser_no_sandbox, l.display]), [

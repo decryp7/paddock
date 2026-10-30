@@ -591,13 +591,13 @@ test('no host job gets a real test browser: the hosts run in a user\'s session (
   assert.match(gates, /RUNNER_OS" != Linux \]; then echo "::notice::The real-browser tests run in the Linux leg/, 'a host leg says where they run');
 });
 
-test('the WebKit job runs on the Mac runner for pushes to main and v* tags only, and runs the three WebKit projects', () => {
+test('the WebKit job runs in the Linux container for pushes to main and v* tags only, and runs the three WebKit projects', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const on = ci.match(/^on:\n((?:[ \t]+.*\n|\n)+)/m)?.[1] ?? '';
   assert.match(on, /push:\n\s+branches: \[main\]\n\s+tags: \["v\*"\]/, 'a push is only main or a v* tag');
   const job = ci.match(/^  e2e-webkit:\n((?:    .*\n|\n)+)/m)?.[1] ?? '';
   assert.notEqual(job, '', 'the e2e-webkit job exists');
-  assert.match(job, /runs-on: macos-latest/);
+  assert.match(job, /runs-on: ubuntu-latest\n    container:\n      image: dev\.decryptology\.net\/decryp7\/paddock-ci:v2/, 'never a browser in a user session (rule 7)');
   const cond = job.match(/^    if: (.*)$/m)?.[1] ?? '';
   assert.match(cond, /github\.event_name == 'push'/, 'never a pull request or a manual run');
   assert.match(cond, /github\.ref == 'refs\/heads\/main'/);
@@ -838,14 +838,14 @@ test("Spotter's real-browser tests use the image's Chrome for Testing on Linux: 
   assert.equal(spotter, version(read(join(PADDOCK, 'crates', 'paddock-chromium', 'src', 'chromium.toml'))), 'the image installs paddock-chromium\'s pin');
   assert.match(read(join(PADDOCK, 'ci-image', 'Dockerfile')), new RegExp(`ARG CHROME_VERSION=${spotter.replace(/\./g, '\\.')}\\n`), 'the image carries that build');
   const contract = ciContract('spotter');
-  assert.deepEqual(contract.testBrowser, { envPrefix: 'SPOTTER', catalogue: 'apps/spotter/crates/spotter-render/src/chromium-manifest.toml', noSandboxOnLinux: true }, 'the Linux leg points SPOTTER_TEST_BROWSER at the image\'s pin');
-  assert.ok(existsSync(join(PADDOCK, contract.testBrowser.catalogue)));
+  // No catalogue and no host clean-up pattern: nothing installs Spotter's pin on a host any more (rule 7).
+  assert.deepEqual(contract.testBrowser, { envPrefix: 'SPOTTER', noSandboxOnLinux: true }, 'the Linux leg points SPOTTER_TEST_BROWSER at the image\'s pin');
+  assert.equal(contract.processPatterns, undefined);
   assert.equal(contract.display, true, 'the renderer\'s window is a real off-screen one: a virtual display on Linux');
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   assert.match(ci, /echo "\$\{PREFIX\}_TEST_BROWSER=\$CHROMIUM_TEST_PATH"/, 'the tests launch the pinned build');
   assert.match(ci, /echo "\$\{PREFIX\}_REQUIRE_TEST_BROWSER=1"/, 'a missing browser fails the run');
   assert.match(read(join(ACTIONS, 'app-gates', 'action.yml')), /xvfb-run --auto-servernum .* dbus-run-session --\)/, 'the tests run under a virtual display');
-  assert.match(contract.processPatterns.join('\n'), /test-browser-spotter/, 'host cleanup ends browsers started from the app\'s own test-browser folder');
   assert.match(read(join(PADDOCK, 'apps', 'spotter', '.config', 'nextest.toml')), /filter = "package\(spotter-render\) & binary\(real_browser\)"\ntest-group = "real-browser"/, 'real browsers take turns under nextest too');
 });
 
@@ -1103,4 +1103,40 @@ test("app-gates runs every command list through run-commands.sh, which names the
   assert.equal(good.status, 0, good.stdout);
   assert.match(good.stdout, /4361/, 'shell expansion works as in the old bash -c');
   assert.equal(run('cd nowhere').status, 1);
+});
+
+// Rule 7 (review P1-3): the macOS and Windows runners run in a user's session (the Mac runner is the user's own desktop), so
+// no job there starts a browser or the real app: no Playwright run, no real-window probe, no real-app smoke, no real-browser
+// test binary. A step limited to Linux (`if: runner.os == 'Linux'`) is fine in a job with host legs.
+test('no job on a macOS or Windows runner starts a browser or the real app', () => {
+  const FORBIDDEN = /playwright test|PADDOCK_REAL_WINDOWS|e2e:tauri\b(?!:build)|--test real_browser|PADDOCK_LIVE_BROWSER: "1"/;
+  const found = [];
+  for (const file of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
+    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+      const code = job.text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+      const host = /runs-on:\s*(?:macos|windows)-/.test(code) || (/runs-on: \$\{\{ matrix\.os \}\}/.test(code) && /(?:macos|windows)-latest/.test(code));
+      if (!host) continue;
+      for (const step of code.split(/\n      - /).slice(1)) {
+        if (/\n\s+if:[^\n]*runner\.os == 'Linux'/.test(`\n${step}`)) continue;
+        if (FORBIDDEN.test(step)) found.push(`${file} ${job.id}: ${step.split('\n')[0]}`);
+      }
+    }
+  }
+  assert.deepEqual(found, []);
+  // The probe of the test itself: a host job with a Playwright run is found.
+  const probe = 'jobs:\n  x:\n    runs-on: macos-latest\n    steps:\n      - run: npx playwright test\n';
+  const [job] = parseJobs(probe);
+  assert.ok(/runs-on:\s*macos-/.test(job.text) && FORBIDDEN.test(job.text));
+});
+
+// Review P1-2: the conformance job runs only when conformance/ changes, so C55 also runs, as a cheap walk, wherever Rust is
+// checked: the crates job, every app leg (app-gates) and Debrief's lint job.
+test('C55 runs on every Rust change: in the crates job, every app leg and Debrief\'s lint job', () => {
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const crates = parseJobs(ci).find((j) => j.id === 'crates')?.text ?? '';
+  assert.match(crates, /paddock-conformance\.mjs --app paddock --root \. --only C55/);
+  assert.match(read(join(ACTIONS, 'app-gates', 'action.yml')), /paddock-conformance\.mjs" --app "\$APP" --root "\$ROOT" --only C55/);
+  const lint = parseJobs(read(join(WORKFLOWS, 'debrief.yml'))).find((j) => j.id === 'rust-lint')?.text ?? '';
+  assert.match(lint, /paddock-conformance\.mjs --app debrief --root \. --only C55/);
+  assert.match(ci, /--only [A-Z0-9,]*\bC55\b/, 'and on Paddock itself in the conformance job');
 });

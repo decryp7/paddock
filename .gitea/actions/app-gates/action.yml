@@ -89,6 +89,16 @@ runs:
         COMMANDS: ${{ inputs.rust-checks }}
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
 
+    # Conformance C55 over the app's Rust (rule 7: tests start a real browser only in a throwaway session): a walk of the
+    # files, a second, on every Rust change, because the conformance job runs only when conformance/ itself changes.
+    - name: No real browser outside a throwaway session (${{ inputs.app }}, C55)
+      if: ${{ !cancelled() && inputs.rust == 'true' && inputs.cargo != '' && runner.os == 'Linux' }}
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+        ROOT: ${{ inputs.cargo }}
+      run: node "${{ github.action_path }}/../../../conformance/bin/paddock-conformance.mjs" --app "$APP" --root "$ROOT" --only C55
+
     # Every step of the Rust half runs even after another failed (clippy and nextest each name what broke), and the steps after a
     # failed check (`checks`, `rust-checks`) still run, so one run reports every failure (`!cancelled()`).
     - name: Rust (${{ inputs.app }}; fmt, clippy, tests on the mock runtime, doc tests, deny)

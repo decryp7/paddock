@@ -134,6 +134,11 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
 
+      # Conformance C55 over Debrief's Rust (rule 7: tests start a real browser only in a throwaway session), on every Rust
+      # change: the conformance job runs only when conformance/ itself changes.
+      - name: No real browser outside a throwaway session (C55)
+        run: node ../../conformance/bin/paddock-conformance.mjs --app debrief --root . --only C55
+
       # The store crates link the official prebuilt libduckdb (ADR 0014): the image's when it has the pinned version, else
       # the pinned, SHA-256-checked download (every job that builds the workspace links it).
       - name: libduckdb
