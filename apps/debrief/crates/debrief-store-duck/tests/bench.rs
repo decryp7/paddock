@@ -93,9 +93,13 @@ fn interactive_operations_at_scale() {
             // `duckdb_memory()` and the resident size). `DEBRIEF_BENCH_LOWER=1` first sets the shipped limit again.
             if let Some(secs) = std::env::var("DEBRIEF_BENCH_IDLE_SECS").ok().and_then(|v| v.parse::<u64>().ok()) {
                 use debrief_core::ports::Inspect;
-                if let Some(lower) = std::env::var("DEBRIEF_BENCH_LOWER").ok() {
+                if let Ok(lower) = std::env::var("DEBRIEF_BENCH_LOWER") {
                     // "1": the shipped limit again; a number: that many MB (then the shipped limit again after 10 s).
-                    let limit = lower.parse::<u64>().ok().filter(|mb| *mb > 1).map_or(shipped_limit.clone(), |mb| format!("{mb}MB"));
+                    let limit = lower
+                        .parse::<u64>()
+                        .ok()
+                        .filter(|mb| *mb > 1)
+                        .map_or(shipped_limit.clone(), |mb| format!("{mb}MB"));
                     store
                         .configure(debrief_store_duck::StoreOptions {
                             memory_limit: limit,

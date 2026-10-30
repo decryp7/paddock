@@ -15,6 +15,42 @@ use duckdb::{params, Connection};
 /// after it (`ts,source,line`; untimed events sort last).
 const LAST_KEY: &str = "ord_last";
 
+/// `meta` key set to 1 while the positions are missing or stale because a rebuild failed: the store rebuilds them when
+/// it opens and at the next maintenance (they must never stay missing).
+pub(crate) const STALE: &str = "ord_stale";
+
+/// Attempts of a rebuild before it is reported as failed.
+pub(crate) const ATTEMPTS: usize = 2;
+
+/// [`rebuild`], tried [`ATTEMPTS`] times; marks the positions [`STALE`] when every attempt failed (and clears the mark
+/// when one succeeded). The error is the last attempt's.
+pub(crate) fn rebuild_or_mark(conn: &Connection) -> duckdb::Result<()> {
+    let mut last = None;
+    for attempt in 1..=ATTEMPTS {
+        match rebuild(conn) {
+            Ok(()) => {
+                if let Err(e) = crate::writer::set_meta(conn, STALE, 0) {
+                    log::warn!("could not clear {STALE}: {e:#}");
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                log::warn!("time-order positions could not be rebuilt (attempt {attempt} of {ATTEMPTS}): {e}");
+                last = Some(e);
+            }
+        }
+    }
+    if let Err(e) = crate::writer::set_meta(conn, STALE, 1) {
+        log::error!("could not mark the positions stale: {e:#}");
+    }
+    Err(last.unwrap_or(duckdb::Error::QueryReturnedNoRows))
+}
+
+/// Whether a failed rebuild left the positions stale.
+pub(crate) fn is_stale(conn: &Connection) -> bool {
+    crate::writer::meta_u64(conn, STALE) == 1
+}
+
 /// Renumbers the visible events.
 pub(crate) fn rebuild(conn: &Connection) -> duckdb::Result<()> {
     conn.execute_batch(
