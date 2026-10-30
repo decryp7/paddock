@@ -124,7 +124,6 @@ development and UI tests only; features are not done until they work against the
   # pacenotes-parse, -index, -worker, -engine, -rules and -req: the same command once per package, --fail-under-lines 95 and
   # 'pacenotes-worker/src/bin/|pacenotes-worker/src/hooks\.rs' added to the ignore regex (see paddock.ci.json for the reasons)
   cargo deny --workspace check
-  node --test scripts/release/publish.test.mjs
   (cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && npx ng test --watch=false)
   ```
 
@@ -135,7 +134,7 @@ development and UI tests only; features are not done until they work against the
 - Use Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`, `chore:`). **Never add a
   Co-Authored-By trailer or any AI attribution** to commits or PRs.
 - **Never run `npx prettier --write`**: the TypeScript is not prettier-formatted and it reformats whole files.
-- Releases are `pacenotes-v*` tags following semver, published with `scripts/release/publish.mjs`. Never tag a `[skip ci]` commit;
+- Releases are `pacenotes-v*` tags following semver, published by the shared `conformance/release/publish.mjs` (no copy in the app; conformance C08). Never tag a `[skip ci]` commit;
   read the release lessons in `docs/suite-lessons.md`.
 - Record significant architecture decisions as ADRs in `docs/adr/`.
 

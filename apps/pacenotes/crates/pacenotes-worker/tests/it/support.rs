@@ -57,3 +57,24 @@ impl ProcessProbe for FixedProbe {
         Some(*self.0.lock().unwrap())
     }
 }
+
+/// A probe that reports "stopped by the system" and tells the test each time it was asked, so a test can wait for N ticks of the
+/// monitor on a condition instead of on a clock.
+pub struct TickProbe(Mutex<std::sync::mpsc::Sender<()>>);
+
+impl TickProbe {
+    pub fn new() -> (TickProbe, std::sync::mpsc::Receiver<()>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        (TickProbe(Mutex::new(tx)), rx)
+    }
+}
+
+impl ProcessProbe for TickProbe {
+    fn sample(&self, _pid: u32) -> Option<ProcSample> {
+        let _ = self.0.lock().unwrap().send(());
+        Some(ProcSample {
+            state: RunState::Stopped,
+            cpu_micros: 0,
+        })
+    }
+}
