@@ -16,8 +16,9 @@ so a slow stage idled the others and the user saw one long wait. Each place also
    most). `lower_priority()` puts a background thread behind the user's work where the OS allows: macOS QoS class
    `UTILITY`, Linux nice 10 on the thread, Windows `THREAD_PRIORITY_BELOW_NORMAL`. (Amended 2026-10-30: macOS was
    `BACKGROUND`, which keeps a thread on the efficiency cores and behind every other thread; callers wait for these pools,
-   so on a loaded Mac a `debrief report` stalled for minutes. Lowered work may be slowed, never starved; `UTILITY` is
-   family ADR 0020's macOS class for user-started work.)
+   so on a loaded Mac a `debrief report` stalled for minutes. Lowered work may be slowed, never starved: Paddock rule 52;
+   family ADR 0020, amended the same day, maps its `Background` class to `UTILITY` too and keeps `BACKGROUND` for
+   `Idle` work nobody waits on.)
 2. **`debrief_core::stages::Stages`** is the one pipeline: the caller's thread reads (IO) in chunks into a bounded queue,
    a bounded rayon pool maps the chunk's items (CPU), one thread commits in order. Queues are bounded (back-pressure,
    memory is a few chunks), order is kept through every stage, so the commit sees what a sequential loop would: results

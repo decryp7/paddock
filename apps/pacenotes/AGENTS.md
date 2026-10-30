@@ -144,10 +144,11 @@ development and UI tests only; features are not done until they work against the
 - Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
-- Work a person waits for never runs at an OS's starvable background level (rule 52: macOS QoS `BACKGROUND` and
-  `PRIO_DARWIN_BG`, Windows background modes and idle/lowest priorities, Linux `SCHED_IDLE` and idle I/O; for a service,
-  launchd `ProcessType` `Background` (or `Adaptive` without XPC), `LowPriorityIO` and systemd `IOSchedulingClass=idle`):
-  lowered work uses `QOS_CLASS_UTILITY`, nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`; a starvable level only for work
-  nobody waits on, with a `conformance: background-qos — <why>` comment (C54).
+- Work a person waits for never runs at an OS's starvable background level (rule 52: macOS QoS `BACKGROUND`,
+  `PRIO_DARWIN_BG`/`taskpolicy` and `IOPOL_THROTTLE`; Windows background modes, idle priorities and EcoQoS; Linux
+  `SCHED_IDLE` and idle I/O; for a service, launchd `ProcessType` `Background` (or `Adaptive` without XPC) and
+  `LowPriorityIO`, systemd `CPUSchedulingPolicy=idle` and `IOSchedulingClass=idle`): lowered work uses
+  `QOS_CLASS_UTILITY`, nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`; a starvable level only for work nobody waits on, with a
+  `conformance: background-qos — <why>` comment (C54).
 - Research official sources before choosing models or libraries; record what you found and when in the ADR.
 - Navigate code with Serena's symbol tools when available. Delegate mechanical work to cheaper models; keep

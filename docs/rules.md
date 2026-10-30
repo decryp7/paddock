@@ -34,7 +34,8 @@ changes here, every app's copy is updated in the same change.
     consistent (build new data, then swap).
 12. **The UI never times out a running job;** it shows "Still working".
 13. **Parallel where it helps, bounded by the kind of work** (CPU: cores−1 or the Performance setting; SSD I/O 4–8; HDD
-    1–2; network a few per host; memory-heavy by RAM), background priority, deterministic results.
+    1–2; network a few per host; memory-heavy by RAM), lowered priority that never starves (rule 52), deterministic
+    results.
 14. **Multi-stage work is a pipeline:** producers → bounded queue → workers, stage-specific thread counts, back-pressure,
     cancel across stages, per-stage progress; determinism by commit-time ordering. IDs: number only new items in sorted
     canonical relative path order; existing IDs never change; moved/renamed files are matched by path, then fingerprint.
@@ -162,7 +163,8 @@ changes here, every app's copy is updated in the same change.
 51. **Slow means: more parallelism, or a cheaper operation.** When any operation is slow (import, indexing, scans, queries,
     CI steps, tests), the analysis answers two questions with measurements:
     (a) Can more threads or workers be assigned? Bounded by the kind of work (ER-20): CPU-bound work gets cores minus one,
-    I/O a few, memory-heavy work is limited by RAM; it runs at background priority with deterministic results.
+    I/O a few, memory-heavy work is limited by RAM; it runs at a lowered priority that never starves (rule 52), with
+    deterministic results.
     (b) Can the operation be made cheaper? For example less work per item, no repeated work, a cheaper algorithm or format,
     caching, batching, skipping.
     Thread counts and similar tunables are Settings values with an "Auto" default, validated in the engine, not
@@ -172,21 +174,26 @@ changes here, every app's copy is updated in the same change.
     time; these were found by accident, and should be found by design.
 
 ## Thread priority (user, 2026-10-30)
-52. **Work a person waits for never runs at an OS's starvable background level.** The starvable levels are macOS QoS
-    `BACKGROUND` and process background (`PRIO_DARWIN_BG`, `taskpolicy -b`); on Windows `THREAD_MODE_BACKGROUND_BEGIN`,
-    `PROCESS_MODE_BACKGROUND_BEGIN`, `IDLE_PRIORITY_CLASS`, `THREAD_PRIORITY_IDLE` and `THREAD_PRIORITY_LOWEST` (the
-    background modes also drop I/O and memory priority to the lowest); on Linux `SCHED_IDLE` and the idle I/O class
-    (`ioprio` `IOPRIO_CLASS_IDLE`). The same levels set for a whole service count too: launchd `ProcessType`
-    `Background` (and `Adaptive` when the service has no XPC `MachServices` to raise it), `LowPriorityIO` `true`, and
-    systemd `IOSchedulingClass=idle`. Lowered work that a caller may wait for (an analysis behind a report, a pool an
-    import waits on through a lock, a download, anything a person started) uses the gentle level instead:
-    `QOS_CLASS_UTILITY` on macOS, nice 10 on Linux, `THREAD_PRIORITY_BELOW_NORMAL` on Windows (Debrief's
-    `debrief_core::threads::lower_priority`). A busy machine slows such work, never stops it. A starvable level is only
-    for work nobody waits on (family ADR 0020's `Idle` class, ADR 0024's `Background` child processes), and each use
-    says why with `// conformance: background-qos — <why nobody waits on it>` (check C54). *Why:* these levels run a
-    thread only when the machine has nothing else to do (macOS `BACKGROUND` also keeps it on the efficiency cores);
-    Debrief's mining pool was in it, so on a loaded Mac `debrief report` waited minutes for its analyses and timed out
-    in CI (Debrief ADR 0052, amended 2026-10-30; lessons 2026-10-30).
+52. **Work a person waits for never runs at an OS's starvable background level.** Starvable levels: on macOS QoS
+    `BACKGROUND`, process background (`PRIO_DARWIN_BG`, `taskpolicy -b` or `-c background`) and `IOPOL_THROTTLE`; on
+    Windows `THREAD_MODE_BACKGROUND_BEGIN`, `PROCESS_MODE_BACKGROUND_BEGIN` (both also drop I/O and memory priority to
+    the lowest), `IDLE_PRIORITY_CLASS`, `THREAD_PRIORITY_IDLE` and EcoQoS (`ProcessPowerThrottling` /
+    `ThreadPowerThrottling` execution speed); on Linux `SCHED_IDLE` (`chrt --idle`) and the idle I/O class
+    (`IOPRIO_CLASS_IDLE`, `ionice -c3`). The same levels set for a whole service count too: launchd `ProcessType`
+    `Background` (and `Adaptive` when the service has no XPC `MachServices` to raise it), `LowPriorityIO` or
+    `LowPriorityBackgroundIO` `true`, systemd `CPUSchedulingPolicy=idle` and `IOSchedulingClass=idle`. Lowered work that
+    a caller may wait for (an analysis behind a report, a pool an import waits on through a lock, a download, anything a
+    person started) uses the gentle level instead: `QOS_CLASS_UTILITY` on macOS, nice 10 (with best-effort I/O) on
+    Linux, `THREAD_PRIORITY_BELOW_NORMAL` on Windows (Debrief's `debrief_core::threads::lower_priority`; family ADR
+    0020's `Background` class). A busy machine slows such work but never stops it. A starvable level is only for work
+    nobody waits on (ADR 0020's `Idle` class), and each use says why with a `conformance: background-qos — <why nobody
+    waits on it>` comment (check C54). (`THREAD_PRIORITY_LOWEST` is not on the list: it is one step below
+    `BELOW_NORMAL`, in the band where the scheduler's dynamic boosts let it run between normal threads, so it is slowed,
+    not starved; `THREAD_PRIORITY_IDLE` sits below all of that band.) *Why:* at these levels a thread gets the CPU or
+    the disk only after all other work at higher levels, for as long as there is any (macOS `BACKGROUND` also keeps it
+    to the efficiency cores), so a caller waiting on it waits as long as the machine is busy. Debrief's mining pool ran
+    in QoS `BACKGROUND`, and on the loaded CI Mac `debrief report` waited minutes for its analyses and timed out
+    (Debrief ADR 0052, amended 2026-10-30; lessons 2026-10-30).
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
