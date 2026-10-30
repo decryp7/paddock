@@ -360,3 +360,59 @@ fn the_readers_survive_the_extremes_that_bit_flips_never_reach() {
     assert!(panicked.is_empty(), "panicked on {} bytes of input", panicked[0].len());
     let _ = (xlsx(), docx());
 }
+
+#[test]
+fn markdown_rows_respect_max_cols_exactly_with_or_without_outer_pipes() {
+    let limits = ImportLimits {
+        max_cols: 2,
+        ..ImportLimits::default()
+    };
+    let p = pack("[columns]\nid = \"a\"\ntext = \"b\"\n");
+    let table = |header: &str, sep: &str, row: &str| format!("{header}\n{sep}\n{row}\n");
+    // two columns, in every spelling: fine
+    for (h, s, r) in [
+        ("a | b", "--|--", "1 | 2"),
+        ("| a | b |", "|--|--|", "| 1 | 2 |"),
+        ("a | b |", "--|--|", "| 1 | 2"),
+        ("| a | b", "|--|--", "1 | 2 |"),
+    ] {
+        let set = import(table(h, s, r).as_bytes(), Format::Markdown, &p, &limits).unwrap_or_else(|e| panic!("{h:?}: {e}"));
+        assert_eq!(set.requirements.len(), 1, "{h:?}");
+    }
+    // three columns, in every spelling: a limit, with the exact count
+    for (h, s, r) in [
+        ("a | b | c", "--|--|--", "1 | 2 | 3"),
+        ("| a | b | c |", "|--|--|--|", "| 1 | 2 | 3 |"),
+    ] {
+        let err = import(table(h, s, r).as_bytes(), Format::Markdown, &p, &limits).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ReqError::Limit {
+                    what: "columns",
+                    got: 3,
+                    max: 2
+                }
+            ),
+            "{h:?}: {err}"
+        );
+        let body_only = table("a | b", "--|--", r);
+        assert!(
+            matches!(
+                import(body_only.as_bytes(), Format::Markdown, &p, &limits),
+                Err(ReqError::Limit {
+                    what: "columns",
+                    got: 3,
+                    ..
+                })
+            ),
+            "a wide body row"
+        );
+    }
+    // an escaped pipe is text, not a column
+    let escaped = table("a | b", "--|--", "x \\| y | z");
+    assert_eq!(
+        import(escaped.as_bytes(), Format::Markdown, &p, &limits).unwrap().requirements[0].id,
+        "x | y"
+    );
+}

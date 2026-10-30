@@ -34,15 +34,35 @@ fn is_separator(line: &str) -> bool {
 /// The cells of a line, after checking from the count of `|` (a byte scan, nothing allocated) that there are not more columns than the
 /// limit allows: 4 MB of `|` would otherwise become four million strings before any bound was looked at.
 fn bounded_cells(line: &str, limits: &ImportLimits) -> Result<Vec<String>, ReqError> {
-    let pipes = line.bytes().filter(|b| *b == b'|').count();
-    if pipes > limits.max_cols + 1 {
+    // the count is exact (the same trimming and escapes as `cells`) and allocates nothing, so a line of 4 MB of pipes is counted, not split
+    let n = cell_count(line);
+    if n > limits.max_cols {
         return Err(ReqError::Limit {
             what: "columns",
-            got: pipes as u64 - 1,
+            got: n as u64,
             max: limits.max_cols as u64,
         });
     }
     Ok(cells(line))
+}
+
+/// How many cells [`cells`] would return, without making them: a row may have outer pipes or not (`| a | b |` and `a | b` are two cells).
+fn cell_count(line: &str) -> usize {
+    let t = line.trim();
+    let t = t.strip_prefix('|').unwrap_or(t);
+    let t = t.strip_suffix('|').unwrap_or(t);
+    let mut n = 1;
+    let mut chars = t.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&'|') => {
+                chars.next();
+            }
+            '|' => n += 1,
+            _ => {}
+        }
+    }
+    n
 }
 
 pub(super) fn read(bytes: &[u8], pack: &MappingPack, limits: &ImportLimits) -> Result<Table, ReqError> {
