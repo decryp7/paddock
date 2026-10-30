@@ -1,5 +1,6 @@
 import { InjectionToken, computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
+import type { SettingsCloseVerdict } from '@decryp7/paddock-ui/shell/settings/window';
 import type { CacheClearScope, CacheInfo, CommandError, Preset, Settings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
@@ -8,19 +9,66 @@ import { PRESET_LABEL } from '../../shared/labels';
 
 type Section = keyof Settings;
 
-/** How long the page waits after the last edit before it saves (a burst of typing or toggling is one save). */
+/** How long a typed value waits after the last keystroke before it is saved (a switch or a choice saves at once). */
 export const SETTINGS_SAVE_DELAY = new InjectionToken<number>('PitwallSettingsSaveDelay', { factory: () => 500 });
+
+/**
+ * Where edits not yet confirmed by the server are written down, so a window that goes without waiting (the app quits, the
+ * webview is torn down) loses none: the next Settings page sends them. The app's own origin storage, shared by its windows.
+ */
+export const SETTINGS_JOURNAL = new InjectionToken<() => Storage | null>('PitwallSettingsJournal', {
+  factory: () => () => globalThis.localStorage ?? null,
+});
+export const SETTINGS_JOURNAL_KEY = 'pw.settings.unsent';
+/** An unsent edit older than this is not sent any more (the user has long seen the window without it). */
+export const SETTINGS_JOURNAL_TTL_MS = 10 * 60_000;
+
+/** A setting as the user sees it: an id for the edit (one per control, or per pair of controls on one value) and its name. */
+export interface SettingField {
+  readonly id: string;
+  /** The setting's name as a sentence starts it: "Port", "Largest request". */
+  readonly label: string;
+}
+
+/** An edit of one setting: the values it changes in one section. */
+interface Edit {
+  readonly field: SettingField;
+  readonly section: Section;
+  readonly values: Readonly<Record<string, unknown>>;
+}
+
+/** A setting the server refused: its edit stays in the form, with the server's reason, until it is edited, retried or undone. */
+export interface Refusal {
+  readonly field: SettingField;
+  readonly error: CommandError;
+}
+
+/** "Port could not be saved: the port is in use." */
+export function refusalText(r: Refusal): string {
+  return `${r.field.label} could not be saved: ${r.error.message}`;
+}
+
+/** "Undo port change". */
+export function undoText(r: Refusal): string {
+  return `Undo ${lowerFirst(r.field.label)} change`;
+}
+
+/** The first letter in lower case, unless the word is an abbreviation ("LAN port" stays). */
+function lowerFirst(text: string): string {
+  return /^[A-Z][A-Z]/.test(text) ? text : text.charAt(0).toLowerCase() + text.slice(1);
+}
 
 interface SettingsState {
   /** What the server has. */
   saved: Settings | null;
-  /** The form: `saved` plus the edits not saved yet (they are saved a moment after they are made). */
+  /** The form: `saved` with the edits not confirmed yet on top (waiting, on the way, or refused). */
   draft: Settings | null;
   loading: boolean;
+  /** A save or a preset is queued or on the way. */
   saving: boolean;
   error: CommandError | null;
-  /** The last save's error, shown inline with Retry; the edit stays in the form until it is saved or reverted. */
-  saveError: CommandError | null;
+  /** The settings the server refused, in the order refused; each is shown with its reason, Undo and Retry. */
+  refusals: readonly Refusal[];
   /** The caches' sizes and hit counts (ADR 0019); null until loaded. */
   cacheInfo: CacheInfo | null;
   cacheError: CommandError | null;
@@ -28,7 +76,7 @@ interface SettingsState {
   clearing: boolean;
 }
 
-const initial: SettingsState = { saved: null, draft: null, loading: false, saving: false, error: null, saveError: null, cacheInfo: null, cacheError: null, clearing: false };
+const initial: SettingsState = { saved: null, draft: null, loading: false, saving: false, error: null, refusals: [], cacheInfo: null, cacheError: null, clearing: false };
 
 /** Applies an edit to one section; any memory edit other than the preset itself makes the preset `custom`. */
 export function editSettings<S extends Section>(s: Settings, section: S, values: Partial<Settings[S]>): Settings {
@@ -38,9 +86,10 @@ export function editSettings<S extends Section>(s: Settings, section: S, values:
 }
 
 /**
- * Settings: the saved values and the form's draft. Every edit is saved by itself a moment later (debounced, so a burst is
- * one save); the server validates and returns what it kept. A refused or failed save keeps the edit and its error until the
- * user retries, edits again or reverts. `flush` saves at once (the window closing).
+ * Settings: the saved values and the form's draft. Each setting saves by itself: a switch or a choice at once, a typed value
+ * after a short pause (or at once on Enter, leaving the field, or the window closing). Every save and preset runs through one
+ * chain, in the order made, and each save sends one setting over what the server has, so a refusal names its setting and a
+ * refused setting never blocks the others. The server validates and returns what it kept.
  */
 export const SettingsStore = signalStore(
   withState(initial),
@@ -51,43 +100,155 @@ export const SettingsStore = signalStore(
       return !!s && !!d && JSON.stringify(s) !== JSON.stringify(d);
     }),
   })),
-  withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts), delay = inject(SETTINGS_SAVE_DELAY)) => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let inflight: Promise<boolean> | null = null;
-    const same = (a: Settings | null, b: Settings | null) => JSON.stringify(a) === JSON.stringify(b);
-    const cancelTimer = () => {
-      if (timer !== null) clearTimeout(timer);
-      timer = null;
-    };
+  withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts), delay = inject(SETTINGS_SAVE_DELAY), journalStorage = inject(SETTINGS_JOURNAL)) => {
+    /** Edits not sent yet, by field id, in the order made. */
+    const pending = new Map<string, Edit>();
+    /** Refused edits, kept in the form and never sent again unless edited or retried. */
+    const refused = new Map<string, Edit>();
+    /** Typed values waiting for their pause. */
+    const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    /** The edit on its way to the server. */
+    let sending: Edit | null = null;
+    /** The one chain every save and preset runs through. */
+    let chain: Promise<unknown> = Promise.resolve();
+    let queued = 0;
 
-    /** Sends the draft as it is now; edits made while it is on the way stay in the draft and are saved next. */
-    async function send(): Promise<boolean> {
-      const sent = store.draft();
-      if (!sent) return false;
-      patchState(store, { saving: true, saveError: null });
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    const apply = (base: Settings, e: Edit) => editSettings(base, e.section, e.values as Partial<Settings[Section]>);
+
+    /** The draft again: what the server has, then the refused edits, the one on its way and the waiting ones. */
+    function redraw(): void {
+      const s = store.saved();
+      if (!s) return;
+      let d: Settings = structuredClone(s);
+      for (const e of [...refused.values(), ...(sending ? [sending] : []), ...pending.values()]) d = apply(d, e);
+      patchState(store, { draft: d });
+    }
+
+    /** The shown refusals follow `refused`. */
+    function syncRefusals(): void {
+      patchState(store, { refusals: store.refusals().filter((r) => refused.has(r.field.id)) });
+    }
+
+    /** Writes down every edit the server has not confirmed (waiting or on its way). */
+    function journal(): void {
+      const unsent = [...(sending ? [sending] : []), ...pending.values()];
       try {
-        const kept = await backend.saveSettings(sent);
-        const now = store.draft();
-        patchState(store, { saved: kept, draft: same(now, sent) ? structuredClone(kept) : now, saving: false });
-        return true;
-      } catch (e) {
-        patchState(store, { saving: false, saveError: toCommandError(e) });
-        return false;
+        const storage = journalStorage();
+        if (!storage) return;
+        if (unsent.length === 0) storage.removeItem(SETTINGS_JOURNAL_KEY);
+        else storage.setItem(SETTINGS_JOURNAL_KEY, JSON.stringify({ at: Date.now(), edits: unsent }));
+      } catch {
+        // Storage refused: the close hook and the page's flush still save.
       }
     }
 
-    /** Saves now: after a save already on the way, and only when the draft differs from what the server has. */
-    async function save(): Promise<boolean> {
-      cancelTimer();
-      while (inflight) await inflight;
-      if (!store.draft()) return false;
-      if (same(store.saved(), store.draft())) return true;
-      inflight = send();
+    /** The edits a window left unsent, once (the record is removed): fresh, well-formed, for a known section. */
+    function takeJournal(saved: Settings): Edit[] {
       try {
-        return await inflight;
-      } finally {
-        inflight = null;
+        const storage = journalStorage();
+        const raw = storage?.getItem(SETTINGS_JOURNAL_KEY);
+        if (!storage || !raw) return [];
+        storage.removeItem(SETTINGS_JOURNAL_KEY);
+        const parsed = JSON.parse(raw) as { at?: unknown; edits?: unknown } | null;
+        if (typeof parsed?.at !== 'number' || Math.abs(Date.now() - parsed.at) > SETTINGS_JOURNAL_TTL_MS || !Array.isArray(parsed.edits)) return [];
+        return (parsed.edits as Partial<Edit>[]).filter(
+          (e): e is Edit =>
+            typeof e?.field?.id === 'string' &&
+            typeof e.field.label === 'string' &&
+            typeof e.section === 'string' &&
+            Object.hasOwn(saved, e.section) &&
+            typeof e.values === 'object' &&
+            e.values !== null &&
+            !Array.isArray(e.values),
+        );
+      } catch {
+        return [];
       }
+    }
+
+    /** Runs `task` after everything queued before it; `saving` is true while anything is queued. */
+    function enqueue<T>(task: () => Promise<T>): Promise<T> {
+      queued++;
+      patchState(store, { saving: true });
+      const run = chain.then(task);
+      chain = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run.finally(() => {
+        if (--queued === 0) patchState(store, { saving: false });
+      });
+    }
+
+    /** Sends the waiting edit of `id` over what the server has; true when it was kept (or nothing waited). */
+    function sendField(id: string): Promise<boolean> {
+      return enqueue(async () => {
+        const e = pending.get(id);
+        const base = store.saved();
+        if (!e || !base) return !refused.has(id);
+        pending.delete(id);
+        sending = e;
+        const body = apply(base, e);
+        try {
+          if (same(body, base)) return true;
+          const kept = await backend.saveSettings(body);
+          patchState(store, { saved: kept });
+          return true;
+        } catch (err) {
+          // A newer edit of the same setting waits: it is sent next, and this refusal is moot.
+          if (!pending.has(id)) {
+            refused.set(id, e);
+            patchState(store, { refusals: [...store.refusals().filter((r) => r.field.id !== id), { field: e.field, error: toCommandError(err) }] });
+          }
+          return false;
+        } finally {
+          sending = null;
+          journal();
+          redraw();
+        }
+      });
+    }
+
+    function stopTimer(id: string): void {
+      const t = timers.get(id);
+      if (t !== undefined) clearTimeout(t);
+      timers.delete(id);
+    }
+
+    /** Queues every waiting edit now, in the order made. */
+    function sendAllWaiting(): Promise<boolean>[] {
+      for (const id of [...timers.keys()]) stopTimer(id);
+      return [...pending.keys()].map((id) => sendField(id));
+    }
+
+    async function flush(): Promise<boolean> {
+      sendAllWaiting();
+      await enqueue(async () => undefined);
+      return refused.size === 0;
+    }
+
+    function edit<S extends Section>(field: SettingField, section: S, values: Partial<Settings[S]>, how: 'now' | 'typed' = 'now'): void {
+      if (!store.saved()) return;
+      if (refused.delete(field.id)) syncRefusals();
+      const prev = pending.get(field.id);
+      pending.delete(field.id);
+      pending.set(field.id, { field, section, values: { ...(prev?.section === section ? prev.values : {}), ...values } });
+      journal();
+      // A typed value is in its field already: drawing the form again mid-word would rewrite it ("2.5" shown as "3").
+      if (how === 'now') redraw();
+      stopTimer(field.id);
+      if (how === 'now') {
+        void sendField(field.id);
+        return;
+      }
+      timers.set(
+        field.id,
+        setTimeout(() => {
+          timers.delete(field.id);
+          void sendField(field.id);
+        }, delay),
+      );
     }
 
     return {
@@ -95,7 +256,10 @@ export const SettingsStore = signalStore(
         patchState(store, { loading: true, error: null });
         try {
           const settings = await backend.settings();
-          patchState(store, { saved: settings, draft: structuredClone(settings), loading: false });
+          patchState(store, { saved: settings, loading: false });
+          redraw();
+          // Edits a window left unsent (it went without waiting) are sent now, in the order they were made.
+          for (const e of takeJournal(settings)) edit(e.field, e.section, e.values as Partial<Settings[Section]>, 'now');
         } catch (e) {
           patchState(store, { loading: false, error: toCommandError(e) });
         }
@@ -127,47 +291,67 @@ export const SettingsStore = signalStore(
         }
       },
 
-      /** Changes the form and saves it a moment later (a newer edit restarts the wait). */
-      edit<S extends Section>(section: S, values: Partial<Settings[S]>): void {
-        const d = store.draft();
-        if (!d) return;
-        patchState(store, { draft: editSettings(d, section, values), saveError: null });
-        cancelTimer();
-        timer = setTimeout(() => {
-          timer = null;
-          void save();
-        }, delay);
-      },
+      /**
+       * Changes one setting in the form and saves it: `now` for a switch or a choice (and a typed value committed with Enter or
+       * by leaving the field), `typed` after the pause (a newer keystroke restarts it).
+       */
+      edit,
 
-      /** Puts the form back to what the server has (after a refused save). */
-      revert(): void {
-        cancelTimer();
-        const s = store.saved();
-        patchState(store, { draft: s && structuredClone(s), saveError: null });
-      },
-
-      save,
-
-      /** Saves an edit still waiting for its moment (the window closes or hides); nothing when all is saved or a save failed. */
-      flush(): Promise<boolean> {
-        if (timer === null && !inflight) return Promise.resolve(!store.saveError());
-        return save();
-      },
-
-      /** Applies a memory preset on the server (after any edit waiting to be saved) and shows its values. */
-      async applyPreset(preset: Exclude<Preset, 'custom'>): Promise<void> {
-        if (store.saving()) return;
-        if (timer !== null) await save();
-        patchState(store, { saving: true });
-        try {
-          const settings = await backend.applyPreset(preset);
-          const d = store.draft();
-          patchState(store, { saved: settings, draft: d ? { ...d, memory: structuredClone(settings.memory) } : structuredClone(settings), saving: false });
-          toasts.ok(`${PRESET_LABEL[preset]} preset applied.`);
-        } catch (e) {
-          patchState(store, { saving: false });
-          toasts.error(toCommandError(e));
+      /** Puts a refused or waiting setting back to what the server has (`id`), or every one. */
+      revert(id?: string): void {
+        const ids = id === undefined ? [...new Set([...refused.keys(), ...pending.keys()])] : [id];
+        for (const i of ids) {
+          stopTimer(i);
+          pending.delete(i);
+          refused.delete(i);
         }
+        syncRefusals();
+        journal();
+        redraw();
+      },
+
+      /** Sends a refused setting again (`id`), or every one; true when all were kept. */
+      async retry(id?: string): Promise<boolean> {
+        const ids = id === undefined ? [...refused.keys()] : refused.has(id) ? [id] : [];
+        for (const i of ids) {
+          pending.set(i, refused.get(i)!);
+          refused.delete(i);
+        }
+        syncRefusals();
+        journal();
+        const results = await Promise.all(ids.map((i) => sendField(i)));
+        return results.every(Boolean);
+      },
+
+      /** Saves every waiting edit now (Enter, the page or window going); true when nothing is left refused. */
+      flush,
+
+      /** What the Settings window's close hook hears: wait for a save, say what was refused and why, or close. */
+      closeVerdict(): SettingsCloseVerdict {
+        if (timers.size > 0 || pending.size > 0 || queued > 0) return { kind: 'wait', done: flush() };
+        const refusals = store.refusals();
+        if (refusals.length === 0) return { kind: 'close' };
+        return { kind: 'warn', message: refusals.map((r) => `${r.field.label} was not saved: ${r.error.message}`).join(' ') };
+      },
+
+      /**
+       * Applies a memory preset on the server after the edits made before it, in the same chain (a preset chosen while a save is
+       * on its way is queued, never dropped), and shows its values. A refused memory edit gives way to the preset.
+       */
+      applyPreset(preset: Exclude<Preset, 'custom'>): Promise<void> {
+        sendAllWaiting();
+        return enqueue(async () => {
+          try {
+            const settings = await backend.applyPreset(preset);
+            for (const [id, e] of [...refused]) if (e.section === 'memory') refused.delete(id);
+            syncRefusals();
+            patchState(store, { saved: settings });
+            redraw();
+            toasts.ok(`${PRESET_LABEL[preset]} preset applied.`);
+          } catch (e) {
+            toasts.error(toCommandError(e));
+          }
+        });
       },
     };
   }),

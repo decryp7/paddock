@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, provideAppInitializer, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
-import { Router } from '@angular/router';
+import { NavigationCancel, NavigationEnd, NavigationError, Router } from '@angular/router';
 import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 import { PdCommandPalette, providePagesPalette } from '@decryp7/paddock-ui/workbench/palette';
 import { PdShellFrame, provideShellPages } from '@decryp7/paddock-ui/shell/pages';
@@ -56,7 +56,24 @@ export function startMainWindow(): void {
   const destroy = inject(DestroyRef);
   destroy.onDestroy(inject(QuitFlow).watch());
   const router = inject(Router);
-  destroy.onDestroy(inject(WINDOW_CONTROL).onNavigate((route) => void router.navigateByUrl(route)));
+  destroy.onDestroy(inject(WINDOW_CONTROL).onNavigate((route) => goWhenRouted(router, route, destroy)));
+}
+
+/**
+ * Goes to `route`, after the window's first navigation when that has not finished yet: a window the tray rebuilt takes
+ * its route while it starts, and the start's own navigation (to the URL it was loaded with) must not undo it.
+ */
+export function goWhenRouted(router: Router, route: string, destroy?: DestroyRef): void {
+  if (router.navigated) {
+    void router.navigateByUrl(route);
+    return;
+  }
+  const sub = router.events.subscribe((e) => {
+    if (!(e instanceof NavigationEnd || e instanceof NavigationCancel || e instanceof NavigationError)) return;
+    sub.unsubscribe();
+    void router.navigateByUrl(route);
+  });
+  destroy?.onDestroy(() => sub.unsubscribe());
 }
 
 /** Pitwall's main window: the pages frame (ADR 0012) from Pitwall's contributions. */

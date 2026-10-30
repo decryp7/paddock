@@ -4,7 +4,8 @@ import { SuEmptyState } from '@decryp7/paddock-ui';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import type { BuildCapability, Engine, InstalledBuild } from '../../core/api.types';
+import type { BuildCapability, CatalogBuild, Engine, InstalledBuild } from '../../core/api.types';
+import { buildDownloadName } from '../../shared/build-download';
 import { LiveStore } from '../../core/live.store';
 import { ago, bytes, bytesIn, bytesUnit, percent, varies } from '../../shared/format';
 import { availabilityLook, capabilityLook, downloadActive, healthLook, SELF_TEST_WORD, selfTestLook } from '../../shared/labels';
@@ -177,6 +178,8 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
               </span>
               @if (c.installed) {
                 <span class="status" data-tone="ok">Installed</span>
+              } @else if (installingNames().has(downloadName(c))) {
+                <span class="status" data-tone="info">Installing…</span>
               } @else {
                 <button type="button" matButton="outlined" [disabled]="store.isBusy()('install:' + c.id)" [attr.aria-label]="'Install ' + c.label + ' ' + c.tag" (click)="store.install(c)">
                   <mat-icon svgIcon="pw:download" aria-hidden="true" />Install
@@ -501,6 +504,15 @@ export class EngineCard {
   });
   protected readonly activeBuild = computed(() => this.engine().builds.find((b) => b.active) ?? null);
   protected readonly installing = computed(() => this.live.downloads().filter((d) => d.kind === 'engine' && ownsDownload(this.engine().name, d.name) && downloadActive(d.state)));
+  /** The downloads installing a build now, the automatic first install's included: their catalog rows offer no Install. */
+  protected readonly installingNames = computed(() => {
+    const setup = this.live.engineSetup()?.download;
+    const all = [...this.installing(), ...(setup && downloadActive(setup.state) ? [setup] : [])];
+    return new Set(all.map((d) => d.name));
+  });
+  protected downloadName(c: CatalogBuild): string {
+    return buildDownloadName(this.engine().name, c);
+  }
 
   protected readonly capLook = capabilityLook;
   /** Pin controls exist for llama.cpp only (pack engines have a single build), and once the engine reported its pins. */

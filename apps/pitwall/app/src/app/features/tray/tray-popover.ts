@@ -1,16 +1,20 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterNextRender, computed, inject } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { LiveStore } from '../../core/live.store';
 import { WINDOW_CONTROL } from '../../core/window-control';
 import { bytes, percent, rate } from '../../shared/format';
 import { loadTone, pressureLook, servingLabel } from '../../shared/labels';
 import { injectNow } from '../../shared/now';
+import { observeHeight } from '../../shared/observe-height';
 import { HotModels } from '../dashboard/hot-models';
 import { UpdatesStore } from '../updates/updates.store';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
 
-/** The tray / menu-bar popover (360×520, frameless): memory, hot models with countdowns, throughput and the key actions. */
+/**
+ * The tray / menu-bar popover (360 px wide, frameless, the window fitted to its content): memory, hot models with
+ * countdowns, throughput and the key actions.
+ */
 @Component({
   selector: 'pw-tray-popover',
   imports: [MatTooltip, MatIconButton, MatButton, MatIconModule, HotModels],
@@ -98,16 +102,16 @@ import { MatTooltip } from '@angular/material/tooltip';
   styles: `
     :host {
       display: block;
-      height: 100vh;
+      min-height: 100vh;
+      background: var(--pd-bg);
     }
+    /* As tall as its content: the window is fitted to it (no empty card, no gap under the buttons). */
     .tray {
       display: flex;
       flex-direction: column;
       gap: var(--pd-space-2);
-      height: 100%;
       padding: var(--pd-space-3) var(--pd-space-4);
       background: var(--pd-bg);
-      overflow: hidden;
     }
     .pairing {
       display: flex;
@@ -243,9 +247,6 @@ import { MatTooltip } from '@angular/material/tooltip';
       }
     }
     .models {
-      flex: 1 1 auto;
-      min-height: 0;
-      overflow: auto;
       padding-top: var(--pd-space-2);
       h2 {
         margin-bottom: var(--pd-space-1);
@@ -301,6 +302,13 @@ export class TrayPopover {
 
   constructor() {
     void this.updates.ensureLoaded();
+    // The popover is as tall as its content: the shell fits the window to the height the page reports.
+    const host = inject<ElementRef<HTMLElement>>(ElementRef);
+    const destroy = inject(DestroyRef);
+    afterNextRender(() => {
+      const tray = host.nativeElement.querySelector('.tray');
+      if (tray) destroy.onDestroy(observeHeight(tray, (h) => void this.windows.fitTray(h).catch(() => undefined)));
+    });
   }
 
   protected open(route: string): void {

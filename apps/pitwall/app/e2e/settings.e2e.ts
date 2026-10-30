@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import { openApp, openSettings, openSettingsWindow, settingsDialog } from './app';
 
 test.describe('settings', () => {
@@ -36,15 +36,15 @@ test.describe('settings', () => {
     }
   });
 
-  test('in its own window, a save that fails says so inline, keeps the change and offers Retry', async ({ page }) => {
+  test('in its own window, a save that fails names the setting, keeps the change and offers Retry', async ({ page }) => {
     await openSettingsWindow(page, 'mock-fast&mock-static&mock-fail=saveSettings');
     const keyless = page.getByRole('switch', { name: 'Accept local requests without a key' });
     await keyless.click();
     const error = page.getByTestId('save-error');
-    await expect(error).toContainText('Your last change was not saved.');
+    await expect(error).toContainText('Accept local requests without a key could not be saved:');
     await expect(error.getByRole('button', { name: 'Retry' })).toBeVisible();
     await expect(keyless).toBeChecked();
-    await error.getByRole('button', { name: 'Undo change' }).click();
+    await error.getByRole('button', { name: 'Undo accept local requests without a key change' }).click();
     await expect(error).toHaveCount(0);
     await expect(keyless).not.toBeChecked();
   });
@@ -60,5 +60,43 @@ test.describe('settings', () => {
     await port.press('Tab');
     await expect(port).toHaveAttribute('aria-invalid', 'false');
     await expect(page.getByTestId('save-error')).toHaveCount(0);
+  });
+
+  // VM check 'Settings: a quick close keeps the edit' (testing-manual.md) in the browser build: Mod+W right after the edit.
+  for (const [what, edit, check] of [
+    [
+      'a switch',
+      async (d: Locator) => d.getByRole('switch', { name: 'Offline mode' }).click(),
+      async (d: Locator) => expect(d.getByRole('switch', { name: 'Offline mode' })).toBeChecked(),
+    ],
+    [
+      'a typed number',
+      async (d: Locator) => d.getByRole('spinbutton', { name: 'Requests at once' }).fill('7'),
+      async (d: Locator) => expect(d.getByRole('spinbutton', { name: 'Requests at once' })).toHaveValue('7'),
+    ],
+  ] as const) {
+    test(`closing Settings at once after ${what} keeps it`, async ({ page }) => {
+      await openSettings(page);
+      await edit(settingsDialog(page));
+      await page.keyboard.press('ControlOrMeta+KeyW');
+      await expect(settingsDialog(page)).toHaveCount(0);
+      await page.keyboard.press('ControlOrMeta+Comma');
+      await check(settingsDialog(page));
+    });
+  }
+
+  test('closing Settings with a refused change says which and why, and closes only when told', async ({ page }) => {
+    await openSettings(page, 'mock-fast&mock-static&mock-fail=saveSettings');
+    const settings = settingsDialog(page);
+    await settings.getByRole('switch', { name: 'Offline mode' }).click();
+    await expect(settings.getByTestId('save-error')).toContainText('Offline mode could not be saved:');
+    await page.keyboard.press('Escape');
+    const warning = settings.getByTestId('settings-not-saved');
+    await expect(warning).toContainText('Offline mode was not saved:');
+    await warning.getByRole('button', { name: 'Keep editing' }).click();
+    await expect(warning).toHaveCount(0);
+    await settings.getByRole('button', { name: 'Close' }).last().click();
+    await settings.getByTestId('settings-not-saved').getByRole('button', { name: 'Close anyway' }).click();
+    await expect(settingsDialog(page)).toHaveCount(0);
   });
 });
