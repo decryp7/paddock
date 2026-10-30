@@ -214,8 +214,18 @@ pub fn check(s: &PerformanceSettings, cores: u32) -> Vec<FieldError> {
             ),
         );
     }
+    // Auto takes as many threads as fit, but at least one: one thread's heap must fit too.
+    if s.index_heap_per_thread_mb > s.import_budget_mb {
+        fail(
+            "indexHeapPerThreadMb",
+            format!(
+                "A search index thread's memory ({} MB) must fit in the import memory ({} MB).",
+                s.index_heap_per_thread_mb, s.import_budget_mb
+            ),
+        );
+    }
     let index_mb = u64::from(s.index_writer_threads) * u64::from(s.index_heap_per_thread_mb);
-    if s.index_writer_threads > 0 && index_mb > u64::from(s.import_budget_mb) {
+    if s.index_writer_threads > 0 && index_mb > u64::from(s.import_budget_mb) && s.index_heap_per_thread_mb <= s.import_budget_mb {
         fail(
             "indexWriterThreads",
             format!(
@@ -399,12 +409,24 @@ mod tests {
             "{}",
             e[0].message
         );
-        // Auto never refuses: it takes as many threads as fit, at least one.
+        // Auto takes as many threads as fit, at least one, so one thread's heap must fit as well.
         let auto = PerformanceSettings {
             index_heap_per_thread_mb: 1024,
             ..PerformanceSettings::default()
         };
-        assert!(check(&auto, 16).is_empty());
+        let e = check(&auto, 16);
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].key, "indexHeapPerThreadMb");
+        assert!(
+            e[0].message.contains("1024 MB") && e[0].message.contains("768 MB"),
+            "{}",
+            e[0].message
+        );
+        let fits = PerformanceSettings {
+            index_heap_per_thread_mb: 768,
+            ..PerformanceSettings::default()
+        };
+        assert!(check(&fits, 16).is_empty(), "one thread of 768 MB fits");
     }
 
     #[test]
