@@ -9,7 +9,7 @@ import type { EChartsCoreOption } from 'echarts/core';
 import type { HistoryRange, Preset } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { ThemeService } from '../../core/theme';
-import { latencyChart, memoryChart, stackedRequestsChart, throughputChart } from '../../shared/charts/chart-options';
+import { latencyChart, memoryChart, stackedLegend, stackedRequestsChart, throughputChart } from '../../shared/charts/chart-options';
 import { EChart } from '../../shared/charts/echart';
 import { duration } from '../../shared/format';
 import { PRESET_HINT, PRESET_LABEL } from '../../shared/labels';
@@ -151,7 +151,12 @@ export class PerfMeter {
           <pw-apps-card [series]="store.history()?.requestsByApp ?? []" />
         </pw-panel>
         <pw-panel class="c5" heading="Requests by app" icon="requests" [loading]="store.loading()" [error]="store.error()" [ready]="!!store.history()" (retry)="store.select(store.range())">
-          <pw-echart [option]="byAppOption()" [themeKey]="chartKey()" height="226px" label="Requests per interval by app" />
+          <pw-echart [option]="byAppOption()" [themeKey]="chartKey()" height="196px" label="Requests per interval by app" />
+          <ul class="series-legend" aria-label="Apps in the chart">
+            @for (e of byAppLegend(); track e.name) {
+              <li><i [style.background]="e.color"></i>{{ e.name }}</li>
+            }
+          </ul>
         </pw-panel>
 
         <pw-panel class="c4" heading="Tokens per second" icon="bolt" [loading]="store.loading()" [error]="store.error()" [ready]="!!store.history()" (retry)="store.select(store.range())">
@@ -161,7 +166,12 @@ export class PerfMeter {
           <pw-echart [option]="latencyOption()" [themeKey]="chartKey()" height="220px" label="Time to first token, p50 and p95, over time" />
         </pw-panel>
         <pw-panel class="c4" heading="Requests by model" icon="models" [loading]="store.loading()" [error]="store.error()" [ready]="!!store.history()" (retry)="store.select(store.range())">
-          <pw-echart [option]="byModelOption()" [themeKey]="chartKey()" height="220px" label="Requests per interval by model" />
+          <pw-echart [option]="byModelOption()" [themeKey]="chartKey()" height="190px" label="Requests per interval by model" />
+          <ul class="series-legend" aria-label="Models in the chart">
+            @for (e of byModelLegend(); track e.name) {
+              <li><i [style.background]="e.color"></i>{{ e.name }}</li>
+            }
+          </ul>
         </pw-panel>
 
         <pw-usage-card class="c12" />
@@ -215,11 +225,14 @@ export class PerfMeter {
     .events {
       max-height: 383px;
     }
+    /* A section break of 24 px (the page's section step) above History: its heading and its range control read as one row,
+       centred on each other, and at 1440x900 the row starts below the window's fold instead of peeking under the status bar. */
     .history-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-top: var(--pd-space-4);
+      min-height: 32px;
+      margin-top: var(--pd-space-6);
       .section {
         font-size: var(--pd-text-body-lg);
       }
@@ -263,6 +276,28 @@ export class PerfMeter {
         width: 1px;
         height: 12px;
         background: var(--pd-hairline);
+      }
+    }
+    /* A chart's series, under it: wraps with the card and never runs into the time axis. */
+    .series-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--pd-space-1) var(--pd-space-3);
+      margin: var(--pd-space-2) 0 0;
+      padding: 0;
+      list-style: none;
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
+      li {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+      }
+      i {
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
       }
     }
     .perf {
@@ -320,14 +355,18 @@ export class Dashboard implements OnInit {
   private readonly appNames = computed(() => new Map(this.live.apps().map((a) => [a.id, a.name])));
   protected readonly byAppOption = computed(() => {
     const h = this.store.history();
-    const names = this.appNames();
-    return stackedRequestsChart(h?.points ?? [], h?.requestsByApp ?? [], this.store.range(), this.tokens(), (k) => names.get(k) ?? k);
+    return stackedRequestsChart(h?.points ?? [], h?.requestsByApp ?? [], this.store.range(), this.tokens(), this.appName);
   });
+  protected readonly byAppLegend = computed(() => stackedLegend(this.store.history()?.requestsByApp ?? [], this.tokens(), this.appName));
+  private readonly appName = (k: string) => this.appNames().get(k) ?? k;
+  /** Models by their display name, from the library (a model need not be loaded now to have served in the range). */
+  private readonly modelNames = computed(() => new Map([...Object.entries(this.store.modelNames()), ...this.live.models().map((m) => [m.modelId, m.name] as const)]));
+  private readonly modelName = (k: string) => this.modelNames().get(k) ?? shortModel(k);
   protected readonly byModelOption = computed(() => {
     const h = this.store.history();
-    const names = new Map(this.live.models().map((m) => [m.modelId, m.name]));
-    return stackedRequestsChart(h?.points ?? [], h?.requestsByModel ?? [], this.store.range(), this.tokens(), (k) => names.get(k) ?? shortModel(k));
+    return stackedRequestsChart(h?.points ?? [], h?.requestsByModel ?? [], this.store.range(), this.tokens(), this.modelName);
   });
+  protected readonly byModelLegend = computed(() => stackedLegend(this.store.history()?.requestsByModel ?? [], this.tokens(), this.modelName));
 
   /** Refreshed with the clock tick, not by the measurement itself. */
   protected readonly perfText = computed(() => (this.now(), `charts ${this.perf.last.toFixed(2)} ms · avg ${this.perf.avg.toFixed(2)} ms · ${this.perf.count} builds · ${this.live.updates()} updates`));

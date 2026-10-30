@@ -24,10 +24,9 @@ import { REQUEST_LIMIT, RequestsStore, type StatusFilter } from './requests.stor
 /** Row height of the virtual table (px); fixed so the viewport can compute what to render. */
 export const ROW_HEIGHT = 40;
 
-/** Milliseconds as a compact table cell (`—` when absent). */
+/** Milliseconds as a bare cell of a column headed in ms (`212`, `1,460`): one unit per column, never a second one in a cell. */
 export function msCell(ms: number | null): string {
-  if (ms === null) return '—';
-  return ms >= 10_000 ? `${(ms / 1000).toFixed(0)} s` : ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)}`;
+  return ms === null ? '—' : int(ms);
 }
 
 /** A column of the log: always shown, or one the user adds from the column menu (the detail panel has them all). */
@@ -43,7 +42,7 @@ export interface Column {
 
 export const COLUMNS: readonly Column[] = [
   { id: 'time', label: 'Time', header: 'Time', width: '68px' },
-  { id: 'app', label: 'App', header: 'App', width: 'minmax(88px, 160px)' },
+  { id: 'app', label: 'App', header: 'App', width: 'minmax(88px, 1fr)' },
   { id: 'model', label: 'Model', header: 'Model', width: 'minmax(88px, 1fr)' },
   { id: 'endpoint', label: 'Endpoint', header: 'Endpoint', width: 'minmax(120px, 1.2fr)' },
   { id: 'api', label: 'API', header: 'API', width: '84px', optional: true },
@@ -213,11 +212,13 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       display: block;
       height: 100%;
     }
+    /* The log fills the window between the title bar and the status bar (the frame's page outlet sizes to its content, so
+       100% would be the content's own height): the rows scroll inside the list, the page itself does not. */
     .page {
       display: flex;
       flex-direction: column;
       gap: var(--pd-space-3);
-      height: 100%;
+      height: calc(100dvh - var(--pd-titlebar-height, 40px) - var(--pd-statusbar-height, 24px) - 2px);
       padding-bottom: var(--pd-space-6);
     }
     .page-head {
@@ -282,37 +283,6 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       display: flex;
       flex-direction: column;
     }
-    @container (max-width: 900px) {
-      .row {
-        grid-template-columns: var(--cols-narrow);
-      }
-      .c-endpoint,
-      .c-tokens,
-      .c-api,
-      .c-chosen,
-      .c-queued,
-      .c-cold {
-        display: none;
-      }
-    }
-    @container (max-width: 680px) {
-      .row {
-        grid-template-columns: var(--cols-compact);
-      }
-      .c-total {
-        display: none;
-      }
-    }
-    @container (max-width: 560px) {
-      .row {
-        grid-template-columns: var(--cols-tiny);
-      }
-      .c-model,
-      .c-ttft,
-      .c-total {
-        display: none;
-      }
-    }
     .sheet {
       display: flex;
       flex-direction: column;
@@ -357,6 +327,39 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
         background: none;
       }
     }
+    /* The narrower templates come after .row: at equal specificity the later rule wins, and the cells a template drops must
+       not slide into the tracks of the columns after them. */
+    @container (max-width: 900px) {
+      .row {
+        grid-template-columns: var(--cols-narrow);
+      }
+      .c-endpoint,
+      .c-tokens,
+      .c-api,
+      .c-chosen,
+      .c-queued,
+      .c-cold {
+        display: none;
+      }
+    }
+    @container (max-width: 680px) {
+      .row {
+        grid-template-columns: var(--cols-compact);
+      }
+      .c-total {
+        display: none;
+      }
+    }
+    @container (max-width: 560px) {
+      .row {
+        grid-template-columns: var(--cols-tiny);
+      }
+      .c-model,
+      .c-ttft,
+      .c-total {
+        display: none;
+      }
+    }
     /* The Time column stays when the window is too narrow for the table and it scrolls sideways. */
     .sticky {
       position: sticky;
@@ -364,14 +367,16 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       z-index: 1;
       background: inherit;
     }
+    /* The sticky cell is opaque (rows scroll under it sideways) and paints exactly what the row paints: the row's tint
+       layered over the card, so a selected or hovered row shows no box around its time. */
     .row:not(.head) .sticky {
       background: var(--pd-surface-1);
     }
-    .row.sel .sticky {
-      background: color-mix(in srgb, var(--pd-surface-1) 90%, var(--pd-accent));
-    }
     .row:hover .sticky {
-      background: color-mix(in srgb, var(--pd-surface-1) 95%, var(--pd-text));
+      background: linear-gradient(var(--pd-hover), var(--pd-hover)), var(--pd-surface-1);
+    }
+    .row.sel .sticky {
+      background: linear-gradient(var(--pd-accent-tint), var(--pd-accent-tint)), var(--pd-surface-1);
     }
     .head .sticky {
       background: var(--pd-surface-1);
@@ -410,9 +415,14 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       font-size: var(--pd-text-label);
       color: var(--pd-text-muted);
     }
+    /* Whole rows only: a scroll stops on a row boundary, so the first row starts right under the header. */
     .vp {
       flex: 1;
       min-height: 0;
+      scroll-snap-type: y mandatory;
+    }
+    .vp .row {
+      scroll-snap-align: start;
     }
   `,
 })

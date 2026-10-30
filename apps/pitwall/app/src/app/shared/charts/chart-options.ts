@@ -264,16 +264,26 @@ export function throughputChart(points: HistoryPoint[], range: HistoryRange, t: 
   };
 }
 
+/**
+ * The unit of a latency axis: one per axis, chosen by its largest value, so ticks never mix `0 ms` and `1.0 s`. The axis
+ * labels and the tooltip use the same unit.
+ */
+export function latencyUnit(values: readonly (number | null | undefined)[]): (v: number) => string {
+  const max = Math.max(0, ...values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v)));
+  if (max < 1000) return (v) => `${Math.round(v)} ms`;
+  return (v) => (v === 0 ? '0 s' : `${(v / 1000).toFixed(1)} s`);
+}
+
 /** Time to first token p50 and p95. */
 export function latencyChart(points: HistoryPoint[], range: HistoryRange, t: ThemeTokens): EChartsCoreOption {
-  const ms = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`);
+  const unit = latencyUnit(points.flatMap((p) => [p.p50Ms, p.p95Ms]));
   return {
     ...base(t),
-    tooltip: { ...(base(t)['tooltip'] as object), formatter: (p: unknown) => tooltipRows(p, ms) },
+    tooltip: { ...(base(t)['tooltip'] as object), formatter: (p: unknown) => tooltipRows(p, unit) },
     legend: legend(t, ['p50', 'p95']),
     grid: { left: 8, right: 12, top: 30, bottom: 4 },
     xAxis: timeAxis(t, range),
-    yAxis: valueAxis(t, 0, ms),
+    yAxis: valueAxis(t, 0, unit),
     dataZoom: [{ type: 'inside', filterMode: 'none' }],
     series: [line('p50', seriesColor(t, 0), points.map((p) => [p.at, p.p50Ms])), line('p95', seriesColor(t, 1), points.map((p) => [p.at, p.p95Ms]))],
   };
@@ -313,7 +323,18 @@ export function bucketKeyed(at: number[], series: KeyedSeries[], max = MAX_BARS)
   return { at: times, series: series.map((s) => ({ key: s.key, values: sum(s.values) })) };
 }
 
-/** Requests per step as stacked bars, one colour per key in a fixed order. */
+/** One entry of a legend drawn beside a chart (HTML, so it wraps with the card instead of running into the axis). */
+export interface LegendEntry {
+  name: string;
+  color: string;
+}
+
+/** The series of a stacked chart in the chart's order and colours: the keys that keep their own colour, then "Other". */
+export function stackedLegend(series: KeyedSeries[], t: ThemeTokens, nameOf: (key: string) => string = (k) => k): LegendEntry[] {
+  return foldKeyed(series).map((s, i) => ({ name: s.key === OTHER ? OTHER : nameOf(s.key), color: seriesColor(t, i) }));
+}
+
+/** Requests per step as stacked bars, one colour per key in a fixed order; the legend is the card's ({@link stackedLegend}). */
 export function stackedRequestsChart(points: HistoryPoint[], series: KeyedSeries[], range: HistoryRange, t: ThemeTokens, nameOf: (key: string) => string = (k) => k): EChartsCoreOption {
   const { at, series: bucketed } = bucketKeyed(points.map((p) => p.at), foldKeyed(series));
   const folded = bucketed.map((s) => ({ ...s, key: s.key === OTHER ? OTHER : nameOf(s.key) }));
@@ -324,8 +345,8 @@ export function stackedRequestsChart(points: HistoryPoint[], series: KeyedSeries
       axisPointer: { type: 'shadow', shadowStyle: { color: `${t.text3}14` } },
       formatter: (p: unknown) => tooltipRows(p, (v) => `${Math.round(v)}`),
     },
-    legend: { ...legend(t, folded.map((s) => s.key)), top: 'auto', bottom: 0, left: 0, right: 0 },
-    grid: { left: 8, right: 12, top: 10, bottom: folded.length > 3 ? 64 : 44 },
+    legend: { show: false },
+    grid: { left: 8, right: 12, top: 10, bottom: 4 },
     xAxis: timeAxis(t, range),
     yAxis: valueAxis(t, 0, (v) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`)),
     dataZoom: [{ type: 'inside', filterMode: 'none' }],
@@ -387,8 +408,9 @@ export function usageChart(series: UsageSeries, metric: UsageMetric, split: Usag
       axisPointer: { type: bars ? 'shadow' : 'line', shadowStyle: { color: `${t.text3}14` }, lineStyle: { color: t.axis, width: 1 } },
       formatter: (p: unknown) => tooltipRows(p, unit),
     },
-    legend: { ...legend(t, entries.map((e) => e.name)), top: 'auto', bottom: 0, left: 0, right: 0 },
-    grid: { left: 8, right: 12, top: 10, bottom: entries.length > 3 ? 64 : 44 },
+    // By app, the card's table under the chart names each app beside its colour: no second legend for the same fact.
+    legend: split === 'app' ? { show: false } : { ...legend(t, entries.map((e) => e.name)), top: 'auto', bottom: 0, left: 0, right: 0 },
+    grid: { left: 8, right: 12, top: 10, bottom: split === 'app' ? 4 : entries.length > 3 ? 64 : 44 },
     xAxis: { ...timeAxis(t, series.range), boundaryGap: false },
     yAxis: valueAxis(t, 0, (v) => (metric === 'memory' ? bytes(v, 0) : compact(v)), { min: 0 }),
     series: entries.map((e, i) =>

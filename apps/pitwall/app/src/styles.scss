@@ -61,6 +61,13 @@ kbd,
   font-variant-numeric: tabular-nums;
 }
 
+/* A version or release tag (`1.1.0`, `b11669`, `Q4_K_M`): sans 600 with tabular figures, never mono (UI review 2 rule 10). */
+.ver {
+  font-weight: var(--pd-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 ::selection {
   background: var(--pd-accent-tint);
 }

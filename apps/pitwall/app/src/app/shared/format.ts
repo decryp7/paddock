@@ -38,7 +38,8 @@ export function duration(ms: number | null | undefined): string {
   const h = Math.floor(min / 60);
   const rest = min % 60;
   if (h < 48) return rest ? `${h} h ${rest} min` : `${h} h`;
-  return `${Math.round(h / 24)} d`;
+  const days = Math.round(h / 24);
+  return `${days} ${days === 1 ? 'day' : 'days'}`;
 }
 
 /** Seconds as a settings value: `90 s`, `5 min`, `2 h`. */
@@ -57,7 +58,7 @@ export function countdown(at: number, now: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
 }
 
-/** `just now`, `5 min ago`, `3 h ago`, `2 d ago`; future times as `in 5 min`. */
+/** `just now`, `5 min ago`, `3 h ago`, `2 days ago`; future times as `in 5 min`. */
 export function ago(at: number | null | undefined, now: number): string {
   if (at === null || at === undefined) return 'never';
   const diff = now - at;
@@ -134,11 +135,14 @@ export function bytesUnit(values: readonly (number | null | undefined)[]): Bytes
   return UNITS[u] as BytesUnit;
 }
 
-/** Bytes as a bare number in a column's unit: `12.4`, `0.6`; whole from 100 up. */
+/**
+ * Bytes as a bare number in a column's unit, one precision per unit so a column never mixes `412` and `38.0`: B, KB and MB
+ * whole (`412`, `38`), GB and TB with `digits` decimals (`12.4`, `0.6`, `150.0`).
+ */
 export function bytesIn(n: number | null | undefined, unit: BytesUnit, digits = 1): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return '—';
-  const v = n / KIB ** UNITS.indexOf(unit);
-  return unit === 'B' ? String(Math.max(0, Math.round(v))) : v.toFixed(v >= 100 ? 0 : digits);
+  const v = Math.max(0, n) / KIB ** UNITS.indexOf(unit);
+  return unit === 'GB' || unit === 'TB' ? v.toFixed(digits) : Math.round(v).toLocaleString('en-US');
 }
 
 /** A unit for a column of durations. */

@@ -9,7 +9,7 @@ import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { ModelPreset, PresetEntry, PresetStatus } from '../../core/api.types';
-import { presetStatusLook } from '../../shared/labels';
+import { presetStatusLook, sentenceCase } from '../../shared/labels';
 import { confirm } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
@@ -52,22 +52,27 @@ export function statusDetail(s: PresetStatus): string {
         <table mat-table class="list" [dataSource]="store.entries()" [trackBy]="byAlias" [fixedLayout]="true" aria-label="Presets">
           <ng-container matColumnDef="alias">
             <th mat-header-cell *matHeaderCellDef scope="col">Name apps send</th>
-            <td mat-cell *matCellDef="let e" class="alias"><span class="mono pitwall-selectable" [matTooltip]="e.preset.alias" matTooltipShowDelay="600">{{ e.preset.alias }}</span>@if (e.preset.cacheResponses) {<span class="badge" matTooltip="Answers to repeated deterministic requests are cached">cache</span>}@if (e.preset.keepWarm) {<span class="badge" matTooltip="The system prompt is kept warm across unloads">warm</span>}</td>
+            <td mat-cell *matCellDef="let e" class="alias">
+              <span class="line mono pitwall-selectable" [matTooltip]="e.preset.alias" matTooltipShowDelay="600">{{ e.preset.alias }}</span>
+              <span class="line sub" [matTooltip]="aboutText(e.preset)" matTooltipShowDelay="600">{{ aboutText(e.preset) || 'Request decides every setting' }}</span>
+            </td>
           </ng-container>
           <ng-container matColumnDef="target">
             <th mat-header-cell *matHeaderCellDef scope="col">Target</th>
-            <td mat-cell *matCellDef="let e"><span class="mono target pitwall-selectable" [matTooltip]="e.preset.target" matTooltipShowDelay="600">{{ e.preset.target }}</span></td>
+            <td mat-cell *matCellDef="let e" class="target-cell">
+              <span class="line mono pitwall-selectable" [matTooltip]="e.preset.target" matTooltipShowDelay="600">{{ e.preset.target }}</span>
+              @if (e.status.state !== 'ready') {
+                <span class="line sub" [matTooltip]="detail(e)" matTooltipShowDelay="600">{{ message(e) }}</span>
+              } @else if (e.status.modelId !== e.preset.target) {
+                <span class="line sub mono" [matTooltip]="detail(e)" matTooltipShowDelay="600">→ {{ e.status.modelId }}</span>
+              }
+            </td>
           </ng-container>
           <ng-container matColumnDef="serves">
             <th mat-header-cell *matHeaderCellDef scope="col">Serves now</th>
             <td mat-cell *matCellDef="let e" class="serves">
               <span class="status" [attr.data-tone]="look(e).tone" [matTooltip]="detail(e)">{{ look(e).label }}</span>
-              <span class="via" [class.mono]="e.status.state === 'ready'" [matTooltip]="e.status.state === 'ready' ? e.status.modelId : message(e)">{{ e.status.state === 'ready' ? e.status.modelId : message(e) }}</span>
             </td>
-          </ng-container>
-          <ng-container matColumnDef="defaults">
-            <th mat-header-cell *matHeaderCellDef scope="col">Defaults</th>
-            <td mat-cell *matCellDef="let e" class="defs" [matTooltip]="defaultsText(e.preset)" matTooltipShowDelay="600">{{ defaultsText(e.preset) || '—' }}</td>
           </ng-container>
           <ng-container matColumnDef="act">
             <th mat-header-cell *matHeaderCellDef scope="col" class="act"><span class="sr-only">Actions</span></th>
@@ -192,39 +197,25 @@ export function statusDetail(s: PresetStatus): string {
     .list {
       margin-top: var(--pd-space-2);
     }
-    .alias {
-      font-weight: var(--pd-weight-medium);
+    /* Two lines per preset: what apps send (or the target) on top, a muted line under it with what it sets (or serves). The
+       name and the target share the flex; the verdict is one word and never cut. */
+    .list {
+      --mat-table-row-item-container-height: 52px;
     }
-    .target,
-    .via {
-      font-size: var(--pd-text-label);
-    }
-    .target {
+    .line {
       display: block;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    /* One line per preset: the verdict, then what serves it (or why nothing does), truncated with a tooltip. */
-    .via {
-      display: inline-block;
-      max-width: calc(100% - 96px);
-      margin-left: var(--pd-space-2);
-      overflow: hidden;
-      vertical-align: bottom;
-      text-overflow: ellipsis;
-      color: var(--pd-text-muted);
+    .alias .mono {
+      font-weight: var(--pd-weight-medium);
     }
-    .defs {
+    .sub {
       font-size: var(--pd-text-label);
       color: var(--pd-text-muted);
-      text-overflow: ellipsis;
     }
-    .mat-column-alias {
-      width: 24%;
-    }
-    .mat-column-target,
-    .mat-column-defaults {
-      width: 20%;
+    .mat-column-serves {
+      width: 168px;
     }
     /* Edit and the "..." menu, with the cell's padding. */
     .mat-column-act {
@@ -275,17 +266,6 @@ export function statusDetail(s: PresetStatus): string {
       .d {
         font-size: var(--pd-text-label);
       }
-    }
-    .badge {
-      display: inline-block;
-      margin-left: var(--pd-space-2);
-      padding: 0 6px;
-      font-size: var(--pd-text-label);
-      font-weight: var(--pd-weight-medium);
-      line-height: 18px;
-      color: var(--pd-text-muted);
-      background: var(--pd-pressed);
-      border-radius: var(--pd-radius-pill);
     }
     .hint {
       margin: 0;
@@ -425,9 +405,15 @@ export class PresetsTab {
     return [...defaultsSummary(p), ...(p.systemPrompt !== null ? ['system prompt'] : [])].join(' · ');
   }
 
+  /** The name's second line: what the preset turns on, in words, then its defaults (`Caches answers · warm prompt · temperature 0.3`). */
+  protected aboutText(p: ModelPreset): string {
+    const flags = [p.cacheResponses ? 'caches answers' : '', p.keepWarm ? 'warm prompt' : ''].filter(Boolean);
+    return sentenceCase([...flags, this.defaultsText(p)].filter(Boolean).join(' · '));
+  }
+
   /** The list behind the row's "..." button and right-click. Delete is only here and asks first. */
-  /** Every column: a preset's defaults are its own setting, and the table is the only place outside the editor that shows them. */
-  protected readonly columns = computed(() => ['alias', 'target', 'serves', 'defaults', 'act']);
+  /** A preset's defaults are its own setting: they are the name's second line, the only place outside the editor that shows them. */
+  protected readonly columns = computed(() => ['alias', 'target', 'serves', 'act']);
   protected readonly byAlias = (_: number, e: PresetEntry) => e.preset.alias;
 
   protected menuItems(p: ModelPreset): MenuItem[] {

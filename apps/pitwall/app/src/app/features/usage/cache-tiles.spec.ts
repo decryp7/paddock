@@ -23,7 +23,7 @@ describe('cache figures', () => {
     expect(cacheHitRate(counters())).toBeNull();
     expect(cacheHitRateText(counters())).toBe('—');
     expect(cacheHitRate(counters({ cacheHits: 1, cacheMisses: 3 }))).toBe(0.25);
-    expect(cacheHitRateText(counters({ cacheHits: 2, cacheMisses: 1 }))).toBe('67 %');
+    expect(cacheHitRateText(counters({ cacheHits: 2, cacheMisses: 1 }))).toBe('67%');
   });
 
   it('adds reused prompt tokens and tokens skipped by hits', () => {
@@ -48,7 +48,7 @@ describe('CacheTiles', () => {
     const el = await mount(counters({ cacheHits: 30, cacheMisses: 70, prefixTokens: 12_000, savedTokens: 3_000 }));
     const tiles = Array.from(el.querySelectorAll('.tile'));
     expect(tiles[0]!.textContent).toContain('Cache hit rate');
-    expect(tiles[0]!.querySelector('.value')!.textContent).toBe('30 %');
+    expect(tiles[0]!.querySelector('.value')!.textContent).toBe('30%');
     expect(tiles[0]!.textContent).toContain('30 hits, 70 misses');
     expect(tiles[1]!.textContent).toContain('Tokens saved');
     expect(tiles[1]!.querySelector('.value')!.textContent).toBe('15k');

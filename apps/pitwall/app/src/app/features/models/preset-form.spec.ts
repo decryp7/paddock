@@ -40,7 +40,7 @@ describe('preset form', () => {
   });
 
   it('summarises the defaults for the list', () => {
-    expect(defaultsSummary(PRESET)).toEqual(['context 8192', 'temperature 0.3', 'top-p 0.9', 'max 800 tokens']);
+    expect(defaultsSummary(PRESET)).toEqual(['context 8,192', 'temperature 0.3', 'top-p 0.9', 'max 800 tokens']);
     expect(defaultsSummary({ ...PRESET, context: null, temperature: null, topP: null, maxTokens: null })).toEqual([]);
   });
 });

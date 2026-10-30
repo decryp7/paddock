@@ -95,6 +95,8 @@ export function demoApps(now: number): AppInfo[] {
     app('pitcrew', 'Pitcrew', true, true, { requests: 212, promptTokens: 148_220, completionTokens: 31_400, busyMs: 402_000, errors: 0, peakMemoryBytes: 3.6 * GiB, cacheHits: 0, cacheMisses: 0, prefixTokens: 61_000, savedTokens: 0 }, { maxPriority: 'background', tools: false }),
     app('spotter', 'Spotter', true, true, { requests: 3460, promptTokens: 905_000, completionTokens: 12_400, busyMs: 1_120_000, errors: 12, peakMemoryBytes: 0.5 * GiB, cacheHits: 2_310, cacheMisses: 1_150, prefixTokens: 0, savedTokens: 601_000 }, {
       maxPriority: 'batch',
+      // Embeddings are deterministic: Spotter opted in to cached answers, which its hits below come from.
+      cacheResponses: true,
       models: ['qwen3-embedding-0.6b-q8_0', 'bge-reranker-v2-m3-q8_0'],
       limits: { requestsPerMin: 600, tokensPerDay: 5_000_000, maxConcurrent: 2, requestsPerDay: 20_000, tokensPerMonth: 120_000_000, maxMemoryPercent: null },
     }),
@@ -497,7 +499,7 @@ export function demoHistory(range: HistoryRange, now: number, seed = 7): History
         at: at + k * stepMs * 0.3,
         kind: is ? 'modelLoaded' : 'modelUnloaded',
         severity: reason === 'pressure' ? 'warn' : 'info',
-        message: is ? `Loaded ${names[k]} (${(1.2 + k).toFixed(1)} s cold start)` : `Released ${names[k]}: ${reason === 'pressure' ? 'available RAM fell below 15 %' : reason === 'manual' ? 'released by you' : reason === 'deepIdle' ? 'deep idle' : reason === 'evicted' ? 'made room for another model' : 'idle for 10 min'}`,
+        message: is ? `Loaded ${names[k]} (${(1.2 + k).toFixed(1)} s cold start)` : `Released ${names[k]}: ${reason === 'pressure' ? 'available RAM fell below 15%' : reason === 'manual' ? 'released by you' : reason === 'deepIdle' ? 'deep idle' : reason === 'evicted' ? 'made room for another model' : 'idle for 10 min'}`,
         modelId: ids[k]!,
         appId: null,
         reason,
@@ -525,7 +527,7 @@ export function demoEvents(now: number): PitwallEvent[] {
     e(0.7, 'pairing', 'info', 'Obsidian Copilot asks to pair (code 482 913)', { appId: 'obsidian-copilot' }),
     e(3, 'contextReleased', 'info', 'Released the context of Qwen3.5 9B after 2 min idle (1.2 GB)', { modelId: 'qwen3.5-9b-q4_k_m', reason: 'idle' }),
     e(14, 'modelLoaded', 'info', 'Loaded Qwen3.5 4B for Nightly report script (1.6 s cold start)', { modelId: 'qwen3.5-4b-q4_k_m', appId: 'nightly-report' }),
-    e(22, 'modelUnloaded', 'warn', 'Released Gemma 4 12B: available RAM fell below 15 %', { modelId: 'gemma-4-12b-it-q4_k_m', reason: 'pressure' }),
+    e(22, 'modelUnloaded', 'warn', 'Released Gemma 4 12B: available RAM fell below 15%', { modelId: 'gemma-4-12b-it-q4_k_m', reason: 'pressure' }),
     e(31, 'requestFailed', 'error', 'Spotter: 429 rate limit (600 requests/min)', { appId: 'spotter' }),
     e(48, 'download', 'info', 'Downloaded bge-reranker-v2-m3 Q8_0 (606 MB, verified)'),
     e(52, 'modelLoaded', 'info', 'Loaded Qwen3.5 9B for Debrief (3.4 s cold start)', { modelId: 'qwen3.5-9b-q4_k_m', appId: 'debrief' }),
@@ -608,6 +610,8 @@ export function demoRequests(now: number, count = 400, seed = 3): RequestRecord[
         r.completionTokens = Math.max(r.completionTokens, 40);
       }
     }
+    // A cached answer never waits for a model: no queue, no cold start, and its total is the cache lookup alone.
+    if (r.cache === 'hit') Object.assign(r, { queuedMs: 0, coldStartMs: null });
     if (r.promptTokens > 1000 && r.cache !== 'hit' && !r.endpoint.includes('embed') && i % 2 === 0) r.cachedTokens = Math.round(r.promptTokens * 0.8);
   });
   // Some apps ask for a preset by name; `modelId` is what it resolved to.

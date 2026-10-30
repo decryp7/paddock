@@ -32,7 +32,8 @@ describe('format', () => {
     expect(duration(3 * 60_000)).toBe('3 min');
     expect(duration(125 * 60_000)).toBe('2 h 5 min');
     expect(duration(120 * 60_000)).toBe('2 h');
-    expect(duration(72 * 3_600_000)).toBe('3 d');
+    expect(duration(72 * 3_600_000)).toBe('3 days');
+    expect(duration(48 * 3_600_000)).toBe('2 days');
     expect(duration(null)).toBe('—');
     expect(seconds(45)).toBe('45 s');
     expect(seconds(600)).toBe('10 min');
@@ -88,7 +89,10 @@ describe('format', () => {
     expect(bytesUnit([NaN, 512])).toBe('B');
     expect(bytesIn(5.6 * G, 'GB')).toBe('5.6');
     expect(bytesIn(600 * 1024 ** 2, 'GB')).toBe('0.6');
-    expect(bytesIn(150 * G, 'GB')).toBe('150');
+    expect(bytesIn(150 * G, 'GB')).toBe('150.0');
+    // One precision per unit: a column of MB is whole, never `412` beside `38.0`.
+    expect(bytesIn(412 * 1024 ** 2, 'MB')).toBe('412');
+    expect(bytesIn(38 * 1024 ** 2, 'MB')).toBe('38');
     expect(bytesIn(700, 'B')).toBe('700');
     expect(bytesIn(null, 'GB')).toBe('—');
   });

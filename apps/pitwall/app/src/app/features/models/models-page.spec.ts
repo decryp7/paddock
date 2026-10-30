@@ -116,6 +116,28 @@ describe('ModelsPage', () => {
     expect(rows[0]!.querySelector('.tag, .pill')).toBeNull();
   });
 
+  it('names each capability glyph for a pointer and a screen reader', async () => {
+    const { el } = await render();
+    const glyphs = Array.from(el.querySelectorAll('pw-library-tab tbody .glyphs mat-icon'));
+    expect(glyphs.length).toBeGreaterThan(8);
+    for (const g of glyphs) {
+      expect(g.getAttribute('role')).toBe('img');
+      expect(g.getAttribute('aria-label')).toMatch(/\w/);
+      expect(g.classList).toContain('mat-mdc-tooltip-trigger');
+    }
+  });
+
+  it('says a value every model shares once in the toolbar instead of in a constant column', async () => {
+    const backend = new MockBackend();
+    const all = await backend.localModels();
+    backend.localModels = async () => all.map((m) => ({ ...m, contextMax: 32_768 }));
+    const { el } = await render(backend);
+    expect(Array.from(el.querySelectorAll('pw-library-tab thead th')).map((t) => t.textContent!.trim())).not.toContain('Context tokens');
+    expect(el.querySelector('pw-library-tab .toolbar')!.textContent).toContain('all 32k context');
+    // A column that varies is shown, so its value is not repeated in the toolbar.
+    expect(el.querySelector('pw-library-tab .toolbar')!.textContent).not.toMatch(/all \d[\d.]*[BM]\b/);
+  });
+
   it('is a Material table with one sticky header row (rule 47, ADR 0027)', async () => {
     const { fixture } = await render();
     const loader = TestbedHarnessEnvironment.loader(fixture);

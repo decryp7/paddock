@@ -16,7 +16,7 @@ import { AppAvatar } from '../../shared/ui/app-avatar';
 import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
 import { Panel } from '../../shared/ui/panel';
 import { moveRowFocus } from '../../shared/ui/row-nav';
-import { limitsText } from '../dashboard/apps-card';
+import { limitsShort, limitsText } from '../dashboard/apps-card';
 import { groupCode, permissionSummary } from '../dashboard/pairing-card';
 import { AppsStore } from './apps.store';
 import { CREATE_APP_DIALOG_ID } from './create-app-dialog';
@@ -100,8 +100,8 @@ import { PermissionsEditor } from './permissions-editor';
                     <h2>{{ a.name }}</h2>
                     <p>
                       <span class="status" [attr.data-tone]="a.connected ? 'ok' : 'muted'">{{ a.connected ? 'Connected' : 'Not connected' }}</span>
-                      <span class="faint">{{ a.connected ? 'active ' : 'last seen ' }}{{ when(a.lastSeenAt, now()) }}</span>
-                      <span class="faint lim" [matTooltip]="limits(a.permissions.limits)" matTooltipShowDelay="600">· {{ limits(a.permissions.limits) }}</span>
+                      <span class="faint seen">{{ a.connected ? 'active ' : 'last seen ' }}{{ when(a.lastSeenAt, now()) }}</span>
+                      <span class="faint lim" [matTooltip]="limits(a.permissions.limits)" matTooltipShowDelay="600">· {{ limitsShort(a.permissions.limits) === 'None' ? 'no limits' : limitsShort(a.permissions.limits) }}</span>
                     </p>
                   </div>
                   <pw-more-button [menu]="appMenuPanel.menu()" [items]="appMenu(a)" [label]="'More actions for ' + a.name" />
@@ -116,7 +116,7 @@ import { PermissionsEditor } from './permissions-editor';
                 <p class="today faint">Today, since midnight</p>
               </section>
 
-              <pw-panel heading="Cached answers" icon="bolt" [sub]="a.permissions.cacheResponses ? 'on for this app' : 'off for this app'">
+              <pw-panel class="cache-panel" heading="Cached answers" icon="bolt" [sub]="a.permissions.cacheResponses ? 'on for this app' : 'off for this app'">
                 <button panel-actions type="button" matButton="outlined" [disabled]="store.isBusy('cache:' + a.id)" (click)="clearAnswers(a)">Clear this app's cached answers</button>
                 <dl class="cache-stats" aria-label="Cache use today">
                   <div><dt>Cache hits</dt><dd class="num">{{ intText(a.today.cacheHits) }}</dd></div>
@@ -248,6 +248,9 @@ import { PermissionsEditor } from './permissions-editor';
         width: 56px;
       }
     }
+    .seen {
+      white-space: nowrap;
+    }
     .lim {
       min-width: 0;
       overflow: hidden;
@@ -349,10 +352,21 @@ import { PermissionsEditor } from './permissions-editor';
       }
     }
     /* The day's figures are a row on the card, set off by one hairline: no boxed grid inside the card. */
+    /* Figures wrap whole: a label never breaks inside ("Completion tokens"), a figure moves to the next line instead. */
+    .usage,
+    .cache-stats {
+      > div {
+        flex: 1 0 auto;
+      }
+      dt,
+      dd {
+        white-space: nowrap;
+      }
+    }
     .usage {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: var(--pd-space-4);
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--pd-space-3) var(--pd-space-6);
       margin: var(--pd-space-4) 0 0;
       padding-top: var(--pd-space-4);
       border-top: 1px solid var(--pd-hairline);
@@ -375,9 +389,9 @@ import { PermissionsEditor } from './permissions-editor';
       font-size: var(--pd-text-label);
     }
     .cache-stats {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: var(--pd-space-4);
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--pd-space-3) var(--pd-space-6);
       margin: 0;
       dt {
         font-size: var(--pd-text-label);
@@ -419,6 +433,7 @@ export class AppsPage implements OnInit {
   protected readonly code = groupCode;
   protected readonly summary = permissionSummary;
   protected readonly limits = limitsText;
+  protected readonly limitsShort = limitsShort;
   protected readonly rateText = cacheHitRateText;
 
   /** `/apps?app=<id>` (from the dashboard's usage legend) opens that app. */

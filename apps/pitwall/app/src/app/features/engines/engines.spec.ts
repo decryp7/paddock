@@ -114,8 +114,13 @@ describe('EnginesPage', () => {
     const { el } = await render();
     expect(el.querySelector('h1')?.textContent).toContain('llama.cpp');
     expect(el.textContent).toContain('CUDA 13 (NVIDIA)');
-    expect(el.textContent).toContain('Self-test passed');
-    expect(el.textContent).toContain('Not tested');
+    // The Self-test column says the word alone; its header says what passed.
+    const tests = Array.from(el.querySelectorAll('td.mat-column-test .status')).map((c) => c.textContent!.trim());
+    expect(tests).toContain('Passed');
+    expect(tests).toContain('Not tested');
+    // A release tag is a version: sans 600 with tabular figures, never mono (UI review 2 rule 10).
+    expect(el.querySelector('td.mat-column-release .ver')?.textContent).toMatch(/^b\d+$/);
+    expect(el.querySelector('td.mat-column-release .mono')).toBeNull();
     expect(el.querySelector('.catalog')!.querySelectorAll('li').length).toBe(4);
     expect(el.querySelector('.catalog li .rec')?.textContent).toContain('Suggested');
     expect(Array.from(el.querySelectorAll('.catalog button')).every((b) => !b.classList.contains('mat-mdc-unelevated-button'))).toBe(true);

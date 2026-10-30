@@ -57,6 +57,7 @@ import type {
   Settings,
   Throughput,
 } from './api.types';
+import { BROWSER_VERSION } from '../shell/engines';
 import type { PitwallBackend, Unsubscribe } from './backend';
 import {
   demoReplyWords,
@@ -207,7 +208,8 @@ export class MockBackend implements PitwallBackend {
     if (options.modelUpdates) this.updateNotices_ = demoUpdateNotices(this.now());
     if (options.quitAsk) this.quitAskPending = true;
     if (options.installing) {
-      const download: Download = { id: 'eng-0', kind: 'engine', name: 'llama.cpp CUDA 13 (b11669)', host: 'github.com', bytesDone: 212 * MiB, bytesTotal: 388 * MiB, speedBps: 24 * MiB, state: 'downloading', error: null, startedAt: this.now() - 9_000 };
+      // The catalog's suggested build (cuda-13 at its pinned release, its download size): the first start installs exactly that.
+      const download: Download = { id: 'eng-0', kind: 'engine', name: 'llama.cpp CUDA 13 (b11702)', host: 'github.com', bytesDone: 212 * MiB, bytesTotal: 398 * MiB, speedBps: 24 * MiB, state: 'downloading', error: null, startedAt: this.now() - 9_000 };
       this.engineSetup_ = { state: 'installing', error: null, download };
     }
     if (options.crashed) {
@@ -232,7 +234,8 @@ export class MockBackend implements PitwallBackend {
     const empty = options.empty ?? false;
     this.settings_ = demoSettings();
     this.server = {
-      version: '1.0.3',
+      // The browser build's one version (the shell's About and Updates read the same constant), never a second literal.
+      version: BROWSER_VERSION,
       apiVersion: 1,
       pid: 7412,
       port: this.settings_.server.port,

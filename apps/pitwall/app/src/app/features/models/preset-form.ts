@@ -1,4 +1,5 @@
 import type { ModelPreset, PresetDraft } from '../../core/api.types';
+import { int } from '../../shared/format';
 
 /** The editor's fields as the user typed them. Numbers stay text until they are parsed, so a half-typed value is not lost. */
 export interface PresetForm {
@@ -77,9 +78,9 @@ export function parseForm(f: PresetForm): ParsedForm {
 /** `0.3 temperature · 800 max tokens` style summary of a preset's defaults, for the list. */
 export function defaultsSummary(p: ModelPreset): string[] {
   const out: string[] = [];
-  if (p.context !== null) out.push(`context ${p.context}`);
+  if (p.context !== null) out.push(`context ${int(p.context)}`);
   if (p.temperature !== null) out.push(`temperature ${p.temperature}`);
   if (p.topP !== null) out.push(`top-p ${p.topP}`);
-  if (p.maxTokens !== null) out.push(`max ${p.maxTokens} tokens`);
+  if (p.maxTokens !== null) out.push(`max ${int(p.maxTokens)} tokens`);
   return out;
 }

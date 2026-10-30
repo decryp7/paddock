@@ -22,7 +22,7 @@ describe('BenchmarksPage', () => {
     const rows = el.querySelectorAll('tbody tr');
     expect(rows).toHaveLength(7);
     expect(rows[0]!.textContent).toContain('Qwen3.5 9B');
-    expect(el.querySelector('.panel, pw-panel[heading="Results"]')?.textContent).toContain('7 runs');
+    expect(el.querySelector('.panel, pw-panel[heading="Results"]')?.textContent).toContain('7 runs · all at 4,096 context tokens');
   });
 
   it('draws the speed chart with one row per model and build', async () => {
@@ -86,7 +86,9 @@ describe('BenchmarksPage', () => {
     const { fixture, el } = await render(BenchmarksPage, mock({ latencyMs: 1 }));
     await wait(30);
     await settle(fixture);
-    expect(Array.from(el.querySelectorAll('thead th')).map((h) => h.textContent!.trim())).toEqual(['Model', 'Build', 'Generation tok/s', 'Prompt tok/s', 'TTFT ms', 'When']);
+    expect(Array.from(el.querySelectorAll('thead th')).map((h) => h.textContent!.trim())).toEqual(['Model and build', 'Generation tok/s', 'Prompt tok/s', 'TTFT ms', 'When']);
+    // The unit is said once per block: the models list's subtitle, not after every score.
+    expect(el.querySelector('ul[aria-label="Models to benchmark"]')!.textContent).not.toContain('tok/s');
     expect(el.querySelector('tbody .tag')).toBeNull();
     // A Material table (rule 47, C43) with one sticky header row.
     expect(el.querySelector('table')!.classList).toContain('mat-mdc-table');

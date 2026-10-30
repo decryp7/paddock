@@ -31,7 +31,7 @@ import { SuEmptyState } from '@decryp7/paddock-ui';
       </header>
 
       <div class="grid">
-        <pw-panel class="models" heading="Models" icon="models" [loading]="store.loading()" [error]="store.error()" [ready]="store.models().length > 0 || (!store.loading() && !store.error())" (retry)="store.load()" [flush]="true">
+        <pw-panel class="models" heading="Models" icon="models" sub="generation, tok/s" [loading]="store.loading()" [error]="store.error()" [ready]="store.models().length > 0 || (!store.loading() && !store.error())" (retry)="store.load()" [flush]="true">
           @if (store.runnable().length === 0) {
             <pd-empty-state heading="No chat models" description="Download a model in Models to measure it here."><mat-icon slot="icon" svgIcon="pw:models" aria-hidden="true" /></pd-empty-state>
           }
@@ -51,7 +51,7 @@ import { SuEmptyState } from '@decryp7/paddock-ui';
                   </span>
                 </div>
                 @if (last) {
-                  <span class="score num" [matTooltip]="'Generation on ' + last.build"><b>{{ rateText(last.genTps) }}</b> tok/s</span>
+                  <span class="score num" [matTooltip]="rateText(last.genTps) + ' tok/s generation on ' + last.build" [attr.aria-label]="rateText(last.genTps) + ' tokens per second'"><b>{{ rateText(last.genTps) }}</b></span>
                 }
                 <button type="button" matIconButton class="run" [class.on]="store.isRunning(m.id)" [attr.aria-label]="'Run benchmark for ' + m.name" [matTooltip]="store.isRunning(m.id) ? 'Running' : 'Run'" [disabled]="store.isRunning(m.id)" (click)="store.run(m.id)">
                   @if (store.isRunning(m.id)) {
@@ -74,26 +74,26 @@ import { SuEmptyState } from '@decryp7/paddock-ui';
         </pw-panel>
       </div>
 
-      <pw-panel heading="Results" icon="requests" [sub]="store.results().length + ' runs'" [loading]="store.loading()" [error]="store.error()" [ready]="store.results().length > 0 || (!store.loading() && !store.error())" (retry)="store.load()" [flush]="true">
+      <pw-panel heading="Results" icon="requests" [sub]="resultsSub()" [loading]="store.loading()" [error]="store.error()" [ready]="store.results().length > 0 || (!store.loading() && !store.error())" (retry)="store.load()" [flush]="true">
         @if (store.results().length === 0) {
           <pd-empty-state heading="No runs yet"><mat-icon slot="icon" svgIcon="pw:benchmarks" aria-hidden="true" /></pd-empty-state>
         } @else {
           <table mat-table class="results" [dataSource]="store.sorted()" [fixedLayout]="true">
             <caption class="sr-only">Benchmark results, newest first</caption>
             <colgroup>
-              <col /><col /><col class="c-gen" /><col class="c-prompt" /><col class="c-n" />
+              <col /><col class="c-gen" /><col class="c-prompt" /><col class="c-n" />
               @if (contextVaries()) {
                 <col class="c-n" />
               }
               <col class="c-when" />
             </colgroup>
+            <!-- The model and, under it, the build it ran on: one run is identified by both. -->
             <ng-container matColumnDef="model">
-              <th mat-header-cell *matHeaderCellDef scope="col">Model</th>
-              <td mat-cell *matCellDef="let r" class="strong" [matTooltip]="store.names().get(r.modelId) ?? r.modelId" matTooltipShowDelay="600">{{ store.names().get(r.modelId) ?? r.modelId }}</td>
-            </ng-container>
-            <ng-container matColumnDef="build">
-              <th mat-header-cell *matHeaderCellDef scope="col">Build</th>
-              <td mat-cell *matCellDef="let r" class="build" [matTooltip]="r.build">{{ r.build }}</td>
+              <th mat-header-cell *matHeaderCellDef scope="col">Model and build</th>
+              <td mat-cell *matCellDef="let r" [matTooltip]="(store.names().get(r.modelId) ?? r.modelId) + ' on ' + r.build" matTooltipShowDelay="600">
+                <span class="line strong">{{ store.names().get(r.modelId) ?? r.modelId }}</span>
+                <span class="line build">{{ r.build }}</span>
+              </td>
             </ng-container>
             <ng-container matColumnDef="gen">
               <th mat-header-cell *matHeaderCellDef scope="col" class="right">Generation tok/s</th>
@@ -205,7 +205,13 @@ import { SuEmptyState } from '@decryp7/paddock-ui';
       }
     }
     .results {
+      --mat-table-row-item-container-height: 48px;
       margin-top: var(--pd-space-3);
+      .line {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
       .mat-mdc-header-cell:last-child,
       .mat-mdc-cell:last-child {
         padding-right: var(--pd-space-4);
@@ -237,8 +243,14 @@ export class BenchmarksPage implements OnInit {
   protected readonly day = date;
   /** The context column only exists when runs differ in it: every run uses the same 4k prompt, so it is noise. */
   protected readonly contextVaries = computed(() => new Set(this.store.results().map((r) => r.contextTokens)).size > 1);
+  /** The run count and, when every run used the same context (its column is hidden), that context said once. */
+  protected readonly resultsSub = computed(() => {
+    const runs = this.store.results();
+    const shared = runs.length > 1 && !this.contextVaries() ? ` · all at ${int(runs[0]!.contextTokens)} context tokens` : '';
+    return `${runs.length} runs${shared}`;
+  });
   /** The results table's columns: Context only when the runs used different context sizes (rule 7, no constant column). */
-  protected readonly columns = computed(() => ['model', 'build', 'gen', 'prompt', 'ttft', ...(this.contextVaries() ? ['context'] : []), 'when']);
+  protected readonly columns = computed(() => ['model', 'gen', 'prompt', 'ttft', ...(this.contextVaries() ? ['context'] : []), 'when']);
   protected readonly rows = computed(() => latestPerRun(this.store.results(), (id) => this.store.names().get(id) ?? id));
   protected readonly option = computed(() => benchmarkChart(this.rows(), this.theme.tokens()));
   protected readonly chartHeight = computed(() => `${Math.max(200, 82 + this.rows().length * 40)}px`);
