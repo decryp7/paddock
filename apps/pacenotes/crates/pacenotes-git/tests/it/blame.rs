@@ -533,3 +533,26 @@ fn the_range_is_checked_before_the_walk_starts() {
         Err(BlameError::Limit { what: "objects read", .. })
     ));
 }
+
+/// An older version that is binary cannot be compared by git, so the lines older than it are attributed to the commit where the file turned
+/// binary. That is not hidden: the answer says it is approximate.
+#[test]
+fn an_older_binary_version_makes_the_answer_approximate_and_says_so() {
+    let repo = Repo::new();
+    repo.commit(1_000, "ann", &[("f.txt", "1\n2\0\n3\n")]);
+    let b = repo.commit(2_000, "bob", &[("f.txt", "1\n2\n3\n")]);
+    let c = repo.commit(3_000, "cat", &[("f.txt", "1\n2\n3\n4\n")]);
+    let history = open(&repo.dir).unwrap();
+    let got = blame(&history, &c, "f.txt", &BlameRequest::default()).unwrap();
+    assert_eq!(who(&got), [(1, 3, hash(&b)), (4, 4, hash(&c))], "{got:?}");
+    assert!(
+        got.approximate,
+        "lines 1 to 3 really came from ann; the answer must say it cannot tell"
+    );
+    // a text-only history is exact
+    let clean = Repo::new();
+    clean.commit(1_000, "ann", &[("f.txt", "1\n2\n3\n")]);
+    let d = clean.commit(2_000, "bob", &[("f.txt", "1\n2\n3\n4\n")]);
+    let history = open(&clean.dir).unwrap();
+    assert!(!blame(&history, &d, "f.txt", &BlameRequest::default()).unwrap().approximate);
+}

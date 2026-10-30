@@ -136,6 +136,9 @@ pub struct Blame {
     pub unnamed_sources: u32,
     /// Objects the history walk read (the figure the progress callback grew to).
     pub objects_read: u64,
+    /// Set when an older version of the file was binary (a NUL in its first 8000 bytes): git cannot compare a binary version, so lines
+    /// older than the commit where the file turned binary are attributed to that commit, and the attribution is approximate.
+    pub approximate: bool,
 }
 
 impl Blame {

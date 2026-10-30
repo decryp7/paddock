@@ -12,7 +12,7 @@
 //! over the cap from its header before reading it, and counts objects read as the progress figure.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
 use pacenotes_core::ports::{Blame, BlameError, BlameHunk, BlameRequest, Blamer};
 use pacenotes_core::{RepoPath, Rev};
@@ -47,6 +47,8 @@ struct Guarded<'a, O> {
     objects: AtomicU64,
     stop: AtomicU8,
     stopped_size: AtomicU64,
+    /// Set when a blob read during the walk had a NUL in its first 8000 bytes.
+    saw_binary: AtomicBool,
     progress: &'a dyn Fn(u64),
 }
 
@@ -119,7 +121,14 @@ impl<O: gix::objs::Find + gix::objs::FindHeader> gix::objs::Find for Guarded<'_,
             self.stopped_size.store(h.size, Ordering::SeqCst);
             return Err(self.halt(Stop::Blob));
         }
-        self.inner.try_find(id, buffer)
+        let found = self.inner.try_find(id, buffer)?;
+        if let Some(data) = &found
+            && data.kind == gix::objs::Kind::Blob
+            && data.data.iter().take(8000).any(|b| *b == 0)
+        {
+            self.saw_binary.store(true, Ordering::Relaxed);
+        }
+        Ok(found)
     }
 }
 
@@ -200,6 +209,7 @@ impl Blamer for GixHistory {
             objects: AtomicU64::new(0),
             stop: AtomicU8::new(0),
             stopped_size: AtomicU64::new(0),
+            saw_binary: AtomicBool::new(false),
             progress,
         };
         // the blamed blob is read once, through the guard (so the cap, the budget and the cancel apply), before the walk: the range is
@@ -240,6 +250,7 @@ impl Blamer for GixHistory {
         entries.sort_by_key(|e| e.start_in_blamed_file);
         let mut blame = Blame {
             objects_read: objects,
+            approximate: guard.saw_binary.load(Ordering::Relaxed),
             ..Blame::default()
         };
         let mut who: BTreeMap<gix::ObjectId, (String, i64)> = BTreeMap::new();
