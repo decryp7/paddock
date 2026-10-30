@@ -777,7 +777,8 @@ the local Windows VM never reproduced it: it is Arm, and Chrome never sandboxes 
 cannot take the code path CI takes. The Chrome logs that CI had already kept as artifacts showed what differs on Windows:
 in every browser the testing config's sandboxed network service could not start (Chrome for Testing in a user folder
 grants app containers nothing) and was started again unsandboxed. The lost loads came 3 to 4 s later, when the profile's
-own requests failed too, so the restart is a lead, not a proven cause, until a CI run without it stays green. **Rule:**
+own requests failed too, so the restart was a lead, not a proven cause, until CI run 7170 (testing config off) ran 25
+Windows browsers with no second start, no failed profile request and no lost load. **Rule:**
 for a flake, read the evidence the failing environment already wrote (logs, artifacts, the program's own counters) before
 building a local reproduction; check that a reproduction can take the same code path (architecture, feature flags,
 sandbox); and write a cause down as confirmed only after a run without it. Test the suspected cause directly (the

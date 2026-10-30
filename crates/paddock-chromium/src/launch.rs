@@ -190,10 +190,11 @@ pub const QUIET_DISABLED_FEATURES: &[&str] = &[
 /// sandbox on Windows (study `NetworkServiceSandboxWindows`), which could not start on Windows CI for a browser in the
 /// runner's user folder: in all 12 Chrome logs of runs 7149 and 7154 the app-container access check failed ("Sandbox
 /// cannot access executable", launch error 45, Windows error 5) and Chrome started the network service again,
-/// unsandboxed. Whether that, or another testing-config feature, caused the lost loads of those runs is not proven: they
-/// started 3 to 4 s after the second start, when the profile's own requests failed too (the sign-in request with
-/// `net::ERR_FAILED` instead of `net::ERR_NAME_NOT_RESOLVED`). Branded Chrome and Edge never apply the testing config,
-/// so the switch is for [`Flavor::Chromium`] only. Read 2026-10-30 against Chrome for Testing 156.0.8078.47.
+/// unsandboxed. The lost loads of those runs started 3 to 4 s after the second start, when the profile's own requests
+/// failed too (the sign-in request with `net::ERR_FAILED` instead of `net::ERR_NAME_NOT_RESOLVED`). With this switch,
+/// CI run 7170 ran the real-browser tests five times on Windows (25 browsers) with none of these: no failed sandbox
+/// start, no second start, no failed sign-in request, no `net::ERR_ABORTED`. Branded Chrome and Edge never apply the
+/// testing config, so the switch is for [`Flavor::Chromium`] only. Read 2026-10-30 against Chrome for Testing 156.0.8078.47.
 pub const NO_TESTING_FIELD_TRIALS: &str = "--disable-field-trial-config";
 
 const DISABLE_FEATURES: &str = "--disable-features=";
