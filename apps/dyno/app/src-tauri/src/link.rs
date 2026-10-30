@@ -28,6 +28,7 @@ use dyno_ipc::{Client, IpcError, Peer, PeerOptions};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use paddock_proc::{Cpu, ExitInfo, Liveness, Patience, Reading, StallCause, StartJudge, StartState};
 use std::time::{Duration, Instant};
 
 /// Every request fails after this long.
@@ -96,6 +97,17 @@ pub enum Stall {
     AgentNotAnswering,
     /// Another agent holds the data folder and has not answered.
     OtherAgentHolds,
+}
+
+impl From<StallCause> for Stall {
+    /// Dyno's chip for a shared stall cause: a note or a stuck start is the agent not answering.
+    fn from(cause: StallCause) -> Stall {
+        match cause {
+            StallCause::WaitingForSupervisor => Stall::WaitingForService,
+            StallCause::HeldByOther => Stall::OtherAgentHolds,
+            _ => Stall::AgentNotAnswering,
+        }
+    }
 }
 
 /// The agent process a [`Launcher`] started, as far as it knows.
@@ -653,7 +665,7 @@ impl AgentLink {
     /// Whether a discovery file found while waiting since `since_ms` names an agent that is up: written after the wait
     /// began, or answering. A file from before the wait that nothing answers is an old agent's, not the one waited for.
     fn names_live_agent(&self, d: &Discovery, since_ms: i64) -> bool {
-        written_since(d, since_ms) || self.try_connect(d).map(|p| p.close()).is_ok()
+        paddock_proc::hint::names_live(d, since_ms, || self.try_connect(d).map(|p| p.close()).is_ok())
     }
 
     /// Starts the agent unless the one this app started is still running, and waits for it to write its discovery file
@@ -666,11 +678,13 @@ impl AgentLink {
             return Ok(());
         }
         let mut seen_retry = self.retries.load(Ordering::SeqCst);
+        // Read and cleared first: a Retry's one-shot permission to launch must not outlive this pass, whichever branch runs.
+        let launch_anyway = self.launch_anyway.swap(false, Ordering::SeqCst);
         if matches!(self.launcher.child(), Child::Running { .. }) {
             logging::info("the agent this app started is still starting; waiting for it");
         } else if !self.service_fallback.load(Ordering::SeqCst) && self.probe_service().is_some_and(|s| s.supervises) {
             return self.wait_for_service(seen_retry);
-        } else if dyno_agent::instance::is_held(&self.dirs) && !self.launch_anyway.swap(false, Ordering::SeqCst) {
+        } else if !launch_anyway && dyno_agent::instance::is_held(&self.dirs) {
             // An agent of nobody this app launched still holds the data folder (the former service's agent that was just
             // asked to exit: on Windows the lock goes only when its process has fully exited). A launch now would be
             // refused (exit 3) and wasted: wait for the lock like for any other holder, with the stall and Retry.
@@ -680,7 +694,16 @@ impl AgentLink {
             logging::info("starting the agent");
             self.launcher.launch()?;
         }
-        let mut looks = 0u32;
+        // The shared judge (ADR 0031) over the process this app started and the discovery file: a note after
+        // STILL_STARTING_AFTER looks, never a give-up. No CPU time is passed: this wait is never judged stuck here.
+        let mut judge = StartJudge::new(
+            Patience {
+                note_after: STILL_STARTING_AFTER,
+                ..Patience::default()
+            },
+            "The Dyno agent",
+        );
+        let mut noted = false;
         loop {
             if self.is_stopping() {
                 return Ok(());
@@ -692,7 +715,8 @@ impl AgentLink {
                 self.clear_stall();
                 return Ok(());
             }
-            match start_progress(self.launcher.child(), Discovery::read(&self.dirs.discovery()).as_ref()) {
+            let state = judge.observe(&reading(self.launcher.child(), Discovery::read(&self.dirs.discovery()).as_ref()));
+            match progress_of(state.clone()) {
                 StartProgress::Starting => {}
                 StartProgress::Ready => {
                     self.clear_stall();
@@ -707,12 +731,11 @@ impl AgentLink {
                     return Err(message);
                 }
             }
-            looks += 1;
-            if looks == STILL_STARTING_AFTER {
-                self.show_stall(
-                    Stall::AgentNotAnswering,
-                    "The Dyno agent is still starting. A slow disk or a busy computer can take a while.",
-                );
+            if let StartState::Stalled(report) = state
+                && !noted
+            {
+                noted = true;
+                self.show_stall(Stall::from(report.cause), &report.message);
             }
             self.look_again();
         }
@@ -834,26 +857,52 @@ pub enum StartProgress {
     Failed(String),
 }
 
-/// The decision for a start in progress (pure).
-pub fn start_progress(child: Child, found: Option<&Discovery>) -> StartProgress {
-    match child {
-        Child::Running { pid } if found.is_some_and(|d| d.pid == pid) => StartProgress::Ready,
-        Child::Running { .. } => StartProgress::Starting,
-        Child::Exited {
-            code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
-        } => StartProgress::OtherAgent,
-        Child::Exited { code } => StartProgress::Failed(match code {
+/// What a look at a start in progress saw, for the shared judge: the launched process (a launcher without one counts as
+/// running) and whether the discovery file names it.
+pub fn reading(child: Child, found: Option<&Discovery>) -> Reading {
+    let (liveness, ready) = match child {
+        Child::Running { pid } => (Liveness::Running, found.is_some_and(|d| d.pid == pid)),
+        Child::Exited { code } => (
+            Liveness::Exited(ExitInfo {
+                status: code,
+                stderr_tail: None,
+            }),
+            false,
+        ),
+        Child::None => (Liveness::Running, found.is_some()),
+    };
+    Reading {
+        liveness,
+        ready,
+        progress: 0,
+        cpu: Cpu::NotRead,
+    }
+}
+
+/// Dyno's meaning of the judge's answer. A note ([`StartState::Stalled`]) is still starting; the caller shows it.
+pub fn progress_of(state: StartState) -> StartProgress {
+    match state {
+        StartState::Starting | StartState::Stalled(_) => StartProgress::Starting,
+        StartState::Ready => StartProgress::Ready,
+        StartState::Exited(ExitInfo {
+            status: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
+            ..
+        }) => StartProgress::OtherAgent,
+        StartState::Exited(ExitInfo { status, .. }) => StartProgress::Failed(match status {
             Some(c) => format!("The Dyno agent stopped while starting (exit code {c}). Its log is in the Dyno data folder."),
             None => "The Dyno agent was ended while starting.".into(),
         }),
-        Child::None if found.is_some() => StartProgress::Ready,
-        Child::None => StartProgress::Starting,
     }
+}
+
+/// The decision for a start in progress (pure): one look judged on its own.
+pub fn start_progress(child: Child, found: Option<&Discovery>) -> StartProgress {
+    progress_of(StartJudge::new(Patience::default(), "The Dyno agent").observe(&reading(child, found)))
 }
 
 /// Whether a discovery file found while waiting since `since_ms` (ms since the epoch) was written after the wait began.
 pub fn written_since(d: &Discovery, since_ms: i64) -> bool {
-    d.started >= since_ms
+    paddock_proc::hint::written_since(d, since_ms)
 }
 
 // ---------------------------------------------------------------------------------------------------------------

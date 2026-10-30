@@ -8,13 +8,14 @@
 //! earlier); the discovery file only says how to reach it.
 
 use crate::paths::Dirs;
-use std::fs::{File, OpenOptions, TryLockError};
+use paddock_proc::Claim;
+use std::fs::OpenOptions;
 use std::path::PathBuf;
 
 /// The held lock: dropping it (or the process ending) frees the data folder.
 #[derive(Debug)]
 pub struct InstanceLock {
-    _file: File,
+    _lock: paddock_proc::InstanceLock,
 }
 
 /// Why the lock was not taken.
@@ -40,28 +41,22 @@ pub enum LockError {
 }
 
 impl InstanceLock {
-    /// Takes the lock for `dirs`, without waiting.
+    /// Takes the lock for `dirs`, without waiting (the shared single-instance lock, `paddock_proc::InstanceLock`).
     pub fn acquire(dirs: &Dirs) -> Result<InstanceLock, LockError> {
         let path = dirs.instance_lock();
-        let io = |source| LockError::Io {
-            path: path.clone(),
-            source,
-        };
-        std::fs::create_dir_all(dirs.root()).map_err(io)?;
-        // Never truncated or written: the content does not matter, only the lock on it.
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&path)
-            .map_err(io)?;
-        match file.try_lock() {
-            Ok(()) => Ok(InstanceLock { _file: file }),
-            Err(TryLockError::WouldBlock) => Err(LockError::Held {
+        match paddock_proc::InstanceLock::claim(&path) {
+            Ok(Claim::Acquired(_lock)) => Ok(InstanceLock { _lock }),
+            Ok(Claim::Held) => Err(LockError::Held {
                 folder: dirs.root().to_path_buf(),
             }),
-            Err(TryLockError::Error(e)) => Err(io(e)),
+            Ok(Claim::Unsupported) => Err(LockError::Io {
+                path,
+                source: std::io::Error::new(std::io::ErrorKind::Unsupported, "file locking is not supported here"),
+            }),
+            Err(e) => Err(LockError::Io {
+                path: e.path,
+                source: e.source,
+            }),
         }
     }
 }
@@ -73,14 +68,19 @@ const LOG_MAX_BYTES: u64 = 1024 * 1024;
 /// found even when the agent was started with its stderr discarded (by the app) or sent elsewhere (by a service).
 /// Bounded: a line equal to the file's last one is not written again (a service retrying a refused agent every 10 s
 /// would otherwise write thousands a day), and the file is rotated past [`LOG_MAX_BYTES`], keeping one older
-/// generation. Failures are ignored: logging never stops the agent.
+/// generation (and nothing is written while the file cannot be moved aside). Failures are ignored: logging never stops the
+/// agent. No line carries a timestamp; if one ever does, the repeat check must compare the text without it.
 pub fn note(dirs: &Dirs, line: &str) {
     use std::io::Write;
     let path = dirs.logs().join("agent.log");
     let _ = std::fs::create_dir_all(dirs.logs());
     if let Ok(meta) = std::fs::metadata(&path) {
         if meta.len() > LOG_MAX_BYTES {
-            let _ = std::fs::rename(&path, path.with_extension("log.1"));
+            // Moved aside, replacing an older generation. When it cannot be moved (a scanner holds the file), nothing is
+            // written: the file never grows past the bound by more than the line that crossed it.
+            if std::fs::rename(&path, path.with_extension("log.1")).is_err() {
+                return;
+            }
         } else if std::fs::read_to_string(&path).is_ok_and(|t| t.lines().last() == Some(line)) {
             return;
         }
@@ -93,7 +93,7 @@ pub fn note(dirs: &Dirs, line: &str) {
 /// Whether an agent holds the lock for `dirs` right now. A free lock is taken and dropped at once to find out, so an agent
 /// starting at that very instant may be refused (it exits; the caller starts or finds one on its next pass).
 pub fn is_held(dirs: &Dirs) -> bool {
-    matches!(InstanceLock::acquire(dirs), Err(LockError::Held { .. }))
+    paddock_proc::is_held(&dirs.instance_lock())
 }
 
 #[cfg(test)]
@@ -138,6 +138,28 @@ mod tests {
         note(&dirs, "after rotation");
         assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), "after rotation");
         assert!(dirs.logs().join("agent.log.1").exists());
+    }
+
+    #[test]
+    fn rotation_replaces_an_older_generation_and_a_log_that_cannot_move_is_not_written() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dirs = Dirs::at(tmp.path().join("data"));
+        let log = dirs.logs().join("agent.log");
+        let older = dirs.logs().join("agent.log.1");
+        let big = || vec![b'x'; usize::try_from(LOG_MAX_BYTES).unwrap() + 1];
+        std::fs::create_dir_all(dirs.logs()).unwrap();
+        std::fs::write(&older, b"older generation").unwrap();
+        std::fs::write(&log, big()).unwrap();
+        note(&dirs, "first after rotation");
+        assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), "first after rotation");
+        assert!(std::fs::metadata(&older).unwrap().len() > LOG_MAX_BYTES, "the older generation was replaced");
+        // The move fails (the target is a folder here; on Windows a scanner holding the file does the same): no write.
+        std::fs::remove_file(&older).unwrap();
+        std::fs::create_dir(&older).unwrap();
+        std::fs::write(&log, big()).unwrap();
+        let before = std::fs::metadata(&log).unwrap().len();
+        note(&dirs, "must not grow the file");
+        assert_eq!(std::fs::metadata(&log).unwrap().len(), before);
     }
 
     #[test]
