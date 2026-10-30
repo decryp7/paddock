@@ -16,13 +16,14 @@ pub mod credentials;
 pub mod dialogs;
 pub mod jobs;
 pub mod live;
+pub mod offline;
 pub mod quit;
 pub mod server_client;
 pub mod service_install;
 pub mod service_repair;
 pub mod tray;
 pub mod tray_model;
-pub mod updater;
+pub mod update_hooks;
 
 use commands::SharedClient;
 use paddock_shell::{AppIdentity, Builder};
@@ -42,6 +43,11 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// How long a quit may take before the shell's exit watchdog ends the process: the server's own bound for stopping
 /// serving (`stop_serving` times out at 30 s in `commands::timeout_for`) plus time to close the windows.
 pub const EXIT_STALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(40);
+
+/// Where the releases are (About's "Release notes", Updates' "Open the releases page").
+pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/paddock/releases?q=pitwall-v";
+/// The feed the updater reads (the moving `pitwall-latest` release of the Paddock repository).
+pub const UPDATE_FEED: &str = "https://dev.decryptology.net/decryp7/paddock/releases/download/pitwall-latest/latest.json";
 
 /// The tray's facts, shared by the live feed (which writes them) and the tray's model (which reads them).
 pub type SharedModel = Arc<Mutex<TrayModel>>;
@@ -114,8 +120,6 @@ paddock_commands::command_table! {
     Mutation [WINDOW] => commands::save_settings,
     Mutation [WINDOW] => quit::quit_app,
     Query [WINDOW] => quit::take_quit_ask,
-    Query [WINDOW | TRAY] => app_commands::app_update_status,
-    Mutation [WINDOW] => app_commands::check_app_update,
     Query [WINDOW] => app_commands::service_state,
     Mutation [WINDOW] => app_commands::decline_service,
     Mutation [WINDOW] => app_commands::open_service_login_items,
@@ -125,7 +129,6 @@ paddock_commands::command_table! {
     Mutation [WINDOW] => app_commands::start_benchmark,
     Mutation [WINDOW] => app_commands::start_install_service,
     Mutation [WINDOW] => app_commands::start_uninstall_service,
-    Mutation [WINDOW] => app_commands::start_app_update,
     Mutation [WINDOW] => app_commands::start_repair_service,
     Mutation [WINDOW] => app_commands::start_check_updates,
     Mutation [WINDOW] => app_commands::app_job_cancel,
@@ -159,14 +162,14 @@ pub enum Place {
 }
 
 /// The client of the server, its offline knowledge and the tray's facts, for `place`.
-fn state(place: &Place) -> (SharedClient, Arc<updater::OfflineKnown>, SharedModel) {
+fn state(place: &Place) -> (SharedClient, Arc<offline::OfflineKnown>, SharedModel) {
     let (data_dir, store): (std::path::PathBuf, Box<dyn credentials::KeyStore>) = match place {
         Place::Installed => (app_state::data_dir().unwrap_or_default(), Box::new(credentials::OsKeyStore)),
         Place::Test { dir } => (dir.clone(), Box::new(credentials::NoKeyStore)),
     };
     let keys = Arc::new(credentials::StoredAdminKey::new(store, data_dir.join("admin.key")));
-    let known_offline = Arc::new(updater::OfflineKnown::default());
-    let client: SharedClient = Arc::new(updater::Observing::new(
+    let known_offline = Arc::new(offline::OfflineKnown::default());
+    let client: SharedClient = Arc::new(offline::Observing::new(
         Arc::new(server_client::LoopbackClient::new(data_dir, keys)),
         known_offline.clone(),
     ));
@@ -178,6 +181,11 @@ fn state(place: &Place) -> (SharedClient, Arc<updater::OfflineKnown>, SharedMode
 pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
     let installed = matches!(place, Place::Installed);
     let (client, known_offline, model) = state(&place);
+    let test_dir = match &place {
+        Place::Installed => None,
+        Place::Test { dir } => Some(dir.clone()),
+    };
+    let (update_client, update_offline) = (client.clone(), known_offline.clone());
     let builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))
         .app_commands(&COMMANDS)
         .dialogs(&[&dialogs::DIALOGS])
@@ -188,15 +196,49 @@ pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
             app.manage(Arc::new(commands::Streams::default()));
             app.manage(Arc::new(jobs::Jobs::default()));
             app.manage(quit::PendingAsk::default());
-            app.manage(updater::Pending::default());
             pitwall_setup(app, installed);
             Ok(())
         })
+        .updater(move |app| updater(app, test_dir, update_client, update_offline))
         .windows(move |app| windows(app, installed));
     if installed {
         builder
     } else {
         builder.in_memory().native_menu(false)
+    }
+}
+
+/// Updates, About and What's New on the shell's updater (the `pitwall-latest` feed, the family's key from CI). Offline mode
+/// blocks every check and download, and so does an Offline mode never confirmed off (local first, fails closed). The service
+/// hooks re-register Pitwall's service after a version change. Without the CI's key the build cannot update itself and says
+/// so ("Updates are not available in this build"). The installer is `tauri-plugin-updater` (registered in [`run`]).
+fn updater<R: Runtime>(
+    app: &AppHandle<R>,
+    test_dir: Option<std::path::PathBuf>,
+    client: SharedClient,
+    known_offline: Arc<offline::OfflineKnown>,
+) -> paddock_updater::tauri::UpdatesBuilder {
+    let key = option_env!("TAURI_UPDATER_PUBKEY");
+    let b = LEGAL
+        .iter()
+        .fold(paddock_updater::tauri::UpdatesBuilder::new(APP_NAME), |b, (id, title, text)| {
+            b.legal(id, title, *text)
+        });
+    let b = b
+        .channel("stable", "Stable", UPDATE_FEED)
+        .public_key(key)
+        .offline_mode(move || known_offline.blocks_updates())
+        .releases_page(RELEASES_PAGE)
+        .homepage("https://dev.decryptology.net/decryp7/paddock")
+        .build_info(option_env!("PADDOCK_BUILD_COMMIT"), option_env!("PADDOCK_BUILD_DATE"));
+    match test_dir {
+        None => b
+            .service_hooks(Arc::new(update_hooks::PitwallService::new(client)))
+            .installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(
+                app.clone(),
+                key.unwrap_or_default(),
+            ))),
+        Some(dir) => b.dirs(dir.join("config"), dir.join("cache")).background(false),
     }
 }
 
@@ -317,7 +359,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![paddock_window::launch::HIDDEN_FLAG]),
         ))
-        .plugin(updater::plugin());
+        .plugin(tauri_plugin_updater::Builder::new().build());
     let builder = app(builder, shell(Place::Installed), launch, tray::native()).invoke_handler(invoke_handler());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -345,6 +387,20 @@ mod legal_tests {
         let ids: Vec<_> = LEGAL.iter().map(|d| d.0).collect();
         assert_eq!(ids, ["notices", "licence-mit", "licence-apache"]);
         assert!(LEGAL[1].2.contains("MIT") && LEGAL[2].2.contains("Apache License"));
+    }
+
+    /// The updater reads the feed the release workflow publishes (`pitwall-latest`), the same one `tauri.conf.json` names
+    /// for the plugin.
+    #[test]
+    fn the_update_feed_is_the_moving_release_the_workflow_publishes() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["plugins"]["updater"]["endpoints"][0], super::UPDATE_FEED);
+        let workflow = include_str!("../../../../../.gitea/workflows/pitwall-release.yml");
+        assert!(
+            workflow.contains("latest-tag: pitwall-latest"),
+            "the workflow publishes pitwall-latest"
+        );
+        assert!(super::UPDATE_FEED.contains("/pitwall-latest/latest.json"));
     }
 }
 
