@@ -11,4 +11,5 @@
 - A browser connection for JavaScript pages survives a stopped and continued process: a page no longer reports closed when the browser was stopped for a while.
 - On Windows the browser Spotter downloads for JavaScript pages starts without Chrome's testing field trials, so pages no longer fail to load with a network error when its network service cannot start sandboxed.
 - A start that does not get to its window is logged with where it stopped (the shell's start guard, from the shell plugin's set-up on), after about 20 s and then every minute, instead of leaving the log empty.
+- Starting and closing the browser for JavaScript pages is judged by whether the browser is working, not by a fixed time: a slow start or quit on a busy machine is waited for, a stuck one is ended and reported as such (ADR 0031).
 - The Copy menu copies the text you selected after a right click, and it stays open in WebKit (macOS) until you choose Copy or press Escape.
