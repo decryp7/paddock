@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { GuiCheck, runGui } from './gui.mjs';
-import { parseVncUrl, vncDoubleClickCommands, vncDragCommands } from './run.mjs';
+import { parseGateway, parseVncUrl, vncDoubleClickCommands, vncDragCommands } from './run.mjs';
 
 const config = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'apps', 'dyno', 'vm-smoke.json'), 'utf8'));
 const B = '/Applications/Dyno.app';
@@ -128,15 +128,24 @@ function fakeGui({ bug = null } = {}) {
     installerUrl: 'http://192.168.64.1:8091/Dyno_1.0.0_aarch64.dmg', installerSha256: 'feed',
     drag: async () => { st.drags++; if (bug === 'first-drag-lost' && st.drags === 1) return; st.installed = true; st.quarantine = '0183;6ae4;Safari;U'; },
     doubleClick: async () => { if (st.app) st.window = true; },
-    reboot: async () => { st.app = null; st.agents = []; st.window = false; st.settingsWin = false; st.sectionOpen = false; if (st.job) startApp({ login: true }); return true; },
+    // A running app is restored by loginwindow (it shows its window, as Dyno does today); otherwise the login item starts it.
+    reboot: async () => {
+      const wasRunning = !!st.app;
+      st.app = null; st.agents = []; st.window = false; st.settingsWin = false; st.sectionOpen = false;
+      if (wasRunning) startApp();
+      else if (st.job) startApp({ login: true });
+      if (wasRunning && st.job) st.agents = [{ pid: ++pid, ppid: 1 }];
+      return true;
+    },
   };
   const guest = { exec, now: () => clock, sleep: async (ms) => { clock += ms; } };
   return { guest, host, st };
 }
 
-async function run(bug) {
+async function run(bug, { restore = null } = {}) {
   const f = fakeGui({ bug });
-  const check = new GuiCheck(f.guest, { ...config, settleSec: 4 }, f.host, { intervalMs: 1000 });
+  const gui = { ...config.gui, loginStart: { ...config.gui.loginStart, restore } };
+  const check = new GuiCheck(f.guest, { ...config, gui, settleSec: 4 }, f.host, { intervalMs: 1000 });
   const r = await runGui(check);
   return { ...r, by: Object.fromEntries(r.steps.map((s) => [s.title, s])), st: f.st };
 }
@@ -154,7 +163,7 @@ test('GUI sequence passes on a well-behaved app: download, drag, Gatekeeper, row
   const r = await run(null);
   const failed = r.steps.filter((s) => s.status === 'fail').map((s) => `${s.title}: ${s.summary}`);
   assert.deepEqual(failed, []);
-  for (const t of ['Download with Safari (quarantine)', 'Open the dmg and drag to Applications', 'Gatekeeper first launch (Open Anyway)', 'Launch at login on: Login Items rows', 'Login Items approval (requiresApproval path)', 'Reboot: login start hidden, one agent', 'Finder double-click opens a window', 'Launch at login off', 'Quit at the end']) {
+  for (const t of ['Download with Safari (quarantine)', 'Open the dmg and drag to Applications', 'Gatekeeper first launch (Open Anyway)', 'Launch at login on: Login Items rows', 'Login Items approval (requiresApproval path)', 'Reboot as a login item (app quit first): hidden, one agent', 'Finder double-click opens a window', 'Launch at login off', 'Quit at the end']) {
     assert.equal(r.by[t]?.status, 'pass', `${t}: ${r.by[t]?.summary}`);
   }
 });
@@ -185,15 +194,15 @@ test('an unidentified legacy row in Login Items fails the rows check', async () 
 
 test('a login start that shows a window fails; the double-click then starts from the --hidden start', async () => {
   const r = await run('login-window');
-  assert.equal(r.by['Reboot: login start hidden, one agent'].status, 'fail');
-  assert.match(r.by['Reboot: login start hidden, one agent'].summary, /started with a window/);
+  assert.equal(r.by['Reboot as a login item (app quit first): hidden, one agent'].status, 'fail');
+  assert.match(r.by['Reboot as a login item (app quit first): hidden, one agent'].summary, /started with a window/);
   assert.equal(r.by['Finder double-click opens a window'].status, 'pass', 'it quits and uses the --hidden start instead');
   assert.match(r.by['Finder double-click opens a window'].checks[0].detail, /--hidden/);
 });
 
 test('a second agent after the login fails the reboot step', async () => {
   const r = await run('second-agent');
-  assert.equal(r.by['Reboot: login start hidden, one agent'].status, 'fail');
+  assert.equal(r.by['Reboot as a login item (app quit first): hidden, one agent'].status, 'fail');
 });
 
 test('Gatekeeper off in the guest stops the GUI run before anything is installed', async () => {
@@ -222,5 +231,22 @@ test('every app config has a valid gui block (window owner, content regex, tray 
     assert.doesNotThrow(() => new RegExp(l.needsApprovalText), app);
     assert.ok(['launchd', 'app'].includes(l.helperParentAfterLogin), app);
     assert.ok(g.loginStart && new RegExp(g.loginStart.hidden) && new RegExp(g.loginStart.shown) && g.loginStart.log, `${app}: loginStart`);
+    assert.ok([null, 'hidden', 'window'].includes(g.loginStart.restore), `${app}: loginStart.restore is null, hidden or window`);
   }
+});
+
+test('parseGateway takes the bridge gateway from route -n get default, nothing else', () => {
+  assert.equal(parseGateway('   route to: default\ndestination: default\n       mask: default\n    gateway: 192.168.64.1\n  interface: en0\n'), '192.168.64.1');
+  assert.equal(parseGateway('    gateway: 10.0.0.1\n'), null);
+  assert.equal(parseGateway('bash: route: command not found'), null);
+});
+
+test('the restore reboot is reported while its expected behaviour is undecided, and judged once it is', async () => {
+  const open = await run(null);
+  const s = open.by['Reboot with the app running (restored at login)'];
+  assert.equal(s.status, 'info');
+  assert.match(s.summary, /restored with: window/);
+  const decided = await run(null, { restore: 'hidden' });
+  assert.equal(decided.by['Reboot with the app running (restored at login)'].status, 'fail');
+  assert.equal((await run(null, { restore: 'window' })).by['Reboot with the app running (restored at login)'].status, 'pass');
 });

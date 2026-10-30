@@ -277,18 +277,11 @@ export class GuiCheck {
     return this.step(title, checks, { passSummary: 'refused, needs approval shown, approved in Login Items, enabled and allowed' });
   }
 
-  /**
-   * Reboot: the image logs admin in again. The app must start as the login item hidden (its log line, no window), and its helper
-   * must run once with the parent the config expects (launchd when the login item starts it). Every snapshot of the settle window
-   * is judged, so a late second helper fails.
-   */
-  async rebootLogin() {
-    const title = 'Reboot: login start hidden, one agent';
-    const l = this.gui.launchAtLogin;
-    if (!l || !this.loginOn) return this.step(title, [], { skip: 'Launch at login is not on (an earlier step failed or the app has none)' });
+  /** Reboots the guest and returns what the app did at the login: the log since the reboot, windows, the settle window. */
+  async rebootAndObserve() {
     const log = await this.core.path(this.gui.loginStart.log);
     const size = Number((await this.g.exec(`stat -f %z ${sq(log)} 2>/dev/null || echo 0`)).stdout.trim()) || 0;
-    if (!(await this.host.reboot())) return this.step(title, [{ ok: false, detail: 'the guest did not come back with an Aqua session after the reboot' }]);
+    if (!(await this.host.reboot())) return null;
     this.core.home = null;
     const appSpec = this.config.processes.find((s) => s.role === 'app');
     const helper = this.config.processes.find((s) => s.role === 'helper');
@@ -296,21 +289,65 @@ export class GuiCheck {
       const procs = await this.core.snapshot();
       return instancesOf(procs, appSpec, this.bundle).length > 0 && (!helper || instancesOf(procs, helper, this.bundle).length > 0);
     }, 3 * this.guard());
-    const w = await this.core.observe({ running: true, loginService: true });
-    const procs = w.snaps.at(-1);
+    const w = await this.core.observe({ running: true, loginService: this.loginOn });
     // A log that rotated over the reboot is read whole: the offset only skips what was written before it.
     const now = Number((await this.g.exec(`stat -f %z ${sq(log)} 2>/dev/null || echo 0`)).stdout.trim()) || 0;
     const since = (await this.g.exec(`tail -c +${now >= size ? size + 1 : 1} ${sq(log)} 2>/dev/null`)).stdout;
-    const start = judgeLoginStart(since, await this.windows(), { ...this.gui.loginStart, windowOwner: this.gui.windowOwner });
-    await this.shot('after-login');
-    const checks = [{ ok: up.ok, detail: up.ok ? `the app and its helper ran ${(up.tookMs / 1000).toFixed(0)} s after the guest answered` : 'the app did not start at login' }, ...start.checks, ...w.checks];
+    return { up, w, since, windows: await this.windows(), procs: w.snaps.at(-1) };
+  }
+
+  /**
+   * Reboot as a login item: the app is quit first (a running app is RESTORED by loginwindow, a different open event without the
+   * login-item marker; that case is the next step), so the login start comes from the login item alone. The app must start hidden
+   * (its log line, no window) and its helper must run once with the parent the config expects, over the settle window.
+   */
+  async rebootLogin() {
+    const title = 'Reboot as a login item (app quit first): hidden, one agent';
+    const l = this.gui.launchAtLogin;
+    if (!l || !this.loginOn) return this.step(title, [], { skip: 'Launch at login is not on (an earlier step failed or the app has none)' });
+    await this.core.quit('(quit before the reboot)');
+    const r = await this.rebootAndObserve();
+    if (!r) return this.step(title, [{ ok: false, detail: 'the guest did not come back with an Aqua session after the reboot' }]);
+    const start = judgeLoginStart(r.since, r.windows, { ...this.gui.loginStart, windowOwner: this.gui.windowOwner });
+    await this.shot('after-login-item-start');
+    const checks = [{ ok: r.up.ok, detail: r.up.ok ? `the app and its helper ran ${(r.up.tookMs / 1000).toFixed(0)} s after the guest answered` : 'the app did not start at login' }, ...start.checks, ...r.w.checks];
+    const appSpec = this.config.processes.find((s) => s.role === 'app');
+    const helper = this.config.processes.find((s) => s.role === 'helper');
     if (helper && l.helperParentAfterLogin) {
-      const hs = instancesOf(procs, helper, this.bundle);
-      const want = l.helperParentAfterLogin === 'launchd' ? (p) => p.ppid === 1 : (p) => instancesOf(procs, appSpec, this.bundle).some((a) => a.pid === p.ppid);
+      const hs = instancesOf(r.procs, helper, this.bundle);
+      const want = l.helperParentAfterLogin === 'launchd' ? (p) => p.ppid === 1 : (p) => instancesOf(r.procs, appSpec, this.bundle).some((a) => a.pid === p.ppid);
       checks.push({ ok: hs.length === 1 && hs.every(want), detail: `${helper.name} after the login: ${hs.map((p) => `pid ${p.pid} parent ${p.ppid}`).join(', ') || 'none'} (expected one, parent ${l.helperParentAfterLogin})` });
     }
     const job = await this.job();
-    return this.step(title, checks, { evidence: [`launchd ${l.label}: state=${job.state} pid=${job.pid}`, ...describeTree(procs, this.config, this.bundle), '--- app log since the reboot', ...since.trimEnd().split('\n').slice(-30)], passSummary: 'started hidden at login, one helper with the expected parent' });
+    return this.step(title, checks, { evidence: [`launchd ${l.label}: state=${job.state} pid=${job.pid}`, ...describeTree(r.procs, this.config, this.bundle), '--- app log since the reboot', ...r.since.trimEnd().split('\n').slice(-30)], passSummary: 'started hidden by the login item, one helper with the expected parent' });
+  }
+
+  /**
+   * Reboot with the app running, as people restart a Mac with a tray app in it: loginwindow restores it ("Reopen windows"). How
+   * the app should start then is a product decision, `gui.loginStart.restore`: "hidden", "window", or null (report only).
+   */
+  async rebootRestore() {
+    const title = 'Reboot with the app running (restored at login)';
+    const want = this.gui.loginStart?.restore;
+    if (want === undefined) return this.step(title, [], { skip: 'no gui.loginStart for this app' });
+    const appSpec = this.config.processes.find((s) => s.role === 'app');
+    if (!instancesOf(await this.core.snapshot(), appSpec, this.bundle).length) await this.core.start();
+    await this.until(async () => instancesOf(await this.core.snapshot(), appSpec, this.bundle).length > 0, this.guard());
+    const r = await this.rebootAndObserve();
+    if (!r) return this.step(title, [{ ok: false, detail: 'the guest did not come back with an Aqua session after the reboot' }]);
+    const hidden = new RegExp(this.gui.loginStart.hidden).exec(r.since)?.[0];
+    const shown = new RegExp(this.gui.loginStart.shown).exec(r.since)?.[0];
+    const wins = appWindows(r.windows, this.gui.windowOwner);
+    const got = wins.length || shown ? 'window' : hidden ? 'hidden' : 'unknown';
+    await this.shot('after-restore');
+    const facts = [{ ok: r.up.ok, detail: r.up.ok ? 'the app was restored at login' : 'the app did not come back after the reboot' },
+      { ok: true, detail: `log since the reboot: ${[hidden, shown].filter(Boolean).map((x) => `"${x}"`).join(', ') || 'no start decision logged'}; ${wins.length} window(s)` }, ...r.w.checks];
+    const evidence = [...describeTree(r.procs, this.config, this.bundle), '--- app log since the reboot', ...r.since.trimEnd().split('\n').slice(-30)];
+    if (want === null) {
+      const s = this.step(title, facts, { evidence, passSummary: '' });
+      return s.status === 'fail' ? s : { ...s, status: 'info', summary: `restored with: ${got} (expected behaviour not decided yet: gui.loginStart.restore is null)` };
+    }
+    return this.step(title, [...facts, { ok: got === want, detail: `restored with: ${got} (expected ${want})` }], { evidence, passSummary: `restored ${want}, one of each` });
   }
 
   /**
@@ -380,6 +417,7 @@ export async function runGui(check, { manual = [] } = {}) {
   push(await check.launchAtLoginOn());
   push(await check.approvalPath());
   push(await check.rebootLogin());
+  push(await check.rebootRestore());
   push(await check.finderDoubleClick());
   push(await check.launchAtLoginOff());
   push(await check.core.quit('Quit at the end'));
