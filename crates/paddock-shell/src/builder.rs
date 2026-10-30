@@ -101,7 +101,7 @@ pub struct Builder<R: Runtime> {
     setup: Vec<AppSetup<R>>,
     tray: Option<TraySetup<R>>,
     launch: Option<LaunchArgs>,
-    start_timing: StartTiming,
+    start_timing: Option<StartTiming>,
 }
 
 impl<R: Runtime> Builder<R> {
@@ -133,7 +133,7 @@ impl<R: Runtime> Builder<R> {
             setup: Vec::new(),
             tray: None,
             launch: None,
-            start_timing: StartTiming::default(),
+            start_timing: Some(StartTiming::default()),
         }
     }
 
@@ -384,9 +384,10 @@ impl<R: Runtime> Builder<R> {
         self
     }
 
-    /// When the start guard reports a start that has not reached the event loop (default: after 20 s, then every minute;
-    /// a paused process restarts its clock). It only logs, from its own thread, naming the phase; it never ends the start.
-    pub fn start_guard(mut self, timing: StartTiming) -> Self {
+    /// When the start guard reports a start that has not got from the shell plugin's set-up to `RunEvent::Ready`
+    /// (default: after 20 ticks of 1 s, then every 60; ADR 0031), or `None` for no guard (tests on the mock runtime). It
+    /// only logs warnings, from its own thread, naming the phase; it never ends the start.
+    pub fn start_guard(mut self, timing: Option<StartTiming>) -> Self {
         self.start_timing = timing;
         self
     }
@@ -401,7 +402,6 @@ impl<R: Runtime> Builder<R> {
                 app.handle(),
                 open_at_start(app.handle(), tray, launch.as_ref()),
             );
-            start_guard::phase(app.handle(), StartPhase::EventLoop);
             Ok(())
         })
     }
@@ -526,11 +526,17 @@ impl<R: Runtime> Builder<R> {
                     "tray/launch need Builder::add_to (the shell opens them from Tauri's own setup)".into(),
                 ),
                 Some(parts) => {
-                    // First: a start stuck from here to the event loop is logged with its phase (ADR 0029).
-                    start_guard::begin(app, parts.start_timing);
+                    // First: a start stuck from here to `RunEvent::Ready` is logged with its phase (ADR 0029).
+                    if let Some(timing) = parts.start_timing {
+                        start_guard::begin(app, timing);
+                    }
                     // No window may be built while Tauri holds its plugin store (it would deadlock).
                     let _scope = paddock_window::tauri::plugin_hook_scope();
-                    parts.install(app).map_err(|e| e as Box<dyn Error>)
+                    parts.install(app).map_err(|e| e as Box<dyn Error>)?;
+                    // The shell is the last plugin: Tauri starts the native event loop next and runs the app's
+                    // `setup` (the tray and the main window) only once it has.
+                    start_guard::phase(app, StartPhase::StartingEventLoop);
+                    Ok(())
                 }
                 None => Ok(()),
             })

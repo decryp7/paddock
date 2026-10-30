@@ -11,7 +11,7 @@
 
 ### Fixed
 
-- A start that does not reach its window is logged with where it stopped (the shell's start guard), after 20 s and then every minute, instead of leaving the log empty.
+- A start that does not get to its window is logged with where it stopped (the shell's start guard, from the shell plugin's set-up on), after about 20 s and then every minute, instead of leaving the log empty.
 - A browser connection survives a stopped and continued process: an interrupted socket read is no longer taken for a closed connection, so a page does not report closed after the browser is stopped and continued.
 - On Windows the test browser (Chrome for Testing) starts without its testing field trials, so loads are no longer lost with ERR_ABORTED when its network service cannot start sandboxed.
 - The Copy menu copies the text you selected after a right click, and it stays open in WebKit (macOS) until you choose Copy or press Escape.
