@@ -34,7 +34,7 @@ export function ruleSummary(r: CustomAlertRule): string {
   return r.forSecs > 0 ? `${base} for ${formatHold(r.forSecs)}` : base;
 }
 
-/** A URL-safe id from a rule name that none of `taken` uses (`gpu-limit`, `gpu-limit-2`, ...). */
+/** A URL-safe id from a rule name that none of `taken` uses (`gpu-load`, `gpu-load-2`, ...). */
 export function uniqueRuleId(name: string, taken: readonly string[]): string {
   const slug =
     name
@@ -67,15 +67,14 @@ export function clockToMinutes(text: string): number | null {
   return h < 24 && min < 60 ? h * 60 + min : null;
 }
 
-/** The engine's default when settings carry no alarm configuration yet. */
-export function defaultAlarmConfig(utcOffsetMinutes: number): AlarmConfig {
+/** The engine's default (`AlarmConfig::default` in dyno-core) while the settings have not arrived yet. */
+export function defaultAlarmConfig(): AlarmConfig {
   return {
     quiet: { enabled: false, startMinute: 22 * 60, endMinute: 7 * 60, criticalBypass: true },
-    chatterTransitions: 6,
-    chatterWindowMinutes: 30,
+    chatterTransitions: 5,
+    chatterWindowMinutes: 10,
     maxAlarms: 500,
-    keepClearedDays: 14,
-    utcOffsetMinutes,
+    keepClearedDays: 7,
   };
 }
 
@@ -153,4 +152,22 @@ export function changeLabel(c: AlarmChange): string {
 /** The rules after saving `rule`: it replaces the rule being edited (`editingId`), or is added at the end. */
 export function withRule(rules: readonly CustomAlertRule[], rule: CustomAlertRule, editingId: string | null): CustomAlertRule[] {
   return editingId === null ? [...rules, rule] : rules.map((r) => (r.id === editingId ? rule : r));
+}
+
+const ACRONYMS = new Set(['cpu', 'gpu', 'ssd', 'ram', 'tcp', 'udp', 'dns']);
+
+/**
+ * A rule's name for people: the engine's rule key (`alert:lowDisk`, `network:newExposedListener`, `threshold:gpu-load`) without
+ * its source prefix, split into words (`Low disk`, `New exposed listener`, `GPU load`). The key itself stays the identity.
+ */
+export function ruleLabel(rule: string): string {
+  const id = rule.includes(':') ? rule.slice(rule.indexOf(':') + 1) : rule;
+  const words = id
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[-_\s]+/)
+    .filter((w) => w !== '')
+    .map((w) => (ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w.toLowerCase()));
+  if (words.length === 0) return rule;
+  const text = words.join(' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }

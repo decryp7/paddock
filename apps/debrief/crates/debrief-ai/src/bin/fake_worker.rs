@@ -40,6 +40,9 @@ impl WorkerBackend for Fake {
         if self.has("--crash-on-chat") {
             crash();
         }
+        if self.has("--exit-leaving-socket") {
+            exit_leaving_socket();
+        }
         if let Some(marker) = self.value("--crash-once") {
             if !std::path::Path::new(&marker).exists() {
                 let _ = std::fs::write(&marker, b"crashed");
@@ -110,4 +113,24 @@ fn crash() -> ! {
     std::process::exit(0xC000_0409_u32 as i32);
     #[cfg(not(windows))]
     std::process::abort();
+}
+
+/// Exits with status 7 while a forked copy keeps the connection open (it ends when its stdin, the lifeline, closes), so the
+/// host sees a dead process on an open connection: a process still finishing its core dump looks the same.
+#[cfg(unix)]
+fn exit_leaving_socket() -> ! {
+    // SAFETY: the child only reads stdin and calls `_exit`, both async-signal-safe.
+    unsafe {
+        if libc::fork() == 0 {
+            let mut buf = [0u8; 64];
+            while libc::read(0, buf.as_mut_ptr().cast(), buf.len()) > 0 {}
+            libc::_exit(0);
+        }
+        libc::_exit(7);
+    }
+}
+
+#[cfg(not(unix))]
+fn exit_leaving_socket() -> ! {
+    std::process::exit(7);
 }

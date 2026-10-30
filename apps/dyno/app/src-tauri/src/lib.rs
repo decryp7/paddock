@@ -138,7 +138,7 @@ fn updater<R: Runtime>(test_dir: Option<std::path::PathBuf>, app: &tauri::AppHan
         .releases_page(RELEASES_PAGE)
         .homepage("https://dev.decryptology.net/decryp7/paddock")
         .changelog(include_str!("../../../CHANGELOG.md"))
-        .build_info(option_env!("DYNO_COMMIT"), option_env!("DYNO_BUILT"));
+        .build_info(option_env!("PADDOCK_BUILD_COMMIT"), option_env!("PADDOCK_BUILD_DATE"));
     match test_dir {
         None => b,
         Some(dir) => b.dirs(dir.join("config"), dir.join("cache")).background(false),
@@ -162,6 +162,8 @@ fn windows<R: Runtime>(app: &tauri::AppHandle<R>, installed: bool) -> Windows<R>
                 link.quit();
             }
         });
+    // A test cannot exit the mock runtime: Quit begins the quit (`Windows::quitting`) and the exit is left out.
+    let b = if installed { b } else { b.exit_app(|_, _| ()) };
     match app.path().app_data_dir() {
         Ok(dir) if installed => b.bounds_file(dir.join("window-state.json")).build(),
         _ => b.build(),

@@ -2,8 +2,11 @@
 //! snapshots) may run. With no windows configured everything may run at any time. Work the user starts with a click
 //! always runs: a window limits only what Dyno starts by itself.
 
-use crate::time::{Timestamp, DAY, MINUTE};
+use crate::time::{starts_of, to_local, LocalZone, Timestamp, DAY, MINUTE};
 use serde::{Deserialize, Serialize};
+
+/// How far ahead the status looks for the next change: a week and a day.
+const LOOK_AHEAD_DAYS: i64 = 8;
 
 /// The most windows a user may define.
 pub const MAX_WINDOWS: usize = 14;
@@ -108,13 +111,19 @@ impl MaintenanceSettings {
     }
 
     /// Whether heavier work may run at `now` (always, when windows are not in use).
-    pub fn is_open(&self, now: Timestamp, utc_offset_minutes: i32) -> bool {
-        !self.enabled || self.windows.iter().any(|w| covers(w, now, utc_offset_minutes))
+    pub fn is_open(&self, now: Timestamp, zone: &dyn LocalZone) -> bool {
+        if !self.enabled {
+            return true;
+        }
+        // One zone lookup, then every window against the same local day and minute.
+        let local = to_local(now, zone);
+        let (day, minute) = (local.div_euclid(DAY), (local.rem_euclid(DAY) / MINUTE) as u16);
+        self.windows.iter().any(|w| covers(w, day, minute))
     }
 
     /// The status at `now`.
-    pub fn status(&self, now: Timestamp, utc_offset_minutes: i32) -> MaintenanceStatus {
-        let open_now = self.is_open(now, utc_offset_minutes);
+    pub fn status(&self, now: Timestamp, zone: &dyn LocalZone) -> MaintenanceStatus {
+        let open_now = self.is_open(now, zone);
         if !self.enabled {
             return MaintenanceStatus {
                 enabled: false,
@@ -123,22 +132,23 @@ impl MaintenanceSettings {
                 next_opens_at: None,
             };
         }
-        // Scan minute by minute for the next change over at most a week and a day (bounded: 10 000 steps).
-        let mut closes_at = None;
-        let mut next_opens_at = None;
-        let mut t = now.floor_to(MINUTE);
-        for _ in 0..(8 * 24 * 60) {
-            t = t.plus(MINUTE);
-            let open = self.is_open(t, utc_offset_minutes);
-            if open_now && !open {
-                closes_at = Some(t);
-                break;
-            }
-            if !open_now && open {
-                next_opens_at = Some(t);
-                break;
-            }
-        }
+        // The state changes only where a window starts or ends: look at those instants in order, up to a week and a day
+        // ahead (bounded: 9 days x 14 windows x 2 edges), instead of at every minute.
+        let today = to_local(now, zone).div_euclid(DAY);
+        let horizon = now.plus(LOOK_AHEAD_DAYS * DAY);
+        let mut edges: Vec<Timestamp> = (today..=today + LOOK_AHEAD_DAYS)
+            .flat_map(|day| {
+                self.windows
+                    .iter()
+                    .flat_map(move |w| [w.start_minute, w.end_minute].map(|m| day * DAY + i64::from(m) * MINUTE))
+            })
+            .flat_map(|wall| starts_of(wall, zone))
+            .filter(|t| *t > now && *t <= horizon)
+            .collect();
+        edges.sort_unstable();
+        edges.dedup();
+        let change = edges.into_iter().find(|t| self.is_open(*t, zone) != open_now);
+        let (closes_at, next_opens_at) = if open_now { (change, None) } else { (None, change) };
         MaintenanceStatus {
             enabled: true,
             open_now,
@@ -148,11 +158,9 @@ impl MaintenanceSettings {
     }
 }
 
-/// Whether `w` covers the local minute of `now` (a window running past midnight belongs to the day it started).
-fn covers(w: &Window, now: Timestamp, utc_offset_minutes: i32) -> bool {
-    let local = now.millis() + i64::from(utc_offset_minutes) * MINUTE;
-    let day = local.div_euclid(DAY);
-    let minute = (local.rem_euclid(DAY) / MINUTE) as u16;
+/// Whether `w` covers `minute` of the local `day` (days since the local epoch; a window running past midnight belongs to the
+/// day it started).
+fn covers(w: &Window, day: i64, minute: u16) -> bool {
     let on = |d: i64| w.days.contains(&Weekday::from_epoch_day(d));
     if w.start_minute < w.end_minute {
         on(day) && minute >= w.start_minute && minute < w.end_minute
@@ -164,6 +172,9 @@ fn covers(w: &Window, now: Timestamp, utc_offset_minutes: i32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time::{FixedZone, DAY};
+
+    const UTC: &FixedZone = &FixedZone::UTC;
 
     // 2026-10-23 is a Friday. 2026-10-23T00:00:00Z in ms:
     const FRI: i64 = 1_792_713_600_000;
@@ -192,42 +203,42 @@ mod tests {
     #[test]
     fn off_means_always_open() {
         let s = MaintenanceSettings::default();
-        assert!(s.is_open(at(0, 12, 0), 0));
-        let st = s.status(at(0, 12, 0), 0);
+        assert!(s.is_open(at(0, 12, 0), UTC));
+        let st = s.status(at(0, 12, 0), UTC);
         assert!(!st.enabled && st.open_now && st.closes_at.is_none() && st.next_opens_at.is_none());
     }
 
     #[test]
     fn a_window_past_midnight_belongs_to_the_day_it_started() {
         let s = night();
-        assert!(!s.is_open(at(0, 22, 59), 0));
-        assert!(s.is_open(at(0, 23, 0), 0));
+        assert!(!s.is_open(at(0, 22, 59), UTC));
+        assert!(s.is_open(at(0, 23, 0), UTC));
         // Saturday 01:59 is still Friday's window; Saturday 02:00 is not.
-        assert!(s.is_open(at(1, 1, 59), 0));
-        assert!(!s.is_open(at(1, 2, 0), 0));
+        assert!(s.is_open(at(1, 1, 59), UTC));
+        assert!(!s.is_open(at(1, 2, 0), UTC));
         // Friday 01:00 belongs to Thursday's window, which does not exist.
-        assert!(!s.is_open(at(0, 1, 0), 0));
+        assert!(!s.is_open(at(0, 1, 0), UTC));
     }
 
     #[test]
     fn the_local_offset_moves_the_window() {
         let s = night();
         // 15:30 UTC is 23:30 at +08:00.
-        assert!(s.is_open(at(0, 15, 30), 8 * 60));
-        assert!(!s.is_open(at(0, 15, 30), 0));
+        assert!(s.is_open(at(0, 15, 30), &FixedZone(8 * 60)));
+        assert!(!s.is_open(at(0, 15, 30), UTC));
     }
 
     #[test]
     fn status_reports_when_it_closes_and_opens() {
         let s = night();
-        let open = s.status(at(0, 23, 30), 0);
+        let open = s.status(at(0, 23, 30), UTC);
         assert!(open.open_now);
         assert_eq!(open.closes_at, Some(at(1, 2, 0)));
-        let closed = s.status(at(0, 12, 0), 0);
+        let closed = s.status(at(0, 12, 0), UTC);
         assert!(!closed.open_now);
         assert_eq!(closed.next_opens_at, Some(at(0, 23, 0)));
         // After this Friday's window, the next opens a week later.
-        let after = s.status(at(1, 3, 0), 0);
+        let after = s.status(at(1, 3, 0), UTC);
         assert_eq!(after.next_opens_at, Some(at(7, 23, 0)));
     }
 
@@ -241,10 +252,74 @@ mod tests {
                 end_minute: 10 * 60,
             }],
         };
-        assert!(s.is_open(at(0, 9, 0), 0));
-        assert!(!s.is_open(at(0, 10, 0), 0));
-        assert!(s.is_open(at(1, 9, 59), 0));
-        assert!(!s.is_open(at(2, 9, 30), 0));
+        assert!(s.is_open(at(0, 9, 0), UTC));
+        assert!(!s.is_open(at(0, 10, 0), UTC));
+        assert!(s.is_open(at(1, 9, 59), UTC));
+        assert!(!s.is_open(at(2, 9, 30), UTC));
+    }
+
+    /// Central European Time with 2026's summer time (+60, +120 from 29 March 01:00 UTC to 25 October 01:00 UTC).
+    #[derive(Debug)]
+    struct Berlin2026;
+    impl LocalZone for Berlin2026 {
+        fn offset_minutes(&self, at: Timestamp) -> i32 {
+            if (1_774_746_000_000..1_792_890_000_000).contains(&at.millis()) {
+                120
+            } else {
+                60
+            }
+        }
+    }
+
+    /// The status the slow way: every minute for a week and a day (the implementation before edges, kept as the reference).
+    fn by_minutes(s: &MaintenanceSettings, now: Timestamp, zone: &dyn LocalZone) -> MaintenanceStatus {
+        let open_now = s.is_open(now, zone);
+        let mut t = now.floor_to(MINUTE);
+        let mut change = None;
+        for _ in 0..(LOOK_AHEAD_DAYS * 24 * 60) {
+            t = t.plus(MINUTE);
+            if s.is_open(t, zone) != open_now {
+                change = Some(t);
+                break;
+            }
+        }
+        MaintenanceStatus {
+            enabled: true,
+            open_now,
+            closes_at: change.filter(|_| open_now),
+            next_opens_at: change.filter(|_| !open_now),
+        }
+    }
+
+    #[test]
+    fn jumping_to_window_edges_finds_what_scanning_every_minute_finds() {
+        let windows = [
+            (vec![Weekday::Fri], 23 * 60, 2 * 60),
+            (vec![Weekday::Sun], 2 * 60 + 30, 3 * 60),
+            (vec![Weekday::Mon, Weekday::Wed], 0, 60),
+            (vec![Weekday::Sat, Weekday::Sun], 9 * 60, 17 * 60),
+        ];
+        let s = MaintenanceSettings {
+            enabled: true,
+            windows: windows
+                .into_iter()
+                .map(|(days, start_minute, end_minute)| Window {
+                    days,
+                    start_minute,
+                    end_minute,
+                })
+                .collect(),
+        };
+        // Every 97 minutes over the weeks around both of 2026's clock changes, in Berlin, UTC and UTC+8.
+        let zones: [&dyn LocalZone; 3] = [&Berlin2026, UTC, &FixedZone(480)];
+        for start in [1_774_137_600_000i64, 1_792_281_600_000] {
+            for step in 0..300 {
+                let now = Timestamp(start + step * 97 * MINUTE + 7_000);
+                for zone in zones {
+                    assert_eq!(s.status(now, zone), by_minutes(&s, now, zone), "{now:?} {zone:?}");
+                }
+            }
+        }
     }
 
     #[test]

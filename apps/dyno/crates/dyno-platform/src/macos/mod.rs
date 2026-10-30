@@ -30,6 +30,7 @@ pub fn platform() -> Platform {
         activity: Box::new(activity::MacActivity::new()),
         issues: crate::issues::os_sources(),
         links: Box::new(crate::links::OsLinks::new()),
+        zone: std::sync::Arc::new(crate::zone::SystemZone),
     }
 }
 

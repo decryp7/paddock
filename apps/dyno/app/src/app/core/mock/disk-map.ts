@@ -27,7 +27,7 @@ const MB = 1024 ** 2;
 export function mockVolumes(): Volume[] {
   const base = { rotational: false, readOnly: false, reachable: true, wholeVolume: true };
   return [
-    { ...base, id: '/', name: 'Macintosh HD', mount: '/', fs: 'apfs', location: 'internal', capacity: Math.round(994.7 * GB), free: Math.round(378.2 * GB) },
+    { ...base, id: '/', name: 'Macintosh HD', mount: '/', fs: 'apfs', location: 'internal', capacity: Math.round(953 * GB), free: Math.round(210 * GB) },
     {
       ...base,
       id: '/Volumes/Photos',
@@ -83,6 +83,7 @@ function specFor(volumeId: string): Spec {
           dir('Movies', [leaf('screen-recording.mov', 18.4), leaf('conference.mp4', 7.7)], 2.2),
           dir('Documents', [leaf('archive-2019.zip', 5.2)], 11.8),
           dir('Downloads', [leaf('installer.dmg', 4.1)], 6.6),
+          dir('Projects', [leaf('monorepo', 96), leaf('build output', 58), leaf('node_modules', 14)], 5),
         ], 8.4),
       ]),
       dir('Applications', [leaf('Xcode.app', 38.9), leaf('Editor.app', 2.8)], 21.7),
@@ -91,7 +92,7 @@ function specFor(volumeId: string): Spec {
       dir('opt', [], 4.8),
       { name: 'Volumes', kind: 'mountPoint' as const },
     ],
-    9.3,
+    0,
   );
 }
 

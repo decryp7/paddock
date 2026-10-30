@@ -17,9 +17,11 @@ choice on Windows (a service) is the wrong one for Dyno.
      `Contents/Library/LaunchAgents/net.decryptology.dyno.agent.plist`, and the shell registers it with
      `SMAppService` (macOS 13+; approval in System Settings > Login Items when the OS asks). The plist runs
      `dyno-agent run` at login (`RunAtLoad`, `KeepAlive`, `ThrottleInterval` 10 s, `LimitLoadToSessionType Aqua`,
-     `ProcessType Background`). The bundle is ad-hoc signed (`signingIdentity "-"`) because `SMAppService` and launch
-     agents refuse a linker-signed bundle (-67056). After an app update launchd may keep the old code requirement and
-     refuse the new binary ("needs LWCR update", spawn failed, exit 78); registering over the live job changes nothing.
+     `ProcessType Standard`; amended 2026-10-30: launchd runs a `Background` job as a DARWIN_BG process with every
+     thread clamped to the `BACKGROUND` QoS band, and the agent answers every request of the app). The bundle is ad-hoc
+     signed (`signingIdentity "-"`) because `SMAppService` and launch agents refuse a linker-signed bundle (-67056).
+     After an app update launchd may keep the old code requirement and refuse the new binary ("needs LWCR update",
+     spawn failed, exit 78); registering over the live job changes nothing.
      The shell therefore replaces the registration (unregister, `launchctl bootout`, wait until the job is gone,
      register, bounded retries) once per version change (the version is recorded in `service-registered-version` in
      the data folder) and whenever `launchctl print` reports it stale while the agent is silent
@@ -27,8 +29,9 @@ choice on Windows (a service) is the wrong one for Dyno.
      service install` writes `~/Library/LaunchAgents/net.decryptology.dyno.agent.plist` and runs `launchctl bootout`,
      waits (bounded) until launchd dropped the job, then `bootstrap`, logging to `~/Library/Logs/Dyno/agent.log`.
    - **Linux: a systemd user unit.** `~/.config/systemd/user/dyno-agent.service`, `Restart=always`, `RestartSec=5`,
-     `Nice=10`, `CPUWeight=20`, `IOSchedulingClass=idle`, `MemoryHigh=256M`, `WantedBy=default.target`, enabled with
-     `systemctl --user enable --now`. Without systemd the app starts the agent itself (ADR 0002).
+     `Nice=10`, `CPUWeight=20`, `IOSchedulingClass=best-effort` with `IOSchedulingPriority=7` (never the idle class,
+     rule 52: the agent reads the folders of a scan the person watches), `MemoryHigh=256M`, `WantedBy=default.target`,
+     enabled with `systemctl --user enable --now`. Without systemd the app starts the agent itself (ADR 0002).
    - **Windows: a per-user `Run` entry, not a service.** `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value
      `Dyno`, data `"<exe>" run`.
 2. **Why not a Windows service (SCM).** Services run in session 0, isolated from the desktop since Vista. From there the

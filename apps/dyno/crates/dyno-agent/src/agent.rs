@@ -176,6 +176,8 @@ pub struct Core {
     /// Apps that are crashing repeatedly now (refreshed after each read of the OS logs); the crash-loop alert and the
     /// health report read them.
     pub crash_loops: Vec<dyno_core::anomaly::Anomaly>,
+    /// The user's local time zone (from the platform): every local day, hour and minute goes through it.
+    pub zone: dyno_core::time::Zone,
 }
 
 impl Core {
@@ -315,7 +317,8 @@ impl Shared {
         let settings = settings.unwrap_or_default().normalised();
         let settings_limits = settings.disk.limits();
         let (job_workers, read_threads) = (settings.jobs.worker_count(), settings.disk.read_threads);
-        let alarms = crate::alarms::AlarmCentre::load(&store, settings.alarms);
+        let zone = platform.zone.clone();
+        let alarms = crate::alarms::AlarmCentre::load(&store, settings.alarms, zone.clone());
         let mut core = Core {
             store,
             settings,
@@ -330,6 +333,7 @@ impl Shared {
             alarms,
             recorder: crate::recorder::Recorder::new(),
             crash_loops: Vec::new(),
+            zone,
         };
         for n in notes {
             core.log(t, ActivityKind::System, "Dyno started with a clean slate".into(), n);
@@ -354,6 +358,7 @@ impl Shared {
             activity,
             issues,
             links,
+            zone: _,
         } = platform;
         let shared = Arc::new_cyclic(|me| Shared {
             plugins: dyno_plugin_host::PluginHost::new(dyno_plugin_host::HostConfig::new(dirs.plugins())),

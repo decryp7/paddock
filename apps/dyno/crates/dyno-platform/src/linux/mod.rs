@@ -50,6 +50,7 @@ pub fn platform() -> Platform {
         activity: Box::new(activity::LinuxActivity::from_env(tools)),
         issues: crate::issues::os_sources(),
         links: Box::new(crate::links::OsLinks::new()),
+        zone: std::sync::Arc::new(crate::zone::SystemZone),
     }
 }
 

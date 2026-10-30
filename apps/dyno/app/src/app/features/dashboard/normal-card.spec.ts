@@ -32,7 +32,7 @@ describe('dy-normal-card', () => {
   it('while learning: one quiet line and no highlights', async () => {
     const { f, el } = render(mockBaselines(NOW, 'learning'));
     await settle(f);
-    expect(el.querySelector('.line')?.textContent).toBe('Learning what is normal for this PC: day 3 of 7');
+    expect(el.querySelector('.line')?.textContent).toBe('Learning what is normal for this computer: day 3 of 7');
     expect(el.querySelector('li')).toBeNull();
   });
 
@@ -41,7 +41,7 @@ describe('dy-normal-card', () => {
     await settle(f);
     const rows = [...el.querySelectorAll('li')];
     expect(rows).toHaveLength(3);
-    expect(rows[0]!.querySelector('.what')?.textContent).toContain('CPU: Higher than usual for Tuesday mornings');
+    expect(rows[0]!.querySelector('.what')?.textContent).toContain('CPU: Higher than usual for Thursday afternoons');
     expect(rows[0]!.querySelector('.vals')?.textContent).toBe('71% now · usually 14%');
     expect(f.debugElement.queryAll(By.directive(MatTooltip))[0]!.injector.get(MatTooltip).message).toContain('usually about 14%');
     expect(rows[0]!.querySelector('.visually-hidden')?.textContent).toContain('usually about 14%');

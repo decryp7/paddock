@@ -22,6 +22,13 @@ pub trait Terminator: Send {
 pub struct OsTerminator;
 
 impl Terminator for OsTerminator {
+    #[cfg_attr(
+        unix,
+        expect(
+            clippy::disallowed_methods,
+            reason = "ADR 0033 WP-6: asks a pid from the last probe; take a ProcessId and use paddock_proc::ask"
+        )
+    )]
     fn ask(&self, pid: u32) -> Result<(), String> {
         #[cfg(unix)]
         {
@@ -40,6 +47,13 @@ impl Terminator for OsTerminator {
         }
     }
 
+    #[cfg_attr(
+        unix,
+        expect(
+            clippy::disallowed_methods,
+            reason = "ADR 0033 WP-6: ends a pid from the last probe; take a ProcessId and use paddock_proc::end"
+        )
+    )]
     fn end(&self, pid: u32) {
         #[cfg(unix)]
         {

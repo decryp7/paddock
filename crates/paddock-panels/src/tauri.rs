@@ -43,7 +43,7 @@ use ::tauri::{AppHandle, Runtime, WebviewWindow, WebviewWindowBuilder};
 use paddock_commands::labels::{Label, resolve};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 /// The log target of this crate.
@@ -99,6 +99,34 @@ impl<R: Runtime> WindowHooks<R> {
 pub struct PanelsBuilder {
     route: String,
     bounds_file: Option<PathBuf>,
+    pointer: Arc<dyn Pointer>,
+}
+
+/// The default mouse button source: the OS in an app; in tests and on the mock runtime (other crates' tests) one that
+/// cannot tell, so no test ever reads the user's mouse (rule 7).
+fn default_pointer() -> Arc<dyn Pointer> {
+    #[cfg(any(test, feature = "mock-runtime"))]
+    return Arc::new(CannotTell);
+    #[cfg(not(any(test, feature = "mock-runtime")))]
+    return Arc::new(native::OsPointer);
+}
+
+/// A mouse button source that cannot tell (as on Linux): the default in tests.
+#[cfg(any(test, feature = "mock-runtime"))]
+struct CannotTell;
+
+#[cfg(any(test, feature = "mock-runtime"))]
+impl Pointer for CannotTell {
+    fn primary_button_down(&self) -> Option<bool> {
+        None
+    }
+}
+
+/// Where the state of the primary mouse button comes from: the OS by default, a scripted source in tests (which never
+/// read the user's mouse, rule 7).
+pub trait Pointer: Send + Sync {
+    /// Whether the primary (usually left) button is held anywhere on screen; `None` when the source cannot tell.
+    fn primary_button_down(&self) -> Option<bool>;
 }
 
 impl PanelsBuilder {
@@ -114,6 +142,12 @@ impl PanelsBuilder {
         self
     }
 
+    /// Reads the mouse button from `pointer` instead of the OS (tests; default: the OS).
+    pub fn pointer(mut self, pointer: impl Pointer + 'static) -> Self {
+        self.pointer = Arc::new(pointer);
+        self
+    }
+
     /// The managed state: `app.manage(builder.build())`.
     pub fn build(self) -> Panels {
         Panels {
@@ -126,6 +160,7 @@ impl PanelsBuilder {
             ghost: Mutex::new(State::default()),
             exiting: AtomicBool::new(false),
             started: Instant::now(),
+            pointer: self.pointer,
         }
     }
 }
@@ -139,6 +174,7 @@ pub struct Panels {
     ghost: Mutex<State>,
     exiting: AtomicBool,
     started: Instant,
+    pointer: Arc<dyn Pointer>,
 }
 
 impl Panels {
@@ -147,6 +183,7 @@ impl Panels {
         PanelsBuilder {
             route: DEFAULT_ROUTE.to_string(),
             bounds_file: None,
+            pointer: default_pointer(),
         }
     }
 
@@ -167,6 +204,11 @@ impl Panels {
 
     pub(crate) fn exiting(&self) -> bool {
         self.exiting.load(Ordering::SeqCst)
+    }
+
+    /// The mouse button source (see [`PanelsBuilder::pointer`]).
+    pub(crate) fn pointer(&self) -> Arc<dyn Pointer> {
+        self.pointer.clone()
     }
 
     pub(crate) fn ghost(&self) -> MutexGuard<'_, State> {

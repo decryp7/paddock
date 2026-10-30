@@ -239,6 +239,7 @@ mod platform {
             // SAFETY: as above; failure (no terminate right on an elevated process) is ignored: the child also
             // exits when its connection closes.
             unsafe {
+                // conformance: pid-kill — a process handle we own (the process object cannot be handed on while it is open)
                 let _ = TerminateProcess(self.0, 1);
             }
         }

@@ -46,13 +46,31 @@ pub enum ThrottleCause {
     Unexplained,
 }
 
+/// What this OS calls its reduced-power mode, as the start of a label: "Low Power Mode" (macOS), "Power saver" (Linux), "Battery saver" (Windows).
+pub const POWER_SAVING_LABEL: &str = if cfg!(target_os = "macos") {
+    "Low Power Mode"
+} else if cfg!(target_os = "linux") {
+    "Power saver"
+} else {
+    "Battery saver"
+};
+
+/// The same inside a sentence: "Low Power Mode" keeps its capitals, the others are lower case.
+pub const POWER_SAVING_NAME: &str = if cfg!(target_os = "macos") {
+    "Low Power Mode"
+} else if cfg!(target_os = "linux") {
+    "power saver"
+} else {
+    "battery saver"
+};
+
 impl ThrottleCause {
     /// A short label.
     pub fn label(self) -> &'static str {
         match self {
             ThrottleCause::Thermal => "Heat",
             ThrottleCause::Power => "Power limit",
-            ThrottleCause::BatterySaver => "Battery saver",
+            ThrottleCause::BatterySaver => POWER_SAVING_LABEL,
             ThrottleCause::Unexplained => "Unknown cause",
         }
     }
@@ -272,7 +290,7 @@ pub fn detect(window: &[ThrottleInput]) -> ThrottleReading {
             ),
         ),
         ThrottleCause::BatterySaver => (
-            format!("Slowed down by battery saver: {lost:.0}% slower"),
+            format!("Slowed down by {POWER_SAVING_NAME}: {lost:.0}% slower"),
             format!("The CPU is giving up {cost} because {why}. Turn the mode off (or plug in) when you need full speed."),
         ),
         ThrottleCause::Unexplained => (
@@ -629,6 +647,20 @@ mod tests {
         }));
         assert_eq!(cause(&r), Some((ThrottleCause::Unexplained, 25.0)));
         assert_eq!(r.confidence, Confidence::Medium);
+    }
+
+    #[test]
+    fn the_power_saving_mode_is_named_as_the_os_names_it() {
+        let expected = if cfg!(target_os = "macos") {
+            ("Low Power Mode", "Slowed down by Low Power Mode")
+        } else if cfg!(target_os = "linux") {
+            ("Power saver", "Slowed down by power saver")
+        } else {
+            ("Battery saver", "Slowed down by battery saver")
+        };
+        assert_eq!(ThrottleCause::BatterySaver.label(), expected.0);
+        let r = detect(&window(|i| i.power_saver = Some(true)));
+        assert!(r.headline.starts_with(expected.1), "{}", r.headline);
     }
 
     #[test]

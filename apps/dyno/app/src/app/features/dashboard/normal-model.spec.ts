@@ -35,8 +35,8 @@ describe('normal model', () => {
     expect(itemName(item('rustc', 'usual', 'CPU'))).toBe('rustc CPU');
   });
   it('has a quiet line while learning or when nothing is unusual, and none when a list follows or it is off', () => {
-    expect(normalLine(overview({ learning: { daysDone: 3, daysNeeded: 7 } }), 0)).toBe('Learning what is normal for this PC: day 3 of 7');
-    expect(normalLine(overview({ learning: { daysDone: 0, daysNeeded: 7 } }), 0)).toBe('Learning what is normal for this PC: day 1 of 7');
+    expect(normalLine(overview({ learning: { daysDone: 3, daysNeeded: 7 } }), 0)).toBe('Learning what is normal for this computer: day 3 of 7');
+    expect(normalLine(overview({ learning: { daysDone: 0, daysNeeded: 7 } }), 0)).toBe('Learning what is normal for this computer: day 1 of 7');
     expect(normalLine(overview({ ready: { days: 9 } }), 0)).toBe('Everything looks usual for this time of the week');
     expect(normalLine(overview({ ready: { days: 9 } }), 2)).toBeNull();
     expect(normalLine(overview('off'), 0)).toBeNull();

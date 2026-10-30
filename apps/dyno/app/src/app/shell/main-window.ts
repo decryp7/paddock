@@ -1,3 +1,4 @@
+import { menuModeProviders } from './menu-mode';
 import { ChangeDetectionStrategy, Component, provideAppInitializer, inject } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import type { Routes } from '@angular/router';
@@ -61,6 +62,7 @@ export function bootMainWindow(): Promise<unknown> {
       provideShellAbout({ about: aboutBackend, updates: updatesBackend, main: true, ready: windowReady }),
       provideContributions(SETTINGS_CONTRIBUTIONS),
       provideShellSettings({ backend: settingsBackend, appearance: { gate: windowReady } }),
+      ...menuModeProviders(!!ipc, window.location.search),
       provideSubmenus(),
       // Mod+Shift+P lists the commands, Mod+P goes to a page (the shared palette on the pages frame).
       providePagesPalette({ commonCommands: ['pd.settings.open', 'dy.refresh-history', 'dy.rescan-issues', 'dy.capture'] }),

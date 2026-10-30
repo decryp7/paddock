@@ -66,7 +66,7 @@ fn requests_are_bounded_and_texts_without_words_search_nothing() {
             &store,
             &Corpus::default(),
             &SearchAllRequest { text: text.into(), limit },
-            &Control::new(BUDGET, NEVER),
+            &Control::unbounded(NEVER),
         )
     };
     assert_eq!(run_with("  ", 0), Ok(None));
@@ -132,9 +132,7 @@ fn finds_events_sources_notes_and_knowledge_with_the_words_marked() {
             doc("k2", DocScope::Project, "Timeout policy", "Retry three times."),
         ],
     };
-    let reply = run(&store, &corpus, &req("timeout"), &Control::new(BUDGET, NEVER))
-        .unwrap()
-        .unwrap();
+    let reply = run(&store, &corpus, &req("timeout"), &Control::unbounded(NEVER)).unwrap().unwrap();
 
     assert_eq!(reply.events.total, 1);
     let ev = &reply.events.items[0];
@@ -150,7 +148,7 @@ fn finds_events_sources_notes_and_knowledge_with_the_words_marked() {
     assert_eq!(reply.knowledge.items[0].scope, DocScope::Global);
     assert_eq!(marked(&reply.knowledge.items[0].snippet), vec!["Timeout"]);
 
-    let by_path = run(&store, &corpus, &req("payments serv"), &Control::new(BUDGET, NEVER))
+    let by_path = run(&store, &corpus, &req("payments serv"), &Control::unbounded(NEVER))
         .unwrap()
         .unwrap();
     assert_eq!(by_path.sources.total, 1);
@@ -161,7 +159,7 @@ fn finds_events_sources_notes_and_knowledge_with_the_words_marked() {
         by_path.knowledge.total, 0,
         "every word must be there: the glossary names payments only"
     );
-    let split = run(&store, &corpus, &req("policy retry"), &Control::new(BUDGET, NEVER))
+    let split = run(&store, &corpus, &req("policy retry"), &Control::unbounded(NEVER))
         .unwrap()
         .unwrap();
     assert_eq!(split.knowledge.total, 1, "the words may be split between the title and the text");
@@ -298,7 +296,7 @@ impl SearchSource for Fake {
 #[test]
 fn finds_field_names_values_of_fields_with_few_values_and_marker_kinds() {
     let fake = Fake::with_fields();
-    let reply = run(&fake, &Corpus::default(), &req("card"), &Control::new(BUDGET, NEVER))
+    let reply = run(&fake, &Corpus::default(), &req("card"), &Control::unbounded(NEVER))
         .unwrap()
         .unwrap();
     let found: Vec<(String, Option<String>)> = reply.fields.items.iter().map(|f| (f.field.clone(), f.value.clone())).collect();
@@ -333,7 +331,7 @@ fn field_values_are_searched_in_at_most_a_bounded_number_of_fields() {
             text: "card".into(),
             limit: 2,
         },
-        &Control::new(BUDGET, NEVER),
+        &Control::unbounded(NEVER),
     )
     .unwrap()
     .unwrap();
@@ -352,7 +350,7 @@ fn a_store_failure_fails_only_its_kinds() {
         notes: vec![doc("n1", DocScope::Project, "Card", "card")],
         ..Corpus::default()
     };
-    let reply = run(&fake, &corpus, &req("card"), &Control::new(BUDGET, NEVER)).unwrap().unwrap();
+    let reply = run(&fake, &corpus, &req("card"), &Control::unbounded(NEVER)).unwrap().unwrap();
     assert_eq!(
         reply.events.outcome,
         KindOutcome::Failed {
@@ -366,7 +364,7 @@ fn a_store_failure_fails_only_its_kinds() {
         fail_summary: Some(StoreError::Busy("an import is running".into())),
         ..Fake::with_fields()
     };
-    let reply = run(&fake, &corpus, &req("card"), &Control::new(BUDGET, NEVER)).unwrap().unwrap();
+    let reply = run(&fake, &corpus, &req("card"), &Control::unbounded(NEVER)).unwrap().unwrap();
     let busy = KindOutcome::Failed {
         message: "busy: an import is running".into(),
     };
@@ -382,7 +380,7 @@ fn a_store_failure_fails_only_its_kinds() {
         fail_facet_after: Some(1),
         ..Fake::with_fields()
     };
-    let reply = run(&fake, &corpus, &req("card"), &Control::new(BUDGET, NEVER)).unwrap().unwrap();
+    let reply = run(&fake, &corpus, &req("card"), &Control::unbounded(NEVER)).unwrap().unwrap();
     assert!(matches!(reply.fields.outcome, KindOutcome::Failed { .. }));
     assert_eq!(reply.fields.total, 2, "the name and the values found before the failure stay");
 }
@@ -407,7 +405,7 @@ fn finds_exception_groups_by_type_message_or_top_frame() {
         ..Fake::with_fields()
     };
     let found = |text: &str| {
-        run(&fake, &Corpus::default(), &req(text), &Control::new(BUDGET, NEVER))
+        run(&fake, &Corpus::default(), &req(text), &Control::unbounded(NEVER))
             .unwrap()
             .unwrap()
             .exceptions
@@ -430,7 +428,7 @@ fn finds_exception_groups_by_type_message_or_top_frame() {
         fail_exceptions: Some(StoreError::Busy("an import is running".into())),
         ..Fake::with_fields()
     };
-    let reply = run(&broken, &Corpus::default(), &req("card"), &Control::new(BUDGET, NEVER))
+    let reply = run(&broken, &Corpus::default(), &req("card"), &Control::unbounded(NEVER))
         .unwrap()
         .unwrap();
     assert!(matches!(reply.exceptions.outcome, KindOutcome::Failed { .. }));
@@ -508,7 +506,7 @@ fn a_newer_search_cancels_this_one() {
 fn every_query_store_is_a_search_source() {
     let (store, dir) = store_with("port", &lines(3));
     let dynamic: &dyn crate::ports::Store = &store;
-    let reply = run(dynamic, &Corpus::default(), &req("worker"), &Control::new(BUDGET, NEVER))
+    let reply = run(dynamic, &Corpus::default(), &req("worker"), &Control::unbounded(NEVER))
         .unwrap()
         .unwrap();
     assert_eq!(reply.events.total, 3);

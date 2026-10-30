@@ -14,7 +14,51 @@ fn options(base: &std::path::Path) -> LaunchOptions {
         .iter()
         .map(|f| f.to_string())
         .collect();
+    o.extra_args.extend(chrome_log_args(
+        std::env::var("PADDOCK_TEST_BROWSER_LOG").ok().as_deref(),
+        base,
+    ));
     o
+}
+
+/// Chrome's own verbose log for CI (`PADDOCK_TEST_BROWSER_LOG`, a folder the job keeps as an artifact): why a child
+/// process such as the network service went away is only in there (ADR 0030). One file per browser, named after its
+/// throwaway base folder (no leading dot, so the artifact keeps it). Nothing when the variable is unset or empty.
+fn chrome_log_args(dir: Option<&str>, base: &std::path::Path) -> Vec<String> {
+    let Some(dir) = dir.filter(|d| !d.is_empty()) else {
+        return Vec::new();
+    };
+    let dir = std::path::Path::new(dir);
+    let _ = std::fs::create_dir_all(dir);
+    let name = base
+        .file_name()
+        .map_or_else(|| "chrome".into(), |n| n.to_string_lossy().into_owned());
+    vec![
+        "--enable-logging".into(),
+        "--v=1".into(),
+        format!(
+            "--log-file={}",
+            dir.join(format!("chrome-{}.log", name.trim_start_matches('.')))
+                .display()
+        ),
+    ]
+}
+
+#[test]
+fn chrome_logs_only_when_ci_asks_for_them() {
+    let base = std::path::Path::new("/t/.tmpAbc");
+    assert!(chrome_log_args(None, base).is_empty());
+    assert!(chrome_log_args(Some(""), base).is_empty());
+    let dir = tempfile::tempdir().unwrap();
+    let args = chrome_log_args(dir.path().to_str(), base);
+    assert_eq!(&args[..2], ["--enable-logging", "--v=1"]);
+    assert_eq!(
+        args[2],
+        format!(
+            "--log-file={}",
+            dir.path().join("chrome-tmpAbc.log").display()
+        )
+    );
 }
 
 /// Answers one connection like a well-behaved server: reads the whole request head, answers with `answer(path)`, stops
@@ -90,7 +134,162 @@ fn a_new_tab_loads_a_page_at_once() {
             format!("http://127.0.0.1:{port}/")
         );
     }
-    assert!(b.close(), "Browser.close ends it by itself");
+    let exited = close_by_itself(&mut b);
+    assert!(
+        exited.0,
+        "Browser.close ends it by itself (waited {:?})",
+        exited.1
+    );
+}
+
+/// Chrome cancels every load its network service was carrying when that process crashes or restarts, with
+/// `net::ERR_ABORTED` and no other navigation and no download (the trace of Windows CI runs 18449, 19025, 19043 and 19880;
+/// the same signature here when the process is ended). The error names that cause, so a Windows failure says whether
+/// it was this one. The order is fixed: the first request is held at the server until the network service has been
+/// ended, so the load is always in flight when the service goes.
+#[test]
+fn a_load_the_network_service_lost_names_the_restart() {
+    let Some(exe) = require_browser() else { return };
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (arrived, first_request) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let held = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        for s in listener.incoming().map_while(Result::ok) {
+            let (arrived, held) = (arrived.clone(), held.clone());
+            std::thread::spawn(move || {
+                if let Some(s) = answer(s, |_| None) {
+                    held.lock().unwrap_or_else(|e| e.into_inner()).push(s);
+                    let _ = arrived.send(());
+                }
+            });
+        }
+    });
+    let base = tempfile::tempdir().unwrap();
+    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let browser = b.pid().expect("the browser's process");
+    let page = b.new_page().unwrap();
+    let url = format!("http://127.0.0.1:{port}/lost");
+    let loaded = std::thread::scope(|s| {
+        let load = s.spawn(|| page.navigate(&url, Duration::from_secs(30)));
+        first_request
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the first request reaches the server");
+        let pid = page
+            .network_service_pid()
+            .expect("the process list")
+            .expect("the browser names its network service");
+        // Only a process of the browser this test launched is ended (rule 7: nothing else on the machine), by identity (rule 53).
+        let service = paddock_proc::ProcessId::of(pid).expect("the network service is running");
+        let browser_id = paddock_proc::ProcessId::of(browser).expect("the browser is running");
+        assert!(
+            paddock_proc::descendants_of(browser_id).contains(&service),
+            "the network service {pid} is a process of the test's browser {browser}"
+        );
+        paddock_proc::end(service);
+        load.join().unwrap()
+    });
+    let e = loaded.expect_err("the load was lost").to_string();
+    assert!(e.contains("network service restarted"), "{e}");
+    let exited = close_by_itself(&mut b);
+    assert!(
+        exited.0,
+        "Browser.close ends it by itself (waited {:?})",
+        exited.1
+    );
+}
+
+/// A document the server answers with no content (204) is cancelled by Chrome with `net::ERR_ABORTED` too, but it was
+/// answered: the error never blames the network service.
+#[test]
+fn an_answered_abort_never_blames_the_network_service() {
+    let Some(exe) = require_browser() else { return };
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for s in listener.incoming().map_while(Result::ok) {
+            std::thread::spawn(move || {
+                let mut s = s;
+                let mut head = Vec::new();
+                let mut buf = [0u8; 4096];
+                while !head.windows(4).any(|w| w == b"\r\n\r\n") && head.len() < 16 << 10 {
+                    match std::io::Read::read(&mut s, &mut buf) {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => head.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let _ = std::io::Write::write_all(
+                    &mut s,
+                    b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n",
+                );
+                let _ = s.shutdown(std::net::Shutdown::Write);
+                let _ = s.set_read_timeout(Some(Duration::from_secs(30)));
+                while matches!(std::io::Read::read(&mut s, &mut buf), Ok(n) if n > 0) {}
+            });
+        }
+    });
+    let base = tempfile::tempdir().unwrap();
+    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let page = b.new_page().unwrap();
+    let e = page
+        .navigate(
+            &format!("http://127.0.0.1:{port}/empty"),
+            Duration::from_secs(30),
+        )
+        .expect_err("a 204 is not a page")
+        .to_string();
+    assert!(
+        e.contains("net::ERR_ABORTED") && !e.contains("network service"),
+        "{e}"
+    );
+    let exited = close_by_itself(&mut b);
+    assert!(
+        exited.0,
+        "Browser.close ends it by itself (waited {:?})",
+        exited.1
+    );
+}
+
+/// Every helper process the browser needs starts on the first try. In all 12 Chrome logs of Windows CI runs 7149 and 7154
+/// the sandboxed network service of Chrome for Testing's testing config could not start (the browser sat in the runner's
+/// user folder) and was started again unsandboxed; real-browser loads were lost in those runs. The browser counts such
+/// failed starts itself, so this checks every browser, not only the unlucky loads.
+#[test]
+fn every_helper_process_starts_on_the_first_try() {
+    let Some(exe) = require_browser() else { return };
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for s in listener.incoming().flatten() {
+            std::thread::spawn(move || answer(s, |_| Some("<title>Up</title>".into())));
+        }
+    });
+    let base = tempfile::tempdir().unwrap();
+    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let page = b.new_page().unwrap();
+    page.navigate(
+        &format!("http://127.0.0.1:{port}/"),
+        Duration::from_secs(30),
+    )
+    .unwrap();
+    let starts = b
+        .helper_starts()
+        .unwrap()
+        .expect("Chrome for Testing reports its histograms");
+    assert!(
+        starts.started > 0,
+        "the browser reports its helper starts: {starts:?}"
+    );
+    assert_eq!(
+        (
+            starts.failed,
+            starts.network_sandbox_failed,
+            starts.network_sandbox_given_up
+        ),
+        (0, 0, 0),
+        "a helper process (the network service) could not start and was started again: {starts:?}"
+    );
+    assert!(close_by_itself(&mut b).0, "Browser.close ends it by itself");
 }
 
 #[test]
@@ -262,12 +461,24 @@ fn a_cancelled_load_says_whether_it_was_a_download_or_replaced() {
 /// asserts the mechanism, that the browser exits by itself and is not killed, and waits for that exit on the condition; the
 /// bound only keeps a browser that never exits from hanging the test (rule 40). Returns whether it exited and the wait.
 fn close_by_itself(b: &mut Chromium) -> (bool, Duration) {
-    const HANG_GUARD: Duration = Duration::from_secs(120);
+    // Over three times the slowest exit measured on a loaded Mac (11.7 s, docs/benchmarks.md) and under CI's 60 s test
+    // kill (nextest slow-timeout 30 s × 2), so a browser that never exits fails here, with the message below.
+    const HANG_GUARD: Duration = Duration::from_secs(40);
+    let dir = b.profile_dir().to_string_lossy().into_owned();
     let started = std::time::Instant::now();
     let exited = b.close_gracefully(HANG_GUARD);
     let waited = started.elapsed();
-    // Always printed (nextest shows it for a failed test): how long a runner needs is the evidence for the next change.
-    eprintln!("Browser.close: exited by itself = {exited}, waited {waited:?}");
+    // Always printed (nextest shows it for a failed test): how long a runner needs is the evidence for the next change;
+    // whether the browser answered Browser.close, and for one that did not exit, which of its processes were still there.
+    let left = if exited {
+        Vec::new()
+    } else {
+        paddock_proc::processes_mentioning(&dir)
+    };
+    eprintln!(
+        "Browser.close: answered = {:?}, exited by itself = {exited}, waited {waited:?}, left before the forced end: {left:?}",
+        b.close_answered()
+    );
     (exited, waited)
 }
 

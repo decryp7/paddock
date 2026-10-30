@@ -18,6 +18,48 @@ Conventional Commits; one semver tag for the whole repo.
 ### Settings window: a page can hold the close until its edit is saved
 - New `settingsPageCloseGuard(guard)` and `SettingsCloseGuards` in `@decryp7/paddock-ui/shell/settings/window` (types `SettingsCloseGuard`, `SettingsCloseVerdict`): a settings page that saves by itself, outside the window's own drafts, says what a close should do each time the window is asked to close (Close, Escape, Cmd/Ctrl+W, the OS). `wait` (with the setting's `label`) keeps the window until the page's save settles and then asks again (a typed value saved after a pause is never lost to a quick close); meanwhile the footer says "Saving <setting>…" (new string `pd.settings.saving`), and after `STILL_SAVING_AFTER_MS` (4 s) the window says "Still saving <setting>." with **Close anyway** and **Keep waiting** (new strings `pd.settings.still-saving`, `pd.settings.still-saving.keep`): the save goes on whatever the user chooses, Close anyway closes, and Keep waiting stays and asks again after the same delay, so a close is never held without bound; `warn` shows "<what> was not saved: <why>" with **Close anyway** and **Keep editing** (new string `pd.settings.not-saved.close`); `close` lets it go. A wait comes before a warning, a guard that throws never keeps the window open, and the window's own unsaved-drafts question still comes first. Quit and the app's exit close dialog windows without asking their pages (a `paddock-window` test pins it). `settingsWindowProviders` provides `SettingsCloseGuards`; outside a Settings window the call does nothing. Pitwall's settings page is the first user.
 
+### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
+- New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
+  iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.
+  WebKit on a Linux runner emulates a Mac (`devices['Desktop Safari']`), so `ControlOrMeta` pressed Ctrl where the app wanted Cmd and no
+  shortcut fired (CI run 7134, Dyno's WebKit leg). `WorkbenchPalette.open` and Dyno's e2e use it.
+### `pd-jobs-status`: a visible heading
+- The Jobs popover has a visible heading (the popover's name, "Jobs") above the list, and the popover region is named by it (`aria-labelledby`), so a picture of it says what it is.
+### `paddock-chromium`: Chromium builds start without their testing field trials
+- A `Flavor::Chromium` browser (Chrome for Testing: the runtime store's and CI's) starts with
+  `--disable-field-trial-config` (`launch::NO_TESTING_FIELD_TRIALS`), as Puppeteer and Playwright do; branded Chrome and
+  Edge never apply that config and get no switch. On Windows CI the config's network-service sandbox could not start
+  for a browser in the runner's user folder (all 12 Chrome logs of runs 7149 and 7154: "Sandbox cannot access
+  executable", launch error 45), and Chrome started the network service again unsandboxed. Real-browser loads were lost
+  with `net::ERR_ABORTED` in those runs, 3 to 4 s later, when the profile's own requests failed too.
+- `command_line` takes the browser's `Flavor`, and the command line has one `--disable-features` switch: the quiet
+  features (now `launch::QUIET_DISABLED_FEATURES`; the switch left `QUIET_FLAGS`) and any the caller passes in
+  `extra_args`, merged without repeats.
+- New `Chromium::helper_starts() -> Result<Option<HelperStarts>>` (`started`, `failed`, `network_sandbox_failed`,
+  `network_sandbox_given_up`, from the browser's own histograms; `None` when it does not say), for tests and diagnostics.
+- CI's test-browser installer (`conformance/ci/install-test-browser.mjs`) grants app containers (S-1-15-2-1, S-1-15-2-2)
+  read and execute on the browser folder on Windows, as Program Files has them.
+- The same switch in the two driver copies still to move onto `paddock-chromium` (plan X14): Spotter's `spotter-render`
+  (`args` now takes the browser's `Flavor` and the caller's extra arguments, which it places before `about:blank` with
+  their features merged into its one `--disable-features` switch; they used to come after the start page) and Debrief's
+  `chromium-driver` (`command_line` takes the `Flavor`).
+- Confirmed by CI run 7170: on Windows, five rounds of the real-browser tests (25 browsers, Chrome logs kept) had no
+  failed sandbox start, no second network-service start, no failed sign-in request and no `net::ERR_ABORTED`.
+
+### `paddock-proc`: processes by identity (ADR 0033, rule 53)
+- New `ProcessId` (pid plus `StartTime`), `Holder`, `Ending`, `TreeEnding`, `holder`, `usage::Row` and `usage::identity`. `kill_tree` (now returning a `TreeEnding`), `end`, `ask` and `terminate` take a `ProcessId` and act only if its pid still belongs to it: one handle on Windows, a pidfd on Linux, a check then the signal on macOS; skipped and refused kills are logged. `processes_mentioning` and `descendants_of` return `ProcessId`s. `ProcessId::of_recorded(pid, written_ms)` is for a pid read from a file. `Supervised::process()` is new.
+- Walks follow parents by age: `usage::descendants`, `tree_memory_with` and the per-pid `tree_memory_from` (now taking a `ProcessId`) count a process as a child only if it started no earlier than its parent. `Table` rows are `Row { parent, rss, started }`, `ProcEntry` has `started`, `ProcessSource` has `started`.
+- macOS start times come from `sysctl(KERN_PROC_PID)` (`p_starttime`), which also answers for setuid children and zombies.
+- Windows: a supervised child's job members are its tree (`Job::members`, each confirmed with `IsProcessInJob`); `Supervised::kill` and the memory cap end the job first; nothing runs `taskkill /T`; `ask` holds a handle across its close request.
+- `paddock-chromium` ends leftover helpers by identity; `paddock-ipc`'s `ClientConfig::is_alive` takes the `Discovery` and defaults to `discovery::is_running` (a file whose pid was handed on is stale).
+- Clippy `disallowed-methods` in lint/clippy.toml (and every workspace): `libc::kill`, `libc::killpg`, nix `kill`/`killpg`, sysinfo `Process::kill`/`kill_with`. New conformance check C53 for kill programs, Win32 kills and open ADR 0033 follow-ups.
+
+### Quit in the menu bar: `QUIT_CONTRIBUTIONS`, and clicks with no window open (`paddock-menu`, `paddock-shell`, `@decryp7/paddock-ui/shell`)
+- Fix: no shell app had Quit in its menu bar: nothing contributed `pd.app.quit` (only the constant existed), so Cmd+Q did nothing. `provideNativeMenu` (so `provideShellPages` and `provideWorkbench`) now registers `QUIT_CONTRIBUTIONS` (the command `pd.app.quit`, `Mod+Q`, last in the app menu, group `quit`) for every app whose native menu port can quit (`tauriNativeMenuPort(ipc)` now has `quitApp()`, the shell's `app_quit` path); no app registers Quit itself. In the in-app menu on Windows the item reads "Exit" (`MENU_OS`).
+- To change what Quit does, an app provides `APP_QUIT` (Pitwall: its `quit::request`); it never contributes a second `pd.app.quit`. Pitwall's own `pd.app.quit` contribution is dropped when its branch merges. `QUIT_CONTRIBUTIONS` stays exported for manifest specs, which list what the frame adds.
+- `ShellCore` has a new member `quitApp()`; the UI of a shell app that implements `ShellCore` by hand adds it.
+- Fix: with the last window closed to the tray (destroyed), the menu bar still shows the last model but a click had no target window and was dropped. `paddock-menu` now hands a click on a shown item to a host-side handler when no window is the target (`NativeMenu::on_no_window`, `on_no_window_by_default`, `route::runs_without_window`). The shell installs its policy unless the app set a handler: Quit runs the shell's quit (as the `app_quit` command; `Builder::menu_quit_without_window` replaces it for an app with its own quit path), any other item brings the main window back as a Dock click does (the click itself is not forwarded: the new window is not listening yet).
+
 ### `paddock-jobs`: `WalkOptions::with_modified`
 - `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
 
@@ -58,6 +100,12 @@ Conventional Commits; one semver tag for the whole repo.
 - Network's Listening table keeps the exposure badge whole at 900 px; truncated names in the dashboard feed, widgets and the Network service column show their full text in a tooltip. The layout e2e now also measures every state (detail panels, tabs, second views), every Settings page (with the advanced fields) and every dialog, and accepts an ellipsis only on the clipping element when it has a tooltip or a label and is not a control, a tab or a number.
 - Benchmarks, Health, Extras (tabs and Maintenance) and Network wrap or shrink to the page instead of being cut by `.pd-page`'s `overflow-x: hidden`; the primary "Run benchmarks" button is always whole. `e2e/layout.spec.ts` now fails on any page content wider than the page, and on text cut without an ellipsis, at 900, 1024 and 1280 px, for every page and every Settings page.
 
+### `paddock-chromium`: an unexplained abort names the network service
+- `Page::navigate`'s error for an unexplained `net::ERR_ABORTED` (not a download, not replaced) says whether the browser's network service restarted, stayed unchanged or could not be asked. New `Page::network_service_pid` (`Result<Option<u32>>`; `SystemInfo` is an experimental DevTools domain). ADR 0030 (proposed).
+### Native feel: the Copy menu stays open on macOS
+- `installNativeFeel` opens the Copy menu once every mouse button is up when the browser sent `contextmenu` while one was held (WebKit on macOS: the right button's press, or Ctrl+click). Drawn on the press, the menu was closed at once by the release's own `click` or `auxclick` (a click outside the CDK overlay), so it vanished as the user let go. Measured with Playwright's WebKit and Chromium; the event order of Windows WebView2 (where `contextmenu` follows the release) is not verified.
+### `paddock-panels`: the mouse button comes through a `Pointer` port
+- New `paddock_panels::tauri::Pointer` and `PanelsBuilder::pointer`: the drag session's blur rule, the tracker thread and the `pointer_button_down` command read the primary button from the layer's pointer (the OS by default). Tests inject their own and never read the user's mouse; two `paddock-panels` tests failed when the user held the button during a run.
 
 ### `providePaddockMaterial`: tooltips wait 500 ms
 - `providePaddockMaterial()` provides `MAT_TOOLTIP_DEFAULT_OPTIONS` with `showDelay: 500` (`PADDOCK_TOOLTIP_OPTIONS`), the design guide's delay for the tooltip every icon-only button carries. Every app that provides it gets the delay without setting it per tooltip.
@@ -445,6 +493,14 @@ Conventional Commits; one semver tag for the whole repo.
   pending task), with no turn budget: a slow first `import()` on a busy runner no longer reads as "never leaves
   Loading" (CI run 6563). `DialogHarnessOptions.maxTurns` is removed; a loader that never answers is now reported by the
   runner's test timeout.
+
+### paddock-proc: watchers read one pid, never the process table (ADR 0024 rule 4)
+- New public API: `ProcessSource` (the port: `memory`, `children`, `table`), `OsSource` (the OS as a source; make one per walk),
+  `tree_memory_from` / `tree_memory_of` (a tree or a job's member list, read pid by pid), `MAX_TREE` (the most processes a walk
+  visits) and `read_children` (`/proc/<pid>/task/*/children`). `tree_memory` and `process_memory` now read only the pids of the tree
+  (macOS `proc_listchildpids`, Linux `children` files; Windows takes one id snapshot per walk, or none for a supervised child, whose
+  kill-on-close job lists its members). One watcher over a synthetic child: 4.9% of a core before, 0.1% after (1,202 processes).
+- `Supervised` on Windows hands its job to the memory watcher. Spotter's `process` module is now a re-export of `paddock-proc`.
 
 ### Spotter on the shared CI kit (WP-C3)
 - Spotter is a leg of `ci.yml` (`apps/spotter/paddock.ci.json`) and releases through the shared `app-release.yml` from a thin

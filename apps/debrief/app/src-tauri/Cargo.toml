@@ -81,6 +81,8 @@ tokio = { workspace = true, features = ["sync", "time"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+# A test process stopped by nextest's timeout (SIGTERM) or Ctrl-C removes its temp folders (`test_support::own`).
+ctrlc = { workspace = true, features = ["termination"] }
 # The fake DevTools browser for the research browser's tests (never a real browser).
 chromium-driver = { path = "../../crates/chromium-driver", features = ["test-support"] }
 # The store in process for the shell's tests (the real adapter on a temp folder).
@@ -95,7 +97,7 @@ debrief-notes = { path = "../../crates/debrief-notes", features = ["ts"] }
 # The video DTOs' TypeScript bindings (`generated_types`, ADR 0033).
 debrief-video = { path = "../../crates/debrief-video", features = ["ts"] }
 # The Store pane's DTOs' TypeScript bindings (`generated_types`, ADR 0030).
-debrief-core = { path = "../../crates/debrief-core", features = ["ts"] }
+debrief-core = { path = "../../crates/debrief-core", features = ["ts", "test-support"] }
 # TypeScript bindings of the wire types (`generated_types` test; ADR 0016).
 ts-rs = "11.1"
 # The base64 that tauri-plugin-updater's `Error::Base64` wraps, to build that error in the updater tests.

@@ -393,12 +393,7 @@ fn history(shared: &Shared, range: dyno_core::history::HistoryRange, end: Option
         top_consumers: top_consumers(&rows, 8),
         disk_trends,
         boots: s.boots(w.from.minus(30 * DAY), w.to).map_err(internal)?,
-        crashes: dyno_core::issues::crash_days(
-            &s.issues(w.from, w.to, 20_000).map_err(internal)?,
-            w.from,
-            w.to,
-            core.settings.alarms.utc_offset_minutes,
-        ),
+        crashes: dyno_core::issues::crash_days(&s.issues(w.from, w.to, 20_000).map_err(internal)?, w.from, w.to, core.zone.as_ref()),
         core_points: {
             let raw = s.core_points(w.tier, w.from, w.to).map_err(internal)?;
             if w.resolution_ms > w.tier.step_ms() {
@@ -581,7 +576,8 @@ fn save_report(shared: &Shared, path: &str, format: ReportFormat, weeks_ago: u32
     if !dest.parent().is_some_and(Path::is_dir) {
         return Err(bad("The folder to save the report in does not exist."));
     }
-    let text = format.render(&weekly_report(shared, weeks_ago)?);
+    let zone = lock(&shared.core).zone.clone();
+    let text = format.render(&weekly_report(shared, weeks_ago)?, zone.as_ref());
     std::fs::write(&dest, text.as_bytes()).map_err(|e| {
         let code = if e.kind() == std::io::ErrorKind::PermissionDenied {
             ErrorCode::AccessDenied

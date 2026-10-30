@@ -12,7 +12,7 @@ import {
   serializeManifest,
   themeProblems,
 } from '@decryp7/paddock-ui/shell';
-import { provideMenus, provideSubmenus } from '@decryp7/paddock-ui/shell/menu';
+import { provideMenus, provideNativeMenu, provideSubmenus } from '@decryp7/paddock-ui/shell/menu';
 import { SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { OS_NOTIFICATIONS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/notify';
 import { SETUP_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/setup';
@@ -99,7 +99,8 @@ describe('shell-demo manifest', () => {
       providers: provideShellTesting({
         contributions: [DEMO_CONTRIBUTIONS, SHELL_ABOUT_CONTRIBUTIONS, SHELL_DIAGNOSTICS_CONTRIBUTIONS, SETUP_CONTRIBUTIONS, OS_NOTIFICATIONS_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS, UNDO_CONTRIBUTIONS, ACTIVITY_CONTRIBUTIONS],
         context: () => Promise.resolve(demoContext),
-        providers: [provideMenus({ appName: 'Shell demo' }), provideSubmenus(...DEMO_SUBMENUS)],
+        // The frame adds Quit when the native menu port can quit (the desktop build).
+        providers: [provideMenus({ appName: 'Shell demo' }), provideSubmenus(...DEMO_SUBMENUS), provideNativeMenu({ port: { setAppMenu: () => Promise.resolve(), onMenu: () => Promise.resolve(() => undefined), quitApp: () => Promise.resolve() } })],
       }),
     });
     const manifest = buildManifest(TestBed.inject(ContributionRegistry));

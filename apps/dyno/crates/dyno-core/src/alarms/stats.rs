@@ -133,7 +133,7 @@ pub fn compute(alarms: &[Alarm], raises: &HashMap<String, u32>, acks: &VecDeque<
 
 #[cfg(test)]
 mod tests {
-    use super::super::{AlarmEngine, AlarmEvent};
+    use super::super::{AlarmConfig, AlarmEngine, AlarmEvent};
     use super::*;
     use crate::health::Severity;
     use crate::time::MINUTE;
@@ -154,13 +154,13 @@ mod tests {
 
     #[test]
     fn empty_engine_has_empty_stats() {
-        let s = AlarmEngine::default().stats(Timestamp(0));
+        let s = AlarmEngine::new(AlarmConfig::default(), crate::time::FixedZone::shared(0)).stats(Timestamp(0));
         assert_eq!(s, AlarmStats::default());
     }
 
     #[test]
     fn times_noise_and_suggestions() {
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), crate::time::FixedZone::shared(0));
         // "noisy": 12 distinct alarms, none acknowledged -> retire. "tuned": 10, all acknowledged -> tune.
         for i in 0..12 {
             e.apply(raise("noisy", &format!("noisy:{i}"), i * 1_000));
@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn flapping_rules_get_a_tune_suggestion() {
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), crate::time::FixedZone::shared(0));
         for i in 0..12 {
             e.apply(raise("flap", "flap:1", i * 10_000));
             e.apply(AlarmEvent::Return {

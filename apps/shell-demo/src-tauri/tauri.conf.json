@@ -3,6 +3,7 @@
   "productName": "Paddock Shell Demo",
   "identifier": "net.decryptology.paddock-shell-demo",
   "build": {
+    "windows": { "staticVCRuntime": false },
     "frontendDist": "../../../ui/dist/shell-demo/browser",
     "devUrl": "http://localhost:4301",
     "beforeDevCommand": "node src-tauri/agent/sidecar.mjs --dev && npm --prefix ../../ui run shell-demo",

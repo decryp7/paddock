@@ -33,7 +33,7 @@ export const ALLOW = [
   { file: 'app/src/app/core/mock/data.ts', text: 'quarantined', reason: 'mock of that plugin state' },
   { file: 'app/src/app/state/counters.store.ts', text: 'Undo', reason: 'undoes deleting one of Dyno\'s own saved counter sets, a setting of Dyno, not of the computer' },
   { file: 'app/src/app/core/api.types.ts', text: 'tune retire', reason: 'wire value of the alarm statistics hint kind: adjust an alarm\'s own threshold' },
-  { file: 'app/src/app/core/mock/alarms.ts', text: 'tune GPU limit', reason: 'mock of that wire value' },
+  { file: 'app/src/app/core/mock/alarms.ts', text: 'tune GPU load', reason: 'mock of that wire value' },
   { file: 'crates/dyno-plugin-host/Cargo.toml', text: 'quarantine', reason: 'the plugin host stops a crashing plugin (a state of the plugin, not a change to the computer)' },
 ];
 

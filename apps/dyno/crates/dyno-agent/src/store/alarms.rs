@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn alarms_events_and_muted_rules_round_trip() {
         let s = Store::memory().unwrap();
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(dyno_core::alarms::AlarmConfig::default(), dyno_core::time::FixedZone::shared(0));
         for c in e.apply(raise("r:a", 1_000)).into_iter().chain(e.apply(raise("r:b", 2_000))) {
             s.put_alarm(&c.alarm).unwrap();
             s.put_alarm_event(&c).unwrap();
@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn the_event_log_is_bounded() {
         let s = Store::memory().unwrap();
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(dyno_core::alarms::AlarmConfig::default(), dyno_core::time::FixedZone::shared(0));
         let c = e.apply(raise("r:a", 1_000)).remove(0);
         s.put_alarm_event(&c).unwrap();
         let mut late = c.clone();

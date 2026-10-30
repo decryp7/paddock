@@ -201,9 +201,23 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
   `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
 - Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
   branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.
+- A change that touches an app's release path builds that app's installers before it lands on main (rule 54): the batch
+  dispatches `<app>-release.yml` with gates on and the bundle built; passing tests alone is not enough.
 - Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
+- Never act on a reusable OS name read earlier (rule 53): hold it (handle, job, listener) or verify its identity (pid plus
+  start time, `paddock_proc::ProcessId`) immediately before acting; kills go through `paddock_proc` (Clippy
+  `disallowed-methods` and C53 check it, ADR 0033).
+- Work a person waits for never runs at an OS's starvable background level (rule 52: macOS QoS `BACKGROUND`,
+  `PRIO_DARWIN_BG`, `taskpolicy -b`/`-c background`/`-c maintenance`/`-d throttle` and `IOPOL_THROTTLE`; Windows
+  background modes, idle priorities and EcoQoS; Linux `SCHED_IDLE` and idle I/O; for a service, launchd `ProcessType`
+  `Background` (or `Adaptive` without XPC) and `LowPriorityIO`, systemd `CPUSchedulingPolicy=idle` and
+  `IOSchedulingClass=idle`): bulk work (long, with progress and Cancel: walks, scans, compaction, exports) uses
+  `QOS_CLASS_UTILITY`, nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`; live work (a person waits on it within a deadline or
+  for a screen to fill: requests, probes, a sampler, a page refresh) may use the first two but stays at the normal level
+  on Windows; a thread holding a lock that live work waits on is live, or must not hold the lock across slow work; a
+  starvable level only for work nobody waits on, with a `conformance: background-qos — <why>` comment (C54).
 - Research official sources before choosing libraries or relying on an OS behaviour (performance counters, job
   objects, Restart Manager, `taskpolicy`), and record what you found and when in the ADR or doc comment.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they are available instead of

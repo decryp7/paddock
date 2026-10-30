@@ -11,7 +11,7 @@
 #
 # Speed (Paddock lessons, "Test and build speed"): Linux jobs run in the paddock-ci image (Rust, nextest, Tauri's libraries,
 # Node, Playwright's browsers, Chrome for Testing and libduckdb baked in); every Rust job compiles through sccache on local
-# disk (setup-rust: the runner's /sccache mount in a container, ~/.paddock-ci/sccache on a host); host runners build from a
+# disk (setup-rust: the runner's /sccache mount in a container, the job slot's sccache-s<n> on a host); host runners build from a
 # fixed checkout path (stable-workspace) into a kept build folder set as cargo configuration (the build-folder action),
 # never CARGO_TARGET_DIR, which sccache hashes; npm's and Angular's caches are kept (node-caches).
 #
@@ -161,6 +161,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The job's own temp and socket folders (ER-14; on the host runners job-isolation's acquire makes the same): the tests
+      # and the leak check never touch a folder other runs use. The socket folder goes with the job's last step.
+      - uses: ./.gitea/actions/job-tmpdir
+
       - uses: ./.gitea/actions/setup-rust
 
       # The pinned cargo-nextest (the image's; the step fails when it is another version).
@@ -186,7 +190,7 @@ jobs:
           case "$out" in *CHROMIUM_TEST_PATH=*) ;; *) echo "::error::the test browser installer printed no CHROMIUM_TEST_PATH"; exit 1 ;; esac
 
       - name: Temp folders before the tests
-        run: node scripts/ci/check-temp-leaks.mjs --snapshot "$RUNNER_TEMP/temp-leaks.json"
+        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --shared --snapshot "$RUNNER_TEMP/temp-leaks.json"
 
       # nextest runs every test in its own process, in parallel across crates, and reports every failure;
       # .config/nextest.toml serialises the tests that time real child processes. The ci profile never retries (a flaky
@@ -211,7 +215,7 @@ jobs:
       # Tests clean up after themselves (docs/testing/temp-leaks.md): a debrief-* / imt-* folder left behind fails the job.
       - name: No temp folders left behind
         if: ${{ !cancelled() }}
-        run: node scripts/ci/check-temp-leaks.mjs --check "$RUNNER_TEMP/temp-leaks.json"
+        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --shared --check "$RUNNER_TEMP/temp-leaks.json"
 
       # The analyses' memory budget (ADR 0014) is the shipped worker's: measured on a release build, Linux only
       # (DuckDB's jemalloc is the allocator there; the test skips itself in debug builds).
@@ -226,6 +230,11 @@ jobs:
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
+
+      - uses: ./.gitea/actions/job-tmpdir
+        if: always()
+        with:
+          mode: remove
 
   # The same tests on the macOS host runner: the contained-plugin sandbox (sandbox-exec profiles, the private socket,
   # symlinked temp paths) and other platform code only run here; a macOS-only bug once passed the Linux-only suite.
@@ -244,6 +253,9 @@ jobs:
         working-directory: apps/debrief
     steps:
       - uses: actions/checkout@v4
+
+      # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
+      - uses: ./.gitea/actions/job-isolation
 
       - uses: ./.gitea/actions/stable-workspace
         with:
@@ -264,8 +276,10 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
-          # Outside the checkout, which stable-workspace moves; the installer stamps the pinned version in it.
-          echo "DEBRIEF_TEST_BROWSER_DIR=$HOME/.paddock-ci/test-browser-debrief" >> "$GITHUB_ENV"
+          # Outside the checkout, which stable-workspace moves: the job slot's kept folder (the installer stamps the pinned
+          # version in it).
+          dir="$(bash ../../conformance/ci/job-isolation.sh path browser debrief)"
+          echo "DEBRIEF_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
 
       - name: libduckdb
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
@@ -281,7 +295,7 @@ jobs:
 
       - name: Temp folders before the tests
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: node scripts/ci/check-temp-leaks.mjs --snapshot "$RUNNER_TEMP/temp-leaks.json"
+        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --snapshot "$RUNNER_TEMP/temp-leaks.json"
 
       - name: Tests (workspace)
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
@@ -295,10 +309,16 @@ jobs:
       - name: No temp folders left behind
         if: ${{ !cancelled() }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: node scripts/ci/check-temp-leaks.mjs --check "$RUNNER_TEMP/temp-leaks.json"
+        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --check "$RUNNER_TEMP/temp-leaks.json"
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
+
+      # The slot goes back last, after everything that uses its folders and its sccache port.
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
 
   # The plugin SDK as an author uses it: a project of every kind from `cargo debrief-plugin new` builds, and one of them
   # passes `cargo debrief-plugin test` (conformance in the sandbox, then its own tests). The examples themselves are
@@ -360,7 +380,8 @@ jobs:
           fetch-depth: 0
 
       # cargo-deny comes with the image; cargo-about does not. Pinned: the committed notices are its output, and a new
-      # release can find more licence texts.
+      # release can find more licence texts (0.9.3 found five more than 0.9.2 on 2026-10-28); bump it together with
+      # scripts/notices/generate.sh's output.
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-about@0.9.2
@@ -416,6 +437,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The job's own temp and socket folders (ER-14; on the host runners job-isolation's acquire makes the same): the tests
+      # and the leak check never touch a folder other runs use. The socket folder goes with the job's last step.
+      - uses: ./.gitea/actions/job-tmpdir
+
       # npm's download cache and the Angular build cache kept on the runner's /sccache mount (Node is the image's).
       - uses: ./.gitea/actions/node-caches
         with:
@@ -461,9 +486,14 @@ jobs:
 
       - name: Frontend unit tests
         run: |
-          node ../scripts/ci/check-temp-leaks.mjs --snapshot "${RUNNER_TEMP:-/tmp}/temp-leaks-ui.json"
+          node ../scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --shared --snapshot "$RUNNER_TEMP/temp-leaks-ui.json"
           npx ng test --watch=false --coverage
-          node ../scripts/ci/check-temp-leaks.mjs --check "${RUNNER_TEMP:-/tmp}/temp-leaks-ui.json"
+          node ../scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --shared --check "$RUNNER_TEMP/temp-leaks-ui.json"
+
+      - uses: ./.gitea/actions/job-tmpdir
+        if: always()
+        with:
+          mode: remove
 
   # Four shards that run at the same time, each with its own production build (Angular's cache kept per shard) and port.
   # Playwright's Chromium and WebKit come with the image: nothing is downloaded. Branch and pull request runs test in
@@ -552,10 +582,9 @@ jobs:
         run: |
           rem Which account runs the job: WebView2 smoke tests cannot run as SYSTEM (its temp is C:\Windows\SystemTemp).
           whoami
-          echo TEMP=%TEMP%
+          echo the job temp folder is %TEMP%
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner: no bash.exe in "%ProgramFiles%\Git\bin" & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo npm_config_cache=%USERPROFILE%\.debrief-ci\npm-cache>>"%GITHUB_ENV%"
           echo npm_config_prefer_offline=true>>"%GITHUB_ENV%"
           echo npm_config_audit=false>>"%GITHUB_ENV%"
           echo npm_config_fund=false>>"%GITHUB_ENV%"
@@ -568,7 +597,18 @@ jobs:
         working-directory: .
         run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
-      # Host runners: the same checkout path every run, so sccache hits the workspace crates (after Git bash on Windows).
+      # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
+      - uses: ./.gitea/actions/job-isolation
+
+      # npm's download cache on the Windows host (node-caches keeps it elsewhere): the job slot's kept folder npm-s<n>.
+      - name: npm cache (Windows)
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: |
+          dir="$(bash conformance/ci/job-isolation.sh path npm)"
+          echo "npm_config_cache=$(cygpath -w "$dir")" >> "$GITHUB_ENV"
+
+      # Host runners: the same checkout path every run, so sccache hits the workspace crates.
       - uses: ./.gitea/actions/stable-workspace
         if: runner.os != 'Linux'
         with:
@@ -613,7 +653,7 @@ jobs:
           fi
           node --version
 
-      # npm's and Angular's caches (the /sccache mount on Linux, ~/.paddock-ci on macOS). Windows reuses a whole
+      # npm's and Angular's caches (the /sccache mount on Linux, the CI home's kept folders on macOS). Windows reuses a whole
       # node_modules instead (below).
       - uses: ./.gitea/actions/node-caches
         if: runner.os != 'Windows'
@@ -638,7 +678,7 @@ jobs:
         run: node e2e-tauri/scripts/fetch-msedgedriver.mjs
 
       # Windows host: unpacking ~900 packages into a fresh node_modules took 7–14 min per job even with the npm cache
-      # on disk. A finished node_modules per package-lock.json lives in %USERPROFILE%\.debrief-ci and is linked into the
+      # on disk. A finished node_modules per package-lock.json lives in the job slot's kept folder node-modules and is linked into the
       # job's checkout (a directory junction); npm ci runs only when the lockfile changed. The last step removes the
       # junction, so no cleanup ever walks into the shared copy (a junction a killed job left is removed here first).
       - name: Reuse node_modules for this lockfile (Windows)
@@ -766,6 +806,12 @@ jobs:
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
+      # The slot goes back last, after everything that uses its folders and its sccache port.
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
+
   # Installers only on full runs: debrief-v* tags, pushes to main, the nightly run and manual runs with `bundles: true`; never
   # for branch or pull request runs. They are the slowest jobs and the Windows leg runs on a developer PC.
   bundle:
@@ -802,7 +848,6 @@ jobs:
           whoami
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner: no bash.exe in "%ProgramFiles%\Git\bin" & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo npm_config_cache=%USERPROFILE%\.debrief-ci\npm-cache>>"%GITHUB_ENV%"
           echo npm_config_prefer_offline=true>>"%GITHUB_ENV%"
           echo npm_config_audit=false>>"%GITHUB_ENV%"
           echo npm_config_fund=false>>"%GITHUB_ENV%"
@@ -814,6 +859,18 @@ jobs:
         working-directory: .
         run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
+      # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
+      - uses: ./.gitea/actions/job-isolation
+
+      # npm's download cache on the Windows host (node-caches keeps it elsewhere): the job slot's kept folder npm-s<n>.
+      - name: npm cache (Windows)
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: |
+          dir="$(bash conformance/ci/job-isolation.sh path npm)"
+          echo "npm_config_cache=$(cygpath -w "$dir")" >> "$GITHUB_ENV"
+
+      # Host runners: the same checkout path every run, so sccache hits the workspace crates.
       - uses: ./.gitea/actions/stable-workspace
         if: runner.os != 'Linux'
         with:
@@ -911,6 +968,18 @@ jobs:
             npx tauri build --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
           fi
 
+      # ADR 0032: no binary the installer carries (the app, its sidecars, duckdb.dll, named by the Tauri configuration) imports
+      # the VC++ runtime; the runner has the redistributable, a user's PC may not.
+      - name: Shipped binaries need no VC++ runtime (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        run: |
+          # Node on Windows reads C:/... paths, not Git Bash's /c/...
+          dir="$PADDOCK_BUILD_FOLDER"
+          if command -v cygpath >/dev/null; then dir="$(cygpath -m "$dir")"; fi
+          node conformance/release/windows-crt-imports.mjs --src-tauri apps/debrief/app/src-tauri --bin-dir "$dir/dist" \
+            --config apps/debrief/app/src-tauri/tauri.sidecars.conf.json
+
       # The packaged store worker finds libduckdb by run path (crates/debrief-store-worker/build/rpath.rs): a signed,
       # notarized macOS app ignores DYLD_LIBRARY_PATH. Unpack the package and check that one of the worker's run paths
       # reaches the packaged library, so a change to the bundle layout cannot ship a worker that fails to start.
@@ -982,6 +1051,12 @@ jobs:
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
+
+      # The slot goes back last, after everything that uses its folders and its sccache port.
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
 
   release:
     name: release

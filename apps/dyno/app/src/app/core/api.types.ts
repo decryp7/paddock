@@ -1087,8 +1087,6 @@ export interface AlarmConfig {
   maxAlarms: number;
   /** 1..90 */
   keepClearedDays: number;
-  /** Local offset from UTC in minutes (set from `-new Date().getTimezoneOffset()`). */
-  utcOffsetMinutes: number;
 }
 
 export interface AlarmSuggestion {
@@ -1550,7 +1548,7 @@ export type BaselineState = 'notJudged' | 'noBaseline' | 'usual' | { higher: Bas
 export interface Judgement {
   state: BaselineState;
   confidence: Confidence;
-  /** "Higher than usual for Tuesday mornings". */
+  /** "Higher than usual for Thursday afternoons". */
   phrase: string;
   explanation: string;
   /** The usual value, formatted. */

@@ -1831,7 +1831,14 @@ fn a_quarantined_worker_pauses_the_ai_queue_until_reset() {
     assert_eq!(list["paused"][0]["kind"], "ai");
     assert_eq!(active_ai(&app).len(), 1, "still waiting");
     // The crash is service health's to state, once: the AI worker is quarantined and one message (cause `health:ai`)
-    // offers the repair.
+    // offers the repair. The queue shows its pause before the pause event reaches health, so wait for the message.
+    // Both events of the crash (the job's failure and the queue's pause) have been delivered once both messages are
+    // there: only then can "no second message" be asserted.
+    wait_until("the health and job messages", || {
+        let notices = ipc(&main, "notifications_list", json!({})).unwrap();
+        let causes: Vec<_> = notices["notices"].as_array().unwrap().iter().map(|n| n["cause"].clone()).collect();
+        causes.contains(&json!("health:ai")) && causes.contains(&json!(format!("job:{}", first)))
+    });
     let notices = ipc(&main, "notifications_list", json!({})).unwrap();
     let ai: Vec<_> = notices["notices"]
         .as_array()

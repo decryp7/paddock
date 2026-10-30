@@ -11,7 +11,13 @@ pub async fn pointer_button_down() -> Option<bool> {
 #[cfg(target_os = "macos")]
 pub(crate) fn primary_button_down() -> Option<bool> {
     // Bit 0 is the primary button, already mapped for left-handed setups by the system.
-    Some(objc2_app_kit::NSEvent::pressedMouseButtons() & 1 == 1)
+    Some(primary_in_mask(objc2_app_kit::NSEvent::pressedMouseButtons()))
+}
+
+/// Whether bit 0 (the primary button) is set in AppKit's pressed-buttons mask.
+#[cfg(any(target_os = "macos", test))]
+fn primary_in_mask(mask: usize) -> bool {
+    mask & 1 == 1
 }
 
 #[cfg(windows)]
@@ -42,12 +48,16 @@ mod tests {
 
     #[test]
     fn reports_the_button_where_the_platform_can() {
+        // Whether the real mouse is held is the machine's, not the test's: only whether the platform can tell.
         let state = pointer_button_down().now();
-        if cfg!(any(target_os = "macos", windows)) {
-            // Nobody holds the mouse while the tests run.
-            assert_eq!(state, Some(false));
-        } else {
-            assert_eq!(state, None);
-        }
+        assert_eq!(state.is_some(), cfg!(any(target_os = "macos", windows)));
+    }
+
+    #[test]
+    fn the_primary_button_is_bit_zero_of_the_mask() {
+        assert!(!primary_in_mask(0));
+        assert!(primary_in_mask(1));
+        assert!(primary_in_mask(0b11));
+        assert!(!primary_in_mask(0b10));
     }
 }

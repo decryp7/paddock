@@ -48,7 +48,7 @@ const HINT_TONE: Record<HintKind, string> = {
       <header class="page-head">
         <div class="titles">
           <h1>Inventory</h1>
-          <p>What is installed in this PC, and what could be upgraded. Dyno only reads it.</p>
+          <p>What is installed in this computer, and what could be upgraded. Dyno only reads it.</p>
         </div>
       </header>
 
@@ -103,7 +103,7 @@ const HINT_TONE: Record<HintKind, string> = {
             }
           </section>
 
-          <section class="card" aria-label="This PC">
+          <section class="card" aria-label="This computer">
             <div class="card-head"><h2><dy-icon name="cpu" /> Processor and storage</h2></div>
             <div class="devices">
               <article class="device">

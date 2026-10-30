@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 /// Set by SIGINT/SIGTERM.
 static SIGNALLED: AtomicBool = AtomicBool::new(false);
 
-const USAGE: &str = "dyno-agent — measures your PC and keeps its history\n\n\
+const USAGE: &str = "dyno-agent — measures your computer and keeps its history\n\n\
 usage:\n  dyno-agent run                 run in the foreground (what the service starts)\n  dyno-agent status              is an agent running?\n  \
 dyno-agent stop                ask the running agent to exit\n  dyno-agent once                print one measurement as JSON (changes nothing)\n  \
 dyno-agent bench [seconds] [none|summary|processes]   run for a while and report Dyno's own CPU and memory as JSON\n  \

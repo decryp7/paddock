@@ -104,6 +104,8 @@ impl JobCentre {
         let shared2 = shared.clone();
         let book = self.book.clone();
         let spawned = self.pool.spawn_job(ctx, move |ctx| {
+            // The pool's workers are `paddock-jobs` threads at the default class: lowered gently, once each (rule 52).
+            dyno_platform::priority::lower_current_thread_once();
             let output = execute(&shared2, ctx, spec)?;
             lock(&book).outputs.insert(id, output);
             Ok(())

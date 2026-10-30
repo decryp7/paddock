@@ -60,7 +60,7 @@ pub struct SpawnSpec {
     pub label: String,
     /// Prefix of the private address (see [`PrivateEndpoint::create_named`]).
     pub endpoint_prefix: String,
-    /// How long the child may take to connect.
+    /// How long the child may take to connect ([`UNTIL_CONNECTED`]: until it connects or exits).
     pub connect_window: Duration,
     /// Run at below-normal priority so the analysis stays responsive.
     pub below_normal_priority: bool,
@@ -76,6 +76,11 @@ pub struct SpawnSpec {
     /// macOS child's sandbox profile lets it reach.
     pub ipc_socket: Option<PathBuf>,
 }
+
+/// A connect window with no wall-clock end: the host waits until the child connects or exits. For tests, whose children
+/// start late on a loaded machine: a fixed window then stopped a child that was still starting, and every restart
+/// started late again (CI 7096). The test runner's hang detector, not a clock, ends a child that never connects.
+pub const UNTIL_CONNECTED: Duration = Duration::MAX;
 
 impl SpawnSpec {
     pub fn new(exe: impl Into<PathBuf>, label: impl Into<String>) -> SpawnSpec {
@@ -148,6 +153,13 @@ impl OsChild {
     /// Ends the child's whole process group (Unix: every child is the leader of its own group, see
     /// [`ChildProcess::spawn`]), so what it started (llama-server under the AI worker) ends with it even when its
     /// own clean-up never runs. Windows children are in a job object that does the same.
+    #[cfg_attr(
+        unix,
+        expect(
+            clippy::disallowed_methods,
+            reason = "ADR 0033 WP-5: killpg after try_wait may have reaped the leader; kill through a ProcessId"
+        )
+    )]
     fn kill_group(&self) {
         #[cfg(unix)]
         {
@@ -676,6 +688,10 @@ mod tests {
     /// its exit status, and a killed child's orphan is collected by PID 1, which never happens in a container whose
     /// PID 1 reaps nothing (CI's job container runs `sleep`). `kill(pid, 0)` alone counts such a zombie as alive.
     #[cfg(unix)]
+    #[cfg_attr(
+        unix,
+        expect(clippy::disallowed_methods, reason = "ADR 0033 WP-5 (test): a liveness probe by pid (signal 0)")
+    )]
     fn running(pid: i32) -> bool {
         // SAFETY: signal 0 only checks that the process exists.
         if unsafe { libc::kill(pid, 0) } != 0 {
@@ -710,6 +726,10 @@ mod tests {
     /// A zombie (ended, not yet collected by its parent) is not running; a live process is.
     #[cfg(unix)]
     #[test]
+    #[cfg_attr(
+        unix,
+        expect(clippy::disallowed_methods, reason = "ADR 0033 WP-5 (test): a liveness probe by pid (signal 0)")
+    )]
     fn a_zombie_is_not_running() {
         // A child that has exited but is not waited for yet is a zombie of this test process.
         #[allow(clippy::disallowed_methods)]
@@ -730,6 +750,13 @@ mod tests {
     /// macOS has no parent-death signal and whose exit hook never runs under SIGKILL).
     #[cfg(unix)]
     #[test]
+    #[cfg_attr(
+        unix,
+        expect(
+            clippy::disallowed_methods,
+            reason = "ADR 0033 WP-5 (test): kills a grandchild by the pid it printed"
+        )
+    )]
     fn a_child_killed_after_its_grace_takes_its_own_children_with_it() {
         let d = tempfile::tempdir().unwrap();
         let pid_file = d.path().join("grandchild.pid");

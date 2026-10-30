@@ -42,7 +42,7 @@ function appleSilicon(): SystemInventory {
     hostName: 'MacBook-Pro',
     cpu: { name: 'Apple M4 Pro', physicalCores: 14, logicalCores: 14, frequencyMhz: 4500 },
     memory: { unified: { total: 48 * GB, kind: 'lpddr5', manufacturer: 'Apple', upgradeable: false } },
-    disks: [disk('Apple SSD AP1024', 994)],
+    disks: [disk('APPLE SSD AP1024Z', 953)],
     hints: [{ kind: 'notUpgradeable', message: 'The memory is part of the chip package and cannot be upgraded. Choose the size when buying.', slot: null }],
   };
 }
@@ -53,7 +53,7 @@ function solderedLaptop(): SystemInventory {
     hostName: 'ULTRABOOK',
     cpu: { name: 'Intel Core Ultra 7 155H', physicalCores: 16, logicalCores: 22, frequencyMhz: 3800 },
     memory: { unified: { total: 32 * GB, kind: 'lpddr5', manufacturer: 'Samsung', upgradeable: false } },
-    disks: [disk('WD PC SN740 NVMe', 954)],
+    disks: [disk('WD PC SN740 NVMe', 953)],
     hints: [{ kind: 'notUpgradeable', message: 'The memory is soldered to the mainboard and cannot be upgraded.', slot: null }],
   };
 }
@@ -97,7 +97,7 @@ function sodimmLaptop(dual: boolean): SystemInventory {
     hostName: 'dev-laptop',
     cpu: { name: 'AMD Ryzen 9 7940HS', physicalCores: 8, logicalCores: 16, frequencyMhz: 4000 },
     memory: { slots: { slots: 2, maxCapacityBytes: 64 * GB, modules } },
-    disks: [disk('WD Blue SN570 NVMe', 954)],
+    disks: [disk('WD Blue SN570 NVMe', 953)],
     hints,
   };
 }
@@ -133,7 +133,7 @@ function ddr4Desktop(): SystemInventory {
         modules: [stick('DIMM_A1', 16, 'ddr4', 3200, 2666, 'Corsair', 'CMK16GX4M1E3200C16'), stick('DIMM_A2', 8, 'ddr4', 2666, 2666, 'Kingston', 'KVR26N19S6/8')],
       },
     },
-    disks: [disk('Samsung PM9A1 NVMe', 954), disk('Crucial MX500 SATA', 931)],
+    disks: [disk('Samsung PM9A1 NVMe', 953), disk('Crucial MX500 SATA', 931)],
     hints,
   };
 }

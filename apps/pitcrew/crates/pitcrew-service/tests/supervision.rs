@@ -218,7 +218,11 @@ impl Harness {
     /// while the machine is slow would put them outside the job (`ATTRIBUTION_SLACK`) and its leftovers would never be
     /// found (CI run 6628 timed out so). One probe step then shows them to the supervisor.
     fn until_job_processes_seen(&mut self) {
-        self.until_real("the job's line is read", |h| h.status().current_job.is_some());
+        // The line itself, not only a job: a look at the processes can find the job before its line is read (CI job
+        // 21879), and the job is named only by the line.
+        self.until_real("the job's line is read", |h| {
+            h.status().current_job.is_some_and(|j| j.info.repository.is_some())
+        });
         let started = self.status().current_job.unwrap().started_at;
         let ahead = started.0.saturating_sub(pitcrew_service::cleanup::now().0);
         assert!(

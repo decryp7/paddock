@@ -97,6 +97,10 @@ pub fn memory_with(pid: u32, read: impl Fn(u32) -> Option<u64>) -> u64 {
 
 /// Asks a process to end (SIGTERM; `force`: kills it). Only ever used on engine processes this server started. Where the
 /// platform has no such signal the process is killed.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "ADR 0033 WP-7: sysinfo kill of an unreaped child by pid (safe today); go through paddock_proc"
+)]
 pub fn terminate(pid: u32, force: bool) {
     let mut s = sysinfo::System::new();
     let p = sysinfo::Pid::from_u32(pid);
