@@ -53,6 +53,11 @@ impl Timestamp {
 pub trait LocalZone: Send + Sync + std::fmt::Debug {
     /// The minutes to add to UTC to get the local wall time at `at` (+480 for UTC+8, -300 for New York in winter).
     fn offset_minutes(&self, at: Timestamp) -> i32;
+
+    /// What this zone is, for diagnostics: an IANA name such as "Asia/Singapore", or why the OS zone could not be read.
+    fn describe(&self) -> String {
+        offset_label(Timestamp(0), self)
+    }
 }
 
 /// A zone shared between threads.
@@ -82,6 +87,16 @@ impl LocalZone for FixedZone {
     }
 }
 
+/// The local offset at `t` as "UTC+08:00", "UTC-09:30" or "UTC".
+pub fn offset_label(t: Timestamp, zone: &(impl LocalZone + ?Sized)) -> String {
+    let minutes = zone.offset_minutes(t).clamp(-MAX_OFFSET_MINUTES, MAX_OFFSET_MINUTES);
+    if minutes == 0 {
+        return "UTC".into();
+    }
+    let sign = if minutes < 0 { '-' } else { '+' };
+    format!("UTC{sign}{:02}:{:02}", minutes.abs() / 60, minutes.abs() % 60)
+}
+
 fn offset_ms(zone: &dyn LocalZone, at: Timestamp) -> i64 {
     i64::from(zone.offset_minutes(at).clamp(-MAX_OFFSET_MINUTES, MAX_OFFSET_MINUTES)) * MINUTE
 }
@@ -91,16 +106,51 @@ pub fn to_local(at: Timestamp, zone: &dyn LocalZone) -> i64 {
     at.millis().saturating_add(offset_ms(zone, at))
 }
 
-/// The instant whose local wall time is `local` (milliseconds since the local epoch). A wall time that occurs twice
-/// (clocks set back) gives one of the two; one that does not occur (clocks set forward) gives an instant at the jump.
+/// The instant whose local wall time is `local` (milliseconds since the local epoch), by the "compatible" rule: a wall
+/// time that occurs twice (clocks set back) gives the earlier instant; one that does not occur (clocks set forward) is read
+/// with the offset from before the change, so it lands as far past the jump as it was into the gap (00:30 in a gap from
+/// 00:00 to 01:00 is 01:30, and a midnight that does not exist is the jump itself).
 pub fn from_local(local: i64, zone: &dyn LocalZone) -> Timestamp {
-    // Guess with the offset at the wall time read as UTC, then correct once with the offset at the guess: exact for every
-    // zone whose offset changes at most once within 14 hours.
-    let guess = Timestamp(local.saturating_sub(offset_ms(zone, Timestamp(local))));
-    Timestamp(local.saturating_sub(offset_ms(zone, guess)))
+    // The offsets a day either side: every zone changes at most once within two days.
+    let before = Timestamp(local.saturating_sub(offset_ms(zone, Timestamp(local.saturating_sub(DAY)))));
+    if to_local(before, zone) == local {
+        return before;
+    }
+    let after = Timestamp(local.saturating_sub(offset_ms(zone, Timestamp(local.saturating_add(DAY)))));
+    if to_local(after, zone) == local {
+        return after;
+    }
+    before
 }
 
-/// The start of the local day that contains `at` (never later than `at`).
+/// Every instant at which the local wall time `local` begins: one as a rule; two when the clocks were set back over it (it
+/// happens twice); and when they were set forward over it, the jump itself (the first instant past it). Edges of local
+/// schedules (maintenance windows) change their state at exactly these instants.
+pub fn starts_of(local: i64, zone: &dyn LocalZone) -> Vec<Timestamp> {
+    let before = Timestamp(local.saturating_sub(offset_ms(zone, Timestamp(local.saturating_sub(DAY)))));
+    let after = Timestamp(local.saturating_sub(offset_ms(zone, Timestamp(local.saturating_add(DAY)))));
+    let mut out: Vec<Timestamp> = [before, after].into_iter().filter(|t| to_local(*t, zone) == local).collect();
+    if out.is_empty() {
+        // In a gap: the jump lies between the two readings. Halve to the millisecond (at most 26 steps for 14 hours).
+        let (mut lo, mut hi) = (before.min(after), before.max(after));
+        let first = offset_ms(zone, lo);
+        while hi.since(lo) > 1 {
+            let mid = lo.plus(hi.since(lo) / 2);
+            if offset_ms(zone, mid) == first {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        out.push(hi);
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// The start of the local day that contains `at` (never later than `at`): its midnight, or the first instant of the day when
+/// the clocks jumped over midnight (Havana, Santiago, the Azores).
 pub fn day_start(at: Timestamp, zone: &dyn LocalZone) -> Timestamp {
     let midnight = to_local(at, zone).div_euclid(DAY) * DAY;
     from_local(midnight, zone).min(at)
@@ -161,6 +211,9 @@ mod tests {
         // A faulty adapter cannot shift a day by more than 14 hours.
         assert_eq!(to_local(t, &FixedZone(10_000)), t.millis() + 14 * HOUR);
         assert_eq!(FixedZone::shared(60).offset_minutes(t), 60);
+        assert_eq!(FixedZone(480).describe(), "UTC+08:00");
+        assert_eq!(offset_label(t, &FixedZone(-570)), "UTC-09:30");
+        assert_eq!(offset_label(t, &FixedZone::UTC), "UTC");
     }
 
     #[test]
@@ -181,12 +234,21 @@ mod tests {
         assert_eq!(local_minute(Timestamp(SPRING - 1), &z), 2 * 60 - 1);
         assert_eq!(local_minute(Timestamp(SPRING), &z), 3 * 60);
         assert_eq!(local_minute(Timestamp(AUTUMN), &z), 2 * 60);
-        // A wall time in the spring gap maps to an instant at the jump; one in the autumn overlap to one of the two.
-        let gap = to_local(Timestamp(SPRING - 1), &z) + 30 * MINUTE;
-        assert!(from_local(gap, &z).since(Timestamp(SPRING)).abs() <= HOUR);
+        // 02:30 in the spring gap is read with the winter offset: 03:30, half an hour past the jump.
+        let gap = to_local(Timestamp(SPRING - 1), &z) + 30 * MINUTE + 1;
+        assert_eq!(from_local(gap, &z), Timestamp(SPRING + 30 * MINUTE));
+        assert_eq!(starts_of(gap, &z), vec![Timestamp(SPRING)], "a time in the gap begins at the jump");
+        // 02:30 in the autumn overlap happens twice: the earlier one (still summer time).
         let overlap = to_local(Timestamp(AUTUMN), &z) + 30 * MINUTE;
-        let back = from_local(overlap, &z);
-        assert_eq!(to_local(back, &z), overlap);
+        assert_eq!(from_local(overlap, &z), Timestamp(AUTUMN - 30 * MINUTE));
+        assert_eq!(
+            starts_of(overlap, &z),
+            vec![Timestamp(AUTUMN - 30 * MINUTE), Timestamp(AUTUMN + 30 * MINUTE)]
+        );
+        assert_eq!(
+            starts_of(to_local(Timestamp(SPRING + 5 * HOUR), &z), &z),
+            vec![Timestamp(SPRING + 5 * HOUR)]
+        );
     }
 
     #[test]

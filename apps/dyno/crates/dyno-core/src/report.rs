@@ -3,7 +3,7 @@
 use crate::forecast::Forecast;
 use crate::health::Severity;
 use crate::history::{Consumer, HistoryPoint};
-use crate::time::Timestamp;
+use crate::time::{offset_label, to_local, LocalZone, Timestamp};
 use crate::units::bytes;
 use serde::{Deserialize, Serialize};
 
@@ -236,21 +236,21 @@ pub fn hardware_lines(
     lines
 }
 
-/// A date as "2026-10-16" in UTC (the engine does not know the user's time zone; the app shows local times).
-pub fn utc_date(t: Timestamp) -> String {
-    let (y, m, d, _, _) = civil(t);
+/// A date as "2026-10-16" in the user's local zone.
+pub fn local_date(t: Timestamp, zone: &dyn LocalZone) -> String {
+    let (y, m, d, _, _) = civil(to_local(t, zone));
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-/// A moment as "2026-10-16 14:05 UTC".
-pub fn utc_time(t: Timestamp) -> String {
-    let (y, m, d, hh, mm) = civil(t);
-    format!("{y:04}-{m:02}-{d:02} {hh:02}:{mm:02} UTC")
+/// A moment as "2026-10-16 14:05" in the user's local zone.
+pub fn local_time(t: Timestamp, zone: &dyn LocalZone) -> String {
+    let (y, m, d, hh, mm) = civil(to_local(t, zone));
+    format!("{y:04}-{m:02}-{d:02} {hh:02}:{mm:02}")
 }
 
-/// Civil date and time of a timestamp (Howard Hinnant's days-to-date algorithm).
-fn civil(t: Timestamp) -> (i64, u32, u32, u32, u32) {
-    let secs = t.millis().div_euclid(1000);
+/// Civil date and time of a wall time in milliseconds since the (local) epoch (Howard Hinnant's days-to-date algorithm).
+fn civil(wall: i64) -> (i64, u32, u32, u32, u32) {
+    let secs = wall.div_euclid(1000);
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);
     let z = days + 719_468;
@@ -292,9 +292,14 @@ fn score_line(r: &WeeklyReport) -> String {
     }
 }
 
-/// The report as Markdown (dates in UTC).
-pub fn to_markdown(r: &WeeklyReport) -> String {
-    let mut o = format!("# Dyno weekly report\n\n{} to {} (UTC)\n\n", utc_date(r.from), utc_date(r.to));
+/// The report as Markdown (dates and times in the user's local zone, which the heading names).
+pub fn to_markdown(r: &WeeklyReport, zone: &dyn LocalZone) -> String {
+    let mut o = format!(
+        "# Dyno weekly report\n\n{} to {}, local time ({})\n\n",
+        local_date(r.from, zone),
+        local_date(r.to, zone),
+        offset_label(r.to, zone)
+    );
     if r.nothing_to_report {
         o.push_str("Nothing to report for this week: Dyno recorded no history or issues.\n");
         return o;
@@ -341,7 +346,7 @@ pub fn to_markdown(r: &WeeklyReport) -> String {
         for i in &r.issues {
             o.push_str(&format!(
                 "- {} {}: {} ({})\n",
-                utc_time(i.at),
+                local_time(i.at, zone),
                 severity_text(i.severity),
                 i.title,
                 i.detail
@@ -372,7 +377,7 @@ pub fn escape_html(s: &str) -> String {
 }
 
 /// The report as one self-contained HTML page (no scripts, no remote content; dates in UTC).
-pub fn to_html(r: &WeeklyReport) -> String {
+pub fn to_html(r: &WeeklyReport, zone: &dyn LocalZone) -> String {
     let e = escape_html;
     let mut o = String::from(
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Dyno weekly report</title>\n<style>\n\
@@ -382,9 +387,10 @@ pub fn to_html(r: &WeeklyReport) -> String {
          .muted{color:#666}\n</style>\n</head>\n<body>\n",
     );
     o.push_str(&format!(
-        "<h1>Dyno weekly report</h1>\n<p class=\"muted\">{} to {} (UTC)</p>\n",
-        utc_date(r.from),
-        utc_date(r.to)
+        "<h1>Dyno weekly report</h1>\n<p class=\"muted\">{} to {}, local time ({})</p>\n",
+        local_date(r.from, zone),
+        local_date(r.to, zone),
+        offset_label(r.to, zone)
     ));
     if r.nothing_to_report {
         o.push_str("<p>Nothing to report for this week: Dyno recorded no history or issues.</p>\n</body>\n</html>\n");
@@ -443,7 +449,7 @@ pub fn to_html(r: &WeeklyReport) -> String {
         for i in &r.issues {
             o.push_str(&format!(
                 "<li>{} {}: {} <span class=\"muted\">({})</span></li>\n",
-                utc_time(i.at),
+                local_time(i.at, zone),
                 severity_text(i.severity),
                 e(&i.title),
                 e(&i.detail)
@@ -474,11 +480,11 @@ impl ReportFormat {
         }
     }
 
-    /// Renders the report in this format.
-    pub fn render(self, r: &WeeklyReport) -> String {
+    /// Renders the report in this format, with dates in the user's local `zone`.
+    pub fn render(self, r: &WeeklyReport, zone: &dyn LocalZone) -> String {
         match self {
-            ReportFormat::Markdown => to_markdown(r),
-            ReportFormat::Html => to_html(r),
+            ReportFormat::Markdown => to_markdown(r, zone),
+            ReportFormat::Html => to_html(r, zone),
         }
     }
 }
@@ -516,6 +522,9 @@ pub fn validate_destination(path: &str, format: ReportFormat) -> Result<std::pat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time::FixedZone;
+
+    const UTC: &FixedZone = &FixedZone::UTC;
 
     fn input(points: &[HistoryPoint]) -> ReportInput<'_> {
         ReportInput {
@@ -597,10 +606,10 @@ mod tests {
     fn nothing_to_report_is_a_valid_report() {
         let r = weekly(input(&[]));
         assert!(r.nothing_to_report);
-        let md = to_markdown(&r);
+        let md = to_markdown(&r, UTC);
         assert!(md.contains("Nothing to report"));
         assert!(!md.contains("## Highlights"));
-        assert!(to_html(&r).contains("Nothing to report"));
+        assert!(to_html(&r, UTC).contains("Nothing to report"));
         // Any one thing makes it a report.
         let mut i = input(&[]);
         i.crashes = 1;
@@ -625,7 +634,7 @@ mod tests {
 
     #[test]
     fn markdown_has_every_section_and_escapes_table_cells() {
-        let md = to_markdown(&busy_week());
+        let md = to_markdown(&busy_week(), UTC);
         for h in [
             "## Highlights",
             "## Health",
@@ -636,18 +645,18 @@ mod tests {
         ] {
             assert!(md.contains(h), "{h}");
         }
-        assert!(md.starts_with("# Dyno weekly report\n\n2025-10-09 to 2025-10-16 (UTC)"));
+        assert!(md.starts_with("# Dyno weekly report\n\n2025-10-09 to 2025-10-16, local time (UTC)"));
         assert!(md.contains("Health score 80 (+10 against a week ago)."));
         assert!(md.contains("Recorded scores, oldest first: 70, 80."));
         assert!(md.contains("| <b>Evil\\|App</b> | 12.5% | 2.0 GB |"));
         assert!(md.contains("- C:: 20.0 GB free of 500.0 GB, full in about 12 days"));
         assert!(md.contains("not filling up") && md.contains("not enough history for a forecast"));
-        assert!(md.contains("1970-01-01 05:00 UTC Warning: Issue 5 (detail)"));
+        assert!(md.contains("1970-01-01 05:00 Warning: Issue 5 (detail)"));
     }
 
     #[test]
     fn html_escapes_text_from_the_machine_and_has_no_script() {
-        let html = to_html(&busy_week());
+        let html = to_html(&busy_week(), UTC);
         assert!(html.starts_with("<!doctype html>"));
         assert!(html.contains("&lt;b&gt;Evil|App&lt;/b&gt;"));
         assert!(!html.contains("<b>") && !html.contains("<script"));
@@ -663,22 +672,31 @@ mod tests {
         i.score_before = Some(70);
         let r = weekly(i);
         assert_eq!((r.score, r.score_change), (None, 0));
-        assert!(to_markdown(&r).contains("No health score was recorded this week."));
+        assert!(to_markdown(&r, UTC).contains("No health score was recorded this week."));
     }
 
     #[test]
-    fn dates_are_civil_utc() {
-        assert_eq!(utc_date(Timestamp(0)), "1970-01-01");
-        assert_eq!(utc_time(Timestamp(951_782_400_000 + 3_660_000)), "2000-02-29 01:01 UTC");
-        assert_eq!(utc_date(Timestamp(-86_400_000)), "1969-12-31");
-        assert_eq!(utc_date(Timestamp(1_760_000_000_000)), "2025-10-09");
+    fn dates_are_civil_and_local() {
+        assert_eq!(local_date(Timestamp(0), UTC), "1970-01-01");
+        assert_eq!(local_time(Timestamp(951_782_400_000 + 3_660_000), UTC), "2000-02-29 01:01");
+        assert_eq!(local_date(Timestamp(-86_400_000), UTC), "1969-12-31");
+        assert_eq!(local_date(Timestamp(1_760_000_000_000), UTC), "2025-10-09");
+        // 2025-10-09T08:53:20Z is 16:53 in UTC+8; nine hours earlier it was 19:53 on the 8th in UTC-4.
+        assert_eq!(local_time(Timestamp(1_760_000_000_000), &FixedZone(480)), "2025-10-09 16:53");
+        assert_eq!(
+            local_time(Timestamp(1_760_000_000_000 - 9 * 3_600_000), &FixedZone(-240)),
+            "2025-10-08 19:53"
+        );
+        assert_eq!(offset_label(Timestamp(0), UTC), "UTC");
+        assert_eq!(offset_label(Timestamp(0), &FixedZone(480)), "UTC+08:00");
+        assert_eq!(offset_label(Timestamp(0), &FixedZone(-570)), "UTC-09:30");
     }
 
     #[test]
     fn formats_and_destinations() {
         assert_eq!((ReportFormat::Markdown.extension(), ReportFormat::Html.extension()), ("md", "html"));
-        assert!(ReportFormat::Html.render(&busy_week()).contains("<html"));
-        assert!(ReportFormat::Markdown.render(&busy_week()).starts_with("# "));
+        assert!(ReportFormat::Html.render(&busy_week(), UTC).contains("<html"));
+        assert!(ReportFormat::Markdown.render(&busy_week(), UTC).starts_with("# "));
         let ok = if cfg!(windows) { "C:\\r\\week.MD" } else { "/r/week.MD" };
         assert!(validate_destination(ok, ReportFormat::Markdown).is_ok());
         let wrong = if cfg!(windows) { "C:\\r\\week.md" } else { "/r/week.md" };
@@ -788,8 +806,8 @@ mod tests {
         i.crashes = 1;
         let r = weekly(i);
         assert!(r.highlights.iter().any(|h| h.starts_with("The CPU ran slower")));
-        assert!(to_markdown(&r).contains("## Hardware\n\n- The CPU ran slower"));
-        assert!(to_html(&r).contains("<h2>Hardware</h2>"));
-        assert!(!to_markdown(&weekly(input(&[]))).contains("## Hardware"));
+        assert!(to_markdown(&r, UTC).contains("## Hardware\n\n- The CPU ran slower"));
+        assert!(to_html(&r, UTC).contains("<h2>Hardware</h2>"));
+        assert!(!to_markdown(&weekly(input(&[])), UTC).contains("## Hardware"));
     }
 }

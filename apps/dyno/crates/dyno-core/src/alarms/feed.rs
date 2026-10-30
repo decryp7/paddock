@@ -192,7 +192,12 @@ pub fn alarms_on(kind: crate::issues::IssueKind) -> bool {
 
 /// A throttling episode that has lasted long enough to count; `active` is false once it ended. Heat is a warning (it can
 /// damage a machine over time), the other causes are information.
-pub fn from_throttle(e: &crate::throttle::ThrottleEpisode, active: bool, confidence: crate::hardware::Confidence) -> Observation {
+pub fn from_throttle(
+    e: &crate::throttle::ThrottleEpisode,
+    active: bool,
+    confidence: crate::hardware::Confidence,
+    zone: &dyn crate::time::LocalZone,
+) -> Observation {
     use crate::throttle::ThrottleCause;
     Observation {
         source: Source::Throttling,
@@ -210,7 +215,7 @@ pub fn from_throttle(e: &crate::throttle::ThrottleEpisode, active: bool, confide
         ),
         detail: format!(
             "Throttling since {} with {} confidence. Open Throttling for the cause and what could help.",
-            crate::report::utc_time(e.start),
+            crate::report::local_time(e.start, zone),
             confidence.word()
         ),
         value: Some(f64::from(e.avg_lost_percent)),
@@ -387,7 +392,7 @@ mod tests {
             peak_lost_percent: 40.0,
             peak_temperature_c: Some(99.0),
         };
-        let o = from_throttle(&e, true, Confidence::High);
+        let o = from_throttle(&e, true, Confidence::High, &crate::time::FixedZone::UTC);
         assert_eq!((o.rule().as_str(), o.key().as_str()), ("throttling:cpu", "throttling:cpu"));
         assert_eq!(o.severity, Severity::Warning);
         assert!(
@@ -401,6 +406,7 @@ mod tests {
             },
             false,
             Confidence::Medium,
+            &crate::time::FixedZone::UTC,
         );
         assert_eq!(power.severity, Severity::Info);
         assert!(!power.active);

@@ -14,6 +14,9 @@ use dyno_platform::Platform;
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
+mod common;
+use common::{full_disk_sample, wait_for_alarm};
+
 struct Harness {
     running: Option<Running>,
     fake: Fake,
@@ -268,38 +271,6 @@ fn the_inventory_is_read_once_and_cached() {
         panic!("inventory")
     };
     assert_eq!(*a, *b);
-}
-
-fn full_disk_sample() -> dyno_core::metrics::SystemSample {
-    let mut s = dyno_platform::fake::quiet_sample(Timestamp(0));
-    s.disks = vec![dyno_core::metrics::DiskSample {
-        id: "c".into(),
-        name: "C:".into(),
-        mount: "C:".into(),
-        total: 100 << 30,
-        free: 2 << 30,
-        removable: false,
-    }];
-    s
-}
-
-fn wait_for_alarm(peer: &Peer<Message>) -> dyno_core::alarms::Alarm {
-    for _ in 0..100 {
-        let Reply::Alarms(list) = ask(
-            peer,
-            Request::Alarms {
-                filter: Default::default(),
-            },
-        )
-        .unwrap() else {
-            panic!("alarms")
-        };
-        if let Some(a) = list.into_iter().next() {
-            return a;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    panic!("no alarm was raised");
 }
 
 #[test]

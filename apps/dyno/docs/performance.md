@@ -15,6 +15,7 @@ Dyno has two things called "bench":
 |---|---|---|---|---|---|---|
 | `dyno-agent bench [seconds] [none\|summary\|processes]` (`crates/dyno-agent/src/cli.rs`) | The agent's own CPU (share of one core) and memory with nobody watching, a summary subscriber or a processes subscriber; JSON output | `cargo run --release -p dyno-agent -- bench 25 processes` | The live machine (read-only) | none | No. `scripts/check-bundle.sh` (`dyno-release.yml`) runs `dyno-agent once`, a smoke test with no budget | below; [architecture.md](architecture.md#dynos-own-overhead) |
 | `cargo test --release -p dyno-agent --test finder_bench -- --ignored --nocapture` (`crates/dyno-agent/tests/finder_bench.rs`) | The file finder (large and duplicate files) on a generated tree, by the number of threads reading it | the command | 400 folders, 50,000 small files and 300 files of about 1 MiB (100 files with two copies each), made in a temp folder | none (a measurement; the checks are the finder's unit tests) | no | [File finder](#file-finder-2026-10-29) |
+| `cargo test --release -p dyno-platform --test maintenance_bench -- --ignored --nocapture` (`crates/dyno-platform/tests/maintenance_bench.rs`) | The Maintenance view's status (when the windows close or open next) in the worst case, with the OS zone and a POSIX zone with summer time | the command | 14 windows, all closed now, the next opening almost a week ahead (generated in the test) | none (a measurement; `jumping_to_window_edges_finds_what_scanning_every_minute_finds` checks the answers) | no | [Maintenance status](#maintenance-status-2026-10-30) |
 | `app/angular.json` budgets | The initial bundle | `cd app && npx ng build` | — | initial warn 900 kB / error 1.5 MB; component style warn 16 kB / error 32 kB | `ci.yml` Dyno leg | — |
 
 ## Budgets
@@ -130,3 +131,29 @@ So 4 threads take about a third of the time and 8 about a quarter to a third of 
 The corpus is small and warm; a large cold folder spends its time waiting for the disk, where parallel reads help more on an
 SSD, and not at all on a spinning disk (hence one thread there). **Not measured:** a spinning disk and a network share (none to
 hand); their thread counts follow ER-20's table and the disk map's.
+
+## Maintenance status (2026-10-30)
+
+Rule 51 (review P2 of ADR 0024): the status looked for the next change by testing every minute of the next eight days, with
+two zone lookups per window per minute. It now jumps from window edge to window edge (`time::starts_of`, so a time the clocks
+skip or repeat is handled) and does one zone lookup per test. The answers are the same: the benchmark prints them (9,535 and
+9,955 minutes to the next opening, before and after), and a unit test compares the two ways around both of 2026's clock changes.
+
+- **Commit:** A/B on `fix/dyno-today-grouping`: before = the minute scan of 794c3cd70 (with this round's other edits), after =
+  the edge jump of the commit that records this entry
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; rustc 1.99.1
+- **Load:** 1-minute load 20 to 22, 5-minute 29 to 30 (other agents and the nightly CI); an indication, compared only within
+  this A/B
+- **Build:** release (`cargo test --release --no-run`), the two test binaries copied and run in turn, `nice -n 10`
+- **Corpus:** 14 windows on Mondays from 09:00 to 10:00 (start minutes 0 to 13 apart), now Monday 2026-10-26 10:05 UTC; synthetic
+- **Runs:** before, after, three pairs, interleaved; 50 calls each
+
+| Zone | Before, best | Before, mean | After, best | After, mean |
+|---|---|---|---|---|
+| The OS zone (`SystemZone`, Asia/Singapore on this machine) | 6.06 to 6.20 ms | 6.37 to 6.61 ms | 0.029 to 0.030 ms | 0.052 to 0.067 ms |
+| POSIX `CET-1CEST,M3.5.0,M10.5.0/3` (`TzZone`) | 6.27 to 6.78 ms | 7.23 to 7.41 ms | 0.034 to 0.035 ms | 0.035 to 0.037 ms |
+
+So about 200 times less work per status. It was never slow enough to notice once, but the status is asked for each time the
+Maintenance view opens and the minute scan grew with the number of windows. **Memory:** not measured (a vector of at most 504
+instants).
+

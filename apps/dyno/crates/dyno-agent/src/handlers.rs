@@ -576,7 +576,8 @@ fn save_report(shared: &Shared, path: &str, format: ReportFormat, weeks_ago: u32
     if !dest.parent().is_some_and(Path::is_dir) {
         return Err(bad("The folder to save the report in does not exist."));
     }
-    let text = format.render(&weekly_report(shared, weeks_ago)?);
+    let zone = lock(&shared.core).zone.clone();
+    let text = format.render(&weekly_report(shared, weeks_ago)?, zone.as_ref());
     std::fs::write(&dest, text.as_bytes()).map_err(|e| {
         let code = if e.kind() == std::io::ErrorKind::PermissionDenied {
             ErrorCode::AccessDenied

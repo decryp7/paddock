@@ -22,6 +22,9 @@ use dyno_platform::issues::ToolRunner;
 use std::sync::Arc;
 use std::time::Duration;
 
+mod common;
+use common::{full_disk_sample, wait_for_alarm};
+
 /// UTC+8 (Singapore, no daylight saving): every local midnight is 16:00 UTC, never a UTC midnight.
 const ZONE: FixedZone = FixedZone(480);
 
@@ -155,34 +158,8 @@ fn quiet_hours_and_until_tomorrow_follow_the_local_clock() {
         },
     )
     .unwrap();
-    let mut full = quiet_sample(Timestamp(0));
-    full.disks = vec![dyno_core::metrics::DiskSample {
-        id: "c".into(),
-        name: "C:".into(),
-        mount: "C:".into(),
-        total: 100 << 30,
-        free: 2 << 30,
-        removable: false,
-    }];
-    h.fake.push_sample(full);
-    let alarm = (0..100)
-        .find_map(|_| {
-            let Reply::Alarms(list) = ask(
-                &peer,
-                Request::Alarms {
-                    filter: Default::default(),
-                },
-            )
-            .unwrap() else {
-                panic!("alarms")
-            };
-            let first = list.into_iter().next();
-            if first.is_none() {
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            first
-        })
-        .expect("the low-disk alarm");
+    h.fake.push_sample(full_disk_sample());
+    let alarm = wait_for_alarm(&peer);
     let Reply::AlarmChanges(log) = ask(
         &peer,
         Request::AlarmHistory {
@@ -251,15 +228,17 @@ fn baselines_learn_and_judge_by_the_local_hour() {
     busy.cpu.total = 95.0;
     let h = Harness::start(Some(busy));
     let s = h.shared();
-    // Four weeks where the CPU is busy only in this local hour of each day, and quiet otherwise.
+    // Four weeks where the CPU is busy only in this local hour of each day and the next (the judgement may come after the
+    // hour turns), and quiet otherwise.
     let t = now();
     let hour_of = |at: Timestamp| to_local(at, &ZONE).rem_euclid(DAY) / HOUR;
+    let busy_hours = [hour_of(t), (hour_of(t) + 1) % 24];
     {
         let core = dyno_agent::agent::lock(&s.core);
         core.store.set_meta("firstSeen", &t.minus(30 * DAY).millis().to_string()).unwrap();
         for q in 0..(28 * 96) {
             let at = t.minus(28 * DAY).plus(q * 15 * MINUTE);
-            let cpu = if hour_of(at) == hour_of(t) { 95.0 } else { 5.0 };
+            let cpu = if busy_hours.contains(&hour_of(at)) { 95.0 } else { 5.0 };
             core.store
                 .put_point(
                     Tier::QuarterHour,
@@ -289,16 +268,20 @@ fn baselines_learn_and_judge_by_the_local_hour() {
     assert_eq!(cpu.judgement.state, State::Usual, "busy is usual at this local hour: {cpu:?}");
     // The words name the local weekday and part of the day. Learning and judging in UTC would cancel out in the
     // numbers, but not in the words: eight hours always change the part of the day (the longest, nights, is seven).
-    let local = to_local(t, &ZONE);
-    let weekday =
-        ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][(local.div_euclid(DAY) + 3).rem_euclid(7) as usize];
-    let part = match local.rem_euclid(DAY) / HOUR {
-        5..=11 => "mornings",
-        12..=16 => "afternoons",
-        17..=21 => "evenings",
-        _ => "nights",
+    let after = now();
+    let words = |at: Timestamp| {
+        let local = to_local(at, &ZONE);
+        let weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            [(local.div_euclid(DAY) + 3).rem_euclid(7) as usize];
+        let part = match local.rem_euclid(DAY) / HOUR {
+            5..=11 => "mornings",
+            12..=16 => "afternoons",
+            17..=21 => "evenings",
+            _ => "nights",
+        };
+        format!("Usual for {weekday} {part}")
     };
-    assert_eq!(cpu.judgement.phrase, format!("Usual for {weekday} {part}"), "{cpu:?}");
+    assert!([words(t), words(after)].contains(&cpu.judgement.phrase), "{cpu:?}");
 }
 
 /// Answers `tmutil` with a destination and the given latest backup.
@@ -336,4 +319,16 @@ fn a_time_machine_folder_name_is_read_as_local_time() {
     };
     let tm = r.statuses.iter().find(|x| x.tool == BackupTool::TimeMachine).expect("Time Machine");
     assert_eq!(tm.last_backup, Some(at), "{tm:?}");
+}
+
+#[test]
+fn the_diagnostics_bundle_names_the_zone_in_use() {
+    let h = Harness::start(None);
+    let bundle = dyno_agent::diagnostics::collect(&h.shared()).unwrap();
+    let zone = bundle
+        .files
+        .iter()
+        .find(|f| f.path == "system/time-zone.json")
+        .expect("the time zone file");
+    assert!(zone.text.contains("UTC+08:00"), "{}", zone.text);
 }
