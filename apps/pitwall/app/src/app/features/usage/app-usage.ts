@@ -135,8 +135,9 @@ const METRICS: { id: UsageMetric; label: string }[] = [
       .c-status {
         width: 96px;
       }
+      /* "955 ms" and "2.2M" whole: numbers are never cut (design guide 3). */
       .c-num {
-        width: 68px;
+        width: 80px;
       }
     }
     .cache {

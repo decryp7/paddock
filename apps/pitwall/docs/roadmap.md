@@ -125,8 +125,11 @@ Pacenotes: toolsets `orient`, `code`, `review`, `diagrams`, `requirements` and `
 - **Done (WP-2.4, Rust).** The app crate runs on `paddock-shell`: the shell opens the tray and the main window (ADR 0029),
   owns the windows, the exit and its watchdog, and guards Pitwall's commands; start tests on the mock runtime. The main
   window is opaque (user, 2026-10-30).
-- **Next.** WP-2.3 (Material, in progress), WP-2.7 (About and notices; waits for the updater decision in the plan), then
-  WP-2.5, 2.6, 2.8, 2.9.
+- **Done (WP-2.3).** Every control is Material or paddock-ui (rule 47; `scripts/ci/controls.test.mjs` fails on a native or
+  retired one); one filled primary per region (`e2e/primary.e2e.ts`); the axe baseline is empty.
+- **Done (WP-2.7, first half).** `THIRD_PARTY_NOTICES.md` for the app, the server and the UI, checked in CI; About shows it
+  once the shell's updater is registered.
+- **Next.** The updater decision (plan, shared-code change 3), then WP-2.5, 2.6, the rest of 2.7, 2.8 and 2.9.
 
 ## Next (hand-off, 2026-10-22)
 
