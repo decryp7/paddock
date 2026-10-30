@@ -1,9 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
+import { dialogContracts, dialogWindowUrl } from '../../../../ui/projects/paddock-e2e/src/index.ts';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openApp } from './app';
+import { CONTRACT_FILES, INPUTS } from './dialog-fixtures';
 
-// Layout at the supported window widths (rule 18): for every route and dialog, no element wider than its container, no
+// Layout at the supported window widths (rule 18): for every route of the main window, no element wider than its container, no
 // horizontal scroll (of the page or of a panel inside it) and no text clipped without an ellipsis. The measurement is the
 // independent reviewer's (Pitwall 1.1 review); visually hidden text (`sr-only`) is clipped on purpose and is not reported.
 //
@@ -11,6 +13,9 @@ import { openApp } from './app';
 // that is not in the baseline fails the test (a new problem), and a baseline line that is gone fails it too (a fix: delete the
 // entry). WP-2/WP-3 own the fixes. Re-record with `PW_RECORD_BASELINE=1 npx playwright test e2e/layout.e2e.ts
 // --project=chromium` (then review the diff). Do not record a new screen's problems: fix the layout.
+//
+// Each dialog window (the Settings window, Pitwall's four dialogs, the shared confirmation, About, Updates and What's new) is
+// measured as Rust opens it: by its URL, at its contract's width (a dialog window has one width, not the main window's three).
 
 const WIDTHS = [900, 1024, 1280] as const;
 
@@ -20,8 +25,6 @@ interface State {
   readonly query?: string;
   readonly width?: number;
   readonly height?: number;
-  /** Measure only inside the open dialog (and wait for it). */
-  readonly dialog?: boolean;
   readonly act?: (page: Page) => Promise<void>;
 }
 
@@ -71,25 +74,6 @@ const STATES: readonly State[] = [
       await page.getByRole('button', { name: /Spotter/ }).first().click();
     },
   },
-  {
-    id: 'apps-new-dialog',
-    hash: '/apps',
-    dialog: true,
-    act: async (page) => {
-      await page.getByRole('button', { name: 'New app' }).first().click();
-    },
-  },
-  {
-    id: 'apps-key-secret',
-    hash: '/apps',
-    dialog: true,
-    act: async (page) => {
-      await page.getByRole('button', { name: 'New app' }).first().click();
-      await page.getByRole('dialog').getByRole('textbox').first().fill('A rather long application name for testing');
-      await page.getByRole('button', { name: 'Create app' }).click();
-      await page.getByRole('dialog', { name: /New key for/ }).waitFor();
-    },
-  },
   { id: 'requests', hash: '/requests' },
   {
     id: 'requests-detail',
@@ -100,9 +84,6 @@ const STATES: readonly State[] = [
   },
   { id: 'playground', hash: '/playground' },
   { id: 'benchmarks', hash: '/benchmarks' },
-  { id: 'settings', hash: '/settings' },
-  { id: 'consent-dialog', hash: '/', query: 'mock-consent', dialog: true },
-  { id: 'quit-dialog', hash: '/', query: 'mock-quit', dialog: true },
   // The tray popover is its own small window, not a resizable one: measured once at its own size.
   { id: 'tray', hash: '/tray', width: 360, height: 560 },
 ];
@@ -195,10 +176,8 @@ test.describe('layout at the supported window widths', () => {
         await page.waitForLoadState('networkidle');
         // A step that breaks fails the test: nothing here is caught.
         await state.act?.(page);
-        // Exactly one dialog window: the previous one has finished closing.
-        if (state.dialog) await expect(page.locator('cdk-dialog-container')).toHaveCount(1);
         await page.waitForLoadState('networkidle');
-        const found = await problems(page, state.dialog ? 'cdk-dialog-container' : null);
+        const found = await problems(page, null);
         const lines = [...found.spill, ...found.scroll, ...found.clipped].sort();
         const id = `${info.project.name}/${key}`;
         if (RECORD) {
@@ -209,5 +188,29 @@ test.describe('layout at the supported window widths', () => {
         expect({ new: lines.filter((l) => !known.includes(l)), fixed: known.filter((l) => !lines.includes(l)) }, id).toEqual({ new: [], fixed: [] });
       });
     }
+  }
+});
+
+test.describe('layout of every dialog window at its contract width', () => {
+  const contracts = dialogContracts(...CONTRACT_FILES);
+  for (const [id, contract] of Object.entries(contracts)) {
+    const key = `window ${id}@${contract.width}`;
+    test(`${key}: nothing new spills, scrolls sideways or is clipped`, async ({ page }, info) => {
+      // A tool (the Settings window) opens at its preferred size; the others at a height that fits a long body.
+      await page.setViewportSize({ width: contract.width, height: contract.height ?? 640 });
+      await page.goto(dialogWindowUrl(id, INPUTS[id] ?? {}, { title: id }));
+      await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
+      await page.waitForLoadState('networkidle');
+      await expect(page.locator('[data-testid=dialog-footer]')).toBeVisible();
+      const found = await problems(page, null);
+      const lines = [...found.spill, ...found.scroll, ...found.clipped].sort();
+      const run = `${info.project.name}/${key}`;
+      if (RECORD) {
+        recorded[run] = lines;
+        return;
+      }
+      const known = baseline[run] ?? [];
+      expect({ new: lines.filter((l) => !known.includes(l)), fixed: known.filter((l) => !lines.includes(l)) }, run).toEqual({ new: [], fixed: [] });
+    });
   }
 });

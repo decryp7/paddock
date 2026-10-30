@@ -2,52 +2,15 @@
   display: block;
 }
 
-.layout {
-  display: grid;
-  grid-template-columns: 184px minmax(0, 880px);
-  gap: var(--pd-space-8);
-  align-items: start;
+/* A page of the Settings window: the window's page area gives the gutter, as it does for the shell's own pages. */
+.page {
+  max-width: none;
+  margin: 0;
+  padding: 0 0 var(--pd-space-8);
 }
 
-.subnav {
-  /* conformance: not-a-header */
-  position: sticky;
-  top: var(--pd-space-6);
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  button {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    height: 30px;
-    padding: 0 var(--pd-space-2);
-    font: inherit;
-    font-weight: var(--pd-weight-medium);
-    color: var(--pd-text-muted);
-    text-align: left;
-    background: none;
-    border: none;
-    border-radius: var(--pd-radius-control);
-    cursor: default;
-    transition: background var(--pd-duration-micro) var(--pd-ease-move);
-    mat-icon {
-      width: 15px;
-      height: 15px;
-      color: var(--pd-text-subtle);
-    }
-    &:hover {
-      background: var(--pd-hover);
-      color: var(--pd-text);
-    }
-    &.active {
-      background: var(--pd-pressed);
-      color: var(--pd-text);
-      mat-icon {
-        color: var(--pd-accent);
-      }
-    }
-  }
+.layout {
+  max-width: 880px;
 }
 
 .cards {
@@ -62,9 +25,12 @@
 
 .row {
   display: flex;
+  /* In the Settings window the page is narrow: a wide control (the quit choices) goes under its label rather than
+     squeezing the label into a column of single words. */
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--pd-space-6);
+  gap: var(--pd-space-2) var(--pd-space-6);
   min-height: 52px;
   padding: var(--pd-space-3) 0;
   border-top: 1px solid var(--pd-hairline);
@@ -75,6 +41,7 @@
 }
 
 .lbl {
+  flex: 1 1 240px;
   min-width: 0;
   .name {
     display: block;
@@ -238,9 +205,12 @@
 }
 
 .savebar {
-  position: fixed;
-  left: calc(var(--pd-sidebar-width) + 50% - var(--pd-sidebar-width) / 2);
+  /* Sticks to the bottom of whatever scrolls the page (the Settings window's page area), centred under the cards. */
+  position: sticky;
   bottom: var(--pd-space-4);
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
   z-index: 100;
   display: flex;
   align-items: center;
@@ -250,7 +220,6 @@
   border: 1px solid var(--pd-hairline);
   border-radius: var(--pd-radius-card);
   box-shadow: var(--pd-shadow-3);
-  transform: translateX(-50%);
   animation: pw-pop var(--pd-duration) var(--pd-ease-move);
   .msg {
     font-size: var(--pd-text-label);
@@ -259,15 +228,6 @@
   }
   .err {
     color: var(--pd-danger);
-  }
-}
-
-@media (max-width: 1100px) {
-  .layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .subnav {
-    display: none;
   }
 }
 

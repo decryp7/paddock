@@ -907,18 +907,6 @@ export type CacheClearScope =
   | { kind: 'app'; appId: string }
   | { kind: 'model'; modelId: string };
 
-export interface AppUpdateStatus {
-  available: boolean;
-  reason: string | null;
-  currentVersion: string;
-}
-
-/** An update found by a check (`UpdateInfo` in `app/src-tauri/src/updater.rs`). */
-export interface UpdateInfo {
-  version: string;
-  notes: string | null;
-}
-
 export type Platform = 'windows' | 'macos' | 'linux';
 
 /** The server's registration with the OS (`ServiceInstall` in `app/src-tauri/src/service_install.rs`). */

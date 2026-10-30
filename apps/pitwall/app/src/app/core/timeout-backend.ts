@@ -8,8 +8,6 @@ export const DEFAULT_TIMEOUT_MS = 15_000;
 const SLOW: Partial<Record<keyof PitwallBackend, number>> = {
   searchModels: 30_000,
   repoFiles: 30_000,
-  appUpdateStatus: 30_000,
-  checkAppUpdate: 30_000,
 };
 
 export function timeoutError(method: string, ms: number): CommandError {

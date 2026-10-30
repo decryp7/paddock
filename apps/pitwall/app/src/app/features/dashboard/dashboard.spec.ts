@@ -9,6 +9,7 @@ import { LiveStore } from '../../core/live.store';
 import { MockBackend } from '../../core/mock-backend';
 import { Toasts } from '../../core/toasts';
 import { ThemeService } from '../../core/theme';
+import { AppearanceStore, BrowserAppearanceBackend, provideAppearance } from '@decryp7/paddock-ui/shell';
 import { registerIcons } from '../../shared/icons';
 import { FakeChart, fakeChartProvider, settle } from '../../../testing/render';
 import { Dashboard, PerfMeter, shortModel } from './dashboard';
@@ -16,7 +17,7 @@ import { Dashboard, PerfMeter, shortModel } from './dashboard';
 async function mount(opts: { backend?: MockBackend; load?: boolean; patch?: (o: Overview) => Overview } = {}) {
   const backend = opts.backend ?? new MockBackend();
   FakeChart.all = [];
-  TestBed.configureTestingModule({ imports: [Dashboard], providers: [{ provide: BACKEND, useValue: backend }, provideRouter([]), fakeChartProvider] });
+  TestBed.configureTestingModule({ imports: [Dashboard], providers: [{ provide: BACKEND, useValue: backend }, provideRouter([]), fakeChartProvider, provideAppearance({ accent: 'pitwall', backend: () => new BrowserAppearanceBackend({ storage: null, channel: null }) })] });
   registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
   const live = TestBed.inject(LiveStore);
   if (opts.load !== false) await live.load();
@@ -239,7 +240,8 @@ describe('Dashboard', () => {
     await settle(fixture);
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     expect(replaces()).toBe(before + 1);
-    TestBed.inject(ThemeService).set(TestBed.inject(ThemeService).resolved() === 'dark' ? 'light' : 'dark');
+    // The shell's Appearance setting changes the scheme; the charts follow it.
+    TestBed.inject(AppearanceStore).setTheme(TestBed.inject(ThemeService).resolved() === 'dark' ? 'light' : 'dark');
     await settle(fixture);
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     expect(replaces()).toBe(before + 2);

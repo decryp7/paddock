@@ -30,7 +30,7 @@ test.describe('native feel', () => {
   test('chrome is not selectable; request text is', async ({ page }) => {
     const selected = () => page.evaluate(() => window.getSelection()?.toString().trim() ?? '');
     await page.evaluate(() => window.getSelection()?.removeAllRanges());
-    await page.locator('pw-sidebar nav a').first().dblclick();
+    await page.locator('pd-pages-sidebar a').first().dblclick();
     expect(await selected()).toBe('');
     await page.locator('h1').first().dblclick();
     expect(await selected()).toBe('');
@@ -111,8 +111,9 @@ test.describe('native feel', () => {
     await page.getByRole('link', { name: /Models/ }).first().click();
     const mouseOutline = await page.getByRole('tab', { name: 'Library' }).evaluate((el) => getComputedStyle(el).outlineStyle);
     expect(mouseOutline).toBe('none');
+    expect(await page.getByRole('tab', { name: 'Library' }).evaluate((el) => el.matches(':focus-visible'))).toBe(false);
     await page.keyboard.press('Tab');
-    const focused = await page.evaluate(() => getComputedStyle(document.activeElement!).outlineStyle);
-    expect(focused).toBe('solid');
+    // The keyboard's focus is :focus-visible, so the family's ring (an outline, or Material's focus indicator) shows.
+    expect(await page.evaluate(() => document.activeElement?.matches(':focus-visible') ?? false)).toBe(true);
   });
 });

@@ -7,7 +7,8 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import type { LocalModel } from '../../core/api.types';
 import { ago, bytes, bytesIn, bytesUnit, date, seconds, slotsText, varies } from '../../shared/format';
 import { CAPABILITY_ICON, CAPABILITY_LABEL, UPDATE_KIND_LABEL, fitLook } from '../../shared/labels';
-import { Confirm } from '../../shared/ui/confirm';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { DetailPanel } from '../../shared/ui/detail-panel';
 import { Fact } from '../../shared/ui/fact';
 import { Panel } from '../../shared/ui/panel';
@@ -452,7 +453,7 @@ export class LibraryTab {
   protected readonly store = inject(ModelsStore);
   protected readonly updates = inject(UpdatesStore);
   protected readonly updateKind = UPDATE_KIND_LABEL;
-  private readonly confirm = inject(Confirm);
+  private readonly dialogs = inject(DialogService);
   protected readonly size = bytes;
   protected readonly when = ago;
   protected readonly secs = seconds;
@@ -597,7 +598,7 @@ export class LibraryTab {
   }
 
   protected async remove(m: LocalModel): Promise<void> {
-    const ok = await this.confirm.ask({ title: `Delete ${m.name}?`, message: `${m.file} (${bytes(m.sizeBytes)}) is removed from disk. You can download it again later.`, confirm: 'Delete', danger: true });
+    const ok = await confirm(this.dialogs, { heading: `Delete ${m.name}?`, message: `${m.file} (${bytes(m.sizeBytes)}) is removed from disk. You can download it again later.`, confirm: { label: 'Delete model', destructive: true } });
     if (ok) {
       if (this.selectedId() === m.id) this.selectedId.set(null);
       await this.store.deleteModel(m.id);
@@ -606,11 +607,10 @@ export class LibraryTab {
 
   protected async cleanUp(): Promise<void> {
     const list = this.store.unusedModels();
-    const ok = await this.confirm.ask({
-      title: `Delete ${list.length} unused ${list.length === 1 ? 'model' : 'models'}?`,
+    const ok = await confirm(this.dialogs, {
+      heading: `Delete ${list.length} unused ${list.length === 1 ? 'model' : 'models'}?`,
       message: `${list.map((m) => m.name).join(', ')} — ${bytes(this.store.unusedBytes())} in total. You can download them again later.`,
-      confirm: 'Delete',
-      danger: true,
+      confirm: { label: list.length === 1 ? 'Delete model' : 'Delete models', destructive: true },
     });
     if (ok) await this.store.cleanUnused();
   }

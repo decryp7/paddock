@@ -10,7 +10,8 @@ import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { ModelPreset, PresetEntry, PresetStatus } from '../../core/api.types';
 import { presetStatusLook } from '../../shared/labels';
-import { Confirm } from '../../shared/ui/confirm';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
 import { moveRowFocus } from '../../shared/ui/row-nav';
 import { Panel } from '../../shared/ui/panel';
@@ -333,7 +334,7 @@ export function statusDetail(s: PresetStatus): string {
 export class PresetsTab {
   protected readonly store = inject(PresetsStore);
   protected readonly models = inject(ModelsStore);
-  private readonly confirm = inject(Confirm);
+  private readonly dialogs = inject(DialogService);
   protected readonly aliasMax = ALIAS_MAX;
   protected readonly promptMax = PROMPT_MAX;
   protected readonly autoExamples = AUTO_EXAMPLES;
@@ -451,11 +452,10 @@ export class PresetsTab {
   }
 
   protected async remove(alias: string): Promise<void> {
-    const ok = await this.confirm.ask({
-      title: `Delete ${alias}?`,
+    const ok = await confirm(this.dialogs, {
+      heading: `Delete ${alias}?`,
       message: 'Apps that ask for this name will get an error until you create it again. The model itself is not touched.',
-      confirm: 'Delete preset',
-      danger: true,
+      confirm: { label: 'Delete preset', destructive: true },
     });
     if (ok) await this.store.remove(alias);
   }

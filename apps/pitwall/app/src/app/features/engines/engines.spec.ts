@@ -1,3 +1,4 @@
+import { dialogsAnswering } from '../../../testing/render';
 import { TestBed } from '@angular/core/testing';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
@@ -7,7 +8,6 @@ import { LiveStore } from '../../core/live.store';
 import { MockBackend } from '../../core/mock-backend';
 import { Toasts } from '../../core/toasts';
 import { registerIcons } from '../../shared/icons';
-import { Confirm } from '../../shared/ui/confirm';
 import { modelLabel } from './engine-card';
 import { EnginesPage } from './engines-page';
 import { EnginesStore } from './engines.store';
@@ -80,7 +80,7 @@ describe('EnginesPage', () => {
       imports: [EnginesPage],
       providers: [
         { provide: BACKEND, useValue: backend },
-        { provide: Confirm, useValue: { ask: () => Promise.resolve(confirm) } },
+        dialogsAnswering(confirm),
       ],
     });
     registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
