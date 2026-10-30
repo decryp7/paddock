@@ -1522,3 +1522,23 @@ test('the CI scripts and macOS run blocks parse under macOS\' bash 3.2: neither 
     assert.equal(r.status, 0, `${b.where}: ${r.stderr}`);
   }
 });
+
+test('every release workflow whose app imports @decryp7/paddock-ui builds the shared UI (prepare) before the app build', () => {
+  const callers = readdirSync(WORKFLOWS).filter((f) => f !== 'app-release.yml' && /-release\.yml$/.test(f) && read(join(WORKFLOWS, f)).includes('./.gitea/workflows/app-release.yml'));
+  assert.ok(callers.includes('dyno-release.yml'), 'the callers of app-release.yml are found');
+  const importsShared = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory() ? importsShared(p) : /\.ts$/.test(e.name) && read(p).includes('@decryp7/paddock-ui')) return true;
+    }
+    return false;
+  };
+  for (const f of callers) {
+    const text = read(join(WORKFLOWS, f));
+    const appDir = /^\s*app-dir:\s*(apps\/\S+)/m.exec(text)?.[1];
+    assert.ok(appDir, `${f} names its app-dir`);
+    if (!importsShared(join(PADDOCK, appDir, 'src'))) continue;
+    const prepare = /^\s*prepare:\s*(.+)$/m.exec(text)?.[1] ?? '';
+    assert.match(prepare, /build -w ui/, `${f}: ${appDir} imports @decryp7/paddock-ui, which resolves from ui/dist, so the bundle job needs prepare: npm run build -w ui`);
+  }
+});
