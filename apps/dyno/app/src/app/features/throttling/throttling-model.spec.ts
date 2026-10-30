@@ -8,7 +8,7 @@ describe('throttling model', () => {
     expect(confidenceText('high')).toBe('Confidence: high');
   });
   it('gives every cause a word and a tone, warning only for heat and the unexplained', () => {
-    expect(Object.values(CAUSE_LABEL)).toEqual(['Heat', 'Power limit', 'Battery saver', 'Unexplained']);
+    expect(Object.values(CAUSE_LABEL)).toEqual(['Heat', 'Power limit', 'Power saving mode', 'Unexplained']);
     expect(CAUSE_TONE).toEqual({ thermal: 'warn', power: 'muted', batterySaver: 'muted', unexplained: 'warn' });
   });
   it('warns only when throttled, is quietly ok when fine and neutral otherwise', () => {

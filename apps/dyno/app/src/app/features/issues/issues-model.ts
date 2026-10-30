@@ -160,5 +160,5 @@ export function hue(name: string): number {
 /** The learning line: "Learning until Oct 30" while learning, else how many programs are known. */
 export function learningText(learning: { active: boolean; until: number | null }, known: number, now: number): string {
   if (learning.active) return learning.until === null ? 'Dyno is about to start learning what is normal here' : `Learning what is normal here until ${formatDate(learning.until, now)}`;
-  return `Watching ${known.toLocaleString('en-US')} known ${known === 1 ? 'program' : 'programs'}`;
+  return `Watching ${known.toLocaleString()} known ${known === 1 ? 'program' : 'programs'}`;
 }

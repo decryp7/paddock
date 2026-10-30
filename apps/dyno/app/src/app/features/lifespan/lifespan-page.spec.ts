@@ -31,7 +31,7 @@ describe('dy-lifespan-page', () => {
   it('lists the disk and the battery with the engine headline, a range bar and the confidence in words', async () => {
     const { f, el } = render(mockLifespan('macos', 'laptop', 'calm'));
     await settle(f);
-    expect(el.querySelector('h1')?.textContent).toBe('Disk and battery life');
+    expect(el.querySelector('h1')?.textContent).toBe('Lifespan');
     const items = [...el.querySelectorAll('.list > li')];
     expect(items).toHaveLength(2);
     expect(items[0]!.textContent).toContain('About 7.4 years of writes left (5.2 to 10 years)');

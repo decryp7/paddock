@@ -45,12 +45,12 @@ import { MatButton, MatIconButton } from '@angular/material/button';
             <dy-sparkline [values]="live.series().memory" [max]="100" [zoom]="true" color="var(--chart-1)" label="Memory" style="--spark-h: 28px" />
           </div>
           <div class="cell">
-            <span class="k"><dy-icon name="disk" /> Disk</span>
+            <span class="k"><dy-icon name="disk" /> Disk <span class="key">read · write</span></span>
             <span class="v num">{{ rate(disk()) }}</span>
             <dy-sparkline [values]="live.series().diskRead" [values2]="live.series().diskWrite" color2="var(--text-3)" label="Disk" style="--spark-h: 28px" />
           </div>
           <div class="cell">
-            <span class="k"><dy-icon name="network" /> Network</span>
+            <span class="k"><dy-icon name="network" /> Network <span class="key">down · up</span></span>
             <span class="v num">{{ rate(net()) }}</span>
             <dy-sparkline [values]="live.series().netRx" [values2]="live.series().netTx" color2="var(--text-3)" label="Network" style="--spark-h: 28px" />
           </div>
@@ -88,6 +88,7 @@ import { MatButton, MatIconButton } from '@angular/material/button';
     .grade-pill[data-tone='warn'] { background: var(--warn-soft); color: var(--warn); }
     .grade-pill[data-tone='bad'] { background: var(--bad-soft); color: var(--bad); }
     .metrics { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: var(--sp-2); }
+    .key { margin-left: var(--sp-1); font-size: var(--fs-xs); color: var(--text-3); }
     .cell { display: grid; grid-template-columns: max-content minmax(24px, 1fr); grid-template-rows: auto 28px; align-items: center; gap: 4px var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--pd-hairline); border-radius: var(--r-lg); background: color-mix(in srgb, var(--surface-2) 55%, transparent); min-width: 0; }
     .cell .k { grid-column: 1 / -1; }
     .k { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; color: var(--text-2); font-size: var(--fs-xs); }

@@ -35,8 +35,8 @@ function macSpecs(): AppSpec[] {
     app({ group: 'cargo', groupName: 'Rust build (cargo)', name: 'cargo', exe: '/Users/alex/.cargo/bin/cargo', count: 1, cpu: 0.4, memory: 48 * MB, disk: 0.4 * MB, parent: 'zsh', ageSecs: 410 }),
     app({ group: 'cargo', groupName: 'Rust build (cargo)', name: 'rustc', exe: '/Users/alex/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc', count: 6, cpu: 41, memory: 3.1 * GB, disk: 186 * MB, parent: 'cargo', swing: 0.25, ageSecs: 300 }),
     app({ group: 'node', groupName: 'Node.js (ng serve)', name: 'node', exe: '/opt/homebrew/bin/node', count: 3, cpu: 1.8, memory: 920 * MB, disk: 0.6 * MB, parent: 'zsh', swing: 0.7, ageSecs: 7_200 }),
-    app({ group: 'docker', groupName: 'Docker Desktop', name: 'Docker Desktop', exe: '/Applications/Docker.app/Contents/MacOS/Docker Desktop', count: 4, cpu: 0.6, memory: 430 * MB, disk: 0.1 * MB, parent: 'finder', ageSecs: 302_400 }),
-    app({ group: 'vm', groupName: 'Docker VM', name: 'com.apple.Virtualization.VirtualMachine', exe: '/System/Library/Frameworks/Virtualization.framework/Versions/A/XPCServices/com.apple.Virtualization.VirtualMachine.xpc/Contents/MacOS/com.apple.Virtualization.VirtualMachine', count: 1, cpu: 3.4, memory: 4.1 * GB, disk: 6.2 * MB, parent: 'docker', swing: 0.5, ageSecs: 302_300 }),
+    app({ group: 'docker', groupName: 'VirtualBox', name: 'VirtualBox', exe: '/Applications/VirtualBox.app/Contents/MacOS/VirtualBox', count: 4, cpu: 0.6, memory: 430 * MB, disk: 0.1 * MB, parent: 'finder', ageSecs: 302_400 }),
+    app({ group: 'vm', groupName: 'VirtualBox VM', name: 'VirtualBoxVM', exe: '/Applications/VirtualBox.app/Contents/Resources/VirtualBoxVM.app/Contents/MacOS/VirtualBoxVM', count: 1, cpu: 3.4, memory: 4.1 * GB, disk: 6.2 * MB, parent: 'docker', swing: 0.5, ageSecs: 302_300 }),
     app({ group: 'teams', groupName: 'Microsoft Teams', name: 'MSTeams', exe: '/Applications/Microsoft Teams.app/Contents/MacOS/MSTeams', count: 6, cpu: 1.9, memory: 1.25 * GB, disk: 0.4 * MB, parent: 'finder', swing: 0.8, ageSecs: 90_000 }),
     app({ group: 'slack', groupName: 'Slack', name: 'Slack', exe: '/Applications/Slack.app/Contents/MacOS/Slack', count: 5, cpu: 0.8, memory: 640 * MB, disk: 0.1 * MB, parent: 'finder', swing: 0.7, ageSecs: 86_000 }),
     app({ group: 'spotify', groupName: 'Spotify', name: 'Spotify', exe: '/Applications/Spotify.app/Contents/MacOS/Spotify', count: 5, cpu: 1.1, memory: 470 * MB, disk: 0.2 * MB, parent: 'finder', ageSecs: 26_000 }),
@@ -133,7 +133,6 @@ export function osProfile(os: MockOs): OsProfile {
       gpuName: 'Apple M4 Pro GPU (20 cores)',
       disks: (days) => [
         { id: 'macintosh-hd', name: 'Macintosh HD (APFS)', mount: '/', total: Math.round(994.7 * GB), free: Math.round((231 - days * 5.1) * GB), removable: false },
-        { id: 't7', name: 'Samsung T7', mount: '/Volumes/T7', total: Math.round(931.5 * GB), free: Math.round(604 * GB), removable: true },
       ],
       network: (w) => [
         { name: 'Wi-Fi (en0)', rxBps: MB1(3.8 + 2.2 * w(810, 5)), txBps: MB1(0.6 + 0.4 * w(811, 5)) },
@@ -168,7 +167,7 @@ export function osProfile(os: MockOs): OsProfile {
       cpuMaxMhz: 4650,
       gpuName: 'NVIDIA GeForce RTX 4070 Laptop GPU',
       disks: (days) => [
-        { id: 'nvme0n1p2', name: 'WD Blue SN570 (ext4)', mount: '/', total: Math.round(953.8 * GB), free: Math.round((210 - days * 5.1) * GB), removable: false },
+        { id: 'nvme0n1p2', name: 'WD Blue SN570 (ext4)', mount: '/', total: Math.round(953 * GB), free: Math.round((210 - days * 5.1) * GB), removable: false },
         { id: 'sda1', name: 'Seagate BarraCuda (ext4)', mount: '/mnt/data', total: Math.round(1863 * GB), free: Math.round(1204 * GB), removable: false },
       ],
       network: (w) => [
@@ -178,7 +177,7 @@ export function osProfile(os: MockOs): OsProfile {
       primaryDisk: 'Root filesystem',
       bootLabel: 'Linux started',
       cpuSensor: 'CPU package',
-      noBattery: 'This PC has no battery.',
+      noBattery: 'This computer has no battery.',
       noTemperatures: 'No hwmon temperature sensors are readable (the kernel exposes none on this machine).',
       noFans: 'No fan speeds are exposed under /sys/class/hwmon.',
       home: '/home/alex',
@@ -203,7 +202,7 @@ export function osProfile(os: MockOs): OsProfile {
     cpuMaxMhz: 4640,
     gpuName: 'NVIDIA GeForce RTX 4070 Laptop GPU',
     disks: (days) => [
-      { id: 'C', name: 'Samsung PM9A1 NVMe', mount: 'C:\\', total: Math.round(953.8 * GB), free: Math.round((210 - days * 5.1) * GB), removable: false },
+      { id: 'C', name: 'Samsung PM9A1 NVMe', mount: 'C:\\', total: Math.round(953 * GB), free: Math.round((210 - days * 5.1) * GB), removable: false },
       { id: 'D', name: 'Seagate BarraCuda HDD', mount: 'D:\\', total: Math.round(1863 * GB), free: Math.round(1204 * GB), removable: false },
     ],
     network: (w) => [
@@ -213,7 +212,7 @@ export function osProfile(os: MockOs): OsProfile {
     primaryDisk: 'Drive C:',
     bootLabel: 'Windows started',
     cpuSensor: 'CPU package',
-    noBattery: 'This PC has no battery.',
+    noBattery: 'This computer has no battery.',
     noTemperatures: 'The CPU does not report temperatures without a vendor driver (Dyno installs no drivers).',
     noFans: 'The motherboard does not expose fan speeds to Windows.',
     home: 'C:\\Users\\alex',

@@ -1,3 +1,4 @@
+import { osTerms } from '../shared/os-terms';
 import type { SuJobPhase, SuJobSnapshot, SuJobState } from '@decryp7/paddock-ui';
 import type { Measured } from './api.types';
 import { readValue } from './measured';
@@ -133,16 +134,19 @@ export interface MockOptions {
   backup?: MockBackupVariant;
   /** Where the mock pushes the status of the jobs it runs (the shell's in-memory jobs backend); jobs run without one too. */
   jobs?: MockJobSink;
+  /** How many steps each job the mock starts takes before it ends (default 1: it ends at once; `?jobsteps=6` keeps it running for screenshots). */
+  jobSteps?: number;
 }
 
 /**
  * Reads the mock options from the page's query string: `?mock=` takes `windows`, `macos`, `linux` and/or `desktop`
- * (comma separated, e.g. `mock=linux,desktop`), `fail=health,whySlow` makes requests fail, `latency=0` removes the delay.
+ * (comma separated, e.g. `mock=linux,desktop`), `fail=health,whySlow` makes requests fail, `latency=0` removes the delay, `jobsteps=6` makes every job take that many steps.
  */
 export function mockOptionsFromUrl(search: string): MockOptions {
   const q = new URLSearchParams(search);
   const fail = q.get('fail');
   const latency = q.get('latency');
+  const jobSteps = q.get('jobsteps');
   const tokens = (q.get('mock') ?? '').split(',').map((t) => t.trim().toLowerCase());
   const os = (['windows', 'macos', 'linux'] as const).find((o) => tokens.includes(o));
   const cpu = tokens.includes('hybrid') ? 'hybrid' : tokens.includes('uniform') ? 'uniform' : undefined;
@@ -153,6 +157,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     latencyMs: latency !== null && Number.isFinite(Number(latency)) ? Number(latency) : 150,
     fail: new Set(fail ? fail.split(',') : []),
     ...(q.get('backup') === 'none' ? { backup: 'none' as const } : {}),
+    ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
   };
 }
 
@@ -227,6 +232,7 @@ export class MockBackend implements DynoBackend {
     this.settingsValue = { ...this.settingsValue, counters: demoCounterSettings(this.profile.os) };
     this.latencyMs = options.latencyMs ?? 0;
     this.jobSink = options.jobs;
+    this.jobSteps = options.jobSteps ?? 1;
     this.jobStepMs = this.latencyMs === 0 ? 0 : 400;
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
@@ -461,7 +467,7 @@ export class MockBackend implements DynoBackend {
               },
             },
         modules: system ? { unavailable: pr.modulesDenied } : { items: { items: pr.libs, truncated: true } },
-        startupSource: p.group === 'teams' ? 'Login item: Microsoft Teams' : p.group === 'docker' ? 'Login item: Docker Desktop' : null,
+        startupSource: p.group === 'teams' ? 'Login item: Microsoft Teams' : p.group === 'docker' ? 'Login item: VirtualBox' : null,
       };
     });
   }
@@ -563,7 +569,7 @@ export class MockBackend implements DynoBackend {
       const io = this.system(t, samples).diskIo;
       const queue = 'available' in io.queue ? io.queue.available : 0;
       if (rustc.length === 0 || rustcCpu < 5) {
-        return { at: now, windowSecs: 55, headline: 'Nothing is slowing your PC down right now', causes: [{ kind: 'nothingWrong', title: 'All quiet', explanation: 'CPU, memory and disk all have room to spare.', confidence: 0.9, evidence: [], hints: [], involved: [] }] };
+        return { at: now, windowSecs: 55, headline: 'Nothing is slowing your computer down right now', causes: [{ kind: 'nothingWrong', title: 'All quiet', explanation: 'CPU, memory and disk all have room to spare.', confidence: 0.9, evidence: [], hints: [], involved: [] }] };
       }
       return {
         at: now,
@@ -580,7 +586,7 @@ export class MockBackend implements DynoBackend {
               { label: 'CPU total', value: `${Math.round(this.system(t, samples).cpu.total)}%` },
               { label: 'For', value: '6 min' },
             ],
-            hints: [{ text: 'Open the task manager', link: 'taskManager' }],
+            hints: [{ text: 'Open Processes', link: 'taskManager' }],
             involved: [
               { id: this.profile.names.rustc, name: this.profile.names.rustc, share: `${Math.round(rustcCpu)}% CPU` },
               { id: this.profile.names.cargo, name: this.profile.names.cargo, share: '2% CPU' },
@@ -614,7 +620,7 @@ export class MockBackend implements DynoBackend {
           {
             kind: 'lowDiskSpace',
             title: 'Drive C: is 78% full',
-            explanation: 'Not slowing you down yet, but Windows needs free space for updates and the page file.',
+            explanation: 'Not slowing you down yet, but Windows needs free space for updates and swap.',
             confidence: 0.22,
             evidence: [{ label: 'Free', value: '210 GB of 953 GB' }],
             hints: [],
@@ -924,8 +930,8 @@ export class MockBackend implements DynoBackend {
 
   private runs(): BenchRun[] {
     return (this.benchRuns ??= [
-      mockRun('r3', this.start - 2 * 60 * MIN, 'Power mode: High performance (after)', 1.12, { group: 'Power mode: High performance', phase: 'after' }, this.profile.cores),
-      mockRun('r2', this.start - 3 * 60 * MIN, 'Power mode: High performance (before)', 1, { group: 'Power mode: High performance', phase: 'before' }, this.profile.cores),
+      mockRun('r3', this.start - 2 * 60 * MIN, `${osTerms(this.profile.os).powerExample} (after)`, 1.12, { group: osTerms(this.profile.os).powerExample, phase: 'after' }, this.profile.cores),
+      mockRun('r2', this.start - 3 * 60 * MIN, `${osTerms(this.profile.os).powerExample} (before)`, 1, { group: osTerms(this.profile.os).powerExample, phase: 'before' }, this.profile.cores),
       mockRun('r1', this.start - 2 * DAY, 'Baseline', 0.99, { load: { cpuPercent: 31, memoryPercent: 61, onBattery: false } }, this.profile.cores),
     ]);
   }
@@ -1012,14 +1018,13 @@ export class MockBackend implements DynoBackend {
         crashes: 9,
         alerts: 2,
         highlights: [
-          'Your PC averaged 38% CPU and 61% memory, peaking at 94% CPU.',
-          'Docker’s backend crashed 6 times today: check its WSL integration.',
+          'Your computer averaged 17% CPU and 58% memory, peaking at 99% CPU.',
+          'The VirtualBox service crashed 6 times this week: check its virtual machine settings.',
           'Sign-in takes 9 s longer than a month ago: 2 new startup apps.',
         ],
         scoreTrend: [66, 68, 71, 70, 72, 74].map((score, i) => ({ at: from + i * 28 * 60 * MIN, score })),
         disks: [
           { disk: this.profile.os === 'windows' ? 'C:' : '/', total: 953 * GB, free: 210 * GB, forecast: { fullInDays: 41 } },
-          { disk: this.profile.os === 'windows' ? 'D:' : '/Volumes/Data', total: 2048 * GB, free: 1500 * GB, forecast: 'notFilling' },
         ],
         issues: [
           { at: issueAt(6 * 60), severity: 'warning', title: 'Drive is getting full', detail: '210 GB free of 953 GB; at this rate it is full in about 41 days.' },
@@ -1139,14 +1144,14 @@ export class MockBackend implements DynoBackend {
   saveInventoryReport(format: InventoryFormat): Promise<SavedInventory | null> {
     return this.reply('saveInventoryReport', () => {
       this.savedInventories.push(format);
-      return { path: `/Users/sam/Documents/dyno-inventory.${format === 'markdown' ? 'md' : 'json'}`, bytes: 18_204 };
+      return { path: `/Users/alex/Documents/dyno-inventory.${format === 'markdown' ? 'md' : 'json'}`, bytes: 18_204 };
     });
   }
 
   pickFolder(): Promise<string | null> {
     return this.reply('pickFolder', () => {
       this.pickedFolders++;
-      return '/Users/sam/Projects';
+      return '/Users/alex/Projects';
     });
   }
 
@@ -1463,7 +1468,7 @@ function publisher(p: MockProcess, fallback: string): string {
     onedrive: 'Microsoft Corporation',
     slack: 'Slack Technologies, LLC',
     spotify: 'Spotify AB',
-    docker: 'Docker Inc.',
+    docker: 'Oracle Corporation',
     node: 'OpenJS Foundation',
     terminal: 'Microsoft Corporation',
     pwsh: 'Microsoft Corporation',

@@ -90,7 +90,7 @@ pub struct SocketRow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Exposure {
-    /// Only this PC (127.0.0.0/8, ::1).
+    /// Only this computer (127.0.0.0/8, ::1).
     Loopback,
     /// Every network interface (0.0.0.0, ::): reachable from the network unless a firewall blocks it. "Exposed".
     AllInterfaces,
@@ -255,7 +255,7 @@ pub struct ConnectionRow {
     pub remote: String,
     /// Remote port.
     pub remote_port: u16,
-    /// Whether the peer is on this PC.
+    /// Whether the peer is on this computer.
     pub remote_is_loopback: bool,
     /// Whether the peer is a public address that "Look up IP" can look up (false: private, loopback, link-local, CGNAT).
     pub lookup_ok: bool,
@@ -273,7 +273,7 @@ pub struct ConnectionRow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct NetworkQuery {
-    /// Show loopback-only listeners and connections to this PC (hidden by default: they are noise).
+    /// Show loopback-only listeners and connections to this computer (hidden by default: they are noise).
     pub show_loopback: bool,
     /// Only this protocol.
     pub proto: Option<Proto>,
@@ -455,7 +455,7 @@ impl NetEvent {
                 exposure,
             } => {
                 let reach = match exposure {
-                    Exposure::Loopback => "on this PC only",
+                    Exposure::Loopback => "on this computer only",
                     Exposure::AllInterfaces => "on every network interface (reachable from the network)",
                     Exposure::Interface => "on one network interface",
                 };
@@ -753,7 +753,7 @@ mod tests {
             proto: Proto::Udp,
             exposure: Exposure::Loopback,
         };
-        assert!(local.describe().contains("this PC only") && local.describe().contains("UDP") && !local.notable());
+        assert!(local.describe().contains("this computer only") && local.describe().contains("UDP") && !local.notable());
         let iface = NetEvent::NewListener {
             program: "x".into(),
             port: 1,

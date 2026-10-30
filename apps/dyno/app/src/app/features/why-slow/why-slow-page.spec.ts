@@ -36,7 +36,7 @@ async function open() {
 describe('dy-why-slow-page', () => {
   it('runs the check when it opens and shows the headline, the cause, what was measured and the apps involved', async () => {
     const { el } = await open();
-    expect(el.querySelector('h1')?.textContent).toBe('Why is my PC slow?');
+    expect(el.querySelector('h1')?.textContent).toBe('Why is my computer slow?');
     expect(el.querySelector('.headline')?.textContent).toContain('Rust build');
     expect(el.querySelector('.when')?.textContent).toContain('Measured over the last 55 s');
     const cause = el.querySelector('.cause')!;
@@ -50,7 +50,9 @@ describe('dy-why-slow-page', () => {
   it('links each cause to the pages that help to look closer', async () => {
     const { el } = await open();
     const hrefs = [...el.querySelectorAll('.cause')[0]!.querySelectorAll('a[matButton="text"]')].map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual(['/processes', '/recorder']);
+    // The Processes page is the hint button's ("Open Processes"), so it is not offered a second time.
+    expect(hrefs).toEqual(['/recorder']);
+    expect([...el.querySelectorAll('.cause')[0]!.querySelectorAll('a[matButton="outlined"]')].map((a) => a.getAttribute('href'))).toContain('/processes');
   });
 
   it('runs again on the button and grows the history', async () => {
@@ -99,7 +101,7 @@ describe('dy-why-slow-page', () => {
 
   it('links the hints that open a screen and shows the others as words', async () => {
     const { el } = await open();
-    expect(el.querySelector('a[matButton="outlined"][href="/processes"]')?.textContent).toContain('Open the task manager');
+    expect(el.querySelector('a[matButton="outlined"][href="/processes"]')?.textContent).toContain('Open Processes');
     expect(el.querySelector('.wait')?.textContent).toContain('Wait for the build');
     expect(el.querySelector('a[href="/health"]')).not.toBeNull();
   });

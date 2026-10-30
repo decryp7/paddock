@@ -22,6 +22,20 @@ const proc = (b: MockBackend, name: string): ProcessSample => b.liveUpdate('proc
 const ref = (p: ProcessSample) => ({ pid: p.pid, started: readValue(p.started) });
 
 describe('mockOptionsFromUrl', () => {
+  it('reads jobsteps as a whole number from 1 to 100 and ignores anything else', () => {
+    expect(mockOptionsFromUrl('?jobsteps=6').jobSteps).toBe(6);
+    for (const bad of ['0', '101', '2.5', 'many', '']) expect(mockOptionsFromUrl(`?jobsteps=${bad}`)).not.toHaveProperty('jobSteps');
+    expect(mockOptionsFromUrl('')).not.toHaveProperty('jobSteps');
+  });
+
+  it('a mock made with jobSteps keeps its jobs running past the first step', async () => {
+    const b = new MockBackend({ latencyMs: 0, jobSteps: 3 });
+    expect(b.jobSteps).toBe(3);
+    const id = await b.startJob({ rescanIssues: { query: { days: 14 } } });
+    expect(b.jobStatuses().find((j) => j.id === id)).toMatchObject({ state: 'running' });
+    expect(new MockBackend({ latencyMs: 0 }).jobSteps).toBe(1);
+  });
+
   it('defaults to a macOS laptop with latency', () => {
     expect(mockOptionsFromUrl('')).toEqual({ machine: 'laptop', os: 'macos', latencyMs: 150, fail: new Set() });
   });
@@ -68,7 +82,7 @@ describe('OS differences', () => {
   it('disks follow the OS', async () => {
     const mounts = async (os: 'windows' | 'macos' | 'linux') => make({ os }).liveUpdate('summary').system.disks.map((d) => d.mount);
     expect(await mounts('windows')).toEqual(['C:\\', 'D:\\']);
-    expect(await mounts('macos')).toEqual(['/', '/Volumes/T7']);
+    expect(await mounts('macos')).toEqual(['/']);
     expect(await mounts('linux')).toEqual(['/', '/mnt/data']);
   });
   it('process names follow the OS', () => {
@@ -480,15 +494,15 @@ describe('mock extras and backup health', () => {
     expect(await b.saveInventoryReport('markdown')).toMatchObject({ path: expect.stringMatching(/\.md$/) });
     expect(await b.saveInventoryReport('json')).toMatchObject({ path: expect.stringMatching(/\.json$/) });
     expect(b.savedInventories).toEqual(['markdown', 'json']);
-    expect(await b.pickFolder()).toBe('/Users/sam/Projects');
+    expect(await b.pickFolder()).toBe('/Users/alex/Projects');
     expect(b.pickedFolders).toBe(1);
   });
 
   it('findFiles job: modes, the size floor and a folder that must be absolute', async () => {
     const b = fresh();
     const find = async (query: FinderQuery) => ((await runJob(b, { findFiles: { query } })) as { finder: FinderResult }).finder;
-    const both = await find({ folder: '/Users/sam/Projects/', mode: 'both', minBytes: 50 * 1024 ** 2 });
-    expect(both.folder).toBe('/Users/sam/Projects');
+    const both = await find({ folder: '/Users/alex/Projects/', mode: 'both', minBytes: 50 * 1024 ** 2 });
+    expect(both.folder).toBe('/Users/alex/Projects');
     expect(both.large).toHaveLength(8);
     expect(both.duplicates).toHaveLength(3);
     expect(both.limit).toBeNull();
