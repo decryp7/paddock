@@ -139,18 +139,23 @@ regression tests below are those cases.)
   clean filter).
 - **A binary file is refused**, not attributed: gix detects a NUL in the content and gives the whole file to the oldest commit, which
   would pass for authorship; `BlameError::Binary` says so.
+- **An older binary version makes the answer approximate.** git cannot compare a binary version, so when an older version of the file has
+  a NUL in its first 8000 bytes the lines older than the commit where the file turned binary are attributed to that commit. The
+  walk notices (the guarded database sees every blob it reads) and sets `Blame::approximate`; the ownership view must show it. A
+  test builds exactly that history and asserts both the attribution and the flag. Forcing "text" with a `diff` attribute on the
+  empty stack was rejected: it would make gix diff a binary blob as lines, which is wrong in a different way.
 - **If a gix upgrade changes any of this, the tests fail.** An upgrade of `gix` or `gix-blame` re-runs them before it merges.
 
 **Bounded and cancellable.** gix's blame is handed an object database wrapped in a guard (`Guarded`) that, on every lookup, checks the
 cancel token and an object budget (2,000,000 by default), reads the header first and refuses a blob over the cap (2 MiB by default)
 **before** reading or inflating it, and counts the objects read, which is the progress figure (ER-18) the caller sees growing. A limit
 is `BlameError::Limit` with a message that says to narrow the range, set `since`, or raise the limit; nothing partial is returned. The
-earlier "gix's blame cannot be interrupted" caveat is gone. (gix cannot read objects over 16 MiB through this path at all; such a file
+earlier "gix's blame cannot be interrupted" caveat is gone. What is not interruptible is a **single blob diff** inside gix once it has started; it is bounded by the 2 MiB cap (checked from the header before any blob is read), so one diff is a few milliseconds of work and the cancel token is looked at before the next object. (gix cannot read objects over 16 MiB through this path at all; such a file
 is reported as a backend error, and the 2 MiB cap normally refuses it first.)
 
 **The port.** Blame is a core port (`Blamer`, with `Blame`, `BlameHunk`, `BlameRequest`, `BlameLimits` and a typed `BlameError`:
 `NotFound`, `UnknownRev`, `InvalidRange`, `RangeOutsideFile`, `Binary`, `Limit`, `Cancelled`, `Backend`) with an in-memory fake and a
-contract test that the real adapter passes too. A range past the end of the file is an error, never an empty answer. A renamed source
+contract test that the real adapter passes too. A range past the end of the file is an error, never an empty answer. It is checked, and a binary blamed file is refused, from one guarded read of the blamed blob **before** the walk. The file is looked up in the commit's tree first, so a missing path (or a folder) is `NotFound` exactly, and a damaged object database stays a backend error. A renamed source
 path that is not a valid repository path is counted (`unnamed_sources`), not mapped to nothing. Author text (the email, cut at 128
 bytes) is personal data: it is returned to the caller for the ownership view and is not logged. `since` bounds the walk on a large
 history; lines whose origin lies further back are attributed to the last commit the walk reached.
