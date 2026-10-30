@@ -38,6 +38,14 @@ pub struct InstanceError {
 impl InstanceLock {
     /// Takes the lock on `path` (created with its folder if missing, never written or truncated) without waiting.
     pub fn claim(path: &Path) -> Result<Claim, InstanceError> {
+        Self::claim_with(path, File::try_lock)
+    }
+
+    /// [`InstanceLock::claim`] with the locking call given (tests make it answer what no real file system does).
+    fn claim_with(
+        path: &Path,
+        lock: impl FnOnce(&File) -> Result<(), TryLockError>,
+    ) -> Result<Claim, InstanceError> {
         let fail = |source| InstanceError {
             path: path.to_path_buf(),
             source,
@@ -52,7 +60,7 @@ impl InstanceLock {
             .truncate(false)
             .open(path)
             .map_err(fail)?;
-        match judge(file.try_lock()) {
+        match judge(lock(&file)) {
             Ok(Verdict::Free) => Ok(Claim::Acquired(InstanceLock { _file: file })),
             Ok(Verdict::Held) => Ok(Claim::Held),
             Ok(Verdict::Unsupported) => Ok(Claim::Unsupported),
@@ -110,12 +118,15 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("data").join("a.lock");
         until(|| !is_held(&path));
-        let first = loop {
-            if let Claim::Acquired(l) = InstanceLock::claim(&path).unwrap() {
-                break l;
-            }
-            std::thread::yield_now();
-        };
+        let held = std::cell::RefCell::new(None);
+        until(|| {
+            *held.borrow_mut() = match InstanceLock::claim(&path) {
+                Ok(Claim::Acquired(l)) => Some(l),
+                _ => None,
+            };
+            held.borrow().is_some()
+        });
+        let first = held.take();
         assert!(is_held(&path));
         assert!(matches!(InstanceLock::claim(&path).unwrap(), Claim::Held));
         let other = tmp.path().join("b.lock");
@@ -123,6 +134,29 @@ mod tests {
         drop(first);
         until(|| !is_held(&path));
         until(|| matches!(InstanceLock::claim(&path), Ok(Claim::Acquired(_))));
+    }
+
+    #[test]
+    fn a_claim_follows_what_the_lock_call_answers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("a.lock");
+        let kind = |k| Err(TryLockError::Error(std::io::Error::from(k)));
+        assert!(matches!(
+            InstanceLock::claim_with(&path, |_| Ok(())),
+            Ok(Claim::Acquired(_))
+        ));
+        assert!(matches!(
+            InstanceLock::claim_with(&path, |_| Err(TryLockError::WouldBlock)),
+            Ok(Claim::Held)
+        ));
+        assert!(matches!(
+            InstanceLock::claim_with(&path, |_| kind(std::io::ErrorKind::Unsupported)),
+            Ok(Claim::Unsupported)
+        ));
+        let e = InstanceLock::claim_with(&path, |_| kind(std::io::ErrorKind::PermissionDenied))
+            .unwrap_err();
+        assert_eq!(e.source.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(e.path, path);
     }
 
     #[test]
@@ -150,5 +184,14 @@ mod tests {
         let err = InstanceLock::claim(&file.join("a.lock")).unwrap_err();
         assert!(err.to_string().contains("a.lock"), "{err}");
         assert!(!is_held(&file.join("a.lock")), "an error is not a holder");
+        // A folder where the lock file should be cannot be opened as one.
+        let folder = tmp.path().join("folder.lock");
+        std::fs::create_dir(&folder).unwrap();
+        assert!(
+            InstanceLock::claim(&folder)
+                .unwrap_err()
+                .to_string()
+                .contains("folder.lock")
+        );
     }
 }
