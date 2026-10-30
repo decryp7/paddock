@@ -1,7 +1,8 @@
 # 62. Stable event ids: the search index and the catalogue are built during the import
 
-- Status: Proposed (2026-10-30)
-- Date: 2026-10-30
+- Status: Proposed (2026-10-30; the user's decisions of 2026-10-31 are recorded below; Accepted after an independent
+  review)
+- Date: 2026-10-30, decisions 2026-10-31
 - Related: ADR 0010 (persistent store), ADR 0014 (database-first engine; §2 step 4 already planned "index: Tantivy on
   its own thread, from the same batches"), ADR 0037 (live tail), ADR 0042 (port table), ADR 0051 (stable source ids),
   ADR 0052 (stage pipelines); Paddock rules 11, 13, 14, 48, 51 and 52; ER-18, ER-20; plan `docs/plans/debrief-1-2.md`
@@ -56,6 +57,7 @@ import wait for background work, which this ADR forbids.
   position order are deterministic although the ids are not.
 - Notes anchor an event by its id (`debrief-notes/src/anchor.rs`, `Anchor::Event`) with time, source and an excerpt
   shown when the id no longer resolves; a reload that reads a source again gives its events new ids.
+  Re-anchoring such notes is out of scope here (decision 3 below).
 
 So the stable id the user asked for exists. What is missing is everything around it: the index and the catalogue must
 accept batches of sources that are not visible yet, hide them until they are, survive a crash or a cancel mid-way, and
@@ -91,7 +93,8 @@ ready, the store's catalog records the source's new generation in the same trans
 (`sources.gen`, a new column), so search switches from the old documents to the new ones at that instant (build new,
 then swap: ER-18). The old generation's documents of that source are deleted afterwards (`IndexWriter::delete_query`,
 in Tantivy 0.27, on `source = s AND gen < g`) and are invisible until then. Notes on events of a re-read source resolve to "no longer
-resolves" with their excerpt, as today; matching them again by (source, line, excerpt) is a separate change to notes.
+resolves" with their excerpt, as today; matching them again by (source, line, excerpt) is out of scope: a later,
+separate Debrief package (decision 3 below).
 
 **Duplicates.** One file at two paths is two sources (ADR 0051 never guesses); a path already known in the import is
 skipped (`known` in `import_keeping`). The store never stores the same event twice under one source, so the index needs
@@ -155,7 +158,7 @@ discover ─▶ dispatcher ─▶ parse pool (threads) ──▶ SegmentSink.wri
 - **Commit points.**
   1. Parquet: a segment is listed (with its sources made ready) every `LIST_EVERY` (1 s), as today.
   2. Index: the owner commits about every 10 s or 512 MB of input text, whichever is first, and at the end of the
-     import; after each commit it hands the sink the set of segments now complete in the index. The sink marks them
+     import (the 10 s cadence is the user's decision 1 below); after each commit it hands the sink the set of segments now complete in the index. The sink marks them
      `indexed` in its next listing transaction (or `UPDATE` for segments listed earlier). The reader reloads after each
      commit (`ReloadPolicy` as now).
   3. Ids and sources: before the owner commits documents, the catalog has persisted `meta.next_id` (already the case
@@ -254,9 +257,9 @@ Same machine, corpus and harness as the baseline (`tests/import_ready.rs` on `wi
 | Cost | total CPU-seconds of the worker; index size and Tantivy segment count after merges |
 | Correctness | on `/samples` and on `large03`: hit ids and order equal to A's (and to `ord` order), catalogue rows equal, for 1, 4 and 8 parse threads; a cancelled import and a killed worker reopen with no stale hit |
 
-Proposed adoption rule (for the user to confirm): B or C replaces A only if it brings search ready at least 25% earlier
-than A, costs at most 15% of import throughput, keeps the tee within its memory share and the word-search p95 during an
-import under 0.5 s.
+Adoption rule (the user's decision 2 below): B or C replaces A only if it brings search ready at least 25% earlier than
+A, costs at most 15% of import throughput, keeps the tee within its 240 MB share and the word-search p95 during an import
+under 0.5 s.
 
 ## Consequences
 
@@ -266,7 +269,8 @@ import under 0.5 s.
   has one writer during an import.
 - Plan package P4 ("entity tally in the parse threads") changes: the tally runs on catalogue workers fed by the tee,
   because the parse threads are already CPU-bound and would slow the import by the extraction's cost. Package 5.2
-  ("defer the index and catalogue for huge imports") becomes the low-memory and tee-off path.
+  ("defer the index and catalogue for huge imports") becomes the low-memory, fan-out-off path. Both accepted
+  2026-10-31; `docs/plans/debrief-1-2.md` (P4, 5.2 and the IX rows, IX-ADR being this ADR) says so.
 - New: `sources.gen`, index fields `gen`, `line` and a FAST `source`, the live filter in every search, the drain and
   sweep rules, chunk-ordered tally merges. Each gets a test that triggers its failure (cancel mid-tee, kill before an
   index commit, a full queue, a reload while searching).
@@ -286,10 +290,15 @@ import under 0.5 s.
 
 WP-1 runs first and alone; if A meets the target, WP-3 to WP-6 are reconsidered before they start.
 
-## Open questions for the user
+## Decisions (user, 2026-10-31)
 
-1. Is search showing hits at most about 10 s behind the event list during an import acceptable, or must a source's
-   hits appear exactly when its events do (commit the index with each listing, at a cost in Tantivy segments)?
-2. The adoption thresholds in section 7.
-3. Should notes re-anchor events after a reload by (source, line, excerpt)? Out of scope here; it is the only reason to
-   want ids that repeat across imports.
+1. **Search lag during an import.** Search may show an event up to about 10 s after the event list does; the index
+   commits about every 10 s during an import (section 3, commit point 2). No commit per listing.
+2. **Adoption thresholds** (section 7), as written: B or C replaces A only if search is ready at least 25% sooner than
+   with A, import throughput drops by at most 15%, the tee stays within its 240 MB share, and the word-search p95 during
+   the import stays under 0.5 s.
+3. **Notes after a reload are out of scope.** Re-anchoring a note's event after a reload by (source, line, excerpt) is
+   a later, separate Debrief package, not part of this ADR or of IX; it is the only reason to want ids that repeat across
+   imports, and nothing here depends on it. Pointer: this section, and the IX-ADR row of `docs/plans/debrief-1-2.md`.
+4. **Plan changes** (accepted by the coordinator with the above): P4's entity tally runs on the catalogue workers fed by
+   the tee, not in the parse threads; 5.2's deferral becomes the low-memory, fan-out-off path.
