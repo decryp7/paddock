@@ -280,14 +280,10 @@ impl Chromium {
         let ended_by = Arc::new(AtomicU8::new(NONE));
         // The caps run from the process start, also while it is still starting.
         watchdog(process.process(), alive.clone(), ended_by.clone(), opts.max_lifetime);
-        let patience = paddock_proc::Patience {
-            tick: Duration::from_millis(50),
-            ..opts.patience
-        };
         match connect(
             &dir,
             &mut process,
-            patience,
+            opts.patience,
             &ended_by,
             opts.max_lifetime,
             paddock_proc::tree_cpu_time,
@@ -576,6 +572,9 @@ fn connect(
                     max_lifetime.as_secs()
                 )));
             }
+            if probe.process.stopped_over_memory().is_some() {
+                return Err(Error::Launch("the browser used more memory than allowed while it started".into()));
+            }
             let status = info.status.map_or_else(String::new, |c| format!(" (exit code {c})"));
             let message = format!("the browser exited right after it started{status}");
             Err(Error::Launch(match info.stderr_tail {
@@ -678,13 +677,20 @@ mod tests {
     }
 
     /// A fast clock for the judge's ticks (1 ms each instead of 50 ms): the process state is real, the verdicts count ticks.
-    struct Yield;
+    /// Past `TICK_GUARD` ticks it says the wait is cancelled, so a broken judge fails in seconds, not minutes.
+    #[cfg(unix)]
+    struct Yield(u32);
 
+    #[cfg(unix)]
+    const TICK_GUARD: u32 = 20_000;
+
+    #[cfg(unix)]
     impl paddock_proc::Pace for Yield {
         fn wait(&mut self, _tick: Duration) -> bool {
             // A tick shortened to 1 ms: the judge counts ticks, so the verdicts are the same; the process is real and needs the time.
             std::thread::sleep(Duration::from_millis(1));
-            true
+            self.0 += 1;
+            self.0 < TICK_GUARD
         }
     }
 
@@ -710,7 +716,7 @@ mod tests {
             &AtomicU8::new(ended_by),
             Duration::from_secs(7),
             cpu,
-            Yield,
+            Yield(0),
         );
         process.kill();
         r
@@ -743,6 +749,7 @@ mod tests {
     }
 
     /// A CPU reading that grows a little each time (a browser that is working), so only its exit ends the wait.
+    #[cfg(unix)]
     fn working() -> impl FnMut(paddock_proc::ProcessId) -> Option<Duration> {
         let mut n = 0u64;
         move |_| {
@@ -757,11 +764,18 @@ mod tests {
     #[test]
     fn a_hung_start_is_reported_with_the_browsers_stderr() {
         let dir = tempfile::tempdir().unwrap();
+        let printed = dir.path().join(STDERR_FILE);
+        // Flat CPU is reported only once the fake has printed its line: wait on the condition, not on a time.
+        let flat = move |_| {
+            std::fs::metadata(&printed)
+                .is_ok_and(|m| m.len() > 0)
+                .then_some(Duration::from_secs(1))
+        };
         let e = start_fake(
             "echo 'GPU process is waiting for a lock' >&2; exec sleep 300",
             dir.path(),
             NONE,
-            |_| Some(Duration::from_secs(1)),
+            flat,
         )
         .err()
         .unwrap()

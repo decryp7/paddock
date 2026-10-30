@@ -164,19 +164,30 @@ async fn a_server_that_never_answers_is_stopped_at_the_timeout() {
     let port = site().await;
     let base = tempfile::tempdir().unwrap();
     let marker = base.path().to_string_lossy().to_string();
-    let (r, log) = renderer(b, base.path());
+    let log = NetLog::new();
+    let mut opts = LaunchOptions::new(base.path());
+    opts.mode = Mode::Headless;
+    opts.extra_args = test_browser_flags();
+    opts.extra_args.extend(log.flags());
+    opts.max_lifetime = spotter_render::launch::lifetime_for(Duration::from_secs(6));
+    let mut c = Chromium::launch(&b, &opts).unwrap();
+    // The page's budget runs from when the browser is up (as the renderer does it), not from the process start.
     let t = Instant::now();
-    let e = r
-        .render(&format!("http://127.0.0.1:{port}/hang"), None, Duration::from_secs(6))
-        .await
+    let e = c
+        .new_page()
+        .unwrap()
+        .navigate(&format!("http://127.0.0.1:{port}/hang"), Duration::from_secs(6))
         .unwrap_err();
-    assert!(matches!(e, RenderError::Failed(_)), "{e:?}\n{}", log.tail());
-    // Start-up has its own limit; the hang itself must end at the 6 s page budget, not at the watchdog.
+    assert!(matches!(e, spotter_render::Error::Timeout(_)), "{e:?}\n{}", log.tail());
+    // The hang ended at the page budget, not at the watchdog (the mechanism; the time is only a sanity bound).
+    assert_eq!(c.ended_by(), EndedBy::Nothing, "{}", log.tail());
     assert!(
         t.elapsed() < spotter_render::launch::lifetime_for(Duration::from_secs(6)),
         "took {:?}",
         t.elapsed()
     );
+    c.close();
+    drop(c);
     assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0);
     assert_no_leftovers(&marker);
 }
