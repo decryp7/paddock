@@ -197,6 +197,9 @@ impl link::Launcher for NoAgent {
     fn launch(&self) -> Result<(), String> {
         Err("no agent in a test".into())
     }
+    fn child(&self) -> link::Child {
+        link::Child::None
+    }
     fn finish(&self, _: std::time::Duration) {}
 }
 

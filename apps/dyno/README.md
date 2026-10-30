@@ -160,7 +160,7 @@ dependencies and the files it touches, plus the known gaps in the foundation.
 
 ## Building from source
 
-Prerequisites: Rust stable (1.88+), Node 24 (`app/.nvmrc`), and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/)
+Prerequisites: Rust stable (1.89+), Node 24 (`app/.nvmrc`), and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/)
 for your OS (WebView2 on Windows, Xcode command line tools on macOS; on Linux `libwebkit2gtk-4.1-dev` and friends).
 
 ```sh

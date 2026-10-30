@@ -68,6 +68,8 @@ block with a `// SAFETY:` comment.
   closed buckets up through the minute, 15-minute and hour tiers.
 - **`service`**: install, uninstall, status and `ensure` of the per-user registration (ADR 0010); the unit text is pure.
 - **`discovery`**, **`paths`**, **`files`**: `agent.json`, the data-folder layout and atomic JSON writes with a backup.
+- **`instance`**: one agent per data folder. The agent holds an OS lock on `agent.lock` (`flock`, `LockFileEx`) while
+  it runs; a second agent cannot take it, opens nothing and exits with code 3 (`cli::EXIT_ALREADY_RUNNING`).
 - **`diskusage`**: the bounded disk-space map.
 - **`cli`**: `run`, `status`, `stop`, `once`, `bench`, `service …`.
 
@@ -76,7 +78,9 @@ block with a `// SAFETY:` comment.
 The shell (`app/src-tauri`) owns the window and tray lifecycle, the settings that belong to the app (launch at login),
 and the **link** to the agent: it reads `agent.json`, starts an agent when none runs, keeps one `dyno-ipc` connection,
 forwards the webview's requests with a 15 s timeout, fans pushes out to the windows, reconnects with backoff and
-replaces an agent of another build. The UI never calls `invoke` directly: it uses the `BACKEND` token, whose real
+replaces an agent of another build. It never starts a second agent while the one it started is running: it waits for a
+starting agent on its process (alive: still starting, however slow the disk; exited: the exit code says why), not on a
+clock (family ADR 0031), and Quit ends exactly the process it started, through the handle it holds (rule 53). The UI never calls `invoke` directly: it uses the `BACKEND` token, whose real
 implementation calls the shell's one `dyno` command and whose mock serves the browser build. State lives in SignalStores
 (`live`, `history`, `processes`, `alerts`, `diagnosis`, `health`, `settings`).
 
@@ -148,6 +152,7 @@ One folder per user (`DYNO_DATA_DIR` overrides it): `%LOCALAPPDATA%\Dyno`, `~/Li
 | `dyno.db` | History tiers, per-app minutes, disk space, events, alerts, snapshots, boots (SQLite, WAL, versioned) | agent |
 | `settings.json` | Versioned settings (`SCHEMA_VERSION`), atomic write with backup | agent |
 | `agent.json` | Endpoint, token, pid, start time, version, protocol; owner-only; removed on exit | agent |
+| `agent.lock` | Empty; the running agent holds an OS lock on it (one agent per data folder) | agent |
 | `logs/` | The shell's small rotating log (`app.log`); the agent writes to stderr (the service's log: `~/Library/Logs/Dyno/agent.log` on macOS, the journal on Linux) | shell, service manager |
 | `plugins/<id>/plugin.toml` | Installed plugins | user |
 

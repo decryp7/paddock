@@ -2,6 +2,12 @@
 //! keeps one dyno-ipc connection, forwards the webview's requests and fans the agent's pushes out to a [`Sink`].
 //! It reconnects with backoff when the connection drops and replaces an agent of another build.
 //!
+//! One agent per data folder: the agent itself refuses to start while another holds the folder's lock
+//! ([`dyno_agent::instance`]), and the link never starts a second one while the one it started is still running. It waits
+//! for a starting agent on its run state, not on a clock (ADR 0031): as long as the process lives and has not written its
+//! discovery file, it is starting (a cold, slow disk can take a minute); when it exits first, the exit says why. Quitting
+//! ends exactly the process this app started, through the handle it holds (rule 53).
+//!
 //! The decisions (what to do about the discovery file, how long to wait, which window wants which detail, whether to
 //! stop the agent on quit) are pure functions with unit tests; the thread around them is thin.
 
@@ -32,8 +38,10 @@ pub fn timeout_for(request: &Request) -> Duration {
         _ => REQUEST_TIMEOUT,
     }
 }
-/// How long a freshly started agent has to write `agent.json` and accept a connection.
-pub const SPAWN_WAIT: Duration = Duration::from_secs(5);
+// pace: how often a starting agent's run state and discovery file are looked at; it bounds nothing.
+const START_POLL: Duration = Duration::from_millis(100);
+/// After this many looks at a still-starting agent (about 5 s) the status says it is still starting. A hint, not a limit.
+const STILL_STARTING_AFTER: u32 = 50;
 /// A request made before the first connection waits this long for it (the window asks for data the moment it opens,
 /// usually before the agent has answered; after a first connection, requests fail fast instead).
 pub const CONNECT_GRACE: Duration = Duration::from_secs(8);
@@ -62,11 +70,34 @@ pub trait Sink: Send + Sync {
     fn connected(&self, _link: &Arc<AgentLink>) {}
 }
 
+/// The agent process a [`Launcher`] started, as far as it knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Child {
+    /// It started none (or cannot tell).
+    None,
+    /// The process it started is running. Its pid names it reliably: the launcher holds the process (unreaped), so the
+    /// pid cannot have been handed on (rule 53).
+    Running {
+        /// The process id.
+        pid: u32,
+    },
+    /// The process it started has exited, with this code (`None`: ended by a signal).
+    Exited {
+        /// The exit code.
+        code: Option<i32>,
+    },
+}
+
 /// Starts the agent process.
 pub trait Launcher: Send + Sync {
-    /// Starts `dyno-agent run` detached. Returns at once; the link waits for the discovery file.
+    /// Starts `dyno-agent run` detached, unless the process it started before is still running: there is never more than
+    /// one. Returns at once; the link watches [`Launcher::child`] and the discovery file. Fails once [`Launcher::close`]d.
     fn launch(&self) -> Result<(), String>;
-    /// Waits briefly for a process this launcher started to exit (after `Shutdown`), killing it when it does not.
+    /// The process this launcher started last.
+    fn child(&self) -> Child;
+    /// No more launches: the app is quitting.
+    fn close(&self) {}
+    /// Waits briefly for the process this launcher started to exit (after `Shutdown`), ending it when it does not.
     fn finish(&self, wait: Duration);
 }
 
@@ -326,22 +357,29 @@ impl AgentLink {
         }
     }
 
-    /// Stops the loop and closes the connection. Returns whether the agent was asked to exit (see
+    /// Stops the loop (it starts nothing from now on) and closes the connection. With `stop_agent`, the agent this app
+    /// started is asked to exit when it is the one connected, and its process is then waited for and ended when it does
+    /// not exit, also while it is still starting. Returns whether an agent of this app was stopped (see
     /// [`stop_agent_on_quit`]).
     pub fn shutdown(&self, stop_agent: bool) -> bool {
-        let mut asked = false;
-        if stop_agent {
-            asked = self.call(Request::Shutdown).is_ok();
-        }
+        // First: nothing may start an agent after this point (the loop sees `stopping`, the launcher is closed).
+        self.launcher.close();
         *lock(&self.stopping) = true;
         self.wake.notify_all();
-        if let Some(p) = lock(&self.peer).take() {
-            p.close();
-        }
-        if asked {
+        let peer = lock(&self.peer).take();
+        let mut stopped = false;
+        if stop_agent {
+            if let Some(p) = peer.as_ref().filter(|_| self.started_by_this_app()) {
+                stopped = p.call(Message::Request(Box::new(Request::Shutdown)), REQUEST_TIMEOUT).is_ok();
+            }
+            stopped |= matches!(self.launcher.child(), Child::Running { .. });
+            // shutdown: the process this app started gets a few seconds to exit, then it is ended through its handle.
             self.launcher.finish(Duration::from_secs(3));
         }
-        asked
+        if let Some(p) = peer {
+            p.close();
+        }
+        stopped
     }
 
     /// The quit decision for this link.
@@ -349,7 +387,8 @@ impl AgentLink {
         if self.quit_done.swap(true, Ordering::SeqCst) {
             return false;
         }
-        let stop = stop_agent_on_quit(self.started_by_this_app(), self.service_installed.load(Ordering::SeqCst));
+        let ours = self.started_by_this_app() || matches!(self.launcher.child(), Child::Running { .. });
+        let stop = stop_agent_on_quit(ours, self.service_installed.load(Ordering::SeqCst));
         logging::info(&format!(
             "quitting; the agent {}",
             if stop {
@@ -386,12 +425,16 @@ impl AgentLink {
                 Plan::Connect => {
                     if let Some(d) = &found {
                         match self.try_connect(d) {
-                            Ok(p) => return Ok(p),
-                            // A stale file (its process is gone): treat as no agent.
-                            Err(e) => {
-                                logging::info(&format!("stale agent.json: {e}"));
-                                let _ = std::fs::remove_file(self.dirs.discovery());
+                            Ok(p) => {
+                                // Ours only when it is the very process this app started (held, so its pid is its own).
+                                let ours = self.launcher.child() == Child::Running { pid: d.pid };
+                                self.started_by_us.store(ours, Ordering::SeqCst);
+                                return Ok(p);
                             }
+                            // Unreachable: its process is gone (the file is stale) or not answering yet. The file is
+                            // left alone: a new agent replaces it, or exits at once when the old one still holds the
+                            // data folder.
+                            Err(e) => logging::info(&format!("agent.json names an agent that did not answer: {e}")),
                         }
                     }
                     self.start_agent()?;
@@ -430,22 +473,83 @@ impl AgentLink {
         }
     }
 
-    /// Starts the agent and waits for it to be reachable (a connection is made by the next pass of [`establish`]).
+    /// Starts the agent unless the one this app started is still running, and waits for it to write its discovery file
+    /// (a connection is made by the next pass of [`establish`]). The wait is judged on the process, not on a clock
+    /// (ADR 0031): while it runs, it is starting.
     fn start_agent(&self) -> Result<(), String> {
-        logging::info("starting the agent");
-        self.launcher.launch()?;
-        self.started_by_us.store(true, Ordering::SeqCst);
-        let end = Instant::now() + SPAWN_WAIT;
-        while Instant::now() < end {
-            if Discovery::read(&self.dirs.discovery()).is_some() {
-                return Ok(());
-            }
+        if self.is_stopping() {
+            return Ok(());
+        }
+        if matches!(self.launcher.child(), Child::Running { .. }) {
+            logging::info("the agent this app started is still starting; waiting for it");
+        } else {
+            logging::info("starting the agent");
+            self.launcher.launch()?;
+        }
+        let mut looks = 0u32;
+        loop {
             if self.is_stopping() {
                 return Ok(());
             }
-            std::thread::sleep(Duration::from_millis(100));
+            match start_progress(self.launcher.child(), Discovery::read(&self.dirs.discovery()).as_ref()) {
+                StartProgress::Starting => {}
+                StartProgress::Ready => return Ok(()),
+                StartProgress::OtherAgent => return self.wait_for_other_agent(),
+                StartProgress::Failed(message) => return Err(message),
+            }
+            looks += 1;
+            if looks == STILL_STARTING_AFTER {
+                logging::info("the agent is still starting");
+                self.sink.agent(AgentStatus::new(
+                    AgentState::Starting,
+                    Some("The Dyno agent is still starting. A slow disk or a busy computer can take a while.".into()),
+                ));
+            }
+            self.pause(START_POLL);
         }
-        Err("The Dyno agent did not start within 5 seconds.".into())
+    }
+
+    /// The agent this app started exited because another one holds the data folder (the login service's, or one that
+    /// was slow to write its discovery file): waits for that one's file while it holds the folder.
+    fn wait_for_other_agent(&self) -> Result<(), String> {
+        logging::info("another agent holds the data folder; waiting for it");
+        while !self.is_stopping() {
+            if Discovery::read(&self.dirs.discovery()).is_some() || !dyno_agent::instance::is_held(&self.dirs) {
+                return Ok(());
+            }
+            self.pause(START_POLL);
+        }
+        Ok(())
+    }
+}
+
+/// Where a start stands, from the launched process and the discovery file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartProgress {
+    /// Still starting: wait.
+    Starting,
+    /// The discovery file names the process (or, for a launcher without a process, any agent wrote one).
+    Ready,
+    /// It exited because another agent holds the data folder.
+    OtherAgent,
+    /// It exited for another reason.
+    Failed(String),
+}
+
+/// The decision for a start in progress (pure).
+pub fn start_progress(child: Child, found: Option<&Discovery>) -> StartProgress {
+    match child {
+        Child::Running { pid } if found.is_some_and(|d| d.pid == pid) => StartProgress::Ready,
+        Child::Running { .. } => StartProgress::Starting,
+        Child::Exited {
+            code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
+        } => StartProgress::OtherAgent,
+        Child::Exited { code } => StartProgress::Failed(match code {
+            Some(c) => format!("The Dyno agent stopped while starting (exit code {c}). Its log is in the Dyno data folder."),
+            None => "The Dyno agent was ended while starting.".into(),
+        }),
+        Child::None if found.is_some() => StartProgress::Ready,
+        Child::None => StartProgress::Starting,
     }
 }
 
@@ -454,7 +558,37 @@ impl AgentLink {
 /// Starts the real agent program detached (no console, its own process group, not tied to the app's lifetime).
 pub struct ProcessLauncher {
     exe: Box<dyn Fn() -> Result<std::path::PathBuf, String> + Send + Sync>,
-    child: Mutex<Option<std::process::Child>>,
+    slot: Mutex<Slot>,
+}
+
+/// The process a [`ProcessLauncher`] started, held until it has exited and been reaped.
+#[derive(Default)]
+struct Slot {
+    child: Option<std::process::Child>,
+    /// The exit code of the last one, once reaped (`Some(None)`: ended by a signal).
+    exited: Option<Option<i32>>,
+    closed: bool,
+}
+
+impl Slot {
+    /// Reaps the child when it has exited, and says what it is.
+    fn look(&mut self) -> Child {
+        if let Some(c) = self.child.as_mut() {
+            match c.try_wait() {
+                Ok(None) => return Child::Running { pid: c.id() },
+                Ok(Some(status)) => {
+                    self.exited = Some(status.code());
+                    self.child = None;
+                }
+                // It cannot be asked: treat it as still running (it is still held; the quit ends it).
+                Err(_) => return Child::Running { pid: c.id() },
+            }
+        }
+        match self.exited {
+            Some(code) => Child::Exited { code },
+            None => Child::None,
+        }
+    }
 }
 
 impl ProcessLauncher {
@@ -462,13 +596,21 @@ impl ProcessLauncher {
     pub fn new(exe: impl Fn() -> Result<std::path::PathBuf, String> + Send + Sync + 'static) -> ProcessLauncher {
         ProcessLauncher {
             exe: Box::new(exe),
-            child: Mutex::new(None),
+            slot: Mutex::new(Slot::default()),
         }
     }
 }
 
 impl Launcher for ProcessLauncher {
     fn launch(&self) -> Result<(), String> {
+        // Held across the start: a quit (`close`, `finish`) waits for it and then sees the new process.
+        let mut slot = lock(&self.slot);
+        if slot.closed {
+            return Err("Dyno is closing.".into());
+        }
+        if matches!(slot.look(), Child::Running { .. }) {
+            return Ok(());
+        }
         let exe = (self.exe)()?;
         // The one place the app starts a program: our own agent, which reports problems through its log and exits; no
         // console window (see the creation flags below) and it is never waited on.
@@ -493,15 +635,24 @@ impl Launcher for ProcessLauncher {
         let child = cmd
             .spawn()
             .map_err(|e| format!("The Dyno agent ({}) could not be started: {e}", exe.display()))?;
-        let mut slot = lock(&self.child);
-        if let Some(mut old) = slot.replace(child) {
-            let _ = old.try_wait();
-        }
+        slot.child = Some(child);
+        slot.exited = None;
         Ok(())
     }
 
+    fn child(&self) -> Child {
+        lock(&self.slot).look()
+    }
+
+    fn close(&self) {
+        lock(&self.slot).closed = true;
+    }
+
     fn finish(&self, wait: Duration) {
-        let Some(mut child) = lock(&self.child).take() else { return };
+        let mut slot = lock(&self.slot);
+        slot.closed = true;
+        let Some(mut child) = slot.child.take() else { return };
+        drop(slot);
         let end = Instant::now() + wait;
         while Instant::now() < end {
             if matches!(child.try_wait(), Ok(Some(_))) {
@@ -606,6 +757,101 @@ mod tests {
     }
 
     #[test]
+    fn a_start_is_judged_on_the_process_and_its_discovery_file_not_on_a_clock() {
+        let ours = |pid| Discovery { pid, ..disc("0.1.0", 1) };
+        let running = Child::Running { pid: 42 };
+        assert_eq!(
+            start_progress(running, None),
+            StartProgress::Starting,
+            "alive without a file: still starting"
+        );
+        assert_eq!(
+            start_progress(running, Some(&ours(7))),
+            StartProgress::Starting,
+            "a file of another process (stale) is not our agent's"
+        );
+        assert_eq!(start_progress(running, Some(&ours(42))), StartProgress::Ready);
+        assert_eq!(
+            start_progress(
+                Child::Exited {
+                    code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING)
+                },
+                None
+            ),
+            StartProgress::OtherAgent
+        );
+        match start_progress(Child::Exited { code: Some(1) }, Some(&ours(42))) {
+            StartProgress::Failed(m) => assert!(m.contains("exit code 1"), "{m}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            start_progress(Child::Exited { code: None }, None),
+            StartProgress::Failed(_)
+        ));
+        assert_eq!(start_progress(Child::None, Some(&ours(7))), StartProgress::Ready);
+        assert_eq!(start_progress(Child::None, None), StartProgress::Starting);
+    }
+
+    /// A stand-in agent program: a shell script in a temp folder that ignores `run` and does what the test says.
+    #[cfg(unix)]
+    fn script(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir.join(name);
+        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_process_launcher_holds_one_agent_at_a_time_and_ends_exactly_it() {
+        let dir = tempfile::tempdir().unwrap();
+        // Never writes a discovery file: an agent stuck in a slow start.
+        let exe = script(dir.path(), "slow-agent", "exec sleep 600");
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = starts.clone();
+        let launcher = ProcessLauncher::new(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+            Ok(exe.clone())
+        });
+        assert_eq!(launcher.child(), Child::None);
+        launcher.launch().unwrap();
+        let Child::Running { pid } = launcher.child() else {
+            panic!("not running")
+        };
+        launcher.launch().unwrap();
+        assert_eq!(starts.load(Ordering::SeqCst), 1, "a second agent was started while the first runs");
+        assert_eq!(launcher.child(), Child::Running { pid });
+        // Quit: it does not exit by itself, so it is ended through the handle, and nothing starts afterwards.
+        launcher.close();
+        launcher.finish(Duration::from_millis(200));
+        assert!(launcher.launch().is_err(), "a closed launcher starts nothing");
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_process_launcher_reports_how_its_agent_exited() {
+        let dir = tempfile::tempdir().unwrap();
+        let code = dyno_agent::cli::EXIT_ALREADY_RUNNING;
+        let exe = script(dir.path(), "refused-agent", &format!("exit {code}"));
+        let launcher = ProcessLauncher::new(move || Ok(exe.clone()));
+        launcher.launch().unwrap();
+        let mut state = launcher.child();
+        // The script exits at once; its exit is what is waited on (a condition, not a time).
+        while matches!(state, Child::Running { .. }) {
+            std::thread::sleep(Duration::from_millis(10));
+            state = launcher.child();
+        }
+        assert_eq!(state, Child::Exited { code: Some(code) });
+        assert_eq!(
+            launcher.child(),
+            Child::Exited { code: Some(code) },
+            "the exit is remembered once reaped"
+        );
+    }
+
+    #[test]
     fn quitting_stops_only_an_agent_this_app_started_without_a_service() {
         assert!(stop_agent_on_quit(true, false));
         assert!(!stop_agent_on_quit(true, true), "a service keeps its agent");
@@ -659,15 +905,20 @@ mod tests {
     }
 
     /// Starts an in-process agent over the fake platform when asked (what the real launcher does with a process).
+    /// Its "process" is this test process: the agent's discovery file names `std::process::id()`.
     struct InProcessLauncher {
         dirs: Dirs,
         started: Mutex<Option<Running>>,
         launches: AtomicUsize,
+        exited: AtomicBool,
         fail: bool,
     }
 
     impl Launcher for InProcessLauncher {
         fn launch(&self) -> Result<(), String> {
+            if matches!(self.child(), Child::Running { .. }) {
+                return Ok(());
+            }
             self.launches.fetch_add(1, Ordering::SeqCst);
             if self.fail {
                 return Err("no agent program".into());
@@ -676,11 +927,20 @@ mod tests {
             fake.add_process(process(100, "busy", 60.0));
             let running = Running::start(self.dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(())))?;
             *lock(&self.started) = Some(running);
+            self.exited.store(false, Ordering::SeqCst);
             Ok(())
+        }
+        fn child(&self) -> Child {
+            match lock(&self.started).as_ref() {
+                Some(r) if !r.stopped() => Child::Running { pid: std::process::id() },
+                _ if self.exited.load(Ordering::SeqCst) => Child::Exited { code: Some(0) },
+                _ => Child::None,
+            }
         }
         fn finish(&self, _: Duration) {
             if let Some(r) = lock(&self.started).take() {
                 r.stop();
+                self.exited.store(true, Ordering::SeqCst);
             }
         }
     }
@@ -697,6 +957,9 @@ mod tests {
     impl Launcher for Shared {
         fn launch(&self) -> Result<(), String> {
             self.0.launch()
+        }
+        fn child(&self) -> Child {
+            self.0.child()
         }
         fn finish(&self, w: Duration) {
             self.0.finish(w)
@@ -715,6 +978,7 @@ mod tests {
             dirs: dirs.clone(),
             started: Mutex::new(None),
             launches: AtomicUsize::new(0),
+            exited: AtomicBool::new(false),
             fail,
         });
         let link = AgentLink::new(dirs, env!("CARGO_PKG_VERSION"), sink.clone(), Box::new(Shared(launcher.clone())));
@@ -792,16 +1056,18 @@ mod tests {
     #[test]
     fn it_connects_to_a_running_agent_and_leaves_it_running_on_quit() {
         let r = rig(false);
-        r.launcher.launch().unwrap();
-        let before = r.launcher.launches.load(Ordering::SeqCst);
+        // Somebody else's agent (the login service's): not started through this app's launcher.
+        let fake = Fake::new();
+        let other = Running::start(r.link.dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
         let handle = r.link.spawn().unwrap();
         wait_for(&r.statuses, AgentState::Running);
-        assert_eq!(r.launcher.launches.load(Ordering::SeqCst), before, "no second agent");
+        assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 0, "no second agent");
         assert!(!r.link.started_by_this_app());
         assert!(!r.link.quit(), "somebody else's agent stays");
         handle.join().unwrap();
         assert!(r.link.dirs.discovery().exists(), "it is still there");
-        r.launcher.finish(Duration::ZERO);
+        assert!(!other.stopped());
+        other.stop();
     }
 
     #[test]
@@ -829,6 +1095,147 @@ mod tests {
         assert!(r.link.call(Request::Settings).is_ok());
         r.link.quit();
         handle.join().unwrap();
+    }
+
+    /// An agent whose start blocks until the test opens the gate: what a cold, slow disk does to the real one (the
+    /// Dyno 1.0 test VM took 50 s to read a 32 MB binary). Each launch is one "process" (a thread) that starts its
+    /// agent once the gate opens.
+    struct SlowLauncher {
+        dirs: Dirs,
+        gate: Arc<(Mutex<bool>, Condvar)>,
+        launches: AtomicUsize,
+        ended: AtomicUsize,
+        agents: Arc<Mutex<Vec<Running>>>,
+        threads: Mutex<Vec<std::thread::JoinHandle<()>>>,
+    }
+
+    impl SlowLauncher {
+        fn new(dirs: Dirs) -> Arc<SlowLauncher> {
+            Arc::new(SlowLauncher {
+                dirs,
+                gate: Arc::new((Mutex::new(false), Condvar::new())),
+                launches: AtomicUsize::new(0),
+                ended: AtomicUsize::new(0),
+                agents: Arc::new(Mutex::new(Vec::new())),
+                threads: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn open(&self) {
+            *lock(&self.gate.0) = true;
+            self.gate.1.notify_all();
+        }
+
+        fn running_agents(&self) -> usize {
+            lock(&self.agents).iter().filter(|r| !r.stopped()).count()
+        }
+
+        fn stop_all(&self) {
+            self.open();
+            for t in std::mem::take(&mut *lock(&self.threads)) {
+                let _ = t.join();
+            }
+            for r in std::mem::take(&mut *lock(&self.agents)) {
+                r.stop();
+            }
+        }
+    }
+
+    struct SlowShared(Arc<SlowLauncher>);
+
+    impl Launcher for SlowShared {
+        fn launch(&self) -> Result<(), String> {
+            let me = &self.0;
+            me.launches.fetch_add(1, Ordering::SeqCst);
+            let (gate, dirs, agents) = (me.gate.clone(), me.dirs.clone(), me.agents.clone());
+            let t = std::thread::spawn(move || {
+                let open = lock(&gate.0);
+                drop(gate.1.wait_while(open, |o| !*o).unwrap_or_else(|e| e.into_inner()));
+                let fake = Fake::new();
+                if let Ok(r) = Running::start(dirs, fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))) {
+                    lock(&agents).push(r);
+                }
+            });
+            lock(&me.threads).push(t);
+            Ok(())
+        }
+        fn child(&self) -> Child {
+            if self.0.ended.load(Ordering::SeqCst) > 0 {
+                Child::Exited { code: Some(0) }
+            } else if self.0.launches.load(Ordering::SeqCst) > 0 {
+                Child::Running { pid: std::process::id() }
+            } else {
+                Child::None
+            }
+        }
+        fn finish(&self, _: Duration) {
+            self.0.ended.fetch_add(1, Ordering::SeqCst);
+            for r in lock(&self.0.agents).iter() {
+                r.shared.request_stop();
+            }
+        }
+    }
+
+    fn slow_rig() -> (Arc<AgentLink>, Arc<SlowLauncher>, Receiver<AgentStatus>, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
+        let dirs = Dirs::at(tmp.path().join("data"));
+        let (tx, rx) = channel();
+        let sink = Arc::new(Recorder {
+            live: AtomicUsize::new(0),
+            statuses: tx,
+        });
+        let launcher = SlowLauncher::new(dirs.clone());
+        let link = AgentLink::new(dirs, env!("CARGO_PKG_VERSION"), sink, Box::new(SlowShared(launcher.clone())));
+        (link, launcher, rx, tmp)
+    }
+
+    /// Waits until `cond` holds or `bound` has passed; returns whether it held.
+    fn until(bound: Duration, cond: impl Fn() -> bool) -> bool {
+        let end = Instant::now() + bound;
+        while !cond() {
+            if Instant::now() >= end {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        true
+    }
+
+    #[test]
+    fn a_slow_agent_start_is_waited_for_and_never_doubled() {
+        let (link, launcher, statuses, _tmp) = slow_rig();
+        let handle = link.spawn().unwrap();
+        // The bound is the subject of the test, not a flake fix (ER-12): the old link gave up after 5 s and started a
+        // second agent after a 2 s backoff, so 9 s outlasts that window with margin. Exactly one start is pending.
+        let doubled = until(Duration::from_secs(9), || launcher.launches.load(Ordering::SeqCst) >= 2);
+        assert!(!doubled, "a second agent was started while the first was still starting");
+        launcher.open();
+        wait_for(&statuses, AgentState::Running);
+        assert_eq!(launcher.launches.load(Ordering::SeqCst), 1);
+        assert_eq!(launcher.running_agents(), 1, "exactly one agent runs");
+        assert!(link.started_by_this_app());
+        assert!(link.quit(), "the agent this app started is stopped on quit");
+        handle.join().unwrap();
+        assert!(
+            until(Duration::from_secs(10), || launcher.running_agents() == 0),
+            "an agent outlived the quit"
+        );
+        launcher.stop_all();
+    }
+
+    #[test]
+    fn quitting_while_the_agent_is_still_starting_ends_it() {
+        let (link, launcher, _statuses, _tmp) = slow_rig();
+        let handle = link.spawn().unwrap();
+        assert!(until(Duration::from_secs(10), || launcher.launches.load(Ordering::SeqCst) == 1));
+        link.quit();
+        handle.join().unwrap();
+        assert_eq!(
+            launcher.ended.load(Ordering::SeqCst),
+            1,
+            "the starting agent was left behind as an orphan"
+        );
+        launcher.stop_all();
     }
 
     #[test]

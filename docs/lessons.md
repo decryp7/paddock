@@ -969,3 +969,13 @@ clean runner; a leftover `ui/dist` in the working trees had hidden it. **Rule:**
 proved by building that app's installers (`<app>-release.yml` with gates on and the bundle built) before it lands on
 main (rule 54). The ci-actions test now checks that every release workflow whose app imports `@decryp7/paddock-ui`
 builds the UI.
+
+## A start window on a wall clock doubled Dyno's agent on a cold disk (2026-10-30, Dyno)
+In a fresh macOS VM (a 32 MB binary took 50 s to read) the first launch of Dyno 1.0 ran two `dyno-agent run` children
+on one `dyno.db`; after Quit one stayed as an orphan. The app's log showed the cause: the link gave up on its agent after
+a fixed 5 s (`SPAWN_WAIT`), started another after a 2 s backoff, and its launcher dropped the first process's handle when
+it stored the second, so Quit stopped only the newest. Nothing stopped a second agent either: no lock on the data folder,
+and a busy database looked damaged to the store, which moves a damaged file aside. **Rule:** a single-instance process
+holds an OS lock for its whole life (a file lock on its data folder) and a second one exits before it opens anything; a
+host waits for a child it started on the child's run state (ADR 0031), never starts another while it holds one, and ends
+it through the handle it holds (rule 53). Reproduce with a start gated by the test, not with load.

@@ -3,7 +3,7 @@
 use crate::discovery::Discovery;
 use crate::paths::Dirs;
 use crate::service::{Service, Status};
-use crate::Running;
+use crate::{Running, StartError};
 use dyno_core::protocol::{LiveDetail, Message, Reply, Request};
 use dyno_ipc::{Client, Peer, PeerOptions};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,11 +19,15 @@ dyno-agent stop                ask the running agent to exit\n  dyno-agent once 
 dyno-agent bench [seconds] [none|summary|processes]   run for a while and report Dyno's own CPU and memory as JSON\n  \
 dyno-agent service install|uninstall|status|ensure   register it to start at login\n";
 
+/// The exit code of `run` when another agent already runs for the data folder: this one started nothing and changed
+/// nothing (the app then connects to the running one).
+pub const EXIT_ALREADY_RUNNING: i32 = 3;
+
 /// Runs the command line; returns the exit code.
 pub fn main(args: Vec<String>) -> i32 {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let out = match args.as_slice() {
-        ["run"] => run(),
+        ["run"] => return run_exit_code(run()),
         ["status"] => status(),
         ["stop"] => stop(),
         ["once"] => once(),
@@ -136,14 +140,26 @@ fn platforms() -> (dyno_platform::Platform, Box<dyn dyno_core::ports::ProcessSou
     (platform, details)
 }
 
-fn run() -> Result<(), String> {
-    let dirs = Dirs::current();
-    if connect(&dirs).is_ok() {
-        println!("An agent is already running; nothing to do.");
-        return Ok(());
+/// The exit code for `run`'s outcome, with its message on stderr.
+fn run_exit_code(out: Result<(), StartError>) -> i32 {
+    match out {
+        Ok(()) => 0,
+        Err(e @ StartError::AlreadyRunning(_)) => {
+            eprintln!("dyno-agent: {e}");
+            EXIT_ALREADY_RUNNING
+        }
+        Err(StartError::Failed(e)) => {
+            eprintln!("dyno-agent: {e}");
+            1
+        }
     }
+}
+
+fn run() -> Result<(), StartError> {
+    let dirs = Dirs::current();
     install_signal_handlers();
     let (platform, details) = platforms();
+    // Takes the data folder's agent lock first: a second agent exits here, before it opens or writes anything.
     let running = Running::start_os(dirs, platform, details, reveal())?;
     eprintln!("dyno-agent {} running (pid {})", env!("CARGO_PKG_VERSION"), running.discovery.pid);
     while !running.stopped() && !SIGNALLED.load(Ordering::SeqCst) {
@@ -280,4 +296,19 @@ fn tempfile_dir() -> Result<std::path::PathBuf, String> {
     let dir = std::env::temp_dir().join(format!("dyno-bench-{}", std::process::id()));
     std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
     Ok(dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::instance::LockError;
+
+    #[test]
+    fn a_refused_second_agent_exits_with_its_own_code_and_other_failures_with_one() {
+        assert_eq!(run_exit_code(Ok(())), 0);
+        let held = StartError::AlreadyRunning(LockError::Held { folder: "/x/Dyno".into() });
+        assert!(held.to_string().contains("already running for /x/Dyno; this one exits"));
+        assert_eq!(run_exit_code(Err(held)), EXIT_ALREADY_RUNNING);
+        assert_eq!(run_exit_code(Err(StartError::Failed("boom".into()))), 1);
+    }
 }
