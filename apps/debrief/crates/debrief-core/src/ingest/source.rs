@@ -43,6 +43,9 @@ pub struct ImportEnv<'a> {
 pub enum Outcome {
     Imported(SourceReport),
     Unrecognized(UnrecognizedFile),
+    /// Something the user should know that is not a failure (the import report's notices): an archive entry kept
+    /// under a new name because the archive names its path more than once.
+    Notice(String),
 }
 
 fn unrecognized(path: &str, name: &str, reason: impl Into<String>) -> Outcome {
@@ -140,8 +143,9 @@ pub(super) fn import_path_with(
         return vec![unrecognized(&path_s, name, e.to_string())];
     }
     let file_name = path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
-    let entries = match crate::archive::expand(&file_name, bytes) {
+    let entries = match crate::archive::expand_cancellable(&file_name, bytes, env.cancel) {
         Ok(e) => e,
+        Err(e) if e.is::<crate::archive::ExpandCancelled>() => return vec![unrecognized(&path_s, name, crate::workspace::NOT_IMPORTED)],
         Err(e) => return vec![unrecognized(&path_s, name, format!("{e:#}"))],
     };
     let kind = if compressed {
@@ -149,40 +153,45 @@ pub(super) fn import_path_with(
     } else {
         FileKind::Compressed
     };
-    entries
-        .into_iter()
-        .filter_map(|entry| {
-            let (source_path, source_name) = match (&entry.name, compressed) {
-                (Some(inner), true) => (
-                    format!("{path_s}{}{inner}", crate::archive::ENTRY_SEPARATOR),
-                    format!("{name}/{inner}"),
-                ),
-                _ => (path_s.clone(), name.to_string()),
-            };
-            if removed.contains(Path::new(&source_path)) {
-                return None;
-            }
-            let len = entry.bytes.len();
-            let head = entry.bytes[..len.min(HEAD_BYTES)].to_vec();
-            let src = NewSource {
-                path: source_path,
-                name: source_name,
-            };
-            Some(import_source(
-                env,
-                Cursor::new(entry.bytes),
-                head,
-                len <= HEAD_BYTES,
-                len as u64,
-                src,
-                kind,
-                path,
-                file_date,
-                sink,
-                None,
-            ))
-        })
-        .collect()
+    let mut outcomes: Vec<Outcome> = Vec::new();
+    for entry in entries {
+        let (source_path, source_name) = match (&entry.name, compressed) {
+            (Some(inner), true) => (
+                format!("{path_s}{}{inner}", crate::archive::ENTRY_SEPARATOR),
+                format!("{name}/{inner}"),
+            ),
+            _ => (path_s.clone(), name.to_string()),
+        };
+        if removed.contains(Path::new(&source_path)) {
+            continue;
+        }
+        // Only an entry that is imported is reported as renamed.
+        if let (Some(own), Some(kept)) = (&entry.renamed_from, &entry.name) {
+            outcomes.push(Outcome::Notice(format!(
+                "{name}/{kept}: {name} has more than one entry named {own}; this one was imported as {kept} so that none is lost"
+            )));
+        }
+        let len = entry.bytes.len();
+        let head = entry.bytes[..len.min(HEAD_BYTES)].to_vec();
+        let src = NewSource {
+            path: source_path,
+            name: source_name,
+        };
+        outcomes.push(import_source(
+            env,
+            Cursor::new(entry.bytes),
+            head,
+            len <= HEAD_BYTES,
+            len as u64,
+            src,
+            kind,
+            path,
+            file_date,
+            sink,
+            None,
+        ));
+    }
+    outcomes
 }
 
 /// Imports one source from a seekable reader whose first bytes are `head`.
