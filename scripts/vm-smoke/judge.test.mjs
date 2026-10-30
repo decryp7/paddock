@@ -1,0 +1,144 @@
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { describeTree, etimeSeconds, instancesOf, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs, peakCounts, renderResult } from './judge.mjs';
+
+const BUNDLE = '/Applications/Dyno.app';
+const config = {
+  processes: [
+    { name: 'dyno-app', role: 'app', max: 1 },
+    { name: 'dyno-agent', role: 'helper', max: 1, argsPattern: '^ run( |$)', parents: ['app', 'launchd'] },
+  ],
+};
+const ps = (rows) => parsePs(rows.map(([pid, ppid, etime, cmd]) => `${String(pid).padStart(5)} ${String(ppid).padStart(5)} ${etime.padStart(11)} ${cmd}`).join('\n'));
+const APP = `${BUNDLE}/Contents/MacOS/dyno-app`;
+const AGENT = `${BUNDLE}/Contents/MacOS/dyno-agent`;
+
+test('parsePs reads pid, parent, age and command; etime has three shapes', () => {
+  const p = parsePs(`  1360  1355       01:05 ${AGENT} run\n    1     0 2-03:04:05 /sbin/launchd\nnot a line\n`);
+  assert.deepEqual(p.map((x) => [x.pid, x.ppid, x.ageSec]), [[1360, 1355, 65], [1, 0, 183845]]);
+  assert.equal(etimeSeconds('01:02:03'), 3723);
+  assert.ok(Number.isNaN(etimeSeconds('soon')));
+});
+
+test('instancesOf matches the installed bundle executable and its args, not a CLI call, a copy elsewhere or a look-alike', () => {
+  const p = ps([
+    [10, 1, '00:30', APP],
+    [11, 10, '00:29', `${AGENT} run`],
+    [12, 10, '00:05', `${AGENT} service status`],
+    [13, 1, '00:05', `/Users/x/Desktop/Dyno.app/Contents/MacOS/dyno-agent run`],
+    [14, 1, '00:05', `${BUNDLE}/Contents/MacOS/dyno-agent-helper run`],
+    [15, 1, '00:05', `vim ${AGENT}`],
+  ]);
+  assert.deepEqual(instancesOf(p, config.processes[1], BUNDLE).map((x) => x.pid), [11]);
+  assert.deepEqual(instancesOf(p, config.processes[0], BUNDLE).map((x) => x.pid), [10]);
+});
+
+test('judgeSnapshot passes one app with one agent whose parent is the app', () => {
+  const r = judgeSnapshot(ps([[10, 1, '00:30', APP], [11, 10, '00:29', `${AGENT} run`]]), config, BUNDLE, { running: true });
+  assert.equal(r.ok, true, JSON.stringify(r.checks));
+});
+
+test('judgeSnapshot fails a second agent (finding A of the Dyno round 2) and names both pids', () => {
+  const r = judgeSnapshot(ps([[10, 1, '01:30', APP], [1360, 10, '01:29', `${AGENT} run`], [1368, 10, '01:19', `${AGENT} run`]]), config, BUNDLE, { running: true });
+  assert.equal(r.ok, false);
+  const c = r.checks.find((x) => x.id === 'count:dyno-agent');
+  assert.match(c.detail, /2 running/);
+  assert.match(c.detail, /1360/);
+  assert.match(c.detail, /1368/);
+});
+
+test('an agent whose parent is launchd passes only with Launch at login on; otherwise it is an orphan', () => {
+  const p = ps([[10, 1, '00:30', APP], [11, 1, '00:29', `${AGENT} run`]]);
+  assert.equal(judgeSnapshot(p, config, BUNDLE, { running: true, loginService: true }).ok, true);
+  const off = judgeSnapshot(p, config, BUNDLE, { running: true, loginService: false });
+  assert.equal(off.ok, false);
+  assert.match(off.checks.find((c) => c.id.startsWith('parent:')).detail, /not allowed/);
+});
+
+test('a helper missing from a running app fails (min defaults to 1)', () => {
+  const r = judgeSnapshot(ps([[10, 1, '00:30', APP]]), config, BUNDLE, { running: true });
+  assert.equal(r.ok, false);
+  assert.match(r.checks.find((c) => c.id === 'count:dyno-agent').detail, /0 running/);
+});
+
+test('after Quit nothing of the app may remain, and a leftover with parent 1 is called an orphan', () => {
+  const left = ps([[1360, 1, '03:00', `${AGENT} run`], [99, 1, '10:00', '/usr/sbin/cfprefsd']]);
+  assert.equal(judgeSnapshot(left, config, BUNDLE, { running: false }).ok, false);
+  assert.deepEqual(orphansAfterQuit(left, config, BUNDLE), [{ name: 'dyno-agent', pid: 1360, ppid: 1, etime: '03:00', orphan: true }]);
+  assert.equal(judgeSnapshot(ps([[99, 1, '10:00', '/usr/sbin/cfprefsd']]), config, BUNDLE, { running: false }).ok, true);
+});
+
+test('the observation window catches a respawn that arrives late', () => {
+  const one = ps([[10, 1, '00:30', APP], [11, 10, '00:29', `${AGENT} run`]]);
+  const two = ps([[10, 1, '00:40', APP], [11, 10, '00:39', `${AGENT} run`], [12, 10, '00:01', `${AGENT} run`]]);
+  assert.deepEqual(peakCounts([one, one, two], config, BUNDLE), { 'dyno-app': 1, 'dyno-agent': 2 });
+  assert.equal(judgeWindow([one, one, one], config, BUNDLE, { running: true }).ok, true);
+  const bad = judgeWindow([one, one, two], config, BUNDLE, { running: true });
+  assert.equal(bad.ok, false);
+  assert.match(bad.checks.find((c) => !c.ok).detail, /peak 2 over 3 snapshots/);
+});
+
+test('describeTree prints pid, age and parent for the evidence', () => {
+  const lines = describeTree(ps([[10, 1, '00:30', APP], [11, 10, '00:29', `${AGENT} run`]]), config, BUNDLE);
+  assert.deepEqual(lines, ['dyno-app pid 10 age 00:30 parent 1 (launchd)', 'dyno-agent pid 11 age 00:29 parent 10 (dyno-app)']);
+  assert.deepEqual(describeTree([], config, BUNDLE), ["(none of the app's processes)"]);
+});
+
+test('parseLaunchctlPrint reads state, pid and program; a missing job gives nulls', () => {
+  const text = 'gui/501/net.decryptology.dyno.agent = {\n\tactive count = 1\n\tprogram = /Applications/Dyno.app/Contents/MacOS/dyno-agent\n\tstate = running\n\tpid = 1360\n}\n';
+  assert.deepEqual(parseLaunchctlPrint(text), { state: 'running', pid: 1360, program: '/Applications/Dyno.app/Contents/MacOS/dyno-agent' });
+  assert.deepEqual(parseLaunchctlPrint('Could not find service'), { state: null, pid: null, program: null });
+});
+
+test('the discovery file must name a live agent; one that names a dead pid is stale; absent is absent', () => {
+  const spec = { helper: 'dyno-agent', jsonPidField: 'pid' };
+  const p = ps([[11, 10, '00:29', `${AGENT} run`]]);
+  assert.deepEqual(judgeStateFile('{"pid": 11}', p, spec, BUNDLE), { present: true, pid: 11, live: true, stale: false });
+  assert.deepEqual(judgeStateFile('{"pid": 1360}', p, spec, BUNDLE), { present: true, pid: 1360, live: false, stale: true });
+  assert.deepEqual(judgeStateFile('not json', p, spec, BUNDLE), { present: true, pid: null, live: false, stale: true });
+  assert.deepEqual(judgeStateFile(null, p, spec, BUNDLE), { present: false, pid: null, live: false, stale: false });
+});
+
+test('renderResult: the verdict is FAIL when any step failed, manual steps are listed apart, pipes are escaped', () => {
+  const md = renderResult({
+    app: 'Dyno', version: '1.0.0', installer: 'a.dmg', guest: 'tart', started: 't', commit: 'abc',
+    steps: [
+      { title: 'Cold start', status: 'pass', summary: 'one app, one agent', checks: [{ ok: true, detail: 'x' }], evidence: ['dyno-app pid 1'] },
+      { title: 'Quit', status: 'fail', summary: 'orphan a|b', checks: [{ ok: false, detail: 'agent pid 3 left' }] },
+      { title: 'Gatekeeper', status: 'manual', summary: 'right-click Open' },
+    ],
+  });
+  assert.match(md, /Result: \*\*FAIL\*\*/);
+  assert.match(md, /\| 2 \| Quit \| FAIL \| orphan a\\\|b \|/);
+  assert.match(md, /\| 3 \| Gatekeeper \| MANUAL \|/);
+  assert.match(md, /- FAIL: agent pid 3 left/);
+  assert.match(md, /manual steps are listed below/);
+});
+
+test('every app config lists an app process, only known keys, and helpers whose parents are app or launchd', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'apps');
+  const seen = [];
+  for (const app of readdirSync(root)) {
+    let text;
+    try {
+      text = readFileSync(join(root, app, 'vm-smoke.json'), 'utf8');
+    } catch {
+      continue;
+    }
+    const c = JSON.parse(text);
+    seen.push(app);
+    assert.equal(c.id, app);
+    assert.match(c.bundle, /\.app$/);
+    assert.equal(c.processes.filter((p) => p.role === 'app').length, 1, `${app}: exactly one app process`);
+    for (const p of c.processes) {
+      assert.ok(['app', 'helper'].includes(p.role), `${app}: role of ${p.name}`);
+      for (const parent of p.parents ?? []) assert.ok(['app', 'launchd'].includes(parent), `${app}: parent ${parent}`);
+    }
+    assert.ok(Number.isInteger(c.readyTimeoutSec) && c.readyTimeoutSec > 0, `${app}: readyTimeoutSec`);
+    if (c.loginService) assert.match(c.loginService.label, /^net\.decryptology\./);
+  }
+  assert.ok(seen.includes('dyno'), `configs found: ${seen}`);
+});

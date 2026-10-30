@@ -1,0 +1,50 @@
+{
+  "$comment": "The processes Debrief may start, for scripts/vm-smoke (see apps/dyno/vm-smoke.json for the field list). min 0: a helper that is started on demand.",
+  "id": "debrief",
+  "app": "Debrief",
+  "bundle": "Debrief.app",
+  "dataDir": "~/Library/Application Support/Debrief",
+  "logs": [
+    "~/Library/Application Support/Debrief/logs/app.log"
+  ],
+  "quit": {
+    "appleScriptName": "Debrief"
+  },
+  "updateHost": "dev.decryptology.net",
+  "readyTimeoutSec": 180,
+  "settleSec": 20,
+  "processes": [
+    {
+      "name": "debrief-app",
+      "role": "app",
+      "max": 1
+    },
+    {
+      "name": "debrief-ai-worker",
+      "role": "helper",
+      "min": 0,
+      "max": 1,
+      "parents": [
+        "app"
+      ]
+    },
+    {
+      "name": "debrief-plugins",
+      "role": "helper",
+      "min": 0,
+      "max": 1,
+      "parents": [
+        "app"
+      ]
+    },
+    {
+      "name": "debrief-store-worker",
+      "role": "helper",
+      "min": 0,
+      "max": 1,
+      "parents": [
+        "app"
+      ]
+    }
+  ]
+}

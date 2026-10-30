@@ -80,6 +80,10 @@ In this order, on one commit:
    release run fails without it. `main` is green.
 2. Run one **manual `dyno-release` with `gates: true`** on that commit (Actions > dyno-release > Run workflow, rule 25). It
    runs Dyno's legs of `ci.yml` (WebKit included) and builds the installers on all three systems.
+   Then confirm the run's verdict job says `installers: built` (all three `bundle (...)` jobs passed): a green run that says
+   `installers: not built` proves nothing about the release path (rule 54).
+2b. Run the scripted VM start check on those installers, on a fresh clone: `source ~/.zshenv; scripts/vm-smoke/vm-smoke.sh --app dyno --run <the run id>`
+   ([scripts/vm-smoke/README.md](../../../scripts/vm-smoke/README.md)). Attach its result file; a failed step blocks the tag.
 3. Run the install and update plan, rows 24a to 24i of [testing-manual.md](testing-manual.md#install-and-update-in-a-throwaway-vm),
    on those installers (the VM plan says how the test builds are made).
 4. Re-measure the overhead numbers in `docs/architecture.md` on a quiet machine (roadmap G13) and refresh `docs/screenshots`

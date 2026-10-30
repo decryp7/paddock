@@ -109,6 +109,13 @@ installations: users must download and install the next version by hand (it carr
 **If it leaks**, generate a new pair, publish a release signed with the new key, and tell users to reinstall
 from the releases page; revoke the old secrets.
 
+## Before tagging (rule 54)
+
+- [ ] **`debrief.yml` dispatch with bundles green** (Actions > build > Run workflow, `bundles` on): open the run and check that the three `bundle (...)` jobs ran and passed and that the verdict job says `installers: built`. A green run that says `installers: not built` proves nothing about the release path (rule 54).
+- [ ] **`scripts/vm-smoke` passes on a fresh clone**: `source ~/.zshenv; scripts/vm-smoke/vm-smoke.sh --app debrief --run <the run id above>` (one VM at a time, local only). Attach its result file to the release notes or the tagging PR; a failed step blocks the tag.
+
+See [scripts/vm-smoke/README.md](../../../scripts/vm-smoke/README.md) for what the check covers and what stays a manual row. Debrief builds its installers in `debrief.yml` (not through `app-release.yml`), so there is no verdict job there yet: read the `bundle` jobs of the run instead.
+
 ## Checking a release
 
 - `latest.json` is attached to the release and lists every platform; `cat` output is in the release job log.
