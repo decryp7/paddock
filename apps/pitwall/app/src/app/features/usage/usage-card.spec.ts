@@ -18,11 +18,13 @@ describe('UsageCard', () => {
     const { el } = await mount();
     expect(el.querySelectorAll('pw-echart').length).toBe(1);
     expect(el.querySelector('pw-echart')!.getAttribute('aria-label')).toContain('Tokens per app over the last 24 hours');
-    const items = Array.from(el.querySelectorAll('.totals li'));
+    const items = Array.from(el.querySelectorAll('.totals tbody tr'));
     expect(items.length).toBe(5);
     expect(items[0]!.textContent).toContain('Debrief');
-    expect(items[0]!.textContent).toContain('tokens');
-    expect(items[0]!.textContent).toContain('GB peak');
+    // Units once, in the headers; the cells are bare numbers.
+    expect(Array.from(el.querySelectorAll('.totals thead th')).map((h) => h.textContent!.trim())).toEqual(['App', 'Tokens', 'Requests', 'Peak memory GB', 'Cached']);
+    expect(items[0]!.textContent).not.toContain('tokens');
+    expect(items[0]!.querySelector('td.mat-column-peak')!.textContent!.trim()).toMatch(/^\d+\.\d$/);
     expect(items[0]!.querySelector('a')!.getAttribute('href')).toBe('/apps?app=debrief');
     const option = FakeChart.all[0]!.options.at(-1)!.option as { series: { name: string }[] };
     expect(option.series.map((s) => s.name)).toContain('Debrief');
@@ -60,9 +62,9 @@ describe('UsageCard', () => {
     const tiles = el.querySelector('pw-cache-tiles')!;
     expect(tiles.textContent).toContain('Cache hit rate');
     expect(tiles.textContent).toContain('Tokens saved');
-    expect(tiles.querySelector('.value')!.textContent).toMatch(/^\d+ %$/);
-    const items = Array.from(el.querySelectorAll('.totals li'));
-    expect(items[0]!.textContent).toContain('% cached');
-    expect(items.some((li) => !li.textContent!.includes('cached'))).toBe(true);
+    expect(tiles.querySelector('.value')!.textContent).toMatch(/^\d+%$/);
+    const cached = Array.from(el.querySelectorAll('.totals tbody td.mat-column-cached')).map((c) => c.textContent!.trim());
+    expect(cached[0]).toMatch(/^\d+%$/);
+    expect(cached).toContain('—');
   });
 });

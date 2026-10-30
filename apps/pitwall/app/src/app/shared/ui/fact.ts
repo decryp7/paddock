@@ -26,13 +26,17 @@ import { Toasts } from '../../core/toasts';
   styles: `
     :host {
       display: grid;
-      grid-template-columns: 104px minmax(0, 1fr) auto;
+      /* Wide enough for the longest label ("Completion tokens") on one line. */
+      grid-template-columns: 120px minmax(0, 1fr) auto;
       align-items: center;
       column-gap: var(--pd-space-2);
       min-height: 26px;
       font-size: var(--pd-text-body);
     }
     .label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       font-size: var(--pd-text-label);
       color: var(--pd-text-muted);
     }

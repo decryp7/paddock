@@ -118,13 +118,15 @@ const SCREENS: Screen[] = [
     },
   },
   {
+    // Debrief opted in to cached answers: the app's Cached answers card with today's hits, misses and hit rate.
     name: 'apps-cache',
     path: '/apps',
+    element: 'pw-panel.cache-panel',
     prepare: async (p) => {
       await p.getByRole('button', { name: /Debrief\s+1\.3k requests/ }).click();
       await expect(p.getByRole('heading', { name: 'Debrief', level: 2 })).toBeVisible();
-      await expect(p.getByRole('switch', { name: 'Cache answers' })).toBeChecked();
-      await p.getByRole('switch', { name: 'Cache answers' }).scrollIntoViewIfNeeded();
+      await expect(p.locator('pw-panel.cache-panel')).toContainText('on for this app');
+      await expect(p.locator('pw-panel.cache-panel .cache-stats')).toContainText('Cache hits');
     },
   },
   { name: 'requests', path: '/requests', snapList: 'cdk-virtual-scroll-viewport', prepare: (p) => expect(p.getByRole('row').nth(1)).toBeVisible() },

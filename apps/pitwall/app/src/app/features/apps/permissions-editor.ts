@@ -10,6 +10,7 @@ import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import type { AppLimits, AppPermissions, LocalModel, Priority } from '../../core/api.types';
 import { PRIORITY_LABEL } from '../../shared/labels';
+import { int } from '../../shared/format';
 
 const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
 
@@ -19,11 +20,15 @@ const PRIORITY_HINT: Record<Priority, string> = {
   batch: 'Runs only when nothing else does',
 };
 
-/** A limit field's text as a value: empty is no limit, a positive whole number is the limit, anything else invalid. */
+/**
+ * A limit field's text as a value: empty is no limit, a positive whole number is the limit, anything else invalid. Thousands
+ * separators are accepted as the field shows them (`120,000,000`), but only in their places (`1,50` is invalid).
+ */
 export function parseLimit(text: string, max = Number.MAX_SAFE_INTEGER): number | null | 'invalid' {
-  const t = text.trim();
-  if (t === '') return null;
-  if (!/^\d+$/.test(t)) return 'invalid';
+  const raw = text.trim();
+  if (raw === '') return null;
+  if (!/^\d+$/.test(raw) && !/^\d{1,3}(,\d{3})+$/.test(raw)) return 'invalid';
+  const t = raw.replace(/,/g, '');
   const n = Number(t);
   return n >= 1 && n <= max && Number.isSafeInteger(n) ? n : 'invalid';
 }
@@ -322,7 +327,8 @@ export class PermissionsEditor {
   }
 
   private load(p: AppPermissions): void {
-    const text = (n: number | null) => (n === null ? '' : String(n));
+    // With separators, as every other count in Pitwall: `120,000,000`, not `120000000`.
+    const text = (n: number | null) => (n === null ? '' : int(n));
     this.allModels.set(p.models === null);
     this.chosen.set(new Set(p.models ?? []));
     this.priority.set(p.maxPriority);

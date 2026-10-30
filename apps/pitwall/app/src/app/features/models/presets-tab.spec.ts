@@ -116,7 +116,7 @@ describe('PresetsTab', () => {
     await settle();
     expect(el.querySelector('form')).toBeNull();
     const row = Array.from(el.querySelectorAll('tbody tr')).find((r) => r.textContent!.includes('dyno-notes'))!;
-    expect(row.textContent).toContain('temperature 0.4');
+    expect(row.textContent).toMatch(/temperature 0.4/i);
     expect(row.textContent).toContain('system prompt');
   });
 
@@ -221,14 +221,15 @@ describe('PresetsTab', () => {
   });
 
 describe('PresetsTab caching', () => {
-  it('badges presets that cache answers or keep the prompt warm', async () => {
+  it('says in words which presets cache answers or keep the prompt warm, under the name', async () => {
     const { el } = await render();
     const rows = Array.from(el.querySelectorAll('tbody tr'));
-    const explain = rows.find((r) => r.textContent!.includes('debrief-explain'))!;
-    expect(Array.from(explain.querySelectorAll('.badge')).map((b) => b.textContent)).toEqual(['cache', 'warm']);
-    const triage = rows.find((r) => r.textContent!.includes('pitcrew-triage'))!;
-    expect(Array.from(triage.querySelectorAll('.badge')).map((b) => b.textContent)).toEqual(['warm']);
-    expect(rows.find((r) => r.textContent!.includes('legacy-explain'))!.querySelector('.badge')).toBeNull();
+    const about = (alias: string) => rows.find((r) => r.textContent!.includes(alias))!.querySelector('.alias .sub')!.textContent!.trim();
+    expect(about('debrief-explain')).toMatch(/^Caches answers · warm prompt · /);
+    expect(about('pitcrew-triage')).toMatch(/^Warm prompt · /);
+    expect(about('legacy-explain')).toBe('Request decides every setting');
+    // No pills on a second line (UI review 2 rule 8).
+    expect(el.querySelector('tbody .badge')).toBeNull();
   });
 
   it('edits both toggles and saves them with the preset', async () => {
