@@ -103,12 +103,17 @@ Rules the core keeps: no `unwrap`/`expect` on user data, `unsafe` denied, `missi
 
 ![UI components: state and backend](diagrams/svg/c4-3-ui-state.svg)
 
-The Angular UI is the presentation layer. Standalone components with signals and OnPush, SignalStores for state,
-Angular CDK for behaviour and accessibility, Angular Material selectively, Apache ECharts for charts, and Pitwall's
-own SVG icon set in the `pw` namespace. Components never call Tauri `invoke`; they use the backend service injected by
-the `BACKEND` token. The screens are `dashboard`, `models`, `engines`, `apps`, `requests`, `playground`, `benchmarks`,
-`settings` and the compact `tray` view. The UI does not re-implement domain rules: fit verdicts, release countdowns and
-model selection come from the core through the server.
+The Angular UI is the presentation layer, on the Paddock app shell (`@decryp7/paddock-ui`, ADR 0012 of the family). One
+bundle boots three kinds of window (`src/main.ts`): the main window (the shell's pages frame with Pitwall's pages, menus,
+status items and commands from `src/app/shell/contributions.ts`), a dialog window (the Settings window, About, Updates,
+What's new, the shared confirmation and Pitwall's four dialogs, each a real OS window fitted by the shell, rule 17) and the
+tray popover. Standalone components with signals and OnPush, SignalStores for state, Angular Material for every control
+(rule 47) and `mat-table` for every table, paddock-ui's states and tokens (`--pd-*`, `data-accent="pitwall"`), Apache
+ECharts for charts, and Pitwall's own SVG icon set in the `pw` namespace. Components never call Tauri `invoke`; they use
+the backend service injected by the `BACKEND` token. The pages are `dashboard`, `models`, `engines`, `apps`, `requests`,
+`playground` and `benchmarks`; Settings is the shell's Settings window with Pitwall's page. The UI does not re-implement
+domain rules: fit verdicts, release countdowns and model selection come from the core through the server. (The C4 UI
+diagrams above still show the 1.0 sidebar and settings route; redrawing them is a follow-up with its own review.)
 
 The Tauri shell (`app/src-tauri`, a workspace member) holds no model or request state of its own. It talks to the
 server only through a `ServerClient` trait (loopback HTTP to the management API and its live feed; a fake in tests):
@@ -119,7 +124,7 @@ server only through a `ServerClient` trait (loopback HTTP to the management API 
 | `credentials.rs` | The app's copy of the admin key in the OS credential store (Windows Credential Manager, macOS Keychain, Secret Service), falling back to `admin.key` when the store is unavailable |
 | `service_install.rs` | Registering the server with the OS: `SMAppService` and the launch agent inside the bundle on macOS, the NSIS installer's service on Windows, a systemd user unit written by `pitwall-server install` on Linux. Elevation and approval are always the OS's own |
 | `lib.rs`, `tray.rs`, `tray_model.rs` | Pitwall on the Paddock shell (`paddock-shell`, ADR 0029): the shell opens the tray and the main window after every plugin is set up, owns the window lifecycle (closing destroys the window, tray Open and Dock reopen rebuild it, only Quit exits, no tray means closing quits), the exit and its watchdog, and guards Pitwall's commands (`COMMANDS`); `tray.rs` draws Pitwall's tray model on the shell's tray |
-| `updater.rs` | The opt-in minisign-verified updater; inert in unsigned builds |
+| `offline.rs`, `update_hooks.rs` | Pitwall on the shell's updater (`paddock-updater`: About, Updates, What's new): what the client learns about Offline mode, which blocks every update check and download and fails closed; the service hooks that repair the macOS registration after a version change. Inert in builds without the signing key |
 | (shell) | [ADR 0012](adr/0012-native-feel.md): the shell's window layer applies the native feel (no browser zoom, extensions or, in release builds, WebView2 browser keys); the UI guard does the rest |
 
 Closing or quitting the app never stops the server. The shell has been type-checked and unit-tested; running it on
