@@ -95,7 +95,7 @@ fn text_limits_and_encodings_are_errors_that_say_what_to_do() {
     assert!(import(&[0xff], Format::Markdown, &p, &ImportLimits::default()).is_err());
     assert!(matches!(
         import(
-            &vec![b'a'; 11],
+            &[b'a'; 11],
             Format::Csv,
             &p,
             &ImportLimits {

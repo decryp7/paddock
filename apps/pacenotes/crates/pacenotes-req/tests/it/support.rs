@@ -72,7 +72,7 @@ pub fn docx() -> Vec<u8> {
         row(cell("Brakes", "<w:vMerge w:val=\"restart\"/>") + &cell("B-1", "") + &cell("Stop <in> time.", "") + &cell("high", "")),
         row(cell("", "<w:vMerge/>")
             + &cell("B-2", "")
-            + &("<w:tc><w:p><w:r><w:t>Hold on slopes.</w:t></w:r></w:p><w:p><w:r><w:t>Even loaded.</w:t></w:r></w:p></w:tc>".to_owned())
+            + "<w:tc><w:p><w:r><w:t>Hold on slopes.</w:t></w:r></w:p><w:p><w:r><w:t>Even loaded.</w:t></w:r></w:p></w:tc>"
             + &cell("low", "")),
         row(cell("Spanning row", "<w:gridSpan w:val=\"2\"/>") + &cell("", "") + &cell("", "")),
     )
