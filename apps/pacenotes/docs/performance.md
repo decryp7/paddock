@@ -90,7 +90,7 @@ rules 220 to 230 ms (20,780 files; the first round 790 ms, cold cache); the shar
 ignore rules 120 to 128 ms (11,470 files). So honouring `.gitignore` costs about 205 ms against 225 ms without it, that is nothing
 extra, and keeps 9,310 build-output files from being read and parsed.
 
-**Cancellable "Finding files" (same day).** The shared `paddock_repo_files::walk` cannot be cancelled and reports nothing until it
+**Cancellable "Finding files" (same day).** The shared `paddock_repo_files::walk` (the crate becomes `paddock-walk` after the shared-code freeze) cannot be cancelled and reports nothing until it
 ends (7.5 s for 120,000 files on the reviewer's machine), so the engine runs it on its own thread and, meanwhile, a parallel
 counting walk (`par_walk`, 4 workers) feeds the live count; a cancel returns at once and abandons the shared walk. On the 20,780-file
 tree: shared walk alone 80 to 85 ms, shared walk plus counting walk 92 to 98 ms wall, that is 8 to 13 ms for the live count and the

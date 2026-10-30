@@ -17,7 +17,7 @@ and watches the workspace so the index follows edits.
 | Crate | What it is |
 |---|---|
 | `pacenotes-worker` | the worker program (`pacenotes-parse-worker`) and the wire types of its protocol, and the host side: the worker pool and `ParseWorkers` (the index's `SymbolSource` over the pool), the stall judge and the process probe. Depends on `pacenotes-parse`, `pacenotes-index`, `paddock-ipc`, `paddock-proc`; the program itself never opens SQLite |
-| `pacenotes-engine` | the edge that joins the index to the shared crates: `JobProgress` (the job reporter as the index's `Progress`), `RepoFilesIgnore` (`.gitignore` from `paddock-repo-files`), `IndexService` (the index job on `paddock-jobs`) and its folder watcher on `paddock-watch` |
+| `pacenotes-engine` | the edge that joins the index to the shared crates: `JobProgress` (the job reporter as the index's `Progress`), `RepoFilesIgnore` (`.gitignore` from `paddock-walk` (today `paddock-repo-files`)), `IndexService` (the index job on `paddock-jobs`) and its folder watcher on `paddock-watch` |
 | `pacenotes-index` | gains `Progress`, `Ignore`, the pool, the size and mtime shortcut and the quarantine table; still no process, no parser |
 
 ### The worker and its protocol

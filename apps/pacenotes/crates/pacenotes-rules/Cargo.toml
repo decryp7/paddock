@@ -1,0 +1,23 @@
+[package]
+name = "pacenotes-rules"
+description = "Pacenotes' review rules (C1): structural patterns over tree-sitter, SARIF 2.1.0 and rdjson readers and writers, waivers and suppressions, finding fingerprints and baselines, and the rule tests. The shared half lives in `shared_copy` until it moves to paddock-rules (C3a)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+pacenotes-core = { workspace = true }
+pacenotes-parse = { workspace = true }
+paddock-jobs = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+toml = "1"
+tree-sitter = "=0.27.1"
+
+[lints]
+workspace = true

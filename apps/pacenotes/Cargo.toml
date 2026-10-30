@@ -21,6 +21,7 @@ pacenotes-parse = { path = "crates/pacenotes-parse" }
 pacenotes-index = { path = "crates/pacenotes-index" }
 pacenotes-worker = { path = "crates/pacenotes-worker" }
 pacenotes-engine = { path = "crates/pacenotes-engine" }
+pacenotes-rules = { path = "crates/pacenotes-rules" }
 pacenotes-trap = { path = "tests/trap" }
 pacenotes-function-api = { path = "crates/pacenotes-function-api" }
 

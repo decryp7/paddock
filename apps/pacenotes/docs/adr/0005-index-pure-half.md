@@ -59,7 +59,7 @@ parse fails closed). A `plain_globs` entry is a name pattern for names without a
 
 The walk takes an `Ignore` port (default `NoIgnore`): a file or folder the port hides is counted as *ignored* and not visited. The
 denylist is checked first, so ignoring never relaxes it. The engine supplies the `.gitignore` implementation from the shared
-`paddock-repo-files` walker (ER-22), see ADR 0006.
+`paddock-walk` (today `paddock-repo-files`) walker (ER-22), see ADR 0006.
 
 `DiskFs` lists with `symlink_metadata`, never follows a link (a link is skipped and counted, whatever it points at: a file, a
 folder, `/`, or itself), skips any `.git` entry (a folder or a gitfile) and every denied name, and checks that the canonical
