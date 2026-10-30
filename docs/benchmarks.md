@@ -291,13 +291,14 @@ These are ordered by impact.
    - Spotter check throughput and Chrome memory: about 17 GB idle was seen on Linux, see the lessons.
    - Windows and Linux runs of anything except CI.
    - CI build parallelism on Linux: `conformance/ci/build-jobs.sh` leaves `CARGO_BUILD_JOBS` unset on the Linux runner
-     (cargo uses every core in each of up to four concurrent containers, as before 2026-10-30) and logs the host's cores.
+     (cargo uses every core in each of up to four concurrent containers, as before 2026-10-30) and logs the host's cores:
+     16 cores and 127,941 MB in a container on d-gtr9 (run 7211, job 23231).
      Its share (cores / 4 or cores / 2, `PADDOCK_CI_JOBS_PER_HOST` in d-gtr9's `runner.envs`) waits for one A/B of Gitea
      job durations of the Rust jobs (crate, crates, app legs, Debrief's rust tests), the same commits with and without it.
    - CI build parallelism: a clean, CI-shaped Dyno build (`cargo test --no-run --workspace --exclude dyno-app`, no sccache,
      no incremental) with `CARGO_BUILD_JOBS=4` (the Mac leg's share) against 13 (cores − 1). Tried on 2026-10-30; the
      5-minute load never fell below 10 in an hour, so nothing was recorded (`conformance/ci/build-jobs.sh` keeps 4 on the
-     shared Mac until it is measured). Also the Linux runner's core count, which no job log prints.
+     shared Mac until it is measured).
    - Memory is not checked outside Debrief.
 4. **Results on loaded machines that need a quiet re-run:**
    - Nearly every Debrief result since 2026-10-20 (Windows VM at about 80% load; Mac mini at load 9–220).
