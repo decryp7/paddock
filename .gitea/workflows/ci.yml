@@ -466,7 +466,34 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
+          # TEMPORARY (fix/windows-err-aborted, revert before merging): Chrome's verbose log of each real-browser test on
+          # Windows, kept below as an artifact on every outcome.
+          PADDOCK_TEST_BROWSER_LOG: ${{ runner.os == 'Windows' && format('{0}/chrome-logs', runner.temp) || '' }}
         run: cargo nextest run --workspace --all-features --profile ci
+
+      # TEMPORARY (fix/windows-err-aborted, revert before merging): the real-browser tests four more times on Windows in
+      # this one run, each a fresh set of browsers, all logged; every round runs even if one fails.
+      - name: Real-browser tests again (Windows, temporary)
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
+        env:
+          PADDOCK_REQUIRE_TEST_BROWSER: "1"
+          PADDOCK_TEST_BROWSER_LOG: ${{ format('{0}/chrome-logs', runner.temp) }}
+        run: |
+          failed=0
+          for round in 1 2 3 4; do
+            echo "round $round"
+            cargo nextest run -p paddock-chromium --all-features --profile ci -E 'test(/^real_browser::/)' || failed=1
+          done
+          exit $failed
+
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        # TEMPORARY (fix/windows-err-aborted, revert before merging): kept on success too, to read the logs of a green run.
+        if: ${{ always() && runner.os == 'Windows' }}
+        with:
+          name: chrome-logs-${{ runner.os }}
+          path: ${{ runner.temp }}/chrome-logs
+          if-no-files-found: ignore
 
       # The crates whose code changes with an optional feature off (cfg(not(feature)) paths, a default feature that can be
       # turned off) also run without it. Cargo unifies features across the packages of one run, so a crate that another
