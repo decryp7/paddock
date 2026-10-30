@@ -175,6 +175,11 @@ pub async fn run_command_for(program: &str, args: &[String], limit: Duration) ->
     if !Path::new(program).is_absolute() {
         return Err("The program to run needs its full path.".into());
     }
+    // Checked up front so a missing program is reported the same everywhere: under amd64 emulation (qemu-user) a failed exec
+    // is not reported back to the parent and the child just ends with status 127.
+    if !Path::new(program).is_file() {
+        return Err("The program could not be started: it was not found.".into());
+    }
     let mut cmd = tokio::process::Command::new(program);
     cmd.args(args)
         .stdin(std::process::Stdio::null())
@@ -330,7 +335,8 @@ mod tests {
     async fn a_relative_program_is_refused_and_a_missing_one_fails_cleanly() {
         assert!(run_command("echo", &[]).await.unwrap_err().contains("full path"));
         let missing = if cfg!(windows) { r"C:\nonexistent\x.exe" } else { "/nonexistent/x" };
-        assert!(run_command(missing, &[]).await.unwrap_err().contains("could not be started"));
+        let message = run_command(missing, &[]).await.unwrap_err();
+        assert!(message.contains("could not be started"), "unexpected message: {message}");
     }
 
     #[cfg(unix)]
