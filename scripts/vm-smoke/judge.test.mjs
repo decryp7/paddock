@@ -81,14 +81,18 @@ test('the observation window catches a respawn that arrives late', () => {
   assert.match(bad.checks.find((c) => !c.ok).detail, /peak 2 over 3 snapshots/);
 });
 
-test('distinctCounts counts processes by pid and start time over a whole step, not per snapshot', () => {
-  const a = { at: 10_000, procs: ps([[11, 10, '00:05', `${AGENT} run`]]) };
-  const b = { at: 14_000, procs: ps([[11, 10, '00:09', `${AGENT} run`], [12, 10, '00:01', `${AGENT} run`]]) };
-  const c = { at: 30_000, procs: ps([[12, 10, '00:17', `${AGENT} run`]]) };
-  assert.equal(distinctCounts([a, b, c], config, BUNDLE)['dyno-agent'], 2, 'pid 11 (seen twice, same start) and pid 12');
-  assert.equal(distinctCounts([a, { at: 20_000, procs: ps([[11, 10, '00:15', `${AGENT} run`]]) }], config, BUNDLE)['dyno-agent'], 1);
-  // The same pid with a start 60 s apart is a different process (pid reuse).
-  assert.equal(distinctCounts([a, { at: 90_000, procs: ps([[11, 10, '00:05', `${AGENT} run`]]) }], config, BUNDLE)['dyno-agent'], 2);
+test('distinctCounts counts processes by pid and the start time ps printed, over a whole step', () => {
+  const row = (pid, lstart) => parsePs(`${pid} 10 00:05 ${lstart} ${AGENT} run`);
+  const t1 = 'Fri Oct 30 14:25:12 2026';
+  const t2 = 'Fri Oct 30 14:25:20 2026';
+  const a = { at: 1, procs: row(11, t1) };
+  const b = { at: 2, procs: [...row(11, t1), ...row(12, t2)] };
+  const c = { at: 3, procs: row(12, t2) };
+  assert.equal(distinctCounts([a, b, c], config, BUNDLE)['dyno-agent'], 2, 'pid 11 seen twice is one process, pid 12 another');
+  assert.equal(distinctCounts([a, { at: 9, procs: row(11, t1) }], config, BUNDLE)['dyno-agent'], 1);
+  // The same pid with another start time is another process (pid reuse), whatever the host clock says.
+  assert.equal(distinctCounts([a, { at: 9, procs: row(11, t2) }], config, BUNDLE)['dyno-agent'], 2);
+  assert.equal(parsePs(`11 10 00:05 Sat Nov  1 03:04:05 2026 ${AGENT} run`)[0].lstart, 'Sat Nov  1 03:04:05 2026', 'a one-digit day is padded');
 });
 
 test('describeTree prints pid, age and parent for the evidence', () => {
