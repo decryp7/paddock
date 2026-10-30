@@ -907,7 +907,7 @@ export function planFor({ base = null, head = 'HEAD', files = null, all = false,
 }
 
 /** The ci.yml job outputs of a plan (the plan job declares and wires exactly these names; a test checks ci.yml against them). */
-export function ciOutputs(plan, legs) {
+export function ciOutputs(plan, legs, base = null) {
   return {
     crates: plan.crates,
     ui: plan.ui,
@@ -918,7 +918,26 @@ export function ciOutputs(plan, legs) {
     paddock_dev: plan.paddockDev,
     apps: JSON.stringify(legs),
     any_app: legs.length > 0,
+    // The commit lint's range start (empty: no base, only the head commit is linted).
+    base: base ?? '',
   };
+}
+
+/**
+ * The commits the commit lint checks, as a git revision range, or null to skip it. Only what a change adds is linted, so an
+ * old bad commit never keeps main red: a pull request lints since its target branch, a push the commits it added
+ * (`before..sha`; a new branch, an all-zero `before`, lints the head commit only), a manual run from the plan's base (the
+ * head commit alone without one); `known(commit)` says whether a commit is in the clone. Tags and a call with an `app` (an app's tag gates, ER-15) and every other event skip it:
+ * a release must not fail on an old commit's subject.
+ */
+export function commitLintRange({ event, ref = '', before = '', sha = 'HEAD', base = '', baseRef = '', app = '', known = () => true }) {
+  if (app || ref.startsWith('refs/tags/')) return null;
+  const head = `${sha}^!`;
+  if (event === 'pull_request') return baseRef ? `origin/${baseRef}..HEAD` : null;
+  // A `before` missing from the history (after a force push) lints the head commit only.
+  if (event === 'push') return before && !/^0+$/.test(before) && known(before) ? `${before}..${sha}` : head;
+  if (event === 'workflow_dispatch') return base ? `${base}..${sha}` : head;
+  return null;
 }
 
 /** A short Markdown summary of a plan for the job summary. */
@@ -978,7 +997,7 @@ async function ci(env, { app = null } = {}) {
     console.log(String(run));
     return;
   }
-  const outputs = ciOutputs(plan, legs);
+  const outputs = ciOutputs(plan, legs, env.PLAN_APP ? null : base);
   if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, Object.entries(outputs).map(([k, v]) => `${k}=${v}\n`).join(''));
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, summary(plan, reason, legs));
 }
@@ -1020,6 +1039,20 @@ export function parseArgs(args) {
 
 if (isMain(import.meta.url)) {
   try {
+    if (process.argv[2] === '--commit-range') {
+      const e = process.env;
+      const gitHas = (c) => {
+        try {
+          git(['cat-file', '-e', `${c}^{commit}`]);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const range = commitLintRange({ event: e.EVENT, ref: e.REF, before: e.BEFORE, sha: e.SHA, base: e.PLAN_BASE, baseRef: e.BASE_REF, app: e.INPUT_APP, known: gitHas });
+      console.log(range ?? 'skip');
+      process.exit(0);
+    }
     const { files, base, head, all, ci: isCi, app, explain } = parseArgs(process.argv.slice(2));
     if (isCi) await ci(process.env, { app });
     else {
