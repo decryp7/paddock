@@ -75,10 +75,14 @@ module `shared_copy` is gone (never both present), so the copies cannot outlive 
 - `State` is **derived, not stored**: a finding is `Suppressed` exactly when the engine attached a waiver to it; Open, Confirmed,
   Dismissed and Fixed are Pacenotes' workflow states and live in its store, not in the shared `Finding`. The shared crate exposes the
   transition table and the one function `effective_state(workflow, waived) -> FindingState`, so "Suppressed" has a single source.
-- Newtypes: `FixSentence` (one sentence: non-empty, at most 300 bytes, no line break), `Reason` (non-blank, at most 500 bytes, no line
+- Newtypes: `FixSentence` (one sentence: non-empty, at most 512 bytes, no line break; measured 2026-10-30: the longest fix string in
+  conformance's source is 346 bytes, in C30, and the longest fix printed by a run over every app is 195), `Reason` (non-blank, at most 500 bytes, no line
   break), `IsoDate` (`YYYY-MM-DD`, a real calendar date).
 - `Waiver` and `Suppression` are two types. A **`Waiver`** is a file entry that hides findings of a rule over a path: `rule` (or a
-  deprecated id), `path` glob, `reason`, `expires: IsoDate` (required), `max_count: Option<u32>`, optional `owner`. A **`Suppression`**
+  deprecated id), `path` glob, `reason`, `expires`, `max_count: Option<u32>`, `owner` and `origin`. A **file** waiver (`origin = File`, in `paddock.waivers.toml`) must have
+  `expires: IsoDate`. A **config** waiver (`origin = Config`, built from a check's own exemption list) has **no expiry**: it still needs a
+  `reason` and an `owner`, because such a list (`untimedCommands`, `a11y.skip`, `ownTestBinaries`) is a standing design decision, not a
+  debt to pay by a date. It is still counted (`max_count`) and still raises `W003` when it hides nothing. A **`Suppression`**
   is the in-source or per-finding form Pacenotes uses: scope `Line`, `File`, `Path(glob)` or `Rule`, `reason` (required), optional
   `expires`. Both are checked by the same engine function and produce the same engine findings; they differ in where they are written and
   in what they must carry.
@@ -105,8 +109,8 @@ A fix sentence is required for every rule and every finding (decided). Where it 
 
 - **Our own rules**: `Rule.fix`, source `Rule`.
 - **Imported results (SARIF, rdjson)**: the first available of, in order: the result's own `fixes[].description.text`, the rule's
-  `help.text`, the rule's `fullDescription.text`, then the first sentence of it, cut to 300 bytes on a character boundary. Source `Tool`.
-- **Nothing available**: the fixed sentence `"<tool> gives no fix for <rule>; see its documentation."` (tool and rule truncated to fit),
+  `help.text`, the rule's `fullDescription.text`, then the first sentence of it, cut to 512 bytes on a character boundary. Source `Tool`.
+- **Nothing available**: the fixed sentence `"<tool> gives no fix for <rule>; see its documentation."` (tool and rule truncated to fit 512 bytes),
   source `Generated`. A `Generated` sentence is **never written back out as the tool's help**: the SARIF writer puts only `Rule` and
   `Tool` sentences in `help.text` or `properties.fix`, and skips `Generated` ones.
 - **URLs** in a descriptor (`helpUri`) are kept only if absolute `http` or `https`, at most 2048 bytes; they are shown as plain text and
@@ -127,10 +131,13 @@ A fix sentence is required for every rule and every finding (decided). Where it 
 - **Owner.** A waiver may name an `owner`; absent, the owner is whoever `CODEOWNERS` gives for the waiver file's path. The report prints
   the owner so an expired waiver has someone to ask.
 - **In-source waivers** (the `conformance: <name>` markers; Pacenotes' annotation comments) must carry a **reason** in the same comment
-  (`/* conformance: not-a-header -- the side panel is not a table row */`). A marker without one is `W002`. Markers are parsed by the
-  rule's own check, not by this crate; they reach the engine as `Suppression`s.
-- **Config exceptions** (a check's own config file listing exempt paths) are read by the check and enter the engine as `Waiver`s, so
-  they are counted, owned and expire like any other.
+  (`/* conformance: not-a-header -- the side panel is not a table row */`). A marker without one is `W002`. The separator between the marker name
+  and the reason is `--` (ASCII, **canonical**: the documentation and any writer use it) or the em dash `—` (also accepted when
+  reading). Markers are parsed by the rule's own check, not by this crate; they reach the engine as `Suppression`s.
+- **Config exceptions** (a check's own config listing exempt names or paths: `untimedCommands`, `a11y.skip`, `ownTestBinaries`) are read by
+  the check and enter the engine as `Waiver`s with `origin = Config`: no expiry, but a reason and an owner are required, they are
+  counted, and an unused one is `W003`. A check that wants none of this may keep its list out of the waiver model; it then reports no
+  `W003` for it.
 
 ### 3.6 Behaviour (pure functions)
 
@@ -146,8 +153,12 @@ A fix sentence is required for every rule and every finding (decided). Where it 
 
 ### 3.7 File formats
 
-- **Waiver file** (`paddock.waivers.toml`, conformance; `.pacenotes/suppressions.toml`, Pacenotes): TOML, `[[waiver]]` tables with
-  string values, plus `max_count` (integer) and `owner`. `version = 1` at the top. Unknown keys are reported (`W002`), never guessed.
+- **Waiver file** (`paddock.waivers.toml`, conformance): TOML, `[[waiver]]` tables with string values, plus `max_count` (integer) and
+  `owner`. `version = 1` at the top (today's JavaScript parser rejects that line; see the behaviour changes in section 6). Unknown keys are
+  reported (`W002`), never guessed.
+- **Suppression file** (`.pacenotes/suppressions.toml`, Pacenotes): `[[waiver]]` tables as above (rule, path glob, reason, required
+  expiry) **and** `[[suppression]]` tables: `scope` (`line`, `file`, `path` or `rule`), `path` (for `line`, `file`, `path`), `line` (for
+  `line`), `rule` (for `rule`, and optionally for the others), `reason` (required), `expires` (optional). One reader reads both table kinds.
 - **Baseline file** (`.pacenotes/baseline.toml`, committable): TOML, `version = 1`, `algorithm = 1`, then `[[finding]]` tables with
   `rule`, `rule_version`, `fingerprint` (hex), `ordinal`, `first_seen`.
 - **One parser serves the waiver files of both** (the same `[[waiver]]` reader, the same checks). The baseline has its own small reader in
@@ -164,7 +175,7 @@ A fix sentence is required for every rule and every finding (decided). Where it 
 
 | Model | SARIF 2.1.0 |
 |---|---|
-| `Report` | one `run` per tool; `tool.driver.name` and `version`; `rules` from the rules that ran; `originalUriBaseIds` declares `%SRCROOT%`; `columnKind: "utf16CodeUnits"` is **not** used (see below) |
+| `Report` | **one `run` per tool**: our findings in ours, and each imported tool's results written back in **that tool's own `run`** with its **raw rule id** in `ruleId`, so an external result round-trips to the same run and the same id; `tool.driver.name` and `version`; `rules` from the rules that ran; `originalUriBaseIds` declares `%SRCROOT%`; `columnKind: "utf16CodeUnits"` is **not** used (see below) |
 | rule | `reportingDescriptor`: `id` (the `RuleId` display form), `name`, `shortDescription` (title), `defaultConfiguration.level`, `help.text` (a `Rule`/`Tool` fix sentence), `properties.policyRef`, `properties.ruleVersion`; `helpUri` only for an absolute http(s) URL, never for `policy_ref` |
 | result to rule | `ruleId` **and** `ruleIndex` (the index into `rules`) |
 | severity | `level`: Info -> `note`, Low and Medium -> `warning`, High and Blocker -> `error`; the exact severity in `properties.severity` so a round trip is lossless |
@@ -242,6 +253,20 @@ dropped one. The input is **bounded** (file size, results count, string length, 
    rename through `deprecated_ids`, exit codes, SARIF round trips (including non-ASCII and external rule ids), a malformed SARIF is an
    error and never a panic, and the field map of section 5 as a table-driven test.
 
+### Behaviour changes against today's JavaScript conformance
+
+The stricter rules of this note change what conformance reports, and R8's goldens compare the JavaScript run with the Rust run byte for
+byte. So each change has one place where it lands, and none lands in R8 silently:
+
+| Change | Lands | How the goldens stay honest |
+|---|---|---|
+| `version = 1` in `paddock.waivers.toml` (today's parser reports the line as `W002`) | **JS conformance first**, in a change of its own before R8: the parser accepts a `version = 1` line and refuses another version | the goldens then compare like with like |
+| In-source markers must carry a reason (`W002` without one); 15 markers have none today | **R8**, as a deliberate golden update, in the **same change that gives each of the 15 markers its reason**, so the run stays green; the JS checks do not enforce it earlier | the golden diff is only the new rule, and the marker fixes are in the same commit |
+| `W003` unused waiver (not on `main` yet) | **JS conformance first**, as a change to the waiver engine with its own tests, raised only for checks that ran; waivers it finds unused are removed or fixed in that change | the goldens then contain `W003` on both sides |
+| Config exceptions become waivers (`origin = Config`, no expiry) | **R8**: the Rust checks read their lists into waivers; JS keeps reading them as lists. No output changes unless an entry is unused, which is `W003` and lands with the row above | the Rust run reproduces the JS output over the same lists |
+| `max_count` as the key of a counted waiver (ADR 0021 calls it the count) | the JS parser reads `max_count` as an alias of `count` **first**; the rename is R8's | no output change |
+| `Report.scope` and the display table (`warn` printed as `warn`) | **R8**, designed to leave the text, Markdown and JSON unchanged | goldens unchanged |
+
 ## 7. Parallelism and cost (rule 51)
 
 The model is data and small functions, so the cost is in the readers and the matcher. SARIF import is bounded streaming over the file (a
@@ -253,6 +278,9 @@ part that needs a measurement; it is designed in C1's own note, not here.
 ## 8. Risks
 
 - A shared `Severity` change later touches both apps' reports; the display table and the golden fixtures are the guard.
+- Fingerprint **ordinals can shift**: two identical snippets in one file are numbered by order, so deleting or inserting one above them
+  renumbers the others and a baselined finding can look new. The baseline lists the ordinal, and a finding whose fingerprint matches but
+  whose ordinal moved is reported as `updated`, not `new`, so CI does not fail on it.
 - `FindingFingerprint` normalisation is a contract: changing it is a new algorithm version and a baseline migration, never a quiet
   edit.
 - Moving `pacenotes-core` types behind a re-export must not change any wire encoding (`wire_tests` runs before and after).
