@@ -42,5 +42,6 @@ A stored offset is also wrong for half the year wherever daylight saving applies
 - The maintenance status jumps from window edge to window edge (`starts_of`) instead of testing every minute of the next eight
   days; a unit test checks it against the minute scan around both clock changes ([performance.md](../performance.md)).
 - A failed read of the OS zone falls back to UTC, is logged once, and the diagnostics bundle (`system/time-zone.json`) names the
-  zone in use or why it could not be read.
+  zone in use or why it could not be read. A failed read is reused for 5 minutes, so recovery after a temporary failure can lag
+  by up to 5 minutes.
 - The UI still formats times with the browser's zone, which is the same OS zone on the same machine.

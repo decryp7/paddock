@@ -9,7 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// Whether a failed read of the OS zone was already logged (once per process: it is read at every lookup).
+/// Whether a failed read of the OS zone was already logged (once per process: it is read at every lookup, and a failed read
+/// is reused for five minutes).
 static FAILURE_LOGGED: AtomicBool = AtomicBool::new(false);
 
 /// How long a failed read is reused before the OS zone is read again: jiff's own cache time for the system zone, so the
@@ -20,7 +21,8 @@ const FAILURE_TTL: Duration = Duration::from_secs(5 * 60);
 static LAST_FAILURE: Mutex<Option<(Instant, String)>> = Mutex::new(None);
 
 /// The zone the OS is set to, read again at every lookup (`jiff` caches it and notices a change). When the OS zone cannot
-/// be read, the lookup answers UTC, logs why once, and [`LocalZone::describe`] says so in the diagnostics bundle.
+/// be read, the lookup answers UTC, logs why once, and [`LocalZone::describe`] says so in the diagnostics bundle; a failed
+/// read is reused for five minutes.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemZone;
 
@@ -31,20 +33,21 @@ impl SystemZone {
 }
 
 /// Reads with `read` unless a failure younger than [`FAILURE_TTL`] is in `cache`, which then answers instead; a failure is
-/// remembered, a success forgets it.
+/// remembered, a success forgets it. The lock is not held while reading, so lookups never wait on each other (two threads may
+/// both read once the failure is stale).
 fn read_through(
     cache: &Mutex<Option<(Instant, String)>>,
     now: Instant,
     read: impl FnOnce() -> Result<TimeZone, String>,
 ) -> Result<TimeZone, String> {
-    let mut last = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some((at, error)) = last.as_ref() {
+    let lock = || cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((at, error)) = lock().as_ref() {
         if now.saturating_duration_since(*at) < FAILURE_TTL {
             return Err(error.clone());
         }
     }
     let result = read();
-    *last = result.as_ref().err().map(|e| (now, e.clone()));
+    *lock() = result.as_ref().err().map(|e| (now, e.clone()));
     result
 }
 
@@ -194,6 +197,8 @@ mod tests {
         // A success forgets the failure: the next lookup reads again.
         assert!(read_through(&cache, t0 + 2 * FAILURE_TTL, || Ok(TimeZone::UTC)).is_ok());
         assert!(cache.lock().unwrap().is_none());
+        assert!(read_through(&cache, t0 + 2 * FAILURE_TTL, failing).is_err());
+        assert_eq!(reads.get(), 3, "after a success the next lookup reads again");
     }
 
     #[test]
