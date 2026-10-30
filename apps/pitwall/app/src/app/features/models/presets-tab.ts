@@ -9,7 +9,6 @@ import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { ModelPreset, PresetEntry, PresetStatus } from '../../core/api.types';
-import { varies } from '../../shared/format';
 import { presetStatusLook } from '../../shared/labels';
 import { Confirm } from '../../shared/ui/confirm';
 import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
@@ -426,8 +425,8 @@ export class PresetsTab {
   }
 
   /** The list behind the row's "..." button and right-click. Delete is only here and asks first. */
-  /** Defaults only when the presets differ in them (UI review 2 rule 7: no constant column). */
-  protected readonly columns = computed(() => ['alias', 'target', 'serves', ...(varies(this.store.entries(), (e) => this.defaultsText(e.preset)) ? ['defaults'] : []), 'act']);
+  /** Every column: a preset's defaults are its own setting, and the table is the only place outside the editor that shows them. */
+  protected readonly columns = computed(() => ['alias', 'target', 'serves', 'defaults', 'act']);
   protected readonly byAlias = (_: number, e: PresetEntry) => e.preset.alias;
 
   protected menuItems(p: ModelPreset): MenuItem[] {

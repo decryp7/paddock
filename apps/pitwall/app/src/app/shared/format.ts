@@ -164,11 +164,12 @@ export function durationIn(ms: number | null | undefined, unit: DurationUnit): s
 }
 
 /**
- * Whether a column says something: false when every row holds the same value (UI review 2 rule 7: a constant column is
- * hidden). One row (or none) always varies: there is nothing to compare it with.
+ * Whether a column says something: false when every row of three or more holds the same value (UI review 2 rules 5 and
+ * 7: a constant column of a list of records is hidden, its value said once elsewhere). Fewer than three rows always
+ * vary: two equal values are a coincidence, not a constant.
  */
 export function varies<T>(rows: readonly T[], value: (row: T) => unknown): boolean {
-  if (rows.length < 2) return true;
+  if (rows.length < 3) return true;
   const first = value(rows[0]!);
   return rows.some((r) => value(r) !== first);
 }
