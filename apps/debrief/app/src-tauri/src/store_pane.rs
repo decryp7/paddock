@@ -72,10 +72,29 @@ pub(crate) async fn store_memory<R: Runtime>(app: AppHandle<R>, state: CurrentWi
 /// the job's message says what it did. Refused (busy) while an import runs.
 #[tauri::command]
 pub(crate) async fn store_maintenance<R: Runtime>(app: AppHandle<R>, state: CurrentWindow, action: MaintenanceAction) -> CmdResult<u64> {
+    start_maintenance(&app, &state, action)
+}
+
+/// Orders the events by time as a job of the window when an opened store's positions are incomplete (an ordering
+/// failed, or the positions are missing): the store does not do it inside the open call, which has a time limit.
+pub(crate) fn order_events_if_needed<R: Runtime>(app: &AppHandle<R>, state: &CurrentWindow, store: &dyn debrief_core::ports::Store) {
+    let (Ok(positioned), Ok(summary)) = (store.positioned(), store.summary()) else {
+        return;
+    };
+    if positioned != summary.total as u64 {
+        log::warn!(Positioned = positioned, Events = summary.total as u64; "The events' time order is incomplete; ordering them again");
+        if let Err(e) = start_maintenance(app, state, MaintenanceAction::OrderEvents) {
+            log::warn!("the ordering job could not start: {}", e.message);
+        }
+    }
+}
+
+/// [`store_maintenance`]: spawns the job and returns its id.
+pub(crate) fn start_maintenance<R: Runtime>(app: &AppHandle<R>, state: &CurrentWindow, action: MaintenanceAction) -> CmdResult<u64> {
     let spec = JobSpec::new(JobKind::Maintenance, action.title()).window(state.label());
     let win = state.arc().clone();
     let (controls, control) = crate::jobs::store_cancel(Controls::default());
-    let id = crate::jobs::spawn(&app, spec, controls, move |ctx| -> CmdResult<Done<()>> {
+    let id = crate::jobs::spawn(app, spec, controls, move |ctx| -> CmdResult<Done<()>> {
         let store = win.engine.store()?;
         ctx.phase(action.phase(), PhaseScale::Indeterminate, 0, 0);
         let report = match control.scope(|| store.maintain(action)) {

@@ -406,6 +406,10 @@ pub(crate) fn apply_changes(state: &WindowState, paths: &[PathBuf]) -> TailRepor
     let options = tail_options(state);
     let done = state.engine.store().map_err(|e| e.message).and_then(|store| {
         let appended = store.append_tail(paths).map_err(|e| e.to_string())?;
+        // E.g. the new events could not be put in time order: the store marked it and the next open orders them again.
+        for notice in &appended.notices {
+            log::error!("Live tail refresh: {}", crate::activity::privacy::redact(notice));
+        }
         let report = state.live.session().after_refresh(&*store, &appended, &options);
         let annotating_later = {
             let mut a = crate::sync::lock(&state.live.annotating);

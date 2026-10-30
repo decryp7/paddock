@@ -99,6 +99,23 @@ pub(crate) fn retry_import<R: Runtime>(app: &AppHandle<R>, job: &crate::jobs::mo
     Ok(None)
 }
 
+/// What the store says the user should know although the import worked (e.g. the events could not be put in time
+/// order, which the next open or import tries again) becomes a warning message, one per text.
+pub(crate) fn report_notices<R: Runtime>(app: &AppHandle<R>, label: &str, notices: &[String]) {
+    use crate::notification_centre::centre::{NewNotice, NoticeScope, NoticeSeverity, NoticeSource};
+    for text in notices {
+        let notice = NewNotice::new(
+            format!("import:notice:{text}"),
+            NoticeSource::Import,
+            NoticeSeverity::Warning,
+            "The import needs attention",
+            NoticeScope::Project,
+        )
+        .body(text.clone());
+        crate::notification_centre::post(app, Some(label), notice, None);
+    }
+}
+
 /// Files of an import that Debrief could not use (not crashed: those are engine errors) become one message
 /// with "Set up format".
 fn report_not_imported<R: Runtime>(app: &AppHandle<R>, label: &str, files: &[debrief_core::api::UnrecognizedFile]) {
@@ -225,6 +242,7 @@ pub(crate) fn after_import<R: Runtime>(
     log_unrecognized(&report.unrecognized);
     report_not_imported(app, state.label(), &report.unrecognized);
     report_timestamp_issues(app, state.label(), &report.sources);
+    report_notices(app, state.label(), &report.notices);
     // Counts only: file names and contents stay out of the logs.
     log::info!(
         Sources = report.sources.len() as u64,
@@ -696,6 +714,7 @@ fn open_store_project_in_job<R: Runtime>(
     let base = state.engine.profile();
     let dest = state.engine.unpack_root();
     let (store, manifest) = state.engine.host().open_project(&file, &dest, &base).map_err(CmdError::from)?;
+    crate::store_pane::order_events_if_needed(app, state, store.as_ref());
     crate::engine::annotate::run_in_job(state, store.as_ref(), ctx, cancel);
     if ctx.is_cancelled() || cancel.load(std::sync::atomic::Ordering::Relaxed) {
         return Err(CmdError::new(crate::ErrorCode::Cancelled, "opening the project was cancelled"));
@@ -782,7 +801,10 @@ pub(crate) fn open_project_file_in_job<R: Runtime>(
             };
             // A crash of the reopening is a failure to reopen, not of the job: the files are imported again.
             match tauri::async_runtime::block_on(crate::sync::blocking("reopening the session", reopen)) {
-                Ok(_) => true,
+                Ok(store) => {
+                    crate::store_pane::order_events_if_needed(app, state, store.as_ref());
+                    true
+                }
                 Err(e) => {
                     log::warn!("the session's store could not be reopened ({e}); importing its files again");
                     false

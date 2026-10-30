@@ -7,12 +7,16 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ### Changed
 
-- **Search:** The word-search index is built with up to four threads (at a lowered priority, so Debrief stays responsive), as many as there are cores to spare and fit in the import memory, instead of two. Settings ▸ Performance ▸ Search index threads (0 is Auto, the default) and Search index memory per thread (64 MB by default) set them; a value you chose for the old Search index threads setting is not kept
+- **Search:** The word-search index of a large import is split over up to four threads (at a lowered priority, so Debrief stays responsive) instead of two, so word searches for common words answer about twice as fast once it is built; building it does not get faster yet. Settings ▸ Performance ▸ Search index threads (0 is Auto, the default) and Search index memory per thread (64 MB by default) set them; a value you chose for the old Search index threads setting is not kept
 
 - **Database engine:** Debrief now runs on DuckDB 2.0. Searches for text in messages use about half the processor time and queries need less memory. The database of an existing project keeps its format, and a new project is written in a format the previous Debrief can still open. A project saved by a newer Debrief than yours now says so and asks you to update, instead of showing a database error
 - **SQL console:** DuckDB 2.0 changed some SQL rules that affect your own queries: `~` and `!~` match anywhere in the text (a partial match), `!` binds tighter than other operators, `X'...'` and `B'...'` are binary and bit-string literals, integer division and remainder by zero are errors, and `SHOW name` prints a setting when no table has that name
 - **macOS:** Debrief now supports Apple silicon Macs only (DuckDB drops Intel Macs in 2.1 and Debrief follows it). Intel Macs can keep using Debrief 1.1.1, which no longer receives updates
 - **Updates:** Debrief now updates from the Paddock repository's releases, signed with the Paddock family's update key. A copy installed before this release cannot update itself to it: download this release once by hand and install it over the old one; later releases update as usual
+
+### Fixed
+
+- **Event list:** After a large import the events could be left without their time order when the database ran out of memory, and the event list then missed events until the next import. The import now gives that step its memory, says so if it still fails, and orders the events again as a job when the project opens
 
 ## 1.1.1 (2026-10-24)
 
