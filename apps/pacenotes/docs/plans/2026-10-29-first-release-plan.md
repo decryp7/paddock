@@ -156,7 +156,7 @@ follow proposal §14 under `apps/pacenotes/crates/`.
 | `pacenotes-function-api` | the function port: contributions, host calls, serialisable messages, typed errors (section 2.1) | the port itself | mirrors `paddock-plugin-api` |
 | `pacenotes-understand` | references with confidence, call graph and call-path trace, repo map budgeting, recogniser matching, ownership, complexity, change impact, orientation and reading order | none (a function: only the port) | recogniser packs through a host call (the host uses `paddock-packs`) |
 | `pacenotes-graph` | graph model, aggregation per zoom level, SCC cycles, shortest path, diff, layer-rule evaluation, layout of a bounded subgraph | none | `paddock-repo-graph` (Cargo and npm manifests; its `cargo-metadata` feature stays off, ADR 0022 §6) |
-| `pacenotes-rules` | structural patterns over tree-sitter, SARIF 2.1.0 and rdjson reader/writer, suppressions, fingerprint baselines, rule tests | none | the joint rules model with `paddock-repo-rules` (ADR 0022 §6, section 3.3) |
+| `pacenotes-rules` | structural patterns over tree-sitter, SARIF 2.1.0 and rdjson reader/writer, suppressions, fingerprint baselines, rule tests | none | the joint rules model with `paddock-rules` (ADR 0022 §6, section 3.3) |
 | `pacenotes-review` | collect, ground, run deterministic rules, budgeted Markdown-rule pass, outputs, exit codes | none (a function: the `Llm` port is a host call) | the host's Pitwall adapter on `paddock-pitwall` |
 | `pacenotes-check` | log-site template match, exception reachability, config-key use, verdict and confidence | none (a function) | the shared stack-trace parser through a host call (section 3.3) |
 | `pacenotes-diagram` | model to layout (templates, layered, router) to canonical draw.io XML; reader for compressed and plain files; round-trip merge; diagram diff; SVG preview geometry | none (a function) | the draw.io writer through a host call; the host uses `paddock-drawio` (section 3.3) |
@@ -272,7 +272,7 @@ total is a growing count, never a static 0 (rule 11).
 |---|---|---|---|
 | BM25, RRF with weights, cosine top-k, index record, benchmark harness and query sets (X55a) | new crate `paddock-embed` (pure half first, worker and Pitwall adapter as X55b) | stage 2 (shared code waits for Debrief 1.2) | Debrief's N7 uses it (debrief-1-2.md); ADR 0001 amendment |
 | Stack-trace parsers (.NET, Java, Python, JS) | a shared crate extracted from `apps/debrief/crates/debrief-core/src/exceptions.rs`, Debrief adopting in the same change | stage 2, after Debrief 1.2 | Debrief and Pacenotes parse the same traces |
-| One rules model (severities, findings with fix diff, scoped suppressions, fingerprint baselines, SARIF, exit codes) | `paddock-repo-rules` per ADR 0022 §6; the joint rules-model note is written in stage 1 (a document), the crate in stage 2 | note in stage 1, crate in stage 2 | conformance and Pacenotes review would otherwise grow two models |
+| One rules model (severities, findings with fix diff, scoped suppressions, fingerprint baselines, SARIF, exit codes) | `paddock-rules` per ADR 0022 §6; the joint rules-model note is written in stage 1 (a document), the crate in stage 2 | note in stage 1, crate in stage 2 | conformance and Pacenotes review would otherwise grow two models |
 | Canonical draw.io writer, theme tokens and UML/C4 shapes | `paddock-drawio` (ADR 0022 §6), golden-tested against today's `.mjs` output | stage 2; stage 1's round-trip prototype stays in `pacenotes-diagram` and moves its writer into the crate then | the family's diagram tooling and Pacenotes share one writer |
 | Coverage readers (LCOV, Cobertura, JaCoCo, llvm-cov, istanbul) and test-result types | next to `paddock-testplan`'s JUnit export | stage 2; stage 1 writes them inside `pacenotes-cover` behind `CoverageSource` and they move with their tests (rule 42) | Sighter writes TRX; Pitcrew collects coverage artefacts |
 | Typed limit errors | `paddock-limits` (Debrief 1.2 package 1.4) | consume when merged | every bounded input in the engine |
@@ -371,7 +371,7 @@ coverage core with its tests, so stage 2 starts with the hardest pure parts prov
 | A3 | Index wiring (A): the parser worker binary on `paddock-ipc`, `-guard`, `-proc`; walk on `paddock-repo-files`, watch on `paddock-watch`, allow-list on `paddock-files`, secret denylist pack; the index job pipeline with phases and Cancel (ADR 0020, 0024) | `apps/pacenotes/crates/pacenotes-parse/src/worker/`, `pacenotes-index/src/{job,watch,store}/` (A3 extends A3a's `pacenotes-index` and keeps its tests) | a worker killed mid-file is an error attributed to the file; Cancel in each phase leaves the previous generation readable; progress never goes backwards; the trap test, re-run through the real walk on `paddock-repo-files` and the worker, still finds nothing run, leaked or escaped | stage 1 | 5 |
 | B1 | `paddock-embed` pure half (X55a) (B): BM25, RRF with weights, brute-force cosine top-k, index record, benchmark harness over generated repositories and query sets | `crates/paddock-embed/` (new crate, the `new-crate` checklist; `crates/Cargo.toml` line by the integrating agent) | the harness reproduces ADR 0001's BM25 ordering on a generated corpus; two records with different models refuse to mix | stage 1 | 4 |
 | FN1 | `pacenotes-function-api` rebased onto `paddock-plugin-api` and `paddock-view` types (C): contributions, tool schemas and `ViewDoc`s re-exported, Pacenotes' host calls kept as its own extension; a mapping test | `apps/pacenotes/crates/pacenotes-function-api/` | a contribution type that differs from `paddock-plugin-api`'s fails the mapping test | FN0, Debrief 1.2 shipped | 1.5 |
-| C3a | `paddock-repo-rules` from the D-rules note (C), with conformance adopting it in the same change (rule 42) and `pacenotes-rules` moved onto it | `crates/paddock-repo-rules/`, `pacenotes-rules`, the conformance reporters it replaces | conformance's report and a Pacenotes SARIF output come from one `Finding` type; every existing conformance test stays green | C1 | 3 |
+| C3a | `paddock-rules` from the D-rules note (C), with conformance adopting it in the same change (rule 42) and `pacenotes-rules` moved onto it | `crates/paddock-rules/`, `pacenotes-rules`, the conformance reporters it replaces | conformance's report and a Pacenotes SARIF output come from one `Finding` type; every existing conformance test stays green | C1 | 3 |
 
 ### 4.5 Wave 3: search, understand, review core, the code view (about 5 days)
 
@@ -560,7 +560,7 @@ work that was safe to start before Debrief 1.2. Its Pacenotes content, as it map
 | BN4 `pacenotes-git` behind `History` | C2 |
 | BN5 index schema and incremental diff, pure half | A3a |
 | BN6 diagram round-trip prototype | DG1 |
-| BN7 structural rules and SARIF | C1 (moved onto `paddock-repo-rules` in C3a) |
+| BN7 structural rules and SARIF | C1 (moved onto `paddock-rules` in C3a) |
 | R1 vector-index spike | R1 |
 | X55a `paddock-embed` pure half, "built now" (its D2) | B1, in stage 2: shared code waits for Debrief 1.2 (decided 2026-10-29) |
 

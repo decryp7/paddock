@@ -1,8 +1,8 @@
 # The joint rules model (D-rules)
 
-Status: proposed, 2026-10-30. Author: the Pacenotes C1 package, for the conformance owner and the user to approve. Docs only; no
+Status: decisions answered by the user 2026-10-30 (section 8); awaiting independent review. Author: the Pacenotes C1 package, for the conformance owner and the user to approve. Docs only; no
 crate is written from it until it is approved. It is the note ADR 0022 section 6 (phase 4) and Pacenotes plan section 3.3 ask for
-before `paddock-repo-rules` and before `pacenotes-rules` (C1).
+before `paddock-rules` and before `pacenotes-rules` (C1).
 
 ## 1. Why one model
 
@@ -34,20 +34,18 @@ ADR 0022 sections 6 and 7. SARIF 2.1.0 is the OASIS standard (https://docs.oasis
 
 ## 3. The joint model
 
-One crate, `paddock-repo-rules`, pure (no I/O, no clock: time is passed in), three layers. Names below are the proposal; the
+One crate, `paddock-rules`, pure (no I/O, no clock: time is passed in), three layers. Names below are the proposal; the
 crate's ADR fixes them.
 
 ### 3.1 Types
 
 - `RuleId`: the Pacenotes validation (`[a-z0-9][a-z0-9._/-]{0,95}`); conformance ids are lower-cased on the way in (`c37`) and keep a
   display form (`C37`). A rule also carries an optional `policy_ref` (conformance's `rule` number, or any citation), shown in reports.
-- `Severity`: the superset `Info < Low < Medium < High < Blocker`. Conformance maps `warn` to `Medium` and `error` to `High` as its
-  defaults, and a check may declare any level; conformance's report prints the old words by a display table, so its output does not change
+- `Severity`: the superset `Info < Low < Medium < High < Blocker`. Conformance maps `warn` to `Medium` and `error` to `High` (decided), and a check may declare any level; conformance's report prints the old words by a display table, so its output does not change
   (a golden test holds that). The gate threshold is a severity: conformance uses "High and above fails", Pacenotes uses a setting.
 - `Place`: path (relative, `/`-separated, validated like `RepoPath`), optional span (line and column, byte offsets), optional revision.
   Conformance fills path and line only.
-- `Finding`: rule id, severity, `Place`, `message`, `fix` (one sentence, **required** for a conformance finding and optional in the
-  model, enforced by a `require_fix` profile), optional `explanation`, optional `evidence` excerpts, optional `fix_diff`, optional
+- `Finding`: rule id, severity, `Place`, `message`, `fix` (one sentence, **required** for every finding; decided 2026-10-30), optional `explanation`, optional `evidence` excerpts, optional `fix_diff`, optional
   `fingerprint`, optional `Confidence`, `State`.
 - `State`: Open, Confirmed, Dismissed, Fixed, Suppressed (Pacenotes' transition table moves over unchanged; conformance only ever
   produces Open and Suppressed).
@@ -107,7 +105,7 @@ Every conformance field and every Pacenotes field, and where it lands. This is t
 | conformance `rule` (number) | rule's `policy_ref` | shown as "rule 37" |
 | conformance `severity` `error` / `warn` | `Severity::High` / `Severity::Medium` | by the profile's display table |
 | conformance `file`, `line` | `Place.path`, `Place.span.line` | `file` may be absent: a repository-level finding has no `Place` |
-| conformance `message`, `fix` | `Finding.message`, `Finding.fix` | `fix` required by the profile |
+| conformance `message`, `fix` | `Finding.message`, `Finding.fix` | `fix` required for every rule |
 | conformance waiver `check` | `Suppression.scope = Rule` | |
 | conformance waiver `path` (glob) | `Suppression.scope` path glob | same glob dialect as `pathMatches` today |
 | conformance waiver `reason`, `expires` | `Suppression.reason`, `.expires` | all four required in the `waiver` profile |
@@ -117,7 +115,7 @@ Every conformance field and every Pacenotes field, and where it lands. This is t
 | Pacenotes `RuleSpec.id`, `title`, `severity` | `Rule.id`, `.title`, `.default_severity` | |
 | `RuleSpec.include`, `exclude`, `languages` | `Rule.scope` | globs bounded (64 each) |
 | `RuleSpec.check` (`Pattern`, `Prose`) | `pacenotes-rules` only | the model has no matcher |
-| `RuleSpec.fix`, `good`, `bad` | `Rule.fix_hint`; examples stay in `pacenotes-rules` | the examples are that crate's tests |
+| `RuleSpec.fix`, `good`, `bad` | `Rule.fix` (required, one sentence); examples stay in `pacenotes-rules` | the examples are that crate's tests; `RuleSpec.fix` is `Option` today and becomes required (section 6) |
 | Pacenotes `Location` | `Place` | revision kept |
 | `FindingState` and its transitions | `State` and its transitions | moved unchanged |
 | `Fingerprint` | `Finding.fingerprint` | the same 32-byte hash |
@@ -130,14 +128,19 @@ Every conformance field and every Pacenotes field, and where it lands. This is t
 
 ## 6. Adoption, order and tests
 
-1. **This note approved** (the user), then ADR for `paddock-repo-rules` (family ADR; one per crate).
-2. **C1 (`pacenotes-rules`)** is written against the types of section 3 as local definitions behind the same names, so C3a moves it by
+1. **This note approved** (the user), then ADR for `paddock-rules` (family ADR; one per crate).
+2. **A fix sentence for every rule.** `RuleSpec.fix` in `pacenotes-core` is `Option<String>` today; it becomes a required field (a rule file
+   without one is refused with a message that says to add one), with its test and a change to the rule fixtures. A finding takes its
+   rule's sentence. An imported SARIF or rdjson result has no rule of ours: the reader builds the rule from the tool's descriptor and,
+   when the tool gave no fix text, uses a fixed sentence that names the tool and its help link ("See the documentation of <rule> in
+   <tool>: <helpUri>"), so the field is never empty.
+3. **C1 (`pacenotes-rules`)** is written against the types of section 3 as local definitions behind the same names, so C3a moves it by
    changing imports, not logic: the structural matcher, rule tests, SARIF and rdjson reader and writer, suppressions and baselines. It
    does not wait for the crate (plan: C1 depends on A2 and D-rules only).
-3. **C3a** (plan 4.4) creates `paddock-repo-rules` from the types and functions of C1 that section 3 calls shared, and moves conformance
+4. **C3a** (plan 4.4) creates `paddock-rules` from the types and functions of C1 that section 3 calls shared, and moves conformance
    onto it in the same change (rule 42); conformance's report text, Markdown and JSON stay byte for byte (golden tests over the
    existing conformance fixtures), and a Pacenotes SARIF output and a conformance run come from one `Finding` type.
-4. Tests of the shared crate, once, in the crate (ER-22): suppression and expiry arithmetic, baseline matching, fingerprint stability under
+5. Tests of the shared crate, once, in the crate (ER-22): suppression and expiry arithmetic, baseline matching, fingerprint stability under
    a rename, exit codes, SARIF round trip (write then read gives the same findings), a malformed SARIF is an error, never a panic, and
    the field map of section 5 as a table-driven test.
 
@@ -148,11 +151,14 @@ file (a large clippy SARIF is tens of megabytes); findings are sorted once and t
 findings. The structural matcher (`pacenotes-rules`) runs per file on the index's parse pool and is the part that needs a
 measurement; it is designed in C1's own note, not here.
 
-## 8. Decisions this note asks for
+## 8. Decisions (answered by the user, 2026-10-30)
 
-1. Is `Medium` the right home for conformance's `warn`, and `High` for `error`? (This decides what "fails" means for the family.)
-2. Is a `fix` sentence required for every finding of the model, or only in the conformance profile? (Proposed: only in the profile,
-   because an imported linter result has none.)
-3. May the crate be named `paddock-repo-rules` as in ADR 0022 section 6? (Proposed: yes.)
-4. Does conformance adopt the Rust crate in C3a (stage 2), or stay JavaScript until `dev check` (ADR 0022 phase 4)? (Proposed: the
-   crate is used from `dev check`; the JavaScript checks stay until then, and the golden tests prove the two outputs equal.)
+1. Conformance `warn` maps to `Medium` and `error` to `High`. The family's gate threshold is therefore "High and above fails" for
+   conformance.
+2. A fix sentence is **required for every rule**, Pacenotes rules included, not only in the conformance profile (section 6 step 2 says how
+   an imported result gets one).
+3. The shared crate is named **`paddock-rules`**, not `paddock-repo-rules`. ADR 0022 (sections 6 and 7 table, R8), ADR 0024 line 244 and
+   `docs/plans/debrief-1-2.md` still say `paddock-repo-rules`; they belong to their own owners and take the new name in their next edit.
+   The Pacenotes plan uses it already.
+4. Conformance moves onto the Rust crate at `dev check` (ADR 0022 R8); the JavaScript checks stay until then, and the golden tests
+   prove the two outputs equal.
