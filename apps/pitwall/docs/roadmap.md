@@ -129,7 +129,11 @@ Pacenotes: toolsets `orient`, `code`, `review`, `diagrams`, `requirements` and `
   retired one); one filled primary per region (`e2e/primary.e2e.ts`); the axe baseline is empty.
 - **Done (WP-2.7, first half).** `THIRD_PARTY_NOTICES.md` for the app, the server and the UI, checked in CI; About shows it
   once the shell's updater is registered.
-- **Next.** The updater decision (plan, shared-code change 3), then WP-2.5, 2.6, the rest of 2.7, 2.8 and 2.9.
+- **Done (tables).** Every table is Angular Material's `mat-table` with a sticky header; a column constant across three or
+  more rows is hidden and its value said once; the request log stays a virtual grid.
+- **Done (updater, shared part).** `paddock-updater` gains an Offline mode predicate that fails closed (on this branch until
+  shared code unfreezes); Pitwall moves to the shared updater with WP-2.5.
+- **Next.** WP-2.5 and WP-2.6 (the UI on the shell, the dialogs as windows, About), then WP-2.8 and WP-2.9.
 
 ## Next (hand-off, 2026-10-22)
 
