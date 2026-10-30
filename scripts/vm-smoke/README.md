@@ -35,13 +35,13 @@ lists them. A run without bundles has no artifact and the check says so.
 
 | Step | Evidence |
 |---|---|
-| Install | `hdiutil` attach, copy to `/Applications`, version from `Info.plist`, `codesign --verify --deep --strict` |
+| Install | `sudo spctl --global-enable` first (the pinned image ships with Gatekeeper disabled; the result records `spctl --status`), then `hdiutil` attach, copy to `/Applications`, version from `Info.plist`, `codesign --verify --deep --strict` |
 | Cold start | `sudo purge` first (cold disk cache), then `open`. Polls until every process in the config runs, the discovery file names the live helper and the `ready` command answers (guard: `readyTimeoutSec`). Then watches `settleSec` seconds of `ps` snapshots (30 s for Dyno, derived from its 5 s + 8 s spawn timers; each config records why). Every snapshot from the launch on, the readiness polls included, is judged: the peak count of the app and of each helper must not exceed `max`, every helper's parent must be the app (or launchd while Launch at login is on), and the number of distinct processes (pid plus start time) per spec over the whole step must not exceed `max`, so a duplicate that exits before ready, or an agent that dies and is replaced, fails too. It does not check that a window is shown (headless) |
 | Second launch while running | `open` again: the same pids, no second app or helper (single instance) |
 | Quit with a window open | `osascript quit`; polls until nothing of the app runs; any leftover is listed with its parent (parent 1 = an orphan of launchd); discovery files that must go are gone. A leftover is then ended, after re-checking its pid, start time and command line in the same guest command (rule 53); a leftover that will not go fails the next step |
 | Start without a window | `open --args --hidden` (the shared tray start), same judgement, then Quit |
 | Relaunch after Quit | start, judge, Quit |
-| Launch at login on, off, on | only for an app whose config has a scripted `loginService.on/off`: after each switch no duplicate and only legal parents, and the launchd job must load, else the step is SKIP ("not proven"). **Dyno has none**: the app registers with SMAppService from the Aqua session, which `tart exec` does not have, and `dyno-agent service install` is a different (legacy LaunchAgents) route. So for every app this is a manual row today |
+| Launch at login on, off, on | only for an app whose config has a scripted `loginService.on/off`: after each switch no duplicate and only legal parents, and the launchd job must load, else the step is SKIP ("not proven"). **Dyno has none**: the app registers with SMAppService itself, and `dyno-agent service install` is a different (legacy LaunchAgents) route; driving the Settings toggle needs a UI driver this check does not have (the guest does run `tart exec` in an Aqua session). So for every app this is a manual row today |
 | Start with the update host black-holed | `/etc/hosts` points the update host at IPv4 and ::1 loopback, where a perl listener accepts, logs and never answers; `purge`, cold start: must still reach ready. The step passes only if the listener was contacted; otherwise it reports SKIP, "NOT EXERCISED" (update checks are off or not on start in this build) |
 | Logs | the last lines of each log in the config, for reading |
 
@@ -50,7 +50,7 @@ window; no check is "sleep, then look".
 
 ## Manual rows (printed in the result as MANUAL, never automated)
 
-- Gatekeeper first launch (right-click > Open) of a quarantined download. The check installs without the quarantine flag.
+- Gatekeeper first launch (right-click > Open) of a quarantined download. Gatekeeper is on in the guest, but the check installs without the quarantine flag, so no prompt appears.
 - Login Items approval in System Settings after Launch at login is switched on.
 - Anything that needs a click in a window. The VM runs `--no-graphics`; the check never drives the host's desktop, never calls
   `sfltool`, and never opens a window on the host. Use the user's own test VM window for these rows (runbooks in the handoff folder).

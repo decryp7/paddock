@@ -153,7 +153,7 @@ test('every app config lists an app process, only known keys, and helpers whose 
     }
     assert.ok(Number.isInteger(c.readyTimeoutSec) && c.readyTimeoutSec > 0, `${app}: readyTimeoutSec`);
     assert.ok(Number.isInteger(c.settleSec) && c.settleSec >= 20 && typeof c.settleWhy === 'string', `${app}: the observation window and why`);
-    if (app === 'dyno') assert.ok(c.settleSec >= 30, 'Dyno respawns after 5 s + 8 s timers: 30 s');
+    if (app === 'dyno') assert.match(c.settleWhy, /crash-loop backoff capped at 15 s/, 'Dyno: one full respawn cycle');
     if (c.loginService) assert.match(c.loginService.label, /^net\.decryptology\./);
   }
   assert.ok(seen.includes('dyno'), `configs found: ${seen}`);

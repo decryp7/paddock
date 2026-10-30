@@ -19,7 +19,7 @@ const GITEA = process.env.PADDOCK_GITEA ?? 'https://dev.decryptology.net';
 const REPO_PATH = 'decryp7/paddock';
 const SHARE = '/Volumes/My Shared Files/stage';
 const MANUAL = [
-  { title: 'Gatekeeper first launch (manual)', summary: 'A downloaded, quarantined copy needs right-click > Open once; this check installs without the quarantine flag, so that prompt is not exercised. Do it in the VM window of the user\'s own test VM.' },
+  { title: 'Gatekeeper first launch (manual)', summary: 'A downloaded, quarantined copy needs right-click > Open once; Gatekeeper is enabled in the guest, but this check installs without the quarantine flag, so that prompt is not exercised. Do it in the VM window of the user\'s own test VM.' },
   { title: 'Login Items approval (manual)', summary: 'macOS may ask to allow the item under System Settings > General > Login Items & Extensions after Launch at login is switched on. That click is not automated and is not driven through any desktop.' },
 ];
 
