@@ -18,7 +18,7 @@ offered to users: updaters read `latest.json` of the *latest* release. The `rele
 - **Windows:** `Dyno_<version>_x64-setup.exe` (NSIS, per-user).
 - **macOS:** `Dyno_<version>_aarch64.dmg`, and with signing secrets also the `.app.tar.gz` the updater installs. The bundle is
   **ad-hoc signed** (`signingIdentity "-"` in `tauri.macos.conf.json`): `SMAppService` and launch agents refuse a
-  linker-signed bundle. It is not notarised: users open it once with right-click > Open. Developer ID signing and
+  linker-signed bundle. It is not notarised: users open it once through Privacy & Security > Open Anyway (twice, then an administrator password; macOS 26). Developer ID signing and
   notarisation are future work.
   While the build is ad hoc the **hardened runtime is off** (`"hardenedRuntime": false`, Paddock rule 23): ad-hoc code
   under the hardened runtime enforces library validation and cannot load a library signed by its vendor ("different

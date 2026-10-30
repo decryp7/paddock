@@ -268,3 +268,26 @@ fn launchd_and_systemd_supervise_the_agent_and_a_windows_run_entry_does_not() {
     assert!(matches!(win.status(), Status::Installed { .. }));
     assert!(!win.supervised());
 }
+
+#[test]
+fn inside_a_mac_app_bundle_the_service_commands_are_refused_with_the_way_to_manage_it() {
+    let inside = Path::new("/Applications/Dyno.app/Contents/MacOS/dyno-agent");
+    let m = refuse_inside_app_bundle(Os::Mac, inside).unwrap_err();
+    assert!(m.contains("Login Items") && m.contains("same label"), "{m}");
+    // The same path on other systems, and a dyno-agent outside a bundle on a Mac, are not refused.
+    assert!(refuse_inside_app_bundle(Os::Linux, inside).is_ok());
+    assert!(refuse_inside_app_bundle(Os::Windows, inside).is_ok());
+    assert!(refuse_inside_app_bundle(Os::Mac, Path::new("/usr/local/bin/dyno-agent")).is_ok());
+    assert!(
+        refuse_inside_app_bundle(Os::Mac, Path::new("/Users/a/.app/dyno-agent")).is_ok(),
+        "a folder named just .app"
+    );
+    for outside in [
+        "/Users/a/tools.app/bin/dyno-agent",
+        "/Users/a/Dyno.app/Contents/Resources/dyno-agent",
+        "/Contents/MacOS/dyno-agent",
+        "/Users/a/X.app/Foo/MacOS/dyno-agent",
+    ] {
+        assert!(refuse_inside_app_bundle(Os::Mac, Path::new(outside)).is_ok(), "{outside}");
+    }
+}

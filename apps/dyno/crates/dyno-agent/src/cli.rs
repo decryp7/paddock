@@ -273,6 +273,7 @@ fn once() -> Result<(), String> {
 
 fn service(cmd: &str) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("Could not find this program: {e}"))?;
+    crate::service::refuse_inside_app_bundle(crate::service::Os::current(), &exe)?;
     let mut svc = Service::for_current_user(exe)?;
     match cmd {
         "install" => svc.install().map(|()| println!("installed and started")),

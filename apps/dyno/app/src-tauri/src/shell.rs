@@ -5,7 +5,7 @@ use crate::dto::AgentStatus;
 use crate::health::Hub;
 use crate::link::{AgentLink, Sink};
 use crate::logging;
-use crate::login::{self, AppAutostart};
+use crate::login;
 use crate::tray_model::{items_from_settings, parse_items, Throttle, TrayItems};
 use dyno_core::activity::ActivityEntry;
 use dyno_core::alerts::Alert;
@@ -175,7 +175,8 @@ impl<R: Runtime> ShellOf<R> {
             Some(p) if p == wanted => Ok(()),
             Some(_) => {
                 let mut service = login::platform_service();
-                let result = login::apply_launch_at_login(wanted, service.as_mut(), &mut AppAutostart(self.app.clone()));
+                let mut autostart = login::platform_autostart(&self.app);
+                let result = login::apply_launch_at_login(wanted, login::current_location(), service.as_mut(), autostart.as_mut());
                 // What was just applied is recorded first (it decides what a quit does), then the agent is handed over to
                 // the service just registered, or taken back from the one just removed.
                 link.set_service_installed(service.installed());

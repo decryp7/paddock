@@ -90,6 +90,29 @@ choice on Windows (a service) is the wrong one for Dyno.
     Running (an activity entry or a chip note); name the OS's own login-items place on Linux in that note; on Quit while
     the fallback is on and the service supervises, end the app's own agent so the service's takes over.
 
+12. **Amendment 2026-10-31: the single route on macOS.** One Settings switch now means one main-app registration plus the
+    existing agent service, and nothing is written under `~/Library/LaunchAgents`.
+    - The app registers itself with `SMAppService.mainApp` (one "Dyno" row in Login Items); `tauri-plugin-autostart`
+      is kept for Linux and Windows only (`login_item::route_for`). The old route wrote `~/Library/LaunchAgents/Dyno.plist`
+      (label `Dyno`, a second row "dyno-app, Item from unidentified developer") with the path recorded at setup. On start
+      the app deletes that file only when it has exactly the plugin's shape (`login_item::is_legacy_plugin_plist`: label
+      `Dyno`, the program `<folder>/Dyno.app/Contents/MacOS/dyno-app`, optionally `--hidden`, `RunAtLoad`, nothing else; never a link or another file). Because that file existed only when the switch was on, removing it also registers the new
+      main-app entry once (`login::migrate_legacy_login`), so the switch never says on with nothing registered.
+    - Both registrations are refused (turning on only) when the executable is translocated (`/AppTranslocation/`) or under
+      `/Volumes/`: the path would not exist after the next login. The message says to move Dyno to Applications.
+    - A login start has no `--hidden` any more. The open-application Apple Event carries `keyAELaunchedAsLogInItem`
+      (`'lgit'`; Apple's `AERegistry.h`, read 2026-10-31: "If present in a kAEOpenApplication event, application was
+      launched as a login item and probably shouldn't open up untitled documents"), as a parameter or as the value of
+      `keyAEPropData`; it is read through `NSAppleEventManager.currentAppleEvent`
+      in the run loop's `Ready` event (a plugin's setup runs earlier, in `Builder::build`, where the event is still nil; the
+      App's setup and `Ready` run inside `applicationDidFinishLaunching`). The shell starts in the tray; the main window
+      is opened in `Ready` unless `--hidden` or the login event asked for the tray. The log line `started hidden (flag or
+      login item)` or `started with a window` records the decision. Whether `SMAppService.mainApp` launches carry
+      `'lgit'` is verified only by the VM run. A missed detection shows the window; it never hides one.
+    - `dyno-agent service install|uninstall|status|ensure` refuses on macOS when run as `*.app/Contents/MacOS/*` (same launchd label as the
+      `SMAppService` agent: `uninstall` would boot out the real agent, `status` would report "not installed").
+      Outside a bundle (development) it works as before.
+
 ## Consequences
 
 - The agent works the same everywhere; only registration and a few adapters differ.
