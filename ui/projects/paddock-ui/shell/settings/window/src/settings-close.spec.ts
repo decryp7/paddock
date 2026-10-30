@@ -156,6 +156,24 @@ describe('pd-settings-window close with a page’s guard', () => {
       expect(vi.getTimerCount()).toBe(0);
     });
 
+    it('a double click on "Keep waiting" arms one timer, not two', async () => {
+      const { fixture, banner, button } = await waiting();
+      vi.advanceTimersByTime(STILL_SAVING_AFTER_MS);
+      fixture.detectChanges();
+      const keep = button('Keep waiting');
+      // Both clicks land before the banner is redrawn away.
+      // Count only the "Still saving" delay (clicks also start Material's own short timers).
+      const timeouts = vi.spyOn(globalThis, 'setTimeout');
+      const delays = () => timeouts.mock.calls.filter((c) => c[1] === STILL_SAVING_AFTER_MS).length;
+      keep.click();
+      keep.click();
+      expect(delays()).toBe(1);
+      vi.advanceTimersByTime(STILL_SAVING_AFTER_MS);
+      fixture.detectChanges();
+      expect(banner()).not.toBeNull();
+      timeouts.mockRestore();
+    });
+
     it('closes when the save is done before the delay', async () => {
       const { finish, closed, window } = await waiting();
       TypedPage.verdict = () => ({ kind: 'close' });
