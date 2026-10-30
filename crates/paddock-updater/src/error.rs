@@ -18,6 +18,9 @@ pub enum UpdateError {
     /// The app's Offline mode is on (local first: every network path is the user's explicit choice), so nothing was asked
     /// of the update server. The app's predicate decides ([`Updater::with_offline_mode`](crate::Updater::with_offline_mode)).
     OfflineMode,
+    /// The app could not confirm that its Offline mode is off (it has not heard from what holds the setting), so nothing
+    /// was asked of the update server (fail closed).
+    OfflineUnknown,
     /// The update server did not answer, timed out or failed.
     Unreachable {
         detail: String,
@@ -81,6 +84,7 @@ pub enum UpdateErrorKind {
     NotAvailable,
     Offline,
     OfflineMode,
+    OfflineUnknown,
     Unreachable,
     NoRelease,
     NoPlatform,
@@ -101,6 +105,7 @@ impl UpdateError {
             UpdateError::NotAvailable => K::NotAvailable,
             UpdateError::Offline => K::Offline,
             UpdateError::OfflineMode => K::OfflineMode,
+            UpdateError::OfflineUnknown => K::OfflineUnknown,
             UpdateError::Unreachable { .. } => K::Unreachable,
             UpdateError::NoRelease => K::NoRelease,
             UpdateError::NoPlatform { .. } => K::NoPlatform,
@@ -121,6 +126,10 @@ impl UpdateError {
             UpdateError::Offline => "The network could not be reached.".into(),
             UpdateError::OfflineMode => {
                 "Offline mode is on, so the update server was not asked.".into()
+            }
+            UpdateError::OfflineUnknown => {
+                "Offline mode could not be confirmed off, so the update server was not asked."
+                    .into()
             }
             UpdateError::Unreachable { .. } => "The update server could not be reached.".into(),
             UpdateError::NoRelease => "The update server has no release information.".into(),
@@ -153,6 +162,9 @@ impl UpdateError {
             }
             UpdateError::Offline => "Check your internet connection or proxy, then try again.",
             UpdateError::OfflineMode => "Turn Offline mode off in Settings to check for updates.",
+            UpdateError::OfflineUnknown => {
+                "Try again once the app's server answers; it holds the Offline mode setting."
+            }
             UpdateError::Unreachable { .. } => {
                 "Try again later. If it keeps failing, download the new version from the releases page."
             }

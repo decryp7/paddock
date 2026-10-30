@@ -212,10 +212,13 @@ impl UpdatesBuilder {
         self
     }
 
-    /// The app's Offline mode (local first): while `is_on` says yes, About's Updates and the background check never reach
-    /// the update server (see [`Updater::with_offline_mode`]; answer yes while the app does not know).
-    pub fn offline_mode(mut self, is_on: impl Fn() -> bool + Send + Sync + 'static) -> Self {
-        self.offline = Some(Arc::new(is_on));
+    /// The app's Offline mode (local first): unless `state` says it is off, About's Updates and the background check never
+    /// reach the update server (see [`Updater::with_offline_mode`]; answer `Unknown` while the app does not know).
+    pub fn offline_mode(
+        mut self,
+        state: impl Fn() -> crate::OfflineState + Send + Sync + 'static,
+    ) -> Self {
+        self.offline = Some(Arc::new(state));
         self
     }
 

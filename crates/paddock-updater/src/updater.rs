@@ -220,8 +220,19 @@ struct Inner {
 type Emit = Box<dyn Fn(&UpdateStatus) + Send + Sync>;
 type Now = Box<dyn Fn() -> u64 + Send + Sync>;
 
+/// What the app knows about its Offline mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OfflineState {
+    /// Confirmed off: checks and downloads may reach the update server.
+    Off,
+    /// On: nothing reaches the network.
+    On,
+    /// Not confirmed (the app has not heard from whatever holds the setting): treated as on (fail closed), and said so.
+    Unknown,
+}
+
 /// The app's Offline mode, asked before every check and download ([`Updater::with_offline_mode`]).
-pub type OfflineMode = Arc<dyn Fn() -> bool + Send + Sync>;
+pub type OfflineMode = Arc<dyn Fn() -> OfflineState + Send + Sync>;
 
 /// The app-wide updater (shared as `Arc<Updater>`).
 pub struct Updater {
@@ -312,19 +323,32 @@ impl Updater {
         self
     }
 
-    /// The app's Offline mode: while `is_on` says yes, no check or download starts, a check or download that began
-    /// before it was switched on stops before it reaches the network, and the automatic check is never due. The
-    /// predicate must answer yes while the app does not know (fail closed); a predicate that panics counts as on.
-    pub fn with_offline_mode(mut self, is_on: OfflineMode) -> Updater {
-        self.offline = Some(is_on);
+    /// The app's Offline mode: unless `state` says [`OfflineState::Off`], no check or download starts, a check or
+    /// download that began before it changed stops before it reaches the network, and the automatic check is never due.
+    /// [`OfflineState::Unknown`] blocks like on (fail closed) but says that it could not be confirmed; a predicate that
+    /// panics counts as unknown.
+    pub fn with_offline_mode(mut self, state: OfflineMode) -> Updater {
+        self.offline = Some(state);
         self
     }
 
-    /// Whether the app's Offline mode is on (fails closed: a panicking predicate is on).
+    /// Why the network may not be used now: [`UpdateError::OfflineMode`] when Offline mode is on,
+    /// [`UpdateError::OfflineUnknown`] when it could not be confirmed off; `None` without a predicate or when it is off.
+    pub fn offline_refusal(&self) -> Option<UpdateError> {
+        let state = self.offline.as_ref().map(|state| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| state()))
+                .unwrap_or(OfflineState::Unknown)
+        })?;
+        match state {
+            OfflineState::Off => None,
+            OfflineState::On => Some(UpdateError::OfflineMode),
+            OfflineState::Unknown => Some(UpdateError::OfflineUnknown),
+        }
+    }
+
+    /// Whether the network is blocked now (Offline mode on or not confirmed off).
     pub fn offline_mode(&self) -> bool {
-        self.offline.as_ref().is_some_and(|is_on| {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| is_on())).unwrap_or(true)
-        })
+        self.offline_refusal().is_some()
     }
 
     /// Keeps the preferences in `store` (until it applies stored ones, the updater starts with automatic checks off on
@@ -420,8 +444,10 @@ impl Updater {
     }
 
     fn begin(&self, event: Event) -> Result<(UpdateStatus, Ticket), UpdateError> {
-        if matches!(event, Event::Check | Event::Download) && self.offline_mode() {
-            return Err(UpdateError::OfflineMode);
+        if matches!(event, Event::Check | Event::Download)
+            && let Some(e) = self.offline_refusal()
+        {
+            return Err(e);
         }
         let mut ticket = Ticket(0);
         let status = self.apply(event, |inner| {
@@ -473,8 +499,7 @@ impl Updater {
     pub fn run_check(&self, ctx: &JobContext, ticket: Ticket) -> Result<(), JobError> {
         ctx.phase(Phase::items(CHECK_PHASE, "Checking for updates", 1));
         // Offline mode switched on since the check began: stop before the network, without counting it as a check.
-        if self.offline_mode() {
-            let e = UpdateError::OfflineMode;
+        if let Some(e) = self.offline_refusal() {
             self.apply_for(ticket, Event::Checked(Err(e.clone())), |_| {});
             return Err(JobError::Failed(e.to_string()));
         }
@@ -613,8 +638,8 @@ impl Updater {
             self.apply_for(ticket, Event::Downloaded(Err(e)), |_| {});
             JobError::Failed(msg)
         };
-        if self.offline_mode() {
-            return Err(fail(UpdateError::OfflineMode));
+        if let Some(e) = self.offline_refusal() {
+            return Err(fail(e));
         }
         let cancelled = |reason: CancelReason| {
             self.apply_for(ticket, Event::Cancel, |_| {});
