@@ -35,6 +35,14 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/paddock/releases?q=spotter-v";
 /// The feed the updater reads.
 pub const UPDATE_FEED: &str = "https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json";
+/// The feed the updater reads: [`UPDATE_FEED`], except in a `-test.N` build made with `SPOTTER_TEST_UPDATE_FEED` set (the
+/// VM update test, built with a throw-away key; the family key never signs such a build). The override must be https.
+pub fn update_feed(version: &str, test_feed: Option<&'static str>) -> &'static str {
+    match test_feed {
+        Some(url) if version.contains("-test.") && url.starts_with("https://") => url,
+        _ => UPDATE_FEED,
+    }
+}
 /// The manifest of the UI's contributions, compared by the tests.
 pub const MANIFEST: &str = include_str!("../../paddock-manifest.json");
 
@@ -287,7 +295,7 @@ fn updater<R: Runtime>(test_dir: Option<std::path::PathBuf>, app: &tauri::AppHan
         .iter()
         .fold(UpdatesBuilder::new(APP_NAME), |b, (id, title, text)| b.legal(id, title, *text));
     let b = b
-        .channel("stable", "Stable", UPDATE_FEED)
+        .channel("stable", "Stable", update_feed(VERSION, option_env!("SPOTTER_TEST_UPDATE_FEED")))
         .public_key(key)
         .installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(
             app.clone(),
@@ -392,6 +400,19 @@ mod updater_tests {
             ["notices", "licence-mit", "licence-apache"],
             "ids are unique and the notices stay listed"
         );
+    }
+
+    /// A release build never reads a feed from its build environment; only a `-test.N` build (the VM update test, made with
+    /// a throw-away key) may, and only over https, so a stray variable cannot point a shipped copy somewhere else.
+    #[test]
+    fn only_a_test_build_may_take_its_feed_from_the_build() {
+        let other = Some("https://192.168.64.1:8089/latest.json");
+        assert_eq!(update_feed("1.0.0", other), UPDATE_FEED, "a release build ignores the override");
+        assert_eq!(update_feed("1.0.0-rc.1", other), UPDATE_FEED, "so does a release candidate");
+        assert_eq!(update_feed("1.0.0-test.1", other), other.unwrap());
+        assert_eq!(update_feed("1.0.0-test.1", None), UPDATE_FEED);
+        assert_eq!(update_feed("1.0.0-test.1", Some("http://192.168.64.1/latest.json")), UPDATE_FEED, "https only");
+        assert_eq!(update_feed("1.0.0-test.1", Some("")), UPDATE_FEED);
     }
 
     #[test]
