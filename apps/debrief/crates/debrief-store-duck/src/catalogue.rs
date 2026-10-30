@@ -201,6 +201,10 @@ impl Drop for CatalogueService {
 
 /// One turn: tidy, then build the next source. True when a source was built (go on at once).
 fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
+    // Counted by the exit handler like a borrowed connection (see `fts::step`).
+    let Some(_running) = crate::shutdown::Active::enter() else {
+        return Ok(false);
+    };
     let todo = {
         let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
         conn.execute_batch(

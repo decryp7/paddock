@@ -675,7 +675,17 @@ fn stages(cancel: &AtomicBool) -> Stages<'_> {
 /// Indexes the next segments (up to [`SEGMENTS_PER_STEP`]) in one commit, if the write lock is free and there are
 /// some; true when it did.
 fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epoch: u64) -> Result<bool> {
-    let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
+    // Counted by the exit handler like a borrowed connection: no step starts once the process exits, and a running
+    // one is waited for (a step's statement during exit crashed DuckDB in its static destructors).
+    let Some(_running) = crate::shutdown::Active::enter() else {
+        return Ok(false);
+    };
+    let Ok(_writing) = write_lock.try_lock() else {
+        // Another writer holds the store, above all an import with its own memory budget: the index writer's heaps
+        // are given back now, so the two never add up; the next step starts a new writer.
+        drop_writer(s);
+        return Ok(false);
+    };
     let (files, ready) = todo(conn)?;
     s.pending.store(files.len() as u64, Ordering::SeqCst);
     if files.is_empty() {
@@ -719,9 +729,31 @@ fn failing_segment<'a>(e: &anyhow::Error, batch: &'a [String]) -> Option<&'a Str
     batch.iter().find(|f| text.contains(f.as_str()))
 }
 
+/// Whether the indexing thread (and the writer's threads it starts) run lowered. Rule 52: work a person waits for is
+/// never starved. This thread holds the store's write lock for a whole step, and live follow waits for that lock. On
+/// macOS (QoS utility) and Linux (nice 10) a lowered thread still gets its turn; on Windows, where the writer's threads
+/// would not inherit it anyway, a below-normal thread holding the lock could keep a waiting refresh behind other work,
+/// so it stays at normal priority there until steps can be cancelled.
+const LOWER_INDEXING_THREAD: bool = !cfg!(windows);
+
+/// Lets the background merges finish (they hold memory and allocate until they do), drops the index writer and gives its
+/// heaps and its threads' pages back to the OS. The slot stays locked until the writer is gone: a clear or a source
+/// removal in that window would find the slot empty, try to open a second writer and fail on the index's lock.
+fn drop_writer(s: &FtsShared) {
+    let mut slot = crate::lock(&s.writer);
+    if let Some(w) = slot.take() {
+        if let Err(e) = w.wait_merging_threads() {
+            log::warn!("full-text index merges failed: {e}");
+        }
+        debrief_alloc::release();
+    }
+}
+
 fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epoch: u64) {
-    // Lowered priority, for this thread and the writer's threads it starts (they inherit it on macOS and Linux).
-    lower_priority();
+    if LOWER_INDEXING_THREAD {
+        // For this thread and the writer's threads it starts (they inherit it on macOS and Linux).
+        lower_priority();
+    }
     let seg_dir = dir.join(SEGMENTS_DIR);
     while !s.stop.load(Ordering::SeqCst) {
         // One segment per turn, under the write lock (imports and compaction wait for at most one).
@@ -736,17 +768,7 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
         }
         // Idle: free the writer's heap and wait for news (or retry a busy lock soon).
         if s.pending.load(Ordering::SeqCst) == 0 {
-            // The slot stays locked until the writer is gone: a clear or a source removal in that window would find the
-            // slot empty, try to open a second writer and fail on the index's lock (leaving the old documents searchable).
-            let mut slot = crate::lock(&s.writer);
-            if let Some(w) = slot.take() {
-                // Let the background merges finish (they hold memory and allocate until they do), then give the
-                // index build's heap and its threads' pages back to the OS: the process may idle now.
-                if let Err(e) = w.wait_merging_threads() {
-                    log::warn!("full-text index merges failed: {e}");
-                }
-                debrief_alloc::release();
-            }
+            drop_writer(s);
         }
         let mut woken = crate::lock(&s.wake.0);
         if !*woken {
@@ -787,6 +809,47 @@ mod tests {
             ]
         );
         assert!(!WordsTokenizer.token_stream("").advance());
+    }
+
+    #[test]
+    fn the_indexing_thread_is_lowered_only_where_a_waiting_refresh_is_never_starved() {
+        // Rule 52: on Windows the thread that holds the write lock for a step stays at normal priority.
+        assert_eq!(LOWER_INDEXING_THREAD, !cfg!(windows));
+    }
+
+    #[test]
+    fn the_writer_is_dropped_when_another_writer_holds_the_store() {
+        let dir = std::env::temp_dir().join(format!("debrief-fts-drop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&crate::schema::ddl(&debrief_core::batch::EventSchema::plain()))
+            .unwrap();
+        let (fts, _) = Fts::open_or_create(
+            &dir.join(INDEX_DIR),
+            1,
+            WriterBudget {
+                heap: 16 << 20,
+                threads: 1,
+            },
+        )
+        .unwrap();
+        let s = FtsShared {
+            writer: Mutex::new(Some(fts.writer().unwrap())),
+            fts,
+            stop: AtomicBool::new(false),
+            wake: (Mutex::new(false), Condvar::new()),
+            pending: AtomicU64::new(1),
+            failure: Mutex::new(None),
+        };
+        let write_lock = Mutex::new(());
+        let held = write_lock.lock().unwrap();
+        assert!(!step(&s, &dir.join(SEGMENTS_DIR), &conn, &write_lock, 1).unwrap());
+        assert!(
+            crate::lock(&s.writer).is_none(),
+            "an import's budget and the writer's heaps never add up"
+        );
+        drop(held);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
