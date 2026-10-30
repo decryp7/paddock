@@ -110,13 +110,24 @@ pub fn register_args(config: &Path, server: &str, token: &str, name: &str, label
 pub fn adjust_generated_config(text: &str, dir: &Path) -> String {
     let quote = |p: PathBuf| format!("'{}'", p.display().to_string().replace('\'', "''"));
     let mut section = String::new();
+    // The generated `runner.timeout` (a job's longest run): a stop waits that long for a running job, not 0s.
+    let mut job_timeout = String::from("3h");
     let mut out = String::with_capacity(text.len() + 128);
     for line in text.lines() {
         if !line.starts_with(' ') && !line.starts_with('#') && line.ends_with(':') {
             section = line.trim_end_matches(':').to_string();
         }
         let trimmed = line.trim();
+        if section == "runner" {
+            if let Some(v) = trimmed.strip_prefix("timeout:") {
+                let v = v.split('#').next().unwrap_or("").trim();
+                if !v.is_empty() {
+                    job_timeout = v.to_string();
+                }
+            }
+        }
         let replaced = match (section.as_str(), trimmed) {
+            ("runner", t) if is_zero_shutdown_timeout(t) => Some(format!("  shutdown_timeout: {job_timeout}")),
             ("host", "workdir_parent:") | ("host", "workdir_parent: \"\"") => {
                 Some(format!("  workdir_parent: {}", quote(dir.join("work"))))
             }
@@ -127,6 +138,14 @@ pub fn adjust_generated_config(text: &str, dir: &Path) -> String {
         out.push('\n');
     }
     out
+}
+
+/// `shutdown_timeout: 0s` (the generated default; also `0`): the runner cancels a running job the moment it is stopped.
+fn is_zero_shutdown_timeout(trimmed: &str) -> bool {
+    let Some(v) = trimmed.strip_prefix("shutdown_timeout:") else {
+        return false;
+    };
+    matches!(v.split('#').next().unwrap_or("").trim(), "0" | "0s" | "\"0s\"" | "'0s'")
 }
 
 #[cfg(test)]
@@ -188,6 +207,23 @@ mod tests {
         assert_eq!(a.iter().position(|s| s == "--token").map(|i| a[i + 1].as_str()), Some("T"));
         assert_eq!(a.last().map(String::as_str), Some("x,y"));
         assert!(!register_args(Path::new("c"), "s", "t", "n", &[]).contains(&"--labels".to_string()));
+    }
+
+    #[test]
+    fn a_stop_waits_for_a_running_job_as_long_as_a_job_may_run() {
+        // The generated default `shutdown_timeout: 0s` cancels the running job on every stop (recorded 2026-10-28).
+        let generated = "runner:\n  capacity: 1\n  timeout: 3h\n  shutdown_timeout: 0s\n  insecure: false\n";
+        let out = adjust_generated_config(generated, Path::new("/r/a"));
+        assert!(out.contains("  shutdown_timeout: 3h\n"), "{out}");
+        assert!(!out.contains("0s"), "{out}");
+        // It follows a non-default job timeout, and leaves a value somebody chose alone.
+        let out = adjust_generated_config("runner:\n  timeout: 90m # longest job\n  shutdown_timeout: 0\n", Path::new("/r/a"));
+        assert!(out.contains("  shutdown_timeout: 90m\n"), "{out}");
+        let chosen = "runner:\n  timeout: 3h\n  shutdown_timeout: 30s\n";
+        assert_eq!(adjust_generated_config(chosen, Path::new("/r/a")), chosen);
+        // Another section's key of that name is not ours.
+        let other = "other:\n  shutdown_timeout: 0s\n";
+        assert_eq!(adjust_generated_config(other, Path::new("/r/a")), other);
     }
 
     #[test]
