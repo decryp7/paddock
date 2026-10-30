@@ -70,7 +70,7 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
             <td mat-cell *matCellDef="let c" class="right num">{{ c.extraBytes ? '+' + sizeIn(c.extraBytes, unitOf(f.choices)) : '—' }}</td>
           </ng-container>
           <ng-container matColumnDef="context">
-            <th mat-header-cell *matHeaderCellDef scope="col" class="right">Longest context tokens</th>
+            <th mat-header-cell *matHeaderCellDef scope="col" class="right">Context tokens</th>
             <td mat-cell *matCellDef="let c" class="right num">{{ c.maxContext ? intText(c.maxContext) : 'none' }}</td>
           </ng-container>
           <ng-container matColumnDef="fits">
@@ -197,11 +197,11 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
         background: var(--pd-surface-3);
       }
       .mat-column-slots {
-        width: 56px;
+        width: 72px;
       }
       .mat-column-memory,
       .mat-column-adds {
-        width: 88px;
+        width: 112px;
       }
       .mat-column-fits {
         width: 88px;
