@@ -1,6 +1,7 @@
 import { BrowserContext, ConsoleMessage, expect, Page, test } from '@playwright/test';
 import { ensureInspector, openApp } from './app';
 import { chooseMenu } from './menu-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // The activity log in the browser build: entries go to the console logger (the mock "log sink"), as
 // `[Debrief.Activity] User <operation> via <trigger>` with the entry's properties as the second argument.
@@ -79,7 +80,7 @@ test('a user journey is logged once per operation, in order, with triggers and w
   await popOut(page, context, 'Inspector');
 
   // Change a setting.
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   const settings = page.getByRole('dialog', { name: 'Settings' });
   await settings.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Diagnostics', exact: true }).click();
   await settings.getByLabel(/^Log level/).click();

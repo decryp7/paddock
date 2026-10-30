@@ -1,12 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 test.describe('command palette', () => {
   test.beforeEach(async ({ page }) => openApp(page));
 
   test('opens with Ctrl+K and from the title bar, filters, navigates and runs a command', async ({ page }, testInfo) => {
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     const input = page.getByRole('combobox', { name: 'Type a command' });
     await expect(input).toBeFocused();
     await expectNoSeriousViolations(page, testInfo, 'palette');
@@ -27,7 +28,7 @@ test.describe('command palette', () => {
   });
 
   test('arrow keys move the highlight and Enter runs it', async ({ page }) => {
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     const input = page.getByRole('combobox', { name: 'Type a command' });
     await input.fill('scheme');
     const options = page.locator('debrief-command-palette').getByRole('option');
@@ -45,14 +46,14 @@ test.describe('command palette', () => {
     await page.keyboard.press('Enter');
     await expect(page.locator('html')).toHaveAttribute('data-scheme', 'light');
     // The theme commands switch the look.
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     await input.fill('theme: console');
     await page.keyboard.press('Enter');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'console');
   });
 
   test('shows key hints and plugin commands, and says when nothing matches', async ({ page }) => {
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     const input = page.getByRole('combobox', { name: 'Type a command' });
     await input.fill('registry');
     await expect(page.locator('debrief-command-palette').getByRole('option', { name: /Show registry viewer/ })).toBeVisible();

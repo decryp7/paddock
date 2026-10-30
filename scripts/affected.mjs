@@ -245,7 +245,7 @@ export function appOfWorkflow(path, appNames) {
  * Files every app's playwright.config.ts imports by relative path (the e2e port and build guard of @decryp7/paddock-e2e): no
  * npm or tsconfig edge says so, so a change to one re-runs the UI half of every app.
  */
-export const E2E_GUARD_INPUTS = /^ui\/projects\/paddock-e2e\/src\/(env|build-guard)\.ts$/;
+export const E2E_GUARD_INPUTS = /^ui\/projects\/paddock-e2e\/src\/(env|build-guard|keyboard)\.ts$/;
 
 /** Editor and VCS metadata: marks nothing. */
 export const META = [/(^|\/)\.gitignore$/, /^\.editorconfig$/, /(^|\/)\.DS_Store$/, /^lefthook\.yml$/];

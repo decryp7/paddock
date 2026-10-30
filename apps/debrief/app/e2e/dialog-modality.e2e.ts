@@ -1,8 +1,9 @@
 import { expect, Page, test } from '@playwright/test';
 import { openApp } from './app';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 async function runCommand(page: Page, title: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill(title);
   await expect(page.locator('debrief-command-palette').getByRole('option').first()).toContainText(title);
@@ -23,7 +24,7 @@ test.describe('Dialog modality', () => {
     await expect(page.getByTestId('dialog-backdrop')).toHaveCount(0);
 
     // The page behind it still takes commands.
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     await expect(page.getByRole('combobox', { name: 'Type a command' })).toBeVisible();
     await page.keyboard.press('Escape');
 

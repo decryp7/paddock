@@ -1,11 +1,12 @@
 import { expect, Page, test } from '@playwright/test';
 import { CAPTURE_TIMEOUT, openApp } from './app';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // Report a problem (mock backend): an error raises the toast, "Report a problem…" opens the dialog that lists
 // what the zip will contain and the steps to reproduce, and Save writes it (the mock records the save).
 
 async function runFromPalette(page: Page, title: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   await page.getByRole('combobox', { name: 'Type a command' }).fill(title);
   await page.keyboard.press('Enter');
 }

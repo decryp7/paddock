@@ -71,6 +71,12 @@ module.exports = defineConfig(
     },
   },
   {
+    // E2E code presses `Mod` with `pressMod` (@decryp7/paddock-e2e), never Playwright's `ControlOrMeta` (ER-22: the shared rule).
+    files: ['e2e/**/*.ts', 'scripts/**/*.ts'],
+    plugins: { paddock: require('../../../eslint/src/plugin.cjs') },
+    rules: { 'paddock/no-control-or-meta': 'error' },
+  },
+  {
     files: ['**/*.html'],
     extends: [angular.configs.templateRecommended, angular.configs.templateAccessibility],
     rules: {

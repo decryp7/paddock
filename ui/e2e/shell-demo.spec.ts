@@ -1,4 +1,4 @@
-import { axeViolations, dialogContracts, dialogFitProblems, measureDialogWindow, openEveryDialog, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
+import { axeViolations, dialogContracts, dialogFitProblems, expect, expectNoHorizontalScroll, measureDialogWindow, openEveryDialog, pressMod, test, THEMES } from '@decryp7/paddock-e2e';
 
 // The shell demo is the reference consumer of @decryp7/paddock-ui/shell (ADR 0012 §7); each work package adds its checks.
 // It uses only the test kit (@decryp7/paddock-e2e, plan S16); the static source checks are in shell/testing's specs.
@@ -279,15 +279,15 @@ test.describe('menus and keys (plan S13)', () => {
   });
 
   test('keys run their commands, also from a text field, but typing there does not', async ({ page }) => {
-    await page.keyboard.press('ControlOrMeta+Shift+H');
+    await pressMod(page, 'Mod+Shift+H');
     await expect(page.getByTestId('greetings')).toHaveText('Greetings: 1');
     const note = page.getByTestId('demo-note');
     await note.click();
     await note.pressSequentially('hk');
     await expect(note).toHaveValue('hk');
-    await page.keyboard.press('ControlOrMeta+Shift+H');
+    await pressMod(page, 'Mod+Shift+H');
     await expect(page.getByTestId('greetings')).toHaveText('Greetings: 2');
-    await page.keyboard.press('ControlOrMeta+Alt+K');
+    await pressMod(page, 'Mod+Alt+K');
     await expect(page.locator('sd-page')).toHaveClass(/compact/);
   });
 
@@ -299,7 +299,7 @@ test.describe('menus and keys (plan S13)', () => {
     await row('sd.greet').getByRole('button', { name: 'Change key' }).click();
     await expect(row('sd.greet').getByTestId('shortcut-key')).toHaveText('Press a key…');
     // A key pressed while recording runs nothing.
-    await page.keyboard.press('ControlOrMeta+Alt+G');
+    await pressMod(page, 'Mod+Alt+G');
     await expect(page.getByTestId('shortcut-message')).toHaveText(`Say hello is now ${mac ? '⌥⌘G' : 'Ctrl+Alt+G'}.`);
     await expect(toasts.getByText(/Hello from the shell demo/)).toHaveCount(0);
     // The menu shows the new key.
@@ -307,16 +307,16 @@ test.describe('menus and keys (plan S13)', () => {
     await page.keyboard.press('Escape');
     // Taken: refused, with the command that has it.
     await row('sd.reset').getByRole('button', { name: 'Change key' }).click();
-    await page.keyboard.press('ControlOrMeta+Alt+G');
+    await pressMod(page, 'Mod+Alt+G');
     await expect(page.getByTestId('shortcut-message')).toContainText('is already used by Say hello; Reset greetings keeps its key.');
 
     await page.reload();
     await expect(row('sd.greet')).toBeVisible();
-    await page.keyboard.press('ControlOrMeta+Shift+H');
-    await page.keyboard.press('ControlOrMeta+Alt+G');
+    await pressMod(page, 'Mod+Shift+H');
+    await pressMod(page, 'Mod+Alt+G');
     await expect(toasts.getByText('Hello from the shell demo (1)')).toBeVisible();
     await row('sd.greet').getByRole('button', { name: 'Reset key' }).click();
-    await page.keyboard.press('ControlOrMeta+Shift+H');
+    await pressMod(page, 'Mod+Shift+H');
     await expect(toasts.getByText('Hello from the shell demo (2)')).toBeVisible();
   });
 
@@ -664,7 +664,7 @@ test.describe('dialogs (plan S6)', () => {
     await expect(d.inPage('About the shell demo')).toHaveCount(1);
     // The window stays usable: the page's controls and the keys work beside it.
     await page.locator('[data-dialog-open="sd.rename"]').focus();
-    await page.keyboard.press('ControlOrMeta+Shift+H');
+    await pressMod(page, 'Mod+Shift+H');
     await expect(page.getByText('Hello from the shell demo (1)')).toBeVisible();
     await viewer.getByRole('button', { name: 'Close' }).click();
     await expect(page.getByTestId('dialog-answer')).toHaveText('About the shell demo: dismissed');
