@@ -45,6 +45,8 @@ pub enum UserAction {
     FailNextScript,
     /// The page opens a JavaScript dialog: it is reported once, and scripts get no reply while it is open.
     OpenDialog,
+    /// The dialog goes away without a `Page.javascriptDialogClosed` event (one the driver missed).
+    CloseDialogUnreported,
 }
 
 impl UserAction {
@@ -57,6 +59,7 @@ impl UserAction {
             UserAction::HangScripts => "hang-scripts",
             UserAction::FailNextScript => "fail-next-script",
             UserAction::OpenDialog => "open-dialog",
+            UserAction::CloseDialogUnreported => "close-dialog-unreported",
         }
     }
 }
@@ -203,6 +206,8 @@ static CONNECTION_DROPPED: AtomicBool = AtomicBool::new(false);
 static LOADS_STALLED: AtomicBool = AtomicBool::new(false);
 static SCRIPTS_HUNG: AtomicBool = AtomicBool::new(false);
 static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
+/// The dialog went away (unreported); it stays so even though the control file still says `open-dialog`.
+static DIALOG_CLOSED: AtomicBool = AtomicBool::new(false);
 /// Set by each `fail-next-script` line; the next `Runtime.evaluate` takes it.
 static FAIL_NEXT_SCRIPT: AtomicBool = AtomicBool::new(false);
 /// How many `fail-next-script` lines were applied (each line once, though the control file is read again and again).
@@ -245,6 +250,7 @@ fn apply_control() {
             "stall-loads" => LOADS_STALLED.store(true, Ordering::SeqCst),
             "hang-scripts" => SCRIPTS_HUNG.store(true, Ordering::SeqCst),
             "open-dialog" => DIALOG_OPEN.store(true, Ordering::SeqCst),
+            "close-dialog-unreported" => DIALOG_CLOSED.store(true, Ordering::SeqCst),
             "quit" => std::process::exit(0),
             _ => {}
         }
@@ -305,7 +311,8 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
         };
         let method = req["method"].as_str().unwrap_or("");
         record_call(method);
-        if method == "Runtime.evaluate" && (SCRIPTS_HUNG.load(Ordering::SeqCst) || DIALOG_OPEN.load(Ordering::SeqCst)) {
+        let dialog = DIALOG_OPEN.load(Ordering::SeqCst) && !DIALOG_CLOSED.load(Ordering::SeqCst);
+        if method == "Runtime.evaluate" && (SCRIPTS_HUNG.load(Ordering::SeqCst) || dialog) {
             // A hung renderer, or a page held by its dialog: the command is never answered.
             continue;
         }

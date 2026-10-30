@@ -234,6 +234,10 @@ pub(crate) fn is_transient(kind: std::io::ErrorKind) -> bool {
 fn dispatch(inner: &Inner, text: &str) {
     let Ok(v) = serde_json::from_str::<Value>(text) else { return };
     if let Some(id) = v.get("id").and_then(Value::as_u64) {
+        // A page that answers is not held by a dialog (in case its `javascriptDialogClosed` was missed).
+        if let Some(s) = v.get("sessionId").and_then(Value::as_str) {
+            lock(&inner.dialogs).remove(s);
+        }
         if let Some(tx) = lock(&inner.pending).remove(&id) {
             let r = match v.get("error") {
                 Some(e) => Err(e.get("message").and_then(Value::as_str).unwrap_or("error").to_string()),
@@ -252,7 +256,8 @@ fn dispatch(inner: &Inner, text: &str) {
                     let message: String = message.chars().take(200).collect();
                     lock(&inner.dialogs).insert(s.to_string(), message);
                 }
-                "Page.javascriptDialogClosed" => {
+                // Closed, or the page moved on (a new document has no dialog of the old one).
+                "Page.javascriptDialogClosed" | "Page.frameNavigated" | "Runtime.executionContextCreated" => {
                     lock(&inner.dialogs).remove(s);
                 }
                 _ => {}
@@ -283,10 +288,12 @@ fn mark_gone(inner: &Inner, params: &Value) {
         .filter_map(|k| params.get(*k).and_then(Value::as_str))
         .collect();
     let mut w = lock(&inner.watched);
+    let mut dialogs = lock(&inner.dialogs);
     for id in ids {
         if let Some(gone) = w.get_mut(id) {
             *gone = true;
         }
+        dialogs.remove(id);
     }
 }
 
@@ -319,6 +326,26 @@ mod tests {
             r#"{"method":"Page.javascriptDialogClosed","sessionId":"S1","params":{"result":false}}"#,
         );
         assert!(lock(&i.dialogs).is_empty());
+    }
+
+    /// Review: a missed `javascriptDialogClosed` must not hold the page for good. Anything that shows the page moved on
+    /// clears its dialog: a reply on its session, a navigation, a new script context, or the session's end.
+    #[test]
+    fn a_dialog_is_forgotten_once_the_page_shows_it_moved_on() {
+        let open = r#"{"method":"Page.javascriptDialogOpening","sessionId":"S1","params":{"message":"Hi"}}"#;
+        for moved_on in [
+            r#"{"id":7,"sessionId":"S1","result":{}}"#,
+            r#"{"method":"Page.frameNavigated","sessionId":"S1","params":{"frame":{}}}"#,
+            r#"{"method":"Runtime.executionContextCreated","sessionId":"S1","params":{"context":{}}}"#,
+            r#"{"method":"Target.detachedFromTarget","params":{"sessionId":"S1","targetId":"T1"}}"#,
+        ] {
+            let i = inner();
+            dispatch(&i, open);
+            dispatch(&i, r#"{"id":8,"sessionId":"S2","result":{}}"#);
+            assert!(lock(&i.dialogs).contains_key("S1"), "another session's reply is not ours");
+            dispatch(&i, moved_on);
+            assert!(lock(&i.dialogs).is_empty(), "{moved_on}");
+        }
     }
 
     #[test]
