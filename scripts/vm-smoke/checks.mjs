@@ -7,7 +7,7 @@ const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 /**
  * @typedef {{ exec(cmd: string, opts?: {timeoutMs?: number}): Promise<{code:number, stdout:string, stderr:string}>, now(): number, sleep(ms: number): Promise<void> }} Guest
- * `exec` runs a bash command line as the guest's user (no login session of its own; GUI apps are started with `open`).
+ * `exec` runs a bash command line as the guest's user (in the guest's Aqua session on the pinned image; GUI apps are started with `open`).
  */
 
 export class Check {
@@ -163,6 +163,11 @@ export class Check {
       `hdiutil detach ${sq(mnt)}`,
     ];
     const checks = [];
+    // The pinned cirruslabs image ships with Gatekeeper disabled (`spctl --status`: assessments disabled); a check that installs an
+    // ad-hoc build on a stock Mac must run with it on, so it is switched on before anything is installed.
+    await this.g.exec('sudo spctl --global-enable');
+    const gk = (await this.g.exec('spctl --status 2>&1')).stdout.trim();
+    checks.push({ ok: /assessments enabled/.test(gk), detail: `Gatekeeper enabled in the guest before the install (spctl --global-enable; the image ships with it off): \`${gk || 'no answer'}\`` });
     for (const c of cmds) {
       const r = await this.g.exec(c, { timeoutMs: 300_000 });
       if (r.code !== 0 && !c.startsWith('hdiutil detach')) {

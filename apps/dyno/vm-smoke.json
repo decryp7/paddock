@@ -13,7 +13,7 @@
   },
   "updateHost": "dev.decryptology.net",
   "readyTimeoutSec": 180,
-  "settleSec": 30,
+  "settleSec": 20,
   "processes": [
     {
       "name": "dyno-app",
@@ -50,8 +50,8 @@
     "on": null,
     "off": null,
     "status": null,
-    "manualReason": "the app registers its login item with SMAppService from the Aqua session; `dyno-agent service install` writes a legacy LaunchAgents plist and bootstraps it with launchctl, a different route that is not what users run, and tart exec has no Aqua session to run SMAppService in",
+    "manualReason": "the app registers its login item with SMAppService, which only the app itself calls; `dyno-agent service install` writes a legacy LaunchAgents plist and bootstraps it with launchctl, a different route that is not what users run. The guest does have an Aqua session, but driving the Settings toggle needs a UI driver (see the GUI VM research), which this check does not have",
     "approval": "System Settings > General > Login Items & Extensions may ask to allow the item (manual)."
   },
-  "settleWhy": "The app waits SPAWN_WAIT 5 s then CONNECT_GRACE 8 s (app/src-tauri/src/link.rs) before it spawns another agent; round 2 saw the duplicate 10 s after the first. 30 s covers two such rounds plus the 2 s polling."
+  "settleWhy": "The supervisor has no fixed spawn wait any more (SPAWN_WAIT and CONNECT_GRACE are gone). The longest respawn timer is the crash-loop backoff capped at 15 s, plus 3 s END_GRACE before the held child is ended on a Retry or hand-over, plus the 2 s polling: 20 s covers one full respawn cycle. A second agent after that is a bug, not a timer."
 }
