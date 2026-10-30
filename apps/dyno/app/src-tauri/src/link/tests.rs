@@ -250,6 +250,8 @@ struct InProcessLauncher {
     launches: AtomicUsize,
     exited: std::sync::atomic::AtomicBool,
     fail: bool,
+    /// Why each launch that did not start an agent failed (for a failing assertion's message).
+    refused: Mutex<Vec<String>>,
 }
 
 impl Launcher for InProcessLauncher {
@@ -263,7 +265,8 @@ impl Launcher for InProcessLauncher {
         }
         let fake = Fake::new();
         fake.add_process(process(100, "busy", 60.0));
-        let running = Running::start(self.dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(())))?;
+        let running = Running::start(self.dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(())))
+            .inspect_err(|e| lock(&self.refused).push(e.to_string()))?;
         *lock(&self.started) = Some(running);
         self.exited.store(false, Ordering::SeqCst);
         Ok(())
@@ -329,6 +332,7 @@ fn rig_with(fail: bool, tuning: super::machine::Tuning) -> Rig {
         launches: AtomicUsize::new(0),
         exited: std::sync::atomic::AtomicBool::new(false),
         fail,
+        refused: Mutex::new(Vec::new()),
     });
     let link = AgentLink::tuned(
         dirs,
@@ -372,7 +376,13 @@ fn it_starts_an_agent_when_none_runs_forwards_requests_and_stops_what_it_started
     let handle = r.link.spawn().unwrap();
     running(&r.link, &r.statuses);
     assert!(r.link.started_by_this_app(), "{:?}", r.link.transitions().current());
-    assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        r.launcher.launches.load(Ordering::SeqCst),
+        1,
+        "launches refused: {:?}; the link is at {:?}",
+        lock(&r.launcher.refused),
+        r.link.transitions().current()
+    );
     // A request round-trips.
     match r.link.call(Request::Settings).unwrap() {
         Reply::Settings(_) => {}
@@ -411,7 +421,13 @@ fn a_request_made_before_the_first_connection_waits_for_it() {
     let handle = r.link.spawn().unwrap();
     // No waiting for the Running status: the window's first requests arrive while the agent is still starting. The request
     // waits on the state (connected, or a shown stall), not on a clock.
-    assert!(matches!(r.link.call(Request::Settings), Ok(Reply::Settings(_))));
+    let result = r.link.call(Request::Settings);
+    assert!(
+        matches!(result, Ok(Reply::Settings(_))),
+        "{result:?}; the link is at {:?}; statuses so far: {:?}",
+        r.link.transitions().current(),
+        r.statuses.try_iter().collect::<Vec<_>>()
+    );
     r.link.quit();
     handle.join().unwrap();
 }

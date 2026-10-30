@@ -136,9 +136,11 @@ impl Executor {
                         &link.app_version,
                         link.launcher.as_ref(),
                         held,
-                        probe.as_ref(),
-                        cpu,
-                        probe_lock,
+                        ports::Ask {
+                            probe: probe.as_ref(),
+                            cpu,
+                            lock: probe_lock,
+                        },
                     );
                     *lock(&seen) = found.map(|d| (seq, d));
                     let _ = events.send(Event::Looked(look));

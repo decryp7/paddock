@@ -211,6 +211,17 @@ pub fn hint_of(d: &Discovery, app_version: &str) -> HintSeen {
     }
 }
 
+/// What a look is asked to read besides the discovery file and the launcher's child.
+#[derive(Clone, Copy)]
+pub struct Ask<'a> {
+    /// The login service's probe, when the OS is to be asked.
+    pub probe: Option<&'a ServiceProbe>,
+    /// Read the CPU time of the held child's tree.
+    pub cpu: bool,
+    /// Probe the agent lock.
+    pub lock: bool,
+}
+
 /// One look at the world for the machine: the discovery file (bounded read), the agent lock, the launcher's child with
 /// the generation it was held under, and the login service when asked. Returns the file too, so a later `RemoveHint` and
 /// `Connect` act on the very file that was seen.
@@ -220,10 +231,9 @@ pub fn look(
     app_version: &str,
     launcher: &dyn Launcher,
     held: Option<Generation>,
-    probe: Option<&ServiceProbe>,
-    cpu: bool,
-    lock: bool,
+    ask: Ask<'_>,
 ) -> (Look, Option<Discovery>) {
+    let Ask { probe, cpu, lock } = ask;
     let found = Discovery::read(&dirs.discovery());
     let child = held.map(|g| (g, launcher.child()));
     let cpu = if !cpu {
