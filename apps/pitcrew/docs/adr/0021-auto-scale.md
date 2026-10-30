@@ -176,6 +176,42 @@ declared precondition, not a detection. With `"slots"`:
 - **`PADDOCK_CI_KEEP_SLOTS` = the pool's `max`,** written into every slot's `runner.envs` through ADR 0011's editor, so
   the kept folders exist for at most as many slots as the pool can run.
 
+### 1a. Session and headless slots (the owner, 2026-10-31)
+
+Auto-scale does not imply headless. Headless (ADR 0023: LaunchDaemon, systemd system unit, one Windows service per runner) is
+an opt-in **per runner**; the scaler never changes it.
+
+- **Inheritance.** A slot has the mode of the runner it was made from (its template: `SessionMode::Interactive` in the
+  logged-in user's GUI session, or a headless mode). "Add N slots" in the register wizard copies the template's mode; a
+  pool's slots may differ only if the owner registered them so by hand. Pitcrew's config check flags a pool whose slots
+  disagree with their template (information, not an error).
+- **Session slots start only inside the user's GUI session, and only while it exists.** The scaler starts a session-mode
+  slot exactly as a session runner starts today (ADR 0003: the service launches it into the user's session). With no such
+  session (logged off, locked out, fast user switching away) a session slot is **not started**; it waits, and the pool
+  page, the history and the reason (ADR 0021 §8) say "no desktop session for <user>: <slot> waits" (the existing
+  `WaitingForLogon` status). It never becomes headless, never starts in session 0, and the scaler never "falls back" to a
+  headless slot of another mode to make up the number. When the session returns the waiting slot is available again.
+- **GUI jobs keep their label.** A label that means "needs a desktop" (for example `gui`, `macos-gui`) is carried only by
+  session runners. Pitcrew checks this on a pool: a headless slot that carries a label some session slot of the same pool
+  also carries, where the owner marked the label `needs_session = true` in `[[autoscale.pools]]`, is an error with a Fix
+  that removes the label. Queue demand for a `needs_session` label counts only for session slots; headless slots never
+  absorb it.
+- **Mixed pools.** A pool may hold session and headless slots. The decision is per slot and pure (below): the planner asks
+  `slot_mode::decide(slot_mode, session_present, label_needs_session)` for each candidate and only starts those that
+  answer `Start`; demand it cannot meet is reported ("waiting for a desktop session"), not moved to another mode.
+- **Family ADR 0025 (slots per host).** The CI home is per account. Session slots run as the logged-in user and share one
+  CI home (one slot space, the rule above). Headless slots run as the service account or per-runner virtual account (ADR
+  0023) and therefore have a **different** CI home: the scaler treats them as a separate slot space, `PADDOCK_CI_KEEP_SLOTS`
+  and `ci_isolation` apply per space, and a pool whose slots span two accounts must declare `ci_isolation = "slots"` for
+  each space or its effective `max` is 1 per space. A headless slot that runs as the same user as session slots shares
+  their home and the same slot space.
+- **Pure core.** `pitcrew_core::autoscale::slot_mode` holds the decision as a pure function over values (no OS calls); the
+  service supplies `session_present` from the session probe. Tests, written first: session slot with a session starts;
+  without one it waits with the reason `NoDesktopSession` and is never `StartHeadless`; headless slot starts regardless of
+  the session; a `needs_session` label with no session slot available gives `Unmet`, not a headless start; a session ending
+  while a slot idles drains it between jobs only (§4), never mid-job; slots of different accounts land in different slot
+  spaces.
+
 ### 2. Signals
 
 | Signal | Source | Freshness | Unknown means |
@@ -394,7 +430,7 @@ jobs waiting longer than 15 minutes, the thrash guard engaged, a slot not availa
 | WP | What | Owner | Size |
 |---|---|---|---|
 | WP-0 | Spike with a read-only token on the real server: `read:user` reads `/user/actions/{jobs,runners}`; `/user` vs `/admin` coverage; `queued` vs `needs`; `labels` = `runs-on`; `head_branch` and `event` on tag runs; `busy` for capacity > 1 and for a container runner; label matching; how a container job's containers are named or labelled per task (the busy rule); a graceful stop with `shutdown_timeout` on macOS, Linux and Windows (Ctrl+Break); two concurrent jobs on one host (the contention factor); LocalSystem credential store on the Windows VM. Results written into this ADR before Accept | researcher | 1 d |
-| WP-1 | `pitcrew_core::autoscale`: types, parsers, `plan`, explanation, thrash guard; unit and property tests, ≥ 99% | implementer (spec'd here) | 2 d |
+| WP-1 | `pitcrew_core::autoscale`: types, parsers, `plan`, explanation, thrash guard, `slot_mode::decide` (§1a); unit and property tests, ≥ 99% | implementer (spec'd here) | 2 d |
 | WP-2 | `[autoscale]` config schema, validation, defaults; settings DTOs | implementer | 0.5 d |
 | WP-3 | Shared: load average and available memory in `paddock-metrics`' `MachineProbe` (Windows: CPU share); tests in the crate | integrating agent (shared crate) | 1 d |
 | WP-4 | Service adapters: Gitea `QueueSource` on `paddock-net`, token through `paddock-secrets`, the mode-2 check with backoff and demand, worker → supervisor messages | implementer | 1.5 d |
