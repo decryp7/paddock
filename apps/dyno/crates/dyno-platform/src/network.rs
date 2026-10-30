@@ -136,11 +136,18 @@ mod tests {
         let udp = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp.local_addr().unwrap().port();
 
-        let rows = OsSockets.sockets().unwrap();
-        let listening = rows
-            .iter()
-            .find(|r| r.proto == Proto::Tcp && r.state == SocketState::Listen && r.local_port == port)
-            .expect("the test's own listener is listed");
+        // Windows can list a new listener as bound, not listening, for a moment after `listen` returned (CI job 21972):
+        // the table is read again until it shows the listener, up to a hang guard.
+        let is_listener = |r: &SocketRow| r.proto == Proto::Tcp && r.state == SocketState::Listen && r.local_port == port;
+        let mut rows = OsSockets.sockets().unwrap();
+        for _ in 0..200 {
+            if rows.iter().any(is_listener) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            rows = OsSockets.sockets().unwrap();
+        }
+        let listening = rows.iter().find(|r| is_listener(r)).expect("the test's own listener is listed");
         assert_eq!(listening.pid, Some(me), "its owner is this process");
         assert!(listening.local.is_loopback() && listening.remote.is_none());
         let connected = rows
