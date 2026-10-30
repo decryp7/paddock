@@ -498,3 +498,38 @@ fn measure_blame() {
         );
     }
 }
+
+/// The range is judged from one guarded read of the blamed blob, before the walk: with a budget of one object, which the walk would
+/// exceed at once, a range past the end is still `RangeOutsideFile`, and one inside the file is the walk's `Limit`.
+#[test]
+fn the_range_is_checked_before_the_walk_starts() {
+    let repo = Repo::new();
+    let (_, _, c) = three(&repo);
+    let history = open(&repo.dir).unwrap();
+    let one = BlameLimits {
+        max_objects: 1,
+        ..BlameLimits::default()
+    };
+    let past = BlameRequest {
+        range: Some((1, 9)),
+        limits: one,
+        ..BlameRequest::default()
+    };
+    assert_eq!(
+        blame(&history, &c, "f.rs", &past),
+        Err(BlameError::RangeOutsideFile {
+            first: 1,
+            last: 9,
+            lines: 3
+        })
+    );
+    let inside = BlameRequest {
+        range: Some((1, 3)),
+        limits: one,
+        ..BlameRequest::default()
+    };
+    assert!(matches!(
+        blame(&history, &c, "f.rs", &inside),
+        Err(BlameError::Limit { what: "objects read", .. })
+    ));
+}
