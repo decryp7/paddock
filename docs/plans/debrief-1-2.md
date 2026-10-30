@@ -239,6 +239,26 @@ confirmation that shows the count and the estimated time.
 | N7 | **Synonym suggestions with Model2Vec** (questions only) | implementer | X55 `paddock-embed` (may slip to 1.3) | 1.5 | 7 |
 | N8 | **Docs**: ADR amendments (Debrief ADR 0033 section 6 now: confirmation instead of a cap), rule 46, lessons, user guide | implementer | N1-N6 | 0.5 | 8 |
 
+### Search-ready packages (import folder to search ready), slotted into the waves above
+
+Added 2026-10-30 from the measurements in
+[apps/debrief/docs/performance.md](../../apps/debrief/docs/performance.md) ("Import of an 8 GB folder until search is
+ready", branch `debrief/duckdb-2`) and the prototypes on `wip/debrief-duckdb2-prototypes`. Baseline, 56.2M events in
+8.07 GB (618 files, invented), M4 Pro, shipped options: import 39.7 to 47.6 s (1.18M to 1.41M events/s), full-text index
+ready at 208 to 223 s, catalogue at 376 to 445 s. Search waits for the background builds, not the import. Already on
+`debrief/duckdb-2`: index threads and memory per thread as Settings (Auto capped at 4), words indexed without counts, one
+UPDATE per index step, positions never left missing (import memory for the ordering, retry and report, the `heavy`
+lock), lowered threads at QoS utility. Rule 52 (work a person waits for is never `BACKGROUND`) applies to the index
+and the catalogue: BP1's "catalogue, index ... `Background`" becomes utility for them.
+
+| # | Package | Owned files | Role | Depends on | Acceptance | Days | Wave |
+|---|---|---|---|---|---|---|---|
+| SR1 | **Index feeder**: past 4 writer threads the pipeline's single Parquet reader, its 4-thread docs pool, the in-order feeder and the commit every 4 segments are the limit (13 threads indexed slower than 4). Read segments in parallel, size the docs pool to the writer, commit by time (about 2 s) instead of by 4 segments, no merges during the bulk load and one merge at the end if measured to win; profile first (`prof-idx.sh`), then lift the Auto cap of 4 | `crates/debrief-store-duck/src/fts.rs`, `crates/debrief-core/src/stages.rs` (if the pipeline changes), `app/src-tauri/src/performance/tuning.rs` (the cap) | researcher, then implementer | — | on a quiet machine the 56M index is ready at least 2x faster than with 2 threads; common-word search p50 not worse than today; index segments bounded | 2.5 | 3 |
+| SR2 | **Index beside the import** (the append window, prototype `gate.rs`): closing the window cancels the steps inside it between batches (rolled back, nothing marked indexed) instead of waiting for them; the import never waits on a lowered thread; the catalogue stays out of the window. The prototype made the import 4 to 5 times slower because the close waited for a step stuck in per-segment commits at background QoS | `crates/debrief-store-duck/src/{gate,fts,lib}.rs` | designer | SR1 | the import is no more than 5% slower than without the window; search is ready within 15 s of the import's end at 56M; a test that the close does not wait for a slow step | 2 | 4 |
+| SR3 | **Catalogue on several workers** (prototype `71c18c57c`): claim the next source, Arrow batch reads, one aggregate at a time under the `heavy` lock; measure 1, 4 and 8 workers end to end and pick the default. If P4 lands first, only for stores P4 did not catalogue | `crates/debrief-store-duck/src/catalogue.rs`, `lib.rs` (one option) | implementer | P3 | catalogue ready at least 3x sooner at 56M; no query or ordering runs out of DuckDB memory while it builds | 1.5 | 4 |
+| SR4 | **Ordering without the second sort**: the rebuild sorts 56M rows twice (window, then `ORDER BY pos`) and spills at 192 MB; measure dropping the second sort and the raised limit (`pos/pos.sh`) and keep what wins with `ord` still in position order | `crates/debrief-store-duck/src/pos.rs` | implementer | — | the ordering at 56M at least 30% faster; `pos = rowid` checked | 0.5 | 3 |
+| SR5 | **Parse speed, the rest**: the large files' newline pre-scan pipelined with their parse instead of before it (each large file is read twice, the first time on one thread); Parquet write settings (zstd 1 and 3, lz4, row groups) measured with the query suite, kept only if queries do not regress | `crates/debrief-core/src/ingest/{parallel,plan}.rs`, `crates/debrief-store-duck/src/segments.rs` | implementer | — | import of the 8 GB folder faster on a cold cache; the settings' numbers in performance.md | 1.5 | 5 |
+
 ## 3. The safety net
 
 All of it runs once on the combined result before the local build and the tag (rule 3), and in CI.
