@@ -43,6 +43,13 @@ pub fn pinned_period(own_cpu: f32) -> Duration {
     }
 }
 
+/// Starts a thread with a name running a job.
+type Spawner = fn(&str, Box<dyn FnOnce() + Send>) -> std::io::Result<()>;
+
+fn spawn_thread(name: &str, job: Box<dyn FnOnce() + Send>) -> std::io::Result<()> {
+    std::thread::Builder::new().name(name.into()).spawn(job).map(drop)
+}
+
 struct Series {
     unit: CounterUnit,
     ring: CounterRing,
@@ -52,6 +59,8 @@ struct Series {
 struct Inner {
     source: Arc<dyn CounterSource>,
     in_flight: AtomicUsize,
+    /// Starts a named thread (replaced in tests to make starting fail).
+    spawner: Spawner,
     catalog: Mutex<Option<(Instant, Arc<CounterCatalog>)>>,
     rates: Mutex<RateTracker>,
     rings: Mutex<HashMap<String, Series>>,
@@ -136,10 +145,15 @@ fn record(inner: &Inner, raws: Vec<RawCounter>, now: Timestamp) -> Vec<CounterRe
 impl CounterCentre {
     /// A centre reading through `source`.
     pub fn new(source: Arc<dyn CounterSource>) -> CounterCentre {
+        Self::with_spawner(source, spawn_thread)
+    }
+
+    fn with_spawner(source: Arc<dyn CounterSource>, spawner: Spawner) -> CounterCentre {
         CounterCentre {
             inner: Arc::new(Inner {
                 source,
                 in_flight: AtomicUsize::new(0),
+                spawner,
                 catalog: Mutex::new(None),
                 rates: Mutex::new(RateTracker::new()),
                 rings: Mutex::new(HashMap::new()),
@@ -178,13 +192,16 @@ impl CounterCentre {
         }
         let slot = Slot(self.inner.clone());
         let inner = self.inner.clone();
-        let spawned = std::thread::Builder::new().name("dyno-counters".into()).spawn(move || {
-            // The user waits for it on the Counters page: live work (rule 52).
-            dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
-            f(&inner, slot);
-        });
+        let spawned = (self.inner.spawner)(
+            "dyno-counters",
+            Box::new(move || {
+                // The user waits for it on the Counters page: live work (rule 52).
+                dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
+                f(&inner, slot);
+            }),
+        );
         if let Err(e) = spawned {
-            self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
+            // A failed spawn dropped the job and its slot, which gave the count back.
             return Err(AgentError::new(ErrorCode::Internal, format!("Dyno could not start a reader: {e}")));
         }
         Ok(())
@@ -300,17 +317,18 @@ impl CounterCentre {
         }
         let slot = Slot(self.inner.clone());
         let inner = self.inner.clone();
-        let spawned = std::thread::Builder::new().name("dyno-counters-pinned".into()).spawn(move || {
-            // It holds one of the two slots the page's requests use, and the live sampler starts it: live work (rule 52).
-            dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
-            let _slot = slot;
-            let raws = inner.source.read(&parsed);
-            record(&inner, raws, now);
-        });
-        spawned.is_ok() || {
-            self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
-            false
-        }
+        // A failed spawn drops the job and its slot, which gives the count back.
+        (self.inner.spawner)(
+            "dyno-counters-pinned",
+            Box::new(move || {
+                // It holds one of the two slots the page's requests use, and the live sampler starts it: live work (rule 52).
+                dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
+                let _slot = slot;
+                let raws = inner.source.read(&parsed);
+                record(&inner, raws, now);
+            }),
+        )
+        .is_ok()
     }
 
     /// The readings kept over the last `minutes` (1 to [`MAX_MINUTES`]) for each path; `events` are the app's own
@@ -676,9 +694,34 @@ mod tests {
         let c = CounterCentre::new(src);
         for _ in 0..200 {
             c.objects().ok();
+            assert_eq!(
+                c.inner.in_flight.load(Ordering::SeqCst),
+                0,
+                "a returned listing still holds its slot"
+            );
             c.inner.catalog.lock().unwrap().take();
             c.values(&["\\Memory\\Free".into()], Timestamp(1)).unwrap();
             assert_eq!(c.inner.in_flight.load(Ordering::SeqCst), 0, "a returned call still holds its slot");
         }
+    }
+
+    fn failing_spawner(_: &str, job: Box<dyn FnOnce() + Send>) -> std::io::Result<()> {
+        drop(job);
+        Err(std::io::Error::other("no threads left"))
+    }
+
+    /// Regression: a thread that could not start used to give its slot back twice (the dropped job's slot and an explicit
+    /// decrement), wrapping the count so every later call was refused as busy for good.
+    #[test]
+    fn a_thread_that_cannot_start_gives_back_its_slot_once() {
+        let src = Arc::new(Roles(Mutex::new(Vec::new())));
+        let c = CounterCentre::with_spawner(src, failing_spawner);
+        assert_eq!(
+            c.values(&["\\Memory\\Free".into()], Timestamp(1)).unwrap_err().code,
+            ErrorCode::Internal
+        );
+        assert_eq!(c.inner.in_flight.load(Ordering::SeqCst), 0);
+        assert!(!c.poll_pinned(&["\\Memory\\Free".into()], Timestamp(2)));
+        assert_eq!(c.inner.in_flight.load(Ordering::SeqCst), 0);
     }
 }
