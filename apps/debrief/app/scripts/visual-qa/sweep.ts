@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { openApp } from '../../e2e/app';
 import { chooseMenu, menubar, openMenu } from '../../e2e/menu-support';
 import { layoutProblems, LayoutProblem } from './layout-check';
+import { pressMod } from '../../../../../ui/projects/paddock-e2e/src/keyboard';
 
 /**
  * Visual QA sweep (see playwright.config.ts): for each theme and size, screenshots the default layout, every top-level
@@ -86,7 +87,7 @@ for (const theme of THEMES) {
         );
       }
 
-      await capture('20-palette', async () => void (await page.keyboard.press('ControlOrMeta+k')));
+      await capture('20-palette', async () => void (await pressMod(page, 'Mod+k')));
       writeFileSync(join(dir, 'report.json'), JSON.stringify(report, null, 2));
     });
   }

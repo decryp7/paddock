@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { gridTotal, initialTotal, openApp, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 test('export dialog counts events, exports through the backend and reports it', async ({ page }, testInfo) => {
   await openApp(page);
@@ -38,7 +39,7 @@ test('export dialog counts only what matches the current filter and closes with 
     filtered = parseCount(await gridTotal(page).innerText());
     return filtered > 0 && filtered < total;
   }).toBe(true);
-  await page.keyboard.press('ControlOrMeta+Shift+e');
+  await pressMod(page, 'Mod+Shift+e');
   const dialog = page.getByRole('dialog', { name: 'Export events' });
   await expect(dialog.getByRole('status')).toContainText(`${filtered.toLocaleString('en-US')} events will be exported`);
   await dialog.getByLabel('All events').check();
