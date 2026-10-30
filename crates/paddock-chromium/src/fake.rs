@@ -26,6 +26,8 @@ const CTL_ENV: &str = "PADDOCK_FAKE_BROWSER_CTL";
 const URL_ENV: &str = "PADDOCK_FAKE_BROWSER_URL";
 const EVAL_ENV: &str = "PADDOCK_FAKE_BROWSER_EVAL";
 const CALLS_ENV: &str = "PADDOCK_FAKE_BROWSER_CALLS";
+/// The file beside the eval file that holds `Browser.getHistograms`' answer.
+const HISTOGRAMS_FILE: &str = "histograms.json";
 /// How often the fake looks at its control file and at its sockets.
 const TICK: Duration = Duration::from_millis(10);
 /// The longest the fake waits for a client's upgrade request.
@@ -186,6 +188,15 @@ impl FakeBrowser {
     /// What every page script returns from now on (see [`FakeBrowser::eval_file`]).
     pub fn page_shows(&self, value: &Value) -> std::io::Result<()> {
         std::fs::write(&self.eval_file, value.to_string())
+    }
+
+    /// What `Browser.getHistograms` answers from now on: `Some(result)`, or a protocol error for `None`.
+    pub fn histograms(&self, result: Option<&Value>) -> std::io::Result<()> {
+        let path = self.eval_file.with_file_name(HISTOGRAMS_FILE);
+        std::fs::write(
+            path,
+            result.map_or_else(|| "error".to_string(), Value::to_string),
+        )
     }
 
     /// The arguments the fake was started with (empty until it started).
@@ -424,8 +435,24 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
         }
         let url = || std::fs::read_to_string(url_file).unwrap_or_else(|_| "about:blank".into());
         let on_page = req.get("sessionId").is_some() || method == "Target.getTargetInfo";
+        // `Browser.getHistograms` answers from `histograms.json` beside the eval file ([`FakeBrowser::histograms`]):
+        // `error` is a protocol error, JSON is the result, no file is a reply without histograms.
+        let histograms = (method == "Browser.getHistograms")
+            .then(|| {
+                std::env::var(EVAL_ENV).ok().and_then(|p| {
+                    std::fs::read_to_string(Path::new(&p).with_file_name(HISTOGRAMS_FILE)).ok()
+                })
+            })
+            .flatten();
         let mut reply = if method == "Page.getFrameTree" && NO_FRAME_TREE.load(Ordering::SeqCst) {
             json!({"id": req["id"], "error": {"code": -32000, "message": "no frame tree"}})
+        } else if histograms.as_deref() == Some("error") {
+            json!({"id": req["id"], "error": {"code": -32601, "message": "'Browser.getHistograms' wasn't found"}})
+        } else if let Some(h) = histograms
+            .as_deref()
+            .and_then(|t| serde_json::from_str::<Value>(t).ok())
+        {
+            json!({"id": req["id"], "result": h})
         } else if closed && on_page {
             // The window is gone: its page answers no more, as Chrome answers for a closed target.
             json!({"id": req["id"], "error": {"code": -32001, "message": "No session or target with given id found"}})

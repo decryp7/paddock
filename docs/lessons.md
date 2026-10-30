@@ -896,3 +896,19 @@ to 0 and that nothing in the product set, so today's score, quiet hours, "until 
 and Time Machine dates were all in UTC while the UI showed local days. **Rule:** local time is a port read from the OS for each
 instant (daylight saving included), never a stored offset; every day boundary goes through one set of day functions; and a test
 of anything with "today" in it pins both its clock and its time zone, and runs once in a zone far from UTC (Dyno ADR 0024).
+
+## Read the failing environment's own logs before building a reproduction (2026-10-30)
+Windows CI failed one real-browser load in nearly every crate job with `net::ERR_ABORTED` and no connection at the test
+server. Four rounds guessed at the driver (first navigation, pid reuse, a network-service restart during the load), and
+the local Windows VM never reproduced it: it is Arm, and Chrome never sandboxes the network service on Arm, so the VM
+cannot take the code path CI takes. The Chrome logs that CI had already kept as artifacts showed what differs on Windows:
+in every browser the testing config's sandboxed network service could not start (Chrome for Testing in a user folder
+grants app containers nothing) and was started again unsandboxed. The lost loads came 3 to 4 s later, when the profile's
+own requests failed too, so the restart was a lead, not a proven cause, until CI run 7170 (testing config off) ran 25
+Windows browsers with no second start, no failed profile request and no lost load. **Rule:**
+for a flake, read the evidence the failing environment already wrote (logs, artifacts, the program's own counters) before
+building a local reproduction; check that a reproduction can take the same code path (architecture, feature flags,
+sandbox); and write a cause down as confirmed only after a run without it. Test the suspected cause directly (the
+browser's own count of failed helper starts is zero), so the check fails on every run, not only on the unlucky ones.
+**Follow-up:** the apps' runtime store keeps Chrome for Testing under the user's local app data, which grants app
+containers nothing either; granting S-1-15-2-1 and S-1-15-2-2 read and execute there at install time is still to do.

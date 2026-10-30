@@ -9,6 +9,10 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 - **Updates:** Debrief now updates from the Paddock repository's releases, signed with the Paddock family's update key. A copy installed before this release cannot update itself to it: download this release once by hand and install it over the old one; later releases update as usual
 
+### Fixed
+
+- **Browser on Windows:** the page browser Debrief downloads (Chrome for Testing) no longer starts its network service twice, which could make the first page it opened fail to load
+
 ## 1.1.1 (2026-10-24)
 
 ### Added

@@ -2,7 +2,7 @@
 //! tree with its time and memory limits. The real user agent and the automation banner are kept on purpose: no stealth.
 
 use crate::cdp::Connection;
-use crate::discover::Browser;
+use crate::discover::{Browser, Flavor};
 use crate::page::Page;
 use crate::{Error, Result};
 use paddock_jobs::CancelToken;
@@ -129,8 +129,8 @@ pub struct LaunchOptions {
     pub memory_cap: Option<u64>,
     /// A limit for the browser's disk cache (a kept profile must not grow without bound).
     pub disk_cache_bytes: Option<u64>,
-    /// [`QUIET_FLAGS`]: no GPU process, no component downloads, no throttling of a window nobody sees. For a browser
-    /// that reads pages; an interactive window the user browses in may turn them off.
+    /// [`QUIET_FLAGS`] and [`QUIET_DISABLED_FEATURES`]: no GPU process, no component downloads, no throttling of a window
+    /// nobody sees. For a browser that reads pages; an interactive window the user browses in may turn them off.
     pub quiet: bool,
     /// More switches (before the start page).
     pub extra_args: Vec<String>,
@@ -187,13 +187,44 @@ pub const QUIET_FLAGS: &[&str] = &[
     "--disable-background-timer-throttling",
     "--disable-renderer-backgrounding",
     "--disable-backgrounding-occluded-windows",
-    "--disable-features=Translate,OptimizationHints,MediaRouter,AutofillServerCommunication,msEdgeShopping,msEdgeSync",
 ];
 
-/// The whole command line the browser starts with: every switch, then [`START_PAGE`] last. This is the only place the
+/// Browser features the quiet browser starts without (in the one `--disable-features` switch, see [`command_line`]).
+pub const QUIET_DISABLED_FEATURES: &[&str] = &[
+    "Translate",
+    "OptimizationHints",
+    "MediaRouter",
+    "AutofillServerCommunication",
+    "msEdgeShopping",
+    "msEdgeSync",
+];
+
+/// The switch that keeps a Chromium build (Chrome for Testing among them) from applying the field-trial testing config
+/// it carries (`testing/variations/fieldtrial_testing_config.json`): experimental features that branded Chrome only gets
+/// from the server for some users, and Puppeteer and Playwright turn off the same way. One of them is the network-service
+/// sandbox on Windows (study `NetworkServiceSandboxWindows`), which could not start on Windows CI for a browser in the
+/// runner's user folder: in all 12 Chrome logs of runs 7149 and 7154 the app-container access check failed ("Sandbox
+/// cannot access executable", launch error 45, Windows error 5) and Chrome started the network service again,
+/// unsandboxed. The lost loads of those runs started 3 to 4 s after the second start, when the profile's own requests
+/// failed too (the sign-in request with `net::ERR_FAILED` instead of `net::ERR_NAME_NOT_RESOLVED`). With this switch,
+/// CI run 7170 ran the real-browser tests five times on Windows (25 browsers) with none of these: no failed sandbox
+/// start, no second start, no failed sign-in request, no `net::ERR_ABORTED`. Branded Chrome and Edge never apply the
+/// testing config, so the switch is for [`Flavor::Chromium`] only. Read 2026-10-30 against Chrome for Testing 156.0.8078.47.
+pub const NO_TESTING_FIELD_TRIALS: &str = "--disable-field-trial-config";
+
+const DISABLE_FEATURES: &str = "--disable-features=";
+
+/// The whole command line `flavor` starts with: every switch, then [`START_PAGE`] last. This is the only place the
 /// arguments are assembled, so no switch can end up after the start page. `--enable-automation` keeps Chrome's
-/// "controlled by automated test software" banner and `navigator.webdriver = true`; nothing hides either.
-pub fn command_line(data_dir: &Path, opts: &LaunchOptions, sandbox: Sandbox) -> Vec<String> {
+/// "controlled by automated test software" banner and `navigator.webdriver = true`; nothing hides either. Every feature to
+/// turn off goes into one `--disable-features` switch, the caller's own (in [`LaunchOptions::extra_args`]) merged in, so
+/// none is lost to a second switch.
+pub fn command_line(
+    flavor: Flavor,
+    data_dir: &Path,
+    opts: &LaunchOptions,
+    sandbox: Sandbox,
+) -> Vec<String> {
     let mut a = vec![
         "--remote-debugging-port=0".to_string(),
         format!("--user-data-dir={}", data_dir.display()),
@@ -235,10 +266,30 @@ pub fn command_line(data_dir: &Path, opts: &LaunchOptions, sandbox: Sandbox) -> 
         // Containers have a small /dev/shm.
         a.push("--disable-dev-shm-usage".into());
     }
+    let mut disabled: Vec<String> = Vec::new();
+    let mut disable = |f: &str| {
+        if !f.is_empty() && !disabled.iter().any(|d| d == f) {
+            disabled.push(f.to_string());
+        }
+    };
+    if opts.quiet {
+        QUIET_DISABLED_FEATURES.iter().for_each(|f| disable(f));
+    }
+    for x in &opts.extra_args {
+        if let Some(list) = x.strip_prefix(DISABLE_FEATURES) {
+            list.split(',').map(str::trim).for_each(&mut disable);
+        }
+    }
+    if !disabled.is_empty() {
+        a.push(format!("{DISABLE_FEATURES}{}", disabled.join(",")));
+    }
+    if flavor == Flavor::Chromium {
+        a.push(NO_TESTING_FIELD_TRIALS.into());
+    }
     a.extend(
         opts.extra_args
             .iter()
-            .filter(|x| x.as_str() != START_PAGE)
+            .filter(|x| x.as_str() != START_PAGE && !x.starts_with(DISABLE_FEATURES))
             .cloned(),
     );
     a.push(START_PAGE.into());
@@ -376,6 +427,56 @@ pub enum Gone {
     PageClosed,
 }
 
+/// How a browser's helper processes started ([`Chromium::helper_starts`]), from its histograms (names as in Chrome for
+/// Testing 156.0.8078.47: `ChildProcess.Launched.UtilityProcessHash`, `ChildProcess.LaunchFailed.UtilityProcessErrorCode`,
+/// `Chrome.SystemNetworkContextManager.NetworkSandboxLaunchFailed.ErrorCode` and `...NetworkSandboxState`).
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HelperStarts {
+    /// Helper processes that started.
+    pub started: u64,
+    /// Tries that failed (each is followed by another).
+    pub failed: u64,
+    /// Tries of the sandboxed network service that failed.
+    pub network_sandbox_failed: u64,
+    /// Times the browser decided to run the network service unsandboxed because an earlier sandboxed start had failed
+    /// (`NetworkSandboxState` bucket 4, `kDisabledBecauseOfFailedLaunch`).
+    pub network_sandbox_given_up: u64,
+}
+
+impl HelperStarts {
+    /// Pure: the counts from `Browser.getHistograms` lists.
+    pub fn from_histograms(launch: &[Value], sandbox: &[Value]) -> HelperStarts {
+        fn named<'a>(list: &'a [Value], name: &'a str) -> impl Iterator<Item = &'a Value> {
+            list.iter()
+                .filter(move |h| h.get("name").and_then(Value::as_str) == Some(name))
+        }
+        let count = |list: &[Value], name: &str| -> u64 {
+            named(list, name)
+                .filter_map(|h| h.get("count").and_then(Value::as_u64))
+                .sum()
+        };
+        let given_up = named(
+            sandbox,
+            "Chrome.SystemNetworkContextManager.NetworkSandboxState",
+        )
+        .filter_map(|h| h.get("buckets").and_then(Value::as_array))
+        .flatten()
+        .filter(|b| b.get("low").and_then(Value::as_i64) == Some(4))
+        .filter_map(|b| b.get("count").and_then(Value::as_u64))
+        .sum();
+        HelperStarts {
+            started: count(launch, "ChildProcess.Launched.UtilityProcessHash"),
+            failed: count(launch, "ChildProcess.LaunchFailed.UtilityProcessErrorCode"),
+            network_sandbox_failed: count(
+                sandbox,
+                "Chrome.SystemNetworkContextManager.NetworkSandboxLaunchFailed.ErrorCode",
+            ),
+            network_sandbox_given_up: given_up,
+        }
+    }
+}
+
 /// Why the supervisor ended the browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EndedBy {
@@ -431,7 +532,7 @@ impl Chromium {
         let stderr = std::fs::File::create(dir.join(STDERR_FILE))
             .map_or_else(|_| std::process::Stdio::null(), std::process::Stdio::from);
         let mut cmd = paddock_proc::command(&exe.path);
-        cmd.args(command_line(&dir, opts, sandbox))
+        cmd.args(command_line(exe.flavor, &dir, opts, sandbox))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(stderr);
@@ -553,6 +654,36 @@ impl Chromium {
                 return self.new_page();
             }
             let _ = self.clock.wait(POLL, &CancelToken::new());
+        }
+    }
+
+    /// How the browser's helper processes started so far, as the browser counts them in its own histograms
+    /// ([`HelperStarts`]). `None` when the browser does not say: it does not know `Browser.getHistograms` (an experimental
+    /// DevTools method) or answers without histograms. A helper that could not start is started again, and requests in
+    /// flight on the first try are lost (see [`NO_TESTING_FIELD_TRIALS`]). For tests and diagnostics.
+    #[doc(hidden)]
+    pub fn helper_starts(&self) -> Result<Option<HelperStarts>> {
+        let Some(launch) = self.histograms("ChildProcess.Launch")? else {
+            return Ok(None);
+        };
+        let Some(sandbox) = self.histograms("Chrome.SystemNetworkContextManager.NetworkSandbox")?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(HelperStarts::from_histograms(&launch, &sandbox)))
+    }
+
+    /// The histograms whose names contain `query`; `None` when the browser does not answer with a list.
+    fn histograms(&self, query: &str) -> Result<Option<Vec<Value>>> {
+        match self.conn.call(
+            None,
+            "Browser.getHistograms",
+            json!({"query": query}),
+            Duration::from_secs(5),
+        ) {
+            Ok(r) => Ok(r.get("histograms").and_then(Value::as_array).cloned()),
+            Err(Error::Protocol(_)) => Ok(None),
+            Err(e) => Err(e),
         }
     }
 

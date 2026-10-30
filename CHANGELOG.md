@@ -11,6 +11,27 @@ Conventional Commits; one semver tag for the whole repo.
   shortcut fired (CI run 7134, Dyno's WebKit leg). `WorkbenchPalette.open` and Dyno's e2e use it.
 ### `pd-jobs-status`: a visible heading
 - The Jobs popover has a visible heading (the popover's name, "Jobs") above the list, and the popover region is named by it (`aria-labelledby`), so a picture of it says what it is.
+### `paddock-chromium`: Chromium builds start without their testing field trials
+- A `Flavor::Chromium` browser (Chrome for Testing: the runtime store's and CI's) starts with
+  `--disable-field-trial-config` (`launch::NO_TESTING_FIELD_TRIALS`), as Puppeteer and Playwright do; branded Chrome and
+  Edge never apply that config and get no switch. On Windows CI the config's network-service sandbox could not start
+  for a browser in the runner's user folder (all 12 Chrome logs of runs 7149 and 7154: "Sandbox cannot access
+  executable", launch error 45), and Chrome started the network service again unsandboxed. Real-browser loads were lost
+  with `net::ERR_ABORTED` in those runs, 3 to 4 s later, when the profile's own requests failed too.
+- `command_line` takes the browser's `Flavor`, and the command line has one `--disable-features` switch: the quiet
+  features (now `launch::QUIET_DISABLED_FEATURES`; the switch left `QUIET_FLAGS`) and any the caller passes in
+  `extra_args`, merged without repeats.
+- New `Chromium::helper_starts() -> Result<Option<HelperStarts>>` (`started`, `failed`, `network_sandbox_failed`,
+  `network_sandbox_given_up`, from the browser's own histograms; `None` when it does not say), for tests and diagnostics.
+- CI's test-browser installer (`conformance/ci/install-test-browser.mjs`) grants app containers (S-1-15-2-1, S-1-15-2-2)
+  read and execute on the browser folder on Windows, as Program Files has them.
+- The same switch in the two driver copies still to move onto `paddock-chromium` (plan X14): Spotter's `spotter-render`
+  (`args` now takes the browser's `Flavor` and the caller's extra arguments, which it places before `about:blank` with
+  their features merged into its one `--disable-features` switch; they used to come after the start page) and Debrief's
+  `chromium-driver` (`command_line` takes the `Flavor`).
+- Confirmed by CI run 7170: on Windows, five rounds of the real-browser tests (25 browsers, Chrome logs kept) had no
+  failed sandbox start, no second network-service start, no failed sign-in request and no `net::ERR_ABORTED`.
+
 ### `paddock-proc`: processes by identity (ADR 0033, rule 53)
 - New `ProcessId` (pid plus `StartTime`), `Holder`, `Ending`, `TreeEnding`, `holder`, `usage::Row` and `usage::identity`. `kill_tree` (now returning a `TreeEnding`), `end`, `ask` and `terminate` take a `ProcessId` and act only if its pid still belongs to it: one handle on Windows, a pidfd on Linux, a check then the signal on macOS; skipped and refused kills are logged. `processes_mentioning` and `descendants_of` return `ProcessId`s. `ProcessId::of_recorded(pid, written_ms)` is for a pid read from a file. `Supervised::process()` is new.
 - Walks follow parents by age: `usage::descendants`, `tree_memory_with` and the per-pid `tree_memory_from` (now taking a `ProcessId`) count a process as a child only if it started no earlier than its parent. `Table` rows are `Row { parent, rss, started }`, `ProcEntry` has `started`, `ProcessSource` has `started`.

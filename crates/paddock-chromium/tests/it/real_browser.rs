@@ -250,6 +250,48 @@ fn an_answered_abort_never_blames_the_network_service() {
     );
 }
 
+/// Every helper process the browser needs starts on the first try. In all 12 Chrome logs of Windows CI runs 7149 and 7154
+/// the sandboxed network service of Chrome for Testing's testing config could not start (the browser sat in the runner's
+/// user folder) and was started again unsandboxed; real-browser loads were lost in those runs. The browser counts such
+/// failed starts itself, so this checks every browser, not only the unlucky loads.
+#[test]
+fn every_helper_process_starts_on_the_first_try() {
+    let Some(exe) = require_browser() else { return };
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for s in listener.incoming().flatten() {
+            std::thread::spawn(move || answer(s, |_| Some("<title>Up</title>".into())));
+        }
+    });
+    let base = tempfile::tempdir().unwrap();
+    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let page = b.new_page().unwrap();
+    page.navigate(
+        &format!("http://127.0.0.1:{port}/"),
+        Duration::from_secs(30),
+    )
+    .unwrap();
+    let starts = b
+        .helper_starts()
+        .unwrap()
+        .expect("Chrome for Testing reports its histograms");
+    assert!(
+        starts.started > 0,
+        "the browser reports its helper starts: {starts:?}"
+    );
+    assert_eq!(
+        (
+            starts.failed,
+            starts.network_sandbox_failed,
+            starts.network_sandbox_given_up
+        ),
+        (0, 0, 0),
+        "a helper process (the network service) could not start and was started again: {starts:?}"
+    );
+    assert!(close_by_itself(&mut b).0, "Browser.close ends it by itself");
+}
+
 #[test]
 fn a_real_browser_reads_a_page_and_closes_cleanly() {
     let Some(exe) = find_for_tests() else {
