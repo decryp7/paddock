@@ -997,3 +997,18 @@ the appender at a fraction of its memory, and eight writers scale it further; th
 footprint of 396 to 418 MB, against the 283 to 303 MB of the existing one-key-per-statement form on 1.5.6 and 329 to 344 MB on 2.0.
 So 2.0 spills instead of failing, but at 70 to 100 MB more resident memory and slower; the work-around stays because the query budget is
 300 MB. The window-operator gap work-around (anomalies) and the lane work-arounds were not re-tested here and stay.
+
+### Index and ordering follow-ups (2026-10-30)
+
+From the review of the import-to-search work on `debrief/duckdb-2`:
+
+- **Don't hold the write lock across `index_files`.** An index step holds the store's write lock while it reads its segments and
+  builds and adds the documents, then commits and marks them. Live follow and compaction wait for the whole step.
+  - For now, rule 52 is kept by running the indexing thread at normal priority on Windows.
+  - The fix is to read and build the documents without the lock and take it only to commit and mark the segments, with
+    the step cancellable at that point (Debrief 1.2 plan package IX-S, with SR2's cancellable steps).
+- **Every rebuild of the time-order positions goes through `Inner::reorder`.** It takes the `heavy` lock, gives DuckDB the
+  import memory, and makes two attempts; if both fail it marks the positions `ord_stale`.
+  - `Positions::order_complete` is false while the positions are stale, and the app then runs the ordering job.
+  - A live append never extends stale positions, and never clears the mark.
+  - Cancel stops the ordering after one attempt: it rolls back and leaves the mark as it was.

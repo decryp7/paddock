@@ -331,10 +331,13 @@ What the round shows, single runs on a busy machine (the import times scatter fr
 about 20% are noise:
 - No variant indexes faster than about 315k documents/s (4 x 128 MB); 2 and 4 threads are equal within the noise.
 - More threads are slower past 4: 13 threads take 1.6 to 2.4 times as long as 2 or 4.
-- More threads also leave more index segments (52 to 54 with 13, 19 to 27 with 2 and 4) and make common-word searches
-  faster (13 threads 132 to 149 ms, 4 threads 191 to 204 ms, 2 threads 374 ms), presumably because a search runs over
-  more segments in parallel.
+- More threads also leave more index segments (52 to 54 with 13, 19 to 27 with 2 and 4), and common-word searches ran
+  faster with more threads (13 threads 132 to 149 ms, 4 threads 191 to 204 ms, 2 threads 374 ms); why is not
+  established.
 
 So the writer threads are no longer the limit. The suspects, not profiled yet, are the pipeline in front of them: one
 Parquet reader, a 4-thread docs pool, an in-order feeder, and a commit every 4 segments. Auto is capped at 4 until that is fixed (plan package SR1). An earlier
 round with the writer at QoS `BACKGROUND` (efficiency cores only) was void and is not shown.
+
+Pending, on a quiet machine: rounds 2 and 3 of this sweep, and the store worker's physical footprint (rule 26) for each
+variant. Until then, these numbers support the Auto cap of 4 and nothing finer.
