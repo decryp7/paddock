@@ -575,3 +575,91 @@ mod tests {
         }
     }
 }
+
+/// The CPU time (user + system) `pid` has used, in microseconds, from a read of that pid only; `None` when there is no
+/// such process or the OS did not say.
+#[cfg(target_os = "linux")]
+pub fn cpu_micros(pid: u32) -> Option<u64> {
+    // SAFETY: sysconf takes an integer and has no preconditions.
+    let hz = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok()?;
+    crate::usage::cpu_micros_from_stat(
+        &std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?,
+        hz,
+    )
+}
+
+/// See the Linux version: `proc_pidinfo(PROC_PIDTASKINFO)`, whose totals are in Mach absolute time units (not nanoseconds
+/// on Apple silicon), converted with `mach_timebase_info`.
+#[cfg(target_os = "macos")]
+#[allow(
+    deprecated,
+    reason = "libc marks the Mach timebase for mach2; one call, no new dependency"
+)]
+pub fn cpu_micros(pid: u32) -> Option<u64> {
+    use std::sync::OnceLock;
+    static TIMEBASE: OnceLock<Option<(u32, u32)>> = OnceLock::new();
+    let (numer, denom) = (*TIMEBASE.get_or_init(|| {
+        let mut tb = libc::mach_timebase_info { numer: 0, denom: 0 };
+        // SAFETY: mach_timebase_info fills the struct it is given.
+        let rc = unsafe { libc::mach_timebase_info(&raw mut tb) };
+        (rc == 0 && tb.denom != 0).then_some((tb.numer, tb.denom))
+    }))?;
+    let pid = libc::c_int::try_from(pid).ok()?;
+    let mut info = std::mem::MaybeUninit::<libc::proc_taskinfo>::zeroed();
+    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_taskinfo>()).ok()?;
+    // SAFETY: proc_pidinfo fills at most `size` bytes of the zero-initialised struct; it is read only when the call
+    // returned the full size.
+    let got = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTASKINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if got != size {
+        return None;
+    }
+    // SAFETY: filled by the call, which returned its whole size.
+    let info = unsafe { info.assume_init() };
+    Some(crate::usage::mach_to_micros(
+        info.pti_total_user.saturating_add(info.pti_total_system),
+        numer,
+        denom,
+    ))
+}
+
+/// See the Linux version: `GetProcessTimes` (kernel + user, in 100 ns units).
+#[cfg(windows)]
+pub fn cpu_micros(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // SAFETY: OpenProcess takes plain values; the handle is closed below; four writable FILETIMEs.
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let mut t = [FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        }; 4];
+        let [c, e, k, u] = &mut t;
+        let ok = GetProcessTimes(h, c, e, k, u);
+        CloseHandle(h);
+        if ok == 0 {
+            return None;
+        }
+        let ft = |f: &FILETIME| (u64::from(f.dwHighDateTime) << 32) | u64::from(f.dwLowDateTime);
+        Some((ft(&t[2]).saturating_add(ft(&t[3]))) / 10)
+    }
+}
+
+/// Elsewhere: not read.
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+pub fn cpu_micros(_pid: u32) -> Option<u64> {
+    None
+}

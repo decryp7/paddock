@@ -434,3 +434,45 @@ compatibility"): frame version 3, whose `Hello` and `Welcome` end with a `caps: 
 version-3 host accepts version-2 peers without capabilities, and a version-3 client refused with `version` reconnects
 once as version 2. The rest of §9 stands: a peer without the bit is never refused and is judged on CPU time and run
 state. Package 2.6d builds it.
+
+## Amendment 2026-10-30: the shared start judge (`paddock-proc`)
+
+**Decision of the user (2026-10-30):** build the shared part for starts now, so every app uses it (Dyno 1.0 first, then
+Spotter and the browser driver). It is deliberately small: what Dyno, Spotter and `paddock-chromium` each wrote beside
+each other (Dyno `link.rs`, Spotter `StartJudge`, `paddock-chromium`'s fixed 20 s `START_LIMIT`). The rest of phase B
+(`paddock-jobs::patience`, the plugin path) is unchanged.
+
+**API (all in `paddock-proc`, pure core and thin edges).**
+
+- `StartJudge` (pure): one `Reading` per tick (`Liveness` Running/Paused/Exited{status, stderr tail}, the `ready`
+  handshake, an app-defined `progress` counter, `Cpu` NotRead/Unavailable/Used) gives a `StartState`: Starting, Ready,
+  Stalled(`StallReport`), Exited(`ExitInfo`). Spin (CPU used without becoming ready), idle (no CPU and no progress) and
+  the note after N ticks are counted in observations, never wall seconds: a paused host counts one tick (section 2).
+  `Patience` holds the limits. The only time-based bound is `hang_guard`, used when the OS gives no CPU reading at all;
+  so a start is always bounded, also without a process identity. A hung process with timer threads can keep using a
+  little CPU and reset the idle count: the caller's cap is the bound for that.
+- `StartWatch` (edge): a `StartProbe` (liveness, ready, progress, CPU) and a `Pace` (the clock) drive the judge until
+  Ready, Exited, Stalled or Cancelled; after a stall it can be called again.
+- `StallReport { cause, action, message }`: `StallCause` Slow, Spinning, Idle, Hung, WaitingForSupervisor, HeldByOther;
+  `StallAction` Wait, Retry, ShowLog. Apps map it to their health chip and Retry.
+- `InstanceLock::claim(path)` gives `Claim::Acquired | Held | Unsupported` from an OS lock (`File::try_lock`: `flock`,
+  `LockFileEx`); `is_held(path)`. The lock is the authority.
+- `hint`: a discovery file is only a hint (rule 53). `Hint` (pid, start), `written_since`, `names_live` (new, or
+  answers), `remove_if_same`, `remove_if_mine`, `write_private_atomic`, `read_bounded`.
+- `tree_cpu_time_from(source, root)`, `ProcessSource::cpu_micros(pid)`: the CPU time of a tree by identity, one pid at
+  a time (macOS `proc_pidinfo(PROC_PIDTASKINFO)` with the timebase, Linux `/proc/<pid>/stat` fields 14 and 15, Windows
+  `GetProcessTimes`), `tree_cpu_time_of` for a job's members.
+
+**What it replaces.** Dyno: `instance.rs`'s lock, `start_progress`, `written_since`/`names_live_agent`,
+`Discovery::remove_if_same/mine`, the "still starting" note. Spotter: `StartJudge`/`StartPatience`. `paddock-chromium`:
+`START_LIMIT`/`start_limit` and the port-file wait. Pitwall, Pitcrew, Debrief: their fixed spawn waits, as C51 lists them.
+
+**Parallelism and cost (ER-20).** The judge is arithmetic on one reading per tick. The probe's cheap signals (a liveness
+check, a file read) run every tick (50 ms); the CPU time is read every `cpu_every` ticks (1 s) and costs one system call
+per process of the tree, never a table scan (ADR 0024 rule 4): about 0.1% of a core for a browser's tree, against about
+2% for a table scan per beat (Spotter's first version). Nothing runs in parallel: one watcher thread per starting
+process, at the caller's priority. Cheaper than reading the CPU is not reading it while the handshake is near: the watch
+reads the handshake first. Measurements are recorded when the apps adopt it (rule 48).
+
+**Conformance C51** starts in report-only mode (warn), flagging fixed start and spawn waits; it turns to failing with the
+waiver-list targets above.

@@ -32,6 +32,13 @@ Conventional Commits; one semver tag for the whole repo.
 - Confirmed by CI run 7170: on Windows, five rounds of the real-browser tests (25 browsers, Chrome logs kept) had no
   failed sandbox start, no second network-service start, no failed sign-in request and no `net::ERR_ABORTED`.
 
+### `paddock-proc`: the start judge, the single-instance lock and discovery hints (ADR 0031)
+
+- `StartJudge`, `StartWatch`, `Patience`, `StallReport`: a start is judged on liveness, a ready handshake, progress
+  ticks and the tree's CPU time, counted in ticks; no wall-clock give-up for a working process.
+- `InstanceLock::claim` (`Acquired`/`Held`/`Unsupported`) and the `hint` module (a discovery file is only a hint).
+- `tree_cpu_time_from`, `tree_cpu_time_of` and `ProcessSource::cpu_micros` read the CPU time one pid at a time.
+
 ### `paddock-proc`: processes by identity (ADR 0033, rule 53)
 - New `ProcessId` (pid plus `StartTime`), `Holder`, `Ending`, `TreeEnding`, `holder`, `usage::Row` and `usage::identity`. `kill_tree` (now returning a `TreeEnding`), `end`, `ask` and `terminate` take a `ProcessId` and act only if its pid still belongs to it: one handle on Windows, a pidfd on Linux, a check then the signal on macOS; skipped and refused kills are logged. `processes_mentioning` and `descendants_of` return `ProcessId`s. `ProcessId::of_recorded(pid, written_ms)` is for a pid read from a file. `Supervised::process()` is new.
 - Walks follow parents by age: `usage::descendants`, `tree_memory_with` and the per-pid `tree_memory_from` (now taking a `ProcessId`) count a process as a child only if it started no earlier than its parent. `Table` rows are `Row { parent, rss, started }`, `ProcEntry` has `started`, `ProcessSource` has `started`.
