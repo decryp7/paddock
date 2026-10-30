@@ -789,8 +789,62 @@ impl TempDir {
 
 impl Drop for TempDir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        crate::scratch::remove_or_defer(&self.0);
     }
+}
+
+/// The lone process of [`a_property_folder_whose_removal_fails_is_gone_when_its_process_ends`]: a property folder whose
+/// removal fails when it is dropped (staged through [`crate::scratch::fail_next_removal`], as a transient error would),
+/// then the process ends normally. Does nothing in a normal run.
+#[test]
+#[cfg(unix)]
+fn a_property_folder_whose_removal_fails_is_gone_when_its_process_ends_in_a_lone_process() {
+    if std::env::var_os("DEBRIEF_PROP_LEAK_PROBE").is_none() {
+        return;
+    }
+    let dir = TempDir::new();
+    let path = dir.0.clone();
+    std::fs::write(path.join("a.clef"), b"x").unwrap();
+    crate::scratch::fail_next_removal();
+    drop(dir);
+    assert!(path.join("a.clef").exists(), "the removal failed, as staged");
+    println!("FOLDER {}", path.display());
+}
+
+/// Regression (CI 7108, job 21353): the workspace properties passed, yet `debrief-prop-<pid>-<n>` folders were left in
+/// the temp folder and the leak check failed. The fixture's `Drop` ignored a failed removal, so any error on a busy
+/// machine (or anything else that made it fail) left the folder for good. Counts the probe's folders after its process
+/// ended: none may be left.
+#[test]
+#[cfg(unix)]
+fn a_property_folder_whose_removal_fails_is_gone_when_its_process_ends() {
+    let name = "properties::a_property_folder_whose_removal_fails_is_gone_when_its_process_ends_in_a_lone_process";
+    let out = debrief_core::process::quiet_command(std::env::current_exe().unwrap())
+        .args(["--exact", name, "--test-threads=1", "--nocapture"])
+        .env("DEBRIEF_PROP_LEAK_PROBE", "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}{}", String::from_utf8_lossy(&out.stderr));
+    let folder = stdout
+        .lines()
+        .find_map(|l| l.split_once("FOLDER ").map(|(_, p)| PathBuf::from(p)))
+        .expect("the probe made its folder");
+    let prefix = folder
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .rsplit_once('-')
+        .unwrap()
+        .0
+        .to_string();
+    let left: Vec<_> = std::fs::read_dir(std::env::temp_dir())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(&format!("{prefix}-")))
+        .collect();
+    assert!(left.is_empty(), "left behind by the probe's process: {left:?}");
 }
 
 #[derive(Debug, Clone)]

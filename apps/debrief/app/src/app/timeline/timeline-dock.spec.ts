@@ -8,7 +8,11 @@ import { EMPTY_EXTRAS, LAYOUT_STORE, LayoutStore } from '../dock/layout-store';
 import { provideTimelines } from './provide-timelines';
 import { TimelineViews } from './timeline-views';
 
-beforeAll(() => loadDockview());
+// The panel's component is a lazy import (a cold one, on a loaded runner, takes longer than a wait's default second): load
+// it, and dockview, before any test starts, so the waits below only cover rendering.
+beforeAll(async () => {
+  await Promise.all([loadDockview(), import('./timeline-panel')]);
+});
 
 describe('additional timelines in the dock', () => {
   let container: HTMLElement;

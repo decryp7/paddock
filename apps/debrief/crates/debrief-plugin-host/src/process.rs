@@ -482,6 +482,11 @@ impl PluginProcess {
         *lock(&self.limits) = limits;
     }
 
+    /// How long a start of its process may take to connect.
+    pub fn connect_window(&self) -> Duration {
+        self.spec.connect_window
+    }
+
     /// The memory cap its process gets at its next start (bytes).
     pub fn memory_cap(&self) -> u64 {
         lock(&self.limits).memory_cap(&self.manifest)

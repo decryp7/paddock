@@ -989,6 +989,25 @@ test('Debrief\'s nextest ci profile stops a hung test, and every longer budget i
 });
 
 
+// Debrief's shell tests each start the plugins binary and its plugin processes; fourteen at once loaded the Mac runner to
+// 116 and pushed five ai::tests past 90 s (CI 7096). They run in a bounded group, chosen by the whole binary so a new test
+// joins it without a list to keep (rule 51, ER-20).
+test('Debrief\'s shell tests, which start plugin processes, run in a group of at most six, chosen by their binary', () => {
+  const text = read(join(PADDOCK, 'apps', 'debrief', '.config', 'nextest.toml'));
+  const group = text.match(/^app-plugin-processes = \{ max-threads = (\d+) \}$/m);
+  assert.ok(group, 'the app-plugin-processes test group exists');
+  assert.ok(Number(group[1]) >= 1 && Number(group[1]) <= 6, `at most six at a time (is ${group[1]})`);
+  const overrides = text.split(/^\[\[profile\.\w+\.overrides\]\]$/m).slice(1);
+  const mine = overrides.filter((o) => /^test-group = 'app-plugin-processes'$/m.test(o));
+  assert.equal(mine.length, 1, 'one override puts tests in the group');
+  assert.match(mine[0], /^filter = 'package\(debrief-app\) & kind\(lib\)'$/m, 'the whole lib binary, not a list of names');
+  for (const o of overrides) {
+    if (/^test-group = /m.test(o) && !/app-plugin-processes/.test(o)) {
+      assert.doesNotMatch(o, /package\(debrief-app\)/, 'no other group takes the shell tests');
+    }
+  }
+});
+
 test('ci.yml runs the icon tests and `install.mjs --check` in an icons job that the plan feeds', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   assert.match(ci, /icons: \$\{\{ steps\.plan\.outputs\.icons \}\}/, 'the plan job exports the icons output');
