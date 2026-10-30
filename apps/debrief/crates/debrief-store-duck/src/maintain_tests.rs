@@ -33,11 +33,13 @@ fn segment_files(conn: &Connection) -> Vec<String> {
     stmt.query_map([], |r| r.get::<_, String>(0)).unwrap().map(Result::unwrap).collect()
 }
 
-/// A store with the sample logs, and one of its sources dropped from the catalog the way `remove_source` does it, but
-/// without the compaction that follows: its rows are garbage the next compaction would rewrite.
+/// A store with the sample logs, indexed, and one of its sources dropped from the catalog the way `remove_source` does
+/// it, but without the compaction that follows: its rows are garbage the next compaction would rewrite (compaction
+/// takes indexed segments only).
 fn with_garbage(dir: &Dir) -> DuckStore {
     let store = DuckStore::create(&dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
     store.open(&samples()).unwrap().wait().unwrap();
+    assert!(store.wait_for_index(std::time::Duration::from_secs(60)).unwrap().ready);
     {
         let conn = store.inner.conn().unwrap();
         let sources: u32 = conn.query_row("SELECT count(*) FROM sources", [], |r| r.get(0)).unwrap();
@@ -117,6 +119,34 @@ fn compaction_reports_progress_and_stops_between_groups_when_cancelled() {
     assert_eq!(p.stage, QueryStage::Evaluating);
     assert!(p.total > 0 && p.done == p.total, "{p:?}");
     assert_ne!(segment_files(&conn), files_before);
+}
+
+/// Compaction takes indexed segments only (ADR 0062 section 3): an unindexed segment, small or holding rows of a
+/// removed source, waits for a later compaction after it is indexed.
+#[test]
+fn compaction_leaves_unindexed_segments_for_later() {
+    let dir = Dir::new("compact-unindexed");
+    let store = with_garbage(&dir);
+    let conn = store.inner.conn().unwrap();
+    // The indexer waits for the write lock: nothing is indexed while the test looks.
+    let _writing = lock(&store.inner.write_lock);
+    conn.execute_batch("UPDATE segments SET indexed = FALSE").unwrap();
+    let files_before = segment_files(&conn);
+    assert!(
+        compact::pending(&conn).unwrap().is_empty(),
+        "nothing is pending while nothing is indexed"
+    );
+    let done = compact::compact_with(&conn, &store.inner.dir, &store.inner.schema, true).unwrap();
+    assert_eq!(done, Compaction::default());
+    assert_eq!(segment_files(&conn), files_before);
+    // Indexed: the garbage is rewritten and the small segments merged.
+    conn.execute_batch("UPDATE segments SET indexed = TRUE").unwrap();
+    assert!(!compact::pending(&conn).unwrap().is_empty());
+    let done = compact::compact_with(&conn, &store.inner.dir, &store.inner.schema, true).unwrap();
+    assert!(done.replaced > 0, "{done:?}");
+    assert_ne!(segment_files(&conn), files_before);
+    let indexed: bool = conn.query_row("SELECT bool_and(indexed) FROM segments", [], |r| r.get(0)).unwrap();
+    assert!(indexed, "merged segments stay indexed");
 }
 
 /// Rewrites a segment in place the way Debrief 1.1 (Arrow 58) wrote it: the `extra` map's entry fields are `keys` and
