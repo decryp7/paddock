@@ -87,19 +87,15 @@ pub fn is_legacy_plugin_plist(xml: &str) -> bool {
     }
 }
 
-/// `<folder>/Dyno.app/Contents/MacOS/dyno-app`: the app's executable inside its bundle, nothing looser.
+/// `/<folder>/Dyno.app/Contents/MacOS/dyno-app`: the app's executable inside its bundle, nothing looser. The plist is a
+/// macOS file whatever OS reads it, so the path is split on `/` as text instead of with the host's `Path` rules (on
+/// Windows a leading `/` is not an absolute path), which keeps this matcher and its tests the same on every OS.
 fn is_app_path(program: &str) -> bool {
-    use std::path::Component::Normal;
-    let p = Path::new(program);
-    if !p.is_absolute() {
+    let Some(rest) = program.strip_prefix('/') else {
         return false;
-    }
-    let tail: Vec<_> = p.components().rev().take(4).collect();
-    matches!(
-        tail.as_slice(),
-        [Normal(exe), Normal(macos), Normal(contents), Normal(bundle)]
-            if *exe == APP_EXE && *macos == "MacOS" && *contents == "Contents" && *bundle == "Dyno.app"
-    )
+    };
+    let parts: Vec<&str> = rest.split('/').collect();
+    matches!(parts.as_slice(), [.., bundle, "Contents", "MacOS", exe] if *bundle == "Dyno.app" && *exe == APP_EXE)
 }
 
 /// What [`remove_legacy_plist`] did.
