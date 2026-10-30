@@ -355,7 +355,13 @@ When you quit Pitwall: keep serving, stop serving, or ask each time.
 
 ![When you quit Pitwall](screenshots/settings-quit-light.png)
 
-![Quit Pitwall? question](screenshots/quit-dialog-light.png)
+![The quit question, "Keep serving after you quit?"](screenshots/quit-dialog-light.png)
+
+Every change is saved by itself a moment after you make it; there is no Save button. A number out of range says what to fix next
+to it and is not saved, and a save the server refuses keeps your change and offers Undo change and Retry. A change still waiting
+is saved when the window closes.
+
+![Background service](screenshots/settings-service-light.png)
 
 - **General**: start at login, theme (system, light, dark), **When you quit Pitwall** (keep serving in the background, stop
   serving, or ask each time; [ADR 0021](adr/0021-what-quitting-does-about-serving.md)). Works.
