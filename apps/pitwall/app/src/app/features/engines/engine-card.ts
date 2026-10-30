@@ -70,7 +70,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
           <table mat-table [dataSource]="buildRows()" [trackBy]="byBuild" [multiTemplateDataRows]="true" [fixedLayout]="true" aria-label="Installed builds">
             <ng-container matColumnDef="build">
               <th mat-header-cell *matHeaderCellDef scope="col">Build</th>
-              <td mat-cell *matCellDef="let b" [matTooltip]="b.label" matTooltipShowDelay="600">
+              <td mat-cell *matCellDef="let b" [matTooltip]="b.devices.length ? b.label + ' · ' + b.devices.join(', ') : b.label" matTooltipShowDelay="600">
                 <span class="bname">{{ b.label }}</span>
                 @if (b.active) {
                   <span class="active"><mat-icon svgIcon="pw:check" aria-hidden="true" />Active</span>
@@ -255,6 +255,12 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
     .mat-column-act {
       width: 116px;
     }
+    /* A narrow list keeps the build's name whole: the devices move to its tooltip. */
+    @container (max-width: 760px) {
+      .mat-column-devices {
+        display: none;
+      }
+    }
     .mat-column-pid,
     .mat-column-restarts {
       width: 88px;
@@ -268,6 +274,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
     .surface {
       /* Clips the table to the rounded corners without becoming a scroller, so the header can stick to the page. */
       overflow: clip;
+      container-type: inline-size;
       background: var(--pd-surface-1);
       border: 1px solid var(--pd-hairline);
       border-radius: var(--pd-radius-card);

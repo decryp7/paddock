@@ -78,13 +78,25 @@ export function limitsText(l: AppLimits): string {
   styles: `
     :host {
       display: block;
+      container-type: inline-size;
       margin: 0 calc(-1 * var(--pd-space-4)) calc(-1 * var(--pd-space-2));
     }
     .mat-column-requests,
     .mat-column-tokens,
     .mat-column-busy,
     .mat-column-errors {
-      width: 72px;
+      width: 88px;
+    }
+    /* A narrow card keeps the app's name and its numbers: the trend goes first, then the limits (both are on Apps & keys). */
+    @container (max-width: 640px) {
+      .mat-column-trend {
+        display: none;
+      }
+    }
+    @container (max-width: 560px) {
+      .mat-column-limits {
+        display: none;
+      }
     }
     .mat-column-limits {
       width: 96px;

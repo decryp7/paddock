@@ -267,6 +267,12 @@ export function fitDetail(f: Fit): string {
       gap: var(--pd-space-3);
       align-items: start;
     }
+    /* Under 1100 px the quantisations take the full width below the results, so their table keeps every column whole. */
+    @media (max-width: 1100px) {
+      .cols {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
     .list {
       list-style: none;
       margin: var(--pd-space-2) 0 0;
