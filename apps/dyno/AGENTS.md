@@ -199,6 +199,9 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
 
 - Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
   `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
+- Specs never wait a fixed number of event-loop turns and never leave a patch behind (rule 49): wait on the condition
+  (Debrief: `openDialog()`), never let an optional chain perform a test's action, and patch a prototype only with
+  `vi.spyOn` (restored after each test).
 - Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
   branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.
 - A change that touches an app's release path builds that app's installers before it lands on main (rule 54): the batch
