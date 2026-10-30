@@ -362,6 +362,7 @@ impl DiskCentre {
         }
         let me = self.clone();
         let spawned = std::thread::Builder::new().name("dyno-volumes".into()).spawn(move || {
+            dyno_platform::priority::lower_current_thread();
             me.refresh();
             me.refreshing.store(false, Ordering::SeqCst);
         });

@@ -704,3 +704,48 @@ fn cancelled_job_open() -> paddock_jobs::JobContext {
     }
     paddock_jobs::JobRegistry::new(Arc::new(Quiet)).register("rescan-issues", "Reading system logs", None)
 }
+
+/// The thread name and QoS class of each read.
+#[cfg(target_os = "macos")]
+type Reads = Arc<Mutex<Vec<(Option<String>, u32)>>>;
+
+/// Reads its own thread's QoS class: a source runs on the thread of the job that reads it.
+#[cfg(target_os = "macos")]
+struct ClassProbe(Reads);
+
+#[cfg(target_os = "macos")]
+impl IssueSource for ClassProbe {
+    fn id(&self) -> IssueSourceId {
+        IssueSourceId::MacReports
+    }
+    fn read(&self, _since: Timestamp, _until: Timestamp) -> Result<Vec<Issue>, PlatformError> {
+        let thread = std::thread::current().name().map(str::to_string);
+        self.0.lock().unwrap().push((thread, dyno_platform::priority::current_qos_class()));
+        Ok(Vec::new())
+    }
+}
+
+/// Every agent thread but the server runs at the gentle level (rule 52), the job pool's workers included: a job the person
+/// started may wait behind a busy machine but is never starved, and is never ahead of the person's own work.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_job_runs_at_the_gentle_level() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let h = Harness::start(vec![Box::new(ClassProbe(seen.clone()))]);
+    let peer = h.client();
+    let job = start(
+        &peer,
+        JobSpec::RescanIssues {
+            query: IssuesQuery { days: 14 },
+        },
+    )
+    .unwrap();
+    assert!(matches!(wait_final(&peer, job.id).state, WireState::Done), "the read ends");
+    let seen = seen.lock().unwrap().clone();
+    // The scheduled read runs on `dyno-issues`; the job's read is the one on any other thread.
+    assert!(
+        seen.iter().any(|(t, _)| t.as_deref() != Some("dyno-issues")),
+        "the job read the source: {seen:?}"
+    );
+    assert!(seen.iter().all(|(_, c)| *c == dyno_platform::priority::UTILITY), "{seen:?}");
+}

@@ -153,7 +153,9 @@ One line each. The dated records are in the app files.
     [the record](#2026-10-29-paddock-chromium-browserclose-exit-time-under-load-fixflaky-browser-close).
 - **CI** (2026-10-24, before the monorepo): Paddock `ci.yml` median 3m05s. App builds 15–37 min median; Debrief's is
   24 min. See [ci-timings](research/2026-10-ci-timings.md). The monorepo has no re-run yet.
-- **Dyno:** the agent costs about 2.0–3.2% of one core and 24 MB (load 55–85, an upper bound, date not stated).
+- **Dyno:** idle, nobody watching, the agent costs about 0.9–1.1% of one core and 30 MB (2026-10-30, release, load 21–61),
+  the same with its threads at `UTILITY` as before; the finder is about 4% slower at `UTILITY` on a busy machine. Earlier:
+  2.0–3.2% of one core and 24 MB (load 55–85, an upper bound, date not stated).
 - **Pacenotes** (2026-10-25/28): Model2Vec potion-code-16M-v2 embeds 6,365 chunks/s on 1 thread and 55,499 on 13, with
   a 200 MB peak. BM25 plus potion-code meets the quality bar (0.750 / +28%).
 - **Pitcrew** (branch `docs/pitcrew-autoscale`, simulation): auto-scaling 1–4 runners cuts the mean wait from 171 to

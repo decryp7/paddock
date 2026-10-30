@@ -147,6 +147,7 @@ impl CounterCentre {
         let (tx, rx) = mpsc::channel();
         let inner = self.inner.clone();
         let spawned = std::thread::Builder::new().name("dyno-counters".into()).spawn(move || {
+            dyno_platform::priority::lower_current_thread();
             let _slot = slot;
             let _ = tx.send(f(&inner));
         });
@@ -244,6 +245,7 @@ impl CounterCentre {
         let slot = Slot(self.inner.clone());
         let inner = self.inner.clone();
         let spawned = std::thread::Builder::new().name("dyno-counters-pinned".into()).spawn(move || {
+            dyno_platform::priority::lower_current_thread();
             let _slot = slot;
             let raws = inner.source.read(&parsed);
             record(&inner, raws, now);

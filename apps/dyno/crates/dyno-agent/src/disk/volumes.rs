@@ -38,6 +38,7 @@ pub fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send +
     std::thread::Builder::new()
         .name("dyno-disk-probe".into())
         .spawn(move || {
+            dyno_platform::priority::lower_current_thread();
             let _ = tx.send(f());
         })
         .ok()?;
@@ -78,6 +79,7 @@ fn probe_network(
     let ask = capacity.clone();
     let marker = Marker(inflight.clone(), mount.clone());
     let spawned = std::thread::Builder::new().name("dyno-disk-probe".into()).spawn(move || {
+        dyno_platform::priority::lower_current_thread();
         let _marker = marker;
         let _ = tx.send(ask(&mount));
     });

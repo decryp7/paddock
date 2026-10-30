@@ -119,6 +119,9 @@ Not in Dyno 1.0 (decided 2026-10-28; ADR 0022 holds the design, the per-OS table
   with a plain reason, never 0. Other accounts' processes are one "Other users" row.
 - **1.1.** The read-only helper installed with the app from a protected folder, **start as administrator at login**, all
   processes and administrator-only counters on all three OS, and the helper installing Dyno's own signed updates.
+  Before it ships, its launchd plist (`crates/dyno-helper/src/install.rs`, the `launchd_plist` text) changes from
+  `ProcessType Background` to `Standard`: the helper answers the agent's requests, and launchd runs a `Background` job as
+  DARWIN_BG with every thread clamped to the `BACKGROUND` QoS band (rule 52; lessons 2026-10-30).
 - **Acceptance (1.0).** No administrator prompt at install or start; nothing runs elevated; unreadable figures say why.
 
 ## WP-02 CPU taming screen and profiles

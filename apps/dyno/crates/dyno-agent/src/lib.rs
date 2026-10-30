@@ -80,7 +80,10 @@ impl Running {
         threads.push(
             std::thread::Builder::new()
                 .name("dyno-sampler".into())
-                .spawn(move || sampler::Sampler::new(sensors, processes).run(&s))
+                .spawn(move || {
+                    dyno_platform::priority::lower_current_thread();
+                    sampler::Sampler::new(sensors, processes).run(&s)
+                })
                 .map_err(|e| format!("could not start the sampler: {e}"))?,
         );
         inventory::warm(&shared);
@@ -91,6 +94,7 @@ impl Running {
             std::thread::Builder::new()
                 .name("dyno-network".into())
                 .spawn(move || {
+                    dyno_platform::priority::lower_current_thread();
                     // Slow and cheap: only so that a new listener is noticed (and logged) when nobody has the page open.
                     while !s.stopped() {
                         s.network.tick(&s);
@@ -107,41 +111,57 @@ impl Running {
         threads.push(
             std::thread::Builder::new()
                 .name("dyno-hardware".into())
-                .spawn(move || hardware::run_background(&s))
+                .spawn(move || {
+                    dyno_platform::priority::lower_current_thread();
+                    hardware::run_background(&s)
+                })
                 .map_err(|e| format!("could not start the hardware watcher: {e}"))?,
         );
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()
                 .name("dyno-issues".into())
-                .spawn(move || issues::run(&s))
+                .spawn(move || {
+                    dyno_platform::priority::lower_current_thread();
+                    issues::run(&s)
+                })
                 .map_err(|e| format!("could not start the issue reader: {e}"))?,
         );
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()
                 .name("dyno-extras".into())
-                .spawn(move || extras::run(&s))
+                .spawn(move || {
+                    dyno_platform::priority::lower_current_thread();
+                    extras::run(&s)
+                })
                 .map_err(|e| format!("could not start the extras: {e}"))?,
         );
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()
                 .name("dyno-unusual".into())
-                .spawn(move || unusual::run(&s))
+                .spawn(move || {
+                    dyno_platform::priority::lower_current_thread();
+                    unusual::run(&s)
+                })
                 .map_err(|e| format!("could not start the program watcher: {e}"))?,
         );
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()
                 .name("dyno-netwatch".into())
-                .spawn(move || netwatch::run(&s))
+                .spawn(move || {
+                    dyno_platform::priority::lower_current_thread();
+                    netwatch::run(&s)
+                })
                 .map_err(|e| format!("could not start the network change watcher: {e}"))?,
         );
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()
                 .name("dyno-server".into())
+                // Not lowered: it answers the app's requests (rule 52; every other agent thread is).
                 .spawn(move || server::serve(&s, host))
                 .map_err(|e| format!("could not start the server: {e}"))?,
         );

@@ -127,7 +127,10 @@ impl NetCentre {
         if stale && !t.refreshing {
             t.refreshing = true;
             let (source, state) = (self.traffic_source.clone(), self.traffic.clone());
-            std::thread::spawn(move || refresh_traffic(source.as_ref(), &state));
+            std::thread::spawn(move || {
+                dyno_platform::priority::lower_current_thread();
+                refresh_traffic(source.as_ref(), &state)
+            });
         }
         match &t.cache {
             Some((_, rows, note)) => (rows.clone(), note.clone()),
@@ -179,21 +182,24 @@ impl NetCentre {
             let (tx, rx) = mpsc::channel::<(IpAddr, Option<String>)>();
             for _ in 0..RESOLVE_WORKERS.min(total) {
                 let (queue, tx, dns, names) = (queue.clone(), tx.clone(), self.dns.clone(), self.names.clone());
-                std::thread::spawn(move || loop {
-                    let Some(ip) = lock(&queue).pop_front() else { break };
-                    let (name, ttl) = match dns.lookup(ip) {
-                        Ok(Some(n)) => (clean_name(&n), NAME_TTL),
-                        Ok(None) => (None, NO_NAME_TTL),
-                        Err(_) => (None, FAILED_TTL),
-                    };
-                    {
-                        let mut cache = lock(&names);
-                        if cache.len() >= MAX_NAMES {
-                            cache.clear();
+                std::thread::spawn(move || {
+                    dyno_platform::priority::lower_current_thread();
+                    loop {
+                        let Some(ip) = lock(&queue).pop_front() else { break };
+                        let (name, ttl) = match dns.lookup(ip) {
+                            Ok(Some(n)) => (clean_name(&n), NAME_TTL),
+                            Ok(None) => (None, NO_NAME_TTL),
+                            Err(_) => (None, FAILED_TTL),
+                        };
+                        {
+                            let mut cache = lock(&names);
+                            if cache.len() >= MAX_NAMES {
+                                cache.clear();
+                            }
+                            cache.insert(ip, (Instant::now(), name.clone(), ttl));
                         }
-                        cache.insert(ip, (Instant::now(), name.clone(), ttl));
+                        let _ = tx.send((ip, name));
                     }
-                    let _ = tx.send((ip, name));
                 });
             }
             drop(tx);
