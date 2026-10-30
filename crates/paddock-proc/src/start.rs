@@ -105,8 +105,9 @@ pub enum StartState {
     Exited(ExitInfo),
 }
 
-/// The pure judge. Feed it one [`Reading`] per tick.
-#[derive(Debug)]
+/// The pure judge. Feed it one [`Reading`] per tick. Cloning copies what it has seen (a state machine that holds a judge
+/// can then be cloned and explored).
+#[derive(Debug, Clone)]
 pub struct StartJudge {
     patience: Patience,
     what: String,
