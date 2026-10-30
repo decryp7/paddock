@@ -395,6 +395,8 @@ export class PdSettingsWindow implements DialogContent {
    * timer pending (a new wait, or "Keep waiting" after the last one fired); `endWait` stops it.
    */
   private armStillSaving(): void {
+    // One timer at a time: a double click on "Keep waiting" arms it once.
+    if (this.stillSavingTimer !== null) return;
     this.stillSavingTimer = setTimeout(() => {
       this.stillSavingTimer = null;
       this.stillSaving.set(this.waitingFor());
