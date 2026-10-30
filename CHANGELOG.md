@@ -7,6 +7,7 @@ Conventional Commits; one semver tag for the whole repo.
 ### Browser specs run axe through the kit
 - `@decryp7/paddock-e2e`: `AxeOptions.extraTags` adds tags to `WCAG_TAGS` (`best-practice`, say). The gallery's specs (gallery, view, sunburst, material) and the shell demo's frame navigation call `axeViolations`, which waits for animations, instead of building `AxeBuilder` themselves.
 - `@decryp7/paddock-eslint`: new `paddock/e2e-axe-through-kit` (on in the preset for `e2e/` files; an `axe.ts` helper is exempt) reports `@axe-core/playwright` imported by a browser spec.
+- `@decryp7/paddock-eslint`: `e2eAxe()` is that block on its own, for an app with its own flat config; Debrief uses it, and its pipeline spec runs axe through its `e2e/axe.ts` helper. The gallery spec waits on the chart's canvas, the fonts and the animations instead of a 600 ms sleep.
 
 ### `pd-copy-menu`: stays open in WebKit
 - `<pd-copy-menu />` gives back the text selection it opened on when it closes (Escape, a click elsewhere, Copy), as a native menu keeps it: WebKit drops the selection when focus moves into the menu. A selection the user made while it was open stays.
