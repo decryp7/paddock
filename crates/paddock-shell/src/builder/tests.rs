@@ -153,6 +153,19 @@ fn the_app_can_replace_what_quit_does_without_a_window() {
 
 /// The policy for a click with no window open, on both kinds of shell: Quit goes to the override, else the window layer's
 /// quit, else the given exit; any other item only reopens the main window where there is a window layer.
+/// A tray's items arrive at the same menu-event handler as the menu bar's (`NativeMenu::on_no_window` takes every id the
+/// menu bar shows, and only those), so a tray id must never be a menu-bar id. The tray's are `pd.show` and `pd.quit`; the
+/// menu bar's Quit is `pd.app.quit`.
+#[test]
+fn tray_ids_and_menu_bar_ids_do_not_overlap() {
+    let tray = [paddock_window::tray::SHOW_ID, paddock_window::tray::QUIT_ID];
+    assert!(!tray.contains(&paddock_menu::model::QUIT_COMMAND));
+    assert!(
+        tray.iter().all(|id| !id.starts_with("pd.app.")),
+        "{tray:?}: pd.app.* is the menu bar's app menu"
+    );
+}
+
 #[test]
 fn a_click_without_a_window_quits_or_brings_the_main_window_back() {
     let plain = app(Builder::new(identity()).in_memory().native_menu(false));
@@ -204,8 +217,7 @@ fn a_menu_click_without_a_window_layer_reaches_the_policy() {
     assert!(app.get_webview_window("main").is_none());
 }
 
-/// A menu item chosen with no window open brings the main window back, after the hook, like a Dock click (macOS).
-#[cfg(target_os = "macos")]
+/// A menu item chosen with no window open brings the main window back, after the hook, like a Dock click.
 #[test]
 fn a_menu_item_without_a_window_reopens_the_main_window() {
     let app = app(shell());
@@ -403,7 +415,6 @@ fn a_bad_first_run_step_fails_the_start_naming_the_checklist() {
 
 /// Waits until the work deferred so far has run (the deferred work runs in order, so a marker queued last arrives
 /// after it; a hang guard only lost work reaches), then checks the main window exists.
-#[cfg(target_os = "macos")]
 fn wait_for_main(app: &tauri::App<MockRuntime>) {
     let (tx, rx) = std::sync::mpsc::channel();
     paddock_window::tauri::after_plugin_hook(app.handle(), move |_| {

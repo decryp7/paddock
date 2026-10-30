@@ -11,6 +11,7 @@ import {
   type Message,
   type ShellMenu,
 } from '@decryp7/paddock-ui/shell';
+import { QUIT_COMMAND } from '../generated/menu';
 import { currentPlatform } from './keys';
 import { Keymap } from './keymap';
 import { buildMenu, buildMenus, foldAppMenu, type MenuNode, type MenuSource, type TopMenu } from './menu-model';
@@ -45,6 +46,12 @@ export interface MenuConfig {
   readonly appName: string;
 }
 
+/** The operating system, as far as menu wording goes: Windows calls the last item of the app menu "Exit". */
+export const MENU_OS = new InjectionToken<'windows' | 'other'>('PADDOCK_MENU_OS', {
+  providedIn: 'root',
+  factory: () => (typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent) ? 'windows' : 'other'),
+});
+
 export const MENU_CONFIG = new InjectionToken<MenuConfig>('PADDOCK_MENU_CONFIG', { providedIn: 'root', factory: () => ({ appName: 'App' }) });
 
 /** A condition that defaults to true: absent, or not askable yet (context not loaded), it holds; throwing, it does not. */
@@ -65,6 +72,7 @@ export class AppMenu {
   private readonly keymap = inject(Keymap);
   private readonly config = inject(MENU_CONFIG);
   readonly mode = inject(MENU_MODE);
+  private readonly os = inject(MENU_OS);
 
   /** Everything the model is built from, as one value that changes when any of it does. */
   private readonly source = computed<MenuSource>(() => {
@@ -79,7 +87,7 @@ export class AppMenu {
       command: (id) => {
         const c = available.get(id);
         if (!c) return null;
-        return { title: c.title.text, enabled: this.commands.isEnabled(c), ...(c.checked ? { checked: this.commands.isChecked(c) } : {}) };
+        return { title: c.id === QUIT_COMMAND && this.mode === 'in-app' && this.os === 'windows' ? msg('pd.app.exit', 'Exit').text : c.title.text, enabled: this.commands.isEnabled(c), ...(c.checked ? { checked: this.commands.isChecked(c) } : {}) };
       },
       shown: (entry) => holds(entry.when as Live<object, boolean> | undefined, ctx),
       keyFor: (command) => keys.get(command),

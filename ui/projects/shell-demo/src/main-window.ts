@@ -2,7 +2,7 @@ import { inject } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 import { provideContributions, provideShellContext, provideShellVersionCheck } from '@decryp7/paddock-ui/shell';
-import { provideShellQuit, provideSubmenus, QUIT_CONTRIBUTIONS, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
+import { provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
 import { provideShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { provideShellSettings, SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { MockStartupBackend, reportBootstrapFailure, TauriStartupBackend, windowReady } from '@decryp7/paddock-ui/shell/startup';
@@ -79,9 +79,6 @@ export function bootMainWindow(): Promise<unknown> {
       // the Appearance settings as the source of the window's look, read once the window is ready (start-up sends only
       // the contract's calls).
       provideContributions(SETTINGS_CONTRIBUTIONS),
-      // Quit (Mod+Q) in the app menu, shared by every shell app.
-      provideContributions(QUIT_CONTRIBUTIONS),
-      ...(ipc ? [provideShellQuit(ipc.invoke)] : []),
       // The window's look: its appearance store (the one writer) over the Appearance settings (the one source), read
       // once the window reported ready (start-up sends only the contract's calls).
       provideShellSettings({ backend: demoSettingsBackend, appearance: { gate: windowReady } }),

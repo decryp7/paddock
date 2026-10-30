@@ -7,7 +7,7 @@ import { PdShellFrame, provideShellPages } from '@decryp7/paddock-ui/shell/pages
 import { provideContributions, provideShellContext, provideShellVersionCheck } from '@decryp7/paddock-ui/shell';
 import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
 import { tauriDialogIo } from '@decryp7/paddock-ui/shell/dialogs';
-import { provideShellQuit, provideSubmenus, QUIT_CONTRIBUTIONS, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
+import { provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
 import { provideShellSettings, SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { MockStartupBackend, reportBootstrapFailure, TauriStartupBackend, windowReady } from '@decryp7/paddock-ui/shell/startup';
 import { LANGUAGE_CONFIG, LocalStorageLanguageStorage } from '@decryp7/paddock-ui/shell/i18n';
@@ -61,9 +61,6 @@ export function bootMainWindow(): Promise<unknown> {
       provideShellAbout({ about: aboutBackend, updates: updatesBackend, main: true, ready: windowReady }),
       provideContributions(SETTINGS_CONTRIBUTIONS),
       provideShellSettings({ backend: settingsBackend, appearance: { gate: windowReady } }),
-      // Quit <App> (Mod+Q) in the app menu: the shell's, so the native menu bar can quit with no window open too.
-      provideContributions(QUIT_CONTRIBUTIONS),
-      ...(ipc ? [provideShellQuit(ipc.invoke)] : []),
       provideSubmenus(),
       // Mod+Shift+P lists the commands, Mod+P goes to a page (the shared palette on the pages frame).
       providePagesPalette({ commonCommands: ['pd.settings.open', 'dy.refresh-history', 'dy.rescan-issues', 'dy.capture'] }),

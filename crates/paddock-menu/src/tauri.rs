@@ -174,6 +174,9 @@ impl<R: Runtime> NativeMenu<R> {
 
     /// Sets what runs a click on a shown item ([`runs_without_window`]) when no window is the target, for example after
     /// the last window was closed to the tray. Without one such a click is dropped. Replaces the earlier one.
+    ///
+    /// Only the ids of the shown menu bar reach it, but a tray's items arrive at the same menu-event handler: tray ids must
+    /// never reuse a menu id (the shell's tray uses `pd.show` and `pd.quit`; the menu bar's Quit is `pd.app.quit`).
     pub fn on_no_window(&self, f: impl Fn(&AppHandle<R>, &str) + Send + Sync + 'static) {
         *lock(&self.no_window) = Some(Arc::new(f));
     }

@@ -73,8 +73,14 @@ export const SHELL_PORTS = new InjectionToken<ShellPorts>('SHELL_PORTS', {
   }),
 });
 
-/** What `ShellCore.quitApp` does: asks the engine to quit (`provideShellQuit` in `shell/menu` provides it). */
+/**
+ * What `ShellCore.quitApp` does when the app provides its own: an app overrides Quit by providing `APP_QUIT`, never by
+ * contributing a second `pd.app.quit`.
+ */
 export const APP_QUIT = new InjectionToken<() => Promise<void>>('PADDOCK_APP_QUIT');
+
+/** The shell's quit (the `app_quit` command), provided by the frames' native menu port; used when the app gave no `APP_QUIT`. */
+export const DEFAULT_APP_QUIT = new InjectionToken<() => Promise<void>>('PADDOCK_DEFAULT_APP_QUIT');
 
 /** Runs a command for `ShellCore.runCommand`: `CommandService`, wired by `provideShellCore` (a token avoids an import cycle). */
 export const SHELL_COMMAND_RUNNER = new InjectionToken<(id: string, args?: unknown) => Promise<boolean>>('SHELL_COMMAND_RUNNER');
@@ -135,9 +141,9 @@ export class ShellContextHost {
     openDialog: <R>(id: string, inputs?: unknown) => this.ports.openDialog(id, inputs) as Promise<DialogOutcome<R>>,
     notify: (n: ShellNotice) => this.ports.notify(n),
     quitApp: () => {
-      const quit = this.injector.get(APP_QUIT, null);
+      const quit = this.injector.get(APP_QUIT, null) ?? this.injector.get(DEFAULT_APP_QUIT, null);
       if (quit) return quit();
-      console.warn('[paddock-shell] no quit in this window (provideShellQuit); cannot quit');
+      console.warn('[paddock-shell] no quit in this window (a native menu port or APP_QUIT); cannot quit');
       return Promise.resolve();
     },
   });
