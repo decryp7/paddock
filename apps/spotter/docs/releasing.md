@@ -28,7 +28,7 @@ browsers", repo root):
 PADDOCK_LIVE_BROWSER=vm SPOTTER_REQUIRE_TEST_BROWSER=1 cargo nextest run -p spotter-render -E 'binary(real_browser)'
 ```
 
-with `SPOTTER_TEST_BROWSER` naming the pinned Chrome for Testing in the VM (`node scripts/install-test-browser.mjs`).
+with `SPOTTER_TEST_BROWSER` naming the pinned Chrome for Testing in the VM (`node apps/spotter/scripts/install-test-browser.mjs`).
 Release-notes checklist item: **VM smoke: <date> <version> pass** (macOS and Windows).
 
 ## How Spotter's updates work
@@ -133,4 +133,4 @@ relaunch, Install Chromium progress and Cancel, wrong-key refusal) were therefor
 specific to the VM (no GPU, paravirtual Metal) or a lock-order bug; the same build must be started once on a real Mac or
 an unstripped build sampled. Evidence: `/Volumes/d7sst7/dev-targets/handoff/spotter-update-test-2026-10-29/`.
 
-The hang was the start-up deadlock of ADR 0029 (a window built inside a plugin hook), fixed before the 1.0.0 release; the next VM run (runbook: `spotter-1.0-vm-runbook.md`) is the first on the fix.
+The hang is believed to be the start-up deadlock of ADR 0029 (a window built inside a plugin hook), fixed before the 1.0.0 release; confirm on both OSes before the tag (the next VM run, runbook: `spotter-1.0-vm-runbook.md`, is the first on the fix).

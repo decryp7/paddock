@@ -16,7 +16,6 @@
 target     target-{name}-{slot}       slot
 src        src/{name}-{slot}          slot
 angular    angular/{name}-{slot}      slot
-browser    test-browser-{name}-{slot} slot
 libduckdb  libduckdb/{name}-{slot}    slot
 node-modules node-modules/{name}-{slot} slot
 sccache    sccache-{slot}             slot
