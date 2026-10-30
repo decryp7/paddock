@@ -1062,6 +1062,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      # CARGO_BUILD_JOBS: this runner's share of the host (conformance/ci/build-jobs.sh; Linux keeps cargo's default).
+      - uses: ./.gitea/actions/build-jobs
+
       - uses: actions/download-artifact@v3
         with:
           path: apps/debrief/artifacts
