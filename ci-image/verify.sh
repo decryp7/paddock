@@ -76,6 +76,21 @@ if [ -n "${EXPECT_CHROME:-}" ]; then
   fi
 fi
 
+# The drivers' test builds refuse a browser at an installed-browser path, links resolved (rule 7): if one of those paths led
+# to Chrome for Testing, every real-browser test in the image would be refused. The Linux candidates of paddock-chromium,
+# chromium-driver and spotter-render: these names in these folders.
+if [ -n "$chrome" ] && [ -e "$chrome" ]; then
+  real=$(readlink -f "$chrome")
+  for d in /usr/bin /usr/local/bin /snap/bin /opt/google/chrome; do
+    for n in google-chrome google-chrome-stable microsoft-edge microsoft-edge-stable chromium chromium-browser; do
+      p="$d/$n"
+      if [ -e "$p" ] && [ "$(readlink -f "$p")" = "$real" ]; then
+        bad "$p leads to Chrome for Testing ($real): the tests' launch gate would refuse it as an installed browser"
+      fi
+    done
+  done
+fi
+
 duck=${DUCKDB_LIB_DIR:-}
 if [ -n "${EXPECT_DUCKDB:-}" ]; then
   if [ -n "$duck" ] && [ -e "$duck/libduckdb.so" ]; then note "libduckdb $EXPECT_DUCKDB: $duck"; else bad "libduckdb.so is missing in '$duck'"; fi

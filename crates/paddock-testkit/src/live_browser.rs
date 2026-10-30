@@ -245,6 +245,17 @@ pub fn fake_script(body: &str) -> String {
     format!("#!/bin/sh\n{FAKE_MARKER}\n{body}\n")
 }
 
+/// The candidate of `installed` that `exe` is or is reached through, comparing canonical paths where they exist.
+pub fn installed_match(
+    exe: &std::path::Path,
+    installed: impl IntoIterator<Item = std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    let canonical =
+        |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let exe = canonical(exe);
+    installed.into_iter().find(|c| canonical(c) == exe)
+}
+
 /// Whether `exe` is one of `installed` (a driver's installed-browser candidates), comparing canonical paths where they
 /// exist (a link or `..` must not hide an installed browser).
 pub fn is_installed(
@@ -265,14 +276,15 @@ pub fn launch_check_with(
     env: &dyn Fn(&str) -> Option<String>,
     exe: &std::path::Path,
     real_program: bool,
-    installed: bool,
+    installed: Option<&std::path::Path>,
     window: BrowserWindow,
 ) -> Result<(), String> {
-    if installed {
+    if let Some(candidate) = installed {
         return Err(format!(
-            "a test never starts a browser the user installed ({}): use the pinned test browser from the driver's \
-             discover::find_for_tests (Paddock rule 7)",
-            exe.display()
+            "{} is, or is reached through, an installed-browser path ({}): a test never starts a browser the user \
+             installed; use the pinned test browser from the driver's discover::find_for_tests (Paddock rule 7)",
+            exe.display(),
+            candidate.display()
         ));
     }
     if !real_program {
@@ -284,8 +296,18 @@ pub fn launch_check_with(
     }
 }
 
+/// The search path `execvp` uses on Unix when `PATH` is unset (glibc's and macOS's default), which `Command` falls back
+/// to as well.
+pub const UNIX_DEFAULT_PATH: &str = "/bin:/usr/bin";
+
 /// What `exe` starts: a bare program name (no path separator) is looked up on `path_var` the way `Command` does (with
-/// `.exe` on Windows); a name not found there, and any path, stay as they are.
+/// `.exe` on Windows; on Unix an unset `PATH` searches [`UNIX_DEFAULT_PATH`]); a name not found there, and any path, stay
+/// as they are.
+///
+/// On Windows, `Command` also searches the folder of the running program and the system folders (`System32`, the
+/// Windows folder) before `PATH`. Those do not matter here: the running program is a test binary in the build folder,
+/// where no browser lives, and no browser installs into the system folders (Edge and Chrome live under `Program Files`
+/// and the user's `AppData`, which the installed-browser candidates cover).
 pub fn resolve_program(
     exe: &std::path::Path,
     path_var: Option<&str>,
@@ -299,7 +321,12 @@ pub fn resolve_program(
     } else {
         vec![exe.to_path_buf()]
     };
-    path_var
+    let search = match path_var {
+        Some(p) => Some(p),
+        None if !windows => Some(UNIX_DEFAULT_PATH),
+        None => None,
+    };
+    search
         .into_iter()
         .flat_map(|p| std::env::split_paths(p).collect::<Vec<_>>())
         .flat_map(|dir| names.iter().map(move |n| dir.join(n)))
@@ -323,7 +350,7 @@ pub fn check_launch_with(
         env,
         &resolved,
         is_real_program(&resolved),
-        is_installed(&resolved, installed),
+        installed_match(&resolved, installed).as_deref(),
         window,
     )
 }
@@ -599,9 +626,13 @@ mod tests {
                 test_vm: true,
             },
         ] {
-            let e =
-                launch_check_with(host, &ci, exe, true, true, BrowserWindow::Headless).unwrap_err();
-            assert!(e.contains("installed"), "{e}");
+            let e = launch_check_with(host, &ci, exe, true, Some(exe), BrowserWindow::Headless)
+                .unwrap_err();
+            assert!(
+                e.contains("is, or is reached through, an installed-browser path")
+                    && e.contains(&exe.display().to_string()),
+                "{e}"
+            );
         }
         // A real program (the pinned build, a downloaded runtime, a hard-coded path): only where the gate allows.
         assert_eq!(
@@ -610,14 +641,14 @@ mod tests {
                 &ci,
                 exe,
                 true,
-                false,
+                None,
                 BrowserWindow::Shown
             ),
             Ok(())
         );
         for host in [Host::plain("macos"), Host::plain("windows")] {
-            let e = launch_check_with(host, &ci, exe, true, false, BrowserWindow::Headless)
-                .unwrap_err();
+            let e =
+                launch_check_with(host, &ci, exe, true, None, BrowserWindow::Headless).unwrap_err();
             assert!(e.contains("was not started") && e.contains("rule 7"), "{e}");
         }
         assert!(
@@ -626,7 +657,7 @@ mod tests {
                 &none,
                 exe,
                 true,
-                false,
+                None,
                 BrowserWindow::Headless
             )
             .is_err()
@@ -641,7 +672,7 @@ mod tests {
                 &vm,
                 exe,
                 true,
-                false,
+                None,
                 BrowserWindow::Shown
             ),
             Ok(())
@@ -653,7 +684,7 @@ mod tests {
             Host::plain("linux"),
         ] {
             assert_eq!(
-                launch_check_with(host, &none, exe, false, false, BrowserWindow::Shown),
+                launch_check_with(host, &none, exe, false, None, BrowserWindow::Shown),
                 Ok(())
             );
         }
@@ -752,7 +783,14 @@ mod tests {
             resolve_program(std::path::Path::new("./google-chrome"), Some(&path), false),
             std::path::PathBuf::from("./google-chrome")
         );
-        assert_eq!(resolve_program(bare, None, false), bare.to_path_buf());
+        // PATH unset: Unix searches execvp's default /bin:/usr/bin (as `Command` does); Windows nothing.
+        #[cfg(unix)]
+        assert_eq!(
+            resolve_program(std::path::Path::new("sh"), None, false),
+            std::path::PathBuf::from("/bin/sh")
+        );
+        assert_eq!(resolve_program(bare, None, true), bare.to_path_buf());
+        assert_eq!(UNIX_DEFAULT_PATH, "/bin:/usr/bin");
         // Windows: `chrome` is found as `chrome.exe`.
         let exe = bin.join("chrome.exe");
         std::fs::write(&exe, [0x4d, 0x5a]).unwrap();

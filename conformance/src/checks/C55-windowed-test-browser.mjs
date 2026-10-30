@@ -149,25 +149,46 @@ export function windowedTestFindings(path, text) {
   return out.sort((a, b) => a.line - b.line);
 }
 
-/** Drivers `toml` (a Cargo.toml) depends on without their test feature in [dev-dependencies]: [{ line, driver }]. */
+/**
+ * Drivers `toml` (a Cargo.toml) depends on without their test feature in [dev-dependencies]: [{ line, driver }]. Entries
+ * are read inline (`name = { .. }`, `name.workspace = true`) and as tables (`[dependencies.name]`), also renamed
+ * (`alias = { package = "spotter-render", .. }`) and target-specific (`[target.'cfg(..)'.dependencies]`).
+ */
 export function manifestFindings(toml) {
   const lines = toml.split('\n');
   const pkg = /^\s*name\s*=\s*"([^"]+)"/m.exec(toml.slice(toml.indexOf('[package]')))?.[1];
+  const entries = []; // { kind: 'dep' | 'dev', key, text, line }
   let section = '';
-  const deps = [];
-  const dev = {};
+  let table = null;
   lines.forEach((l, i) => {
     const head = /^\s*\[([^\]]+)\]\s*$/.exec(l);
     if (head) {
       section = head[1].trim();
+      table = null;
+      if (section.startsWith('workspace')) return;
+      const t = /^(?:target\.[^\]]*?\.)?(dev-dependencies|dependencies|build-dependencies)\.([\w-]+)$/.exec(section);
+      if (t && t[1] !== 'build-dependencies') {
+        table = { kind: t[1] === 'dev-dependencies' ? 'dev' : 'dep', key: t[2], text: '', line: i + 1 };
+        entries.push(table);
+      }
       return;
     }
+    if (table) {
+      table.text += `${l}\n`;
+      return;
+    }
+    if (section.startsWith('workspace')) return;
+    const kind = /(^|\.)dev-dependencies$/.test(section) ? 'dev' : /(^|\.)dependencies$/.test(section) && !/build-dependencies$/.test(section) ? 'dep' : null;
     const entry = /^\s*([\w-]+)(?:\.workspace)?\s*=\s*(.*)$/.exec(l);
-    if (!entry || !(entry[1] in DRIVERS) || section.startsWith('workspace')) return;
-    if (/(^|\.)dev-dependencies$/.test(section)) dev[entry[1]] = (dev[entry[1]] ?? '') + entry[2];
-    else if (/(^|\.)dependencies$/.test(section)) deps.push({ line: i + 1, driver: entry[1] });
+    if (kind && entry) entries.push({ kind, key: entry[1], text: entry[2], line: i + 1 });
   });
-  return deps.filter((d) => d.driver !== pkg && !new RegExp(`"${DRIVERS[d.driver]}"`).test(dev[d.driver] ?? ''));
+  const driverOf = (e) => /\bpackage\s*=\s*"([^"]+)"/.exec(e.text)?.[1] ?? e.key;
+  const dev = {};
+  for (const e of entries.filter((x) => x.kind === 'dev' && driverOf(x) in DRIVERS)) dev[driverOf(e)] = (dev[driverOf(e)] ?? '') + e.text;
+  return entries
+    .filter((e) => e.kind === 'dep' && driverOf(e) in DRIVERS && driverOf(e) !== pkg)
+    .filter((e) => !new RegExp(`"${DRIVERS[driverOf(e)]}"`).test(dev[driverOf(e)] ?? ''))
+    .map((e) => ({ line: e.line, driver: driverOf(e) }));
 }
 
 const MESSAGES = {

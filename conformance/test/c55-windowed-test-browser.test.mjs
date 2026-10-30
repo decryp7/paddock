@@ -186,6 +186,14 @@ test('C55 manifests: a crate that depends on a driver enables its test feature i
   // The driver itself, and a workspace's table of dependencies, are not dependents.
   assert.deepEqual(manifestFindings('[package]\nname = "paddock-chromium"\n\n[dependencies]\npaddock-chromium = { path = "." }\n'), []);
   assert.deepEqual(manifestFindings('[workspace.dependencies]\nspotter-render = { path = "crates/spotter-render" }\n'), []);
+  // Table form and renamed dependencies (fourth review, optional P2).
+  const table = '[package]\nname = "a"\n\n[dependencies.spotter-render]\nworkspace = true\n\n[dev-dependencies]\ntempfile = "3"\n';
+  assert.deepEqual(manifestFindings(table), [{ line: 4, driver: 'spotter-render' }]);
+  assert.deepEqual(manifestFindings(table + '\n[dev-dependencies.spotter-render]\nworkspace = true\nfeatures = ["testing"]\n'), []);
+  const renamed = '[package]\nname = "a"\n\n[dependencies]\nrender = { package = "spotter-render", path = "x" }\n';
+  assert.deepEqual(manifestFindings(renamed), [{ line: 5, driver: 'spotter-render' }]);
+  assert.deepEqual(manifestFindings(renamed + '\n[dev-dependencies]\nr = { package = "spotter-render", path = "x", features = ["testing"] }\n'), []);
+  assert.deepEqual(manifestFindings('[package]\nname = "a"\n\n[build-dependencies]\nspotter-render = { path = "x" }\n'), [], 'a build script is not a test');
 });
 
 test('C55 through the runner: a manifest finding', async () => {
