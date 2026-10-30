@@ -394,3 +394,78 @@ fn a_phase_publishes_its_last_throttled_count_before_the_next_phase_starts() {
         "the walk's final count is lost: {walk_counts:?}"
     );
 }
+
+fn last_done(sink: &Collect) -> Option<u64> {
+    sink.all().iter().rev().find_map(|s| match &s.state {
+        JobState::Running { phase: Some(p) } => Some(p.done),
+        _ => None,
+    })
+}
+
+#[test]
+fn finish_publishes_the_last_throttled_count_first() {
+    let sink = Collect::new();
+    let clock = FakeClock::new();
+    let r = reporter(sink.clone(), &clock);
+    r.begin_phase(Phase::discovering("walk", "Finding"));
+    r.add(4);
+    r.add(1); // inside the interval: pending
+    assert!(r.finish(JobState::Done));
+    assert_eq!(
+        last_done(&sink),
+        Some(5),
+        "the final count is published before the terminal event"
+    );
+    assert_eq!(sink.all().last().unwrap().state, JobState::Done);
+}
+
+/// A clock that adds one to the job the moment an emit reads it: an update landing in the middle of an emit.
+struct AddsDuringEmit {
+    job: std::sync::OnceLock<Reporter>,
+    armed: std::sync::atomic::AtomicBool,
+}
+
+impl Clock for AddsDuringEmit {
+    fn monotonic(&self) -> Duration {
+        if self.armed.swap(false, std::sync::atomic::Ordering::SeqCst)
+            && let Some(r) = self.job.get()
+        {
+            r.add(1);
+        }
+        Duration::ZERO
+    }
+    fn wall(&self) -> std::time::SystemTime {
+        std::time::UNIX_EPOCH
+    }
+    fn wait(&self, _: Duration, _: &CancelToken) -> Result<(), Cancelled> {
+        Ok(())
+    }
+}
+
+#[test]
+fn an_update_landing_during_an_emit_is_published_by_the_next_flush() {
+    let sink = Collect::new();
+    let clock = Arc::new(AddsDuringEmit {
+        job: std::sync::OnceLock::new(),
+        armed: std::sync::atomic::AtomicBool::new(false),
+    });
+    let r = Reporter::with_clock(
+        JobId(1),
+        JobKind::new("scan"),
+        "Scan",
+        None,
+        sink.clone(),
+        clock.clone(),
+        100,
+    );
+    assert!(clock.job.set(r.clone()).is_ok());
+    r.begin_phase(Phase::discovering("walk", "Finding"));
+    clock.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    r.set_total(9); // an emit; the clock adds 1 while it runs
+    r.flush();
+    assert_eq!(
+        last_done(&sink),
+        Some(1),
+        "the update made during the emit is not lost"
+    );
+}
