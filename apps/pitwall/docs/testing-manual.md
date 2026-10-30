@@ -157,10 +157,10 @@ Pitwall 1.0.x updates do not look at the new feed, so this is the path every exi
 
 | # | Platform | Steps | Expected |
 |---|----------|-------|----------|
-| U7 | All | Install the 1.1.0-rc test build (signed with the test key, feed on the host). Settings > Updates > Check for updates. | "1.1.1 is available" with the release notes; the check made one GET of `latest.json` and nothing else (watch the host's server log). |
+| U7 | All | Install the 1.1.0-rc test build (signed with the test key, feed on the host). Help > Check for updates… (the Updates window). | "1.1.1 is available" with the release notes; the check made one GET of `latest.json` and nothing else (watch the host's server log). |
 | U8 | All | Choose Install, then **Cancel** while the download runs; repeat and cancel at the very start; then watch the "Installing" phase. | The download stops, the state returns to "1.1.1 is available", nothing is half-installed, the app and the server still run 1.1.0-rc; Install works again afterwards. During "Installing" Cancel is unavailable (disabled, with the reason), because an install cannot be undone half-way. |
 | U9 | All | Install, with a streaming request running through the server. | The download and the install finish; the app restarts. The server does not restart until it is idle: the stream completes first, then the server restarts once onto the new binary (no restart while requests, queued jobs or downloads are active). |
-| U10 | All | Afterwards `GET /x/v1/health`, then Settings > Updates. | `version` is 1.1.1; "You have the latest version"; models, keys and settings unchanged. |
+| U10 | All | Afterwards `GET /x/v1/health`, then Help > Check for updates…. | `version` is 1.1.1; "You have the latest version"; models, keys and settings unchanged. |
 | U11 | All | Serve a `latest.json` whose `.sig` was made with a different key (or edit one byte of the installer). | The install is refused with a signature message; the old version keeps running. |
 | U12 | All | Stop the host feed, then check for updates. | A clear "could not check" message and a next step; no crash, no retry loop. |
 
@@ -175,8 +175,8 @@ Pitwall 1.0.x updates do not look at the new feed, so this is the path every exi
 
 | # | Steps | Expected |
 |---|-------|----------|
-| U15 | Turn on offline mode (Settings > Network), turn on automatic update checks, restart the app, and click Check for updates. Watch the host feed's log and the VM's network (`tcpdump` on the VM or the feed's access log). | No request reaches the feed or any other host; the check reports that offline mode is on. Turning offline mode off allows the check again. |
-| U15b | Offline mode on, then stop the Pitwall server (quit the service), and click Check for updates. Watch the feed log. | No request reaches the feed. With the server down the app cannot ask it whether offline is on, so it refuses unless it knows from a last-known value that offline is off; it says why. |
+| U15 | Turn on offline mode (Settings > Network), turn on automatic update checks, restart the app, and choose Help > Check for updates…. Watch the host feed's log and the VM's network (`tcpdump` on the VM or the feed's access log). | No request reaches the feed or any other host; the check reports that offline mode is on. Turning offline mode off allows the check again. |
+| U15b | Offline mode on, then stop the Pitwall server (quit the service), and choose Help > Check for updates…. Watch the feed log. | No request reaches the feed. With the server down the app cannot ask it whether offline is on, so it refuses unless it knows from a last-known value that offline is off; it says why. |
 
 ### E. Uninstall leaves nothing behind
 
@@ -197,7 +197,7 @@ Record the platform, build versions and each result in the release notes' verifi
 | 46 | Run a chat in the Playground, cancel it midway. | Generation stops; the job leaves the queue. |
 | 47 | Benchmarks > Run on the test model, then quit and start Pitwall again. | A tokens-per-second figure appears and is still listed after the restart (`benchmarks.json` in the data folder). |
 | 47a | Settings > Privacy > Keep request content on, make a request that contains a fake key (`pw_` followed by 30 letters), open it in Requests. | The prompt and the answer show; the key is shown as `[redacted]`; turning the setting off keeps no new content; restarting Pitwall empties the list. |
-| 47b | Settings > Updates > Check for updates (a build with an updater key only). | Nothing is contacted until you press the button; with an update, Install and restart. A build without a key says "Not configured". |
+| 47b | Help > Check for updates… (the Updates window) (a build with an updater key only). | Nothing is contacted until you press the button; with an update, Install and restart. A build without a key says "Not configured". |
 | 47c | Make a few requests with an app's key, then Apps & keys > that app > Usage over time. Switch 24h, 7d, 30d and Tokens, Requests, Peak memory. | Totals match the requests made; the chart has one bar per period; peak memory equals the size of the model that served them (Models shows its memory); the Dashboard's Usage by app chart shows the same app, and its legend link opens the app. |
 | 47d | Set Requests per day to 3 for the app and make 4 requests; then set Memory share to 1 percent and make another. | The 4th answers 429 "this app has made its 3 requests for today ..."; the Limits list shows "Limit reached"; at 80 % (the 3rd of 4, or 2.4) a "Close to the limit" warning and one event appear; the memory share answers 403 naming the model's MiB and the share. Raising the limits lets requests through again. |
 | 47e | Quit Pitwall, damage `usage.json` (write `{ not json`), start it. | It starts; the app's usage comes back from `usage.json.bak` (at most 30 s older); with both damaged the charts start empty. |

@@ -380,8 +380,9 @@ falls back to the backup and then the defaults. Works.
   logic (`pitwall-server install`, the launch agent, the Windows service) and the app's install action exist and are unit-tested; they have not been run on real Windows and Linux machines.
 - **Discovery**: a running server writes `discovery.json` (version, API version, pid, port, base URL, start time) and removes it
   on a clean stop. Works.
-- **Updates** use the Tauri updater against a signed `latest.json`; builds without the signing key are unsigned and report that
-  updates are not available. Not configured yet; see [releasing](releasing.md).
+- **Updates** are the shell's (Help > Check for updates…): the signed `latest.json` of the `pitwall-latest` release, checked
+  only when you ask or, if you turn it on, once a day; never while Offline mode is on or has not been confirmed off. Builds
+  without the signing key report that updates are not available; see [releasing](releasing.md).
 
 ## Security and privacy
 
