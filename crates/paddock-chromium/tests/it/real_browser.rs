@@ -179,12 +179,14 @@ fn a_load_the_network_service_lost_names_the_restart() {
             .network_service_pid()
             .expect("the process list")
             .expect("the browser names its network service");
-        // Only a process of the browser this test launched is ended (rule 7: nothing else on the machine).
+        // Only a process of the browser this test launched is ended (rule 7: nothing else on the machine), by identity (rule 53).
+        let service = paddock_proc::ProcessId::of(pid).expect("the network service is running");
+        let browser_id = paddock_proc::ProcessId::of(browser).expect("the browser is running");
         assert!(
-            paddock_proc::descendants_of(browser).contains(&pid),
+            paddock_proc::descendants_of(browser_id).contains(&service),
             "the network service {pid} is a process of the test's browser {browser}"
         );
-        paddock_proc::end(pid);
+        paddock_proc::end(service);
         load.join().unwrap()
     });
     let e = loaded.expect_err("the load was lost").to_string();
