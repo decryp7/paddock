@@ -176,7 +176,8 @@ impl CounterCentre {
         let slot = Slot(self.inner.clone());
         let inner = self.inner.clone();
         let spawned = std::thread::Builder::new().name("dyno-counters".into()).spawn(move || {
-            dyno_platform::priority::lower_current_thread();
+            // The user waits for it on the Counters page: live work (rule 52).
+            dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
             let _slot = slot;
             f(&inner);
         });
