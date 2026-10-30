@@ -10,6 +10,7 @@ use pacenotes_core::{Language, Location, Position, RepoPath, Span};
 use pacenotes_parse::{Limits, ParseLanguage};
 use paddock_jobs::CancelToken;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 use tree_sitter::{Node, Parser, Tree};
 
 use crate::shared_copy::{Finding, FindingFingerprint, FixSentence, FixSource, RuleId, path_matches};
@@ -144,6 +145,8 @@ pub struct Found {
     pub matches: Vec<Match>,
     /// Set when the result is partial.
     pub truncated: Option<Truncated>,
+    /// Match steps used on the whole file (a test of a bound counts these, not seconds).
+    pub steps: usize,
 }
 
 /// Bounds of one search of one file.
@@ -418,7 +421,11 @@ impl Pattern {
                         Position::new(e.row as u32 + 1, e.column as u32 + 1),
                     ) && let Ok(span) = Span::new(a, b)
                     {
-                        let captures = m.caps.iter().map(|(n, nodes)| (n.clone(), range_text(target_src, nodes))).collect();
+                        let captures = m
+                            .caps
+                            .iter()
+                            .map(|(n, cap)| (n.clone(), range_text(target_src, cap.nodes())))
+                            .collect();
                         found.matches.push(Match {
                             span,
                             text: target_src[node.byte_range()].to_owned(),
@@ -450,6 +457,7 @@ impl Pattern {
                 }
             }
         }
+        found.steps = total_steps;
         found
     }
 }
@@ -490,11 +498,28 @@ impl<'t> Leaves<'t> {
     }
 }
 
+/// What a placeholder matched: one node, or a range of a sibling list that is shared, never copied, so binding a run costs nothing
+/// that is not counted.
+#[derive(Clone)]
+enum Cap<'t> {
+    One(Node<'t>),
+    Run(Rc<Vec<Node<'t>>>, usize, usize),
+}
+
+impl<'t> Cap<'t> {
+    fn nodes(&self) -> &[Node<'t>] {
+        match self {
+            Cap::One(n) => std::slice::from_ref(n),
+            Cap::Run(all, from, to) => &all[*from..*to],
+        }
+    }
+}
+
 struct Matcher<'a, 't> {
     pat: &'a str,
     tgt: &'t str,
     vars: &'a BTreeMap<String, Var>,
-    caps: Vec<(String, Vec<Node<'t>>)>,
+    caps: Vec<(String, Cap<'t>)>,
     /// Steps of this attempt.
     steps: usize,
     /// Steps of the whole file.
@@ -543,12 +568,12 @@ impl<'t> Matcher<'_, 't> {
         }
     }
 
-    fn bind(&mut self, name: &str, nodes: &[Node<'t>]) -> bool {
+    fn bind(&mut self, name: &str, cap: Cap<'t>) -> bool {
         if let Some(i) = self.caps.iter().position(|(n, _)| n == name) {
             let old = self.caps[i].1.clone();
-            return self.same_tokens(&old, nodes);
+            return self.same_tokens(old.nodes(), cap.nodes());
         }
-        self.caps.push((name.to_owned(), nodes.to_vec()));
+        self.caps.push((name.to_owned(), cap));
         true
     }
 
@@ -563,41 +588,42 @@ impl<'t> Matcher<'_, 't> {
         }
         match self.var(p).cloned() {
             Some(Var::Any) => return t.is_named(),
-            Some(Var::One(name)) => return t.is_named() && self.bind(&name, &[t]),
+            Some(Var::One(name)) => return t.is_named() && self.bind(&name, Cap::One(t)),
             Some(Var::Run(_)) => return false,
             None => {}
         }
         if p.kind_id() != t.kind_id() {
             return false;
         }
-        let (pc, tc) = (self.children(p), self.children(t));
+        let (pc, tc) = (self.children(p), Rc::new(self.children(t)));
         if pc.is_empty() || tc.is_empty() {
             return pc.is_empty() && tc.is_empty() && self.pat[p.byte_range()] == self.tgt[t.byte_range()];
         }
-        self.seq(&pc, &tc)
+        self.seq(&pc, &tc, 0)
     }
 
-    fn seq(&mut self, pc: &[Node<'_>], tc: &[Node<'t>]) -> bool {
+    /// Matches the pattern siblings `pc` against the target siblings `tc[at..]`.
+    fn seq(&mut self, pc: &[Node<'_>], tc: &Rc<Vec<Node<'t>>>, at: usize) -> bool {
         if !self.step() {
             return false;
         }
-        let Some((p, rest)) = pc.split_first() else { return tc.is_empty() };
+        let Some((p, rest)) = pc.split_first() else { return at >= tc.len() };
         if let Some(Var::Run(name)) = self.var(*p).cloned() {
-            for k in 0..=tc.len() {
+            for k in at..=tc.len() {
                 let mark = self.caps.len();
-                if self.bind(&name, &tc[..k]) && self.seq(rest, &tc[k..]) {
+                if self.bind(&name, Cap::Run(tc.clone(), at, k)) && self.seq(rest, tc, k) {
                     return true;
                 }
                 self.caps.truncate(mark);
-                if *self.total > self.total_max || self.steps > MAX_STEPS {
+                if *self.total > self.total_max || self.steps > MAX_STEPS || self.cancelled {
                     return false;
                 }
             }
             return false;
         }
-        let Some((t, tail)) = tc.split_first() else { return false };
+        let Some(t) = tc.get(at).copied() else { return false };
         let mark = self.caps.len();
-        if self.node(*p, *t) && self.seq(rest, tail) {
+        if self.node(*p, t) && self.seq(rest, tc, at + 1) {
             return true;
         }
         self.caps.truncate(mark);

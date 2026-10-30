@@ -325,3 +325,24 @@ fn a_cancel_is_noticed_inside_a_match_attempt() {
     let found = p.find_all(code.as_bytes(), &MatchLimits::default(), &stopped);
     assert_eq!(found.truncated, Some(Truncated::Cancelled));
 }
+
+/// Binding a run shares the sibling list instead of copying it, and the work is counted: a run over n arguments takes a number of
+/// steps linear in n (a copy per binding would be quadratic work that no step counted).
+#[test]
+fn binding_a_run_is_linear_in_counted_steps() {
+    let steps = |n: usize| {
+        let args = (0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
+        let p = Pattern::compile(ParseLanguage::Rust, "f($$$A, z)").unwrap();
+        let found = p.find_all(
+            format!("fn g() {{ f({args}, z); }}").as_bytes(),
+            &MatchLimits::default(),
+            &CancelToken::new(),
+        );
+        assert_eq!(found.matches.len(), 1);
+        assert_eq!(found.matches[0].captures["A"].split(", ").count(), n);
+        found.steps
+    };
+    let (small, large) = (steps(500), steps(2000));
+    assert!(large <= small * 5, "4x the arguments took {large} steps against {small}");
+    assert!(large <= 2000 * 8, "{large} steps for 2000 arguments");
+}
