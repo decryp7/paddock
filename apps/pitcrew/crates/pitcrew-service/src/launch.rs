@@ -140,8 +140,9 @@ impl Started {
         }
     }
 
+    // The bare-pid kill exists only in the macOS `Spawned` arm, so the expectation is fulfilled only there.
     #[cfg_attr(
-        unix,
+        target_os = "macos",
         expect(
             clippy::disallowed_methods,
             reason = "ADR 0033 WP-6: kills a spawned runner without the reaped guard; use paddock_proc"
