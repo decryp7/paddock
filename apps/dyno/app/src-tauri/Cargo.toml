@@ -46,13 +46,15 @@ paddock-updater = { path = "../../../../crates/paddock-updater", features = ["ta
 paddock-download = { path = "../../../../crates/paddock-download", features = ["tauri"] }
 paddock-window = { path = "../../../../crates/paddock-window", features = ["tauri", "tray", "wry"] }
 log = { version = "0.4", features = ["kv"] }
-tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-notification = "2.4.0"
 tauri-plugin-dialog = "2.7.3"
 # The installer behind the shell's updater (`PluginInstaller`): verifies the package signature again and installs it.
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+tauri-plugin-autostart = "2"
 
 [target.'cfg(windows)'.dependencies]
 # The taskbar's light/dark setting (tray icon), read only.

@@ -13,6 +13,7 @@ pub mod health;
 pub mod link;
 pub mod logging;
 pub mod login;
+pub mod login_item;
 pub mod service_repair;
 pub mod shell;
 pub mod supervise;
@@ -242,6 +243,9 @@ fn agent_setup<R: Runtime>(
     // keep the old job: replace the registration once per version and whenever launchd says it is stale
     // (`service_repair`), in the background, so measuring resumes without the user's help.
     let repair = link.clone();
+    // The old route (`tauri-plugin-autostart`) left `~/Library/LaunchAgents/Dyno.plist`; `SMAppService.mainApp` replaces it.
+    #[cfg(target_os = "macos")]
+    std::thread::spawn(login::remove_legacy_login_plist);
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(5));
         match login::platform_service().repair(&|| repair.connected()) {
@@ -253,13 +257,44 @@ fn agent_setup<R: Runtime>(
     Ok(())
 }
 
+/// macOS: `SMAppService.mainApp` starts the app at login without `--hidden`; macOS says it was a login start in the
+/// open-application Apple Event instead ([`login::launched_as_login_item`]), which exists only while Tauri's setup runs.
+/// This plugin's setup runs inside it, so it decides there: the shell was told to start in the tray (`launch.hidden`), and
+/// unless the flag or the login event asked for that, the main window is opened right after the setup (tray first).
+#[cfg(target_os = "macos")]
+fn login_start_plugin(asked_hidden: bool) -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::new("dyno-login-start")
+        .setup(move |app, _| {
+            let hidden = login_item::hidden_at_start(asked_hidden, login::launched_as_login_item());
+            logging::info(&format!(
+                "started {}",
+                if hidden { "hidden (flag or login item)" } else { "with a window" }
+            ));
+            if !hidden {
+                let handle = app.clone();
+                app.run_on_main_thread(move || {
+                    if handle.get_webview_window(paddock_commands::labels::MAIN_LABEL).is_none() {
+                        if let Err(e) = paddock_window::tauri::create_main(&handle) {
+                            log::error!(Error = e.message.as_str(); "The main window could not be opened");
+                        }
+                    }
+                })?;
+            }
+            Ok(())
+        })
+        .build()
+}
+
 /// Starts the app.
 pub fn run() {
     // First: the shared crates' log lines (the start's error among them) reach Dyno's daily log file (paddock-log); Dyno's
     // own lines stay in its agent-side log.
     let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
     let cwd = std::env::current_dir().ok();
-    let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
+    #[allow(unused_mut)]
+    let mut launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
+    #[cfg(target_os = "macos")]
+    let asked_hidden = std::mem::replace(&mut launch.hidden, true);
     let hub = health::Hub::<tauri::Wry>::default();
     let shell = shell::<tauri::Wry>(Place::Installed, &hub, Arc::new(shell::NativePixels));
     let builder = tauri::Builder::default()
@@ -268,11 +303,15 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![paddock_window::launch::HIDDEN_FLAG]),
-        ));
+        .plugin(tauri_plugin_updater::Builder::new().build());
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(login_start_plugin(asked_hidden));
+    // Linux and Windows register the app itself with the autostart plugin; macOS uses `SMAppService.mainApp` (login.rs).
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_autostart::init(
+        tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+        Some(vec![paddock_window::launch::HIDDEN_FLAG]),
+    ));
     let items = shell::initial_items(&dyno_core::settings::Settings::default().tray_items);
     let builder = app(builder, shell, launch, tray::DynoTray::new(items)).invoke_handler(invoke_handler());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).

@@ -2,6 +2,10 @@
 
 ## [1.0.0] - 2026-10-29
 
+### Fixed
+
+- macOS: turning on Launch at login adds one Dyno row to Login Items (the app registers itself with `SMAppService.mainApp`; no second "dyno-app" row, nothing under `~/Library/LaunchAgents`), it is refused with a message when Dyno runs from the disk image or a quarantined download, and a login start still opens in the tray. `dyno-agent service` refuses inside the app on macOS. The "First launch" notes describe the macOS 26 steps.
+
 ### Added
 
 - The link to the agent is now a state machine with one owner (ADR 0025): a request made before the first connection waits for the connection or for a shown stall with Retry instead of failing after 8 seconds, a connection that drops right after it was made backs off, and a start, a hand-over and a quit can no longer interleave into two agents or a wrong "stopped" note.

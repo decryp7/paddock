@@ -85,6 +85,28 @@ impl Os {
     }
 }
 
+/// On macOS the app's bundle registers the agent itself (`SMAppService`, the plist inside the bundle) under the same
+/// launchd label as [`Service`] writes: the CLI's `install` would add a second plist, `uninstall` would boot out the real
+/// agent and `status` would report "not installed". A `dyno-agent` running from inside a `.app` therefore refuses every
+/// `service` subcommand with the way to manage it instead. Other OSes and a `dyno-agent` outside a bundle are not affected.
+pub fn refuse_inside_app_bundle(os: Os, exe: &Path) -> Result<(), String> {
+    if os != Os::Mac {
+        return Ok(());
+    }
+    let in_bundle = exe
+        .components()
+        .any(|c| c.as_os_str().to_str().is_some_and(|n| n.len() > 4 && n.ends_with(".app")));
+    if in_bundle {
+        return Err(
+            "this dyno-agent is part of the Dyno app, which registers it with macOS itself under the same label \
+             (System Settings > General > Login Items, or Dyno's Settings > Launch at login); `service` commands would \
+             conflict with that registration, so they are not available here"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 impl Service {
     /// The service for the current user and OS, pointing at `exe`.
     pub fn for_current_user(exe: PathBuf) -> Result<Service, String> {
