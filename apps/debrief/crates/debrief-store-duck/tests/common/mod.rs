@@ -129,3 +129,46 @@ pub fn ranged(p: &Pair, q: Filter) -> Filter {
         ..q
     }
 }
+
+/// The id blocks of the store in `dir` are consistent (ADR 0062 section 1): every listed segment has at least one block
+/// and every block belongs to a listed segment and lies within its id range, no two blocks overlap whatever file holds
+/// them, and every row of every segment file lies in a block of its own file.
+pub fn assert_blocks_consistent(store: &DuckStore, dir: &std::path::Path) {
+    let count = |sql: &str| store.bench_sql(sql).unwrap_or_else(|e| panic!("{sql}: {e}"));
+    assert_eq!(
+        count("SELECT 1 FROM segments s WHERE NOT EXISTS (SELECT 1 FROM segment_blocks b WHERE b.file = s.file)"),
+        0,
+        "a listed segment without id blocks"
+    );
+    assert_eq!(
+        count("SELECT 1 FROM segment_blocks WHERE file NOT IN (SELECT file FROM segments)"),
+        0,
+        "a block of a file that is not listed"
+    );
+    assert_eq!(
+        count("SELECT 1 FROM segment_blocks b JOIN segments s USING (file) WHERE b.first_id < s.first_id OR b.end_id > s.end_id OR b.first_id >= b.end_id"),
+        0,
+        "a block outside its segment's range"
+    );
+    assert_eq!(
+        count(
+            "SELECT 1 FROM segment_blocks a, segment_blocks b WHERE (a.file, a.first_id) <> (b.file, b.first_id) AND a.first_id < b.end_id AND b.first_id < a.end_id"
+        ),
+        0,
+        "two blocks overlap"
+    );
+    let glob = dir
+        .join(debrief_store_duck::segments::SEGMENTS_DIR)
+        .join("*.parquet")
+        .to_string_lossy()
+        .replace('\\', "/");
+    if count("SELECT 1 FROM segments") > 0 {
+        assert_eq!(
+            count(&format!(
+                "SELECT 1 FROM read_parquet('{glob}', filename = true) e WHERE NOT EXISTS (SELECT 1 FROM segment_blocks b WHERE e.filename LIKE '%' || b.file AND e.id >= b.first_id AND e.id < b.end_id)"
+            )),
+            0,
+            "a row outside the blocks of its file"
+        );
+    }
+}

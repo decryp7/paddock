@@ -2,7 +2,7 @@
 
 use crate::common;
 
-use common::{log_samples, store_with, TempDir};
+use common::{assert_blocks_consistent, log_samples, store_with, TempDir};
 use debrief_core::batch::{EventId, SourceId};
 use debrief_core::ports::{Ingest, PageQuery, Positions, Query, StoreError};
 use debrief_core::{PluginRegistry, Profile};
@@ -133,6 +133,85 @@ fn removal_hides_at_once_and_compaction_reclaims() {
     // And it can import again.
     store.open(std::slice::from_ref(&logs.0)).unwrap().wait().unwrap();
     assert_eq!(store.summary().unwrap().total, 80);
+}
+
+/// The id blocks of every segment are kept in `segment_blocks` (ADR 0062 section 1): one per import here, moved to
+/// the new file when small segments are merged and when a removed source's rows are rewritten out, dropped with a
+/// segment that holds nothing live, never overlapping, and every row lies in a block of its own file.
+#[test]
+fn id_blocks_follow_their_rows_through_listing_compaction_and_removal() {
+    let logs = TempDir::new("blocks-logs");
+    for i in 0..40 {
+        std::fs::write(
+            logs.0.join(format!("f{i:02}.log")),
+            format!(
+                "2026-10-14 10:00:{:02} INFO file {i} line 1\n2026-10-14 10:00:{:02} WARN file {i} line 2\n",
+                i % 60,
+                i % 60
+            ),
+        )
+        .unwrap();
+    }
+    let dir = TempDir::new("blocks");
+    let store = DuckStore::create_with(
+        &dir.0,
+        Profile::default_profile(),
+        PluginRegistry::new(),
+        StoreOptions {
+            parse_threads: 1,
+            ..StoreOptions::default()
+        },
+    )
+    .unwrap();
+    let blocks = |store: &DuckStore| store.bench_sql("SELECT 1 FROM segment_blocks").unwrap();
+    for i in 0..40 {
+        store.open(&[logs.0.join(format!("f{i:02}.log"))]).unwrap().wait().unwrap();
+        // Compaction merges indexed segments only: each import's segment is indexed before the next import.
+        assert!(store.wait_for_index(std::time::Duration::from_secs(60)).unwrap().ready);
+        assert_blocks_consistent(&store, &dir.0);
+    }
+    assert_eq!(blocks(&store), 40, "one block per import, kept through the merges");
+    assert!(files(&dir).len() < 40, "small segments were merged");
+    assert!(
+        store
+            .bench_sql("SELECT file FROM segment_blocks GROUP BY file HAVING count(*) > 1")
+            .unwrap()
+            >= 1,
+        "a merged segment holds the blocks of the segments it replaced"
+    );
+    // The last file's own segment holds nothing live once it is removed: dropped with its block.
+    let id_of = |store: &DuckStore, name: &str| {
+        store
+            .summary()
+            .unwrap()
+            .sources
+            .iter()
+            .find(|s| s.name.ends_with(name))
+            .map(|s| s.id)
+            .unwrap()
+    };
+    store.remove_source(SourceId(id_of(&store, "f39.log"))).unwrap();
+    assert_blocks_consistent(&store, &dir.0);
+    assert_eq!(blocks(&store), 39);
+    // A source inside a merged segment is rewritten out of it; the segment keeps every block it held.
+    store.remove_source(SourceId(id_of(&store, "f07.log"))).unwrap();
+    assert_blocks_consistent(&store, &dir.0);
+    assert_eq!(blocks(&store), 39);
+    // Reopening keeps them as they are.
+    drop(store);
+    let store = DuckStore::open(&dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
+    assert_blocks_consistent(&store, &dir.0);
+    assert_eq!(blocks(&store), 39);
+    // A store written before `segment_blocks` existed gets them from `segments` when it opens: here no segment's range
+    // overlaps another's, so each holds its range as one block.
+    drop(store);
+    duckdb::Connection::open(dir.0.join(debrief_store_duck::DB_FILE))
+        .unwrap()
+        .execute_batch("DROP TABLE segment_blocks")
+        .unwrap();
+    let store = DuckStore::open(&dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
+    assert_blocks_consistent(&store, &dir.0);
+    assert_eq!(blocks(&store), store.bench_sql("SELECT 1 FROM segments").unwrap());
 }
 
 #[test]
