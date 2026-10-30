@@ -46,6 +46,17 @@ export function parseArgs(argv) {
   return o;
 }
 
+/**
+ * What this checkout lacks for `./dev` (paddock-dev, which holds the host-wide VM slot): the paths its inputs list names
+ * (tools/paddock-dev/inputs.txt: the tool and the shared crates it is built from). A sparse checkout without `crates/` used to
+ * fail later as "could not take a VM slot"; this names the gap and the fix instead. Returns the missing paths ([] = complete).
+ */
+export function checkoutGaps(repo) {
+  const list = join(repo, 'tools', 'paddock-dev', 'inputs.txt');
+  if (!existsSync(list)) return ['tools/paddock-dev'];
+  return readFileSync(list, 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')).filter((p) => !existsSync(join(repo, p)));
+}
+
 const log = (m) => console.error(`vm-smoke: ${m}`);
 
 const children = new Set(); // every host child in flight, so a signal can end them (cleanup)
@@ -133,6 +144,8 @@ async function main(argv) {
   try {
     if (o.guest === 'macos' && process.platform !== 'darwin') throw new Error('the macOS guest needs a Mac host with Tart');
     if ((await hostRun('which', [tartBin])).code !== 0) throw new Error('tart is needed (brew install cirruslabs/cli/tart)');
+    const gaps = checkoutGaps(REPO);
+    if (gaps.length) throw new Error(`this checkout lacks ${gaps.join(', ')}, which ./dev (paddock-dev, the VM slot) is built from. Use a full checkout, or: git sparse-checkout add tools crates .cargo`);
 
     // The installer.
     let dmg = o.installer ? resolve(o.installer) : null;

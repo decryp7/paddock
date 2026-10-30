@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
-import { parseArgs } from './run.mjs';
+import { checkoutGaps, parseArgs } from './run.mjs';
 
 const dynoConfig = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'apps', 'dyno', 'vm-smoke.json'), 'utf8'));
 // Dyno's own config has no scripted Launch-at-login toggle (SMAppService is called by the app itself); the handover logic is tested with one.
@@ -187,4 +188,20 @@ test('arguments: one app, exactly one installer source, macOS only', () => {
   assert.throws(() => parseArgs(['--app', 'dyno', '--run', '1', '--installer', 'x']), /exactly one/);
   assert.throws(() => parseArgs(['--app', '../x', '--run', '1']), /not an app id/);
   assert.throws(() => parseArgs(['--app', 'dyno', '--run', '1', '--guest', 'windows']), /only macos/);
+});
+
+test('checkoutGaps names what a sparse checkout lacks for ./dev, and nothing for a full one', () => {
+  const root = mkdtempSync(join(tmpdir(), 'vmsmoke-co-'));
+  try {
+    assert.deepEqual(checkoutGaps(root), ['tools/paddock-dev']);
+    mkdirSync(join(root, 'tools', 'paddock-dev'), { recursive: true });
+    writeFileSync(join(root, 'tools', 'paddock-dev', 'inputs.txt'), '# inputs\ntools/paddock-dev\ncrates/Cargo.toml\ncrates/paddock-slots\n\n');
+    assert.deepEqual(checkoutGaps(root), ['crates/Cargo.toml', 'crates/paddock-slots']);
+    mkdirSync(join(root, 'crates', 'paddock-slots'), { recursive: true });
+    writeFileSync(join(root, 'crates', 'Cargo.toml'), '');
+    assert.deepEqual(checkoutGaps(root), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+  assert.deepEqual(checkoutGaps(join(dirname(fileURLToPath(import.meta.url)), '..', '..')), [], 'this worktree is complete');
 });

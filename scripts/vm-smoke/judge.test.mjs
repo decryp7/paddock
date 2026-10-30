@@ -36,6 +36,22 @@ test('instancesOf matches the installed bundle executable and its args, not a CL
   assert.deepEqual(instancesOf(p, config.processes[0], BUNDLE).map((x) => x.pid), [10]);
 });
 
+test('instancesOf counts the login item agent that launchd starts with the bare program name (BundleProgram)', () => {
+  const p = ps([
+    [10, 1, '00:30', APP],
+    [20, 1, '00:31', 'dyno-agent run'],
+    [21, 1, '00:05', 'dyno-agent service status'],
+    [22, 1, '00:05', 'vim dyno-agent'],
+    [23, 1, '00:05', 'dyno-agent-helper run'],
+  ]);
+  assert.deepEqual(instancesOf(p, config.processes[1], BUNDLE).map((x) => x.pid), [20]);
+  const r = judgeSnapshot(p, config, BUNDLE, { running: true, loginService: true });
+  assert.ok(r.ok, JSON.stringify(r.checks));
+  // Two agents, one from the bundle path (the app's child) and one bare (launchd's): a duplicate, and it is seen.
+  const two = judgeSnapshot(ps([[10, 1, '00:30', APP], [11, 10, '00:29', `${AGENT} run`], [20, 1, '00:31', 'dyno-agent run']]), config, BUNDLE, { running: true, loginService: true });
+  assert.equal(two.checks.find((c) => c.id === 'count:dyno-agent').ok, false);
+});
+
 test('judgeSnapshot passes one app with one agent whose parent is the app', () => {
   const r = judgeSnapshot(ps([[10, 1, '00:30', APP], [11, 10, '00:29', `${AGENT} run`]]), config, BUNDLE, { running: true });
   assert.equal(r.ok, true, JSON.stringify(r.checks));
