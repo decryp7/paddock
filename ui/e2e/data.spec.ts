@@ -1,5 +1,4 @@
-import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, test, type Page } from '@decryp7/paddock-e2e';
 
 // The data parts of paddock-ui (plan X21) in the gallery: the table's sorting, filter, keyboard, menus and virtual rows, the
 // chart wrapper over a real ECharts, and the forms helpers, in both themes, with axe and without horizontal scroll at 320 px.
@@ -19,8 +18,8 @@ for (const theme of THEMES) {
   test(`axe finds no violations in the table, chart and forms (${theme})`, async ({ page }) => {
     await open(page, theme);
     await page.locator('section[data-testid="chart"] canvas').first().waitFor();
-    const results = await new AxeBuilder({ page }).include('section[data-testid="table"]').include('section[data-testid="chart"]').include('section[data-testid="forms"]').withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
-    expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+    // Colours are read at rest: the field hints fade in over 300 ms (Material's subscript animation), and axe can read them half way.
+    expect(await axeViolations(page, { include: ['section[data-testid="table"]', 'section[data-testid="chart"]', 'section[data-testid="forms"]'] })).toEqual([]);
   });
 }
 
