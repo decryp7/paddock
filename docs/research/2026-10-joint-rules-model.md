@@ -42,7 +42,7 @@ Names are the proposal; the crate's ADR fixes them.
 ### 3.1 One owner for the shared types
 
 `paddock-rules` owns, and `pacenotes-core` re-exports (`pub use paddock_rules::{...}`, an amendment to ADR 0002 written with this note):
-`Severity`, `FindingState` and its transitions, `Confidence`, `Position`, `Span`, `Location`, `RepoPath`, `FileId`-free identity types
+`Severity`, `FindingState` and its transitions, `Confidence`, `Position`, `Span`, `Location`, `RepoPath`
 below, and `FindingFingerprint`. The file-content `Fingerprint`, `FileId`, `SymbolId`, `Rev`, `Tier`, `Language`, `RuleSpec` and `Check`
 stay in `pacenotes-core`: they are about code, not about reporting. The shared `Rule` has **no `languages` field** (a conformance check
 has none); Pacenotes' `RuleSpec` wraps a shared `Rule` and adds `languages`, `check` and the examples. ADR 0002's "Shared later" list
