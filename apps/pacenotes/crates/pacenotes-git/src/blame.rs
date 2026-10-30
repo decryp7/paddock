@@ -127,7 +127,17 @@ impl Blamer for GixHistory {
             return Err(BlameError::UnknownRev(rev.to_string()));
         };
         let repo = self.thread_local_repo();
-        repo.find_commit(id).map_err(|_| BlameError::UnknownRev(rev.to_string()))?;
+        let commit = repo.find_commit(id).map_err(|_| BlameError::UnknownRev(rev.to_string()))?;
+        // is the file there? looked up in the commit's tree, so a missing path is `NotFound` deterministically, whatever words gix's own
+        // errors use (and a damaged object database stays a backend error)
+        let entry = commit
+            .tree()
+            .and_then(|tree| tree.lookup_entry_by_path(path.as_str()))
+            .map_err(|e| BlameError::Backend(e.to_string()))?
+            .filter(|e| e.mode().is_blob());
+        let Some(_entry) = entry else {
+            return Err(BlameError::NotFound(path.clone()));
+        };
         let ranges = match request.range {
             Some((a, b)) if a >= 1 && b >= a => {
                 gix::blame::BlameRanges::from_one_based_inclusive_range(a..=b).map_err(|e| BlameError::Backend(e.to_string()))?
@@ -198,7 +208,6 @@ impl Blamer for GixHistory {
                         got: guard.stopped_size.load(Ordering::SeqCst),
                         max: request.limits.max_blob_bytes,
                     },
-                    None if e.to_string().contains("wasn't found") => BlameError::NotFound(path.clone()),
                     None => BlameError::Backend(e.to_string()),
                 });
             }
