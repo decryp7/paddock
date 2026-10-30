@@ -1,6 +1,6 @@
 # 11. Canonical draw.io form and the round-trip merge rules
 
-Status: proposed (2026-10-30), plan row D-diagram, proposal section 9.2. Numbered at merge. Needs an independent review.
+Status: proposed (2026-10-30), revised after the first independent review. Plan row D-diagram, proposal section 9.2. Numbered at merge.
 
 ## Context
 
@@ -26,92 +26,132 @@ carry a scheme of its own. Read from that branch (not yet on `main`), the tool g
 
 What the tool **does not** do, and Pacenotes needs: it has no notion of a generated cell versus a manual one, no merge (regeneration
 overwrites the file; a hand edit must be adopted with `import` first, which replaces the data), no stable ids from code identity, no
-attributes beyond the model (`<object>` wrappers, `pn_*` fields are refused), and `import` keeps the page name but not the page id
+attributes beyond the model (`<object>` wrappers and custom fields are refused, and `parent` other than the default layer is refused), and `import` keeps the page name but not the page id
 (the family writes `id = name`, so a draw.io-saved random diagram id fails `--strict` forever).
 
 ## Decision
 
 ### 1. One canonical form, owned by `paddock-diagrams`
 
-Pacenotes writes through `drawio::write` and checks with `--check --strict`. It does not add a second writer. Compressed files are
-refused with the tool's message (turn Compressed off); the proposal's "reader for compressed files" (plan DG1) is dropped unless a
-recording shows draw.io on the web or in VS Code compresses by default (open question for DG1, below).
+Pacenotes writes through the shared writer and checks with `--check --strict`. It adds no second writer. Compressed files are refused
+with the tool's message (turn Compressed off). The proposal's "reader for compressed files" is dropped; whether the VS Code extension
+compresses by default stays a DG1 recording, and a "yes" reopens this point. Embedded `.drawio.svg` and `.drawio.png` are out of scope.
+`UserObject` and `object` are the same thing to draw.io, which keeps the element name it read and never converts one to the other;
+the reader accepts both and the writer keeps the name it found (new cells use `object`).
 
-### 2. Pacenotes diagrams are the family's data plus a generation record
+### 2. What is recorded, and where (no sidecar file)
 
-The generated part of a diagram is the `Diagram` model plus, per generated item, the identity it came from. Ids are
-`pn:<kind>:<hash>` of the code element's qualified name, kind and language (proposal 9.2), so order never matters. The generation
-record (per item: id, `pn_hash` of the generated content, `pn_geo` the generated rectangle) lives **in the file** (proposal 9.2:
-no sidecar), as the shared tool's extension in section 4.
+All records are custom data in the file, so one save carries them. DG1 must confirm with real saves that each survives.
 
-### 3. Hand edits that must survive, and how each is detected
+- **Page record**, on the root cell as `<object id="0" gen_page="...">`: the generated ids in generation order, the **tombstones**
+  (generated ids the user deleted and chose to remember, H7), and a format version. Bounded: at most `MAX_ITEMS` ids.
+- **Per-cell record**, as wrapper attributes on the cell: `gen_key` (the identity string: qualified name, kind, language, plus an app
+  tag value such as `pacenotes`), `gen_label` and `gen_style` (one hash per part, of what was **last written**), `gen_geo`
+  (the written `x,y,w,h`), `gen_pts` (the written waypoints of an edge) and `gen_parent` (the written parent).
+- **Names are neutral.** The shared crate reserves the prefix `gen_`; the app tag lives in the value, or the app declares its own
+  prefix in `diagrams.json`. `pn_` is not used. The marker `pnGen=1` in the style string is dropped: the presence of `gen_key` is the
+  only mark of a generated cell. `pn_rev` is dropped too: a revision stamp changes on every commit and would make every file differ in
+  every regeneration, while the hashes already say exactly which parts changed.
+- **Ids** are `pn:<kind>:<hash>` of the identity string (proposal 9.2), so order never matters. The hash is the first 16 hex digits
+  (64 bits) of SHA-256 over the identity string; part hashes are the first 16 hex digits of SHA-256 of the part's canonical text. A
+  collision between two different identities (about 2 in 10^10 at 20,000 items) is detected when generating (two identities, one id):
+  the generator fails with both names and extends the hash for that diagram to 24 digits. It is never merged silently.
+- Wrapper attributes that are not in the generated-meta names (link, tooltip, tags, Edit Data fields, a person's own) are **kept
+  verbatim**; the merge owns only the `gen_` names.
 
-Detection compares three things: the file as saved (F), the generation record in it (R, what the generator wrote last time), and the
-new generation (G, from the current index). A cell is *generated* when its id starts with `pn:` and it carries the marker; anything
-else is *manual*.
+### 3. Matching and the three-way rule
+
+F is the saved file, R the record in it, G the new generation from the current index.
+
+**Matching order, per generated item in G:** (1) a cell whose id equals the derived id wins. (2) Only if no cell has that id, a cell
+carrying the same `gen_key` is the same item, its id was changed by draw.io (H10) and is restored on write. (3) Any other cell
+carrying that key (a copy, H2) is **manual**: merge strips its `gen_` meta, so it stays as the person's own shape.
+
+**Per part (label, style), using the stored hash:** an *edit* is hash(F part) differs from the stored hash; *code changed* is hash(G
+part) differs from the stored hash. Edit only: keep F. Code changed only: take G. Both: **conflict**, F kept, G shown in the preview.
+Neither: take G (identical). Geometry and waypoints are compared with the stored `gen_geo` and `gen_pts`; a difference pins them (H3,
+H6). Off-grid numbers are a difference like any other and count as H3, not as serialisation.
+
+### 4. Hand edits that must survive, and how each is detected
 
 | # | Hand edit | Detected by | Rule on regeneration |
 |---|---|---|---|
-| H1 | Manual shape or edge added (no `pn:` id) | id has no `pn:` prefix or marker | Never touched, never removed; stays after generated cells in original order |
-| H2 | Generated cell duplicated (copy keeps style and marker, gets a new id) | marker present but the id is not in R | Treated as manual (H1) |
-| H3 | Generated cell moved or resized | F geometry differs from `pn_geo` | Pinned: rectangle kept |
-| H4 | Style tweak (colour, font, dash) | F style differs from the generated style | Kept; only tokens the generator owns (marker, `pn_` keys) are rewritten |
-| H5 | Label edited | F label differs from the label for `pn_hash` | Kept and flagged "label edited"; if code content also changed, a conflict shown in the preview |
-| H6 | Edge waypoints edited | F waypoints differ from R | Pinned like geometry (H3) |
-| H7 | Generated cell deleted | id in R, not in F | Not silently re-added: listed in the preview as "deleted by you", the user chooses to restore or to remember the deletion (recorded in the data file) |
-| H8 | Cell reparented, grouped or put on another layer | F `parent` differs from R | Parent kept; geometry is then relative, so H3 is judged in the parent's frame |
-| H9 | Cell order (z-order) changed | order of ids in F differs from R | Kept for pinned cells; new cells go in front of generated ones, behind manual |
-| H10 | Id changed by draw.io (paste, import) | `pn_key` present, id differs from the derived id | Matched by `pn_key`, id restored on write; if two cells share a `pn_key`, the first is the original and the other is H2 |
-| H11 | Page renamed, diagram id changed by draw.io | page id or name differs | Not a content edit: the name comes from the data, the id is normalised (section 4) and reported as `reformat_only`, not as a failure |
-| H12 | File re-serialised by draw.io (key order, spacing, `UserObject` for `object`, numbers off the grid) | `--check` passes, `--strict` fails | Reported as serialisation only; regeneration normalises the file once |
-| H13 | Code element gone | id in R, not in G | Cell marked "removed in code" and kept until the user confirms in the preview |
+| H1 | Manual shape or edge added | no `gen_key` | Never touched, never removed; kept after generated cells in file order |
+| H2 | Generated cell duplicated | same `gen_key`, id not derived, derived id also present | Manual; its `gen_` meta is stripped (section 3) |
+| H3 | Moved, resized, or placed off the grid | F geometry differs from `gen_geo` | Pinned |
+| H4 | Style changed | hash(F style) differs from `gen_style` | Kept; conflict only if the code side also changed |
+| H5 | Label edited | hash(F label) differs from `gen_label` | Kept and flagged "label edited"; both sides changed is a conflict |
+| H6 | Edge waypoints edited | F points differ from `gen_pts` | Pinned like geometry |
+| H7 | Generated cell deleted | id in the page record's id list, not in F | Tombstone, see below |
+| H8 | Cell reparented, grouped, moved to another layer | F parent differs from `gen_parent` | Parent kept; geometry is then judged in the parent's frame. Layers are kept as cells; the generator writes to the default layer |
+| H9 | Z-order changed | order of ids in F differs from the page record's order | Kept for pinned cells; new cells go in front of generated, behind manual |
+| H10 | Id changed by draw.io | no cell with the derived id, one with the `gen_key` | Section 3 rule 2; the id is restored and manual edges that referenced it are rewritten (below) |
+| H11 | Page renamed, diagram id changed | page name or id differs | Not content: name from data, id normalised, reported as `reformat_only` |
+| H12 | Re-serialised by draw.io (key order, spacing, whitespace) | `--check` passes, `--strict` fails | Serialisation only; regeneration normalises once |
+| H13 | Code element gone | id in the page record, not in G | Cell marked "removed in code" and kept until the user confirms; its tombstone, if any, is dropped |
+| H14 | A generated edge reconnected to another cell | source or target differs from R | Pinned with the edge; reported "reconnected" |
+| H15 | Edge label (child vertex of the edge, or an offset) | a child cell with the edge as parent, or label geometry | Kept as a manual child; offset treated as geometry (H3) |
+| H16 | Link, tooltip, tags, Edit Data on a generated cell | wrapper attributes outside the `gen_` names | Kept verbatim |
+| H17 | `visible=0` or `locked` | style or attribute on the cell | Kept; `visible=0` cells still count as present (not deleted) |
+| H18 | Collapsed container, layer visibility | container and layer attributes | Kept; children keep their pins |
+| H19 | Page view toggles (grid, guides, page size, background) | model attributes differ from the canonical set | Normalised to canonical and reported as `reformat_only`; not refused and not merged |
 
-Not preserved, by design: edits to the model attributes (grid, page size), a second page, a compressed page. They are refused or
-normalised with a message, not merged.
+**H7, deleted generated cells.** Detection is the page record. The non-interactive default is: do **not** re-add, report "deleted by
+you (pending)", and do **not** fail `--check`. In the preview the user chooses *restore* (the cell is placed fresh, as a new item,
+not at the old position) or *remember* (the id goes into the page record's tombstones, and is not reported again). Tombstones are
+removed when the code element is removed (H13). A rename gives a new id, so it is a new item, not a tombstone hit.
 
-### 4. What Pacenotes needs added to the shared tool (proposal for `paddock-diagrams`, not a copy)
+**Manual edges that end at a generated cell.** On an id restore (H10) their `source` and `target` are rewritten to the restored id. On
+removal in code (H13) the cell is kept until confirmed; if the user confirms, an attached manual edge becomes free at its last
+point (the endpoint stays where the cell was), and when the user prefers, removal is blocked and the edge listed instead.
 
-Each item is a change to `crates/paddock-diagrams` and `tools/paddock-dev`, made by the tool's owner, with its adoption by Pacenotes
-in the same change (AGENTS.md: shared change and adoption land together). Until then `paddock-diagrams` is frozen for this work and
-nothing here is copied into Pacenotes.
+**New cells** are placed in free grid slots next to their neighbours by edge, else by group, **around** pinned cells (never on
+them), and edges are routed around pinned cells. After a merge the stored `gen_geo` is the geometry **as written** (the pinned value
+for a pinned cell), so a pin stays a pin until the user chooses "re-layout" (which asks first).
 
-1. **Normalise the diagram id on `import` and compare it leniently in `--check`.** Reviewers of the tool already asked for this.
-   `import` sets the id from the page name; `difference` ignores the id and `--strict` reports an id-only difference as
-   `reformat_only` (H11). Test: the saved-by-drawio fixture with a random id round trips with no finding.
-2. **Item metadata.** A small, bounded `meta: BTreeMap<String, String>` on `Shape` and `Edge` (keys limited to a fixed prefix list,
-   such as `pn_key`, `pn_hash`, `pn_geo`; value length bounded), written as an `<object>` wrapper in canonical position and read
-   back; `UserObject` accepted on read (H12). Other unknown attributes stay refused. This is the only model change.
-3. **Item roles.** `import` keeps the marker style key (`pnGen=1`) as metadata instead of refusing it, so the generated/manual
-   split (H1, H2) survives a round trip. A per-app allow-list of extra style keys would also do; the choice is the tool's.
-4. **A pure `merge(previous_file, generated, options) -> MergeResult`** in `paddock-diagrams`, format-neutral where possible: it takes
-   the saved `MxFile`, the new `Diagram`, and returns the merged `Diagram` plus a list of `Change { id, kind: Added | Updated |
-   Removed | Pinned | LabelEdited | Conflict | DeletedByUser }`. It implements the table in section 3, with no I/O. Pacenotes supplies
-   identity and layout; the crate owns matching and pinning, so Debrief or Dyno can use it too (rule of three not yet met, so it
-   stays a function, not a framework).
-5. **`dev diagrams merge`** (apps opt in through `diagrams.json`): writes the merged file, prints the change list, and with
-   `--check` fails on a stale generated part (hash or identity set differs) and ignores manual cells.
-6. **Tolerant read for a draw.io-saved file with extra, ignorable data.** `import` today fails on any unknown element or style
-   key. For merge the reader must keep unknown *style keys* on manual cells verbatim (opaque) rather than refuse them, since a
-   person may use any draw.io shape; the model-level `Unsupported` stays for generated cells and for `import` into data.
-   Open point for the tool's owner: whether opaque cells fit the "neutral model" or need a separate `Opaque` item.
-7. **Golden and fixture tests in the shared crate**, not in Pacenotes: each of H1 to H13 has a test there; Pacenotes tests only
-   its identity function, its layout and the wiring.
+**Not preserved, by design:** a second page, a compressed page, embedded `.drawio.svg/.png`. They are refused with a message.
 
-### 5. Parallelism and cost (rule 51)
+### 5. What Pacenotes needs added to the shared tool (a proposal; the tool's owner builds it, Pacenotes adopts it in the same change)
 
-Diagrams are small (bounded at 20,000 items and 8 MiB) and merge is a linear pass over ids in a map, so no parallelism: the
-measurable cost is the draw.io CLI export, which `dev diagrams export` already runs one file at a time with a 180 s timeout. Cheaper
-work is already designed in: `--check` is a pure compare, and the stale check hashes the generated part only. Measure the merge on a
-20,000 item diagram when item 4 lands; the budget is the existing `MAX_ITEMS` case under one second.
+1. **Normalise the diagram id on `import`** and compare it leniently in `--check` (the tool's reviewers asked for this); an id-only
+   difference is `reformat_only` (H11, H19). Test: the saved-by-drawio fixture with a random id round trips clean.
+2. **`drawio::merge(saved: &MxFile, generated: &Diagram, opts) -> Merged { file: MxFile, changes: Vec<Change> }`**, working at file
+   level, pure, no I/O. Generated cells are written from G, then overlaid with what is pinned (as raw strings: geometry, style,
+   label, waypoints, parent). `Change` is `Added | Updated | Removed | Pinned | LabelEdited | StyleEdited | Conflict | Reconnected |
+   DeletedByUser | Rewired`. It implements sections 3 and 4.
+3. **`RawCell`** in the `drawio` module and a bounded **`MxFile::parse_lenient`**: manual cells (and their opaque style keys,
+   wrapper attributes and children) pass through verbatim. The strict `parse`, `import` and `--check` keep every refusal they have
+   today, and `RawCell` never enters the neutral `Diagram` model. This answers the earlier open question: opaque cells do not need a
+   model item, because the merge works on files.
+4. **Item metadata** is read and written only by the merge and the strict writer: a bounded map (reserved `gen_` prefix, length
+   bounds), `UserObject` accepted. The strict parse accepts exactly the reserved names and the page record, and refuses other unknown
+   attributes. The set of style keys kept verbatim on manual cells is a configuration allow-list in `diagrams.json`, not code.
+5. **`dev diagrams merge`**, opted in per diagram in `diagrams.json`: writes the merged file and prints the change list. `merge
+   --check` fails on a stale generated part (identity set or part hashes differ from G) and ignores manual cells. **Merge-managed
+   files are exempt from `generate`'s "committed file needs a data file" rule**; `merge --check` checks them instead, and `generate
+   --check --strict` skips them by name.
+6. **Parent handling:** `parent` other than the default layer is accepted by the lenient parse and the merge (H8) and stays refused
+   by the strict parse used by `import`.
+7. **Tests live in the shared crate:** one per row H1 to H19, fixtures first from `saved-by-drawio.drawio`, then from DG1's
+   recordings. Pacenotes tests only its identity function, layout and wiring.
+
+### 6. Parallelism and cost (rule 51)
+
+Diagrams are bounded (20,000 items, 8 MiB). The merge is a linear pass over id maps. Where it helps: **files merge in parallel**,
+one task per diagram, bounded by cores minus one (CPU-bound, deterministic output because each file is independent and results are
+reported in name order). The costly step is the **draw.io CLI export** (an Electron process per file): it is parallel only up to a
+bound set by RAM (a few at a time; the tool's default stays one until measured), and it is **skipped when the diagram's hash is
+unchanged** since the last export (hash of the `.drawio` kept next to the SVG/PNG, git-ignored). `--check` is a pure compare and
+needs no draw.io. The merge on a 20,000-item diagram is measured when item 2 lands, budget under one second, and the number goes in
+the tool's `docs/performance.md` and the family `docs/benchmarks.md` (not in this ADR).
 
 ## Consequences
 
-- Pacenotes' DG1 has a smaller job: identity, layout and the wiring to `dev diagrams merge`. It does not write a writer or a reader.
-- DG1's recordings must cover H2, H3, H4, H5, H6, H7, H8, H10, H11, H12 in draw.io desktop, web and the VS Code extension; the
-  list of edits the agent hands the user is this table. Whether a platform compresses by default, renames ids on paste, or
-  converts `object` to `UserObject` is unobserved; each result is recorded in the fixture's README and may change section 3.
-- The shared tool must grow items 1 to 6 before DG1 can pass; if the owner declines item 4, Pacenotes proposes it as a shared
-  `paddock-diagrams` module in the same change, never as a private copy.
-- Drops from the proposal: the optional `pacenotes diagram merge-driver` (Later) and the recommended `.gitattributes` entry stay
-  as they were; the canonical form in the shared tool already gives one line per cell, which is what a text merge needs.
-- Risk: the opaque-cell question (item 6) decides whether a person's own draw.io shapes survive; resolve it in the review.
+- DG1 shrinks to identity, layout and wiring to `dev diagrams merge`; it writes no writer or reader.
+- DG1's recordings must confirm that the page record and the per-cell records survive a save, and cover H2 to H10 and H14 to H19 in
+  draw.io desktop, web and the VS Code extension (including compression by default, paste id changes, and whether wrapper
+  attributes keep their order). Each result is recorded in the fixtures' README and may change section 4.
+- The shared tool must grow items 1 to 6 before DG1 can pass. If the owner declines item 2, Pacenotes proposes it as a module in
+  the shared crate, never as a private copy.
+- The optional `pacenotes diagram merge-driver` and the `.gitattributes` advice are unchanged; the canonical form's one line per cell
+  is what a text merge needs.
