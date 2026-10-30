@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { buildEnv } from '../ci/build-env.mjs';
-import { checkPin, executableIn, install, parseArgs, parseRustPin, platformId, urlFor } from '../ci/install-test-browser.mjs';
+import { checkPin, executableIn, grantCommand, install, parseArgs, parseRustPin, platformId, urlFor } from '../ci/install-test-browser.mjs';
 import { decide, tagFor } from '../ci/plan.mjs';
 import { firstLaunch, releaseNotes } from '../ci/release-notes.mjs';
 import { makeApp, PADDOCK } from './helpers.mjs';
@@ -126,24 +126,35 @@ test('install-test-browser: downloads once, verifies the checksum before extract
     chmodSync(join(to, 'chrome-linux64', 'chrome'), 0o755);
   };
   const fetchBytes = async (url) => { fetched.push(url); return bytes; };
-  const exe = await install({ pin, dir, id: 'linux64', fetchBytes, extract });
+  const granted = [];
+  const grant = (d) => granted.push(d);
+  const exe = await install({ pin, dir, id: 'linux64', fetchBytes, extract, grant });
   assert.equal(exe, join(dir, 'chrome-linux64', 'chrome'));
-  assert.equal(await install({ pin, dir, id: 'linux64', fetchBytes, extract }), exe);
+  assert.equal(await install({ pin, dir, id: 'linux64', fetchBytes, extract, grant }), exe);
   assert.equal(fetched.length, 1, 'the second call found the pinned version');
-  await install({ pin: { ...pin, version: '10.0.0' }, dir, id: 'linux64', fetchBytes, extract });
+  assert.deepEqual(granted, [dir, dir], 'app containers get access on a fresh install and on a reused one');
+  await install({ pin: { ...pin, version: '10.0.0' }, dir, id: 'linux64', fetchBytes, extract, grant });
   assert.equal(fetched.length, 2, 'a new pin downloads again');
+});
+
+test('install-test-browser: on Windows, app containers may read and run the browser (Chrome checks it before a sandboxed helper starts)', () => {
+  assert.equal(grantCommand('/d', 'linux'), null);
+  assert.equal(grantCommand('/d', 'darwin'), null);
+  const [cmd, args] = grantCommand('C:\\ci\\browser', 'win32', { SystemRoot: 'C:\\Windows' });
+  assert.equal(cmd, 'C:\\Windows\\System32\\icacls.exe');
+  assert.deepEqual(args, ['C:\\ci\\browser', '/grant', '*S-1-15-2-1:(OI)(CI)(RX)', '/grant', '*S-1-15-2-2:(OI)(CI)(RX)', '/Q']);
 });
 
 test('install-test-browser: a wrong checksum extracts nothing; a missing platform and a short archive are errors', async () => {
   const pin = { version: '1', base: 'https://x.test', sums: { linux64: 'c'.repeat(64) } };
   const dir = join(makeApp({ 'a.txt': '' }), 'browser');
   let extracted = false;
-  await assert.rejects(install({ pin, dir, id: 'linux64', fetchBytes: async () => Buffer.from('tampered'), extract: () => { extracted = true; } }), /checksum mismatch/);
+  await assert.rejects(install({ pin, dir, id: 'linux64', fetchBytes: async () => Buffer.from('tampered'), extract: () => { extracted = true; }, grant: () => assert.fail('nothing to grant') }), /checksum mismatch/);
   assert.equal(extracted, false);
   assert.equal(existsSync(dir), false);
   await assert.rejects(install({ pin, dir, id: 'win64', fetchBytes: async () => Buffer.alloc(0) }), /no checksum for win64/);
   const bytes = Buffer.from('z');
-  await assert.rejects(install({ pin: { ...pin, sums: { linux64: sha(bytes) } }, dir, id: 'linux64', fetchBytes: async () => bytes, extract: () => {} }), /did not contain/);
+  await assert.rejects(install({ pin: { ...pin, sums: { linux64: sha(bytes) } }, dir, id: 'linux64', fetchBytes: async () => bytes, extract: () => {}, grant: () => assert.fail('nothing to grant') }), /did not contain/);
 });
 
 // ---- tauri-bundle.sh ---------------------------------------------------------------------------------------------------

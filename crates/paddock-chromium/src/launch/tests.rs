@@ -105,6 +105,48 @@ fn the_launch_command_line_is_the_one_built_and_the_profile_goes_with_the_browse
     assert!(b.close(), "a second close finds it ended");
 }
 
+/// `helper_starts` reads the browser's histograms; a browser that answers without them, or does not know the method,
+/// says nothing (`None`) instead of failing.
+#[test]
+fn helper_starts_come_from_the_browser_or_say_nothing() {
+    let f = Fixture::new(Mode::Obey, 1);
+    let mut b = f.launch();
+    assert!(
+        f.fake.args().contains(&NO_TESTING_FIELD_TRIALS.to_string()),
+        "a Chromium build starts without its testing config"
+    );
+    assert_eq!(
+        b.helper_starts().unwrap(),
+        None,
+        "a reply without histograms"
+    );
+    f.fake.histograms(None).unwrap();
+    assert_eq!(
+        b.helper_starts().unwrap(),
+        None,
+        "a browser without the method"
+    );
+    f.fake
+        .histograms(Some(&json!({"histograms": [
+            {"name": "ChildProcess.Launched.UtilityProcessHash", "count": 2},
+            {"name": "ChildProcess.LaunchFailed.UtilityProcessErrorCode", "count": 1}
+        ]})))
+        .unwrap();
+    assert_eq!(
+        b.helper_starts().unwrap(),
+        Some(HelperStarts {
+            started: 2,
+            failed: 1,
+            ..HelperStarts::default()
+        })
+    );
+    assert!(b.close_gracefully(Duration::from_secs(10)));
+    assert!(
+        matches!(b.helper_starts(), Err(Error::Closed)),
+        "a closed browser is an error"
+    );
+}
+
 /// Regression (Debrief 1.1.1, Linux as root): `--no-sandbox` was appended after the start page.
 #[test]
 fn without_the_sandbox_the_start_page_is_still_the_last_argument() {

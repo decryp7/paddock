@@ -93,11 +93,10 @@ fn a_new_tab_loads_a_page_at_once() {
     assert!(b.close(), "Browser.close ends it by itself");
 }
 
-/// Every helper process the browser needs starts on the first try. On Windows CI each browser's network service failed to
-/// start in its sandbox (Chrome could not read the program in the runner's user folder: error 45, access denied) and was
-/// started again unsandboxed; a load that ran into that restart ended in `net::ERR_ABORTED` before it reached the network
-/// (runs 7149, 7154). A failed start is counted in the browser's own histogram, so this checks the cause itself, not the
-/// race it opens: it fails on every such browser, not only on the unlucky ones.
+/// Every helper process the browser needs starts on the first try. In all 12 Chrome logs of Windows CI runs 7149 and 7154
+/// the sandboxed network service of Chrome for Testing's testing config could not start (the browser sat in the runner's
+/// user folder) and was started again unsandboxed; real-browser loads were lost in those runs. The browser counts such
+/// failed starts itself, so this checks every browser, not only the unlucky loads.
 #[test]
 fn every_helper_process_starts_on_the_first_try() {
     let Some(exe) = require_browser() else { return };
@@ -116,13 +115,21 @@ fn every_helper_process_starts_on_the_first_try() {
         Duration::from_secs(30),
     )
     .unwrap();
-    let starts = b.helper_starts().unwrap();
+    let starts = b
+        .helper_starts()
+        .unwrap()
+        .expect("Chrome for Testing reports its histograms");
     assert!(
         starts.started > 0,
         "the browser reports its helper starts: {starts:?}"
     );
     assert_eq!(
-        starts.failed, 0,
+        (
+            starts.failed,
+            starts.network_sandbox_failed,
+            starts.network_sandbox_given_up
+        ),
+        (0, 0, 0),
         "a helper process (the network service) could not start and was started again: {starts:?}"
     );
     assert!(close_by_itself(&mut b).0, "Browser.close ends it by itself");

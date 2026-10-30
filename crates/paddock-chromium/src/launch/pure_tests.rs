@@ -1,7 +1,6 @@
 //! The pure parts of the launch: the command line, the sandbox decision, display check, theme and profiles (every OS).
 
 use super::*;
-use paddock_runtime::OsKind;
 
 fn opts(base: &Path) -> LaunchOptions {
     let mut o = LaunchOptions::new(Profile::Throwaway(base.to_path_buf()));
@@ -13,7 +12,12 @@ fn opts(base: &Path) -> LaunchOptions {
 
 #[test]
 fn keeps_the_automation_banner_and_hides_nothing() {
-    let a = command_line(Path::new("/tmp/p"), &opts(Path::new("/b")), Sandbox::On);
+    let a = command_line(
+        Flavor::Chromium,
+        Path::new("/tmp/p"),
+        &opts(Path::new("/b")),
+        Sandbox::On,
+    );
     assert!(a.contains(&"--enable-automation".to_string()));
     assert!(
         a.iter()
@@ -28,7 +32,7 @@ fn the_window_modes() {
     let with = |w: Window| {
         let mut o = opts(Path::new("/b"));
         o.window = w;
-        command_line(Path::new("/p"), &o, Sandbox::On)
+        command_line(Flavor::Chromium, Path::new("/p"), &o, Sandbox::On)
     };
     let placed = with(Window::OnScreen(Some(WindowBounds {
         x: -1800,
@@ -71,7 +75,7 @@ fn the_start_page_is_last_for_every_combination_of_options() {
                 ] {
                     let mut o = opts(Path::new("/b"));
                     (o.quiet, o.disk_cache_bytes, o.extra_args) = (quiet, cache, extra.clone());
-                    let a = command_line(Path::new("/p"), &o, sandbox);
+                    let a = command_line(Flavor::Chromium, Path::new("/p"), &o, sandbox);
                     assert_eq!(a.last().map(String::as_str), Some(START_PAGE), "{a:?}");
                     assert_eq!(a.iter().filter(|x| *x == START_PAGE).count(), 1, "{a:?}");
                     assert_eq!(
@@ -100,25 +104,31 @@ fn the_start_page_is_last_for_every_combination_of_options() {
     }
 }
 
-/// Chrome for Testing turns on its network-service sandbox on Windows (its field-trial testing config). That sandbox
-/// cannot read a browser kept in a user's folder (`C:\\Users\\...`, where the runtime store and CI keep it), so Chrome
-/// starts the network service a second time, unsandboxed, and a load that runs into that restart ends in
-/// `net::ERR_ABORTED` before it reaches the network (Windows CI runs 7149 and 7154). The driver starts it unsandboxed at
-/// once, on Windows only, in the one `--disable-features` switch the browser reads (Chrome keeps only the last one).
+/// A Chromium build (Chrome for Testing) starts without its field-trial testing config; branded Chrome and Edge never
+/// apply it and get no switch. On Windows CI that config's network-service sandbox could not start for a browser in the
+/// runner's user folder and Chrome started the network service a second time (all 12 Chrome logs of runs 7149 and 7154);
+/// loads were lost in those runs (see [`NO_TESTING_FIELD_TRIALS`]). Every feature to turn off is in one
+/// `--disable-features` switch, the caller's merged in without repeats.
 #[test]
-fn windows_starts_the_network_service_unsandboxed_and_keeps_one_feature_switch() {
+fn chromium_builds_start_without_testing_field_trials_and_one_feature_switch() {
     for quiet in [true, false] {
         for extra in [
             vec![],
             vec![
-                "--disable-features=Foo,NetworkServiceSandbox".to_string(),
+                "--disable-features=Foo,Translate".to_string(),
                 "--lang=de".to_string(),
             ],
         ] {
             let mut o = opts(Path::new("/b"));
             (o.quiet, o.extra_args) = (quiet, extra.clone());
-            for os in [OsKind::Windows, OsKind::Macos, OsKind::Linux] {
-                let a = command_line_for(os, Path::new("/p"), &o, Sandbox::On);
+            for flavor in [Flavor::Chromium, Flavor::Chrome, Flavor::Edge] {
+                let a = command_line(flavor, Path::new("/p"), &o, Sandbox::On);
+                assert_eq!(
+                    a.contains(&NO_TESTING_FIELD_TRIALS.to_string()),
+                    flavor == Flavor::Chromium,
+                    "{flavor:?}: {a:?}"
+                );
+                assert_eq!(a.last().map(String::as_str), Some(START_PAGE), "{a:?}");
                 let switches: Vec<&String> = a
                     .iter()
                     .filter(|x| x.starts_with("--disable-features="))
@@ -129,11 +139,10 @@ fn windows_starts_the_network_service_unsandboxed_and_keeps_one_feature_switch()
                     .map(|s| s["--disable-features=".len()..].split(',').collect())
                     .unwrap_or_default();
                 assert_eq!(
-                    features.contains(&"NetworkServiceSandbox"),
-                    os == OsKind::Windows || !extra.is_empty(),
-                    "{os:?} quiet={quiet}: {a:?}"
+                    features.contains(&"Translate"),
+                    quiet || !extra.is_empty(),
+                    "{a:?}"
                 );
-                assert_eq!(features.contains(&"Translate"), quiet, "{a:?}");
                 assert_eq!(
                     features.contains(&"Foo"),
                     !extra.is_empty(),
@@ -147,15 +156,42 @@ fn windows_starts_the_network_service_unsandboxed_and_keeps_one_feature_switch()
             }
         }
     }
-    let here = command_line(Path::new("/p"), &opts(Path::new("/b")), Sandbox::On);
+}
+
+/// The helper counts come from the browser's histograms; missing ones count nothing.
+#[test]
+fn helper_starts_are_read_from_the_histograms() {
+    let launch = vec![
+        json!({"name": "ChildProcess.Launched.UtilityProcessHash", "count": 3}),
+        json!({"name": "ChildProcess.LaunchFailed.UtilityProcessErrorCode", "count": 1}),
+        json!({"name": "ChildProcess.LaunchFailed.WinLastError", "count": 1}),
+    ];
+    let sandbox = vec![
+        json!({"name": "Chrome.SystemNetworkContextManager.NetworkSandboxLaunchFailed.ErrorCode", "count": 1}),
+        json!({"name": "Chrome.SystemNetworkContextManager.NetworkSandboxState", "count": 6,
+               "buckets": [{"low": 1, "high": 2, "count": 3}, {"low": 4, "high": 5, "count": 3}]}),
+    ];
     assert_eq!(
-        here,
-        command_line_for(
-            crate::discover::this_os(),
-            Path::new("/p"),
-            &opts(Path::new("/b")),
-            Sandbox::On
-        )
+        HelperStarts::from_histograms(&launch, &sandbox),
+        HelperStarts {
+            started: 3,
+            failed: 1,
+            network_sandbox_failed: 1,
+            network_sandbox_given_up: 3
+        }
+    );
+    assert_eq!(
+        HelperStarts::from_histograms(&[], &[]),
+        HelperStarts::default()
+    );
+    let odd = vec![
+        json!({"name": "Chrome.SystemNetworkContextManager.NetworkSandboxState"}),
+        json!({"count": 9}),
+        json!(null),
+    ];
+    assert_eq!(
+        HelperStarts::from_histograms(&odd, &odd),
+        HelperStarts::default()
     );
 }
 
