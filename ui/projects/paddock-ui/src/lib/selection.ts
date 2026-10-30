@@ -11,11 +11,22 @@ export interface PreservedSelection {
   restore(): void;
 }
 
-/** Is this element a place where the caret belongs to the user (a text field, a select, editable content)? */
+/** The `<input>` types the user types text into (`''` is text): only these own a caret. */
+const TEXT_INPUT_TYPES = new Set(['', 'text', 'search', 'email', 'url', 'tel', 'password', 'number', 'date', 'datetime-local', 'month', 'time', 'week']);
+
+/** Is this element a place where the caret belongs to the user (a text input, a text area, a select, editable content)? */
 export function isEditableElement(el: Element | null): boolean {
   if (!el) return false;
-  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return true;
+  if (el instanceof HTMLInputElement) return TEXT_INPUT_TYPES.has((el.getAttribute('type') ?? '').toLowerCase());
+  if (el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return true;
   return el instanceof HTMLElement && (el.isContentEditable || el.getAttribute('contenteditable') === 'true' || el.getAttribute('contenteditable') === '');
+}
+
+/** The focused element, looking into open shadow roots (a field inside a web component). */
+export function deepActiveElement(doc: Document): Element | null {
+  let active = doc.activeElement;
+  while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+  return active;
 }
 
 const NOTHING: PreservedSelection = { restore: () => undefined };
@@ -28,7 +39,7 @@ export function preserveSelection(doc: Document = document): PreservedSelection 
   return {
     restore: () => {
       const now = doc.getSelection();
-      if (!now || isEditableElement(doc.activeElement)) return;
+      if (!now || isEditableElement(deepActiveElement(doc))) return;
       if (now.rangeCount > 0 && !now.isCollapsed) return;
       // Ranges follow the DOM: one whose text was removed has collapsed onto the parent, and holds nothing to give back.
       const live = saved.filter((r) => !r.collapsed && r.startContainer.isConnected && r.endContainer.isConnected);

@@ -8,7 +8,7 @@ import { formatKeybinding, isMac } from '../extensions/keybinding';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (service.menu(); as m) {
-      <div class="backdrop" data-debrief-overlay (mousedown)="service.close(true, false)" (contextmenu)="$event.preventDefault(); service.close(true, false)"></div>
+      <div class="backdrop" data-debrief-overlay (mousedown)="service.close()" (contextmenu)="$event.preventDefault(); service.close()"></div>
       <div #box class="menu popover" role="menu" aria-label="Actions" i18n-aria-label="@@ui.contextMenu.actions" [style.left.px]="m.x" [style.top.px]="m.y" (keydown)="onKey($event)">
         @for (item of m.items; track item.label; let i = $index) {
           @if (i > 0 && item.group !== m.items[i - 1]?.group) {

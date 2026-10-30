@@ -1,6 +1,6 @@
 import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem } from '@angular/cdk/menu';
 import { DOCUMENT } from '@angular/common';
-import { afterNextRender, ChangeDetectionStrategy, Component, effect, inject, Injectable, Injector, signal, untracked, viewChild } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, DestroyRef, effect, inject, Injectable, Injector, signal, untracked, viewChild } from '@angular/core';
 import { copyText } from './clipboard';
 import { preserveSelection, type PreservedSelection } from './selection';
 
@@ -65,10 +65,9 @@ export class PdCopyMenu {
 @Component({
   selector: 'pd-copy-menu',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(document:pointerdown)': 'notePress($event)' },
   imports: [CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
   template: `
-    <span class="pd-anchor" [cdkContextMenuTriggerFor]="panel" (cdkContextMenuClosed)="menu.close(!pressedOutside)"></span>
+    <span class="pd-anchor" [cdkContextMenuTriggerFor]="panel" (cdkContextMenuClosed)="closed()"></span>
     <ng-template #panel>
       <div cdkMenu class="pd-menu" [attr.aria-label]="label">
         <button type="button" cdkMenuItem class="pd-item" (cdkMenuItemTriggered)="menu.copy()">{{ label }}</button>
@@ -91,8 +90,11 @@ export class PdCopyMenuHost {
   /** The menu panel, once it is open (its template is declared here, so the query finds it in the overlay). */
   private readonly panel = viewChild(CdkMenu);
   private readonly injector = inject(Injector);
-  /** A press landed outside the open menu: the close that follows is a dismissal, not Escape or Copy. */
-  protected pressedOutside = false;
+  /**
+   * The event being dispatched is a click, auxclick or right click outside the open menu: the very events the CDK closes the
+   * menu on. It describes only the close that event causes, never a later Escape (see the listeners in the constructor).
+   */
+  private dismissing = false;
 
   constructor() {
     // The service's state is the one truth: the CDK menu is opened and closed to follow it (a DOM overlay is outside the signal graph).
@@ -104,7 +106,7 @@ export class PdCopyMenuHost {
           trigger.close();
           return;
         }
-        this.pressedOutside = false;
+        this.dismissing = false;
         // Opened with the right click itself, the CDK skips that click's own auxclick. `_openOnContextMenu` is the CDK's host
         // listener: public in its typings but not documented API, so the parts.spec test "stays open through the release of the
         // right click" guards it on every CDK update.
@@ -113,10 +115,34 @@ export class PdCopyMenuHost {
         afterNextRender(() => this.panel()?.focusFirstItem('program'), { injector: this.injector });
       });
     });
+    const doc = inject(DOCUMENT);
+    const win = doc.defaultView;
+    // Set before the CDK's listener on the events it closes on; cleared after them on the window, and at the start of the next
+    // press or key (an app that stopped a click's propagation kept both the CDK and the window from seeing it).
+    const closing = ['click', 'auxclick', 'contextmenu'] as const;
+    const fresh = ['pointerdown', 'keydown'] as const;
+    const before = (e: Event) => {
+      this.dismissing = this.menu.state() !== null && !(e.target instanceof Element && e.target.closest('.pd-menu'));
+    };
+    const clear = () => (this.dismissing = false);
+    for (const t of closing) {
+      doc.addEventListener(t, before, true);
+      win?.addEventListener(t, clear);
+    }
+    for (const t of fresh) doc.addEventListener(t, clear, true);
+    inject(DestroyRef).onDestroy(() => {
+      for (const t of closing) {
+        doc.removeEventListener(t, before, true);
+        win?.removeEventListener(t, clear);
+      }
+      for (const t of fresh) doc.removeEventListener(t, clear, true);
+    });
   }
 
-  protected notePress(e: PointerEvent): void {
-    if (!this.menu.state()) return;
-    this.pressedOutside = !(e.target instanceof Element && e.target.closest('.pd-menu'));
+  /** The CDK closed the menu: a dismissal by a click elsewhere leaves the selection alone; Escape and Copy give it back. */
+  protected closed(): void {
+    const dismissed = this.dismissing;
+    this.dismissing = false;
+    this.menu.close(!dismissed);
   }
 }

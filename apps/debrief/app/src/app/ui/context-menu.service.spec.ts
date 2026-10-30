@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { ContextMenuHost } from './context-menu-host';
 import { ContextMenuService } from './context-menu.service';
 
 describe('ContextMenuService', () => {
@@ -54,7 +55,7 @@ describe('ContextMenuService', () => {
     menus.close(); // closing a closed menu does nothing
     expect(menus.menu()).toBeNull();
   });
-  it('never takes the caret from a focused text field, saves no caret, and leaves the selection to a press elsewhere', () => {
+  it('never takes the caret from a text field (also in a shadow root), saves no caret, and restores past a checkbox', () => {
     const menus = TestBed.inject(ContextMenuService);
     const input = document.createElement('input');
     document.body.append(input);
@@ -74,14 +75,50 @@ describe('ContextMenuService', () => {
       expect(menus.menu()!.selection).toEqual([]);
       menus.close();
 
-      // Dismissed by a press elsewhere (the backdrop): the selection is left to that press.
+      // Asked to leave the selection alone, it does.
       select(p);
       menus.open(1, 2, [{ label: 'Copy', run: () => undefined }], null);
       getSelection()!.removeAllRanges();
       menus.close(true, false);
       expect(getSelection()!.toString()).toBe('');
+
+      // A checkbox has the focus: it owns no caret, so the selection comes back.
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      document.body.append(box);
+      select(p);
+      menus.open(1, 2, [{ label: 'Copy', run: () => undefined }], box);
+      getSelection()!.removeAllRanges();
+      menus.close();
+      expect(getSelection()!.toString()).toBe('keep me selected');
+      box.remove();
+
+      // A text field inside a shadow root keeps its caret.
+      const shadowHost = document.createElement('div');
+      document.body.append(shadowHost);
+      const inner = document.createElement('input');
+      shadowHost.attachShadow({ mode: 'open' }).append(inner);
+      select(p);
+      menus.open(1, 2, [{ label: 'Copy', run: () => undefined }], null);
+      inner.focus();
+      getSelection()!.removeAllRanges();
+      menus.close(false);
+      expect(getSelection()!.toString()).toBe('');
+      shadowHost.remove();
     } finally {
       input.remove();
     }
+  });
+  it('a press on the backdrop closes the menu and gives the selection back: the backdrop swallowed it, nothing else changed', async () => {
+    const menus = TestBed.inject(ContextMenuService);
+    const fixture = TestBed.createComponent(ContextMenuHost);
+    select(p);
+    menus.open(1, 2, [{ label: 'Copy', run: () => undefined }], null);
+    await fixture.whenStable();
+    const backdrop = fixture.nativeElement.querySelector('.backdrop') as HTMLElement;
+    getSelection()!.removeAllRanges(); // WebKit, as the menu took the focus
+    backdrop.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    expect(menus.menu()).toBeNull();
+    expect(getSelection()!.toString()).toBe('keep me selected');
   });
 });

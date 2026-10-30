@@ -324,12 +324,11 @@ describe('pd-copy-menu', () => {
     const r = document.createRange();
     r.selectNodeContents(p);
     try {
-      document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); // no menu open: nothing to note
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true })); // no menu open: not a dismissal
       getSelection()!.removeAllRanges();
       getSelection()!.addRange(r);
       menu.open(1, 2, 'keep me selected');
       await vi.waitFor(() => expect(panel()).not.toBeNull());
-      item()!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); // a press inside the menu is not a dismissal
       getSelection()!.removeAllRanges(); // WebKit, as the menu took the focus
       // The user clicks into a field: the press is outside the menu, and the CDK closes it on the click.
       input.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
@@ -356,6 +355,34 @@ describe('pd-copy-menu', () => {
       getSelection()!.removeAllRanges();
       p.remove();
       input.remove();
+    }
+  });
+
+  it('a press elsewhere that did not close the menu does not stop a later Escape from giving the selection back', async () => {
+    const f = TestBed.createComponent(PdCopyMenuHost);
+    const menu = TestBed.inject(PdCopyMenu);
+    f.detectChanges();
+    const p = document.createElement('p');
+    p.textContent = 'keep me selected';
+    document.body.append(p);
+    const r = document.createRange();
+    r.selectNodeContents(p);
+    try {
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(r);
+      menu.open(1, 2, 'keep me selected');
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      // A press and release elsewhere with no click (a drag that ended off its start): the CDK keeps the menu open.
+      document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+      expect(menu.state()).not.toBeNull();
+      getSelection()!.removeAllRanges(); // WebKit, as the menu took the focus
+      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+      await vi.waitFor(() => expect(menu.state()).toBeNull());
+      await vi.waitFor(() => expect(getSelection()!.toString()).toBe('keep me selected'));
+    } finally {
+      getSelection()!.removeAllRanges();
+      p.remove();
     }
   });
 
