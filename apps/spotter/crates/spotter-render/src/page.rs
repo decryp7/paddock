@@ -922,6 +922,7 @@ mod tests {
             // Signal only a child that is still unreaped: once it was waited for, its pid may belong to another process.
             if let Ok(None) = self.0.try_wait() {
                 let id = self.0.id().to_string();
+                // conformance: pid-kill — the child is ours and unreaped (checked above), so its pid cannot have been reused
                 let _ = std::process::Command::new("kill").args(["-CONT", &id]).status();
             }
             let _ = self.0.kill();
@@ -978,6 +979,7 @@ mod tests {
             assert!(child.0.try_wait().unwrap().is_none(), "the child ended before it was ready");
             dir.path().join("ready").exists()
         });
+        // conformance: pid-kill — the child is ours and unreaped (held by the guard), so its pid cannot have been reused
         let kill = |sig: &str| assert!(std::process::Command::new("kill").args([sig, &pid]).status().unwrap().success());
         // The child's state in /proc: `T` once the stop took effect.
         let stopped = || {
