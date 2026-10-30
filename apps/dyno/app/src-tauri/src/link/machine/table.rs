@@ -52,7 +52,7 @@ fn look_seq(cmds: &[Command]) -> Seq {
 fn connect_seq(cmds: &[Command]) -> Seq {
     cmds.iter()
         .find_map(|c| match c {
-            Command::Connect { seq } => Some(*seq),
+            Command::Connect { seq, .. } => Some(*seq),
             _ => None,
         })
         .unwrap_or_else(|| panic!("no connect in {cmds:?}"))
@@ -347,7 +347,7 @@ fn an_agent_of_another_build_is_asked_to_exit_and_awaited_until_the_lock_is_free
         hint: Some(hint(9, 500, false)),
         ..look(seq)
     }));
-    assert_eq!(cmds[0], Command::RemoveHint);
+    assert!(matches!(cmds[0], Command::RemoveHint { .. }), "{cmds:?}");
     assert!(matches!(cmds[1], Command::Look { .. }));
     assert_eq!(launches(&cmds), 0);
 }
@@ -358,7 +358,7 @@ fn a_file_of_another_build_with_a_free_lock_is_removed_and_ours_launches() {
         hint: Some(hint(9, 500, false)),
         ..l
     });
-    assert_eq!(cmds[0], Command::RemoveHint);
+    assert!(matches!(cmds[0], Command::RemoveHint { look: 1 }), "{cmds:?}");
     assert_eq!(launches(&cmds), 1);
 }
 
@@ -1002,4 +1002,67 @@ fn the_first_request_waits_for_a_connection_a_stall_or_a_failure() {
     let mut s = starting();
     ticks(&mut s, NOTE_AFTER);
     assert!(s.snapshot().settled(), "a shown stall ends the wait for the first connection");
+}
+
+// ------------------------------------------------------------------------------------------------ review: launch failures and old numbers
+
+#[test]
+fn a_launch_that_fails_while_retry_is_ending_it_does_not_leave_the_link_stuck() {
+    let (mut s, _) = first(|l| l);
+    s.step(Event::Retry { stall: None });
+    assert_eq!(*s.phase(), Phase::Ending { child: 1 });
+    // The launch failed in the meantime: there is no child to wait for, and the end that follows reports nothing to end.
+    let cmds = s.step(Event::Launched {
+        child: 1,
+        result: Err("missing".into()),
+    });
+    assert_eq!(s.held(), None);
+    assert!(matches!(s.phase(), Phase::Looking { .. }), "stuck in {:?}: {cmds:?}", s.phase());
+    // The late report of the end changes nothing.
+    let seq = look_seq(&cmds);
+    assert!(s.step(Event::ChildEnded { child: 1, code: None }).is_empty());
+    assert_eq!(*s.phase(), Phase::Looking { seq });
+}
+
+#[test]
+fn a_launch_answer_about_an_old_child_never_touches_the_current_one() {
+    let mut s = starting();
+    s.step(Event::Retry { stall: None });
+    let seq = look_seq(&s.step(Event::ChildEnded { child: 1, code: None }));
+    s.step(Event::Looked(look(seq)));
+    assert_eq!(*s.phase(), Phase::Starting { child: 2 });
+    // A late "generation 1 could not be launched" while generation 2 starts.
+    assert!(s
+        .step(Event::Launched {
+            child: 1,
+            result: Err("old".into())
+        })
+        .is_empty());
+    assert_eq!(*s.phase(), Phase::Starting { child: 2 });
+    assert_eq!(s.held(), Some(2));
+}
+
+#[test]
+fn a_connection_to_an_agent_with_another_pid_is_not_ours_even_while_a_child_is_held() {
+    // Rule 53: ours is decided by the pid of the process this app holds, not by "a child is held".
+    let mut s = starting();
+    let seq = tick_look(&mut s);
+    let cmds = s.step(Event::Looked(Look {
+        hint: Some(hint(PID, 1_000, true)),
+        child: Some((1, Child::Running { pid: PID })),
+        ..look(seq)
+    }));
+    let c = connect_seq(&cmds);
+    s.step(Event::Connected {
+        seq: c,
+        peer: 7,
+        pid: Some(PID + 1),
+    });
+    assert_eq!(
+        *s.phase(),
+        Phase::Connected {
+            peer: 7,
+            owner: Owner::Other
+        }
+    );
 }

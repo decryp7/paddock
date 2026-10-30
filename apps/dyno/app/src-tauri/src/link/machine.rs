@@ -306,6 +306,10 @@ pub enum Command {
     Connect {
         /// The connect.
         seq: Seq,
+        /// The look whose file this connect is for (the adapter acts on that file or re-reads, never on an older look's).
+        look: Seq,
+        /// Why: the file must be of this build to be used, of another to be asked to exit.
+        purpose: Purpose,
     },
     /// Ask the agent on this connection to exit, then close it: the only act towards an agent this app did not start.
     AskToExit {
@@ -324,7 +328,10 @@ pub enum Command {
         peer: PeerId,
     },
     /// Remove the discovery file seen at the last look if it is still that very file (it names an agent that is gone).
-    RemoveHint,
+    RemoveHint {
+        /// The look that saw the file.
+        look: Seq,
+    },
     /// What requests go to.
     UsePeer(Option<PeerId>),
     /// The status for the window and the chip.
@@ -355,6 +362,10 @@ pub struct Snapshot {
     pub ever_connected: bool,
     /// The generation of the child held, if any.
     pub child: Option<Generation>,
+    /// How many looks have been answered (counted observations of the world, for tests and the chip).
+    pub looks: u64,
+    /// How many `ServiceChanged` events have had their look answered.
+    pub changes_answered: u64,
 }
 
 impl Snapshot {
@@ -482,6 +493,9 @@ pub struct Supervisor {
     failures: u32,
     connected_ticks: u32,
     ever_connected: bool,
+    looks: u64,
+    changed_seq: Option<Seq>,
+    changes_answered: u64,
     tuning: Tuning,
     #[cfg(test)]
     mutant: Mutant,
@@ -513,6 +527,9 @@ impl Supervisor {
             failures: 0,
             connected_ticks: 0,
             ever_connected: false,
+            looks: 0,
+            changed_seq: None,
+            changes_answered: 0,
             tuning: Tuning::default(),
             #[cfg(test)]
             mutant: Mutant::None,
@@ -645,6 +662,7 @@ impl Supervisor {
     }
 
     fn connect(&mut self, purpose: Purpose, look: Look, out: &mut Vec<Command>) {
+        let look_seq = look.seq;
         let seq = self.next_seq();
         self.set_phase(
             Phase::Connecting {
@@ -654,7 +672,11 @@ impl Supervisor {
             },
             out,
         );
-        out.push(Command::Connect { seq });
+        out.push(Command::Connect {
+            seq,
+            look: look_seq,
+            purpose,
+        });
     }
 
     fn launch(&mut self, out: &mut Vec<Command>) {
@@ -804,6 +826,10 @@ impl Supervisor {
             return; // the answer to a look that was superseded: stale by construction
         }
         self.look_out = None;
+        self.looks += 1;
+        if self.changed_seq == Some(look.seq) {
+            self.changes_answered += 1;
+        }
         let was_supervised = self.service.supervises;
         if let Some(s) = look.service {
             self.service = s;
@@ -848,7 +874,7 @@ impl Supervisor {
     fn retiring_look(&mut self, look: Look, out: &mut Vec<Command>) {
         if look.lock == LockSeen::Free {
             if look.hint.is_some() {
-                out.push(Command::RemoveHint);
+                out.push(Command::RemoveHint { look: look.seq });
             }
             self.reask = false;
             self.reset_wait(out);
@@ -921,7 +947,7 @@ impl Supervisor {
                     self.connect(Purpose::AskToExit, look, out);
                     return;
                 } else {
-                    out.push(Command::RemoveHint);
+                    out.push(Command::RemoveHint { look: look.seq });
                 }
             }
         }
@@ -1172,7 +1198,7 @@ impl Machine for Supervisor {
             Event::ServiceChanged => {
                 // A look already out may have been taken before the change: the newest look wins.
                 if !matches!(self.phase, Phase::Idle | Phase::Quitting { .. }) {
-                    self.issue_look(true, false, &mut out);
+                    self.changed_seq = Some(self.issue_look(true, false, &mut out));
                 }
             }
             Event::ServiceInstalled(installed) => self.service.installed = installed,
@@ -1186,6 +1212,8 @@ impl Machine for Supervisor {
             stall: self.stall,
             ever_connected: self.ever_connected,
             child: self.held(),
+            looks: self.looks,
+            changes_answered: self.changes_answered,
         }
     }
 
@@ -1213,6 +1241,11 @@ impl Supervisor {
                     Phase::Starting { child: g } if g == child => {
                         self.judge = None;
                         self.fail(message, out);
+                    }
+                    Phase::Ending { child: g } if g == child => {
+                        // Retry was ending a child that never existed: nothing to wait for (the end queued behind the launch
+                        // finds nothing and its report is stale by then).
+                        self.start_looking(out);
                     }
                     Phase::Quitting { outcome } => {
                         self.set_phase(Phase::Stopped { outcome }, out);

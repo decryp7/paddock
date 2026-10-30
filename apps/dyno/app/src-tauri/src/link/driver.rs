@@ -6,7 +6,7 @@
 //! is left behind); one *notifier* thread delivers the sink's notifications in order (the sink may block on the UI); a short
 //! thread per look, connect, ask and connection watch. The connection is watched by waiting for its close, not by polling.
 
-use super::machine::{Command, Event, Generation, Launch, PeerId};
+use super::machine::{Command, Event, Generation, Launch, PeerId, Purpose, Seq};
 use super::ports::{self, now_ms};
 use super::{AgentLink, Child, Stall, REQUEST_TIMEOUT};
 use crate::dto::AgentStatus;
@@ -27,6 +27,8 @@ const END_GRACE: Duration = Duration::from_secs(3);
 enum LauncherJob {
     Launch(Generation),
     End(Generation),
+    /// The quit is decided: no more launches (the slot may be busy with an end, so not on the owner thread).
+    Close,
 }
 
 enum Notice {
@@ -50,8 +52,8 @@ pub struct Executor {
     peer_ids: Arc<AtomicU64>,
     /// The generation the launcher holds, so a look tags its child view with it.
     held: Arc<Mutex<Option<Generation>>>,
-    /// The discovery file seen by the last look (what a connect and a removal act on).
-    seen: Arc<Mutex<Option<Discovery>>>,
+    /// The discovery file seen by the last look, tagged with that look (what a connect and a removal may act on).
+    seen: Arc<Mutex<Option<(Seq, Discovery)>>>,
 }
 
 impl Executor {
@@ -81,6 +83,7 @@ impl Executor {
                         }
                         let _ = ev.send(Event::Launched { child, result });
                     }
+                    LauncherJob::Close => l.launcher.close(),
                     LauncherJob::End(child) => {
                         l.launcher.finish(END_GRACE);
                         let code = match l.launcher.child() {
@@ -134,7 +137,7 @@ impl Executor {
                         probe.as_ref(),
                         cpu,
                     );
-                    *lock(&seen) = found;
+                    *lock(&seen) = found.map(|d| (seq, d));
                     let _ = events.send(Event::Looked(look));
                 });
             }
@@ -147,12 +150,19 @@ impl Executor {
                 logging::info("ending the agent this app started");
                 let _ = self.launcher_jobs.send(LauncherJob::End(child));
             }
-            Command::Connect { seq } => {
-                let found = lock(&self.seen).clone().or_else(|| Discovery::read(&self.link.dirs.discovery()));
-                let (link, events, peers, ids) = (self.link.clone(), self.events.clone(), self.peers.clone(), self.peer_ids.clone());
+            Command::Connect { seq, look, purpose } => {
+                let (link, events, peers, ids, seen) = (
+                    self.link.clone(),
+                    self.events.clone(),
+                    self.peers.clone(),
+                    self.peer_ids.clone(),
+                    self.seen.clone(),
+                );
                 spawn("dyno-connect", move || {
-                    // The file is read again: the agent may have written a newer one since the look.
-                    let current = Discovery::read(&link.dirs.discovery()).or(found);
+                    // The file of the look this connect is for; if that look was replaced, the file is read again (the agent may
+                    // also have written a newer one since). Off the owner thread: it is file I/O.
+                    let tagged = lock(&seen).clone().filter(|(s, _)| *s == look).map(|(_, d)| d);
+                    let current = Discovery::read(&link.dirs.discovery()).or(tagged);
                     let Some(d) = current else {
                         let _ = events.send(Event::ConnectFailed {
                             seq,
@@ -160,6 +170,15 @@ impl Executor {
                         });
                         return;
                     };
+                    // A file of another build is never used, and one of this build is never asked to exit: the decision was
+                    // taken from a file that may have been replaced.
+                    if ports::hint_of(&d, &link.app_version).same_build != (purpose == Purpose::Use) {
+                        let _ = events.send(Event::ConnectFailed {
+                            seq,
+                            why: "The discovery file changed.".into(),
+                        });
+                        return;
+                    }
                     match ports::connect(&d, &link.sink) {
                         Ok(peer) => {
                             let id = ids.fetch_add(1, Ordering::SeqCst) + 1;
@@ -203,11 +222,16 @@ impl Executor {
                     p.close();
                 }
             }
-            Command::RemoveHint => {
-                // Removed only if it is still that very file: a newer agent may have written its own meanwhile.
-                if let Some(d) = lock(&self.seen).take() {
-                    Discovery::remove_if_same(&self.link.dirs.discovery(), &d);
-                }
+            Command::RemoveHint { look } => {
+                // Removed only if it is still that very file, and only the file of that look: a newer agent may have written
+                // its own meanwhile. File I/O, so off the owner thread.
+                let (link, seen) = (self.link.clone(), self.seen.clone());
+                spawn("dyno-unhint", move || {
+                    let tagged = lock(&seen).take().filter(|(s, _)| *s == look);
+                    if let Some((_, d)) = tagged {
+                        Discovery::remove_if_same(&link.dirs.discovery(), &d);
+                    }
+                });
             }
             Command::UsePeer(None) => *lock(&self.link.peer) = None,
             Command::UsePeer(Some(id)) => {
@@ -232,7 +256,7 @@ impl Executor {
                 let _ = self.notices.send(Notice::Stalled(None));
             }
             Command::Done(outcome) => {
-                self.link.launcher.close();
+                let _ = self.launcher_jobs.send(LauncherJob::Close);
                 logging::info(&format!(
                     "quitting; the agent {}",
                     if outcome.stopped_own {

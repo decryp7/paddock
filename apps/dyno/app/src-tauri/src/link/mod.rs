@@ -212,8 +212,10 @@ pub struct AgentLink {
     /// What requests go to (set by the supervisor's `UsePeer`).
     pub(crate) peer: Mutex<Option<Arc<Peer<Message>>>>,
     votes: Mutex<DetailVotes>,
-    /// The detail last sent over the current connection; held across the request so two syncs never interleave.
+    /// The detail last sent over the current connection.
     sent: Mutex<Option<LiveDetail>>,
+    /// Serialises the syncs of the subscription.
+    syncing: Mutex<()>,
     probe: Mutex<Option<ServiceProbe>>,
     events: Sender<Event>,
     inbox: Mutex<Option<Receiver<Event>>>,
@@ -241,6 +243,7 @@ impl AgentLink {
             peer: Mutex::new(None),
             votes: Mutex::new(DetailVotes::default()),
             sent: Mutex::new(None),
+            syncing: Mutex::new(()),
             probe: Mutex::new(None),
             events,
             inbox: Mutex::new(Some(inbox)),
@@ -359,20 +362,26 @@ impl AgentLink {
         self.sync_detail()
     }
 
-    /// A window is gone: it no longer wants anything.
-    pub fn drop_window(&self, window: &str) {
+    /// A window is gone: it no longer wants anything. Returns at once (it is called from the UI thread): the subscription is
+    /// brought up to date on a worker, because that is a request to the agent.
+    pub fn drop_window(self: &Arc<Self>, window: &str) {
         lock(&self.votes).remove(window);
-        let _ = self.sync_detail();
+        let me = self.clone();
+        let _ = std::thread::Builder::new().name("dyno-detail".into()).spawn(move || {
+            let _ = me.sync_detail();
+        });
     }
 
+    /// Brings the agent's subscription up to what the windows want. Syncs are serialised (one request at a time, so two
+    /// cannot cross on the wire), but `sent` itself is held only to read or set it, never across the request (ER-17).
     fn sync_detail(&self) -> Result<(), CommandError> {
+        let _one_at_a_time = lock(&self.syncing);
         let wanted = lock(&self.votes).effective();
-        let mut sent = lock(&self.sent);
-        if *sent == Some(wanted) {
+        if *lock(&self.sent) == Some(wanted) {
             return Ok(());
         }
         self.call(Request::Subscribe { detail: wanted })?;
-        *sent = Some(wanted);
+        *lock(&self.sent) = Some(wanted);
         Ok(())
     }
 

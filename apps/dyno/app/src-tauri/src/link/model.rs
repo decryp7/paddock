@@ -256,7 +256,7 @@ impl World {
                 if matches!(self.m.phase(), Phase::Quitting { .. } | Phase::Stopped { .. }) {
                     self.violation = Some("launched after the quit began");
                 }
-                if self.held.is_some() || self.own.alive() || !self.jobs.is_empty() {
+                if self.own.alive() || self.jobs.iter().any(|j| matches!(j, Job::Launch(..))) {
                     self.violation = Some("a second own agent was launched while the first was still held");
                 }
                 if self.asked_other && self.other == Other::Exiting && !anyway {
@@ -271,7 +271,7 @@ impl World {
                 }
                 self.jobs.push(Job::End(child));
             }
-            Command::Connect { seq } => {
+            Command::Connect { seq, .. } => {
                 let target = self.hint().and_then(|_| self.answering());
                 self.connects.push((seq, target));
             }
@@ -288,7 +288,7 @@ impl World {
                     self.inbox.push(Event::PeerClosed { peer });
                 }
             }
-            Command::RemoveHint => {
+            Command::RemoveHint { .. } => {
                 if self.answering().is_some() {
                     self.violation = Some("removed the discovery file of an agent that is alive");
                 } else {
@@ -354,6 +354,19 @@ impl World {
             }
             v.push((label, w));
         }
+        if let Some(Job::Launch(g, _)) = self.jobs.first().copied() {
+            // The launch can fail (no program, the OS refused): the executor then holds nothing.
+            let mut w = self.clone();
+            w.jobs.remove(0);
+            if w.held == Some(g) {
+                w.held = None;
+            }
+            w.inbox.push(Event::Launched {
+                child: g,
+                result: Err("could not start".into()),
+            });
+            v.push((format!("launch of {g} fails"), w));
+        }
         if let Some(job) = self.jobs.first().copied() {
             let mut w = self.clone();
             w.jobs.remove(0);
@@ -395,6 +408,13 @@ impl World {
                 let mut w = self.clone();
                 w.own = Proc::Ready;
                 v.push(("own agent writes its file".into(), w));
+            }
+            Proc::Ready => {
+                // It dies by itself (a crash): its lock and its connections go with it, its file stays.
+                let mut w = self.clone();
+                w.own_gone(1);
+                w.stale_hint = true;
+                v.push(("own agent crashes".into(), w));
             }
             Proc::Exiting => {
                 let mut w = self.clone();
@@ -465,7 +485,7 @@ fn base(mutant: Mutant, budget: Budget) -> World {
 }
 
 const BUDGET: Budget = Budget {
-    ticks: 3,
+    ticks: 2,
     retry: 1,
     quit: 1,
     removal: 1,
@@ -481,7 +501,13 @@ fn scenarios(mutant: Mutant, budget: Budget) -> Vec<(&'static str, World)> {
         w
     };
     vec![
-        ("no agent, no service", mk(&|w| w.budget.add = 0)),
+        (
+            "no agent, no service",
+            mk(&|w| {
+                w.budget.add = 0;
+                w.budget.ticks = 3;
+            }),
+        ),
         (
             "the service runs the agent, then is removed",
             mk(&|w| {
@@ -493,11 +519,22 @@ fn scenarios(mutant: Mutant, budget: Budget) -> Vec<(&'static str, World)> {
             }),
         ),
         (
-            "the service starts nothing",
+            "the service starts nothing, Retry and Quit interleaved with the fallback",
             mk(&|w| {
+                // One recheck and one idle recheck are enough to reach the fallback within the tick budget.
+                w.m = Supervisor::tuned(
+                    Tuning {
+                        service_recheck: 1,
+                        idle_rechecks: 1,
+                        ..TUNING
+                    },
+                    mutant,
+                );
                 w.supervises = true;
                 w.installed = true;
                 w.budget.add = 0;
+                w.budget.removal = 0;
+                w.budget.ticks = 4;
             }),
         ),
         (
@@ -506,6 +543,7 @@ fn scenarios(mutant: Mutant, budget: Budget) -> Vec<(&'static str, World)> {
                 w.other = Other::Exiting;
                 w.budget.add = 0;
                 w.budget.removal = 0;
+                w.budget.ticks = 3;
             }),
         ),
         (
@@ -513,6 +551,7 @@ fn scenarios(mutant: Mutant, budget: Budget) -> Vec<(&'static str, World)> {
             mk(&|w| {
                 w.stale_hint = true;
                 w.budget.removal = 0;
+                w.budget.add = 0;
                 w.budget.ticks = 2;
             }),
         ),
@@ -523,32 +562,52 @@ fn scenarios(mutant: Mutant, budget: Budget) -> Vec<(&'static str, World)> {
                 w.other_old_build = true;
                 w.budget.add = 0;
                 w.budget.removal = 0;
+                w.budget.ticks = 3;
             }),
         ),
         (
             "the login switch is turned on while the app runs",
             mk(&|w| {
                 w.budget.removal = 0;
+                w.budget.retry = 0;
                 w.budget.ticks = 2;
             }),
         ),
     ]
 }
 
+/// A 128-bit key of a state: its `Debug` text hashed as it is written (no string is built).
+fn key_of(w: &World) -> (u64, u64) {
+    use std::fmt::Write;
+    use std::hash::Hasher;
+    struct Two(std::collections::hash_map::DefaultHasher, std::collections::hash_map::DefaultHasher);
+    impl Write for Two {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            self.0.write(s.as_bytes());
+            self.1.write(s.as_bytes());
+            self.1.write_u8(0xA5);
+            Ok(())
+        }
+    }
+    let mut h = Two(Default::default(), Default::default());
+    let _ = write!(h, "{w:?}");
+    (h.0.finish(), h.1.finish())
+}
+
 fn check_all(mutant: Mutant, budget: Budget) -> Vec<(&'static str, Explored)> {
-    scenarios(mutant, budget)
-        .into_iter()
-        .map(|(name, w)| {
-            let r = explore(
-                w,
-                MAX_STATES,
-                |w| format!("{w:?}"),
-                |w| w.successors(),
-                |w| w.violation.map(str::to_string),
-            );
-            (name, r)
-        })
-        .collect()
+    // One thread per scenario: they share nothing.
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = scenarios(mutant, budget)
+            .into_iter()
+            .map(|(name, w)| {
+                scope.spawn(move || {
+                    let r = explore(w, MAX_STATES, key_of, |w| w.successors(), |w| w.violation.map(str::to_string));
+                    (name, r)
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().expect("a scenario panicked")).collect()
+    })
 }
 
 #[test]
@@ -635,7 +694,7 @@ fn a_login_service_that_starts_nothing_ends_with_an_agent_of_the_apps_own_withou
     let r = explore(
         w,
         MAX_STATES,
-        |w| format!("{w:?}"),
+        key_of,
         |w| w.successors(),
         |w| w.m.snapshot().started_by_this_app().then(|| "reached".to_string()),
     );

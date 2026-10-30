@@ -215,10 +215,18 @@ fn wait_state(link: &AgentLink, what: &str, cond: impl Fn(&Snapshot) -> bool) ->
         .unwrap_or_else(|| panic!("never reached: {what}; the link is at {:?}", link.transitions().current()))
 }
 
-/// Waits until `more` further observations of the world have been made (steps of the supervisor): a wait that lets the
+/// Waits until `more` further looks at the world have been answered (the link's published counter): a wait that lets the
 /// link keep looking, counted instead of timed.
 fn let_it_look(link: &AgentLink, more: u64) {
-    assert!(link.transitions().wait_steps(more, HANG_GUARD), "the link stopped looking");
+    let target = link.transitions().current().looks + more;
+    wait_state(link, "more looks", |s| s.looks >= target);
+}
+
+/// `refresh_service` and wait for the look it asked for to be answered (and so for what it decided to be done).
+fn refresh_and_wait(link: &AgentLink) {
+    let seen = link.transitions().current().changes_answered;
+    link.refresh_service();
+    wait_state(link, "the look after the service changed", |s| s.changes_answered > seen);
 }
 
 /// Waits until a fake's own state (a counter, a thread's progress) satisfies `cond`. Only for state the link cannot publish.
@@ -665,8 +673,7 @@ fn with_the_service_supervising_the_app_never_starts_an_agent_of_its_own() {
     );
     assert!(!r.link.started_by_this_app());
     // Rule 53: a refresh with the service supervising ends nothing this app did not start.
-    r.link.refresh_service();
-    let_it_look(&r.link, 5);
+    refresh_and_wait(&r.link);
     assert!(manager.agent_running() && r.link.connected());
     assert!(!r.link.quit(), "the service's agent stays");
     handle.join().unwrap();
@@ -934,8 +941,7 @@ fn a_login_service_that_starts_no_agent_is_waited_for_then_replaced_by_the_apps_
         "{seen:?}"
     );
     // The hand-over does not take the app's agent away again: the service has shown it starts nothing.
-    r.link.refresh_service();
-    let_it_look(&r.link, 5);
+    refresh_and_wait(&r.link);
     assert!(r.link.connected() && matches!(r.launcher.child(), Child::Running { .. }));
     assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 1);
     // A registered service keeps its agent on quit, so the app's own is ended through the launcher.
@@ -956,8 +962,7 @@ fn taking_the_agent_back_waits_for_the_former_agent_to_release_the_data_folder_b
     running(&r.link, &r.statuses);
     // The connection has been made and the service looked at: it supervises.
     wait_state(&r.link, "the service is known", |s| s.connected());
-    r.link.refresh_service();
-    let_it_look(&r.link, 3);
+    refresh_and_wait(&r.link);
     manager.set(false, false);
     r.link.refresh_service();
     wait_state(&r.link, "the former agent is taken back", |s| {
@@ -1028,7 +1033,7 @@ fn a_quit_is_taken_at_once_while_the_service_probe_never_answers() {
         ServiceState::default()
     }));
     let handle = r.link.spawn().unwrap();
-    let_it_look(&r.link, 10);
+    assert!(r.link.transitions().wait_steps(10, HANG_GUARD), "the owner stopped stepping");
     assert!(!r.link.quit(), "nothing was started");
     handle.join().unwrap();
     assert!(r.link.transitions().current().stopped());

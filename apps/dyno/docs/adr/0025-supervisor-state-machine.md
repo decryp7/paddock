@@ -24,9 +24,12 @@ where they disagree this section wins.
    `FAILED_AFTER` times; the shared `StallCause` only inside `Starting`). A `Quitting` phase is excluded by name: it is bounded
    by the grace of ADR 0031 class S. A count survives a look made from inside a wait (so a stale file beside a holder still
    reaches its note). Retry carries the id of the stall it answers; one for a stall that is over does nothing.
-3. **The owner thread never blocks.** `Launch`, `Look`, `Connect`, `AskToExit`, `EndHeldChild` and the shell's `connected`
-   callback run on workers and answer with events; the sink's notifications go through one notifier thread; `AgentLink::call`
-   asserts it is not on the owner thread. Tests: a service probe that never answers, and a sink that blocks, and Quit still
+3. **The owner thread never blocks.** `Launch`, `EndHeldChild` and closing the launcher (one launcher thread, in order),
+   `Look`, `Connect` (including its file read), `RemoveHint` (file I/O), `AskToExit` and the shell's `connected` callback run
+   on workers and answer with events; the sink's notifications go through one notifier thread; `AgentLink::call` asserts it
+   is not on the owner thread. What stays on the owner thread is bounded and local: map and mutex bookkeeping and the
+   log-line appends. `drop_window` (called from the UI thread) syncs the subscription on a worker, and `sent` is never held
+   across a request. Tests: a service probe that never answers, and a sink that blocks, and Quit still
    reaches `Stopped`.
 4. **The automatic fallback of ADR 0010 stays**: `WaitingForService` counts rechecks that saw no agent holding the lock and
    starts the app's own agent after `SERVICE_IDLE_RECHECKS`, without Retry. The model proves an own agent is reachable beside
@@ -40,7 +43,16 @@ where they disagree this section wins.
 9. **The start judge is fed a real CPU reading** every `CPU_EVERY` ticks (or `Unavailable`), never `NotRead` for ever, through
    one adapter function (`ports::cpu_of`).
 10. **Health's repair waits on the published transitions** (`AgentLink::wait_connected`) instead of polling.
-11. `Cargo`: `paddock_proc::StartJudge` derives `Clone` (the machine is cloned by the model check).
+11. **Review of the code (2026-10-30):** a launch that fails while Retry is ending it returns to `Looking` (it left `Ending`
+    for ever); `Connect` and `RemoveHint` carry the look whose file they are for, and a connect re-checks that the file is of
+    the build its purpose needs; the stale-answer rows (an old generation's `Launched`, a pid that is not the held child's)
+    are table tests; the model has launch failures, an agent that crashes after it is ready, and a long service-fallback
+    scenario with Retry and Quit interleaved; `changes_answered` and `looks` are published so tests count looks, not steps.
+12. **Follow-up (not done):** an approval granted in System Settings after `RequiresApproval` is not noticed while connected
+    (the probe is re-asked on connect, on a service change and while a service is awaited, not on a timer); and on macOS the
+    CLI's `dyno-agent service install` writes a legacy LaunchAgents plist with the label SMAppService uses: it should refuse
+    or use SMAppService when the app's item is enabled.
+13. `Cargo`: `paddock_proc::StartJudge` derives `Clone` (the machine is cloned by the model check).
 
 Not done here, as decided: the generic part (`crate::supervise`: `Machine`, `run_owner`, `Transitions`, `spawn_ticker`, and
 `explore` in tests) has no Dyno type in it and moves to `paddock-proc` after the tag.

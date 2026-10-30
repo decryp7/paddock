@@ -176,7 +176,9 @@ impl<R: Runtime> ShellOf<R> {
             Some(_) => {
                 let mut service = login::platform_service();
                 let result = login::apply_launch_at_login(wanted, service.as_mut(), &mut AppAutostart(self.app.clone()));
-                // Hand the agent over to the service just registered, or take it back from the one just removed.
+                // What was just applied is recorded first (it decides what a quit does), then the agent is handed over to
+                // the service just registered, or taken back from the one just removed.
+                link.set_service_installed(service.installed());
                 link.refresh_service();
                 if result.is_ok() {
                     *self.launch_at_login.lock().unwrap_or_else(|e| e.into_inner()) = Some(wanted);
