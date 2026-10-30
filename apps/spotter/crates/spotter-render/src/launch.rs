@@ -36,6 +36,9 @@ pub struct LaunchOptions {
     /// Extra command-line flags. Empty in the product; tests use it for the root-in-a-container switches
     /// (see `discover::test_browser_flags_with`).
     pub extra_args: Vec<String>,
+    /// When a browser that has not opened its DevTools port is stuck rather than slow (ADR 0031): a slow or starved start is
+    /// waited for. The wall-clock cap is [`LaunchOptions::max_lifetime`], which runs from the process start.
+    pub patience: paddock_proc::Patience,
 }
 
 impl LaunchOptions {
@@ -47,6 +50,7 @@ impl LaunchOptions {
             max_lifetime: Duration::from_secs(120),
             memory_cap: Some(2 << 30),
             extra_args: Vec::new(),
+            patience: paddock_proc::Patience::default(),
         }
     }
 }
@@ -80,15 +84,6 @@ pub fn stderr_tail(bytes: &[u8]) -> String {
         .filter(|l| !l.is_empty())
         .collect();
     lines.join(" | ")
-}
-
-fn with_stderr(message: &str, dir: &Path) -> String {
-    let tail = std::fs::read(dir.join(STDERR_FILE)).map(|b| stderr_tail(&b)).unwrap_or_default();
-    if tail.is_empty() {
-        message.to_string()
-    } else {
-        format!("{message} (browser output: {tail})")
-    }
 }
 
 /// Flags that keep a throwaway browser quick and predictable on a cold, loaded machine (a CI runner, a fresh VM):
@@ -175,12 +170,13 @@ pub fn args(data_dir: &Path, mode: Mode, flavor: Flavor, extra: &[String]) -> Ve
     a
 }
 
-/// How long the browser may take to start (before the page's own time budget begins).
-pub const START_LIMIT: Duration = Duration::from_secs(20);
+/// The start allowance inside the render's wall-clock cap ([`lifetime_for`]); a start is not failed at this time, it is
+/// judged on the browser's run state (ADR 0031) and only the cap ends a slow one.
+pub const START_ALLOWANCE: Duration = Duration::from_secs(20);
 
 /// The wall-clock cap for a render whose page gets `page_budget`: the start allowance, the page and a margin.
 pub fn lifetime_for(page_budget: Duration) -> Duration {
-    START_LIMIT + page_budget + Duration::from_secs(10)
+    START_ALLOWANCE + page_budget + Duration::from_secs(10)
 }
 
 /// How long a browser gets to quit by itself after `Browser.close` before it is killed.
@@ -281,7 +277,15 @@ impl Chromium {
         let ended_by = Arc::new(AtomicU8::new(NONE));
         // The caps run from the process start, also while it is still starting.
         watchdog(process.process(), alive.clone(), ended_by.clone(), opts.max_lifetime);
-        match connect(&dir, &mut process) {
+        match connect(
+            &dir,
+            &mut process,
+            opts.patience,
+            &ended_by,
+            opts.max_lifetime,
+            paddock_proc::tree_cpu_time,
+            SleepPace,
+        ) {
             Ok(conn) => Ok(Chromium {
                 conn: Arc::new(conn),
                 process,
@@ -399,23 +403,134 @@ fn cleanup(dir: &Path) {
     }
 }
 
-/// Waits for the `DevToolsActivePort` file Chrome writes into the profile and connects to the browser endpoint.
-fn connect(dir: &Path, process: &mut Supervised) -> Result<Connection> {
-    let end = Instant::now() + START_LIMIT;
-    loop {
-        if let Ok(s) = std::fs::read_to_string(dir.join("DevToolsActivePort")) {
-            let mut l = s.lines();
-            if let (Some(port), Some(path)) = (l.next().and_then(|p| p.trim().parse::<u16>().ok()), l.next()) {
-                return Connection::connect(port, path.trim());
+/// What the start judge looks at: the browser process, its `DevToolsActivePort` file and the connection it names.
+struct BrowserProbe<'a, F> {
+    dir: &'a Path,
+    process: &'a mut Supervised,
+    id: Option<paddock_proc::ProcessId>,
+    cpu: F,
+    conn: Option<Connection>,
+    /// The last refused or half-made handshake (the file can appear a moment before the endpoint takes connections).
+    refused: Option<Error>,
+    /// A failure that is not worth trying again.
+    failed: Option<Error>,
+}
+
+impl<F: FnMut(paddock_proc::ProcessId) -> Option<Duration>> paddock_proc::StartProbe for BrowserProbe<'_, F> {
+    fn liveness(&mut self) -> paddock_proc::Liveness {
+        if self.process.is_running() {
+            return paddock_proc::Liveness::Running;
+        }
+        paddock_proc::Liveness::Exited(paddock_proc::ExitInfo {
+            status: self.process.wait().and_then(|s| s.code()),
+            stderr_tail: paddock_proc::tail_of(&self.dir.join(STDERR_FILE), STDERR_TAIL).map(|t| stderr_tail(t.as_bytes())),
+        })
+    }
+
+    fn ready(&mut self) -> bool {
+        if self.conn.is_some() || self.failed.is_some() {
+            return true;
+        }
+        let Ok(s) = std::fs::read_to_string(self.dir.join("DevToolsActivePort")) else {
+            return false;
+        };
+        let mut l = s.lines();
+        let (Some(port), Some(path)) = (l.next().and_then(|p| p.trim().parse::<u16>().ok()), l.next()) else {
+            return false;
+        };
+        match Connection::connect(port, path.trim()) {
+            Ok(c) => self.conn = Some(c),
+            Err(e @ Error::Connection(_)) => {
+                self.refused = Some(e);
+                return false;
             }
+            Err(e) => self.failed = Some(e),
         }
-        if !process.is_running() {
-            return Err(Error::Launch(with_stderr("the browser exited right after it started", dir)));
+        true
+    }
+
+    fn cpu_time(&mut self) -> Option<Duration> {
+        (self.cpu)(self.id?)
+    }
+}
+
+/// Waits for one tick on the real clock.
+struct SleepPace;
+
+impl paddock_proc::Pace for SleepPace {
+    fn wait(&mut self, tick: Duration) -> bool {
+        std::thread::sleep(tick);
+        true
+    }
+}
+
+/// Waits for the `DevToolsActivePort` file Chrome writes into the profile and connects to the browser endpoint, judged on the
+/// browser's run state (ADR 0031) by the shared start judge: a slow start is waited for; the wall-clock cap (the watchdog)
+/// ends one that takes the whole allowance, and then the failure says so. `cpu` and `pace` are seams for tests.
+fn connect(
+    dir: &Path,
+    process: &mut Supervised,
+    patience: paddock_proc::Patience,
+    ended_by: &AtomicU8,
+    max_lifetime: Duration,
+    cpu: impl FnMut(paddock_proc::ProcessId) -> Option<Duration>,
+    pace: impl paddock_proc::Pace,
+) -> Result<Connection> {
+    use paddock_proc::{StartState, StartWatch, Watched};
+    let id = process.process();
+    let probe = BrowserProbe {
+        dir,
+        process,
+        id,
+        cpu,
+        conn: None,
+        refused: None,
+        failed: None,
+    };
+    let mut watch = StartWatch::new(patience, "the browser", probe, pace);
+    // A note ("still starting") is not a reason to give up; only a stuck browser is.
+    let seen = loop {
+        match watch.wait() {
+            Watched::State(StartState::Stalled(r)) if !r.cause.is_stuck() => {}
+            seen => break seen,
         }
-        if Instant::now() > end {
-            return Err(Error::Timeout("the browser start"));
+    };
+    let probe = watch.into_probe();
+    match seen {
+        Watched::Cancelled => Err(Error::Closed),
+        Watched::State(StartState::Ready) => match (probe.conn, probe.failed) {
+            (Some(conn), _) => Ok(conn),
+            (None, Some(e)) => Err(e),
+            (None, None) => Err(Error::Closed),
+        },
+        Watched::State(StartState::Exited(info)) => {
+            if ended_by.load(Ordering::Acquire) == TIMED_OUT {
+                return Err(Error::Launch(format!(
+                    "the browser did not start within {} s (its time limit)",
+                    max_lifetime.as_secs()
+                )));
+            }
+            if probe.process.stopped_over_memory().is_some() {
+                return Err(Error::Launch("the browser used more memory than allowed while it started".into()));
+            }
+            let status = info.status.map_or_else(String::new, |c| format!(" (exit code {c})"));
+            let message = format!("the browser exited right after it started{status}");
+            Err(Error::Launch(match info.stderr_tail {
+                Some(tail) => format!("{message} (browser output: {tail})"),
+                None => message,
+            }))
         }
-        std::thread::sleep(Duration::from_millis(50));
+        // Stuck (`Starting` is never answered by a watch): the last refused handshake says more than the time did.
+        Watched::State(StartState::Stalled(report)) => Err(probe.refused.unwrap_or_else(|| {
+            let tail = paddock_proc::tail_of(&dir.join(STDERR_FILE), STDERR_TAIL)
+                .map(|t| stderr_tail(t.as_bytes()))
+                .filter(|t| !t.is_empty());
+            Error::Launch(match tail {
+                Some(tail) => format!("{} (browser output: {tail})", report.message),
+                None => report.message,
+            })
+        })),
+        Watched::State(StartState::Starting) => Err(Error::Closed),
     }
 }
 
@@ -464,7 +579,7 @@ mod tests {
     #[test]
     fn the_wall_clock_cap_covers_start_and_page() {
         assert_eq!(lifetime_for(Duration::from_secs(40)), Duration::from_secs(70));
-        assert!(lifetime_for(Duration::ZERO) > START_LIMIT);
+        assert!(lifetime_for(Duration::ZERO) > START_ALLOWANCE);
     }
 
     #[test]
@@ -497,6 +612,111 @@ mod tests {
             e.contains("exited right after it started") && e.contains("without --no-sandbox"),
             "{e}"
         );
+    }
+
+    /// A fast clock for the judge's ticks (1 ms each instead of 50 ms): the process state is real, the verdicts count ticks.
+    /// Past `TICK_GUARD` ticks it says the wait is cancelled, so a broken judge fails in seconds, not minutes.
+    #[cfg(unix)]
+    struct Yield(u32);
+
+    #[cfg(unix)]
+    const TICK_GUARD: u32 = 20_000;
+
+    #[cfg(unix)]
+    impl paddock_proc::Pace for Yield {
+        fn wait(&mut self, _tick: Duration) -> bool {
+            // A tick shortened to 1 ms: the judge counts ticks, so the verdicts are the same; the process is real and needs the time.
+            std::thread::sleep(Duration::from_millis(1));
+            self.0 += 1;
+            self.0 < TICK_GUARD
+        }
+    }
+
+    /// Starts `script` as a fake browser whose stderr goes to the profile folder `dir`, and waits for its DevTools port.
+    #[cfg(unix)]
+    #[expect(clippy::disallowed_methods, reason = "a fake browser script, like the real browser: std Command")]
+    fn start_fake(
+        script: &str,
+        dir: &Path,
+        ended_by: u8,
+        cpu: impl FnMut(paddock_proc::ProcessId) -> Option<Duration>,
+    ) -> Result<Connection> {
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.args(["-c", script])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::fs::File::create(dir.join(STDERR_FILE)).unwrap());
+        let mut process = Supervised::spawn(cmd).unwrap();
+        let r = connect(
+            dir,
+            &mut process,
+            paddock_proc::Patience::default(),
+            &AtomicU8::new(ended_by),
+            Duration::from_secs(7),
+            cpu,
+            Yield(0),
+        );
+        process.kill();
+        r
+    }
+
+    /// A CPU reading that grows a little each time (a browser that is working), so only its exit ends the wait.
+    #[cfg(unix)]
+    fn working() -> impl FnMut(paddock_proc::ProcessId) -> Option<Duration> {
+        let mut n = 0u64;
+        move |_| {
+            n += 1;
+            Some(Duration::from_micros(n))
+        }
+    }
+
+    /// A browser that stays alive, uses no CPU and never opens its port is stuck (judged on ticks, not on a fixed time), and
+    /// the error carries the tail of what it printed.
+    #[cfg(unix)]
+    #[test]
+    fn a_hung_start_is_reported_with_the_browsers_stderr() {
+        let dir = tempfile::tempdir().unwrap();
+        let printed = dir.path().join(STDERR_FILE);
+        // Flat CPU is reported only once the fake has printed its line: wait on the condition, not on a time.
+        let flat = move |_| {
+            std::fs::metadata(&printed)
+                .is_ok_and(|m| m.len() > 0)
+                .then_some(Duration::from_secs(1))
+        };
+        let e = start_fake(
+            "echo 'GPU process is waiting for a lock' >&2; exec sleep 300",
+            dir.path(),
+            NONE,
+            flat,
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(e.contains("done nothing") && e.contains("GPU process is waiting"), "{e}");
+    }
+
+    /// The exit status and the stderr tail of a browser that ended during the start are named.
+    #[cfg(unix)]
+    #[test]
+    fn a_browser_that_exits_during_the_start_names_its_exit_code_and_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = start_fake("echo 'bad flag' >&2; exit 3", dir.path(), NONE, |_| None)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            e.contains("exited right after it started") && e.contains("exit code 3") && e.contains("bad flag"),
+            "{e}"
+        );
+    }
+
+    /// A browser the time cap ended during its start was not a crash: the message says it did not start within the cap.
+    #[cfg(unix)]
+    #[test]
+    fn a_start_ended_by_the_time_cap_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = start_fake("exit 1", dir.path(), TIMED_OUT, working()).err().unwrap().to_string();
+        assert!(e.contains("did not start within 7 s"), "{e}");
     }
 
     /// A Chromium build starts without its testing field trials, branded Chrome and Edge get no switch; the caller's

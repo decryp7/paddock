@@ -1182,3 +1182,12 @@ GPU process took 48 s to launch, was killed as unresponsive again and again, and
 process. Later starts in the same VM took about 1 s. **Lesson:** a start logs where it is from a thread that the start cannot
 block, from as early as it can (and says which part it does not cover); and a VM check runs after the guest has settled (one WebKit app started
 once), with the guest's `log show` for WebKit's process lines kept as evidence, before calling a blank window a bug.
+
+## A fixed browser-start deadline failed a slow runner, not a stuck browser (2026-10-30, Spotter)
+`spotter-render::real_browser a_download_address_is_reported_as_a_download` failed in main's CI run 7194 with "the browser
+did not answer in time (the browser start)": Spotter's driver waited a fixed 20 s for the `DevToolsActivePort` file. It
+was not a shared port or profile (port 0, a unique profile folder per start); nextest runs each test in its own process,
+beside every other binary of the job, so a start on a loaded runner can simply take longer. Reproduced in a Linux
+container with a wrapper that delays the real browser by 24 s (fails at 20 s before, passes after). **Rule (ADR 0031):** a
+start is judged on run state by the shared `paddock_proc::StartWatch`, never on a fixed time; the driver gives it a probe
+(liveness with exit code and stderr tail, the port file, the tree's CPU time) and only the render's cap ends a slow one.

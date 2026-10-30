@@ -155,19 +155,30 @@ async fn a_server_that_never_answers_is_stopped_at_the_timeout() {
     let port = site().await;
     let base = tempfile::tempdir().unwrap();
     let marker = base.path().to_string_lossy().to_string();
-    let (r, log) = renderer(b, base.path());
+    let log = NetLog::new();
+    let mut opts = LaunchOptions::new(base.path());
+    opts.mode = Mode::Headless;
+    opts.extra_args = test_browser_flags();
+    opts.extra_args.extend(log.flags());
+    opts.max_lifetime = spotter_render::launch::lifetime_for(Duration::from_secs(6));
+    let mut c = Chromium::launch(&b, &opts).unwrap();
+    // The page's budget runs from when the browser is up (as the renderer does it), not from the process start.
     let t = Instant::now();
-    let e = r
-        .render(&format!("http://127.0.0.1:{port}/hang"), None, Duration::from_secs(6))
-        .await
+    let e = c
+        .new_page()
+        .unwrap()
+        .navigate(&format!("http://127.0.0.1:{port}/hang"), Duration::from_secs(6))
         .unwrap_err();
-    assert!(matches!(e, RenderError::Failed(_)), "{e:?}\n{}", log.tail());
-    // Start-up has its own limit; the hang itself must end at the 6 s page budget, not at the watchdog.
+    assert!(matches!(e, spotter_render::Error::Timeout(_)), "{e:?}\n{}", log.tail());
+    // The hang ended at the page budget, not at the watchdog (the mechanism; the time is only a sanity bound).
+    assert_eq!(c.ended_by(), EndedBy::Nothing, "{}", log.tail());
     assert!(
         t.elapsed() < spotter_render::launch::lifetime_for(Duration::from_secs(6)),
         "took {:?}",
         t.elapsed()
     );
+    c.close();
+    drop(c);
     assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0);
     assert_no_leftovers(&marker);
 }
@@ -278,13 +289,13 @@ fn the_watchdog_kills_the_whole_tree_at_the_wall_clock_limit() {
     opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
     // The limit runs from the spawn, so it has to leave room for a slow start on a loaded runner (which is not what is tested).
-    opts.max_lifetime = spotter_render::launch::START_LIMIT + Duration::from_secs(4);
+    opts.max_lifetime = spotter_render::launch::START_ALLOWANCE + Duration::from_secs(4);
     let mut c = Chromium::launch(&b, &opts).unwrap();
     let dir = c.profile_dir().to_path_buf();
     assert!(c.is_running());
     let marker = dir.to_string_lossy().to_string();
     assert!(!processes_mentioning(&marker).is_empty());
-    let end = Instant::now() + spotter_render::launch::START_LIMIT + Duration::from_secs(30);
+    let end = Instant::now() + spotter_render::launch::START_ALLOWANCE + Duration::from_secs(30);
     while c.is_running() && Instant::now() < end {
         std::thread::sleep(Duration::from_millis(100));
     }
