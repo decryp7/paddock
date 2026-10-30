@@ -141,9 +141,14 @@ test.describe('the row menu from the keyboard', () => {
     await page.goto(url('/processes'));
     const grid = page.getByRole('treegrid', { name: 'Processes' });
     await expect(grid).toBeVisible();
-    await page.getByRole('radio', { name: 'All', exact: true }).click();
+    const all = page.getByRole('radio', { name: 'All', exact: true });
+    await all.click();
+    // The rows are redrawn for the new filter: take the row (and its focus) only once the filter is the checked one.
+    await expect(all).toBeChecked();
     const row = grid.locator('.pd-body [role=row][data-key]:not([aria-expanded])').first();
+    await expect(row).toBeVisible();
     await row.focus();
+    await expect(row).toBeFocused();
     await page.keyboard.press('Shift+F10');
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();

@@ -755,20 +755,41 @@ mod tests {
         );
     }
 
-    #[test]
-    fn cancel_stops_comparing_within_a_chunk_and_leaves_the_files_alone() {
+    fn three_equal_files() -> (tempfile::TempDir, PathBuf, Vec<PathBuf>) {
         let t = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(t.path()).unwrap().join("dups");
         let paths: Vec<_> = (0..3).map(|i| write(&root, &format!("same{i}.bin"), 9, 6 * MB)).collect();
-        let job = Run::new().cancel_when("contents", 64 * 1024);
+        (t, root, paths)
+    }
+
+    /// One reader thread reports (and so cancels, on its own thread) before its next chunk: it stops at that chunk boundary. The
+    /// cancel is not racing other readers, so the count is exact.
+    #[test]
+    fn cancel_stops_a_reader_at_its_next_chunk_boundary_and_leaves_the_files_alone() {
+        let (_t, root, paths) = three_equal_files();
+        let job = Run::new().cancel_when("contents", 1);
+        let out = job.job(|ctx| run(ctx, &query(&root, FinderMode::Duplicates), "s", Limits::default(), w(1), lg()));
+        assert!(matches!(out, Err(JobError::Cancelled(_))), "{out:?}");
+        let read = job.phases().last().unwrap().counts.last().copied().unwrap();
+        assert_eq!(
+            read,
+            paddock_jobs::CHUNK as u64,
+            "the reader read past the chunk it was cancelled in"
+        );
+        assert!(paths.iter().all(|p| p.exists()));
+        assert!(matches!(job.end_state(), JobState::Cancelled { .. }));
+    }
+
+    /// Cancelled before the four readers start (the phase's first event), none of them reads a byte: each checks the token before
+    /// its first chunk. Nothing here depends on how fast a thread sees the cancel.
+    #[test]
+    fn cancel_before_the_readers_start_reads_nothing_on_any_thread() {
+        let (_t, root, paths) = three_equal_files();
+        let job = Run::new().cancel_when("contents", 0);
         let out = job.job(|ctx| run(ctx, &query(&root, FinderMode::Duplicates), "s", Limits::default(), w(4), lg()));
         assert!(matches!(out, Err(JobError::Cancelled(_))), "{out:?}");
         let read = job.phases().last().unwrap().counts.last().copied().unwrap();
-        // Each thread reads at most one more chunk before it sees the cancel.
-        assert!(
-            read <= 64 * 1024 + 4 * paddock_jobs::CHUNK as u64,
-            "read {read} bytes after the cancel"
-        );
+        assert_eq!(read, 0, "a reader read after the cancel");
         assert!(paths.iter().all(|p| p.exists()));
         assert!(matches!(job.end_state(), JobState::Cancelled { .. }));
     }
