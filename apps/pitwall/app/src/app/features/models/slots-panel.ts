@@ -1,4 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, input, output, signal } from '@angular/core';
+import { MatButton } from '@angular/material/button';
+import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
+import { MatSlider, MatSliderThumb } from '@angular/material/slider';
 import type { FitVerdict, LocalModel, SlotChoice } from '../../core/api.types';
 import { bytes, concurrencyText, slotsText, tokensText } from '../../shared/format';
 import { fitLook } from '../../shared/labels';
@@ -11,35 +14,40 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
 /** Parallel slots of one model: pick a count, see what each slot costs and how much context or concurrency fits. */
 @Component({
   selector: 'pw-slots-panel',
+  imports: [MatButton, MatButtonToggleGroup, MatButtonToggle, MatSlider, MatSliderThumb],
   providers: [SlotsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="head">
       <p class="title">Parallel slots · {{ model().name }}</p>
-      <button type="button" class="btn ghost sm" (click)="closed.emit()" aria-label="Close slots">Close</button>
+      <button type="button" matButton (click)="closed.emit()" aria-label="Close slots">Close</button>
     </div>
     <p class="lead">A slot serves one request at a time, so more slots let more requests run together. Each slot keeps its own context in memory.</p>
 
-    <div class="picks" role="radiogroup" [attr.aria-label]="'Parallel slots for ' + model().name">
+    <mat-button-toggle-group class="picks" hideSingleSelectionIndicator [aria-label]="'Parallel slots for ' + model().name" [value]="slots()" (change)="setSlots(+$event.value)">
       @for (n of picks(); track n) {
-        <button type="button" role="radio" class="pick" [attr.aria-checked]="slots() === n" [attr.data-tone]="tone(n)" (click)="setSlots(n)">
+        <mat-button-toggle class="pick" [value]="n" [attr.data-tone]="tone(n)">
           <b>{{ n }}</b>
           <span>{{ adds(n) }}</span>
-        </button>
+        </mat-button-toggle>
       }
+    </mat-button-toggle-group>
+
+    <div class="slider">
+      <span aria-hidden="true">Slots: <b class="num">{{ slotsLabel() }}</b></span>
+      <mat-slider min="1" max="16" step="1">
+        <input matSliderThumb [value]="slots()" [attr.aria-label]="'Parallel slots for ' + model().name" [attr.aria-valuetext]="slotsLabel()" (input)="setSlots(+$any($event.target).value)" />
+      </mat-slider>
+    </div>
+    <div class="slider">
+      <span aria-hidden="true">Context per slot: <b class="num">{{ contextLabel() }}</b></span>
+      <mat-slider min="0" [max]="steps().length - 1" step="1">
+        <input matSliderThumb [value]="step()" [attr.aria-label]="'Context per slot for ' + model().name" [attr.aria-valuetext]="contextLabel()" (input)="setStep(+$any($event.target).value)" />
+      </mat-slider>
     </div>
 
-    <label class="slider">
-      <span>Slots: <b class="num">{{ slotsLabel() }}</b></span>
-      <input class="range" type="range" min="1" max="16" step="1" [value]="slots()" [attr.aria-label]="'Parallel slots for ' + model().name" (input)="setSlots(+$any($event.target).value)" />
-    </label>
-    <label class="slider">
-      <span>Context per slot: <b class="num">{{ contextLabel() }}</b></span>
-      <input class="range" type="range" min="0" [max]="steps().length - 1" step="1" [value]="step()" [attr.aria-label]="'Context per slot for ' + model().name" (input)="setStep(+$any($event.target).value)" />
-    </label>
-
     @if (fits.error(); as e) {
-      <p class="err" role="alert">{{ e.message }} <button type="button" class="btn ghost sm" (click)="ask()">Retry</button></p>
+      <p class="err" role="alert">{{ e.message }} <button type="button" matButton (click)="ask()">Retry</button></p>
     } @else if (fits.fit(); as f) {
       <p class="answer" [attr.data-tone]="look(f.verdict).tone">
         <span class="status" [attr.data-tone]="look(f.verdict).tone">{{ look(f.verdict).label }}</span>
@@ -86,9 +94,9 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
     </p>
     <div class="foot">
       @if (model().slotsCustom) {
-        <button type="button" class="btn sm" [disabled]="busy()" (click)="useDefault()">Use the default</button>
+        <button type="button" matButton="outlined" [disabled]="busy()" (click)="useDefault()">Use the default</button>
       }
-      <button type="button" class="btn primary sm" [disabled]="busy() || !changed()" (click)="save()">Save {{ slotsLabel() }}</button>
+      <button type="button" matButton="filled" [disabled]="busy() || !changed()" (click)="save()">Save {{ slotsLabel() }}</button>
     </div>
   `,
   styles: `
@@ -127,30 +135,22 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
       font-size: var(--pd-text-label);
       color: var(--pd-text-muted);
     }
+    /* The quick picks: a segmented group whose segments carry the count and what it adds (two lines). */
     .picks {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: var(--pd-space-2);
+      grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+      grid-auto-flow: column;
+      --mat-button-toggle-height: 52px;
     }
     .pick {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 2px;
-      min-height: 52px;
-      padding: var(--pd-space-2);
-      font: inherit;
-      color: var(--pd-text);
-      background: var(--pd-surface-1);
-      border: 1px solid var(--pd-hairline);
-      border-radius: var(--pd-radius-control);
-      cursor: default;
-      &:hover {
-        background: var(--pd-hover);
-      }
-      &[aria-checked='true'] {
-        border-color: var(--pd-accent);
-        box-shadow: 0 0 0 1px var(--pd-accent);
+      min-width: 0;
+      ::ng-deep .mat-button-toggle-label-content {
+        padding-inline: var(--pd-space-1);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        line-height: var(--pd-lh-label);
       }
       b {
         font-size: var(--pd-text-subtitle, 16px);
@@ -173,9 +173,12 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
       gap: 4px;
       font-size: var(--pd-text-label);
       color: var(--pd-text-muted);
-      input {
-        width: 100%;
-        accent-color: var(--pd-accent);
+      /* Material keeps 8 px each side for the thumb at either end: a block slider in its own margins never overflows. */
+      mat-slider {
+        display: block;
+        width: auto;
+        margin: 0 8px;
+        min-width: 0;
       }
     }
     .answer {

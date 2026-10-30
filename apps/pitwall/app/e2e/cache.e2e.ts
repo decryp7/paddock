@@ -7,12 +7,12 @@ test.describe('caching', () => {
     const card = page.locator('#set-cache');
     await expect(card).toContainText('never sent anywhere');
     await expect(card.locator('.cache-stats').first()).toContainText('90 days since last use');
-    await card.getByRole('button', { name: /^Cached answers expiry/ }).click();
+    await card.getByRole('combobox', { name: 'Cached answers expiry' }).click();
     await page.getByRole('option', { name: '30 days after it is stored' }).click();
     await expect(page.getByText('You have unsaved changes.')).toBeVisible();
     await page.getByRole('button', { name: 'Save changes' }).click();
     await expect(page.getByText('You have unsaved changes.')).toHaveCount(0);
-    await expect(card.getByRole('button', { name: /^Cached answers expiry: 30 days/ })).toBeVisible();
+    await expect(card.getByRole('combobox', { name: 'Cached answers expiry' })).toContainText('30 days after it is stored');
 
     await card.getByRole('button', { name: 'Clear now' }).nth(1).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Clear now' }).click();

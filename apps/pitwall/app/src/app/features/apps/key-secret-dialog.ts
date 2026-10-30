@@ -1,6 +1,9 @@
 import { DIALOG_DATA, DialogRef } from '@angular/cdk/dialog';
 import { ChangeDetectionStrategy, Component, DOCUMENT, inject, signal } from '@angular/core';
+import { MatButton } from '@angular/material/button';
+import { MatFormField } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInput } from '@angular/material/input';
 import type { CreatedKey } from '../../core/api.types';
 
 export interface KeySecretData {
@@ -11,7 +14,7 @@ export interface KeySecretData {
 /** Shows a new key's secret exactly once, with Copy and a clear warning. Nothing keeps the secret after it closes. */
 @Component({
   selector: 'pw-key-secret-dialog',
-  imports: [MatIconModule],
+  imports: [MatButton, MatFormField, MatIconModule, MatInput],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'pw-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'pw-key-title', 'aria-describedby': 'pw-key-warn' },
   template: `
@@ -30,8 +33,8 @@ export interface KeySecretData {
 
     <label class="sr-only" for="pw-key-secret">Secret key</label>
     <div class="secret pitwall-selectable">
-      <input id="pw-key-secret" class="mono" readonly [value]="data.created.secret" (focus)="$any($event.target).select()" spellcheck="false" autocomplete="off" />
-      <button type="button" class="btn" [class.primary]="!copied()" (click)="copy()" cdkFocusInitial>
+      <mat-form-field class="field"><input matInput id="pw-key-secret" class="mono" readonly [value]="data.created.secret" (focus)="$any($event.target).select()" spellcheck="false" autocomplete="off" /></mat-form-field>
+      <button type="button" [matButton]="copied() ? 'outlined' : 'filled'" (click)="copy()" cdkFocusInitial>
         <mat-icon [svgIcon]="copied() ? 'pw:check' : 'pw:copy'" aria-hidden="true" />{{ copied() ? 'Copied' : 'Copy' }}
       </button>
     </div>
@@ -43,7 +46,7 @@ export interface KeySecretData {
 
     <div class="row">
       <span class="faint">Prefix {{ data.created.key.prefix }}</span>
-      <button type="button" class="btn" (click)="ref.close()">I've saved it</button>
+      <button type="button" matButton="outlined" (click)="ref.close()">I've saved it</button>
     </div>
   `,
   styles: `
@@ -92,24 +95,13 @@ export interface KeySecretData {
       display: flex;
       gap: var(--pd-space-2);
       margin-top: var(--pd-space-4);
-      input {
+      align-items: center;
+      .field {
         flex: 1;
         min-width: 0;
-        height: 34px;
-        padding: 0 var(--pd-space-3);
-        font-size: var(--pd-text-label);
-        color: var(--pd-text);
-        background: var(--pd-surface-2);
-        border: 1px solid var(--pd-border-strong);
-        border-radius: var(--pd-radius-control);
-        outline: none;
-        &:focus {
-          border-color: var(--pd-accent);
-          box-shadow: 0 0 0 3px var(--pd-accent-tint);
-        }
       }
-      .btn {
-        height: 34px;
+      input {
+        font-size: var(--pd-text-label);
       }
     }
     .status {

@@ -1,5 +1,10 @@
 import { ChangeDetectionStrategy, Component, DOCUMENT, DestroyRef, OnInit, afterNextRender, computed, inject, signal } from '@angular/core';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
+import { MatFormField, MatSuffix } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInput } from '@angular/material/input';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { CacheClearScope, CacheInfo, CacheKindInfo, CacheStorage, OnQuit, Preset, ThemeChoice } from '../../core/api.types';
@@ -9,7 +14,6 @@ import { Toasts } from '../../core/toasts';
 import { PRESET_HINT, PRESET_LABEL } from '../../shared/labels';
 import { Confirm } from '../../shared/ui/confirm';
 import { Panel } from '../../shared/ui/panel';
-import { PwSelect, type SelectOption } from '../../shared/ui/select';
 import { bytes, date, int } from '../../shared/format';
 import { expiryText, oldestText, sizeText, ttlOptions } from './cache-text';
 import { ServicePanel } from '../service/service-panel';
@@ -46,7 +50,7 @@ export function parseNumber(value: string, min = -Infinity, max = Infinity): num
 /** Everything Pitwall can be told: general, server, memory, network, privacy and updates. */
 @Component({
   selector: 'pw-settings-page',
-  imports: [MatIconModule, MatSlideToggleModule, MatTooltipModule, Panel, PwSelect, ServicePanel],
+  imports: [MatButton, MatIconButton, MatButtonToggleGroup, MatButtonToggle, MatFormField, MatInput, MatSuffix, MatIconModule, MatSlideToggleModule, MatTooltipModule, Panel, PdSelect, ServicePanel],
   providers: [SettingsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './settings-page.html',
@@ -215,7 +219,7 @@ export class SettingsPage implements OnInit {
   protected setSchedule(v: string): void {
     if (v === 'daily' || v === 'weekly') void this.updates.setCheck(true, v);
   }
-  protected readonly scheduleOptions: SelectOption[] = [
+  protected readonly scheduleOptions: PdSelectOption[] = [
     { value: 'weekly', label: 'Every week' },
     { value: 'daily', label: 'Every day' },
   ];

@@ -1,6 +1,8 @@
 import { Dialog } from '@angular/cdk/dialog';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { MatButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { SuEmptyState } from '@decryp7/paddock-ui';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -10,12 +12,9 @@ import { ago, compact, date, duration, int } from '../../shared/format';
 import { cacheHitRateText } from '../usage/usage-format';
 import { injectNow } from '../../shared/now';
 import { Confirm } from '../../shared/ui/confirm';
-import { EmptyState } from '../../shared/ui/empty-state';
 import { AppAvatar } from '../../shared/ui/app-avatar';
-import { ContextMenuService, type ContextMenuItem } from '../../shared/ui/context-menu';
+import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
 import { Panel } from '../../shared/ui/panel';
-import { RowMenu } from '../../shared/ui/row-menu';
-import { isMenuKey } from '../../shared/ui/row-nav';
 import { limitsText } from '../dashboard/apps-card';
 import { groupCode, permissionSummary } from '../dashboard/pairing-card';
 import { AppsStore } from './apps.store';
@@ -27,7 +26,7 @@ import { PermissionsEditor } from './permissions-editor';
 /** Apps & keys: who may use Pitwall, with which models and how much, their keys and pending pairings. */
 @Component({
   selector: 'pw-apps-page',
-  imports: [MatIconModule, MatTooltipModule, Panel, EmptyState, PermissionsEditor, AppUsage, AppAvatar, RowMenu],
+  imports: [MatButton, MatIconModule, MatTooltipModule, Panel, SuEmptyState, PermissionsEditor, AppUsage, AppAvatar, ItemsMenu, MoreButton, RowMenu],
   providers: [AppsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -38,7 +37,7 @@ import { PermissionsEditor } from './permissions-editor';
           <p class="sub">Who may use Pitwall, with which models and how much. Pitwall keeps only a hash of each key.</p>
         </div>
         <div class="actions">
-          <button type="button" class="btn" [class.primary]="!live.pairings().length" [disabled]="store.isBusy('create')" (click)="newApp()"><mat-icon svgIcon="pw:plus" aria-hidden="true" />New app</button>
+          <button type="button" [matButton]="live.pairings().length ? 'outlined' : 'filled'" [disabled]="store.isBusy('create')" (click)="newApp()"><mat-icon svgIcon="pw:plus" aria-hidden="true" />New app</button>
         </div>
       </header>
 
@@ -53,8 +52,8 @@ import { PermissionsEditor } from './permissions-editor';
                 </div>
                 <div class="code" [attr.aria-label]="'Pairing code ' + p.code"><span class="mono">{{ code(p.code) }}</span></div>
                 <div class="pact">
-                  <button type="button" class="btn ghost" [disabled]="live.isBusy()('pairing:' + p.id)" (click)="live.denyPairing(p.id)">Deny</button>
-                  <button type="button" class="btn primary" [disabled]="live.isBusy()('pairing:' + p.id)" (click)="approve(p.id, p.permissions)">
+                  <button type="button" matButton [disabled]="live.isBusy()('pairing:' + p.id)" (click)="live.denyPairing(p.id)">Deny</button>
+                  <button type="button" matButton="filled" [disabled]="live.isBusy()('pairing:' + p.id)" (click)="approve(p.id, p.permissions)">
                     <mat-icon svgIcon="pw:check" aria-hidden="true" />Approve
                   </button>
                 </div>
@@ -70,9 +69,10 @@ import { PermissionsEditor } from './permissions-editor';
         <div class="layout">
           <pw-panel class="list-panel" [flush]="true" heading="Apps" icon="apps" [sub]="store.loaded() ? store.apps().length + '' : ''" [loading]="store.loading()" [ready]="store.loaded()" [error]="store.loaded() ? store.error() : null" (retry)="store.load()">
             @if (store.apps().length === 0) {
-              <pw-empty-state icon="apps" heading="No apps yet" text="Apps appear when they pair, or when you create one and give it a key.">
-                <button type="button" class="btn sm" (click)="newApp()">New app</button>
-              </pw-empty-state>
+              <pd-empty-state heading="No apps yet" description="Apps appear when they pair, or when you create one and give it a key.">
+                <mat-icon slot="icon" svgIcon="pw:apps" aria-hidden="true" />
+                <button slot="action" type="button" matButton="outlined" (click)="newApp()">New app</button>
+              </pd-empty-state>
             }
             <ul class="apps" aria-label="Apps">
               @for (a of store.apps(); track a.id) {
@@ -103,7 +103,7 @@ import { PermissionsEditor } from './permissions-editor';
                       <span class="faint lim" [matTooltip]="limits(a.permissions.limits)" matTooltipShowDelay="600">· {{ limits(a.permissions.limits) }}</span>
                     </p>
                   </div>
-                  <pw-row-menu [items]="appMenu(a)" [label]="'More actions for ' + a.name" />
+                  <pw-more-button [menu]="appMenuPanel.menu()" [items]="appMenu(a)" [label]="'More actions for ' + a.name" />
                 </div>
                 <dl class="usage" aria-label="Usage today">
                   <div><dt>Requests</dt><dd class="num">{{ intText(a.today.requests) }}</dd></div>
@@ -116,7 +116,7 @@ import { PermissionsEditor } from './permissions-editor';
               </section>
 
               <pw-panel heading="Cached answers" icon="bolt" [sub]="a.permissions.cacheResponses ? 'on for this app' : 'off for this app'">
-                <button panel-actions type="button" class="btn sm" [disabled]="store.isBusy('cache:' + a.id)" (click)="clearAnswers(a)">Clear this app's cached answers</button>
+                <button panel-actions type="button" matButton="outlined" [disabled]="store.isBusy('cache:' + a.id)" (click)="clearAnswers(a)">Clear this app's cached answers</button>
                 <dl class="cache-stats" aria-label="Cache use today">
                   <div><dt>Cache hits</dt><dd class="num">{{ intText(a.today.cacheHits) }}</dd></div>
                   <div><dt>Misses</dt><dd class="num">{{ intText(a.today.cacheMisses) }}</dd></div>
@@ -132,9 +132,9 @@ import { PermissionsEditor } from './permissions-editor';
               <pw-app-usage [appId]="a.id" [appName]="a.name" [permissions]="a.permissions" />
 
               <pw-panel heading="Keys" icon="key" [flush]="true">
-                <button panel-actions type="button" class="btn sm" [disabled]="store.isBusy('app:' + a.id)" (click)="createKey(a)"><mat-icon svgIcon="pw:plus" aria-hidden="true" />Create key</button>
+                <button panel-actions type="button" matButton="outlined" [disabled]="store.isBusy('app:' + a.id)" (click)="createKey(a)"><mat-icon svgIcon="pw:plus" aria-hidden="true" />Create key</button>
                 @if (a.keys.length === 0) {
-                  <pw-empty-state icon="key" heading="No keys" [text]="a.name + ' cannot call Pitwall until it has a key or pairs again.'" />
+                  <pd-empty-state heading="No keys" [description]="a.name + ' cannot call Pitwall until it has a key or pairs again.'"><mat-icon slot="icon" svgIcon="pw:key" aria-hidden="true" /></pd-empty-state>
                 } @else {
                   <table class="table keys fit">
                     <colgroup><col /><col class="c-day" /><col class="c-day" /><col class="c-act" /></colgroup>
@@ -148,11 +148,11 @@ import { PermissionsEditor } from './permissions-editor';
                     </thead>
                     <tbody>
                       @for (k of a.keys; track k.id) {
-                        <tr tabindex="0" (keydown)="onKeyRow(a, k, $event)" (contextmenu)="onKeyMenu(a, k, $event)">
+                        <tr tabindex="0" pwRowMenu [matContextMenuTriggerFor]="keyMenuPanel.menu()" [matContextMenuTriggerData]="{ items: keyMenu(a, k) }">
                           <td><span class="mono prefix">{{ k.prefix }}</span></td>
                           <td class="muted">{{ day(k.createdAt) }}</td>
                           <td class="muted">{{ when(k.lastUsedAt, now()) }}</td>
-                          <td class="right"><pw-row-menu [items]="keyMenu(a, k)" [label]="'More actions for key ' + k.prefix" /></td>
+                          <td class="right"><pw-more-button [menu]="keyMenuPanel.menu()" [items]="keyMenu(a, k)" [label]="'More actions for key ' + k.prefix" /></td>
                         </tr>
                       }
                     </tbody>
@@ -170,6 +170,8 @@ import { PermissionsEditor } from './permissions-editor';
         </div>
       }
     </div>
+    <pw-items-menu #appMenuPanel label="App actions" />
+    <pw-items-menu #keyMenuPanel label="Key actions" />
   `,
   styles: `
     .page {
@@ -410,7 +412,6 @@ export class AppsPage implements OnInit {
   protected readonly live = inject(LiveStore);
   private readonly dialog = inject(Dialog);
   private readonly confirm = inject(Confirm);
-  private readonly menu = inject(ContextMenuService);
   protected readonly now = injectNow(15_000);
 
   protected readonly when = ago;
@@ -436,7 +437,7 @@ export class AppsPage implements OnInit {
   }
 
   /** Delete is not a button in the page: it lives in this menu and asks first. */
-  protected appMenu(a: AppInfo): ContextMenuItem[] {
+  protected appMenu(a: AppInfo): MenuItem[] {
     return [
       { label: 'Create key', run: () => void this.createKey(a), disabled: this.store.isBusy('app:' + a.id) },
       { label: 'Delete app…', run: () => void this.remove(a), danger: true, divider: true, disabled: this.store.isBusy('app:' + a.id) },
@@ -444,24 +445,11 @@ export class AppsPage implements OnInit {
   }
 
   /** Revoke is only in the key's menu, in danger text, and names the key. */
-  protected keyMenu(a: AppInfo, k: AppInfo['keys'][number]): ContextMenuItem[] {
+  protected keyMenu(a: AppInfo, k: AppInfo['keys'][number]): MenuItem[] {
     return [
       { label: 'Copy key prefix', run: () => void navigator.clipboard?.writeText(k.prefix).catch(() => undefined) },
       { label: 'Revoke key…', run: () => void this.revoke(a, k.id, k.prefix), danger: true, divider: true, disabled: this.store.isBusy('key:' + k.id) },
     ];
-  }
-
-  protected onKeyRow(a: AppInfo, k: AppInfo['keys'][number], e: KeyboardEvent): void {
-    if (e.target === e.currentTarget && isMenuKey(e)) {
-      e.preventDefault();
-      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      this.menu.open(r.left + 48, r.bottom - 8, this.keyMenu(a, k));
-    }
-  }
-
-  protected onKeyMenu(a: AppInfo, k: AppInfo['keys'][number], e: MouseEvent): void {
-    e.preventDefault();
-    this.menu.open(e.clientX, e.clientY, this.keyMenu(a, k));
   }
 
   protected select(id: string): void {

@@ -92,7 +92,7 @@ describe('AppsPage', () => {
     expect(el.querySelector('button[aria-label^="Revoke key"]')).toBeNull();
     (el.querySelector('button[aria-label^="More actions for key"]') as HTMLButtonElement).click();
     await settle(fixture);
-    const revoke = Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent!.includes('Revoke key'))!;
+    const revoke = Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-panel .mat-mdc-menu-item')).find((b) => b.textContent!.includes('Revoke key'))!;
     expect(revoke.classList.contains('danger')).toBe(true);
     revoke.click();
     await settle(fixture);
@@ -102,6 +102,36 @@ describe('AppsPage', () => {
     await settle(fixture);
     expect(el.querySelector('table.keys')).toBeNull();
     expect(el.textContent).toContain('No keys');
+  });
+
+  it('opens the key menu on a right-click of its row', async () => {
+    const { fixture, el } = await render();
+    const row = el.querySelector('table.keys tbody tr') as HTMLElement;
+    const items = () => Array.from(document.querySelectorAll('.mat-mdc-menu-panel .mat-mdc-menu-item')).map((b) => b.textContent!.trim());
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    await settle(fixture);
+    expect(items()).toEqual(['Copy key prefix', 'Revoke key…']);
+  });
+
+  it('opens the key menu from the keyboard: Shift+F10 on the focused row', async () => {
+    const { fixture, el } = await render();
+    const row = el.querySelector('table.keys tbody tr') as HTMLElement;
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
+    await settle(fixture);
+    expect(Array.from(document.querySelectorAll('.mat-mdc-menu-panel .mat-mdc-menu-item')).map((b) => b.textContent!.trim())).toEqual(['Copy key prefix', 'Revoke key…']);
+  });
+
+  it('the header has one filled primary: New app, unless a pairing waits (then Approve is the primary)', async () => {
+    const { el } = await render();
+    const header = el.querySelector('.page-head') as HTMLElement;
+    expect(header.querySelectorAll('.mat-mdc-unelevated-button').length).toBe(0);
+    expect(el.querySelector('.pair-list .mat-mdc-unelevated-button')?.textContent).toContain('Approve');
+    expect(el.querySelector('[class*="btn"]')).toBeNull();
+  });
+
+  it('New app is the filled primary when no pairing waits', async () => {
+    const { el } = await render(new MockBackend({ empty: true }));
+    expect(el.querySelector('.page-head .mat-mdc-unelevated-button')?.textContent).toContain('New app');
   });
 
   it('creates an app and then shows its first key', async () => {
@@ -127,7 +157,7 @@ describe('AppsPage', () => {
     expect(button(el, 'Delete app')).toBeUndefined();
     (el.querySelector('button[aria-label="More actions for Debrief"]') as HTMLButtonElement).click();
     await settle(fixture);
-    Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent!.includes('Delete app'))!.click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-panel .mat-mdc-menu-item')).find((b) => b.textContent!.includes('Delete app'))!.click();
     await settle(fixture);
     button(overlay().querySelector('pw-confirm-dialog')!, 'Delete app')!.click();
     await settle(fixture);

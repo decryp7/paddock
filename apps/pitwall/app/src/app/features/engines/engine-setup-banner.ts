@@ -2,6 +2,8 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { MatIconModule } from '@angular/material/icon';
 import { LiveStore } from '../../core/live.store';
 import { bytes, percent } from '../../shared/format';
+import { MatButton } from '@angular/material/button';
+import { MatProgressBar } from '@angular/material/progress-bar';
 
 /**
  * The automatic llama.cpp install, shown on the dashboard and on the llama.cpp page only while it runs or after it
@@ -10,7 +12,7 @@ import { bytes, percent } from '../../shared/format';
  */
 @Component({
   selector: 'pw-engine-setup',
-  imports: [MatIconModule],
+  imports: [MatProgressBar, MatButton, MatIconModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let s = setup();
@@ -20,7 +22,7 @@ import { bytes, percent } from '../../shared/format';
         <div class="text">
           <p class="title"><b>Installing llama.cpp…</b> Models you load or download wait until it is ready.</p>
           @if (s.download; as d) {
-            <div class="meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="pct()" aria-label="Installing llama.cpp"><span [style.width.%]="pct()"></span></div>
+            <mat-progress-bar class="bar" mode="determinate" [value]="pct()" aria-label="Installing llama.cpp" />
             <p class="msg num">{{ d.name }}: {{ size(d.bytesDone) }} of {{ size(d.bytesTotal) }}{{ d.state === 'selfTest' ? ', checking it' : '' }}</p>
           }
         </div>
@@ -32,7 +34,7 @@ import { bytes, percent } from '../../shared/format';
           <p class="title"><b>llama.cpp is not installed.</b> Models cannot load until it is.</p>
           <p class="msg">{{ s.error }}</p>
         </div>
-        <button type="button" class="btn" [disabled]="live.isBusy()('engineSetup')" (click)="live.retryEngineSetup()">Retry</button>
+        <button type="button" matButton="outlined" [disabled]="live.isBusy()('engineSetup')" (click)="live.retryEngineSetup()">Retry</button>
       </section>
     }
   `,
@@ -71,17 +73,10 @@ import { bytes, percent } from '../../shared/format';
       font-size: var(--pd-text-label);
       color: var(--pd-text-muted);
     }
-    .meter {
-      height: 4px;
+    .bar {
+      --mat-progress-bar-active-indicator-height: 4px;
+      --mat-progress-bar-track-height: 4px;
       margin-top: var(--pd-space-2);
-      overflow: hidden;
-      background: var(--pd-hairline);
-      border-radius: 2px;
-      span {
-        display: block;
-        height: 100%;
-        background: var(--pd-accent);
-      }
     }
   `,
 })

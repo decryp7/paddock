@@ -4,6 +4,7 @@ import type { AppPermissions, PairingRequest } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { ago } from '../../shared/format';
 import { PRIORITY_LABEL } from '../../shared/labels';
+import { MatButton } from '@angular/material/button';
 
 /** `482913` as `482 913`, easier to compare with what the app shows. */
 export function groupCode(code: string): string {
@@ -22,7 +23,7 @@ export function permissionSummary(p: AppPermissions): string[] {
 /** A pending pairing request: the code to match, what it asks for, and Approve / Deny. */
 @Component({
   selector: 'pw-pairing-card',
-  imports: [MatIconModule],
+  imports: [MatButton, MatIconModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" role="region" [attr.aria-label]="'Pairing request from ' + request().appName">
@@ -37,8 +38,8 @@ export function permissionSummary(p: AppPermissions): string[] {
         <span class="digits mono">{{ code(request().code) }}</span>
       </div>
       <div class="actions">
-        <button type="button" class="btn ghost" [disabled]="busy()" (click)="live.denyPairing(request().id)">Deny</button>
-        <button type="button" class="btn primary" [disabled]="busy()" (click)="live.approvePairing(request().id, request().permissions)">
+        <button type="button" matButton [disabled]="busy()" (click)="live.denyPairing(request().id)">Deny</button>
+        <button type="button" matButton="filled" [disabled]="busy()" (click)="live.approvePairing(request().id, request().permissions)">
           <mat-icon svgIcon="pw:check" aria-hidden="true" />Approve
         </button>
       </div>

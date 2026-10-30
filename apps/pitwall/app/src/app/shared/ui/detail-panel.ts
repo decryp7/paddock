@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, inject, input, output } from '@angular/core';
+import { MatIconButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 
@@ -9,7 +10,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
  */
 @Component({
   selector: 'pw-detail-panel',
-  imports: [MatIconModule, MatTooltipModule],
+  imports: [MatIconModule, MatTooltipModule, MatIconButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { role: 'complementary', '[attr.aria-label]': 'heading()' },
   template: `
@@ -22,7 +23,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
       </div>
       <div class="actions">
         <ng-content select="[panel-actions]" />
-        <button type="button" class="btn ghost icon sm" aria-label="Close details" matTooltip="Close (Esc)" (click)="closed.emit()"><mat-icon svgIcon="pw:close" aria-hidden="true" /></button>
+        <button type="button" matIconButton aria-label="Close details" matTooltip="Close (Esc)" (click)="closed.emit()"><mat-icon svgIcon="pw:close" aria-hidden="true" /></button>
       </div>
     </header>
     <div class="toolbar"><ng-content select="[panel-toolbar]" /></div>
@@ -114,7 +115,7 @@ export class DetailPanel implements OnDestroy {
   private readonly onKey = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape') return;
     // A menu or dialog that is open takes the key first.
-    if (document.querySelector('.pw-menu, [role="dialog"], [role="alertdialog"], [role="menu"]')) return;
+    if (document.querySelector('.mat-mdc-menu-panel, [role="dialog"], [role="alertdialog"], [role="menu"]')) return;
     this.closed.emit();
   };
 

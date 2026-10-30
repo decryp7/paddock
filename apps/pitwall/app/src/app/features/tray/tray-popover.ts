@@ -7,11 +7,13 @@ import { loadTone, pressureLook, servingLabel } from '../../shared/labels';
 import { injectNow } from '../../shared/now';
 import { HotModels } from '../dashboard/hot-models';
 import { UpdatesStore } from '../updates/updates.store';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /** The tray / menu-bar popover (360×520, frameless): memory, hot models with countdowns, throughput and the key actions. */
 @Component({
   selector: 'pw-tray-popover',
-  imports: [MatIconModule, HotModels],
+  imports: [MatTooltip, MatIconButton, MatButton, MatIconModule, HotModels],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="tray">
@@ -27,7 +29,7 @@ import { UpdatesStore } from '../updates/updates.store';
             <span class="state"><span class="dot" aria-hidden="true"></span>Connecting…</span>
           }
         </div>
-        <button type="button" class="btn ghost icon sm" aria-label="Open Pitwall" (click)="open('/')"><mat-icon svgIcon="pw:open" aria-hidden="true" /></button>
+        <button type="button" matIconButton aria-label="Open Pitwall" matTooltip="Open Pitwall" (click)="open('/')"><mat-icon svgIcon="pw:open" aria-hidden="true" /></button>
       </header>
 
       @if (live.pairings().length; as n) {
@@ -45,7 +47,7 @@ import { UpdatesStore } from '../updates/updates.store';
       }
 
       @if (live.error() && !live.overview()) {
-        <p class="down" role="alert">The Pitwall server is not responding. <button type="button" class="btn sm" (click)="live.load()">Retry</button></p>
+        <p class="down" role="alert">The Pitwall server is not responding. <button type="button" matButton="outlined" (click)="live.load()">Retry</button></p>
       }
 
       @if (live.memory(); as m) {
@@ -84,12 +86,12 @@ import { UpdatesStore } from '../updates/updates.store';
 
       <footer>
         @if (live.paused()) {
-          <button type="button" class="btn" [disabled]="live.isBusy()('serving')" (click)="live.setServing(false)"><mat-icon svgIcon="pw:play" aria-hidden="true" />Resume</button>
+          <button type="button" matButton="outlined" [disabled]="live.isBusy()('serving')" (click)="live.setServing(false)"><mat-icon svgIcon="pw:play" aria-hidden="true" />Resume</button>
         } @else {
-          <button type="button" class="btn" [disabled]="live.isBusy()('serving') || !live.overview()" (click)="live.setServing(true)"><mat-icon svgIcon="pw:pause" aria-hidden="true" />Pause serving</button>
+          <button type="button" matButton="outlined" [disabled]="live.isBusy()('serving') || !live.overview()" (click)="live.setServing(true)"><mat-icon svgIcon="pw:pause" aria-hidden="true" />Pause serving</button>
         }
-        <button type="button" class="btn" [disabled]="live.isBusy()('release') || !live.overview()" (click)="live.releaseMemory()"><mat-icon svgIcon="pw:release" aria-hidden="true" />Release memory</button>
-        <button type="button" class="btn primary wide" (click)="open('/')">Open Pitwall</button>
+        <button type="button" matButton="outlined" [disabled]="live.isBusy()('release') || !live.overview()" (click)="live.releaseMemory()"><mat-icon svgIcon="pw:release" aria-hidden="true" />Release memory</button>
+        <button type="button" matButton="filled" class="wide" (click)="open('/')">Open Pitwall</button>
       </footer>
     </div>
   `,
@@ -252,7 +254,7 @@ import { UpdatesStore } from '../updates/updates.store';
       gap: var(--pd-space-2);
       .wide {
         grid-column: 1 / -1;
-        height: 32px;
+        --mat-button-filled-container-height: 32px;
       }
     }
   `,

@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, input, output } from '@angular/core';
+import { MatButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import type { RequestRecord } from '../../core/api.types';
 import { date, duration, int } from '../../shared/format';
@@ -11,7 +12,7 @@ import { RequestsStore } from './requests.store';
 /** The details of one request, in the panel beside the log. Prompt and response stay hidden until the user asks for them. */
 @Component({
   selector: 'pw-request-detail',
-  imports: [MatIconModule, DetailPanel, Fact],
+  imports: [MatButton, MatIconModule, DetailPanel, Fact],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-detail-panel [heading]="r().endpoint" [sub]="appName() + ' · ' + when(r().at)" (closed)="closed.emit()">
@@ -83,11 +84,11 @@ import { RequestsStore } from './requests.store';
             <p class="faint">Loading…</p>
           } @else if (c.error) {
             <p class="err" role="alert"><mat-icon svgIcon="pw:alert" aria-hidden="true" />{{ c.error.message }}</p>
-            <button type="button" class="btn sm" (click)="store.showContent()">Retry</button>
+            <button type="button" matButton="outlined" (click)="store.showContent()">Retry</button>
           } @else if (c.data; as d) {
             <div class="content-head">
               <span class="faint">Request</span>
-              <button type="button" class="btn ghost sm" (click)="store.hideContent()"><mat-icon svgIcon="pw:eye-off" aria-hidden="true" />Hide content</button>
+              <button type="button" matButton (click)="store.hideContent()"><mat-icon svgIcon="pw:eye-off" aria-hidden="true" />Hide content</button>
             </div>
             <pre class="mono" tabindex="0" aria-label="Request body">{{ d.request }}</pre>
             <span class="faint label2">Response</span>
@@ -97,7 +98,7 @@ import { RequestsStore } from './requests.store';
           <div class="hidden-box">
             <mat-icon svgIcon="pw:lock" aria-hidden="true" />
             <p>Prompts and responses are hidden. They are kept on this machine only.</p>
-            <button type="button" class="btn sm" (click)="store.showContent()"><mat-icon svgIcon="pw:eye" aria-hidden="true" />Show content</button>
+            <button type="button" matButton="outlined" (click)="store.showContent()"><mat-icon svgIcon="pw:eye" aria-hidden="true" />Show content</button>
           </div>
         }
       </section>

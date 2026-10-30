@@ -5,6 +5,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { bytes } from '../../shared/format';
 import { UPDATE_KIND_LABEL } from '../../shared/labels';
 import { UpdatesStore } from './updates.store';
+import { MatButton, MatIconButton } from '@angular/material/button';
 
 /** Notices shown before "Show all". */
 export const SHOWN = 3;
@@ -16,7 +17,7 @@ export const SHOWN = 3;
  */
 @Component({
   selector: 'pw-update-banner',
-  imports: [MatIconModule, MatTooltipModule, RouterLink],
+  imports: [MatIconButton, MatButton, MatIconModule, MatTooltipModule, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (store.count() > 0) {
@@ -24,7 +25,7 @@ export const SHOWN = 3;
         <section class="banner callout summary" data-tone="info" role="status" aria-label="Model updates">
           <mat-icon svgIcon="pw:download" aria-hidden="true" />
           <span class="text"><b class="num">{{ store.count() }}</b> {{ store.count() === 1 ? 'model update is' : 'model updates are' }} available. Pitwall only tells you; nothing downloads until you choose.</span>
-          <a class="btn sm" routerLink="/models">Review</a>
+          <a matButton="outlined" routerLink="/models">Review</a>
         </section>
       } @else {
         <section class="banner callout" data-tone="info" role="region" aria-label="Model updates">
@@ -41,15 +42,15 @@ export const SHOWN = 3;
                   <span class="meta num">{{ n.file }} · {{ size(n.sizeBytes) }} · {{ n.repo }}</span>
                 </div>
                 <div class="act">
-                  <button type="button" class="btn ghost icon sm reveal" [disabled]="store.isBusy()(n.id)" [attr.aria-label]="'Get ' + n.file" matTooltip="Get it" (click)="store.get(n)"><mat-icon svgIcon="pw:download" aria-hidden="true" /></button>
-                  <button type="button" class="btn ghost icon sm reveal" [disabled]="store.isBusy()(n.id)" [attr.aria-label]="'Remind me about ' + n.modelId + ' in a week'" matTooltip="Remind me in a week" (click)="store.dismiss(n.id, 7)"><mat-icon svgIcon="pw:clock" aria-hidden="true" /></button>
-                  <button type="button" class="btn ghost icon sm reveal" [disabled]="store.isBusy()(n.id)" [attr.aria-label]="'Dismiss the update for ' + n.modelId" matTooltip="Dismiss" (click)="store.dismiss(n.id, null)"><mat-icon svgIcon="pw:close" aria-hidden="true" /></button>
+                  <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()(n.id)" [attr.aria-label]="'Get ' + n.file" matTooltip="Get it" (click)="store.get(n)"><mat-icon svgIcon="pw:download" aria-hidden="true" /></button>
+                  <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()(n.id)" [attr.aria-label]="'Remind me about ' + n.modelId + ' in a week'" matTooltip="Remind me in a week" (click)="store.dismiss(n.id, 7)"><mat-icon svgIcon="pw:clock" aria-hidden="true" /></button>
+                  <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()(n.id)" [attr.aria-label]="'Dismiss the update for ' + n.modelId" matTooltip="Dismiss" (click)="store.dismiss(n.id, null)"><mat-icon svgIcon="pw:close" aria-hidden="true" /></button>
                 </div>
               </li>
             }
           </ul>
           @if (hidden() > 0) {
-            <button type="button" class="btn ghost sm more" (click)="all.set(true)">Show all {{ store.count() }}</button>
+            <button type="button" matButton class="more" (click)="all.set(true)">Show all {{ store.count() }}</button>
           }
         </section>
       }

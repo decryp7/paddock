@@ -31,17 +31,17 @@ describe('UsageCard', () => {
   it('switches range and metric', async () => {
     const { fixture, el, backend } = await mount();
     const spy = vi.spyOn(backend, 'usageSeries');
-    (Array.from(el.querySelectorAll('[aria-label="Usage range"] button')).find((b) => b.textContent === '7d') as HTMLButtonElement).click();
+    (Array.from(el.querySelectorAll('[aria-label="Usage range"] button')).find((b) => b.textContent!.trim() === '7d') as HTMLButtonElement).click();
     await settle(fixture);
     expect(spy).toHaveBeenCalledWith('7d', null);
-    (Array.from(el.querySelectorAll('[aria-label="Usage metric"] button')).find((b) => b.textContent === 'Requests') as HTMLButtonElement).click();
+    (Array.from(el.querySelectorAll('[aria-label="Usage metric"] button')).find((b) => b.textContent!.trim() === 'Requests') as HTMLButtonElement).click();
     await settle(fixture);
     expect(el.querySelector('pw-echart')!.getAttribute('aria-label')).toContain('Requests per app over the last 7 days');
   });
 
   it('invites the user to connect an app when nothing was used', async () => {
     const { el } = await mount(new MockBackend({ empty: true }));
-    expect(el.querySelector('pw-empty-state')!.textContent).toContain('No usage yet');
+    expect(el.querySelector('pd-empty-state')!.textContent).toContain('No usage yet');
     expect(el.querySelector('pw-echart')).toBeNull();
   });
 

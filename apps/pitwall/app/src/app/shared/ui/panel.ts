@@ -1,8 +1,9 @@
-import { ChangeDetectionStrategy, Component, inject, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import type { CommandError } from '../../core/api.types';
 import { ServiceStore } from '../../features/service/service.store';
-import { Skeleton } from './skeleton';
+import { MatButton } from '@angular/material/button';
+import { SuSkeleton } from '@decryp7/paddock-ui';
 
 /**
  * A card with a header and an error boundary: while `loading` with no data it shows a skeleton; on `error` an inline
@@ -11,7 +12,7 @@ import { Skeleton } from './skeleton';
  */
 @Component({
   selector: 'pw-panel',
-  imports: [MatIconModule, Skeleton],
+  imports: [MatIconModule, MatButton, SuSkeleton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[class.flush]': 'flush()', '[attr.aria-busy]': 'loading()' },
   template: `
@@ -36,13 +37,17 @@ import { Skeleton } from './skeleton';
         <mat-icon svgIcon="pw:alert" aria-hidden="true" />
         <span class="msg">{{ e.message }}</span>
         @if (e.code === 'serverUnavailable' && service.canRepair()) {
-          <button type="button" class="btn sm primary" data-testid="repair-service" [disabled]="service.isBusy()('repair')" (click)="service.repair()">Repair service</button>
+          <button type="button" matButton="filled" data-testid="repair-service" [disabled]="service.isBusy()('repair')" (click)="service.repair()">Repair service</button>
         }
-        <button type="button" class="btn sm" (click)="retry.emit()">Retry</button>
+        <button type="button" matButton="outlined" (click)="retry.emit()">Retry</button>
       </div>
     }
     @if (loading() && !ready()) {
-      <pw-skeleton [lines]="skeletonLines()" />
+      <div class="skeleton" aria-hidden="true">
+        @for (w of skeletonWidths(); track $index) {
+          <pd-skeleton [width]="w" />
+        }
+      </div>
     } @else if (ready()) {
       <ng-content />
     }
@@ -66,9 +71,14 @@ import { Skeleton } from './skeleton';
       .error {
         margin: 0 var(--pd-space-4) var(--pd-space-3);
       }
-      pw-skeleton {
+      .skeleton {
         padding: var(--pd-space-2) var(--pd-space-4) var(--pd-space-4);
       }
+    }
+    .skeleton {
+      display: grid;
+      gap: var(--pd-space-2);
+      padding: var(--pd-space-1) 0;
     }
     header {
       display: flex;
@@ -113,8 +123,10 @@ import { Skeleton } from './skeleton';
       flex: 0 1 auto;
       min-width: 0;
     }
+    /* In a narrow card the buttons go under the message instead of out of the card. */
     .error {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       gap: var(--pd-space-2);
       margin-bottom: var(--pd-space-3);
@@ -128,11 +140,11 @@ import { Skeleton } from './skeleton';
         flex: none;
       }
       .msg {
-        flex: 1;
+        flex: 1 1 120px;
         min-width: 0;
         overflow-wrap: anywhere;
       }
-      .btn {
+      button {
         flex: none;
       }
     }
@@ -148,6 +160,8 @@ export class Panel {
   /** There is data to show (keeps content visible during reloads and errors). */
   readonly ready = input(true);
   readonly skeletonLines = input(4);
+  /** One shimmering line per `skeletonLines`, in varied widths like text. */
+  protected readonly skeletonWidths = computed(() => Array.from({ length: this.skeletonLines() }, (_, i) => `${[92, 76, 84, 58, 70][i % 5]}%`));
   readonly flush = input(false);
   readonly retry = output<void>();
 }

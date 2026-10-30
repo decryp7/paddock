@@ -6,8 +6,9 @@ import { LiveStore } from '../../core/live.store';
 import { ThemeService } from '../../core/theme';
 import { compact, duration, int } from '../../shared/format';
 import { seriesColor } from '../../shared/theme-tokens';
-import { EmptyState } from '../../shared/ui/empty-state';
-import { Sparkline } from '../../shared/ui/sparkline';
+import { MatButton } from '@angular/material/button';
+import { MatIcon } from '@angular/material/icon';
+import { SuEmptyState, SuSparkline } from '@decryp7/paddock-ui';
 
 /** The limits that are set, in short (`600/min · 5M tok/day`), or `No limits`. */
 export function limitsText(l: AppLimits): string {
@@ -24,13 +25,14 @@ export function limitsText(l: AppLimits): string {
 /** Connected apps with today's requests, tokens, busy time, errors and limits, and a trend over the chart range. */
 @Component({
   selector: 'pw-apps-card',
-  imports: [MatTooltipModule, RouterLink, Sparkline, EmptyState],
+  imports: [MatTooltipModule, MatButton, MatIcon, RouterLink, SuSparkline, SuEmptyState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (live.apps().length === 0) {
-      <pw-empty-state icon="apps" heading="No apps yet" text="Apps pair with Pitwall the first time they ask for a model, or you create a key for them.">
-        <a class="btn sm" routerLink="/apps">Apps & keys</a>
-      </pw-empty-state>
+      <pd-empty-state heading="No apps yet" description="Apps pair with Pitwall the first time they ask for a model, or you create a key for them.">
+        <mat-icon slot="icon" svgIcon="pw:apps" aria-hidden="true" />
+        <a slot="action" matButton="outlined" routerLink="/apps">Apps & keys</a>
+      </pd-empty-state>
     } @else {
       <table class="table fit">
         <colgroup><col /><col class="c-n" /><col class="c-n" /><col class="c-n" /><col class="c-n" /><col class="c-lim" /><col class="c-trend" /></colgroup>
@@ -52,7 +54,7 @@ export function limitsText(l: AppLimits): string {
                 <span class="app">
                   <span class="avatar" [style.--c]="color(a)" aria-hidden="true">{{ a.name[0] }}</span>
                   <span class="nm" [matTooltip]="a.name" matTooltipShowDelay="600">{{ a.name }}</span>
-                  <span class="conn" [class.on]="a.connected" [attr.aria-label]="a.connected ? 'Connected' : 'Not connected'" [matTooltip]="a.connected ? 'Connected' : 'Not connected'"></span>
+                  <span class="conn" role="img" [class.on]="a.connected" [attr.aria-label]="a.connected ? 'Connected' : 'Not connected'" [matTooltip]="a.connected ? 'Connected' : 'Not connected'"></span>
                 </span>
               </td>
               <td class="right num">{{ intText(a.today.requests) }}</td>
@@ -60,7 +62,7 @@ export function limitsText(l: AppLimits): string {
               <td class="right num">{{ dur(a.today.busyMs) }}</td>
               <td class="right num" [class.bad]="a.today.errors > 0">{{ a.today.errors }}</td>
               <td class="limits"><span class="lim" [matTooltip]="limits(a.permissions.limits)">{{ limits(a.permissions.limits) }}</span></td>
-              <td class="trend"><pw-sparkline [values]="trend(a)" [color]="color(a)" [width]="64" [height]="22" /></td>
+              <td class="trend"><pd-sparkline [values]="trend(a)" [min]="0" [height]="22" [label]="'Requests of ' + a.name" [style.color]="color(a)" /></td>
             </tr>
           }
         </tbody>
@@ -77,6 +79,9 @@ export function limitsText(l: AppLimits): string {
     }
     .c-lim {
       width: 96px;
+    }
+    .trend pd-sparkline {
+      width: 64px;
     }
     .c-trend {
       width: 88px;

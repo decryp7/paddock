@@ -98,17 +98,44 @@ describe('RequestsPage', () => {
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: write } });
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
     await settle(fixture);
-    const labels = Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item'));
+    const labels = Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-panel .mat-mdc-menu-item'));
     expect(labels.map((b) => b.textContent!.trim())).toEqual(['Details', 'Copy request id', 'Copy endpoint', expect.stringContaining('Only requests from')]);
     labels[1]!.click();
     await settle(fixture);
     expect(write).toHaveBeenCalledWith(store.visible()[0]!.id);
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     await settle(fixture);
-    Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).at(-1)!.click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-panel .mat-mdc-menu-item')).at(-1)!.click();
     await settle(fixture);
     expect(store.filter().app).not.toBe('all');
     vi.unstubAllGlobals();
+  });
+
+  it('opens the row menu from the keyboard (Shift+F10)', async () => {
+    const { fixture, el } = await render();
+    const row = el.querySelector<HTMLElement>('[role="row"][tabindex]')!;
+    const items = () => Array.from(document.querySelectorAll('.mat-mdc-menu-panel .mat-mdc-menu-item')).map((b) => b.textContent!.trim());
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
+    await settle(fixture);
+    expect(items()).toEqual(['Details', 'Copy request id', 'Copy endpoint', expect.stringContaining('Only requests from')]);
+  });
+
+  it('opens the same row menu from the row\'s "..." button', async () => {
+    const { fixture, el } = await render();
+    const row = el.querySelector<HTMLElement>('[role="row"][tabindex]')!;
+    row.querySelector<HTMLButtonElement>('button[aria-label^="More actions for the request"]')!.click();
+    await settle(fixture);
+    expect(Array.from(document.querySelectorAll('.mat-mdc-menu-panel .mat-mdc-menu-item')).map((b) => b.textContent!.trim())).toEqual(['Details', 'Copy request id', 'Copy endpoint', expect.stringContaining('Only requests from')]);
+  });
+
+  it('filters by status with a Material segmented control that counts the errors', async () => {
+    const { fixture, el, store } = await render();
+    const group = el.querySelector('mat-button-toggle-group[aria-label="Status"]')!;
+    const errors = Array.from(group.querySelectorAll<HTMLButtonElement>('[role="radio"]')).find((b) => b.textContent!.includes('Errors'))!;
+    expect(errors.textContent).toContain(String(store.errorCount()));
+    errors.click();
+    await settle(fixture);
+    expect(store.filter().status).toBe('errors');
   });
 
   it('renders the filter row and the table header', async () => {
@@ -118,9 +145,10 @@ describe('RequestsPage', () => {
     expect(Array.from(el.querySelectorAll('[role="columnheader"]')).map((h) => h.textContent!.trim())).toEqual(['Time', 'App', 'Model', 'Endpoint', 'TTFT ms', 'Total s', 'Tokens in / out', 'Status', 'Actions']);
     expect(el.querySelector('.shown')?.textContent).toContain(`${store.records().length} requests`);
     expect(el.querySelector('select')).toBeNull();
-    el.querySelector<HTMLButtonElement>('#pw-req-app')!.click();
+    expect(el.querySelector('#pw-req-search')?.closest('mat-form-field')).not.toBeNull();
+    el.querySelector<HTMLElement>('#pw-req-app')!.click();
     await settle(fixture);
-    const options = Array.from(document.querySelectorAll('.cdk-overlay-container .pw-select-list .opt')).map((o) => o.textContent?.trim());
+    const options = Array.from(document.querySelectorAll('.cdk-overlay-container mat-option')).map((o) => o.textContent?.trim());
     expect(options[0]).toBe('All apps');
     expect(options.length).toBeGreaterThan(2);
   });
@@ -130,9 +158,9 @@ describe('RequestsPage', () => {
     const search = el.querySelector('#pw-req-search') as HTMLInputElement;
     search.value = 'embeddings';
     search.dispatchEvent(new Event('input'));
-    el.querySelector<HTMLButtonElement>('#pw-req-app')!.click();
+    el.querySelector<HTMLElement>('#pw-req-app')!.click();
     await settle(fixture);
-    Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container .pw-select-list .opt'))
+    Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container mat-option'))
       .find((o) => o.textContent!.trim().toLowerCase() === 'spotter')!
       .click();
     (Array.from(el.querySelectorAll('[role="radio"]')).find((b) => b.textContent?.includes('Errors')) as HTMLButtonElement).click();
