@@ -264,7 +264,7 @@ byte. So each change has one place where it lands, and none lands in R8 silently
 | In-source markers must carry a reason (`W002` without one); 15 markers have none today | **R8**, as a deliberate golden update, in the **same change that gives each of the 15 markers its reason**, so the run stays green; the JS checks do not enforce it earlier | the golden diff is only the new rule, and the marker fixes are in the same commit |
 | `W003` unused waiver (not on `main` yet) | **JS conformance first**, as a change to the waiver engine with its own tests, raised only for checks that ran; waivers it finds unused are removed or fixed in that change | the goldens then contain `W003` on both sides |
 | Config exceptions become waivers (`origin = Config`, no expiry) | **R8**: the Rust checks read their lists into waivers; JS keeps reading them as lists. No output changes unless an entry is unused, which is `W003` and lands with the row above | the Rust run reproduces the JS output over the same lists |
-| `max_count` as the key of a counted waiver (ADR 0021 calls it the count) | the JS parser reads `max_count` as an alias of `count` **first**; the rename is R8's | no output change |
+| `max_count` as a waiver key (`waivers.mjs` has no count today; ADR 0021's counted waivers are the per-file ceilings of check C38) | **R8**: the Rust engine takes the ceiling from the waiver; the JS checks keep counting as they do | no output change, because both stop at the same ceiling |
 | `Report.scope` and the display table (`warn` printed as `warn`) | **R8**, designed to leave the text, Markdown and JSON unchanged | goldens unchanged |
 
 ## 7. Parallelism and cost (rule 51)
