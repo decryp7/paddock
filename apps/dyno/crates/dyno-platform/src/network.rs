@@ -39,7 +39,7 @@ impl NetworkSockets for OsSockets {
     /// for an unknown state).
     #[cfg(windows)]
     fn sockets(&self) -> Result<Vec<SocketRow>, PlatformError> {
-        crate::windows::net::sockets().ok_or_else(|| PlatformError::Failed("The OS would not list the open sockets.".into()))
+        crate::windows::net::sockets().map_err(PlatformError::Failed)
     }
 
     #[cfg(not(windows))]

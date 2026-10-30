@@ -41,6 +41,17 @@ pub fn mib_name(state: u32) -> &'static str {
     }
 }
 
+/// The buffer size to ask for after Windows said a table needs `reported` bytes: an eighth more, so a table that grows
+/// again before the next read still fits, but never more than `cap`; `None` when the table itself is over the cap.
+pub fn next_table_size(reported: u32, cap: u32) -> Option<u32> {
+    (reported <= cap).then(|| reported.saturating_add(reported / 8).min(cap))
+}
+
+/// The error for a table Windows would not give (`what` names it), with the Win32 code.
+pub fn table_error(what: &str, code: u32) -> String {
+    format!("Windows would not list the {what} (error {code}, {code:#010X}).")
+}
+
 /// The state of a row read from `table`.
 pub fn row_state(table: TcpTable, state: u32) -> SocketState {
     match (table, state) {
@@ -82,6 +93,27 @@ mod tests {
         assert_eq!(row_state(TcpTable::Listener, 2), SocketState::Listen);
         assert_eq!(row_state(TcpTable::Connections, 0), SocketState::Other);
         assert_eq!(row_name(TcpTable::Connections, 0), "UNKNOWN (0)");
+    }
+
+    /// Review P2 (2026-10-30): a table that grew between the size query and the read is asked for with headroom, so a
+    /// busy machine does not use up the retries; never past the cap.
+    #[test]
+    fn a_table_that_grew_is_read_again_with_headroom_up_to_the_cap() {
+        assert_eq!(next_table_size(800, 1 << 20), Some(900));
+        assert_eq!(next_table_size(0, 1 << 20), Some(0));
+        assert_eq!(next_table_size(1000, 1100), Some(1100), "headroom stops at the cap");
+        assert_eq!(next_table_size(2000, 1100), None, "a table over the cap is not read");
+        assert_eq!(next_table_size(u32::MAX, u32::MAX), Some(u32::MAX));
+    }
+
+    /// Review P2 (2026-10-30): a table Windows would not give is an error that names it and the Win32 code, never
+    /// silently left out of the list.
+    #[test]
+    fn a_table_that_cannot_be_read_is_named_with_its_code() {
+        assert_eq!(
+            table_error("listening TCP sockets (IPv6)", 122),
+            "Windows would not list the listening TCP sockets (IPv6) (error 122, 0x0000007A)."
+        );
     }
 
     #[test]
