@@ -10,8 +10,7 @@ Conventional Commits; one semver tag for the whole repo.
   Edge never apply that config and get no switch. On Windows CI the config's network-service sandbox could not start
   for a browser in the runner's user folder (all 12 Chrome logs of runs 7149 and 7154: "Sandbox cannot access
   executable", launch error 45), and Chrome started the network service again unsandboxed. Real-browser loads were lost
-  with `net::ERR_ABORTED` in those runs, 3 to 4 s later, when the profile's own requests failed too; whether the config
-  caused that is to be confirmed by CI.
+  with `net::ERR_ABORTED` in those runs, 3 to 4 s later, when the profile's own requests failed too.
 - `command_line` takes the browser's `Flavor`, and the command line has one `--disable-features` switch: the quiet
   features (now `launch::QUIET_DISABLED_FEATURES`; the switch left `QUIET_FLAGS`) and any the caller passes in
   `extra_args`, merged without repeats.
@@ -19,6 +18,12 @@ Conventional Commits; one semver tag for the whole repo.
   `network_sandbox_given_up`, from the browser's own histograms; `None` when it does not say), for tests and diagnostics.
 - CI's test-browser installer (`conformance/ci/install-test-browser.mjs`) grants app containers (S-1-15-2-1, S-1-15-2-2)
   read and execute on the browser folder on Windows, as Program Files has them.
+- The same switch in the two driver copies still to move onto `paddock-chromium` (plan X14): Spotter's `spotter-render`
+  (`args` now takes the browser's `Flavor` and the caller's extra arguments, which it places before `about:blank` with
+  their features merged into its one `--disable-features` switch; they used to come after the start page) and Debrief's
+  `chromium-driver` (`command_line` takes the `Flavor`).
+- Confirmed by CI run 7170: on Windows, five rounds of the real-browser tests (25 browsers, Chrome logs kept) had no
+  failed sandbox start, no second network-service start, no failed sign-in request and no `net::ERR_ABORTED`.
 
 ### `paddock-proc`: processes by identity (ADR 0033, rule 53)
 - New `ProcessId` (pid plus `StartTime`), `Holder`, `Ending`, `TreeEnding`, `holder`, `usage::Row` and `usage::identity`. `kill_tree` (now returning a `TreeEnding`), `end`, `ask` and `terminate` take a `ProcessId` and act only if its pid still belongs to it: one handle on Windows, a pidfd on Linux, a check then the signal on macOS; skipped and refused kills are logged. `processes_mentioning` and `descendants_of` return `ProcessId`s. `ProcessId::of_recorded(pid, written_ms)` is for a pid read from a file. `Supervised::process()` is new.
