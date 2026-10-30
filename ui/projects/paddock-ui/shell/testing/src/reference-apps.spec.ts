@@ -12,7 +12,7 @@ import {
   serializeManifest,
   themeProblems,
 } from '@decryp7/paddock-ui/shell';
-import { provideMenus, provideSubmenus } from '@decryp7/paddock-ui/shell/menu';
+import { provideMenus, provideSubmenus, QUIT_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/menu';
 import { SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { OS_NOTIFICATIONS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/notify';
 import { SETUP_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/setup';
@@ -97,7 +97,7 @@ describe('shell-demo manifest', () => {
   it('keeps paddock-manifest.json equal to the main window’s contributions', async () => {
     TestBed.configureTestingModule({
       providers: provideShellTesting({
-        contributions: [DEMO_CONTRIBUTIONS, SHELL_ABOUT_CONTRIBUTIONS, SHELL_DIAGNOSTICS_CONTRIBUTIONS, SETUP_CONTRIBUTIONS, OS_NOTIFICATIONS_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS, UNDO_CONTRIBUTIONS, ACTIVITY_CONTRIBUTIONS],
+        contributions: [DEMO_CONTRIBUTIONS, SHELL_ABOUT_CONTRIBUTIONS, SHELL_DIAGNOSTICS_CONTRIBUTIONS, SETUP_CONTRIBUTIONS, OS_NOTIFICATIONS_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS, QUIT_CONTRIBUTIONS, UNDO_CONTRIBUTIONS, ACTIVITY_CONTRIBUTIONS],
         context: () => Promise.resolve(demoContext),
         providers: [provideMenus({ appName: 'Shell demo' }), provideSubmenus(...DEMO_SUBMENUS)],
       }),

@@ -68,7 +68,7 @@ type McpSetup<R> = Box<
 >;
 type ServiceSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<ServicePart, BoxError> + Send>;
 type AppSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<(), BoxError> + Send>;
-type MenuNoWindow<R> = dyn Fn(&AppHandle<R>) + Send + Sync;
+type MenuQuit<R> = dyn Fn(&AppHandle<R>) + Send + Sync;
 type TraySetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Tray<R> + Send>;
 type HealthAdjust<R> = Box<dyn FnOnce(&AppHandle<R>, HealthSetup<R>) -> HealthSetup<R> + Send>;
 
@@ -95,7 +95,7 @@ pub struct Builder<R: Runtime> {
     downloader: Option<paddock_download::Downloader>,
     in_memory: bool,
     native_menu: bool,
-    menu_no_window: Option<Arc<MenuNoWindow<R>>>,
+    menu_quit: Option<Arc<MenuQuit<R>>>,
     setup: Vec<AppSetup<R>>,
     tray: Option<TraySetup<R>>,
     launch: Option<LaunchArgs>,
@@ -126,7 +126,7 @@ impl<R: Runtime> Builder<R> {
             downloader: None,
             in_memory: false,
             native_menu: true,
-            menu_no_window: None,
+            menu_quit: None,
             setup: Vec::new(),
             tray: None,
             launch: None,
@@ -355,12 +355,13 @@ impl<R: Runtime> Builder<R> {
 
     /// What a click on Quit in the menu bar does when no window is open (the last one was closed to the tray; the menu
     /// bar still shows its menus). Default: the shell's quit, the same path as the `app_quit` command (the window layer's
-    /// exit with its teardown, or Tauri's exit without a window layer). An app with its own quit path gives it here.
-    pub fn menu_without_window(
+    /// exit with its teardown, or Tauri's exit without a window layer). An app with its own quit path gives it here. Any
+    /// other item clicked with no window open brings the main window back, as a Dock click does.
+    pub fn menu_quit_without_window(
         mut self,
         f: impl Fn(&AppHandle<R>) + Send + Sync + 'static,
     ) -> Self {
-        self.menu_no_window = Some(Arc::new(f));
+        self.menu_quit = Some(Arc::new(f));
         self
     }
 
@@ -714,25 +715,44 @@ impl<R: Runtime> Builder<R> {
         for f in self.setup {
             f(app)?;
         }
-        // After the app's own set-up, which may manage the menu state: Quit in the menu bar with no window open.
+        // After the app's own set-up, which may manage the menu state: clicks with no window open. The shell's policy
+        // never replaces a handler the app set itself.
         if let Some(menu) = app.try_state::<paddock_menu::tauri::NativeMenu<R>>() {
-            let quit = self.menu_no_window;
-            menu.on_no_window(move |app, _| match &quit {
-                Some(f) => f(app),
-                None => quit_app(app),
+            let quit = self.menu_quit;
+            menu.on_no_window_by_default(move |app, id| {
+                menu_without_window(app, id, quit.as_deref())
             });
         }
         Ok(())
     }
 }
 
-/// The shell's quit: the window layer's (every window closes, the exit watchdog is armed), as the `app_quit` command;
-/// Tauri's exit when there is no window layer.
-fn quit_app<R: Runtime>(app: &AppHandle<R>) {
-    quit_or(app, |app| app.exit(0));
+/// A click on a menu item with no window open (the last one was closed to the tray): Quit quits (`quit`, else the
+/// shell's), any other item brings the main window back as a Dock click does. The item itself is not forwarded to the
+/// new window: it is not listening yet, so the click would be lost; the person chooses again.
+fn menu_without_window<R: Runtime>(app: &AppHandle<R>, id: &str, quit: Option<&MenuQuit<R>>) {
+    menu_without_window_using(app, id, quit, |app| app.exit(0));
 }
 
-/// [`quit_app`] with the exit without a window layer given (the mock runtime cannot exit).
+/// [`menu_without_window`] with the exit of an app without a window layer given (the mock runtime cannot exit).
+fn menu_without_window_using<R: Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+    quit: Option<&MenuQuit<R>>,
+    exit: impl FnOnce(&AppHandle<R>),
+) {
+    if id == paddock_menu::model::QUIT_COMMAND {
+        match quit {
+            Some(f) => f(app),
+            None => quit_or(app, exit),
+        }
+    } else if app.try_state::<Windows<R>>().is_some() {
+        reopen_after_hook(app);
+    }
+}
+
+/// The shell's quit: the window layer's (every window closes, the exit watchdog is armed), as the `app_quit` command;
+/// the given exit when there is no window layer.
 fn quit_or<R: Runtime>(app: &AppHandle<R>, exit: impl FnOnce(&AppHandle<R>)) {
     if app.try_state::<Windows<R>>().is_some() {
         paddock_window::tauri::quit(app);
@@ -741,8 +761,7 @@ fn quit_or<R: Runtime>(app: &AppHandle<R>, exit: impl FnOnce(&AppHandle<R>)) {
     }
 }
 
-/// A Dock click with no window open (macOS): the window comes back after the run-event hook, not inside it.
-#[cfg(target_os = "macos")]
+/// A Dock click or a menu click with no window open (macOS): the window comes back after the hook, not inside it.
 fn reopen_after_hook<R: Runtime>(app: &AppHandle<R>) {
     paddock_window::tauri::after_plugin_hook(app, paddock_window::tauri::reopen);
 }

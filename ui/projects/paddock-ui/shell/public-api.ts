@@ -100,6 +100,7 @@ export {
   SHELL_PORTS,
   SHELL_IDLE,
   SHELL_COMMAND_RUNNER,
+  APP_QUIT,
   type ShellContext,
   type ShellCore,
   type ShellPorts,

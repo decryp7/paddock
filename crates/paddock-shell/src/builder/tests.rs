@@ -132,7 +132,7 @@ fn the_app_can_replace_what_quit_does_without_a_window() {
     let asked = Arc::new(std::sync::Mutex::new(0));
     let seen = asked.clone();
     let app = app(shell()
-        .menu_without_window(move |_| *seen.lock().unwrap() += 1)
+        .menu_quit_without_window(move |_| *seen.lock().unwrap() += 1)
         .setup(|app| {
             app.manage(NativeMenu::<MockRuntime>::with_bar(
                 "Shell Demo",
@@ -151,14 +151,66 @@ fn the_app_can_replace_what_quit_does_without_a_window() {
     assert_eq!(*asked.lock().unwrap(), 1);
 }
 
-/// Without a window layer and without an override, Quit falls back to Tauri's own exit (harmless on the mock runtime).
+/// The policy for a click with no window open, on both kinds of shell: Quit goes to the override, else the window layer's
+/// quit, else the given exit; any other item only reopens the main window where there is a window layer.
 #[test]
-fn quit_without_a_window_layer_uses_tauris_exit() {
-    let app = app(Builder::new(identity()).in_memory().native_menu(false));
-    assert!(app.try_state::<Windows<MockRuntime>>().is_none());
-    let mut exited = false;
-    quit_or(app.handle(), |_| exited = true);
-    assert!(exited);
+fn a_click_without_a_window_quits_or_brings_the_main_window_back() {
+    let plain = app(Builder::new(identity()).in_memory().native_menu(false));
+    assert!(plain.try_state::<Windows<MockRuntime>>().is_none());
+    let exited = std::cell::Cell::new(0);
+    menu_without_window_using(plain.handle(), "pd.app.quit", None, |_| {
+        exited.set(exited.get() + 1)
+    });
+    assert_eq!(exited.get(), 1, "no window layer: the exit given");
+    // Another item has nothing to reopen without a window layer.
+    menu_without_window_using(plain.handle(), "pd.about", None, |_| {
+        unreachable!("not a quit")
+    });
+    assert!(plain.get_webview_window("main").is_none());
+    // With an override, Quit is the app's.
+    let own = Arc::new(std::sync::Mutex::new(0));
+    let seen = own.clone();
+    let quit: Arc<MenuQuit<MockRuntime>> = Arc::new(move |_| *seen.lock().unwrap() += 1);
+    menu_without_window_using(plain.handle(), "pd.app.quit", Some(&*quit), |_| {
+        unreachable!("the app quits")
+    });
+    assert_eq!(*own.lock().unwrap(), 1);
+}
+
+/// The installed handler: a click on a shell that has no window layer does nothing for an item that is not Quit.
+#[test]
+fn a_menu_click_without_a_window_layer_reaches_the_policy() {
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .setup(|app| {
+            app.manage(NativeMenu::<MockRuntime>::with_bar(
+                "Shell Demo",
+                true,
+                NoBar,
+            ));
+            Ok(())
+        }));
+    let menu = app.state::<NativeMenu<MockRuntime>>();
+    let about = serde_json::json!({ "menus": [{ "id": "app", "label": "Shell Demo", "items": [
+        { "kind": "item", "id": "pd.about", "label": "About", "keybinding": null, "checked": null, "enabled": true }
+    ] }] });
+    let model = paddock_menu::model::parse(serde_json::from_value(about).unwrap()).unwrap();
+    menu.apply(app.handle(), &model).unwrap();
+    assert_eq!(
+        paddock_menu::tauri::menu_chosen(app.handle(), "pd.about"),
+        None
+    );
+    assert!(app.get_webview_window("main").is_none());
+}
+
+/// A menu item chosen with no window open brings the main window back, after the hook, like a Dock click (macOS).
+#[cfg(target_os = "macos")]
+#[test]
+fn a_menu_item_without_a_window_reopens_the_main_window() {
+    let app = app(shell());
+    menu_without_window(app.handle(), "pd.settings.open", None);
+    wait_for_main(&app);
 }
 
 #[test]

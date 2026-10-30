@@ -88,7 +88,8 @@ impl<R: Runtime> NativeBar<R> for TauriBar {
     }
 }
 
-/// What runs a click on an app-level item when no window is the target (the app's quit): gets the app and the item id.
+/// What runs a click on a shown item when no window is the target (Quit, or bringing the main window back): gets the app
+/// and the item id.
 pub type NoWindowHandler<R> = dyn Fn(&AppHandle<R>, &str) + Send + Sync + 'static;
 
 /// Managed state: the spec the menu bar shows, the target window and the build count.
@@ -171,13 +172,27 @@ impl<R: Runtime> NativeMenu<R> {
         Ok(update)
     }
 
-    /// Sets what runs a click on an app-level item ([`runs_without_window`]: Quit) when no window is the target, for
-    /// example after the last window was closed to the tray. Without one such a click is dropped. Replaces the earlier one.
+    /// Sets what runs a click on a shown item ([`runs_without_window`]) when no window is the target, for example after
+    /// the last window was closed to the tray. Without one such a click is dropped. Replaces the earlier one.
     pub fn on_no_window(&self, f: impl Fn(&AppHandle<R>, &str) + Send + Sync + 'static) {
         *lock(&self.no_window) = Some(Arc::new(f));
     }
 
-    /// The handler for a click on `id`, if there is no target window and the item is an app-level one that is shown.
+    /// Like [`NativeMenu::on_no_window`], but only when none is set yet (a default that never replaces the app's own).
+    /// Returns whether it was set.
+    pub fn on_no_window_by_default(
+        &self,
+        f: impl Fn(&AppHandle<R>, &str) + Send + Sync + 'static,
+    ) -> bool {
+        let mut slot = lock(&self.no_window);
+        let free = slot.is_none();
+        if free {
+            *slot = Some(Arc::new(f));
+        }
+        free
+    }
+
+    /// The handler for a click on `id`, if there is no target window and the item is a shown one.
     fn no_window_handler(&self, id: &str) -> Option<Arc<NoWindowHandler<R>>> {
         let shown = lock(&self.shown);
         let ids = shown.as_deref().map(item_ids).unwrap_or_default();
@@ -214,7 +229,7 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
 
 /// Sends a chosen item to the target window only (not its pop-outs or dialogs: it runs the command once). Returns the
 /// window it went to; `None` when the id is not one of the shown items or no window is the target. With no target
-/// window, Quit goes to the [`NativeMenu::on_no_window`] handler instead (and this returns `None`).
+/// window, a shown item goes to the [`NativeMenu::on_no_window`] handler instead (and this returns `None`).
 pub fn menu_chosen<R: Runtime>(app: &AppHandle<R>, id: &str) -> Option<String> {
     let state = app.try_state::<NativeMenu<R>>()?;
     let Some(label) = state.route(id) else {

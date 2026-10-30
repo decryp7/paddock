@@ -40,6 +40,8 @@ export interface ShellCore {
   openDialog<R = unknown>(id: string, inputs?: unknown): Promise<DialogOutcome<R>>;
   /** Shows a notice (notification host, plan S4). */
   notify(notice: ShellNotice): void;
+  /** Quits the app (the shell's `app_quit`; `provideShellQuit`). Resolves once asked; a window without a quit only warns. */
+  quitApp(): Promise<void>;
 }
 
 /**
@@ -70,6 +72,9 @@ export const SHELL_PORTS = new InjectionToken<ShellPorts>('SHELL_PORTS', {
     notify: (n) => (n.level === 'error' ? console.error : console.warn)(`[paddock-shell] ${n.message}`),
   }),
 });
+
+/** What `ShellCore.quitApp` does: asks the engine to quit (`provideShellQuit` in `shell/menu` provides it). */
+export const APP_QUIT = new InjectionToken<() => Promise<void>>('PADDOCK_APP_QUIT');
 
 /** Runs a command for `ShellCore.runCommand`: `CommandService`, wired by `provideShellCore` (a token avoids an import cycle). */
 export const SHELL_COMMAND_RUNNER = new InjectionToken<(id: string, args?: unknown) => Promise<boolean>>('SHELL_COMMAND_RUNNER');
@@ -129,6 +134,12 @@ export class ShellContextHost {
     showPage: (id: string) => this.ports.showPage(id),
     openDialog: <R>(id: string, inputs?: unknown) => this.ports.openDialog(id, inputs) as Promise<DialogOutcome<R>>,
     notify: (n: ShellNotice) => this.ports.notify(n),
+    quitApp: () => {
+      const quit = this.injector.get(APP_QUIT, null);
+      if (quit) return quit();
+      console.warn('[paddock-shell] no quit in this window (provideShellQuit); cannot quit');
+      return Promise.resolve();
+    },
   });
   private readonly loaded = signal<ShellContext | null>(this.config ? null : this.core);
   private pending: Promise<ShellContext> | null = null;
