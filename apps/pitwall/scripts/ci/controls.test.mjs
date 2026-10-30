@@ -16,6 +16,9 @@ test('finds each kind of native or retired control, with its line', () => {
     '<pw-empty-state heading="None" />',
     '<input class="input" type="search" />',
     '<input type="number" />',
+    '<table class="table fit">',
+    '<table mat-table class="table" [dataSource]="rows">',
+    '<table class="grid">',
   ].join('\n');
   const found = findNativeControls(src);
   assert.deepEqual(
@@ -31,6 +34,10 @@ test('finds each kind of native or retired control, with its line', () => {
       [8, 'retired-component'],
       [9, 'unthemed-input'],
       [10, 'unthemed-input'],
+      [11, 'table-class'],
+      [11, 'native-table'],
+      [12, 'table-class'],
+      [13, 'native-table'],
     ],
   );
 });
@@ -46,6 +53,9 @@ test('Material and paddock-ui controls pass', () => {
     '<pd-select [options]="o" />',
     '<pd-segmented-control label="Range" [options]="o" />',
     '<input type="file" hidden />',
+    '<table mat-table class="results" [dataSource]="rows" [fixedLayout]="true">',
+    '<table mat-table class="table-list" [dataSource]="rows">',
+    '<pd-table [rows]="rows" [columns]="cols" label="Rows" />',
   ].join('\n');
   assert.deepEqual(ids(src), []);
 });
@@ -57,6 +67,6 @@ test('the check covers the templates of the app (inline and .html), not the spec
   assert.ok(!files.some((f) => f.endsWith('.spec.ts')));
 });
 
-test('no native select, native checkbox, unthemed input, .btn, .seg or retired Pitwall control is left in src/app', () => {
+test('no native select, native checkbox, unthemed input, .btn, .seg, hand-rolled table or retired Pitwall control is left in src/app', () => {
   assert.deepEqual(appFindings(), []);
 });

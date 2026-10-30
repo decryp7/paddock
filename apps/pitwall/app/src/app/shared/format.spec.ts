@@ -1,4 +1,4 @@
-import { ago, bytes, clock, compact, concurrencyText, countdown, date, duration, gb, int, percent, rate, seconds, slotsText, tokensText } from './format';
+import { ago, bytes, bytesIn, bytesUnit, clock, compact, concurrencyText, countdown, date, duration, durationIn, durationUnit, gb, int, percent, rate, seconds, slotsText, tokensText, varies } from './format';
 
 const GB = 1024 ** 3;
 
@@ -79,5 +79,40 @@ describe('format', () => {
     expect(concurrencyText(6)).toBe('up to 6 requests at once');
     expect(tokensText(8192)).toBe('8,192 tokens');
     expect(tokensText(1)).toBe('1 token');
+  });
+  it('puts a column of bytes in the unit its largest value reads best in', () => {
+    const G = 1024 ** 3;
+    expect(bytesUnit([5.6 * G, 600 * 1024 ** 2, null])).toBe('GB');
+    expect(bytesUnit([300 * 1024 ** 2])).toBe('MB');
+    expect(bytesUnit([])).toBe('B');
+    expect(bytesUnit([NaN, 512])).toBe('B');
+    expect(bytesIn(5.6 * G, 'GB')).toBe('5.6');
+    expect(bytesIn(600 * 1024 ** 2, 'GB')).toBe('0.6');
+    expect(bytesIn(150 * G, 'GB')).toBe('150');
+    expect(bytesIn(700, 'B')).toBe('700');
+    expect(bytesIn(null, 'GB')).toBe('—');
+  });
+
+  it('puts a column of durations in one unit', () => {
+    expect(durationUnit([955, 2200])).toBe('ms');
+    expect(durationUnit([12_000, null])).toBe('s');
+    expect(durationUnit([45 * 60_000])).toBe('min');
+    expect(durationUnit([11 * 3_600_000])).toBe('h');
+    expect(durationUnit([])).toBe('ms');
+    expect(durationIn(2213, 'ms')).toBe('2,213');
+    expect(durationIn(12_340, 's')).toBe('12.3');
+    expect(durationIn(150_000, 's')).toBe('150');
+    expect(durationIn(48 * 60_000 + 20_000, 'min')).toBe('48');
+    expect(durationIn(11.5 * 3_600_000, 'h')).toBe('11.5');
+    expect(durationIn(-5, 'ms')).toBe('0');
+    expect(durationIn(undefined, 's')).toBe('—');
+  });
+
+  it('tells a column that varies from a constant one', () => {
+    expect(varies([{ a: 1 }, { a: 1 }, { a: 1 }], (r) => r.a)).toBe(false);
+    expect(varies([{ a: 1 }, { a: 1 }, { a: 2 }], (r) => r.a)).toBe(true);
+    expect(varies([{ a: 1 }, { a: 1 }], (r) => r.a)).toBe(true);
+    expect(varies([{ a: 1 }], (r) => r.a)).toBe(true);
+    expect(varies([], () => 0)).toBe(true);
   });
 });

@@ -6,6 +6,7 @@ import { MatFormField, MatLabel } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInput } from '@angular/material/input';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { ModelPreset, PresetEntry, PresetStatus } from '../../core/api.types';
 import { presetStatusLook } from '../../shared/labels';
@@ -34,7 +35,7 @@ export function statusDetail(s: PresetStatus): string {
 /** Model presets and aliases (ADR 0014): apps send the alias as `model`; here the user decides what serves it. */
 @Component({
   selector: 'pw-presets-tab',
-  imports: [MatButton, MatIconButton, MatFormField, MatLabel, MatInput, MatAutocomplete, MatAutocompleteTrigger, MatOption, MatIconModule, MatTooltipModule, Panel, SuEmptyState, ItemsMenu, MoreButton, RowMenu, MatSlideToggleModule],
+  imports: [MatButton, MatIconButton, MatFormField, MatLabel, MatInput, MatAutocomplete, MatAutocompleteTrigger, MatOption, MatIconModule, MatTooltipModule, Panel, SuEmptyState, ItemsMenu, MoreButton, RowMenu, MatSlideToggleModule, MatTableModule],
   providers: [PresetsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -48,41 +49,38 @@ export function statusDetail(s: PresetStatus): string {
         </pd-empty-state>
       } @else {
         <pw-items-menu #rowMenu label="Preset actions" />
-        <div class="scroll">
-          <table class="table fit">
-            <colgroup><col class="c-alias" /><col class="c-target" /><col /><col class="c-defs" /><col class="c-act" /></colgroup>
-            <thead>
-              <tr>
-                <th scope="col">Name apps send</th>
-                <th scope="col">Target</th>
-                <th scope="col">Serves now</th>
-                <th scope="col">Defaults</th>
-                <th scope="col"><span class="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (e of store.entries(); track e.preset.alias) {
-                <tr tabindex="0" [class.editing]="store.editor()?.editing === e.preset.alias" (click)="onRowClick(e.preset, $event)" (keydown)="onRowKey(e.preset, $event)" pwRowMenu [matContextMenuTriggerFor]="rowMenu.menu()" [matContextMenuTriggerData]="{ items: menuItems(e.preset) }">
-                  <td class="alias"><span class="mono pitwall-selectable">{{ e.preset.alias }}</span>@if (e.preset.cacheResponses) {<span class="badge" matTooltip="Answers to repeated deterministic requests are cached">cache</span>}@if (e.preset.keepWarm) {<span class="badge" matTooltip="The system prompt is kept warm across unloads">warm</span>}</td>
-                  <td><span class="mono target pitwall-selectable" [matTooltip]="e.preset.target" matTooltipShowDelay="600">{{ e.preset.target }}</span></td>
-                  <td class="serves">
-                    <span class="status" [attr.data-tone]="look(e).tone" [matTooltip]="detail(e)">{{ look(e).label }}</span>
-                    <span class="via" [class.mono]="e.status.state === 'ready'" [matTooltip]="e.status.state === 'ready' ? e.status.modelId : message(e)">{{ e.status.state === 'ready' ? e.status.modelId : message(e) }}</span>
-                  </td>
-                  <td class="defs"><span [matTooltip]="defaultsText(e.preset)" matTooltipShowDelay="600">{{ defaultsText(e.preset) || '—' }}</span></td>
-                  <td class="act">
-                    <span class="row-actions">
-                      <button type="button" matIconButton class="reveal" [attr.aria-label]="'Edit ' + e.preset.alias" matTooltip="Edit" [disabled]="store.deleting().includes(e.preset.alias)" (click)="openEdit(e.preset)">
-                        <mat-icon svgIcon="pw:edit" aria-hidden="true" />
-                      </button>
-                      <pw-more-button [menu]="rowMenu.menu()" [items]="menuItems(e.preset)" [label]="'More actions for ' + e.preset.alias" />
-                    </span>
-                  </td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </div>
+        <table mat-table class="list" [dataSource]="store.entries()" [trackBy]="byAlias" [fixedLayout]="true" aria-label="Presets">
+          <ng-container matColumnDef="alias">
+            <th mat-header-cell *matHeaderCellDef scope="col">Name apps send</th>
+            <td mat-cell *matCellDef="let e" class="alias"><span class="mono pitwall-selectable" [matTooltip]="e.preset.alias" matTooltipShowDelay="600">{{ e.preset.alias }}</span>@if (e.preset.cacheResponses) {<span class="badge" matTooltip="Answers to repeated deterministic requests are cached">cache</span>}@if (e.preset.keepWarm) {<span class="badge" matTooltip="The system prompt is kept warm across unloads">warm</span>}</td>
+          </ng-container>
+          <ng-container matColumnDef="target">
+            <th mat-header-cell *matHeaderCellDef scope="col">Target</th>
+            <td mat-cell *matCellDef="let e"><span class="mono target pitwall-selectable" [matTooltip]="e.preset.target" matTooltipShowDelay="600">{{ e.preset.target }}</span></td>
+          </ng-container>
+          <ng-container matColumnDef="serves">
+            <th mat-header-cell *matHeaderCellDef scope="col">Serves now</th>
+            <td mat-cell *matCellDef="let e" class="serves">
+              <span class="status" [attr.data-tone]="look(e).tone" [matTooltip]="detail(e)">{{ look(e).label }}</span>
+              <span class="via" [class.mono]="e.status.state === 'ready'" [matTooltip]="e.status.state === 'ready' ? e.status.modelId : message(e)">{{ e.status.state === 'ready' ? e.status.modelId : message(e) }}</span>
+            </td>
+          </ng-container>
+          <ng-container matColumnDef="defaults">
+            <th mat-header-cell *matHeaderCellDef scope="col">Defaults</th>
+            <td mat-cell *matCellDef="let e" class="defs" [matTooltip]="defaultsText(e.preset)" matTooltipShowDelay="600">{{ defaultsText(e.preset) || '—' }}</td>
+          </ng-container>
+          <ng-container matColumnDef="act">
+            <th mat-header-cell *matHeaderCellDef scope="col" class="act"><span class="sr-only">Actions</span></th>
+            <td mat-cell *matCellDef="let e" class="act">
+              <button type="button" matIconButton class="reveal" [attr.aria-label]="'Edit ' + e.preset.alias" matTooltip="Edit" [disabled]="store.deleting().includes(e.preset.alias)" (click)="openEdit(e.preset)">
+                <mat-icon svgIcon="pw:edit" aria-hidden="true" />
+              </button>
+              <pw-more-button [menu]="rowMenu.menu()" [items]="menuItems(e.preset)" [label]="'More actions for ' + e.preset.alias" />
+            </td>
+          </ng-container>
+          <tr mat-header-row *matHeaderRowDef="columns(); sticky: true"></tr>
+          <tr mat-row *matRowDef="let e; columns: columns()" tabindex="0" [class.selected]="store.editor()?.editing === e.preset.alias" (click)="onRowClick(e.preset, $event)" (keydown)="onRowKey(e.preset, $event)" pwRowMenu [matContextMenuTriggerFor]="rowMenu.menu()" [matContextMenuTriggerData]="{ items: menuItems(e.preset) }"></tr>
+        </table>
       }
     </pw-panel>
 
@@ -191,8 +189,7 @@ export function statusDetail(s: PresetStatus): string {
       display: grid;
       gap: var(--pd-space-3);
     }
-    .scroll {
-      overflow-x: auto;
+    .list {
       margin-top: var(--pd-space-2);
     }
     .alias {
@@ -222,21 +219,18 @@ export function statusDetail(s: PresetStatus): string {
       color: var(--pd-text-muted);
       text-overflow: ellipsis;
     }
-    .c-alias {
+    .mat-column-alias {
       width: 24%;
     }
-    .c-target,
-    .c-defs {
+    .mat-column-target,
+    .mat-column-defaults {
       width: 20%;
     }
     /* Edit and the "..." menu, with the cell's padding. */
-    .c-act {
+    .mat-column-act {
       width: 84px;
     }
 
-    tr.editing td {
-      background: var(--pd-accent-tint);
-    }
     .actions {
       display: inline-flex;
       gap: var(--pd-space-1);
@@ -432,6 +426,10 @@ export class PresetsTab {
   }
 
   /** The list behind the row's "..." button and right-click. Delete is only here and asks first. */
+  /** Every column: a preset's defaults are its own setting, and the table is the only place outside the editor that shows them. */
+  protected readonly columns = computed(() => ['alias', 'target', 'serves', 'defaults', 'act']);
+  protected readonly byAlias = (_: number, e: PresetEntry) => e.preset.alias;
+
   protected menuItems(p: ModelPreset): MenuItem[] {
     return [
       { label: 'Edit', run: () => this.openEdit(p) },
