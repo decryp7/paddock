@@ -205,11 +205,11 @@ Pitwall runs native engines on untrusted model files and answers requests from o
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
 - Work a person waits for never runs at an OS's starvable background level (rule 52: macOS QoS `BACKGROUND`,
-  `PRIO_DARWIN_BG`/`taskpolicy` and `IOPOL_THROTTLE`; Windows background modes, idle priorities and EcoQoS; Linux
-  `SCHED_IDLE` and idle I/O; for a service, launchd `ProcessType` `Background` (or `Adaptive` without XPC) and
-  `LowPriorityIO`, systemd `CPUSchedulingPolicy=idle` and `IOSchedulingClass=idle`): lowered work uses
-  `QOS_CLASS_UTILITY`, nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`; a starvable level only for work nobody waits on, with a
-  `conformance: background-qos — <why>` comment (C54).
+  `PRIO_DARWIN_BG`, `taskpolicy -b`/`-c background`/`-c maintenance`/`-d throttle` and `IOPOL_THROTTLE`; Windows
+  background modes, idle priorities and EcoQoS; Linux `SCHED_IDLE` and idle I/O; for a service, launchd `ProcessType`
+  `Background` (or `Adaptive` without XPC) and `LowPriorityIO`, systemd `CPUSchedulingPolicy=idle` and
+  `IOSchedulingClass=idle`): lowered work uses `QOS_CLASS_UTILITY`, nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`; a
+  starvable level only for work nobody waits on, with a `conformance: background-qos — <why>` comment (C54).
 - Research official sources before choosing libraries or relying on an engine's or API's behaviour (llama-server
   options, SDK request shapes), and record what you found and when in the ADR or doc comment.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they are available instead of

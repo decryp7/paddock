@@ -45,12 +45,14 @@ export const STARVABLE = {
   IOPRIO_CLASS_IDLE: 'Linux idle I/O class (disk access only when nothing else uses it)',
 };
 
-/** Paths to a starvable level in the thread-priority crate (`ThreadPriority::Min` is the OS's lowest level). */
+/**
+ * Paths to a starvable level in the thread-priority crate. (`ThreadPriority::Min` is not one: it is the lowest normal level,
+ * about `THREAD_PRIORITY_LOWEST` on Windows and nice 19 on Linux, which is slowed, not starved.)
+ */
 const PATHS = [
   { re: /\bNormalThreadSchedulePolicy\s{0,4}::\s{0,4}Idle\b/g, name: 'thread-priority NormalThreadSchedulePolicy::Idle' },
   { re: /\bWinAPIThreadPriority\s{0,4}::\s{0,4}Idle\b/g, name: 'thread-priority WinAPIThreadPriority::Idle' },
   { re: /\bWinAPIThreadPriority\s{0,4}::\s{0,4}BackgroundModeBegin\b/g, name: 'thread-priority WinAPIThreadPriority::BackgroundModeBegin' },
-  { re: /\bThreadPriority\s{0,4}::\s{0,4}Min\b/g, name: 'thread-priority ThreadPriority::Min' },
 ];
 
 const OTHER = {
@@ -63,7 +65,6 @@ const OTHER = {
   'thread-priority NormalThreadSchedulePolicy::Idle': 'Linux SCHED_IDLE through the thread-priority crate',
   'thread-priority WinAPIThreadPriority::Idle': 'Windows idle thread priority through the thread-priority crate',
   'thread-priority WinAPIThreadPriority::BackgroundModeBegin': 'Windows thread background mode through the thread-priority crate',
-  'thread-priority ThreadPriority::Min': "the OS's lowest thread priority through the thread-priority crate (the idle level on some systems)",
   'launchd ProcessType Background': 'launchd throttles the whole service like QoS BACKGROUND',
   'launchd ProcessType Adaptive without XPC': 'with no XPC request to raise it, an Adaptive service stays throttled like Background',
   'launchd LowPriorityIO': "launchd throttles all of the service's disk I/O",
@@ -558,7 +559,6 @@ const HINT = new RegExp(
     'chrt',
     'ThreadSchedulePolicy',
     'WinAPIThreadPriority',
-    'ThreadPriority',
     'ProcessType',
     'LowPriority',
     'SchedulingClass',

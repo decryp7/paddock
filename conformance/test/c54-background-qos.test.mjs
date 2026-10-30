@@ -229,7 +229,6 @@ test('C54 more starvable levels: taskpolicy maintenance and throttle, constants,
     'const BG: i32 = 0x0001_0000;',
     'unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY(BG)) };',
     'unsafe { libc::syscall(libc::SYS_ioprio_set, 1, 0, 3 << 13) };',
-    'set_current_thread_priority(ThreadPriority::Min)?;',
     'set_thread_priority_and_policy(t, p, ThreadSchedulePolicy::Normal(NormalThreadSchedulePolicy::Idle))?;',
     'set_winapi_thread_priority(h, WinAPIThreadPriority::BackgroundModeBegin)?;',
   ];
@@ -239,11 +238,12 @@ test('C54 more starvable levels: taskpolicy maintenance and throttle, constants,
     [4, 'IDLE_PRIORITY_CLASS (0x40, through IDLE_FLAGS)'],
     [6, 'THREAD_MODE_BACKGROUND_BEGIN (0x10000, through BG)'],
     [7, 'IOPRIO_CLASS_IDLE (3 << 13)'],
-    [8, 'thread-priority ThreadPriority::Min'],
-    [9, 'thread-priority NormalThreadSchedulePolicy::Idle'],
-    [10, 'thread-priority WinAPIThreadPriority::BackgroundModeBegin'],
+    [8, 'thread-priority NormalThreadSchedulePolicy::Idle'],
+    [9, 'thread-priority WinAPIThreadPriority::BackgroundModeBegin'],
   ]);
   assert.deepEqual(rs('const GENTLE: u32 = 0x4000;\ncmd.creation_flags(GENTLE);\nlet x = 2 << 13;\n'), []);
+  // The crate's minimum is its lowest normal level (about THREAD_PRIORITY_LOWEST, nice 19): slowed, not starved.
+  assert.deepEqual(rs('set_current_thread_priority(ThreadPriority::Min)?;\n'), []);
 });
 
 test('C54 no false alarms: values with their own keys, test modules, match arms, other commands\' flags', () => {
