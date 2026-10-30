@@ -67,11 +67,53 @@ test('codeWithStrings keeps literals and drops comments, offsets unchanged', () 
 
 test('C55 through the runner: one error per ungated test or direct read', async () => {
   const root = makeApp({
-    'crates/r/tests/real_browser.rs': 'fn b() -> Option<B> { find_for_tests(Mode::Headless) }\n' + t('#[test]', '    let r = ChromiumRenderer::new(a, b().unwrap());'),
-    'crates/r/tests/ok.rs': 'fn b() -> Option<B> { find_for_tests(Mode::OffScreen) }\n' + t('#[test]', '    let r = browser(Mode::OffScreen);\n    let r = ChromiumRenderer::new(a, b);'),
+    'crates/r/tests/real_browser.rs': 'fn b() -> Option<B> { find_for_tests(Mode::Headless) }\n' + t('#[test]', '    let r = ChromiumRenderer::new(a, c).with_browser(b().unwrap());'),
+    'crates/r/tests/ok.rs': 'fn b() -> Option<B> { find_for_tests(Mode::OffScreen) }\n' + t('#[test]', '    let r = browser(Mode::OffScreen);\n    let r = ChromiumRenderer::new(a, c).with_browser(r);'),
     'crates/r/src/discover.rs': 'pub const TEST_BROWSER_ENV: &str = "SPOTTER_TEST_BROWSER";\n',
     'app/src/live.rs': 'fn f() { let _ = std::env::var_os("CHROMIUM_TEST_PATH"); }\n',
   });
   const found = await findingsOf('C55', root);
   assert.deepEqual(found.map((f) => [f.file, f.severity]).sort(), [['app/src/live.rs', 'error'], ['crates/r/tests/real_browser.rs', 'error']]);
+});
+
+// Review P1-1: the bypasses the pre-filter let through. Each is caught in test code, and none in product code.
+const inTestMod = (body) => `pub fn product() {}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn it() {\n${body}\n    }\n}\n`;
+const PROBES = [
+  ['search', '        let b = chromium_driver::find().unwrap();\n        Chromium::launch(&b, &LaunchOptions::default()).unwrap();'],
+  ['search', '        let b = paddock_chromium::discover::find(None, None).unwrap();'],
+  ['search', '        let b = discover::find_installed().unwrap();'],
+  ['search', '        let b = discover::find_downloaded(&dir);'],
+  ['search', '        let b = runtime::installed(&store).unwrap();'],
+  ['renderer', '        let page = ChromiumRenderer::new(d.path(), d.path()).render("http://127.0.0.1:1/", None, t).await;'],
+  ['renderer', '        let r = ChromiumRenderer::new(\n            d.path(),\n            d.path(),\n        );'],
+  ['path', '        let b = Browser::chromium("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");'],
+  ['path', '        let b = Browser::chromium("C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe");'],
+  ['path', '        let b = Browser::chromium("/usr/bin/google-chrome-stable");'],
+  ['command', '        std::process::Command::new("google-chrome").arg("--headless").spawn().unwrap();'],
+  ['command', '        Command::new("open").args(["-a", "Debrief"]).status().unwrap();'],
+  [['command', 'path'], '        Command::new("/usr/bin/chromium").spawn().unwrap();'],
+  ['direct', '        let p = std::env::var(concat!("CHROMIUM_", "TEST_PATH")).unwrap();'],
+];
+
+test('C55 bad: every bypass probe of the review is caught in test code (src cfg(test) module and tests/)', () => {
+  for (const [kind, body] of PROBES) {
+    const want = [kind].flat();
+    assert.deepEqual(kinds('crates/x/src/lib.rs', inTestMod(body)), want, body);
+    assert.deepEqual(kinds('apps/y/crates/z/tests/it/probe.rs', `#[test]\nfn it() {\n${body}\n}\n`), want, body);
+    assert.deepEqual(kinds('crates/x/src/launch/tests.rs', `fn helper() {\n${body}\n}\n`), want, `${body} (a tests.rs helper)`);
+  }
+  assert.deepEqual(kinds('crates/x/tests/it/a.rs', 'use chromium_driver::find;\n#[test]\nfn it() { let b = find(); }\n'), ['search']);
+  assert.deepEqual(kinds('crates/x/tests/it/a.rs', 'use paddock_chromium::discover::{find, Browser};\n'), ['search']);
+});
+
+test('C55 good: the product\'s own search and launch outside test code, a renderer with its browser, a waiver with a reason', () => {
+  const product = 'pub fn resolve() -> Option<Browser> {\n    discover::find_installed().or_else(|| runtime::installed(&s))\n}\npub fn r() -> ChromiumRenderer { ChromiumRenderer::new(a, b) }\npub fn spawn() { Command::new("open").spawn(); }\n';
+  assert.deepEqual(kinds('crates/x/src/adapter.rs', product + inTestMod('        let x = 1;')), []);
+  assert.deepEqual(kinds('crates/x/src/adapter.rs', inTestMod('        let r = ChromiumRenderer::new(a, b)\n            .with_browser(fake.browser());')), []);
+  const waived = inTestMod('        // conformance: no-launch — only resolves; the launch gate refuses an installed browser\n        let r = ChromiumRenderer::new(a, b);');
+  assert.deepEqual(kinds('crates/x/src/adapter.rs', waived), []);
+  const bare = inTestMod('        // conformance: no-launch\n        let r = ChromiumRenderer::new(a, b);');
+  assert.deepEqual(kinds('crates/x/src/adapter.rs', bare), ['renderer'], 'a waiver needs its reason');
+  // Process names in data are not paths to an installed browser.
+  assert.deepEqual(kinds('crates/x/tests/it/a.rs', '#[test]\nfn it() { let p = proc(10, "chrome.exe"); let q = "/Applications/Utilities/Terminal.app"; }\n'), []);
 });
