@@ -6,8 +6,8 @@ rides on it. The decisions behind it are [ADR 0001](adr/0001-plugin-platform-cra
 [ADR 0017](../apps/debrief/docs/adr/0017-one-ipc-out-of-process-plugins.md) (one IPC); this document describes what the
 code does.
 
-Status: the code read at `origin/main` `dfc9cdc94` (2026-10-30); the design read at `docs/adr-plugin-platform`
-`a7c391053`, whose decisions are dated 2026-10-31.
+Status: the code read at `origin/main` `dfc9cdc94` (2026-10-30); the design read at the ADR commit as merged,
+`286f49dab`, whose decisions are dated 2026-10-31.
 
 - **Built** means it is in the code on `main`; every such statement cites the file and line.
 - **Designed** means it is decided in ADR 0001 as revised on 2026-10-31 (branch `docs/adr-plugin-platform` at
