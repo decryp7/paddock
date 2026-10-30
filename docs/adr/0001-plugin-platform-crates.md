@@ -47,6 +47,9 @@ types `Record`, `Level`, `WireEvent`; ADR 0003), `pacenotes-plugin-api` (index q
 
 ### Wire (extends Debrief ADR 0017 §1; frames unchanged)
 
+The wire byte by byte (transport, framing, postcard encoding, handshake, versioning, streams, limits) is described in
+[ipc-wire.md](../ipc-wire.md).
+
 As built in `crates/paddock-plugin-api/src/protocol.rs` (abridged; what this revision adds is marked **new**):
 
 ```rust
