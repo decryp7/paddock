@@ -615,6 +615,7 @@ pub fn cpu_sample(pid: u32) -> Option<crate::usage::CpuSample> {
         let rc = unsafe { libc::mach_timebase_info(&raw mut tb) };
         (rc == 0 && tb.denom != 0).then_some((tb.numer, tb.denom))
     }))?;
+    let raw = pid;
     let pid = libc::c_int::try_from(pid).ok()?;
     let mut all = std::mem::MaybeUninit::<libc::proc_taskallinfo>::zeroed();
     let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_taskallinfo>()).ok()?;
@@ -639,6 +640,9 @@ pub fn cpu_sample(pid: u32) -> Option<crate::usage::CpuSample> {
                 .checked_add(all.pbsd.pbi_start_tvusec)?,
         )
     } else {
+        // This call carries no identity: the start time is read before it and after it, and the sample is dropped if the
+        // pid changed hands in between (rule 53).
+        let before = start_time(raw)?;
         let mut info = std::mem::MaybeUninit::<libc::proc_taskinfo>::zeroed();
         let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_taskinfo>()).ok()?;
         // SAFETY: as above, for the smaller struct.
@@ -655,9 +659,10 @@ pub fn cpu_sample(pid: u32) -> Option<crate::usage::CpuSample> {
             return None;
         }
         // SAFETY: filled by the call, which returned its whole size.
-        return Some(crate::usage::CpuSample {
-            micros: task_micros(unsafe { info.assume_init() }, numer, denom),
-            started: None,
+        let micros = task_micros(unsafe { info.assume_init() }, numer, denom);
+        return (start_time(raw)? == before).then_some(crate::usage::CpuSample {
+            micros,
+            started: Some(before),
         });
     };
     Some(crate::usage::CpuSample {

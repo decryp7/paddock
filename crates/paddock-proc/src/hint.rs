@@ -147,6 +147,24 @@ mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_pipe_is_not_a_hint_and_is_not_waited_on() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fifo = tmp.path().join("agent.json");
+        let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        // SAFETY: mkfifo takes a NUL-terminated path and a mode.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        // Opening a FIFO for reading with no writer would block; the open here is non-blocking only by luck of the check
+        // order, so a writer is held open while the read is asked, and the answer is still `None`.
+        let _writer = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&fifo)
+            .unwrap();
+        assert!(read_bounded(&fifo).is_none());
+    }
+
     #[test]
     fn writes_are_atomic_private_and_reads_are_bounded() {
         let tmp = tempfile::tempdir().unwrap();

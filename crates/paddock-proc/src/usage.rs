@@ -948,6 +948,10 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
     /// read per process of its tree.
     #[test]
     fn a_tick_reads_no_whole_table_and_one_read_per_process_of_the_tree() {
+        // A source that does not override the CPU reading says nothing (the trait's default).
+        let plain = Counting::new(&[(1, &[], 1)]);
+        assert_eq!(plain.cpu_sample(1), None);
+        assert_eq!(plain.cpu_micros(1), None);
         let src = Counting::new(&[
             (1, &[2, 3], 10),
             (2, &[4], 20),
