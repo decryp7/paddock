@@ -1,47 +1,22 @@
-//! A process's TCP and UDP endpoints (IPv4 and IPv6) from the IP Helper owner-pid tables.
+//! TCP and UDP endpoints (IPv4 and IPv6) with their owning process, from the IP Helper owner-pid tables. Whether a TCP
+//! endpoint listens comes from the table it was read from (`TCP_TABLE_OWNER_PID_LISTENER` or `_CONNECTIONS`), never from
+//! its `dwState` alone: newer Windows 11 builds report a listener's state as 0 ([`crate::parse::win_tcp`]).
 
+use crate::parse::win_tcp::{row_name, row_state, TcpTable};
+use dyno_core::network::{Proto, SocketRow, SocketState};
 use dyno_core::process::{Connection, Pid};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
 use windows::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, GetExtendedUdpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCPROW_OWNER_PID, MIB_UDP6ROW_OWNER_PID, MIB_UDPROW_OWNER_PID,
-    TCP_TABLE_OWNER_PID_ALL, UDP_TABLE_OWNER_PID,
+    TCP_TABLE_CLASS, TCP_TABLE_OWNER_PID_ALL, TCP_TABLE_OWNER_PID_CONNECTIONS, TCP_TABLE_OWNER_PID_LISTENER, UDP_TABLE_OWNER_PID,
 };
 use windows::Win32::Networking::WinSock::{AF_INET, AF_INET6};
 
 /// The largest table read (bytes).
 const MAX_TABLE: u32 = 64 << 20;
 
-/// The MIB_TCP_STATE name.
-pub fn tcp_state(state: u32) -> &'static str {
-    match state {
-        1 => "CLOSED",
-        2 => "LISTEN",
-        3 => "SYN_SENT",
-        4 => "SYN_RECEIVED",
-        5 => "ESTABLISHED",
-        6 => "FIN_WAIT_1",
-        7 => "FIN_WAIT_2",
-        8 => "CLOSE_WAIT",
-        9 => "CLOSING",
-        10 => "LAST_ACK",
-        11 => "TIME_WAIT",
-        12 => "DELETE_TCB",
-        // MIB_TCP_STATE_RESERVED: bound but not (yet) listening or connected; `netstat -q` shows it as BOUND. A listener
-        // can be listed so for a moment after `listen` returned (CI job 21972).
-        100 => "BOUND",
-        _ => "UNKNOWN",
-    }
-}
-
-/// The state shown for a row: its MIB_TCP_STATE name, or the number of a state Windows does not document (`UNKNOWN (n)`),
-/// so what the OS said is not lost.
-pub fn state_name(state: u32) -> String {
-    match tcp_state(state) {
-        "UNKNOWN" => format!("UNKNOWN ({state})"),
-        name => name.into(),
-    }
-}
+pub use crate::parse::win_tcp::mib_name as tcp_state;
 
 /// A port as stored in the tables (network byte order in the low 16 bits).
 pub fn port(raw: u32) -> u16 {
@@ -51,14 +26,6 @@ pub fn port(raw: u32) -> u16 {
 /// An IPv4 address as stored in the tables (network byte order in memory).
 pub fn ipv4(raw: u32) -> Ipv4Addr {
     Ipv4Addr::from(raw.to_ne_bytes())
-}
-
-fn v4(addr: u32, p: u32) -> String {
-    SocketAddr::from((ipv4(addr), port(p))).to_string()
-}
-
-fn v6(addr: [u8; 16], p: u32) -> String {
-    SocketAddr::from((Ipv6Addr::from(addr), port(p))).to_string()
 }
 
 /// Rows of a `{ dwNumEntries; ROW table[] }` table in `buf`.
@@ -95,9 +62,13 @@ fn table(fetch: impl Fn(Option<*mut core::ffi::c_void>, &mut u32) -> u32) -> Opt
 }
 
 pub(super) fn tcp(family: u32) -> Option<Vec<u8>> {
+    tcp_class(family, TCP_TABLE_OWNER_PID_ALL)
+}
+
+fn tcp_class(family: u32, class: TCP_TABLE_CLASS) -> Option<Vec<u8>> {
     table(|p, size| {
         // SAFETY: `p` is None (size query) or a buffer of `*size` bytes.
-        unsafe { GetExtendedTcpTable(p, size, false, family, TCP_TABLE_OWNER_PID_ALL, 0) }
+        unsafe { GetExtendedTcpTable(p, size, false, family, class, 0) }
     })
 }
 
@@ -108,75 +79,131 @@ fn udp(family: u32) -> Option<Vec<u8>> {
     })
 }
 
-/// Every endpoint owned by `pid`; `None` when the tables can't be read at all.
-pub fn connections(pid: Pid) -> Option<Vec<Connection>> {
+/// One endpoint as read from the tables.
+#[derive(Debug, Clone)]
+struct Endpoint {
+    proto: Proto,
+    v6: bool,
+    local: SocketAddr,
+    /// The peer of a TCP connection (`None` for a listener and for UDP).
+    remote: Option<SocketAddr>,
+    state: SocketState,
+    /// What the page shows as the state (`LISTEN`, `ESTABLISHED`, `UNKNOWN (0)`, empty for UDP).
+    state_name: String,
+    pid: u32,
+}
+
+fn sa4(addr: u32, p: u32) -> SocketAddr {
+    SocketAddr::from((ipv4(addr), port(p)))
+}
+
+fn sa6(addr: [u8; 16], p: u32) -> SocketAddr {
+    SocketAddr::from((Ipv6Addr::from(addr), port(p)))
+}
+
+/// Every endpoint of the machine; `None` when no table could be read at all. A listener is read from the listener table
+/// and a connection from the connections table, so a row's `dwState` never decides whether it listens.
+fn endpoints() -> Option<Vec<Endpoint>> {
     let mut out = Vec::new();
     let mut any = false;
-    if let Some(b) = tcp(u32::from(AF_INET.0)) {
-        any = true;
-        out.extend(
-            rows::<MIB_TCPROW_OWNER_PID>(&b)
-                .into_iter()
-                .filter(|r| r.dwOwningPid == pid)
-                .map(|r| Connection {
-                    protocol: "TCP".into(),
-                    local: v4(r.dwLocalAddr, r.dwLocalPort),
-                    remote: if r.dwState == 2 {
-                        String::new()
-                    } else {
-                        v4(r.dwRemoteAddr, r.dwRemotePort)
-                    },
-                    state: state_name(r.dwState),
-                }),
-        );
-    }
-    if let Some(b) = tcp(u32::from(AF_INET6.0)) {
-        any = true;
-        out.extend(
-            rows::<MIB_TCP6ROW_OWNER_PID>(&b)
-                .into_iter()
-                .filter(|r| r.dwOwningPid == pid)
-                .map(|r| Connection {
-                    protocol: "TCP6".into(),
-                    local: v6(r.ucLocalAddr, r.dwLocalPort),
-                    remote: if r.dwState == 2 {
-                        String::new()
-                    } else {
-                        v6(r.ucRemoteAddr, r.dwRemotePort)
-                    },
-                    state: state_name(r.dwState),
-                }),
-        );
+    for (table, class) in [
+        (TcpTable::Listener, TCP_TABLE_OWNER_PID_LISTENER),
+        (TcpTable::Connections, TCP_TABLE_OWNER_PID_CONNECTIONS),
+    ] {
+        let peer = |remote: SocketAddr| (table == TcpTable::Connections).then_some(remote);
+        if let Some(b) = tcp_class(u32::from(AF_INET.0), class) {
+            any = true;
+            out.extend(rows::<MIB_TCPROW_OWNER_PID>(&b).into_iter().map(|r| Endpoint {
+                proto: Proto::Tcp,
+                v6: false,
+                local: sa4(r.dwLocalAddr, r.dwLocalPort),
+                remote: peer(sa4(r.dwRemoteAddr, r.dwRemotePort)),
+                state: row_state(table, r.dwState),
+                state_name: row_name(table, r.dwState),
+                pid: r.dwOwningPid,
+            }));
+        }
+        if let Some(b) = tcp_class(u32::from(AF_INET6.0), class) {
+            any = true;
+            out.extend(rows::<MIB_TCP6ROW_OWNER_PID>(&b).into_iter().map(|r| Endpoint {
+                proto: Proto::Tcp,
+                v6: true,
+                local: sa6(r.ucLocalAddr, r.dwLocalPort),
+                remote: peer(sa6(r.ucRemoteAddr, r.dwRemotePort)),
+                state: row_state(table, r.dwState),
+                state_name: row_name(table, r.dwState),
+                pid: r.dwOwningPid,
+            }));
+        }
     }
     if let Some(b) = udp(u32::from(AF_INET.0)) {
         any = true;
-        out.extend(
-            rows::<MIB_UDPROW_OWNER_PID>(&b)
-                .into_iter()
-                .filter(|r| r.dwOwningPid == pid)
-                .map(|r| Connection {
-                    protocol: "UDP".into(),
-                    local: v4(r.dwLocalAddr, r.dwLocalPort),
-                    remote: String::new(),
-                    state: String::new(),
-                }),
-        );
+        out.extend(rows::<MIB_UDPROW_OWNER_PID>(&b).into_iter().map(|r| Endpoint {
+            proto: Proto::Udp,
+            v6: false,
+            local: sa4(r.dwLocalAddr, r.dwLocalPort),
+            remote: None,
+            state: SocketState::Listen,
+            state_name: String::new(),
+            pid: r.dwOwningPid,
+        }));
     }
     if let Some(b) = udp(u32::from(AF_INET6.0)) {
         any = true;
-        out.extend(
-            rows::<MIB_UDP6ROW_OWNER_PID>(&b)
-                .into_iter()
-                .filter(|r| r.dwOwningPid == pid)
-                .map(|r| Connection {
-                    protocol: "UDP6".into(),
-                    local: v6(r.ucLocalAddr, r.dwLocalPort),
-                    remote: String::new(),
-                    state: String::new(),
-                }),
-        );
+        out.extend(rows::<MIB_UDP6ROW_OWNER_PID>(&b).into_iter().map(|r| Endpoint {
+            proto: Proto::Udp,
+            v6: true,
+            local: sa6(r.ucLocalAddr, r.dwLocalPort),
+            remote: None,
+            state: SocketState::Listen,
+            state_name: String::new(),
+            pid: r.dwOwningPid,
+        }));
     }
     any.then_some(out)
+}
+
+/// Every endpoint owned by `pid`; `None` when the tables can't be read at all.
+pub fn connections(pid: Pid) -> Option<Vec<Connection>> {
+    Some(
+        endpoints()?
+            .into_iter()
+            .filter(|e| e.pid == pid)
+            .map(|e| Connection {
+                protocol: match (e.proto, e.v6) {
+                    (Proto::Tcp, false) => "TCP",
+                    (Proto::Tcp, true) => "TCP6",
+                    (Proto::Udp, false) => "UDP",
+                    (Proto::Udp, true) => "UDP6",
+                }
+                .into(),
+                local: e.local.to_string(),
+                remote: match (e.proto, e.remote) {
+                    (Proto::Udp, _) => String::new(),
+                    (Proto::Tcp, Some(r)) => r.to_string(),
+                    (Proto::Tcp, None) => String::new(),
+                },
+                state: e.state_name,
+            })
+            .collect(),
+    )
+}
+
+/// Every socket of the machine with its owner, for the Network page; `None` when the tables can't be read at all.
+pub fn sockets() -> Option<Vec<SocketRow>> {
+    Some(
+        endpoints()?
+            .into_iter()
+            .map(|e| SocketRow {
+                proto: e.proto,
+                local: e.local.ip(),
+                local_port: e.local.port(),
+                remote: e.remote.map(|r| (r.ip(), r.port())),
+                state: e.state,
+                pid: Some(e.pid),
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -192,10 +219,7 @@ mod tests {
         assert_eq!(tcp_state(2), "LISTEN");
         assert_eq!(tcp_state(100), "BOUND");
         assert_eq!(tcp_state(99), "UNKNOWN");
-        // A state Windows does not document keeps its number, so a report says which (CI runs 7145 to 7168).
-        assert_eq!(state_name(2), "LISTEN");
-        assert_eq!(state_name(99), "UNKNOWN (99)");
-        assert_eq!(v6([0; 16], u32::from(443u16.to_be())), "[::]:443");
+        assert_eq!(sa6([0; 16], u32::from(443u16.to_be())).to_string(), "[::]:443");
         let mut buf = 2u32.to_ne_bytes().to_vec();
         buf.extend(7u32.to_ne_bytes());
         // Truncated: claims two rows, holds one.
@@ -209,21 +233,43 @@ mod tests {
         let udp = UdpSocket::bind("[::1]:0").unwrap();
         let tport = tcp.local_addr().unwrap().port();
         let uport = udp.local_addr().unwrap().port();
-        // Windows can list a new listener as BOUND for a moment after `listen` returned (CI job 21972): the table is
-        // read again until it shows the listener, up to a hang guard.
-        let listening = |c: &Connection| c.protocol == "TCP" && c.local == format!("127.0.0.1:{tport}") && c.state == "LISTEN";
-        let mut conns = connections(std::process::id()).unwrap();
-        for _ in 0..200 {
-            if conns.iter().any(listening) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            conns = connections(std::process::id()).unwrap();
-        }
-        assert!(conns.iter().any(listening), "{conns:?}");
+        let client = std::net::TcpStream::connect(("127.0.0.1", tport)).unwrap();
+        let (_server_side, _) = tcp.accept().unwrap();
+        let cport = client.local_addr().unwrap().port();
+        // The listener is listed as listening on every build: by the table it is in, whatever its `dwState` says (2 on
+        // Windows 11 26300, 0 on the CI runner since 2026-10-29, job 22533).
+        let conns = connections(std::process::id()).unwrap();
+        let mine: Vec<&Connection> = conns.iter().filter(|c| c.protocol == "TCP").collect();
         assert!(
-            conns.iter().any(|c| c.protocol == "UDP6" && c.local == format!("[::1]:{uport}")),
+            mine.iter()
+                .any(|c| c.local == format!("127.0.0.1:{tport}") && c.state == "LISTEN" && c.remote.is_empty()),
             "{conns:?}"
+        );
+        assert!(
+            mine.iter()
+                .any(|c| c.local == format!("127.0.0.1:{cport}") && c.remote == format!("127.0.0.1:{tport}") && c.state == "ESTABLISHED"),
+            "{conns:?}"
+        );
+        assert!(
+            conns
+                .iter()
+                .any(|c| c.protocol == "UDP6" && c.local == format!("[::1]:{uport}") && c.state.is_empty()),
+            "{conns:?}"
+        );
+    }
+
+    #[test]
+    fn the_machine_list_has_this_processs_listener_with_its_owner() {
+        let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
+        let tport = tcp.local_addr().unwrap().port();
+        let rows = sockets().unwrap();
+        let mine: Vec<&SocketRow> = rows.iter().filter(|r| r.local_port == tport).collect();
+        assert!(
+            mine.iter().any(|r| r.proto == Proto::Tcp
+                && r.state == SocketState::Listen
+                && r.remote.is_none()
+                && r.pid == Some(std::process::id())),
+            "{mine:?}"
         );
     }
 }
