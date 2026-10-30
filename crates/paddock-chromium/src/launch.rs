@@ -696,9 +696,10 @@ fn watchdog(
 /// this browser's processes match. Returns how many were ended.
 fn end_leftovers(dir: &Path) -> usize {
     let left = paddock_proc::processes_mentioning(&dir.to_string_lossy());
-    for &pid in &left {
-        log::warn!("A browser helper (pid {pid}) outlived the browser and is ended");
-        paddock_proc::end(pid);
+    for &id in &left {
+        log::warn!("A browser helper ({id}) outlived the browser and is ended");
+        // By identity: a helper that ended since the look is not mistaken for whatever got its pid (ADR 0033).
+        paddock_proc::end(id);
     }
     left.len()
 }

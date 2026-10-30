@@ -210,6 +210,10 @@ These measure tooling, not a product. They are kept where they are.
 - [Package managers](research/2026-10-package-managers.md) (2026-10-25, load 11–20).
 - [Dialog windows that open hidden](research/2026-10-28-dialog-hidden-windows.md) (2026-10-28): ready latency per OS
   and scenario.
+- `paddock-proc` snapshot with start times ([ADR 0033](adr/0033-processes-by-identity-never-by-a-bare-pid.md), 2026-10-30,
+  macOS release build, about 1,130 processes, load 17–23, synthetic: the machine's own process table, nothing recorded):
+  `cargo run --release -p paddock-proc --example snapshot_cost`. A snapshot takes 13.6–14.7 ms, and the start times take
+  0.53–1.77 ms of that. Windows is not measured.
 - [Lessons](lessons.md): test-binary consolidation, 239 → 99 binaries, nextest 301 s → 196 s.
 
 ## Gaps

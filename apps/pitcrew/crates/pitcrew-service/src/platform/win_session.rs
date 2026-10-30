@@ -365,6 +365,7 @@ impl RunnerProcess for SessionProcess {
         crate::launch::kill_tree(self.started.pid);
         // SAFETY: valid process handle; failure (already gone) is ignored.
         unsafe {
+            // conformance: pid-kill — a process handle we own (the process object cannot be handed on while it is open)
             let _ = TerminateProcess(self.started.process.0, 1);
         }
     }
@@ -381,6 +382,7 @@ pub fn run_in_session(session: u32, program: &std::path::Path, args: &[String], 
             None if Instant::now() >= deadline => {
                 // SAFETY: valid process handle.
                 unsafe {
+                    // conformance: pid-kill — a process handle we own (the process object cannot be handed on while it is open)
                     let _ = TerminateProcess(started.process.0, 1);
                 }
                 return Err("the stop helper did not finish in time".into());

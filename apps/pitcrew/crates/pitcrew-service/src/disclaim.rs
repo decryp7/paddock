@@ -236,6 +236,13 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        unix,
+        expect(
+            clippy::disallowed_methods,
+            reason = "ADR 0033 WP-6 (test): killpg on a recorded pid; use paddock_proc"
+        )
+    )]
     fn the_child_leads_its_own_process_group_and_a_bad_program_is_an_error() {
         let mut s = spawn(
             Path::new("/bin/sh"),

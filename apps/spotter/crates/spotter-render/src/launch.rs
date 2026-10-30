@@ -150,7 +150,8 @@ pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
 
 const NONE: u8 = 0;
 const TIMED_OUT: u8 = 1;
-const OVER_MEMORY: u8 = 2;
+/// How often the supervisor looks at the browser's memory.
+const MEMORY_LOOK: Duration = Duration::from_millis(500);
 
 /// Why the watchdog ended the browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,6 +190,10 @@ fn unique_dir(base: &Path) -> PathBuf {
 
 impl Chromium {
     /// Starts `exe` with a fresh profile and connects to it.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the browser, a GUI program: std Command, as the driver is copied between apps"
+    )]
     pub fn launch(exe: &Browser, opts: &LaunchOptions) -> Result<Chromium> {
         check_display(opts.mode, cfg!(target_os = "linux"), |k| std::env::var(k).ok())?;
         let dir = unique_dir(&opts.profile_base);
@@ -200,7 +205,22 @@ impl Chromium {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(stderr);
-        let mut process = match Supervised::spawn(cmd) {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(paddock_proc::CREATE_NO_WINDOW);
+        }
+        // The memory cap is watched by the shared supervisor from the process start, also while it is still starting: it
+        // reads the pids of the tree only (on Windows the members of the child's job object), never the process table.
+        let spawned = match opts.memory_cap {
+            Some(limit) => {
+                let mut cap = paddock_proc::MemoryCap::new(limit, "the browser");
+                cap.every = MEMORY_LOOK;
+                Supervised::spawn_capped(cmd, cap)
+            }
+            None => Supervised::spawn(cmd),
+        };
+        let mut process = match spawned {
             Ok(p) => p,
             Err(e) => {
                 cleanup(&dir);
@@ -210,7 +230,7 @@ impl Chromium {
         let alive = Arc::new(AtomicBool::new(true));
         let ended_by = Arc::new(AtomicU8::new(NONE));
         // The caps run from the process start, also while it is still starting.
-        watchdog(process.id(), alive.clone(), ended_by.clone(), opts.max_lifetime, opts.memory_cap);
+        watchdog(process.process(), alive.clone(), ended_by.clone(), opts.max_lifetime);
         match connect(&dir, &mut process) {
             Ok(conn) => Ok(Chromium {
                 conn: Arc::new(conn),
@@ -247,7 +267,7 @@ impl Chromium {
     pub fn ended_by(&self) -> EndedBy {
         match self.ended_by.load(Ordering::Acquire) {
             TIMED_OUT => EndedBy::TimeLimit,
-            OVER_MEMORY => EndedBy::MemoryCap,
+            _ if self.process.stopped_over_memory().is_some() => EndedBy::MemoryCap,
             _ => EndedBy::Nothing,
         }
     }
@@ -286,29 +306,21 @@ impl Drop for Chromium {
     }
 }
 
-/// Ends the tree when time or memory is up, even if nobody calls anything. Stops when `alive` is cleared.
-fn watchdog(pid: Option<u32>, alive: Arc<AtomicBool>, ended_by: Arc<AtomicU8>, max: Duration, cap: Option<u64>) {
-    let Some(pid) = pid else { return };
+/// Ends the tree when the time is up, even if nobody calls anything. Stops when `alive` is cleared.
+fn watchdog(root: Option<paddock_proc::ProcessId>, alive: Arc<AtomicBool>, ended_by: Arc<AtomicU8>, max: Duration) {
+    let Some(root) = root else { return };
     let end = Instant::now() + max;
     let _ = std::thread::Builder::new().name("render-watchdog".into()).spawn(move || {
-        let mut tick = 0u32;
         while alive.load(Ordering::Acquire) {
-            let reason = if Instant::now() >= end {
-                Some(TIMED_OUT)
-            } else if tick % 4 == 3 && cap.is_some_and(|c| process::current_tree_memory(pid) > c) {
-                Some(OVER_MEMORY)
-            } else {
-                None
-            };
+            let reason = if Instant::now() >= end { Some(TIMED_OUT) } else { None };
             if let Some(r) = reason {
-                // Re-check right before killing so a reused pid is never signalled after a normal end.
+                // By identity (ADR 0033): a pid handed on after the browser ended is left alone.
                 if alive.swap(false, Ordering::AcqRel) {
                     ended_by.store(r, Ordering::Release);
-                    process::kill_tree(pid);
+                    process::kill_tree(root);
                 }
                 return;
             }
-            tick = tick.wrapping_add(1);
             std::thread::sleep(Duration::from_millis(250));
         }
     });

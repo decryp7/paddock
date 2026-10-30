@@ -11,6 +11,13 @@ Conventional Commits; one semver tag for the whole repo.
   shortcut fired (CI run 7134, Dyno's WebKit leg). `WorkbenchPalette.open` and Dyno's e2e use it.
 ### `pd-jobs-status`: a visible heading
 - The Jobs popover has a visible heading (the popover's name, "Jobs") above the list, and the popover region is named by it (`aria-labelledby`), so a picture of it says what it is.
+### `paddock-proc`: processes by identity (ADR 0033, rule 53)
+- New `ProcessId` (pid plus `StartTime`), `Holder`, `Ending`, `TreeEnding`, `holder`, `usage::Row` and `usage::identity`. `kill_tree` (now returning a `TreeEnding`), `end`, `ask` and `terminate` take a `ProcessId` and act only if its pid still belongs to it: one handle on Windows, a pidfd on Linux, a check then the signal on macOS; skipped and refused kills are logged. `processes_mentioning` and `descendants_of` return `ProcessId`s. `ProcessId::of_recorded(pid, written_ms)` is for a pid read from a file. `Supervised::process()` is new.
+- Walks follow parents by age: `usage::descendants`, `tree_memory_with` and the per-pid `tree_memory_from` (now taking a `ProcessId`) count a process as a child only if it started no earlier than its parent. `Table` rows are `Row { parent, rss, started }`, `ProcEntry` has `started`, `ProcessSource` has `started`.
+- macOS start times come from `sysctl(KERN_PROC_PID)` (`p_starttime`), which also answers for setuid children and zombies.
+- Windows: a supervised child's job members are its tree (`Job::members`, each confirmed with `IsProcessInJob`); `Supervised::kill` and the memory cap end the job first; nothing runs `taskkill /T`; `ask` holds a handle across its close request.
+- `paddock-chromium` ends leftover helpers by identity; `paddock-ipc`'s `ClientConfig::is_alive` takes the `Discovery` and defaults to `discovery::is_running` (a file whose pid was handed on is stale).
+- Clippy `disallowed-methods` in lint/clippy.toml (and every workspace): `libc::kill`, `libc::killpg`, nix `kill`/`killpg`, sysinfo `Process::kill`/`kill_with`. New conformance check C53 for kill programs, Win32 kills and open ADR 0033 follow-ups.
 
 ### `paddock-jobs`: `WalkOptions::with_modified`
 - `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
@@ -445,6 +452,14 @@ Conventional Commits; one semver tag for the whole repo.
   pending task), with no turn budget: a slow first `import()` on a busy runner no longer reads as "never leaves
   Loading" (CI run 6563). `DialogHarnessOptions.maxTurns` is removed; a loader that never answers is now reported by the
   runner's test timeout.
+
+### paddock-proc: watchers read one pid, never the process table (ADR 0024 rule 4)
+- New public API: `ProcessSource` (the port: `memory`, `children`, `table`), `OsSource` (the OS as a source; make one per walk),
+  `tree_memory_from` / `tree_memory_of` (a tree or a job's member list, read pid by pid), `MAX_TREE` (the most processes a walk
+  visits) and `read_children` (`/proc/<pid>/task/*/children`). `tree_memory` and `process_memory` now read only the pids of the tree
+  (macOS `proc_listchildpids`, Linux `children` files; Windows takes one id snapshot per walk, or none for a supervised child, whose
+  kill-on-close job lists its members). One watcher over a synthetic child: 4.9% of a core before, 0.1% after (1,202 processes).
+- `Supervised` on Windows hands its job to the memory watcher. Spotter's `process` module is now a re-export of `paddock-proc`.
 
 ### Spotter on the shared CI kit (WP-C3)
 - Spotter is a leg of `ci.yml` (`apps/spotter/paddock.ci.json`) and releases through the shared `app-release.yml` from a thin

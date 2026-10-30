@@ -96,14 +96,14 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<Output, P
 /// The pid of a running tool that Cancel and the timeout may signal, until the tool has been reaped. Both take the lock; so does
 /// the reaping, which releases the pid under it: a signal either reaches the live tool or finds nothing.
 struct TreeGuard {
-    pid: std::sync::Mutex<Option<u32>>,
-    end: fn(u32),
+    pid: std::sync::Mutex<Option<paddock_proc::ProcessId>>,
+    end: fn(paddock_proc::ProcessId),
 }
 
 impl TreeGuard {
-    fn new(pid: Option<u32>, end: fn(u32)) -> Result<TreeGuard, PlatformError> {
+    fn new(pid: Option<paddock_proc::ProcessId>, end: fn(paddock_proc::ProcessId)) -> Result<TreeGuard, PlatformError> {
         match pid {
-            Some(p) if p != 0 => Ok(TreeGuard {
+            Some(p) if p.pid() != 0 => Ok(TreeGuard {
                 pid: std::sync::Mutex::new(Some(p)),
                 end,
             }),
@@ -158,7 +158,9 @@ pub fn run_streaming(
         _ => PlatformError::Failed(format!("Could not run {program}: {e}")),
     })?;
     // Never a guess: pid 0 would signal our own process group. A child with no id is ended and reported.
-    let guard = match TreeGuard::new(tool.id(), paddock_proc::kill_tree) {
+    let guard = match TreeGuard::new(tool.process(), |id| {
+        paddock_proc::kill_tree(id);
+    }) {
         Ok(g) => std::sync::Arc::new(g),
         Err(e) => {
             tool.kill();
@@ -421,24 +423,27 @@ pub(crate) mod tests {
     }
 
     static KILLED: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
-    fn record(pid: u32) {
-        KILLED.lock().unwrap().push(pid);
+    fn record(id: paddock_proc::ProcessId) {
+        KILLED.lock().unwrap().push(id.pid());
+    }
+    fn id(pid: u32) -> Option<paddock_proc::ProcessId> {
+        Some(paddock_proc::ProcessId::new(pid, paddock_proc::StartTime::from_micros(1)))
     }
 
     #[test]
     fn a_missing_or_zero_pid_is_an_error_never_a_signal_to_our_own_process_group() {
         assert!(matches!(TreeGuard::new(None, record), Err(PlatformError::Failed(_))));
         assert!(
-            matches!(TreeGuard::new(Some(0), record), Err(PlatformError::Failed(_))),
+            matches!(TreeGuard::new(id(0), record), Err(PlatformError::Failed(_))),
             "pid 0 is every process of our own group"
         );
-        assert!(TreeGuard::new(Some(4242), record).is_ok());
+        assert!(TreeGuard::new(id(4242), record).is_ok());
     }
 
     #[test]
     fn a_cancel_after_the_tool_was_reaped_signals_nothing_because_the_pid_may_belong_to_someone_else_by_then() {
         let before = KILLED.lock().unwrap().len();
-        let guard = TreeGuard::new(Some(777_001), record).unwrap();
+        let guard = TreeGuard::new(id(777_001), record).unwrap();
         guard.kill();
         assert_eq!(
             KILLED.lock().unwrap()[before..],
