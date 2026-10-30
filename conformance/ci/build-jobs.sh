@@ -9,12 +9,17 @@
 # The agents' local cap of 2 (ER-24) is for the shared developer Mac; a CI runner gets its share of the host's cores:
 #
 #   1. PADDOCK_CI_BUILD_JOBS (a runner's runner.envs), a whole number >= 1: used as it is.
-#   2. Otherwise the host's cores divided by PADDOCK_CI_JOBS_PER_HOST (runner.envs: how many jobs the host runs at once, the
-#      sum of its runners' capacity), at least 1. Without it, the runner class's known layout (verified 2026-10-30 from
-#      Gitea's job list: the most jobs one runner ran at once over the last 100 runs):
-#        Linux    4  d-gtr9, capacity 4, containers without a CPU limit (cargo's own default is every core, per job)
-#        Windows  2  decryp7ology-dev, two jobs at once (16 cores: 8 each, as before)
-#        macOS    1  d7-mac-mini, capacity 1 (one runner)
+#   2. Otherwise (the host's cores - PADDOCK_CI_RESERVED_CORES) / PADDOCK_CI_JOBS_PER_HOST, at least 1 (runner.envs:
+#      the cores kept for work outside CI on that host, and how many jobs the host runs at once, the sum of its runners'
+#      capacity). Without them, the runner class's known layout (verified 2026-10-30 from Gitea's job list: the most jobs
+#      one runner ran at once over the last 100 runs):
+#                 jobs/host  reserved
+#        Linux    4          0   d-gtr9, capacity 4, containers without a CPU limit (cargo's own default: every core, per job)
+#        Windows  2          0   decryp7ology-dev, two jobs at once; 16 cores, 32 GB: 8 each, as two builds of 16 ran out of
+#                                memory
+#        macOS    1          10  d7-mac-mini, capacity 1, on the developer Mac its agents share: up to 5 agents with
+#                                CARGO_BUILD_JOBS=2 each (ER-24) keep 10 of its 14 cores, so CI gets 4, as before. Set
+#                                PADDOCK_CI_RESERVED_CORES=1 in the runner's runner.envs when the Mac is CI's alone (13).
 #
 # Cores: nproc (Linux and Git Bash; honours the container's cpuset), else sysctl hw.ncpu (macOS), else NUMBER_OF_PROCESSORS,
 # else getconf. PADDOCK_CI_CORES and RUNNER_OS replace the probes in tests. Runs under macOS' bash 3.2.
@@ -41,6 +46,13 @@ default_share() {
   esac
 }
 
+default_reserved() {
+  case "${RUNNER_OS:-}" in
+    macOS) echo 10 ;;
+    *) echo 0 ;;
+  esac
+}
+
 emit() { # <jobs> <why>
   echo "CARGO_BUILD_JOBS=$1 ($2)"
   if [ -n "${GITHUB_ENV:-}" ]; then echo "CARGO_BUILD_JOBS=$1" >> "$GITHUB_ENV"; else echo "CARGO_BUILD_JOBS=$1"; fi
@@ -56,6 +68,10 @@ share="${PADDOCK_CI_JOBS_PER_HOST:-}"
 src="the runner's PADDOCK_CI_JOBS_PER_HOST"
 if [ -z "$share" ]; then share=$(default_share); src="the ${RUNNER_OS:-unknown} runner class's default"; fi
 is_count "$share" || { echo "::error::PADDOCK_CI_JOBS_PER_HOST must be a whole number >= 1, not '$share'"; exit 1; }
+reserved="${PADDOCK_CI_RESERVED_CORES:-}"
+rsrc="the runner's PADDOCK_CI_RESERVED_CORES"
+if [ -z "$reserved" ]; then reserved=$(default_reserved); rsrc="the ${RUNNER_OS:-unknown} runner class's default"; fi
+case "$reserved" in '' | *[!0-9]*) echo "::error::PADDOCK_CI_RESERVED_CORES must be a whole number >= 0, not '$reserved'"; exit 1 ;; esac
 
 n=$(cores)
 if ! is_count "$n"; then
@@ -63,6 +79,6 @@ if ! is_count "$n"; then
   echo "::warning::could not count this host's cores; CARGO_BUILD_JOBS stays unset (cargo uses every core it sees)"
   exit 0
 fi
-jobs=$((n / share))
+jobs=$(((n - reserved) / share))
 [ "$jobs" -ge 1 ] || jobs=1
-emit "$jobs" "$n cores / $share jobs per host, $src"
+emit "$jobs" "($n cores - $reserved reserved, $rsrc) / $share jobs per host, $src"

@@ -1554,19 +1554,21 @@ const buildJobs = (env) =>
 const jobsOf = (r) => /^CARGO_BUILD_JOBS=(\d+)$/m.exec(r.stdout)?.[1];
 
 test('build-jobs gives each runner class its share of the host: cores / jobs per host, never the agents\' cap of two', () => {
-  // The runner layout of 2026-10-30: Linux d-gtr9 runs 4 jobs at once, Windows 2 (16 cores), the Mac 1 (14 cores).
-  assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'macOS', PADDOCK_CI_CORES: '14' })), '14');
+  // The runner layout of 2026-10-30: Linux d-gtr9 runs 4 jobs at once, Windows 2 (16 cores), the Mac 1 (14 cores, 10 of
+  // them kept for the agents that share it: 5 agents x 2, ER-24).
+  assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'macOS', PADDOCK_CI_CORES: '14' })), '4');
+  assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'macOS', PADDOCK_CI_CORES: '14', PADDOCK_CI_RESERVED_CORES: '1' })), '13');
   assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '16' })), '8');
   assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '32' })), '8');
   // A runner's own settings win: the jobs its host runs at once, or an exact number.
-  assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'macOS', PADDOCK_CI_CORES: '14', PADDOCK_CI_JOBS_PER_HOST: '3' })), '4');
+  assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '14', PADDOCK_CI_JOBS_PER_HOST: '3' })), '4');
   assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '32', PADDOCK_CI_BUILD_JOBS: '12' })), '12');
   // Never below one; nonsense fails the step with the variable's name.
   assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '2' })), '1');
-  for (const env of [{ PADDOCK_CI_BUILD_JOBS: '0' }, { PADDOCK_CI_JOBS_PER_HOST: 'two' }]) {
+  for (const env of [{ PADDOCK_CI_BUILD_JOBS: '0' }, { PADDOCK_CI_JOBS_PER_HOST: 'two' }, { PADDOCK_CI_RESERVED_CORES: '-1' }]) {
     const r = buildJobs({ RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '8', ...env });
     assert.notEqual(r.status, 0, JSON.stringify(env));
-    assert.match(r.stdout, /::error::PADDOCK_CI_(BUILD_JOBS|JOBS_PER_HOST) must be a whole number/);
+    assert.match(r.stdout, /::error::PADDOCK_CI_(BUILD_JOBS|JOBS_PER_HOST|RESERVED_CORES) must be a whole number/);
   }
   // Without a count of cores the variable stays unset (cargo's own default), and the step stays green.
   const unknown = buildJobs({ RUNNER_OS: 'Linux', PADDOCK_CI_CORES: 'many' });
