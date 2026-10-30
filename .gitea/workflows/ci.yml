@@ -57,8 +57,10 @@ jobs:
       conformance: ${{ steps.plan.outputs.conformance }}
       tools: ${{ steps.plan.outputs.tools }}
       icons: ${{ steps.plan.outputs.icons }}
+      paddock_dev: ${{ steps.plan.outputs.paddock_dev }}
       apps: ${{ steps.plan.outputs.apps }}
       any_app: ${{ steps.plan.outputs.any_app }}
+      base: ${{ steps.plan.outputs.base }}
     steps:
       # The whole history: the base (a merge base, the last green commit of main) can be any older commit.
       - uses: actions/checkout@v4
@@ -182,6 +184,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
+
+      # A slot of the host (job isolation): its own Angular cache and ports, so two runs of this job can share the Mac.
+      - uses: ./.gitea/actions/job-isolation
+
       - uses: ./.gitea/actions/node-caches
 
       - name: Install
@@ -203,10 +211,16 @@ jobs:
       - name: Reference app checks in WebKit
         env:
           PADDOCK_WEBKIT: "1"
-          PW_PORT: "4320"
-          SHELL_DEMO_PORT: "4321"
-          WORKBENCH_DEMO_PORT: "4322"
-        run: npx playwright test --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit
+        run: |
+          # The job slot's own block of three ports (conformance/ci/ports.txt `webkit`: 4320-4322 for s1).
+          port=$(bash ../conformance/ci/job-isolation.sh port webkit)
+          export PW_PORT=$port SHELL_DEMO_PORT=$((port + 1)) WORKBENCH_DEMO_PORT=$((port + 2))
+          npx playwright test --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit
+
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
 
   # @decryp7/paddock-conformance (conformance/, plan X9): every check has a good and a bad fixture, the release scripts are
   # tested (latest.json byte-equal to the apps' copy), the shared macOS verify runs against a shimmed bundle. No dependencies.
@@ -240,7 +254,7 @@ jobs:
       # waiver (paddock.waivers.toml).
       - name: Paddock itself (applicable checks)
         working-directory: .
-        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39 --strict C36
+        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C48,C53,C54,C56,C57 --strict C36
 
 
   # The shared CI actions' scripts and the dev and host tools (plan X10, X47): every script runs in a scratch folder with a
@@ -260,6 +274,10 @@ jobs:
 
       - name: new-app templates
         run: node --test scripts/new-app.test.mjs scripts/coverage-gate.test.mjs
+
+      # The VM start check's evidence parsers and judges (scripts/vm-smoke): a fake guest, no VM.
+      - name: VM start check
+        run: node --test scripts/vm-smoke/*.test.mjs
 
       # The plan's rules and the repo contracts it checks (doc inputs, app CI files, CODEOWNERS, Renovate, one npm lock).
       - name: Affected rules and repo contracts
@@ -387,8 +405,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs (the runner runs two jobs
-      # at once).
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it).
       - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
         shell: cmd
@@ -396,15 +413,23 @@ jobs:
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
-          echo PADDOCK_TEST_BROWSER_DIR=%USERPROFILE%\.paddock-ci\test-browser>>"%GITHUB_ENV%"
 
-      # The Mac host runner: four build jobs; the host toolchain as installed.
-      - name: Build jobs (macOS)
-        if: runner.os == 'macOS'
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
+
+      # A slot of the host (job isolation; after Git bash on Windows): the job's kept folders end in its slot and its temp
+      # folders are the runner's per-job folder, so concurrent jobs on one host never share either.
+      - uses: ./.gitea/actions/job-isolation
+
+      # The test browser outside the checkout, which stable-workspace moves: the slot's kept folder (the installer stamps the
+      # pinned version in it).
+      - name: Test browser folder (macOS, Windows)
+        if: runner.os != 'Linux'
+        working-directory: .
         run: |
-          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
-          echo "PADDOCK_TEST_BROWSER_DIR=$HOME/.paddock-ci/test-browser" >> "$GITHUB_ENV"  # outside the checkout, which stable-workspace moves; the installer stamps the pinned version in it
+          dir="$(bash conformance/ci/job-isolation.sh path browser paddock)"
+          if command -v cygpath >/dev/null; then dir="$(cygpath -w "$dir")"; fi
+          echo "PADDOCK_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
 
       # Host runners check out into a per-job hashed folder; sccache keys a compile on its folder, so the workspace crates miss
       # on every run. Build from the same physical path every time: PADDOCK_WORKSPACE, the cargo steps' working-directory
@@ -424,7 +449,8 @@ jobs:
           workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
           name: paddock-${{ github.job }}
 
-      # Toolchain and sccache on every OS: sccache's local disk cache (host runners: ~/.paddock-ci/sccache, containers: the /sccache mount).
+      # Toolchain and sccache on every OS: sccache's local disk cache (host runners: the job slot's kept folder sccache-s<n>,
+      # containers: the /sccache mount).
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy
@@ -434,7 +460,7 @@ jobs:
           rustc --version && cargo --version
           cargo clippy --version || { echo "::error::clippy is missing on this runner (rustup component add clippy)"; exit 1; }
 
-      # The pinned cargo-nextest: the image's on Linux, a copy kept under ~/.paddock-ci/tools on the hosts (downloaded once
+      # The pinned cargo-nextest: the image's on Linux, a copy in the hosts' shared kept folder tools (downloaded once
       # per version); the step fails when the runner has another version.
       - uses: ./.gitea/actions/host-tools
 
@@ -465,7 +491,17 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
+          # Chrome's verbose log of each real-browser test on Windows, kept below when the job fails (ADR 0030: why the
+          # network service went away is only in there).
+          PADDOCK_TEST_BROWSER_LOG: ${{ runner.os == 'Windows' && format('{0}/chrome-logs', runner.temp) || '' }}
         run: cargo nextest run --workspace --all-features --profile ci
+
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        if: failure() && runner.os == 'Windows'
+        with:
+          name: chrome-logs-${{ runner.os }}
+          path: ${{ runner.temp }}/chrome-logs
+          if-no-files-found: ignore
 
       # The crates whose code changes with an optional feature off (cfg(not(feature)) paths, a default feature that can be
       # turned off) also run without it. Cargo unifies features across the packages of one run, so a crate that another
@@ -478,6 +514,9 @@ jobs:
           cargo nextest run -p paddock-shell -p paddock-secrets -p paddock-siblings --profile ci
           cargo nextest run -p paddock-diag -p paddock-updater --profile ci
           cargo nextest run -p paddock-download --no-default-features --profile ci
+          # paddock-repo-graph's git and cargo adapters sit behind features that only paddock-dev (its own workspace) turns on;
+          # its default build, without them, is the one Pacenotes uses.
+          cargo nextest run -p paddock-repo-graph --profile ci
 
       # nextest (and so the coverage job) does not run doc tests.
       - name: Doc tests (workspace, every feature)
@@ -488,21 +527,41 @@ jobs:
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
-  # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a pull request, whichever project it touches.
-  # The apps' own workflows had a copy of this step each; the C23 check of "Paddock itself" skips the history before the rule.
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
+
+  # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a change, whichever project it touches.
+  # Only the commits a change adds are linted (scripts/affected.mjs commitLintRange): a pull request since its target
+  # branch, a push `before..sha`, a manual run from the plan's base. Tags and an app's tag gates skip it (ER-15).
   commits:
     name: commit messages
-    if: ${{ github.event_name == 'pull_request' }}
+    needs: [plan]
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
-      # Full history so the range from the target branch can be read.
+      # Full history so the range from the base can be read.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - run: node conformance/bin/paddock-conformance.mjs commit-lint --range "origin/${{ github.base_ref }}..HEAD"
+      - name: Lint the commit messages
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+          BASE_REF: ${{ github.base_ref }}
+          PLAN_BASE: ${{ needs.plan.outputs.base }}
+          INPUT_APP: ${{ inputs.app }}
+        run: |
+          range="$(node scripts/affected.mjs --commit-range)"
+          echo "commit-lint range: $range"
+          if [ "$range" = "skip" ]; then exit 0; fi
+          node conformance/bin/paddock-conformance.mjs commit-lint --range "$range"
 
   # One leg per affected app and operating system (ADR 0014 §6): the app's CI contract (apps/<app>/paddock.ci.json) through
   # the shared app-gates action, only the halves the change reaches (rust, ui). Linux (the paddock-ci image) carries the
@@ -528,18 +587,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs.
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it).
       - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
         shell: cmd
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
 
-      - name: Build jobs (macOS)
-        if: runner.os == 'macOS'
-        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
+
+      # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
+      - uses: ./.gitea/actions/job-isolation
 
       - uses: ./.gitea/actions/stable-workspace
         if: runner.os != 'Linux'
@@ -561,16 +621,16 @@ jobs:
         if: runner.os != 'Linux'
 
       # An app whose tests drive a real browser (paddock.ci.json `testBrowser`): the pinned Chrome for Testing, never an installed
-      # one (rule 7). The image has it on Linux; on a host it is kept in a folder of the app under the runner user's home.
+      # one (rule 7). The image has it on Linux; on a host it is the app's kept folder of the job slot (test-browser-<app>-<slot>).
       - name: Test browser folder (macOS, Windows)
         if: runner.os != 'Linux' && matrix.test_browser_prefix != ''
         shell: bash
         env:
           APP: ${{ matrix.app }}
         run: |
-          home="$HOME"
-          if command -v cygpath >/dev/null; then home="$(cygpath -w "$HOME")"; fi
-          echo "PADDOCK_TEST_BROWSER_DIR=$home/.paddock-ci/test-browser-$APP" >> "$GITHUB_ENV"
+          dir="$(bash conformance/ci/job-isolation.sh path browser "$APP")"
+          if command -v cygpath >/dev/null; then dir="$(cygpath -w "$dir")"; fi
+          echo "PADDOCK_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
 
       - name: Chrome for Testing (macOS, Windows)
         if: runner.os != 'Linux' && matrix.test_browser_prefix != ''
@@ -619,6 +679,7 @@ jobs:
           ui: ${{ matrix.ui }}
           last-packages: ${{ matrix.last_packages }}
           windows-clippy: ${{ matrix.windows_clippy }}
+          notices: ${{ matrix.notices }}
           filter: ${{ matrix.filter }}
           display: ${{ matrix.display }}
           e2e-checks: ${{ matrix.e2e_checks }}
@@ -632,12 +693,12 @@ jobs:
           path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ matrix.e2e_artifacts }}
           if-no-files-found: ignore
 
-      # Nothing may stay behind on a host: no fake runners or test sockets of the app's tests (paddock.ci.json `processes`).
+      # Nothing of this job may stay behind on a host: no fake runners or test programs of the app's tests (paddock.ci.json
+      # `processPatterns`, each anchored on a folder of this job), no temp folders of its tests.
       - uses: ./.gitea/actions/host-cleanup
         if: always() && runner.os != 'Linux'
         with:
           app-id: ${{ matrix.app }}
-          processes: ${{ matrix.processes }}
           process-patterns: ${{ matrix.process_patterns }}
           temp-prefix: ${{ matrix.app }}-it-
 
@@ -647,3 +708,101 @@ jobs:
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
+
+      # The slot goes back last: the clean-up, the prune and the sccache server's stop all act on this slot's folders and port.
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
+
+  # The developer and CI tool (ADR 0022): its own Cargo workspace and lockfile, tested on every OS it runs on. Linux runs in the
+  # paddock-ci image (git, Node for the golden test's live oracle, nextest); Windows and macOS run on the host.
+  paddock-dev:
+    name: paddock-dev (${{ matrix.os }})
+    needs: [plan]
+    if: ${{ needs.plan.outputs.paddock_dev == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    defaults:
+      run:
+        working-directory: tools/paddock-dev
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        working-directory: .
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
+
+      # A slot of the host (job isolation; after Git bash on Windows): its kept folders and ports are this job's alone.
+      - uses: ./.gitea/actions/job-isolation
+
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
+        with:
+          name: paddock-${{ github.job }}-${{ runner.os }}
+
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+          name: paddock-${{ github.job }}
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          components: clippy,rustfmt
+
+      - uses: ./.gitea/actions/host-tools
+
+      # The tool's lockfile must follow the lockfiles of the crates/ it uses by path (they change dependencies in their own PRs).
+      - name: Lockfile is current
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: |
+          cargo metadata --locked --format-version 1 > /dev/null || {
+            echo "::error::tools/paddock-dev/Cargo.lock is stale, run cargo update -w in tools/paddock-dev and commit it"; exit 1; }
+
+      - name: Format
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: cargo fmt --check
+
+      - name: Clippy
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Tests
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: cargo nextest run --profile ci --locked --no-fail-fast
+
+      # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.
+      - name: Deny
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: cargo deny check
+
+      # The kept build folder stays within its cap (this job's own folder only, after the builds).
+      - uses: ./.gitea/actions/prune-build-folder
+        if: always() && runner.os != 'Linux'
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+      # The slot goes back last: the prune and the sccache server's stop act on this slot's folders and port.
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release

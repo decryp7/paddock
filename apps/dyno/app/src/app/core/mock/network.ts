@@ -1,7 +1,7 @@
 import type { ConnectionRow, ListenerRow, NetOwner, NetworkQuery, NetworkSnapshot, SocketState, TrafficRow } from '../api.types';
 
 const proc = (pid: number, name: string, path: string): NetOwner => ({ kind: 'process', pid, name, path });
-const UNKNOWN: NetOwner = { kind: 'unknown', reason: 'The OS did not say which program owns this. It may belong to another user or the system; Dyno never runs elevated, the helper can look it up.' };
+const UNKNOWN: NetOwner = { kind: 'unknown', reason: 'The OS did not say which program owns this. It may belong to another user or the system; Dyno does not run with administrator rights.' };
 
 const MIN = 60_000;
 
@@ -40,7 +40,7 @@ const CONNECTIONS: ConnectionRow[] = [
   conn('Slack', 1177, '/Applications/Slack.app', '34.224.12.7', 443, 'timeWait', 'TIME_WAIT', 1, 52311),
   conn('Code Helper', 2290, '/Applications/Visual Studio Code.app', '20.189.173.5', 443, 'established', 'ESTABLISHED', 60, 52090),
   conn('cargo', 4410, '/Users/me/.cargo/bin/cargo', '151.101.129.91', 443, 'established', 'ESTABLISHED', 3, 52402),
-  conn('Docker Desktop', 1999, '/Applications/Docker.app', '10.0.0.8', 5000, 'established', 'ESTABLISHED', 140, 52001),
+  conn('VirtualBox', 1999, '/Applications/VirtualBox.app', '10.0.0.8', 5000, 'established', 'ESTABLISHED', 140, 52001),
   conn('node', 4120, '/usr/local/bin/node', '127.0.0.1', 5432, 'established', 'ESTABLISHED', 11, 52333),
   conn('Spotify', 1544, '/Applications/Spotify.app', '35.186.224.25', 4070, 'closeWait', 'CLOSE_WAIT', 25, 52188),
 ];

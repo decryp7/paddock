@@ -15,12 +15,15 @@ copied). Read them before any change; their reasons are in [docs/lessons.md](doc
 ## Layout
 
 ```
-crates/          shared Rust crates, one Cargo workspace (crates/Cargo.toml)
+crates/          shared Rust crates, one Cargo workspace (crates/Cargo.toml); paddock-slots, paddock-repo-files and
+                 paddock-repo-graph are the libraries under tools/paddock-dev
 ui/              @decryp7/paddock-ui, @decryp7/paddock-e2e, the gallery and the demo UIs (one Angular workspace)
 apps/<app>/      one app each (debrief, dyno, pacenotes, pitcrew, pitwall, sighter, spotter and the two demos), its tree
                  unchanged below its folder, its own Cargo workspace and Cargo.lock, and paddock.ci.json (its CI contract)
 conformance/ eslint/ tsconfig/ lint/ icons/ templates/    shared checks, presets, the icon pipeline, new-app templates
 docs/            family docs: rules, lessons, ADRs, plans, research; an app's docs stay in apps/<app>/docs
+tools/paddock-dev  the Rust developer and CI tool (ADR 0022: its own Cargo workspace and lockfile; run it with `./dev`, which
+                 builds or fetches the binary its inputs name)
 scripts/         family scripts: affected.mjs (CI's plan), publish.mjs, new-app.mjs, demo-release.mjs
 .gitea/          ci.yml (plan and affected jobs), nightly.yml, each app's <app>.yml, the shared actions
 package.json     the one npm workspace and package-lock.json (ui, eslint, icons, the demos, apps/*/app)
@@ -29,7 +32,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 ## Working in the monorepo
 
 - **Worktrees (rule 2).** Every agent works in its own worktree of `paddock`; for app work a sparse one:
-  `git sparse-checkout set --cone crates ui scripts docs apps/<app>`. Never work in the main checkout; never `git stash`.
+  `git sparse-checkout set --cone crates ui scripts docs tools apps/<app>`. Never work in the main checkout; never `git stash`.
 - **Build folders.** One `CARGO_TARGET_DIR` per app per worktree, kept between tasks for the same app (reusing it is
   what makes rebuilds fast; sccache gives almost nothing across worktrees, ADR 0014 §1).
 - **Cargo.** There is no root Cargo workspace: `crates/` and each app are their own workspaces, so each app builds with
@@ -42,6 +45,17 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - **Affected tests (rule 3).** `node scripts/affected.mjs origin/main --explain` lists the projects a change reaches (the
   Cargo and npm graphs, Tauri `frontendDist`, `tsconfig`/`angular.json`/ESLint config paths, declared doc inputs). Run
   those, plus the touched specs. CI runs the same plan; nightly.yml runs everything.
+  Only `rust-toolchain`, the root `package.json`, `.npmrc`, `.nvmrc`, `.gitattributes` and `tsconfig/` still mark
+  everything; the table above `GLOBAL` in `scripts/affected.mjs` says what every other former global reaches:
+  `scripts/affected*.mjs` mark tools, ui and paddock-dev (the `plan` and `tools` jobs run their tests; the golden test of
+  `dev` uses the script as oracle), `.cargo/` and `lint/` the Rust builds (`lint/` also conformance), a `ci.yml` change only
+  the jobs whose text changed (everything if the file cannot be split into jobs, uses YAML anchors, its header changed or
+  the `plan` job changed), a shared action or a script of `conformance/ci` or `conformance/release` only the jobs and
+  workflows that use it, following scripts that import or name it (imports built at run time are not seen), reusable
+  workflows to their callers, and ignoring mentions in comments and README prose; an action nobody uses marks everything.
+  `--files` means working tree against HEAD: a committed change cannot be diffed, so it marks everything. Users that run only
+  nightly, on a tag or manually are named as such in `--explain`; `e2e-webkit` never runs on a pull request. The Rust port
+  in `tools/paddock-dev` keeps `.gitea/` and `conformance/(ci|release|src/util)/` global (a superset of the script).
 - **Ownership.** [CODEOWNERS](CODEOWNERS) (Go regular expressions, Gitea's syntax) says who owns which paths; a brief
   names the paths its task owns. Shared integration points (`crates/*/src/lib.rs`, `crates/Cargo.toml`, `public-api.ts`,
   `_tokens.scss`, the root `package.json`, `.gitea/`, `renovate.json`, `CODEOWNERS`) are changed by the integrating agent
@@ -70,10 +84,11 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   `data-accent`, `data-density`. Any change is a CHANGELOG entry; no backward-compatibility shims before Paddock's v1.
 - Shared Rust crates have a pure core and a `tauri` feature for the adapter; typed errors, doc comments on public items,
   no `unwrap` on I/O or user data, bounded resources. Coverage: crates >= 99% lines (CI's llvm-cov gate), components 100%.
-- Anchor every ignore rule (`/ui/dist/`, not `dist/`); `node_modules/` is the one unanchored rule.
+- Anchor every ignore rule (`/ui/dist/`, not `dist/`); `node_modules` (no trailing slash, so it also matches a symlink) is the one unanchored rule; conformance C57 fails on any tracked symlink.
 
 ## Testing and quality gates
 
+- **E2E and screenshots run on fresh code (guidance; a binding rule is proposed).** A running dev server is reused only with `PW_REUSE_SERVER=1`; default ports derive from the worktree path (`e2ePort` in `@decryp7/paddock-e2e`); a config that consumes `ui/dist` or the css fails at load with "rebuild ui: npm run build -w ui" when they were built from older sources (`build-guard.ts`, content stamps; lessons.md). New Playwright configs use these.
 - Every change ships with tests; every bug fix starts with a failing test. A colour change keeps `npm run test:tokens`
   green (WCAG AA/AAA pairs, CVD separation); change the tokens, not the test.
 - Before committing, the gates of the affected projects, for example:
@@ -170,4 +185,30 @@ Apply these deliberately. They are not decoration:
 - Delegate mechanical or well-specified work (refactors with a precise spec, test scaffolding, docs) to cheaper models.
   Keep architecture and review on the main model.
 - Share first (rule 42): check Paddock's crates and packages before writing anything an app copy would duplicate.
+- Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
+  `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
+- Specs never wait a fixed number of event-loop turns and never leave a patch behind (rule 49): wait on the condition
+  (Debrief's `openDialog()`, once `fix/debrief-import-range-flake` lands), never let an optional chain perform a test's
+  action, and patch a prototype only with `vi.spyOn` (restored after each test).
+- Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
+  branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.
+- A change that touches an app's release path builds that app's installers before it lands on main (rule 54): the batch
+  dispatches `<app>-release.yml` with gates on and the bundle built; passing tests alone is not enough.
+- Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
+  cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
+  thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
+- Never act on a reusable OS name read earlier (rule 53): hold it (handle, job, listener) or verify its identity (pid plus
+  start time, `paddock_proc::ProcessId`) immediately before acting; kills go through `paddock_proc` (Clippy
+  `disallowed-methods` and C53 check it, ADR 0033). A discovery file that names a pid or port (Dyno's `agent.json`) is
+  only a hint: act on it after a held lock or a live connection proves the process is there, and remove it only if it is
+  still the same file (same pid and start time).
+- Work a person waits for never runs at an OS's starvable background level (rule 52: macOS QoS `BACKGROUND`,
+  `PRIO_DARWIN_BG`, `taskpolicy -b`/`-c background`/`-c maintenance`/`-d throttle` and `IOPOL_THROTTLE`; Windows
+  background modes, idle priorities and EcoQoS; Linux `SCHED_IDLE` and idle I/O; for a service, launchd `ProcessType`
+  `Background` (or `Adaptive` without XPC) and `LowPriorityIO`, systemd `CPUSchedulingPolicy=idle` and
+  `IOSchedulingClass=idle`): bulk work (long, with progress and Cancel: walks, scans, compaction, exports) uses
+  `QOS_CLASS_UTILITY`, nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`; live work (a person waits on it within a deadline or
+  for a screen to fill: requests, probes, a sampler, a page refresh) may use the first two but stays at the normal level
+  on Windows; a thread holding a lock that live work waits on is live, or must not hold the lock across slow work; a
+  starvable level only for work nobody waits on, with a `conformance: background-qos — <why>` comment (C54).
 - Spawn subagents by role: implementer (Sonnet, mechanical), designer, reviewer, researcher (Opus); see `.claude/agents/`.

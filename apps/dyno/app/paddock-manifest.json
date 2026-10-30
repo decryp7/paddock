@@ -1,0 +1,320 @@
+{
+  "version": 1,
+  "commands": [
+    {
+      "id": "dy.add-alarm-rule",
+      "title": "dy.add-alarm-rule"
+    },
+    {
+      "id": "dy.capture",
+      "title": "dy.capture"
+    },
+    {
+      "id": "dy.check-backup",
+      "title": "dy.check-backup"
+    },
+    {
+      "id": "dy.export-issues",
+      "title": "dy.export-issues"
+    },
+    {
+      "id": "dy.export-report",
+      "title": "dy.export-report"
+    },
+    {
+      "id": "dy.refresh-history",
+      "title": "dy.refresh-history"
+    },
+    {
+      "id": "dy.rescan-issues",
+      "title": "dy.rescan-issues"
+    },
+    {
+      "id": "dy.run-why-slow",
+      "title": "dy.run-why-slow"
+    },
+    {
+      "id": "dy.save-diagnostics",
+      "title": "dy.save-diagnostics"
+    },
+    {
+      "id": "pd.about.open",
+      "title": "pd.about.open"
+    },
+    {
+      "id": "pd.app.quit",
+      "title": "pd.app.quit"
+    },
+    {
+      "id": "pd.settings.open",
+      "title": "pd.settings.open"
+    },
+    {
+      "id": "pd.updates.open",
+      "title": "pd.updates.open"
+    },
+    {
+      "id": "pd.whats-new.open",
+      "title": "pd.whats-new.open"
+    }
+  ],
+  "keybindings": [
+    {
+      "command": "pd.settings.open",
+      "key": "Mod+,",
+      "accelerator": "CmdOrCtrl+,",
+      "scope": "window"
+    },
+    {
+      "command": "pd.app.quit",
+      "key": "Mod+Q",
+      "accelerator": "CmdOrCtrl+Q",
+      "scope": "window"
+    }
+  ],
+  "menus": [
+    {
+      "menu": "app",
+      "command": "pd.settings.open",
+      "group": "settings",
+      "order": 100,
+      "accelerator": "CmdOrCtrl+,"
+    },
+    {
+      "menu": "app",
+      "command": "pd.app.quit",
+      "group": "quit",
+      "order": 1000,
+      "accelerator": "CmdOrCtrl+Q"
+    },
+    {
+      "menu": "help",
+      "command": "pd.whats-new.open",
+      "group": "about",
+      "order": 100,
+      "accelerator": null
+    },
+    {
+      "menu": "help",
+      "command": "pd.updates.open",
+      "group": "about",
+      "order": 200,
+      "accelerator": null
+    },
+    {
+      "menu": "help",
+      "command": "pd.about.open",
+      "group": "about",
+      "order": 300,
+      "accelerator": null
+    }
+  ],
+  "pages": [
+    "dy.alarms",
+    "dy.backup",
+    "dy.benchmarks",
+    "dy.counters",
+    "dy.dashboard",
+    "dy.diagnostics",
+    "dy.disk-map",
+    "dy.extras",
+    "dy.health",
+    "dy.inventory",
+    "dy.issues",
+    "dy.lifespan",
+    "dy.network",
+    "dy.processes",
+    "dy.recorder",
+    "dy.reports",
+    "dy.throttling",
+    "dy.why-slow"
+  ],
+  "statusItems": [
+    "dy.agent"
+  ],
+  "settingsPages": [
+    "dy.general",
+    "pd.appearance"
+  ],
+  "settingsForms": [
+    "pd.appearance"
+  ],
+  "dialogs": {
+    "dy.alert-rule": {
+      "kind": "form",
+      "modality": "modal",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 560,
+      "height": null,
+      "commands": [
+        "dyno"
+      ]
+    },
+    "dy.file-hash": {
+      "kind": "viewer",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 720,
+      "height": 560,
+      "commands": [
+        "dyno"
+      ]
+    },
+    "dy.lockers": {
+      "kind": "tool",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 560,
+      "height": 480,
+      "commands": [
+        "dyno"
+      ]
+    },
+    "dy.web-search": {
+      "kind": "form",
+      "modality": "modal",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 400,
+      "height": null,
+      "commands": [
+        "dyno"
+      ]
+    },
+    "pd.about": {
+      "kind": "viewer",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 720,
+      "height": 560,
+      "commands": [
+        "about_info",
+        "about_legal",
+        "files_open_url"
+      ]
+    },
+    "pd.confirm": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": true,
+      "requiredChoice": false,
+      "width": 400,
+      "height": null,
+      "commands": []
+    },
+    "pd.settings": {
+      "kind": "tool",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 880,
+      "height": 700,
+      "commands": [
+        "dyno",
+        "settings_*"
+      ]
+    },
+    "pd.updates": {
+      "kind": "form",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 560,
+      "height": null,
+      "commands": [
+        "updates_cancel",
+        "updates_check",
+        "updates_download",
+        "updates_install_on_quit",
+        "updates_restart",
+        "updates_set_preferences",
+        "updates_status"
+      ]
+    },
+    "pd.whats-new": {
+      "kind": "viewer",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 720,
+      "height": 560,
+      "commands": [
+        "about_whats_new"
+      ]
+    }
+  },
+  "healthServices": [
+    "dy.agent"
+  ],
+  "notificationKinds": {
+    "dy.alarm": {
+      "actions": []
+    },
+    "pd.updates.available": {
+      "actions": []
+    }
+  },
+  "messages": {
+    "dy.add-alarm-rule": "Add rule…",
+    "dy.alert-rule.title": "Alert rule",
+    "dy.capture": "Capture the last ten minutes",
+    "dy.category.alarms": "Alarms",
+    "dy.category.backup": "Backup health",
+    "dy.category.dashboard": "Dashboard",
+    "dy.category.diagnostics": "Diagnostics",
+    "dy.category.issues": "Issues",
+    "dy.category.recorder": "Flight recorder",
+    "dy.category.reports": "Reports",
+    "dy.category.why-slow": "Why slow",
+    "dy.check-backup": "Check now",
+    "dy.export-issues": "Export for Debrief…",
+    "dy.export-report": "Export Markdown…",
+    "dy.file-hash.title": "Search the file's hash on VirusTotal",
+    "dy.health.agent": "the Dyno agent",
+    "dy.lockers.title": "What is locking this file?",
+    "dy.notification.alarm": "Alarm",
+    "dy.page.alarms": "Alarms",
+    "dy.page.backup": "Backup health",
+    "dy.page.benchmarks": "Benchmarks",
+    "dy.page.counters": "Counters",
+    "dy.page.dashboard": "Dashboard",
+    "dy.page.diagnostics": "Diagnostics",
+    "dy.page.disk-map": "Disk map",
+    "dy.page.extras": "Extras",
+    "dy.page.health": "Health",
+    "dy.page.inventory": "Inventory",
+    "dy.page.issues": "Issues",
+    "dy.page.lifespan": "Lifespan",
+    "dy.page.network": "Network",
+    "dy.page.processes": "Processes",
+    "dy.page.recorder": "Flight recorder",
+    "dy.page.reports": "Reports",
+    "dy.page.throttling": "Throttling",
+    "dy.page.why-slow": "Why slow",
+    "dy.refresh-history": "Refresh history",
+    "dy.rescan-issues": "Read the system logs now",
+    "dy.run-why-slow": "Run again",
+    "dy.save-diagnostics": "Save bundle…",
+    "dy.settings.general": "Dyno",
+    "dy.status.agent": "The Dyno agent",
+    "dy.web-search.title": "Search the web",
+    "pd.about.open": "About",
+    "pd.about.title": "About",
+    "pd.app.quit": "Quit",
+    "pd.category.app": "Application",
+    "pd.category.help": "Help",
+    "pd.confirm.title": "Confirm",
+    "pd.settings.appearance": "Appearance",
+    "pd.settings.open": "Settings…",
+    "pd.settings.title": "Settings",
+    "pd.updates.notification.available": "Update available",
+    "pd.updates.open": "Check for updates…",
+    "pd.updates.title": "Updates",
+    "pd.whats-new.open": "What’s new",
+    "pd.whats-new.title": "What’s new"
+  }
+}

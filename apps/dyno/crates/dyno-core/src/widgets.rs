@@ -86,7 +86,7 @@ pub enum WidgetKind {
     Health,
     /// The CPU card: load, history, the per-core view and a link to the CPU details.
     Cpu,
-    /// The plain-language reading of what is slowing the PC down (the "Why slow" summary).
+    /// The plain-language reading of what is slowing the computer down (the "Why slow" summary).
     Diagnosis,
     /// What happened lately: alarms, rule actions and Dyno's own changes.
     Events,
@@ -644,17 +644,6 @@ pub enum TrayItemStyle {
     GraphAndNumber,
 }
 
-/// What clicking a tray item opens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum TrayOpens {
-    /// A popover about this metric.
-    #[default]
-    OwnPopover,
-    /// The main popover.
-    MainPopover,
-}
-
 /// One tray item.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -665,8 +654,6 @@ pub struct TrayItem {
     pub metric: Metric,
     /// How it draws.
     pub style: TrayItemStyle,
-    /// What a click opens.
-    pub opens: TrayOpens,
 }
 
 fn clean_text(s: &str, max: usize) -> String {
@@ -709,13 +696,11 @@ impl Default for TrayItems {
                     id: "cpu".into(),
                     metric: Metric::CpuTotal,
                     style: TrayItemStyle::VerticalBars,
-                    opens: TrayOpens::OwnPopover,
                 },
                 TrayItem {
                     id: "memory".into(),
                     metric: Metric::Memory,
                     style: TrayItemStyle::VerticalBars,
-                    opens: TrayOpens::OwnPopover,
                 },
             ],
         }
@@ -1029,7 +1014,6 @@ mod tests {
                 unit: "%\n%%%%%%%%%%".into(),
                 label: "L".repeat(40),
             },
-            opens: TrayOpens::MainPopover,
         };
         let mut t = TrayItems {
             version: 1,
@@ -1060,9 +1044,8 @@ mod tests {
         assert!(parse_tray(r#"{"version":7}"#).1.unwrap().contains("newer"));
         assert!(parse_tray(&" ".repeat(MAX_BYTES + 1)).1.unwrap().contains("too large"));
         assert_eq!(parse_tray("{}"), (TrayItems::default(), None));
-        let (t, w) = parse_tray(
-            r#"{"items":[{"id":"a","metric":"cpuTotal","style":"lineGraph","opens":"mainPopover"},{"id":"","metric":"fan","style":"ring","opens":"ownPopover"}]}"#,
-        );
+        let (t, w) =
+            parse_tray(r#"{"items":[{"id":"a","metric":"cpuTotal","style":"lineGraph"},{"id":"","metric":"fan","style":"ring"}]}"#);
         assert_eq!((t.items.len(), w.is_some()), (1, true));
         let mut bad = TrayItems::default();
         bad.items[0].metric = Metric::PerfCounter(String::new());

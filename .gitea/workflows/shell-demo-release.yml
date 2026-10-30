@@ -33,6 +33,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # CARGO_BUILD_JOBS: this runner's share of the host (conformance/ci/build-jobs.sh; Linux keeps cargo's default).
+      - uses: ./.gitea/actions/build-jobs
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -47,18 +50,18 @@ jobs:
       - name: The release notes (the version's CHANGELOG section)
         run: node scripts/demo-release.mjs shell-demo notes /tmp/notes.md && cat /tmp/notes.md
 
-      - name: UI (specs, translations, dialog contracts, the shell demo's build and browser checks)
+      - name: UI (specs, translations, the shell demo's build and browser checks)
         working-directory: ui
         env:
           PW_PORT: 4300
           SHELL_DEMO_PORT: 4301
+          WORKBENCH_DEMO_PORT: 4302
         run: |
           (cd .. && npm ci)  # the root npm workspace (ADR 0014 §1)
           npm test
           npm run test:scripts
           npm run build
           npm run i18n:check
-          npm run check:dialogs
           npm run shell-demo:build
           npx playwright install --with-deps chromium
           npx playwright test --project=shell-demo
@@ -94,20 +97,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Git bash on PATH and a persistent build folder (Windows)
+      - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
         shell: cmd
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo CARGO_TARGET_DIR=%USERPROFILE%\.paddock-ci\target-shell-demo>>"%GITHUB_ENV%"
-          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
 
-      - name: Persistent build folder (macOS)
+      - name: Build folder of the job (macOS)
         if: runner.os == 'macOS'
         run: |
           echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/../.paddock-ci-target-shell-demo" >> "$GITHUB_ENV"
-          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
+
+      # A slot of the host (job isolation; after Git bash on Windows); on Windows the build folder is the slot's kept one.
+      - uses: ./.gitea/actions/job-isolation
+
+      - name: Kept build folder (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          dir="$(bash conformance/ci/job-isolation.sh path target shell-demo)"
+          echo "CARGO_TARGET_DIR=$(cygpath -w "$dir")" >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@v4
         if: runner.os == 'Linux'
@@ -156,6 +168,11 @@ jobs:
           name: paddock-shell-demo-${{ runner.os }}
           path: apps/shell-demo/dist/*
           if-no-files-found: error
+
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
 
   release:
     name: release

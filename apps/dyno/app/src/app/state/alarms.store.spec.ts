@@ -71,7 +71,7 @@ describe('AlarmsStore', () => {
     const { store, notifier } = setup();
     await store.load();
     expect(await store.note(7, '   ')).toBe(false);
-    expect(notifier.toasts().at(-1)?.text).toBe('Write a note of 1 to 200 characters.');
+    expect(notifier.recent().at(-1)?.text).toBe('Write a note of 1 to 200 characters.');
     expect(store.alarms()).toHaveLength(5);
   });
 
@@ -136,7 +136,7 @@ describe('AlarmsStore', () => {
     await store.loadStats();
     expect(store.historyLoaded()).toBe(true);
     expect(store.history().length).toBeGreaterThan(5);
-    expect(store.stats()?.noisiest[0]?.rule).toBe('threshold:gpu-limit');
+    expect(store.stats()?.noisiest[0]?.rule).toBe('threshold:gpu-load');
     vi.spyOn(mock, 'alarmHistory').mockRejectedValueOnce({ code: 'timeout', message: 'Too slow.' });
     vi.spyOn(mock, 'alarmStats').mockRejectedValueOnce({ code: 'timeout', message: 'Too slow.' });
     await store.loadHistory();

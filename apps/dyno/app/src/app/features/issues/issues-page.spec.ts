@@ -1,8 +1,10 @@
+import { UnusualStore } from '../../state/unusual.store';
 import { Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { BACKEND } from '../../core/backend';
-import { MockBackend } from '../../core/mock-backend';
+import type { MockBackend } from '../../core/mock-backend';
+import { jobsProviders, mockWithJobs } from '../../../testing/job-test-support';
 import { provideIcons } from '../../shared/icons';
 import { Chart } from '../../shared/chart';
 import { IssuesPage } from './issues-page';
@@ -20,9 +22,9 @@ class StubChart {
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
 function render(fail: string[] = [], prepare: (mock: MockBackend) => void = () => undefined) {
-  const mock = new MockBackend({ latencyMs: 0, now: () => NOW, fail: new Set(fail) });
+  const { mock, jobs } = mockWithJobs({ now: () => NOW, fail: new Set(fail) });
   prepare(mock);
-  TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([]), { provide: BACKEND, useValue: mock }] });
+  TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([]), jobsProviders(jobs), { provide: BACKEND, useValue: mock }] });
   TestBed.overrideComponent(IssuesView, { remove: { imports: [Chart] }, add: { imports: [StubChart] } });
   const f = TestBed.createComponent(IssuesPage);
   f.detectChanges();
@@ -31,6 +33,8 @@ function render(fail: string[] = [], prepare: (mock: MockBackend) => void = () =
 const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
   for (let i = 0; i < 6; i++) {
     await f.whenStable();
+    await new Promise((r) => setTimeout(r, 2));
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
     f.detectChanges();
   }
 };
@@ -42,27 +46,28 @@ describe('dy-issues-page', () => {
     await settle(f);
     expect(el.querySelector('h1')?.textContent).toBe('Issues');
     expect(el.querySelector('[aria-label="Stability"] .big')?.textContent).toMatch(/\d+/);
-    expect(el.querySelectorAll('table[aria-label="Apps with the most issues"] tbody tr').length).toBe(5);
-    expect(el.querySelectorAll('table[aria-label="Issues"] tr.day').length).toBeGreaterThan(2);
+    expect(el.querySelectorAll('[role$="grid"][aria-label="Apps with the most issues"] [role="row"][data-key]').length).toBe(5);
+    expect(el.querySelectorAll('[role$="grid"][aria-label="Issues"] .pd-group').length).toBeGreaterThan(2);
     expect(el.textContent).toContain('2 of 2 logs read');
-    expect(el.querySelector('.tab-count, .count')?.textContent).toBe('5');
+    expect(el.querySelector('pd-segmented-control .pd-count')?.textContent?.trim()).toBe('5');
   });
 
   it('filters by a leaderboard row, clears it, collapses a day and opens evidence as plain text', async () => {
     const { f, el } = render();
     await settle(f);
-    (el.querySelector('tr[aria-label="Show only Mail"]') as HTMLElement).click();
+    (el.querySelector('[role$="grid"][aria-label="Apps with the most issues"] [role="row"][data-key="Mail"]') as HTMLElement).click();
     await settle(f);
-    const rows = [...el.querySelectorAll('table[aria-label="Issues"] tr.row')];
+    const rows = [...el.querySelectorAll('[role$="grid"][aria-label="Issues"] [role="row"][data-key]:not(.pd-group)')];
     expect(rows.length).toBe(3);
     expect(rows.every((r) => r.textContent!.includes('Mail'))).toBe(true);
-    (el.querySelector('[aria-label="Clear the filter"]') as HTMLElement).click();
+    (el.querySelector('[aria-label^="Clear the filter"]') as HTMLElement).click();
     await settle(f);
-    expect(el.querySelectorAll('table[aria-label="Issues"] tr.row').length).toBeGreaterThan(3);
-    (el.querySelector('tr.day button') as HTMLElement).click();
+    expect(el.querySelectorAll('[role$="grid"][aria-label="Issues"] [role="row"][data-key]:not(.pd-group)').length).toBeGreaterThan(3);
+    const day = () => el.querySelector('[role$="grid"][aria-label="Issues"] .pd-group') as HTMLElement;
+    day().click();
     await settle(f);
-    expect(el.querySelector('tr.day button')?.getAttribute('aria-expanded')).toBe('false');
-    (el.querySelectorAll('tr.row')[0] as HTMLElement).click();
+    expect(day().getAttribute('aria-expanded')).toBe('false');
+    (el.querySelectorAll('[role$="grid"][aria-label="Issues"] [role="row"][data-key]:not(.pd-group)')[0] as HTMLElement).click();
     await settle(f);
     const detail = el.querySelector('[aria-label="Issue details"]')!;
     expect(detail.querySelector('pre.evidence')).not.toBeNull();
@@ -121,33 +126,52 @@ describe('dy-issues-page', () => {
     expect(el.querySelector('[aria-label="Stability"]')).not.toBeNull();
   });
 
-  it('new and unusual: reasons, protect, hide and show hidden', async () => {
-    const { f, el } = render();
+  it('a rescan shows the read as a job with Cancel, and Cancel leaves the page as it was', async () => {
+    const { f, el, mock } = render();
     await settle(f);
-    btn(el, 'New and unusual').click();
-    await settle(f);
-    const table = el.querySelector('table[aria-label="New and unusual programs"]')!;
-    expect(table.textContent).toContain('Unusual because it runs from a temporary folder');
-    expect(table.textContent).not.toMatch(/malware|virus/i);
-    (el.querySelector('[aria-label="Protect updater-helper"]') as HTMLElement).click();
-    await settle(f);
-    expect(el.querySelector('table[aria-label="New and unusual programs"]')!.textContent).not.toContain('updater-helper');
-    (el.querySelector('[aria-label="Hide ngrok"]') as HTMLElement).click();
-    await settle(f);
-    btn(el, 'Show hidden').click();
-    await settle(f);
-    const text = el.querySelector('table[aria-label="New and unusual programs"]')!.textContent!;
-    expect(text).toContain('ngrok');
-    expect(text).toContain('Protected');
-    expect(el.querySelector('[aria-label="Show ngrok again"]')).not.toBeNull();
+    const before = el.querySelector('[aria-label="Stability"]')?.textContent;
+    mock.jobSteps = 40;
+    mock.jobStepMs = 20;
+    const cancel = vi.spyOn(mock, 'cancelJob');
+    (el.querySelector('[aria-label="Read the system logs now"]') as HTMLElement).click();
+    for (let i = 0; i < 5 && !el.querySelector('pd-job'); i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      await settle(f);
+    }
+    const card = el.querySelector('pd-job')!;
+    expect(card.textContent).toContain('Reading system logs');
+    expect((el.querySelector('[aria-label="Read the system logs now"]') as HTMLButtonElement).disabled).toBe(true);
+    btn(card as HTMLElement, 'Cancel').click();
+    for (let i = 0; i < 40 && el.querySelector('pd-job'); i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      await settle(f);
+    }
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(el.querySelector('pd-job')).toBeNull();
+    expect(el.querySelector('[role=alert]')).toBeNull();
+    expect(el.querySelector('[aria-label="Stability"]')?.textContent).toBe(before);
+    expect((el.querySelector('[aria-label="Read the system logs now"]') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('new and unusual: the detail panel explains each reason and states what protect does', async () => {
+  it('new and unusual: lists the reasons and offers no action on a program', async () => {
     const { f, el } = render();
     await settle(f);
     btn(el, 'New and unusual').click();
     await settle(f);
-    (el.querySelectorAll('tr.row')[0] as HTMLElement).click();
+    const table = el.querySelector('[role$="grid"][aria-label="New and unusual programs"]')!;
+    expect(table.textContent).toContain('Unusual because it runs from a temporary folder');
+    expect(table.textContent).not.toMatch(/malware|virus/i);
+    expect(el.querySelector('[aria-label="Protect updater-helper"]')).toBeNull();
+    expect(el.querySelector('[aria-label="Hide ngrok"]')).toBeNull();
+    expect(table.textContent).toContain('updater-helper');
+  });
+
+  it('new and unusual: the detail panel explains each reason', async () => {
+    const { f, el } = render();
+    await settle(f);
+    btn(el, 'New and unusual').click();
+    await settle(f);
+    (el.querySelectorAll('[role$="grid"] [role="row"][data-key]')[0] as HTMLElement).click();
     await settle(f);
     const d = el.querySelector('[aria-label="Program details"]')!;
     expect(d.textContent).toContain('It is not signed by any publisher.');
@@ -163,7 +187,7 @@ describe('dy-issues-page', () => {
     btn(el, 'New and unusual').click();
     await settle(f);
     await mock.forgetBaseline();
-    btn(el, 'Show hidden').click();
+    await TestBed.inject(UnusualStore).load();
     await settle(f);
     expect(el.textContent).toContain('Dyno is learning what is normal here');
   });

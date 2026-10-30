@@ -1,12 +1,12 @@
 //! The agent's alarm centre: the pure [`AlarmEngine`] plus persistence (`alarms`, `alarm_events`) and the push of
-//! every change to connected apps. Raised from the sampler's alert evaluation and the rules' Notify steps; changed by
+//! every change to connected apps. Raised from the sampler's alert evaluation and changed by
 //! the app's acknowledge / shelve / mute / note requests.
 
 use crate::store::Store;
-use dyno_core::alarms::feed::{from_alert, from_rule_notify, Observation};
+use dyno_core::alarms::feed::{from_alert, Observation};
 use dyno_core::alarms::{Alarm, AlarmChange, AlarmConfig, AlarmEngine, AlarmEvent, AlarmFilter, AlarmStats, ChangeKind, ShelveFor};
 use dyno_core::alerts::Alert;
-use dyno_core::time::Timestamp;
+use dyno_core::time::{Timestamp, Zone};
 
 /// How often [`AlarmCentre::tick`] does any work.
 const TICK_EVERY_MS: i64 = 30_000;
@@ -21,11 +21,11 @@ pub struct AlarmCentre {
 
 impl AlarmCentre {
     /// Restores the open alarms and muted rules from `store`.
-    pub fn load(store: &Store, config: AlarmConfig) -> AlarmCentre {
+    pub fn load(store: &Store, config: AlarmConfig, zone: Zone) -> AlarmCentre {
         let alarms = store.alarms(LOAD_LIMIT).unwrap_or_default();
         let muted = store.muted_rules().unwrap_or_default();
         AlarmCentre {
-            engine: AlarmEngine::restore(config, alarms, muted),
+            engine: AlarmEngine::restore(config, zone, alarms, muted),
             last_tick: Timestamp(0),
         }
     }
@@ -69,11 +69,6 @@ impl AlarmCentre {
     /// An alert the alert evaluation just produced.
     pub fn alert(&mut self, store: &Store, alert: &Alert) -> Vec<AlarmChange> {
         self.observe(store, from_alert(alert), alert.at)
-    }
-
-    /// A rule's Notify step.
-    pub fn rule_notify(&mut self, store: &Store, rule_name: &str, app: &str, at: Timestamp) -> Vec<AlarmChange> {
-        self.observe(store, from_rule_notify(rule_name, rule_name, app), at)
     }
 
     /// Time passing; does work at most every 30 s.

@@ -4,9 +4,9 @@
 //! [`install`], [`manifest`]) know nothing of Spotter and will move to the shared paddock repo; only [`adapter`]
 //! (and [`status`], which mirrors the UI's `RendererStatus`) are Spotter specific.
 
-// The browser is a GUI program started by the supervisor; `taskkill`/`kill` are short helpers. The driver is meant to
-// be copied between apps, so it uses std's `Command` directly instead of the app's quiet-command helper.
-#![allow(clippy::disallowed_methods)]
+// The browser is a GUI program started by the supervisor. The driver is meant to be copied between apps, so it uses std's
+// `Command` directly instead of the app's quiet-command helper; each use carries its own `#[expect]`, so the lint still sees
+// every bare-pid kill (ADR 0033).
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod adapter;

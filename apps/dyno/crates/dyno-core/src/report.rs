@@ -3,7 +3,7 @@
 use crate::forecast::Forecast;
 use crate::health::Severity;
 use crate::history::{Consumer, HistoryPoint};
-use crate::time::Timestamp;
+use crate::time::{offset_label, to_local, LocalZone, Timestamp};
 use crate::units::bytes;
 use serde::{Deserialize, Serialize};
 
@@ -27,10 +27,6 @@ pub struct WeeklyReport {
     pub avg_memory: f32,
     /// Biggest consumers.
     pub top_apps: Vec<Consumer>,
-    /// Rule actions taken.
-    pub rule_actions: u32,
-    /// Bytes cleaned up.
-    pub cleaned_bytes: u64,
     /// App crashes.
     pub crashes: u32,
     /// Alerts raised.
@@ -43,17 +39,15 @@ pub struct WeeklyReport {
     pub disks: Vec<ReportDisk>,
     /// The week's alerts, newest first (at most [`MAX_LISTED`]).
     pub issues: Vec<ReportIssue>,
-    /// What changed on the machine (rule actions, cleanups, startup and tuning changes), newest first (at most [`MAX_LISTED`]).
-    pub changes: Vec<ReportChange>,
     /// Hardware notes: time throttled and disks or batteries that need attention, as plain sentences (empty when there
     /// is nothing to say).
     #[serde(default)]
     pub hardware: Vec<String>,
-    /// True when the week holds no history, issues, changes or crashes: a valid report that says so.
+    /// True when the week holds no history, issues or crashes: a valid report that says so.
     pub nothing_to_report: bool,
 }
 
-/// Most issues and changes the report lists.
+/// Most issues the report lists.
 pub const MAX_LISTED: usize = 20;
 
 /// The health score at one moment.
@@ -94,18 +88,6 @@ pub struct ReportIssue {
     pub detail: String,
 }
 
-/// Something Dyno or the user changed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReportChange {
-    /// When.
-    pub at: Timestamp,
-    /// One line.
-    pub title: String,
-    /// Why or what exactly.
-    pub detail: String,
-}
-
 /// What the report is built from.
 pub struct ReportInput<'a> {
     /// Start.
@@ -120,10 +102,6 @@ pub struct ReportInput<'a> {
     pub score: Option<u32>,
     /// Score a week ago, if recorded.
     pub score_before: Option<u32>,
-    /// Rule actions.
-    pub rule_actions: u32,
-    /// Bytes cleaned.
-    pub cleaned_bytes: u64,
     /// Crashes.
     pub crashes: u32,
     /// Alerts.
@@ -134,8 +112,6 @@ pub struct ReportInput<'a> {
     pub disks: Vec<ReportDisk>,
     /// Alerts of the week, newest first.
     pub issues: Vec<ReportIssue>,
-    /// Changes of the week, newest first.
-    pub changes: Vec<ReportChange>,
     /// Hardware notes (see [`hardware_lines`]).
     pub hardware: Vec<String>,
 }
@@ -156,7 +132,7 @@ pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
         highlights.push("Dyno has no history for this week yet.".to_string());
     } else {
         highlights.push(format!(
-            "Your PC averaged {avg_cpu:.0}% CPU and {avg_memory:.0}% memory, peaking at {peak_cpu:.0}% CPU."
+            "Your computer averaged {avg_cpu:.0}% CPU and {avg_memory:.0}% memory, peaking at {peak_cpu:.0}% CPU."
         ));
     }
     if let Some(top) = i.top_apps.first() {
@@ -166,16 +142,6 @@ pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
         c if c > 0 => highlights.push(format!("The health score rose by {c} points to {score_now}.")),
         c if c < 0 => highlights.push(format!("The health score fell by {} points to {score_now}.", -c)),
         _ => {}
-    }
-    if i.rule_actions > 0 {
-        highlights.push(format!(
-            "Rules stepped in {} time{}.",
-            i.rule_actions,
-            if i.rule_actions == 1 { "" } else { "s" }
-        ));
-    }
-    if i.cleaned_bytes > 0 {
-        highlights.push(format!("Cleanup freed {}.", bytes(i.cleaned_bytes)));
     }
     if i.crashes > 0 {
         let one = i.crashes == 1;
@@ -200,17 +166,9 @@ pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
     for h in i.hardware.iter().take(3) {
         highlights.push(h.clone());
     }
-    let nothing_to_report = i.points.is_empty()
-        && i.issues.is_empty()
-        && i.changes.is_empty()
-        && i.crashes == 0
-        && i.rule_actions == 0
-        && i.cleaned_bytes == 0
-        && i.alerts == 0
-        && i.top_apps.is_empty();
-    let (mut issues, mut changes) = (i.issues, i.changes);
+    let nothing_to_report = i.points.is_empty() && i.issues.is_empty() && i.crashes == 0 && i.alerts == 0 && i.top_apps.is_empty();
+    let mut issues = i.issues;
     issues.truncate(MAX_LISTED);
-    changes.truncate(MAX_LISTED);
     WeeklyReport {
         from: i.from,
         to: i.to,
@@ -220,15 +178,12 @@ pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
         peak_cpu,
         avg_memory,
         top_apps: i.top_apps,
-        rule_actions: i.rule_actions,
-        cleaned_bytes: i.cleaned_bytes,
         crashes: i.crashes,
         alerts: i.alerts,
         highlights,
         score_trend: i.score_trend,
         disks: i.disks,
         issues,
-        changes,
         hardware: i.hardware,
         nothing_to_report,
     }
@@ -281,21 +236,21 @@ pub fn hardware_lines(
     lines
 }
 
-/// A date as "2026-10-16" in UTC (the engine does not know the user's time zone; the app shows local times).
-pub fn utc_date(t: Timestamp) -> String {
-    let (y, m, d, _, _) = civil(t);
+/// A date as "2026-10-16" in the user's local zone.
+pub fn local_date(t: Timestamp, zone: &dyn LocalZone) -> String {
+    let (y, m, d, _, _) = civil(to_local(t, zone));
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-/// A moment as "2026-10-16 14:05 UTC".
-pub fn utc_time(t: Timestamp) -> String {
-    let (y, m, d, hh, mm) = civil(t);
-    format!("{y:04}-{m:02}-{d:02} {hh:02}:{mm:02} UTC")
+/// A moment as "2026-10-16 14:05" in the user's local zone.
+pub fn local_time(t: Timestamp, zone: &dyn LocalZone) -> String {
+    let (y, m, d, hh, mm) = civil(to_local(t, zone));
+    format!("{y:04}-{m:02}-{d:02} {hh:02}:{mm:02}")
 }
 
-/// Civil date and time of a timestamp (Howard Hinnant's days-to-date algorithm).
-fn civil(t: Timestamp) -> (i64, u32, u32, u32, u32) {
-    let secs = t.millis().div_euclid(1000);
+/// Civil date and time of a wall time in milliseconds since the (local) epoch (Howard Hinnant's days-to-date algorithm).
+fn civil(wall: i64) -> (i64, u32, u32, u32, u32) {
+    let secs = wall.div_euclid(1000);
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);
     let z = days + 719_468;
@@ -337,11 +292,16 @@ fn score_line(r: &WeeklyReport) -> String {
     }
 }
 
-/// The report as Markdown (dates in UTC).
-pub fn to_markdown(r: &WeeklyReport) -> String {
-    let mut o = format!("# Dyno weekly report\n\n{} to {} (UTC)\n\n", utc_date(r.from), utc_date(r.to));
+/// The report as Markdown (dates and times in the user's local zone, which the heading names).
+pub fn to_markdown(r: &WeeklyReport, zone: &dyn LocalZone) -> String {
+    let mut o = format!(
+        "# Dyno weekly report\n\n{} to {}, local time ({})\n\n",
+        local_date(r.from, zone),
+        local_date(r.to, zone),
+        offset_label(r.to, zone)
+    );
     if r.nothing_to_report {
-        o.push_str("Nothing to report for this week: Dyno recorded no history, issues or changes.\n");
+        o.push_str("Nothing to report for this week: Dyno recorded no history or issues.\n");
         return o;
     }
     o.push_str("## Highlights\n\n");
@@ -386,21 +346,12 @@ pub fn to_markdown(r: &WeeklyReport) -> String {
         for i in &r.issues {
             o.push_str(&format!(
                 "- {} {}: {} ({})\n",
-                utc_time(i.at),
+                local_time(i.at, zone),
                 severity_text(i.severity),
                 i.title,
                 i.detail
             ));
         }
-    }
-    o.push_str("\n## What changed\n\n");
-    o.push_str(&format!(
-        "Rules stepped in {} time(s); cleanup freed {}.\n",
-        r.rule_actions,
-        bytes(r.cleaned_bytes)
-    ));
-    for c in &r.changes {
-        o.push_str(&format!("- {} {} ({})\n", utc_time(c.at), c.title, c.detail));
     }
     o
 }
@@ -426,7 +377,7 @@ pub fn escape_html(s: &str) -> String {
 }
 
 /// The report as one self-contained HTML page (no scripts, no remote content; dates in UTC).
-pub fn to_html(r: &WeeklyReport) -> String {
+pub fn to_html(r: &WeeklyReport, zone: &dyn LocalZone) -> String {
     let e = escape_html;
     let mut o = String::from(
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Dyno weekly report</title>\n<style>\n\
@@ -436,12 +387,13 @@ pub fn to_html(r: &WeeklyReport) -> String {
          .muted{color:#666}\n</style>\n</head>\n<body>\n",
     );
     o.push_str(&format!(
-        "<h1>Dyno weekly report</h1>\n<p class=\"muted\">{} to {} (UTC)</p>\n",
-        utc_date(r.from),
-        utc_date(r.to)
+        "<h1>Dyno weekly report</h1>\n<p class=\"muted\">{} to {}, local time ({})</p>\n",
+        local_date(r.from, zone),
+        local_date(r.to, zone),
+        offset_label(r.to, zone)
     ));
     if r.nothing_to_report {
-        o.push_str("<p>Nothing to report for this week: Dyno recorded no history, issues or changes.</p>\n</body>\n</html>\n");
+        o.push_str("<p>Nothing to report for this week: Dyno recorded no history or issues.</p>\n</body>\n</html>\n");
         return o;
     }
     o.push_str("<h2>Highlights</h2>\n<ul>\n");
@@ -497,7 +449,7 @@ pub fn to_html(r: &WeeklyReport) -> String {
         for i in &r.issues {
             o.push_str(&format!(
                 "<li>{} {}: {} <span class=\"muted\">({})</span></li>\n",
-                utc_time(i.at),
+                local_time(i.at, zone),
                 severity_text(i.severity),
                 e(&i.title),
                 e(&i.detail)
@@ -505,20 +457,7 @@ pub fn to_html(r: &WeeklyReport) -> String {
         }
         o.push_str("</ul>\n");
     }
-    o.push_str(&format!(
-        "<h2>What changed</h2>\n<p>Rules stepped in {} time(s); cleanup freed {}.</p>\n<ul>\n",
-        r.rule_actions,
-        bytes(r.cleaned_bytes)
-    ));
-    for c in &r.changes {
-        o.push_str(&format!(
-            "<li>{} {} <span class=\"muted\">({})</span></li>\n",
-            utc_time(c.at),
-            e(&c.title),
-            e(&c.detail)
-        ));
-    }
-    o.push_str("</ul>\n</body>\n</html>\n");
+    o.push_str("</body>\n</html>\n");
     o
 }
 
@@ -541,11 +480,11 @@ impl ReportFormat {
         }
     }
 
-    /// Renders the report in this format.
-    pub fn render(self, r: &WeeklyReport) -> String {
+    /// Renders the report in this format, with dates in the user's local `zone`.
+    pub fn render(self, r: &WeeklyReport, zone: &dyn LocalZone) -> String {
         match self {
-            ReportFormat::Markdown => to_markdown(r),
-            ReportFormat::Html => to_html(r),
+            ReportFormat::Markdown => to_markdown(r, zone),
+            ReportFormat::Html => to_html(r, zone),
         }
     }
 }
@@ -569,7 +508,7 @@ pub fn validate_destination(path: &str, format: ReportFormat) -> Result<std::pat
     if !p.is_absolute() {
         return Err("Give the full path of the file to save.".into());
     }
-    if crate::cleanup::has_dot_segment(p) {
+    if crate::disk::has_dot_segment(p) {
         return Err("The save path may not contain \"..\".".into());
     }
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_ascii_lowercase();
@@ -583,6 +522,9 @@ pub fn validate_destination(path: &str, format: ReportFormat) -> Result<std::pat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time::FixedZone;
+
+    const UTC: &FixedZone = &FixedZone::UTC;
 
     fn input(points: &[HistoryPoint]) -> ReportInput<'_> {
         ReportInput {
@@ -592,14 +534,11 @@ mod tests {
             top_apps: vec![],
             score: Some(80),
             score_before: None,
-            rule_actions: 0,
-            cleaned_bytes: 0,
             crashes: 0,
             alerts: 0,
             score_trend: vec![],
             disks: vec![],
             issues: vec![],
-            changes: vec![],
             hardware: vec![],
         }
     }
@@ -660,13 +599,6 @@ mod tests {
             },
         ];
         i.issues = vec![issue(5)];
-        i.changes = vec![ReportChange {
-            at: Timestamp(3_600_000),
-            title: "Turned off <Updater> at login".into(),
-            detail: "You changed this".into(),
-        }];
-        i.rule_actions = 2;
-        i.cleaned_bytes = 1 << 30;
         weekly(i)
     }
 
@@ -674,10 +606,10 @@ mod tests {
     fn nothing_to_report_is_a_valid_report() {
         let r = weekly(input(&[]));
         assert!(r.nothing_to_report);
-        let md = to_markdown(&r);
+        let md = to_markdown(&r, UTC);
         assert!(md.contains("Nothing to report"));
         assert!(!md.contains("## Highlights"));
-        assert!(to_html(&r).contains("Nothing to report"));
+        assert!(to_html(&r, UTC).contains("Nothing to report"));
         // Any one thing makes it a report.
         let mut i = input(&[]);
         i.crashes = 1;
@@ -685,18 +617,11 @@ mod tests {
     }
 
     #[test]
-    fn issues_and_changes_are_capped_and_disks_forecast() {
+    fn issues_are_capped_and_disks_forecast() {
         let mut i = input(&[]);
         i.issues = (0..30).map(issue).collect();
-        i.changes = (0..30)
-            .map(|n| ReportChange {
-                at: Timestamp(n),
-                title: "x".into(),
-                detail: String::new(),
-            })
-            .collect();
         let r = weekly(i);
-        assert_eq!((r.issues.len(), r.changes.len()), (MAX_LISTED, MAX_LISTED));
+        assert_eq!(r.issues.len(), MAX_LISTED);
         assert!(r.highlights.iter().any(|h| h == "30 things needed attention."));
         let r = busy_week();
         assert!(r
@@ -709,7 +634,7 @@ mod tests {
 
     #[test]
     fn markdown_has_every_section_and_escapes_table_cells() {
-        let md = to_markdown(&busy_week());
+        let md = to_markdown(&busy_week(), UTC);
         for h in [
             "## Highlights",
             "## Health",
@@ -717,26 +642,23 @@ mod tests {
             "## Busiest apps",
             "## Disks",
             "## Issues",
-            "## What changed",
         ] {
             assert!(md.contains(h), "{h}");
         }
-        assert!(md.starts_with("# Dyno weekly report\n\n2025-10-09 to 2025-10-16 (UTC)"));
+        assert!(md.starts_with("# Dyno weekly report\n\n2025-10-09 to 2025-10-16, local time (UTC)"));
         assert!(md.contains("Health score 80 (+10 against a week ago)."));
         assert!(md.contains("Recorded scores, oldest first: 70, 80."));
         assert!(md.contains("| <b>Evil\\|App</b> | 12.5% | 2.0 GB |"));
         assert!(md.contains("- C:: 20.0 GB free of 500.0 GB, full in about 12 days"));
         assert!(md.contains("not filling up") && md.contains("not enough history for a forecast"));
-        assert!(md.contains("1970-01-01 05:00 UTC Warning: Issue 5 (detail)"));
-        assert!(md.contains("Rules stepped in 2 time(s); cleanup freed 1.0 GB."));
+        assert!(md.contains("1970-01-01 05:00 Warning: Issue 5 (detail)"));
     }
 
     #[test]
     fn html_escapes_text_from_the_machine_and_has_no_script() {
-        let html = to_html(&busy_week());
+        let html = to_html(&busy_week(), UTC);
         assert!(html.starts_with("<!doctype html>"));
         assert!(html.contains("&lt;b&gt;Evil|App&lt;/b&gt;"));
-        assert!(html.contains("Turned off &lt;Updater&gt; at login"));
         assert!(!html.contains("<b>") && !html.contains("<script"));
         assert!(html.contains("<h2>Disks</h2>") && html.contains("<h2>Issues</h2>"));
         assert_eq!(escape_html("a&\"'<>"), "a&amp;&quot;&#39;&lt;&gt;");
@@ -750,22 +672,31 @@ mod tests {
         i.score_before = Some(70);
         let r = weekly(i);
         assert_eq!((r.score, r.score_change), (None, 0));
-        assert!(to_markdown(&r).contains("No health score was recorded this week."));
+        assert!(to_markdown(&r, UTC).contains("No health score was recorded this week."));
     }
 
     #[test]
-    fn dates_are_civil_utc() {
-        assert_eq!(utc_date(Timestamp(0)), "1970-01-01");
-        assert_eq!(utc_time(Timestamp(951_782_400_000 + 3_660_000)), "2000-02-29 01:01 UTC");
-        assert_eq!(utc_date(Timestamp(-86_400_000)), "1969-12-31");
-        assert_eq!(utc_date(Timestamp(1_760_000_000_000)), "2025-10-09");
+    fn dates_are_civil_and_local() {
+        assert_eq!(local_date(Timestamp(0), UTC), "1970-01-01");
+        assert_eq!(local_time(Timestamp(951_782_400_000 + 3_660_000), UTC), "2000-02-29 01:01");
+        assert_eq!(local_date(Timestamp(-86_400_000), UTC), "1969-12-31");
+        assert_eq!(local_date(Timestamp(1_760_000_000_000), UTC), "2025-10-09");
+        // 2025-10-09T08:53:20Z is 16:53 in UTC+8; nine hours earlier it was 19:53 on the 8th in UTC-4.
+        assert_eq!(local_time(Timestamp(1_760_000_000_000), &FixedZone(480)), "2025-10-09 16:53");
+        assert_eq!(
+            local_time(Timestamp(1_760_000_000_000 - 9 * 3_600_000), &FixedZone(-240)),
+            "2025-10-08 19:53"
+        );
+        assert_eq!(offset_label(Timestamp(0), UTC), "UTC");
+        assert_eq!(offset_label(Timestamp(0), &FixedZone(480)), "UTC+08:00");
+        assert_eq!(offset_label(Timestamp(0), &FixedZone(-570)), "UTC-09:30");
     }
 
     #[test]
     fn formats_and_destinations() {
         assert_eq!((ReportFormat::Markdown.extension(), ReportFormat::Html.extension()), ("md", "html"));
-        assert!(ReportFormat::Html.render(&busy_week()).contains("<html"));
-        assert!(ReportFormat::Markdown.render(&busy_week()).starts_with("# "));
+        assert!(ReportFormat::Html.render(&busy_week(), UTC).contains("<html"));
+        assert!(ReportFormat::Markdown.render(&busy_week(), UTC).starts_with("# "));
         let ok = if cfg!(windows) { "C:\\r\\week.MD" } else { "/r/week.MD" };
         assert!(validate_destination(ok, ReportFormat::Markdown).is_ok());
         let wrong = if cfg!(windows) { "C:\\r\\week.md" } else { "/r/week.md" };
@@ -806,22 +737,17 @@ mod tests {
             memory_avg: 0,
         }];
         i.score_before = Some(70);
-        i.rule_actions = 1;
-        i.cleaned_bytes = 3 << 30;
         i.crashes = 2;
         let r = weekly(i);
         assert_eq!((r.avg_cpu, r.peak_cpu, r.avg_memory, r.score_change), (20.0, 90.0, 50.0, 10));
-        assert_eq!(r.highlights.len(), 6);
+        assert_eq!(r.highlights.len(), 4);
         assert!(r.highlights[2].contains("rose by 10"));
-        assert!(r.highlights[3].contains("1 time."));
-        assert!(r.highlights[5].contains("2 app crashes"));
+        assert!(r.highlights[3].contains("2 app crashes"));
         let mut i = input(&pts);
         i.score_before = Some(90);
-        i.rule_actions = 3;
         i.crashes = 1;
         let r = weekly(i);
         assert!(r.highlights.iter().any(|h| h.contains("fell by 10")));
-        assert!(r.highlights.iter().any(|h| h.contains("3 times")));
         assert!(r.highlights.iter().any(|h| h.contains("1 app crash was")));
     }
 
@@ -880,8 +806,8 @@ mod tests {
         i.crashes = 1;
         let r = weekly(i);
         assert!(r.highlights.iter().any(|h| h.starts_with("The CPU ran slower")));
-        assert!(to_markdown(&r).contains("## Hardware\n\n- The CPU ran slower"));
-        assert!(to_html(&r).contains("<h2>Hardware</h2>"));
-        assert!(!to_markdown(&weekly(input(&[]))).contains("## Hardware"));
+        assert!(to_markdown(&r, UTC).contains("## Hardware\n\n- The CPU ran slower"));
+        assert!(to_html(&r, UTC).contains("<h2>Hardware</h2>"));
+        assert!(!to_markdown(&weekly(input(&[])), UTC).contains("## Hardware"));
     }
 }

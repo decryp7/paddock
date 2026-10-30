@@ -58,6 +58,11 @@ product-reference points come from established knowledge (marked "[k]" in Source
   Subtitle 15/22/600; Title 18/26/600 (page title); Display 28/32/600 tabular (tile hero); Hero 40/44/600 (tray/health
   score only). Weights used: 400, 500, 600. No 700, no italics for emphasis.
 - Max line length 80 characters in prose; truncate with ellipsis plus tooltip, never wrap table cells to 3 lines.
+- A truncation is a decision that says so: `text-overflow: ellipsis` and the full text in a tooltip, title or aria-label (the app's
+  `dyFullText` sets `data-full-text`). Controls, tabs, links and numbers are never truncated: they wrap, or the layout gives them room.
+- Tab nav bars: a link is as wide as its label (`--pd-space-3` side padding, no 160 px minimum), so eight tabs fit a 900 px window; a
+  narrower page paginates. `mat-tab-group` (content tabs, a few of them) keeps Material's own sizing: it paginates by itself and no app
+  has a row of tabs that needs the rule.
 - Sentence case everywhere. Units are a smaller sibling of the number (`17.1` 28 px + `GB` 13 px muted).
 
 ## 4. Colour
@@ -239,6 +244,8 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   metric + unit + window ("CPU, last 24 h").
 - **Empty chart**: keep axes ghosted at 40% opacity, centred message "No data for this period" + next step ("Widen to
   7 days"). **Loading**: skeleton block at final height (no layout shift). **Error**: inline message + Retry.
+- **Sunburst** (`pd-sunburst`): hierarchies only; four rings; colour by branch with `ring.ts` (five largest children, the rest neutral); hidden space is
+  hatched and not-yet-counted space is dashed, never colour alone; the consumer pairs it with a list or table that carries every value.
 - Pass tokens in; re-theme on scheme change without reloading data. Do not use `dataZoom` slider chrome by default:
   use brush on the plot and a "Reset zoom" chip.
 
@@ -251,6 +258,7 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   right-aligned tabular with units in header, first column strong, hover surface-2, selected = accent 12% tint plus
   2 px left bar, truncation with tooltip (a path is cut at segment boundaries and keeps the trailing segments, `…/Debrief/plugins/viewer/plugin-1.bin`, because the shared head is the part rows have in common), row actions appear on hover/focus but remain keyboard reachable (the "..."
   button stays visible in `--pd-row-action-rest`, subtle text at 75% (65% measured 2.75:1 in light), 3:1 or better; 100% text colour on hover, focus and open). Sort affordance visible. Never clip the last column: use sticky action column.
+  - **Tree grid** (`pd-table` with `order="source"` and `tree`): for a list the app orders itself as a tree (processes under their parent, connections under their program). The app lists the visible rows in display order and owns the fold state; each row has `aria-level`, `aria-expanded` (null for a leaf) and its place among siblings, and the first cell is indented `--pd-tree-indent` per level. Right unfolds a folded row and on an unfolded one moves to its first child; Left folds an unfolded row, and on a leaf or a folded row goes to its parent. A tree has no filter field (the rows are the app's list). One row action cluster per row shares one tooltip, to the left of the cluster (`PdActionTip`).
 - **Toolbars**: 44 px, ghost buttons by default (no border until hover), one primary (filled accent) at the far right,
   groups separated by a 1 px divider, segmented controls for 2-4 mutually exclusive options (time range).
 - **Buttons**: primary (accent fill), secondary (surface-2 + border-strong), ghost, danger (danger fill only in
@@ -266,14 +274,47 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
 - **Toasts**: bottom-right, kept clear of the status bar and of the page footer (`--pd-page-footer-safe`, 56 px: a footer up to 56 px
   tall, such as a wizard's Next, is not covered), 360 max, auto-dismiss 5 s (errors persist until dismissed), at most 3 stacked, with Undo
   where the action is reversible; `role=status` (errors `role=alert`).
+  **One toast area**: the notification host and the undo toast (a Material snack bar, rule 47) share it. Both are 360 px, bottom right,
+  on the same baseline with the same look (surface-3, hairline, shadow); the undo toast is the lowest and the host lifts itself by its
+  height (`ToastArea`), so they stack and never overlap at any width. The snack bar is announced by its own polite live region
+  (`aria-live="polite"`, the equivalent of `role=status`) and never takes focus; a snack bar shows one at a time, so another one
+  replaces the undo toast (the edit stays undoable). Known Material limit: for about 150 ms after it opens, the snack bar's content
+  is `aria-hidden` while its buttons are focusable (it moves the content into the live region after that delay); axe's
+  `aria-hidden-focus` can flag that window, so tests wait for the live region before running axe.
 - **Badges**: 20 px high, 12/500, pill, tint bg + status colour text + 12 px icon + word. Counts in nav: neutral
   surface-3 pill; use status tint only if the count means a problem. Never more than 2 badges in one table cell.
 - **Skeletons**: 1.6 s shimmer on surface-2 (static in reduced motion), same geometry as content.
 - **Empty states**: 32 px muted icon, 15/600 title (what is missing), one muted sentence (why / what happens next), one
   button (the next step). **Error states**: icon in danger, what failed in plain words, likely cause, Retry + secondary
   ("Open logs"). Never raw exception text as the headline.
-- **Forms**: label above input 12/500, helper 12 muted, error replaces helper in danger with icon, validate on blur,
-  toggles are for immediate effects, checkboxes for form submit; group settings by consequence, not by data model.
+- **Forms**: every field is a Material outline field (`mat-form-field appearance="outline"` with `floatLabel="always"`, rule 47
+  and decision D1, 2026-10-28): the label 12/500 sits in the outline's notch and stays there, empty or not; helper 12 muted
+  under the field, replaced by the error in danger with its icon; validate on blur. Selects are `mat-select`, times
+  `mat-timepicker`, a few exclusive choices `mat-button-toggle-group`. Toggles are for immediate effects, checkboxes for form
+  submit; group settings by consequence, not by data model. (UI rule 11, "label above the input", is superseded: the label is in the notch.)
+
+### Material controls (rule 47)
+- **One theme.** `@decryp7/paddock-ui/css/material.css` is the whole Material look: Material 3 with density -3, every system and
+  component token resolved to `--pd-*`, so theme, accent, contrast and density follow our tokens. An app loads it and carries no
+  Material theme of its own. The accent comes from `data-accent` on `<html>`; a `data-accent` on a subtree does not reach Material
+  parts (their tokens resolve on `:root`).
+- **Behaviour defaults.** `providePaddockMaterial()` (`@decryp7/paddock-ui/material`): every `mat-form-field` is
+  `appearance="outline"` with `floatLabel="always"`, the slide toggle has no icon in its handle (`hideIcon`), button toggles show no check mark, and ripples are off. It MUST be provided in every bootstrap: the main window and each dialog window (a window without it shows the minus and check icons). Feedback is the
+  state layer (hover, pressed) and the keyboard ring, the same calm response as the rest of the family and nothing to switch
+  off for Reduce Motion.
+- **State layers.** The bridge itself sets Material's hover, focus and pressed state-layer opacities from `--pd-hover-alpha` (hover and
+  keyboard focus) and `--pd-pressed-alpha`, so it never depends on `mat.theme` defining them; without them the opacity is undefined,
+  computes to 1 and Material draws an opaque disc. Both are public tokens (0.05 and 0.09, in every theme) and `--pd-hover` and
+  `--pd-pressed` are built from them, so a Material control and a family control show the same fill.
+- **Buttons are `matButton`:** `filled` = primary (accent fill), `outlined` = secondary (surface-2 + border-strong), `text` =
+  ghost, and the class `pd-button-danger` on any of them = danger. `tonal` and `elevated` are bridged only so they never fall back
+  to Material's blue; the family does not use them (an app review rejects them).
+- **Keyboard focus** is Material's strong indicator in `--pd-focus-ring`: a 2 px solid ring 2 px outside the control, 3:1 on every
+  surface (`--pd-focus-width`, 2 px). `e2e/material.spec.ts` tabs through every kind of control and asserts it. **Exception, form
+  fields:** the floated label sits on the border, so a ring around the box would cross it; the field's own outline is the ring
+  instead, in `--pd-focus-ring` at 3 px (the resting 1 px border is part of it, so 2 px of new pixels change, SC 2.4.13).
+- **Measured:** `npm run test:tokens` checks the contrast of every bridged component in both schemes and all accents; the gallery
+  page "Material controls" and its e2e check the rendered sizes (28 px rows, 4 px panel padding, 12 px floated label).
 
 ## 9. Motion
 
@@ -292,6 +333,9 @@ server. Check the URL in Settings, then Retry."). No exclamation marks, no jokes
 units and thousands separators; relative time under 24 h with absolute on hover; "3 min ago" not "3m". Empty states
 start with the benefit, not the lack. Pitwall may be slightly technical, Dyno slightly warmer, Debrief terse, Pitcrew
 operational, Spotter concise.
+
+"Label: value" pairs (a status chip's "Log store: stopped", a fact list's "Version: 1.2") use a lower-case value unless it is a
+proper noun or a name; the label starts the sentence, the value continues it.
 
 ## 11. Native-feel rules (Debrief ADR 0028 for the whole Paddock family)
 

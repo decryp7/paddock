@@ -76,8 +76,8 @@ describe('the notes', () => {
     assert.equal(changelogSection(changelog, '0.2.0'), '### Added\n\n- B');
     assert.equal(changelogSection(changelog, '0.1.0'), '### Added\n\n- A');
     assert.equal(releaseNotes(shell, changelog, '0.1.0'), `### Added\n\n- A\n\n${firstLaunch(shell)}\n`);
-    assert.match(firstLaunch(shell), /Open Anyway/);
-    assert.match(firstLaunch(shell), /about Paddock Shell Demo >/);
+    assert.match(firstLaunch(shell), /Open Anyway[\s\S]*Open Anyway[\s\S]*administrator/);
+    assert.match(firstLaunch(shell), /“Paddock Shell Demo” was blocked/);
     assert.match(firstLaunch(workbench), /Paddock Workbench Demo is not code-signed/);
   });
 

@@ -227,6 +227,41 @@ pub trait IssueSource: Send + Sync {
     fn id(&self) -> IssueSourceId;
     /// The issues that happened in `[since, until]`.
     fn read(&self, since: Timestamp, until: Timestamp) -> Result<Vec<Issue>, PlatformError>;
+    /// Whether [`read_controlled`](Self::read_controlled) honours Cancel and reports progress (a source that streams the output
+    /// of a tool). A source that does not is read in one uninterruptible step.
+    fn controllable(&self) -> bool {
+        false
+    }
+    /// [`read`](Self::read) that reports a growing count of the records it parsed and stops its tool when `control` is
+    /// cancelled (the result is then dropped by the caller). The default ignores `control`.
+    fn read_controlled(&self, since: Timestamp, until: Timestamp, control: &dyn ReadControl) -> Result<Vec<Issue>, PlatformError> {
+        let _ = control;
+        self.read(since, until)
+    }
+}
+
+/// What a running read tells its owner and asks of it (the job that runs the read): a growing count and the cancel signal.
+pub trait ReadControl: Send + Sync {
+    /// Whether the owner asked the read to stop.
+    fn cancelled(&self) -> bool;
+    /// Records parsed so far (only grows).
+    fn parsed(&self, records: u64);
+    /// Calls `stop` once, at once, when the owner cancels (and straight away when it already did) until the returned guard is
+    /// dropped. The read uses it to kill a child process, so Cancel does not wait for the tool's next line.
+    fn on_cancel(&self, stop: Box<dyn Fn() + Send + Sync>) -> Box<dyn Send>;
+}
+
+/// A [`ReadControl`] that is never cancelled and ignores progress.
+pub struct NoControl;
+
+impl ReadControl for NoControl {
+    fn cancelled(&self) -> bool {
+        false
+    }
+    fn parsed(&self, _records: u64) {}
+    fn on_cancel(&self, _stop: Box<dyn Fn() + Send + Sync>) -> Box<dyn Send> {
+        Box::new(())
+    }
 }
 
 /// What the last read of a source found.
@@ -329,7 +364,7 @@ pub fn validate_export_path(path: &str) -> Result<std::path::PathBuf, String> {
     if !p.is_absolute() {
         return Err("Give the full path of the file to save.".into());
     }
-    if crate::cleanup::has_dot_segment(p) {
+    if crate::disk::has_dot_segment(p) {
         return Err("The save path may not contain \"..\".".into());
     }
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_ascii_lowercase();

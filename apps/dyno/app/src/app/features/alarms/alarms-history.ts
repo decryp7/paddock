@@ -1,52 +1,49 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { AlarmChange } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { AlarmsStore } from '../../state/alarms.store';
-import { TABLE_CSS } from './alarms-css';
-import { changeLabel, shortTime } from './alarms-model';
+import { changeLabel, shortTime, ruleLabel } from './alarms-model';
+
+interface HistoryRow {
+  readonly n: number;
+  readonly change: AlarmChange;
+}
 
 /** The latest alarm changes (raised, acknowledged, shelved, ...), newest first. */
 @Component({
   selector: 'dy-alarms-history',
-  imports: [AsyncState],
+  imports: [AsyncState, PdTable, PdCell],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="store.historyLoaded()" [error]="store.historyError()" [empty]="store.history().length === 0" emptyTitle="No alarm history yet" emptyText="Every change to an alarm is listed here: raised, acknowledged, shelved and more." emptyIcon="clock" what="alarm history" [rows]="4" (retry)="store.loadHistory()">
       <p class="lead num">The last {{ store.history().length }} changes</p>
-      <div class="grid" role="table" aria-label="Alarm history">
-        <div class="head" role="row">
-          <span role="columnheader">When</span>
-          <span role="columnheader">Change</span>
-          <span role="columnheader">Alarm</span>
-          <span role="columnheader" class="c-rule">Rule</span>
-        </div>
-        @for (c of store.history(); track $index) {
-          <div class="row" role="row">
-            <span class="cell muted num" role="cell">{{ time(c.at) }}</span>
-            <span class="cell" role="cell">{{ label(c) }}</span>
-            <span class="cell" role="cell"><span class="truncate" [title]="c.alarm.title">{{ c.alarm.title }}</span></span>
-            <span class="cell c-rule muted" role="cell"><span class="truncate id" [title]="c.alarm.rule">{{ c.alarm.rule }}</span></span>
-          </div>
-        }
-      </div>
+      <pd-table [toolbar]="false" label="Alarm history" [rows]="rows()" [columns]="columns" [rowKey]="rowKey" [filterable]="false" [maxHeight]="560">
+        <ng-template pdCell="rule" let-r><span class="id">{{ ruleName(r.change.alarm.rule) }}</span></ng-template>
+      </pd-table>
     </dy-async>
   `,
-  styles: [
-    TABLE_CSS,
-    `
+  styles: `
     :host { display: block; }
     dy-async { display: grid; gap: var(--sp-3); }
-    .head, .row { --cols: 130px 170px minmax(180px, 1fr) minmax(140px, 220px); }
-    .row { min-height: 36px; }
-    @container (max-width: 700px) { .c-rule { display: none; } .head, .row { --cols: 130px 170px minmax(140px, 1fr); } }
+    .id { font-size: var(--fs-sm); line-height: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
   `,
-  ],
 })
 export class AlarmsHistory {
   protected readonly store = inject(AlarmsStore);
+  protected readonly ruleName = ruleLabel;
   private readonly now = signal(Date.now());
   protected readonly label = (c: AlarmChange) => changeLabel(c);
   protected readonly time = (at: number) => shortTime(at, this.now());
+  /** The changes, each with its place (a change has no id of its own). */
+  protected readonly rows = computed(() => this.store.history().map((change, n) => ({ n, change })));
+  protected readonly rowKey = (r: HistoryRow): string => String(r.n);
+  protected readonly columns: PdColumn<HistoryRow>[] = [
+    { key: 'at', header: 'When', value: (r) => r.change.at, text: (r) => this.time(r.change.at), width: '130px' },
+    { key: 'change', header: 'Change', value: (r) => this.label(r.change), width: '170px' },
+    { key: 'alarm', header: 'Alarm', value: (r) => r.change.alarm.title, required: true, width: 'minmax(0, 1fr)' },
+    { key: 'rule', header: 'Rule', value: (r) => ruleLabel(r.change.alarm.rule), width: 'minmax(140px, 220px)', hideBelow: 700 },
+  ];
 
   constructor() {
     if (!this.store.historyLoaded()) void this.store.loadHistory();

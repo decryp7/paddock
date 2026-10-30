@@ -6,7 +6,7 @@ import { JobsBackend, type Unlisten } from './jobs-backend';
 import { JOBS_CONTRIBUTIONS } from './jobs.contributions';
 import { PdJobsList } from './jobs-list';
 import { PdJobsStatus } from './jobs-status';
-import { jobsStatusDetail, jobsStatusText } from './jobs-status-text';
+import { jobsStatusDetail, jobsStatusProgress, jobsStatusText } from './jobs-status-text';
 import { jobsBed, phase, settle, snap } from './spec-helpers';
 import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 
@@ -128,6 +128,10 @@ describe('pd-jobs-status', () => {
     expect(button.getAttribute('aria-expanded')).toBe('true');
     const panel = el.querySelector('[role="region"]') as HTMLElement;
     expect(panel.id).toBe(button.getAttribute('aria-controls'));
+    // The popover names itself with a visible heading.
+    const heading = panel.querySelector('h2') as HTMLElement;
+    expect(heading.textContent?.trim()).toBe('Jobs');
+    expect(panel.getAttribute('aria-labelledby')).toBe(heading.id);
     expect(panel.querySelectorAll('li')).toHaveLength(2);
 
     panel.dispatchEvent(new Event('pointerdown', { bubbles: true }));
@@ -202,5 +206,14 @@ describe('JOBS_CONTRIBUTIONS', () => {
     const item = registry.find('statusItems', 'pd.jobs') as { load: () => Promise<unknown> } | undefined;
     expect(await item?.load()).toBe(PdJobsStatus);
     expect(registry.has('notificationKinds', 'pd.jobs.failed')).toBe(true);
+  });
+});
+
+describe('the status item does not repeat the job title', () => {
+  const view = { headline: 'Downloading', percent: 40, count: '', timed: false };
+  it('leaves the phase out when it is the title', () => {
+    expect(jobsStatusProgress(view, 'Downloading')).toBe('40%');
+    expect(jobsStatusProgress(view, 'Update runner')).toBe('Downloading 40%');
+    expect(jobsStatusProgress({ ...view, percent: null, count: '1,240 so far' }, 'downloading')).toBe('1,240 so far');
   });
 });

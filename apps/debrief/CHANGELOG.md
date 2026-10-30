@@ -17,6 +17,8 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 ### Fixed
 
 - **Event list:** After a large import the events could be left without their time order when the database ran out of memory, and the event list then missed events until the next import. The import now gives that step its memory, says so if it still fails, and orders the events again as a job when the project opens
+- **Browser on Windows:** the page browser Debrief downloads (Chrome for Testing) no longer starts its network service twice, which could make the first page it opened fail to load
+- **Event Log follower:** the status no longer shows more queued events than the queue holds while the writer is busy
 
 ## 1.1.1 (2026-10-24)
 

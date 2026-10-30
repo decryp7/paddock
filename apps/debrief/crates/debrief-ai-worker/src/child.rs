@@ -90,6 +90,13 @@ mod reaper {
     static PIDS: Mutex<Vec<i32>> = Mutex::new(Vec::new());
     static HOOK: Once = Once::new();
 
+    #[cfg_attr(
+        unix,
+        expect(
+            clippy::disallowed_methods,
+            reason = "ADR 0033 WP-5: the exit reaper SIGKILLs registered pids that try_wait may have reaped; register ProcessIds"
+        )
+    )]
     extern "C" fn kill_all() {
         // try_lock: never block in an exit hook.
         if let Ok(pids) = PIDS.try_lock() {

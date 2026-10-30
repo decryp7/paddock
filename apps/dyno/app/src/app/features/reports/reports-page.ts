@@ -1,4 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import { PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
+import type { Consumer } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatBytes, formatCount, formatDayTime, formatPercent, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -6,35 +8,30 @@ import { SEVERITY_LABEL } from '../../shared/labels';
 import { Sparkline } from '../../shared/sparkline';
 import { ReportsStore } from '../../state/reports.store';
 import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports-model';
+import { MatButton } from '@angular/material/button';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 
 /**
  * Reports: Dyno's weekly summary built by the engine from its own history (health trend, busiest apps, disk forecast, issues
- * and what changed), one week at a time, exportable as Markdown or a web page. Made on this PC and saved only where you choose.
+ * and what changed), one week at a time, exportable as Markdown or a web page. Made on this computer and saved only where you choose.
  */
 @Component({
   selector: 'dy-reports-page',
-  imports: [AsyncState, Icon, Sparkline],
+  imports: [AsyncState, Icon, Sparkline, PdTable, PdSelect, MatButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <header class="page-head">
         <div class="titles">
           <h1>Reports</h1>
-          <p>A weekly summary from Dyno's own history. Made on this PC, saved only where you choose.</p>
+          <p>A weekly summary from Dyno's own history. Made on this computer, saved only where you choose.</p>
         </div>
-        <label class="week">
-          <span class="visually-hidden">Week</span>
-          <select class="select" aria-label="Week" [value]="store.weeksAgo()" (change)="pick($event)">
-            @for (o of options(); track o.value) {
-              <option [value]="o.value" [selected]="o.value === store.weeksAgo()">{{ o.label }}</option>
-            }
-          </select>
-        </label>
-        <button type="button" class="btn" [disabled]="!canExport()" (click)="store.export('markdown')">
-          <dy-icon name="file" /> {{ store.exporting() === 'markdown' ? 'Saving…' : 'Export Markdown...' }}
+        <pd-select class="week" [options]="weekChoices()" [value]="weekValue()" ariaLabel="Week" (valueChange)="pick($event)" />
+        <button type="button" matButton="outlined" [disabled]="!canExport()" (click)="store.export('markdown')">
+          <dy-icon name="file" /> {{ store.exporting() === 'markdown' ? 'Saving…' : 'Export Markdown…' }}
         </button>
-        <button type="button" class="btn" [disabled]="!canExport()" (click)="store.export('html')">
-          <dy-icon name="file" /> {{ store.exporting() === 'html' ? 'Saving…' : 'Export web page...' }}
+        <button type="button" matButton="outlined" [disabled]="!canExport()" (click)="store.export('html')">
+          <dy-icon name="file" /> {{ store.exporting() === 'html' ? 'Saving…' : 'Export web page…' }}
         </button>
       </header>
 
@@ -52,7 +49,7 @@ import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports
         </div>
       }
 
-      <dy-async [loaded]="!!store.report()" [error]="store.error()" [empty]="!!store.report()?.nothingToReport" emptyTitle="Nothing to report" emptyText="Dyno recorded no history, issues or changes for this week." emptyIcon="reports" what="the report" [rows]="5" (retry)="store.load()">
+      <dy-async [loaded]="!!store.report()" [error]="store.error()" [empty]="!!store.report()?.nothingToReport" emptyTitle="Nothing to report" emptyText="Dyno recorded no history or issues for this week." emptyIcon="reports" what="the report" [rows]="5" (retry)="store.load()">
         <div class="stack">
         @if (store.report(); as r) {
           <p class="range num">{{ range(r) }}</p>
@@ -63,7 +60,6 @@ import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports
             <div><dt>Memory in use</dt><dd>{{ pct(r.avgMemory) }}<small>on average</small></dd></div>
             <div><dt>App crashes</dt><dd>{{ count(r.crashes) }}</dd></div>
             <div><dt>Alerts</dt><dd>{{ count(r.alerts) }}</dd></div>
-            <div><dt>Rule actions</dt><dd>{{ count(r.ruleActions) }}</dd></div>
           </dl>
 
           <section class="card" aria-label="Highlights">
@@ -85,15 +81,9 @@ import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports
             @if (r.topApps.length) {
               <section class="card" aria-label="Busiest apps">
                 <div class="card-head"><h2><dy-icon name="processes" /> Busiest apps</h2></div>
-                <table class="table">
-                  <caption class="visually-hidden">Busiest apps of the week</caption>
-                  <thead><tr><th>App</th><th class="r">CPU (average)</th><th class="r">Memory (average)</th></tr></thead>
-                  <tbody>
-                    @for (a of r.topApps; track a.app) {
-                      <tr><td><span class="ell" [title]="a.app">{{ a.app }}</span></td><td class="r">{{ pct(a.cpuAvg) }}</td><td class="r">{{ bytes(a.memoryAvg) }}</td></tr>
-                    }
-                  </tbody>
-                </table>
+                <div class="tablewrap">
+                  <pd-table [toolbar]="false" label="Busiest apps of the week" [rows]="r.topApps" [columns]="appColumns" [rowKey]="appKey" [filterable]="false" [maxHeight]="360" />
+                </div>
               </section>
             }
             @if (r.disks.length) {
@@ -135,22 +125,6 @@ import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports
             </section>
           }
 
-          <section class="card" aria-label="What changed">
-            <div class="card-head"><h2><dy-icon name="diff" /> What changed</h2></div>
-            <p class="lead">Rules stepped in {{ plural(r.ruleActions, 'time') }}; cleanup freed {{ bytes(r.cleanedBytes) }}.</p>
-            @if (r.changes.length) {
-              <ul class="events">
-                @for (c of r.changes; track c.at + c.title) {
-                  <li>
-                    <span class="t num">{{ day(c.at) }}</span>
-                    <div class="x"><strong>{{ c.title }}</strong><span>{{ c.detail }}</span></div>
-                  </li>
-                }
-              </ul>
-            } @else {
-              <p class="none">You and Dyno changed nothing else this week.</p>
-            }
-          </section>
         }
         </div>
       </dy-async>
@@ -161,7 +135,7 @@ import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports
     .page { display: grid; gap: var(--sp-4); align-content: start; }
     .stack { display: grid; gap: var(--sp-4); min-width: 0; align-content: start; }
     .page-head { margin-bottom: 0; align-items: center; }
-    .week .select { min-width: 190px; }
+    .week { min-width: 200px; }
     .note { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); border: 1px solid var(--border); background: var(--surface-2); font-size: var(--fs-sm); min-width: 0; }
     .note.bad { border-color: var(--bad); }
     .note > dy-icon { --icon-size: 15px; color: var(--text-3); flex: none; }
@@ -177,7 +151,7 @@ import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports
     .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--sp-4); align-items: start; }
     .spark { padding: var(--sp-3) var(--sp-4) var(--sp-4); --spark-h: 72px; }
     .ell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
-    .table { margin-top: var(--sp-2); }
+    .tablewrap { margin-top: var(--sp-2); }
     .rows { list-style: none; margin: 0; padding: var(--sp-2) var(--sp-4) var(--sp-3); display: grid; }
     .rows li { display: flex; gap: var(--sp-3); align-items: baseline; padding: var(--sp-2) 0; border-top: 1px solid var(--border-subtle); font-size: var(--fs-base); }
     .rows li:first-child { border-top: 0; }
@@ -198,8 +172,16 @@ import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports
 export class ReportsPage implements OnInit {
   protected readonly store = inject(ReportsStore);
   protected readonly options = computed(() => weekOptions(this.store.latestEnd()));
+  protected readonly weekChoices = computed<PdSelectOption[]>(() => this.options().map((o) => ({ value: String(o.value), label: o.label })));
+  protected readonly weekValue = computed(() => String(this.store.weeksAgo()));
   protected readonly canExport = computed(() => !!this.store.report() && !this.store.exporting());
   protected readonly trend = computed(() => this.store.report()?.scoreTrend.map((p) => p.score) ?? []);
+  protected readonly appKey = (a: { app: string }): string => a.app;
+  protected readonly appColumns: PdColumn<Consumer>[] = [
+    { key: 'app', header: 'App', value: (a) => a.app, required: true, sortable: false, width: 'minmax(0, 1fr)' },
+    { key: 'cpu', header: 'CPU (average)', value: (a) => a.cpuAvg, text: (a) => formatPercent(a.cpuAvg, 0), align: 'end', sortable: false, width: '150px' },
+    { key: 'memory', header: 'Memory (average)', value: (a) => a.memoryAvg, text: (a) => formatBytes(a.memoryAvg), align: 'end', sortable: false, width: '150px' },
+  ];
   protected readonly bytes = formatBytes;
   protected readonly pct = (v: number) => formatPercent(v, 0);
   protected readonly plural = plural;
@@ -214,7 +196,7 @@ export class ReportsPage implements OnInit {
     void this.store.load();
   }
 
-  protected pick(event: Event): void {
-    void this.store.select(Number((event.target as HTMLSelectElement).value));
+  protected pick(value: string): void {
+    void this.store.select(Number(value));
   }
 }

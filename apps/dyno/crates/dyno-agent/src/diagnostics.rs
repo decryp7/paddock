@@ -40,9 +40,13 @@ pub fn collect(shared: &Shared) -> Result<DiagnosticsBundle, String> {
         env!("CARGO_PKG_VERSION"),
         &inventory.os,
     );
-    let (settings, alarms, stats, events, activity, alerts, recorder) = {
+    let (zone, settings, alarms, stats, events, activity, alerts, recorder) = {
         let core = lock(&shared.core);
         (
+            serde_json::json!({
+                "zone": core.zone.describe(),
+                "offsetNow": dyno_core::time::offset_label(t, core.zone.as_ref()),
+            }),
             core.settings.clone(),
             core.alarms.list(
                 &dyno_core::alarms::AlarmFilter {
@@ -54,12 +58,7 @@ pub fn collect(shared: &Shared) -> Result<DiagnosticsBundle, String> {
             ),
             core.alarms.stats(t),
             core.store.alarm_events(None, RECENT).unwrap_or_default(),
-            core.store
-                .activity(RECENT)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(e, _, _)| e)
-                .collect::<Vec<_>>(),
+            core.store.activity(RECENT).unwrap_or_default().into_iter().collect::<Vec<_>>(),
             core.store.alerts(RECENT).unwrap_or_default(),
             core.recorder.snapshot(CaptureReason::Manual, t),
         )
@@ -82,6 +81,7 @@ pub fn collect(shared: &Shared) -> Result<DiagnosticsBundle, String> {
         json(&inventory),
     )?;
     add("settings.json", "Dyno's settings", json(&settings))?;
+    add("system/time-zone.json", "The time zone local days are counted in", json(&zone))?;
     add("alarms/open.json", "Alarms", json(&alarms))?;
     add("alarms/stats.json", "Alarm statistics", json(&stats))?;
     add("alarms/history.json", "Recent alarm changes", json(&events))?;
@@ -92,7 +92,7 @@ pub fn collect(shared: &Shared) -> Result<DiagnosticsBundle, String> {
             json(&n),
         )?;
     }
-    add("activity.json", "What Dyno and you changed recently", json(&activity))?;
+    add("activity.json", "What Dyno recorded recently", json(&activity))?;
     add("alerts.json", "Recent alerts", json(&alerts))?;
     if let Some(r) = recorder {
         add(

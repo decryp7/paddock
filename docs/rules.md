@@ -17,6 +17,12 @@ changes here, every app's copy is updated in the same change.
    Lint and type-check the touched files before every push.
 5. **Every bug fix starts with a failing regression test.** A test-only failure is fixed properly (deterministic, no
    sleeps), never silently skipped.
+   A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30), in their own worktree: for Rust,
+   `cargo mutants --in-diff <diff> -p <crate> --timeout-multiplier 3` with `CARGO_BUILD_JOBS=2` (install once with
+   `cargo install cargo-mutants --locked`); for TypeScript, revert the fix and run the new test. The review reports whether
+   the new test fails without the fix; a test that still passes proves nothing and is sent back. (A `cargo mutants
+   --in-diff` CI job on the shared crates comes after the releases; see
+   [lessons.md](lessons.md#a-bug-fix-review-runs-a-mutation-check-2026-10-30).)
 6. **Tests never hard-code the app version;** they read it from its single source and check its shape.
 7. **Tests never touch the user's machine:** no real launchd/Login Items/services, no installed apps, never the
    installed Google Chrome (pinned Chrome for Testing or an explicit env var only), no `~/Documents`, `~/Desktop`,
@@ -34,7 +40,8 @@ changes here, every app's copy is updated in the same change.
     consistent (build new data, then swap).
 12. **The UI never times out a running job;** it shows "Still working".
 13. **Parallel where it helps, bounded by the kind of work** (CPU: cores−1 or the Performance setting; SSD I/O 4–8; HDD
-    1–2; network a few per host; memory-heavy by RAM), background priority, deterministic results.
+    1–2; network a few per host; memory-heavy by RAM), lowered priority that never starves (rule 52), deterministic
+    results.
 14. **Multi-stage work is a pipeline:** producers → bounded queue → workers, stage-specific thread counts, back-pressure,
     cancel across stages, per-stage progress; determinism by commit-time ordering. IDs: number only new items in sorted
     canonical relative path order; existing IDs never change; moved/renamed files are matched by path, then fingerprint.
@@ -137,6 +144,116 @@ changes here, every app's copy is updated in the same change.
     hand-roll only what neither provides, with the reason in the component's doc comment. Material is themed through the
     `--pd-*` tokens (one shared theme), CSP-safe. *Why:* Material is widely used and tested; hand-rolled components cost
     bugs it already solves.
+
+## Benchmarks (user, 2026-10-29)
+48. **Every quoted benchmark run is recorded.** Any benchmark or performance number quoted anywhere is first recorded in
+    the owning app's `docs/performance.md` (shared code: `docs/benchmarks.md`) as a results block in the template of
+    [benchmarks.md](benchmarks.md), newest first. "Anywhere" means an ADR, research note, plan, CHANGELOG, commit message,
+    pull request or lesson. The block gives date, commit, machine, load, build, synthetic corpus and generator, the exact
+    command with env vars, the number and kind of runs, the numbers with the budget and verdict, and the memory measure
+    (physical footprint, rule 26). The quoting document links to the block. A number without a block is not evidence for a
+    decision or a budget. *Why:* results were scattered across ADRs, branches and expiring job logs, often without
+    machine, load or build, so they could not be compared or reproduced, and stale numbers kept being quoted.
+
+## Test isolation (user, 2026-10-29)
+49. **Specs never wait a fixed number of event-loop turns and never leave a patch behind.** Specs of one bundle share a
+    page (the Angular builder runs Vitest with `isolate: false`), so: (a) wait on the condition, never on a count of
+    turns or timers: once `fix/debrief-import-range-flake` lands, Debrief's `openDialog()` (`testing/helpers.ts`) waits
+    with `vi.waitFor` for a lazily loaded dialog and fails when none opens; (b) an optional chain never performs a
+    test's action (no `stack().at(-1)?.ref.close()`): a missing thing must fail the test; (c) a patch on a prototype is
+    a `vi.spyOn`, put back by `restoreMocks` and by a global `afterEach(vi.restoreAllMocks)`, never an assignment,
+    `Object.defineProperty` or `Object.assign` on it. Once that branch lands, Debrief's ESLint (`no-restricted-syntax`
+    for specs) enforces (b) and (c); the other apps follow. *Why:* a fixed wait and a leaked patch each made a spec
+    fail now and then, only in the full run
+    ([lessons.md](lessons.md#test-isolation-debrief-2026-10-29)).
+
+## CI economy (user, 2026-10-29)
+50. **CI runs only what a change needs, once.**
+    (a) At most one CI run per branch head. Before dispatching, cancel any queued run on the same branch with an older head.
+    (b) Do not dispatch while review fixes are pending. Dispatch once after the last fix, and do not re-dispatch just to
+    refresh against main; merge main right before landing.
+    (c) A branch already merged into another branch gets no CI of its own.
+    (d) Docs-only changes land after the local conformance checks, without waiting for CI.
+    (e) Branch runs use the affected plan (rule 3); the full gates run once on main or at release.
+    *Why:* CI runners are the scarcest resource, and every wasted run delays a release.
+
+## Performance analysis (user, 2026-10-29)
+51. **Slow means: more parallelism, or a cheaper operation.** When any operation is slow (import, indexing, scans, queries,
+    CI steps, tests), the analysis answers two questions with measurements:
+    (a) Can more threads or workers be assigned? Bounded by the kind of work (ER-20): CPU-bound work gets cores minus one,
+    I/O a few, memory-heavy work is limited by RAM; it runs at a lowered priority that never starves (rule 52), with
+    deterministic results.
+    (b) Can the operation be made cheaper? For example less work per item, no repeated work, a cheaper algorithm or format,
+    caching, batching, skipping.
+    Thread counts and similar tunables are Settings values with an "Auto" default, validated in the engine, not
+    constants. Every design or ADR with a long or bulk operation has a "Parallelism and cost" section. Every
+    performance review checks both questions. Results are recorded under rule 48.
+    *Why:* Debrief's import was bound by 2 Tantivy writer threads and a single-threaded catalogue, and regex was 38% of parse
+    time; these were found by accident, and should be found by design.
+
+## Thread priority (user, 2026-10-30)
+52. **Work a person waits for never runs at an OS's starvable background level.** Starvable levels: on macOS QoS
+    `BACKGROUND`, process background (`PRIO_DARWIN_BG`, `taskpolicy -b`, `-c background` or `-c maintenance`) and
+    throttled I/O (`IOPOL_THROTTLE`, `taskpolicy -d throttle`); on Windows `THREAD_MODE_BACKGROUND_BEGIN`,
+    `PROCESS_MODE_BACKGROUND_BEGIN` (both also drop I/O and memory priority to the lowest), `IDLE_PRIORITY_CLASS`,
+    `THREAD_PRIORITY_IDLE` and EcoQoS (`ProcessPowerThrottling` / `ThreadPowerThrottling` execution speed); on Linux
+    `SCHED_IDLE` (`chrt --idle`) and the idle I/O class (`IOPRIO_CLASS_IDLE`, `ionice -c3`). The same levels set for a
+    whole service count too: launchd `ProcessType` `Background` (and `Adaptive` when the service has no XPC
+    `MachServices` to raise it), `LowPriorityIO` or `LowPriorityBackgroundIO` `true`, systemd `CPUSchedulingPolicy=idle`
+    and `IOSchedulingClass=idle`. Every other thread has a role. **Live** work is what a person waits on within a
+    deadline or for a screen to fill: requests, probes with a deadline, a sampler behind a live view, a page refresh.
+    **Bulk** work is long work that shows progress and can be cancelled: walks, scans, compaction, exports. Bulk work
+    runs at the gentle level: `QOS_CLASS_UTILITY` on macOS, nice 10 (with best-effort I/O) on Linux,
+    `THREAD_PRIORITY_BELOW_NORMAL` on Windows (Debrief's `debrief_core::threads::lower_priority`; family ADR 0020's
+    `Background` class); a busy machine slows it, and on Windows it accepts stalls of seconds. A thread holding a lock
+    that live work waits on is live, or must not hold the lock across slow work. Live work may use the
+    gentle level on macOS and Linux, whose schedulers share the CPU by weight, but stays at `THREAD_PRIORITY_NORMAL` on
+    Windows: Windows always runs a ready thread of a higher priority before a lower one
+    ([Scheduling Priorities](https://learn.microsoft.com/en-us/windows/win32/procthread/scheduling-priorities)), its
+    dynamic boosts are for foreground windows, input and finished waits
+    ([Priority Boosts](https://learn.microsoft.com/en-us/windows/win32/procthread/priority-boosts)), and its
+    anti-starvation boost for a ready thread that has not run comes only after seconds (Windows Internals; Microsoft
+    Learn's [Priority Inversion](https://learn.microsoft.com/en-us/windows/win32/procthread/priority-inversion) page now
+    describes AutoBoost for lock owners instead). A starvable level is only for work nobody waits on (ADR 0020's `Idle`
+    class), and each use says why with a `conformance: background-qos — <why nobody waits on it>` comment (check C54). (`THREAD_PRIORITY_LOWEST` is not on the list, but like `BELOW_NORMAL` it waits behind busy
+    normal threads, so it is for bulk work only; `THREAD_PRIORITY_IDLE` sits below all of the dynamic band.) *Why:* at
+    these levels a thread gets the CPU or the disk only after all other work at higher levels, for as long as there is
+    any (macOS `BACKGROUND` also keeps it to the efficiency cores), so a caller waiting on it waits as long as the
+    machine is busy. Debrief's mining pool ran in QoS `BACKGROUND`, and on the loaded CI Mac `debrief report` waited
+    minutes for its analyses and timed out (Debrief ADR 0052, amended 2026-10-30; lessons 2026-10-30). On the Windows CI
+    runner Dyno's sampler and counters listing, lowered to `BELOW_NORMAL`, did not run for seconds while tests filled the
+    cores (CI runs 7166 and 7168; lessons 2026-10-30).
+
+## Process identity (user, 2026-10-30)
+53. **Never act on a reusable OS name read earlier.** A process id, a port or a temp path read earlier may name something
+    else by the time it is used. Hold the thing itself (a process handle, a job object, a bound listener, an open file)
+    or verify its identity immediately before acting (for a process: its pid plus its start time,
+    `paddock_proc::ProcessId`). A tree is followed by age (a child never started before its parent) or by job
+    membership, never by parent pids alone. Kills go through `paddock_proc` (`kill_tree`, `end`, `ask`, `terminate`,
+    `Supervised`). Clippy's `disallowed-methods` (lint/clippy.toml: `libc::kill`, `libc::killpg`, nix's `kill`/`killpg`,
+    sysinfo's `Process::kill`/`kill_with`) and conformance check C53 (`taskkill`, kill commands, `Stop-Process`,
+    `TerminateProcess`, `TerminateJobObject`, open ADR 0033 follow-ups) enforce it. ADR
+    [0033](adr/0033-processes-by-identity-never-by-a-bare-pid.md); ADR [0023](adr/0023-tests-never-free-a-port-they-probe.md)
+    is the same rule for ports.
+    A discovery file, a file that names a pid or a port (Dyno's `agent.json`), is only a hint: act on it only after a held
+    lock or a live connection proves the process is there, and remove it only if it is still the same file (same pid and
+    start time), never because it was the file read earlier.
+    *Why:* Windows hands a freed pid on at once. `kill_tree` killed the pids of a stale snapshot, which can end another
+    test's Chrome helper; the same mistake was in four shapes in five apps. (It was suspected of causing the Windows
+    `ERR_ABORTED` failures; the suspected cause was disproved by run 7158; the flake has another cause, ADR 0033 WP-4.)
+    Dyno's stale `agent.json` made the app say "Agent stopped" and loop on exit 3 for a process that was gone or replaced
+    ([lessons.md](lessons.md#a-discovery-file-is-a-hint-never-proof-2026-10-30-dyno)).
+
+## Release path (user, 2026-10-30)
+54. **Every change that touches an app's release path builds that app's installers before it lands on main.** The release
+    path is the release workflow, the shared app-release workflow, the bundle and prepare steps, the Tauri config and the
+    app's imports of shared packages.
+    (a) The batch dispatches `<app>-release.yml` with gates on and the installers (bundle) built; passing tests alone is
+    not enough.
+    (b) Partly enforced: the ci-actions test (added on fix/dyno-bundle-ui) checks that every release workflow whose app
+    imports `@decryp7/paddock-ui` builds the UI.
+    *Why:* Dyno's release workflow had no `prepare: npm run build -w ui`. Tests passed, but every installer build failed
+    on a clean runner; a leftover `ui/dist` had hidden it.
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:

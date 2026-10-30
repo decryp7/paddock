@@ -1,11 +1,17 @@
 //! The supervisor end to end with a fake runner (`examples/fake_runner.rs`): real processes, pipes, logs and
 //! graceful stops; a controllable clock so backoff and the job grace period take no real time.
+//!
+//! Nothing here depends on how fast the machine is: jobs are held (`job_secs=hold`) until the test releases them, a
+//! test waits for what the supervisor has *seen* (a job's processes in its usage, not only the "task started" line),
+//! and every wait is on a condition. A real-time job length or a fixed number of fake-clock steps that must fit into
+//! one real job made these tests fail or time out on a loaded runner (CI run 6628).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods, missing_docs)]
 
 use pitcrew_core::health::RunnerStatus;
 use pitcrew_core::history::HistoryEvent;
 use pitcrew_core::history::HistoryKind;
 use pitcrew_core::names::RunnerName;
+use pitcrew_core::process_track::ATTRIBUTION_SLACK;
 use pitcrew_core::protocol::{Request, Response, RunnerSnapshot, Secret};
 use pitcrew_core::time::Timestamp;
 use pitcrew_core::update::{LocalMoment, TimeOfDay, Weekday};
@@ -177,17 +183,110 @@ impl Harness {
         }
     }
 
-    /// Advances the fake clock by `step` and processes everything that arrived, a few times.
+    /// Advances the fake clock by `step`, processes everything that arrived (waiting briefly for the first message, so
+    /// the runner's output and processes can move on between steps) and ticks once.
     fn pump(&mut self, step: Duration) {
         self.clock.fetch_add(step.as_millis() as u64, Ordering::SeqCst);
-        std::thread::sleep(Duration::from_millis(30));
+        if let Ok(m) = self.rx.recv_timeout(Duration::from_millis(30)) {
+            self.sup.handle(m);
+        }
         while let Ok(m) = self.rx.try_recv() {
             self.sup.handle(m);
         }
         self.sup.tick(self.now());
     }
 
-    fn until(&mut self, what: &str, step: Duration, mut f: impl FnMut(&mut Harness) -> bool) {
+    /// Ends the held job (`job_secs=hold`): the fake runner ends the job's process when this file appears.
+    fn release_job(&self) {
+        let _ = std::fs::write(self.runner_dir.join("release"), "");
+    }
+
+    /// Runs until the supervisor has recorded the released job as finished. The clock has to move: a job ends
+    /// `IDLE_CONFIRM` after its processes were last seen, and every step is one look at them.
+    fn until_job_finished(&mut self) {
+        self.until("the job is recorded as finished", PROBE_STEP, |h| {
+            count(&h.history(), |k| matches!(k, HistoryKind::JobFinished { .. })) >= 1
+        });
+    }
+
+    /// Waits until the supervisor has seen the job's processes, not only its "task started" line: a job counts as
+    /// running past the line's grace period (`IDLE_CONFIRM`) only while its processes are seen. On a loaded machine the
+    /// process starts well after the line (`spawn_delay_ms` in the fake makes that so every time).
+    ///
+    /// Until the processes run the clock follows the real one: the job's start is the clock's time when its line is
+    /// read, and its processes' start times come from the real clock, so a clock running ahead (or falling behind)
+    /// while the machine is slow would put them outside the job (`ATTRIBUTION_SLACK`) and its leftovers would never be
+    /// found (CI run 6628 timed out so). One probe step then shows them to the supervisor.
+    fn until_job_processes_seen(&mut self) {
+        // The line itself, not only a job: a look at the processes can find the job before its line is read (CI job
+        // 21879), and the job is named only by the line.
+        self.until_real("the job's line is read", |h| {
+            h.status().current_job.is_some_and(|j| j.info.repository.is_some())
+        });
+        let started = self.status().current_job.unwrap().started_at;
+        let ahead = started.0.saturating_sub(pitcrew_service::cleanup::now().0);
+        assert!(
+            Duration::from_millis(ahead) < ATTRIBUTION_SLACK,
+            "the job's start ({ahead} ms ahead of the real clock) must be within ATTRIBUTION_SLACK of its processes' start"
+        );
+        let marker = self.runner_dir.join("job.started");
+        self.until_real("the job's processes run", |_| marker.exists());
+        // The runner alone is one process; on Windows its console host (`conhost.exe`) makes two.
+        let base = if cfg!(windows) { 2 } else { 1 };
+        self.pump(PROBE_STEP);
+        let s = self.status();
+        assert!(
+            s.current_job.is_some() && s.usage.is_some_and(|u| u.processes > base),
+            "the probe after the job's processes started sees them: {s:?}"
+        );
+    }
+
+    /// Runs until cleanup has stopped the leftover `pid`. The clock moves in steps of `step` while the stop cannot be
+    /// due yet (before the leftover's `StopsAt` time), then one probe step at a time until the stop begins (the time
+    /// has come and the runner is idle: the probe tick that sees both asks the process to stop), and then holds still
+    /// until the stop is recorded: with the clock moving, a process slower to exit than the stop timeout's few clock
+    /// steps would be ended by force instead.
+    #[cfg(unix)]
+    fn until_stopped(&mut self, what: &str, step: Duration, pid: u32) {
+        let events_before = self.process_events().len();
+        let at = match self
+            .processes()
+            .entries
+            .iter()
+            .find(|e| e.pid == pid)
+            .and_then(|e| e.leftover.clone())
+        {
+            Some(pitcrew_core::process_track::Leftover {
+                fate: Fate::StopsAt { at },
+                ..
+            }) => at,
+            other => panic!("{pid} is not a leftover with a stop time: {other:?}"),
+        };
+        while self.now().0 + (step.as_millis() as u64) < at.0 {
+            self.pump(step);
+        }
+        self.until(what, PROBE_STEP, |h| {
+            (h.now() >= at && h.processes().idle) || h.process_events().len() > events_before
+        });
+        self.until(what, Duration::ZERO, |h| h.process_events().len() > events_before);
+        // A look at the processes after the stop, so the list and the counts show it.
+        self.pump(PROBE_STEP);
+    }
+
+    /// Pumps in steps of `step` until `f` holds.
+    fn until(&mut self, what: &str, step: Duration, f: impl FnMut(&mut Harness) -> bool) {
+        self.wait(what, Some(step), f);
+    }
+
+    /// Like [`Harness::until`], with the clock following the real one (never behind it, never ahead by more than it
+    /// was): for waits on real processes whose start times the supervisor compares with its clock. The clock still
+    /// moves while it waits, so a job whose processes nobody has seen ends after `IDLE_CONFIRM` (20 s) of real time:
+    /// use it only for waits the fake runner ends promptly (its line, its `job.started` marker).
+    fn until_real(&mut self, what: &str, f: impl FnMut(&mut Harness) -> bool) {
+        self.wait(what, None, f);
+    }
+
+    fn wait(&mut self, what: &str, step: Option<Duration>, mut f: impl FnMut(&mut Harness) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(40);
         while !f(self) {
             assert!(
@@ -195,7 +294,13 @@ impl Harness {
                 "timed out waiting for: {what}; status {:?}",
                 self.status()
             );
-            self.pump(step);
+            match step {
+                Some(step) => self.pump(step),
+                None => {
+                    self.clock.fetch_max(pitcrew_service::cleanup::now().0, Ordering::SeqCst);
+                    self.pump(Duration::ZERO);
+                }
+            }
         }
     }
 
@@ -258,10 +363,15 @@ impl Drop for Harness {
     /// A failing test never leaves its fake runner (or the processes it started) running: everything whose program,
     /// working folder or command line is in this test's folder is killed with its descendants, then the folder goes.
     fn drop(&mut self) {
+        // A held job ends first, so the fake runner never leaves its `sleep 100000` behind.
+        self.release_job();
         self.kill_leftover_processes();
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }
+
+/// One clock step that is sure to include a look at the processes.
+const PROBE_STEP: Duration = pitcrew_service::supervisor::PROBE_EVERY;
 
 fn count(h: &[HistoryEvent], f: impl Fn(&HistoryKind) -> bool) -> usize {
     h.iter().filter(|e| f(&e.kind)).count()
@@ -335,9 +445,9 @@ fn a_stalled_runner_is_stopped_gracefully_and_restarted() {
 
 #[test]
 fn stop_waits_for_the_running_job() {
-    // The job lasts long enough that a loaded CI runner still sees it running between two status calls.
-    let mut h = Harness::new("busy", "mode=job\njob_secs=10\n", true);
-    h.until("job seen", Duration::from_secs(6), |h| h.status().current_job.is_some());
+    // The job runs until the test releases it, however slow the machine is.
+    let mut h = Harness::new("busy", "mode=job\njob_secs=hold\n", true);
+    h.until_job_processes_seen();
     let s = h.status();
     assert_eq!(s.status, RunnerStatus::Busy);
     assert_eq!(s.current_job.unwrap().info.repository.as_deref(), Some("owner/app"));
@@ -347,11 +457,12 @@ fn stop_waits_for_the_running_job() {
     for _ in 0..5 {
         h.pump(Duration::from_secs(60));
         assert!(h.status().running_since.is_some());
-        if h.status().status != RunnerStatus::Draining {
-            break;
-        }
+        assert_eq!(h.status().status, RunnerStatus::Draining);
     }
-    h.until("stopped after the job", Duration::from_secs(25), |h| {
+    h.release_job();
+    h.until_job_finished();
+    // The stop request went out on the tick that saw the job end; the clock holds still while the runner exits.
+    h.until("stopped after the job", Duration::ZERO, |h| {
         h.status().status == RunnerStatus::Stopped
     });
     let hist = h.history();
@@ -362,19 +473,17 @@ fn stop_waits_for_the_running_job() {
 
 #[test]
 fn usage_follows_the_runner_and_the_processes_it_started() {
-    let mut h = Harness::new("meter", "mode=job\njob_secs=6\n", true);
+    let mut h = Harness::new("meter", "mode=job\njob_secs=hold\n", true);
     // The runner alone is one process; on Windows its console host (`conhost.exe`) makes two.
     let base = if cfg!(windows) { 2 } else { 1 };
     // The job's child (the stand-in for a compiler) is counted with the runner.
-    h.until("the job's process is counted", Duration::from_secs(6), |h| {
-        h.status().usage.is_some_and(|u| u.processes > base)
-    });
+    h.until_job_processes_seen();
     let during = h.status().usage.unwrap();
     assert!(during.mem_bytes > 0, "{during:?}");
     assert!(during.cpu_permille <= 1000);
-    // It exits, and drops out of the count while the runner stays. The child lives `job_secs` (on Windows `ping -n 7`
-    // takes about 7 s, and a loaded runner is slower), so the deadline leaves room. On Windows the runner also has its
-    // console host, which stays.
+    // It exits, and drops out of the count while the runner stays. On Windows the runner also has its console host,
+    // which stays.
+    h.release_job();
     h.until("the exited child is no longer counted", Duration::from_secs(20), |h| {
         h.status().usage.is_some_and(|u| u.processes == base)
     });
@@ -505,8 +614,9 @@ fn a_manual_cleanup_reports_what_it_did() {
 
 #[test]
 fn a_replaced_service_program_restarts_the_service_only_when_no_job_runs() {
-    let mut h = Harness::new("selfup", "mode=job\njob_secs=3\n", true);
-    h.until("job seen", Duration::from_secs(6), |h| h.status().current_job.is_some());
+    // The job's process starts after its "task started" line, as on a loaded machine (CI run 6628 failed here).
+    let mut h = Harness::new("selfup", "mode=job\njob_secs=hold\nspawn_delay_ms=500\n", true);
+    h.until_job_processes_seen();
     let t = |h: &Harness, extra: u64| Timestamp(h.now().0 + extra);
     // Unchanged: never.
     assert!(!h.sup.restart_for_new_program(t(&h, 60_000)));
@@ -516,7 +626,9 @@ fn a_replaced_service_program_restarts_the_service_only_when_no_job_runs() {
     // Checked at most every 30 s.
     assert!(!h.sup.restart_for_new_program(t(&h, 121_000)));
     // The job ended: restart (the service manager starts the new program, which adopts the runners).
-    h.until("job done", Duration::from_secs(6), |h| h.status().current_job.is_none());
+    h.release_job();
+    h.until_job_finished();
+    assert!(h.status().current_job.is_none());
     for _ in 0..6 {
         h.pump(Duration::from_secs(60));
     }
@@ -526,12 +638,16 @@ fn a_replaced_service_program_restarts_the_service_only_when_no_job_runs() {
 
 // ---- leftover processes (ADR 0012) and runner configuration (ADR 0011) -------------------------------------------
 
+#[cfg(unix)]
 use pitcrew_core::process_track::Fate;
-use pitcrew_core::protocol::{ErrorCode, ProcessList, RestartPlan};
+#[cfg(unix)]
+use pitcrew_core::protocol::ProcessList;
+use pitcrew_core::protocol::{ErrorCode, RestartPlan};
 use pitcrew_core::runner_config::ConfigEdit;
 use pitcrew_core::runner_settings::RunnerSettings;
 
 /// Whether a process still runs (a zombie nobody reaped does not count).
+#[cfg(unix)]
 fn alive(pid: u32) -> bool {
     let out = std::process::Command::new("ps")
         .args(["-o", "stat=", "-p", &pid.to_string()])
@@ -542,6 +658,8 @@ fn alive(pid: u32) -> bool {
     !s.is_empty() && !s.starts_with('Z')
 }
 
+// The leftover tests run on Unix only (the fake runner's leftovers are shell background jobs).
+#[cfg(unix)]
 impl Harness {
     fn processes(&mut self) -> ProcessList {
         match self.ask(Request::Processes { runner: self.name.clone() }) {
@@ -558,9 +676,10 @@ impl Harness {
             .map(|e| e.pid)
     }
 
-    /// Runs until the job has ended and its leftovers are classified.
+    /// Runs until the held job has started its leftovers, ends it, and runs until its leftovers are classified.
     fn until_leftovers(&mut self, n: u32) {
-        self.until("the job started", Duration::from_millis(100), |h| h.status().current_job.is_some());
+        self.until_job_processes_seen();
+        self.release_job();
         self.until("the leftovers are noticed", Duration::from_secs(6), |h| h.status().leftovers >= n);
     }
 
@@ -576,7 +695,7 @@ impl Harness {
 #[cfg(unix)]
 #[test]
 fn a_leftover_is_listed_and_stopped_after_the_keep_time_when_the_runner_is_idle() {
-    let mut h = Harness::new("lefty", "mode=leftover\njob_secs=2\nleftovers=sleep:600\n", true);
+    let mut h = Harness::new("lefty", "mode=leftover\njob_secs=hold\nleftovers=sleep:600\n", true);
     h.until_leftovers(1);
     let list = h.processes();
     assert!(list.cleanup && list.idle);
@@ -609,7 +728,7 @@ fn a_leftover_is_listed_and_stopped_after_the_keep_time_when_the_runner_is_idle(
     }
     assert!(alive(pid), "still within the keep time");
     // ...then asked to stop, once.
-    h.until("stopped", Duration::from_secs(60), |h| !h.process_events().is_empty());
+    h.until_stopped("stopped", Duration::from_secs(60), pid);
     assert!(!alive(pid));
     let HistoryKind::ProcessStopped {
         name,
@@ -640,7 +759,7 @@ fn a_leftover_is_listed_and_stopped_after_the_keep_time_when_the_runner_is_idle(
 #[test]
 fn rules_set_the_keep_time_per_process_and_never_means_never() {
     let rules = "[runners.processes]\nkeep = { amount = 1, unit = \"minutes\" }\n[[runners.processes.rules]]\npattern = \"tail\"\nkeep = \"never\"\n";
-    let mut h = Harness::with_runner_toml("rulesy", "mode=leftover\njob_secs=2\nleftovers=sleep:600,tail\n", true, rules);
+    let mut h = Harness::with_runner_toml("rulesy", "mode=leftover\njob_secs=hold\nleftovers=sleep:600,tail\n", true, rules);
     h.until_leftovers(2);
     let sleep = h.leftover_pid("sleep").unwrap();
     let tail = h.leftover_pid("tail").unwrap();
@@ -658,9 +777,7 @@ fn rules_set_the_keep_time_per_process_and_never_means_never() {
     assert_eq!(fate("tail").fate, Fate::Never);
     assert_eq!(fate("tail").rule.as_deref(), Some("tail"));
     assert!(matches!(fate("sleep").fate, Fate::StopsAt { .. }));
-    h.until("the sleep leftover is stopped", Duration::from_secs(30), |h| {
-        !h.process_events().is_empty()
-    });
+    h.until_stopped("the sleep leftover is stopped", Duration::from_secs(30), sleep);
     for _ in 0..4 {
         h.pump(Duration::from_secs(3 * 3600));
     }
@@ -676,7 +793,8 @@ fn rules_set_the_keep_time_per_process_and_never_means_never() {
         allow_runner: false,
     });
     assert_eq!(r, Response::Ok);
-    h.until("stopped by the user", Duration::from_secs(5), |h| h.process_events().len() == 2);
+    // Asked already: the clock holds still until it is gone.
+    h.until("stopped by the user", Duration::ZERO, |h| h.process_events().len() == 2);
     assert!(!alive(tail));
     let mine = h.process_events().into_iter().find(|k| {
         matches!(
@@ -697,7 +815,7 @@ fn rules_set_the_keep_time_per_process_and_never_means_never() {
 #[cfg(unix)]
 #[test]
 fn keep_longer_postpones_the_stop_and_cleanup_can_be_turned_off() {
-    let mut h = Harness::new("keeper", "mode=leftover\njob_secs=2\nleftovers=sleep:600\n", true);
+    let mut h = Harness::new("keeper", "mode=leftover\njob_secs=hold\nleftovers=sleep:600\n", true);
     h.until_leftovers(1);
     let row = h.processes().entries.into_iter().find(|e| e.leftover.is_some()).unwrap();
     let r = h.ask(Request::KeepProcess {
@@ -763,12 +881,14 @@ fn unsafe_kill(pid: u32) {
 #[cfg(unix)]
 #[test]
 fn nothing_is_stopped_while_a_job_runs() {
-    let mut h = Harness::new("busyleft", "mode=leftover\njob_secs=2\nleftovers=sleep:600\n", true);
+    // A keep time of one minute: the busy stretch below needs a few clock steps, not eighty process-table reads.
+    let keep = "[runners.processes]\nkeep = { amount = 1, unit = \"minutes\" }\n";
+    let mut h = Harness::with_runner_toml("busyleft", "mode=leftover\njob_secs=hold\nleftovers=sleep:600\n", true, keep);
     h.until_leftovers(1);
     let pid = h.leftover_pid("sleep").unwrap();
     let name = h.name.clone();
     // A new job keeps the runner busy past the keep time (the runner says "task started" again and again).
-    for _ in 0..80 {
+    for _ in 0..12 {
         h.sup.handle(Msg::Line {
             runner: name.clone(),
             generation: 1,
@@ -780,7 +900,7 @@ fn nothing_is_stopped_while_a_job_runs() {
     assert!(alive(pid), "a busy runner's leftovers wait");
     assert!(!h.processes().idle);
     // The job ends; the overdue leftover is stopped.
-    h.until("stopped once idle", Duration::from_secs(6), |h| !h.process_events().is_empty());
+    h.until_stopped("stopped once idle", Duration::from_secs(6), pid);
     assert!(!alive(pid));
     h.finish();
 }
@@ -788,7 +908,7 @@ fn nothing_is_stopped_while_a_job_runs() {
 #[cfg(unix)]
 #[test]
 fn a_stop_outside_the_runners_tree_is_refused() {
-    let mut h = Harness::new("fence", "mode=leftover\njob_secs=2\nleftovers=sleep:600\n", true);
+    let mut h = Harness::new("fence", "mode=leftover\njob_secs=hold\nleftovers=sleep:600\n", true);
     h.until_leftovers(1);
     let stranger = std::process::Command::new("sleep").arg("120").spawn();
     let mut stranger = stranger.unwrap();
@@ -846,10 +966,10 @@ fn get_config(h: &mut Harness) -> (String, String) {
 
 #[test]
 fn a_saved_configuration_restarts_the_runner_after_its_job_and_the_labels_are_verified() {
-    let mut h = Harness::new("cfgsave", "mode=job\njob_secs=4\n", true);
+    let mut h = Harness::new("cfgsave", "mode=job\njob_secs=hold\n", true);
     let original = "# my runner\nlog:\n  level: info # keep this\nrunner:\n  capacity: 1\n";
     write_config(&h, original);
-    h.until("job seen", Duration::from_millis(200), |h| h.status().current_job.is_some());
+    h.until_job_processes_seen();
     let before = h.status().running_since;
     let (text, fp) = get_config(&mut h);
     assert_eq!(text, original);
@@ -936,7 +1056,15 @@ fn a_saved_configuration_restarts_the_runner_after_its_job_and_the_labels_are_ve
     // The runner finishes its job first; it is not restarted under it.
     assert_eq!(h.status().pending, Some(pitcrew_core::controller::Pending::Restart));
     assert_eq!(h.status().running_since, before);
-    h.until("restarted after the job", Duration::from_secs(6), |h| {
+    h.release_job();
+    h.until_job_finished();
+    // The restart's stop request went out on the tick that saw the job end; the clock holds still while the runner
+    // exits (no stop timeout can pass), then moves again for the start (the next look at the processes must no longer
+    // see the old runner).
+    h.until("the runner stopped for the restart", Duration::ZERO, |h| {
+        count(&h.history(), |k| matches!(k, HistoryKind::Exited { expected: true, .. })) >= 1
+    });
+    h.until("restarted after the job", PROBE_STEP, |h| {
         count(&h.history(), |k| *k == HistoryKind::Started) >= 2
     });
     h.until("labels verified", Duration::from_secs(6), |h| {

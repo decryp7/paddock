@@ -533,6 +533,7 @@ mod scm {
                 if Instant::now() >= deadline {
                     // SAFETY: a valid process handle we own; failure (already gone) is ignored.
                     unsafe {
+                        // conformance: pid-kill — a process handle we opened at the start and still hold
                         let _ = TerminateProcess(helper.0, 1);
                     }
                     return false;
@@ -544,6 +545,7 @@ mod scm {
         fn kill(&mut self) {
             // SAFETY: a valid process handle we own; failure (already gone) is ignored.
             unsafe {
+                // conformance: pid-kill — a process handle we opened at the start and still hold
                 let _ = TerminateProcess(self.process.0, 1);
             }
         }

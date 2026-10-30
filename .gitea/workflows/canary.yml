@@ -37,6 +37,9 @@ jobs:
         with:
           path: paddock
 
+      # CARGO_BUILD_JOBS: this runner's share of the host (conformance/ci/build-jobs.sh; Linux keeps cargo's default).
+      - uses: ./paddock/.gitea/actions/build-jobs
+
       - name: ${{ matrix.app }} (main)
         uses: actions/checkout@v4
         with:

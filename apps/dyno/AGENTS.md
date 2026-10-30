@@ -1,8 +1,7 @@
 # Dyno — engineering rules for coding agents and contributors
 
-Dyno measures, explains and tunes your PC: a pure Rust core (`crates/dyno-core`), OS adapters
-(`crates/dyno-platform`), a background agent that samples, keeps history and runs rules (`crates/dyno-agent`), a
-minimal privileged helper (`crates/dyno-helper`), one small IPC (`crates/dyno-ipc`) shared with out-of-process plugins
+Dyno watches your PC and changes nothing on it ([ADR 0021](docs/adr/0021-monitoring-only.md)): a pure Rust core (`crates/dyno-core`), OS adapters
+(`crates/dyno-platform`), a background agent that samples, keeps history and raises alarms (`crates/dyno-agent`), one small IPC (`crates/dyno-ipc`) shared with out-of-process plugins
 (`crates/dyno-plugin-api`, `crates/dyno-plugin-host`), a Tauri 2 shell (`app/src-tauri`) and an Angular UI
 (`app/src`). See README.md for what it does and `docs/adr/` for why it is built this way.
 
@@ -17,11 +16,11 @@ rule here disagrees, they win. This file holds only what is specific to Dyno.
 Apply these deliberately. They are not decoration:
 
 - **Single responsibility.** One reason to change per module, type and component. Split a file when it starts doing
-  several jobs (e.g. sampling vs. storage vs. rules); keep request/response types apart from the logic that produces
+  several jobs (e.g. sampling vs. storage vs. alarms); keep request/response types apart from the logic that produces
   them.
 - **Open/closed.** Extend by adding, not editing: a new OS is a new `dyno-platform` adapter behind the
-  `dyno_core::ports` traits; a new cleanup category is a catalog entry (or a plugin); new behaviour for users is
-  configuration (rules, profiles, settings), not hard-coded special cases.
+  `dyno_core::ports` traits; a new view is a port and an adapter (or a sensor plugin); new behaviour for users is
+  configuration (settings), not hard-coded special cases.
 - **Liskov.** Every implementation of a port (`SystemSensors`, `ProcessSource`, `ProcessControl`, `FileLocks`,
   `StartupItems`, `FactsSource`, `UserActivity`) honours the documented contract: same error semantics
   (`PlatformError`), unavailable readings with a reason instead of zeros, no surprising panics.
@@ -31,19 +30,19 @@ Apply these deliberately. They are not decoration:
   - The Tauri shell talks to the agent only through `dyno_core::protocol` over `dyno-ipc`.
   - Angular components never call Tauri `invoke` directly: they go through the backend injected by the `BACKEND`
     token (real Tauri backend or the mock for browser dev/tests), and state lives in SignalStores.
-- **Pure core, thin edges.** Grouping, diagnosis, anomaly detection, forecasts, the rules engine, protection,
-  cleanup policy, health scoring, tuning plans, alerts, downsampling, sampling intervals and the tray icon are pure
+- **Pure core, thin edges.** Grouping, diagnosis, anomaly detection, forecasts,
+  health scoring, alerts, downsampling, sampling intervals and the tray icon are pure
   functions in `dyno-core`, with time passed in as values. Processes, files, the registry and the network stay thin
   in the platform adapters and the agent.
 - **Ports and adapters.** The core never depends on the agent, the platform crate, Tauri or an OS API.
 - **Parse, don't validate.** Convert untrusted input (IPC JSON from the webview, frames from other processes,
-  settings and rule files, plugin proposals, command output such as `lsof` and `powercfg`) into typed values once, at
-  the edge (`ProcessRef`, `ProcessAction`, `RuleSet::validate`, `HelperAction::validate`), and work with the types
+  settings files, plugin readings, command output such as `lsof` and `powercfg`) into typed values once, at
+  the edge (`ProcessRef`, the typed `Request`), and work with the types
   afterwards.
 - **Make illegal states unrepresentable.** Prefer enums and newtypes over strings, flags and `Option` combinations
   that can disagree (e.g. `Reading<T>` instead of a value plus an "available" flag; `ProcessRef` = pid + start time).
-- **Command–query separation.** Live data, history, diagnosis, health and scans have no side effects; only actions,
-  rule changes, cleanup runs, tuning, startup changes and settings mutate.
+- **Command–query separation.** Live data, history, diagnosis and health have no side effects; only settings,
+  alarm acknowledgements and Dyno's own data mutate.
 - Also: separation of concerns, high cohesion and low coupling, KISS, YAGNI, DRY with the rule of three before
   abstracting, composition over inheritance, Law of Demeter, least astonishment (sensible defaults, everything off
   until enabled), fail fast with a message that tells the user what to fix, and leave touched code better than you
@@ -51,25 +50,20 @@ Apply these deliberately. They are not decoration:
 
 ## Safety
 
-Dyno can end, suspend, throttle and re-prioritise processes, delete files and change system settings. Therefore:
+Dyno 1.0.0 only watches ([ADR 0021](docs/adr/0021-monitoring-only.md)). Therefore:
 
-- **Never act without an enabled rule or an explicit click.** Rules ship disabled. Scheduled cleanups run only the
-  categories the user enabled. Diagnosis and health only *suggest*; a suggestion runs when the user clicks it.
-- **The protected list is absolute** (`dyno_core::protect`): the OS's critical processes, the antivirus, the audio
-  engine, Dyno itself and the user's entries are never touched — not by rules, not by clicks. Rules never touch the
-  foreground app.
-- **Every action is logged and undoable** where the OS allows (`dyno_core::activity`): rule actions are released
-  when the rule stops holding, when the app exits and when Dyno stops (`ProcessControl::release_all`, also after a
-  crash: named CPU-cap jobs are re-opened and released at the next start).
-- **Every action targets a `ProcessRef`** (pid + start time), so a reused pid is never hit.
-- **Deletes are recoverable**: Recycle Bin / Trash or a 7-day quarantine; nothing outside the category's roots,
-  never links, never personal folders unless the user picked a personal category's item; previews show every item
-  and its size before anything is deleted.
-- **System changes only through the privileged helper** (`crates/dyno-helper`, ADR 0006): a closed set of
-  `HelperAction`s, each previewed, approved with the OS prompt, validated again in the helper and recorded with its
-  inverse. The app and the agent never run elevated.
+- **Never change the machine.** No process action (end, suspend, cap, priority), no delete, move or restore of files, no
+  setting or startup change, no tuning. Code that does any of this is removed, not hidden behind a flag. What Dyno writes is its
+  own data: history, settings, alarm acknowledgements, mutes and notes, snapshots, baselines and the exports the user saves.
+- **Reads are bounded.** External tools and OS calls run with timeouts; a missing tool or right is an unavailable reading with a
+  reason, never an exception.
+- **No privileged helper in 1.0** (ADR 0021 point 4, ADR 0022 for 1.1). The app and the agent run with the user's rights and
+  never elevate themselves; there is no way to run elevated in 1.0 (elevation is planned for 1.1). A reading the OS withholds is `Reading::Unavailable` with a plain reason,
+  never 0; other accounts' processes are one "Other users" row. Any helper that comes back in 1.1 is read-only, validates every
+  frame again and audits every call.
+- **Plugins are sensors only.** There is no cleanup or action provider.
 - **Tests act only on what they create.** Dummy processes the test spawns, temp folders it creates, registry keys
-  under a test key it deletes afterwards. Never throttle, suspend, kill or re-prioritise anything else on the
+  under a test key it deletes afterwards. Never touch, kill or inspect anything else in a way that could change the
   developer's or CI machine (the macOS runner is a person's real Mac).
 
 ## Security and robustness
@@ -82,7 +76,7 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
 - Tauri capabilities stay least-privilege: only the plugins and permissions the UI uses, no `fs`/`shell` wildcards,
   no remote content. Keep the CSP free of `unsafe-eval` and remote origins. Never bind process or file names with
   `[innerHTML]`.
-- Parsers never panic on any input and enforce limits (settings size, rule and protected-list counts, detail list
+- Parsers never panic on any input and enforce limits (settings size, detail list
   caps, scan item caps, frame size).
 - No `unwrap()`/`expect()` on user data or I/O outside tests (clippy warns on both). Library errors are typed; the
   app edge converts them to messages for the UI.
@@ -95,7 +89,7 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
 
 ## Languages
 
-- All code that ships inside Dyno is Rust (core, platform, agent, helper, plugins, Tauri shell) plus the Angular UI.
+- All code that ships inside Dyno is Rust (core, platform, agent, plugins, Tauri shell) plus the Angular UI.
   Don't add C#, C++, Python, PowerShell or other runtimes to the product.
 - Plugins are Rust only and always run out of process: a plugin depends on `dyno-plugin-api` alone, is served by
   `dyno_plugin_api::serve`, and talks to Dyno over the one IPC (`dyno-ipc`: length-prefixed postcard frames on a
@@ -105,8 +99,8 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
 
 ## Where logic lives
 
-- **The Rust core is the single source of truth** for behaviour: grouping, diagnosis, anomalies, forecasts, rules,
-  protection, cleanup safety, health, tuning, alerts, reports, history resolution. The agent carries out the core's
+- **The Rust core is the single source of truth** for behaviour: grouping, diagnosis, anomalies, forecasts,
+  health, alerts, reports, history resolution. The agent carries out the core's
   decisions; the app shows them.
 - **Angular is the presentation layer**: layout, interaction state, rendering and formatting of what the agent
   returns. It must not re-implement domain rules. If the UI needs a computation, add it to the core and expose it
@@ -118,10 +112,10 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
 
 - **Contain failures.** One bad process, file, plugin or sensor never takes down sampling or the app. Plugins run
   out of process with timeouts and memory caps and are quarantined after repeated failures. The agent is a separate
-  process: if it dies the app shows it and restarts it; if the app dies the agent exits and releases what rules did.
+  process: if it dies the app shows it and restarts it; if the app dies the agent keeps measuring.
 - **Degrade, don't fail.** Missing sensors, missing rights, locked files and unavailable tools produce a clear
   message (`Reading::Unavailable`, `PlatformError` with a next step) instead of an exception.
-- **Recoverable state.** Settings, rules and the activity log are versioned, written atomically with a backup, and
+- **Recoverable state.** Settings and the alarm log are versioned, written atomically with a backup, and
   loading tolerates damage (falls back to the backup, then the defaults). The history database tolerates being
   deleted.
 - **Bounded resources.** Respect the existing limits (history retention and downsampling, detail caps, scan caps,
@@ -188,15 +182,47 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
   comments only where intent isn't obvious), idioms. Rust uses `rustfmt.toml` (max_width 140).
 - UI: standalone components, signals, OnPush, CSS custom properties for theme tokens (dark and light), accessible
   markup (real buttons, labels, aria-labels on icon buttons), the `dy` selector prefix.
-- UI building blocks: use **Angular CDK** for behaviour and accessibility (menus, overlays, dialogs, listbox,
-  scrolling) instead of hand-rolling them, and **Angular Material first** (rule 47: a Material component wherever one fits), themed through
-  Dyno's CSS tokens. Icons use Material's `MatIconRegistry` with Dyno's own SVGs registered as literals in the `dy`
+- The UI runs on the Paddock app shell (ADR 0023): pages, status items, commands, settings pages and dialogs are
+  contributions in `app/src/app/shell/contributions.ts`; the frame, the palette, notifications, jobs, Settings, About and the
+  tray popover are the shell's. A dialog is an OS window: its contract is Rust's (`src-tauri/src/dialogs.rs`, generated to
+  `generated/dialog-contracts.ts`), its component declares `dialogActions` and draws no footer, and a confirmation is the
+  shared `pd.confirm`. Never open a CDK dialog or write a toast; use `DialogService` and `Notifier`. The legacy `--surface-*`,
+  `--text-*`, `--sp-*` tokens in `styles.scss` are a bridge over `--pd-*`: new code uses `--pd-*`.
+- UI building blocks: use **Angular CDK** for behaviour and accessibility (menus, overlays, listbox, scrolling) instead of
+  hand-rolling them, and **Angular Material first** (rule 47: a Material component wherever one fits), themed through
+  the shared `--pd-*` tokens. Icons use Material's `MatIconRegistry` with Dyno's own SVGs registered as literals in the `dy`
   namespace; no icon fonts and no icon URLs fetched at run time (the CSP forbids it).
 - Charts use Apache ECharts with the CVD-checked categorical palette. Status colours always come with words or
   numbers; validate colours for contrast (WCAG AA) and colour-vision deficiency.
 
 ## Working practices
 
+- Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
+  `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
+- Specs never wait a fixed number of event-loop turns and never leave a patch behind (rule 49): wait on the condition
+  (Debrief's `openDialog()`, once `fix/debrief-import-range-flake` lands), never let an optional chain perform a test's
+  action, and patch a prototype only with `vi.spyOn` (restored after each test).
+- Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
+  branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.
+- A change that touches an app's release path builds that app's installers before it lands on main (rule 54): the batch
+  dispatches `<app>-release.yml` with gates on and the bundle built; passing tests alone is not enough.
+- Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
+  cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
+  thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
+- Never act on a reusable OS name read earlier (rule 53): hold it (handle, job, listener) or verify its identity (pid plus
+  start time, `paddock_proc::ProcessId`) immediately before acting; kills go through `paddock_proc` (Clippy
+  `disallowed-methods` and C53 check it, ADR 0033). A discovery file that names a pid or port (Dyno's `agent.json`) is
+  only a hint: act on it after a held lock or a live connection proves the process is there, and remove it only if it is
+  still the same file (same pid and start time).
+- Work a person waits for never runs at an OS's starvable background level (rule 52: macOS QoS `BACKGROUND`,
+  `PRIO_DARWIN_BG`, `taskpolicy -b`/`-c background`/`-c maintenance`/`-d throttle` and `IOPOL_THROTTLE`; Windows
+  background modes, idle priorities and EcoQoS; Linux `SCHED_IDLE` and idle I/O; for a service, launchd `ProcessType`
+  `Background` (or `Adaptive` without XPC) and `LowPriorityIO`, systemd `CPUSchedulingPolicy=idle` and
+  `IOSchedulingClass=idle`): bulk work (long, with progress and Cancel: walks, scans, compaction, exports) uses
+  `QOS_CLASS_UTILITY`, nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`; live work (a person waits on it within a deadline or
+  for a screen to fill: requests, probes, a sampler, a page refresh) may use the first two but stays at the normal level
+  on Windows; a thread holding a lock that live work waits on is live, or must not hold the lock across slow work; a
+  starvable level only for work nobody waits on, with a `conformance: background-qos — <why>` comment (C54).
 - Research official sources before choosing libraries or relying on an OS behaviour (performance counters, job
   objects, Restart Manager, `taskpolicy`), and record what you found and when in the ADR or doc comment.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they are available instead of

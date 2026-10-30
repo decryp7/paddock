@@ -123,6 +123,7 @@ impl Probe {
 
     /// Whether the process `pid` (started at `started_ms` when known) still runs. A zombie that nobody has reaped
     /// yet does not count: it is dead, only its entry is left.
+    // ADR 0033 WP-6: a missing start time counts as a match; compare start times or use paddock_proc::ProcessId
     pub fn alive(&mut self, pid: u32, started_ms: Option<u64>) -> bool {
         let id = Pid::from_u32(pid);
         self.sys
@@ -141,6 +142,7 @@ impl Probe {
     }
 
     /// Whether `pid` has child processes that belong to a job (its console host does not).
+    // ADR 0033 WP-6: children found by parent pid without start times; use paddock_proc::descendants
     pub fn has_job_children(&self, pid: u32) -> bool {
         let parent = Pid::from_u32(pid);
         self.processes()

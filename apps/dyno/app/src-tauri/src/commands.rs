@@ -1,12 +1,10 @@
-//! The Tauri commands: `dyno` (every engine request, forwarded to the agent), `app_info`, and the tray window's two
-//! buttons. Arguments are parsed into typed values here, at the edge; the webview is not trusted (it may not stop the
-//! agent, and it only reaches the commands below).
+//! The Tauri commands: `dyno` (every engine request, forwarded to the agent) and the commands that open an OS file dialog
+//! (the shell owns the windows, the tray popover, About and updates). Arguments are parsed into typed values here, at the
+//! edge; the webview is not trusted (it may not stop the agent, and it only reaches the commands in the table of lib.rs).
 
-use crate::dto::{AppInfo, CommandError};
+use crate::dto::CommandError;
 use crate::link::AgentLink;
 use crate::shell::Shell;
-use crate::tray;
-use crate::window;
 use dyno_core::protocol::{Reply, Request};
 use serde_json::Value;
 use std::sync::Arc;
@@ -19,10 +17,11 @@ pub fn parse_request(value: Value) -> Result<Request, CommandError> {
     match request {
         // Only the app's own shutdown path may stop the agent.
         Request::Shutdown => Err(CommandError::bad("The window may not stop the agent.")),
-        // A watched folder is added only through `add_watched_folder`, which asks the person in the OS folder dialog.
-        Request::AddWatchedFolder { .. } => Err(CommandError::bad("A folder to watch is chosen in the folder dialog.")),
-        // The report goes only where the OS save dialog said (`save_inventory_report`), never to a path the webview names.
-        Request::SaveInventoryReport { .. } => Err(CommandError::bad("Use the Export button: it asks where to save the report.")),
+        // A file is written only where the OS save dialog said (the `save_*` commands), never to a path the webview names:
+        // `dyno` is reachable from the tray and dialog windows too.
+        Request::SaveInventoryReport { .. } | Request::SaveDiagnostics { .. } | Request::SaveReport { .. } | Request::SaveIssues { .. } => {
+            Err(CommandError::bad("Use the Export or Save button: it asks where to save the file."))
+        }
         r => Ok(r),
     }
 }
@@ -44,6 +43,14 @@ pub fn handle(link: &AgentLink, shell: &Shell, window: &str, request: Request) -
     reply
         .into_json()
         .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
+}
+
+/// The path as text for the agent. A path that is not valid Unicode is refused rather than altered: the agent would
+/// write to a different file than the one the person chose.
+pub fn utf8_path(path: &std::path::Path) -> Result<String, CommandError> {
+    path.to_str()
+        .map(str::to_string)
+        .ok_or_else(|| CommandError::bad("That location has characters Dyno cannot use in a file name. Choose another folder."))
 }
 
 /// The folders the person picked in the OS folder dialog this session; the file finder may look only in these.
@@ -91,7 +98,7 @@ pub async fn pick_folder(app: AppHandle, picked: State<'_, PickedFolders>) -> Re
     let path = chosen
         .into_path()
         .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
-    Ok(Value::String(picked.remember(&path.to_string_lossy())))
+    Ok(Value::String(picked.remember(&utf8_path(&path)?)))
 }
 
 /// "Export report..." on the Inventory tab: the OS save dialog, then the agent writes the hardware and software report
@@ -120,7 +127,7 @@ pub async fn save_inventory_report(
             .into_path()
             .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
         let reply = link.call(Request::SaveInventoryReport {
-            path: path.to_string_lossy().into_owned(),
+            path: utf8_path(&path)?,
             format,
         })?;
         reply
@@ -129,6 +136,25 @@ pub async fn save_inventory_report(
     })
     .await
     .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
+/// The file finder and a folder scan of the disk map look only in a folder the person picked in the OS dialog
+/// (`pick_folder`); a volume scan names a volume the agent itself listed.
+fn check_picked(picked: &PickedFolders, request: &Request) -> Result<(), CommandError> {
+    let folder = match request {
+        Request::StartJob {
+            spec: dyno_core::jobs::JobSpec::FindFiles { query },
+        } => &query.folder,
+        Request::StartDiskScan {
+            target: dyno_core::disk::scan::DiskTarget::Folder { path },
+        } => path,
+        _ => return Ok(()),
+    };
+    if picked.allows(folder) {
+        Ok(())
+    } else {
+        Err(CommandError::bad("Choose the folder with the Choose folder button first."))
+    }
 }
 
 /// The one command of the engine contract: `invoke('dyno', { request })`.
@@ -146,12 +172,7 @@ pub async fn dyno(
         request,
         Request::LookupIp { .. } | Request::WebSearch { .. } | Request::VirusTotalUrl { .. }
     );
-    // The file finder looks only in a folder the person picked in the OS dialog (`pick_folder`).
-    if let Request::FindFiles { query } = &request {
-        if !picked.allows(&query.folder) {
-            return Err(CommandError::bad("Choose the folder with the Choose folder button first."));
-        }
-    }
+    check_picked(&picked, &request)?;
     let (link, shell, label) = (link.inner().clone(), shell.inner().clone(), webview.label().to_string());
     let value = tauri::async_runtime::spawn_blocking(move || handle(&link, &shell, &label, request))
         .await
@@ -186,12 +207,6 @@ fn open_in_browser(app: &AppHandle, url: &str) -> Result<(), CommandError> {
     })
 }
 
-/// `appInfo()`.
-#[tauri::command]
-pub async fn app_info(app: AppHandle) -> Result<AppInfo, CommandError> {
-    Ok(crate::updater::app_info(&app))
-}
-
 /// "Save bundle...": the OS save dialog (so the path is one the person chose, never one the webview supplied), then the
 /// agent writes the redacted zip there. `null` when they cancel.
 #[tauri::command]
@@ -212,7 +227,7 @@ pub async fn save_diagnostics(app: AppHandle, link: State<'_, Arc<AgentLink>>) -
         let path = chosen
             .into_path()
             .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
-        let path = path.to_string_lossy().into_owned();
+        let path = utf8_path(&path)?;
         let reply = link.call(Request::SaveDiagnostics { path })?;
         reply
             .into_json()
@@ -252,7 +267,7 @@ pub async fn save_report(
         let path = chosen
             .into_path()
             .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
-        let path = path.to_string_lossy().into_owned();
+        let path = utf8_path(&path)?;
         let reply = link.call(Request::SaveReport { path, format, weeks_ago })?;
         reply
             .into_json()
@@ -282,7 +297,7 @@ pub async fn save_issues(app: AppHandle, link: State<'_, Arc<AgentLink>>, days: 
         let path = chosen
             .into_path()
             .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
-        let path = path.to_string_lossy().into_owned();
+        let path = utf8_path(&path)?;
         let reply = link.call(Request::SaveIssues { path, days })?;
         reply
             .into_json()
@@ -290,72 +305,6 @@ pub async fn save_issues(app: AppHandle, link: State<'_, Arc<AgentLink>>, days: 
     })
     .await
     .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
-}
-
-/// "Add folder" on the Watched folders page: the OS folder dialog (so the folder is one the person chose, never one the
-/// webview named), then the agent adds it switched off. `null` when they cancel.
-#[tauri::command]
-pub async fn add_watched_folder(
-    app: AppHandle,
-    link: State<'_, Arc<AgentLink>>,
-    template: Option<String>,
-    keep_for_secs: u32,
-    recursive: bool,
-) -> Result<Value, CommandError> {
-    let link = link.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        use tauri_plugin_dialog::DialogExt;
-        let Some(chosen) = app.dialog().file().set_title("Choose the folder to watch").blocking_pick_folder() else {
-            return Ok(Value::Null);
-        };
-        let path = chosen
-            .into_path()
-            .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
-        let path = path.to_string_lossy().into_owned();
-        let reply = link.call(Request::AddWatchedFolder {
-            path,
-            template,
-            keep_for_secs,
-            recursive,
-        })?;
-        reply
-            .into_json()
-            .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
-    })
-    .await
-    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
-}
-
-/// The tray dropdown's "Open Dyno".
-#[tauri::command]
-pub async fn tray_open_main(app: AppHandle) -> Result<(), CommandError> {
-    window::show_main(&app);
-    tray::popover_blurred(&app, tray::DROPDOWN);
-    Ok(())
-}
-
-/// The popover page reports the height of its content (logical pixels); the window follows, within limits. Returns the
-/// height that was applied.
-#[tauri::command]
-pub async fn popover_resize(webview: Webview, app: AppHandle, height: f64) -> Result<f64, CommandError> {
-    crate::popover::resize(&app, webview.label(), height).map_err(CommandError::bad)
-}
-
-/// Escape in a popover page (or its own close button).
-#[tauri::command]
-pub async fn popover_close(webview: Webview, app: AppHandle) -> Result<(), CommandError> {
-    if !crate::popover::is_popover_label(webview.label()) {
-        return Err(CommandError::bad("Only a popover can be closed this way."));
-    }
-    crate::popover::close(&app, webview.label());
-    Ok(())
-}
-
-/// The tray dropdown's "Quit".
-#[tauri::command]
-pub async fn tray_quit(app: AppHandle) -> Result<(), CommandError> {
-    tray::quit(&app);
-    Ok(())
 }
 
 #[cfg(test)]
@@ -388,9 +337,18 @@ mod tests {
         use serde_json::json;
         // The report is saved only through the dialog command.
         assert!(parse_request(json!({"saveInventoryReport": {"path": "/tmp/x.md", "format": "markdown"}})).is_err());
+        // So are the bundle, the weekly report and the issues: `dyno` is reachable from the tray and dialog windows too.
+        assert!(parse_request(json!({"saveDiagnostics": {"path": "/tmp/x.zip"}})).is_err());
+        assert!(parse_request(json!({"saveReport": {"path": "/tmp/x.md", "format": "markdown", "weeksAgo": 0}})).is_err());
+        assert!(parse_request(json!({"saveIssues": {"path": "/tmp/x.jsonl", "days": 7}})).is_err());
         // The finder's request parses, but `dyno` refuses a folder nobody picked.
-        let r = parse_request(json!({"findFiles": {"query": {"folder": "/tmp", "minBytes": 1}}})).unwrap();
-        assert!(matches!(r, Request::FindFiles { .. }));
+        let r = parse_request(json!({"startJob": {"spec": {"findFiles": {"query": {"folder": "/tmp", "minBytes": 1}}}}})).unwrap();
+        assert!(matches!(
+            r,
+            Request::StartJob {
+                spec: dyno_core::jobs::JobSpec::FindFiles { .. }
+            }
+        ));
         let picked = PickedFolders::default();
         let dir = std::env::temp_dir();
         let dir = dir.to_string_lossy();
@@ -407,29 +365,31 @@ mod tests {
     }
 
     #[test]
+    fn a_disk_scan_of_a_folder_needs_a_picked_folder_but_a_volume_does_not() {
+        use serde_json::json;
+        let picked = PickedFolders::default();
+        let dir = std::env::temp_dir().to_string_lossy().into_owned();
+        let folder = parse_request(json!({"startDiskScan": {"target": {"folder": {"path": dir}}}})).unwrap();
+        assert!(check_picked(&picked, &folder).is_err(), "nobody picked it");
+        picked.remember(&dir);
+        assert!(check_picked(&picked, &folder).is_ok());
+        let volume = parse_request(json!({"startDiskScan": {"target": {"volume": {"id": "/"}}}})).unwrap();
+        assert!(check_picked(&PickedFolders::default(), &volume).is_ok());
+        assert!(check_picked(&PickedFolders::default(), &Request::WhySlow).is_ok());
+        let finder = parse_request(json!({"startJob": {"spec": {"findFiles": {"query": {"folder": dir, "minBytes": 1}}}}})).unwrap();
+        assert!(check_picked(&PickedFolders::default(), &finder).is_err());
+    }
+
+    #[test]
     fn the_extras_requests_have_the_shape_the_ui_sends() {
         use serde_json::json;
-        for name in [
-            "sleepBlockers",
-            "bootAnalysis",
-            "appUsage",
-            "gpuProcesses",
-            "softwareInventory",
-            "maintenance",
-            "backup",
-            "refreshBackup",
-        ] {
+        for name in ["gpuProcesses", "maintenance", "backup", "jobs"] {
             assert!(parse_request(json!(name)).is_ok(), "{name}");
         }
         assert!(matches!(
             parse_request(json!({"changes": {"query": {"hours": 24}}})).unwrap(),
             Request::Changes { query } if query.hours == 24
         ));
-        assert!(matches!(
-            parse_request(json!({"removeFoundFiles": {"scanId": "s", "ids": ["a"], "mode": "quarantine"}})).unwrap(),
-            Request::RemoveFoundFiles { .. }
-        ));
-        assert!(parse_request(json!({"removeFoundFiles": {"scanId": "s", "ids": ["a"], "mode": "shred"}})).is_err());
     }
 
     #[test]
@@ -439,51 +399,41 @@ mod tests {
             Request::Issues { query } if query.days == 14
         ));
         assert!(matches!(
-            parse_request(json!({"rescanIssues": {"query": {"days": 7}}})).unwrap(),
-            Request::RescanIssues { .. }
-        ));
-        assert_eq!(
-            parse_request(json!({"unusual": {"includeIgnored": true}})).unwrap(),
-            Request::Unusual { include_ignored: true }
-        );
-        assert!(matches!(
-            parse_request(json!({"unusualAct": {"key": "/a/b", "action": "protect"}})).unwrap(),
-            Request::UnusualAct {
-                action: dyno_core::unusual::baseline::UnusualAction::Protect,
-                ..
+            parse_request(json!({"startJob": {"spec": {"rescanIssues": {"query": {"days": 7}}}}})).unwrap(),
+            Request::StartJob {
+                spec: dyno_core::jobs::JobSpec::RescanIssues { .. }
             }
         ));
+        assert_eq!(parse_request(json!("unusual")).unwrap(), Request::Unusual);
         assert_eq!(parse_request(json!("forgetBaseline")).unwrap(), Request::ForgetBaseline);
-        // A forged action is refused at the edge.
-        assert!(parse_request(json!({"unusualAct": {"key": "k", "action": "delete"}})).is_err());
+        // The ignore and protect actions are gone.
+        assert!(parse_request(json!({"unusualAct": {"key": "k", "action": "protect"}})).is_err());
+        assert!(matches!(
+            parse_request(json!({"startJob": {"spec": {"fileHash": {"source": {"path": "/a"}}}}})).unwrap(),
+            Request::StartJob {
+                spec: dyno_core::jobs::JobSpec::FileHash { .. }
+            }
+        ));
+        assert!(parse_request(json!({"startJob": {"spec": {"fileHash": {"source": {"pid": 1}}}}})).is_err());
+        assert_eq!(
+            parse_request(json!({"cancelJob": {"id": 3}})).unwrap(),
+            Request::CancelJob { id: 3 }
+        );
+        assert_eq!(
+            parse_request(json!({"jobResult": {"id": 3}})).unwrap(),
+            Request::JobResult { id: 3 }
+        );
     }
 
     #[test]
-    fn a_watched_folder_cannot_be_added_by_the_webview_but_the_other_watch_requests_parse() {
-        let add = json!({"addWatchedFolder": {"path": "/x", "template": null, "keepForSecs": 600, "recursive": false}});
-        assert!(parse_request(add).unwrap_err().message.contains("folder dialog"));
-        assert!(matches!(parse_request(json!("watchedFolders")).unwrap(), Request::WatchedFolders));
-        assert!(matches!(
-            parse_request(json!({"setWatchedFolder": {"id": "w-1", "keepForSecs": 600, "enabled": true, "recursive": null}})).unwrap(),
-            Request::SetWatchedFolder { enabled: Some(true), .. }
-        ));
-        assert!(matches!(
-            parse_request(json!({"previewWatchedFolder": {"id": "w-1"}})).unwrap(),
-            Request::PreviewWatchedFolder { .. }
-        ));
-        assert!(matches!(
-            parse_request(json!({"webSearch": {"query": "q"}})).unwrap(),
-            Request::WebSearch { .. }
-        ));
-        assert!(matches!(
-            parse_request(json!({"fileHash": {"source": {"path": "/a"}}})).unwrap(),
-            Request::FileHash { .. }
-        ));
-        assert!(parse_request(json!({"fileHash": {"source": {"pid": 1}}})).is_err());
-        assert!(matches!(
-            parse_request(json!({"startupOverview": {"filter": {"hideOs": true, "hideSigned": false}}})).unwrap(),
-            Request::StartupOverview { .. }
-        ));
+    fn a_save_path_that_is_not_unicode_is_refused_not_altered() {
+        assert_eq!(utf8_path(std::path::Path::new("/tmp/report.md")).unwrap(), "/tmp/report.md");
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let odd = std::path::Path::new(std::ffi::OsStr::from_bytes(b"/tmp/caf\xe9.md"));
+            assert_eq!(utf8_path(odd).unwrap_err().code, crate::dto::ErrorCode::BadRequest);
+        }
     }
 
     #[test]

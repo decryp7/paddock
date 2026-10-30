@@ -1671,6 +1671,7 @@ dependencies = [
  "cairo-rs",
  "chromium-driver",
  "chrono",
+ "ctrlc",
  "debrief-agent",
  "debrief-ai",
  "debrief-alloc",
@@ -1889,6 +1890,7 @@ dependencies = [
 name = "debrief-ipc"
 version = "0.1.0"
 dependencies = [
+ "debrief-ipc",
  "getrandom 0.4.3",
  "landlock",
  "libc",
@@ -5309,8 +5311,10 @@ name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "log",
  "paddock-workspace-hack",
  "sysinfo",
+ "thiserror 2.0.21",
  "windows-sys 0.61.2",
 ]
 
@@ -5318,12 +5322,14 @@ dependencies = [
 name = "paddock-workspace-hack"
 version = "0.1.0"
 dependencies = [
+ "aho-corasick",
  "base64 0.23.1",
  "bitflags 2.13.2",
  "block2",
  "cairo-sys-rs",
  "chrono",
  "crc32fast",
+ "crossbeam-utils",
  "deranged",
  "digest 0.11.3",
  "email_address",

@@ -281,12 +281,23 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
         // Give up on it once it has read the whole file (the SDK stops reads at a cancel itself): what is checked
         // is that the importer's own work ends.
         let read_before = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed);
-        let waiting = Instant::now();
-        while p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed) - read_before < content.len() as u64
-            && waiting.elapsed() < Duration::from_secs(10)
+        // Waits for the host's signal that the whole file was read (a loaded machine reads it late, and cancelling
+        // before the importer has it all ends the read, not the importer's own work). The slice only bounds how
+        // long to wait before looking at the stream again; the hang guard only reports a plugin that never reads it.
+        let hang_guard = Instant::now();
+        while !p
+            .host
+            .wait_bytes_read(read_before + content.len() as u64, Duration::from_millis(20))
         {
-            if let Ok(StreamEvent::Done(_)) = stream.next(Some(Duration::from_millis(20))) {
+            if let Ok(StreamEvent::Done(_)) = stream.next(Some(Duration::from_millis(1))) {
                 return Ok("the import ended before it could be cancelled".into());
+            }
+            if hang_guard.elapsed() >= READ_HANG_GUARD {
+                return Err(format!(
+                    "importer \"{}\" did not read the whole file within {} s (hung)",
+                    importer.id,
+                    READ_HANG_GUARD.as_secs()
+                ));
             }
         }
         let started = Instant::now();
@@ -319,6 +330,9 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
 }
 
 /// How long one import of a sample may take in the checks.
+/// Reports a plugin that never reads its whole input; never the condition for passing (the host signals that).
+const READ_HANG_GUARD: Duration = Duration::from_secs(300);
+
 const IMPORT_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// The frame limit of the `oversized-frames` check.

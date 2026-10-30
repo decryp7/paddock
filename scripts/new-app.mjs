@@ -27,9 +27,7 @@ import { isMain } from '../conformance/src/util/is-main.mjs';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * What is never copied: build output, installed packages, Tauri's generated schemas, the demo's own lock file, and the
- * dialog command check's config (paddock-check-dialog-commands walks the shell's TypeScript sources, which the npm
- * package does not ship: outside this repository it cannot follow a dialog into the shell yet).
+ * What is never copied: build output, installed packages, Tauri's generated schemas and the demo's own lock file.
  */
 const TEMPLATES = {
   'shell-demo': { id: 'shell-demo', title: 'Paddock Shell Demo', readme: 'apps/shell-demo/README.md', section: 'Start a new app from the demo' },
@@ -38,7 +36,7 @@ const TEMPLATES = {
 /** The window accents an app can name (`SU_ACCENTS` of `@decryp7/paddock-ui`). */
 const ACCENTS = ['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter', 'pacenotes', 'sighter', 'graphite'];
 
-const SKIP = new Set(['node_modules', 'target', 'gen', 'dist', 'Cargo.lock', '.angular', 'paddock-dialog-commands.json']);
+const SKIP = new Set(['node_modules', 'target', 'gen', 'dist', 'Cargo.lock', '.angular']);
 
 // ---------------------------------------------------------------------------------------------------------------- pure
 
@@ -154,7 +152,6 @@ export function rustRewrites({ id, name, identifier }, versions) {
       ['pub const APP_NAME: &str = "Paddock Shell Demo";', `pub const APP_NAME: &str = "${name}";`],
       ['"https://dev.decryptology.net/decryp7/paddock/releases"', `"https://dev.decryptology.net/decryp7/${id}/releases"`],
       ['.homepage("https://dev.decryptology.net/decryp7/paddock")', `.homepage("https://dev.decryptology.net/decryp7/${id}")`],
-      ['include_str!("../../../../ui/projects/shell-demo/dialog-contracts.json")', 'include_str!("../../dialog-contracts.json")'],
       ['include_str!("../../../../ui/projects/shell-demo/paddock-manifest.json")', 'include_str!("../../paddock-manifest.json")'],
       ['include_str!("../../CHANGELOG.md")', 'include_str!("../../../CHANGELOG.md")'],
       ['include_str!("../../../../LICENSE-MIT")', 'include_str!("../../../LICENSE-MIT")'],
@@ -166,6 +163,7 @@ export function rustRewrites({ id, name, identifier }, versions) {
       ['"binaries/shell-demo-agent"', `"binaries/${agent}"`],
       ['use paddock_shell_demo::', `use ${lib}::`],
       ['paddock_shell_demo::tray::', `${lib}::tray::`],
+      ['paddock_shell_demo::app(', `${lib}::app(`],
       ['app_dir().join("../../../ui/projects/shell-demo")', 'app_dir().join("..")'],
       ['"cd apps/shell-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app"', '"cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app"'],
       ['app_dir().join("../CHANGELOG.md")', 'app_dir().join("../../CHANGELOG.md")'],
@@ -197,6 +195,9 @@ export function uiRewrites({ id, name }) {
       ["'https://dev.decryptology.net/decryp7/paddock/releases'", `'https://dev.decryptology.net/decryp7/${id}/releases'`],
     ],
     'src/app/generated/app-commands.ts': [['cd apps/shell-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app', 'cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app']],
+    'src/app/generated/dialog-contracts.ts': [
+      ['cd apps/shell-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app', 'cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app'],
+    ],
     'src/index.html': [['<title>Paddock Shell Demo</title>', `<title>${name}</title>`], ['Starting shell demo&hellip;', `Starting ${name}&hellip;`]],
     'tsconfig.app.json': [
       ['"extends": "../../tsconfig.json"', '"extends": "./tsconfig.json"'],
@@ -227,11 +228,12 @@ export function workbenchRustRewrites({ id, name, identifier }, versions) {
       ['pub const APP_ID: &str = "workbench-demo";', `pub const APP_ID: &str = "${id}";`],
       ['pub const APP_NAME: &str = "Paddock Workbench Demo";', `pub const APP_NAME: &str = "${name}";`],
       ['`WORKBENCH_DEMO_HOME`', `\`${id.toUpperCase().replaceAll('-', '_')}_HOME\``],
-      ['include_str!("../../../../ui/projects/workbench-demo/dialog-contracts.json")', 'include_str!("../../dialog-contracts.json")'],
     ],
     'tests/app.rs': [
       ['use paddock_workbench_demo::', `use ${lib}::`],
+      ['paddock_workbench_demo::app(', `${lib}::app(`],
       ['app_dir().join("../../../ui/projects/workbench-demo")', 'app_dir().join("..")'],
+      ['"cd apps/workbench-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app"', '"cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app"'],
       ['snapshot["app"], "Paddock Workbench Demo"', `snapshot["app"], ${JSON.stringify(name)}`],
     ],
     'tauri.conf.json': [
@@ -261,6 +263,7 @@ export function workbenchUiRewrites({ name, accent }) {
     ],
     'src/index.html': [['<title>Paddock Workbench Demo</title>', `<title>${name}</title>`], ['Starting workbench demo&hellip;', `Starting ${name}&hellip;`]],
     'src/main-window.ts': [["'Workbench demo'", JSON.stringify(name).replaceAll('"', "'")]],
+    'src/app/generated/dialog-contracts.ts': [['cd apps/workbench-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app', 'cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app']],
     'src/app/views/orientation-view.ts': [['<h1>Workbench demo</h1>', `<h1>${name}</h1>`]],
     'tsconfig.app.json': [
       ['"extends": "../../tsconfig.json"', '"extends": "./tsconfig.json"'],
@@ -325,7 +328,8 @@ export function e2eSmoke({ id, name, template = 'shell-demo' }) {
   const config = `import { paddockConfig } from '@decryp7/paddock-e2e';
 
 // ${name}'s end-to-end specs (plan X39): Chromium in a branch (\`npm run e2e\`), WebKit too on the combined result and in CI.
-export default paddockConfig({ app: '${id}', defaultPort: 4200, serve: (port) => \`npx ng serve --port \${port}\` });
+// buildGuard 'none': the app uses the published @decryp7/paddock-ui from node_modules, not ui/dist (an app mapped to ui/dist says 'ui-dist' and uiRoot).
+export default paddockConfig({ app: '${id}', defaultPort: 4200, buildGuard: 'none', serve: (port) => \`npx ng serve --port \${port}\` });
 `;
   const ready = workbench ? "page.locator('pd-dock [role=tab]').first()" : "page.locator('#pd-main')";
   const extra = workbench
@@ -403,9 +407,30 @@ export function tsconfigJson(uiTsconfig) {
   return { compileOnSave: false, compilerOptions, angularCompilerOptions: uiTsconfig.angularCompilerOptions };
 }
 
+/** The cargo table that links the C runtime statically on Windows (ADR 0032), as the root `.cargo/config.toml` has it. */
+const CRT_TABLE = `[target.'cfg(all(windows, target_env = "msvc"))']`;
+
+/**
+ * The new app's `.cargo/config.toml`: the static C runtime table of this repository's root configuration, with the comment
+ * above it. The app's `tauri.conf.json` turns Tauri's partial `staticVCRuntime` off (copied from the demo), so without
+ * this table its sidecars and its app would import VCRUNTIME140.dll. Throws when the root configuration lost the table.
+ */
+export function cargoConfig(rootConfig) {
+  const lines = rootConfig.split('\n');
+  const at = lines.indexOf(CRT_TABLE);
+  if (at < 0) throw new Error(`.cargo/config.toml has no ${CRT_TABLE} table (ADR 0032)`);
+  let start = at;
+  while (start > 0 && lines[start - 1].startsWith('#')) start--;
+  let end = at + 1;
+  while (end < lines.length && lines[end].trim() !== '' && !lines[end].startsWith('[')) end++;
+  const header = '# Cargo settings for this app (from the Paddock repository\'s root .cargo/config.toml).\n\n';
+  return `${header}${lines.slice(start, end).join('\n')}\n`;
+}
+
 /**
  * The repo root of a new app from Paddock's templates (plan X27, X43): the baseline config files, an AGENTS.md made of the
- * shared doc blocks, docs/suite-lessons.md, docs/releasing.md and the README skeleton. The generator's own tsconfig and the
+ * shared doc blocks, docs/suite-lessons.md, docs/releasing.md, the README skeleton and `.cargo/config.toml` (the static C
+ * runtime on Windows, ADR 0032). The generator's own tsconfig and the
  * Cargo profiles (the app has no root Cargo.toml yet) are not taken from the template.
  */
 export function writeRepoRoot(dest, { id, name }) {
@@ -427,6 +452,7 @@ export function writeRepoRoot(dest, { id, name }) {
     put(file, text);
   }
   put('README.md', fill(readFileSync(join(root, 'docs', 'blocks', 'readme-skeleton.md'), 'utf8'), config));
+  put('.cargo/config.toml', cargoConfig(readFileSync(join(root, '.cargo', 'config.toml'), 'utf8')));
 }
 
 /** The new app's changelog: one release, started from the demo. */

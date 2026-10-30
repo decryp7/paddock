@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "identifier": "net.decryptology.spotter",
   "build": {
+    "windows": { "staticVCRuntime": false },
     "frontendDist": "../dist/app/browser",
     "devUrl": "http://localhost:4370",
     "beforeDevCommand": "npm run start -- --port 4370 --poll 1500",

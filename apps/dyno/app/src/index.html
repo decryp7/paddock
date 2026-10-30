@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-accent="dyno">
 <head>
   <meta charset="utf-8">
   <title>Dyno</title>
@@ -9,6 +9,8 @@
   <link rel="icon" type="image/svg+xml" href="dyno-logo.svg">
 </head>
 <body>
-  <dy-root></dy-root>
+  <!-- Shown from the first moment the page loads until Angular renders; Angular replaces dy-root's content. Plain markup
+       and the paddock splash class: no inline style or script (CSP). -->
+  <dy-root><div class="pd-splash" role="status" data-testid="boot-splash"><img src="dyno-logo.svg" alt="" width="56" height="56"><span>Starting Dyno…</span></div></dy-root>
 </body>
 </html>

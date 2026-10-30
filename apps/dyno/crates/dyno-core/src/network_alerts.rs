@@ -18,7 +18,7 @@ pub struct NetworkAlerts {
 }
 
 /// The alarm an event stands for under `rules`, or `None` when that rule is off or the event is not notable (a new
-/// loopback listener is only visible on this PC).
+/// loopback listener is only visible on this computer).
 pub fn observation(event: &NetEvent, rules: NetworkAlerts) -> Option<Observation> {
     match event {
         NetEvent::NewListener {

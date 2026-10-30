@@ -11,7 +11,7 @@ use dyno_core::extras::sleep::{self, SleepReport};
 use dyno_core::extras::software::{self, SoftwareInventory};
 use dyno_core::extras::usage::{self, EnergySample};
 use dyno_core::ports::PlatformError;
-use dyno_core::time::Timestamp;
+use dyno_core::time::{LocalZone, Timestamp};
 use std::time::Duration;
 
 /// How long a quick tool may take.
@@ -288,26 +288,33 @@ pub trait BackupEnv {
     fn runner(&self, tool: BackupTool) -> Box<dyn ToolRunner + '_>;
 }
 
-/// Checks every backup tool that exists on this OS and is installed. Tools that are not installed produce nothing: "no
-/// backup tool found" is a normal state. One tool failing never affects the others.
-pub fn backup_statuses(
+/// The backup tools that exist on this OS and are installed, in the order they are checked. Tools that are not installed
+/// are left out: "no backup tool found" is a normal state.
+pub fn backup_tools_present(env: &dyn BackupEnv, os: &str) -> Vec<BackupTool> {
+    BackupTool::ALL.into_iter().filter(|t| t.on_os(os) && env.available(*t)).collect()
+}
+
+/// Checks one backup tool (read-only tools with timeouts). One tool failing never affects the others.
+pub fn backup_status_of(
     env: &dyn BackupEnv,
-    os: &str,
+    tool: BackupTool,
     now: Timestamp,
-    utc_offset_minutes: i32,
+    zone: &dyn LocalZone,
     stale_after_hours: u32,
-) -> Vec<BackupStatus> {
-    BackupTool::ALL
+) -> BackupStatus {
+    let runner = env.runner(tool);
+    check_one(runner.as_ref(), tool, now, zone, stale_after_hours)
+}
+
+/// Checks every backup tool that exists on this OS and is installed.
+pub fn backup_statuses(env: &dyn BackupEnv, os: &str, now: Timestamp, zone: &dyn LocalZone, stale_after_hours: u32) -> Vec<BackupStatus> {
+    backup_tools_present(env, os)
         .into_iter()
-        .filter(|t| t.on_os(os) && env.available(*t))
-        .map(|tool| {
-            let runner = env.runner(tool);
-            check_one(runner.as_ref(), tool, now, utc_offset_minutes, stale_after_hours)
-        })
+        .map(|tool| backup_status_of(env, tool, now, zone, stale_after_hours))
         .collect()
 }
 
-fn check_one(r: &dyn ToolRunner, tool: BackupTool, now: Timestamp, off: i32, stale: u32) -> BackupStatus {
+fn check_one(r: &dyn ToolRunner, tool: BackupTool, now: Timestamp, zone: &dyn LocalZone, stale: u32) -> BackupStatus {
     match tool {
         BackupTool::TimeMachine => {
             let dest = run(r, "tmutil", &["destinationinfo"], QUICK);
@@ -318,7 +325,7 @@ fn check_one(r: &dyn ToolRunner, tool: BackupTool, now: Timestamp, off: i32, sta
                 d.as_deref().map_err(String::as_str),
                 l.as_deref().map_err(String::as_str),
                 now,
-                off,
+                zone,
                 stale,
             )
         }
@@ -356,7 +363,7 @@ fn check_one(r: &dyn ToolRunner, tool: BackupTool, now: Timestamp, off: i32, sta
             Err(e) => repo_problem(tool, &e, "RESTIC_REPOSITORY"),
         },
         BackupTool::Borg => match run(r, "borg", &["list", "--last", "1", "--json"], Duration::from_secs(60)) {
-            Ok(t) => match backup::parse_borg_latest(&t, off) {
+            Ok(t) => match backup::parse_borg_latest(&t, zone) {
                 Some(at) => backup::judged(tool, at, now, stale),
                 None => backup::no_backup(tool, "Borg's repository has no archive yet."),
             },
@@ -430,6 +437,7 @@ pub fn needs_attention(s: &BackupStatus) -> bool {
 mod tests {
     use super::*;
     use crate::issues::testing::Scripted;
+    use dyno_core::time::FixedZone;
 
     fn ok(s: &str) -> Result<String, PlatformError> {
         Ok(s.to_string())
@@ -588,9 +596,9 @@ mod tests {
 
     #[test]
     fn no_backup_tool_found_is_a_normal_empty_answer() {
-        assert!(backup_statuses(&env(&[], vec![]), "macos", NOW, 0, 48).is_empty());
+        assert!(backup_statuses(&env(&[], vec![]), "macos", NOW, &FixedZone::UTC, 48).is_empty());
         // A tool that exists on another OS is not even considered.
-        assert!(backup_statuses(&env(&[BackupTool::TimeMachine], vec![]), "linux", NOW, 0, 48).is_empty());
+        assert!(backup_statuses(&env(&[BackupTool::TimeMachine], vec![]), "linux", NOW, &FixedZone::UTC, 48).is_empty());
     }
 
     #[test]
@@ -606,7 +614,7 @@ mod tests {
                 (BackupTool::Borg, vec![fail("Repository /mnt/borg does not exist.")]),
             ],
         );
-        let s = backup_statuses(&e, "macos", NOW, 480, 48);
+        let s = backup_statuses(&e, "macos", NOW, &FixedZone(480), 48);
         assert_eq!(s.len(), 4, "{s:#?}");
         assert_eq!(
             s.iter().find(|x| x.tool == BackupTool::Duplicati).unwrap().state,

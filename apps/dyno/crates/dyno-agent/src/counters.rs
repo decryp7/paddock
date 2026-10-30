@@ -6,12 +6,12 @@ use dyno_core::counters::{
     search, CounterCatalog, CounterHistory, CounterHit, CounterObject, CounterObjectList, CounterPath, CounterReading, CounterRing,
     CounterSeries, CounterUnit, RateTracker, RawCounter, MAX_HITS, MAX_READ,
 };
-use dyno_core::ports::CounterSource;
+use dyno_core::ports::{CounterSource, PlatformError};
 use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_core::time::{Timestamp, MINUTE};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 /// How long the catalog is reused (it changes when a device appears or a program starts).
@@ -57,6 +57,26 @@ struct Inner {
     rings: Mutex<HashMap<String, Series>>,
     /// The pinned counters the background reading covers, so a page's reads do not make the rate tracker forget them.
     pinned: Mutex<Vec<String>>,
+    /// The listing of every counter while one runs (callers join it).
+    listing: Mutex<Option<Arc<Listing>>>,
+}
+
+/// One listing of every counter: its result once it ended.
+#[derive(Default)]
+struct Listing {
+    result: Mutex<Option<Result<Arc<CounterCatalog>, PlatformError>>>,
+    done: Condvar,
+}
+
+/// The error of a call that did not end within `deadline`.
+fn timed_out(what: &str, deadline: Duration) -> AgentError {
+    AgentError::new(
+        ErrorCode::Timeout,
+        format!(
+            "Windows, macOS or Linux took too long {what} (more than {} s); try again.",
+            deadline.as_secs()
+        ),
+    )
 }
 
 /// Counts a call in flight until the thread running it ends, wherever that happens.
@@ -124,6 +144,7 @@ impl CounterCentre {
                 rates: Mutex::new(RateTracker::new()),
                 rings: Mutex::new(HashMap::new()),
                 pinned: Mutex::new(Vec::new()),
+                listing: Mutex::new(None),
             }),
         }
     }
@@ -136,6 +157,15 @@ impl CounterCentre {
         what: &str,
         f: impl FnOnce(&Arc<Inner>) -> T + Send + 'static,
     ) -> Result<T, AgentError> {
+        let (tx, rx) = mpsc::channel();
+        self.start(what, move |inner| {
+            let _ = tx.send(f(inner));
+        })?;
+        rx.recv_timeout(deadline).map_err(|_| timed_out(what, deadline))
+    }
+
+    /// Runs `f` on its own thread, counted as a call in flight until it ends; refused when [`MAX_IN_FLIGHT`] are.
+    fn start(&self, what: &str, f: impl FnOnce(&Arc<Inner>) + Send + 'static) -> Result<(), AgentError> {
         if self.inner.in_flight.fetch_add(1, Ordering::SeqCst) >= MAX_IN_FLIGHT {
             self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
             return Err(AgentError::new(
@@ -144,41 +174,64 @@ impl CounterCentre {
             ));
         }
         let slot = Slot(self.inner.clone());
-        let (tx, rx) = mpsc::channel();
         let inner = self.inner.clone();
         let spawned = std::thread::Builder::new().name("dyno-counters".into()).spawn(move || {
+            // The user waits for it on the Counters page: live work (rule 52).
+            dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
             let _slot = slot;
-            let _ = tx.send(f(&inner));
+            f(&inner);
         });
         if let Err(e) = spawned {
             self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
             return Err(AgentError::new(ErrorCode::Internal, format!("Dyno could not start a reader: {e}")));
         }
-        rx.recv_timeout(deadline).map_err(|_| {
-            AgentError::new(
-                ErrorCode::Timeout,
-                format!(
-                    "Windows, macOS or Linux took too long {what} (more than {} s); try again.",
-                    deadline.as_secs()
-                ),
-            )
-        })
+        Ok(())
     }
 
     fn catalog(&self) -> Result<Arc<CounterCatalog>, AgentError> {
+        self.catalog_within(CATALOG_DEADLINE)
+    }
+
+    fn catalog_within(&self, deadline: Duration) -> Result<Arc<CounterCatalog>, AgentError> {
         if let Some((at, c)) = lock(&self.inner.catalog).as_ref() {
             if at.elapsed() < CATALOG_TTL {
                 return Ok(c.clone());
             }
         }
-        let fresh = self.within(CATALOG_DEADLINE, "listing the performance counters", |inner| {
-            let found = inner.source.catalog().map(|c| Arc::new(CounterCatalog::bounded(c.objects)));
-            if let Ok(c) = &found {
-                *lock(&inner.catalog) = Some((Instant::now(), c.clone()));
+        const WHAT: &str = "listing the performance counters";
+        // One listing at a time: a retry after a timeout waits for the listing still running instead of starting another
+        // (on a busy machine a fresh one would time out again, and every retry would add one more).
+        let listing = {
+            let mut running = lock(&self.inner.listing);
+            match running.as_ref() {
+                Some(l) => l.clone(),
+                None => {
+                    let l = Arc::new(Listing::default());
+                    let mine = l.clone();
+                    self.start(WHAT, move |inner| {
+                        let found = inner.source.catalog().map(|c| Arc::new(CounterCatalog::bounded(c.objects)));
+                        if let Ok(c) = &found {
+                            *lock(&inner.catalog) = Some((Instant::now(), c.clone()));
+                        }
+                        // Ended: a later call starts afresh (after a failure, too); callers already waiting get this result.
+                        *lock(&inner.listing) = None;
+                        *lock(&mine.result) = Some(found);
+                        mine.done.notify_all();
+                    })?;
+                    *running = Some(l.clone());
+                    l
+                }
             }
-            found
-        })?;
-        fresh.map_err(AgentError::from)
+        };
+        let result = lock(&listing.result);
+        let (result, _) = listing
+            .done
+            .wait_timeout_while(result, deadline, |r| r.is_none())
+            .unwrap_or_else(|e| e.into_inner());
+        match result.as_ref() {
+            Some(found) => found.clone().map_err(AgentError::from),
+            None => Err(timed_out(WHAT, deadline)),
+        }
     }
 
     /// The first level of the browser.
@@ -244,6 +297,8 @@ impl CounterCentre {
         let slot = Slot(self.inner.clone());
         let inner = self.inner.clone();
         let spawned = std::thread::Builder::new().name("dyno-counters-pinned".into()).spawn(move || {
+            // It holds one of the two slots the page's requests use, and the live sampler starts it: live work (rule 52).
+            dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
             let _slot = slot;
             let raws = inner.source.read(&parsed);
             record(&inner, raws, now);
@@ -300,7 +355,6 @@ mod tests {
     use super::*;
     use dyno_core::counters::{CounterKind, CounterUnit as U};
     use dyno_core::metrics::Reading;
-    use dyno_core::ports::PlatformError;
     use dyno_platform::counters::{Entry, FakeCounters};
 
     fn entry(inst: Option<&str>, name: &str, kind: CounterKind, v: f64) -> Entry {
@@ -349,8 +403,8 @@ mod tests {
 
         let ev = dyno_core::protocol::TimelineEvent {
             at: Timestamp(2_000),
-            kind: dyno_core::protocol::TimelineEventKind::Cleanup,
-            label: "Cleanup ran".into(),
+            kind: dyno_core::protocol::TimelineEventKind::Alert,
+            label: "Alert raised".into(),
         };
         let h = c
             .history(&p, 5, Timestamp(3_500), |from, to| {
@@ -528,5 +582,85 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(ok);
+    }
+
+    /// Counts its listings; each waits until released.
+    struct SlowCatalog {
+        calls: AtomicUsize,
+        released: Mutex<bool>,
+        changed: std::sync::Condvar,
+    }
+
+    impl CounterSource for SlowCatalog {
+        fn catalog(&self) -> Result<CounterCatalog, PlatformError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let g = lock(&self.released);
+            drop(self.changed.wait_while(g, |r| !*r).unwrap_or_else(|e| e.into_inner()));
+            FakeCounters::new(vec![Entry::new("Memory", None, "Free", U::Bytes, CounterKind::Gauge, 1.0)]).catalog()
+        }
+
+        fn read(&self, _: &[CounterPath]) -> Vec<RawCounter> {
+            vec![]
+        }
+    }
+
+    /// Regression (Windows CI run 7166): listing every counter took longer than the deadline on a busy machine, and the
+    /// retry the error asks for started a second full listing instead of waiting for the one still running, so on a slow
+    /// machine no retry could ever finish in time. A retry joins the running listing, and gets its result.
+    #[test]
+    fn a_retry_waits_for_the_listing_still_running_instead_of_listing_again() {
+        let src = Arc::new(SlowCatalog {
+            calls: AtomicUsize::new(0),
+            released: Mutex::new(false),
+            changed: std::sync::Condvar::new(),
+        });
+        let c = CounterCentre::new(src.clone());
+        let first = c.catalog_within(Duration::from_millis(50));
+        assert_eq!(first.unwrap_err().code, ErrorCode::Timeout);
+        let retry = c.catalog_within(Duration::from_millis(50));
+        assert_eq!(retry.unwrap_err().code, ErrorCode::Timeout);
+        assert_eq!(src.calls.load(Ordering::SeqCst), 1, "the retry joined the running listing");
+        *lock(&src.released) = true;
+        src.changed.notify_all();
+        // Bounded far above any scheduling delay (a hang guard): the running listing ends and the retry gets it.
+        let listed = c.catalog_within(Duration::from_secs(20)).unwrap();
+        assert!(listed.object("Memory").is_some());
+        assert_eq!(src.calls.load(Ordering::SeqCst), 1, "listed once");
+    }
+
+    /// Records the thread role every call into the OS ran at.
+    struct Roles(Mutex<Vec<Option<dyno_platform::priority::ThreadRole>>>);
+
+    impl CounterSource for Roles {
+        fn catalog(&self) -> Result<CounterCatalog, PlatformError> {
+            lock(&self.0).push(dyno_platform::priority::current_role());
+            FakeCounters::new(vec![Entry::new("Memory", None, "Free", U::Bytes, CounterKind::Gauge, 1.0)]).catalog()
+        }
+
+        fn read(&self, _: &[CounterPath]) -> Vec<RawCounter> {
+            lock(&self.0).push(dyno_platform::priority::current_role());
+            vec![]
+        }
+    }
+
+    /// Rule 52 (coordinator review, 2026-10-30): the Counters page's requests and the pinned reading hold the same two
+    /// slots, and both are live work. A bulk pinned read stalled behind busy normal threads on Windows would make the
+    /// user's request come back Busy.
+    #[test]
+    fn requests_and_the_pinned_reading_run_as_live_work() {
+        use dyno_platform::priority::ThreadRole;
+        let src = Arc::new(Roles(Mutex::new(Vec::new())));
+        let c = CounterCentre::new(src.clone());
+        c.objects().unwrap();
+        c.values(&["\\Memory\\Free".into()], Timestamp(1)).unwrap();
+        assert!(c.poll_pinned(&["\\Memory\\Free".into()], Timestamp(2)));
+        // The background reading ends on its own thread: wait for it (a hang guard bounds the loop).
+        for _ in 0..500 {
+            if lock(&src.0).len() == 3 && c.inner.in_flight.load(Ordering::SeqCst) == 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(*lock(&src.0), vec![Some(ThreadRole::Live); 3]);
     }
 }

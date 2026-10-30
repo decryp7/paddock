@@ -86,6 +86,12 @@ jobs:
           git diff "origin/$BASE...HEAD" -- "$CRATE_PATH" > pr.diff
           cargo mutants -p "$PACKAGE" --in-diff pr.diff --timeout-multiplier "$MULT" --no-shuffle
 
+      # `jobs` mutants build at once: each gets 1/jobs of the job's share, so the job's rustc count stays its share.
+      - uses: ./.paddock/.gitea/actions/build-jobs
+        if: github.event_name != 'pull_request'
+        with:
+          split: ${{ inputs.jobs }}
+
       - name: Mutants in the whole crate
         if: github.event_name != 'pull_request'
         env:

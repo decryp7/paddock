@@ -8,10 +8,19 @@ import { normalizeKey, parseKey, pressedKeys } from '@decryp7/paddock-ui/shell';
 /** `mac`: `Mod` is Cmd; `other`: `Mod` is Ctrl (Windows, Linux). */
 export type KeyPlatform = 'mac' | 'other';
 
+/** The operating system of this browser, for key hints and menu wording: macOS and iOS, Windows, or any other. */
+export type MenuOs = 'mac' | 'windows' | 'other';
+
+/** The operating system of this browser (the one place that reads the user agent). */
+export function currentOs(nav: { readonly platform?: string; readonly userAgent?: string } | undefined = globalThis.navigator): MenuOs {
+  const p = `${nav?.platform ?? ''} ${nav?.userAgent ?? ''}`;
+  if (/Mac|iPhone|iPad/.test(p)) return 'mac';
+  return /Win/i.test(p) ? 'windows' : 'other';
+}
+
 /** The platform of this browser (Cmd on macOS and iOS). */
 export function currentPlatform(nav: { readonly platform?: string; readonly userAgent?: string } | undefined = globalThis.navigator): KeyPlatform {
-  const p = `${nav?.platform ?? ''} ${nav?.userAgent ?? ''}`;
-  return /Mac|iPhone|iPad/.test(p) ? 'mac' : 'other';
+  return currentOs(nav) === 'mac' ? 'mac' : 'other';
 }
 
 /** The part of a keyboard event the helpers read. */

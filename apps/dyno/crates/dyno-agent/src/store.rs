@@ -12,7 +12,7 @@
 //! The database is a cache of the past, never the only copy of anything the user made: a damaged file is moved
 //! aside and a fresh one created. Values are JSON text (small, debuggable, versioned by serde defaults).
 
-use dyno_core::activity::{ActivityEntry, UndoRecord};
+use dyno_core::activity::ActivityEntry;
 use dyno_core::alerts::Alert;
 use dyno_core::forecast::DiskTrendPoint;
 use dyno_core::history::{AppMinute, CoreBucket, HistoryPoint, Retention, Tier};
@@ -65,7 +65,7 @@ CREATE INDEX IF NOT EXISTS app_minutes_at ON app_minutes (at);
 CREATE TABLE IF NOT EXISTS disk_free (disk TEXT NOT NULL, at INTEGER NOT NULL, total INTEGER NOT NULL, free INTEGER NOT NULL, PRIMARY KEY (disk, at)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS events (at INTEGER NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS events_at ON events (at);
-CREATE TABLE IF NOT EXISTS activity (id TEXT PRIMARY KEY, at INTEGER NOT NULL, entry TEXT NOT NULL, undo TEXT NOT NULL, undone INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS activity (id TEXT PRIMARY KEY, at INTEGER NOT NULL, entry TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS activity_at ON activity (at);
 CREATE TABLE IF NOT EXISTS alerts (id TEXT PRIMARY KEY, at INTEGER NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS snapshots (id TEXT PRIMARY KEY, at INTEGER NOT NULL, info TEXT NOT NULL, data TEXT NOT NULL);
@@ -84,11 +84,6 @@ fn tier_id(t: Tier) -> i64 {
 
 fn kind_text(k: TimelineEventKind) -> &'static str {
     match k {
-        TimelineEventKind::Throttle => "throttle",
-        TimelineEventKind::Cap => "cap",
-        TimelineEventKind::Release => "release",
-        TimelineEventKind::Cleanup => "cleanup",
-        TimelineEventKind::Tuning => "tuning",
         TimelineEventKind::Alert => "alert",
         TimelineEventKind::Boot => "boot",
         TimelineEventKind::Network => "network",
@@ -97,11 +92,6 @@ fn kind_text(k: TimelineEventKind) -> &'static str {
 
 fn kind_from(s: &str) -> Option<TimelineEventKind> {
     Some(match s {
-        "throttle" => TimelineEventKind::Throttle,
-        "cap" => TimelineEventKind::Cap,
-        "release" => TimelineEventKind::Release,
-        "cleanup" => TimelineEventKind::Cleanup,
-        "tuning" => TimelineEventKind::Tuning,
         "alert" => TimelineEventKind::Alert,
         "boot" => TimelineEventKind::Boot,
         "network" => TimelineEventKind::Network,
@@ -117,12 +107,29 @@ fn parse<T: DeserializeOwned>(s: &str) -> Option<T> {
     serde_json::from_str(s).ok()
 }
 
+/// Whether `e` says another connection holds the database (not that the file is damaged).
+fn is_busy(e: &StoreError) -> bool {
+    matches!(
+        e,
+        StoreError::Sql(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked,
+                ..
+            },
+            _
+        ))
+    )
+}
+
 impl Store {
     /// Opens (or creates) the database at `path`. A file that isn't a usable database is renamed to
     /// `<name>.damaged-<at>` and a fresh one created; the returned note says so.
+    ///
+    /// A database another process is writing (busy or locked) is not damaged: that is an error, and the file stays.
     pub fn open(path: &Path, now: Timestamp) -> Result<(Store, Option<String>)> {
         match Self::try_open(path) {
             Ok(s) => Ok((s, None)),
+            Err(e) if is_busy(&e) => Err(e),
             Err(e) => {
                 let aside: PathBuf = path.with_extension(format!("damaged-{}", now.millis()));
                 let _ = std::fs::rename(path, &aside);
@@ -338,65 +345,22 @@ impl Store {
         Ok(out)
     }
 
-    /// Stores an activity entry with its undo record.
-    pub fn put_activity(&self, e: &ActivityEntry, undo: &UndoRecord) -> Result<()> {
+    /// Stores an activity entry.
+    pub fn put_activity(&self, e: &ActivityEntry) -> Result<()> {
         self.conn.execute(
-            "INSERT OR REPLACE INTO activity (id, at, entry, undo, undone) VALUES (?1, ?2, ?3, ?4, 0)",
-            params![e.id, e.at.millis(), json(e)?, json(undo)?],
+            "INSERT OR REPLACE INTO activity (id, at, entry) VALUES (?1, ?2, ?3)",
+            params![e.id, e.at.millis(), json(e)?],
         )?;
         Ok(())
     }
 
-    /// An entry with its undo record and whether it was undone.
-    pub fn activity_entry(&self, id: &str) -> Result<Option<(ActivityEntry, UndoRecord, bool)>> {
-        let row: Option<(String, String, i64)> = self
-            .conn
-            .query_row("SELECT entry, undo, undone FROM activity WHERE id = ?1", [id], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-            })
-            .optional()?;
-        Ok(row.and_then(|(e, u, d)| Some((parse(&e)?, parse(&u).unwrap_or(UndoRecord::None), d != 0))))
-    }
-
-    /// Marks an entry undone.
-    pub fn mark_undone(&self, id: &str) -> Result<()> {
-        self.conn.execute("UPDATE activity SET undone = 1 WHERE id = ?1", [id])?;
-        Ok(())
-    }
-
-    /// The latest entries, newest first, with their undo records and undone flags.
-    pub fn activity(&self, limit: u32) -> Result<Vec<(ActivityEntry, UndoRecord, bool)>> {
+    /// The latest entries, newest first.
+    pub fn activity(&self, limit: u32) -> Result<Vec<ActivityEntry>> {
         let mut st = self
             .conn
-            .prepare_cached("SELECT entry, undo, undone FROM activity ORDER BY at DESC, rowid DESC LIMIT ?1")?;
-        let rows = st.query_map([i64::from(limit.min(1_000))], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
-        })?;
-        Ok(rows
-            .filter_map(|r| r.ok())
-            .filter_map(|(e, u, d)| Some((parse(&e)?, parse(&u).unwrap_or(UndoRecord::None), d != 0)))
-            .collect())
-    }
-
-    /// Activity entries of a kind since `from` (for counts in reports).
-    pub fn count_activity(&self, kind: &str, from: Timestamp) -> Result<u32> {
-        let pattern = format!("%\"kind\":\"{kind}\"%");
-        let n: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM activity WHERE at >= ?1 AND entry LIKE ?2",
-            params![from.millis(), pattern],
-            |r| r.get(0),
-        )?;
-        Ok(n.max(0) as u32)
-    }
-
-    /// Bytes freed by cleanups since `from`.
-    pub fn cleaned_bytes(&self, from: Timestamp) -> Result<u64> {
-        Ok(self
-            .activity(1_000)?
-            .into_iter()
-            .filter(|(e, _, _)| e.at >= from && e.kind == dyno_core::activity::ActivityKind::Cleanup)
-            .filter_map(|(e, _, _)| e.bytes)
-            .sum())
+            .prepare_cached("SELECT entry FROM activity ORDER BY at DESC, rowid DESC LIMIT ?1")?;
+        let rows = st.query_map([i64::from(limit.min(1_000))], |r| r.get::<_, String>(0))?;
+        Ok(rows.filter_map(|r| r.ok()).filter_map(|e| parse(&e)).collect())
     }
 
     /// Stores an alert.
@@ -565,7 +529,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dyno_core::activity::{ActivityKind, UndoState};
+    use dyno_core::activity::ActivityKind;
     use dyno_core::time::{HOUR, MINUTE};
 
     fn point(at: i64) -> HistoryPoint {
@@ -576,15 +540,13 @@ mod tests {
         }
     }
 
-    fn entry(id: &str, at: i64, kind: ActivityKind, bytes: Option<u64>) -> ActivityEntry {
+    fn entry(id: &str, at: i64, kind: ActivityKind) -> ActivityEntry {
         ActivityEntry {
             id: id.into(),
             at: Timestamp(at),
             kind,
             title: "t".into(),
             detail: "d".into(),
-            undo: UndoState::NotUndoable,
-            bytes,
         }
     }
 
@@ -599,12 +561,12 @@ mod tests {
         assert_eq!(s.points(Tier::Minute, Timestamp(0), Timestamp(1)).unwrap().len(), 1);
         let e = TimelineEvent {
             at: Timestamp(5),
-            kind: TimelineEventKind::Cap,
-            label: "Capped Chrome".into(),
+            kind: TimelineEventKind::Alert,
+            label: "CPU alert".into(),
         };
         s.put_event(&e).unwrap();
         assert_eq!(s.events(Timestamp(0), Timestamp(10)).unwrap(), vec![e]);
-        for k in ["throttle", "cap", "release", "cleanup", "tuning", "alert", "boot"] {
+        for k in ["alert", "boot"] {
             assert_eq!(kind_from(k).map(kind_text), Some(k));
         }
         assert!(kind_from("x").is_none());
@@ -651,23 +613,10 @@ mod tests {
     #[test]
     fn activity_alerts_and_snapshots() {
         let s = Store::memory().unwrap();
-        let undo = UndoRecord::Tuning {
-            id: "powerPlan".into(),
-            apply: dyno_core::helper::HelperAction::SetVisualEffects(2),
-            revert: dyno_core::helper::HelperAction::SetVisualEffects(0),
-            after: "2".into(),
-        };
-        s.put_activity(&entry("a", 1, ActivityKind::Tuning, None), &undo).unwrap();
-        s.put_activity(&entry("b", 2, ActivityKind::Cleanup, Some(500)), &UndoRecord::None)
-            .unwrap();
+        s.put_activity(&entry("a", 1, ActivityKind::Alert)).unwrap();
+        s.put_activity(&entry("b", 2, ActivityKind::System)).unwrap();
         let all = s.activity(10).unwrap();
-        assert_eq!(all[0].0.id, "b");
-        assert_eq!(s.activity_entry("a").unwrap().unwrap().1, undo);
-        s.mark_undone("a").unwrap();
-        assert!(s.activity_entry("a").unwrap().unwrap().2);
-        assert!(s.activity_entry("zzz").unwrap().is_none());
-        assert_eq!(s.count_activity("cleanup", Timestamp(0)).unwrap(), 1);
-        assert_eq!(s.cleaned_bytes(Timestamp(0)).unwrap(), 500);
+        assert_eq!((all[0].id.as_str(), all[1].id.as_str()), ("b", "a"));
         let alert = Alert {
             id: "x".into(),
             at: Timestamp(3),
@@ -705,6 +654,25 @@ mod tests {
         }
         let (_, note) = Store::open(&path, Timestamp(9)).unwrap();
         assert!(note.unwrap().contains("newer"));
+    }
+
+    #[test]
+    fn a_database_another_process_is_writing_is_never_set_aside_as_damaged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.db");
+        // Another writer (a second agent, before the single-agent lock) holds the write lock on a fresh file.
+        let other = Connection::open(&path).unwrap();
+        other.execute_batch("BEGIN EXCLUSIVE; CREATE TABLE other (x INTEGER);").unwrap();
+        let opened = Store::open(&path, Timestamp(7));
+        assert!(
+            !dir.path().join("history.damaged-7").exists(),
+            "a busy database was moved aside as damaged"
+        );
+        assert!(opened.is_err(), "a busy database is an error, not a fresh start");
+        other.execute_batch("COMMIT").unwrap();
+        drop(other);
+        let (_, note) = Store::open(&path, Timestamp(8)).unwrap();
+        assert!(note.is_none(), "it opens as is once the other writer is done");
     }
 
     #[test]

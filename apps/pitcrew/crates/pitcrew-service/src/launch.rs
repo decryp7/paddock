@@ -140,6 +140,14 @@ impl Started {
         }
     }
 
+    // The bare-pid kill exists only in the macOS `Spawned` arm, so the expectation is fulfilled only there.
+    #[cfg_attr(
+        target_os = "macos",
+        expect(
+            clippy::disallowed_methods,
+            reason = "ADR 0033 WP-6: kills a spawned runner without the reaped guard; use paddock_proc"
+        )
+    )]
     fn kill(&mut self) {
         match self {
             Started::Std(c) => {
@@ -250,6 +258,13 @@ pub fn set_stop_helper(exe: PathBuf) {
 }
 
 /// Asks process `pid` (a group leader) to stop. On Windows `session` is the user session it runs in, if any.
+#[cfg_attr(
+    unix,
+    expect(
+        clippy::disallowed_methods,
+        reason = "ADR 0033 WP-6: kill_tree signals a recorded pid (adopted runners); kill by ProcessId"
+    )
+)]
 pub fn graceful_stop(pid: u32, session: Option<u32>) -> Result<(), String> {
     #[cfg(unix)]
     {
@@ -287,6 +302,13 @@ pub fn graceful_stop(pid: u32, session: Option<u32>) -> Result<(), String> {
 }
 
 /// Ends `pid` and every process it started.
+#[cfg_attr(
+    unix,
+    expect(
+        clippy::disallowed_methods,
+        reason = "ADR 0033 WP-6: kill_tree signals a recorded pid (adopted runners); kill by ProcessId"
+    )
+)]
 pub fn kill_tree(pid: u32) {
     #[cfg(unix)]
     {
@@ -296,7 +318,7 @@ pub fn kill_tree(pid: u32) {
     }
     #[cfg(windows)]
     {
-        let mut cmd = quiet_command(std::path::Path::new("taskkill.exe"));
+        let mut cmd = quiet_command(&crate::process::taskkill_exe());
         cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);
         let _ = run_with_timeout(cmd, Duration::from_secs(20));
     }

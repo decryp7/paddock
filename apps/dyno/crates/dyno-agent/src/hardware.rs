@@ -301,19 +301,22 @@ fn observe(shared: &Arc<Shared>, o: Observation, t: Timestamp) {
 
 /// What the sampler does with the tracker's events: persists finished episodes and raises or returns the alarm.
 pub fn handle_events(shared: &Arc<Shared>, events: Vec<TrackerEvent>, confidence: Option<Confidence>, t: Timestamp) {
-    let alarms = lock(&shared.core).settings.hardware_alarms.throttling;
+    let (alarms, zone) = {
+        let core = lock(&shared.core);
+        (core.settings.hardware_alarms.throttling, core.zone.clone())
+    };
     for e in events {
         match e {
             TrackerEvent::Started(ep) => {
                 // Only with evidence: a hint (low confidence) is shown on the page but never raises an alarm.
                 let c = confidence.unwrap_or(Confidence::Low);
                 if alarms && c >= Confidence::Medium {
-                    observe(shared, from_throttle(&ep, true, c), t);
+                    observe(shared, from_throttle(&ep, true, c, zone.as_ref()), t);
                 }
             }
             TrackerEvent::Ended(ep) => {
                 let _ = lock(&shared.core).store.put_throttle_episode(&ep);
-                observe(shared, from_throttle(&ep, false, Confidence::Medium), t);
+                observe(shared, from_throttle(&ep, false, Confidence::Medium, zone.as_ref()), t);
             }
         }
     }

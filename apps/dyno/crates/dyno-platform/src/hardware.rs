@@ -204,8 +204,7 @@ impl DiskWearSource for SmartctlWear {
     fn read(&mut self) -> Reading<Vec<DiskWear>> {
         let Some(program) = self.candidates.iter().find(|p| p.is_file()) else {
             return Reading::unavailable(
-                "Dyno reads SSD wear through smartmontools, which is not installed. Install it (on macOS: brew install smartmontools) \
-                 or wait for Dyno's privileged helper.",
+                "Dyno reads SSD wear through smartmontools, which is not installed. Install it (on macOS: brew install smartmontools).",
             );
         };
         let scan = match self.run(program, &["--scan", "-j"]) {
@@ -505,7 +504,7 @@ mod tests {
     #[test]
     fn a_missing_smartctl_is_explained() {
         let r = SmartctlWear::new(vec![PathBuf::from("/dyno/missing/smartctl")]).read();
-        assert!(matches!(r, Reading::Unavailable(m) if m.contains("smartmontools") && m.contains("helper")));
+        assert!(matches!(r, Reading::Unavailable(m) if m.contains("smartmontools") && !m.contains("helper")));
     }
 
     #[test]

@@ -87,7 +87,7 @@ describe('RecorderStore', () => {
     expect(store.snapshots()[0]!.reason).toBe('manual');
     expect(store.selectedId()).toBe(store.snapshots()[0]!.id);
     expect(store.capturing()).toBe(false);
-    expect(notifier.toasts().length).toBe(1);
+    expect(notifier.recent().length).toBe(1);
   });
 
   it('reports a failed capture without changing the list', async () => {
@@ -96,7 +96,7 @@ describe('RecorderStore', () => {
     vi.spyOn(mock, 'capture').mockRejectedValue({ code: 'internal', message: 'disk full' });
     await store.capture();
     expect(store.snapshots()).toHaveLength(3);
-    expect(notifier.toasts()[0]!.text).toBe('disk full');
+    expect(notifier.recent()[0]!.text).toBe('disk full');
     expect(store.capturing()).toBe(false);
   });
 

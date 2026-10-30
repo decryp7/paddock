@@ -9,7 +9,7 @@
 use dyno_core::protocol::LiveUpdate;
 use dyno_core::settings::{TrayMetric, TrayStyle};
 use dyno_core::tray::{self, Icon};
-use dyno_core::widgets::{Metric, TrayItemStyle, TrayItems as TrayItemSettings, TrayOpens};
+use dyno_core::widgets::{Metric, TrayItemStyle, TrayItems as TrayItemSettings};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
@@ -60,15 +60,6 @@ pub enum Glyph {
     CoreBars,
 }
 
-/// What clicking an item opens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Opens {
-    /// The shared popover (`#/tray`).
-    Main,
-    /// The item's own focused popover (`#/popover/<id>`).
-    Own,
-}
-
 /// One menu-bar / tray item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemSpec {
@@ -78,8 +69,6 @@ pub struct ItemSpec {
     pub metric: Metric,
     /// How it draws.
     pub glyph: Glyph,
-    /// What a click opens.
-    pub opens: Opens,
     /// The label a number shows in the tooltip (empty: the metric's name).
     pub label: String,
     /// The unit a number shows in the tooltip (empty: the metric's own).
@@ -88,12 +77,11 @@ pub struct ItemSpec {
 
 impl ItemSpec {
     /// A spec with the default label and unit.
-    pub fn new(id: &str, metric: Metric, glyph: Glyph, opens: Opens) -> ItemSpec {
+    pub fn new(id: &str, metric: Metric, glyph: Glyph) -> ItemSpec {
         ItemSpec {
             id: id.into(),
             metric,
             glyph,
-            opens,
             label: String::new(),
             unit: String::new(),
         }
@@ -118,10 +106,6 @@ pub fn items_from_settings(s: &TrayItemSettings) -> Vec<ItemSpec> {
                 id: i.id.clone(),
                 metric: i.metric.clone(),
                 glyph,
-                opens: match i.opens {
-                    TrayOpens::OwnPopover => Opens::Own,
-                    TrayOpens::MainPopover => Opens::Main,
-                },
                 label,
                 unit,
             }
@@ -129,7 +113,7 @@ pub fn items_from_settings(s: &TrayItemSettings) -> Vec<ItemSpec> {
         .collect()
 }
 
-/// Items from `metric:glyph[:own]` entries separated by commas, e.g. `cpu:ring,memory:number:own,cpu:cores` (metrics
+/// Items from `metric:glyph` entries separated by commas, e.g. `cpu:ring,memory:number,cpu:cores` (metrics
 /// `cpu memory swap disk network gpu temp battery`; glyphs `bars graph meter ring number graphnumber cores`). Anything
 /// unrecognised is skipped; at most 8 items.
 pub fn parse_items(text: &str) -> Vec<ItemSpec> {
@@ -157,8 +141,7 @@ pub fn parse_items(text: &str) -> Vec<ItemSpec> {
             Some("cores") if metric == Metric::CpuTotal => Glyph::CoreBars,
             _ => continue,
         };
-        let opens = if parts.get(2) == Some(&"own") { Opens::Own } else { Opens::Main };
-        out.push(ItemSpec::new(&format!("{}-{}", parts[0], out.len() + 1), metric, glyph, opens));
+        out.push(ItemSpec::new(&format!("{}-{}", parts[0], out.len() + 1), metric, glyph));
     }
     out
 }
@@ -282,7 +265,10 @@ impl TrayItems {
             }),
             Metric::Battery => s.battery.value().map(|b| percent(b.charge)),
             Metric::Process(name) => Some(percent(
-                u.top_cpu.iter().find(|g| g.name.eq_ignore_ascii_case(name)).map_or(0.0, |g| g.cpu),
+                u.top_cpu
+                    .iter()
+                    .find(|g| g.name.eq_ignore_ascii_case(name))
+                    .map_or(0.0, |g| g.cpu_read()),
             )),
             Metric::Fan | Metric::PerfCounter(_) => None,
         }
@@ -322,7 +308,7 @@ impl TrayItems {
         let Some(m) = self.measure(u, &spec.metric) else {
             return Frame {
                 icon: tray::render_meter(0.0, size, dark),
-                tooltip: format!("Dyno — {name} is not available on this PC"),
+                tooltip: format!("Dyno — {name} is not available on this computer"),
             };
         };
         let history = &mut self.state[i].history;
@@ -359,7 +345,6 @@ mod tests {
     use dyno_core::grouping::AppGroup;
     use dyno_core::metrics::{NetworkSample, Reading};
     use dyno_core::protocol::{LiveUpdate, Overhead};
-    use dyno_core::rules::ProfileId;
     use dyno_core::time::Timestamp;
     use dyno_core::widgets::TrayItem;
     use dyno_platform::fake::quiet_sample;
@@ -378,24 +363,21 @@ mod tests {
             top_cpu: vec![],
             top_memory: vec![],
             overhead: Overhead::default(),
-            profile: ProfileId::Normal,
-            rules_paused: false,
-            active_actions: vec![],
             processes: None,
             groups: None,
+            other_users: None,
         }
     }
 
     fn item(id: &str, metric: Metric, glyph: Glyph) -> ItemSpec {
-        ItemSpec::new(id, metric, glyph, Opens::Main)
+        ItemSpec::new(id, metric, glyph)
     }
 
-    fn setting(id: &str, metric: Metric, style: TrayItemStyle, opens: TrayOpens) -> TrayItem {
+    fn setting(id: &str, metric: Metric, style: TrayItemStyle) -> TrayItem {
         TrayItem {
             id: id.into(),
             metric,
             style,
-            opens,
         }
     }
 
@@ -412,14 +394,11 @@ mod tests {
     fn the_settings_model_maps_to_items() {
         let default = items_from_settings(&TrayItemSettings::default());
         assert_eq!(default.len(), 2);
-        assert_eq!(
-            (default[0].glyph, default[0].opens, &default[0].metric),
-            (Glyph::Bars, Opens::Own, &Metric::CpuTotal)
-        );
+        assert_eq!((default[0].glyph, &default[0].metric), (Glyph::Bars, &Metric::CpuTotal));
         let s = TrayItemSettings {
             version: 1,
             items: vec![
-                setting("a", Metric::CpuPerCore, TrayItemStyle::VerticalBars, TrayOpens::MainPopover),
+                setting("a", Metric::CpuPerCore, TrayItemStyle::VerticalBars),
                 setting(
                     "b",
                     Metric::Temperature,
@@ -427,12 +406,11 @@ mod tests {
                         unit: "C".into(),
                         label: "Hot".into(),
                     },
-                    TrayOpens::OwnPopover,
                 ),
-                setting("c", Metric::Memory, TrayItemStyle::GraphAndNumber, TrayOpens::OwnPopover),
-                setting("d", Metric::Swap, TrayItemStyle::LineGraph, TrayOpens::OwnPopover),
-                setting("e", Metric::Battery, TrayItemStyle::HorizontalMeter, TrayOpens::OwnPopover),
-                setting("f", Metric::GpuLoad, TrayItemStyle::Ring, TrayOpens::OwnPopover),
+                setting("c", Metric::Memory, TrayItemStyle::GraphAndNumber),
+                setting("d", Metric::Swap, TrayItemStyle::LineGraph),
+                setting("e", Metric::Battery, TrayItemStyle::HorizontalMeter),
+                setting("f", Metric::GpuLoad, TrayItemStyle::Ring),
             ],
         };
         let items = items_from_settings(&s);
@@ -448,25 +426,18 @@ mod tests {
                 Glyph::Ring
             ]
         );
-        assert_eq!(
-            (items[0].opens, items[1].label.as_str(), items[1].unit.as_str()),
-            (Opens::Main, "Hot", "C")
-        );
+        assert_eq!((items[1].label.as_str(), items[1].unit.as_str()), ("Hot", "C"));
     }
 
     #[test]
     fn items_parse_from_text_and_junk_is_skipped() {
-        let items = parse_items("cpu:ring, memory:number:own, gpu:nope, disk:cores, cpu:cores, bogus:ring");
-        let got: Vec<(&str, Glyph, Opens)> = items.iter().map(|i| (i.id.as_str(), i.glyph, i.opens)).collect();
+        let items = parse_items("cpu:ring, memory:number, gpu:nope, disk:cores, cpu:cores, bogus:ring");
+        let got: Vec<(&str, Glyph)> = items.iter().map(|i| (i.id.as_str(), i.glyph)).collect();
         assert_eq!(
             got,
-            [
-                ("cpu-1", Glyph::Ring, Opens::Main),
-                ("memory-2", Glyph::Number, Opens::Own),
-                ("cpu-3", Glyph::CoreBars, Opens::Main)
-            ]
+            [("cpu-1", Glyph::Ring), ("memory-2", Glyph::Number), ("cpu-3", Glyph::CoreBars)]
         );
-        assert!(items.iter().all(|i| crate::popover::valid_item_id(&i.id)));
+        assert!(items.iter().all(|i| i.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')));
         assert_eq!(parse_items(&"cpu:ring,".repeat(20)).len(), 8, "at most eight items");
         assert!(parse_items("").is_empty());
     }
@@ -567,9 +538,10 @@ mod tests {
             name: "Chrome".into(),
             exe: None,
             pids: vec![],
-            cpu: 33.0,
-            memory: 0,
-            disk_bps: 0.0,
+            cpu: dyno_core::process::Measured::Value(33.0),
+            memory: dyno_core::process::Measured::Value(0),
+            disk_bps: dyno_core::process::Measured::Value(0.0),
+            partial: false,
         }];
         let mut m = TrayItems::new(vec![item("p", Metric::Process("chrome".into()), Glyph::Number)], 32);
         assert!(m.frames(&u, true)[0].1.tooltip.contains("chrome 33%"));

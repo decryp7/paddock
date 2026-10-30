@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
-import type { Alarm, AlarmChange, AlarmFilter, AlarmStats, CommandError, Settings, ShelveFor } from '../core/api.types';
+import type { Alarm, AlarmChange, AlarmFilter, AlarmStats, CommandError, CustomAlertRule, Settings, ShelveFor } from '../core/api.types';
 import { BACKEND, type Unsubscribe } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { mergeAlarms, needsAcknowledge, prependChange, sortOpen } from './alarm-list';
@@ -71,6 +71,19 @@ export const AlarmsStore = signalStore(
         if (store.selectedId() === id) patchState(store, { detailHistory: [] });
       }
     };
+    /** Runs one rule operation; the settings store then shows what the engine stored. */
+    const runRuleOperation = async (run: () => Promise<Settings>): Promise<CommandError | null> => {
+      patchState(store, { saving: true });
+      try {
+        await run();
+        await settings.load();
+        return null;
+      } catch (e) {
+        return toCommandError(e);
+      } finally {
+        patchState(store, { saving: false });
+      }
+    };
     return {
       async load(): Promise<void> {
         patchState(store, { error: null });
@@ -114,6 +127,14 @@ export const AlarmsStore = signalStore(
           history: s.historyLoaded ? prependChange(s.history, c, HISTORY_LIMIT) : s.history,
           detailHistory: s.selectedId === c.alarm.id ? prependChange(s.detailHistory, c, DETAIL_HISTORY_LIMIT) : s.detailHistory,
         }));
+      },
+      /** Adds or replaces one alert rule through the engine (no read-merge-write of the whole settings); answers its error or null. */
+      async upsertRule(rule: CustomAlertRule): Promise<CommandError | null> {
+        return runRuleOperation(() => backend.upsertAlertRule(rule));
+      },
+      /** Deletes one alert rule through the engine; answers its error or null. */
+      async deleteRule(id: string): Promise<CommandError | null> {
+        return runRuleOperation(() => backend.deleteAlertRule(id));
       },
       /**
        * Saves the whole settings with `change` applied; the engine validates. Answers its error (for inline display) or null

@@ -1,8 +1,8 @@
 name: stable-workspace
-description: "Host runners only: moves the checkout to a fixed folder under the runner's home and leaves a link at the old path (where the folder cannot move, as on Windows, keeps a clone there at the same commit), sets PADDOCK_WORKSPACE to it, so the build runs from the same physical path every time. sccache keys a Rust compile on its working folder; the runner's per-job hashed work folder made every path crate miss."
+description: "Host runners only: moves the checkout to a fixed folder of the job's slot in the CI home (job-isolation: src/<name>-<slot>) and leaves a link at the old path (where the folder cannot move, as on Windows, keeps a clone there at the same commit), sets PADDOCK_WORKSPACE to it, so the build runs from the same physical path every time. sccache keys a Rust compile on its working folder; the runner's per-job hashed work folder made every path crate miss."
 inputs:
   name:
-    description: "Folder name under ~/.paddock-ci/src; one per repo and job (the default is both)."
+    description: "Folder name under the CI home's src/ (the job's slot is appended); one per repo and job (the default is both)."
     default: ${{ github.repository }}-${{ github.job }}
 runs:
   using: composite
@@ -18,8 +18,14 @@ runs:
         if [ -L "$GITHUB_WORKSPACE" ]; then echo "stable-workspace: already linked"; exit 0; fi
         ws=$(cd "$GITHUB_WORKSPACE" && pwd -P)
         folder=$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '_')
-        root="${PADDOCK_CI_HOME:-$HOME/.paddock-ci}/src"
-        stable="$root/$folder"
+        # The job slot's own copy (job-isolation: src/<name>-<slot>), so a concurrent job of the same name never moves or
+        # cleans this one. No slot (the job-isolation action did not run): build in place, which only costs cache hits.
+        # Its stderr (a migration notice, an error) goes to the log; only stdout is the path.
+        if ! stable="$(bash "${{ github.action_path }}/../../../conformance/ci/job-isolation.sh" path src "$folder")"; then
+          echo "::warning::stable-workspace: no kept folder of this job's slot (see the message above); building from the work folder."
+          exit 0
+        fi
+        root="$(dirname "$stable")"
         # The folder later steps build from: PADDOCK_WORKSPACE, which a step uses as its working-directory (falling back to the
         # workspace when the variable is unset).
         use() {

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "shell-tray",
+  "description": "The tray popover (tray): events and the shell's tray set; it calls only the commands that name the tray class.",
+  "windows": ["tray", "tray-*"],
+  "permissions": ["core:event:default", "paddock-shell:tray"]
+}

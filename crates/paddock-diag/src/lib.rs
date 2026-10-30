@@ -75,6 +75,21 @@ paddock_commands::command_table! {
     Quiet [WINDOW | TRAY] limit 64 * paddock_commands::KIB => tauri::log_from_webview,
 }
 
+paddock_dialogs::dialogs! {
+    /// The diagnostics dialogs (ADR 0026 §3): Report a problem is a modeless form (a text area, a report that loads and
+    /// saves; the user may look at the app while writing).
+    pub static DIALOGS;
+    "pd.report-problem" => Form(Modeless) {
+        width: Some(Wide),
+        commands: &[
+            dialog_callable::diagnostics_preview,
+            dialog_callable::diagnostics_save,
+            dialog_callable::diagnostics_cancel,
+            dialog_callable::log_from_webview,
+        ],
+    },
+}
+
 #[cfg(feature = "tauri")]
 pub mod tauri;
 

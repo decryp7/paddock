@@ -38,6 +38,9 @@
   --pd-weight-semibold: 600;
   --pd-numeric: tabular-nums;
 
+  // The keyboard ring's thickness (SC 2.4.13), used by every focus outline.
+  --pd-focus-width: 2px;
+
   // 4 px grid.
   --pd-space-0: 2px;
   --pd-space-1: 4px;
@@ -73,11 +76,19 @@
   --pd-z-banner: 30;
   --pd-z-overlay: 1000;
   --pd-z-toast: 1100;
+  // Layers inside a table (local to its scroller, all below --pd-z-sticky): the header above sticky columns above row actions
+  // above cells, so nothing that scrolls paints over the header (C43, ADR 0027).
+  --pd-z-table-row-action: 1;
+  --pd-z-table-sticky-column: 2;
+  --pd-z-table-header: 3;
+  // The header cell of a sticky column sticks both ways: above the header row and the column.
+  --pd-z-table-corner: 4;
 
   // Layout.
   --pd-sidebar-width: 216px;
   --pd-sidebar-collapsed: 56px;
   --pd-toolbar-height: 44px;
+  --pd-tree-indent: 20px;
   --pd-statusbar-height: 24px;
   --pd-page-footer-safe: 56px;
   --pd-tray-width: 360px;
@@ -130,8 +141,11 @@
   --pd-text: #eceef1;
   --pd-text-muted: #a0a7b2;
   --pd-text-subtle: #8b93a0;
-  --pd-hover: rgb(255 255 255 / 0.05);
-  --pd-pressed: rgb(255 255 255 / 0.09);
+  // Interaction fills: one alpha each in every theme; Material's state layers use the same two numbers as their opacities.
+  --pd-hover-alpha: 0.05;
+  --pd-pressed-alpha: 0.09;
+  --pd-hover: rgb(255 255 255 / var(--pd-hover-alpha));
+  --pd-pressed: rgb(255 255 255 / var(--pd-pressed-alpha));
   --pd-scrim: rgb(0 0 0 / 0.55);
   --pd-on-accent: #ffffff;
   --pd-on-danger: #ffffff;
@@ -182,8 +196,8 @@
   --pd-text: #14171c;
   --pd-text-muted: #4f5764;
   --pd-text-subtle: #5f6775;
-  --pd-hover: rgb(15 20 30 / 0.05);
-  --pd-pressed: rgb(15 20 30 / 0.09);
+  --pd-hover: rgb(15 20 30 / var(--pd-hover-alpha));
+  --pd-pressed: rgb(15 20 30 / var(--pd-pressed-alpha));
   --pd-scrim: rgb(15 20 30 / 0.32);
   --pd-on-accent: #ffffff;
   --pd-on-danger: #ffffff;

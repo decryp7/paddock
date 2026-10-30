@@ -1,15 +1,20 @@
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
 import type { UnusualItem } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { Dialogs } from '../../shared/dialog';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { formatDate, formatRelative } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
 import { UnusualStore } from '../../state/unusual.store';
 import { Lookups } from '../lookup/lookups';
 import { hue, initial, learningText, whyText } from './issues-model';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
+import { MatMenuModule } from '@angular/material/menu';
 
 /**
  * Programs that are new on this computer, and why some of them may be worth a look. A transparency tool: it lists reasons
@@ -18,23 +23,19 @@ import { hue, initial, learningText, whyText } from './issues-model';
  */
 @Component({
   selector: 'dy-unusual-view',
-  imports: [AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger, RouterLink],
+  imports: [AsyncState, Icon, PdTable, PdCell, MatMenuModule, FullTextTip, MatTooltip, MatButton, MatIconButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(keydown)': 'key($event)' },
   template: `
     <dy-async [loaded]="!!store.overview()" [error]="store.error()" what="new programs" [rows]="4" (retry)="store.load()">
       @if (store.overview(); as o) {
         <div class="bar" role="group" aria-label="New programs">
           <span class="learn">{{ learning() }}</span>
           <span class="grow"></span>
-          @if (o.ignored > 0 || store.includeIgnored()) {
-            <button type="button" class="tog" [attr.aria-pressed]="store.includeIgnored()" (click)="store.setIncludeIgnored(!store.includeIgnored())"><dy-icon name="check" /> Show hidden ({{ o.ignored }})</button>
-          }
-          <button type="button" class="btn ghost icon" aria-label="More actions" [cdkMenuTriggerFor]="more"><dy-icon name="more" /></button>
+          <button type="button" matIconButton matTooltip="More actions" aria-label="More actions" [matMenuTriggerFor]="more"><dy-icon name="more" /></button>
         </div>
 
         @if (!o.enabled) {
-          <div class="none"><dy-icon name="eye" /><strong>Watching for new programs is off</strong><span>Turn it on in Settings and Dyno starts learning which programs are normal here.</span><a class="btn" routerLink="/settings">Open settings</a></div>
+          <div class="none"><dy-icon name="eye" /><strong>Watching for new programs is off</strong><span>Turn it on in Settings and Dyno starts learning which programs are normal here.</span><button type="button" matButton="outlined" (click)="openSettings()">Open settings</button></div>
         } @else if (o.items.length === 0) {
           <div class="none">
             <dy-icon [name]="o.learning.active ? 'clock' : 'check'" />
@@ -43,61 +44,31 @@ import { hue, initial, learningText, whyText } from './issues-model';
           </div>
         } @else {
           <div class="layout" [class.with-detail]="!!selected()">
-            <div class="tablewrap">
-              <table class="table progs" aria-label="New and unusual programs">
-                <thead><tr><th>Program</th><th>Why</th><th class="when">First seen</th><th class="state">State</th><th class="acts"><span class="visually-hidden">Actions</span></th></tr></thead>
-                <tbody>
-                  @for (i of o.items; track i.key) {
-                    <tr class="row" tabindex="0" [class.sel]="selectedKey() === i.key" [class.hidden-item]="i.status === 'ignored' || i.status === 'protected'" [cdkContextMenuTriggerFor]="menu" [cdkContextMenuTriggerData]="{ item: i }" (click)="select(i)" (keydown.enter)="select(i)" (keydown.shift.f10)="select(i)" (contextmenu)="select(i)">
-                      <td>
-                        <span class="prog">
-                          <span class="av" aria-hidden="true" [style.background]="tile(i.name)">{{ ini(i.name) }}</span>
-                          <span class="ell" [title]="i.exe ?? i.name">{{ i.name }}</span>
-                        </span>
-                      </td>
-                      <td><span class="why"><span class="dot" [attr.data-tone]="i.level === 'unusual' ? 'warn' : null" aria-hidden="true"></span><span class="ell" [title]="why(i)">{{ why(i) }}</span></span></td>
-                      <td class="when muted">{{ since(i) }}</td>
-                      <td class="state muted">{{ i.status === 'ignored' ? 'Hidden' : i.status === 'protected' ? 'Protected' : i.running ? 'Running' : 'Not running' }}</td>
-                      <td class="acts">
-                        @if (i.status === 'new') {
-                          <button type="button" class="ib" [disabled]="store.busy() !== null" [attr.aria-label]="'Protect ' + i.name" title="Protect: rules never touch it" (click)="act(i, 'protect', $event)"><dy-icon name="shield-check" /></button>
-                          <button type="button" class="ib" [disabled]="store.busy() !== null" [attr.aria-label]="'Hide ' + i.name" title="Hide from this list" (click)="act(i, 'ignore', $event)"><dy-icon name="close" /></button>
-                        } @else {
-                          <button type="button" class="ib" [disabled]="store.busy() !== null" [attr.aria-label]="'Show ' + i.name + ' again'" title="Show on the list again" (click)="act(i, 'restore', $event)"><dy-icon name="undo" /></button>
-                        }
-                      </td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
+            <pd-table [toolbar]="false" label="New and unusual programs" [rows]="o.items" [columns]="columns" [rowKey]="itemKey" [filterable]="false" [rowActions]="actions" [selectedKey]="selectedKey()" [maxHeight]="620" (rowActivate)="select($event)" (action)="run($event)" (keydown.escape)="selectedKey.set(null)">
+              <ng-template pdCell="name" let-i><span class="prog"><span class="av" aria-hidden="true" [style.background]="tile(i.name)">{{ ini(i.name) }}</span><span class="ell" [dyFullText]="i.name">{{ i.name }}</span></span></ng-template>
+              <ng-template pdCell="why" let-i><span class="why"><span class="dot" [attr.data-tone]="i.level === 'unusual' ? 'warn' : null" aria-hidden="true"></span><span class="ell" [dyFullText]="why(i)">{{ why(i) }}</span></span></ng-template>
+            </pd-table>
 
             @if (selected(); as s) {
               <aside class="detail" tabindex="-1" aria-label="Program details" (keydown.escape)="selectedKey.set(null)">
                 <div class="dhead">
                   <span class="prog"><span class="av" aria-hidden="true" [style.background]="tile(s.name)">{{ ini(s.name) }}</span><strong>{{ s.name }}</strong></span>
-                  <button type="button" class="ib" aria-label="Close details" (click)="selectedKey.set(null)"><dy-icon name="close" /></button>
+                  <button type="button" matIconButton matTooltip="Close details" aria-label="Close details" (click)="selectedKey.set(null)"><dy-icon name="close" /></button>
                 </div>
                 <p class="lead">{{ why(s) }}.</p>
                 @if (s.reasons.length > 1) {
                   <ul class="reasons">@for (r of s.reasons; track r) { <li>It {{ r }}.</li> }</ul>
                 }
                 <dl>
-                  @if (s.exe) { <dt>Path</dt><dd class="sel mono" [title]="s.exe">{{ s.exe }}</dd> }
+                  @if (s.exe) { <dt>Path</dt><dd class="sel mono" [dyFullText]="s.exe">{{ s.exe }}</dd> }
                   @if (s.publisher) { <dt>Publisher</dt><dd class="sel">{{ s.publisher }}</dd> }
                   <dt>First seen</dt><dd>{{ firstSeenFull(s) }}</dd>
                   <dt>Last seen</dt><dd>{{ s.lastSeen > 0 ? (s.running ? 'Running now' : ago(s.lastSeen)) : 'Has not run since' }}</dd>
                 </dl>
                 <div class="dacts">
-                  @if (s.status === 'new') {
-                    <button type="button" class="btn sm" [disabled]="store.busy() !== null" (click)="act(s, 'protect')"><dy-icon name="shield-check" /> Protect</button>
-                    <button type="button" class="btn sm" [disabled]="store.busy() !== null" (click)="act(s, 'ignore')"><dy-icon name="close" /> Hide</button>
-                  } @else {
-                    <button type="button" class="btn sm" [disabled]="store.busy() !== null" (click)="act(s, 'restore')"><dy-icon name="undo" /> Show again</button>
-                  }
-                  @if (s.exe) { <button type="button" class="btn sm" (click)="copy(s.exe)"><dy-icon name="copy" /> Copy path</button> }
+                  @if (s.exe) { <button type="button" matButton="outlined" (click)="copy(s.exe)"><dy-icon name="copy" /> Copy path</button> }
                 </div>
-                <p class="hint">Protect adds it to the list that rules never touch. Hide only removes it from this list. Dyno never ends or removes a program because of what is shown here.</p>
+                <p class="hint">Dyno never ends or removes a program because of what is shown here.</p>
               </aside>
             }
           </div>
@@ -105,24 +76,11 @@ import { hue, initial, learningText, whyText } from './issues-model';
       }
     </dy-async>
 
-    <ng-template #menu let-item="item">
-      <div class="menu" cdkMenu aria-label="Program actions">
-        @if (item.status === 'new') {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="act(item, 'protect')"><dy-icon name="shield-check" /> Protect</button>
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="act(item, 'ignore')"><dy-icon name="close" /> Hide from this list</button>
-        } @else {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="act(item, 'restore')"><dy-icon name="undo" /> Show again</button>
-        }
-        @if (item.exe) { <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copy(item.exe)"><dy-icon name="copy" /> Copy path</button> }
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchWeb(item)"><dy-icon name="search" /> Search the web…</button>
-        @if (item.exe) { <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchHash(item)"><dy-icon name="shield" /> Search file hash on VirusTotal…</button> }
-      </div>
-    </ng-template>
-    <ng-template #more>
-      <div class="menu" cdkMenu aria-label="More actions">
-        <button type="button" class="menu-item danger" cdkMenuItem (cdkMenuItemTriggered)="forget()"><dy-icon name="trash" /> Forget the programs Dyno knows…</button>
-      </div>
-    </ng-template>
+    <mat-menu #more="matMenu" aria-label="More actions">
+      <ng-template matMenuContent>
+        <button mat-menu-item class="danger" (click)="forget()"><dy-icon name="trash" /> Forget the programs Dyno knows…</button>
+      </ng-template>
+    </mat-menu>
   `,
   styles: `
     :host { display: grid; gap: var(--sp-3); align-content: start; }
@@ -130,31 +88,15 @@ import { hue, initial, learningText, whyText } from './issues-model';
     .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; min-height: 44px; }
     .grow { flex: 1; }
     .learn { color: var(--text-2); font-size: var(--fs-sm); }
-    .tog { display: inline-flex; align-items: center; gap: 4px; height: var(--control-h); padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-pill); background: var(--surface-2); color: var(--text-2); font: var(--fw-medium) var(--fs-sm) / 1 var(--font-sans); cursor: pointer; }
-    .tog dy-icon { --icon-size: 13px; display: none; }
-    .tog[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
-    .tog[aria-pressed='true'] dy-icon { display: inline-block; }
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 340px; }
-    .tablewrap { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); overflow: auto; max-height: 620px; min-width: 0; }
-    .progs { table-layout: fixed; }
-    .progs th.when, .progs td.when { width: 110px; }
-    .progs th.state, .progs td.state { width: 100px; }
-    .progs th.acts, .progs td.acts { width: 72px; padding: 0 4px; text-align: right; }
-    .progs td { overflow: hidden; text-overflow: ellipsis; }
-    .progs th:first-child, .progs td:first-child { width: 28%; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--border-strong); }
+    .dot[data-tone='warn'] { background: var(--warn); }
     .prog { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
     .av { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: #fff; font: var(--fw-semibold) 12px / 1 var(--font-sans); }
     .ell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .why { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
     .why .dot:not([data-tone]) { background: transparent; }
-    tr.row { cursor: default; }
-    tr.row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-    tr.row.sel td { background: var(--accent-soft); }
-    tr.row.sel td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
-    tr.row.hidden-item td { opacity: 0.65; }
-    td.acts { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
-    tr.row:hover td.acts, tr.row:focus-within td.acts, tr.row.sel td.acts { opacity: 1; }
     .ib { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
     .ib:hover:not(:disabled) { background: var(--surface-active); color: var(--text-1); }
     .ib:disabled { opacity: 0.35; cursor: default; }
@@ -174,14 +116,14 @@ import { hue, initial, learningText, whyText } from './issues-model';
     .sel { user-select: text; cursor: text; }
     .dacts { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
     .hint { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
-    .menu-item.danger { color: var(--bad); }
     @media (max-width: 1100px) { .layout.with-detail { grid-template-columns: minmax(0, 1fr); } }
   `,
 })
 export class UnusualView {
   protected readonly store = inject(UnusualStore);
   private readonly notifier = inject(Notifier);
-  private readonly dialogs = inject(Dialogs);
+  private readonly ports = inject(SHELL_PORTS);
+  private readonly dialogs = inject(DialogService);
   private readonly lookups = inject(Lookups);
   protected readonly selectedKey = signal<string | null>(null);
   protected readonly ini = initial;
@@ -221,31 +163,33 @@ export class UnusualView {
     this.selectedKey.set(i.key);
   }
 
-  protected async act(i: UnusualItem, action: 'ignore' | 'protect' | 'restore', e?: Event): Promise<void> {
-    e?.stopPropagation();
-    await this.store.act(i, action);
-    if (action !== 'restore' && !this.store.includeIgnored()) this.selectedKey.set(null);
-  }
+  protected readonly itemKey = (i: UnusualItem): string => i.key;
+  protected readonly columns: PdColumn<UnusualItem>[] = [
+    { key: 'name', header: 'Program', value: (i) => i.name, required: true, width: 'minmax(0, 1.4fr)' },
+    { key: 'why', header: 'Why', value: (i) => whyText(i), width: 'minmax(0, 2.4fr)', hideBelow: 520 },
+    { key: 'firstSeen', header: 'First seen', value: (i) => i.firstSeen, text: (i) => this.since(i), width: '110px' },
+    { key: 'state', header: 'State', value: (i) => (i.running ? 'Running' : 'Not running'), width: '100px', hideBelow: 640 },
+  ];
+  /** The row actions: nothing here changes a program, they copy or look it up. */
+  protected readonly actions = (i: UnusualItem): PdRowAction[] => [
+    ...(i.exe ? [{ id: 'copy', label: 'Copy path', icon: 'copy' }] : []),
+    { id: 'web', label: 'Search the web…', icon: 'search' },
+    ...(i.exe ? [{ id: 'hash', label: 'Search file hash on VirusTotal…', icon: 'shield' }] : []),
+  ];
 
-  /** Up and Down move between rows. */
-  protected key(e: KeyboardEvent): void {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-    const rows = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('tr.row')];
-    const at = rows.indexOf(document.activeElement as HTMLElement);
-    const next = rows[at + (e.key === 'ArrowDown' ? 1 : -1)];
-    if (next) {
-      e.preventDefault();
-      next.focus();
-    }
+  protected run({ id, row }: PdRowActionEvent<UnusualItem>): void {
+    this.select(row);
+    if (id === 'copy' && row.exe) void this.copy(row.exe);
+    else if (id === 'web') this.searchWeb(row);
+    else this.searchHash(row);
   }
 
   protected async forget(): Promise<void> {
     const known = this.store.overview()?.known ?? 0;
-    const ok = await this.dialogs.confirm({
-      title: 'Forget the programs Dyno knows?',
-      message: `Dyno forgets the ${known} programs it learned and the ones you hid or protected, then learns again for ${this.store.overview()?.learningDays ?? 7} days before it lists anything new. Programs you protected stay on the protected list.`,
-      confirmLabel: 'Forget',
-      danger: true,
+    const ok = await confirm(this.dialogs, {
+      heading: 'Forget the programs Dyno knows?',
+      message: `Dyno forgets the ${known} programs it learned, then learns again for ${this.store.overview()?.learningDays ?? 7} days before it lists anything new.`,
+      confirm: { label: 'Forget', destructive: true },
     });
     if (ok) {
       this.selectedKey.set(null);
@@ -260,5 +204,10 @@ export class UnusualView {
     } catch {
       this.notifier.show('Copying is not allowed here.', 'bad');
     }
+  }
+
+  /** Opens the shell's Settings window (Dyno's page is in it). */
+  protected openSettings(): void {
+    void this.ports.openDialog('pd.settings');
   }
 }

@@ -45,10 +45,16 @@ const dayKey = (at: number): string => {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 };
 
+/** The local calendar day before the one containing `now` (not 24 hours back: a day is 23 or 25 hours when the clocks change). */
+const previousDayKey = (now: number): string => {
+  const d = new Date(now);
+  return dayKey(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1, 12).getTime());
+};
+
 /** "Today", "Yesterday" or "Oct 20" for the local day containing `at`. */
 export function dayLabel(at: number, now: number): string {
   if (dayKey(at) === dayKey(now)) return 'Today';
-  if (dayKey(at) === dayKey(now - 24 * 3_600_000)) return 'Yesterday';
+  if (dayKey(at) === previousDayKey(now)) return 'Yesterday';
   return formatDate(at, now);
 }
 
@@ -160,5 +166,5 @@ export function hue(name: string): number {
 /** The learning line: "Learning until Oct 30" while learning, else how many programs are known. */
 export function learningText(learning: { active: boolean; until: number | null }, known: number, now: number): string {
   if (learning.active) return learning.until === null ? 'Dyno is about to start learning what is normal here' : `Learning what is normal here until ${formatDate(learning.until, now)}`;
-  return `Watching ${known.toLocaleString('en-US')} known ${known === 1 ? 'program' : 'programs'}`;
+  return `Watching ${known.toLocaleString()} known ${known === 1 ? 'program' : 'programs'}`;
 }

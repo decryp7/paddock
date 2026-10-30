@@ -1,7 +1,7 @@
-//! The audit log: one JSON line per change or refusal, written before the change runs so a crash leaves a trace
-//! (ADR 0016). Root-owned and world-readable; it holds summaries of settings, never file contents or secrets.
+//! The audit log: one JSON line per refusal or removal (ADR 0016). Root-owned and world-readable; it holds summaries,
+//! never file contents or secrets.
 
-use dyno_core::helper_wire::{parse_audit_line, AuditEntry, AuditVerdict};
+use dyno_core::helper_wire::{parse_audit_line, AuditEntry};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
@@ -45,7 +45,7 @@ impl AuditLog {
         self.path.with_file_name(name)
     }
 
-    /// Appends `entry`. A log that cannot be written is reported to the caller, who must then refuse to change anything.
+    /// Appends `entry`. A log that cannot be written is reported to the caller, who must then refuse to remove anything.
     pub fn record(&self, entry: &AuditEntry) -> Result<(), String> {
         let _g = self.guard();
         if std::fs::metadata(&self.path).is_ok_and(|m| m.len() > self.max_bytes) {
@@ -79,23 +79,6 @@ impl AuditLog {
     fn read_current(&self) -> Vec<AuditEntry> {
         read_file(&self.path)
     }
-
-    /// After a start: a change that began and never ended is recorded as interrupted.
-    pub fn recover(&self, at: i64) {
-        let last = {
-            let _g = self.guard();
-            self.read_current().pop()
-        };
-        if let Some(e) = last.filter(|e| e.verdict == AuditVerdict::Started) {
-            let _ = self.record(&AuditEntry {
-                at,
-                verdict: AuditVerdict::Interrupted,
-                detail: "The helper stopped before this change finished; check the setting and revert it if needed.".into(),
-                after: None,
-                ..e
-            });
-        }
-    }
 }
 
 fn read_file(path: &PathBuf) -> Vec<AuditEntry> {
@@ -122,6 +105,7 @@ fn read_file(path: &PathBuf) -> Vec<AuditEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dyno_core::helper_wire::AuditVerdict;
 
     fn entry(at: i64, what: &str, verdict: AuditVerdict) -> AuditEntry {
         AuditEntry {
@@ -129,8 +113,6 @@ mod tests {
             peer: Some(7),
             what: what.into(),
             verdict,
-            before: Some("on".into()),
-            after: None,
             detail: String::new(),
         }
     }
@@ -141,7 +123,7 @@ mod tests {
         let log = AuditLog::new(dir.path().join("audit.jsonl"));
         assert!(log.tail(5).is_empty());
         for i in 0..5 {
-            log.record(&entry(i, &format!("change {i}"), AuditVerdict::Applied)).unwrap();
+            log.record(&entry(i, &format!("change {i}"), AuditVerdict::Done)).unwrap();
         }
         let t = log.tail(3);
         assert_eq!(t.iter().map(|e| e.at).collect::<Vec<_>>(), [4, 3, 2]);
@@ -152,8 +134,8 @@ mod tests {
     fn a_damaged_line_is_skipped_and_the_log_rotates_once() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("audit.jsonl");
-        let log = AuditLog::with_limit(path.clone(), 150);
-        log.record(&entry(1, "a", AuditVerdict::Applied)).unwrap();
+        let log = AuditLog::with_limit(path.clone(), 100);
+        log.record(&entry(1, "a", AuditVerdict::Done)).unwrap();
         std::fs::OpenOptions::new()
             .append(true)
             .open(&path)
@@ -169,30 +151,11 @@ mod tests {
     }
 
     #[test]
-    fn a_change_that_began_and_never_ended_is_marked_interrupted_once() {
-        let dir = tempfile::tempdir().unwrap();
-        let log = AuditLog::new(dir.path().join("audit.jsonl"));
-        log.record(&entry(1, "done", AuditVerdict::Applied)).unwrap();
-        log.recover(10);
-        assert_eq!(log.tail(10).len(), 1, "a finished log needs nothing");
-        log.record(&entry(2, "hibernation off", AuditVerdict::Started)).unwrap();
-        log.recover(10);
-        let t = log.tail(10);
-        assert_eq!(
-            (t[0].verdict, t[0].what.as_str(), t[0].at),
-            (AuditVerdict::Interrupted, "hibernation off", 10)
-        );
-        assert!(t[0].detail.contains("revert"));
-        log.recover(11);
-        assert_eq!(log.tail(10).len(), 3, "recovering twice adds nothing");
-    }
-
-    #[test]
     fn an_unwritable_log_is_an_error_for_the_caller() {
         let dir = tempfile::tempdir().unwrap();
         let log = AuditLog::new(dir.path().join("no-such-folder").join("audit.jsonl"));
         assert!(log
-            .record(&entry(1, "x", AuditVerdict::Applied))
+            .record(&entry(1, "x", AuditVerdict::Done))
             .unwrap_err()
             .contains("cannot be written"));
     }

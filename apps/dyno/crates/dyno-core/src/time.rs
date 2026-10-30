@@ -1,6 +1,9 @@
-//! Time as values. The core never reads a clock: callers pass [`Timestamp`]s in.
+//! Time as values. The core never reads a clock: callers pass [`Timestamp`]s in. It never reads the machine's time zone
+//! either: local days, hours and minutes come through the [`LocalZone`] port (the OS adapter in `dyno-platform`, a
+//! [`FixedZone`] in tests).
 
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Milliseconds since the Unix epoch (UTC).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
@@ -44,9 +47,220 @@ impl Timestamp {
     }
 }
 
+/// The user's local time zone as a port: the offset from UTC in force at an instant, daylight saving included. Every
+/// local day, hour and minute the engine computes (the day an issue counts for, quiet hours, "until tomorrow",
+/// maintenance windows, the slots a baseline learns, the local time in a backup's name) goes through it.
+pub trait LocalZone: Send + Sync + std::fmt::Debug {
+    /// The minutes to add to UTC to get the local wall time at `at` (+480 for UTC+8, -300 for New York in winter).
+    fn offset_minutes(&self, at: Timestamp) -> i32;
+
+    /// What this zone is, for diagnostics: an IANA name such as "Asia/Singapore", or why the OS zone could not be read.
+    fn describe(&self) -> String {
+        offset_label(Timestamp(0), self)
+    }
+}
+
+/// A zone shared between threads.
+pub type Zone = Arc<dyn LocalZone>;
+
+/// The largest offset any zone uses, in minutes (UTC+14). Offsets outside are clamped, so a faulty adapter cannot move a
+/// day by more than that.
+pub const MAX_OFFSET_MINUTES: i32 = 14 * 60;
+
+/// A zone with one offset all year (UTC, or a test's fixed zone).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FixedZone(pub i32);
+
+impl FixedZone {
+    /// Coordinated Universal Time.
+    pub const UTC: FixedZone = FixedZone(0);
+
+    /// This zone, shared.
+    pub fn shared(minutes: i32) -> Zone {
+        Arc::new(FixedZone(minutes))
+    }
+}
+
+impl LocalZone for FixedZone {
+    fn offset_minutes(&self, _at: Timestamp) -> i32 {
+        self.0
+    }
+}
+
+/// The local offset at `t` as "UTC+08:00", "UTC-09:30" or "UTC".
+pub fn offset_label(t: Timestamp, zone: &(impl LocalZone + ?Sized)) -> String {
+    let minutes = zone.offset_minutes(t).clamp(-MAX_OFFSET_MINUTES, MAX_OFFSET_MINUTES);
+    if minutes == 0 {
+        return "UTC".into();
+    }
+    let sign = if minutes < 0 { '-' } else { '+' };
+    format!("UTC{sign}{:02}:{:02}", minutes.abs() / 60, minutes.abs() % 60)
+}
+
+fn offset_ms(zone: &dyn LocalZone, at: Timestamp) -> i64 {
+    i64::from(zone.offset_minutes(at).clamp(-MAX_OFFSET_MINUTES, MAX_OFFSET_MINUTES)) * MINUTE
+}
+
+/// The local wall time at `at`, as milliseconds since the local epoch (1970-01-01 00:00 local).
+pub fn to_local(at: Timestamp, zone: &dyn LocalZone) -> i64 {
+    at.millis().saturating_add(offset_ms(zone, at))
+}
+
+/// The instant whose local wall time is `local` (milliseconds since the local epoch), by the "compatible" rule: a wall
+/// time that occurs twice (clocks set back) gives the earlier instant; one that does not occur (clocks set forward) is read
+/// with the offset from before the change, so it lands as far past the jump as it was into the gap (00:30 in a gap from
+/// 00:00 to 01:00 is 01:30, and a midnight that does not exist is the jump itself).
+pub fn from_local(local: i64, zone: &dyn LocalZone) -> Timestamp {
+    // The offsets a day either side: every zone changes at most once within two days.
+    let before = Timestamp(local.saturating_sub(offset_ms(zone, Timestamp(local.saturating_sub(DAY)))));
+    if to_local(before, zone) == local {
+        return before;
+    }
+    let after = Timestamp(local.saturating_sub(offset_ms(zone, Timestamp(local.saturating_add(DAY)))));
+    if to_local(after, zone) == local {
+        return after;
+    }
+    before
+}
+
+/// Every instant at which the local wall time `local` begins: one as a rule; two when the clocks were set back over it (it
+/// happens twice); and when they were set forward over it, the jump itself (the first instant past it). Edges of local
+/// schedules (maintenance windows) change their state at exactly these instants.
+pub fn starts_of(local: i64, zone: &dyn LocalZone) -> Vec<Timestamp> {
+    let before = Timestamp(local.saturating_sub(offset_ms(zone, Timestamp(local.saturating_sub(DAY)))));
+    let after = Timestamp(local.saturating_sub(offset_ms(zone, Timestamp(local.saturating_add(DAY)))));
+    let mut out: Vec<Timestamp> = [before, after].into_iter().filter(|t| to_local(*t, zone) == local).collect();
+    if out.is_empty() {
+        // In a gap: the jump lies between the two readings. Halve to the millisecond (at most 26 steps for 14 hours).
+        let (mut lo, mut hi) = (before.min(after), before.max(after));
+        let first = offset_ms(zone, lo);
+        while hi.since(lo) > 1 {
+            let mid = lo.plus(hi.since(lo) / 2);
+            if offset_ms(zone, mid) == first {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        out.push(hi);
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// The start of the local day that contains `at` (never later than `at`): its midnight, or the first instant of the day when
+/// the clocks jumped over midnight (Havana, Santiago, the Azores).
+pub fn day_start(at: Timestamp, zone: &dyn LocalZone) -> Timestamp {
+    let midnight = to_local(at, zone).div_euclid(DAY) * DAY;
+    from_local(midnight, zone).min(at)
+}
+
+/// The start of the next local day after `at` (always later than `at`; 23 or 25 hours on when the clocks change).
+pub fn next_day_start(at: Timestamp, zone: &dyn LocalZone) -> Timestamp {
+    let midnight = to_local(at, zone).div_euclid(DAY) * DAY;
+    from_local(midnight.saturating_add(DAY), zone).max(at.plus(1))
+}
+
+/// The start of the local day before the one that contains `at`.
+pub fn previous_day_start(at: Timestamp, zone: &dyn LocalZone) -> Timestamp {
+    day_start(day_start(at, zone).minus(1), zone)
+}
+
+/// The minute of the local day at `at` (0 to 1439).
+pub fn local_minute(at: Timestamp, zone: &dyn LocalZone) -> u16 {
+    (to_local(at, zone).rem_euclid(DAY) / MINUTE) as u16
+}
+
+/// The local day at `at` as days since 1970-01-01 (local), for weekdays and dates.
+pub fn local_epoch_day(at: Timestamp, zone: &dyn LocalZone) -> i64 {
+    to_local(at, zone).div_euclid(DAY)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Central European Time with summer time in 2026: +60, +120 from 29 March 01:00 UTC to 25 October 01:00 UTC.
+    #[derive(Debug)]
+    struct Berlin2026;
+    const SPRING: i64 = 1_774_746_000_000; // 2026-03-29T01:00:00Z
+    const AUTUMN: i64 = 1_792_890_000_000; // 2026-10-25T01:00:00Z
+    impl LocalZone for Berlin2026 {
+        fn offset_minutes(&self, at: Timestamp) -> i32 {
+            if (SPRING..AUTUMN).contains(&at.millis()) {
+                120
+            } else {
+                60
+            }
+        }
+    }
+
+    #[test]
+    fn local_days_follow_the_zone() {
+        let utc8 = FixedZone(480);
+        // 2026-10-29T23:30:00Z is 07:30 on 30 October in UTC+8: its day began at 16:00 UTC the day before.
+        let t = Timestamp(1_793_316_600_000);
+        assert_eq!(day_start(t, &utc8), Timestamp(1_793_289_600_000));
+        assert_eq!(next_day_start(t, &utc8), Timestamp(1_793_289_600_000 + DAY));
+        assert_eq!(previous_day_start(t, &utc8), Timestamp(1_793_289_600_000 - DAY));
+        assert_eq!(local_minute(t, &utc8), 7 * 60 + 30);
+        assert_eq!(day_start(t, &FixedZone::UTC), Timestamp(1_793_232_000_000));
+        assert_eq!(local_epoch_day(t, &utc8), local_epoch_day(t, &FixedZone::UTC) + 1);
+        assert_eq!(from_local(to_local(t, &utc8), &utc8), t);
+        // A faulty adapter cannot shift a day by more than 14 hours.
+        assert_eq!(to_local(t, &FixedZone(10_000)), t.millis() + 14 * HOUR);
+        assert_eq!(FixedZone::shared(60).offset_minutes(t), 60);
+        assert_eq!(FixedZone(480).describe(), "UTC+08:00");
+        assert_eq!(offset_label(t, &FixedZone(-570)), "UTC-09:30");
+        assert_eq!(offset_label(t, &FixedZone::UTC), "UTC");
+    }
+
+    #[test]
+    fn days_are_23_and_25_hours_long_when_the_clocks_change() {
+        let z = Berlin2026;
+        // 29 March: midnight was +60 (23:00 UTC the day before), the next midnight +120 (22:00 UTC).
+        let spring_day = Timestamp(SPRING + 5 * HOUR);
+        let start = day_start(spring_day, &z);
+        assert_eq!(start, Timestamp(SPRING - 2 * HOUR));
+        assert_eq!(next_day_start(spring_day, &z).since(start), 23 * HOUR);
+        // 25 October: 25 hours.
+        let autumn_day = Timestamp(AUTUMN + 5 * HOUR);
+        let start = day_start(autumn_day, &z);
+        assert_eq!(start, Timestamp(AUTUMN - 3 * HOUR));
+        assert_eq!(next_day_start(autumn_day, &z).since(start), 25 * HOUR);
+        assert_eq!(previous_day_start(next_day_start(autumn_day, &z), &z), start);
+        // Wall times on either side of the change.
+        assert_eq!(local_minute(Timestamp(SPRING - 1), &z), 2 * 60 - 1);
+        assert_eq!(local_minute(Timestamp(SPRING), &z), 3 * 60);
+        assert_eq!(local_minute(Timestamp(AUTUMN), &z), 2 * 60);
+        // 02:30 in the spring gap is read with the winter offset: 03:30, half an hour past the jump.
+        let gap = to_local(Timestamp(SPRING - 1), &z) + 30 * MINUTE + 1;
+        assert_eq!(from_local(gap, &z), Timestamp(SPRING + 30 * MINUTE));
+        assert_eq!(starts_of(gap, &z), vec![Timestamp(SPRING)], "a time in the gap begins at the jump");
+        // 02:30 in the autumn overlap happens twice: the earlier one (still summer time).
+        let overlap = to_local(Timestamp(AUTUMN), &z) + 30 * MINUTE;
+        assert_eq!(from_local(overlap, &z), Timestamp(AUTUMN - 30 * MINUTE));
+        assert_eq!(
+            starts_of(overlap, &z),
+            vec![Timestamp(AUTUMN - 30 * MINUTE), Timestamp(AUTUMN + 30 * MINUTE)]
+        );
+        assert_eq!(
+            starts_of(to_local(Timestamp(SPRING + 5 * HOUR), &z), &z),
+            vec![Timestamp(SPRING + 5 * HOUR)]
+        );
+    }
+
+    #[test]
+    fn day_boundaries_hold_at_the_extremes() {
+        for z in [FixedZone(-MAX_OFFSET_MINUTES), FixedZone::UTC, FixedZone(MAX_OFFSET_MINUTES)] {
+            for t in [Timestamp(0), Timestamp(-1), Timestamp(1_793_316_600_000)] {
+                let s = day_start(t, &z);
+                assert!(s <= t && next_day_start(t, &z) > t, "{z:?} {t:?}");
+                assert_eq!(local_minute(s, &z), 0);
+            }
+        }
+    }
 
     #[test]
     fn arithmetic_saturates_and_floors() {

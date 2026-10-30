@@ -16,7 +16,9 @@ use paddock_health::tauri::Setup as HealthSetup;
 use paddock_settings::{Configurable, Settings};
 use paddock_startup::tauri::Startup;
 use paddock_updater::tauri::UpdatesBuilder;
-use paddock_window::tauri::Windows;
+use paddock_window::WindowError;
+use paddock_window::launch::LaunchArgs;
+use paddock_window::tauri::{Tray, Windows};
 use serde::Serialize;
 use std::error::Error;
 use std::sync::Arc;
@@ -43,9 +45,6 @@ impl AppIdentity {
     }
 }
 
-/// An empty contract file: no dialog of the app's own (the shell's dialogs still need the app's contract file).
-const NO_CONTRACTS: &str = r#"{"version":1,"base":[],"dialogs":{}}"#;
-
 type BoxError = Box<dyn Error + Send + Sync>;
 type Part<R, T> = Box<dyn FnOnce(&AppHandle<R>) -> T + Send>;
 type DiagSetup<R> =
@@ -69,13 +68,15 @@ type McpSetup<R> = Box<
 >;
 type ServiceSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<ServicePart, BoxError> + Send>;
 type AppSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<(), BoxError> + Send>;
+type MenuQuit<R> = dyn Fn(&AppHandle<R>) + Send + Sync;
+type TraySetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Tray<R> + Send>;
 type HealthAdjust<R> = Box<dyn FnOnce(&AppHandle<R>, HealthSetup<R>) -> HealthSetup<R> + Send>;
 
 /// The shell plugin with its parts (ADR 0012 §2: `paddock_shell::Builder::new(identity)...build()`).
 pub struct Builder<R: Runtime> {
     identity: AppIdentity,
     app_commands: &'static Table,
-    contracts: Option<String>,
+    dialogs: Vec<&'static paddock_dialogs::DialogTable>,
     services: Vec<ServiceSpec>,
     health_setup: Option<HealthAdjust<R>>,
     settings: Option<Part<R, Settings>>,
@@ -94,7 +95,10 @@ pub struct Builder<R: Runtime> {
     downloader: Option<paddock_download::Downloader>,
     in_memory: bool,
     native_menu: bool,
+    menu_quit: Option<Arc<MenuQuit<R>>>,
     setup: Vec<AppSetup<R>>,
+    tray: Option<TraySetup<R>>,
+    launch: Option<LaunchArgs>,
 }
 
 impl<R: Runtime> Builder<R> {
@@ -103,7 +107,7 @@ impl<R: Runtime> Builder<R> {
         Builder {
             identity,
             app_commands: &Table::EMPTY,
-            contracts: None,
+            dialogs: Vec::new(),
             services: Vec::new(),
             health_setup: None,
             settings: None,
@@ -122,7 +126,10 @@ impl<R: Runtime> Builder<R> {
             downloader: None,
             in_memory: false,
             native_menu: true,
+            menu_quit: None,
             setup: Vec::new(),
+            tray: None,
+            launch: None,
         }
     }
 
@@ -133,11 +140,21 @@ impl<R: Runtime> Builder<R> {
         self
     }
 
-    /// The app's generated dialog contract file (`dialog-contracts.json`, ADR 0009). Without one only the shell's base
-    /// commands reach dialogs.
-    pub fn dialog_contracts(mut self, json: impl Into<String>) -> Self {
-        self.contracts = Some(json.into());
+    /// The dialog tables of the app's own dialogs and of the non-shell features it uses (the workbench's), ADR 0026 §3.
+    /// The shell's own tables ([`crate::SHELL_DIALOGS`]) are always registered; two tables declaring one id fail the
+    /// build of the plugin.
+    pub fn dialogs(mut self, tables: &[&'static paddock_dialogs::DialogTable]) -> Self {
+        self.dialogs.extend_from_slice(tables);
         self
+    }
+
+    /// Every dialog table: the shell's, then the app's.
+    fn dialog_tables(&self) -> Vec<&'static paddock_dialogs::DialogTable> {
+        crate::SHELL_DIALOGS
+            .iter()
+            .copied()
+            .chain(self.dialogs.iter().copied())
+            .collect()
     }
 
     /// The app's services, in the order the status bar lists them (their repairs are the shell's code, rule 19).
@@ -325,13 +342,56 @@ impl<R: Runtime> Builder<R> {
     }
 
     /// The app's own set-up, run after the shell's state is managed (in the order given). An error fails the app's
-    /// start with that error.
+    /// start with that error. It runs inside the plugin's set-up, where Tauri holds its plugin store: it opens no window
+    /// (one built here fails the start; building its webview would wait for the store forever). The shell opens the tray
+    /// ([`Builder::tray`]) and the main window ([`Builder::launch`]) itself, after every plugin is set up.
     pub fn setup(
         mut self,
         f: impl FnOnce(&AppHandle<R>) -> Result<(), BoxError> + Send + 'static,
     ) -> Self {
         self.setup.push(Box::new(f));
         self
+    }
+
+    /// What a click on Quit in the menu bar does when no window is open (the last one was closed to the tray; the menu
+    /// bar still shows its menus). Default: the shell's quit, the same path as the `app_quit` command (the window layer's
+    /// exit with its teardown, or Tauri's exit without a window layer). An app with its own quit path gives it here. Any
+    /// other item clicked with no window open brings the main window back, as a Dock click does.
+    pub fn menu_quit_without_window(
+        mut self,
+        f: impl Fn(&AppHandle<R>) + Send + Sync + 'static,
+    ) -> Self {
+        self.menu_quit = Some(Arc::new(f));
+        self
+    }
+
+    /// The app's tray: `f` builds it (backend, model, menu actions) at start, after every plugin is set up and before the
+    /// main window, so `--hidden` can stay in it. Without a tray (or on a desktop without one) closing the last window
+    /// quits.
+    pub fn tray(mut self, f: impl FnOnce(&AppHandle<R>) -> Tray<R> + Send + 'static) -> Self {
+        self.tray = Some(Box::new(f));
+        self
+    }
+
+    /// The start's arguments: the shell opens the main window for them at start (none for `--hidden` with a tray), with
+    /// the launch's files and links waiting in it. Needs [`Builder::windows`] and [`Builder::add_to`].
+    pub fn launch(mut self, launch: LaunchArgs) -> Self {
+        self.launch = Some(launch);
+        self
+    }
+
+    /// Adds the shell plugin to `builder` (after the plugins already on it) and the start: the tray, then the main window,
+    /// from Tauri's own `setup`, which runs after every plugin is set up (a window built inside a plugin hook deadlocks).
+    /// A start that cannot open its window is logged and ends the app with code 1. This takes `builder`'s `setup`.
+    pub fn add_to(mut self, builder: tauri::Builder<R>) -> tauri::Builder<R> {
+        let (tray, launch) = (self.tray.take(), self.launch.take());
+        builder.plugin(self.build()).setup(move |app| {
+            started(
+                app.handle(),
+                open_at_start(app.handle(), tray, launch.as_ref()),
+            );
+            Ok(())
+        })
     }
 
     /// The ids of the app's health services.
@@ -349,14 +409,19 @@ impl<R: Runtime> Builder<R> {
     /// they agree. With `manifest` (the app's `paddock-manifest.json`), also [`crate::manifest::check`].
     pub fn problems(&self, manifest: Option<&str>) -> Vec<String> {
         let mut out = crate::manifest::table_problems(self.app_commands);
-        match paddock_dialogs::Contracts::parse(self.contracts.as_deref().unwrap_or(NO_CONTRACTS)) {
+        match paddock_dialogs::Contracts::from_tables(&self.dialog_tables()) {
             Ok(c) => {
                 out.extend(crate::manifest::contract_problems(&c, self.app_commands));
                 if let Some(json) = manifest {
-                    out.extend(crate::manifest::contract_drift(json, &c));
+                    let own: Vec<&str> = self
+                        .dialogs
+                        .iter()
+                        .flat_map(|t| t.entries().iter().map(|e| e.id))
+                        .collect();
+                    out.extend(crate::manifest::contract_drift(json, &c, &own));
                 }
             }
-            Err(e) => out.push(format!("the dialog contract file is not valid: {e}")),
+            Err(e) => out.push(format!("the dialog tables do not fit together: {e}")),
         }
         if let Some(json) = manifest {
             let sections = self.section_ids();
@@ -439,15 +504,29 @@ impl<R: Runtime> Builder<R> {
         let handler = Guard::new(&COMMANDS)
             .dialog_grants(paddock_dialogs::tauri::grant_of)
             .wrap(routes.handler());
+        // The tray and the launch open only through `add_to`: a shell built here with them would start without its window.
+        let unopened = self.tray.is_some() || self.launch.is_some();
         let mut parts = Some(self);
         tauri::plugin::Builder::<R>::new(PLUGIN_NAME)
             .invoke_handler(handler)
             .setup(move |app, _api| match parts.take() {
-                Some(parts) => parts.install(app).map_err(|e| e as Box<dyn Error>),
+                Some(_) if unopened => Err(
+                    "tray/launch need Builder::add_to (the shell opens them from Tauri's own setup)".into(),
+                ),
+                Some(parts) => {
+                    // No window may be built while Tauri holds its plugin store (it would deadlock).
+                    let _scope = paddock_window::tauri::plugin_hook_scope();
+                    parts.install(app).map_err(|e| e as Box<dyn Error>)
+                }
                 None => Ok(()),
             })
-            .on_page_load(|webview, payload| paddock_startup::tauri::on_page_load(webview, payload))
+            // Tauri runs these hooks with its plugin store held: no window may be built in them (it would deadlock).
+            .on_page_load(|webview, payload| {
+                let _scope = paddock_window::tauri::plugin_hook_scope();
+                paddock_startup::tauri::on_page_load(webview, payload)
+            })
             .on_window_ready(|window| {
+                let _scope = paddock_window::tauri::plugin_hook_scope();
                 let w = window.clone();
                 window.on_window_event(move |event| on_window_event(&w, event));
             })
@@ -556,16 +635,23 @@ impl<R: Runtime> Builder<R> {
                 .map_err(|e| named("the AI access settings", e))?;
         }
 
-        let dialogs = Dialogs::from_json(self.contracts.as_deref().unwrap_or(NO_CONTRACTS))
-            .map_err(|e| named("the dialog contracts", e))?;
-        app.manage(dialogs);
-
+        let tables: Vec<_> = crate::SHELL_DIALOGS
+            .iter()
+            .copied()
+            .chain(self.dialogs.iter().copied())
+            .collect();
         let startup = match self.startup {
             Some(s) => s,
             None => Startup::builder()
                 .build()
                 .map_err(|e| named("the start-up watchdog", e))?,
         };
+        // A dialog window that never sends its ready handshake is shown at the start-up config's deadline (ADR 0026 §4.3).
+        let deadline = startup.with(|dog| dog.config().dialog_show_deadline);
+        let dialogs = Dialogs::from_tables(&tables)
+            .map_err(|e| named("the dialog contracts", e))?
+            .with_show_deadline(deadline);
+        app.manage(dialogs);
         app.manage(startup);
 
         if let Some(f) = self.windows {
@@ -629,7 +715,80 @@ impl<R: Runtime> Builder<R> {
         for f in self.setup {
             f(app)?;
         }
+        // After the app's own set-up, which may manage the menu state: clicks with no window open. The shell's policy
+        // never replaces a handler the app set itself.
+        if let Some(menu) = app.try_state::<paddock_menu::tauri::NativeMenu<R>>() {
+            let quit = self.menu_quit;
+            menu.on_no_window_by_default(move |app, id| {
+                menu_without_window(app, id, quit.as_deref())
+            });
+        }
         Ok(())
+    }
+}
+
+/// A click on a menu item with no window open (the last one was closed to the tray): Quit quits (`quit`, else the
+/// shell's), any other item brings the main window back as a Dock click does. The item itself is not forwarded to the
+/// new window: it is not listening yet, so the click would be lost; the person chooses again.
+fn menu_without_window<R: Runtime>(app: &AppHandle<R>, id: &str, quit: Option<&MenuQuit<R>>) {
+    menu_without_window_using(app, id, quit, |app| app.exit(0));
+}
+
+/// [`menu_without_window`] with the exit of an app without a window layer given (the mock runtime cannot exit).
+fn menu_without_window_using<R: Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+    quit: Option<&MenuQuit<R>>,
+    exit: impl FnOnce(&AppHandle<R>),
+) {
+    if id == paddock_menu::model::QUIT_COMMAND {
+        match quit {
+            Some(f) => f(app),
+            None => quit_or(app, exit),
+        }
+    } else if app.try_state::<Windows<R>>().is_some() {
+        reopen_after_hook(app);
+    }
+}
+
+/// The shell's quit: the window layer's (every window closes, the exit watchdog is armed), as the `app_quit` command;
+/// the given exit when there is no window layer.
+fn quit_or<R: Runtime>(app: &AppHandle<R>, exit: impl FnOnce(&AppHandle<R>)) {
+    if app.try_state::<Windows<R>>().is_some() {
+        paddock_window::tauri::quit(app);
+    } else {
+        exit(app);
+    }
+}
+
+/// A Dock click or a menu click with no window open (macOS): the window comes back after the hook, not inside it.
+fn reopen_after_hook<R: Runtime>(app: &AppHandle<R>) {
+    paddock_window::tauri::after_plugin_hook(app, paddock_window::tauri::reopen);
+}
+
+/// The tray, then the main window for `launch` (none for `--hidden` with a tray). Runs in Tauri's `setup`.
+fn open_at_start<R: Runtime>(
+    app: &AppHandle<R>,
+    tray: Option<TraySetup<R>>,
+    launch: Option<&LaunchArgs>,
+) -> Result<(), WindowError> {
+    if let Some(f) = tray {
+        let tray = f(app);
+        if !paddock_window::tauri::create_tray(app, tray) {
+            log::info!("No tray icon; closing the last window quits");
+        }
+    }
+    match launch {
+        Some(launch) => paddock_window::tauri::start(app, launch),
+        None => Ok(()),
+    }
+}
+
+/// A start that could not open its window is logged and ends the app (code 1) instead of a panic in the event loop.
+fn started<R: Runtime>(app: &AppHandle<R>, result: Result<(), WindowError>) {
+    if let Err(e) = result {
+        log::error!(Error = e.message.as_str(); "The app could not open its window and stops");
+        paddock_window::tauri::exit_with(app, 1);
     }
 }
 
@@ -745,8 +904,25 @@ fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
 
 /// The app's run events: the window layer's exit (bounded teardown), and at exit the pending update and the messages.
 fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
+    // Tauri calls this with its plugin store held: no window may be built here (it would deadlock).
+    let _scope = paddock_window::tauri::plugin_hook_scope();
     if app.try_state::<Windows<R>>().is_some() {
-        paddock_window::tauri::on_run_event(app, event);
+        match event {
+            // A file opened from Finder or a Dock click with no window open: these build windows, after the hook.
+            #[cfg(target_os = "macos")]
+            RunEvent::Opened { urls } => {
+                let urls = urls.clone();
+                paddock_window::tauri::after_plugin_hook(app, move |app| {
+                    paddock_window::tauri::opened(app, &urls)
+                });
+            }
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            } => reopen_after_hook(app),
+            _ => paddock_window::tauri::on_run_event(app, event),
+        }
     }
     if let RunEvent::Exit = event {
         // First: the last checkpoint and the removal of the running marker are what makes this a clean exit.

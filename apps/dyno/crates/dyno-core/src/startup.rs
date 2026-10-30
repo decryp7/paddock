@@ -21,24 +21,13 @@ pub enum StartupLocation {
     ScheduledTask,
     /// `~/Library/LaunchAgents` (this user).
     UserLaunchAgent,
-    /// `/Library/LaunchAgents` (every user; needs the helper).
+    /// `/Library/LaunchAgents` (every user).
     SystemLaunchAgent,
     /// A macOS login item.
     LoginItem,
 }
 
 impl StartupLocation {
-    /// Whether changing it needs administrator rights (and so goes through the privileged helper).
-    pub fn needs_admin(&self) -> bool {
-        matches!(
-            self,
-            StartupLocation::MachineRunKey
-                | StartupLocation::CommonStartupFolder
-                | StartupLocation::ScheduledTask
-                | StartupLocation::SystemLaunchAgent
-        )
-    }
-
     /// The user-facing name.
     pub fn label(&self) -> &'static str {
         match self {
@@ -62,8 +51,6 @@ pub enum StartupState {
     Enabled,
     /// Does not run.
     Disabled,
-    /// Disabled at the OS level; Dyno starts it this many seconds after login.
-    Delayed(u32),
 }
 
 /// Measured startup cost.
@@ -164,8 +151,8 @@ fn norm_path(s: &str) -> String {
 }
 
 /// Whether the entry is part of the operating system `os` (by its label or the folder it runs from).
-pub fn is_os_owned(entry: &StartupEntry, os: crate::cleanup::Os) -> bool {
-    use crate::cleanup::Os;
+pub fn is_os_owned(entry: &StartupEntry, os: crate::os::Os) -> bool {
+    use crate::os::Os;
     let exe = entry.exe.as_deref().map(norm_path).unwrap_or_default();
     let name = norm_path(&entry.name);
     let under = |prefixes: &[&str]| prefixes.iter().any(|p| exe.starts_with(p));
@@ -198,7 +185,7 @@ pub fn is_os_owned(entry: &StartupEntry, os: crate::cleanup::Os) -> bool {
 }
 
 /// Classifies an entry: the OS's own first, then signed (a publisher is known), else other.
-pub fn origin(entry: &StartupEntry, os: crate::cleanup::Os) -> StartupOrigin {
+pub fn origin(entry: &StartupEntry, os: crate::os::Os) -> StartupOrigin {
     if is_os_owned(entry, os) {
         StartupOrigin::Os
     } else if entry.publisher.as_deref().is_some_and(|p| !p.trim().is_empty()) {
@@ -233,7 +220,7 @@ pub struct StartupOverview {
 }
 
 /// Applies `filter` to `entries`.
-pub fn overview(entries: Vec<StartupEntry>, filter: StartupFilter, os: crate::cleanup::Os) -> StartupOverview {
+pub fn overview(entries: Vec<StartupEntry>, filter: StartupFilter, os: crate::os::Os) -> StartupOverview {
     let total = entries.len() as u32;
     let (mut os_count, mut signed_count) = (0, 0);
     let kept = entries
@@ -258,27 +245,6 @@ pub fn overview(entries: Vec<StartupEntry>, filter: StartupFilter, os: crate::cl
     }
 }
 
-/// The most seconds a delayed start may wait.
-pub const MAX_DELAY_SECS: u32 = 600;
-
-/// Checks a requested startup state change.
-pub fn validate_change(entry: &StartupEntry, to: StartupState) -> Result<(), String> {
-    match to {
-        StartupState::Delayed(s) if s == 0 || s > MAX_DELAY_SECS => Err(format!("A delay is between 1 and {MAX_DELAY_SECS} seconds.")),
-        _ if entry.state == to => Err(format!("{} is already {}.", entry.name, state_label(to))),
-        _ => Ok(()),
-    }
-}
-
-/// The user-facing word for a state.
-pub fn state_label(s: StartupState) -> &'static str {
-    match s {
-        StartupState::Enabled => "enabled",
-        StartupState::Disabled => "disabled",
-        StartupState::Delayed(_) => "delayed",
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod fixtures {
     use super::*;
@@ -288,7 +254,7 @@ pub(crate) mod fixtures {
         StartupEntry {
             id: format!("userRunKey:{name}"),
             name: name.into(),
-            command: format!("\"{exe}\" --background"),
+            command: format!("\"{exe}\" --hidden"),
             exe: Some(exe.into()),
             location: StartupLocation::UserRunKey,
             state: StartupState::Enabled,
@@ -343,21 +309,7 @@ mod tests {
             StartupLocation::SystemLaunchAgent,
             StartupLocation::LoginItem,
         ];
-        let admin: Vec<bool> = all.iter().map(StartupLocation::needs_admin).collect();
-        assert_eq!(admin, [false, true, false, true, true, false, true, false]);
         assert!(all.iter().all(|l| !l.label().is_empty()));
-    }
-
-    #[test]
-    fn changes_are_checked() {
-        let e = entry("Slack", "C:\\s.exe", ImpactRating::Low);
-        assert!(validate_change(&e, StartupState::Enabled).is_err());
-        assert_eq!(validate_change(&e, StartupState::Disabled), Ok(()));
-        assert_eq!(validate_change(&e, StartupState::Delayed(30)), Ok(()));
-        assert!(validate_change(&e, StartupState::Delayed(0)).is_err());
-        assert!(validate_change(&e, StartupState::Delayed(MAX_DELAY_SECS + 1)).is_err());
-        assert_eq!(state_label(StartupState::Disabled), "disabled");
-        assert_eq!(state_label(StartupState::Delayed(3)), "delayed");
     }
 }
 
@@ -365,7 +317,7 @@ mod tests {
 mod filter_tests {
     use super::fixtures::entry;
     use super::*;
-    use crate::cleanup::Os;
+    use crate::os::Os;
 
     fn signed(name: &str, exe: &str, publisher: &str) -> StartupEntry {
         let mut e = entry(name, exe, ImpactRating::Low);

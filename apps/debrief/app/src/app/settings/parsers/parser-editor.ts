@@ -92,7 +92,7 @@ const PREVIEW_DEBOUNCE_MS = 300;
     .lbl { display: flex; align-items: center; gap: 8px; color: var(--text-2); }
     .rows { max-height: 180px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; font-size: var(--fs-sm); }
     .prow { display: grid; grid-template-columns: 200px 90px minmax(0, 1fr); gap: 8px; padding: 3px 8px; border-bottom: 1px solid var(--border); }
-    .prow.head { position: sticky; top: 0; background: var(--bg-3); color: var(--muted); font-weight: 600; }
+    .prow.head { position: sticky; top: 0; z-index: 3; background: var(--bg-3); color: var(--muted); font-weight: 600; }
     .foot { display: flex; justify-content: flex-end; gap: 8px; }
   `,
 })

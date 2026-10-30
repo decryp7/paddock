@@ -74,9 +74,18 @@ pub(super) fn release_page<R: Runtime>(app: &AppHandle<R>) {
 fn ensure_window<R: Runtime>(
     app: &AppHandle<R>,
     size: crate::ghost::geometry::GhostSize,
-) -> ::tauri::Result<Window<R>> {
+) -> Result<Window<R>, PanelError> {
     if let Some(w) = crate::tauri::window(app, GHOST_LABEL) {
         return Ok(w);
+    }
+    if paddock_commands::plugin_hook::in_plugin_hook() {
+        return Err(PanelError::new(
+            PanelErrorCode::InsidePluginHook,
+            format!(
+                "the window \"{GHOST_LABEL}\" {}",
+                paddock_commands::plugin_hook::INSIDE_PLUGIN_HOOK
+            ),
+        ));
     }
     let builder = WebviewWindowBuilder::new(app, GHOST_LABEL, WebviewUrl::App(GHOST_PAGE.into()))
         .title("Drag preview")
@@ -91,7 +100,11 @@ fn ensure_window<R: Runtime>(
         .focusable(false)
         .visible(false)
         .on_page_load(native::on_page_load);
-    let window = builder.build()?.as_ref().window();
+    let window = builder
+        .build()
+        .map_err(|e| PanelError::new(PanelErrorCode::Failed, e.to_string()))?
+        .as_ref()
+        .window();
     native::make_click_through(&window);
     Ok(window)
 }
@@ -157,9 +170,14 @@ pub(super) fn start<R: Runtime>(
     if screens.is_empty() {
         return Ok(false);
     }
-    let made = ensure_window(app, ghost.size).inspect_err(native::ghost_unavailable);
-    if made.is_err() {
-        return Ok(false);
+    match ensure_window(app, ghost.size) {
+        Ok(_) => {}
+        // A wiring bug, not a missing feature: say so.
+        Err(e) if e.code == PanelErrorCode::InsidePluginHook => return Err(e),
+        Err(e) => {
+            native::ghost_unavailable(&e);
+            return Ok(false);
+        }
     }
     hide(app);
     let (id, loaded) = panels
@@ -168,7 +186,7 @@ pub(super) fn start<R: Runtime>(
     if loaded {
         push_content(app);
     }
-    native::spawn_tracker(app.clone(), id).map_err(|e| {
+    native::spawn_tracker(app.clone(), id, panels.pointer()).map_err(|e| {
         panels.ghost().finish(host);
         PanelError::new(PanelErrorCode::Failed, e.to_string())
     })?;

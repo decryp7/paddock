@@ -8,6 +8,7 @@ use paddock_commands::testing::{WriteMode, sync_generated};
 use paddock_health::ServiceSpec;
 use paddock_shell::{AppIdentity, PLUGIN_NAME};
 use paddock_shell_demo::agent;
+use paddock_shell_demo::dialogs::DIALOGS;
 use paddock_shell_demo::engine::{self, DemoJob, Engine};
 use paddock_shell_demo::{
     APP_ID, APP_NAME, COMMANDS, MANIFEST, Place, VERSION, invoke_handler, shell, shell_with_log,
@@ -191,6 +192,13 @@ fn the_uis_command_names_are_generated_from_the_apps_table() {
 }
 
 #[test]
+fn the_uis_dialog_contracts_are_generated_from_the_apps_table() {
+    let text = paddock_dialogs::ts::contracts_module("the app", &DIALOGS, REGENERATE);
+    let path = ui_dir().join("src/app/generated/dialog-contracts.ts");
+    sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
+}
+
+#[test]
 fn every_command_of_the_app_is_async() {
     paddock_commands::testing::assert_async(&COMMANDS, &[&app_dir().join("src")]);
 }
@@ -222,9 +230,9 @@ fn a_drifted_ui_is_reported() {
     let p = shell::<MockRuntime>(Place::Test { dir: dir.clone() }).problems(Some(&renamed));
     assert!(p.iter().any(|x| x.contains("about_infos")), "{p:?}");
     let bad = shell::<MockRuntime>(Place::Test { dir })
-        .dialog_contracts("{")
+        .dialogs(&[&DIALOGS])
         .problems(None);
-    assert!(bad[0].contains("not valid"), "{bad:?}");
+    assert!(bad[0].contains("do not fit together"), "{bad:?}");
 }
 
 #[test]
@@ -746,4 +754,56 @@ fn the_agent_carries_the_apps_version_and_is_bundled_next_to_it() {
             .unwrap()
             .contains("sidecar.mjs")
     );
+}
+
+/// The demo's start as `run` composes it (rule 43), on the mock runtime with a headless tray: the tray and the main window
+/// open, after every plugin is set up (a window built inside a plugin hook deadlocks the start).
+#[test]
+fn the_start_opens_the_tray_and_the_main_window() {
+    use paddock_shell::testing::{Started, start};
+    let dir = tempfile::tempdir().unwrap();
+    let place = Place::Test {
+        dir: dir.path().to_path_buf(),
+    };
+    let started = start(move || composed(place, paddock_window::launch::LaunchArgs::default()));
+    assert_eq!(
+        started,
+        Ok(Started {
+            main_window: true,
+            tray: true
+        })
+    );
+}
+
+/// Started at log-in (`--hidden`) with a tray: no window.
+#[test]
+fn a_hidden_start_stays_in_the_tray() {
+    use paddock_shell::testing::{Started, start};
+    let dir = tempfile::tempdir().unwrap();
+    let place = Place::Test {
+        dir: dir.path().to_path_buf(),
+    };
+    let launch = paddock_window::launch::LaunchArgs {
+        hidden: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        start(move || composed(place, launch)),
+        Ok(Started {
+            main_window: false,
+            tray: true
+        })
+    );
+}
+
+fn composed(
+    place: Place,
+    launch: paddock_window::launch::LaunchArgs,
+) -> tauri::Builder<MockRuntime> {
+    paddock_shell_demo::app(
+        mock_builder(),
+        shell(place),
+        launch,
+        paddock_window::tauri::HeadlessTray,
+    )
 }

@@ -1,5 +1,4 @@
-import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, test, type Page } from '@decryp7/paddock-e2e';
 
 // The data parts of paddock-ui (plan X21) in the gallery: the table's sorting, filter, keyboard, menus and virtual rows, the
 // chart wrapper over a real ECharts, and the forms helpers, in both themes, with axe and without horizontal scroll at 320 px.
@@ -19,8 +18,8 @@ for (const theme of THEMES) {
   test(`axe finds no violations in the table, chart and forms (${theme})`, async ({ page }) => {
     await open(page, theme);
     await page.locator('section[data-testid="chart"] canvas').first().waitFor();
-    const results = await new AxeBuilder({ page }).include('section[data-testid="table"]').include('section[data-testid="chart"]').include('section[data-testid="forms"]').withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
-    expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+    // Colours are read at rest: the field hints fade in over 300 ms (Material's subscript animation), and axe can read them half way.
+    expect(await axeViolations(page, { include: ['section[data-testid="table"]', 'section[data-testid="chart"]', 'section[data-testid="forms"]'] })).toEqual([]);
   });
 }
 
@@ -28,7 +27,7 @@ test('table: sorting cycles ascending, descending, none and sets aria-sort', asy
   await open(page);
   const first = async () => (await names(page).first().innerText()).trim();
   const original = await first();
-  const header = small(page).getByRole('button', { name: 'Sort by Name' });
+  const header = small(page).getByRole('columnheader', { name: 'Name' }).getByRole('button');
   await header.click();
   await expect(small(page).getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'ascending');
   const asc = await first();
@@ -101,7 +100,7 @@ test('table: 5,000 rows are drawn by the virtual viewport, a few at a time', asy
   const drawn = await big.locator('[role=row][data-index]').count();
   expect(drawn).toBeGreaterThan(0);
   expect(drawn).toBeLessThan(100);
-  await expect(big.locator('[role=grid]')).toHaveAttribute('aria-rowcount', /^5\d{3}$/);
+  await expect(big.locator('[role=treegrid]')).toHaveAttribute('aria-rowcount', /^5\d{3}$/);
   // Grouped: the groups are rows of the table.
   await expect(big.locator('.pd-group').first()).toBeVisible();
 });
@@ -138,10 +137,11 @@ test('table: rows are 32 px with a 28 px header, and a sortable header shows its
   const row = small(page).locator('[role=row][data-index]').first();
   expect((await row.boundingBox())!.height).toBeCloseTo(32, 0);
   expect((await small(page).locator('.pd-header').boundingBox())!.height).toBeCloseTo(28, 0);
-  const icon = small(page).locator('.pd-sort').first().locator('.pd-sort-icon');
-  await expect(icon).toHaveCSS('opacity', '0');
+  // Material's sort arrow: hidden at rest, a quiet hint on hover.
+  const arrow = small(page).locator('.pd-sort').first().locator('.mat-sort-header-arrow');
+  await expect(arrow).toHaveCSS('opacity', '0');
   await small(page).locator('.pd-sort').first().hover();
-  await expect(icon).toHaveCSS('opacity', '1');
+  await expect(arrow).not.toHaveCSS('opacity', '0');
 });
 
 test('table: the keyboard focus in a menu is a 2 px ring with 3:1 contrast, and the icon slot lines the labels up', async ({ page }) => {
@@ -159,14 +159,14 @@ test('table: the keyboard focus in a menu is a 2 px ring with 3:1 contrast, and 
     const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
     const lin = (v: number) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
     const lum = (c: number[]) => 0.2126 * lin(c[0]!) + 0.7152 * lin(c[1]!) + 0.0722 * lin(c[2]!);
-    const menuBg = getComputedStyle(e.parentElement!).backgroundColor;
+    const menuBg = getComputedStyle(e.closest('.pd-popmenu')!).backgroundColor;
     const [a, b] = [lum(rgb(cs.outlineColor)), lum(rgb(menuBg))];
     return { width: cs.outlineWidth, style: cs.outlineStyle, ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) };
   });
   expect(ring.width).toBe('2px');
   expect(ring.style).toBe('solid');
   expect(ring.ratio).toBeGreaterThanOrEqual(3);
-  const lefts = await page.locator('.pd-popmenu__item > span:last-child').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().left)));
+  const lefts = await page.locator('.pd-popmenu__item .mat-mdc-menu-item-text > span:last-child').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().left)));
   expect(new Set(lefts).size).toBe(1);
   await expect(page.locator('.pd-popmenu__sep')).toHaveCount(1);
   await page.keyboard.press('Escape');
@@ -196,13 +196,11 @@ test('table: loading and empty say no count, and the columns do not move when ro
   for (const id of ['box-loading', 'box-empty', 'box-error']) expect(await left(id), id).toBe(loaded);
 });
 
-test('table: the sortable hint is a two-way glyph, never the one a descending sort uses', async ({ page }) => {
+test('table: an unsorted header hides its arrow, the sorted one shows it solid', async ({ page }) => {
   await open(page);
   const grid = page.locator('[data-testid="box-selected"]');
-  const desc = await grid.getByRole('columnheader', { name: 'Size (KiB)' }).locator('.pd-sort-icon path').first().getAttribute('d');
-  const hint = await grid.getByRole('columnheader', { name: 'Kind' }).locator('.pd-sort-icon path').first().getAttribute('d');
-  expect(hint).not.toBe(desc);
-  expect(hint).toContain('M8 9l4-4 4 4');
+  await expect(grid.getByRole('columnheader', { name: 'Size (KiB)' }).locator('.mat-sort-header-arrow')).toHaveCSS('opacity', '1');
+  await expect(grid.getByRole('columnheader', { name: 'Kind' }).locator('.mat-sort-header-arrow')).toHaveCSS('opacity', '0');
 });
 
 test('table: the resting "..." button is visible in its own colour, not faded', async ({ page }) => {
@@ -314,4 +312,84 @@ test('forms: the error shows after the field was left, with the 14 px alert icon
   await forms.getByLabel('Port').fill('8080');
   await forms.getByRole('button', { name: 'Save' }).click();
   await expect(forms.getByTestId('forms-status')).toHaveText('Saved Alpha');
+});
+
+test('table: End and Home in the 5,000-row virtual table move the focus to the last and the first row once they are drawn', async ({ page }) => {
+  await open(page);
+  const grid = page.locator('[data-testid="table-virtual"]');
+  await grid.locator('[role=row][data-index]').first().focus();
+  await page.keyboard.press('End');
+  const last = await grid.locator('[role=treegrid]').getAttribute('aria-rowcount');
+  await expect(page.locator(':focus')).toHaveAttribute('aria-rowindex', String(last));
+  await page.keyboard.press('Home');
+  await expect(page.locator(':focus')).toHaveAttribute('data-index', '0');
+});
+
+
+test('table: the row is the one tab stop: Right reaches its buttons, a focused button has exactly one ring, Tab leaves the grid', async ({ page }) => {
+  await open(page);
+  const grid = small(page).locator('[role=grid]');
+  const row = grid.locator('[role=row][data-index]').first();
+  await row.focus();
+  await page.keyboard.press('ArrowRight');
+  const button = row.locator('.pd-icon-btn').first();
+  await expect(button).toBeFocused();
+  const rings = await button.evaluate((b) => {
+    // The button's own outline, and Material's focus indicator (a ::before on the button or on its indicator span).
+    const own = getComputedStyle(b);
+    const outline = own.outlineStyle !== 'none' && parseFloat(own.outlineWidth) > 0 ? 1 : 0;
+    const indicators = [b, ...b.querySelectorAll('.mat-focus-indicator')].filter((e) => {
+      const before = getComputedStyle(e, '::before');
+      return before.content !== 'none' && before.content !== 'normal' && before.display !== 'none' && parseFloat(before.borderTopWidth) > 0;
+    }).length;
+    return outline + indicators;
+  });
+  expect(rings).toBe(1);
+  await page.keyboard.press('ArrowLeft');
+  await expect(row).toBeFocused();
+  await page.keyboard.press('Tab');
+  expect(await grid.evaluate((g) => g.contains(document.activeElement))).toBe(false);
+});
+
+test('table: folding a group from the keyboard keeps the focus on its row after the virtual table has scrolled', async ({ page }) => {
+  await open(page);
+  const big = page.locator('[data-testid="table-virtual"]');
+  const body = big.locator('.pd-body');
+  await body.evaluate((e) => (e.scrollTop = 40 * 32));
+  await expect(big.locator('[role=row][data-index="45"]')).toBeAttached();
+  await body.evaluate((e) => (e.scrollTop = 0));
+  const group = big.locator('[role=row][data-index="0"]');
+  await expect(group).toBeAttached();
+  await group.focus();
+  const focusedGroup = page.locator('.pd-group[data-index="0"]:focus');
+  for (const [key, expanded] of [['ArrowLeft', 'false'], ['ArrowRight', 'true'], ['Enter', 'false']] as const) {
+    await page.keyboard.press(key);
+    await expect(focusedGroup, `after ${key}`).toHaveAttribute('aria-expanded', expanded);
+  }
+});
+
+test('table: a tree grid has levels, and Right and Left unfold, enter and fold the rows', async ({ page }) => {
+  await open(page);
+  const tree = page.locator('[data-testid="table-tree"] [role=treegrid]');
+  await expect(tree).toBeVisible();
+  const row = (name: string) => tree.getByRole('row', { name: new RegExp(name) });
+  // "Report builder" starts folded: its renderer is not there; the other tops show their levels.
+  await expect(row('Report builder')).toHaveAttribute('aria-expanded', 'false');
+  await expect(row('Renderer')).toHaveCount(0);
+  await expect(row('Syslog service')).toHaveAttribute('aria-level', '1');
+  await expect(row('Collector')).toHaveAttribute('aria-level', '2');
+  await expect(row('Parser worker')).toHaveAttribute('aria-level', '3');
+  // Right unfolds the folded row, and on the unfolded row moves to its first child.
+  await row('Report builder').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(row('Report builder')).toHaveAttribute('aria-expanded', 'true');
+  await expect(row('Renderer')).toHaveAttribute('aria-level', '2');
+  await page.keyboard.press('ArrowRight');
+  await expect(row('Renderer')).toBeFocused();
+  // Left from a leaf goes up to its parent, and Left on an unfolded parent folds it.
+  await page.keyboard.press('ArrowLeft');
+  await expect(row('Report builder')).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(row('Report builder')).toHaveAttribute('aria-expanded', 'false');
+  await expect(row('Renderer')).toHaveCount(0);
 });

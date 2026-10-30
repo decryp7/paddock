@@ -14,11 +14,6 @@ import type {
   SavedDiagnostics,
   ShelveFor,
   Anomaly,
-  AppInfo,
-  CleanupCategory,
-  CleanupOutcome,
-  CleanupScan,
-  DeleteMode,
   Diagnosis,
   HealthReport,
   History,
@@ -27,18 +22,20 @@ import type {
   LiveUpdate,
   Locker,
   PluginInfo,
-  ProcessAction,
   ProcessDetails,
   ProcessRef,
-  ProfileId,
-  QuarantineEntry,
-  RuleSet,
+  CustomAlertRule,
   Settings,
-  SizeNode,
+  DiskChildren,
+  DiskChildrenQuery,
+  DiskRings,
+  DiskRingsQuery,
+  DiskScanStatus,
+  DiskTarget,
+  Volume,
   SnapshotDiff,
   SnapshotInfo,
   StartupEntry,
-  StartupState,
   SystemInventory,
   ThrottleOverview,
   LifespanOverview,
@@ -54,38 +51,25 @@ import type {
   BenchOverview,
   StartBenchmark,
   Timestamp,
-  HelperStatus,
-  TuningSuggestion,
   WeeklyReport,
   ReportFormat,
   SavedReport,
   BackupReport,
-  BootReport,
   ChangeTimeline,
   ChangesQuery,
-  FinderQuery,
-  FinderResult,
   GpuReport,
   InventoryFormat,
   MaintenanceStatus,
   SavedInventory,
-  SleepReport,
-  SoftwareInventory,
-  UsageReport,
   IssuesOverview,
   IssuesQuery,
+  JobOutput,
+  JobSpec,
   SavedIssues,
-  UnusualAction,
   UnusualOverview,
-  AddWatchedFolder,
-  FileHashInfo,
-  HashSource,
   SearchSeed,
   StartupFilter,
   StartupOverview,
-  WatchChange,
-  WatchOverview,
-  WatchPreview,
 } from './api.types';
 
 /** Stops a subscription. */
@@ -104,15 +88,13 @@ export interface DynoBackend {
   onAgentStatus(listener: (s: AgentStatus) => void): Unsubscribe;
   /** Alarm changes pushed by the agent (new, repeated, returned, acknowledged, shelved, muted, noted). */
   onAlarm(listener: (c: AlarmChange) => void): Unsubscribe;
-
-  appInfo(): Promise<AppInfo>;
+  /** A disk scan's status changed (at most four a second per scan, one final); keep the highest `seq`. No polling. */
+  onDiskScan(listener: (s: DiskScanStatus) => void): Unsubscribe;
+  /** The volumes mounted now changed (one came, one went, one stopped answering); the new list. */
+  onDiskVolumes(listener: (v: Volume[]) => void): Unsubscribe;
 
   // Processes.
   processDetails(target: ProcessRef): Promise<ProcessDetails>;
-  /** Acts on a process; resolves with the activity entry it logged. */
-  act(target: ProcessRef, action: ProcessAction): Promise<ActivityEntry>;
-  /** Acts on every process of an app group. */
-  actOnGroup(groupId: string, action: ProcessAction): Promise<ActivityEntry>;
   lockers(path: string): Promise<Locker[]>;
   openLocation(target: ProcessRef): Promise<void>;
   takeSnapshot(label: string): Promise<SnapshotInfo>;
@@ -124,38 +106,32 @@ export interface DynoBackend {
   anomalies(): Promise<Anomaly[]>;
   history(range: HistoryRange, end: Timestamp | null): Promise<History>;
   activity(limit: number): Promise<ActivityEntry[]>;
-  undo(activityId: string): Promise<ActivityEntry>;
-  /** Releases what a rule is doing to a process now (priority, efficiency mode, cap), without waiting for the rule. */
-  releaseAction(target: ProcessRef): Promise<ActivityEntry>;
 
-  // Rules.
-  rules(): Promise<RuleSet>;
-  saveRules(rules: RuleSet): Promise<RuleSet>;
-  setProfile(profile: ProfileId): Promise<RuleSet>;
-  pauseRules(paused: boolean): Promise<RuleSet>;
-
-  // Cleanup.
-  cleanupCategories(): Promise<CleanupCategory[]>;
-  scanCleanup(categories: string[]): Promise<CleanupScan>;
-  runCleanup(scanId: string, itemIds: string[], mode: DeleteMode): Promise<CleanupOutcome>;
-  quarantine(): Promise<QuarantineEntry[]>;
-  restoreQuarantine(id: string): Promise<void>;
-  diskUsage(path: string | null): Promise<SizeNode>;
-
-  // Health and tuning.
+  // Health.
   health(): Promise<HealthReport>;
-  tuning(): Promise<TuningSuggestion[]>;
-  applyTuning(id: string): Promise<ActivityEntry>;
-  /** Puts the previous setting back; `force` overwrites a setting something else changed since Dyno applied it. */
-  revertTuning(id: string, force?: boolean): Promise<ActivityEntry>;
+  // The disk map.
+  /** The volumes mounted now: internal, external and network, with capacity. */
+  diskVolumes(): Promise<Volume[]>;
+  /** Starts a scan (a job) and resolves at once with its status; the same target again returns the running scan. */
+  startDiskScan(target: DiskTarget): Promise<DiskScanStatus>;
+  /** Stops a scan and resolves at once; what was counted stays. */
+  cancelDiskScan(scan: number): Promise<void>;
+  /** The status of every kept scan (a window that opens late asks once). */
+  diskScans(): Promise<DiskScanStatus[]>;
+  /** One page of one level of a scan. */
+  diskChildren(query: DiskChildrenQuery): Promise<DiskChildren>;
+  /** Several levels under a folder in one answer (the sunburst's rings). */
+  diskRings(query: DiskRingsQuery): Promise<DiskRings>;
+  /** The full path of a node (Reveal, Copy path). */
+  diskPath(scan: number, node: number): Promise<string>;
+  /** Reads the folders a finished scan could not open once more, and only those; resolves at once with the status (the scan runs again). */
+  retryDiskScan(scan: number): Promise<DiskScanStatus>;
+  /** Opens the system's Full Disk Access pane (macOS); rejects with `unsupported` and the reason elsewhere. */
+  openFullDiskAccessSettings(): Promise<void>;
+  /** Shows a node in Finder, Explorer or the file manager. */
+  diskReveal(scan: number, node: number): Promise<void>;
 
-  // The privileged helper (ADR 0016). Installing happens only from the confirmation dialog.
-  helperStatus(): Promise<HelperStatus>;
-  /** Starts the install or update (the system's permission prompt opens); resolves at once with state `installing`. */
-  installHelper(): Promise<HelperStatus>;
-  uninstallHelper(): Promise<HelperStatus>;
   startupEntries(): Promise<StartupEntry[]>;
-  setStartupState(id: string, state: StartupState): Promise<ActivityEntry>;
 
   // What is installed (memory modules, CPU, disks) and hints.
   inventory(): Promise<SystemInventory>;
@@ -217,19 +193,19 @@ export interface DynoBackend {
   alerts(limit: number): Promise<Alert[]>;
   settings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<Settings>;
+  /** Adds an alert rule, or replaces the one with the same id; the engine validates it and answers the settings. */
+  upsertAlertRule(rule: CustomAlertRule): Promise<Settings>;
+  /** Deletes the alert rule with `id`; answers the settings. */
+  deleteAlertRule(id: string): Promise<Settings>;
   plugins(): Promise<PluginInfo[]>;
 
   // Issues and unusual programs (observe-only).
   /** Crashes, hangs and other problems the OS recorded, with the stability score and how each log was read. */
   issues(query: IssuesQuery): Promise<IssuesOverview>;
-  /** Reads the OS logs now and answers the same as `issues`. */
-  rescanIssues(query: IssuesQuery): Promise<IssuesOverview>;
   /** Asks where to save (the OS save dialog) and writes the last `days` days as JSON lines for Debrief; `null` when they cancel. */
   saveIssues(days: number): Promise<SavedIssues | null>;
   /** Programs that are new or unusual on this computer. */
-  unusual(includeIgnored: boolean): Promise<UnusualOverview>;
-  /** Ignores, protects (adds to the protected list) or restores a program on the list. */
-  unusualAct(key: string, action: UnusualAction): Promise<UnusualOverview>;
+  unusual(): Promise<UnusualOverview>;
   /** Forgets the baseline of programs; learning starts again. */
   forgetBaseline(): Promise<UnusualOverview>;
 
@@ -239,59 +215,43 @@ export interface DynoBackend {
   searchSeed(text: string): Promise<SearchSeed>;
   /** Opens a web search for exactly this text in the default browser. */
   webSearch(query: string): Promise<void>;
-  /** The SHA-256 of a program's file, computed here. */
-  fileHash(source: HashSource): Promise<FileHashInfo>;
   /** Opens the VirusTotal page of a hash in the default browser. */
   openVirusTotal(sha256: string): Promise<void>;
   /** The startup entries after hiding the OS's and signed ones, with the counts. */
   startupOverview(filter: StartupFilter): Promise<StartupOverview>;
 
-  // Watched folders (WP-10): files older than the keep-for time move to the 7-day quarantine, only in folders the person
-  // chose, configured, previewed and turned on.
-  watchedFolders(): Promise<WatchOverview>;
-  /** Opens the OS folder dialog and adds the chosen folder (switched off); `null` when they cancel. */
-  addWatchedFolder(request: AddWatchedFolder): Promise<WatchOverview | null>;
-  setWatchedFolder(id: string, change: WatchChange): Promise<WatchOverview>;
-  removeWatchedFolder(id: string): Promise<WatchOverview>;
-  /** A dry run: what a sweep would move now. Needed before a folder can be turned on. */
-  previewWatchedFolder(id: string): Promise<WatchPreview>;
-  /** Sweeps now (after the preview); answers the list. */
-  sweepWatchedFolder(id: string): Promise<WatchOverview>;
   // Extras (read-only views) and backup health.
   /** Installs, updates, new start-up items and setting changes in a window. */
   changes(query: ChangesQuery): Promise<ChangeTimeline>;
-  /** What keeps the computer awake now and what woke it. */
-  sleepBlockers(): Promise<SleepReport>;
-  /** Recent boots and what slowed the last one. */
-  bootAnalysis(): Promise<BootReport>;
-  /** Network traffic and energy impact per app. */
-  appUsage(): Promise<UsageReport>;
   /** GPU use per process. */
   gpuProcesses(): Promise<GpuReport>;
-  /** The installed software. */
-  softwareInventory(): Promise<SoftwareInventory>;
   /** Asks where to save (the OS save dialog) and writes the hardware and software report there; `null` when they cancel. */
   saveInventoryReport(format: InventoryFormat): Promise<SavedInventory | null>;
   /** Asks for a folder (the OS folder dialog; the webview never invents a path); `null` when they cancel. */
   pickFolder(): Promise<string | null>;
-  /** Looks for large and duplicate files in a folder the person chose. Deletes nothing. */
-  findFiles(query: FinderQuery): Promise<FinderResult>;
-  /** Removes selected files of a finder result through the cleanup policy; the engine keeps one copy of every duplicate group. */
-  removeFoundFiles(scanId: string, ids: string[], mode: DeleteMode): Promise<CleanupOutcome>;
   /** Where the maintenance windows stand now. */
   maintenance(): Promise<MaintenanceStatus>;
   /** The last backup check (the engine runs one when there is none yet). */
   backup(): Promise<BackupReport>;
-  /** Checks the backup tools now and answers the report. */
-  refreshBackup(): Promise<BackupReport>;
 
-  // The tray dropdown window.
-  /** Shows and focuses the main window (and hides the tray dropdown). */
-  trayOpenMain(): Promise<void>;
-  /** Tells the shell how tall the tray popover's content is (CSS pixels) so it can size the window to fit; no-op in the browser. */
-  popoverResize(height: number): Promise<void>;
+  // Long operations are jobs (ER-17 to ER-19): find large and duplicate files in a folder the person chose (deletes nothing),
+  // read the OS logs now, check the backup tools now, hash a program's file, and the sleep, boot, app-usage and software reads.
+  // The shell's jobs store follows them (`paddock://jobs`) and cancels them (`job_cancel`); `JobStarter` ties these together.
+  // Nothing here waits for the work, so none of it needs a long timeout.
+  /** Starts a job and resolves at once with its id. A second start of the same work answers the running job; another search or log read while one runs is refused with `busy`. */
+  startJob(spec: JobSpec): Promise<number>;
+  /** What a done job produced; `notFound` when the job is not done or too old to be kept. */
+  jobResult(id: number): Promise<JobOutput>;
+
+  // The tray popover window (the shell places and fits it).
+  /** Shows and focuses the main window (and hides the tray popover). */
+  showMainWindow(): Promise<void>;
+  /** Tells the shell how tall the popover's content is (CSS pixels) so it can size the window to fit; no-op in the browser. */
+  fitTray(height: number): Promise<void>;
+  /** Closes the tray popover. */
+  hideTray(): Promise<void>;
   /** Quits the Dyno app (the background agent keeps its own lifecycle). */
-  trayQuit(): Promise<void>;
+  quitApp(): Promise<void>;
 }
 
 export const BACKEND = new InjectionToken<DynoBackend>('DynoBackend');

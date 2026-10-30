@@ -215,6 +215,11 @@ impl UpdatesBuilder {
         self
     }
 
+    /// Whether an installer is set (a build without one finds updates but cannot install them).
+    pub fn has_installer(&self) -> bool {
+        self.installer.is_some()
+    }
+
     /// What this build was bundled as (`nsis`, `msi`, `appimage`, `deb`, `rpm`, `app`): its package is preferred.
     pub fn installer_kind(mut self, kind: &str) -> Self {
         self.installer_kind = Some(kind.into());

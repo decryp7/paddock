@@ -107,3 +107,12 @@ fn every_command_is_async() {
     let refs: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
     paddock_commands::testing::assert_async(&COMMANDS, &refs);
 }
+
+/// The shell's own dialog contracts (`pd.confirm`) as TypeScript, in the `shell/confirm` entry point (ADR 0026 §3, §5).
+#[test]
+fn generated_dialog_contracts_are_current() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../ui/projects/paddock-ui/shell/confirm/generated/dialog-contracts.ts");
+    let text = paddock_dialogs::ts::contracts_module("paddock-shell", &crate::DIALOGS, REGENERATE);
+    sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
+}

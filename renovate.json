@@ -8,6 +8,7 @@
     "apps/*/target/**",
     "**/target/**",
     "templates/**",
+    "tools/paddock-dev/tests/golden/**",
     "apps/dyno/templates/**",
     "apps/dyno/plugins/dyno-plugin-example/**"
   ],

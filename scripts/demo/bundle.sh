@@ -19,6 +19,15 @@ rm -rf "$dir/release/bundle"
 [ -d node_modules ] || npm ci
 (cd apps/$app && npx tauri build --bundles "$bundles")
 
+# ADR 0032: no binary the Windows installer carries imports the VC++ runtime (the list comes from the Tauri configuration).
+case ",$bundles," in
+  *,nsis,* | *,msi,*)
+    bin_dir="$dir/release"
+    if command -v cygpath >/dev/null; then bin_dir="$(cygpath -m "$bin_dir")"; fi  # Node reads C:/..., not /c/...
+    node conformance/release/windows-crt-imports.mjs --src-tauri "apps/$app/src-tauri" --bin-dir "$bin_dir"
+    ;;
+esac
+
 # Tauri seals the .app ad-hoc (signingIdentity "-"), but not the DMG around it: seal that too, so the DMG verifies with
 # `codesign --verify --deep --strict` like the app (rule 23).
 if [ "$(uname)" = "Darwin" ]; then

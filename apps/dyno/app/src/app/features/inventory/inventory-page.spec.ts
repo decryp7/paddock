@@ -25,7 +25,10 @@ describe('InventoryPage', () => {
     expect(el.textContent).toContain('Board maximum');
     [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Table')!.click();
     f.detectChanges();
-    expect(el.querySelectorAll('tbody tr')).toHaveLength(4);
+    await f.whenStable();
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    f.detectChanges();
+    expect(el.querySelectorAll('pd-table [role="row"][data-key]')).toHaveLength(4);
     expect(el.textContent).toContain('CMK16GX4M1E3200C16');
   });
 
@@ -38,11 +41,11 @@ describe('InventoryPage', () => {
   });
 
   it('says why the modules are unknown when only the total is available', async () => {
-    const inv: SystemInventory = { ...mockInventory('windows'), memory: { totalOnly: { total: 16 * 1024 ** 3, reason: { reason: 'The OS did not answer.', needsHelper: true } } }, hints: [] };
+    const inv: SystemInventory = { ...mockInventory('windows'), memory: { totalOnly: { total: 16 * 1024 ** 3, reason: { reason: 'The OS did not answer.' } } }, hints: [] };
     const f = await render(inv);
     const el = f.nativeElement as HTMLElement;
     expect(el.textContent).toContain('16 GB installed');
-    expect(el.textContent).toContain('needs the Dyno helper');
+    expect(el.textContent).not.toContain('helper');
   });
 
   it('shows an inline error with Retry', async () => {

@@ -1,5 +1,4 @@
-//! Feeds: turn what Dyno already produces (alerts, rule notifications, custom thresholds, issues, taming and cleanup
-//! events) into alarm events through one generic [`Observation`].
+//! Feeds: turn what Dyno already produces (alerts, custom thresholds, issues and hardware findings) into alarm events through one generic [`Observation`].
 
 use super::AlarmEvent;
 use crate::alerts::{Alert, AlertKind};
@@ -7,7 +6,7 @@ use crate::health::Severity;
 use crate::time::{Timestamp, MINUTE};
 use crate::widgets::Metric;
 
-/// How long a one-off event (an alert that fires once, a cleanup that ran) stays an open alarm by itself.
+/// How long a one-off event (an alert that fires once) stays an open alarm by itself.
 pub const EVENT_TTL_MS: i64 = 30 * MINUTE;
 
 /// Where an observation comes from; it becomes the alarm's rule prefix, so muting and the statistics group by it.
@@ -19,10 +18,6 @@ pub enum Source {
     Issue,
     /// A custom threshold on a widget or metric.
     Threshold,
-    /// A rule that tamed an app.
-    Taming,
-    /// A cleanup that ran or found something.
-    Cleanup,
     /// A network event: a new exposed listener or a new remote host.
     Network,
     /// The CPU running slower than it should (heat, a power limit or battery saver).
@@ -41,8 +36,6 @@ impl Source {
             Source::Alert => "alert",
             Source::Issue => "issue",
             Source::Threshold => "threshold",
-            Source::Taming => "taming",
-            Source::Cleanup => "cleanup",
             Source::Network => "network",
             Source::Throttling => "throttling",
             Source::Lifespan => "lifespan",
@@ -80,7 +73,7 @@ pub struct Observation {
 impl Observation {
     /// The same observation with the person's own name for the rule in its title.
     pub fn titled(mut self, name: &str) -> Observation {
-        self.title = format!("{name} is past its limit");
+        self.title = format!("{name} is over its limit");
         self
     }
 
@@ -154,22 +147,6 @@ pub fn from_alert(alert: &Alert) -> Observation {
     }
 }
 
-/// A rule's "Notify" step firing for `app`.
-pub fn from_rule_notify(rule_id: &str, rule_name: &str, app: &str) -> Observation {
-    Observation {
-        source: Source::Taming,
-        name: rule_id.into(),
-        subject: app.into(),
-        severity: Severity::Info,
-        title: format!("{rule_name}: {app}"),
-        detail: format!("The rule \"{rule_name}\" notified you about {app}."),
-        value: None,
-        metric: Some(Metric::Process(app.into())),
-        active: true,
-        one_off: true,
-    }
-}
-
 /// A user threshold crossed (or no longer crossed) by `value`.
 pub fn from_threshold(name: &str, metric: Metric, severity: Severity, value: f64, limit: f64, crossed: bool) -> Observation {
     Observation {
@@ -177,7 +154,7 @@ pub fn from_threshold(name: &str, metric: Metric, severity: Severity, value: f64
         name: name.into(),
         subject: String::new(),
         severity,
-        title: format!("{name} is past its limit"),
+        title: format!("{name} is over its limit"),
         detail: format!("The value is {value:.1}; the limit is {limit:.1}."),
         value: Some(value),
         metric: Some(metric),
@@ -213,25 +190,14 @@ pub fn alarms_on(kind: crate::issues::IssueKind) -> bool {
     )
 }
 
-/// A finished cleanup (or one that found something) as an informational event.
-pub fn from_cleanup(title: &str, detail: &str) -> Observation {
-    Observation {
-        source: Source::Cleanup,
-        name: "cleanup".into(),
-        subject: title.into(),
-        severity: Severity::Info,
-        title: title.into(),
-        detail: detail.into(),
-        value: None,
-        metric: None,
-        active: true,
-        one_off: true,
-    }
-}
-
 /// A throttling episode that has lasted long enough to count; `active` is false once it ended. Heat is a warning (it can
 /// damage a machine over time), the other causes are information.
-pub fn from_throttle(e: &crate::throttle::ThrottleEpisode, active: bool, confidence: crate::hardware::Confidence) -> Observation {
+pub fn from_throttle(
+    e: &crate::throttle::ThrottleEpisode,
+    active: bool,
+    confidence: crate::hardware::Confidence,
+    zone: &dyn crate::time::LocalZone,
+) -> Observation {
     use crate::throttle::ThrottleCause;
     Observation {
         source: Source::Throttling,
@@ -248,8 +214,9 @@ pub fn from_throttle(e: &crate::throttle::ThrottleEpisode, active: bool, confide
             e.cause.label().to_lowercase()
         ),
         detail: format!(
-            "Throttling since {} with {} confidence. Open Throttling for the cause and what could help.",
-            crate::report::utc_time(e.start),
+            "Throttling since {} ({}) with {} confidence. Open Throttling for the cause and what could help.",
+            crate::report::local_time(e.start, zone),
+            crate::time::offset_label(e.start, zone),
             confidence.word()
         ),
         value: Some(f64::from(e.avg_lost_percent)),
@@ -322,7 +289,7 @@ pub fn from_baseline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::alarms::{AlarmEngine, AlarmState};
+    use crate::alarms::{AlarmConfig, AlarmEngine, AlarmState};
 
     fn alert(kind: AlertKind, title: &str) -> Alert {
         Alert {
@@ -337,7 +304,7 @@ mod tests {
 
     #[test]
     fn alerts_become_one_off_alarms_that_expire() {
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), crate::time::FixedZone::shared(0));
         let o = from_alert(&alert(AlertKind::LowDisk, "C: is almost full"));
         assert_eq!(
             (o.rule().as_str(), o.key().as_str()),
@@ -366,7 +333,7 @@ mod tests {
 
     #[test]
     fn thresholds_raise_and_return() {
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), crate::time::FixedZone::shared(0));
         let up = from_threshold("gpu-limit", Metric::GpuLoad, Severity::Warning, 97.0, 90.0, true);
         let c = e.apply(up.into_event(Timestamp(1)));
         assert_eq!(c[0].alarm.current_value, Some(97.0));
@@ -389,7 +356,7 @@ mod tests {
         assert_eq!(o.severity, Severity::Critical);
         assert!(o.one_off && o.active);
         assert_eq!(o.detail, "I/O error on disk3");
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), crate::time::FixedZone::shared(0));
         e.apply(o.into_event(Timestamp(5)));
         assert_eq!(e.alarms().len(), 1);
         assert!(alarms_on(IssueKind::BadShutdown));
@@ -398,18 +365,14 @@ mod tests {
     }
 
     #[test]
-    fn rules_issues_and_cleanup_events() {
-        let n = from_rule_notify("tame-chrome", "Tame Chrome", "Chrome");
-        assert_eq!(n.key(), "taming:tame-chrome:Chrome");
-        assert_eq!(n.metric, Some(Metric::Process("Chrome".into())));
-        let c = from_cleanup("Cleanup finished", "Freed 2 GB");
-        assert_eq!(c.rule(), "cleanup:cleanup");
-        assert_eq!(c.severity, Severity::Info);
+    fn observation_keys() {
+        let o = from_threshold("hot", Metric::Process("a".into()), Severity::Warning, 5.0, 4.0, true);
+        assert_eq!(o.rule(), "threshold:hot");
         for s in [Source::Issue, Source::Custom, Source::Threshold] {
             let o = Observation {
                 source: s,
                 subject: String::new(),
-                ..from_cleanup("x", "y")
+                ..o.clone()
             };
             assert_eq!(o.key(), o.rule());
         }
@@ -430,7 +393,14 @@ mod tests {
             peak_lost_percent: 40.0,
             peak_temperature_c: Some(99.0),
         };
-        let o = from_throttle(&e, true, Confidence::High);
+        let o = from_throttle(&e, true, Confidence::High, &crate::time::FixedZone::UTC);
+        assert!(o.detail.starts_with("Throttling since 1970-01-01 00:00 (UTC) "), "{}", o.detail);
+        let east = from_throttle(&e, true, Confidence::High, &crate::time::FixedZone(480));
+        assert!(
+            east.detail.starts_with("Throttling since 1970-01-01 08:00 (UTC+08:00) "),
+            "{}",
+            east.detail
+        );
         assert_eq!((o.rule().as_str(), o.key().as_str()), ("throttling:cpu", "throttling:cpu"));
         assert_eq!(o.severity, Severity::Warning);
         assert!(
@@ -444,6 +414,7 @@ mod tests {
             },
             false,
             Confidence::Medium,
+            &crate::time::FixedZone::UTC,
         );
         assert_eq!(power.severity, Severity::Info);
         assert!(!power.active);

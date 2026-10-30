@@ -4,6 +4,7 @@ import { Title } from '@angular/platform-browser';
 import { ActivatedRouteSnapshot, provideRouter, Router, type Route } from '@angular/router';
 import {
   CommandService,
+  ContributionRegistry,
   definePage,
   msg,
   provideContributions,
@@ -13,7 +14,7 @@ import {
   type PageDef,
 } from '@decryp7/paddock-ui/shell';
 import { MemoryJobsBackend } from '@decryp7/paddock-ui/shell/jobs';
-import { Keymap, NATIVE_MENU_GATE, RESERVED_KEYS } from '@decryp7/paddock-ui/shell/menu';
+import { Keymap, NATIVE_MENU_GATE, RESERVED_KEYS, type NativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
 import { MemoryNotificationCentre, MemoryServiceHealth, NotificationsStore } from '@decryp7/paddock-ui/shell/notify';
 import { MockStartupBackend, UI_CHECKPOINT, WindowReady } from '@decryp7/paddock-ui/shell/startup';
 import { PdShellFrame } from './frame';
@@ -210,6 +211,12 @@ interface Ctx {
   readonly count: () => number;
   readonly fail: () => boolean;
 }
+
+/** A desktop build's native menu port: it can quit, which is what puts Quit in the menu bar. */
+function quittingPort(quits: string[]): NativeMenuPort {
+  return { setAppMenu: () => Promise.resolve(), onMenu: () => Promise.resolve(() => undefined), quitApp: () => Promise.resolve(void quits.push('quit')) };
+}
+
 const count = signal(0);
 
 @Component({ selector: 'p-one', template: `<h1>Page one</h1><input data-testid="field" />`, changeDetection: ChangeDetectionStrategy.OnPush })
@@ -231,6 +238,7 @@ const PAGES: PageDef<Ctx>[] = [
     icon: 'pd:window',
     order: 200,
     badge: (ctx) => ctx.count(),
+    badgeLabel: (ctx) => (ctx.count() > 5 ? `${ctx.count()} things` : null),
     providers: () => Promise.resolve([Scoped]),
     load: () => Promise.resolve(PageTwo as Type<unknown>),
   }),
@@ -286,6 +294,24 @@ describe('pd-shell-frame with provideShellPages', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  // Every shell app has Quit with Mod+Q in its app menu from the frame (rule 42), and an app overrides what it does with
+  // `APP_QUIT`; the desktop build is the one with a native menu port.
+  it('puts Quit with Mod+Q in the app menu of an app with a native menu, and quits through the port', async () => {
+    const quits: string[] = [];
+    await boot({ nativeMenu: quittingPort(quits) });
+    const registry = TestBed.inject(ContributionRegistry);
+    expect(registry.menus().filter((m) => m.menu === 'app' && m.command === 'pd.app.quit')).toHaveLength(1);
+    expect(registry.keybindings().find((k) => k.command === 'pd.app.quit')?.key).toBe('Mod+Q');
+    await (await TestBed.inject(ShellContextHost).load()).quitApp();
+    expect(quits).toEqual(['quit']);
+  });
+
+  it('has no Quit without a native menu port (the browser)', async () => {
+    await boot();
+    expect(TestBed.inject(ContributionRegistry).menus().some((m) => m.command === 'pd.app.quit')).toBe(false);
+  });
+
+
   it('shows the title bar, the pages, the first page and the status bar; the window title names the page', async () => {
     const { el, router } = await boot();
     expect(el.querySelector('[data-testid="app-name"]')?.textContent).toBe('Test app');
@@ -335,7 +361,24 @@ describe('pd-shell-frame with provideShellPages', () => {
     count.set(3);
     await settle();
     await fixture.whenStable();
-    expect(el.querySelector('[data-page-link="t.two"] [data-testid="page-badge"]')?.textContent).toBe('3');
+    expect(el.querySelector('[data-page-link="t.two"] .mat-badge-content')?.textContent).toBe('3');
+    // A badge without a label keeps its count in the link's name (the badge itself is aria-hidden), and the row-end count is the badge.
+    expect(el.querySelector('[data-page-link="t.two"]')?.getAttribute('aria-label')).toBe('Two, 3');
+    expect(el.querySelector('[data-page-link="t.two"] .pd-count .mat-badge-content')?.textContent).toBe('3');
+    expect(el.querySelector('[data-page-link="t.one"]')?.hasAttribute('aria-label')).toBe(false);
+    // Expanded, a link has a tooltip only to say what its badge counts.
+    count.set(6);
+    await settle();
+    await fixture.whenStable();
+    expect(el.querySelector('[data-page-link="t.two"]')?.getAttribute('aria-label')).toBe('Two, 6 things');
+    // The name already says what the count is, so the labelled sidebar adds no tooltip that would read it twice.
+    el.querySelector('[data-page-link="t.two"]')?.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(document.querySelector('.mat-mdc-tooltip')).toBeNull();
+    expect(el.querySelector('[data-page-link="t.two"]')?.hasAttribute('aria-describedby')).toBe(false);
+    // The page groups are lists, not navigation landmarks inside the frame's own.
+    expect([...el.querySelectorAll('mat-nav-list')].map((l) => l.getAttribute('role'))).toEqual(['list', 'list']);
+    count.set(3);
+    await settle();
     expect(el.querySelector('[data-page-link="t.lab"]')).not.toBeNull();
     await router.navigateByUrl('/two');
     await settle();
@@ -385,6 +428,30 @@ describe('pd-shell-frame with provideShellPages', () => {
     expect(TestBed.inject(NotificationsStore).all().some((n) => n.title === 'hello' || n.body === 'hello')).toBe(true);
   });
 
+  it('go resolves once the page is shown, and refuses an unknown id', async () => {
+    const { router } = await boot();
+    expect(await TestBed.inject(ShellPages).go('t.about')).toBe(true);
+    expect(router.url).toBe('/about');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await TestBed.inject(ShellPages).go('t.none')).toBe(false);
+    expect(warn).toHaveBeenCalledWith('[paddock-pages] there is no page t.none');
+  });
+
+  it('goAndFocus shows the page and focuses the page region, also when the page is already shown', async () => {
+    const { router, el } = await boot();
+    document.body.append(el);
+    const pages = TestBed.inject(ShellPages);
+    expect(await pages.goAndFocus('t.about')).toBe(true);
+    expect(document.activeElement).toBe(el.querySelector('#pd-main'));
+    (document.activeElement as HTMLElement).blur();
+    // The same page again: no navigation happens, the focus still lands.
+    await pages.goAndFocus('t.about');
+    expect(router.url).toBe('/about');
+    expect(document.activeElement).toBe(el.querySelector('#pd-main'));
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await pages.goAndFocus('t.none')).toBe(false);
+  });
+
   it('the sidebar button collapses to the rail and back, and the rail names its links', async () => {
     const { el, fixture, frame } = await boot();
     const toggle = el.querySelector<HTMLButtonElement>('[data-testid="sidebar-toggle"]') as HTMLButtonElement;
@@ -399,7 +466,9 @@ describe('pd-shell-frame with provideShellPages', () => {
     expect(frame.dataset['sidebar']).toBe('rail');
     expect(toggle.getAttribute('aria-label')).toBe('Expand sidebar');
     expect(el.querySelector('[data-page-link="t.one"]')?.getAttribute('aria-label')).toBe('One');
-    expect(el.querySelector('[data-page-link="t.one"]')?.getAttribute('title')).toBe('One');
+    expect(el.querySelector('[data-page-link="t.one"]')?.getAttribute('title')).toBeNull();
+    el.querySelector('[data-page-link="t.one"]')?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('One'));
     toggle.click();
     await fixture.whenStable();
     expect(frame.dataset['sidebar']).toBe('expanded');
@@ -459,6 +528,22 @@ describe('pd-shell-frame with provideShellPages', () => {
     field.remove();
   });
 
+  it('a navigation chosen in the command palette focuses the page (the palette closes under the focus)', async () => {
+    const { el, router, fixture } = await boot();
+    document.body.append(el);
+    const palette = document.createElement('div');
+    palette.dataset['testid'] = 'palette';
+    const input = document.createElement('input');
+    palette.append(input);
+    document.body.append(palette);
+    input.focus();
+    await router.navigateByUrl('/about');
+    await settle();
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(el.querySelector('#pd-main'));
+    palette.remove();
+  });
+
   it('F6 cycles the regions; a handled key is left alone; skip link focuses the page', async () => {
     const { el, frame } = await boot();
     document.body.append(el);
@@ -488,7 +573,9 @@ describe('pd-shell-frame with provideShellPages', () => {
     const links = [...el.querySelectorAll<HTMLAnchorElement>('nav a.pd-item')];
     const key = (from: HTMLElement, k: string) => {
       from.focus();
-      const e = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
+      // The CDK key manager reads keyCode, which a real keyboard always sets.
+      const keyCode = { ArrowDown: 40, ArrowUp: 38, Home: 36, End: 35 }[k] ?? 65;
+      const e = new KeyboardEvent('keydown', { key: k, keyCode, bubbles: true, cancelable: true });
       from.dispatchEvent(e);
       return e;
     };
@@ -501,6 +588,43 @@ describe('pd-shell-frame with provideShellPages', () => {
     key(links[0] as HTMLElement, 'End');
     expect(document.activeElement).toBe(links.at(-1));
     expect(key(links[0] as HTMLElement, 'a').defaultPrevented).toBe(false);
+    // A key from the sidebar that is not on a link (the footer slot) is left alone.
+    const foot = el.querySelector<HTMLElement>('nav [slot="sidebar"], nav .pd-slot')!;
+    foot.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', keyCode: 40, bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(links[0]);
+    // Expanded, the names are drawn, so a link has no tooltip of its own, unless its badge needs explaining.
+    links[0]?.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(document.querySelector('.mat-mdc-tooltip')).toBeNull();
+    // A key on the list itself, not on a link, is left alone.
+    expect(key(el.querySelector<HTMLElement>('mat-nav-list')!, 'ArrowDown').defaultPrevented).toBe(false);
+    // The bottom list has its own keys.
+    const bottom = links.at(-1) as HTMLElement;
+    key(bottom, 'ArrowUp');
+    expect(document.activeElement).toBe(links.at(-2));
+  });
+
+  it('a page hidden after the context loads, then shown, keeps its arrow-key place, and the labels carry the family weights', async () => {
+    const { el, fixture } = await boot();
+    document.body.append(el);
+    await TestBed.inject(ShellContextHost).load();
+    await settle();
+    // Hidden after the context loaded, then shown: the page keeps its place in the arrow-key order.
+    expect(el.querySelector('[data-page-link="t.lab"]')).toBeNull();
+    count.set(3);
+    await settle();
+    await fixture.whenStable();
+    const link = (id: string) => el.querySelector<HTMLAnchorElement>(`[data-page-link="${id}"]`)!;
+    expect([...el.querySelectorAll('nav a.pd-item')].map((a) => (a as HTMLElement).dataset['pageLink'])).toEqual(['t.one', 't.two', 't.lab', 't.about']);
+    link('t.two').focus();
+    link('t.two').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', keyCode: 40, bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(link('t.lab'));
+    link('t.lab').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', keyCode: 40, bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(link('t.about'));
+    // The list item's title directive is applied (the weights of its label are its tokens, measured in the e2e).
+    expect(link('t.two').querySelector('.pd-label')?.classList.contains('mdc-list-item__primary-text')).toBe(true);
+    expect(link('t.two').querySelector('pd-icon')?.classList.contains('mdc-list-item__start')).toBe(true);
+    count.set(0);
+    await settle();
   });
 
   it('the native menu bar waits for ready; the recovery and checkpoint are wired', async () => {

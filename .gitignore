@@ -1,5 +1,5 @@
 # The root npm workspace (ADR 0014 §1): every package's dependencies, hoisted or nested, are never source.
-node_modules/
+node_modules
 
 # Anchored on purpose: an unanchored rule can hide source folders.
 /ui/node_modules/
@@ -8,10 +8,14 @@ node_modules/
 /ui/out-tsc/
 /ui/coverage/
 /ui/test-results/
+/ui/dialog-check/
 # Generated from scss/ by `npm run build:css`.
 /ui/projects/paddock-ui/css/
 /crates/target/
+# The paddock-dev tool's local build folder (./dev builds it there on a cache miss).
+/tools/paddock-dev/target/
 /crates/.cargo/ci.toml
+/tools/paddock-dev/.cargo/ci.toml
 .DS_Store
 
 # Icon set build deps
@@ -35,3 +39,4 @@ node_modules/
 /apps/workbench-demo/src-tauri/gen/
 /apps/workbench-demo/src-tauri/target/
 /apps/workbench-demo/dist/
+/vm-smoke-results/

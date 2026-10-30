@@ -1,7 +1,7 @@
 //! The Tauri adapter of `paddock-dialogs` (built with the `tauri` feature): dialogs as real OS windows (rule 17),
 //! created by kind, placed on the parent's monitor and owned by the window that opened them.
 //!
-//! Set up: manage a [`Dialogs`] (from the app's contract file), list the four commands in the command table, hand
+//! Set up: manage a [`Dialogs`] (from the owners' contract tables, ADR 0026 §3), list the five commands in the command table, hand
 //! [`grant_of`] to the guard of `paddock-commands` and forward window events to [`on_window_event`]:
 //!
 //! ```ignore
@@ -10,10 +10,11 @@
 //!     Mutation [MAIN | DIALOG] limit 9 * MIB => paddock_dialogs::tauri::dialog_open,
 //!     Query [DIALOG] => paddock_dialogs::tauri::dialog_take_input,
 //!     Mutation [DIALOG] limit 2 * MIB => paddock_dialogs::tauri::dialog_close,
-//!     Quiet [DIALOG] => paddock_dialogs::tauri::dialog_fit_height,
+//!     Quiet [DIALOG] => paddock_dialogs::tauri::dialog_ready,
+//!     Quiet [DIALOG] => paddock_dialogs::tauri::dialog_fit,
 //! }
 //! tauri::Builder::default()
-//!     .manage(paddock_dialogs::Dialogs::from_json(include_str!("../dialog-contracts.json"))?)
+//!     .manage(paddock_dialogs::Dialogs::from_tables(&[&app::DIALOGS])?)
 //!     .invoke_handler(Guard::new(&COMMANDS).dialog_grants(paddock_dialogs::tauri::grant_of).wrap(handler!()))
 //!     .on_window_event(|w, e| paddock_dialogs::tauri::on_window_event(w, e))
 //! ```
@@ -25,6 +26,16 @@
 //! * **Modeless** dialogs are owned too (above the parent, minimised with it) but the parent stays usable; on macOS they
 //!   are independent windows ([`Parenting`](crate::Parenting)), since a child window there is confined to its parent's
 //!   display.
+//! * **A window opens hidden and appears fitted** (ADR 0026 §4, the 1.1-0 spike). It is built unseen at the placed size
+//!   with the dialog shell's background; its page measures itself synchronously once its content and fonts are in and
+//!   reports it with [`dialog_ready`], which sizes the window (the measure's minimum content becomes the OS minimum),
+//!   shows and focuses it. A page that has not reported within [`Dialogs::show_deadline`] is shown at the placed size
+//!   anyway (a blank page must not leave the user with a dialog they cannot see), and a later [`dialog_ready`] fits it
+//!   once. The parent is disabled at the moment of showing, never at creation, so a dialog that never
+//!   shows never locks anything. On macOS an owned dialog is also attached to its parent only then
+//!   (`-[NSWindow addChildWindow:ordered:]`): AppKit orders a child window in with its parent as soon as it exists. Opening a pending dialog again creates no window and does not show
+//!   it early. [`dialog_fit`] refits a shown dialog; a scale-factor change refits it from its last measure. Which
+//!   mechanism keeps the window unseen is [`show_mechanism`](crate::window::show_mechanism): hidden, shown on ready (method d, every OS).
 //! * No dialog window has title-bar buttons; a close request from the OS reaches the dialog as its own Close/Cancel
 //!   ([`CLOSE_REQUESTED_EVENT`]), and a required choice ignores it unless its page does not answer
 //!   ([`page_unresponsive`]).
@@ -32,18 +43,19 @@
 //! Data never travels through window globals: the input is validated and parked at open (`dialog_take_input` hands it to
 //! the dialog's own webview) and the result goes back through `dialog_close` as [`RESULT_EVENT`] to the opener.
 
-use crate::contract::{DIALOG_MIN, Grant, Modality};
+use crate::contract::{Grant, Modality, Size};
 use crate::placement::{self, Bounds, Monitor, Placement, Rect, ScreenPosition};
 use crate::registry::{CloseDecision, Dialogs, OpenDialog};
 use crate::window::{
-    CLOSE_REQUESTED_EVENT, CLOSED_EVENT, DialogClosed, DialogError, DialogErrorCode, DialogInfo,
-    DialogRequest, DialogResult, DialogStart, MAX_RESULT_BYTES, RESULT_EVENT, WindowSpec,
-    clean_title, disables_parent_natively, geometry, is_fitted, json_len, plan_fit, validate,
-    window_config,
+    Around, CLOSE_REQUESTED_EVENT, CLOSED_EVENT, DialogClosed, DialogError, DialogErrorCode,
+    DialogInfo, DialogRequest, DialogResult, DialogShown, DialogStart, MAX_RESULT_BYTES, Measure,
+    RESULT_EVENT, SHOWN_EVENT, WindowSpec, clean_title, disables_parent_natively, geometry,
+    json_len, plan_fit, validate, viewport_delta, window_config,
 };
+use ::tauri::window::Color;
 use ::tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize,
-    Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window, WindowEvent,
+    AppHandle, Emitter, LogicalPosition, Manager, PhysicalPosition, PhysicalSize, Runtime,
+    WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window, WindowEvent,
 };
 use paddock_commands::labels::{Label, resolve};
 use serde_json::Value;
@@ -93,6 +105,20 @@ impl<R: Runtime> WindowHooks<R> {
         self.built = Some(Box::new(f));
         self
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// What the lifecycle did to native windows on this thread: the mock runtime keeps no window state to look at.
+    static NATIVE: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Notes a native window operation for the tests (nothing outside them).
+fn native(op: &str, label: &str) {
+    #[cfg(test)]
+    NATIVE.with(|n| n.borrow_mut().push(format!("{op}:{label}")));
+    #[cfg(not(test))]
+    let _ = (op, label);
 }
 
 fn failed(e: impl std::fmt::Display) -> DialogError {
@@ -228,14 +254,19 @@ fn open_on<R: Runtime>(
         ));
     }
     if let Some(existing) = dialogs.find(caller, &request.dialog_id, request.instance.as_deref()) {
-        if let Some(w) = app.get_webview_window(&existing) {
+        // A pending dialog is not on screen yet and shows (focused) when it is ready; focusing it now would show it
+        // unfitted (a hidden window orders in when it is made key).
+        let pending = dialogs.is_pending(&existing);
+        if !pending && let Some(w) = app.get_webview_window(&existing) {
             let _ = w.unminimize();
+            native("focus", &existing);
             let _ = w.set_focus();
         }
         return Ok(DialogInfo {
             label: existing,
             dialog_id: request.dialog_id,
             existing: true,
+            pending,
         });
     }
     let parent = app
@@ -248,12 +279,11 @@ fn open_on<R: Runtime>(
     entry.title = title.clone();
     entry.input = request.input.clone();
     let label = dialogs.reserve(entry)?;
-    let (w, h, min_w, min_h) = geometry(&request, &contract);
+    let (w, h, min_w, min_h) = geometry(&contract);
     // The placement policy: on the parent's monitor, sized by the kind's rule.
     let parent_os = parent.as_ref().window();
     let monitor = monitor_of_window(&parent_os);
-    let fitted = is_fitted(&request, contract.kind);
-    let remembered = placement::memory_for(contract.kind, fitted, request.remembered, h);
+    let remembered = placement::memory_for(contract.kind, request.remembered, (w, h));
     let place = placement::place(
         outer_rect(&parent_os),
         monitor.as_ref().map(|m| m.0),
@@ -270,26 +300,35 @@ fn open_on<R: Runtime>(
         title: &title,
         modality: contract.modality,
         os,
+        theme: request.theme.unwrap_or_else(|| {
+            if matches!(parent.theme(), Ok(::tauri::Theme::Dark)) {
+                crate::window::Theme::Dark
+            } else {
+                crate::window::Theme::Light
+            }
+        }),
     };
     if let Err(e) = build_window(app, &spec, &place, (min_w, min_h), &parent) {
         dialogs.remove(&label);
+        if e.code == DialogErrorCode::InsidePluginHook {
+            return Err(e);
+        }
         return Err(DialogError::new(
             DialogErrorCode::Failed,
             format!("could not open the dialog window: {e}"),
         ));
     }
-    if contract.modality == Modality::Modal && disables_parent_natively(os) {
-        let _ = parent.set_enabled(false);
-    }
+    schedule_deadline(app, &dialogs, &label, os);
     log::info!(
         target: TARGET,
         Dialog = request.dialog_id.as_str(), Host = host.as_str(), Window = label.as_str();
-        "Dialog window opened"
+        "Dialog window created, waiting for its page to report ready"
     );
     Ok(DialogInfo {
         label,
         dialog_id: request.dialog_id,
         existing: false,
+        pending: true,
     })
 }
 
@@ -326,9 +365,20 @@ fn build_window<R: Runtime>(
     min: (f64, f64),
     parent: &WebviewWindow<R>,
 ) -> Result<(), DialogError> {
+    if paddock_commands::plugin_hook::in_plugin_hook() {
+        return Err(DialogError::new(
+            DialogErrorCode::InsidePluginHook,
+            format!(
+                "the dialog \"{}\" {}",
+                spec.label,
+                paddock_commands::plugin_hook::INSIDE_PLUGIN_HOOK
+            ),
+        ));
+    }
     let at = placement::screen_position(place, spec.os);
     let c = window_config(spec, &at, place, min);
-    // A native title bar with the dialog's title: dialogs are ordinary OS windows.
+    let (r, g, b) = c.background;
+    // A native title bar with the dialog's title: dialogs are ordinary OS windows. Built unseen (see the module doc).
     let builder = WebviewWindowBuilder::new(app, spec.label, WebviewUrl::App(c.url.clone().into()))
         .title(c.title.clone())
         .inner_size(c.inner.0, c.inner.1)
@@ -338,8 +388,13 @@ fn build_window<R: Runtime>(
         .closable(c.closable)
         .minimizable(c.minimizable)
         .maximizable(c.maximizable)
-        .focused(true);
-    let builder = if c.owned {
+        .visible(false)
+        .background_color(Color(r, g, b, 255))
+        .initialization_script(c.init_script.clone())
+        .focused(false);
+    // On macOS a child window is ordered in with its parent as soon as it exists, hidden or not: the parent is attached
+    // when the dialog is shown instead (`attach_at_show`).
+    let builder = if c.owned && !attaches_at_show(spec.os) {
         owned_by(builder, parent)?
     } else {
         builder
@@ -354,16 +409,106 @@ fn build_window<R: Runtime>(
         f(&window);
     }
     // Where logical coordinates are not one global space (Windows, Linux with mixed DPI), the builder converted them
-    // with some monitor's scale: set the exact physical place (on the parent's monitor) and size now. Both values come
-    // from a monitor rectangle (i32/u32) plus a clamped offset, so they fit.
+    // with some monitor's scale: set the exact physical place (on the parent's monitor) and size now. The size is the placed one rounded up once. Both values come from a monitor
+    // rectangle (i32/u32) plus a clamped offset, so they fit.
     if let Some((x, y)) = at.physical {
         let _ = window.set_position(PhysicalPosition::new(x, y));
-        let _ = window.set_size(PhysicalSize::new(
-            place.width.round().max(1.0) as u32,
-            place.height.round().max(1.0) as u32,
-        ));
+        let (pw, ph) = place.physical_size();
+        let _ = window.set_size(PhysicalSize::new(pw, ph));
     }
     Ok(())
+}
+
+/// Runs `f` on the main thread, in the order of the calls. The mock runtime has no main thread to post to: there it runs
+/// at once, which keeps the order and lets the tests look at the result.
+#[cfg(not(any(test, feature = "mock-runtime")))]
+fn on_main_thread<R: Runtime>(app: &AppHandle<R>, f: impl FnOnce() + Send + 'static) {
+    let _ = app.run_on_main_thread(f);
+}
+
+#[cfg(any(test, feature = "mock-runtime"))]
+fn on_main_thread<R: Runtime>(_app: &AppHandle<R>, f: impl FnOnce() + Send + 'static) {
+    #[cfg(test)]
+    if DEFER_MAIN.with(|d| d.get()) {
+        MAIN_QUEUE.with(|q| q.borrow_mut().push(Box::new(f)));
+        return;
+    }
+    f();
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests that order the main thread's queue by hand switch deferral on; the queue then holds what was posted.
+    static DEFER_MAIN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static MAIN_QUEUE: std::cell::RefCell<Vec<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Queues the application of `parent`'s desired enabled state on the main thread (ADR 0026 §4.4). Nothing but the
+/// parent's label is captured: the task reads the LATEST desired state from the registry when it runs, so a show and a
+/// close that raced each other converge on whichever came last, whatever order the tasks run in. Never called under the
+/// registry lock.
+fn queue_parent_state<R: Runtime>(app: &AppHandle<R>, parent: &str) {
+    let (handle, parent) = (app.clone(), parent.to_string());
+    on_main_thread(app, move || apply_parent_state(&handle, &parent));
+}
+
+/// Applies the parent's desired state if it differs from the one applied last. The registry lock is held only to read
+/// it; the window API is called after it is released.
+fn apply_parent_state<R: Runtime>(app: &AppHandle<R>, parent: &str) {
+    let Some(dialogs) = app.try_state::<Dialogs>() else {
+        return;
+    };
+    if dialogs.exiting() {
+        return;
+    }
+    let Some(disabled) = dialogs.parent_change(parent) else {
+        return;
+    };
+    let Some(p) = app.get_webview_window(parent) else {
+        return;
+    };
+    native(if disabled { "disable" } else { "enable" }, parent);
+    // Recorded only when the window took it; an Err leaves it unrecorded so the next apply retries.
+    if p.set_enabled(!disabled).is_ok() {
+        dialogs.applied(parent, disabled);
+    }
+}
+
+/// Whether an owned dialog window is attached to its parent when it is shown rather than when it is built: macOS, where
+/// AppKit orders a child window in with its parent at once, even one built hidden (the 1.1-0 spike).
+pub(crate) fn attaches_at_show(os: &str) -> bool {
+    os == "macos"
+}
+
+/// Attaches `child` to `parent` as a child window above it (`-[NSWindow addChildWindow:ordered:]`), on the main thread.
+#[cfg(all(target_os = "macos", not(any(test, feature = "mock-runtime"))))]
+fn attach_child<R: Runtime>(
+    app: &AppHandle<R>,
+    parent: &WebviewWindow<R>,
+    child: &WebviewWindow<R>,
+) {
+    use objc2_app_kit::{NSWindow, NSWindowOrderingMode};
+    let (parent, child) = (parent.clone(), child.clone());
+    let _ = app.run_on_main_thread(move || {
+        let (Ok(p), Ok(c)) = (parent.ns_window(), child.ns_window()) else {
+            return;
+        };
+        // SAFETY: both pointers are live NSWindows owned by Tauri (it hands them out on the main thread, where this runs),
+        // and `addChildWindow:ordered:` only retains the child.
+        unsafe {
+            let (p, c) = (&*(p as *const NSWindow), &*(c as *const NSWindow));
+            p.addChildWindow_ordered(c, NSWindowOrderingMode::Above);
+        }
+    });
+}
+
+/// Elsewhere (and on the mock runtime, which has no native windows) the parent was attached when the window was built.
+#[cfg(not(all(target_os = "macos", not(any(test, feature = "mock-runtime")))))]
+fn attach_child<R: Runtime>(
+    _app: &AppHandle<R>,
+    _parent: &WebviewWindow<R>,
+    _child: &WebviewWindow<R>,
+) {
 }
 
 /// An owned window of `owner`: above it, minimised and hidden with it (Windows: owner; macOS: child; Linux: transient).
@@ -426,9 +571,16 @@ fn on_destroyed_on<R: Runtime>(app: &AppHandle<R>, label: &str, os: &str) {
     let Some(dialogs) = app.try_state::<Dialogs>() else {
         return;
     };
+    let exiting = dialogs.exiting();
     let Some(entry) = dialogs.remove(label) else {
         return;
     };
+    // Only a shown modal held its parent: the parent is released by a queued "apply the latest state" task, which counts
+    // the shown modals left when it runs.
+    if !exiting && entry.shown && entry.modality == Modality::Modal && disables_parent_natively(os)
+    {
+        queue_parent_state(app, &entry.parent);
+    }
     log::info!(
         target: TARGET,
         Dialog = entry.dialog_id.as_str(), Host = entry.host.as_str(), Window = label;
@@ -440,12 +592,6 @@ fn on_destroyed_on<R: Runtime>(app: &AppHandle<R>, label: &str, os: &str) {
     let Some(parent) = app.get_webview_window(&entry.parent) else {
         return;
     };
-    if entry.modality == Modality::Modal
-        && disables_parent_natively(os)
-        && dialogs.modal_children_of(&entry.parent) == 0
-    {
-        let _ = parent.set_enabled(true);
-    }
     let _ = parent.set_focus();
     let parent_os = parent.as_ref().window();
     let parent_at = parent_os
@@ -474,8 +620,10 @@ pub fn close_all_of<R: Runtime>(app: &AppHandle<R>, host: &str) -> usize {
         return 0;
     };
     let labels = dialogs.of_host(host);
+    dialogs.forget_applied(host);
     for label in &labels {
         dialogs.remove(label);
+        dialogs.forget_applied(label);
         if let Some(w) = app.get_webview_window(label) {
             let _ = w.destroy();
         }
@@ -502,6 +650,11 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
     let label = window.label();
     let parsed = Label::parse(label);
     let is_dialog = matches!(parsed, Some(Label::Dialog { .. }));
+    if matches!(event, WindowEvent::Destroyed)
+        && let Some(dialogs) = app.try_state::<Dialogs>()
+    {
+        dialogs.forget_applied(label);
+    }
     match event {
         WindowEvent::CloseRequested { api, .. } if is_dialog => {
             if !close_requested(app, label) {
@@ -509,6 +662,7 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
             }
         }
         WindowEvent::Moved(_) | WindowEvent::Resized(_) if is_dialog => moved(window),
+        WindowEvent::ScaleFactorChanged { .. } if is_dialog => scale_changed(window),
         WindowEvent::Destroyed if is_dialog => on_destroyed(app, label),
         WindowEvent::Destroyed if matches!(parsed, Some(Label::Main | Label::Window(_))) => {
             close_all_of(app, label);
@@ -525,7 +679,8 @@ pub fn invoke_handler<R: Runtime>()
         dialog_open,
         dialog_take_input,
         dialog_close,
-        dialog_fit_height
+        dialog_ready,
+        dialog_fit
     ]
 }
 
@@ -600,54 +755,213 @@ fn close<R: Runtime>(
     window.destroy().map_err(failed)
 }
 
-/// Sizes the calling dialog window to its content: the dialog measured `content` px and asks for that height (the
-/// width stays). A viewer only grows; the height is bounded by the dialog's own monitor, and a window that would hang
-/// off its bottom moves up on that monitor.
+/// The dialog's page measured itself (ADR 0026 §4.2): sizes the calling dialog window, makes the measure's minimum
+/// content the OS minimum, and shows and focuses the window if it is still pending. Sent once per window; one that
+/// arrives after the show deadline fits the window once.
 #[::tauri::command]
-pub async fn dialog_fit_height<R: Runtime>(
+pub async fn dialog_ready<R: Runtime>(
     app: AppHandle<R>,
     window: Window<R>,
-    content: f64,
+    measure: Measure,
 ) -> Result<(), DialogError> {
-    let monitor = monitor_of_window(&window).map(|m| m.0);
-    fit_height(&app, &window, content, monitor, std::env::consts::OS)
+    let os = std::env::consts::OS;
+    ready(&app, &window, measure, os)
 }
 
-fn fit_height<R: Runtime>(
+/// A refit of a dialog (ADR 0026 §4.5): its content, the theme, the density or the fonts changed. Sizes the window like
+/// [`dialog_ready`] but never shows it.
+#[::tauri::command]
+pub async fn dialog_fit<R: Runtime>(
+    app: AppHandle<R>,
+    window: Window<R>,
+    measure: Measure,
+) -> Result<(), DialogError> {
+    let monitor = monitor_of_window(&window).map(|m| m.0);
+    fit(&app, &window, measure, monitor, std::env::consts::OS)
+}
+
+fn ready<R: Runtime>(
     app: &AppHandle<R>,
     window: &Window<R>,
-    content: f64,
+    measure: Measure,
+    os: &str,
+) -> Result<(), DialogError> {
+    let monitor = monitor_of_window(window).map(|m| m.0);
+    fit(app, window, measure, monitor, os)?;
+    show(app, window.label(), os, false);
+    Ok(())
+}
+
+/// A window's decorations, logical px: its outer size minus its inner size (a side where the platform reports the
+/// inner as the larger has none).
+fn decor(outer: PhysicalSize<u32>, inner: PhysicalSize<u32>, scale: f64) -> Size {
+    Size {
+        width: f64::from(outer.width.saturating_sub(inner.width)) / scale,
+        height: f64::from(outer.height.saturating_sub(inner.height)) / scale,
+    }
+}
+
+/// The window's own decorations, read from the window itself (hidden or not).
+fn decor_of<R: Runtime>(w: &Window<R>, scale: f64) -> Size {
+    decor(
+        w.outer_size().unwrap_or_default(),
+        w.inner_size().unwrap_or_default(),
+        scale,
+    )
+}
+
+/// Sizes the dialog window `window` for `measure` (see [`plan_fit`]): the minimum content first (so the size is never
+/// below it), then the size in whole physical px rounded up once, then the move that keeps it on its monitor.
+fn fit<R: Runtime>(
+    app: &AppHandle<R>,
+    window: &Window<R>,
+    measure: Measure,
     monitor: Option<Monitor>,
     os: &str,
 ) -> Result<(), DialogError> {
     let dialogs = dialogs(app)?;
     let entry = dialogs.get(window.label()).ok_or_else(not_a_dialog)?;
-    let floor = dialogs
-        .contracts()
-        .get(&entry.dialog_id)
-        .map_or(DIALOG_MIN.height, |c| c.floor().height);
+    let floor = entry.kind.policy().min_size.map_or(0.0, |s| s.height);
     let scale = window.scale_factor().map_err(failed)?;
-    let size = window
+    let inner = window
         .inner_size()
         .map_err(failed)?
         .to_logical::<f64>(scale);
-    let outer = outer_rect(window);
-    let plan = plan_fit(entry.kind, content, floor, size.height, outer, monitor, os)?;
-    let Some(fit) = plan else {
-        return Ok(());
+    let around = Around {
+        current: Size {
+            width: inner.width,
+            height: inner.height,
+        },
+        decor: decor_of(window, scale),
+        outer: outer_rect(window),
+        monitor,
+        os,
+        viewport_delta: 0.0,
     };
+    // The page reports CSS px: logical px once the webview zoom is taken out. The viewport delta is measured once, on the
+    // window as it is at the first fit, and kept (a later fit must not read it off a resized window).
+    let measure = measure.checked()?;
+    let zoom = dialogs
+        .zoom_for(window.label(), measure.device_pixel_ratio, scale)
+        .ok_or_else(not_a_dialog)?;
+    let measure = measure.logical(zoom);
+    let viewport_delta = dialogs
+        .viewport_delta_or(window.label(), || {
+            viewport_delta(around.current.height, measure.viewport_height)
+        })
+        .ok_or_else(not_a_dialog)?;
+    let around = Around {
+        viewport_delta,
+        ..around
+    };
+    let plan = plan_fit(entry.kind, measure, floor, &around)?;
+    dialogs.set_measure(window.label(), measure);
     window
-        .set_size(LogicalSize::new(size.width, fit.height))
+        .set_min_size(Some(PhysicalSize::new(
+            placement::physical_ceil(plan.min.width, scale),
+            placement::physical_ceil(plan.min.height, scale),
+        )))
         .map_err(failed)?;
-    if let Some(at) = fit.move_to {
+    if plan.resize {
+        window
+            .set_size(PhysicalSize::new(
+                placement::physical_ceil(plan.size.width, scale),
+                placement::physical_ceil(plan.size.height, scale),
+            ))
+            .map_err(failed)?;
+    }
+    if let Some(at) = plan.move_to {
         set_position(window, &at).map_err(failed)?;
     }
     log::info!(
         target: TARGET,
-        Dialog = entry.dialog_id.as_str(), Content = content, Height = fit.height;
+        Dialog = entry.dialog_id.as_str(), Content = measure.content.height, Height = plan.size.height;
         "Dialog window fitted to its content"
     );
     Ok(())
+}
+
+/// Shows and focuses the pending dialog window `label`, once; later calls do nothing. The parent is attached (macOS)
+/// now (where the OS disables it natively), not when the window was created. `deadline`: the page did not
+/// report ready in time.
+fn show<R: Runtime>(app: &AppHandle<R>, label: &str, os: &str, deadline: bool) {
+    let Some(dialogs) = app.try_state::<Dialogs>() else {
+        return;
+    };
+    let Some(entry) = dialogs.get(label) else {
+        return;
+    };
+    let parent = app.get_webview_window(&entry.parent);
+    // Marked shown under the registry lock (a close racing this show is ordered against it, and one that came first
+    // leaves nothing to show); the parent's disabling is queued after the lock is released.
+    let Some(entry) = dialogs.mark_shown(label) else {
+        return;
+    };
+    if entry.modality == Modality::Modal && disables_parent_natively(os) {
+        queue_parent_state(app, &entry.parent);
+    }
+    let Some(w) = app.get_webview_window(label) else {
+        return;
+    };
+    if let Some(p) = &parent
+        && attaches_at_show(os)
+        && crate::Parenting::of(entry.modality, os) == crate::Parenting::Owned
+    {
+        native("attach", label);
+        attach_child(app, p, &w);
+    }
+    native("show", label);
+    let _ = w.show();
+    native("focus", label);
+    let _ = w.set_focus();
+    let _ = app.emit_to(
+        entry.parent.as_str(),
+        SHOWN_EVENT,
+        DialogShown {
+            label: label.to_string(),
+            dialog_id: entry.dialog_id.clone(),
+        },
+    );
+    if deadline {
+        log::warn!(
+            target: TARGET,
+            Dialog = entry.dialog_id.as_str(), Window = label;
+            "Dialog window shown at the deadline, its page had not reported ready"
+        );
+    } else {
+        log::info!(
+            target: TARGET,
+            Dialog = entry.dialog_id.as_str(), Window = label;
+            "Dialog window shown"
+        );
+    }
+}
+
+/// After [`Dialogs::show_deadline`] a dialog that is still pending is shown at its placed size.
+fn schedule_deadline<R: Runtime>(app: &AppHandle<R>, dialogs: &Dialogs, label: &str, os: &str) {
+    let (app, label, os) = (app.clone(), label.to_string(), os.to_string());
+    dialogs.scheduler().after(
+        dialogs.show_deadline(),
+        Box::new(move || show(&app, &label, &os, true)),
+    );
+}
+
+/// The scale factor of a dialog window changed (it was dragged to another display, or the display's scale was changed):
+/// refit it from its last measure, which is in logical px and so still right; a dialog that has not reported yet has
+/// nothing to refit and is sized by its `dialog_ready` at the scale it has then.
+pub fn scale_changed<R: Runtime>(window: &Window<R>) {
+    let app = window.app_handle();
+    let Some(measure) = app
+        .try_state::<Dialogs>()
+        .and_then(|d| d.get(window.label()))
+        .and_then(|e| e.measure)
+    else {
+        return;
+    };
+    let monitor = monitor_of_window(window).map(|m| m.0);
+    if let Err(e) = fit(app, window, measure, monitor, std::env::consts::OS) {
+        log::warn!(target: TARGET, Window = window.label(); "Dialog refit after a scale change failed: {e}");
+    }
 }
 
 /// Moves a window to `at`: the exact physical place where logical coordinates are not global, else points.

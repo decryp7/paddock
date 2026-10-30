@@ -123,6 +123,7 @@ const SECTIONS: { key: SettingsSection; label: string; icon: string }[] = [
       align-items: start;
     }
     .sub {
+      /* conformance: not-a-header */
       position: sticky;
       top: var(--space-6);
       display: grid;

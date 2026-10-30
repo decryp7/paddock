@@ -3,6 +3,7 @@ import type { CommandError } from '../core/api.types';
 import { errorHint } from '../core/command-error';
 import { Icon } from './icon';
 import type { IconName } from './icons';
+import { MatButton } from '@angular/material/button';
 
 /**
  * A panel's request states around its content: a skeleton until the first answer, an inline error with Retry when
@@ -11,7 +12,7 @@ import type { IconName } from './icons';
  */
 @Component({
   selector: 'dy-async',
-  imports: [Icon],
+  imports: [MatButton, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (!loaded() && error(); as e) {
@@ -23,7 +24,7 @@ import type { IconName } from './icons';
             <span>{{ hint() }}</span>
           }
         </div>
-        <button type="button" class="btn sm" (click)="retry.emit()"><dy-icon name="refresh" /> Retry</button>
+        <button type="button" matButton="outlined" (click)="retry.emit()"><dy-icon name="refresh" /> Retry</button>
       </div>
     } @else if (!loaded()) {
       <div class="skeleton-wrap" aria-busy="true" [attr.aria-label]="'Loading ' + what()">
@@ -39,7 +40,7 @@ import type { IconName } from './icons';
         <div class="banner" role="alert">
           <dy-icon name="alert" />
           <span class="truncate">{{ e.message }}</span>
-          <button type="button" class="btn sm ghost" (click)="retry.emit()">Retry</button>
+          <button type="button" matButton="text" (click)="retry.emit()">Retry</button>
         </div>
       }
       @if (empty()) {

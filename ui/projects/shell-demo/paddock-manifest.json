@@ -6,6 +6,10 @@
       "title": "pd.about.open"
     },
     {
+      "id": "pd.app.quit",
+      "title": "pd.app.quit"
+    },
+    {
       "id": "pd.diagnostics.report",
       "title": "pd.diag.open"
     },
@@ -112,6 +116,12 @@
       "scope": "window"
     },
     {
+      "command": "pd.app.quit",
+      "key": "Mod+Q",
+      "accelerator": "CmdOrCtrl+Q",
+      "scope": "window"
+    },
+    {
       "command": "sd.greet",
       "key": "Mod+Shift+H",
       "accelerator": "CmdOrCtrl+Shift+H",
@@ -137,6 +147,13 @@
       "group": "settings",
       "order": 100,
       "accelerator": "CmdOrCtrl+,"
+    },
+    {
+      "menu": "app",
+      "command": "pd.app.quit",
+      "group": "quit",
+      "order": 1000,
+      "accelerator": "CmdOrCtrl+Q"
     },
     {
       "menu": "edit",
@@ -335,13 +352,12 @@
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": {
-        "width": 680,
-        "height": 560
-      },
+      "width": 720,
+      "height": 560,
       "commands": [
         "about_info",
-        "about_legal"
+        "about_legal",
+        "files_open_url"
       ]
     },
     "pd.channels.remove": {
@@ -349,7 +365,8 @@
       "modality": "modal",
       "instanced": true,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 400,
+      "height": null,
       "commands": []
     },
     "pd.channels.secret": {
@@ -357,18 +374,30 @@
       "modality": "modal",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 400,
+      "height": null,
       "commands": [
         "channels_set_secret"
       ]
+    },
+    "pd.confirm": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": true,
+      "requiredChoice": false,
+      "width": 400,
+      "height": null,
+      "commands": []
     },
     "pd.mcp.key": {
       "kind": "form",
       "modality": "modal",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 400,
+      "height": null,
       "commands": [
+        "mcp_get",
         "mcp_issue_key"
       ]
     },
@@ -377,15 +406,17 @@
       "modality": "modal",
       "instanced": true,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 400,
+      "height": null,
       "commands": []
     },
     "pd.report-problem": {
-      "kind": "decision",
-      "modality": "modal",
+      "kind": "form",
+      "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 720,
+      "height": null,
       "commands": [
         "diagnostics_cancel",
         "diagnostics_preview",
@@ -398,7 +429,8 @@
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 880,
+      "height": 620,
       "commands": [
         "app_relaunch",
         "channels_clear_secret",
@@ -412,33 +444,20 @@
         "mcp_revoke_key",
         "mcp_save",
         "open_login_items",
-        "packs_reload",
-        "packs_status",
-        "service_install",
-        "service_repair",
-        "service_status",
-        "settings_overview",
-        "settings_reset",
-        "settings_set",
-        "setup_act",
-        "setup_finish",
-        "setup_repair",
-        "setup_skip",
-        "setup_state",
-        "storage_cancel",
-        "storage_clear",
-        "storage_last",
-        "storage_reveal",
-        "storage_scan",
-        "storage_tree"
+        "packs_*",
+        "service_*",
+        "settings_*",
+        "setup_*",
+        "storage_*"
       ]
     },
     "pd.setup": {
-      "kind": "tool",
+      "kind": "form",
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 560,
+      "height": null,
       "commands": [
         "setup_act",
         "setup_finish",
@@ -452,15 +471,17 @@
       "modality": "modal",
       "instanced": true,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 400,
+      "height": null,
       "commands": []
     },
     "pd.updates": {
-      "kind": "tool",
+      "kind": "form",
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 560,
+      "height": null,
       "commands": [
         "updates_cancel",
         "updates_check",
@@ -476,10 +497,8 @@
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": {
-        "width": 680,
-        "height": 560
-      },
+      "width": 720,
+      "height": 560,
       "commands": [
         "about_whats_new"
       ]
@@ -489,10 +508,8 @@
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": {
-        "width": 680,
-        "height": 560
-      },
+      "width": 720,
+      "height": 560,
       "commands": []
     },
     "sd.choose-style": {
@@ -500,7 +517,8 @@
       "modality": "modal",
       "instanced": false,
       "requiredChoice": true,
-      "minSize": null,
+      "width": 400,
+      "height": null,
       "commands": []
     },
     "sd.confirm-reset": {
@@ -508,15 +526,17 @@
       "modality": "modal",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 400,
+      "height": null,
       "commands": []
     },
     "sd.inspector": {
-      "kind": "tool",
+      "kind": "form",
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 560,
+      "height": null,
       "commands": [
         "demo_status"
       ]
@@ -526,7 +546,17 @@
       "modality": "modal",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 400,
+      "height": null,
+      "commands": []
+    },
+    "sd.unsaved": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 400,
+      "height": null,
       "commands": []
     }
   },
@@ -552,10 +582,12 @@
     "pd.about.open": "About",
     "pd.about.title": "About",
     "pd.activity.page": "Activity",
+    "pd.app.quit": "Quit",
     "pd.category.app": "Application",
     "pd.category.help": "Help",
     "pd.channels.remove.title": "Remove channel",
     "pd.channels.secret.title": "Channel secret",
+    "pd.confirm.title": "Confirm",
     "pd.diag.open": "Report a problem…",
     "pd.diag.title": "Report a problem",
     "pd.mcp.key.title": "Add a client",
@@ -595,6 +627,7 @@
     "sd.dialog.confirm-reset": "Reset greetings?",
     "sd.dialog.inspector": "Engine inspector",
     "sd.dialog.rename": "Rename",
+    "sd.dialog.unsaved": "Unsaved changes",
     "sd.engine.break": "Break the demo engine",
     "sd.fail": "Fail on purpose",
     "sd.greet": "Say hello",

@@ -13,6 +13,7 @@ import {
   ViewContainerRef,
   viewChild,
 } from '@angular/core';
+import { MatTooltip } from '@angular/material/tooltip';
 import { SuErrorState, SuSkeleton } from '@decryp7/paddock-ui';
 import { describe } from '../context';
 import { loadPart, type LazyPart } from '../lazy';
@@ -29,7 +30,7 @@ export type PartStatus = { readonly kind: 'loading' } | { readonly kind: 'loaded
 @Component({
   selector: 'pd-part-outlet',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuErrorState, SuSkeleton],
+  imports: [SuErrorState, SuSkeleton, MatTooltip],
   host: { '[attr.data-part-status]': 'status().kind', '[class.pd-page]': 'variant() === "page"' },
   template: `
     <ng-container #slot />
@@ -47,7 +48,7 @@ export type PartStatus = { readonly kind: 'loading' } | { readonly kind: 'loaded
         @if (variant() === 'page') {
           <pd-error-state [heading]="openFailed()" [cause]="reason()" [retryLabel]="t.tryAgain" (retry)="load()" data-testid="part-error" />
         } @else {
-          <button type="button" class="pd-retry" [attr.aria-label]="retryLabel()" [title]="failedTitle()" data-testid="part-error" (click)="load()">
+          <button type="button" class="pd-retry" [attr.aria-label]="retryLabel()" [matTooltip]="failedTitle()" data-testid="part-error" (click)="load()">
             <span aria-hidden="true">!</span>
           </button>
         }

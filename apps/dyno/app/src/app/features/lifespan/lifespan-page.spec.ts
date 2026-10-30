@@ -31,7 +31,7 @@ describe('dy-lifespan-page', () => {
   it('lists the disk and the battery with the engine headline, a range bar and the confidence in words', async () => {
     const { f, el } = render(mockLifespan('macos', 'laptop', 'calm'));
     await settle(f);
-    expect(el.querySelector('h1')?.textContent).toBe('Disk and battery life');
+    expect(el.querySelector('h1')?.textContent).toBe('Lifespan');
     const items = [...el.querySelectorAll('.list > li')];
     expect(items).toHaveLength(2);
     expect(items[0]!.textContent).toContain('About 7.4 years of writes left (5.2 to 10 years)');
@@ -56,8 +56,10 @@ describe('dy-lifespan-page', () => {
     await settle(f);
     const bars = [...el.querySelectorAll('[role=progressbar]')];
     expect(bars).toHaveLength(2);
-    expect(bars[0]!.getAttribute('aria-valuenow')).toBe('6');
-    expect(bars[0]!.getAttribute('aria-valuemax')).toBe('14');
+    expect(bars[0]!.getAttribute('aria-label')).toBe('History collected');
+    expect(bars[0]!.getAttribute('aria-valuemax')).toBe('100');
+    expect(bars[0]!.getAttribute('aria-valuenow')).toBe(String(Math.round((6 / 14) * 100)));
+    expect(bars[0]!.getAttribute('aria-valuetext')).toBe('Have 6 of 14 days');
     expect(el.textContent).toContain('Have 6 of 14 days');
     expect(el.querySelector('.range')).toBeNull();
   });

@@ -108,6 +108,11 @@ export function formatRelative(at: number, now: number): string {
   return phrase(months, months === 1 ? 'month' : 'months');
 }
 
+/** How long ago `at` was, never in the future: a time at or after `now` (clock drift between processes) reads `just now`. */
+export function formatAgo(at: number, now: number): string {
+  return formatRelative(Math.min(at, now), now);
+}
+
 /** Clock time `14:05` (24 h, the user's locale decides only the separators via Intl). */
 export function formatClock(at: number): string {
   return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false }).format(at);
@@ -190,5 +195,5 @@ export function formatSpan(days: number | null | undefined): string {
 /** A moment as `Oct 22, 4:20 PM` (the year only when it differs from `now`'s); short enough never to wrap. */
 export function formatStamp(at: number, now: number = at): string {
   const sameYear = new Date(at).getFullYear() === new Date(now).getFullYear();
-  return new Intl.DateTimeFormat('en-US', sameYear ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } : { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(at);
+  return new Intl.DateTimeFormat(undefined, sameYear ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } : { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(at);
 }

@@ -3,7 +3,7 @@
 //! Tauri's own ACL, the drag ghost's page, and the sample job, Pitwall and assistant working without Pitwall.
 
 use paddock_panels::ghost::{GHOST_LABEL, page};
-use paddock_workbench_demo::{COMMANDS, Place, invoke_handler, link, shell, workbench};
+use paddock_workbench_demo::{COMMANDS, Place, dialogs, invoke_handler, link, shell, workbench};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -290,4 +290,54 @@ fn the_sample_reindex_starts_a_job_on_the_shells_registry() {
 fn every_command_of_the_demo_is_async_and_in_its_table() {
     assert_eq!(COMMANDS.specs().len(), 5);
     paddock_commands::testing::assert_async(&COMMANDS, &[&app_dir().join("src")]);
+}
+
+/// The demo's dialog base set as TypeScript, which its dialog windows hand to `dialogWindowConfig` (ADR 0026 §3).
+#[test]
+fn the_uis_dialog_contracts_are_generated_from_the_apps_table() {
+    const REGENERATE: &str =
+        "cd apps/workbench-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app";
+    let text = paddock_dialogs::ts::contracts_module("the app", &dialogs::DIALOGS, REGENERATE);
+    let path = ui_dir().join("src/app/generated/dialog-contracts.ts");
+    paddock_commands::testing::sync_generated(
+        &path,
+        &text,
+        paddock_commands::testing::WriteMode::from_env(),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// The demo's start as `run` composes it (rule 43), on the mock runtime: the main window opens, after every plugin is set
+/// up (a window built inside a plugin hook deadlocks the start). The demo has no tray, so `--hidden` still opens it (there
+/// would be no way back to the app).
+#[test]
+fn the_start_opens_the_main_window_even_when_hidden_without_a_tray() {
+    use paddock_shell::testing::{Started, start};
+    for hidden in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let place = Place::Test {
+            dir: dir.path().to_path_buf(),
+        };
+        let launch = paddock_window::launch::LaunchArgs {
+            hidden,
+            ..Default::default()
+        };
+        let started = start(move || {
+            let link = link(&place).unwrap();
+            paddock_workbench_demo::app(
+                mock_builder(),
+                shell::<MockRuntime>(&place, link.clone()),
+                workbench::<MockRuntime>(&place, link).unwrap(),
+                launch,
+            )
+        });
+        assert_eq!(
+            started,
+            Ok(Started {
+                main_window: true,
+                tray: false
+            }),
+            "hidden: {hidden}"
+        );
+    }
 }

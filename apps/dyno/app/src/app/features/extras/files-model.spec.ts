@@ -4,14 +4,11 @@ import {
   MIN_SIZES,
   MODES,
   baseName,
-  defaultSelection,
   dirName,
   fileRows,
-  groupsEmptied,
   mibToBytes,
   middleEllipsis,
   scanSentence,
-  summariseFiles,
 } from './files-model';
 
 const MB = 1024 * 1024;
@@ -27,7 +24,8 @@ function result(over: Partial<FinderResult> = {}): FinderResult {
       { bytesEach: 50 * MB, wastedBytes: 50 * MB, files: [f('d2a', '/p/m.onnx', 50, 1), f('d2b', '/p/x/m.onnx', 50, 2)] },
     ],
     scanned: 1200,
-    truncated: false,
+    unreadable: 0,
+    limit: null,
     wastedBytes: 250 * MB,
     ...over,
   };
@@ -41,34 +39,9 @@ describe('files model', () => {
     expect(mibToBytes(100)).toBe(100 * MB);
   });
 
-  it('selects every copy but the oldest, and no large file', () => {
-    expect([...defaultSelection(result())].sort()).toEqual(['d1b', 'd1c', 'd2b']);
-    expect(defaultSelection(result({ duplicates: [] })).size).toBe(0);
-  });
-
-  it('finds groups whose every copy is selected', () => {
-    const r = result();
-    expect(groupsEmptied(r, defaultSelection(r))).toEqual([]);
-    expect(groupsEmptied(r, new Set(['d2a', 'd2b'])).map((g) => g.files[0]!.id)).toEqual(['d2a']);
-    expect(groupsEmptied(r, new Set(['d1a', 'd1b', 'd1c', 'd2a', 'd2b']))).toHaveLength(2);
-    expect(groupsEmptied(result({ duplicates: [{ bytesEach: 1, wastedBytes: 0, files: [] }] }), new Set())).toEqual([]);
-  });
-
-  it('summarises the selection, counting a file once even when it is in both lists', () => {
-    const r = result();
-    const s = summariseFiles(r, new Set(['l1', 'd1b', 'd1c']));
-    expect(s.count).toBe(3);
-    expect(s.bytes).toBe(1100 * MB);
-    expect(s.copies).toEqual({ count: 2, bytes: 200 * MB });
-    expect(s.large).toEqual({ count: 1, bytes: 900 * MB });
-    expect(summariseFiles(null, new Set(['x'])).count).toBe(0);
-    expect(summariseFiles(r, new Set()).bytes).toBe(0);
-  });
-
   it('builds one list of rows: large files, then each group, with collapsing', () => {
     const rows = fileRows(result(), new Set());
     expect(rows.filter((r) => r.kind === 'group').map((r) => (r.kind === 'group' ? r.title : ''))).toEqual(['Large files', '3 copies of site.psd', '2 copies of m.onnx']);
-    expect(rows.filter((r) => r.kind === 'file' && r.keep).map((r) => (r.kind === 'file' ? r.file.id : ''))).toEqual(['d1a', 'd2a']);
     expect(rows.find((r) => r.kind === 'group')).toMatchObject({ detail: '2 files, 0.98 GB', open: true });
     expect(rows.find((r) => r.kind === 'group' && r.key === 'g:dup0')).toMatchObject({ detail: '100 MB each, 200 MB wasted' });
     const collapsed = fileRows(result(), new Set(['g:large', 'g:dup1']));
@@ -94,6 +67,9 @@ describe('files model', () => {
 
   it('says what was looked at and whether the walk stopped early', () => {
     expect(scanSentence(result())).toBe('Looked at 1,200 files.');
-    expect(scanSentence(result({ scanned: 1, truncated: true }))).toBe('Looked at 1 file before the limit; there may be more.');
+    const limit = { limit: 'files' as const, message: 'Stopped after 500000 files and folders. Choose a smaller folder to see everything in it.' };
+    expect(scanSentence(result({ scanned: 1, limit }))).toBe(`Looked at 1 file before a limit. ${limit.message}`);
+    expect(scanSentence(result({ unreadable: 1 }))).toBe('Looked at 1,200 files. 1 folder could not be read and was left out.');
+    expect(scanSentence(result({ unreadable: 3 }))).toBe('Looked at 1,200 files. 3 folders could not be read and were left out.');
   });
 });

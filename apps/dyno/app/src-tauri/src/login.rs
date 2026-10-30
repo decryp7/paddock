@@ -1,7 +1,9 @@
 //! Starting at login: the one Settings switch `launchAtLogin` means "Dyno opens at login (in the tray) and the agent
 //! keeps measuring while the window is closed" (ADR 0010). Two registrations back it:
 //!
-//! - the app itself, with `tauri-plugin-autostart` (started with `--background`: tray only, no window);
+//! - the app itself: `SMAppService.mainApp` on macOS (one row in Login Items, nothing under `~/Library/LaunchAgents`;
+//!   started at login, it hides in the tray because macOS says so, [`mac::launched_as_login_item`]) and
+//!   `tauri-plugin-autostart` with `--hidden` on Linux and Windows ([`crate::login_item::route_for`]);
 //! - the agent as a per-user service: `SMAppService` on macOS (the plist inside the bundle), a systemd user unit on
 //!   Linux and the per-user `Run` entry on Windows (`dyno_agent::service`).
 //!
@@ -19,6 +21,11 @@ pub trait AgentService: Send {
     fn install(&mut self) -> Result<(), String>;
     /// Stops and removes it.
     fn uninstall(&mut self) -> Result<(), String>;
+    /// Whether the OS starts the agent now and restarts it when it exits (launchd, systemd), so the app must hand over
+    /// to it instead of running its own; a Windows `Run` entry only starts it at the next logon.
+    fn supervises(&mut self) -> bool {
+        false
+    }
     /// Registers it again when the OS cannot start what is registered, and on macOS once after every version change
     /// (an update). `agent_answers` asks whether the agent answers now. Returns whether it registered again.
     fn repair(&mut self, agent_answers: &dyn Fn() -> bool) -> Result<bool, String>;
@@ -32,7 +39,18 @@ pub trait Autostart: Send {
 
 /// Applies the `launchAtLogin` setting to both registrations. Each is attempted even if the other fails; the message
 /// names what did not work and what to do.
-pub fn apply_launch_at_login(on: bool, service: &mut dyn AgentService, autostart: &mut dyn Autostart) -> Result<(), String> {
+///
+/// Turning it on from a place that will not exist after the next login (`location`, [`crate::login_item::refuse_unstable_location`])
+/// registers neither and says where to move Dyno; turning it off always runs.
+pub fn apply_launch_at_login(
+    on: bool,
+    location: Result<(), String>,
+    service: &mut dyn AgentService,
+    autostart: &mut dyn Autostart,
+) -> Result<(), String> {
+    if let (true, Err(e)) = (on, location) {
+        return Err(format!("Your settings are saved, but start at login was not turned on: {e}"));
+    }
     let mut problems = Vec::new();
     let service_result = if on { service.install() } else { service.uninstall() };
     if let Err(e) = service_result {
@@ -54,10 +72,40 @@ pub fn apply_launch_at_login(on: bool, service: &mut dyn AgentService, autostart
     }
 }
 
-/// The agent program next to the app (or `DYNO_AGENT_BIN`).
+/// Removes the old route's `Dyno.plist` from `launch_agents` (only a file of exactly that shape) and, because its
+/// existence means the switch was on, registers the app's new entry through `autostart` so the switch never says on with
+/// nothing registered. An unstable `location` removes the file but registers nothing (the user is told at the next toggle).
+pub fn migrate_legacy_login(
+    launch_agents: &std::path::Path,
+    location: Result<(), String>,
+    autostart: &mut dyn Autostart,
+) -> Result<crate::login_item::LegacyPlist, String> {
+    let result = crate::login_item::remove_legacy_plist(launch_agents).map_err(|e| e.to_string())?;
+    if result == crate::login_item::LegacyPlist::Removed && location.is_ok() {
+        autostart.set(true)?;
+    }
+    Ok(result)
+}
+
+/// Whether the running executable may be registered to start at login.
+pub fn current_location() -> Result<(), String> {
+    match std::env::current_exe() {
+        Ok(exe) => crate::login_item::refuse_unstable_location(&exe),
+        Err(e) => Err(format!("the app's folder cannot be found: {e}")),
+    }
+}
+
+/// The agent program next to the app (or `DYNO_AGENT_BIN` in a development build).
 pub fn agent_program() -> Result<PathBuf, String> {
     let app = std::env::current_exe().map_err(|e| format!("the app's folder cannot be found: {e}"))?;
-    crate::link::agent_exe(&app, std::env::var_os("DYNO_AGENT_BIN").as_deref())
+    let env = std::env::var_os("DYNO_AGENT_BIN");
+    crate::link::agent_exe(&app, agent_override(cfg!(debug_assertions), env.as_deref()))
+}
+
+/// The program `DYNO_AGENT_BIN` names, only in a development build: in a release build the environment must not decide
+/// which program the app runs (any process of the user could set it).
+pub fn agent_override(debug_build: bool, value: Option<&std::ffi::OsStr>) -> Option<&std::ffi::OsStr> {
+    value.filter(|_| debug_build)
 }
 
 // ---------------------------------------------------------------------------------------------------- Linux, Windows
@@ -88,6 +136,10 @@ impl AgentService for CliService {
         self.service()?.uninstall()
     }
 
+    fn supervises(&mut self) -> bool {
+        self.service().is_ok_and(|mut s| s.supervised())
+    }
+
     fn repair(&mut self, _agent_answers: &dyn Fn() -> bool) -> Result<bool, String> {
         self.service()?.ensure()
     }
@@ -96,7 +148,7 @@ impl AgentService for CliService {
 // ---------------------------------------------------------------------------------------------------------- macOS
 
 #[cfg(target_os = "macos")]
-pub use mac::SmService;
+pub use mac::{launched_as_login_item, migrate_legacy_login_at_start, MainAppLogin, SmService};
 
 #[cfg(target_os = "macos")]
 mod mac {
@@ -107,8 +159,8 @@ mod mac {
 
     use super::*;
     use crate::service_repair::{
-        keep_registered, parse_job, parse_print_disabled, plan, record_registered_version, registered_version, JobReport, Observed,
-        RegisterError, RegistrationStatus, RepairOps, REGISTERED_VERSION_FILE,
+        keep_registered, parse_job, parse_print_disabled, plan, record_registered_version, registered_version, service_supervises,
+        JobReport, Observed, RegisterError, RegistrationStatus, RepairOps, REGISTERED_VERSION_FILE,
     };
     use dyno_agent::service::LABEL;
     use objc2_foundation::NSString;
@@ -119,6 +171,86 @@ mod mac {
 
     /// The bundled launch agent.
     pub struct SmService;
+
+    /// The app itself as a login item: `SMAppService.mainApp` (one row in Login Items, macOS 13+).
+    pub struct MainAppLogin;
+
+    impl Autostart for MainAppLogin {
+        fn set(&mut self, on: bool) -> Result<(), String> {
+            // SAFETY: a class method returning an object we own.
+            let s = unsafe { SMAppService::mainAppService() };
+            // SAFETY: a property read on a valid object.
+            let status = unsafe { s.status() };
+            if on {
+                if status == SMAppServiceStatus::Enabled {
+                    return Ok(());
+                }
+                // SAFETY: a method call on a valid object; the error is returned as a Retained NSError.
+                match unsafe { s.registerAndReturnError() } {
+                    Ok(()) => Ok(()),
+                    // Waiting for the user's approval in Login Items is not a failure; the agent registration opens the pane.
+                    Err(_) if unsafe { s.status() } == SMAppServiceStatus::RequiresApproval => Ok(()),
+                    Err(e) => Err(e.localizedDescription().to_string()),
+                }
+            } else if status == SMAppServiceStatus::NotRegistered || status == SMAppServiceStatus::NotFound {
+                Ok(())
+            } else {
+                // SAFETY: a method call on a valid object.
+                unsafe { s.unregisterAndReturnError() }.map_err(|e| e.localizedDescription().to_string())
+            }
+        }
+    }
+
+    /// Moves a start-at-login the old route (`tauri-plugin-autostart`) wrote to `SMAppService.mainApp` ([`super::migrate_legacy_login`]).
+    pub fn migrate_legacy_login_at_start() {
+        let Some(home) = std::env::var_os("HOME") else { return };
+        let dir = PathBuf::from(home).join("Library/LaunchAgents");
+        match super::migrate_legacy_login(&dir, super::current_location(), &mut MainAppLogin) {
+            Ok(crate::login_item::LegacyPlist::Removed) => {
+                crate::logging::info("moved start at login from the old Dyno.plist to a Login Items entry")
+            }
+            Ok(_) => {}
+            Err(e) => crate::logging::info(&format!("the old start-at-login file could not be moved: {e}")),
+        }
+    }
+
+    /// Whether macOS started this process as a login item: the open-application Apple Event carries
+    /// `keyAELaunchedAsLogInItem` (`'lgit'`) - Apple's `AERegistry.h` (Xcode SDK, read 2026-10-31): "If present in a
+    /// kAEOpenApplication event, application was launched as a login item and probably shouldn't open up untitled
+    /// documents". It is either a parameter of the event or the value of its `keyAEPropData` (`'prdt'`), so both are
+    /// read. Only valid while the event is being handled: call it from `applicationDidFinishLaunching`, which is where
+    /// Tauri runs its setup (`RuntimeRunEvent::Ready`). Any miss means "not a login start": the window shows.
+    pub fn launched_as_login_item() -> bool {
+        use objc2::runtime::AnyObject;
+        use objc2::{class, msg_send};
+        const OAPP: u32 = u32::from_be_bytes(*b"oapp");
+        const PROP_DATA: u32 = u32::from_be_bytes(*b"prdt");
+        const LOGIN_ITEM: u32 = u32::from_be_bytes(*b"lgit");
+        // SAFETY: plain message sends on Foundation objects; the types of the replies match the documented
+        // NSAppleEventManager / NSAppleEventDescriptor signatures (FourCharCode is u32).
+        unsafe {
+            let manager: Option<objc2::rc::Retained<AnyObject>> = msg_send![class!(NSAppleEventManager), sharedAppleEventManager];
+            let Some(manager) = manager else { return false };
+            let event: Option<objc2::rc::Retained<AnyObject>> = msg_send![&*manager, currentAppleEvent];
+            let Some(event) = event else { return false };
+            let id: u32 = msg_send![&*event, eventID];
+            if id != OAPP {
+                return false;
+            }
+            let direct: Option<objc2::rc::Retained<AnyObject>> = msg_send![&*event, paramDescriptorForKeyword: LOGIN_ITEM];
+            if direct.is_some() {
+                return true;
+            }
+            let props: Option<objc2::rc::Retained<AnyObject>> = msg_send![&*event, paramDescriptorForKeyword: PROP_DATA];
+            match props {
+                Some(p) => {
+                    let code: u32 = msg_send![&*p, enumCodeValue];
+                    code == LOGIN_ITEM
+                }
+                None => false,
+            }
+        }
+    }
 
     fn service() -> objc2::rc::Retained<SMAppService> {
         let name = NSString::from_str(PLIST);
@@ -272,6 +404,12 @@ mod mac {
             matches!(status(), SMAppServiceStatus::Enabled | SMAppServiceStatus::RequiresApproval)
         }
 
+        /// Enabled, not switched off in Login Items and loaded in launchd: it runs the job (`RunAtLoad`, `KeepAlive`).
+        /// Waiting for approval, switched off or dropped by launchd, it runs nothing.
+        fn supervises(&mut self) -> bool {
+            service_supervises(registration_status(), launchd_disabled(), job_report())
+        }
+
         fn install(&mut self) -> Result<(), String> {
             register(true).map_err(|e| match e {
                 RegisterError::NeedsApproval => {
@@ -326,9 +464,34 @@ pub fn platform_service() -> Box<dyn AgentService> {
     Box::new(CliService)
 }
 
-/// The app's own login item (`tauri-plugin-autostart`).
+/// The probe the agent link asks before it starts an agent of its own (see [`crate::link::ServiceState`]).
+pub fn service_probe() -> crate::link::ServiceProbe {
+    std::sync::Arc::new(|| {
+        let mut service = platform_service();
+        crate::link::ServiceState {
+            installed: service.installed(),
+            supervises: service.supervises(),
+        }
+    })
+}
+
+/// The app's own login item: `SMAppService.mainApp` on macOS, `tauri-plugin-autostart` elsewhere.
+#[cfg(target_os = "macos")]
+pub fn platform_autostart<R: tauri::Runtime>(_app: &tauri::AppHandle<R>) -> Box<dyn Autostart> {
+    Box::new(MainAppLogin)
+}
+
+/// The app's own login item: `SMAppService.mainApp` on macOS, `tauri-plugin-autostart` elsewhere.
+#[cfg(not(target_os = "macos"))]
+pub fn platform_autostart<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Box<dyn Autostart> {
+    Box::new(AppAutostart(app.clone()))
+}
+
+/// The app's own login item with `tauri-plugin-autostart` (Linux and Windows).
+#[cfg(not(target_os = "macos"))]
 pub struct AppAutostart<R: tauri::Runtime>(pub tauri::AppHandle<R>);
 
+#[cfg(not(target_os = "macos"))]
 impl<R: tauri::Runtime> Autostart for AppAutostart<R> {
     fn set(&mut self, on: bool) -> Result<(), String> {
         use tauri_plugin_autostart::ManagerExt;
@@ -340,6 +503,18 @@ impl<R: tauri::Runtime> Autostart for AppAutostart<R> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_agent_override_from_the_environment_counts_only_in_a_development_build() {
+        let v = std::ffi::OsString::from("/tmp/other-agent");
+        assert_eq!(super::agent_override(true, Some(v.as_os_str())), Some(v.as_os_str()));
+        assert_eq!(
+            super::agent_override(false, Some(v.as_os_str())),
+            None,
+            "a release build ignores it"
+        );
+        assert_eq!(super::agent_override(true, None), None);
+    }
+
     use super::*;
     use std::sync::{Arc, Mutex};
 
@@ -398,7 +573,7 @@ mod tests {
             calls: calls.0.clone(),
             fail: autostart_fails,
         };
-        let r = apply_launch_at_login(on, &mut s, &mut a);
+        let r = apply_launch_at_login(on, Ok(()), &mut s, &mut a);
         let log = calls.0.lock().unwrap().clone();
         (r, log)
     }
@@ -427,5 +602,66 @@ mod tests {
         let (r, _) = apply(true, true, true);
         assert!(r.unwrap_err().contains("; and "));
         assert!(apply(false, false, true).0.unwrap_err().contains("login items"));
+    }
+
+    #[test]
+    fn an_unstable_location_registers_neither_but_turning_off_always_runs() {
+        let calls = Calls::default();
+        let mut s = FakeService {
+            calls: calls.0.clone(),
+            fail: false,
+        };
+        let mut a = FakeAutostart {
+            calls: calls.0.clone(),
+            fail: false,
+        };
+        let bad = || Err("move Dyno to Applications".to_string());
+        let m = apply_launch_at_login(true, bad(), &mut s, &mut a).unwrap_err();
+        assert!(
+            m.contains("move Dyno to Applications") && m.starts_with("Your settings are saved"),
+            "{m}"
+        );
+        assert!(calls.0.lock().unwrap().is_empty(), "nothing was registered");
+        assert_eq!(apply_launch_at_login(false, bad(), &mut s, &mut a), Ok(()));
+        assert_eq!(calls.0.lock().unwrap().len(), 2, "both were removed");
+    }
+
+    #[test]
+    fn a_removed_legacy_file_registers_the_new_entry_once_and_nothing_else_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n<key>Label</key>\n<string>Dyno</string>\n\
+            <key>AssociatedBundleIdentifiers</key>\n<array></array>\n<key>ProgramArguments</key>\n<array><string>/Applications/Dyno.app/Contents/MacOS/dyno-app</string>\
+            <string>--hidden</string></array>\n<key>RunAtLoad</key>\n<true/>\n</dict>\n</plist>";
+        let calls = Calls::default();
+        let mut a = FakeAutostart {
+            calls: calls.0.clone(),
+            fail: false,
+        };
+        // Nothing there: nothing registered.
+        assert_eq!(
+            migrate_legacy_login(dir.path(), Ok(()), &mut a),
+            Ok(crate::login_item::LegacyPlist::Absent)
+        );
+        // A foreign file is kept and nothing is registered.
+        std::fs::write(dir.path().join("Dyno.plist"), "mine").unwrap();
+        assert_eq!(
+            migrate_legacy_login(dir.path(), Ok(()), &mut a),
+            Ok(crate::login_item::LegacyPlist::Foreign)
+        );
+        assert!(calls.0.lock().unwrap().is_empty());
+        // The old file: removed, new entry registered.
+        std::fs::write(dir.path().join("Dyno.plist"), old).unwrap();
+        assert_eq!(
+            migrate_legacy_login(dir.path(), Ok(()), &mut a),
+            Ok(crate::login_item::LegacyPlist::Removed)
+        );
+        assert_eq!(*calls.0.lock().unwrap(), vec!["autostart true".to_string()]);
+        // From an unstable place the file goes but nothing is registered.
+        std::fs::write(dir.path().join("Dyno.plist"), old).unwrap();
+        assert_eq!(
+            migrate_legacy_login(dir.path(), Err("x".into()), &mut a),
+            Ok(crate::login_item::LegacyPlist::Removed)
+        );
+        assert_eq!(calls.0.lock().unwrap().len(), 1);
     }
 }

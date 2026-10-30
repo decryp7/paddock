@@ -5,9 +5,7 @@ import type { Anomaly, Diagnosis, HealthReason, HealthReport } from '../../core/
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
-import { Notifier } from '../../shared/notifier';
 import { DiagnosisStore } from '../../state/diagnosis.store';
-import { TuningStore } from '../../state/tuning.store';
 import { LiveStore } from '../../state/live.store';
 import { AnomaliesCallout } from './anomalies-callout';
 import { DiagnosisCard } from './diagnosis-card';
@@ -27,7 +25,9 @@ function env() {
 async function settle(f: { whenStable(): Promise<unknown>; detectChanges(): void }) {
   f.detectChanges();
   await f.whenStable();
-  await new Promise((r) => setTimeout(r, 5));
+  // The mock's first live update arrives on its own timer: wait until the dashboard's live store has it.
+  const live = TestBed.inject(LiveStore);
+  await vi.waitFor(() => expect(live.connected()).toBe(true));
   f.detectChanges();
 }
 const buttons = (el: HTMLElement) => [...el.querySelectorAll('button')];
@@ -95,11 +95,10 @@ const diagnosis = (extra: Diagnosis['causes'] = []): Diagnosis => ({
       explanation: 'It compiles.',
       confidence: 0.8,
       evidence: [{ label: 'CPU', value: '90%' }],
-      suggestions: [
-        { label: 'Open tasks', action: 'openTaskManager' },
-        { label: 'Open cleanup', action: 'openCleanup' },
-        { label: 'Open startup', action: 'openStartup' },
-        { label: 'Lower', action: { process: { target: { pid: 7, started: 1 }, name: 'x', action: { setPriority: 'belowNormal' } } } },
+      hints: [
+        { text: 'Open tasks', link: 'taskManager' },
+        { text: 'Open startup', link: 'startup' },
+        { text: 'Let it finish', link: null },
       ],
       involved: [{ id: 'cc', name: 'Compiler', share: '90% CPU' }],
     },
@@ -135,29 +134,23 @@ describe('DiagnosisCard', () => {
     expect(el.querySelector('a[href="/why-slow"]')?.textContent).toContain('See the evidence');
   });
 
-  it('routes the suggestions that open a screen and acts on a process suggestion', async () => {
-    const { mock, nav } = env();
+  it('links the hints that open a screen and shows the others as words', async () => {
+    const { mock } = env();
     vi.spyOn(mock, 'whySlow').mockResolvedValue(diagnosis());
-    const act = vi.spyOn(mock, 'act').mockResolvedValue({ id: 'e', title: 'Lowered', undo: 'notUndoable' } as never);
     const f = TestBed.createComponent(DiagnosisCard);
     f.detectChanges();
     await TestBed.inject(DiagnosisStore).run();
     await settle(f);
     const el = f.nativeElement as HTMLElement;
-    byText(el, 'Open tasks').click();
-    byText(el, 'Open cleanup').click();
-    byText(el, 'Open startup').click();
-    expect(nav.mock.calls.map((c) => c[0])).toEqual(['/processes', '/cleanup', '/health']);
-    await settle(f);
-    byText(el, 'Lower').click();
-    await settle(f);
-    expect(act).toHaveBeenCalledWith({ pid: 7, started: 1 }, { setPriority: 'belowNormal' });
-    expect(TestBed.inject(Notifier).toasts().at(-1)?.text).toBe('Lowered');
+    expect(el.querySelector('a[href="/processes"]')?.textContent).toContain('Open tasks');
+    expect(el.querySelector('a[href="/health"]')?.textContent).toContain('Open startup');
+    expect(el.querySelector('.hint')?.textContent).toContain('Let it finish');
+    expect(el.querySelector('button')?.textContent).not.toContain('Let it finish');
   });
 
   it('lists other possible causes behind a toggle (singular and plural)', async () => {
     const { mock } = env();
-    const other = { kind: 'memoryPressure', title: 'Low memory', explanation: '', confidence: 0.3, evidence: [], suggestions: [], involved: [] } as Diagnosis['causes'][number];
+    const other = { kind: 'memoryPressure', title: 'Low memory', explanation: '', confidence: 0.3, evidence: [], hints: [], involved: [] } as Diagnosis['causes'][number];
     vi.spyOn(mock, 'whySlow').mockResolvedValue(diagnosis([other]));
     const f = TestBed.createComponent(DiagnosisCard);
     f.detectChanges();
@@ -190,13 +183,12 @@ describe('DiagnosisCard', () => {
   });
 });
 
-const reason = (id: string, impact: number, kind: NonNullable<HealthReason['fix']>['kind'] | null, extra: Partial<NonNullable<HealthReason['fix']>> = {}): HealthReason => ({
+const reason = (id: string, impact: number): HealthReason => ({
   id,
   title: `Reason ${id}`,
   detail: `Detail ${id}`,
   impact,
   severity: 'warn' as HealthReason['severity'],
-  fix: kind === null ? null : { label: `Fix ${id}`, explanation: `Explain ${id}`, preview: ['line one'], needsAdmin: true, undoable: true, kind, ...extra },
 });
 const report = (reasons: HealthReason[]): HealthReport => ({ at: NOW, score: 100 - reasons.reduce((a, r) => a + r.impact, 0), grade: 'good', reasons });
 
@@ -205,7 +197,7 @@ describe('HealthHero', () => {
 
   it('shows a skeleton, then the score, grade and the three costliest reasons by impact', async () => {
     const { mock } = env();
-    vi.spyOn(mock, 'health').mockResolvedValue(report([reason('a', 2, null), reason('b', 9, null), reason('c', 5, null), reason('d', 7, null)]));
+    vi.spyOn(mock, 'health').mockResolvedValue(report([reason('a', 2), reason('b', 9), reason('c', 5), reason('d', 7)]));
     const f = TestBed.createComponent(HealthHero);
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
@@ -237,86 +229,6 @@ describe('HealthHero', () => {
     expect(el.querySelector('.err')).toBeNull();
   });
 
-  it('opens the fix dialog and applies the tuning only after confirming', async () => {
-    const { mock } = env();
-    vi.spyOn(mock, 'health').mockResolvedValue(report([reason('a', 5, { tuning: 'power-plan' })]));
-    const apply = vi.spyOn(TestBed.inject(TuningStore), 'apply').mockResolvedValue(true);
-    const f = TestBed.createComponent(HealthHero);
-    await settle(f);
-    byText(f.nativeElement, 'Fix a').click();
-    await settle(f);
-    const dlg = document.querySelector('dy-fix-dialog') as HTMLElement;
-    expect(dlg.textContent).toContain('Explain a');
-    expect(dlg.textContent).toContain('line one');
-    expect(dlg.textContent).toContain('administrator');
-    expect(dlg.textContent).toContain('Undoable from Activity');
-    byText(dlg, 'Not now').click();
-    await settle(f);
-    expect(apply).not.toHaveBeenCalled();
-    byText(f.nativeElement, 'Fix a').click();
-    await settle(f);
-    const dlg2 = document.querySelector('dy-fix-dialog') as HTMLElement;
-    [...dlg2.querySelectorAll('button.primary')].find((b) => b.textContent?.includes('Fix a'))!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle(f);
-    // The fix needs administrator rights: the helper is offered first, and nothing is applied until it is there.
-    const helper = document.querySelector('dy-helper-dialog') as HTMLElement;
-    expect(helper.textContent).toContain('Install the Dyno helper');
-    expect(apply).not.toHaveBeenCalled();
-    byText(helper, 'Not now').click();
-    await settle(f);
-    expect(apply).not.toHaveBeenCalled();
-    byText(f.nativeElement, 'Fix a').click();
-    await settle(f);
-    (document.querySelector('dy-fix-dialog button.primary') as HTMLElement).click();
-    await settle(f);
-    byText(document.querySelector('dy-helper-dialog') as HTMLElement, 'Install the helper').click();
-    await settle(f);
-    expect(apply).toHaveBeenCalledWith('power-plan');
-  });
-
-  it.each([
-    ['openStartup', '/health'],
-    ['openTaskManager', '/processes'],
-    ['openLifespan', '/lifespan'],
-  ] as const)('a confirmed %s fix navigates to %s', async (kind, url) => {
-    const { mock, nav } = env();
-    vi.spyOn(mock, 'health').mockResolvedValue(report([reason('a', 5, kind, { needsAdmin: false, undoable: false, preview: [] })]));
-    const f = TestBed.createComponent(HealthHero);
-    await settle(f);
-    byText(f.nativeElement, 'Fix a').click();
-    await settle(f);
-    const dlg = document.querySelector('dy-fix-dialog') as HTMLElement;
-    expect(dlg.textContent).toContain('Cannot be undone');
-    expect(dlg.textContent).not.toContain('What will change');
-    [...dlg.querySelectorAll('button.primary')][0]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle(f);
-    expect(nav).toHaveBeenCalledWith(url);
-  });
-
-  it('a confirmed openCleanup fix opens the Cleanup page (it only scans there; nothing is deleted)', async () => {
-    const { mock, nav } = env();
-    vi.spyOn(mock, 'health').mockResolvedValue(report([reason('a', 5, 'openCleanup', { needsAdmin: false, undoable: false, preview: [] })]));
-    const f = TestBed.createComponent(HealthHero);
-    await settle(f);
-    byText(f.nativeElement, 'Fix a').click();
-    await settle(f);
-    [...(document.querySelector('dy-fix-dialog') as HTMLElement).querySelectorAll('button.primary')][0]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle(f);
-    expect(nav).toHaveBeenCalledWith('/cleanup');
-  });
-
-  it('a confirmed restart fix only advises, it never restarts anything', async () => {
-    const { mock, nav } = env();
-    vi.spyOn(mock, 'health').mockResolvedValue(report([reason('a', 5, 'restart', { needsAdmin: false })]));
-    const f = TestBed.createComponent(HealthHero);
-    await settle(f);
-    byText(f.nativeElement, 'Fix a').click();
-    await settle(f);
-    (document.querySelector('dy-fix-dialog button.primary') as HTMLElement).click();
-    await settle(f);
-    expect(nav).not.toHaveBeenCalled();
-    expect(TestBed.inject(Notifier).toasts().at(-1)?.text).toMatch(/never restarts/);
-  });
 });
 
 describe('TopApps', () => {
@@ -333,7 +245,7 @@ describe('TopApps', () => {
   it('lists at most seven apps with values and process counts, and opens one in the task manager', () => {
     const { mock, navigate } = env();
     const update = mock.liveUpdate('summary');
-    const many = Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, name: `App${i}`, exe: null, pids: i === 0 ? [1, 2, 3] : [i + 10], cpu: 90 - i * 10, memory: 1024 * 1024 * (i + 1), diskBps: 0 }));
+    const many = Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, name: `App${i}`, exe: null, pids: i === 0 ? [1, 2, 3] : [i + 10], cpu: { value: 90 - i * 10 }, memory: { value: 1024 * 1024 * (i + 1) }, diskBps: { value: 0 }, partial: false }));
     TestBed.inject(LiveStore).receive({ ...update, topCpu: many, topMemory: many });
     const f = TestBed.createComponent(TopApps);
     f.detectChanges();

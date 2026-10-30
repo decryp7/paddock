@@ -915,8 +915,12 @@ fn window_events_track_focus_and_destroyed_windows() {
 
 #[test]
 fn dialogs_get_the_same_feel_and_hooks() {
-    let contracts = paddock_dialogs::Contracts::parse(
-        r#"{ "version": 1, "dialogs": { "about": { "kind": "viewer", "modality": "modeless" } } }"#,
+    let contracts = paddock_dialogs::Contracts::from_entries(
+        &[paddock_dialogs::Entry::new(
+            "about",
+            paddock_dialogs::Shape::Viewer,
+        )],
+        &[],
     )
     .unwrap();
     let app = app_with(
@@ -1282,4 +1286,61 @@ fn a_bounds_save_that_fails_after_a_window_closed_is_logged() {
     destroyed(app.handle(), "main");
     // The save runs on a thread of its own; the exit teardown saves (and fails) once more, synchronously.
     exit(app.handle());
+}
+
+/// Inside a plugin hook (where Tauri holds its plugin store) a window is refused with its own code instead of
+/// deadlocking; the work handed to `after_plugin_hook` runs afterwards, in the order it was handed over, and opens the
+/// window.
+#[test]
+fn a_plugin_hook_refuses_windows_and_after_plugin_hook_runs_the_work_in_order() {
+    let app = app_with(windows(multi(), &calls()).build());
+    let h = app.handle();
+    let (tx, rx) = std::sync::mpsc::channel();
+    {
+        let _scope = plugin_hook_scope();
+        let e = start(h, &LaunchArgs::default()).unwrap_err();
+        assert_eq!(e.code, crate::WindowErrorCode::InsidePluginHook);
+        assert!(app.get_webview_window("main").is_none());
+        for i in 0..20 {
+            let tx = tx.clone();
+            after_plugin_hook(h, move |_| {
+                let _ = tx.send(Ok(i));
+            });
+        }
+        after_plugin_hook(h, move |app| {
+            let _ = tx.send(create_main(app).map(|_| 20).map_err(|e| e.message));
+        });
+    }
+    // A hang guard only lost work reaches.
+    let got: Vec<i32> = (0..21)
+        .map(|_| {
+            rx.recv_timeout(Duration::from_secs(30))
+                .expect("the deferred work ran")
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(got, (0..21).collect::<Vec<_>>(), "in the order handed over");
+    assert!(app.get_webview_window("main").is_some());
+}
+
+/// A start that cannot go on ends the app through the window layer's exit hook, with its code.
+#[test]
+fn exit_with_ends_the_app_through_the_exit_hook() {
+    let seen = calls();
+    let app = app_with(windows(multi(), &seen).build());
+    exit_with(app.handle(), 1);
+    assert_eq!(taken(&seen), ["exit 1"]);
+}
+
+/// The headless tray draws nothing and exists, so the app behaves as with a tray (no window with `--hidden`).
+#[test]
+fn the_headless_tray_exists_and_draws_nothing() {
+    let app = app_with(windows(multi(), &calls()).build());
+    let h = app.handle();
+    assert!(create_tray(
+        h,
+        Tray::new(HeadlessTray, |_| TrayView::new("App", vec![], "normal"))
+    ));
+    assert!(tray_available(h));
+    refresh_tray(h);
 }

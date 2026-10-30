@@ -1,12 +1,41 @@
-import type { Alert, ProcessSample } from './api.types';
+import { readValue } from './measured';
+import type { SuJobSnapshot } from '@decryp7/paddock-ui';
+import type { Alert, BackupReport, BootReport, FinderQuery, FinderResult, JobOutput, JobSpec, ProcessSample, SleepReport, SoftwareInventory, UsageReport } from './api.types';
 import { MockBackend, type MockOptions, applyMockPlatform, mockOptionsFromUrl } from './mock-backend';
 
 const NOW = 1_700_000_000_000;
 const make = (o: MockOptions = {}) => new MockBackend({ latencyMs: 0, now: () => NOW, ...o });
+
+/** Starts a job and plays it to its end the way the shell's jobs store sees it (every status the sink hears); a failed job rejects with its message, a cancelled one resolves `null`. */
+async function runJob(b: MockBackend, spec: JobSpec): Promise<JobOutput | null> {
+  const id = await b.startJob(spec);
+  for (let i = 0; i < 200; i++) {
+    const s = b.jobStatuses().find((j) => j.id === id)!;
+    if (s.state === 'done') return b.jobResult(id);
+    if (s.state === 'cancelled') return null;
+    if (s.state === 'failed') throw { code: 'internal', message: s.message };
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  throw new Error('the job never ended');
+}
 const proc = (b: MockBackend, name: string): ProcessSample => b.liveUpdate('processes').processes!.find((p) => p.name === name)!;
-const ref = (p: ProcessSample) => ({ pid: p.pid, started: p.started });
+const ref = (p: ProcessSample) => ({ pid: p.pid, started: readValue(p.started) });
 
 describe('mockOptionsFromUrl', () => {
+  it('reads jobsteps as a whole number from 1 to 100 and ignores anything else', () => {
+    expect(mockOptionsFromUrl('?jobsteps=6').jobSteps).toBe(6);
+    for (const bad of ['0', '101', '2.5', 'many', '']) expect(mockOptionsFromUrl(`?jobsteps=${bad}`)).not.toHaveProperty('jobSteps');
+    expect(mockOptionsFromUrl('')).not.toHaveProperty('jobSteps');
+  });
+
+  it('a mock made with jobSteps keeps its jobs running past the first step', async () => {
+    const b = new MockBackend({ latencyMs: 0, jobSteps: 3 });
+    expect(b.jobSteps).toBe(3);
+    const id = await b.startJob({ rescanIssues: { query: { days: 14 } } });
+    expect(b.jobStatuses().find((j) => j.id === id)).toMatchObject({ state: 'running' });
+    expect(new MockBackend({ latencyMs: 0 }).jobSteps).toBe(1);
+  });
+
   it('defaults to a macOS laptop with latency', () => {
     expect(mockOptionsFromUrl('')).toEqual({ machine: 'laptop', os: 'macos', latencyMs: 150, fail: new Set() });
   });
@@ -50,14 +79,10 @@ describe('applyMockPlatform', () => {
 });
 
 describe('OS differences', () => {
-  it('appInfo reports the OS', async () => {
-    for (const os of ['windows', 'macos', 'linux'] as const) expect((await make({ os }).appInfo()).os).toBe(os);
-    expect((await make().appInfo()).updatesAvailable).toBe(false);
-  });
   it('disks follow the OS', async () => {
     const mounts = async (os: 'windows' | 'macos' | 'linux') => make({ os }).liveUpdate('summary').system.disks.map((d) => d.mount);
     expect(await mounts('windows')).toEqual(['C:\\', 'D:\\']);
-    expect(await mounts('macos')).toEqual(['/', '/Volumes/T7']);
+    expect(await mounts('macos')).toEqual(['/']);
     expect(await mounts('linux')).toEqual(['/', '/mnt/data']);
   });
   it('process names follow the OS', () => {
@@ -112,7 +137,7 @@ describe('live data', () => {
     expect(a.topCpu.length).toBeLessThanOrEqual(8);
   });
   it('reports a plausible system sample', () => {
-    const { system, pressure, activeActions, profile, rulesPaused } = make().liveUpdate('summary');
+    const { system, pressure } = make().liveUpdate('summary');
     expect(system.cpu.total).toBeGreaterThan(0);
     expect(system.cpu.perCore).toHaveLength(14);
     expect(system.cpu.coreKinds.filter((k) => k === 'efficiency')).toHaveLength(4);
@@ -120,9 +145,6 @@ describe('live data', () => {
     expect(system.cpu.coreFrequencyMhz).toHaveLength(14);
     expect(system.memory.used).toBeLessThan(system.memory.total);
     expect(['normal', 'elevated', 'critical']).toContain(pressure);
-    expect(activeActions).toHaveLength(1);
-    expect(profile).toBe('normal');
-    expect(rulesPaused).toBe(false);
   });
   it('tick pushes to listeners, trimming the process list for summary listeners', () => {
     vi.useFakeTimers();
@@ -206,14 +228,14 @@ describe('errors and the fail option', () => {
     const b = make({ fail: new Set(['health', 'whySlow']) });
     await expect(b.health()).rejects.toEqual({ code: 'internal', message: 'The mock was asked to fail “health”.' });
     await expect(b.whySlow()).rejects.toMatchObject({ code: 'internal' });
-    await expect(b.rules()).resolves.toBeDefined();
+    await expect(b.settings()).resolves.toBeDefined();
   });
   it('replies after the simulated latency', async () => {
     vi.useFakeTimers();
     try {
       const b = new MockBackend({ latencyMs: 100, now: () => NOW });
       const done = vi.fn();
-      void b.rules().then(done);
+      void b.settings().then(done);
       await vi.advanceTimersByTimeAsync(99);
       expect(done).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
@@ -222,81 +244,27 @@ describe('errors and the fail option', () => {
       vi.useRealTimers();
     }
   });
+  it('adds, replaces and deletes one alert rule without touching the other settings', async () => {
+    const b = make();
+    const rule = { id: 'hot', name: 'Hot', metric: 'cpuTemp', op: 'above', limit: 90, forSecs: 30, severity: 'warning', enabled: true } as never;
+    const added = await b.upsertAlertRule(rule);
+    expect(added.customAlerts?.map((r) => r.id)).toContain('hot');
+    const renamed = await b.upsertAlertRule({ ...(rule as object), name: 'Hotter' } as never);
+    expect(renamed.customAlerts?.filter((r) => r.id === 'hot')).toHaveLength(1);
+    expect(renamed.customAlerts?.find((r) => r.id === 'hot')?.name).toBe('Hotter');
+    const gone = await b.deleteAlertRule('hot');
+    expect(gone.customAlerts?.some((r) => r.id === 'hot')).toBe(false);
+    expect(gone.sampling).toEqual(added.sampling);
+  });
   it('replies are copies: mutating them does not change the mock', async () => {
     const b = make();
     const s = await b.settings();
-    s.theme = s.theme === 'dark' ? 'light' : 'dark';
-    expect((await b.settings()).theme).not.toBe(s.theme);
+    s.launchAtLogin = !s.launchAtLogin;
+    expect((await b.settings()).launchAtLogin).not.toBe(s.launchAtLogin);
   });
 });
 
 describe('process actions', () => {
-  it('act sets priority, is undoable, and shows up in processDetails', async () => {
-    const b = make();
-    const p = proc(b, 'node');
-    const entry = await b.act(ref(p), { setPriority: 'idle' });
-    expect(entry).toMatchObject({ kind: 'manual', undo: 'available' });
-    expect((await b.processDetails(ref(p))).priority).toBe('idle');
-    expect((await b.activity(1))[0]!.id).toBe(entry.id);
-  });
-  it('act: suspend/resume, affinity, efficiency, CPU cap', async () => {
-    const b = make();
-    const p = proc(b, 'node');
-    await b.act(ref(p), 'suspend');
-    expect(proc(b, 'node')).toMatchObject({ state: 'suspended', cpu: 0 });
-    expect((await b.act(ref(p), 'resume')).title).toMatch(/Resumed/);
-    expect(proc(b, 'node').state).not.toBe('suspended');
-    await b.act(ref(p), { setAffinity: 3 });
-    expect((await b.processDetails(ref(p))).affinity).toBeNull(); // macOS
-    const lin = make({ os: 'linux' });
-    const lp = proc(lin, 'node');
-    await lin.act(ref(lp), { setAffinity: 3 });
-    expect((await lin.processDetails(ref(lp))).affinity).toBe(3);
-    await b.act(ref(p), { setEfficiencyMode: true });
-    expect((await b.processDetails(ref(p))).efficiencyMode).toBe(true);
-    await b.act(ref(p), { setEfficiencyMode: false });
-    expect((await b.processDetails(ref(p))).efficiencyMode).toBe(false);
-    expect((await b.act(ref(p), { setCpuCap: 0.5 })).title).toMatch(/Capped/);
-    expect(proc(b, 'node').cpu).toBeLessThanOrEqual(0.5);
-    expect((await b.act(ref(p), { setCpuCap: null })).title).toMatch(/Removed the CPU cap/);
-  });
-  it('end removes the process and is not undoable', async () => {
-    const b = make();
-    const p = proc(b, 'node');
-    const before = b.liveUpdate('processes').processes!.length;
-    expect((await b.act(ref(p), 'end')).undo).toBe('notUndoable');
-    expect(b.liveUpdate('processes').processes!.length).toBe(before - 1);
-    await expect(b.act(ref(p), 'end')).rejects.toEqual({ code: 'notFound', message: 'The process has exited.' });
-    await expect(b.processDetails(ref(p))).rejects.toMatchObject({ code: 'notFound' });
-  });
-  it('protected processes refuse', async () => {
-    const b = make();
-    const p = b.liveUpdate('processes').processes!.find((x) => x.protectedReason)!;
-    await expect(b.act(ref(p), 'end')).rejects.toMatchObject({ code: 'protected' });
-  });
-  it('a stale start time is treated as a different process', async () => {
-    const b = make();
-    const p = proc(b, 'node');
-    await expect(b.act({ pid: p.pid, started: p.started + 1 }, 'end')).rejects.toMatchObject({ code: 'notFound' });
-  });
-  it('actOnGroup affects every member', async () => {
-    const b = make();
-    const members = b.liveUpdate('processes').groups!.find((g) => g.id === 'node')!.pids.length;
-    const entry = await b.actOnGroup('node', 'end');
-    expect(entry.title).toBe(`Ended node (${members})`);
-    expect(b.liveUpdate('processes').processes!.some((p) => p.name === 'node')).toBe(false);
-  });
-  it('actOnGroup: unknown and protected groups', async () => {
-    const b = make();
-    await expect(b.actOnGroup('nope', 'end')).rejects.toEqual({ code: 'notFound', message: 'That app is no longer running.' });
-    await expect(b.actOnGroup('dyno', 'end')).rejects.toMatchObject({ code: 'protected' });
-  });
-  it('group CPU caps are shared across the members', async () => {
-    const b = make();
-    await b.actOnGroup('chrome', { setCpuCap: 4 });
-    const g = b.liveUpdate('processes').groups!.find((x) => x.id === 'chrome')!;
-    expect(g.cpu).toBeLessThanOrEqual(4.5);
-  });
   it('lockers match by path and validate it', async () => {
     const b = make();
     await expect(b.lockers('  ')).rejects.toMatchObject({ code: 'badRequest' });
@@ -320,7 +288,7 @@ describe('process actions', () => {
     const chrome = await b.processDetails(ref(proc(b, 'chrome.exe')));
     expect(chrome.signature).toEqual({ signed: 'Google LLC' });
     expect(chrome.commandLine).toContain('--type=renderer');
-    const sys = b.liveUpdate('processes').processes!.find((p) => p.protectedReason && p.protectedReason !== 'Protected: Dyno itself')!;
+    const sys = b.liveUpdate('processes').processes!.find((p) => p.exe === null)!;
     const sd = await b.processDetails(ref(sys));
     expect('unavailable' in sd.openFiles).toBe(true);
     expect(sd.cwd).toBeNull();
@@ -346,24 +314,10 @@ describe('snapshots', () => {
 });
 
 describe('diagnosis, history, activity', () => {
-  it('whySlow blames the build while it runs, and offers a fix', async () => {
+  it('whySlow blames the build while it runs, and points at the task manager', async () => {
     const d = await make().whySlow();
     expect(d.causes[0]!.kind).toBe('cpuHog');
-    expect(d.causes[0]!.suggestions.some((s) => typeof s.action === 'object' && 'process' in s.action)).toBe(true);
-  });
-  it('whySlow is calm when the build is gone, and without cargo has no process fix', async () => {
-    const b = make();
-    await b.actOnGroup('cargo', 'end');
-    const d = await b.whySlow();
-    expect(d.causes[0]!.kind).toBe('nothingWrong');
-  });
-  it('whySlow without cargo but with rustc still diagnoses', async () => {
-    const b = make();
-    const cargo = proc(b, 'cargo');
-    await b.act(ref(cargo), 'end');
-    const d = await b.whySlow();
-    expect(d.causes[0]!.kind).toBe('cpuHog');
-    expect(d.causes[0]!.suggestions).toHaveLength(1);
+    expect(d.causes[0]!.hints.some((h) => h.link === 'taskManager')).toBe(true);
   });
   it.each([
     ['hour', 30_000, 3_600_000],
@@ -393,143 +347,6 @@ describe('diagnosis, history, activity', () => {
     expect((await b.alerts(1)).length).toBe(1);
     expect(await b.alerts(-1)).toEqual([]);
   });
-  it('undo marks the entry undone, logs a new one and emits both', async () => {
-    const b = make();
-    const seen = vi.fn();
-    b.onActivity(seen);
-    const entry = await b.act(ref(proc(b, 'node')), { setPriority: 'idle' });
-    const undone = await b.undo(entry.id);
-    expect(undone.title).toBe(`Undid: ${entry.title}`);
-    expect(undone.undo).toBe('notUndoable');
-    expect((await b.activity(10)).find((e) => e.id === entry.id)!.undo).toBe('undone');
-    await Promise.resolve();
-    expect(seen.mock.calls.map((c) => c[0].id)).toContain(entry.id);
-  });
-  it('undo of a rule action releases the active action', async () => {
-    const b = make();
-    const rule = (await b.activity(100)).find((e) => e.kind === 'rule' && e.undo === 'available');
-    if (rule) {
-      const undone = await b.undo(rule.id);
-      expect(undone.kind).toBe('release');
-    }
-  });
-  it('undo errors', async () => {
-    const b = make();
-    await expect(b.undo('nope')).rejects.toEqual({ code: 'notFound', message: 'That activity is no longer in the log.' });
-    const e = await b.act(ref(proc(b, 'node')), 'end');
-    await expect(b.undo(e.id)).rejects.toEqual({ code: 'badRequest', message: 'It cannot be undone.' });
-    const expired = (await b.activity(100)).find((x) => x.undo === 'expired');
-    if (expired) await expect(b.undo(expired.id)).rejects.toMatchObject({ message: expect.stringContaining('no longer') });
-  });
-  it('releaseAction drops the rule action once', async () => {
-    const b = make();
-    const target = b.liveUpdate('summary').activeActions[0]!.target;
-    const entry = await b.releaseAction(target);
-    expect(entry.kind).toBe('release');
-    expect(b.liveUpdate('summary').activeActions).toEqual([]);
-    await expect(b.releaseAction(target)).rejects.toEqual({ code: 'notFound', message: 'That action was already released.' });
-  });
-});
-
-describe('rules and profiles', () => {
-  it('has the demo rules, profiles and Windows-vs-other protected names', async () => {
-    const rs = await make().rules();
-    expect(rs.profile).toBe('normal');
-    expect(rs.rules.length).toBeGreaterThan(0);
-    expect(rs.protected).toContain('Spotify');
-    expect((await make({ os: 'windows' }).rules()).protected).toContain('Spotify.exe');
-  });
-  it('setProfile switches, logs, and rejects unknown ids', async () => {
-    const b = make();
-    expect((await b.setProfile('gaming')).profile).toBe('gaming');
-    expect(b.liveUpdate('summary').profile).toBe('gaming');
-    expect((await b.activity(1))[0]!.title).toMatch(/Switched to the .* profile/);
-    await expect(b.setProfile('nonsense' as never)).rejects.toEqual({ code: 'badRequest', message: 'Unknown profile.' });
-  });
-  it('the meeting profile makes the build step aside', async () => {
-    const b = make();
-    const cpu = () => b.liveUpdate('summary').topCpu.find((g) => g.id === 'cargo')!.cpu;
-    const normal = cpu();
-    await b.setProfile('meeting');
-    expect(cpu()).toBeLessThan(normal);
-  });
-  it('pauseRules releases active actions and boosts the build; resume restores', async () => {
-    const b = make();
-    const cpu = () => b.liveUpdate('summary').topCpu.find((g) => g.id === 'cargo')!.cpu;
-    const normal = cpu();
-    expect((await b.pauseRules(true)).paused).toBe(true);
-    expect(b.liveUpdate('summary').activeActions).toEqual([]);
-    expect(b.liveUpdate('summary').rulesPaused).toBe(true);
-    expect(cpu()).toBeGreaterThan(normal);
-    expect((await b.pauseRules(false)).paused).toBe(false);
-    expect((await b.activity(1))[0]!.title).toBe('Resumed rules');
-  });
-  it('saveRules validates every rule', async () => {
-    const b = make();
-    const rs = await b.rules();
-    const rule = rs.rules[0]!;
-    await expect(b.saveRules({ ...rs, rules: [{ ...rule, name: ' ' }] })).rejects.toEqual({ code: 'badRequest', message: 'Every rule needs a name.' });
-    await expect(b.saveRules({ ...rs, rules: [{ ...rule, condition: { ...rule.condition, cpuAbove: 0 } }] })).rejects.toMatchObject({ message: expect.stringContaining('between 1 and 100%') });
-    await expect(b.saveRules({ ...rs, rules: [{ ...rule, condition: { ...rule.condition, cpuAbove: 101 } }] })).rejects.toMatchObject({ code: 'badRequest' });
-    await expect(b.saveRules({ ...rs, rules: [{ ...rule, ladder: [] }] })).rejects.toMatchObject({ message: expect.stringContaining('at least one step') });
-    const saved = await b.saveRules({ ...rs, protected: ['X'], builtInProtected: ['ignored'] });
-    expect(saved.protected).toEqual(['X']);
-    expect(saved.builtInProtected).not.toEqual(['ignored']);
-    expect((await b.rules()).protected).toEqual(['X']);
-  });
-});
-
-describe('cleanup', () => {
-  it('lists categories and marks the scheduled ones', async () => {
-    const b = make();
-    const cats = await b.cleanupCategories();
-    expect(cats.length).toBeGreaterThan(2);
-    const settings = await b.settings();
-    for (const c of cats) expect(c.scheduled).toBe(settings.cleanup.categories.includes(c.id));
-  });
-  it('scans all categories or the requested ones', async () => {
-    const b = make();
-    const all = await b.scanCleanup([]);
-    expect(all.results.length).toBe((await b.cleanupCategories()).length);
-    expect(all.totalBytes).toBe(all.results.reduce((a, r) => a + r.bytes, 0));
-    const ids = (await b.cleanupCategories()).slice(0, 1).map((c) => c.id);
-    const one = await b.scanCleanup(ids);
-    expect(one.results.map((r) => r.category)).toEqual(ids);
-  });
-  it('runs a quarantine cleanup, freeing bytes and logging an undoable entry', async () => {
-    const b = make();
-    const scan = await b.scanCleanup([]);
-    const items = scan.results.flatMap((r) => r.items).filter((i) => !i.path.includes('Cache')).slice(0, 3);
-    const quarantineBefore = (await b.quarantine()).length;
-    const out = await b.runCleanup(scan.id, items.map((i) => i.id), 'quarantine');
-    expect(out.deleted).toBe(items.length);
-    expect(out.freedBytes).toBe(items.reduce((a, i) => a + i.bytes, 0));
-    expect(out.quarantineId).toBeTruthy();
-    expect((await b.quarantine()).length).toBe(quarantineBefore + 1);
-    const entry = (await b.activity(1))[0]!;
-    expect(entry).toMatchObject({ kind: 'cleanup', undo: 'available', bytes: out.freedBytes });
-    // A scan can be used once.
-    await expect(b.runCleanup(scan.id, [], 'quarantine')).rejects.toEqual({ code: 'notFound', message: 'That scan expired. Scan again.' });
-  });
-  it('recycle-bin cleanups are not quarantined or undoable', async () => {
-    const b = make();
-    const scan = await b.scanCleanup([]);
-    const item = scan.results.flatMap((r) => r.items)[0]!;
-    const out = await b.runCleanup(scan.id, [item.id], 'recycleBin');
-    expect(out.quarantineId).toBeNull();
-    expect((await b.activity(1))[0]!.undo).toBe('notUndoable');
-  });
-  it('restoreQuarantine restores once', async () => {
-    const b = make();
-    const q = (await b.quarantine())[0]!;
-    await b.restoreQuarantine(q.id);
-    expect(await b.quarantine()).toEqual([]);
-    await expect(b.restoreQuarantine(q.id)).rejects.toMatchObject({ code: 'notFound' });
-  });
-  it('diskUsage returns a tree', async () => {
-    const root = await make().diskUsage(null);
-    expect(root.bytes).toBeGreaterThan(0);
-  });
 });
 
 describe('health, tuning, startup', () => {
@@ -538,59 +355,6 @@ describe('health, tuning, startup', () => {
     expect(h.score).toBe(100 - h.reasons.reduce((a, r) => a + r.impact, 0));
     const grade = h.score >= 80 ? 'good' : h.score >= 60 ? 'fair' : 'poor';
     expect(h.grade).toBe(grade);
-  });
-  it('applying a tuning suggestion changes the list, the score and the log; applying twice fails', async () => {
-    const b = make();
-    const before = await b.health();
-    const t = (await b.tuning()).find((x) => !x.applied)!;
-    const entry = await b.applyTuning(t.id);
-    expect(entry).toMatchObject({ kind: 'tuning', undo: 'available', title: t.title });
-    expect((await b.tuning()).find((x) => x.id === t.id)!.applied).toBe(true);
-    expect((await b.health()).score).toBeGreaterThanOrEqual(before.score);
-    await expect(b.applyTuning(t.id)).rejects.toEqual({ code: 'badRequest', message: 'It is already applied.' });
-    const reverted = await b.revertTuning(t.id);
-    expect(reverted.title).toBe(`Reverted: ${t.title}`);
-    await expect(b.revertTuning(t.id)).rejects.toEqual({ code: 'badRequest', message: 'It is not applied.' });
-    await expect(b.applyTuning('nope')).rejects.toMatchObject({ code: 'notFound' });
-  });
-  it('tuning that needs administrator rights waits for the helper, and a setting changed outside Dyno needs a forced revert', async () => {
-    const b = make();
-    const list = await b.tuning();
-    const admin = list.find((x) => x.needsAdmin && !x.applied)!;
-    expect(admin.blocked).toBeNull();
-    expect(list.find((x) => x.id === 'powerPlan')!.preview).toEqual(['Activate the power plan Balanced']);
-    await expect(b.applyTuning(admin.id)).rejects.toMatchObject({ code: 'accessDenied', message: expect.stringContaining('Settings > Helper') });
-    expect((await b.helperStatus()).state).toBe('notInstalled');
-    expect((await b.installHelper()).state).toBe('ready');
-    await expect(b.applyTuning(admin.id)).resolves.toMatchObject({ kind: 'tuning' });
-    expect((await b.uninstallHelper()).state).toBe('notInstalled');
-    await b.applyTuning('powerPlan');
-    b.changeTuningOutside('powerPlan');
-    expect((await b.tuning()).find((x) => x.id === 'powerPlan')!.changedOutside).toBe(true);
-    await expect(b.revertTuning('powerPlan')).rejects.toMatchObject({ code: 'badRequest', message: expect.stringContaining('Something else changed') });
-    expect((await b.revertTuning('powerPlan', true)).title).toContain('Reverted');
-    expect((await b.tuning()).find((x) => x.id === 'powerPlan')!.changedOutside).toBe(false);
-    b.changeTuningOutside('powerPlan'); // not applied: nothing to flag
-    expect((await b.tuning()).find((x) => x.id === 'powerPlan')!.changedOutside).toBe(false);
-  });
-  it('a startup item for every user needs the helper; the installing state is a pending prompt', async () => {
-    const b = new MockBackend({ latencyMs: 5, now: () => NOW });
-    const all = (await b.startupEntries()).find((e) => e.needsAdmin)!;
-    await expect(b.setStartupState(all.id, 'disabled')).rejects.toMatchObject({ code: 'accessDenied' });
-    expect((await b.installHelper()).state).toBe('installing');
-    expect((await b.helperStatus()).state).toBe('installing');
-    await new Promise((r) => setTimeout(r, 1000));
-    expect((await b.helperStatus()).state).toBe('ready');
-    await expect(b.setStartupState(all.id, 'disabled')).resolves.toMatchObject({ kind: 'startup' });
-  });
-  it('startup entries change state with the right wording', async () => {
-    const b = make();
-    const e = (await b.startupEntries())[0]!;
-    expect((await b.setStartupState(e.id, 'disabled')).title).toBe(`Disabled ${e.name} at sign-in`);
-    expect((await b.setStartupState(e.id, 'enabled')).title).toBe(`Enabled ${e.name} at sign-in`);
-    expect((await b.setStartupState(e.id, { delayed: 30 })).title).toBe(`Delayed by 30 s: ${e.name} at sign-in`);
-    expect((await b.startupEntries())[0]!.state).toEqual({ delayed: 30 });
-    await expect(b.setStartupState('nope', 'enabled')).rejects.toEqual({ code: 'notFound', message: 'That startup entry was removed.' });
   });
 });
 
@@ -609,7 +373,7 @@ describe('reports, settings, plugins, tray', () => {
     const before = await b.weeklyReport(1);
     expect(before.to).toBe(now.from);
     const empty = await b.weeklyReport(6);
-    expect(empty).toMatchObject({ nothingToReport: true, score: null, issues: [], changes: [] });
+    expect(empty).toMatchObject({ nothingToReport: true, score: null, issues: [] });
     await expect(b.weeklyReport(53)).rejects.toMatchObject({ code: 'badRequest' });
   });
   it('saveReport records the format and the week and answers the path', async () => {
@@ -631,23 +395,9 @@ describe('reports, settings, plugins, tray', () => {
     expect(o.issues[0]!.at).toBeGreaterThan(o.issues[1]!.at);
     expect((await b.issues({ days: 7 })).total).toBeLessThan(o.total);
     expect((await b.issues({ days: 999 })).days).toBe(90);
-    expect(await b.rescanIssues({ days: 14 })).toMatchObject({ days: 14 });
+    expect(await runJob(b, { rescanIssues: { query: { days: 14 } } })).toMatchObject({ issues: { days: 14 } });
     expect(await b.saveIssues(14)).toMatchObject({ count: 13 });
     expect(b.savedIssues).toEqual([14]);
-  });
-  it('unusual: protect adds to the protected list, ignore hides, restore brings back, forget starts learning again', async () => {
-    const b = make();
-    const first = await b.unusual(false);
-    const helper = first.items.find((i) => i.name === 'updater-helper')!;
-    await b.unusualAct(helper.key, 'protect');
-    expect((await b.rules()).protected).toContain(helper.exe);
-    expect((await b.unusual(false)).items.some((i) => i.key === helper.key)).toBe(false);
-    expect((await b.unusual(true)).items.some((i) => i.key === helper.key)).toBe(true);
-    await b.unusualAct(helper.key, 'restore');
-    expect((await b.unusual(false)).items.some((i) => i.key === helper.key)).toBe(true);
-    await expect(b.unusualAct('nope', 'ignore')).rejects.toMatchObject({ code: 'notFound' });
-    const forgotten = await b.forgetBaseline();
-    expect(forgotten).toMatchObject({ known: 0, items: [], learning: { active: true } });
   });
   it('whySlow names the apps behind a cause and how long it looked', async () => {
     const d = await make().whySlow();
@@ -672,8 +422,10 @@ describe('reports, settings, plugins, tray', () => {
   it('lists plugins and handles the tray commands', async () => {
     const b = make();
     expect((await b.plugins()).length).toBeGreaterThan(0);
-    await expect(b.trayOpenMain()).resolves.toBeUndefined();
-    await expect(b.trayQuit()).resolves.toBeUndefined();
+    await expect(b.showMainWindow()).resolves.toBeUndefined();
+    await expect(b.hideTray()).resolves.toBeUndefined();
+    await expect(b.fitTray(300)).resolves.toBeUndefined();
+    await expect(b.quitApp()).resolves.toBeUndefined();
   });
 });
 
@@ -699,18 +451,6 @@ describe('mock CPU layout', () => {
     expect(c.avg).toBeLessThanOrEqual(c.max);
   });
 
-  it('rules answers a copy, and switching a rule off releases what it had in effect', async () => {
-    const b = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000 });
-    const set = await b.rules();
-    set.paused = true;
-    expect((await b.rules()).paused).toBe(false);
-    expect(b.liveUpdate('summary').activeActions).toHaveLength(1);
-    set.paused = false;
-    set.rules = set.rules.map((r) => ({ ...r, enabled: false }));
-    await b.saveRules(set);
-    expect((await b.rules()).rules.every((r) => !r.enabled)).toBe(true);
-    expect(b.liveUpdate('summary').activeActions).toHaveLength(0);
-  });
 });
 
 describe('mock extras and backup health', () => {
@@ -735,17 +475,17 @@ describe('mock extras and backup health', () => {
 
   it('sleep, boot, usage, GPU and software answer realistic data', async () => {
     const b = fresh();
-    const sleep = await b.sleepBlockers();
+    const { sleep } = (await runJob(b, 'sleepBlockers')) as { sleep: SleepReport };
     expect(sleep.blockers.map((x) => x.name)).toContain('coreaudiod');
     expect(sleep.wakes.length).toBeGreaterThan(2);
-    const boot = await b.bootAnalysis();
+    const { boot } = (await runJob(b, 'bootAnalysis')) as { boot: BootReport };
     expect(boot.boots).toHaveLength(8);
     expect(boot.slowest[0]!.secs).toBeGreaterThan(boot.slowest[1]!.secs);
     expect(boot.verdict).toBeTruthy();
-    const usage = await b.appUsage();
+    const { appUsage: usage } = (await runJob(b, 'appUsage')) as { appUsage: UsageReport };
     expect(usage.apps.length).toBeGreaterThan(5);
     expect((await b.gpuProcesses()).processes[0]!.gpuPercent).toBeGreaterThan(0);
-    const sw = await b.softwareInventory();
+    const { software: sw } = (await runJob(b, 'softwareInventory')) as { software: SoftwareInventory };
     expect(sw.items.length).toBeGreaterThanOrEqual(40);
   });
 
@@ -754,40 +494,103 @@ describe('mock extras and backup health', () => {
     expect(await b.saveInventoryReport('markdown')).toMatchObject({ path: expect.stringMatching(/\.md$/) });
     expect(await b.saveInventoryReport('json')).toMatchObject({ path: expect.stringMatching(/\.json$/) });
     expect(b.savedInventories).toEqual(['markdown', 'json']);
-    expect(await b.pickFolder()).toBe('/Users/sam/Projects');
+    expect(await b.pickFolder()).toBe('/Users/alex/Projects');
     expect(b.pickedFolders).toBe(1);
   });
 
-  it('findFiles: modes, the size floor and a folder that must be absolute', async () => {
+  it('findFiles job: modes, the size floor and a folder that must be absolute', async () => {
     const b = fresh();
-    const both = await b.findFiles({ folder: '/Users/sam/Projects/', mode: 'both', minBytes: 50 * 1024 ** 2 });
-    expect(both.folder).toBe('/Users/sam/Projects');
+    const find = async (query: FinderQuery) => ((await runJob(b, { findFiles: { query } })) as { finder: FinderResult }).finder;
+    const both = await find({ folder: '/Users/alex/Projects/', mode: 'both', minBytes: 50 * 1024 ** 2 });
+    expect(both.folder).toBe('/Users/alex/Projects');
     expect(both.large).toHaveLength(8);
     expect(both.duplicates).toHaveLength(3);
+    expect(both.limit).toBeNull();
     expect(both.wastedBytes).toBe(both.duplicates.reduce((a, g) => a + g.wastedBytes, 0));
     expect(both.duplicates[0]!.files[0]!.modified).toBeLessThan(both.duplicates[0]!.files[1]!.modified);
-    expect((await b.findFiles({ folder: '/x', mode: 'large', minBytes: 0 })).duplicates).toEqual([]);
-    expect((await b.findFiles({ folder: '/x', mode: 'duplicates', minBytes: 0 })).large).toEqual([]);
-    const big = await b.findFiles({ folder: '/x', mode: 'both', minBytes: 1024 ** 3 });
+    expect((await find({ folder: '/x', mode: 'large', minBytes: 0 })).duplicates).toEqual([]);
+    expect((await find({ folder: '/x', mode: 'duplicates', minBytes: 0 })).large).toEqual([]);
+    const big = await find({ folder: '/x', mode: 'both', minBytes: 1024 ** 3 });
     expect(big.large.every((f) => f.bytes >= 1024 ** 3)).toBe(true);
-    await expect(b.findFiles({ folder: 'relative/path', mode: 'both', minBytes: 0 })).rejects.toMatchObject({ code: 'badRequest' });
+    // A blank folder is refused at the start; a relative one fails the job with what to fix.
+    await expect(b.startJob({ findFiles: { query: { folder: ' ', mode: 'both', minBytes: 0 } } })).rejects.toMatchObject({ code: 'badRequest' });
+    await expect(runJob(b, { findFiles: { query: { folder: 'relative/path', mode: 'both', minBytes: 0 } } })).rejects.toMatchObject({ message: 'Give the full path of the folder.' });
   });
 
-  it('removeFoundFiles: refuses stale scans, unknown files and every copy of a group, then removes', async () => {
-    const b = fresh();
-    await expect(b.removeFoundFiles('old', ['l1'], 'quarantine')).rejects.toMatchObject({ code: 'notFound' });
-    await expect(b.removeFoundFiles('scan-1', [], 'quarantine')).rejects.toMatchObject({ code: 'badRequest' });
-    await expect(b.removeFoundFiles('scan-1', ['nope'], 'quarantine')).rejects.toMatchObject({ code: 'badRequest' });
-    await expect(b.removeFoundFiles('scan-1', ['d2a', 'd2b'], 'quarantine')).rejects.toMatchObject({ message: expect.stringContaining('at least one copy') });
-    const out = await b.removeFoundFiles('scan-1', ['d2b', 'l1'], 'quarantine');
-    expect(out).toMatchObject({ deleted: 2, failed: [], quarantineId: 'q-find-1' });
-    expect(out.freedBytes).toBeGreaterThan(6 * 1024 ** 3);
-    expect((await b.removeFoundFiles('scan-1', ['l2'], 'recycleBin')).quarantineId).toBeNull();
-    const after = await b.findFiles({ folder: '/x', mode: 'both', minBytes: 0 });
-    expect(after.large.map((f) => f.id)).not.toContain('l1');
-    expect(after.duplicates.map((g) => g.files.length)).not.toContain(2);
-    // the last copy of the pair that lost one is now alone and no longer a group
-    await expect(b.removeFoundFiles('scan-1', ['d2a'], 'quarantine')).rejects.toMatchObject({ code: 'badRequest' });
+  describe('jobs (ER-17 to ER-19)', () => {
+    const rescan: JobSpec = { rescanIssues: { query: { days: 14 } } };
+    const statusOf = (b: MockBackend, id: number) => b.jobStatuses().find((j) => j.id === id)!;
+
+    it('a start answers at once with the id of a running job; the same work answers the same job; another search is busy', async () => {
+      const b = fresh();
+      b.jobSteps = 3;
+      b.jobStepMs = 50;
+      const first = await b.startJob(rescan);
+      expect(statusOf(b, first)).toMatchObject({ state: 'running', phase: null, kind: 'rescan-issues' });
+      expect(await b.startJob(rescan)).toBe(first);
+      await expect(b.startJob({ rescanIssues: { query: { days: 7 } } })).rejects.toMatchObject({ code: 'busy' });
+      // Different kinds run side by side.
+      expect(await b.startJob('refreshBackup')).not.toBe(first);
+    });
+
+    it('pushes every status to the sink in order: queued, running, a phase whose count only grows, done', async () => {
+      const heard: SuJobSnapshot[] = [];
+      const b = fresh({ jobs: { emit: (j: SuJobSnapshot) => heard.push(j) } });
+      b.jobSteps = 4;
+      const id = await b.startJob({ fileHash: { source: { path: '/Applications/Tool.app/tool' } } });
+      await new Promise((r) => setTimeout(r, 30));
+      const mine = heard.filter((j) => j.id === id);
+      expect(mine.map((j) => j.state)).toEqual(['queued', 'running', 'running', 'running', 'running', 'done']);
+      expect(mine.every((j, i) => i === 0 || j.seq > mine[i - 1]!.seq)).toBe(true);
+      const counts = mine.flatMap((j) => (j.state === 'running' && j.phase ? [j.phase.done] : []));
+      expect(counts).toHaveLength(3);
+      expect(counts.every((c, i) => i === 0 || c >= counts[i - 1]!)).toBe(true);
+      expect(mine[2]).toMatchObject({ phase: { id: 'hash', unit: 'bytes', total: 48_231_424 } });
+      expect(await b.jobResult(id)).toMatchObject({ fileHash: { bytes: 48_231_424 } });
+    });
+
+    it('Cancel ends a job as cancelled, it has no result, and a new search can start', async () => {
+      const b = fresh();
+      b.jobSteps = 5;
+      b.jobStepMs = 50;
+      const id = await b.startJob({ findFiles: { query: { folder: '/x', mode: 'both', minBytes: 0 } } });
+      expect(b.cancelJob(id)).toBe(true);
+      expect(statusOf(b, id).state).toBe('cancelled');
+      await expect(b.jobResult(id)).rejects.toMatchObject({ code: 'notFound' });
+      expect(b.cancelJob(id)).toBe(false);
+      expect(b.cancelJob(999)).toBe(false);
+      expect(await b.startJob({ findFiles: { query: { folder: '/y', mode: 'both', minBytes: 0 } } })).not.toBe(id);
+    });
+
+    it('a stalled mock reports the first status and nothing more', async () => {
+      const b = fresh();
+      b.jobsStalled = true;
+      const id = await b.startJob('sleepBlockers');
+      await new Promise((r) => setTimeout(r, 20));
+      expect(statusOf(b, id)).toMatchObject({ state: 'running', phase: null, seq: 2 });
+    });
+
+    it('the four tool reads and the backup check hand over their reports; a check of the backups sets the time only when done', async () => {
+      const b = fresh();
+      expect(await runJob(b, 'sleepBlockers')).toMatchObject({ sleep: { blockers: expect.any(Array) } });
+      expect(await runJob(b, 'bootAnalysis')).toMatchObject({ boot: { boots: expect.any(Array) } });
+      expect(await runJob(b, 'appUsage')).toMatchObject({ appUsage: { apps: expect.any(Array) } });
+      expect(await runJob(b, 'softwareInventory')).toMatchObject({ software: { items: expect.any(Array) } });
+      b.jobSteps = 2;
+      b.jobStepMs = 5;
+      const before = (await b.backup()).checkedAt;
+      const id = await b.startJob('refreshBackup');
+      expect((await b.backup()).checkedAt).toBe(before);
+      await new Promise((r) => setTimeout(r, 40));
+      expect(statusOf(b, id).state).toBe('done');
+      expect((await b.backup()).checkedAt).toBe(NOW);
+    });
+
+    it('only the last few finished jobs are kept', async () => {
+      const b = fresh();
+      for (let i = 0; i < 20; i++) await runJob(b, { fileHash: { source: { path: `/a/${i}` } } });
+      expect(b.jobStatuses()).toHaveLength(16);
+    });
   });
 
   it('maintenance: open inside a window, closed outside, always open when off', async () => {
@@ -836,8 +639,8 @@ describe('mock extras and backup health', () => {
     expect(r.statuses[0]!.nextStep).toBeNull();
     expect(r.statuses[1]!.nextStep).toContain('never starts a backup');
     expect(r.checkedAt).toBe(NOW - 40 * 60_000);
-    const checked = await b.refreshBackup();
-    expect(checked.checkedAt).toBe(NOW);
+    const checked = (await runJob(b, 'refreshBackup')) as { backup: BackupReport };
+    expect(checked.backup.checkedAt).toBe(NOW);
     expect((await b.backup()).checkedAt).toBe(NOW);
     const none = await fresh({ backup: 'none' }).backup();
     expect(none.statuses).toEqual([]);
@@ -848,15 +651,6 @@ describe('mock extras and backup health', () => {
     expect(mockOptionsFromUrl('?latency=0').backup).toBeUndefined();
   });
 
-  it('rules carry a temporary one and the action carries its measured CPU', async () => {
-    const b = fresh();
-    const temp = (await b.rules()).rules.find((r) => r.expiresAt !== null)!;
-    expect(temp.enabled).toBe(true);
-    expect(temp.expiresAt! - NOW).toBe(2 * 3_600_000 + 10 * 60_000);
-    expect(b.liveUpdate('summary').activeActions[0]).toMatchObject({ cpuBefore: 78, cpuAfter: 31 });
-    const act = (await b.activity(50)).find((a) => a.detail.startsWith('Measured:'))!;
-    expect(act.detail).toBe('Measured: Chrome used 78 % CPU before and 31 % 21 s after.');
-  });
 });
 
 describe('hardware: throttling, lifespan and baselines', () => {

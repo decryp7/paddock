@@ -55,31 +55,34 @@ export function executableIn(dir, id) {
 }
 
 /**
- * Installs the pinned build into `dir` unless that version is already there. `fetchBytes(url)` and `extract(zip, dir)` are
- * injectable. Returns the executable path.
+ * Installs the pinned build into `dir` unless that version is already there, and lets app containers read it either way
+ * (`grantCommand`). `fetchBytes(url)`, `extract(zip, dir)` and `grant(dir)` are injectable. Returns the executable path.
  */
-export async function install({ pin, dir, id = platformId(), fetchBytes = defaultFetch, extract = defaultExtract }) {
+export async function install({ pin, dir, id = platformId(), fetchBytes = defaultFetch, extract = defaultExtract, grant = defaultGrant }) {
   const sha = pin.sums[id];
   if (!sha) throw new Error(`no checksum for ${id} in the pin`);
-  return installBuild({ version: pin.version, url: urlFor(pin, id), sha, id, dir, fetchBytes, extract });
+  return installBuild({ version: pin.version, url: urlFor(pin, id), sha, id, dir, fetchBytes, extract, grant });
 }
 
 /**
  * Installs the build a `paddock-runtime` catalogue pins for `key` (this machine's by default) into `dir`. Returns the executable.
  */
-export async function installFromCatalogue({ text, dir, key = platformKey(), fetchBytes = defaultFetch, extract = defaultExtract }) {
+export async function installFromCatalogue({ text, dir, key = platformKey(), fetchBytes = defaultFetch, extract = defaultExtract, grant = defaultGrant }) {
   const cat = readCatalogue(text);
   const e = entryFor(cat, key);
   const id = CFT_PLATFORMS[key];
   if (!id) throw new Error(`Chrome for Testing has no build for ${key}`);
   if (!/^[0-9a-f]{64}$/.test(e.sha256 ?? '')) throw new Error(`the checksum for ${key} is not a SHA-256`);
-  return installBuild({ version: cat.version, url: e.url, sha: e.sha256, id, dir, fetchBytes, extract });
+  return installBuild({ version: cat.version, url: e.url, sha: e.sha256, id, dir, fetchBytes, extract, grant });
 }
 
-async function installBuild({ version, url, sha, id, dir, fetchBytes, extract }) {
+async function installBuild({ version, url, sha, id, dir, fetchBytes, extract, grant }) {
   const exe = executableIn(dir, id);
   const stamp = join(dir, '.pinned-version');
-  if (existsSync(stamp) && readFileSync(stamp, 'utf8').trim() === version && existsSync(exe)) return exe;
+  if (existsSync(stamp) && readFileSync(stamp, 'utf8').trim() === version && existsSync(exe)) {
+    grant(dir);
+    return exe;
+  }
   const bytes = await fetchBytes(url);
   const got = createHash('sha256').update(bytes).digest('hex');
   if (got !== sha) throw new Error(`checksum mismatch for ${url}: ${got}`);
@@ -95,7 +98,36 @@ async function installBuild({ version, url, sha, id, dir, fetchBytes, extract })
     rmSync(work, { recursive: true, force: true });
   }
   if (!existsSync(exe)) throw new Error(`the archive did not contain ${exe}`);
+  grant(dir);
   return exe;
+}
+
+/**
+ * The program and arguments that let Chrome's app-container sandboxes read and run the browser in `dir` (Windows only;
+ * `null` elsewhere). Chrome checks that an app container can read its program before it starts a sandboxed helper such
+ * as the network service; a folder under the runner's user profile grants app containers nothing, so on Windows CI the
+ * check failed in every browser ("Sandbox cannot access executable", runs 7149 and 7154) and Chrome started the network
+ * service again unsandboxed. Grants read and execute, inherited, to ALL APPLICATION PACKAGES (S-1-15-2-1) and ALL
+ * RESTRICTED APPLICATION PACKAGES (S-1-15-2-2), as Program Files has them. Idempotent.
+ */
+export function grantCommand(dir, platform = process.platform, env = process.env) {
+  if (platform !== 'win32') return null;
+  const icacls = win32.join(env.SystemRoot ?? 'C:\\Windows', 'System32', 'icacls.exe');
+  return [icacls, [dir, '/grant', '*S-1-15-2-1:(OI)(CI)(RX)', '/grant', '*S-1-15-2-2:(OI)(CI)(RX)', '/Q']];
+}
+
+/**
+ * Runs `grantCommand` for `dir`. The grant is defence in depth (Chromium builds start without the testing config that
+ * turns the network-service sandbox on, so CI run 7170's browsers never sandboxed it), so a failed `icacls` warns on
+ * stderr and the install carries on. `command`, `run` and `warn` are injectable.
+ */
+export function defaultGrant(dir, { command = grantCommand(dir), run = (cmd, args) => execFileSync(cmd, args, { timeout: 5 * 60 * 1000 }), warn = (m) => console.warn(m) } = {}) {
+  if (!command) return;
+  try {
+    run(command[0], command[1]);
+  } catch (e) {
+    warn(`install-test-browser: warning: could not let app containers read ${dir} (${e.message}); the browser still works, but a sandboxed helper of it may not start`);
+  }
 }
 
 async function defaultFetch(url) {

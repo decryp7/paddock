@@ -1,15 +1,15 @@
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMenuTrigger } from '@angular/cdk/menu';
-import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
+import { CdkFixedSizeVirtualScroll, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
 import { NgTemplateOutlet } from '@angular/common';
 import {
-  afterEveryRender,
   afterNextRender,
   ChangeDetectionStrategy,
+  isDevMode,
   Component,
   computed,
   contentChild,
   contentChildren,
   DestroyRef,
+  effect,
   Directive,
   ElementRef,
   inject,
@@ -19,8 +19,16 @@ import {
   output,
   signal,
   TemplateRef,
+  untracked,
   viewChild,
 } from '@angular/core';
+import { MatIconButton } from '@angular/material/button';
+import { MatContextMenuTrigger, MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
+import { MatSort, MatSortHeader, type Sort } from '@angular/material/sort';
+import { MatCell, MatCellDef, MatColumnDef, MatHeaderCell, MatHeaderCellDef, MatHeaderRow, MatHeaderRowDef, MatRow, MatRowDef, MatTable } from '@angular/material/table';
+import { MatTooltip } from '@angular/material/tooltip';
+import { PdActionTip } from './action-tip';
+import { PdContextMenuKeys } from '@decryp7/paddock-ui/material';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdMiddleText } from './middle-text';
 import {
@@ -32,17 +40,18 @@ import {
   fromControl,
   groupItems,
   inlineActions,
-  isMenuKey,
   menuActions,
   nextIndex,
-  nextSort,
+  parentIndex,
   PD_HEADER_HEIGHT,
   rowHeightFor,
   PD_FOLD_EXTRA,
   shownColumns,
   sortRows,
+  treePlaces,
   type PdColumn,
   type PdRowAction,
+  type PdRowTree,
   type PdSort,
   type PdTableItem,
 } from './model';
@@ -76,22 +85,38 @@ function readDensity(): number {
 
 const NO_ACTIONS = (): readonly PdRowAction[] => [];
 
-/** Above this many lines the rows are drawn by a virtual scroll viewport (`virtual="auto"`). */
+/** Above this many lines only the rows in view are drawn (`virtual="auto"`). */
 export const PD_TABLE_VIRTUAL_FROM = 100;
 
+/** A line the table draws: a row or a group heading, or a placeholder while the rows load. */
+type PdLine<T> = PdTableItem<T> | { readonly kind: 'skeleton'; readonly n: number };
+
+/** The five placeholder lines of the loading state. */
+const SKELETON: readonly PdLine<never>[] = [0, 1, 2, 3, 4].map((n) => ({ kind: 'skeleton', n }));
+
+/** The column id of the row actions (not a key an app gives its columns). */
+const ACTIONS_COLUMN = 'pd-actions';
+
+/** How many rows the virtual viewport draws beyond the visible ones. */
+const VIRTUAL_BUFFER_ROWS = 8;
+
 /**
- * The family's data table (plan X21; the UI review's rules 2, 5, 6, 7, 8, 9): one sticky header with sentence-case, sortable
- * columns (ascending, descending, none: `aria-sort`), a filter field, a column menu, optional group rows, uniform rows
- * (32, 40 or 48 px), numbers right-aligned in tabular figures, text that never wraps (truncated with the full value as the
- * tooltip, or shortened in the middle for paths and ids) and no horizontal scroll at any width: columns with `hideBelow`
- * drop out as the table narrows (it follows its own width, not the window's).
+ * The family's data table (plan X21; the UI review's rules 2, 5, 6, 7, 8, 9; ADR 0027), built on Angular Material's table
+ * (`mat-table`, the CDK table) with its sticky header row, `matSort` for sorting (`aria-sort` on the headers), `mat-menu` for the
+ * column and row menus (also on right-click, `matContextMenuTriggerFor`), `matTooltip` for the full text of a cell and
+ * `matIconButton` for the row actions. What Material does not have is built on top: group rows, text shortened in the middle,
+ * columns that drop out as the table narrows (`hideBelow`: it follows its own width, not the window's), the family's uniform row
+ * heights (24, 32 or 36 px, a 28 px header) and the grid keyboard.
+ *
+ * The rows are always drawn in the CDK virtual scroll viewport, with the header row stuck to its top the way Material documents
+ * it (the CDK table keeps its sticky header in place while the viewport moves the rows). Above 100 lines (`virtual="auto"`) only
+ * the rows in view are drawn; below, or with `virtual="false"`, the viewport's buffer covers every row, so all are drawn.
  *
  * Rows are a `grid` with one tab stop (roving): Up, Down, Page Up, Page Down, Home and End move between rows, Enter opens
- * the row (`rowActivate`; on a group row it folds the group), and Shift+F10 or the Menu key (the browser's `contextmenu`)
- * opens the row's menu at the row, like a right-click. Row actions: up to two icon buttons on hover and focus, a "..." button
- * (40 % opacity at rest, so touch and keyboard can reach it) and the same list as the menu; destructive items only in the
- * menu, in danger text (`action` carries the choice, the app confirms). Long tables (above 100 lines) are drawn by the CDK
- * virtual scroll viewport; keyboard navigation scrolls to rows that are not drawn.
+ * the row (`rowActivate`; on a group row it folds the group), and Shift+F10 or the Menu key opens the row's menu at the row,
+ * like a right-click. Row actions: up to two icon buttons on hover and focus, a "..." button (always visible in its resting
+ * colour, so touch and keyboard can reach it) and the same list as the menu; destructive items only in the menu, in danger text
+ * (`action` carries the choice, the app confirms).
  *
  * ```html
  * <pd-table [rows]="plugins()" [columns]="columns" [rowKey]="key" [rowActions]="actions" label="Plugins" (rowActivate)="open($event)" (action)="run($event)" />
@@ -100,11 +125,40 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
 @Component({
   selector: 'pd-table',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdStatusGlyph, NgTemplateOutlet, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMenuTrigger, CdkContextMenuTrigger, PdGlyph, PdMiddleText],
-  host: { '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"' },
+  imports: [
+    PdStatusGlyph,
+    NgTemplateOutlet,
+    CdkVirtualScrollViewport,
+    CdkFixedSizeVirtualScroll,
+    MatTable,
+    MatColumnDef,
+    MatHeaderCellDef,
+    MatHeaderCell,
+    MatCellDef,
+    MatCell,
+    MatHeaderRowDef,
+    MatHeaderRow,
+    MatRowDef,
+    MatRow,
+    MatSort,
+    MatSortHeader,
+    MatMenu,
+    MatMenuItem,
+    MatMenuTrigger,
+    MatMenuContent,
+    MatContextMenuTrigger,
+    PdContextMenuKeys,
+    MatTooltip,
+    PdActionTip,
+    MatIconButton,
+    PdGlyph,
+    PdMiddleText,
+  ],
+  host: { '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"', '(document:pointerdown)': 'onPointerDownAnywhere($event)' },
   template: `
+    @if (toolbar()) {
     <div class="pd-toolbar">
-      @if (filterable()) {
+      @if (filterable() && !tree()) {
         <label class="pd-filter">
           <pd-glyph name="search" [size]="14" />
           <input class="pd-filter-input" type="search" autocomplete="off" [attr.aria-label]="t.filter" [placeholder]="t.filter" [value]="query()" [disabled]="state() !== 'ready' || !rows().length" (input)="query.set($any($event.target).value)" />
@@ -119,254 +173,269 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
       <span class="pd-spacer"></span>
       <ng-content select="[pdTableToolbar]" />
       @if (choosable().length) {
-        <button type="button" class="pd-tool" [cdkMenuTriggerFor]="columnsMenu" [attr.aria-label]="t.columns" [attr.title]="t.columns" data-testid="table-columns">
+        <button type="button" class="pd-tool" [matMenuTriggerFor]="columnsMenu" [attr.aria-label]="t.columns" [matTooltip]="t.columns" data-testid="table-columns">
           <pd-glyph name="columns" [size]="14" /><span class="pd-tool-text">{{ t.columns }}</span>
         </button>
       }
     </div>
-    <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the grid only receives keydown bubbling from its rows and cells, which are the focus stops (roving tabindex) -->
-    <div #grid class="pd-grid" role="grid" [attr.aria-label]="label()" [attr.aria-busy]="state() === 'loading'" [attr.aria-rowcount]="items().length + 1" [style.--pd-cols]="gridTemplate()" [style.--pd-gutter.px]="gutter()" (keydown)="onKeydown($event)">
-      <div class="pd-header" role="row" aria-rowindex="1">
+    }
+    <!-- One grid (a tree grid when grouped: group rows expand, their rows are a level below): a header-only table above the scrolling body, so the header never moves with the rows (ADR 0027). There is no
+         horizontal scroll (columns drop out instead), so the two tables share their tracks (--pd-cols) and need no syncing
+         sideways; the header keeps the width of the body's scrollbar (--pd-gutter). -->
+    <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the grid only receives keydown bubbling from its rows and sort headers, which are the focus stops (roving tabindex) -->
+    <div
+      class="pd-grid"
+      [attr.role]="groupBy() || tree() ? 'treegrid' : 'grid'"
+      [style.--pd-cols]="gridTemplate()"
+      [style.--pd-gutter.px]="gutter()"
+      [attr.aria-label]="label()"
+      [attr.aria-busy]="state() === 'loading'"
+      [attr.aria-rowcount]="items().length + 1"
+      (keydown)="onKeydown($event)"
+      (focusin)="onFocusIn($event)"
+      (focusout)="onFocusOut($event)"
+    >
+      <mat-table role="rowgroup" class="pd-head-table" [dataSource]="noLines" matSort [matSortDisableClear]="!sortClearable()" [matSortActive]="sort()?.key ?? ''" [matSortDirection]="sort()?.direction ?? ''" (matSortChange)="onSort($event)">
         @for (c of columns2(); track c.key) {
-          <div role="columnheader" class="pd-th" [class.pd-end]="c.align === 'end'" [attr.aria-sort]="ariaSort(c)">
+          <ng-container [matColumnDef]="c.key">
             @if (c.sortable !== false) {
-              <button type="button" class="pd-sort" [class.pd-sorted]="sort()?.key === c.key" (click)="sortBy(c.key)" [attr.aria-label]="sortLabel(c)">
+              <mat-header-cell *matHeaderCellDef mat-sort-header class="pd-th pd-sort" [class.pd-end]="c.align === 'end'" [class.pd-sorted]="sort()?.key === c.key" [arrowPosition]="c.align === 'end' ? 'before' : 'after'" [start]="c.sortStart ?? 'asc'" [sortActionDescription]="sortLabel(c)">
                 <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
-                <pd-glyph class="pd-sort-icon" [name]="sort()?.key !== c.key ? 'sort' : sort()?.direction === 'asc' ? 'chevron-up' : 'chevron-down'" [size]="14" />
-              </button>
+              </mat-header-cell>
             } @else {
-              <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
+              <mat-header-cell *matHeaderCellDef class="pd-th" [class.pd-end]="c.align === 'end'">
+                <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
+              </mat-header-cell>
             }
-          </div>
+          </ng-container>
         }
         @if (actionWidth()) {
-          <div role="columnheader" class="pd-th pd-actions-th"><span class="pd-sr">{{ t.actions }}</span></div>
+          <ng-container [matColumnDef]="actionsColumn">
+            <mat-header-cell *matHeaderCellDef class="pd-th pd-actions-th"><span class="pd-sr">{{ t.actions }}</span></mat-header-cell>
+          </ng-container>
         }
-      </div>
-      @switch (state()) {
-        @case ('loading') {
-          <div class="pd-body" role="rowgroup" data-testid="table-loading">
-            @for (n of [0, 1, 2, 3, 4]; track n) {
-              <div role="row" class="pd-row pd-skeleton">
-                @for (c of columns2(); track c.key) {
-                  <div role="gridcell" class="pd-cell"><span class="pd-skel" [class.pd-skel-end]="c.align === 'end'" [style.width.%]="40 + ((n * 17 + c.key.length * 11) % 50)"></span></div>
+        <mat-header-row *matHeaderRowDef="displayed()" class="pd-header" aria-rowindex="1" />
+      </mat-table>
+      <cdk-virtual-scroll-viewport class="pd-body" [itemSize]="rowPx()" [minBufferPx]="bufferPx()" [maxBufferPx]="bufferPx() * 2" [style.height.px]="bodyHeight()" [attr.data-testid]="state() === 'loading' ? 'table-loading' : null">
+        <!-- A row group only while it has rows anyone can read: not when empty (the state is said below) or loading (placeholders are hidden). -->
+        <mat-table class="pd-body-table" [attr.role]="state() === 'ready' && lines().length ? 'rowgroup' : null" [dataSource]="lines()" [trackBy]="trackLine" (contentChanged)="onRowsDrawn()">
+          @for (c of columns2(); track c.key; let k = $index) {
+            <ng-container [matColumnDef]="c.key">
+              <mat-cell *matCellDef="let line" class="pd-cell" [attr.role]="cellRole" [class.pd-end]="c.align === 'end'" [class.pd-first]="k === 0" [style.--pd-tree-level]="k === 0 ? indent(line) : null" [class.pd-group-cell]="line.kind === 'group' && k === 0" [class.pd-group-summary]="line.kind === 'group' && k > 0">
+                @switch (line.kind) {
+                  @case ('skeleton') {
+                    <span class="pd-skel" [class.pd-skel-end]="c.align === 'end'" [style.width.%]="40 + ((line.n * 17 + c.key.length * 11) % 50)"></span>
+                  }
+                  @case ('group') {
+                    @if (k === 0) {
+                      <button type="button" class="pd-group-toggle" tabindex="-1" [attr.aria-expanded]="!line.collapsed" [attr.aria-label]="line.label || t.none">
+                        <pd-glyph [name]="line.collapsed ? 'chevron-right' : 'chevron-down'" [size]="14" />
+                      </button>
+                      <span class="pd-group-name" [class.pd-mono]="isMono(line.key)">{{ line.label || t.none }}</span>
+                      <span class="pd-group-count">{{ formatCount(line.count) }}</span>
+                    } @else {
+                      <span class="pd-text">{{ line.cells?.[c.key] ?? '' }}</span>
+                    }
+                  }
+                  @default {
+                    @let custom = customCells().get(c.key);
+                    @if (custom) {
+                      <ng-container *ngTemplateOutlet="custom; context: { $implicit: line.row, column: c, folded: folded() }" />
+                    } @else if (c.truncate === 'middle') {
+                      <pd-middle-text [value]="text(c, line.row)" />
+                    } @else {
+                      <span class="pd-text" [attr.data-full-text]="text(c, line.row)" [matTooltip]="text(c, line.row)" [matTooltipDisabled]="true" matTooltipShowDelay="500" #tip="matTooltip" (mouseenter)="tip.disabled = !isTruncated($event)" (mouseleave)="tip.disabled = true">{{ text(c, line.row) }}</span>
+                    }
+                  }
                 }
-                @if (actionWidth()) { <div role="gridcell" class="pd-cell"></div> }
-              </div>
-            }
-          </div>
-        }
-        @case ('error') {
-          <div class="pd-body" role="rowgroup">
-            <div role="row" class="pd-msg-row"><div role="gridcell" class="pd-empty pd-error" data-testid="table-error">
-              <pd-status-glyph status="error" [size]="14" /><span role="alert">{{ errorText() || t.error }}</span>
-              <button type="button" class="pd-retry" (click)="retry.emit()">{{ t.retry }}</button>
-            </div></div>
-          </div>
-        }
-        @default {
-          @if (isVirtual()) {
-            <cdk-virtual-scroll-viewport class="pd-body" role="rowgroup" [itemSize]="rowPx()" [style.height.px]="bodyHeight()">
-              <ng-container *cdkVirtualFor="let item of items(); let i = index; trackBy: trackItem">
-                <ng-container *ngTemplateOutlet="line; context: { $implicit: item, index: i }" />
-              </ng-container>
-            </cdk-virtual-scroll-viewport>
-          } @else {
-            <div class="pd-body" role="rowgroup" [style.max-height.px]="maxHeight()">
-              @for (item of items(); track trackItem($index, item)) {
-                <ng-container *ngTemplateOutlet="line; context: { $implicit: item, index: $index }" />
-              }
-            </div>
-          }
-          @if (!items().length) {
-            <div class="pd-body" role="rowgroup">
-              <div role="row" class="pd-msg-row"><div role="gridcell" class="pd-empty">
-                @if (rows().length) {
-                  <p role="status">{{ t.noMatch }}</p>
-                } @else if (emptySlot()) {
-                  <ng-content select="[pdTableEmpty]" />
-                } @else {
-                  <p role="status">{{ emptyText() }}</p>
-                }
-              </div></div>
-            </div>
-          }
-        }
-      }
-    </div>
-
-    <ng-template #line let-item let-i="index">
-      @if (item.kind === 'group') {
-        <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events -- a group row is toggled from the keyboard by the grid keydown handler (Enter and arrows), and its tabindex is bound -->
-        <div role="row" class="pd-row pd-group" [class.pd-group-grid]="!!item.cells" [attr.aria-rowindex]="i + 2" [attr.data-index]="i" [attr.tabindex]="i === active() ? 0 : -1" (click)="toggleGroup(item.key)">
-          <div role="gridcell" class="pd-group-cell">
-            <button type="button" class="pd-group-toggle" tabindex="-1" [attr.aria-expanded]="!item.collapsed" [attr.aria-label]="item.label || t.none">
-              <pd-glyph [name]="item.collapsed ? 'chevron-right' : 'chevron-down'" [size]="14" />
-            </button>
-            <span class="pd-group-name" [class.pd-mono]="isMono(item.key)">{{ item.label || t.none }}</span>
-            <span class="pd-group-count">{{ formatCount(item.count) }}</span>
-          </div>
-          @if (item.cells) {
-            @for (c of columns2(); track c.key; let k = $index) {
-              @if (k > 0) {
-                <div role="gridcell" class="pd-cell pd-group-summary" [class.pd-end]="c.align === 'end'">{{ item.cells[c.key] ?? '' }}</div>
-              }
-            }
-            @if (actionWidth()) {
-              <div role="gridcell" class="pd-cell"></div>
-            }
-          }
-        </div>
-      } @else {
-        @let row = item.row;
-        @let actions = actionsOf(row);
-        <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events -- a row is activated from the keyboard by the grid keydown handler (Enter), and its tabindex is bound -->
-        <div
-          role="row"
-          class="pd-row"
-          [class.pd-folded]="folded()"
-          [class.pd-selected]="selectedKey() === rowKey()(row)"
-          [attr.aria-rowindex]="i + 2"
-          [attr.aria-selected]="selectedKey() === rowKey()(row)"
-          [attr.data-index]="i"
-          [attr.data-key]="rowKey()(row)"
-          [attr.tabindex]="i === active() ? 0 : -1"
-          [cdkContextMenuTriggerFor]="rowMenu"
-          [cdkContextMenuDisabled]="!actions.length"
-          [cdkContextMenuTriggerData]="{ row }"
-          (click)="onRowClick(row, $event, i)"
-        >
-          @for (c of columns2(); track c.key) {
-            <div role="gridcell" class="pd-cell" [class.pd-end]="c.align === 'end'" [class.pd-first]="$first">
-              @let custom = customCells().get(c.key);
-              @if (custom) {
-                <ng-container *ngTemplateOutlet="custom; context: { $implicit: row, column: c, folded: folded() }" />
-              } @else if (c.truncate === 'middle') {
-                <pd-middle-text [value]="text(c, row)" />
-              } @else {
-                <span class="pd-text" [attr.title]="text(c, row)">{{ text(c, row) }}</span>
-              }
-            </div>
+              </mat-cell>
+            </ng-container>
           }
           @if (actionWidth()) {
-            <div role="gridcell" class="pd-cell pd-actions">
-              @if (actions.length) {
-                @if (!narrow()) {
-                  @for (a of inline(actions); track a.id) {
-                    <button type="button" class="pd-icon-btn pd-inline" [attr.aria-label]="a.label" [attr.title]="a.label" [disabled]="a.disabled" (click)="act(a, row, $event)">
-                      <pd-glyph [name]="a.icon ?? ''" [size]="14" />
+            <ng-container [matColumnDef]="actionsColumn">
+              <mat-cell *matCellDef="let line" class="pd-cell pd-actions" [attr.role]="cellRole" pdActionTip>
+                @if (line.kind === 'row') {
+                  @let actions = actionsOf(line.row);
+                  @if (actions.length) {
+                    @if (!narrow()) {
+                      @for (a of inline(actions); track a.id) {
+                        <button type="button" matIconButton tabindex="-1" class="pd-icon-btn pd-inline" [attr.aria-label]="a.label" [disabled]="a.disabled" (click)="act(a, line.row, $event)">
+                          <pd-glyph [name]="a.icon ?? ''" [size]="14" />
+                        </button>
+                      }
+                    }
+                    <button type="button" matIconButton tabindex="-1" class="pd-icon-btn pd-more" [attr.aria-label]="t.more" [matMenuTriggerFor]="rowMenu" [matMenuTriggerData]="{ row: line.row }">
+                      <pd-glyph name="more" [size]="16" />
                     </button>
                   }
                 }
-                <button type="button" class="pd-icon-btn pd-more" [attr.aria-label]="t.more" [attr.title]="t.more" aria-haspopup="menu" [cdkMenuTriggerFor]="rowMenu" [cdkMenuTriggerData]="{ row }" (click)="$event.stopPropagation()">
-                  <pd-glyph name="more" [size]="16" />
-                </button>
-              }
-            </div>
+              </mat-cell>
+            </ng-container>
           }
-        </div>
+          <mat-row
+            *matRowDef="let line; columns: displayed()"
+            class="pd-row"
+            [class.pd-group]="line.kind === 'group'"
+            [class.pd-group-grid]="line.kind === 'group' && !!line.cells"
+            [class.pd-span]="spans(line)"
+            [class.pd-skeleton]="line.kind === 'skeleton'"
+            [class.pd-folded]="folded() && line.kind === 'row'"
+            [class.pd-selected]="isSelected(line)"
+            [class.pd-menu-open]="line.kind === 'row' && menuKey() === rowKey()(line.row)"
+            [attr.aria-hidden]="line.kind === 'skeleton' ? 'true' : null"
+            [attr.aria-expanded]="line.kind === 'group' ? !line.collapsed : treeExpanded(line)"
+            [attr.aria-level]="treeLevel(line)"
+            [attr.aria-posinset]="treePlace().get(line)?.pos ?? null"
+            [attr.aria-setsize]="treePlace().get(line)?.size ?? null"
+            [attr.aria-rowindex]="line.kind === 'skeleton' ? null : indexOf(line) + 2"
+            [attr.data-index]="line.kind === 'skeleton' ? null : indexOf(line)"
+            [attr.data-key]="line.kind === 'row' ? rowKey()(line.row) : null"
+            [attr.aria-selected]="line.kind === 'row' ? isSelected(line) : null"
+            [attr.tabindex]="line.kind === 'skeleton' ? null : indexOf(line) === active() ? 0 : -1"
+            pdContextMenuKeys
+            [matContextMenuTriggerFor]="rowMenu"
+            [matContextMenuTriggerData]="{ row: line.row }"
+            [matContextMenuTriggerDisabled]="line.kind !== 'row' || !actionsOf(line.row).length"
+            (menuOpened)="menuKey.set(line.kind === 'row' ? rowKey()(line.row) : null)"
+            (menuClosed)="menuKey.set(null)"
+            (click)="onLineClick(line, $event)"
+          />
+        </mat-table>
+      </cdk-virtual-scroll-viewport>
+      <!-- The error and empty states are a row of the grid, across its columns. -->
+      @if (state() === 'error') {
+        <div role="row" class="pd-msg-row"><div role="gridcell" class="pd-empty pd-error" data-testid="table-error">
+          <pd-status-glyph status="error" [size]="14" /><span role="alert">{{ errorText() || t.error }}</span>
+          <button type="button" class="pd-retry" (click)="retry.emit()">{{ t.retry }}</button>
+        </div></div>
+      } @else if (state() === 'ready' && !items().length) {
+        <div role="row" class="pd-msg-row"><div role="gridcell" class="pd-empty">
+          @if (rows().length) {
+            <p role="status">{{ t.noMatch }}</p>
+          } @else if (emptySlot()) {
+            <ng-content select="[pdTableEmpty]" />
+          } @else {
+            <p role="status">{{ emptyText() }}</p>
+          }
+        </div></div>
       }
-    </ng-template>
+    </div>
 
-    <ng-template #rowMenu let-row="row">
-      <div cdkMenu class="pd-popmenu" [attr.aria-label]="t.actions">
+    <mat-menu #rowMenu="matMenu" class="pd-popmenu" [aria-label]="t.actions">
+      <ng-template matMenuContent let-row="row">
         @let items = menuOf(row);
         @let icons = hasIcon(items);
         @for (a of items; track a.id; let k = $index) {
           @if (a.danger && k > 0 && !items[k - 1]?.danger) {
             <div class="pd-popmenu__sep" role="separator"></div>
           }
-          <button type="button" cdkMenuItem class="pd-popmenu__item" [class.pd-popmenu__item--danger]="a.danger" [disabled]="a.disabled" (cdkMenuItemTriggered)="emit(a, row)">
+          <button type="button" mat-menu-item class="pd-popmenu__item" [class.pd-popmenu__item--danger]="a.danger" [disabled]="a.disabled" (click)="emit(a, row)">
             @if (icons) {
               <span class="pd-popmenu__icon">@if (a.icon) { <pd-glyph [name]="a.icon" [size]="14" /> }</span>
             }
             <span>{{ a.label }}</span>
           </button>
         }
-      </div>
-    </ng-template>
+      </ng-template>
+    </mat-menu>
 
-    <ng-template #columnsMenu>
-      <div cdkMenu class="pd-popmenu" [attr.aria-label]="t.columns">
-        @for (c of choosable(); track c.key) {
-          <button type="button" cdkMenuItemCheckbox class="pd-popmenu__item" [cdkMenuItemChecked]="isShown(c)" (cdkMenuItemTriggered)="toggleColumn(c.key)">
-            <span class="pd-popmenu__icon">@if (isShown(c)) { <pd-glyph name="check" [size]="14" /> }</span>
-            <span>{{ c.header }}</span>
-          </button>
-        }
-      </div>
-    </ng-template>
+    <mat-menu #columnsMenu="matMenu" class="pd-popmenu" [aria-label]="t.columns">
+      @for (c of choosable(); track c.key) {
+        <button type="button" mat-menu-item role="menuitemcheckbox" class="pd-popmenu__item" [attr.aria-checked]="isShown(c)" (click)="toggleColumn(c.key)">
+          <span class="pd-popmenu__icon">@if (isShown(c)) { <pd-glyph name="check" [size]="14" /> }</span>
+          <span>{{ c.header }}</span>
+        </button>
+      }
+    </mat-menu>
   `,
   styles: `
-    :host { display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; container-type: inline-size; }
-    .pd-toolbar { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 44px; min-width: 0; }
+    /* Material's parts take the family's theme (css/material.css: colours, the sort arrow, type, the focus indicator); the table
+       sets only what is its own: its row and header heights, row action buttons of the smallest hit size with a state layer in the
+       control radius, and no 48 px touch target reaching out of the row
+       (the row is the target). The keyboard ring of a button is Material's focus indicator alone. */
+    :host {
+      display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; container-type: inline-size;
+      --mat-table-background-color: transparent;
+      --mat-table-header-container-height: var(--pd-table-head);
+      --mat-table-row-item-container-height: var(--pd-table-row);
+      --mat-icon-button-state-layer-size: var(--pd-hit-min);
+      --mat-icon-button-container-shape: var(--pd-radius-control);
+      --mat-icon-button-touch-target-display: none;
+    }
+    .pd-toolbar { display: flex; align-items: center; gap: var(--pd-space-2); min-height: var(--pd-toolbar-height); min-width: 0; }
     .pd-filter { display: flex; align-items: center; gap: var(--pd-space-2); flex: 1 1 8rem; max-width: 24rem; min-width: 8rem; height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-input); background: var(--pd-surface-1); color: var(--pd-text-muted); }
-    .pd-filter:focus-within { border-color: var(--pd-focus-ring); outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pd-filter:focus-within { border-color: var(--pd-focus-ring); outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-filter-input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-body); }
     .pd-count { color: var(--pd-text-muted); font-size: var(--pd-text-label); white-space: nowrap; font-variant-numeric: tabular-nums; }
     .pd-spacer { flex: 1; }
     .pd-tool { display: inline-flex; align-items: center; gap: var(--pd-space-1); height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border: 1px solid transparent; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
-    .pd-tool:hover { background: var(--pd-hover); color: var(--pd-text); }
-    .pd-tool:focus-visible, .pd-sort:focus-visible, .pd-retry:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
+    .pd-tool:hover, .pd-tool[aria-expanded='true'] { background: var(--pd-hover); color: var(--pd-text); }
+    .pd-tool:focus-visible, .pd-retry:focus-visible { outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring); outline-offset: 2px; }
     /* A narrow table keeps the filter and an icon-only Columns button; the count goes (the grid says how many rows it has). */
     @container (max-width: 400px) { .pd-tool-text, .pd-count { display: none; } .pd-tool { padding: 0 var(--pd-space-2); } }
-    .pd-grid { position: relative; min-width: 0; overflow: hidden; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: var(--pd-surface-1); }
-    .pd-header, .pd-row { display: grid; grid-template-columns: var(--pd-cols); align-items: center; column-gap: var(--pd-space-3); padding: 0 var(--pd-space-3); min-width: 0; }
-    .pd-header { position: sticky; top: 0; z-index: var(--pd-z-sticky); height: var(--pd-table-head); border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); }
-    .pd-th { display: flex; min-width: 0; }
-    .pd-th.pd-end, .pd-cell.pd-end { justify-content: flex-end; text-align: end; }
-    .pd-sort { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; padding: 0 4px; margin-inline: -4px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; border-radius: var(--pd-radius-tag); }
-    .pd-th.pd-end .pd-sort { flex-direction: row-reverse; }
-    .pd-sort:hover { color: var(--pd-text); }
-    /* The sort affordance: a quiet chevron on hover and focus, solid once the column is the sort. */
-    .pd-sort-icon { color: var(--pd-text-subtle); opacity: 0; }
-    .pd-sort:hover .pd-sort-icon, .pd-sort:focus-visible .pd-sort-icon { opacity: 1; }
-    .pd-sorted .pd-sort-icon { opacity: 1; color: var(--pd-text); }
+    /* Its own stacking context: the table's layers stay local and never compete with the page's. */
+    .pd-grid { position: relative; isolation: isolate; min-width: 0; overflow: hidden; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: var(--pd-surface-1); }
+    .pd-body { display: block; min-width: 0; overflow-x: hidden; overflow-y: auto; }
+    .pd-grid .pd-head-table, .pd-grid .pd-body-table { display: block; min-width: 0; }
+    /* Every line is a CSS grid over the same tracks (--pd-cols), so the header and the rows share their columns. */
+    .pd-grid .pd-header, .pd-grid .pd-row { display: grid; grid-template-columns: var(--pd-cols); align-items: center; column-gap: var(--pd-space-3); box-sizing: border-box; padding: 0 var(--pd-space-3); min-width: 0; border: 0; }
+    /* The header is outside the scrolling body, on an opaque surface; it keeps the width of the body's scrollbar so a column's
+       header and values share one right edge. */
+    .pd-grid .pd-header { padding-inline-end: calc(var(--pd-space-3) + var(--pd-gutter, 0px)); height: var(--pd-table-head); min-height: var(--pd-table-head); border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); font-family: inherit; letter-spacing: normal; }
+    .pd-grid .pd-th, .pd-grid .pd-cell { display: flex; align-items: center; flex: none; min-width: 0; min-height: 0; padding: 0; border: 0; overflow: hidden; white-space: nowrap; background: none; color: inherit; font: inherit; letter-spacing: normal; align-self: stretch; }
+    .pd-grid .pd-th.pd-end, .pd-grid .pd-cell.pd-end { justify-content: safe flex-end; text-align: end; }
+    .pd-grid .pd-sort { cursor: pointer; }
+    .pd-grid .pd-sort:hover, .pd-grid .pd-sorted { color: var(--pd-text); }
+    .pd-grid .pd-th .mat-sort-header-container { min-width: 0; max-width: 100%; gap: var(--pd-space-1); border-radius: var(--pd-radius-tag); }
+    .pd-grid .pd-th.pd-end .mat-sort-header-container { margin-inline-start: auto; }
+    .pd-grid .pd-th .mat-sort-header-content { min-width: 0; }
+    .pd-grid .pd-th .mat-sort-header-container:focus-visible { outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring); outline-offset: 2px; }
+    .pd-grid .pd-th .mat-sort-header-arrow { margin: 0; }
+    .pd-grid .pd-sorted .mat-sort-header-arrow { color: var(--pd-text); }
     .pd-th-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pd-body { display: block; overflow-y: auto; overflow-x: hidden; min-width: 0; }
-    /* The header keeps the width of the body's scrollbar (measured), so a column's header and its values share one right edge whether or not the body scrolls. */
-    .pd-header { padding-inline-end: calc(var(--pd-space-3) + var(--pd-gutter, 0px)); }
-    .pd-row { height: var(--pd-table-row); border-bottom: 1px solid var(--pd-hairline); color: var(--pd-text); font-size: var(--pd-text-body); cursor: default; }
-    .pd-row:last-child { border-bottom: 0; }
-    .pd-row.pd-folded { align-items: start; padding-block: 6px; box-sizing: border-box; }
-    .pd-row:hover { background: var(--pd-hover); }
-    .pd-row:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
+    .pd-grid .pd-row { height: var(--pd-table-row); min-height: var(--pd-table-row); border-bottom: 1px solid var(--pd-hairline); color: var(--pd-text); font-size: var(--pd-text-body); font-weight: var(--pd-weight-regular); cursor: default; }
+    .pd-grid .pd-row.pd-folded { align-items: start; padding-block: calc(var(--pd-space-1) + var(--pd-space-0)); }
+    /* Hovered, and while its menu is open (the "..." button's or the right-click one), so the menu's row stays marked. */
+    .pd-grid .pd-row:hover, .pd-grid .pd-row.pd-menu-open, .pd-grid .pd-row:has(.pd-more[aria-expanded='true']) { background: var(--pd-hover); }
+    .pd-grid .pd-row:focus-visible { outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring); outline-offset: -2px; }
     /* Selected: the accent tint with a 2 px accent bar on the left (the guide). */
-    .pd-row.pd-selected { background: var(--pd-accent-tint, var(--pd-hover)); box-shadow: inset 2px 0 0 var(--pd-accent); }
-    .pd-cell { display: flex; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; }
-    .pd-cell.pd-end { font-variant-numeric: tabular-nums; }
-    .pd-cell.pd-first { font-weight: var(--pd-weight-medium); }
+    .pd-grid .pd-row.pd-selected { background: var(--pd-accent-tint, var(--pd-hover)); box-shadow: inset 2px 0 0 var(--pd-accent); }
+    .pd-grid .pd-cell.pd-first { padding-inline-start: calc(var(--pd-tree-level, 0) * var(--pd-tree-indent)); }
+    .pd-grid .pd-cell.pd-end { font-variant-numeric: tabular-nums; }
+    .pd-grid .pd-cell.pd-first { font-weight: var(--pd-weight-medium); }
     .pd-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pd-group.pd-group-grid { display: grid; }
-    .pd-group-summary { color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
+    /* A group row is one heading cell across the row; with the group's own cells (groupSummary) it uses the columns beneath. */
+    .pd-grid .pd-group { background: var(--pd-surface-2); color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); cursor: pointer; }
+    .pd-grid .pd-group:not(.pd-group-grid) { grid-template-columns: minmax(0, 1fr); }
+    .pd-grid .pd-group:not(.pd-group-grid) .pd-cell:not(.pd-group-cell) { display: none; }
+    /* A tree row whose first cell is a heading (a program) spans the row. */
+    .pd-grid .pd-span { grid-template-columns: minmax(0, 1fr); }
+    .pd-grid .pd-span .pd-cell:not(.pd-first) { display: none; }
+    .pd-grid .pd-group-summary { color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
+    .pd-grid .pd-group-cell { gap: var(--pd-space-2); }
     .pd-group-name.pd-mono { font-family: var(--pd-font-mono); font-size: var(--pd-text-label); }
-    .pd-group { display: block; background: var(--pd-surface-2); color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .pd-group-cell { display: flex; align-items: center; gap: var(--pd-space-2); height: 100%; min-width: 0; }
     .pd-group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-group-toggle { display: inline-flex; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
     .pd-group-count { color: var(--pd-text-subtle); font-variant-numeric: tabular-nums; }
-    .pd-actions { justify-content: flex-end; gap: 4px; overflow: visible; }
-    .pd-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
-    .pd-icon-btn:hover:not(:disabled) { background: var(--pd-hover); color: var(--pd-text); }
-    .pd-icon-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); }
-    .pd-icon-btn:disabled { opacity: 0.4; cursor: default; }
-    .pd-inline { opacity: 0; }
+    .pd-grid .pd-actions { justify-content: flex-end; gap: var(--pd-space-1); overflow: visible; }
+    .pd-grid .pd-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: var(--pd-hit-min); height: var(--pd-hit-min); padding: 0; border-radius: var(--pd-radius-control); color: var(--pd-text-muted); }
+    .pd-grid .pd-icon-btn:hover:not(:disabled), .pd-grid .pd-icon-btn:focus-visible { color: var(--pd-text); }
+    .pd-grid .pd-inline { opacity: 0; }
     /* Always visible in its own resting colour (3:1, SC 1.4.11), so touch and keyboard users can find it (UI patterns, rule 2). */
-    .pd-more { color: var(--pd-row-action-rest, var(--pd-text-muted)); }
-    .pd-row:hover .pd-inline, .pd-row:focus-within .pd-inline { opacity: 1; }
-    .pd-row:hover .pd-more, .pd-row:focus-within .pd-more, .pd-more[aria-expanded='true'] { color: var(--pd-text); }
+    .pd-grid .pd-more { color: var(--pd-row-action-rest, var(--pd-text-muted)); }
+    .pd-grid .pd-row:hover .pd-inline, .pd-grid .pd-row:focus-within .pd-inline { opacity: 1; }
+    .pd-grid .pd-row:hover .pd-more, .pd-grid .pd-row:focus-within .pd-more, .pd-grid .pd-more[aria-expanded='true'] { color: var(--pd-text); }
     /* On the selected row's tint the rest colour (mixed against the plain surface) is not 3:1: use the full subtle text there. */
-    .pd-row.pd-selected .pd-more { color: var(--pd-text-subtle); }
-    .pd-row.pd-selected:hover .pd-more, .pd-row.pd-selected:focus-within .pd-more, .pd-row.pd-selected .pd-more[aria-expanded='true'] { color: var(--pd-text); }
-    @media (hover: none) { .pd-inline { opacity: 0.6; } }
+    .pd-grid .pd-row.pd-selected .pd-more { color: var(--pd-text-subtle); }
+    .pd-grid .pd-row.pd-selected:hover .pd-more, .pd-grid .pd-row.pd-selected:focus-within .pd-more, .pd-grid .pd-row.pd-selected .pd-more[aria-expanded='true'] { color: var(--pd-text); }
+    @media (hover: none) { .pd-grid .pd-inline { opacity: 0.6; } }
     .pd-empty { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); margin: 0; padding: var(--pd-space-6, 32px) var(--pd-space-3); color: var(--pd-text-muted); text-align: center; font-size: var(--pd-text-body); }
-    .pd-msg-row { display: block; }
     .pd-empty p { margin: 0; }
     .pd-empty.pd-error { flex-direction: row; justify-content: center; }
-    .pd-empty.pd-error pd-glyph { color: var(--pd-danger-text, var(--pd-danger)); }
-    .pd-retry { height: 24px; padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
+    .pd-empty.pd-error pd-status-glyph { color: var(--pd-danger-text, var(--pd-danger)); }
+    .pd-retry { height: var(--pd-hit-min); padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
     .pd-retry:hover { background: var(--pd-hover); }
-    .pd-skeleton { pointer-events: none; }
+    .pd-grid .pd-skeleton { pointer-events: none; }
     .pd-skel-end { margin-inline-start: auto; }
     .pd-skel { display: block; height: 10px; border-radius: 3px; background: var(--pd-hover); animation: pd-pulse 1.4s ease-in-out infinite; }
     @keyframes pd-pulse { 50% { opacity: 0.5; } }
@@ -385,6 +454,8 @@ export class PdTable<T> {
   readonly label = input.required<string>();
   /** Actions of a row; none means a row without a menu. */
   readonly rowActions = input<(row: T) => readonly PdRowAction[]>(NO_ACTIONS);
+  /** The toolbar above the grid (the filter, the row count, the Columns menu); `false` for a small static table that needs none of them. */
+  readonly toolbar = input(true);
   /** Shows the filter field. */
   readonly filterable = input(true);
   /** Row height in pixels: 24, 32 or 36, the family's densities (UI guide §3); default: the density the page is in (Standard 32). */
@@ -397,7 +468,7 @@ export class PdTable<T> {
   readonly retry = output<void>();
   /** The tallest the table body grows before it scrolls. */
   readonly maxHeight = input(480);
-  /** Draw rows with the virtual scroll viewport: `auto` from {@link PD_TABLE_VIRTUAL_FROM} lines. */
+  /** Draw only the rows in view (virtual scroll): `auto` from {@link PD_TABLE_VIRTUAL_FROM} lines; `false` draws every row. */
   readonly virtual = input<boolean | 'auto'>('auto');
   /** The column rows are grouped by (its text), or null. */
   readonly groupBy = input<string | null>(null);
@@ -409,6 +480,14 @@ export class PdTable<T> {
   readonly countLabel = input<((shown: number, total: number) => string) | null>(null);
   /** What an empty table says. */
   readonly emptyText = input($localize`:@@pd.table.empty:Nothing to show yet.`);
+  /** `source`: the rows arrive in the order to show (the app sorts and filters them, as a tree needs); the table only shows the sort and reports it. */
+  readonly order = input<'sorted' | 'source'>('sorted');
+  /** Makes the rows a tree grid (levels, folding with Left and Right, indented first cells); see {@link PdRowTree}. Not with `groupBy`. */
+  readonly tree = input<PdRowTree<T> | null>(null);
+  /** The keyboard asked to fold or unfold a tree row (Left on an unfolded row, Right on a folded one); the app changes its fold state. */
+  readonly rowToggle = output<T>();
+  /** A header cycles ascending, descending, none (default); with `false` only ascending and descending, so the list is never unsorted. */
+  readonly sortClearable = input(true);
   /** The sort (two-way). */
   readonly sort = model<PdSort | null>(null);
   /** The filter text (two-way). */
@@ -438,10 +517,15 @@ export class PdTable<T> {
     error: $localize`:@@pd.table.error:The rows could not be loaded.`,
     retry: $localize`:@@pd.table.retry:Retry`,
   };
+  protected readonly actionsColumn = ACTIONS_COLUMN;
+  /** The header-only table draws no lines. */
+  protected readonly noLines: readonly PdLine<T>[] = [];
+  /** The body's cells are cells of the one grid (the CDK table would call them `cell`: its own role is `rowgroup`). */
+  protected readonly cellRole = 'gridcell';
 
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly injector = inject(Injector);
-  private readonly viewport = viewChild(CdkVirtualScrollViewport);
+  private readonly viewport = viewChild.required(CdkVirtualScrollViewport);
   private readonly cells = contentChildren(PdCell);
   protected readonly emptySlot = contentChild(PdTableEmpty);
   protected readonly customCells = computed(() => new Map(this.cells().map((c) => [c.key(), c.template] as const)));
@@ -449,6 +533,10 @@ export class PdTable<T> {
   private readonly width = signal(1024);
   /** The width of the body's scrollbar in pixels (0 when it does not scroll or the bar overlays). */
   protected readonly gutter = signal(0);
+  /** The row to focus once the table has drawn it (a virtual table draws a row a frame after it scrolls there). */
+  private pendingFocus: string | null = null;
+  /** The key of the row whose right-click menu is open (the row stays marked meanwhile). */
+  protected readonly menuKey = signal<string | null>(null);
   private readonly collapsed = signal<ReadonlySet<string>>(new Set());
   protected readonly active = signal(0);
 
@@ -479,17 +567,55 @@ export class PdTable<T> {
   /** The columns the user may switch (all but the required ones). */
   protected readonly choosable = computed(() => this.columns().filter((c) => !c.required));
   protected readonly gridTemplate = computed(() => [...this.columns2().map(columnTrack), ...(this.actionWidth() ? [`${this.actionWidth()}px`] : [])].join(' '));
+  /** The column ids the header and every row draw, in order. */
+  protected readonly displayed = computed(() => [...this.columns2().map((c) => c.key), ...(this.actionWidth() ? [ACTIONS_COLUMN] : [])]);
 
-  private readonly filtered = computed(() => filterRows(this.rows(), this.columns(), this.query()));
+  private readonly filtered = computed(() => (this.tree() ? this.rows() : filterRows(this.rows(), this.columns(), this.query())));
   /** The rows after filtering and sorting. */
-  protected readonly ordered = computed(() => sortRows(this.filtered(), this.columns(), this.sort()));
+  protected readonly ordered = computed(() => (this.order() === 'source' || this.tree() ? this.filtered() : sortRows(this.filtered(), this.columns(), this.sort())));
   /** The lines: rows, with group headings when grouped. */
   protected readonly items = computed<readonly PdTableItem<T>[]>(() => {
     const key = this.groupBy();
+    if (key && this.tree() && isDevMode()) console.error('pd-table: `tree` and `groupBy` are two ways to form a tree grid; use one.');
     return groupItems(this.ordered(), key ? this.columns().find((c) => c.key === key) : undefined, this.collapsed(), this.groupSummary());
   });
+  /** What the table draws: the lines, five placeholders while loading, nothing on an error (the message is below the header). */
+  protected readonly lines = computed<readonly PdLine<T>[]>(() => (this.state() === 'loading' ? SKELETON : this.state() === 'error' ? [] : this.items()));
+  private readonly positions = computed(() => new Map<PdLine<T>, number>(this.lines().map((l, i) => [l, i])));
+  /** Each line's place by its key ({@link trackLine}): a line keeps its key when lines come and go above it. */
+  private readonly keyIndex = computed(() => new Map(this.lines().map((l, i) => [this.lineKey(l), i] as const)));
+  /**
+   * Where each line sits in the tree of a grouped table (a virtual table draws only some of the rows, so the tree grid says
+   * their place): a group among the groups, a row among its group's rows (the group's count). Empty when not grouped.
+   */
+  protected readonly treePlace = computed(() => {
+    const place = new Map<PdLine<T>, { pos: number; size: number }>();
+    const tree = this.tree();
+    if (tree) {
+      const rows = this.lines().filter((l): l is { readonly kind: 'row'; readonly row: T } => l.kind === 'row');
+      const spots = treePlaces(rows.map((l) => l.row), tree.level);
+      rows.forEach((l, i) => place.set(l, { pos: (spots[i] as readonly [number, number])[0], size: (spots[i] as readonly [number, number])[1] }));
+      return place;
+    }
+    if (!this.groupBy()) return place;
+    const lines = this.lines();
+    const groups = lines.filter((l) => l.kind === 'group').length;
+    let group = 0;
+    let row = 0;
+    let size = 0;
+    for (const l of lines) {
+      if (l.kind === 'group') {
+        place.set(l, { pos: ++group, size: groups });
+        [row, size] = [0, l.count];
+      } else if (l.kind === 'row') place.set(l, { pos: ++row, size });
+    }
+    return place;
+  });
   protected readonly isVirtual = computed(() => (this.virtual() === 'auto' ? this.items().length > PD_TABLE_VIRTUAL_FROM : this.virtual()));
-  protected readonly bodyHeight = computed(() => Math.min(this.items().length * this.rowPx(), this.maxHeight()));
+  /** The scrolling body: as tall as the lines, up to `maxHeight`. */
+  protected readonly bodyHeight = computed(() => Math.min(this.lines().length * this.rowPx(), this.maxHeight()));
+  /** Virtual: a few rows beyond the visible ones; otherwise a buffer that covers every row, so all are drawn. */
+  protected readonly bufferPx = computed(() => (this.isVirtual() ? VIRTUAL_BUFFER_ROWS * this.rowPx() : (this.lines().length + 1) * this.rowPx()));
   /** "N rows" (thousands separated by the locale), "M of N rows" when filtered; empty while loading or when there are no rows (nothing to count). */
   protected readonly countText = computed(() => {
     if (this.state() !== 'ready' || !this.rows().length) return '';
@@ -497,7 +623,8 @@ export class PdTable<T> {
     const custom = this.countLabel();
     if (custom) return custom(this.ordered().length, this.rows().length);
     const [shown, total] = [n.format(this.ordered().length), n.format(this.rows().length)];
-    return this.ordered().length === this.rows().length ? $localize`:@@pd.table.count:${total} rows` : $localize`:@@pd.table.countOf:${shown} of ${total} rows`;
+    if (this.ordered().length === this.rows().length) return this.rows().length === 1 ? $localize`:@@pd.table.count1:1 row` : $localize`:@@pd.table.count:${total} rows`;
+    return this.rows().length === 1 ? $localize`:@@pd.table.countOf1:${shown} of 1 row` : $localize`:@@pd.table.countOf:${shown} of ${total} rows`;
   });
 
   constructor() {
@@ -509,18 +636,80 @@ export class PdTable<T> {
     observer?.observe(this.host);
     const mutation = typeof MutationObserver === 'undefined' ? null : new MutationObserver(() => this.density.set(readDensity()));
     mutation?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-density'] });
-    afterEveryRender(() => {
+    // The header keeps the width of the body's scrollbar: measured when the body resizes (a scrollbar appearing changes its
+    // content box), not on every render of the app.
+    const bodyObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.measureGutter());
+    afterNextRender(() => {
       const body = this.host.querySelector<HTMLElement>('.pd-body');
-      const bar = body ? Math.max(0, body.offsetWidth - body.clientWidth) : 0;
-      if (bar !== this.gutter()) this.gutter.set(bar);
+      if (body) bodyObserver?.observe(body);
+      this.updateTabStops();
+    });
+    // The lines changed: a row the keyboard was waiting for is forgotten only when it is gone (it is waited for by its key, so
+    // a group folding above it does not lose it), and the sort headers' stops follow the rows.
+    let drawnColumns: readonly PdColumn<T>[] | null = null;
+    effect(() => {
+      const keys = this.keyIndex();
+      const columns = this.columns2();
+      untracked(() => {
+        // The columns changed (the pane narrowed or widened): the rows are drawn again, so the row that holds the focus is focused again once they are.
+        if (drawnColumns !== null && drawnColumns !== columns) this.holdFocus();
+        drawnColumns = columns;
+        if (this.pendingFocus !== null && !keys.has(this.pendingFocus)) this.pendingFocus = null;
+        afterNextRender(
+          () => {
+            this.updateTabStops();
+            this.focusPending();
+          },
+          { injector: this.injector },
+        );
+      });
     });
     inject(DestroyRef).onDestroy(() => {
       observer?.disconnect();
       mutation?.disconnect();
+      bodyObserver?.disconnect();
     });
   }
 
-  protected trackItem = (_: number, item: PdTableItem<T>): string => (item.kind === 'group' ? `g:${item.key}` : this.rowKey()(item.row));
+  /** Remembers the row that has the focus, to focus it again once the rows are drawn again. */
+  private holdFocus(): void {
+    const row = document.activeElement?.closest<HTMLElement>('.pd-body [role="row"][data-key]');
+    if (row && this.host.contains(row) && this.pendingFocus === null) this.pendingFocus = `r:${row.dataset['key'] as string}`;
+  }
+
+  /** A line's key: its kind as a prefix (`r:` a row's own key, `g:` a group's name, `s:` a placeholder), so an app's row key never equals a group's. */
+  protected lineKey(line: PdLine<T>): string {
+    return line.kind === 'skeleton' ? `s:${line.n}` : line.kind === 'group' ? `g:${line.key}` : `r:${this.rowKey()(line.row)}`;
+  }
+  /** What the body table tracks a line by: its key and the columns it is drawn with, so the CDK never reuses a row view built for other columns (stale cells). */
+  protected trackLine = (_: number, line: PdLine<T>): string => `${this.lineKey(line)}|${this.displayed().join(',')}`;
+  /** The line's place in the table (a virtual table draws only a window of them). */
+  protected indexOf(line: PdLine<T>): number {
+    return this.positions().get(line) as number;
+  }
+  protected isSelected(line: PdLine<T>): boolean {
+    return line.kind === 'row' && this.selectedKey() === this.rowKey()(line.row);
+  }
+  /** The level of a line in the tree grid: a group is 1 and its rows 2; a tree's rows have the level the app gives. */
+  protected treeLevel(line: PdLine<T>): number | null {
+    if (line.kind === 'skeleton') return null;
+    if (this.groupBy()) return line.kind === 'group' ? 1 : 2;
+    const tree = this.tree();
+    return tree && line.kind === 'row' ? tree.level(line.row) : null;
+  }
+  protected treeExpanded(line: PdLine<T>): boolean | null {
+    const tree = this.tree();
+    return tree && line.kind === 'row' ? tree.expanded(line.row) : null;
+  }
+  protected spans(line: PdLine<T>): boolean {
+    const tree = this.tree();
+    return !!tree?.spans && line.kind === 'row' && tree.spans(line.row);
+  }
+  /** The depth of a tree row below the top, for the indent of its first cell (`--pd-tree-indent` a level). */
+  protected indent(line: PdLine<T>): number | null {
+    const level = this.tree() ? this.treeLevel(line) : null;
+    return level === null || level < 2 ? null : level - 1;
+  }
   protected text(c: PdColumn<T>, row: T): string {
     return cellText(c, row);
   }
@@ -542,15 +731,12 @@ export class PdTable<T> {
   protected isShown(c: PdColumn<T>): boolean {
     return this.columns2().some((s) => s.key === c.key);
   }
-  protected ariaSort(c: PdColumn<T>): 'ascending' | 'descending' | 'none' | null {
-    const s = this.sort();
-    return c.sortable === false ? null : s?.key === c.key ? (s.direction === 'asc' ? 'ascending' : 'descending') : 'none';
-  }
   protected sortLabel(c: PdColumn<T>): string {
     return $localize`:@@pd.table.sortBy:Sort by ${c.header}`;
   }
-  protected sortBy(key: string): void {
-    this.sort.set(nextSort(this.sort(), key));
+  /** Material's sort header cycles ascending, descending, none; the table keeps the result as its two-way `sort`. */
+  protected onSort(e: Sort): void {
+    this.sort.set(e.direction ? { key: e.active, direction: e.direction } : null);
   }
   protected toggleGroup(key: string): void {
     this.collapsed.update((set) => {
@@ -574,45 +760,275 @@ export class PdTable<T> {
     if (!a.disabled) this.action.emit({ id: a.id, row });
   }
 
-  protected onRowClick(row: T, e: Event, index: number): void {
-    this.active.set(index);
+  protected onLineClick(line: PdLine<T>, e: Event): void {
+    if (line.kind === 'skeleton') return;
+    // A click takes over from a row the keyboard was still waiting for (End or Page Down in a virtual table).
+    this.pendingFocus = null;
+    this.active.set(this.indexOf(line));
+    if (line.kind === 'group') return this.toggleGroup(line.key);
     if (fromControl(e)) return;
-    this.open(row);
+    this.open(line.row);
   }
   private open(row: T): void {
     this.selectedKey.set(this.rowKey()(row));
     this.rowActivate.emit(row);
   }
 
+  private measureGutter(): void {
+    const body = this.host.querySelector<HTMLElement>('.pd-body');
+    const bar = body ? Math.max(0, body.offsetWidth - body.clientWidth) : 0;
+    if (bar !== this.gutter()) this.gutter.set(bar);
+  }
+
+  /**
+   * One tab stop for the grid: the active row. The sort headers are reached with the arrow keys from the rows (Up from the
+   * first row) and keep the stop only while there are no rows to stop on; Material gives each sort header its own stop.
+   */
+  private updateTabStops(): void {
+    const hasRows = !!this.host.querySelector('.pd-body [role="row"][data-index]');
+    this.sortHeaders().forEach((h, i) => h.setAttribute('tabindex', !hasRows && i === 0 ? '0' : '-1'));
+  }
+
+  /** The body table drew its rows (their bindings are set in the render that follows): the row the keyboard asked for may be there now, and the stops follow. */
+  protected onRowsDrawn(): void {
+    afterNextRender(
+      () => {
+        this.updateTabStops();
+        this.restoreLostFocus();
+        this.focusPending();
+      },
+      { injector: this.injector },
+    );
+  }
+
+  /**
+   * The key of the row that has the focus. When the app puts the rows in another order (live values), the browser drops the focus
+   * of a row element that was moved, whether or not the element is still there; the row is then focused again by its key. That
+   * happens in the frame after the rows were drawn (their `data-index` is bound in the render that follows), so a key pressed in
+   * that one frame reaches the page, not the row.
+   */
+  private focusedRow: string | null = null;
+  protected onFocusIn(e: FocusEvent): void {
+    const row = e.target instanceof Element ? e.target.closest<HTMLElement>('.pd-body [role="row"][data-key]') : null;
+    this.focusedRow = row ? `r:${row.dataset['key'] as string}` : null;
+  }
+  /** A click anywhere outside the grid moves the focus away on purpose (to the page, when it hits nothing focusable): forget the row. */
+  protected onPointerDownAnywhere(e: Event): void {
+    if (e.target instanceof Node && !this.host.contains(e.target)) this.focusedRow = null;
+  }
+  /** The focus fell to the page while a row of this grid had it (its element was removed or moved): ask for the row again by its key. */
+  private restoreLostFocus(): void {
+    const held = this.focusedRow;
+    if (held === null || document.activeElement !== document.body || this.pendingFocus !== null) return;
+    this.focusedRow = null;
+    if (this.keyIndex().has(held)) this.pendingFocus = held;
+  }
+
+  /** The focus left the grid for another element: forget a row still waiting to be focused, so it never takes the focus back. */
+  protected onFocusOut(e: FocusEvent): void {
+    const to = e.relatedTarget;
+    if (to instanceof Node && !this.host.querySelector('.pd-grid')?.contains(to)) {
+      this.pendingFocus = null;
+      this.focusedRow = null;
+    }
+  }
+
   protected onKeydown(e: KeyboardEvent): void {
-    const target = e.target instanceof Element ? e.target.closest<HTMLElement>('[role="row"][data-index]') : null;
+    if (!(e.target instanceof Element)) return;
+    const head = e.target.closest<HTMLElement>('.pd-head-table [role="columnheader"]');
+    if (head) return this.onHeaderKeydown(e, head);
+    const button = e.target.closest<HTMLElement>('.pd-icon-btn');
+    if (button) return this.onButtonKeydown(e, button);
+    const target = e.target.closest<HTMLElement>('[role="row"][data-index]');
     if (!target || e.target !== target) return;
     const index = Number(target.dataset['index']);
-    if (isMenuKey(e)) {
-      // The keyboard's right-click: not every platform turns it into a `contextmenu` event, so the row's menu is opened here.
-      e.preventDefault();
-      const box = target.getBoundingClientRect();
-      target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left + 24, clientY: box.top + box.height / 2 }));
-      return;
-    }
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' || e.key === ' ') {
       const item = this.items()[index];
       e.preventDefault();
-      if (item?.kind === 'group') this.toggleGroup(item.key);
+      if (item?.kind === 'group') this.toggleFromKeyboard(item.key);
       else if (item) this.open(item.row);
       return;
     }
-    const page = Math.max(1, Math.floor((this.bodyHeight() || this.maxHeight()) / this.rowPx()) - 1);
+    const item = this.items()[index];
+    if (item?.kind === 'row' && this.treeKey(e, index, item.row)) return;
+    if (item?.kind === 'group' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+      // The tree grid: Right expands a collapsed group, and on an expanded one moves to its first row; Left collapses it.
+      e.preventDefault();
+      if (e.key === 'ArrowRight' && item.collapsed) this.toggleFromKeyboard(item.key);
+      else if (e.key === 'ArrowRight' && this.items()[index + 1]?.kind === 'row') this.moveTo(index + 1);
+      else if (e.key === 'ArrowLeft' && !item.collapsed) this.toggleFromKeyboard(item.key);
+      return;
+    }
+    if (e.key === 'ArrowLeft' && this.groupBy()) {
+      // Left on a row of a group moves to its group row.
+      const group = this.items().slice(0, index).map((l) => l.kind).lastIndexOf('group');
+      if (group >= 0) {
+        e.preventDefault();
+        this.moveTo(group);
+      }
+      return;
+    }
+    if (e.key === 'ArrowRight') {
+      // The row's action buttons are not tab stops: Right reaches the first one that is enabled.
+      const first = this.rowButtons(target)[0];
+      if (first) {
+        e.preventDefault();
+        first.focus();
+      }
+      return;
+    }
+    if (e.key === 'ArrowUp' && index === 0 && this.focusHeader(this.sortHeaders().findIndex((h) => h.closest('.pd-sorted')))) {
+      e.preventDefault();
+      return;
+    }
+    const page = Math.max(1, Math.floor(this.bodyHeight() / this.rowPx()) - 1);
     const to = nextIndex(this.items().length, index, e.key, page);
     if (to === null) return;
     e.preventDefault();
     this.moveTo(to);
   }
 
-  /** Makes row `index` the tab stop and focuses it, scrolling to it first when it is not drawn. */
+  /**
+   * The tree grid's keys on a row of a tree: Right unfolds a folded row and on an unfolded one moves to its first child; Left folds
+   * an unfolded row and otherwise moves up to the row's parent. True when the key was used (a leaf's Right goes to its buttons).
+   */
+  private treeKey(e: KeyboardEvent, index: number, row: T): boolean {
+    const tree = this.tree();
+    if (!tree || (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft')) return false;
+    const open = tree.expanded(row);
+    const rows = this.items().map((l) => (l.kind === 'row' ? l.row : null));
+    const lines = rows.map((r) => r as T);
+    if (e.key === 'ArrowRight') {
+      if (open === null) return false;
+      e.preventDefault();
+      if (!open) this.toggleTree(row);
+      else if (rows[index + 1] && tree.level(lines[index + 1] as T) > tree.level(row)) this.moveTo(index + 1);
+      return true;
+    }
+    if (open === true) {
+      e.preventDefault();
+      this.toggleTree(row);
+      return true;
+    }
+    const up = parentIndex(lines, index, tree.level);
+    if (up < 0) return false;
+    e.preventDefault();
+    this.moveTo(up);
+    return true;
+  }
+  /** Asks the app to fold or unfold a tree row and keeps the focus on it once the table has redrawn. */
+  private toggleTree(row: T): void {
+    this.rowToggle.emit(row);
+    this.pendingFocus = `r:${this.rowKey()(row)}`;
+    afterNextRender(() => this.focusPending(), { injector: this.injector });
+  }
+
+  /** The sortable column headers' buttons (Material's sort header containers), in order. */
+  private sortHeaders(): HTMLElement[] {
+    return [...this.host.querySelectorAll<HTMLElement>('.pd-head-table .mat-sort-header-container')];
+  }
+  /** Focuses sort header `i` (the first when `i` is -1); false when the table has none. */
+  private focusHeader(i: number): boolean {
+    const headers = this.sortHeaders();
+    const h = headers[Math.max(0, i)];
+    h?.focus();
+    return !!h;
+  }
+  /** In the header row: Left, Right, Home and End move between the sort headers, Down goes back to the rows (Material sorts on Enter and Space). */
+  private onHeaderKeydown(e: KeyboardEvent, head: HTMLElement): void {
+    const headers = this.sortHeaders();
+    const at = headers.findIndex((h) => head.contains(h));
+    const to = e.key === 'ArrowLeft' ? at - 1 : e.key === 'ArrowRight' ? at + 1 : e.key === 'Home' ? 0 : e.key === 'End' ? headers.length - 1 : null;
+    if (e.key === 'ArrowDown' && this.items().length) {
+      e.preventDefault();
+      this.moveTo(Math.min(this.active(), this.items().length - 1));
+      return;
+    }
+    if (to === null || to < 0 || to >= headers.length) return;
+    e.preventDefault();
+    this.focusHeader(to);
+  }
+
+  /** On a row's action button: Left and Right move between the enabled buttons (Left from the first goes back to the row), Escape returns to the row, Up and Down go to the row above or below. */
+  private onButtonKeydown(e: KeyboardEvent, button: HTMLElement): void {
+    const row = button.closest<HTMLElement>('[role="row"][data-index]')!;
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      // Up and Down leave the buttons for the row above or below (the buttons differ from row to row).
+      e.preventDefault();
+      const to = nextIndex(this.items().length, Number(row.dataset['index']), e.key);
+      if (to !== null) this.moveTo(to);
+      return;
+    }
+    const buttons = this.rowButtons(row);
+    const at = buttons.indexOf(button);
+    const to = e.key === 'ArrowRight' ? buttons[Math.min(at + 1, buttons.length - 1)] : e.key === 'ArrowLeft' ? (at > 0 ? buttons[at - 1] : row) : e.key === 'Escape' ? row : null;
+    if (!to) return;
+    e.preventDefault();
+    to.focus();
+  }
+
+  /** A row's action buttons that can be used (disabled ones are skipped by the arrow keys). */
+  private rowButtons(row: HTMLElement): HTMLElement[] {
+    return [...row.querySelectorAll<HTMLElement>('.pd-icon-btn:not(:disabled)')];
+  }
+
+  /** Whether a cell's text is cut (its tooltip shows the full text only then). */
+  protected isTruncated(e: Event): boolean {
+    const el = e.target as HTMLElement;
+    return el.scrollWidth > el.clientWidth;
+  }
+
+  /**
+   * Makes row `index` the tab stop and focuses it, first scrolling it into view below the header when it is not in view. A
+   * virtual table draws a row a frame after it scrolls there, so the focus waits until the row is drawn (each render and each
+   * time the table's rows change).
+   */
   moveTo(index: number): void {
     this.active.set(index);
-    this.viewport()?.scrollToIndex(index);
-    afterNextRender(() => this.host.querySelector<HTMLElement>(`[role="row"][data-index="${index}"]`)?.focus(), { injector: this.injector });
+    const viewport = this.viewport();
+    const top = index * this.rowPx();
+    const offset = viewport.measureScrollOffset('top');
+    const visible = this.bodyHeight();
+    if (top < offset) viewport.scrollToOffset(top);
+    else if (top + this.rowPx() > offset + visible) viewport.scrollToOffset(top + this.rowPx() - visible);
+    const line = this.lines()[index];
+    this.pendingFocus = line ? this.lineKey(line) : null;
+    // A row that is drawn already takes the focus now (a key pressed right after this one then acts on it); one that is not, once drawn.
+    this.focusPending();
+    afterNextRender(() => this.focusPending(), { injector: this.injector });
+  }
+
+  /**
+   * Folds or unfolds a group from the keyboard and keeps the focus on its row: the virtual table redraws its rows (and may
+   * recycle the focused row's view), so the group row is focused again, by its key, once it is drawn.
+   */
+  private toggleFromKeyboard(key: string): void {
+    this.toggleGroup(key);
+    this.pendingFocus = `g:${key}`;
+    afterNextRender(() => this.focusPending(), { injector: this.injector });
+  }
+
+  /**
+   * Focuses the row with this key once it is drawn (an app asks after it closed a panel opened from the row, say). A no-op when
+   * there is no such row; a focus that moved to another element meanwhile is not taken back.
+   */
+  focusRow(key: string): void {
+    this.pendingFocus = `r:${key}`;
+    afterNextRender(() => this.focusPending(), { injector: this.injector });
+  }
+
+  /** Focuses the line the keyboard asked for (by its key) once it is drawn; a no-op when there is none or it is not drawn yet. */
+  protected focusPending(): void {
+    if (this.pendingFocus === null) return;
+    const index = this.keyIndex().get(this.pendingFocus);
+    if (index === undefined) {
+      this.pendingFocus = null;
+      return;
+    }
+    const row = this.host.querySelector<HTMLElement>(`.pd-body [role="row"][data-index="${index}"]`);
+    if (!row) return;
+    this.pendingFocus = null;
+    this.active.set(index);
+    row.focus({ preventScroll: true });
   }
 }

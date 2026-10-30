@@ -1,5 +1,5 @@
 import type { Injector } from '@angular/core';
-import { defineCommand, defineKeybinding, defineMenuItem, msg, type Message } from '@decryp7/paddock-ui/shell';
+import { answerOf, defineCommand, defineKeybinding, defineMenuItem, msg, type Message } from '@decryp7/paddock-ui/shell';
 import { provideLiveContributions, type WorkbenchBatch } from '@decryp7/paddock-ui/workbench';
 import { Perspectives, PERSPECTIVE_KEYS } from './perspectives';
 import { WorkbenchDock } from './dock.service';
@@ -93,7 +93,7 @@ export function dockContributions(injector: Injector): WorkbenchBatch {
           await layouts().ready;
           const names = layouts().list().map((l) => l.name);
           const suggested = `${$localize`:@@pd.wb.dock.layout.default-name:Layout`} ${names.length + 1}`;
-          const name = await ctx.openDialog<string>(LAYOUT_SAVE_DIALOG_ID, { names, suggested });
+          const name = answerOf(await ctx.openDialog<string>(LAYOUT_SAVE_DIALOG_ID, { names, suggested }));
           if (typeof name === 'string') perspectives().saveCurrent(name);
         },
       }),
@@ -102,10 +102,12 @@ export function dockContributions(injector: Injector): WorkbenchBatch {
         title: msg('pd.wb.dock.cmd.layout-manage', 'Manage layouts…'),
         category: CATEGORY,
         run: async (ctx) => {
-          const result = await ctx.openDialog<LayoutManageResult>(LAYOUT_MANAGE_DIALOG_ID, {});
+          const result = answerOf(await ctx.openDialog<LayoutManageResult>(LAYOUT_MANAGE_DIALOG_ID, {}));
           // The window edited the stored layouts from its own window: read them again before anything is applied.
           await perspectives().refresh();
           if (result?.apply) layouts().apply(result.apply);
+          // "Save current layout" in the window: the window closes and the ordinary Save layout flow asks for the name.
+          else if (result?.save) await ctx.runCommand(DOCK_COMMANDS.layoutSave);
         },
       }),
       defineCommand({ id: DOCK_COMMANDS.layoutApply, title: msg('pd.wb.dock.cmd.layout-apply', 'Apply saved layout'), category: CATEGORY, when: () => layouts().list().length > 0, run: (_ctx, args) => void dock().applyNamedLayout(nameOf(args) ?? '') }),

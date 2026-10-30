@@ -1,4 +1,4 @@
-//! "Why is my PC slow right now?": names the cause in plain words, with the evidence, from the last minute of
+//! "Why is my computer slow right now?": names the cause in plain words, with the evidence, from the last minute of
 //! samples and the current apps.
 //!
 //! Each detector scores its cause 0–1; causes under [`MIN_CONFIDENCE`] are dropped. With none left the answer is
@@ -8,8 +8,7 @@ use crate::anomaly::Evidence;
 use crate::grouping::{file_name, AppGroup};
 use crate::hardware::{Confidence, OsThrottle};
 use crate::metrics::{derive_pressure, MemoryPressure, SystemSample};
-use crate::process::{Priority, ProcessAction, ProcessRef, ProcessSample};
-use crate::protect::Protection;
+use crate::process::ProcessSample;
 use crate::throttle::{self, ThrottleInput};
 use crate::time::Timestamp;
 use crate::units::bytes;
@@ -42,39 +41,41 @@ pub enum CauseKind {
     GpuBusy,
 }
 
-/// What Dyno suggests doing about a cause.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A page worth opening to look closer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum SuggestedAction {
-    /// Act on the app's main process (the UI confirms first).
-    Process {
-        /// The process.
-        target: ProcessRef,
-        /// The app's name.
-        name: String,
-        /// What to do.
-        action: ProcessAction,
-    },
-    /// Open the cleanup screen.
-    OpenCleanup,
-    /// Open the task manager.
-    OpenTaskManager,
-    /// Open the startup manager.
-    OpenStartup,
-    /// Restart the computer.
-    Restart,
-    /// Nothing to do but wait.
-    Wait,
+pub enum HintLink {
+    /// The task manager.
+    TaskManager,
+    /// The startup list.
+    Startup,
 }
 
-/// A suggestion with its button label.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Something worth knowing about a cause, in words, with a page to look closer at where one helps. Dyno changes
+/// nothing on the computer, so a hint never carries an action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Suggestion {
-    /// Button label.
-    pub label: String,
-    /// What it does.
-    pub action: SuggestedAction,
+pub struct Hint {
+    /// What to know or do (for the person).
+    pub text: String,
+    /// A page that shows more, if one does.
+    pub link: Option<HintLink>,
+}
+
+impl Hint {
+    fn text(text: &str) -> Hint {
+        Hint {
+            text: text.into(),
+            link: None,
+        }
+    }
+
+    fn open(text: &str, link: HintLink) -> Hint {
+        Hint {
+            text: text.into(),
+            link: Some(link),
+        }
+    }
 }
 
 /// An app that is part of a cause, with its share of what was measured.
@@ -106,8 +107,8 @@ pub struct Cause {
     pub confidence: f32,
     /// The numbers.
     pub evidence: Vec<Evidence>,
-    /// What to do.
-    pub suggestions: Vec<Suggestion>,
+    /// Hints.
+    pub hints: Vec<Hint>,
     /// The busiest apps behind it (empty when the cause is not an app, e.g. heat).
     pub involved: Vec<Involved>,
 }
@@ -161,8 +162,6 @@ pub struct Input<'a> {
     pub groups: &'a [AppGroup],
     /// Current processes.
     pub processes: &'a [ProcessSample],
-    /// The protected list (suggestions never target protected processes).
-    pub protection: &'a Protection<'a>,
     /// The volume the OS lives on (its id, e.g. "C:" or "/").
     pub system_disk: &'a str,
     /// What the OS says about speed limits, and whether a battery-saving mode is on (for the throttling cause).
@@ -232,7 +231,7 @@ pub fn diagnose(input: &Input<'_>) -> Diagnosis {
     let by_pid: HashMap<u32, &ProcessSample> = input.processes.iter().map(|p| (p.pid, p)).collect();
     let mut causes = Vec::new();
     cpu_causes(input, &by_pid, &mut causes);
-    memory_cause(input, &by_pid, &mut causes);
+    memory_cause(input, &mut causes);
     disk_cause(input, &mut causes);
     thermal_cause(input, &mut causes);
     space_cause(input, &mut causes);
@@ -244,13 +243,13 @@ pub fn diagnose(input: &Input<'_>) -> Diagnosis {
         let mem = avg(input.samples, |s| s.memory_percent());
         causes.push(Cause {
             kind: CauseKind::NothingWrong,
-            title: "Nothing is slowing your PC down right now".into(),
+            title: "Nothing is slowing your computer down right now".into(),
             explanation: "CPU, memory and disk all have room to spare. If something felt slow, it may have been brief: \
                           the history charts show the last hour, and Dyno keeps watching."
                 .into(),
             confidence: 1.0,
             evidence: vec![Evidence::new("CPU", pct(cpu)), Evidence::new("Memory in use", pct(mem))],
-            suggestions: vec![],
+            hints: vec![],
             involved: vec![],
         });
     }
@@ -266,19 +265,15 @@ pub fn diagnose(input: &Input<'_>) -> Diagnosis {
     }
 }
 
-fn root_of<'a>(g: &AppGroup, by_pid: &HashMap<u32, &'a ProcessSample>) -> Option<&'a ProcessSample> {
-    g.pids.first().and_then(|p| by_pid.get(p)).copied()
-}
-
 fn cpu_causes(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &mut Vec<Cause>) {
     let total = avg(input.samples, |s| s.cpu.total);
-    let Some(top) = input.groups.iter().max_by(|a, b| a.cpu.total_cmp(&b.cpu)) else {
+    let Some(top) = input.groups.iter().max_by(|a, b| a.cpu_read().total_cmp(&b.cpu_read())) else {
         return;
     };
-    if total < 50.0 || top.cpu < 20.0 {
+    if total < 50.0 || top.cpu_read() < 20.0 {
         return;
     }
-    let confidence = ((total - 40.0) / 50.0).clamp(0.0, 1.0) * (top.cpu / 50.0).clamp(0.2, 1.0);
+    let confidence = ((total - 40.0) / 50.0).clamp(0.0, 1.0) * (top.cpu_read() / 50.0).clamp(0.2, 1.0);
     let mut evidence = vec![
         Evidence::new("CPU (last minute)", pct(total)),
         Evidence::new(
@@ -288,18 +283,18 @@ fn cpu_causes(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &mu
                 top.pids.len(),
                 if top.pids.len() == 1 { "" } else { "es" }
             ),
-            pct(top.cpu),
+            pct(top.cpu_read()),
         ),
     ];
     if let Some(second) = input
         .groups
         .iter()
         .filter(|g| g.id != top.id)
-        .max_by(|a, b| a.cpu.total_cmp(&b.cpu))
+        .max_by(|a, b| a.cpu_read().total_cmp(&b.cpu_read()))
     {
-        evidence.push(Evidence::new(format!("Next: {}", second.name), pct(second.cpu)));
+        evidence.push(Evidence::new(format!("Next: {}", second.name), pct(second.cpu_read())));
     }
-    let (kind, title, explanation, mut suggestions) = match app_kind(top, by_pid) {
+    let (kind, title, explanation, mut hints) = match app_kind(top, by_pid) {
         Some(CauseKind::OsUpdate) => (
             CauseKind::OsUpdate,
             "Your system is installing updates".to_string(),
@@ -307,78 +302,48 @@ fn cpu_causes(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &mu
                 "{} is busy installing updates; this passes on its own. A restart may be needed afterwards.",
                 top.name
             ),
-            vec![Suggestion {
-                label: "Let it finish".into(),
-                action: SuggestedAction::Wait,
-            }],
+            vec![Hint::text("Let it finish")],
         ),
         Some(CauseKind::AntivirusScan) => (
             CauseKind::AntivirusScan,
             "The antivirus is scanning".to_string(),
             format!(
                 "{} is scanning files. Builds and big copies make it scan a lot; excluding your development folders \
-                 (Health ▸ Tuning) helps.",
+                 from its scans helps.",
                 top.name
             ),
-            vec![Suggestion {
-                label: "Let it finish".into(),
-                action: SuggestedAction::Wait,
-            }],
+            vec![Hint::text("Let it finish")],
         ),
         Some(CauseKind::Indexing) => (
             CauseKind::Indexing,
             "Search indexing is busy".to_string(),
-            "The search indexer is catching up with changed files. Excluding build folders from indexing helps (Health ▸ Tuning)."
-                .to_string(),
+            "The search indexer is catching up with changed files. Excluding build folders from indexing helps.".to_string(),
             vec![],
         ),
         _ => (
             CauseKind::CpuHog,
-            format!("{} is using {} of your CPU", top.name, pct(top.cpu)),
+            format!("{} is using {} of your CPU", top.name, pct(top.cpu_read())),
             format!(
-                "{} takes most of the processor, so everything else waits. Lowering its priority keeps the rest \
-                 responsive without stopping it.",
+                "{} takes most of the processor, so everything else waits. Closing it or giving it less to do keeps the rest \
+                 responsive.",
                 top.name
             ),
             vec![],
         ),
     };
-    if let Some(root) = root_of(top, by_pid).filter(|r| input.protection.allows(r)) {
-        suggestions.push(Suggestion {
-            label: format!("Lower {}'s priority", top.name),
-            action: SuggestedAction::Process {
-                target: root.reference(),
-                name: top.name.clone(),
-                action: ProcessAction::SetPriority(Priority::BelowNormal),
-            },
-        });
-        if kind == CauseKind::CpuHog {
-            suggestions.push(Suggestion {
-                label: "Efficiency mode".into(),
-                action: SuggestedAction::Process {
-                    target: root.reference(),
-                    name: top.name.clone(),
-                    action: ProcessAction::SetEfficiencyMode(true),
-                },
-            });
-        }
-    }
-    suggestions.push(Suggestion {
-        label: "Open the task manager".into(),
-        action: SuggestedAction::OpenTaskManager,
-    });
+    hints.push(Hint::open("Open Processes", HintLink::TaskManager));
     out.push(Cause {
         kind,
         title,
         explanation,
         confidence,
         evidence,
-        suggestions,
-        involved: involved(input.groups, |g| g.cpu, |v| format!("{} CPU", pct(v))),
+        hints,
+        involved: involved(input.groups, |g| g.cpu_read(), |v| format!("{} CPU", pct(v))),
     });
 }
 
-fn memory_cause(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &mut Vec<Cause>) {
+fn memory_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
     let Some(last) = input.samples.last() else { return };
     let level = last
         .memory
@@ -401,28 +366,15 @@ fn memory_cause(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &
     if last.memory.swap_used > 0 {
         evidence.push(Evidence::new("Swap / page file in use", bytes(last.memory.swap_used)));
     }
-    let mut suggestions = vec![];
-    if let Some(top) = input.groups.iter().max_by_key(|g| g.memory) {
-        evidence.push(Evidence::new(format!("Biggest: {}", top.name), bytes(top.memory)));
-        if let Some(root) = root_of(top, by_pid).filter(|r| input.protection.allows(r)) {
-            suggestions.push(Suggestion {
-                label: format!("Close {}", top.name),
-                action: SuggestedAction::Process {
-                    target: root.reference(),
-                    name: top.name.clone(),
-                    action: ProcessAction::End,
-                },
-            });
-        }
+    let mut hints = vec![];
+    if let Some(top) = input.groups.iter().max_by_key(|g| g.memory_read()) {
+        evidence.push(Evidence::new(format!("Biggest: {}", top.name), bytes(top.memory_read())));
     }
-    suggestions.push(Suggestion {
-        label: "Open the task manager".into(),
-        action: SuggestedAction::OpenTaskManager,
-    });
+    hints.push(Hint::open("Open Processes", HintLink::TaskManager));
     out.push(Cause {
         kind: CauseKind::MemoryPressure,
         title: if level == MemoryPressure::Critical {
-            "Your PC is out of memory".into()
+            "Your computer is out of memory".into()
         } else {
             "Memory is running low".into()
         },
@@ -431,8 +383,8 @@ fn memory_cause(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &
             .into(),
         confidence,
         evidence,
-        suggestions,
-        involved: involved(input.groups, |g| g.memory as f32, |v| bytes(v as u64)),
+        hints,
+        involved: involved(input.groups, |g| g.memory_read() as f32, |v| bytes(v as u64)),
     });
 }
 
@@ -453,12 +405,12 @@ fn disk_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
     if let Some(top) = input
         .groups
         .iter()
-        .filter(|g| g.disk_bps > 0.0)
-        .max_by(|a, b| a.disk_bps.total_cmp(&b.disk_bps))
+        .filter(|g| g.disk_read() > 0.0)
+        .max_by(|a, b| a.disk_read().total_cmp(&b.disk_read()))
     {
         evidence.push(Evidence::new(
             format!("Busiest: {}", top.name),
-            format!("{}/s", bytes(top.disk_bps as u64)),
+            format!("{}/s", bytes(top.disk_read() as u64)),
         ));
     }
     out.push(Cause {
@@ -469,11 +421,8 @@ fn disk_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
             .into(),
         confidence,
         evidence,
-        suggestions: vec![Suggestion {
-            label: "Open the task manager".into(),
-            action: SuggestedAction::OpenTaskManager,
-        }],
-        involved: involved(input.groups, |g| g.disk_bps as f32, |v| format!("{}/s", bytes(v as u64))),
+        hints: vec![Hint::open("Open Processes", HintLink::TaskManager)],
+        involved: involved(input.groups, |g| g.disk_read() as f32, |v| format!("{}/s", bytes(v as u64))),
     });
 }
 
@@ -500,7 +449,7 @@ fn thermal_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
             Confidence::Low => 0.5,
         },
         evidence: reading.evidence,
-        suggestions: vec![],
+        hints: vec![],
         involved: vec![],
     });
 }
@@ -518,14 +467,11 @@ fn space_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
         kind: CauseKind::LowDiskSpace,
         title: format!("{} is nearly full", d.name),
         explanation: "With little free space the system can't grow its page file or install updates, and apps fail to \
-                      save. Cleanup shows what can go safely."
+                      save."
             .into(),
         confidence: if d.free < 1 << 30 { 0.8 } else { 0.5 },
         evidence: vec![Evidence::new("Free", format!("{} ({})", bytes(d.free), pct(free_pct)))],
-        suggestions: vec![Suggestion {
-            label: "Free up space".into(),
-            action: SuggestedAction::OpenCleanup,
-        }],
+        hints: vec![],
         involved: vec![],
     });
 }
@@ -543,7 +489,7 @@ fn gpu_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
             .into(),
         confidence: 0.4,
         evidence: vec![Evidence::new("GPU", pct(util))],
-        suggestions: vec![],
+        hints: vec![],
         involved: vec![],
     });
 }
@@ -575,14 +521,11 @@ mod tests {
         }
         fn run(&self) -> Diagnosis {
             let groups = group(&self.procs);
-            let user = vec![];
-            let protection = Protection::new(&user, &[]);
             diagnose(&Input {
                 now: Timestamp(60_000),
                 samples: &self.samples,
                 groups: &groups,
                 processes: &self.procs,
-                protection: &protection,
                 system_disk: "c:",
                 throttle: self.throttle,
             })
@@ -594,7 +537,7 @@ mod tests {
         let d = Case::new().run();
         assert_eq!(d.causes.len(), 1);
         assert_eq!(d.causes[0].kind, CauseKind::NothingWrong);
-        assert_eq!(d.headline, "Nothing is slowing your PC down right now");
+        assert_eq!(d.headline, "Nothing is slowing your computer down right now");
         let empty = Case {
             samples: vec![],
             procs: vec![],
@@ -615,20 +558,13 @@ mod tests {
         assert_eq!(d.headline, "Rust compiler is using 63% of your CPU");
         assert!(top.evidence.iter().any(|e| e.label.starts_with("Next: Google Chrome")));
         assert!(top.evidence.iter().any(|e| e.label == "Rust compiler (1 process)"));
-        assert!(
-            matches!(&top.suggestions[0].action, SuggestedAction::Process { target, action: ProcessAction::SetPriority(_), .. } if target.pid == 20)
-        );
-        assert_eq!(top.suggestions.len(), 3);
-        // Two processes: plural; a protected hog gets no process suggestions.
+        assert_eq!(top.hints.len(), 1);
+        assert_eq!(top.hints[0].link, Some(HintLink::TaskManager));
+        // Two processes: plural.
         c.procs.push(proc(21, Some(20), "rustc.exe", 1.0, 1));
         c.procs[3].exe = c.procs[2].exe.clone();
         let d = c.run();
         assert!(d.causes[0].evidence.iter().any(|e| e.label == "Rust compiler (2 processes)"));
-        let mut c = Case::new();
-        c.each(|s| s.cpu.total = 92.0);
-        c.procs = vec![proc(20, None, "csrss.exe", 63.0, 1)];
-        let d = c.run();
-        assert_eq!(d.causes[0].suggestions.len(), 1);
     }
 
     #[test]
@@ -687,15 +623,9 @@ mod tests {
         });
         let d = c.run();
         assert_eq!(d.causes[0].kind, CauseKind::MemoryPressure);
-        assert_eq!(d.causes[0].title, "Your PC is out of memory");
+        assert_eq!(d.causes[0].title, "Your computer is out of memory");
         assert!(d.causes[0].evidence.iter().any(|e| e.label == "Swap / page file in use"));
-        assert!(matches!(
-            &d.causes[0].suggestions[0].action,
-            SuggestedAction::Process {
-                action: ProcessAction::End,
-                ..
-            }
-        ));
+        assert_eq!(d.causes[0].hints[0].link, Some(HintLink::TaskManager));
         let mut c = Case::new();
         c.each(|s| {
             s.memory.pressure = Reading::unavailable("n/a");
@@ -705,13 +635,13 @@ mod tests {
         c.procs.clear();
         let d = c.run();
         assert_eq!(d.causes[0].title, "Memory is running low");
-        assert_eq!(d.causes[0].suggestions.len(), 1);
+        assert_eq!(d.causes[0].hints.len(), 1);
         let mut c = Case::new();
         c.each(|s| s.memory.commit = Reading::Available(Commit { used: 1, limit: 2 }));
         c.each(|s| s.memory.pressure = Reading::Available(MemoryPressure::Elevated));
         c.procs = vec![proc(3, None, "System", 0.0, 9000)];
         let d = c.run();
-        assert_eq!(d.causes[0].suggestions.len(), 1, "no close for protected");
+        assert_eq!(d.causes[0].hints.len(), 1);
     }
 
     #[test]
@@ -721,7 +651,7 @@ mod tests {
             s.disk_io.queue = Reading::Available(4.2);
             s.disk_io.busy = Reading::Available(99.0);
         });
-        c.procs[0].disk_write_bps = 50e6;
+        c.procs[0].disk_write_bps = crate::process::Measured::Value(50e6);
         let d = c.run();
         assert_eq!(d.causes[0].kind, CauseKind::DiskQueue);
         assert!(d.causes[0].evidence.iter().any(|e| e.label == "Busiest: Google Chrome"));

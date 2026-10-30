@@ -16,3 +16,4 @@ mod tauri;
 mod tauri_activity;
 mod time;
 mod walk;
+mod wire;

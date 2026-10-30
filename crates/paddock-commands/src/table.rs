@@ -184,6 +184,146 @@ const fn last_segment(path: &'static str) -> &'static str {
     path.split_at(start).1
 }
 
+/// What a [`DialogCallable`] names (see [`DialogCallable::kind`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DialogCallableKind {
+    /// One command of a table, open to dialogs.
+    Command(&'static str),
+    /// Every command of a table whose name starts with this (`settings_*`); at least one is open to dialogs.
+    Prefix(&'static str),
+    /// A Tauri plugin's command (`plugin:<plugin>|<command>`): scoped by the plugin's own permissions, checked against
+    /// the plugin's permission list by a unit test in the owner.
+    Plugin {
+        plugin: &'static str,
+        command: &'static str,
+    },
+}
+
+/// A command a dialog contract may name (ADR 0026 §3). [`command_table!`](crate::command_table) emits one marker per
+/// command open to dialogs (`dialog_callable::<name>`); a contract names the marker, so a misspelt command, a removed
+/// one or one closed to dialogs is an unresolved name: a compile error that names it. [`prefix`] and [`plugin`] build
+/// the two other forms. The fields are private, so a value cannot be made by hand (a string literal would bypass the
+/// compile-time check):
+///
+/// ```compile_fail
+/// let _ = paddock_commands::DialogCallable::Command("x");
+/// ```
+///
+/// ```compile_fail
+/// let _ = paddock_commands::DialogCallable(paddock_commands::DialogCallableKind::Command("x"));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DialogCallable(DialogCallableKind);
+
+impl DialogCallable {
+    /// What this entry names.
+    pub const fn kind(&self) -> DialogCallableKind {
+        self.0
+    }
+
+    /// The entry as the run-time contract lists it: the command, `prefix*`, or `plugin:<plugin>|<command>`.
+    pub fn wire(&self) -> String {
+        match self.0 {
+            DialogCallableKind::Command(c) => c.to_string(),
+            DialogCallableKind::Prefix(p) => format!("{p}*"),
+            DialogCallableKind::Plugin { plugin, command } => format!("plugin:{plugin}|{command}"),
+        }
+    }
+
+    /// For [`command_table!`](crate::command_table) and tests only: a command marker.
+    #[doc(hidden)]
+    pub const fn __command(name: &'static str) -> DialogCallable {
+        DialogCallable(DialogCallableKind::Command(name))
+    }
+
+    /// For tests only: a prefix entry without the compile-time check of [`prefix`].
+    #[doc(hidden)]
+    pub const fn __prefix(prefix: &'static str) -> DialogCallable {
+        DialogCallable(DialogCallableKind::Prefix(prefix))
+    }
+}
+
+/// A `prefix*` entry over `callable` (a table's `dialog_callable::ALL`). Evaluated at compile time in a contract table: a
+/// prefix that is not `lower_snake_case` or that matches no dialog-callable command fails the build.
+pub const fn prefix(callable: &[&str], prefix: &'static str) -> DialogCallable {
+    let p = prefix.as_bytes();
+    assert!(
+        !p.is_empty() && p.len() < MAX_NAME_LEN,
+        "dialog contract: a prefix* entry is empty or too long"
+    );
+    let mut i = 0;
+    while i < p.len() {
+        assert!(
+            p[i].is_ascii_lowercase() || p[i].is_ascii_digit() || p[i] == b'_',
+            "dialog contract: a prefix* entry is not lower_snake_case"
+        );
+        i += 1;
+    }
+    let mut k = 0;
+    while k < callable.len() {
+        if starts_with(callable[k], prefix) {
+            return DialogCallable(DialogCallableKind::Prefix(prefix));
+        }
+        k += 1;
+    }
+    panic!("dialog contract: a prefix* entry matches no dialog-callable command")
+}
+
+/// A plugin command entry (`plugin("dialog", "open")`): not resolvable at compile time; the owner's unit test checks it
+/// against the plugin's generated permission list.
+pub const fn plugin(plugin: &'static str, command: &'static str) -> DialogCallable {
+    assert!(
+        !plugin.is_empty() && !command.is_empty(),
+        "dialog contract: a plugin command needs a plugin and a command"
+    );
+    DialogCallable(DialogCallableKind::Plugin { plugin, command })
+}
+
+const fn starts_with(name: &str, prefix: &str) -> bool {
+    let (n, p) = (name.as_bytes(), prefix.as_bytes());
+    if p.len() > n.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < p.len() {
+        if n[i] != p[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// How many of `specs` are open to dialogs (used by [`command_table!`](crate::command_table) for `dialog_callable::ALL`).
+#[doc(hidden)]
+pub const fn dialog_count(specs: &[Spec]) -> usize {
+    let mut n = 0;
+    let mut i = 0;
+    while i < specs.len() {
+        if specs[i].windows.0 & Windows::DIALOG.0 != 0 {
+            n += 1;
+        }
+        i += 1;
+    }
+    n
+}
+
+/// The names of `specs` open to dialogs, in table order. `N` must be [`dialog_count`]`(specs)`.
+#[doc(hidden)]
+pub const fn dialog_names<const N: usize>(specs: &[Spec]) -> [&'static str; N] {
+    let mut out = [""; N];
+    let mut k = 0;
+    let mut i = 0;
+    while i < specs.len() {
+        if specs[i].windows.0 & Windows::DIALOG.0 != 0 {
+            out[k] = specs[i].name;
+            k += 1;
+        }
+        i += 1;
+    }
+    out
+}
+
 /// What is wrong with a table: the entry at `index` (and, for a duplicate, the earlier entry `first`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TableError {

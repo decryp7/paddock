@@ -60,6 +60,13 @@ pub fn disabled_in_login_items(status: RegistrationStatus, launchd_disabled: Opt
     }
 }
 
+/// Whether launchd starts the agent now and restarts it (`KeepAlive`), so the app must wait for it: the item is enabled,
+/// the user did not switch it off in Login Items ([`disabled_in_login_items`]) and launchd still has the job loaded
+/// (`job.found`). Anything less supervises nothing, and waiting for it would wait for an agent that never comes.
+pub fn service_supervises(status: RegistrationStatus, launchd_disabled: Option<bool>, job: JobReport) -> bool {
+    status == RegistrationStatus::Enabled && !disabled_in_login_items(status, launchd_disabled) && job.found
+}
+
 /// Reads `label`'s entry in the output of `launchctl print-disabled gui/<uid>`: `"label" => disabled` (older systems
 /// print `true`/`false`). `None` when the label is not listed.
 pub fn parse_print_disabled(output: &str, label: &str) -> Option<bool> {
@@ -355,6 +362,25 @@ mod tests {
         assert!(disabled_in_login_items(Enabled, Some(true)));
         assert!(!disabled_in_login_items(Enabled, None));
         assert!(!disabled_in_login_items(NotFound, Some(true)));
+    }
+
+    #[test]
+    fn launchd_supervises_only_an_enabled_item_the_user_did_not_switch_off_whose_job_is_loaded() {
+        use RegistrationStatus::*;
+        let loaded = JobReport {
+            found: true,
+            ..JobReport::default()
+        };
+        assert!(service_supervises(Enabled, None, loaded));
+        assert!(service_supervises(Enabled, Some(false), loaded));
+        // Enabled for SMAppService but off in Login Items (launchd's override database): nothing runs the agent.
+        assert!(!service_supervises(Enabled, Some(true), loaded));
+        // Waiting for approval, not registered, not found: launchd runs nothing.
+        assert!(!service_supervises(RequiresApproval, None, loaded));
+        assert!(!service_supervises(NotRegistered, None, loaded));
+        assert!(!service_supervises(NotFound, None, loaded));
+        // Enabled, but launchd dropped the job (or `launchctl print` could not be read): it starts nothing.
+        assert!(!service_supervises(Enabled, None, JobReport::default()));
     }
 
     #[test]

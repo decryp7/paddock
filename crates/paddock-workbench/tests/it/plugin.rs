@@ -263,8 +263,11 @@ fn the_drag_ghost_window_matches_no_permission_set() {
 fn a_dialog_reaches_only_what_its_contract_declares() {
     let dir = tempfile::tempdir().unwrap();
     let app = app(full(dir.path()));
-    let contracts = r#"{"version":1,"base":[],"dialogs":{"wb.tool":{"kind":"tool","modality":"modeless","requiredChoice":false,"instanced":false,"commands":[]}}}"#;
-    app.manage(Dialogs::from_json(contracts).unwrap());
+    paddock_dialogs::dialogs! {
+        static TOOL;
+        "wb.tool" => Tool,
+    }
+    app.manage(Dialogs::from_tables(&[&TOOL]).unwrap());
     // The dialog layer does not know this window: the ACL lets the dialog set through, the guard refuses.
     let unknown = window(&app, "d-main-1");
     let e = invoke(&unknown, "ui_sync_publish", json!({})).unwrap_err();

@@ -3,6 +3,7 @@
   "productName": "Paddock Workbench Demo",
   "identifier": "net.decryptology.paddock-workbench-demo",
   "build": {
+    "windows": { "staticVCRuntime": false },
     "frontendDist": "../../../ui/dist/workbench-demo/browser",
     "devUrl": "http://localhost:4302",
     "beforeDevCommand": "npm --prefix ../../ui run workbench-demo",

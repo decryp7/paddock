@@ -36,3 +36,22 @@ export interface TypeToken<T> {
 export function type<T>(): TypeToken<T> {
   return {};
 }
+
+/**
+ * What a dialog's opener receives when it is gone (ADR 0026 §2): never an ambiguous `undefined`. An answer of
+ * `undefined` is a value like any other; the dismiss action, Escape, Cmd/Ctrl+W or an OS close are a dismissal.
+ */
+export type DialogOutcome<R> = { readonly kind: 'answered'; readonly value: R } | { readonly kind: 'dismissed' };
+
+/** The outcome of a dismissed dialog. */
+export const DISMISSED: DialogOutcome<never> = Object.freeze({ kind: 'dismissed' });
+
+/** The outcome of a dialog answered with `value`. */
+export function answered<R>(value: R): DialogOutcome<R> {
+  return { kind: 'answered', value };
+}
+
+/** The value of an answered outcome, `undefined` for a dismissal (for an opener that only cares about the value). */
+export function answerOf<R>(outcome: DialogOutcome<R>): R | undefined {
+  return outcome.kind === 'answered' ? outcome.value : undefined;
+}

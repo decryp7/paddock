@@ -1,8 +1,8 @@
-import { EVENTS, REQUEST_TIMEOUT_MS, TauriBackend, type InvokeFn, type ListenFn } from './tauri-backend';
+import type { JobSpec } from './api.types';
+import { EVENTS, TauriBackend, type InvokeFn, type ListenFn } from './tauri-backend';
 
 const REF = { pid: 7, started: 1000 };
-const SETTINGS = { theme: 'dark' } as never;
-const RULES = { rules: [] } as never;
+const SETTINGS = { launchAtLogin: true } as never;
 
 function fake() {
   const invoke = vi.fn().mockResolvedValue('ok');
@@ -19,11 +19,15 @@ function fake() {
   return { backend, invoke, listen, emit, stops };
 }
 
+/** `startJob` answers the job's id; the shape test only looks at what was sent. */
+const started = async (b: TauriBackend, spec: JobSpec): Promise<string> => {
+  await b.startJob(spec);
+  return 'ok';
+};
+
 describe('TauriBackend: request shapes', () => {
   const cases: Array<[string, (b: TauriBackend) => Promise<unknown>, unknown]> = [
     ['processDetails', (b) => b.processDetails(REF), { processDetails: { target: REF } }],
-    ['act', (b) => b.act(REF, { setPriority: 'idle' }), { act: { target: REF, action: { setPriority: 'idle' } } }],
-    ['actOnGroup', (b) => b.actOnGroup('chrome', 'end'), { actOnGroup: { groupId: 'chrome', action: 'end' } }],
     ['lockers', (b) => b.lockers('/tmp/x'), { lockers: { path: '/tmp/x' } }],
     ['openLocation', (b) => b.openLocation(REF), { openLocation: { target: REF } }],
     ['takeSnapshot', (b) => b.takeSnapshot('before'), { takeSnapshot: { label: 'before' } }],
@@ -34,64 +38,45 @@ describe('TauriBackend: request shapes', () => {
     ['history', (b) => b.history('week', 5), { history: { range: 'week', end: 5 } }],
     ['history now', (b) => b.history('hour', null), { history: { range: 'hour', end: null } }],
     ['activity', (b) => b.activity(30), { activity: { limit: 30 } }],
-    ['undo', (b) => b.undo('act-1'), { undo: { activityId: 'act-1' } }],
-    ['releaseAction', (b) => b.releaseAction(REF), { releaseAction: { target: REF } }],
-    ['rules', (b) => b.rules(), 'rules'],
-    ['saveRules', (b) => b.saveRules(RULES), { saveRules: { rules: RULES } }],
-    ['setProfile', (b) => b.setProfile('gaming'), { setProfile: { profile: 'gaming' } }],
-    ['pauseRules', (b) => b.pauseRules(true), { pauseRules: { paused: true } }],
-    ['cleanupCategories', (b) => b.cleanupCategories(), 'cleanupCategories'],
-    ['scanCleanup', (b) => b.scanCleanup(['temp']), { scanCleanup: { categories: ['temp'] } }],
-    ['runCleanup', (b) => b.runCleanup('s1', ['i1'], 'quarantine'), { runCleanup: { scanId: 's1', itemIds: ['i1'], mode: 'quarantine' } }],
-    ['quarantine', (b) => b.quarantine(), 'quarantine'],
-    ['restoreQuarantine', (b) => b.restoreQuarantine('q1'), { restoreQuarantine: { id: 'q1' } }],
-    ['diskUsage', (b) => b.diskUsage(null), { diskUsage: { path: null } }],
+    ['diskVolumes', (b) => b.diskVolumes(), 'diskVolumes'],
+    ['startDiskScan of a volume', (b) => b.startDiskScan({ volume: { id: '/' } }), { startDiskScan: { target: { volume: { id: '/' } } } }],
+    ['startDiskScan of a folder', (b) => b.startDiskScan({ folder: { path: '/x' } }), { startDiskScan: { target: { folder: { path: '/x' } } } }],
+    ['cancelDiskScan', (b) => b.cancelDiskScan(7), { cancelDiskScan: { scan: 7 } }],
+    ['diskScans', (b) => b.diskScans(), 'diskScans'],
+    ['diskChildren', (b) => b.diskChildren({ scan: 7, node: null, offset: 48, limit: 48, minFraction: 0.004 }), { diskChildren: { scan: 7, node: null, offset: 48, limit: 48, minFraction: 0.004 } }],
+    ['diskRings', (b) => b.diskRings({ scan: 7, node: null, rings: 3, minShare: 0.01, maxNodes: 500 }), { diskRings: { scan: 7, node: null, rings: 3, minShare: 0.01, maxNodes: 500 } }],
+    ['diskPath', (b) => b.diskPath(7, 4), { diskPath: { scan: 7, node: 4 } }],
+    ['retryDiskScan', (b) => b.retryDiskScan(7), { retryDiskScan: { scan: 7 } }],
+    ['openFullDiskAccessSettings', (b) => b.openFullDiskAccessSettings(), 'openFullDiskAccessSettings'],
+    ['diskReveal', (b) => b.diskReveal(7, 4), { diskReveal: { scan: 7, node: 4 } }],
     ['health', (b) => b.health(), 'health'],
-    ['tuning', (b) => b.tuning(), 'tuning'],
-    ['applyTuning', (b) => b.applyTuning('t'), { applyTuning: { id: 't' } }],
-    ['revertTuning', (b) => b.revertTuning('t'), { revertTuning: { id: 't', force: false } }],
-    ['revertTuning forced', (b) => b.revertTuning('t', true), { revertTuning: { id: 't', force: true } }],
-    ['helperStatus', (b) => b.helperStatus(), 'helperStatus'],
-    ['installHelper', (b) => b.installHelper(), 'installHelper'],
-    ['uninstallHelper', (b) => b.uninstallHelper(), 'uninstallHelper'],
     ['startupEntries', (b) => b.startupEntries(), 'startupEntries'],
-    ['setStartupState', (b) => b.setStartupState('s', { delayed: 30 }), { setStartupState: { id: 's', state: { delayed: 30 } } }],
     ['weeklyReport', (b) => b.weeklyReport(3), { weeklyReport: { weeksAgo: 3 } }],
     ['alerts', (b) => b.alerts(10), { alerts: { limit: 10 } }],
     ['changes', (b) => b.changes({ hours: 24 }), { changes: { query: { hours: 24 } } }],
-    ['sleepBlockers', (b) => b.sleepBlockers(), 'sleepBlockers'],
-    ['bootAnalysis', (b) => b.bootAnalysis(), 'bootAnalysis'],
-    ['appUsage', (b) => b.appUsage(), 'appUsage'],
     ['gpuProcesses', (b) => b.gpuProcesses(), 'gpuProcesses'],
-    ['softwareInventory', (b) => b.softwareInventory(), 'softwareInventory'],
-    ['findFiles', (b) => b.findFiles({ folder: '/x', mode: 'both', minBytes: 5 }), { findFiles: { query: { folder: '/x', mode: 'both', minBytes: 5 } } }],
-    ['removeFoundFiles', (b) => b.removeFoundFiles('s', ['a'], 'quarantine'), { removeFoundFiles: { scanId: 's', ids: ['a'], mode: 'quarantine' } }],
+    ['startJob findFiles', (b) => started(b, { findFiles: { query: { folder: '/x', mode: 'both', minBytes: 5 } } }), { startJob: { spec: { findFiles: { query: { folder: '/x', mode: 'both', minBytes: 5 } } } } }],
+    ['startJob rescanIssues', (b) => started(b, { rescanIssues: { query: { days: 7 } } }), { startJob: { spec: { rescanIssues: { query: { days: 7 } } } } }],
+    ['startJob refreshBackup', (b) => started(b, 'refreshBackup'), { startJob: { spec: 'refreshBackup' } }],
+    ['startJob fileHash of a process', (b) => started(b, { fileHash: { source: { process: REF } } }), { startJob: { spec: { fileHash: { source: { process: REF } } } } }],
+    ['startJob fileHash of a path', (b) => started(b, { fileHash: { source: { path: '/a/b' } } }), { startJob: { spec: { fileHash: { source: { path: '/a/b' } } } } }],
+    ['startJob sleepBlockers', (b) => started(b, 'sleepBlockers'), { startJob: { spec: 'sleepBlockers' } }],
+    ['startJob bootAnalysis', (b) => started(b, 'bootAnalysis'), { startJob: { spec: 'bootAnalysis' } }],
+    ['startJob appUsage', (b) => started(b, 'appUsage'), { startJob: { spec: 'appUsage' } }],
+    ['startJob softwareInventory', (b) => started(b, 'softwareInventory'), { startJob: { spec: 'softwareInventory' } }],
+    ['jobResult', (b) => b.jobResult(4), { jobResult: { id: 4 } }],
     ['maintenance', (b) => b.maintenance(), 'maintenance'],
     ['backup', (b) => b.backup(), 'backup'],
-    ['refreshBackup', (b) => b.refreshBackup(), 'refreshBackup'],
     ['settings', (b) => b.settings(), 'settings'],
     ['saveSettings', (b) => b.saveSettings(SETTINGS), { saveSettings: { settings: SETTINGS } }],
     ['plugins', (b) => b.plugins(), 'plugins'],
     ['issues', (b) => b.issues({ days: 14 }), { issues: { query: { days: 14 } } }],
-    ['rescanIssues', (b) => b.rescanIssues({ days: 7 }), { rescanIssues: { query: { days: 7 } } }],
-    ['unusual', (b) => b.unusual(true), { unusual: { includeIgnored: true } }],
-    ['unusualAct', (b) => b.unusualAct('/a', 'protect'), { unusualAct: { key: '/a', action: 'protect' } }],
+    ['unusual', (b) => b.unusual(), 'unusual'],
     ['forgetBaseline', (b) => b.forgetBaseline(), 'forgetBaseline'],
     ['searchSeed', (b) => b.searchSeed('Slack'), { searchSeed: { text: 'Slack' } }],
     ['webSearch', (b) => b.webSearch('slack high cpu'), { webSearch: { query: 'slack high cpu' } }],
-    ['fileHash of a process', (b) => b.fileHash({ process: REF }), { fileHash: { source: { process: REF } } }],
-    ['fileHash of a path', (b) => b.fileHash({ path: '/a/b' }), { fileHash: { source: { path: '/a/b' } } }],
     ['openVirusTotal', (b) => b.openVirusTotal('ab'.repeat(32)), { virusTotalUrl: { sha256: 'ab'.repeat(32) } }],
     ['startupOverview', (b) => b.startupOverview({ hideOs: true, hideSigned: false }), { startupOverview: { filter: { hideOs: true, hideSigned: false } } }],
-    ['watchedFolders', (b) => b.watchedFolders(), 'watchedFolders'],
-    [
-      'setWatchedFolder sends absent fields as null',
-      (b) => b.setWatchedFolder('w-1', { enabled: true }),
-      { setWatchedFolder: { id: 'w-1', keepForSecs: null, enabled: true, recursive: null } },
-    ],
-    ['removeWatchedFolder', (b) => b.removeWatchedFolder('w-1'), { removeWatchedFolder: { id: 'w-1' } }],
-    ['previewWatchedFolder', (b) => b.previewWatchedFolder('w-1'), { previewWatchedFolder: { id: 'w-1' } }],
-    ['sweepWatchedFolder', (b) => b.sweepWatchedFolder('w-1'), { sweepWatchedFolder: { id: 'w-1' } }],
   ];
 
   it.each(cases)('%s sends the externally tagged request through the dyno command', async (_name, call, request) => {
@@ -113,13 +98,6 @@ describe('TauriBackend: request shapes', () => {
     expect(invoke).toHaveBeenCalledWith('save_issues', { days: 30 });
   });
 
-  it('addWatchedFolder asks the shell for the folder dialog and never sends a path from the webview', async () => {
-    const { backend, invoke } = fake();
-    await backend.addWatchedFolder({ template: 'installers', keepForSecs: 600, recursive: false });
-    expect(invoke).toHaveBeenCalledWith('add_watched_folder', { template: 'installers', keepForSecs: 600, recursive: false });
-    expect(JSON.stringify(invoke.mock.calls)).not.toContain('path');
-  });
-
   it('saveInventoryReport and pickFolder ask the shell for its dialogs', async () => {
     const { backend, invoke } = fake();
     await backend.saveInventoryReport('json');
@@ -128,65 +106,52 @@ describe('TauriBackend: request shapes', () => {
     expect(invoke).toHaveBeenLastCalledWith('pick_folder');
   });
 
-  it('popoverResize sends the measured height to popover_resize', async () => {
+  it('the tray popover is the shell’s window: fit, close, show the main window and quit are the shell’s commands', async () => {
     const { backend, invoke } = fake();
-    await backend.popoverResize(342);
-    expect(invoke.mock.calls).toEqual([['popover_resize', { height: 342 }]]);
-  });
-
-  it('appInfo and the tray use their own commands without arguments', async () => {
-    const { backend, invoke } = fake();
-    await backend.appInfo();
-    await backend.trayOpenMain();
-    await backend.trayQuit();
-    expect(invoke.mock.calls).toEqual([['app_info'], ['tray_open_main'], ['tray_quit']]);
+    await backend.fitTray(342);
+    await backend.hideTray();
+    await backend.quitApp();
+    await backend.showMainWindow();
+    expect(invoke.mock.calls).toEqual([
+      ['plugin:paddock-shell|tray_fit_height', { height: 342 }],
+      ['plugin:paddock-shell|tray_close'],
+      ['plugin:paddock-shell|app_quit'],
+      ['plugin:paddock-shell|window_focus', { label: 'main' }],
+      ['plugin:paddock-shell|tray_close'],
+    ]);
   });
 });
 
-describe('TauriBackend: errors and timeout', () => {
+describe('TauriBackend: errors', () => {
   it('turns a well-formed rejection into a CommandError', async () => {
     const { backend, invoke } = fake();
-    invoke.mockRejectedValueOnce({ code: 'protected', message: 'no' });
-    await expect(backend.whySlow()).rejects.toEqual({ code: 'protected', message: 'no' });
+    invoke.mockRejectedValueOnce({ code: 'busy', message: 'no' });
+    await expect(backend.whySlow()).rejects.toEqual({ code: 'busy', message: 'no' });
   });
   it('turns other rejections into internal errors', async () => {
     const { backend, invoke } = fake();
     invoke.mockRejectedValueOnce('plain text');
-    await expect(backend.rules()).rejects.toEqual({ code: 'internal', message: 'plain text' });
+    await expect(backend.settings()).rejects.toEqual({ code: 'internal', message: 'plain text' });
     invoke.mockRejectedValueOnce(new Error('boom'));
-    await expect(backend.rules()).rejects.toEqual({ code: 'internal', message: 'boom' });
+    await expect(backend.settings()).rejects.toEqual({ code: 'internal', message: 'boom' });
   });
 
-  describe('timeout', () => {
-    beforeEach(() => vi.useFakeTimers());
-    afterEach(() => vi.useRealTimers());
-
-    it('rejects with code timeout when the shell does not answer', async () => {
+  it('has no timer: a request the shell has not answered stays pending, however long it takes (ER-19)', async () => {
+    vi.useFakeTimers();
+    try {
       const { invoke, listen } = fake();
       invoke.mockReturnValue(new Promise(() => undefined));
-      const backend = new TauriBackend(invoke as unknown as InvokeFn, listen as unknown as ListenFn, 50);
-      const result = backend.health();
-      const assertion = expect(result).rejects.toEqual({ code: 'timeout', message: 'Dyno did not answer in time.' });
-      await vi.advanceTimersByTimeAsync(50);
-      await assertion;
-    });
-    it('does not time out once answered, and clears its timer', async () => {
-      const { backend } = fake();
-      await backend.health();
+      const backend = new TauriBackend(invoke as unknown as InvokeFn, listen as unknown as ListenFn);
+      let settled = false;
+      const done = () => (settled = true);
+      void backend.health().then(done, done);
+      void backend.pickFolder().then(done, done);
       expect(vi.getTimerCount()).toBe(0);
-    });
-    it('uses 15 s by default', async () => {
-      const { invoke } = fake();
-      invoke.mockReturnValue(new Promise(() => undefined));
-      const backend = new TauriBackend(invoke as unknown as InvokeFn, vi.fn() as unknown as ListenFn);
-      expect(REQUEST_TIMEOUT_MS).toBe(15_000);
-      let rejected: unknown;
-      backend.health().catch((e: unknown) => (rejected = e));
-      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS - 1);
-      expect(rejected).toBeUndefined();
-      await vi.advanceTimersByTimeAsync(1);
-      expect(rejected).toMatchObject({ code: 'timeout' });
-    });
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(settled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -281,10 +246,18 @@ describe('TauriBackend: live subscription', () => {
 });
 
 describe('TauriBackend: push channels', () => {
+  it('the disk scan event has the name the shell emits', () => {
+    expect(EVENTS.diskScan).toBe('dyno://disk-scan');
+    expect(EVENTS.diskVolumes).toBe('dyno://disk-volumes');
+  });
+
+
   it.each([
     ['onAlert', EVENTS.alert],
     ['onActivity', EVENTS.activity],
     ['onAgentStatus', EVENTS.agent],
+    ['onDiskScan', EVENTS.diskScan],
+    ['onDiskVolumes', EVENTS.diskVolumes],
   ] as const)('%s listens to its own event', async (method, event) => {
     const { backend, emit, listen, stops } = fake();
     const l = vi.fn();

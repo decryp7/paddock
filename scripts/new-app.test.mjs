@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
-import { angularJson, changelog, crateNames, createApp, leftovers, parseArgs, registryDependencies, rewrite, tsconfigJson } from './new-app.mjs';
+import { angularJson, cargoConfig, changelog, crateNames, createApp, leftovers, parseArgs, registryDependencies, rewrite, tsconfigJson } from './new-app.mjs';
 
 const defaults = { template: 'shell-demo', accent: 'graphite' };
 
@@ -107,7 +107,8 @@ describe('a new app', () => {
     assert.equal(conf.identifier, 'net.decryptology.pacenotes');
     assert.equal(conf.build.frontendDist, '../dist/app/browser');
     assert.match(read('app/src-tauri/src/lib.rs'), /pub const APP_ID: &str = "pacenotes";/);
-    assert.match(read('app/src-tauri/src/lib.rs'), /include_str!\("\.\.\/\.\.\/dialog-contracts\.json"\)/);
+    assert.match(read('app/src-tauri/src/lib.rs'), /\.dialogs\(&\[&dialogs::DIALOGS\]\)/);
+    assert.match(read('app/src/app/generated/dialog-contracts.ts'), /cd app\/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app/);
     assert.match(read('app/src/app/demo-name.ts'), /APP_NAME = 'Pacenotes'/);
     assert.ok(existsSync(join(dest, 'app/src-tauri/icons/tray/pacenotes-tray-18ptTemplate@2x.png')));
     assert.ok(!readdirSync(join(dest, 'app/src-tauri/icons/tray')).some((f) => f.startsWith('shell-demo')));
@@ -120,6 +121,10 @@ describe('a new app', () => {
     assert.match(read('AGENTS.md'), /<!-- paddock:block rules rev=[0-9a-f]{8} -->/);
     assert.match(read('README.md'), /^# Pacenotes\n/);
     assert.match(read('docs/releasing.md'), /Pacenotes is not code-signed yet/);
+    // ADR 0032: the copied tauri.conf.json turns Tauri's partial static VC runtime off, so the new repo must link the C
+    // runtime statically itself, or every Windows binary of the new app would import VCRUNTIME140.dll.
+    assert.equal(conf.build.windows.staticVCRuntime, false);
+    assert.match(read('.cargo/config.toml'), /^\[target\.'cfg\(all\(windows, target_env = "msvc"\)\)'\]\nrustflags = \["-C", "target-feature=\+crt-static"\]$/m);
     assert.equal(read('app/tsconfig.json').includes('paddock-tsconfig'), false, 'the generator keeps its own tsconfig');
     const pkg = JSON.parse(read('app/package.json'));
     assert.match(pkg.dependencies['@decryp7/paddock-ui'], /^\^\d+\.\d+\.\d+$/);
@@ -130,7 +135,7 @@ describe('a new app', () => {
     assert.equal(pkg.scripts.test, undefined);
     assert.equal(pkg.devDependencies.jsdom, undefined);
     assert.equal(JSON.parse(read('app/angular.json')).projects.app.architect.test, undefined);
-    assert.match(read('app/playwright.config.ts'), /paddockConfig\(\{ app: 'pacenotes', defaultPort: 4200, serve: \(port\) => `npx ng serve --port \$\{port\}` \}\)/);
+    assert.match(read('app/playwright.config.ts'), /paddockConfig\(\{ app: 'pacenotes', defaultPort: 4200, buildGuard: 'none', serve: \(port\) => `npx ng serve --port \$\{port\}` \}\)/);
     const smoke = read('app/e2e/smoke.spec.ts');
     assert.match(smoke, /page\.locator\('#pd-main'\)/);
     assert.match(smoke, /axeInThemes\(page\)/);
@@ -210,4 +215,13 @@ describe('a new app from the workbench demo', () => {
     assert.throws(() => createApp({ ...args, dest: other, template: 'nope' }), /unknown template nope/);
     assert.ok(!existsSync(other));
   });
+});
+
+test('cargoConfig takes the static C runtime table and its comment from the root configuration, and fails without it', () => {
+  const root = '# head\n[target.x86_64-pc-windows-msvc]\nlinker = "x"\n\n# why\n# more\n[target.\'cfg(all(windows, target_env = "msvc"))\']\nrustflags = ["-C", "target-feature=+crt-static"]\n\n[registries.r]\nindex = "i"\n';
+  const out = cargoConfig(root);
+  assert.match(out, /^# Cargo settings for this app/);
+  assert.match(out, /# why\n# more\n\[target\.'cfg\(all\(windows, target_env = "msvc"\)\)'\]\nrustflags = \["-C", "target-feature=\+crt-static"\]\n$/);
+  assert.doesNotMatch(out, /linker|registries|# head/);
+  assert.throws(() => cargoConfig('[target.x86_64-pc-windows-msvc]\nlinker = "x"\n'), /ADR 0032/);
 });

@@ -42,7 +42,7 @@ interface Seed {
 }
 
 const SEEDS: Seed[] = [
-  { ago: 35 * MIN, kind: 'appCrash', app: 'Google Chrome Helper (Renderer)', title: 'Google Chrome Helper (Renderer) quit unexpectedly', evidence: 'Version 156.0.8078.48. Exception EXC_CRASH (SIGABRT). Abort trap: 6. macOS 27.0.1 (26A434)' },
+  { ago: 35 * MIN, kind: 'appCrash', app: 'Google Chrome Helper (Renderer)', title: 'Google Chrome Helper (Renderer) quit unexpectedly', evidence: 'Version 156.0.8078.47. Exception EXC_CRASH (SIGABRT). Abort trap: 6. macOS 27.0.1 (26A434)' },
   { ago: 3 * HOUR, kind: 'appHang', app: 'Safari', title: 'Safari stopped responding', evidence: 'Report: /Users/alex/Library/Logs/DiagnosticReports/Safari_2026-10-22-101112_host.hang' },
   { ago: 9 * HOUR + 20 * MIN, kind: 'appCrash', app: 'Slack', title: 'Slack quit unexpectedly', evidence: 'Version 4.41.105. Exception EXC_BAD_ACCESS (SIGSEGV). macOS 27.0.1 (26A434)' },
   { ago: DAY + 5 * HOUR, kind: 'badShutdown', app: '', title: 'The Mac shut down without warning (cause 0)', evidence: 'AppleSMC: Previous shutdown cause: 0', source: 'macLog' },
@@ -174,9 +174,9 @@ export function seedUnusual(): UnusualItem[] {
 }
 
 /** The unusual page for `items` at `now` (offsets in the seeds become times). */
-export function mockUnusual(items: UnusualItem[], now: number, includeIgnored: boolean, extraIgnored: number): UnusualOverview {
+export function mockUnusual(items: UnusualItem[], now: number, extraKnown: number): UnusualOverview {
   const shown = items
-    .filter((i) => i.status === 'new' || (includeIgnored && (i.status === 'ignored' || i.status === 'protected')))
+    .filter((i) => i.status === 'new')
     .map((i) => ({ ...i, firstSeen: now + i.firstSeen, lastSeen: i.running ? now - MIN : now + i.lastSeen }))
     .sort((a, b) => Number(a.status !== 'new') - Number(b.status !== 'new') || b.score - a.score || b.firstSeen - a.firstSeen);
   return {
@@ -184,8 +184,7 @@ export function mockUnusual(items: UnusualItem[], now: number, includeIgnored: b
     enabled: true,
     learning: { active: false, until: now - 5 * DAY },
     learningDays: 7,
-    known: 412,
-    ignored: extraIgnored + items.filter((i) => i.status === 'ignored' || i.status === 'protected').length,
+    known: 412 + extraKnown,
     items: shown,
   };
 }

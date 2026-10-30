@@ -1,26 +1,23 @@
-//! The agent's shared state: the ports to the OS, the store, the user's settings and rules, the latest measurement
+//! The agent's shared state: the ports to the OS, the store, the user's settings, the latest measurement
 //! and the subscribers. [`Sampler`](crate::sampler) feeds it; [`handlers`](crate::handlers) answer the app's requests
 //! from it. Locks are short and never held across a call into the OS, except process control (which must be serial).
 
 use crate::files;
-use crate::helper_centre::HelperCentre;
-use crate::helper_link::{ElevatedStartup, ElevatedTraffic, ElevatedTuning, HelperLink, IpcHelperLink};
 use crate::paths::Dirs;
 use crate::rollup::HistoryWriter;
 use crate::store::Store;
-use dyno_core::activity::{ActivityEntry, ActivityKind, UndoRecord, UndoState};
+use dyno_core::activity::{ActivityEntry, ActivityKind};
 use dyno_core::alerts::Alerts;
 use dyno_core::facts::SystemFacts;
 use dyno_core::grouping::AppGroup;
 use dyno_core::metrics::SystemSample;
-use dyno_core::ports::{FactsSource, FileLocks, PlatformError, ProcessControl, ProcessSource, StartupItems, UserActivity};
-use dyno_core::process::{Priority, ProcessRef, ProcessSample};
+use dyno_core::ports::{FactsSource, FileLocks, PlatformError, ProcessSource, StartupItems, UserActivity};
+use dyno_core::process::ProcessSample;
 use dyno_core::protocol::{LiveDetail, LiveUpdate, Message};
-use dyno_core::rules::{Engine, RuleSet};
 use dyno_core::settings::Settings;
 use dyno_core::time::Timestamp;
 use dyno_platform::Platform;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::SyncSender;
@@ -46,6 +43,72 @@ pub const RECENT_SAMPLES: usize = 180;
 /// Facts are refreshed at most this often.
 pub const FACTS_TTL: Duration = Duration::from_secs(300);
 
+/// Disk scan statuses waiting for one app: the latest of each scan. A status replaces the older one of its scan, so a slow app
+/// sees fewer events but always the newest, and a final state (done, cancelled, failed) is never dropped.
+#[derive(Default)]
+pub struct ScanSlot(Mutex<std::collections::BTreeMap<u64, dyno_core::disk::scan::DiskScanStatus>>);
+
+impl ScanSlot {
+    /// Keeps `status` unless a newer event of the same scan is already waiting.
+    pub fn put(&self, status: dyno_core::disk::scan::DiskScanStatus) {
+        let mut m = lock(&self.0);
+        match m.get(&status.scan) {
+            Some(old) if old.seq >= status.seq => {}
+            _ => {
+                m.insert(status.scan, status);
+            }
+        }
+    }
+
+    /// Everything waiting, oldest scan first; the slot is empty afterwards.
+    pub fn take(&self) -> Vec<dyno_core::disk::scan::DiskScanStatus> {
+        std::mem::take(&mut *lock(&self.0)).into_values().collect()
+    }
+}
+
+/// Job statuses waiting for one app: the newest of each job. A status replaces the older one of its job, so a slow app sees
+/// fewer events but always the newest, and a final state (done, failed, cancelled) is never dropped.
+#[derive(Default)]
+pub struct JobSlot(Mutex<std::collections::BTreeMap<u64, paddock_jobs::wire::WireSnapshot>>);
+
+impl JobSlot {
+    /// Keeps `status` unless a newer event of the same job is already waiting.
+    pub fn put(&self, status: paddock_jobs::wire::WireSnapshot) {
+        let mut m = lock(&self.0);
+        match m.get(&status.id) {
+            Some(old) if old.seq >= status.seq => {}
+            _ => {
+                m.insert(status.id, status);
+            }
+        }
+    }
+
+    /// Everything waiting, oldest job first; the slot is empty afterwards.
+    pub fn take(&self) -> Vec<paddock_jobs::wire::WireSnapshot> {
+        std::mem::take(&mut *lock(&self.0)).into_values().collect()
+    }
+}
+
+/// The newest volume list waiting for one app, with the ticket of the listing it came from: an older listing never replaces a
+/// newer one, and the list is never dropped for a full queue.
+#[derive(Default)]
+pub struct VolumesSlot(Mutex<Option<(u64, Vec<dyno_core::disk::volume::Volume>)>>);
+
+impl VolumesSlot {
+    /// Keeps the list unless a newer listing's is already waiting.
+    pub fn put(&self, ticket: u64, volumes: Vec<dyno_core::disk::volume::Volume>) {
+        let mut m = lock(&self.0);
+        if m.as_ref().is_none_or(|(old, _)| *old < ticket) {
+            *m = Some((ticket, volumes));
+        }
+    }
+
+    /// The list waiting, if any; the slot is empty afterwards.
+    pub fn take(&self) -> Option<Vec<dyno_core::disk::volume::Volume>> {
+        lock(&self.0).take().map(|(_, v)| v)
+    }
+}
+
 /// A connected app that wants live updates.
 pub struct Sub {
     /// Connection id.
@@ -54,6 +117,12 @@ pub struct Sub {
     pub detail: Arc<AtomicU8>,
     /// Bounded: a slow app loses frames, it never slows the sampler.
     pub tx: SyncSender<Message>,
+    /// Disk scan statuses, latest per scan: never a lossy queue (a final state must arrive).
+    pub scans: Arc<ScanSlot>,
+    /// The volume list, newest only, same reason.
+    pub volumes: Arc<VolumesSlot>,
+    /// Job statuses, latest per job, same reason.
+    pub jobs: Arc<JobSlot>,
 }
 
 impl Sub {
@@ -84,10 +153,6 @@ pub struct Core {
     pub store: Store,
     /// The user's settings.
     pub settings: Settings,
-    /// The user's rules.
-    pub rules: RuleSet,
-    /// The rules engine's state.
-    pub engine: Engine,
     /// Alert evaluation state.
     pub alerts: Alerts,
     /// Custom alert rule evaluation state.
@@ -98,8 +163,6 @@ pub struct Core {
     pub recent: VecDeque<SystemSample>,
     /// History writer state.
     pub writer: HistoryWriter,
-    /// Priorities rules replaced, so the undo restores them.
-    pub previous_priority: HashMap<ProcessRef, Priority>,
     /// Facts and when they were read.
     pub facts: Option<(std::time::Instant, SystemFacts)>,
     /// Activity ids made this run.
@@ -113,6 +176,8 @@ pub struct Core {
     /// Apps that are crashing repeatedly now (refreshed after each read of the OS logs); the crash-loop alert and the
     /// health report read them.
     pub crash_loops: Vec<dyno_core::anomaly::Anomaly>,
+    /// The user's local time zone (from the platform): every local day, hour and minute goes through it.
+    pub zone: dyno_core::time::Zone,
 }
 
 impl Core {
@@ -122,46 +187,24 @@ impl Core {
         format!("{}-{}", at.millis(), self.counter)
     }
 
-    /// Saves settings and rules to disk (best effort: a read-only data folder must not stop the agent).
+    /// Saves settings to disk (best effort: a read-only data folder must not stop the agent).
     pub fn save_settings(&self, dirs: &Dirs) {
         if let Err(e) = files::save(&dirs.settings(), &self.settings) {
             eprintln!("dyno-agent: could not save settings: {e}");
         }
     }
 
-    /// Saves the rules.
-    pub fn save_rules(&self, dirs: &Dirs) {
-        if let Err(e) = files::save(&dirs.rules(), &self.rules) {
-            eprintln!("dyno-agent: could not save rules: {e}");
-        }
-    }
-
-    /// Records an entry in the activity log and returns it with its undo state filled in.
-    pub fn log(
-        &mut self,
-        at: Timestamp,
-        kind: ActivityKind,
-        title: String,
-        detail: String,
-        undo: UndoRecord,
-        bytes: Option<u64>,
-    ) -> ActivityEntry {
+    /// Records an entry in the activity log and returns it.
+    pub fn log(&mut self, at: Timestamp, kind: ActivityKind, title: String, detail: String) -> ActivityEntry {
         let id = self.next_id(at);
-        let state = match &undo {
-            UndoRecord::None => UndoState::NotUndoable,
-            UndoRecord::Process { actions, .. } if actions.is_empty() => UndoState::NotUndoable,
-            _ => UndoState::Available,
-        };
         let entry = ActivityEntry {
             id,
             at,
             kind,
             title,
             detail,
-            undo: state,
-            bytes,
         };
-        if let Err(e) = self.store.put_activity(&entry, &undo) {
+        if let Err(e) = self.store.put_activity(&entry) {
             eprintln!("dyno-agent: could not record activity: {e}");
         }
         entry
@@ -170,8 +213,6 @@ impl Core {
 
 /// The ports that talk to the OS, each behind its own lock.
 pub struct Ports {
-    /// Acting on processes.
-    pub control: Mutex<Box<dyn ProcessControl>>,
     /// File locks.
     pub locks: Mutex<Box<dyn FileLocks>>,
     /// Process details (slow calls).
@@ -182,12 +223,8 @@ pub struct Ports {
     pub activity: Mutex<Box<dyn UserActivity>>,
     /// Startup entries.
     pub startup: Mutex<Box<dyn StartupItems>>,
-    /// The few system settings tuning may change (observe-only until a click).
-    pub tuning: Mutex<Box<dyn dyno_core::ports::TuningSystem>>,
     /// The network interfaces and Wi-Fi network (network change events).
     pub links: Mutex<Box<dyn dyno_core::ports::NetworkLinks>>,
-    /// The privileged helper's lifecycle: its state, and installing it on a click (WP-01, ADR 0016).
-    pub helper: Mutex<Box<dyn crate::helper_centre::HelperControl>>,
 }
 
 /// Shows a file in the file manager (injectable so tests do not open Finder).
@@ -222,18 +259,18 @@ pub struct Shared {
     pub extras: crate::extras::ExtrasCentre,
     /// Benchmark runs (only on the user's click).
     pub bench: crate::bench::BenchCentre,
-    /// Cleanup: categories, scans and the quarantine (deletes only on the user's confirmed click).
-    pub cleanup: crate::cleanup::centre::CleanupCentre,
-    /// Watched folders with keep-for times (WP-10): files move to the quarantine only in folders the user set up.
-    pub watch: crate::watch::WatchCentre,
     /// Network change events on the timeline (WP-35).
     pub netwatch: crate::netwatch::NetWatchCentre,
+    /// Long operations (find files, read the OS logs, check backups, hash a file) as jobs with progress and Cancel.
+    pub jobs: crate::jobs::JobCentre,
     /// SHA-256 of program files for the VirusTotal search (WP-33); nothing is uploaded.
     pub hasher: crate::filehash::FileHasher,
     /// Throttling and hardware life: the OS's speed limit, SSD wear and battery capacity (observe-only).
     pub hardware: crate::hardware::HardwareCentre,
     /// "Is this normal?" baselines learned from history.
     pub baselines: crate::baselines::BaselineCentre,
+    /// The disk map: volumes and scans (read-only).
+    pub disk: Arc<crate::disk::centre::DiskCentre>,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -242,10 +279,21 @@ pub struct Shared {
 }
 
 impl Shared {
-    /// Builds the state: opens the store (moving a damaged one aside), loads settings and rules (falling back to
+    /// Builds the state: opens the store (moving a damaged one aside), loads settings (falling back to
     /// defaults with a note in the activity log). Returns the sampler's two ports separately. `details` is a second
     /// process source used only for on-demand details, so a slow `lsof` never delays a sampling tick.
     pub fn build(dirs: Dirs, platform: Platform, details: Box<dyn ProcessSource>, reveal: Reveal) -> Result<Built, String> {
+        Shared::build_with(dirs, platform, details, reveal, crate::disk::DiskPorts::none())
+    }
+
+    /// [`Shared::build`] with the disk map's machine ports given (tests pass fixed ones).
+    pub fn build_with(
+        dirs: Dirs,
+        platform: Platform,
+        details: Box<dyn ProcessSource>,
+        reveal: Reveal,
+        disk_ports: crate::disk::DiskPorts,
+    ) -> Result<Built, String> {
         let t = now();
         let mut notes: Vec<String> = Vec::new();
         if let Err(e) = std::fs::create_dir_all(dirs.root()) {
@@ -267,46 +315,28 @@ impl Shared {
         let (settings, warn) = files::load(&dirs.settings(), dyno_core::settings::parse);
         notes.extend(warn);
         let settings = settings.unwrap_or_default().normalised();
-        let (rules, warn) = files::load(&dirs.rules(), |text| {
-            let (set, w) = files::json_or_default::<RuleSet>(text);
-            match set.validate() {
-                Ok(valid) => (valid, w),
-                Err(e) => (
-                    RuleSet::default(),
-                    Some(format!("The saved rules were not valid ({e}); Dyno uses its defaults.")),
-                ),
-            }
-        });
-        notes.extend(warn);
-        let rules = rules.unwrap_or_default();
-        let alarms = crate::alarms::AlarmCentre::load(&store, settings.alarms);
+        let settings_limits = settings.disk.limits();
+        let (job_workers, read_threads) = (settings.jobs.worker_count(), settings.disk.read_threads);
+        let zone = platform.zone.clone();
+        let alarms = crate::alarms::AlarmCentre::load(&store, settings.alarms, zone.clone());
         let mut core = Core {
             store,
             settings,
-            rules,
-            engine: Engine::new(),
             alerts: Alerts::new(),
             custom: dyno_core::alarms::custom::CustomEvaluator::new(),
             latest: Latest::default(),
             recent: VecDeque::new(),
             writer: HistoryWriter::default(),
-            previous_priority: HashMap::new(),
             facts: None,
             counter: 0,
             inventory: None,
             alarms,
             recorder: crate::recorder::Recorder::new(),
             crash_loops: Vec::new(),
+            zone,
         };
         for n in notes {
-            core.log(
-                t,
-                ActivityKind::System,
-                "Dyno started with a clean slate".into(),
-                n,
-                UndoRecord::None,
-                None,
-            );
+            core.log(t, ActivityKind::System, "Dyno started with a clean slate".into(), n);
         }
         let (bench, bench_note) = crate::bench::BenchCentre::load(
             dirs.benchmarks(),
@@ -314,90 +344,39 @@ impl Shared {
             Box::new(crate::bench::ProcessLauncher::beside_agent()),
         );
         if let Some(n) = bench_note {
-            core.log(t, ActivityKind::System, "Benchmark history reset".into(), n, UndoRecord::None, None);
-        }
-        let (cleanup, cleanup_notes) = crate::cleanup::centre::CleanupCentre::load(
-            &dirs,
-            crate::cleanup::roots::Env::current(),
-            Box::new(crate::cleanup::trash::OsTrash),
-            t,
-        );
-        for n in cleanup_notes {
-            core.log(
-                t,
-                ActivityKind::System,
-                "A cleanup pack was ignored".into(),
-                n,
-                UndoRecord::None,
-                None,
-            );
-        }
-        let (watch, watch_note) = crate::watch::WatchCentre::load(dirs.watched_folders());
-        if let Some(n) = watch_note {
-            core.log(
-                t,
-                ActivityKind::System,
-                "Watched folders were reset".into(),
-                n,
-                UndoRecord::None,
-                None,
-            );
+            core.log(t, ActivityKind::System, "Benchmark history reset".into(), n);
         }
         let unusual = crate::unusual::UnusualCentre::load(&core.store);
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-        // One link to the helper (if it is installed) serves the tuning, startup and traffic wrappers and the lifecycle.
-        // Only the agent of the user's own data folder talks to the real helper or opens the real permission prompt; an agent
-        // started on another folder (every test) gets a link to nothing and a lifecycle that cannot install (the suite lesson
-        // about production names: names derive from the data folder).
         let own_folder = dirs.root() == Dirs::current().root();
-        let link: Arc<dyn HelperLink> = if own_folder {
-            Arc::new(IpcHelperLink::system())
-        } else {
-            Arc::new(IpcHelperLink::new(
-                dirs.root().join("no-helper.sock").to_string_lossy().into_owned(),
-                dirs.root().join("no-helper.token"),
-            ))
-        };
-        let helper_centre = if own_folder {
-            HelperCentre::system(link.clone())
-        } else {
-            HelperCentre::unavailable(
-                link.clone(),
-                "Dyno was started on a folder of its own, so it does not install the helper.",
-            )
-        };
         let Platform {
             sensors,
             processes,
-            control,
             locks,
             startup,
             facts,
             activity,
             issues,
             links,
+            zone: _,
         } = platform;
-        let shared = Shared {
+        let shared = Arc::new_cyclic(|me| Shared {
             plugins: dyno_plugin_host::PluginHost::new(dyno_plugin_host::HostConfig::new(dirs.plugins())),
             dirs,
             core: Mutex::new(core),
             ports: Ports {
-                control: Mutex::new(control),
                 locks: Mutex::new(locks),
                 details: Mutex::new(details),
                 facts: Mutex::new(facts),
                 activity: Mutex::new(activity),
-                startup: Mutex::new(Box::new(ElevatedStartup::new(startup, link.clone()))),
-                tuning: Mutex::new(Box::new(ElevatedTuning::new(dyno_platform::tuning::os_tuner(), link.clone()))),
+                startup: Mutex::new(startup),
                 links: Mutex::new(links),
-                helper: Mutex::new(Box::new(helper_centre)),
             },
             subs: Mutex::new(Vec::new()),
             reveal,
             bench,
-            cleanup,
-            watch,
             netwatch: crate::netwatch::NetWatchCentre::new(),
+            jobs: crate::jobs::JobCentre::new(me.clone(), job_workers),
             hasher: crate::filehash::FileHasher::new(),
             counters: crate::counters::CounterCentre::new(Arc::new(dyno_platform::counters::OsCounters)),
             issues: crate::issues::IssueCentre::new(issues),
@@ -406,16 +385,26 @@ impl Shared {
             network: crate::network::NetCentre::new(
                 Box::new(dyno_platform::network::OsSockets),
                 Arc::new(dyno_platform::network::OsReverseDns),
-                Box::new(ElevatedTraffic::new(dyno_platform::network::OsTraffic, link)),
+                Box::new(dyno_platform::network::OsTraffic),
             ),
             hardware: crate::hardware::HardwareCentre::os(),
             baselines: crate::baselines::BaselineCentre::new(),
+            disk: Arc::new(crate::disk::centre::DiskCentre::new(
+                Arc::new(crate::disk::fs::OsDirSource),
+                disk_ports.volumes,
+                Arc::new(crate::disk::BroadcastStatus(me.clone())),
+                Arc::new(crate::disk::centre::SystemClock::default()),
+                disk_ports.access,
+                cores,
+                settings_limits,
+            )),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),
             next_conn: AtomicU64::new(1),
-        };
-        Ok((Arc::new(shared), sensors, processes))
+        });
+        shared.disk.set_read_threads(read_threads);
+        Ok((shared, sensors, processes))
     }
 
     /// A new connection id.
@@ -463,6 +452,34 @@ impl Shared {
             }
         }
         best
+    }
+
+    /// Hands a scan status to every connected app: it replaces the older one of the same scan that has not been sent yet, and
+    /// the connection's push thread is woken. Nothing is lost but intermediate events.
+    pub fn broadcast_scan(&self, status: &dyno_core::disk::scan::DiskScanStatus) {
+        for s in lock(&self.subs).iter() {
+            s.scans.put(status.clone());
+            // The message only wakes the push thread; the content is in the slot. A full queue means the thread is awake
+            // anyway and looks at the slot after every message.
+            let _ = s.tx.try_send(Message::DiskScan(Box::new(status.clone())));
+        }
+    }
+
+    /// Hands a job's status to every connected app: it replaces the older one of the same job that has not been sent yet, and
+    /// the connection's push thread is woken. Nothing is lost but intermediate events.
+    pub fn broadcast_job(&self, status: &paddock_jobs::wire::WireSnapshot) {
+        for s in lock(&self.subs).iter() {
+            s.jobs.put(status.clone());
+            let _ = s.tx.try_send(Message::Job(Box::new(status.clone())));
+        }
+    }
+
+    /// Hands a changed volume list to every connected app, newest listing wins; like scan statuses it is never lost to a full queue.
+    pub fn broadcast_volumes(&self, ticket: u64, volumes: &[dyno_core::disk::volume::Volume]) {
+        for s in lock(&self.subs).iter() {
+            s.volumes.put(ticket, volumes.to_vec());
+            let _ = s.tx.try_send(Message::DiskVolumes(Vec::new()));
+        }
     }
 
     /// Sends `m` to every connected app (dropping it for a slow one).

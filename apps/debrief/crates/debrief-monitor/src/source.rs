@@ -36,6 +36,7 @@ pub trait ProcessSource {
 }
 
 /// Adds descendants of matched processes (`parents` maps pid to parent pid) until stable.
+// ADR 0033 WP-5: watched children found by parent pid without start times (display only); skip a child older than its parent
 pub fn expand_children(matched: &mut HashSet<u32>, parents: &HashMap<u32, u32>) {
     loop {
         let before = matched.len();

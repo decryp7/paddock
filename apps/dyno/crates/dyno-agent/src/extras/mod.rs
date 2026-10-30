@@ -1,17 +1,13 @@
 //! The extras (WP-13) and backup health (WP-14) on the agent side: runs the read-only OS tools behind a [`ToolRunner`],
 //! keeps the few results worth caching, records the changes the "What changed" timeline needs, and answers the requests.
-//! Everything is observe-only: the one thing that moves files is removing the finder results the user selected, and that
-//! goes through the cleanup policy's admission and the Trash or the quarantine ([`finder`]).
+//! Everything is observe-only: nothing here moves or removes a file ([`finder`] only lists).
 
 pub mod backup_check;
 pub mod finder;
 
 use crate::agent::{lock, now, Shared};
-use dyno_core::activity::{ActivityKind, UndoRecord};
-use dyno_core::cleanup::{CleanupOutcome, DeleteMode};
 use dyno_core::extras::boot::{self, BootReport, BootRow, SettleTracker};
-use dyno_core::extras::changes::{diff_software, diff_startup, from_activity, timeline, Change, ChangesQuery};
-use dyno_core::extras::files::{FinderQuery, FinderResult};
+use dyno_core::extras::changes::{diff_software, diff_startup, timeline, Change, ChangesQuery};
 use dyno_core::extras::gpu::GpuReport;
 use dyno_core::extras::software::{render_report, validate_destination, InventoryFormat, SoftwareInventory, SoftwareItem};
 use dyno_core::extras::usage::{self, UsageReport};
@@ -19,15 +15,12 @@ use dyno_core::protocol::{AgentError, BootRecord, ErrorCode, Reply, Request, Sav
 use dyno_core::time::{Timestamp, DAY, HOUR, SECOND};
 use dyno_platform::issues::{OsRunner, ToolRunner};
 use dyno_platform::toolpath::PathResolver;
-use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// How long a software list is reused (reading it takes seconds to minutes).
 const SOFTWARE_TTL: Duration = Duration::from_secs(10 * 60);
-/// Finder results kept for a removal.
-const KEEP_RESULTS: usize = 4;
 /// How often the background work runs (backup check, change recording).
 pub const BACKGROUND_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// The first background run waits this long after the agent starts.
@@ -46,7 +39,7 @@ const KEY_SINCE: &str = "changes.since";
 /// Whether Dyno may start heavier background work now (always, unless the user set maintenance windows).
 pub fn maintenance_open(shared: &Shared) -> bool {
     let core = lock(&shared.core);
-    core.settings.maintenance.is_open(now(), core.settings.alarms.utc_offset_minutes)
+    core.settings.maintenance.is_open(now(), core.zone.as_ref())
 }
 
 fn bad(msg: impl Into<String>) -> AgentError {
@@ -66,8 +59,9 @@ pub struct ExtrasCentre {
     os: Mutex<&'static str>,
     own_folder: bool,
     software: Mutex<Option<(Instant, SoftwareInventory)>>,
-    pub(crate) backup: Mutex<backup_check::Slot>,
-    kept: Mutex<VecDeque<finder::Kept>>,
+    pub(crate) backup: Arc<Mutex<backup_check::Slot>>,
+    /// Signalled when a backup check ends and when a job waiting for one is cancelled.
+    pub(crate) backup_done: Arc<std::sync::Condvar>,
     counter: AtomicU64,
 }
 
@@ -81,8 +75,8 @@ impl ExtrasCentre {
             os: Mutex::new(std::env::consts::OS),
             own_folder,
             software: Mutex::new(None),
-            backup: Mutex::new(backup_check::Slot::default()),
-            kept: Mutex::new(VecDeque::new()),
+            backup: Arc::new(Mutex::new(backup_check::Slot::default())),
+            backup_done: Arc::new(std::sync::Condvar::new()),
             counter: AtomicU64::new(1),
         }
     }
@@ -98,47 +92,41 @@ impl ExtrasCentre {
         *lock(&self.backup_tools) = Some(tools);
     }
 
+    /// The backup report as it stands, without starting a check (tests).
+    pub fn backup_report(&self) -> dyno_core::backup::BackupReport {
+        backup_check::peek(self)
+    }
+
     /// Tests: pretend to be another OS (`macos`, `windows`, `linux`).
     pub fn use_os(&self, os: &'static str) {
         *lock(&self.os) = os;
     }
 
-    fn tools(&self) -> Arc<dyn ToolRunner> {
+    pub(crate) fn tools(&self) -> Arc<dyn ToolRunner> {
         lock(&self.tools).clone()
     }
 
-    fn os(&self) -> &'static str {
+    pub(crate) fn os(&self) -> &'static str {
         *lock(&self.os)
     }
 
-    fn next_id(&self, t: Timestamp) -> String {
+    /// An id for one finder result.
+    pub fn next_scan_id(&self, t: Timestamp) -> String {
         format!("f{}-{}", t.millis(), self.counter.fetch_add(1, Ordering::Relaxed))
     }
 }
 
 /// Answers an extras request.
 pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentError> {
-    let x = &shared.extras;
     match request {
         Request::Changes { query } => changes(shared, query).map(|t| Reply::Changes(Box::new(t))),
-        Request::SleepBlockers => Ok(Reply::Sleep(Box::new(dyno_platform::extras::sleep_report(
-            x.tools().as_ref(),
-            x.os(),
-        )))),
-        Request::BootAnalysis => boot_report(shared).map(|b| Reply::Boot(Box::new(b))),
-        Request::AppUsage => Ok(Reply::AppUsage(Box::new(app_usage(shared)))),
         Request::GpuProcesses => Ok(Reply::Gpu(Box::new(gpu(shared)))),
-        Request::SoftwareInventory => Ok(Reply::Software(Box::new(software(shared)))),
         Request::SaveInventoryReport { path, format } => save_inventory(shared, &path, format).map(Reply::InventorySaved),
-        Request::FindFiles { query } => find_files(shared, &query).map(|r| Reply::FileFinder(Box::new(r))),
-        Request::RemoveFoundFiles { scan_id, ids, mode } => remove_found(shared, &scan_id, &ids, mode).map(Reply::Outcome),
         Request::Maintenance => {
             let core = lock(&shared.core);
-            let off = core.settings.alarms.utc_offset_minutes;
-            Ok(Reply::Maintenance(core.settings.maintenance.status(now(), off)))
+            Ok(Reply::Maintenance(core.settings.maintenance.status(now(), core.zone.as_ref())))
         }
-        Request::Backup => Ok(Reply::Backup(Box::new(backup_check::report(shared, false)))),
-        Request::RefreshBackup => Ok(Reply::Backup(Box::new(backup_check::report(shared, true)))),
+        Request::Backup => Ok(Reply::Backup(Box::new(backup_check::report(shared)))),
         other => Err(bad(format!("{other:?} is not an extras request."))),
     }
 }
@@ -162,10 +150,7 @@ fn changes(shared: &Shared, query: ChangesQuery) -> Result<dyno_core::extras::ch
     let t = now();
     let (from, to) = query.window(t);
     let core = lock(&shared.core);
-    let mut all = core.store.changes(from, to).map_err(internal)?;
-    let activity = core.store.activity(500).map_err(internal)?;
-    let entries: Vec<_> = activity.into_iter().map(|(e, _, _)| e).collect();
-    all.extend(from_activity(&entries));
+    let all = core.store.changes(from, to).map_err(internal)?;
     let since = core
         .store
         .meta(KEY_SINCE)
@@ -227,7 +212,8 @@ pub fn record_changes(shared: &Shared) {
     }
 }
 
-fn boot_report(shared: &Shared) -> Result<BootReport, AgentError> {
+/// Boot history and what slowed the last start (runs OS tools).
+pub fn boot_report(shared: &Shared) -> Result<BootReport, AgentError> {
     let x = &shared.extras;
     let facts = dyno_platform::extras::boot_facts(x.tools().as_ref(), x.os());
     let t = now();
@@ -254,7 +240,8 @@ fn boot_report(shared: &Shared) -> Result<BootReport, AgentError> {
     })
 }
 
-fn app_usage(shared: &Shared) -> UsageReport {
+/// Network and energy use per app (runs OS tools).
+pub fn app_usage(shared: &Shared) -> UsageReport {
     let x = &shared.extras;
     let apps: Vec<(String, Vec<u32>)> = lock(&shared.core)
         .latest
@@ -307,80 +294,6 @@ fn save_inventory(shared: &Shared, path: &str, format: InventoryFormat) -> Resul
         path: dest.to_string_lossy().into_owned(),
         bytes: text.len() as u64,
     })
-}
-
-fn find_files(shared: &Shared, query: &FinderQuery) -> Result<FinderResult, AgentError> {
-    let x = &shared.extras;
-    let t = now();
-    let id = x.next_id(t);
-    let (result, root) = finder::run(query, &id).map_err(bad)?;
-    let mut kept = lock(&x.kept);
-    kept.push_back(finder::Kept {
-        result: result.clone(),
-        root,
-        at: t,
-    });
-    while kept.len() > KEEP_RESULTS {
-        kept.pop_front();
-    }
-    Ok(result)
-}
-
-fn remove_found(shared: &Arc<Shared>, scan_id: &str, ids: &[String], mode: DeleteMode) -> Result<CleanupOutcome, AgentError> {
-    if scan_id.len() > 128 {
-        return Err(bad("That request is too large."));
-    }
-    let x = &shared.extras;
-    let t = now();
-    let home = home_dir();
-    let admitted = {
-        let kept = lock(&x.kept);
-        let k = kept
-            .iter()
-            .find(|k| k.result.scan_id == scan_id)
-            .ok_or_else(|| bad("That result is no longer available; look again."))?;
-        let mut locks = lock(&shared.ports.locks);
-        let mut in_use = |p: &std::path::Path| -> Option<String> {
-            let mut names: Vec<String> = locks.lockers(p).ok()?.into_iter().map(|l| l.name).collect();
-            names.sort();
-            names.dedup();
-            (!names.is_empty()).then(|| names.join(", "))
-        };
-        finder::admit_selection(k, ids, &home, t, &mut in_use).map_err(bad)?
-    };
-    let mut outcome = shared.cleanup.dispose(&admitted.ready, mode, t);
-    outcome.failed.extend(admitted.failed);
-    if outcome.deleted > 0 {
-        let (where_to, undo) = match &outcome.quarantine_id {
-            Some(q) => (
-                "to the 7-day quarantine",
-                UndoRecord::Quarantine {
-                    id: q.clone(),
-                    expires: dyno_core::activity::quarantine_expiry(t),
-                },
-            ),
-            None => ("to the Recycle Bin / Trash", UndoRecord::None),
-        };
-        let title = format!("Removed {} file{}", outcome.deleted, if outcome.deleted == 1 { "" } else { "s" });
-        let entry = lock(&shared.core).log(
-            t,
-            ActivityKind::Cleanup,
-            title,
-            format!("Chosen in the file finder, moved {where_to}"),
-            undo,
-            Some(outcome.freed_bytes),
-        );
-        if let Some(q) = &outcome.quarantine_id {
-            shared.cleanup.link_activity(q, &entry.id);
-        }
-    }
-    Ok(outcome)
-}
-
-fn home_dir() -> std::path::PathBuf {
-    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-        .map(std::path::PathBuf::from)
-        .unwrap_or_default()
 }
 
 /// Records this boot (once) and finds when the desktop settled after login, so Boot analysis has a history. Runs once at
@@ -442,7 +355,10 @@ pub fn run(shared: &Arc<Shared>) {
     }
     // Watching for the desktop to settle can take minutes; it must not delay the checks below.
     let s = shared.clone();
-    let _ = std::thread::Builder::new().name("dyno-boot".into()).spawn(move || record_boot(&s));
+    let _ = std::thread::Builder::new().name("dyno-boot".into()).spawn(move || {
+        dyno_platform::priority::lower_current_thread();
+        record_boot(&s)
+    });
     wait(shared, FIRST_RUN_AFTER);
     while !shared.stopped() {
         if maintenance_open(shared) {

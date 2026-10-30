@@ -1,7 +1,8 @@
+import { FullTextTip } from '../../shared/full-text-tip';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import type { ActivityEntry, Alert } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { formatBytes, formatRelative } from '../../shared/format';
+import { formatRelative } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import type { IconName } from '../../shared/icons';
 import { ACTIVITY_ICON, ALERT_ICON, SEVERITY_TONE, type Tone } from '../../shared/labels';
@@ -16,8 +17,6 @@ export interface FeedItem {
   tone: Tone;
   title: string;
   detail: string;
-  /** The activity entry to offer Undo for. */
-  undoId: string | null;
 }
 
 /** Merges activity and alerts into one feed, newest first (pure). */
@@ -28,36 +27,32 @@ export function buildFeed(activity: readonly ActivityEntry[], alerts: readonly A
     icon: ACTIVITY_ICON[a.kind],
     tone: a.kind === 'alert' ? 'warn' : 'muted',
     title: a.title,
-    detail: a.bytes !== null ? `${a.detail} · freed ${formatBytes(a.bytes)}`.replace(/^ · /, '') : a.detail,
-    undoId: a.undo === 'available' ? a.id : null,
+    detail: a.detail,
   }));
-  const fromAlerts = alerts.map<FeedItem>((a) => ({ id: `n-${a.id}`, at: a.at, icon: ALERT_ICON[a.kind], tone: SEVERITY_TONE[a.severity], title: a.title, detail: a.detail, undoId: null }));
+  const fromAlerts = alerts.map<FeedItem>((a) => ({ id: `n-${a.id}`, at: a.at, icon: ALERT_ICON[a.kind], tone: SEVERITY_TONE[a.severity], title: a.title, detail: a.detail }));
   return [...fromActivity, ...fromAlerts].sort((x, y) => y.at - x.at).slice(0, limit);
 }
 
-/** What Dyno did and what it warned about, newest first, with Undo where the OS allows. */
+/** What Dyno noticed and what it warned about, newest first. */
 @Component({
   selector: 'dy-events-feed',
-  imports: [AsyncState, Icon],
+  imports: [FullTextTip, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" aria-label="Activity and alerts">
       <div class="card-head">
         <h2><dy-icon name="bell" /> Activity and alerts</h2>
       </div>
-      <dy-async [loaded]="loaded()" [error]="error()" [empty]="items().length === 0" emptyTitle="Nothing has happened yet" emptyText="Rule actions, cleanups, tuning and alerts show up here. Dyno changes nothing unless a rule you enabled or a click of yours says so." what="activity" [rows]="4" (retry)="reload()">
+      <dy-async [loaded]="loaded()" [error]="error()" [empty]="items().length === 0" emptyTitle="Nothing has happened yet" emptyText="Alerts and notes from Dyno itself show up here. Dyno only looks: it changes nothing on your computer." what="activity" [rows]="4" (retry)="reload()">
         <ul>
           @for (i of items(); track i.id) {
             <li>
               <span class="ic" [attr.data-tone]="i.tone"><dy-icon [name]="i.icon" /></span>
               <div class="txt">
-                <span class="title">{{ i.title }}</span>
-                <span class="detail truncate">{{ i.detail }}</span>
+                <span class="title" [dyFullText]="i.title">{{ i.title }}</span>
+                <span class="detail truncate" [dyFullText]="i.detail">{{ i.detail }}</span>
               </div>
               <span class="when num">{{ ago(i.at) }}</span>
-              @if (i.undoId; as id) {
-                <button type="button" class="btn sm" [disabled]="activity.undoing().includes(id)" (click)="activity.undo(id)"><dy-icon name="undo" /> Undo</button>
-              }
             </li>
           }
         </ul>
@@ -89,7 +84,7 @@ export class EventsFeed implements OnInit {
   protected readonly items = computed(() => buildFeed(this.activity.entries(), this.alerts.alerts(), 7));
   protected readonly loaded = computed(() => this.activity.loaded() || this.alerts.loaded());
   protected readonly error = computed(() => (this.activity.loaded() || this.alerts.loaded() ? null : (this.activity.error() ?? this.alerts.error())));
-  /** Relative to the engine's clock, so the feed reads right whatever the PC's clock does. */
+  /** Relative to the engine's clock, so the feed reads right whatever the computer's clock does. */
   protected readonly ago = (at: number) => formatRelative(at, this.live.system()?.at ?? Date.now());
 
   ngOnInit(): void {

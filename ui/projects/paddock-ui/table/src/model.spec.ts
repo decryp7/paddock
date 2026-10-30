@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   actionColumnWidth,
+  parentIndex,
+  treePlaces,
   cellText,
   columnTrack,
   fitColumns,
@@ -11,7 +13,6 @@ import {
   fromControl,
   groupItems,
   inlineActions,
-  isMenuKey,
   menuActions,
   nextIndex,
   nextSort,
@@ -118,10 +119,7 @@ describe('table model', () => {
     expect(nextIndex(50, 5, 'a')).toBeNull();
   });
 
-  it('knows the keyboard right-click and clicks that came from a control', () => {
-    expect(isMenuKey({ key: 'ContextMenu', shiftKey: false })).toBe(true);
-    expect(isMenuKey({ key: 'F10', shiftKey: true })).toBe(true);
-    expect(isMenuKey({ key: 'F10', shiftKey: false })).toBe(false);
+  it('knows clicks that came from a control', () => {
     const row = document.createElement('div');
     row.innerHTML = '<span>text</span><button>go</button>';
     const ev = (el: Element) => ({ target: el }) as unknown as Event;
@@ -206,5 +204,36 @@ describe('table model', () => {
   it('knows the family row heights', () => {
     expect([24, 32, 36].map(rowHeightFor)).toEqual([24, 32, 36]);
     expect([40, 48, 0, Number.NaN].map(rowHeightFor)).toEqual([32, 32, 32, 32]);
+  });
+});
+
+describe('tree rows', () => {
+  const levels = [1, 2, 2, 3, 1, 2];
+  const level = (n: number): number => n;
+
+  it('gives every row its place among its siblings and the count of them', () => {
+    expect(treePlaces(levels, level)).toEqual([
+      [1, 2],
+      [1, 2],
+      [2, 2],
+      [1, 1],
+      [2, 2],
+      [1, 1],
+    ]);
+  });
+
+  it('puts a row whose parent level is missing among the top rows', () => {
+    expect(treePlaces([3, 3], level)).toEqual([
+      [1, 2],
+      [2, 2],
+    ]);
+  });
+
+  it('finds the row above with a smaller level, or none', () => {
+    expect(parentIndex(levels, 3, level)).toBe(2);
+    expect(parentIndex(levels, 2, level)).toBe(0);
+    expect(parentIndex(levels, 5, level)).toBe(4);
+    expect(parentIndex(levels, 4, level)).toBe(-1);
+    expect(parentIndex(levels, 0, level)).toBe(-1);
   });
 });

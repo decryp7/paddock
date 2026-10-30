@@ -5,11 +5,11 @@
 Machine setup shared by every Paddock app (tools, build cache, worktrees, test runs): [paddock/docs/dev-setup.md](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/dev-setup.md). This page adds only what is specific to this app.
 
 ```
-crates/dyno-core         pure core: model, grouping, rules, diagnosis, cleanup policy, health, protocol, ports
-crates/dyno-platform     OS adapters (windows/, macos/, linux/, unix_control.rs) and test fakes
+crates/dyno-core         pure core: model, grouping, diagnosis, health, alarms, protocol, ports
+crates/dyno-platform     OS adapters (windows/, macos/, linux/) and test fakes
 crates/dyno-ipc          the one local IPC (frames, token handshake, host/child)
 crates/dyno-agent        the agent: sampler, server, handlers, store, rollup, service, cli
-crates/dyno-helper       privileged helper: daemon, install plans, audit log (ADR 0016)
+crates/dyno-helper       the privileged helper: not shipped in 1.0, kept for 1.1 (ADR 0022)
 crates/dyno-plugin-api   what a plugin depends on; crates/dyno-plugin-host guards plugins
 plugins/                 example plugin
 app/src-tauri            Tauri shell (commands, link to the agent, tray, windows, native feel, updater)
@@ -106,10 +106,11 @@ Dyno is on Paddock's shared CI kit (WP-C4): its gates are legs of `.gitea/workfl
 | `app dyno (windows-latest)`, `(macos-latest)` | host runners | clippy (also on Windows: `windowsClippy`), nextest, doc tests for the OS adapters; tests act only on dummies they spawn; a kept build folder, host clean-up of this job's test programs |
 | `e2e-1`, `e2e-2` | Linux container | Playwright against the mock, Chromium, two shards, one worker each |
 | `e2e-webkit` | Linux container | Playwright, WebKit: main, tags, the nightly and a manual run with `webkit` |
-| `bundle` (`dyno-release.yml`) | Windows, macOS, Linux | on a push to main, `dyno-v*` tags, nightly and manual runs: `tauri build` (NSIS, `.dmg`, `.deb` + AppImage), the run-path check (`scripts/check-bundle.sh`; on macOS the agent also measures once from the built app), the seal check and the start of every sidecar (`macos-verify`), artifacts |
+| `bundle` (`dyno-release.yml`) | Windows, macOS, Linux | on `dyno-v*` tags, manual runs and the nightly (`nightly.yml`); not on a push to main: `tauri build` (NSIS, `.dmg`, `.deb` + AppImage), the run-path check (`scripts/check-bundle.sh`; on macOS the agent also measures once from the built app), the seal check and the start of every sidecar (`macos-verify`), artifacts |
 | `release` | Linux container | on `dyno-v*` tags: release notes (git-cliff), `latest.json`, the Gitea release |
 
-Host runners keep a persistent build folder outside the workspace (`.paddock-ci/target-dyno-app`), which the shared
+Host runners keep a persistent build folder outside the workspace (the job slot's kept folder `target-dyno-app-s<n>` in the
+CI home, Paddock ADR 0025), which the shared
 `prune-build-folder` action (`tools/prune-build-folders.sh`, 20 GB) caps at the end of each host job, so nothing piles up. CI could not be run when the workflow was written; see roadmap G15.
 
 ## Architecture documents and diagrams
@@ -127,8 +128,6 @@ picture in both themes before committing and update the date in `common.mjs` whe
 | Add a measurement | a `Reading` field in `dyno_core::metrics`, the adapter's probe per OS, the UI tile |
 | Support a new OS or sensor | a new adapter behind `dyno_core::ports` in `dyno-platform` |
 | Add a request | `dyno_core::protocol` (`Request`, `Reply`, `PROTOCOL_VERSION`), a handler in `dyno-agent`, the DTO in `api.types.ts`, the mock, the UI store |
-| Add a cleanup category | `dyno_core::cleanup::catalog` (a pack later), roots in `dyno_agent::cleanup::roots`, a test with a temp tree |
-| Add a rule or profile | `dyno_core::rules::model` data and a test of the `Engine` |
 | Add a setting | `dyno_core::settings` (optional with a default; bump `SCHEMA_VERSION` for a breaking change and add a migration with a test) |
 | Add a screen | `app/src/app/features/<name>`, a route, `shell/nav.ts`, a store, mock data, a Playwright flow, screenshots |
 | Write a plugin | [plugins.md](plugins.md) |

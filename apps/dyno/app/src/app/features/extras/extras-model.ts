@@ -33,8 +33,6 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
   removed: 'Removed',
   startupAdded: 'New at start-up',
   startupRemoved: 'Gone from start-up',
-  setting: 'Setting',
-  cleanup: 'Cleanup',
 };
 
 /** A kind's dot: calm for the routine kinds, a tone only for what is worth a look (a new start-up item). */
@@ -188,3 +186,14 @@ export function filterSoftware(items: readonly SoftwareItem[], search: string): 
 
 /** The first letter for an avatar tile. */
 export { initial, hue } from '../issues/issues-model';
+
+/** A row with its place in the list, for engine lists that carry no id of their own (a table row needs a key). */
+export type Numbered<T> = T & { readonly n: number };
+
+/** The rows of `list`, each with its place. */
+export function numbered<T>(list: readonly T[]): Numbered<T>[] {
+  return list.map((row, n) => ({ ...row, n }));
+}
+
+/** A numbered row's key. */
+export const numberKey = (row: { readonly n: number }): string => String(row.n);

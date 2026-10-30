@@ -21,7 +21,7 @@ export type Unlisten = () => void;
  * and an adapter over its `listen` (`(event, cb) => listen(event, (e) => cb(e.payload))`).
  */
 export interface AboutIpc {
-  invoke<T>(command: AboutCommand, args?: Record<string, unknown>): Promise<T>;
+  invoke<T>(command: AboutCommand | 'files_open_url', args?: Record<string, unknown>): Promise<T>;
   listen(event: string, handler: (payload: unknown) => void): Promise<Unlisten>;
 }
 
@@ -35,6 +35,8 @@ export abstract class AboutBackend {
   abstract whatsNew(): Promise<WhatsNew>;
   /** Once per start, from the main window: whether to open What's New (`about_whats_new_start`). */
   abstract whatsNewOnStart(): Promise<WhatsNewDecision>;
+  /** Opens a web address (the releases page) in the system browser (`files_open_url`, which refuses other schemes). */
+  abstract openUrl(url: string): Promise<void>;
 }
 
 /**
@@ -81,6 +83,10 @@ export class TauriAboutBackend extends AboutBackend {
 
   async whatsNewOnStart(): Promise<WhatsNewDecision> {
     return parsed(parseWhatsNewDecision(await this.ipc.invoke<unknown>('about_whats_new_start')), 'start-up decision');
+  }
+
+  async openUrl(url: string): Promise<void> {
+    await this.ipc.invoke<unknown>('files_open_url', { url });
   }
 }
 
@@ -156,6 +162,17 @@ export class MemoryAboutBackend extends AboutBackend {
     this.decision = 'nothing';
     return Promise.resolve(d);
   }
+
+  /** The web addresses asked to open, in order. */
+  readonly openedUrls: string[] = [];
+  /** Opens them, when set (a browser build passes `window.open`); tests leave it unset and read `openedUrls`. */
+  opener: ((url: string) => void) | null = null;
+
+  openUrl(url: string): Promise<void> {
+    this.openedUrls.push(url);
+    this.opener?.(url);
+    return Promise.resolve();
+  }
 }
 
 /** What the fake update server of [`MemoryUpdatesBackend`] has. */
@@ -177,6 +194,9 @@ export interface MemoryUpdatesOptions {
   /** The newer release (`release`, `bad-signature`). */
   readonly release?: Omit<UpdateInfo, 'currentVersion'>;
   readonly channels?: readonly ChannelInfo[];
+  /** The update server's host and releases page the Updates window shows (default: a placeholder host). */
+  readonly host?: string;
+  readonly releasesPage?: string;
   /** Runs each simulated step of the engine's work (default: the next microtask). */
   readonly schedule?: (step: () => void) => void;
 }
@@ -222,8 +242,8 @@ export class MemoryUpdatesBackend extends UpdatesBackend {
       autoCheck: false,
       channel: channels[0]?.id ?? '',
       channels: [...channels],
-      endpointHost: unavailable ? null : 'updates.example',
-      releasesPage: 'https://updates.example/releases',
+      endpointHost: unavailable ? null : (options.host ?? 'updates.example'),
+      releasesPage: options.releasesPage ?? 'https://updates.example/releases',
     };
   }
 

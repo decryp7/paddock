@@ -1,6 +1,6 @@
 # 4. CPU taming: rules with an escalation ladder, and the per-OS ways of holding a process back
 
-- Status: accepted (2026-10-22)
+- Status: superseded by ADR 0021 (2026-10-28); Dyno no longer changes processes. Kept for history
 - Related: ADR 0002, 0003 (groups), 0006 (observe-only), `dyno_core::rules`, `dyno_core::protect`,
   `dyno_platform::unix_control`, `dyno_platform::windows::control`
 

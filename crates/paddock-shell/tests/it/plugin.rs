@@ -6,6 +6,7 @@
 use paddock_commands::WindowClass;
 use paddock_shell::{AppIdentity, Builder, COMMANDS, PLUGIN_NAME, VERSION};
 use paddock_updater::tauri::UpdatesBuilder;
+use paddock_window::launch::LaunchArgs;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -192,11 +193,14 @@ fn the_permission_sets_open_each_command_to_exactly_the_classes_of_the_table() {
 
 #[test]
 fn a_dialog_reaches_only_what_its_contract_declares() {
-    let contracts = r#"{"version":1,"base":[],"dialogs":{"sd.settings":{"kind":"tool","modality":"modeless","requiredChoice":false,"instanced":false,"commands":["settings_overview"]}}}"#;
+    paddock_dialogs::dialogs! {
+        static SETTINGS;
+        "sd.settings" => Tool { commands: &[paddock_shell::dialog_commands::settings::settings_overview] },
+    }
     let app = app(Builder::new(identity())
         .in_memory()
         .native_menu(false)
-        .dialog_contracts(contracts));
+        .dialogs(&[&SETTINGS]));
     // The dialog layer does not know this window: the ACL lets the dialog set through, the guard refuses.
     let unknown = window(&app, "d-main-1");
     let e = invoke(&unknown, "settings_overview", json!({})).unwrap_err();
@@ -394,7 +398,7 @@ fn a_part_that_fails_to_set_up_stops_the_start_with_its_name() {
             .plugin(b.in_memory().native_menu(false).build())
             .build(context())
     };
-    let bad_contracts = built(Builder::new(identity()).dialog_contracts("{"));
+    let bad_contracts = built(Builder::new(identity()).dialogs(&[&paddock_channels::DIALOGS]));
     assert!(bad_contracts.is_err());
     let no_service =
         built(Builder::new(identity()).service(|_| Err("the agent is missing".into())));
@@ -901,4 +905,97 @@ fn storage_brings_its_commands_to_main_windows_and_dialogs_and_a_failing_setup_n
         .build(context());
     let e = built.err().map(|e| e.to_string()).unwrap_or_default();
     assert!(e.contains("storage") && e.contains("no folders"), "{e}");
+}
+
+#[test]
+fn dialogs_are_shown_at_the_start_up_configs_deadline() {
+    let config = paddock_startup::Config {
+        dialog_show_deadline: std::time::Duration::from_millis(1500),
+        ..Default::default()
+    };
+    let startup = paddock_startup::tauri::Startup::builder()
+        .config(config)
+        .build()
+        .unwrap();
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .startup(startup));
+    let dialogs = app.state::<paddock_dialogs::Dialogs>();
+    assert_eq!(
+        dialogs.show_deadline(),
+        std::time::Duration::from_millis(1500)
+    );
+}
+
+/// The shell opens the start itself, after every plugin is set up: the tray, then the main window.
+#[cfg(feature = "mock-runtime")]
+#[test]
+fn the_shell_opens_the_tray_then_the_main_window_after_every_plugin() {
+    let started = paddock_shell::testing::start(|| started_app(LaunchArgs::default()));
+    assert_eq!(
+        started,
+        Ok(paddock_shell::testing::Started {
+            main_window: true,
+            tray: true
+        })
+    );
+}
+
+/// Started at log-in (`--hidden`) with a tray: no window.
+#[cfg(feature = "mock-runtime")]
+#[test]
+fn a_hidden_start_with_a_tray_opens_no_window() {
+    let started = paddock_shell::testing::start(|| {
+        started_app(LaunchArgs {
+            hidden: true,
+            ..LaunchArgs::default()
+        })
+    });
+    assert_eq!(
+        started,
+        Ok(paddock_shell::testing::Started {
+            main_window: false,
+            tray: true
+        })
+    );
+}
+
+/// The start test names a start that fails instead of passing or hanging (here the old wiring: a window opened from the
+/// shell's own `setup`).
+#[cfg(feature = "mock-runtime")]
+#[test]
+fn the_start_test_names_a_failed_start() {
+    use paddock_window::tauri::{WindowConfig, Windows};
+    let started = paddock_shell::testing::start(|| {
+        mock_builder().plugin(
+            Builder::new(identity())
+                .in_memory()
+                .native_menu(false)
+                .windows(|_| Windows::builder(WindowConfig::new("Shell Demo")).build())
+                .setup(|app| {
+                    paddock_window::tauri::start(app, &LaunchArgs::default())?;
+                    Ok(())
+                })
+                .build(),
+        )
+    });
+    let e = started.unwrap_err();
+    assert!(e.contains("tauri::Builder::setup"), "{e}");
+}
+
+#[cfg(feature = "mock-runtime")]
+fn started_app(launch: LaunchArgs) -> tauri::Builder<MockRuntime> {
+    use paddock_window::tauri::{HeadlessTray, Tray, WindowConfig, Windows};
+    Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .windows(|_| Windows::builder(WindowConfig::new("Shell Demo")).build())
+        .tray(|_| {
+            Tray::new(HeadlessTray, |_| {
+                paddock_window::tray::TrayView::new("Shell Demo", vec![], "normal")
+            })
+        })
+        .launch(launch)
+        .add_to(mock_builder())
 }

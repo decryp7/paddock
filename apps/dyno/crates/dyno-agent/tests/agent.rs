@@ -5,18 +5,17 @@
 use dyno_agent::cli::{ask, ask_within, connect};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
-use dyno_core::activity::UndoState;
 use dyno_core::history::HistoryRange;
-use dyno_core::ports::{PlatformError, ProcessSource};
-use dyno_core::process::{Priority, ProcessAction};
 use dyno_core::protocol::{ErrorCode, LiveDetail, LiveUpdate, Message, Reply, Request};
 use dyno_core::time::Timestamp;
 use dyno_ipc::{Client, Peer, PeerOptions};
 use dyno_platform::fake::{process, Fake};
 use dyno_platform::Platform;
 use std::sync::mpsc::{channel, Receiver};
-use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
+
+mod common;
+use common::{full_disk_sample, wait_for_alarm};
 
 struct Harness {
     running: Option<Running>,
@@ -67,67 +66,6 @@ impl Harness {
         ask(&peer, Request::Subscribe { detail }).unwrap();
         (peer, rx)
     }
-
-    /// Waits until the agent's process table holds `pid`. The sampler fills it on its own thread after the agent
-    /// starts, and the agent acts only on processes it has sampled, so a test that acts must wait for this first.
-    fn wait_for_process(&self, pid: u32) {
-        let (_peer, rx) = self.subscriber(LiveDetail::Processes);
-        loop {
-            let live = rx
-                .recv_timeout(Duration::from_secs(10))
-                .expect("a live update with the process table");
-            if live.processes.is_some_and(|ps| ps.iter().any(|p| p.pid == pid)) {
-                return;
-            }
-        }
-    }
-}
-
-/// A process table that stays unread until the test opens it: the state between the agent's start and its first
-/// process sample, held as long as the test needs it.
-#[derive(Clone, Default)]
-struct Gate(Arc<(Mutex<bool>, Condvar)>);
-
-impl Gate {
-    fn open(&self) {
-        *self.0 .0.lock().unwrap() = true;
-        self.0 .1.notify_all();
-    }
-
-    fn wait(&self) {
-        let (open, cv) = &*self.0;
-        let _open = cv.wait_while(open.lock().unwrap(), |o| !*o).unwrap();
-    }
-
-    /// Opens the gate when dropped, so a failing assertion cannot leave the sampler blocked and the agent unstoppable.
-    /// Declare it after the harness: it is dropped first.
-    fn opener(&self) -> GateOpener {
-        GateOpener(self.clone())
-    }
-}
-
-struct GateOpener(Gate);
-
-impl Drop for GateOpener {
-    fn drop(&mut self) {
-        self.0.open();
-    }
-}
-
-struct GatedProcesses {
-    gate: Gate,
-    inner: Box<dyn ProcessSource>,
-}
-
-impl ProcessSource for GatedProcesses {
-    fn processes(&mut self) -> Vec<dyno_core::process::ProcessSample> {
-        self.gate.wait();
-        self.inner.processes()
-    }
-
-    fn details(&mut self, target: dyno_core::process::ProcessRef) -> Result<dyno_core::process::ProcessDetails, PlatformError> {
-        self.inner.details(target)
-    }
 }
 
 impl Drop for Harness {
@@ -136,10 +74,6 @@ impl Drop for Harness {
             r.stop();
         }
     }
-}
-
-fn target(pid: u32) -> dyno_core::process::ProcessRef {
-    process(pid, "x", 0.0).reference()
 }
 
 #[test]
@@ -154,6 +88,31 @@ fn a_subscriber_gets_live_updates_with_processes_only_when_it_asks() {
     let s = summary.recv_timeout(Duration::from_secs(10)).expect("a summary update");
     assert!(s.processes.is_none() && s.groups.is_none());
     assert!(!s.top_cpu.is_empty());
+}
+
+#[test]
+fn other_users_processes_are_folded_into_one_row_in_the_live_update() {
+    let h = Harness::start();
+    for pid in [200, 201] {
+        let mut p = process(pid, "theirs", 3.0);
+        p.owner = dyno_core::process::Owner::Other;
+        h.fake.add_process(p);
+    }
+    let (_p, rx) = h.subscriber(LiveDetail::Processes);
+    let live = loop {
+        let l = rx.recv_timeout(Duration::from_secs(10)).expect("a live update");
+        if l.other_users.is_some() {
+            break l;
+        }
+    };
+    let other = live.other_users.unwrap();
+    assert_eq!(other.count, 2);
+    let listed = live.processes.unwrap();
+    assert!(
+        listed.iter().all(|p| p.owner != dyno_core::process::Owner::Other),
+        "folded ones are not listed"
+    );
+    assert_eq!(listed.len(), 3);
 }
 
 #[test]
@@ -175,68 +134,43 @@ fn settings_round_trip_and_survive_a_restart() {
 }
 
 #[test]
-fn a_click_acts_logs_and_undoes_and_protected_processes_are_refused() {
+fn an_alert_rule_is_added_changed_and_deleted_without_touching_the_other_settings() {
+    use dyno_core::alarms::custom::{CustomAlertRule, CustomMetric, CustomOp};
+    use dyno_core::health::Severity;
     let h = Harness::start();
-    let (peer, rx) = h.subscriber(LiveDetail::Processes);
-    rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    let Reply::Activity(entry) = ask(
-        &peer,
-        Request::Act {
-            target: target(100),
-            action: ProcessAction::SetPriority(Priority::Idle),
-        },
-    )
-    .unwrap() else {
-        panic!("activity")
+    let peer = h.client();
+    let rule = |limit: f64| CustomAlertRule {
+        id: "busy".into(),
+        name: "Busy".into(),
+        metric: CustomMetric::CpuTotal,
+        op: CustomOp::Above,
+        limit,
+        for_secs: 30,
+        severity: Severity::Warning,
+        enabled: true,
     };
-    assert!(entry.title.contains("busy"));
-    assert_eq!(h.fake.actions().len(), 1);
-    let Reply::Activities(list) = ask(&peer, Request::Activity { limit: 10 }).unwrap() else {
-        panic!("list")
+    let Reply::Settings(before) = ask(&peer, Request::Settings).unwrap() else {
+        panic!("settings")
     };
-    assert_eq!(list[0].id, entry.id);
-    assert_eq!(list[0].undo, UndoState::Available);
-    let Reply::Activity(undone) = ask(
-        &peer,
-        Request::Undo {
-            activity_id: entry.id.clone(),
-        },
-    )
-    .unwrap() else {
-        panic!("undo")
+    let Reply::Settings(added) = ask(&peer, Request::UpsertAlertRule { rule: rule(90.0) }).unwrap() else {
+        panic!("settings")
     };
-    assert_eq!(undone.undo, UndoState::Undone);
-    assert_eq!(h.fake.actions().len(), 2);
-    assert!(ask(&peer, Request::Undo { activity_id: entry.id }).unwrap_err().contains("already"));
-    // launchd is on the protected list.
-    let err = ask(
-        &peer,
-        Request::Act {
-            target: target(102),
-            action: ProcessAction::End,
-        },
-    )
-    .unwrap_err();
-    assert!(err.contains("protected"), "{err}");
-    assert_eq!(h.fake.actions().len(), 2, "nothing was done to the protected process");
-    // A pid that is not in the table is not found, and an invalid action is a bad request.
-    assert!(ask(
-        &peer,
-        Request::Act {
-            target: target(999),
-            action: ProcessAction::End
-        }
-    )
-    .is_err());
-    assert!(ask(
-        &peer,
-        Request::Act {
-            target: target(100),
-            action: ProcessAction::SetCpuCap(Some(0))
-        }
-    )
-    .unwrap_err()
-    .contains("CPU cap"));
+    assert_eq!(added.custom_alerts.len(), 1);
+    let Reply::Settings(changed) = ask(&peer, Request::UpsertAlertRule { rule: rule(80.0) }).unwrap() else {
+        panic!("settings")
+    };
+    assert_eq!((changed.custom_alerts.len(), changed.custom_alerts[0].limit), (1, 80.0));
+    assert_eq!(changed.sampling, before.sampling);
+    let saved = std::fs::read_to_string(h.dirs.settings()).unwrap();
+    assert!(saved.contains("\"busy\""));
+    let mut bad = rule(1.0);
+    bad.id = "not valid".into();
+    assert!(ask(&peer, Request::UpsertAlertRule { rule: bad }).is_err());
+    assert!(ask(&peer, Request::DeleteAlertRule { id: "nope".into() }).is_err());
+    let Reply::Settings(gone) = ask(&peer, Request::DeleteAlertRule { id: "busy".into() }).unwrap() else {
+        panic!("settings")
+    };
+    assert!(gone.custom_alerts.is_empty());
 }
 
 #[test]
@@ -337,38 +271,6 @@ fn the_inventory_is_read_once_and_cached() {
         panic!("inventory")
     };
     assert_eq!(*a, *b);
-}
-
-fn full_disk_sample() -> dyno_core::metrics::SystemSample {
-    let mut s = dyno_platform::fake::quiet_sample(Timestamp(0));
-    s.disks = vec![dyno_core::metrics::DiskSample {
-        id: "c".into(),
-        name: "C:".into(),
-        mount: "C:".into(),
-        total: 100 << 30,
-        free: 2 << 30,
-        removable: false,
-    }];
-    s
-}
-
-fn wait_for_alarm(peer: &Peer<Message>) -> dyno_core::alarms::Alarm {
-    for _ in 0..100 {
-        let Reply::Alarms(list) = ask(
-            peer,
-            Request::Alarms {
-                filter: Default::default(),
-            },
-        )
-        .unwrap() else {
-            panic!("alarms")
-        };
-        if let Some(a) = list.into_iter().next() {
-            return a;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    panic!("no alarm was raised");
 }
 
 #[test]
@@ -603,175 +505,7 @@ fn the_diagnostics_bundle_previews_and_saves_a_redacted_zip() {
     }
 }
 
-// ------------------------------------------------------------------------------------------------------- cleanup
-
-/// An agent whose data folder holds a user pack for a folder the test creates in its own temp directory.
-fn start_with_cleanup_pack() -> (Harness, std::path::PathBuf) {
-    let tmp = tempfile::tempdir().unwrap();
-    let work = tmp.path().join("cachey");
-    std::fs::create_dir_all(&work).unwrap();
-    let dirs = Dirs::at(tmp.path().join("data"));
-    std::fs::create_dir_all(dirs.packs()).unwrap();
-    let name = tmp.path().file_name().unwrap().to_string_lossy().into_owned();
-    std::fs::write(
-        dirs.packs().join("test.toml"),
-        format!(
-            "format = 1\n[[category]]\nid = \"testcache\"\nname = \"Test cache\"\ndescription = \"A folder the test made.\"\ngroup = \"developer\"\nrisk = \"review\"\npaths = [\"{{temp}}/{name}/cachey\"]\n"
-        ),
-    )
-    .unwrap();
-    std::fs::write(dirs.packs().join("broken.toml"), "format = ").unwrap();
-    let fake = Fake::new();
-    let running = Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
-    (
-        Harness {
-            running: Some(running),
-            fake,
-            dirs,
-            _tmp: tmp,
-        },
-        work,
-    )
-}
-
-#[test]
-fn cleanup_scans_without_deleting_runs_only_what_was_chosen_and_undoes() {
-    let (h, work) = start_with_cleanup_pack();
-    let peer = h.client();
-    std::fs::write(work.join("one"), b"11").unwrap();
-    std::fs::write(work.join("two"), b"2222").unwrap();
-    let Reply::Categories(cats) = ask(&peer, Request::CleanupCategories).unwrap() else {
-        panic!("categories")
-    };
-    assert!(cats.iter().any(|c| c.id == "testcache") && cats.iter().any(|c| c.id == "userTemp"));
-    // The broken pack is reported in the activity log and ignored.
-    let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
-        panic!("log")
-    };
-    assert!(log.iter().any(|e| e.detail.contains("broken.toml")));
-    let Reply::Scan(scan) = ask(
-        &peer,
-        Request::ScanCleanup {
-            categories: vec!["testcache".into()],
-        },
-    )
-    .unwrap() else {
-        panic!("scan")
-    };
-    assert_eq!(scan.total_bytes, 6);
-    assert!(work.join("one").exists(), "a scan deletes nothing");
-    let two = scan.results[0].items.iter().find(|i| i.path.ends_with("two")).unwrap().id.clone();
-    // Errors: a made-up scan, a made-up item.
-    assert!(ask(
-        &peer,
-        Request::RunCleanup {
-            scan_id: "nope".into(),
-            item_ids: vec![two.clone()],
-            mode: dyno_core::cleanup::DeleteMode::Quarantine
-        }
-    )
-    .is_err());
-    assert!(ask(
-        &peer,
-        Request::RunCleanup {
-            scan_id: scan.id.clone(),
-            item_ids: vec!["x".into()],
-            mode: dyno_core::cleanup::DeleteMode::Quarantine
-        }
-    )
-    .unwrap_err()
-    .contains("not part"));
-    let Reply::Outcome(out) = ask(
-        &peer,
-        Request::RunCleanup {
-            scan_id: scan.id.clone(),
-            item_ids: vec![two],
-            mode: dyno_core::cleanup::DeleteMode::Quarantine,
-        },
-    )
-    .unwrap() else {
-        panic!("outcome")
-    };
-    assert_eq!((out.deleted, out.freed_bytes), (1, 4));
-    assert!(work.join("one").exists() && !work.join("two").exists());
-    let q = out.quarantine_id.unwrap();
-    let Reply::Quarantines(held) = ask(&peer, Request::Quarantine).unwrap() else {
-        panic!("quarantines")
-    };
-    assert_eq!((held[0].id.as_str(), held[0].item_count), (q.as_str(), 1));
-    let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
-        panic!("log")
-    };
-    let entry = log.iter().find(|e| e.title.starts_with("Cleaned 1 item")).unwrap();
-    assert_eq!((entry.undo, entry.bytes), (UndoState::Available, Some(4)));
-    // Undo from the activity log puts it back and marks the entry undone.
-    let Reply::Activity(undone) = ask(
-        &peer,
-        Request::Undo {
-            activity_id: entry.id.clone(),
-        },
-    )
-    .unwrap() else {
-        panic!("undo")
-    };
-    assert_eq!(undone.undo, UndoState::Undone);
-    assert_eq!(std::fs::read(work.join("two")).unwrap(), b"2222");
-    assert!(ask(&peer, Request::RestoreQuarantine { id: q }).is_err(), "nothing left to restore");
-    // The disk map validates its path.
-    assert!(ask(
-        &peer,
-        Request::DiskUsage {
-            path: Some("relative".into())
-        }
-    )
-    .is_err());
-    let Reply::SizeTree(tree) = ask(
-        &peer,
-        Request::DiskUsage {
-            path: Some(work.to_string_lossy().into_owned()),
-        },
-    )
-    .unwrap() else {
-        panic!("tree")
-    };
-    assert_eq!(tree.bytes, 6);
-}
-
-/// Regression (CI run 6489): the sampler reads the first process table on its own thread after the agent starts, so
-/// a test that acts at once races it. Held deterministically here: before the first table the target is not found;
-/// once the table holds it, the same action succeeds.
-#[test]
-fn an_action_before_the_first_process_table_is_not_found_and_succeeds_once_the_table_holds_it() {
-    let gate = Gate::default();
-    let h = Harness::start_with(|mut p| {
-        p.processes = Box::new(GatedProcesses {
-            gate: gate.clone(),
-            inner: p.processes,
-        });
-        p
-    });
-    let _opener = gate.opener();
-    let peer = h.client();
-    let act = || {
-        ask(
-            &peer,
-            Request::Act {
-                target: target(100),
-                action: ProcessAction::SetPriority(Priority::BelowNormal),
-            },
-        )
-    };
-    let err = act().unwrap_err();
-    assert!(err.contains("not in the list"), "{err}");
-    assert!(h.fake.actions().is_empty());
-    gate.open();
-    h.wait_for_process(100);
-    let Reply::Activity(entry) = act().unwrap() else {
-        panic!("activity")
-    };
-    assert!(entry.title.contains("busy"), "{}", entry.title);
-    assert_eq!(h.fake.actions().len(), 1);
-}
+// ------------------------------------------------------------------------------------------------------- disk map
 
 #[test]
 fn the_weekly_report_is_built_from_stored_data_and_exported_as_markdown_and_html() {
@@ -790,22 +524,6 @@ fn the_weekly_report_is_built_from_stored_data_and_exported_as_markdown_and_html
     assert!(ask(&peer, Request::WeeklyReport { weeks_ago: 53 })
         .unwrap_err()
         .contains("at most 52"));
-    // Something the user did shows up under "what changed" (not as a rule action).
-    h.wait_for_process(100);
-    ask(
-        &peer,
-        Request::Act {
-            target: target(100),
-            action: ProcessAction::SetPriority(Priority::BelowNormal),
-        },
-    )
-    .unwrap();
-    let Reply::Report(r) = ask(&peer, Request::WeeklyReport { weeks_ago: 0 }).unwrap() else {
-        panic!("report")
-    };
-    assert!(r.changes.iter().any(|c| c.title.contains("busy")), "{:?}", r.changes);
-    assert!(!r.nothing_to_report);
-
     let md = h._tmp.path().join("week.md");
     let Reply::ReportSaved(saved) = ask(
         &peer,
@@ -853,9 +571,15 @@ fn the_counters_browser_lists_searches_reads_and_charts_this_machines_counters()
     let h = Harness::start();
     let peer = h.client();
     let ask_slow = |r| ask_within(&peer, r, Duration::from_secs(30));
-    let Reply::CounterObjects(objects) = ask_slow(Request::CounterObjects).unwrap() else {
-        panic!("objects")
-    };
+    // Listing every counter can take longer than the agent waits on a busy machine (Windows CI run 7166); it then says to
+    // try again, and the retry joins the listing still running. Asked again as the message says (a bounded hang guard).
+    let objects = (0..5)
+        .find_map(|_| match ask_slow(Request::CounterObjects) {
+            Ok(Reply::CounterObjects(o)) => Some(o),
+            Err(e) if e.contains("took too long") => None,
+            other => panic!("objects: {other:?}"),
+        })
+        .expect("the counters were listed");
     assert!(objects.objects.iter().any(|o| o.name == "Memory" && o.counters > 0));
     let Reply::CounterObject(memory) = ask_slow(Request::CounterObject { name: "Memory".into() }).unwrap() else {
         panic!("object")
@@ -874,7 +598,12 @@ fn the_counters_browser_lists_searches_reads_and_charts_this_machines_counters()
             panic!("values")
         };
         assert_eq!(values[0].path, path);
-        std::thread::sleep(Duration::from_millis(1100));
+        // The counter history keeps only readings that are strictly later than the last one (and a running total needs a
+        // later reading to become a rate): wait until the agent's clock has moved on, not for a fixed time.
+        let read_at = dyno_agent::agent::now();
+        while dyno_agent::agent::now() <= read_at {
+            std::thread::yield_now();
+        }
     }
     let Reply::CounterHistory(history) = ask_slow(Request::CounterHistory {
         paths: vec![path.clone()],
@@ -1084,8 +813,10 @@ fn baselines_learn_silently_then_judge_and_alarm_only_when_asked() {
     assert!(o.items.is_empty());
     // Four weeks of quiet history, first seen long ago.
     let now = dyno_agent::agent::now();
+    let held = h.fake.hold_samples();
+    assert!(held.wait_parked(Duration::from_secs(20)), "the sampler reached the hold");
     {
-        let core = dyno_agent::agent::lock(&s.core);
+        let mut core = dyno_agent::agent::lock(&s.core);
         core.store.set_meta("firstSeen", &now.minus(30 * DAY).millis().to_string()).unwrap();
         for q in 0..(28 * 96) {
             let p = HistoryPoint {
@@ -1096,17 +827,32 @@ fn baselines_learn_silently_then_judge_and_alarm_only_when_asked() {
             };
             core.store.put_point(Tier::QuarterHour, &p).unwrap();
         }
+        // The judged values are the agent's recent samples, and whether its sampler has run yet depends on the machine (on
+        // the busy Windows runner it had not, CI runs 7166 and 7168): start from none, so the test never depends on it.
+        core.recent.clear();
     }
     h.fake.push_sample(dyno_platform::fake::quiet_sample(Timestamp(0)));
     let Reply::Baselines(o) = ask(&peer, Request::Baselines).unwrap() else {
         panic!("baselines")
     };
     assert!(matches!(o.learning, Learning::Ready { .. }), "{:?}", o.learning);
-    let cpu = o
-        .items
-        .iter()
-        .find(|i| i.subject == "System" && i.label == "CPU")
-        .expect("a CPU item");
+    assert!(o.items.is_empty(), "nothing is judged before a sample: {:?}", o.items);
+    // Sampling goes on: the CPU is judged once the agent has sampled it (waited for, whenever its sampler runs; the loop
+    // is a hang guard).
+    drop(held);
+    s.wake_sampler();
+    let mut judged = None;
+    for _ in 0..100 {
+        let Reply::Baselines(o) = ask(&peer, Request::Baselines).unwrap() else {
+            panic!("baselines")
+        };
+        judged = o.items.into_iter().find(|i| i.subject == "System" && i.label == "CPU");
+        if judged.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let cpu = judged.expect("a CPU item");
     assert_eq!(cpu.judgement.state, State::Usual, "{cpu:?}");
     assert!(cpu.judgement.phrase.starts_with("Usual for"), "{}", cpu.judgement.phrase);
 
@@ -1147,4 +893,205 @@ fn baselines_learn_silently_then_judge_and_alarm_only_when_asked() {
         dyno_agent::baselines::evaluate_alarms(&s);
     }
     assert!(alarm_rules(&peer).contains(&"baseline:cpu".to_string()), "{:?}", alarm_rules(&peer));
+}
+
+/// Rule 52 (coordinator review, 2026-10-30): the sampler fills the live view, so it runs as live work (normal priority on
+/// Windows, never stalled behind busy normal threads).
+#[test]
+fn the_sampler_runs_as_live_work() {
+    let h = Harness::start();
+    let mut role = None;
+    // Waits for the sampler's first sample (a hang guard bounds the loop).
+    for _ in 0..200 {
+        role = h.fake.with(|s| s.sample_role);
+        if role.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(role, Some(dyno_platform::priority::ThreadRole::Live));
+}
+
+// ------------------------------------------------------------------------------------------------- one agent per folder
+// A second agent on the same data folder refuses to start, says why, and leaves the first one's discovery file and
+// history alone (a Dyno 1.0 test VM ran two agents on one `dyno.db` after a slow first start).
+
+fn start_on(dirs: &Dirs) -> Result<Running, String> {
+    let fake = Fake::new();
+    fake.add_process(process(100, "busy", 60.0));
+    Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).map_err(|e| e.to_string())
+}
+
+/// Starts an agent on `dirs` once the lock is free: a refusal for "already running" is waited out (the holder is gone, a forked
+/// child may still carry a copy of the lock's descriptor until it execs); any other failure is the test's.
+fn start_when_the_folder_is_free(dirs: &Dirs) -> Running {
+    let end = std::time::Instant::now() + Duration::from_secs(40); // hang guard of the harness only
+    loop {
+        match start_on(dirs) {
+            Ok(running) => return running,
+            Err(e) if e.contains("already running") && std::time::Instant::now() < end => std::thread::yield_now(),
+            Err(e) => panic!("the folder never became free: {e}"),
+        }
+    }
+}
+
+#[test]
+fn a_second_agent_on_the_same_data_folder_refuses_to_start_and_says_so() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    let first = start_on(&dirs).unwrap();
+    let before = dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap();
+
+    let second = start_on(&dirs);
+    let message = match second {
+        Ok(r) => {
+            r.stop();
+            panic!("a second agent started on the same data folder");
+        }
+        Err(e) => e,
+    };
+    assert!(message.contains("already running"), "{message}");
+    assert!(
+        message.contains("another computer"),
+        "a shared network home can hold it from elsewhere: {message}"
+    );
+    // The agent's log file says it too (the app starts the agent with stderr discarded; a service's stderr is elsewhere).
+    let log = std::fs::read_to_string(dirs.logs().join("agent.log")).unwrap_or_default();
+    assert!(log.contains("already running"), "agent.log: {log:?}");
+    assert_eq!(
+        dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap(),
+        before,
+        "the refused agent left the first one's discovery file alone"
+    );
+
+    // Once the first one is gone, the folder is free again (the lock ends with its holder). "Gone" is the moment the OS lets
+    // the lock go, not the moment `stop` returns: a program the agent just started (the hardware readers run `pmset` and the like
+    // on a background thread) holds a copy of every descriptor open at its fork, the lock's included, until it execs, and on a
+    // loaded macOS runner that exec can take a while. So the third start waits on the lock being free, as the lock's own test does.
+    first.stop();
+    let third = start_when_the_folder_is_free(&dirs);
+    assert_ne!(
+        dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap().endpoint,
+        before.endpoint
+    );
+    third.stop();
+}
+
+#[test]
+fn a_folder_that_cannot_lock_still_runs_the_agent_but_says_so_in_the_log_and_the_activity() {
+    use dyno_agent::instance::LockError;
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    let fake = Fake::new();
+    fake.add_process(process(100, "busy", 60.0));
+    let unsupported = LockError::Io {
+        path: dirs.instance_lock(),
+        source: std::io::Error::new(std::io::ErrorKind::Unsupported, "file locking is not supported here"),
+    };
+    let running = Running::start_with_lock(
+        dirs.clone(),
+        fake.platform(),
+        Box::new(fake.clone()),
+        Box::new(|_| Ok(())),
+        dyno_agent::disk::DiskPorts::none(),
+        Err(unsupported),
+    )
+    .unwrap();
+    let log = std::fs::read_to_string(dirs.logs().join("agent.log")).unwrap_or_default();
+    assert!(log.contains("not supported"), "agent.log: {log:?}");
+    let (peer, _) = connect(&dirs).unwrap();
+    let Reply::Activities(entries) = ask(&peer, Request::Activity { limit: 50 }).unwrap() else {
+        panic!("not activities")
+    };
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.title.contains("second agent") && e.detail.contains("not supported")),
+        "{entries:?}"
+    );
+    running.stop();
+}
+
+#[test]
+fn agents_on_different_data_folders_run_side_by_side() {
+    let tmp = tempfile::tempdir().unwrap();
+    let a = start_on(&Dirs::at(tmp.path().join("a"))).unwrap();
+    let b = start_on(&Dirs::at(tmp.path().join("b"))).unwrap();
+    a.stop();
+    b.stop();
+}
+
+/// A child between its fork and its exec holds a copy of every descriptor open at the fork, the lock's included (it is closed
+/// at the exec, `O_CLOEXEC`). The agent starts programs on background threads (the hardware readers), so the OS can keep the data
+/// folder locked for a while after the agent that held it is gone; a loaded macOS runner showed it (the third start of
+/// `a_second_agent…` was refused). This holds a child in that state on purpose, without a clock: it blocks on a pipe the test
+/// closes.
+#[cfg(unix)]
+#[test]
+#[expect(
+    unsafe_code,
+    reason = "pipe(2), read(2) and write(2) in the child between fork and exec, async-signal-safe calls only"
+)]
+#[expect(clippy::disallowed_methods, reason = "the test starts a trivial program to hold a forked child")]
+fn a_child_forked_before_it_execs_keeps_the_folder_locked_until_it_does_and_the_next_start_waits() {
+    use std::os::unix::process::CommandExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    let first = start_on(&dirs).unwrap();
+
+    let mut ready = [0i32; 2];
+    let mut release = [0i32; 2];
+    // SAFETY: two fresh pipes; the descriptors are closed below.
+    unsafe {
+        assert_eq!(libc::pipe(ready.as_mut_ptr()), 0);
+        assert_eq!(libc::pipe(release.as_mut_ptr()), 0);
+    }
+    let (ready_w, release_r, release_w) = (ready[1], release[0], release[1]);
+    let forker = std::thread::spawn(move || {
+        let mut cmd = std::process::Command::new("true");
+        // SAFETY: only `write` and `read` run in the child before the exec.
+        unsafe {
+            cmd.pre_exec(move || {
+                let byte = 1u8;
+                libc::write(ready_w, std::ptr::addr_of!(byte).cast(), 1);
+                // (its own copy of the write end would keep the read from ever ending)
+                libc::close(release_w);
+                let mut b = 0u8;
+                libc::read(release_r, std::ptr::addr_of_mut!(b).cast(), 1);
+                Ok(())
+            });
+        }
+        cmd.status().unwrap();
+    });
+    // The child has forked (it says so) and now waits, holding the descriptors it was born with.
+    let mut b = 0u8;
+    // SAFETY: reads one byte from our own pipe.
+    assert_eq!(unsafe { libc::read(ready[0], std::ptr::addr_of_mut!(b).cast(), 1) }, 1);
+
+    first.stop();
+    assert!(
+        dyno_agent::instance::is_held(&dirs),
+        "the stopped agent's lock should still be held by the forked child's copy of the descriptor"
+    );
+    match start_on(&dirs) {
+        Ok(r) => {
+            r.stop();
+            panic!("an agent started while a forked child still carried the lock");
+        }
+        Err(refused) => assert!(refused.contains("already running"), "{refused}"),
+    }
+
+    // The child execs (the read ends), its copy closes, the lock is free: the waiting start succeeds.
+    // SAFETY: closes our write end of the release pipe, which unblocks the child's read.
+    unsafe {
+        libc::close(release[1]);
+    }
+    forker.join().unwrap();
+    start_when_the_folder_is_free(&dirs).stop();
+    // SAFETY: closes the remaining ends.
+    unsafe {
+        libc::close(ready[0]);
+        libc::close(ready[1]);
+        libc::close(release[0]);
+    }
 }

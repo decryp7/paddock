@@ -221,7 +221,9 @@ pub struct ImportReport {
     pub bytes: u64,
     pub elapsed_ms: u64,
     /// Things the user should know that are not failures: e.g. files that look like renamed ones but were not
-    /// matched to an earlier source because the match was ambiguous (they are new sources).
+    /// matched to an earlier source because the match was ambiguous (they are new sources), and archive entries
+    /// imported under a new name because the archive names their path more than once. Only the DuckDB store's import
+    /// fills this; the in-memory workspace's import reports none of them.
     #[serde(default)]
     pub notices: Vec<String>,
 }

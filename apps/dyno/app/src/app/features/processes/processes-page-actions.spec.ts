@@ -1,14 +1,12 @@
 import { TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
-import { Dialogs } from '../../shared/dialog';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { provideIcons } from '../../shared/icons';
 import { LiveStore } from '../../state/live.store';
 import { Lookups } from '../lookup/lookups';
 import { ProcessesStore } from '../../state/processes.store';
-import { AffinityDialog, CapDialog, LockersDialog } from './process-dialogs';
-import type { Row } from './process-rows';
+import { nextFrame } from '../../testing/frame';
 import { ProcessesPage } from './processes-page';
 
 const NOW = 1_700_000_000_000;
@@ -21,86 +19,39 @@ async function make(os: 'windows' | 'macos' = 'windows', fail?: Set<string>) {
   TestBed.inject(LiveStore);
   f.detectChanges();
   await f.whenStable();
-  await new Promise((r) => setTimeout(r, 5));
+  await vi.waitFor(() => expect(store.processes().length).toBeGreaterThan(0)); // the mock's first live update
+  f.detectChanges();
+  await f.whenStable();
+  await nextFrame();
   f.detectChanges();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const c = f.componentInstance as any;
-  const dialogs = TestBed.inject(Dialogs);
-  const act = vi.spyOn(store, 'act');
+  const dialogs = TestBed.inject(DialogService);
   const processRow = () => {
     store.setMode('flat');
-    return store.rows().find((r) => r.kind === 'process' && r.protectedReason === null)!;
+    return store.rows().find((r) => r.kind === 'process')!;
   };
-  return { f, store, mock, c, dialogs, act, el: f.nativeElement as HTMLElement, processRow };
+  return { f, store, mock, c, dialogs, el: f.nativeElement as HTMLElement, processRow };
 }
 
 describe('ProcessesPage actions', () => {
   it('summarises the machine', async () => {
     const { c } = await make();
     expect(c.summary()).toMatch(/processes · .*% CPU · .* memory in use/);
-    expect(c.ariaSort('cpu')).toBe('descending');
-    expect(c.ariaSort('name')).toBeNull();
+    expect(c.pdSort()).toEqual({ key: 'cpu', direction: 'desc' });
     c.store.sortBy('cpu');
-    expect(c.ariaSort('cpu')).toBe('ascending');
-    expect(c.pid({ pid: null })).toBe('');
-    expect(c.pid({ pid: 7 })).toBe('7');
-    expect(c.prioLabel('normal')).toBeTruthy();
-  });
-
-  it('end confirms with the right wording and acts only when confirmed', async () => {
-    const { c, dialogs, act, store } = await make();
-    const confirm = vi.spyOn(dialogs, 'confirm');
-    store.setMode('flat');
-    const proc = store.rows().find((r) => r.kind === 'process')!;
-    confirm.mockResolvedValueOnce(false);
-    await c.end(proc);
-    expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ title: `End ${proc.name}?`, confirmLabel: 'End', danger: true }));
-    expect(act).not.toHaveBeenCalled();
-    confirm.mockResolvedValueOnce(true);
-    await c.end(proc);
-    expect(act).toHaveBeenCalledWith(proc, 'end');
-    store.setMode('groups');
-    const group = store.rows().find((r) => r.kind === 'group')!;
-    confirm.mockResolvedValueOnce(false);
-    await c.end(group);
-    expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ title: `End all of ${group.name}?`, confirmLabel: 'End all' }));
-    expect(confirm.mock.calls.at(-1)![0].message).toContain('This ends');
-  });
-
-  it('affinity opens the dialog with the cores and applies the chosen mask', async () => {
-    const { c, dialogs, act, processRow } = await make();
-    const open = vi.spyOn(dialogs, 'open').mockReturnValue({ closed: of(0b11) } as never);
-    const row: Row = processRow();
-    await c.affinity(row);
-    expect(open).toHaveBeenCalledWith(AffinityDialog, { name: row.name, cores: expect.any(Number), mask: null });
-    expect(act).toHaveBeenCalledWith(row, { setAffinity: 3 });
-  });
-  it('affinity passes the known mask of the selected process and ignores a cancelled dialog', async () => {
-    const { c, dialogs, act, processRow, store } = await make();
-    const row = processRow();
-    await store.select(row.ref!);
-    const open = vi.spyOn(dialogs, 'open').mockReturnValue({ closed: of(undefined) } as never);
-    await c.affinity(row);
-    expect(open.mock.calls[0]![1]).toMatchObject({ mask: store.details()!.affinity });
-    expect(act).not.toHaveBeenCalled();
-  });
-
-  it('cap opens the dialog with the name and applies the percentage', async () => {
-    const { c, dialogs, act, processRow } = await make();
-    const row = processRow();
-    const open = vi.spyOn(dialogs, 'open').mockReturnValueOnce({ closed: of(40) } as never).mockReturnValueOnce({ closed: of(undefined) } as never);
-    await c.cap(row);
-    expect(open).toHaveBeenCalledWith(CapDialog, row.name);
-    expect(act).toHaveBeenCalledWith(row, { setCpuCap: 40 });
-    await c.cap(row);
-    expect(act).toHaveBeenCalledTimes(1);
+    expect(c.pdSort()).toEqual({ key: 'cpu', direction: 'asc' });
+    c.onSort({ key: 'user', direction: 'asc' });
+    expect(c.store.sort()).toEqual({ key: 'user', dir: 'asc' });
+    c.onSort(null);
+    expect(c.store.sort()).toEqual({ key: 'user', dir: 'asc' });
   });
 
   it('lockers opens the lockers dialog; details selects a process; groups are ignored', async () => {
     const { c, dialogs, store, processRow } = await make();
-    const open = vi.spyOn(dialogs, 'open').mockReturnValue({ closed: of(undefined) } as never);
+    const open = vi.spyOn(dialogs, 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'dismissed' }), dismiss() {} } as never);
     c.lockers();
-    expect(open).toHaveBeenCalledWith(LockersDialog);
+    expect(open).toHaveBeenCalledWith('dy.lockers');
     const select = vi.spyOn(store, 'select');
     const row = processRow();
     c.details(row);
@@ -121,17 +72,8 @@ describe('ProcessesPage actions', () => {
     const group = store.rows().find((r) => r.kind === 'group' && r.expandable)!;
     c.rowClick(group);
     expect(toggle).toHaveBeenCalledWith(group);
-  });
-
-  it('shows a failed action inline and Dismiss clears it', async () => {
-    const { f, el, store, c, processRow } = await make('windows', new Set(['act']));
-    await c.store.act(processRow(), 'suspend');
-    f.detectChanges();
-    expect(el.querySelector('.banner[role=alert]')).not.toBeNull();
-    el.querySelector<HTMLButtonElement>('.banner [aria-label=Dismiss]')!.click();
-    f.detectChanges();
-    expect(store.actionError()).toBeNull();
-    expect(el.querySelector('.banner')).toBeNull();
+    // A group is folded, not selected: the highlight stays with the open process.
+    expect(c.selectedKey()).not.toBe(group.key);
   });
 
   it('opens the details panel when a row is selected', async () => {
@@ -152,99 +94,124 @@ describe('ProcessesPage actions', () => {
   });
 
   describe('keyboard', () => {
-    function rows(store: InstanceType<typeof ProcessesStore>, n = 3) {
-      const host = document.createElement('div');
-      const els = store.rows().slice(0, n).map((r) => {
-        const d = document.createElement('div');
-        d.setAttribute('role', 'row');
-        d.tabIndex = 0;
-        d.dataset['key'] = r.key;
-        host.appendChild(d);
-        return d;
-      });
-      document.body.appendChild(host);
-      return { host, els };
-    }
-    const press = (c: { key(e: KeyboardEvent): void }, target: Element | null, key: string) => {
-      const ev = new KeyboardEvent('keydown', { key, cancelable: true, bubbles: true });
-      Object.defineProperty(ev, 'target', { value: target });
-      c.key(ev);
-      return ev;
+    const press = (target: Element, key: string) => target.dispatchEvent(new KeyboardEvent('keydown', { key, cancelable: true, bubbles: true }));
+    const rowEls = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('[role="row"][data-key]')];
+    const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
+      await f.whenStable();
+      await nextFrame();
+      f.detectChanges();
     };
 
-    it('moves focus with the arrow keys', async () => {
-      const { c, store } = await make();
-      const { host, els } = rows(store);
-      expect(press(c, els[0]!, 'ArrowDown').defaultPrevented).toBe(true);
-      expect(document.activeElement).toBe(els[1]);
-      press(c, els[1]!, 'ArrowUp');
-      expect(document.activeElement).toBe(els[0]);
-      expect(press(c, els[0]!, 'ArrowUp').defaultPrevented).toBe(false);
-      host.remove();
+    it('has one tab stop; the arrows move between rows', async () => {
+      const { f, el } = await make();
+      const rows = rowEls(el);
+      expect(rows.length).toBeGreaterThan(2);
+      expect(rows.filter((r) => r.tabIndex === 0)).toHaveLength(1);
+      rows[0]!.focus();
+      press(rows[0]!, 'ArrowDown');
+      await settle(f);
+      expect(document.activeElement).toBe(rowEls(el)[1]);
+      press(rowEls(el)[1]!, 'ArrowUp');
+      await settle(f);
+      expect(document.activeElement).toBe(rowEls(el)[0]);
     });
-    it('ignores keys outside a row or on an unknown row', async () => {
-      const { c, store } = await make();
-      const sel = vi.spyOn(store, 'select');
-      expect(press(c, document.body, 'Enter').defaultPrevented).toBe(false);
-      expect(press(c, null, 'Enter').defaultPrevented).toBe(false);
-      const ghost = document.createElement('div');
-      ghost.setAttribute('role', 'row');
-      ghost.dataset['key'] = 'nope';
-      expect(press(c, ghost, 'Enter').defaultPrevented).toBe(false);
-      expect(sel).not.toHaveBeenCalled();
-    });
-    it('Right expands and Left collapses an expandable row', async () => {
-      const { c, store } = await make();
+    it('says the levels of the tree and Right unfolds a folded app, Left folds an unfolded one', async () => {
+      const { f, el, store } = await make();
       store.setMode('groups');
-      const group = store.rows().find((r) => r.expandable)!;
-      const el = document.createElement('div');
-      el.setAttribute('role', 'row');
-      el.dataset['key'] = group.key;
+      f.detectChanges();
+      await settle(f);
+      const grid = el.querySelector('[role="treegrid"]')!;
+      expect(grid).not.toBeNull();
+      const group = () => rowEls(el).find((r) => r.hasAttribute('aria-expanded'))!;
+      expect(group().getAttribute('aria-level')).toBe('1');
       const toggle = vi.spyOn(store, 'toggle');
-      press(c, el, 'ArrowRight');
-      if (!group.expanded) expect(toggle).toHaveBeenCalledTimes(1);
-      press(c, el, 'ArrowLeft');
-      if (group.expanded) expect(toggle).toHaveBeenCalledTimes(1);
-      // leaf rows never toggle
-      const leaf = store.rows().find((r) => !r.expandable)!;
-      el.dataset['key'] = leaf.key;
-      toggle.mockClear();
-      press(c, el, 'ArrowRight');
-      press(c, el, 'ArrowLeft');
-      expect(toggle).not.toHaveBeenCalled();
-    });
-    it('Left collapses an expanded row', async () => {
-      const { c, store } = await make();
-      store.setMode('groups');
-      const group = store.rows().find((r) => r.expandable)!;
-      if (!group.expanded) store.toggle(group);
-      const el = document.createElement('div');
-      el.setAttribute('role', 'row');
-      el.dataset['key'] = group.key;
-      const toggle = vi.spyOn(store, 'toggle');
-      press(c, el, 'ArrowLeft');
+      group().focus();
+      const open = group().getAttribute('aria-expanded') === 'true';
+      press(group(), open ? 'ArrowLeft' : 'ArrowRight');
+      await settle(f);
       expect(toggle).toHaveBeenCalledTimes(1);
-      press(c, el, 'ArrowRight');
-      expect(toggle).toHaveBeenCalledTimes(2);
+      expect(group().getAttribute('aria-expanded')).toBe(open ? 'false' : 'true');
+      // The focus stays on the row that was folded.
+      expect(document.activeElement).toBe(group());
     });
-    it('Enter shows details; Delete ends unless protected', async () => {
-      const { c, store, dialogs } = await make();
-      const confirm = vi.spyOn(dialogs, 'confirm').mockResolvedValue(false);
+    it('Right on an unfolded app moves to its first process and Left comes back', async () => {
+      const { f, el, store } = await make();
+      store.setMode('groups');
+      const g = store.rows().find((r) => r.expandable)!;
+      if (!g.expanded) store.toggle(g);
+      f.detectChanges();
+      await settle(f);
+      const group = rowEls(el).find((r) => r.dataset['key'] === g.key)!;
+      group.focus();
+      press(group, 'ArrowRight');
+      await settle(f);
+      expect((document.activeElement as HTMLElement).getAttribute('aria-level')).toBe('2');
+      press(document.activeElement!, 'ArrowLeft');
+      await settle(f);
+      expect(document.activeElement).toBe(rowEls(el).find((r) => r.dataset['key'] === g.key));
+    });
+    it('Enter and Space show details of a process', async () => {
+      const { f, el, store } = await make();
       store.setMode('flat');
-      const proc = store.rows().find((r) => r.kind === 'process' && !r.protectedReason)!;
-      const prot = store.rows().find((r) => r.protectedReason)!;
-      const el = document.createElement('div');
-      el.setAttribute('role', 'row');
-      el.dataset['key'] = proc.key;
+      f.detectChanges();
+      await settle(f);
       const select = vi.spyOn(store, 'select');
-      expect(press(c, el, 'Enter').defaultPrevented).toBe(true);
-      expect(select).toHaveBeenCalled();
-      press(c, el, 'Delete');
-      expect(confirm).toHaveBeenCalledTimes(1);
-      el.dataset['key'] = prot.key;
-      press(c, el, 'Delete');
-      expect(confirm).toHaveBeenCalledTimes(1);
-      press(c, el, 'x');
+      const first = rowEls(el).find((r) => !r.hasAttribute('aria-expanded'))!;
+      first.focus();
+      press(first, 'Enter');
+      press(first, ' ');
+      expect(select).toHaveBeenCalledTimes(2);
+    });
+    it('Escape closes the details panel and keeps the focus on the row', async () => {
+      const { f, el, store } = await make();
+      store.setMode('flat');
+      f.detectChanges();
+      await settle(f);
+      const first = rowEls(el).find((r) => !r.hasAttribute('aria-expanded'))!;
+      first.focus();
+      press(first, 'Enter');
+      await settle(f);
+      expect(store.selected()).not.toBeNull();
+      press(rowEls(el).find((r) => r.dataset['key'] === first.dataset['key'])!, 'Escape');
+      await settle(f);
+      expect(store.selected()).toBeNull();
+      // Nothing open: Escape is left to others.
+      expect(press(rowEls(el)[0]!, 'Escape')).toBe(true);
+    });
+    it('opens the row menu with Shift+F10 and offers the actions of a real process', async () => {
+      const { f, el, store } = await make();
+      store.setMode('flat');
+      f.detectChanges();
+      await settle(f);
+      const first = rowEls(el)[0]!;
+      first.focus();
+      first.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, cancelable: true, bubbles: true }));
+      await settle(f);
+      const items = [...document.querySelectorAll('.pd-popmenu__item')].map((i) => i.textContent!.trim());
+      expect(items).toEqual(['Details', 'Open file location', 'Search the web…', 'Search file hash on VirusTotal…']);
+      document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = ''));
+    });
+  });
+
+  describe('row actions', () => {
+    it('open the file location, search and select by the action chosen', async () => {
+      const { c, store, processRow } = await make();
+      const lookups = TestBed.inject(Lookups);
+      const web = vi.spyOn(lookups, 'searchWeb').mockResolvedValue(false);
+      const hash = vi.spyOn(lookups, 'searchHash').mockResolvedValue(false);
+      const location = vi.spyOn(store, 'openLocation').mockResolvedValue();
+      const select = vi.spyOn(store, 'select');
+      const row = processRow();
+      c.run({ id: 'details', row });
+      c.run({ id: 'location', row });
+      c.run({ id: 'web', row });
+      c.run({ id: 'hash', row });
+      expect(select).toHaveBeenCalledWith(row.ref);
+      expect(location).toHaveBeenCalledWith(row.ref);
+      expect(web).toHaveBeenCalled();
+      expect(hash).toHaveBeenCalled();
+      expect(c.actions({ ...row, kind: 'other' })).toEqual([]);
+      expect(c.actions({ ...row, ref: null }).map((a: { id: string }) => a.id)).toEqual(['web']);
     });
   });
 

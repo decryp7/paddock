@@ -1,3 +1,5 @@
+import { By } from '@angular/platform-browser';
+import { MatTooltip } from '@angular/material/tooltip';
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
@@ -6,6 +8,7 @@ import { Chart } from '../../shared/chart';
 import { MockBackend } from '../../core/mock-backend';
 import { CountersStore } from '../../state/counters.store';
 import { SettingsStore } from '../../state/settings.store';
+import { nextFrame } from '../../testing/frame';
 import { CountersPage } from './counters-page';
 
 const NOW = 1_700_000_000_000;
@@ -26,6 +29,7 @@ async function open(fail: string[] = []) {
   const settle = async () => {
     for (let i = 0; i < 3; i++) {
       await new Promise((r) => setTimeout(r));
+      await nextFrame();
       f.detectChanges();
     }
   };
@@ -52,11 +56,11 @@ describe('CountersPage', () => {
     expect(el.querySelector('h2')!.textContent).toBe('Memory');
     await click('button[aria-label="Chart Pages/sec"]');
     expect(store.watching()).toEqual(['\\Memory\\Pages/sec']);
-    const table = el.querySelector('[aria-label="Charted counters"][role="table"]')!;
+    const table = el.querySelector('[aria-label="Charted counters"][role="grid"]')!;
     expect(table.textContent).toContain('Pages/sec');
-    expect(table.querySelector('.r.num b')!.textContent).toMatch(/\d/);
-    expect(el.textContent).toContain('Cleanup');
-    await click('button[aria-label="Stop charting Pages/sec"]');
+    expect(table.querySelector('b')!.textContent).toMatch(/\d/);
+    expect(el.textContent).toContain('Network');
+    await click('[aria-label="Charted counters"] [role="row"][data-key] button[aria-label="Stop charting"]');
     expect(el.textContent).toContain('Nothing charted yet');
   });
 
@@ -64,9 +68,9 @@ describe('CountersPage', () => {
     const { el, f, click, store } = await open();
     const idx = [...el.querySelectorAll('[aria-label="Objects"] button')].findIndex((b) => b.textContent!.includes('Network Interface'));
     await click('[aria-label="Objects"] button', idx);
-    const select = el.querySelector('select[aria-label="Instance"]') as HTMLSelectElement;
-    select.value = 'Wi-Fi';
-    select.dispatchEvent(new Event('change'));
+    (el.querySelector('mat-select[aria-label="Instance"] .mat-mdc-select-trigger') as HTMLElement).click();
+    f.detectChanges();
+    ([...document.querySelectorAll('mat-option')].find((o) => o.textContent?.trim() === 'Wi-Fi') as HTMLElement).click();
     f.detectChanges();
     await click('button[aria-label="Chart Bytes Received/sec"]');
     expect(store.watching()).toEqual(['\\Network Interface(Wi-Fi)\\Bytes Received/sec']);
@@ -100,29 +104,32 @@ describe('CountersPage', () => {
   });
 
   it('pins from the row, shows pinned counters that are not charted and saves a set by name', async () => {
-    const { el, f, click, store } = await open();
+    const { el, f, click, store, settle } = await open();
     expect(el.querySelector('[aria-label="Pinned counters"][role="list"]')!.textContent).toContain('% Processor Time');
     await store.setWatching(['\\Memory\\Pages/sec']);
     f.detectChanges();
-    await click('button[aria-label="Pin Pages/sec"]');
+    await settle();
+    await click('[aria-label="Charted counters"] [role="row"][data-key] button[aria-label="Pin"]');
     expect(store.isPinned('\\Memory\\Pages/sec')).toBe(true);
-    await click('button.btn.ghost', 0);
+    await click('button[matButton="text"]', [...el.querySelectorAll('button[matButton="text"]')].findIndex((b) => b.textContent?.includes('Save as set')));
     const name = el.querySelector('input[aria-label="Set name"]') as HTMLInputElement;
     name.value = 'Memory only';
     name.dispatchEvent(new Event('input'));
     f.detectChanges();
-    await click('.namebar .primary');
+    await click('.namebar button[matButton="filled"]');
     expect(store.sets().map((s) => s.name)).toContain('Memory only');
     expect(el.querySelector('.namebar')).toBeNull();
   });
 
   it('explains a counter that is gone instead of showing a number', async () => {
-    const { el, f, store } = await open();
+    const { el, f, store, settle } = await open();
     await store.setWatching(['\\Network Interface(USB Ethernet)\\Bytes Sent/sec']);
     f.detectChanges();
+    await settle();
     const cell = el.querySelector('.unavail')!;
     expect(cell.textContent).toContain('Unavailable');
-    expect(cell.getAttribute('title')).toMatch(/not available/);
+    const tip = f.debugElement.queryAll(By.css('.unavail'))[0]!.injector.get(MatTooltip);
+    expect(tip.message).toMatch(/not available/);
   });
 
   it('shows an inline error with Retry when the objects cannot be listed', async () => {

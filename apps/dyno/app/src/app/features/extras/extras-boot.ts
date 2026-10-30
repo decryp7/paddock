@@ -1,4 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import { PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
+import type { BootStep } from '../../core/api.types';
 import { ThemeService } from '../../core/theme';
 import { AsyncState } from '../../shared/async-state';
 import { Chart } from '../../shared/chart';
@@ -11,7 +13,7 @@ import { EXTRAS_STYLES } from './extras-styles';
 /** How long the last start-up took, how recent boots compare, and what slowed the last one. */
 @Component({
   selector: 'dy-extras-boot',
-  imports: [AsyncState, Chart, Icon],
+  imports: [AsyncState, Chart, Icon, PdTable],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="!!data()" [error]="store.boot().error" what="start-up information" [rows]="5" (retry)="store.loadBoot()">
@@ -37,16 +39,7 @@ import { EXTRAS_STYLES } from './extras-styles';
 
           <h2 class="sec">What slowed start-up</h2>
           @if (b.slowest.length > 0) {
-            <div class="tablewrap">
-              <table class="table tbl" aria-label="What slowed start-up">
-                <thead><tr><th>Service or program</th><th class="r w-secs">Delay</th></tr></thead>
-                <tbody>
-                  @for (s of b.slowest; track s.name) {
-                    <tr><td><span class="ell" [title]="s.name">{{ s.name }}</span></td><td class="r num">{{ secs(s.secs) }}</td></tr>
-                  }
-                </tbody>
-              </table>
-            </div>
+            <pd-table [toolbar]="false" label="What slowed start-up" [rows]="b.slowest" [columns]="slowColumns" [rowKey]="slowKey" [filterable]="false" [maxHeight]="620" />
           } @else if (b.stepsUnavailable; as why) {
             <p class="note" role="status"><dy-icon name="info" /><span>{{ why }}</span></p>
           } @else {
@@ -69,7 +62,6 @@ import { EXTRAS_STYLES } from './extras-styles';
       .verdict { margin: 0; flex: 1 1 320px; color: var(--text-2); }
       .chartcard { padding: var(--sp-3) var(--sp-4); --chart-h: 200px; }
       .chartcard .sec { margin: 0 0 var(--sp-2); }
-      .w-secs { width: 120px; }
     `,
   ],
 })
@@ -78,6 +70,11 @@ export class ExtrasBoot implements OnInit {
   private readonly theme = inject(ThemeService);
   protected readonly data = computed(() => this.store.boot().data);
   protected readonly secs = formatSeconds;
+  protected readonly slowKey = (s: BootStep): string => s.name;
+  protected readonly slowColumns: PdColumn<BootStep>[] = [
+    { key: 'name', header: 'Service or program', value: (s) => s.name, required: true, sortable: false, width: 'minmax(0, 1fr)' },
+    { key: 'secs', header: 'Delay', value: (s) => s.secs, text: (s) => formatSeconds(s.secs), align: 'end', sortable: false, width: '120px' },
+  ];
   protected readonly total = computed(() => {
     const b = this.data();
     return formatSeconds(b?.lastTotalSecs ?? b?.boots[0]?.bootSecs ?? null);

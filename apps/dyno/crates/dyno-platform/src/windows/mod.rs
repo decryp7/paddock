@@ -1,14 +1,10 @@
-//! Windows adapters: performance counters, process control, details, Restart Manager, startup entries, facts and
+//! Windows adapters: performance counters, details, Restart Manager, startup entries, facts and
 //! user activity.
 
 pub mod activity;
-pub mod control;
-#[cfg(test)]
-mod control_tests;
 pub mod counters;
-pub mod elevate;
-pub mod handle;
 pub mod net;
+pub mod nt_query;
 pub mod pdh;
 pub mod topology;
 pub mod traffic;
@@ -20,16 +16,16 @@ use dyno_core::ports::PlatformError;
 use std::path::{Path, PathBuf};
 
 /// The ports for Windows.
-pub fn platform(state_file: PathBuf) -> Platform {
+pub fn platform() -> Platform {
     let fake = crate::fake::Fake::new();
     let f = fake.platform();
     Platform {
         sensors: Box::new(SysinfoSensors::new(Box::new(pdh::WinProbe::new()))),
-        control: Box::new(control::WinControl::new(state_file)),
-        processes: Box::new(SysinfoProcesses::new(Box::new(NoDetails))),
+        processes: Box::new(SysinfoProcesses::new(Box::new(NoDetails)).with_nt(Box::new(nt_query::NtQuery::load()))),
         activity: Box::new(activity::WinActivity),
         issues: crate::issues::os_sources(),
         links: Box::new(crate::links::OsLinks::new()),
+        zone: std::sync::Arc::new(crate::zone::SystemZone),
         ..f
     }
 }

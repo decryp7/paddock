@@ -1,18 +1,17 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! The extras (WP-13), backup health (WP-14) and taming proof (WP-36) end to end over the fake platform: scripted tools
+//! The extras (WP-13), backup health (WP-14) end to end over the fake platform: scripted tools
 //! (no real `tmutil`, `pmset` or `restic` is run), a real IPC connection and a SQLite file in a temp folder.
 
-use dyno_agent::cli::{ask, ask_within, connect};
+use dyno_agent::cli::{ask, ask_within, connect, run_job};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_core::backup::{BackupState, BackupTool};
-use dyno_core::cleanup::DeleteMode;
 use dyno_core::extras::changes::{ChangeKind, ChangesQuery};
-use dyno_core::extras::files::{FinderMode, FinderQuery};
+use dyno_core::extras::files::{FinderMode, FinderQuery, FinderResult};
+use dyno_core::jobs::{JobOutput, JobSpec};
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{Message, Reply, Request};
-use dyno_core::rules::{Command, RuleSet};
 use dyno_core::time::{Timestamp, HOUR};
 use dyno_ipc::Peer;
 use dyno_platform::fake::{process, Fake};
@@ -126,13 +125,13 @@ fn sleep_blockers_come_from_the_scripted_tool_and_a_refusal_is_a_sentence() {
             "WHO UID USER PID COMM WHAT WHY MODE\nFirefox 1000 sam 2210 firefox sleep Playing audio block\n",
         )],
     )]));
-    let Reply::Sleep(s) = ask(&h.client(), Request::SleepBlockers).unwrap() else {
+    let JobOutput::Sleep(s) = run_job(&h.client(), JobSpec::SleepBlockers, Duration::from_secs(30)).unwrap() else {
         panic!("sleep")
     };
     assert_eq!(s.blockers[0].name, "Firefox");
     assert!(s.wakes_unavailable.is_some());
     x.use_tools(Tools::with(vec![]));
-    let Reply::Sleep(s) = ask(&h.client(), Request::SleepBlockers).unwrap() else {
+    let JobOutput::Sleep(s) = run_job(&h.client(), JobSpec::SleepBlockers, Duration::from_secs(30)).unwrap() else {
         panic!("sleep")
     };
     assert!(s.blockers.is_empty() && s.blockers_unavailable.unwrap().contains("not available"));
@@ -191,8 +190,16 @@ fn write(dir: &std::path::Path, name: &str, byte: u8, len: usize) -> std::path::
     p
 }
 
+/// Runs the finder as a job and waits for its result.
+fn find(peer: &Peer<Message>, query: FinderQuery) -> Result<FinderResult, String> {
+    match run_job(peer, JobSpec::FindFiles { query }, Duration::from_secs(60))? {
+        JobOutput::Finder(r) => Ok(*r),
+        other => panic!("{other:?}"),
+    }
+}
+
 #[test]
-fn the_finder_lists_removes_to_the_quarantine_and_never_removes_every_copy() {
+fn the_finder_lists_large_files_and_duplicates_and_moves_nothing() {
     let h = Harness::start();
     let peer = h.client();
     let t = tempfile::tempdir().unwrap();
@@ -206,57 +213,15 @@ fn the_finder_lists_removes_to_the_quarantine_and_never_removes_every_copy() {
         mode: FinderMode::Both,
         min_bytes: 0,
     };
-    let Reply::FileFinder(r) = ask_within(&peer, Request::FindFiles { query }, Duration::from_secs(60)).unwrap() else {
-        panic!("finder")
-    };
+    let r = find(&peer, query).unwrap();
     assert_eq!(r.large[0].bytes, 4 * MB as u64);
     assert_eq!(r.duplicates.len(), 1);
-    let ids: Vec<String> = r.duplicates[0].files.iter().map(|f| f.id.clone()).collect();
-
-    // Removing both copies is refused as a whole; nothing moves.
-    let both = Request::RemoveFoundFiles {
-        scan_id: r.scan_id.clone(),
-        ids: ids.clone(),
-        mode: DeleteMode::Quarantine,
-    };
-    let err = ask(&peer, both).unwrap_err();
-    assert!(err.contains("every copy"), "{err}");
-    assert!(a.exists() && b.exists());
-
-    // An unknown result is refused.
-    assert!(ask(
-        &peer,
-        Request::RemoveFoundFiles {
-            scan_id: "nope".into(),
-            ids: ids.clone(),
-            mode: DeleteMode::Quarantine
-        }
-    )
-    .is_err());
-
-    // One copy goes to the quarantine, is logged, and can be put back from Activity's quarantine.
-    let one = Request::RemoveFoundFiles {
-        scan_id: r.scan_id.clone(),
-        ids: vec![ids[1].clone()],
-        mode: DeleteMode::Quarantine,
-    };
-    let Reply::Outcome(o) = ask(&peer, one).unwrap() else {
-        panic!("outcome")
-    };
-    assert_eq!(o.deleted, 1, "{:?}", o.failed);
-    let q = o.quarantine_id.unwrap();
-    let remaining = [&a, &b].iter().filter(|p| p.exists()).count();
-    assert_eq!(remaining, 1);
-    let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
-        panic!("activity")
-    };
-    assert!(log.iter().any(|e| e.title.starts_with("Removed 1 file")), "{log:?}");
-    assert!(ask(&peer, Request::RestoreQuarantine { id: q }).is_ok());
-    assert!(a.exists() && b.exists());
+    assert_eq!(r.duplicates[0].files.len(), 2);
+    assert!(a.exists() && b.exists(), "finding moves nothing");
 }
 
 #[test]
-fn the_finder_refuses_a_folder_that_is_not_there_and_stale_selections() {
+fn the_finder_refuses_a_folder_that_is_not_there() {
     let h = Harness::start();
     let peer = h.client();
     let missing = std::env::temp_dir().join("dyno-definitely-not-here");
@@ -265,23 +230,17 @@ fn the_finder_refuses_a_folder_that_is_not_there_and_stale_selections() {
         mode: FinderMode::Both,
         min_bytes: 0,
     };
-    assert!(ask(&peer, Request::FindFiles { query: q })
-        .unwrap_err()
-        .contains("cannot be opened"));
-    assert!(ask(
-        &peer,
-        Request::RemoveFoundFiles {
-            scan_id: "x".into(),
-            ids: vec![],
-            mode: DeleteMode::RecycleBin
-        }
-    )
-    .is_err());
+    assert!(find(&peer, q).unwrap_err().contains("cannot be opened"));
 }
 
 fn backup_report(peer: &Peer<Message>, refresh: bool) -> dyno_core::backup::BackupReport {
-    let req = if refresh { Request::RefreshBackup } else { Request::Backup };
-    let Reply::Backup(mut r) = ask(peer, req).unwrap() else {
+    if refresh {
+        let JobOutput::Backup(r) = run_job(peer, JobSpec::RefreshBackup, Duration::from_secs(30)).unwrap() else {
+            panic!("backup")
+        };
+        return *r;
+    }
+    let Reply::Backup(mut r) = ask(peer, Request::Backup).unwrap() else {
         panic!("backup")
     };
     for _ in 0..200 {
@@ -419,66 +378,6 @@ fn maintenance_windows_are_validated_and_reported() {
 }
 
 #[test]
-fn a_temporary_rule_switches_itself_off_and_says_so() {
-    let h = Harness::start();
-    let peer = h.client();
-    let Reply::Rules(mut set) = ask(&peer, Request::Rules).unwrap() else {
-        panic!("rules")
-    };
-    let r = &mut set.rules[0];
-    r.enabled = true;
-    r.expires_at = Some(real_now().minus(1000));
-    let id = r.id.clone();
-    let set: RuleSet = *set;
-    ask(&peer, Request::SaveRules { rules: set }).unwrap();
-    let mut gone = false;
-    for _ in 0..100 {
-        let Reply::Rules(now_set) = ask(&peer, Request::Rules).unwrap() else {
-            panic!("rules")
-        };
-        let rule = now_set.rules.iter().find(|r| r.id == id).unwrap();
-        if !rule.enabled && rule.expires_at.is_none() {
-            gone = true;
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    assert!(gone, "the expired rule is switched off");
-    let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
-        panic!("activity")
-    };
-    assert!(
-        log.iter().any(|e| e.title.contains("temporary rule") && e.title.contains("ended")),
-        "{log:?}"
-    );
-}
-
-#[test]
-fn a_measured_effect_is_written_to_the_activity_log() {
-    let h = Harness::start();
-    let s = h.shared();
-    dyno_agent::sampler::apply_commands(
-        &s,
-        vec![Command::Measured {
-            rule_id: "r".into(),
-            rule_name: "Calm builds".into(),
-            app: "Chrome".into(),
-            before: 78.0,
-            after: 31.0,
-            after_secs: 21,
-            description: "lowered its priority".into(),
-        }],
-        real_now(),
-    );
-    let Reply::Activities(log) = ask(&h.client(), Request::Activity { limit: 20 }).unwrap() else {
-        panic!("activity")
-    };
-    let e = log.iter().find(|e| e.title.starts_with("Measured")).unwrap();
-    assert_eq!(e.title, "Measured: Chrome used 78% CPU before and 31% after 21 s");
-    assert!(e.detail.contains("It helped"));
-}
-
-#[test]
 fn boot_analysis_uses_the_stored_boots_and_says_what_it_cannot_know() {
     let h = Harness::start();
     let s = h.shared();
@@ -488,7 +387,7 @@ fn boot_analysis_uses_the_stored_boots_and_says_what_it_cannot_know() {
     for (i, secs) in [40.0f32, 42.0, 41.0, 90.0].iter().enumerate() {
         lock_put_boot(&s, t.minus((10 - i as i64) * 24 * HOUR), *secs);
     }
-    let Reply::Boot(b) = ask(&h.client(), Request::BootAnalysis).unwrap() else {
+    let JobOutput::Boot(b) = run_job(&h.client(), JobSpec::BootAnalysis, Duration::from_secs(30)).unwrap() else {
         panic!("boot")
     };
     assert_eq!(b.boots.len(), 4);
@@ -516,7 +415,7 @@ fn the_inventory_report_is_written_only_to_a_valid_path() {
     s.extras
         .use_tools(Tools::with(vec![("dpkg-query -W", vec![ok("bash\t5.2\ncurl\t8.4\n")])]));
     let peer = h.client();
-    let Reply::Software(sw) = ask(&peer, Request::SoftwareInventory).unwrap() else {
+    let JobOutput::Software(sw) = run_job(&peer, JobSpec::SoftwareInventory, Duration::from_secs(30)).unwrap() else {
         panic!("software")
     };
     assert_eq!(sw.items.len(), 2);
@@ -547,7 +446,7 @@ fn gpu_and_usage_degrade_to_a_reason() {
         panic!("gpu")
     };
     assert!(g.processes.is_empty() && g.unavailable.is_some());
-    let Reply::AppUsage(u) = ask(&peer, Request::AppUsage).unwrap() else {
+    let JobOutput::AppUsage(u) = run_job(&peer, JobSpec::AppUsage, Duration::from_secs(30)).unwrap() else {
         panic!("usage")
     };
     assert!(u.energy_unavailable.is_some());

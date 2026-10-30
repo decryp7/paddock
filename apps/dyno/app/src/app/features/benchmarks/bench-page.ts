@@ -1,4 +1,7 @@
+import { PlatformService } from '../../core/platform';
+import { osTerms } from '../../shared/os-terms';
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { BenchKind, BenchMetric, BenchRun, BenchStatus, MetricDelta } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatDayTime, formatMetric, formatPercent } from '../../shared/format';
@@ -7,6 +10,11 @@ import { BenchStore } from '../../state/bench.store';
 import { DeviceArt } from '../inventory/device-art';
 import { BenchArt } from './bench-art';
 import { barPair, bestValues, kindTitle, statusNote, verdictWord } from './bench-model';
+import { MatButton } from '@angular/material/button';
+import { MatFormField } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
+import { MatCheckbox } from '@angular/material/checkbox';
+import { MatTooltip } from '@angular/material/tooltip';
 
 const KINDS: { kind: BenchKind; text: string }[] = [
   { kind: 'cpu', text: 'Integer work on one core and on all of them' },
@@ -18,14 +26,14 @@ const KINDS: { kind: BenchKind; text: string }[] = [
 /** Benchmarks: started only by a click, each in its own process with a timeout; the load at the time is stored with the result. */
 @Component({
   selector: 'dy-bench-page',
-  imports: [AsyncState, BenchArt, DeviceArt, Icon],
+  imports: [AsyncState, BenchArt, DeviceArt, Icon, PdTable, PdCell, MatTooltip, MatCheckbox, MatFormField, MatInput, MatButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <header class="page-head">
         <div class="titles">
           <h1>Benchmarks</h1>
-          <p>Measure the CPU, memory and disk on request, and compare before and after a change. Nothing runs until you click, and it all stays on this PC.</p>
+          <p>Measure the CPU, memory and disk on request, and compare before and after a change. Nothing runs until you click, and it all stays on this computer.</p>
         </div>
       </header>
 
@@ -36,7 +44,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
               <h2><dy-icon name="gauge" /> Run</h2>
               <span class="spacer"></span>
               @if (o.running) {
-                <button type="button" class="btn sm" (click)="store.cancel()"><dy-icon name="stop" /> Cancel</button>
+                <button type="button" matButton="outlined" (click)="store.cancel()"><dy-icon name="stop" /> Cancel</button>
               }
             </div>
             @if (o.running; as r) {
@@ -49,33 +57,31 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                   </li>
                 }
               </ol>
-              <p class="note">Keep the PC otherwise idle while this runs; any other work lowers the numbers.</p>
+              <p class="note">Keep the computer otherwise idle while this runs; any other work lowers the numbers.</p>
             } @else {
               <div class="kinds" role="group" aria-label="What to measure">
                 @for (k of kinds; track k.kind) {
-                  <label class="kind" [attr.data-on]="chosen().has(k.kind)">
-                    <input type="checkbox" [checked]="chosen().has(k.kind)" (change)="toggle(k.kind)" [attr.aria-label]="title(k.kind)" />
-                    <dy-icon [name]="icons[k.kind]" />
-                    <span class="kt"><strong>{{ title(k.kind) }}</strong><span class="sub">{{ k.text }}</span></span>
-                  </label>
+                  <mat-checkbox class="kind" [attr.data-on]="chosen().has(k.kind)" [checked]="chosen().has(k.kind)" (change)="toggle(k.kind)">
+                    <span class="kbody"><dy-icon [name]="icons[k.kind]" /><span class="kt"><strong>{{ title(k.kind) }}</strong><span class="sub">{{ k.text }}</span></span></span>
+                  </mat-checkbox>
                 }
               </div>
               <div class="runbar">
                 <div class="field grow">
                   <label for="bench-label">Name this run</label>
-                  <input id="bench-label" class="input" type="text" maxlength="80" placeholder="Baseline" [value]="label()" (input)="label.set($any($event.target).value)" />
+                  <mat-form-field><input id="bench-label" matInput type="text" maxlength="80" placeholder="Baseline" [value]="label()" (input)="label.set($any($event.target).value)" /></mat-form-field>
                 </div>
-                <button type="button" class="btn primary" [disabled]="store.busy() || chosen().size === 0" (click)="run()"><dy-icon name="play" /> Run benchmarks</button>
+                <button type="button" matButton="filled" [disabled]="store.busy() || chosen().size === 0" (click)="run()"><dy-icon name="play" /> Run benchmarks</button>
               </div>
               <div class="pair">
                 <div class="field grow">
                   <label for="bench-change">Before and after a change</label>
-                  <input id="bench-change" class="input" type="text" maxlength="80" placeholder="What you are about to change, e.g. Power mode: High performance" [value]="change()" (input)="change.set($any($event.target).value)" />
+                  <mat-form-field><input id="bench-change" matInput type="text" maxlength="80" [placeholder]="'What you are about to change, e.g. ' + terms.powerExample" [value]="change()" (input)="change.set($any($event.target).value)" /></mat-form-field>
                 </div>
                 <ol class="stepper" aria-label="Before and after steps">
-                  <li><button type="button" class="btn" [class.primary]="!!change().trim() && !hasBefore()" [disabled]="store.busy() || chosen().size === 0 || !change().trim()" (click)="run('before')">1 · Measure before</button></li>
+                  <li><button type="button" [matButton]="!!change().trim() && !hasBefore() ? 'filled' : 'outlined'" [disabled]="store.busy() || chosen().size === 0 || !change().trim()" (click)="run('before')">1 · Measure before</button></li>
                   <li class="mid">2 · Make the change</li>
-                  <li><button type="button" class="btn" [class.primary]="hasBefore()" [disabled]="store.busy() || chosen().size === 0 || !change().trim() || !hasBefore()" (click)="run('after')">3 · Measure after</button></li>
+                  <li><button type="button" [matButton]="hasBefore() ? 'filled' : 'outlined'" [disabled]="store.busy() || chosen().size === 0 || !change().trim() || !hasBefore()" (click)="run('after')">3 · Measure after</button></li>
                 </ol>
               </div>
             }
@@ -110,7 +116,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                             <li>
                               <span class="label">{{ m.label }}</span>
                               <span class="value num">{{ metric(m.value) }} <small>{{ m.unit }}</small></span>
-                              <span class="bar" role="presentation"><i [style.width.%]="pair(m).fill * 100"></i>@if (pair(m).marker !== null) { <b class="mk" [style.left.%]="pair(m).marker! * 100" title="Best earlier run"></b> }</span>
+                              <span class="bar" role="presentation"><i [style.width.%]="pair(m).fill * 100"></i>@if (pair(m).marker !== null) { <b class="mk" [style.left.%]="pair(m).marker! * 100" matTooltip="Best earlier run"></b> }</span>
                             </li>
                           }
                         </ul>
@@ -130,7 +136,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
               <div class="card-head">
                 <h2><dy-icon name="diff" /> Comparison</h2>
                 <span class="spacer"></span>
-                <button type="button" class="btn sm ghost" (click)="store.clearComparison()">Close</button>
+                <button type="button" matButton="text" (click)="store.clearComparison()">Close</button>
               </div>
               @for (w of c.warnings; track w) {
                 <p class="warning"><dy-icon name="alert" /> {{ w }}</p>
@@ -138,21 +144,14 @@ const KINDS: { kind: BenchKind; text: string }[] = [
               @if (c.deltas.length === 0) {
                 <p class="note">The two runs share no finished measurements.</p>
               } @else {
-                <table class="table">
-                  <caption class="visually-hidden">Before and after</caption>
-                  <thead><tr><th>Measurement</th><th class="r">Before</th><th class="r">After</th><th class="r">Change</th><th>Verdict</th></tr></thead>
-                  <tbody>
-                    @for (d of c.deltas; track d.kind + d.id) {
-                      <tr>
-                        <td>{{ d.label }} <span class="faint">({{ title(d.kind) }})</span></td>
-                        <td class="r num">{{ metric(d.before) }} <small>{{ d.unit }}</small></td>
-                        <td class="r num">{{ metric(d.after) }} <small>{{ d.unit }}</small></td>
-                        <td class="r num">{{ signed(d) }}</td>
-                        <td><span class="badge" [attr.data-tone]="tone(d)">{{ word(d) }}</span></td>
-                      </tr>
-                    }
-                  </tbody>
-                </table>
+                <div class="tablewrap">
+                  <pd-table [toolbar]="false" label="Before and after" [rows]="c.deltas" [columns]="deltaColumns" [rowKey]="deltaKey" [filterable]="false" [maxHeight]="420">
+                    <ng-template pdCell="label" let-d>{{ d.label }}{{ ' ' }}<span class="faint">({{ title(d.kind) }})</span></ng-template>
+                    <ng-template pdCell="before" let-d><span class="num">{{ metric(d.before) }} <small>{{ d.unit }}</small></span></ng-template>
+                    <ng-template pdCell="after" let-d><span class="num">{{ metric(d.after) }} <small>{{ d.unit }}</small></span></ng-template>
+                    <ng-template pdCell="verdict" let-d><span class="badge" [attr.data-tone]="tone(d)">{{ word(d) }}</span></ng-template>
+                  </pd-table>
+                </div>
               }
             </section>
           }
@@ -161,27 +160,18 @@ const KINDS: { kind: BenchKind; text: string }[] = [
             <div class="card-head">
               <h2><dy-icon name="calendar" /> History</h2>
               <span class="spacer"></span>
-              <button type="button" class="btn sm" [disabled]="picked().length !== 2" (click)="compare()"><dy-icon name="diff" /> Compare selected</button>
+              <button type="button" matButton="outlined" [disabled]="picked().length !== 2" (click)="compare()"><dy-icon name="diff" /> Compare selected</button>
             </div>
             @if (o.runs.length === 0) {
               <p class="note">No runs yet. Choose what to measure above and click Run benchmarks.</p>
             } @else {
-              <table class="table">
-                <caption class="visually-hidden">Saved runs</caption>
-                <thead><tr><th><span class="visually-hidden">Select</span></th><th>Run</th><th>When</th><th class="r">CPU load</th><th>Measured</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
-                <tbody>
-                  @for (r of o.runs; track r.id) {
-                    <tr>
-                      <td><input type="checkbox" [checked]="picked().includes(r.id)" [attr.aria-label]="'Select ' + r.label" (change)="pick(r.id)" /></td>
-                      <td>{{ r.label }}@if (r.phase) { <span class="badge outline">{{ r.phase === 'before' ? 'Before' : 'After' }}</span> }</td>
-                      <td>{{ day(r.startedAt) }}</td>
-                      <td class="r num">{{ pct(r.load.cpuPercent) }}</td>
-                      <td>{{ kindsOf(r) }}</td>
-                      <td class="r"><button type="button" class="btn sm ghost" [attr.aria-label]="'Delete ' + r.label" (click)="store.remove(r.id)"><dy-icon name="trash" /></button></td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
+              <div class="tablewrap">
+                <pd-table [toolbar]="false" label="Saved runs" [rows]="o.runs" [columns]="runColumns" [rowKey]="runKey" [filterable]="false" [maxHeight]="420">
+                  <ng-template pdCell="pick" let-r><mat-checkbox [checked]="picked().includes(r.id)" [aria-label]="'Select ' + r.label" (change)="pick(r.id)" /></ng-template>
+                  <ng-template pdCell="run" let-r><span class="runcell"><span class="slot">@if (r.phase) { <span class="badge outline">{{ r.phase === 'before' ? 'Before' : 'After' }}</span> }</span><span class="ell" [matTooltip]="r.label">{{ r.label }}</span></span></ng-template>
+                  <ng-template pdCell="actions" let-r><button type="button" matButton="text" [attr.aria-label]="'Delete ' + r.label" (click)="store.remove(r.id)"><dy-icon name="trash" /></button></ng-template>
+                </pd-table>
+              </div>
             }
           </section>
         }
@@ -190,14 +180,14 @@ const KINDS: { kind: BenchKind; text: string }[] = [
   `,
   styles: `
     :host { display: block; }
-    dy-async { display: grid; gap: var(--sp-4); }
-    .page { display: grid; gap: var(--sp-4); align-content: start; }
-    .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) 0; }
-    .kind { position: relative; display: flex; align-items: center; gap: var(--sp-3); padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); cursor: pointer; }
+    dy-async { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
+    .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); align-content: start; }
+    .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) 0; }
+    .kind { position: relative; display: flex; align-items: center; gap: var(--sp-3); padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); }
     .kind[data-on='true'] { border-color: var(--border-strong); background: var(--surface-2); }
     .kind dy-icon { --icon-size: 20px; color: var(--text-3); flex: none; }
     .kind[data-on='true'] dy-icon { color: var(--text-1); }
-    .kind input { order: 3; margin-left: auto; }
+    .kbody { display: inline-flex; align-items: center; gap: var(--sp-3); }
     .kt { display: grid; min-width: 0; }
     .stepper { list-style: none; margin: 0; padding: 0; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
     .stepper .mid { color: var(--text-3); font-size: var(--fs-sm); padding: 0 var(--sp-1); }
@@ -216,7 +206,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     .note, .warning, .load { margin: 0; padding: var(--sp-2) var(--sp-4); color: var(--text-2); }
     .load { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
     .warning { display: flex; gap: var(--sp-2); align-items: center; color: var(--warn); }
-    .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: var(--sp-3); padding: var(--sp-2) var(--sp-4) 0; }
+    .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: var(--sp-3); padding: var(--sp-2) var(--sp-4) 0; }
     .result { display: flex; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-lg); background: var(--surface-inset); min-width: 0; align-items: flex-start; }
     .result .art { flex: none; width: 96px; display: grid; place-items: center; padding-top: var(--sp-1); }
     .result .art dy-device-art { width: 72px; }
@@ -232,13 +222,18 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; min-width: 2px; }
     .took { display: block; margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-xs); }
     .why { margin: 0; display: flex; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); }
-    .table { margin: 0 var(--sp-4) var(--sp-3); width: calc(100% - 2 * var(--sp-4)); }
+    .tablewrap { margin: 0 var(--sp-4) var(--sp-3); }
+    .num { font-variant-numeric: tabular-nums; }
     .faint { color: var(--text-3); }
     small { color: var(--text-3); }
-    .badge.outline { margin-left: var(--sp-2); }
+    /* The Before/After badge has a slot of its own before the label, so a long label ellipsises instead of pushing it out of the cell. */
+    .runcell { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+    .slot { flex: none; width: 58px; }
+    .ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   `,
 })
 export class BenchPage implements OnInit, OnDestroy {
+  protected readonly terms = osTerms(inject(PlatformService).platform);
   protected readonly store = inject(BenchStore);
   protected readonly kinds = KINDS;
   protected readonly chosen = signal<ReadonlySet<BenchKind>>(new Set<BenchKind>(['cpu', 'memory', 'disk']));
@@ -250,6 +245,23 @@ export class BenchPage implements OnInit, OnDestroy {
   protected readonly pct = (v: number) => formatPercent(v, 0);
   protected readonly day = formatDayTime;
   protected readonly note = statusNote;
+  protected readonly deltaKey = (d: MetricDelta): string => d.kind + d.id;
+  protected readonly runKey = (r: BenchRun): string => r.id;
+  protected readonly deltaColumns: PdColumn<MetricDelta>[] = [
+    { key: 'label', header: 'Measurement', value: (d) => d.label, text: (d) => `${d.label} (${kindTitle(d.kind)})`, required: true, sortable: false, width: 'minmax(0, 2fr)' },
+    { key: 'before', header: 'Before', value: (d) => d.before, align: 'end', sortable: false, width: '110px' },
+    { key: 'after', header: 'After', value: (d) => d.after, align: 'end', sortable: false, width: '110px' },
+    { key: 'change', header: 'Change', value: (d) => d.changePercent, text: (d) => this.signed(d), align: 'end', sortable: false, width: '100px' },
+    { key: 'verdict', header: 'Verdict', value: (d) => verdictWord(d.verdict), sortable: false, width: '120px' },
+  ];
+  protected readonly runColumns: PdColumn<BenchRun>[] = [
+    { key: 'pick', header: 'Select', value: () => '', headerHidden: true, sortable: false, width: '28px' },
+    { key: 'run', header: 'Run', value: (r) => r.label, required: true, sortable: false, width: 'minmax(0, 2fr)' },
+    { key: 'when', header: 'When', value: (r) => r.startedAt, text: (r) => formatDayTime(r.startedAt), sortable: false, width: '150px' },
+    { key: 'load', header: 'CPU load', value: (r) => r.load.cpuPercent, text: (r) => formatPercent(r.load.cpuPercent, 0), align: 'end', sortable: false, width: '90px' },
+    { key: 'kinds', header: 'Measured', value: (r) => this.kindsOf(r), sortable: false, width: 'minmax(0, 1fr)', hideBelow: 640 },
+    { key: 'actions', header: 'Actions', value: () => '', headerHidden: true, sortable: false, width: '44px' },
+  ];
   protected readonly word = (d: MetricDelta) => verdictWord(d.verdict);
   protected readonly latest = computed(() => this.store.overview()?.runs[0] ?? null);
   /** The best value of each metric over the runs before the latest one. */

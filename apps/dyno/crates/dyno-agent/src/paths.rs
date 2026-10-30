@@ -49,16 +49,6 @@ impl Dirs {
         self.root.join("settings.json")
     }
 
-    /// The user's rules and protected list.
-    pub fn rules(&self) -> PathBuf {
-        self.root.join("rules.json")
-    }
-
-    /// What process control applied (so a crashed run can be undone).
-    pub fn process_control(&self) -> PathBuf {
-        self.root.join("process-control.json")
-    }
-
     /// The benchmark run history.
     pub fn benchmarks(&self) -> PathBuf {
         self.root.join("benchmarks.json")
@@ -69,6 +59,11 @@ impl Dirs {
         self.root.join("agent.json")
     }
 
+    /// The lock only one agent per data folder can hold ([`crate::instance`]).
+    pub fn instance_lock(&self) -> PathBuf {
+        self.root.join("agent.lock")
+    }
+
     /// The agent's log folder.
     pub fn logs(&self) -> PathBuf {
         self.root.join("logs")
@@ -77,21 +72,6 @@ impl Dirs {
     /// Where plugins live (`<id>/plugin.toml`).
     pub fn plugins(&self) -> PathBuf {
         self.root.join("plugins")
-    }
-
-    /// Cleanup packs the user dropped in (`*.toml`).
-    pub fn packs(&self) -> PathBuf {
-        self.root.join("packs")
-    }
-
-    /// The watched folders (WP-10).
-    pub fn watched_folders(&self) -> PathBuf {
-        self.root.join("watched-folders.json")
-    }
-
-    /// Where cleaned items wait for seven days.
-    pub fn quarantine(&self) -> PathBuf {
-        self.root.join("quarantine")
     }
 }
 
@@ -105,16 +85,7 @@ mod tests {
         assert_eq!(d.database(), Path::new("/x/dyno/dyno.db"));
         assert_eq!(d.discovery(), Path::new("/x/dyno/agent.json"));
         assert_eq!(d.root(), Path::new("/x/dyno"));
-        for p in [
-            d.settings(),
-            d.rules(),
-            d.process_control(),
-            d.logs(),
-            d.plugins(),
-            d.packs(),
-            d.quarantine(),
-            d.watched_folders(),
-        ] {
+        for p in [d.settings(), d.logs(), d.plugins(), d.instance_lock()] {
             assert!(p.starts_with("/x/dyno"));
         }
     }

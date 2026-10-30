@@ -1,7 +1,7 @@
 //! The tray icon and its popover: a left click opens the popover (`index.html#/tray`, the UI's tray window), the menu
 //! shows the window or quits. Without a tray on this desktop the app runs without one (paddock-window logs it).
 
-use paddock_window::tauri::{NativeTray, PopoverSpec, Popovers, Tray, create_tray};
+use paddock_window::tauri::{NativeTray, PopoverSpec, Popovers, Tray, TrayBackend};
 use paddock_window::tray::{TrayView, item};
 use tauri::image::Image;
 use tauri::{AppHandle, Manager, Runtime};
@@ -21,11 +21,15 @@ pub fn view() -> TrayView {
     )
 }
 
-/// The popover spec and the tray (managed state). Call from the app's set-up, before the main window.
-pub fn create<R: Runtime>(app: &AppHandle<R>) -> bool {
+/// The popover spec and the tray drawn by `backend` (the shell creates it at start, before the main window).
+pub fn tray<R: Runtime>(app: &AppHandle<R>, backend: impl TrayBackend<R>) -> Tray<R> {
     app.manage(Popovers::new().popover(None, PopoverSpec::new(POPOVER_ROUTE, crate::APP_NAME)));
-    let native = NativeTray::new(|_| icon()).menu_on_left_click(false);
-    create_tray(app, Tray::new(native, |_| view()).popover(true))
+    Tray::new(backend, |_| view()).popover(true)
+}
+
+/// The native tray icon.
+pub fn native() -> NativeTray {
+    NativeTray::new(|_| icon()).menu_on_left_click(false)
 }
 
 /// The menu-bar template image on macOS (tinted by the system), the white glyph for the dark taskbars elsewhere.

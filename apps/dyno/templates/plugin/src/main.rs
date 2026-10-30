@@ -1,4 +1,4 @@
-//! A Dyno plugin. Implement the providers you contribute and list them in the manifest and in plugin.toml.
+//! A Dyno plugin. Implement the sensor provider and list it in the manifest and in plugin.toml.
 
 use dyno_plugin_api::{Contribution, Manifest, Plugin, SensorProvider, SensorReading};
 

@@ -1,11 +1,12 @@
 import { Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, provideRouter, Router } from '@angular/router';
-import type { MaintenanceSettings, SleepReport } from '../../core/api.types';
+import type { JobOutput, MaintenanceSettings, SleepReport } from '../../core/api.types';
+import { mockBoot, mockSoftware, mockUsage } from '../../core/mock/extras';
 import { BACKEND } from '../../core/backend';
-import { MockBackend } from '../../core/mock-backend';
+import type { MockBackend } from '../../core/mock-backend';
+import { jobsProviders, mockWithJobs } from '../../../testing/job-test-support';
 import { Chart } from '../../shared/chart';
-import { Dialogs } from '../../shared/dialog';
 import { provideIcons } from '../../shared/icons';
 import { ExtrasStore } from '../../state/extras.store';
 import { SettingsStore } from '../../state/settings.store';
@@ -21,10 +22,11 @@ class StubChart {
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
 function render(tab = '', options: ConstructorParameters<typeof MockBackend>[0] = {}) {
-  const mock = new MockBackend({ latencyMs: 0, now: () => NOW, ...options });
+  const { mock, jobs } = mockWithJobs({ now: () => NOW, ...options });
   TestBed.configureTestingModule({
     providers: [
       provideIcons(),
+      jobsProviders(jobs),
       provideRouter([]),
       { provide: BACKEND, useValue: mock },
       { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: new Map(tab ? [['tab', tab]] : []) } } },
@@ -38,21 +40,28 @@ function render(tab = '', options: ConstructorParameters<typeof MockBackend>[0] 
 const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
   for (let i = 0; i < 6; i++) {
     await f.whenStable();
+    // A job the mock runs steps on a timer, like the agent's pushes.
+    await new Promise((r) => setTimeout(r, 2));
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
     f.detectChanges();
   }
 };
 const btn = (el: HTMLElement, text: string) => [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes(text))!;
 const tabBtn = (el: HTMLElement, text: string) => [...el.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((b) => b.textContent === text)!;
-const rowsOf = (el: HTMLElement, label: string) => el.querySelectorAll(`table[aria-label="${label}"] tbody tr`);
+const rowsOf = (el: HTMLElement, label: string) => el.querySelectorAll(`[role$="grid"][aria-label="${label}"] [role="row"][data-key]`);
+const groupsOf = (el: HTMLElement, label: string) => [...el.querySelectorAll(`[role$="grid"][aria-label="${label}"] .pd-group`)];
 const clickTab = async (f: Parameters<typeof settle>[0], el: HTMLElement, text: string) => {
   tabBtn(el, text).click();
   await settle(f);
 };
 
+/** The next job's result is `output`: the mock stands in for the engine's report. */
+const returns = (mock: MockBackend, output: JobOutput) => vi.spyOn(mock, 'jobResult').mockResolvedValue(output);
+
 describe('dy-extras-page', () => {
   it('has the eight tabs in a tablist, opens What changed first, and reads each tab only when opened', async () => {
     const { f, el, mock } = render();
-    const spy = vi.spyOn(mock, 'bootAnalysis');
+    const spy = vi.spyOn(mock, 'startJob');
     await settle(f);
     expect(el.querySelector('h1')?.textContent).toBe('Extras');
     expect([...el.querySelectorAll('[role="tab"]')].map((b) => b.textContent)).toEqual(['What changed', 'Sleep', 'Boot', 'Apps', 'GPU', 'Files', 'Inventory', 'Maintenance']);
@@ -65,32 +74,27 @@ describe('dy-extras-page', () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
-  it('follows the tab named in the address, ignores a name it does not know, and moves with the arrow keys', async () => {
+  it('follows the tab named in the address, ignores a name it does not know, and moves with the tab links', async () => {
     expect(tabFrom('files')).toBe('files');
     expect(tabFrom('nope')).toBe('changes');
     expect(tabFrom(null)).toBe('changes');
     const { f, el } = render('gpu');
     await settle(f);
     expect(tabBtn(el, 'GPU').getAttribute('aria-selected')).toBe('true');
-    const press = (key: string) => el.querySelector('[role="tab"][aria-selected="true"]')!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-    press('ArrowRight');
-    await settle(f);
+    await clickTab(f, el, 'Files');
     expect(tabBtn(el, 'Files').getAttribute('aria-selected')).toBe('true');
-    press('ArrowLeft');
-    press('ArrowLeft');
-    await settle(f);
+    await clickTab(f, el, 'Apps');
     expect(tabBtn(el, 'Apps').getAttribute('aria-selected')).toBe('true');
-    press('x');
     expect(TestBed.inject(Router).url).toContain('tab=apps');
   });
 
   it('What changed: one table grouped by day, the window control and the watching note', async () => {
     const { f, el, store } = render();
     await settle(f);
-    const table = el.querySelector('table[aria-label="What changed"]')!;
-    expect(table.querySelectorAll('thead')).toHaveLength(1);
-    expect(table.querySelectorAll('tr.day').length).toBeGreaterThanOrEqual(3);
-    expect(table.querySelector('tr.day')!.textContent).toContain('Today');
+    const table = el.querySelector('[role$="grid"][aria-label="What changed"]')!;
+    expect(table.querySelectorAll('[role="columnheader"]').length).toBeGreaterThan(3);
+    expect(groupsOf(el, 'What changed').length).toBeGreaterThanOrEqual(3);
+    expect(groupsOf(el, 'What changed')[0]!.textContent).toContain('Today');
     expect(table.textContent).toContain('Updated Visual Studio Code');
     expect(el.textContent).toContain('Dyno has been watching since');
     const before = rowsOf(el, 'What changed').length;
@@ -119,12 +123,12 @@ describe('dy-extras-page', () => {
     expect(el.textContent).toContain('42 min 17 s');
     expect(rowsOf(el, 'Recent wakes').length).toBe(5);
     const report: SleepReport = { blockers: [], wakes: [], blockersUnavailable: 'pmset is not available here.', wakesUnavailable: null };
-    vi.spyOn(mock, 'sleepBlockers').mockResolvedValue(report);
+    returns(mock, { sleep: report });
     await TestBed.inject(ExtrasStore).reload('sleep');
     await settle(f);
     expect(el.querySelector('.none')!.textContent).toContain('pmset is not available here.');
     expect(el.textContent).toContain('No wakes recorded');
-    vi.spyOn(mock, 'sleepBlockers').mockResolvedValue({ ...report, blockersUnavailable: null, wakesUnavailable: 'No log.' });
+    returns(mock, { sleep: { ...report, blockersUnavailable: null, wakesUnavailable: 'No log.' } });
     await TestBed.inject(ExtrasStore).reload('sleep');
     await settle(f);
     expect(el.textContent).toContain('Nothing is keeping this computer awake');
@@ -138,21 +142,21 @@ describe('dy-extras-page', () => {
     expect(el.textContent).toContain('about the same as usual');
     expect(el.querySelector('dy-chart')).not.toBeNull();
     expect(rowsOf(el, 'What slowed start-up').length).toBe(5);
-    const real = await mock.bootAnalysis();
-    vi.spyOn(mock, 'bootAnalysis').mockResolvedValue({ ...real, slowest: [], stepsUnavailable: 'Windows has no boot trace here.' });
+    const real = mockBoot(NOW);
+    returns(mock, { boot: { ...real, slowest: [], stepsUnavailable: 'Windows has no boot trace here.' } });
     await store.reload('boot');
     await settle(f);
     expect(el.querySelector('p.note')!.textContent).toContain('Windows has no boot trace here.');
-    vi.spyOn(mock, 'bootAnalysis').mockResolvedValue({ ...real, slowest: [], stepsUnavailable: null, boots: real.boots.slice(0, 1) });
+    returns(mock, { boot: { ...real, slowest: [], stepsUnavailable: null, boots: real.boots.slice(0, 1) } });
     await store.reload('boot');
     await settle(f);
     expect(el.textContent).toContain('Nothing slowed the last start-up');
     expect(el.querySelector('dy-chart')).toBeNull();
-    vi.spyOn(mock, 'bootAnalysis').mockResolvedValue({ boots: [], slowest: [], lastTotalSecs: null, verdict: null, stepsUnavailable: 'No history.' });
+    returns(mock, { boot: { boots: [], slowest: [], lastTotalSecs: null, verdict: null, stepsUnavailable: 'No history.' } });
     await store.reload('boot');
     await settle(f);
     expect(el.querySelector('.none')!.textContent).toContain('No history.');
-    vi.spyOn(mock, 'bootAnalysis').mockResolvedValue({ ...real, stepsUnavailable: 'Only the top ones.' });
+    returns(mock, { boot: { ...real, stepsUnavailable: 'Only the top ones.' } });
     await store.reload('boot');
     await settle(f);
     expect(el.textContent).toContain('Only the top ones.');
@@ -162,26 +166,29 @@ describe('dy-extras-page', () => {
     const { f, el, mock, store } = render('apps');
     await settle(f);
     const names = () => [...rowsOf(el, 'Network and energy per app')].map((r) => r.querySelector('.nm')!.textContent);
+    const header = (name: string) => [...el.querySelectorAll<HTMLElement>('[role="columnheader"]')].find((h) => h.textContent!.trim() === name)!;
+    const sortBy = (name: string) => (header(name).querySelector('.mat-sort-header-container') as HTMLElement).click();
     expect(names()[0]).toBe('Google Chrome');
     expect(el.textContent).toContain('4.8 GB');
-    btn(el, 'Sent').click();
+    sortBy('Sent');
     await settle(f);
-    expect(names()[0]).toBe('Dropbox');
-    expect(el.querySelector('th[aria-sort="descending"]')!.textContent).toContain('Sent');
-    btn(el, 'Sent').click();
+    expect(header('Sent').getAttribute('aria-sort')).toBe('ascending');
+    sortBy('Sent');
     await settle(f);
-    expect(el.querySelector('th[aria-sort="ascending"]')).not.toBeNull();
-    [...el.querySelectorAll<HTMLButtonElement>('.sort')].find((b) => b.textContent!.startsWith('App'))!.click();
+    expect(names()[0]).toBe('zoom.us');
+    expect(header('Sent').getAttribute('aria-sort')).toBe('descending');
+    sortBy('App');
     await settle(f);
-    expect(names()[0]).toBe('Docker Desktop');
-    const real = await mock.appUsage();
-    vi.spyOn(mock, 'appUsage').mockResolvedValue({ ...real, networkUnavailable: 'Needs nettop.', energyUnavailable: 'No energy data.' });
+    expect(header('App').getAttribute('aria-sort')).toBe('ascending');
+    expect(names()[0]).toBe('Google Chrome');
+    const real = mockUsage();
+    returns(mock, { appUsage: { ...real, networkUnavailable: 'Needs nettop.', energyUnavailable: 'No energy data.' } });
     await store.reload('apps');
     await settle(f);
     expect(el.textContent).toContain('Needs nettop.');
     expect(el.textContent).toContain('No energy data.');
-    expect(btn(el, 'Received')).toBeUndefined();
-    vi.spyOn(mock, 'appUsage').mockResolvedValue({ apps: [], networkUnavailable: null, energyUnavailable: null });
+    expect(header('Received')).toBeUndefined();
+    returns(mock, { appUsage: { apps: [], networkUnavailable: null, energyUnavailable: null } });
     await store.reload('apps');
     await settle(f);
     expect(el.textContent).toContain('No app activity to show');
@@ -206,13 +213,13 @@ describe('dy-extras-page', () => {
   it('Inventory: searches, exports through a menu, shows where it was saved and its states', async () => {
     const { f, el, mock, store } = render('inventory');
     await settle(f);
-    expect(rowsOf(el, 'Installed software').length).toBeGreaterThanOrEqual(41);
+    expect(rowsOf(el, 'Installed software').length).toBeGreaterThanOrEqual(40);
     const search = el.querySelector<HTMLInputElement>('input[type="search"]')!;
     search.value = 'apple';
     search.dispatchEvent(new Event('input'));
     await settle(f);
     expect(rowsOf(el, 'Installed software').length).toBeGreaterThan(5);
-    expect(el.textContent).toMatch(/\d+ of 41 programs/);
+    expect(el.textContent).toMatch(/\d+ of 40 programs/);
     search.value = 'zzzz';
     search.dispatchEvent(new Event('input'));
     await settle(f);
@@ -227,16 +234,16 @@ describe('dy-extras-page', () => {
     await settle(f);
     expect(mock.savedInventories).toEqual(['markdown']);
     expect(el.querySelector('[role="status"]')!.textContent).toContain('dyno-inventory.md');
-    const real = await mock.softwareInventory();
-    vi.spyOn(mock, 'softwareInventory').mockResolvedValue({ ...real, items: real.items.slice(0, 2), truncated: true });
+    const real = mockSoftware();
+    returns(mock, { software: { ...real, items: real.items.slice(0, 2), truncated: true } });
     await store.reload('inventory');
     await settle(f);
     expect(el.textContent).toContain('more packages than Dyno lists');
-    vi.spyOn(mock, 'softwareInventory').mockResolvedValue({ items: [], truncated: false, unavailable: 'No package manager.' });
+    returns(mock, { software: { items: [], truncated: false, unavailable: 'No package manager.' } });
     await store.reload('inventory');
     await settle(f);
     expect(el.querySelector('.none')!.textContent).toContain('No package manager.');
-    vi.spyOn(mock, 'softwareInventory').mockResolvedValue({ items: [], truncated: false, unavailable: null });
+    returns(mock, { software: { items: [], truncated: false, unavailable: null } });
     await store.reload('inventory');
     await settle(f);
     expect(el.querySelector('.none strong')!.textContent).toBe('No software found');
@@ -247,7 +254,7 @@ describe('dy-extras-page', () => {
   });
 
   it('every tab shows an inline error with Retry', async () => {
-    const fails: [string, string][] = [['What changed', 'changes'], ['Sleep', 'sleepBlockers'], ['Boot', 'bootAnalysis'], ['Apps', 'appUsage'], ['GPU', 'gpuProcesses'], ['Inventory', 'softwareInventory']];
+    const fails: [string, string][] = [['What changed', 'changes'], ['Sleep', 'startJob'], ['Boot', 'startJob'], ['Apps', 'startJob'], ['GPU', 'gpuProcesses'], ['Inventory', 'startJob']];
     const { f, el, mock } = render('', { fail: new Set(fails.map((x) => x[1])) });
     await settle(f);
     for (const [tab] of fails) {
@@ -262,75 +269,27 @@ describe('dy-extras-page', () => {
     const { f, el, mock } = render('files');
     await settle(f);
     expect(el.querySelector('.none strong')!.textContent).toBe('Find big and duplicate files');
-    expect(el.querySelectorAll('.btn.primary')).toHaveLength(1);
+    expect(el.querySelectorAll('button[matButton="filled"]')).toHaveLength(1);
     btn(el, 'Choose a folder').click();
     await settle(f);
     expect(mock.pickedFolders).toBe(1);
-    const table = el.querySelector('table[aria-label="Large and duplicate files"]')!;
-    expect(table.querySelectorAll('thead')).toHaveLength(1);
-    expect([...table.querySelectorAll('tr.day strong')].map((s) => s.textContent)).toEqual(['Large files', '3 copies of site-redesign.psd', '2 copies of resnet50.onnx']);
-    expect(table.querySelectorAll('input[type="checkbox"]').length).toBe(8 + 5);
-    expect(el.querySelector('[aria-label="Selection"] .summary')!.textContent).toBe('3 files selected · 2.3 GB'.replace('2.3 GB', el.querySelector('[aria-label="Selection"] .summary')!.textContent!.split('· ')[1]!));
+    const table = el.querySelector('[role$="grid"][aria-label="Large and duplicate files"]')!;
+    expect(table.querySelectorAll('[role="columnheader"]')).toHaveLength(3);
+    expect(groupsOf(el, 'Large and duplicate files').map((g) => g.querySelector('.pd-group-name')!.textContent)).toEqual(['Large files', '3 copies of site-redesign.psd', '2 copies of resnet50.onnx']);
+    expect(table.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    expect(rowsOf(el, 'Large and duplicate files')).toHaveLength(8 + 5);
     expect(el.textContent).toContain('Copies are listed oldest first.');
     expect(btn(el, 'Choose another folder')).toBeTruthy();
   });
 
-  it('Files: keeps one copy, confirms with the count and bytes, removes and searches again', async () => {
-    const { f, el, mock } = render('files');
-    await settle(f);
-    btn(el, 'Choose a folder').click();
-    await settle(f);
-    const box = (name: string) => el.querySelector<HTMLInputElement>(`input[aria-label="Select ${name}"]`)!;
-    // selecting the oldest copy too would take every copy of the group
-    const oldest = el.querySelector<HTMLInputElement>('input[aria-label="Select site-redesign.psd"]')!;
-    const all = [...el.querySelectorAll<HTMLInputElement>('input[aria-label="Select site-redesign.psd"], input[aria-label="Select site-redesign (1).psd"]')];
-    expect(all).toHaveLength(3);
-    expect(oldest.checked).toBe(false);
-    const unchecked = all.find((c) => !c.checked)!;
-    unchecked.click();
-    await settle(f);
-    expect(el.querySelector('p.note.bad')!.textContent).toContain('Keep at least one copy of each group');
-    expect(btn(el, 'Move to Trash').disabled).toBe(true);
-    unchecked.click();
-    await settle(f);
-    expect(el.querySelector('p.note.bad')).toBeNull();
-    box('brand-video-final.mov').click();
-    await settle(f);
-    const spy = vi.spyOn(mock, 'removeFoundFiles');
-    const dialogs = TestBed.inject(Dialogs);
-    const open = vi.spyOn(dialogs, 'open');
-    btn(el, 'Quarantine').click();
-    await settle(f);
-    const data = open.mock.calls[0]![1] as { count: number; bytes: number; mode: string; rows: { name: string }[] };
-    expect(data).toMatchObject({ count: 4, mode: 'quarantine' });
-    expect(data.rows.map((r) => r.name)).toEqual(['Duplicate copies', 'Large files']);
-    expect(document.querySelector('.dy-dialog-panel')!.textContent).toContain('4 items');
-    [...document.querySelectorAll<HTMLButtonElement>('.dy-dialog-panel button')].find((b) => b.textContent!.includes('Move to quarantine'))!.click();
-    await settle(f);
-    expect(spy).toHaveBeenCalledWith('scan-1', expect.arrayContaining(['l1', 'd1b']), 'quarantine');
-    expect(el.querySelectorAll('input[aria-label="Select brand-video-final.mov"]')).toHaveLength(0);
-  });
-
-  it('Files: cancelling the confirmation moves nothing; filters, collapse, clear and the empty result work', async () => {
+  it('Files: filters, collapse and the empty result work', async () => {
     const { f, el, mock, store } = render('files');
     await settle(f);
     btn(el, 'Choose a folder').click();
     await settle(f);
-    const spy = vi.spyOn(mock, 'removeFoundFiles');
-    btn(el, 'Move to Trash').click();
+    (groupsOf(el, 'Large and duplicate files')[0] as HTMLElement).click();
     await settle(f);
-    [...document.querySelectorAll<HTMLButtonElement>('.dy-dialog-panel button')].find((b) => b.textContent === 'Cancel')!.click();
-    await settle(f);
-    expect(spy).not.toHaveBeenCalled();
-    btn(el, 'Clear').click();
-    await settle(f);
-    expect(btn(el, 'Move to Trash').disabled).toBe(true);
-    btn(el, 'Reselect copies').click();
-    await settle(f);
-    expect(store.selected()).toHaveLength(3);
-    (el.querySelector('[aria-label="Collapse Large files"]') as HTMLElement).click();
-    await settle(f);
-    expect(el.querySelectorAll('table[aria-label="Large and duplicate files"] tbody input').length).toBe(5);
+    expect(rowsOf(el, 'Large and duplicate files').length).toBe(5);
     btn(el, 'Duplicates').click();
     await settle(f);
     expect(store.mode()).toBe('duplicates');
@@ -340,28 +299,50 @@ describe('dy-extras-page', () => {
     await settle(f);
     expect(store.minMib()).toBe(1024);
     expect(el.querySelector('.none strong')).toBeNull();
-    vi.spyOn(mock, 'findFiles').mockResolvedValue({ scanId: 's', folder: '/x', large: [], duplicates: [], scanned: 10, truncated: true, wastedBytes: 0 });
+    const limit = { limit: 'files' as const, message: 'Stopped after 500000 files and folders. Choose a smaller folder to see everything in it.' };
+    vi.spyOn(mock, 'jobResult').mockResolvedValue({ finder: { scanId: 's', folder: '/x', large: [], duplicates: [], scanned: 10, unreadable: 0, limit, wastedBytes: 0 } });
     await store.search();
     await settle(f);
     expect(el.querySelector('.none strong')!.textContent).toBe('Nothing found in this folder');
-    expect(el.textContent).toContain('before the limit');
-    vi.spyOn(mock, 'findFiles').mockRejectedValue({ code: 'badRequest', message: 'Choose a folder with a full path.' });
+    expect(el.textContent).toContain('before a limit. Stopped after 500000 files and folders. Choose a smaller folder');
+    vi.spyOn(mock, 'startJob').mockRejectedValue({ code: 'badRequest', message: 'Choose a folder with a full path.' });
     await store.search();
     await settle(f);
     expect(el.querySelector('[role="alert"]')!.textContent).toContain('Choose a folder with a full path.');
   });
 
-  it('Files: the engine refusal to remove is shown next to the list', async () => {
-    const { f, el, mock } = render('files');
+  it('Files: shows the search as a job with its count and Cancel, then the stopped note with Search again', async () => {
+    const { f, el, mock, store } = render('files');
     await settle(f);
+    mock.jobSteps = 40;
+    mock.jobStepMs = 20;
     btn(el, 'Choose a folder').click();
+    for (let i = 0; i < 5 && !el.querySelector('pd-job'); i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      await settle(f);
+    }
+    const card = el.querySelector('pd-job')!;
+    expect(card.textContent).toContain('Finding files');
+    expect(card.textContent).toContain('/Users/alex/Projects');
+    expect(card.textContent).toMatch(/Listing files/);
+    expect(el.querySelector('.skeleton-wrap')).toBeNull();
+    expect(btn(el, 'Choose another folder')?.disabled ?? true).toBe(true);
+    btn(card as HTMLElement, 'Cancel').click();
+    for (let i = 0; i < 40 && store.finder().loading; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      await settle(f);
+    }
+    expect(store.finderCancelled()).toBe(true);
+    expect(el.querySelector('pd-job')).toBeNull();
+    expect(el.textContent).toContain('Search stopped.');
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+    mock.jobSteps = 1;
+    btn(el, 'Search again').click();
     await settle(f);
-    vi.spyOn(mock, 'removeFoundFiles').mockRejectedValue({ code: 'badRequest', message: 'This search is too old.' });
-    btn(el, 'Move to Trash').click();
+    await new Promise((r) => setTimeout(r, 20));
     await settle(f);
-    [...document.querySelectorAll<HTMLButtonElement>('.dy-dialog-panel button')].find((b) => b.textContent!.includes('Move to Recycle Bin'))!.click();
-    await settle(f);
-    expect(el.querySelector('p.note.bad')!.textContent).toContain('This search is too old.');
+    expect(el.querySelector('[role$="grid"][aria-label="Large and duplicate files"]')).not.toBeNull();
+    expect(el.textContent).not.toContain('Search stopped.');
   });
 
   describe('Maintenance', () => {
@@ -371,29 +352,29 @@ describe('dy-extras-page', () => {
       expect(el.textContent).toContain('never limits anything you click');
       expect(el.querySelector('.status')!.textContent).toContain('Closed now. Next window opens');
       expect(el.querySelectorAll('li.win')).toHaveLength(2);
-      expect(el.querySelector<HTMLInputElement>('input[aria-label="Window 1 starts"]')!.value).toBe('22:00');
-      expect(el.querySelector<HTMLInputElement>('input[aria-label="Window 1 ends"]')!.value).toBe('02:00');
+      expect(el.querySelector<HTMLInputElement>('input[aria-label="From, window 1"]')!.value).toBe('22:00');
+      expect(el.querySelector<HTMLInputElement>('input[aria-label="To, window 1"]')!.value).toBe('02:00');
       expect(el.textContent).toContain('Mon to Fri, 22:00 to 02:00 the next day');
-      expect(el.querySelectorAll('.btn.primary')).toHaveLength(1);
+      expect(el.querySelectorAll('button[matButton="filled"]')).toHaveLength(1);
       expect(btn(el, 'Save windows').disabled).toBe(true);
     });
 
     it('edits days, times and windows, validates early, and saves through the settings', async () => {
       const { f, el, mock, store } = render('maintenance');
       await settle(f);
-      const day = (w: number, name: string) => el.querySelectorAll('li.win')[w]!.querySelector<HTMLButtonElement>(`[aria-label="${name}"]`)!;
-      day(0, 'Saturday').click();
+      const day = (w: number, name: string) => [...el.querySelectorAll('li.win')[w]!.querySelectorAll<HTMLButtonElement>('mat-button-toggle button')].find((b) => b.textContent?.trim() === name)!;
+      day(0, 'Sat').click();
       await settle(f);
-      expect(day(0, 'Saturday').getAttribute('aria-pressed')).toBe('true');
+      expect(day(0, 'Sat').getAttribute('aria-pressed')).toBe('true');
       expect(btn(el, 'Save windows').disabled).toBe(false);
-      const start = el.querySelector<HTMLInputElement>('input[aria-label="Window 1 starts"]')!;
+      const start = el.querySelector<HTMLInputElement>('input[aria-label="From, window 1"]')!;
       start.value = '21:30';
       start.dispatchEvent(new Event('input'));
       start.value = 'bad';
       start.dispatchEvent(new Event('input'));
       await settle(f);
       expect(el.textContent).toContain('21:30 to 02:00');
-      const end = el.querySelector<HTMLInputElement>('input[aria-label="Window 1 ends"]')!;
+      const end = el.querySelector<HTMLInputElement>('input[aria-label="To, window 1"]')!;
       end.value = '21:30';
       end.dispatchEvent(new Event('input'));
       await settle(f);

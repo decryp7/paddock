@@ -85,6 +85,30 @@ impl Os {
     }
 }
 
+/// On macOS the app's bundle registers the agent itself (`SMAppService`, the plist inside the bundle) under the same
+/// launchd label as [`Service`] writes: the CLI's `install` would add a second plist, `uninstall` would boot out the real
+/// agent and `status` would report "not installed". A `dyno-agent` running from inside a `.app` therefore refuses every
+/// `service` subcommand with the way to manage it instead. Other OSes and a `dyno-agent` outside a bundle are not affected.
+pub fn refuse_inside_app_bundle(os: Os, exe: &Path) -> Result<(), String> {
+    if os != Os::Mac {
+        return Ok(());
+    }
+    // `<name>.app/Contents/MacOS/<program>`: the program inside a bundle, not any folder that happens to end in `.app`.
+    let parts: Vec<&str> = exe.components().filter_map(|c| c.as_os_str().to_str()).collect();
+    let in_bundle = parts
+        .windows(4)
+        .any(|w| w[0].len() > 4 && w[0].ends_with(".app") && w[1] == "Contents" && w[2] == "MacOS" && !w[3].is_empty());
+    if in_bundle {
+        return Err(
+            "this dyno-agent is part of the Dyno app, which registers it with macOS itself under the same label \
+             (System Settings > General > Login Items, or Dyno's Settings > Launch at login); `service` commands would \
+             conflict with that registration, so they are not available here"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 impl Service {
     /// The service for the current user and OS, pointing at `exe`.
     pub fn for_current_user(exe: PathBuf) -> Result<Service, String> {
@@ -225,6 +249,21 @@ impl Service {
                 },
                 _ => Status::NotInstalled,
             },
+        }
+    }
+
+    /// Whether the OS service manager starts the agent now and restarts it when it exits, so nobody else may run one
+    /// beside it: a bootstrapped launch agent (`KeepAlive`), a systemd user unit that is active or restarting
+    /// (`Restart=always`; `is-active` says `activating` during `RestartSec`, and exits non-zero then). An enabled but
+    /// stopped or failed unit starts nothing now. A Windows `Run` entry starts it only at the next logon: never.
+    pub fn supervised(&mut self) -> bool {
+        match self.os {
+            Os::Mac => self.plist_path().exists(),
+            Os::Linux => self
+                .runner
+                .run("systemctl", &["--user", "is-active", "dyno-agent.service"])
+                .is_ok_and(|(_, out)| matches!(out.trim(), "active" | "activating")),
+            Os::Windows => false,
         }
     }
 

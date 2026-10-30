@@ -1,10 +1,13 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { MatButton } from '@angular/material/button';
+import { PdCell, PdTable, type PdColumn, type PdSort } from '@decryp7/paddock-ui/table';
 import type { ThrottleEpisode } from '../../core/api.types';
+import { FullTextTip } from '../../shared/full-text-tip';
 import { AsyncState } from '../../shared/async-state';
 import { formatDuration, formatStamp } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { ThrottleStore } from '../../state/throttle.store';
-import { CAUSE_LABEL, CAUSE_TONE, type SortDirection, confidenceText, episodeSeconds, sortEpisodes, verdictTone } from './throttling-model';
+import { CAUSE_LABEL, CAUSE_TONE, confidenceText, episodeSeconds, verdictTone } from './throttling-model';
 
 /**
  * Throttling: whether the CPU is running slower than it should and why. One reading now (words, confidence and the numbers
@@ -13,7 +16,7 @@ import { CAUSE_LABEL, CAUSE_TONE, type SortDirection, confidenceText, episodeSec
  */
 @Component({
   selector: 'dy-throttling-page',
-  imports: [AsyncState, Icon],
+  imports: [FullTextTip, MatButton, AsyncState, Icon, PdTable, PdCell],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -55,33 +58,9 @@ import { CAUSE_LABEL, CAUSE_TONE, type SortDirection, confidenceText, episodeSec
               </div>
               @if (d.episodes.length) {
                 <div class="scroll">
-                  <table class="table">
-                    <caption class="visually-hidden">Times the CPU was slowed down in the last 30 days</caption>
-                    <thead>
-                      <tr>
-                        <th scope="col" [attr.aria-sort]="direction() === 'desc' ? 'descending' : 'ascending'">
-                          <button type="button" class="sort" [attr.aria-label]="'Started, sorted ' + (direction() === 'desc' ? 'newest first' : 'oldest first') + '. Change order'" (click)="flip()">
-                            Started <dy-icon name="chevron-down" [class.up]="direction() === 'asc'" />
-                          </button>
-                        </th>
-                        <th scope="col" class="r">Duration</th>
-                        <th scope="col">Cause</th>
-                        <th scope="col" class="r">Speed lost, average (%)</th>
-                        <th scope="col" class="r">Peak temperature (°C)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (e of rows(); track e.id) {
-                        <tr>
-                          <td class="num">{{ stamp(e.start) }}</td>
-                          <td class="r">{{ duration(e) }}</td>
-                          <td><span class="dot" [attr.data-tone]="causeTone[e.cause]" aria-hidden="true"></span> {{ causeLabel[e.cause] }}</td>
-                          <td class="r">{{ e.avgLostPercent }}</td>
-                          <td class="r">{{ e.peakTemperatureC === null ? '—' : e.peakTemperatureC }}</td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
+                  <pd-table [toolbar]="false" label="Times the CPU was slowed down in the last 30 days" [rows]="d.episodes" [columns]="columns" [rowKey]="rowKey" [filterable]="false" [maxHeight]="420" [(sort)]="sort">
+                    <ng-template pdCell="cause" let-e><span class="dot" [attr.data-tone]="causeToneOf(e)" aria-hidden="true"></span><span class="ell" [dyFullText]="causeLabelOf(e)">{{ causeLabelOf(e) }}</span></ng-template>
+                  </pd-table>
                 </div>
               } @else {
                 <div class="empty">
@@ -93,7 +72,7 @@ import { CAUSE_LABEL, CAUSE_TONE, type SortDirection, confidenceText, episodeSec
             </section>
 
             <section class="inputs" aria-label="What Dyno can see on this machine">
-              <button type="button" class="btn sm ghost" [attr.aria-expanded]="inputsOpen()" aria-controls="throttle-inputs" (click)="userOpen.set(!inputsOpen())">
+              <button type="button" matButton="text" [attr.aria-expanded]="inputsOpen()" aria-controls="throttle-inputs" (click)="userOpen.set(!inputsOpen())">
                 <dy-icon [name]="inputsOpen() ? 'chevron-down' : 'chevron-right'" /> What Dyno can see on this machine
               </button>
               @if (inputsOpen()) {
@@ -130,12 +109,13 @@ import { CAUSE_LABEL, CAUSE_TONE, type SortDirection, confidenceText, episodeSec
     .kv dt { color: var(--text-3); font-size: var(--fs-sm); }
     .kv dd { margin: 2px 0 0; font-weight: var(--fw-medium); }
     .card-head .summary { margin-left: auto; color: var(--text-3); font-size: var(--fs-sm); }
-    .scroll { max-height: 420px; overflow: auto; }
-    .table th .sort { display: inline-flex; align-items: center; gap: var(--sp-1); padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: default; }
-    .table th .sort:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
-    .table th .sort dy-icon { --icon-size: 14px; }
-    .table th .sort dy-icon.up { transform: rotate(180deg); }
-    .table td .dot { margin-right: var(--sp-1); }
+    .scroll { margin: 0 var(--sp-4) var(--sp-3); }
+    .ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: var(--sp-2); background: var(--border-strong); flex: none; }
+    .dot[data-tone='ok'] { background: var(--ok); }
+    .dot[data-tone='warn'] { background: var(--warn); }
+    .dot[data-tone='bad'] { background: var(--bad); }
+    .dot[data-tone='info'] { background: var(--info); }
     .empty { display: grid; justify-items: center; gap: var(--sp-1); padding: var(--sp-8) var(--sp-4); text-align: center; color: var(--text-2); }
     .empty dy-icon { --icon-size: 32px; color: var(--text-3); margin-bottom: var(--sp-1); }
     .empty strong { color: var(--text-1); font-size: 15px; font-weight: var(--fw-semibold); }
@@ -154,7 +134,16 @@ export class ThrottlingPage implements OnInit, OnDestroy {
   protected readonly overview = this.store.overview;
   protected readonly causeLabel = CAUSE_LABEL;
   protected readonly causeTone = CAUSE_TONE;
-  protected readonly direction = signal<SortDirection>('desc');
+  /** The episodes arrive newest first; the table sorts them (Started, newest first, until the person chooses another order). */
+  protected readonly sort = signal<PdSort | null>({ key: 'start', direction: 'desc' });
+  protected readonly rowKey = (e: ThrottleEpisode): string => e.id;
+  protected readonly columns: PdColumn<ThrottleEpisode>[] = [
+    { key: 'start', header: 'Started', value: (e) => e.start, text: (e) => this.stamp(e.start), width: '150px' },
+    { key: 'duration', header: 'Duration', value: (e) => episodeSeconds(e, this.overview()?.at ?? e.start), text: (e) => this.duration(e), align: 'end', width: '80px' },
+    { key: 'cause', header: 'Cause', value: (e) => this.causeLabelOf(e), width: 'minmax(120px, 1fr)' },
+    { key: 'lost', header: 'Speed lost, average (%)', value: (e) => e.avgLostPercent, align: 'end', width: '168px' },
+    { key: 'peak', header: 'Peak temperature (°C)', value: (e) => e.peakTemperatureC, text: (e) => (e.peakTemperatureC === null ? '—' : String(e.peakTemperatureC)), align: 'end', width: '168px' },
+  ];
   protected readonly userOpen = signal<boolean | null>(null);
 
   protected readonly tone = computed(() => {
@@ -162,7 +151,6 @@ export class ThrottlingPage implements OnInit, OnDestroy {
     return d ? verdictTone(d.reading.verdict) : 'muted';
   });
   protected readonly confidence = computed(() => confidenceText(this.overview()?.reading.confidence ?? 'low'));
-  protected readonly rows = computed(() => sortEpisodes(this.overview()?.episodes ?? [], this.direction()));
   protected readonly summary = computed(() => `${formatDuration((this.overview()?.minutes30d ?? 0) * 60)} throttled in the last 30 days`);
   /** The list of what the machine reports is open on its own when Dyno cannot tell, and stays as the user left it otherwise. */
   protected readonly inputsOpen = computed(() => this.userOpen() ?? this.overview()?.reading.verdict === 'cannotTell');
@@ -175,10 +163,8 @@ export class ThrottlingPage implements OnInit, OnDestroy {
     this.store.stop();
   }
 
-  protected flip(): void {
-    this.direction.update((d) => (d === 'desc' ? 'asc' : 'desc'));
-  }
-
+  protected causeToneOf = (e: ThrottleEpisode) => CAUSE_TONE[e.cause];
+  protected causeLabelOf = (e: ThrottleEpisode) => CAUSE_LABEL[e.cause];
   protected stamp = (at: number): string => formatStamp(at, this.overview()?.at ?? at);
   protected duration = (e: ThrottleEpisode): string => formatDuration(episodeSeconds(e, this.overview()?.at ?? e.start));
 }

@@ -36,7 +36,7 @@ async function open() {
 describe('dy-why-slow-page', () => {
   it('runs the check when it opens and shows the headline, the cause, what was measured and the apps involved', async () => {
     const { el } = await open();
-    expect(el.querySelector('h1')?.textContent).toBe('Why is my PC slow?');
+    expect(el.querySelector('h1')?.textContent).toBe('Why is my computer slow?');
     expect(el.querySelector('.headline')?.textContent).toContain('Rust build');
     expect(el.querySelector('.when')?.textContent).toContain('Measured over the last 55 s');
     const cause = el.querySelector('.cause')!;
@@ -49,8 +49,10 @@ describe('dy-why-slow-page', () => {
 
   it('links each cause to the pages that help to look closer', async () => {
     const { el } = await open();
-    const hrefs = [...el.querySelectorAll('.cause')[0]!.querySelectorAll('a')].map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual(['/processes', '/recorder']);
+    const hrefs = [...el.querySelectorAll('.cause')[0]!.querySelectorAll('a[matButton="text"]')].map((a) => a.getAttribute('href'));
+    // The Processes page is the hint button's ("Open Processes"), so it is not offered a second time.
+    expect(hrefs).toEqual(['/recorder']);
+    expect([...el.querySelectorAll('.cause')[0]!.querySelectorAll('a[matButton="outlined"]')].map((a) => a.getAttribute('href'))).toContain('/processes');
   });
 
   it('runs again on the button and grows the history', async () => {
@@ -90,41 +92,18 @@ describe('dy-why-slow-page', () => {
     btn(el, 'Copy as text').click();
     await settle(f);
     expect(writeText.mock.calls[0]![0]).toContain('Rust build');
-    expect(TestBed.inject(Notifier).toasts().at(-1)?.text).toBe('Copied the diagnosis');
+    expect(TestBed.inject(Notifier).recent().at(-1)?.text).toBe('Copied the diagnosis');
     writeText.mockRejectedValue(new Error('denied'));
     btn(el, 'Copy as text').click();
     await settle(f);
-    expect(TestBed.inject(Notifier).toasts().at(-1)?.text).toContain('clipboard');
+    expect(TestBed.inject(Notifier).recent().at(-1)?.text).toContain('clipboard');
   });
 
-  it('changes nothing until the preview is confirmed', async () => {
-    const { f, el, mock } = await open();
-    const act = vi.spyOn(mock, 'act').mockResolvedValue({ id: 'e', title: 'Lowered', undo: 'notUndoable' } as never);
-    btn(el, 'Lower the build').click();
-    await settle(f);
-    expect(document.body.textContent).toContain('Change: Priority: Below normal');
-    expect(act).not.toHaveBeenCalled();
-    [...document.querySelectorAll<HTMLButtonElement>('.dy-dialog-panel button')].find((b) => b.textContent?.trim() === 'Cancel')!.click();
-    await settle(f);
-    expect(act).not.toHaveBeenCalled();
-    btn(el, 'Lower the build').click();
-    await settle(f);
-    [...document.querySelectorAll<HTMLButtonElement>('.dy-dialog-panel button')].find((b) => b.textContent?.includes('Lower the build'))!.click();
-    await settle(f);
-    expect(act).toHaveBeenCalledTimes(1);
-    expect(TestBed.inject(Notifier).toasts().at(-1)?.text).toBe('Lowered');
-  });
-
-  it('routes fixes that open a screen and says waiting is enough', async () => {
-    const { f, el, nav } = await open();
-    btn(el, 'Open the task manager').click();
-    expect(nav).toHaveBeenCalledWith('/processes');
-    expect(el.querySelector('.wait')?.textContent).toContain('waiting is enough');
-    btn(el, 'See tuning suggestions').click();
-    expect(nav).toHaveBeenCalledWith('/health');
-    btn(el, 'Free up space').click();
-    await settle(f);
-    expect(document.body.textContent).toContain('Not built yet');
+  it('links the hints that open a screen and shows the others as words', async () => {
+    const { el } = await open();
+    expect(el.querySelector('a[matButton="outlined"][href="/processes"]')?.textContent).toContain('Open Processes');
+    expect(el.querySelector('.wait')?.textContent).toContain('Wait for the build');
+    expect(el.querySelector('a[href="/health"]')).not.toBeNull();
   });
 
   it('shows the error inline with Retry, and the idle text before the first result', async () => {
@@ -142,17 +121,4 @@ describe('dy-why-slow-page', () => {
     expect(TestBed.inject(DiagnosisStore).error()).toBeNull();
   });
 
-  it('the restart suggestion only explains that Dyno never restarts the PC', async () => {
-    const { mock } = setup();
-    vi.spyOn(mock, 'whySlow').mockResolvedValue({
-      ...diag('Restart', NOW),
-      causes: [{ kind: 'osUpdate', title: 'Updates', explanation: '', confidence: 0.5, evidence: [], involved: [], suggestions: [{ label: 'Restart later', action: 'restart' }] }],
-    });
-    const f = TestBed.createComponent(WhySlowPage);
-    f.detectChanges();
-    await settle(f);
-    btn(f.nativeElement as HTMLElement, 'Restart later').click();
-    await settle(f);
-    expect(TestBed.inject(Notifier).toasts().at(-1)?.text).toContain('never restarts');
-  });
 });

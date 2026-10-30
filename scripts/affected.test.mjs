@@ -1,11 +1,29 @@
 // Tests of scripts/affected.mjs (ADR 0014 §6): the rules on this tree's real graph, the pure parts (lock diff, base choice,
 // matrix legs) and the contracts the script relies on (doc inputs, app CI files, CODEOWNERS, Renovate).
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join, posix } from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, commitLintRange, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+
+/**
+ * A paddock.ci.json process pattern as host-cleanup runs it: {tmp}, {build} and {slot} filled in by the real
+ * conformance/ci/job-isolation.sh for a sample job (its own runner folder 0123456789abcdef, slot s1, build folder
+ * target-<app>-app-s1), as a RegExp; null when the script refuses it (not anchored on a folder of the job).
+ */
+const JOB = { tmp: '/Users/x/gitea-runner/work/0123456789abcdef/tmp', ci: '/Users/x/.paddock-ci', slot: 's1' };
+function scoped(pat, app, os = 'macOS') {
+  const win = os === 'Windows';
+  const r = spawnSync('bash', [join(ROOT, 'conformance', 'ci', 'job-isolation.sh'), 'pattern', pat], {
+    env: { PATH: '/usr/bin:/bin', RUNNER_OS: os, PADDOCK_CI_SLOT: JOB.slot, PADDOCK_JOB_TEMP: (win ? 'C:' : '') + JOB.tmp, PADDOCK_BUILD_FOLDER: `${win ? 'C:' : ''}${JOB.ci}/target-${app}-app-${JOB.slot}` },
+    encoding: 'utf8',
+  });
+  return r.status === 0 ? new RegExp(r.stdout.trim()) : null;
+}
+/** Every pattern of an app, for macOS and Windows command lines. */
+const scopedAll = (app, pats) => pats.flatMap((p) => [scoped(p, app), scoped(p, app, 'Windows')]);
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
@@ -18,8 +36,9 @@ describe('the graph of this tree', () => {
   test('a shared crate marks crates and every app whose Cargo graph reaches it, Rust half only', () => {
     const r = run('crates/paddock-jobs/src/lib.rs');
     assert.ok(r.crates && !r.ui);
-    // Debrief's store worker depends on paddock-proc by path (the macOS memory footprint), so the shared crates reach Debrief too.
-    assert.deepEqual(r.apps, ['debrief', 'shell-demo', 'workbench-demo']);
+    // Debrief's store worker and Spotter's renderer depend on paddock-proc by path (the memory figure and the supervised child),
+    // so the shared crates reach Debrief and Spotter too; Dyno takes the shell crates by path.
+    assert.deepEqual(r.apps, ['debrief', 'dyno', 'shell-demo', 'spotter', 'workbench-demo']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust']);
     assert.deepEqual(r.kinds.debrief, ['rust']);
     assert.ok(r.packages.crates.includes('paddock-jobs'));
@@ -40,14 +59,44 @@ describe('the graph of this tree', () => {
     assert.deepEqual(r.packages['apps/shell-demo/src-tauri'], ['paddock-shell-demo', 'shell-demo-agent']);
   });
 
+  test('the e2e port and build guard (imported by relative path by every app config) mark the UI half of every app', () => {
+    for (const f of ['ui/projects/paddock-e2e/src/env.ts', 'ui/projects/paddock-e2e/src/build-guard.ts']) {
+      const r = run(f);
+      for (const a of APPS) assert.ok(r.apps.includes(a), `${f} reaches ${a}`);
+    }
+  });
+
   // Paddock 234f6911: a ui/ shell change broke the shell demo job, which has no npm or Cargo edge to ui/ (spike §2).
   test('a ui change marks the Tauri shells that embed a ui build (frontendDist), both halves', () => {
     const r = run('ui/projects/paddock-ui/shell/src/public-api.ts');
     assert.ok(r.ui);
-    // Spotter maps @decryp7/paddock-ui to ui/dist in its tsconfig (a path edge, no npm edge).
-    assert.deepEqual(r.apps, ['shell-demo', 'spotter', 'workbench-demo']);
+    // Spotter and Dyno map @decryp7/paddock-ui to ui/dist in their tsconfig (a path edge, no npm edge).
+    assert.deepEqual(r.apps, ['dyno', 'shell-demo', 'spotter', 'workbench-demo']);
     assert.deepEqual(r.kinds.spotter, ['ui']);
+    assert.deepEqual(r.kinds.dyno, ['ui']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust', 'ui']);
+  });
+
+  test('a generated ui file marks the crate that checks it, so a stale one fails on the branch', () => {
+    const r = run('ui/projects/paddock-ui/shell/generated/dialogs.ts');
+    assert.ok(r.crates && r.ui);
+    assert.ok(r.packages.crates.includes('paddock-dialogs'));
+    // A generated file no crate names marks every crate of the workspace (fail safe).
+    const unknown = run('ui/projects/paddock-ui/shell/generated/no-such-file.json');
+    assert.ok(unknown.crates);
+    assert.ok(unknown.packages.crates.length > 5);
+    // Other files in ui/ (not generated) do not mark crates.
+    assert.ok(!run('ui/projects/paddock-ui/shell/src/public-api.ts').crates);
+  });
+
+  test("an app's Cargo.toml and capabilities run conformance (C48 reads them), other app files do not", () => {
+    for (const f of ['apps/shell-demo/src-tauri/capabilities/dialog.json', 'apps/shell-demo/src-tauri/Cargo.toml', 'apps/debrief/app/src-tauri/capabilities/dialog.json']) {
+      const r = run(f);
+      assert.ok(r.conformance, f);
+      assert.deepEqual(r.apps, [f.split('/')[1]], f);
+    }
+    assert.ok(!run('apps/shell-demo/src-tauri/src/lib.rs').conformance);
+    assert.ok(!run('apps/shell-demo/README.md').conformance);
   });
 
   test("ui's ESLint config reaches ../eslint, so a preset change runs ui's lint", () => {
@@ -65,7 +114,7 @@ describe('the graph of this tree', () => {
   });
 
   test('global inputs mark everything; an app release workflow marks one app', () => {
-    for (const f of ['.gitea/workflows/ci.yml', '.gitea/actions/setup-rust/action.yml', 'package.json', '.cargo/config.toml', 'scripts/affected.mjs', 'conformance/release/latest-json.mjs']) {
+    for (const f of ['rust-toolchain.toml', 'package.json', '.npmrc', 'tsconfig/base.json']) {
       const r = run(f);
       assert.ok(r.all && r.crates && r.ui && r.eslint && r.conformance && r.tools, f);
       assert.deepEqual(r.apps, APPS, f);
@@ -94,12 +143,329 @@ describe('the graph of this tree', () => {
     assert.deepEqual([i.ciImage, i.ui, i.apps], [true, true, []]);
   });
 
+  test('the developer tool is its own project: its folder and the ./dev wrapper mark it, and the shared crates it uses reach it', () => {
+    const own = run('tools/paddock-dev/src/lib.rs');
+    assert.deepEqual([own.paddockDev, own.tools, own.crates, own.apps], [true, false, false, []]);
+    for (const f of ['dev', 'dev.cmd']) assert.deepEqual([run(f).paddockDev, run(f).all], [true, false], f);
+    assert.ok(run('crates/paddock-slots/src/lib.rs').paddockDev, 'a path dependency of the tool reaches it');
+    assert.ok(run('crates/paddock-cli/src/lib.rs').paddockDev);
+    assert.ok(run('.cargo/config.toml').paddockDev, 'global inputs reach it');
+    assert.equal(run('tools/bootstrap.sh').paddockDev, false);
+  });
+
   test('every project of a changed file is in the plan, and no app outside apps/ appears', () => {
     for (const f of tracked) {
       const own = owners(f);
       if (!own) continue;
       const r = run(f);
       for (const a of r.apps) assert.ok(graph.apps.has(a), `${f} names unknown app ${a}`);
+    }
+  });
+});
+
+// Synthetic .gitea trees: the per-job diff of ci.yml and the users of an action, without touching the real workflows.
+const CI = (conf = 'node a', app = 'node b') => `name: ci
+on:
+  push:
+jobs:
+  plan:
+    steps:
+      - uses: ./.gitea/actions/plan-only
+  ui:
+    steps:
+      - uses: ./.gitea/actions/node-caches
+  conformance: # the checks
+    steps:
+      - run: ${conf}
+  app:
+    steps:
+      - run: ${app}
+      - uses: ./.gitea/actions/app-gates
+  crates:
+    steps:
+      - uses: ./.gitea/actions/build-folder
+      - uses: ./.gitea/actions/install-test-browser
+`;
+const giteaOf = (before, after, dirty = null) => {
+  const trees = { before, after: { ...before, ...after } };
+  return {
+    appNames: APPS,
+    files: () => Object.keys(trees.after),
+    dirty,
+    scripts: () => Object.keys(trees.after).filter((f) => /^conformance\/.*\.(mjs|sh)$/.test(f)),
+    before: (f) => trees.before[f] ?? null,
+    after: (f) => trees.after[f] ?? null,
+  };
+};
+const ACTIONS = {
+  '.gitea/actions/plan-only/action.yml': 'runs: x',
+  '.gitea/actions/node-caches/action.yml': 'runs: x',
+  '.gitea/actions/app-gates/action.yml': 'runs: y',
+  '.gitea/actions/build-folder/action.yml': 'run: bash "${{ github.action_path }}/../../../conformance/ci/build-folder.sh"',
+  '.gitea/actions/install-test-browser/action.yml': 'run: node "${{ github.action_path }}/../../../conformance/ci/install-test-browser.mjs"',
+  '.gitea/actions/README.md': '- uses: decryp7/paddock/.gitea/actions/node-caches@v0.3.0 and .gitea/actions/unused',
+  '.gitea/actions/unused/action.yml': 'runs: u',
+  '.gitea/actions/only-commented/action.yml': 'runs: c',
+  'conformance/ci/install-test-browser.mjs': "import { entryFor } from './runtime-catalogue.mjs';\nimport { isMain } from '../src/util/is-main.mjs';",
+  'conformance/ci/runtime-catalogue.mjs': 'export const entryFor = 1;',
+  'conformance/src/util/is-main.mjs': 'export const isMain = 1;',
+  'conformance/ci/unrelated.mjs': 'export const x = 1;',
+  '.gitea/actions/nested/action.yml': 'steps:\n  - uses: ./.paddock/.gitea/actions/build-folder',
+};
+const BASE_TREE = {
+  '.gitea/workflows/ci.yml': CI(),
+  '.gitea/workflows/dyno.yml': 'jobs:\n  gates:\n    steps:\n      - uses: ./.gitea/actions/node-caches\n',
+  '.gitea/workflows/nightly.yml': 'jobs:\n  night:\n    steps:\n      - uses: ./.gitea/actions/nightly-only\n',
+  '.gitea/actions/nightly-only/action.yml': 'runs: n',
+  ...ACTIONS,
+};
+const runGitea = (files, gitea) => affected(files, graph, { gitea });
+const CARGO_APPS = APPS.filter((a) => graph.apps.get(a).cargo);
+const CI_FILE = '.gitea/workflows/ci.yml';
+
+describe('.gitea changes are narrowed to the jobs they reach', () => {
+  test('a change to the planner and its tests marks tools, ui and paddock-dev (its golden test), never an app', () => {
+    for (const f of ['scripts/affected.test.mjs', 'scripts/affected.mjs']) {
+      const r = run(f);
+      assert.deepEqual([r.all, r.apps, r.crates, r.tools, r.ui, r.paddockDev], [false, [], false, true, true, true], f);
+    }
+  });
+
+  test('a ci.yml change to one job marks that job only; a change to the app job marks the app legs', () => {
+    const r = runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: CI('node a --only C06') }));
+    assert.deepEqual([r.all, r.conformance, r.crates, r.ui, r.tools, r.apps], [false, true, false, false, false, []]);
+    const a = runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: CI('node a', 'node c') }));
+    assert.deepEqual([a.all, a.crates, a.apps], [false, false, APPS]);
+  });
+
+  test('a change to the plan job marks everything: it wires every other job', () => {
+    const r = runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: CI().replace('plan-only', 'plan-only2') }));
+    assert.ok(r.all && r.crates && r.ui);
+    assert.deepEqual(r.apps, APPS);
+  });
+
+  test('a ci.yml change outside the jobs (the header), an unknown job or text that is not a workflow marks everything', () => {
+    const hdr = CI().replace('  push:', '  pull_request:');
+    assert.ok(runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: hdr })).all);
+    assert.ok(runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: `${CI()}  brand-new:\n    steps: []\n` })).all);
+    assert.ok(runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: 'this: [is, not\n  a workflow' })).all);
+    // No way to read the revisions at all (no gitea reader): everything.
+    assert.ok(affected([CI_FILE], graph).all);
+    assert.equal(changedJobs(CI(), 'jobs:\nx: 1'), null);
+    // Identical revisions (a change nobody can see): everything.
+    assert.ok(runGitea([CI_FILE], giteaOf(BASE_TREE, {})).all);
+  });
+
+  test('a job split that could hide a job is refused: a comment after a key, odd two-space lines, anchors and aliases', () => {
+    const base = CI();
+    // The key with a trailing comment starts its own job (the edit below must not be attributed to the job before it).
+    const r = runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: base.replace('node a', 'node a2') }));
+    assert.deepEqual([r.all, r.conformance, r.ui, r.crates], [false, true, false, false]);
+    for (const bad of [`${base}  "quoted": {}\n`, `${base}  crates2: { runs-on: x }\n`, `${base}anchors:\n  x: &rs 1\n`, base.replace('node b', 'node *rs'), base.replace('steps:\n      - uses: ./.gitea/actions/build-folder', 'steps: &rs\n      - uses: ./.gitea/actions/build-folder')]) {
+      assert.equal(changedJobs(base, bad), null, bad);
+      assert.ok(runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: bad })).all, bad);
+    }
+    assert.deepEqual(changedJobs(base, base.replace('  conformance: # the checks', '  conformance: # checks')), []); // only a comment on a key line
+  });
+
+  test('an action change marks only the ci.yml jobs and app workflows that use it, through nested actions and a .paddock prefix', () => {
+    const g = giteaOf(BASE_TREE, {});
+    const ui = runGitea(['.gitea/actions/node-caches/action.yml'], g);
+    assert.deepEqual([ui.all, ui.ui, ui.crates, ui.apps], [false, true, false, ['dyno']]);
+    const gates = runGitea(['.gitea/actions/app-gates/action.yml'], g);
+    assert.deepEqual([gates.all, gates.crates, gates.apps], [false, false, APPS]);
+    const bf = runGitea(['.gitea/actions/build-folder/action.yml'], g);
+    assert.deepEqual([bf.all, bf.crates, bf.ui, bf.apps], [false, true, false, []]);
+    // An action nobody uses cannot be traced (external consumers are possible): everything.
+    assert.ok(runGitea(['.gitea/actions/nested/action.yml'], g).all);
+    // A README that mentions an action is no use of it: the unused action stays unused (everything), node-caches keeps its users.
+    assert.ok(runGitea(['.gitea/actions/unused/action.yml'], g).all);
+    const nc = runGitea(['.gitea/actions/node-caches/action.yml'], g);
+    assert.deepEqual([nc.all, nc.ui], [false, true]);
+    const viaPrefix = runGitea(['.gitea/actions/build-folder/action.yml'], giteaOf(BASE_TREE, {}));
+    assert.ok(viaPrefix.crates);
+    // An action only the nightly runs is reported as such and marks tools.
+    const night = affected(['.gitea/actions/nightly-only/action.yml'], graph, { gitea: g, explain: true });
+    assert.deepEqual([night.all, night.tools, night.apps], [false, true, []]);
+    assert.ok(night.why.tools.some((w) => /not a pull request/.test(w)));
+  });
+
+  test('a script of conformance/ci or conformance/release also marks the jobs of the actions that run it', () => {
+    const g = giteaOf(BASE_TREE, {});
+    const r = runGitea(['conformance/ci/build-folder.sh'], g);
+    assert.deepEqual([r.all, r.crates, r.conformance, r.ui, r.eslint, r.apps], [false, true, true, false, false, APPS]);
+    const other = runGitea(['conformance/release/latest-json.mjs'], g);
+    assert.deepEqual([other.all, other.crates, other.ui], [false, false, false]);
+    assert.deepEqual(other.apps, APPS);
+    // Without a reader for the .gitea files the script cannot be traced: everything.
+    assert.ok(affected(['conformance/ci/build-folder.sh'], graph).all);
+  });
+
+  test('a script is traced through the scripts that import it, transitively (helpers in conformance/src/util too)', () => {
+    const g = giteaOf(BASE_TREE, {});
+    for (const f of ['conformance/ci/runtime-catalogue.mjs', 'conformance/src/util/is-main.mjs', 'conformance/ci/install-test-browser.mjs']) {
+      const r = runGitea([f], g);
+      assert.deepEqual([r.all, r.crates, r.ui], [false, true, false], f);
+    }
+    assert.deepEqual(runGitea(['conformance/ci/unrelated.mjs'], g).crates, false);
+  });
+
+  test('importer tracing is transitive: a imports b imports c, a change to c reaches the action that runs a', () => {
+    const tree = {
+      ...BASE_TREE,
+      '.gitea/actions/chain/action.yml': 'run: node conformance/ci/chain-a.mjs',
+      '.gitea/workflows/ci.yml': CI().replace('install-test-browser', 'chain'),
+      'conformance/ci/chain-a.mjs': "import './chain-b.mjs';",
+      'conformance/ci/chain-b.mjs': "import { c } from './chain-c.mjs';",
+      'conformance/ci/chain-c.mjs': 'export const c = 1;',
+    };
+    const g = giteaOf(tree, {});
+    assert.deepEqual(scriptImporters('conformance/ci/chain-c.mjs', g).sort(), ['conformance/ci/chain-a.mjs', 'conformance/ci/chain-b.mjs', 'conformance/ci/chain-c.mjs']);
+    const r = runGitea(['conformance/ci/chain-c.mjs'], g);
+    assert.deepEqual([r.all, r.crates], [false, true]);
+  });
+
+  test('a mention of an action only in a comment of ci.yml is no use: everything', () => {
+    const tree = { ...BASE_TREE, '.gitea/workflows/ci.yml': `# see ./.gitea/actions/only-commented\n${CI()}  # ./.gitea/actions/only-commented\n` };
+    assert.ok(runGitea(['.gitea/actions/only-commented/action.yml'], giteaOf(tree, {})).all);
+  });
+
+  test('a reusable workflow (app-e2e.yml) that uses a changed action is followed to its callers, here an app workflow', () => {
+    const tree = {
+      ...BASE_TREE,
+      '.gitea/workflows/app-e2e.yml': 'on:\n  workflow_call:\njobs:\n  e2e:\n    steps:\n      - uses: ./.gitea/actions/unused\n',
+      '.gitea/workflows/dyno-release.yml': 'jobs:\n  e2e:\n    uses: ./.gitea/workflows/app-e2e.yml\n',
+    };
+    const r = runGitea(['.gitea/actions/unused/action.yml'], giteaOf(tree, {}));
+    assert.deepEqual([r.all, r.apps, r.crates], [false, ['dyno'], false]);
+    // The same workflow with no caller cannot be traced: everything.
+    const orphan = { ...tree, '.gitea/workflows/dyno-release.yml': 'jobs: {}\n' };
+    assert.ok(runGitea(['.gitea/actions/unused/action.yml'], giteaOf(orphan, {})).all);
+  });
+
+  test('in files mode a .gitea or script file that is not dirty (committed, nothing to diff) marks everything', () => {
+    const dirty = new Set([CI_FILE]);
+    const r = runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: CI('node a --only C06') }, (f) => dirty.has(f)));
+    assert.equal(r.all, false);
+    assert.ok(runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: CI('node a --only C06') }, () => false)).all);
+    assert.ok(runGitea(['.gitea/actions/node-caches/action.yml'], giteaOf(BASE_TREE, {}, () => false)).all);
+    assert.ok(runGitea(['conformance/ci/build-folder.sh'], giteaOf(BASE_TREE, {}, () => false)).all);
+  });
+
+  test('the toolchain marks everything; the shared Rust inputs (.cargo, lint) only the Rust builds, lint also conformance', () => {
+    const t = run('rust-toolchain.toml');
+    assert.ok(t.all && t.ui && t.crates);
+    assert.deepEqual(t.apps, APPS);
+    for (const f of ['.cargo/config.toml', 'lint/clippy.toml']) {
+      const r = run(f);
+      assert.deepEqual([r.all, r.ui, r.crates, r.paddockDev, r.conformance], [false, false, true, true, f.startsWith('lint/')], f);
+      assert.deepEqual(r.apps, CARGO_APPS, f);
+      assert.ok(CARGO_APPS.every((a) => r.kinds[a].join() === 'rust'), f);
+    }
+  });
+
+  test('ci.yml wires the plan job outputs: every needs.plan.outputs.X is declared, and every declared output is one --ci writes', () => {
+    const ci = readFileSync(join(ROOT, CI_FILE), 'utf8');
+    const planJob = workflowJobs(ci).jobs.get('plan');
+    const declared = [...planJob.matchAll(/^ {6}([a-z_]+): \$\{\{ steps\.plan\.outputs\.([a-z_]+) \}\}/gm)];
+    const written = Object.keys(ciOutputs({ paddockDev: false }, []));
+    for (const [, name, step] of declared) {
+      assert.equal(name, step, `output ${name} reads steps.plan.outputs.${step}`);
+      assert.ok(written.includes(step), `--ci writes ${step}`);
+    }
+    const names = declared.map((d) => d[1]);
+    for (const [, used] of ci.matchAll(/needs\.plan\.outputs\.([a-z_]+)/g)) assert.ok(names.includes(used), `ci.yml uses needs.plan.outputs.${used}, which the plan job does not declare`);
+    for (const w of written) assert.ok(names.includes(w), `--ci writes ${w}, which the plan job does not declare`);
+    assert.equal(ciOutputs({}, []).any_app, false);
+    assert.equal(ciOutputs({}, [{ app: 'x' }]).any_app, true);
+    assert.equal(ciOutputs({}, [{ app: 'x' }]).apps, '[{"app":"x"}]');
+    assert.equal(ciOutputs({}, [], 'abc123').base, 'abc123');
+    assert.equal(ciOutputs({}, []).base, '', 'no base: the commit lint checks the head commit only');
+  });
+
+  test('commitLintRange lints only what a change adds, and skips tags and app gates', () => {
+    const Z = '0'.repeat(40);
+    assert.equal(commitLintRange({ event: 'pull_request', baseRef: 'main' }), 'origin/main..HEAD');
+    assert.equal(commitLintRange({ event: 'pull_request' }), null);
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'aaa', sha: 'bbb' }), 'aaa..bbb');
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/x', before: Z, sha: 'bbb' }), 'bbb^!', 'a new branch: the head commit');
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/x', before: '', sha: 'bbb' }), 'bbb^!');
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'gone', sha: 'bbb', known: () => false }), 'bbb^!', 'a force push: before is not in the clone');
+    assert.equal(commitLintRange({ event: 'workflow_dispatch', base: 'ccc', sha: 'bbb' }), 'ccc..bbb');
+    assert.equal(commitLintRange({ event: 'workflow_dispatch', sha: 'bbb' }), 'bbb^!');
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/tags/v1.0.0', before: Z, sha: 'bbb' }), null, 'a tag');
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/tags/dyno-v1.0.0', before: 'aaa', sha: 'bbb' }), null);
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'aaa', sha: 'bbb', app: 'dyno' }), null, 'an app tag call');
+    assert.equal(commitLintRange({ event: 'schedule', sha: 'bbb' }), null);
+  });
+
+  test('ci.yml has a commits job that asks commitLintRange for its range', () => {
+    const job = workflowJobs(readFileSync(join(ROOT, CI_FILE), 'utf8')).jobs.get('commits');
+    assert.ok(job, 'a commits job');
+    assert.match(job, /needs: \[plan\]/);
+    assert.match(job, /node scripts\/affected\.mjs --commit-range/);
+    assert.match(job, /fetch-depth: 0/);
+    for (const v of ['EVENT', 'REF', 'BEFORE', 'SHA', 'BASE_REF', 'PLAN_BASE', 'INPUT_APP']) assert.match(job, new RegExp(`${v}: \\$\\{\\{`), v);
+  });
+});
+
+describe('planFor reads the .gitea revisions from git', () => {
+  const sh = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...a], { cwd, encoding: 'utf8' });
+  const scratch = () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'affected-')));
+    sh(dir, 'init', '-q', '-b', 'main');
+    mkdirSync(join(dir, '.gitea/workflows'), { recursive: true });
+    writeFileSync(join(dir, CI_FILE), CI());
+    sh(dir, 'add', '-A');
+    sh(dir, 'commit', '-q', '-m', 'base');
+    return dir;
+  };
+
+  test('base mode: a committed change to one job marks that job (before is the base, after the head)', () => {
+    const dir = scratch();
+    try {
+      const base = sh(dir, 'rev-parse', 'HEAD').trim();
+      writeFileSync(join(dir, CI_FILE), CI('node a --only C06'));
+      sh(dir, 'commit', '-q', '-am', 'one job');
+      const r = planFor({ base, head: 'HEAD', root: dir, explain: true }).plan;
+      assert.deepEqual([r.all, r.conformance, r.crates, r.ui], [false, true, false, false]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('base mode: a committed change to an imported helper marks the job of the action that runs the importing script', () => {
+    const dir = scratch();
+    try {
+      const put = (f, text) => {
+        mkdirSync(join(dir, f.split('/').slice(0, -1).join('/')), { recursive: true });
+        writeFileSync(join(dir, f), text);
+      };
+      put('.gitea/actions/install-test-browser/action.yml', 'run: node "${{ github.action_path }}/../../../conformance/ci/install-test-browser.mjs"');
+      put('conformance/ci/install-test-browser.mjs', "import { entryFor } from './runtime-catalogue.mjs';");
+      put('conformance/ci/runtime-catalogue.mjs', 'export const entryFor = 1;');
+      sh(dir, 'add', '-A');
+      sh(dir, 'commit', '-q', '-m', 'script');
+      const base = sh(dir, 'rev-parse', 'HEAD').trim();
+      put('conformance/ci/runtime-catalogue.mjs', 'export const entryFor = 2;');
+      sh(dir, 'commit', '-q', '-am', 'helper');
+      const r = planFor({ base, head: 'HEAD', root: dir }).plan;
+      assert.deepEqual([r.all, r.crates, r.ui], [false, true, false]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('files mode: an uncommitted change is narrowed, a committed one (HEAD equals the working tree) marks everything', () => {
+    const dir = scratch();
+    try {
+      writeFileSync(join(dir, CI_FILE), CI('node a --only C06'));
+      const dirty = planFor({ files: [CI_FILE], root: dir }).plan;
+      assert.deepEqual([dirty.all, dirty.conformance, dirty.crates], [false, true, false]);
+      sh(dir, 'commit', '-q', '-am', 'one job');
+      assert.ok(planFor({ files: [CI_FILE], root: dir }).plan.all);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
@@ -211,7 +577,7 @@ describe('matrix legs', () => {
     const rust = matrix(run('apps/pitcrew/crates/pitcrew-core/src/lib.rs'), graph);
     assert.deepEqual(rust.map((l) => [l.os, l.rust, l.ui]), [['ubuntu-latest', true, false], ['windows-latest', true, false], ['macos-latest', true, false]]);
     for (const host of rust.filter((l) => l.os !== LINUX)) assert.deepEqual([host.prepare, host.checks, host.ui_checks, host.angular_dir], ['', '', '', ''], 'the host legs carry no commands');
-    assert.ok(rust.every((l) => l.cargo === 'apps/pitcrew' && l.processes === 'fake_runner'), 'the Cargo folder is normalised and the test processes are named');
+    assert.ok(rust.every((l) => l.cargo === 'apps/pitcrew' && /fake_runner/.test(l.process_patterns) && !('processes' in l)), 'the Cargo folder is normalised and the test processes are named by patterns only');
     const ui = matrix(run('apps/pitcrew/app/src/main.ts'), graph);
     assert.deepEqual(ui.map((l) => [l.os, l.rust, l.ui]), [['ubuntu-latest', false, true]]);
     assert.equal(ui[0].angular_dir, 'apps/pitcrew/app');
@@ -274,29 +640,43 @@ describe('matrix legs', () => {
     assert.ok(!spotter.ui.some((l) => /webkit/.test(l)), 'WebKit does not lengthen the main leg');
   });
 
-  test("an app's host-cleanup patterns match its own paths and never the real runner (every app that has them)", () => {
+  test("an app's host-cleanup patterns match its own paths and never the real runner or another job (every app that has them)", () => {
     const real = ['gitea-runner daemon', '/usr/local/bin/gitea-runner daemon', '/Users/x/runners/main/bin/gitea-runner daemon', '/opt/act_runner/act_runner daemon', 'C:\\runner\\act_runner.exe daemon', '/Users/x/actions-runner/Runner.Listener run'];
+    const t = JOB.tmp;
+    const other = '/Users/x/gitea-runner/work/fedcba9876543210/tmp';
     const ours = {
-      dyno: ['/Users/x/.paddock-ci/target-dyno-app/debug/dyno-ipc-test-child echo', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app\\debug\\dyno-test-plugin.exe', '/var/folders/ab/T/dyno-it-plugins-Xk3a9Q/p1/plugin'],
-      pitwall: ['/Users/x/.paddock-ci/target-pitwall-app/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'],
-      pitcrew: ['/var/folders/ab/T/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon', 'C:\\Users\\x\\AppData\\Local\\Temp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon'],
-      spotter: ['/Users/x/.paddock-ci/test-browser-spotter/chrome-mac/Google Chrome for Testing --headless', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter\\chrome-win64\\chrome.exe --headless'],
+      dyno: ['/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-ipc-test-child echo', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app-s1\\debug\\dyno-test-plugin.exe', `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin`],
+      pitwall: ['/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'],
+      pitcrew: [`${t}/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon`, 'C:\\Users\\x\\gitea-runner\\work\\0123456789abcdef\\tmp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon', '/Users/x/.paddock-ci/target-pitcrew-app-s1/debug/examples/fake_runner --exit-after 5'],
+      spotter: ['/Users/x/.paddock-ci/test-browser-spotter-s1/chrome-mac/Google Chrome for Testing --headless', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter-s1\\chrome-win64\\chrome.exe --headless'],
     };
-    const near = {
-      spotter: ['/Users/x/.paddock-ci/test-browser-spotter-old/chrome', '/Users/x/.paddock-ci/test-browser-spotterx/chrome', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter-old\\chrome.exe', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotterx\\chrome.exe'],
+    // Another job on the same host: the next slot's kept folders, another runner folder's temp.
+    const otherJob = {
+      dyno: ['/Users/x/.paddock-ci/target-dyno-app-s2/debug/dyno-ipc-test-child echo', `${other}/dyno-it-plugins-Xk3a9Q/p1/plugin`],
+      pitwall: ['/Users/x/.paddock-ci/target-pitwall-app-s2/debug/pitwall-server --fake-engine'],
+      pitcrew: [`${other}/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon`, '/Users/x/.paddock-ci/target-pitcrew-app-s2/debug/examples/fake_runner'],
+      spotter: ['/Users/x/.paddock-ci/test-browser-spotter-s2/chrome-mac/Google Chrome for Testing', '/Users/x/.paddock-ci/test-browser-spotter-s12/chrome-mac/Google Chrome for Testing', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter-s2\\chrome.exe'],
     };
     let checked = 0;
     for (const [name, app] of graph.apps) {
       if (!app.processPatterns?.length) continue;
-      assert.ok(ours[name], `${name} has process patterns: list its own command lines here`);
-      const res = app.processPatterns.map((pat) => new RegExp(pat));
+      assert.ok(ours[name] && otherJob[name], `${name} has process patterns: list its own and another job's command lines here`);
+      const res = scopedAll(name, app.processPatterns);
+      assert.ok(res.every(Boolean), `${name}: every pattern is anchored on a folder of the job ({tmp}, {build} or {slot})`);
       for (const line of ours[name]) assert.ok(res.some((re) => re.test(line)), `${name}: no pattern matches ${line}`);
       for (const re of res) {
-        for (const line of [...real, ...(near[name] ?? [])]) assert.doesNotMatch(line, re, `${name}: ${re} would kill ${line}`);
+        for (const line of [...real, ...otherJob[name]]) assert.doesNotMatch(line, re, `${name}: ${re} would kill ${line}`);
         checked += 1;
       }
     }
     assert.ok(checked >= 2);
+  });
+
+  test('job-isolation refuses a process pattern that names no folder of the job, or one the job does not have', () => {
+    assert.equal(scoped('[/\\\\]pitcrew-it-[^/]+[/\\\\]gitea-runner', 'pitcrew'), null, 'a temp prefix alone matches every job');
+    assert.equal(scoped('fake_runner', 'pitcrew'), null, 'an exact name matches every job');
+    const r = spawnSync('bash', [join(ROOT, 'conformance', 'ci', 'job-isolation.sh'), 'pattern', '{tmp}/x'], { env: { PATH: '/usr/bin:/bin', RUNNER_OS: 'macOS' }, encoding: 'utf8' });
+    assert.notEqual(r.status, 0, 'no job temp folder: nothing to anchor on');
   });
 
   test("onlyApp (a tag's gates, ci.yml's `app` input) keeps one app, both halves, and no other project", () => {
@@ -333,6 +713,44 @@ describe('contracts', () => {
     assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /"\$RUNNER_OS" != Windows \] \|\| \[ "\$WINDOWS_CLIPPY" = true \]; then step cargo clippy/);
   });
 
+  test('notices: an app with a `notices` block checks its THIRD_PARTY_NOTICES.md on the Linux leg that runs Rust or UI, and only there', () => {
+    for (const [name, app] of graph.apps) {
+      if (!app.notices) continue;
+      assert.ok(app.notices.name && Array.isArray(app.notices.manifests), `${name}: notices needs a name and its Cargo manifests`);
+    }
+    const pitwall = graph.apps.get('pitwall');
+    const legsOf = () => matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph).filter((l) => l.app === 'pitwall');
+    assert.ok(legsOf().every((l) => l.notices === 'false'), 'no block, no check');
+    pitwall.notices = { name: 'Pitwall', manifests: [] };
+    try {
+      const legs = legsOf();
+      assert.ok(legs.length > 1, 'Pitwall has host legs too');
+      for (const l of legs) assert.equal(l.notices, l.os === LINUX ? 'true' : 'false', l.os);
+    } finally {
+      delete pitwall.notices;
+    }
+    assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /scripts\/notices\.sh" "\$APP" --check/, 'app-gates runs the shared check');
+  });
+
+  test('notices: the check runs on exactly one leg of an app, not on its e2e shards or the WebKit leg; the tool and its config are inputs', () => {
+    const dyno = graph.apps.get('dyno');
+    const had = dyno.notices;
+    dyno.notices = { name: 'Dyno', manifests: [] };
+    try {
+      const legs = matrix(run('apps/dyno/app/src/app/shell/about.providers.ts'), graph, { webkit: true }).filter((l) => l.app === 'dyno');
+      assert.ok(legs.length > 2, 'the UI change gives the main leg, the e2e shards and more');
+      assert.equal(legs.filter((l) => l.notices === 'true').length, 1);
+      assert.ok(legs.filter((l) => l.e2e_leg).every((l) => l.notices === 'false'));
+      for (const f of ['scripts/notices.sh', 'templates/repo/about.toml', 'conformance/src/notices/generate.mjs']) {
+        const hit = matrix(run(f), graph).filter((l) => l.app === 'dyno' && l.notices === 'true');
+        assert.equal(hit.length, 1, `${f} re-checks the notices of an app with the block`);
+      }
+    } finally {
+      if (had) dyno.notices = had;
+      else delete dyno.notices;
+    }
+  });
+
   test("an app's last packages reach every leg, so a host leg and the Linux leg agree on what is tested apart", () => {
     const legs = matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph);
     assert.deepEqual([...new Set(legs.map((l) => l.last_packages))], ['pitwall-app'], 'Pitwall tests its Tauri shell after the rest');
@@ -344,59 +762,59 @@ describe('contracts', () => {
     const patterns = graph.apps.get('pitcrew').processPatterns;
     assert.ok(patterns?.length, 'Pitcrew names the fake runner copy the tests start');
     assert.ok(legs.every((l) => l.process_patterns === patterns.join('\n')), 'every leg hands the patterns to host-cleanup');
-    const ours = ['/var/folders/ab/T/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon', 'C:\\Users\\x\\AppData\\Local\\Temp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon'];
-    const real = ['gitea-runner daemon', '/usr/local/bin/gitea-runner daemon', '/Users/x/runners/main/bin/gitea-runner daemon', '/opt/act_runner/act_runner daemon', '/Users/x/pitcrew/runner/bin/gitea-runner daemon', '/tmp/pitcrew-it/gitea-runner', '/tmp/other-1/runner/bin/gitea-runner'];
-    for (const pat of patterns) {
-      const re = new RegExp(pat);
-      for (const line of ours) assert.match(line, re, `${pat} misses the test copy`);
-      for (const line of real) assert.doesNotMatch(line, re, `${pat} would kill ${line}`);
-    }
+    const t = JOB.tmp;
+    const ours = [`${t}/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon`, 'C:\\Users\\x\\gitea-runner\\work\\0123456789abcdef\\tmp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon'];
+    const real = ['gitea-runner daemon', '/usr/local/bin/gitea-runner daemon', '/Users/x/runners/main/bin/gitea-runner daemon', '/opt/act_runner/act_runner daemon', '/Users/x/pitcrew/runner/bin/gitea-runner daemon', '/tmp/pitcrew-it/gitea-runner', '/tmp/other-1/runner/bin/gitea-runner', '/var/folders/ab/T/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon'];
+    const res = scopedAll('pitcrew', patterns);
+    for (const line of ours) assert.ok(res.some((re) => re.test(line)), `no pattern matches the test copy ${line}`);
+    for (const re of res) for (const line of real) assert.doesNotMatch(line, re, `${re} would kill ${line}`);
   });
 
   test("every process pattern is anchored on a folder of this job, and Pitwall's never reaches an installed app, another job or the user's own engine", () => {
     for (const [name, app] of graph.apps) {
-      for (const pat of app.processPatterns ?? []) {
-        assert.match(pat, /pitcrew-it-|dyno-it-|test-browser-|\.paddock-ci|target-/, `${name}: ${pat} names no temp or build folder of the job`);
-      }
+      assert.equal(app.processes, undefined, `${name}: no exact process names (paddock.ci.json \`processes\`): they match every job's processes`);
+      for (const pat of app.processPatterns ?? []) assert.match(pat, /\{(tmp|build|slot)\}/, `${name}: ${pat} names no folder of the job ({tmp}, {build}, {slot})`);
     }
     const pitwall = graph.apps.get('pitwall');
-    assert.deepEqual(pitwall.processes ?? [], [], 'no exact process names: they would kill the user\'s installed Pitwall and its engine, and other jobs');
-    const ours = ['/Users/x/.paddock-ci/target-pitwall-app/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'];
+    const ours = ['/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'];
     const near = [
       '/Applications/Pitwall.app/Contents/MacOS/pitwall-server --port 8080',
       '/Applications/Pitwall.app/Contents/MacOS/pitwall-server --fake-engine',
-      '/Users/x/.paddock-ci/target-spotter-app/debug/pitwall-server --fake-engine',
-      '/Users/x/.paddock-ci/target-pitwall-bundle/debug/pitwall-server --fake-engine',
+      '/Users/x/.paddock-ci/target-spotter-app-s1/debug/pitwall-server --fake-engine',
+      '/Users/x/.paddock-ci/target-pitwall-bundle-s1/debug/pitwall-server --fake-engine',
+      '/Users/x/.paddock-ci/target-pitwall-app-s2/debug/pitwall-server --fake-engine',
       '/Users/x/.paddock/engines/llama-server --port 8081 -m model.gguf',
       '/Users/x/dev/pitwall/target/debug/pitwall-server --fake-engine',
       '/opt/homebrew/bin/llama-server --port 8080',
     ];
-    for (const pat of pitwall.processPatterns) {
-      const re = new RegExp(pat);
-      for (const line of ours) assert.match(line, re, `${pat} misses ${line}`);
-      for (const line of near) assert.doesNotMatch(line, re, `${pat} would kill ${line}`);
+    for (const re of scopedAll('pitwall', pitwall.processPatterns)) {
+      for (const line of ours) assert.match(line, re, `${re} misses ${line}`);
+      for (const line of near) assert.doesNotMatch(line, re, `${re} would kill ${line}`);
     }
   });
 
   test("Dyno's process pattern ends only test programs of its own build folder: never the installed app, its agent, another job's folder or the user's tools", () => {
     const dyno = graph.apps.get('dyno');
-    assert.deepEqual(dyno.processes ?? [], [], "no exact process names: they would kill the user's installed Dyno and its agent");
-    const ours = ['/Users/x/.paddock-ci/target-dyno-app/debug/dyno-ipc-test-child echo', '/Users/x/.paddock-ci/target-dyno-app/debug/dyno-bench cpu --millis 20', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app\\debug\\dyno-test-plugin.exe', '/var/folders/ab/T/dyno-it-plugins-Xk3a9Q/p1/plugin', 'C:\\Users\\x\\AppData\\Local\\Temp\\dyno-it-plugins-Xk3a9Q\\p1\\plugin.exe'];
+    const t = JOB.tmp;
+    const ours = ['/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-ipc-test-child echo', '/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-bench cpu --millis 20', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app-s1\\debug\\dyno-test-plugin.exe', `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin`, 'C:\\Users\\x\\gitea-runner\\work\\0123456789abcdef\\tmp\\dyno-it-plugins-Xk3a9Q\\p1\\plugin.exe'];
     const near = [
       '/Users/x/Library/Application Support/Dyno/plugins/p1/plugin',
-      '/var/folders/ab/T/other-it-plugins-Xk3a9Q/p1/plugin',
-      '/var/folders/ab/T/dyno-it-plugins-Xk3a9Q/p1/plugin.toml',
+      `${t}/other-it-plugins-Xk3a9Q/p1/plugin`,
+      `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin.toml`,
+      '/var/folders/ab/T/dyno-it-plugins-Xk3a9Q/p1/plugin',
+      '/Users/x/gitea-runner/work/fedcba9876543210/tmp/dyno-it-plugins-Xk3a9Q/p1/plugin',
       '/Applications/Dyno.app/Contents/MacOS/dyno-agent run',
       '/Applications/Dyno.app/Contents/MacOS/dyno-helper',
       '/Applications/Dyno.app/Contents/MacOS/dyno-bench',
-      '/Users/x/.paddock-ci/target-dyno-bundle/debug/dyno-ipc-test-child echo',
-      '/Users/x/.paddock-ci/target-spotter-app/debug/dyno-ipc-test-child echo',
-      '/Users/x/.paddock-ci/target-dyno-app/debug/dyno-agent run',
+      '/Users/x/.paddock-ci/target-dyno-bundle-s1/debug/dyno-ipc-test-child echo',
+      '/Users/x/.paddock-ci/target-spotter-app-s1/debug/dyno-ipc-test-child echo',
+      '/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-agent run',
+      '/Users/x/.paddock-ci/target-dyno-app-s2/debug/dyno-bench cpu',
       '/Users/x/.paddock-ci/target-dyno-app2/debug/dyno-bench cpu',
       '/Users/x/dev/dyno/target/debug/dyno-ipc-test-child echo',
       'C:\\Program Files\\Dyno\\dyno-agent.exe',
     ];
-    const res = dyno.processPatterns.map((pat) => new RegExp(pat));
+    const res = scopedAll('dyno', dyno.processPatterns);
     for (const line of ours) assert.ok(res.some((re) => re.test(line)), `no pattern matches ${line}`);
     for (const re of res) for (const line of near) assert.doesNotMatch(line, re, `${re} would kill ${line}`);
   });
@@ -574,5 +992,15 @@ describe('command line: incomplete or unknown arguments are refused, never plann
     assert.equal(parseArgs(['origin/main', '--explain']).explain, true);
     assert.deepEqual(parseArgs(['--files', 'a,b', '--explain']).files, ['a', 'b']);
     assert.equal(parseArgs(['--all']).all, true);
+  });
+});
+
+describe('paths from cargo metadata on Windows', () => {
+  test('repoRelative gives a / path where path.relative would give a \\ one', () => {
+    const win = (root, p) => repoRelative(root, p, win32.relative, win32.sep);
+    assert.equal(win('C:\\work\\paddock', 'C:\\work\\paddock\\crates\\paddock-cli'), 'crates/paddock-cli');
+    assert.equal(win('C:\\work\\paddock', 'c:\\WORK\\paddock\\apps\\x\\app\\src-tauri'), 'apps/x/app/src-tauri', 'drive letter and case do not matter on Windows');
+    assert.equal(win('C:\\work\\paddock', 'C:\\work\\paddock'), '');
+    assert.equal(repoRelative('/r', '/r/crates/a'), 'crates/a');
   });
 });

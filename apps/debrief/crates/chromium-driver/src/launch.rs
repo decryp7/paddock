@@ -2,7 +2,7 @@
 //! supervised process. The real user agent and the automation banner are kept on purpose: no stealth.
 
 use crate::cdp::Connection;
-use crate::discover::Browser;
+use crate::discover::{Browser, Flavor};
 use crate::page::Page;
 use crate::process::Supervised;
 use crate::{Error, Result};
@@ -95,10 +95,19 @@ fn switches(data_dir: &Path, opts: &LaunchOptions, sandbox: Sandbox) -> Vec<Stri
     a
 }
 
-/// The whole command line the browser starts with: every switch, then [`START_PAGE`] last. This is the only place
+/// Keeps a Chromium build (Chrome for Testing) from applying the field-trial testing config it carries, as Puppeteer and
+/// Playwright do; branded Chrome and Edge never apply it. That config turns on the network-service sandbox on Windows,
+/// which could not start for a browser in a user folder on Paddock's Windows CI (all 12 Chrome logs of runs 7149 and
+/// 7154), and real-browser loads ended in `net::ERR_ABORTED` in those runs (paddock-chromium's `NO_TESTING_FIELD_TRIALS`).
+pub const NO_TESTING_FIELD_TRIALS: &str = "--disable-field-trial-config";
+
+/// The whole command line `flavor` starts with: every switch, then [`START_PAGE`] last. This is the only place
 /// arguments are assembled, so no switch can end up after the start page.
-pub fn command_line(data_dir: &Path, opts: &LaunchOptions, sandbox: Sandbox) -> Vec<String> {
+pub fn command_line(flavor: Flavor, data_dir: &Path, opts: &LaunchOptions, sandbox: Sandbox) -> Vec<String> {
     let mut a = switches(data_dir, opts, sandbox);
+    if flavor == Flavor::Chromium {
+        a.push(NO_TESTING_FIELD_TRIALS.into());
+    }
     a.push(START_PAGE.into());
     a
 }
@@ -221,6 +230,10 @@ impl Chromium {
     }
 
     /// [`Chromium::launch`] with the sandbox decision made by the caller (tests run the root branch on any OS).
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the browser, a GUI program: this crate cannot use Debrief's process helper"
+    )]
     fn launch_with(exe: &Browser, opts: &LaunchOptions, sandbox: Sandbox) -> Result<Chromium> {
         let (dir, throwaway) = match &opts.profile {
             Profile::Throwaway => (unique_dir(), true),
@@ -234,7 +247,7 @@ impl Chromium {
             }
         }
         let mut cmd = std::process::Command::new(&exe.path);
-        cmd.args(command_line(&dir, opts, sandbox))
+        cmd.args(command_line(exe.flavor, &dir, opts, sandbox))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
@@ -383,6 +396,13 @@ impl Drop for Chromium {
     }
 }
 
+#[cfg_attr(
+    unix,
+    expect(
+        clippy::disallowed_methods,
+        reason = "ADR 0033 WP-5: the watchdog killpg()s a pid captured at launch; move to paddock-chromium"
+    )
+)]
 fn kill_pid(pid: Option<u32>) {
     #[cfg(unix)]
     if let Some(p) = pid {
@@ -437,7 +457,7 @@ mod tests {
 
     #[test]
     fn keeps_the_automation_banner_and_hides_nothing() {
-        let a = command_line(Path::new("/tmp/p"), &LaunchOptions::default(), Sandbox::On);
+        let a = command_line(Flavor::Chromium, Path::new("/tmp/p"), &LaunchOptions::default(), Sandbox::On);
         assert!(a.contains(&"--enable-automation".to_string()));
         assert!(a
             .iter()
@@ -470,7 +490,7 @@ mod tests {
                         disk_cache_bytes,
                         ..LaunchOptions::default()
                     };
-                    let a = command_line(Path::new("/p"), &opts, sandbox);
+                    let a = command_line(Flavor::Chromium, Path::new("/p"), &opts, sandbox);
                     assert_eq!(a.last().map(String::as_str), Some(START_PAGE), "{a:?}");
                     assert_eq!(a.iter().filter(|x| *x == START_PAGE).count(), 1, "{a:?}");
                     assert_eq!(a.contains(&"--no-sandbox".to_string()), sandbox == Sandbox::Off, "{a:?}");
@@ -480,12 +500,29 @@ mod tests {
         }
     }
 
+    /// A Chromium build starts without its testing field trials; branded Chrome and Edge get no switch.
+    #[test]
+    fn chromium_builds_start_without_testing_field_trials() {
+        for flavor in [Flavor::Chromium, Flavor::Chrome, Flavor::Edge] {
+            let a = command_line(flavor, Path::new("/p"), &LaunchOptions::default(), Sandbox::On);
+            assert_eq!(
+                a.contains(&NO_TESTING_FIELD_TRIALS.to_string()),
+                flavor == Flavor::Chromium,
+                "{a:?}"
+            );
+            assert_eq!(a.last().map(String::as_str), Some(START_PAGE), "{a:?}");
+        }
+    }
+
     #[test]
     fn the_window_opens_on_screen() {
-        assert!(!command_line(Path::new("/p"), &LaunchOptions::default(), Sandbox::On)
-            .iter()
-            .any(|x| x.starts_with("--window-position") || x.contains("headless") || x.contains("offscreen")));
+        assert!(
+            !command_line(Flavor::Chromium, Path::new("/p"), &LaunchOptions::default(), Sandbox::On)
+                .iter()
+                .any(|x| x.starts_with("--window-position") || x.contains("headless") || x.contains("offscreen"))
+        );
         let placed = command_line(
+            Flavor::Chromium,
             Path::new("/p"),
             &LaunchOptions {
                 window: Some(WindowBounds {
@@ -553,7 +590,8 @@ mod tests {
         let (_d, _fake, mut b) = launch_fake(crate::fake::Mode::Obey, 1);
         let (dir, pid) = (b.profile_dir().to_path_buf(), b.pid().unwrap());
         assert!(dir.exists());
-        assert!(b.close_gracefully(Duration::from_secs(5)), "it exited by itself");
+        // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
+        assert!(b.close_gracefully(Duration::from_secs(40)), "it exited by itself");
         assert!(!dir.exists(), "the throwaway profile is gone");
         assert!(!crate::process::process_exists(pid) || !b.is_running());
     }
@@ -623,7 +661,8 @@ mod tests {
         assert!(args.contains(&format!("--user-data-dir={}", kept.display())), "{args:?}");
         assert!(args.contains(&"--disk-cache-size=1234".to_string()), "{args:?}");
         assert_eq!(args.last().map(String::as_str), Some("about:blank"), "the start page stays last");
-        assert!(b.close_gracefully(Duration::from_secs(2)));
+        // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
+        assert!(b.close_gracefully(Duration::from_secs(40)));
         assert!(kept.is_dir(), "a kept profile is not removed");
     }
 

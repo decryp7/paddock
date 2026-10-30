@@ -741,6 +741,7 @@ impl Inner {
                     report.sources.push(read::report_source(&r));
                 }
                 Outcome::Unrecognized(u) => unrecognized.push(u),
+                Outcome::Notice(n) => report.notices.push(n),
             }
         }
         {

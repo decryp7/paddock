@@ -313,6 +313,8 @@ compression of it is the native writer's bottleneck; zstd Parquet is 8.7× small
 2026-10-20): Parquet segments + native catalog.** Rejected: native table (single-writer bottleneck, 9× larger),
 `raw`-if-different (no effect on real data), Arrow-scan inserts (memory leak), parallel appenders (no gain).
 
+See also [research/2026-10-29-duckdb-write-paths.md](../research/2026-10-29-duckdb-write-paths.md) (the write paths on DuckDB 2.0, 2026-10-29).
+
 ### What exists
 
 - **Parallel import** (`debrief_core::ingest::import_files_parallel`, `ParallelOptions`, `SharedSink`): files on a rayon

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { groupLeaks, leakPattern, listLeaks, main, newLeaks } from './check-temp-leaks.mjs';
+import { ENDPOINT_PATTERN, groupLeaks, leakPattern, listEndpointLeaks, listLeaks, main, newLeaks, sharedDirs } from './check-temp-leaks.mjs';
 
 const quiet = () => {
   const out = [];
@@ -90,5 +90,86 @@ test('the offenders are listed with their counts, most first', () => {
     assert.match(text, /debrief-plugin-aa11/, 'the folders are listed too');
   } finally {
     s.done();
+  }
+});
+
+test('the shared folders are scanned for endpoint-shaped names only, never for other files', () => {
+  assert.ok(ENDPOINT_PATTERN.test('debrief-plugin-372eb9bd2f3d'));
+  assert.ok(ENDPOINT_PATTERN.test('debrief-ipc-0123456789ab'));
+  // A test's own prefix with a random part (debrief-ipc tests/it/launch.rs: `debrief-test-gone-<8 hex>`), plus the 12 hex.
+  assert.ok(ENDPOINT_PATTERN.test('debrief-test-gone-1a2b3c4d-0123456789ab'));
+  assert.ok(ENDPOINT_PATTERN.test('dbwAb3dEf'));
+  for (const other of ['debrief-plugin-372eb9bd2f3', 'debrief-plugin-372eb9bd2f3dd', 'debrief-parity-x-1-ab', 'debrief', 'systemd-private-0123456789ab', 'dbw', 'dbwAb3dEf9', 'plugin-372eb9bd2f3d']) {
+    assert.ok(!ENDPOINT_PATTERN.test(other), other);
+  }
+  const s = scratch();
+  try {
+    for (const n of ['debrief-plugin-372eb9bd2f3d', 'dbwAb3dEf', 'debrief-parity-x-1-ab', 'unrelated', 'user-0123456789ab']) mkdirSync(join(s.dir, n));
+    assert.deepEqual(listEndpointLeaks(s.dir), [`${s.dir}/dbwAb3dEf`, `${s.dir}/debrief-plugin-372eb9bd2f3d`]);
+    assert.deepEqual(listEndpointLeaks(join(s.dir, 'missing')), []);
+  } finally {
+    s.done();
+  }
+});
+
+test('sharedDirs names /tmp and the runtime folder, once each, and not the temp folder itself', () => {
+  assert.deepEqual(sharedDirs({ XDG_RUNTIME_DIR: '/run/user/1' }, '/var/tmp'), ['/tmp', '/run/user/1']);
+  assert.deepEqual(sharedDirs({ XDG_RUNTIME_DIR: '/tmp' }, '/var/tmp'), ['/tmp']);
+  assert.deepEqual(sharedDirs({}, '/tmp'), []);
+});
+
+test('--dir with --shared scans the given folder and the shared socket folders (a CI job\'s own TMPDIR, 2026-10-29)', () => {
+  const temp = scratch();
+  const shared = scratch();
+  try {
+    const file = join(temp.dir, '..', `${temp.dir.split('/').pop()}-base.json`);
+    const args = ['--dir', temp.dir, '--shared'];
+    assert.equal(main([...args, '--snapshot', file], quiet().log, () => [shared.dir]), 0);
+    // A socket folder that fell back to a shared folder (the job's temp path was too long) still counts.
+    mkdirSync(join(shared.dir, 'debrief-plugin-372eb9bd2f3d'));
+    const out = quiet();
+    assert.equal(main([...args, '--check', file], out.log, () => [shared.dir]), 1);
+    rmSync(file, { force: true });
+    // Without --shared, --dir alone scans only that folder, as before.
+    assert.equal(main(['--dir', temp.dir], quiet().log, () => [shared.dir]), 0);
+  } finally {
+    temp.done();
+    shared.done();
+  }
+});
+
+test('--socket-dir scans the job\'s own socket folder for endpoint-shaped names, so a host job never reads the shared /tmp', () => {
+  const temp = scratch();
+  const sockets = scratch();
+  const shared = scratch();
+  try {
+    const file = join(temp.dir, '..', `${temp.dir.split('/').pop()}-sock.json`);
+    const args = ['--dir', temp.dir, '--socket-dir', sockets.dir];
+    const never = () => [shared.dir];
+    assert.equal(main([...args, '--snapshot', file], quiet().log, never), 0);
+    // Someone else's socket folder in the shared folder (a local run on the same host) is not this job's leak.
+    mkdirSync(join(shared.dir, 'debrief-ipc-0123456789ab'));
+    assert.equal(main([...args, '--check', file], quiet().log, never), 0);
+    // The job's own socket folder is checked.
+    mkdirSync(join(sockets.dir, 'dbwAb3dEf'));
+    assert.equal(main([...args, '--check', file], quiet().log, never), 1);
+    rmSync(file, { force: true });
+  } finally {
+    temp.done();
+    sockets.done();
+    shared.done();
+  }
+});
+
+test('an empty --socket-dir fails with 2 on Unix (a missing socket base is never skipped), and is allowed on Windows', () => {
+  const temp = scratch();
+  try {
+    const out = quiet();
+    assert.equal(main(['--dir', temp.dir, '--socket-dir', ''], out.log, () => [], 'darwin'), 2);
+    assert.equal(main(['--dir', temp.dir, '--socket-dir', ''], quiet().log, () => [], 'linux'), 2);
+    assert.equal(main(['--dir', temp.dir, '--socket-dir'], quiet().log, () => [], 'linux'), 2, 'no value at all');
+    assert.equal(main(['--dir', temp.dir, '--socket-dir', ''], quiet().log, () => [], 'win32'), 0, 'named pipes: no socket folder');
+  } finally {
+    temp.done();
   }
 });

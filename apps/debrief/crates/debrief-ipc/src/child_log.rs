@@ -723,20 +723,15 @@ impl ChildLog {
 
     /// Writes one event at `at` (fixed times make reproducible logs).
     pub fn record_at(&self, at: SystemTime, event: &ChildEvent) {
-        let line = {
-            let mut live = lock(&self.live);
-            if let ChildEvent::Start { .. } = event {
-                live.run += 1;
-            }
-            let version = lock(&self.version).clone();
-            let line = format_line(at, &self.name, self.kind, version.as_deref(), live.run, event);
-            if let Ok(parsed) = serde_json::from_str::<LogLine>(&line) {
-                live.summary.apply(&parsed);
-            }
-            line
-        };
-        let name = self.name.clone();
-        let kind = self.kind;
+        // The status is updated under the same lock after the line is in the tail, so a reader that sees the status
+        // of an event finds its line.
+        let mut live = lock(&self.live);
+        if let ChildEvent::Start { .. } = event {
+            live.run += 1;
+        }
+        let version = lock(&self.version).clone();
+        let line = format_line(at, &self.name, self.kind, version.as_deref(), live.run, event);
+        let (name, kind) = (self.name.clone(), self.kind);
         lock(&self.sink).push(&line, || {
             format_line(
                 at,
@@ -750,6 +745,9 @@ impl ChildLog {
                 )),
             )
         });
+        if let Ok(parsed) = serde_json::from_str::<LogLine>(&line) {
+            live.summary.apply(&parsed);
+        }
     }
 
     pub fn record(&self, event: &ChildEvent) {
@@ -992,6 +990,33 @@ mod tests {
         // The same summary from the file text, except that a final start is unknown, not running.
         assert_eq!(summarize("ai-worker", &text).unwrap(), live);
         assert!(summarize("x", "not json\n{\"Event\":\"output\"}\n").is_none());
+    }
+
+    /// Regression (Linux CI, `a_crash_is_recorded_with_its_output_and_exit_code`): the status showed an exit before the
+    /// line was in the tail, so a reader that waited for the status found no line.
+    #[test]
+    fn a_status_that_shows_an_exit_has_its_line_in_the_tail() {
+        for i in 0..3000 {
+            let log = Arc::new(ChildLog::open(None, &ChildLogSpec::new(format!("race-{i}"), ChildKind::Plugin)));
+            log.record_at(at(0), &ChildEvent::Start { pid: 7 });
+            let writer = {
+                let log = log.clone();
+                std::thread::spawn(move || {
+                    log.record_at(
+                        at(1),
+                        &ChildEvent::Exit {
+                            pid: Some(7),
+                            exit: Exit::Code(3),
+                        },
+                    )
+                })
+            };
+            while log.status().state == ChildRunState::Running {
+                std::hint::spin_loop();
+            }
+            assert!(log.tail_text().contains("\"Event\":\"crash\""), "iteration {i}");
+            writer.join().unwrap();
+        }
     }
 
     #[test]

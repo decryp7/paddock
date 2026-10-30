@@ -89,6 +89,142 @@ fn the_menu_bar_follows_the_focus_and_the_close_of_every_window() {
     assert_eq!(menu.target(), None);
 }
 
+/// Dyno closes its last window to the tray (the window is destroyed) and keeps running; the menu bar still shows
+/// "Quit", and choosing it must quit the app although no window is the target any more.
+#[test]
+fn quit_from_the_menu_bar_works_when_the_last_window_was_destroyed() {
+    let exits = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = exits.clone();
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .windows(move |_| {
+            Windows::builder(WindowConfig::new("Shell Demo"))
+                .exit_app(move |_, code| seen.lock().unwrap().push(code))
+                .build()
+        })
+        .setup(|app| {
+            app.manage(NativeMenu::<MockRuntime>::with_bar(
+                "Shell Demo",
+                true,
+                NoBar,
+            ));
+            Ok(())
+        }));
+    let menu = app.state::<NativeMenu<MockRuntime>>();
+    let quit = serde_json::json!({ "menus": [{ "id": "app", "label": "Shell Demo", "items": [
+        { "kind": "item", "id": "pd.app.quit", "label": "Quit Shell Demo", "keybinding": null, "checked": null, "enabled": true }
+    ] }] });
+    let model = paddock_menu::model::parse(serde_json::from_value(quit).unwrap()).unwrap();
+    menu.apply(app.handle(), &model).unwrap();
+    assert!(menu.shown_ids().contains(&"pd.app.quit".to_string()));
+    let w = window(&app, "main");
+    on_window_event(&w, &WindowEvent::Focused(true));
+    on_window_event(&w, &WindowEvent::Destroyed);
+    assert_eq!(menu.target(), None);
+    paddock_menu::tauri::menu_chosen(app.handle(), "pd.app.quit");
+    assert_eq!(*exits.lock().unwrap(), [0], "Quit asks the app to exit");
+}
+
+/// An app with its own quit path (Pitwall) replaces the shell's.
+#[test]
+fn the_app_can_replace_what_quit_does_without_a_window() {
+    let asked = Arc::new(std::sync::Mutex::new(0));
+    let seen = asked.clone();
+    let app = app(shell()
+        .menu_quit_without_window(move |_| *seen.lock().unwrap() += 1)
+        .setup(|app| {
+            app.manage(NativeMenu::<MockRuntime>::with_bar(
+                "Shell Demo",
+                true,
+                NoBar,
+            ));
+            Ok(())
+        }));
+    let menu = app.state::<NativeMenu<MockRuntime>>();
+    let quit = serde_json::json!({ "menus": [{ "id": "app", "label": "Shell Demo", "items": [
+        { "kind": "item", "id": "pd.app.quit", "label": "Quit Shell Demo", "keybinding": null, "checked": null, "enabled": true }
+    ] }] });
+    let model = paddock_menu::model::parse(serde_json::from_value(quit).unwrap()).unwrap();
+    menu.apply(app.handle(), &model).unwrap();
+    paddock_menu::tauri::menu_chosen(app.handle(), "pd.app.quit");
+    assert_eq!(*asked.lock().unwrap(), 1);
+}
+
+/// The policy for a click with no window open, on both kinds of shell: Quit goes to the override, else the window layer's
+/// quit, else the given exit; any other item only reopens the main window where there is a window layer.
+/// A tray's items arrive at the same menu-event handler as the menu bar's (`NativeMenu::on_no_window` takes every id the
+/// menu bar shows, and only those), so a tray id must never be a menu-bar id. The tray's are `pd.show` and `pd.quit`; the
+/// menu bar's Quit is `pd.app.quit`.
+#[test]
+fn tray_ids_and_menu_bar_ids_do_not_overlap() {
+    let tray = [paddock_window::tray::SHOW_ID, paddock_window::tray::QUIT_ID];
+    assert!(!tray.contains(&paddock_menu::model::QUIT_COMMAND));
+    assert!(
+        tray.iter().all(|id| !id.starts_with("pd.app.")),
+        "{tray:?}: pd.app.* is the menu bar's app menu"
+    );
+}
+
+#[test]
+fn a_click_without_a_window_quits_or_brings_the_main_window_back() {
+    let plain = app(Builder::new(identity()).in_memory().native_menu(false));
+    assert!(plain.try_state::<Windows<MockRuntime>>().is_none());
+    let exited = std::cell::Cell::new(0);
+    menu_without_window_using(plain.handle(), "pd.app.quit", None, |_| {
+        exited.set(exited.get() + 1)
+    });
+    assert_eq!(exited.get(), 1, "no window layer: the exit given");
+    // Another item has nothing to reopen without a window layer.
+    menu_without_window_using(plain.handle(), "pd.about", None, |_| {
+        unreachable!("not a quit")
+    });
+    assert!(plain.get_webview_window("main").is_none());
+    // With an override, Quit is the app's.
+    let own = Arc::new(std::sync::Mutex::new(0));
+    let seen = own.clone();
+    let quit: Arc<MenuQuit<MockRuntime>> = Arc::new(move |_| *seen.lock().unwrap() += 1);
+    menu_without_window_using(plain.handle(), "pd.app.quit", Some(&*quit), |_| {
+        unreachable!("the app quits")
+    });
+    assert_eq!(*own.lock().unwrap(), 1);
+}
+
+/// The installed handler: a click on a shell that has no window layer does nothing for an item that is not Quit.
+#[test]
+fn a_menu_click_without_a_window_layer_reaches_the_policy() {
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .setup(|app| {
+            app.manage(NativeMenu::<MockRuntime>::with_bar(
+                "Shell Demo",
+                true,
+                NoBar,
+            ));
+            Ok(())
+        }));
+    let menu = app.state::<NativeMenu<MockRuntime>>();
+    let about = serde_json::json!({ "menus": [{ "id": "app", "label": "Shell Demo", "items": [
+        { "kind": "item", "id": "pd.about", "label": "About", "keybinding": null, "checked": null, "enabled": true }
+    ] }] });
+    let model = paddock_menu::model::parse(serde_json::from_value(about).unwrap()).unwrap();
+    menu.apply(app.handle(), &model).unwrap();
+    assert_eq!(
+        paddock_menu::tauri::menu_chosen(app.handle(), "pd.about"),
+        None
+    );
+    assert!(app.get_webview_window("main").is_none());
+}
+
+/// A menu item chosen with no window open brings the main window back, after the hook, like a Dock click.
+#[test]
+fn a_menu_item_without_a_window_reopens_the_main_window() {
+    let app = app(shell());
+    menu_without_window(app.handle(), "pd.settings.open", None);
+    wait_for_main(&app);
+}
+
 #[test]
 fn window_events_without_the_window_layer_still_reach_the_other_parts() {
     let app = app(Builder::new(identity())
@@ -275,4 +411,75 @@ fn a_bad_first_run_step_fails_the_start_naming_the_checklist() {
         Ok(_) => panic!("the start must fail"),
     };
     assert!(err.contains("set-up checklist"), "{err}");
+}
+
+/// Waits until the work deferred so far has run (the deferred work runs in order, so a marker queued last arrives
+/// after it; a hang guard only lost work reaches), then checks the main window exists.
+fn wait_for_main(app: &tauri::App<MockRuntime>) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    paddock_window::tauri::after_plugin_hook(app.handle(), move |_| {
+        let _ = tx.send(());
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the deferred work ran");
+    assert!(
+        app.get_webview_window("main").is_some(),
+        "the main window opened"
+    );
+}
+
+/// A start that cannot open its window ends the app through the window layer's exit (code 1), never a panic; a start
+/// that worked ends nothing.
+#[test]
+fn a_start_that_cannot_open_its_window_exits_with_code_1() {
+    let exits = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = exits.clone();
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .windows(move |_| {
+            Windows::builder(WindowConfig::new("Shell Demo"))
+                .exit_app(move |_, code| seen.lock().unwrap().push(code))
+                .build()
+        }));
+    started(app.handle(), Ok(()));
+    assert!(exits.lock().unwrap().is_empty());
+    started(
+        app.handle(),
+        Err(WindowError::new(
+            paddock_window::WindowErrorCode::Failed,
+            "no screen",
+        )),
+    );
+    assert_eq!(*exits.lock().unwrap(), [1]);
+}
+
+/// A Dock click with no window open (macOS) opens the main window after the run-event hook, not inside it (Tauri holds
+/// its plugin store there).
+#[cfg(target_os = "macos")]
+#[test]
+fn a_dock_click_with_no_window_opens_the_main_window_after_the_hook() {
+    // `RunEvent::Reopen` cannot be built outside Tauri (non-exhaustive): its branch calls this.
+    let app = app(shell());
+    let _scope = paddock_window::tauri::plugin_hook_scope();
+    reopen_after_hook(app.handle());
+    wait_for_main(&app);
+}
+
+/// A file opened from Finder with no window open (macOS) is handed to the window layer after the hook.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_file_opened_from_finder_opens_the_main_window_after_the_hook() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("a.log");
+    std::fs::write(&file, "x").unwrap();
+    let app = app(shell());
+    let _scope = paddock_window::tauri::plugin_hook_scope();
+    on_run_event(
+        app.handle(),
+        &RunEvent::Opened {
+            urls: vec![tauri::Url::from_file_path(&file).unwrap()],
+        },
+    );
+    wait_for_main(&app);
 }

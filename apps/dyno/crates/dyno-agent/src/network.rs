@@ -3,7 +3,7 @@
 //! activity entries. Observe-only: nothing here closes a connection or touches a firewall.
 
 use crate::agent::{lock, now, Shared};
-use dyno_core::activity::{ActivityKind, UndoRecord};
+use dyno_core::activity::ActivityKind;
 use dyno_core::network::{build, NetEvent, NetworkQuery, NetworkSnapshot, SocketRow, Tracker};
 use dyno_core::network_names::{clean_name, parse_addresses, HostName};
 use dyno_core::network_traffic::{TrafficRow, TrafficTracker};
@@ -127,7 +127,11 @@ impl NetCentre {
         if stale && !t.refreshing {
             t.refreshing = true;
             let (source, state) = (self.traffic_source.clone(), self.traffic.clone());
-            std::thread::spawn(move || refresh_traffic(source.as_ref(), &state));
+            std::thread::spawn(move || {
+                // The Network page waits for it: live work (rule 52).
+                dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
+                refresh_traffic(source.as_ref(), &state)
+            });
         }
         match &t.cache {
             Some((_, rows, note)) => (rows.clone(), note.clone()),
@@ -179,21 +183,25 @@ impl NetCentre {
             let (tx, rx) = mpsc::channel::<(IpAddr, Option<String>)>();
             for _ in 0..RESOLVE_WORKERS.min(total) {
                 let (queue, tx, dns, names) = (queue.clone(), tx.clone(), self.dns.clone(), self.names.clone());
-                std::thread::spawn(move || loop {
-                    let Some(ip) = lock(&queue).pop_front() else { break };
-                    let (name, ttl) = match dns.lookup(ip) {
-                        Ok(Some(n)) => (clean_name(&n), NAME_TTL),
-                        Ok(None) => (None, NO_NAME_TTL),
-                        Err(_) => (None, FAILED_TTL),
-                    };
-                    {
-                        let mut cache = lock(&names);
-                        if cache.len() >= MAX_NAMES {
-                            cache.clear();
+                std::thread::spawn(move || {
+                    // Look up names: the user waits for the answer (rule 52).
+                    dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
+                    loop {
+                        let Some(ip) = lock(&queue).pop_front() else { break };
+                        let (name, ttl) = match dns.lookup(ip) {
+                            Ok(Some(n)) => (clean_name(&n), NAME_TTL),
+                            Ok(None) => (None, NO_NAME_TTL),
+                            Err(_) => (None, FAILED_TTL),
+                        };
+                        {
+                            let mut cache = lock(&names);
+                            if cache.len() >= MAX_NAMES {
+                                cache.clear();
+                            }
+                            cache.insert(ip, (Instant::now(), name.clone(), ttl));
                         }
-                        cache.insert(ip, (Instant::now(), name.clone(), ttl));
+                        let _ = tx.send((ip, name));
                     }
-                    let _ = tx.send((ip, name));
                 });
             }
             drop(tx);
@@ -247,7 +255,7 @@ fn record(shared: &Shared, events: &[NetEvent]) {
                 NetEvent::NewListener { .. } => "New listener",
                 NetEvent::NewRemoteHost { .. } => "New remote host",
             };
-            core.log(t, ActivityKind::System, title.into(), e.describe(), UndoRecord::None, None);
+            core.log(t, ActivityKind::System, title.into(), e.describe());
         }
         if notable.len() > MAX_EVENTS_PER_LOOK {
             core.log(
@@ -258,8 +266,6 @@ fn record(shared: &Shared, events: &[NetEvent]) {
                     "{} more new listeners or hosts appeared at the same time.",
                     notable.len() - MAX_EVENTS_PER_LOOK
                 ),
-                UndoRecord::None,
-                None,
             );
         }
         let rules = core.settings.network_alerts;
@@ -302,8 +308,12 @@ mod tests {
 
     struct Dns(Arc<StdMutex<Vec<IpAddr>>>);
 
+    /// The thread roles the fakes were called at.
+    static ROLES: StdMutex<Vec<(&str, Option<dyno_platform::priority::ThreadRole>)>> = StdMutex::new(Vec::new());
+
     impl ReverseDns for Dns {
         fn lookup(&self, ip: IpAddr) -> Result<Option<String>, PlatformError> {
+            ROLES.lock().unwrap().push(("dns", dyno_platform::priority::current_role()));
             self.0.lock().unwrap().push(ip);
             match ip.to_string().as_str() {
                 "10.0.0.1" => Ok(Some("router.lan.".into())),
@@ -319,6 +329,7 @@ mod tests {
 
     impl ProcessTraffic for NoTraffic {
         fn counters(&self) -> Result<Vec<dyno_core::network_traffic::TrafficCounter>, PlatformError> {
+            ROLES.lock().unwrap().push(("traffic", dyno_platform::priority::current_role()));
             match &self.0 {
                 Ok(v) => Ok(v.clone()),
                 Err(PlatformError::Unsupported(m)) => Err(PlatformError::Unsupported(m.clone())),
@@ -412,5 +423,20 @@ mod tests {
         let e = c.look(&[]).unwrap_err();
         assert_eq!(e.code, ErrorCode::Internal);
         assert!(e.to_string().contains("denied"));
+    }
+
+    /// Rule 52 (coordinator review, 2026-10-30): the user waits for host names (Look up names) and for the traffic the
+    /// Network page shows, so both run as live work, never stalled behind busy normal threads on Windows.
+    #[test]
+    fn name_lookups_and_the_traffic_refresh_run_as_live_work() {
+        use dyno_platform::priority::ThreadRole;
+        let c = centre(Arc::default(), Ok(vec![]));
+        c.resolve(&["10.0.9.1".into()]).unwrap();
+        settled(&c);
+        let roles = ROLES.lock().unwrap().clone();
+        for what in ["dns", "traffic"] {
+            assert!(roles.iter().any(|(w, _)| *w == what), "{what} never ran: {roles:?}");
+        }
+        assert!(roles.iter().all(|(_, r)| *r == Some(ThreadRole::Live)), "{roles:?}");
     }
 }

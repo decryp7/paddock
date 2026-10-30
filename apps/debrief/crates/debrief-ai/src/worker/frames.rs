@@ -311,7 +311,7 @@ impl FramesTransport {
         spec.args = args.to_vec();
         spec.env = env.to_vec();
         spec.keep_env = super::WORKER_ENV;
-        spec.endpoint_prefix = "debrief-ai".into();
+        spec.endpoint_prefix = debrief_ipc::endpoint::prefix::AI.into();
         spec.connect_window = CONNECT_WINDOW;
         spec.log = Some(worker_log());
         let mut c = ChildSpec::new(spec);
@@ -347,9 +347,13 @@ impl FramesTransport {
         })
     }
 
+    /// Names what ended the call: a worker that has exited crashed, whether its connection closed yet or not. A process
+    /// still finishing its core dump keeps its sockets open, so the stall timer can run out first; that is a crash, not
+    /// a hang.
     fn died(&self, e: IpcError) -> TransportError {
         match (e, &self.child) {
             (IpcError::Died(_), Some(c)) => IpcError::Died(c.exit_text()),
+            (IpcError::Timeout, Some(c)) if c.exited() => IpcError::Died(c.exit_text()),
             (e, _) => e,
         }
     }
