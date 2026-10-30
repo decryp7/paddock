@@ -5,11 +5,17 @@ test.describe('apps and keys', () => {
   test('creates an app and shows its key once', async ({ page }) => {
     await openApp(page, '/apps');
     await page.getByRole('button', { name: 'New app' }).first().click();
-    await page.getByLabel('Name').fill('My script');
-    await page.getByRole('button', { name: 'Create app' }).click();
-    const dialog = page.locator('pw-key-secret-dialog');
-    await expect(dialog).toContainText('pw_');
-    await dialog.getByRole('button', { name: "I've saved it" }).click();
+    const form = page.getByRole('dialog', { name: 'New app' });
+    await expect(form.getByTestId('dialog-action-create')).toBeDisabled();
+    await form.getByLabel('Name').fill('My script');
+    await form.getByTestId('dialog-action-create').click();
+    const secret = page.getByRole('alertdialog', { name: /New key for My script/ });
+    await expect(secret.locator('#pw-key-secret')).toHaveValue(/^pw_/);
+    // A required choice: Escape does not lose the key.
+    await page.keyboard.press('Escape');
+    await expect(secret).toBeVisible();
+    await secret.getByRole('button', { name: "I've saved it" }).click();
+    await expect(secret).toHaveCount(0);
     await expect(page.getByText('My script').first()).toBeVisible();
   });
 

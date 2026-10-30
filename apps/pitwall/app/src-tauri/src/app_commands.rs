@@ -1,13 +1,12 @@
 //! The app's own commands (everything that is not a management method): the service's registration, start at log-in
-//! and updates.
+//! and the long operations as jobs. Pitwall's own updates are the shell's (`paddock-updater`, About and Updates).
 
 use crate::app_state::{self, AppState, FirstRun};
 use crate::commands::{forward, SharedClient};
 use crate::jobs::{self, JobEvent, JobSink, JobSpec, Jobs, Outcome};
 use crate::service_install::{self, ServiceInstall};
 use crate::service_repair::{RepairOutcome, RepairPhase};
-use crate::updater::{self, AppUpdateStatus, OfflineKnown, UpdateInfo};
-use paddock_jobs::{Phase, Unit};
+use paddock_jobs::Phase;
 use pitwall_core::mgmt::{CommandError, ErrorCode};
 use serde_json::Value;
 use std::sync::Arc;
@@ -88,23 +87,6 @@ pub async fn set_autostart(app: AppHandle, enabled: bool) -> Result<bool, Comman
             .map_err(|e| internal(format!("start at log-in could not be read: {e}")))
     })
     .await?
-}
-
-/// Whether this build can update itself (`AppUpdateStatus` in `api.types.ts`).
-#[tauri::command]
-pub async fn app_update_status(app: AppHandle) -> Result<AppUpdateStatus, CommandError> {
-    blocking("reading the update status", move || updater::status(&app)).await
-}
-
-/// Checks for a release; only when the user asks.
-#[tauri::command]
-pub async fn check_app_update(
-    app: AppHandle,
-    client: State<'_, SharedClient>,
-    known: State<'_, Arc<OfflineKnown>>,
-) -> Result<Option<UpdateInfo>, CommandError> {
-    updater::refuse_when_offline(client.as_ref(), &known).await?;
-    updater::check(&app).await
 }
 
 // Long operations as jobs (ER-17..19) on the shared executor. Each `start_*` returns the job id at once and reports on
@@ -417,62 +399,6 @@ pub async fn start_check_updates(
         "check_updates_now",
         serde_json::json!({}),
     ))
-}
-
-/// Downloads and installs the update in the background (`install_app_update` as a job); the app restarts when it is done.
-/// The download reports bytes. Cancel drops the download, which leaves the installed version untouched and the found update
-/// in place for another try.
-#[tauri::command]
-pub async fn start_app_update(
-    app: AppHandle,
-    client: State<'_, SharedClient>,
-    known: State<'_, Arc<OfflineKnown>>,
-    jobs: State<'_, Arc<Jobs>>,
-    on_event: Channel<JobEvent>,
-) -> Result<u64, CommandError> {
-    updater::refuse_when_offline(client.as_ref(), &known).await?;
-    let (c, k) = (client.inner().clone(), known.inner().clone());
-    let mut spec = spec("app-update", "Updating Pitwall", "Preparing the update");
-    spec.own_progress = true;
-    Ok(jobs::start(jobs.inner(), spec, channel_sink(on_event), move |ctx| async move {
-        ctx.phase(Phase {
-            id: "download".into(),
-            label: "Downloading the update".into(),
-            unit: Unit::Bytes,
-            total: None,
-        });
-        let progress = ctx.clone();
-        // Once the install starts it cannot be interrupted: the guard keeps Cancel off until the app restarts.
-        let installing = std::sync::Mutex::new(None);
-        let report = move |p| {
-            if let Some(g) = apply_install_progress(&progress, p) {
-                *installing.lock().unwrap_or_else(|e| e.into_inner()) = Some(g);
-            }
-        };
-        let gate = || async move { updater::refuse_when_offline(c.as_ref(), &k).await };
-        tokio::select! {
-            r = updater::install(&app, report, gate) => r.map(|()| Outcome::Done(Value::Null)),
-            () = jobs::cancelled(ctx.cancel_token()) => Ok(Outcome::Cancelled),
-        }
-    }))
-}
-
-/// Shows an install's progress on its job: bytes (and the size when known) while downloading, then the install phase, which
-/// returns the guard that keeps Cancel off.
-fn apply_install_progress(ctx: &paddock_jobs::JobContext, p: updater::InstallProgress) -> Option<paddock_jobs::UncancellableGuard> {
-    match p {
-        updater::InstallProgress::Downloading { done, total } => {
-            if let Some(t) = total {
-                ctx.set_total(t);
-            }
-            ctx.set(done);
-            None
-        }
-        updater::InstallProgress::Installing => {
-            ctx.phase(Phase::discovering("install", "Installing the update"));
-            Some(ctx.uncancellable("The update is being installed and cannot be cancelled; Pitwall restarts when it is done."))
-        }
-    }
 }
 
 /// The user stops waiting for a job whose Cancel did not take effect: the job ends as cancelled and says the server may
@@ -1160,85 +1086,5 @@ mod tests {
         );
         events.until_terminal().await;
         assert!(matches!(events.last(), Some(JobEvent::Failed { error, .. }) if error.code == ErrorCode::ServerUnavailable));
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn once_the_install_starts_cancel_is_off_with_a_reason() {
-        let jobs = jobs();
-        let (sink, events) = collector();
-        let (installing_tx, mut installing_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
-        let id = jobs::start(&jobs, spec("app-update", "t", "p"), sink, move |ctx| async move {
-            assert!(apply_install_progress(&ctx, updater::InstallProgress::Downloading { done: 1, total: None }).is_none());
-            let _guard = apply_install_progress(&ctx, updater::InstallProgress::Installing);
-            installing_tx.send(()).unwrap();
-            std::future::pending::<()>().await;
-            Ok(Outcome::Done(Value::Null))
-        });
-        installing_rx.recv().await.unwrap();
-        assert!(!jobs.cancel(id), "an install in progress cannot be cancelled");
-        events
-            .until("the events say why", |e| {
-                e.iter()
-                    .any(|e| matches!(e, JobEvent::Progress { cancellable: false, phase, .. } if phase.contains("Installing")))
-            })
-            .await;
-    }
-
-    #[test]
-    fn an_install_reports_bytes_then_the_install_phase() {
-        let jobs = jobs();
-        let (sink, events) = collector();
-        let spec = {
-            let mut s = spec("app-update", "t", "Preparing the update");
-            s.own_progress = true;
-            s
-        };
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .start_paused(true)
-            .build()
-            .unwrap();
-        rt.block_on(async {
-            jobs::start(&jobs, spec, sink, |ctx| async move {
-                ctx.phase(Phase {
-                    id: "download".into(),
-                    label: "Downloading the update".into(),
-                    unit: Unit::Bytes,
-                    total: None,
-                });
-                apply_install_progress(&ctx, updater::InstallProgress::Downloading { done: 100, total: None });
-                apply_install_progress(
-                    &ctx,
-                    updater::InstallProgress::Downloading {
-                        done: 400,
-                        total: Some(1000),
-                    },
-                );
-                apply_install_progress(&ctx, updater::InstallProgress::Installing);
-                Ok(Outcome::Done(Value::Null))
-            });
-            events.until_terminal().await;
-        });
-        let all = events.all();
-        let bytes: Vec<(u64, Option<u64>)> = all
-            .iter()
-            .filter_map(|e| match e {
-                JobEvent::Progress { phase, done, total, .. } if phase == "Downloading the update" => Some((*done, *total)),
-                _ => None,
-            })
-            .collect();
-        assert!(
-            all.iter()
-                .filter(|e| progress_phase(e) == Some("Downloading the update"))
-                .all(|e| matches!(e, JobEvent::Progress { unit: Unit::Bytes, .. })),
-            "the download counts bytes"
-        );
-        assert!(all
-            .iter()
-            .filter(|e| progress_phase(e) == Some("Installing the update"))
-            .all(|e| matches!(e, JobEvent::Progress { unit: Unit::Items, .. })));
-        assert!(bytes.contains(&(100, None)) && bytes.contains(&(400, Some(1000))), "{bytes:?}");
-        assert!(bytes.windows(2).all(|w| w[0].0 <= w[1].0), "never backwards: {bytes:?}");
-        assert!(all.iter().any(|e| progress_phase(e) == Some("Installing the update")));
     }
 }

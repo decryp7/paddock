@@ -1,4 +1,4 @@
-import { mockOptionsFrom } from '../app.config';
+import { mockOptionsFrom } from './backend-factory';
 import type { LiveUpdate, PlaygroundEvent } from './api.types';
 import { isTauri } from './backend';
 import { toCommandError } from './command-error';
@@ -54,7 +54,6 @@ describe('MockBackend', () => {
     expect((await mock.requests(10)).length).toBe(10);
     expect((await mock.benchmarks()).length).toBeGreaterThan(0);
     expect((await mock.settings()).memory.preset).toBe('balanced');
-    expect((await mock.appUpdateStatus()).available).toBe(false);
     expect((await mock.diskUsage()).unused).toContain('qwen3.5-2b-q8_0');
   });
 

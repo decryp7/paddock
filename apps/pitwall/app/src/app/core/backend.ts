@@ -4,7 +4,6 @@ import type {
   CacheClearScope,
   CacheInfo,
   AppPermissions,
-  AppUpdateStatus,
   BenchmarkResult,
   BuildCapabilities,
   EnginePinState,
@@ -43,7 +42,6 @@ import type {
   Settings,
   UpdateCheckResult,
   UpdateCheckStatus,
-  UpdateInfo,
   UpdateNotice,
   UpdateSchedule,
 } from './api.types';
@@ -168,11 +166,6 @@ export interface PitwallBackend {
   // Settings
   settings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<Settings>;
-  appUpdateStatus(): Promise<AppUpdateStatus>;
-  /** Looks for a newer release; only when the user asks. Null: this is the latest. */
-  checkAppUpdate(): Promise<UpdateInfo | null>;
-  /** Installs the update the last check found; the app restarts. */
-  installAppUpdate(): Promise<void>;
 
   // The server as an OS service, and start at log-in (app commands, not management calls)
   serviceState(): Promise<ServiceInstall>;
@@ -202,7 +195,6 @@ export const JOB_METHODS: ReadonlySet<keyof PitwallBackend> = new Set<keyof Pitw
   'installService',
   'uninstallService',
   'repairService',
-  'installAppUpdate',
 ]);
 
 export const BACKEND = new InjectionToken<PitwallBackend>('PitwallBackend');

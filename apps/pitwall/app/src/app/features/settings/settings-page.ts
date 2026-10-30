@@ -1,18 +1,19 @@
-import { ChangeDetectionStrategy, Component, DOCUMENT, DestroyRef, OnInit, afterNextRender, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, InjectionToken, OnInit, computed, inject } from '@angular/core';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
+import { PdNotificationHost } from '@decryp7/paddock-ui/shell/notify';
 import { MatFormField, MatSuffix } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInput } from '@angular/material/input';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import type { CacheClearScope, CacheInfo, CacheKindInfo, CacheStorage, OnQuit, Preset, ThemeChoice } from '../../core/api.types';
+import type { CacheClearScope, CacheInfo, CacheKindInfo, CacheStorage, OnQuit, Preset } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
-import { ThemeService } from '../../core/theme';
 import { Toasts } from '../../core/toasts';
 import { PRESET_HINT, PRESET_LABEL } from '../../shared/labels';
-import { Confirm } from '../../shared/ui/confirm';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { Panel } from '../../shared/ui/panel';
 import { bytes, date, int } from '../../shared/format';
 import { expiryText, oldestText, sizeText, ttlOptions } from './cache-text';
@@ -27,17 +28,11 @@ const GB = 1024 ** 3;
 const MB = 1024 ** 2;
 const PRESETS: Exclude<Preset, 'custom'>[] = ['lowMemory', 'balanced', 'performance'];
 
-const SECTIONS = [
-  { id: 'general', label: 'General', icon: 'sliders' },
-  { id: 'server', label: 'Server', icon: 'server' },
-  { id: 'memory', label: 'Memory', icon: 'memory' },
-  { id: 'cache', label: 'Caching', icon: 'bolt' },
-  { id: 'network', label: 'Network', icon: 'globe' },
-  { id: 'model-updates', label: 'Model updates', icon: 'download' },
-  { id: 'privacy', label: 'Privacy', icon: 'lock' },
-  { id: 'service', label: 'Service', icon: 'server' },
-  { id: 'updates', label: 'Updates', icon: 'download' },
-] as const;
+/**
+ * Set in a window of its own (the Settings window booted by URL): the page shows its confirmations itself, since no pages frame
+ * with a notification host is around it. In the main window's in-page dialog (the browser build) the frame's host shows them.
+ */
+export const OWN_TOAST_HOST = new InjectionToken<boolean>('PitwallOwnToastHost', { factory: () => false });
 
 /** A number from a number input, clamped to `[min, max]`, or null when it is empty or not a number. */
 export function parseNumber(value: string, min = -Infinity, max = Infinity): number | null {
@@ -47,10 +42,13 @@ export function parseNumber(value: string, min = -Infinity, max = Infinity): num
   return Math.min(max, Math.max(min, n));
 }
 
-/** Everything Pitwall can be told: general, server, memory, network, privacy and updates. */
+/**
+ * Pitwall's page of the Settings window (Appearance and Updates are the shell's pages beside it): general, server, memory,
+ * caching, network, model updates, privacy and the background service.
+ */
 @Component({
   selector: 'pw-settings-page',
-  imports: [MatButton, MatIconButton, MatButtonToggleGroup, MatButtonToggle, MatFormField, MatInput, MatSuffix, MatIconModule, MatSlideToggleModule, MatTooltipModule, Panel, PdSelect, ServicePanel],
+  imports: [MatButton, MatIconButton, MatButtonToggleGroup, MatButtonToggle, MatFormField, MatInput, MatSuffix, MatIconModule, MatSlideToggleModule, MatTooltipModule, Panel, PdSelect, ServicePanel, PdNotificationHost],
   providers: [SettingsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './settings-page.html',
@@ -66,11 +64,9 @@ export class SettingsPage implements OnInit {
     const s = this.updates.status();
     return s ? checkSummary(s, this.now()) : '';
   });
-  private readonly theme = inject(ThemeService);
   private readonly toasts = inject(Toasts);
-  private readonly doc = inject(DOCUMENT);
-  private readonly confirm = inject(Confirm);
-  protected readonly sections = SECTIONS;
+  protected readonly ownToasts = inject(OWN_TOAST_HOST);
+  private readonly dialogs = inject(DialogService);
   protected readonly intText = int;
   protected readonly sizeOf = bytes;
   protected readonly cacheKinds: { id: 'embeddings' | 'responses'; title: string; noun: string; about: string; ttlHint: string }[] = [
@@ -80,12 +76,6 @@ export class SettingsPage implements OnInit {
   protected readonly presets = PRESETS;
   protected readonly presetLabel = PRESET_LABEL;
   protected readonly presetHint = PRESET_HINT;
-  protected readonly active = signal<string>('general');
-  protected readonly themes: { value: ThemeChoice; label: string; icon: string }[] = [
-    { value: 'system', label: 'System', icon: 'monitor' },
-    { value: 'light', label: 'Light', icon: 'sun' },
-    { value: 'dark', label: 'Dark', icon: 'moon' },
-  ];
   protected readonly quitOptions: { value: OnQuit; label: string }[] = [
     { value: 'keepServing', label: 'Keep serving in the background' },
     { value: 'stopServing', label: 'Stop serving' },
@@ -94,48 +84,20 @@ export class SettingsPage implements OnInit {
   protected readonly d = computed(() => this.store.draft());
   protected readonly lan = computed(() => this.live.server()?.lan ?? null);
 
-  constructor() {
-    // Scroll spy: the sub-navigation follows the section at the top of the view.
-    let observer: IntersectionObserver | null = null;
-    afterNextRender(() => {
-      if (typeof IntersectionObserver === 'undefined') return;
-      observer = new IntersectionObserver(
-        (entries) => {
-          const top = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-          if (top) this.active.set(top.target.id.replace(/^set-/, ''));
-        },
-        { rootMargin: '0px 0px -65% 0px' },
-      );
-      this.observe = () => this.doc.querySelectorAll('[id^="set-"]').forEach((el) => observer?.observe(el));
-      this.observe();
-    });
-    inject(DestroyRef).onDestroy(() => observer?.disconnect());
-  }
-
-  /** Starts observing the section cards (they render once settings load). */
-  private observe: () => void = () => undefined;
-
   ngOnInit(): void {
     void this.service.refresh();
     void this.updates.load();
     void this.store.loadCacheInfo();
-    void this.store.load().then(() => setTimeout(() => this.observe()));
+    void this.store.load();
+    // The network address and certificate come from the server's overview; the Settings window reads it itself.
+    if (!this.live.overview()) void this.live.loadOverview();
+    this.live.connect();
   }
 
-  protected go(id: string): void {
-    this.active.set(id);
-    this.doc.getElementById(`set-${id}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-  }
-
-  protected setTheme(choice: ThemeChoice): void {
-    this.store.edit('general', { theme: choice });
-    this.theme.set(choice);
-  }
-
-  protected discard(): void {
-    this.store.discard();
-    const t = this.store.saved()?.general.theme;
-    if (t) this.theme.set(t);
+  /** Saves, then reads the overview again: a new port or network setting changes the address shown. */
+  protected async save(): Promise<void> {
+    await this.store.save();
+    if (!this.store.dirty()) void this.live.loadOverview();
   }
 
   protected value(e: Event): string {
@@ -263,11 +225,10 @@ export class SettingsPage implements OnInit {
 
   /** Clearing is destructive but cheap to undo (the caches refill), so it asks once, naming what goes. */
   protected async clear(scope: CacheClearScope, what: string): Promise<void> {
-    const ok = await this.confirm.ask({
-      title: `Clear ${what}?`,
+    const ok = await confirm(this.dialogs, {
+      heading: `Clear ${what}?`,
       message: 'The entries are deleted now. Apps keep working; requests are answered by the model again until the cache refills.',
-      confirm: 'Clear now',
-      danger: true,
+      confirm: { label: 'Clear cache', destructive: true },
     });
     if (ok) await this.store.clearCache(scope);
   }

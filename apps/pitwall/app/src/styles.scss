@@ -2,18 +2,8 @@
    and the Material theme are @decryp7/paddock-ui's (paddock.css, controls.css and material.css, loaded by angular.json):
    components use the shared --pd-* tokens only. <html data-accent="pitwall"> picks Pitwall's violet (index.html).
 
-   The window is opaque, like every family window (user, 2026-10-30): no Mica or vibrancy behind it.
-
-   Pitwall's one own property is a layout value the family has no token for (--pw-*): html.mac reserves a 28 px title
-   region for the inset traffic lights. */
-
-:root {
-  --pw-titlebar-h: 0px;
-}
-
-html.mac {
-  --pw-titlebar-h: 28px;
-}
+   The window is opaque, like every family window (user, 2026-10-30): no Mica or vibrancy behind it. The frame around the
+   pages (title bar, sidebar, status bar), the dialogs and their windows are the shell's (@decryp7/paddock-ui/shell). */
 
 *,
 *::before,
@@ -470,25 +460,8 @@ cdk-virtual-scroll-viewport.fit > .cdk-virtual-scroll-content-wrapper {
   }
 }
 
-/* ---- CDK overlay, dialog ------------------------------------------------------------------------------------- */
+/* ---- Motion ------------------------------------------------------------------------------------------------- */
 
-
-.cdk-overlay-backdrop.pw-backdrop {
-  background: var(--pd-scrim);
-}
-.cdk-overlay-backdrop.pw-backdrop-blur {
-  background: var(--pd-scrim);
-  backdrop-filter: blur(2px);
-}
-.pw-dialog {
-  background: var(--pd-surface-3);
-  color: var(--pd-text);
-  border: 1px solid var(--pd-hairline);
-  border-radius: var(--pd-radius-dialog);
-  box-shadow: var(--pd-shadow-3);
-  outline: none;
-  animation: pw-pop var(--pd-duration) var(--pd-ease-move);
-}
 @keyframes pw-pop {
   from {
     opacity: 0;

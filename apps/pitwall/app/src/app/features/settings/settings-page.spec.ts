@@ -1,10 +1,9 @@
 import { TestBed } from '@angular/core/testing';
 import { MockBackend } from '../../core/mock-backend';
 import { LiveStore } from '../../core/live.store';
-import { ThemeService } from '../../core/theme';
 import { Toasts } from '../../core/toasts';
-import { button, render, settle } from '../../../testing/render';
-import { SettingsPage, parseNumber } from './settings-page';
+import { button, dialogsAnswering, render, settle } from '../../../testing/render';
+import { OWN_TOAST_HOST, SettingsPage, parseNumber } from './settings-page';
 
 describe('parseNumber', () => {
   it('clamps, and rejects empty or non-numeric input', () => {
@@ -18,9 +17,13 @@ describe('parseNumber', () => {
 });
 
 describe('SettingsPage', () => {
+  /** How the confirmation's window answers (`true`: the affirmative). */
+  let confirmAnswer = true;
   async function setup(backend = new MockBackend()) {
+    const dialogs = dialogsAnswering(() => (confirmAnswer ? true : undefined));
+    TestBed.configureTestingModule({ providers: [dialogs] });
     const r = await render(SettingsPage, backend);
-    return { ...r, theme: TestBed.inject(ThemeService), toasts: TestBed.inject(Toasts) };
+    return { ...r, toasts: TestBed.inject(Toasts), opened: dialogs.opened };
   }
   const input = (el: HTMLElement, id: string) => el.querySelector<HTMLInputElement>('#' + id)!;
   async function change(fixture: Parameters<typeof settle>[0], el: HTMLElement, id: string, value: string) {
@@ -31,12 +34,18 @@ describe('SettingsPage', () => {
   }
   const switchOf = (el: HTMLElement, labelId: string) => el.querySelector<HTMLButtonElement>(`button[aria-labelledby="${labelId}"], [aria-labelledby="${labelId}"] button`)!;
 
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    localStorage.clear();
+    confirmAnswer = true;
+  });
 
-  it('renders every section from the loaded settings, with no save bar', async () => {
+  it('renders every section from the loaded settings as the Settings window’s Pitwall page, with no save bar', async () => {
     const { el } = await setup();
-    expect(el.querySelector('h1')?.textContent).toBe('Settings');
-    for (const id of ['general', 'server', 'memory', 'network', 'model-updates', 'privacy', 'service', 'updates']) expect(el.querySelector('#set-' + id)).not.toBeNull();
+    expect(el.querySelector('h2.pd-title')?.textContent).toBe('Pitwall');
+    expect(el.querySelector('h1')).toBeNull();
+    for (const id of ['general', 'server', 'memory', 'network', 'model-updates', 'privacy', 'service']) expect(el.querySelector('#set-' + id)).not.toBeNull();
+    // Appearance and app updates are the shell's pages of the window: no theme switch and no Updates section here.
+    expect(el.querySelector('#set-updates, [aria-labelledby="lbl-theme"]')).toBeNull();
     expect(input(el, 'srv-port').value).toBe('11500');
     expect(input(el, 'srv-max').value).toBe('32');
     expect(input(el, 'mem-idle').value).toBe('10');
@@ -45,8 +54,18 @@ describe('SettingsPage', () => {
     // Rule 47: every number field is a Material field, no native select or legacy button is left.
     for (const id of ['srv-port', 'srv-max', 'mem-idle', 'prv-ret']) expect(input(el, id).closest('mat-form-field')).not.toBeNull();
     expect(el.querySelector('select, [class*="btn"]')).toBeNull();
-    expect(el.textContent).toContain('Updates are not configured');
-    expect(el.textContent).toContain('Not configured');
+  });
+
+  it('in a window of its own reads the overview itself and shows its confirmations there', async () => {
+    TestBed.configureTestingModule({ providers: [{ provide: OWN_TOAST_HOST, useValue: true }] });
+    const { el } = await setup();
+    expect(TestBed.inject(LiveStore).server()).not.toBeNull();
+    expect(el.querySelector('pd-notification-host')).not.toBeNull();
+  });
+
+  it('in the main window leaves the confirmations to the frame’s host', async () => {
+    const { el } = await setup();
+    expect(el.querySelector('pd-notification-host')).toBeNull();
   });
 
   it('shows an error panel with retry when settings cannot load', async () => {
@@ -54,11 +73,6 @@ describe('SettingsPage', () => {
     expect(el.querySelector('#set-general')).toBeNull();
     expect(el.textContent).toContain('not responding');
     expect(el.querySelector('[role="alert"], .error, button')).not.toBeNull();
-  });
-
-  it('says it could not ask for updates when that check fails', async () => {
-    const { el } = await setup(new MockBackend({ failing: ['appUpdateStatus'] }));
-    expect(el.textContent).toContain('Could not ask for updates.');
   });
 
   it('shows the service state and installs and removes it', async () => {
@@ -106,17 +120,6 @@ describe('SettingsPage', () => {
     toggle.click();
     await settle(fixture);
     expect(el.querySelector<HTMLButtonElement>('button[aria-labelledby="lbl-login"]')!.getAttribute('aria-checked')).toBe('true');
-  });
-
-  it('checks for an update only on request, then installs it', async () => {
-    const { fixture, el } = await setup(new MockBackend({ updateAvailable: true }));
-    expect(el.textContent).toContain('only looks for updates when you ask');
-    await button(el, 'Check for updates').click();
-    await settle(fixture);
-    expect(el.textContent).toContain('Version 0.2.0 is ready to install');
-    await button(el, 'Install and restart').click();
-    await settle(fixture);
-    expect(el.textContent).toContain('Update available');
   });
 
   it('edits a number, shows the save bar, and saves it', async () => {
@@ -205,17 +208,6 @@ describe('SettingsPage', () => {
     expect(el.querySelector('.savebar')).toBeNull();
   });
 
-  it('changes the theme live and restores the saved one on discard', async () => {
-    const { fixture, el, theme } = await setup();
-    button(el, 'Dark').click();
-    await settle(fixture);
-    expect(theme.choice()).toBe('dark');
-    expect(el.querySelector('.savebar')).not.toBeNull();
-    button(el, 'Discard').click();
-    await settle(fixture);
-    expect(theme.choice()).toBe('system');
-  });
-
   it('toggles offline mode and saves it to the server', async () => {
     const { fixture, el, backend } = await setup();
     switchOf(el, 'lbl-offline').click();
@@ -288,18 +280,6 @@ describe('SettingsPage', () => {
     expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'bad' });
   });
 
-  it('marks the section in the sub-navigation and scrolls to it', async () => {
-    const { fixture, el } = await setup();
-    const target = el.querySelector<HTMLElement>('#set-privacy')!;
-    const scroll = vi.fn();
-    target.scrollIntoView = scroll;
-    button(el, 'Privacy').click();
-    await settle(fixture);
-    expect(scroll).toHaveBeenCalled();
-    expect(button(el, 'Privacy').getAttribute('aria-current')).toBe('true');
-    expect(button(el, 'General').getAttribute('aria-current')).toBeNull();
-  });
-
   describe('model updates', () => {
     const panel = (el: HTMLElement) => el.querySelector('#set-model-updates')!;
 
@@ -361,14 +341,6 @@ describe('SettingsPage', () => {
   describe('caching', () => {
     const overlay = () => document.querySelector('.cdk-overlay-container') as HTMLElement;
     afterEach(() => overlay()?.replaceChildren());
-
-    async function confirmWith(fixture: Parameters<typeof settle>[0], label: string) {
-      await settle(fixture);
-      const dlg = overlay().querySelector('pw-confirm-dialog') as HTMLElement;
-      expect(dlg).not.toBeNull();
-      button(dlg, label).click();
-      await settle(fixture);
-    }
 
     it('explains the three layers and the privacy rule in plain words', async () => {
       const { el } = await setup();
@@ -470,24 +442,25 @@ describe('SettingsPage', () => {
     });
 
     it('clears one cache after confirming and refreshes its figures', async () => {
-      const { fixture, el, toasts } = await setup();
+      const { fixture, el, toasts, opened } = await setup();
       const clear = Array.from(el.querySelectorAll<HTMLButtonElement>('#set-cache button')).filter((b) => b.textContent!.trim() === 'Clear now');
       expect(clear.length).toBe(2);
       clear[1]!.click();
-      await confirmWith(fixture, 'Clear now');
+      await settle(fixture);
+      expect(opened.at(-1)).toMatchObject({ id: 'pd.confirm', inputs: { confirm: { label: 'Clear cache', destructive: true } } });
       expect(toasts.toasts().at(-1)?.message).toContain('Removed 184 cached entries');
       expect(el.querySelectorAll('#set-cache .cache-stats')[1]!.textContent).toContain('none');
     });
 
     it('does nothing when the confirmation is cancelled, and clears everything on request', async () => {
       const { fixture, el, toasts } = await setup();
+      confirmAnswer = false;
       button(el, 'Clear all caches').click();
       await settle(fixture);
-      button(overlay(), 'Cancel').click();
-      await settle(fixture);
       expect(toasts.toasts().length).toBe(0);
+      confirmAnswer = true;
       button(el.querySelector('#set-cache') as HTMLElement, 'Clear all caches').click();
-      await confirmWith(fixture, 'Clear now');
+      await settle(fixture);
       expect(toasts.toasts().at(-1)?.message).toContain('Removed 3596 cached entries');
     });
   });

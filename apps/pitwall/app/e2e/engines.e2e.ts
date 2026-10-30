@@ -33,9 +33,11 @@ test.describe('engines', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Pinned to Vulkan b11669 for all models' })).toBeVisible();
     // Roll back names its target and asks first.
     await page.getByRole('button', { name: /^Roll back to CUDA 13/ }).click();
-    await expect(page.getByRole('dialog')).toContainText('Roll back to CUDA 13 (NVIDIA) b11669?');
-    await expect(page.getByRole('dialog')).toContainText('pinned for all models');
-    await page.getByRole('dialog').getByRole('button', { name: 'Roll back' }).click();
+    const confirm = page.getByRole('alertdialog');
+    await expect(confirm).toContainText('Roll back to CUDA 13 (NVIDIA) b11669?');
+    await expect(confirm).toContainText('pinned for all models');
+    // A primary (not a danger) confirmation: Roll back is the filled button.
+    await confirm.getByRole('button', { name: 'Roll back' }).click();
     await expect(page.getByRole('button', { name: 'Unpin CUDA 13 (NVIDIA) b11669 for all models' })).toBeVisible();
   });
 

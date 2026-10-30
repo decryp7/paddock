@@ -63,20 +63,25 @@ test('the check finds an old token and lets the allowed kinds through', () => {
   assert.deepEqual(foreignVars(dir).sort(), ['a/x.ts: --text-2', 'y.scss: --bg-card']);
 });
 
+// Since the shell owns the title bar (1.1 WP-2.5) Pitwall declares no --pw-* property of its own; one added later must be
+// declared once, in styles.scss.
 test("every --pw-* property is declared once, in styles.scss, and styles.scss names no colour", () => {
   const styles = readFileSync(join(APP, 'src', 'styles.scss'), 'utf8');
   const declared = new Set([...styles.matchAll(/^\s*(--pw-[a-z0-9-]+):/gm)].map((m) => m[1]));
-  assert.ok(declared.size > 0);
   const used = new Set();
+  let files = 0;
   const walk = (d) => {
     for (const name of readdirSync(d)) {
       const p = join(d, name);
       if (statSync(p).isDirectory()) walk(p);
-      else for (const m of readFileSync(p, 'utf8').matchAll(/var\((--pw-[a-z0-9-]+)/g)) used.add(m[1]);
+      else {
+        files += 1;
+        for (const m of readFileSync(p, 'utf8').matchAll(/var\((--pw-[a-z0-9-]+)/g)) used.add(m[1]);
+      }
     }
   };
   walk(join(APP, 'src'));
-  assert.ok(used.has('--pw-titlebar-h'), 'the walk reaches the components');
+  assert.ok(files > 100, 'the walk reaches the components');
   for (const u of used) assert.ok(declared.has(u), `${u} is used but not declared in styles.scss`);
   const literals = [...styles.matchAll(/#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\(/gi)].map((m) => m[0]);
   assert.deepEqual(literals, [], 'colours come from --pd-* tokens');

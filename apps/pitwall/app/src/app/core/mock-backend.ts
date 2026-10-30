@@ -9,7 +9,6 @@ import type {
   CacheClearScope,
   CacheInfo,
   AppPermissions,
-  AppUpdateStatus,
   BenchmarkResult,
   BuildCapabilities,
   CommandError,
@@ -51,7 +50,6 @@ import type {
   UpdateCheckResult,
   UpdateCheckSettings,
   UpdateCheckStatus,
-  UpdateInfo,
   UpdateNotice,
   UpdateSchedule,
   ServerInfo,
@@ -103,13 +101,12 @@ const JOB_TITLES: Partial<Record<keyof PitwallBackend, string>> = {
   installService: 'Installing the service',
   uninstallService: 'Removing the service',
   repairService: 'Repairing the service',
-  installAppUpdate: 'Updating Pitwall',
 };
 
 /** The calls the desktop app answers itself, without the server (they keep working when the server is down). */
 const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
-  'autostart', 'setAutostart', 'appUpdateStatus', 'checkAppUpdate', 'installAppUpdate', 'quitApp', 'takeQuitAsk',
+  'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk',
 ]);
 
 export interface MockOptions {
@@ -134,8 +131,6 @@ export interface MockOptions {
   startFailed?: boolean;
   /** macOS: a repair of a refused registration is under way (notice with its progress). */
   repairing?: boolean;
-  /** A newer release is available and the build can update itself. */
-  updateAvailable?: boolean;
   /** A model's engine crashed repeatedly and was given up on (dashboard issue with Retry). */
   crashed?: boolean;
   /** Model update notices are already on offer (otherwise "Check now" finds them). */
@@ -193,7 +188,6 @@ export class MockBackend implements PitwallBackend {
   private autostart_ = false;
   private issues_: EngineIssue[] = [];
   private engineSetup_: EngineSetup = { state: 'idle', error: null, download: null };
-  private readonly updateAvailable: boolean;
   private updateCheck_: UpdateCheckSettings = { enabled: false, schedule: 'weekly' };
   private updateNotices_: UpdateNotice[] = [];
   private updateHidden_ = new Set<string>();
@@ -207,7 +201,6 @@ export class MockBackend implements PitwallBackend {
     this.failing = new Set(options.failing ?? []);
     this.rnd = prng(options.seed ?? 42);
     this.streamDelay = options.streamDelayMs ?? 0;
-    this.updateAvailable = options.updateAvailable ?? false;
     if (options.modelUpdates) this.updateNotices_ = demoUpdateNotices(this.now());
     if (options.quitAsk) this.quitAskPending = true;
     if (options.installing) {
@@ -1277,26 +1270,6 @@ export class MockBackend implements PitwallBackend {
     });
   }
 
-  appUpdateStatus(): Promise<AppUpdateStatus> {
-    return this.reply('appUpdateStatus', () =>
-      this.updateAvailable
-        ? { available: true, reason: null, currentVersion: this.server.version }
-        : { available: false, reason: 'Updates are not configured for this build (no updater key).', currentVersion: this.server.version },
-    );
-  }
-
-  checkAppUpdate(): Promise<UpdateInfo | null> {
-    return this.reply('checkAppUpdate', () => {
-      if (!this.updateAvailable) this.fail('notAvailable', 'Updates are not available in this build.');
-      return { version: '0.2.0', notes: 'Faster model loading and a new dashboard tile.' };
-    });
-  }
-
-  installAppUpdate(): Promise<void> {
-    return this.reply('installAppUpdate', () => {
-      if (!this.updateAvailable) this.fail('notAvailable', 'Updates are not available in this build.');
-    });
-  }
 
   serviceState(): Promise<ServiceInstall> {
     return this.reply('serviceState', () => this.service);

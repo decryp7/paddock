@@ -3,13 +3,46 @@
 //! window that opened them acts on it (creates the app, quits, installs the service), so no dialog calls one of Pitwall's
 //! commands itself and each contract lists only the start-up handshake every dialog window needs. The shared confirmation
 //! (`pd.confirm`), About, What's new and Updates are the shell's tables. The slots panel stays an in-app popover (an
-//! anchored panel, rule 17).
+//! anchored panel, rule 17). The one exception is the Settings window: the shell's window as Pitwall's tool, whose
+//! Pitwall page reads and saves the settings, runs the service's jobs and clears the cache itself.
 
+use crate::dialog_callable as app;
 use paddock_shell::dialog_commands as shell;
 
 paddock_dialogs::dialogs! {
     /// Pitwall's dialogs, and the commands every one of its dialog windows may call (the start-up handshake).
     pub static DIALOGS, base &[shell::startup::window_pong, shell::startup::window_ready];
+    // The Settings window: the shell's settings commands, and what Pitwall's page needs (its settings, presets of the
+    // memory policy, the response cache, the overview for the network address it shows, the service and start at log-in,
+    // the model update checks, its jobs) and `dialog_open` for the confirmation before a cache is cleared.
+    "pd.settings" => Tool {
+        width: Some(Px(880)),
+        height: Some(700),
+        commands: &[
+            prefix(shell::settings::ALL, "settings_"),
+            shell::dialogs::dialog_open,
+            app::overview,
+            app::settings,
+            app::save_settings,
+            app::apply_preset,
+            app::cache_info,
+            app::clear_cache,
+            app::service_state,
+            app::start_install_service,
+            app::start_uninstall_service,
+            app::start_repair_service,
+            app::decline_service,
+            app::open_service_login_items,
+            app::get_autostart,
+            app::set_autostart,
+            app::update_check_status,
+            app::update_notices,
+            app::set_update_check,
+            app::start_check_updates,
+            app::app_job_cancel,
+            app::app_job_stop_waiting,
+        ],
+    },
     // "New app": the name (Create app is disabled until it is valid); the window that opened it creates the app.
     "pw.create-app" => Form(Modal) {
         width: Some(Narrow),
@@ -49,6 +82,14 @@ mod tests {
                 assert!(!c.allows(id, command), "{id} may not call {command}");
             }
         }
+        for command in ["settings", "save_settings", "clear_cache", "start_install_service", "set_autostart"] {
+            assert!(c.allows("pd.settings", command), "the Settings window may call {command}");
+        }
+        assert!(!c.allows("pd.settings", "delete_model") && !c.allows("pd.settings", "chat"));
+        assert!(
+            !c.allows("pd.settings", "quit_app") && !c.allows("pd.settings", "download_model"),
+            "the Settings window neither quits nor downloads"
+        );
         let secret = DIALOGS.entries().iter().find(|e| e.id == "pw.key-secret").unwrap();
         assert!(
             secret.required_choice,
