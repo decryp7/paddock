@@ -95,7 +95,7 @@ as a proxy for per-OS branches.
 | Host tools, smokes, verify-installed (sh, ps1) | 24 | 1,555 | 0 | 162 | 3 | `dev host` |
 | Notices, window weight, benches, plugin and font builds | 11 | 976 | 1 | 31 | 3 | `dev notices`, ... |
 | Scaffolder and package publisher | 2 | 990 | 4 | 3 | 3 | `dev new-app`, `dev packages` |
-| Conformance engine and checks C03–C37 | 43 | 2,545 | 2 | 45 | 4 | `paddock-repo-rules`, `dev check` |
+| Conformance engine and checks C03–C37 | 43 | 2,545 | 2 | 45 | 4 | `paddock-rules`, `dev check` |
 | App checks that become rules | 6 | 320 | 0 | 17 | 4 | rules |
 | Icon pipeline (`@resvg/resvg-js`, `playwright-core`) | 23 | 4,098 | 0 | 125 | 5 | `dev icons` (resvg, `paddock-chromium`) |
 | Diagram and poster generators | 77 | 7,277 | 1 | 138 | 5 | `paddock-drawio` + data files; `dev images` |
@@ -140,7 +140,7 @@ phase 5 (generators and glue) and phase 6 (the alternatives for the lossy catego
   `window-weight`, `new-app`, `packages`, `check` (conformance), `icons`, `diagrams`, `images`, `build-info`, `i18n`.
 - **Library crates in `crates/`** where a second consumer exists (§6): `paddock-repo-files` (bounded, `.gitignore`-aware
   walk and hashing), `paddock-repo-graph` (projects, edges, file-to-project mapping, affected closure, the `History`
-  port), `paddock-repo-rules` (after a joint rules-model note with the Pacenotes design, §6), `paddock-drawio` (the
+  port), `paddock-rules` (after a joint rules-model note with the Pacenotes design, §6), `paddock-drawio` (the
   draw.io emitter and theme tokens). CI-only logic stays in modules of `paddock-dev`.
 - **Reuse, not new code:** `paddock-proc` for every external command (timeouts, output caps, tree kill, no console window
   on Windows); `paddock-download` and `paddock-archive` for pinned downloads; **`paddock-runtime`'s TOML catalogues** for
@@ -380,7 +380,7 @@ port), `pacenotes-rules`, `pacenotes-review`, a dependency graph from repositori
 | Walk and hashing | `paddock-repo-files`: bounded walk with `ignore`, `.gitignore`-aware, rayon, SHA-256 | yes; `pacenotes-index` adds its denylist and allow-list on top | its own crate, so the graph and rules crates do not drag each other in | none |
 | Project graph: Cargo and npm workspaces, `tsconfig` paths, Tauri `frontendDist`, file to project, reverse closure | `paddock-repo-graph` | yes: §23's "repositories → packages and modules" level, edges with source and confidence | reads manifests with `toml`/`serde_json`. The `cargo metadata` adapter (exact, used by CI) **is never run inside Pacenotes**. Pacenotes opens hostile repositories and executes nothing from them (§14), and cargo reads the repository's `.cargo/config.toml`, which can name the `rustc` and wrapper programs. To enforce this, the adapter sits behind the crate feature `cargo-metadata`, off by default, and the extended WP-C6 check fails when any manifest under `apps/pacenotes/` enables it, directly or through `cargo tree -e features` in Pacenotes' leg | GLOBAL/DOCS rules, `kinds`, nextest packages, the CI matrix: `dev plan` |
 | Git history | the `History` port in `paddock-repo-graph`: changed files between revisions, log with subjects, file at revision | yes: Pacenotes plugs in its gix adapter | the CI adapter runs `git` through `paddock-proc` | Gitea run and job records |
-| Rules engine | `paddock-repo-rules` | yes, once both models agree | **The models differ today.** Conformance has `error`/`warn`, findings with a one-sentence fix, path-glob waivers with reason and expiry (counted waivers from ADR 0021), and job summaries. Pacenotes §24 has severities `blocker`…`info`, scoped suppressions (line, file, path, rule) with reason and expiry, baselines by fingerprint (rule, path, normalised snippet hash), fix diffs, SARIF and exit codes 0/1/2/3. A **joint rules-model note**, written with the Pacenotes design before the crate (phase 4, first WP), fixes one model: a severity superset, a `Finding` with optional fix text and diff, `Suppression` with scope, reason, expiry and count, fingerprint baselines, report writers (text, JSON, SARIF 2.1.0, job summary) and the exit-code mapping | the family checks themselves |
+| Rules engine | `paddock-rules` | yes, once both models agree | **The models differ today.** Conformance has `error`/`warn`, findings with a one-sentence fix, path-glob waivers with reason and expiry (counted waivers from ADR 0021), and job summaries. Pacenotes §24 has severities `blocker`…`info`, scoped suppressions (line, file, path, rule) with reason and expiry, baselines by fingerprint (rule, path, normalised snippet hash), fix diffs, SARIF and exit codes 0/1/2/3. A **joint rules-model note**, written with the Pacenotes design before the crate (phase 4, first WP), fixes one model: a severity superset, a `Finding` with optional fix text and diff, `Suppression` with scope, reason, expiry and count, fingerprint baselines, report writers (text, JSON, SARIF 2.1.0, job summary) and the exit-code mapping | the family checks themselves |
 | draw.io emitter | `paddock-drawio` (model to canonical mxGraph XML, theme tokens from one source, UML/C4 shapes) | yes: `pacenotes-diagram` adds layout, round-trip merge and diffs on top | golden tests against today's `.mjs` output (the oracle §9.7 asked for) | the family's diagram data files |
 | Gitea REST client | a module of `paddock-dev` | partly (auth, paging, errors) | extracted when `pacenotes-gitea` (PR comments) starts | releases, packages, run records |
 
@@ -403,7 +403,7 @@ times the JS it replaces after duplicates collapse, shell about 2 times; tests a
 | | R6 | notices, window weight, startup bench, plugin and font builds | 1.5 | 976 + about 400 | 900 + 500 tests |
 | | R7 | `new-app`, `packages publish` (with `cargo hakari publish`) | 2 | 990 + about 700 | 1,200 + 800 tests |
 | **4 Rules** | R8a | joint rules-model note with the Pacenotes design (§6) | 1 | – | note |
-| | R8 | `paddock-repo-rules`, `dev check`: checks C03–C37 and the six app checks against golden findings; shadow week; `conformance/` keeps only fixtures | 4.5 | 2,865 + 3,460 | 3,300 + 3,800 tests |
+| | R8 | `paddock-rules`, `dev check`: checks C03–C37 and the six app checks against golden findings; shadow week; `conformance/` keeps only fixtures | 4.5 | 2,865 + 3,460 | 3,300 + 3,800 tests |
 | **5 Generators and UI glue** | R11 | `paddock-drawio` and `dev diagrams` (generate, export through the draw.io CLI); per-app diagram sources become data files | 7 | 5,999 + 159 wrappers | 1,500 + 5,000 data + 1,200 tests |
 | | R12 | `dev icons` (resvg, PNG, `.icns`, `.ico`, previews and sheets with `paddock-chromium`, install and `--check`); `cargo deny` on resvg's licence | 4.5 | 4,098 + 161 | 4,500 + 1,200 tests |
 | | R13 | `dev images` (posters: templates and `paddock-chromium` screenshots) | 2 | 1,278 | 600 + 300 tests |

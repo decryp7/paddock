@@ -241,7 +241,7 @@ rules, because ADR 0018 already owns bounded loading and streaming imports; they
 **Tooling (ADR 0022).** ADR 0022 §3(a) bans new `.mjs`, `.sh` and `.py` tooling files from the start of its phase 1,
 and its phases start after Debrief 1.2 (the agreed order). So C40-C42 are written now as `.mjs` conformance checks
 (`conformance/src/{priority,polls,threads}.mjs`), like C1-C39; they join ADR 0022's counted baseline of tooling files and
-move to `paddock-repo-rules` in its rules phase. The measurement scripts committed with the evidence
+move to `paddock-rules` in its rules phase. The measurement scripts committed with the evidence
 (`apps/debrief/scripts/perf/*.py`, `*.sh`) go on the same baseline and move to `paddock-dev` (or `paddock-bench`) with it.
 
 ## Consequences

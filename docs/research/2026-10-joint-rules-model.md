@@ -157,8 +157,7 @@ measurement; it is designed in C1's own note, not here.
    conformance.
 2. A fix sentence is **required for every rule**, Pacenotes rules included, not only in the conformance profile (section 6 step 2 says how
    an imported result gets one).
-3. The shared crate is named **`paddock-rules`**, not `paddock-repo-rules`. ADR 0022 (sections 6 and 7 table, R8), ADR 0024 line 244 and
-   `docs/plans/debrief-1-2.md` still say `paddock-repo-rules`; they belong to their own owners and take the new name in their next edit.
-   The Pacenotes plan uses it already.
+3. The shared crate is named **`paddock-rules`**, not `paddock-repo-rules`. ADR 0022, ADR 0024, `docs/plans/debrief-1-2.md` and the
+   Pacenotes plan use the new name (renamed in the same change).
 4. Conformance moves onto the Rust crate at `dev check` (ADR 0022 R8); the JavaScript checks stay until then, and the golden tests
    prove the two outputs equal.
