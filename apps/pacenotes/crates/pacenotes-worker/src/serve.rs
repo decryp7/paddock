@@ -73,7 +73,7 @@ pub fn answer(req: &ParseRequest, stop: &dyn Fn() -> bool) -> Result<ParseReply,
     }
     let path = RepoPath::parse(&req.path).map_err(|e| RemoteError::new(codes::INVALID, e.to_string()))?;
     #[cfg(feature = "test-hooks")]
-    hooks(&req.path);
+    crate::hooks::run(&req.path);
     let Some(language) = ParseLanguage::from_path(&path) else {
         return Ok(ParseReply { facts: None });
     };
@@ -104,28 +104,44 @@ pub fn run() -> Result<(), IpcError> {
     child::serve("pacenotes-parse-worker", PROTOCOL, |_| Arc::new(handler()), |_, _| {})
 }
 
-/// Behaviours for the crash tests, chosen by the file name's suffix. Only in builds with the `test-hooks` feature.
-#[cfg(feature = "test-hooks")]
-fn hooks(path: &str) {
-    #[allow(unconditional_recursion)]
-    fn recurse(n: u64) -> u64 {
-        let pad = [n as u8; 4096];
-        std::hint::black_box(&pad);
-        recurse(n + 1) + u64::from(pad[0])
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::*;
+
+    fn request(path: &str, bytes: &[u8]) -> ParseRequest {
+        ParseRequest {
+            path: path.to_owned(),
+            bytes: bytes.to_vec(),
+            max_nodes: pacenotes_parse::DEFAULT_MAX_NODES as u32,
+        }
     }
-    if path.ends_with(".abort") {
-        std::process::abort();
-    } else if path.ends_with(".exit") {
-        std::process::exit(7);
-    } else if path.ends_with(".spin") {
-        loop {
-            std::hint::black_box(0u64);
-        }
-    } else if path.ends_with(".block") {
-        loop {
-            std::thread::park();
-        }
-    } else if path.ends_with(".overflow") {
-        std::hint::black_box(recurse(0));
+
+    #[test]
+    fn a_file_is_answered_with_its_symbols_imports_calls_and_chunks() {
+        let src = b"use std::fmt;\n\npub fn a() { b(); }\n\npub fn b() {}\n";
+        let facts = answer(&request("src/lib.rs", src), &|| false).unwrap().facts.unwrap();
+        assert_eq!(facts.language, "rust");
+        assert_eq!(facts.symbols.len(), 2);
+        assert!(facts.imports.iter().any(|i| i.target.contains("std")));
+        assert!(facts.calls.iter().any(|c| c.callee == "b" && c.caller.as_deref() == Some("a")));
+        assert!(!facts.chunks.is_empty());
+    }
+
+    #[test]
+    fn a_file_in_no_known_language_has_no_facts_and_a_bad_path_is_refused() {
+        assert_eq!(answer(&request("notes.txt", b"x"), &|| false).unwrap(), ParseReply { facts: None });
+        let err = answer(&request("../escape.rs", b"x"), &|| false).unwrap_err();
+        assert_eq!(err.code, codes::INVALID);
+    }
+
+    #[test]
+    fn a_stopped_call_is_answered_as_cancelled_and_a_huge_file_as_too_large() {
+        let big = vec![b'a'; 64 * 1024 * 1024];
+        let err = answer(&request("big.rs", &big), &|| false).unwrap_err();
+        assert_eq!(err.code, codes::TOO_LARGE);
+        let src = b"pub fn a() {}\n".repeat(200);
+        let err = answer(&request("src/lib.rs", &src), &|| true).unwrap_err();
+        assert_eq!(err.code, CallCtx::cancelled_error().code);
     }
 }

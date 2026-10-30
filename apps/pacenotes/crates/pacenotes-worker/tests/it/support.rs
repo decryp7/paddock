@@ -19,6 +19,10 @@ pub fn settings() -> WorkerSettings {
             spin_cpu_micros: 300_000,
         },
         beat: Duration::from_millis(40),
+        // The test workers' coverage profiles go nowhere: a worker the host ends (a crash, a stall, a Cancel, a pool shut down) leaves a
+        // torn profile that fails `cargo llvm-cov` ("no profile can be merged"). The worker's own code is covered in-process
+        // (`serve::tests`), where it can be.
+        envs: vec![("LLVM_PROFILE_FILE".into(), "/dev/null".into())],
         ..WorkerSettings::new(WORKER)
     }
 }

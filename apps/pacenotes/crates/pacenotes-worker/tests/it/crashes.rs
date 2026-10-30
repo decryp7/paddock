@@ -51,16 +51,16 @@ fn the_worker_answers_a_bad_path_and_a_cancelled_call_with_typed_errors_and_stay
 
 #[test]
 fn a_worker_that_aborts_exits_or_overflows_its_stack_costs_that_file_only() {
-    let w = workers();
     for crash in ["bad.abort", "bad.exit", "bad.overflow"] {
+        let w = workers();
         match extract(&w, crash, b"x") {
             Err(SourceError::Crashed(why)) => assert!(why.contains("worker"), "{crash}: {why}"),
             other => panic!("{crash}: {other:?}"),
         }
         // the next file goes to a fresh worker and is parsed
         assert!(extract(&w, "src/ok.rs", GOOD).unwrap().is_some(), "after {crash}");
+        assert!(w.started() >= 2, "the crash was followed by a new process: {}", w.started());
     }
-    assert!(w.started() >= 4, "each crash was followed by a new process: {}", w.started());
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]

@@ -8,6 +8,8 @@
 //! - [`stall`] and [`probe`]: ADR 0031's stall judgement (no wall clocks) as a pure state machine, and the per-process probe it
 //!   reads.
 
+#[cfg(feature = "test-hooks")]
+mod hooks;
 pub mod host;
 pub mod probe;
 pub mod protocol;

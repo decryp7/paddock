@@ -14,11 +14,15 @@ use crate::support::{ParseSource, RecordingFs, p, workspace};
 struct Recorder {
     events: Mutex<Vec<String>>,
     on_phase: Option<(&'static str, CancelToken)>,
+    /// Cancels when the first item of this phase is counted done.
+    on_first_add: Option<(&'static str, CancelToken)>,
+    current: Mutex<&'static str>,
 }
 
 impl Progress for Recorder {
     fn phase(&self, id: &'static str, label: &'static str, total: Option<u64>) {
         self.events.lock().unwrap().push(format!("phase {id} {label:?} total={total:?}"));
+        *self.current.lock().unwrap() = id;
         if let Some((at, token)) = &self.on_phase
             && *at == id
         {
@@ -28,6 +32,11 @@ impl Progress for Recorder {
 
     fn add(&self, n: u64) {
         self.events.lock().unwrap().push(format!("add {n}"));
+        if let Some((at, token)) = &self.on_first_add
+            && *at == *self.current.lock().unwrap()
+        {
+            token.cancel();
+        }
     }
 
     fn set_total(&self, total: u64) {
@@ -319,4 +328,48 @@ fn cancel_in_any_phase_leaves_the_previous_generation_and_the_save_phase_is_the_
     let report = ix.run(&mut opened.store, &token).unwrap();
     assert!(report.generation.is_some());
     assert!(opened.store.generation(&live).unwrap().0 > before.0);
+}
+
+/// The cancel checks inside the per-file work and just before the swap: cancel arrives while a phase is under way, not as it begins.
+#[test]
+fn cancel_while_a_phase_is_under_way_stops_before_the_swap() {
+    for phase in ["read", "extract"] {
+        let ws = workspace_of(&many(6));
+        let mut opened = IndexStore::open(&ws.path("index.db")).unwrap();
+        let fs = RecordingFs::new(&ws.path("ws"));
+        let (source, deny) = (ParseSource::default(), Denylist::new());
+        let live = CancelToken::new();
+        let token = CancelToken::new();
+        let rec = Recorder {
+            on_first_add: Some((phase, token.clone())),
+            ..Recorder::default()
+        };
+        let ix = Indexer {
+            progress: &rec,
+            ..Indexer::new(&fs, &source, &deny)
+        };
+        assert_eq!(
+            ix.run(&mut opened.store, &token),
+            Err(IndexError::Cancelled),
+            "cancelled during {phase}"
+        );
+        assert_eq!(opened.store.counts().unwrap(), (0, 0), "{phase}: nothing was written");
+        let _ = &live;
+    }
+    // one changed file: its phase ends with the cancel and only the check before the swap is left to stop the run
+    let ws = workspace_of(&many(1));
+    let mut opened = IndexStore::open(&ws.path("index.db")).unwrap();
+    let fs = RecordingFs::new(&ws.path("ws"));
+    let (source, deny) = (ParseSource::default(), Denylist::new());
+    let token = CancelToken::new();
+    let rec = Recorder {
+        on_first_add: Some(("extract", token.clone())),
+        ..Recorder::default()
+    };
+    let ix = Indexer {
+        progress: &rec,
+        ..Indexer::new(&fs, &source, &deny)
+    };
+    assert_eq!(ix.run(&mut opened.store, &token), Err(IndexError::Cancelled));
+    assert_eq!(opened.store.counts().unwrap(), (0, 0));
 }

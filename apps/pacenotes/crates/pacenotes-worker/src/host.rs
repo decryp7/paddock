@@ -30,6 +30,8 @@ pub struct WorkerSettings {
     pub beat: Duration,
     /// The node limit sent with every request.
     pub max_nodes: u32,
+    /// Environment variables added to every worker's (the coverage job points the deliberately crashed workers' profiles away).
+    pub envs: Vec<(std::ffi::OsString, std::ffi::OsString)>,
 }
 
 impl WorkerSettings {
@@ -41,6 +43,7 @@ impl WorkerSettings {
             stall: StallLimits::default(),
             beat: Duration::from_secs(1),
             max_nodes: pacenotes_parse::DEFAULT_MAX_NODES as u32,
+            envs: Vec::new(),
         }
     }
 }
@@ -97,6 +100,7 @@ impl ParseWorkers {
         let mut spec = ChildSpec::new(&self.settings.program, "pacenotes-parse-worker");
         spec.lower_priority = true;
         spec.memory_limit = self.settings.memory_limit;
+        spec.envs.clone_from(&self.settings.envs);
         spec.protocol = PROTOCOL;
         spec.host_name = "Pacenotes".into();
         // a cap, not a liveness bound: the launcher gives up at once when the process exits before it connects
