@@ -214,8 +214,9 @@ pub fn from_throttle(
             e.cause.label().to_lowercase()
         ),
         detail: format!(
-            "Throttling since {} with {} confidence. Open Throttling for the cause and what could help.",
+            "Throttling since {} ({}) with {} confidence. Open Throttling for the cause and what could help.",
             crate::report::local_time(e.start, zone),
+            crate::time::offset_label(e.start, zone),
             confidence.word()
         ),
         value: Some(f64::from(e.avg_lost_percent)),
@@ -393,6 +394,13 @@ mod tests {
             peak_temperature_c: Some(99.0),
         };
         let o = from_throttle(&e, true, Confidence::High, &crate::time::FixedZone::UTC);
+        assert!(o.detail.starts_with("Throttling since 1970-01-01 00:00 (UTC) "), "{}", o.detail);
+        let east = from_throttle(&e, true, Confidence::High, &crate::time::FixedZone(480));
+        assert!(
+            east.detail.starts_with("Throttling since 1970-01-01 08:00 (UTC+08:00) "),
+            "{}",
+            east.detail
+        );
         assert_eq!((o.rule().as_str(), o.key().as_str()), ("throttling:cpu", "throttling:cpu"));
         assert_eq!(o.severity, Severity::Warning);
         assert!(

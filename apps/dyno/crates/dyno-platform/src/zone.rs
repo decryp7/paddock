@@ -6,9 +6,18 @@
 use dyno_core::time::{LocalZone, Timestamp};
 use jiff::tz::TimeZone;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// Whether a failed read of the OS zone was already logged (once per process: it is read at every lookup).
 static FAILURE_LOGGED: AtomicBool = AtomicBool::new(false);
+
+/// How long a failed read is reused before the OS zone is read again: jiff's own cache time for the system zone, so the
+/// failure path costs no more than the working one.
+const FAILURE_TTL: Duration = Duration::from_secs(5 * 60);
+
+/// The last failed read and when it happened.
+static LAST_FAILURE: Mutex<Option<(Instant, String)>> = Mutex::new(None);
 
 /// The zone the OS is set to, read again at every lookup (`jiff` caches it and notices a change). When the OS zone cannot
 /// be read, the lookup answers UTC, logs why once, and [`LocalZone::describe`] says so in the diagnostics bundle.
@@ -17,8 +26,26 @@ pub struct SystemZone;
 
 impl SystemZone {
     fn read() -> Result<TimeZone, String> {
-        TimeZone::try_system().map_err(|e| e.to_string())
+        read_through(&LAST_FAILURE, Instant::now(), || TimeZone::try_system().map_err(|e| e.to_string()))
     }
+}
+
+/// Reads with `read` unless a failure younger than [`FAILURE_TTL`] is in `cache`, which then answers instead; a failure is
+/// remembered, a success forgets it.
+fn read_through(
+    cache: &Mutex<Option<(Instant, String)>>,
+    now: Instant,
+    read: impl FnOnce() -> Result<TimeZone, String>,
+) -> Result<TimeZone, String> {
+    let mut last = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((at, error)) = last.as_ref() {
+        if now.saturating_duration_since(*at) < FAILURE_TTL {
+            return Err(error.clone());
+        }
+    }
+    let result = read();
+    *last = result.as_ref().err().map(|e| (now, e.clone()));
+    result
 }
 
 impl LocalZone for SystemZone {
@@ -148,6 +175,25 @@ mod tests {
             }
             assert_eq!(jumps, 23, "{name}: the 23 hours of the one day a year without a midnight");
         }
+    }
+
+    #[test]
+    fn a_failed_read_is_reused_for_five_minutes_then_read_again() {
+        let cache = Mutex::new(None);
+        let reads = std::cell::Cell::new(0);
+        let failing = || {
+            reads.set(reads.get() + 1);
+            Err::<TimeZone, _>("no zone".to_string())
+        };
+        let t0 = Instant::now();
+        assert_eq!(read_through(&cache, t0, failing).unwrap_err(), "no zone");
+        assert_eq!(read_through(&cache, t0 + Duration::from_secs(299), failing).unwrap_err(), "no zone");
+        assert_eq!(reads.get(), 1, "the failure is reused within the five minutes");
+        assert!(read_through(&cache, t0 + FAILURE_TTL, failing).is_err());
+        assert_eq!(reads.get(), 2, "read again after five minutes");
+        // A success forgets the failure: the next lookup reads again.
+        assert!(read_through(&cache, t0 + 2 * FAILURE_TTL, || Ok(TimeZone::UTC)).is_ok());
+        assert!(cache.lock().unwrap().is_none());
     }
 
     #[test]
