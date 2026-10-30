@@ -17,13 +17,17 @@ pub trait Hint {
 /// The most a hint file may hold; a larger file is not one.
 pub const MAX_HINT_BYTES: u64 = 16 * 1024;
 
-/// The bytes of a hint file, `None` when missing, unreadable or larger than [`MAX_HINT_BYTES`].
+/// The bytes of a hint file, `None` when missing, unreadable, not a regular file or larger than [`MAX_HINT_BYTES`]. The
+/// file is opened once and read through that handle, so what was checked is what is read.
 pub fn read_bounded(path: &Path) -> Option<Vec<u8>> {
-    let meta = std::fs::metadata(path).ok()?;
-    if meta.len() > MAX_HINT_BYTES {
+    use std::io::Read;
+    let file = std::fs::File::open(path).ok()?;
+    if !file.metadata().ok()?.is_file() {
         return None;
     }
-    std::fs::read(path).ok()
+    let mut bytes = Vec::new();
+    file.take(MAX_HINT_BYTES + 1).read_to_end(&mut bytes).ok()?;
+    (bytes.len() as u64 <= MAX_HINT_BYTES).then_some(bytes)
 }
 
 /// Whether the hint was written after a wait began at `since_ms`: a file from before that is an old instance's.
@@ -38,7 +42,9 @@ pub fn names_live(hint: &impl Hint, since_ms: i64, answers: impl FnOnce() -> boo
 }
 
 /// Removes the file at `path` only if `read` still finds the one that was seen (same pid and same start): a newer
-/// instance may have written its own meanwhile, and that one is never removed.
+/// instance may have written its own meanwhile, and that one is not removed. Best effort: the check and the removal are
+/// two steps, so an instance that writes its file between them loses it; the instance lock
+/// ([`crate::instance`]), not this file, is what proves a process, and a lost hint is written again.
 pub fn remove_if_same<H: Hint>(path: &Path, seen: &H, read: impl Fn(&Path) -> Option<H>) {
     if read(path).is_some_and(|d| d.pid() == seen.pid() && d.started_ms() == seen.started_ms()) {
         let _ = std::fs::remove_file(path);
@@ -52,23 +58,37 @@ pub fn remove_if_mine<H: Hint>(path: &Path, read: impl Fn(&Path) -> Option<H>) {
     }
 }
 
-/// Writes `body` to `path` atomically (a temporary file beside it, then a rename), readable by the owner only on Unix.
+/// Writes `body` to `path` atomically: a temporary file beside it with a name no other writer uses, created new (never
+/// following a link someone left at that name) and readable by the owner only on Unix, then renamed over `path`. The
+/// temporary file is removed when anything fails.
 pub fn write_private_atomic(path: &Path, body: &[u8]) -> std::io::Result<()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let mut tmp_name = path.as_os_str().to_owned();
-    tmp_name.push(".tmp");
+    tmp_name.push(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
     let tmp = std::path::PathBuf::from(tmp_name);
     let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    options.open(&tmp)?.write_all(body)?;
-    std::fs::rename(&tmp, path)
+    let result = options
+        .open(&tmp)
+        .and_then(|mut f| f.write_all(body))
+        .and_then(|()| std::fs::rename(&tmp, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 #[cfg(test)]
@@ -133,7 +153,11 @@ mod tests {
         let path = tmp.path().join("sub").join("f.json");
         write_private_atomic(&path, b"abc").unwrap();
         assert_eq!(read_bounded(&path).unwrap(), b"abc");
-        assert!(!tmp.path().join("sub").join("f.json.tmp").exists());
+        let leftovers = std::fs::read_dir(tmp.path().join("sub"))
+            .unwrap()
+            .flatten()
+            .count();
+        assert_eq!(leftovers, 1, "no temporary file is left behind");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -150,6 +174,19 @@ mod tests {
         assert!(read_bounded(&path).is_none());
         assert!(read_bounded(&tmp.path().join("missing")).is_none());
         let under_a_file = path.join("x");
-        assert!(write_private_atomic(&under_a_file, b"x").is_err());
+        assert!(
+            write_private_atomic(&under_a_file, b"x").is_err(),
+            "the folder cannot be made under a file"
+        );
+        // A path that is a folder: the temporary file is written, the rename fails, and the temporary file is removed.
+        let folder = tmp.path().join("folder");
+        std::fs::create_dir(&folder).unwrap();
+        assert!(write_private_atomic(&folder, b"x").is_err());
+        assert_eq!(
+            std::fs::read_dir(tmp.path()).unwrap().flatten().count(),
+            2,
+            "only `sub` and `folder` remain"
+        );
+        assert!(read_bounded(&folder).is_none(), "a folder is not a hint");
     }
 }

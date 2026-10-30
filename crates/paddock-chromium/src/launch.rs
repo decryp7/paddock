@@ -954,7 +954,13 @@ fn connect(
         probe,
         ClockPace(opts.clock.clone()),
     );
-    let seen = watch.wait();
+    // A note ("still starting") is not a reason to give up; only a stuck browser is.
+    let seen = loop {
+        match watch.wait() {
+            Watched::State(StartState::Stalled(r)) if !r.cause.is_stuck() => {}
+            seen => break seen,
+        }
+    };
     let probe = watch.into_probe();
     match seen {
         Watched::Cancelled => Err(Error::Closed),
@@ -982,9 +988,10 @@ fn connect(
             }))
         }
         // Stuck (`Starting` is never answered by a watch): the last refused handshake says more than the time did.
-        Watched::State(StartState::Stalled(_) | StartState::Starting) => {
-            Err(probe.refused.unwrap_or(Error::Timeout("the browser start")))
+        Watched::State(StartState::Stalled(report)) => {
+            Err(probe.refused.unwrap_or(Error::Launch(report.message)))
         }
+        Watched::State(StartState::Starting) => Err(Error::Closed),
     }
 }
 

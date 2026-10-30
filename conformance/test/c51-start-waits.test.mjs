@@ -24,6 +24,11 @@ test('C51 passes waived sites, the judge, other names and test modules', () => {
   assert.deepEqual(lines('fn start() {\n}\nfn later() {\n    rx.recv_timeout(d);\n}\n'), []);
 });
 
+test('C51 sees code after a test module and does not flag connect functions', () => {
+  assert.deepEqual(lines('#[cfg(test)]\nmod tests {\n    const START_LIMIT: Duration = D;\n}\npub const SPAWN_TIMEOUT: Duration = D;\n'), [5]);
+  assert.deepEqual(lines('fn connect_pipe() {\n    rx.recv_timeout(d);\n}\nfn start_launchctl_job() {\n    // pace: poll\n    rx.recv_timeout(d);\n}\n'), []);
+});
+
 test('C51 through the runner: warnings only, for source in scope only', async () => {
   const bad = 'pub const START_LIMIT: Duration = D;\n';
   const f = await findingsOf(

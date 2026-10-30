@@ -51,9 +51,6 @@ fn opts_on(f: &Fixture, clock: &FakeClock) -> LaunchOptions {
     o
 }
 
-/// Launches with a fake clock: the start-up wait polls on it, so time is moved on whenever the watchdog and the start-up
-/// wait both wait (the launch then reads the port file again). The fake time this takes has nothing to do with how long
-/// the real fake browser needs, so `opts_on` puts the limits out of reach.
 /// Launches `exe` with `o` (whose clock is `clock`) and moves the fake time on whenever the launch waits.
 fn launch_on_options(exe: &Browser, clock: &FakeClock, o: LaunchOptions) -> Result<Chromium> {
     std::thread::scope(|s| {
@@ -68,6 +65,9 @@ fn launch_on_options(exe: &Browser, clock: &FakeClock, o: LaunchOptions) -> Resu
     })
 }
 
+/// Launches with a fake clock: the start-up wait polls on it, so time is moved on whenever the watchdog and the start-up
+/// wait both wait (the launch then reads the port file again). The fake time this takes has nothing to do with how long
+/// the real fake browser needs, so `opts_on` puts the limits out of reach.
 fn launch_on(f: &Fixture, clock: &FakeClock, o: LaunchOptions) -> Result<Chromium> {
     std::thread::scope(|s| {
         let h = s.spawn(|| Chromium::launch_with(&f.exe(), &o, Sandbox::On));
@@ -302,7 +302,10 @@ fn a_start_that_does_nothing_is_stuck_on_the_clock_not_after_a_fixed_wait() {
     };
     (o.clock, o.max_lifetime) = (Arc::new(clock.clone()), FAR);
     let e = launch_on_options(&silent, &clock, o).err().unwrap();
-    assert!(matches!(e, Error::Timeout("the browser start")), "{e}");
+    assert!(
+        matches!(&e, Error::Launch(m) if m.contains("the browser")),
+        "{e}"
+    );
 }
 
 #[test]
@@ -323,7 +326,10 @@ fn a_busy_start_is_waited_for_and_a_spinning_one_is_given_up_on() {
     };
     (o.clock, o.max_lifetime) = (Arc::new(clock.clone()), FAR);
     let e = launch_on_options(&silent, &clock, o).err().unwrap();
-    assert!(matches!(e, Error::Timeout("the browser start")), "{e}");
+    assert!(
+        matches!(&e, Error::Launch(m) if m.contains("the browser")),
+        "{e}"
+    );
 }
 
 #[test]
@@ -341,7 +347,10 @@ fn a_start_that_cannot_be_observed_is_bounded_by_the_hang_guard() {
     };
     (o.clock, o.max_lifetime) = (Arc::new(clock.clone()), FAR);
     let e = launch_on_options(&silent, &clock, o).err().unwrap();
-    assert!(matches!(e, Error::Timeout("the browser start")), "{e}");
+    assert!(
+        matches!(&e, Error::Launch(m) if m.contains("the browser")),
+        "{e}"
+    );
 }
 
 #[test]
@@ -355,20 +364,28 @@ fn a_start_ended_by_the_callers_cap_says_it_was_the_time_limit() {
         Duration::from_secs(2),
         Some(busy()),
     );
-    std::thread::scope(|s| {
+    let e = std::thread::scope(|s| {
         let h = s.spawn(|| Chromium::launch_with(&silent, &o, Sandbox::On));
+        // Both waits are registered (the watchdog's 2 s and the start loop's tick) before time moves. From then on the
+        // clock is moved on whenever anything waits: once the cap has fired the watchdog is gone and only the start loop
+        // waits, and it must still be given the time to look again and find the browser ended (rule 49).
         assert!(
             clock.wait_for_waiters(2, Duration::from_secs(20)),
             "the watchdog and the start-up wait"
         );
-        clock.advance(Duration::from_secs(2));
-        let e = h.join().unwrap().err().unwrap();
-        assert!(
-            matches!(&e, Error::Launch(m) if m.contains("did not start within 2 s")),
-            "{e}"
-        );
-        assert!(!e.to_string().contains("exited"), "{e}");
+        while !h.is_finished() {
+            if clock.waiters() >= 1 {
+                clock.advance(POLL);
+            }
+            std::thread::yield_now();
+        }
+        h.join().unwrap().err().unwrap()
     });
+    assert!(
+        matches!(&e, Error::Launch(m) if m.contains("did not start within 2 s")),
+        "{e}"
+    );
+    assert!(!e.to_string().contains("exited"), "{e}");
     assert!(
         paddock_proc::processes_mentioning(&d.path().join("silent.sh").to_string_lossy())
             .is_empty(),
@@ -907,7 +924,10 @@ fn a_garbled_port_file_or_a_silent_browser_fails_the_launch() {
     };
     o.clock = Arc::new(clock.clone());
     let e = launch_on_options(&silent, &clock, o).err().unwrap();
-    assert!(matches!(e, Error::Timeout("the browser start")), "{e}");
+    assert!(
+        matches!(&e, Error::Launch(m) if m.contains("the browser")),
+        "{e}"
+    );
     assert!(
         paddock_proc::processes_mentioning(&d.path().join("silent.sh").to_string_lossy())
             .is_empty(),

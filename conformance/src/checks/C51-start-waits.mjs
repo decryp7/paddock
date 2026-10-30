@@ -1,8 +1,8 @@
-// C51 (report-only): a start or spawn is judged on run state, not on a fixed wait (ADR 0031). Warns, never fails, about non-test
+// C51 (report-only, the narrow first step of ADR 0031 section 8: start and spawn waits only, not every `Duration` wait): a start or spawn is judged on run state, not on a fixed wait (ADR 0031). Warns, never fails, about non-test
 // Rust that gives a starting process or service a fixed time to become ready:
 // - a `Duration` constant, static or struct field whose name says START, SPAWN, LAUNCH or READY and also TIMEOUT, LIMIT, DEADLINE,
 //   WAIT, GRACE, BUDGET or WINDOW (`START_LIMIT`, `start_timeout`, `ready_deadline`);
-// - inside a `fn` whose name starts with start, spawn, launch, boot or connect: `Deadline::after(`, `recv_timeout(`,
+// - inside a `fn` whose name starts with start, spawn, launch or boot: `Deadline::after(`, `recv_timeout(`,
 //   `wait_timeout(` / `wait_timeout_while(`, or `Instant::now() +`.
 // A site passes with `// cap: <why>`, `// external: <why>`, `// shutdown: <why>`, `// ui: <why>` or `// pace: <why>` (a
 // throttle or poll interval that bounds nothing) on the line or the line above, or when the line uses `Patience` (the shared
@@ -19,14 +19,27 @@ const KIND = '(?:START|SPAWN|LAUNCH|READY)';
 const BOUND = '(?:TIMEOUT|LIMIT|DEADLINE|WAIT|GRACE|BUDGET|WINDOW)';
 const NAMED = new RegExp(`\\b((?:const|static)\\s+)?([A-Za-z0-9_]*${KIND}[A-Za-z0-9_]*${BOUND}[A-Za-z0-9_]*)\\s*:\\s*(?:Option<\\s*)?(?:std::time::)?Duration\\b`, 'i');
 const IN_START_FN = /\b(?:Deadline::after|Instant::now\(\)\s*\+|\.recv_timeout|\.wait_timeout(?:_while)?)\s*\(?/;
-const START_FN = /\bfn\s+((?:start|spawn|launch|boot|connect)\w*)/;
+const START_FN = /\bfn\s+((?:start|spawn|launch|boot)\w*)/;
 
 const lineAt = (text, index) => text.slice(0, index).split('\n').length;
 
-/** `text` without its in-file test module (`#[cfg(test)] mod ... { }` at the end of a file or before another item). */
+/** `text` with every in-file `#[cfg(test)] mod name { ... }` blanked (newlines kept), up to its closing brace, so code after it still counts. */
 function withoutTests(text) {
-  const i = text.search(/#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*mod\s+\w+\s*\{/);
-  return i < 0 ? text : text.slice(0, i) + text.slice(i).replace(/[^\n]/g, ' ');
+  const masked = maskRust(text);
+  let out = text;
+  for (const m of masked.matchAll(/#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*mod\s+\w+\s*\{/g)) {
+    let depth = 0;
+    let end = masked.length;
+    for (let i = m.index + m[0].length - 1; i < masked.length; i++) {
+      if (masked[i] === '{') depth++;
+      else if (masked[i] === '}' && --depth === 0) {
+        end = i + 1;
+        break;
+      }
+    }
+    out = out.slice(0, m.index) + out.slice(m.index, end).replace(/[^\n]/g, ' ') + out.slice(end);
+  }
+  return out;
 }
 
 /** The fixed start waits in one Rust source: [{ line, what }] for the sites that carry no waiver. */
@@ -58,7 +71,7 @@ export function startWaits(source) {
 export default {
   id: 'C51',
   title: 'Starts are judged on run state, not on a fixed wait (report-only)',
-  rule: 51,
+  rule: 40,
   run(ctx) {
     const out = [];
     for (const f of ctx.files()) {
@@ -66,7 +79,7 @@ export default {
       const text = ctx.read(f);
       if (!text) continue;
       for (const s of startWaits(text)) {
-        out.push(warn('C51', 51, f, s.line, `${s.what}: a working start must not fail only because time passed (ADR 0031)`, 'Judge it with `paddock_proc::StartJudge` / `StartWatch`, or mark a real cap with `// cap: <why>` (also `external`, `shutdown`, `ui`, `pace`).'));
+        out.push(warn('C51', 51, f, s.line, `${s.what}: a working start must not fail only because time passed (ADR 0031, ER-19)`, 'Judge it with `paddock_proc::StartJudge` / `StartWatch`, or mark a real cap with `// cap: <why>` (also `external`, `shutdown`, `ui`, `pace`).'));
       }
     }
     return out;
