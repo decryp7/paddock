@@ -9,7 +9,7 @@ import { ActivatedRoute } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import type { AppInfo, AppPermissions } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
-import { ago, compact, date, duration, int, varies } from '../../shared/format';
+import { ago, compact, date, duration, int } from '../../shared/format';
 import { cacheHitRateText } from '../usage/usage-format';
 import { injectNow } from '../../shared/now';
 import { Confirm } from '../../shared/ui/confirm';
@@ -443,10 +443,9 @@ export class AppsPage implements OnInit {
     ];
   }
 
-  /** The keys table's columns: a date column only when the keys differ in it (UI review 2 rule 7). */
-  protected keyColumns(a: AppInfo): string[] {
-    const keys = a.keys;
-    return ['key', ...(varies(keys, (k) => this.day(k.createdAt)) ? ['created'] : []), ...(varies(keys, (k) => this.when(k.lastUsedAt, this.now())) ? ['used'] : []), 'act'];
+  /** The keys table's columns: when each key was made and last used are its own facts, shown for every key. */
+  protected keyColumns(_: AppInfo): string[] {
+    return ['key', 'created', 'used', 'act'];
   }
   protected readonly byKeyId = (_: number, k: AppInfo['keys'][number]) => k.id;
 

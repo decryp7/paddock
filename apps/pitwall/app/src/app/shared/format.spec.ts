@@ -109,8 +109,9 @@ describe('format', () => {
   });
 
   it('tells a column that varies from a constant one', () => {
-    expect(varies([{ a: 1 }, { a: 1 }], (r) => r.a)).toBe(false);
-    expect(varies([{ a: 1 }, { a: 2 }], (r) => r.a)).toBe(true);
+    expect(varies([{ a: 1 }, { a: 1 }, { a: 1 }], (r) => r.a)).toBe(false);
+    expect(varies([{ a: 1 }, { a: 1 }, { a: 2 }], (r) => r.a)).toBe(true);
+    expect(varies([{ a: 1 }, { a: 1 }], (r) => r.a)).toBe(true);
     expect(varies([{ a: 1 }], (r) => r.a)).toBe(true);
     expect(varies([], () => 0)).toBe(true);
   });
