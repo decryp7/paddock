@@ -390,6 +390,7 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'aaa', sha: 'bbb' }), 'aaa..bbb');
     assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/x', before: Z, sha: 'bbb' }), 'bbb^!', 'a new branch: the head commit');
     assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/x', before: '', sha: 'bbb' }), 'bbb^!');
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'gone', sha: 'bbb', known: () => false }), 'bbb^!', 'a force push: before is not in the clone');
     assert.equal(commitLintRange({ event: 'workflow_dispatch', base: 'ccc', sha: 'bbb' }), 'ccc..bbb');
     assert.equal(commitLintRange({ event: 'workflow_dispatch', sha: 'bbb' }), 'bbb^!');
     assert.equal(commitLintRange({ event: 'push', ref: 'refs/tags/v1.0.0', before: Z, sha: 'bbb' }), null, 'a tag');

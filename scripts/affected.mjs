@@ -927,14 +927,15 @@ export function ciOutputs(plan, legs, base = null) {
  * The commits the commit lint checks, as a git revision range, or null to skip it. Only what a change adds is linted, so an
  * old bad commit never keeps main red: a pull request lints since its target branch, a push the commits it added
  * (`before..sha`; a new branch, an all-zero `before`, lints the head commit only), a manual run from the plan's base (the
- * head commit alone without one). Tags and a call with an `app` (an app's tag gates, ER-15) and every other event skip it:
+ * head commit alone without one); `known(commit)` says whether a commit is in the clone. Tags and a call with an `app` (an app's tag gates, ER-15) and every other event skip it:
  * a release must not fail on an old commit's subject.
  */
-export function commitLintRange({ event, ref = '', before = '', sha = 'HEAD', base = '', baseRef = '', app = '' }) {
+export function commitLintRange({ event, ref = '', before = '', sha = 'HEAD', base = '', baseRef = '', app = '', known = () => true }) {
   if (app || ref.startsWith('refs/tags/')) return null;
   const head = `${sha}^!`;
   if (event === 'pull_request') return baseRef ? `origin/${baseRef}..HEAD` : null;
-  if (event === 'push') return before && !/^0+$/.test(before) ? `${before}..${sha}` : head;
+  // A `before` missing from the history (after a force push) lints the head commit only.
+  if (event === 'push') return before && !/^0+$/.test(before) && known(before) ? `${before}..${sha}` : head;
   if (event === 'workflow_dispatch') return base ? `${base}..${sha}` : head;
   return null;
 }
@@ -1040,7 +1041,15 @@ if (isMain(import.meta.url)) {
   try {
     if (process.argv[2] === '--commit-range') {
       const e = process.env;
-      const range = commitLintRange({ event: e.EVENT, ref: e.REF, before: e.BEFORE, sha: e.SHA, base: e.PLAN_BASE, baseRef: e.BASE_REF, app: e.INPUT_APP });
+      const gitHas = (c) => {
+        try {
+          git(['cat-file', '-e', `${c}^{commit}`]);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const range = commitLintRange({ event: e.EVENT, ref: e.REF, before: e.BEFORE, sha: e.SHA, base: e.PLAN_BASE, baseRef: e.BASE_REF, app: e.INPUT_APP, known: gitHas });
       console.log(range ?? 'skip');
       process.exit(0);
     }

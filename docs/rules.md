@@ -158,12 +158,13 @@ changes here, every app's copy is updated in the same change.
 ## Test isolation (user, 2026-10-29)
 49. **Specs never wait a fixed number of event-loop turns and never leave a patch behind.** Specs of one bundle share a
     page (the Angular builder runs Vitest with `isolate: false`), so: (a) wait on the condition, never on a count of
-    turns or timers: once `fix/debrief-import-range-flake` lands, Debrief's `openDialog()` (`testing/helpers.ts`) waits with
-    `vi.waitFor` for a lazily loaded dialog and fails when none opens; (b) an optional chain never performs a test's action (no `stack().at(-1)?.ref.close()`): a
-    missing thing must fail the test; (c) a patch on a prototype is a `vi.spyOn`, put back by `restoreMocks` and by a
-    global `afterEach(vi.restoreAllMocks)`, never an assignment, `Object.defineProperty` or `Object.assign` on it.
-    Once that branch lands, Debrief's ESLint (`no-restricted-syntax` for specs) enforces (b) and (c); the other apps follow. *Why:* a fixed
-    wait and a leaked patch each made a spec fail now and then, only in the full run
+    turns or timers: once `fix/debrief-import-range-flake` lands, Debrief's `openDialog()` (`testing/helpers.ts`) waits
+    with `vi.waitFor` for a lazily loaded dialog and fails when none opens; (b) an optional chain never performs a
+    test's action (no `stack().at(-1)?.ref.close()`): a missing thing must fail the test; (c) a patch on a prototype is
+    a `vi.spyOn`, put back by `restoreMocks` and by a global `afterEach(vi.restoreAllMocks)`, never an assignment,
+    `Object.defineProperty` or `Object.assign` on it. Once that branch lands, Debrief's ESLint (`no-restricted-syntax`
+    for specs) enforces (b) and (c); the other apps follow. *Why:* a fixed wait and a leaked patch each made a spec
+    fail now and then, only in the full run
     ([lessons.md](lessons.md#test-isolation-debrief-2026-10-29)).
 
 ## CI economy (user, 2026-10-29)
