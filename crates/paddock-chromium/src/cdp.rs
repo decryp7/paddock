@@ -17,6 +17,8 @@ use tungstenite::protocol::WebSocketConfig;
 
 const MAX_MESSAGE: usize = 32 << 20;
 const MAX_EVENTS: usize = 1024;
+/// The most the write buffer may hold while a send is interrupted (commands are small).
+const MAX_WRITE_BUFFER: usize = 8 << 20;
 
 /// How [`Connection::wait_event_or_lost`] ended.
 #[derive(Debug, Clone)]
@@ -85,6 +87,8 @@ impl Connection {
         let mut cfg = WebSocketConfig::default();
         cfg.max_message_size = Some(MAX_MESSAGE);
         cfg.max_frame_size = Some(MAX_MESSAGE);
+        // An interrupted send can leave frames in the write buffer; the buffer is bounded (the default is not).
+        cfg.max_write_buffer_size = MAX_WRITE_BUFFER;
         let (ws, _) = tungstenite::client::client_with_config(req, stream, Some(cfg))
             .map_err(|e| Error::Connection(e.to_string()))?;
         let _ = ws
@@ -244,9 +248,11 @@ impl Drop for Connection {
 type Ws = tungstenite::WebSocket<TcpStream>;
 
 fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
-    // Sends what callers queued; a failed send ends the loop like a failed read.
+    // Sends what callers queued, then writes what an interrupted send left in the buffer (`read` flushes only pongs and
+    // close frames); a failed send ends the loop like a failed read.
     let flush = |ws: &mut Ws| {
-        std::iter::from_fn(|| rx.try_recv().ok()).all(|m| ws.send(Message::text(m)).is_ok())
+        std::iter::from_fn(|| rx.try_recv().ok()).all(|m| sent(&ws.send(Message::text(m))))
+            && sent(&ws.flush())
     };
     while !inner.closed.load(Ordering::Acquire) && flush(&mut ws) {
         match ws.read() {
@@ -263,9 +269,27 @@ fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
     let _ = ws.close(None);
 }
 
-/// A read that found nothing within the poll time (not an error).
+/// Whether a send or flush leaves the connection usable. A transient error is not a failure: the frame stays in the
+/// write buffer and the next flush writes it (tungstenite's `send`).
+fn sent(r: &tungstenite::Result<()>) -> bool {
+    match r {
+        Ok(()) => true,
+        Err(tungstenite::Error::Io(e)) => is_transient(e.kind()),
+        Err(_) => false,
+    }
+}
+
+/// A read that found nothing within the poll time, or was interrupted by a signal (not an error of the connection).
 fn idle(e: &tungstenite::Error) -> bool {
-    matches!(e, tungstenite::Error::Io(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut))
+    matches!(e, tungstenite::Error::Io(e) if is_transient(e.kind()))
+}
+
+/// A socket read or write that ended without an error of the connection: a timeout, or a signal. Linux ends a read
+/// that has a timeout (`SO_RCVTIMEO`) with `EINTR` after a stop and continue or a handled signal (signal(7)); taking
+/// that for the end of the connection made every page report closed. EOF and reset errors are not transient.
+pub(crate) fn is_transient(kind: std::io::ErrorKind) -> bool {
+    use std::io::ErrorKind::{Interrupted, TimedOut, WouldBlock};
+    matches!(kind, WouldBlock | TimedOut | Interrupted)
 }
 
 /// Whether an event goes into the bounded log. Network events are only wanted for documents (a failed load's trace,
@@ -397,5 +421,35 @@ mod tests {
             );
             assert!(lock(&i.watched)["T1"], "{m}");
         }
+    }
+}
+
+#[cfg(test)]
+mod transient_tests {
+    use super::*;
+    use std::io::{Error as IoError, ErrorKind};
+
+    /// Regression: `EINTR` after a stop and continue ended the connection. Only EOF and reset errors end it.
+    #[test]
+    fn a_timeout_or_a_signal_is_idle_and_an_eof_or_a_reset_is_not() {
+        for kind in [
+            ErrorKind::WouldBlock,
+            ErrorKind::TimedOut,
+            ErrorKind::Interrupted,
+        ] {
+            let e = tungstenite::Error::Io(IoError::from(kind));
+            assert!(idle(&e) && sent(&Err(e)), "{kind:?}");
+        }
+        for kind in [
+            ErrorKind::UnexpectedEof,
+            ErrorKind::ConnectionReset,
+            ErrorKind::BrokenPipe,
+        ] {
+            let e = tungstenite::Error::Io(IoError::from(kind));
+            assert!(!idle(&e) && !sent(&Err(e)), "{kind:?}");
+        }
+        assert!(sent(&Ok(())));
+        assert!(!sent(&Err(tungstenite::Error::ConnectionClosed)));
+        assert!(!idle(&tungstenite::Error::ConnectionClosed));
     }
 }
