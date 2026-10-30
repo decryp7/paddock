@@ -332,6 +332,9 @@
       <trans-unit id="pd.channels.save-failed-title" datatype="html">
         <source>The channel was not saved.</source>
       </trans-unit>
+      <trans-unit id="pd.channels.save-to-apply" datatype="html">
+        <source>The channel is applied when you save it.</source>
+      </trans-unit>
       <trans-unit id="pd.channels.secret-missing" datatype="html">
         <source>No secret yet</source>
       </trans-unit>
