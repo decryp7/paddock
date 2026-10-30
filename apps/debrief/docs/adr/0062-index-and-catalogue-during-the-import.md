@@ -1,7 +1,7 @@
 # 62. Stable event ids: the search index and the catalogue are built during the import
 
-- Status: Proposed (2026-10-30; the user's decisions of 2026-10-30 are recorded below; Accepted after an independent
-  review). Revision 2 (2026-10-30) answers the first review's P1 and P2 findings.
+- Status: Accepted (2026-10-30), after two independent reviews. Revision 2 answered the first review's P1 and P2
+  findings; revision 3 the second review's P2 findings and the coordinator's decision to drop source generations.
 - Date: 2026-10-30
 - Related: ADR 0010 (persistent store), ADR 0014 (database-first engine; §2 step 4 already planned "index: Tantivy on
   its own thread, from the same batches"), ADR 0037 (live tail), ADR 0042 (port table), ADR 0051 (stable source ids),
@@ -104,40 +104,46 @@ query on `id` (`RangeQuery` on the FAST `id` field, Tantivy 0.27, `query/range_q
 does not depend on file names. The `seg` field goes.
 
 **What the index stores per event (index `LAYOUT` 5):** `id` (FAST; range-queried), `ts` (FAST, untimed as
-`i64::MAX`, as today), `source` (INDEXED and FAST), `line` (FAST) and `gen` (FAST): the source's generation (below).
+`i64::MAX`, as today), `source` (INDEXED and FAST) and `line` (FAST).
 
 **From an id to a row or a position:** unchanged. Rows: `rows(ids)` and `texts(ids)` find the segments by their id
 ranges and filter `READY`. Positions: `position_of(id)` reads `ord` and returns `None` until the event is positioned (the
 port already says so).
 
-**Source generations.** A side table `source_gen(source, gen)` holds a per-source counter. It is bumped only when a
-source's events are read again under the same source id (today only a reload, through ADR 0051's kept ids); compaction,
-clock skew and live tail never bump it. The tee stamps each document with the generation the sink decided in
-`begin_source` (`gen + 1` for a kept id, `0` for a new source); indexing from Parquet reads the generation from the
-catalog under the write lock. A document is live only if its `(source, gen)` equals the catalog's.
+**No source generations (YAGNI, coordinator decision 2026-10-30).** Revision 2 stamped documents with a per-source
+generation. No current flow needs one: a reload clears the index before it reads again (below), a followed file read
+again in full becomes a new source, and a deleted source simply stops being ready. A future build-new-then-swap reload
+ADR would add `source_gen(source, gen)` and a `gen` field to the live filter; nothing here prevents that.
 
 **Re-imports (reload)**, as the code does it (defect 4): the store and the index are empty while a reload runs and
 fill as the new import lists segments, exactly as for a first import. With the tee the index receives the new import's
 documents during the reload, so:
 
-- `discard_aside` (success) changes nothing in the index: it holds only the new generation;
+- `discard_aside` (success) changes nothing in the index: it holds only the new import's documents;
 - `restore_aside` (failure or cancel) clears the index before it marks the restored segments unindexed (today it relies
   on the clear done by `set_aside_events`, which the tee would have refilled);
-- the new side tables `segment_blocks` and `source_gen` join `ASIDE_TABLES`, so they are set aside and restored with
-  the rest. `catalogue`, `catalogue_trigrams` and `catalogue_sources` stay out, as today (rows are joined with ready
+- the new side tables `segment_blocks` and `source_chunks` join `ASIDE_TABLES`, so they are set aside and restored
+  with the rest. `catalogue`, `catalogue_trigrams` and `catalogue_sources` stay out, as today (rows are joined with ready
   sources).
 
-A per-source build-new-then-swap reload (old events answer until the new ones are ready) is not in scope; `source_gen`
-is what it would need, and it would get its own ADR, work package and tests.
+A per-source build-new-then-swap reload (old events answer until the new ones are ready) is not in scope; it would get
+its own ADR (with source generations), work package and tests.
+
+**The tee guard.** `import_keeping` creates the tee as a guard value (`TeeGuard`). On every way out of the function,
+success, an early `?` return, a panic unwound by `guard::catch`, or cancel, its `Drop` stops the queues, discards what
+the index writer holds uncommitted (`rollback`), drops the tallies and releases the writer to the index owner. Because
+the guard lives inside `import_keeping`, it is gone before `reload` calls `restore_aside`, so the restore's index clear
+never meets a writer still filling. A test makes the sink fail after the tee started (a crash point returning an error)
+and checks that `restore_aside` leaves no stale hit and that the next import can open the writer.
 
 **Duplicates.** One file at two paths is two sources (ADR 0051 never guesses); a path already known in the import is
 skipped (`known` in `import_keeping`). Within the index, a block's documents are only ever added after its range was
 deleted in the same uncommitted writer state, or once by the tee (section 3), so no document is indexed twice.
 
 **Append to an existing store (live tail, ADR 0037).** Appended events get new ids in a new segment of the same source
-and the source's current generation; the tee indexes them like an import's batches; `pos::append` extends positions
+; the tee indexes them like an import's batches; `pos::append` extends positions
 without a sort when they sort after the last positioned event, as today. A followed file that must be read again in full
-becomes a new source (`tail.rs`), so it needs no generation bump.
+becomes a new source (`tail.rs`) with new ids.
 
 **Deleting a source.** As today: the catalog deletes the source (it stops being live at once, so its documents are
 filtered out at once), then the index deletes `source = s` and the catalogue its rows. A crash between the two leaves
@@ -153,8 +159,7 @@ The index answers in time order by itself. `pos` stays a store-side concern for 
   measured in prototype B.
 - **The live filter** is one `DocPredicateQuery` (Tantivy 0.27, `query/doc_predicate_query/`) added as a `Must` clause of
   every search, so `Count`, `TopDocs` and the `Ids` collector behind the search box's filter all inherit it. A document
-  is live when (a) its `(source, gen)` matches the catalog for a ready source and (b) its `id` lies in a block of a listed
-  segment. Both tables are read once per search under a snapshot (sources: thousands at most; blocks: a sorted vector,
+  is live when (a) its `source` is ready and (b) its `id` lies in a block of a listed segment. Both tables are read once per search under a snapshot (sources: thousands at most; blocks: a sorted vector,
   binary search). (b) is what hides documents the tee committed before the sink listed their segment.
 - `SearchReply` gains `complete: bool` (`debrief-core/src/ports/dto.rs`; serde default `true` for older peers): false
   while some visible segment is not yet indexed, so the UI shows "Still indexing" next to counts that will grow
@@ -175,20 +180,26 @@ discover ─▶ dispatcher ─▶ parse pool (threads) ──▶ SegmentSink.wri
                                                          └─ try_send ─▶ names queue (bounded) ─▶ catalogue workers
 ```
 
-**Lock order in the sink** (fixes defect 1). `catalog` is always taken before `ids`, never the other way, and no lock is
-held across a Parquet write or an `observe` call. `open_segment` takes only `ids`. Persisting ids moves to the listing:
+**Lock order in the sink** (fixes defect 1). The sink's locks are taken in one order: a parse thread's `slot`, then
+`catalog`, then `ids` (`write` holds its slot while `register` tries `catalog` and `open_segment` takes `ids`; `finish`
+empties the slots before it lists). No lock is taken against that order, and none is held across an `observe` call.
+`open_segment` takes only `ids`. Persisting ids moves to the listing:
 
 - the listing (which holds `catalog`, then takes `ids`) persists `meta.next_id` as the current next id plus a
   reserve of `RESERVE_BLOCKS` blocks (64 x 131,072 ids);
 - `open_segment` hands out blocks below that persisted mark without touching `catalog`; a block beyond it (an import
   faster than the listing) drops `ids`, takes `catalog` then `ids`, and persists a new mark first;
-- the order is written at the top of `writer.rs` and checked by a stress test: 16 threads, `SEGMENT_ROWS` of 8 and
-  `LIST_EVERY` of 0, many tiny sources, under a deadline that fails the test instead of hanging.
+- the order is written at the top of `writer.rs` and checked by a stress test: 16 threads, a segment size of 8 rows and
+  `LIST_EVERY` of 0, many tiny sources, under a deadline that fails the test instead of hanging. `SEGMENT_ROWS` becomes
+  a test seam for this: the sink takes its segment size from its options (default `SEGMENT_ROWS`), as it already takes
+  `list_every`.
 
 **One owner per store artefact.** The index has one writer (Tantivy allows one); its owner is the `FtsService` thread,
 which during an import consumes the index queue and otherwise catches up from Parquet. The catalogue workers (prototype
-71c18c57c, plan SR3) consume the names queue. During an import the sink is the only writer of the catalog database: it
-records index progress and catalogue rows in its own listing transactions. Nothing in this design takes the store's
+71c18c57c, plan SR3) consume the names queue. During an import the sink is the only writer of the catalog's import
+tables (`segments`, `segment_blocks`, `sources`, `source_chunks`, `meta`): it records index progress in its own listing
+transactions. The catalogue workers write only the catalogue tables, each source in its own transaction gated on the
+source being ready, as `catalogue.rs` `commit` does today; the two never write the same rows. Nothing in this design takes the store's
 write lock beside the import, and the append window of `gate.rs` is not needed.
 
 **The import never waits for a consumer.** `observe` (called after the segment write with the slot released)
@@ -214,10 +225,12 @@ did meanwhile.
    of the import. After each commit it hands the sink the blocks now complete in the index; the sink marks a segment
    `indexed` in its next listing transaction once all its blocks are complete. A document committed before its segment
    is listed is not live (filter (b)).
-3. Catalogue: a source's tallies are merged when the source is finished; its rows are written in the listing
-   transaction that makes it ready (or the next one), so a lookup sees its names when it sees its events, as now.
+3. Catalogue: a source's tallies are merged when the source is finished; a catalogue worker writes its rows in its
+   own transaction once the source is ready (a worker whose source is not ready yet waits for the next listing's wake),
+   so a lookup sees its names at most one listing after its events. Nothing of the catalogue runs in the listing, so the
+   listing's time stays what it is today; prototype B records it as a metric.
 4. End of import: drain the queues (bounded, so this wait is short; its time is a measured metric), final index commit,
-   last listing; then **release the tee's memory** (the owner waits for Tantivy's merges and drops the writer, the
+   last listing, and the tee guard is dropped; then **release the tee's memory** (the owner waits for Tantivy's merges and drops the writer, the
    catalogue drops its tallies, `debrief_alloc::release()`) **before** `maintain` (compaction, `pos::rebuild`,
    checkpoint), so the ordering's DuckDB memory never stacks on the tee's; catch-up of skipped segments starts after
    `pos::rebuild`.
@@ -226,14 +239,17 @@ did meanwhile.
 
 - The order of a source's events is (chunk index, position in the chunk). The chunk plan depends only on the file and
   the chunk size (`ingest/plan.rs`), not on threads; a small or compressed file is one chunk. The sink's `observe`
-  passes the chunk index (a new field the parse side already knows), and the sink records each source's chunk starts in
-  a side table `source_chunks(source, chunk, first_byte)` with the listing.
+  passes the chunk index (a new field the parse side already knows), and the sink records each chunked source's chunk
+  starts in a side table `source_chunks(source, chunk, first_byte, first_line)` (from `ChunkStart`) with the listing.
+- Within a chunk, ids increase in event order: one chunk is parsed on one thread, which writes to its own slot, and a
+  slot's next block always lies above its last. A test checks that ids increase with `line` inside every chunk.
 - Caps: each chunk's tally keeps at most `MAX_NAMES` names in first-seen order; tallies are merged in chunk order, a
-  name enters the source's tally only while it holds fewer than `MAX_NAMES`, and `MAX_EVENTS_SCANNED` counts events in
-  that order. When `dropped` is 0 every count is exact; otherwise counts are lower bounds, as the `dropped` column
+  name enters the source's tally only while it holds fewer than `MAX_NAMES`. `MAX_EVENTS_SCANNED` is applied at chunk
+  granularity in both paths: chunks are taken in order while the events taken so far are below the cap, a chunk that
+  starts below it is taken whole, and later chunks are not scanned. When `dropped` is 0 every count is exact; otherwise counts are lower bounds, as the `dropped` column
   already tells the UI.
-- The post-import build (skipped sources, older stores) reads `ORDER BY byte_offset, id` and splits the events at the
-  recorded chunk starts, so it computes the same function. The oracle in the differential test does the same; tests run
+- The post-import build (skipped sources, older stores) computes the same function without relying on byte offsets: a
+  source with `source_chunks` rows is split by `line` at each chunk's `first_line` and read `ORDER BY chunk, id`; a source without rows (one chunk) is read `ORDER BY id`. The oracle in the differential test does the same; tests run
   with 1, 4 and 8 parse threads and with a chunk size small enough to split `/samples` files.
 - Field values (today a SQL `GROUP BY` over `extra`) become per-source counts with the same caps, plus a new bound of
   1,000 keys per source.
@@ -242,19 +258,20 @@ did meanwhile.
 rule: what was read stays usable) and keep their documents and tallies; aborted sources are deleted from `sources`, so
 their documents are not live at once and are deleted in the drain commit; their tallies are dropped.
 
-**Crash and the open-time sweep.** Before anything else writes, opening a store deletes from the index, in one commit:
-documents whose `id` is in no block of `segment_blocks` (range deletes over the gaps between listed blocks), documents of
-sources not in `sources` or of an older generation, and the ranges of every block of an unindexed segment. Those
+**Crash and the open-time sweep.** Before anything else writes, opening a store deletes from the index, in one commit,
+every document that is not live or belongs to an unindexed segment: one `delete_query` with a `DocPredicateQuery` that
+is true when the `id` is in no block of an indexed listed segment or the `source` is not in `sources`. The sweep logs
+the segment and block counts it checked and its time, so its cost on large stores is on record. Those
 segments are then indexed again. Because the sweep runs before any import, an id range that a crashed import used and
 did not persist can be reused afterwards without meeting a stale document.
 
 **What search shows mid-import.** Live documents only: events of ready sources, in listed segments, in a committed index
-generation, at most about 10 s behind the event list (decision 1), plus whatever the tee skipped, which appears as the
+commit, at most about 10 s behind the event list (decision 1), plus whatever the tee skipped, which appears as the
 catch-up proceeds. `complete` stays false until then, and `index_status` reports the segments still to index (rule 11).
 
 **Testability hooks** (test-only features of `debrief-store-duck`): named crash points (after an index commit and before
 the listing, after the listing and before the index commit, inside the drain); queue capacity 0, which must give exactly
-prototype A's result; a property test that imports random small sources with random times, offsets and cancel points
+prototype A's result; the sink's segment size (above); a property test that imports random small sources with random times, offsets and cancel points
 and checks that search hits, in order, equal the `ord` order of the matching events.
 
 ### 4. Bounded resources and memory
@@ -304,12 +321,14 @@ import) may give most of the gain with none of the consistency work. The measure
 
 No backward compatibility before v1, and the index and catalogue are rebuildable caches. No existing table changes:
 
-- `segment_blocks`, `source_gen` and `source_chunks` are side tables in `ADDED_DDL` (`CREATE TABLE IF NOT EXISTS`, no
+- `segment_blocks` and `source_chunks` are side tables in `ADDED_DDL` (`CREATE TABLE IF NOT EXISTS`, no
   `ALTER`), so the appenders and `INSERT ... SELECT *` statements over `sources` and `segments`, and the aside copies,
   keep their column lists. `FORMAT_VERSION` does not change.
-- On open, a store without `segment_blocks` rows gets them from its segments as runs of consecutive ids
-  (`SELECT id - row_number() OVER (ORDER BY id) ...` per file), so a compacted segment's runs never claim ids of another
-  file. A source without a `source_gen` row has generation 0; one without `source_chunks` rows is one chunk.
+- On open, a store without `segment_blocks` rows takes them straight from `segments` for every segment whose
+  `[first_id, end_id)` overlaps no other segment's range (every never-compacted segment, and compacted ones whose hull
+  is clear: ids in its gaps belonged to removed rows and are never reused). Only segments whose ranges overlap are
+  scanned for runs of consecutive ids (`SELECT id - row_number() OVER (ORDER BY id) ...` per file), as a background step
+  with progress and Cancel, before their segments are indexed. A source without `source_chunks` rows is one chunk.
 - The index `LAYOUT` goes from 4 to 5: an older index is recreated empty and every segment indexed again in the
   background (the existing epoch and layout check in `Fts::open_or_create`), with progress and Cancel.
 - The catalogue's `VERSION` goes to 2 (the order and cap rule above), so every source is built again in the background.
@@ -329,10 +348,11 @@ Same machine, corpus and harness as the baseline (`tests/import_ready.rs` on `wi
 
 | Metric | How |
 |---|---|
-| Search ready | seconds from the start until every visible event is in a committed index generation (`complete` true) |
+| Search ready | seconds from the start until every visible event is in a committed index commit (`complete` true) |
 | Catalogue ready | seconds until every ready source is catalogued |
 | Import throughput | events per second until the last segment is listed; and seconds until positions exist |
 | Memory | peak physical footprint of the whole worker during the import, during `maintain` and during catch-up; and the tee's own share (queue bytes, documents, writer heap, merges, tallies) |
+| Listing | time per listing transaction during the import, against today's (the catalogue no longer writes in it) |
 | Drain | seconds from the last parsed batch to the final index commit (bounded: a failure above 5 s) |
 | Query latency | word-search p50 and p95 of 20 queries, during the import (from 10 s on) and after |
 | Skips | share of batches the tee skipped, per queue |
@@ -353,8 +373,8 @@ p95 during the import stays under 0.5 s, and the worker's total peak physical fo
   becomes the low-memory, fan-out-off path. Both accepted on 2026-10-30 (decision 4).
 - Three latent defects are fixed on the way (lock order in the sink, file-name index keys, stale times after a clock
   offset), each with a failing test first.
-- New: `segment_blocks`, `source_gen`, `source_chunks`; index `LAYOUT` 5; the live filter; `SearchReply.complete`; the
-  sweep on open; chunk-ordered tallies. Each gets a test that triggers its failure (cancel mid-tee, crash points, a full
+- New: `segment_blocks`, `source_chunks`; index `LAYOUT` 5; the live filter; `SearchReply.complete`; the sweep on
+  open; the tee guard; chunk-ordered tallies. Each gets a test that triggers its failure (cancel mid-tee, crash points, a full
   queue, a reload that fails while the tee runs).
 
 ## Work packages
@@ -362,13 +382,13 @@ p95 during the import stays under 0.5 s, and the worker's total peak physical fo
 | WP | What | Files | Role | Size (days) |
 |---|---|---|---|---|
 | WP-1 | Prototype A and its measurements (independent of the rest; may start now); record in `performance.md` | `fts.rs` (readers), `catalogue.rs`, `tests/import_ready.rs` | researcher | 1.5 |
-| WP-2 | Failing tests first: the 16-thread sink stress test (lock order); hit order equals `ord` with equal times and after a clock offset; a document of an unready, aborted, unlisted or older-generation source is never counted or returned; a failed reload with the tee leaves no stale hit; a full queue never blocks `write` | `crates/debrief-store-duck/tests/`, `writer.rs` and `fts.rs` tests | implementer | 1.5 |
-| WP-3 | Sink lock order and the id reserve; `segment_blocks` kept by listing, compaction and skew; compaction skips unindexed segments; skew marks rewritten segments unindexed and its doc comment is corrected | `writer.rs`, `compact.rs`, `skew.rs`, `schema.rs` | designer | 2 |
-| WP-4 | Index `LAYOUT` 5, block-range deletes, the live filter as a `DocPredicateQuery`, the total order, `SearchReply.complete`; `source_gen`; the open-time sweep; `restore_aside` clears the index and the side tables join `ASIDE_TABLES` | `fts.rs`, `lib.rs` (open, aside), `debrief-core/src/ports/dto.rs` | designer | 2.5 |
-| WP-5 | The tee: bounded queues, skips, the index owner consuming the queue, commit cadence, the sink marking `indexed`, drain, memory release before `maintain`, cancel, crash points | `writer.rs`, `fts.rs`, `lib.rs` (`import_keeping`, `maintain`) | designer | 3 |
-| WP-6 | Catalogue from the tee: chunk index through `observe`, `source_chunks`, per-chunk tallies merged in chunk order with the cap rule, field counts with caps, the ordered post-import build, the differential test | `debrief-core/src/catalogue/`, `debrief-core/src/ingest/` (chunk index), `catalogue.rs`, `writer.rs` | designer | 3 |
+| WP-2 | Failing tests first: the 16-thread sink stress test (lock order); hit order equals `ord` with equal times and after a clock offset; a document of an unready, aborted or unlisted source is never counted or returned; a failed reload with the tee leaves no stale hit; an early error return from `import_keeping` drops the tee guard before `restore_aside`; a full queue never blocks `write` | `crates/debrief-store-duck/tests/`, `writer.rs` and `fts.rs` tests | implementer | 1.5 |
+| WP-3 | Sink lock order (slot, catalog, ids), the id reserve and the segment-size seam; `segment_blocks` kept by listing, compaction and skew; compaction skips unindexed segments; skew marks rewritten segments unindexed and its doc comment is corrected | `writer.rs`, `compact.rs`, `skew.rs`, `schema.rs` | designer | 2 |
+| WP-4 | Index `LAYOUT` 5, block-range deletes, the live filter as a `DocPredicateQuery`, the total order, `SearchReply.complete`; the open-time sweep as one predicate delete; `restore_aside` clears the index and the side tables join `ASIDE_TABLES`; the `segment_blocks` backfill (direct from `segments`, scan only overlapping ranges in the background) | `fts.rs`, `lib.rs` (open, aside), `debrief-core/src/ports/dto.rs` | designer | 2 |
+| WP-5 | The tee: bounded queues, skips, the index owner consuming the queue, commit cadence, the sink marking `indexed`, drain, the tee guard on every exit path, memory release before `maintain`, cancel, crash points | `writer.rs`, `fts.rs`, `lib.rs` (`import_keeping`, `maintain`) | designer | 3.25 |
+| WP-6 | Catalogue from the tee: chunk index through `observe`, `source_chunks` with `first_line`, per-chunk tallies merged in chunk order with the cap rule (`MAX_EVENTS_SCANNED` by whole chunks), rows written by the workers in their own transactions gated on ready, field counts with caps, the ordered post-import build, the differential test | `debrief-core/src/catalogue/`, `debrief-core/src/ingest/` (chunk index), `catalogue.rs`, `writer.rs` | designer | 3 |
 | WP-7 | Memory shares and thread rules as Performance settings with Auto; tee off in low memory and when no core is spare | `lib.rs` (`StoreOptions`), app settings schema | implementer | 1 |
-| WP-8 | Prototypes B and C, the adoption decision, this ADR to Accepted or amended | harness, `performance.md`, this ADR | researcher | 1.5 |
+| WP-8 | Prototypes B and C, the adoption decision, this ADR amended with the numbers | harness, `performance.md`, this ADR | researcher | 1.5 |
 
 WP-1 runs first; if A meets the target, WP-4 to WP-7 are reconsidered before they start. WP-3's fixes are worth having
 either way.
