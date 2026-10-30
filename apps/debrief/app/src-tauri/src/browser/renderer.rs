@@ -26,7 +26,9 @@ pub const ACCENT: u32 = 0x2F6FE0;
 const LOAD_TIMEOUT: Duration = Duration::from_secs(30);
 const SETTLE: Duration = Duration::from_millis(400);
 const ACT_LOAD_TIMEOUT: Duration = Duration::from_secs(15);
-/// How long a challenge page may wait for the user.
+/// How long a challenge page may wait for the user. Read off the wall clock on purpose, unlike the driver's waits
+/// (`chromium_driver::clock::Budget`): this waits for a person, not for the browser, and a stall of Debrief only shortens
+/// it by the stall; the user is asked again on the next research.
 #[cfg(not(test))]
 const CHALLENGE_WAIT: Duration = Duration::from_secs(10 * 60);
 #[cfg(test)]
@@ -107,8 +109,12 @@ impl ChromiumPage {
     /// A challenge page (consent, CAPTCHA) waits for the user in the browser window, which is already on screen; once
     /// it is gone the work continues. The user took part, so the window is not closed when the work ends.
     fn hand_off_challenges(&self, s: &Session) -> Result<(), BrowserError> {
-        if s.page.challenge().ok().flatten().is_none() {
-            return Ok(());
+        match s.page.challenge() {
+            Ok(Some(_)) => {}
+            // A page that does not answer, or is gone, is not a page without a check.
+            Err(e @ (DriverError::Timeout(_) | DriverError::Closed)) => return Err(failed(e)),
+            // No check, or the document changed under the script (a navigation): nothing for the user.
+            Ok(None) | Err(_) => return Ok(()),
         }
         s.handed_off.store(true, Ordering::SeqCst);
         let url = s.page.info().map(|i| i.url).unwrap_or_default();
@@ -121,7 +127,11 @@ impl ChromiumPage {
             }
             match s.page.challenge() {
                 Ok(None) => break,
-                Err(e) => return Err(failed(e)),
+                // A page that does not answer, or is gone, ends the wait.
+                Err(e @ (DriverError::Timeout(_) | DriverError::Closed)) => return Err(failed(e)),
+                // The page moved on under the script (the user solved the check: "Execution context was destroyed"),
+                // or shows a dialog to the user: look again.
+                Err(_) => {}
                 Ok(Some(_)) if Instant::now() > end => {
                     return Err(BrowserError::Failed(
                         "the page still needs you (a check or consent); open the page yourself or try again".into(),
@@ -136,9 +146,18 @@ impl ChromiumPage {
     /// After an action or navigation: wait for the load it started, hand off challenges, enforce the chat's site rules.
     fn settle(&self, s: &Session, activity: Activity) -> Result<(), BrowserError> {
         std::thread::sleep(SETTLE);
+        // A page still loading after the bound is read as it is; a page that does not answer (or is gone) is an error.
+        // The bound is read off the wall clock, not a stall-proof `Budget`: each look is a bounded driver call that
+        // already forgives a stall, and a stall here only means the page is read sooner, never a failure.
         let end = Instant::now() + ACT_LOAD_TIMEOUT;
-        while !s.page.load_finished().unwrap_or(true) && Instant::now() < end {
-            std::thread::sleep(Duration::from_millis(100));
+        while Instant::now() < end {
+            match s.page.load_finished() {
+                // Loaded, or held by a dialog (it will not finish meanwhile): go on and read it.
+                Ok(true) | Err(DriverError::Dialog(_)) => break,
+                Err(e @ (DriverError::Timeout(_) | DriverError::Closed)) => return Err(failed(e)),
+                // Still loading, or the document changed under the script (a navigation): look again.
+                Ok(false) | Err(_) => std::thread::sleep(Duration::from_millis(100)),
+            }
         }
         self.hand_off_challenges(s)?;
         let url = s.page.info().map(|i| i.url).unwrap_or_default();
@@ -698,6 +717,18 @@ mod tests {
             r.renderers.kill_all();
         }
 
+        /// Regression: after a load, a page that answered no script counted as loaded (`load_finished` failing was
+        /// "finished") and as one without a challenge, so the work went on with a hung page.
+        #[test]
+        fn a_page_that_does_not_answer_scripts_fails_the_navigation_with_a_timeout() {
+            let r = rig(Mode::Obey, 1);
+            research_step(&r);
+            r.fake.act(UserAction::HangScripts).unwrap();
+            let got = r.page.navigate(&WebUrl::parse("http://127.0.0.1:9/next").unwrap());
+            assert_eq!(got, Err(BrowserError::Timeout));
+            r.renderers.kill_all();
+        }
+
         #[test]
         fn a_second_browser_while_the_kept_profile_is_in_use_gets_a_throwaway_one() {
             let r = rig(Mode::Obey, 1);
@@ -866,6 +897,31 @@ mod tests {
             let retry = page_with(&r, Lease::run());
             retry.navigate(&WebUrl::parse("http://127.0.0.1:9/results").unwrap()).unwrap();
             assert_ne!(r.renderers.current("main").unwrap().pid(), Some(pid));
+            r.renderers.kill_all();
+        }
+
+        /// Regression (review of the hung-page fix): when the user solves a check, the page navigates and a script that
+        /// was running fails ("Execution context was destroyed"). That is no reason to stop waiting for the user.
+        #[test]
+        fn a_script_failing_while_the_user_solves_a_check_keeps_the_wait_going() {
+            let r = rig(Mode::Obey, 1);
+            research_step(&r);
+            std::fs::write(&r.fake.url_file, "https://www.google.com/sorry/index?continue=x").unwrap();
+            let s = r.renderers.current("main").unwrap();
+            assert!(s.page.challenge().unwrap().is_some());
+            let (ctl, url) = (r.fake.ctl_file.clone(), r.fake.url_file.clone());
+            let page = ChromiumPage {
+                notify: Arc::new(move |c: Cue| {
+                    if c.activity == Activity::WaitingForYou {
+                        // The user solves the check: the page moves on, and the next script fails under it.
+                        std::fs::write(&url, "http://127.0.0.1:9/results").unwrap();
+                        let mut f = std::fs::OpenOptions::new().append(true).create(true).open(&ctl).unwrap();
+                        std::io::Write::write_all(&mut f, b"fail-next-script\n").unwrap();
+                    }
+                }),
+                ..page_with(&r, Lease::default())
+            };
+            assert_eq!(page.hand_off_challenges(&s), Ok(()));
             r.renderers.kill_all();
         }
 
