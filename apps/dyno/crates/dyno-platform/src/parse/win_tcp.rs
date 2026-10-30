@@ -3,8 +3,11 @@
 //! Whether a row listens comes from the table it was read from, not from its `dwState`: Microsoft documents
 //! `TCP_TABLE_OWNER_PID_LISTENER` as "all listening (receiving only) TCP endpoints" and `TCP_TABLE_OWNER_PID_CONNECTIONS`
 //! as "all connected TCP endpoints" (learn.microsoft.com, TCP_TABLE_CLASS), while newer Windows 11 builds report a
-//! listener's `dwState` as 0, a value MIB_TCP_STATE does not define (Dyno's Windows CI runner since 2026-10-29, job 22533;
-//! reported for build 26340.9596 in Hyact/workbuddy-switch-plus#2; build 26300 still reports 2).
+//! listener's `dwState` as 0, a value MIB_TCP_STATE does not define. Seen on Dyno's Windows CI runner from 2026-10-29
+//! (job 22533), right after it installed the optional preview update KB5127653 (Windows 11 26H1, build 28000.3365,
+//! released 2026-10-28); also reported for build 26340.9596 (Hyact/workbuddy-switch-plus#2); build 26300 reports 2.
+//! Microsoft's release notes for KB5127653 (Release Preview build 28000.3351) mention no change to the TCP tables, so
+//! the cause is not documented; users get these builds too, so state 0 is handled, not waited out.
 
 use dyno_core::network::SocketState;
 
