@@ -5333,6 +5333,7 @@ name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "log",
  "paddock-workspace-hack",
  "sysinfo",
  "windows-sys 0.61.2",

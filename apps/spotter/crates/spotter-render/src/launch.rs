@@ -190,6 +190,10 @@ fn unique_dir(base: &Path) -> PathBuf {
 
 impl Chromium {
     /// Starts `exe` with a fresh profile and connects to it.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the browser, a GUI program: std Command, as the driver is copied between apps"
+    )]
     pub fn launch(exe: &Browser, opts: &LaunchOptions) -> Result<Chromium> {
         check_display(opts.mode, cfg!(target_os = "linux"), |k| std::env::var(k).ok())?;
         let dir = unique_dir(&opts.profile_base);
@@ -226,7 +230,7 @@ impl Chromium {
         let alive = Arc::new(AtomicBool::new(true));
         let ended_by = Arc::new(AtomicU8::new(NONE));
         // The caps run from the process start, also while it is still starting.
-        watchdog(process.id(), alive.clone(), ended_by.clone(), opts.max_lifetime);
+        watchdog(process.process(), alive.clone(), ended_by.clone(), opts.max_lifetime);
         match connect(&dir, &mut process) {
             Ok(conn) => Ok(Chromium {
                 conn: Arc::new(conn),
@@ -303,17 +307,17 @@ impl Drop for Chromium {
 }
 
 /// Ends the tree when the time is up, even if nobody calls anything. Stops when `alive` is cleared.
-fn watchdog(pid: Option<u32>, alive: Arc<AtomicBool>, ended_by: Arc<AtomicU8>, max: Duration) {
-    let Some(pid) = pid else { return };
+fn watchdog(root: Option<paddock_proc::ProcessId>, alive: Arc<AtomicBool>, ended_by: Arc<AtomicU8>, max: Duration) {
+    let Some(root) = root else { return };
     let end = Instant::now() + max;
     let _ = std::thread::Builder::new().name("render-watchdog".into()).spawn(move || {
         while alive.load(Ordering::Acquire) {
             let reason = if Instant::now() >= end { Some(TIMED_OUT) } else { None };
             if let Some(r) = reason {
-                // Re-check right before killing so a reused pid is never signalled after a normal end.
+                // By identity (ADR 0033): a pid handed on after the browser ended is left alone.
                 if alive.swap(false, Ordering::AcqRel) {
                     ended_by.store(r, Ordering::Release);
-                    process::kill_tree(pid);
+                    process::kill_tree(root);
                 }
                 return;
             }

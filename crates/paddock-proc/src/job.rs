@@ -15,6 +15,7 @@ use windows_sys::Win32::System::JobObjects::{
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_PROCESS_ID_LIST,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicProcessIdList,
     JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+    TerminateJobObject,
 };
 
 /// A kill-on-close job; closing its handle (on drop) ends every process in it.
@@ -75,6 +76,18 @@ impl Job {
         })
     }
 
+    /// The members of the job by identity: each id of [`Job::pids`] whose process, opened by handle, is still in the job
+    /// (a member that ended and whose pid was handed on is left out). `None` when the job cannot be queried.
+    pub(crate) fn members(&self) -> Option<Vec<crate::ProcessId>> {
+        let job = self.0.as_raw_handle();
+        Some(
+            self.pids()?
+                .into_iter()
+                .filter_map(|pid| crate::sys::identity_in_job(pid, job))
+                .collect(),
+        )
+    }
+
     /// Puts `child` into a new kill-on-close job. Processes it starts afterwards join the job too (nested jobs: Windows 8
     /// and later, also when the app itself runs in a job).
     pub(crate) fn assign(child: &Child) -> io::Result<Job> {
@@ -106,6 +119,21 @@ impl Job {
             return Err(io::Error::last_os_error());
         }
         Ok(Job(job))
+    }
+}
+
+impl Job {
+    /// Ends every process in the job now, through the job's handle: no pid is looked up, so none can have been handed on
+    /// (ADR 0033). The job stays open; closing it later ends whatever joined since.
+    pub(crate) fn terminate(&self) {
+        // SAFETY: a valid job handle owned by `self`.
+        // conformance: pid-kill — a job handle this value owns: no pid is looked up
+        if unsafe { TerminateJobObject(self.0.as_raw_handle(), 1) } == 0 {
+            log::warn!(
+                "Could not end the job of a child: {}",
+                io::Error::last_os_error()
+            );
+        }
     }
 }
 
