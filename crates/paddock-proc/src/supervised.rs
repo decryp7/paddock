@@ -284,6 +284,12 @@ impl Supervised {
         })
     }
 
+    /// Lowers the child's priority (Unix; Windows lowered it at the start, see [`crate::lower_priority`]). Done through the
+    /// held child right after the spawn, so no fork window is needed. False when the child is gone or the OS refused.
+    pub fn lower_priority(&self) -> bool {
+        self.child.as_ref().is_some_and(crate::sys::lower_child)
+    }
+
     /// Whether the child runs in a kill-on-close job object (Windows; always false elsewhere, where the process group
     /// plays that part).
     pub fn in_job(&self) -> bool {
@@ -837,5 +843,51 @@ mod tests {
         assert_eq!(s.stopped_over_memory(), None, "{:?}", heard.lock().unwrap());
         assert!(s.is_running());
         assert!(s.memory_peak() < cap_bytes, "peak {}", s.memory_peak());
+    }
+
+    /// The child is lowered from the parent after the spawn (rule 52: bulk work lowered), read back from the OS.
+    #[cfg(unix)]
+    #[test]
+    fn lower_priority_lowers_the_started_child_and_not_a_gone_one() {
+        let mut s = Supervised::spawn(child(Mode::Sleep)).unwrap();
+        let pid = s.id().unwrap();
+        // SAFETY: getpriority takes two integers; the child is unreaped, so the pid is its own.
+        let nice = |pid: u32| unsafe { libc::getpriority(libc::PRIO_PROCESS, pid as libc::id_t) };
+        let own = crate::sys::own_niceness();
+        assert_eq!(nice(pid), own, "starts at the parent's priority");
+        assert!(s.lower_priority());
+        // A parent already below the target (a niced test run) keeps its level.
+        assert_eq!(nice(pid), own.max(crate::sys::LOWERED_NICE));
+        s.kill();
+        assert!(!s.lower_priority(), "nothing left to lower");
+    }
+
+    /// Regression (CI run 7230, two restart tests): lowering a child in `pre_exec` made every spawn a fork, and a forked
+    /// child carries a copy of the parent's lock descriptor until it execs, so a restart right after the holder let go was
+    /// refused as "already running". Spawned lowered, the lock is free the moment it is dropped.
+    #[cfg(unix)]
+    #[test]
+    fn a_lowered_spawn_leaves_no_copy_of_a_held_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent.lock");
+        let crate::Claim::Acquired(lock) = crate::InstanceLock::claim(&path).unwrap() else {
+            panic!("the lock was free");
+        };
+        let mut children: Vec<Supervised> = (0..8)
+            .map(|_| {
+                let s = Supervised::spawn(child(Mode::Sleep)).unwrap();
+                s.lower_priority();
+                s
+            })
+            .collect();
+        drop(lock);
+        assert!(
+            matches!(
+                crate::InstanceLock::claim(&path).unwrap(),
+                crate::Claim::Acquired(_)
+            ),
+            "a child still holds a copy of the lock"
+        );
+        children.iter_mut().for_each(Supervised::kill);
     }
 }

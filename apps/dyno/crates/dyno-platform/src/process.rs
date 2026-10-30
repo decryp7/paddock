@@ -142,7 +142,28 @@ impl TreeGuard {
 /// then returns [`PlatformError::Failed`] ("stopped") and the caller, who knows it cancelled, drops the result. A non-zero exit
 /// is an error carrying the start of the error output. Only [`MAX_TOOL_OUTPUT`] bytes of stdout are read.
 pub fn run_streaming(
+    cmd: Command,
+    timeout: Duration,
+    control: &dyn ReadControl,
+    on_line: impl FnMut(&str),
+) -> Result<(), PlatformError> {
+    stream(cmd, false, timeout, control, on_line)
+}
+
+/// [`run_streaming`] for a heavy read that must not slow the user's work: `cmd` was marked with
+/// `paddock_proc::lower_priority` (Windows) and the started tool is lowered here (Unix), with no fork window.
+pub fn run_streaming_lowered(
+    cmd: Command,
+    timeout: Duration,
+    control: &dyn ReadControl,
+    on_line: impl FnMut(&str),
+) -> Result<(), PlatformError> {
+    stream(cmd, true, timeout, control, on_line)
+}
+
+fn stream(
     mut cmd: Command,
+    lowered: bool,
     timeout: Duration,
     control: &dyn ReadControl,
     mut on_line: impl FnMut(&str),
@@ -157,6 +178,9 @@ pub fn run_streaming(
         std::io::ErrorKind::PermissionDenied => PlatformError::AccessDenied(format!("Not allowed to run {program}.")),
         _ => PlatformError::Failed(format!("Could not run {program}: {e}")),
     })?;
+    if lowered {
+        tool.lower_priority();
+    }
     // Never a guess: pid 0 would signal our own process group. A child with no id is ended and reported.
     let guard = match TreeGuard::new(tool.process(), |id| {
         paddock_proc::kill_tree(id);

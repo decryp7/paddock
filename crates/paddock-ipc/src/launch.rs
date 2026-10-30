@@ -214,6 +214,9 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
     };
     let mut process = spawned
         .map_err(|e| IpcError::Spawn(format!("{} could not be started ({e})", spec.peer.label)))?;
+    if spec.lower_priority {
+        process.lower_priority();
+    }
     let pid = process
         .id()
         .ok_or_else(|| IpcError::Spawn(format!("{} exited at once", spec.peer.label)))?;

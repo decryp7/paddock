@@ -47,16 +47,18 @@ mod unix {
         cmd.process_group(0);
     }
 
-    /// Lowers the child's priority between fork and exec (the `nice` binary would drop `DYLD_*` on macOS).
-    pub fn lower_priority_before_exec(cmd: &mut Command) {
-        // SAFETY: setpriority is async-signal-safe and the closure touches no memory of the parent.
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::setpriority(libc::PRIO_PROCESS, 0, 10);
-                Ok(())
-            });
-        }
+    /// Lowers the priority of `child`, which the caller still holds unreaped, so the pid is still its own (rule 53). Done
+    /// after the spawn, never in a `pre_exec` hook: a hook forces fork+exec instead of `posix_spawn`, and a concurrent
+    /// fork then carries a copy of every inheritable descriptor (a lock, an exec-status pipe) until it execs. The child
+    /// runs at normal priority for the few microseconds between its start and this call; for work that lasts at least
+    /// milliseconds that is harmless, and the `nice(1)` binary would drop `DYLD_*` on macOS. Returns whether it took.
+    pub fn lower_child(child: &std::process::Child) -> bool {
+        // SAFETY: setpriority takes plain integers and has no memory effects; it only changes our own child's priority.
+        unsafe { libc::setpriority(libc::PRIO_PROCESS, child.id(), LOWERED_NICE) == 0 }
     }
+
+    /// The niceness of a lowered child.
+    pub const LOWERED_NICE: i32 = 10;
 
     /// The niceness of this process (tests).
     #[cfg(test)]
@@ -493,6 +495,12 @@ pub fn process_parents() -> Option<Vec<(u32, u32)>> {
 /// Makes the child lead its own process group (Unix only).
 #[cfg(not(unix))]
 pub fn own_group(_cmd: &mut std::process::Command) {}
+
+/// Windows lowers the priority with the creation flags set by `lower_priority`; nothing is left to do after the spawn.
+#[cfg(not(unix))]
+pub fn lower_child(_child: &std::process::Child) -> bool {
+    true
+}
 
 #[cfg(all(test, unix))]
 mod tests {

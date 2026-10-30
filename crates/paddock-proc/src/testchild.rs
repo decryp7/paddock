@@ -26,8 +26,6 @@ pub enum Mode {
     Endless,
     /// Print the environment.
     PrintEnv,
-    /// Print the niceness.
-    PrintNice,
     /// Print a line, then exit with code 3.
     Exit3,
     /// Ignore SIGTERM, print `ready`, sleep (Unix).
@@ -51,7 +49,6 @@ impl Mode {
             Mode::Leave => "leave",
             Mode::Endless => "endless",
             Mode::PrintEnv => "print_env",
-            Mode::PrintNice => "print_nice",
             Mode::Exit3 => "exit3",
             Mode::IgnoreTerm => "ignore_term",
             Mode::Polite => "polite",
@@ -115,10 +112,6 @@ fn helper_main() {
             for (k, v) in std::env::vars() {
                 say(&format!("{k}={v}"));
             }
-        }
-        "print_nice" => {
-            #[cfg(unix)]
-            say(&crate::sys::own_niceness().to_string());
         }
         "exit3" => {
             say("bye");
