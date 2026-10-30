@@ -66,13 +66,26 @@ impl InstanceLock {
     }
 }
 
+/// The agent log is moved aside to `agent.log.1` once it grows past this.
+const LOG_MAX_BYTES: u64 = 1024 * 1024;
+
 /// Appends `line` to the agent's own log file (`logs/agent.log` in the data folder), so a refusal or a missing lock is
 /// found even when the agent was started with its stderr discarded (by the app) or sent elsewhere (by a service).
-/// Failures are ignored: logging never stops the agent.
+/// Bounded: a line equal to the file's last one is not written again (a service retrying a refused agent every 10 s
+/// would otherwise write thousands a day), and the file is rotated past [`LOG_MAX_BYTES`], keeping one older
+/// generation. Failures are ignored: logging never stops the agent.
 pub fn note(dirs: &Dirs, line: &str) {
     use std::io::Write;
+    let path = dirs.logs().join("agent.log");
     let _ = std::fs::create_dir_all(dirs.logs());
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(dirs.logs().join("agent.log")) {
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if meta.len() > LOG_MAX_BYTES {
+            let _ = std::fs::rename(&path, path.with_extension("log.1"));
+        } else if std::fs::read_to_string(&path).is_ok_and(|t| t.lines().last() == Some(line)) {
+            return;
+        }
+    }
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
         let _ = writeln!(f, "{line}");
     }
 }
@@ -102,6 +115,29 @@ mod tests {
         drop(first);
         assert!(!is_held(&dirs));
         drop(InstanceLock::acquire(&dirs).unwrap());
+    }
+
+    #[test]
+    fn repeated_refusals_do_not_grow_the_log_without_bound() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dirs = Dirs::at(tmp.path().join("data"));
+        let log = dirs.logs().join("agent.log");
+        for _ in 0..50 {
+            note(&dirs, "dyno-agent: another Dyno agent is already running");
+        }
+        assert_eq!(
+            std::fs::read_to_string(&log).unwrap().lines().count(),
+            1,
+            "the same refusal is written once"
+        );
+        note(&dirs, "dyno-agent: something else");
+        note(&dirs, "dyno-agent: another Dyno agent is already running");
+        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 3);
+        // Past the bound the file is moved aside, so it never grows beyond it by more than a line.
+        std::fs::write(&log, vec![b'x'; usize::try_from(LOG_MAX_BYTES).unwrap() + 1]).unwrap();
+        note(&dirs, "after rotation");
+        assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), "after rotation");
+        assert!(dirs.logs().join("agent.log.1").exists());
     }
 
     #[test]

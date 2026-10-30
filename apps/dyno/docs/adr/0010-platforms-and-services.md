@@ -86,7 +86,9 @@ choice on Windows (a service) is the wrong one for Dyno.
     written after the wait began or its agent answers; a refusal or a missing lock is written to `logs/agent.log` too.
     Follow-ups, not yet done: kickstart the service after a hand-over instead of waiting for its throttle; probe
     `RequiresApproval` again so an approval given later is noticed; slow the `is_held` probe in the waits (it takes and
-    releases the lock at every look); the `/tmp/Dyno` fallback folder for an unwritable data folder.
+    releases the lock at every look); the `/tmp/Dyno` fallback folder for an unwritable data folder. For 1.0.1: keep the service fallback visible after
+    Running (an activity entry or a chip note); name the OS's own login-items place on Linux in that note; on Quit while
+    the fallback is on and the service supervises, end the app's own agent so the service's takes over.
 
 ## Consequences
 

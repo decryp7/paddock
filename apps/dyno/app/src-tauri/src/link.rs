@@ -1497,6 +1497,10 @@ mod tests {
         (link, launcher, rx, tmp)
     }
 
+    /// A hang guard for the waits below: well over the slowest wait measured under load and under CI's 60 s test kill
+    /// (family hang guard, 40 s).
+    const HANG_GUARD: Duration = Duration::from_secs(40);
+
     /// Waits until `cond` holds or `bound` has passed; returns whether it held.
     fn until(bound: Duration, cond: impl Fn() -> bool) -> bool {
         let end = Instant::now() + bound;
@@ -1511,13 +1515,15 @@ mod tests {
 
     #[test]
     fn a_slow_agent_start_is_waited_for_and_never_doubled() {
+        // No wall clock decides anything here: `start_agent` has no timer, only the pure `start_progress` (process state
+        // and discovery file) and a count of looks. The guard on `until` only keeps a broken link from hanging the test.
         let (link, launcher, statuses, _tmp) = slow_rig();
         let handle = link.spawn().unwrap();
         // The wait is measured in looks at the process, not in seconds (ER-12): the old link gave up after 50 looks and
         // started a second agent, so twice that many looks with the gate shut must still show exactly one launch. The
         // bound only keeps a broken link from hanging the test.
         assert!(
-            until(Duration::from_secs(60), || launcher.looks.load(Ordering::SeqCst) >= 100),
+            until(HANG_GUARD, || launcher.looks.load(Ordering::SeqCst) >= 100),
             "the link never looked at the starting agent"
         );
         assert_eq!(
@@ -1807,7 +1813,7 @@ mod tests {
     /// Every status up to and including the first with `state`.
     fn collect_until(rx: &Receiver<AgentStatus>, state: AgentState) -> Vec<AgentStatus> {
         let mut seen = Vec::new();
-        let end = Instant::now() + Duration::from_secs(60);
+        let end = Instant::now() + HANG_GUARD;
         while Instant::now() < end {
             if let Ok(s) = rx.recv_timeout(Duration::from_millis(200)) {
                 let done = s.state == state;
@@ -1848,7 +1854,7 @@ mod tests {
         let fresh = holder.discovery.clone();
         stale_file().write(&r.link.dirs.discovery()).unwrap();
         let handle = r.link.spawn().unwrap();
-        assert!(until(Duration::from_secs(60), || r.link.looks() >= 100), "the link never waited");
+        assert!(until(HANG_GUARD, || r.link.looks() >= 100), "the link never waited");
         assert_eq!(
             r.launcher.launches(),
             1,
@@ -1873,7 +1879,7 @@ mod tests {
         let r = stub_rig(Child::Running { pid: 4242 });
         let handle = r.link.spawn().unwrap();
         assert!(
-            until(Duration::from_secs(60), || r.sink.stalled_with(Stall::AgentNotAnswering)),
+            until(HANG_GUARD, || r.sink.stalled_with(Stall::AgentNotAnswering)),
             "no stall was reported for an agent that never wrote its discovery file"
         );
         assert_eq!(r.launcher.launches(), 1, "it keeps waiting, it does not start another");
@@ -1881,7 +1887,7 @@ mod tests {
         // Retry: the held process is ended through its handle, then launched again.
         r.link.retry();
         assert!(
-            until(Duration::from_secs(60), || r.launcher.launches() == 2),
+            until(HANG_GUARD, || r.launcher.launches() == 2),
             "Retry did not launch the agent again"
         );
         assert_eq!(
@@ -1905,14 +1911,14 @@ mod tests {
         let _ = std::fs::remove_file(r.link.dirs.discovery());
         let handle = r.link.spawn().unwrap();
         assert!(
-            until(Duration::from_secs(60), || r.sink.stalled_with(Stall::OtherAgentHolds)),
+            until(HANG_GUARD, || r.sink.stalled_with(Stall::OtherAgentHolds)),
             "no stall was reported while another agent holds the data folder"
         );
         assert_eq!(r.launcher.launches(), 1);
         // Retry runs the connection steps again (and finds the holder still there).
         r.link.retry();
         assert!(
-            until(Duration::from_secs(60), || r.launcher.launches() == 2),
+            until(HANG_GUARD, || r.launcher.launches() == 2),
             "Retry did not run establish again"
         );
         fresh.write(&r.link.dirs.discovery()).unwrap();
