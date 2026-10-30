@@ -630,6 +630,12 @@ test('the nextest ci profile fails a test over its time budget, and every longer
   }
 });
 
+test('the shared UI Playwright config never retries a test (rule 5: a flaky test is fixed, not retried)', () => {
+  const text = read(join(PADDOCK, 'ui', 'playwright.config.ts'));
+  const retries = [...text.matchAll(/^\s*retries:\s*(.+?),?$/gm)].map((m) => m[1]);
+  assert.deepEqual(retries, ['0'], 'every retries setting is 0, also on CI');
+});
+
 test('paddock-dev has the same nextest ci profile as the crates, and its longer budgets are waivers with a reason', () => {
   const text = read(join(PADDOCK, 'tools', 'paddock-dev', '.config', 'nextest.toml'));
   const ci = text.slice(text.indexOf('[profile.ci]\n') + '[profile.ci]\n'.length);

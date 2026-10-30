@@ -262,11 +262,15 @@ test.describe('review 1 (X50)', () => {
     await wb.palette.run('Show problems');
     const table = page.locator('wd-problems-view pd-table');
     await expect(table.getByRole('columnheader', { name: /Problem/ })).toBeVisible();
-    const [tw, pw] = await Promise.all([
-      table.evaluate((t) => t.getBoundingClientRect().width),
-      table.getByRole('columnheader', { name: /Problem/ }).evaluate((h) => h.getBoundingClientRect().width),
-    ]);
-    expect(pw / tw).toBeGreaterThanOrEqual(0.6);
+    // The widths settle after the table's layout pass: wait on the ratio, not on the first read (WebKit read it early).
+    const ratio = async () => {
+      const [tw, pw] = await Promise.all([
+        table.evaluate((t) => t.getBoundingClientRect().width),
+        table.getByRole('columnheader', { name: /Problem/ }).evaluate((h) => h.getBoundingClientRect().width),
+      ]);
+      return pw / tw;
+    };
+    await expect.poll(ratio).toBeGreaterThanOrEqual(0.6);
     await expect(table.locator('.where').first()).toBeVisible();
     // Review 2 P1-A: folded rows grow; no cell overflows, the second line clears the row's bottom border by 4 px.
     const overflow = await table.locator('[role=row].pd-row').evaluateAll((rows) =>

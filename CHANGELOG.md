@@ -46,6 +46,8 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### `paddock-chromium`: an unexplained abort names the network service
 - `Page::navigate`'s error for an unexplained `net::ERR_ABORTED` (not a download, not replaced) says whether the browser's network service restarted, stayed unchanged or could not be asked. New `Page::network_service_pid` (`Result<Option<u32>>`; `SystemInfo` is an experimental DevTools domain). ADR 0030 (proposed).
+### Native feel: the Copy menu stays open on macOS
+- `installNativeFeel` opens the Copy menu once every mouse button is up when the browser sent `contextmenu` while one was held (WebKit on macOS: the right button's press, or Ctrl+click). Drawn on the press, the menu was closed at once by the release's own `click` or `auxclick` (a click outside the CDK overlay), so it vanished as the user let go. Measured with Playwright's WebKit and Chromium; the event order of Windows WebView2 (where `contextmenu` follows the release) is not verified.
 
 ### `providePaddockMaterial`: tooltips wait 500 ms
 - `providePaddockMaterial()` provides `MAT_TOOLTIP_DEFAULT_OPTIONS` with `showDelay: 500` (`PADDOCK_TOOLTIP_OPTIONS`), the design guide's delay for the tooltip every icon-only button carries. Every app that provides it gets the delay without setting it per tooltip.
