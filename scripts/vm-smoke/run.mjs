@@ -8,6 +8,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { createServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statfsSync, writeFileSync, cpSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -15,6 +16,8 @@ import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
 import { GuiCheck, runGui } from './gui.mjs';
 import { renderResult } from './judge.mjs';
+import { runUpdateTest } from './update.mjs';
+import { feedRoute } from './update-judge.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -49,11 +52,13 @@ export function parseArgs(argv) {
     else if (a === '--guest') o.guest = take(i++, a);
     else if (a === '--keep-vm') o.keep = true;
     else if (a === '--gui') o.gui = true;
+    else if (a === '--update-test') { o.updateTest = take(i++, a); o.gui = true; }
     else throw new Error(`unknown option ${a}`);
   }
   if (!o.app) throw new Error('--app <id> is needed (dyno, spotter, pitcrew, pitwall, debrief)');
   if (!/^[a-z][a-z-]*$/.test(o.app)) throw new Error(`--app ${o.app} is not an app id`);
-  if (!o.installer === !o.run) throw new Error('give exactly one of --installer <file.dmg> or --run <CI run id>');
+  if (o.updateTest && (o.installer || o.run)) throw new Error('--update-test takes its installer from the assets folder (spotter-update-assets.sh); give no --installer or --run');
+  if (!o.updateTest && !o.installer === !o.run) throw new Error('give exactly one of --installer <file.dmg> or --run <CI run id>');
   if (o.run && !/^\d+$/.test(o.run)) throw new Error('--run takes a number');
   if (o.guest !== 'macos') throw new Error(`--guest ${o.guest}: only macos is scripted here. Windows guests: scripts/vm-win.sh on origin/tools/win-test-vm; Linux: tools/macos-vm-smoke.sh --guest linux (see README)`);
   return o;
@@ -191,7 +196,8 @@ async function main(argv) {
     if (gaps.length) throw new Error(`this checkout lacks ${gaps.join(', ')}, which ./dev (paddock-dev, the VM slot) is built from. Use a full checkout, or: git sparse-checkout add tools crates .cargo`);
 
     // The installer.
-    let dmg = o.installer ? resolve(o.installer) : null;
+    const plan = o.updateTest ? JSON.parse(readFileSync(join(resolve(o.updateTest), 'plan.json'), 'utf8')) : null;
+    let dmg = o.installer ? resolve(o.installer) : plan ? findDmg(join(resolve(o.updateTest), 'installer')) : null;
     let source = dmg;
     if (!dmg) {
       const name = o.artifact ?? `${o.app}-macOS`;
@@ -203,6 +209,7 @@ async function main(argv) {
     const stage = join(scratch, 'stage');
     mkdirSync(stage);
     cpSync(dmg, join(stage, 'installer.dmg'));
+    if (plan) cpSync(join(resolve(o.updateTest), 'ca', 'ca.pem'), join(stage, 'ca.pem'));
 
     // A VM slot, host-wide, the same one tools/macos-vm-smoke.sh takes (`./dev ci slot`, an OS lock the kernel frees with its holder).
     mkdirSync(tartHome, { recursive: true });
@@ -296,7 +303,26 @@ async function main(argv) {
         },
       };
       const check = new GuiCheck(guest, config, host, { log });
-      ({ steps, version } = await runGui(check));
+      if (plan) {
+        // The local HTTPS feed of the update test: the VM bridge address only, the test CA's server certificate, the current case's files.
+        if (gw !== plan.host) throw new Error(`the guest's gateway is ${gw} but the old build has ${plan.host} built in as its feed; rebuild the assets with --host ${gw}`);
+        const root = join(resolve(o.updateTest), 'feed');
+        let current = 'ok';
+        let feedLog = [];
+        const feedServer = createHttpsServer({ key: readFileSync(join(resolve(o.updateTest), 'ca', 'server.key')), cert: readFileSync(join(resolve(o.updateTest), 'ca', 'server.pem')) }, (req, res) => {
+          if (current === 'down') { req.socket.destroy(); return; }
+          const route = feedRoute(req.url ?? '/', current);
+          feedLog.push(`${req.method} ${req.url} ${route ? 200 : 404}`);
+          if (!route || !existsSync(join(root, route.file))) { res.writeHead(404).end(); return; }
+          res.writeHead(200, { 'content-type': route.type, 'content-length': statSync(join(root, route.file)).size });
+          createReadStream(join(root, route.file)).pipe(res);
+        });
+        await new Promise((r, j) => { feedServer.once('error', j); feedServer.listen(plan.port, gw, r); });
+        // Closed with the other host children at cleanup.
+        children.add({ kill: () => feedServer.close() });
+        const feed = { setCase: (id) => { current = id; }, feedLog: () => feedLog, clearFeedLog: () => { feedLog = []; } };
+        ({ steps, version } = await runUpdateTest(check, feed, plan));
+      } else ({ steps, version } = await runGui(check));
       // The screenshots (taken inside the guest) next to the result file.
       const shots = join(out, `${started.replace(/[:.]/g, '-')}-${o.app}-screens`);
       mkdirSync(shots, { recursive: true });
