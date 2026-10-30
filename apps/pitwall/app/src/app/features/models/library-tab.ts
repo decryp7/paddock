@@ -329,7 +329,7 @@ export function contextText(tokens: number | null): string {
       width: 72px;
     }
     .mat-column-context {
-      width: 112px;
+      width: 128px;
     }
     .mat-column-status {
       width: 132px;

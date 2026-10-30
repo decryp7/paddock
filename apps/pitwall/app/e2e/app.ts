@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { dialogWindowUrl } from '../../../../ui/projects/paddock-e2e/src/index.ts';
+import { dialogWindowUrl, pressMod } from '../../../../ui/projects/paddock-e2e/src/index.ts';
 
 /** Opens a screen of the main window against the mock backend with no simulated latency; `?mock-static` stops the live ticker. */
 export async function openApp(page: Page, hash = '/', query = 'mock-fast&mock-static'): Promise<void> {
@@ -16,7 +16,7 @@ export async function openApp(page: Page, hash = '/', query = 'mock-fast&mock-st
  */
 export async function openSettings(page: Page, query = 'mock-fast&mock-static'): Promise<void> {
   await openApp(page, '/', query);
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   await expect(settingsDialog(page)).toBeVisible();
 }
 

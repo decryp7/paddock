@@ -336,7 +336,8 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
       align-items: center;
       gap: var(--pd-space-2);
       min-width: 0;
-      > * {
+      /* Not the name: the scoped "child of any" selector would outrank .bname's own shrink. */
+      > :not(.bname) {
         flex: none;
       }
     }

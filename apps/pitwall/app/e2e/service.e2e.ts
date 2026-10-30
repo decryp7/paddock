@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { openApp, openSettings, openSettingsWindow, settingsDialog } from './app';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/index.ts';
 
 const QUESTION = /Run Pitwall's server in the background\?/;
 
@@ -11,7 +12,7 @@ test.describe('service and start at login', () => {
     await dialog.getByRole('button', { name: 'Run in the background' }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByText('Pitwall now runs as a service.')).toBeVisible();
-    await page.keyboard.press('ControlOrMeta+Comma');
+    await pressMod(page, 'Mod+Comma');
     await expect(settingsDialog(page).getByTestId('service-pill').first()).toHaveText(/Running/);
   });
 
@@ -20,7 +21,7 @@ test.describe('service and start at login', () => {
     const dialog = page.getByRole('alertdialog');
     await dialog.getByRole('button', { name: 'Not now' }).click();
     await expect(dialog).toHaveCount(0);
-    await page.keyboard.press('ControlOrMeta+Comma');
+    await pressMod(page, 'Mod+Comma');
     const settings = settingsDialog(page);
     await expect(settings.getByTestId('service-pill').first()).toHaveText(/Not installed/);
     await settings.getByRole('button', { name: 'Install service' }).first().click();

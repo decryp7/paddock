@@ -130,7 +130,7 @@ const METRICS: { id: UsageMetric; label: string }[] = [
         width: 72px;
       }
       .mat-column-status {
-        width: 96px;
+        width: 120px;
       }
       /* "2,213" and "2.2M" whole: numbers are never cut (design guide 3). */
       .mat-column-tokens,

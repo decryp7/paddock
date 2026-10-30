@@ -1,12 +1,13 @@
 import { expect, test, type Locator } from '@playwright/test';
 import { openApp, openSettings, openSettingsWindow, settingsDialog } from './app';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/index.ts';
 
 test.describe('settings', () => {
   test('opens from Mod+, as the Settings window, not as a page of the main window', async ({ page }) => {
     await openApp(page, '/settings');
     // The old route is gone: it lands on the first page.
     await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
-    await page.keyboard.press('ControlOrMeta+Comma');
+    await pressMod(page, 'Mod+Comma');
     const settings = settingsDialog(page);
     await expect(settings.getByRole('heading', { name: 'Pitwall' })).toBeVisible();
     for (const name of ['Pitwall', 'Appearance']) await expect(settings.getByText(name, { exact: true }).first()).toBeVisible();
@@ -22,7 +23,7 @@ test.describe('settings', () => {
     // Closing right away loses nothing: the page saves what waits when it goes.
     await settings.getByRole('button', { name: 'Close' }).last().click();
     await expect(settings).toHaveCount(0);
-    await page.keyboard.press('ControlOrMeta+Comma');
+    await pressMod(page, 'Mod+Comma');
     await expect(settingsDialog(page).getByRole('switch', { name: 'Offline mode' })).toBeChecked();
   });
 
@@ -33,6 +34,8 @@ test.describe('settings', () => {
       await page.getByRole('combobox', { name: /Theme/ }).click();
       await page.getByRole('option', { name: theme }).click();
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme.toLowerCase());
+      // The list is still closing for a moment, and a click on the field then lands on it: wait until it is gone.
+      await expect(page.getByRole('option')).toHaveCount(0);
     }
   });
 
@@ -78,9 +81,9 @@ test.describe('settings', () => {
     test(`closing Settings at once after ${what} keeps it`, async ({ page }) => {
       await openSettings(page);
       await edit(settingsDialog(page));
-      await page.keyboard.press('ControlOrMeta+KeyW');
+      await pressMod(page, 'Mod+KeyW');
       await expect(settingsDialog(page)).toHaveCount(0);
-      await page.keyboard.press('ControlOrMeta+Comma');
+      await pressMod(page, 'Mod+Comma');
       await check(settingsDialog(page));
     });
   }
