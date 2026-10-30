@@ -25,8 +25,18 @@ pub const CANCELLED: &str = "Cancelled.";
 pub const MIN_INTERVAL: Duration = Duration::from_millis(100);
 
 /// A flag the user (or a timeout) raises to stop an operation; clones share it.
-#[derive(Debug, Clone, Default)]
-pub struct Cancel(Arc<AtomicBool>);
+#[derive(Clone, Default)]
+pub struct Cancel {
+    flag: Arc<AtomicBool>,
+    /// Another owner of the stop: the app's job registry, which the user's Cancel reaches.
+    source: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+}
+
+impl std::fmt::Debug for Cancel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cancel").field("cancelled", &self.is_cancelled()).finish()
+    }
+}
 
 impl Cancel {
     /// A fresh, not yet cancelled flag.
@@ -34,14 +44,23 @@ impl Cancel {
         Cancel::default()
     }
 
+    /// A flag that is also raised when `source` says so: the stop of a job another owner (the app shell's job
+    /// registry) cancels. `source` is read on every poll, so it must be cheap.
+    pub fn linked(source: impl Fn() -> bool + Send + Sync + 'static) -> Cancel {
+        Cancel {
+            flag: Arc::default(),
+            source: Some(Arc::new(source)),
+        }
+    }
+
     /// Asks the operation to stop.
     pub fn cancel(&self) {
-        self.0.store(true, Ordering::Relaxed);
+        self.flag.store(true, Ordering::Relaxed);
     }
 
     /// Whether a stop was asked for.
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
+        self.flag.load(Ordering::Relaxed) || self.source.as_ref().is_some_and(|s| s())
     }
 }
 
@@ -238,6 +257,20 @@ mod tests {
         let sink = seen.clone();
         let job = Job::new(cancel.clone(), move |p| sink.lock().unwrap().push(p.clone())).with_interval(interval);
         (job, cancel, seen)
+    }
+
+    #[test]
+    fn a_linked_cancel_follows_its_source_and_its_own_flag() {
+        let raised = Arc::new(AtomicBool::new(false));
+        let source = raised.clone();
+        let c = Cancel::linked(move || source.load(Ordering::Relaxed));
+        let d = c.clone();
+        assert!(!d.is_cancelled());
+        raised.store(true, Ordering::Relaxed);
+        assert!(c.is_cancelled() && d.is_cancelled(), "the registry's cancel reaches every clone");
+        let own = Cancel::linked(|| false);
+        own.cancel();
+        assert!(own.is_cancelled(), "the flag still works on its own");
     }
 
     #[test]

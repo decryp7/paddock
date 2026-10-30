@@ -7,9 +7,10 @@ use spotter_core::release::Release;
 use spotter_core::source::{Plan, Source, SourceConfig, SourceError};
 use spotter_core::version::VersionScheme;
 use spotter_sources::checker::for_plan;
-use spotter_sources::download::download;
+mod support;
 use spotter_sources::http::Http;
 use std::sync::Arc;
+use support::download;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -33,11 +34,9 @@ fn route(path: &str, headers: &str, base: &str) -> Reply {
     let auth = headers
         .lines()
         .find_map(|l| l.strip_prefix("authorization: ").or_else(|| l.strip_prefix("Authorization: ")));
-    let range = headers.lines().find_map(|l| {
-        l.to_ascii_lowercase()
-            .strip_prefix("range: bytes=")
-            .map(|r| r.trim_end_matches('-').to_string())
-    });
+    let range = headers
+        .lines()
+        .find_map(|l| l.to_ascii_lowercase().strip_prefix("range: bytes=").map(|r| r.to_string()));
     match path {
         "/repos/o/r/releases?per_page=100" => reply(
             200,
@@ -59,12 +58,15 @@ fn route(path: &str, headers: &str, base: &str) -> Reply {
         "/private" => reply(403, b""),
         "/big" => reply(200, &vec![b'x'; 4096]),
         "/files/app-1.2.0.zip" => match range {
-            Some(from) => {
+            Some(spec) => {
+                // `bytes=a-` or `bytes=a-b` (the downloader probes with `0-0` and then asks for ranges).
+                let (from, to) = spec.split_once('-').unwrap();
                 let from: usize = from.parse().unwrap();
+                let to = to.parse::<usize>().map_or(FILE.len() - 1, |t| t.min(FILE.len() - 1));
                 Reply {
                     status: 206,
-                    headers: vec![("Content-Range".into(), format!("bytes {from}-{}/{}", FILE.len() - 1, FILE.len()))],
-                    body: FILE[from..].to_vec(),
+                    headers: vec![("Content-Range".into(), format!("bytes {from}-{to}/{}", FILE.len()))],
+                    body: FILE[from..=to].to_vec(),
                 }
             }
             None => reply(200, FILE),
@@ -121,7 +123,7 @@ fn source(kind: &str, values: &[(&str, &str)]) -> Source {
 #[tokio::test]
 async fn forge_answers_are_listed() {
     let base = serve().await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let src = source("github", &[("repo", "o/r"), ("server", &base)]);
     let checker = for_plan(src.plan(&Default::default()), &http, None);
     let c = checker.list(10).await.unwrap();
@@ -132,7 +134,7 @@ async fn forge_answers_are_listed() {
 #[tokio::test]
 async fn registries_answer_bearer_challenges() {
     let base = serve().await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let host = base.trim_start_matches("http://");
     // The container source speaks https; point a request at the local server directly.
     let req = spotter_core::source::HttpRequest::get(format!("{base}/v2/o/app/tags/list?n=1000"));
@@ -147,7 +149,7 @@ async fn registries_answer_bearer_challenges() {
 #[tokio::test]
 async fn statuses_sizes_and_connection_failures_map_to_errors() {
     let base = serve().await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let get = |p: &str, max: usize| {
         let http = http.clone();
         let url = format!("{base}{p}");
@@ -188,9 +190,9 @@ fn release(location: &str) -> Release {
 #[tokio::test]
 async fn downloads_resume_and_verify_checksums() {
     let base = serve().await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let dest = tempfile::tempdir().unwrap();
-    // A part left by an interrupted run is resumed with a range request.
+    // A bare part with no resume state is not trusted (its bytes were never hashed): the file is fetched whole.
     std::fs::write(dest.path().join("app-1.2.0.zip.part"), &FILE[..20]).unwrap();
     let d = download(&http, &release(&format!("{base}/files/app-1.2.0.zip")), dest.path(), true)
         .await
@@ -232,7 +234,7 @@ async fn downloads_resume_and_verify_checksums() {
 
 #[tokio::test]
 async fn files_on_shares_are_copied_with_resume_and_sidecar_checksums() {
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let src = tempfile::tempdir().unwrap();
     let dest = tempfile::tempdir().unwrap();
     let file = src.path().join("R1.02.00T01.zip");

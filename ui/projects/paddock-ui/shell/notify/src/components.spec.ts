@@ -59,6 +59,10 @@ describe('chip text, sentence case and accurate state words', () => {
     expect(chipCompactText([svc('service.needsApproval')])).toBe('Sources needs approval');
     expect(chipText([svc('service.repairFailed')])).toBe('Your sources: stopped');
     expect(chipText([{ label: 'the AI', state: 'degraded', cause: cause('pitwall.needsPairing') }])).toBe('AI: needs pairing');
+    // Spotter's page browser: not there, and an install that did not work, say so (not just "stopped").
+    expect(stateWord('down', cause('sp.renderer.missing'))).toBe('not installed');
+    expect(stateWord('down', cause('sp.renderer.install'))).toBe('failed');
+    expect(stateWord('down', cause('sp.renderer.not-found'))).toBe('failed');
     // A code nobody listed (or none) is plain "stopped".
     expect(chipText([svc('x.unknown')])).toBe('Your sources: stopped');
     expect(stateWord('down', cause(null))).toBe('stopped');

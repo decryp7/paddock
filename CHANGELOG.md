@@ -152,6 +152,46 @@ Conventional Commits; one semver tag for the whole repo.
 ### The dialog frame's filled button uses the page primary's colours
 - `.pd-frame-btn--filled` takes `--pd-accent-fill` with `--pd-on-accent`, the same as `.pd-btn--primary` and Material's filled button, so a dialog's primary and a page's primary are one colour in both schemes (`--pd-accent-control` is for toggles and checkmarks).
 
+### The shell owns the start (ADR 0029; shared API, breaking)
+- `paddock-shell`: `Builder::tray(f)`, `Builder::launch(LaunchArgs)` and `Builder::add_to(tauri::Builder)` open the tray
+  and the main window from Tauri's own `setup`, after every plugin is set up (a window built inside a plugin hook
+  deadlocked the main thread: Spotter started with no window). A start that cannot open its window is logged and exits
+  with code 1. `Builder::setup` no longer opens windows. New `paddock_shell::testing::start` (feature `mock-runtime`):
+  the start test every app runs. The shell's plugin hooks are marked; a Dock click with no window and a file opened from
+  Finder open their window after the hook.
+- `paddock-shell`: `logging::install` (and `install_in`): the app's `paddock-log` in its folders with the level from
+  Settings; every app on the shell calls it first in `run`. A shell built with `build()` that has a tray or a launch
+  fails the start ("tray/launch need Builder::add_to"); `testing::start` names a start that panicked.
+- `paddock-commands`: `plugin_hook` (`plugin_hook_scope`, `in_plugin_hook`, `INSIDE_PLUGIN_HOOK`).
+- `paddock-window`: `after_plugin_hook` (window work after the hook, in order), `exit_with`, `HeadlessTray`; windows and
+  the tray popover refuse to be built inside a plugin hook with the new `WindowErrorCode` `insidePluginHook`.
+- `paddock-dialogs`, `paddock-panels`: dialogs, pop-outs and the drag ghost refuse to be built inside a plugin hook, with
+  the new `DialogErrorCode` / `PanelErrorCode` `insidePluginHook`.
+- `paddock-workbench`: its plugin hooks are marked.
+- Spotter, the shell demo and the workbench demo use the new start; conformance C50 checks every app on the shell.
+
+### Material: stepper theme (shared)
+- `material.css`: `mat-stepper` follows the family tokens (`--mat-stepper-*` from `--pd-*`, a 56 px header (24 px circle plus `--pd-space-4` above and below, Material's fixed height dropped), tighter header
+  padding and lines, an outlined circle for steps not reached, no content inset; the geometry applies to horizontal steppers only). Spotter's add/edit watch flow is a linear
+  `mat-stepper` on it and no longer carries its own stepper theme.
+
+### Jobs: quietOnSuccess (shared API)
+- `paddock-jobs`: `JobSnapshot::quiet_on_success` (wire field `quietOnSuccess`, off by default and left out of the wire form while off),
+  set with `JobContext::quiet_on_success()` / `Reporter::set_quiet_on_success()` and carried by every later snapshot, the terminal one
+  included. `@decryp7/paddock-ui/shell/jobs`: `SuJobSnapshot.quietOnSuccess`, read by `parseJobSnapshot`, and the jobs store does not
+  announce the success of such a job (a failure still is). For work that runs again with every edit of a form or on a schedule; the
+  generated `JOB_SNAPSHOT_FIXTURES` carry a quiet job, so both sides test the same wire form. Spotter uses it for the source test and
+  the check of one watch.
+
+### Copy menu in WebKit
+- `@decryp7/paddock-ui/shell/feel`: the guard keeps the `auxclick` that WebKit sends after a context menu from reaching the app, so the
+  Copy menu it just opened is no longer closed as an outside click.
+
+### Dialog buttons
+- `@decryp7/paddock-ui/shell/dialogs`: the filled (primary) dialog button uses `--pd-accent-fill` with `--pd-on-accent` and
+  `--pd-accent-fill-hover` (it used the accent text colour, 2.18:1 with white ink in dark mode). `test:tokens` checks both pairs
+  for every accent, scheme and contrast mode.
+
 ### Rust developer and CI tool, phase R0 (ADR 0022)
 - New shared crates `paddock-slots` (numbered job slots over OS file locks, with a holder that always ends: job folder gone,
   release, or `--max-hold-secs`), `paddock-repo-files` (the walk, its caps and a bounded-thread file hash) and

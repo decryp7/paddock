@@ -1072,6 +1072,11 @@ test("app-release runs an app's own bundle check on Linux and macOS, after the i
   assert.ok(script && existsSync(join(PADDOCK, script)), "Dyno's check script exists");
 });
 
+test("spotter-release takes its first release's notes from the app's CHANGELOG", () => {
+  const path = /first-release-changelog: (\S+)/.exec(read(join(WORKFLOWS, 'spotter-release.yml')))?.[1];
+  assert.ok(path && existsSync(join(PADDOCK, path)), "Spotter's CHANGELOG exists");
+});
+
 test('every host job that keeps a build folder caps it at the end, with the shared prune action, in its own folder only', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const rel = read(join(WORKFLOWS, 'app-release.yml'));

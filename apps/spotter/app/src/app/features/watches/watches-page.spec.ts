@@ -149,6 +149,9 @@ describe('WatchesPage', () => {
     const { f } = await make(makeMock({ scenario: 'broken' }));
     expect(text(f.nativeElement)).toContain('Could not load the watch list');
     expect(text(f.nativeElement)).toContain('The engine is not answering');
+    // A list that could not be read has no count: "0 watches" would be a claim the page cannot make.
+    expect(text(f.nativeElement)).not.toContain('0 watches');
+    expect(f.nativeElement.querySelector('.sub')).toBeNull();
     (byText(f.nativeElement, 'button', /retry/i) as HTMLButtonElement).click();
     await settle(f);
     expect(text(f.nativeElement)).toContain('Could not load the watch list');

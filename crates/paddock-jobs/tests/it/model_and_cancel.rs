@@ -88,6 +88,7 @@ fn snapshot_json_is_camel_case_and_round_trips() {
         eta_ms: None,
         cancellable: false,
         not_cancellable_reason: Some("Saving".into()),
+        quiet_on_success: false,
     };
     let json = serde_json::to_value(&snap).unwrap();
     assert_eq!(json["id"], 7);

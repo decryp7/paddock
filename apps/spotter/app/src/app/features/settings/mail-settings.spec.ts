@@ -49,7 +49,7 @@ describe('Settings e-mail form', () => {
 
   it('moves the port with the security mode unless the person typed their own', async () => {
     const { f } = await make();
-    const tab = (label: string) => byText(f.nativeElement, '.seg-tabs[aria-label="Mail security"] button', new RegExp(`^${label}$`)) as HTMLButtonElement;
+    const tab = (label: string) => byText(f.nativeElement, 'mat-button-toggle-group[aria-label="Mail security"] button', new RegExp(`^${label}$`)) as HTMLButtonElement;
     tab('TLS').click();
     await settle(f);
     expect(field(f, 'port').value).toBe('465');
@@ -57,7 +57,7 @@ describe('Settings e-mail form', () => {
     tab('None').click();
     await settle(f);
     expect(field(f, 'port').value).toBe('2525');
-    expect(tab('None').getAttribute('aria-pressed')).toBe('true');
+    expect(tab('None').closest('mat-button-toggle')!.classList).toContain('mat-button-toggle-checked');
   });
 
   it('shows the typed error from a failed test inline, in an alert', async () => {

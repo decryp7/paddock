@@ -5,12 +5,9 @@ import type {
   MailStatus,
   AppEvent,
   AppInfo,
-  AppUpdateCheck,
-  AppUpdateStatus,
   Dashboard,
   DashboardRange,
   DiscoveredFeed,
-  JobEvent,
   ImportFormat,
   ImportResult,
   OpenTarget,
@@ -31,7 +28,6 @@ import type {
   WatchSummary,
 } from './api.types';
 import type { ReleaseTarget, SpotterBackend } from './backend';
-import { timeoutFor, withTimeout } from './call-timeout';
 import { toCommandError } from './command-error';
 import type { Platform } from './window-chrome';
 
@@ -42,8 +38,6 @@ export type EventListen = <T>(event: string, handler: (event: { payload: T }) =>
 
 /** The event the shell pushes `StatePush` on. */
 export const STATE_EVENT = 'spotter://state';
-/** The event the shell pushes `JobEvent` on while a long operation runs and when it ends. */
-export const JOB_EVENT = 'spotter://job';
 /** The event the shell asks the main window to show a route on (payload: the route string). */
 export const NAVIGATE_EVENT = 'spotter://navigate';
 
@@ -77,8 +71,8 @@ export class TauriBackend implements SpotterBackend {
   sourceKinds(): Promise<SourceKind[]> {
     return this.run('source_kinds');
   }
-  testSource(draft: WatchDraft, secrets: Record<string, string>, jobId: string): Promise<SourcePreview> {
-    return this.run('test_source', { draft, secrets, jobId });
+  testSource(draft: WatchDraft, secrets: Record<string, string>): Promise<SourcePreview> {
+    return this.run('test_source', { draft, secrets });
   }
   saveWatch(draft: WatchDraft, secrets: Record<string, string>): Promise<WatchSummary> {
     return this.run('save_watch', { draft, secrets });
@@ -89,8 +83,8 @@ export class TauriBackend implements SpotterBackend {
   setPaused(id: string, paused: boolean): Promise<void> {
     return this.run('set_paused', { id, paused });
   }
-  checkNow(id: string | null, jobId: string): Promise<void> {
-    return this.run('check_now', { id, jobId });
+  checkNow(id: string | null): Promise<void> {
+    return this.run('check_now', { id });
   }
   acknowledge(id: string, version: string | null): Promise<void> {
     return this.run('acknowledge', { id, version });
@@ -107,8 +101,8 @@ export class TauriBackend implements SpotterBackend {
   openRelease(id: string, version: string, target?: ReleaseTarget): Promise<void> {
     return this.run('open_release', { id, version, product: target?.product ?? null, artifact: target?.artifact ?? null });
   }
-  downloadRelease(id: string, version: string, jobId: string, target?: ReleaseTarget): Promise<string> {
-    return this.run('download_release', { id, version, jobId, product: target?.product ?? null, artifact: target?.artifact ?? null });
+  downloadRelease(id: string, version: string, target?: ReleaseTarget): Promise<string> {
+    return this.run('download_release', { id, version, product: target?.product ?? null, artifact: target?.artifact ?? null });
   }
   suggestPattern(example: string, selections: PatternSelection[]): Promise<string> {
     return this.run('suggest_pattern', { example, selections });
@@ -161,8 +155,8 @@ export class TauriBackend implements SpotterBackend {
   rendererStatus(): Promise<RendererStatus> {
     return this.run('renderer_status');
   }
-  installRenderer(jobId: string): Promise<RendererStatus> {
-    return this.run('install_renderer', { jobId });
+  installRenderer(): Promise<RendererStatus> {
+    return this.run('install_renderer');
   }
   importList(format: ImportFormat, text: string): Promise<ImportResult> {
     return this.run('import_list', { format, text });
@@ -185,31 +179,20 @@ export class TauriBackend implements SpotterBackend {
   sendTestEmail(to: string): Promise<void> {
     return this.run('send_test_email', { to });
   }
-  appUpdateStatus(): Promise<AppUpdateStatus> {
-    return this.run('app_update_status');
-  }
-  checkAppUpdate(): Promise<AppUpdateCheck> {
-    return this.run('check_app_update');
-  }
-  installAppUpdate(): Promise<void> {
-    return this.run('install_app_update');
-  }
   showMainWindow(route: string | null): Promise<void> {
     return this.run('show_main_window', { route });
   }
+  pendingRoute(): Promise<string | null> {
+    return this.run('pending_route');
+  }
+  // The popover is the shell's window: closing and fitting it are the shell's commands.
   hideTray(): Promise<void> {
-    return this.run('hide_tray');
+    return this.run('plugin:paddock-shell|tray_close');
   }
   fitTray(height: number): Promise<void> {
-    return this.run('fit_tray', { height });
+    return this.run('plugin:paddock-shell|tray_fit_height', { height });
   }
 
-  cancelJob(jobId: string): Promise<void> {
-    return this.run('cancel_job', { jobId });
-  }
-  onJob(handler: (event: JobEvent) => void): Promise<() => void> {
-    return this.listenTo<JobEvent>(JOB_EVENT, (e) => handler(e.payload));
-  }
   onState(handler: (push: StatePush) => void): Promise<() => void> {
     return this.listenTo<StatePush>(STATE_EVENT, (e) => handler(e.payload));
   }
@@ -219,10 +202,8 @@ export class TauriBackend implements SpotterBackend {
 
   private async run<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
     try {
-      const work = args === undefined ? this.call<T>(cmd) : this.call<T>(cmd, args);
-      const limit = timeoutFor(cmd);
-      // A job has no limit: the engine ends it, and the UI shows what it is doing meanwhile.
-      return await (limit === null ? work : withTimeout(work, limit));
+      // No timer: a call is answered when the engine answers (rule 12); a long one is a shell job with Cancel.
+      return await (args === undefined ? this.call<T>(cmd) : this.call<T>(cmd, args));
     } catch (e) {
       throw toCommandError(e);
     }

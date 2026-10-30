@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, ElementRef, InjectionToken, OnDestroy, effect, inject, input, viewChild } from '@angular/core';
 import { registerPaddockTheme, type PaddockChartTokens } from '@decryp7/paddock-ui';
-import { ThemeService } from '../../core/theme.service';
+import { ChartTokens } from '../../core/chart-tokens';
 
 /** The part of an ECharts instance the app uses. */
 export interface ChartInstance {
@@ -51,7 +51,7 @@ export class Chart implements OnDestroy {
   /** What the chart shows, in words, for assistive technology. */
   readonly label = input.required<string>();
 
-  private readonly theme = inject(ThemeService);
+  private readonly theme = inject(ChartTokens);
   private readonly loader = inject(CHART_LOADER);
   private readonly host = viewChild.required<ElementRef<HTMLElement>>('host');
   private chart: ChartInstance | null = null;
@@ -63,7 +63,7 @@ export class Chart implements OnDestroy {
   constructor() {
     effect(() => {
       const option = this.option();
-      const tokens = this.theme.chartTokens();
+      const tokens = this.theme.tokens();
       void this.draw(option, tokens);
     });
   }

@@ -809,6 +809,9 @@
       <trans-unit id="pd.health.state.degraded" datatype="html">
         <source>limited</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.failed" datatype="html">
+        <source>failed</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.incompatible" datatype="html">
         <source>incompatible</source>
       </trans-unit>

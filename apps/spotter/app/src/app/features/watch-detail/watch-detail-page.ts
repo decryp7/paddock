@@ -1,17 +1,20 @@
 import { CdkContextMenuTrigger } from '@angular/cdk/menu';
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
+import { routeParam } from '../../core/route-param';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { Router, RouterLink } from '@angular/router';
 import { SuEmptyState } from '@decryp7/paddock-ui';
 import type { CheckRecord, Product, Release, WatchAction } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
 import { Clipboard } from '../../shared/clipboard';
-import { formatBytes, formatDateTime, formatDuration, formatShortDateTime, mebibytes } from '../../shared/format';
+import { formatBytes } from '@decryp7/paddock-ui/format';
+import { formatDateTime, formatDuration, formatShortDateTime } from '../../shared/format';
 import { kindIcon, SCHEME_OPTIONS } from '../../shared/labels';
+import { breakablePath } from '../../shared/format';
 import { middleEllipsis } from '../../shared/identity';
 import { AgoPipe, AgoShortPipe } from '../../shared/ui/ago.pipe';
 import { Avatar } from '../../shared/ui/avatar';
-import { Confirm } from '../../shared/ui/confirm-dialog';
+import { Confirm, deleteWatchPrompt } from '../../shared/ui/confirm';
 import { Panel } from '../../shared/ui/panel';
 import { MenuButton, MenuPanel, type MenuEntry } from '../../shared/ui/row-menu';
 import { RowItem, RowList } from '../../shared/ui/row-nav';
@@ -37,7 +40,8 @@ function choice(a: { variant?: string; extension?: string }): string {
 })
 export class WatchDetailPage {
   /** From the route (`/watches/:id`). */
-  readonly id = input.required<string>();
+  private readonly param = routeParam('id');
+  readonly id = computed(() => this.param() ?? '');
 
   protected readonly store = inject(WatchDetailStore);
   protected readonly watches = inject(WatchesStore);
@@ -51,8 +55,8 @@ export class WatchDetailPage {
   protected readonly bytes = formatBytes;
   protected readonly dateTime = formatDateTime;
   protected readonly duration = formatDuration;
-  protected readonly mib = mebibytes;
   protected readonly glyph = kindIcon;
+  protected readonly path = breakablePath;
   protected readonly middle = (text: string) => middleEllipsis(text, 38);
   private readonly clock = inject(ClockService);
   protected readonly short = (ms: number | null | undefined) => formatShortDateTime(ms, this.clock.now());
@@ -160,12 +164,7 @@ export class WatchDetailPage {
   protected async remove(): Promise<void> {
     const d = this.detail();
     if (!d) return;
-    const ok = await this.confirm.ask({
-      title: `Delete "${d.spec.name}"?`,
-      message: 'Spotter stops watching it and forgets its history. Downloaded files stay where they are.',
-      confirmLabel: 'Delete watch',
-      danger: true,
-    });
+    const ok = await this.confirm.ask(deleteWatchPrompt(d.spec.name));
     if (ok && (await this.watches.remove(this.id()))) await this.router.navigate(['/watches']);
   }
 

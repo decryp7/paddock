@@ -67,6 +67,16 @@ for (const theme of THEMES) {
     await expect(field).toHaveClass(/mat-mdc-form-field-label-always-float/);
   });
 
+  test(`Material controls: the horizontal stepper header is 56 px with its lines flush (${theme})`, async ({ page }) => {
+    await open(page, theme);
+    const stepper = page.getByTestId('material-stepper');
+    const headers = stepper.locator('.mat-step-header');
+    await expect(headers).toHaveCount(3);
+    for (const h of await headers.all()) expect(await h.evaluate((e) => e.getBoundingClientRect().height)).toBe(56);
+    expect(await stepper.locator('.mat-stepper-horizontal-line').first().evaluate((e) => getComputedStyle(e).marginLeft)).toBe('0px');
+    expect(await stepper.locator('.mat-step-label').first().evaluate((e) => getComputedStyle(e).minWidth)).toBe('0px');
+  });
+
   test(`Material controls: rendered sizes, type and fields match the guide (${theme})`, async ({ page }) => {
     await open(page, theme);
     const s = section(page);
