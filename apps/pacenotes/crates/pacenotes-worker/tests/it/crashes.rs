@@ -7,7 +7,7 @@ use pacenotes_index::{SourceError, SymbolSource};
 use pacenotes_worker::{OsProbe, ParseWorkers};
 use paddock_jobs::CancelToken;
 
-use crate::support::{FixedProbe, WORKER, p, settings, workers};
+use crate::support::{FixedProbe, TickProbe, WORKER, p, settings, workers};
 
 const GOOD: &[u8] =
     b"pub struct Shape;\n\nimpl Shape {\n    pub fn area(&self) -> u32 { helper(2) }\n}\n\npub fn helper(x: u32) -> u32 { x }\n";
@@ -82,16 +82,18 @@ fn a_spinning_worker_is_judged_stuck_by_cpu_time_and_a_blocked_one_by_ticks() {
 fn cancel_ends_a_stuck_call_and_a_paused_worker_is_never_judged_stuck() {
     // a probe that says "stopped by the system" forever: the judge counts nothing, the call would wait for ever, so only Cancel
     // ends it, and the pause was counted so the job can say so
-    let w = Arc::new(ParseWorkers::new(settings(), Arc::new(FixedProbe::stopped())));
+    let (probe, ticks) = TickProbe::new();
+    let w = Arc::new(ParseWorkers::new(settings(), Arc::new(probe)));
     let token = CancelToken::new();
     let t = token.clone();
     let w2 = w.clone();
     let handle = std::thread::spawn(move || w2.extract(&p("wait.block"), b"x", &t));
-    let started = std::time::Instant::now();
-    while w.paused_ticks() < 5 {
-        assert!(started.elapsed() < Duration::from_secs(60), "the monitor never saw the pause");
-        std::thread::yield_now();
+    // wait on the monitor's own ticks (one message per sample), not on a clock: the first sample is the baseline, so seven samples are six
+    // judged ticks
+    for _ in 0..7 {
+        ticks.recv().unwrap();
     }
+    assert!(w.paused_ticks() >= 5, "the monitor saw the pause: {}", w.paused_ticks());
     assert!(!handle.is_finished(), "a paused worker is waited for, however many ticks go by");
     token.cancel();
     assert_eq!(handle.join().unwrap(), Err(SourceError::Cancelled));
