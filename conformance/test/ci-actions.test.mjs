@@ -1699,7 +1699,9 @@ test('every job that runs cargo sets its build jobs (build-jobs or setup-rust); 
       const t = uncommented(job.text);
       // A caller of a reusable workflow: the called workflow's jobs are checked themselves.
       if (/^\s{4}uses: \.\//m.test(t)) continue;
-      if (builds.test(t) && !/actions\/(build-jobs|setup-rust)\b/.test(t)) missing.push(`${file} ${job.id}`);
+      // At least one of them unconditional (no `if:` of its own), so a skipped step never leaves the job without its jobs.
+      const unconditional = /- uses: \.\/(?:\.?paddock\/)?\.gitea\/actions\/(build-jobs|setup-rust)[^\n]*\n(?!\s+if:)/;
+      if (builds.test(t) && !unconditional.test(t)) missing.push(`${file} ${job.id}`);
       const iso = t.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-isolation\s*\n/);
       if (iso < 0 || !/runs-on:[^\n]*(macos|windows|\$\{\{)/.test(t)) continue;
       const bj = t.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/build-jobs\b/);

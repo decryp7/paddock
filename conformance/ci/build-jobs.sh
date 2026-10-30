@@ -14,8 +14,8 @@
 #   2. Otherwise the smaller of
 #        cores:  (the host's cores - PADDOCK_CI_RESERVED_CORES) / PADDOCK_CI_JOBS_PER_HOST
 #        memory: (the host's RAM - PADDOCK_CI_RESERVED_RAM_MB) / (PADDOCK_CI_JOBS_PER_HOST x PADDOCK_CI_RUSTC_MB)
-#      divided by <split>, at least 1. PADDOCK_CI_RUSTC_MB defaults to 1536 (about 1 GB per debug rustc was seen on the
-#      Windows runner, which ran out of memory with two builds of 16 rustc; 1.5 GB keeps a margin).
+#      divided by <split>, at least 1. PADDOCK_CI_RUSTC_MB defaults to 1536, an estimate (about 1 GB per debug rustc plus
+#      a margin), not a measurement: the A/B in docs/benchmarks.md (Gaps) is to measure it.
 #      Without the runner.envs, the runner class's known layout (verified 2026-10-30 from Gitea's job list: the most jobs
 #      one runner ran at once over the last 100 runs):
 #                 jobs/host  cores kept  RAM kept
