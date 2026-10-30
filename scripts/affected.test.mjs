@@ -673,6 +673,21 @@ describe('contracts', () => {
     }
   });
 
+  test('an app whose UI imports @decryp7/paddock-ui builds ui/dist before its UI and e2e commands (rule 54)', () => {
+    for (const [name, app] of graph.apps) {
+      if (!app.angularDir || !app.ui?.length) continue;
+      const tsconfig = join(ROOT, app.dir, app.angularDir, 'tsconfig.json');
+      if (!existsSync(tsconfig) || !readFileSync(tsconfig, 'utf8').includes('ui/dist/paddock-ui')) continue;
+      const lists = { ui: app.ui, e2e: app.e2e, e2eWebkit: app.e2eWebkit };
+      for (const [k, cmds] of Object.entries(lists)) {
+        if (!cmds?.length) continue;
+        const build = cmds.indexOf('npm run build -w ui');
+        const first = cmds.findIndex((c) => /\b(ng|playwright)\b/.test(c));
+        assert.ok(build >= 0 && build < first, `${name}: \`${k}\` must run "npm run build -w ui" before its first ng/playwright command`);
+      }
+    }
+  });
+
   test('rust checks reach only the Linux leg, and run only when the change reaches the Rust half', () => {
     const [leg] = matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph).filter((l) => l.os === LINUX);
     assert.match(leg.rust_checks, /cargo llvm-cov nextest -p pitwall-core/);
