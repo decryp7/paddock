@@ -246,14 +246,17 @@ These measure tooling, not a product. They are kept where they are.
 
   | Measure | ld-prime, SDK 27.2 (default) | ld-prime, SDK 26.5 | rust-lld, SDK 26.5 | Budget | Verdict |
   |---|---|---|---|---|---|
-  | Rebuild after touching dyno-agent | 2.43 s (1.72–3.89) | 1.75 s (1.43–2.77) | 2.20 s (1.87–3.01) | > 20 % faster to adopt | no gain |
-  | Rebuild after touching dyno-core | 4.97 s (4.36–6.95) | 5.12 s (4.08–7.01) | 5.43 s (3.84–7.67) | > 20 % faster to adopt | no gain |
-  | Link of `dyno-agent` alone (33–35 MB) | – | 0.34 s (0.25–0.43) | 0.42 s (0.40–0.46) | – | ld-prime faster |
-  | Link of `dyno` (the CLI) alone | – | 0.12 s (0.08–0.14) | 0.145 s (0.13–0.17) | – | ld-prime faster |
+  | Rebuild after touching dyno-agent | 2.43 s (1.72–3.89) | 1.75 s (1.43–2.77) | 2.20 s (1.87–3.01) | > 20 % faster to adopt | ld-prime not slower (indication, loaded) |
+  | Rebuild after touching dyno-core | 4.97 s (4.36–6.95) | 5.12 s (4.08–7.01) | 5.43 s (3.84–7.67) | > 20 % faster to adopt | ld-prime not slower (indication, loaded) |
+  | Link of `dyno-agent` alone (33–35 MB) | – | 0.34 s (0.25–0.43) | 0.42 s (0.40–0.46) | – | ld-prime not slower (indication, loaded) |
+  | Link of `dyno` (the CLI) alone | – | 0.12 s (0.08–0.14) | 0.145 s (0.13–0.17) | – | ld-prime not slower (indication, loaded) |
 
 - **Memory measure:** not measured (a build).
-- **Notes:** linking is 0.1–0.4 s of a 1.5–5 s rebuild; the rest is rustc on the touched crate and its dependants, so no
-  linker could make the rebuild 20 % faster, and rust-lld is the slower of the two here. An earlier pass at the same load
+- **Notes:** noise floor: the same linker (ld-prime) on two SDKs, which should take the same time, differs by 39 % in the
+  dyno-agent medians (2.43 s against 1.75 s), so differences below that are noise at this load. Linking is 0.1–0.4 s of a
+  1.5–5 s rebuild; the rest is rustc on the touched crate and its dependants, so no
+  linker could make the rebuild 20 % faster, and rust-lld was not faster in any measure. This agrees with Dyno's
+  2026-10-29 link-time study (rust-lld +16 % on the app's rebuild, [performance.md](../apps/dyno/docs/performance.md)). An earlier pass at the same load
   timed with a 0.5 s polling clock and is discarded. mold and sold were not tried: mold produces no Mach-O any more, and
   sold (the commercial macOS fork) was archived in November 2024, its README pointing to Apple's new linker. Linux and
   Windows were not measured: on `x86_64-unknown-linux-gnu` rustc already links with rust-lld (default since 1.90; the CI
@@ -287,6 +290,10 @@ These are ordered by impact.
    - Pitwall request latency and queueing.
    - Spotter check throughput and Chrome memory: about 17 GB idle was seen on Linux, see the lessons.
    - Windows and Linux runs of anything except CI.
+   - CI build parallelism on Linux: `conformance/ci/build-jobs.sh` leaves `CARGO_BUILD_JOBS` unset on the Linux runner
+     (cargo uses every core in each of up to four concurrent containers, as before 2026-10-30) and logs the host's cores.
+     Its share (cores / 4 or cores / 2, `PADDOCK_CI_JOBS_PER_HOST` in d-gtr9's `runner.envs`) waits for one A/B of Gitea
+     job durations of the Rust jobs (crate, crates, app legs, Debrief's rust tests), the same commits with and without it.
    - CI build parallelism: a clean, CI-shaped Dyno build (`cargo test --no-run --workspace --exclude dyno-app`, no sccache,
      no incremental) with `CARGO_BUILD_JOBS=4` (the Mac leg's share) against 13 (cores − 1). Tried on 2026-10-30; the
      5-minute load never fell below 10 in an hour, so nothing was recorded (`conformance/ci/build-jobs.sh` keeps 4 on the
