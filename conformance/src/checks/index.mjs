@@ -27,7 +27,8 @@ import C49 from './C49-provider-grants.mjs';
 import C50 from './C50-shell-start.mjs';
 import C53 from './C53-pid-kills.mjs';
 import C54 from './C54-background-qos.mjs';
+import C55 from './C55-windowed-test-browser.mjs';
 import C56 from './C56-build-env-names.mjs';
 
 /** Every check, in id order. A check is { id, title, rule, run(ctx) -> findings[] | Promise<findings[]> }. */
-export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C39, C43, C45, C48, C49, C50, C53, C54, C56];
+export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C39, C43, C45, C48, C49, C50, C53, C54, C55, C56];

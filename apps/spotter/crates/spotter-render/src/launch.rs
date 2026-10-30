@@ -235,6 +235,17 @@ impl Chromium {
         reason = "the browser, a GUI program: std Command, as the driver is copied between apps"
     )]
     pub fn launch(exe: &Browser, opts: &LaunchOptions) -> Result<Chromium> {
+        // Test builds: no installed browser, and no real one outside a throwaway session (rule 7), however it was found
+        // (an installed one through `find_installed`, a download, a hard-coded path).
+        #[cfg(any(test, feature = "testing"))]
+        {
+            use paddock_testkit::live_browser::BrowserWindow;
+            let window = match opts.mode {
+                Mode::Headless => BrowserWindow::Headless,
+                Mode::OffScreen | Mode::OnScreen => BrowserWindow::Shown,
+            };
+            crate::discover::check_test_launch(&exe.path, window).map_err(Error::Launch)?;
+        }
         check_display(opts.mode, cfg!(target_os = "linux"), |k| std::env::var(k).ok())?;
         let dir = unique_dir(&opts.profile_base);
         std::fs::create_dir_all(&dir).map_err(|e| Error::Launch(format!("the profile folder could not be created: {e}")))?;
@@ -473,7 +484,7 @@ mod tests {
         let exe_path = base.path().join("fake-chrome.sh");
         std::fs::write(
             &exe_path,
-            "#!/bin/sh\necho 'Running as root without --no-sandbox is not supported' >&2\nexit 1\n",
+            "#!/bin/sh\n# paddock-fake-browser\necho 'Running as root without --no-sandbox is not supported' >&2\nexit 1\n",
         )
         .unwrap();
         std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -535,6 +546,24 @@ mod tests {
         assert!(args(Path::new("/p"), Mode::Headless, Flavor::Chromium, &[]).contains(&"--headless=new".to_string()));
     }
 
+    /// Regression (review P1-1): a renderer without `with_browser` falls through to `find_installed`, and a test launched
+    /// the user's Chrome. In test builds the launch itself refuses an installed browser.
+    #[test]
+    fn a_test_build_never_launches_an_installed_browser() {
+        let base = tempfile::tempdir().unwrap();
+        let env = |k: &str| std::env::var(k).ok();
+        // conformance: no-launch — the gate under test refuses each candidate before anything starts
+        for exe in crate::discover::candidates(crate::discover::Os::CURRENT, &env) {
+            let e = Chromium::launch(&exe, &headless(base.path())).err().unwrap();
+            assert!(
+                matches!(&e, Error::Launch(m) if m.contains("installed")),
+                "{}: {e}",
+                exe.path.display()
+            );
+        }
+        assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0, "refused before any profile");
+    }
+
     #[test]
     fn missing_executable_is_a_launch_error_and_leaves_no_profile() {
         let base = tempfile::tempdir().unwrap();
@@ -551,9 +580,14 @@ mod tests {
     #[test]
     fn a_browser_that_exits_at_once_is_a_launch_error() {
         let base = tempfile::tempdir().unwrap();
+        // A fake that exits at once (a script: a test never starts a real program outside a throwaway session).
+        let bin = tempfile::tempdir().unwrap();
+        let stub = bin.path().join("exits.sh");
+        std::fs::write(&stub, "#!/bin/sh\n# paddock-fake-browser\nexit 0\n").unwrap();
+        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         let exe = Browser {
             flavor: crate::discover::Flavor::Chromium,
-            path: "/usr/bin/true".into(),
+            path: stub,
         };
         let e = Chromium::launch(&exe, &headless(base.path())).err().unwrap();
         assert!(matches!(e, Error::Launch(_)), "{e}");

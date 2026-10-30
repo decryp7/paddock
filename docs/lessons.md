@@ -972,3 +972,53 @@ each loop turn also calls `flush`, and the write buffer has a bound. A test that
 so a failing parent still ends the child's own children (a process group of its own is not reached by a signal to the group).
 **Open (ER-21):** the same reader exists three times. A shared `is_transient` and a conformance check for `WouldBlock | TimedOut`
 without `Interrupted` belong to the driver consolidation ADR, not to this fix.
+## 2026-10-30: live-browser tests opened Chrome on the user's desktop (Debrief, Spotter, paddock-chromium)
+
+The Mac CI runner runs in the user's GUI session and set `CHROMIUM_TEST_PATH`, so every macOS rust-test job of Debrief
+opened Chrome for Testing windows on the user's desktop: chromium-driver's `real_browser` tests and the renderer's
+scripted-page and challenge-page tests (Debrief's driver has no headless mode, by design: a challenge page needs a person,
+`the_browser_opens_on_screen_with_no_offscreen_or_headless_arguments`). The challenge test also timed out on that runner
+(runs 7141 and 7146); it also fails about one run in ten in the Linux container, so the desktop was not its only cause
+(a separate bug-fix task). Spotter's `off_screen_headful_mode_and_redirects` did the same on the Mac and Windows legs (a
+window at -32000,-32000 still has a Dock or taskbar entry and takes the focus), and the headless tests of Spotter and
+paddock-chromium still started Chrome in the user's session, where nobody had shown that a headless Chrome never shows
+in the Dock or takes the focus. Debrief's real-app smoke (`tauri-smoke`) opened the real app on the Mac runner and on the
+Windows runner, a developer PC. **Rule (rule 7):** a test starts a real browser or opens the real app only in a
+throwaway Linux CI container: under `xvfb-run` with `PADDOCK_LIVE_BROWSER=1` (Debrief's `rust tests`, the `crates`
+coverage job, app-gates' `display` wrap). The gate is shared, `paddock_testkit::live_browser`, and structural: every
+driver's test-browser finder (`paddock_chromium`, `chromium_driver`, `spotter_render` `discover::find_for_tests`) asks it
+with the window mode the test launches, so no test gets a browser around it; elsewhere the test prints where it runs, and
+a job set up wrongly (the variable without a display for a window, or the browser required on Linux without the
+variable) fails instead of skipping. C55 is the backstop: no read of the test browser outside `src/discover.rs`, and no
+test that launches a window after asking the finder for none. Mac and Windows lose this coverage on purpose; the
+WebView2 and macOS real-app smoke and the macOS start-up budgets run in the local test VMs before a release.
+
+A second review found the gate still had holes, each now closed in the structure rather than by a check alone: the
+finders were gated but a test could find a browser another way (`chromium_driver::find()`, `discover::find`, Spotter's
+renderer without `with_browser` falling through to `find_installed`, a downloaded runtime, a hard-coded path) and launch
+it, so in test builds each driver's launch now asks `paddock_testkit::live_browser::check_launch` before it starts any
+program: never an installed browser, and no real program (anything but a script, which is what the fakes are) outside a
+throwaway session. C55 had pre-filtered files on the finder's names (a file without them was never read) and ran only
+when conformance/ changed; it now reads every Rust file, flags the product's browser search, a renderer without its
+browser, a browser or app started by name and an installed browser's path in test code, and runs in the crates job, every
+app leg and Debrief's lint job. Two more jobs put windows on the host desktops (the WebKit e2e on the Mac runner, the
+nightly real-window probe on macOS and Windows): both now run in the Linux container, and a CI test fails any host job
+that runs Playwright, the real-window probe, the real-app smoke or a real-browser test binary. The macOS and Windows
+coverage moved to the local test VMs: `PADDOCK_LIVE_BROWSER=vm` is honoured only where the VM marker is
+(`kern.hv_vmm_present` on macOS, the administrator-only value `HKLM\SOFTWARE\Paddock` `TestVM` on Windows), and each
+release records "VM smoke: <date> <version> pass". Rule 7 now says so. A third review found the last holes: the drivers'
+self-tests (Spotter's renderer status self-tests the installed browser) started programs ungated, a fake was recognised by
+its `#!` line although Chrome's and Edge's Linux launchers are scripts too, and Debrief's `open_url` opened the default
+browser from tests. The self-tests ask the gate, fakes carry `# paddock-fake-browser`, installed paths compare
+canonically, `open_url` is a no-op in tests, and C55 names self-tests, the status and default-browser openers in test
+code. The pattern behind all three rounds: a gate on one entry point is a check, not a structure; put it at every place
+that starts a program, and recognise the allowed case positively. A fourth review found two more of the same kind: a bare
+program name (`Browser::chromium("google-chrome")`) was no file, so the gate let it pass while `Command` found it on PATH
+(the gate now resolves it the same way), and Spotter's app depended on the renderer without its `testing` feature, so the
+app's own tests compiled the gate out (C55 now checks every dependent's [dev-dependencies]).
+
+Considered and rejected: a test-only headless or off-screen launch option for Debrief's live tests, to keep them on the
+Mac. Headless tests a mode the product never runs (the challenge test is about the window coming to the front), the option
+would be a product code path that must never be used, and an off-screen headful window still shows in the Dock and takes
+the focus (Spotter's case). Also rejected: keeping the headless tests on the hosts, since even a headless Chrome is a
+process of the user's session.

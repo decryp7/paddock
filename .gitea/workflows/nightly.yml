@@ -72,23 +72,20 @@ jobs:
         run: npm run check:dialog-commands
 
   # ADR 0026 section 6: the real-window probe. It opens the built shell-demo's real dialog frame in a real (hidden, then
-  # shown) window and checks the window's height against the frame's measure, so it needs a webview and a display: the
-  # host runners have one, Linux gets a virtual one (xvfb-run).
+  # shown) window and checks the window's height against the frame's measure, so it needs a webview and a display: a
+  # virtual one (xvfb-run) in the Linux container. Never on the macOS or Windows host runners, which run in a user's
+  # session (rule 7: a real app window only in a throwaway Linux container or a test VM); their probe runs in the local
+  # test VMs (docs/dev-setup.md, "Test VMs").
   #
-  # OFF by default, and not a gate of the green nightly (it is not in `mark`'s needs): it opens real windows on the runner
-  # hosts' desktops (ER-14), and the Mac host's displays sleep at night, so a scheduled run would hang or fail for reasons
-  # that say nothing about the code. It runs on a manual run (workflow_dispatch), or on the nightly when the repository
-  # variable PADDOCK_REAL_WINDOW_PROBE is "true".
+  # Not a gate of the green nightly (it is not in `mark`'s needs). It runs on a manual run (workflow_dispatch), or on the
+  # nightly when the repository variable PADDOCK_REAL_WINDOW_PROBE is "true".
   dialog-window-probe:
-    name: dialog window probe (${{ matrix.os }})
+    name: dialog window probe (Linux)
     needs: [gate]
     if: ${{ needs.gate.outputs.run == 'true' && (github.event_name == 'workflow_dispatch' || vars.PADDOCK_REAL_WINDOW_PROBE == 'true') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     defaults:
       run:
         shell: bash
@@ -96,16 +93,6 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
-
-      - name: Git bash on PATH (Windows)
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: |
-          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
-          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-
-      # A slot of the host (job isolation; after Git bash on Windows): setup-rust's sccache folder and port are this job's.
-      - uses: ./.gitea/actions/job-isolation
 
       - uses: ./.gitea/actions/setup-rust
         with:
@@ -122,30 +109,16 @@ jobs:
           npm run shell-demo:build -w ui
           test -f ui/dist/shell-demo/browser/index.html
 
-      - name: Probe (Linux, virtual display)
-        if: runner.os == 'Linux'
+      - name: Probe (virtual display)
         working-directory: crates
         env:
           PADDOCK_REAL_WINDOWS: "1"
+          PADDOCK_LIVE_BROWSER: "1"
           PADDOCK_PROBE_DIST: ${{ github.workspace }}/ui/dist/shell-demo/browser
         run: xvfb-run -a cargo test -p paddock-dialogs --features tauri --test show_probe -- --nocapture
 
-      - name: Probe (macOS, Windows)
-        if: runner.os != 'Linux'
-        working-directory: crates
-        env:
-          PADDOCK_REAL_WINDOWS: "1"
-          PADDOCK_PROBE_DIST: ${{ github.workspace }}/ui/dist/shell-demo/browser
-        run: cargo test -p paddock-dialogs --features tauri --test show_probe -- --nocapture
-
       - uses: ./.gitea/actions/sccache-stats
         if: always()
-
-      # The slot goes back last.
-      - uses: ./.gitea/actions/job-isolation
-        if: always()
-        with:
-          mode: release
 
   mark:
     name: mark the green nightly

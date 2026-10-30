@@ -37,7 +37,8 @@ describe('the graph of this tree', () => {
     const r = run('crates/paddock-jobs/src/lib.rs');
     assert.ok(r.crates && !r.ui);
     // Debrief's store worker and Spotter's renderer depend on paddock-proc by path (the memory figure and the supervised child),
-    // so the shared crates reach Debrief and Spotter too; Dyno takes the shell crates by path.
+    // so the shared crates reach Debrief and Spotter too; Dyno takes the shell crates by path. Spotter's renderer tests take
+    // paddock-testkit (the real-browser gate), which depends on paddock-jobs.
     assert.deepEqual(r.apps, ['debrief', 'dyno', 'shell-demo', 'spotter', 'workbench-demo']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust']);
     assert.deepEqual(r.kinds.debrief, ['rust']);
@@ -562,14 +563,14 @@ describe('matrix legs', () => {
     assert.throws(() => matrix({ apps: ['x'], kinds: { x: ['rust'] }, packages: {} }, { cargo: new Map(), apps }), /must include ubuntu-latest/);
   });
 
-  test("an app's test browser and display reach every leg; the sandbox flag and the display are Linux-only", () => {
-    const testBrowser = { envPrefix: 'DEMO', catalogue: 'apps/x/chromium.toml', noSandboxOnLinux: true };
+  test("an app's test browser and display reach every leg; the sandbox flag is Linux-only", () => {
+    const testBrowser = { envPrefix: 'DEMO', noSandboxOnLinux: true };
     const apps = new Map([['x', { dir: 'apps/x', cargo: '.', os: [LINUX, 'windows-latest', 'macos-latest'], display: true, testBrowser }]]);
     const legs = matrix({ apps: ['x'], kinds: { x: ['rust'] }, packages: {} }, { cargo: new Map(), apps });
-    assert.deepEqual(legs.map((l) => [l.os, l.test_browser_prefix, l.test_browser_catalogue, l.test_browser_no_sandbox, l.display]), [
-      [LINUX, 'DEMO', 'apps/x/chromium.toml', 'true', 'true'],
-      ['windows-latest', 'DEMO', 'apps/x/chromium.toml', 'false', 'false'],
-      ['macos-latest', 'DEMO', 'apps/x/chromium.toml', 'false', 'false'],
+    assert.deepEqual(legs.map((l) => [l.os, l.test_browser_prefix, l.test_browser_no_sandbox, l.display]), [
+      [LINUX, 'DEMO', 'true', 'true'],
+      ['windows-latest', 'DEMO', 'false', 'true'],
+      ['macos-latest', 'DEMO', 'false', 'true'],
     ]);
     const plain = matrix({ apps: ['x'], kinds: { x: ['rust'] }, packages: {} }, { cargo: new Map(), apps: new Map([['x', { dir: 'apps/x', cargo: '.' }]]) });
     assert.deepEqual([plain[0].test_browser_prefix, plain[0].test_browser_no_sandbox, plain[0].display], ['', 'false', 'false']);

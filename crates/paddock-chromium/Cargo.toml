@@ -9,7 +9,7 @@ publish = ["decryp7"]
 
 [features]
 # A fake DevTools browser (Unix) for tests of this crate and of the apps that drive it.
-test-support = []
+test-support = ["dep:paddock-testkit"]
 
 [dependencies]
 paddock-download = { workspace = true }
@@ -22,10 +22,15 @@ log = "0.4"
 # A small synchronous WebSocket client for the DevTools endpoint on 127.0.0.1 (MIT OR Apache-2.0).
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+# `test-support`: the test-browser finder asks the shared real-browser gate (`paddock_testkit::live_browser`).
+paddock-testkit = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]
+paddock-testkit = { workspace = true }
+# The integration tests use the test-browser finder (`test-support`).
+paddock-chromium = { path = ".", features = ["test-support"] }
 tempfile = "3"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }

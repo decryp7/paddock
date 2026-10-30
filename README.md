@@ -149,7 +149,8 @@ The shared packages use one semver tag for the whole repo (`vMAJOR.MINOR.PATCH`)
 the npm packages (`@decryp7/paddock-ui` with its entry points, `@decryp7/paddock-e2e`) to the Gitea npm registry, and
 creates the release notes. Steps: update the version in `ui/projects/paddock-ui/package.json` and
 `ui/projects/paddock-e2e/package.json` (they move together), bump each changed crate's `version`, update `CHANGELOG.md`,
-commit, tag, push the tag. `node scripts/publish.mjs` (or `cd ui && npm run release`) is the local dry run: it lists every
+commit, tag, push the tag; a release that changes `paddock-chromium` first runs its real-browser tests in the macOS and
+Windows test VMs (docs/dev-setup.md, "Test VMs and real browsers"; CI runs them on Linux only). `node scripts/publish.mjs` (or `cd ui && npm run release`) is the local dry run: it lists every
 crate, npm package and entry point with what the tag would publish, and uploads nothing.
 
 The demos have their own tags: `shell-demo-v<version>` and `workbench-demo-v<version>` (built by
