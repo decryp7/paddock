@@ -373,3 +373,44 @@ fn the_registration_job_kind_is_the_same_in_rust_and_the_ui() {
         );
     }
 }
+
+/// Pitcrew's start as `run` composes it (rule 43, ADR 0029), on the mock runtime with a headless tray and no service: the
+/// tray and the main window open after every plugin is set up (a window built inside a plugin hook deadlocks).
+#[test]
+fn the_start_opens_the_tray_and_the_main_window() {
+    use paddock_shell::testing::{start, Started};
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().to_path_buf();
+    assert_eq!(
+        start(move || composed(&data, paddock_window::launch::LaunchArgs::default())),
+        Ok(Started {
+            main_window: true,
+            tray: true
+        })
+    );
+}
+
+/// Started at log-in (`--hidden`) with a tray: Pitcrew stays in the tray without a window.
+#[test]
+fn a_hidden_start_stays_in_the_tray() {
+    use paddock_shell::testing::{start, Started};
+    let launch = paddock_window::launch::LaunchArgs {
+        hidden: true,
+        ..Default::default()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().to_path_buf();
+    assert_eq!(
+        start(move || composed(&data, launch)),
+        Ok(Started {
+            main_window: false,
+            tray: true
+        })
+    );
+}
+
+/// Pitcrew as `run` composes it, without the OS plugins, the native tray or a service.
+fn composed(dir: &Path, launch: paddock_window::launch::LaunchArgs) -> tauri::Builder<MockRuntime> {
+    let shell = shell(Arc::new(Down), Place::Test { dir: dir.to_path_buf() });
+    pitcrew_app_lib::app(mock_builder(), shell, launch, paddock_window::tauri::HeadlessTray)
+}

@@ -6,7 +6,7 @@
 //! and a dark variant chosen from the taskbar's theme. Each state has its own shape, not only its own colour.
 
 use crate::events::{Actions, Latest};
-use paddock_window::tauri::{NativeTray, Tray};
+use paddock_window::tauri::{NativeTray, Tray, TrayBackend};
 use paddock_window::tray::{disabled, item, submenu, TrayEntry, TrayView, MAX_ID, QUIT_ID, SHOW_ID};
 use pitcrew_core::health::RunnerStatus;
 use pitcrew_core::protocol::RunnerSnapshot;
@@ -222,12 +222,11 @@ impl TrayState {
     }
 }
 
-/// The tray over the shell's window layer: its model reads what the event thread keeps current in [`Latest`], and a left
-/// click shows the window (menu on macOS). Returns whether the icon exists (Linux without an app indicator: closing the
-/// last window then quits, which the window layer decides).
-pub fn create<R: Runtime>(app: &AppHandle<R>) -> bool {
-    let native = NativeTray::new(|key| Image::from_bytes(icon_bytes(TrayState::from_key(key), dark_taskbar())).ok());
-    let tray = Tray::new(native, |app: &AppHandle<R>| {
+/// The tray over the shell's window layer (the shell creates it at start, ADR 0029): its model reads what the event
+/// thread keeps current in [`Latest`], and a left click shows the window (menu on macOS). `backend` draws it: the native
+/// tray when installed, none in a test.
+pub fn tray<R: Runtime>(backend: impl TrayBackend<R>) -> Tray<R> {
+    Tray::new(backend, |app: &AppHandle<R>| {
         let latest = app.state::<Latest>();
         let connected = matches!(latest.connection(), crate::dto::ConnectionState::Connected { .. });
         let runners = if connected {
@@ -243,8 +242,12 @@ pub fn create<R: Runtime>(app: &AppHandle<R>) -> bool {
             let _ = paddock_window::tauri::reveal(app, "main");
         }
         app.state::<Actions>().run(app, action, runner);
-    });
-    paddock_window::tauri::create_tray(app, tray)
+    })
+}
+
+/// The native tray backend with Pitcrew's state icons.
+pub fn native() -> NativeTray {
+    NativeTray::new(|key| Image::from_bytes(icon_bytes(TrayState::from_key(key), dark_taskbar())).ok())
 }
 
 #[cfg(test)]

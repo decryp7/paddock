@@ -164,7 +164,7 @@ fn updater(test_dir: Option<std::path::PathBuf>) -> UpdatesBuilder {
         .changelog(include_str!("../../../CHANGELOG.md"))
         .legal("licence-mit", "MIT licence", include_str!("../../../LICENSE-MIT"))
         .legal("licence-apache", "Apache licence 2.0", include_str!("../../../LICENSE-APACHE"))
-        .build_info(option_env!("PITCREW_COMMIT"), option_env!("PITCREW_BUILT"));
+        .build_info(option_env!("PADDOCK_BUILD_COMMIT"), option_env!("PADDOCK_BUILD_DATE"));
     match test_dir {
         None => b,
         Some(dir) => b.dirs(dir.join("config"), dir.join("cache")).background(false),
@@ -187,6 +187,18 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
     paddock_commands::tauri::Guard::new(&COMMANDS)
         .dialog_grants(paddock_dialogs::tauri::grant_of)
         .wrap(handler!())
+}
+
+/// Pitcrew on `builder` (after the plugins already on it): the shell plugin `shell`, the tray drawn by `tray_backend`, the
+/// main window for `launch` (none for `--hidden` with a tray). The shell opens both after every plugin is set up (ADR 0029:
+/// a window built inside a plugin hook deadlocks). The start `run` uses and the start test composes.
+pub fn app<R: Runtime>(
+    builder: tauri::Builder<R>,
+    shell: Builder<R>,
+    launch: paddock_window::launch::LaunchArgs,
+    tray_backend: impl paddock_window::tauri::TrayBackend<R>,
+) -> tauri::Builder<R> {
+    shell.tray(move |_| tray::tray(tray_backend)).launch(launch).add_to(builder)
 }
 
 /// Starts the app.
@@ -214,11 +226,10 @@ pub fn run() {
                 }
             });
         }
-        tray::create(app);
         events::start(app.clone());
-        paddock_window::tauri::start(app, &launch)?;
         Ok(())
     });
+    let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -227,9 +238,8 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
         ))
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(shell.build())
-        .invoke_handler(invoke_handler());
+        .plugin(tauri_plugin_updater::Builder::new().build());
+    let builder = app(builder, shell, launch, tray::native()).invoke_handler(invoke_handler());
     // Tauri has this event on macOS and iOS only (not WebView2 or WebKitGTK).
     #[cfg(target_os = "macos")]
     let builder = builder.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated);
