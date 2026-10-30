@@ -6,7 +6,7 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### Live-browser tests stay off the user's desktop (rule 7)
 - Tests open a browser window only on Linux under a virtual display: the CI job runs them under `xvfb-run` with `PADDOCK_LIVE_BROWSER=1` (debrief.yml `rust tests`; the `app-gates` action sets it with its `display` wrap, and a host leg prints a notice instead). Debrief's `chromium_driver::discover::find_for_tests` hands out the test browser only there (its driver has no headless mode) and the new `test_browser()` says why a live test did not run; Spotter's `discover::windowed_tests_here()` gates its one headful test. A job set up wrongly (the variable without a display, or the browser required on Linux without it) fails. Debrief's macOS rust-test job no longer installs Chrome for Testing.
-- Conformance C51: a headful launch in `tests/` without the gate, or a read of `CHROMIUM_TEST_PATH` around the finder, is an error.
+- Conformance C55: a headful launch in `tests/` without the gate, or a read of `CHROMIUM_TEST_PATH` around the finder, is an error.
 
 ### `paddock-jobs`: `WalkOptions::with_modified`
 - `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.

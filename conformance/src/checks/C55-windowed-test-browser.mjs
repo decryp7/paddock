@@ -1,4 +1,4 @@
-// C51: tests never open a browser window on the user's desktop (rule 7; lesson "Live-browser tests opened Chrome on the
+// C55: tests never open a browser window on the user's desktop (rule 7; lesson "Live-browser tests opened Chrome on the
 // user's desktop"). A test browser's window may open only on Linux under a virtual display (xvfb-run, with
 // PADDOCK_LIVE_BROWSER=1 set by the CI job); the test-browser finders (`discover.rs`) carry that gate. Flagged:
 // - in any Rust file but a `discover.rs`, reading `CHROMIUM_TEST_PATH` directly or calling `find_for_tests_with(`: both go
@@ -50,7 +50,7 @@ export function windowedTestFindings(path, text) {
 }
 
 export default {
-  id: 'C51',
+  id: 'C55',
   title: 'Tests open a browser window only under a virtual display',
   rule: 7,
   run(ctx) {
@@ -61,9 +61,9 @@ export default {
       if (!text || !/CHROMIUM_TEST_PATH|find_for_tests_with|Mode::|ChromiumRenderer/.test(text)) continue;
       for (const p of windowedTestFindings(f, text)) {
         if (p.kind === 'direct') {
-          out.push(error('C51', 7, f, p.line, 'reads the test browser around its finder (and the finder\'s window gate)', 'Get the test browser from the crate\'s `discover::find_for_tests()` / `test_browser()`, which hand it out only where its window lands on a virtual display.'));
+          out.push(error('C55', 7, f, p.line, 'reads the test browser around its finder (and the finder\'s window gate)', 'Get the test browser from the crate\'s `discover::find_for_tests()` / `test_browser()`, which hand it out only where its window lands on a virtual display.'));
         } else {
-          out.push(error('C51', 7, f, p.line, `test \`${p.name}\` opens a headful browser window without the gate: on a desktop runner it lands on the user's screen`, 'Launch it headless (`Mode::Headless`), or return early unless `discover::windowed_tests_here()` (Linux under xvfb-run with PADDOCK_LIVE_BROWSER=1).'));
+          out.push(error('C55', 7, f, p.line, `test \`${p.name}\` opens a headful browser window without the gate: on a desktop runner it lands on the user's screen`, 'Launch it headless (`Mode::Headless`), or return early unless `discover::windowed_tests_here()` (Linux under xvfb-run with PADDOCK_LIVE_BROWSER=1).'));
         }
       }
     }

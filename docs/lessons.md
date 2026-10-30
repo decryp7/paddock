@@ -765,7 +765,7 @@ headless. **Rule (rule 7):** a test opens a browser window only on Linux under a
 under `xvfb-run` and sets `PADDOCK_LIVE_BROWSER=1` (debrief.yml `rust tests`; app-gates sets it with its `display` wrap).
 The gate lives in the test-browser finder (`chromium_driver::discover::find_for_tests` / `test_browser`,
 `spotter_render::discover::windowed_tests_here`); elsewhere the test prints where it runs instead, and a job set up wrongly
-(the variable without a display, or the browser required on Linux without the variable) fails instead of skipping. C51
+(the variable without a display, or the browser required on Linux without the variable) fails instead of skipping. C55
 flags a headful launch in `tests/` without the gate and any read of `CHROMIUM_TEST_PATH` around the finder.
 
 Considered and rejected: a test-only headless or off-screen launch option for Debrief's live tests, to keep them on the
