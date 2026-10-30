@@ -7,12 +7,14 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ### Changed
 
+- **Menus on macOS:** closing a context menu with Escape or one of its items keeps the text you had selected, as a native menu does (WebKit used to drop the highlight). Clicking elsewhere to dismiss it gives the selection back too (that click only closes the menu); a text field with the focus keeps its cursor.
 - **Updates:** Debrief now updates from the Paddock repository's releases, signed with the Paddock family's update key. A copy installed before this release cannot update itself to it: download this release once by hand and install it over the old one; later releases update as usual
 
 ### Fixed
 
 - **Browser on Windows:** the page browser Debrief downloads (Chrome for Testing) no longer starts its network service twice, which could make the first page it opened fail to load
 - **Event Log follower:** the status no longer shows more queued events than the queue holds while the writer is busy
+- **Research:** A page that stops answering is no longer taken for a page without a "verify you are human" check (research went on reading a hung page); research says the browser did not answer instead. When Debrief does not get the processor for a few seconds (a very busy computer, or Debrief paused and resumed) while the research browser starts or loads a page, research no longer fails with "the browser did not answer in time", and the research browser no longer closes. A page that shows a dialog (such as "Leave site?") now says so instead of timing out.
 
 ## 1.1.1 (2026-10-24)
 

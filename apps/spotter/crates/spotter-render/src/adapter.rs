@@ -171,6 +171,7 @@ mod tests {
     async fn no_browser_is_unavailable_with_a_hint() {
         let d = tempfile::tempdir().unwrap();
         // An explicit executable that is missing still launches (and fails); with none anywhere, Unavailable.
+        // conformance: no-launch — only resolves; it renders only when nothing is found, and in test builds the launch refuses an installed browser
         let r = ChromiumRenderer::new(d.path(), d.path());
         if r.resolve().is_none() {
             let e = r.render("https://a.test/", None, Duration::from_secs(1)).await.unwrap_err();

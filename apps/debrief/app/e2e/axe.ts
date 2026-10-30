@@ -4,7 +4,6 @@ import { expect, Page, TestInfo } from '@playwright/test';
 /** The WCAG levels every axe check covers: 2.0, 2.1 and 2.2, A and AA. */
 export const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 
-/** Runs axe against WCAG 2.2 A/AA and fails on any serious or critical violation. */
 /** Waits until no CSS animation or transition is running: axe measures colours as rendered, so a panel sliding in or a
  *  scrim fading out mid-scan reads as low contrast (WebKit, being slower, used to hit this). */
 export async function settleAnimations(page: Page): Promise<void> {
@@ -24,6 +23,7 @@ export async function settleAnimations(page: Page): Promise<void> {
   );
 }
 
+/** Runs axe against WCAG 2.2 A/AA, once the animations have settled, and fails on any serious or critical violation. */
 export async function expectNoSeriousViolations(page: Page, testInfo: TestInfo, label: string, include?: string): Promise<void> {
   await settleAnimations(page);
   const builder = new AxeBuilder({ page }).withTags(WCAG_TAGS);

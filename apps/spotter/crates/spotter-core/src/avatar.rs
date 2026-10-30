@@ -53,7 +53,7 @@ pub fn check_image(bytes: &[u8]) -> Result<ImageKind, String> {
         return Err("the image is empty".into());
     }
     if bytes.len() > MAX_AVATAR_BYTES {
-        return Err(format!("the image is larger than {} KiB", MAX_AVATAR_BYTES >> 10));
+        return Err(format!("the image is larger than {} KB", MAX_AVATAR_BYTES >> 10));
     }
     if bytes.starts_with(&PNG_SIGNATURE) {
         return png_dimensions(bytes).and_then(dimensions_ok).map(|()| ImageKind::Png);

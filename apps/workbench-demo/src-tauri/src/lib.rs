@@ -121,7 +121,8 @@ pub fn shell<R: Runtime>(place: &Place, link: Arc<Link>) -> Builder<R> {
         });
     match place {
         Place::Installed => builder,
-        Place::Test { .. } => builder.in_memory().native_menu(false),
+        // No start guard: a test's app never reaches `RunEvent::Ready`, so it would tick on.
+        Place::Test { .. } => builder.in_memory().native_menu(false).start_guard(None),
     }
 }
 

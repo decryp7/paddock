@@ -3,14 +3,15 @@
 //! `dialog_ready`, and checks that the window was shown by that ready and not by the deadline, that the page's viewport is
 //! exactly the measured content height after the show (no cut-off footer, no scroll bar: the 1.1-0 spike's two failures)
 //! and that the footer is fully visible. It needs the real webview, a window system and the built UI, so the ordinary
-//! test run skips it: it exits 0 at once unless `PADDOCK_REAL_WINDOWS=1`, and with a message unless `PADDOCK_PROBE_DIST`
+//! test run skips it: it exits 0 at once unless `PADDOCK_REAL_WINDOWS=1` and the real-browser gate allows a window (rule
+//! 7: `PADDOCK_LIVE_BROWSER=1` under xvfb-run, or `vm` in a test VM; set up wrongly, it fails), and with a message unless `PADDOCK_PROBE_DIST`
 //! names the built shell-demo (`npm run build -w ui` then `npx ng build shell-demo` in `ui`: `ui/dist/shell-demo/browser`).
 //! The workflow job `dialog-window-probe` (manual runs, or opt-in with the variable `PADDOCK_REAL_WINDOW_PROBE`) sets
 //! both. The parent is a visible host window and the dialog is modal; the probe also asserts that the dialog window is
 //! still hidden when its page's `dialog_ready` reaches Rust (it is shown by that ready, not before).
 //!
 //! Run it (from `crates`; `--features tauri`, NOT `--all-features`, which pulls in the mock runtime):
-//! `PADDOCK_REAL_WINDOWS=1 PADDOCK_PROBE_DIST=../ui/dist/shell-demo/browser cargo test -p paddock-dialogs
+//! `PADDOCK_LIVE_BROWSER=vm PADDOCK_REAL_WINDOWS=1 PADDOCK_PROBE_DIST=../ui/dist/shell-demo/browser cargo test -p paddock-dialogs
 //! --features tauri --test show_probe -- --nocapture` (an absolute `PADDOCK_PROBE_DIST` works from any folder). The
 //! probe stands in for the app's shell plugin: the page sends the shell's commands (`dialog_take_input`, `dialog_ready`, ...)
 //! as `plugin:paddock-shell|<command>`, so the probe registers a plugin of that name and an ACL that lets the `d-*`
@@ -235,6 +236,28 @@ fn main() {
     if std::env::var("PADDOCK_REAL_WINDOWS").as_deref() != Ok("1") {
         eprintln!("show_probe: skipped (set PADDOCK_REAL_WINDOWS=1 to open a real window)");
         return;
+    }
+    // A real window only in a throwaway Linux container (xvfb-run, PADDOCK_LIVE_BROWSER=1) or a test VM (rule 7).
+    {
+        use paddock_testkit::live_browser::{
+            BrowserWindow, Host, LiveBrowser, live_browser_with, process_env,
+        };
+        match live_browser_with(
+            Host::current(),
+            &process_env,
+            BrowserWindow::Shown,
+            "PADDOCK_REAL_WINDOWS",
+        ) {
+            Ok(LiveBrowser::Allowed) => {}
+            Ok(LiveBrowser::NotHere(why)) => {
+                eprintln!("show_probe: not run here: {why}");
+                return;
+            }
+            Err(why) => {
+                eprintln!("show_probe: {why}");
+                std::process::exit(1);
+            }
+        }
     }
     let dist = match dist() {
         Ok(d) => d,

@@ -1,5 +1,4 @@
-import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Locator, type Page } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, test, type Locator, type Page } from '@decryp7/paddock-e2e';
 
 // <pd-view> (plan X51, ADR 0002) in the gallery: every node kind drawn from one sample document, the actions it sends, patches,
 // the inline errors, axe in both themes, and no horizontal scroll of the page at 320 px (wide tables and drawings scroll in their
@@ -24,8 +23,7 @@ const log = (page: Page) => page.getByTestId('view-log');
 for (const theme of THEMES) {
   test(`axe finds no violations in the view (${theme})`, async ({ page }) => {
     await open(page, theme);
-    const results = await new AxeBuilder({ page }).include('[data-testid="view-box"]').withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
-    expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+    expect(await axeViolations(page, { include: ['[data-testid="view-box"]'] })).toEqual([]);
   });
 }
 

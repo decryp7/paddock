@@ -1,12 +1,13 @@
 import { expect, Page, test } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // The inference runtime (llama-server builds, ADR 0009) in the set-up wizard and the model manager,
 // against the scripted AI mock (src/app/core/mock/mock-ai-runtimes.ts).
 
 async function runCommand(page: Page, text: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill(text);
   await expect(page.locator('debrief-command-palette').getByRole('option').first()).toContainText(text);

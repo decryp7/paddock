@@ -1,4 +1,4 @@
-import { axeViolations, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, expectNoHorizontalScroll, pressMod, test, THEMES } from '@decryp7/paddock-e2e';
 
 // Settings (plan S10) in the shell demo: the Settings window as a modeless tool dialog over the demo's in-memory engine,
 // which serves the sections Rust wrote into the fixtures (every field kind). Chromium only in branches (rule 3). Only the
@@ -20,7 +20,7 @@ test.describe('settings (plan S10)', () => {
     await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/);
     // The keyboard shortcut opens the same (single) window.
     await page.getByRole('button', { name: 'Say hello' }).focus();
-    await page.keyboard.press('ControlOrMeta+Comma');
+    await pressMod(page, 'Mod+Comma');
     await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(1);
     // The frame's Close (ADR 0026: the window declares no footer of its own).
     await win.getByText('Close', { exact: true }).click();

@@ -1,9 +1,18 @@
-import { axeViolations, expect, installTauriFake, test, THEMES } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, installTauriFake, test, THEMES, type Locator, type Page } from '@decryp7/paddock-e2e';
 
 // Frame navigation on Angular Material and the CDK (Material migration WP-4): the sidebar's arrow keys come from the CDK
 // FocusKeyManager, the badges are matBadge, the rail and status bar tooltips are matTooltip, and the copy menu is a CDK
-// context menu. Chromium only; console errors are collected so a CSP violation fails the test.
+// context menu. Chromium and WebKit; console errors are collected so a CSP violation fails the test.
 test.use({ consoleErrors: true });
+
+/**
+ * Waits until the page list is final. Until the app context loads the shell offers every page, the conditional Lab too
+ * (`pages.ts`: `visible` evaluates `when` as true for a null context), so a count taken before it is stale on a slow machine.
+ */
+async function pageListSettled(app: { sidebar: { link(name: string): Locator } }, page: Page): Promise<void> {
+  await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
+  await expect(app.sidebar.link('Lab')).toHaveCount(0);
+}
 
 for (const colorScheme of THEMES) {
   test.describe(`frame navigation (${colorScheme})`, () => {
@@ -11,6 +20,7 @@ for (const colorScheme of THEMES) {
 
     test('Up, Down, Home and End move focus through the page links, wrapping, with the focus ring visible', async ({ app, page, pageErrors }) => {
       await app.frame.open();
+      await pageListSettled(app, page);
       const links = app.sidebar.links;
       const count = await links.count();
       await links.first().focus();
@@ -64,8 +74,9 @@ for (const colorScheme of THEMES) {
       expect(icon.left - item.left).toBeGreaterThanOrEqual(8);
     });
 
-    test('in the rail every icon is centred in its row', async ({ app }) => {
+    test('in the rail every icon is centred in its row', async ({ app, page }) => {
       await app.frame.open();
+      await pageListSettled(app, page);
       await app.frame.toggle.click();
       await expect.poll(() => app.frame.sidebarMode()).toBe('rail');
       const off = await app.sidebar.links.evaluateAll((els) =>
@@ -80,13 +91,12 @@ for (const colorScheme of THEMES) {
 
     test('the page lists are lists inside one labelled navigation landmark, and axe (best practice too) finds nothing', async ({ app, page }) => {
       await app.frame.open();
+      await pageListSettled(app, page);
       await expect(page.getByRole('navigation')).toHaveCount(1);
       // The top and the bottom group are each a list (not navigation landmarks of their own) of list items holding the links.
       await expect(page.getByRole('list').filter({ has: page.locator('a[data-page-link]') })).toHaveCount(2);
       await expect(page.getByRole('listitem').filter({ has: page.locator('a[data-page-link]') })).toHaveCount(await app.sidebar.links.count());
-      const { default: AxeBuilder } = await import('@axe-core/playwright');
-      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa', 'best-practice']).analyze();
-      expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+      expect(await axeViolations(page, { extraTags: ['best-practice'] })).toEqual([]);
     });
 
     test('the sidebar and the status bar pass axe, and show no console errors (CSP)', async ({ app, page, pageErrors }) => {
@@ -101,40 +111,60 @@ for (const colorScheme of THEMES) {
 test.describe('copy menu', () => {
   test('a right click on selected text opens Copy at the pointer, focused; Escape closes it and Copy copies', async ({ app, page, pageErrors }) => {
     await installTauriFake(page, { platform: 'mac', otherwise: 'null' });
-    // The page's clipboard is a recorder: no browser permission (WebKit knows no clipboard permissions), nothing on the
-    // machine's clipboard (rule 7).
+    // A page-local clipboard: no browser permission (WebKit knows only clipboard-read) and never the machine's own clipboard.
     await page.addInitScript(() => {
-      const copied: string[] = [];
-      Object.defineProperty(navigator, 'clipboard', {
-        configurable: true,
-        value: { writeText: async (t: string) => void copied.push(t), readText: async () => copied.at(-1) ?? '' },
-      });
+      let copied = '';
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t: string) => void (copied = t), readText: async () => copied } });
     });
     await app.frame.open();
     const text = page.getByTestId('app-context');
-    // Selects the whole line before each right-click: closing the menu may collapse the selection, and a right-click on
-    // unselected text then selects the word under the pointer (macOS WebKit), as natively.
-    const selectLine = () =>
-      text.evaluate((el) => {
-        el.classList.add('pd-selectable');
-        const r = document.createRange();
-        r.selectNodeContents(el);
-        getSelection()?.removeAllRanges();
-        getSelection()?.addRange(r);
-      });
-    await selectLine();
+    await text.evaluate((el) => {
+      el.classList.add('pd-selectable');
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      getSelection()?.removeAllRanges();
+      getSelection()?.addRange(r);
+    });
     await text.click({ button: 'right', position: { x: 20, y: 8 } });
     const item = page.getByRole('menuitem', { name: 'Copy' });
     await expect(item).toBeVisible();
     await expect(item).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(item).toHaveCount(0);
-    await selectLine();
+    // The selection is still there (WebKit drops it when the menu takes the focus; the menu gives it back on close).
+    await expect.poll(() => page.evaluate(() => getSelection()?.toString() ?? '')).toContain('App context');
     await text.click({ button: 'right', position: { x: 20, y: 8 } });
     await page.getByRole('menuitem', { name: 'Copy' }).click();
     await expect(page.getByRole('menuitem', { name: 'Copy' })).toHaveCount(0);
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('App context');
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('App context');
     // The fake IPC does not answer the shell's version call; that message is the only one expected.
     expect(pageErrors.filter((e) => !/did not say its version/.test(e))).toEqual([]);
+  });
+
+  test('clicking into a text field dismisses the menu and the field keeps its caret: typing lands there', async ({ app, page }) => {
+    await installTauriFake(page, { platform: 'mac', otherwise: 'null' });
+    await app.frame.open();
+    const text = page.getByTestId('app-context');
+    // A text field beside the selected text (the page has none of its own there).
+    await text.evaluate((el) => {
+      el.classList.add('pd-selectable');
+      const field = document.createElement('input');
+      field.setAttribute('data-testid', 'probe-field');
+      field.setAttribute('aria-label', 'Probe');
+      el.after(field);
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      getSelection()?.removeAllRanges();
+      getSelection()?.addRange(r);
+    });
+    await text.click({ button: 'right', position: { x: 20, y: 8 } });
+    const item = page.getByRole('menuitem', { name: 'Copy' });
+    await expect(item).toBeFocused();
+    const field = page.getByTestId('probe-field');
+    await field.click();
+    await expect(item).toHaveCount(0);
+    await expect(field).toBeFocused();
+    await page.keyboard.type('hello');
+    await expect(field).toHaveValue('hello');
   });
 });

@@ -1,6 +1,7 @@
 import { expect, Page, test } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 async function selectRowWithMessage(page: Page, text: string): Promise<void> {
   await page.getByTestId('query-field').fill(text);
@@ -11,7 +12,7 @@ async function selectRowWithMessage(page: Page, text: string): Promise<void> {
 }
 
 async function runCommand(page: Page, title: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill(title);
   await expect(page.locator('debrief-command-palette').getByRole('option').first()).toContainText(title);

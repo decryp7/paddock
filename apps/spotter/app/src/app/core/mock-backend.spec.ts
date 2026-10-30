@@ -1,6 +1,8 @@
 import { blankDraft } from './draft';
 import type { CommandError, StatePush, WatchDraft } from './api.types';
 import { MockBackend } from './mock-backend';
+import { MockJobs } from './mock/mock-jobs';
+import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 import { DAY, PRESETS, SOURCE_KINDS, makeReleases, rng } from './mock/mock-data';
 
 const NOW = Date.UTC(2026, 9, 22, 12, 0, 0);
@@ -72,27 +74,27 @@ describe('MockBackend', () => {
   describe('testSource', () => {
     it('lists problems for an unknown kind, missing fields and a custom scheme without pattern', async () => {
       const b = make();
-      const unknown = await b.testSource(blankDraft({ source: { kind: 'nope', values: {} } }), {}, 'j');
+      const unknown = await b.testSource(blankDraft({ source: { kind: 'nope', values: {} } }), {});
       expect(unknown.problems[0]).toContain('Unknown source kind');
-      const missing = await b.testSource(blankDraft({ source: { kind: 'github', values: { repo: '  ' } }, versions: 'custom' }), {}, 'j');
+      const missing = await b.testSource(blankDraft({ source: { kind: 'github', values: { repo: '  ' } }, versions: 'custom' }), {});
       expect(missing.problems.some((p) => p.endsWith('is required.'))).toBe(true);
       expect(missing.problems).toContain('A custom version scheme needs a pattern.');
       expect(missing.releases).toEqual([]);
     });
 
     it('reports an unreachable target as an error, not as problems', async () => {
-      const p = await make().testSource(githubDraft({ source: { kind: 'github', values: { repo: 'offline/x' } } }), {}, 'j');
+      const p = await make().testSource(githubDraft({ source: { kind: 'github', values: { repo: 'offline/x' } } }), {});
       expect(p.problems).toEqual([]);
       expect(p.error?.kind).toBe('unreachable');
     });
 
     it('filters prereleases and by prefix, counting what it skipped', async () => {
       const b = make();
-      const all = await b.testSource(githubDraft({ includePrereleases: true }), {}, 'j');
-      const none = await b.testSource(githubDraft({ includePrereleases: false }), {}, 'j');
+      const all = await b.testSource(githubDraft({ includePrereleases: true }), {});
+      const none = await b.testSource(githubDraft({ includePrereleases: false }), {});
       expect(all.releases.length).toBeGreaterThanOrEqual(none.releases.length);
       expect(none.prereleasesSkipped).toBe(all.releases.length - none.releases.length);
-      const pre = await b.testSource(githubDraft({ filter: { prefix: 'zzz-', soakHours: 0 } }), {}, 'j');
+      const pre = await b.testSource(githubDraft({ filter: { prefix: 'zzz-', soakHours: 0 } }), {});
       expect(pre.releases).toEqual([]);
       expect(pre.namesSkipped).toBeGreaterThan(0);
       expect(pre.withoutVersion).toContain('README.txt');
@@ -165,19 +167,38 @@ describe('MockBackend', () => {
   it('checkNow checks one watch or every unpaused one, resolving pending status', async () => {
     const b = make();
     const saved = await b.saveWatch(githubDraft(), {});
-    await b.checkNow(saved.id, 'j');
+    await b.checkNow(saved.id);
     const after = await b.getWatch(saved.id);
     expect(after.summary.status.kind).toBe('ok');
     expect(after.checks).toHaveLength(1);
     expect(after.summary.lastCheckMs).toBe(NOW);
-    await b.checkNow(null, 'j');
+    await b.checkNow(null);
     const paused = await b.getWatch('w-8');
     expect(paused.checks).toHaveLength(30); // paused: untouched
     expect(paused.checks.at(-1)?.atMs).toBeLessThan(NOW);
     const checked = await b.getWatch('w-1');
     expect(checked.checks).toHaveLength(30); // the history keeps the last 30 checks
     expect(checked.checks.at(-1)?.atMs).toBe(NOW);
-    expect((await rejection(b.checkNow('nope', 'j'))).code).toBe('notFound');
+    expect((await rejection(b.checkNow('nope'))).code).toBe('notFound');
+  });
+
+  it('runs checkNow as a job the shell can cancel by the id in its snapshots', async () => {
+    const jobs = new MockJobs(0);
+    const seen: SuJobSnapshot[] = [];
+    jobs.connect((s) => {
+      seen.push(s);
+      if (s.state === 'running') jobs.cancel(s.id);
+    });
+    const b = make({ jobs });
+    expect((await rejection(b.checkNow('w-1'))).code).toBe('cancelled');
+    expect(seen[0]).toMatchObject({ kind: 'sp.check', state: 'queued' });
+    expect(seen.at(-1)).toMatchObject({ state: 'cancelled', reason: 'user' });
+    // Nothing was checked: the history keeps its demo times.
+    expect((await b.getWatch('w-1')).checks.at(-1)?.atMs).toBeLessThan(NOW);
+    // Check-all runs on in the background, so the cancel shows only in the snapshots.
+    seen.length = 0;
+    await b.checkNow(null);
+    expect(seen.at(-1)).toMatchObject({ kind: 'sp.check-all', state: 'cancelled' });
   });
 
   it('acknowledges the latest or a given version, resets, and records the installed version', async () => {
@@ -201,9 +222,9 @@ describe('MockBackend', () => {
     const b = make();
     const v = (await b.getWatch('w-1')).history[0]!;
     await expect(b.openRelease('w-1', v.version)).resolves.toBeUndefined();
-    expect(await b.downloadRelease('w-1', v.version, 'j')).toContain(v.name);
+    expect(await b.downloadRelease('w-1', v.version)).toContain(v.name);
     expect((await rejection(b.openRelease('w-1', 'x'))).code).toBe('notFound');
-    expect((await rejection(b.downloadRelease('w-1', 'x', 'j'))).code).toBe('notFound');
+    expect((await rejection(b.downloadRelease('w-1', 'x'))).code).toBe('notFound');
   });
 
   describe('dashboard and events', () => {
@@ -245,8 +266,8 @@ describe('MockBackend', () => {
     it('saves, validates and pauses notifications', async () => {
       const b = make();
       const s = await b.getSettings();
-      expect((await b.saveSettings({ ...s, theme: 'dark' })).theme).toBe('dark');
-      expect((await b.getSettings()).theme).toBe('dark');
+      expect((await b.saveSettings({ ...s, defaultIntervalSecs: 7200 })).defaultIntervalSecs).toBe(7200);
+      expect((await b.getSettings()).defaultIntervalSecs).toBe(7200);
       const err = await rejection(b.saveSettings({ ...s, defaultIntervalSecs: 10 }));
       expect(err.problems).toEqual(['Use at least one minute.']);
       expect((await b.pauseNotifications(30)).notificationsPausedUntilMs).toBe(NOW + 30 * 60_000);
@@ -275,7 +296,7 @@ describe('MockBackend', () => {
   it('installs the renderer once', async () => {
     const b = make();
     expect((await b.rendererStatus()).kind).toBe('none');
-    const r = await b.installRenderer('j');
+    const r = await b.installRenderer();
     expect(r.canDownload).toBe(false);
     expect((await b.rendererStatus()).kind).toBe('chromium-downloaded');
   });
@@ -296,12 +317,8 @@ describe('MockBackend', () => {
     });
   });
 
-  it('alternates app update checks and installs', async () => {
-    const b = make();
-    expect((await b.appUpdateStatus()).available).toBe(true);
-    expect((await b.checkAppUpdate()).updateAvailable).toBe(true);
-    expect((await b.checkAppUpdate()).updateAvailable).toBe(false);
-    await expect(b.installAppUpdate()).resolves.toBeUndefined();
+  it('has no pending route in the browser', async () => {
+    expect(await make().pendingRoute()).toBeNull();
   });
 
   it('shows the main window by navigating, and hides the tray', async () => {

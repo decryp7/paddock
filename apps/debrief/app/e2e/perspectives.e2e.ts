@@ -3,6 +3,7 @@ import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
 import { chooseMenu, menuItem, openMenuPath } from './menu-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // Perspectives: named window arrangements switched from the activity bar, Window ▸ Perspectives and Ctrl+1…9.
 
@@ -61,18 +62,18 @@ test.describe('perspectives', () => {
   test('Ctrl+2 switches to Profiling and Ctrl+1 restores Investigate as it was left', async ({ page }) => {
     await runCommand(page, 'Show anomalies');
     await expect(tab(page, 'Anomalies')).toBeVisible();
-    await page.keyboard.press('ControlOrMeta+2');
+    await pressMod(page, 'Mod+2');
     await expect(page.locator('debrief-captures-view')).toBeVisible();
     await expect(page.getByTestId('captures-landing')).toBeVisible();
     await expect(page.locator('debrief-timeline-panel')).toHaveCount(0);
     await expect(page.getByRole('grid', { name: 'Events' })).toHaveCount(0);
 
-    await page.keyboard.press('ControlOrMeta+1');
+    await pressMod(page, 'Mod+1');
     await expect(page.locator('debrief-timeline-panel')).toBeVisible();
     await expect(page.getByRole('grid', { name: 'Events' })).toBeVisible();
     await expect(tab(page, 'Anomalies')).toBeVisible();
     // The choice is remembered across a reload.
-    await page.keyboard.press('ControlOrMeta+2');
+    await pressMod(page, 'Mod+2');
     await expect(page.locator('debrief-captures-view')).toBeVisible();
     // The layout is saved a moment after a change: wait for it before reloading.
     await expect.poll(() => page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('debrief.layout') ?? '{}').layout?.panels ?? {}).includes('profiling-captures'))).toBe(true);

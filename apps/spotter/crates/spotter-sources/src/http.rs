@@ -1,10 +1,12 @@
 //! HTTP for sources: bounded bodies, deadlines, the OCI anonymous/credentialed token dance, and failures mapped to
 //! statuses ([`spotter_core::source::http::status_error`]).
 
+use paddock_download::{ProxyRules, ProxyScheme};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, WWW_AUTHENTICATE};
 use spotter_core::limits::MAX_BODY_BYTES;
 use spotter_core::source::http::{parse_token, status_error, BearerChallenge};
 use spotter_core::source::{HttpRequest, SourceError};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// The HTTP client sources share.
@@ -19,10 +21,38 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 impl Http {
     /// A client that identifies as `Spotter/<version>` and uses the system's proxy settings and certificate store.
     pub fn new(version: &str) -> Result<Http, String> {
-        reqwest::Client::builder()
-            .user_agent(format!("Spotter/{version} (+https://dev.decryptology.net/decryp7/spotter)"))
+        Self::build(version, None)
+    }
+
+    /// As [`new`](Self::new), but asks `rules` (the proxy decision the app's downloader uses) which proxy, if any, a request
+    /// goes through, instead of reading the system's settings again: a release's checksum and listing then take the same way
+    /// as its file. A proxy's login is not sent (the system's settings carry none).
+    pub fn with_proxy(version: &str, rules: Arc<ProxyRules>) -> Result<Http, String> {
+        Self::build(version, Some(rules))
+    }
+
+    /// A client that never uses a proxy (tests: no reading of the machine's settings).
+    pub fn direct(version: &str) -> Result<Http, String> {
+        Self::build(version, Some(Arc::new(ProxyRules::none())))
+    }
+
+    fn build(version: &str, rules: Option<Arc<ProxyRules>>) -> Result<Http, String> {
+        let mut builder = reqwest::Client::builder()
+            .user_agent(format!("Spotter/{version} (+https://dev.decryptology.net/decryp7/paddock)"))
             .connect_timeout(Duration::from_secs(15))
-            .redirect(reqwest::redirect::Policy::limited(8))
+            .redirect(reqwest::redirect::Policy::limited(8));
+        if let Some(rules) = rules {
+            builder = builder.no_proxy().proxy(reqwest::Proxy::custom(move |url| {
+                rules.for_url(url.as_str()).and_then(|p| {
+                    let scheme = match p.scheme() {
+                        ProxyScheme::Http => "http",
+                        ProxyScheme::Https => "https",
+                    };
+                    reqwest::Url::parse(&format!("{scheme}://{}:{}", p.host(), p.port())).ok()
+                })
+            }));
+        }
+        builder
             .build()
             .map(|client| Http { client })
             .map_err(|e| format!("The HTTP client could not be created: {e}"))

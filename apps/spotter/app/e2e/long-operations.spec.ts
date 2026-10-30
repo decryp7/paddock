@@ -1,22 +1,22 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from '@decryp7/paddock-e2e';
 
 /**
- * Long operations against the mock backend (which paces its steps like the shell would report them): the panel shows
- * the phase in words with its own numbers from the start, Cancel works, and the UI never gives up on its own.
+ * Long operations against the mock backend (which paces its steps like the shell would report them): the shell's Jobs
+ * list shows the phase in words with its own numbers from the start, Cancel works, and the UI never gives up on its own.
  */
 test.describe('long operations show what they are doing and can be cancelled', () => {
-  test('a download shows its phase and bytes, and Cancel stops it', async ({ page }) => {
-    await page.goto('/');
+  test('a download shows its phase and bytes, and Cancel stops it', async ({ page, app }) => {
+    // Slow steps, so the Jobs list is opened while the download still runs.
+    await page.goto('/?jobStepMs=1500');
     await page.locator('sp-whats-new li.item').first().click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Download' }).click();
-    const panel = page.getByRole('region', { name: 'Running operations' });
-    await expect(panel).toBeVisible();
-    await expect(panel.locator('.phase')).toHaveText('Downloading');
-    await expect(panel.locator('.numbers')).toContainText(/MiB of 176 MiB/);
-    await expect(panel.locator('progress')).toHaveAttribute('max', '1');
-    await panel.getByRole('button', { name: /^Cancel: / }).click();
+    await app.statusBar.jobs.click();
+    const job = app.jobs.items.first();
+    await expect(job).toBeVisible();
+    await expect(job).toContainText('Downloading');
+    await expect(job).toContainText(/MB of 176 MB/);
+    await job.getByRole('button', { name: /Cancel/ }).click();
     await expect(page.getByText('Download cancelled')).toBeVisible();
-    await expect(panel).toHaveCount(0);
     await expect(page.getByText('Download failed')).toHaveCount(0);
   });
 
@@ -25,30 +25,43 @@ test.describe('long operations show what they are doing and can be cancelled', (
     await page.locator('sp-whats-new li.item').first().click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Download' }).click();
     await expect(page.getByText('Download finished')).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole('region', { name: 'Running operations' })).toHaveCount(0);
   });
 
-  test('installing the browser goes through Downloading, Unpacking and Testing', async ({ page }) => {
-    await page.goto('/#/settings');
-    await page.getByRole('button', { name: 'Download Chromium' }).click();
-    const panel = page.getByRole('region', { name: 'Running operations' });
-    const phase = panel.locator('.phase');
+  test('installing the browser goes through Downloading, Unpacking and Testing, shown inline with its count', async ({ app, page }) => {
+    await page.goto('/?jobStepMs=400');
+    await app.settings.open({ page: 'sp.general' });
+    await page.getByRole('button', { name: 'Install Chromium' }).click();
+    const phase = page.getByTestId('install-phase');
+    // Every phase the job names, in the order it runs them; the first two count bytes.
     await expect(phase).toHaveText('Downloading');
-    await expect(phase).toHaveText('Unpacking', { timeout: 10_000 });
-    await expect(phase).toHaveText('Testing', { timeout: 10_000 });
-    await expect(page.getByText('Browser installed')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('install-count')).toContainText(/MB of 149 MB/);
+    await expect(phase).toHaveText('Unpacking');
+    await expect(page.getByTestId('install-count')).toContainText(/MB of 584 MB/);
+    await expect(phase).toHaveText('Testing');
+    await expect(page.getByText('Chromium installed by Spotter')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('install-phase')).toHaveCount(0);
   });
 
-  test('checking every watch shows n of m and can be cancelled', async ({ page }) => {
-    await page.goto('/#/watches');
+  test('the browser install can be cancelled from the settings page', async ({ app, page }) => {
+    await page.goto('/?jobStepMs=400');
+    await app.settings.open({ page: 'sp.general' });
+    await page.getByRole('button', { name: 'Install Chromium' }).click();
+    await expect(page.getByTestId('install-phase')).toHaveText('Downloading');
+    await page.getByRole('group', { name: 'Installing Chromium' }).getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.getByTestId('install-phase')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Install Chromium' })).toBeEnabled();
+    await expect(page.getByText('No browser available')).toBeVisible();
+  });
+
+  test('checking every watch shows n of m and can be cancelled', async ({ page, app }) => {
+    await page.goto('/?jobStepMs=1500#/watches');
     await page.getByRole('button', { name: 'Watches actions' }).click();
     await page.getByRole('menuitem', { name: 'Check all now' }).click();
-    const panel = page.getByRole('region', { name: 'Running operations' });
-    await expect(panel).toBeVisible();
-    await expect(panel.locator('.phase')).toHaveText('Checking');
-    await expect(panel.locator('.numbers')).toHaveText(/^\d+ of \d+$/);
-    await panel.getByRole('button', { name: /^Cancel: / }).click();
-    await expect(page.getByText('Check cancelled')).toBeVisible();
-    await expect(panel).toHaveCount(0);
+    await app.statusBar.jobs.click();
+    const job = app.jobs.items.first();
+    await expect(job).toContainText('Checking');
+    await expect(job).toContainText(/\d+ of \d+/);
+    await job.getByRole('button', { name: /Cancel/ }).click();
+    await expect(job).toContainText(/Cancelled|cancelled/);
   });
 });

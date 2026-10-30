@@ -1,11 +1,12 @@
 import { expect, Page, test } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // Pitwall as the AI engine (ADR 0059) against the scripted AI mock (?mockPitwall=...).
 
 async function runCommand(page: Page, text: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill(text);
   await expect(page.locator('debrief-command-palette').getByRole('option').first()).toContainText(text);
@@ -15,7 +16,7 @@ async function runCommand(page: Page, text: string): Promise<void> {
 const wizard = (page: Page) => page.getByRole('dialog', { name: 'Set up the AI assistant' });
 
 async function openAiSettings(page: Page) {
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   const settings = page.getByRole('dialog', { name: 'Settings' });
   await settings.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: /AI assistant/ }).click();
   return settings;

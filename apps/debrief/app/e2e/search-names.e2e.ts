@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // Human-like name matching in search everything (Mod+Shift+F) against the mock backend: the "Did you mean" line says
 // which name the words mean, why, how else it is written and whether an AI suggested it; accepting or rejecting is
@@ -10,7 +11,7 @@ test.describe('search names', () => {
   test.beforeEach(async ({ page }) => {
     await openApp(page);
     await page.locator('debrief-events-grid').first().click();
-    await page.keyboard.press('ControlOrMeta+Shift+F');
+    await pressMod(page, 'Mod+Shift+F');
   });
 
   const dialog = (page: import('@playwright/test').Page) => page.getByRole('dialog', { name: 'Search everything' });

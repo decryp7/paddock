@@ -1,5 +1,6 @@
 import { expect, Page, test } from '@playwright/test';
 import { openApp } from './app';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // The app should feel like a desktop app: no browser context menu on its chrome, no reload, page zoom or other
 // browser keys. The guard only prevents the browser's default, so Debrief's own menus and shortcuts keep working.
@@ -75,13 +76,18 @@ test.describe('native feel', () => {
     expect(await message.evaluate((el) => getComputedStyle(el).userSelect || (getComputedStyle(el) as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect)).toBe('text');
     await message.dblclick({ position: { x: 12, y: 6 } });
     await expect.poll(() => page.evaluate(() => window.getSelection()?.toString().trim() ?? '')).not.toBe('');
+    const selected = await page.evaluate(() => window.getSelection()?.toString() ?? '');
     await watch(page, ['contextmenu']);
     await message.click({ button: 'right', position: { x: 12, y: 6 } });
     await expect.poll(() => prevented(page, 'contextmenu')).toEqual([true]);
     const menu = page.getByRole('menu');
     await expect(menu.getByRole('menuitem', { name: 'Copy', exact: true })).toBeVisible();
+    // In WebKit `contextmenu` comes on the button press: the menu is drawn before the release, which must not close it.
+    await expect(menu.getByRole('menuitem', { name: 'Copy', exact: true })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);
+    // The selection is still there, as a native menu keeps it (WebKit drops it when the menu takes the focus).
+    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe(selected);
   });
 
   test('middle-click does not start autoscroll on chrome, and files dropped outside drop targets do not navigate', async ({ page }) => {
@@ -109,9 +115,9 @@ test.describe('native feel', () => {
     await watch(page, ['keydown']);
     await page.locator('debrief-status-bar').click();
     await page.keyboard.press('F5');
-    await page.keyboard.press('ControlOrMeta+r');
-    await page.keyboard.press('ControlOrMeta+p');
-    await page.keyboard.press('ControlOrMeta+Equal');
+    await pressMod(page, 'Mod+r');
+    await pressMod(page, 'Mod+p');
+    await pressMod(page, 'Mod+Equal');
     await expect.poll(() => prevented(page, 'keydown')).toEqual([true, true, true, true]);
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => (window as unknown as { __marker?: number }).__marker)).toBe(42);

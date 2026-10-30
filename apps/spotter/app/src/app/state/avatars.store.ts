@@ -35,6 +35,10 @@ export const AvatarsStore = signalStore(
           .catch(() => null)
           .then((a) => patchState(store, (s) => ({ images: { ...s.images, [key]: a?.dataUrl ?? null } })));
       },
+      /** Whether the lookup for an identity has been answered (a picture, none, or a failure): until then it is pending. */
+      isSettled(ref: AvatarRef): boolean {
+        return keyOf(ref) in store.images();
+      },
       /** The data URL for an identity, or null while unknown or when there is none. */
       urlOf(ref: AvatarRef): string | null {
         return store.images()[keyOf(ref)] ?? null;

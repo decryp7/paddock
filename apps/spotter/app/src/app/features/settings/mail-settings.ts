@@ -1,3 +1,4 @@
+import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import type { SmtpSecurity, SmtpSettings } from '../../core/api.types';
 import { SettingsStore } from '../../state/settings.store';
@@ -15,6 +16,7 @@ const defaultPort = (s: SmtpSecurity): number => SECURITY.find((x) => x.value ==
  */
 @Component({
   selector: 'sp-mail-settings',
+  imports: [MatButtonToggleGroup, MatButtonToggle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="mail" role="group" aria-labelledby="mail-h">
@@ -32,11 +34,11 @@ const defaultPort = (s: SmtpSecurity): number => SECURITY.find((x) => x.value ==
           <input class="input digits" name="port" inputmode="numeric" autocomplete="off" [value]="port()" (input)="port.set(val($event))" />
         </label>
         <div class="f sec"><span class="l" id="sec-l">Security</span>
-          <div class="seg-tabs" role="group" aria-label="Mail security">
+          <mat-button-toggle-group aria-label="Mail security" [value]="sec()" (change)="pickSecurity($event.value)">
             @for (o of security; track o.value) {
-              <button type="button" [attr.aria-pressed]="o.value === sec()" (click)="pickSecurity(o.value)">{{ o.label }}</button>
+              <mat-button-toggle [value]="o.value">{{ o.label }}</mat-button-toggle>
             }
-          </div>
+          </mat-button-toggle-group>
         </div>
         <label class="f"><span class="l">From</span>
           <input class="input" name="from" type="email" autocomplete="off" placeholder="spotter@example.org" [value]="from()" (input)="from.set(val($event))" />

@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { expandFields, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openQuery, runCommand, searchField } from './analysis-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 test.describe('analysis views', () => {
   test.beforeEach(async ({ page }) => openApp(page));
@@ -126,7 +127,7 @@ test.describe('analysis views', () => {
     const input = await openQuery(page);
     await input.click();
     await input.fill('level >= warning');
-    await input.press('ControlOrMeta+Enter');
+    await pressMod(input, 'Mod+Enter');
     await expect(page.locator('[data-testid=query-applied]')).toContainText('level >= warning');
     await runCommand(page, 'Show patterns');
     const patterns = page.locator('debrief-patterns-view');

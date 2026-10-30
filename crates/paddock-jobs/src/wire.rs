@@ -132,6 +132,8 @@ impl From<WireSnapshot> for JobSnapshot {
             eta_ms: w.eta_ms,
             cancellable: w.cancellable,
             not_cancellable_reason: w.not_cancellable_reason,
+            // The wire form (Dyno's agent) does not carry the flag; jobs that cross it announce their success.
+            quiet_on_success: false,
         }
     }
 }

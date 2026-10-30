@@ -127,6 +127,7 @@ proptest! {
             id: JobId(1), kind: JobKind::new("k"), title: "t".into(), subject: None,
             state: JobState::Running { phase: Some(PhaseProgress { phase, done }) },
             seq: 1, elapsed_ms: 2, eta_ms: None, cancellable: true, not_cancellable_reason: None,
+            quiet_on_success: false,
         };
         let back: JobSnapshot = serde_json::from_str(&serde_json::to_string(&snap).unwrap()).unwrap();
         prop_assert_eq!(back, snap);

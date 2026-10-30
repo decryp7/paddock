@@ -150,6 +150,9 @@ pub fn locate_executable(root: &Path, os: Os) -> Option<Browser> {
     reason = "the browser's self-test: this crate cannot use Debrief's process helper"
 )]
 pub fn self_test(exe: &Path) -> Result<String> {
+    // Test builds: a self-test starts the browser too (headless), so it asks the same gate as a launch (rule 7).
+    #[cfg(any(test, feature = "test-support"))]
+    crate::discover::check_test_launch(exe, paddock_testkit::live_browser::BrowserWindow::Headless).map_err(err)?;
     let mut child = std::process::Command::new(exe)
         .arg("--version")
         .stdin(std::process::Stdio::null())
@@ -249,6 +252,16 @@ mod tests {
         let sum = sha256_file(&a).unwrap();
         assert!(extract_verified(&a, &sum, &d.path().join("out")).is_err());
         assert!(!d.path().join("evil").exists());
+    }
+
+    #[test]
+    fn self_test_never_starts_an_installed_browser_in_a_test_build() {
+        // Regression (review): the self-test started whatever it was given; in test builds it asks the launch gate.
+        // conformance: no-launch — the gate under test refuses each candidate before anything starts
+        for b in crate::discover::candidates(crate::discover::Os::CURRENT, &|k| std::env::var(k).ok()) {
+            let e = self_test(&b.path).unwrap_err().to_string();
+            assert!(e.contains("installed"), "{}: {e}", b.path.display());
+        }
     }
 
     #[test]

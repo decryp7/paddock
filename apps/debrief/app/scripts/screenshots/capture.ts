@@ -2,6 +2,7 @@ import { expect, Page, test } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { ensureInspector, openApp } from '../../e2e/app';
+import { pressMod } from '../../../../../ui/projects/paddock-e2e/src/keyboard';
 
 /**
  * Captures the README screenshots from the browser build (mock backend) into docs/screenshots.
@@ -19,7 +20,7 @@ const skipped: string[] = [];
 async function command(page: Page, title: string, retry = true): Promise<boolean> {
   const box = page.getByRole('combobox', { name: 'Type a command' });
   for (let i = 0; i < 3 && !(await box.isVisible()); i++) {
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     await page.waitForTimeout(250);
   }
   await box.fill(title);
@@ -207,12 +208,12 @@ async function captureAll(page: Page, theme: 'dark' | 'light'): Promise<void> {
   await fresh(page, theme);
   await page.locator('.debrief-tab[data-panel-id="timeline"] .debrief-tab-close').click({ timeout: 2000 }).catch(() => undefined);
   // The Explorer closed (Ctrl+B): the search field gets the width to show the whole one-line query.
-  await page.keyboard.press('ControlOrMeta+b');
+  await pressMod(page, 'Mod+b');
   await shot(page, 'query', async () => {
     await need(page, 'Query: focus the search field');
     // One line that fits the bar: unfocused, the field shows the whole query that produced the rows (and covers nothing).
     await page.getByTestId('query-field').fill('level >= debug | stats count() by SourceContext, level');
-    await page.keyboard.press('ControlOrMeta+Enter');
+    await pressMod(page, 'Mod+Enter');
     await page.getByTestId('query-field').blur();
     await page.waitForTimeout(800);
   });
@@ -220,14 +221,14 @@ async function captureAll(page: Page, theme: 'dark' | 'light'): Promise<void> {
   await shot(page, 'query-results', async () => {
     await need(page, 'Query: focus the search field');
     await page.getByTestId('query-field').fill('level >= debug | stats count() by SourceContext, level');
-    await page.getByTestId('query-field').press('ControlOrMeta+Enter');
+    await pressMod(page.getByTestId('query-field'), 'Mod+Enter');
     await page.waitForTimeout(1200);
     await need(page, 'Query: show results');
     await expect(page.getByText('Results of the previous query')).toHaveCount(0);
     await page.waitForTimeout(800);
   }, 'Query results');
 
-  await page.keyboard.press('ControlOrMeta+b'); // the Explorer back for the later shots
+  await pressMod(page, 'Mod+b'); // the Explorer back for the later shots
   // The query shots leave their text in the search field: clear it so later shots show an empty field.
   await need(page, 'Query: focus the search field').catch(() => undefined);
   await page.getByTestId('query-field').fill('').catch(() => undefined);

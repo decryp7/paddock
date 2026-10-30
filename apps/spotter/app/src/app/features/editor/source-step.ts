@@ -6,7 +6,7 @@ import { GROUP_LABEL, GROUP_ORDER } from '../../shared/labels';
 import { Avatar } from '../../shared/ui/avatar';
 import { KindIcon } from '../../shared/ui/kind-icon';
 import { Panel } from '../../shared/ui/panel';
-import { ToastStore } from '../../state/toast.store';
+import { Notifier } from '../../state/notifier';
 import { EditorStore } from './editor.store';
 
 type Way = 'presets' | 'kinds' | 'feed' | 'import';
@@ -228,7 +228,7 @@ type Way = 'presets' | 'kinds' | 'feed' | 'import';
 export class SourceStep {
   protected readonly store = inject(EditorStore);
   private readonly router = inject(Router);
-  private readonly toast = inject(ToastStore);
+  private readonly toast = inject(Notifier);
 
   protected readonly ways: { id: Way; label: string }[] = [
     { id: 'presets', label: 'Popular software' },
