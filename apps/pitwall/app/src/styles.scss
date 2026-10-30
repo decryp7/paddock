@@ -301,96 +301,98 @@ summary {
 
 /* ---- Tables --------------------------------------------------------------------------------------------------- */
 
-.table {
+/* Every list of records is Angular Material's table on a native <table> (rule 47): `<table mat-table [fixedLayout]="true">`
+   with Material's sticky header row (`matHeaderRowDef: …; sticky: true`). The Material bridge gives the colours and type;
+   these are Pitwall's row sizes and row states. The columns share the panel's width (a <colgroup> sets the ones that need a
+   share) and a text cell that is too narrow ends in an ellipsis, its full value in a tooltip or the detail panel (UI review
+   2 rule 9); number, date and status columns are given the width they need and are never cut.
+   The table is its own stacking context (ADR 0027): the CDK writes its sticky layers inline (header 100, sticky column 1,
+   their corner 101), in the family's order (header above sticky column above cells), and they never meet the page's. */
+table.mat-mdc-table {
+  --mat-table-header-container-height: 32px;
+  --mat-table-row-item-container-height: 40px;
+  isolation: isolate;
   width: 100%;
-  border-collapse: collapse;
-  font-size: var(--pd-text-body);
-  th {
-    position: sticky;
-    top: 0;
-    /* Above sticky columns (2) and positioned cells: the family's table ladder (header 3, sticky column 2, row action 1). */
-    z-index: 3;
-    height: 32px;
+  .mat-mdc-header-cell,
+  .mat-mdc-cell {
     padding: 0 var(--pd-space-3);
-    font-size: var(--pd-text-label);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .mat-mdc-header-cell {
     font-weight: var(--pd-weight-medium);
-    color: var(--pd-text-subtle);
-    text-align: left;
-    white-space: nowrap;
     background: var(--pd-surface-1);
-    border-bottom: 1px solid var(--pd-hairline);
   }
-  td {
-    height: 40px;
-    padding: 0 var(--pd-space-3);
-    border-bottom: 1px solid var(--pd-hairline);
-    white-space: nowrap;
+  .mat-mdc-header-cell:first-child,
+  .mat-mdc-cell:first-child {
+    padding-left: var(--pd-space-4);
   }
-  tr:last-child td {
+  .mat-mdc-row:last-child .mat-mdc-cell {
     border-bottom: none;
   }
-  tbody tr {
+  /* Hover and selection paint the cells, so the last row keeps a flush panel's rounded corners. */
+  .mat-mdc-cell {
     transition: background var(--pd-duration-micro) var(--pd-ease-move);
   }
-  tbody tr:hover {
+  .mat-mdc-row:hover > .mat-mdc-cell {
     background: var(--pd-hover);
+  }
+  .mat-mdc-row[tabindex] {
+    cursor: default;
+    &:focus-visible {
+      outline: 2px solid var(--pd-accent-ring);
+      outline-offset: -2px;
+    }
+  }
+  .mat-mdc-row.selected > .mat-mdc-cell {
+    background: var(--pd-accent-tint);
+  }
+  .mat-mdc-row.selected > .mat-mdc-cell:first-child {
+    box-shadow: inset 2px 0 0 var(--pd-accent);
+  }
+  .num,
+  .right {
+    font-variant-numeric: tabular-nums;
   }
   .right {
     text-align: right;
   }
+  /* Row actions: icon buttons that appear on hover and keyboard focus; the "..." button (pw-more-button) stays at rest. */
+  .act {
+    text-align: right;
+    .reveal {
+      opacity: 0;
+    }
+  }
+  .mat-mdc-row:hover .reveal,
+  .mat-mdc-row:focus-within .reveal,
+  .mat-mdc-row.selected .reveal,
+  .reveal.on,
+  .reveal:focus-visible {
+    opacity: 1;
+  }
+  /* Without a pointer that hovers (touch), the row actions are always shown. */
+  @media (hover: none) {
+    .reveal {
+      opacity: 1;
+    }
+  }
 }
 
-/* Row actions: icon buttons that appear on hover and keyboard focus; the "..." button stays at 40 % (RowMenu). */
+pw-panel.flush table.mat-mdc-table .mat-mdc-row:last-child {
+  > .mat-mdc-cell:first-child {
+    border-bottom-left-radius: calc(var(--pd-radius-card) - 1px);
+  }
+  > .mat-mdc-cell:last-child {
+    border-bottom-right-radius: calc(var(--pd-radius-card) - 1px);
+  }
+}
+
 /* The CDK places a virtual list's rows in an absolutely positioned wrapper as wide as its widest row: a list whose rows
    are a fitting grid (cells end in an ellipsis) makes the wrapper the viewport's width instead of scrolling sideways. */
 cdk-virtual-scroll-viewport.fit > .cdk-virtual-scroll-content-wrapper {
   width: 100%;
-}
-
-/* A table that fits its panel instead of scrolling sideways: the columns share the width (a <colgroup> sets the ones
-   that need a share), and a cell that is too narrow ends in an ellipsis; its full value is in a tooltip or the detail
-   panel (UI review 2 rule 9). */
-.table.fit {
-  table-layout: fixed;
-  th,
-  td {
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-}
-
-.table .row-actions {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 2px;
-  .reveal {
-    opacity: 0;
-  }
-}
-.table .row-actions .reveal.on,
-.table tbody tr:hover .row-actions .reveal,
-.table tbody tr:focus-within .row-actions .reveal,
-.table tbody tr.selected .row-actions .reveal {
-  opacity: 1;
-}
-.table tbody tr[tabindex] {
-  cursor: default;
-  &:focus-visible {
-    outline: 2px solid var(--pd-accent-ring);
-    outline-offset: -2px;
-  }
-}
-.table tbody tr.selected {
-  background: var(--pd-accent-tint);
-  box-shadow: inset 2px 0 0 var(--pd-accent);
-}
-.table .num,
-.table .right {
-  font-variant-numeric: tabular-nums;
-}
-.table th.right {
-  text-align: right;
 }
 
 /* A page with a detail panel on the right: the list keeps the remaining width and scrolls on its own. */

@@ -1,6 +1,8 @@
 // Pitwall's controls are Angular Material and paddock-ui (rule 47; 1.1 WP-2.3): no native select, no native checkbox, no
 // unthemed input and none of the retired Pitwall controls (`.btn`, `.seg`, `pw-select`, the row and context menus, the
-// skeleton, sparkline, toast host and empty state) in a template. controls.test.mjs runs the check over every template.
+// skeleton, sparkline, toast host and empty state) in a template. Tables are Material's (`<table mat-table>`) or
+// paddock-ui's `pd-table` (1.1 WP-2, tables): no hand-rolled `<table>` and no retired `.table` class. controls.test.mjs
+// runs the check over every template.
 //
 //   node scripts/ci/controls.mjs      lists what is left, one line per finding
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -16,6 +18,8 @@ const RULES = [
   { id: 'native-checkbox', re: /<input\b[^>]*\btype=["']checkbox["'][^>]*>/g, why: 'a native checkbox: use mat-checkbox (forms) or mat-slide-toggle (immediate)' },
   { id: 'btn-class', re: /\bclass=["'](?:[^"']*\s)?btn(?:\s[^"']*)?["']/g, why: 'a .btn button: use matButton / matIconButton' },
   { id: 'seg-class', re: /\bclass=["'](?:[^"']*\s)?seg(?:\s[^"']*)?["']/g, why: 'a .seg group: use pd-segmented-control or mat-button-toggle-group' },
+  { id: 'table-class', re: /<table\b[^>]*\bclass=["'](?:[^"']*\s)?table(?:\s[^"']*)?["'][^>]*>/g, why: 'the retired .table class: use mat-table (with [fixedLayout]) or pd-table' },
+  { id: 'native-table', re: /<table\b(?![^>]*\bmat-table\b)[^>]*>/g, why: 'a hand-rolled <table>: use mat-table or pd-table' },
   {
     id: 'retired-component',
     re: /<pw-(?:select|row-menu|context-menu|skeleton|sparkline|toast-host|empty-state)\b/g,
