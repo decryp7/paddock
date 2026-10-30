@@ -43,7 +43,8 @@ pub trait Launcher: Send + Sync {
     fn launch(&self) -> Result<(), String>;
     /// The process this launcher started last.
     fn child(&self) -> Child;
-    /// No more launches: the app is quitting.
+    /// No more launches: the app is quitting. Must not block (it is called on the supervisor's owner thread): a launch that
+    /// was queued before it sees it and does not run.
     fn close(&self) {}
     /// Waits briefly for the process this launcher started to exit (after `Shutdown`), ending it when it does not.
     fn finish(&self, wait: Duration);
@@ -55,6 +56,8 @@ pub trait Launcher: Send + Sync {
 pub struct ProcessLauncher {
     exe: Box<dyn Fn() -> Result<std::path::PathBuf, String> + Send + Sync>,
     slot: Mutex<Slot>,
+    /// No more launches (an atomic, so closing never waits for a launch or an end in progress).
+    closed: std::sync::atomic::AtomicBool,
 }
 
 /// The process a [`ProcessLauncher`] started, held until it has exited and been reaped.
@@ -63,7 +66,6 @@ struct Slot {
     child: Option<std::process::Child>,
     /// The exit code of the last one, once reaped (`Some(None)`: ended by a signal).
     exited: Option<Option<i32>>,
-    closed: bool,
 }
 
 impl Slot {
@@ -93,6 +95,7 @@ impl ProcessLauncher {
         ProcessLauncher {
             exe: Box::new(exe),
             slot: Mutex::new(Slot::default()),
+            closed: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
@@ -101,7 +104,7 @@ impl Launcher for ProcessLauncher {
     fn launch(&self) -> Result<(), String> {
         // Held across the start: a quit (`close`, `finish`) waits for it and then sees the new process.
         let mut slot = lock(&self.slot);
-        if slot.closed {
+        if self.closed.load(std::sync::atomic::Ordering::SeqCst) {
             return Err("Dyno is closing.".into());
         }
         if matches!(slot.look(), Child::Running { .. }) {
@@ -141,7 +144,7 @@ impl Launcher for ProcessLauncher {
     }
 
     fn close(&self) {
-        lock(&self.slot).closed = true;
+        self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     fn finish(&self, wait: Duration) {

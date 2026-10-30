@@ -516,6 +516,7 @@ fn scenarios(mutant: Mutant, budget: Budget) -> Vec<(&'static str, World)> {
                 w.installed = true;
                 w.other = Other::Ready;
                 w.budget.add = 0;
+                w.budget.ticks = 3;
             }),
         ),
         (

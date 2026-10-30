@@ -27,8 +27,6 @@ const END_GRACE: Duration = Duration::from_secs(3);
 enum LauncherJob {
     Launch(Generation),
     End(Generation),
-    /// The quit is decided: no more launches (the slot may be busy with an end, so not on the owner thread).
-    Close,
 }
 
 enum Notice {
@@ -83,7 +81,6 @@ impl Executor {
                         }
                         let _ = ev.send(Event::Launched { child, result });
                     }
-                    LauncherJob::Close => l.launcher.close(),
                     LauncherJob::End(child) => {
                         l.launcher.finish(END_GRACE);
                         let code = match l.launcher.child() {
@@ -256,7 +253,8 @@ impl Executor {
                 let _ = self.notices.send(Notice::Stalled(None));
             }
             Command::Done(outcome) => {
-                let _ = self.launcher_jobs.send(LauncherJob::Close);
+                // Closing never blocks (an atomic), so a launch queued before the quit sees it and does not run.
+                self.link.launcher.close();
                 logging::info(&format!(
                     "quitting; the agent {}",
                     if outcome.stopped_own {
