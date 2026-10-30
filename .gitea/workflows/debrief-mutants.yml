@@ -74,6 +74,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      # CARGO_BUILD_JOBS: this runner's share of the host (conformance/ci/build-jobs.sh; Linux keeps cargo's default).
+      - uses: ./.gitea/actions/build-jobs
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: actions/cache@v4
@@ -93,6 +96,12 @@ jobs:
         run: |
           git diff --relative "origin/${{ github.base_ref }}...HEAD" -- crates/debrief-core > pr.diff
           cargo mutants -p debrief-core --in-diff pr.diff --timeout-multiplier 3 --no-shuffle
+
+      # Two mutants build at once (--jobs 2): each gets half of the job's share, so the job's rustc count stays its share.
+      - uses: ./.gitea/actions/build-jobs
+        if: github.event_name != 'pull_request'
+        with:
+          split: "2"
 
       - name: Mutants in debrief-core
         if: github.event_name != 'pull_request'

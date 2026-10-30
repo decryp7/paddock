@@ -9,6 +9,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 out="${1:?the output folder}"
+# Build jobs: the caller's (CI: the build-jobs action's share of the host; locally 2, ER-24), passed into the container,
+# which would otherwise see none of the host's environment.
+jobs="${CARGO_BUILD_JOBS:?set CARGO_BUILD_JOBS (CI sets it with the build-jobs action; locally use 2, ER-24)}"
 [ -d ui/dist/shell-demo/browser ] || { echo "::error::build the UI first: npm --prefix ui run shell-demo:build"; exit 1; }
 mkdir -p "$out"; out="$(cd "$out" && pwd)"
 # The same Rust as the host's build (rustc --version), so both platforms build with one compiler.
@@ -19,9 +22,9 @@ docker run -d --name "$c" --platform linux/arm64 -v "$out:/out" ubuntu:24.04 sle
 docker exec "$c" mkdir -p /src
 git archive HEAD | docker exec -i "$c" tar -x -C /src
 tar -cf - ui/dist/shell-demo | docker exec -i "$c" tar -x -C /src
-docker exec -i -e TOOLCHAIN="$toolchain" "$c" bash -s <<'IN'
+docker exec -i -e TOOLCHAIN="$toolchain" -e CARGO_BUILD_JOBS="$jobs" "$c" bash -s <<'IN'
 set -euo pipefail
-export DEBIAN_FRONTEND=noninteractive CARGO_HOME=/cargo RUSTUP_HOME=/rustup PATH=/cargo/bin:$PATH CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
+export DEBIAN_FRONTEND=noninteractive CARGO_HOME=/cargo RUSTUP_HOME=/rustup PATH=/cargo/bin:$PATH
 apt-get update -qq
 apt-get install -y -qq curl build-essential pkg-config libssl-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
   librsvg2-dev libxdo-dev >/dev/null

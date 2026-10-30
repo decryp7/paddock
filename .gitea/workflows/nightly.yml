@@ -105,6 +105,9 @@ jobs:
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
 
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
+
       # A slot of the host (job isolation; after Git bash on Windows): setup-rust's sccache folder and port are this job's.
       - uses: ./.gitea/actions/job-isolation
 

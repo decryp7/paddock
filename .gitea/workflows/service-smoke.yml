@@ -36,7 +36,9 @@ jobs:
       - name: Persistent build folder
         run: |
           echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/../.paddock-ci-target-shell-demo" >> "$GITHUB_ENV"
-          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores.
+      - uses: ./.gitea/actions/build-jobs
 
       - uses: ./.gitea/actions/build-env
 
