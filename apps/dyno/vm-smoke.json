@@ -53,5 +53,53 @@
     "manualReason": "the app registers its login item with SMAppService, which only the app itself calls; `dyno-agent service install` writes a legacy LaunchAgents plist and bootstraps it with launchctl, a different route that is not what users run. The guest does have an Aqua session, but driving the Settings toggle needs a UI driver (see the GUI VM research), which this check does not have",
     "approval": "System Settings > General > Login Items & Extensions may ask to allow the item (manual)."
   },
-  "settleWhy": "The supervisor has no fixed spawn wait any more (SPAWN_WAIT and CONNECT_GRACE are gone). The longest respawn timer is the crash-loop backoff capped at 15 s, plus 3 s END_GRACE before the held child is ended on a Retry or hand-over, plus the 2 s polling: 20 s covers one full respawn cycle. A second agent after that is a bug, not a timer."
+  "settleWhy": "The supervisor has no fixed spawn wait any more (SPAWN_WAIT and CONNECT_GRACE are gone). The longest respawn timer is the crash-loop backoff capped at 15 s, plus 3 s END_GRACE before the held child is ended on a Retry or hand-over, plus the 2 s polling: 20 s covers one full respawn cycle. A second agent after that is a bug, not a timer.",
+  "gui": {
+    "$comment": "For scripts/vm-smoke --gui (README, GUI mode): how a person sees and drives Dyno. windowOwner is the CGWindowList owner; contentRegex a text of the rendered main window; launchAtLogin the AX path to the Settings switch (open: actions until the switch is there; save: the button that applies it), the launchd label, the Login Items rows the app must have (and no other), the text the app shows when macOS needs approval, and the agent's parent after a login start; loginStart the log lines that record how the app decided to start (ADR 0010).",
+    "windowOwner": "Dyno",
+    "contentRegex": "^Dashboard( \\||$)",
+    "guardSec": 60,
+    "launchAtLogin": {
+      "label": "net.decryptology.dyno.agent",
+      "open": [
+        [
+          "press",
+          "Dyno",
+          "^Settings…",
+          "AXMenuItem"
+        ],
+        [
+          "press",
+          "Dyno",
+          "^Dyno$",
+          "AXButton"
+        ]
+      ],
+      "switch": [
+        "Dyno",
+        "^Start Dyno at login",
+        "AXCheckBox"
+      ],
+      "save": [
+        "Dyno",
+        "^Save changes",
+        "AXButton"
+      ],
+      "rows": {
+        "openAtLogin": [
+          "Dyno"
+        ],
+        "background": [
+          "Dyno"
+        ]
+      },
+      "needsApprovalText": "macOS needs your approval[^|]*",
+      "helperParentAfterLogin": "launchd"
+    },
+    "loginStart": {
+      "log": "~/Library/Application Support/Dyno/logs/app.log",
+      "hidden": "started hidden \\(flag or login item\\)",
+      "shown": "started with a window"
+    }
+  }
 }
