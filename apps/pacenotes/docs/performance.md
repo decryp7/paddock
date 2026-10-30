@@ -123,3 +123,28 @@ rules of a pack run one after another that is one parse per rule per file; shari
 in `find_all`) is the follow-up, measured when the engine wires the rules. The waiver glob is bounded by steps, not seconds: the
 reviewer's case (`*a` fourteen times against 80 characters, which took over ten minutes) is checked as at most
 `pattern length * path length * 2` steps in a unit test.
+
+## 2026-10-30, blame and gix's similarity rename tracking (`Rewrites::default()`), parallelism and cost (ER-20, rule 48)
+
+Helper: `cargo test --release -p pacenotes-git --test it -- --ignored --nocapture measure_blame`. Machine: the development Mac mini (Apple M4
+Pro, 14 cores, 64 GB), 5-minute load 21 to 29 during the runs (other agents were building), release build, two runs per row. Repositories:
+**invented and built in the scratch area** by the test (never a real repository): one file of 2,000 lines, 300 commits that each edit a
+few lines of it; in the second repository the file is also renamed (`git mv`) every tenth commit (30 renames). The whole file is blamed
+at the last commit.
+
+| History | Rename tracking | Time | Hunks | Objects read |
+|---|---|---|---|---|
+| edits only | similarity (`Rewrites::default()`, what ships) | 278, 271 ms | 1,994 | 3,597 |
+| edits only | none | 249, 274 ms | 1,994 | 3,597 |
+| a rename every 10th commit | similarity (what ships) | 295, 264 ms | 1,994 | 3,747 |
+| a rename every 10th commit | none | 1.2, 2.5 ms | **1** | 19 |
+
+**Cheaper operation (ER-20).** Turning rename tracking off is not a saving: without it a renamed file's history ends at the rename, the
+whole file goes to the commit that renamed it (one hunk, 19 objects, a millisecond), and the answer is wrong. With tracking on, the
+extra cost over "edits only" is about 150 more objects (4%) and no measurable time at this size; it is the rename detection of the commits
+that touch the file, not a search over the repository. So the default stays on, and the bounds that matter are the ones every blame
+has: the object budget (default 2,000,000), the blob cap (2 MiB), `since`, and the line range. **Parallelism:** gix's blame walks one
+history sequentially; the parallelism available is across files (one blame per file on a job pool), bounded by the object-database
+reads (disk), a few at a time on an SSD, one or two on a hard disk; that belongs to the ownership view that calls it and is not
+measured here. **Not measured:** a repository with hundreds of thousands of commits or very wide renames; the object budget stops those
+with a limit error that says to set `since`.
