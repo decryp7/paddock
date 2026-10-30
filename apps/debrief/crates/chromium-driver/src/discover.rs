@@ -99,7 +99,7 @@ pub fn find() -> Option<Browser> {
 pub const REQUIRE_VAR: &str = "DEBRIEF_REQUIRE_TEST_BROWSER";
 
 /// The OS name the shared gate takes (`std::env::consts::OS`).
-#[cfg(any(test, feature = "test-support"))]
+#[cfg(test)]
 fn os_name(os: Os) -> &'static str {
     match os {
         Os::Windows => "windows",
@@ -114,14 +114,14 @@ fn os_name(os: Os) -> &'static str {
 /// mode, so every test browser opens a window, rule 7). The gate's verdict and the reason a test skips.
 #[cfg(any(test, feature = "test-support"))]
 fn find_for_tests_with(
-    os: Os,
+    host: paddock_testkit::live_browser::Host,
     env: &dyn Fn(&str) -> Option<String>,
     exists: &dyn Fn(&Path) -> bool,
 ) -> Result<paddock_testkit::live_browser::TestBrowser<Browser>, String> {
     use paddock_testkit::live_browser::{find_test_browser, BrowserWindow};
     let hint = "install the pin with conformance/ci/install-test-browser.mjs --rust-source app/src-tauri/src/browser/runtime.rs \
                 and set CHROMIUM_TEST_PATH (installed browsers are never launched by tests)";
-    find_test_browser(os_name(os), env, BrowserWindow::Shown, REQUIRE_VAR, hint, || {
+    find_test_browser(host, env, BrowserWindow::Shown, REQUIRE_VAR, hint, || {
         env("CHROMIUM_TEST_PATH")
             .map(PathBuf::from)
             .filter(|p| exists(p))
@@ -137,7 +137,7 @@ fn find_for_tests_with(
 #[cfg(any(test, feature = "test-support"))]
 pub fn find_for_tests() -> Option<Browser> {
     use paddock_testkit::live_browser::{process_env, TestBrowser};
-    match find_for_tests_with(Os::CURRENT, &process_env, &|p| p.is_file()) {
+    match find_for_tests_with(paddock_testkit::live_browser::Host::current(), &process_env, &|p| p.is_file()) {
         Ok(TestBrowser::Found(b)) => Some(b),
         _ => None,
     }
@@ -148,7 +148,11 @@ pub fn find_for_tests() -> Option<Browser> {
 #[cfg(any(test, feature = "test-support"))]
 pub fn test_browser() -> Option<Browser> {
     use paddock_testkit::live_browser::{found_or_skip, process_env};
-    found_or_skip(find_for_tests_with(Os::CURRENT, &process_env, &|p| p.is_file()))
+    found_or_skip(find_for_tests_with(
+        paddock_testkit::live_browser::Host::current(),
+        &process_env,
+        &|p| p.is_file(),
+    ))
 }
 
 pub fn find_with(os: Os, env: &dyn Fn(&str) -> Option<String>, exists: &dyn Fn(&Path) -> bool) -> Option<Browser> {
@@ -208,7 +212,7 @@ mod tests {
     const XVFB: &[(&str, &str)] = &[(LIVE_BROWSER_VAR, "1"), ("DISPLAY", ":99")];
 
     fn found(os: Os, env: &dyn Fn(&str) -> Option<String>, exists: &dyn Fn(&Path) -> bool) -> Option<Browser> {
-        match find_for_tests_with(os, env, exists) {
+        match find_for_tests_with(paddock_testkit::live_browser::Host::plain(os_name(os)), env, exists) {
             Ok(TestBrowser::Found(b)) => Some(b),
             _ => None,
         }
@@ -238,7 +242,9 @@ mod tests {
     fn a_test_browser_opens_a_window_only_on_a_virtual_display() {
         let exists = |p: &Path| p == Path::new("/opt/test/chrome");
         for os in [Os::Mac, Os::Windows] {
-            let Ok(TestBrowser::Skip(why)) = find_for_tests_with(os, &pinned_with(XVFB), &exists) else {
+            let Ok(TestBrowser::Skip(why)) =
+                find_for_tests_with(paddock_testkit::live_browser::Host::plain(os_name(os)), &pinned_with(XVFB), &exists)
+            else {
                 panic!("{os:?} got a browser")
             };
             assert!(why.contains("Linux") && why.contains(LIVE_BROWSER_VAR), "{why}");
@@ -250,8 +256,18 @@ mod tests {
             PathBuf::from("/opt/test/chrome")
         );
         // Every window needs the virtual display; a job set up wrongly fails.
-        assert!(find_for_tests_with(Os::Linux, &pinned_with(&[(LIVE_BROWSER_VAR, "1")]), &exists).is_err());
-        assert!(find_for_tests_with(Os::Linux, &pinned_with(&[(REQUIRE_VAR, "1")]), &exists).is_err());
+        assert!(find_for_tests_with(
+            paddock_testkit::live_browser::Host::plain("linux"),
+            &pinned_with(&[(LIVE_BROWSER_VAR, "1")]),
+            &exists
+        )
+        .is_err());
+        assert!(find_for_tests_with(
+            paddock_testkit::live_browser::Host::plain("linux"),
+            &pinned_with(&[(REQUIRE_VAR, "1")]),
+            &exists
+        )
+        .is_err());
         let _ = (find_for_tests(), os_name(Os::Mac), os_name(Os::Windows));
     }
 

@@ -396,6 +396,20 @@ impl Chromium {
 
     /// [`Chromium::launch`] with the sandbox decided by the caller (tests run the root branch on any OS).
     pub fn launch_with(exe: &Browser, opts: &LaunchOptions, sandbox: Sandbox) -> Result<Chromium> {
+        // Test builds: no installed browser, and no real one outside a throwaway session (rule 7), however it was found.
+        #[cfg(any(test, feature = "test-support"))]
+        {
+            use paddock_testkit::live_browser::{BrowserWindow, check_launch};
+            let env = |k: &str| std::env::var(k).ok();
+            let installed = crate::discover::candidates(crate::discover::this_os(), &env)
+                .iter()
+                .any(|c| c.path == exe.path);
+            let window = match opts.window {
+                Window::Headless => BrowserWindow::Headless,
+                Window::OffScreen | Window::OnScreen(_) => BrowserWindow::Shown,
+            };
+            check_launch(&exe.path, installed, window).map_err(Error::Launch)?;
+        }
         check_display(opts.window, cfg!(target_os = "linux"), |k| {
             std::env::var(k).ok()
         })?;

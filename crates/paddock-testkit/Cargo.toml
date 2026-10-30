@@ -13,3 +13,7 @@ tempfile = "3"
 # `net::HeldPort::reset`: SO_LINGER 0 on an accepted connection.
 socket2 = "0.6"
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+# `live_browser::Host::current`: `kern.hv_vmm_present` (is this Mac a test VM).
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"

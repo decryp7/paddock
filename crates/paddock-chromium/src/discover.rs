@@ -183,17 +183,17 @@ pub const REQUIRE_TEST_BROWSER_ENV: &str = "PADDOCK_REQUIRE_TEST_BROWSER";
 pub fn find_for_tests(window: crate::Window) -> Option<Browser> {
     use paddock_testkit::live_browser::{found_or_skip, process_env};
     found_or_skip(find_for_tests_with(
-        std::env::consts::OS,
+        paddock_testkit::live_browser::Host::current(),
         &process_env,
         &|p| p.is_file(),
         window,
     ))
 }
 
-/// [`find_for_tests`] with the OS (as `std::env::consts::OS` names it), the environment and the file check injected.
+/// [`find_for_tests`] with the machine, the environment and the file check injected.
 #[cfg(any(test, feature = "test-support"))]
 fn find_for_tests_with(
-    os: &str,
+    host: paddock_testkit::live_browser::Host,
     env: &dyn Fn(&str) -> Option<String>,
     exists: &dyn Fn(&Path) -> bool,
     window: crate::Window,
@@ -206,9 +206,11 @@ fn find_for_tests_with(
     let hint = format!(
         "set {TEST_BROWSER_ENV} to the pinned Chrome for Testing (installed browsers are never used by tests)"
     );
-    find_test_browser(os, env, shows, REQUIRE_TEST_BROWSER_ENV, &hint, || {
+    find_test_browser(host, env, shows, REQUIRE_TEST_BROWSER_ENV, &hint, || {
         let path = PathBuf::from(env(TEST_BROWSER_ENV).filter(|p| !p.is_empty())?);
-        let installed = candidates(os_of(os), env).iter().any(|c| c.path == path);
+        let installed = candidates(os_of(host.os), env)
+            .iter()
+            .any(|c| c.path == path);
         if installed {
             log::warn!(
                 "{TEST_BROWSER_ENV} names an installed browser; tests use only a Chrome for Testing build"
@@ -306,7 +308,12 @@ mod tests {
             }
         };
         let found = |os, env: &dyn Fn(&str) -> Option<String>, exists: &dyn Fn(&Path) -> bool| {
-            match find_for_tests_with(os, env, exists, crate::Window::Headless) {
+            match find_for_tests_with(
+                paddock_testkit::live_browser::Host::plain(os),
+                env,
+                exists,
+                crate::Window::Headless,
+            ) {
                 Ok(TestBrowser::Found(b)) => Some(b),
                 _ => None,
             }
@@ -354,7 +361,12 @@ mod tests {
             ] {
                 assert!(
                     matches!(
-                        find_for_tests_with(os, &env, &|_| true, w),
+                        find_for_tests_with(
+                            paddock_testkit::live_browser::Host::plain(os),
+                            &env,
+                            &|_| true,
+                            w
+                        ),
                         Ok(TestBrowser::Skip(_))
                     ),
                     "{os} {w:?}"
@@ -362,14 +374,19 @@ mod tests {
             }
         }
         assert!(matches!(
-            find_for_tests_with("linux", &env, &|_| true, crate::Window::OffScreen),
+            find_for_tests_with(
+                paddock_testkit::live_browser::Host::plain("linux"),
+                &env,
+                &|_| true,
+                crate::Window::OffScreen
+            ),
             Ok(TestBrowser::Found(_))
         ));
         // A window needs the virtual display.
         let no_display = |k: &str| if k == "DISPLAY" { None } else { env(k) };
         assert!(
             find_for_tests_with(
-                "linux",
+                paddock_testkit::live_browser::Host::plain("linux"),
                 &no_display,
                 &|_| true,
                 crate::Window::OnScreen(None)
@@ -377,7 +394,13 @@ mod tests {
             .is_err()
         );
         assert!(
-            find_for_tests_with("linux", &no_display, &|_| true, crate::Window::Headless).is_ok()
+            find_for_tests_with(
+                paddock_testkit::live_browser::Host::plain("linux"),
+                &no_display,
+                &|_| true,
+                crate::Window::Headless
+            )
+            .is_ok()
         );
         let _ = find_for_tests(crate::Window::Headless);
     }
