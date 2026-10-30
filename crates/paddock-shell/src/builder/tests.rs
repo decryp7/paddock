@@ -574,11 +574,14 @@ fn a_start_stuck_in_the_set_up_is_logged_with_its_phase_while_it_is_stuck() {
         "after the plugins' set-up the event loop starts; the app's setup has not run yet"
     );
     assert!(
-        wait_until(|| guard_logged(log::Level::Warn, "still in starting the event loop")),
+        wait_until(|| guard_logged(log::Level::Warn, "it is in starting the event loop")),
         "the gap until Ready is reported with its own phase"
     );
     on_run_event(&app, &RunEvent::Ready);
-    assert!(guard_logged(log::Level::Warn, "The start went on after"));
+    assert!(guard_logged(
+        log::Level::Warn,
+        "The app finished starting after"
+    ));
 }
 
 /// The test shell has no start guard: a mock app never reaches Ready, so a guard would tick on and report it.
