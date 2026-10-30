@@ -1714,3 +1714,22 @@ test('every job that runs cargo sets its build jobs (build-jobs or setup-rust); 
   const setup = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   assert.match(setup, /if \[ -z "\$\{CARGO_BUILD_JOBS:-\}" \]; then bash "\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\.\/conformance\/ci\/build-jobs\.sh"/);
 });
+
+test('every workflow step that runs the ui Playwright config provides every port variable that config requires on CI', () => {
+  const config = read(join(PADDOCK, 'ui', 'playwright.config.ts'));
+  const required = [...config.matchAll(/e2ePort\('([A-Z_]+)'/g)].map((m) => m[1]);
+  assert.ok(required.length >= 3, 'ui/playwright.config.ts names its port variables with e2ePort');
+  let checked = 0;
+  for (const f of readdirSync(WORKFLOWS).filter((n) => n.endsWith('.yml'))) {
+    const text = read(join(WORKFLOWS, f));
+    const uiShard = /^\s*working-directory: ui\s*$/m;
+    for (const step of text.split(/\n\s*- (?=name:|uses:|run:)/)) {
+      if (!/playwright test/.test(step) || !uiShard.test(step)) continue;
+      checked++;
+      for (const name of required) {
+        assert.match(step, new RegExp(`\\b${name}\\b`), `${f}: a step runs the ui Playwright config without setting ${name} (e2ePort refuses a default on CI)`);
+      }
+    }
+  }
+  assert.ok(checked >= 2, 'the check found the release workflows\' ui Playwright steps');
+});
