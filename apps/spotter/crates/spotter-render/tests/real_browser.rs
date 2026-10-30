@@ -362,7 +362,7 @@ fn closing_quits_the_browser_by_itself_before_any_kill() {
 #[test]
 fn the_production_close_path_ends_the_browser_and_reports_whether_it_needed_a_kill() {
     let _turn = serial();
-    let Some(b) = browser() else { return };
+    let Some(b) = browser(Mode::Headless) else { return };
     const ROUNDS: usize = 3;
     let mut killed = 0;
     for _ in 0..ROUNDS {

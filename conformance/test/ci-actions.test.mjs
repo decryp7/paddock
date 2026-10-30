@@ -1557,6 +1557,8 @@ test('every release workflow whose app imports @decryp7/paddock-ui builds the sh
     const prepare = /^\s*prepare:\s*(.+)$/m.exec(text)?.[1] ?? '';
     assert.match(prepare, /build -w ui/, `${f}: ${appDir} imports @decryp7/paddock-ui, which resolves from ui/dist, so the bundle job needs prepare: npm run build -w ui`);
   }
+});
+
 // Rule 7 (review P1-3): the macOS and Windows runners run in a user's session (the Mac runner is the user's own desktop), so
 // no job there starts a browser or the real app: no Playwright run, no real-window probe, no real-app smoke, no real-browser
 // test binary. A step limited to Linux (`if: runner.os == 'Linux'`) is fine in a job with host legs.

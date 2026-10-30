@@ -160,7 +160,8 @@ fn a_load_the_network_service_lost_names_the_restart() {
         }
     });
     let base = tempfile::tempdir().unwrap();
-    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let mut b =
+        Chromium::launch(&exe, &headless_options(base.path())).expect("Chrome for Testing starts");
     let browser = b.pid().expect("the browser's process");
     let page = b.new_page().unwrap();
     let url = format!("http://127.0.0.1:{port}/lost");
@@ -223,7 +224,8 @@ fn an_answered_abort_never_blames_the_network_service() {
         }
     });
     let base = tempfile::tempdir().unwrap();
-    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let mut b =
+        Chromium::launch(&exe, &headless_options(base.path())).expect("Chrome for Testing starts");
     let page = b.new_page().unwrap();
     let e = page
         .navigate(
@@ -259,7 +261,8 @@ fn every_helper_process_starts_on_the_first_try() {
         }
     });
     let base = tempfile::tempdir().unwrap();
-    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let mut b =
+        Chromium::launch(&exe, &headless_options(base.path())).expect("Chrome for Testing starts");
     let page = b.new_page().unwrap();
     page.navigate(
         &format!("http://127.0.0.1:{port}/"),
