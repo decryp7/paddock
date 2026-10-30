@@ -743,8 +743,9 @@ mod tests {
             let (fin, log) = (finish.clone(), calls.clone());
             std::thread::spawn(move || {
                 let Ok((stream, _)) = l.accept() else { return };
-                let _ = stream.set_read_timeout(Some(Duration::from_millis(10)));
+                // The poll time is set after the handshake: before it, a slow handshake read ends the handshake.
                 if let Ok(ws) = tungstenite::accept(stream) {
+                    let _ = ws.get_ref().set_read_timeout(Some(Duration::from_millis(10)));
                     fake_session(ws, script, &fin, &log);
                 }
             });
@@ -892,6 +893,7 @@ mod tests {
             let end = Instant::now() + Duration::from_secs(20);
             while !cond() {
                 assert!(Instant::now() < end, "timed out waiting for {what}");
+                // conformance: hang-guard — polls another process's state, which has no event to wait on
                 std::thread::sleep(Duration::from_millis(5));
             }
         };

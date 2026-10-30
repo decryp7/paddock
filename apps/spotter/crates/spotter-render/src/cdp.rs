@@ -15,6 +15,8 @@ use tungstenite::Message;
 
 const MAX_MESSAGE: usize = 32 << 20;
 const MAX_EVENTS: usize = 1024;
+/// The most the write buffer may hold while a send is interrupted (commands are small).
+const MAX_WRITE_BUFFER: usize = 8 << 20;
 
 /// How [`Connection::wait_event_or_lost`] ended.
 #[derive(Debug, Clone)]
@@ -73,6 +75,8 @@ impl Connection {
         let mut cfg = WebSocketConfig::default();
         cfg.max_message_size = Some(MAX_MESSAGE);
         cfg.max_frame_size = Some(MAX_MESSAGE);
+        // An interrupted send can leave frames in the write buffer; the buffer is bounded (the default is not).
+        cfg.max_write_buffer_size = MAX_WRITE_BUFFER;
         let (ws, _) = tungstenite::client::client_with_config(req, stream, Some(cfg)).map_err(|e| Error::Connection(e.to_string()))?;
         let _ = ws.get_ref().set_read_timeout(Some(Duration::from_millis(20)));
         let inner = Arc::new(Inner {
@@ -189,12 +193,13 @@ type Ws = tungstenite::WebSocket<TcpStream>;
 fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
     'outer: while !inner.closed.load(Ordering::Acquire) {
         while let Ok(m) = rx.try_recv() {
-            match ws.send(Message::text(m)) {
-                Ok(()) => {}
-                // The frame is queued; the next read or send writes it (tungstenite's `send`).
-                Err(tungstenite::Error::Io(e)) if is_transient(e.kind()) => {}
-                Err(_) => break 'outer,
+            if !sent(&ws.send(Message::text(m))) {
+                break 'outer;
             }
+        }
+        // Writes what an interrupted send left in the buffer (`read` flushes only pongs and close frames).
+        if !sent(&ws.flush()) {
+            break;
         }
         match ws.read() {
             Ok(Message::Text(t)) => dispatch(&inner, t.as_str()),
@@ -217,6 +222,16 @@ fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
 pub(crate) fn is_transient(kind: std::io::ErrorKind) -> bool {
     use std::io::ErrorKind::{Interrupted, TimedOut, WouldBlock};
     matches!(kind, WouldBlock | TimedOut | Interrupted)
+}
+
+/// Whether a send or flush leaves the connection usable. A transient error is not a failure: the frame stays in the
+/// write buffer and the next flush writes it (tungstenite's `send`).
+fn sent(r: &tungstenite::Result<()>) -> bool {
+    match r {
+        Ok(()) => true,
+        Err(tungstenite::Error::Io(e)) => is_transient(e.kind()),
+        Err(_) => false,
+    }
 }
 
 /// Whether an event goes into the bounded log. Network events are only wanted for documents (a failed load's trace,
@@ -269,5 +284,26 @@ mod tests {
         assert!(!kept("Network.loadingFailed", Some(&json!({"type": "Script"}))));
         assert!(!kept("Network.dataReceived", Some(&json!({}))));
         assert!(!kept("Network.requestWillBeSentExtraInfo", None));
+    }
+}
+
+#[cfg(test)]
+mod transient_tests {
+    use super::*;
+    use std::io::{Error as IoError, ErrorKind};
+
+    /// Regression: `EINTR` after a stop and continue ended the connection. Only EOF and reset errors end it.
+    #[test]
+    fn a_timeout_or_a_signal_is_transient_and_an_eof_or_a_reset_is_not() {
+        for kind in [ErrorKind::WouldBlock, ErrorKind::TimedOut, ErrorKind::Interrupted] {
+            assert!(is_transient(kind), "{kind:?}");
+            assert!(sent(&Err(tungstenite::Error::Io(IoError::from(kind)))), "{kind:?}");
+        }
+        for kind in [ErrorKind::UnexpectedEof, ErrorKind::ConnectionReset, ErrorKind::BrokenPipe] {
+            assert!(!is_transient(kind), "{kind:?}");
+            assert!(!sent(&Err(tungstenite::Error::Io(IoError::from(kind)))), "{kind:?}");
+        }
+        assert!(sent(&Ok(())));
+        assert!(!sent(&Err(tungstenite::Error::ConnectionClosed)));
     }
 }

@@ -795,23 +795,36 @@ fn the_page_size_cap_is_sixteen_mebibytes() {
     assert_eq!(MAX_HTML, 16 << 20);
 }
 
-/// Kills the stopped-and-continued child's whole process group (the child and the fake browser it started) when
-/// dropped, also on a panic of the parent: continue first, then kill and reap.
+/// Ends the stopped-and-continued child when dropped, also on a panic of the parent. It continues the child and tells it
+/// `go`, so the child finishes its checks and exits and its own drops end the fake browser and remove its folder (the
+/// fake runs in a process group of its own, so no signal to the child's group reaches it); only a child that does not
+/// exit within a bound is killed (with its group) and reaped.
 #[cfg(target_os = "linux")]
-struct ChildGuard(std::process::Child);
+struct ChildGuard {
+    child: std::process::Child,
+    go: PathBuf,
+}
 
 #[cfg(target_os = "linux")]
 impl Drop for ChildGuard {
     fn drop(&mut self) {
         // Signal only a child that is still unreaped: once it was waited for, its pid may belong to another process.
-        if let Ok(None) = self.0.try_wait() {
-            // SAFETY: plain signals to the process group this guard's still-unreaped child leads (set at spawn).
-            unsafe {
-                libc::killpg(self.0.id() as i32, libc::SIGCONT);
-                libc::killpg(self.0.id() as i32, libc::SIGKILL);
+        if let Ok(None) = self.child.try_wait() {
+            let pid = self.child.id() as i32;
+            // SAFETY: a signal to the still-unreaped child of this guard.
+            unsafe { libc::kill(pid, libc::SIGCONT) };
+            let _ = std::fs::write(&self.go, "");
+            let end = Instant::now() + Duration::from_secs(15);
+            // conformance: hang-guard — polls another process's state, which has no event to wait on
+            while matches!(self.child.try_wait(), Ok(None)) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            if let Ok(None) = self.child.try_wait() {
+                // SAFETY: a signal to the process group this guard's still-unreaped child leads (set at spawn).
+                unsafe { libc::killpg(pid, libc::SIGKILL) };
             }
         }
-        let _ = self.0.wait();
+        let _ = self.child.wait();
     }
 }
 
@@ -830,6 +843,7 @@ fn a_stopped_and_continued_process_keeps_its_browser_connection() {
         while !cond() {
             // conformance: hang-guard — a stuck child must fail the test, not hang it
             assert!(Instant::now() < end, "timed out waiting for {what}");
+            // conformance: hang-guard — polls another process's state, which has no event to wait on
             std::thread::sleep(Duration::from_millis(5));
         }
     };
@@ -858,10 +872,13 @@ fn a_stopped_and_continued_process_keeps_its_browser_connection() {
         .spawn()
         .unwrap();
     let pid = child.id();
-    let mut child = ChildGuard(child);
+    let mut child = ChildGuard {
+        child,
+        go: dir.path().join("go"),
+    };
     wait_for("the child to be ready", &mut || {
         assert!(
-            child.0.try_wait().unwrap().is_none(),
+            child.child.try_wait().unwrap().is_none(),
             "the child ended before it was ready"
         );
         dir.path().join("ready").exists()
@@ -873,6 +890,7 @@ fn a_stopped_and_continued_process_keeps_its_browser_connection() {
             .and_then(|s| s.rsplit_once(") ").map(|(_, rest)| rest.starts_with('T')))
             .unwrap_or(false)
     };
+    // SAFETY: a signal to the child this test spawned and has not waited for (it is reaped only below).
     let kill = |sig: i32| assert_eq!(unsafe { libc::kill(pid as i32, sig) }, 0);
     for _ in 0..5 {
         kill(libc::SIGSTOP);
@@ -882,7 +900,7 @@ fn a_stopped_and_continued_process_keeps_its_browser_connection() {
     }
     std::fs::write(dir.path().join("go"), "").unwrap();
     assert!(
-        child.0.wait().unwrap().success(),
+        child.child.wait().unwrap().success(),
         "the child's checks failed (its output is above)"
     );
 }

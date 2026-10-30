@@ -17,6 +17,8 @@ use tungstenite::protocol::WebSocketConfig;
 
 const MAX_MESSAGE: usize = 32 << 20;
 const MAX_EVENTS: usize = 1024;
+/// The most the write buffer may hold while a send is interrupted (commands are small).
+const MAX_WRITE_BUFFER: usize = 8 << 20;
 
 /// How [`Connection::wait_event_or_lost`] ended.
 #[derive(Debug, Clone)]
@@ -85,6 +87,8 @@ impl Connection {
         let mut cfg = WebSocketConfig::default();
         cfg.max_message_size = Some(MAX_MESSAGE);
         cfg.max_frame_size = Some(MAX_MESSAGE);
+        // An interrupted send can leave frames in the write buffer; the buffer is bounded (the default is not).
+        cfg.max_write_buffer_size = MAX_WRITE_BUFFER;
         let (ws, _) = tungstenite::client::client_with_config(req, stream, Some(cfg))
             .map_err(|e| Error::Connection(e.to_string()))?;
         let _ = ws
@@ -244,9 +248,11 @@ impl Drop for Connection {
 type Ws = tungstenite::WebSocket<TcpStream>;
 
 fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
-    // Sends what callers queued; a failed send ends the loop like a failed read.
+    // Sends what callers queued, then writes what an interrupted send left in the buffer (`read` flushes only pongs and
+    // close frames); a failed send ends the loop like a failed read.
     let flush = |ws: &mut Ws| {
         std::iter::from_fn(|| rx.try_recv().ok()).all(|m| sent(&ws.send(Message::text(m))))
+            && sent(&ws.flush())
     };
     while !inner.closed.load(Ordering::Acquire) && flush(&mut ws) {
         match ws.read() {
@@ -263,8 +269,8 @@ fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
     let _ = ws.close(None);
 }
 
-/// Whether a send leaves the connection usable. A transient error is not a failure: the frame is queued and the next
-/// read or send writes it (tungstenite's `send`).
+/// Whether a send or flush leaves the connection usable. A transient error is not a failure: the frame stays in the
+/// write buffer and the next flush writes it (tungstenite's `send`).
 fn sent(r: &tungstenite::Result<()>) -> bool {
     match r {
         Ok(()) => true,
