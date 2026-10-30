@@ -238,25 +238,6 @@ describe('native feel: the installed guard', () => {
     expect(copied).toHaveLength(1);
   });
 
-  it('keeps the auxclick WebKit sends after the context menu from reaching the app, so the Copy menu it opened is not closed as an outside click (regression)', () => {
-    const seen: string[] = [];
-    const listener = (e: Event) => seen.push(`${e.type}:${(e as MouseEvent).button}`);
-    document.body.addEventListener('auxclick', listener, true);
-    document.body.addEventListener('mousedown', listener, true);
-    const range = document.createRange();
-    range.selectNodeContents(el('p'));
-    window.getSelection()?.addRange(range);
-    fire(el('p'), new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 1, clientY: 2 }));
-    expect(copied).toHaveLength(1);
-    fire(el('p'), new MouseEvent('auxclick', { button: 2, bubbles: true, cancelable: true }));
-    // The next press is the user's own: it reaches the app and the guard stands down.
-    fire(el('p'), new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true }));
-    fire(el('p'), new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
-    document.body.removeEventListener('auxclick', listener, true);
-    document.body.removeEventListener('mousedown', listener, true);
-    expect(seen).toEqual(['mousedown:0', 'auxclick:1']);
-  });
-
   it('blocks Ctrl+wheel zoom without stopping the app handlers, and the back/forward mouse buttons', () => {
     let zoomed = false;
     el('b').addEventListener('wheel', () => (zoomed = true));

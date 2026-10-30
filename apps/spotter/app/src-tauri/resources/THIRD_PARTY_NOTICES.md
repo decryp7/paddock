@@ -478,7 +478,7 @@ Licence expressions (packages):
 - tauri-plugin-notification 2.7.0 — Apache-2.0 OR MIT [MIT-4]
 - tauri-plugin-opener 2.7.2 — Apache-2.0 OR MIT [MIT-4]
 - tauri-plugin-single-instance 2.5.4 — Apache-2.0 OR MIT [MIT-4]
-- tauri-plugin-updater 2.14.0 — Apache-2.0 OR MIT [MIT-4]
+- tauri-plugin-updater 2.14.1 — Apache-2.0 OR MIT [MIT-4]
 - tauri-runtime 2.12.2 — Apache-2.0 OR MIT [MIT-132]
 - tauri-runtime-wry 2.12.3 — Apache-2.0 OR MIT [MIT-132]
 - tauri-utils 2.10.2 — Apache-2.0 OR MIT [MIT-132]
@@ -4089,7 +4089,7 @@ Used by (98):
   objc2-web-kit 0.3.2, r-efi 5.3.0, r-efi 6.0.0, rsqlite-vfs 0.1.1,
   rustls-platform-verifier-android 0.2.0, tauri-plugin-autostart 2.7.0, tauri-plugin-dialog 2.8.3,
   tauri-plugin-fs 2.7.1, tauri-plugin-notification 2.7.0, tauri-plugin-opener 2.7.2,
-  tauri-plugin-single-instance 2.5.4, tauri-plugin-updater 2.14.0, tauri-winrt-notification 0.8.1,
+  tauri-plugin-single-instance 2.5.4, tauri-plugin-updater 2.14.1, tauri-winrt-notification 0.8.1,
   webview2-com 0.39.1, webview2-com-macros 0.8.1, webview2-com-sys 0.39.1,
   winapi-i686-pc-windows-gnu 0.4.0, winapi-x86_64-pc-windows-gnu 0.4.0, windows 0.62.2,
   windows-collections 0.3.2, windows-core 0.62.2, windows-future 0.3.2, windows-implement 0.60.2,
