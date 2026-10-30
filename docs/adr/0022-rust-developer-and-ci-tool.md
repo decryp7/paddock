@@ -542,3 +542,7 @@ is the first.
 - Playwright browsers: <https://playwright.dev/docs/browsers> (read)
 - Node.js type stripping: <https://nodejs.org/api/typescript.html> (read)
 - SARIF 2.1.0: <https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html> (read)
+
+## Amendment (2026-10-30)
+
+The shared rules crate is named `paddock-rules`, not `paddock-repo-rules`, by the user's decision on the joint rules-model note (`docs/research/2026-10-joint-rules-model.md`). Every earlier mention in this ADR is renamed; nothing else in it changes. R8 also owns the golden fixtures that prove the JavaScript and Rust conformance outputs equal.

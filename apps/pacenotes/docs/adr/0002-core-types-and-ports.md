@@ -132,6 +132,15 @@ re-parsing; `symbols_in_file` and every reply are bounded so a large repository 
 model call (an `Llm` call needs a user origin). A3a's design records the thread counts as settings with an "Auto" default
 and the measurements (rule 48) in `docs/performance.md`.
 
+### Amendment (2026-10-30, D-rules): reporting types move to `paddock-rules`
+
+The joint rules model (`docs/research/2026-10-joint-rules-model.md`) makes the shared crate `paddock-rules` the single owner of the
+types a report needs: `Severity`, `FindingState` and its transitions, `Confidence`, `Position`, `Span`, `Location`, `RepoPath`, and the
+new `FindingFingerprint` (rule id, algorithm version, normalised snippet, enclosing qualified name; no path, so it survives a rename).
+`pacenotes-core` re-exports them in C3a, with no change to any wire encoding (`wire_tests` runs before and after). The file-content
+`Fingerprint`, `FileId`, `SymbolId`, `Rev`, `Tier`, `Language`, `RuleSpec` and `Check` stay here. `RuleSpec.fix` becomes required.
+Until C3a, `pacenotes-rules` keeps temporary copies in one module that a test refuses to let outlive the move.
+
 ### Shared later
 
 Five things here are copies or parallel designs that belong in shared crates, and move only when shared code unfreezes after the Dyno and
