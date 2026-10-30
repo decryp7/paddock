@@ -992,3 +992,11 @@ clean runner; a leftover `ui/dist` in the working trees had hidden it. **Rule:**
 proved by building that app's installers (`<app>-release.yml` with gates on and the bundle built) before it lands on
 main (rule 54). The ci-actions test now checks that every release workflow whose app imports `@decryp7/paddock-ui`
 builds the UI.
+
+## A discovery file is a hint, never proof (2026-10-30, Dyno)
+Dyno's `agent.json` (the file that names the agent's pid and port) outlived its agent. The app read it, took it for a
+live agent, showed a false "Agent stopped" and looped on exit code 3. Separately, `Plan::Replace` deleted a
+file it no longer owned: it had read the file earlier and removed it later, after a newer agent had written its own.
+**Rule (53, amended):** a file that names a pid or port is only a hint. Act on it after a held lock or a live connection
+proves the process is there, and remove it only if it is still the same file (same pid and start time). This is rule 53's
+reusable-name rule applied to files.

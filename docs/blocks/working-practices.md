@@ -21,7 +21,9 @@
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
 - Never act on a reusable OS name read earlier (rule 53): hold it (handle, job, listener) or verify its identity (pid plus
   start time, `paddock_proc::ProcessId`) immediately before acting; kills go through `paddock_proc` (Clippy
-  `disallowed-methods` and C53 check it, ADR 0033).
+  `disallowed-methods` and C53 check it, ADR 0033). A discovery file that names a pid or port (Dyno's `agent.json`) is
+  only a hint: act on it after a held lock or a live connection proves the process is there, and remove it only if it is
+  still the same file (same pid and start).
 - Work a person waits for never runs at an OS's starvable background level (rule 52: macOS QoS `BACKGROUND`,
   `PRIO_DARWIN_BG`, `taskpolicy -b`/`-c background`/`-c maintenance`/`-d throttle` and `IOPOL_THROTTLE`; Windows
   background modes, idle priorities and EcoQoS; Linux `SCHED_IDLE` and idle I/O; for a service, launchd `ProcessType`

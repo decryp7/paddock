@@ -228,9 +228,14 @@ changes here, every app's copy is updated in the same change.
     `TerminateProcess`, `TerminateJobObject`, open ADR 0033 follow-ups) enforce it. ADR
     [0033](adr/0033-processes-by-identity-never-by-a-bare-pid.md); ADR [0023](adr/0023-tests-never-free-a-port-they-probe.md)
     is the same rule for ports.
+    A discovery file, a file that names a pid or a port (Dyno's `agent.json`), is only a hint: act on it only after a held
+    lock or a live connection proves the process is there, and remove it only if it is still the same file (same pid and
+    start), never because it was the file read earlier.
     *Why:* Windows hands a freed pid on at once. `kill_tree` killed the pids of a stale snapshot, which can end another
     test's Chrome helper; the same mistake was in four shapes in five apps. (It was suspected of causing the Windows
     `ERR_ABORTED` failures; the suspected cause was disproved by run 7158; the flake has another cause, ADR 0033 WP-4.)
+    Dyno's stale `agent.json` made the app say "Agent stopped" and loop on exit 3 for a process that was gone or replaced
+    ([lessons.md](lessons.md#a-discovery-file-is-a-hint-never-proof-2026-10-30-dyno)).
 
 ## Release path (user, 2026-10-30)
 54. **Every change that touches an app's release path builds that app's installers before it lands on main.** The release
