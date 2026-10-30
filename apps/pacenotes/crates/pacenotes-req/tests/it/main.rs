@@ -3,6 +3,7 @@
 //! builds the workbooks and Word files); the data is invented.
 
 mod hostile;
+mod limits;
 mod mapping;
 mod office;
 mod support;
