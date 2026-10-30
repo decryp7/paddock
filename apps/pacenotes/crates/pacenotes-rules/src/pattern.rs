@@ -470,20 +470,42 @@ fn range_text(src: &str, nodes: &[Node<'_>]) -> String {
 }
 
 /// The significant leaf tokens under some nodes (comments and layout left out), produced one at a time, so `a.b` and `a . b` are the
-/// same and a comparison can stop at the first difference.
-struct Leaves<'t> {
+/// same and a comparison can stop at the first difference. It walks the slice by index and pushes a node's children only when it
+/// descends into it, so starting a comparison costs nothing in proportion to the size of the capture; `pops` counts the nodes looked at,
+/// so the caller can charge them as steps.
+struct Leaves<'a, 't> {
+    nodes: &'a [Node<'t>],
+    next_node: usize,
     stack: Vec<Node<'t>>,
+    pops: usize,
 }
 
-impl<'t> Leaves<'t> {
-    fn new(nodes: &[Node<'t>]) -> Leaves<'t> {
+impl<'a, 't> Leaves<'a, 't> {
+    fn new(nodes: &'a [Node<'t>]) -> Leaves<'a, 't> {
         Leaves {
-            stack: nodes.iter().rev().copied().collect(),
+            nodes,
+            next_node: 0,
+            stack: Vec::new(),
+            pops: 0,
         }
     }
 
+    /// The nodes looked at since the last call.
+    fn take_pops(&mut self) -> usize {
+        std::mem::take(&mut self.pops)
+    }
+
     fn next(&mut self, src: &'t str) -> Option<&'t str> {
-        while let Some(n) = self.stack.pop() {
+        loop {
+            let n = match self.stack.pop() {
+                Some(n) => n,
+                None => {
+                    let n = *self.nodes.get(self.next_node)?;
+                    self.next_node += 1;
+                    n
+                }
+            };
+            self.pops += 1;
             if n.is_extra() {
                 continue;
             }
@@ -494,7 +516,6 @@ impl<'t> Leaves<'t> {
             let kids: Vec<Node<'t>> = n.children(&mut cursor).collect();
             self.stack.extend(kids.into_iter().rev());
         }
-        None
     }
 }
 
@@ -556,13 +577,16 @@ impl<'t> Matcher<'_, 't> {
     fn same_tokens(&mut self, a: &[Node<'t>], b: &[Node<'t>]) -> bool {
         let (mut ia, mut ib) = (Leaves::new(a), Leaves::new(b));
         loop {
-            match (ia.next(self.tgt), ib.next(self.tgt)) {
-                (None, None) => return true,
-                (Some(x), Some(y)) => {
-                    if !self.step() || x != y {
-                        return false;
-                    }
+            let (x, y) = (ia.next(self.tgt), ib.next(self.tgt));
+            // every node looked at is a step, the tokens included, so the work is bounded by the budget
+            for _ in 0..(ia.take_pops() + ib.take_pops()).max(1) {
+                if !self.step() {
+                    return false;
                 }
+            }
+            match (x, y) {
+                (None, None) => return true,
+                (Some(x), Some(y)) if x == y => {}
                 _ => return false,
             }
         }
@@ -769,4 +793,56 @@ pub struct RuleRun {
     pub findings: Vec<Finding>,
     /// Set when the result is partial.
     pub truncated: Option<Truncated>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A step count cannot see a copy. This does: binding a run stores a handle to the parent's sibling list and a range, never a new
+    /// `Vec`, so the list's reference count goes up and the pointer is the same.
+    #[test]
+    fn binding_a_run_shares_the_sibling_list_instead_of_copying_it() {
+        let mut parser = Parser::new();
+        parser.set_language(&ParseLanguage::Rust.grammar().unwrap()).unwrap();
+        let src = "fn g() { f(1, 2, 3, 4); }";
+        let tree = parser.parse(src, None).unwrap();
+        let args = tree
+            .root_node()
+            .descendant_for_byte_range(src.find("(1").unwrap(), src.find("4)").unwrap() + 1)
+            .unwrap();
+        let siblings: Rc<Vec<Node<'_>>> = Rc::new({
+            let mut c = args.walk();
+            args.children(&mut c).collect()
+        });
+        assert!(siblings.len() >= 4);
+        let (vars, mut total, cancel) = (BTreeMap::new(), 0usize, CancelToken::new());
+        let mut m = Matcher {
+            pat: "",
+            tgt: src,
+            vars: &vars,
+            caps: Vec::new(),
+            steps: 0,
+            total: &mut total,
+            total_max: 1_000,
+            cancel: &cancel,
+            exhausted: false,
+            cancelled: false,
+        };
+        assert_eq!(Rc::strong_count(&siblings), 1);
+        assert!(m.bind("A", Cap::Run(siblings.clone(), 1, 3)));
+        assert!(m.bind("B", Cap::Run(siblings.clone(), 2, 4)));
+        assert_eq!(Rc::strong_count(&siblings), 3, "each binding holds a handle to the one list");
+        for (_, cap) in &m.caps {
+            let Cap::Run(list, _, _) = cap else { panic!("a run was bound") };
+            assert!(
+                Rc::ptr_eq(list, &siblings),
+                "the capture points at the parent's list, not at a copy"
+            );
+        }
+        // comparing a bound name again clones the handle, never the nodes
+        let before = Rc::strong_count(&siblings);
+        let _ = m.bind("A", Cap::Run(siblings.clone(), 1, 3));
+        assert_eq!(Rc::strong_count(&siblings), before, "the temporary handle was dropped again");
+    }
 }
