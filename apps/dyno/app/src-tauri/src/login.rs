@@ -123,8 +123,8 @@ mod mac {
 
     use super::*;
     use crate::service_repair::{
-        keep_registered, parse_job, parse_print_disabled, plan, record_registered_version, registered_version, JobReport, Observed,
-        RegisterError, RegistrationStatus, RepairOps, REGISTERED_VERSION_FILE,
+        keep_registered, parse_job, parse_print_disabled, plan, record_registered_version, registered_version, service_supervises,
+        JobReport, Observed, RegisterError, RegistrationStatus, RepairOps, REGISTERED_VERSION_FILE,
     };
     use dyno_agent::service::LABEL;
     use objc2_foundation::NSString;
@@ -288,9 +288,10 @@ mod mac {
             matches!(status(), SMAppServiceStatus::Enabled | SMAppServiceStatus::RequiresApproval)
         }
 
-        /// Enabled: launchd runs the job (`RunAtLoad`, `KeepAlive`). Waiting for approval, it runs nothing.
+        /// Enabled, not switched off in Login Items and loaded in launchd: it runs the job (`RunAtLoad`, `KeepAlive`).
+        /// Waiting for approval, switched off or dropped by launchd, it runs nothing.
         fn supervises(&mut self) -> bool {
-            status() == SMAppServiceStatus::Enabled
+            service_supervises(registration_status(), launchd_disabled(), job_report())
         }
 
         fn install(&mut self) -> Result<(), String> {

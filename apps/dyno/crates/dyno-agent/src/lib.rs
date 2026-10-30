@@ -111,16 +111,49 @@ impl Running {
         reveal: agent::Reveal,
         disk_ports: disk::DiskPorts,
     ) -> Result<Running, StartError> {
-        let instance = match instance::InstanceLock::acquire(&dirs) {
+        let lock = instance::InstanceLock::acquire(&dirs);
+        Running::start_with_lock(dirs, platform, details, reveal, disk_ports, lock)
+    }
+
+    /// [`Running::start_with`] with the result of taking the data folder's lock given (tests pass a failed one). A held
+    /// lock refuses the start; a folder that cannot lock at all (locking unsupported, for example on some network
+    /// shares) starts the agent without the guard against a second one, and says so in the agent's log and activity.
+    pub fn start_with_lock(
+        dirs: paths::Dirs,
+        platform: dyno_platform::Platform,
+        details: Box<dyn dyno_core::ports::ProcessSource>,
+        reveal: agent::Reveal,
+        disk_ports: disk::DiskPorts,
+        lock: Result<instance::InstanceLock, instance::LockError>,
+    ) -> Result<Running, StartError> {
+        let mut unguarded = None;
+        let instance = match lock {
             Ok(lock) => Some(lock),
-            Err(e @ instance::LockError::Held { .. }) => return Err(StartError::AlreadyRunning(e)),
+            Err(e @ instance::LockError::Held { .. }) => {
+                let err = StartError::AlreadyRunning(e);
+                instance::note(&dirs, &format!("dyno-agent: {err}"));
+                return Err(err);
+            }
             // A folder that cannot hold a lock file cannot hold the history either (it is kept in memory); go on.
             Err(e) => {
                 eprintln!("dyno-agent: {e}");
+                instance::note(
+                    &dirs,
+                    &format!("dyno-agent: {e}; starting without the guard against a second agent"),
+                );
+                unguarded = Some(e.to_string());
                 None
             }
         };
         let (shared, sensors, processes) = Shared::build_with(dirs, platform, details, reveal, disk_ports)?;
+        if let Some(why) = unguarded {
+            agent::lock(&shared.core).log(
+                agent::now(),
+                dyno_core::activity::ActivityKind::System,
+                "Dyno cannot guard against a second agent in this folder".into(),
+                format!("{why}. If two Dyno agents run for this folder, quit one of them."),
+            );
+        }
         let (host, discovery) = server::bind(&shared).map_err(|e| format!("Dyno could not open its private endpoint: {e}"))?;
         let mut threads = Vec::new();
         let s = shared.clone();

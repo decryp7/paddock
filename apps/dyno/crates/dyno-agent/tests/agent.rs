@@ -938,6 +938,13 @@ fn a_second_agent_on_the_same_data_folder_refuses_to_start_and_says_so() {
         Err(e) => e,
     };
     assert!(message.contains("already running"), "{message}");
+    assert!(
+        message.contains("another computer"),
+        "a shared network home can hold it from elsewhere: {message}"
+    );
+    // The agent's log file says it too (the app starts the agent with stderr discarded; a service's stderr is elsewhere).
+    let log = std::fs::read_to_string(dirs.logs().join("agent.log")).unwrap_or_default();
+    assert!(log.contains("already running"), "agent.log: {log:?}");
     assert_eq!(
         dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap(),
         before,
@@ -952,6 +959,41 @@ fn a_second_agent_on_the_same_data_folder_refuses_to_start_and_says_so() {
         before.endpoint
     );
     third.stop();
+}
+
+#[test]
+fn a_folder_that_cannot_lock_still_runs_the_agent_but_says_so_in_the_log_and_the_activity() {
+    use dyno_agent::instance::LockError;
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    let fake = Fake::new();
+    fake.add_process(process(100, "busy", 60.0));
+    let unsupported = LockError::Io {
+        path: dirs.instance_lock(),
+        source: std::io::Error::new(std::io::ErrorKind::Unsupported, "file locking is not supported here"),
+    };
+    let running = Running::start_with_lock(
+        dirs.clone(),
+        fake.platform(),
+        Box::new(fake.clone()),
+        Box::new(|_| Ok(())),
+        dyno_agent::disk::DiskPorts::none(),
+        Err(unsupported),
+    )
+    .unwrap();
+    let log = std::fs::read_to_string(dirs.logs().join("agent.log")).unwrap_or_default();
+    assert!(log.contains("not supported"), "agent.log: {log:?}");
+    let (peer, _) = connect(&dirs).unwrap();
+    let Reply::Activities(entries) = ask(&peer, Request::Activity { limit: 50 }).unwrap() else {
+        panic!("not activities")
+    };
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.title.contains("second agent") && e.detail.contains("not supported")),
+        "{entries:?}"
+    );
+    running.stop();
 }
 
 #[test]

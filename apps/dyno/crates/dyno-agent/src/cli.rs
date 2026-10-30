@@ -307,7 +307,12 @@ mod tests {
     fn a_refused_second_agent_exits_with_its_own_code_and_other_failures_with_one() {
         assert_eq!(run_exit_code(Ok(())), 0);
         let held = StartError::AlreadyRunning(LockError::Held { folder: "/x/Dyno".into() });
-        assert!(held.to_string().contains("already running for /x/Dyno; this one exits"));
+        let message = held.to_string();
+        assert!(message.contains("already running for /x/Dyno"), "{message}");
+        assert!(
+            message.contains("another computer") && message.contains("this one exits"),
+            "{message}"
+        );
         assert_eq!(run_exit_code(Err(held)), EXIT_ALREADY_RUNNING);
         assert_eq!(run_exit_code(Err(StartError::Failed("boom".into()))), 1);
     }

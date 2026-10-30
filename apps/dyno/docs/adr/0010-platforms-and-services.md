@@ -75,6 +75,18 @@ choice on Windows (a service) is the wrong one for Dyno.
     systemd's `RestartSec` 5 s). Turning it off: the app asks the former service's agent to exit over its connection
     (never a kill) and starts its own. A Windows `Run` entry starts the agent only at the next logon, so it supervises
     nothing now and the app keeps its own agent (which Quit then leaves running, as before).
+    Waits are judged by run state (ADR 0031), and none ends on a clock, but each long one says why and offers Retry:
+    after about 5 s "still starting" (the agent this app started has not written its discovery file: Retry ends that
+    process through its handle and starts again), "waiting for the login service" (Retry starts the app's own agent) and
+    "another agent holds the data folder" (Retry runs the connection steps again). A service that supervises on paper
+    but runs nothing (macOS: SMAppService enabled, not switched off in Login Items, and the job loaded in launchd;
+    Linux: `systemctl --user is-active`, `active` or `activating`) is told by the lock: when no process held it across
+    four rechecks in a row (about 20 s, longer than launchd's 10 s throttle), the app starts its own agent and says so,
+    and does not hand it over again until the service shows it works. A discovery file counts as ready only if it was
+    written after the wait began or its agent answers; a refusal or a missing lock is written to `logs/agent.log` too.
+    Follow-ups, not yet done: kickstart the service after a hand-over instead of waiting for its throttle; probe
+    `RequiresApproval` again so an approval given later is noticed; slow the `is_held` probe in the waits (it takes and
+    releases the lock at every look); the `/tmp/Dyno` fallback folder for an unwritable data folder.
 
 ## Consequences
 

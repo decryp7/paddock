@@ -26,7 +26,7 @@ use dyno_core::protocol::{LiveDetail, LiveUpdate, Message, Reply, Request, PROTO
 use dyno_core::{activity::ActivityEntry, alerts::Alert};
 use dyno_ipc::{Client, IpcError, Peer, PeerOptions};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -51,6 +51,11 @@ const START_POLL: Duration = Duration::from_millis(100);
 const STILL_STARTING_AFTER: u32 = 50;
 /// While waiting for the service's agent, the service is asked again every this many looks (about 5 s).
 const SERVICE_RECHECK: u32 = 50;
+/// The login service is rechecked this many times in a row with no process holding the agent lock before the app takes
+/// it that the service starts nothing: four rechecks (about 20 s) outlast launchd's `ThrottleInterval` of 10 s and
+/// systemd's `RestartSec` of 5 s, so a service that is merely restarting a refused agent is never mistaken for one that
+/// does not run. A count of observations, not a limit on the wait.
+const SERVICE_IDLE_RECHECKS: u32 = 4;
 /// A request made before the first connection waits this long for it (the window asks for data the moment it opens,
 /// usually before the agent has answered; after a first connection, requests fail fast instead).
 pub const CONNECT_GRACE: Duration = Duration::from_secs(8);
@@ -75,8 +80,22 @@ pub trait Sink: Send + Sync {
     fn job(&self, _status: paddock_jobs::wire::WireSnapshot) {}
     /// The connection state changed.
     fn agent(&self, status: AgentStatus);
+    /// A wait for the agent is taking long (`Some`, with its cause), or is over (`None`). The chip shows it with Retry.
+    fn stalled(&self, _stall: Option<Stall>) {}
     /// A connection was made: the shell reads what it needs from the agent (settings, for the tray).
     fn connected(&self, _link: &Arc<AgentLink>) {}
+}
+
+/// Why a wait for the agent has gone on longer than usual. A wait is never given up on (ADR 0031): this is information
+/// for the status chip, with a Retry that acts on the cause ([`AgentLink::retry`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stall {
+    /// The login service is meant to start the agent, and has not.
+    WaitingForService,
+    /// The agent this app started is running but has not written its discovery file.
+    AgentNotAnswering,
+    /// Another agent holds the data folder and has not answered.
+    OtherAgentHolds,
 }
 
 /// The agent process a [`Launcher`] started, as far as it knows.
@@ -219,6 +238,16 @@ pub struct AgentLink {
     probe: Mutex<Option<ServiceProbe>>,
     stopping: Mutex<bool>,
     wake: Condvar,
+    /// How often a wait looks again, in milliseconds (pace only; tests shorten it).
+    poll_ms: AtomicU64,
+    /// Counts Retry requests ([`AgentLink::retry`]); a wait acts on a count it has not seen.
+    retries: AtomicU32,
+    /// The login service did not start its agent, so the app runs its own beside the (broken) service.
+    service_fallback: AtomicBool,
+    /// A stall was reported and not yet cleared.
+    stall_shown: AtomicBool,
+    /// How many times a wait has looked again ([`AgentLink::looks`]).
+    looks: AtomicU64,
 }
 
 impl AgentLink {
@@ -241,6 +270,11 @@ impl AgentLink {
             probe: Mutex::new(None),
             stopping: Mutex::new(false),
             wake: Condvar::new(),
+            poll_ms: AtomicU64::new(START_POLL.as_millis() as u64),
+            retries: AtomicU32::new(0),
+            service_fallback: AtomicBool::new(false),
+            stall_shown: AtomicBool::new(false),
+            looks: AtomicU64::new(0),
         })
     }
 
@@ -249,6 +283,26 @@ impl AgentLink {
         let me = self.clone();
         self.running.store(true, Ordering::SeqCst);
         std::thread::Builder::new().name("dyno-link".into()).spawn(move || me.run())
+    }
+
+    /// How often a wait for the agent looks again (default [`START_POLL`]). The thresholds are counted in looks, so this
+    /// only changes the pace.
+    pub fn set_poll(&self, every: Duration) {
+        self.poll_ms
+            .store(u64::try_from(every.as_millis()).unwrap_or(u64::MAX).max(1), Ordering::SeqCst);
+    }
+
+    /// How many times a wait for the agent has looked again so far: its progress, counted rather than timed.
+    pub fn looks(&self) -> u64 {
+        self.looks.load(Ordering::SeqCst)
+    }
+
+    /// The Retry of the status chip: acts on the wait in progress (ends and relaunches the agent this app started and
+    /// that does not answer, starts the app's own agent when the login service starts none, looks for the agent again
+    /// when another one holds the data folder). Without a wait in progress it does nothing.
+    pub fn retry(&self) {
+        self.retries.fetch_add(1, Ordering::SeqCst);
+        self.wake.notify_all();
     }
 
     /// How to ask the OS about the login service. Without one, no service supervises the agent.
@@ -262,6 +316,9 @@ impl AgentLink {
         let state = probe();
         self.service_installed.store(state.installed, Ordering::SeqCst);
         self.supervised.store(state.supervises, Ordering::SeqCst);
+        if !state.supervises {
+            self.service_fallback.store(false, Ordering::SeqCst);
+        }
         Some(state)
     }
 
@@ -281,7 +338,8 @@ impl AgentLink {
     /// The service supervises the agent: ends the app's own agent (only the process this app started, rule 53), so the
     /// service's, refused while ours held the data folder, takes over. The loop then waits for it.
     fn hand_over(&self) {
-        if !matches!(self.launcher.child(), Child::Running { .. }) {
+        // The service has shown it starts nothing (see `wait_for_service`): ending the app's agent would leave none.
+        if self.service_fallback.load(Ordering::SeqCst) || !matches!(self.launcher.child(), Child::Running { .. }) {
             return;
         }
         logging::info("the login service runs the agent now; stopping the app's own agent");
@@ -513,6 +571,10 @@ impl AgentLink {
                                 // Ours only when it is the very process this app started (held, so its pid is its own).
                                 let ours = self.launcher.child() == Child::Running { pid: d.pid };
                                 self.started_by_us.store(ours, Ordering::SeqCst);
+                                if !ours {
+                                    // The service's agent is up after all.
+                                    self.service_fallback.store(false, Ordering::SeqCst);
+                                }
                                 return Ok(p);
                             }
                             // Unreachable: its process is gone (the file is stale) or not answering yet. The file is
@@ -536,9 +598,10 @@ impl AgentLink {
                             self.wait_gone(Duration::from_secs(5));
                         }
                     }
-                    if Discovery::read(&self.dirs.discovery()).is_some() {
-                        // Its process is gone but the file stayed.
-                        let _ = std::fs::remove_file(self.dirs.discovery());
+                    if let Some(found) = &found {
+                        // Its process is gone but the file stayed: removed only if it is still that very file (a newer
+                        // agent may have written its own meanwhile).
+                        Discovery::remove_if_same(&self.dirs.discovery(), found);
                     }
                 }
                 Plan::Spawn => self.start_agent()?,
@@ -557,17 +620,53 @@ impl AgentLink {
         }
     }
 
+    /// One pace of a wait: counts the look, then waits [`AgentLink::set_poll`] (or until the link stops).
+    fn look_again(&self) {
+        self.looks.fetch_add(1, Ordering::SeqCst);
+        self.pause(Duration::from_millis(self.poll_ms.load(Ordering::SeqCst)));
+    }
+
+    /// Tells the chip what a long wait is waiting for (Retry acts on it), and the window as a "still starting" note.
+    fn show_stall(&self, stall: Stall, note: &str) {
+        logging::info(&format!("still waiting: {note}"));
+        self.sink.agent(AgentStatus::new(AgentState::Starting, Some(note.to_string())));
+        self.stall_shown.store(true, Ordering::SeqCst);
+        self.sink.stalled(Some(stall));
+    }
+
+    /// The wait is over (or starts anew): the chip drops the stall it showed.
+    fn clear_stall(&self) {
+        if self.stall_shown.swap(false, Ordering::SeqCst) {
+            self.sink.stalled(None);
+        }
+    }
+
+    /// Whether Retry was chosen since `seen` (the count when the wait began); `seen` is brought up to date.
+    fn retry_chosen(&self, seen: &mut u32) -> bool {
+        let now = self.retries.load(Ordering::SeqCst);
+        std::mem::replace(seen, now) != now
+    }
+
+    /// Whether a discovery file found while waiting since `since_ms` names an agent that is up: written after the wait
+    /// began, or answering. A file from before the wait that nothing answers is an old agent's, not the one waited for.
+    fn names_live_agent(&self, d: &Discovery, since_ms: i64) -> bool {
+        written_since(d, since_ms) || self.try_connect(d).map(|p| p.close()).is_ok()
+    }
+
     /// Starts the agent unless the one this app started is still running, and waits for it to write its discovery file
     /// (a connection is made by the next pass of [`establish`]). The wait is judged on the process, not on a clock
-    /// (ADR 0031): while it runs, it is starting.
+    /// (ADR 0031): while it runs, it is starting. After [`STILL_STARTING_AFTER`] looks the chip says so with Retry,
+    /// which ends the process this app started (through the handle it holds) and launches again; the wait itself never
+    /// ends on time.
     fn start_agent(&self) -> Result<(), String> {
         if self.is_stopping() {
             return Ok(());
         }
+        let mut seen_retry = self.retries.load(Ordering::SeqCst);
         if matches!(self.launcher.child(), Child::Running { .. }) {
             logging::info("the agent this app started is still starting; waiting for it");
-        } else if self.probe_service().is_some_and(|s| s.supervises) {
-            return self.wait_for_service();
+        } else if !self.service_fallback.load(Ordering::SeqCst) && self.probe_service().is_some_and(|s| s.supervises) {
+            return self.wait_for_service(seen_retry);
         } else {
             logging::info("starting the agent");
             self.launcher.launch()?;
@@ -577,60 +676,134 @@ impl AgentLink {
             if self.is_stopping() {
                 return Ok(());
             }
+            if self.retry_chosen(&mut seen_retry) {
+                logging::info("Retry: ending the agent this app started and starting it again");
+                self.launcher.finish(Duration::from_secs(3));
+                self.started_by_us.store(false, Ordering::SeqCst);
+                self.clear_stall();
+                return Ok(());
+            }
             match start_progress(self.launcher.child(), Discovery::read(&self.dirs.discovery()).as_ref()) {
                 StartProgress::Starting => {}
-                StartProgress::Ready => return Ok(()),
-                StartProgress::OtherAgent => return self.wait_for_other_agent(),
-                StartProgress::Failed(message) => return Err(message),
+                StartProgress::Ready => {
+                    self.clear_stall();
+                    return Ok(());
+                }
+                StartProgress::OtherAgent => {
+                    self.clear_stall();
+                    return self.wait_for_other_agent(seen_retry);
+                }
+                StartProgress::Failed(message) => {
+                    self.clear_stall();
+                    return Err(message);
+                }
             }
             looks += 1;
             if looks == STILL_STARTING_AFTER {
-                logging::info("the agent is still starting");
-                self.sink.agent(AgentStatus::new(
-                    AgentState::Starting,
-                    Some("The Dyno agent is still starting. A slow disk or a busy computer can take a while.".into()),
-                ));
+                self.show_stall(
+                    Stall::AgentNotAnswering,
+                    "The Dyno agent is still starting. A slow disk or a busy computer can take a while.",
+                );
             }
-            self.pause(START_POLL);
+            self.look_again();
         }
     }
 
     /// The login service supervises the agent: waits for its discovery file, however long its start takes, and looks at
-    /// the service again now and then (turned off meanwhile: the next pass starts the app's own).
-    fn wait_for_service(&self) -> Result<(), String> {
+    /// the service again now and then (turned off meanwhile: the next pass starts the app's own). A service that
+    /// supervises on paper but starts nothing (switched off in Login Items, a job launchd dropped, a unit that fails) is
+    /// told by the agent lock: when no process has held it across [`SERVICE_IDLE_RECHECKS`] rechecks in a row, longer
+    /// than the service manager's restart interval, the app starts its own agent (safe: the lock makes the loser of two
+    /// exit with code 3) and says so. Retry does that at once.
+    fn wait_for_service(&self, mut seen_retry: u32) -> Result<(), String> {
         logging::info("the login service runs the agent; waiting for it");
+        let since = now_ms();
         let mut looks = 0u32;
+        let mut idle = 0u32;
         while !self.is_stopping() {
-            if Discovery::read(&self.dirs.discovery()).is_some() {
+            if Discovery::read(&self.dirs.discovery()).is_some_and(|d| self.names_live_agent(&d, since)) {
+                self.clear_stall();
+                return Ok(());
+            }
+            if self.retry_chosen(&mut seen_retry) {
+                self.fall_back_to_own_agent("Retry was chosen");
                 return Ok(());
             }
             looks += 1;
             if looks == STILL_STARTING_AFTER {
-                self.sink.agent(AgentStatus::new(
-                    AgentState::Starting,
-                    Some("Waiting for the Dyno agent that your system starts at login.".into()),
-                ));
+                self.show_stall(
+                    Stall::WaitingForService,
+                    "Waiting for the Dyno agent that your system starts at login.",
+                );
             }
-            if looks.is_multiple_of(SERVICE_RECHECK) && !self.probe_service().is_some_and(|s| s.supervises) {
-                return Ok(());
+            if looks.is_multiple_of(SERVICE_RECHECK) {
+                if !self.probe_service().is_some_and(|s| s.supervises) {
+                    self.clear_stall();
+                    return Ok(());
+                }
+                if dyno_agent::instance::is_held(&self.dirs) {
+                    idle = 0;
+                } else {
+                    idle += 1;
+                    if idle >= SERVICE_IDLE_RECHECKS {
+                        self.fall_back_to_own_agent("no agent has run for the login service");
+                        return Ok(());
+                    }
+                }
             }
-            self.pause(START_POLL);
+            self.look_again();
         }
         Ok(())
     }
 
+    /// The login service starts no agent: the app runs its own from now on (until the service shows it works, or is
+    /// turned off), and says so.
+    fn fall_back_to_own_agent(&self, why: &str) {
+        logging::info(&format!("the login service started no agent ({why}); starting the app's own"));
+        self.service_fallback.store(true, Ordering::SeqCst);
+        self.clear_stall();
+        self.sink.agent(AgentStatus::new(
+            AgentState::Starting,
+            Some(
+                "The login service did not start the Dyno agent, so Dyno started its own. Check Dyno in System Settings, Login Items."
+                    .into(),
+            ),
+        ));
+    }
+
     /// The agent this app started exited because another one holds the data folder (the login service's, or one that
-    /// was slow to write its discovery file): waits for that one's file while it holds the folder.
-    fn wait_for_other_agent(&self) -> Result<(), String> {
+    /// was slow to write its discovery file): waits for that one's file while it holds the folder. A file from before
+    /// the wait that nothing answers is an old agent's and does not count. After [`STILL_STARTING_AFTER`] looks the chip
+    /// says who holds the folder, with a Retry that runs the connection steps again.
+    fn wait_for_other_agent(&self, mut seen_retry: u32) -> Result<(), String> {
         logging::info("another agent holds the data folder; waiting for it");
+        let since = now_ms();
+        let mut looks = 0u32;
         while !self.is_stopping() {
-            if Discovery::read(&self.dirs.discovery()).is_some() || !dyno_agent::instance::is_held(&self.dirs) {
+            let live = Discovery::read(&self.dirs.discovery()).is_some_and(|d| self.names_live_agent(&d, since));
+            if live || !dyno_agent::instance::is_held(&self.dirs) || self.retry_chosen(&mut seen_retry) {
+                self.clear_stall();
                 return Ok(());
             }
-            self.pause(START_POLL);
+            looks += 1;
+            if looks == STILL_STARTING_AFTER {
+                self.show_stall(
+                    Stall::OtherAgentHolds,
+                    "Another Dyno agent holds the data folder and has not answered. It may be starting slowly, or running on another computer that shares the folder.",
+                );
+            }
+            self.look_again();
         }
         Ok(())
     }
+}
+
+/// Now, in milliseconds since the epoch (what an agent writes as `started`).
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+        .unwrap_or(0)
 }
 
 /// Where a start stands, from the launched process and the discovery file.
@@ -661,6 +834,11 @@ pub fn start_progress(child: Child, found: Option<&Discovery>) -> StartProgress 
         Child::None if found.is_some() => StartProgress::Ready,
         Child::None => StartProgress::Starting,
     }
+}
+
+/// Whether a discovery file found while waiting since `since_ms` (ms since the epoch) was written after the wait began.
+pub fn written_since(d: &Discovery, since_ms: i64) -> bool {
+    d.started >= since_ms
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1004,6 +1182,21 @@ mod tests {
     struct Recorder {
         live: AtomicUsize,
         statuses: Sender<AgentStatus>,
+        stalls: Mutex<Vec<Option<Stall>>>,
+    }
+
+    impl Recorder {
+        fn new(statuses: Sender<AgentStatus>) -> Arc<Recorder> {
+            Arc::new(Recorder {
+                live: AtomicUsize::new(0),
+                statuses,
+                stalls: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn stalled_with(&self, stall: Stall) -> bool {
+            lock(&self.stalls).contains(&Some(stall))
+        }
     }
 
     impl Sink for Recorder {
@@ -1014,6 +1207,9 @@ mod tests {
         fn activity(&self, _: ActivityEntry) {}
         fn agent(&self, s: AgentStatus) {
             let _ = self.statuses.send(s);
+        }
+        fn stalled(&self, stall: Option<Stall>) {
+            lock(&self.stalls).push(stall);
         }
     }
 
@@ -1083,10 +1279,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let (tx, rx) = channel();
-        let sink = Arc::new(Recorder {
-            live: AtomicUsize::new(0),
-            statuses: tx,
-        });
+        let sink = Recorder::new(tx);
         let launcher = Arc::new(InProcessLauncher {
             dirs: dirs.clone(),
             started: Mutex::new(None),
@@ -1217,6 +1410,8 @@ mod tests {
         dirs: Dirs,
         gate: Arc<(Mutex<bool>, Condvar)>,
         launches: AtomicUsize,
+        /// How often the link looked at the process: the progress of a wait, counted instead of timed.
+        looks: AtomicUsize,
         ended: AtomicUsize,
         agents: Arc<Mutex<Vec<Running>>>,
         threads: Mutex<Vec<std::thread::JoinHandle<()>>>,
@@ -1228,6 +1423,7 @@ mod tests {
                 dirs,
                 gate: Arc::new((Mutex::new(false), Condvar::new())),
                 launches: AtomicUsize::new(0),
+                looks: AtomicUsize::new(0),
                 ended: AtomicUsize::new(0),
                 agents: Arc::new(Mutex::new(Vec::new())),
                 threads: Mutex::new(Vec::new()),
@@ -1273,6 +1469,7 @@ mod tests {
             Ok(())
         }
         fn child(&self) -> Child {
+            self.0.looks.fetch_add(1, Ordering::SeqCst);
             if self.0.ended.load(Ordering::SeqCst) > 0 {
                 Child::Exited { code: Some(0) }
             } else if self.0.launches.load(Ordering::SeqCst) > 0 {
@@ -1293,12 +1490,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let (tx, rx) = channel();
-        let sink = Arc::new(Recorder {
-            live: AtomicUsize::new(0),
-            statuses: tx,
-        });
+        let sink = Recorder::new(tx);
         let launcher = SlowLauncher::new(dirs.clone());
         let link = AgentLink::new(dirs, env!("CARGO_PKG_VERSION"), sink, Box::new(SlowShared(launcher.clone())));
+        link.set_poll(Duration::from_millis(1));
         (link, launcher, rx, tmp)
     }
 
@@ -1318,10 +1513,18 @@ mod tests {
     fn a_slow_agent_start_is_waited_for_and_never_doubled() {
         let (link, launcher, statuses, _tmp) = slow_rig();
         let handle = link.spawn().unwrap();
-        // The bound is the subject of the test, not a flake fix (ER-12): the old link gave up after 5 s and started a
-        // second agent after a 2 s backoff, so 9 s outlasts that window with margin. Exactly one start is pending.
-        let doubled = until(Duration::from_secs(9), || launcher.launches.load(Ordering::SeqCst) >= 2);
-        assert!(!doubled, "a second agent was started while the first was still starting");
+        // The wait is measured in looks at the process, not in seconds (ER-12): the old link gave up after 50 looks and
+        // started a second agent, so twice that many looks with the gate shut must still show exactly one launch. The
+        // bound only keeps a broken link from hanging the test.
+        assert!(
+            until(Duration::from_secs(60), || launcher.looks.load(Ordering::SeqCst) >= 100),
+            "the link never looked at the starting agent"
+        );
+        assert_eq!(
+            launcher.launches.load(Ordering::SeqCst),
+            1,
+            "a second agent was started while the first was still starting"
+        );
         launcher.open();
         wait_for(&statuses, AgentState::Running);
         assert_eq!(launcher.launches.load(Ordering::SeqCst), 1);
@@ -1503,6 +1706,256 @@ mod tests {
         assert!(r.link.quit(), "the app's own agent is stopped on quit");
         handle.join().unwrap();
         manager.stop();
+    }
+
+    /// A launcher that does what the test says, counting what the link asks of it: after a launch the process is in
+    /// `after_launch` (running and silent, or exited with a code), until `finish` ends it.
+    struct StubLauncher {
+        launches: AtomicUsize,
+        looks: AtomicUsize,
+        finished: AtomicUsize,
+        after_launch: Child,
+        state: Mutex<Child>,
+    }
+
+    impl StubLauncher {
+        fn new(after_launch: Child) -> Arc<StubLauncher> {
+            Arc::new(StubLauncher {
+                launches: AtomicUsize::new(0),
+                looks: AtomicUsize::new(0),
+                finished: AtomicUsize::new(0),
+                after_launch,
+                state: Mutex::new(Child::None),
+            })
+        }
+
+        fn launches(&self) -> usize {
+            self.launches.load(Ordering::SeqCst)
+        }
+    }
+
+    struct StubShared(Arc<StubLauncher>);
+
+    impl Launcher for StubShared {
+        fn launch(&self) -> Result<(), String> {
+            let me = &self.0;
+            if matches!(*lock(&me.state), Child::Running { .. }) {
+                return Ok(());
+            }
+            me.launches.fetch_add(1, Ordering::SeqCst);
+            *lock(&me.state) = me.after_launch;
+            Ok(())
+        }
+        fn child(&self) -> Child {
+            self.0.looks.fetch_add(1, Ordering::SeqCst);
+            *lock(&self.0.state)
+        }
+        fn finish(&self, _: Duration) {
+            self.0.finished.fetch_add(1, Ordering::SeqCst);
+            *lock(&self.0.state) = Child::Exited { code: None };
+        }
+    }
+
+    struct StubRig {
+        link: Arc<AgentLink>,
+        launcher: Arc<StubLauncher>,
+        sink: Arc<Recorder>,
+        statuses: Receiver<AgentStatus>,
+        _tmp: tempfile::TempDir,
+    }
+
+    fn stub_rig(after_launch: Child) -> StubRig {
+        let tmp = tempfile::tempdir().unwrap();
+        let dirs = Dirs::at(tmp.path().join("data"));
+        let (tx, rx) = channel();
+        let sink = Recorder::new(tx);
+        let launcher = StubLauncher::new(after_launch);
+        let link = AgentLink::new(
+            dirs,
+            env!("CARGO_PKG_VERSION"),
+            sink.clone(),
+            Box::new(StubShared(launcher.clone())),
+        );
+        link.set_poll(Duration::from_millis(1));
+        StubRig {
+            link,
+            launcher,
+            sink,
+            statuses: rx,
+            _tmp: tmp,
+        }
+    }
+
+    /// A discovery file of this build that names a dead agent: nothing answers at its endpoint.
+    fn stale_file() -> Discovery {
+        Discovery {
+            endpoint: "dyno-test-nothing-listens-here".into(),
+            token: "00".into(),
+            pid: 1,
+            started: 0,
+            version: env!("CARGO_PKG_VERSION").into(),
+            protocol: PROTOCOL_VERSION,
+        }
+    }
+
+    /// An agent that holds the data folder (and its lock) and has been started by somebody else.
+    fn other_agent(dirs: &Dirs) -> Running {
+        let fake = Fake::new();
+        Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap()
+    }
+
+    /// Every status up to and including the first with `state`.
+    fn collect_until(rx: &Receiver<AgentStatus>, state: AgentState) -> Vec<AgentStatus> {
+        let mut seen = Vec::new();
+        let end = Instant::now() + Duration::from_secs(60);
+        while Instant::now() < end {
+            if let Ok(s) = rx.recv_timeout(Duration::from_millis(200)) {
+                let done = s.state == state;
+                seen.push(s);
+                if done {
+                    return seen;
+                }
+            }
+        }
+        panic!("never reached {state:?}: {seen:?}");
+    }
+
+    fn drained(rx: &Receiver<AgentStatus>) -> Vec<AgentStatus> {
+        rx.try_iter().collect()
+    }
+
+    #[test]
+    fn a_discovery_file_counts_as_ready_only_if_written_since_the_wait_began() {
+        let d = Discovery {
+            started: 1_000,
+            ..stale_file()
+        };
+        assert!(written_since(&d, 1_000));
+        assert!(written_since(&d, 999));
+        assert!(
+            !written_since(&d, 1_001),
+            "a file from before the wait is not the agent we wait for"
+        );
+    }
+
+    #[test]
+    fn a_stale_discovery_file_beside_a_slow_lock_holder_is_not_ready_and_launches_nothing_more() {
+        let r = stub_rig(Child::Exited {
+            code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
+        });
+        // Another agent holds the data folder but is slow to write its file; the file there is an old agent's.
+        let holder = other_agent(&r.link.dirs);
+        let fresh = holder.discovery.clone();
+        stale_file().write(&r.link.dirs.discovery()).unwrap();
+        let handle = r.link.spawn().unwrap();
+        assert!(until(Duration::from_secs(60), || r.link.looks() >= 100), "the link never waited");
+        assert_eq!(
+            r.launcher.launches(),
+            1,
+            "the old file made the link launch agents that exit at once"
+        );
+        let seen = drained(&r.statuses);
+        assert!(
+            seen.iter().all(|s| !matches!(s.state, AgentState::Failed | AgentState::Restarting)),
+            "a false outage was reported: {seen:?}"
+        );
+        // The holder writes its file: the link connects, still without another launch.
+        fresh.write(&r.link.dirs.discovery()).unwrap();
+        wait_for(&r.statuses, AgentState::Running);
+        assert_eq!(r.launcher.launches(), 1);
+        r.link.shutdown(false);
+        handle.join().unwrap();
+        holder.stop();
+    }
+
+    #[test]
+    fn an_agent_that_never_answers_is_reported_with_retry_and_retry_ends_that_process_and_launches_again() {
+        let r = stub_rig(Child::Running { pid: 4242 });
+        let handle = r.link.spawn().unwrap();
+        assert!(
+            until(Duration::from_secs(60), || r.sink.stalled_with(Stall::AgentNotAnswering)),
+            "no stall was reported for an agent that never wrote its discovery file"
+        );
+        assert_eq!(r.launcher.launches(), 1, "it keeps waiting, it does not start another");
+        assert_eq!(r.launcher.finished.load(Ordering::SeqCst), 0);
+        // Retry: the held process is ended through its handle, then launched again.
+        r.link.retry();
+        assert!(
+            until(Duration::from_secs(60), || r.launcher.launches() == 2),
+            "Retry did not launch the agent again"
+        );
+        assert_eq!(
+            r.launcher.finished.load(Ordering::SeqCst),
+            1,
+            "the old process was not ended through the launcher"
+        );
+        r.link.shutdown(true);
+        handle.join().unwrap();
+        assert_eq!(r.launcher.launches(), 2);
+    }
+
+    #[test]
+    fn another_agent_that_holds_the_folder_without_answering_is_reported_with_retry() {
+        let r = stub_rig(Child::Exited {
+            code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
+        });
+        // As after a replace: the old agent's file is gone, but it still holds the folder.
+        let holder = other_agent(&r.link.dirs);
+        let fresh = holder.discovery.clone();
+        let _ = std::fs::remove_file(r.link.dirs.discovery());
+        let handle = r.link.spawn().unwrap();
+        assert!(
+            until(Duration::from_secs(60), || r.sink.stalled_with(Stall::OtherAgentHolds)),
+            "no stall was reported while another agent holds the data folder"
+        );
+        assert_eq!(r.launcher.launches(), 1);
+        // Retry runs the connection steps again (and finds the holder still there).
+        r.link.retry();
+        assert!(
+            until(Duration::from_secs(60), || r.launcher.launches() == 2),
+            "Retry did not run establish again"
+        );
+        fresh.write(&r.link.dirs.discovery()).unwrap();
+        wait_for(&r.statuses, AgentState::Running);
+        r.link.shutdown(false);
+        handle.join().unwrap();
+        holder.stop();
+    }
+
+    #[test]
+    fn a_login_service_that_starts_no_agent_is_waited_for_then_replaced_by_the_apps_own_with_a_note() {
+        let r = rig(false);
+        r.link.set_poll(Duration::from_millis(1));
+        // It says it supervises; nothing ever runs (switched off in Login Items, a job launchd dropped, a unit that fails).
+        let manager = FakeServiceManager::new(r.link.dirs.clone(), true, true);
+        r.link.set_service_probe(manager.probe());
+        let handle = r.link.spawn().unwrap();
+        let seen = collect_until(&r.statuses, AgentState::Running);
+        assert_eq!(
+            r.launcher.launches.load(Ordering::SeqCst),
+            1,
+            "the app never started an agent of its own"
+        );
+        assert!(r.link.started_by_this_app());
+        assert!(
+            r.sink.stalled_with(Stall::WaitingForService),
+            "no stall was reported while waiting for the service"
+        );
+        // The note says what happened (it is also in the log).
+        assert!(
+            seen.iter()
+                .filter_map(|s| s.message.as_deref())
+                .any(|m| m.contains("did not start")),
+            "{seen:?}"
+        );
+        // The hand-over does not take the app's agent away again: the service has shown it starts nothing.
+        r.link.refresh_service();
+        assert!(r.link.connected() && matches!(r.launcher.child(), Child::Running { .. }));
+        assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 1);
+        // A registered service keeps its agent on quit, so the app's own is ended through the launcher.
+        r.link.quit();
+        handle.join().unwrap();
+        r.launcher.finish(Duration::ZERO);
     }
 
     #[test]

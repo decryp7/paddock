@@ -979,3 +979,11 @@ and a busy database looked damaged to the store, which moves a damaged file asid
 holds an OS lock for its whole life (a file lock on its data folder) and a second one exits before it opens anything; a
 host waits for a child it started on the child's run state (ADR 0031), never starts another while it holds one, and ends
 it through the handle it holds (rule 53). Reproduce with a start gated by the test, not with load.
+
+**Follow-up (review of the hand-over, 2026-10-30):** a wait judged on run state still needs a way out the user can see.
+Three waits could show only "Starting..." forever: a service that "supervises" on paper (switched off in Login Items,
+job dropped), a child that runs but never writes its discovery file, and another agent holding the lock after its file
+was deleted. **Rule:** every wait without a time limit reports a cause and a Retry once it is long (ER-19), a "ready"
+discovery file must be newer than the wait or answer (a stale file caused exit-3 launch loops and a false "Agent
+stopped"), and a supervisor's claim is checked against the lock, which nothing can fake. Open: kickstart after hand-over,
+re-probing `RequiresApproval`, the `is_held` probe rate, the `/tmp/Dyno` fallback (ADR 0010 §11).

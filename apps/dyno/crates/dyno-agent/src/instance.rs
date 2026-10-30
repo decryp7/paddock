@@ -21,7 +21,10 @@ pub struct InstanceLock {
 #[derive(Debug, thiserror::Error)]
 pub enum LockError {
     /// Another agent holds it.
-    #[error("another Dyno agent is already running for {}", folder.display())]
+    #[error(
+        "another Dyno agent is already running for {} (it may be on another computer that shares this folder, for example a network home)",
+        folder.display()
+    )]
     Held {
         /// The data folder.
         folder: PathBuf,
@@ -60,6 +63,17 @@ impl InstanceLock {
             }),
             Err(TryLockError::Error(e)) => Err(io(e)),
         }
+    }
+}
+
+/// Appends `line` to the agent's own log file (`logs/agent.log` in the data folder), so a refusal or a missing lock is
+/// found even when the agent was started with its stderr discarded (by the app) or sent elsewhere (by a service).
+/// Failures are ignored: logging never stops the agent.
+pub fn note(dirs: &Dirs, line: &str) {
+    use std::io::Write;
+    let _ = std::fs::create_dir_all(dirs.logs());
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(dirs.logs().join("agent.log")) {
+        let _ = writeln!(f, "{line}");
     }
 }
 

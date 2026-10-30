@@ -229,15 +229,16 @@ impl Service {
     }
 
     /// Whether the OS service manager starts the agent now and restarts it when it exits, so nobody else may run one
-    /// beside it: a bootstrapped launch agent (`KeepAlive`), an enabled systemd user unit (`Restart=always`). A Windows
-    /// `Run` entry starts it only at the next logon: never.
+    /// beside it: a bootstrapped launch agent (`KeepAlive`), a systemd user unit that is active or restarting
+    /// (`Restart=always`; `is-active` says `activating` during `RestartSec`, and exits non-zero then). An enabled but
+    /// stopped or failed unit starts nothing now. A Windows `Run` entry starts it only at the next logon: never.
     pub fn supervised(&mut self) -> bool {
         match self.os {
             Os::Mac => self.plist_path().exists(),
             Os::Linux => self
                 .runner
-                .run("systemctl", &["--user", "is-enabled", "dyno-agent.service"])
-                .is_ok_and(|(ok, out)| ok && out.trim() == "enabled"),
+                .run("systemctl", &["--user", "is-active", "dyno-agent.service"])
+                .is_ok_and(|(_, out)| matches!(out.trim(), "active" | "activating")),
             Os::Windows => false,
         }
     }

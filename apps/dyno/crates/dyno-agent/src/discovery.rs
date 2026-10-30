@@ -50,6 +50,14 @@ impl Discovery {
         serde_json::from_slice(&std::fs::read(path).ok()?).ok()
     }
 
+    /// Removes the file only if it is still the one that was read as `seen` (same process, same start): a newer agent
+    /// may have written its own meanwhile, and that one is never removed.
+    pub fn remove_if_same(path: &Path, seen: &Discovery) {
+        if Discovery::read(path).is_some_and(|d| d.pid == seen.pid && d.started == seen.started) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
     /// Removes the file if it still names this process.
     pub fn remove_if_mine(path: &Path) {
         if Discovery::read(path).is_some_and(|d| d.pid == std::process::id()) {
@@ -113,6 +121,33 @@ mod tests {
         d.write(&path).unwrap();
         Discovery::remove_if_mine(&path);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_file_is_removed_as_seen_only_while_it_is_still_that_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent.json");
+        let seen = sample();
+        seen.write(&path).unwrap();
+        // A newer agent wrote its own file after it was read: it stays.
+        let newer = Discovery {
+            started: seen.started + 1,
+            ..seen.clone()
+        };
+        newer.write(&path).unwrap();
+        Discovery::remove_if_same(&path, &seen);
+        assert_eq!(Discovery::read(&path), Some(newer));
+        let other_process = Discovery {
+            pid: seen.pid + 1,
+            ..seen.clone()
+        };
+        other_process.write(&path).unwrap();
+        Discovery::remove_if_same(&path, &seen);
+        assert!(path.exists(), "another process's file stays");
+        seen.write(&path).unwrap();
+        Discovery::remove_if_same(&path, &seen);
+        assert!(!path.exists(), "the very file that was read is removed");
+        Discovery::remove_if_same(&path, &seen);
     }
 
     #[test]

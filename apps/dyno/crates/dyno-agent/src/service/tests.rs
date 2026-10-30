@@ -232,18 +232,31 @@ fn launchd_and_systemd_supervise_the_agent_and_a_windows_run_entry_does_not() {
     mac.uninstall().unwrap();
     assert!(!mac.supervised());
 
-    // Linux: what systemd has enabled (Restart=always); a unit file systemd never enabled is not.
+    // Linux: what systemd is running or about to restart (is-active: active, or activating during RestartSec); a unit that
+    // is merely enabled but stopped, failed or inactive supervises nothing now.
     let dir = tempfile::tempdir().unwrap();
     let s = Script::default();
     let mut linux = service(Os::Linux, dir.path(), &s);
-    s.answer("is-enabled", false, "disabled\n");
-    assert!(!linux.supervised());
+    for (ok, out) in [(false, "inactive\n"), (false, "failed\n"), (false, "unknown\n")] {
+        s.answers.lock().unwrap().clear();
+        s.answer("is-active", ok, out);
+        assert!(!linux.supervised(), "{out:?}");
+    }
     s.answers.lock().unwrap().clear();
-    s.answer("is-enabled", true, "enabled\n");
+    s.answer("is-active", true, "active\n");
+    assert!(linux.supervised());
+    s.answers.lock().unwrap().clear();
+    // `systemctl is-active` exits non-zero while a unit is activating (auto-restart); it is still being restarted.
+    s.answer("is-active", false, "activating\n");
     assert!(linux.supervised());
     assert!(
-        s.calls().iter().any(|c| c == "systemctl --user is-enabled dyno-agent.service"),
+        s.calls().iter().any(|c| c == "systemctl --user is-active dyno-agent.service"),
         "{:?}",
+        s.calls()
+    );
+    assert!(
+        !s.calls().iter().any(|c| c.contains("is-enabled")),
+        "enabled is not running: {:?}",
         s.calls()
     );
 

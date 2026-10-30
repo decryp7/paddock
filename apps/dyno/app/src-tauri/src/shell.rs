@@ -285,6 +285,10 @@ impl<R: Runtime> Sink for ShellOf<R> {
         self.emit(events::AGENT, status);
     }
 
+    fn stalled(&self, stall: Option<crate::link::Stall>) {
+        self.hub.report_stall(stall);
+    }
+
     fn connected(&self, link: &Arc<AgentLink>) {
         // Read what the shell itself needs: the tray's metrics and style, and whether launching at login is on.
         match link.call(Request::Settings) {
