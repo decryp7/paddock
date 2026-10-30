@@ -82,7 +82,7 @@ module `shared_copy` is gone (never both present), so the copies cannot outlive 
   deprecated id), `path` glob, `reason`, `expires`, `max_count: Option<u32>`, `owner` and `origin`. A **file** waiver (`origin = File`, in `paddock.waivers.toml`) must have
   `expires: IsoDate`. A **config** waiver (`origin = Config`, built from a check's own exemption list) has **no expiry**: it still needs a
   `reason` and an `owner`, because such a list (`untimedCommands`, `a11y.skip`, `ownTestBinaries`) is a standing design decision, not a
-  debt to pay by a date. It is still counted (`max_count`) and still raises `W003` when it hides nothing. A **`Suppression`**
+  debt to pay by a date. It is still counted (`max_count`) and still raises `W003` when it hides nothing; for a config waiver the `owner` requirement is met by the CODEOWNERS owner of the check's config file, so no entry has to name one. A **`Suppression`**
   is the in-source or per-finding form Pacenotes uses: scope `Line`, `File`, `Path(glob)` or `Rule`, `reason` (required), optional
   `expires`. Both are checked by the same engine function and produce the same engine findings; they differ in where they are written and
   in what they must carry.
@@ -153,7 +153,7 @@ A fix sentence is required for every rule and every finding (decided). Where it 
 
 ### 3.7 File formats
 
-- **Waiver file** (`paddock.waivers.toml`, conformance): TOML, `[[waiver]]` tables with string values, plus `max_count` (integer) and
+- **Waiver file** (`paddock.waivers.toml`, conformance): TOML, `[[waiver]]` tables with string values, plus `count` (integer, ADR 0021's key; the model field is `max_count`) and
   `owner`. `version = 1` at the top (today's JavaScript parser rejects that line; see the behaviour changes in section 6). Unknown keys are
   reported (`W002`), never guessed.
 - **Suppression file** (`.pacenotes/suppressions.toml`, Pacenotes): `[[waiver]]` tables as above (rule, path glob, reason, required
@@ -208,7 +208,7 @@ dropped one. The input is **bounded** (file size, results count, string length, 
 | conformance per-app run (`--app`) | `Report.scope` | one report per scope; the Markdown title keeps "Conformance: <app>" |
 | conformance waiver `check`, `path` | `Waiver.rule`, `Waiver.path` | same glob dialect as `pathMatches` |
 | conformance waiver `reason`, `expires` | `Waiver.reason`, `.expires` | both required; expiry day inclusive, UTC |
-| ADR 0021 counted waiver (count) | `Waiver.max_count` (ceiling) and computed `hidden` | above the ceiling the waiver waives nothing |
+| ADR 0021 counted waiver (file key `count`) | `Waiver.max_count` (ceiling) and computed `hidden` | not implemented in JS yet (section 6); above the ceiling the waiver waives nothing |
 | conformance `W001`, `W002` | engine findings | ids kept |
 | unused waiver (new) and the inline "waives nothing" warning | engine finding `W003`, `Medium` | only for rules that ran |
 | in-source markers (`conformance: ...`) | `Suppression` from the check, reason required | a marker without a reason is `W002` |
@@ -263,8 +263,8 @@ byte. So each change has one place where it lands, and none lands in R8 silently
 | `version = 1` in `paddock.waivers.toml` (today's parser reports the line as `W002`) | **JS conformance first**, in a change of its own before R8: the parser accepts a `version = 1` line and refuses another version | the goldens then compare like with like |
 | In-source markers must carry a reason (`W002` without one); 15 markers have none today | **R8**, as a deliberate golden update, in the **same change that gives each of the 15 markers its reason**, so the run stays green; the JS checks do not enforce it earlier | the golden diff is only the new rule, and the marker fixes are in the same commit |
 | `W003` unused waiver (not on `main` yet) | **JS conformance first**, as a change to the waiver engine with its own tests, raised only for checks that ran; waivers it finds unused are removed or fixed in that change | the goldens then contain `W003` on both sides |
-| Config exceptions become waivers (`origin = Config`, no expiry) | **R8**: the Rust checks read their lists into waivers; JS keeps reading them as lists. No output changes unless an entry is unused, which is `W003` and lands with the row above | the Rust run reproduces the JS output over the same lists |
-| `max_count` as a waiver key (`waivers.mjs` has no count today; ADR 0021's counted waivers are the per-file ceilings of check C38) | **R8**: the Rust engine takes the ceiling from the waiver; the JS checks keep counting as they do | no output change, because both stop at the same ceiling |
+| Config exceptions become waivers (`origin = Config`, no expiry) | **R8**: the Rust checks read their lists into waivers; JS keeps reading them as lists. JS's `W003` does not cover config lists, so an unused config entry (`W003` in Rust) is a **deliberate golden update in R8**, listed with the entries it flags and fixed or removed in that same change | the Rust run reproduces the JS output over the same lists |
+| Counted waivers (`count` in the waiver file, `max_count` in the model) | **They do not exist yet**: there is no C38 and no count in `waivers.mjs` today. ADR 0021 describes them; whichever lands first, ADR 0021 WP-2 in JS or R8, defines them, and the goldens include them from then on. The file key stays **`count`** (ADR 0021), read into the model's `max_count` | no output change before they exist; after, both sides read the same key |
 | `Report.scope` and the display table (`warn` printed as `warn`) | **R8**, designed to leave the text, Markdown and JSON unchanged | goldens unchanged |
 
 ## 7. Parallelism and cost (rule 51)
