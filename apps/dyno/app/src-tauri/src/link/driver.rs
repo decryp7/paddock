@@ -121,7 +121,12 @@ impl Executor {
     /// Executes one command. Returns at once.
     pub fn execute(&mut self, command: Command) {
         match command {
-            Command::Look { seq, service, cpu } => {
+            Command::Look {
+                seq,
+                service,
+                cpu,
+                lock: probe_lock,
+            } => {
                 let (link, events, held, seen) = (self.link.clone(), self.events.clone(), *lock(&self.held), self.seen.clone());
                 spawn("dyno-look", move || {
                     let probe = if service { link.probe() } else { None };
@@ -133,6 +138,7 @@ impl Executor {
                         held,
                         probe.as_ref(),
                         cpu,
+                        probe_lock,
                     );
                     *lock(&seen) = found.map(|d| (seq, d));
                     let _ = events.send(Event::Looked(look));

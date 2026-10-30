@@ -11,7 +11,7 @@ fn look(seq: Seq) -> Look {
         seq,
         now_ms: 1_000,
         hint: None,
-        lock: LockSeen::Free,
+        lock: Some(LockSeen::Free),
         service: None,
         child: None,
         cpu: Cpu::NotRead,
@@ -131,7 +131,7 @@ fn connected_own() -> Supervisor {
 fn connected_other(service: ServiceState) -> Supervisor {
     let (mut s, cmds) = first(|l| Look {
         hint: Some(hint(9, 500, true)),
-        lock: LockSeen::Held,
+        lock: Some(LockSeen::Held),
         service: Some(service),
         ..l
     });
@@ -194,7 +194,8 @@ fn begin_reports_starting_and_looks_once() {
         Command::Look {
             seq: 1,
             service: true,
-            cpu: false
+            cpu: false,
+            lock: true
         }
     ));
     assert_eq!(*s.phase(), Phase::Looking { seq: 1 });
@@ -218,7 +219,10 @@ fn an_answer_to_a_superseded_look_changes_nothing() {
 
 #[test]
 fn a_held_lock_with_no_file_is_waited_for_and_nothing_is_launched() {
-    let (s, cmds) = first(|l| Look { lock: LockSeen::Held, ..l });
+    let (s, cmds) = first(|l| Look {
+        lock: Some(LockSeen::Held),
+        ..l
+    });
     assert_eq!(launches(&cmds), 0);
     assert_eq!(*s.phase(), Phase::WaitingForHolder);
 }
@@ -227,7 +231,7 @@ fn a_held_lock_with_no_file_is_waited_for_and_nothing_is_launched() {
 fn a_file_of_this_build_beside_a_held_lock_is_connected_to() {
     let (s, cmds) = first(|l| Look {
         hint: Some(hint(9, 500, true)),
-        lock: LockSeen::Held,
+        lock: Some(LockSeen::Held),
         ..l
     });
     assert!(matches!(cmds[0], Command::Connect { .. }));
@@ -248,7 +252,10 @@ fn a_stale_file_with_a_free_lock_is_not_the_agent_and_not_connected_to() {
 
 #[test]
 fn a_file_written_after_the_wait_began_is_worth_a_connection_even_with_a_free_lock() {
-    let (mut s, _) = first(|l| Look { lock: LockSeen::Held, ..l });
+    let (mut s, _) = first(|l| Look {
+        lock: Some(LockSeen::Held),
+        ..l
+    });
     assert_eq!(*s.phase(), Phase::WaitingForHolder);
     let seq = tick_look(&mut s);
     let cmds = s.step(Event::Looked(Look {
@@ -262,7 +269,7 @@ fn a_file_written_after_the_wait_began_is_worth_a_connection_even_with_a_free_lo
 fn a_failed_connect_decides_again_from_the_same_look_without_the_file() {
     let (mut s, cmds) = first(|l| Look {
         hint: Some(hint(9, 500, true)),
-        lock: LockSeen::Held,
+        lock: Some(LockSeen::Held),
         ..l
     });
     let c = connect_seq(&cmds);
@@ -278,7 +285,7 @@ fn a_failed_connect_decides_again_from_the_same_look_without_the_file() {
     // (a file newer than the wait does get a connection; when it fails, the free lock launches)
     let (mut s2, seq) = begun();
     s2.step(Event::Looked(Look {
-        lock: LockSeen::Held,
+        lock: Some(LockSeen::Held),
         ..look(seq)
     }));
     let seq = tick_look(&mut s2);
@@ -296,7 +303,7 @@ fn a_failed_connect_decides_again_from_the_same_look_without_the_file() {
 fn a_connection_made_after_it_was_given_up_is_closed() {
     let (mut s, cmds) = first(|l| Look {
         hint: Some(hint(9, 500, true)),
-        lock: LockSeen::Held,
+        lock: Some(LockSeen::Held),
         ..l
     });
     let c = connect_seq(&cmds);
@@ -312,7 +319,7 @@ fn a_connection_made_after_it_was_given_up_is_closed() {
 fn an_agent_of_another_build_is_asked_to_exit_and_awaited_until_the_lock_is_free() {
     let (mut s, cmds) = first(|l| Look {
         hint: Some(hint(9, 500, false)),
-        lock: LockSeen::Held,
+        lock: Some(LockSeen::Held),
         ..l
     });
     let c = connect_seq(&cmds);
@@ -335,7 +342,7 @@ fn an_agent_of_another_build_is_asked_to_exit_and_awaited_until_the_lock_is_free
         let seq = tick_look(&mut s);
         let cmds = s.step(Event::Looked(Look {
             hint: Some(hint(9, 500, false)),
-            lock: LockSeen::Held,
+            lock: Some(LockSeen::Held),
             ..look(seq)
         }));
         assert_eq!(launches(&cmds), 0);
@@ -366,7 +373,7 @@ fn a_file_of_another_build_with_a_free_lock_is_removed_and_ours_launches() {
 fn retry_on_an_agent_asked_to_exit_asks_again() {
     let (mut s, cmds) = first(|l| Look {
         hint: Some(hint(9, 500, false)),
-        lock: LockSeen::Held,
+        lock: Some(LockSeen::Held),
         ..l
     });
     let c = connect_seq(&cmds);
@@ -379,7 +386,7 @@ fn retry_on_an_agent_asked_to_exit_asks_again() {
     let seq = look_seq(&cmds);
     let cmds = s.step(Event::Looked(Look {
         hint: Some(hint(9, 500, false)),
-        lock: LockSeen::Held,
+        lock: Some(LockSeen::Held),
         ..look(seq)
     }));
     assert!(
@@ -410,11 +417,11 @@ fn a_supervising_service_is_waited_for_and_the_app_starts_nothing() {
 fn a_wait_for_the_service_shows_its_cause_then_retry_starts_the_apps_own() {
     let (mut s, _) = first(|l| Look {
         service: Some(SUPERVISING),
-        lock: LockSeen::Held,
+        lock: Some(LockSeen::Held),
         ..l
     });
     run_ticks(&mut s, NOTE_AFTER, |seq, service| Look {
-        lock: LockSeen::Held,
+        lock: Some(LockSeen::Held),
         service: service.then_some(SUPERVISING),
         ..look(seq)
     });
@@ -461,7 +468,7 @@ fn a_lock_held_resets_the_count_of_a_service_that_starts_nothing() {
         let held = round % 2 == 0; // held every other recheck: never four free ones in a row
         let cmds = run_ticks(&mut s, SERVICE_RECHECK, |seq, service| Look {
             service: service.then_some(SUPERVISING),
-            lock: if held { LockSeen::Held } else { LockSeen::Free },
+            lock: if held { Some(LockSeen::Held) } else { Some(LockSeen::Free) },
             ..look(seq)
         });
         launched += launches(&cmds);
@@ -600,10 +607,13 @@ fn a_retry_for_a_stall_that_is_over_does_nothing() {
 
 #[test]
 fn retry_on_a_holder_launches_anyway_once() {
-    let (mut s, _) = first(|l| Look { lock: LockSeen::Held, ..l });
+    let (mut s, _) = first(|l| Look {
+        lock: Some(LockSeen::Held),
+        ..l
+    });
     let seq = look_seq(&s.step(Event::Retry { stall: None }));
     let cmds = s.step(Event::Looked(Look {
-        lock: LockSeen::Held,
+        lock: Some(LockSeen::Held),
         ..look(seq)
     }));
     assert_eq!(cmds, [Command::Launch { child: 1, anyway: true }]);
@@ -623,7 +633,7 @@ fn a_connection_to_the_child_we_hold_is_ours_any_other_is_not() {
 fn connecting_publishes_the_peer_reports_running_and_looks_at_the_service() {
     let (mut s, cmds) = first(|l| Look {
         hint: Some(hint(9, 500, true)),
-        lock: LockSeen::Held,
+        lock: Some(LockSeen::Held),
         ..l
     });
     let c = connect_seq(&cmds);
@@ -741,7 +751,7 @@ fn a_removed_service_is_asked_to_exit_and_nothing_launches_until_the_lock_is_fre
     for _ in 0..3 {
         let seq = tick_look(&mut s);
         let cmds = s.step(Event::Looked(Look {
-            lock: LockSeen::Held,
+            lock: Some(LockSeen::Held),
             hint: Some(hint(9, 500, true)),
             ..look(seq)
         }));
@@ -887,7 +897,7 @@ fn every_wait_shows_its_cause_after_the_note_and_retry_acts_on_it() {
     let in_replacing = || {
         let (mut s, cmds) = first(|l| Look {
             hint: Some(hint(9, 500, false)),
-            lock: LockSeen::Held,
+            lock: Some(LockSeen::Held),
             ..l
         });
         let c = connect_seq(&cmds);
@@ -918,7 +928,7 @@ fn every_wait_shows_its_cause_after_the_note_and_retry_acts_on_it() {
     };
     let connecting = first(|l| Look {
         hint: Some(hint(9, 500, true)),
-        lock: LockSeen::Held,
+        lock: Some(LockSeen::Held),
         ..l
     })
     .0;
@@ -935,7 +945,15 @@ fn every_wait_shows_its_cause_after_the_note_and_retry_acts_on_it() {
             .0,
             Stall::WaitingForService,
         ),
-        ("holder", first(|l| Look { lock: LockSeen::Held, ..l }).0, Stall::OtherAgentHolds),
+        (
+            "holder",
+            first(|l| Look {
+                lock: Some(LockSeen::Held),
+                ..l
+            })
+            .0,
+            Stall::OtherAgentHolds,
+        ),
         ("replacing", in_replacing(), Stall::OtherAgentHolds),
         ("taking back", in_taking_back(), Stall::OtherAgentHolds),
         ("ending", in_ending(), Stall::AgentNotAnswering),
@@ -1065,4 +1083,20 @@ fn a_connection_to_an_agent_with_another_pid_is_not_ours_even_while_a_child_is_h
             owner: Owner::Other
         }
     );
+}
+
+#[test]
+fn the_looks_of_a_start_in_progress_leave_the_agent_lock_alone() {
+    // The lock probe holds the lock for an instant; the agent this app launched claims it at the start, and the two meeting
+    // made the agent's claim fail (exit 3, a second launch). The judge needs the process and the file, not the lock.
+    let mut s = starting();
+    let cmds = s.step(Event::Tick);
+    assert!(matches!(cmds[..], [Command::Look { lock: false, .. }]), "{cmds:?}");
+    // Every other wait reads it.
+    let (mut s, _) = first(|l| Look {
+        lock: Some(LockSeen::Held),
+        ..l
+    });
+    let cmds = s.step(Event::Tick);
+    assert!(matches!(cmds[..], [Command::Look { lock: true, .. }]), "{cmds:?}");
 }

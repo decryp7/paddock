@@ -222,6 +222,7 @@ pub fn look(
     held: Option<Generation>,
     probe: Option<&ServiceProbe>,
     cpu: bool,
+    lock: bool,
 ) -> (Look, Option<Discovery>) {
     let found = Discovery::read(&dirs.discovery());
     let child = held.map(|g| (g, launcher.child()));
@@ -237,11 +238,13 @@ pub fn look(
         seq,
         now_ms: now_ms(),
         hint: found.as_ref().map(|d| hint_of(d, app_version)),
-        lock: if dyno_agent::instance::is_held(dirs) {
-            LockSeen::Held
-        } else {
-            LockSeen::Free
-        },
+        lock: lock.then(|| {
+            if dyno_agent::instance::is_held(dirs) {
+                LockSeen::Held
+            } else {
+                LockSeen::Free
+            }
+        }),
         service: probe.map(|p| p()),
         child,
         cpu,

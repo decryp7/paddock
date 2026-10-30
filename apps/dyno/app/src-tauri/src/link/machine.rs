@@ -112,8 +112,9 @@ pub struct Look {
     pub now_ms: i64,
     /// The discovery file, if any.
     pub hint: Option<HintSeen>,
-    /// The agent lock.
-    pub lock: LockSeen,
+    /// The agent lock; `None` when the look did not probe it (a probe takes the lock for an instant, which would refuse an
+    /// agent that starts at that very moment, so the looks of a start in progress leave it alone).
+    pub lock: Option<LockSeen>,
     /// The login service, when asked (and a probe exists).
     pub service: Option<ServiceState>,
     /// The launcher's child with the generation the launcher held when it looked.
@@ -294,6 +295,9 @@ pub enum Command {
         service: bool,
         /// Read the CPU time of the held child's tree (the start judge reads it every few ticks, never every look).
         cpu: bool,
+        /// Probe the agent lock. Not while the agent this app launched is starting: the probe holds the lock for an instant and
+        /// would make that agent's own claim fail (exit 3) when the two meet.
+        lock: bool,
     },
     /// Start the agent (never while a child is held); answers [`Event::Launched`].
     Launch {
@@ -650,10 +654,10 @@ impl Supervisor {
         });
     }
 
-    fn issue_look(&mut self, service: bool, cpu: bool, out: &mut Vec<Command>) -> Seq {
+    fn issue_look(&mut self, service: bool, cpu: bool, lock: bool, out: &mut Vec<Command>) -> Seq {
         let seq = self.next_seq();
         self.look_out = Some(seq);
-        out.push(Command::Look { seq, service, cpu });
+        out.push(Command::Look { seq, service, cpu, lock });
         seq
     }
 
@@ -666,6 +670,7 @@ impl Supervisor {
             seq,
             service: true,
             cpu: false,
+            lock: true,
         });
     }
 
@@ -780,7 +785,8 @@ impl Supervisor {
         if wants_look && self.look_out.is_none() {
             let service = matches!(self.phase, Phase::WaitingForService) && self.wait.ticks.is_multiple_of(self.tuning.service_recheck);
             let cpu = matches!(self.phase, Phase::Starting { .. }) && self.wait.ticks.is_multiple_of(self.tuning.cpu_every);
-            self.issue_look(service, cpu, out);
+            let lock = !matches!(self.phase, Phase::Starting { .. });
+            self.issue_look(service, cpu, lock, out);
         }
         #[cfg(test)]
         if self.mutant == Mutant::LaunchOnFixedWait
@@ -852,7 +858,7 @@ impl Supervisor {
             Phase::WaitingForService => {
                 if look.service.is_some() {
                     // The lock tells a service that supervises on paper from one that starts nothing.
-                    if look.lock == LockSeen::Held {
+                    if look.lock == Some(LockSeen::Held) {
                         self.wait.idle_rechecks = 0;
                     } else if self.service.supervises {
                         self.wait.idle_rechecks += 1;
@@ -880,7 +886,7 @@ impl Supervisor {
     /// Looks while a retired agent is awaited: nothing is launched, and nothing reconnects to the agent that was asked to
     /// exit, until the data folder is free (invariant: the lock, not the connection, says the agent is gone).
     fn retiring_look(&mut self, look: Look, out: &mut Vec<Command>) {
-        if look.lock == LockSeen::Free {
+        if look.lock == Some(LockSeen::Free) {
             if look.hint.is_some() {
                 out.push(Command::RemoveHint { look: look.seq });
             }
@@ -947,11 +953,11 @@ impl Supervisor {
                 let fresh = self.wait.since_ms.is_some_and(|s| h.started_ms >= s);
                 if h.same_build {
                     // Worth a connection only if something may answer: the lock is held, or the file is newer than the wait.
-                    if look.lock == LockSeen::Held || fresh {
+                    if look.lock == Some(LockSeen::Held) || fresh {
                         self.connect(Purpose::Use, look, out);
                         return;
                     }
-                } else if look.lock == LockSeen::Held {
+                } else if look.lock == Some(LockSeen::Held) {
                     self.connect(Purpose::AskToExit, look, out);
                     return;
                 } else {
@@ -961,7 +967,7 @@ impl Supervisor {
         }
         if self.service.supervises && !self.fallback {
             self.set_phase(Phase::WaitingForService, out);
-        } else if look.lock == LockSeen::Held && !self.launch_anyway {
+        } else if look.lock == Some(LockSeen::Held) && !self.launch_anyway {
             self.set_phase(Phase::WaitingForHolder, out);
         } else {
             self.launch(out);
@@ -1051,7 +1057,7 @@ impl Supervisor {
                 self.set_phase(Phase::Connected { peer, owner }, out);
                 out.push(Command::Report(AgentStatus::new(AgentState::Running, None)));
                 // What the service says now decides hand-over and take-back, and what a quit does.
-                self.issue_look(true, false, out);
+                self.issue_look(true, false, true, out);
             }
             Purpose::AskToExit => {
                 out.push(Command::AskToExit { peer });
@@ -1155,7 +1161,7 @@ impl Supervisor {
             Phase::Replacing { .. } | Phase::TakingBack { .. } => {
                 self.reask = true;
                 if self.look_out.is_none() {
-                    self.issue_look(false, false, out);
+                    self.issue_look(false, false, true, out);
                 }
             }
             Phase::Looking { .. } | Phase::Connecting { .. } | Phase::BackingOff { .. } => {
@@ -1206,7 +1212,7 @@ impl Machine for Supervisor {
             Event::ServiceChanged => {
                 // A look already out may have been taken before the change: the newest look wins.
                 if !matches!(self.phase, Phase::Idle | Phase::Quitting { .. }) {
-                    self.changed_seq = Some(self.issue_look(true, false, &mut out));
+                    self.changed_seq = Some(self.issue_look(true, false, true, &mut out));
                 }
             }
             Event::ServiceInstalled(installed) => self.service.installed = installed,

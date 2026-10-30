@@ -234,7 +234,7 @@ impl World {
 
     fn execute(&mut self, c: Command) {
         match c {
-            Command::Look { seq, service, .. } => {
+            Command::Look { seq, service, lock, .. } => {
                 if self.looks.len() >= 2 {
                     self.looks.remove(0);
                 }
@@ -242,7 +242,7 @@ impl World {
                     seq,
                     now_ms: self.clock,
                     hint: self.hint(),
-                    lock: if self.lock_held() { LockSeen::Held } else { LockSeen::Free },
+                    lock: lock.then_some(if self.lock_held() { LockSeen::Held } else { LockSeen::Free }),
                     service: service.then_some(ServiceState {
                         installed: self.installed,
                         supervises: self.supervises,

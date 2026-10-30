@@ -274,9 +274,13 @@ impl AgentLink {
             .take()
             .ok_or_else(|| std::io::Error::other("the link is already running"))?;
         let mut executor = driver::Executor::new(self.clone(), self.events.clone())?;
-        let owner = run_owner("dyno-link", Supervisor::new(), inbox, self.transitions.clone(), move |command| {
-            executor.execute(command)
-        })?;
+        let owner = run_owner(
+            "dyno-link",
+            Supervisor::with_tuning(self.tuning),
+            inbox,
+            self.transitions.clone(),
+            move |command| executor.execute(command),
+        )?;
         let _ = self.events.send(Event::Begin);
         spawn_ticker(
             "dyno-pace",

@@ -330,12 +330,13 @@ fn rig_with(fail: bool, tuning: super::machine::Tuning) -> Rig {
         exited: std::sync::atomic::AtomicBool::new(false),
         fail,
     });
-    let link = AgentLink::paced(
+    let link = AgentLink::tuned(
         dirs,
         env!("CARGO_PKG_VERSION"),
         sink.clone(),
         Box::new(Shared(launcher.clone())),
         FAST,
+        tuning,
     );
     Rig {
         link,
