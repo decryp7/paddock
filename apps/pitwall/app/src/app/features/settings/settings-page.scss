@@ -88,56 +88,31 @@
   }
 }
 
-.w-sm {
-  width: 96px;
-  text-align: right;
-}
-.w-xs {
-  width: 72px;
-  text-align: right;
-}
-
-.unit-input {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--pd-space-2);
-  span {
-    min-width: 32px;
+/* A number with its unit in the field's suffix: the field keeps one width per kind, the label beside it wraps. */
+.num-field {
+  flex: none;
+  input {
+    text-align: right;
+  }
+  [matTextSuffix] {
+    padding-inline-start: var(--pd-space-1);
     font-size: var(--pd-text-label);
     color: var(--pd-text-subtle);
   }
 }
-
-.seg {
-  display: inline-flex;
+.w-sm {
+  width: 128px;
+}
+.w-xs {
+  width: 104px;
+}
+.select {
   flex: none;
-  padding: 2px;
-  background: var(--pd-pressed);
-  border-radius: var(--pd-radius-control);
-  button {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 26px;
-    padding: 0 var(--pd-space-3);
-    font: inherit;
-    font-size: var(--pd-text-label);
-    font-weight: var(--pd-weight-medium);
-    color: var(--pd-text-muted);
-    background: none;
-    border: none;
-    border-radius: var(--pd-radius-tag);
-    cursor: default;
-    mat-icon {
-      width: 13px;
-      height: 13px;
-    }
-    &[aria-checked='true'] {
-      color: var(--pd-text);
-      background: var(--pd-surface-1);
-      box-shadow: var(--pd-shadow-1);
-    }
-  }
+  width: 200px;
+}
+
+.toggles {
+  flex: none;
 }
 
 /* The control keeps its size; the label beside it wraps. */
@@ -193,8 +168,9 @@
   &.custom {
     cursor: default;
     border-style: dashed;
-    &:not(.on) {
-      opacity: 0.7;
+    /* Not chosen: the name recedes to the hint's colour (no opacity, which took the hint under 4.5:1). */
+    &:not(.on) .p-name {
+      color: var(--pd-text-muted);
     }
   }
 }

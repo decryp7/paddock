@@ -53,7 +53,7 @@ describe('App', () => {
     expect(el.querySelector('pw-sidebar')).not.toBeNull();
     expect(el.querySelector('main#main')).not.toBeNull();
     expect(el.querySelector('a.skip')?.textContent).toContain('Skip to content');
-    expect(el.querySelector('pw-toast-host')).not.toBeNull();
+    expect(el.querySelector('pd-notification-host')).not.toBeNull();
   });
 
   it('starts loading the live data and subscribes once', async () => {
@@ -85,7 +85,7 @@ describe('App', () => {
     expect(el.querySelector('pw-sidebar')).toBeNull();
     expect(el.querySelector('.titlebar')).toBeNull();
     expect(el.querySelector('a.skip')).toBeNull();
-    expect(el.querySelector('pw-toast-host')).not.toBeNull();
+    expect(el.querySelector('pd-notification-host')).not.toBeNull();
     await router.navigateByUrl('/tray');
     await settle(fixture, 6);
     expect(el.querySelector('pw-sidebar')).toBeNull();

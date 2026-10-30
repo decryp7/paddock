@@ -56,12 +56,12 @@ test.describe('model updates', () => {
     await toggle.click();
     await expect(toggle).toBeChecked();
     await expect(panel).toContainText('The next check runs');
-    await panel.getByRole('button', { name: /^How often/ }).click();
+    await panel.getByRole('combobox', { name: /^How often/ }).click();
     await page.getByRole('option', { name: 'Every day' }).click();
-    await expect(panel.getByRole('button', { name: /^How often/ })).toContainText('Every day');
+    await expect(panel.getByRole('combobox', { name: /^How often/ })).toContainText('Every day');
     await toggle.click();
     await expect(toggle).not.toBeChecked();
-    await expect(panel.getByRole('button', { name: /^How often/ })).toBeDisabled();
+    await expect(panel.getByRole('combobox', { name: /^How often/ })).toBeDisabled();
 
     await page.getByRole('switch', { name: 'Offline mode' }).click();
     await page.getByRole('button', { name: 'Save' }).click();

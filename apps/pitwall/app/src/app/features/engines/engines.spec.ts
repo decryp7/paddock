@@ -101,7 +101,7 @@ describe('EnginesPage', () => {
   async function menu(el: HTMLElement, settle: () => Promise<void>, build: string, item: string) {
     (el.querySelector(`button[aria-label="More actions for ${build}"]`) as HTMLButtonElement).click();
     await settle();
-    Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
     await settle();
   }
 
@@ -118,7 +118,7 @@ describe('EnginesPage', () => {
     expect(el.textContent).toContain('Not tested');
     expect(el.querySelector('.catalog')!.querySelectorAll('li').length).toBe(4);
     expect(el.querySelector('.catalog li .rec')?.textContent).toContain('Suggested');
-    expect(Array.from(el.querySelectorAll('.catalog button')).every((b) => !b.classList.contains('primary'))).toBe(true);
+    expect(Array.from(el.querySelectorAll('.catalog button')).every((b) => !b.classList.contains('mat-mdc-unelevated-button'))).toBe(true);
     expect(el.textContent).not.toContain('Healthy');
     expect(el.querySelector('.tag.upd')).toBeNull();
     expect(el.querySelector('.section-head .link')?.textContent).toContain('Update available');
@@ -135,9 +135,9 @@ describe('EnginesPage', () => {
     const { el, settle, live } = await render(backend);
     await live.load();
     expect(el.querySelector('select')).toBeNull();
-    (el.querySelector('#build-choice') as HTMLButtonElement).click();
+    (el.querySelector('#build-choice .mat-mdc-select-trigger') as HTMLElement).click();
     await settle();
-    const opts = Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container .pw-select-list .opt'));
+    const opts = Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container mat-option'));
     expect(opts[0]!.textContent).toContain('Automatic');
     opts.find((o) => o.textContent!.includes('Vulkan'))!.click();
     await settle();
@@ -173,6 +173,23 @@ describe('EnginesPage', () => {
     await settle();
     expect(el.querySelector('button[aria-label="More actions for CPU (AVX2) b4300"]')).not.toBeNull();
     expect(el.textContent).toContain('Roll back to Vulkan b11669');
+  });
+
+  it('opens the same build menu on a right-click and on Shift+F10 (Material context menu)', async () => {
+    const { el, settle } = await render();
+    const row = el.querySelector('button[aria-label="More actions for CPU (AVX2) b4300"]')!.closest('tr')!;
+    const items = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-item')).map((b) => b.textContent!.trim());
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
+    await settle();
+    expect(items()).toContain('Remove…');
+    expect(document.querySelector('.mat-mdc-menu-item.danger')!.textContent).toContain('Remove…');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    document.querySelector<HTMLElement>('.cdk-overlay-backdrop')?.click();
+    await settle();
+    row.focus();
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
+    await settle();
+    expect(items()).toEqual(expect.arrayContaining(['Features', 'Remove…']));
   });
 
   it('shows an error with Retry, and Retry loads again', async () => {

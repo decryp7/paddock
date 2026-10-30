@@ -3,6 +3,7 @@ import { MatIconModule } from '@angular/material/icon';
 import type { EngineIssue } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { countdown } from '../../shared/format';
+import { MatButton } from '@angular/material/button';
 
 /** Text for the right-hand side of an issue: a countdown to the restart, "restarting now", or nothing for a failed model. */
 export function restartText(issue: EngineIssue, now: number): string | null {
@@ -16,7 +17,7 @@ export function restartText(issue: EngineIssue, now: number): string | null {
  */
 @Component({
   selector: 'pw-engine-issues',
-  imports: [MatIconModule],
+  imports: [MatButton, MatIconModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @for (i of issues(); track i.modelId) {
@@ -34,7 +35,7 @@ export function restartText(issue: EngineIssue, now: number): string | null {
           @if (restartText(i, now()); as t) {
             <span class="when num">{{ t }}</span>
           } @else {
-            <button type="button" class="btn" [disabled]="live.isBusy()('model:' + i.modelId)" (click)="live.loadModel(i.modelId)">Retry</button>
+            <button type="button" matButton="outlined" [disabled]="live.isBusy()('model:' + i.modelId)" (click)="live.loadModel(i.modelId)">Retry</button>
           }
         </div>
       </section>

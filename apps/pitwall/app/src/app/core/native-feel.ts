@@ -1,5 +1,5 @@
 import { DOCUMENT, DestroyRef, EnvironmentProviders, inject, isDevMode, makeEnvironmentProviders, provideEnvironmentInitializer } from '@angular/core';
-import { ContextMenuService } from '../shared/ui/context-menu';
+import { PdCopyMenu } from '@decryp7/paddock-ui';
 import { isMac } from './theme';
 
 /**
@@ -243,8 +243,8 @@ export function provideNativeFeel(): EnvironmentProviders {
     provideEnvironmentInitializer(() => {
       const win = inject(DOCUMENT).defaultView;
       if (!win) return;
-      const menu = inject(ContextMenuService);
-      const copyMenu = (x: number, y: number, text: string) => menu.open(x, y, [{ label: 'Copy', run: () => void win.navigator.clipboard?.writeText(text).catch(() => undefined) }]);
+      const menu = inject(PdCopyMenu);
+      const copyMenu = (x: number, y: number, text: string) => menu.open(x, y, text);
       const remove = installNativeFeel(win, { release: !isDevMode(), mac: isMac(win.navigator.userAgent) }, { copyMenu });
       inject(DestroyRef).onDestroy(remove);
     }),

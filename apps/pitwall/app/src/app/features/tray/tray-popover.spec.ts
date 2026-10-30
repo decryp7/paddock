@@ -96,8 +96,8 @@ describe('TrayPopover', () => {
     expect(text(el.querySelector('.state')!)).toMatch(/^Pausedon:\d+$/);
     expect(text(el.querySelector('.stats div')!)).toBe('0.0tok/s');
     // Open Pitwall is the only filled button, paused or not; Resume sits beside Release as an equal secondary.
-    expect(Array.from(el.querySelectorAll('button.primary')).map((b) => b.textContent!.trim())).toEqual(['Open Pitwall']);
-    expect(btn('Resume').classList.contains('primary')).toBe(false);
+    expect(Array.from(el.querySelectorAll('button.mat-mdc-unelevated-button')).map((b) => b.textContent!.trim())).toEqual(['Open Pitwall']);
+    expect(btn('Resume').classList.contains('mat-mdc-unelevated-button')).toBe(false);
     expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent!.includes('Pause serving'))).toBe(false);
     btn('Resume').click();
     await settle(fixture);

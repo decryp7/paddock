@@ -62,7 +62,7 @@ test.describe('models', () => {
     await openApp(page, '/models');
     await page.getByRole('tab', { name: /Discover/ }).click();
     await expect(page.getByText('Recommended for this machine')).toBeVisible();
-    await page.getByRole('button', { name: 'code', exact: true }).click();
+    await page.getByRole('option', { name: 'code', exact: true }).click();
     await expect(page.getByRole('list', { name: 'Recommended models' }).getByRole('listitem')).toHaveCount(2);
     await page.getByRole('button', { name: /^Download Qwen3.6 35B-A3B/ }).click();
     await page.getByRole('tab', { name: /Downloads/ }).click();
@@ -78,19 +78,19 @@ test.describe('models', () => {
 
     await page.getByRole('button', { name: 'New preset' }).first().click();
     await page.getByLabel('Name apps send as the model').fill('dyno-notes');
-    await page.getByLabel('Serves from').fill('auto:chat,small');
+    await page.getByRole('combobox', { name: 'Serves from' }).fill('auto:chat,small');
     await page.getByLabel('Temperature').fill('0.4');
     const preview = page.getByRole('status', { name: 'What this preset resolves to' });
     await expect(preview).toContainText('Would serve');
-    await page.getByLabel('Serves from').fill('no-such-model');
+    await page.getByRole('combobox', { name: 'Serves from' }).fill('no-such-model');
     await expect(preview).toContainText('Cannot be saved');
     await expect(page.getByRole('button', { name: 'Create preset' })).toBeDisabled();
-    await page.getByLabel('Serves from').fill('auto:chat,small');
+    await page.getByRole('combobox', { name: 'Serves from' }).fill('auto:chat,small');
     await page.getByRole('button', { name: 'Create preset' }).click();
     await expect(list.getByRole('row', { name: /dyno-notes/ })).toContainText('temperature 0.4');
 
     await page.getByRole('button', { name: 'Edit legacy-explain' }).click();
-    await page.getByLabel('Serves from').fill('qwen3.5-9b-q4_k_m');
+    await page.getByRole('combobox', { name: 'Serves from' }).fill('qwen3.5-9b-q4_k_m');
     await page.getByRole('button', { name: 'Save preset' }).click();
     await expect(list).not.toContainText('Model removed');
 

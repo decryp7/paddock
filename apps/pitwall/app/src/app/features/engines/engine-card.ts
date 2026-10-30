@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
-import { PwSelect, type SelectOption } from '../../shared/ui/select';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
+import { SuEmptyState } from '@decryp7/paddock-ui';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { BuildCapability, Engine, InstalledBuild } from '../../core/api.types';
@@ -7,11 +8,10 @@ import { LiveStore } from '../../core/live.store';
 import { ago, bytes, percent } from '../../shared/format';
 import { availabilityLook, capabilityLook, downloadActive, healthLook, selfTestLook } from '../../shared/labels';
 import { Confirm } from '../../shared/ui/confirm';
-import { ContextMenuService, type ContextMenuItem } from '../../shared/ui/context-menu';
-import { EmptyState } from '../../shared/ui/empty-state';
-import { RowMenu } from '../../shared/ui/row-menu';
-import { isMenuKey } from '../../shared/ui/row-nav';
+import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
 import { EnginesStore } from './engines.store';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatProgressBar } from '@angular/material/progress-bar';
 
 /** A readable model name from its id, for the process table. */
 export function modelLabel(id: string): string {
@@ -29,20 +29,17 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
  */
 @Component({
   selector: 'pw-engine-card',
-  imports: [MatIconModule, MatTooltipModule, EmptyState, RowMenu, PwSelect],
+  imports: [MatProgressBar, MatIconButton, MatButton, MatIconModule, MatTooltipModule, SuEmptyState, ItemsMenu, MoreButton, RowMenu, PdSelect],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let e = engine();
     <section class="engine" aria-label="llama.cpp">
       <div class="choice">
-        <div class="field">
-          <label for="build-choice">Build</label>
-          <pw-select inputId="build-choice" label="Build" [options]="buildOptions()" [value]="e.buildChoice" [disabled]="store.isBusy()('select') || e.builds.length === 0" (changed)="store.select($event)" />
-        </div>
+        <pd-select class="build" inputId="build-choice" label="Build" [options]="buildOptions()" [value]="e.buildChoice" [disabled]="store.isBusy()('select') || e.builds.length === 0" (valueChange)="store.select($event)" />
         <p class="hint">Automatic picks the fastest installed build that passed its self-test on this hardware.</p>
         <span class="status" [attr.data-tone]="look().tone">{{ look().label }}</span>
         @if (rollbackTarget(); as t) {
-          <button type="button" class="btn" [disabled]="store.isBusy()('rollback')" (click)="rollback()"><mat-icon svgIcon="pw:rollback" aria-hidden="true" />Roll back to {{ t.label }} {{ t.tag }}</button>
+          <button type="button" matButton="outlined" [disabled]="store.isBusy()('rollback')" (click)="rollback()"><mat-icon svgIcon="pw:rollback" aria-hidden="true" />Roll back to {{ t.label }} {{ t.tag }}</button>
         } @else if (rollbackBlocked(); as why) {
           <p class="hint" data-test="rollback-blocked">Roll back is not available: {{ why }}</p>
         }
@@ -62,9 +59,10 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
         }
       </div>
       @if (e.builds.length === 0) {
-        <pw-empty-state icon="engines" heading="No build installed" text="Pitwall installs the build suggested for this machine by itself. You can also install another from the catalog below." />
+        <pd-empty-state heading="No build installed" description="Pitwall installs the build suggested for this machine by itself. You can also install another from the catalog below."><mat-icon slot="icon" svgIcon="pw:engines" aria-hidden="true" /></pd-empty-state>
       } @else {
         <div class="surface">
+          <pw-items-menu #rowMenu label="Build actions" />
           <table class="table fit">
             <colgroup><col /><col class="c-rel" /><col class="c-size" /><col class="c-test" /><col class="c-dev" /><col class="c-act" /></colgroup>
             <thead>
@@ -79,7 +77,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
             </thead>
             <tbody>
               @for (b of e.builds; track b.id + b.tag) {
-                <tr tabindex="0" (keydown)="onRowKey(b, $event)" (contextmenu)="onRowMenu(b, $event)">
+                <tr tabindex="0" (keydown)="onRowKey(b, $event)" pwRowMenu [matContextMenuTriggerFor]="rowMenu.menu()" [matContextMenuTriggerData]="{ items: menuItems(b) }">
                   <td>
                     <span class="bname" [matTooltip]="b.label" matTooltipShowDelay="600">{{ b.label }}</span>
                     @if (b.active) {
@@ -98,7 +96,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
                       @if (canPin()) {
                         <button
                           type="button"
-                          class="btn ghost icon sm reveal"
+                          matIconButton class="reveal"
                           [class.on]="isPinned(b)"
                           [attr.aria-pressed]="isPinned(b)"
                           [attr.aria-label]="(isPinned(b) ? 'Unpin ' : 'Pin ') + b.label + ' ' + b.tag + ' for all models'"
@@ -109,10 +107,10 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
                           <mat-icon [svgIcon]="isPinned(b) ? 'pw:pin' : 'pw:unpin'" aria-hidden="true" />
                         </button>
                       }
-                      <button type="button" class="btn ghost icon sm reveal" [attr.aria-expanded]="capsOpen().has(b.id)" [attr.aria-controls]="'caps-' + b.id" [attr.aria-label]="'What ' + b.label + ' ' + b.tag + ' supports'" matTooltip="Features" (click)="toggleCaps(b.id)">
+                      <button type="button" matIconButton class="reveal" [attr.aria-expanded]="capsOpen().has(b.id)" [attr.aria-controls]="'caps-' + b.id" [attr.aria-label]="'What ' + b.label + ' ' + b.tag + ' supports'" matTooltip="Features" (click)="toggleCaps(b.id)">
                         <mat-icon [svgIcon]="capsOpen().has(b.id) ? 'pw:chevron-down' : 'pw:chevron-right'" aria-hidden="true" />
                       </button>
-                      <pw-row-menu [items]="menuItems(b)" [label]="'More actions for ' + b.label + ' ' + b.tag" />
+                      <pw-more-button [menu]="rowMenu.menu()" [items]="menuItems(b)" [label]="'More actions for ' + b.label + ' ' + b.tag" />
                     </span>
                   </td>
                 </tr>
@@ -153,7 +151,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
             @for (d of installing(); track d.id) {
               <li>
                 <span class="mono">{{ d.name }}</span>
-                <div class="meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="pct(d.bytesDone, d.bytesTotal)" [attr.aria-label]="'Installing ' + d.name"><span [style.width.%]="pct(d.bytesDone, d.bytesTotal)"></span></div>
+                <mat-progress-bar mode="determinate" [value]="pct(d.bytesDone, d.bytesTotal)" [attr.aria-label]="'Installing ' + d.name" />
                 <span class="faint num">{{ size(d.bytesDone) }} / {{ size(d.bytesTotal) }}</span>
               </li>
             }
@@ -172,7 +170,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
               @if (c.installed) {
                 <span class="status" data-tone="ok">Installed</span>
               } @else {
-                <button type="button" class="btn sm" [disabled]="store.isBusy()('install:' + c.id)" [attr.aria-label]="'Install ' + c.label + ' ' + c.tag" (click)="store.install(c)">
+                <button type="button" matButton="outlined" [disabled]="store.isBusy()('install:' + c.id)" [attr.aria-label]="'Install ' + c.label + ' ' + c.tag" (click)="store.install(c)">
                   <mat-icon svgIcon="pw:download" aria-hidden="true" />Install
                 </button>
               }
@@ -188,7 +186,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
             <li>
               <span class="bname">{{ l.label }}</span>
               <span class="faint">Pitwall no longer uses it. Nothing is deleted until you remove it.</span>
-              <button type="button" class="btn sm" [disabled]="store.isBusy()('leftover:' + l.id)" (click)="store.removeLeftover(l)">Remove {{ l.label }} ({{ size(l.sizeBytes) }})</button>
+              <button type="button" matButton="outlined" [disabled]="store.isBusy()('leftover:' + l.id)" (click)="store.removeLeftover(l)">Remove {{ l.label }} ({{ size(l.sizeBytes) }})</button>
             </li>
           }
         </ul>
@@ -260,17 +258,9 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
       align-items: flex-end;
       flex-wrap: wrap;
       gap: var(--pd-space-4);
-      .field {
-        display: grid;
-        gap: 4px;
-        label {
-          font-size: var(--pd-text-label);
-          font-weight: var(--pd-weight-medium);
-          color: var(--pd-text-muted);
-        }
-        pw-select {
-          min-width: 300px;
-        }
+      .build {
+        width: 300px;
+        max-width: 100%;
       }
       .hint {
         flex: 1;
@@ -391,7 +381,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
       .faint {
         font-size: var(--pd-text-label);
       }
-      .btn {
+      .mat-mdc-button-base {
         justify-self: end;
       }
       .status {
@@ -462,14 +452,13 @@ export class EngineCard {
   protected readonly store = inject(EnginesStore);
   private readonly live = inject(LiveStore);
   private readonly confirm = inject(Confirm);
-  private readonly menu = inject(ContextMenuService);
   protected readonly size = bytes;
   protected readonly when = ago;
   protected readonly pct = percent;
   protected readonly model = modelLabel;
   protected readonly test = (b: InstalledBuild) => selfTestLook(b.selfTest);
   protected readonly health = healthLook;
-  protected readonly buildOptions = computed<SelectOption[]>(() => [
+  protected readonly buildOptions = computed<PdSelectOption[]>(() => [
     { value: 'auto', label: 'Automatic' + (this.activeBuild() ? ' — uses ' + this.activeBuild()!.label : '') },
     ...this.engine().builds.map((b) => ({ value: b.id, label: `${b.label} · ${b.tag}`, disabled: b.selfTest === 'failed' })),
   ]);
@@ -511,8 +500,8 @@ export class EngineCard {
   }
 
   /** The one list behind a build's "..." button, right-click and Shift+F10. Remove is only here, and asks first. */
-  protected menuItems(b: InstalledBuild): ContextMenuItem[] {
-    const items: ContextMenuItem[] = [{ label: this.capsOpen().has(b.id) ? 'Hide features' : 'Features', run: () => this.toggleCaps(b.id) }];
+  protected menuItems(b: InstalledBuild): MenuItem[] {
+    const items: MenuItem[] = [{ label: this.capsOpen().has(b.id) ? 'Hide features' : 'Features', run: () => this.toggleCaps(b.id) }];
     if (this.canPin()) {
       const pinned = this.isPinned(b);
       items.push({ label: pinned ? 'Unpin for all models' : 'Pin for all models', run: () => void this.store.togglePin(b), disabled: this.store.isBusy()('pin') || (!pinned && b.selfTest !== 'passed') });
@@ -526,16 +515,7 @@ export class EngineCard {
     if (e.key === 'Enter') {
       e.preventDefault();
       this.toggleCaps(b.id);
-    } else if (isMenuKey(e)) {
-      e.preventDefault();
-      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      this.menu.open(r.left + 48, r.bottom - 8, this.menuItems(b));
     }
-  }
-
-  protected onRowMenu(b: InstalledBuild, e: MouseEvent): void {
-    e.preventDefault();
-    this.menu.open(e.clientX, e.clientY, this.menuItems(b));
   }
 
   protected isPinned(b: InstalledBuild): boolean {

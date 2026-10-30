@@ -42,6 +42,9 @@ describe('SettingsPage', () => {
     expect(input(el, 'mem-idle').value).toBe('10');
     expect(input(el, 'mem-min').value).toBe('4');
     expect(el.querySelector('.savebar')).toBeNull();
+    // Rule 47: every number field is a Material field, no native select or legacy button is left.
+    for (const id of ['srv-port', 'srv-max', 'mem-idle', 'prv-ret']) expect(input(el, id).closest('mat-form-field')).not.toBeNull();
+    expect(el.querySelector('select, [class*="btn"]')).toBeNull();
     expect(el.textContent).toContain('Updates are not configured');
     expect(el.textContent).toContain('Not configured');
   });
@@ -232,6 +235,7 @@ describe('SettingsPage', () => {
     radios[2]!.click();
     await settle(fixture);
     expect(radios[2]!.getAttribute('aria-checked')).toBe('true');
+    expect(group.tagName.toLowerCase()).toBe('mat-button-toggle-group');
     button(el, 'Save changes').click();
     await settle(fixture);
     expect((await backend.settings()).general.onQuit).toBe('ask');
@@ -303,7 +307,7 @@ describe('SettingsPage', () => {
       const { el } = await setup();
       const p = panel(el);
       expect(switchOf(el, 'lbl-model-updates').getAttribute('aria-checked')).toBe('false');
-      expect(p.querySelector<HTMLButtonElement>('#model-updates-schedule')!.disabled).toBe(true);
+      expect(p.querySelector<HTMLElement>('#model-updates-schedule')!.getAttribute('aria-disabled')).toBe('true');
       expect(p.textContent).toContain('Off until you turn it on');
       expect(p.textContent).toContain('never downloads anything by itself');
       expect(p.textContent).toContain('only the repository ids');
@@ -317,11 +321,11 @@ describe('SettingsPage', () => {
       switchOf(el, 'lbl-model-updates').click();
       await settle(fixture);
       expect(spy).toHaveBeenLastCalledWith(true, 'weekly');
-      const trigger = panel(el).querySelector<HTMLButtonElement>('#model-updates-schedule')!;
-      expect(trigger.disabled).toBe(false);
+      const trigger = panel(el).querySelector<HTMLElement>('#model-updates-schedule')!;
+      expect(trigger.getAttribute('aria-disabled')).toBe('false');
       trigger.click();
       await settle(fixture);
-      Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container .pw-select-list .opt'))
+      Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container mat-option'))
         .find((o) => o.textContent!.trim() === 'Every day')!
         .click();
       await settle(fixture);
@@ -412,20 +416,21 @@ describe('SettingsPage', () => {
 
     it('maps the expiry choices to seconds in the draft', async () => {
       const { fixture, el, backend } = await setup();
-      const trigger = el.querySelector<HTMLButtonElement>('#set-cache pw-select button[aria-label="Cached answers expiry: 7 days after it is stored"]')!;
+      const trigger = el.querySelector<HTMLElement>('#set-cache pd-select mat-select[aria-label="Cached answers expiry"]')!;
+      expect(trigger.textContent).toContain('7 days after it is stored');
       trigger.click();
       await settle(fixture);
-      const options = Array.from(overlay().querySelectorAll<HTMLElement>('.pw-select-list .opt')).map((o) => o.textContent!.trim());
+      const options = Array.from(overlay().querySelectorAll<HTMLElement>('mat-option')).map((o) => o.textContent!.trim());
       expect(options).toEqual(['1 hour after it is stored', '1 day after it is stored', '7 days after it is stored', '30 days after it is stored', '90 days after it is stored', 'Never (size cap only)']);
-      overlay().querySelectorAll<HTMLElement>('.pw-select-list .opt')[0]!.click();
+      overlay().querySelectorAll<HTMLElement>('mat-option')[0]!.click();
       await settle(fixture);
       button(el, 'Save changes').click();
       await settle(fixture);
       expect((await backend.settings()).cache.responsesTtlSecs).toBe(3600);
 
-      el.querySelector<HTMLButtonElement>('#set-cache pw-select button[aria-label^="Embeddings expiry"]')!.click();
+      el.querySelector<HTMLElement>('#set-cache pd-select mat-select[aria-label="Embeddings expiry"]')!.click();
       await settle(fixture);
-      overlay().querySelectorAll<HTMLElement>('.pw-select-list .opt')[5]!.click();
+      Array.from(overlay().querySelectorAll<HTMLElement>('.mat-mdc-select-panel')).at(-1)!.querySelectorAll<HTMLElement>('mat-option')[5]!.click();
       await settle(fixture);
       button(el, 'Save changes').click();
       await settle(fixture);

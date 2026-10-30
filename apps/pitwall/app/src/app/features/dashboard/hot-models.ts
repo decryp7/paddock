@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { SuEmptyState } from '@decryp7/paddock-ui';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
@@ -8,8 +9,8 @@ import { ThemeService } from '../../core/theme';
 import { bytes, countdown, slotsText } from '../../shared/format';
 import { hotStateLook } from '../../shared/labels';
 import { seriesColor } from '../../shared/theme-tokens';
-import { EmptyState } from '../../shared/ui/empty-state';
 import { contextText } from '../models/library-tab';
+import { MatButton, MatIconButton } from '@angular/material/button';
 
 /** How far a model is through its idle time (0 just used … 1 due), for the countdown bar. */
 export function idleProgress(m: LoadedModel, now: number): number | null {
@@ -22,22 +23,23 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
 /** The hot models with memory, state and a live countdown to auto-release; pin and unload in place. */
 @Component({
   selector: 'pw-hot-models',
-  imports: [MatIconModule, MatTooltipModule, RouterLink, EmptyState],
+  imports: [MatIconButton, MatButton, MatIconModule, MatTooltipModule, RouterLink, SuEmptyState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (live.models().length === 0) {
-      <pw-empty-state icon="models" heading="No model loaded" [text]="compact() ? '' : 'Models load on the first request and are released when idle.'">
+      <pd-empty-state heading="No model loaded" [description]="compact() ? '' : 'Models load on the first request and are released when idle.'">
+        <mat-icon slot="icon" svgIcon="pw:models" aria-hidden="true" />
         @if (!compact()) {
-          <a class="btn sm" routerLink="/models">Open the library</a>
+          <a slot="action" matButton="outlined" routerLink="/models">Open the library</a>
         }
-      </pw-empty-state>
+      </pd-empty-state>
     }
     <ul class="list" [class.compact]="compact()" aria-label="Loaded models">
       @for (m of shown(); track m.modelId) {
         <li class="row">
           <div class="main" [matTooltip]="compact() ? '' : ctx(m.contextTokens) + ' context per slot · ' + slotsOf(m.slots)" matTooltipShowDelay="600">
             <div class="title">
-              <span class="state" [attr.data-tone]="look(m).tone" [attr.aria-label]="look(m).label"></span>
+              <span class="state" role="img" [attr.data-tone]="look(m).tone" [attr.aria-label]="look(m).label"></span>
               <span class="name">{{ m.name }}</span>
               @if (m.pinned) {
                 <mat-icon class="pinned" svgIcon="pw:pin" aria-label="Pinned" matTooltip="Pinned: never released automatically" />
@@ -66,10 +68,10 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
           </div>
           @if (!compact()) {
             <div class="actions">
-              <button type="button" class="btn ghost icon sm" [attr.aria-label]="(m.pinned ? 'Unpin ' : 'Pin ') + m.name" [matTooltip]="m.pinned ? 'Unpin' : 'Pin (keep loaded)'" [disabled]="live.isBusy()('model:' + m.modelId)" (click)="live.pinModel(m.modelId, !m.pinned)">
+              <button type="button" matIconButton [attr.aria-label]="(m.pinned ? 'Unpin ' : 'Pin ') + m.name" [matTooltip]="m.pinned ? 'Unpin' : 'Pin (keep loaded)'" [disabled]="live.isBusy()('model:' + m.modelId)" (click)="live.pinModel(m.modelId, !m.pinned)">
                 <mat-icon [svgIcon]="m.pinned ? 'pw:unpin' : 'pw:pin'" aria-hidden="true" />
               </button>
-              <button type="button" class="btn ghost icon sm" [attr.aria-label]="'Unload ' + m.name" matTooltip="Unload now" [disabled]="live.isBusy()('model:' + m.modelId)" (click)="live.unloadModel(m.modelId)">
+              <button type="button" matIconButton [attr.aria-label]="'Unload ' + m.name" matTooltip="Unload now" [disabled]="live.isBusy()('model:' + m.modelId)" (click)="live.unloadModel(m.modelId)">
                 <mat-icon svgIcon="pw:release" aria-hidden="true" />
               </button>
             </div>
@@ -145,6 +147,9 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
         height: 8px;
         border-radius: 2px;
       }
+    }
+    pd-empty-state {
+      padding: var(--pd-space-4);
     }
     :host {
       display: block;

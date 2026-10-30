@@ -1,5 +1,6 @@
 import { Dialog, DialogRef, DIALOG_DATA } from '@angular/cdk/dialog';
 import { ChangeDetectionStrategy, Component, Injectable, inject } from '@angular/core';
+import { MatButton } from '@angular/material/button';
 import { firstValueFrom } from 'rxjs';
 
 export interface ConfirmOptions {
@@ -12,14 +13,15 @@ export interface ConfirmOptions {
 /** A modal yes/no (CDK dialog: focus trap, Escape closes, focus returns to the trigger). */
 @Component({
   selector: 'pw-confirm-dialog',
+  imports: [MatButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'pw-dialog', role: 'alertdialog', 'aria-labelledby': 'pw-confirm-title', 'aria-describedby': 'pw-confirm-msg' },
   template: `
     <h2 id="pw-confirm-title">{{ data.title }}</h2>
     <p id="pw-confirm-msg">{{ data.message }}</p>
     <div class="row">
-      <button type="button" class="btn" (click)="ref.close(false)">Cancel</button>
-      <button type="button" class="btn" [class.danger-solid]="data.danger" [class.primary]="!data.danger" cdkFocusInitial (click)="ref.close(true)">{{ data.confirm }}</button>
+      <button type="button" matButton="outlined" (click)="ref.close(false)">Cancel</button>
+      <button type="button" matButton="filled" [class.pd-button-danger]="!!data.danger" cdkFocusInitial (click)="ref.close(true)">{{ data.confirm }}</button>
     </div>
   `,
   styles: `

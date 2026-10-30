@@ -8,6 +8,9 @@ import { TauriBackend } from './core/tauri-backend';
 import { withTimeout } from './core/timeout-backend';
 import { provideNativeFeel } from './core/native-feel';
 import { provideIcons } from './shared/icons';
+import { Toasts } from './core/toasts';
+import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
+import { NOTIFICATION_SOURCES } from '@decryp7/paddock-ui/shell/notify';
 
 /**
  * Mock options from the browser URL, for UI tests and screenshots: `?mock-fail=overview,history` makes those calls
@@ -41,6 +44,10 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     provideRouter(routes, withHashLocation()),
     provideIcons(),
+    // Material's family defaults (outlined fields, no ripples, plain toggles, tooltip delay): rule 47, every window.
+    providePaddockMaterial(),
+    // Pitwall's toasts go to the family's one toast host (`pd-notification-host` in the root component).
+    { provide: NOTIFICATION_SOURCES, multi: true, useExisting: Toasts },
     provideNativeFeel(),
     // Inside the app the real Tauri backend; in the browser build (development, UI tests) the mock.
     { provide: BACKEND, useFactory: () => withTimeout(isTauri() ? new TauriBackend() : new MockBackend(mockOptionsFrom(location.search))) },

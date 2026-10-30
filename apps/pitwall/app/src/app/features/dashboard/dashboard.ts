@@ -1,5 +1,9 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, isDevMode } from '@angular/core';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
 import { MatIconModule } from '@angular/material/icon';
+import { MatMenuTrigger } from '@angular/material/menu';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { EChartsCoreOption } from 'echarts/core';
 import type { HistoryRange, Preset } from '../../core/api.types';
@@ -10,7 +14,7 @@ import { EChart } from '../../shared/charts/echart';
 import { duration } from '../../shared/format';
 import { PRESET_HINT, PRESET_LABEL } from '../../shared/labels';
 import { injectNow } from '../../shared/now';
-import { ContextMenuService } from '../../shared/ui/context-menu';
+import { ItemsMenu, type MenuItem } from '../../shared/ui/menu';
 import { Panel } from '../../shared/ui/panel';
 import { UsageCard } from '../usage/usage-card';
 import { AppsCard } from './apps-card';
@@ -51,7 +55,7 @@ export class PerfMeter {
 /** Home: everything Pitwall is doing right now, how it got here, and the actions you need most. */
 @Component({
   selector: 'pw-dashboard',
-  imports: [MatIconModule, MatTooltipModule, Panel, EChart, StatTiles, HotModels, QueueCard, EngineIssues, EngineSetupBanner, EnginesCard, EventsFeed, AppsCard, PairingCard, UsageCard, UpdateBanner],
+  imports: [MatIconModule, MatTooltipModule, MatButton, MatIconButton, MatButtonToggleGroup, MatButtonToggle, MatMenuTrigger, SuSegmentedControl, ItemsMenu, Panel, EChart, StatTiles, HotModels, QueueCard, EngineIssues, EngineSetupBanner, EnginesCard, EventsFeed, AppsCard, PairingCard, UsageCard, UpdateBanner],
   providers: [DashboardStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -71,17 +75,16 @@ export class PerfMeter {
           </p>
         </div>
         <div class="actions">
-          <div class="seg" role="radiogroup" aria-label="Memory preset">
+          <mat-button-toggle-group hideSingleSelectionIndicator aria-label="Memory preset" [value]="live.overview()?.preset" [disabled]="live.isBusy()('preset') || !live.overview()" (change)="live.applyPreset($event.value)">
             @for (p of presets; track p) {
-              <button type="button" role="radio" [attr.aria-checked]="live.overview()?.preset === p" [matTooltip]="presetHint[p]" [disabled]="live.isBusy()('preset') || !live.overview()" (click)="live.applyPreset(p)">
-                {{ presetLabel[p] }}
-              </button>
+              <mat-button-toggle [value]="p" [matTooltip]="presetHint[p]">{{ presetLabel[p] }}</mat-button-toggle>
             }
-          </div>
+          </mat-button-toggle-group>
           @if (live.paused()) {
-            <button type="button" class="btn primary" [disabled]="live.isBusy()('serving')" (click)="live.setServing(false)"><mat-icon svgIcon="pw:play" aria-hidden="true" />Resume serving</button>
+            <button type="button" matButton="filled" [disabled]="live.isBusy()('serving')" (click)="live.setServing(false)"><mat-icon svgIcon="pw:play" aria-hidden="true" />Resume serving</button>
           }
-          <button type="button" class="btn ghost icon" aria-label="More actions" aria-haspopup="menu" matTooltip="More actions" (click)="openMore($event)"><mat-icon svgIcon="pw:more" aria-hidden="true" /></button>
+          <button type="button" matIconButton aria-label="More actions" matTooltip="More actions" [matMenuTriggerFor]="moreMenu.menu()" [matMenuTriggerData]="{ items: moreItems() }"><mat-icon svgIcon="pw:more" aria-hidden="true" /></button>
+          <pw-items-menu #moreMenu label="Dashboard actions" />
         </div>
       </header>
 
@@ -123,11 +126,7 @@ export class PerfMeter {
 
       <div class="history-head">
         <h2 class="section">History</h2>
-        <div class="seg small" role="radiogroup" aria-label="History range">
-          @for (r of ranges; track r) {
-            <button type="button" role="radio" [attr.aria-checked]="store.range() === r" (click)="store.select(r)">{{ r }}</button>
-          }
-        </div>
+        <pd-segmented-control label="History range" [options]="rangeSegs" [value]="store.range()" (valueChange)="store.select($any($event))" />
       </div>
 
       <div class="grid">
@@ -185,41 +184,6 @@ export class PerfMeter {
     .offline {
       color: var(--pd-warning);
       font-weight: var(--pd-weight-medium);
-    }
-    .seg {
-      display: inline-flex;
-      padding: 2px;
-      background: var(--pd-pressed);
-      border-radius: var(--pd-radius-control);
-      button {
-        height: 24px;
-        padding: 0 var(--pd-space-3);
-        font: inherit;
-        font-size: var(--pd-text-label);
-        font-weight: var(--pd-weight-medium);
-        color: var(--pd-text-muted);
-        background: none;
-        border: none;
-        border-radius: var(--pd-radius-tag);
-        cursor: default;
-        transition: background var(--pd-duration-micro) var(--pd-ease-move);
-        &:hover:not(:disabled) {
-          color: var(--pd-text);
-        }
-        &[aria-checked='true'] {
-          color: var(--pd-text);
-          background: var(--pd-surface-1);
-          box-shadow: var(--pd-shadow-1);
-        }
-        &:disabled {
-          cursor: default;
-        }
-      }
-      &.small button {
-        height: 22px;
-        min-width: 40px;
-        padding: 0 var(--pd-space-2);
-      }
     }
     .grid {
       display: grid;
@@ -333,9 +297,8 @@ export class Dashboard implements OnInit {
   protected readonly live = inject(LiveStore);
   protected readonly store = inject(DashboardStore);
   private readonly theme = inject(ThemeService);
-  private readonly menu = inject(ContextMenuService);
   protected readonly now = injectNow();
-  protected readonly ranges = RANGES;
+  protected readonly rangeSegs: SuSegment[] = RANGES.map((r) => ({ value: r, label: r }));
   protected readonly presets = PRESETS;
   protected readonly presetLabel = PRESET_LABEL;
   protected readonly presetHint = PRESET_HINT;
@@ -391,13 +354,13 @@ export class Dashboard implements OnInit {
   }
 
   /** Release memory and Pause serving: occasional actions, kept out of the header's way. */
-  protected openMore(e: Event): void {
+  protected readonly moreItems = computed<MenuItem[]>(() => {
     const busy = !this.live.overview();
-    this.menu.openFrom(e.currentTarget as HTMLElement, [
+    return [
       { label: 'Release memory', run: () => void this.live.releaseMemory(), disabled: busy || this.live.isBusy()('release') },
       { label: this.live.paused() ? 'Resume serving' : 'Pause serving', run: () => void this.live.setServing(!this.live.paused()), disabled: busy || this.live.isBusy()('serving') },
-    ]);
-  }
+    ];
+  });
 }
 
 /** A readable name for a model id the library does not know any more (`gemma-4-12b-it-q4_k_m` → `gemma-4-12b-it`). */

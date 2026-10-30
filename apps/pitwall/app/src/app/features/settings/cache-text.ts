@@ -1,6 +1,6 @@
 import type { CacheKindInfo } from '../../core/api.types';
 import { ago, bytes, int } from '../../shared/format';
-import type { SelectOption } from '../../shared/ui/select';
+import type { PdSelectOption } from '@decryp7/paddock-ui/select';
 
 const DAY = 86_400;
 
@@ -15,7 +15,7 @@ export const TTL_CHOICES: readonly { secs: number; label: string }[] = [
 ];
 
 /** The choices for a select, with the current value added when it is not one of the standard ones (e.g. from settings.toml). */
-export function ttlOptions(current: number, sliding: boolean): SelectOption[] {
+export function ttlOptions(current: number, sliding: boolean): PdSelectOption[] {
   const suffix = sliding ? ' since last use' : ' after it is stored';
   const label = (c: { secs: number; label: string }) => (c.secs === 0 ? c.label : c.label + suffix);
   const out = TTL_CHOICES.map((c) => ({ value: String(c.secs), label: label(c) }));

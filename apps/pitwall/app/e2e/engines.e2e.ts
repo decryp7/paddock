@@ -43,7 +43,7 @@ test.describe('engines', () => {
     await openApp(page, '/models');
     await page.getByRole('tab', { name: /Library/ }).click();
     await page.getByRole('row', { name: /Qwen3.5 9B/ }).click();
-    await page.locator('pw-select button[id^="pin-"]').first().click();
+    await page.locator('pd-select [id^="pin-"]').first().click();
     await page.getByRole('option', { name: 'Pin to Vulkan b11669' }).click();
     await expect(page.getByText(/Pinned to vulkan b11669/).first()).toBeVisible();
   });

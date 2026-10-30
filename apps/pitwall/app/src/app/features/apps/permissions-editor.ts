@@ -1,6 +1,13 @@
-import { ChangeDetectionStrategy, Component, computed, effect, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, input, output, signal, untracked, viewChildren } from '@angular/core';
+import { MatButton } from '@angular/material/button';
+import { MatCheckbox } from '@angular/material/checkbox';
+import type { ErrorStateMatcher } from '@angular/material/core';
+import { MatError, MatFormField, MatLabel, MatSuffix } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
+import { MatRadioButton, MatRadioGroup } from '@angular/material/radio';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import type { AppLimits, AppPermissions, LocalModel, Priority } from '../../core/api.types';
 import { PRIORITY_LABEL } from '../../shared/labels';
 
@@ -50,16 +57,16 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
 /** Edits an app's permissions locally; Save emits the parsed permissions (the server validates again). */
 @Component({
   selector: 'pw-permissions-editor',
-  imports: [MatSlideToggleModule, MatTooltipModule],
+  imports: [MatButton, MatCheckbox, MatError, MatFormField, MatInput, MatLabel, MatRadioButton, MatRadioGroup, MatSuffix, MatSlideToggleModule, MatTooltipModule, SuSegmentedControl],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form (submit)="$event.preventDefault(); submit()" [attr.aria-label]="'Permissions of ' + appName()">
       <fieldset class="group">
         <legend>Models</legend>
-        <div class="choice" role="radiogroup" aria-label="Which models">
-          <label class="radio"><input type="radio" [name]="uid + '-models'" [checked]="allModels()" (change)="allModels.set(true)" /> Every model</label>
-          <label class="radio"><input type="radio" [name]="uid + '-models'" [checked]="!allModels()" (change)="allModels.set(false)" /> Only these</label>
-        </div>
+        <mat-radio-group class="choice" aria-label="Which models" [value]="allModels() ? 'all' : 'some'" (change)="allModels.set($event.value === 'all')">
+          <mat-radio-button value="all">Every model</mat-radio-button>
+          <mat-radio-button value="some">Only these</mat-radio-button>
+        </mat-radio-group>
         @if (!allModels()) {
           @if (models().length === 0) {
             <p class="faint hint">No local models yet. Download one in Models.</p>
@@ -67,13 +74,12 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
             <ul class="models">
               @for (m of models(); track m.id) {
                 <li>
-                  <label class="check">
-                    <input type="checkbox" [checked]="chosen().has(m.id)" (change)="toggleModel(m.id)" />
+                  <mat-checkbox class="check" [checked]="chosen().has(m.id)" (change)="toggleModel(m.id)">
                     <span class="mname" [matTooltip]="m.name" matTooltipShowDelay="600">{{ m.name }}</span>
                     @if (m.quant) {
                       <span class="tag">{{ m.quant }}</span>
                     }
-                  </label>
+                  </mat-checkbox>
                 </li>
               }
             </ul>
@@ -83,11 +89,7 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
 
       <fieldset class="group">
         <legend>Highest priority</legend>
-        <div class="seg" role="radiogroup" aria-label="Highest priority">
-          @for (p of priorities; track p) {
-            <button type="button" role="radio" [attr.aria-checked]="priority() === p" (click)="priority.set(p)">{{ priorityLabel[p] }}</button>
-          }
-        </div>
+        <pd-segmented-control label="Highest priority" [options]="prioritySegs" [value]="priority()" (valueChange)="setPriority($event)" />
         <p class="faint hint">{{ priorityHint[priority()] }}</p>
       </fieldset>
 
@@ -120,23 +122,21 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
         <legend>Limits</legend>
         <div class="limits">
           @for (l of limitFields; track l.key) {
-            <div class="field">
-              <label [for]="uid + '-' + l.key">{{ l.label }}</label>
-              <div class="with-unit">
-                <input class="input num" [id]="uid + '-' + l.key" inputmode="numeric" placeholder="No limit" autocomplete="off" [value]="limitText()[l.key]" (input)="setLimit(l.key, $any($event.target).value)" [attr.aria-invalid]="invalid().has(l.key)" />
-                <span class="unit">{{ l.unit }}</span>
-              </div>
+            <mat-form-field class="field">
+              <mat-label>{{ l.label }}</mat-label>
+              <input matInput class="num" [id]="uid + '-' + l.key" inputmode="numeric" placeholder="No limit" autocomplete="off" [errorStateMatcher]="matchers[l.key]" [value]="limitText()[l.key]" (input)="setLimit(l.key, $any($event.target).value)" />
+              <span matTextSuffix class="unit">{{ l.unit }}</span>
               @if (invalid().has(l.key)) {
-                <span class="err" role="alert">{{ l.max ? 'A whole number from 1 to ' + l.max + ', or empty.' : 'A whole number of 1 or more, or empty.' }}</span>
+                <mat-error><span role="alert">{{ l.max ? 'A whole number from 1 to ' + l.max + ', or empty.' : 'A whole number of 1 or more, or empty.' }}</span></mat-error>
               }
-            </div>
+            </mat-form-field>
           }
         </div>
       </fieldset>
 
       <div class="foot">
-        <button type="button" class="btn ghost" [disabled]="!dirty() || busy()" (click)="reset()">Reset</button>
-        <button type="submit" class="btn primary" [disabled]="!dirty() || invalid().size > 0 || busy()">Save permissions</button>
+        <button type="button" matButton [disabled]="!dirty() || busy()" (click)="reset()">Reset</button>
+        <button type="submit" matButton="filled" [disabled]="!dirty() || invalid().size > 0 || busy()">Save permissions</button>
       </div>
     </form>
   `,
@@ -162,17 +162,17 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
       display: flex;
       gap: var(--pd-space-4);
     }
-    .radio,
     .check {
-      display: inline-flex;
+      display: block;
       max-width: 100%;
+      min-width: 0;
+    }
+    .check ::ng-deep label {
+      display: inline-flex;
       align-items: center;
       gap: var(--pd-space-2);
-      cursor: default;
-      input {
-        accent-color: var(--pd-accent);
-        margin: 0;
-      }
+      min-width: 0;
+      overflow: hidden;
     }
     .models {
       list-style: none;
@@ -186,7 +186,24 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
       border: 1px solid var(--pd-hairline);
       border-radius: var(--pd-radius-control);
       li {
-        padding: 6px 0;
+        min-width: 0;
+      }
+    }
+    /* A long model name ends in an ellipsis inside the checkbox's label instead of pushing it out of its column. */
+    .check {
+      display: block;
+      min-width: 0;
+      ::ng-deep .mdc-form-field {
+        display: flex;
+        max-width: 100%;
+        min-width: 0;
+      }
+      ::ng-deep .mdc-form-field > label {
+        display: flex;
+        align-items: center;
+        gap: var(--pd-space-1);
+        min-width: 0;
+        overflow: hidden;
       }
     }
     .mname {
@@ -198,29 +215,6 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
     .hint {
       margin-top: var(--pd-space-2);
       font-size: var(--pd-text-label);
-    }
-    .seg {
-      display: inline-flex;
-      padding: 2px;
-      background: var(--pd-pressed);
-      border-radius: var(--pd-radius-control);
-      button {
-        height: 26px;
-        padding: 0 var(--pd-space-3);
-        font: inherit;
-        font-size: var(--pd-text-label);
-        font-weight: var(--pd-weight-medium);
-        color: var(--pd-text-muted);
-        background: none;
-        border: none;
-        border-radius: var(--pd-radius-tag);
-        cursor: default;
-        &[aria-checked='true'] {
-          color: var(--pd-text);
-          background: var(--pd-surface-1);
-          box-shadow: var(--pd-shadow-1);
-        }
-      }
     }
     .toggle-row {
       display: flex;
@@ -247,35 +241,12 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
       gap: var(--pd-space-3);
     }
     .field {
-      display: grid;
-      gap: 6px;
-      label {
-        font-size: var(--pd-text-label);
-        color: var(--pd-text-muted);
-      }
+      min-width: 0;
     }
-    .with-unit {
-      position: relative;
-      .input {
-        width: 100%;
-        padding-right: 44px;
-      }
-      .unit {
-        position: absolute;
-        right: var(--pd-space-3);
-        top: 50%;
-        transform: translateY(-50%);
-        font-size: var(--pd-text-label);
-        color: var(--pd-text-subtle);
-        pointer-events: none;
-      }
-    }
-    .input[aria-invalid='true'] {
-      border-color: var(--pd-danger);
-    }
-    .err {
+    .unit {
+      padding-inline-end: var(--pd-space-2);
       font-size: var(--pd-text-label);
-      color: var(--pd-danger);
+      color: var(--pd-text-subtle);
     }
     .foot {
       display: flex;
@@ -296,10 +267,11 @@ export class PermissionsEditor {
   readonly busy = input(false);
   readonly save = output<AppPermissions>();
 
-  protected readonly priorities = PRIORITIES;
-  protected readonly priorityLabel = PRIORITY_LABEL;
   protected readonly priorityHint = PRIORITY_HINT;
   protected readonly limitFields = LIMITS;
+  protected readonly prioritySegs: SuSegment[] = PRIORITIES.map((p) => ({ value: p, label: PRIORITY_LABEL[p] }));
+  /** A limit field shows Material's error state (red outline, the message under it) while its text is invalid. */
+  protected readonly matchers = Object.fromEntries(LIMITS.map((l) => [l.key, { isErrorState: () => this.invalid().has(l.key) } satisfies ErrorStateMatcher])) as unknown as Record<LimitKey, ErrorStateMatcher>;
 
   protected readonly allModels = signal(true);
   protected readonly chosen = signal<ReadonlySet<string>>(new Set());
@@ -333,8 +305,16 @@ export class PermissionsEditor {
     return v === null || !samePermissions(v, this.permissions());
   });
 
+  private readonly limitInputs = viewChildren(MatInput);
+
   constructor() {
     effect(() => this.load(this.permissions()));
+    // effect-state: a matInput without a form control never asks its matcher by itself; tell it when the invalid set changes.
+    effect(() => {
+      this.invalid();
+      const inputs = this.limitInputs();
+      untracked(() => inputs.forEach((i) => i.updateErrorState()));
+    });
   }
 
   protected reset(): void {
@@ -350,6 +330,11 @@ export class PermissionsEditor {
     this.extended.set(p.extendedApis);
     this.cacheResponses.set(p.cacheResponses);
     this.limitText.set(Object.fromEntries(LIMITS.map((l) => [l.key, text(p.limits[l.key])])) as Record<LimitKey, string>);
+  }
+
+  protected setPriority(p: string): void {
+    const chosen = PRIORITIES.find((x) => x === p);
+    if (chosen) this.priority.set(chosen);
   }
 
   protected toggleModel(id: string): void {

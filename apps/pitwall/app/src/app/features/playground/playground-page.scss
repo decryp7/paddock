@@ -10,10 +10,11 @@
   padding-bottom: var(--pd-space-6);
 }
 
-.btn.on {
-  --btn-bg: var(--pd-accent-tint);
-  --btn-border: color-mix(in srgb, var(--pd-accent) 45%, transparent);
-  color: var(--pd-accent);
+/* Compare is on: an accent tint, never a second filled primary (UI review 2 rule 18). */
+.mat-mdc-outlined-button.on {
+  --mat-button-outlined-label-text-color: var(--pd-accent);
+  --mat-button-outlined-outline-color: color-mix(in srgb, var(--pd-accent) 45%, transparent);
+  background: var(--pd-accent-tint);
 }
 
 .layout {
@@ -244,28 +245,13 @@
   display: flex;
   flex-direction: column;
   gap: var(--pd-space-2);
-  padding: var(--pd-space-3);
-  background: var(--pd-surface-1);
-  border: 1px solid var(--pd-hairline);
-  border-radius: var(--pd-radius-card);
-  box-shadow: var(--pd-shadow-2);
-  &:focus-within {
-    border-color: var(--pd-accent);
-    box-shadow:
-      0 0 0 3px var(--pd-accent-tint),
-      var(--pd-shadow-2);
+  .prompt {
+    width: 100%;
   }
   textarea {
     min-height: 48px;
     max-height: 200px;
-    padding: 0;
-    background: transparent;
-    border: none;
-    box-shadow: none;
     resize: none;
-    &:focus {
-      box-shadow: none;
-    }
   }
 }
 
@@ -293,8 +279,10 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  width: 100%;
   margin-bottom: var(--pd-space-4);
-  label {
+  > label,
+  .field-head label {
     font-size: var(--pd-text-label);
     font-weight: var(--pd-weight-medium);
     color: var(--pd-text-muted);
@@ -313,9 +301,12 @@
   }
 }
 
+/* Material keeps 8 px each side for the thumb at either end: a block slider in its own margins never overflows. */
 .range {
-  width: 100%;
-  accent-color: var(--pd-accent);
+  display: block;
+  width: auto;
+  min-width: 0;
+  margin: 0 8px;
 }
 
 .scale {
