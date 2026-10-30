@@ -20,7 +20,9 @@ module.exports = {
     };
     return {
       ImportDeclaration(node) {
-        check(node, String(node.source.value));
+        // A type import runs nothing (`import type { AxeResults }`, or only inline `type` specifiers).
+        const typeOnly = node.importKind === 'type' || (node.specifiers.length > 0 && node.specifiers.every((s) => s.importKind === 'type'));
+        if (!typeOnly) check(node, String(node.source.value));
       },
       ImportExpression(node) {
         if (node.source.type === 'Literal') check(node, String(node.source.value));

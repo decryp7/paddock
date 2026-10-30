@@ -8,9 +8,12 @@ ts().run('e2e-axe-through-kit (ER-12)', rules['e2e-axe-through-kit'], {
     "import { expect } from '@playwright/test';",
     "const m = await import('./axe');",
     "const x = require('node:fs');",
+    "import type { AxeResults } from '@axe-core/playwright';",
+    "import { type AxeResults } from '@axe-core/playwright';",
   ],
   invalid: [
     { code: "import AxeBuilder from '@axe-core/playwright';", errors: [{ messageId: 'direct' }] },
+    { code: "import AxeBuilder, { type AxeResults } from '@axe-core/playwright';", errors: [{ messageId: 'direct' }] },
     { code: "const { default: AxeBuilder } = await import('@axe-core/playwright');", errors: [{ messageId: 'direct' }] },
     { code: "const AxeBuilder = require('@axe-core/playwright');", errors: [{ messageId: 'direct' }] },
   ],

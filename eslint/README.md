@@ -30,7 +30,9 @@ as Debrief's two accessibility rules), `storeFlagsAllowedIn` (regex of the file 
 | `paddock/template-no-inner-html` | security | no `[innerHTML]` / `[outerHTML]` binding |
 | angular-eslint (preset) | 33 | `prefer-inject`, `prefer-signals`, `prefer-signal-model`, `template/prefer-control-flow`, `template/prefer-class-binding` |
 
-An app with its own flat config (Debrief) adds the axe check alone: `...e2eAxe()` from `@decryp7/paddock-eslint` is the
+`paddock/e2e-axe-through-kit` reaches only the files a project lints: `ui` (`eslint projects e2e`) and Debrief (`e2e/**/*.ts` in
+its `lintFilePatterns`). Dyno, Pitcrew, Pitwall and Spotter lint `src/**` only, so their browser specs are not checked until
+`e2e/**/*.ts` joins their patterns. An app with its own flat config (Debrief) adds the axe check alone: `...e2eAxe()` from `@decryp7/paddock-eslint` is the
 preset's block for `e2e/` files, its `axe.ts` helper exempt.
 
 Not lintable (kept as review rules or other checks): 34 (window bootstrap shape), 35 (lazy panels: conformance C29 measures the
