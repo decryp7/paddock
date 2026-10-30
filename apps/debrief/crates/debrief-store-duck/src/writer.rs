@@ -580,6 +580,10 @@ mod tests {
     }
 
     fn sink(c: &Connection, dir: &Path, seen: Option<Arc<AtomicU64>>) -> SegmentSink {
+        sink_for(c, dir, seen, 2)
+    }
+
+    fn sink_for(c: &Connection, dir: &Path, seen: Option<Arc<AtomicU64>>, threads: usize) -> SegmentSink {
         let observe: Option<Observe> = seen.map(|s| -> Observe {
             Box::new(move |b: &EventBatch| {
                 s.fetch_add(b.num_rows() as u64, Ordering::SeqCst);
@@ -589,7 +593,7 @@ mod tests {
             c.try_clone().unwrap(),
             dir,
             Arc::new(EventSchema::plain()),
-            2,
+            threads,
             Arc::new(AtomicU64::new(0)),
             observe,
         )
@@ -752,6 +756,74 @@ mod tests {
         assert!(
             count(&c, "SELECT count(*) FROM segments") <= 3,
             "one segment per thread (plus the outside slot)"
+        );
+        drop(c);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// The sink takes its locks in one order (see the module docs): 16 parse threads writing tiny segments that are
+    /// closed and listed at once, with an observer set (which persisted the next id while holding `ids`, against the
+    /// listing's order), finish before a deadline instead of deadlocking (ADR 0062, defect 1).
+    #[test]
+    fn sixteen_threads_listing_tiny_segments_with_an_observer_never_deadlock() {
+        const THREADS: usize = 16;
+        const SOURCES_PER_THREAD: usize = 4;
+        const BATCHES: usize = 4;
+        const ROWS: usize = 3;
+        // Generous for a loaded debug build; a deadlock never ends, so the test fails here instead of hanging.
+        const DEADLINE: Duration = Duration::from_secs(120);
+        let (dir, c) = store();
+        let seen = Arc::new(AtomicU64::new(0));
+        let mut w = sink_for(&c, &dir, Some(seen.clone()), THREADS);
+        w.list_every = Duration::ZERO;
+        w.segment_age = Duration::ZERO;
+        let w = Arc::new(w);
+        let ids: Vec<SourceId> = (0..THREADS * SOURCES_PER_THREAD)
+            .map(|i| {
+                w.begin_source(
+                    &NewSource {
+                        path: format!("f{i}"),
+                        name: format!("f{i}"),
+                    },
+                    None,
+                )
+                .unwrap()
+            })
+            .collect();
+        let (done, finished) = std::sync::mpsc::channel();
+        let worker = {
+            let w = w.clone();
+            let ids = ids.clone();
+            std::thread::spawn(move || {
+                let pool = rayon::ThreadPoolBuilder::new().num_threads(THREADS).build().unwrap();
+                pool.install(|| {
+                    use rayon::prelude::*;
+                    ids.par_iter().for_each(|id| {
+                        for _ in 0..BATCHES {
+                            w.write(batch(*id, ROWS)).unwrap();
+                        }
+                        w.finish_source(&report(*id, BATCHES * ROWS)).unwrap();
+                    })
+                });
+                let _ = done.send(());
+            })
+        };
+        match finished.recv_timeout(DEADLINE) {
+            Ok(()) => worker.join().unwrap(),
+            // The worker panicked (an error, not a deadlock): its panic is the failure.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => worker.join().unwrap(),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("the sink deadlocked: the writes did not end within {DEADLINE:?}"),
+        }
+        let w = Arc::try_unwrap(w).unwrap_or_else(|_| panic!("the writer is still shared"));
+        w.finish().unwrap();
+        let total = (THREADS * SOURCES_PER_THREAD * BATCHES * ROWS) as u64;
+        assert_eq!(seen.load(Ordering::SeqCst), total, "every batch was observed");
+        assert_eq!(count(&c, "SELECT count(*) FROM events"), total);
+        assert_eq!(count(&c, "SELECT count(DISTINCT id) FROM events"), total, "ids are unique");
+        assert_eq!(count(&c, "SELECT count(*) FROM sources WHERE ready"), ids.len() as u64);
+        assert!(
+            count(&c, "SELECT CAST(value AS UBIGINT) FROM meta WHERE key = 'next_id'") >= count(&c, "SELECT max(end_id) FROM segments"),
+            "no listed id can be handed out again"
         );
         drop(c);
         std::fs::remove_dir_all(dir).ok();
