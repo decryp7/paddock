@@ -756,9 +756,10 @@ not by guessing at the VM.
 `paddock_proc::kill_tree` read the process table, ran `taskkill /T /F`, then killed every pid from that table again. By then
 those pids were free, and Windows hands a freed pid on at once: with four real-browser tests in parallel, the next owner was
 likely another test's Chrome helper, and killing its network service gives exactly the `ERR_ABORTED` trace of the Windows
-flake. That was the suspected cause, **not a confirmed one**: CI run 7154 still showed an abort with no response while the
-network service stayed the same process, so the flake has at least one other cause (handled apart, with a local Windows
-reproduction). Do not call a cause confirmed until a run shows it. The sweep
+flake. That was the suspected cause, and **the suspected cause was disproved by run 7158; the flake has another cause
+(WP-4)**: run 7158 failed with `ERR_ABORTED` on Windows with every identity fix in place and none of the ADR 0030 code
+(handled apart, with a local Windows reproduction). Do not call a cause confirmed until a run shows it, and keep the fix
+for a real mistake apart from the hunt for a flake's cause. The sweep
 found the same mistake in four shapes across the family: a snapshot killed later, a tree built from parent pids (which outlive
 their processes on Windows; an "explorer orphan" then joins a browser's tree and its memory cap), a `killpg(child.id())`
 after `try_wait` had reaped the child, and a pid trusted from a file. The first fix had a gap of its own: macOS's

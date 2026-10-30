@@ -1,7 +1,8 @@
 # 33. Processes by identity, never by a bare pid
 
-- Status: Accepted (2026-10-30, by the user) as binding rule 53. Whether it caused the Windows `ERR_ABORTED` failures is
-  **not confirmed** (see Evidence); the rule stands on its own, since the mistake it removes was real in every shape below.
+- Status: Accepted (2026-10-30, by the user) as binding rule 53. Pid reuse was the suspected cause of the Windows
+  `ERR_ABORTED` failures; **the suspected cause was disproved by run 7158; the flake has another cause (WP-4)**. The rule
+  stands on its own, on the real mistakes the sweep found in every shape below.
 - Date: 2026-10-30
 - Related: rule 53 (this decision), rule 40 / ER-21 (recurring bugs mean a missing design rule), ER-14 (tests touch only
   what they started), rules 42/43 (share first); ADR 0024 rule 4 (a watcher tick reads no whole process table;
@@ -14,11 +15,11 @@
   - In jobs 21399, 21598, 21908 and 21966, the test `a_browser_ended_by_force_leaves_nothing_behind` finished 0.04 to
     2 s before the failure, in the same test binary. The four real-browser tests run in parallel.
   - The ADR 0030 draft showed that ending the network service gives exactly the trace of these failures.
-  - **Not confirmed.** CI run 7154 ran this work together with ADR 0030's diagnostics. On Windows, a load was still aborted
-    with no response event while the network service stayed the same process (`an_answered_abort_never_blames_the_network_service`,
-    and a timeout in `a_load_the_network_service_lost_names_the_restart`). So at least some of the aborts have another
-    cause. The pid reuse below is a real way to kill another test's helper, but it is not shown to be the cause of the
-    flake.
+  - **Disproved as the cause.** CI run 7154 (this work together with ADR 0030's diagnostics) showed a Windows load
+    aborted with no response event while the network service stayed the same process. CI run 7158, with every identity
+    fix of this ADR in place and none of the ADR 0030 code, still failed on Windows with `ERR_ABORTED` in
+    `a_new_tab_loads_a_page_at_once`. The suspected cause was disproved by run 7158; the flake has another cause (WP-4).
+    The pid reuse below is still a real way to kill another program's process, which is what this ADR removes.
   - On macOS, `proc_pidinfo(PROC_PIDTBSDINFO)` refuses a process of another effective user. Measured by the review: a
     setuid `/usr/bin/top` child gives EPERM.
 
@@ -35,7 +36,8 @@ the process is created until the process has been terminated" (read 2026-10-30,
 <https://learn.microsoft.com/en-us/windows/win32/procthread/process-handles-and-identifiers>). With four tests each
 starting Chrome, the next owner is likely another test's browser helper. Killing its network service gives the
 trace of the Windows failures: the request leaves, the service dies, the load is cancelled with `ERR_ABORTED
-canceled=true`, and the server never sees a connection. That made it the suspected cause; it is not confirmed (Evidence).
+canceled=true`, and the server never sees a connection. That made it the suspected cause; the suspected cause was
+disproved by run 7158, and the flake has another cause (WP-4; Evidence).
 
 Whatever caused the flake, the same mistake has several shapes, and a sweep found them across the family:
 
@@ -189,9 +191,9 @@ checks that the pid still belongs to the process it means (pid plus start time).
   - the Windows job-member tree;
   - Clippy's `disallowed-methods` and C53, with the waivers;
   - rule 53.
-- **WP-4:** the ADR 0030 diagnostics and their two Windows tests, in a task of their own with a local Windows
-  reproduction. Run 7154 already showed aborts with an unchanged network service, so the flake has at least one other
-  cause.
+- **WP-4:** find the flake's real cause, in a task of its own with a local Windows reproduction (the ADR 0030
+  diagnostics and their two Windows tests go there). Runs 7154 and 7158 showed aborts with an unchanged network service
+  and with every identity fix in place, so pid reuse is not it.
 - **WP-5 Debrief:**
   - `chromium-driver` moves to `paddock-chromium` (X14);
   - `debrief-ipc` `kill_group`, the `debrief-ai-worker` reaper and the test kills (`debrief-collect`,

@@ -348,9 +348,9 @@ mod port_tests {
         )
     }
 
-    /// Regression (ADR 0033), the suspected cause of the Windows `ERR_ABORTED` flake: ending one browser could kill the
-    /// network service of a browser another test had just started, because a pid from the snapshot was killed without asking
-    /// who held it now.
+    /// Regression (ADR 0033): ending one browser could kill the network service of a browser another test had just started,
+    /// because a pid from the snapshot was killed without asking who held it now. (Once suspected of causing the Windows
+    /// `ERR_ABORTED` flake; disproved by run 7158.)
     #[test]
     fn a_stale_snapshot_entry_never_kills_the_process_that_holds_its_pid_now() {
         let os = browser_whose_pid_is_handed_on();

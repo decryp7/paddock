@@ -183,8 +183,8 @@ changes here, every app's copy is updated in the same change.
     [0033](adr/0033-processes-by-identity-never-by-a-bare-pid.md); ADR [0023](adr/0023-tests-never-free-a-port-they-probe.md)
     is the same rule for ports.
     *Why:* Windows hands a freed pid on at once. `kill_tree` killed the pids of a stale snapshot, which can end another
-    test's Chrome helper (a suspected, unconfirmed cause of the Windows `ERR_ABORTED` failures); the same mistake was in
-    four shapes in five apps.
+    test's Chrome helper; the same mistake was in four shapes in five apps. (It was suspected of causing the Windows
+    `ERR_ABORTED` failures; the suspected cause was disproved by run 7158; the flake has another cause, ADR 0033 WP-4.)
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
