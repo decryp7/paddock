@@ -77,11 +77,22 @@ import { MatTooltipModule } from '@angular/material/tooltip';
       gap: 2px;
       flex: none;
     }
+    /*
+     * More below (or above) is shown by a soft shade at that edge, which goes once the end is reached: the covers scroll
+     * with the content (local) and hide the shades (scroll) at an end the content has reached. No script, both engines.
+     */
     .body {
       flex: 1;
       min-height: 0;
       overflow: auto;
       padding: var(--pd-space-3) var(--pd-space-4);
+      --panel-shade: color-mix(in srgb, var(--pd-text) 22%, transparent);
+      background:
+        linear-gradient(var(--pd-surface-1) 30%, transparent) top / 100% 32px no-repeat local,
+        linear-gradient(transparent, var(--pd-surface-1) 70%) bottom / 100% 32px no-repeat local,
+        linear-gradient(var(--panel-shade), transparent) top / 100% 16px no-repeat scroll,
+        linear-gradient(transparent, var(--panel-shade)) bottom / 100% 16px no-repeat scroll;
+      background-color: var(--pd-surface-1);
     }
     .toolbar {
       display: flex;

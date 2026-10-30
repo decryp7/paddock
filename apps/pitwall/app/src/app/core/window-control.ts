@@ -7,6 +7,8 @@ export interface WindowControl {
   openMain(route?: string): Promise<void>;
   /** In the main window: routes the tray asks for, including one asked for before this window existed. Returns a stop. */
   onNavigate(handler: (route: string) => void): () => void;
+  /** In the tray popover: makes the popover window as tall as its content (logical px). */
+  fitTray(height: number): Promise<void>;
 }
 
 /** The storage key of the route the tray left for the main window. */
@@ -72,6 +74,7 @@ export interface TauriWindowPort {
  * (`core:event:default`), no `core:window:*` permission. `window_focus { label: 'main' }` goes through the shell's
  * `reveal`, which rebuilds `main` when it was closed (destroyed); the route waits in {@link PendingRoute} for the window
  * to take it, and the doorbell only tells a window that already listens. Then `tray_close` closes the popover.
+ * `tray_fit_height` makes the popover as tall as its content.
  */
 export class TauriWindowControl implements WindowControl {
   constructor(
@@ -91,6 +94,10 @@ export class TauriWindowControl implements WindowControl {
     } finally {
       await this.port.invoke('plugin:paddock-shell|tray_close').catch(() => undefined);
     }
+  }
+
+  async fitTray(height: number): Promise<void> {
+    await this.port.invoke('plugin:paddock-shell|tray_fit_height', { height });
   }
 
   onNavigate(handler: (route: string) => void): () => void {
@@ -166,6 +173,11 @@ export class BrowserWindowControl implements WindowControl {
     const route = this.pending.take();
     if (route) handler(route);
     return () => undefined;
+  }
+
+  /** The tab is as large as the browser makes it. */
+  async fitTray(): Promise<void> {
+    return undefined;
   }
 }
 

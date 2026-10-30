@@ -1,3 +1,4 @@
+import { buildDownloadName } from '../shared/build-download';
 import type {
   AppDetail,
   ModelPreset,
@@ -208,8 +209,9 @@ export class MockBackend implements PitwallBackend {
     if (options.modelUpdates) this.updateNotices_ = demoUpdateNotices(this.now());
     if (options.quitAsk) this.quitAskPending = true;
     if (options.installing) {
-      // The catalog's suggested build (cuda-13 at its pinned release, its download size): the first start installs exactly that.
-      const download: Download = { id: 'eng-0', kind: 'engine', name: 'llama.cpp CUDA 13 (b11702)', host: 'github.com', bytesDone: 212 * MiB, bytesTotal: 398 * MiB, speedBps: 24 * MiB, state: 'downloading', error: null, startedAt: this.now() - 9_000 };
+      // The catalog's suggested build (cuda-13 at its pinned release, its download size, named as the server names it): the first
+      // start installs exactly that.
+      const download: Download = { id: 'eng-0', kind: 'engine', name: 'llama.cpp CUDA 13 (NVIDIA) (b11702)', host: 'github.com', bytesDone: 212 * MiB, bytesTotal: 398 * MiB, speedBps: 24 * MiB, state: 'downloading', error: null, startedAt: this.now() - 9_000 };
       this.engineSetup_ = { state: 'installing', error: null, download };
     }
     if (options.crashed) {
@@ -799,7 +801,7 @@ export class MockBackend implements PitwallBackend {
       if (this.server.offline) this.fail('offline', 'Offline mode is on: Pitwall downloads nothing.');
       const engine = this.engineOfBuild(buildId) ?? this.fail('notFound', `No build ${buildId} in the catalog.`);
       const cat = engine.catalog.find((c) => c.id === buildId)!;
-      const d: Download = { id: `eng-${this.nextId++}-${cat.id}`, kind: 'engine', name: `${engine.name} ${cat.label} ${cat.tag}`, host: 'github.com', bytesDone: 0, bytesTotal: cat.downloadBytes, speedBps: 0, state: 'queued', error: null, startedAt: this.now() };
+      const d: Download = { id: `eng-${this.nextId++}-${cat.id}`, kind: 'engine', name: buildDownloadName(engine.name, cat), host: 'github.com', bytesDone: 0, bytesTotal: cat.downloadBytes, speedBps: 0, state: 'queued', error: null, startedAt: this.now() };
       this.downloads_.unshift(d);
       this.emit({ kind: 'download', download: clone(d) });
       return d;
