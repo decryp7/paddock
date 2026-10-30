@@ -50,8 +50,8 @@
     "on": null,
     "off": null,
     "status": null,
-    "manualReason": "the app registers its login item with SMAppService, which only the app itself calls; `dyno-agent service install` writes a legacy LaunchAgents plist and bootstraps it with launchctl, a different route that is not what users run. The guest does have an Aqua session, but driving the Settings toggle needs a UI driver (see the GUI VM research), which this check does not have",
-    "approval": "System Settings > General > Login Items & Extensions may ask to allow the item (manual)."
+    "manualReason": "the app registers its login item with SMAppService, which only the app itself calls; `dyno-agent service install` writes a legacy LaunchAgents plist and bootstraps it with launchctl, a different route that is not what users run. The guest does have an Aqua session, but driving the Settings toggle needs a UI driver (see the GUI VM research), which the headless run does not use: the GUI mode (--gui) drives it through gui.launchAtLogin",
+    "approval": "System Settings > General > Login Items & Extensions; driven in the GUI mode (--gui)."
   },
   "settleWhy": "The supervisor has no fixed spawn wait any more (SPAWN_WAIT and CONNECT_GRACE are gone). The longest respawn timer is the crash-loop backoff capped at 15 s, plus 3 s END_GRACE before the held child is ended on a Retry or hand-over, plus the 2 s polling: 20 s covers one full respawn cycle. A second agent after that is a bug, not a timer.",
   "gui": {
