@@ -79,9 +79,11 @@ fn removal_hides_at_once_and_compaction_reclaims() {
     .unwrap();
     for i in 0..40 {
         store.open(&[logs.0.join(format!("f{i:02}.log"))]).unwrap().wait().unwrap();
+        // Compaction merges indexed segments only (ADR 0062): each import's segment is indexed before the next.
+        assert!(store.wait_for_index(std::time::Duration::from_secs(60)).unwrap().ready);
     }
     assert_eq!(store.summary().unwrap().total, 80);
-    // 40 small segments (one per import) were merged once there were more than 32.
+    // 40 small segments (one per import) were merged once more than 32 of them were indexed.
     let n = files(&dir).len();
     assert!(n < 40, "{n} segment files");
     // Removing a source hides its events at once; a segment that is mostly garbage is rewritten (here:
