@@ -1769,6 +1769,9 @@
       <trans-unit id="pd.settings.no-match" datatype="html">
         <source>No settings match “<x id="query"/>”.</source>
       </trans-unit>
+      <trans-unit id="pd.settings.not-saved.close" datatype="html">
+        <source>Close anyway</source>
+      </trans-unit>
       <trans-unit id="pd.settings.notifications" datatype="html">
         <source>Notifications</source>
       </trans-unit>
