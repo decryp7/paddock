@@ -22,6 +22,7 @@ import { DIALOG_REF, type DialogContent } from '@decryp7/paddock-ui/shell/dialog
 import { fieldText, matchesQuery, settingsNav, type SettingsNavItem, SettingsStore } from '@decryp7/paddock-ui/shell/settings';
 import { PdSettingsSection, PdSettingsSectionPage, SETTINGS_PAGE } from './settings-section';
 import { SettingsDrafts } from './settings-drafts';
+import { SettingsStatus } from './settings-status';
 
 /** The settings pages a Settings window lists (the app's `settingsPages` contributions plus the shell's). */
 export const SETTINGS_WINDOW_PAGES = new InjectionToken<readonly SettingsPageDef[]>('PADDOCK_SETTINGS_WINDOW_PAGES', {
@@ -209,6 +210,7 @@ export class PdSettingsWindow implements DialogContent {
   };
   protected readonly store = inject(SettingsStore);
   private readonly drafts = inject(SettingsDrafts);
+  private readonly pageStatus = inject(SettingsStatus, { optional: true });
   private readonly pages = inject(SETTINGS_WINDOW_PAGES);
   private readonly environment = inject(EnvironmentInjector);
   private readonly injector = inject(Injector);
@@ -340,6 +342,9 @@ export class PdSettingsWindow implements DialogContent {
     this.ref?.dismiss();
   }
 
-  /** The footer's status line: the last change's notice, else how saving works (the frame draws it beside Close; ADR 0026 §2). */
-  readonly dialogStatus = computed(() => this.store.notice() ?? this.t.savedLive);
+  /**
+   * The footer's status line (the frame draws it beside Close; ADR 0026 §2): the last change's notice, else what the shown page
+   * says about saving (`settingsPageStatus`), else how saving works here.
+   */
+  readonly dialogStatus = computed(() => this.store.notice() ?? this.pageStatus?.text() ?? this.t.savedLive);
 }

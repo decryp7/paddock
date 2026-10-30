@@ -149,6 +149,19 @@ const RUNS: Run[] = [
           <mat-timepicker #time />
         </mat-form-field>
       </div>
+      <div class="gal-row" data-testid="material-field-row">
+        <mat-form-field data-testid="material-field-value">
+          <mat-label>Max tokens</mat-label>
+          <input matInput [(ngModel)]="maxTokens" />
+        </mat-form-field>
+        <mat-form-field class="gal-field-wide" data-testid="material-textarea">
+          <mat-label>System prompt</mat-label>
+          <textarea matInput rows="3" [(ngModel)]="prompt"></textarea>
+        </mat-form-field>
+        <mat-form-field data-testid="material-field-unlabelled">
+          <input matInput aria-label="Filter runs" placeholder="Filter runs" [(ngModel)]="filter" />
+        </mat-form-field>
+      </div>
 
       <h3>Choices</h3>
       <div class="gal-row gal-row--center">
@@ -305,6 +318,9 @@ export class GalMaterial {
   protected readonly hasChild = (_: number, n: Node): boolean => !!n.children?.length;
 
   protected query = '';
+  protected maxTokens = '512';
+  protected prompt = 'Explain the log excerpt to an engineer in plain language. Be concise and name the likely cause first.';
+  protected filter = '';
   protected level = 'warn';
   protected source = '';
   protected day: Date | null = new Date(2026, 9, 28);
