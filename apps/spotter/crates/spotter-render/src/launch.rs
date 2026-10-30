@@ -194,16 +194,12 @@ impl Chromium {
         // (an installed one through `find_installed`, a download, a hard-coded path).
         #[cfg(any(test, feature = "testing"))]
         {
-            use paddock_testkit::live_browser::{check_launch, BrowserWindow};
-            let os = crate::discover::Os::CURRENT;
-            let installed = crate::discover::candidates(os, &|k| std::env::var(k).ok())
-                .iter()
-                .any(|c| c.path == exe.path);
+            use paddock_testkit::live_browser::BrowserWindow;
             let window = match opts.mode {
                 Mode::Headless => BrowserWindow::Headless,
                 Mode::OffScreen | Mode::OnScreen => BrowserWindow::Shown,
             };
-            check_launch(&exe.path, installed, window).map_err(Error::Launch)?;
+            crate::discover::check_test_launch(&exe.path, window).map_err(Error::Launch)?;
         }
         check_display(opts.mode, cfg!(target_os = "linux"), |k| std::env::var(k).ok())?;
         let dir = unique_dir(&opts.profile_base);
@@ -424,7 +420,7 @@ mod tests {
         let exe_path = base.path().join("fake-chrome.sh");
         std::fs::write(
             &exe_path,
-            "#!/bin/sh\necho 'Running as root without --no-sandbox is not supported' >&2\nexit 1\n",
+            "#!/bin/sh\n# paddock-fake-browser\necho 'Running as root without --no-sandbox is not supported' >&2\nexit 1\n",
         )
         .unwrap();
         std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -459,6 +455,7 @@ mod tests {
     fn a_test_build_never_launches_an_installed_browser() {
         let base = tempfile::tempdir().unwrap();
         let env = |k: &str| std::env::var(k).ok();
+        // conformance: no-launch — the gate under test refuses each candidate before anything starts
         for exe in crate::discover::candidates(crate::discover::Os::CURRENT, &env) {
             let e = Chromium::launch(&exe, &headless(base.path())).err().unwrap();
             assert!(
@@ -489,7 +486,7 @@ mod tests {
         // A fake that exits at once (a script: a test never starts a real program outside a throwaway session).
         let bin = tempfile::tempdir().unwrap();
         let stub = bin.path().join("exits.sh");
-        std::fs::write(&stub, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::write(&stub, "#!/bin/sh\n# paddock-fake-browser\nexit 0\n").unwrap();
         std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         let exe = Browser {
             flavor: crate::discover::Flavor::Chromium,

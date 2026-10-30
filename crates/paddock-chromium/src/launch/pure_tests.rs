@@ -246,6 +246,7 @@ fn the_cap_is_checked_once_more_when_the_browser_connects() {
 fn a_test_build_never_launches_an_installed_browser() {
     let base = tempfile::tempdir().unwrap();
     let env = |k: &str| std::env::var(k).ok();
+    // conformance: no-launch — the gate under test refuses each candidate before anything starts
     for exe in crate::discover::candidates(crate::discover::this_os(), &env) {
         let e = Chromium::launch(&exe, &opts(base.path())).err().unwrap();
         assert!(

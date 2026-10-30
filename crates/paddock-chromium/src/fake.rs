@@ -117,7 +117,7 @@ fn script(
         .map(|(k, v)| format!("export {k}='{v}'\n"))
         .collect();
     format!(
-        "#!/bin/sh\n{dyld}printf '%s\\n' \"$@\" > '{args}'\nexport {CHILD_ENV}=1 {ARGS_ENV}='{args}' {MODE_ENV}={mode} {TABS_ENV}={tabs} {URL_ENV}='{url}' {CTL_ENV}='{ctl}' {CALLS_ENV}='{calls}' {EVAL_ENV}='{eval}'\nexec '{me}' '{test_path}' --exact --nocapture\n",
+        "#!/bin/sh\n# paddock-fake-browser\n{dyld}printf '%s\\n' \"$@\" > '{args}'\nexport {CHILD_ENV}=1 {ARGS_ENV}='{args}' {MODE_ENV}={mode} {TABS_ENV}={tabs} {URL_ENV}='{url}' {CTL_ENV}='{ctl}' {CALLS_ENV}='{calls}' {EVAL_ENV}='{eval}'\nexec '{me}' '{test_path}' --exact --nocapture\n",
         args = f.args_file.display(),
         url = f.url_file.display(),
         ctl = f.ctl_file.display(),

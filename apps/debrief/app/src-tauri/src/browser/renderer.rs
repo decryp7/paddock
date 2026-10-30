@@ -901,7 +901,7 @@ mod tests {
             std::fs::write(
                 &gated,
                 format!(
-                    "#!/bin/sh\nwhile [ ! -f '{}' ]; do sleep 0.01; done\nexec '{}' \"$@\"\n",
+                    "#!/bin/sh\n# paddock-fake-browser\nwhile [ ! -f '{}' ]; do sleep 0.01; done\nexec '{}' \"$@\"\n",
                     go.display(),
                     r.fake.exe.display()
                 ),

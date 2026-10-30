@@ -165,6 +165,15 @@ pub fn find_with(os: Os, env: &dyn Fn(&str) -> Option<String>, exists: &dyn Fn(&
     candidates(os, env).into_iter().find(|b| exists(&b.path))
 }
 
+/// The test-build gate of every program this driver starts (a launch, a self-test): never an installed browser, and no
+/// real program outside a throwaway session (rule 7; `paddock_testkit::live_browser::check_launch`), however it was found.
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) fn check_test_launch(exe: &Path, window: paddock_testkit::live_browser::BrowserWindow) -> Result<(), String> {
+    use paddock_testkit::live_browser::{check_launch, is_installed};
+    let installed = is_installed(exe, candidates(Os::CURRENT, &|k| std::env::var(k).ok()).into_iter().map(|b| b.path));
+    check_launch(exe, installed, window)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -529,7 +529,7 @@ fn a_failed_start_reports_the_browsers_error_output_and_leaves_no_profile() {
     let exe = base.path().join("fake-chrome.sh");
     std::fs::write(
         &exe,
-        "#!/bin/sh\necho 'Running as root without --no-sandbox is not supported' >&2\nexit 1\n",
+        "#!/bin/sh\n# paddock-fake-browser\necho 'Running as root without --no-sandbox is not supported' >&2\nexit 1\n",
     )
     .unwrap();
     std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -544,7 +544,7 @@ fn a_failed_start_reports_the_browsers_error_output_and_leaves_no_profile() {
     );
     assert_eq!(std::fs::read_dir(&profiles).unwrap().count(), 0);
     let quiet = base.path().join("quiet.sh");
-    std::fs::write(&quiet, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::write(&quiet, "#!/bin/sh\n# paddock-fake-browser\nexit 0\n").unwrap();
     std::fs::set_permissions(&quiet, std::fs::Permissions::from_mode(0o755)).unwrap();
     let e = Chromium::launch(&Browser::chromium(&quiet), &opts(&profiles))
         .err()
@@ -692,7 +692,7 @@ fn a_theme_that_cannot_be_written_does_not_stop_the_launch() {
 fn script(dir: &Path, name: &str, body: &str) -> Browser {
     use std::os::unix::fs::PermissionsExt;
     let exe = dir.join(name);
-    std::fs::write(&exe, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::write(&exe, format!("#!/bin/sh\n# paddock-fake-browser\n{body}\n")).unwrap();
     std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
     Browser::chromium(exe)
 }

@@ -14,7 +14,8 @@
 //! - [`live_browser`]: the gate of every test that starts a real browser (only in a throwaway Linux session, rule 7).
 //! - [`FakeClock`]: the deterministic clock of `paddock_jobs::time`, re-exported so a test needs one dependency.
 //!
-//! Nothing here touches the user's folders, starts a process or sleeps.
+//! Nothing here touches the user's folders or sleeps; the only process it starts is `reg.exe`, on Windows, to read the
+//! test-VM marker ([`live_browser::Host::current`]).
 
 pub mod env;
 pub mod golden;

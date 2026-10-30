@@ -225,13 +225,7 @@ impl Chromium {
         // Test builds: no installed browser, and no real one outside a throwaway session (rule 7), however it was found.
         // This driver always opens a window.
         #[cfg(any(test, feature = "test-support"))]
-        {
-            use paddock_testkit::live_browser::{check_launch, BrowserWindow};
-            let installed = crate::discover::candidates(crate::discover::Os::CURRENT, &|k| std::env::var(k).ok())
-                .iter()
-                .any(|c| c.path == exe.path);
-            check_launch(&exe.path, installed, BrowserWindow::Shown).map_err(Error::Launch)?;
-        }
+        crate::discover::check_test_launch(&exe.path, paddock_testkit::live_browser::BrowserWindow::Shown).map_err(Error::Launch)?;
         let (dir, throwaway) = match &opts.profile {
             Profile::Throwaway => (unique_dir(), true),
             Profile::Persistent(p) => (p.clone(), false),
@@ -737,6 +731,7 @@ mod tests {
     #[test]
     fn a_test_build_never_launches_an_installed_browser() {
         let env = |k: &str| std::env::var(k).ok();
+        // conformance: no-launch — the gate under test refuses each candidate before anything starts
         for exe in crate::discover::candidates(crate::discover::Os::CURRENT, &env) {
             let e = Chromium::launch(&exe, &LaunchOptions::default()).err().unwrap();
             assert!(

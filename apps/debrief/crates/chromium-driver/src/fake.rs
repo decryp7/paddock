@@ -95,7 +95,7 @@ fn script(
 ) -> String {
     let dyld: String = dyld.iter().map(|(k, v)| format!("export {k}='{v}'\n")).collect();
     format!(
-        "#!/bin/sh\n{dyld}printf '%s\\n' \"$@\" > '{args}'\nexport {CHILD_ENV}=1 {ARGS_ENV}='{args}' {MODE_ENV}={mode} {TABS_ENV}={tabs} FAKE_BROWSER_URL='{url}' {CTL_ENV}='{ctl}' {CALLS_ENV}='{calls}'\nexec '{me}' '{test_path}' --exact --nocapture\n",
+        "#!/bin/sh\n# paddock-fake-browser\n{dyld}printf '%s\\n' \"$@\" > '{args}'\nexport {CHILD_ENV}=1 {ARGS_ENV}='{args}' {MODE_ENV}={mode} {TABS_ENV}={tabs} FAKE_BROWSER_URL='{url}' {CTL_ENV}='{ctl}' {CALLS_ENV}='{calls}'\nexec '{me}' '{test_path}' --exact --nocapture\n",
         args = args.display(),
         url = url.display(),
         ctl = ctl.display(),

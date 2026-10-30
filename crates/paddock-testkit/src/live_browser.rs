@@ -16,9 +16,18 @@
 /// `1` opens real windows on that desktop: set it only under `xvfb-run` (CI does) or in a VM.
 pub const LIVE_BROWSER_VAR: &str = "PADDOCK_LIVE_BROWSER";
 
-/// The marker file of a Windows test VM, below `%ProgramData%`: the VM image creates it (`docs/dev-setup.md`, "Test VMs");
-/// no desktop machine has it.
-pub const WINDOWS_VM_MARKER: &str = r"Paddock\test-vm";
+/// The marker of a Windows test VM: the DWORD value `TestVM` = 1 under this machine-wide key, which only an administrator can
+/// write (`reg add HKLM\SOFTWARE\Paddock /v TestVM /t REG_DWORD /d 1 /f`, run once by the VM's set-up,
+/// `docs/dev-setup.md`, "Test VMs and real browsers"). No desktop machine has it.
+pub const WINDOWS_VM_KEY: &str = r"HKLM\SOFTWARE\Paddock";
+
+/// The value under [`WINDOWS_VM_KEY`] that marks a Windows test VM.
+pub const WINDOWS_VM_VALUE: &str = "TestVM";
+
+/// The line every fake browser and stub script of a test carries: the launch gate lets only these start outside a
+/// throwaway session ([`is_real_program`]). Real launchers are scripts too (Chrome's and Edge's on Linux), so a `#!` line
+/// alone proves nothing.
+pub const FAKE_MARKER: &str = "# paddock-fake-browser";
 
 /// How the browser a test wants to start shows itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,8 +43,8 @@ pub enum BrowserWindow {
 pub struct Host {
     /// The OS, as `std::env::consts::OS` names it.
     pub os: &'static str,
-    /// A macOS or Windows test VM (a hypervisor guest on macOS, `kern.hv_vmm_present`; the [`WINDOWS_VM_MARKER`] on
-    /// Windows). Never set on Linux, where CI's containers are the throwaway sessions.
+    /// A macOS or Windows test VM (a hypervisor guest on macOS, `kern.hv_vmm_present`; the administrator-only
+    /// [`WINDOWS_VM_KEY`] value on Windows). Never set on Linux, where CI's containers are the throwaway sessions.
     pub test_vm: bool,
 }
 
@@ -50,8 +59,7 @@ impl Host {
         let os = std::env::consts::OS;
         let test_vm = match os {
             "macos" => macos_guest(),
-            "windows" => std::env::var_os("ProgramData")
-                .is_some_and(|d| std::path::Path::new(&d).join(WINDOWS_VM_MARKER).is_file()),
+            "windows" => windows_vm_marked(),
             _ => false,
         };
         Host { os, test_vm }
@@ -79,6 +87,37 @@ fn macos_guest() -> bool {
 #[cfg(not(target_os = "macos"))]
 fn macos_guest() -> bool {
     false
+}
+
+/// Whether [`WINDOWS_VM_KEY`] has `TestVM` = 1, read with the system's `reg.exe` (bounded by its own exit; nothing else).
+#[cfg(windows)]
+fn windows_vm_marked() -> bool {
+    let reg = std::env::var_os("SystemRoot")
+        .map(|r| std::path::PathBuf::from(r).join("System32").join("reg.exe"))
+        .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows\System32\reg.exe"));
+    std::process::Command::new(reg)
+        .args(["query", WINDOWS_VM_KEY, "/v", WINDOWS_VM_VALUE])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .is_ok_and(|o| o.status.success() && reg_dword_is_one(&String::from_utf8_lossy(&o.stdout)))
+}
+
+#[cfg(not(windows))]
+fn windows_vm_marked() -> bool {
+    false
+}
+
+/// Whether `reg query` output shows `TestVM    REG_DWORD    0x1`.
+#[cfg(any(windows, test))]
+fn reg_dword_is_one(out: &str) -> bool {
+    out.lines().any(|l| {
+        let f: Vec<&str> = l.split_whitespace().collect();
+        f.len() == 3
+            && f[0].eq_ignore_ascii_case(WINDOWS_VM_VALUE)
+            && f[1] == "REG_DWORD"
+            && f[2] == "0x1"
+    })
 }
 
 /// Whether a test may start a real browser here.
@@ -123,7 +162,7 @@ pub fn live_browser_with(
             ("vm", true) => Ok(LiveBrowser::Allowed),
             ("vm", false) => Err(format!(
                 "{LIVE_BROWSER_VAR}=vm but this {} machine is not a test VM (no VM marker): a test never starts a real \
-                 browser in a user's session (Paddock rule 7)",
+                 browser on a desktop or in a user's session (Paddock rule 7)",
                 host.os
             )),
             _ => Ok(LiveBrowser::NotHere(format!(
@@ -186,23 +225,36 @@ pub fn found_or_skip<B>(found: Result<TestBrowser<B>, String>) -> Option<B> {
     }
 }
 
-/// Whether `exe` is a real program: an existing file that is not a script. A test's fake browser is a script (`#!` on
-/// Unix, `.cmd`/`.bat` on Windows), and a path that does not exist starts nothing.
+/// Whether `exe` is a real program: an existing file that is not a test's fake, which says so with the [`FAKE_MARKER`]
+/// line in its first 4 KiB. A path that does not exist starts nothing.
 pub fn is_real_program(exe: &std::path::Path) -> bool {
     use std::io::Read;
     if !exe.is_file() {
         return false;
     }
-    let ext = exe
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase);
-    if matches!(ext.as_deref(), Some("cmd" | "bat")) {
-        return false;
-    }
-    let mut first = [0u8; 2];
-    let read = std::fs::File::open(exe).and_then(|mut f| f.read_exact(&mut first));
-    !(read.is_ok() && &first == b"#!")
+    let mut head = Vec::with_capacity(4096);
+    let read = std::fs::File::open(exe).and_then(|f| f.take(4096).read_to_end(&mut head));
+    !(read.is_ok()
+        && String::from_utf8_lossy(&head)
+            .lines()
+            .any(|l| l.trim() == FAKE_MARKER))
+}
+
+/// `#!/bin/sh`, the [`FAKE_MARKER`] and `body`: the text of a fake browser or stub script.
+pub fn fake_script(body: &str) -> String {
+    format!("#!/bin/sh\n{FAKE_MARKER}\n{body}\n")
+}
+
+/// Whether `exe` is one of `installed` (a driver's installed-browser candidates), comparing canonical paths where they
+/// exist (a link or `..` must not hide an installed browser).
+pub fn is_installed(
+    exe: &std::path::Path,
+    installed: impl IntoIterator<Item = std::path::PathBuf>,
+) -> bool {
+    let canonical =
+        |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let exe = canonical(exe);
+    installed.into_iter().any(|c| canonical(&c) == exe)
 }
 
 /// The launch-time gate a driver asks in test builds, before it starts `exe` with `window`. Refused: a browser the user
@@ -579,24 +631,74 @@ mod tests {
     }
 
     #[test]
-    fn scripts_and_missing_paths_are_not_real_programs() {
+    fn only_marked_fakes_and_missing_paths_are_not_real_programs() {
         let d = tempfile::tempdir().unwrap();
-        let script = d.path().join("fake-browser");
-        std::fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+        let fake = d.path().join("fake-browser");
+        std::fs::write(&fake, fake_script("exit 0")).unwrap();
+        // Review P2-1: Chrome's and Edge's Linux launchers are bash scripts, and a wrapper script can start a real
+        // browser: a `#!` line is no proof of a fake, and neither is a Windows batch file.
+        let launcher = d.path().join("google-chrome");
+        std::fs::write(
+            &launcher,
+            "#!/bin/bash\nexec -a \"$0\" /opt/google/chrome/chrome \"$@\"\n",
+        )
+        .unwrap();
         let cmd = d.path().join("fake.cmd");
         std::fs::write(&cmd, "@echo off").unwrap();
         let binary = d.path().join("chrome");
         std::fs::write(&binary, [0x7f, b'E', b'L', b'F']).unwrap();
         let empty = d.path().join("empty");
         std::fs::write(&empty, "").unwrap();
-        assert!(!is_real_program(&script));
-        assert!(!is_real_program(&cmd));
+        assert!(!is_real_program(&fake));
         assert!(!is_real_program(&d.path().join("missing")));
         assert!(!is_real_program(d.path()), "a folder");
-        assert!(is_real_program(&binary));
+        for real in [&launcher, &cmd, &binary, &empty] {
+            assert!(is_real_program(real), "{}", real.display());
+        }
+        // The marker counts only as a line of its own, not inside another one.
+        let quoted = d.path().join("quoted");
+        std::fs::write(&quoted, format!("#!/bin/sh\necho '{FAKE_MARKER}'\n")).unwrap();
+        assert!(is_real_program(&quoted));
+    }
+
+    #[test]
+    fn installed_paths_compare_canonically() {
+        let d = tempfile::tempdir().unwrap();
+        let real = d.path().join("chrome");
+        std::fs::write(&real, "x").unwrap();
+        let via_dots = d.path().join("sub").join("..").join("chrome");
+        std::fs::create_dir(d.path().join("sub")).unwrap();
+        assert!(is_installed(&via_dots, [real.clone()]));
+        #[cfg(unix)]
+        {
+            let link = d.path().join("link");
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            assert!(
+                is_installed(&link, [real.clone()]),
+                "a link to an installed browser"
+            );
+        }
+        assert!(is_installed(
+            std::path::Path::new("/no/such/chrome"),
+            [std::path::PathBuf::from("/no/such/chrome")]
+        ));
+        assert!(!is_installed(&real, [d.path().join("other")]));
+    }
+
+    #[test]
+    fn the_windows_vm_marker_is_the_admin_only_registry_value() {
+        let out =
+            "\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Paddock\r\n    TestVM    REG_DWORD    0x1\r\n\r\n";
+        assert!(reg_dword_is_one(out));
+        assert!(!reg_dword_is_one(&out.replace("0x1", "0x0")));
+        assert!(!reg_dword_is_one(&out.replace("REG_DWORD", "REG_SZ")));
+        assert!(!reg_dword_is_one(""));
         assert!(
-            is_real_program(&empty),
-            "an unreadable header is treated as a program"
+            WINDOWS_VM_KEY.starts_with("HKLM\\"),
+            "machine-wide: only an administrator writes it"
         );
+        if !cfg!(windows) {
+            assert!(!windows_vm_marked());
+        }
     }
 }

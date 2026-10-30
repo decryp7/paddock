@@ -173,6 +173,9 @@ pub fn locate_executable(root: &Path, os: Os) -> Option<Browser> {
 
 /// Runs `<exe> --version` with a timeout and returns its output; the self-test of an installed browser.
 pub fn self_test(exe: &Path) -> Result<String> {
+    // Test builds: a self-test starts the browser too (headless), so it asks the same gate as a launch (rule 7).
+    #[cfg(any(test, feature = "testing"))]
+    crate::discover::check_test_launch(exe, paddock_testkit::live_browser::BrowserWindow::Headless).map_err(err)?;
     let mut child = std::process::Command::new(exe)
         .arg("--version")
         .stdin(std::process::Stdio::null())
@@ -367,6 +370,17 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("valid archive"));
+    }
+
+    #[test]
+    fn self_test_never_starts_an_installed_browser_in_a_test_build() {
+        // Regression (review): `renderer_status()` self-tests `find_installed()`, so a status test on Windows ran the
+        // user's msedge.exe. In test builds the self-test asks the launch gate first.
+        // conformance: no-launch — the gate under test refuses each candidate before anything starts
+        for b in crate::discover::candidates(crate::discover::Os::CURRENT, &|k| std::env::var(k).ok()) {
+            let e = self_test(&b.path).unwrap_err().to_string();
+            assert!(e.contains("installed"), "{}: {e}", b.path.display());
+        }
     }
 
     #[test]

@@ -3350,6 +3350,7 @@ dependencies = [
  "log",
  "objc2-app-kit",
  "paddock-commands",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "serde",
  "serde_json",

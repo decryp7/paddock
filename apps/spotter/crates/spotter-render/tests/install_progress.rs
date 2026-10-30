@@ -23,7 +23,7 @@ fn fake_zip(dir: &Path) -> (Vec<u8>, String) {
     let mut z = zip::ZipWriter::new(std::fs::File::create(&p).unwrap());
     let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     z.start_file("chrome-linux/chrome", stored).unwrap();
-    z.write_all(b"#!/bin/sh\necho Chromium 1\n").unwrap();
+    z.write_all(b"#!/bin/sh\n# paddock-fake-browser\necho Chromium 1\n").unwrap();
     z.start_file("chrome-linux/locales.pak", stored).unwrap();
     z.write_all(&(0..BIG).map(|i| (i % 249) as u8).collect::<Vec<_>>()).unwrap();
     z.finish().unwrap();
