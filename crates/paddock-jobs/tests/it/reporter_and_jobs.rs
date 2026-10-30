@@ -370,3 +370,27 @@ fn many_threads_share_one_reporter() {
         "events arrive in order"
     );
 }
+
+#[test]
+fn a_phase_publishes_its_last_throttled_count_before_the_next_phase_starts() {
+    let sink = Collect::new();
+    let clock = FakeClock::new();
+    let r = reporter(sink.clone(), &clock);
+    r.begin_phase(Phase::discovering("walk", "Finding"));
+    r.add(4);
+    r.add(1); // within the interval: pending, not yet published
+    r.begin_phase(Phase::items("read", "Reading", 10));
+    let walk_counts: Vec<u64> = sink
+        .all()
+        .iter()
+        .filter_map(|s| match &s.state {
+            JobState::Running { phase: Some(p) } if p.phase.id == "walk" => Some(p.done),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        walk_counts.last(),
+        Some(&5),
+        "the walk's final count is lost: {walk_counts:?}"
+    );
+}

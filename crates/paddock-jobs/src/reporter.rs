@@ -163,8 +163,9 @@ impl Reporter {
             g.eta_ms = g.eta.observe(now, done, total);
         }
         g.seq += 1;
-        let snap = self.build(&g);
+        // Cleared before the count is read: an add that lands after this marks it pending again instead of being lost.
         self.0.dirty.store(false, Ordering::Relaxed);
+        let snap = self.build(&g);
         self.0.last_emit_ms.store(now, Ordering::Relaxed);
         if catch_unwind(AssertUnwindSafe(|| self.0.sink.emit(&snap))).is_err() {
             self.0.sink_panics.fetch_add(1, Ordering::Relaxed);
@@ -191,6 +192,8 @@ impl Reporter {
 
     /// Starts a new phase on its own scale: the count restarts at 0 and the event goes out at once. Starts the job if needed.
     pub fn begin_phase(&self, phase: Phase) {
+        // The previous phase's last throttled count goes out first: it is that phase's final value and the reset below drops it.
+        self.flush();
         let mut g = lock(&self.0.inner);
         if g.state.is_terminal() {
             return;
