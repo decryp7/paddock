@@ -37,7 +37,8 @@ fn pos(l: u32, c: u32) -> Position {
 }
 
 const PACK: &str = "[pack]\nid = \"go\"\nlanguages = [\"go\"]\nglobs = [\"**/*.go\"]\n[server]\ncommand = \"gopls\"\ninit_options = { a = 1 }\n[features]\nuse = [\"definition\"]\n";
-const RULE: &str = "id = \"r\"\ntitle = \"T\"\nseverity = \"low\"\ngood = [\"a\"]\nbad = [\"b\"]\n[check]\npattern = \"$X\"\n";
+const RULE: &str =
+    "id = \"r\"\ntitle = \"T\"\nseverity = \"low\"\nfix = \"Do it.\"\ngood = [\"a\"]\nbad = [\"b\"]\n[check]\npattern = \"$X\"\n";
 
 #[test]
 fn every_core_type_round_trips_through_json_and_postcard() {
@@ -208,7 +209,7 @@ fn every_validated_type_refuses_an_invalid_value_on_json_and_postcard() {
         exclude: vec![],
         languages: vec![],
         check: rule.check().clone(),
-        fix: None,
+        fix: String::new(),
         good: vec![],
         bad: vec![],
     };

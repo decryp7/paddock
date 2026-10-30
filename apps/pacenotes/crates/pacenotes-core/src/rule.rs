@@ -12,6 +12,8 @@ use crate::tier::Severity;
 pub const MAX_EXAMPLES: usize = 32;
 /// The most globs per list.
 pub const MAX_GLOBS: usize = 64;
+/// The longest fix sentence, in bytes (measured against conformance's longest, 346).
+pub const MAX_FIX_BYTES: usize = 512;
 /// The longest example, pattern or Markdown text, in bytes.
 pub const MAX_TEXT_BYTES: usize = 16 * 1024;
 
@@ -103,7 +105,8 @@ pub(crate) struct RuleWire {
     #[serde(default)]
     pub(crate) languages: Vec<Language>,
     pub(crate) check: Check,
-    pub(crate) fix: Option<String>,
+    #[serde(default)]
+    pub(crate) fix: String,
     #[serde(default)]
     pub(crate) good: Vec<String>,
     #[serde(default)]
@@ -129,7 +132,7 @@ pub struct RuleSpec {
     exclude: Vec<String>,
     languages: Vec<Language>,
     check: Check,
-    fix: Option<String>,
+    fix: String,
     good: Vec<String>,
     bad: Vec<String>,
 }
@@ -185,8 +188,20 @@ impl RuleSpec {
                 "List the languages the rule applies to, or none for all.",
             ));
         }
-        if w.fix.as_deref().is_some_and(|f| f.len() > MAX_TEXT_BYTES) {
-            return Err(err("fix", "it is too long".into(), "Keep the fix hint short."));
+        let fix = w.fix.trim();
+        if fix.is_empty() {
+            return Err(err(
+                "fix",
+                "it is missing or blank".into(),
+                "Add `fix = \"...\"`: one sentence that says what to do about a finding.",
+            ));
+        }
+        if fix.len() > MAX_FIX_BYTES || fix.chars().any(char::is_control) {
+            return Err(err(
+                "fix",
+                format!("it is longer than {MAX_FIX_BYTES} bytes or has a line break"),
+                "Write the fix as one short sentence on one line.",
+            ));
         }
         for (field, list) in [("good", &w.good), ("bad", &w.bad)] {
             if list.len() > MAX_EXAMPLES || list.iter().any(|e| e.len() > MAX_TEXT_BYTES || e.contains('\0')) {
@@ -232,7 +247,7 @@ impl RuleSpec {
             exclude: w.exclude,
             languages: w.languages,
             check: w.check,
-            fix: w.fix,
+            fix: fix.to_owned(),
             good: w.good,
             bad: w.bad,
         })
@@ -273,9 +288,9 @@ impl RuleSpec {
         &self.check
     }
 
-    /// A hint on how to fix a violation.
-    pub fn fix(&self) -> Option<&str> {
-        self.fix.as_deref()
+    /// What to do about a violation, one sentence (required).
+    pub fn fix(&self) -> &str {
+        &self.fix
     }
 
     /// Snippets the rule must not flag; with `bad` they are the rule's tests.
@@ -327,9 +342,26 @@ pattern = "$X.unwrap()"
 
     #[test]
     fn a_markdown_rule_needs_text_not_examples() {
-        let md = "id = \"validate-body\"\ntitle = \"Validate the body\"\nseverity = \"medium\"\n[check]\nmarkdown = \"Handlers validate the request body before using it.\"\n";
+        let md = "id = \"validate-body\"\ntitle = \"Validate the body\"\nseverity = \"medium\"\nfix = \"Validate it.\"\n[check]\nmarkdown = \"Handlers validate the request body before using it.\"\n";
         assert!(RuleSpec::from_toml(md).is_ok());
         assert!(msg(&md.replace("Handlers validate the request body before using it.", "  ")).contains("check.text"));
+    }
+
+    /// D-rules decision 2 (2026-10-30): every rule says in one sentence what to do.
+    #[test]
+    fn a_rule_without_a_usable_fix_sentence_is_refused_with_a_message_that_says_to_add_one() {
+        let without = GOOD.replace("fix = \"Return the error with `?`.\"\n", "");
+        let msg = |t: &str| RuleSpec::from_toml(t).unwrap_err().to_string();
+        assert!(
+            msg(&without).contains("field `fix`") && msg(&without).contains("Add"),
+            "{}",
+            msg(&without)
+        );
+        for bad in ["fix = \"   \"", "fix = \"two\\nlines\"", &format!("fix = \"{}\"", "w".repeat(513))] {
+            let text = GOOD.replace("fix = \"Return the error with `?`.\"", bad);
+            assert!(msg(&text).contains("field `fix`"), "{bad}: {}", msg(&text));
+        }
+        assert!(RuleSpec::from_toml(&GOOD.replace("Return the error with `?`.", &"w".repeat(512))).is_ok());
     }
 
     #[test]
@@ -385,7 +417,7 @@ pattern = "$X.unwrap()"
         assert_eq!(r.include(), ["src/**/*.rs"]);
         assert_eq!(r.exclude(), ["tests/**"]);
         assert_eq!(r.languages().len(), 1);
-        assert_eq!(r.fix(), Some("Return the error with `?`."));
+        assert_eq!(r.fix(), "Return the error with `?`.");
         assert_eq!((r.good().len(), r.bad().len()), (1, 1));
         assert_eq!(r.check(), &Check::Pattern("$X.unwrap()".into()));
     }

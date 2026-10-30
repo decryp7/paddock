@@ -55,11 +55,6 @@ fn a_rule_that_cannot_run_is_refused_with_a_message() {
         "id = \"p\"\ntitle = \"T\"\nseverity = \"low\"\nfix = \"Do it.\"\ngood = [\"fn f() {}\"]\nbad = [\"fn f() { f(1); }\"]\ncheck = { pattern = \"f($X)\" }\n",
     );
     assert!(matches!(CompiledRule::compile(&none), Err(PatternError::NoLanguage(_))));
-    let no_fix = spec(
-        "id = \"p\"\ntitle = \"T\"\nseverity = \"low\"\nlanguages = [\"rust\"]\ngood = [\"fn f() {}\"]\nbad = [\"fn f() { f(1); }\"]\ncheck = { pattern = \"f($X)\" }\n",
-    );
-    let err = CompiledRule::compile(&no_fix).err().unwrap();
-    assert!(matches!(err, PatternError::MissingFix(_)) && err.to_string().contains("says in one sentence"));
     let json = spec(
         "id = \"p\"\ntitle = \"T\"\nseverity = \"low\"\nlanguages = [\"json\"]\nfix = \"Do it.\"\ngood = [\"{}\"]\nbad = [\"[]\"]\ncheck = { pattern = \"f($X)\" }\n",
     );
@@ -69,8 +64,6 @@ fn a_rule_that_cannot_run_is_refused_with_a_message() {
     ));
     let bad = spec(&UNWRAP_RULE.replace("$X.unwrap()", "x.unwrap(("));
     assert!(matches!(CompiledRule::compile(&bad), Err(PatternError::Syntax { .. })));
-    let long_fix = spec(&UNWRAP_RULE.replace("Return the error with `?` or handle it.", &"w ".repeat(400)));
-    assert!(matches!(CompiledRule::compile(&long_fix), Err(PatternError::BadFix { .. })));
 }
 
 #[test]

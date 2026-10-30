@@ -71,9 +71,6 @@ pub enum PatternError {
         /// The language as written.
         language: String,
     },
-    /// No fix sentence.
-    #[error("rule {0} has no `fix`; every rule says in one sentence what to do about a finding")]
-    MissingFix(String),
     /// The fix sentence is not valid.
     #[error("rule {rule}: {problem}")]
     BadFix {
@@ -471,8 +468,7 @@ impl CompiledRule {
         if spec.languages().is_empty() {
             return Err(PatternError::NoLanguage(id));
         }
-        let fix = spec.fix().ok_or_else(|| PatternError::MissingFix(id.clone()))?;
-        let fix = FixSentence::parse(fix).map_err(|e| PatternError::BadFix {
+        let fix = FixSentence::parse(spec.fix()).map_err(|e| PatternError::BadFix {
             rule: id.clone(),
             problem: e.to_string(),
         })?;

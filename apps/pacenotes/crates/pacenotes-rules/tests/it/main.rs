@@ -3,6 +3,7 @@
 
 mod baseline;
 mod engine;
+mod misc;
 mod pattern;
 mod report;
 mod rules;
