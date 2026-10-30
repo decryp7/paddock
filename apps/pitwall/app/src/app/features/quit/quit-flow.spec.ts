@@ -75,8 +75,36 @@ describe('QuitFlow', () => {
     const backend = new MockBackend({ quitAsk: true });
     const { flow, opened } = await setup('ask', undefined, backend);
     const stop = flow.watch();
-    await new Promise((r) => setTimeout(r, 0));
-    expect(opened).toHaveLength(1);
+    await vi.waitFor(() => expect(opened).toHaveLength(1));
+    stop();
+  });
+
+  it('takes the request before asking: a stale event with nothing pending does not ask; a pending one asks once', async () => {
+    const backend = new MockBackend();
+    const { flow, opened } = await setup('ask', undefined, backend);
+    const take = vi.spyOn(backend, 'takeQuitAsk');
+    const stop = flow.watch();
+    await vi.waitFor(() => expect(take).toHaveBeenCalledTimes(1));
+    backend.emitStaleQuitAsk();
+    await vi.waitFor(() => expect(take).toHaveBeenCalledTimes(2));
+    expect(opened).toEqual([]);
+    backend.askQuit();
+    await vi.waitFor(() => expect(opened).toHaveLength(1));
+    // The request was taken: a second event for the same Quit finds nothing and asks nothing more.
+    backend.emitStaleQuitAsk();
+    await vi.waitFor(() => expect(take).toHaveBeenCalledTimes(4));
+    expect(opened.map((o) => o.id)).toEqual([QUIT_DIALOG_ID]);
+    stop();
+  });
+
+  it('a request that cannot be taken asks nothing', async () => {
+    const backend = new MockBackend({ quitAsk: true, failing: ['takeQuitAsk'] });
+    const { flow, opened } = await setup('ask', undefined, backend);
+    const take = vi.spyOn(backend, 'takeQuitAsk');
+    const stop = flow.watch();
+    await vi.waitFor(() => expect(take).toHaveBeenCalled());
+    await expect(take.mock.results[0]!.value).rejects.toBeDefined();
+    expect(opened).toEqual([]);
     stop();
   });
 });
