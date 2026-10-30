@@ -509,4 +509,34 @@ test.describe('outlined field geometry', () => {
       });
     }
   }
+  for (const theme of THEMES) {
+    for (const density of ['standard', 'compact', 'comfortable'] as const) {
+      test(`Material controls: a row of a labelled field, a field without a label and buttons shares one vertical centre (${theme}, ${density})`, async ({ page }) => {
+        await open(page, theme, 'debrief', density);
+        const row = page.getByTestId('material-mixed-row');
+        await row.scrollIntoViewIfNeeded();
+        if (SHOTS) {
+          mkdirSync(SHOTS, { recursive: true });
+          // With a margin: the floated label sits on the field's top border, half above the row's box.
+          const b = (await row.boundingBox())!;
+          await page.screenshot({ path: join(SHOTS, `mixed-row-${theme}-${density}.png`), clip: { x: b.x - 12, y: b.y - 12, width: b.width + 24, height: b.height + 24 } });
+        }
+        // The visible boxes: a field's outlined container (not its host, which also holds the subscript), a button itself.
+        const boxes = await row.evaluate((r) =>
+          [...r.children].map((c) => {
+            const box = (c.querySelector('.mat-mdc-text-field-wrapper') ?? c).getBoundingClientRect();
+            return { name: c.textContent?.trim() || (c.querySelector('input')?.getAttribute('aria-label') ?? ''), height: box.height, centre: box.top + box.height / 2 };
+          }),
+        );
+        expect(boxes.map((b) => Math.round(b.height)), 'the row mixes heights (labelled field, field, buttons)').toEqual([
+          (await px(page, '--pd-control-height')) + 2 * (await px(page, '--pd-space-2')),
+          await px(page, '--pd-control-height'),
+          await px(page, '--pd-button-height'),
+          await px(page, '--pd-button-height'),
+        ]);
+        const centres = boxes.map((b) => b.centre);
+        expect(Math.max(...centres) - Math.min(...centres), JSON.stringify(boxes)).toBeLessThanOrEqual(1);
+      });
+    }
+  }
 });

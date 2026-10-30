@@ -291,7 +291,9 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   and decision D1, 2026-10-28): the label 12/500 sits in the outline's notch and stays there, empty or not. A labelled field is
   the control height plus 8 px above and below its text row (44 px at the standard density; 40 compact, 48 comfortable), so the
   label never touches the text and the text keeps 8 px from the outline; a textarea has the same padding and grows; a field
-  without a label (a toolbar filter) is the control height. Helper 12 muted
+  without a label (a toolbar filter) is the control height. Do not mix a labelled field with a field without a label, or a
+  labelled field with a 32 px button, in one row unless the row centres its items: use `.pd-field-row` (controls.css; items share
+  one vertical centre), and keep fields with a hint or error line in a top-aligned column instead. Helper 12 muted
   under the field, replaced by the error in danger with its icon; validate on blur. Selects are `mat-select`, times
   `mat-timepicker`, a few exclusive choices `mat-button-toggle-group`. Toggles are for immediate effects, checkboxes for form
   submit; group settings by consequence, not by data model. (UI rule 11, "label above the input", is superseded: the label is in the notch.)
