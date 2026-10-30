@@ -1012,3 +1012,10 @@ From the review of the import-to-search work on `debrief/duckdb-2`:
   - `Positions::order_complete` is false while the positions are stale, and the app then runs the ordering job.
   - A live append never extends stale positions, and never clears the mark.
   - Cancel stops the ordering after one attempt: it rolls back and leaves the mark as it was.
+- **Percent scale in the jobs service and the Jobs pane.** The ordering job reports DuckDB's estimate as "N of 100", and
+  the import's ordering stage puts "(N%)" in its label, because a phase has only bytes, counts or indeterminate. A
+  percent scale in `PhaseScale`, shown as a percentage by the Jobs pane, would let both use it.
+- **The ordering lifecycle is one state machine per window** (app `ordering.rs`: Ready, Running with the job's id,
+  LeftToUser). Debrief starts the ordering once per episode. A cancelled or failed ordering is left to the user, with
+  a message per window whose action retries it, and the Store pane never starts a second one. Any change of the
+  window's store starts a new episode.

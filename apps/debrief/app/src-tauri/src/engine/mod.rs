@@ -234,11 +234,19 @@ impl Engine {
         let profile = crate::sync::lock(&self.profile).clone();
         let store = self.host.create(&dir, &profile).map_err(|e| unavailable(&e))?;
         self.hand_parsers(store.as_ref());
+        self.new_ordering_episode();
         *slot = Some(Current {
             store: store.clone(),
             kind: StoreKind::Scratch,
         });
         Ok(store)
+    }
+
+    /// Another store in the window (opened, created, replaced or closed): a new ordering episode (`crate::ordering`,
+    /// `Event::Opened`), so an earlier episode's Cancel or failure does not keep this store from being ordered.
+    fn new_ordering_episode(&self) {
+        let mut o = crate::sync::lock(&self.ordering);
+        *o = crate::ordering::step(*o, crate::ordering::Event::Opened).0;
     }
 
     /// Hands the window's parser library to `store`; remembers how many of its sources need reading again.
@@ -292,6 +300,7 @@ impl Engine {
     /// Makes `store` the window's store; the one before is closed (and its scratch folder deleted).
     pub(crate) fn replace(&self, store: SharedStore, kind: StoreKind) {
         self.hand_parsers(store.as_ref());
+        self.new_ordering_episode();
         let previous = crate::sync::write(&self.current).replace(Current { store, kind });
         if let Some(p) = previous {
             retire(p);
@@ -628,7 +637,10 @@ mod tests {
         drop(a);
         // Another store replaces it; the scratch folder goes.
         let other = local::host().create(&root.join("other"), &Profile::default_profile()).unwrap();
+        // An ordering left to the user belongs to the store it was about: the next store starts a new episode.
+        *crate::sync::lock(&engine.ordering) = crate::ordering::State::LeftToUser;
         engine.replace(other, StoreKind::Project);
+        assert_eq!(*crate::sync::lock(&engine.ordering), crate::ordering::State::Ready);
         assert_eq!(engine.kind(), Some(StoreKind::Project));
         assert!(!first.exists(), "the scratch folder was removed");
         // A project folder stays when the window closes.

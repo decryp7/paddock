@@ -15,8 +15,9 @@ pub(crate) enum State {
     /// Nothing is known to be wrong, or a new episode: an incomplete order starts the job.
     #[default]
     Ready,
-    /// An ordering job is queued or running; `auto`: Debrief started it.
-    Running { auto: bool },
+    /// An ordering job is queued or running; `auto`: Debrief started it; `job`: its id, once the jobs service gave it
+    /// (until then an end is taken as this job's: only the job just started can end in the window).
+    Running { auto: bool, job: Option<u64> },
     /// This episode's ordering was cancelled or failed: Debrief does not start it again.
     LeftToUser,
 }
@@ -32,12 +33,14 @@ pub(crate) enum Outcome {
 /// What happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Event {
-    /// A store was opened in the window: a new episode.
+    /// The window's store was opened or replaced: a new episode.
     Opened,
     /// The store says the order is incomplete.
     Incomplete,
-    /// The user started the ordering (the Store pane, or the message's action).
+    /// The user asks for the ordering (the Store pane, or the message's action).
     UserStarted,
+    /// The job [`Action::StartJob`] asked for was started with id `job`.
+    Started { job: u64 },
     /// An ordering job of the window ended (`job` is its id).
     Finished { outcome: Outcome, job: u64 },
 }
@@ -46,8 +49,12 @@ pub(crate) enum Event {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Action {
     Nothing,
-    /// Start the ordering job (Debrief's own start).
-    StartJob,
+    /// Start the ordering job (`auto`: Debrief's own start), then report [`Event::Started`].
+    StartJob {
+        auto: bool,
+    },
+    /// The user asked while an ordering job runs: say so, start nothing.
+    AlreadyRunning,
     /// Tell the user the events are not in time order, with an action that runs the ordering again (a retry of `job`).
     AskUser {
         job: u64,
@@ -58,19 +65,25 @@ pub(crate) enum Action {
 
 /// The next state and the action for `event` in `state`.
 pub(crate) fn step(state: State, event: Event) -> (State, Action) {
+    use State::*;
     match (state, event) {
-        (_, Event::Opened) => (State::Ready, Action::Nothing),
-        (State::Ready, Event::Incomplete) => (State::Running { auto: true }, Action::StartJob),
-        (s @ (State::Running { .. } | State::LeftToUser), Event::Incomplete) => (s, Action::Nothing),
-        (_, Event::UserStarted) => (State::Running { auto: false }, Action::Nothing),
+        (_, Event::Opened) => (Ready, Action::Nothing),
+        (Ready, Event::Incomplete) => (Running { auto: true, job: None }, Action::StartJob { auto: true }),
+        (s @ (Running { .. } | LeftToUser), Event::Incomplete) => (s, Action::Nothing),
+        (s @ Running { .. }, Event::UserStarted) => (s, Action::AlreadyRunning),
+        (Ready | LeftToUser, Event::UserStarted) => (Running { auto: false, job: None }, Action::StartJob { auto: false }),
+        (Running { auto, job: None }, Event::Started { job }) => (Running { auto, job: Some(job) }, Action::Nothing),
+        (s, Event::Started { .. }) => (s, Action::Nothing),
+        // An end of another job (one of before an open, or a second one) is not this episode's.
+        (s @ Running { job: Some(ours), .. }, Event::Finished { job, .. }) if job != ours => (s, Action::Nothing),
         (
-            _,
+            Running { .. },
             Event::Finished {
                 outcome: Outcome::Done, ..
             },
-        ) => (State::Ready, Action::Resolve),
-        (State::Running { .. }, Event::Finished { job, .. }) => (State::LeftToUser, Action::AskUser { job }),
-        (s @ (State::Ready | State::LeftToUser), Event::Finished { .. }) => (s, Action::Nothing),
+        ) => (Ready, Action::Resolve),
+        (Running { .. }, Event::Finished { job, .. }) => (LeftToUser, Action::AskUser { job }),
+        (Ready | LeftToUser, Event::Finished { .. }) => (state, Action::Nothing),
     }
 }
 
@@ -78,38 +91,76 @@ pub(crate) fn step(state: State, event: Event) -> (State, Action) {
 mod tests {
     use super::*;
 
-    const AUTO: State = State::Running { auto: true };
-    const USER: State = State::Running { auto: false };
+    const fn auto(job: Option<u64>) -> State {
+        State::Running { auto: true, job }
+    }
+    const fn user(job: Option<u64>) -> State {
+        State::Running { auto: false, job }
+    }
 
-    fn finished(outcome: Outcome) -> Event {
-        Event::Finished { outcome, job: 7 }
+    fn finished(outcome: Outcome, job: u64) -> Event {
+        Event::Finished { outcome, job }
     }
 
     #[test]
     fn the_table() {
         let table = [
-            // An incomplete order starts the job once per episode.
-            (State::Ready, Event::Incomplete, AUTO, Action::StartJob),
-            (AUTO, Event::Incomplete, AUTO, Action::Nothing),
-            (USER, Event::Incomplete, USER, Action::Nothing),
+            // An incomplete order starts the job once per episode; its id is recorded once started.
+            (State::Ready, Event::Incomplete, auto(None), Action::StartJob { auto: true }),
+            (auto(None), Event::Started { job: 7 }, auto(Some(7)), Action::Nothing),
+            (auto(Some(7)), Event::Incomplete, auto(Some(7)), Action::Nothing),
+            (user(Some(7)), Event::Incomplete, user(Some(7)), Action::Nothing),
+            (auto(Some(7)), Event::Started { job: 9 }, auto(Some(7)), Action::Nothing),
+            // The user asks while it runs: nothing is started (the Store pane cannot start a second one).
+            (auto(Some(7)), Event::UserStarted, auto(Some(7)), Action::AlreadyRunning),
+            (user(None), Event::UserStarted, user(None), Action::AlreadyRunning),
             // Cancelled or failed: left to the user, asked once, never restarted by the next refresh or restart.
-            (AUTO, finished(Outcome::Cancelled), State::LeftToUser, Action::AskUser { job: 7 }),
-            (AUTO, finished(Outcome::Failed), State::LeftToUser, Action::AskUser { job: 7 }),
-            (USER, finished(Outcome::Cancelled), State::LeftToUser, Action::AskUser { job: 7 }),
+            (
+                auto(Some(7)),
+                finished(Outcome::Cancelled, 7),
+                State::LeftToUser,
+                Action::AskUser { job: 7 },
+            ),
+            (
+                auto(Some(7)),
+                finished(Outcome::Failed, 7),
+                State::LeftToUser,
+                Action::AskUser { job: 7 },
+            ),
+            (
+                user(Some(7)),
+                finished(Outcome::Cancelled, 7),
+                State::LeftToUser,
+                Action::AskUser { job: 7 },
+            ),
+            (
+                auto(None),
+                finished(Outcome::Failed, 7),
+                State::LeftToUser,
+                Action::AskUser { job: 7 },
+            ),
             (State::LeftToUser, Event::Incomplete, State::LeftToUser, Action::Nothing),
+            // An end of another job is not this one's.
+            (auto(Some(7)), finished(Outcome::Failed, 3), auto(Some(7)), Action::Nothing),
+            (auto(Some(7)), finished(Outcome::Done, 3), auto(Some(7)), Action::Nothing),
             // The user starts it again (Store pane, the message's action).
-            (State::LeftToUser, Event::UserStarted, USER, Action::Nothing),
-            (State::Ready, Event::UserStarted, USER, Action::Nothing),
+            (State::LeftToUser, Event::UserStarted, user(None), Action::StartJob { auto: false }),
+            (State::Ready, Event::UserStarted, user(None), Action::StartJob { auto: false }),
             // Done ends the episode and resolves the message.
-            (AUTO, finished(Outcome::Done), State::Ready, Action::Resolve),
-            (USER, finished(Outcome::Done), State::Ready, Action::Resolve),
-            (State::LeftToUser, finished(Outcome::Done), State::Ready, Action::Resolve),
-            // Opening a store is a new episode.
+            (auto(Some(7)), finished(Outcome::Done, 7), State::Ready, Action::Resolve),
+            (user(Some(7)), finished(Outcome::Done, 7), State::Ready, Action::Resolve),
+            // Opening or replacing the store is a new episode.
             (State::LeftToUser, Event::Opened, State::Ready, Action::Nothing),
-            (AUTO, Event::Opened, State::Ready, Action::Nothing),
-            // A stray end (a job of before an open) changes nothing.
-            (State::Ready, finished(Outcome::Failed), State::Ready, Action::Nothing),
-            (State::LeftToUser, finished(Outcome::Cancelled), State::LeftToUser, Action::Nothing),
+            (auto(Some(7)), Event::Opened, State::Ready, Action::Nothing),
+            // A stray end changes nothing.
+            (State::Ready, finished(Outcome::Failed, 7), State::Ready, Action::Nothing),
+            (
+                State::LeftToUser,
+                finished(Outcome::Cancelled, 7),
+                State::LeftToUser,
+                Action::Nothing,
+            ),
+            (State::LeftToUser, finished(Outcome::Done, 7), State::LeftToUser, Action::Nothing),
         ];
         for (state, event, next, action) in table {
             assert_eq!(step(state, event), (next, action), "{state:?} + {event:?}");
@@ -122,13 +173,13 @@ mod tests {
         let mut started = 0;
         for event in [
             Event::Incomplete,
-            finished(Outcome::Cancelled),
-            Event::Incomplete,
+            Event::Started { job: 7 },
+            finished(Outcome::Cancelled, 7),
             Event::Incomplete,
             Event::Incomplete,
         ] {
             let (next, action) = step(s, event);
-            started += usize::from(action == Action::StartJob);
+            started += usize::from(matches!(action, Action::StartJob { .. }));
             s = next;
         }
         assert_eq!((s, started), (State::LeftToUser, 1));
