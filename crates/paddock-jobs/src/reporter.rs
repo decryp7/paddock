@@ -2,7 +2,7 @@ use crate::eta::EtaEstimator;
 use crate::model::{JobId, JobKind, JobSnapshot, JobState, Phase, PhaseProgress};
 use crate::time::{Clock, SystemClock};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Default floor between two events of one job: 10 per second.
