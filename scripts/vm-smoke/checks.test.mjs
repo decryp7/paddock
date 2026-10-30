@@ -165,6 +165,17 @@ test('a leftover that ignores TERM is ended with KILL after the identity check, 
   assert.ok(f.calls.some((x) => / kill -KILL \d+$/.test(x)));
 });
 
+test('the kill compares the start time recorded in the snapshot, not one read just before', async () => {
+  const f = fakeGuest({ bug: 'orphan-agent' });
+  const c = new Check(f.guest, { ...config, settleSec: 12, readyTimeoutSec: 30 });
+  await c.startAndJudge({ title: 'x' });
+  await c.quit('q');
+  const kills = f.calls.filter((x) => / kill -TERM \d+$/.test(x));
+  assert.ok(kills.length >= 1);
+  for (const k of kills) assert.match(k, /^\[ "\$\(ps -o lstart= -p \d+\)" = 'Fri Oct 30 14:\d\d:\d\d 2026' \]/);
+  assert.equal(f.calls.filter((x) => x.startsWith('ps -o lstart=')).length, 0, 'no separate lstart read');
+});
+
 test('arguments: one app, exactly one installer source, macOS only', () => {
   assert.equal(parseArgs(['--app', 'dyno', '--run', '7193']).run, '7193');
   assert.throws(() => parseArgs(['--run', '1']), /--app/);
