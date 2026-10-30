@@ -46,7 +46,7 @@ pub async fn service_state(client: State<'_, SharedClient>) -> Result<ServiceIns
 
 /// Opens System Settings > General > Login Items (macOS); the user switches the item, Pitwall never does.
 #[tauri::command]
-pub async fn open_login_items() -> Result<(), CommandError> {
+pub async fn open_service_login_items() -> Result<(), CommandError> {
     tauri::async_runtime::spawn_blocking(service_install::open_login_items)
         .await
         .map_err(|e| internal(format!("opening Login Items stopped unexpectedly: {e}")))?
@@ -108,7 +108,7 @@ pub async fn check_app_update(
 }
 
 // Long operations as jobs (ER-17..19) on the shared executor. Each `start_*` returns the job id at once and reports on
-// the channel; `job_cancel` stops one.
+// the channel; `app_job_cancel` stops one.
 
 fn channel_sink(channel: Channel<JobEvent>) -> JobSink {
     Arc::new(move |event| {
@@ -478,14 +478,14 @@ fn apply_install_progress(ctx: &paddock_jobs::JobContext, p: updater::InstallPro
 /// The user stops waiting for a job whose Cancel did not take effect: the job ends as cancelled and says the server may
 /// still be working. `false` when the job does not offer it (the progress event's `canStopWaiting` is false).
 #[tauri::command]
-pub async fn job_stop_waiting(jobs: State<'_, Arc<Jobs>>, id: u64) -> Result<bool, CommandError> {
+pub async fn app_job_stop_waiting(jobs: State<'_, Arc<Jobs>>, id: u64) -> Result<bool, CommandError> {
     Ok(jobs.stop_waiting(id))
 }
 
 /// Cancels a job. `true` when the request was made; `false` for an unknown or finished job, or one in a step that cannot
 /// be interrupted (its events say `cancellable: false`).
 #[tauri::command]
-pub async fn job_cancel(jobs: State<'_, Arc<Jobs>>, id: u64) -> Result<bool, CommandError> {
+pub async fn app_job_cancel(jobs: State<'_, Arc<Jobs>>, id: u64) -> Result<bool, CommandError> {
     Ok(jobs.cancel(id))
 }
 

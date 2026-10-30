@@ -2,7 +2,7 @@
 
 - Status: accepted (2026-10-23)
 - Related: ADR 0006 (memory), ADR 0012 (native feel), `docs/suite-lessons.md` (tray apps); code:
-  [`quit.rs`](../../app/src-tauri/src/quit.rs), [`app_menu.rs`](../../app/src-tauri/src/app_menu.rs),
+  [`quit.rs`](../../app/src-tauri/src/quit.rs), [`tray.rs`](../../app/src-tauri/src/tray.rs) (the 1.1 shell move removed `app_menu.rs`; the menu's Quit items come from the UI's contribution),
   [`Serving::stop_all`](../../crates/pitwall-server/src/serving.rs)
 
 ## Context

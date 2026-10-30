@@ -138,10 +138,10 @@ export class TauriBackend implements PitwallBackend {
     return () => void this.jobListeners.delete(listener);
   }
   jobCancel(jobId: number): Promise<boolean> {
-    return this.run('job_cancel', { id: jobId });
+    return this.run('app_job_cancel', { id: jobId });
   }
   jobStopWaiting(jobId: number): Promise<boolean> {
-    return this.run('job_stop_waiting', { id: jobId });
+    return this.run('app_job_stop_waiting', { id: jobId });
   }
 
   // Models
@@ -364,7 +364,7 @@ export class TauriBackend implements PitwallBackend {
     return this.run('decline_service');
   }
   openLoginItems(): Promise<void> {
-    return this.run('open_login_items');
+    return this.run('open_service_login_items');
   }
   quitApp(stopServing: boolean, remember: boolean): Promise<void> {
     return this.run('quit_app', { stopServing, rememberChoice: remember });

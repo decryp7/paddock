@@ -55,6 +55,20 @@ impl KeyStore for OsKeyStore {
     }
 }
 
+/// No credential store: the app's copy is only the server's `admin.key` (a test's start, which must not reach the user's
+/// keychain, ER-14). Storing is a no-op.
+pub struct NoKeyStore;
+
+impl KeyStore for NoKeyStore {
+    fn get(&self) -> Option<String> {
+        None
+    }
+
+    fn set(&self, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 /// The key from the OS store with the server's `admin.key` as fallback and as the source of truth on refresh.
 pub struct StoredAdminKey {
     store: Box<dyn KeyStore>,

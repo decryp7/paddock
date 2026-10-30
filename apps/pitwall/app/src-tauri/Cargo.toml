@@ -37,6 +37,14 @@ tokio = { workspace = true, features = ["time", "sync", "rt", "macros"] }
 # the main window is opaque, user 2026-10-30); a no-op
 # elsewhere. It must sit here, not under a target table: tauri-build checks only this list against the config.
 tauri = { version = "2.12.4", features = ["tray-icon", "image-png", "macos-private-api"] }
+# The Paddock app shell (ADR 0012, ADR 0029): the plugin and the crates whose types the app names itself (path dependencies
+# inside the monorepo). The shell owns the start, the windows, the tray icon, the exit and its watchdog, and the guard in front
+# of Pitwall's commands.
+paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray"] }
+paddock-commands = { path = "../../../../crates/paddock-commands", features = ["tauri"] }
+paddock-dialogs = { path = "../../../../crates/paddock-dialogs", features = ["tauri"] }
+paddock-startup = { path = "../../../../crates/paddock-startup", features = ["tauri"] }
+paddock-window = { path = "../../../../crates/paddock-window", features = ["tauri", "tray", "wry"] }
 tauri-plugin-autostart = "2"
 # A second launch focuses the running app instead of starting another one (release builds; see window::second_launch).
 tauri-plugin-single-instance = "2"
@@ -74,3 +82,5 @@ tempfile.workspace = true
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tokio = { workspace = true, features = ["time", "sync", "rt", "rt-multi-thread", "macros", "net", "io-util", "test-util"] }
 tauri = { version = "2.12.4", features = ["test"] }
+# The shell plugin on Tauri's mock runtime: the start test (ADR 0029, C50) opens no window and touches no user folder.
+paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray", "mock-runtime"] }
