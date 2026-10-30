@@ -4,7 +4,7 @@
 
 use crate::common;
 
-use common::{pair_of, store_with, TempDir};
+use common::{assert_blocks_consistent, pair_of, store_with, TempDir};
 use debrief_core::ports::{Filter, Ingest, PageQuery, Positions, Query, Skew};
 use debrief_core::skew::{OffsetSpec, SetOffsetRequest, SuggestRequest};
 use debrief_core::{PluginRegistry, Profile};
@@ -32,6 +32,29 @@ fn times(store: &DuckStore) -> Vec<(String, Option<i64>)> {
 
 fn source_of(store: &DuckStore, file: &str) -> u32 {
     store.summary().unwrap().sources.iter().find(|s| s.path.ends_with(file)).unwrap().id
+}
+
+/// The rewritten segments keep their id blocks (ADR 0062 section 1): the blocks move to the new files in the same
+/// catalog transaction, so every row still lies in a block of its own file and no two blocks overlap.
+#[test]
+fn an_offset_moves_the_id_blocks_with_the_rows() {
+    let logs = TempDir::new("skew-blocks-logs");
+    std::fs::write(logs.0.join("a.log"), "2026-10-14 10:00:00 INFO a1\n2026-10-14 10:00:10 INFO a2\n").unwrap();
+    std::fs::write(logs.0.join("b.log"), "2026-10-14 10:00:05 INFO b1\n2026-10-14 10:00:15 INFO b2\n").unwrap();
+    let dir = TempDir::new("skew-blocks-store");
+    let (store, _) = store_with(&dir, Profile::default_profile(), std::slice::from_ref(&logs.0)).unwrap();
+    assert_blocks_consistent(&store, &dir.0);
+    let blocks = store.bench_sql("SELECT 1 FROM segment_blocks").unwrap();
+    let files = store.bench_sql("SELECT file FROM segments").unwrap();
+    let b = source_of(&store, "b.log");
+    store.set_source_offset(&manual(b, 20_000)).unwrap();
+    assert_blocks_consistent(&store, &dir.0);
+    assert_eq!(
+        store.bench_sql("SELECT 1 FROM segment_blocks").unwrap(),
+        blocks,
+        "every block is kept"
+    );
+    assert_eq!(store.bench_sql("SELECT file FROM segments").unwrap(), files);
 }
 
 #[test]

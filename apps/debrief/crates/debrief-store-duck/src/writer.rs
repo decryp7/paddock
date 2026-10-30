@@ -884,4 +884,44 @@ mod tests {
         drop(c);
         std::fs::remove_dir_all(dir).ok();
     }
+
+    /// Each listed segment's id block is recorded in `segment_blocks` with the listing (ADR 0062 section 1), also for
+    /// segments listed while the import runs, and a dropped writer's unlisted segments leave none.
+    #[test]
+    fn a_listing_records_each_segments_id_block() {
+        let (dir, c) = store();
+        let w = sink(&c, &dir, None);
+        let src = NewSource {
+            path: "a".into(),
+            name: "a".into(),
+        };
+        let a = w.begin_source(&src, None).unwrap();
+        let per = 8192;
+        let batches = (SEGMENT_ROWS as usize / per) + 2;
+        for _ in 0..batches {
+            w.write(batch(a, per)).unwrap();
+        }
+        assert_eq!(count(&c, "SELECT count(*) FROM segments"), 1, "listed while the import runs");
+        assert_eq!(count(&c, "SELECT count(*) FROM segment_blocks"), 1);
+        w.finish_source(&report(a, per * batches)).unwrap();
+        w.finish().unwrap();
+        let segments = count(&c, "SELECT count(*) FROM segments");
+        assert_eq!(segments, 2);
+        assert_eq!(count(&c, "SELECT count(*) FROM segment_blocks"), segments);
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(*) FROM segment_blocks b JOIN segments s USING (file) WHERE b.first_id = s.first_id AND b.end_id = s.end_id"
+            ),
+            segments,
+            "a new segment's block is its id range"
+        );
+        let w = sink(&c, &dir, None);
+        let b = w.begin_source(&src, None).unwrap();
+        w.write(batch(b, 3)).unwrap();
+        drop(w);
+        assert_eq!(count(&c, "SELECT count(*) FROM segment_blocks"), segments);
+        drop(c);
+        std::fs::remove_dir_all(dir).ok();
+    }
 }
