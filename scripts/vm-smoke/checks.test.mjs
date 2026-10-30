@@ -54,7 +54,8 @@ function fakeGuest({ bug = null } = {}) {
       return app ? ok() : { code: 1, stdout: '', stderr: 'not running' };
     }
     if (cmd.startsWith('ps -o lstart= -p')) return ok('Fri Oct 30 14:25:12 2026\n');
-    const kill = /^\[ "\$\(ps -o lstart= -p (\d+)\)" = '.*' \] && ps -p \d+ -o command= \| grep -qxF -- .* && kill \d+$/.exec(cmd);
+    const kill = /^\[ "\$\(ps -o lstart= -p (\d+)\)" = '.*' \] && ps -p \d+ -o command= \| grep -qxF -- .* && kill (-TERM|-KILL) \d+$/.exec(cmd);
+    if (kill && bug === 'ignore-term' && kill[2] === '-TERM') return ok();
     if (kill) { procs = procs.filter((p) => p.pid !== Number(kill[1])); return ok(); }
     if (cmd.includes('dyno-agent') && cmd.includes('status') && !cmd.includes('service')) return procs.some((p) => p.command.includes('dyno-agent')) ? ok('running') : { code: 1, stdout: '', stderr: '' };
     if (cmd.includes("'service' 'install'")) { loginOn = true; const a = procs.find((p) => p.command.includes('dyno-agent')); if (a) a.ppid = 1; return ok('installed and started'); }
@@ -100,7 +101,7 @@ test('an agent left running after Quit is reported as an orphan of launchd, and 
   const q = byTitle(r, /Quit with a window open/);
   assert.equal(q.status, 'fail');
   assert.ok(q.checks.some((c) => /an orphan of launchd/.test(c.detail)), JSON.stringify(q.checks));
-  assert.ok(r.calls.some((c) => /^\[ "\$\(ps -o lstart= -p \d+\)" = '.*' \] && ps -p \d+ -o command= \| grep -qxF -- .* && kill \d+$/.test(c)), 'pid, start time and command line checked in the same guest command as the kill');
+  assert.ok(r.calls.some((c) => /^\[ "\$\(ps -o lstart= -p \d+\)" = '.*' \] && ps -p \d+ -o command= \| grep -qxF -- .* && kill -(TERM|KILL) \d+$/.test(c)), 'pid, start time and command line checked in the same guest command as the kill');
 });
 
 test('an app that never starts fails on the guard instead of passing', async () => {
@@ -153,6 +154,15 @@ test('a helper replaced during the second launch fails that step through its own
   const s = await c.secondLaunch();
   assert.equal(s.status, 'fail');
   assert.match(s.checks.filter((x) => !x.ok).map((x) => x.detail).join(' '), /dyno-agent: 2 distinct/);
+});
+
+test('a leftover that ignores TERM is ended with KILL after the identity check, and the next step starts clean', async () => {
+  const f = fakeGuest({ bug: 'ignore-term' });
+  const c = new Check(f.guest, { ...config, settleSec: 12, readyTimeoutSec: 30 });
+  await c.startAndJudge({ title: 'x' });
+  const r = await c.reset();
+  assert.equal(r.gone, true);
+  assert.ok(f.calls.some((x) => / kill -KILL \d+$/.test(x)));
 });
 
 test('arguments: one app, exactly one installer source, macOS only', () => {
