@@ -1,8 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window (and further top-level windows, w-*): Tauri's events, dragging the window by its title bar and sidebar header (data-tauri-drag-region; the macOS window has an overlay title bar), double-click to zoom, and the shell's main set. Pitwall's own commands are app commands behind the shell's guard (src-tauri/src/lib.rs COMMANDS), so the UI cannot reach the file system, the shell, the updater or the network directly",
-  "windows": ["main", "w-*"],
+  "description": "The main window (Pitwall opens no further top-level windows): Tauri's events, dragging the window by its title bar and sidebar header (data-tauri-drag-region; the macOS window has an overlay title bar), double-click to zoom, and the shell's main set. Pitwall's own commands are app commands behind the shell's guard (src-tauri/src/lib.rs COMMANDS), so the UI cannot reach the file system, the shell, the updater or the network directly",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:event:default",
     "core:window:allow-start-dragging",

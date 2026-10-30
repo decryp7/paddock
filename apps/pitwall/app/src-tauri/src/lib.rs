@@ -168,7 +168,7 @@ fn state(place: &Place) -> (SharedClient, Arc<offline::OfflineKnown>, SharedMode
         Place::Test { dir } => (dir.clone(), Box::new(credentials::NoKeyStore)),
     };
     let keys = Arc::new(credentials::StoredAdminKey::new(store, data_dir.join("admin.key")));
-    let known_offline = Arc::new(offline::OfflineKnown::default());
+    let known_offline = Arc::new(offline::OfflineKnown::at(data_dir.join("offline-known.json")));
     let client: SharedClient = Arc::new(offline::Observing::new(
         Arc::new(server_client::LoopbackClient::new(data_dir, keys)),
         known_offline.clone(),
@@ -227,7 +227,7 @@ fn updater<R: Runtime>(
     let b = b
         .channel("stable", "Stable", UPDATE_FEED)
         .public_key(key)
-        .offline_mode(move || known_offline.blocks_updates())
+        .offline_mode(move || known_offline.state())
         .releases_page(RELEASES_PAGE)
         .homepage("https://dev.decryptology.net/decryp7/paddock")
         .build_info(option_env!("PADDOCK_BUILD_COMMIT"), option_env!("PADDOCK_BUILD_DATE"));
@@ -274,7 +274,7 @@ pub fn app<R: Runtime>(
     tray_backend: impl paddock_window::tauri::TrayBackend<R>,
 ) -> tauri::Builder<R> {
     // The shell opens both after every plugin is set up (ADR 0029: a window built inside a plugin hook deadlocks).
-    shell.tray(move |_| tray::tray(tray_backend)).launch(launch).add_to(builder)
+    shell.tray(move |app| tray::tray(app, tray_backend)).launch(launch).add_to(builder)
 }
 
 /// Where the live feed goes: the UI's event and the tray.
@@ -303,9 +303,28 @@ impl<R: Runtime> live::LiveSink for AppSink<R> {
     }
 }
 
+/// Cancels the update check or download in flight (Offline mode turned on); nothing else is touched.
+fn stop_update_transfer<R: Runtime>(app: &AppHandle<R>) {
+    let Some(updates) = app.try_state::<Arc<paddock_updater::tauri::Updates>>() else {
+        return;
+    };
+    let busy = matches!(
+        updates.updater.status().phase,
+        paddock_updater::UpdatePhase::Checking { .. } | paddock_updater::UpdatePhase::Downloading { .. }
+    );
+    if busy && updates.cancel().is_ok() {
+        eprintln!("Pitwall: Offline mode turned on; the update transfer was stopped");
+    }
+}
+
 /// Pitwall's own set-up, after its state is managed: the live feed (UI events and the tray, reconnecting on its own),
 /// resuming serving after a "stop serving" quit and, installed on macOS, repairing a service registration launchd refuses.
 fn pitwall_setup<R: Runtime>(app: &AppHandle<R>, installed: bool) {
+    // Offline mode turned on while an update check or download runs: cancel it now, so the transfer stops instead of
+    // finishing (the shared updater also refuses the next step before the network). A verified download is kept.
+    let handle = app.clone();
+    app.state::<Arc<offline::OfflineKnown>>()
+        .watch(move || stop_update_transfer(&handle));
     let client = app.state::<SharedClient>().inner().clone();
     let sink = AppSink {
         app: app.clone(),

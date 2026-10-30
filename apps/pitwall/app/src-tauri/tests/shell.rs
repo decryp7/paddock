@@ -221,3 +221,66 @@ fn every_command_is_async() {
         );
     }
 }
+
+/// Pitwall wires its Offline gate into the shell's updater: before the server ever answered, a check is refused as
+/// "could not be confirmed" without touching the network; after a live `server` frame says Offline mode is off, it passes
+/// the gate (begun, not run: no network in a test); after one says it is on, it is refused as Offline mode.
+#[test]
+fn the_updater_is_gated_by_what_the_server_said_about_offline_mode() {
+    use paddock_updater::{tauri::Updates, UpdateError};
+    use pitwall_app_lib::offline::OfflineKnown;
+    use std::sync::Arc;
+    use tauri::Manager;
+    let dir = tempfile::tempdir().unwrap();
+    let app = composed(
+        dir.path(),
+        LaunchArgs {
+            hidden: true,
+            ..Default::default()
+        },
+    )
+    .build(tauri::test::mock_context(tauri::test::noop_assets()))
+    .unwrap();
+    let updates = app.state::<Arc<Updates>>().inner().clone();
+    let known = app.state::<Arc<OfflineKnown>>().inner().clone();
+    assert_eq!(
+        updates.updater.begin_check().unwrap_err(),
+        UpdateError::OfflineUnknown,
+        "first run: not confirmed"
+    );
+    known.observe_frame(r#"{"kind":"server","server":{"offline":false}}"#);
+    // Past the gate: a test build has no signing key, so the next answer is "not available in this build" (or, with a key,
+    // a started check, abandoned before it runs).
+    match updates.updater.begin_check() {
+        Ok((_, ticket)) => updates.updater.abandon(ticket),
+        Err(e) => assert_eq!(e, UpdateError::NotAvailable, "the offline gate let it through"),
+    }
+    known.observe_frame(r#"{"kind":"server","server":{"offline":true}}"#);
+    assert_eq!(updates.updater.begin_check().unwrap_err(), UpdateError::OfflineMode);
+    assert!(dir.path().join("offline-known.json").is_file(), "the last confirmed value is kept");
+}
+
+/// Quit from the macOS app menu with no window open must still quit (or ask). Today the shell's menu routes `pd.app.quit`
+/// to a window and drops it when none is open (paddock-menu `route`); the shared fix (a "no target window" handler, branch
+/// `fix/menu-quit-without-window`) is not on this branch yet. Run with `--ignored` to see it fail.
+#[test]
+#[ignore = "fails until the shell's no-window menu handler lands (fix/menu-quit-without-window); then Pitwall wires quit::request to it"]
+fn quit_from_the_menu_with_no_window_open_still_quits_or_asks() {
+    use tauri::Manager;
+    let dir = tempfile::tempdir().unwrap();
+    // Started in the tray (`--hidden`): no window is open, as after the user closed the main window.
+    let app = composed(
+        dir.path(),
+        LaunchArgs {
+            hidden: true,
+            ..Default::default()
+        },
+    )
+    .build(tauri::test::mock_context(tauri::test::noop_assets()))
+    .unwrap();
+    assert!(app.get_webview_window("main").is_none(), "no window is open");
+    paddock_window::tauri::menu_chosen(app.handle(), "pd.app.quit");
+    let pending = app.state::<pitwall_app_lib::quit::PendingAsk>().take();
+    let quitting = app.state::<paddock_window::tauri::Windows<tauri::test::MockRuntime>>().quitting();
+    assert!(pending || quitting, "the menu's Quit asked or quit with no window open");
+}

@@ -607,7 +607,12 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "save_settings" => {
             let ui: UiSettings = arg(a, "settings")?;
             let s = st.cfg().with_ui(ui).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?;
-            ok(st.save_settings(s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?.ui())
+            let saved = st.save_settings(s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?.ui();
+            // Every window (the app's Offline gate among them) hears the new server state at once, not at the next read.
+            st.push(&LiveUpdate::Server {
+                server: overview(st).server,
+            });
+            ok(saved)
         }
         _ => Err(err(mgmt::ErrorCode::NotImplemented, format!("unknown call \"{method}\""))),
     }
