@@ -935,3 +935,13 @@ sandbox); and write a cause down as confirmed only after a run without it. Test 
 browser's own count of failed helper starts is zero), so the check fails on every run, not only on the unlucky ones.
 **Follow-up:** the apps' runtime store keeps Chrome for Testing under the user's local app data, which grants app
 containers nothing either; granting S-1-15-2-1 and S-1-15-2-2 read and execute there at install time is still to do.
+
+## A count of a queue's contents is a reservation, never a separate copy (2026-10-30, Debrief)
+The Event Log follower kept its queue length in an atomic counter beside the bounded channel: readers added after a send,
+the writer subtracted after taking a batch. The two updates were never atomic with the channel, so the count raced both
+ways: first it dipped below zero and showed 18446744073709551615 (7d38d47a0 clamped it, which hid the cause), then it
+showed 5 queued with a capacity of 4 when a reader refilled the slots the writer had freed before the writer counted them
+out (debrief.yml run 7175, at load 40; fixed in b935d03a6). This is the second instance of one pattern (ER-21). **Rule:**
+a count of a queue's contents is a reservation taken before the send and given back after the take, never a separate copy
+updated after; then it stays between what the queue holds and its capacity by construction, needs no clamp, and doubles
+as the back-pressure. Test such a race by stalling one thread at the hand-over point (a probe or barrier), never by load.
