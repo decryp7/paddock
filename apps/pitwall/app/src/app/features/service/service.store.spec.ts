@@ -18,12 +18,11 @@ describe('ServiceStore', () => {
     expect(store.askConsent()).toBe(false);
   });
 
-  it('refresh reads the service, start at log-in and the update status', async () => {
+  it('refresh reads the service and start at log-in', async () => {
     const { store } = setup();
     await store.refresh();
     expect(store.service()?.installed).toBe(true);
     expect(store.autostart()).toBe(false);
-    expect(store.updateStatus()?.available).toBe(false);
     expect(store.askConsent()).toBe(false);
   });
 
@@ -44,20 +43,30 @@ describe('ServiceStore', () => {
     expect(store.askConsent()).toBe(true);
   });
 
+  it('Not now keeps the question away for the rest of this run, even when the state is read again', async () => {
+    const { store } = setup({ askConsent: true });
+    await store.refresh();
+    expect(store.askConsent()).toBe(true);
+    store.later();
+    expect(store.askConsent()).toBe(false);
+    // Opening Settings reads the service again; the engine still says "not asked", but the user said not now.
+    await store.refresh();
+    expect(store.askConsent()).toBe(false);
+  });
+
   it('one failing part does not hide the others', async () => {
     const { store } = setup({ failing: ['serviceState'] });
     await store.refresh();
     expect(store.service()).toBeNull();
     expect(store.error()?.code).toBe('serverUnavailable');
     expect(store.autostart()).toBe(false);
-    expect(store.updateStatus()).not.toBeNull();
   });
 
   it('keeps the last known values when a later refresh fails', async () => {
     const backend = new MockBackend();
     const { store } = setup({}, backend);
     await store.refresh();
-    const failing = new MockBackend({ failing: ['serviceState', 'autostart', 'appUpdateStatus'] });
+    const failing = new MockBackend({ failing: ['serviceState', 'autostart'] });
     TestBed.resetTestingModule();
     const again = setup({}, failing).store;
     await again.refresh();
@@ -141,34 +150,6 @@ describe('ServiceStore', () => {
     await store.setAutostart(true);
     expect(store.autostart()).toBe(false);
     expect(toasts.toasts().at(-1)?.tone).toBe('bad');
-  });
-
-  it('checks for an update only when asked and installs the one it found', async () => {
-    const { store } = setup({ updateAvailable: true });
-    await store.refresh();
-    expect(store.update()).toBeNull();
-    await store.checkUpdate();
-    expect(store.update()?.version).toBe('0.2.0');
-    expect(store.upToDate()).toBe(false);
-    await store.applyUpdate();
-    expect(store.error()).toBeNull();
-  });
-
-  it('says up to date when the check finds nothing', async () => {
-    const backend = new MockBackend({ updateAvailable: true });
-    vi.spyOn(backend, 'checkAppUpdate').mockResolvedValue(null);
-    const { store } = setup({}, backend);
-    await store.checkUpdate();
-    expect(store.update()).toBeNull();
-    expect(store.upToDate()).toBe(true);
-  });
-
-  it('a failed check records the error and installing without a found update does nothing', async () => {
-    const { store } = setup();
-    await store.checkUpdate();
-    expect(store.error()?.code).toBe('notAvailable');
-    await store.applyUpdate();
-    expect(store.isBusy()('apply')).toBe(false);
   });
 
   describe('macOS Login Items and the repair', () => {

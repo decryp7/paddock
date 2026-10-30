@@ -1,8 +1,8 @@
 <div class="page">
   <header class="page-head">
     <div>
-      <h1>Settings</h1>
-      <p class="sub">Stored on this machine. Changes apply when you save.</p>
+      <h2 class="pd-title" id="pw-settings-title">Pitwall</h2>
+      <p class="sub">The server's settings, stored on this computer. Changes apply when you save.</p>
     </div>
   </header>
 
@@ -11,14 +11,6 @@
   }
 
   <div class="layout">
-    <nav class="subnav" aria-label="Settings sections">
-      @for (s of sections; track s.id) {
-        <button type="button" [class.active]="active() === s.id" [attr.aria-current]="active() === s.id ? 'true' : null" (click)="go(s.id)">
-          <mat-icon [svgIcon]="'pw:' + s.icon" aria-hidden="true" />{{ s.label }}
-        </button>
-      }
-    </nav>
-
     <div class="cards">
       @if (store.loading() && !d()) {
         <pw-panel heading="General" icon="sliders" [loading]="true" [ready]="false" [skeletonLines]="6" />
@@ -30,14 +22,6 @@
       @if (d(); as s) {
         <!-- General -->
         <pw-panel id="set-general" heading="General" icon="sliders">
-          <div class="row">
-            <div class="lbl"><span class="name" id="lbl-theme">Theme</span><p class="hint">System follows your OS light or dark setting.</p></div>
-            <mat-button-toggle-group class="toggles" hideSingleSelectionIndicator aria-labelledby="lbl-theme" [value]="s.general.theme" (change)="setTheme($event.value)">
-              @for (t of themes; track t.value) {
-                <mat-button-toggle [value]="t.value"><mat-icon [svgIcon]="'pw:' + t.icon" aria-hidden="true" />{{ t.label }}</mat-button-toggle>
-              }
-            </mat-button-toggle-group>
-          </div>
           <div class="row">
             <div class="lbl"><span class="name" id="lbl-login">Start at login</span><p class="hint">Start Pitwall in the tray when you sign in. This is your computer's own login item, so it applies at once.</p></div>
             @if (service.autostart() !== null) {
@@ -335,42 +319,6 @@
         <!-- Service -->
         <pw-service-panel />
 
-        <!-- Updates -->
-        <pw-panel id="set-updates" heading="Updates" icon="download">
-          @if (service.updateStatus(); as u) {
-            <div class="row">
-              <div class="lbl">
-                <span class="name">Pitwall {{ u.currentVersion }}</span>
-                <p class="hint">
-                  @if (service.update(); as up) {
-                    Version {{ up.version }} is ready to install. {{ up.notes ?? '' }}
-                  } @else if (!u.available) {
-                    {{ u.reason ?? 'Updates are off in this build.' }}
-                  } @else if (service.upToDate()) {
-                    You have the latest version.
-                  } @else {
-                    Pitwall only looks for updates when you ask; nothing is sent until then.
-                  }
-                </p>
-              </div>
-              <span class="status" [attr.data-tone]="service.update() ? 'info' : u.available ? (service.upToDate() ? 'ok' : 'muted') : 'muted'">{{
-                service.update() ? 'Update available' : u.available ? (service.upToDate() ? 'Up to date' : 'Not checked') : 'Not configured'
-              }}</span>
-            </div>
-            @if (u.available) {
-              <div class="row">
-                <div class="lbl"><span class="name">{{ service.update() ? 'Install ' + service.update()!.version : 'Check for updates' }}</span><p class="hint">{{ service.update() ? 'Pitwall restarts. The server restarts itself when it is idle.' : 'Asks the release server whether a newer version exists.' }}</p></div>
-                @if (service.update()) {
-                  <button type="button" matButton="filled" [disabled]="service.isBusy()('apply')" (click)="service.applyUpdate()">{{ service.isBusy()('apply') ? 'Installing…' : 'Install and restart' }}</button>
-                } @else {
-                  <button type="button" matButton="outlined" [disabled]="service.isBusy()('check')" (click)="service.checkUpdate()">{{ service.isBusy()('check') ? 'Checking…' : 'Check for updates' }}</button>
-                }
-              </div>
-            }
-          } @else {
-            <p class="faint pad">Could not ask for updates.</p>
-          }
-        </pw-panel>
       }
     </div>
   </div>
@@ -384,7 +332,11 @@
     } @else {
       <span class="msg">You have unsaved changes.</span>
     }
-    <button type="button" matButton="outlined" [disabled]="store.saving()" (click)="discard()">Discard</button>
-    <button type="button" matButton="filled" [disabled]="store.saving() || !store.dirty()" (click)="store.save()">{{ store.saving() ? 'Saving…' : 'Save changes' }}</button>
+    <button type="button" matButton="outlined" [disabled]="store.saving()" (click)="store.discard()">Discard</button>
+    <button type="button" matButton="filled" [disabled]="store.saving() || !store.dirty()" (click)="save()">{{ store.saving() ? 'Saving…' : 'Save changes' }}</button>
   </div>
+}
+@if (ownToasts) {
+  <!-- The Settings window is its own window: its confirmations show here (the main window's frame shows its own). -->
+  <pd-notification-host />
 }

@@ -13,12 +13,15 @@ paddock_dialogs::dialogs! {
     /// Pitwall's dialogs, and the commands every one of its dialog windows may call (the start-up handshake).
     pub static DIALOGS, base &[shell::startup::window_pong, shell::startup::window_ready];
     // The Settings window: the shell's settings commands, and what Pitwall's page needs (its settings, presets of the
-    // memory policy, the response cache, the service and start at log-in, the model update checks, its jobs).
+    // memory policy, the response cache, the overview for the network address it shows, the service and start at log-in,
+    // the model update checks, its jobs) and `dialog_open` for the confirmation before a cache is cleared.
     "pd.settings" => Tool {
         width: Some(Px(880)),
         height: Some(700),
         commands: &[
             prefix(shell::settings::ALL, "settings_"),
+            shell::dialogs::dialog_open,
+            app::overview,
             app::settings,
             app::save_settings,
             app::apply_preset,
@@ -33,7 +36,9 @@ paddock_dialogs::dialogs! {
             app::get_autostart,
             app::set_autostart,
             app::update_check_status,
+            app::update_notices,
             app::set_update_check,
+            app::start_check_updates,
             app::app_job_cancel,
             app::app_job_stop_waiting,
         ],
@@ -81,6 +86,10 @@ mod tests {
             assert!(c.allows("pd.settings", command), "the Settings window may call {command}");
         }
         assert!(!c.allows("pd.settings", "delete_model") && !c.allows("pd.settings", "chat"));
+        assert!(
+            !c.allows("pd.settings", "quit_app") && !c.allows("pd.settings", "download_model"),
+            "the Settings window neither quits nor downloads"
+        );
         let secret = DIALOGS.entries().iter().find(|e| e.id == "pw.key-secret").unwrap();
         assert!(
             secret.required_choice,

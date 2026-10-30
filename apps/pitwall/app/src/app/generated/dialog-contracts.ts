@@ -11,7 +11,7 @@ export const DIALOG_CONTRACTS = {
     height: 700,
     instanced: false,
     requiredChoice: false,
-    commands: ['app_job_cancel', 'app_job_stop_waiting', 'apply_preset', 'cache_info', 'clear_cache', 'decline_service', 'get_autostart', 'open_service_login_items', 'save_settings', 'service_state', 'set_autostart', 'set_update_check', 'settings', 'settings_*', 'start_install_service', 'start_repair_service', 'start_uninstall_service', 'update_check_status'],
+    commands: ['app_job_cancel', 'app_job_stop_waiting', 'apply_preset', 'cache_info', 'clear_cache', 'decline_service', 'dialog_open', 'get_autostart', 'open_service_login_items', 'overview', 'save_settings', 'service_state', 'set_autostart', 'set_update_check', 'settings', 'settings_*', 'start_check_updates', 'start_install_service', 'start_repair_service', 'start_uninstall_service', 'update_check_status', 'update_notices'],
   },
   'pw.create-app': {
     id: 'pw.create-app',

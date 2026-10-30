@@ -1,25 +1,24 @@
-import { Dialog } from '@angular/cdk/dialog';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { SuEmptyState } from '@decryp7/paddock-ui';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
 import type { AppInfo, AppPermissions } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { ago, compact, date, duration, int } from '../../shared/format';
 import { cacheHitRateText } from '../usage/usage-format';
 import { injectNow } from '../../shared/now';
-import { Confirm } from '../../shared/ui/confirm';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { AppAvatar } from '../../shared/ui/app-avatar';
 import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
 import { Panel } from '../../shared/ui/panel';
 import { limitsText } from '../dashboard/apps-card';
 import { groupCode, permissionSummary } from '../dashboard/pairing-card';
 import { AppsStore } from './apps.store';
-import { CreateAppDialog } from './create-app-dialog';
-import { KeySecretDialog, type KeySecretData } from './key-secret-dialog';
+import { CREATE_APP_DIALOG_ID } from './create-app-dialog';
+import { KEY_SECRET_DIALOG_ID } from './key-secret-dialog';
 import { AppUsage } from '../usage/app-usage';
 import { PermissionsEditor } from './permissions-editor';
 
@@ -411,8 +410,7 @@ import { PermissionsEditor } from './permissions-editor';
 export class AppsPage implements OnInit {
   protected readonly store = inject(AppsStore);
   protected readonly live = inject(LiveStore);
-  private readonly dialog = inject(Dialog);
-  private readonly confirm = inject(Confirm);
+  private readonly dialogs = inject(DialogService);
   protected readonly now = injectNow(15_000);
 
   protected readonly when = ago;
@@ -458,9 +456,9 @@ export class AppsPage implements OnInit {
   }
 
   protected async newApp(): Promise<void> {
-    const ref = this.dialog.open<string>(CreateAppDialog, { backdropClass: 'pw-backdrop' });
-    const name = await firstValueFrom(ref.closed);
-    if (!name) return;
+    const outcome = await this.dialogs.open<string>(CREATE_APP_DIALOG_ID, { inputs: {}, title: 'New app' }).closed;
+    if (outcome.kind !== 'answered' || !outcome.value) return;
+    const name = outcome.value;
     const app = await this.store.createApp(name);
     if (app) {
       this.selectedId.set(app.id);
@@ -471,37 +469,33 @@ export class AppsPage implements OnInit {
   protected async createKey(app: AppInfo): Promise<void> {
     const created = await this.store.createKey(app.id);
     if (!created) return;
-    const data: KeySecretData = { appName: app.name, created };
-    // The secret lives only in this dialog; a stray click on the backdrop must not lose it.
-    this.dialog.open(KeySecretDialog, { data, backdropClass: 'pw-backdrop', disableClose: true });
+    // The secret lives only in this dialog, a required choice: nothing but "I've saved it" closes it.
+    await this.dialogs.open(KEY_SECRET_DIALOG_ID, { inputs: { appName: app.name, secret: created.secret, prefix: created.key.prefix }, title: `New key for ${app.name}` }).closed;
   }
 
   protected async revoke(app: AppInfo, keyId: string, prefix: string): Promise<void> {
-    const ok = await this.confirm.ask({
-      title: `Revoke ${prefix}?`,
+    const ok = await confirm(this.dialogs, {
+      heading: `Revoke ${prefix}?`,
       message: `${app.name} can no longer use this key: requests with it fail at once. This can't be undone.`,
-      confirm: 'Revoke key',
-      danger: true,
+      confirm: { label: 'Revoke key', destructive: true },
     });
     if (ok) await this.store.revokeKey(app.id, keyId);
   }
 
   protected async remove(app: AppInfo): Promise<void> {
-    const ok = await this.confirm.ask({
-      title: `Delete ${app.name}?`,
+    const ok = await confirm(this.dialogs, {
+      heading: `Delete ${app.name}?`,
       message: `Its keys stop working and its permissions are removed. It can pair again later.`,
-      confirm: 'Delete app',
-      danger: true,
+      confirm: { label: 'Delete app', destructive: true },
     });
     if (ok && (await this.store.deleteApp(app.id))) this.selectedId.set(null);
   }
 
   protected async clearAnswers(app: AppInfo): Promise<void> {
-    const ok = await this.confirm.ask({
-      title: `Clear ${app.name}'s cached answers?`,
+    const ok = await confirm(this.dialogs, {
+      heading: `Clear ${app.name}'s cached answers?`,
       message: 'Repeated requests are answered by the model again until new answers are cached. Nothing else changes.',
-      confirm: 'Clear cached answers',
-      danger: true,
+      confirm: { label: 'Clear cached answers', destructive: true },
     });
     if (ok) await this.store.clearCachedAnswers(app.id);
   }

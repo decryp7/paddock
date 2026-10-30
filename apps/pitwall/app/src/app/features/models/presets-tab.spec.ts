@@ -5,7 +5,7 @@ import type { PitwallBackend } from '../../core/backend';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { registerIcons } from '../../shared/icons';
-import { Confirm } from '../../shared/ui/confirm';
+import { dialogsAnswering } from '../../../testing/render';
 import { ModelsStore } from './models.store';
 import { PREVIEW_DELAY_MS } from './presets.store';
 import { PresetsTab, statusDetail } from './presets-tab';
@@ -17,7 +17,7 @@ const tick = async (n = 6) => {
 async function render(backend: PitwallBackend = new MockBackend(), confirm = true) {
   TestBed.configureTestingModule({
     imports: [PresetsTab],
-    providers: [ModelsStore, { provide: BACKEND, useValue: backend }, { provide: Confirm, useValue: { ask: vi.fn(() => Promise.resolve(confirm)) } }],
+    providers: [ModelsStore, { provide: BACKEND, useValue: backend }, dialogsAnswering(confirm)],
   });
   registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
   await TestBed.inject(ModelsStore).load();

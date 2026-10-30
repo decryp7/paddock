@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { openApp } from './app';
+import { openSettings, settingsDialog } from './app';
 
 test.describe('model updates', () => {
   test('is off until you turn it on; Check now finds updates, which only ever download after you confirm', async ({ page }) => {
-    await openApp(page, '/settings');
-    const panel = page.locator('#set-model-updates');
+    await openSettings(page);
+    const panel = settingsDialog(page).locator('#set-model-updates');
     await expect(panel).toBeVisible();
     await expect(panel.getByRole('switch', { name: 'Check for model updates' })).not.toBeChecked();
     await expect(panel).toContainText('only the repository ids');
@@ -15,7 +15,8 @@ test.describe('model updates', () => {
     await expect(panel).toContainText('Last checked');
 
     // The dashboard points at them; Models lists them and marks the rows.
-    await page.getByRole('link', { name: 'Dashboard' }).click();
+    await settingsDialog(page).getByRole('button', { name: 'Close' }).first().click();
+    await expect(settingsDialog(page)).toHaveCount(0);
     const summary = page.locator('pw-update-banner .summary');
     await expect(summary).toContainText('2 model updates are available');
     await summary.getByRole('link', { name: 'Review' }).click();
@@ -36,7 +37,7 @@ test.describe('model updates', () => {
 
     // Confirming starts the normal download and clears that notice.
     await banner.getByRole('button', { name: 'Get Qwen3.5-9B-Q4_K_M.gguf' }).click();
-    await page.getByRole('alertdialog').getByRole('button', { name: 'Download' }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Download update' }).click();
     await expect(page.getByText('Downloading Qwen3.5-9B-Q4_K_M.gguf.')).toBeVisible();
     await expect(banner).toContainText('1 update available');
     await page.getByRole('tab', { name: /Downloads/ }).click();
@@ -50,8 +51,8 @@ test.describe('model updates', () => {
   });
 
   test('turns the schedule on and off, and offline mode stops the check', async ({ page }) => {
-    await openApp(page, '/settings');
-    const panel = page.locator('#set-model-updates');
+    await openSettings(page);
+    const panel = settingsDialog(page).locator('#set-model-updates');
     const toggle = panel.getByRole('switch', { name: 'Check for model updates' });
     await toggle.click();
     await expect(toggle).toBeChecked();
@@ -63,8 +64,8 @@ test.describe('model updates', () => {
     await expect(toggle).not.toBeChecked();
     await expect(panel.getByRole('combobox', { name: /^How often/ })).toBeDisabled();
 
-    await page.getByRole('switch', { name: 'Offline mode' }).click();
-    await page.getByRole('button', { name: 'Save' }).click();
+    await settingsDialog(page).getByRole('switch', { name: 'Offline mode' }).click();
+    await settingsDialog(page).getByRole('button', { name: 'Save changes' }).click();
     await expect(panel.getByRole('button', { name: 'Check now' })).toBeDisabled();
     await expect(panel).toContainText('Offline mode is on, so no check can run.');
   });

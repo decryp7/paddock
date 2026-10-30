@@ -5,7 +5,6 @@ import type {
   CacheClearScope,
   CacheInfo,
   AppPermissions,
-  AppUpdateStatus,
   BenchmarkResult,
   BuildCapabilities,
   EnginePinState,
@@ -44,7 +43,6 @@ import type {
   Settings,
   UpdateCheckResult,
   UpdateCheckStatus,
-  UpdateInfo,
   UpdateNotice,
   UpdateSchedule,
 } from './api.types';
@@ -336,15 +334,6 @@ export class TauriBackend implements PitwallBackend {
   }
   saveSettings(settings: Settings): Promise<Settings> {
     return this.run('save_settings', { settings });
-  }
-  appUpdateStatus(): Promise<AppUpdateStatus> {
-    return this.run('app_update_status');
-  }
-  checkAppUpdate(): Promise<UpdateInfo | null> {
-    return this.run('check_app_update');
-  }
-  installAppUpdate(): Promise<void> {
-    return this.job('start_app_update');
   }
 
   // The server as an OS service, and start at log-in
