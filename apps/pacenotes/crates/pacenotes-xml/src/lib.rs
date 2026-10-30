@@ -15,6 +15,8 @@
 
 use std::borrow::Cow;
 
+pub use roxmltree;
+
 /// Bounds of one parse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct XmlLimits {
@@ -102,7 +104,7 @@ fn find(b: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
 pub fn clean<'a>(text: &'a str, part: &str, limits: &XmlLimits) -> Result<Cow<'a, str>, XmlError> {
     let b = text.as_bytes();
     let (mut i, mut depth) = (0usize, 0usize);
-    let mut blank: Option<(usize, usize)> = None;
+    let mut blanks: Vec<(usize, usize)> = Vec::new();
     while i < b.len() {
         if b[i] != b'<' {
             i += 1;
@@ -137,7 +139,7 @@ pub fn clean<'a>(text: &'a str, part: &str, limits: &XmlLimits) -> Result<Cow<'a
                     line: line_at(text, i),
                 });
             }
-            blank = Some((i, j + 1));
+            blanks.push((i, j + 1));
             i = j + 1;
         } else if rest.starts_with(b"<!") {
             i = find(b, i + 2, b">").map_or(b.len(), |e| e + 1);
@@ -160,15 +162,26 @@ pub fn clean<'a>(text: &'a str, part: &str, limits: &XmlLimits) -> Result<Cow<'a
             i = end;
         }
     }
-    Ok(match blank {
-        None => Cow::Borrowed(text),
-        Some((from, to)) => {
-            let mut s = String::with_capacity(text.len());
-            s.push_str(&text[..from]);
-            s.extend(text[from..to].chars().map(|c| if c == '\n' { '\n' } else { ' ' }));
-            s.push_str(&text[to..]);
-            Cow::Owned(s)
+    Ok(if blanks.is_empty() {
+        Cow::Borrowed(text)
+    } else {
+        // every bare DOCTYPE becomes spaces, byte for byte (a multi-byte character becomes as many spaces as it has bytes), with its
+        // newlines kept: lengths, lines and every position after it are the original's
+        let mut s = String::with_capacity(text.len());
+        let mut at = 0;
+        for (from, to) in blanks {
+            s.push_str(&text[at..from]);
+            for c in text[from..to].chars() {
+                if c == '\n' {
+                    s.push('\n');
+                } else {
+                    s.extend(std::iter::repeat_n(' ', c.len_utf8()));
+                }
+            }
+            at = to;
         }
+        s.push_str(&text[at..]);
+        Cow::Owned(s)
     })
 }
 

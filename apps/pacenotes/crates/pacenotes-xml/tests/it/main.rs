@@ -128,3 +128,27 @@ fn hostile_shapes_never_panic() {
         let _ = doc(&s);
     }
 }
+
+#[test]
+fn blanking_is_by_bytes_so_non_ascii_text_in_a_doctype_keeps_every_position() {
+    let text = "<!DOCTYPE r PUBLIC \"-//é€ 😀//EN\" \"x.dtd\">\n<r>\n<a/>\n</r>";
+    let cleaned = clean(text, "r", &XmlLimits::default()).unwrap();
+    assert_eq!(cleaned.len(), text.len(), "same bytes");
+    assert_eq!(cleaned.find("<r>"), text.find("<r>"), "and the same offset for what follows");
+    let doc = parse(&cleaned, "r", &XmlLimits::default()).unwrap();
+    assert_eq!(line_of(&doc, doc.descendants().find(|n| n.has_tag_name("a")).unwrap()), 3);
+    assert_eq!(doc.root_element().range().start, text.find("<r>").unwrap());
+}
+
+#[test]
+fn every_bare_doctype_is_blanked_and_a_later_one_with_declarations_is_refused_with_its_own_line() {
+    let two = "<!DOCTYPE a>\n<!DOCTYPE b SYSTEM \"b.dtd\">\n<r/>";
+    let cleaned = clean(two, "r", &XmlLimits::default()).unwrap();
+    assert!(!cleaned.contains("DOCTYPE") && cleaned.matches('\n').count() == 2);
+    assert!(doc(two).is_ok(), "nothing is left for the parser to object to");
+    let late = "<!DOCTYPE a>\n<!DOCTYPE b [<!ENTITY x \"y\">]>\n<r/>";
+    assert!(
+        matches!(doc(late), Err(XmlError::Dtd { line: 2, .. })),
+        "the declarations are on line 2"
+    );
+}
