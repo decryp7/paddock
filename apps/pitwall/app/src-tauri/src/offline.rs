@@ -11,11 +11,19 @@ use serde_json::Value;
 /// confirmed value is kept in the app's data folder (`offline-known.json`), so after a restart with the server not
 /// answering the app still knows it; on a first run it is unknown (and blocks). When Offline mode turns on, the
 /// watchers run (Pitwall cancels an update check or download in flight).
+///
+/// Observations are ordered: a reply carries the ticket taken before its call went out, so an older reply that arrives late
+/// cannot overwrite a newer value (nor be kept in the file); a live frame takes its ticket when it arrives, so it always
+/// wins over a reply to a call that went out before it.
 #[derive(Default)]
 pub struct OfflineKnown {
     value: std::sync::atomic::AtomicU8,
     file: Option<std::path::PathBuf>,
     watchers: std::sync::Mutex<Vec<Box<dyn Fn() + Send + Sync>>>,
+    /// The next ticket, and the newest ticket applied (with the value it set), guarded together; also serialises the
+    /// file's writes.
+    next: std::sync::atomic::AtomicU64,
+    applied: std::sync::Mutex<u64>,
 }
 
 impl OfflineKnown {
@@ -32,7 +40,7 @@ impl OfflineKnown {
         OfflineKnown {
             value: std::sync::atomic::AtomicU8::new(value),
             file: Some(file),
-            watchers: std::sync::Mutex::new(Vec::new()),
+            ..OfflineKnown::default()
         }
     }
 
@@ -41,21 +49,41 @@ impl OfflineKnown {
         self.watchers.lock().unwrap_or_else(|p| p.into_inner()).push(Box::new(f));
     }
 
-    /// Remembers what the server said (and keeps it in the file when it changed).
+    /// A ticket for an observation about to be asked for (take it before the call goes out).
+    pub fn ticket(&self) -> u64 {
+        self.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    }
+
+    /// Remembers what the server said just now (a live frame, or anything with no older call in flight).
     pub fn set(&self, offline: bool) {
+        let ticket = self.ticket();
+        self.set_at(ticket, offline);
+    }
+
+    /// Remembers what the server said in answer to the call that took `ticket`, unless a newer observation was applied
+    /// meanwhile (then this one is stale and dropped). Keeps it in the file when it changed.
+    pub fn set_at(&self, ticket: u64, offline: bool) {
+        let mut applied = self.applied.lock().unwrap_or_else(|p| p.into_inner());
+        if ticket < *applied {
+            return;
+        }
+        *applied = ticket;
         let new = if offline { Self::OFFLINE } else { Self::ONLINE };
         let old = self.value.swap(new, std::sync::atomic::Ordering::SeqCst);
         if old == new {
             return;
         }
         if let Some(file) = &self.file {
-            // Atomic: a temp file in the same folder, then a rename. A failure is logged; the value in memory stands.
-            let tmp = file.with_extension("json.tmp");
+            // Atomic and serialised (under the lock): a temp file of this process and ticket in the same folder, then a
+            // rename. A failure is logged; the value in memory stands.
+            let tmp = file.with_extension(format!("json.{}-{ticket}.tmp", std::process::id()));
             let text = serde_json::json!({ "offline": offline }).to_string();
             if let Err(e) = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, file)) {
+                let _ = std::fs::remove_file(&tmp);
                 eprintln!("Pitwall: the last known Offline mode could not be kept ({e})");
             }
         }
+        drop(applied);
         if offline {
             for f in self.watchers.lock().unwrap_or_else(|p| p.into_inner()).iter() {
                 f();
@@ -85,6 +113,12 @@ impl OfflineKnown {
 
     /// Learns from a server reply: `overview` (`server.offline`) and `update_check_status` (`offline`).
     pub fn observe(&self, method: &str, reply: &Value) {
+        let ticket = self.ticket();
+        self.observe_at(ticket, method, reply);
+    }
+
+    /// Like [`observe`](Self::observe), for a reply to the call that took `ticket` before it went out.
+    pub fn observe_at(&self, ticket: u64, method: &str, reply: &Value) {
         let flag = match method {
             "update_check_status" => reply.get("offline"),
             "overview" => reply.get("server").and_then(|s| s.get("offline")),
@@ -92,7 +126,7 @@ impl OfflineKnown {
             _ => None,
         };
         if let Some(b) = flag.and_then(Value::as_bool) {
-            self.set(b);
+            self.set_at(ticket, b);
         }
     }
 
@@ -152,8 +186,10 @@ impl ServerClient for Observing {
         timeout: Option<std::time::Duration>,
     ) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
         Box::pin(async move {
+            // The ticket is taken before the call goes out: a slower, older reply cannot overwrite a newer value.
+            let ticket = self.known.ticket();
             let reply = self.inner.call(method, args, timeout).await?;
-            self.known.observe(method, &reply);
+            self.known.observe_at(ticket, method, &reply);
             Ok(reply)
         })
     }
@@ -209,6 +245,32 @@ mod tests {
         assert_eq!(OfflineKnown::at(file.clone()).get(), Some(true));
         std::fs::write(&file, "not json").unwrap();
         assert_eq!(OfflineKnown::at(file).get(), None, "damaged: unknown");
+    }
+
+    /// An older reply that arrives after a newer observation is dropped (and not kept in the file); a live frame wins over
+    /// a reply to a call that went out before it.
+    #[test]
+    fn an_older_reply_never_overwrites_a_newer_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("offline-known.json");
+        let known = OfflineKnown::at(file.clone());
+        let old_call = known.ticket();
+        let new_call = known.ticket();
+        known.observe_at(new_call, "settings", &json!({ "network": { "offline": true } }));
+        known.observe_at(old_call, "overview", &json!({ "server": { "offline": false } }));
+        assert_eq!(known.get(), Some(true), "the older reply was dropped");
+        assert_eq!(OfflineKnown::at(file.clone()).get(), Some(true), "and not kept");
+        let in_flight = known.ticket();
+        known.observe_frame(r#"{"kind":"server","server":{"offline":false}}"#);
+        known.observe_at(in_flight, "overview", &json!({ "server": { "offline": true } }));
+        assert_eq!(known.get(), Some(false), "the frame wins over the reply to the earlier call");
+        assert_eq!(OfflineKnown::at(file).get(), Some(false));
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "no temp files left");
     }
 
     /// The watchers run when Offline mode turns on, once per change, never when it turns off or stays the same.
