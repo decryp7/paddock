@@ -9,7 +9,7 @@ use crate::commands::{self, SharedClient};
 use crate::quit::{self, QuitChoice};
 use crate::tray_model::{Entry, TrayAction, TrayState, TrayView};
 use crate::SharedModel;
-use paddock_window::tauri::{NativeTray, Tray, TrayBackend};
+use paddock_window::tauri::{NativeTray, PopoverSpec, Popovers, Tray, TrayBackend};
 use paddock_window::tray::{self as shell_tray, SHOW_ID};
 use tauri::image::Image;
 use tauri::{AppHandle, Manager, Runtime};
@@ -85,14 +85,22 @@ pub fn shell_view(view: &TrayView) -> shell_tray::TrayView {
     shell_tray::TrayView::new(&view.tooltip, menu, icon_name(view.state))
 }
 
-/// The native tray icon: Tauri's, with Pitwall's pictures per state. A left click opens the menu on macOS and the window
-/// elsewhere (the shell's rule without a popover).
+/// The popover's route in the UI (`main.ts` boots the tray window for it): memory, throughput, loaded models, Pause and
+/// Free memory, Open Pitwall.
+pub const POPOVER_ROUTE: &str = "index.html#/tray";
+/// The popover's width (logical px), the UI's tray layout.
+pub const POPOVER_WIDTH: f64 = 360.0;
+
+/// The native tray icon: Tauri's, with Pitwall's pictures per state. A left click opens the popover on every OS; the
+/// right click (and Control-click) opens the menu.
 pub fn native() -> NativeTray {
-    NativeTray::new(|name| state_of(name).and_then(|s| Image::from_bytes(icon_bytes(s, dark_taskbar())).ok()))
+    NativeTray::new(|name| state_of(name).and_then(|s| Image::from_bytes(icon_bytes(s, dark_taskbar())).ok())).menu_on_left_click(false)
 }
 
-/// The shell's tray over `backend`: the model reads the facts the live feed keeps, and Pitwall's own items run here.
-pub fn tray<R: Runtime>(backend: impl TrayBackend<R>) -> Tray<R> {
+/// The shell's tray over `backend`, with its popover: the model reads the facts the live feed keeps, and Pitwall's own items
+/// run here.
+pub fn tray<R: Runtime>(app: &AppHandle<R>, backend: impl TrayBackend<R>) -> Tray<R> {
+    app.manage(Popovers::new().popover(None, PopoverSpec::new(POPOVER_ROUTE, crate::APP_NAME).width(POPOVER_WIDTH)));
     Tray::new(backend, |app: &AppHandle<R>| {
         let view = match app.try_state::<SharedModel>() {
             Some(m) => m.lock().unwrap_or_else(|p| p.into_inner()).view(),
@@ -105,6 +113,7 @@ pub fn tray<R: Runtime>(backend: impl TrayBackend<R>) -> Tray<R> {
             act(app, action);
         }
     })
+    .popover(true)
 }
 
 /// Runs one of Pitwall's tray items (Open is the shell's).

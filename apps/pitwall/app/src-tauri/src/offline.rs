@@ -7,32 +7,76 @@ use pitwall_core::mgmt::CommandError;
 use serde_json::Value;
 
 /// The last `network.offline` the server reported (to this app, by any status or overview read). Offline mode blocks every
-/// network path, so when the server cannot be asked this is the answer; a value never seen is "unknown".
+/// network path, so when the server cannot be asked this is the answer; a value never seen is "unknown". The last
+/// confirmed value is kept in the app's data folder (`offline-known.json`), so after a restart with the server not
+/// answering the app still knows it; on a first run it is unknown (and blocks). When Offline mode turns on, the
+/// watchers run (Pitwall cancels an update check or download in flight).
 #[derive(Default)]
-pub struct OfflineKnown(std::sync::atomic::AtomicU8);
+pub struct OfflineKnown {
+    value: std::sync::atomic::AtomicU8,
+    file: Option<std::path::PathBuf>,
+    watchers: std::sync::Mutex<Vec<Box<dyn Fn() + Send + Sync>>>,
+}
 
 impl OfflineKnown {
     const ONLINE: u8 = 1;
     const OFFLINE: u8 = 2;
 
-    /// Remembers what the server said.
-    pub fn set(&self, offline: bool) {
-        self.0.store(
-            if offline { Self::OFFLINE } else { Self::ONLINE },
-            std::sync::atomic::Ordering::SeqCst,
-        );
+    /// Kept in `file` (read now: a missing or damaged file is unknown).
+    pub fn at(file: std::path::PathBuf) -> OfflineKnown {
+        let value = std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .and_then(|v| v.get("offline").and_then(Value::as_bool))
+            .map_or(0, |b| if b { Self::OFFLINE } else { Self::ONLINE });
+        OfflineKnown {
+            value: std::sync::atomic::AtomicU8::new(value),
+            file: Some(file),
+            watchers: std::sync::Mutex::new(Vec::new()),
+        }
     }
 
-    /// Whether app updates are blocked: Offline mode is on, or was never confirmed off (fails closed). Last seen online
-    /// allows an update while the server is down, since an update may be what repairs a broken service. The shared
-    /// updater asks this before every check and download (`UpdatesBuilder::offline_mode`).
-    pub fn blocks_updates(&self) -> bool {
-        self.get() != Some(false)
+    /// Runs `f` each time Offline mode turns on (from off or unknown).
+    pub fn watch(&self, f: impl Fn() + Send + Sync + 'static) {
+        self.watchers.lock().unwrap_or_else(|p| p.into_inner()).push(Box::new(f));
+    }
+
+    /// Remembers what the server said (and keeps it in the file when it changed).
+    pub fn set(&self, offline: bool) {
+        let new = if offline { Self::OFFLINE } else { Self::ONLINE };
+        let old = self.value.swap(new, std::sync::atomic::Ordering::SeqCst);
+        if old == new {
+            return;
+        }
+        if let Some(file) = &self.file {
+            // Atomic: a temp file in the same folder, then a rename. A failure is logged; the value in memory stands.
+            let tmp = file.with_extension("json.tmp");
+            let text = serde_json::json!({ "offline": offline }).to_string();
+            if let Err(e) = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, file)) {
+                eprintln!("Pitwall: the last known Offline mode could not be kept ({e})");
+            }
+        }
+        if offline {
+            for f in self.watchers.lock().unwrap_or_else(|p| p.into_inner()).iter() {
+                f();
+            }
+        }
+    }
+
+    /// What the shared updater asks before every check and download (`UpdatesBuilder::offline_mode`): on, off, or unknown
+    /// (never confirmed; blocks, and says so). Last seen off allows an update while the server is down, since an update
+    /// may be what repairs a broken service.
+    pub fn state(&self) -> paddock_updater::OfflineState {
+        match self.get() {
+            Some(true) => paddock_updater::OfflineState::On,
+            Some(false) => paddock_updater::OfflineState::Off,
+            None => paddock_updater::OfflineState::Unknown,
+        }
     }
 
     /// The last value seen, `None` when the server never answered.
     pub fn get(&self) -> Option<bool> {
-        match self.0.load(std::sync::atomic::Ordering::SeqCst) {
+        match self.value.load(std::sync::atomic::Ordering::SeqCst) {
             Self::ONLINE => Some(false),
             Self::OFFLINE => Some(true),
             _ => None,
@@ -141,15 +185,47 @@ mod tests {
         Reply::Ok(json!({ "offline": offline }))
     }
 
-    /// Offline mode blocks updates, and so does a value never seen (fail closed); last seen online allows them.
+    /// Offline mode blocks updates, and so does a value never seen (fail closed, said as unknown); last seen off allows them.
     #[test]
-    fn updates_are_blocked_unless_offline_mode_was_last_seen_off() {
+    fn the_updater_sees_on_off_or_unknown() {
+        use paddock_updater::OfflineState;
         let known = OfflineKnown::default();
-        assert!(known.blocks_updates(), "never known: blocked");
+        assert_eq!(known.state(), OfflineState::Unknown, "never known");
         known.set(true);
-        assert!(known.blocks_updates());
+        assert_eq!(known.state(), OfflineState::On);
         known.set(false);
-        assert!(!known.blocks_updates());
+        assert_eq!(known.state(), OfflineState::Off);
+    }
+
+    /// The last confirmed value survives a restart (the file in the data folder); a missing or damaged file is unknown.
+    #[test]
+    fn the_last_confirmed_value_is_kept_across_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("offline-known.json");
+        assert_eq!(OfflineKnown::at(file.clone()).get(), None, "first run: unknown");
+        OfflineKnown::at(file.clone()).set(false);
+        assert_eq!(OfflineKnown::at(file.clone()).get(), Some(false));
+        OfflineKnown::at(file.clone()).set(true);
+        assert_eq!(OfflineKnown::at(file.clone()).get(), Some(true));
+        std::fs::write(&file, "not json").unwrap();
+        assert_eq!(OfflineKnown::at(file).get(), None, "damaged: unknown");
+    }
+
+    /// The watchers run when Offline mode turns on, once per change, never when it turns off or stays the same.
+    #[test]
+    fn the_watchers_run_when_offline_mode_turns_on() {
+        let known = OfflineKnown::default();
+        let n = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = n.clone();
+        known.watch(move || {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        known.set(false);
+        known.set(true);
+        known.set(true);
+        known.set(false);
+        known.set(true);
+        assert_eq!(n.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

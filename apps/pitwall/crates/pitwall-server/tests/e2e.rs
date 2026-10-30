@@ -850,3 +850,22 @@ async fn stopping_serving_unloads_every_model_ends_the_engine_processes_and_resu
     assert_eq!(again.status, 200, "{}", again.body);
     h.st.serving.release_all();
 }
+
+/// Saving the settings tells every window at once (a `server` frame on the live feed carries the new Offline mode), so the
+/// app's Offline gate for its own updates does not wait for the next read.
+#[tokio::test]
+async fn saving_the_settings_pushes_the_new_server_state_to_the_live_feed() {
+    let h = harness(false).await;
+    let mut rx = h.st.live.subscribe();
+    let mut ui = h.rpc("settings", json!({})).await.json();
+    ui["network"]["offline"] = json!(true);
+    assert_eq!(h.rpc("save_settings", json!({"settings": ui})).await.status, 200);
+    let frame = loop {
+        let text = rx.try_recv().expect("a server frame was pushed when the settings were saved");
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        if v["kind"] == "server" {
+            break v;
+        }
+    };
+    assert_eq!(frame["server"]["offline"], json!(true), "{frame}");
+}
