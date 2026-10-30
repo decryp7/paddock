@@ -1,6 +1,6 @@
 // Generated from the Rust wire types of paddock-updater (ts-rs). Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-updater --lib generated.
 
-export type UpdateErrorKind = "notAvailable" | "offline" | "unreachable" | "noRelease" | "noPlatform" | "invalidManifest" | "signatureInvalid" | "tooLarge" | "diskFull" | "storage" | "installFailed" | "busy" | "invalid";
+export type UpdateErrorKind = "notAvailable" | "offline" | "offlineMode" | "unreachable" | "noRelease" | "noPlatform" | "invalidManifest" | "signatureInvalid" | "tooLarge" | "diskFull" | "storage" | "installFailed" | "busy" | "invalid";
 
 export type UpdateErrorDto = { kind: UpdateErrorKind, message: string, nextStep: string, detail: string | null, };
 

@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-updater`: Offline mode (local first)
+- `UpdatesBuilder::offline_mode(is_on)` and `Updater::with_offline_mode`: while the app's Offline mode is on, no check or download starts (`UpdateError::OfflineMode`, wire kind `offlineMode`, with the next step "Turn Offline mode off in Settings"), a check or download that began before it was switched on stops before the network (a stopped check is not counted as one), and the automatic check is never due. The predicate fails closed: an app answers yes while it does not know, and a predicate that panics counts as on. Without the predicate nothing changes. Pitwall is the first user (its fail-closed offline gate, 1.1).
+
 ### `paddock-jobs`: `WalkOptions::with_modified`
 - `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
 
