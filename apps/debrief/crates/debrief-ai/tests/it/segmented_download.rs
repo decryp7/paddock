@@ -8,7 +8,7 @@ use debrief_ai::AiError;
 use serde_json::json;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 type Delay = Box<dyn Fn(u64, usize) -> Duration + Send + Sync>;
@@ -22,6 +22,9 @@ struct Fake {
     delay: Option<Delay>,
     reject: Option<Reject>,
     on_data: Option<Box<dyn Fn(u64) + Send + Sync>>,
+    /// The first this-many requests are held until that many are open at once, so overlap is observed, not hoped for.
+    rendezvous: usize,
+    opened: (Mutex<()>, Condvar),
     calls: AtomicUsize,
     in_flight: AtomicUsize,
     served: AtomicU64,
@@ -36,6 +39,8 @@ impl Fake {
             delay: None,
             reject: None,
             on_data: None,
+            rendezvous: 0,
+            opened: (Mutex::new(()), Condvar::new()),
             calls: AtomicUsize::new(0),
             in_flight: AtomicUsize::new(0),
             served: AtomicU64::new(0),
@@ -89,6 +94,19 @@ impl ModelSource for Fake {
         let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
         let _g = InFlight(&self.in_flight);
         self.log.lock().unwrap().push((start, end, now));
+        if call < self.rendezvous {
+            // Nothing is served until `rendezvous` connections are open together. The bound only turns a serial engine into a
+            // failed assertion instead of a hang; a parallel engine releases every holder the moment the last one arrives.
+            let (m, cv) = &self.opened;
+            let _guard = m.lock().unwrap();
+            cv.notify_all();
+            let _ = cv
+                .wait_timeout_while(_guard, Duration::from_secs(30), |_| {
+                    self.in_flight.load(Ordering::SeqCst) < self.rendezvous
+                })
+                .unwrap();
+            cv.notify_all();
+        }
         if let Some(e) = self.reject.as_ref().and_then(|f| f(start, call, now)) {
             return Err(e);
         }
@@ -146,7 +164,8 @@ const SIZE: usize = 6 * 1024 * 1024 + 12345;
 
 #[test]
 fn ranges_in_parallel_reassemble_to_the_original_bytes_and_hash() {
-    let src = Fake::new(blob(SIZE));
+    let mut src = Fake::new(blob(SIZE));
+    src.rendezvous = 4;
     let dir = tempfile::tempdir().unwrap();
     let p = Progress::new();
     let path = download(&src, dir.path(), opts(), &p).unwrap();
@@ -156,7 +175,7 @@ fn ranges_in_parallel_reassemble_to_the_original_bytes_and_hash() {
     assert_eq!(names, vec![std::ffi::OsString::from("big.gguf")]);
     let log = src.log.lock().unwrap();
     assert!(log.len() > 4, "{} requests", log.len());
-    assert!(log.iter().map(|l| l.2).max().unwrap() >= 2, "connections ran in parallel");
+    assert!(log.iter().map(|l| l.2).max().unwrap() >= 4, "connections ran in parallel");
     assert!(log.iter().map(|l| l.2).max().unwrap() <= 4);
     assert_eq!(p.snapshot().bytes, SIZE as u64);
 }
