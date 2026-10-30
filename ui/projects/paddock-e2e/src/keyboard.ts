@@ -48,9 +48,14 @@ export async function pageModKey(page: Page): Promise<'Meta' | 'Control'> {
   return modKey(await page.evaluate(() => ({ platform: navigator.platform, userAgent: navigator.userAgent })));
 }
 
-/** The `Mod` of a binding replaced by `mod` (`Mod+Shift+P` becomes `Meta+Shift+P`); every other key is kept. Pure. */
+/**
+ * The `Mod` of a binding replaced by `mod` (`Mod+Shift+P` becomes `Meta+Shift+P`); every other key is kept. A binding without
+ * a `Mod` modifier throws: it is a typo (`Mdo+k`) or a key that needs no helper. Pure.
+ */
 export function bindingFor(binding: string, mod: 'Meta' | 'Control'): string {
-  return binding.split('+').map((key, i, keys) => (key === 'Mod' && i < keys.length - 1 ? mod : key)).join('+');
+  const keys = binding.split('+');
+  if (!keys.slice(0, -1).includes('Mod')) throw new Error(`bindingFor: "${binding}" has no Mod modifier (write Mod+k, or press the key directly)`);
+  return keys.map((key, i) => (key === 'Mod' && i < keys.length - 1 ? mod : key)).join('+');
 }
 
 /**
@@ -63,6 +68,17 @@ export async function pressMod(target: Page | Locator, binding: string): Promise
   const mod = await pageModKey(isPage ? target : target.page());
   const key = bindingFor(binding, mod);
   if (isPage) await target.keyboard.press(key);
+  else await target.press(key);
+}
+
+/**
+ * Presses a binding written with `Mod` for a key the browser itself handles (text editing in a field: Ctrl+Home, Ctrl+A),
+ * which follows the machine the browser runs on, not the page's platform: the case Playwright's `ControlOrMeta` is for. The
+ * app's own shortcuts use {@link pressMod}.
+ */
+export async function pressHostMod(target: Page | Locator, binding: string): Promise<void> {
+  const key = bindingFor(binding, process.platform === 'darwin' ? 'Meta' : 'Control');
+  if ('keyboard' in target) await target.keyboard.press(key);
   else await target.press(key);
 }
 

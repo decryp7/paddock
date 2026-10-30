@@ -69,16 +69,10 @@ module.exports = defineConfig(
     },
   },
   {
-    // E2E code presses `Mod` with `pressMod` (@decryp7/paddock-e2e, keyboard.ts), never Playwright's `ControlOrMeta`: that
-    // follows the machine the tests run on, but the app binds `Mod` by the page's platform (WebKit on Linux emulates a Mac).
+    // E2E code presses `Mod` with `pressMod` (@decryp7/paddock-e2e), never Playwright's `ControlOrMeta` (ER-22: the shared rule).
     files: ['e2e/**/*.ts', 'scripts/**/*.ts'],
-    rules: {
-      'no-restricted-syntax': [
-        'error',
-        { selector: "Literal[value=/ControlOrMeta/]", message: "ControlOrMeta follows the test machine, not the page. Use pressMod(page, 'Mod+k') or pageModKey(page) from ui/projects/paddock-e2e/src/keyboard.ts." },
-        { selector: 'TemplateElement[value.raw=/ControlOrMeta/]', message: 'ControlOrMeta follows the test machine, not the page. Use pressMod / pageModKey.' },
-      ],
-    },
+    plugins: { paddock: require('../../../eslint/src/plugin.cjs') },
+    rules: { 'paddock/no-control-or-meta': 'error' },
   },
   {
     files: ['**/*.html'],

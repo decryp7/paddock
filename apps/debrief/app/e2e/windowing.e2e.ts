@@ -1,7 +1,7 @@
 import { expect, Page, test } from '@playwright/test';
 import { nextRender, openApp } from './app';
 import { chooseMenu, openMenu } from './menu-support';
-import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
+import { pageModKey, pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // Windows, the close prompt and background work against the browser build's mock windowing backend
 // (src/app/windowing/mock-windowing-backend.ts): each window is a tab with `?window=<label>` and its
@@ -82,7 +82,7 @@ test('closing the last window asks once, then remembers "Keep running in tray"',
 test('File ▸ Exit quits Debrief in one step (nothing unsaved: no question)', async ({ page }) => {
   const problems = watchProblems(page);
   await openApp(page);
-  const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform));
+  const mac = (await pageModKey(page)) === 'Meta';
   const quit = page.waitForEvent('console', (m) => m.text() === '[mock windowing] quit_app');
   await chooseMenu(page, 'File', mac ? 'Quit Debrief' : 'Exit');
   await quit;
