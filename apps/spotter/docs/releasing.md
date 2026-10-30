@@ -133,4 +133,28 @@ relaunch, Install Chromium progress and Cancel, wrong-key refusal) were therefor
 specific to the VM (no GPU, paravirtual Metal) or a lock-order bug; the same build must be started once on a real Mac or
 an unstripped build sampled. Evidence: `/Volumes/d7sst7/dev-targets/handoff/spotter-update-test-2026-10-29/`.
 
-The hang is believed to be the start-up deadlock of ADR 0029 (a window built inside a plugin hook), fixed before the 1.0.0 release; confirm on both OSes before the tag (the next VM run, runbook: `spotter-1.0-vm-runbook.md`, is the first on the fix).
+### 2026-10-30, f6b1ab5c5 (`steward/spotter-1.0-batch`), unstripped debug build, start only
+
+| OS | Result |
+| --- | --- |
+| macOS 26.6.2 (25G83) guest, Tart `macos-tahoe-base`, fresh clone, `--no-graphics` | **PASS (start)**: the main window opens and its page reports ready; steps 3 to 7 not run (they need the VM's window) |
+
+The start is no longer deadlocked: the shell opens the tray and the window from Tauri's `setup` (ADR 0029), and the log
+has lines from the first moment (`Native menu bar built`, `Main window built`, `Window main ready`). Warm VM: window built
+about 1 s after the process started, ready 1.5 s later, the Dashboard rendered (screenshot). A second `open` focuses the
+running copy (one process; single instance), a stale `/tmp/net_decryptology_spotter_si.sock` left by a killed copy does
+not stop the next start, and starting the binary directly (as the updater's relaunch does) opens the window too.
+
+The first start in the freshly booted VM took 76 s to its window and its page went blank: WebKit's GPU process took 48 s
+to launch and was then killed as unresponsive repeatedly (`GPUProcessProxy::didBecomeUnresponsive`), and WebKit
+terminated every web content process (`WebProcessPool::terminateAllWebContentProcesses`; Spotter logged "The web content
+process of window main terminated" and reloaded). That is the cold VM's paravirtual GPU, not Spotter: every later start
+in the same VM was normal. Run the VM checks after the first boot has settled (start Safari or Spotter once first).
+
+Since this run the shell also has a start guard: from the shell plugin's set-up on, a start that has not got to
+`RunEvent::Ready` is logged with its phase (the shell plugin's set-up, starting the event loop, opening the tray, opening
+the main window) after 20 ticks of 1 s and every 60 after that, so a hang there no longer leaves the log empty. It does
+not cover what runs before the shell plugin's set-up: Tauri's build and the set-ups of the plugins registered before it
+(single instance, notification, opener, dialog, updater, autostart). A hang there still shows only in `sample`.
+
+The 2026-10-29 hang was the start-up deadlock of ADR 0029 (a window built inside a plugin hook), fixed before the 1.0.0 release and verified on 2026-10-30 (above). The update steps (runbook `spotter-1.0-vm-runbook.md`, section 1 step 5) still have to be run on the CI-built bundles before the tag.
