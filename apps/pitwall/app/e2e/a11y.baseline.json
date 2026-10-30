@@ -1,16 +1,1 @@
-{
-  "chromium/dashboard": [
-    "dark: aria-prohibited-attr: div[aria-describedby=\"cdk-describedby-message-ng-N\"] > .title[_ngcontent-ng-N=\"\"] > .state[aria-label=\"Ready\"][data-tone=\"ok\"], span[aria-label=\"Busy\"], .row:nth-child(3) > .main[mattooltipshowdelay=\"600\"][cdk-describedby-host=\"ng-N\"] > .title[_ngcontent-ng-N=\"\"] > .state[aria-label=\"Ready\"][data-tone=\"ok\"], li:nth-child(1) > .job-dot[data-state=\"running\"][aria-label=\"Running\"], li:nth-child(2) > .job-dot[data-state=\"running\"][aria-label=\"Running\"], li:nth-child(3) > .job-dot[data-state=\"queued\"][aria-label=\"Waiting\"], li:nth-child(4) > .job-dot[data-state=\"queued\"][aria-label=\"Waiting\"], tr:nth-child(1) > td:nth-child(1) > .app[_ngcontent-ng-N=\"\"] > .on.conn[aria-label=\"Connected\"], tr:nth-child(2) > td:nth-child(1) > .app[_ngcontent-ng-N=\"\"] > .on.conn[aria-label=\"Connected\"], tr:nth-child(3) > td:nth-child(1) > .app[_ngcontent-ng-N=\"\"] > .on.conn[aria-label=\"Connected\"], tr:nth-child(4) > td:nth-child(1) > .app[_ngcontent-ng-N=\"\"] > .on.conn[aria-label=\"Connected\"], span[aria-label=\"Not connected\"]",
-    "dark: scrollable-region-focusable: pw-events-feed",
-    "light: aria-prohibited-attr: div[aria-describedby=\"cdk-describedby-message-ng-N\"] > .title[_ngcontent-ng-N=\"\"] > .state[aria-label=\"Ready\"][data-tone=\"ok\"], span[aria-label=\"Busy\"], .row:nth-child(3) > .main[mattooltipshowdelay=\"600\"][cdk-describedby-host=\"ng-N\"] > .title[_ngcontent-ng-N=\"\"] > .state[aria-label=\"Ready\"][data-tone=\"ok\"], li:nth-child(1) > .job-dot[data-state=\"running\"][aria-label=\"Running\"], li:nth-child(2) > .job-dot[data-state=\"running\"][aria-label=\"Running\"], li:nth-child(3) > .job-dot[data-state=\"queued\"][aria-label=\"Waiting\"], li:nth-child(4) > .job-dot[data-state=\"queued\"][aria-label=\"Waiting\"], tr:nth-child(1) > td:nth-child(1) > .app[_ngcontent-ng-N=\"\"] > .on.conn[aria-label=\"Connected\"], tr:nth-child(2) > td:nth-child(1) > .app[_ngcontent-ng-N=\"\"] > .on.conn[aria-label=\"Connected\"], tr:nth-child(3) > td:nth-child(1) > .app[_ngcontent-ng-N=\"\"] > .on.conn[aria-label=\"Connected\"], tr:nth-child(4) > td:nth-child(1) > .app[_ngcontent-ng-N=\"\"] > .on.conn[aria-label=\"Connected\"], span[aria-label=\"Not connected\"]",
-    "light: scrollable-region-focusable: pw-events-feed"
-  ],
-  "chromium/settings": [
-    "dark: color-contrast: .custom > .p-hint",
-    "light: color-contrast: .custom > .p-hint"
-  ],
-  "chromium/tray": [
-    "dark: aria-prohibited-attr: span[data-tone=\"ok\"], span[data-tone=\"info\"]",
-    "light: aria-prohibited-attr: span[data-tone=\"ok\"], span[data-tone=\"info\"]"
-  ]
-}
+{}

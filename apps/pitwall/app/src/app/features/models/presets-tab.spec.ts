@@ -49,7 +49,7 @@ async function render(backend: PitwallBackend = new MockBackend(), confirm = tru
   const menu = async (alias: string, item: string) => {
     button(`More actions for ${alias}`).click();
     await settle();
-    Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
     await settle();
   };
   return { fixture, el, settle, button, type, typeAndPreview, menu };
@@ -199,7 +199,10 @@ describe('PresetsTab', () => {
     const { el, button, settle } = await render();
     button('New preset').click();
     await settle();
-    const options = Array.from(el.querySelectorAll('#pw-preset-targets option')).map((o) => o.getAttribute('value'));
+    const target = el.querySelector('#pw-preset-target') as HTMLInputElement;
+    target.dispatchEvent(new Event('focusin'));
+    await settle();
+    const options = Array.from(document.querySelectorAll('.mat-mdc-option .mono')).map((o) => o.textContent?.trim());
     expect(options).toContain('qwen3.5-9b-q4_k_m');
     expect(options).toContain('auto:chat,fast');
     expect(el.querySelector('#pw-preset-engine')).toBeNull();

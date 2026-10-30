@@ -39,7 +39,7 @@ describe('QuitPrompt', () => {
     prompt.watch();
     backend.askQuit();
     await tick();
-    (document.querySelector('pw-quit-dialog input[type=checkbox]') as HTMLInputElement).click();
+    (document.querySelector('pw-quit-dialog mat-checkbox input') as HTMLInputElement).click();
     await choose('Quit and stop serving');
     expect(backend.quits).toEqual([{ stopServing: true, remember: true }]);
     expect((await backend.settings()).general.onQuit).toBe('stopServing');

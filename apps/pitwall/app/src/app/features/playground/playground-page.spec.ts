@@ -135,9 +135,9 @@ describe('PlaygroundPage', () => {
     expect(box(el).placeholder).toBe('Message both models…');
     expect(el.querySelector('select')).toBeNull();
     for (const [id, name] of [['pg-model-0', 'Qwen3.5 9B'], ['pg-model-1', 'Qwen3.5 4B']] as const) {
-      el.querySelector<HTMLButtonElement>(`#${id}`)!.click();
+      el.querySelector<HTMLElement>(`#${id}`)!.click();
       await settle(fixture);
-      const opts = Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container .pw-select-list .opt'));
+      const opts = Array.from(Array.from(document.querySelectorAll<HTMLElement>('.mat-mdc-select-panel')).at(-1)!.querySelectorAll<HTMLElement>('mat-option'));
       opts.find((o) => o.textContent!.includes(name))!.click();
       await settle(fixture);
     }
@@ -177,5 +177,8 @@ describe('PlaygroundPage', () => {
     expect(el.querySelector('output')?.textContent).toBe('1.25');
     expect(sys.value).toBe('Be terse');
     expect(max.value).toBe('64');
+    // Rule 47: the fields are Material, the temperature a Material slider.
+    expect(temp.closest('mat-slider')).not.toBeNull();
+    for (const f of [sys, max, box(el)]) expect(f.closest('mat-form-field')).not.toBeNull();
   });
 });

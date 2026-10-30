@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { PdCopyMenu } from '@decryp7/paddock-ui';
 import { EnvironmentInjector, createEnvironmentInjector } from '@angular/core';
 import {
   browserKeyAction,
@@ -289,7 +290,7 @@ describe('provideNativeFeel', () => {
     expect(press()).toBe(false);
   });
 
-  it("opens Pitwall's menu with Copy on selected text, only when the click is on the selection", async () => {
+  it("opens the family's Copy menu (PdCopyMenu) with the selected text, only when the click is on the selection", () => {
     const env = createEnvironmentInjector([provideNativeFeel()], TestBed.inject(EnvironmentInjector));
     const p = document.createElement('p');
     p.textContent = 'copy me';
@@ -297,17 +298,10 @@ describe('provideNativeFeel', () => {
     const range = document.createRange();
     range.selectNodeContents(p);
     window.getSelection()?.addRange(range);
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 6 });
     p.dispatchEvent(e);
     expect(e.defaultPrevented).toBe(true);
-    const items = Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item'));
-    expect(items.map((i) => i.textContent?.trim())).toEqual(['Copy']);
-    items[0]!.click();
-    expect(writeText).toHaveBeenCalledWith('copy me');
-    await Promise.resolve();
-    expect(document.querySelectorAll('.pw-menu').length).toBe(0);
+    expect(env.get(PdCopyMenu).state()).toEqual({ x: 5, y: 6, text: 'copy me' });
     window.getSelection()?.removeAllRanges();
     p.remove();
     env.destroy();

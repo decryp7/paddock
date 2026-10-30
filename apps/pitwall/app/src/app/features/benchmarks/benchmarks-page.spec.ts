@@ -88,7 +88,10 @@ describe('BenchmarksPage', () => {
     await settle(fixture);
     expect(Array.from(el.querySelectorAll('thead th')).map((h) => h.textContent!.trim())).toEqual(['Model', 'Build', 'Generation tok/s', 'Prompt tok/s', 'TTFT ms', 'When']);
     expect(el.querySelector('tbody .tag')).toBeNull();
-    expect(el.querySelectorAll('.page-head .btn.primary').length).toBe(1);
+    // A Material table (rule 47, C43) with one sticky header row.
+    expect(el.querySelector('table')!.classList).toContain('mat-mdc-table');
+    expect(Array.from(el.querySelectorAll('thead th')).every((h) => h.classList.contains('mat-mdc-table-sticky'))).toBe(true);
+    expect(el.querySelectorAll('.page-head .mat-mdc-unelevated-button').length).toBe(1);
     const runs = Array.from(el.querySelectorAll('li button.run'));
     expect(runs.length).toBeGreaterThan(1);
     expect(runs.every((b) => b.textContent!.trim() === '')).toBe(true);

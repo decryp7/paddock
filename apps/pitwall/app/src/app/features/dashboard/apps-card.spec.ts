@@ -36,7 +36,7 @@ async function mount(series?: KeyedSeries[], backend = new MockBackend()) {
 describe('AppsCard', () => {
   it('invites the user to pair an app when there are none', async () => {
     const { el } = await mount(undefined, new MockBackend({ empty: true }));
-    expect(el.querySelector('pw-empty-state')!.textContent).toContain('No apps yet');
+    expect(el.querySelector('pd-empty-state')!.textContent).toContain('No apps yet');
     expect(el.querySelector('a[href="/apps"]')).not.toBeNull();
     expect(el.querySelector('table')).toBeNull();
   });
@@ -69,9 +69,9 @@ describe('AppsCard', () => {
     const { el, live } = await mount([{ key: 'debrief', values: [1, 4, 2] }]);
     const rows = Array.from(el.querySelectorAll('tbody tr'));
     const imt = rows.find((r) => r.querySelector('.nm')!.textContent === 'Debrief')!;
-    expect(imt.querySelectorAll('pw-sparkline path')[1]!.getAttribute('d')).toMatch(/^M0\.0,/);
+    expect(imt.querySelector('pd-sparkline .pd-line')!.getAttribute('d')).toMatch(/^M3\.0 /);
     const other = rows.find((r) => r.querySelector('.nm')!.textContent !== 'Debrief')!;
-    expect(other.querySelectorAll('pw-sparkline path')[1]!.getAttribute('d')).toBe('');
+    expect(other.querySelector('pd-sparkline .pd-line')!.getAttribute('d')).toBe('');
     expect(live.apps().length).toBeGreaterThan(1);
   });
 
@@ -82,7 +82,7 @@ describe('AppsCard', () => {
     ]);
     const stroke = (name: string) => {
       const row = Array.from(el.querySelectorAll('tbody tr')).find((r) => r.querySelector('.nm')!.textContent === name)!;
-      return row.querySelectorAll('pw-sparkline path')[1]!.getAttribute('stroke');
+      return (row.querySelector('pd-sparkline') as HTMLElement).style.color;
     };
     expect(stroke('Nightly report script')).not.toBe(stroke('Debrief'));
     expect(stroke('Spotter')).not.toBe(stroke('Debrief'));

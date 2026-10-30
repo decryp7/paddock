@@ -1,19 +1,21 @@
-import { CdkConnectedOverlay, CdkOverlayOrigin } from '@angular/cdk/overlay';
-import { PwSelect, type SelectOption } from '../../shared/ui/select';
 import { ScrollingModule } from '@angular/cdk/scrolling';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { MatIconButton } from '@angular/material/button';
+import { MatFormField, MatPrefix } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInput } from '@angular/material/input';
+import { MatMenu, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
+import { SuEmptyState, SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { RequestRecord } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { Toasts } from '../../core/toasts';
 import { clock, int } from '../../shared/format';
 import { AppAvatar } from '../../shared/ui/app-avatar';
-import { ContextMenuService, type ContextMenuItem } from '../../shared/ui/context-menu';
-import { EmptyState } from '../../shared/ui/empty-state';
 import { Panel } from '../../shared/ui/panel';
-import { RowMenu } from '../../shared/ui/row-menu';
-import { isMenuKey, moveRowFocus } from '../../shared/ui/row-nav';
+import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
+import { moveRowFocus } from '../../shared/ui/row-nav';
 import { shortModel } from '../dashboard/dashboard';
 import { API_LABEL, CHOSEN_LABEL, secondsCell, statusText, tokensCell } from './request-labels';
 import { RequestDetail } from './request-detail';
@@ -81,7 +83,7 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
 /** The request log: every recent request on one line; the facts that are the same on every row live in the detail panel. */
 @Component({
   selector: 'pw-requests-page',
-  imports: [ScrollingModule, CdkConnectedOverlay, CdkOverlayOrigin, MatIconModule, MatTooltipModule, Panel, EmptyState, RequestDetail, AppAvatar, RowMenu, PwSelect],
+  imports: [ScrollingModule, MatIconButton, MatFormField, MatPrefix, MatInput, MatMenu, MatMenuItem, MatMenuTrigger, MatIconModule, MatTooltipModule, Panel, SuEmptyState, SuSegmentedControl, RequestDetail, AppAvatar, ItemsMenu, MoreButton, RowMenu, PdSelect],
   providers: [RequestsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -92,50 +94,28 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
           <p class="sub">What your apps asked for. Prompts and responses stay hidden unless you open them.</p>
         </div>
         <div class="actions">
-          <button type="button" class="btn ghost icon" aria-label="Refresh" matTooltip="Refresh" [disabled]="store.loading()" (click)="store.load()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" /></button>
+          <button type="button" matIconButton aria-label="Refresh" matTooltip="Refresh" [disabled]="store.loading()" (click)="store.load()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" /></button>
         </div>
       </header>
 
       <div class="filters" role="search" aria-label="Filter requests">
-        <div class="search">
-          <mat-icon svgIcon="pw:search" aria-hidden="true" />
-          <label class="sr-only" for="pw-req-search">Search endpoint or model</label>
-          <input id="pw-req-search" class="input" type="search" placeholder="Search endpoint or model" autocomplete="off" [value]="store.filter().text" (input)="store.setFilter({ text: $any($event.target).value })" />
-        </div>
-        <pw-select class="app-filter" inputId="pw-req-app" label="App" [options]="appSelectOptions()" [value]="store.filter().app" (changed)="store.setFilter({ app: $event })" />
-        <div class="seg" role="radiogroup" aria-label="Status">
-          @for (s of statuses; track s.value) {
-            <button type="button" role="radio" [attr.aria-checked]="store.filter().status === s.value" (click)="store.setFilter({ status: s.value })">
-              {{ s.label }}
-              @if (s.value === 'errors' && store.errorCount()) {
-                <span class="count num">{{ store.errorCount() }}</span>
-              }
-            </button>
-          }
-        </div>
+        <mat-form-field class="search">
+          <mat-icon matPrefix svgIcon="pw:search" aria-hidden="true" />
+          <input matInput id="pw-req-search" type="search" placeholder="Search endpoint or model" aria-label="Search endpoint or model" autocomplete="off" [value]="store.filter().text" (input)="store.setFilter({ text: $any($event.target).value })" />
+        </mat-form-field>
+        <pd-select class="app-filter" inputId="pw-req-app" ariaLabel="App" [options]="appSelectOptions()" [value]="store.filter().app" (valueChange)="store.setFilter({ app: $event })" />
+        <pd-segmented-control label="Status" [options]="statusSegs()" [value]="store.filter().status" (valueChange)="setStatus($event)" />
         <span class="shown faint num" aria-live="polite">{{ shownText() }}</span>
-        <button
-          type="button"
-          class="btn ghost icon"
-          cdkOverlayOrigin
-          #colsOrigin="cdkOverlayOrigin"
-          aria-label="Columns"
-          matTooltip="Columns"
-          aria-haspopup="menu"
-          [attr.aria-expanded]="colsOpen()"
-          (click)="colsOpen.set(!colsOpen())"
-        >
+        <button type="button" matIconButton class="cols" aria-label="Columns" matTooltip="Columns" [matMenuTriggerFor]="colsMenu">
           <mat-icon svgIcon="pw:sliders" aria-hidden="true" />
         </button>
-        <ng-template cdkConnectedOverlay [cdkConnectedOverlayOrigin]="colsOrigin" [cdkConnectedOverlayOpen]="colsOpen()" (overlayOutsideClick)="colsOpen.set(false)" (detach)="colsOpen.set(false)">
-          <div class="pop" role="menu" tabindex="-1" aria-label="Columns" (keydown.escape)="colsOpen.set(false)">
-            @for (c of optionalColumns; track c.id) {
-              <button type="button" role="menuitemcheckbox" class="opt" [attr.aria-checked]="extra().has(c.id)" (click)="toggleColumn(c.id)">
-                <mat-icon svgIcon="pw:check" aria-hidden="true" />{{ c.label }}
-              </button>
-            }
-          </div>
-        </ng-template>
+        <mat-menu #colsMenu="matMenu" aria-label="Columns" class="pw-cols-menu">
+          @for (c of optionalColumns; track c.id) {
+            <button type="button" mat-menu-item role="menuitemcheckbox" class="opt" [attr.aria-checked]="extra().has(c.id)" (click)="$event.stopPropagation(); toggleColumn(c.id)">
+              <mat-icon svgIcon="pw:check" aria-hidden="true" [class.off]="!extra().has(c.id)" />{{ c.label }}
+            </button>
+          }
+        </mat-menu>
       </div>
 
       <div class="with-panel fill body">
@@ -149,7 +129,7 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
                 <span role="columnheader"><span class="sr-only">Actions</span></span>
               </div>
               @if (store.visible().length === 0) {
-                <pw-empty-state icon="requests" [heading]="store.records().length ? 'No request matches' : 'No requests yet'" [text]="store.records().length ? 'Change the filter to see more.' : 'Requests from your apps appear here.'" />
+                <pd-empty-state [heading]="store.records().length ? 'No request matches' : 'No requests yet'" [description]="store.records().length ? 'Change the filter to see more.' : 'Requests from your apps appear here.'"><mat-icon slot="icon" svgIcon="pw:requests" aria-hidden="true" /></pd-empty-state>
               } @else {
                 <cdk-virtual-scroll-viewport class="vp fit" [itemSize]="rowHeight" minBufferPx="400" maxBufferPx="800" role="rowgroup">
                   <div
@@ -163,7 +143,9 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
                     [attr.aria-selected]="r.id === store.selectedId()"
                     (click)="onRowClick(r, $event)"
                     (keydown)="onRowKey(r, $event)"
-                    (contextmenu)="onRowMenu(r, $event)"
+                    pwRowMenu
+                    [matContextMenuTriggerFor]="rowMenu.menu()"
+                    [matContextMenuTriggerData]="{ items: menuItems(r) }"
                   >
                     @for (c of grid().cols; track c.id) {
                       @switch (c.id) {
@@ -211,7 +193,7 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
                         }
                       }
                     }
-                    <span role="cell" class="act"><pw-row-menu [items]="menuItems(r)" [label]="'More actions for the request to ' + r.endpoint" /></span>
+                    <span role="cell" class="act"><pw-more-button [menu]="rowMenu.menu()" [items]="menuItems(r)" [label]="'More actions for the request to ' + r.endpoint" /></span>
                   </div>
                 </cdk-virtual-scroll-viewport>
               }
@@ -224,6 +206,7 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
         }
       </div>
     </div>
+    <pw-items-menu #rowMenu label="Request actions" />
   `,
   styles: `
     :host {
@@ -248,53 +231,12 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
     }
     /* One toolbar row at every supported width: the search gives way first, then the count. */
     .search {
-      position: relative;
       flex: 0 1 280px;
       min-width: 160px;
-      mat-icon {
-        position: absolute;
-        left: 9px;
-        top: 50%;
-        width: 14px;
-        height: 14px;
-        transform: translateY(-50%);
-        color: var(--pd-text-subtle);
-        pointer-events: none;
-      }
-      .input {
-        width: 100%;
-        padding-left: 30px;
-      }
     }
     .app-filter {
       flex: 0 1 160px;
       min-width: 120px;
-    }
-    .seg {
-      display: inline-flex;
-      padding: 2px;
-      background: var(--pd-pressed);
-      border-radius: var(--pd-radius-control);
-      button {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        height: 26px;
-        padding: 0 var(--pd-space-3);
-        font: inherit;
-        font-size: var(--pd-text-label);
-        font-weight: var(--pd-weight-medium);
-        color: var(--pd-text-muted);
-        background: none;
-        border: none;
-        border-radius: var(--pd-radius-tag);
-        cursor: default;
-        &[aria-checked='true'] {
-          color: var(--pd-text);
-          background: var(--pd-surface-1);
-          box-shadow: var(--pd-shadow-1);
-        }
-      }
     }
     .shown {
       margin-left: auto;
@@ -309,48 +251,19 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       .shown {
         display: none;
       }
-      .filters > .btn {
+      .filters > .cols {
         margin-left: auto;
       }
     }
-    .filters > .btn {
+    .filters > .cols {
       flex: none;
     }
-    .pop {
-      display: flex;
-      flex-direction: column;
-      min-width: 168px;
-      padding: var(--pd-space-1);
-      background: var(--pd-surface-3);
-      border: 1px solid var(--pd-hairline);
-      border-radius: var(--pd-radius-card);
-      box-shadow: var(--pd-shadow-3);
+    /* The Columns menu: a check marks each column that is on. */
+    .opt mat-icon {
+      color: var(--pd-accent);
     }
-    .opt {
-      display: flex;
-      align-items: center;
-      gap: var(--pd-space-2);
-      height: 28px;
-      padding: 0 8px;
-      font: inherit;
-      text-align: left;
-      color: var(--pd-text);
-      background: none;
-      border: none;
-      border-radius: var(--pd-radius-tag);
-      cursor: default;
-      mat-icon {
-        width: 14px;
-        height: 14px;
-        visibility: hidden;
-        color: var(--pd-accent);
-      }
-      &[aria-checked='true'] mat-icon {
-        visibility: visible;
-      }
-      &:hover {
-        background: var(--pd-hover);
-      }
+    .opt mat-icon.off {
+      visibility: hidden;
     }
     .body {
       flex: 1;
@@ -506,7 +419,6 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
 export class RequestsPage implements OnInit {
   protected readonly store = inject(RequestsStore);
   private readonly live = inject(LiveStore);
-  private readonly menu = inject(ContextMenuService);
   private readonly toasts = inject(Toasts);
   protected readonly limit = REQUEST_LIMIT;
   protected readonly rowHeight = ROW_HEIGHT;
@@ -527,7 +439,6 @@ export class RequestsPage implements OnInit {
 
   /** The optional columns the user turned on (none by default: they repeat on nearly every row). */
   protected readonly extra = signal<ReadonlySet<Column['id']>>(new Set());
-  protected readonly colsOpen = signal(false);
   protected readonly grid = computed(() => layout(this.extra()));
   protected readonly shownText = computed(() => {
     const shown = this.store.visible().length;
@@ -542,13 +453,23 @@ export class RequestsPage implements OnInit {
     return ids.map((id) => ({ id, name: this.appName(id) })).sort((a, b) => a.name.localeCompare(b.name));
   });
 
-  protected readonly appSelectOptions = computed<SelectOption[]>(() => [
+  protected readonly appSelectOptions = computed<PdSelectOption[]>(() => [
     { value: 'all', label: 'All apps' },
     ...this.appOptions().map((a) => ({ value: a.id, label: a.name })),
   ]);
 
   ngOnInit(): void {
     void this.store.load();
+  }
+
+  /** The status filter as segments; Errors carries its count when there are any. */
+  protected readonly statusSegs = computed<SuSegment[]>(() =>
+    this.statuses.map((s) => ({ value: s.value, label: s.label, ...(s.value === 'errors' && this.store.errorCount() ? { count: this.store.errorCount() } : {}) })),
+  );
+
+  protected setStatus(value: string): void {
+    const s = this.statuses.find((x) => x.value === value);
+    if (s) this.store.setFilter({ status: s.value });
   }
 
   protected toggleColumn(id: Column['id']): void {
@@ -580,7 +501,7 @@ export class RequestsPage implements OnInit {
   }
 
   /** One list for the row's "..." button, its right-click menu and Shift+F10. */
-  protected menuItems(r: RequestRecord): ContextMenuItem[] {
+  protected menuItems(r: RequestRecord): MenuItem[] {
     return [
       { label: 'Details', run: () => this.store.select(r.id) },
       { label: 'Copy request id', run: () => this.copy(r.id, 'Request id') },
@@ -610,17 +531,9 @@ export class RequestsPage implements OnInit {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       this.store.select(r.id);
-    } else if (isMenuKey(e)) {
-      e.preventDefault();
-      const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      this.menu.open(box.left + 80, box.bottom - 8, this.menuItems(r));
     } else {
       moveRowFocus(e);
     }
   }
 
-  protected onRowMenu(r: RequestRecord, e: MouseEvent): void {
-    e.preventDefault();
-    this.menu.open(e.clientX, e.clientY, this.menuItems(r));
-  }
 }

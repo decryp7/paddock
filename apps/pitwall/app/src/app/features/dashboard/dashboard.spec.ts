@@ -29,7 +29,7 @@ async function mount(opts: { backend?: MockBackend; load?: boolean; patch?: (o: 
   const more = async (item: string) => {
     (el.querySelector('button[aria-label="More actions"]') as HTMLButtonElement).click();
     await settle(fixture);
-    Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
     await settle(fixture);
   };
   return { fixture, el, live, backend, btn, more };
@@ -160,9 +160,9 @@ describe('Dashboard', () => {
     const { el, fixture } = await mount({ backend: new MockBackend({ failing: ['overview'] }) });
     (el.querySelector('button[aria-label="More actions"]') as HTMLButtonElement).click();
     await settle(fixture);
-    const items = Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item'));
+    const items = Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-item'));
     expect(items.map((i) => i.textContent!.trim())).toEqual(['Release memory', 'Pause serving']);
-    expect(items.every((i) => i.getAttribute('aria-disabled') === 'true')).toBe(true);
+    expect(items.every((i) => i.disabled)).toBe(true);
     document.querySelector<HTMLElement>('.cdk-overlay-backdrop')!.click();
     for (const r of Array.from(el.querySelectorAll('[aria-label="Memory preset"] button')) as HTMLButtonElement[]) expect(r.disabled).toBe(true);
   });

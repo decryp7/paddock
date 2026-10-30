@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
+import { MatIconButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTabLink, MatTabNav, MatTabNavPanel } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { LiveStore } from '../../core/live.store';
 import { downloadActive } from '../../shared/labels';
@@ -20,18 +22,10 @@ const TABS: { id: ModelsTab; label: string }[] = [
   { id: 'downloads', label: 'Downloads' },
 ];
 
-/** The next tab for an arrow/Home/End key in the tab list, or null for other keys. */
-export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
-  const i = TABS.findIndex((t) => t.id === current);
-  const n = TABS.length;
-  const to = key === 'ArrowRight' ? (i + 1) % n : key === 'ArrowLeft' ? (i - 1 + n) % n : key === 'Home' ? 0 : key === 'End' ? n - 1 : -1;
-  return to < 0 ? null : TABS[to]!.id;
-}
-
 /** Models: the local library, Hugging Face discovery with fit verdicts, and downloads. */
 @Component({
   selector: 'pw-models-page',
-  imports: [MatIconModule, MatTooltipModule, Panel, LibraryTab, DiscoverTab, PresetsTab, DownloadsList, UpdateBanner],
+  imports: [MatIconButton, MatTabNav, MatTabLink, MatTabNavPanel, MatIconModule, MatTooltipModule, Panel, LibraryTab, DiscoverTab, PresetsTab, DownloadsList, UpdateBanner],
   providers: [ModelsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -42,24 +36,15 @@ export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
           <p class="sub">Models on this machine, and new ones from Hugging Face with a verdict on what fits.</p>
         </div>
         <div class="actions">
-          <button type="button" class="btn ghost icon" aria-label="Refresh" matTooltip="Refresh" (click)="store.load()" [disabled]="store.loading()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" /></button>
+          <button type="button" matIconButton aria-label="Refresh" matTooltip="Refresh" (click)="store.load()" [disabled]="store.loading()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" /></button>
         </div>
       </header>
 
       <pw-update-banner class="updates" />
 
-      <div class="tabs" role="tablist" aria-label="Models">
+      <nav mat-tab-nav-bar class="tabs" aria-label="Models" mat-stretch-tabs="false" mat-align-tabs="start" [tabPanel]="tabPanel">
         @for (t of tabs; track t.id) {
-          <button
-            type="button"
-            role="tab"
-            [id]="'tab-' + t.id"
-            [attr.aria-selected]="tab() === t.id"
-            [attr.aria-controls]="'panel-' + t.id"
-            [attr.tabindex]="tab() === t.id ? 0 : -1"
-            (click)="tab.set(t.id)"
-            (keydown)="onKey($event)"
-          >
+          <button type="button" mat-tab-link [id]="'tab-' + t.id" [active]="tab() === t.id" (click)="tab.set(t.id)">
             {{ t.label }}
             @if (t.id === 'library' && store.loaded()) {
               <span class="count num">{{ store.library().length }}</span>
@@ -69,9 +54,9 @@ export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
             }
           </button>
         }
-      </div>
+      </nav>
 
-      <div role="tabpanel" [id]="'panel-' + tab()" [attr.aria-labelledby]="'tab-' + tab()">
+      <mat-tab-nav-panel #tabPanel>
         @switch (tab()) {
           @case ('library') {
             <pw-library-tab [now]="now()" (discover)="tab.set('discover')" />
@@ -88,45 +73,15 @@ export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
             </pw-panel>
           }
         }
-      </div>
+      </mat-tab-nav-panel>
     </div>
   `,
   styles: `
     .tabs {
-      display: flex;
-      gap: var(--pd-space-1);
       margin-bottom: var(--pd-space-4);
-      border-bottom: 1px solid var(--pd-hairline);
-      button {
-        position: relative;
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        height: 34px;
-        padding: 0 var(--pd-space-3);
-        font: inherit;
-        font-weight: var(--pd-weight-medium);
-        color: var(--pd-text-muted);
-        background: none;
-        border: none;
-        cursor: default;
-        &:hover {
-          color: var(--pd-text);
-        }
-        &[aria-selected='true'] {
-          color: var(--pd-text);
-          &::after {
-            content: '';
-            position: absolute;
-            left: var(--pd-space-2);
-            right: var(--pd-space-2);
-            bottom: -1px;
-            height: 2px;
-            border-radius: 2px;
-            background: var(--pd-accent);
-          }
-        }
-      }
+    }
+    .count {
+      margin-inline-start: 6px;
     }
   `,
 })
@@ -156,13 +111,5 @@ export class ModelsPage implements OnInit {
   ngOnInit(): void {
     void this.store.load();
     void this.store.loadBuilds();
-  }
-
-  protected onKey(e: KeyboardEvent): void {
-    const to = nextTab(this.tab(), e.key);
-    if (!to) return;
-    e.preventDefault();
-    this.tab.set(to);
-    (e.currentTarget as HTMLElement).parentElement?.querySelector<HTMLElement>(`#tab-${to}`)?.focus();
   }
 }

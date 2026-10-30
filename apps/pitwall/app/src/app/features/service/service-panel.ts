@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { Panel } from '../../shared/ui/panel';
 import { consentDetail } from './service-consent';
 import { ServiceStore } from './service.store';
+import { MatButton } from '@angular/material/button';
 
 /**
  * The background service card (Settings). It belongs to the desktop app, not to the server: it renders and works while
@@ -11,7 +12,7 @@ import { ServiceStore } from './service.store';
  */
 @Component({
   selector: 'pw-service-panel',
-  imports: [Panel],
+  imports: [MatButton, Panel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel id="set-service" heading="Background service" icon="server" sub="So apps can use Pitwall without this window">
@@ -26,15 +27,15 @@ import { ServiceStore } from './service.store';
         <div class="row">
           <div class="lbl"><span class="name">{{ sv.installed ? 'Remove the service' : 'Run in the background' }}</span><p class="hint">{{ serviceHint(sv.platform) }}</p></div>
           @if (sv.installed) {
-            <button type="button" class="btn" [disabled]="service.isBusy()('uninstall')" (click)="service.uninstall()">{{ service.isBusy()('uninstall') ? 'Removing…' : 'Remove service' }}</button>
+            <button type="button" matButton="outlined" [disabled]="service.isBusy()('uninstall')" (click)="service.uninstall()">{{ service.isBusy()('uninstall') ? 'Removing…' : 'Remove service' }}</button>
           } @else if (!sv.disabledInLoginItems) {
-            <button type="button" class="btn primary" [disabled]="!sv.canInstall || service.isBusy()('install')" (click)="service.install()">{{ service.isBusy()('install') ? 'Installing…' : 'Install service' }}</button>
+            <button type="button" matButton="filled" [disabled]="!sv.canInstall || service.isBusy()('install')" (click)="service.install()">{{ service.isBusy()('install') ? 'Installing…' : 'Install service' }}</button>
           }
         </div>
         @if (service.canRepair()) {
           <div class="row" data-testid="service-repair-action">
             <div class="lbl"><span class="name">Repair the service</span><p class="hint">Removes the registration, waits until macOS has dropped it and registers the service again. It takes up to a minute.</p></div>
-            <button type="button" class="btn primary" data-testid="repair-service" [disabled]="service.isBusy()('repair')" (click)="service.repair()">{{ service.isBusy()('repair') ? 'Repairing…' : 'Repair service' }}</button>
+            <button type="button" matButton="filled" data-testid="repair-service" [disabled]="service.isBusy()('repair')" (click)="service.repair()">{{ service.isBusy()('repair') ? 'Repairing…' : 'Repair service' }}</button>
           </div>
         }
         @if (sv.repair; as r) {
@@ -45,7 +46,7 @@ import { ServiceStore } from './service.store';
         @if (sv.disabledInLoginItems) {
           <div class="row" data-testid="service-login-items-row">
             <div class="lbl"><span class="name">Switched off in Login Items</span><p class="hint">Switch Pitwall on in System Settings > General > Login Items. Pitwall never does it for you.</p></div>
-            <button type="button" class="btn primary" [disabled]="service.isBusy()('loginItems')" (click)="service.openLoginItems()">Open Login Items</button>
+            <button type="button" matButton="outlined" [disabled]="service.isBusy()('loginItems')" (click)="service.openLoginItems()">Open Login Items</button>
           </div>
         }
       } @else {

@@ -79,7 +79,8 @@ describe('QueueCard', () => {
     const bar = el.querySelector('.prog')!;
     expect(bar.getAttribute('aria-valuenow')).toBe('42');
     expect(bar.getAttribute('aria-label')).toBe('Progress of Debrief chat');
-    expect((bar.querySelector('span') as HTMLElement).style.width).toBe('42%');
+    expect(bar.tagName).toBe('MAT-PROGRESS-BAR');
+    expect(bar.getAttribute('mode')).toBe('determinate');
   });
 
   it('measures a running job from submission when it has no start time, and hides zero tokens', async () => {

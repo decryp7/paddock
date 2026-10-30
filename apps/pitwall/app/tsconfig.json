@@ -12,7 +12,11 @@
     "experimentalDecorators": true,
     "importHelpers": true,
     "target": "ES2022",
-    "module": "preserve"
+    "module": "preserve",
+    "paths": {
+      "@decryp7/paddock-ui": ["../../../ui/dist/paddock-ui"],
+      "@decryp7/paddock-ui/*": ["../../../ui/dist/paddock-ui/*"]
+    }
   },
   "angularCompilerOptions": {
     "strictInjectionParameters": true,

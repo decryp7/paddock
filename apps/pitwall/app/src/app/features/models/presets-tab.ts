@@ -1,16 +1,19 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked, viewChildren } from '@angular/core';
+import { MatAutocomplete, MatAutocompleteTrigger } from '@angular/material/autocomplete';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatOption, type ErrorStateMatcher } from '@angular/material/core';
+import { MatFormField, MatLabel } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInput } from '@angular/material/input';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { ModelPreset, PresetEntry, PresetStatus } from '../../core/api.types';
 import { presetStatusLook } from '../../shared/labels';
 import { Confirm } from '../../shared/ui/confirm';
-import { ContextMenuService, type ContextMenuItem } from '../../shared/ui/context-menu';
-import { RowMenu } from '../../shared/ui/row-menu';
-import { isMenuKey, moveRowFocus } from '../../shared/ui/row-nav';
-import { EmptyState } from '../../shared/ui/empty-state';
+import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
+import { moveRowFocus } from '../../shared/ui/row-nav';
 import { Panel } from '../../shared/ui/panel';
-import { PwSelect } from '../../shared/ui/select';
+import { SuEmptyState } from '@decryp7/paddock-ui';
 import { defaultsSummary, EMPTY_FORM, formOf, parseForm, type PresetField, type PresetForm } from './preset-form';
 import { PresetsStore } from './presets.store';
 import { ModelsStore } from './models.store';
@@ -30,19 +33,20 @@ export function statusDetail(s: PresetStatus): string {
 /** Model presets and aliases (ADR 0014): apps send the alias as `model`; here the user decides what serves it. */
 @Component({
   selector: 'pw-presets-tab',
-  imports: [MatIconModule, MatTooltipModule, Panel, EmptyState, RowMenu, MatSlideToggleModule, PwSelect],
+  imports: [MatButton, MatIconButton, MatFormField, MatLabel, MatInput, MatAutocomplete, MatAutocompleteTrigger, MatOption, MatIconModule, MatTooltipModule, Panel, SuEmptyState, ItemsMenu, MoreButton, RowMenu, MatSlideToggleModule],
   providers: [PresetsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel heading="Presets" icon="sliders" [sub]="summary()" [flush]="true" [loading]="store.loading()" [error]="store.error()" [ready]="store.loaded()" [skeletonLines]="4" (retry)="store.load()">
       <div panel-actions>
-        <button type="button" class="btn sm primary" [disabled]="!!store.editor()" (click)="openNew()"><mat-icon svgIcon="pw:plus" aria-hidden="true" />New preset</button>
+        <button type="button" matButton="filled" [disabled]="!!store.editor()" (click)="openNew()"><mat-icon svgIcon="pw:plus" aria-hidden="true" />New preset</button>
       </div>
       @if (store.entries().length === 0) {
-        <pw-empty-state icon="sliders" heading="No presets yet" text="A preset gives an app a stable name such as debrief-explain. You decide which model, context, temperature and system prompt serve it.">
-          <button type="button" class="btn primary sm" [disabled]="!!store.editor()" (click)="openNew()"><mat-icon svgIcon="pw:plus" aria-hidden="true" />New preset</button>
-        </pw-empty-state>
+        <pd-empty-state heading="No presets yet" description="A preset gives an app a stable name such as debrief-explain. You decide which model, context, temperature and system prompt serve it.">
+          <mat-icon slot="icon" svgIcon="pw:sliders" aria-hidden="true" />
+        </pd-empty-state>
       } @else {
+        <pw-items-menu #rowMenu label="Preset actions" />
         <div class="scroll">
           <table class="table fit">
             <colgroup><col class="c-alias" /><col class="c-target" /><col /><col class="c-defs" /><col class="c-act" /></colgroup>
@@ -57,7 +61,7 @@ export function statusDetail(s: PresetStatus): string {
             </thead>
             <tbody>
               @for (e of store.entries(); track e.preset.alias) {
-                <tr tabindex="0" [class.editing]="store.editor()?.editing === e.preset.alias" (click)="onRowClick(e.preset, $event)" (keydown)="onRowKey(e.preset, $event)" (contextmenu)="onRowMenu(e.preset, $event)">
+                <tr tabindex="0" [class.editing]="store.editor()?.editing === e.preset.alias" (click)="onRowClick(e.preset, $event)" (keydown)="onRowKey(e.preset, $event)" pwRowMenu [matContextMenuTriggerFor]="rowMenu.menu()" [matContextMenuTriggerData]="{ items: menuItems(e.preset) }">
                   <td class="alias"><span class="mono pitwall-selectable">{{ e.preset.alias }}</span>@if (e.preset.cacheResponses) {<span class="badge" matTooltip="Answers to repeated deterministic requests are cached">cache</span>}@if (e.preset.keepWarm) {<span class="badge" matTooltip="The system prompt is kept warm across unloads">warm</span>}</td>
                   <td><span class="mono target pitwall-selectable" [matTooltip]="e.preset.target" matTooltipShowDelay="600">{{ e.preset.target }}</span></td>
                   <td class="serves">
@@ -67,10 +71,10 @@ export function statusDetail(s: PresetStatus): string {
                   <td class="defs"><span [matTooltip]="defaultsText(e.preset)" matTooltipShowDelay="600">{{ defaultsText(e.preset) || '—' }}</span></td>
                   <td class="act">
                     <span class="row-actions">
-                      <button type="button" class="btn ghost icon sm reveal" [attr.aria-label]="'Edit ' + e.preset.alias" matTooltip="Edit" [disabled]="store.deleting().includes(e.preset.alias)" (click)="openEdit(e.preset)">
+                      <button type="button" matIconButton class="reveal" [attr.aria-label]="'Edit ' + e.preset.alias" matTooltip="Edit" [disabled]="store.deleting().includes(e.preset.alias)" (click)="openEdit(e.preset)">
                         <mat-icon svgIcon="pw:edit" aria-hidden="true" />
                       </button>
-                      <pw-row-menu [items]="menuItems(e.preset)" [label]="'More actions for ' + e.preset.alias" />
+                      <pw-more-button [menu]="rowMenu.menu()" [items]="menuItems(e.preset)" [label]="'More actions for ' + e.preset.alias" />
                     </span>
                   </td>
                 </tr>
@@ -85,51 +89,51 @@ export function statusDetail(s: PresetStatus): string {
       <pw-panel [heading]="ed.editing === null ? 'New preset' : 'Edit ' + ed.editing" icon="sliders" [ready]="true">
         <form class="editor" (submit)="$event.preventDefault(); save()" aria-label="Preset editor">
           <div class="grid">
-            <div class="field">
-              <label for="pw-preset-alias">Name apps send as the model</label>
-              <input class="input mono" id="pw-preset-alias" autocomplete="off" spellcheck="false" placeholder="debrief-explain" [attr.maxlength]="aliasMax" [value]="form().alias" (input)="set('alias', $any($event.target).value)" />
-            </div>
-            <div class="field">
-              <label for="pw-preset-target">Serves from</label>
-              <input class="input mono" id="pw-preset-target" autocomplete="off" spellcheck="false" placeholder="An installed model, or auto:chat,fast" list="pw-preset-targets" [value]="form().target" (input)="set('target', $any($event.target).value)" />
-              <datalist id="pw-preset-targets">
+            <mat-form-field class="field">
+              <mat-label>Name apps send as the model</mat-label>
+              <input matInput class="mono" id="pw-preset-alias" autocomplete="off" spellcheck="false" placeholder="debrief-explain" [attr.maxlength]="aliasMax" [value]="form().alias" (input)="set('alias', $any($event.target).value)" />
+            </mat-form-field>
+            <mat-form-field class="field">
+              <mat-label>Serves from</mat-label>
+              <input matInput class="mono" id="pw-preset-target" autocomplete="off" spellcheck="false" placeholder="An installed model, or auto:chat,fast" [matAutocomplete]="targets" [value]="form().target" (input)="set('target', $any($event.target).value)" />
+              <mat-autocomplete #targets="matAutocomplete" (optionSelected)="set('target', $event.option.value)">
                 @for (m of models.library(); track m.id) {
-                  <option [value]="m.id">{{ m.name }}</option>
+                  <mat-option [value]="m.id"><span class="mono">{{ m.id }}</span> <span class="faint">{{ m.name }}</span></mat-option>
                 }
                 @for (a of autoExamples; track a) {
-                  <option [value]="a"></option>
+                  <mat-option [value]="a"><span class="mono">{{ a }}</span></mat-option>
                 }
-              </datalist>
-            </div>
+              </mat-autocomplete>
+            </mat-form-field>
           </div>
           <p class="hint faint">A model id serves exactly that model. <span class="mono">auto:chat,fast</span> lets Pitwall pick the best installed model with these capabilities for each request.</p>
 
           <div class="grid four">
-            <div class="field">
-              <label for="pw-preset-context">Context (tokens)</label>
-              <input class="input num" id="pw-preset-context" inputmode="numeric" autocomplete="off" placeholder="Model default" [attr.aria-invalid]="bad('context')" [value]="form().context" (input)="set('context', $any($event.target).value)" />
-            </div>
-            <div class="field">
-              <label for="pw-preset-temperature">Temperature</label>
-              <input class="input num" id="pw-preset-temperature" inputmode="decimal" autocomplete="off" placeholder="Request decides" [attr.aria-invalid]="bad('temperature')" [value]="form().temperature" (input)="set('temperature', $any($event.target).value)" />
-            </div>
-            <div class="field">
-              <label for="pw-preset-topp">Top-p</label>
-              <input class="input num" id="pw-preset-topp" inputmode="decimal" autocomplete="off" placeholder="Request decides" [attr.aria-invalid]="bad('topP')" [value]="form().topP" (input)="set('topP', $any($event.target).value)" />
-            </div>
-            <div class="field">
-              <label for="pw-preset-max">Max tokens</label>
-              <input class="input num" id="pw-preset-max" inputmode="numeric" autocomplete="off" placeholder="Request decides" [attr.aria-invalid]="bad('maxTokens')" [value]="form().maxTokens" (input)="set('maxTokens', $any($event.target).value)" />
-            </div>
+            <mat-form-field class="field">
+              <mat-label>Context (tokens)</mat-label>
+              <input matInput class="num" id="pw-preset-context" inputmode="numeric" autocomplete="off" placeholder="Model default" [errorStateMatcher]="invalid.context" [value]="form().context" (input)="set('context', $any($event.target).value)" />
+            </mat-form-field>
+            <mat-form-field class="field">
+              <mat-label>Temperature</mat-label>
+              <input matInput class="num" id="pw-preset-temperature" inputmode="decimal" autocomplete="off" placeholder="Request decides" [errorStateMatcher]="invalid.temperature" [value]="form().temperature" (input)="set('temperature', $any($event.target).value)" />
+            </mat-form-field>
+            <mat-form-field class="field">
+              <mat-label>Top-p</mat-label>
+              <input matInput class="num" id="pw-preset-topp" inputmode="decimal" autocomplete="off" placeholder="Request decides" [errorStateMatcher]="invalid.topP" [value]="form().topP" (input)="set('topP', $any($event.target).value)" />
+            </mat-form-field>
+            <mat-form-field class="field">
+              <mat-label>Max tokens</mat-label>
+              <input matInput class="num" id="pw-preset-max" inputmode="numeric" autocomplete="off" placeholder="Request decides" [errorStateMatcher]="invalid.maxTokens" [value]="form().maxTokens" (input)="set('maxTokens', $any($event.target).value)" />
+            </mat-form-field>
           </div>
           @if (parsed().invalid.size > 0) {
             <p class="err" role="alert">Context, temperature, top-p and max tokens must be plain numbers, or empty.</p>
           }
 
-          <div class="field">
-            <label for="pw-preset-system">System prompt</label>
-            <textarea class="input" id="pw-preset-system" rows="4" [attr.maxlength]="promptMax" placeholder="Added in front of the conversation only when the request has no system message of its own." [value]="form().systemPrompt" (input)="set('systemPrompt', $any($event.target).value)"></textarea>
-          </div>
+          <mat-form-field class="field">
+            <mat-label>System prompt</mat-label>
+            <textarea matInput id="pw-preset-system" rows="4" [attr.maxlength]="promptMax" placeholder="Added in front of the conversation only when the request has no system message of its own." [value]="form().systemPrompt" (input)="set('systemPrompt', $any($event.target).value)"></textarea>
+          </mat-form-field>
 
           <p class="hint faint">The context applies when the model is loaded for a request. A model that is already loaded keeps what it was loaded with until it is released. Values a request carries win over the defaults here.</p>
 
@@ -174,8 +178,8 @@ export function statusDetail(s: PresetStatus): string {
           }
 
           <div class="foot">
-            <button type="button" class="btn ghost" (click)="store.closeEditor()">Cancel</button>
-            <button type="submit" class="btn primary" [disabled]="!canSave()">{{ ed.editing === null ? 'Create preset' : 'Save preset' }}</button>
+            <button type="button" matButton (click)="store.closeEditor()">Cancel</button>
+            <button type="submit" matButton="filled" [disabled]="!canSave()">{{ ed.editing === null ? 'Create preset' : 'Save preset' }}</button>
           </div>
         </form>
       </pw-panel>
@@ -256,17 +260,8 @@ export function statusDetail(s: PresetStatus): string {
       }
     }
     .field {
-      display: grid;
-      gap: 4px;
+      width: 100%;
       min-width: 0;
-      .input {
-        width: 100%;
-      }
-      label {
-        font-size: var(--pd-text-label);
-        font-weight: var(--pd-weight-medium);
-        color: var(--pd-text-muted);
-      }
     }
     .toggle-row {
       display: flex;
@@ -345,7 +340,6 @@ export class PresetsTab {
   protected readonly store = inject(PresetsStore);
   protected readonly models = inject(ModelsStore);
   private readonly confirm = inject(Confirm);
-  private readonly menu = inject(ContextMenuService);
   protected readonly aliasMax = ALIAS_MAX;
   protected readonly promptMax = PROMPT_MAX;
   protected readonly autoExamples = AUTO_EXAMPLES;
@@ -365,8 +359,15 @@ export class PresetsTab {
     return !!this.store.editor() && !this.store.saving() && invalid.size === 0 && draft.alias !== '' && draft.target !== '' && !p?.problem;
   });
 
+  private readonly inputs = viewChildren(MatInput);
+
   constructor() {
     void this.store.load();
+    // effect-state: pushes the parsed form's invalid fields into Material's error tracker, which has no signal input.
+    effect(() => {
+      this.parsed();
+      for (const i of this.inputs()) i.updateErrorState();
+    });
     // Ask the engine what the draft resolves to whenever it changes (after typing pauses).
     effect(() => {
       const { draft, invalid } = this.parsed();
@@ -390,6 +391,17 @@ export class PresetsTab {
   protected bad(field: PresetField): boolean {
     return this.parsed().invalid.has(field);
   }
+
+  /**
+   * The number fields show Material's error state (red outline, `aria-invalid`) while their text is not a plain number. The
+   * fields have no form control, so Material does not re-check them by itself: the effect below asks it to on every change.
+   */
+  protected readonly invalid: Record<'context' | 'temperature' | 'topP' | 'maxTokens', ErrorStateMatcher> = {
+    context: { isErrorState: () => this.bad('context') },
+    temperature: { isErrorState: () => this.bad('temperature') },
+    topP: { isErrorState: () => this.bad('topP') },
+    maxTokens: { isErrorState: () => this.bad('maxTokens') },
+  };
 
   protected setFlag(field: 'cacheResponses' | 'keepWarm', on: boolean): void {
     this.form.update((f) => ({ ...f, [field]: on }));
@@ -419,7 +431,7 @@ export class PresetsTab {
   }
 
   /** The list behind the row's "..." button and right-click. Delete is only here and asks first. */
-  protected menuItems(p: ModelPreset): ContextMenuItem[] {
+  protected menuItems(p: ModelPreset): MenuItem[] {
     return [
       { label: 'Edit', run: () => this.openEdit(p) },
       { label: 'Delete…', run: () => void this.remove(p.alias), danger: true, divider: true, disabled: this.store.deleting().includes(p.alias) },
@@ -435,18 +447,9 @@ export class PresetsTab {
     if (e.key === 'Enter') {
       e.preventDefault();
       this.openEdit(p);
-    } else if (isMenuKey(e)) {
-      e.preventDefault();
-      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      this.menu.open(r.left + 48, r.bottom - 8, this.menuItems(p));
     } else {
       moveRowFocus(e);
     }
-  }
-
-  protected onRowMenu(p: ModelPreset, e: MouseEvent): void {
-    e.preventDefault();
-    this.menu.open(e.clientX, e.clientY, this.menuItems(p));
   }
 
   protected async remove(alias: string): Promise<void> {

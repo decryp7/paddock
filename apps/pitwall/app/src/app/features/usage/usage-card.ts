@@ -8,36 +8,32 @@ import { usageChart, type UsageMetric } from '../../shared/charts/chart-options'
 import { EChart } from '../../shared/charts/echart';
 import { bytes, compact, int } from '../../shared/format';
 import { seriesColor } from '../../shared/theme-tokens';
-import { EmptyState } from '../../shared/ui/empty-state';
 import { Panel } from '../../shared/ui/panel';
 import { CacheTiles } from './cache-tiles';
 import { cacheHitRate, cacheHitRateText, tokensOf, USAGE_RANGES, USAGE_RANGE_TEXT } from './usage-format';
 import { UsageStore } from './usage.store';
+import { MatButton } from '@angular/material/button';
+import { MatIcon } from '@angular/material/icon';
+import { SuEmptyState, SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 
 /** The dashboard's compact usage chart: tokens or requests per app over 24 h, 7 d or 30 d, with a legend of totals. */
 @Component({
   selector: 'pw-usage-card',
-  imports: [Panel, EChart, EmptyState, RouterLink, CacheTiles],
+  imports: [MatButton, MatIcon, SuEmptyState, SuSegmentedControl, Panel, EChart, RouterLink, CacheTiles],
   providers: [UsageStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel heading="Usage by app" icon="apps" [sub]="rangeText()" [loading]="store.loading()" [error]="store.error()" [ready]="!!store.series()" [skeletonLines]="6" (retry)="store.reload()">
       <div panel-actions class="controls">
-        <div class="seg" role="radiogroup" aria-label="Usage metric">
-          <button type="button" role="radio" [attr.aria-checked]="metric() === 'tokens'" (click)="metric.set('tokens')">Tokens</button>
-          <button type="button" role="radio" [attr.aria-checked]="metric() === 'requests'" (click)="metric.set('requests')">Requests</button>
-        </div>
-        <div class="seg" role="radiogroup" aria-label="Usage range">
-          @for (r of ranges; track r) {
-            <button type="button" role="radio" [attr.aria-checked]="store.range() === r" (click)="store.select(r)">{{ r }}</button>
-          }
-        </div>
+        <pd-segmented-control label="Usage metric" [options]="metricSegs" [value]="metric()" (valueChange)="metric.set($event === 'requests' ? 'requests' : 'tokens')" />
+        <pd-segmented-control label="Usage range" [options]="rangeSegs" [value]="store.range()" (valueChange)="store.select($any($event))" />
       </div>
       @if (store.series(); as s) {
         @if (s.totals.requests === 0) {
-          <pw-empty-state icon="apps" heading="No usage yet" text="Requests from your apps appear here, per app, as they are made.">
-            <a class="btn sm" routerLink="/apps">Apps & keys</a>
-          </pw-empty-state>
+          <pd-empty-state heading="No usage yet" description="Requests from your apps appear here, per app, as they are made.">
+            <mat-icon slot="icon" svgIcon="pw:apps" aria-hidden="true" />
+            <a slot="action" matButton="outlined" routerLink="/apps">Apps & keys</a>
+          </pd-empty-state>
         } @else {
           <pw-echart [option]="option()" [themeKey]="chartKey()" height="170px" [label]="chartLabel()" />
           <pw-cache-tiles class="cache" [totals]="s.totals" />
@@ -65,33 +61,6 @@ import { UsageStore } from './usage.store';
     .controls {
       display: flex;
       gap: var(--pd-space-2);
-    }
-    .seg {
-      display: inline-flex;
-      padding: 2px;
-      background: var(--pd-pressed);
-      border-radius: var(--pd-radius-control);
-      button {
-        height: 22px;
-        min-width: 40px;
-        padding: 0 var(--pd-space-2);
-        font: inherit;
-        font-size: var(--pd-text-label);
-        font-weight: var(--pd-weight-medium);
-        color: var(--pd-text-muted);
-        background: none;
-        border: none;
-        border-radius: var(--pd-radius-tag);
-        cursor: default;
-        &:hover {
-          color: var(--pd-text);
-        }
-        &[aria-checked='true'] {
-          color: var(--pd-text);
-          background: var(--pd-surface-1);
-          box-shadow: var(--pd-shadow-1);
-        }
-      }
     }
     .cache {
       margin-top: var(--pd-space-3);
@@ -134,7 +103,11 @@ export class UsageCard implements OnInit {
   private readonly live = inject(LiveStore);
   private readonly theme = inject(ThemeService);
 
-  protected readonly ranges = USAGE_RANGES;
+  protected readonly rangeSegs: SuSegment[] = USAGE_RANGES.map((r) => ({ value: r, label: r }));
+  protected readonly metricSegs: SuSegment[] = [
+    { value: 'tokens', label: 'Tokens' },
+    { value: 'requests', label: 'Requests' },
+  ];
   protected readonly metric = signal<Exclude<UsageMetric, 'memory'>>('tokens');
   protected readonly count = compact;
   protected readonly intText = int;

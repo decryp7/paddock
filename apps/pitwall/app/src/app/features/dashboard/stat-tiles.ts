@@ -4,12 +4,12 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { LiveStore } from '../../core/live.store';
 import { bytes, gb, int, percent, rate } from '../../shared/format';
 import { loadTone, pressureLook } from '../../shared/labels';
-import { Skeleton } from '../../shared/ui/skeleton';
+import { SuSkeleton } from '@decryp7/paddock-ui';
 
 /** The four live tiles at the top of the dashboard: memory, GPU memory, processors and throughput. */
 @Component({
   selector: 'pw-stat-tiles',
-  imports: [MatIconModule, MatTooltipModule, Skeleton],
+  imports: [MatIconModule, MatTooltipModule, SuSkeleton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="tile" aria-labelledby="t-ram">
@@ -24,15 +24,15 @@ import { Skeleton } from '../../shared/ui/skeleton';
       @if (live.memory(); as m) {
         <div class="value num">{{ gbText(m.ramTotal - m.ramAvailable) }}<span class="unit">GB</span><span class="of">of {{ gbText(m.ramTotal, 0) }} GB</span></div>
         <div class="stack" role="img" [attr.aria-label]="ramPct() + ' percent used, ' + ownPct() + ' percent by Pitwall'">
-          <span class="seg own" [style.width.%]="ownPct()"></span>
-          <span class="seg other" [style.width.%]="ramPct() - ownPct()"></span>
+          <span class="part own" [style.width.%]="ownPct()"></span>
+          <span class="part other" [style.width.%]="ramPct() - ownPct()"></span>
         </div>
         <div class="foot">
           <span><i class="key own"></i>Pitwall <b class="num">{{ bytesText(m.pitwallRss) }}</b></span>
           <span class="faint num">{{ bytesText(m.ramAvailable) }} free</span>
         </div>
       } @else {
-        <pw-skeleton [lines]="3" />
+        <div class="skel" aria-hidden="true"><pd-skeleton width="55%" [height]="28" /><pd-skeleton [height]="6" /><pd-skeleton width="80%" /></div>
       }
     </section>
 
@@ -59,7 +59,7 @@ import { Skeleton } from '../../shared/ui/skeleton';
         <div class="value small">No GPU</div>
         <p class="faint">Models run on the CPU.</p>
       } @else {
-        <pw-skeleton [lines]="3" />
+        <div class="skel" aria-hidden="true"><pd-skeleton width="55%" [height]="28" /><pd-skeleton [height]="6" /><pd-skeleton width="80%" /></div>
       }
     </section>
 
@@ -86,7 +86,7 @@ import { Skeleton } from '../../shared/ui/skeleton';
           <span class="faint num">swap {{ bytesText(m.swapUsed) }}</span>
         </div>
       } @else {
-        <pw-skeleton [lines]="3" />
+        <div class="skel" aria-hidden="true"><pd-skeleton width="55%" [height]="28" /><pd-skeleton [height]="6" /><pd-skeleton width="80%" /></div>
       }
     </section>
 
@@ -109,11 +109,16 @@ import { Skeleton } from '../../shared/ui/skeleton';
           <div><span class="k">Requests</span><b class="num">{{ intText(t.requestsPerMin) }}</b><span class="u">/min</span></div>
         </div>
       } @else {
-        <pw-skeleton [lines]="3" />
+        <div class="skel" aria-hidden="true"><pd-skeleton width="55%" [height]="28" /><pd-skeleton [height]="6" /><pd-skeleton width="80%" /></div>
       }
     </section>
   `,
   styles: `
+    .skel {
+      display: grid;
+      gap: var(--pd-space-3);
+      padding-top: var(--pd-space-1);
+    }
     :host {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -191,7 +196,7 @@ import { Skeleton } from '../../shared/ui/skeleton';
       border-radius: var(--pd-radius-pill);
       background: var(--pd-surface-2);
       overflow: hidden;
-      .seg {
+      .part {
         height: 100%;
         transition: width var(--pd-duration-large) var(--pd-ease-move);
       }

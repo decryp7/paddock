@@ -47,7 +47,7 @@ describe('AppUsage', () => {
   it('switches the range and the metric', async () => {
     const { fixture, el, backend } = await mount();
     const spy = vi.spyOn(backend, 'usageSeries');
-    (Array.from(el.querySelectorAll('[aria-label="Usage range"] button')).find((b) => b.textContent === '30d') as HTMLButtonElement).click();
+    (Array.from(el.querySelectorAll('[aria-label="Usage range"] button')).find((b) => b.textContent!.trim() === '30d') as HTMLButtonElement).click();
     await settle(fixture);
     expect(spy).toHaveBeenCalledWith('30d', 'spotter');
     expect(el.querySelector('pw-echart')!.getAttribute('aria-label')).toContain('the last 30 days');

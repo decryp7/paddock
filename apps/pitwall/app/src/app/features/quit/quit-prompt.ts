@@ -4,6 +4,8 @@ import { firstValueFrom } from 'rxjs';
 import { BACKEND, type Unsubscribe } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Toasts } from '../../core/toasts';
+import { MatButton } from '@angular/material/button';
+import { MatCheckbox } from '@angular/material/checkbox';
 
 /** What the dialog answers with: nothing (cancel), or whether to stop serving and whether to remember the choice. */
 export type QuitAnswer = { stopServing: boolean; remember: boolean } | null;
@@ -11,6 +13,7 @@ export type QuitAnswer = { stopServing: boolean; remember: boolean } | null;
 /** The "When you quit Pitwall" question, shown when the setting is "Ask each time". */
 @Component({
   selector: 'pw-quit-dialog',
+  imports: [MatButton, MatCheckbox],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'pw-dialog', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'pw-quit-title', 'aria-describedby': 'pw-quit-msg' },
   template: `
@@ -19,11 +22,11 @@ export type QuitAnswer = { stopServing: boolean; remember: boolean } | null;
       Apps on this computer can keep using your models while Pitwall runs in the background. Stopping serving unloads every model and
       ends the engine processes; Pitwall serves again when you open it.
     </p>
-    <label class="remember"><input type="checkbox" [checked]="remember()" (change)="remember.set($any($event.target).checked)" /> Remember my choice</label>
+    <mat-checkbox class="remember" [checked]="remember()" (change)="remember.set($event.checked)">Remember my choice</mat-checkbox>
     <div class="row">
-      <button type="button" class="btn" (click)="ref.close(null)">Cancel</button>
-      <button type="button" class="btn" (click)="ref.close({ stopServing: true, remember: remember() })">Quit and stop serving</button>
-      <button type="button" class="btn primary" cdkFocusInitial (click)="ref.close({ stopServing: false, remember: remember() })">Quit, keep serving</button>
+      <button type="button" matButton="outlined" (click)="ref.close(null)">Cancel</button>
+      <button type="button" matButton="outlined" (click)="ref.close({ stopServing: true, remember: remember() })">Quit and stop serving</button>
+      <button type="button" matButton="filled" cdkFocusInitial (click)="ref.close({ stopServing: false, remember: remember() })">Quit, keep serving</button>
     </div>
   `,
   styles: `
@@ -41,10 +44,8 @@ export type QuitAnswer = { stopServing: boolean; remember: boolean } | null;
       margin-bottom: var(--pd-space-3);
     }
     .remember {
-      display: flex;
-      align-items: center;
-      gap: var(--pd-space-2);
-      font-size: var(--pd-text-label);
+      display: block;
+      margin-left: calc(-1 * var(--pd-space-2));
     }
     .row {
       display: flex;

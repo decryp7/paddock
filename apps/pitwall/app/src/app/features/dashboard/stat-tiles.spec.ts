@@ -49,7 +49,7 @@ describe('StatTiles', () => {
   it('shows skeletons in every tile until the overview arrives', async () => {
     const { el } = await mount(undefined, new MockBackend({ failing: ['overview'] }));
     expect(el.querySelectorAll('section.tile').length).toBe(4);
-    expect(el.querySelectorAll('pw-skeleton').length).toBe(4);
+    expect(el.querySelectorAll('.skel').length).toBe(4);
   });
 
   it('shows used system memory, the Pitwall share and the pressure', async () => {
@@ -59,8 +59,8 @@ describe('StatTiles', () => {
     // Normal pressure is the calm state: nothing is said about it.
     expect(t.querySelector('.status')).toBeNull();
     expect(t.querySelector('.stack')!.getAttribute('aria-label')).toBe('50 percent used, 13 percent by Pitwall');
-    expect((t.querySelector('.seg.own') as HTMLElement).style.width).toBe('13%');
-    expect((t.querySelector('.seg.other') as HTMLElement).style.width).toBe('37%');
+    expect((t.querySelector('.part.own') as HTMLElement).style.width).toBe('13%');
+    expect((t.querySelector('.part.other') as HTMLElement).style.width).toBe('37%');
     expect(text(t.querySelector('.foot')!)).toBe('Pitwall4.0GB16.0GBfree');
   });
 

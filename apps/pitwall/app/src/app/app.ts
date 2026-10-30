@@ -11,7 +11,8 @@ import { LiveStore } from './core/live.store';
 import { ThemeService, isMac } from './core/theme';
 import { WINDOW_CONTROL } from './core/window-control';
 import { Sidebar } from './shell/sidebar';
-import { ToastHost } from './shared/ui/toast-host';
+import { PdCopyMenuHost } from '@decryp7/paddock-ui';
+import { PdNotificationHost } from '@decryp7/paddock-ui/shell/notify';
 
 /**
  * The window: a Linear-style sidebar and the routed screen. The tray popover (`#/tray`) is rendered alone in its own
@@ -19,7 +20,7 @@ import { ToastHost } from './shared/ui/toast-host';
  */
 @Component({
   selector: 'pw-root',
-  imports: [RouterOutlet, Sidebar, ToastHost, ServiceNotices, JobsPanel],
+  imports: [RouterOutlet, Sidebar, PdNotificationHost, PdCopyMenuHost, ServiceNotices, JobsPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (tray()) {
@@ -36,7 +37,8 @@ import { ToastHost } from './shared/ui/toast-host';
       </div>
       <a class="skip" href="#main" (click)="skip($event)">Skip to content</a>
     }
-    <pw-toast-host />
+    <pd-notification-host />
+    <pd-copy-menu />
   `,
   styles: `
     :host {

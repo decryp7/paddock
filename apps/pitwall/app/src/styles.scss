@@ -105,8 +105,7 @@ code,
 button,
 label,
 [role='button'],
-[role='tab'],
-.btn {
+[role='tab'] {
   -webkit-user-select: none;
   user-select: none;
 }
@@ -132,198 +131,7 @@ summary {
   scrollbar-color: var(--pd-border-strong) transparent;
 }
 
-/* ---- Buttons -------------------------------------------------------------------------------------------------- */
-
-.btn {
-  --btn-bg: var(--pd-surface-1);
-  --btn-fg: var(--pd-text);
-  --btn-border: var(--pd-border-strong);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--pd-space-1);
-  height: 28px;
-  padding: 0 var(--pd-space-3);
-  font: inherit;
-  font-size: var(--pd-text-body);
-  font-weight: var(--pd-weight-medium);
-  color: var(--btn-fg);
-  background: var(--btn-bg);
-  border: 1px solid var(--btn-border);
-  border-radius: var(--pd-radius-control);
-  box-shadow: var(--pd-shadow-1);
-  cursor: default;
-  white-space: nowrap;
-  user-select: none;
-  transition:
-    background var(--pd-duration-micro) var(--pd-ease-move),
-    border-color var(--pd-duration-micro) var(--pd-ease-move),
-    color var(--pd-duration-micro) var(--pd-ease-move);
-
-  mat-icon {
-    width: 15px;
-    height: 15px;
-    flex: none;
-  }
-  &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--btn-bg) 92%, var(--pd-text));
-  }
-  &:active:not(:disabled) {
-    transform: translateY(0.5px);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-  &.primary {
-    --btn-bg: var(--pd-accent-fill);
-    --btn-fg: var(--pd-on-accent);
-    --btn-border: transparent;
-    &:hover:not(:disabled) {
-      background: var(--pd-accent-fill-hover);
-    }
-    /* A disabled primary reads as disabled without losing its label: neutral fill, text still above 3:1. */
-    &:disabled {
-      --btn-bg: var(--pd-pressed);
-      --btn-fg: var(--pd-text-muted);
-      opacity: 1;
-    }
-  }
-  &.danger {
-    --btn-fg: var(--pd-danger);
-  }
-  &.danger-solid {
-    --btn-bg: var(--pd-danger-fill);
-    --btn-fg: var(--pd-on-danger);
-    --btn-border: transparent;
-  }
-  &.ghost {
-    --btn-bg: transparent;
-    --btn-border: transparent;
-    box-shadow: none;
-    color: var(--pd-text-muted);
-    &:hover:not(:disabled) {
-      background: var(--pd-hover);
-      color: var(--pd-text);
-    }
-  }
-  &.sm {
-    height: 24px;
-    padding: 0 var(--pd-space-2);
-    font-size: var(--pd-text-label);
-    border-radius: var(--pd-radius-tag);
-  }
-  &.lg {
-    height: 34px;
-    padding: 0 var(--pd-space-4);
-  }
-  &.icon {
-    width: 28px;
-    padding: 0;
-    &.sm {
-      width: 24px;
-    }
-  }
-}
-
-/* ---- Inputs --------------------------------------------------------------------------------------------------- */
-
-.input,
-.select {
-  height: 30px;
-  min-width: 0;
-  padding: 0 var(--pd-space-3);
-  font: inherit;
-  font-size: var(--pd-text-body);
-  color: var(--pd-text);
-  background: var(--pd-surface-1);
-  /* The control border (3:1 against the surface, WCAG 1.4.11), not the hairline-strong divider. */
-  border: 1px solid var(--pd-border-control);
-  border-radius: var(--pd-radius-control);
-  outline: none;
-  transition:
-    border-color var(--pd-duration-micro) var(--pd-ease-move),
-    box-shadow var(--pd-duration-micro) var(--pd-ease-move);
-  &::placeholder {
-    color: var(--pd-text-subtle);
-  }
-  &:focus-visible,
-  &:focus {
-    border-color: var(--pd-accent);
-    box-shadow: 0 0 0 3px var(--pd-accent-tint);
-  }
-}
-.select {
-  appearance: none;
-  padding-right: var(--pd-space-6);
-  background-image: linear-gradient(45deg, transparent 50%, var(--pd-text-muted) 50%), linear-gradient(135deg, var(--pd-text-muted) 50%, transparent 50%);
-  background-position:
-    calc(100% - 13px) 50%,
-    calc(100% - 9px) 50%;
-  background-size: 4px 4px;
-  background-repeat: no-repeat;
-}
-textarea.input {
-  height: auto;
-  padding: var(--pd-space-2) var(--pd-space-3);
-  line-height: var(--pd-lh-body);
-  resize: vertical;
-}
-
-/* ---- Pills and badges ----------------------------------------------------------------------------------------- */
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 20px;
-  padding: 0 7px;
-  font-size: var(--pd-text-label);
-  font-weight: var(--pd-weight-medium);
-  line-height: 1;
-  color: var(--pd-text-muted);
-  background: var(--pd-pressed);
-  border-radius: var(--pd-radius-pill);
-  white-space: nowrap;
-  &::before {
-    content: none;
-  }
-  &.dot::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
-  }
-  &[data-tone='ok'] {
-    color: var(--pd-success);
-    background: var(--pd-success-tint);
-  }
-  &[data-tone='warn'] {
-    color: var(--pd-warning);
-    background: var(--pd-warning-tint);
-  }
-  &[data-tone='bad'] {
-    color: var(--pd-danger);
-    background: var(--pd-danger-tint);
-  }
-  &[data-tone='info'] {
-    color: var(--pd-info);
-    background: var(--pd-info-tint);
-  }
-  /* Neutral ("Not installed", "Idle"): grey, no status dot, no border. */
-  &[data-tone='muted'] {
-    color: var(--pd-text-subtle);
-    background: var(--pd-hover);
-    &::before {
-      content: none;
-    }
-  }
-  &.outline {
-    background: transparent;
-    box-shadow: inset 0 0 0 1px var(--pd-border-strong);
-  }
-}
+/* ---- Status and badges ----------------------------------------------------------------------------------------- */
 
 /* Status = a dot and a sentence-case word, calm by default (no pill on every row). */
 .status {
@@ -691,92 +499,28 @@ cdk-virtual-scroll-viewport.fit > .cdk-virtual-scroll-content-wrapper {
   }
 }
 
-.pw-menu {
-  min-width: 180px;
-  padding: var(--pd-space-1);
-  background: var(--pd-surface-3);
-  border: 1px solid var(--pd-hairline);
-  border-radius: var(--pd-radius-card);
-  box-shadow: var(--pd-shadow-3);
-  animation: pw-pop var(--pd-duration-micro) var(--pd-ease-move);
-  .pw-menu-item {
-    display: flex;
-    align-items: center;
-    gap: var(--pd-space-2);
-    width: 100%;
-    height: 30px;
-    padding: 0 var(--pd-space-2);
-    font: inherit;
-    color: var(--pd-text);
-    text-align: left;
-    background: none;
-    border: none;
-    border-radius: var(--pd-radius-tag);
-    cursor: default;
-    &:hover,
-    &:focus-visible,
-    &.cdk-menu-item:focus {
-      background: var(--pd-hover);
-      outline: none;
-    }
-    mat-icon {
-      width: 15px;
-      height: 15px;
-      color: var(--pd-text-muted);
-    }
-    &.danger {
-      color: var(--pd-danger);
-    }
-    &[aria-disabled='true'] {
-      opacity: 0.45;
-    }
-  }
-  .pw-menu-divider {
-    height: 1px;
-    margin: var(--pd-space-1) 0;
-    background: var(--pd-hairline);
-    border: none;
-  }
+/* ---- Material (rule 47): what is Pitwall's own; the look is paddock-ui's css/material.css -------------------- */
+
+/* A row menu (pw-items-menu): the danger colour for destructive items, and a hairline between groups. */
+.mat-mdc-menu-item.danger {
+  --mat-menu-item-label-text-color: var(--pd-danger);
+}
+.pw-menu-divider {
+  height: 1px;
+  margin: var(--pd-space-1) 0;
+  background: var(--pd-hairline);
+  border: none;
 }
 
-/* The themed select's popup (pw-select): a CDK listbox in an overlay. */
-.pw-select-list {
-  min-width: 180px;
-  max-height: 320px;
-  margin: 0;
-  padding: var(--pd-space-1);
-  overflow-y: auto;
-  list-style: none;
-  background: var(--pd-surface-3);
-  border: 1px solid var(--pd-hairline);
-  border-radius: var(--pd-radius-card);
-  box-shadow: var(--pd-shadow-3);
-  outline: none;
-  animation: pw-pop var(--pd-duration-micro) var(--pd-ease-move);
-  .opt {
-    display: flex;
-    align-items: center;
-    gap: var(--pd-space-2);
-    height: 30px;
-    padding: 0 var(--pd-space-3) 0 var(--pd-space-2);
-    color: var(--pd-text);
-    white-space: nowrap;
-    border-radius: var(--pd-radius-tag);
-    cursor: default;
-    .tick {
-      width: 14px;
-      height: 14px;
-      color: var(--pd-accent);
-      visibility: hidden;
-    }
-    &:hover,
-    &.cdk-option-active {
-      background: var(--pd-hover);
-    }
-    &[aria-selected='true'] .tick {
-      visibility: visible;
-    }
-  }
+/* Pitwall's icons in Material buttons and in the shared empty state (32 px, design guide: Empty states). */
+.mat-mdc-button-base mat-icon.mat-icon {
+  width: 16px;
+  height: 16px;
+  font-size: 16px;
+}
+pd-empty-state mat-icon.mat-icon[slot='icon'] {
+  width: 32px;
+  height: 32px;
 }
 
 mat-icon.mat-icon {
