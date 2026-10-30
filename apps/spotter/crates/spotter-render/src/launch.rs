@@ -179,8 +179,30 @@ pub fn lifetime_for(page_budget: Duration) -> Duration {
     START_ALLOWANCE + page_budget + Duration::from_secs(10)
 }
 
-/// How long a browser gets to quit by itself after `Browser.close` before it is killed.
+/// How long a browser that failed to start gets to quit after a polite request before it is killed (the start failed, so
+/// there is no run state to judge it by).
 pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
+
+/// When a browser asked to quit (`Browser.close`) is stuck rather than slow (ADR 0031): a browser that is still using CPU is
+/// flushing and is waited for; one that uses none and does not exit is given up on after `idle`. `spin` is CPU time summed
+/// over cores and processes of the tree, so a multi-threaded flush reaches it faster than the wall clock.
+pub const CLOSE_PATIENCE: paddock_proc::Patience = paddock_proc::Patience {
+    spin: Duration::from_secs(60),
+    idle: Duration::from_secs(5),
+    hang_guard: Duration::from_secs(10),
+    note_after: 0,
+    tick: Duration::from_millis(50),
+    cpu_every: 20,
+};
+
+/// The most a quit may take, however it looks: a browser with a throwaway profile is safe to end after it (the profile is
+/// deleted).
+// cap: a bound on something that cannot report progress beyond CPU time; the judge ends a stuck quit much earlier.
+const CLOSE_CAP: Duration = Duration::from_secs(20);
+
+/// How long the browser gets to react to a polite termination after its quit was waited for (or given up on), before the
+/// tree is killed. It is only reached by a browser that did not quit by itself.
+const TERMINATE_GRACE: Duration = Duration::from_millis(500);
 
 const NONE: u8 = 0;
 const TIMED_OUT: u8 = 1;
@@ -206,8 +228,6 @@ pub struct Chromium {
     dir: PathBuf,
     alive: Arc<AtomicBool>,
     ended_by: Arc<AtomicU8>,
-    /// Whether the last [`close`](Chromium::close) ended with the browser gone by itself (no termination was needed).
-    quit_by_itself: bool,
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -292,7 +312,6 @@ impl Chromium {
                 dir,
                 alive,
                 ended_by,
-                quit_by_itself: false,
             }),
             Err(e) => {
                 alive.store(false, Ordering::Release);
@@ -332,31 +351,25 @@ impl Chromium {
         Page::attach(self.conn.clone())
     }
 
-    /// Asks the browser to quit (`Browser.close` over DevTools) and waits up to [`CLOSE_GRACE`] for the process to
-    /// end, then ends whatever is left. A browser that is killed while it still starts up can leave a copy of
-    /// itself behind on macOS (the code-sign clone), so every normal end goes through here. Idempotent.
-    pub fn close(&mut self) {
-        self.close_within(CLOSE_GRACE);
-    }
-
-    /// As [`close`](Self::close) with the time the browser gets to quit by itself (tests that check that it does give it
-    /// far more than the default, so a loaded machine cannot turn "slow" into "needed a kill").
-    pub fn close_within(&mut self, grace: Duration) {
+    /// Asks the browser to quit (`Browser.close` over DevTools) and waits for the process to end, judged on its run state
+    /// ([`CLOSE_PATIENCE`]: a slow quit that still uses CPU is waited for, a stuck one is not), then ends whatever is
+    /// left. A browser that is killed while it still starts up can leave a copy of itself behind on macOS (the
+    /// code-sign clone), so every normal end goes through here. Returns whether the browser quit by itself, before any
+    /// termination or kill, and was not ended by the watchdog or the memory cap. Idempotent.
+    pub fn close(&mut self) -> bool {
+        let mut by_itself = !self.process.is_running();
         if self.alive.load(Ordering::Acquire) && self.process.is_running() && !self.conn.is_closed() {
             let _ = self.conn.call(None, "Browser.close", serde_json::json!({}), Duration::from_secs(2));
-            let end = Instant::now() + grace;
-            while self.process.is_running() && Instant::now() < end {
-                std::thread::sleep(Duration::from_millis(50));
-            }
+            by_itself = wait_to_quit(
+                &mut self.process,
+                CLOSE_PATIENCE,
+                paddock_proc::tree_cpu_time,
+                CappedSleep::new(CLOSE_CAP),
+            ) == Quit::Exited;
         }
-        self.quit_by_itself = !self.process.is_running();
         self.alive.store(false, Ordering::Release);
-        self.process.terminate(Duration::from_millis(500));
-    }
-
-    /// Whether the last close found the browser already gone (it quit on `Browser.close`; nothing had to end it).
-    pub fn quit_by_itself(&self) -> bool {
-        self.quit_by_itself
+        self.process.terminate(TERMINATE_GRACE);
+        by_itself && self.ended_by() == EndedBy::Nothing
     }
 
     /// Ends the browser at once.
@@ -400,6 +413,84 @@ fn cleanup(dir: &Path) {
             return;
         }
         std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// What the quit judge looks at: the browser process, ready when it is gone.
+struct QuitProbe<'a, F> {
+    process: &'a mut Supervised,
+    id: Option<paddock_proc::ProcessId>,
+    cpu: F,
+}
+
+impl<F: FnMut(paddock_proc::ProcessId) -> Option<Duration>> paddock_proc::StartProbe for QuitProbe<'_, F> {
+    fn liveness(&mut self) -> paddock_proc::Liveness {
+        if self.process.is_running() {
+            paddock_proc::Liveness::Running
+        } else {
+            paddock_proc::Liveness::Exited(paddock_proc::ExitInfo {
+                status: None,
+                stderr_tail: None,
+            })
+        }
+    }
+
+    fn ready(&mut self) -> bool {
+        !self.process.is_running()
+    }
+
+    fn cpu_time(&mut self) -> Option<Duration> {
+        (self.cpu)(self.id?)
+    }
+}
+
+/// Waits for one tick on the real clock, and says the wait is over (cancelled) once `cap` has passed.
+struct CappedSleep {
+    end: Instant,
+}
+
+impl CappedSleep {
+    fn new(cap: Duration) -> CappedSleep {
+        CappedSleep { end: Instant::now() + cap }
+    }
+}
+
+impl paddock_proc::Pace for CappedSleep {
+    fn wait(&mut self, tick: Duration) -> bool {
+        std::thread::sleep(tick);
+        Instant::now() < self.end
+    }
+}
+
+/// How a wait for the browser to quit ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Quit {
+    /// The process exited.
+    Exited,
+    /// Judged stuck on its run state (no CPU and no exit, or spinning).
+    Stuck,
+    /// The pace's cap ended the wait.
+    Capped,
+}
+
+/// Waits until the browser process has exited. It reuses the shared start judge with "ready" meaning "gone", so the quit is
+/// judged on run state like a start (ADR 0031): a quit that still uses CPU is waited for. `cpu` and `pace` are seams for tests.
+fn wait_to_quit(
+    process: &mut Supervised,
+    patience: paddock_proc::Patience,
+    cpu: impl FnMut(paddock_proc::ProcessId) -> Option<Duration>,
+    pace: impl paddock_proc::Pace,
+) -> Quit {
+    use paddock_proc::{StartState, StartWatch, Watched};
+    let id = process.process();
+    let mut watch = StartWatch::new(patience, "the browser", QuitProbe { process, id, cpu }, pace);
+    loop {
+        match watch.wait() {
+            Watched::State(StartState::Stalled(r)) if !r.cause.is_stuck() => {}
+            Watched::State(StartState::Ready | StartState::Exited(_)) => return Quit::Exited,
+            Watched::State(_) => return Quit::Stuck,
+            Watched::Cancelled => return Quit::Capped,
+        }
     }
 }
 
@@ -623,7 +714,7 @@ mod tests {
     const TICK_GUARD: u32 = 20_000;
 
     #[cfg(unix)]
-    impl paddock_proc::Pace for Yield {
+    impl paddock_proc::Pace for &mut Yield {
         fn wait(&mut self, _tick: Duration) -> bool {
             // A tick shortened to 1 ms: the judge counts ticks, so the verdicts are the same; the process is real and needs the time.
             std::thread::sleep(Duration::from_millis(1));
@@ -639,6 +730,7 @@ mod tests {
         script: &str,
         dir: &Path,
         ended_by: u8,
+        memory_cap: Option<u64>,
         cpu: impl FnMut(paddock_proc::ProcessId) -> Option<Duration>,
     ) -> Result<Connection> {
         let mut cmd = std::process::Command::new("/bin/sh");
@@ -646,7 +738,15 @@ mod tests {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::fs::File::create(dir.join(STDERR_FILE)).unwrap());
-        let mut process = Supervised::spawn(cmd).unwrap();
+        let mut process = match memory_cap {
+            Some(limit) => {
+                let mut cap = paddock_proc::MemoryCap::new(limit, "the fake browser");
+                cap.every = Duration::from_millis(20);
+                Supervised::spawn_capped(cmd, cap)
+            }
+            None => Supervised::spawn(cmd),
+        }
+        .unwrap();
         let r = connect(
             dir,
             &mut process,
@@ -654,10 +754,51 @@ mod tests {
             &AtomicU8::new(ended_by),
             Duration::from_secs(7),
             cpu,
-            Yield(0),
+            &mut Yield(0),
         );
         process.kill();
         r
+    }
+
+    /// A browser that takes longer to quit than the old fixed 5 s grace, but works while it does, is waited for, not killed.
+    #[cfg(unix)]
+    #[test]
+    #[expect(clippy::disallowed_methods, reason = "a fake browser script: std Command")]
+    fn a_slow_quit_that_still_uses_cpu_is_waited_for() {
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.args(["-c", "sleep 6"]);
+        let mut process = Supervised::spawn(cmd).unwrap();
+        // 6 s at 1 ms ticks is about 6000 ticks, sixty times the idle limit of 100 ticks: only the CPU use keeps the wait going.
+        let quit = wait_to_quit(&mut process, CLOSE_PATIENCE, working(), &mut Yield(0));
+        assert_eq!(quit, Quit::Exited);
+    }
+
+    /// A browser that neither exits nor uses CPU is judged stuck after the idle ticks (about 100), long before any guard or cap.
+    #[cfg(unix)]
+    #[test]
+    #[expect(clippy::disallowed_methods, reason = "a fake browser script: std Command")]
+    fn a_stuck_quit_is_given_up_on_by_run_state() {
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.args(["-c", "exec sleep 300"]);
+        let mut process = Supervised::spawn(cmd).unwrap();
+        let mut pace = Yield(0);
+        let quit = wait_to_quit(&mut process, CLOSE_PATIENCE, |_| Some(Duration::from_secs(1)), &mut pace);
+        assert_eq!(quit, Quit::Stuck);
+        assert!(pace.0 < 1_000, "judged after {} ticks", pace.0);
+        process.kill();
+    }
+
+    /// The memory cap ending the fake during its start is reported as such, not as a crash.
+    #[cfg(unix)]
+    #[test]
+    fn a_start_ended_by_the_memory_cap_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = "x=$(head -c 60000000 /dev/zero | tr '\\0' a); sleep 300";
+        let e = start_fake(script, dir.path(), NONE, Some(16 << 20), working())
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(e.contains("more memory than allowed"), "{e}");
     }
 
     /// A CPU reading that grows a little each time (a browser that is working), so only its exit ends the wait.
@@ -687,6 +828,7 @@ mod tests {
             "echo 'GPU process is waiting for a lock' >&2; exec sleep 300",
             dir.path(),
             NONE,
+            None,
             flat,
         )
         .err()
@@ -700,7 +842,7 @@ mod tests {
     #[test]
     fn a_browser_that_exits_during_the_start_names_its_exit_code_and_output() {
         let dir = tempfile::tempdir().unwrap();
-        let e = start_fake("echo 'bad flag' >&2; exit 3", dir.path(), NONE, |_| None)
+        let e = start_fake("echo 'bad flag' >&2; exit 3", dir.path(), NONE, None, |_| None)
             .err()
             .unwrap()
             .to_string();
@@ -715,7 +857,10 @@ mod tests {
     #[test]
     fn a_start_ended_by_the_time_cap_says_so() {
         let dir = tempfile::tempdir().unwrap();
-        let e = start_fake("exit 1", dir.path(), TIMED_OUT, working()).err().unwrap().to_string();
+        let e = start_fake("exit 1", dir.path(), TIMED_OUT, None, working())
+            .err()
+            .unwrap()
+            .to_string();
         assert!(e.contains("did not start within 7 s"), "{e}");
     }
 
