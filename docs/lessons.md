@@ -765,4 +765,6 @@ use `Standard` and lower individual threads instead, at the gentle levels of rul
 On Linux the same goes for the idle I/O class: Dyno's systemd unit now says `IOSchedulingClass=best-effort` with
 `IOSchedulingPriority=7`. **Follow-up (ADR 0020):** Dyno's `dyno_platform::priority::lower_current_thread` copies Debrief's
 `debrief_core::threads::lower_priority`; both go once the shared `paddock_jobs::exec::priority::apply_current(Class)` exists,
-and the shared `paddock-service` renderer's `low_priority()` systemd text (`IOSchedulingClass=idle`) moves to best effort then.
+and the shared `paddock-service` renderer's `low_priority()` output moves off the starvable levels then: the systemd
+text (`IOSchedulingClass=idle`) to best effort 7, and the launchd text's `LowPriorityIO` (I/O throttled like the background
+band), both still in its golden files.

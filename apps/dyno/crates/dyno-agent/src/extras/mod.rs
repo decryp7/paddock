@@ -356,7 +356,10 @@ pub fn run(shared: &Arc<Shared>) {
     }
     // Watching for the desktop to settle can take minutes; it must not delay the checks below.
     let s = shared.clone();
-    let _ = std::thread::Builder::new().name("dyno-boot".into()).spawn(move || record_boot(&s));
+    let _ = std::thread::Builder::new().name("dyno-boot".into()).spawn(move || {
+        dyno_platform::priority::lower_current_thread();
+        record_boot(&s)
+    });
     wait(shared, FIRST_RUN_AFTER);
     while !shared.stopped() {
         if maintenance_open(shared) {

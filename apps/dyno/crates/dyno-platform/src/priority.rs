@@ -36,8 +36,55 @@ pub fn lower_current_thread() -> bool {
     }
 }
 
+thread_local! {
+    static LOWERED: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+/// [`lower_current_thread`] once per thread: for work handed to a pool this crate does not start (a closure that runs on
+/// another library's worker threads), which calls it for every item. New threads do not inherit the class of the thread
+/// that starts them (macOS gives them the default class), so each worker lowers itself. Returns what the first call
+/// returned.
+pub fn lower_current_thread_once() -> bool {
+    LOWERED.with(|l| match l.get() {
+        Some(done) => done,
+        None => {
+            let done = lower_current_thread();
+            l.set(Some(done));
+            done
+        }
+    })
+}
+
+/// The calling thread's QoS class (`qos_class_t` as a number), for tests that check where work runs.
+#[cfg(target_os = "macos")]
+pub fn current_qos_class() -> u32 {
+    let mut class = libc::qos_class_t::QOS_CLASS_UNSPECIFIED;
+    let mut relative = 0;
+    // SAFETY: reads the calling thread's own QoS class into two locals; on failure they keep UNSPECIFIED.
+    unsafe { libc::pthread_get_qos_class_np(libc::pthread_self(), &mut class, &mut relative) };
+    class as u32
+}
+
+/// `QOS_CLASS_UTILITY` as a number, to compare with [`current_qos_class`].
+#[cfg(target_os = "macos")]
+pub const UTILITY: u32 = libc::qos_class_t::QOS_CLASS_UTILITY as u32;
+
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_pool_worker_lowers_itself_once() {
+        let (first, again, class) = std::thread::spawn(|| {
+            let first = super::lower_current_thread_once();
+            let again = super::lower_current_thread_once();
+            (first, again, super::current_qos_class())
+        })
+        .join()
+        .unwrap();
+        assert!(first && again);
+        assert_eq!(class, super::UTILITY);
+    }
+
     #[test]
     fn a_thread_can_be_lowered() {
         // On its own thread: the class stays until the thread ends.

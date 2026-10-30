@@ -34,6 +34,43 @@ Dyno has two things called "bench":
 
 ## Results (newest first)
 
+### 2026-10-30, agent threads at the gentle level (rule 52, fix/dyno-qos-utility-2)
+
+- **Commit:** A/B: base 1af0b346e (only the disk walk lowered; every other agent thread at the default class) → change: the
+  agent's own threads (sampler, network, hardware, issues, extras, unusual, network change, inventory, boot, backup check,
+  counters, volume list and probes, traffic and name lookups) and the finder's thread and workers at `lower_current_thread`
+  (`QOS_CLASS_UTILITY` on macOS); `dyno-server`, its connections and the benchmark thread not lowered
+- **Machine:** Mac mini M4 Pro (Mac16,11), 14 cores, macOS 27.2; rustc 1.99.1
+- **Load:** busy, other agents building: 1-minute load 21-61, 5-minute 22-37 (the finder runs started at 5-minute 36, above
+  the usual gate of 30), so the numbers are noisy and only compare like for like
+- **Build:** release (`cargo build --release -p dyno-agent`, `cargo test --release --test finder_bench --no-run`), each
+  commit in its own worktree and target folder
+- **Corpus:** idle: the live machine, read-only, nobody subscribed; finder: `finder_bench`'s generated tree (400 folders,
+  50,000 small files, 300 files of about 1 MiB)
+- **Command:** idle: `dyno-agent bench 150 none` (in-process agent, data in a temp folder, no window and no launch agent)
+  with `top -l 25 -s 5 -pid <pid> -stats pid,cpu,power` and one `ps -M -p <pid>` while it ran; finder: the
+  `finder_bench` binary with `--ignored --nocapture` under `nice -n 10`
+- **Runs:** alternating base, change, base, change; the idle runs 150 s each; the finder bench reports best and median of
+  its own repeats
+- **Numbers:**
+
+  | Measure | Base | Change | Budget | Verdict |
+  |---|---|---|---|---|
+  | Idle agent CPU, `bench` (% of one core, 2 runs) | 0.98, 0.90 | 1.06, 0.95 | about 1% (ADR 0002), 0.5% idle (ADR 0024 D7) | the same within noise; over the 0.5% idle budget before and after |
+  | Idle agent CPU, `top` mean of 25 samples (2 runs) | 0.89, 0.80 | 0.94, 0.84 | — | the same within noise |
+  | Idle energy impact, `top` POWER mean (2 runs) | 0.89, 0.80 | 0.94, 0.84 | — | the same within noise |
+  | Resident memory, `bench` | 29.7, 29.8 MB | 30.0, 30.1 MB | — | the same |
+  | Agent threads by scheduling priority (`ps -M`) | all at 31 (default) | 8 at 20 (utility), the rest at 31 | — | as intended |
+  | Finder, 1 thread, median (2 runs) | 0.81, 0.82 s | 0.85, 0.85 s | none | about 4% slower on a busy machine |
+  | Finder, 4 threads, median (2 runs) | 0.25, 0.25 s | 0.26, 0.26 s | none | about 4% slower |
+  | Finder, 8 threads, median (2 runs) | 0.18, 0.16 s | 0.19, 0.19 s | none | about 10% slower, within its spread |
+
+- **Memory measure:** resident set size from `bench` (`sysinfo`)
+- **Notes:** lowering changes when the agent runs, not how much work it does, so its idle CPU and energy stay the same; a
+  lowered search yields to other work on a busy machine, which is the few percent above. Not measured: the agent under
+  launchd (`ProcessType Standard` instead of `Background`), which needs the installed app; that is for the VM checks before
+  the tag, with `ps -M` on the running agent (every thread was at 4 under `Background`).
+
 ### 2026-10-29, release identity of the rlib-only crate type (docs/link-time)
 
 - **Commit:** A/B: base cb3329e0f (template crate types) → change 451948bbb (`crate-type = ["rlib"]`): pre-rebase cb3329e0f (parent cae1649f9) → 451948bbb, same content as 784264b1d's crate-type diff; both kept on the branch `wip/link-time-ab`; research note

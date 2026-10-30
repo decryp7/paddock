@@ -10,6 +10,7 @@ use std::sync::Arc;
 pub fn warm(shared: &Arc<Shared>) {
     let s = shared.clone();
     let _ = std::thread::Builder::new().name("dyno-inventory".into()).spawn(move || {
+        dyno_platform::priority::lower_current_thread();
         let _ = get(&s);
     });
 }

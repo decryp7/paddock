@@ -1174,6 +1174,34 @@ mod tests {
         Err(std::io::Error::other("no more threads"))
     }
 
+    /// The person watches the scan, so its readers are lowered gently and never starved (rule 52): each worker leaves its
+    /// thread at `UTILITY`, read back through the spawn hook once the worker's job is over.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn every_reader_runs_at_the_gentle_level() {
+        static CLASSES: (Mutex<Vec<u32>>, std::sync::Condvar) = (Mutex::new(Vec::new()), std::sync::Condvar::new());
+        fn recording(name: String, job: Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()> {
+            os_spawn(
+                name,
+                Box::new(move || {
+                    job();
+                    lock(&CLASSES.0).push(dyno_platform::priority::current_qos_class());
+                    CLASSES.1.notify_all();
+                }),
+            )
+        }
+        let mut c = cfg(3);
+        c.spawn = recording;
+        let fs = Arc::new(sample());
+        let (_w, _rec, end) = run(fs.clone(), fs.root(), c);
+        assert_eq!(end, End::Done);
+        let mut classes = lock(&CLASSES.0);
+        while classes.len() < 3 {
+            classes = CLASSES.1.wait(classes).unwrap_or_else(|p| p.into_inner());
+        }
+        assert!(classes.iter().all(|c| *c == dyno_platform::priority::UTILITY), "{classes:?}");
+    }
+
     #[test]
     fn a_retry_that_cannot_start_a_thread_changes_nothing() {
         static OUT_OF_THREADS: AtomicBool = AtomicBool::new(false);

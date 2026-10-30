@@ -63,6 +63,14 @@ at `User` with bounded threads.
 | Linux | nice 10 (`Background`) or nice 19 + `SCHED_IDLE` (`Idle`) in `pre_exec`; never raised again | `setpriority(PRIO_PROCESS, tid, …)`, `SCHED_IDLE` for `Idle` | `ioprio_set` best-effort 7 (`Background`), idle class (`Idle`) |
 | Windows | `BELOW_NORMAL_PRIORITY_CLASS` (`Background`) or `IDLE_PRIORITY_CLASS` (`Idle`) at `CreateProcess`, then `SetProcessInformation(child, ProcessMemoryPriority, MEMORY_PRIORITY_LOW / VERY_LOW)` and `SetProcessInformation(child, ProcessPowerThrottling, EXECUTION_SPEED)` (EcoQoS) | `SetThreadPriority(THREAD_MODE_BACKGROUND_BEGIN)` | memory priority as set; I/O priority of *another* process has no public API |
 
+**Amended 2026-10-30 (rule 52, check C54).** The starvable cells of the thread and I/O columns (macOS
+`QOS_CLASS_BACKGROUND`, Windows `THREAD_MODE_BACKGROUND_BEGIN`, Linux `SCHED_IDLE` and the idle I/O class) are the
+`Idle` case only: work nobody waits on, each use carrying `// conformance: background-qos — <why>`. A `Background`
+thread that a caller may wait for (an analysis behind a report, a scan or search the person started, a pool an import
+waits on through a lock) runs at the gentle level: `QOS_CLASS_UTILITY` on macOS, nice 10 with `ioprio` best-effort 7 on
+Linux, `THREAD_PRIORITY_BELOW_NORMAL` on Windows. Debrief's report waited 100 s instead of 3 s on a loaded Mac for a pool
+in `QOS_CLASS_BACKGROUND`, and launchd's `ProcessType Background` puts a whole process in that band (lessons 2026-10-30).
+
 `PROCESS_MODE_BACKGROUND_BEGIN` applies only to the calling process, so it cannot be set on llama-server or any other
 third-party child. Our own Rust children may enter it on themselves, which also lowers their I/O priority, but only
 through `paddock_proc::priority::enter_background_self()`, and only when they were **launched** at `Background` or

@@ -29,8 +29,9 @@ choice on Windows (a service) is the wrong one for Dyno.
      service install` writes `~/Library/LaunchAgents/net.decryptology.dyno.agent.plist` and runs `launchctl bootout`,
      waits (bounded) until launchd dropped the job, then `bootstrap`, logging to `~/Library/Logs/Dyno/agent.log`.
    - **Linux: a systemd user unit.** `~/.config/systemd/user/dyno-agent.service`, `Restart=always`, `RestartSec=5`,
-     `Nice=10`, `CPUWeight=20`, `IOSchedulingClass=idle`, `MemoryHigh=256M`, `WantedBy=default.target`, enabled with
-     `systemctl --user enable --now`. Without systemd the app starts the agent itself (ADR 0002).
+     `Nice=10`, `CPUWeight=20`, `IOSchedulingClass=best-effort` with `IOSchedulingPriority=7` (never the idle class,
+     rule 52: the agent reads the folders of a scan the person watches), `MemoryHigh=256M`, `WantedBy=default.target`,
+     enabled with `systemctl --user enable --now`. Without systemd the app starts the agent itself (ADR 0002).
    - **Windows: a per-user `Run` entry, not a service.** `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value
      `Dyno`, data `"<exe>" run`.
 2. **Why not a Windows service (SCM).** Services run in session 0, isolated from the desktop since Vista. From there the

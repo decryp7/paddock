@@ -119,6 +119,7 @@ fn abandonable<T: Send + 'static>(
     let thread = {
         let (ctx, tx, held) = (ctx.clone(), tx.clone(), held.clone());
         std::thread::Builder::new().name("dyno-finder".into()).spawn(move || {
+            lowered("search");
             let result = work(&ctx);
             // Over: whatever was counted for it comes off, and nothing may be counted afterwards.
             *held.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
@@ -140,6 +141,14 @@ fn abandonable<T: Send + 'static>(
             Err(JobError::Cancelled(ctx.cancel_token().reason().unwrap_or(CancelReason::User)))
         }
     }
+}
+
+/// Lowers the thread a part of the search runs on, gently and once (rule 52): the search's own thread and the workers of the
+/// shared walk and map, which start their threads themselves and do not pass on the class of the thread that asked.
+fn lowered(_part: &'static str) {
+    dyno_platform::priority::lower_current_thread_once();
+    #[cfg(all(test, target_os = "macos"))]
+    tests::saw(_part, dyno_platform::priority::current_qos_class());
 }
 
 /// What the walk found.
@@ -177,6 +186,7 @@ fn walk(ctx: &JobContext, root: &Path, min_bytes: u64, limits: Limits, workers: 
         ..WalkOptions::default()
     }
     .with_filter(move |e| {
+        lowered("walk");
         if s.fetch_add(1, Ordering::Relaxed) >= max_files {
             many.store(true, Ordering::Relaxed);
             return Decision::SkipSubtree;
@@ -266,6 +276,7 @@ fn find_duplicates(
     let candidates: Vec<usize> = groups.iter().flatten().copied().collect();
     ctx.phase(Phase::items("heads", "Comparing the start of files", candidates.len() as u64));
     let heads = par_map_ordered(candidates, workers, ctx.cancel_token(), ctx, |i| {
+        lowered("heads");
         head_digest(ctx, Path::new(&files[i].path)).map(|h| (i, h))
     })?;
     let head_of: std::collections::HashMap<usize, [u8; 32]> = heads.into_iter().filter_map(|(i, h)| h.map(|h| (i, h))).collect();
@@ -298,6 +309,7 @@ fn find_duplicates(
     let total: u64 = to_read.iter().map(|i| files[*i].bytes).sum();
     ctx.phase(Phase::bytes("contents", "Comparing contents", Some(total)));
     let digests = par_map_ordered(to_read, workers, ctx.cancel_token(), &(), |i| {
+        lowered("contents");
         full_digest(ctx, Path::new(&files[i].path)).map(|h| (i, h))
     })?;
     Ok((digests.into_iter().filter_map(|(i, h)| h.map(|h| (i, h))).collect(), cut))
@@ -392,6 +404,29 @@ mod tests {
 
     fn find(root: &Path, mode: FinderMode) -> Result<FinderResult, JobError> {
         Run::new().job(|ctx| run(ctx, &query(root, mode), "s", Limits::default(), w(4), lg()))
+    }
+
+    /// The QoS class each part of a search ran at, per thread (every finder test adds to it).
+    #[cfg(target_os = "macos")]
+    static SEEN: Mutex<Vec<(&'static str, u32)>> = Mutex::new(Vec::new());
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn saw(part: &'static str, class: u32) {
+        SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((part, class));
+    }
+
+    /// The person started the search and watches it, so every thread of it (its own, the walk's and the comparison's workers)
+    /// is lowered gently, never starved (rule 52): `UTILITY` on macOS.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn every_thread_of_a_search_runs_at_the_gentle_level() {
+        let (_t, root) = fixture();
+        assert_eq!(find(&root, FinderMode::Both).unwrap().duplicates.len(), 1);
+        let seen = SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        for part in ["search", "walk", "heads", "contents"] {
+            assert!(seen.iter().any(|(p, _)| *p == part), "{part} never ran: {seen:?}");
+        }
+        assert!(seen.iter().all(|(_, c)| *c == dyno_platform::priority::UTILITY), "{seen:?}");
     }
 
     #[test]

@@ -68,6 +68,7 @@ pub fn report(shared: &Arc<Shared>) -> BackupReport {
     if start {
         let s = shared.clone();
         let spawned = std::thread::Builder::new().name("dyno-backup-check".into()).spawn(move || {
+            dyno_platform::priority::lower_current_thread();
             let _ = run_check(&s, None);
         });
         if spawned.is_err() {
