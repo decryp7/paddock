@@ -4,6 +4,10 @@
 /// its parent's sockets between fork and exec and keeps one it inherited, so it is not an owner; unrelated holders (two
 /// programs sharing a port with `SO_REUSEPORT`, a socket passed over a Unix socket) all are. Sorted, so the answer never
 /// depends on the order the OS listed them in. `parent` gives a process's parent when it is known.
+///
+/// So forked workers that serve a listener their master opened (nginx, Apache prefork, gunicorn) are folded into the
+/// master: the page shows one listener owned by the master, not one per worker. A worker that opened its own socket
+/// (with `SO_REUSEPORT`) is an owner of that socket.
 pub fn owners(holders: &[u32], parent: impl Fn(u32) -> Option<u32>) -> Vec<u32> {
     let mut out: Vec<u32> = holders
         .iter()
@@ -39,5 +43,18 @@ mod tests {
         // Unrelated holders all own it, in pid order whatever order the OS used.
         assert_eq!(owners(&[42, 7], |_| None), [7, 42]);
         assert_eq!(owners(&[7, 42], |_| None), [7, 42]);
+    }
+
+    /// A pre-forking server (nginx, Apache prefork, gunicorn): the master opened the listener and its workers inherited
+    /// it, so the page shows one listener, the master's.
+    #[test]
+    fn forked_workers_fold_into_their_master() {
+        let parent = |pid: u32| match pid {
+            201 | 202 => Some(200),
+            200 => Some(1),
+            _ => None,
+        };
+        assert_eq!(owners(&[202, 200, 201], parent), [200]);
+        assert_eq!(owners(&[201, 202, 200], parent), [200]);
     }
 }

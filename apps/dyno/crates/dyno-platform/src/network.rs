@@ -51,7 +51,9 @@ impl NetworkSockets for OsSockets {
         .map_err(|e| PlatformError::Failed(format!("The OS would not list the open sockets ({e}).")))?;
         // One socket can come back once per holder (macOS) or once with all its holders (Linux); a child holds its
         // parent's sockets between fork and exec and keeps one it inherited. Rows are merged per socket and listed once
-        // per owner, never once per holder or for whichever holder the OS listed first.
+        // per owner, never once per holder or for whichever holder the OS listed first. Rows with the same tuple
+        // (protocol, local address and port, peer, state) and no visible pid (another user's sockets without elevation)
+        // collapse into one row: the OS gives nothing that would tell them apart.
         let mut holders: Vec<(SocketRow, Vec<u32>)> = Vec::new();
         let mut seen: std::collections::HashMap<SocketRow, usize> = std::collections::HashMap::new();
         for i in infos {
@@ -272,7 +274,9 @@ mod tests {
         let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
         while !both() {
             assert!(std::time::Instant::now() < end, "the OS never listed the child as a holder");
-            std::thread::yield_now();
+            // Waits on the condition above; the pause only keeps each poll of the machine's sockets from spinning (the
+            // deadline is a hang guard).
+            std::thread::sleep(std::time::Duration::from_millis(20));
         }
         let rows = OsSockets.sockets().unwrap();
         let listening: Vec<&SocketRow> = rows
