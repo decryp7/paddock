@@ -7,11 +7,13 @@ import { commitLintMain, lint } from '../src/commit-lint.mjs';
 import { findingsOf, makeApp, messages } from './helpers.mjs';
 
 test('lint good: Conventional Commits, scope, breaking mark, merge commits', () => {
-  for (const m of ['feat: add x', 'fix(core): y\n\nBody text.', 'chore!: drop z', 'Merge branch main', 'docs: a [skip ci]']) assert.deepEqual(lint(m), [], m);
+  for (const m of ['feat: add x', 'fix(core): y\n\nBody text.', 'fix(spotter,debrief): both apps', 'chore!: drop z', 'Merge branch main', 'docs: a [skip ci]']) assert.deepEqual(lint(m), [], m);
 });
 
 test('lint bad: header shape, long header, missing blank line, empty', () => {
   assert.match(lint('Added a thing')[0], /does not start with/);
+  assert.match(lint('fix(a,): x')[0], /does not start with/);
+  assert.match(lint('fix(a, b): x')[0], /does not start with/);
   assert.match(lint(`feat: ${'x'.repeat(100)}`)[0], /first line is/);
   assert.match(lint('feat: ok\nbody')[0], /second line must be empty/);
   assert.match(lint('')[0], /empty/);

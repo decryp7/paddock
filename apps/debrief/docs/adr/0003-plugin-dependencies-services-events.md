@@ -1,6 +1,6 @@
 # 3. Plugin dependencies, services, extension points and events
 
-- Status: Accepted (2026-10-31, confirmation review of the amendment; first accepted 2026-10-17); **scoped and
+- Status: Accepted (2026-10-30, confirmation review of the amendment; first accepted 2026-10-17); **scoped and
   partly superseded** by [ADR 0017](0017-one-ipc-out-of-process-plugins.md) and family
   [ADR 0001](../../../../docs/adr/0001-plugin-platform-crates.md) (see "Amendment: scope after the plugin platform" at
   the end)
@@ -56,7 +56,7 @@ internals, start in the wrong order, or fail when a provider is disabled or quar
   missing/incompatible/cyclic dependencies, cascade on quarantine and crashing subscribers.
 - API crates become public contracts and need semver discipline.
 
-## Amendment: scope after the plugin platform (2026-10-31)
+## Amendment: scope after the plugin platform (2026-10-30)
 
 ADR 0017 moved plugins out of process and dropped "workspace hooks, events, exporters, services and plugin-declared
 extension points, and dependencies between plugins" from them; family ADR 0001 then made the out-of-process host a

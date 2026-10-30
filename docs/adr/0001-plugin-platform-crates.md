@@ -1,7 +1,7 @@
 # 1. The `paddock-plugin` family: one out-of-process plugin platform for Debrief, Pacenotes and Dyno
 
-- Status: Accepted (2026-10-31), after an independent review and a confirmation review. Proposed 2026-10-23; **built**
-  in Paddock 0.3.0 (plan X51, 2026-10-25) with the differences under "Implementation notes"; revised 2026-10-31 with what
+- Status: Accepted (2026-10-30), after an independent review and a confirmation review. Proposed 2026-10-23; **built**
+  in Paddock 0.3.0 (plan X51, 2026-10-25) with the differences under "Implementation notes"; revised 2026-10-30 with what
   Debrief 1.2 needs before PH1 to PH4 start: the OS sandbox in Paddock, streamed and host-side extension calls, liveness,
   and parallelism and cost.
 - Versioning and consumption follow ADR 0014 §4 and §5 (one repository, path dependencies, tags per app), which
@@ -230,11 +230,11 @@ count as writing. Whatever the flags say, the OS sandbox still bounds what a plu
   has `#[serde(default)]`. The same rules hold inside every `Extension` namespace. The doc comments that still say a field
   may be appended (`crates/paddock-plugin-api/src/protocol.rs:18`, `apps/debrief/crates/debrief-plugin-api/src/protocol.rs:24`)
   are corrected in the IPC hardening package.
-- **The protocol stays 2.0 for this revision** (decided 2026-10-31). `HostCall::Extension` is appended at the end of
+- **The protocol stays 2.0 for this revision** (decided 2026-10-30). `HostCall::Extension` is appended at the end of
   `HostCall`, and `PLATFORM_PROTOCOL` stays 2.0: no app has shipped protocol 2.0, and there is no compatibility promise
   before v1. The minor rule above applies from the first release that ships protocol 2.0; the same holds for the
   `Progress` frames of package 2.6d.
-- **Capabilities in the handshake: frame version 3** (decided 2026-10-31, before package 2.6d; amends ADR 0031 §9). A
+- **Capabilities in the handshake: frame version 3** (decided 2026-10-30, before package 2.6d; amends ADR 0031 §9). A
   field appended to `Hello` would break the handshake both ways (an older host fails the decode with "trailing bytes" and
   the plugin host counts it as a crash; [ipc-wire.md](../ipc-wire.md) §16). Instead:
   - `paddock_ipc::frame::VERSION` becomes 3. In version 3, `Hello` and `Welcome` end with `caps: u32`, a bit set; bit 0
@@ -248,7 +248,7 @@ count as writing. Whatever the flags say, the OS sandbox still bounds what a plu
     four pairings of versions 2 and 3.
 - **No compatibility across a major, binary or source.** A plugin built for an older major is refused
   (`Refusal::PluginTooOld`), and Debrief's protocol 1 is refused as no longer supported (`Refusal::Legacy`). There is no
-  binary legacy mode and no source shim (user decision, 2026-10-31: "no need to keep legacy plugins. Just remove them."),
+  binary legacy mode and no source shim (user decision, 2026-10-30: "no need to keep legacy plugins. Just remove them."),
   and the shared host has no hook for serving an old protocol.
 - **No support window before v1.** Whether a later major keeps the previous one working for a while is decided by an ADR
   when the platform has shipped a major to third parties; until then the rule above holds.
@@ -339,7 +339,7 @@ Built as described, with these deliberate differences:
   words the refusals on top of it. `GrantRef` likewise exists once, in `paddock-view`, re-exported by the package.
 - Protocol 1 (Debrief's own) is refused by the version gate: at the handshake (`IpcError::Version`, tested with the frozen
   `fixture_v1`) and from a manifest (`Refusal::Legacy`). There is no binary legacy mode and no source shim (user decision,
-  2026-10-31); Debrief removes old installed plugins on the first start of 1.2 (ADR 0003 phase 3).
-- Still to build after the 2026-10-31 revision: `paddock-sandbox` (PH1); `Remote::stream`, `StreamContract`,
+  2026-10-30); Debrief removes old installed plugins on the first start of 1.2 (ADR 0003 phase 3).
+- Still to build after the 2026-10-30 revision: `paddock-sandbox` (PH1); `Remote::stream`, `StreamContract`,
   `HostCall::Extension`, `Contract::role` (package 2.6b); resource requests with one memory policy and the lifecycle
   (2.6a); the liveness conversion (2.6c, 2.6d); the refusal texts above (PH3).

@@ -356,7 +356,12 @@ mod tests {
             .find_map(|l| l.strip_prefix("pid "))
             .and_then(|p| p.parse().ok())
             .expect("the child told its grandchild's pid before the timeout");
-        assert!(!crate::is_alive(pid), "the grandchild survived the timeout");
+        // The pipes reach EOF, and the run returns, a moment before the killed grandchild stops showing as running (Windows
+        // ends a process asynchronously): wait on that state with a deadline, as the other tree tests do.
+        assert!(
+            crate::testchild::is_gone(pid),
+            "the grandchild survived the timeout"
+        );
     }
 
     #[test]

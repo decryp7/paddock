@@ -398,7 +398,7 @@ Total about 18.5 days.
 (b) **The phase shown while a child or the app is stopped:** "Paused by macOS or another app".
 (c) **Debrief first:** phase A in Debrief 1.2; phase B after the Dyno, Spotter and Pitwall 1.1 tags.
 
-## Amendment 2026-10-31: phase A is built in the shared crates
+## Amendment 2026-10-30: phase A is built in the shared crates
 
 **Why.** Debrief 1.2 moves onto the shared plugin platform (family ADRs [0001](0001-plugin-platform-crates.md) and
 [0003](0003-debrief-migration-and-users.md)), and its package PH1 deletes `debrief-ipc`. Phase A's judge and probe would
@@ -426,7 +426,7 @@ protocol-2.0 plugin is built with the `Progress` frames. The plan counts the wor
 13 days, against about 14 for phase A (9.5), WP-B1 (1.5), WP-B2 (2) and WP-B4 (1) done separately; part of WP-B3 is in
 2.6d.
 
-**Correction to §9 (2026-10-31).** §9 says a capability bit in `Hello` needs no frame version bump. That is wrong on this
+**Correction to §9 (2026-10-30).** §9 says a capability bit in `Hello` needs no frame version bump. That is wrong on this
 wire: postcard has no field count, so a field appended to `Hello` fails the handshake both ways (an older host reports
 "trailing bytes" and counts a crash; a newer host reading an older `Hello` reports "Hit the end of buffer";
 [ipc-wire.md](../ipc-wire.md) §16, measured). The capability is carried as decided in family ADR 0001 ("Versioning and

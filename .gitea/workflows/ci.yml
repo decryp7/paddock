@@ -60,6 +60,7 @@ jobs:
       paddock_dev: ${{ steps.plan.outputs.paddock_dev }}
       apps: ${{ steps.plan.outputs.apps }}
       any_app: ${{ steps.plan.outputs.any_app }}
+      base: ${{ steps.plan.outputs.base }}
     steps:
       # The whole history: the base (a merge base, the last green commit of main) can be any older commit.
       - uses: actions/checkout@v4
@@ -250,7 +251,7 @@ jobs:
       # waiver (paddock.waivers.toml).
       - name: Paddock itself (applicable checks)
         working-directory: .
-        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C48,C53,C54,C56 --strict C36
+        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C48,C53,C54,C56,C57 --strict C36
 
 
   # The shared CI actions' scripts and the dev and host tools (plan X10, X47): every script runs in a scratch folder with a
@@ -528,21 +529,36 @@ jobs:
         with:
           mode: release
 
-  # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a pull request, whichever project it touches.
-  # The apps' own workflows had a copy of this step each; the C23 check of "Paddock itself" skips the history before the rule.
+  # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a change, whichever project it touches.
+  # Only the commits a change adds are linted (scripts/affected.mjs commitLintRange): a pull request since its target
+  # branch, a push `before..sha`, a manual run from the plan's base. Tags and an app's tag gates skip it (ER-15).
   commits:
     name: commit messages
-    if: ${{ github.event_name == 'pull_request' }}
+    needs: [plan]
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
-      # Full history so the range from the target branch can be read.
+      # Full history so the range from the base can be read.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - run: node conformance/bin/paddock-conformance.mjs commit-lint --range "origin/${{ github.base_ref }}..HEAD"
+      - name: Lint the commit messages
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+          BASE_REF: ${{ github.base_ref }}
+          PLAN_BASE: ${{ needs.plan.outputs.base }}
+          INPUT_APP: ${{ inputs.app }}
+        run: |
+          range="$(node scripts/affected.mjs --commit-range)"
+          echo "commit-lint range: $range"
+          if [ "$range" = "skip" ]; then exit 0; fi
+          node conformance/bin/paddock-conformance.mjs commit-lint --range "$range"
 
   # One leg per affected app and operating system (ADR 0014 §6): the app's CI contract (apps/<app>/paddock.ci.json) through
   # the shared app-gates action, only the halves the change reaches (rust, ui). Linux (the paddock-ci image) carries the
