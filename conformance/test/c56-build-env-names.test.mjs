@@ -27,7 +27,8 @@ test('buildInfoProblems: the shared names pass; others, swapped or none fail, wi
 
 test('buildInfoProblems: AppInfo::new may read only the commit name', () => {
   assert.deepEqual(buildInfoProblems(INFO_GOOD), []);
-  assert.deepEqual(buildInfoProblems('AppInfo::new("a", "A", "1", "")'), []);
+  assert.equal(buildInfoProblems('AppInfo::new("a", "A", "1", "")').length, 1, 'no option_env! at all');
+  assert.equal(buildInfoProblems('AppInfo::new(ID, N, V, option_env!("PADDOCK_BUILD_COMMIT").or(option_env!("PADDOCK_BUILD_COMMIT")))').length, 1, 'two reads');
   const bad = buildInfoProblems(INFO_BAD);
   assert.equal(bad.length, 1);
   assert.equal(bad[0].line, 2);
@@ -39,6 +40,12 @@ test('buildInfoProblems: comments, strings and test modules are not looked at', 
   assert.deepEqual(buildInfoProblems('/* .build_info(option_env!("X"), option_env!("Y")) */\n'), []);
   assert.deepEqual(buildInfoProblems('let s = "// .build_info(a)";\n' + GOOD), [], 'a // inside a string opens no comment');
   assert.deepEqual(buildInfoProblems(`${GOOD}#[cfg(test)]\nmod t { fn f() { x.build_info(None, None); } }\n`), []);
+});
+
+test('buildInfoProblems: a leading #[cfg(test)] use hides nothing below it', () => {
+  assert.equal(buildInfoProblems(`#[cfg(test)]\nuse x::y;\n${DYNO}`).length, 1);
+  assert.equal(buildInfoProblems(`#[cfg(test)]\nuse x::{y, z};\n${DYNO}`).length, 1);
+  assert.deepEqual(buildInfoProblems(`${GOOD}#[cfg(test)]\nmod t { fn f() { if a { x.build_info(None, None); } } }\n`), []);
 });
 
 test('C56 from the repo root: an app with its own names is flagged; tests, shared names and non-callers pass', async () => {

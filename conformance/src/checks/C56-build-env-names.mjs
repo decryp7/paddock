@@ -3,10 +3,11 @@
 // PADDOCK_BUILD_DATE, so its About page showed no commit and no date; the shell-demo's `AppInfo::new` commit had the same
 // bug. The names come from the code that sets them (`buildEnv` in conformance/ci/build-env.mjs, in order commit, date).
 // Checked in the production Rust of an app's `src-tauri/` (so it works from the repo root and from one app's folder):
-// `.build_info(` must pass `option_env!` of exactly those two names, and `AppInfo::new(` may read only the commit name.
-// Not looked at: comments, strings, `tests/`, benches and everything from the first `#[cfg(test)]` of a file on (as C45).
+// `.build_info(` must pass `option_env!` of exactly those two names, and `AppInfo::new(` must read exactly the commit name.
+// Not looked at: comments, strings, `tests/`, benches and every `#[cfg(test)]` item (as C45).
 import { buildEnv } from '../../ci/build-env.mjs';
 import { error } from '../finding.mjs';
+import { withoutTestItems } from '../util/rust-test-items.mjs';
 import { maskRust } from './C39-freed-port.mjs';
 
 /** The names build-env sets, in order: [commit, date]. */
@@ -17,11 +18,9 @@ const TEST_FILE = /(^|\/)(?:tests?|benches)(?:\.rs$|\/)/;
 
 /** Problems in the production part of a Rust source: [{ line, message }]. */
 export function buildInfoProblems(source, names = buildEnvNames()) {
-  const mask = maskRust(source);
-  const cut = mask.search(/#\[\s*cfg\s*\(\s*test\s*\)\s*\]/);
-  const end = cut < 0 ? mask.length : cut;
+  const mask = withoutTestItems(maskRust(source));
   const out = [];
-  for (const m of mask.slice(0, end).matchAll(/\.build_info\s*\(|\bAppInfo::new\s*\(/g)) {
+  for (const m of mask.matchAll(/\.build_info\s*\(|\bAppInfo::new\s*\(/g)) {
     let depth = 1;
     let i = m.index + m[0].length;
     const from = i;
@@ -30,11 +29,11 @@ export function buildInfoProblems(source, names = buildEnvNames()) {
     const read = [...source.slice(from, i).matchAll(/option_env!\s*\(\s*"([^"]*)"\s*\)/g)].map((x) => x[1]);
     const line = mask.slice(0, m.index).split('\n').length + (mask[m.index] === '\n' ? 1 : 0);
     const info = m[0].startsWith('.build_info');
-    const ok = info ? read.length === names.length && read.every((n, k) => n === names[k]) : read.every((n) => n === names[0]);
+    const ok = info ? read.length === names.length && read.every((n, k) => n === names[k]) : read.length === 1 && read[0] === names[0];
     if (!ok) {
       out.push({
         line,
-        message: `${info ? '.build_info' : 'AppInfo::new'} reads ${read.length ? read.join(' and ') : 'no option_env! names'}, but build-env sets ${info ? names.join(' and ') : names[0]}: the About page shows no commit${info ? ' or date' : ''}`,
+        message: `${info ? '.build_info' : 'AppInfo::new'} reads ${read.length ? read.join(' and ') : 'no option_env! names'}, but build-env sets ${info ? names.join(' and ') : `exactly ${names[0]}`}: the About page shows no commit${info ? ' or date' : ''}`,
       });
     }
   }
