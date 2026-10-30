@@ -14,7 +14,51 @@ fn options(base: &std::path::Path) -> LaunchOptions {
         .iter()
         .map(|f| f.to_string())
         .collect();
+    o.extra_args.extend(chrome_log_args(
+        std::env::var("PADDOCK_TEST_BROWSER_LOG").ok().as_deref(),
+        base,
+    ));
     o
+}
+
+/// Chrome's own verbose log for CI (`PADDOCK_TEST_BROWSER_LOG`, a folder the job keeps as an artifact): why a helper
+/// process such as the network service started twice is only in there. One file per browser, named after its throwaway
+/// base folder (no leading dot, so the artifact keeps it). Nothing when the variable is unset or empty.
+fn chrome_log_args(dir: Option<&str>, base: &std::path::Path) -> Vec<String> {
+    let Some(dir) = dir.filter(|d| !d.is_empty()) else {
+        return Vec::new();
+    };
+    let dir = std::path::Path::new(dir);
+    let _ = std::fs::create_dir_all(dir);
+    let name = base
+        .file_name()
+        .map_or_else(|| "chrome".into(), |n| n.to_string_lossy().into_owned());
+    vec![
+        "--enable-logging".into(),
+        "--v=1".into(),
+        format!(
+            "--log-file={}",
+            dir.join(format!("chrome-{}.log", name.trim_start_matches('.')))
+                .display()
+        ),
+    ]
+}
+
+#[test]
+fn chrome_logs_only_when_ci_asks_for_them() {
+    let base = std::path::Path::new("/t/.tmpAbc");
+    assert!(chrome_log_args(None, base).is_empty());
+    assert!(chrome_log_args(Some(""), base).is_empty());
+    let dir = tempfile::tempdir().unwrap();
+    let args = chrome_log_args(dir.path().to_str(), base);
+    assert_eq!(&args[..2], ["--enable-logging", "--v=1"]);
+    assert_eq!(
+        args[2],
+        format!(
+            "--log-file={}",
+            dir.path().join("chrome-tmpAbc.log").display()
+        )
+    );
 }
 
 /// Answers one connection like a well-behaved server: reads the whole request head, answers with `answer(path)`, stops
