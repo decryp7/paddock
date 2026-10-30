@@ -236,7 +236,9 @@ for (const theme of ['dark', 'light'] as const) {
         await page.goto(dialogWindowUrl(s.window, {}, { title: 'Settings', query: `?mock-static&mock-fast${s.query ? '&' + s.query : ''}` }));
         await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
         await s.prepare?.(page);
-        await page.clock.runFor(1500);
+        // Long enough for the window's own confirmations ("Checking every week.") to go: no toast in a documentation shot.
+        await page.clock.runFor(12_000);
+        for (const close of await page.getByRole('button', { name: /^(Dismiss|Close notification)/ }).all()) await close.click();
         await page.mouse.move(2, 2);
         await page.waitForTimeout(600);
         if (s.element) {
