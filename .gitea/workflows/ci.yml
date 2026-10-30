@@ -60,6 +60,7 @@ jobs:
       paddock_dev: ${{ steps.plan.outputs.paddock_dev }}
       apps: ${{ steps.plan.outputs.apps }}
       any_app: ${{ steps.plan.outputs.any_app }}
+      base: ${{ steps.plan.outputs.base }}
     steps:
       # The whole history: the base (a merge base, the last green commit of main) can be any older commit.
       - uses: actions/checkout@v4
@@ -528,21 +529,34 @@ jobs:
         with:
           mode: release
 
-  # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a pull request, whichever project it touches.
-  # The apps' own workflows had a copy of this step each; the C23 check of "Paddock itself" skips the history before the rule.
+  # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a change, whichever project it touches.
+  # A pull request lints the commits since its target branch; a push to main or a tag and a manual run lint the commits
+  # from the plan's base (the last green run of main, the `base` input) to HEAD, or just the head commit when there is no
+  # base (older history has commits from before the rule, which the C23 check of "Paddock itself" skips as well).
   commits:
     name: commit messages
-    if: ${{ github.event_name == 'pull_request' }}
+    needs: [plan]
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
-      # Full history so the range from the target branch can be read.
+      # Full history so the range from the base can be read.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - run: node conformance/bin/paddock-conformance.mjs commit-lint --range "origin/${{ github.base_ref }}..HEAD"
+      - name: Lint the commit messages
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          PLAN_BASE: ${{ needs.plan.outputs.base }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then range="origin/${BASE_REF}..HEAD"
+          elif [ -n "$PLAN_BASE" ]; then range="${PLAN_BASE}..HEAD"
+          else range="-1"; fi
+          echo "commit-lint range: $range"
+          node conformance/bin/paddock-conformance.mjs commit-lint --range "$range"
 
   # One leg per affected app and operating system (ADR 0014 §6): the app's CI contract (apps/<app>/paddock.ci.json) through
   # the shared app-gates action, only the halves the change reaches (rust, ui). Linux (the paddock-ci image) carries the

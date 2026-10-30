@@ -907,7 +907,7 @@ export function planFor({ base = null, head = 'HEAD', files = null, all = false,
 }
 
 /** The ci.yml job outputs of a plan (the plan job declares and wires exactly these names; a test checks ci.yml against them). */
-export function ciOutputs(plan, legs) {
+export function ciOutputs(plan, legs, base = null) {
   return {
     crates: plan.crates,
     ui: plan.ui,
@@ -918,6 +918,8 @@ export function ciOutputs(plan, legs) {
     paddock_dev: plan.paddockDev,
     apps: JSON.stringify(legs),
     any_app: legs.length > 0,
+    // The commit lint's range start (empty: no base, only the head commit is linted).
+    base: base ?? '',
   };
 }
 
@@ -978,7 +980,7 @@ async function ci(env, { app = null } = {}) {
     console.log(String(run));
     return;
   }
-  const outputs = ciOutputs(plan, legs);
+  const outputs = ciOutputs(plan, legs, env.PLAN_APP ? null : base);
   if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, Object.entries(outputs).map(([k, v]) => `${k}=${v}\n`).join(''));
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, summary(plan, reason, legs));
 }

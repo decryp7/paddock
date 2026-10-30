@@ -379,6 +379,19 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     assert.equal(ciOutputs({}, []).any_app, false);
     assert.equal(ciOutputs({}, [{ app: 'x' }]).any_app, true);
     assert.equal(ciOutputs({}, [{ app: 'x' }]).apps, '[{"app":"x"}]');
+    assert.equal(ciOutputs({}, [], 'abc123').base, 'abc123');
+    assert.equal(ciOutputs({}, []).base, '', 'no base: the commit lint checks the head commit only');
+  });
+
+  test('ci.yml lints commit messages on pull requests, pushes and manual runs, over the plan base', () => {
+    const ci = readFileSync(join(ROOT, CI_FILE), 'utf8');
+    const job = workflowJobs(ci).jobs.get('commits');
+    assert.ok(job, 'a commits job');
+    assert.match(job, /needs: \[plan\]/);
+    for (const event of ['pull_request', 'push', 'workflow_dispatch']) assert.match(job, new RegExp(`github\\.event_name == '${event}'`), event);
+    assert.match(job, /needs\.plan\.outputs\.base/);
+    assert.match(job, /fetch-depth: 0/);
+    assert.match(job, /commit-lint --range "\$range"/);
   });
 });
 
