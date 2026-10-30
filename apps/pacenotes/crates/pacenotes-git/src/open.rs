@@ -221,7 +221,7 @@ pub fn open(workspace: &Path) -> Result<GixHistory, OpenError> {
         .with(gix::sec::Trust::Reduced)
         .strict_config(false)
         .lossy_config(true)
-        .config_overrides(["core.fsmonitor=false"]);
+        .config_overrides(["core.fsmonitor=false", "core.bigFileThreshold=1073741824"]);
     let repo = gix::ThreadSafeRepository::open_opts(&gitdir, options).map_err(|e| OpenError::Backend(e.to_string()))?;
     Ok(GixHistory::new(repo, root))
 }

@@ -4,15 +4,15 @@
 //!
 //! A repository is hostile input. [`open`] checks that nothing leads out of the workspace (a `.git` file, symlinks,
 //! `commondir`, alternates) and opens gix isolated; the crate never starts a process and never asks gix for a worktree, an
-//! index, a filter, a blob diff or an attribute, so nothing a repository configures (`core.fsmonitor`, `filter.*`,
-//! `diff.*.textconv`, hooks) can run.
+//! index, a filter or an attribute, and reads blobs through a diff only for blame, whose one module builds its own empty attribute
+//! stack (ADR 0004, amendment of C2b), so nothing a repository configures (`core.fsmonitor`, `filter.*`, `diff.*.textconv`, attributes,
+//! hooks) can run or change an answer.
 
-pub mod blame;
+mod blame;
 pub mod churn;
 pub mod history;
 pub mod open;
 
-pub use blame::{Blame, BlameHunk, MAX_BLAME_HUNKS};
 pub use churn::{CommitChanges, FileChurn, HotSpot, churn, rank_hot_spots};
 pub use history::{GixHistory, MAX_LOG_COMMITS};
 pub use open::{OpenError, open};
