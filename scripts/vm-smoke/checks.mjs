@@ -64,8 +64,8 @@ export class Check {
     const left = this.config.processes.flatMap((s) => instancesOf(procs, s, this.bundle));
     const stillThere = async () => { const now = await this.snapshot(); return left.filter((p) => now.some((q) => q.pid === p.pid && q.command === p.command)); };
     const end = async (p, signal) => {
-      const lstart = (await this.g.exec(`ps -o lstart= -p ${p.pid}`)).stdout.trim();
-      await this.g.exec(`[ "$(ps -o lstart= -p ${p.pid})" = ${sq(lstart)} ] && ps -p ${p.pid} -o command= | grep -qxF -- ${sq(p.command)} && kill ${signal} ${p.pid}`);
+      if (!p.lstart) return; // no recorded start time: the identity cannot be checked, so nothing is ended
+      await this.g.exec(`[ "$(ps -o lstart= -p ${p.pid})" = ${sq(p.lstart)} ] && ps -p ${p.pid} -o command= | grep -qxF -- ${sq(p.command)} && kill ${signal} ${p.pid}`);
     };
     for (const p of left) await end(p, '-TERM');
     // An agent that ignores TERM (the orphan of the 7207 run did) is ended with KILL, after the same identity check.
