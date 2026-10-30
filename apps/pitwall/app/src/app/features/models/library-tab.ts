@@ -2,9 +2,10 @@ import { CdkConnectedOverlay, CdkOverlayOrigin } from '@angular/cdk/overlay';
 import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { LocalModel } from '../../core/api.types';
-import { ago, bytes, date, seconds, slotsText } from '../../shared/format';
+import { ago, bytes, bytesIn, bytesUnit, date, seconds, slotsText, varies } from '../../shared/format';
 import { CAPABILITY_ICON, CAPABILITY_LABEL, UPDATE_KIND_LABEL, fitLook } from '../../shared/labels';
 import { Confirm } from '../../shared/ui/confirm';
 import { DetailPanel } from '../../shared/ui/detail-panel';
@@ -43,7 +44,7 @@ export function contextText(tokens: number | null): string {
 /** The local library: disk usage with clean-up, and every model with load, pin, idle override and delete. */
 @Component({
   selector: 'pw-library-tab',
-  imports: [MatButton, MatIconButton, MatIconModule, MatTooltipModule, CdkConnectedOverlay, CdkOverlayOrigin, Panel, SuEmptyState, SlotsPanel, DetailPanel, Fact, ItemsMenu, MoreButton, RowMenu, PdSelect],
+  imports: [MatButton, MatIconButton, MatIconModule, MatTableModule, MatTooltipModule, CdkConnectedOverlay, CdkOverlayOrigin, Panel, SuEmptyState, SlotsPanel, DetailPanel, Fact, ItemsMenu, MoreButton, RowMenu, PdSelect],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel heading="Disk" icon="disk" [loading]="store.loading()" [error]="store.disk() ? null : store.error()" [ready]="!!store.disk()" [skeletonLines]="2" (retry)="store.load()">
@@ -80,70 +81,75 @@ export function contextText(tokens: number | null): string {
           <div class="toolbar">{{ summary() }}</div>
           <pw-items-menu #rowMenu label="Model actions" />
           <div class="scroll">
-            <table class="table">
-              <thead>
-                <tr>
-                  <th scope="col">Model</th>
-                  <th scope="col" class="right col-size">Size</th>
-                  <th scope="col" class="right col-params">Params</th>
-                  <th scope="col" class="right col-ctx">Context</th>
-                  <th scope="col">Status</th>
-                  <th scope="col" class="act"><span class="sr-only">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (m of store.library(); track m.id) {
-                  <tr
-                    tabindex="0"
-                    [id]="'row-' + m.id"
-                    [class.selected]="selectedId() === m.id"
-                    [attr.aria-selected]="selectedId() === m.id"
-                    (click)="onRowClick(m, $event)"
-                    (keydown)="onRowKey(m, $event)"
-                    pwRowMenu
-                    [matContextMenuTriggerFor]="rowMenu.menu()"
-                    [matContextMenuTriggerData]="{ items: menuItems(m) }"
-                  >
-                    <td class="model">
-                      <span class="line">
-                        <span class="name" [matTooltip]="m.name" matTooltipShowDelay="600">{{ m.name }}</span>
-                        <span class="glyphs">
-                          @for (c of m.capabilities; track c) {
-                            <mat-icon [svgIcon]="'pw:' + glyph[c]" role="img" [attr.aria-label]="capability[c]" [matTooltip]="capability[c]" />
-                          }
-                          @if (updates.noticesFor()(m.id).length) {
-                            <mat-icon class="upd" svgIcon="pw:download" role="img" [attr.aria-label]="'Update available for ' + m.name" [matTooltip]="'Update available: ' + updateKind[updates.noticesFor()(m.id)[0]!.kind]" />
-                          }
-                        </span>
-                      </span>
-                      <span class="repo" [matTooltip]="m.repo" matTooltipShowDelay="600">{{ m.repo }}</span>
-                    </td>
-                    <td class="right num col-size">{{ size(m.sizeBytes) }}</td>
-                    <td class="right num col-params">{{ params(m.paramsB) }}</td>
-                    <td class="right num col-ctx">{{ ctx(m.contextMax) }}</td>
-                    <td>
-                      @if (m.loaded) {
-                        <span class="status" data-tone="ok">Loaded</span>
-                      } @else {
-                        <span class="status" [attr.data-tone]="fit(m).tone" [matTooltip]="m.fit.message">{{ fit(m).label }}</span>
+            <table mat-table [dataSource]="store.library()" [trackBy]="byId" [fixedLayout]="true" aria-label="Models in the library">
+              <ng-container matColumnDef="model">
+                <th mat-header-cell *matHeaderCellDef scope="col">Model</th>
+                <td mat-cell *matCellDef="let row" class="model">
+                  @let m = asModel(row);
+                  <span class="line">
+                    <span class="name" [matTooltip]="m.name" matTooltipShowDelay="600">{{ m.name }}</span>
+                    <span class="glyphs">
+                      @for (c of m.capabilities; track c) {
+                        <mat-icon [svgIcon]="'pw:' + glyph[c]" role="img" [attr.aria-label]="capability[c]" [matTooltip]="capability[c]" />
                       }
-                      @if (m.pinned) {
-                        <mat-icon class="pinned" svgIcon="pw:pin" role="img" aria-label="Pinned" matTooltip="Pinned: never released automatically" />
+                      @if (updates.noticesFor()(m.id).length) {
+                        <mat-icon class="upd" svgIcon="pw:download" role="img" [attr.aria-label]="'Update available for ' + m.name" [matTooltip]="'Update available: ' + updateKind[updates.noticesFor()(m.id)[0]!.kind]" />
                       }
-                    </td>
-                    <td class="act">
-                      <span class="row-actions">
-                        @if (m.loaded) {
-                          <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()('model:' + m.id)" (click)="store.unloadModel(m.id)" [attr.aria-label]="'Unload ' + m.name" matTooltip="Unload"><mat-icon svgIcon="pw:release" aria-hidden="true" /></button>
-                        } @else {
-                          <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()('model:' + m.id) || m.fit.verdict === 'wontFit'" (click)="store.loadModel(m.id)" [attr.aria-label]="'Load ' + m.name" matTooltip="Load"><mat-icon svgIcon="pw:play" aria-hidden="true" /></button>
-                        }
-                        <pw-more-button [menu]="rowMenu.menu()" [items]="menuItems(m)" [label]="'More actions for ' + m.name" />
-                      </span>
-                    </td>
-                  </tr>
-                }
-              </tbody>
+                    </span>
+                  </span>
+                  <span class="repo" [matTooltip]="m.repo" matTooltipShowDelay="600">{{ m.repo }}</span>
+                </td>
+              </ng-container>
+              <ng-container matColumnDef="size">
+                <th mat-header-cell *matHeaderCellDef scope="col" class="right">Size {{ sizeUnit() }}</th>
+                <td mat-cell *matCellDef="let m" class="right num">{{ sizeIn(m.sizeBytes, sizeUnit()) }}</td>
+              </ng-container>
+              <ng-container matColumnDef="params">
+                <th mat-header-cell *matHeaderCellDef scope="col" class="right">Params</th>
+                <td mat-cell *matCellDef="let m" class="right num">{{ params(m.paramsB) }}</td>
+              </ng-container>
+              <ng-container matColumnDef="context">
+                <th mat-header-cell *matHeaderCellDef scope="col" class="right">Context tokens</th>
+                <td mat-cell *matCellDef="let m" class="right num">{{ ctx(m.contextMax) }}</td>
+              </ng-container>
+              <ng-container matColumnDef="status">
+                <th mat-header-cell *matHeaderCellDef scope="col">Status</th>
+                <td mat-cell *matCellDef="let m">
+                  @if (m.loaded) {
+                    <span class="status" data-tone="ok">Loaded</span>
+                  } @else {
+                    <span class="status" [attr.data-tone]="fit(m).tone" [matTooltip]="m.fit.message">{{ fit(m).label }}</span>
+                  }
+                  @if (m.pinned) {
+                    <mat-icon class="pinned" svgIcon="pw:pin" role="img" aria-label="Pinned" matTooltip="Pinned: never released automatically" />
+                  }
+                </td>
+              </ng-container>
+              <ng-container matColumnDef="act">
+                <th mat-header-cell *matHeaderCellDef scope="col" class="act"><span class="sr-only">Actions</span></th>
+                <td mat-cell *matCellDef="let m" class="act">
+                  @if (m.loaded) {
+                    <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()('model:' + m.id)" (click)="store.unloadModel(m.id)" [attr.aria-label]="'Unload ' + m.name" matTooltip="Unload"><mat-icon svgIcon="pw:release" aria-hidden="true" /></button>
+                  } @else {
+                    <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()('model:' + m.id) || m.fit.verdict === 'wontFit'" (click)="store.loadModel(m.id)" [attr.aria-label]="'Load ' + m.name" matTooltip="Load"><mat-icon svgIcon="pw:play" aria-hidden="true" /></button>
+                  }
+                  <pw-more-button [menu]="rowMenu.menu()" [items]="menuItems(m)" [label]="'More actions for ' + m.name" />
+                </td>
+              </ng-container>
+              <tr mat-header-row *matHeaderRowDef="columns(); sticky: true"></tr>
+              <tr
+                mat-row
+                *matRowDef="let m; columns: columns()"
+                tabindex="0"
+                [id]="'row-' + m.id"
+                [class.selected]="selectedId() === m.id"
+                [attr.aria-selected]="selectedId() === m.id"
+                (click)="onRowClick(m, $event)"
+                (keydown)="onRowKey(m, $event)"
+                pwRowMenu
+                [matContextMenuTriggerFor]="rowMenu.menu()"
+                [matContextMenuTriggerData]="{ items: menuItems(m) }"
+              ></tr>
             </table>
           </div>
         }
@@ -311,64 +317,40 @@ export function contextText(tokens: number | null): string {
       color: var(--pd-text-muted);
       border-bottom: 1px solid var(--pd-hairline);
     }
+    /* The list's width (the detail panel open, a small window) decides which columns it keeps. */
     .scroll {
       container-type: inline-size;
-      overflow-x: auto;
-      /* The last row's selected or hover background must not square off the panel's rounded corners. */
-      border-radius: 0 0 calc(var(--pd-radius-card) - 1px) calc(var(--pd-radius-card) - 1px);
     }
-    /* A narrow list (the detail panel is open, or a small window) drops the columns the panel repeats. */
+    .mat-column-size {
+      width: 80px;
+    }
+    .mat-column-params {
+      width: 72px;
+    }
+    .mat-column-context {
+      width: 112px;
+    }
+    .mat-column-status {
+      width: 132px;
+    }
+    /* Load or unload and the "..." button, with the cell's padding. */
+    .mat-column-act {
+      width: 92px;
+    }
+    /* A narrow list drops the columns the detail panel repeats. */
     @container (max-width: 640px) {
-      .col-params,
-      .col-ctx {
+      .mat-column-params,
+      .mat-column-context {
         display: none;
       }
     }
     @container (max-width: 500px) {
-      .col-size {
+      .mat-column-size {
         display: none;
       }
     }
-    /* The action column stays in view whatever the width, so the row actions never clip. */
-    .table th.act,
-    .table td.act {
-      position: sticky;
-      right: 0;
-      z-index: 2;
-      width: 1%;
-      background: var(--pd-surface-1);
-      box-shadow: -10px 0 8px -8px color-mix(in srgb, var(--pd-text) 14%, transparent);
-    }
-    /* The action column's header cell sticks both ways (the corner, 4): above the header row (3) and the action cells (2). */
-    .table th.act {
-      z-index: 4;
-    }
-    .table tr:hover td.act {
-      background: color-mix(in srgb, var(--pd-surface-1) 94%, var(--pd-text));
-    }
-    .table tr.selected td.act {
-      background: color-mix(in srgb, var(--pd-surface-1) 90%, var(--pd-accent));
-    }
-    .table th:first-child,
-    .table td:first-child {
-      padding-left: var(--pd-space-4);
-    }
-    .table th:last-child,
-    .table td:last-child {
-      padding-right: var(--pd-space-3);
-    }
-    .table td {
-      height: 48px;
-    }
-    .table td.act {
-      min-width: 72px;
-    }
-    .model {
-      width: 100%;
-      max-width: 0;
-      min-width: 180px;
-      overflow: hidden;
-      text-overflow: ellipsis;
+    table {
+      --mat-table-row-item-container-height: 48px;
     }
     .line {
       display: flex;
@@ -497,6 +479,18 @@ export class LibraryTab {
     const loaded = lib.filter((m) => m.loaded).length;
     return `${lib.length} models · ${loaded} loaded`;
   });
+
+  /** The columns that say something: parameters and context only when they differ between models (UI review 2 rule 7). */
+  protected readonly columns = computed(() => {
+    const lib = this.store.library();
+    return ['model', 'size', ...(varies(lib, (m) => m.paramsB) ? ['params'] : []), ...(varies(lib, (m) => m.contextMax) ? ['context'] : []), 'status', 'act'];
+  });
+  /** The Size column's unit, in its header. */
+  protected readonly sizeUnit = computed(() => bytesUnit(this.store.library().map((m) => m.sizeBytes)));
+  protected readonly sizeIn = bytesIn;
+  protected readonly byId = (_: number, m: LocalModel) => m.id;
+  /** Material's cell templates are untyped: the row as the model it is. */
+  protected readonly asModel = (row: LocalModel) => row;
 
   protected readonly segments = computed(() => {
     const d = this.store.disk();

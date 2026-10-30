@@ -2,19 +2,21 @@ import { Dialog } from '@angular/cdk/dialog';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTableModule } from '@angular/material/table';
 import { SuEmptyState } from '@decryp7/paddock-ui';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import type { AppInfo, AppPermissions } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
-import { ago, compact, date, duration, int } from '../../shared/format';
+import { ago, compact, date, duration, int, varies } from '../../shared/format';
 import { cacheHitRateText } from '../usage/usage-format';
 import { injectNow } from '../../shared/now';
 import { Confirm } from '../../shared/ui/confirm';
 import { AppAvatar } from '../../shared/ui/app-avatar';
 import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
 import { Panel } from '../../shared/ui/panel';
+import { moveRowFocus } from '../../shared/ui/row-nav';
 import { limitsText } from '../dashboard/apps-card';
 import { groupCode, permissionSummary } from '../dashboard/pairing-card';
 import { AppsStore } from './apps.store';
@@ -26,7 +28,7 @@ import { PermissionsEditor } from './permissions-editor';
 /** Apps & keys: who may use Pitwall, with which models and how much, their keys and pending pairings. */
 @Component({
   selector: 'pw-apps-page',
-  imports: [MatButton, MatIconModule, MatTooltipModule, Panel, SuEmptyState, PermissionsEditor, AppUsage, AppAvatar, ItemsMenu, MoreButton, RowMenu],
+  imports: [MatButton, MatIconModule, MatTableModule, MatTooltipModule, Panel, SuEmptyState, PermissionsEditor, AppUsage, AppAvatar, ItemsMenu, MoreButton, RowMenu],
   providers: [AppsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -136,26 +138,25 @@ import { PermissionsEditor } from './permissions-editor';
                 @if (a.keys.length === 0) {
                   <pd-empty-state heading="No keys" [description]="a.name + ' cannot call Pitwall until it has a key or pairs again.'"><mat-icon slot="icon" svgIcon="pw:key" aria-hidden="true" /></pd-empty-state>
                 } @else {
-                  <table class="table keys fit">
-                    <colgroup><col /><col class="c-day" /><col class="c-day" /><col class="c-act" /></colgroup>
-                    <thead>
-                      <tr>
-                        <th scope="col">Key</th>
-                        <th scope="col">Created</th>
-                        <th scope="col">Last used</th>
-                        <th scope="col"><span class="sr-only">Actions</span></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (k of a.keys; track k.id) {
-                        <tr tabindex="0" pwRowMenu [matContextMenuTriggerFor]="keyMenuPanel.menu()" [matContextMenuTriggerData]="{ items: keyMenu(a, k) }">
-                          <td><span class="mono prefix">{{ k.prefix }}</span></td>
-                          <td class="muted">{{ day(k.createdAt) }}</td>
-                          <td class="muted">{{ when(k.lastUsedAt, now()) }}</td>
-                          <td class="right"><pw-more-button [menu]="keyMenuPanel.menu()" [items]="keyMenu(a, k)" [label]="'More actions for key ' + k.prefix" /></td>
-                        </tr>
-                      }
-                    </tbody>
+                  <table mat-table class="keys" [dataSource]="a.keys" [trackBy]="byKeyId" [fixedLayout]="true" [attr.aria-label]="'Keys of ' + a.name">
+                    <ng-container matColumnDef="key">
+                      <th mat-header-cell *matHeaderCellDef scope="col">Key</th>
+                      <td mat-cell *matCellDef="let k" [matTooltip]="k.prefix" matTooltipShowDelay="600"><span class="mono prefix">{{ k.prefix }}</span></td>
+                    </ng-container>
+                    <ng-container matColumnDef="created">
+                      <th mat-header-cell *matHeaderCellDef scope="col" class="right">Created</th>
+                      <td mat-cell *matCellDef="let k" class="right muted">{{ day(k.createdAt) }}</td>
+                    </ng-container>
+                    <ng-container matColumnDef="used">
+                      <th mat-header-cell *matHeaderCellDef scope="col" class="right">Last used</th>
+                      <td mat-cell *matCellDef="let k" class="right muted">{{ when(k.lastUsedAt, now()) }}</td>
+                    </ng-container>
+                    <ng-container matColumnDef="act">
+                      <th mat-header-cell *matHeaderCellDef scope="col" class="act"><span class="sr-only">Actions</span></th>
+                      <td mat-cell *matCellDef="let k" class="act"><pw-more-button [menu]="keyMenuPanel.menu()" [items]="keyMenu(a, k)" [label]="'More actions for key ' + k.prefix" /></td>
+                    </ng-container>
+                    <tr mat-header-row *matHeaderRowDef="keyColumns(a); sticky: true"></tr>
+                    <tr mat-row *matRowDef="let k; columns: keyColumns(a)" tabindex="0" (keydown)="onKeyRowKey($event)" pwRowMenu [matContextMenuTriggerFor]="keyMenuPanel.menu()" [matContextMenuTriggerData]="{ items: keyMenu(a, k) }"></tr>
                   </table>
                 }
               </pw-panel>
@@ -239,11 +240,12 @@ import { PermissionsEditor } from './permissions-editor';
       }
     }
     .keys {
-      .c-day {
+      .mat-column-created,
+      .mat-column-used {
         width: 112px;
       }
       /* The "..." button with the cell's padding. */
-      .c-act {
+      .mat-column-act {
         width: 56px;
       }
     }
@@ -394,12 +396,8 @@ import { PermissionsEditor } from './permissions-editor';
     }
     .keys {
       margin-top: var(--pd-space-2);
-      th:first-child,
-      td:first-child {
-        padding-left: var(--pd-space-4);
-      }
-      th:last-child,
-      td:last-child {
+      .mat-mdc-header-cell:last-child,
+      .mat-mdc-cell:last-child {
         padding-right: var(--pd-space-4);
       }
     }
@@ -443,6 +441,17 @@ export class AppsPage implements OnInit {
       { label: 'Create key', run: () => void this.createKey(a), disabled: this.store.isBusy('app:' + a.id) },
       { label: 'Delete app…', run: () => void this.remove(a), danger: true, divider: true, disabled: this.store.isBusy('app:' + a.id) },
     ];
+  }
+
+  /** The keys table's columns: a date column only when the keys differ in it (UI review 2 rule 7). */
+  protected keyColumns(a: AppInfo): string[] {
+    const keys = a.keys;
+    return ['key', ...(varies(keys, (k) => this.day(k.createdAt)) ? ['created'] : []), ...(varies(keys, (k) => this.when(k.lastUsedAt, this.now())) ? ['used'] : []), 'act'];
+  }
+  protected readonly byKeyId = (_: number, k: AppInfo['keys'][number]) => k.id;
+
+  protected onKeyRowKey(e: KeyboardEvent): void {
+    if (e.target === e.currentTarget) moveRowFocus(e);
   }
 
   /** Revoke is only in the key's menu, in danger text, and names the key. */

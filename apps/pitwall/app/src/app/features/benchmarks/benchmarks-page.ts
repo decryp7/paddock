@@ -78,7 +78,7 @@ import { SuEmptyState } from '@decryp7/paddock-ui';
         @if (store.results().length === 0) {
           <pd-empty-state heading="No runs yet"><mat-icon slot="icon" svgIcon="pw:benchmarks" aria-hidden="true" /></pd-empty-state>
         } @else {
-          <table mat-table class="table fit" [dataSource]="store.sorted()" [fixedLayout]="true">
+          <table mat-table class="results" [dataSource]="store.sorted()" [fixedLayout]="true">
             <caption class="sr-only">Benchmark results, newest first</caption>
             <colgroup>
               <col /><col /><col class="c-gen" /><col class="c-prompt" /><col class="c-n" />
@@ -108,7 +108,7 @@ import { SuEmptyState } from '@decryp7/paddock-ui';
               <td mat-cell *matCellDef="let r" class="right num">{{ intText(r.ttftMs) }}</td>
             </ng-container>
             <ng-container matColumnDef="context">
-              <th mat-header-cell *matHeaderCellDef scope="col" class="right">Context</th>
+              <th mat-header-cell *matHeaderCellDef scope="col" class="right">Context tokens</th>
               <td mat-cell *matCellDef="let r" class="right num">{{ intText(r.contextTokens) }}</td>
             </ng-container>
             <ng-container matColumnDef="when">
@@ -204,21 +204,17 @@ import { SuEmptyState } from '@decryp7/paddock-ui';
         opacity: 1;
       }
     }
-    .table {
+    .results {
       margin-top: var(--pd-space-3);
-      th:first-child,
-      td:first-child {
-        padding-left: var(--pd-space-4);
-      }
-      th:last-child,
-      td:last-child {
+      .mat-mdc-header-cell:last-child,
+      .mat-mdc-cell:last-child {
         padding-right: var(--pd-space-4);
       }
     }
     .strong {
       font-weight: var(--pd-weight-medium);
     }
-    .table b {
+    .results b {
       font-weight: var(--pd-weight-semibold);
     }
     .build,
