@@ -25,7 +25,7 @@ import { MatButton } from '@angular/material/button';
           <span class="status" data-testid="service-pill" [attr.data-tone]="tone(sv)">{{ pill(sv) }}</span>
         </div>
         <div class="row">
-          <div class="lbl"><span class="name">{{ sv.installed ? 'Remove the service' : 'Run in the background' }}</span><p class="hint">{{ serviceHint(sv.platform) }}</p></div>
+          <div class="lbl"><span class="name">{{ sv.installed ? 'Remove the service' : 'Run in the background' }}</span><p class="hint" data-testid="service-action-hint">{{ sv.installed ? removeHint(sv.platform) : serviceHint(sv.platform) }}</p></div>
           @if (sv.installed) {
             <button type="button" matButton="outlined" [disabled]="service.isBusy()('uninstall')" (click)="service.uninstall()">{{ service.isBusy()('uninstall') ? 'Removing…' : 'Remove service' }}</button>
           } @else if (!sv.disabledInLoginItems) {
@@ -60,7 +60,7 @@ import { MatButton } from '@angular/material/button';
       min-width: 0;
     }
     pw-panel {
-      scroll-margin-top: var(--pd-space-6);
+      scroll-margin-top: var(--pd-space-3);
     }
     .row {
       display: flex;
@@ -75,7 +75,14 @@ import { MatButton } from '@angular/material/button';
         padding-top: 0;
       }
     }
+    /* An action keeps its label on one line; the text beside it wraps instead. */
+    .row button {
+      flex: none;
+      min-width: 128px;
+      white-space: nowrap;
+    }
     .lbl {
+      flex: 1 1 auto;
       min-width: 0;
       .name {
         display: block;
@@ -102,6 +109,12 @@ export class ServicePanel {
 
   protected serviceHint(platform: string): string {
     return consentDetail(platform);
+  }
+
+  /** What removing does, in the platform's words: the server stops running in the background; models and settings stay. */
+  protected removeHint(platform: string): string {
+    const what = platform === 'windows' ? 'Windows service' : platform === 'macos' ? 'login item' : 'systemd user service';
+    return `Removes the ${what}: Pitwall's server stops running in the background, and apps can reach it only while Pitwall is open. Your models and settings stay.`;
   }
 
   protected pill(sv: { installed: boolean; running: boolean; disabledInLoginItems: boolean; startFailed: boolean; notInLoginItems: boolean }): string {

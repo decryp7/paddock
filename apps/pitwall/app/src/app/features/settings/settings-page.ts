@@ -1,6 +1,5 @@
-import { ChangeDetectionStrategy, Component, InjectionToken, OnInit, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DOCUMENT, DestroyRef, InjectionToken, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { MatButton, MatIconButton } from '@angular/material/button';
-import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
 import { PdNotificationHost } from '@decryp7/paddock-ui/shell/notify';
 import { MatFormField, MatSuffix } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
@@ -34,12 +33,11 @@ const PRESETS: Exclude<Preset, 'custom'>[] = ['lowMemory', 'balanced', 'performa
  */
 export const OWN_TOAST_HOST = new InjectionToken<boolean>('PitwallOwnToastHost', { factory: () => false });
 
-/** A number from a number input, clamped to `[min, max]`, or null when it is empty or not a number. */
-export function parseNumber(value: string, min = -Infinity, max = Infinity): number | null {
-  if (value.trim() === '') return null;
-  const n = Number(value);
-  if (!Number.isFinite(n)) return null;
-  return Math.min(max, Math.max(min, n));
+/** A number typed into a number field, or what to fix when it is empty, not a number or outside `[min, max]`. */
+export function checkNumber(value: string, min: number, max: number): { ok: true; value: number } | { ok: false; error: string } {
+  const n = value.trim() === '' ? NaN : Number(value);
+  if (!Number.isFinite(n) || n < min || n > max) return { ok: false, error: `Enter a number from ${min} to ${max}.` };
+  return { ok: true, value: n };
 }
 
 /**
@@ -48,7 +46,7 @@ export function parseNumber(value: string, min = -Infinity, max = Infinity): num
  */
 @Component({
   selector: 'pw-settings-page',
-  imports: [MatButton, MatIconButton, MatButtonToggleGroup, MatButtonToggle, MatFormField, MatInput, MatSuffix, MatIconModule, MatSlideToggleModule, MatTooltipModule, Panel, PdSelect, ServicePanel, PdNotificationHost],
+  imports: [MatButton, MatIconButton, MatFormField, MatInput, MatSuffix, MatIconModule, MatSlideToggleModule, MatTooltipModule, Panel, PdSelect, ServicePanel, PdNotificationHost],
   providers: [SettingsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './settings-page.html',
@@ -73,16 +71,55 @@ export class SettingsPage implements OnInit {
     { id: 'embeddings', title: 'Embeddings', noun: 'cached embedding', about: 'Vectors for text your apps embed. The same text and model always give the same vector.', ttlHint: 'Counted since the entry was last used, so what you keep using stays.' },
     { id: 'responses', title: 'Cached answers', noun: 'saved answer', about: 'Answers to deterministic requests from apps and presets that opted in (Apps & keys, Models ▸ Presets).', ttlHint: 'Counted from when the answer was stored, so old answers do not outlive a model update for long.' },
   ];
-  protected readonly presets = PRESETS;
-  protected readonly presetLabel = PRESET_LABEL;
-  protected readonly presetHint = PRESET_HINT;
+  /** The memory presets; Custom is what the values below make when they differ from every preset (never chosen here). */
+  protected readonly presetOptions: PdSelectOption[] = [...PRESETS.map((p) => ({ value: p, label: PRESET_LABEL[p] })), { value: 'custom', label: PRESET_LABEL.custom, disabled: true }];
+  protected presetHint(p: Preset): string {
+    return p === 'custom' ? 'Your own values below. Choose a preset to replace them.' : `${PRESET_HINT[p]}.`;
+  }
   protected readonly quitOptions: { value: OnQuit; label: string }[] = [
-    { value: 'keepServing', label: 'Keep serving in the background' },
+    { value: 'keepServing', label: 'Keep serving' },
     { value: 'stopServing', label: 'Stop serving' },
     { value: 'ask', label: 'Ask each time' },
   ];
+  protected readonly capOptions: PdSelectOption[] = [
+    { value: 'fits', label: 'What fits' },
+    { value: 'limit', label: 'Set a limit' },
+  ];
+  protected readonly promptCacheOptions: PdSelectOption[] = [
+    { value: 'auto', label: 'Automatic' },
+    { value: 'size', label: 'Set a size' },
+  ];
+  protected readonly storageOptions: PdSelectOption[] = [
+    { value: 'disk', label: 'On disk' },
+    { value: 'memory', label: 'Memory only' },
+  ];
   protected readonly d = computed(() => this.store.draft());
   protected readonly lan = computed(() => this.live.server()?.lan ?? null);
+  /** What to fix in a number field (by the input's id) whose value was not taken. */
+  protected readonly fieldErrors = signal<Readonly<Record<string, string>>>({});
+
+  constructor() {
+    // Settings save themselves: an edit still waiting is saved when the page goes away or its window hides or closes.
+    const doc = inject(DOCUMENT);
+    const flush = () => void this.store.flush();
+    const onHidden = () => doc.visibilityState === 'hidden' && flush();
+    doc.defaultView?.addEventListener('pagehide', flush);
+    doc.addEventListener('visibilitychange', onHidden);
+    inject(DestroyRef).onDestroy(() => {
+      doc.defaultView?.removeEventListener('pagehide', flush);
+      doc.removeEventListener('visibilitychange', onHidden);
+      flush();
+    });
+    // A saved port or network setting changes the address shown: read the overview again.
+    let last: string | null = null;
+    effect(() => {
+      const s = this.store.saved();
+      if (!s) return;
+      const key = JSON.stringify([s.server.port, s.network]);
+      if (last !== null && key !== last) untracked(() => void this.live.loadOverview());
+      last = key;
+    });
+  }
 
   ngOnInit(): void {
     void this.service.refresh();
@@ -94,10 +131,25 @@ export class SettingsPage implements OnInit {
     this.live.connect();
   }
 
-  /** Saves, then reads the overview again: a new port or network setting changes the address shown. */
-  protected async save(): Promise<void> {
-    await this.store.save();
-    if (!this.store.dirty()) void this.live.loadOverview();
+  protected fieldError(id: string): string | null {
+    return this.fieldErrors()[id] ?? null;
+  }
+
+  /** Takes a number field's value when it is valid, or says inline what to fix (and saves nothing for it). */
+  private num(id: string, v: string, min: number, max: number, apply: (n: number) => void): void {
+    const r = checkNumber(v, min, max);
+    this.fieldErrors.update((all) => {
+      const { [id]: _gone, ...rest } = all;
+      return r.ok ? rest : { ...rest, [id]: r.error };
+    });
+    if (r.ok) apply(r.value);
+  }
+
+  protected setPreset(v: string): void {
+    if (v === 'lowMemory' || v === 'balanced' || v === 'performance') void this.store.applyPreset(v);
+  }
+  protected setOnQuit(v: string): void {
+    if (v === 'keepServing' || v === 'stopServing' || v === 'ask') this.store.edit('general', { onQuit: v });
   }
 
   protected value(e: Event): string {
@@ -117,53 +169,43 @@ export class SettingsPage implements OnInit {
   }
 
   protected setPort(v: string): void {
-    const n = parseNumber(v, 1, 65535);
-    if (n !== null) this.store.edit('server', { port: Math.round(n) });
+    this.num('srv-port', v, 1024, 65535, (n) => this.store.edit('server', { port: Math.round(n) }));
   }
   protected setMaxRequest(v: string): void {
-    const n = parseNumber(v, 1, 4096);
-    if (n !== null) this.store.edit('server', { maxRequestBytes: Math.round(n) * MB });
+    this.num('srv-max', v, 1, 4096, (n) => this.store.edit('server', { maxRequestBytes: Math.round(n) * MB }));
   }
   protected setTimeoutSecs(v: string): void {
-    const n = parseNumber(v, 5, 86_400);
-    if (n !== null) this.store.edit('server', { requestTimeoutSecs: Math.round(n) });
+    this.num('srv-timeout', v, 5, 86_400, (n) => this.store.edit('server', { requestTimeoutSecs: Math.round(n) }));
   }
   protected setMaxConcurrent(v: string): void {
-    const n = parseNumber(v, 1, 64);
-    if (n !== null) this.store.edit('server', { maxConcurrent: Math.round(n) });
+    this.num('srv-conc', v, 1, 64, (n) => this.store.edit('server', { maxConcurrent: Math.round(n) }));
   }
   protected setIdleMinutes(key: 'idleUnloadSecs' | 'deepIdleSecs', v: string): void {
-    const n = parseNumber(v, 0.5, 1440);
-    if (n === null) return;
-    const secs = Math.round(n * 60);
-    this.store.edit('memory', key === 'idleUnloadSecs' ? { idleUnloadSecs: secs } : { deepIdleSecs: secs });
+    this.num(key === 'idleUnloadSecs' ? 'mem-idle' : 'mem-deep', v, 0.5, 1440, (n) => {
+      const secs = Math.round(n * 60);
+      this.store.edit('memory', key === 'idleUnloadSecs' ? { idleUnloadSecs: secs } : { deepIdleSecs: secs });
+    });
   }
   protected setPressure(v: string): void {
-    const n = parseNumber(v, 1, 90);
-    if (n !== null) this.store.edit('memory', { pressureAvailablePercent: Math.round(n) });
+    this.num('mem-pressure', v, 1, 90, (n) => this.store.edit('memory', { pressureAvailablePercent: Math.round(n) }));
   }
   protected setMinFree(v: string): void {
-    const n = parseNumber(v, 0, 1024);
-    if (n !== null) this.store.edit('memory', { minFreeBytes: Math.round(n * GB) });
+    this.num('mem-min', v, 0, 1024, (n) => this.store.edit('memory', { minFreeBytes: Math.round(n * GB) }));
   }
   protected setMaxHot(v: string): void {
-    const n = parseNumber(v, 1, 16);
-    if (n !== null) this.store.edit('memory', { maxHotModels: Math.round(n) });
+    this.num('mem-hot', v, 1, 16, (n) => this.store.edit('memory', { maxHotModels: Math.round(n) }));
   }
   protected setHotCap(v: string): void {
-    const n = parseNumber(v, 1, 1024);
-    if (n !== null) this.store.edit('memory', { hotCapBytes: Math.round(n * GB) });
+    this.num('mem-cap', v, 1, 1024, (n) => this.store.edit('memory', { hotCapBytes: Math.round(n * GB) }));
   }
-  protected setCapMode(fits: boolean): void {
-    this.store.edit('memory', { hotCapBytes: fits ? null : 16 * GB });
+  protected setCapMode(v: string): void {
+    this.store.edit('memory', { hotCapBytes: v === 'fits' ? null : 16 * GB });
   }
   protected setLanPort(v: string): void {
-    const n = parseNumber(v, 1024, 65535);
-    if (n !== null) this.store.edit('network', { lanPort: Math.round(n) });
+    this.num('net-port', v, 1024, 65535, (n) => this.store.edit('network', { lanPort: Math.round(n) }));
   }
   protected setRetention(v: string): void {
-    const n = parseNumber(v, 1, 365);
-    if (n !== null) this.store.edit('privacy', { metricsRetentionDays: Math.round(n) });
+    this.num('prv-ret', v, 1, 365, (n) => this.store.edit('privacy', { metricsRetentionDays: Math.round(n) }));
   }
 
   protected storage(k: 'embeddings' | 'responses'): CacheStorage {
@@ -188,27 +230,25 @@ export class SettingsPage implements OnInit {
   protected ttlChoices(k: 'embeddings' | 'responses') {
     return ttlOptions(this.ttl(k), k === 'embeddings');
   }
-  protected setStorage(k: 'embeddings' | 'responses', v: CacheStorage): void {
+  protected setStorage(k: 'embeddings' | 'responses', v: string): void {
+    if (v !== 'disk' && v !== 'memory') return;
     this.store.edit('cache', k === 'embeddings' ? { embeddingsStorage: v } : { responsesStorage: v });
   }
   protected setMaxMib(k: 'embeddings' | 'responses', v: string): void {
-    const n = parseNumber(v, 1, 1_048_576);
-    if (n !== null) this.store.edit('cache', k === 'embeddings' ? { embeddingsMaxMib: Math.round(n) } : { responsesMaxMib: Math.round(n) });
+    this.num(`cache-${k}-max`, v, 1, 1_048_576, (n) => this.store.edit('cache', k === 'embeddings' ? { embeddingsMaxMib: Math.round(n) } : { responsesMaxMib: Math.round(n) }));
   }
   protected setTtl(k: 'embeddings' | 'responses', v: string): void {
     const n = Number(v);
     if (Number.isFinite(n) && n >= 0) this.store.edit('cache', k === 'embeddings' ? { embeddingsTtlSecs: n } : { responsesTtlSecs: n });
   }
-  protected setPromptCacheAuto(auto: boolean): void {
-    this.store.edit('cache', { promptCacheMib: auto ? null : 1024 });
+  protected setPromptCacheMode(v: string): void {
+    this.store.edit('cache', { promptCacheMib: v === 'auto' ? null : 1024 });
   }
   protected setPromptCacheMib(v: string): void {
-    const n = parseNumber(v, 0, 1_048_576);
-    if (n !== null) this.store.edit('cache', { promptCacheMib: Math.round(n) });
+    this.num('cache-prompt-mib', v, 0, 1_048_576, (n) => this.store.edit('cache', { promptCacheMib: Math.round(n) }));
   }
   protected setKeepWarmDays(v: string): void {
-    const n = parseNumber(v, 1, 3650);
-    if (n !== null) this.store.edit('cache', { keepWarmDays: Math.round(n) });
+    this.num('cache-keep-warm', v, 1, 3650, (n) => this.store.edit('cache', { keepWarmDays: Math.round(n) }));
   }
   protected cacheSize(k: CacheKindInfo): string {
     return sizeText(k);

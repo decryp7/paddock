@@ -60,7 +60,7 @@ export const KEY_SECRET_DIALOG = defineDialog(DIALOG_CONTRACTS['pw.key-secret'],
   load: () => import('../features/apps/key-secret-dialog').then((m) => m.KeySecretDialog),
 });
 
-/** "Quit Pitwall?" (a decision). Answers whether to stop serving and whether to keep the choice. */
+/** The quit question, "Keep serving after you quit?" in a window titled "Quit Pitwall" (a decision). Answers whether to stop serving and whether to keep the choice. */
 export const QUIT_DIALOG = defineDialog(DIALOG_CONTRACTS['pw.quit'], {
   title: msg('pw.quit.title', 'Quit Pitwall'),
   result: type<QuitAnswer>(),

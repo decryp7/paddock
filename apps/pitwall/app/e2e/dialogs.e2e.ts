@@ -46,7 +46,7 @@ test.describe('Pitwall dialog windows', () => {
     await expect.poll(() => d.result()).toContain('true');
   });
 
-  test('Quit Pitwall?: Cancel answers nothing; "Don\'t ask again" is part of the answer', async ({ page }) => {
+  test('Keep serving after you quit?: Cancel answers nothing; "Don\'t ask again" is part of the answer', async ({ page }) => {
     const d = await open(page, 'pw.quit', {});
     await expect(d.action('keep')).toBeFocused();
     await page.getByRole('checkbox', { name: "Don't ask again" }).check();
@@ -66,7 +66,7 @@ test.describe('quitting from the main window', () => {
   test('a quit asked for with "Ask each time" shows the question in the page; Cancel leaves Pitwall running', async ({ page }) => {
     await openApp(page, '/', 'mock-fast&mock-static&mock-quit');
     const question = page.getByRole('alertdialog');
-    await expect(question).toContainText('Quit Pitwall?');
+    await expect(question).toContainText('Keep serving after you quit?');
     await question.getByRole('button', { name: 'Cancel' }).click();
     await expect(question).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();

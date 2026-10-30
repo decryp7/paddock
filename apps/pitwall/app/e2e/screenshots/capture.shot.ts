@@ -1,9 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { resolve } from 'node:path';
-import { dialogWindowUrl } from '../../../../../ui/projects/paddock-e2e/src/index.ts';
+import { dialogContracts, dialogWindowUrl } from '../../../../../ui/projects/paddock-e2e/src/index.ts';
+import { CONTRACT_FILES } from '../dialog-fixtures';
 
 const OUT = resolve(__dirname, '../../../docs/screenshots');
+const CONTRACTS = dialogContracts(...CONTRACT_FILES.map((p) => resolve(__dirname, '../..', p)));
 const WIDTH = 1440;
 const HEIGHT = 900;
 // A fixed clock so countdowns, "5 min ago" and chart axes are the same on every run.
@@ -20,6 +22,11 @@ interface Screen {
   element?: string;
   /** A dialog window (its id) opened by its URL, as Rust loads it in its own OS window, instead of a page of the main window. */
   window?: string;
+  /** The window's title (as Rust gives it) and its input. */
+  title?: string;
+  input?: unknown;
+  /** The Settings window: the section (its id) scrolled to the top of the page area, so the shot starts at a section. */
+  section?: string;
   /** Waits for the screen and drives it into the state to show. */
   prepare?: (page: Page) => Promise<void>;
 }
@@ -100,12 +107,12 @@ const SCREENS: Screen[] = [
     prepare: (p) => expect(p.getByRole('status', { name: 'Installing llama.cpp' })).toBeVisible(),
   },
   {
+    // The quit question in its own window, as Rust opens it: titled "Quit Pitwall", at the contract's width and fitted height.
     name: 'quit-dialog',
-    path: '/engines',
-    query: 'mock-quit&mock-clean',
-    prepare: async (p) => {
-      await expect(p.getByRole('alertdialog', { name: 'Quit Pitwall?' })).toBeVisible();
-    },
+    path: '',
+    window: 'pw.quit',
+    title: 'Quit Pitwall',
+    prepare: (p) => expect(p.getByRole('alertdialog', { name: 'Keep serving after you quit?' })).toBeVisible(),
   },
   { name: 'apps', path: '/apps', prepare: (p) => expect(p.locator('h1')).toBeVisible() },
   {
@@ -169,25 +176,32 @@ const SCREENS: Screen[] = [
     name: 'settings-quit',
     path: '',
     window: 'pd.settings',
-    element: '#set-general',
+    section: '#set-general',
     prepare: async (p) => {
-      await p.getByRole('radio', { name: 'Ask each time' }).click();
-      await expect(p.getByRole('radio', { name: 'Ask each time' })).toHaveAttribute('aria-checked', 'true');
+      await p.locator('#gen-quit').click();
+      await p.getByRole('option', { name: 'Ask each time' }).click();
+      await expect(p.locator('#gen-quit')).toContainText('Ask each time');
     },
   },
   {
     name: 'settings-cache',
     path: '',
     window: 'pd.settings',
-    element: '#set-cache',
-    prepare: async (p) => {
-      await expect(p.locator('#set-cache .cache-stats').first()).toBeVisible();
-    },
+    section: '#set-cache',
+    prepare: (p) => expect(p.locator('#set-cache .cache-stats').first()).toBeVisible(),
+  },
+  {
+    name: 'settings-service',
+    path: '',
+    window: 'pd.settings',
+    section: '#set-service',
+    prepare: (p) => expect(p.getByTestId('service-pill')).toContainText('Running'),
   },
   {
     name: 'settings',
     path: '',
     window: 'pd.settings',
+    section: '#set-model-updates',
     prepare: async (p) => {
       // Model updates switched on and checked once, as a user who opted in would see it.
       const panel = p.locator('#set-model-updates');
@@ -229,24 +243,28 @@ for (const theme of ['dark', 'light'] as const) {
   for (const s of SCREENS.filter((x) => !ONLY || ONLY.includes(x.name))) {
     test(`${s.name} ${theme}`, async ({ page }) => {
       if (s.window) {
-        // The Settings window at its own size (the contract's 880x700), as the shell opens it.
+        // A window at its own size, as the shell opens it: Settings at the contract's 880x700, a dialog at its contract's
+        // width and the height it fits itself to.
+        const contract = CONTRACTS[s.window]!;
+        const fixed = contract.kind === 'tool';
         await page.clock.install({ time: NOW });
         await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
-        await page.setViewportSize({ width: 880, height: 700 });
-        await page.goto(dialogWindowUrl(s.window, {}, { title: 'Settings', query: `?mock-static&mock-fast${s.query ? '&' + s.query : ''}` }));
+        await page.setViewportSize({ width: contract.width, height: fixed ? (contract.height ?? 700) : 810 });
+        await page.goto(dialogWindowUrl(s.window, s.input ?? {}, { title: s.title ?? 'Settings', query: `?mock-static&mock-fast${s.query ? '&' + s.query : ''}` }));
         await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
         await s.prepare?.(page);
         // Long enough for the window's own confirmations ("Checking every week.") to go: no toast in a documentation shot.
         await page.clock.runFor(12_000);
         for (const close of await page.getByRole('button', { name: /^(Dismiss|Close notification)/ }).all()) await close.click();
         await page.mouse.move(2, 2);
-        await page.waitForTimeout(600);
-        if (s.element) {
-          await page.locator(s.element).scrollIntoViewIfNeeded();
-          await page.locator(s.element).screenshot({ path: `${OUT}/${s.name}-${theme}.png` });
-        } else {
-          await page.screenshot({ path: `${OUT}/${s.name}-${theme}.png` });
+        if (!fixed) {
+          const asked = await page.evaluate(() => ({ h: Number(document.documentElement.dataset['fittedHeight'] ?? '0'), min: document.documentElement.dataset['minContent'] ?? '0x0' }));
+          await page.setViewportSize({ width: contract.width, height: Math.max(asked.h, Number(asked.min.split('x')[1] ?? '0')) });
         }
+        // The shot starts at the top of a section, never mid-card.
+        if (s.section) await page.locator(s.section).evaluate((e) => e.scrollIntoView({ block: 'start' }));
+        await page.waitForTimeout(600);
+        await page.screenshot({ path: `${OUT}/${s.name}-${theme}.png` });
         return;
       }
       await open(page, s.path, theme, s.query);
@@ -283,10 +301,13 @@ for (const theme of ['dark', 'light'] as const) {
   }
 
   if (!ONLY || ONLY.includes('tray')) {
-    // The tray popover is 360x520 logical: capture the element itself at its real size.
+    // The tray popover window (`#/tray`, 360x520 logical) as the tray opens it, with both banners (a pairing and model
+    // updates) and the loaded models summarised under them.
     test(`tray ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width: 360, height: 520 });
-      await open(page, '/tray', theme);
+      await open(page, '/tray', theme, 'mock-updates');
+      await expect(page.getByText(/model updates are available/)).toBeVisible();
+      await expect(page.locator('pw-hot-models .more')).toContainText('more loaded');
       const tray = page.locator('.tray');
       await expect(tray).toBeVisible();
       await page.clock.runFor(1500);

@@ -6,10 +6,10 @@ const open = () => renderFramed(QuitDialog, { id: 'pw.quit', kind: 'decision', m
 describe('QuitDialog (pw.quit)', () => {
   afterEach(() => delete document.documentElement.dataset['platform']);
 
-  it('asks "Quit Pitwall?" with Cancel, Quit and stop serving, and Quit, keep serving in the native order of each OS', async () => {
+  it('asks "Keep serving after you quit?" (not the window title again) with Cancel, Quit and stop serving, and Quit, keep serving in the native order of each OS', async () => {
     document.documentElement.dataset['platform'] = 'macos';
     const mac = await open();
-    expect(mac.heading()).toBe('Quit Pitwall?');
+    expect(mac.heading()).toBe('Keep serving after you quit?');
     expect(mac.actions()).toEqual(['stop', 'cancel', 'keep']);
     expect(mac.action('keep')!.className).toContain('pd-frame-btn--filled');
     expect(mac.action('stop')!.className).not.toContain('danger');

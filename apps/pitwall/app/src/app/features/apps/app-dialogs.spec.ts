@@ -41,7 +41,8 @@ describe('CreateAppDialog (pw.create-app)', () => {
 });
 
 describe('KeySecretDialog (pw.key-secret)', () => {
-  const SECRET = 'pw_live_8f3a9c2e7b1d4f6a0c5e9b2d7f1a3c8e';
+  /** The shape of a real key: `pw_` and 43 characters (`pitwall-core` keys.rs). */
+  const SECRET = 'pw_Xk7fQ2mR9vLc4Tn8bJ1wHs6pYd3Ge0Ua5Zi2Ko9Nq4Fr';
   const open = async () => {
     const d = await renderFramed(KeySecretDialog, { id: KEY_SECRET_DIALOG_ID, kind: 'decision', modality: 'modal', requiredChoice: true, inputs: { appName: 'Raycast', secret: SECRET, prefix: 'pw_live_8f3a' } });
     registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
@@ -53,7 +54,12 @@ describe('KeySecretDialog (pw.key-secret)', () => {
     const d = await open();
     expect(d.heading()).toBe('New key for Raycast');
     expect(d.q('key-warning')!.textContent).toContain("you won't see it again");
-    expect(d.el.querySelector<HTMLTextAreaElement>('#pw-key-secret')!.value).toBe(SECRET);
+    const key = d.el.querySelector<HTMLElement>('#pw-key-secret')!;
+    expect(key.textContent).toBe(SECRET);
+    expect(key.getAttribute('role')).toBe('textbox');
+    expect(key.getAttribute('aria-readonly')).toBe('true');
+    // One icon: the decision's, beside the heading; the warning is a callout without an icon of its own.
+    expect(d.el.querySelectorAll('mat-icon, [data-testid="dialog-icon"] svg').length).toBe(1);
     expect(d.actions().sort()).toEqual(['copy', 'saved']);
     expect(d.action('dismiss')).toBeNull();
     expect(document.activeElement).toBe(d.action('copy'));
@@ -83,6 +89,8 @@ describe('KeySecretDialog (pw.key-secret)', () => {
     const d = await open();
     await d.press('copy');
     expect(d.el.textContent).toContain('Ctrl+C');
+    // The key is selected for a copy by hand.
+    expect(document.getSelection()!.toString()).toBe(SECRET);
     expect(d.outcome()).toBeNull();
   });
 });
