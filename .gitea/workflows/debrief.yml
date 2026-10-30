@@ -283,14 +283,6 @@ jobs:
           workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
           name: debrief-${{ github.job }}
 
-      - name: The test browser's folder
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: |
-          # Outside the checkout, which stable-workspace moves: the job slot's kept folder (the installer stamps the pinned
-          # version in it).
-          dir="$(bash ../../conformance/ci/job-isolation.sh path browser debrief)"
-          echo "DEBRIEF_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
-
       - name: libduckdb
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: bash scripts/ci/libduckdb-env.sh
