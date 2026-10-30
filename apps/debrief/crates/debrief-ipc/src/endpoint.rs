@@ -88,6 +88,24 @@ pub fn remove_live() {
     }
 }
 
+/// A short folder for endpoint sockets, tried after the temp folder and before the shared `/tmp`: CI's job-tmpdir sets it
+/// to a folder of the job's own, so a socket whose temp path is too long never lands where local runs on the same host
+/// make theirs. Unset (the app, a developer's run), nothing changes.
+#[cfg(unix)]
+pub const SOCKET_BASE_VAR: &str = "PADDOCK_SOCKET_BASE";
+
+/// Where endpoint folders are tried, in order: `XDG_RUNTIME_DIR` and the socket base when they are folders, the temp folder,
+/// then `/tmp`. Pure: the caller reads the environment.
+#[cfg(unix)]
+pub fn socket_bases(xdg_runtime_dir: Option<std::ffi::OsString>, temp: PathBuf, socket_base: Option<std::ffi::OsString>) -> Vec<PathBuf> {
+    let dir = |v: Option<std::ffi::OsString>| v.filter(|v| !v.is_empty()).map(PathBuf::from).filter(|d| d.is_dir());
+    let mut bases: Vec<PathBuf> = dir(xdg_runtime_dir).into_iter().collect();
+    bases.push(temp);
+    bases.extend(dir(socket_base));
+    bases.push(PathBuf::from("/tmp"));
+    bases
+}
+
 /// A listening address owned by the supervisor; the private directory is removed on drop.
 pub struct PrivateEndpoint {
     pub address: String,
@@ -105,12 +123,11 @@ impl PrivateEndpoint {
     #[cfg(unix)]
     pub fn create_named(prefix: &str) -> io::Result<PrivateEndpoint> {
         let harden: fn(&std::path::Path) -> io::Result<()> = harden_dir;
-        let mut bases: Vec<PathBuf> = Vec::new();
-        if let Some(d) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|d| d.is_dir()) {
-            bases.push(d);
-        }
-        bases.push(std::env::temp_dir());
-        bases.push(PathBuf::from("/tmp"));
+        let bases = socket_bases(
+            std::env::var_os("XDG_RUNTIME_DIR"),
+            std::env::temp_dir(),
+            std::env::var_os(SOCKET_BASE_VAR),
+        );
         let mut last = io::Error::other("no place for a private socket");
         for base in bases {
             // Named by its resolved path (macOS' temp folder `/var/folders/…` is `/private/var/folders/…`): a contained
@@ -227,11 +244,57 @@ mod tests {
         drop(e); // dropping afterwards is harmless
     }
 
+    /// A scratch folder short enough for an endpoint's socket, never the shared `/tmp`: the job's socket base when it is set
+    /// (in CI the temp folder is the runner's long per-job folder, where `create_in` would skip the base), else the temp
+    /// folder.
+    #[cfg(unix)]
+    fn short_scratch() -> tempfile::TempDir {
+        let candidates = [
+            std::env::var_os(SOCKET_BASE_VAR).filter(|v| !v.is_empty()).map(PathBuf::from),
+            Some(std::env::temp_dir()),
+        ];
+        let root = candidates
+            .into_iter()
+            .flatten()
+            .find(|c| c.is_dir() && fits(&c.join(".tmp0000000000"), "debrief-x"))
+            .expect("a temp folder short enough for a socket (set PADDOCK_SOCKET_BASE to a short folder)");
+        tempfile::tempdir_in(root).unwrap()
+    }
+
+    /// CI (2026-10-29): a socket whose temp folder is too long fell back to the shared `/tmp`, which local runs on the same
+    /// Mac use too, so a leak check there failed jobs for others' folders. A job's own short socket folder
+    /// (`PADDOCK_SOCKET_BASE`, set by CI's job-tmpdir) comes before `/tmp`; unset or missing, nothing changes.
+    #[cfg(unix)]
+    #[test]
+    fn the_job_socket_base_comes_before_the_shared_tmp() {
+        use std::path::PathBuf;
+        let base = tempfile::tempdir().unwrap();
+        let temp = PathBuf::from("/long/temp");
+        let got = socket_bases(None, temp.clone(), Some(base.path().as_os_str().to_owned()));
+        assert_eq!(got, vec![temp.clone(), base.path().to_path_buf(), PathBuf::from("/tmp")]);
+        let xdg = base.path().to_path_buf();
+        assert_eq!(
+            socket_bases(Some(xdg.clone().into_os_string()), temp.clone(), None),
+            vec![xdg, temp.clone(), PathBuf::from("/tmp")]
+        );
+        let missing = base.path().join("gone").into_os_string();
+        assert_eq!(
+            socket_bases(None, temp.clone(), Some(missing)),
+            vec![temp.clone(), PathBuf::from("/tmp")],
+            "a missing folder is skipped"
+        );
+        assert_eq!(
+            socket_bases(None, temp.clone(), Some("".into())),
+            vec![temp, PathBuf::from("/tmp")],
+            "an empty value is unset"
+        );
+    }
+
     /// Regression: a step after `mkdir` that fails (the permission hardening) left the new folder behind, unowned.
     #[cfg(unix)]
     #[test]
     fn a_failing_step_after_making_the_folder_removes_it_again() {
-        let base = tempfile::tempdir().unwrap();
+        let base = short_scratch();
         let failing: fn(&std::path::Path) -> io::Result<()> = |_| Err(io::Error::other("cannot harden"));
         assert!(PrivateEndpoint::create_in(base.path(), "debrief-x", failing).is_err());
         assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0, "no folder is left behind");

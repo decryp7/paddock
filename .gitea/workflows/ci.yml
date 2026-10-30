@@ -183,6 +183,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A slot of the host (job isolation): its own Angular cache and ports, so two runs of this job can share the Mac.
+      - uses: ./.gitea/actions/job-isolation
+
       - uses: ./.gitea/actions/node-caches
 
       - name: Install
@@ -204,10 +207,16 @@ jobs:
       - name: Reference app checks in WebKit
         env:
           PADDOCK_WEBKIT: "1"
-          PW_PORT: "4320"
-          SHELL_DEMO_PORT: "4321"
-          WORKBENCH_DEMO_PORT: "4322"
-        run: npx playwright test --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit
+        run: |
+          # The job slot's own block of three ports (conformance/ci/ports.txt `webkit`: 4320-4322 for s1).
+          port=$(bash ../conformance/ci/job-isolation.sh port webkit)
+          export PW_PORT=$port SHELL_DEMO_PORT=$((port + 1)) WORKBENCH_DEMO_PORT=$((port + 2))
+          npx playwright test --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit
+
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
 
   # @decryp7/paddock-conformance (conformance/, plan X9): every check has a good and a bad fixture, the release scripts are
   # tested (latest.json byte-equal to the apps' copy), the shared macOS verify runs against a shimmed bundle. No dependencies.
@@ -398,14 +407,25 @@ jobs:
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
           (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
-          echo PADDOCK_TEST_BROWSER_DIR=%USERPROFILE%\.paddock-ci\test-browser>>"%GITHUB_ENV%"
 
       # The Mac host runner: four build jobs; the host toolchain as installed.
       - name: Build jobs (macOS)
         if: runner.os == 'macOS'
+        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      # A slot of the host (job isolation; after Git bash on Windows): the job's kept folders end in its slot and its temp
+      # folders are the runner's per-job folder, so concurrent jobs on one host never share either.
+      - uses: ./.gitea/actions/job-isolation
+
+      # The test browser outside the checkout, which stable-workspace moves: the slot's kept folder (the installer stamps the
+      # pinned version in it).
+      - name: Test browser folder (macOS, Windows)
+        if: runner.os != 'Linux'
+        working-directory: .
         run: |
-          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
-          echo "PADDOCK_TEST_BROWSER_DIR=$HOME/.paddock-ci/test-browser" >> "$GITHUB_ENV"  # outside the checkout, which stable-workspace moves; the installer stamps the pinned version in it
+          dir="$(bash conformance/ci/job-isolation.sh path browser paddock)"
+          if command -v cygpath >/dev/null; then dir="$(cygpath -w "$dir")"; fi
+          echo "PADDOCK_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
 
       # Host runners check out into a per-job hashed folder; sccache keys a compile on its folder, so the workspace crates miss
       # on every run. Build from the same physical path every time: PADDOCK_WORKSPACE, the cargo steps' working-directory
@@ -425,7 +445,8 @@ jobs:
           workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
           name: paddock-${{ github.job }}
 
-      # Toolchain and sccache on every OS: sccache's local disk cache (host runners: ~/.paddock-ci/sccache, containers: the /sccache mount).
+      # Toolchain and sccache on every OS: sccache's local disk cache (host runners: the job slot's kept folder sccache-s<n>,
+      # containers: the /sccache mount).
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy
@@ -435,7 +456,7 @@ jobs:
           rustc --version && cargo --version
           cargo clippy --version || { echo "::error::clippy is missing on this runner (rustup component add clippy)"; exit 1; }
 
-      # The pinned cargo-nextest: the image's on Linux, a copy kept under ~/.paddock-ci/tools on the hosts (downloaded once
+      # The pinned cargo-nextest: the image's on Linux, a copy in the hosts' shared kept folder tools (downloaded once
       # per version); the step fails when the runner has another version.
       - uses: ./.gitea/actions/host-tools
 
@@ -492,6 +513,11 @@ jobs:
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
+
   # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a pull request, whichever project it touches.
   # The apps' own workflows had a copy of this step each; the C23 check of "Paddock itself" skips the history before the rule.
   commits:
@@ -545,6 +571,9 @@ jobs:
         if: runner.os == 'macOS'
         run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
+      # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
+      - uses: ./.gitea/actions/job-isolation
+
       - uses: ./.gitea/actions/stable-workspace
         if: runner.os != 'Linux'
         with:
@@ -565,16 +594,16 @@ jobs:
         if: runner.os != 'Linux'
 
       # An app whose tests drive a real browser (paddock.ci.json `testBrowser`): the pinned Chrome for Testing, never an installed
-      # one (rule 7). The image has it on Linux; on a host it is kept in a folder of the app under the runner user's home.
+      # one (rule 7). The image has it on Linux; on a host it is the app's kept folder of the job slot (test-browser-<app>-<slot>).
       - name: Test browser folder (macOS, Windows)
         if: runner.os != 'Linux' && matrix.test_browser_prefix != ''
         shell: bash
         env:
           APP: ${{ matrix.app }}
         run: |
-          home="$HOME"
-          if command -v cygpath >/dev/null; then home="$(cygpath -w "$HOME")"; fi
-          echo "PADDOCK_TEST_BROWSER_DIR=$home/.paddock-ci/test-browser-$APP" >> "$GITHUB_ENV"
+          dir="$(bash conformance/ci/job-isolation.sh path browser "$APP")"
+          if command -v cygpath >/dev/null; then dir="$(cygpath -w "$dir")"; fi
+          echo "PADDOCK_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
 
       - name: Chrome for Testing (macOS, Windows)
         if: runner.os != 'Linux' && matrix.test_browser_prefix != ''
@@ -637,12 +666,12 @@ jobs:
           path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ matrix.e2e_artifacts }}
           if-no-files-found: ignore
 
-      # Nothing may stay behind on a host: no fake runners or test sockets of the app's tests (paddock.ci.json `processes`).
+      # Nothing of this job may stay behind on a host: no fake runners or test programs of the app's tests (paddock.ci.json
+      # `processPatterns`, each anchored on a folder of this job), no temp folders of its tests.
       - uses: ./.gitea/actions/host-cleanup
         if: always() && runner.os != 'Linux'
         with:
           app-id: ${{ matrix.app }}
-          processes: ${{ matrix.processes }}
           process-patterns: ${{ matrix.process_patterns }}
           temp-prefix: ${{ matrix.app }}-it-
 
@@ -652,6 +681,12 @@ jobs:
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
+
+      # The slot goes back last: the clean-up, the prune and the sccache server's stop all act on this slot's folders and port.
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
 
   # The developer and CI tool (ADR 0022): its own Cargo workspace and lockfile, tested on every OS it runs on. Linux runs in the
   # paddock-ci image (git, Node for the golden test's live oracle, nextest); Windows and macOS run on the host.
@@ -686,6 +721,9 @@ jobs:
       - name: Build jobs (macOS)
         if: runner.os == 'macOS'
         run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      # A slot of the host (job isolation; after Git bash on Windows): its kept folders and ports are this job's alone.
+      - uses: ./.gitea/actions/job-isolation
 
       - uses: ./.gitea/actions/stable-workspace
         if: runner.os != 'Linux'
@@ -737,3 +775,9 @@ jobs:
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
+
+      # The slot goes back last: the prune and the sccache server's stop act on this slot's folders and port.
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release

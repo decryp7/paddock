@@ -5,8 +5,8 @@
 #   bash build-folder.sh <cargo-workspace> <name>
 #
 # Linux containers build in the workspace's target/ (a new container every run; sccache keeps the compiled crates). Host
-# runners (macOS, Windows) build in a folder that outlives the job, outside the checkout:
-# ${PADDOCK_CI_HOME:-$HOME/.paddock-ci}/target-<name>. It is written to <cargo-workspace>/.cargo/ci.toml (git-ignored,
+# runners (macOS, Windows) build in a folder that outlives the job, outside the checkout: the kept folder `target` of the
+# job's slot (job-isolation.sh path target <name>: <ci-home>/target-<name>-<slot>), so two jobs on one host never share one. It is written to <cargo-workspace>/.cargo/ci.toml (git-ignored,
 # included by the workspace's .cargo/config.toml as `include = [{ path = "ci.toml", optional = true }]`), so every cargo
 # command (clippy, nextest, doc tests, `tauri build`, cargo metadata) uses it with no flag and no environment variable.
 # Exports PADDOCK_BUILD_FOLDER (the folder, for the steps that collect from it) through $GITHUB_ENV.
@@ -27,8 +27,7 @@ case "${RUNNER_OS:?}" in
     dir="$ws/target"
     ;;
   *)
-    dir="${PADDOCK_CI_HOME:-$HOME/.paddock-ci}/target-$name"
-    mkdir -p "$dir"
+    dir="$(bash "$(dirname "$0")/job-isolation.sh" path target "$name")"
     # Cargo on Windows wants a native path; forward slashes work in cargo, Node and Git bash alike.
     if [ "$RUNNER_OS" = Windows ] && command -v cygpath >/dev/null 2>&1; then dir=$(cygpath -m "$dir"); fi
     case "$dir" in *"'"*) echo "::error::build-folder: the build folder $dir has a quote in its path"; exit 1 ;; esac
