@@ -397,3 +397,31 @@ Total about 18.5 days.
     (section 9): accepted. A long silent call of theirs counts toward the spin limit.
 (b) **The phase shown while a child or the app is stopped:** "Paused by macOS or another app".
 (c) **Debrief first:** phase A in Debrief 1.2; phase B after the Dyno, Spotter and Pitwall 1.1 tags.
+
+## Amendment 2026-10-31: phase A is built in the shared crates
+
+**Why.** Debrief 1.2 moves onto the shared plugin platform (family ADRs [0001](0001-plugin-platform-crates.md) and
+[0003](0003-debrief-migration-and-users.md)), and its package PH1 deletes `debrief-ipc`. Phase A's judge and probe would
+be written into a crate that the same release deletes, and then copied again in WP-B4. ER-22 (share first) asks for one
+shared implementation instead. The "rule 42 exception" under Sequencing is therefore withdrawn.
+
+**What changes.** Phase A's stall judge is built in the shared crates (`paddock-jobs`, `paddock-proc`, `paddock-ipc`,
+`paddock-plugin-host`, `paddock-guard`), not in `debrief-ipc`, as packages of the
+[Debrief 1.2 plan](../plans/debrief-1-2.md):
+
+| Work package here | Plan package | Notes |
+|---|---|---|
+| WP-A1 (judge, ports) and WP-A2 (run state per OS) | **2.6c** | written directly as WP-B1: `paddock-jobs::patience`, `paddock_proc::runstate` |
+| WP-A3, plugin path; WP-B2 (`paddock-ipc` frames); WP-B3 for `paddock-plugin-host` and `paddock-guard` | **2.6d** | the `Progress` frames land before Debrief 1.2 ships protocol 2.0, so the protocol stays 2.0 (family ADR 0001, "Versioning and compatibility") |
+| WP-A3, the rest: store and AI worker bounds, the AI runtimes' check, `BUSY_WAIT`, `TAIL_WAIT`, the ready handshake, the in-process watchdog, the "Paused" phase, C per key | **LV1** | |
+| WP-A4 (tests on `until_condition()`, C51 for Debrief) | **LV2** | |
+| WP-A5 (verification on the user's Mac) | **LV3** | before Debrief 1.2's tag |
+| WP-B4 (Debrief onto the shared crates) | none | nothing to move: there are no phase A copies |
+| WP-B3 for `paddock-startup` and `paddock-chromium`; WP-B5 (the other apps) | unchanged | phase B, each app with its next release; `paddock-startup`'s `ready_timeout` goes with LV1 if Debrief is on the shell by then |
+
+**Sequencing.** Decision (c) is kept in substance. The shared work happens in Debrief 1.2, which comes after the Dyno,
+Spotter and Pitwall 1.1 tags in the agreed order, so nothing here sits on those releases' paths. Decision (a) no longer
+applies to Debrief's old plugins: plugins built for protocol 1 are removed and refused (family ADR 0003), and every
+protocol-2.0 plugin is built with the `Progress` frames. The plan counts the work as 2.6c, 2.6d and LV1-LV3, about
+13 days, against about 14 for phase A (9.5), WP-B1 (1.5), WP-B2 (2) and WP-B4 (1) done separately; part of WP-B3 is in
+2.6d.
