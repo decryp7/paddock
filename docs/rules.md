@@ -17,6 +17,10 @@ changes here, every app's copy is updated in the same change.
    Lint and type-check the touched files before every push.
 5. **Every bug fix starts with a failing regression test.** A test-only failure is fixed properly (deterministic, no
    sleeps), never silently skipped.
+   A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30): `cargo mutants --in-diff <diff>` for Rust where
+   it is available, otherwise revert the fix and run the new test, and reports whether the test fails without the fix. A
+   test that still passes proves nothing and is sent back. (A `cargo mutants --in-diff` CI job on the shared crates comes
+   after the releases; see [lessons.md](lessons.md#a-bug-fix-review-runs-a-mutation-check-2026-10-30).)
 6. **Tests never hard-code the app version;** they read it from its single source and check its shape.
 7. **Tests never touch the user's machine:** no real launchd/Login Items/services, no installed apps, never the
    installed Google Chrome (pinned Chrome for Testing or an explicit env var only), no `~/Documents`, `~/Desktop`,

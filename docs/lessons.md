@@ -1000,3 +1000,11 @@ file it no longer owned: it had read the file earlier and removed it later, afte
 **Rule (53, amended):** a file that names a pid or port is only a hint. Act on it after a held lock or a live connection
 proves the process is there, and remove it only if it is still the same file (same pid and start time). This is rule 53's
 reusable-name rule applied to files.
+
+## A bug-fix review runs a mutation check (2026-10-30)
+Rule 5 asks for a failing test first, but a reviewer reading the diff cannot tell whether the new test would have failed
+without the fix: a test written after the fix may never have failed. **Rule (5, amended; user, 2026-10-30):** the
+reviewer of a bug fix runs a mutation check on the fix (`cargo mutants --in-diff <diff>` for Rust where available,
+otherwise revert the fix and run the new test) and reports whether the test fails. **Follow-up, not built:** a CI job that
+runs `cargo mutants --in-diff` over the shared crates' changes, to be added after the releases.
+
