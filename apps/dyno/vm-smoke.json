@@ -101,8 +101,8 @@
       "log": "~/Library/Application Support/Dyno/logs/app.log",
       "hidden": "started hidden",
       "shown": "started with a window",
-      "restore": null,
-      "restoreWhy": "How Dyno should start when loginwindow restores it (the Mac restarted with Dyno running, \"Reopen windows\") is a product decision not taken yet (handoff dyno-login-blockers.md recommends hidden); until then the GUI run reports what happened."
+      "restore": "hidden",
+      "restoreWhy": "Decision 2026-10-31 (user): a \"Reopen windows\" restore at login (loginwindow open event with rsto=yes) starts Dyno hidden in the tray, whatever the Start-at-login setting. Installers built before the fix on dyno/login-blockers fail this step, as expected."
     }
   }
 }
