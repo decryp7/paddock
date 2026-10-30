@@ -57,11 +57,13 @@ impl Default for StartTiming {
     }
 }
 
-/// A report of a stuck start: the phase and the ticks the start has waited.
+/// A report of a stuck start: the phase, the ticks counted and the time since the start began (for the log only; the
+/// decision is the ticks').
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StuckStart {
     pub phase: StartPhase,
     pub ticks: u64,
+    pub waited: Duration,
     /// Whether this is the first report (later ones repeat it).
     pub first: bool,
 }
@@ -123,9 +125,9 @@ impl StartGuard {
         self.done
     }
 
-    /// One tick: a report when the start is overdue, then again every [`StartTiming::repeat`] ticks; `None` otherwise
-    /// and after [`ready`](Self::ready).
-    pub fn tick(&mut self) -> Option<StuckStart> {
+    /// One tick at `now`: a report when the start is overdue, then again every [`StartTiming::repeat`] ticks; `None`
+    /// otherwise and after [`ready`](Self::ready). `now` only dates the report.
+    pub fn tick(&mut self, now: Instant) -> Option<StuckStart> {
         if self.done {
             return None;
         }
@@ -139,6 +141,7 @@ impl StartGuard {
         Some(StuckStart {
             phase: self.phase,
             ticks: self.ticks,
+            waited: now.saturating_duration_since(self.began),
             first,
         })
     }
@@ -148,8 +151,14 @@ impl StartGuard {
 mod tests {
     use super::*;
 
+    /// `n` ticks, one second of the fake clock apart (the clock only dates the reports).
     fn ticks(g: &mut StartGuard, n: u64) -> Vec<StuckStart> {
-        (0..n).filter_map(|_| g.tick()).collect()
+        (0..n)
+            .filter_map(|_| {
+                let at = g.began + Duration::from_secs(g.ticks + 1);
+                g.tick(at)
+            })
+            .collect()
     }
 
     #[test]
@@ -170,6 +179,7 @@ mod tests {
         let at = |ticks, first| StuckStart {
             phase: StartPhase::MainWindow,
             ticks,
+            waited: Duration::from_secs(ticks),
             first,
         };
         assert_eq!(
@@ -184,8 +194,14 @@ mod tests {
         let t0 = Instant::now();
         let mut g = StartGuard::new(StartTiming::default(), t0);
         assert!(ticks(&mut g, 19).is_empty());
-        let r = g.tick().expect("the 20th tick reports");
-        assert_eq!((r.ticks, r.first), (20, true));
+        // The 20th wake-up comes ten minutes late (the process was paused): still the 20th tick, dated as it is.
+        let r = g
+            .tick(t0 + Duration::from_secs(600))
+            .expect("the 20th tick reports");
+        assert_eq!(
+            (r.ticks, r.waited, r.first),
+            (20, Duration::from_secs(600), true)
+        );
         assert_eq!(
             g.ready(t0 + Duration::from_secs(3600)),
             Some(Duration::from_secs(3600))

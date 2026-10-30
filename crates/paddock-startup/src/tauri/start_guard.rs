@@ -7,6 +7,7 @@
 
 use crate::start_guard::{StartGuard, StartPhase, StartTiming, StuckStart};
 use ::tauri::{AppHandle, Manager, Runtime};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread::JoinHandle;
 use std::time::Instant;
@@ -18,8 +19,11 @@ fn lock(m: &Mutex<StartGuard>) -> MutexGuard<'_, StartGuard> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Numbers the guards' threads (`paddock-start-guard-<n>`), so each one's lines can be told apart.
+static GUARDS: AtomicU64 = AtomicU64::new(0);
+
 /// Starts guarding the start (once per app; a second call does nothing and returns `None`). Call it first in the
-/// set-up that may block. Returns the thread's handle.
+/// set-up that may block. Returns the thread's handle; its name is `paddock-start-guard-<n>`, unique in the process.
 pub fn begin<R: Runtime>(app: &AppHandle<R>, timing: StartTiming) -> Option<JoinHandle<()>> {
     if app.try_state::<Guarded>().is_some() {
         return None;
@@ -28,7 +32,10 @@ pub fn begin<R: Runtime>(app: &AppHandle<R>, timing: StartTiming) -> Option<Join
     let weak = Arc::downgrade(&shared);
     app.manage(Guarded(shared));
     let spawned = std::thread::Builder::new()
-        .name("paddock-start-guard".into())
+        .name(format!(
+            "paddock-start-guard-{}",
+            GUARDS.fetch_add(1, Ordering::Relaxed)
+        ))
         .spawn(move || watch(&weak, timing));
     spawned
         .map_err(|e| log::warn!("The start guard could not start: {e}"))
@@ -52,7 +59,7 @@ fn watch(guard: &Weak<Mutex<StartGuard>>, timing: StartTiming) {
                 if g.is_done() {
                     Tick::Done
                 } else {
-                    g.tick().map_or(Tick::Quiet, Tick::Stuck)
+                    g.tick(Instant::now()).map_or(Tick::Quiet, Tick::Stuck)
                 }
             }
         };
@@ -65,14 +72,17 @@ fn watch(guard: &Weak<Mutex<StartGuard>>, timing: StartTiming) {
 }
 
 fn report(stuck: StuckStart) {
-    let (phase, ticks) = (stuck.phase.describe(), stuck.ticks);
+    let (phase, ticks, secs) = (stuck.phase.describe(), stuck.ticks, stuck.waited.as_secs());
     if stuck.first {
         log::warn!(
-            Phase = phase, Ticks = ticks;
-            "The start has not opened its window after {ticks} ticks; it is in {phase} (still waiting)"
+            Phase = phase, Ticks = ticks, Waited = secs;
+            "The app has not finished starting after {secs} s; it is in {phase} (still waiting)"
         );
     } else {
-        log::warn!(Phase = phase, Ticks = ticks; "The start is still in {phase} after {ticks} ticks");
+        log::warn!(
+            Phase = phase, Ticks = ticks, Waited = secs;
+            "The app has still not finished starting after {secs} s; it is in {phase}"
+        );
     }
 }
 
@@ -97,6 +107,6 @@ pub fn ready<R: Runtime>(app: &AppHandle<R>) {
     };
     let took = lock(&g.0).ready(Instant::now());
     if let Some(took) = took {
-        log::warn!(Waited = took.as_secs(); "The start went on after {} s", took.as_secs());
+        log::warn!(Waited = took.as_secs(); "The app finished starting after {} s", took.as_secs());
     }
 }

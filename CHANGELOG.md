@@ -7,14 +7,15 @@ Conventional Commits; one semver tag for the whole repo.
 ### `paddock-startup`, `paddock-shell`: the start guard
 - From the shell plugin's set-up on, a start that has not got to `RunEvent::Ready` is logged from the guard's own thread
   with the phase it is in (the shell plugin's set-up, starting the event loop, opening the tray, opening the main
-  window): a warning after 20 ticks of 1 s, again every 60 ticks while it stays there, and "The start went on after N s"
-  when it does. It counts ticks, not time (ADR 0031), so a paused or starved process is not reported early, and it only
+  window): "The app has not finished starting after N s; it is in <phase>" (a warning, with `Ticks` and `Waited` fields)
+  after 20 ticks of 1 s, again every 60 ticks while it stays there, and "The app finished starting after N s" when it
+  does. The wording also fits a `--hidden` start, which opens no window. It counts ticks, not time (ADR 0031), so a paused or starved process is not reported early, and it only
   logs (ER-19). The page watchdog cannot see this part of the start (no page yet), so Spotter 1.0's first VM run
   (ADR 0029's deadlock) left nothing in its log. Not covered: Tauri's build and the set-ups of plugins registered before
   the shell (single instance, autostart, updater). New pure `paddock_startup::{StartGuard, StartPhase, StartTiming,
   StuckStart}`, the adapter `paddock_startup::tauri::start_guard::{begin, phase, current, ready}`, and
   `paddock_shell::Builder::start_guard(Option<StartTiming>)` (default on; `None` for tests on the mock runtime, which
-  never reach Ready).
+  never reach Ready); Spotter's, Dyno's and the demos' test places pass `None`).
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.

@@ -17,8 +17,9 @@ type App = ::tauri::App<MockRuntime>;
 /// Every log record of this crate, as (level, window, message).
 static LOGGED: Mutex<Vec<(log::Level, String, String)>> = Mutex::new(Vec::new());
 
-/// Every record of the start guard's own target.
-static GUARD_LOGGED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Every record of the start guard's own target, as (logging thread's name, level, message): each guard thread has its
+/// own name and each test runs on its own thread, so a test reads only its own guard's lines under any test runner.
+static GUARD_LOGGED: Mutex<Vec<(String, log::Level, String)>> = Mutex::new(Vec::new());
 
 struct Capture;
 
@@ -31,7 +32,11 @@ impl log::Log for Capture {
             return;
         }
         if record.target() == "paddock_startup::tauri::start_guard" {
-            lock(&GUARD_LOGGED).push(record.args().to_string());
+            let thread = std::thread::current()
+                .name()
+                .unwrap_or_default()
+                .to_string();
+            lock(&GUARD_LOGGED).push((thread, record.level(), record.args().to_string()));
         }
         let window = record
             .key_values()
@@ -728,8 +733,22 @@ fn eventually(cond: impl Fn() -> bool) -> bool {
     false
 }
 
-fn start_logged(level: log::Level, text: &str) -> bool {
-    log_of("")
+/// The start guard's lines logged by `guard` (its thread) or by this test's own thread (`ready`'s closing line).
+fn guard_lines(guard: &std::thread::Thread) -> Vec<(log::Level, String)> {
+    let own = std::thread::current()
+        .name()
+        .unwrap_or_default()
+        .to_string();
+    let guard = guard.name().unwrap_or_default().to_string();
+    lock(&GUARD_LOGGED)
+        .iter()
+        .filter(|(t, _, _)| *t == guard || *t == own)
+        .map(|(_, l, m)| (*l, m.clone()))
+        .collect()
+}
+
+fn guard_logged(guard: &std::thread::Thread, level: log::Level, text: &str) -> bool {
+    guard_lines(guard)
         .iter()
         .any(|(l, m)| *l == level && m.contains(text))
 }
@@ -759,20 +778,29 @@ fn the_start_guard_logs_a_stuck_start_by_phase_until_it_is_ready() {
         start_guard::current(app.handle()),
         Some(crate::StartPhase::MainWindow)
     );
-    assert!(eventually(|| start_logged(
+    let guard = thread.thread().clone();
+    assert!(eventually(|| guard_logged(
+        &guard,
         log::Level::Warn,
         "it is in opening the main window (still waiting)"
     )));
-    assert!(eventually(|| start_logged(
+    assert!(eventually(|| guard_logged(
+        &guard,
         log::Level::Warn,
-        "The start is still in opening the main window"
+        "The app has still not finished starting after"
     )));
     start_guard::ready(app.handle());
-    assert!(start_logged(log::Level::Warn, "The start went on after"));
+    assert!(guard_logged(
+        &guard,
+        log::Level::Warn,
+        "The app finished starting after"
+    ));
     thread.join().expect("the guard's thread ended at ready");
     start_guard::ready(app.handle());
     assert!(
-        !log_of("").iter().any(|(l, _)| *l == log::Level::Error),
+        !guard_lines(&guard)
+            .iter()
+            .any(|(l, _)| *l == log::Level::Error),
         "a slow start is never an error"
     );
 }
@@ -793,11 +821,15 @@ fn the_start_guard_is_optional_and_silent_for_a_start_on_time() {
     };
     let app = mock_builder().build(mock_context(noop_assets())).unwrap();
     let thread = start_guard::begin(app.handle(), timing).expect("the guard's thread started");
+    let guard = thread.thread().clone();
+    assert!(
+        guard
+            .name()
+            .is_some_and(|n| n.starts_with("paddock-start-guard-")),
+        "each guard's thread has its own name"
+    );
     start_guard::phase(app.handle(), crate::StartPhase::Tray);
     start_guard::ready(app.handle());
     thread.join().expect("ended at ready without a report");
-    assert!(
-        lock(&GUARD_LOGGED).is_empty(),
-        "the start guard logged nothing"
-    );
+    assert_eq!(guard_lines(&guard), [], "the start guard logged nothing");
 }
