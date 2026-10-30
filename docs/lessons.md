@@ -828,3 +828,14 @@ Chromium-only and the macOS runner has a Mac host and a Mac page, so only the We
 and the Settings tests had been red there since that leg began. **Rule:** e2e tests press the app's shortcuts with
 `pressMod(page, 'Mod+…')` from `@decryp7/paddock-e2e`, which reads the page's navigator; never `ControlOrMeta` for an
 app shortcut. The selftest `mod-key.shot.ts` makes the mismatch on any host by giving the page the other platform.
+## 2026-10-30: CI runners have the VC++ runtime, so only a clean PC or an import check shows a missing one (Dyno, all apps)
+
+On a clean Windows 11 VM, Dyno 1.0's `dyno-agent.exe` exited with 0xC0000135 (`STATUS_DLL_NOT_FOUND`) until Microsoft's
+VC++ redistributable was installed: it imported `VCRUNTIME140.dll`. Every app with a sidecar shipped the same import.
+Tauri's `staticVCRuntime` covers only the main binary, and each sidecar is a crate of its own. No CI job could see it:
+the Windows runners have Visual Studio's build tools and therefore the redistributable, so every build, test, smoke
+run and installer test passed. **Rule (ADR 0032):** every Windows binary links the C runtime statically (`+crt-static`
+in the root `.cargo/config.toml`; every app sets Tauri's `staticVCRuntime` to false, because the two together do not
+link), and every Windows installer build runs `conformance/release/windows-crt-imports.mjs` over the files it ships. More
+generally, a dependency that the build machine has and a user's PC may lack (a runtime, a framework, a font, a driver)
+is checked on the artifact, with an import or bundle check, or on a clean machine, never inferred from a green CI.

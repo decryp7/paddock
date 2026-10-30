@@ -968,6 +968,18 @@ jobs:
             npx tauri build --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
           fi
 
+      # ADR 0032: no binary the installer carries (the app, its sidecars, duckdb.dll, named by the Tauri configuration) imports
+      # the VC++ runtime; the runner has the redistributable, a user's PC may not.
+      - name: Shipped binaries need no VC++ runtime (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        run: |
+          # Node on Windows reads C:/... paths, not Git Bash's /c/...
+          dir="$PADDOCK_BUILD_FOLDER"
+          if command -v cygpath >/dev/null; then dir="$(cygpath -m "$dir")"; fi
+          node conformance/release/windows-crt-imports.mjs --src-tauri apps/debrief/app/src-tauri --bin-dir "$dir/dist" \
+            --config apps/debrief/app/src-tauri/tauri.sidecars.conf.json
+
       # The packaged store worker finds libduckdb by run path (crates/debrief-store-worker/build/rpath.rs): a signed,
       # notarized macOS app ignores DYLD_LIBRARY_PATH. Unpack the package and check that one of the worker's run paths
       # reaches the packaged library, so a change to the bundle layout cannot ship a worker that fails to start.
