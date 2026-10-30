@@ -57,8 +57,8 @@ Dyno has two things called "bench":
   | Measure | Base | Change | Budget | Verdict |
   |---|---|---|---|---|
   | Idle agent CPU, `bench` (% of one core, 2 runs) | 0.98, 0.90 | 1.06, 0.95 | about 1% (ADR 0002), 0.5% idle (ADR 0024 D7) | the same within noise; over the 0.5% idle budget before and after |
-  | Idle agent CPU, `top` mean of 25 samples (2 runs) | 0.89, 0.80 | 0.94, 0.84 | — | the same within noise |
-  | Idle energy impact, `top` POWER mean (2 runs) | 0.89, 0.80 | 0.94, 0.84 | — | the same within noise |
+  | Idle agent CPU, `top` mean of 24 samples (2 runs) | 0.92, 0.83 | 0.97, 0.88 | — | the same within noise |
+  | Idle energy impact, `top` POWER mean of 24 samples (2 runs) | 0.92, 0.83 | 0.97, 0.88 | — | equal to the CPU column (see the notes) |
   | Resident memory, `bench` | 29.7, 29.8 MB | 30.0, 30.1 MB | — | the same |
   | Agent threads by scheduling priority (`ps -M`) | all at 31 (default) | 8 at 20 (utility), the rest at 31 | — | as intended |
   | Finder, 1 thread, median (2 runs) | 0.81, 0.82 s | 0.85, 0.85 s | none | about 4% slower on a busy machine |
@@ -66,7 +66,11 @@ Dyno has two things called "bench":
   | Finder, 8 threads, median (2 runs) | 0.18, 0.16 s | 0.19, 0.19 s | none | about 10% slower, within its spread |
 
 - **Memory measure:** resident set size from `bench` (`sysinfo`)
-- **Notes:** lowering changes when the agent runs, not how much work it does, so its idle CPU and energy stay the same; a
+- **Notes:** the POWER row is not a copy of the CPU row: `top` printed the same value in its `%CPU` and `POWER` columns in
+  every one of the 100 samples (4 runs × 25), so for this process its energy-impact score followed CPU time alone and adds
+  nothing to the CPU row. Why `top` gives equal values is not documented in `top(1)` (not verified further). The means
+  leave out `top`'s first sample of each run, which is always 0.0 (it has no earlier sample to compare with); the first
+  version of this entry counted it. Lowering changes when the agent runs, not how much work it does, so its idle CPU and energy stay the same; a
   lowered search yields to other work on a busy machine, which is the few percent above. Not measured: the agent under
   launchd (`ProcessType Standard` instead of `Background`), which needs the installed app; that is for the VM checks before
   the tag, with `ps -M` on the running agent (every thread was at 4 under `Background`).
