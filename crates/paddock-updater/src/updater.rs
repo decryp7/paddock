@@ -220,6 +220,9 @@ struct Inner {
 type Emit = Box<dyn Fn(&UpdateStatus) + Send + Sync>;
 type Now = Box<dyn Fn() -> u64 + Send + Sync>;
 
+/// The app's Offline mode, asked before every check and download ([`Updater::with_offline_mode`]).
+pub type OfflineMode = Arc<dyn Fn() -> bool + Send + Sync>;
+
 /// The app-wide updater (shared as `Arc<Updater>`).
 pub struct Updater {
     config: UpdaterConfig,
@@ -227,6 +230,7 @@ pub struct Updater {
     downloader: Arc<Downloader>,
     installer: Option<Arc<dyn Installer>>,
     hooks: Option<Arc<dyn ServiceHooks>>,
+    offline: Option<OfflineMode>,
     store: std::sync::OnceLock<Arc<dyn PreferenceStore>>,
     records: Arc<RecordStore>,
     inner: Mutex<Inner>,
@@ -276,6 +280,7 @@ impl Updater {
             downloader,
             installer: None,
             hooks: None,
+            offline: None,
             store: std::sync::OnceLock::new(),
             inner: Mutex::new(Inner {
                 phase,
@@ -305,6 +310,21 @@ impl Updater {
     pub fn with_service_hooks(mut self, hooks: Arc<dyn ServiceHooks>) -> Updater {
         self.hooks = Some(hooks);
         self
+    }
+
+    /// The app's Offline mode: while `is_on` says yes, no check or download starts, a check or download that began
+    /// before it was switched on stops before it reaches the network, and the automatic check is never due. The
+    /// predicate must answer yes while the app does not know (fail closed); a predicate that panics counts as on.
+    pub fn with_offline_mode(mut self, is_on: OfflineMode) -> Updater {
+        self.offline = Some(is_on);
+        self
+    }
+
+    /// Whether the app's Offline mode is on (fails closed: a panicking predicate is on).
+    pub fn offline_mode(&self) -> bool {
+        self.offline.as_ref().is_some_and(|is_on| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| is_on())).unwrap_or(true)
+        })
     }
 
     /// Keeps the preferences in `store` (until it applies stored ones, the updater starts with automatic checks off on
@@ -400,6 +420,9 @@ impl Updater {
     }
 
     fn begin(&self, event: Event) -> Result<(UpdateStatus, Ticket), UpdateError> {
+        if matches!(event, Event::Check | Event::Download) && self.offline_mode() {
+            return Err(UpdateError::OfflineMode);
+        }
         let mut ticket = Ticket(0);
         let status = self.apply(event, |inner| {
             inner.generation += 1;
@@ -449,6 +472,12 @@ impl Updater {
     /// A failed check is the job's failure and the status's [`UpdatePhase::Failed`].
     pub fn run_check(&self, ctx: &JobContext, ticket: Ticket) -> Result<(), JobError> {
         ctx.phase(Phase::items(CHECK_PHASE, "Checking for updates", 1));
+        // Offline mode switched on since the check began: stop before the network, without counting it as a check.
+        if self.offline_mode() {
+            let e = UpdateError::OfflineMode;
+            self.apply_for(ticket, Event::Checked(Err(e.clone())), |_| {});
+            return Err(JobError::Failed(e.to_string()));
+        }
         let endpoint = {
             let inner = self.lock();
             self.channel(&inner.prefs.channel)
@@ -584,6 +613,9 @@ impl Updater {
             self.apply_for(ticket, Event::Downloaded(Err(e)), |_| {});
             JobError::Failed(msg)
         };
+        if self.offline_mode() {
+            return Err(fail(UpdateError::OfflineMode));
+        }
         let cancelled = |reason: CancelReason| {
             self.apply_for(ticket, Event::Cancel, |_| {});
             JobError::Cancelled(reason)
@@ -747,6 +779,9 @@ impl Updater {
 
     /// Whether the automatic check should run now.
     pub fn auto_check_due(&self) -> bool {
+        if self.offline_mode() {
+            return false;
+        }
         let now = (self.now)();
         let inner = self.lock();
         let since = inner.last_checked.map(|t| now.saturating_sub(t));

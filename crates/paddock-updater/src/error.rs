@@ -15,6 +15,9 @@ pub enum UpdateError {
     NotAvailable,
     /// No network (the server's name could not be resolved, or no route).
     Offline,
+    /// The app's Offline mode is on (local first: every network path is the user's explicit choice), so nothing was asked
+    /// of the update server. The app's predicate decides ([`Updater::with_offline_mode`](crate::Updater::with_offline_mode)).
+    OfflineMode,
     /// The update server did not answer, timed out or failed.
     Unreachable {
         detail: String,
@@ -77,6 +80,7 @@ pub struct UpdateErrorDto {
 pub enum UpdateErrorKind {
     NotAvailable,
     Offline,
+    OfflineMode,
     Unreachable,
     NoRelease,
     NoPlatform,
@@ -96,6 +100,7 @@ impl UpdateError {
         match self {
             UpdateError::NotAvailable => K::NotAvailable,
             UpdateError::Offline => K::Offline,
+            UpdateError::OfflineMode => K::OfflineMode,
             UpdateError::Unreachable { .. } => K::Unreachable,
             UpdateError::NoRelease => K::NoRelease,
             UpdateError::NoPlatform { .. } => K::NoPlatform,
@@ -114,6 +119,9 @@ impl UpdateError {
         match self {
             UpdateError::NotAvailable => "Updates are not available in this build.".into(),
             UpdateError::Offline => "The network could not be reached.".into(),
+            UpdateError::OfflineMode => {
+                "Offline mode is on, so the update server was not asked.".into()
+            }
             UpdateError::Unreachable { .. } => "The update server could not be reached.".into(),
             UpdateError::NoRelease => "The update server has no release information.".into(),
             UpdateError::NoPlatform { .. } => {
@@ -144,6 +152,7 @@ impl UpdateError {
                 "This build was made without an update signing key, so it cannot verify updates. Download new versions from the releases page."
             }
             UpdateError::Offline => "Check your internet connection or proxy, then try again.",
+            UpdateError::OfflineMode => "Turn Offline mode off in Settings to check for updates.",
             UpdateError::Unreachable { .. } => {
                 "Try again later. If it keeps failing, download the new version from the releases page."
             }
