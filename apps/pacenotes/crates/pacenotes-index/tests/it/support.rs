@@ -131,3 +131,51 @@ pub fn workspace(files: &[(&str, &str)]) -> Scratch {
     }
     s
 }
+
+/// A file system that cancels the run's token after a given read, or fails reads of a path from its nth read on (0 is the first), to
+/// put a Cancel or a read error at an exact point of a pass.
+pub struct StopFs {
+    inner: DiskFs,
+    pub cancel_after_read_of: Option<(&'static str, CancelToken)>,
+    pub fail_from: Option<(&'static str, usize)>,
+    seen: Mutex<std::collections::BTreeMap<String, usize>>,
+}
+
+impl StopFs {
+    pub fn new(root: &std::path::Path) -> StopFs {
+        StopFs {
+            inner: DiskFs::new(root).unwrap(),
+            cancel_after_read_of: None,
+            fail_from: None,
+            seen: Mutex::new(std::collections::BTreeMap::new()),
+        }
+    }
+}
+
+impl WorkspaceFs for StopFs {
+    fn list(&self, dir: Option<&RepoPath>) -> Result<Vec<DirEntry>, FsError> {
+        self.inner.list(dir)
+    }
+
+    fn read(&self, path: &RepoPath, max_bytes: u64) -> Result<Vec<u8>, FsError> {
+        let nth = {
+            let mut seen = self.seen.lock().unwrap();
+            let n = seen.entry(path.to_string()).or_insert(0);
+            *n += 1;
+            *n - 1
+        };
+        if let Some((name, from)) = self.fail_from
+            && path.as_str() == name
+            && nth >= from
+        {
+            return Err(FsError::Io("the file is locked by another program".into()));
+        }
+        let bytes = self.inner.read(path, max_bytes);
+        if let Some((name, token)) = &self.cancel_after_read_of
+            && path.as_str() == *name
+        {
+            token.cancel();
+        }
+        bytes
+    }
+}

@@ -6,12 +6,75 @@ use paddock_jobs::{CancelToken, Counter, Decision, JobError, WalkEntry, WalkOpti
 use paddock_repo_files::{RepoFilesError, WalkLimits, walk};
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::{Arc, Condvar, LazyLock, Mutex, mpsc};
 
 /// The walk of the ignore rules failed.
 #[derive(Debug, thiserror::Error)]
 #[error("could not read the ignore rules: {0}")]
 pub struct IgnoreError(#[from] RepoFilesError);
+
+/// Lets one shared walk run at a time. A cancelled scan abandons its walk, which goes on until it ends; without this, cancelling and
+/// starting again would pile up walks of a very large tree. A new scan waits (cancellably) for the slot.
+#[derive(Default)]
+pub struct WalkSlot {
+    busy: Mutex<bool>,
+    freed: Condvar,
+}
+
+/// The slot of this process.
+static GLOBAL_SLOT: LazyLock<Arc<WalkSlot>> = LazyLock::new(|| Arc::new(WalkSlot::default()));
+
+/// Held by a running shared walk; frees the slot when dropped.
+struct SlotGuard(Arc<WalkSlot>);
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        *self.0.state() = false;
+        self.0.freed.notify_all();
+    }
+}
+
+impl WalkSlot {
+    /// A free slot.
+    pub fn new() -> Arc<WalkSlot> {
+        Arc::new(WalkSlot::default())
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, bool> {
+        self.busy.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Whether a shared walk (also an abandoned one) is still running.
+    pub fn is_busy(&self) -> bool {
+        *self.state()
+    }
+
+    /// Waits until no walk is running.
+    pub fn wait_free(&self) {
+        let mut busy = self.state();
+        while *busy {
+            busy = self.freed.wait(busy).unwrap_or_else(|p| p.into_inner());
+        }
+    }
+
+    fn acquire(self: &Arc<Self>, cancel: &CancelToken) -> Result<SlotGuard, JobError> {
+        let slot = self.clone();
+        // wakes the wait below when the token fires; it takes the lock first so the wake cannot fall between check and wait
+        let _wake = cancel.on_cancel(move || {
+            drop(slot.state());
+            slot.freed.notify_all();
+        });
+        let mut busy = self.state();
+        loop {
+            cancel.check().map_err(JobError::from)?;
+            if !*busy {
+                *busy = true;
+                return Ok(SlotGuard(self.clone()));
+            }
+            busy = self.freed.wait(busy).unwrap_or_else(|p| p.into_inner());
+        }
+    }
+}
 
 /// Which files and folders `.gitignore` leaves visible, learned from one [`paddock_repo_files::walk`] of the workspace.
 ///
@@ -51,6 +114,7 @@ impl RepoFilesIgnore {
         let walk_root = root.to_path_buf();
         let count_root = root.to_path_buf();
         Self::scan_with(
+            &GLOBAL_SLOT,
             move || Ok(walk(&walk_root, limits)?.into_iter().map(|f| f.path).collect()),
             || {
                 let found = Found(progress, std::sync::atomic::AtomicU64::new(0));
@@ -75,6 +139,7 @@ impl RepoFilesIgnore {
 
     /// The core of [`scan_cancellable`](Self::scan_cancellable) with both walks supplied (a test blocks the shared one).
     pub fn scan_with(
+        slot: &Arc<WalkSlot>,
         shared_walk: impl FnOnce() -> Result<Vec<String>, IgnoreError> + Send + 'static,
         count: impl FnOnce() -> Result<(), JobError>,
         cancel: &CancelToken,
@@ -83,11 +148,13 @@ impl RepoFilesIgnore {
             Walked(Result<Vec<String>, IgnoreError>),
             Cancelled,
         }
+        let guard = slot.acquire(cancel)?;
         let (tx, rx) = mpsc::channel();
         let walked = tx.clone();
         std::thread::Builder::new()
             .name("ignore-walk".into())
             .spawn(move || {
+                let _guard = guard;
                 let _ = walked.send(Message::Walked(shared_walk()));
             })
             .map_err(|e| JobError::Failed(format!("could not start the ignore-rule walk: {}", e.kind())))?;

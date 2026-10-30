@@ -51,6 +51,20 @@ pub enum EngineError {
         /// The repository folder as given.
         root: PathBuf,
     },
+    /// The repository folder cannot be resolved (it does not exist, or cannot be read), so it cannot be said where the index may go.
+    #[error("the repository folder {root} cannot be opened ({why}); choose a folder that exists")]
+    RootUnresolvable {
+        /// The repository folder as given.
+        root: PathBuf,
+        /// What the system said.
+        why: String,
+    },
+    /// The place of the index file cannot be worked out, so it cannot be said that it is outside the repository.
+    #[error("the place of the index file {store} cannot be worked out; give a full path in a folder that exists")]
+    StoreUnresolvable {
+        /// The index file as given.
+        store: PathBuf,
+    },
     /// The job pool has been shut down.
     #[error("the app is shutting down; the index was not started")]
     PoolClosed,
@@ -68,17 +82,24 @@ fn canonical_place(path: &std::path::Path) -> Option<PathBuf> {
             return Some(rest.iter().rev().fold(real, |acc, part| acc.join(part)));
         }
         rest.push(at.file_name()?.to_owned());
-        at = at.parent()?;
+        at = match at.parent()? {
+            p if p.as_os_str().is_empty() => std::path::Path::new("."),
+            p => p,
+        };
     }
 }
 
 impl IndexSetup {
-    /// Refuses an index file inside the repository. A root that cannot be resolved is left to the run, which fails with its own
-    /// message.
+    /// Refuses an index file inside the repository. It fails closed: a root or a store that cannot be resolved is refused with its
+    /// own error, never let through.
     pub fn check(&self) -> Result<(), EngineError> {
-        let (Some(root), Some(store)) = (self.root.canonicalize().ok(), canonical_place(&self.store_path)) else {
-            return Ok(());
-        };
+        let root = self.root.canonicalize().map_err(|e| EngineError::RootUnresolvable {
+            root: self.root.clone(),
+            why: e.kind().to_string(),
+        })?;
+        let store = canonical_place(&self.store_path).ok_or_else(|| EngineError::StoreUnresolvable {
+            store: self.store_path.clone(),
+        })?;
         if store.starts_with(&root) {
             return Err(EngineError::StoreInsideWorkspace {
                 store: self.store_path.clone(),
@@ -120,7 +141,7 @@ fn failed(e: impl std::fmt::Display) -> JobError {
 
 fn run(setup: &IndexSetup, ctx: &JobContext) -> Result<IndexOutcome, JobError> {
     let progress = JobProgress::new(ctx);
-    progress.phase("walk", "Finding files", None);
+    progress.phase("scan", "Scanning the folder", None);
     let fs = DiskFs::new(&setup.root).map_err(failed)?;
     let limits = WalkLimits {
         max_files: setup.limits.snapshot.max_entries,

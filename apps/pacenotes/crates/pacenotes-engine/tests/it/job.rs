@@ -38,7 +38,18 @@ fn a_run_reports_its_phases_indexes_the_files_and_honours_gitignore_with_the_den
     assert!(matches!(seen.first().unwrap().state, JobState::Queued));
     assert!(matches!(seen.last().unwrap().state, JobState::Done));
     assert_eq!(seen.first().unwrap().kind.0, "pacenotes.index");
-    assert_eq!(phase_ids(&seen), ["walk", "read", "extract", "save"]);
+    for snapshot in &seen {
+        if let JobState::Running { phase: Some(p) } = &snapshot.state {
+            assert!(
+                p.phase.total.is_none_or(|t| p.done <= t),
+                "{} of {:?} in {}",
+                p.done,
+                p.phase.total,
+                p.phase.id
+            );
+        }
+    }
+    assert_eq!(phase_ids(&seen), ["scan", "walk", "read", "extract", "save"]);
 }
 
 #[test]
@@ -55,13 +66,29 @@ fn a_second_run_over_an_unchanged_tree_changes_nothing_and_a_change_is_picked_up
 }
 
 #[test]
-fn a_workspace_that_is_missing_fails_with_a_message_instead_of_panicking() {
-    let r = rig(&[("a.rs", "x")]);
-    std::fs::remove_dir_all(r.scratch.path("ws")).unwrap();
-    let err = r.service.start().unwrap().join().unwrap_err();
-    assert!(matches!(err, paddock_jobs::JobError::Failed(_)), "{err:?}");
-    let seen = r.sink.wait_for(|s| ended(s, 1));
-    assert!(matches!(seen.last().unwrap().state, JobState::Failed { .. }));
+fn a_workspace_or_store_that_cannot_be_resolved_is_refused_with_a_typed_error() {
+    let mut r = rig(&[("a.rs", "x")]);
+    let make = |root: std::path::PathBuf, store: std::path::PathBuf| pacenotes_engine::IndexSetup {
+        root,
+        store_path: store,
+        source: std::sync::Arc::new(crate::support::NoLanguages),
+        denylist: std::sync::Arc::new(pacenotes_index::Denylist::new()),
+        limits: pacenotes_index::IndexLimits::default(),
+        read_workers: paddock_jobs::Workers::one(),
+        parse_workers: paddock_jobs::Workers::one(),
+    };
+    let service = |r: &crate::support::Rig, setup| {
+        pacenotes_engine::IndexService::new(r.registry.clone(), r.pool.clone(), std::sync::Arc::new(setup))
+    };
+    r.service = service(&r, make(r.scratch.path("nowhere"), r.scratch.path("index/index.db")));
+    let err = r.service.start().err().unwrap();
+    assert!(matches!(err, pacenotes_engine::EngineError::RootUnresolvable { .. }), "{err:?}");
+    assert!(err.to_string().contains("choose a folder that exists"));
+    r.service = service(&r, make(r.scratch.path("ws"), std::path::PathBuf::new()));
+    let err = r.service.start().err().unwrap();
+    assert!(matches!(err, pacenotes_engine::EngineError::StoreUnresolvable { .. }), "{err:?}");
+    assert!(err.to_string().contains("cannot be worked out"));
+    assert!(r.sink.all().is_empty(), "nothing was registered");
 }
 
 #[test]

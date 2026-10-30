@@ -235,9 +235,6 @@ impl<'a> Indexer<'a> {
             cancel,
             &Tick(self.progress),
             |(path, size)| {
-                if cancel.is_cancelled() {
-                    return Err(cancelled());
-                }
                 if size > self.limits.max_file_bytes {
                     return Ok(Read::TooLarge);
                 }
@@ -261,6 +258,10 @@ impl<'a> Indexer<'a> {
                 }
                 match self.fs.read(&path, self.limits.max_file_bytes) {
                     Ok(bytes) => {
+                        // a Cancel that arrived while the file was being read: do not hash it
+                        if cancel.is_cancelled() {
+                            return Err(cancelled());
+                        }
                         let read_at_ns = self.clock.now_ns();
                         Ok(Read::Hashed {
                             path,
@@ -354,9 +355,6 @@ impl<'a> Indexer<'a> {
         work.sort_by(|a, b| a.path.cmp(&b.path));
         self.progress.phase("extract", "Reading code", Some(work.len() as u64));
         let extracted = par_map_ordered(work, self.parse_workers, cancel, &Tick(self.progress), |w| {
-            if cancel.is_cancelled() {
-                return Err(cancelled());
-            }
             let size = sizes[&w.path];
             let bytes = match self.fs.read(&w.path, self.limits.max_file_bytes) {
                 Ok(b) => b,

@@ -7,7 +7,7 @@ use pacenotes_core::ports::Store;
 use pacenotes_index::{Denylist, EpochClock, IndexError, IndexStore, Indexer, Progress};
 use paddock_jobs::{CancelToken, Workers};
 
-use crate::support::{ParseSource, RecordingFs, p, workspace};
+use crate::support::{ParseSource, RecordingFs, StopFs, p, workspace};
 
 /// Records what the job would show.
 #[derive(Default)]
@@ -372,4 +372,79 @@ fn cancel_while_a_phase_is_under_way_stops_before_the_swap() {
     };
     assert_eq!(ix.run(&mut opened.store, &token), Err(IndexError::Cancelled));
     assert_eq!(opened.store.counts().unwrap(), (0, 0));
+}
+
+/// A Cancel that arrives while a file is being read or parsed, put at that exact point by the doubles (no race).
+#[test]
+fn a_cancel_during_a_read_or_a_parse_stops_the_run_and_writes_nothing() {
+    // read pass: the token fires as m001 is read; the file is not hashed and the run stops
+    let ws = workspace_of(&many(6));
+    let mut opened = IndexStore::open(&ws.path("index.db")).unwrap();
+    let token = CancelToken::new();
+    let mut fs = StopFs::new(&ws.path("ws"));
+    fs.cancel_after_read_of = Some(("src/m001.rs", token.clone()));
+    let (source, deny) = (ParseSource::default(), Denylist::new());
+    let ix = Indexer::new(&fs, &source, &deny);
+    assert_eq!(ix.run(&mut opened.store, &token), Err(IndexError::Cancelled));
+    assert_eq!(opened.store.counts().unwrap(), (0, 0));
+    assert!(source.extracted.lock().unwrap().is_empty(), "nothing was parsed");
+
+    // parse pass: the source cancels while it is handed m003 and reports the stop
+    let token = CancelToken::new();
+    let source = ParseSource {
+        cancel_on: Some(("src/m003.rs", token.clone())),
+        ..ParseSource::default()
+    };
+    let fs = RecordingFs::new(&ws.path("ws"));
+    let ix = Indexer::new(&fs, &source, &deny);
+    assert_eq!(ix.run(&mut opened.store, &token), Err(IndexError::Cancelled));
+    assert_eq!(opened.store.counts().unwrap(), (0, 0), "nothing was written");
+}
+
+#[test]
+fn a_file_that_cannot_be_read_is_counted_in_either_pass_and_the_run_goes_on() {
+    // locked from the first read: dropped in the read pass
+    let ws = workspace_of(&many(4));
+    let mut opened = IndexStore::open(&ws.path("index.db")).unwrap();
+    let mut fs = StopFs::new(&ws.path("ws"));
+    fs.fail_from = Some(("src/m001.rs", 0));
+    let (source, deny) = (ParseSource::default(), Denylist::new());
+    let report = Indexer::new(&fs, &source, &deny)
+        .run(&mut opened.store, &CancelToken::new())
+        .unwrap();
+    assert_eq!((report.added, report.unreadable), (3, 1));
+
+    // readable for the fingerprint, locked by the time it is parsed (the second read)
+    let ws = workspace_of(&many(4));
+    let mut opened = IndexStore::open(&ws.path("index.db")).unwrap();
+    let mut fs = StopFs::new(&ws.path("ws"));
+    fs.fail_from = Some(("src/m002.rs", 1));
+    let report = Indexer::new(&fs, &source, &deny)
+        .run(&mut opened.store, &CancelToken::new())
+        .unwrap();
+    assert_eq!(report.unreadable, 1, "{report:?}");
+    assert_eq!(report.added, 4, "the file is listed, at tier 1");
+    assert_eq!(opened.store.counts().unwrap().0, 4);
+}
+
+/// The read API cuts a chunk at 32 KiB, on a character boundary.
+#[test]
+fn a_chunk_longer_than_32_kib_is_cut_on_a_character_boundary() {
+    // one line that is itself longer than the cut, so the chunker cannot have split it, made of two-byte characters
+    let src = format!("pub fn big() {{ let wide = \"{}\"; }}\n", "\u{e9}".repeat(20_000));
+    let ws = workspace(&[("src/big.rs", src.as_str())]);
+    let mut opened = IndexStore::open(&ws.path("index.db")).unwrap();
+    let fs = RecordingFs::new(&ws.path("ws"));
+    let (source, deny) = (ParseSource::default(), Denylist::new());
+    let ix = Indexer::new(&fs, &source, &deny);
+    ix.run(&mut opened.store, &CancelToken::new()).unwrap();
+    let texts = ix.chunk_texts(&opened.store, &p("src/big.rs")).unwrap();
+    assert!(!texts.is_empty());
+    assert!(
+        texts.iter().all(|t| t.len() <= 32 * 1024),
+        "{:?}",
+        texts.iter().map(String::len).collect::<Vec<_>>()
+    );
+    assert!(texts.iter().any(|t| t.len() > 30 * 1024), "one chunk was long enough to be cut");
+    assert!(texts.iter().all(|t| std::str::from_utf8(t.as_bytes()).is_ok()));
 }

@@ -158,6 +158,7 @@ fn cancel_ends_finding_files_while_the_shared_walk_is_still_running() {
         })
     };
     let result = RepoFilesIgnore::scan_with(
+        &pacenotes_engine::WalkSlot::new(),
         move || {
             entered_tx.send(()).unwrap();
             let _ = release_rx.recv();
@@ -192,4 +193,69 @@ fn cancel_ends_the_count_too_and_a_failed_walk_is_a_failure_with_its_message() {
         &pacenotes_index::NoProgress,
     );
     assert!(matches!(err, Err(paddock_jobs::JobError::Failed(_))), "{:?}", err.err());
+}
+
+/// At most one shared walk runs at a time, an abandoned one included: cancelling and starting again does not pile up walks.
+#[test]
+fn an_abandoned_walk_holds_the_slot_and_the_next_scan_waits_for_it_cancellably() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    let slot = pacenotes_engine::WalkSlot::new();
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let first = paddock_jobs::CancelToken::new();
+    let canceller = {
+        let first = first.clone();
+        std::thread::spawn(move || {
+            entered_rx.recv().unwrap();
+            first.cancel();
+        })
+    };
+    let abandoned = RepoFilesIgnore::scan_with(
+        &slot,
+        move || {
+            entered_tx.send(()).unwrap();
+            let _ = release_rx.recv();
+            Ok(Vec::new())
+        },
+        || Ok(()),
+        &first,
+    );
+    assert!(matches!(abandoned, Err(paddock_jobs::JobError::Cancelled(_))));
+    canceller.join().unwrap();
+    assert!(slot.is_busy(), "the abandoned walk still runs and holds the slot");
+
+    // a scan that is cancelled while it waits for the slot never starts a walk
+    let second = paddock_jobs::CancelToken::new();
+    let started = std::sync::Arc::new(AtomicBool::new(false));
+    let waiting = {
+        let (slot, second, started) = (slot.clone(), second.clone(), started.clone());
+        std::thread::spawn(move || {
+            RepoFilesIgnore::scan_with(
+                &slot,
+                move || {
+                    started.store(true, Ordering::SeqCst);
+                    Ok(Vec::new())
+                },
+                || Ok(()),
+                &second,
+            )
+        })
+    };
+    second.cancel();
+    assert!(matches!(waiting.join().unwrap(), Err(paddock_jobs::JobError::Cancelled(_))));
+    assert!(!started.load(Ordering::SeqCst), "no second walk ran beside the abandoned one");
+
+    // a scan that is not cancelled waits for the abandoned walk to end, then runs
+    let third = {
+        let slot = slot.clone();
+        std::thread::spawn(move || {
+            RepoFilesIgnore::scan_with(&slot, || Ok(vec!["a.rs".to_owned()]), || Ok(()), &paddock_jobs::CancelToken::new())
+        })
+    };
+    drop(release_tx);
+    let ignore = third.join().unwrap().unwrap();
+    assert!(ignore.visible_file(&p("a.rs")));
+    slot.wait_free();
+    assert!(!slot.is_busy());
 }
