@@ -44,6 +44,10 @@ pub(crate) trait StoreHost: Send + Sync {
     fn set_third_party(&self, _plugins: Vec<debrief_store_client::protocol::ThirdPartyPlugin>) {}
     /// Starts what serves the stores ahead of the first one (a background thread calls it after the first paint).
     fn warm_up(&self) {}
+    /// How often the process serving the stores was restarted (0 for a store in process).
+    fn restarts(&self) -> usize {
+        0
+    }
 }
 
 /// The store worker of the app: one process for every window's store.
@@ -131,6 +135,10 @@ impl StoreHost for WorkerHost {
         Ok((Arc::new(store), manifest))
     }
 
+    fn restarts(&self) -> usize {
+        self.worker.status().restarts
+    }
+
     fn warm_up(&self) {
         let started = std::time::Instant::now();
         match self.worker.warm_up() {
@@ -178,6 +186,8 @@ pub(crate) struct Engine {
     last_report: Mutex<Option<debrief_core::ports::ImportReport>>,
     /// The running import's progress (`import_progress`), as its job last read it.
     progress: Mutex<debrief_core::workspace::ProgressSnapshot>,
+    /// The store worker's restarts this window has checked the time order after.
+    seen_restarts: std::sync::atomic::AtomicUsize,
 }
 
 /// Scratch folders made by this process (unique per window and store).
@@ -186,7 +196,6 @@ static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(1);
 impl Engine {
     pub(crate) fn new(host: Arc<dyn StoreHost>, root: PathBuf, label: &str, profile: Profile) -> Engine {
         Engine {
-            host,
             root,
             label: label.to_string(),
             current: RwLock::default(),
@@ -195,6 +204,8 @@ impl Engine {
             stale_parsers: Mutex::new(0),
             last_report: Mutex::default(),
             progress: Mutex::new(debrief_core::workspace::ProgressSnapshot::stopped()),
+            seen_restarts: std::sync::atomic::AtomicUsize::new(host.restarts()),
+            host,
         }
     }
 
@@ -282,6 +293,13 @@ impl Engine {
         if let Some(p) = previous {
             retire(p);
         }
+    }
+
+    /// Whether the store worker restarted since the last call (it reopened the store; an ordering it was running is
+    /// gone, so the time order may be incomplete).
+    pub(crate) fn worker_restarted(&self) -> bool {
+        let now = self.host.restarts();
+        now > self.seen_restarts.swap(now, std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Opens the store already in `dir` (a restored window) as the window's store.

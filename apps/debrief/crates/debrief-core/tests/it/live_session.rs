@@ -179,6 +179,7 @@ fn file_changes_become_states_and_the_status_lists_rates() {
             held: Vec::new(),
             first_new: None,
             notices: Vec::new(),
+            order_incomplete: false,
         },
         &TailOptions::default(),
     );

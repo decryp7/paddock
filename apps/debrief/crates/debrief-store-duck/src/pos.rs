@@ -73,7 +73,20 @@ pub(crate) fn complete(conn: &Connection) -> duckdb::Result<bool> {
     })
 }
 
-/// Whether `e` ended a statement that was cancelled: the thread's control was cancelled, or DuckDB says interrupted.
+/// Positions the events with ids from `first_new` on after every positioned event, in their own time order, without
+/// checking that they sort after them: for stale positions, so new events are listed while the ordering job repairs
+/// the order. The stale mark stays.
+pub(crate) fn append_at_end(conn: &Connection, first_new: u64) -> duckdb::Result<()> {
+    let positioned = conn.query_row("SELECT count(*) FROM ord", [], |r| r.get::<_, u64>(0))?;
+    conn.execute(
+        "INSERT INTO ord SELECT (? + row_number() OVER (ORDER BY coalesce(ts, 9223372036854775807), source, line, id) - 1)::UBIGINT, id FROM events WHERE id >= ? ORDER BY 1",
+        params![positioned, first_new],
+    )?;
+    Ok(())
+}
+
+/// Whether `e` ended a statement that was cancelled: the thread's control was cancelled, or DuckDB says interrupted
+/// (duckdb-rs maps no error code to an interrupt; its own tests match this text too).
 fn cancelled(e: &duckdb::Error) -> bool {
     debrief_core::ql::QueryControl::current().is_some_and(|c| c.is_cancelled()) || e.to_string().contains("Interrupted")
 }

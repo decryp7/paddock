@@ -75,8 +75,16 @@ pub(crate) async fn store_maintenance<R: Runtime>(app: AppHandle<R>, state: Curr
     start_maintenance(&app, &state, action)
 }
 
+/// The percentage of `p` (0 to 100), never below the highest reported so far (`best`); `None` before an estimate.
+fn monotonic_percent(best: &std::sync::atomic::AtomicU64, p: debrief_core::ql::QueryProgress) -> Option<u64> {
+    (p.total > 0).then(|| {
+        let now = p.done.min(p.total).saturating_mul(100) / p.total;
+        best.fetch_max(now, std::sync::atomic::Ordering::SeqCst).max(now)
+    })
+}
+
 /// After an open job: orders the window's events by time when its store says the order is incomplete.
-pub(crate) fn order_events_after_open<R: Runtime>(app: &AppHandle<R>, state: &CurrentWindow) {
+pub(crate) fn order_events_if_incomplete<R: Runtime>(app: &AppHandle<R>, state: &CurrentWindow) {
     if let Ok(store) = state.engine.store() {
         order_events_if_needed(app, state, store.as_ref());
     }
@@ -111,9 +119,14 @@ pub(crate) fn start_maintenance<R: Runtime>(app: &AppHandle<R>, state: &CurrentW
     let spec = JobSpec::new(JobKind::Maintenance, action.title()).window(state.label());
     let win = state.arc().clone();
     let (controls, control) = crate::jobs::store_cancel(Controls::default());
-    // The ordering is one long statement: DuckDB's estimate of it, relayed to the control, is the job's percentage.
+    // The ordering is one long statement: DuckDB's estimate of it, relayed to the control, is the job's percentage,
+    // which never goes back (the estimate restarts with each statement and a retry).
     let controls = if action == MaintenanceAction::OrderEvents {
-        crate::jobs::with_stage_probe(controls, &control, "Ordering events by time", "Ordering events by time")
+        let (c, best) = (control.clone(), std::sync::atomic::AtomicU64::new(0));
+        controls.with_probe(move || {
+            monotonic_percent(&best, c.progress())
+                .map(|pct| crate::jobs::JobProgress::in_phase(MaintenanceAction::OrderEvents.phase(), PhaseScale::Count, pct, 100))
+        })
     } else {
         controls
     };
@@ -389,6 +402,26 @@ mod tests {
         fn order_complete(&self) -> debrief_core::ports::StoreResult<bool> {
             Ok(false)
         }
+    }
+
+    #[test]
+    fn the_ordering_jobs_percentage_never_goes_back() {
+        use debrief_core::ql::{QueryProgress, QueryStage};
+        let p = |done, total| QueryProgress {
+            stage: QueryStage::Evaluating,
+            done,
+            total,
+        };
+        let best = std::sync::atomic::AtomicU64::new(0);
+        assert_eq!(monotonic_percent(&best, p(0, 0)), None, "no estimate yet");
+        assert_eq!(monotonic_percent(&best, p(50, 100)), Some(50));
+        assert_eq!(
+            monotonic_percent(&best, p(10, 200)),
+            Some(50),
+            "the next statement starts its estimate again"
+        );
+        assert_eq!(monotonic_percent(&best, p(180, 200)), Some(90));
+        assert_eq!(monotonic_percent(&best, p(300, 200)), Some(100), "never above 100");
     }
 
     #[test]

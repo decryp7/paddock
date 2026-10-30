@@ -35,9 +35,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-/// What a live refresh says while the positions are stale (the ordering job repairs them).
-pub(crate) const STALE_NOTICE: &str = "The events are not fully in time order (an earlier ordering failed): new events are listed, \
-     but the event list may show them out of place until Debrief orders the events again.";
+/// What a live refresh says while the positions are stale (the ordering job repairs them; the app starts it when a
+/// refresh says this).
+pub(crate) const STALE_NOTICE: &str = "The events are not fully in time order (an earlier ordering failed): new events are listed at \
+     the end until Debrief has put the events in time order again.";
 
 /// How long live tail waits for a running import before it gives up for this change.
 pub(crate) const TAIL_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -437,9 +438,14 @@ impl Inner {
             });
             out.sources_changed.extend(done.iter().filter(|a| a.events > 0).map(|a| a.id));
             if pos::is_stale(conn) {
-                // An ordering failed earlier: the ordering job repairs it. Reordering on every refresh would rebuild
-                // all positions twice per refresh and fail the same way.
+                // An ordering failed earlier: the ordering job repairs it (the app starts it on this notice). Reordering
+                // on every refresh would rebuild all positions twice per refresh and fail the same way; the new events
+                // are positioned after the others so the event list shows them meanwhile.
+                if let Err(e) = pos::append_at_end(conn, first_new) {
+                    log::warn!("the new events could not be positioned: {e}");
+                }
                 out.notices.push(STALE_NOTICE.to_string());
+                out.order_incomplete = true;
             } else {
                 // The new events follow the positioned ones (the usual case) or every event is put in order again.
                 let extended = pos::append(conn, first_new, before).unwrap_or_else(|e| {
@@ -577,7 +583,7 @@ impl DuckStore {
         if self.inner.importing.swap(true, Ordering::SeqCst) {
             return Err(StoreError::Busy("an import is running; wait for it or cancel it".into()));
         }
-        let guard = Importing(self.inner.clone());
+        let guard = Importing::bulk(self.inner.clone());
         let canonical = paths
             .iter()
             .map(|p| std::fs::canonicalize(p).map_err(|e| StoreError::Io(format!("{}: {e}", p.display()))))

@@ -697,7 +697,7 @@ pub(crate) async fn open_project<R: Runtime>(
             crate::recent::opened_project(&handle, &path, &opened.name);
         }
         // Last, once the project is open (and annotated): an incomplete time order is repaired by its own job.
-        crate::store_pane::order_events_after_open(&handle, &win);
+        crate::store_pane::order_events_if_incomplete(&handle, &win);
         Ok(crate::jobs::Done::new(opened).with_result(crate::jobs::JobResult::workspace()))
     })
 }

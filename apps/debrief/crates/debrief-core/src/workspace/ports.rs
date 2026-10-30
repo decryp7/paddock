@@ -173,6 +173,7 @@ impl Ingest for WorkspaceStore {
             held: Vec::new(),
             first_new: None,
             notices: Vec::new(),
+            order_incomplete: false,
         })
     }
 }

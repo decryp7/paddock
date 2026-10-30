@@ -317,7 +317,13 @@ fn a_stale_order_stays_marked_through_live_refreshes_until_the_ordering_job_repa
     let r = store.append_tail(std::slice::from_ref(&file)).unwrap();
     assert_eq!(r.appended, 2, "{r:?}");
     assert_eq!(stale(&store), 1, "an append does not clear the mark");
+    assert_eq!(
+        store.positioned().unwrap(),
+        store.summary().unwrap().total as u64,
+        "the new events are listed (positioned at the end) while the order waits for its repair"
+    );
     assert!(r.notices.iter().any(|n| n.contains("time order")), "the refresh says so: {r:?}");
+    assert!(r.order_incomplete, "and tells the app to run the ordering job");
     assert!(!store.order_complete().unwrap());
     use debrief_core::ports::{Maintain, MaintenanceAction};
     store.maintain(MaintenanceAction::OrderEvents).unwrap();
@@ -352,6 +358,40 @@ fn a_live_refresh_that_cannot_order_the_new_events_says_so_and_marks_the_positio
     assert_eq!(stale(&store), 1, "the append's fallback goes through the one ordering");
 }
 
+/// Whether `flag` was ever set while `f` ran (a thread watches it the whole time).
+fn ever_set(flag: &AtomicBool, f: impl FnOnce()) -> bool {
+    let (seen, done) = (AtomicBool::new(false), AtomicBool::new(false));
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            while !done.load(Ordering::SeqCst) {
+                if flag.load(Ordering::SeqCst) {
+                    seen.store(true, Ordering::SeqCst);
+                }
+                std::thread::yield_now();
+            }
+        });
+        f();
+        done.store(true, Ordering::SeqCst);
+    });
+    seen.load(Ordering::SeqCst)
+}
+
+#[test]
+fn only_bulk_imports_set_the_flag_the_index_writer_gives_its_memory_back_for() {
+    let dir = Dir::new("bulk-flag");
+    let (store, file) = followed(&dir, &[]);
+    assert!(!store.inner.bulk_import.load(Ordering::SeqCst));
+    // A live refresh holds the store briefly: the index writer keeps its heaps.
+    assert!(!ever_set(&store.inner.bulk_import, || {
+        store.append_tail(std::slice::from_ref(&file)).unwrap();
+    }));
+    // An import is a bulk import.
+    assert!(ever_set(&store.inner.bulk_import, || {
+        store.open(&samples()).unwrap().wait().unwrap();
+    }));
+    assert!(!store.inner.bulk_import.load(Ordering::SeqCst), "and it ends with the import");
+}
+
 #[test]
 fn the_catalogue_waits_while_heavy_work_holds_the_store() {
     let dir = Dir::new("heavy-catalogue");
@@ -372,6 +412,15 @@ fn the_catalogue_waits_while_heavy_work_holds_the_store() {
     drop(held);
     // ...and finishes once the lock is free.
     assert!(store.wait_for_catalogue(std::time::Duration::from_secs(60)).unwrap());
+}
+
+#[test]
+fn the_import_s_ordering_percentage_never_goes_back() {
+    assert_eq!(ordering_percent(0, 50, 100), 50);
+    assert_eq!(ordering_percent(50, 10, 200), 50, "the next statement starts its estimate again");
+    assert_eq!(ordering_percent(50, 180, 200), 90);
+    assert_eq!(ordering_percent(90, 300, 200), 100);
+    assert_eq!(ordering_percent(0, 0, 0), 0);
 }
 
 #[test]

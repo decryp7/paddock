@@ -539,8 +539,8 @@ pub struct FtsShared {
     pub pending: AtomicU64,
     /// The last indexing failure.
     pub failure: Mutex<Option<String>>,
-    /// The store's flag of a running import (`Inner::importing`).
-    importing: Arc<AtomicBool>,
+    /// The store's flag of a running bulk import (`Inner::bulk_import`; not a live refresh).
+    bulk_import: Arc<AtomicBool>,
 }
 
 /// The indexing thread of a store; stopped and joined on drop.
@@ -556,7 +556,7 @@ impl FtsService {
         dir: &Path,
         conn: Connection,
         write_lock: Arc<Mutex<()>>,
-        importing: Arc<AtomicBool>,
+        bulk_import: Arc<AtomicBool>,
         budget: WriterBudget,
     ) -> Result<FtsService> {
         let epoch = match meta_u64(&conn, "fts_epoch") {
@@ -577,7 +577,7 @@ impl FtsService {
             wake: (Mutex::new(true), Condvar::new()),
             pending: AtomicU64::new(0),
             failure: Mutex::new(None),
-            importing,
+            bulk_import,
         });
         crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
@@ -694,7 +694,7 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
     let Ok(_writing) = write_lock.try_lock() else {
         // An import holds the store, with its own memory budget: the index writer's heaps are given back now, so the
         // two never add up; the next step starts a new writer. A brief holder (a live refresh) keeps the writer.
-        if s.importing.load(Ordering::SeqCst) {
+        if s.bulk_import.load(Ordering::SeqCst) {
             drop_writer(s);
         }
         return Ok(false);
@@ -853,7 +853,7 @@ mod tests {
             wake: (Mutex::new(false), Condvar::new()),
             pending: AtomicU64::new(1),
             failure: Mutex::new(None),
-            importing: Arc::new(AtomicBool::new(false)),
+            bulk_import: Arc::new(AtomicBool::new(false)),
         };
         let write_lock = Mutex::new(());
         let held = write_lock.lock().unwrap();
@@ -861,7 +861,7 @@ mod tests {
         assert!(!step(&s, &dir.join(SEGMENTS_DIR), &conn, &write_lock, 1).unwrap());
         assert!(crate::lock(&s.writer).is_some(), "a live refresh does not cost the writer");
         // An import: its budget and the writer's heaps never add up.
-        s.importing.store(true, Ordering::SeqCst);
+        s.bulk_import.store(true, Ordering::SeqCst);
         assert!(!step(&s, &dir.join(SEGMENTS_DIR), &conn, &write_lock, 1).unwrap());
         assert!(
             crate::lock(&s.writer).is_none(),

@@ -160,10 +160,12 @@ fn with_ordering_percent<T>(conn: &Connection, progress: &ImportProgress, f: imp
     let (stop, stopped) = std::sync::mpsc::channel::<()>();
     let out = std::thread::scope(|s| {
         s.spawn(move || {
+            // Never backwards: DuckDB's estimate starts again with each statement (and a retry).
+            let mut best = 0;
             while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(crate::progress::POLL) {
                 if let Some(p) = crate::progress::from_duckdb(&handle.query_progress()) {
-                    let percent = p.done.saturating_mul(100) / p.total.max(1);
-                    progress.set_stage(Some(&format!("Ordering events by time ({percent}%)")));
+                    best = ordering_percent(best, p.done, p.total);
+                    progress.set_stage(Some(&format!("Ordering events by time ({best}%)")));
                 }
             }
         });
@@ -173,6 +175,11 @@ fn with_ordering_percent<T>(conn: &Connection, progress: &ImportProgress, f: imp
     });
     let _ = conn.set_query_progress_tracking(false);
     out
+}
+
+/// The ordering's percentage from `done` of `total`, never below `best` and never above 100.
+fn ordering_percent(best: u64, done: u64, total: u64) -> u64 {
+    best.max(done.min(total).saturating_mul(100) / total.max(1))
 }
 
 /// What the user is told when the events could not be put in time order.
@@ -301,7 +308,9 @@ pub(crate) struct Inner {
     pub(crate) state: RwLock<State>,
     /// Bumped by every change to the events (keys read caches).
     pub(crate) generation: Arc<AtomicU64>,
-    pub(crate) importing: Arc<AtomicBool>,
+    pub(crate) importing: AtomicBool,
+    /// A bulk import runs (not a live refresh, which also sets `importing` for its brief hold of the store).
+    pub(crate) bulk_import: Arc<AtomicBool>,
     /// The time window later imports read (ADR 0047).
     pub(crate) import_window: RwLock<debrief_core::ingest::ImportWindow>,
     /// Held by whatever rewrites the catalog (an import, compaction, positions, removal).
@@ -946,11 +955,11 @@ impl DuckStore {
         let parsers = Arc::new(parsers);
         let write_lock = Arc::new(Mutex::new(()));
         let heavy = Arc::new(Mutex::new(()));
-        let importing = Arc::new(AtomicBool::new(false));
+        let bulk_import = Arc::new(AtomicBool::new(false));
         let started = conn
             .try_clone()
             .map_err(anyhow::Error::from)
-            .and_then(|c| fts::FtsService::start(dir, c, write_lock.clone(), importing.clone(), opts.index));
+            .and_then(|c| fts::FtsService::start(dir, c, write_lock.clone(), bulk_import.clone(), opts.index));
         let (fts, fts_error) = match started {
             Ok(f) => (Some(f), None),
             Err(e) => {
@@ -979,7 +988,8 @@ impl DuckStore {
                     unrecognized: Vec::new(),
                 }),
                 generation: Arc::new(AtomicU64::new(0)),
-                importing,
+                importing: AtomicBool::new(false),
+                bulk_import,
                 import_window: RwLock::new(Default::default()),
                 write_lock,
                 heavy,
@@ -1060,11 +1070,21 @@ impl DuckStore {
     }
 }
 
-/// Clears the "import running" flag when the job ends, however it ends.
+/// Clears the "import running" flag (and the bulk import's) when the job ends, however it ends.
 pub(crate) struct Importing(pub(crate) Arc<Inner>);
+
+impl Importing {
+    /// A bulk import (open, reload, open at the end): it also sets `bulk_import`, for which the index writer gives its
+    /// heaps back (an import's memory budget and the writer's never add up). The caller set `importing`.
+    pub(crate) fn bulk(inner: Arc<Inner>) -> Importing {
+        inner.bulk_import.store(true, Ordering::SeqCst);
+        Importing(inner)
+    }
+}
 
 impl Drop for Importing {
     fn drop(&mut self) {
+        self.0.bulk_import.store(false, Ordering::SeqCst);
         self.0.importing.store(false, Ordering::SeqCst);
     }
 }
@@ -1098,7 +1118,7 @@ impl Ingest for DuckStore {
         if self.inner.importing.swap(true, Ordering::SeqCst) {
             return Err(StoreError::Busy("an import is running; wait for it or cancel it".into()));
         }
-        let guard = Importing(self.inner.clone());
+        let guard = Importing::bulk(self.inner.clone());
         let canonical = paths
             .iter()
             .map(|p| std::fs::canonicalize(p).map_err(|e| StoreError::Io(format!("{}: {e}", p.display()))))

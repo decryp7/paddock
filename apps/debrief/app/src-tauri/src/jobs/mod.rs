@@ -553,6 +553,20 @@ where
     E: JobFailure + Send + 'static,
 {
     let jobs = app.try_state::<Jobs>().ok_or("Debrief is not ready yet")?;
+    // After every window job: a store worker that restarted meanwhile reopened the store, and an ordering it was
+    // running is gone, so the window checks its time order (at most one ordering job runs).
+    let (handle, window) = (app.clone(), spec.source.window.clone());
+    let f = move |ctx: &JobCtx| {
+        let out = f(ctx);
+        if let Some(label) = &window {
+            if let Ok(win) = crate::windows::CurrentWindow::of(&handle, label) {
+                if win.engine.worker_restarted() {
+                    crate::store_pane::order_events_if_incomplete(&handle, &win);
+                }
+            }
+        }
+        out
+    };
     jobs.submit(spec, controls, f).map(|h| h.id).map_err(|r| r.to_string())
 }
 

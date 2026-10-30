@@ -63,6 +63,10 @@ pub struct TailAppend {
     /// What the user should know although the refresh worked (e.g. the events could not be put in time order).
     #[serde(default)]
     pub notices: Vec<String>,
+    /// The events' time order is incomplete (an ordering failed): the new events were listed at the end, and the app
+    /// runs the ordering job (`MaintenanceAction::OrderEvents`).
+    #[serde(default)]
+    pub order_incomplete: bool,
 }
 
 /// Where the events a refresh added start (ids only grow, so they are all at and after `id`).

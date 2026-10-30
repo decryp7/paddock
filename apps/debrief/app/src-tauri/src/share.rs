@@ -365,7 +365,7 @@ pub(crate) async fn open_bundle<R: Runtime>(
         opened.bundle = Some(serde_json::to_value(&extracted.manifest).map_err(err)?);
         opened.folder = Some(extracted.dir.to_string_lossy().into_owned());
         log::info!(Manifest = extracted.manifest.is_some(); "Bundle opened");
-        crate::store_pane::order_events_after_open(&handle, &win);
+        crate::store_pane::order_events_if_incomplete(&handle, &win);
         Ok(crate::jobs::Done::new(opened).with_result(crate::jobs::JobResult::workspace()))
     })
 }
