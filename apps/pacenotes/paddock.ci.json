@@ -13,6 +13,8 @@
     "node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C52",
     "cd apps/pacenotes",
     "node --test scripts/check-no-cargo-metadata.test.mjs",
-    "node scripts/check-no-cargo-metadata.mjs"
+    "node scripts/check-no-cargo-metadata.mjs",
+    "node --test scripts/check-no-test-hooks.test.mjs",
+    "node scripts/check-no-test-hooks.mjs"
   ]
 }
