@@ -1009,3 +1009,36 @@ otherwise, and for TypeScript, revert the fix and run the new test), in the revi
 (`-p <crate>`, `--timeout-multiplier`, `CARGO_BUILD_JOBS=2`), and reports whether the test fails. **Follow-up, not
 built:** a CI job that runs `cargo mutants --in-diff` over the shared crates' changes, to be added after the releases.
 
+## A start window on a wall clock doubled Dyno's agent on a cold disk (2026-10-30, Dyno)
+In a fresh macOS VM (a 32 MB binary took 50 s to read) the first launch of Dyno 1.0 ran two `dyno-agent run` children
+on one `dyno.db`; after Quit one stayed as an orphan. The app's log showed the cause: the link gave up on its agent after
+a fixed 5 s (`SPAWN_WAIT`), started another after a 2 s backoff, and its launcher dropped the first process's handle when
+it stored the second, so Quit stopped only the newest. Nothing stopped a second agent either: no lock on the data folder,
+and a busy database looked damaged to the store, which moves a damaged file aside. **Rule:** a single-instance process
+holds an OS lock for its whole life (a file lock on its data folder) and a second one exits before it opens anything; a
+host waits for a child it started on the child's run state (ADR 0031), never starts another while it holds one, and ends
+it through the handle it holds (rule 53). Reproduce with a start gated by the test, not with load.
+
+**Follow-up (review of the hand-over, 2026-10-30):** a wait judged on run state still needs a way out the user can see.
+Three waits could show only "Starting..." forever: a service that "supervises" on paper (switched off in Login Items,
+job dropped), a child that runs but never writes its discovery file, and another agent holding the lock after its file
+was deleted. **Rule:** every wait without a time limit reports a cause and a Retry once it is long (ER-19), a "ready"
+discovery file must be newer than the wait or answer (a stale file caused exit-3 launch loops and a false "Agent
+stopped"), and a supervisor's claim is checked against the lock, which nothing can fake. Open: kickstart after hand-over,
+re-probing `RequiresApproval`, the `is_held` probe rate, the `/tmp/Dyno` fallback (ADR 0010 §11).
+
+## Five fixes in two days meant a supervisor with no owner and no state (2026-10-30, Dyno)
+Dyno's agent link needed five rounds of fixes on the release path (a fixed wait that doubled the agent, endless silent waits,
+a stale discovery file taken as ready, a launch before a Windows lock was released, a quit outcome read twice), each approved in
+review and each followed by a failure on another OS. The cause was not any one interleaving: the supervisor had no single
+owner and no explicit state. Five threads wrote 12 flags, "which wait are we in" was the function being executed, and each
+decision was assembled from several reads that other threads and the OS changed in between. **Rule:** a supervisor of a
+process (start, find, hand over, stop) is a pure `step(event) -> commands` machine with one owner thread; its phase says what
+it waits for; every answer from the world carries the number of the thing it is about (look, connect, child generation,
+connection) and a stale one is dropped; a child is held until its end is reported; a decision that must not change (the quit
+outcome) is taken once, in `step`, and stored; the owner never blocks (slow ports answer as events); every transition is
+published and tests wait on it, not on flags or sleeps. Prove the machine with a bounded model check of every interleaving,
+and prove the check by making each historical bug a mutant it must catch (Dyno ADR 0025). Two things the first prototype got
+wrong and a review caught: releasing the child before it is gone (a second agent while the first still runs), and an event
+without the generation it is about (an old child's exit taken for the new one's).
+

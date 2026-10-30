@@ -911,3 +911,96 @@ fn the_sampler_runs_as_live_work() {
     }
     assert_eq!(role, Some(dyno_platform::priority::ThreadRole::Live));
 }
+
+// ------------------------------------------------------------------------------------------------- one agent per folder
+// A second agent on the same data folder refuses to start, says why, and leaves the first one's discovery file and
+// history alone (a Dyno 1.0 test VM ran two agents on one `dyno.db` after a slow first start).
+
+fn start_on(dirs: &Dirs) -> Result<Running, String> {
+    let fake = Fake::new();
+    fake.add_process(process(100, "busy", 60.0));
+    Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).map_err(|e| e.to_string())
+}
+
+#[test]
+fn a_second_agent_on_the_same_data_folder_refuses_to_start_and_says_so() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    let first = start_on(&dirs).unwrap();
+    let before = dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap();
+
+    let second = start_on(&dirs);
+    let message = match second {
+        Ok(r) => {
+            r.stop();
+            panic!("a second agent started on the same data folder");
+        }
+        Err(e) => e,
+    };
+    assert!(message.contains("already running"), "{message}");
+    assert!(
+        message.contains("another computer"),
+        "a shared network home can hold it from elsewhere: {message}"
+    );
+    // The agent's log file says it too (the app starts the agent with stderr discarded; a service's stderr is elsewhere).
+    let log = std::fs::read_to_string(dirs.logs().join("agent.log")).unwrap_or_default();
+    assert!(log.contains("already running"), "agent.log: {log:?}");
+    assert_eq!(
+        dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap(),
+        before,
+        "the refused agent left the first one's discovery file alone"
+    );
+
+    // Once the first one is gone, the folder is free again (the lock ends with its holder).
+    first.stop();
+    let third = start_on(&dirs).unwrap();
+    assert_ne!(
+        dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap().endpoint,
+        before.endpoint
+    );
+    third.stop();
+}
+
+#[test]
+fn a_folder_that_cannot_lock_still_runs_the_agent_but_says_so_in_the_log_and_the_activity() {
+    use dyno_agent::instance::LockError;
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    let fake = Fake::new();
+    fake.add_process(process(100, "busy", 60.0));
+    let unsupported = LockError::Io {
+        path: dirs.instance_lock(),
+        source: std::io::Error::new(std::io::ErrorKind::Unsupported, "file locking is not supported here"),
+    };
+    let running = Running::start_with_lock(
+        dirs.clone(),
+        fake.platform(),
+        Box::new(fake.clone()),
+        Box::new(|_| Ok(())),
+        dyno_agent::disk::DiskPorts::none(),
+        Err(unsupported),
+    )
+    .unwrap();
+    let log = std::fs::read_to_string(dirs.logs().join("agent.log")).unwrap_or_default();
+    assert!(log.contains("not supported"), "agent.log: {log:?}");
+    let (peer, _) = connect(&dirs).unwrap();
+    let Reply::Activities(entries) = ask(&peer, Request::Activity { limit: 50 }).unwrap() else {
+        panic!("not activities")
+    };
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.title.contains("second agent") && e.detail.contains("not supported")),
+        "{entries:?}"
+    );
+    running.stop();
+}
+
+#[test]
+fn agents_on_different_data_folders_run_side_by_side() {
+    let tmp = tempfile::tempdir().unwrap();
+    let a = start_on(&Dirs::at(tmp.path().join("a"))).unwrap();
+    let b = start_on(&Dirs::at(tmp.path().join("b"))).unwrap();
+    a.stop();
+    b.stop();
+}

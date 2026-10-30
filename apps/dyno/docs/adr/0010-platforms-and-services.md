@@ -67,6 +67,28 @@ choice on Windows (a service) is the wrong one for Dyno.
 10. **Where files live.** `%LOCALAPPDATA%\Dyno`, `~/Library/Application Support/Dyno`, `$XDG_DATA_HOME/dyno`
     (`~/.local/share/dyno`); process-control state under `%LOCALAPPDATA%\Dyno`, `~/Library/Application Support/Dyno`,
     `$XDG_STATE_HOME/dyno`. `DYNO_DATA_DIR` overrides the data folder (tests use it, so none touches a real profile).
+11. **One agent, and who runs it (amended 2026-10-30).** The agent holds an OS lock on `agent.lock` in its data folder;
+    a second one exits at once with code 3. While launchd (`KeepAlive`) or systemd (`Restart=always`) supervises the
+    agent, the app starts none of its own and waits for the service's. Turning Launch at login on while the app's own
+    agent runs hands over: the app asks its agent to exit and ends that process (only the one it started, rule 53), and
+    the service's agent, refused until then, takes over at its next restart (launchd's `ThrottleInterval` 10 s,
+    systemd's `RestartSec` 5 s). Turning it off: the app asks the former service's agent to exit over its connection
+    (never a kill) and starts its own. A Windows `Run` entry starts the agent only at the next logon, so it supervises
+    nothing now and the app keeps its own agent (which Quit then leaves running, as before).
+    Waits are judged by run state (ADR 0031), and none ends on a clock, but each long one says why and offers Retry:
+    after about 5 s "still starting" (the agent this app started has not written its discovery file: Retry ends that
+    process through its handle and starts again), "waiting for the login service" (Retry starts the app's own agent) and
+    "another agent holds the data folder" (Retry runs the connection steps again). A service that supervises on paper
+    but runs nothing (macOS: SMAppService enabled, not switched off in Login Items, and the job loaded in launchd;
+    Linux: `systemctl --user is-active`, `active` or `activating`) is told by the lock: when no process held it across
+    four rechecks in a row (about 20 s, longer than launchd's 10 s throttle), the app starts its own agent and says so,
+    and does not hand it over again until the service shows it works. A discovery file counts as ready only if it was
+    written after the wait began or its agent answers; a refusal or a missing lock is written to `logs/agent.log` too.
+    Follow-ups, not yet done: kickstart the service after a hand-over instead of waiting for its throttle; probe
+    `RequiresApproval` again so an approval given later is noticed; slow the `is_held` probe in the waits (it takes and
+    releases the lock at every look); the `/tmp/Dyno` fallback folder for an unwritable data folder. For 1.0.1: keep the service fallback visible after
+    Running (an activity entry or a chip note); name the OS's own login-items place on Linux in that note; on Quit while
+    the fallback is on and the service supervises, end the app's own agent so the service's takes over.
 
 ## Consequences
 

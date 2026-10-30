@@ -219,3 +219,52 @@ fn macos_bootstraps_only_after_launchd_dropped_the_old_job_and_the_wait_is_bound
     assert_eq!(*waited.lock().unwrap(), GONE_WAIT);
     assert!(s.calls().last().unwrap().contains("bootstrap"));
 }
+
+#[test]
+fn launchd_and_systemd_supervise_the_agent_and_a_windows_run_entry_does_not() {
+    // macOS: a bootstrapped launch agent (KeepAlive) is started and restarted by launchd.
+    let dir = tempfile::tempdir().unwrap();
+    let s = Script::default();
+    let mut mac = service(Os::Mac, dir.path(), &s);
+    assert!(!mac.supervised());
+    mac.install().unwrap();
+    assert!(mac.supervised());
+    mac.uninstall().unwrap();
+    assert!(!mac.supervised());
+
+    // Linux: what systemd is running or about to restart (is-active: active, or activating during RestartSec); a unit that
+    // is merely enabled but stopped, failed or inactive supervises nothing now.
+    let dir = tempfile::tempdir().unwrap();
+    let s = Script::default();
+    let mut linux = service(Os::Linux, dir.path(), &s);
+    for (ok, out) in [(false, "inactive\n"), (false, "failed\n"), (false, "unknown\n")] {
+        s.answers.lock().unwrap().clear();
+        s.answer("is-active", ok, out);
+        assert!(!linux.supervised(), "{out:?}");
+    }
+    s.answers.lock().unwrap().clear();
+    s.answer("is-active", true, "active\n");
+    assert!(linux.supervised());
+    s.answers.lock().unwrap().clear();
+    // `systemctl is-active` exits non-zero while a unit is activating (auto-restart); it is still being restarted.
+    s.answer("is-active", false, "activating\n");
+    assert!(linux.supervised());
+    assert!(
+        s.calls().iter().any(|c| c == "systemctl --user is-active dyno-agent.service"),
+        "{:?}",
+        s.calls()
+    );
+    assert!(
+        !s.calls().iter().any(|c| c.contains("is-enabled")),
+        "enabled is not running: {:?}",
+        s.calls()
+    );
+
+    // Windows: the Run entry starts the agent at the next logon only; nothing restarts it now.
+    let dir = tempfile::tempdir().unwrap();
+    let s = Script::default();
+    s.answer("query", true, "Dyno    REG_SZ    \"/opt/dyno/dyno-agent\" run");
+    let mut win = service(Os::Windows, dir.path(), &s);
+    assert!(matches!(win.status(), Status::Installed { .. }));
+    assert!(!win.supervised());
+}

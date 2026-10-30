@@ -17,6 +17,7 @@ pub mod files;
 pub mod handlers;
 pub mod handlers_search;
 pub mod hardware;
+pub mod instance;
 pub mod inventory;
 pub mod issues;
 pub mod jobs;
@@ -34,6 +35,38 @@ pub mod unusual;
 use agent::Shared;
 use std::sync::Arc;
 
+/// Why an agent did not start.
+#[derive(Debug)]
+pub enum StartError {
+    /// Another agent already runs for this data folder ([`instance`]); this one must exit without touching anything.
+    AlreadyRunning(instance::LockError),
+    /// Anything else, with its message.
+    Failed(String),
+}
+
+impl std::fmt::Display for StartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StartError::AlreadyRunning(e) => write!(f, "{e}; this one exits."),
+            StartError::Failed(m) => f.write_str(m),
+        }
+    }
+}
+
+impl std::error::Error for StartError {}
+
+impl From<String> for StartError {
+    fn from(m: String) -> StartError {
+        StartError::Failed(m)
+    }
+}
+
+impl From<StartError> for String {
+    fn from(e: StartError) -> String {
+        e.to_string()
+    }
+}
+
 /// A running agent: the sampler and the server threads.
 pub struct Running {
     /// The shared state.
@@ -41,6 +74,9 @@ pub struct Running {
     threads: Vec<std::thread::JoinHandle<()>>,
     /// What the app needs to connect.
     pub discovery: discovery::Discovery,
+    /// The data folder's agent lock, held until the agent has stopped (`None` only when the folder cannot hold a lock
+    /// file, in which case it cannot hold the history either and the agent keeps it in memory).
+    instance: Option<instance::InstanceLock>,
 }
 
 impl Running {
@@ -51,7 +87,7 @@ impl Running {
         platform: dyno_platform::Platform,
         details: Box<dyn dyno_core::ports::ProcessSource>,
         reveal: agent::Reveal,
-    ) -> Result<Running, String> {
+    ) -> Result<Running, StartError> {
         Running::start_with(dirs, platform, details, reveal, disk::DiskPorts::none())
     }
 
@@ -61,19 +97,63 @@ impl Running {
         platform: dyno_platform::Platform,
         details: Box<dyn dyno_core::ports::ProcessSource>,
         reveal: agent::Reveal,
-    ) -> Result<Running, String> {
+    ) -> Result<Running, StartError> {
         Running::start_with(dirs, platform, details, reveal, disk::DiskPorts::os())
     }
 
-    /// [`Running::start`] with the disk map's machine ports given (tests pass fixed ones).
+    /// [`Running::start`] with the disk map's machine ports given (tests pass fixed ones). Takes the data folder's agent
+    /// lock first: while another agent holds it, nothing is opened or written and the result is
+    /// [`StartError::AlreadyRunning`].
     pub fn start_with(
         dirs: paths::Dirs,
         platform: dyno_platform::Platform,
         details: Box<dyn dyno_core::ports::ProcessSource>,
         reveal: agent::Reveal,
         disk_ports: disk::DiskPorts,
-    ) -> Result<Running, String> {
+    ) -> Result<Running, StartError> {
+        let lock = instance::InstanceLock::acquire(&dirs);
+        Running::start_with_lock(dirs, platform, details, reveal, disk_ports, lock)
+    }
+
+    /// [`Running::start_with`] with the result of taking the data folder's lock given (tests pass a failed one). A held
+    /// lock refuses the start; a folder that cannot lock at all (locking unsupported, for example on some network
+    /// shares) starts the agent without the guard against a second one, and says so in the agent's log and activity.
+    pub fn start_with_lock(
+        dirs: paths::Dirs,
+        platform: dyno_platform::Platform,
+        details: Box<dyn dyno_core::ports::ProcessSource>,
+        reveal: agent::Reveal,
+        disk_ports: disk::DiskPorts,
+        lock: Result<instance::InstanceLock, instance::LockError>,
+    ) -> Result<Running, StartError> {
+        let mut unguarded = None;
+        let instance = match lock {
+            Ok(lock) => Some(lock),
+            Err(e @ instance::LockError::Held { .. }) => {
+                let err = StartError::AlreadyRunning(e);
+                instance::note(&dirs, &format!("dyno-agent: {err}"));
+                return Err(err);
+            }
+            // A folder that cannot hold a lock file cannot hold the history either (it is kept in memory); go on.
+            Err(e) => {
+                eprintln!("dyno-agent: {e}");
+                instance::note(
+                    &dirs,
+                    &format!("dyno-agent: {e}; starting without the guard against a second agent"),
+                );
+                unguarded = Some(e.to_string());
+                None
+            }
+        };
         let (shared, sensors, processes) = Shared::build_with(dirs, platform, details, reveal, disk_ports)?;
+        if let Some(why) = unguarded {
+            agent::lock(&shared.core).log(
+                agent::now(),
+                dyno_core::activity::ActivityKind::System,
+                "Dyno cannot guard against a second agent in this folder".into(),
+                format!("{why}. If two Dyno agents run for this folder, quit one of them."),
+            );
+        }
         let (host, discovery) = server::bind(&shared).map_err(|e| format!("Dyno could not open its private endpoint: {e}"))?;
         let mut threads = Vec::new();
         let s = shared.clone();
@@ -170,6 +250,7 @@ impl Running {
             shared,
             threads,
             discovery,
+            instance,
         })
     }
 
@@ -178,11 +259,12 @@ impl Running {
         self.shared.stopped()
     }
 
-    /// Stops and waits for the threads (the sampler releases everything it applied first).
+    /// Stops and waits for the threads (the sampler releases everything it applied first), then frees the data folder.
     pub fn stop(self) {
         self.shared.request_stop();
         for t in self.threads {
             let _ = t.join();
         }
+        drop(self.instance);
     }
 }

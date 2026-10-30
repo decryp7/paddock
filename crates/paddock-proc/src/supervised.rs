@@ -168,6 +168,7 @@ impl Watcher {
                 let mut watch = MemoryWatch::new(cap.limit);
                 let mut last = 0;
                 loop {
+                    // pace: how often the memory is looked at; it bounds nothing
                     match stopped.recv_timeout(cap.every) {
                         Err(RecvTimeoutError::Timeout) => {}
                         // Told to stop, or the Supervised is gone.

@@ -1150,6 +1150,7 @@ dependencies = [
  "dyno-plugin-host",
  "libc",
  "paddock-jobs",
+ "paddock-proc",
  "plist",
  "rusqlite",
  "serde",
@@ -1179,6 +1180,7 @@ dependencies = [
  "paddock-health",
  "paddock-jobs",
  "paddock-menu",
+ "paddock-proc",
  "paddock-settings",
  "paddock-shell",
  "paddock-startup",
@@ -3646,6 +3648,7 @@ dependencies = [
  "log",
  "paddock-workspace-hack",
  "sysinfo",
+ "thiserror 2.0.21",
  "windows-sys 0.61.2",
 ]
 

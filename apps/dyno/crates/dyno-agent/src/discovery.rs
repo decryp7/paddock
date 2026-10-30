@@ -32,49 +32,35 @@ impl Discovery {
 
     /// Writes the file atomically with owner-only permissions.
     pub fn write(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let tmp = path.with_extension("json.tmp");
         let body = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
-        write_private(&tmp, &body)?;
-        std::fs::rename(&tmp, path)
+        paddock_proc::hint::write_private_atomic(path, &body)
     }
 
     /// Reads the file; `None` when missing or damaged.
     pub fn read(path: &Path) -> Option<Discovery> {
-        let meta = std::fs::metadata(path).ok()?;
-        if meta.len() > 16 * 1024 {
-            return None;
-        }
-        serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+        serde_json::from_slice(&paddock_proc::hint::read_bounded(path)?).ok()
+    }
+
+    /// Removes the file only if it is still the one that was read as `seen` (same process, same start): a newer agent
+    /// may have written its own meanwhile, and that one is never removed.
+    pub fn remove_if_same(path: &Path, seen: &Discovery) {
+        paddock_proc::hint::remove_if_same(path, seen, Discovery::read);
     }
 
     /// Removes the file if it still names this process.
     pub fn remove_if_mine(path: &Path) {
-        if Discovery::read(path).is_some_and(|d| d.pid == std::process::id()) {
-            let _ = std::fs::remove_file(path);
-        }
+        paddock_proc::hint::remove_if_mine(path, Discovery::read);
     }
 }
 
-#[cfg(unix)]
-fn write_private(path: &Path, body: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    f.write_all(body)
-}
-
-#[cfg(not(unix))]
-fn write_private(path: &Path, body: &[u8]) -> std::io::Result<()> {
-    // The data folder is under the user's profile, which Windows already restricts to the user.
-    std::fs::write(path, body)
+/// A discovery file is only a hint (rule 53): the shared helpers decide when it names a live agent.
+impl paddock_proc::hint::Hint for Discovery {
+    fn pid(&self) -> u32 {
+        self.pid
+    }
+    fn started_ms(&self) -> i64 {
+        self.started
+    }
 }
 
 #[cfg(test)]
@@ -113,6 +99,33 @@ mod tests {
         d.write(&path).unwrap();
         Discovery::remove_if_mine(&path);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_file_is_removed_as_seen_only_while_it_is_still_that_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent.json");
+        let seen = sample();
+        seen.write(&path).unwrap();
+        // A newer agent wrote its own file after it was read: it stays.
+        let newer = Discovery {
+            started: seen.started + 1,
+            ..seen.clone()
+        };
+        newer.write(&path).unwrap();
+        Discovery::remove_if_same(&path, &seen);
+        assert_eq!(Discovery::read(&path), Some(newer));
+        let other_process = Discovery {
+            pid: seen.pid + 1,
+            ..seen.clone()
+        };
+        other_process.write(&path).unwrap();
+        Discovery::remove_if_same(&path, &seen);
+        assert!(path.exists(), "another process's file stays");
+        seen.write(&path).unwrap();
+        Discovery::remove_if_same(&path, &seen);
+        assert!(!path.exists(), "the very file that was read is removed");
+        Discovery::remove_if_same(&path, &seen);
     }
 
     #[test]

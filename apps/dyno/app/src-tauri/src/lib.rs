@@ -15,6 +15,7 @@ pub mod logging;
 pub mod login;
 pub mod service_repair;
 pub mod shell;
+pub mod supervise;
 pub mod tray;
 pub mod tray_model;
 
@@ -197,6 +198,9 @@ impl link::Launcher for NoAgent {
     fn launch(&self) -> Result<(), String> {
         Err("no agent in a test".into())
     }
+    fn child(&self) -> link::Child {
+        link::Child::None
+    }
     fn finish(&self, _: std::time::Duration) {}
 }
 
@@ -218,6 +222,10 @@ fn agent_setup<R: Runtime>(
         Box::new(NoAgent)
     };
     let link = AgentLink::new(dirs, VERSION, events.clone(), launcher);
+    if installed {
+        // Asked before the link starts an agent of its own: none beside one the login service supervises.
+        link.set_service_probe(login::service_probe());
+    }
     app.manage(events.clone());
     app.manage(link.clone());
     app.manage(commands::PickedFolders::default());
