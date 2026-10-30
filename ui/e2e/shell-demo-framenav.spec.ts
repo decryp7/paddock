@@ -1,9 +1,18 @@
-import { axeViolations, expect, installTauriFake, test, THEMES } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, installTauriFake, test, THEMES, type Locator, type Page } from '@decryp7/paddock-e2e';
 
 // Frame navigation on Angular Material and the CDK (Material migration WP-4): the sidebar's arrow keys come from the CDK
 // FocusKeyManager, the badges are matBadge, the rail and status bar tooltips are matTooltip, and the copy menu is a CDK
 // context menu. Chromium only; console errors are collected so a CSP violation fails the test.
 test.use({ consoleErrors: true });
+
+/**
+ * Waits until the page list is final. Until the app context loads the shell offers every page, the conditional Lab too
+ * (`pages.ts`: `visible` evaluates `when` as true for a null context), so a count taken before it is stale on a slow machine.
+ */
+async function pageListSettled(app: { sidebar: { link(name: string): Locator } }, page: Page): Promise<void> {
+  await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
+  await expect(app.sidebar.link('Lab')).toHaveCount(0);
+}
 
 for (const colorScheme of THEMES) {
   test.describe(`frame navigation (${colorScheme})`, () => {
@@ -11,6 +20,7 @@ for (const colorScheme of THEMES) {
 
     test('Up, Down, Home and End move focus through the page links, wrapping, with the focus ring visible', async ({ app, page, pageErrors }) => {
       await app.frame.open();
+      await pageListSettled(app, page);
       const links = app.sidebar.links;
       const count = await links.count();
       await links.first().focus();
@@ -80,6 +90,7 @@ for (const colorScheme of THEMES) {
 
     test('the page lists are lists inside one labelled navigation landmark, and axe (best practice too) finds nothing', async ({ app, page }) => {
       await app.frame.open();
+      await pageListSettled(app, page);
       await expect(page.getByRole('navigation')).toHaveCount(1);
       // The top and the bottom group are each a list (not navigation landmarks of their own) of list items holding the links.
       await expect(page.getByRole('list').filter({ has: page.locator('a[data-page-link]') })).toHaveCount(2);
