@@ -4,8 +4,7 @@ A `spotter-v*` tag on `main` runs `.gitea/workflows/spotter-release.yml` (repo r
 (Rust on Linux, Windows and macOS, the frontend with the Chromium and WebKit e2e), then the shared `app-release.yml` builds the
 installers (Windows NSIS, the macOS `.dmg` sealed ad hoc and verified, Linux `.deb` and AppImage) and publishes a Gitea release
 with the installers, release notes (`RELEASE_NOTES.md`, from git-cliff) and `latest.json`, the release information Spotter's
-updater reads. It also puts `latest.json` on the moving `spotter-latest` release, which installed copies read. Installers are
-also built for pushes to `main` that reach Spotter, the nightly run and manual runs (`workflow_dispatch`, no release; `gates: true`
+updater reads. It also puts `latest.json` on the moving `spotter-latest` release, which installed copies read. Installers are also built by the nightly run (`nightly.yml`) and by manual runs (`workflow_dispatch`, no release; `gates: true`
 also runs Spotter's `ci.yml` legs first).
 
 ```sh
@@ -80,6 +79,13 @@ enforces library validation and cannot load a library signed by its vendor ("dif
 build when an ad-hoc Mach-O has the hardened runtime on or when bundled Mach-Os disagree on their TeamIdentifier, on the `.app`
 and on the copy inside the DMG. Spotter bundles no sidecar today; one added to `bundle.externalBin` is started from the built app
 by the same step (and `conformance/test/ci-actions.test.mjs` fails until `spotter-release.yml` lists it).
+
+## Before tagging (rule 54)
+
+- [ ] **`spotter-release.yml` dispatch with bundles green** (Actions > spotter-release > Run workflow, `gates` on): open the run and check that the three `bundle (...)` jobs ran and passed and that the verdict job says `installers: built`. A green run that says `installers: not built` proves nothing about the release path (rule 54).
+- [ ] **`scripts/vm-smoke` passes on a fresh clone**: `source ~/.zshenv; scripts/vm-smoke/vm-smoke.sh --app spotter --run <the run id above>` (one VM at a time, local only). Attach its result file to the release notes or the tagging PR; a failed step blocks the tag.
+
+See [scripts/vm-smoke/README.md](../../../scripts/vm-smoke/README.md) for what the check covers and what stays a manual row.
 
 ## First launch note
 

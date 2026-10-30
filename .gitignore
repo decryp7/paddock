@@ -39,3 +39,4 @@ node_modules
 /apps/workbench-demo/src-tauri/gen/
 /apps/workbench-demo/src-tauri/target/
 /apps/workbench-demo/dist/
+/vm-smoke-results/
