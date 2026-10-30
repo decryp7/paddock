@@ -256,9 +256,8 @@ pub fn find_downloaded(data_dir: &Path) -> Option<Browser> {
 /// real program outside a throwaway session (rule 7; `paddock_testkit::live_browser::check_launch`), however it was found.
 #[cfg(any(test, feature = "testing"))]
 pub(crate) fn check_test_launch(exe: &Path, window: paddock_testkit::live_browser::BrowserWindow) -> Result<(), String> {
-    use paddock_testkit::live_browser::{check_launch, is_installed};
-    let installed = is_installed(exe, candidates(Os::CURRENT, &|k| std::env::var(k).ok()).into_iter().map(|b| b.path));
-    check_launch(exe, installed, window)
+    let installed = candidates(Os::CURRENT, &|k| std::env::var(k).ok()).into_iter().map(|b| b.path);
+    paddock_testkit::live_browser::check_launch(exe, installed, window)
 }
 
 #[cfg(test)]

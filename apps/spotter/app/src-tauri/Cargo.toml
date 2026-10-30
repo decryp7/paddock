@@ -54,6 +54,8 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dw
 
 [dev-dependencies]
 tempfile.workspace = true
+# The real-browser gate in the renderer's launch and self-test (rule 7): without it the app's own tests compile it out.
+spotter-render = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true

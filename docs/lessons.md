@@ -792,7 +792,10 @@ its `#!` line although Chrome's and Edge's Linux launchers are scripts too, and 
 browser from tests. The self-tests ask the gate, fakes carry `# paddock-fake-browser`, installed paths compare
 canonically, `open_url` is a no-op in tests, and C55 names self-tests, the status and default-browser openers in test
 code. The pattern behind all three rounds: a gate on one entry point is a check, not a structure; put it at every place
-that starts a program, and recognise the allowed case positively.
+that starts a program, and recognise the allowed case positively. A fourth review found two more of the same kind: a bare
+program name (`Browser::chromium("google-chrome")`) was no file, so the gate let it pass while `Command` found it on PATH
+(the gate now resolves it the same way), and Spotter's app depended on the renderer without its `testing` feature, so the
+app's own tests compiled the gate out (C55 now checks every dependent's [dev-dependencies]).
 
 Considered and rejected: a test-only headless or off-screen launch option for Debrief's live tests, to keep them on the
 Mac. Headless tests a mode the product never runs (the challenge test is about the window coming to the front), the option

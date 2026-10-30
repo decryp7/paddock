@@ -19,12 +19,17 @@
 //     self-tests ask the launch gate in test builds; this names a test that would start the user's browser);
 //   - the user's default browser: `open::that*(`, a call of `open_url(` (not a method of a fake: `f.open_url(`),
 //     `Command::new("xdg-open")`, `Command::new("cmd")` with `start`;
+//   - a browser by bare name: `Browser::chromium("<name>")` or `Browser { path: "<name>" .. }` without a path
+//     separator (`Command` finds it on PATH; the launch gate resolves it the same way, this names it early);
 //   - a hard-coded installed browser: a literal path into `/Applications/{Google Chrome,Chromium,Microsoft Edge}*.app`, `Google\Chrome\Application`,
 //     `/usr/bin/google-chrome*` or `/usr/bin/chromium*` (a bare `chrome.exe` is a process name in many tests' data);
 //   - in a file that gets a test browser (`find_for_tests(`, `test_browser(`), a test fn that launches a window
 //     (`Mode::`/`Window::OffScreen`/`OnScreen`, or default options) after asking the finder for none (the gate then never
 //     checked for the virtual display). Helper fns are not followed: the launch-time check refuses a real browser outside
 //     a throwaway session whatever the helper did, so this rule only names the mismatch early.
+// - in a Cargo.toml: a crate that depends on a driver (`paddock-chromium`, `chromium-driver`, `spotter-render`) without
+//   the driver's test feature in its [dev-dependencies] (`test-support`; Spotter's `testing`): its tests would build the
+//   driver without the launch gate.
 // A deliberate case carries `// conformance: no-launch — <reason>` on the line or the line above, or anywhere in the test fn
 // it is in.
 import { error } from '../finding.mjs';
@@ -38,7 +43,10 @@ const SELF_TEST = /\brenderer_status\s*\(|\binstall::self_test\s*\(|\bdiscover::
 const BARE_SELF_TEST = /\bself_test\s*\(/;
 const NAMES_INSTALLED = /(?<![.\w])(?:[\w:]*::)?candidates\s*\(|\bfind_installed/;
 const OPENER = /\bopen::that\w*\s*\(|(?<![.\w])(?:[\w:]*::)?open_url\s*\(|\bCommand::new\s*\(\s*"cmd(?:\.exe)?"\s*\)[^;]*"start"/g;
+const BARE = /\bBrowser::chromium\s*\(\s*"[^"\/\\\n]+"\s*\)|\bBrowser\s*\{[^}]*?\bpath:\s*"[^"\/\\\n]+"/g;
 const RENDERER = /\bChromiumRenderer::new\s*\(/g;
+/** The drivers and the feature that compiles their launch gate into a dependent's tests. */
+export const DRIVERS = { 'paddock-chromium': 'test-support', 'chromium-driver': 'test-support', 'spotter-render': 'testing' };
 const FINDER = /\b(?:find_for_tests|test_browser)\s*\(/;
 const HEADFUL = /\b(?:Mode|Window)::(?:OffScreen|OnScreen)\b|\bChromiumRenderer::new\s*\(|\bLaunchOptions::(?:new|default)\s*\(|\bLaunchOptions\s*\{|\bChromium::launch\s*\(/;
 const HEADLESS = /headless/i;
@@ -110,7 +118,7 @@ export function windowedTestFindings(path, text) {
   };
   for (const m of code.matchAll(DIRECT)) push(m.index, 'direct');
   const inTest = (i) => ranges.some(([a, b]) => i >= a && i < b);
-  for (const [re, kind] of [[PRODUCT_SEARCH, 'search'], [COMMAND, 'command'], [INSTALLED_PATH, 'path'], [SELF_TEST, 'selftest'], [OPENER, 'opener']]) {
+  for (const [re, kind] of [[PRODUCT_SEARCH, 'search'], [COMMAND, 'command'], [INSTALLED_PATH, 'path'], [SELF_TEST, 'selftest'], [OPENER, 'opener'], [BARE, 'bare']]) {
     for (const m of code.matchAll(re)) if (inTest(m.index)) push(m.index, kind);
   }
   // A test fn that self-tests what it took from the installed candidates.
@@ -141,6 +149,27 @@ export function windowedTestFindings(path, text) {
   return out.sort((a, b) => a.line - b.line);
 }
 
+/** Drivers `toml` (a Cargo.toml) depends on without their test feature in [dev-dependencies]: [{ line, driver }]. */
+export function manifestFindings(toml) {
+  const lines = toml.split('\n');
+  const pkg = /^\s*name\s*=\s*"([^"]+)"/m.exec(toml.slice(toml.indexOf('[package]')))?.[1];
+  let section = '';
+  const deps = [];
+  const dev = {};
+  lines.forEach((l, i) => {
+    const head = /^\s*\[([^\]]+)\]\s*$/.exec(l);
+    if (head) {
+      section = head[1].trim();
+      return;
+    }
+    const entry = /^\s*([\w-]+)(?:\.workspace)?\s*=\s*(.*)$/.exec(l);
+    if (!entry || !(entry[1] in DRIVERS) || section.startsWith('workspace')) return;
+    if (/(^|\.)dev-dependencies$/.test(section)) dev[entry[1]] = (dev[entry[1]] ?? '') + entry[2];
+    else if (/(^|\.)dependencies$/.test(section)) deps.push({ line: i + 1, driver: entry[1] });
+  });
+  return deps.filter((d) => d.driver !== pkg && !new RegExp(`"${DRIVERS[d.driver]}"`).test(dev[d.driver] ?? ''));
+}
+
 const MESSAGES = {
   direct: ['reads the test browser around its finder (and the real-browser gate)', 'Get the test browser from the driver\'s `discover::find_for_tests(mode)` (or Debrief\'s `test_browser()`).'],
   search: ['a test uses the product\'s browser search, which finds the browser the user installed', 'Use the pinned test browser from `discover::find_for_tests(mode)`; a test never starts an installed browser.'],
@@ -148,6 +177,7 @@ const MESSAGES = {
   command: ['a test starts a browser or an app by name', 'Start the pinned test browser through the driver, only where the gate allows it; never `open` an app from a test.'],
   selftest: ['a test asks a browser for its version by starting it (a self-test or the renderer status), or lists the installed candidates', 'Self-test the pinned test browser or a fake; the drivers refuse an installed browser in test builds, and a test that checks that refusal says so with the waiver.'],
   opener: ['a test opens the user\'s default browser', 'Short-circuit the opener in test builds (`if cfg!(test) { return Ok(()) }`) and assert the call, never open a page from a test.'],
+  bare: ['a test names a browser by a bare program name, which `Command` finds on PATH', 'Use the pinned test browser\'s full path (from `find_for_tests`) or a fake\'s path.'],
   path: ['a test names an installed browser\'s path', 'Use the pinned test browser from the driver\'s finder, never a path into the user\'s installed apps.'],
 };
 
@@ -158,6 +188,12 @@ export default {
   run(ctx) {
     const out = [];
     for (const f of ctx.files()) {
+      if (/(^|\/)Cargo\.toml$/.test(f)) {
+        for (const m of manifestFindings(ctx.read(f) ?? '')) {
+          out.push(error('C55', 7, f, m.line, `depends on ${m.driver} without its \`${DRIVERS[m.driver]}\` feature in [dev-dependencies]: its tests build the driver without the launch gate`, `Add \`${m.driver} = { ..., features = ["${DRIVERS[m.driver]}"] }\` to [dev-dependencies].`));
+        }
+        continue;
+      }
       if (!f.endsWith('.rs')) continue;
       const text = ctx.read(f);
       if (!text) continue;

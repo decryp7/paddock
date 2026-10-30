@@ -228,14 +228,10 @@ pub(crate) fn check_test_launch(
     exe: &Path,
     window: paddock_testkit::live_browser::BrowserWindow,
 ) -> Result<(), String> {
-    use paddock_testkit::live_browser::{check_launch, is_installed};
-    let installed = is_installed(
-        exe,
-        candidates(this_os(), &|k| std::env::var(k).ok())
-            .into_iter()
-            .map(|b| b.path),
-    );
-    check_launch(exe, installed, window)
+    let installed = candidates(this_os(), &|k| std::env::var(k).ok())
+        .into_iter()
+        .map(|b| b.path);
+    paddock_testkit::live_browser::check_launch(exe, installed, window)
 }
 
 #[cfg(test)]

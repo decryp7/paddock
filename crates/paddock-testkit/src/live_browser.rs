@@ -284,20 +284,57 @@ pub fn launch_check_with(
     }
 }
 
-/// [`launch_check_with`] for this machine and process.
-pub fn check_launch(
+/// What `exe` starts: a bare program name (no path separator) is looked up on `path_var` the way `Command` does (with
+/// `.exe` on Windows); a name not found there, and any path, stay as they are.
+pub fn resolve_program(
     exe: &std::path::Path,
-    installed: bool,
+    path_var: Option<&str>,
+    windows: bool,
+) -> std::path::PathBuf {
+    if exe.components().count() != 1 || exe.is_absolute() || exe.as_os_str().is_empty() {
+        return exe.to_path_buf();
+    }
+    let names: Vec<std::path::PathBuf> = if windows && exe.extension().is_none() {
+        vec![exe.with_extension("exe"), exe.to_path_buf()]
+    } else {
+        vec![exe.to_path_buf()]
+    };
+    path_var
+        .into_iter()
+        .flat_map(|p| std::env::split_paths(p).collect::<Vec<_>>())
+        .flat_map(|dir| names.iter().map(move |n| dir.join(n)))
+        .find(|c| c.is_file())
+        .unwrap_or_else(|| exe.to_path_buf())
+}
+
+/// The launch-time gate for the machine `host` and the environment `env`: `exe` is resolved first ([`resolve_program`],
+/// so a bare `google-chrome` is judged as the program `Command` would start), then refused when it is one of `installed`
+/// (the driver's installed-browser candidates, compared canonically) or a real program outside a throwaway session.
+pub fn check_launch_with(
+    host: Host,
+    env: &dyn Fn(&str) -> Option<String>,
+    exe: &std::path::Path,
+    installed: impl IntoIterator<Item = std::path::PathBuf>,
     window: BrowserWindow,
 ) -> Result<(), String> {
+    let resolved = resolve_program(exe, env("PATH").as_deref(), host.os == "windows");
     launch_check_with(
-        Host::current(),
-        &process_env,
-        exe,
-        is_real_program(exe),
-        installed,
+        host,
+        env,
+        &resolved,
+        is_real_program(&resolved),
+        is_installed(&resolved, installed),
         window,
     )
+}
+
+/// [`check_launch_with`] for this machine and process.
+pub fn check_launch(
+    exe: &std::path::Path,
+    installed: impl IntoIterator<Item = std::path::PathBuf>,
+    window: BrowserWindow,
+) -> Result<(), String> {
+    check_launch_with(Host::current(), &process_env, exe, installed, window)
 }
 
 /// The process's environment, as the `env` of the functions above.
@@ -623,10 +660,105 @@ mod tests {
         assert!(
             check_launch(
                 std::path::Path::new("/nonexistent/chrome"),
-                false,
+                Vec::new(),
                 BrowserWindow::Shown
             )
             .is_ok()
+        );
+    }
+
+    /// Re-review P1-a: `Command::new("google-chrome")` finds the program on PATH, but the gate looked at the bare name,
+    /// which is no file, and let it pass. A bare name is resolved on PATH first, as `Command` does.
+    #[test]
+    fn a_bare_program_name_is_judged_as_what_path_starts() {
+        let d = tempfile::tempdir().unwrap();
+        let bin = d.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let chrome = bin.join("google-chrome");
+        std::fs::write(&chrome, [0x7f, b'E', b'L', b'F']).unwrap();
+        let fake = bin.join("fake-browser");
+        std::fs::write(&fake, fake_script("exit 0")).unwrap();
+        let path = std::env::join_paths([d.path().join("empty"), bin.clone()])
+            .unwrap()
+            .into_string()
+            .unwrap();
+        let env = |k: &str| (k == "PATH").then(|| path.clone());
+        let bare = std::path::Path::new("google-chrome");
+        assert_eq!(resolve_program(bare, Some(&path), false), chrome);
+        // A real program found on PATH: refused outside a throwaway session, and as an installed browser everywhere.
+        let e = check_launch_with(
+            Host::plain("macos"),
+            &env,
+            bare,
+            Vec::new(),
+            BrowserWindow::Headless,
+        )
+        .unwrap_err();
+        assert!(
+            e.contains("was not started") && e.contains("google-chrome"),
+            "{e}"
+        );
+        let ci = |k: &str| match k {
+            "PATH" => Some(path.clone()),
+            LIVE_BROWSER_VAR => Some("1".into()),
+            _ => None,
+        };
+        let e = check_launch_with(
+            Host::plain("linux"),
+            &ci,
+            bare,
+            [chrome.clone()],
+            BrowserWindow::Headless,
+        )
+        .unwrap_err();
+        assert!(e.contains("installed"), "{e}");
+        assert_eq!(
+            check_launch_with(
+                Host::plain("linux"),
+                &ci,
+                bare,
+                Vec::new(),
+                BrowserWindow::Headless
+            ),
+            Ok(())
+        );
+        // A marked fake on PATH, a name on no PATH entry, and a path (never looked up) pass anywhere.
+        let none = |k: &str| (k == "PATH").then(|| path.clone());
+        assert_eq!(
+            check_launch_with(
+                Host::plain("macos"),
+                &none,
+                std::path::Path::new("fake-browser"),
+                Vec::new(),
+                BrowserWindow::Shown
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            check_launch_with(
+                Host::plain("macos"),
+                &none,
+                std::path::Path::new("chromium"),
+                Vec::new(),
+                BrowserWindow::Shown
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            resolve_program(std::path::Path::new("chromium"), Some(&path), false),
+            std::path::PathBuf::from("chromium")
+        );
+        assert_eq!(
+            resolve_program(std::path::Path::new("./google-chrome"), Some(&path), false),
+            std::path::PathBuf::from("./google-chrome")
+        );
+        assert_eq!(resolve_program(bare, None, false), bare.to_path_buf());
+        // Windows: `chrome` is found as `chrome.exe`.
+        let exe = bin.join("chrome.exe");
+        std::fs::write(&exe, [0x4d, 0x5a]).unwrap();
+        assert_eq!(
+            resolve_program(std::path::Path::new("chrome"), Some(&path), true),
+            exe
         );
     }
 

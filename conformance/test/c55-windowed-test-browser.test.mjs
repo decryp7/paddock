@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { codeWithStrings, windowedTestFindings } from '../src/checks/C55-windowed-test-browser.mjs';
+import { codeWithStrings, manifestFindings, windowedTestFindings } from '../src/checks/C55-windowed-test-browser.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
 const t = (attr, body, name = 'it') => `${attr}\nasync fn ${name}() {\n${body}\n}\n`;
@@ -151,4 +151,45 @@ test('C55 good: a fake\'s open_url, candidates() of another type, an asserted pr
   }
   // Outside test code the product calls them freely.
   assert.deepEqual(kinds('crates/x/src/status.rs', 'pub fn renderer_status(d: &Path) -> S { let v = crate::install::self_test(&p); open_url(u); S }\n'), []);
+});
+
+// Re-review P1-a and P1-b: a bare program name (found on PATH by `Command`) and a crate whose tests compile a driver without
+// its launch gate.
+test('C55 bad: a browser by bare name in test code; good: a path, a fake\'s path, outside test code', () => {
+  for (const body of [
+    '        let b = Browser::chromium("google-chrome");',
+    '        let b = Browser::chromium("chromium");',
+    '        let b = Browser {\n            flavor: Flavor::Chromium,\n            path: "msedge".into(),\n        };',
+  ]) {
+    assert.deepEqual(kinds('crates/x/src/lib.rs', inTestMod(body)), ['bare'], body);
+  }
+  for (const body of [
+    '        let b = Browser::chromium("/nonexistent/chrome");',
+    '        let b = Browser::chromium(fake.exe.clone());',
+    '        let b = Browser { flavor: Flavor::Chromium, path: "/usr/bin/true".into() };',
+    '        let o = Options { path: "chromium" };',
+  ]) {
+    assert.deepEqual(kinds('crates/x/src/lib.rs', inTestMod(body)).filter((k) => k === 'bare'), [], body);
+  }
+  assert.deepEqual(kinds('crates/x/src/lib.rs', 'pub fn default_browser() -> Browser { Browser::chromium("chromium") }\n'), []);
+});
+
+test('C55 manifests: a crate that depends on a driver enables its test feature in [dev-dependencies]', () => {
+  const spotterApp = '[package]\nname = "spotter-app"\n\n[dependencies]\nspotter-render.workspace = true\n\n[dev-dependencies]\ntempfile.workspace = true\n';
+  assert.deepEqual(manifestFindings(spotterApp), [{ line: 5, driver: 'spotter-render' }], 'the re-review\'s case');
+  assert.deepEqual(manifestFindings(spotterApp + 'spotter-render = { workspace = true, features = ["testing"] }\n'), []);
+  const debrief = '[package]\nname = "debrief-app"\n\n[dependencies]\nchromium-driver = { path = "../../crates/chromium-driver" }\n\n[dev-dependencies]\nchromium-driver = { path = "../../crates/chromium-driver", features = ["test-support"] }\n';
+  assert.deepEqual(manifestFindings(debrief), []);
+  assert.deepEqual(manifestFindings(debrief.replace('"test-support"', '"other"')).map((f) => f.driver), ['chromium-driver']);
+  const target = '[package]\nname = "x"\n\n[target.\'cfg(unix)\'.dependencies]\npaddock-chromium = { workspace = true }\n';
+  assert.deepEqual(manifestFindings(target).map((f) => f.driver), ['paddock-chromium'], 'target-specific dependencies too');
+  // The driver itself, and a workspace's table of dependencies, are not dependents.
+  assert.deepEqual(manifestFindings('[package]\nname = "paddock-chromium"\n\n[dependencies]\npaddock-chromium = { path = "." }\n'), []);
+  assert.deepEqual(manifestFindings('[workspace.dependencies]\nspotter-render = { path = "crates/spotter-render" }\n'), []);
+});
+
+test('C55 through the runner: a manifest finding', async () => {
+  const root = makeApp({ 'app/src-tauri/Cargo.toml': '[package]\nname = "a"\n\n[dependencies]\nspotter-render.workspace = true\n' });
+  const found = await findingsOf('C55', root);
+  assert.deepEqual(found.map((f) => [f.file, f.line]), [['app/src-tauri/Cargo.toml', 5]]);
 });
