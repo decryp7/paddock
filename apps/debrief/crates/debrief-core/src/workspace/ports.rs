@@ -284,6 +284,9 @@ impl Positions for WorkspaceStore {
     fn positioned(&self) -> StoreResult<u64> {
         Err(unsupported("positions"))
     }
+    fn order_complete(&self) -> StoreResult<bool> {
+        Err(unsupported("positions"))
+    }
 }
 
 impl Analysis for WorkspaceStore {

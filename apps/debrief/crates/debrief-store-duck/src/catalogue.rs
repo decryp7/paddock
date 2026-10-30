@@ -62,6 +62,10 @@ fn build(conn: &Connection, source: u32, heavy: &Mutex<()>) -> Result<(Vec<Entry
         let mut stmt = conn.prepare("SELECT id, ts, message, exception FROM events WHERE source = ? LIMIT ?")?;
         let mut rows = stmt.query(params![source, MAX_EVENTS_SCANNED as u64])?;
         while let Some(r) = rows.next()? {
+            // The process is exiting: stop reading (the source is catalogued again next time).
+            if crate::shutdown::down() {
+                anyhow::bail!("the process is exiting");
+            }
             let (id, ts): (u64, Option<i64>) = (r.get(0)?, r.get(1)?);
             let message: String = r.get(2)?;
             let exception: Option<String> = r.get(3)?;
@@ -173,6 +177,7 @@ impl CatalogueService {
             failed: Mutex::new(HashSet::new()),
             heavy,
         });
+        crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
         let handle = std::thread::Builder::new()
             .name("debrief-catalogue".into())
@@ -229,6 +234,9 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
     let (entries, dropped, guids) = built;
     // The write lock is taken without waiting for an import: the next turn tries again.
     let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
+    if crate::shutdown::down() {
+        return Ok(false);
+    }
     commit(conn, source, &entries, dropped, guids)?;
     s.pending.store(todo.len() as u64 - 1, Ordering::SeqCst);
     Ok(true)

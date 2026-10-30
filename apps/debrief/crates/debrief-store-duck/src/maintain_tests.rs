@@ -283,6 +283,46 @@ fn every_path_that_reorders_reports_a_failure_and_marks_the_positions_stale() {
     let e = store.remove_source(SourceId(source)).unwrap_err().to_string();
     assert!(e.contains("removed") && e.contains("time order"), "{e}");
     assert_eq!(stale(&store), 1, "remove_source");
+    drop(store);
+    // A clock correction
+    use debrief_core::ports::Skew;
+    let dir = Dir::new("reorder-skew");
+    let store = unorderable(&dir);
+    let source = store
+        .inner
+        .conn()
+        .unwrap()
+        .query_row("SELECT min(id) FROM sources", [], |r| r.get::<_, u32>(0))
+        .unwrap();
+    let e = store
+        .set_source_offset(&debrief_core::skew::SetOffsetRequest {
+            spec: debrief_core::skew::OffsetSpec::Manual {
+                source,
+                offset_ms: 3_600_000,
+            },
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("clock correction") && e.contains("time order"), "{e}");
+    assert_eq!(stale(&store), 1, "clock correction");
+}
+
+#[test]
+fn a_stale_order_stays_marked_through_live_refreshes_until_the_ordering_job_repairs_it() {
+    let dir = Dir::new("stale-live");
+    let (store, file) = followed(&dir, &[]);
+    // A failed ordering (a clock correction's, say) left positions with the right count in the wrong order.
+    crate::writer::set_meta(&store.inner.conn().unwrap(), pos::STALE, 1).unwrap();
+    assert!(!store.order_complete().unwrap(), "the count matches, the order is not complete");
+    let r = store.append_tail(std::slice::from_ref(&file)).unwrap();
+    assert_eq!(r.appended, 2, "{r:?}");
+    assert_eq!(stale(&store), 1, "an append does not clear the mark");
+    assert!(r.notices.iter().any(|n| n.contains("time order")), "the refresh says so: {r:?}");
+    assert!(!store.order_complete().unwrap());
+    use debrief_core::ports::{Maintain, MaintenanceAction};
+    store.maintain(MaintenanceAction::OrderEvents).unwrap();
+    assert!(store.order_complete().unwrap(), "the job repairs it");
+    assert_eq!(stale(&store), 0);
 }
 
 /// A store following one CLEF file (one line per event, so nothing is held back), and reading `more` folders.
@@ -310,35 +350,6 @@ fn a_live_refresh_that_cannot_order_the_new_events_says_so_and_marks_the_positio
     assert_eq!(r.appended, 2, "{r:?}");
     assert!(r.notices.iter().any(|n| n.contains("time order")), "{r:?}");
     assert_eq!(stale(&store), 1, "the append's fallback goes through the one ordering");
-}
-
-#[test]
-fn a_live_refresh_that_compacts_orders_the_events_again() {
-    let dir = Dir::new("reorder-tail-compact");
-    let (store, file) = followed(&dir, &samples());
-    let files_before = {
-        // A sample source is removed from the catalog without its compaction: its rows are garbage the refresh's
-        // compaction rewrites, and their positions must go with them.
-        let conn = store.inner.conn().unwrap();
-        let victim: u32 = conn
-            .query_row("SELECT min(id) FROM sources WHERE path NOT LIKE '%a.clef'", [], |r| r.get(0))
-            .unwrap();
-        conn.execute("DELETE FROM sources WHERE id = ?", params![victim]).unwrap();
-        // The catalog's live counts are refreshed by compaction; mark the segments so the refresh plans one.
-        conn.execute_batch("UPDATE segments SET live = rows - 1").unwrap();
-        segment_files(&conn)
-    };
-    let r = store.append_tail(std::slice::from_ref(&file)).unwrap();
-    assert_eq!(r.appended, 2, "{r:?}");
-    assert!(r.notices.is_empty(), "{r:?}");
-    let conn = store.inner.conn().unwrap();
-    assert_ne!(segment_files(&conn), files_before, "the garbage segments were rewritten");
-    assert_eq!(
-        store.positioned().unwrap(),
-        store.summary().unwrap().total as u64,
-        "every visible event, no other"
-    );
-    assert_eq!(crate::writer::meta_u64(&conn, pos::STALE), 0);
 }
 
 #[test]

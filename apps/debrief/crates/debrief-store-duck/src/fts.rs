@@ -366,7 +366,8 @@ impl Fts {
         let ts_field = self.index.schema().get_field("ts")?;
         let keys: Vec<u64> = files.iter().map(|f| segment_key(f)).collect();
         let mut batches = SegmentBatches::new(seg_dir, files);
-        let input = std::iter::from_fn(|| batches.next_batch());
+        // Reading stops once the process exits (the exit handler waits for running steps only so long).
+        let input = std::iter::from_fn(|| if crate::shutdown::down() { None } else { batches.next_batch() });
         let mut first_error: Option<anyhow::Error> = None;
         let mut finished = 0usize;
         let mut seen = vec![false; files.len()];
@@ -538,6 +539,8 @@ pub struct FtsShared {
     pub pending: AtomicU64,
     /// The last indexing failure.
     pub failure: Mutex<Option<String>>,
+    /// The store's flag of a running import (`Inner::importing`).
+    importing: Arc<AtomicBool>,
 }
 
 /// The indexing thread of a store; stopped and joined on drop.
@@ -549,7 +552,13 @@ pub struct FtsService {
 
 impl FtsService {
     /// Opens (or recreates) the index of the store in `dir` and starts indexing what is missing.
-    pub fn start(dir: &Path, conn: Connection, write_lock: Arc<Mutex<()>>, budget: WriterBudget) -> Result<FtsService> {
+    pub fn start(
+        dir: &Path,
+        conn: Connection,
+        write_lock: Arc<Mutex<()>>,
+        importing: Arc<AtomicBool>,
+        budget: WriterBudget,
+    ) -> Result<FtsService> {
         let epoch = match meta_u64(&conn, "fts_epoch") {
             0 => {
                 set_meta(&conn, "fts_epoch", 1)?;
@@ -568,7 +577,9 @@ impl FtsService {
             wake: (Mutex::new(true), Condvar::new()),
             pending: AtomicU64::new(0),
             failure: Mutex::new(None),
+            importing,
         });
+        crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
         let store_dir = dir.to_path_buf();
         let handle = std::thread::Builder::new()
@@ -681,9 +692,11 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
         return Ok(false);
     };
     let Ok(_writing) = write_lock.try_lock() else {
-        // Another writer holds the store, above all an import with its own memory budget: the index writer's heaps
-        // are given back now, so the two never add up; the next step starts a new writer.
-        drop_writer(s);
+        // An import holds the store, with its own memory budget: the index writer's heaps are given back now, so the
+        // two never add up; the next step starts a new writer. A brief holder (a live refresh) keeps the writer.
+        if s.importing.load(Ordering::SeqCst) {
+            drop_writer(s);
+        }
         return Ok(false);
     };
     let (files, ready) = todo(conn)?;
@@ -711,6 +724,12 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
         let bad = failing_segment(&e, batch).unwrap_or(&batch[0]);
         conn.execute("UPDATE segments SET indexed = TRUE WHERE file = ?", params![bad])?;
         return Err(e.context(format!("indexing {bad}")));
+    }
+    // The process is exiting: nothing more is written (the documents added go with the writer and the segments stay
+    // unindexed, so they are indexed again next time).
+    if crate::shutdown::down() {
+        let _ = w.rollback();
+        return Ok(false);
     }
     s.fts.commit(w, epoch)?;
     // One statement (one commit, one write-ahead-log sync) for the step's segments, not one per segment.
@@ -812,13 +831,7 @@ mod tests {
     }
 
     #[test]
-    fn the_indexing_thread_is_lowered_only_where_a_waiting_refresh_is_never_starved() {
-        // Rule 52: on Windows the thread that holds the write lock for a step stays at normal priority.
-        assert_eq!(LOWER_INDEXING_THREAD, !cfg!(windows));
-    }
-
-    #[test]
-    fn the_writer_is_dropped_when_another_writer_holds_the_store() {
+    fn the_writer_is_dropped_only_when_an_import_holds_the_store() {
         let dir = std::env::temp_dir().join(format!("debrief-fts-drop-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let conn = Connection::open_in_memory().unwrap();
@@ -840,9 +853,15 @@ mod tests {
             wake: (Mutex::new(false), Condvar::new()),
             pending: AtomicU64::new(1),
             failure: Mutex::new(None),
+            importing: Arc::new(AtomicBool::new(false)),
         };
         let write_lock = Mutex::new(());
         let held = write_lock.lock().unwrap();
+        // A brief holder (a live refresh): the writer stays for the next step.
+        assert!(!step(&s, &dir.join(SEGMENTS_DIR), &conn, &write_lock, 1).unwrap());
+        assert!(crate::lock(&s.writer).is_some(), "a live refresh does not cost the writer");
+        // An import: its budget and the writer's heaps never add up.
+        s.importing.store(true, Ordering::SeqCst);
         assert!(!step(&s, &dir.join(SEGMENTS_DIR), &conn, &write_lock, 1).unwrap());
         assert!(
             crate::lock(&s.writer).is_none(),

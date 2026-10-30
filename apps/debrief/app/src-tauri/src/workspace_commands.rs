@@ -696,6 +696,8 @@ pub(crate) async fn open_project<R: Runtime>(
             win.set_project(Some(path.clone()));
             crate::recent::opened_project(&handle, &path, &opened.name);
         }
+        // Last, once the project is open (and annotated): an incomplete time order is repaired by its own job.
+        crate::store_pane::order_events_after_open(&handle, &win);
         Ok(crate::jobs::Done::new(opened).with_result(crate::jobs::JobResult::workspace()))
     })
 }
@@ -714,7 +716,6 @@ fn open_store_project_in_job<R: Runtime>(
     let base = state.engine.profile();
     let dest = state.engine.unpack_root();
     let (store, manifest) = state.engine.host().open_project(&file, &dest, &base).map_err(CmdError::from)?;
-    crate::store_pane::order_events_if_needed(app, state, store.as_ref());
     crate::engine::annotate::run_in_job(state, store.as_ref(), ctx, cancel);
     if ctx.is_cancelled() || cancel.load(std::sync::atomic::Ordering::Relaxed) {
         return Err(CmdError::new(crate::ErrorCode::Cancelled, "opening the project was cancelled"));
@@ -801,10 +802,7 @@ pub(crate) fn open_project_file_in_job<R: Runtime>(
             };
             // A crash of the reopening is a failure to reopen, not of the job: the files are imported again.
             match tauri::async_runtime::block_on(crate::sync::blocking("reopening the session", reopen)) {
-                Ok(store) => {
-                    crate::store_pane::order_events_if_needed(app, state, store.as_ref());
-                    true
-                }
+                Ok(_) => true,
                 Err(e) => {
                     log::warn!("the session's store could not be reopened ({e}); importing its files again");
                     false

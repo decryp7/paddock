@@ -195,6 +195,10 @@ pub trait Positions: Send + Sync {
     fn position_of(&self, id: EventId) -> StoreResult<Option<u64>>;
     /// Events that have a position.
     fn positioned(&self) -> StoreResult<u64>;
+    /// Whether the positions are a complete, current time order: every visible event has one and no ordering failed
+    /// since (a failed ordering leaves the old positions, which may hold the right number in the wrong order). Cheap:
+    /// two counts and a flag. The app orders the events again as a job when it is false.
+    fn order_complete(&self) -> StoreResult<bool>;
 }
 
 /// Analyses that need code over event batches (patterns, exceptions, anomalies...). Each result says

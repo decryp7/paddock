@@ -35,6 +35,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
+/// What a live refresh says while the positions are stale (the ordering job repairs them).
+pub(crate) const STALE_NOTICE: &str = "The events are not fully in time order (an earlier ordering failed): new events are listed, \
+     but the event list may show them out of place until Debrief orders the events again.";
+
 /// How long live tail waits for a running import before it gives up for this change.
 pub(crate) const TAIL_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -432,27 +436,30 @@ impl Inner {
                 ts: done.iter().filter(|a| a.events > 0).filter_map(|a| a.from).min(),
             });
             out.sources_changed.extend(done.iter().filter(|a| a.events > 0).map(|a| a.id));
-            // The new events follow the positioned ones (the usual case) or every event is put in order again.
-            let mut reorder = match pos::append(conn, first_new, before) {
-                Ok(extended) => !extended,
-                Err(e) => {
+            if pos::is_stale(conn) {
+                // An ordering failed earlier: the ordering job repairs it. Reordering on every refresh would rebuild
+                // all positions twice per refresh and fail the same way.
+                out.notices.push(STALE_NOTICE.to_string());
+            } else {
+                // The new events follow the positioned ones (the usual case) or every event is put in order again.
+                let extended = pos::append(conn, first_new, before).unwrap_or_else(|e| {
                     log::warn!("time-order positions could not be extended: {e}");
-                    true
+                    false
+                });
+                if !extended {
+                    out.notices.extend(self.reorder(conn));
                 }
-            };
+            }
+            // Compaction during a live refresh keeps every event's id and time, and the view hides sources that are not
+            // ready, so it never changes which events are visible or their order: no reordering after it.
             match compact::pending(conn) {
-                Ok(p) if !p.is_empty() => match compact::compact(conn, &self.dir, &self.schema) {
-                    // Merging small segments keeps every event; rewriting out rows of removed sources leaves positions
-                    // of events that are gone, so the events are ordered again only then.
-                    Ok(c) if c.replaced > 0 => reorder |= !pos::complete(conn).unwrap_or(false),
-                    Ok(_) => {}
-                    Err(e) => log::warn!("segment compaction failed: {e:#}"),
-                },
+                Ok(p) if !p.is_empty() => {
+                    if let Err(e) = compact::compact(conn, &self.dir, &self.schema) {
+                        log::warn!("segment compaction failed: {e:#}");
+                    }
+                }
                 Ok(_) => {}
                 Err(e) => log::warn!("segment compaction could not be planned: {e:#}"),
-            }
-            if reorder {
-                out.notices.extend(self.reorder(conn));
             }
             self.generation.fetch_add(1, Ordering::SeqCst);
             self.bump_version(conn)?;

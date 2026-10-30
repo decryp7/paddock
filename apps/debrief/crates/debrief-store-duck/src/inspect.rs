@@ -466,7 +466,12 @@ impl Maintain for DuckStore {
                 {
                     let _writing = lock(&self.inner.write_lock);
                     let conn = self.inner.conn()?;
-                    if let Some(notice) = self.inner.reorder(&conn) {
+                    let notice = self.inner.reorder(&conn);
+                    // Cancel interrupted the ordering: it rolled back, the old positions and their mark are kept.
+                    if debrief_core::ql::QueryControl::current().is_some_and(|c| c.is_cancelled()) {
+                        return Err(StoreError::Cancelled);
+                    }
+                    if let Some(notice) = notice {
                         return Err(StoreError::Engine(notice));
                     }
                     conn.execute_batch("CHECKPOINT").map_err(engine)?;

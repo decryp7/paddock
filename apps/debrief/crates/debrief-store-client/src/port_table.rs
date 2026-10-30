@@ -101,6 +101,7 @@ macro_rules! store_port_table {
             Positions {
                 plain {
                     call Positioned: fn positioned() -> u64;
+                    call OrderComplete: fn order_complete() -> bool;
                 }
                 custom {
                     IdsAt: fn ids_at(from: u64, len: usize) -> Vec<EventId> = client remote_ids_at, server serve_ids_at;

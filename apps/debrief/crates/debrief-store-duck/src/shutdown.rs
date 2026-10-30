@@ -20,6 +20,27 @@ static DOWN: AtomicBool = AtomicBool::new(false);
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static INSTALL: Once = Once::new();
 static BORROWED: AtomicUsize = AtomicUsize::new(0);
+/// Interrupts of the connections background threads run their statements on (the indexer, the catalogue): the exit
+/// handler fires them, so a step that holds a statement past the drain does not run into DuckDB's destructors.
+static INTERRUPTS: std::sync::Mutex<Vec<std::sync::Arc<duckdb::InterruptHandle>>> = std::sync::Mutex::new(Vec::new());
+/// Most interrupts kept (one per background connection of each store opened; old ones are of closed connections).
+const MAX_INTERRUPTS: usize = 256;
+
+/// Whether the process is exiting: background steps stop before their next statement.
+pub(crate) fn down() -> bool {
+    DOWN.load(Ordering::SeqCst)
+}
+
+/// Lets the exit handler interrupt the statement running on `conn` (a background thread's own connection).
+pub(crate) fn interrupt_on_exit(conn: &duckdb::Connection) {
+    let handle = conn.interrupt_handle();
+    if let Ok(mut all) = INTERRUPTS.lock() {
+        if all.len() >= MAX_INTERRUPTS {
+            all.remove(0);
+        }
+        all.push(handle);
+    }
+}
 
 /// One borrowed connection that may run a statement; dropping it lets the exit handler go on.
 pub(crate) struct Active(());
@@ -48,6 +69,12 @@ impl Drop for Active {
 
 extern "C" fn at_exit() {
     DOWN.store(true, Ordering::SeqCst);
+    // Never wait for the lock at exit: a thread may hold it (it is only held to push a handle).
+    if let Ok(all) = INTERRUPTS.try_lock() {
+        for handle in all.iter() {
+            handle.interrupt();
+        }
+    }
     let started = Instant::now();
     while ACTIVE.load(Ordering::SeqCst) > 0 && started.elapsed() < DRAIN {
         std::thread::yield_now();

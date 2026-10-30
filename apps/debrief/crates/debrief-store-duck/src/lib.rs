@@ -114,7 +114,8 @@ impl Default for StoreOptions {
 }
 
 /// DuckDB's memory limit raised while it lives; dropping it (also when the work fails or panics) sets the limit to what
-/// `normal` returns then, so a `configure` that ran meanwhile is not undone.
+/// `normal` returns then, so a `configure` that ran meanwhile is not undone. Such a `configure` sets its limit at once,
+/// so the rest of the raised work runs with it (lower than the import memory, as the user asked).
 struct RaisedMemory<'c, N: Fn() -> String> {
     conn: &'c Connection,
     normal: N,
@@ -147,6 +148,31 @@ impl<N: Fn() -> String> Drop for RaisedMemory<'_, N> {
 pub(crate) fn with_memory<T>(conn: &Connection, raised: &str, normal: impl Fn() -> String, f: impl FnOnce(&Connection) -> T) -> T {
     let _raised = RaisedMemory::new(conn, raised, normal);
     f(conn)
+}
+
+/// Runs `f` (the ordering) while the import's stage reads "Ordering events by time (N%)" from DuckDB's progress
+/// estimate of the statement on `conn` (the Store pane's ordering job gets it through the run's control instead).
+fn with_ordering_percent<T>(conn: &Connection, progress: &ImportProgress, f: impl FnOnce() -> T) -> T {
+    if conn.set_query_progress_tracking(true).is_err() {
+        return f();
+    }
+    let handle = conn.progress_handle();
+    let (stop, stopped) = std::sync::mpsc::channel::<()>();
+    let out = std::thread::scope(|s| {
+        s.spawn(move || {
+            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(crate::progress::POLL) {
+                if let Some(p) = crate::progress::from_duckdb(&handle.query_progress()) {
+                    let percent = p.done.saturating_mul(100) / p.total.max(1);
+                    progress.set_stage(Some(&format!("Ordering events by time ({percent}%)")));
+                }
+            }
+        });
+        let out = f();
+        drop(stop);
+        out
+    });
+    let _ = conn.set_query_progress_tracking(false);
+    out
 }
 
 /// What the user is told when the events could not be put in time order.
@@ -275,7 +301,7 @@ pub(crate) struct Inner {
     pub(crate) state: RwLock<State>,
     /// Bumped by every change to the events (keys read caches).
     pub(crate) generation: Arc<AtomicU64>,
-    pub(crate) importing: AtomicBool,
+    pub(crate) importing: Arc<AtomicBool>,
     /// The time window later imports read (ADR 0047).
     pub(crate) import_window: RwLock<debrief_core::ingest::ImportWindow>,
     /// Held by whatever rewrites the catalog (an import, compaction, positions, removal).
@@ -408,7 +434,10 @@ impl Inner {
         }
         stage("Ordering events by time");
         log::debug!("import: compact {:?}", tc.elapsed());
-        notices.extend(self.reorder_holding_heavy(conn));
+        notices.extend(match progress {
+            Some(p) => with_ordering_percent(conn, p, || self.reorder_holding_heavy(conn)),
+            None => self.reorder_holding_heavy(conn),
+        });
         log::debug!("import: pos {:?}", tc.elapsed());
         stage("Saving the index");
         // Write the catalog into the database file now, so a reopen does not replay the WAL.
@@ -917,10 +946,11 @@ impl DuckStore {
         let parsers = Arc::new(parsers);
         let write_lock = Arc::new(Mutex::new(()));
         let heavy = Arc::new(Mutex::new(()));
+        let importing = Arc::new(AtomicBool::new(false));
         let started = conn
             .try_clone()
             .map_err(anyhow::Error::from)
-            .and_then(|c| fts::FtsService::start(dir, c, write_lock.clone(), opts.index));
+            .and_then(|c| fts::FtsService::start(dir, c, write_lock.clone(), importing.clone(), opts.index));
         let (fts, fts_error) = match started {
             Ok(f) => (Some(f), None),
             Err(e) => {
@@ -949,7 +979,7 @@ impl DuckStore {
                     unrecognized: Vec::new(),
                 }),
                 generation: Arc::new(AtomicU64::new(0)),
-                importing: AtomicBool::new(false),
+                importing,
                 import_window: RwLock::new(Default::default()),
                 write_lock,
                 heavy,
@@ -986,14 +1016,22 @@ impl DuckStore {
         Ok(())
     }
 
-    /// Merges small segments and drops rows of removed sources now (normally done after each change).
+    /// Merges small segments and drops rows of removed sources now (normally done after each change), then orders the
+    /// events again through the one guarded path when segments were rewritten (as the Store pane's Compact does).
     pub fn compact(&self) -> StoreResult<Compaction> {
         self.idle()?;
         let _writing = lock(&self.inner.write_lock);
         let conn = self.inner.conn()?;
         let c = compact::compact(&conn, &self.inner.dir, &self.inner.schema).map_err(|e| engine(format!("{e:#}")))?;
+        let notice = if c.replaced > 0 { self.inner.reorder(&conn) } else { None };
         self.changed();
-        Ok(c)
+        match notice {
+            None => Ok(c),
+            Some(n) => Err(StoreError::Engine(format!(
+                "Compacted {} segments into {}. {n}",
+                c.replaced, c.written
+            ))),
+        }
     }
 
     /// From how many events on timelines are answered from the histogram (tests lower it).

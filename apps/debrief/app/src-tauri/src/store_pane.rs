@@ -75,18 +75,35 @@ pub(crate) async fn store_maintenance<R: Runtime>(app: AppHandle<R>, state: Curr
     start_maintenance(&app, &state, action)
 }
 
-/// Orders the events by time as a job of the window when an opened store's positions are incomplete (an ordering
-/// failed, or the positions are missing): the store does not do it inside the open call, which has a time limit.
-pub(crate) fn order_events_if_needed<R: Runtime>(app: &AppHandle<R>, state: &CurrentWindow, store: &dyn debrief_core::ports::Store) {
-    let (Ok(positioned), Ok(summary)) = (store.positioned(), store.summary()) else {
-        return;
-    };
-    if positioned != summary.total as u64 {
-        log::warn!(Positioned = positioned, Events = summary.total as u64; "The events' time order is incomplete; ordering them again");
-        if let Err(e) = start_maintenance(app, state, MaintenanceAction::OrderEvents) {
-            log::warn!("the ordering job could not start: {}", e.message);
-        }
+/// After an open job: orders the window's events by time when its store says the order is incomplete.
+pub(crate) fn order_events_after_open<R: Runtime>(app: &AppHandle<R>, state: &CurrentWindow) {
+    if let Ok(store) = state.engine.store() {
+        order_events_if_needed(app, state, store.as_ref());
     }
+}
+
+/// Orders the events by time as a job of the window when the store's order is incomplete (an ordering failed, or
+/// positions are missing; `Positions::order_complete`, two counts and a flag): the store does not do it inside the open
+/// call, which has a time limit. At most one such job per window at a time.
+pub(crate) fn order_events_if_needed<R: Runtime>(app: &AppHandle<R>, state: &CurrentWindow, store: &dyn debrief_core::ports::Positions) {
+    if !matches!(store.order_complete(), Ok(false)) || ordering_running(app, state.label()) {
+        return;
+    }
+    log::warn!("The events' time order is incomplete; ordering them again");
+    if let Err(e) = start_maintenance(app, state, MaintenanceAction::OrderEvents) {
+        log::warn!("the ordering job could not start: {}", e.message);
+    }
+}
+
+/// Whether the window has an ordering job queued or running.
+fn ordering_running<R: Runtime>(app: &AppHandle<R>, label: &str) -> bool {
+    use tauri::Manager;
+    let Some(jobs) = app.try_state::<crate::jobs::Jobs>() else {
+        return false;
+    };
+    let title = MaintenanceAction::OrderEvents.title();
+    // Queued and running jobs, shown or not yet (a snapshot leaves out jobs too young to show).
+    !jobs.find_active(|j| j.window() == Some(label) && j.title == title).is_empty()
 }
 
 /// [`store_maintenance`]: spawns the job and returns its id.
@@ -94,6 +111,12 @@ pub(crate) fn start_maintenance<R: Runtime>(app: &AppHandle<R>, state: &CurrentW
     let spec = JobSpec::new(JobKind::Maintenance, action.title()).window(state.label());
     let win = state.arc().clone();
     let (controls, control) = crate::jobs::store_cancel(Controls::default());
+    // The ordering is one long statement: DuckDB's estimate of it, relayed to the control, is the job's percentage.
+    let controls = if action == MaintenanceAction::OrderEvents {
+        crate::jobs::with_stage_probe(controls, &control, "Ordering events by time", "Ordering events by time")
+    } else {
+        controls
+    };
     let id = crate::jobs::spawn(app, spec, controls, move |ctx| -> CmdResult<Done<()>> {
         let store = win.engine.store()?;
         ctx.phase(action.phase(), PhaseScale::Indeterminate, 0, 0);
@@ -348,6 +371,40 @@ mod tests {
             Ok(())
         });
         (channel, seen)
+    }
+
+    /// Positions whose order is incomplete (an ordering failed).
+    struct Incomplete;
+
+    impl debrief_core::ports::Positions for Incomplete {
+        fn ids_at(&self, _from: u64, _len: usize) -> debrief_core::ports::StoreResult<Vec<debrief_core::batch::EventId>> {
+            Ok(Vec::new())
+        }
+        fn position_of(&self, _id: debrief_core::batch::EventId) -> debrief_core::ports::StoreResult<Option<u64>> {
+            Ok(None)
+        }
+        fn positioned(&self) -> debrief_core::ports::StoreResult<u64> {
+            Ok(0)
+        }
+        fn order_complete(&self) -> debrief_core::ports::StoreResult<bool> {
+            Ok(false)
+        }
+    }
+
+    #[test]
+    fn an_incomplete_order_starts_exactly_one_ordering_job() {
+        use tauri::Manager;
+        let app = opened();
+        let jobs = app.state::<crate::jobs::Jobs>().inner().clone();
+        let ordering = || jobs.find_active(|j| j.title == MaintenanceAction::OrderEvents.title()).len();
+        // The open was complete: no ordering job.
+        assert_eq!(ordering(), 0);
+        // Held, so the job cannot finish between the two checks.
+        jobs.hold_starts(true);
+        order_events_if_needed(app.handle(), &main_window(&app), &Incomplete);
+        order_events_if_needed(app.handle(), &main_window(&app), &Incomplete);
+        assert_eq!(ordering(), 1, "one job, not one per check");
+        jobs.hold_starts(false);
     }
 
     #[test]
