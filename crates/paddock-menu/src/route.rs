@@ -1,6 +1,7 @@
 //! Where native menu clicks go and whose menus the menu bar shows: the focused top-level window (a dialog or a pop-out
 //! stands for its host, `paddock_commands::labels::resolve`). Pure.
 
+use crate::model::QUIT_COMMAND;
 use paddock_commands::labels::{Label, resolve};
 
 /// The top-level window the menu bar belongs to: the one that had the focus last (a dialog's or pop-out's focus counts
@@ -54,6 +55,13 @@ pub fn route(id: &str, shown: &[&str], target: Option<&str>) -> Option<String> {
     target.map(|label| resolve(label).to_string())
 }
 
+/// Whether a click on item `id` is an app-level command that still means something when no window is the target (the
+/// last window was closed to the tray and the menu bar still shows its model): [`QUIT_COMMAND`]. The host runs it
+/// ([`crate::tauri::NativeMenu::on_no_window`]). The id must be one of the shown menu's items, like for [`route`]. Pure.
+pub fn runs_without_window(id: &str, shown: &[&str], target: Option<&str>) -> bool {
+    target.is_none() && id == QUIT_COMMAND && shown.contains(&id)
+}
+
 /// Whether a model sent by window `caller` is shown: the menu bar shows the focused window's menus, so a model is applied
 /// when its window has the focus, is the target, or no window is the target yet (the first window at start).
 pub fn applies(caller: &str, caller_focused: bool, target: Option<&str>) -> bool {
@@ -80,6 +88,24 @@ mod tests {
         // Not ours (a tray's items), or no window.
         assert_eq!(route("quit", &ids, Some("main")), None);
         assert_eq!(route("pw.view.compact", &ids, None), None);
+    }
+
+    #[test]
+    fn only_quit_runs_without_a_window_and_only_when_shown() {
+        let ids = ["pd.app.quit", "pd.about"];
+        assert!(runs_without_window("pd.app.quit", &ids, None));
+        assert!(
+            !runs_without_window("pd.about", &ids, None),
+            "needs a window"
+        );
+        assert!(
+            !runs_without_window("pd.app.quit", &["pd.about"], None),
+            "not shown"
+        );
+        assert!(
+            !runs_without_window("pd.app.quit", &ids, Some("main")),
+            "a window is the target: it gets the click"
+        );
     }
 
     #[test]

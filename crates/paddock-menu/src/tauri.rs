@@ -29,11 +29,11 @@ use crate::model::{
     AppMenu, Item, MENU_EVENT, MenuApplied, MenuSetError, MenuSetErrorCode, NativeMenuModel, parse,
 };
 use crate::native::{NativeNode, Predefined, Update, diff, item_ids, native_spec};
-use crate::route::{Focus, applies, route};
+use crate::route::{Focus, applies, route, runs_without_window};
 use ::tauri::menu::{CheckMenuItem, Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu};
 use ::tauri::{AppHandle, Emitter, Manager, Runtime, Window, WindowEvent};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 /// The log target of this crate.
 const TARGET: &str = "paddock_menu";
@@ -88,6 +88,9 @@ impl<R: Runtime> NativeBar<R> for TauriBar {
     }
 }
 
+/// What runs a click on an app-level item when no window is the target (the app's quit): gets the app and the item id.
+pub type NoWindowHandler<R> = dyn Fn(&AppHandle<R>, &str) + Send + Sync + 'static;
+
 /// Managed state: the spec the menu bar shows, the target window and the build count.
 pub struct NativeMenu<R: Runtime> {
     app_name: String,
@@ -95,6 +98,7 @@ pub struct NativeMenu<R: Runtime> {
     bar: Box<dyn NativeBar<R>>,
     shown: Mutex<Option<Vec<NativeNode>>>,
     focus: Mutex<Focus>,
+    no_window: Mutex<Option<Arc<NoWindowHandler<R>>>>,
     builds: AtomicU64,
 }
 
@@ -116,6 +120,7 @@ impl<R: Runtime> NativeMenu<R> {
             bar: Box::new(bar),
             shown: Mutex::new(None),
             focus: Mutex::new(Focus::new()),
+            no_window: Mutex::new(None),
             builds: AtomicU64::new(0),
         }
     }
@@ -166,6 +171,22 @@ impl<R: Runtime> NativeMenu<R> {
         Ok(update)
     }
 
+    /// Sets what runs a click on an app-level item ([`runs_without_window`]: Quit) when no window is the target, for
+    /// example after the last window was closed to the tray. Without one such a click is dropped. Replaces the earlier one.
+    pub fn on_no_window(&self, f: impl Fn(&AppHandle<R>, &str) + Send + Sync + 'static) {
+        *lock(&self.no_window) = Some(Arc::new(f));
+    }
+
+    /// The handler for a click on `id`, if there is no target window and the item is an app-level one that is shown.
+    fn no_window_handler(&self, id: &str) -> Option<Arc<NoWindowHandler<R>>> {
+        let shown = lock(&self.shown);
+        let ids = shown.as_deref().map(item_ids).unwrap_or_default();
+        if !runs_without_window(id, &ids, lock(&self.focus).target()) {
+            return None;
+        }
+        lock(&self.no_window).clone()
+    }
+
     /// Where a click on `id` goes (a shown item, to the target window).
     pub fn route(&self, id: &str) -> Option<String> {
         let shown = lock(&self.shown);
@@ -192,9 +213,16 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// Sends a chosen item to the target window only (not its pop-outs or dialogs: it runs the command once). Returns the
-/// window it went to; `None` when the id is not one of the shown items or no window is the target.
+/// window it went to; `None` when the id is not one of the shown items or no window is the target. With no target
+/// window, Quit goes to the [`NativeMenu::on_no_window`] handler instead (and this returns `None`).
 pub fn menu_chosen<R: Runtime>(app: &AppHandle<R>, id: &str) -> Option<String> {
-    let label = app.try_state::<NativeMenu<R>>()?.route(id)?;
+    let state = app.try_state::<NativeMenu<R>>()?;
+    let Some(label) = state.route(id) else {
+        if let Some(handler) = state.no_window_handler(id) {
+            handler(app, id);
+        }
+        return None;
+    };
     if let Err(e) = app.emit_to(label.as_str(), MENU_EVENT, id) {
         log::warn!(target: TARGET, Window = label.as_str(), Error = e.to_string().as_str(); "A menu click could not be sent");
         return None;

@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-menu` / `paddock-shell`: Quit in the menu bar with no window open
+- Fix: after the last window was closed to the tray (the window is destroyed) the menu bar still showed "Quit <App>" (`pd.app.quit`), but the click had no target window and was dropped, so Cmd+Q did nothing in a tray app. `NativeMenu::on_no_window` sets a host-side handler for app-level items (`route::runs_without_window`: Quit) when no window is the target; the shell sets it to its quit (the `app_quit` path: the window layer's exit with its teardown) and `Builder::menu_without_window` replaces it for an app with its own quit path.
+
 ### `paddock-jobs`: `WalkOptions::with_modified`
 - `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
 

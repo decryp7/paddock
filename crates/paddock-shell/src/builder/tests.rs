@@ -89,6 +89,78 @@ fn the_menu_bar_follows_the_focus_and_the_close_of_every_window() {
     assert_eq!(menu.target(), None);
 }
 
+/// Dyno closes its last window to the tray (the window is destroyed) and keeps running; the menu bar still shows
+/// "Quit", and choosing it must quit the app although no window is the target any more.
+#[test]
+fn quit_from_the_menu_bar_works_when_the_last_window_was_destroyed() {
+    let exits = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = exits.clone();
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .windows(move |_| {
+            Windows::builder(WindowConfig::new("Shell Demo"))
+                .exit_app(move |_, code| seen.lock().unwrap().push(code))
+                .build()
+        })
+        .setup(|app| {
+            app.manage(NativeMenu::<MockRuntime>::with_bar(
+                "Shell Demo",
+                true,
+                NoBar,
+            ));
+            Ok(())
+        }));
+    let menu = app.state::<NativeMenu<MockRuntime>>();
+    let quit = serde_json::json!({ "menus": [{ "id": "app", "label": "Shell Demo", "items": [
+        { "kind": "item", "id": "pd.app.quit", "label": "Quit Shell Demo", "keybinding": null, "checked": null, "enabled": true }
+    ] }] });
+    let model = paddock_menu::model::parse(serde_json::from_value(quit).unwrap()).unwrap();
+    menu.apply(app.handle(), &model).unwrap();
+    assert!(menu.shown_ids().contains(&"pd.app.quit".to_string()));
+    let w = window(&app, "main");
+    on_window_event(&w, &WindowEvent::Focused(true));
+    on_window_event(&w, &WindowEvent::Destroyed);
+    assert_eq!(menu.target(), None);
+    paddock_menu::tauri::menu_chosen(app.handle(), "pd.app.quit");
+    assert_eq!(*exits.lock().unwrap(), [0], "Quit asks the app to exit");
+}
+
+/// An app with its own quit path (Pitwall) replaces the shell's.
+#[test]
+fn the_app_can_replace_what_quit_does_without_a_window() {
+    let asked = Arc::new(std::sync::Mutex::new(0));
+    let seen = asked.clone();
+    let app = app(shell()
+        .menu_without_window(move |_| *seen.lock().unwrap() += 1)
+        .setup(|app| {
+            app.manage(NativeMenu::<MockRuntime>::with_bar(
+                "Shell Demo",
+                true,
+                NoBar,
+            ));
+            Ok(())
+        }));
+    let menu = app.state::<NativeMenu<MockRuntime>>();
+    let quit = serde_json::json!({ "menus": [{ "id": "app", "label": "Shell Demo", "items": [
+        { "kind": "item", "id": "pd.app.quit", "label": "Quit Shell Demo", "keybinding": null, "checked": null, "enabled": true }
+    ] }] });
+    let model = paddock_menu::model::parse(serde_json::from_value(quit).unwrap()).unwrap();
+    menu.apply(app.handle(), &model).unwrap();
+    paddock_menu::tauri::menu_chosen(app.handle(), "pd.app.quit");
+    assert_eq!(*asked.lock().unwrap(), 1);
+}
+
+/// Without a window layer and without an override, Quit falls back to Tauri's own exit (harmless on the mock runtime).
+#[test]
+fn quit_without_a_window_layer_uses_tauris_exit() {
+    let app = app(Builder::new(identity()).in_memory().native_menu(false));
+    assert!(app.try_state::<Windows<MockRuntime>>().is_none());
+    let mut exited = false;
+    quit_or(app.handle(), |_| exited = true);
+    assert!(exited);
+}
+
 #[test]
 fn window_events_without_the_window_layer_still_reach_the_other_parts() {
     let app = app(Builder::new(identity())
