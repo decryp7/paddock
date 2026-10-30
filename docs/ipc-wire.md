@@ -6,11 +6,12 @@ rides on it. The decisions behind it are [ADR 0001](adr/0001-plugin-platform-cra
 [ADR 0017](../apps/debrief/docs/adr/0017-one-ipc-out-of-process-plugins.md) (one IPC); this document describes what the
 code does.
 
-Status as of 2026-10-30, read at `origin/main` `dfc9cdc94`:
+Status: the code read at `origin/main` `dfc9cdc94` (2026-10-30); the design read at `docs/adr-plugin-platform`
+`a7c391053`, whose decisions are dated 2026-10-31.
 
 - **Built** means it is in the code on `main`; every such statement cites the file and line.
 - **Designed** means it is decided in ADR 0001 as revised on 2026-10-31 (branch `docs/adr-plugin-platform` at
-  `f246bb683`) or in [ADR 0031](adr/0031-patience-not-wall-clocks.md) (with its 2026-10-31 amendment on that branch), and
+  `a7c391053`) or in [ADR 0031](adr/0031-patience-not-wall-clocks.md) (with its 2026-10-31 amendment on that branch), and
   not built yet. Those parts are marked *Designed* where they appear.
 
 Paths are relative to the repository root. `paddock-ipc` is `crates/paddock-ipc/src/`, the plugin API is
@@ -239,8 +240,9 @@ And on the wire, prefix included:
 | `Welcome { version: 2, protocol: 2.0 }` | `04 00 00 00 01 02 02 00` | 8 |
 | `Hello { version: 2, protocol: 2.0, token, pid: 4242 }` | `26 00 00 00 00 02 02 00` + 32 token bytes + `92 21` | 42 |
 
-So the frame costs 4 bytes of prefix plus about 4 to 25 bytes of envelope (variant, id, credit and the body's length, all
-varints), and the body is the protocol message's own postcard bytes. The body is encoded once on its own and then
+So the frame costs 4 bytes of prefix plus 2 to 20 bytes of envelope (variant, id, credit and the body's length, all
+varints: 2 for `Cancel { id: 1 }`, at most 1 + 10 + 5 + 4 for a `Call` with the largest id and credit and a body near
+the 64 MiB cap), and the body is the protocol message's own postcard bytes. The body is encoded once on its own and then
 copied into the frame (`peer.rs:451`, `frame.rs:332`).
 
 ### Why postcard
@@ -291,7 +293,7 @@ sequenceDiagram
     H->>C: start the process, Bootstrap JSON line on stdin (stdin stays open)
     C->>H: connect to the endpoint
     C->>H: Hello { version 2, protocol 2.0, token, pid }
-    Note over H: 1. first frame is a Hello? else close<br/>2. frame version == 2? else Fail{0, "version"}<br/>3. protocol accepted? else Fail{0, "version"}<br/>4. token matches (constant time)? else Fail{0, "auth"}<br/>5. claimed pid == OS-reported pid == launched pid? else Fail{0, "auth"}
+    Note over H: 1. first frame starts like a Hello? else close<br/>2. frame version == 2? else Fail{0, "version"}<br/>3. protocol accepted? else Fail{0, "version"}<br/>4. the whole Hello decodes? else close<br/>5. token matches (constant time)? else Fail{0, "auth"}<br/>6. claimed pid == OS-reported pid == launched pid? else Fail{0, "auth"}
     H->>C: Welcome { version 2, protocol 2.0 }
     Note over H,C: Peer::start on both sides, calls go both ways
 ```
@@ -356,7 +358,7 @@ The evolution of every kind of change, measured with invented `v1` and `v2` type
 |---|---|---|---|
 | Variant appended at the end of an enum | the new variant: error ("not valid"); the others decode | decodes | **minor**, as long as nobody sends the new variant to a v1 reader |
 | Field appended at the end of a top-level struct | error: "1 trailing bytes" | error: "Hit the end of buffer", even with `#[serde(default)]` | **major** |
-| Field appended to a struct nested before other data | error **or a silent misread**: v2 `(Opts { n: 1, verbose: true }, vec![])` = `01 01 00` decodes in v1 as `(Opts { n: 1 }, [0])` | error ("Found a bool that wasn't 0 or 1") or a misread | **major**, and dangerous |
+| Field appended to a struct nested before other data | error **or a silent misread**: v2 `(Opts { n: 1, verbose: true }, vec![])` = `01 01 00` decodes in v1 as `(Opts { n: 1 }, [0])` | error ("Found a bool that wasn't 0 or 1") **or a silent misread**: the new field takes the next value's bytes | **major**, and dangerous in both directions |
 | Variants reordered, or one inserted in the middle | every later variant changes meaning | the same | **major** |
 | A field's type changed | misread or error | misread or error | **major** |
 | A field added to a type that crosses as `Json` (for example `Described`) | serde_json ignores unknown fields | decodes only if the new field is an `Option` or has `#[serde(default)]` | **minor** under that condition |
@@ -370,12 +372,13 @@ extensible part in a `Json` value. Section 16 lists two places whose doc comment
 
 - **No compatibility before v1** (rule set and user decision, recorded in ADR 0001 "Versioning and compatibility"):
   `PLATFORM_PROTOCOL` stays 2.0 while no app has shipped it, even when variants are appended (*Designed:*
-  `HostCall::Extension` and ADR 0031's `Progress` frame are added without a bump). The minor rule applies from the first
+  `HostCall::Extension` and ADR 0031's `Progress` frame are added without a protocol bump; the frame version goes to 3
+  for the handshake's capabilities, section 9). The minor rule applies from the first
   release that ships 2.0.
 - **No compatibility across a major, binary or source.** A plugin built for an older major is refused at the handshake
   and from its manifest (`Refusal::PluginTooOld`), and Debrief's protocol 1 is refused as no longer supported
   (`Refusal::Legacy`). There is no binary legacy mode and no source shim; Debrief removes old installed plugins on the
-  first start of 1.2 (ADR 0001 and ADR 0003 at `docs/adr-plugin-platform` `f246bb683`, user decision 2026-10-31). The
+  first start of 1.2 (ADR 0001 and ADR 0003 at `docs/adr-plugin-platform` `a7c391053`, user decision 2026-10-31). The
   frozen protocol-1 program `paddock-plugin-fixture-v1` keeps the refusal tested
   (`crates/paddock-plugin-test/src/bin/fixture_v1.rs`; the expected text is asserted in
   `crates/paddock-plugin-host/tests/it/faults.rs:240`).
@@ -639,8 +642,19 @@ host's instances and assigns them to packages 2.6c and 2.6d. Nothing of it is bu
   host owes the child an answer (a `HostCall` in flight) nothing counts. Any progress resets the counters. Stuck = N
   blocked ticks or C CPU-seconds of spin; N starts from today's values (15 ticks for a start), C is measured per call kind.
 - The plugin SDK sends a new **`Progress`** frame from progress points only, never from a keep-alive timer
-  (ADR 0031 §2). ADR 0031 §9 plans a `progress` capability bit in `Hello` so that older peers are judged on CPU and run
-  state alone; section 16 notes a wire problem with adding it as a field.
+  (ADR 0031 §2). Whether a peer sends them is a **capability** agreed in the handshake, so a peer without it is judged
+  on CPU time and run state alone (ADR 0031 §9).
+- *Designed (ADR 0001 at `a7c391053`, "Capabilities in the handshake: frame version 3", package 2.6d):* a field cannot
+  simply be appended to `Hello`, and a new `Hello` variant is refused by an older host (section 16, point 6). Instead
+  `frame::VERSION` becomes 3, and in version 3 `Hello` and `Welcome` end with `caps: u32`, a bit set whose bit 0 is
+  `progress`; later capabilities are new bits, never a layout change. A version-3 host reads the versions first
+  (`handshake_versions`), accepts a version-2 `Hello` and answers with a version-2 `Welcome`, without capabilities. A
+  version-3 client that a version-2 host refuses with `version` reconnects once with a version-2 `Hello`. A refusal is
+  never a fault. Package 2.6d tests the four pairings of versions 2 and 3.
+- A simpler route exists for peers that are always built together (a plugin and the app that ships its protocol): the
+  protocol minor the `Hello` already carries says which frames the peer knows, so "minor at least N" can stand for
+  "sends `Progress`" with no frame change. It does not cover peers whose protocol is unversioned (`0.0`) or that update
+  separately, which is why the ADR chose the frame version.
 - `call_timeout`, `hang_grace` and the fixed start window go; `NO_BUDGET` stays only as a cap where an operation declares
   one; `stop_grace` and `CANCEL_GRACE` stay (shutdown).
 
@@ -722,7 +736,7 @@ under 280 ms), not a budget.
 
 What each call costs, from the code (not timed):
 
-- **Bytes:** 4 bytes of prefix plus about 4 to 25 bytes of envelope (section 4), plus the body. A `Json` value is
+- **Bytes:** 4 bytes of prefix plus 2 to 20 bytes of envelope (section 4), plus the body. A `Json` value is
   serialised to JSON text and parsed again on the other side.
 - **Copies:** the body is encoded, then copied into the frame buffer (`frame.rs:332`); the reader allocates the body at
   its announced size and decodes from it.
@@ -732,8 +746,7 @@ What each call costs, from the code (not timed):
 ### Batching guidance
 
 - Never one call per record: stream batches. Debrief's protocol 1 sends up to 8,192 events or about 4 MiB per item
-  (`MAX_EVENTS_PER_ITEM`, `ITEM_BYTES`). ADR 0001's revision says "by convention about 64 KiB of events" per item; the two
-  differ, and package 2.6b's benchmark should settle the item size (section 16).
+  (`MAX_EVENTS_PER_ITEM`, `ITEM_BYTES`); ADR 0001 keeps that as the 1.2 bound, and package 2.6b's benchmark may lower it.
 - Lend files by range (`ReadFile`, 1 MiB pieces) instead of sending them whole; push outputs in 256 KiB pieces.
 - Keep contract bodies postcard; use `Json` only where the value is JSON by contract.
 - Keep items well under the frame limit: an item over 16 MiB fails the call.
@@ -748,7 +761,8 @@ What each call costs, from the code (not timed):
   `THREAD_PRIORITY_BELOW_NORMAL` on Windows); **Live** calls (a sniff, a tail someone watches) at normal level. Nothing a
   person waits on runs at a starvable level (`QOS_CLASS_BACKGROUND`, `PRIO_DARWIN_BG`, `SCHED_IDLE`). Rule 52 is not on
   `main` yet; its text is on `fix/dyno-bundle-ui`.
-- A plugin that parses in parallel sizes its pool with `paddock_proc::threads(kind, class)` (ADR 0024 §1, to be built);
+- *Designed (ADR 0001, ADR 0024 §1):* a plugin that parses in parallel sizes its pool with
+  `paddock_proc::threads(kind, class)`;
   CPU work gets cores minus one **in total**, so the app limits concurrent bulk calls across plugins.
 
 ## 12. Testing
@@ -805,7 +819,7 @@ The AI worker does **not** speak JSON-RPC on the wire today. Debrief ADR 0002 on
 for workers; ADR 0017 replaced that. The worker's requests are a postcard `WorkerRequest` enum over `debrief-ipc` frames
 (`apps/debrief/crates/debrief-ai/src/worker/frames.rs:1`, `:56`), and `Chat` streams token deltas as items with credits.
 What remains of JSON-RPC is naming: the transport trait takes a method name and `serde_json::Value` parameters
-(`transport.rs:27`), and the worker's error codes keep JSON-RPC's numbers "for readability" (`-32600`, `-32601`, ...,
+(`apps/debrief/crates/debrief-ai/src/worker/transport.rs:27`), and the worker's error codes keep JSON-RPC's numbers "for readability" (`-32600`, `-32601`, ...,
 `apps/debrief/crates/debrief-ai/src/worker/protocol.rs:23`). JSON over HTTP exists only between the worker and its own
 child, `llama-server`, an external program whose API is HTTP (section 1).
 
@@ -876,6 +890,11 @@ pub const MAX_TEXT: usize = 4096;
 **2. The plugin:** handle it, check the bounds, honour cancel.
 
 ```rust
+use paddock_plugin_api::prelude::*;
+// `codes` and `CallCtx` are not re-exported by paddock-plugin-api today, so the plugin also depends on paddock-ipc
+// directly (section 16, point 10; IP1 adds the re-exports).
+use paddock_ipc::{CallCtx, codes};
+
 contributions.add_extension::<Notes>(|ctx: &ExtCtx, req: NotesRequest| match req {
     NotesRequest::Find { text, limit } => find(ctx, &text, limit),
     NotesRequest::Count { text } => {
@@ -885,7 +904,7 @@ contributions.add_extension::<Notes>(|ctx: &ExtCtx, req: NotesRequest| match req
         let mut n = 0;
         for chunk in index_chunks() {
             if ctx.is_cancelled() {
-                return Err(CallCtx::cancelled_error());
+                return Err(CallCtx::cancelled_error()); // code "cancelled"
             }
             n += chunk.count(&text);
         }
@@ -896,15 +915,35 @@ contributions.add_extension::<Notes>(|ctx: &ExtCtx, req: NotesRequest| match req
 
 The manifest declares the new minor: `ns = "example.notes.v1/1"`.
 
-**3. The app:** call it only when the plugin's declared minor has it.
+**3. The app:** serve the new minor, then call it only when the plugin's declared minor has it.
+
+The app's `HostInfo` must list the namespace at the new minor. Otherwise the plugin, whose manifest now says minor 1, is
+refused as `AppTooOld` at install (`installed.rs:302`) and in its status (`supervisor.rs:894`), and is never started:
+
+```rust
+let info = HostInfo::new("Notes app")
+    .serving(NamespaceSupport::new("example.notes.v1", 1).since(1, "1.4")); // the app release that adds minor 1
+```
+
+Then, at the call site:
 
 ```rust
 let notes: Remote<Notes> = supervisor.remote::<Notes>()?;   // refuses a plugin newer than Notes::MINOR
-let reply = notes.call(&NotesRequest::Count { text })?;      // a fault is attributed to the plugin
+let declared = supervisor
+    .manifest()                                             // supervisor.rs:130
+    .namespaces()
+    .find(|n| n.ns() == Notes::NS)
+    .map_or(0, |n| n.minor);
+if declared >= 1 {
+    let reply = notes.call(&NotesRequest::Count { text })?; // a fault is attributed to the plugin
+} else {
+    // an older plugin: fall back (Find and count) or tell the user to update it
+}
 ```
 
 `Remote` sends the plugin's declared minor (`supervisor.rs:825`), but it does not stop the app from sending `Count` to a
-plugin declared at minor 0; that plugin answers `invalid`. The app checks the minor first (section 16).
+plugin declared at minor 0; that plugin answers `invalid`. Hence the check above, until requests carry their own minor
+(section 16, point 5).
 
 **4. Tests:** round-trip `NotesRequest::Count` and `NotesReply::Counted` through `paddock_ipc::wire`; a `FakeHost` test
 of the handler, including over-long text and cancel; a test that a minor-0 handler answers `Count` with `invalid` and the
@@ -916,41 +955,22 @@ conformance check if every plugin must handle it, and the minor of `PLATFORM_PRO
 
 ## 16. Open points found while writing this
 
-Found by reading the code at `dfc9cdc94` and by the scratch program of section 4. None is fixed here.
+Found by reading the code at `dfc9cdc94` and by the scratch program of section 4. None is fixed on `main`. Ranked by
+severity; the owner is the package of the [Debrief 1.2 plan](plans/debrief-1-2.md) (branch `docs/adr-plugin-platform`
+at `a7c391053`) that takes it.
 
-1. **"Append a field" is documented as compatible in two places, and it is not.** `PLATFORM_PROTOCOL`'s doc comment says a
-   minor change is "a request, call, reply or description field was added at the end (older plugins keep working)"
-   (`paddock-plugin-api/src/protocol.rs:18`), and Debrief's `PROTOCOL` says the same
-   (`apps/debrief/crates/debrief-plugin-api/src/protocol.rs:24`). For postcard bodies, an appended field breaks both
-   directions and, nested, can be misread silently (section 5). `paddock-ipc`'s own wording (`wire.rs:5`: "adding a
-   variant at the end of an enum is a minor protocol change; anything else is a new major") is the correct rule.
-2. **ADR 0031 §9's `progress` capability bit in `Hello`** is described as needing no frame version bump. Adding a field to
-   `Hello` makes its full decode fail on an older host with "1 trailing bytes" (measured: `handshake_versions` still reads
-   the versions, `decode_body` fails), which the host reports as "the hello is not valid", a protocol error, and the
-   plugin host then counts as a crash fault (`supervisor.rs:409`); an older peer's `Hello` read by a newer host fails the
-   same way ("Hit the end of buffer"). ADR 0031's 2026-10-31 amendment narrows the need (every protocol-2.0 plugin is
-   built with `Progress` frames), but §9 is about peers that update separately (it names Pitwall's service, Dyno's agent and Pitcrew's service), and
-   there an older and a newer `Hello` meet. A new frame
-   version, or a capability-carrying `Hello` variant appended at the end of `Frame`, would be needed.
-3. **ADR 0001 says the endpoint is "inherited at launch"** ("Alternatives considered"). It is not inherited: the child
-   receives its name and token in the bootstrap and connects (section 2).
-4. **The `crates/README.md` row for `paddock-ipc` lists users "Debrief, Dyno, Pitcrew"**; on `main` no app links it yet.
-5. **Item size:** ADR 0001 says items carry "about 64 KiB of events" by convention; Debrief's protocol 1 allows 8,192
-   events or about 4 MiB per item. Package 2.6b's benchmark should fix one number.
-6. **No fuzz target for plugin bodies** (`PlatformRequest`, `HostCall`, contract bodies), and **no CI job runs the shared
-   crates' fuzz targets**.
-7. **The writer queue is unbounded** (`mpsc::channel`, `peer.rs:225`), while `lib.rs:2` says queues are bounded. Credits,
-   `max_concurrent_calls` and the push queue bound most traffic; pushes and calls this side starts are not bounded if the
-   other side stops reading.
-8. **A repeated call id from the other side is not detected**: `serve_call` replaces the entry in `served`
-   (`peer.rs:554`), so a misbehaving peer can only confuse its own calls; a check would turn it into a protocol error.
-9. **Nothing stops a host from sending a variant newer than the peer's minor**: `Remote` knows the plugin's minor but
-   does not check requests against it. A per-variant minor (for example a `fn minor(&self) -> u16` on the request enum)
-   would make it checkable.
-10. **The handshake does not compare the peer's uid** with the host's own: it records it (`handshake.rs:147`); the 0700
-    folder and the owner-only pipe are the gate.
-11. **An oversized reply from a plugin is not counted as its fault.** The SDK never sends one (it answers `tooLarge`
-    instead), but a plugin that bypasses it and sends a `Reply` over the limit makes the host's `Peer::call` return
-    `IpcError::TooLarge` (`on_skipped`, `peer.rs:613`), which `classify` treats as the host's own request being too large:
-    `HostError::Invalid("the request is N bytes ...")`, nothing counted (`supervisor.rs:558`). Found by reading; no test
-    was written for it.
+| # | Severity | Open point | Owner |
+|---|---|---|---|
+| 1 | high | **An oversized reply from a plugin is not counted as its fault.** The SDK never sends one (it answers `tooLarge` instead, `peer.rs:576`), but a plugin that bypasses it and sends a `Reply` over the limit makes the host's `Peer::call` return `IpcError::TooLarge` (`on_skipped`, `peer.rs:613`), which `classify` treats as the host's own request being too large: `HostError::Invalid("the request is N bytes ...")`, nothing counted (`supervisor.rs:558`). The host reads past up to 64 MiB per such reply, and since nothing is counted the plugin is never quarantined: it can make the host do that on every call, forever. Found by reading; no test yet. | IP1 |
+| 2 | high | **"Append a field" is documented as compatible in two places, and it is not.** `PLATFORM_PROTOCOL`'s doc comment says a minor change is "a request, call, reply or description field was added at the end (older plugins keep working)" (`crates/paddock-plugin-api/src/protocol.rs:18`), and Debrief's `PROTOCOL` says the same (`apps/debrief/crates/debrief-plugin-api/src/protocol.rs:24`). For postcard bodies an appended field breaks both directions and, nested, can be misread silently (section 5). `paddock-ipc`'s own wording (`wire.rs:5`) and ADR 0001 now state the correct rule. | IP1 |
+| 3 | high | **No fuzz target for plugin bodies** (`PlatformRequest`, `HostCall`, contract bodies), and **no CI job runs the shared crates' fuzz targets**. | IP1 |
+| 4 | medium | **The writer queue is unbounded** (`mpsc::channel`, `peer.rs:225`), while `lib.rs:2` says queues are bounded. Credits, `max_concurrent_calls` and the push queue bound most traffic; pushes and calls this side starts are not bounded if the other side stops reading. | IP1 |
+| 5 | medium | **Nothing stops a host from sending a variant newer than the peer's minor**: `Remote` knows the plugin's minor but does not check requests against it. A per-variant minor (for example a `fn minor(&self) -> u16` on the request enum) would make it checkable. | IP1 |
+| 6 | medium | **The `progress` capability in `Hello`.** ADR 0031 §9 said a capability bit needed no frame version bump. Adding a field to `Hello` makes its full decode fail on an older host with "1 trailing bytes" (measured: `handshake_versions` still reads the versions, `decode_body` fails), reported as "the hello is not valid" and counted by the plugin host as a crash (`supervisor.rs:409`); an older `Hello` read by a newer host fails with "Hit the end of buffer". A `Hello` variant appended at the end of `Frame` does not work either: an older host closes with "the first frame was not a hello" (`handshake.rs:179`), also a crash (found by the independent review). **Resolved in the ADR** (*Designed*, ADR 0001 at `a7c391053`, "Capabilities in the handshake: frame version 3", package 2.6d): see section 9. | 2.6d |
+| 7 | low | **A repeated call id from the other side is not detected**: `serve_call` replaces the entry in `served` (`peer.rs:554`), so a misbehaving peer can only confuse its own calls; a check would turn it into a protocol error. | IP1 |
+| 8 | low | **The handshake does not compare the peer's uid** with the host's own: it records it (`handshake.rs:147`); the 0700 folder and the owner-only pipe are the gate. | IP1 |
+| 9 | low | **Stale shim wording.** `PLATFORM_PROTOCOL`'s doc comment says "the shim that serves such plugins is the app's" (`crates/paddock-plugin-api/src/protocol.rs:16`, which also links a non-existent `crate::error::Refusal::Legacy`), and `Refusal::Legacy` says "the app's compatibility shim may serve it" (`crates/paddock-plugin-api/src/compat.rs:255`); the ADRs now decide there is no shim, binary or source (section 5). | IP1 |
+| 10 | low | **`codes` and `CallCtx` are not re-exported by `paddock-plugin-api`**, although a plugin is meant to depend on that crate alone (`lib.rs:2` of the API). A contract handler that answers `invalid` or `cancelled` needs `paddock-ipc` as a direct dependency (section 15). | IP1 |
+| 11 | low | **The `crates/README.md` row for `paddock-ipc` lists users "Debrief, Dyno, Pitcrew"**; on `main` no app links it yet. | IP1 |
+| 12 | resolved | **ADR 0001 said the endpoint is "inherited at launch".** It is not inherited: the child receives its name and token in the bootstrap and connects (section 2). **Resolved in the ADR** at `a7c391053` ("Alternatives considered" now says so). | done |
+| 13 | resolved | **Item size:** ADR 0001 said items carry "about 64 KiB of events"; Debrief's protocol 1 allows 8,192 events or about 4 MiB per item. **Resolved in the ADR** at `a7c391053`: the 1.2 bound is Debrief's (8,192 events or about 4 MiB, whichever first); package 2.6b's benchmark may lower it. | done |
