@@ -9,8 +9,9 @@ code does.
 Status as of 2026-10-30, read at `origin/main` `dfc9cdc94`:
 
 - **Built** means it is in the code on `main`; every such statement cites the file and line.
-- **Designed** means it is decided in ADR 0001 as revised on 2026-10-31 (branch `docs/adr-plugin-platform`) or in
-  [ADR 0031](adr/0031-patience-not-wall-clocks.md), and not built yet. Those parts are marked *Designed* where they appear.
+- **Designed** means it is decided in ADR 0001 as revised on 2026-10-31 (branch `docs/adr-plugin-platform` at
+  `f246bb683`) or in [ADR 0031](adr/0031-patience-not-wall-clocks.md) (with its 2026-10-31 amendment on that branch), and
+  not built yet. Those parts are marked *Designed* where they appear.
 
 Paths are relative to the repository root. `paddock-ipc` is `crates/paddock-ipc/src/`, the plugin API is
 `crates/paddock-plugin-api/src/`, the plugin host is `crates/paddock-plugin-host/src/`.
@@ -334,8 +335,8 @@ On top of the handshake, the plugin host judges a plugin's manifest and `Describ
 | `Mismatch` | `Describe` disagrees with the verified manifest (tools, views, settings, MCP tools, namespaces, version, protocol) | names the difference |
 
 A refusal is not a fault: the supervisor sets the plugin's status to `Refused` and counts nothing
-(`supervisor.rs:408`). *Designed:* PH3 rewords the `Legacy` and `PluginTooOld` texts to "rebuild it from source" (ADR 0001,
-"Implementation notes").
+(`supervisor.rs:408`). *Designed:* PH3 rewords the texts: `PluginTooOld` to "install a version built for this app", `Legacy` to
+"was built for an older Debrief and is no longer supported" (ADR 0001, "Versioning and compatibility").
 
 ### Evolution rules
 
@@ -371,13 +372,16 @@ extensible part in a `Json` value. Section 16 lists two places whose doc comment
   `PLATFORM_PROTOCOL` stays 2.0 while no app has shipped it, even when variants are appended (*Designed:*
   `HostCall::Extension` and ADR 0031's `Progress` frame are added without a bump). The minor rule applies from the first
   release that ships 2.0.
-- **No binary compatibility across a major.** A plugin built for an older major is refused at the handshake and from its
-  manifest; there is no binary legacy mode (ADR 0001, ADR 0003 phase 3). The frozen protocol-1 program
-  `paddock-plugin-fixture-v1` keeps that refusal tested (`crates/paddock-plugin-test/src/bin/fixture_v1.rs`; the expected
-  text is asserted in `crates/paddock-plugin-host/tests/it/faults.rs:240`).
-- **Support window for the previous major (Designed, ADR 0001):** when a new major ships, the SDK keeps a **source-level**
-  shim for the previous major for two minor releases of each app that hosts plugins, then removes it. For Debrief this is
-  `debrief-plugin-api` re-exporting its 1.1 names over the platform until 1.4 (ADR 0003 phases 3 and 5).
+- **No compatibility across a major, binary or source.** A plugin built for an older major is refused at the handshake
+  and from its manifest (`Refusal::PluginTooOld`), and Debrief's protocol 1 is refused as no longer supported
+  (`Refusal::Legacy`). There is no binary legacy mode and no source shim; Debrief removes old installed plugins on the
+  first start of 1.2 (ADR 0001 and ADR 0003 at `docs/adr-plugin-platform` `f246bb683`, user decision 2026-10-31). The
+  frozen protocol-1 program `paddock-plugin-fixture-v1` keeps the refusal tested
+  (`crates/paddock-plugin-test/src/bin/fixture_v1.rs`; the expected text is asserted in
+  `crates/paddock-plugin-host/tests/it/faults.rs:240`).
+- **Support window for the previous major: none before v1.** Whether a later major keeps the previous one working for a
+  while is to be decided by an ADR once the platform has shipped a major to third parties (same source). An earlier draft
+  of that revision kept a source-level shim for two minor releases; it was withdrawn on 2026-10-31.
 
 ## 6. Message model
 
@@ -923,8 +927,11 @@ Found by reading the code at `dfc9cdc94` and by the scratch program of section 4
 2. **ADR 0031 §9's `progress` capability bit in `Hello`** is described as needing no frame version bump. Adding a field to
    `Hello` makes its full decode fail on an older host with "1 trailing bytes" (measured: `handshake_versions` still reads
    the versions, `decode_body` fails), which the host reports as "the hello is not valid", a protocol error, and the
-   plugin host then counts as a crash fault (`supervisor.rs:409`). A new frame version, or a new `Hello` variant at the
-   end of `Frame`, would be needed.
+   plugin host then counts as a crash fault (`supervisor.rs:409`); an older peer's `Hello` read by a newer host fails the
+   same way ("Hit the end of buffer"). ADR 0031's 2026-10-31 amendment narrows the need (every protocol-2.0 plugin is
+   built with `Progress` frames), but §9 is about peers that update separately (it names Pitwall's service, Dyno's agent and Pitcrew's service), and
+   there an older and a newer `Hello` meet. A new frame
+   version, or a capability-carrying `Hello` variant appended at the end of `Frame`, would be needed.
 3. **ADR 0001 says the endpoint is "inherited at launch"** ("Alternatives considered"). It is not inherited: the child
    receives its name and token in the bootstrap and connects (section 2).
 4. **The `crates/README.md` row for `paddock-ipc` lists users "Debrief, Dyno, Pitcrew"**; on `main` no app links it yet.
