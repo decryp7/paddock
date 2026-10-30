@@ -21,7 +21,7 @@ import { ServiceStore } from '../service/service.store';
 import { checkSummary } from '../updates/update-text';
 import { UpdatesStore } from '../updates/updates.store';
 import { injectNow } from '../../shared/now';
-import { refusalText, SettingsStore, undoText, type SettingField } from './settings.store';
+import { refusalText, SettingsStore, undoText, unsentText, type SettingField } from './settings.store';
 import { settingsPageCloseGuard } from '@decryp7/paddock-ui/shell/settings/window';
 
 const GB = 1024 ** 3;
@@ -137,6 +137,7 @@ export class SettingsPage implements OnInit {
 
   protected readonly refusalText = refusalText;
   protected readonly undoText = undoText;
+  protected readonly unsentText = unsentText;
 
   constructor() {
     // The Settings window asks before it closes: a typed value still waiting is saved first, a refused one is named.
