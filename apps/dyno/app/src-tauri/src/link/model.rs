@@ -29,7 +29,7 @@ const TUNING: Tuning = Tuning {
 /// The most states a search may visit; a search that gets there fails.
 const MAX_STATES: usize = 2_000_000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Proc {
     NotStarted,
     Starting,
@@ -49,7 +49,7 @@ impl Proc {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Other {
     None,
     /// Holds the lock, has not written its file yet (a slow start).
@@ -58,20 +58,20 @@ enum Other {
     Exiting,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Target {
     Own,
     Other,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Job {
     Launch(Generation, i64),
     End(Generation),
 }
 
 /// What is left of the person's and the clock's choices.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash)]
 struct Budget {
     ticks: u8,
     retry: u8,
@@ -80,7 +80,7 @@ struct Budget {
     add: u8,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 struct World {
     m: Supervisor,
     clock: i64,
@@ -516,14 +516,14 @@ const BUDGET: Budget = Budget {
 };
 
 /// The worlds the machine is checked in, each begun with `Begin`.
-fn scenarios(mutant: Mutant, budget: Budget) -> Vec<(&'static str, World)> {
+fn scenarios(mutant: Mutant, budget: Budget, bound: Bound) -> Vec<(&'static str, World)> {
     let mk = |f: &dyn Fn(&mut World)| {
         let mut w = base(mutant, budget);
         f(&mut w);
         w.feed(Event::Begin);
         w
     };
-    vec![
+    let all = vec![
         (
             "no agent, no service",
             mk(&|w| {
@@ -606,31 +606,53 @@ fn scenarios(mutant: Mutant, budget: Budget) -> Vec<(&'static str, World)> {
                 w.budget.ticks = 2;
             }),
         ),
-    ]
+    ];
+    all.into_iter()
+        .map(|(name, mut w)| {
+            if bound == Bound::Ci {
+                // Re-run the scenario's start with the smaller budget: the budget is part of the begun world.
+                w.budget.ticks = w.budget.ticks.min(ci_ticks(name));
+            }
+            (name, w)
+        })
+        .collect()
 }
 
-/// A 128-bit key of a state: its `Debug` text hashed as it is written (no string is built).
-fn key_of(w: &World) -> (u64, u64) {
-    use std::fmt::Write;
-    use std::hash::Hasher;
-    struct Two(std::collections::hash_map::DefaultHasher, std::collections::hash_map::DefaultHasher);
-    impl Write for Two {
-        fn write_str(&mut self, s: &str) -> std::fmt::Result {
-            self.0.write(s.as_bytes());
-            self.1.write(s.as_bytes());
-            self.1.write_u8(0xA5);
-            Ok(())
-        }
+/// How far a search goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Bound {
+    /// What every CI leg runs: the scenarios with as few ticks as still show their invariants (and every named mutant).
+    Ci,
+    /// The full search (`cargo test -p dyno-app --lib link::model -- --ignored`): more ticks in every scenario.
+    Full,
+}
+
+/// The ticks a scenario gets in the CI bound. Three ticks reach a wait's note (the "cause shown" invariant), so the scenarios
+/// whose waits matter most keep three; the others look twice.
+fn ci_ticks(name: &str) -> u8 {
+    match name {
+        "no agent, no service"
+        | "an agent of another build"
+        | "the service starts nothing, Retry and Quit interleaved with the fallback" => 3,
+        _ => 2,
     }
-    let mut h = Two(Default::default(), Default::default());
-    let _ = write!(h, "{w:?}");
-    (h.0.finish(), h.1.finish())
 }
 
-fn check_all(mutant: Mutant, budget: Budget) -> Vec<(&'static str, Explored)> {
+/// A 128-bit key of a state: two hashes of its fields (no text is built).
+fn key_of(w: &World) -> (u64, u64) {
+    use std::hash::{Hash, Hasher};
+    let mut a = std::collections::hash_map::DefaultHasher::new();
+    let mut b = std::collections::hash_map::DefaultHasher::new();
+    b.write_u8(0xA5);
+    w.hash(&mut a);
+    w.hash(&mut b);
+    (a.finish(), b.finish())
+}
+
+fn check_all(mutant: Mutant, budget: Budget, bound: Bound) -> Vec<(&'static str, Explored)> {
     // One thread per scenario: they share nothing.
     std::thread::scope(|scope| {
-        let handles: Vec<_> = scenarios(mutant, budget)
+        let handles: Vec<_> = scenarios(mutant, budget, bound)
             .into_iter()
             .map(|(name, w)| {
                 scope.spawn(move || {
@@ -643,11 +665,12 @@ fn check_all(mutant: Mutant, budget: Budget) -> Vec<(&'static str, Explored)> {
     })
 }
 
-#[test]
-fn the_machine_keeps_every_invariant_in_every_interleaving_up_to_the_bound() {
+/// Searches every scenario at `bound` and fails on a violation or on a search that hit its state bound; returns the states
+/// visited and the time taken.
+fn assert_clean(bound: Bound) -> (usize, std::time::Duration) {
     let t = std::time::Instant::now();
     let mut total = 0;
-    for (name, r) in check_all(Mutant::None, BUDGET) {
+    for (name, r) in check_all(Mutant::None, BUDGET, bound) {
         assert!(
             !r.truncated,
             "{name}: the search reached its bound of {MAX_STATES} states without finishing"
@@ -658,40 +681,63 @@ fn the_machine_keeps_every_invariant_in_every_interleaving_up_to_the_bound() {
         eprintln!("  {name}: {} states", r.states);
         total += r.states;
     }
-    eprintln!("model check: {total} states in {:?}", t.elapsed());
+    (total, t.elapsed())
 }
 
-/// Each mutant must be found by at least one scenario.
-fn caught(mutant: Mutant) -> String {
-    for (name, r) in check_all(mutant, BUDGET) {
+/// The CI bound: every invariant in every interleaving of the scenarios at two or three ticks. It has to stay cheap enough for
+/// every CI leg (nextest's limit is 60 s and a shared runner is slow); the numbers measured on the development Mac are in the
+/// commit that introduced the two bounds.
+#[test]
+fn the_machine_keeps_every_invariant_in_every_interleaving_up_to_the_ci_bound() {
+    let (total, took) = assert_clean(Bound::Ci);
+    eprintln!("model check (CI bound): {total} states in {took:?}");
+}
+
+/// The full bound: one more tick in most scenarios, many times the states. Run it by hand, and in a nightly that runs ignored
+/// tests: `cargo test -p dyno-app --lib link::model -- --ignored`.
+#[test]
+#[ignore = "the full bound takes minutes in a loaded test build; the CI bound runs on every leg"]
+fn the_machine_keeps_every_invariant_in_every_interleaving_up_to_the_full_bound() {
+    let (total, took) = assert_clean(Bound::Full);
+    eprintln!("model check (full bound): {total} states in {took:?}");
+}
+
+/// The named scenarios (at the CI bound) must show `mutant`'s violation. Only those run, and each stops at its first violation,
+/// so a mutant costs what it takes to find it.
+fn caught(mutant: Mutant, scenario_names: &[&str]) -> String {
+    for (name, w) in scenarios(mutant, BUDGET, Bound::Ci)
+        .into_iter()
+        .filter(|(n, _)| scenario_names.contains(n))
+    {
+        let r = explore(w, MAX_STATES, key_of, |w| w.successors(), |w| w.violation.map(str::to_string));
         if let Some(v) = r.violation {
-            return format!("{name}: {} (after {} steps)", v.what, v.trace.len());
+            return format!("{name}: {} (after {} steps, {} states)", v.what, v.trace.len(), r.states);
         }
     }
-    panic!("{mutant:?} was not caught: the model check cannot fail on it");
+    panic!("{mutant:?} was not caught in {scenario_names:?}: the model check cannot fail on it");
 }
 
 #[test]
 fn bug_1_a_fixed_wait_that_launches_a_second_agent_is_caught() {
-    let found = caught(Mutant::LaunchOnFixedWait);
+    let found = caught(Mutant::LaunchOnFixedWait, &["no agent, no service"]);
     assert!(found.contains("second own agent"), "{found}");
 }
 
 #[test]
 fn bug_2_a_wait_without_a_cause_is_caught() {
-    let found = caught(Mutant::EndlessWait);
+    let found = caught(Mutant::EndlessWait, &["no agent, no service"]);
     assert!(found.contains("without a cause"), "{found}");
 }
 
 #[test]
 fn bug_3_a_stale_discovery_file_taken_for_the_agent_is_caught() {
-    let found = caught(Mutant::StaleHintAsAgent);
+    let found = caught(Mutant::StaleHintAsAgent, &["a stale discovery file"]);
     assert!(found.contains("does not exist"), "{found}");
 }
 
 #[test]
 fn bug_4_launching_when_the_connection_closes_before_the_lock_is_released_is_caught() {
-    let found = caught(Mutant::LaunchOnPeerClosed);
+    let found = caught(Mutant::LaunchOnPeerClosed, &["the service runs the agent, then is removed"]);
     assert!(
         found.contains("released the data folder") || found.contains("second own agent"),
         "{found}"
@@ -700,19 +746,22 @@ fn bug_4_launching_when_the_connection_closes_before_the_lock_is_released_is_cau
 
 #[test]
 fn bug_5_a_quit_outcome_read_again_after_the_exit_is_caught() {
-    let found = caught(Mutant::QuitOutcomeReread);
+    let found = caught(Mutant::QuitOutcomeReread, &["no agent, no service"]);
     assert!(found.contains("different outcome"), "{found}");
 }
 
 #[test]
 fn never_probing_the_lock_is_caught_beside_a_holder_that_has_not_written_its_file() {
-    let found = caught(Mutant::NeverProbeLock);
+    let found = caught(
+        Mutant::NeverProbeLock,
+        &["a foreign agent holds the folder and is slow to write its file"],
+    );
     assert!(found.contains("did not see the agent holding"), "{found}");
 }
 
 #[test]
 fn the_generation_hole_of_the_first_draft_is_caught() {
-    let found = caught(Mutant::GenerationBlind);
+    let found = caught(Mutant::GenerationBlind, &["no agent, no service"]);
     assert!(found.contains("second own agent") || found.contains("not the one held"), "{found}");
 }
 

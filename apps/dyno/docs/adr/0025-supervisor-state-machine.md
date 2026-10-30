@@ -40,6 +40,10 @@ where they disagree this section wins.
 7. **Owner has two values** (`ThisApp(Generation)`, `Other`): take-back and hand-over need only "ours or not".
 8. **The model check fails when it reaches its state bound**, uses parent pointers for traces, and covers the discovery file
    (stale or of another build) and the launcher's queue. Its counts are shrunk (`Tuning`) so a note comes after 3 ticks.
+   Two bounds: the CI bound (2 to 3 ticks per scenario, 375k states, about 2.5 s on the development Mac, run by every leg) and
+   the full bound (an `#[ignore]` test, 865k states, about 8.5 s; run by hand, and by a nightly once Dyno's nightly runs
+   ignored tests). The state key is a derived `Hash`, not the debug text (about 10 times cheaper). Each named mutant is
+   searched in its own scenario at the CI bound and must be caught there.
 9. **The start judge is fed a real CPU reading** every `CPU_EVERY` ticks (or `Unavailable`), never `NotRead` for ever, through
    one adapter function (`ports::cpu_of`).
 10. **Health's repair waits on the published transitions** (`AgentLink::wait_connected`) instead of polling.

@@ -52,7 +52,7 @@ const EXIT_ALREADY_RUNNING: i32 = dyno_agent::cli::EXIT_ALREADY_RUNNING;
 
 /// The counts that decide when a wait shows its cause and when a service is given up on. The production values are the
 /// constants above; the model check shrinks them so that every interleaving up to a wait's note fits in a bound.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Tuning {
     /// Ticks in one wait before its cause is shown.
     pub note_after: u32,
@@ -86,7 +86,7 @@ impl Default for Tuning {
 }
 
 /// What a look found about the discovery file: a hint, never proof.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HintSeen {
     /// The pid the file names.
     pub pid: u32,
@@ -101,7 +101,7 @@ pub struct HintSeen {
 }
 
 /// Whether some process holds the agent's lock (the authority for "is an agent running here").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LockSeen {
     /// Nobody.
     Free,
@@ -130,7 +130,7 @@ pub struct Look {
 }
 
 /// Who runs the agent we are connected to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Owner {
     /// The very process this app started (held, so its pid is its own).
     ThisApp(Generation),
@@ -139,14 +139,14 @@ pub enum Owner {
 }
 
 /// What a quit decided, once.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct QuitOutcome {
     /// The agent this app started is stopped (see [`stop_agent_on_quit`]).
     pub stopped_own: bool,
 }
 
 /// Why a connect was made.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Purpose {
     /// To use the agent.
     Use,
@@ -155,7 +155,7 @@ pub enum Purpose {
 }
 
 /// What the link is doing or waiting for.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub enum Phase {
     /// Not begun.
     Idle,
@@ -224,7 +224,7 @@ pub enum Phase {
 }
 
 /// What the world or the person tells the machine.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub enum Event {
     /// Start supervising.
     Begin,
@@ -281,7 +281,7 @@ pub enum Event {
 }
 
 /// A launch that worked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Launch {
     /// When it was launched (ms since the epoch).
     pub at_ms: i64,
@@ -420,7 +420,7 @@ impl Snapshot {
 }
 
 /// The kind of wait a phase is, for counting its ticks: the count starts anew when the kind changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Cat {
     Deciding,
     Starting,
@@ -445,7 +445,7 @@ fn cat_of(phase: &Phase) -> Option<Cat> {
 }
 
 /// The child this app started and holds until it is gone.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 struct Held {
     generation: Generation,
     pid: Option<u32>,
@@ -454,7 +454,7 @@ struct Held {
     launched_ms: i64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Hash)]
 struct Wait {
     cat: Option<Cat>,
     /// The wait this deciding step interrupted: coming back to it keeps its count and its stall.
@@ -1358,6 +1358,50 @@ impl Supervisor {
             }
             _ => {} // a connection that is not the current one, or one asked to exit: the lock says when it is gone
         }
+    }
+}
+
+impl std::hash::Hash for Look {
+    /// Everything but the CPU reading (a duration the model check keeps constant).
+    fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
+        (self.seq, self.now_ms, &self.hint, self.lock, self.service, self.child).hash(h);
+    }
+}
+
+#[cfg(test)]
+impl std::hash::Hash for Supervisor {
+    /// The state as the model check sees it: every field, the judge by its (small) debug text.
+    fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
+        (
+            &self.phase,
+            &self.child,
+            self.generation,
+            self.seq,
+            self.look_out,
+            self.service,
+            self.fallback,
+        )
+            .hash(h);
+        (
+            self.launch_anyway,
+            self.reask,
+            &self.wait,
+            self.stall,
+            self.stall_ids,
+            self.failures,
+        )
+            .hash(h);
+        (
+            self.connected_ticks,
+            self.ever_connected,
+            self.looks,
+            self.changed_seq,
+            self.changes_answered,
+            self.tuning,
+            self.mutant,
+        )
+            .hash(h);
+        format!("{:?}", self.judge).hash(h);
     }
 }
 

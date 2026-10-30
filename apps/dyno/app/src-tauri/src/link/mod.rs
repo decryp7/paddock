@@ -91,7 +91,7 @@ pub trait Sink: Send + Sync {
 
 /// Why a wait for the agent has gone on longer than usual. A wait is never given up on (ADR 0031): this is information
 /// for the status chip, with a Retry that acts on the cause ([`AgentLink::retry`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Stall {
     /// The login service is meant to start the agent, and has not.
     WaitingForService,
@@ -117,7 +117,7 @@ impl From<StallCause> for Stall {
 }
 
 /// What the OS service manager says about the agent's login service.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct ServiceState {
     /// A service is registered (Quit then leaves the agent running).
     pub installed: bool,
