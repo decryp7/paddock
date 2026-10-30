@@ -145,7 +145,8 @@ fn helper_starts_come_from_the_browser_or_say_nothing() {
             ..HelperStarts::default()
         })
     );
-    assert!(b.close_gracefully(Duration::from_secs(10)));
+    // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
+    assert!(b.close_gracefully(CLOSE_GUARD));
     assert!(
         matches!(b.helper_starts(), Err(Error::Closed)),
         "a closed browser is an error"
