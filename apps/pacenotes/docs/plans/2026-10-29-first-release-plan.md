@@ -308,7 +308,7 @@ total is a growing count, never a static 0 (rule 11).
   crates at 99 % lines or more; from stage 2, F1's port checks; for UI work `npx ng lint`, `ng test`, `ng build`, Angular
   coverage at 80 % or more overall and near 100 % for stores, services and pure utilities, `npm audit --omit=dev
   --audit-level=high` and the touched Playwright specs in Chromium (rule 3); for release work
-  `node --test scripts/release/publish.test.mjs` (the gates of `apps/pacenotes/AGENTS.md`); `node scripts/affected.mjs origin/main --explain` lists what else to run.
+  the gates of `apps/pacenotes/AGENTS.md` (the release script is the shared `conformance/release/publish.mjs`, with no copy in the app); `node scripts/affected.mjs origin/main --explain` lists what else to run.
   A shared crate or package changed by a Pacenotes package keeps its own tests in `crates/` or `ui/` (rule 43), is adopted
   by its other users in the same change (rule 42) and carries its CHANGELOG entry.
 - **Shared-code limit while another app releases (rule 1).** The frozen set of a release is declared for the

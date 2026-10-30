@@ -60,6 +60,6 @@ Process and workflow
 
 Releases (Gitea runners)
 - Inside Gitea runners `github.server_url` is the internal http address; never use it for public or updater URLs. Hard-code `https://dev.decryptology.net/${{ github.repository }}/…`.
-- `gitea.com/actions/release-action` is a Go action and the runner image has no Go, so the release job fails. Use `scripts/release/publish.mjs` (and its test) from Pitcrew: plain Gitea API, idempotent.
+- `gitea.com/actions/release-action` is a Go action and the runner image has no Go, so the release job fails. Use the shared `conformance/release/publish.mjs` (it has its own tests; no app keeps a copy): plain Gitea API, idempotent.
 - Never tag a `[skip ci]` commit: Gitea skips the tag run too.
 - Persistent runner target dirs (Windows) keep old installers: `rm -rf <target>/dist/bundle` before `tauri build`, and fail the collect step if any versioned installer lacks this version (Pitcrew v1.0.0's first publish pointed `latest.json` at a stale 0.1.0 .exe). Keep the version guard that checks the tag against the app version.
