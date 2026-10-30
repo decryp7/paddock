@@ -36,6 +36,7 @@ pub mod config;
 pub mod lifecycle;
 pub mod safe_mode;
 pub mod session;
+pub mod start_guard;
 pub mod watchdog;
 
 pub use ask::{Choice, Prompt, Question};
@@ -48,6 +49,7 @@ pub use lifecycle::{
 };
 pub use safe_mode::{Feature, Mode, SAFE_MODE_FLAG};
 pub use session::{Autosaver, SessionError, SessionInfo, SessionStore};
+pub use start_guard::{StartGuard, StartPhase, StartTiming, StuckStart};
 pub use watchdog::{Action, Pong, Recovery, Watchdog};
 
 /// The event a ready window gets as a liveness ping; the page answers with `window_pong` and the same `seq`.
