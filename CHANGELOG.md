@@ -4,6 +4,15 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-startup`, `paddock-shell`: the start guard
+- A start that has not reached the event loop (plugins' set-up, tray, main window) is logged from its own thread with the
+  phase it is in: an error after 20 s, then a warning every minute while it stays there, and "The start reached the event
+  loop after N s" when it goes on. It only logs (ER-19); a paused process (a CPU limiter such as App Tamer, a suspend)
+  restarts its clock. The page watchdog cannot see this part of the start (no page yet), so Spotter 1.0's first VM run
+  (ADR 0029's deadlock) left nothing in its log. New pure `paddock_startup::{StartGuard, StartPhase, StartTiming,
+  StuckStart}`, the adapter `paddock_startup::tauri::start_guard::{begin, phase, ready}`, and
+  `paddock_shell::Builder::start_guard(StartTiming)` (the shell begins it first in its plugin set-up and ends it at
+  `RunEvent::Ready`).
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.

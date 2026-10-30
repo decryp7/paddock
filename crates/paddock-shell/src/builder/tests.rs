@@ -483,3 +483,83 @@ fn a_file_opened_from_finder_opens_the_main_window_after_the_hook() {
     );
     wait_for_main(&app);
 }
+
+/// Every record logged by the start guard (`paddock_startup`), as (level, message).
+static GUARD_LOG: std::sync::Mutex<Vec<(log::Level, String)>> = std::sync::Mutex::new(Vec::new());
+
+struct GuardCapture;
+
+impl log::Log for GuardCapture {
+    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+        true
+    }
+    fn log(&self, record: &log::Record<'_>) {
+        if record.target().starts_with("paddock_startup") {
+            let mut log = GUARD_LOG
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            log.push((record.level(), record.args().to_string()));
+        }
+    }
+    fn flush(&self) {}
+}
+
+fn guard_logged(level: log::Level, text: &str) -> bool {
+    let log = GUARD_LOG
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    log.iter().any(|(l, m)| *l == level && m.contains(text))
+}
+
+/// Waits until `cond` holds; the deadline is a hang guard, never a measure.
+fn wait_until(cond: impl Fn() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        if cond() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    false
+}
+
+/// A start stuck before the event loop (here the app's set-up blocks, as the window built inside a plugin hook did in
+/// Spotter 1.0's first VM run, ADR 0029) is logged from the start guard's own thread with the phase it is stuck in, while
+/// it is stuck; once it goes on, the guard says how long it took and the start completes (nothing is ended or restarted).
+#[test]
+fn a_start_stuck_in_the_set_up_is_logged_with_its_phase_while_it_is_stuck() {
+    let _ = log::set_logger(&GuardCapture);
+    log::set_max_level(log::LevelFilter::Trace);
+    let (release, blocked) = std::sync::mpsc::channel::<()>();
+    let timing = StartTiming {
+        first_report: std::time::Duration::from_millis(100),
+        repeat: std::time::Duration::from_secs(600),
+        tick: std::time::Duration::from_millis(10),
+        pause_gap: std::time::Duration::from_secs(10),
+    };
+    let shell = shell().start_guard(timing).setup(move |_| {
+        let _ = blocked.recv_timeout(std::time::Duration::from_secs(30));
+        Ok(())
+    });
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let app = mock_builder()
+            .plugin(shell.build())
+            .build(mock_context(noop_assets()));
+        let _ = tx.send(app.map(|a| a.handle().clone()).map_err(|e| e.to_string()));
+    });
+    assert!(
+        wait_until(|| guard_logged(log::Level::Error, "it is in the plugins' set-up")),
+        "the stuck start was logged with its phase while it was stuck"
+    );
+    release.send(()).unwrap();
+    let app = rx
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the start went on once the set-up returned")
+        .expect("the start succeeded");
+    on_run_event(&app, &RunEvent::Ready);
+    assert!(guard_logged(
+        log::Level::Warn,
+        "The start reached the event loop after"
+    ));
+}

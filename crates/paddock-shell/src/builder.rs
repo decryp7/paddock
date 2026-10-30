@@ -15,6 +15,8 @@ use paddock_health::ServiceSpec;
 use paddock_health::tauri::Setup as HealthSetup;
 use paddock_settings::{Configurable, Settings};
 use paddock_startup::tauri::Startup;
+use paddock_startup::tauri::start_guard;
+use paddock_startup::{StartPhase, StartTiming};
 use paddock_updater::tauri::UpdatesBuilder;
 use paddock_window::WindowError;
 use paddock_window::launch::LaunchArgs;
@@ -99,6 +101,7 @@ pub struct Builder<R: Runtime> {
     setup: Vec<AppSetup<R>>,
     tray: Option<TraySetup<R>>,
     launch: Option<LaunchArgs>,
+    start_timing: StartTiming,
 }
 
 impl<R: Runtime> Builder<R> {
@@ -130,6 +133,7 @@ impl<R: Runtime> Builder<R> {
             setup: Vec::new(),
             tray: None,
             launch: None,
+            start_timing: StartTiming::default(),
         }
     }
 
@@ -380,6 +384,13 @@ impl<R: Runtime> Builder<R> {
         self
     }
 
+    /// When the start guard reports a start that has not reached the event loop (default: after 20 s, then every minute;
+    /// a paused process restarts its clock). It only logs, from its own thread, naming the phase; it never ends the start.
+    pub fn start_guard(mut self, timing: StartTiming) -> Self {
+        self.start_timing = timing;
+        self
+    }
+
     /// Adds the shell plugin to `builder` (after the plugins already on it) and the start: the tray, then the main window,
     /// from Tauri's own `setup`, which runs after every plugin is set up (a window built inside a plugin hook deadlocks).
     /// A start that cannot open its window is logged and ends the app with code 1. This takes `builder`'s `setup`.
@@ -390,6 +401,7 @@ impl<R: Runtime> Builder<R> {
                 app.handle(),
                 open_at_start(app.handle(), tray, launch.as_ref()),
             );
+            start_guard::phase(app.handle(), StartPhase::EventLoop);
             Ok(())
         })
     }
@@ -514,6 +526,8 @@ impl<R: Runtime> Builder<R> {
                     "tray/launch need Builder::add_to (the shell opens them from Tauri's own setup)".into(),
                 ),
                 Some(parts) => {
+                    // First: a start stuck from here to the event loop is logged with its phase (ADR 0029).
+                    start_guard::begin(app, parts.start_timing);
                     // No window may be built while Tauri holds its plugin store (it would deadlock).
                     let _scope = paddock_window::tauri::plugin_hook_scope();
                     parts.install(app).map_err(|e| e as Box<dyn Error>)
@@ -773,13 +787,17 @@ fn open_at_start<R: Runtime>(
     launch: Option<&LaunchArgs>,
 ) -> Result<(), WindowError> {
     if let Some(f) = tray {
+        start_guard::phase(app, StartPhase::Tray);
         let tray = f(app);
         if !paddock_window::tauri::create_tray(app, tray) {
             log::info!("No tray icon; closing the last window quits");
         }
     }
     match launch {
-        Some(launch) => paddock_window::tauri::start(app, launch),
+        Some(launch) => {
+            start_guard::phase(app, StartPhase::MainWindow);
+            paddock_window::tauri::start(app, launch)
+        }
         None => Ok(()),
     }
 }
@@ -906,6 +924,9 @@ fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
 fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
     // Tauri calls this with its plugin store held: no window may be built here (it would deadlock).
     let _scope = paddock_window::tauri::plugin_hook_scope();
+    if let RunEvent::Ready = event {
+        start_guard::ready(app);
+    }
     if app.try_state::<Windows<R>>().is_some() {
         match event {
             // A file opened from Finder or a Dock click with no window open: these build windows, after the hook.
