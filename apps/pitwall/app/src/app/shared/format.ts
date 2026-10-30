@@ -122,3 +122,54 @@ export function concurrencyText(maxSlots: number): string {
 export function tokensText(n: number): string {
   return `${int(n)} ${n === 1 ? 'token' : 'tokens'}`;
 }
+
+/** A unit a table column states once in its header ("Size GB"), so its cells are bare, aligned numbers. */
+export type BytesUnit = 'B' | 'KB' | 'MB' | 'GB' | 'TB';
+
+/** The unit for a column of byte counts: the one its largest value reads best in (at least 1, under 1024). */
+export function bytesUnit(values: readonly (number | null | undefined)[]): BytesUnit {
+  const max = Math.max(0, ...values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v)));
+  let u = 0;
+  for (let v = max; v >= KIB && u < UNITS.length - 1; v /= KIB) u++;
+  return UNITS[u] as BytesUnit;
+}
+
+/** Bytes as a bare number in a column's unit: `12.4`, `0.6`; whole from 100 up. */
+export function bytesIn(n: number | null | undefined, unit: BytesUnit, digits = 1): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return '—';
+  const v = n / KIB ** UNITS.indexOf(unit);
+  return unit === 'B' ? String(Math.max(0, Math.round(v))) : v.toFixed(v >= 100 ? 0 : digits);
+}
+
+/** A unit for a column of durations. */
+export type DurationUnit = 'ms' | 's' | 'min' | 'h';
+
+const MS_PER: Record<DurationUnit, number> = { ms: 1, s: 1000, min: 60_000, h: 3_600_000 };
+
+/** The unit for a column of durations in milliseconds: ms under 10 s, s under 10 min, min under 10 h, then h. */
+export function durationUnit(values: readonly (number | null | undefined)[]): DurationUnit {
+  const max = Math.max(0, ...values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v)));
+  if (max < 10_000) return 'ms';
+  if (max < 600_000) return 's';
+  if (max < 36_000_000) return 'min';
+  return 'h';
+}
+
+/** Milliseconds as a bare number in a column's unit: `955`, `2.2`, `48`; ms and min whole, s and h with one decimal under 100. */
+export function durationIn(ms: number | null | undefined, unit: DurationUnit): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return '—';
+  const v = Math.max(0, ms) / MS_PER[unit];
+  if (unit === 'ms' || unit === 'min') return Math.round(v).toLocaleString('en-US');
+  return v < 100 ? v.toFixed(1) : String(Math.round(v));
+}
+
+/**
+ * Whether a column says something: false when every row of three or more holds the same value (UI review 2 rules 5 and
+ * 7: a constant column of a list of records is hidden, its value said once elsewhere). Fewer than three rows always
+ * vary: two equal values are a coincidence, not a constant.
+ */
+export function varies<T>(rows: readonly T[], value: (row: T) => unknown): boolean {
+  if (rows.length < 3) return true;
+  const first = value(rows[0]!);
+  return rows.some((r) => value(r) !== first);
+}

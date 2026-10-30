@@ -1,5 +1,7 @@
 import { pickOption, dialogsAnswering } from '../../../testing/render';
+import { TestbedHarnessEnvironment } from '@angular/cdk/testing/testbed';
 import { TestBed } from '@angular/core/testing';
+import { MatTableHarness } from '@angular/material/table/testing';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import type { Download, Fit } from '../../core/api.types';
@@ -107,9 +109,25 @@ describe('ModelsPage', () => {
     // Nothing destructive at rest: Delete lives in the "..." menu only.
     expect(el.querySelector('button[aria-label="Delete Gemma 4 12B"]')).toBeNull();
     expect(el.querySelector('button[aria-label="More actions for Gemma 4 12B"]')).not.toBeNull();
-    expect(Array.from(el.querySelectorAll('pw-library-tab thead th')).map((t) => t.textContent!.trim())).toEqual(['Model', 'Size', 'Params', 'Context', 'Status', 'Actions']);
+    // Units in the header, so the cells are bare right-aligned numbers.
+    expect(Array.from(el.querySelectorAll('pw-library-tab thead th')).map((t) => t.textContent!.trim())).toEqual(['Model', 'Size GB', 'Params', 'Context tokens', 'Status', 'Actions']);
+    expect(rows[0]!.querySelector('td.mat-column-size')!.textContent!.trim()).toMatch(/^\d+(\.\d)?$/);
     expect(rows[0]!.querySelector('mat-icon[aria-label="Chat"]')).not.toBeNull();
     expect(rows[0]!.querySelector('.tag, .pill')).toBeNull();
+  });
+
+  it('is a Material table with one sticky header row (rule 47, ADR 0027)', async () => {
+    const { fixture } = await render();
+    const loader = TestbedHarnessEnvironment.loader(fixture);
+    const table = await loader.getHarness(MatTableHarness.with({ selector: 'pw-library-tab table' }));
+    const [header] = await table.getHeaderRows();
+    expect(await header!.getCellTextByIndex()).toEqual(['Model', 'Size GB', 'Params', 'Context tokens', 'Status', 'Actions']);
+    const rows = await table.getRows();
+    expect(rows.length).toBe(8);
+    const first = await rows[0]!.getCellTextByColumnName();
+    expect(first['model']).toContain('Qwen3.5 9B');
+    expect(first['status']).toContain('Loaded');
+    expect(fixture.nativeElement.querySelector('pw-library-tab thead th')!.classList).toContain('mat-mdc-table-sticky');
   });
 
   it('opens the details on a row click or Enter and closes them with Escape, returning focus to the row', async () => {
