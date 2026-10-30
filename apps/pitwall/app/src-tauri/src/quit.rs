@@ -137,12 +137,32 @@ pub async fn request<R: Runtime>(app: &AppHandle<R>, forced: Option<QuitChoice>)
     }
 }
 
+/// The menu command "Quit Pitwall and stop serving" (the UI's `pw.quit-stop`), which the shell hands to
+/// [`request_from_menu`] when no window is open to run it.
+pub const QUIT_STOP_COMMAND: &str = "pw.quit-stop";
+
+/// The quit the menu bar started with no window open, so a test can wait for it (the latest one).
+#[derive(Default)]
+pub struct MenuQuit(std::sync::Mutex<Option<tauri::async_runtime::JoinHandle<()>>>);
+
+impl MenuQuit {
+    /// Takes the latest quit's task (once).
+    pub fn take(&self) -> Option<tauri::async_runtime::JoinHandle<()>> {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).take()
+    }
+}
+
 /// Quit chosen in the menu bar with no window open (the last one was closed to the tray): the same path as the tray's Quit,
-/// by the "When you quit" setting. The shell calls this on the main thread, so the work runs on the async runtime; the handle
-/// lets a test wait for it to finish.
-pub fn request_from_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::async_runtime::JoinHandle<()> {
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move { request(&app, None).await })
+/// by the "When you quit" setting, or with `forced` ("Quit and stop serving"). The shell calls this on the main thread, so
+/// the work runs on the async runtime; [`MenuQuit`] keeps its task.
+pub fn request_from_menu<R: Runtime>(app: &AppHandle<R>, forced: Option<QuitChoice>) {
+    let task = {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move { request(&app, forced).await })
+    };
+    if let Some(slot) = app.try_state::<MenuQuit>() {
+        *slot.0.lock().unwrap_or_else(|p| p.into_inner()) = Some(task);
+    }
 }
 
 /// The user's answer in the "When you quit" dialog: quit now, stopping serving or not, optionally remembering it.

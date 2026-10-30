@@ -151,6 +151,42 @@ fn the_app_can_replace_what_quit_does_without_a_window() {
     assert_eq!(*asked.lock().unwrap(), 1);
 }
 
+/// An app item whose command lives in the window (Pitwall's "Quit and stop serving") has its own handler for a click with no
+/// window open; another item still has none and an id handled twice keeps the last handler.
+#[test]
+fn an_app_item_can_have_its_own_handler_without_a_window() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+    let (first, second) = (seen.clone(), seen.clone());
+    let app = app(shell()
+        .menu_without_window("app.stop", move |_| first.lock().unwrap().push("first"))
+        .menu_without_window("app.stop", move |_| second.lock().unwrap().push("second"))
+        .setup(|app| {
+            app.manage(NativeMenu::<MockRuntime>::with_bar(
+                "Shell Demo",
+                true,
+                NoBar,
+            ));
+            Ok(())
+        }));
+    let menu = app.state::<NativeMenu<MockRuntime>>();
+    let wire = serde_json::json!({ "menus": [{ "id": "app", "label": "Shell Demo", "items": [
+        { "kind": "item", "id": "app.stop", "label": "Stop", "keybinding": null, "checked": null, "enabled": true }
+    ] }] });
+    let model = paddock_menu::model::parse(serde_json::from_value(wire).unwrap()).unwrap();
+    menu.apply(app.handle(), &model).unwrap();
+    assert_eq!(menu.target(), None, "no window is the menu bar's target");
+    paddock_menu::tauri::menu_chosen(app.handle(), "app.stop");
+    assert_eq!(
+        *seen.lock().unwrap(),
+        ["second"],
+        "the handler ran once, instead of reopening the window"
+    );
+    assert!(
+        app.get_webview_window("main").is_none(),
+        "the window did not come back"
+    );
+}
+
 /// The policy for a click with no window open, on both kinds of shell: Quit goes to the override, else the window layer's
 /// quit, else the given exit; any other item only reopens the main window where there is a window layer.
 /// A tray's items arrive at the same menu-event handler as the menu bar's (`NativeMenu::on_no_window` takes every id the

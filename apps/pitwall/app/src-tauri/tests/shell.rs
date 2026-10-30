@@ -5,7 +5,14 @@
 
 use paddock_shell::testing::{start, Started};
 use paddock_window::launch::LaunchArgs;
-use pitwall_app_lib::{app, shell, Place, COMMANDS};
+use pitwall_app_lib::commands::SharedClient;
+use pitwall_app_lib::quit::{MenuQuit, PendingAsk, QUIT_STOP_COMMAND};
+use pitwall_app_lib::server_client::{unavailable, BoxFuture, FrameStream, ServerClient};
+use pitwall_app_lib::{app, shell, shell_with_server, Place, COMMANDS};
+use pitwall_core::mgmt::CommandError;
+use std::sync::Arc;
+use std::time::Duration;
+use tauri::Manager;
 
 /// Pitwall as `run` composes it, its state and live feed included (its files in `dir`, a server that is not there).
 fn composed(dir: &std::path::Path, launch: LaunchArgs) -> tauri::Builder<tauri::test::MockRuntime> {
@@ -99,8 +106,8 @@ fn the_manifest_repeats_each_dialogs_contract_exactly() {
     }
 }
 
-/// The macOS app menu's Quit is Pitwall's: the UI contributes the shell's Quit command (placed last by the shell) and "Quit
-/// Pitwall and stop serving", both run through Pitwall's quit flow, and Mod+Q quits.
+/// The macOS app menu's Quit is the shell's (contributed by the frames, with Mod+Q) and runs Pitwall's quit flow through
+/// `APP_QUIT`; "Quit Pitwall and stop serving" is Pitwall's own item. Both are in the manifest.
 #[test]
 fn the_app_menu_quits_through_pitwall() {
     let manifest: serde_json::Value = serde_json::from_str(MANIFEST).unwrap();
@@ -230,7 +237,6 @@ fn the_updater_is_gated_by_what_the_server_said_about_offline_mode() {
     use paddock_updater::{tauri::Updates, UpdateError};
     use pitwall_app_lib::offline::OfflineKnown;
     use std::sync::Arc;
-    use tauri::Manager;
     let dir = tempfile::tempdir().unwrap();
     let app = composed(
         dir.path(),
@@ -272,22 +278,58 @@ impl paddock_menu::tauri::NativeBar<tauri::test::MockRuntime> for NoBar {
     }
 }
 
-/// Quit from the menu bar with no window open (the main window was closed to the tray) must still quit, or ask: the shell's
-/// no-window handler (`Builder::menu_quit_without_window`) runs Pitwall's own quit (`quit::request`, by the "When you quit"
-/// setting). The server is not there, so the setting reads as its default (keep serving) and the quit begins.
-#[test]
-fn quit_from_the_menu_with_no_window_open_still_quits_or_asks() {
-    use paddock_menu::tauri::{menu_chosen, NativeMenu};
-    use tauri::Manager;
-    let dir = tempfile::tempdir().unwrap();
-    let shell = shell(Place::Test {
-        dir: dir.path().to_path_buf(),
-    })
-    .setup(|app| {
+/// A stand-in for the Pitwall server: answers `settings` with the "When you quit" value it was given, records every call.
+struct QuitServer {
+    on_quit: &'static str,
+    calls: std::sync::Mutex<Vec<String>>,
+}
+
+impl QuitServer {
+    fn new(on_quit: &'static str) -> Arc<QuitServer> {
+        Arc::new(QuitServer {
+            on_quit,
+            calls: Default::default(),
+        })
+    }
+
+    fn calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+impl ServerClient for QuitServer {
+    fn call<'a>(
+        &'a self,
+        method: &'a str,
+        _: serde_json::Value,
+        _: Option<Duration>,
+    ) -> BoxFuture<'a, Result<serde_json::Value, CommandError>> {
+        self.calls.lock().unwrap().push(method.to_string());
+        let reply = match method {
+            "settings" => serde_json::json!({ "general": { "onQuit": self.on_quit } }),
+            _ => serde_json::Value::Null,
+        };
+        Box::pin(async move { Ok(reply) })
+    }
+
+    fn open_stream<'a>(
+        &'a self,
+        _: &'a str,
+        _: Option<serde_json::Value>,
+        _: Duration,
+    ) -> BoxFuture<'a, Result<Box<dyn FrameStream>, CommandError>> {
+        Box::pin(async { Err(unavailable()) })
+    }
+}
+
+/// Pitwall started in the tray (`--hidden`: no window is open, as after the user closed the main window) over `server`, with
+/// the menu bar showing Quit and "Quit and stop serving".
+fn tray_only_app(dir: &std::path::Path, server: Arc<QuitServer>) -> tauri::App<tauri::test::MockRuntime> {
+    use paddock_menu::tauri::NativeMenu;
+    let shell = shell_with_server(Place::Test { dir: dir.to_path_buf() }, Some(server as SharedClient)).setup(|app| {
         app.manage(NativeMenu::<tauri::test::MockRuntime>::with_bar("Pitwall", true, NoBar));
         Ok(())
     });
-    // Started in the tray (`--hidden`): no window is open, as after the user closed the main window.
     let launch = LaunchArgs {
         hidden: true,
         ..Default::default()
@@ -296,26 +338,67 @@ fn quit_from_the_menu_with_no_window_open_still_quits_or_asks() {
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .unwrap();
     assert!(app.get_webview_window("main").is_none(), "no window is open");
-    let wire = serde_json::json!({ "menus": [{ "id": "app", "label": "Pitwall", "items": [
-        { "kind": "item", "id": "pd.app.quit", "label": "Quit", "keybinding": null, "checked": null, "enabled": true }
-    ] }] });
+    let item =
+        |id: &str| serde_json::json!({ "kind": "item", "id": id, "label": id, "keybinding": null, "checked": null, "enabled": true });
+    let wire =
+        serde_json::json!({ "menus": [{ "id": "app", "label": "Pitwall", "items": [item("pd.app.quit"), item(QUIT_STOP_COMMAND)] }] });
     let model = paddock_menu::model::parse(serde_json::from_value(wire).unwrap()).unwrap();
     app.state::<NativeMenu<tauri::test::MockRuntime>>()
         .apply(app.handle(), &model)
         .unwrap();
-    menu_chosen(app.handle(), "pd.app.quit");
-    // The quit runs on the async runtime: wait on its outcome (a quit begun, or the question asked), not on a time; the
-    // deadline only bounds a failing run.
-    let windows = app.state::<paddock_window::tauri::Windows<tauri::test::MockRuntime>>();
-    let ask = app.state::<pitwall_app_lib::quit::PendingAsk>();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while !(windows.quitting() || ask.take()) {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the menu's Quit neither asked nor quit with no window open"
-        );
-        std::thread::yield_now();
-    }
+    app
+}
+
+/// Chooses `id` in the menu bar with no window open and waits for the quit the menu started (its task, not a time; the guard
+/// only bounds a hang).
+fn choose_without_window(app: &tauri::App<tauri::test::MockRuntime>, id: &str) {
+    paddock_menu::tauri::menu_chosen(app.handle(), id);
+    let task = app.state::<MenuQuit>().take().expect("the menu started Pitwall's quit");
+    tauri::async_runtime::block_on(async move { tokio::time::timeout(Duration::from_secs(40), task).await })
+        .expect("the quit finished")
+        .expect("the quit did not panic");
+}
+
+fn quitting(app: &tauri::App<tauri::test::MockRuntime>) -> bool {
+    app.state::<paddock_window::tauri::Windows<tauri::test::MockRuntime>>().quitting()
+}
+
+/// Quit from the menu bar with no window open (the main window was closed to the tray) runs Pitwall's own flow
+/// (`Builder::menu_quit_without_window`), by the "When you quit" setting: "Ask each time" asks and does not quit.
+#[test]
+fn quit_from_the_menu_with_no_window_open_asks_when_the_setting_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = QuitServer::new("ask");
+    let app = tray_only_app(dir.path(), server.clone());
+    choose_without_window(&app, "pd.app.quit");
+    assert!(app.state::<PendingAsk>().take(), "the question is waiting for a window");
+    assert!(!quitting(&app), "asking does not quit");
+    assert!(!server.calls().contains(&"stop_serving".to_string()));
+}
+
+/// The same with the setting "Stop serving": the server is told to stop before the quit begins.
+#[test]
+fn quit_from_the_menu_with_no_window_open_stops_serving_when_the_setting_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = QuitServer::new("stopServing");
+    let app = tray_only_app(dir.path(), server.clone());
+    choose_without_window(&app, "pd.app.quit");
+    assert!(server.calls().contains(&"stop_serving".to_string()), "serving was stopped");
+    assert!(quitting(&app), "then the quit began");
+    assert!(!app.state::<PendingAsk>().take());
+}
+
+/// "Quit Pitwall and stop serving" from the menu bar with no window open does not just bring the window back (as any other
+/// item does): it stops serving and quits, whatever the setting says.
+#[test]
+fn quit_and_stop_serving_from_the_menu_with_no_window_open_stops_and_quits() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = QuitServer::new("ask");
+    let app = tray_only_app(dir.path(), server.clone());
+    choose_without_window(&app, QUIT_STOP_COMMAND);
+    assert!(server.calls().contains(&"stop_serving".to_string()), "serving was stopped");
+    assert!(quitting(&app), "then the quit began");
+    assert!(app.get_webview_window("main").is_none(), "the window did not come back");
 }
 
 /// The tray popover's "Open Pitwall" and "Review": with no window open (main is destroyed when closed), the popover asks the
@@ -323,7 +406,6 @@ fn quit_from_the_menu_with_no_window_open_still_quits_or_asks() {
 /// capability grants the shell's tray set, and that set holds both commands.
 #[test]
 fn the_tray_popover_opens_the_main_window_when_none_is_open() {
-    use tauri::Manager;
     let dir = tempfile::tempdir().unwrap();
     let app = composed(
         dir.path(),

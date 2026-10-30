@@ -136,9 +136,9 @@ impl LoopbackClient {
         }
     }
 
-    /// Tests only: never fall back to the well-known port, which a Pitwall installed on the machine may be using.
-    #[cfg(test)]
-    fn discovery_port_only(mut self) -> LoopbackClient {
+    /// Tests only: never fall back to the well-known port, which a Pitwall installed on the machine may be using (a test of
+    /// the composed app must not reach a real server, ER-14).
+    pub fn discovery_port_only(mut self) -> LoopbackClient {
         self.default_port = None;
         self
     }

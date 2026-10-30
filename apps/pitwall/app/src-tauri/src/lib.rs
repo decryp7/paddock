@@ -161,26 +161,34 @@ pub enum Place {
     },
 }
 
-/// The client of the server, its offline knowledge and the tray's facts, for `place`.
-fn state(place: &Place) -> (SharedClient, Arc<offline::OfflineKnown>, SharedModel) {
+/// The client of the server, its offline knowledge and the tray's facts, for `place`. A test's client never falls back to the
+/// well-known port (a Pitwall installed on the machine may be using it, ER-14), or is `server` when the test gives one.
+fn state(place: &Place, server: Option<SharedClient>) -> (SharedClient, Arc<offline::OfflineKnown>, SharedModel) {
     let (data_dir, store): (std::path::PathBuf, Box<dyn credentials::KeyStore>) = match place {
         Place::Installed => (app_state::data_dir().unwrap_or_default(), Box::new(credentials::OsKeyStore)),
         Place::Test { dir } => (dir.clone(), Box::new(credentials::NoKeyStore)),
     };
     let keys = Arc::new(credentials::StoredAdminKey::new(store, data_dir.join("admin.key")));
     let known_offline = Arc::new(offline::OfflineKnown::at(data_dir.join("offline-known.json")));
-    let client: SharedClient = Arc::new(offline::Observing::new(
-        Arc::new(server_client::LoopbackClient::new(data_dir, keys)),
-        known_offline.clone(),
-    ));
+    let inner: SharedClient = match (place, server) {
+        (Place::Test { .. }, Some(server)) => server,
+        (Place::Test { .. }, None) => Arc::new(server_client::LoopbackClient::new(data_dir, keys).discovery_port_only()),
+        (Place::Installed, _) => Arc::new(server_client::LoopbackClient::new(data_dir, keys)),
+    };
+    let client: SharedClient = Arc::new(offline::Observing::new(inner, known_offline.clone()));
     (client, known_offline, Arc::new(Mutex::new(TrayModel::new())))
 }
 
 /// The shell plugin with Pitwall's parts: its commands, its state and the live feed (set-up: state only, no window; the
 /// shell opens the tray and the window after every plugin, ADR 0029) and the window layer.
 pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
+    shell_with_server(place, None)
+}
+
+/// [`shell`] with the server given: a test's stand-in for the Pitwall server (ignored for the installed app).
+pub fn shell_with_server<R: Runtime>(place: Place, server: Option<SharedClient>) -> Builder<R> {
     let installed = matches!(place, Place::Installed);
-    let (client, known_offline, model) = state(&place);
+    let (client, known_offline, model) = state(&place, server);
     let test_dir = match &place {
         Place::Installed => None,
         Place::Test { dir } => Some(dir.clone()),
@@ -196,11 +204,15 @@ pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
             app.manage(Arc::new(commands::Streams::default()));
             app.manage(Arc::new(jobs::Jobs::default()));
             app.manage(quit::PendingAsk::default());
+            app.manage(quit::MenuQuit::default());
             pitwall_setup(app, installed);
             Ok(())
         })
         // Quit in the menu bar with the last window closed to the tray goes through Pitwall's own quit (the setting, or the ask).
-        .menu_quit_without_window(|app| drop(quit::request_from_menu(app)))
+        .menu_quit_without_window(|app| quit::request_from_menu(app, None))
+        .menu_without_window(quit::QUIT_STOP_COMMAND, |app| {
+            quit::request_from_menu(app, Some(quit::QuitChoice::StopServing))
+        })
         .updater(move |app| updater(app, test_dir, update_client, update_offline))
         .windows(move |app| windows(app, installed));
     if installed {
@@ -253,8 +265,9 @@ fn windows<R: Runtime>(app: &AppHandle<R>, installed: bool) -> Windows<R> {
         .min_size(860.0, 560.0)
         .exit_stall_limit(EXIT_STALL_LIMIT);
     let b = Windows::builder(config).prefs(Arc::new(FixedPrefs::new(OnClose::Tray, OpenFilesIn::NewWindow)));
-    // A test composes the app on the mock runtime, which cannot exit: the quit runs to its end and the exit is a no-op.
-    let b = if installed { b } else { b.exit_app(|_, _| ()) };
+    // A test composes the app on the mock runtime, which cannot exit: the quit runs to its end, the exit is a no-op and the
+    // exit watchdog does not end the test process.
+    let b = if installed { b } else { b.exit_app(|_, _| ()).end_process(|_| ()) };
     match app.path().app_data_dir() {
         Ok(dir) if installed => b.bounds_file(dir.join("window-state.json")).build(),
         _ => b.build(),

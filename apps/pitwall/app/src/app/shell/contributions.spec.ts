@@ -107,6 +107,13 @@ describe('Pitwall contributions', () => {
     expect(quit).toHaveBeenLastCalledWith('stopServing');
   });
 
+  it('has the main window provide PITWALL_APP_QUIT (without it the shell’s Quit would skip the quit question)', async () => {
+    // The window's providers are built in `bootMainWindow`, which cannot run here: check the registration in its source.
+    const fs = await nodeFs();
+    const source = fs.readFileSync('src/app/shell/main-window.ts', 'utf8');
+    expect(source).toMatch(/^\s+PITWALL_APP_QUIT,$/m);
+  });
+
   it('title every own command in sentence case, under a category', () => {
     configure();
     const own = TestBed.inject(ContributionRegistry)
