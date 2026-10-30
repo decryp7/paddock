@@ -819,3 +819,12 @@ navigation, and a restart of the browser's network service. Fixing them one gues
 CI. Ending the network service locally reproduced the Windows trace exactly. **Rule:** a driver error that can have
 several causes says which ones it ruled out (the trace, the network service's process), and a real-browser test drives
 each named cause on purpose (ADR 0030). Diagnostics land before a fix that would hide the cause.
+## 2026-10-29: `ControlOrMeta` follows the test machine, the app follows the page (Dyno's WebKit leg)
+
+Dyno's WebKit e2e on the Linux runner failed every shortcut test (command palette, Settings with `Mod+,`, and the axe
+pass over the palette): `devices['Desktop Safari']` gives the page a Mac user agent, so the shell's `currentPlatform`
+binds `Mod` to Cmd, while Playwright's `ControlOrMeta` resolves on the host (Linux) and pressed Ctrl. The branch runs are
+Chromium-only and the macOS runner has a Mac host and a Mac page, so only the WebKit-on-Linux leg (main pushes) saw it,
+and the Settings tests had been red there since that leg began. **Rule:** e2e tests press the app's shortcuts with
+`pressMod(page, 'Mod+…')` from `@decryp7/paddock-e2e`, which reads the page's navigator; never `ControlOrMeta` for an
+app shortcut. The selftest `mod-key.shot.ts` makes the mismatch on any host by giving the page the other platform.

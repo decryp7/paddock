@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
+- New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
+  iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.
+  WebKit on a Linux runner emulates a Mac (`devices['Desktop Safari']`), so `ControlOrMeta` pressed Ctrl where the app wanted Cmd and no
+  shortcut fired (CI run 7134, Dyno's WebKit leg). `WorkbenchPalette.open` and Dyno's e2e use it.
+
 ### `paddock-jobs`: `WalkOptions::with_modified`
 - `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
 

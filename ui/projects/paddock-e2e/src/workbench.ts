@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { ShellDialogs, ShellJobs, ShellMenus, ShellNotifications, ShellStatusBar } from './shell.ts';
+import { pressMod } from './keyboard.ts';
 
 /*
  * Page objects for the workbench (ADR 0013 §4; plan W7), by accessible names and the workbench's test ids, so an IDE-style
@@ -118,7 +119,7 @@ export class WorkbenchPalette {
   }
   /** Opens it with the keyboard (`Mod+Shift+P` for commands, `Mod+P` for the plain-text provider) and waits. */
   async open(commands = true): Promise<void> {
-    await this.page.keyboard.press(commands ? 'ControlOrMeta+Shift+P' : 'ControlOrMeta+P');
+    await pressMod(this.page, commands ? 'Mod+Shift+P' : 'Mod+P');
     await expect(this.input).toBeFocused();
   }
   /** Types a query (replacing what is there) and waits for the list to settle (not "Searching"). */
