@@ -250,3 +250,43 @@ check = "C53"
 path = "tools/paddock-dev/tests/it/wrapper.rs"
 reason = "ADR 0033 WP-9 (test): a file-wide allow of disallowed_methods; allow it on the items that start programs"
 expires = "2026-12-31"
+
+# C54 (rule 52): Dyno's lowered threads still use the starvable levels (macOS QoS BACKGROUND, Windows background mode);
+# whether anything waits on them (the disk-map scan calls background_current_thread) is being checked separately.
+[[waiver]]
+check = "C54"
+path = "crates/paddock-service/src/render.rs"
+reason = "paddock-service: renders LowPriorityIO and IOSchedulingClass=idle for every low_priority() service; to follow ADR 0020's priority helper (the class decides the level)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C54"
+path = "crates/paddock-service/src/golden.rs"
+reason = "paddock-service: the golden specs request ProcessType::Background as the apps do today; changes with the renderer (ADR 0020 helper)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C54"
+path = "apps/debrief/crates/debrief-agent/src/service/launchd.rs"
+reason = "Debrief: the headless diagnostics agent's daemon plist is ProcessType Background. Scheduled collection is work nobody waits on, but a person may wait for a triggered capture, so this is a known violation of rule 52"
+owner = "debrief"
+follow_up = "Debrief 1.2: render the agent's plist at Standard (or Adaptive with an XPC trigger) and keep Background only for scheduled collection, through the ADR 0020 priority helper; delete this waiver then"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C54"
+path = "apps/dyno/crates/dyno-helper/src/install.rs"
+reason = "Dyno: the privileged helper's plist is ProcessType Background while the user waits for its actions; being checked separately (Dyno review)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C54"
+path = "apps/shell-demo/src-tauri/agent/src/lib.rs"
+reason = "shell demo: its heartbeat agent asks paddock-service for a Background, low_priority service; follows the ADR 0020 helper"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C54"
+path = "apps/shell-demo/src-tauri/macos/agent.plist"
+reason = "shell demo: the heartbeat agent's plist (ProcessType Background, LowPriorityIO) as paddock-service renders it; follows the ADR 0020 helper"
+expires = "2026-12-31"

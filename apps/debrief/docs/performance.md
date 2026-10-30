@@ -83,6 +83,32 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-10-30, `debrief report` under CPU contention: QoS background against utility (branch `fix/debrief-cli-report-hang`)
+
+- **Commit:** A/B: base dfc9cdc94 (mining and full-text pools in QoS `BACKGROUND`) → change 1c2567566 (`UTILITY`)
+- **Machine:** Mac mini M4 Pro, 14 cores (10 performance, 4 efficiency), 64 GB, macOS 27.2
+- **Load:** 1-minute load about 20 before each run; 14 added `nice -n 20` CPU-bound processes (Perl busy loops, 150 s
+  each) during the contended runs, which normal-priority threads preempt; other agents' builds ran too
+- **Build:** debug (`cargo nextest run --no-run`), libduckdb 1.5.6; temporary per-phase `eprintln!` timing in
+  `debrief-cli`'s `run.rs` and `tests/it/cli.rs` (not committed)
+- **Corpus:** the test's own synthetic log (`write_log` in `crates/debrief-cli/tests/it/cli.rs`): 240 events, Serilog text
+- **Command:** `TMPDIR=<53-character folder> PADDOCK_SOCKET_BASE=<folder> DYLD_LIBRARY_PATH=<libduckdb> target/debug/deps/it-<hash> --exact cli::the_report_is_written_as_html_and_never_overwritten_silently --nocapture`
+- **Runs:** base 3 runs idle and 5 contended; change 3 contended; each run times 3 `report` executions (the fourth,
+  refused, takes microseconds); ranges reported
+- **Numbers:**
+
+  | Measure | Base (`BACKGROUND`) | Change (`UTILITY`) | Budget | Verdict |
+  |---|---|---|---|---|
+  | Report build, idle | 0.16 s | not measured | none | — |
+  | Report build, contended | 0.09–12.7 s | 0.09–0.33 s | none | contention no longer stretches it |
+  | Import, contended | 0.23–0.35 s | 0.30–0.94 s | none | normal priority, not affected by the class |
+  | Whole test, contended | 4.8–20.6 s | 1.5–2.7 s | nextest CI timeout 90 s | pass |
+
+- **Memory measure:** not measured
+- **Notes:** a timing on a shared, loaded machine: compare only within this A/B. CI history of the same test (macOS
+  runner, jobs 21203, 21682, 21861, 22060): usually 3–9 s, 36 s, 63 s, then timeouts at 102 s and 90 s on busy runs;
+  Linux always under 10 s. Raw output was not kept. Rule 52 and the lessons entry of 2026-10-30 quote these numbers.
+
 ### 2026-10-28, DuckDB server mode (Quack), research in progress
 
 - Date, commit: 2026-10-28; branch `docs/research-duckdb-server-mode`, **uncommitted** in its worktree (`research/2026-10-28-duckdb-server-mode.md` and `harness/`).

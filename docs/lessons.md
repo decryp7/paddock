@@ -857,3 +857,18 @@ or verify its identity (`paddock_proc::ProcessId`, pid plus start time) right be
 job membership. Clippy's `disallowed-methods` and check C53 enforce it. **Also:** when a flaky test fails right after
 another test in the same binary ended something, suspect the ending before the failing test; and test an identity source
 with a process of another user, not only your own.
+## 2026-10-30: a caller that waits on macOS `BACKGROUND` threads waits as long as the machine is busy (Debrief)
+
+`debrief-cli`'s `the_report_is_written_as_html_and_never_overwritten_silently` took 3 to 9 s on the Mac runner most of
+the time, 36 s, 63 s and 102 s (timed out) on busy runs, and timed out again in debrief.yml run 7150; on Linux it never
+passed 10 s. The report's analyses run on Debrief's shared mining pool, whose threads
+`debrief_core::threads::lower_priority` put in macOS's QoS class `BACKGROUND`, the lowest class: it is kept to the
+efficiency cores and runs only after default and utility work, with its I/O throttled. While the shared Mac was loaded,
+the CLI's foreground thread waited on workers that barely ran. Measured on the Mac mini with 14 `nice -n 20` CPU hogs,
+which normal-priority threads preempt: the report build went from 0.16 s to as much as 12.7 s while the import beside it
+did not change; with `UTILITY` the same build stayed at 0.09-0.33 s
+([performance.md](../apps/debrief/docs/performance.md), 2026-10-30 block). **Lesson, now rule 52:** work a caller may
+wait for (a report, an analysis, an import blocked on a lock, a download) never runs at an OS's starvable background
+level; lowered means `UTILITY` on macOS, nice 10 on Linux and below-normal on Windows. Family ADR 0020 was amended the
+same day: its `Background` class uses those levels, and only `Idle` work, which nobody waits on, may use the starvable
+ones (check C54).

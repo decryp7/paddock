@@ -177,6 +177,12 @@ Pitcrew runs privileged (a Windows service as LocalSystem), downloads executable
 - Never act on a reusable OS name read earlier (rule 53): hold it (handle, job, listener) or verify its identity (pid plus
   start time, `paddock_proc::ProcessId`) immediately before acting; kills go through `paddock_proc` (Clippy
   `disallowed-methods` and C53 check it, ADR 0033).
+- Work a person waits for never runs at an OS's starvable background level (rule 52: macOS QoS `BACKGROUND`,
+  `PRIO_DARWIN_BG`, `taskpolicy -b`/`-c background`/`-c maintenance`/`-d throttle` and `IOPOL_THROTTLE`; Windows
+  background modes, idle priorities and EcoQoS; Linux `SCHED_IDLE` and idle I/O; for a service, launchd `ProcessType`
+  `Background` (or `Adaptive` without XPC) and `LowPriorityIO`, systemd `CPUSchedulingPolicy=idle` and
+  `IOSchedulingClass=idle`): lowered work uses `QOS_CLASS_UTILITY`, nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`; a
+  starvable level only for work nobody waits on, with a `conformance: background-qos — <why>` comment (C54).
 - Research official sources before choosing libraries or relying on a runner's behaviour (release layout, log
   messages, signals), and record what you found and when in the ADR or doc comment.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they are available instead of
