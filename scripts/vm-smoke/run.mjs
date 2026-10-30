@@ -14,7 +14,14 @@ import { renderResult } from './judge.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
-const MACOS_IMAGE = 'ghcr.io/cirruslabs/macos-tahoe-base@sha256:4aaa751fa7538902d73c767f27a066fc87e83f183069da4e4b5022863abd4c77';
+export const MACOS_IMAGE = 'ghcr.io/cirruslabs/macos-tahoe-base@sha256:4aaa751fa7538902d73c767f27a066fc87e83f183069da4e4b5022863abd4c77';
+
+/** The local Tart VM name of the GUI test image built from a pinned base (gui-image.sh): one image per base digest. */
+export function guiImageName(baseRef) {
+  const m = /\/macos-([a-z]+)-base@sha256:([0-9a-f]{8})/.exec(baseRef);
+  if (!m) throw new Error(`not a pinned cirruslabs macOS base reference: ${baseRef}`);
+  return `vmgui-base-${m[1]}-${m[2]}`;
+}
 const GITEA = process.env.PADDOCK_GITEA ?? 'https://dev.decryptology.net';
 const REPO_PATH = 'decryp7/paddock';
 const SHARE = '/Volumes/My Shared Files/stage';
