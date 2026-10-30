@@ -42,6 +42,7 @@ import type {
   PitwallEvent,
   PlaygroundEvent,
   PlaygroundRequest,
+  Platform,
   Preset,
   QueueSnapshot,
   RequestContent,
@@ -123,6 +124,8 @@ export interface MockOptions {
   seed?: number;
   /** The server is not registered with the OS yet and the user has not been asked (first-run question). */
   askConsent?: boolean;
+  /** The OS the service is registered with (its wording in Settings and the first-run question); default macOS. */
+  platform?: Platform;
   /** macOS: the background item is switched off in Login Items (notice with an "Open Login Items" button). */
   loginItemOff?: boolean;
   /** The server is down: every call except the app's own (service, log-in, updates) fails with `serverUnavailable`. */
@@ -213,7 +216,7 @@ export class MockBackend implements PitwallBackend {
       ];
     }
     this.service = {
-      platform: 'macos',
+      platform: options.platform ?? 'macos',
       installed: !options.askConsent,
       running: !(options.serverDown || options.startFailed),
       canInstall: true,
@@ -1353,10 +1356,18 @@ export class MockBackend implements PitwallBackend {
     return () => this.quitAskHandlers.delete(handler);
   }
 
-  /** Demo and test hook: the user chose Quit while the setting is "ask" (`windowOpen`: the window is there to answer). */
+  /**
+   * Demo and test hook: the user chose Quit while the setting is "ask" (`windowOpen`: the window is there to answer). As
+   * the app does, the request is left pending first and the event only tells the window to take it.
+   */
   askQuit(windowOpen = true): void {
+    this.quitAskPending = true;
     if (windowOpen) this.quitAskHandlers.forEach((h) => h());
-    else this.quitAskPending = true;
+  }
+
+  /** Test hook: a stale `quit-ask` event with nothing pending (it must not bring the question up). */
+  emitStaleQuitAsk(): void {
+    this.quitAskHandlers.forEach((h) => h());
   }
 
   autostart(): Promise<boolean> {

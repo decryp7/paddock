@@ -6,7 +6,7 @@ import { toCommandError } from '../../core/command-error';
 import { Toasts } from '../../core/toasts';
 import type { QuitAnswer } from './quit-dialog';
 
-/** The id of the "Quit Pitwall?" dialog (`src-tauri/src/dialogs.rs`). */
+/** The id of the quit question's dialog (`src-tauri/src/dialogs.rs`). */
 export const QUIT_DIALOG_ID = 'pw.quit';
 
 /** A choice made before asking: the "Quit Pitwall and stop serving" items. */
@@ -37,7 +37,7 @@ export class QuitFlow {
     return this.run({ stopServing: onQuit === 'stopServing', remember: false });
   }
 
-  /** Asks "Quit Pitwall?" (one question at a time: a second request waits for the open one) and carries out the answer. */
+  /** Asks the quit question (one question at a time: a second request waits for the open one) and carries out the answer. */
   ask(): Promise<void> {
     this.asking ??= (async () => {
       try {
@@ -50,16 +50,20 @@ export class QuitFlow {
     return this.asking;
   }
 
-  /** Listens for the app's request to ask (the tray's Quit with "Ask each time"), and shows one made before this window loaded. */
+  /**
+   * Listens for the app's request to ask (the tray's Quit with "Ask each time"), and shows one made before this window loaded.
+   * Either way the request is taken from the app first and asked only when it was still pending, so a leftover event never
+   * brings the question up later.
+   */
   watch(): Unsubscribe {
-    const stop = this.backend.onQuitAsk(() => void this.ask());
-    void this.backend.takeQuitAsk().then(
-      (pending) => {
-        if (pending) void this.ask();
-      },
-      () => undefined,
-    );
+    const stop = this.backend.onQuitAsk(() => void this.askIfPending());
+    void this.askIfPending();
     return stop;
+  }
+
+  private async askIfPending(): Promise<void> {
+    const pending = await this.backend.takeQuitAsk().catch(() => false);
+    if (pending) await this.ask();
   }
 
   private async run(answer: QuitAnswer): Promise<void> {

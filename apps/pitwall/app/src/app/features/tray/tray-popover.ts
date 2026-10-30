@@ -74,9 +74,9 @@ import { MatTooltip } from '@angular/material/tooltip';
       }
 
       <section class="stats" aria-label="Throughput">
-        <div><b class="num">{{ tps() }}</b><span>tok/s</span></div>
-        <div><b class="num">{{ live.queue()?.running?.length ?? 0 }}</b><span>running</span></div>
-        <div><b class="num">{{ live.queue()?.waiting?.length ?? 0 }}</b><span>waiting</span></div>
+        <div><b class="num">{{ tps() }}</b> <span>tok/s</span></div>
+        <div><b class="num">{{ live.queue()?.running?.length ?? 0 }}</b> <span>running</span></div>
+        <div><b class="num">{{ live.queue()?.waiting?.length ?? 0 }}</b> <span>waiting</span></div>
       </section>
 
       <section class="models" aria-label="Loaded models">
@@ -86,11 +86,11 @@ import { MatTooltip } from '@angular/material/tooltip';
 
       <footer>
         @if (live.paused()) {
-          <button type="button" matButton="outlined" [disabled]="live.isBusy()('serving')" (click)="live.setServing(false)"><mat-icon svgIcon="pw:play" aria-hidden="true" />Resume</button>
+          <button type="button" matButton="outlined" [disabled]="live.isBusy()('serving')" (click)="live.setServing(false)">Resume serving</button>
         } @else {
-          <button type="button" matButton="outlined" [disabled]="live.isBusy()('serving') || !live.overview()" (click)="live.setServing(true)"><mat-icon svgIcon="pw:pause" aria-hidden="true" />Pause serving</button>
+          <button type="button" matButton="outlined" [disabled]="live.isBusy()('serving') || !live.overview()" (click)="live.setServing(true)">Pause serving</button>
         }
-        <button type="button" matButton="outlined" [disabled]="live.isBusy()('release') || !live.overview()" (click)="live.releaseMemory()"><mat-icon svgIcon="pw:release" aria-hidden="true" />Release memory</button>
+        <button type="button" matButton="outlined" [disabled]="live.isBusy()('release') || !live.overview()" (click)="live.releaseMemory()">Release memory</button>
         <button type="button" matButton="filled" class="wide" (click)="open('/')">Open Pitwall</button>
       </footer>
     </div>
@@ -105,15 +105,17 @@ import { MatTooltip } from '@angular/material/tooltip';
       flex-direction: column;
       gap: var(--pd-space-2);
       height: 100%;
-      padding: var(--pd-space-3) var(--pd-space-4) var(--pd-space-4);
+      padding: var(--pd-space-3) var(--pd-space-4);
       background: var(--pd-bg);
       overflow: hidden;
     }
     .pairing {
       display: flex;
+      flex: none;
       align-items: center;
       gap: var(--pd-space-2);
-      padding: var(--pd-space-2) var(--pd-space-3);
+      min-height: 32px;
+      padding: 6px var(--pd-space-3);
       font: inherit;
       font-size: var(--pd-text-label);
       color: var(--pd-text);
@@ -187,6 +189,7 @@ import { MatTooltip } from '@angular/material/tooltip';
     .mem,
     .stats,
     .models {
+      flex: none;
       padding: var(--pd-space-3);
       background: var(--pd-surface-1);
       border: 1px solid var(--pd-hairline);
@@ -194,7 +197,7 @@ import { MatTooltip } from '@angular/material/tooltip';
     }
     .mem {
       display: grid;
-      gap: 6px;
+      gap: var(--pd-space-1);
       .row {
         display: flex;
         align-items: center;
@@ -212,24 +215,27 @@ import { MatTooltip } from '@angular/material/tooltip';
       .small {
         font-size: var(--pd-text-label);
       }
-      .meter {
-        margin-bottom: 4px;
+      .meter + .row {
+        margin-top: var(--pd-space-1);
       }
     }
+    /* One line: each figure with its unit beside it, so the loaded models keep the room. */
     .stats {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       padding: var(--pd-space-2) var(--pd-space-3);
       > div {
         display: flex;
-        flex-direction: column;
-        align-items: center;
+        align-items: baseline;
+        justify-content: center;
+        gap: var(--pd-space-1);
+        white-space: nowrap;
       }
       b {
-        font-size: var(--pd-text-title);
+        font-size: var(--pd-text-body-lg);
         font-weight: var(--pd-weight-semibold);
         font-variant-numeric: tabular-nums;
-        line-height: 1.2;
+        line-height: 1.4;
       }
       span {
         font-size: var(--pd-text-label);
@@ -237,7 +243,7 @@ import { MatTooltip } from '@angular/material/tooltip';
       }
     }
     .models {
-      flex: 1;
+      flex: 1 1 auto;
       min-height: 0;
       overflow: auto;
       padding-top: var(--pd-space-2);
@@ -249,14 +255,16 @@ import { MatTooltip } from '@angular/material/tooltip';
       }
     }
     footer {
+      flex: none;
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: var(--pd-space-2);
-      /* Two actions side by side in a 360 px popover: each on one line, with less side padding than a page button. */
+      /* Two actions side by side in a 360 px popover, each on one line: words only (no icon), so both fit with room to spare. */
       button {
         min-width: 0;
         white-space: nowrap;
         --mat-button-outlined-horizontal-padding: var(--pd-space-2);
+        --mat-button-outlined-container-height: 32px;
       }
       .wide {
         grid-column: 1 / -1;
@@ -287,8 +295,8 @@ export class TrayPopover {
     if (!g || !g.vramTotal || g.vramUsed === null) return null;
     return { used: g.vramUsed, total: g.vramTotal, pct: percent(g.vramUsed, g.vramTotal), util: g.utilisation };
   });
-  /** Two loaded models fit under a banner, three without one; the rest is summarised so no row is cut off. */
-  protected readonly modelLimit = computed(() => (this.live.pairings().length > 0 || this.updates.count() > 0 ? 2 : 3));
+  /** Three loaded models fit without a banner, one fewer under each banner; the rest is summarised so no row is cut off. */
+  protected readonly modelLimit = computed(() => Math.max(1, 3 - (this.live.pairings().length > 0 ? 1 : 0) - (this.updates.count() > 0 ? 1 : 0)));
   protected readonly tps = computed(() => (this.live.paused() ? '0.0' : rate(this.live.throughput()?.genTps ?? 0)));
 
   constructor() {

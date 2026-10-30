@@ -54,6 +54,18 @@ describe('TrayPopover', () => {
     expect(el.querySelector('pw-hot-models .actions')).toBeNull();
   });
 
+  it('under two banners shows one loaded model and summarises the rest, so no row is cut off', async () => {
+    const { el } = await mount({ backend: new MockBackend({ modelUpdates: true }) });
+    expect(el.querySelectorAll('.pairing').length).toBe(2);
+    expect(el.querySelectorAll('pw-hot-models li.row').length).toBe(1);
+    expect(el.querySelector('pw-hot-models .more')!.textContent).toContain('+2 more loaded');
+    // The footer's actions are words on one line (no icon squeezing them).
+    for (const b of Array.from(el.querySelectorAll('footer button'))) {
+      expect(b.querySelector('mat-icon')).toBeNull();
+      expect(getComputedStyle(b).whiteSpace).toBe('nowrap');
+    }
+  });
+
   it('shows the connecting state before the first load', async () => {
     const { el } = await mount({ load: false });
     expect(text(el.querySelector('.state')!)).toBe('Connecting…');
