@@ -298,3 +298,37 @@ The split captures equal the whole pattern's on all 1M lines, the message length
 still, does not build for this pattern ("not one-pass: conflicting transition"). Expected effect on a real import: about half of the
 regex share, so roughly 15 to 20% less parse CPU on text logs. The end-to-end import has not been measured yet: the machine had no
 quiet window.
+
+### Index writer threads and heap, first sweep (one round; 2026-10-30)
+
+- Build: release, `wip/debrief-duckdb2-prototypes` at 5bac7512c (`ready-w3`). That is index settings, words without counts,
+  one UPDATE per step, the ordering fix and lowered threads at QoS utility, the same index code as `debrief/duckdb-2` at
+  98afb89ee.
+- Corpus: `large10`, warm.
+- Command: `exp.sh e4` (`import_ready` with `DEBRIEF_READY_WAIT=index DEBRIEF_READY_INDEX=threads,total_heap_mb`).
+- Load: the 1-minute and 5-minute load at the start, and the 1-minute load at the end. Runs that ended above 15 were run
+  again; this is round 1 of 3, and rounds 2 and 3 were not run (the machine was busy).
+- Index ready is counted from the start of the import; searches are p50 of 20, run right after the index was ready.
+
+| Threads x heap | Load start / end | Import | Index ready | Docs/s after import | Index | Segments | "timeout" p50 (3.7M hits) | Peak RSS |
+|---|---|---|---|---|---|---|---|---|
+| 2 x 32 MB (old default) | 9.9, 14.8 / 11.6 | 39.7 s | 225 s | 303k | 1,435 MB | 24 | 374 ms | 2,926 MB |
+| 4 x 64 MB | 9.5, 12.0 / 11.2 | 42.1 s | 227 s | 304k | 1,440 MB | 27 | 204 ms | 2,694 MB |
+| 4 x 128 MB | 9.8, 11.6 / 13.8 | 58.3 s | 237 s | 314k | 1,441 MB | 23 | 191 ms | 2,793 MB |
+| 4 x 256 MB | 7.4, 7.3 / 6.7 | 54.4 s | 281 s | 248k | 1,422 MB | 19 | 198 ms | 2,871 MB |
+| 6 x 64 MB | 9.9, 14.7 / 12.0 | 45.4 s | 252 s | 272k | 1,446 MB | 30 | 198 ms | 2,689 MB |
+| 6 x 128 MB | 9.7, 10.7 / 13.8 | 51.9 s | 255 s | 276k | 1,439 MB | 36 | 188 ms | 2,710 MB |
+| 6 x 256 MB | 9.1, 14.9 / 8.7 | 77.2 s | 327 s | 225k | 1,439 MB | 37 | 146 ms | 2,730 MB |
+| 13 x 64 MB | 8.4, 14.7 / 11.4 | 42.3 s | 363 s | 175k | 1,466 MB | 54 | 132 ms | 2,729 MB |
+| 13 x 128 MB | 9.3, 14.5 / 9.5 | 64.4 s | 535 s | 119k | 1,471 MB | 53 | 149 ms | 2,741 MB |
+| 13 x 256 MB | 8.2, 11.3 / 9.2 | 58.4 s | 549 s | 115k | 1,456 MB | 52 | 137 ms | 2,811 MB |
+
+What the round shows, single runs on a busy machine (the import times scatter from 40 to 77 s):
+- No variant indexes faster than about 300k documents/s.
+- More threads are slower past 4: 13 threads take 1.6 to 2.4 times as long as 2 or 4.
+- More threads also leave more index segments (52 to 54 against 19 to 27) and make common-word searches faster (130 to 150
+  ms against 374 ms), presumably because a search runs over more segments in parallel.
+
+So the writer threads are no longer the limit. The pipeline in front of them is: one Parquet reader, a 4-thread docs pool,
+an in-order feeder, and a commit every 4 segments. Auto is capped at 4 until that is fixed (plan package SR1). An earlier
+round with the writer at QoS `BACKGROUND` (efficiency cores only) was void and is not shown.
