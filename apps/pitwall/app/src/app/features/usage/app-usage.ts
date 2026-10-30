@@ -1,11 +1,12 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
+import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { EChartsCoreOption } from 'echarts/core';
 import type { AppPermissions, LimitStatus, RequestRecord } from '../../core/api.types';
 import { ThemeService } from '../../core/theme';
 import { usageChart, type UsageMetric } from '../../shared/charts/chart-options';
 import { EChart } from '../../shared/charts/echart';
-import { bytes, clock, compact, duration, int } from '../../shared/format';
+import { bytes, clock, compact, durationIn, durationUnit, int, varies } from '../../shared/format';
 import { LIMIT_LABEL, limitStateLook, statusTone } from '../../shared/labels';
 import { MatIcon } from '@angular/material/icon';
 import { SuEmptyState, SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
@@ -23,7 +24,7 @@ const METRICS: { id: UsageMetric; label: string }[] = [
 /** One app's usage over time, where each of its limits stands, and its latest requests (metadata only). */
 @Component({
   selector: 'pw-app-usage',
-  imports: [Panel, EChart, SuEmptyState, SuSegmentedControl, MatIcon, CacheTiles, MatTooltipModule],
+  imports: [Panel, EChart, SuEmptyState, SuSegmentedControl, MatIcon, CacheTiles, MatTableModule, MatTooltipModule],
   providers: [UsageStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -76,48 +77,41 @@ const METRICS: { id: UsageMetric; label: string }[] = [
       }
     </pw-panel>
 
-    <pw-panel heading="Recent requests" icon="requests" [sub]="recent().length ? recent().length + ' latest' : ''" [flush]="true" [loading]="store.loading() && !store.detail()" [ready]="!!store.detail()">
+    <pw-panel heading="Recent requests" icon="requests" [sub]="recentSub()" [flush]="true" [loading]="store.loading() && !store.detail()" [ready]="!!store.detail()">
       @if (recent().length === 0) {
         <pd-empty-state heading="No requests yet" description="Requests from this app appear here with their model, status and size. Prompt text is never shown here."><mat-icon slot="icon" svgIcon="pw:requests" aria-hidden="true" /></pd-empty-state>
       } @else {
-        <table class="table recent fit">
-          <colgroup>
-            <col class="c-time" /><col /><col />
-            @if (hasFailures()) {
-              <col class="c-status" />
-            }
-            <col class="c-num" /><col class="c-num" />
-          </colgroup>
-          <thead>
-            <tr>
-              <th scope="col">Time</th>
-              <th scope="col">Endpoint</th>
-              <th scope="col">Model</th>
-              @if (hasFailures()) {
-                <th scope="col">Status</th>
+        <table mat-table class="recent" [dataSource]="recent()" [trackBy]="byId" [fixedLayout]="true" [attr.aria-label]="'Recent requests of ' + appName()">
+          <ng-container matColumnDef="time">
+            <th mat-header-cell *matHeaderCellDef scope="col">Time</th>
+            <td mat-cell *matCellDef="let r" class="muted num">{{ time(r.at) }}</td>
+          </ng-container>
+          <ng-container matColumnDef="endpoint">
+            <th mat-header-cell *matHeaderCellDef scope="col">Endpoint</th>
+            <td mat-cell *matCellDef="let r" class="mono ep" [matTooltip]="r.endpoint" matTooltipShowDelay="600">{{ r.endpoint }}</td>
+          </ng-container>
+          <ng-container matColumnDef="model">
+            <th mat-header-cell *matHeaderCellDef scope="col">Model</th>
+            <td mat-cell *matCellDef="let r" [matTooltip]="r.modelId ?? ''" matTooltipShowDelay="600">{{ r.modelId ?? '—' }}</td>
+          </ng-container>
+          <ng-container matColumnDef="status">
+            <th mat-header-cell *matHeaderCellDef scope="col">Status</th>
+            <td mat-cell *matCellDef="let r">
+              @if (r.status >= 400) {
+                <span class="status" [attr.data-tone]="tone(r.status)">{{ r.status }} failed</span>
               }
-              <th scope="col" class="right">Tokens</th>
-              <th scope="col" class="right">Took</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (r of recent(); track r.id) {
-              <tr>
-                <td class="muted num">{{ time(r.at) }}</td>
-                <td class="mono ep" [matTooltip]="r.endpoint" matTooltipShowDelay="600">{{ r.endpoint }}</td>
-                <td [matTooltip]="r.modelId ?? ''" matTooltipShowDelay="600">{{ r.modelId ?? '—' }}</td>
-                @if (hasFailures()) {
-                  <td>
-                    @if (r.status >= 400) {
-                      <span class="status" [attr.data-tone]="tone(r.status)">{{ r.status }} failed</span>
-                    }
-                  </td>
-                }
-                <td class="right num">{{ count(tokens(r)) }}</td>
-                <td class="right num">{{ dur(r.totalMs) }}</td>
-              </tr>
-            }
-          </tbody>
+            </td>
+          </ng-container>
+          <ng-container matColumnDef="tokens">
+            <th mat-header-cell *matHeaderCellDef scope="col" class="right">Tokens</th>
+            <td mat-cell *matCellDef="let r" class="right num">{{ count(tokens(r)) }}</td>
+          </ng-container>
+          <ng-container matColumnDef="took">
+            <th mat-header-cell *matHeaderCellDef scope="col" class="right">Took {{ tookUnit() }}</th>
+            <td mat-cell *matCellDef="let r" class="right num">{{ durIn(r.totalMs, tookUnit()) }}</td>
+          </ng-container>
+          <tr mat-header-row *matHeaderRowDef="columns(); sticky: true"></tr>
+          <tr mat-row *matRowDef="let r; columns: columns()"></tr>
         </table>
       }
     </pw-panel>
@@ -129,15 +123,16 @@ const METRICS: { id: UsageMetric; label: string }[] = [
       gap: var(--pd-space-3);
     }
     .recent {
-      .c-time {
+      .mat-column-time {
         width: 72px;
       }
-      .c-status {
+      .mat-column-status {
         width: 96px;
       }
-      /* "955 ms" and "2.2M" whole: numbers are never cut (design guide 3). */
-      .c-num {
-        width: 80px;
+      /* "2,213" and "2.2M" whole: numbers are never cut (design guide 3). */
+      .mat-column-tokens,
+      .mat-column-took {
+        width: 88px;
       }
     }
     .cache {
@@ -231,21 +226,13 @@ const METRICS: { id: UsageMetric; label: string }[] = [
       color: var(--pd-text-muted);
     }
     .recent {
-      th:first-child,
-      td:first-child {
-        padding-left: var(--pd-space-4);
-      }
-      th:last-child,
-      td:last-child {
+      .mat-mdc-header-cell:last-child,
+      .mat-mdc-cell:last-child {
         padding-right: var(--pd-space-4);
       }
     }
     .ep {
-      max-width: 220px;
       font-size: var(--pd-text-label);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
     }
   `,
 })
@@ -275,7 +262,6 @@ export class AppUsage {
   protected readonly count = compact;
   protected readonly intText = int;
   protected readonly size = bytes;
-  protected readonly dur = duration;
   protected readonly tokens = (r: RequestRecord) => r.promptTokens + r.completionTokens;
 
   protected readonly rangeText = computed(() => USAGE_RANGE_TEXT[this.store.range()]);
@@ -283,6 +269,28 @@ export class AppUsage {
   protected readonly recent = computed(() => this.store.detail()?.recent ?? []);
   /** The Status column exists only when something failed: a column of nothing is noise. */
   protected readonly hasFailures = computed(() => this.recent().some((r) => r.status >= 400));
+  /** Endpoint and model only when the requests differ in them (UI review 2 rule 7); a shared one is said in the panel's subtitle. */
+  protected readonly columns = computed(() => {
+    const r = this.recent();
+    return [
+      'time',
+      ...(varies(r, (x) => x.endpoint) ? ['endpoint'] : []),
+      ...(varies(r, (x) => x.modelId) ? ['model'] : []),
+      ...(this.hasFailures() ? ['status'] : []),
+      'tokens',
+      'took',
+    ];
+  });
+  protected readonly recentSub = computed(() => {
+    const r = this.recent();
+    if (!r.length) return '';
+    const cols = this.columns();
+    const shared = [cols.includes('endpoint') || r.length < 2 ? '' : r[0]!.endpoint, cols.includes('model') || r.length < 2 ? '' : (r[0]!.modelId ?? '')].filter(Boolean);
+    return [`${r.length} latest`, ...shared.map((v) => `all ${v}`)].join(' · ');
+  });
+  protected readonly tookUnit = computed(() => durationUnit(this.recent().map((r) => r.totalMs)));
+  protected readonly durIn = durationIn;
+  protected readonly byId = (_: number, r: RequestRecord) => r.id;
   protected readonly chartKey = computed(() => `${this.theme.resolved()}:${this.store.range()}:${this.metric()}`);
   protected readonly option = computed<EChartsCoreOption>(() => {
     const s = this.store.series();

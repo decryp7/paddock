@@ -1,10 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
 import type { AppInfo, AppLimits, KeyedSeries } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { ThemeService } from '../../core/theme';
-import { compact, duration, int } from '../../shared/format';
+import { compact, durationIn, durationUnit, int, varies } from '../../shared/format';
 import { seriesColor } from '../../shared/theme-tokens';
 import { MatButton } from '@angular/material/button';
 import { MatIcon } from '@angular/material/icon';
@@ -25,7 +26,7 @@ export function limitsText(l: AppLimits): string {
 /** Connected apps with today's requests, tokens, busy time, errors and limits, and a trend over the chart range. */
 @Component({
   selector: 'pw-apps-card',
-  imports: [MatTooltipModule, MatButton, MatIcon, RouterLink, SuSparkline, SuEmptyState],
+  imports: [MatTableModule, MatTooltipModule, MatButton, MatIcon, RouterLink, SuSparkline, SuEmptyState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (live.apps().length === 0) {
@@ -34,64 +35,80 @@ export function limitsText(l: AppLimits): string {
         <a slot="action" matButton="outlined" routerLink="/apps">Apps & keys</a>
       </pd-empty-state>
     } @else {
-      <table class="table fit">
-        <colgroup><col /><col class="c-n" /><col class="c-n" /><col class="c-n" /><col class="c-n" /><col class="c-lim" /><col class="c-trend" /></colgroup>
-        <thead>
-          <tr>
-            <th scope="col">App</th>
-            <th scope="col" class="right">Requests</th>
-            <th scope="col" class="right">Tokens</th>
-            <th scope="col" class="right">Busy</th>
-            <th scope="col" class="right">Errors</th>
-            <th scope="col">Limits</th>
-            <th scope="col"><span class="sr-only">Trend</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          @for (a of apps(); track a.id) {
-            <tr>
-              <td>
-                <span class="app">
-                  <span class="avatar" [style.--c]="color(a)" aria-hidden="true">{{ a.name[0] }}</span>
-                  <span class="nm" [matTooltip]="a.name" matTooltipShowDelay="600">{{ a.name }}</span>
-                  <span class="conn" role="img" [class.on]="a.connected" [attr.aria-label]="a.connected ? 'Connected' : 'Not connected'" [matTooltip]="a.connected ? 'Connected' : 'Not connected'"></span>
-                </span>
-              </td>
-              <td class="right num">{{ intText(a.today.requests) }}</td>
-              <td class="right num">{{ count(a.today.promptTokens + a.today.completionTokens) }}</td>
-              <td class="right num">{{ dur(a.today.busyMs) }}</td>
-              <td class="right num" [class.bad]="a.today.errors > 0">{{ a.today.errors }}</td>
-              <td class="limits"><span class="lim" [matTooltip]="limits(a.permissions.limits)">{{ limits(a.permissions.limits) }}</span></td>
-              <td class="trend"><pd-sparkline [values]="trend(a)" [min]="0" [height]="22" [label]="'Requests of ' + a.name" [style.color]="color(a)" /></td>
-            </tr>
-          }
-        </tbody>
+      <table mat-table [dataSource]="apps()" [trackBy]="byId" [fixedLayout]="true" aria-label="Apps today">
+        <ng-container matColumnDef="app">
+          <th mat-header-cell *matHeaderCellDef scope="col">App</th>
+          <td mat-cell *matCellDef="let a">
+            <span class="app">
+              <span class="avatar" [style.--c]="color(a)" aria-hidden="true">{{ a.name[0] }}</span>
+              <span class="nm" [matTooltip]="a.name" matTooltipShowDelay="600">{{ a.name }}</span>
+              <span class="conn" role="img" [class.on]="a.connected" [attr.aria-label]="a.connected ? 'Connected' : 'Not connected'" [matTooltip]="a.connected ? 'Connected' : 'Not connected'"></span>
+            </span>
+          </td>
+        </ng-container>
+        <ng-container matColumnDef="requests">
+          <th mat-header-cell *matHeaderCellDef scope="col" class="right">Requests</th>
+          <td mat-cell *matCellDef="let a" class="right num">{{ intText(a.today.requests) }}</td>
+        </ng-container>
+        <ng-container matColumnDef="tokens">
+          <th mat-header-cell *matHeaderCellDef scope="col" class="right">Tokens</th>
+          <td mat-cell *matCellDef="let a" class="right num">{{ count(a.today.promptTokens + a.today.completionTokens) }}</td>
+        </ng-container>
+        <ng-container matColumnDef="busy">
+          <th mat-header-cell *matHeaderCellDef scope="col" class="right">Busy {{ busyUnit() }}</th>
+          <td mat-cell *matCellDef="let a" class="right num">{{ durIn(a.today.busyMs, busyUnit()) }}</td>
+        </ng-container>
+        <ng-container matColumnDef="errors">
+          <th mat-header-cell *matHeaderCellDef scope="col" class="right">Errors</th>
+          <td mat-cell *matCellDef="let a" class="right num" [class.bad]="a.today.errors > 0">{{ a.today.errors }}</td>
+        </ng-container>
+        <ng-container matColumnDef="limits">
+          <th mat-header-cell *matHeaderCellDef scope="col">Limits</th>
+          <td mat-cell *matCellDef="let a" class="limits" [matTooltip]="limits(a.permissions.limits)">{{ limits(a.permissions.limits) }}</td>
+        </ng-container>
+        <ng-container matColumnDef="trend">
+          <th mat-header-cell *matHeaderCellDef scope="col"><span class="sr-only">Trend</span></th>
+          <td mat-cell *matCellDef="let a" class="trend"><pd-sparkline [values]="trend(a)" [min]="0" [height]="22" [label]="'Requests of ' + a.name" [style.color]="color(a)" /></td>
+        </ng-container>
+        <tr mat-header-row *matHeaderRowDef="columns(); sticky: true"></tr>
+        <tr mat-row *matRowDef="let a; columns: columns()"></tr>
       </table>
     }
   `,
   styles: `
     :host {
       display: block;
+      container-type: inline-size;
       margin: 0 calc(-1 * var(--pd-space-4)) calc(-1 * var(--pd-space-2));
     }
-    .c-n {
-      width: 72px;
+    .mat-column-requests,
+    .mat-column-tokens,
+    .mat-column-busy,
+    .mat-column-errors {
+      width: 88px;
     }
-    .c-lim {
+    /* A narrow card keeps the app's name and its numbers: the trend goes first, then the limits (both are on Apps & keys). */
+    @container (max-width: 640px) {
+      .mat-column-trend {
+        display: none;
+      }
+    }
+    @container (max-width: 560px) {
+      .mat-column-limits {
+        display: none;
+      }
+    }
+    .mat-column-limits {
       width: 96px;
+    }
+    .mat-column-trend {
+      width: 88px;
     }
     .trend pd-sparkline {
       width: 64px;
     }
-    .c-trend {
-      width: 88px;
-    }
-    .table th:first-child,
-    .table td:first-child {
-      padding-left: var(--pd-space-4);
-    }
-    .table th:last-child,
-    .table td:last-child {
+    .mat-mdc-header-cell:last-child,
+    .mat-mdc-cell:last-child {
       padding-right: var(--pd-space-4);
     }
     .app {
@@ -140,11 +157,6 @@ export function limitsText(l: AppLimits): string {
       color: var(--pd-text-muted);
       font-size: var(--pd-text-label);
     }
-    .lim {
-      display: block;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
   `,
 })
 export class AppsCard {
@@ -154,7 +166,22 @@ export class AppsCard {
   private readonly theme = inject(ThemeService);
   protected readonly intText = int;
   protected readonly count = compact;
-  protected readonly dur = duration;
+  protected readonly durIn = durationIn;
+  protected readonly busyUnit = computed(() => durationUnit(this.live.apps().map((a) => a.today.busyMs)));
+  protected readonly byId = (_: number, a: AppInfo) => a.id;
+  /** Errors only when an app had one, limits only when the apps differ in them (UI review 2 rule 7). */
+  protected readonly columns = computed(() => {
+    const apps = this.live.apps();
+    return [
+      'app',
+      'requests',
+      'tokens',
+      'busy',
+      ...(apps.some((a) => a.today.errors > 0) ? ['errors'] : []),
+      ...(varies(apps, (a) => limitsText(a.permissions.limits)) ? ['limits'] : []),
+      'trend',
+    ];
+  });
   protected readonly limits = limitsText;
   protected readonly apps = computed(() => [...this.live.apps()].sort((a, b) => b.today.requests - a.today.requests));
   private readonly byKey = computed(() => new Map(this.series().map((s) => [s.key, s.values])));
