@@ -221,6 +221,10 @@ impl Chromium {
     }
 
     /// [`Chromium::launch`] with the sandbox decision made by the caller (tests run the root branch on any OS).
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the browser, a GUI program: this crate cannot use Debrief's process helper"
+    )]
     fn launch_with(exe: &Browser, opts: &LaunchOptions, sandbox: Sandbox) -> Result<Chromium> {
         let (dir, throwaway) = match &opts.profile {
             Profile::Throwaway => (unique_dir(), true),
@@ -383,6 +387,13 @@ impl Drop for Chromium {
     }
 }
 
+#[cfg_attr(
+    unix,
+    expect(
+        clippy::disallowed_methods,
+        reason = "ADR 0033 WP-5: the watchdog killpg()s a pid captured at launch; move to paddock-chromium"
+    )
+)]
 fn kill_pid(pid: Option<u32>) {
     #[cfg(unix)]
     if let Some(p) = pid {

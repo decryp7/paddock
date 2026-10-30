@@ -10,8 +10,8 @@
 //! * [`install`]: verified install of a pinned Chromium archive.
 
 // This crate depends on nothing of Debrief, so it cannot use `debrief_core::process::quiet_command`; the processes it starts
-// are the browser (a GUI program) and `taskkill`, which is started without a console window.
-#![allow(clippy::disallowed_methods)]
+// are the browser (a GUI program) and `taskkill`, which is started without a console window. Each `Command::new` carries its
+// own `#[expect(clippy::disallowed_methods)]`, so the lint still sees every bare-pid kill (ADR 0033).
 
 pub mod cdp;
 pub mod challenge;
