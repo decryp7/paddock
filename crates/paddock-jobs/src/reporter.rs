@@ -136,10 +136,8 @@ impl Reporter {
 
     /// The current snapshot (does not count as an emit).
     pub fn snapshot(&self) -> JobSnapshot {
-        {
-            let g = lock(&self.0.inner);
-            self.build(&g, self.0.done.load(Ordering::Relaxed))
-        }
+        let g = lock(&self.0.inner);
+        self.build(&g, self.0.done.load(Ordering::Relaxed))
     }
 
     fn build(&self, g: &Inner, done: u64) -> JobSnapshot {
@@ -181,9 +179,8 @@ impl Reporter {
 
     /// Progress after the end of the job is dropped: the terminal snapshot is the last event.
     fn emit_live(&self, g: MutexGuard<'_, Inner>) {
-        if g.state.is_terminal() {
-            // Nothing is published after the end.
-        } else {
+        // Nothing is published after the end.
+        if !g.state.is_terminal() {
             self.emit_locked(g);
         }
     }
