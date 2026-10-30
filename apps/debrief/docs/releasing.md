@@ -111,6 +111,9 @@ from the releases page; revoke the old secrets.
 
 ## Checking a release
 
+- Before the tag: the real-app smoke on Windows (WebView2) and macOS (launch and quit, start-up budgets) in the local
+  test VMs ([testing-manual.md](testing-manual.md), "Smoke tests of the real app"). CI runs it on Linux only: the host
+  runners run in a user's session, where a test never opens the app's windows (Paddock rule 7).
 - `latest.json` is attached to the release and lists every platform; `cat` output is in the release job log.
 - An installed older version: Help ▸ Check for updates… shows the new version, notes and size; download,
   then Restart to update.

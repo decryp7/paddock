@@ -356,7 +356,8 @@ Gitea Actions workflows live in [`.gitea/workflows/`](../.gitea/workflows/):
      check (pull requests), the Angular build with `npm audit`, the i18n extraction check, `ng lint`,
      unit tests with coverage, the Playwright end-to-end tests, and a check that the generated
      third-party notices are up to date.
-  2. *real-app smoke* (Windows and Linux): builds the debug app and runs the `tauri-driver` tests.
+  2. *real-app smoke* (Linux, in the CI container under Xvfb): builds the debug app and runs the `tauri-driver` tests. The
+     Windows and macOS smoke runs in the local test VMs before a release (testing-manual.md), never on a host runner (rule 7).
   3. *bundle* (matrix), only for `v*` tags, the nightly run and manual runs (not for pushes or pull
      requests, so an installer breakage shows up within 24 hours): `.deb`/`.rpm` on `ubuntu-latest`,
      the NSIS `-setup.exe` on `windows-latest` and `.dmg` on `macos-latest`, uploaded as run artifacts.

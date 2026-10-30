@@ -983,8 +983,10 @@ dependencies = [
 name = "chromium-driver"
 version = "0.1.0"
 dependencies = [
+ "chromium-driver",
  "libc",
  "log",
+ "paddock-testkit",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -1330,6 +1332,7 @@ checksum = "4b5b023fc2978536bbb2a3b71237964fc4630bec1eb31077b4977127f4cdb9c0"
 dependencies = [
  "chrono",
  "derive_builder",
+ "jiff",
  "strum",
 ]
 
@@ -4050,6 +4053,7 @@ dependencies = [
  "defmt",
  "jiff-core",
  "jiff-static",
+ "jiff-tzdb",
  "jiff-tzdb-platform",
  "log",
  "portable-atomic",
@@ -5329,6 +5333,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-env"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "paddock-jobs"
+version = "0.2.0"
+dependencies = [
+ "croner",
+ "jiff",
+ "paddock-env",
+ "paddock-workspace-hack",
+ "serde",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
@@ -5336,6 +5362,16 @@ dependencies = [
  "paddock-workspace-hack",
  "sysinfo",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "paddock-testkit"
+version = "0.1.0"
+dependencies = [
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "socket2",
+ "tempfile",
 ]
 
 [[package]]

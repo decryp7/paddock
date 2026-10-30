@@ -752,23 +752,29 @@ crate, so every shared crate's line (the start's error among them) was lost: eve
 (`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
 not by guessing at the VM.
 
-## 2026-10-30: live-browser tests opened Chrome on the user's desktop (Debrief, Spotter)
+## 2026-10-30: live-browser tests opened Chrome on the user's desktop (Debrief, Spotter, paddock-chromium)
 
-The Mac CI runner runs in the user's GUI session and sets `CHROMIUM_TEST_PATH`, so every macOS rust-test job of Debrief
+The Mac CI runner runs in the user's GUI session and set `CHROMIUM_TEST_PATH`, so every macOS rust-test job of Debrief
 opened Chrome for Testing windows on the user's desktop: chromium-driver's `real_browser` tests and the renderer's
 scripted-page and challenge-page tests (Debrief's driver has no headless mode, by design: a challenge page needs a person,
 `the_browser_opens_on_screen_with_no_offscreen_or_headless_arguments`). The challenge test also timed out on that runner
-(runs 7141 and 7146), an on-screen Chrome competing with the user's apps for the focus. Spotter's
-`off_screen_headful_mode_and_redirects` had the same flaw on the Mac and Windows legs: a window at -32000,-32000 is still a
-window with a Dock or taskbar entry that takes the focus. paddock-chromium and Spotter's other live tests were already
-headless. **Rule (rule 7):** a test opens a browser window only on Linux under a virtual display: the CI job runs it
-under `xvfb-run` and sets `PADDOCK_LIVE_BROWSER=1` (debrief.yml `rust tests`; app-gates sets it with its `display` wrap).
-The gate lives in the test-browser finder (`chromium_driver::discover::find_for_tests` / `test_browser`,
-`spotter_render::discover::windowed_tests_here`); elsewhere the test prints where it runs instead, and a job set up wrongly
-(the variable without a display, or the browser required on Linux without the variable) fails instead of skipping. C55
-flags a headful launch in `tests/` without the gate and any read of `CHROMIUM_TEST_PATH` around the finder.
+(runs 7141 and 7146); it also fails about one run in ten in the Linux container, so the desktop was not its only cause
+(a separate bug-fix task). Spotter's `off_screen_headful_mode_and_redirects` did the same on the Mac and Windows legs (a
+window at -32000,-32000 still has a Dock or taskbar entry and takes the focus), and the headless tests of Spotter and
+paddock-chromium still started Chrome in the user's session, where nobody had shown that a headless Chrome never shows
+in the Dock or takes the focus. Debrief's real-app smoke (`tauri-smoke`) opened the real app on the Mac runner and on the
+Windows runner, a developer PC. **Rule (rule 7):** a test starts a real browser or opens the real app only in a
+throwaway Linux CI container: under `xvfb-run` with `PADDOCK_LIVE_BROWSER=1` (Debrief's `rust tests`, the `crates`
+coverage job, app-gates' `display` wrap). The gate is shared, `paddock_testkit::live_browser`, and structural: every
+driver's test-browser finder (`paddock_chromium`, `chromium_driver`, `spotter_render` `discover::find_for_tests`) asks it
+with the window mode the test launches, so no test gets a browser around it; elsewhere the test prints where it runs, and
+a job set up wrongly (the variable without a display for a window, or the browser required on Linux without the
+variable) fails instead of skipping. C55 is the backstop: no read of the test browser outside `src/discover.rs`, and no
+test that launches a window after asking the finder for none. Mac and Windows lose this coverage on purpose; the
+WebView2 and macOS real-app smoke and the macOS start-up budgets run in the local test VMs before a release.
 
 Considered and rejected: a test-only headless or off-screen launch option for Debrief's live tests, to keep them on the
 Mac. Headless tests a mode the product never runs (the challenge test is about the window coming to the front), the option
 would be a product code path that must never be used, and an off-screen headful window still shows in the Dock and takes
-the focus (Spotter's case). The Mac keeps the fake-browser tests of the whole life cycle; the live ones run once, on Linux.
+the focus (Spotter's case). Also rejected: keeping the headless tests on the hosts, since even a headless Chrome is a
+process of the user's session.

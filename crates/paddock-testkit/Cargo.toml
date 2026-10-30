@@ -1,7 +1,7 @@
 [package]
 name = "paddock-testkit"
 version = "0.1.0"
-description = "Rust test kit for the Paddock apps (a dev-dependency): scratch folders with a leftover check, a process-wide environment lock with an in-process hermetic environment, golden files with an update variable, a fake OS command runner, a never-panics helper, a held loopback port and the deterministic clock."
+description = "Rust test kit for the Paddock apps (a dev-dependency): scratch folders with a leftover check, a process-wide environment lock with an in-process hermetic environment, golden files with an update variable, a fake OS command runner, a never-panics helper, a held loopback port, the deterministic clock and the gate of real-browser tests."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

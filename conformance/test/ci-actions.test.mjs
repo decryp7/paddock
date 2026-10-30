@@ -384,7 +384,9 @@ test('every job that builds Rust on a host sets its build folder with the build-
       const at = job.text.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/build-folder/);
       if (at < 0) continue;
       const sw = job.text.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/stable-workspace/);
-      assert.ok(sw >= 0 && sw < at, `${file} ${job.id}: the stable checkout path before the build folder`);
+      // A job that runs only in the CI container (a fixed image) has no host checkout to move.
+      const containerOnly = /\n    container:\n      image: /.test(job.text);
+      assert.ok(containerOnly || (sw >= 0 && sw < at), `${file} ${job.id}: the stable checkout path before the build folder`);
       const ws = /workspace: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}\/([^\n]+)\n\s+name: (\S+)/.exec(job.text.slice(at));
       assert.ok(ws, `${file} ${job.id}: the workspace in the stable checkout, and a folder name`);
       uses.push(`${file}:${job.id}`);
@@ -397,7 +399,7 @@ test('every job that builds Rust on a host sets its build folder with the build-
       assert.equal(ignored.status, 0, `${ws[1]}/.cargo/ci.toml is git-ignored`);
     }
   }
-  for (const want of ['ci.yml:crate', 'ci.yml:app', 'app-release.yml:bundle', 'debrief.yml:rust-test-macos', 'debrief.yml:tauri-smoke', 'debrief.yml:bundle']) {
+  for (const want of ['ci.yml:crate', 'ci.yml:app', 'app-release.yml:bundle', 'debrief.yml:rust-test-macos', 'debrief.yml:bundle']) {
     assert.ok(uses.includes(want), `${want} sets its build folder with the action (found: ${uses.join(', ')})`);
   }
   const copies = spawnSync('git', ['ls-files', 'apps/*/scripts/ci/build-folder.sh'], { cwd: PADDOCK, encoding: 'utf8' });
@@ -575,15 +577,18 @@ test('CI moves the checkout to a stable path on the host runners only, after Git
   }
 });
 
-test('the test browser of a host job lives in a kept folder of the runner user, outside the checkout that stable-workspace moves', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
-  const dirs = [...ci.matchAll(/PADDOCK_TEST_BROWSER_DIR=(\S+)/g)].map((m) => m[1]);
-  assert.equal(dirs.length, 3, 'one per host OS in the crate job, and the app leg\'s own (per app, under $HOME)');
-  for (const d of dirs) {
-    assert.doesNotMatch(d, /GITHUB_WORKSPACE|\.\./, `${d}: a path relative to the checkout dies when the checkout moves`);
-    assert.match(d, /\.paddock-ci[\\/]test-browser/, d);
+test('no host job gets a real test browser: the hosts run in a user\'s session (rule 7), the Linux container runs them', () => {
+  for (const wf of ['ci.yml', 'debrief.yml']) {
+    const text = read(join(WORKFLOWS, wf));
+    assert.doesNotMatch(text, /uses: \.\/\.gitea\/actions\/install-test-browser|PADDOCK_TEST_BROWSER_DIR/, `${wf} installs no test browser on a host`);
   }
-  assert.ok(ci.indexOf('PADDOCK_TEST_BROWSER_DIR') < ci.indexOf('uses: ./.gitea/actions/install-test-browser'), 'the folder is chosen before the browser is installed');
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  assert.match(ci, /- name: The tests' browser\n\s+if: runner\.os == 'Linux' && matrix\.test_browser_prefix != ''/, 'an app\'s test browser is the Linux container\'s');
+  assert.match(ci, /PADDOCK_REQUIRE_TEST_BROWSER: "1"\n\s+PADDOCK_LIVE_BROWSER: "1"/, 'paddock-chromium\'s real-browser tests run in the coverage job');
+  assert.match(read(join(WORKFLOWS, 'debrief.yml')), /PADDOCK_LIVE_BROWSER: "1"\n\s+run: xvfb-run -a cargo nextest run/, 'Debrief\'s run under Xvfb');
+  const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
+  assert.match(gates, /wrap=\(env PADDOCK_LIVE_BROWSER=1 xvfb-run /, 'an app leg with `display` runs them under Xvfb');
+  assert.match(gates, /RUNNER_OS" != Linux \]; then echo "::notice::The real-browser tests run in the Linux leg/, 'a host leg says where they run');
 });
 
 test('the WebKit job runs on the Mac runner for pushes to main and v* tags only, and runs the three WebKit projects', () => {
@@ -833,13 +838,12 @@ test("Spotter's real-browser tests use the image's Chrome for Testing on Linux: 
   assert.equal(spotter, version(read(join(PADDOCK, 'crates', 'paddock-chromium', 'src', 'chromium.toml'))), 'the image installs paddock-chromium\'s pin');
   assert.match(read(join(PADDOCK, 'ci-image', 'Dockerfile')), new RegExp(`ARG CHROME_VERSION=${spotter.replace(/\./g, '\\.')}\\n`), 'the image carries that build');
   const contract = ciContract('spotter');
-  assert.deepEqual(contract.testBrowser, { envPrefix: 'SPOTTER', catalogue: 'apps/spotter/crates/spotter-render/src/chromium-manifest.toml', noSandboxOnLinux: true }, 'the leg installs Spotter\'s pin on the hosts and points SPOTTER_TEST_BROWSER at it');
+  assert.deepEqual(contract.testBrowser, { envPrefix: 'SPOTTER', catalogue: 'apps/spotter/crates/spotter-render/src/chromium-manifest.toml', noSandboxOnLinux: true }, 'the Linux leg points SPOTTER_TEST_BROWSER at the image\'s pin');
   assert.ok(existsSync(join(PADDOCK, contract.testBrowser.catalogue)));
   assert.equal(contract.display, true, 'the renderer\'s window is a real off-screen one: a virtual display on Linux');
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   assert.match(ci, /echo "\$\{PREFIX\}_TEST_BROWSER=\$CHROMIUM_TEST_PATH"/, 'the tests launch the pinned build');
   assert.match(ci, /echo "\$\{PREFIX\}_REQUIRE_TEST_BROWSER=1"/, 'a missing browser fails the run');
-  assert.match(ci, /test-browser-\$APP/, 'a kept host folder of the app\'s own (two jobs may run on a host at once)');
   assert.match(read(join(ACTIONS, 'app-gates', 'action.yml')), /xvfb-run --auto-servernum .* dbus-run-session --\)/, 'the tests run under a virtual display');
   assert.match(contract.processPatterns.join('\n'), /test-browser-spotter/, 'host cleanup ends browsers started from the app\'s own test-browser folder');
   assert.match(read(join(PADDOCK, 'apps', 'spotter', '.config', 'nextest.toml')), /filter = "package\(spotter-render\) & binary\(real_browser\)"\ntest-group = "real-browser"/, 'real browsers take turns under nextest too');
@@ -919,12 +923,17 @@ test('Debrief builds Rust through sccache in every Rust job, with the build fold
   // The kept build folder of the host legs is cargo configuration that cargo itself reads (.cargo/ci.toml, included).
   assert.match(read(join(PADDOCK, 'apps', 'debrief', '.cargo', 'config.toml')), /include = \[[^\]]*\{ path = "ci\.toml", optional = true \}/);
   for (const job of ['rust-test-macos', 'tauri-smoke', 'bundle']) assert.match(jobBlock(yml, job), /uses: \.\/\.gitea\/actions\/build-folder\n/, `${job}: the build folder (the shared action)`);
-  assert.match(jobBlock(yml, 'tauri-smoke'), /DEBRIEF_E2E_APP=\$PADDOCK_BUILD_FOLDER\/debug\/debrief-app\$ext/, 'the smoke starts the app from the job\'s build folder');
+  assert.match(jobBlock(yml, 'tauri-smoke'), /DEBRIEF_E2E_APP=\$PADDOCK_BUILD_FOLDER\/debug\/debrief-app"/, 'the smoke starts the app from the job\'s build folder');
+  // The real app opens windows: its smoke runs only in the Linux container under Xvfb, never on a host runner (rule 7).
+  const smoke = jobBlock(yml, 'tauri-smoke');
+  assert.match(smoke, /runs-on: ubuntu-latest\n\s+container:\n\s+image: dev\.decryptology\.net\/decryp7\/paddock-ci:v2/);
+  assert.doesNotMatch(smoke, /matrix|windows-latest|macos-latest|runner\.os ==/, 'no host leg');
+  assert.match(smoke, /xvfb-run -a --server-args="-screen 0 1600x1000x24" npm run e2e:tauri/);
 });
 
 test('Debrief\'s host legs build from a stable checkout path, after Git bash is on PATH on Windows', () => {
   const yml = debriefYml();
-  for (const job of ['rust-test-macos', 'tauri-smoke', 'bundle']) {
+  for (const job of ['rust-test-macos', 'bundle']) {
     const block = jobBlock(yml, job);
     const at = block.indexOf('uses: ./.gitea/actions/stable-workspace');
     assert.ok(at > 0, `${job} uses stable-workspace`);

@@ -512,71 +512,33 @@ jobs:
           path: apps/debrief/app/playwright-report
           if-no-files-found: ignore
 
-  # A few WebdriverIO smoke tests of the real app (engine + shell + production UI, no mock), through
-  # tauri-driver: msedgedriver for WebView2 on Windows, WebKitWebDriver under Xvfb on Linux (both in place: the image's,
-  # the host's). macOS has no WKWebView driver. Locally: see docs/testing-manual.md ("Smoke tests of the real app").
-  # Full runs only (main, debrief-v* tags, nightly, `bundles: true`), never on branch or pull request runs.
+  # A few WebdriverIO smoke tests of the real app (engine + shell + production UI, no mock), through tauri-driver and
+  # WebKitWebDriver, on Linux only, in the CI container under Xvfb: the real app opens windows, and the Windows and macOS
+  # host runners run in a user's session (the Mac runner is the user's own desktop; the Windows one a developer PC), where a
+  # test never opens one (Paddock rule 7). The WebView2 smoke (Windows) and the macOS launch-and-quit smoke and start-up
+  # benchmark run in the local test VMs before a release instead (docs/testing-manual.md, "Smoke tests of the real app").
+  # The sidecars of the macOS .app are still started in CI by macos-verify-bundle.sh in the bundle job. Locally: see
+  # docs/testing-manual.md. Full runs only (main, debrief-v* tags, nightly, `bundles: true`), never on branch or pull
+  # request runs.
   tauri-smoke:
-    name: real-app smoke (${{ matrix.os }})
+    name: real-app smoke (Linux)
     needs: [plan, rust-lint]
     if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        # macOS has no WebDriver for WKWebView: its leg builds the .app, starts every sidecar from it and asserts that the
-        # app stays up and quits within 10 s (scripts/ci/macos-smoke.sh). The v1.0.1 store-worker abort reached users
-        # because no macOS job ever started the sidecars.
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    # Linux legs run in the paddock-ci image; Windows and macOS run on the host.
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     timeout-minutes: 60
     defaults:
       run:
         shell: bash
         working-directory: apps/debrief
-    # Windows runners usually run as administrator, where WebView2 ignores WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS (how
-    # msedgedriver enables remote debugging); the debug build hands those arguments to WebView2 itself, so both legs
-    # are required. Each run keeps Debrief's folders in a temp DEBRIEF_DATA_DIR (see app/e2e-tauri/wdio.conf.ts).
+    # Each run keeps Debrief's folders in a temp DEBRIEF_DATA_DIR (see app/e2e-tauri/wdio.conf.ts).
     steps:
       - uses: actions/checkout@v4
 
-      # Host-mode Windows runners may not have Git's bash on PATH; actions and `shell: bash` need it. The npm cache lives in
-      # a host folder that outlives the job (npm ci then installs from disk).
-      - name: Git bash on PATH (Windows)
-        if: runner.os == 'Windows'
-        # cmd, not PowerShell: runners with a restricted execution policy refuse the .ps1 act writes for a step.
-        shell: cmd
-        working-directory: .
-        run: |
-          rem Which account runs the job: WebView2 smoke tests cannot run as SYSTEM (its temp is C:\Windows\SystemTemp).
-          whoami
-          echo TEMP=%TEMP%
-          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner: no bash.exe in "%ProgramFiles%\Git\bin" & exit /b 1)
-          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo npm_config_cache=%USERPROFILE%\.debrief-ci\npm-cache>>"%GITHUB_ENV%"
-          echo npm_config_prefer_offline=true>>"%GITHUB_ENV%"
-          echo npm_config_audit=false>>"%GITHUB_ENV%"
-          echo npm_config_fund=false>>"%GITHUB_ENV%"
-          rem The Windows runner is a developer PC (16 cores, 32 GB) that runs two jobs at once: a debug and a release
-          rem build with 16 rustc processes each exhausted its memory. Eight each keeps both inside it.
-          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
-
-      - name: Build jobs (macOS)
-        if: runner.os == 'macOS'
-        working-directory: .
-        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
-
-      # Host runners: the same checkout path every run, so sccache hits the workspace crates (after Git bash on Windows).
-      - uses: ./.gitea/actions/stable-workspace
-        if: runner.os != 'Linux'
-        with:
-          name: debrief-${{ github.job }}-${{ runner.os }}
-
       - uses: ./.gitea/actions/setup-rust
 
-      # One kept build folder per job on a host (the smoke and installer jobs run at the same time and would otherwise wait
-      # for each other on the cargo lock), as cargo configuration (the shared build-folder action): PADDOCK_BUILD_FOLDER and
+      # The job's build folder, as cargo configuration (the shared build-folder action): PADDOCK_BUILD_FOLDER and
       # DEBRIEF_E2E_APP for the steps below.
       - uses: ./.gitea/actions/build-folder
         with:
@@ -586,36 +548,10 @@ jobs:
       # The debug app the real-app smoke starts (wdio), in the job's build folder.
       - name: The smoke's app binary
         shell: bash
-        run: |
-          ext=; if [ "$RUNNER_OS" = Windows ]; then ext=.exe; fi
-          echo "DEBRIEF_E2E_APP=$PADDOCK_BUILD_FOLDER/debug/debrief-app$ext" >> "$GITHUB_ENV"
+        run: echo "DEBRIEF_E2E_APP=$PADDOCK_BUILD_FOLDER/debug/debrief-app" >> "$GITHUB_ENV"
 
-      # Host runners keep their own Node: fail fast when it is missing or not the major version app/.nvmrc asks for.
-      - name: Host Node matches app/.nvmrc
-        if: runner.os != 'Linux'
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: |
-          want=$(tr -d ' v\r\n' < app/.nvmrc | cut -d. -f1)
-          if ! command -v node >/dev/null; then
-            if [ -x "/c/Program Files/nodejs/node.exe" ]; then
-              echo 'C:\Program Files\nodejs' >> "$GITHUB_PATH"
-              export PATH="/c/Program Files/nodejs:$PATH"
-            else
-              echo "::error::Node.js is not installed on this runner: install Node $want (app/.nvmrc) on the host and put it on PATH."
-              exit 1
-            fi
-          fi
-          have=$(node -p 'process.versions.node.split(".")[0]')
-          if [ "$have" != "$want" ]; then
-            echo "::error::The runner has Node $(node --version) but app/.nvmrc asks for Node $want: install Node $want on the host."
-            exit 1
-          fi
-          node --version
-
-      # npm's and Angular's caches (the /sccache mount on Linux, ~/.paddock-ci on macOS). Windows reuses a whole
-      # node_modules instead (below).
+      # npm's and Angular's caches (the /sccache mount).
       - uses: ./.gitea/actions/node-caches
-        if: runner.os != 'Windows'
         with:
           angular-dir: apps/debrief/app
           name: debrief-smoke
@@ -625,74 +561,16 @@ jobs:
         run: bash scripts/ci/libduckdb-env.sh
 
       - name: tauri-driver
-        if: runner.os != 'macOS'
         run: command -v tauri-driver || cargo install tauri-driver --locked
 
-      # The Edge WebDriver must match the runner's WebView2 runtime exactly: the script reads the runtime's
-      # version from the registry (EdgeUpdate client {F3017226-…}) and downloads
-      # https://msedgedriver.microsoft.com/<version>/edgedriver_win64.zip into app/e2e-tauri/.drivers/.
-      - name: Edge WebDriver matching WebView2
-        if: runner.os == 'Windows'
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app
-        run: node e2e-tauri/scripts/fetch-msedgedriver.mjs
-
-      # Windows host: unpacking ~900 packages into a fresh node_modules took 7–14 min per job even with the npm cache
-      # on disk. A finished node_modules per package-lock.json lives in %USERPROFILE%\.debrief-ci and is linked into the
-      # job's checkout (a directory junction); npm ci runs only when the lockfile changed. The last step removes the
-      # junction, so no cleanup ever walks into the shared copy (a junction a killed job left is removed here first).
-      - name: Reuse node_modules for this lockfile (Windows)
-        if: runner.os == 'Windows'
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
-        run: bash apps/debrief/scripts/ci/windows-node-modules.sh link
-
       - name: Debug app binary
-        if: runner.os != 'macOS'
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app
         run: |
           [ -d ../../../node_modules ] || (cd ../../.. && npm ci)
           npm run e2e:tauri:build
 
-      # macOS: a real debug .app (ad-hoc sealed by tauri.macos.conf.json) with the sidecars and libduckdb inside, the same
-      # layout the installer ships; then the signature/Team-ID/load checks and the launch-and-quit smoke.
-      - name: Debug .app (macOS)
-        if: runner.os == 'macOS'
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app
-        env:
-          DEBRIEF_CARGO_PROFILE: debug
-        run: |
-          (cd ../../.. && npm ci)
-          npx tauri build --debug --bundles app --config src-tauri/tauri.sidecars.conf.json
-
-      - name: Smoke test, sidecars and quit within 10 s (macOS)
-        if: runner.os == 'macOS'
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: |
-          app=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
-          [ -d "$app" ] || { echo "::error::no debug .app was built"; exit 1; }
-          node --test scripts/ci/macos-smoke.test.mjs
-          bash scripts/ci/macos-verify-bundle.sh "$app"
-          bash scripts/ci/macos-smoke.sh "$app"
-
-      - name: Smoke tests (Windows)
-        if: runner.os == 'Windows'
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app
-        # Keep Debrief's folders so a failure can show the app's own logs (next step).
-        env:
-          DEBRIEF_E2E_KEEP_DATA: "1"
-        run: npm run e2e:tauri
-
-      - name: Debrief logs of the failed smoke run (Windows)
-        if: failure() && runner.os == 'Windows'
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app
-        run: |
-          for f in $(find e2e-tauri/.tmp -path '*debrief-e2e-*' -name '*.log' 2>/dev/null | sort); do
-            echo "::group::$f"; tail -n 150 "$f"; echo "::endgroup::"
-          done
-          tasklist //FI "IMAGENAME eq debrief-app.exe" || true
-
       # A session bus for the single-instance plugin and notifications, and a virtual display for WebKitGTK.
-      - name: Smoke tests (Linux)
-        if: runner.os == 'Linux'
+      - name: Smoke tests
         working-directory: apps/debrief/app
         # WebKitGTK in a CI container: its web-process sandbox (bubblewrap) cannot start as root inside Docker, and
         # there is no GPU. These switches apply to this throwaway test container only, never to Debrief itself.
@@ -705,8 +583,8 @@ jobs:
           DEBRIEF_E2E_KEEP_DATA: "1"
         run: dbus-run-session -- xvfb-run -a --server-args="-screen 0 1600x1000x24" npm run e2e:tauri
 
-      - name: Debrief logs of the failed smoke run (Linux)
-        if: failure() && runner.os == 'Linux'
+      - name: Debrief logs of the failed smoke run
+        if: failure()
         run: |
           for f in $(find /tmp -path '*debrief-e2e-*' -name '*.log' 2>/dev/null | sort); do
             echo "::group::$f"; tail -n 150 "$f"; echo "::endgroup::"
@@ -725,19 +603,11 @@ jobs:
       # No live search test here: CI never depends on the real network. The same probe runs over recorded engine pages in
       # the rust tests (browser::live::tests); the live one is a manual run (docs/development.md, "Live search test").
 
-      # The start-up benchmark (Paddock rule 16; startup_timings.rs): five everyday starts of the built app after a
-      # first run, each one's "Startup timings" line read and the medians checked against scripts/ci/startup-budgets.json.
-      # Nightly and manual runs only. macOS has measured budgets; Linux reports until its first nightly numbers are in.
-      - name: Start-up benchmark (macOS)
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os == 'macOS'
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: |
-          app=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
-          node --test scripts/ci/startup-bench.test.mjs
-          node scripts/ci/startup-bench.mjs "$app" --runs 5 --out "${RUNNER_TEMP:-/tmp}/startup-timings.json"
-
-      - name: Start-up benchmark (Linux, report only)
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os == 'Linux'
+      # The start-up benchmark (Paddock rule 16; startup_timings.rs): five everyday starts of the built app after a first run,
+      # each one's "Startup timings" line read. Nightly and manual runs only; Linux reports until its first nightly numbers
+      # are in. The macOS budgets (scripts/ci/startup-budgets.json) are checked in the local macOS test VM before a release.
+      - name: Start-up benchmark (report only)
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled()
         env:
           WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
@@ -749,18 +619,12 @@ jobs:
             --out "${RUNNER_TEMP:-/tmp}/startup-timings.json"
 
       - name: Start-up timings
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os != 'Windows'
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled()
         uses: actions/upload-artifact@v3
         with:
           name: startup-timings-${{ runner.os }}
           path: ${{ runner.temp }}/startup-timings.json
           if-no-files-found: ignore
-
-      # Unlink the shared node_modules (rmdir on a junction removes the link only, never the target's files).
-      - name: Unlink the shared node_modules (Windows)
-        if: always() && runner.os == 'Windows'
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
-        run: bash apps/debrief/scripts/ci/windows-node-modules.sh unlink
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
