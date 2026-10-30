@@ -352,14 +352,10 @@ fn closing_quits_the_browser_by_itself_before_any_kill() {
     opts.mode = Mode::Headless;
     let mut c = Chromium::launch(&b, &opts).unwrap();
     let marker = c.profile_dir().to_string_lossy().to_string();
-    let t = Instant::now();
-    c.close();
+    // The mechanism, not a duration: the browser ended by itself, before any termination or kill. How long a slow quit takes
+    // is load, and `close` waits for one that is still working (it judges the run state).
+    assert!(c.close(), "the browser did not quit by itself");
     assert!(!c.is_running());
-    assert!(
-        t.elapsed() < spotter_render::launch::CLOSE_GRACE,
-        "needed a kill: {:?}",
-        t.elapsed()
-    );
     assert_eq!(c.ended_by(), EndedBy::Nothing);
     assert_no_leftovers(&marker);
 }
