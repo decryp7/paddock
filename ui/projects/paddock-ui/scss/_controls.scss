@@ -139,6 +139,17 @@
   gap: var(--pd-space-2);
 }
 
+// A row that mixes controls of different heights: a labelled outlined field (the control height plus 16 px), a field without a
+// label (the control height) and buttons (--pd-button-height). Its items share one vertical centre, so the boxes line up on the
+// middle instead of hanging from the top. A field with a hint or an error line under it is taller by that line: keep those in a
+// top-aligned form column, not in this row.
+.pd-field-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pd-space-2) var(--pd-space-3);
+}
+
 // ---- Fields: text inputs, native selects and text areas share one look; the label, hint and error go in .pd-field.
 .pd-input,
 .pd-select,
