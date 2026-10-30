@@ -42,7 +42,7 @@ pub enum PatternError {
     #[error("the pattern is only a placeholder and matches everything; add the code around it")]
     TooGeneral,
     /// The pattern does not parse in the language.
-    #[error("the pattern is not valid {language} code; check the pattern or the language")]
+    #[error("the pattern is not valid {language} code, or is more than one statement or expression; write one statement or one expression")]
     Syntax {
         /// The language.
         language: &'static str,
@@ -117,45 +117,121 @@ pub struct Match {
     pub captures: BTreeMap<String, String>,
 }
 
-/// Bounds of one search.
+/// Why a search stopped early; the caller reports a partial result (exit code 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Truncated {
+    /// The file is larger than [`MatchLimits::max_bytes`] and was not searched.
+    TooLarge {
+        /// Its size.
+        len: usize,
+        /// The limit.
+        max: usize,
+    },
+    /// More than [`MatchLimits::max_nodes`] nodes.
+    Nodes,
+    /// More than [`MatchLimits::max_matches`] matches.
+    Matches,
+    /// The file used up [`MatchLimits::max_steps`].
+    Steps,
+    /// The run was cancelled.
+    Cancelled,
+}
+
+/// What a search found, and why it stopped early if it did.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Found {
+    /// The matches, in file order.
+    pub matches: Vec<Match>,
+    /// Set when the result is partial.
+    pub truncated: Option<Truncated>,
+}
+
+/// Bounds of one search of one file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MatchLimits {
+    /// Largest file searched (the parser's own default, 2 MiB). A bigger file is not searched, so it has no findings and no
+    /// fingerprints; a baseline entry for it reads as no longer found, and the run is partial.
+    pub max_bytes: usize,
     /// Most nodes visited.
     pub max_nodes: usize,
     /// Most matches kept.
     pub max_matches: usize,
+    /// Most match steps for the whole file (all attempts together).
+    pub max_steps: usize,
 }
 
 impl Default for MatchLimits {
     fn default() -> Self {
         MatchLimits {
+            max_bytes: pacenotes_parse::DEFAULT_MAX_BYTES,
             max_nodes: 500_000,
             max_matches: 1_000,
+            max_steps: 5_000_000,
         }
     }
 }
 
-fn wrapper(language: ParseLanguage) -> Option<(&'static str, &'static str)> {
+/// Statement and expression wrappers (head, tail) for languages whose grammar has no free-standing statements. Tried in order after the
+/// pattern as written: the statement as written, the statement with a `;`, then an expression in an initialiser (so `$X.length` works).
+fn wrappers(language: ParseLanguage) -> Vec<(&'static str, &'static str, bool)> {
+    let stmt = |head, tail| [(head, tail, false), (head, tail, true)];
     match language {
-        ParseLanguage::Rust => Some(("fn __pn() {\n", "\n}")),
-        ParseLanguage::Go => Some(("package p\nfunc __pn() {\n", "\n}")),
-        ParseLanguage::Java => Some(("class P { void m() {\n", "\n} }")),
-        ParseLanguage::CSharp => Some(("class P { void M() {\n", "\n} }")),
-        ParseLanguage::Kotlin => Some(("fun m() {\n", "\n}")),
-        ParseLanguage::C | ParseLanguage::Cpp => Some(("void m(void) {\n", "\n}")),
-        ParseLanguage::TypeScript | ParseLanguage::Tsx | ParseLanguage::JavaScript | ParseLanguage::Python => None,
+        ParseLanguage::Rust => stmt("fn __pn() {\n", "\n}")
+            .into_iter()
+            .chain([("fn __pn() { let __e = ", "; }", false)])
+            .collect(),
+        ParseLanguage::Go => stmt("package p\nfunc __pn() {\n", "\n}")
+            .into_iter()
+            .chain([("package p\nfunc __pn() { __e := ", "\n}", false)])
+            .collect(),
+        ParseLanguage::Java => stmt("class P { void m() {\n", "\n} }")
+            .into_iter()
+            .chain([("class P { void m() { Object __e = ", "; } }", false)])
+            .collect(),
+        ParseLanguage::CSharp => stmt("class P { void M() {\n", "\n} }")
+            .into_iter()
+            .chain([("class P { void M() { var __e = ", "; } }", false)])
+            .collect(),
+        ParseLanguage::Kotlin => stmt("fun m() {\n", "\n}")
+            .into_iter()
+            .chain([("fun m() { val __e = ", "\n}", false)])
+            .collect(),
+        ParseLanguage::C | ParseLanguage::Cpp => stmt("void m(void) {\n", "\n}")
+            .into_iter()
+            .chain([("void m(void) { int __e = ", "; }", false)])
+            .collect(),
+        ParseLanguage::TypeScript | ParseLanguage::Tsx | ParseLanguage::JavaScript | ParseLanguage::Python => Vec::new(),
     }
 }
 
-/// Swaps `$NAME`, `$$$NAME` and `$_` for identifiers the grammar accepts, and says what each stands for.
-fn substitute(pattern: &str) -> Result<(String, BTreeMap<String, Var>), PatternError> {
+/// Swaps `$NAME`, `$$$NAME` and `$_` for identifiers the grammar accepts, and says what each stands for. A `$` inside a string literal is
+/// part of the string and is matched literally.
+fn substitute(language: ParseLanguage, pattern: &str) -> Result<(String, BTreeMap<String, Var>), PatternError> {
+    let single_quoted_strings = matches!(
+        language,
+        ParseLanguage::Python | ParseLanguage::JavaScript | ParseLanguage::TypeScript | ParseLanguage::Tsx
+    );
     let bytes = pattern.as_bytes();
     let mut out = String::with_capacity(pattern.len() + 16);
     let mut vars = BTreeMap::new();
     let mut i = 0;
     let mut n = 0;
+    let mut quote: Option<u8> = None;
     while i < bytes.len() {
-        if bytes[i] == b'$' {
+        let c = bytes[i];
+        if let Some(q) = quote {
+            if c == b'\\' && i + 1 < bytes.len() {
+                let len = pattern[i + 1..].chars().next().map_or(1, char::len_utf8);
+                out.push_str(&pattern[i..i + 1 + len]);
+                i += 1 + len;
+                continue;
+            }
+            if c == q {
+                quote = None;
+            }
+        } else if c == b'"' || (c == b'\'' && single_quoted_strings) {
+            quote = Some(c);
+        } else if c == b'$' {
             let run = pattern[i..].starts_with("$$$");
             let start = i + if run { 3 } else { 1 };
             let mut end = start;
@@ -184,7 +260,6 @@ fn substitute(pattern: &str) -> Result<(String, BTreeMap<String, Var>), PatternE
                 continue;
             }
         }
-        // copy one character
         let ch_len = pattern[i..].chars().next().map_or(1, char::len_utf8);
         out.push_str(&pattern[i..i + ch_len]);
         i += ch_len;
@@ -215,7 +290,8 @@ fn depth(node: Node<'_>) -> usize {
 }
 
 impl Pattern {
-    /// Compiles `source` for `language`.
+    /// Compiles `source` for `language`. A pattern is **one statement or one expression**: several statements (`a(); b();`) are
+    /// refused, because they would have to match a run of siblings in a particular block, which a pattern cannot say.
     pub fn compile(language: ParseLanguage, source: &str) -> Result<Pattern, PatternError> {
         let trimmed = source.trim();
         if trimmed.is_empty() {
@@ -224,7 +300,7 @@ impl Pattern {
         if trimmed.len() > MAX_PATTERN_BYTES {
             return Err(PatternError::TooLong(trimmed.len()));
         }
-        let (text, vars) = substitute(trimmed)?;
+        let (text, vars) = substitute(language, trimmed)?;
         let grammar = language.grammar().map_err(|e| PatternError::Grammar {
             language: language.id(),
             why: e.to_string(),
@@ -234,15 +310,11 @@ impl Pattern {
             language: language.id(),
             why: e.to_string(),
         })?;
-        let attempts: Vec<(String, usize)> = {
-            let mut v = vec![(text.clone(), 0)];
-            if let Some((head, tail)) = wrapper(language) {
-                v.push((format!("{head}{text}{tail}"), head.len()));
-                // a statement pattern written without its `;`
-                v.push((format!("{head}{text};{tail}"), head.len()));
-            }
-            v
-        };
+        let mut attempts: Vec<(String, usize)> = vec![(text.clone(), 0)];
+        for (head, tail, semicolon) in wrappers(language) {
+            let semi = if semicolon { ";" } else { "" };
+            attempts.push((format!("{head}{text}{semi}{tail}"), head.len()));
+        }
         for (full, offset) in attempts {
             let Some(tree) = parser.parse(&full, None) else { continue };
             if tree.root_node().has_error() {
@@ -254,6 +326,10 @@ impl Pattern {
             };
             // the deepest node that spans the whole pattern
             if node.start_byte() != range.0 || node.end_byte() != range.1 {
+                continue;
+            }
+            // the whole file as the root means several statements side by side, which a pattern cannot express
+            if node.parent().is_none() {
                 continue;
             }
             if depth(node) > MAX_PATTERN_DEPTH {
@@ -282,38 +358,53 @@ impl Pattern {
         self.tree.root_node().descendant_for_byte_range(self.range.0, self.range.1)
     }
 
-    /// Every place the pattern matches in `bytes` (a file of this pattern's language). Nested matches are all reported. Returns what it
-    /// found when a bound is reached.
-    pub fn find_all(&self, bytes: &[u8], limits: &MatchLimits) -> Vec<Match> {
-        let Ok(target_src) = std::str::from_utf8(bytes) else {
-            return Vec::new();
-        };
-        let Ok(grammar) = self.language.grammar() else { return Vec::new() };
+    /// Every place the pattern matches in `bytes` (a file of this pattern's language). Nested matches are all reported. Stops, and says
+    /// why in [`Found::truncated`], when a bound is reached or `cancel` fires.
+    pub fn find_all(&self, bytes: &[u8], limits: &MatchLimits, cancel: &CancelToken) -> Found {
+        let mut found = Found::default();
+        if bytes.len() > limits.max_bytes {
+            found.truncated = Some(Truncated::TooLarge {
+                len: bytes.len(),
+                max: limits.max_bytes,
+            });
+            return found;
+        }
+        let Ok(target_src) = std::str::from_utf8(bytes) else { return found };
+        let Ok(grammar) = self.language.grammar() else { return found };
         let mut parser = Parser::new();
         if parser.set_language(&grammar).is_err() {
-            return Vec::new();
+            return found;
         }
-        let Some(tree) = parser.parse(target_src, None) else {
-            return Vec::new();
-        };
-        let Some(root_pattern) = self.root() else { return Vec::new() };
+        let Some(tree) = parser.parse(target_src, None) else { return found };
+        let Some(root_pattern) = self.root() else { return found };
         let kind = root_pattern.kind_id();
-        let mut out = Vec::new();
         let mut visited = 0usize;
+        let mut total_steps = 0usize;
         let mut cursor = tree.walk();
-        loop {
+        'walk: loop {
             let node = cursor.node();
             visited += 1;
-            if visited > limits.max_nodes || out.len() >= limits.max_matches {
+            if visited > limits.max_nodes {
+                found.truncated = Some(Truncated::Nodes);
+                break;
+            }
+            if visited.is_multiple_of(256) && cancel.is_cancelled() {
+                found.truncated = Some(Truncated::Cancelled);
                 break;
             }
             if node.kind_id() == kind {
+                if found.matches.len() >= limits.max_matches {
+                    found.truncated = Some(Truncated::Matches);
+                    break;
+                }
                 let mut m = Matcher {
                     pat: &self.source,
                     tgt: target_src,
                     vars: &self.vars,
                     caps: Vec::new(),
                     steps: 0,
+                    total: &mut total_steps,
+                    total_max: limits.max_steps,
                 };
                 if m.node(root_pattern, node) {
                     let (s, e) = (node.start_position(), node.end_position());
@@ -322,17 +413,17 @@ impl Pattern {
                         Position::new(e.row as u32 + 1, e.column as u32 + 1),
                     ) && let Ok(span) = Span::new(a, b)
                     {
-                        let captures = m
-                            .caps
-                            .iter()
-                            .map(|(n, (a, b))| (n.clone(), target_src[*a..*b].to_owned()))
-                            .collect();
-                        out.push(Match {
+                        let captures = m.caps.iter().map(|(n, nodes)| (n.clone(), range_text(target_src, nodes))).collect();
+                        found.matches.push(Match {
                             span,
                             text: target_src[node.byte_range()].to_owned(),
                             captures,
                         });
                     }
+                }
+                if total_steps > limits.max_steps {
+                    found.truncated = Some(Truncated::Steps);
+                    break;
                 }
             }
             if cursor.goto_first_child() {
@@ -343,53 +434,84 @@ impl Pattern {
                     break;
                 }
                 if !cursor.goto_parent() {
-                    return out;
+                    break 'walk;
                 }
             }
         }
-        out
+        found
     }
 }
 
-struct Matcher<'a> {
-    pat: &'a str,
-    tgt: &'a str,
-    vars: &'a BTreeMap<String, Var>,
-    caps: Vec<(String, (usize, usize))>,
-    steps: usize,
+fn range_text(src: &str, nodes: &[Node<'_>]) -> String {
+    match (nodes.first(), nodes.last()) {
+        (Some(a), Some(b)) => src[a.start_byte()..b.end_byte()].to_owned(),
+        _ => String::new(),
+    }
 }
 
-impl Matcher<'_> {
+/// The significant leaf tokens under `nodes` (comments and layout left out), so `a.b` and `a . b` are the same.
+fn tokens<'t>(src: &'t str, nodes: &[Node<'t>]) -> Vec<&'t str> {
+    let mut out = Vec::new();
+    let mut stack: Vec<Node<'t>> = nodes.iter().rev().copied().collect();
+    while let Some(n) = stack.pop() {
+        if n.is_extra() {
+            continue;
+        }
+        if n.child_count() == 0 {
+            out.push(&src[n.byte_range()]);
+        } else {
+            let mut cursor = n.walk();
+            let kids: Vec<Node<'t>> = n.children(&mut cursor).collect();
+            stack.extend(kids.into_iter().rev());
+        }
+    }
+    out
+}
+
+struct Matcher<'a, 't> {
+    pat: &'a str,
+    tgt: &'t str,
+    vars: &'a BTreeMap<String, Var>,
+    caps: Vec<(String, Vec<Node<'t>>)>,
+    /// Steps of this attempt.
+    steps: usize,
+    /// Steps of the whole file.
+    total: &'a mut usize,
+    total_max: usize,
+}
+
+impl<'t> Matcher<'_, 't> {
     fn var(&self, n: Node<'_>) -> Option<&Var> {
         self.vars.get(&self.pat[n.byte_range()])
     }
 
-    fn same_text(&self, a: (usize, usize), b: (usize, usize)) -> bool {
-        let words = |r: (usize, usize)| self.tgt[r.0..r.1].split_whitespace().collect::<Vec<_>>();
-        words(a) == words(b)
+    /// Counts a step; false once this attempt or the whole file is out of budget.
+    fn step(&mut self) -> bool {
+        self.steps += 1;
+        *self.total += 1;
+        self.steps <= MAX_STEPS && *self.total <= self.total_max
     }
 
-    fn bind(&mut self, name: &str, range: (usize, usize)) -> bool {
+    fn bind(&mut self, name: &str, nodes: &[Node<'t>]) -> bool {
         if let Some((_, old)) = self.caps.iter().find(|(n, _)| n == name) {
-            return self.same_text(*old, range);
+            return tokens(self.tgt, old) == tokens(self.tgt, nodes);
         }
-        self.caps.push((name.to_owned(), range));
+        self.caps.push((name.to_owned(), nodes.to_vec()));
         true
     }
 
-    fn children<'t>(&self, node: Node<'t>) -> Vec<Node<'t>> {
+    fn children(&self, node: Node<'t>) -> Vec<Node<'t>> {
         let mut cursor = node.walk();
         node.children(&mut cursor).filter(|c| !c.is_extra()).collect()
     }
 
-    fn node(&mut self, p: Node<'_>, t: Node<'_>) -> bool {
-        self.steps += 1;
-        if self.steps > MAX_STEPS {
+    fn node(&mut self, p: Node<'_>, t: Node<'t>) -> bool {
+        if !self.step() {
             return false;
         }
         match self.var(p).cloned() {
             Some(Var::Any) => return t.is_named(),
-            Some(Var::One(name)) => return t.is_named() && self.bind(&name, (t.start_byte(), t.end_byte())),
+            Some(Var::One(name)) => return t.is_named() && self.bind(&name, &[t]),
             Some(Var::Run(_)) => return false,
             None => {}
         }
@@ -403,23 +525,21 @@ impl Matcher<'_> {
         self.seq(&pc, &tc)
     }
 
-    fn seq(&mut self, pc: &[Node<'_>], tc: &[Node<'_>]) -> bool {
-        self.steps += 1;
-        if self.steps > MAX_STEPS {
+    fn seq(&mut self, pc: &[Node<'_>], tc: &[Node<'t>]) -> bool {
+        if !self.step() {
             return false;
         }
         let Some((p, rest)) = pc.split_first() else { return tc.is_empty() };
         if let Some(Var::Run(name)) = self.var(*p).cloned() {
             for k in 0..=tc.len() {
                 let mark = self.caps.len();
-                let range = match (tc.first(), k.checked_sub(1).and_then(|i| tc.get(i))) {
-                    (Some(a), Some(b)) => (a.start_byte(), b.end_byte()),
-                    _ => (0, 0),
-                };
-                if self.bind(&name, range) && self.seq(rest, &tc[k..]) {
+                if self.bind(&name, &tc[..k]) && self.seq(rest, &tc[k..]) {
                     return true;
                 }
                 self.caps.truncate(mark);
+                if *self.total > self.total_max || self.steps > MAX_STEPS {
+                    return false;
+                }
             }
             return false;
         }
@@ -508,25 +628,30 @@ impl CompiledRule {
     }
 
     /// The findings of this rule in one file. A file outside the rule's scope or languages has none.
-    pub fn run(&self, path: &RepoPath, bytes: &[u8], limits: &MatchLimits) -> Vec<Finding> {
+    pub fn run(&self, path: &RepoPath, bytes: &[u8], limits: &MatchLimits, cancel: &CancelToken) -> RuleRun {
+        let none = RuleRun::default();
         let Some(language) = ParseLanguage::from_path(path) else {
-            return Vec::new();
+            return none;
         };
         let Some(pattern) = self.patterns.iter().find(|p| p.language() == language) else {
-            return Vec::new();
+            return none;
         };
         if !self.in_scope(path) {
-            return Vec::new();
+            return none;
         }
-        let matches = pattern.find_all(bytes, limits);
-        if matches.is_empty() {
-            return Vec::new();
+        let found = pattern.find_all(bytes, limits, cancel);
+        if found.matches.is_empty() {
+            return RuleRun {
+                findings: Vec::new(),
+                truncated: found.truncated,
+            };
         }
-        let symbols = pacenotes_parse::parse(language, bytes, &Limits::default(), &CancelToken::new())
+        let symbols = pacenotes_parse::parse(language, bytes, &Limits::default(), cancel)
             .map(|o| o.symbols)
             .unwrap_or_default();
         let rule = RuleId::Local(self.spec.id().clone());
-        matches
+        let findings = found
+            .matches
             .into_iter()
             .map(|m| {
                 let enclosing = symbols
@@ -551,6 +676,19 @@ impl CompiledRule {
                     confidence: None,
                 }
             })
-            .collect()
+            .collect();
+        RuleRun {
+            findings,
+            truncated: found.truncated,
+        }
     }
+}
+
+/// The findings of one rule in one file, and why the search stopped early if it did (the caller then reports a partial result).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RuleRun {
+    /// The findings found.
+    pub findings: Vec<Finding>,
+    /// Set when the result is partial.
+    pub truncated: Option<Truncated>,
 }

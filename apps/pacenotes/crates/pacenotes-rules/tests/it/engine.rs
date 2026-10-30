@@ -3,7 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use pacenotes_core::Severity;
-use pacenotes_rules::shared_copy::{HiddenBy, IsoDate, Origin, Reason, RuleId, Suppression, SuppressionScope, Waiver, apply_waivers};
+use pacenotes_rules::shared_copy::{
+    HiddenBy, IsoDate, Origin, Owner, Reason, RuleId, Suppression, SuppressionScope, Waiver, apply_waivers,
+};
 
 use crate::support::{finding, rule};
 
@@ -12,14 +14,10 @@ fn date(s: &str) -> IsoDate {
 }
 
 fn waiver(id: &str, glob: &str, expires: Option<&str>, max: Option<u32>) -> Waiver {
-    Waiver {
-        rule: rule(id),
-        path: glob.into(),
-        reason: Reason::parse("legacy").unwrap(),
-        expires: expires.map(date),
-        max_count: max,
-        owner: None,
-        origin: Origin::File,
+    let reason = Reason::parse("legacy").unwrap();
+    match expires {
+        Some(d) => Waiver::file(rule(id), glob, reason, date(d), max, None).unwrap(),
+        None => Waiver::config(rule(id), glob, reason, Owner::parse("CODEOWNERS").unwrap(), max).unwrap(),
     }
 }
 
@@ -50,24 +48,31 @@ fn a_live_waiver_hides_what_it_covers_and_the_expiry_day_is_inclusive() {
         "an expired waiver waives nothing"
     );
     assert_eq!(ids(&next_day), ["w001"]);
+    assert!(
+        next_day.engine[0].message.starts_with("the waiver for r over src/**"),
+        "{}",
+        next_day.engine[0].message
+    );
 }
 
 #[test]
-fn a_file_waiver_without_an_expiry_is_incomplete_but_a_config_waiver_needs_none() {
+fn a_config_waiver_needs_no_expiry_and_a_file_waiver_cannot_be_built_without_one() {
     let findings = vec![finding("r", Severity::High, "src/a.rs", 1, "x")];
-    let mut file = waiver("r", "src/**", None, None);
-    let app = apply_waivers(
-        findings.clone(),
-        std::slice::from_ref(&file),
-        &[],
-        &ran(&["r"]),
-        &BTreeMap::new(),
-        date("2026-10-30"),
-    );
-    assert_eq!((ids(&app), app.hidden.len()), (vec!["w002".to_owned()], 0));
-    file.origin = Origin::Config;
-    let app = apply_waivers(findings, &[file], &[], &ran(&["r"]), &BTreeMap::new(), date("2026-10-30"));
+    let config = waiver("r", "src/**", None, None);
+    assert_eq!(config.origin(), Origin::Config);
+    let app = apply_waivers(findings, &[config], &[], &ran(&["r"]), &BTreeMap::new(), date("2026-10-30"));
     assert_eq!((app.hidden.len(), app.engine.len()), (1, 0));
+    assert!(
+        Waiver::file(
+            rule("r"),
+            &"*".repeat(300),
+            Reason::parse("x").unwrap(),
+            date("2026-12-31"),
+            None,
+            None
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -141,6 +146,7 @@ fn suppressions_cover_a_line_a_file_a_glob_or_a_rule_and_need_not_be_expired() {
         rule: rule_id.map(rule),
         reason: reason.clone(),
         expires: expires.map(date),
+        in_source: false,
     };
     let findings = vec![
         finding("r", Severity::High, "src/a.rs", 5, "a"),
@@ -179,6 +185,7 @@ fn an_unused_suppression_is_reported_when_its_rule_ran() {
         rule: Some(rule("r")),
         reason: Reason::parse("x").unwrap(),
         expires: None,
+        in_source: false,
     };
     let app = apply_waivers(
         Vec::new(),
@@ -191,4 +198,82 @@ fn an_unused_suppression_is_reported_when_its_rule_ran() {
     assert_eq!(ids(&app), ["w003"]);
     let app = apply_waivers(Vec::new(), &[], &[s], &ran(&[]), &BTreeMap::new(), date("2026-10-30"));
     assert!(app.engine.is_empty());
+}
+
+#[test]
+fn a_bad_entry_in_a_waiver_file_is_a_w002_finding_and_the_rest_of_the_file_still_applies() {
+    use pacenotes_rules::shared_copy::{SuppressionFile, waiver_problems};
+    let text = "version = 1\n[[waiver]]\nrule = \"r\"\npath = \"src/**\"\nreason = \"legacy\"\nexpires = \"2027-01-01\"\n\n[[waiver]]\nrule = \"r\"\npath = \"lib/**\"\nreason = \"\"\nexpires = \"2027-01-01\"\n";
+    let (file, errors) = SuppressionFile::parse_lenient(text);
+    let problems = waiver_problems(&errors, "paddock.waivers.toml");
+    assert_eq!((problems.len(), problems[0].rule.to_string()), (1, "w002".to_owned()));
+    assert!(problems[0].message.starts_with("paddock.waivers.toml: waiver number 2") && problems[0].fix.as_str().contains("Fix the entry"));
+    let findings = vec![
+        finding("r", Severity::High, "src/a.rs", 1, "x"),
+        finding("r", Severity::High, "lib/b.rs", 1, "y"),
+    ];
+    let app = apply_waivers(
+        findings,
+        &file.waivers,
+        &file.suppressions,
+        &ran(&["r"]),
+        &BTreeMap::new(),
+        date("2026-10-30"),
+    );
+    assert_eq!(
+        (app.hidden.len(), app.kept.len()),
+        (1, 1),
+        "the good waiver still hides its finding"
+    );
+}
+
+#[test]
+fn a_hidden_finding_carries_the_waiver_or_suppression_that_hid_it() {
+    use pacenotes_rules::shared_copy::HiddenFinding;
+    let w = Waiver::file(
+        rule("r"),
+        "src/**",
+        Reason::parse("legacy").unwrap(),
+        date("2027-01-01"),
+        None,
+        Some(Owner::parse("decryp7").unwrap()),
+    )
+    .unwrap();
+    let s = Suppression {
+        scope: SuppressionScope::File { path: "lib/b.rs".into() },
+        rule: None,
+        reason: Reason::parse("generated").unwrap(),
+        expires: None,
+        in_source: true,
+    };
+    let findings = vec![
+        finding("r", Severity::High, "src/a.rs", 1, "x"),
+        finding("t", Severity::High, "lib/b.rs", 1, "y"),
+    ];
+    let app = apply_waivers(
+        findings,
+        std::slice::from_ref(&w),
+        std::slice::from_ref(&s),
+        &ran(&["r", "t"]),
+        &BTreeMap::new(),
+        date("2026-10-30"),
+    );
+    let records: Vec<_> = app
+        .hidden
+        .iter()
+        .map(|h| HiddenFinding::from_hidden(h, std::slice::from_ref(&w), std::slice::from_ref(&s)).unwrap())
+        .collect();
+    assert_eq!(
+        (records[0].reason.as_str(), records[0].in_source, records[0].owner.as_deref()),
+        ("legacy", false, Some("decryp7"))
+    );
+    assert_eq!(records[0].expires, Some(date("2027-01-01")));
+    assert_eq!(
+        (records[1].reason.as_str(), records[1].in_source, records[1].owner.clone()),
+        ("generated", true, None)
+    );
+    assert!(
+        HiddenFinding::from_hidden(&app.hidden[0], &[], &[]).is_none(),
+        "an index that is not there is not guessed"
+    );
 }

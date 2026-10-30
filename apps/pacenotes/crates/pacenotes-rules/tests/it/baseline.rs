@@ -28,18 +28,40 @@ fn identical_findings_in_a_file_are_numbered_in_order() {
 }
 
 #[test]
-fn only_new_findings_are_new_and_a_moved_file_or_a_shifted_ordinal_is_not() {
+fn only_new_findings_are_new_and_a_moved_file_is_not() {
     let old = finding("r", Severity::High, "a.rs", 1, "x.unwrap()");
     let baseline = Baseline {
         entries: vec![entry_of(&old, 1)],
     };
     // the same finding in a file that moved: same identity, known
     let moved = finding("r", Severity::High, "deeper/a.rs", 40, "x.unwrap()");
-    // a second identical one appears above it: the first by order is known, the second is a shifted ordinal
-    let twin = finding("r", Severity::High, "deeper/a.rs", 3, "x.unwrap()");
     let fresh = finding("r", Severity::High, "a.rs", 7, "other()");
-    let got = compare(&[twin, moved, fresh], &baseline, &BTreeMap::new());
-    assert_eq!((got.known, got.updated, got.new), (vec![0], vec![1], vec![2]));
+    let got = compare(&[moved, fresh], &baseline, &BTreeMap::new());
+    assert_eq!((got.known, got.updated, got.new), (vec![0], vec![], vec![1]));
+}
+
+/// Per (rule, fingerprint) the baseline holds `n` entries: the first `n` findings are known or updated, any beyond are new.
+#[test]
+fn identical_findings_beyond_the_recorded_count_are_new_and_a_shifted_ordinal_is_updated() {
+    let same = |line| finding("r", Severity::High, "a.rs", line, "x.unwrap()");
+    let one = Baseline {
+        entries: vec![entry_of(&same(1), 1)],
+    };
+    let got = compare(&[same(3), same(9), same(12)], &one, &BTreeMap::new());
+    assert_eq!(
+        (got.known, got.updated, got.new),
+        (vec![0], vec![], vec![1, 2]),
+        "a copy-pasted finding is not absorbed"
+    );
+    // the baseline recorded the second of two; now only one is left, and it is the first
+    let second = Baseline {
+        entries: vec![entry_of(&same(1), 2)],
+    };
+    let got = compare(&[same(3)], &second, &BTreeMap::new());
+    assert_eq!((got.known.clone(), got.updated.clone(), got.new.clone()), (vec![], vec![0], vec![]));
+    let states = got.states(2);
+    assert_eq!(states[0].map(|s| s.sarif_name()), Some("updated"));
+    assert_eq!(states[1], None);
 }
 
 #[test]

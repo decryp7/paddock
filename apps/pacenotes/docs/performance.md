@@ -104,3 +104,22 @@ parallel counting walk beside it, for the live count and the cancel (about 8 to 
 220 to 230 ms for the one walk without ignore rules, so the three cost the same as one unfiltered walk and keep 9,300 files from
 being read. At most one (1) runs at a time. Walks (1) and (2) become one, and walk (1) cancellable, when the shared walker is
 unfrozen (ADR 0006).
+
+## 2026-10-30, `pacenotes-rules` matcher (rule 48)
+
+Helper: `cargo test --release -p pacenotes-rules --test it -- --ignored --nocapture measure_matcher`. Release build, the development Mac
+mini at 5-minute load 16; one run. Corpus: a generated Rust file of 2,000 functions (161,780 bytes), invented code.
+
+| Case | Time | Matches |
+|---|---|---|
+| typical rule `$X.unwrap()` | 25 ms | 2,000 |
+| `$A + $B` | 23 ms | 2,000 |
+| run placeholder `g($$$A)` | 25 ms | 2,000 |
+| hostile: `f($$$A, $$$B, $$$C, $$$D, x)` against 40 arguments | 4.7 ms (ends by its step budget, no match) | 0 |
+| hostile: 2,000-deep nesting | 2.4 ms | 0 |
+
+So about 150 microseconds per kilobyte per rule, and each rule parses the file again (the parse is most of the 25 ms). With the
+rules of a pack run one after another that is one parse per rule per file; sharing the index's parse tree across rules (take a `Tree`
+in `find_all`) is the follow-up, measured when the engine wires the rules. The waiver glob is bounded by steps, not seconds: the
+reviewer's case (`*a` fourteen times against 80 characters, which took over ten minutes) is checked as at most
+`pattern length * path length * 2` steps in a unit test.

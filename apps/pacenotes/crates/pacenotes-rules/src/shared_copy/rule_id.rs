@@ -50,6 +50,12 @@ impl ExternalRuleId {
             }
         };
         check("tool", tool, MAX_TOOL_BYTES)?;
+        if tool.contains(':') {
+            return Err(RuleIdError::External {
+                part: "tool",
+                problem: "not allowed to contain `:` (it separates the tool from the id)",
+            });
+        }
         check("id", id, MAX_EXTERNAL_ID_BYTES)?;
         Ok(ExternalRuleId {
             tool: tool.to_owned(),
@@ -85,6 +91,23 @@ impl RuleId {
             .map_err(|_| RuleIdError::Local(text.chars().take(40).collect()))
     }
 
+    /// The form shown to people: conformance-style ids (one letter and digits, `c37`, `w001`) in capitals as they are written in the
+    /// documents (`C37`, `W001`); everything else as it is. The stored and SARIF form stays lowercase for local ids.
+    pub fn display_form(&self) -> String {
+        match self {
+            RuleId::Local(id) => {
+                let t = id.as_str();
+                let mut chars = t.chars();
+                if chars.next().is_some_and(|c| c.is_ascii_lowercase()) && t.len() > 1 && chars.all(|c| c.is_ascii_digit()) {
+                    t.to_ascii_uppercase()
+                } else {
+                    t.to_owned()
+                }
+            }
+            RuleId::External(_) => self.to_string(),
+        }
+    }
+
     /// An imported id.
     pub fn external(tool: &str, id: &str) -> Result<RuleId, RuleIdError> {
         ExternalRuleId::new(tool, id).map(RuleId::External)
@@ -115,6 +138,17 @@ mod tests {
         assert!(RuleId::external(&"t".repeat(65), "x").is_err() && RuleId::external("t", &"x".repeat(257)).is_err());
         assert!(RuleId::external("t", &"x".repeat(256)).is_ok());
         assert!(RuleId::external("t", "a\nb").is_err());
+        assert!(RuleId::external("a:b", "x").unwrap_err().to_string().contains("`:`"));
+        assert!(RuleId::external("t", "a:b").is_ok(), "the id may contain a colon (clippy::x)");
+        assert_eq!(
+            (
+                RuleId::local("w001").unwrap().display_form(),
+                RuleId::local("c37").unwrap().display_form(),
+                RuleId::local("no-unwrap").unwrap().display_form()
+            ),
+            ("W001".to_owned(), "C37".to_owned(), "no-unwrap".to_owned())
+        );
+        assert_eq!(RuleId::external("t", "a1").unwrap().display_form(), "t:a1");
         assert_ne!(RuleId::local("a").unwrap(), RuleId::external("tool", "a").unwrap());
     }
 }

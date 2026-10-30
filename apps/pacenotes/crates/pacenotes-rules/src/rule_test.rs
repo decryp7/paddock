@@ -2,6 +2,7 @@
 
 use pacenotes_core::RepoPath;
 use pacenotes_parse::ParseLanguage;
+use paddock_jobs::CancelToken;
 
 use crate::pattern::{CompiledRule, MatchLimits, example_extension};
 
@@ -39,7 +40,17 @@ pub fn test_rule(rule: &CompiledRule) -> RuleTestReport {
         };
         for (kind, examples, want) in [("bad", spec.bad(), true), ("good", spec.good(), false)] {
             for (i, example) in examples.iter().enumerate() {
-                let found = !rule.run(&path, example.as_bytes(), &MatchLimits::default()).is_empty();
+                let run = rule.run(&path, example.as_bytes(), &MatchLimits::default(), &CancelToken::new());
+                if let Some(why) = run.truncated {
+                    report.failures.push(Failure {
+                        language: language.id(),
+                        kind,
+                        number: i + 1,
+                        problem: format!("the search of this example stopped early ({why:?}); shorten the example"),
+                    });
+                    continue;
+                }
+                let found = !run.findings.is_empty();
                 if found == want {
                     report.passed += 1;
                 } else {

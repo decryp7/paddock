@@ -58,7 +58,7 @@ module `shared_copy` is gone (never both present), so the copies cannot outlive 
 
 - `RuleId` (a rule's identity) is an enum, so an imported rule can never collide with or be mistaken for one of ours:
   `Local(LocalRuleId)` with the Pacenotes validation (`[a-z0-9][a-z0-9._/-]{0,95}`; conformance ids are lower-cased on the way in and
-  keep a display form, `C37`), and `External(ExternalRuleId { tool, id })`. `ExternalRuleId` is **bounded** (tool at most 64 bytes, id at
+  keep a display form, `C37`; engine findings show `W001`, `W002`), and `:` is not allowed in an external tool name (it separates tool and id), and `External(ExternalRuleId { tool, id })`. `ExternalRuleId` is **bounded** (tool at most 64 bytes, id at
   most 256, no control characters) and **lossless**: the id is exactly the string the tool gave, with no case folding or trimming, and
   it round-trips exactly through SARIF and the baseline file. Display form `tool:id`.
 - `Rule`: id, title, `default_severity`, `fix` (a `FixSentence`, required), optional `policy_ref`, `version` (a number, raised when what
@@ -79,7 +79,7 @@ module `shared_copy` is gone (never both present), so the copies cannot outlive 
   conformance's source is 346 bytes, in C30, and the longest fix printed by a run over every app is 195), `Reason` (non-blank, at most 500 bytes, no line
   break), `IsoDate` (`YYYY-MM-DD`, a real calendar date).
 - `Waiver` and `Suppression` are two types. A **`Waiver`** is a file entry that hides findings of a rule over a path: `rule` (or a
-  deprecated id), `path` glob, `reason`, `expires`, `max_count: Option<u32>`, `owner` and `origin`. A **file** waiver (`origin = File`, in `paddock.waivers.toml`) must have
+  deprecated id), `path` glob, `reason`, `expires`, `max_count: Option<u32>`, `owner` and `origin`. Both are built only by constructors that enforce what each origin must carry. A **file** waiver (`origin = File`, in `paddock.waivers.toml`) must have
   `expires: IsoDate`. A **config** waiver (`origin = Config`, built from a check's own exemption list) has **no expiry**: it still needs a
   `reason` and an `owner`, because such a list (`untimedCommands`, `a11y.skip`, `ownTestBinaries`) is a standing design decision, not a
   debt to pay by a date. It is still counted (`max_count`) and still raises `W003` when it hides nothing; for a config waiver the `owner` requirement is met by the CODEOWNERS owner of the check's config file, so no entry has to name one. A **`Suppression`**
@@ -120,6 +120,7 @@ A fix sentence is required for every rule and every finding (decided). Where it 
 
 - **Expiry** is compared in **UTC**, on dates: a waiver whose `expires` is today is still in force; it is expired from the next UTC
   day. `now` is passed in. An expired waiver waives nothing and is `W001`.
+- **Globs** in waivers are matched in time linear in pattern length times path length (never exponential) and bounded when read: at most 256 bytes and 16 `*`. A waiver file is read leniently: a bad entry becomes a `W002` engine finding that names it, and the rest of the file still applies; a file that cannot be read at all (not TOML, wrong version) has no entries and one `W002`.
 - **Counted waivers** (ADR 0021): `max_count` is an input ceiling, the most findings the waiver may hide; `hidden` is computed by the
   engine. If `hidden > max_count` the waiver **waives nothing** and the engine reports it (the findings it covered stay visible, plus
   one engine finding that names the waiver and both numbers). If `hidden < max_count` the report suggests lowering the ceiling to
@@ -143,7 +144,7 @@ A fix sentence is required for every rule and every finding (decided). Where it 
 
 1. `apply_waivers(findings, waivers, suppressions, ran, today) -> (kept, hidden, engine_findings)`: conformance's `applyWaivers`,
    generalised, with 3.5.
-2. `apply_baseline(findings, baseline) -> (new, known)`; a rule's `version` and `deprecated_ids` are consulted, so a rename or a version
+2. `apply_baseline(findings, baseline) -> (new, known, updated)`: per (rule, fingerprint) the baseline holds `n` entries, and the first `n` findings in file order are known (the recorded ordinal) or updated (the ordinal moved), while any beyond `n` are **new**, so a copy-pasted finding is never absorbed; a rule's `version` and `deprecated_ids` are consulted, so a rename or a version
    bump does not turn every baselined finding "new".
 3. `fingerprint(rule, snippet, enclosing) -> FindingFingerprint` (3.3).
 4. `exit_code(report, threshold, partial) -> 0 | 1 | 2 | 3`: 0 clean, 1 findings at or above the threshold, 2 error, 3 partial or budget
@@ -180,11 +181,11 @@ A fix sentence is required for every rule and every finding (decided). Where it 
 | result to rule | `ruleId` **and** `ruleIndex` (the index into `rules`) |
 | severity | `level`: Info -> `note`, Low and Medium -> `warning`, High and Blocker -> `error`; the exact severity in `properties.severity` so a round trip is lossless |
 | `Location` | `result.locations[0].physicalLocation`: `artifactLocation` with `uri` (relative) and `uriBaseId: "%SRCROOT%"`; the region, below |
-| region and columns | ours are **UTF-8 bytes**. The writer emits `region.startLine`, `startColumn`, `endLine`, `endColumn` **in code points** (`run.columnKind = "unicodeCodePoints"`), converting from bytes, and also `byteOffset` and `byteLength` in `region` where the byte offset is known. The reader converts from the **declared** `columnKind` (`utf16CodeUnits`, which is the SARIF default when absent, or `unicodeCodePoints`) to bytes using the file's text when it has it, and otherwise keeps the line and drops the columns, counting it. A round-trip test with non-ASCII text (a two-byte, a three-byte, and a four-byte character before the finding, plus a surrogate pair for the UTF-16 case) proves the columns survive |
-| `message`, `fix` | `result.message.text`; a per-finding fix sentence in `properties.fix`; a `fix_diff` as `result.fixes[]` with `artifactChanges` and a `description`; a `Generated` sentence is not written |
+| region and columns | ours are **UTF-8 bytes**. The writer emits `region.startLine`, `startColumn`, `endLine`, `endColumn` **in code points** (`run.columnKind = "unicodeCodePoints"`), converting from bytes, and also `byteOffset` and `byteLength` in `region` where the byte offset is known. The reader converts from the **declared** `columnKind` (`utf16CodeUnits`, which is the SARIF default when absent, or `unicodeCodePoints`) to bytes using the file's text when it has it, and otherwise keeps the line and drops the columns, counting it. Each file's text is fetched **once per run** and lines are found by binary search over a line-start index, in the writer and the readers. A round-trip test with non-ASCII text (a two-byte, a three-byte, and a four-byte character before the finding, plus a surrogate pair for the UTF-16 case) proves the columns survive |
+| `message`, `fix` | `result.message.text`; a per-finding fix sentence in `properties.fix`; a `fix_diff` (a unified diff, which `fixes[].artifactChanges` cannot carry as it is) in `properties.fixDiff`, with no `fixes` written; the output is validated against the vendored official 2.1.0 schema in a test; a `Generated` sentence is not written |
 | `FindingFingerprint` | `result.partialFingerprints["paddockFindingHash/v1"]` |
-| waiver or suppression | the result **stays in `results`** with `suppressions[]` set: `kind` `inSource` or `external`, `status` `accepted` (a live waiver) or `rejected`/`underReview` as the reader maps them, `justification` = reason, `properties.expires`, `properties.owner` |
-| baseline | `result.baselineState`: `new`, `unchanged`, `updated`, `absent` (`absent` for a baselined finding no longer found, emitted as a result with no location only when the report asks to list them) |
+| waiver or suppression | the result **stays in `results`** with `suppressions[]` set: `kind` `inSource` or `external`, `status` `accepted`, `justification` = reason, `properties.expires`, `properties.owner` (the writer is given the waiver or suppression itself). On read **only an `accepted` suppression, or one with no status, hides a result**; `rejected` and `underReview` do not |
+| baseline | `result.baselineState` written from the comparison: `new`, `unchanged`, `updated`, `absent` (`absent` for a baselined finding no longer found, emitted as a result with no location only when the report asks to list them) |
 | workflow state | `result.properties.state` (SARIF has no Confirmed or Dismissed beyond suppressions) |
 | `scope` | `run.automationDetails.id` |
 
@@ -193,7 +194,7 @@ are skipped and counted). `level` absent means: the rule's `defaultConfiguration
 defaults). A result with `suppressions` becomes a hidden finding with that waiver as an `external` or `inSource` suppression, not a
 dropped one. The input is **bounded** (file size, results count, string length, nesting) and the reader never panics on any input
 (rule 36); unknown fields go to `properties` up to a cap and are otherwise ignored. rdjson (reviewdog) is read the same way:
-`diagnostics[]` with `message`, `location.path`, `location.range` (rdjson columns are code points, converted the same way), `severity`,
+`diagnostics[]` with `message`, `location.path`, `location.range` (rdjson columns are **UTF-8 bytes**, 1-based, the end exclusive, as in reviewdog's proto, so they are ours and need no conversion; each must fall on a character boundary when the file's text is at hand, else the columns are dropped and counted), `severity`,
 `code`, `suggestions`. An imported rule is an `ExternalRuleId { tool, id }`, so it round-trips to the same `ruleId`.
 
 ## 5. Field-by-field map (the table the adoption test iterates over)

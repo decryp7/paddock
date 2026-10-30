@@ -17,13 +17,18 @@ C3a. C1 comes first and so keeps the shared half in `pacenotes-rules/src/shared_
   and bounded, and avoids a second tree-sitter in the dependency graph.
 - **Patterns** (`pattern`): code of the rule's language with `$NAME` (one node, the same name twice means the same text), `$$$NAME` (a
   run of siblings, commas included) and `$_`. The pattern is parsed with the target's grammar (wrapped in a function or class for
-  languages that need a statement context, with and without a trailing `;`) and matched node by node: same kind, same children, tokens
+  languages that need a statement context, with and without a trailing `;`, and as an initialiser expression so `$X.length` works in
+  Java and C#) and matched node by node: same kind, same children, tokens
   and operators equal, comments and layout ignored. Bounds: pattern 4 KiB, 32 placeholders, depth 64, 500,000 nodes, 1,000 matches, and
   100,000 steps per match attempt (past that an attempt is no match). Matching is deterministic and runs per file; it takes bytes and
   returns findings, so the index's parse pool can drive it.
+- **A pattern is one statement or one expression.** Several statements side by side (`a(); b();`) are refused with a message that says
+  so. A `$` inside a string literal is part of the string and matches literally. Captured text is compared token by token, so
+  `a.b` and `a . b` are the same.
 - **Findings** carry the rule's id, severity and **required** fix sentence (`RuleSpec.fix` in `pacenotes-core` is now required, 512
   bytes, one line), and a `FindingFingerprint` (rule id, algorithm version 1, normalised snippet, enclosing qualified name from the
-  file's outline; no path) so a baseline survives a rename.
+  file's outline; no path) so a baseline survives a rename. A file over 2 MiB is not searched, so it has no findings and no
+  fingerprints; its baselined findings read as no longer found, and the run is partial.
 - **Rule tests** (`rule_test`): every `bad` example must be flagged and no `good` one, in each of the rule's languages. The core already
   refuses a structural rule without both.
 - **SARIF and rdjson**: as in the note, section 4. Our results go in our `run`, each imported tool's in its own with its raw id;
@@ -37,11 +42,14 @@ C3a. C1 comes first and so keeps the shared half in `pacenotes-rules/src/shared_
 
 ## Parallelism and cost (rule 51)
 
-The cost is parsing the file once for the match and once more for the outline (to name the enclosing symbol), per file that has a
-match; files without a match cost one parse. Both can come from the index's single parse when the engine wires it (A3 follow-up), at
-which point `find_all` takes the tree. Matching itself is linear in the tree for a fixed pattern, bounded by the step limit. SARIF
-reading is a single pass over the input with the caps above. Nothing here is measured yet; the first measurement belongs with the
-engine wiring, on the Paddock monorepo, in `docs/performance.md`.
+Measured (docs/performance.md, 2026-10-30): a typical rule over a 160 KB file takes about 25 ms, nearly all of it the parse. **Every
+rule parses the file again** (`find_all` parses its target), and a file with a match is parsed once more for the outline that names the
+enclosing symbol; so a pack of N rules costs N parses per file. Taking the index's single parse tree in `find_all` (and the outline from
+the same parse) is the follow-up and belongs with the engine wiring. Hostile input is bounded in counted steps, not seconds: 2 MiB
+per file (the parser's default), 500,000 nodes, 1,000 matches, 5,000,000 steps per file over all attempts and 100,000 per attempt, and
+a `CancelToken` checked every 256 nodes; a search that stops early returns a `Truncated` reason and the caller reports a partial result
+(exit code 3). Waiver globs are matched in time linear in pattern length times path length and bounded when read (256 bytes, 16 stars).
+SARIF and rdjson fetch each file's text once per run and find lines by binary search over a line-start index.
 
 ## Consequences
 

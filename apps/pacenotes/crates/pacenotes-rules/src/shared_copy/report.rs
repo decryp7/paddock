@@ -5,6 +5,49 @@ use std::collections::BTreeMap;
 
 use super::{Finding, Hidden, Rule, RuleId};
 
+/// A hidden finding with the waiver or suppression itself, for the report: why, until when, who to ask.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HiddenFinding {
+    /// The finding.
+    pub finding: Finding,
+    /// Why it was hidden.
+    pub reason: super::Reason,
+    /// True when the suppression is written in the source.
+    pub in_source: bool,
+    /// The last day the waiver or suppression holds.
+    pub expires: Option<super::IsoDate>,
+    /// Who to ask (a waiver's owner).
+    pub owner: Option<String>,
+}
+
+impl HiddenFinding {
+    /// The record for a finding the engine hid, looked up in the entries that were passed to it.
+    pub fn from_hidden(h: &Hidden, waivers: &[super::Waiver], suppressions: &[super::Suppression]) -> Option<HiddenFinding> {
+        Some(match h.by {
+            super::HiddenBy::Waiver(i) => {
+                let w = waivers.get(i)?;
+                HiddenFinding {
+                    finding: h.finding.clone(),
+                    reason: w.reason().clone(),
+                    in_source: false,
+                    expires: w.expires(),
+                    owner: w.owner().map(|o| o.as_str().to_owned()),
+                }
+            }
+            super::HiddenBy::Suppression(i) => {
+                let s = suppressions.get(i)?;
+                HiddenFinding {
+                    finding: h.finding.clone(),
+                    reason: s.reason.clone(),
+                    in_source: s.in_source,
+                    expires: s.expires,
+                    owner: None,
+                }
+            }
+        })
+    }
+}
+
 /// A result read from SARIF or rdjson, with the reason that hid it when the source had suppressed it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Imported {

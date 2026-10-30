@@ -1,11 +1,13 @@
 //! Structural patterns.
 
 use pacenotes_parse::ParseLanguage;
-use pacenotes_rules::pattern::{MAX_PATTERN_BYTES, MAX_PLACEHOLDERS, MatchLimits, Pattern, PatternError};
+use pacenotes_rules::pattern::{MAX_PATTERN_BYTES, MAX_PLACEHOLDERS, MatchLimits, Pattern, PatternError, Truncated};
+use paddock_jobs::CancelToken;
 
 fn find(language: ParseLanguage, pattern: &str, code: &str) -> Vec<(String, Vec<(String, String)>)> {
     let p = Pattern::compile(language, pattern).unwrap_or_else(|e| panic!("{pattern}: {e}"));
-    p.find_all(code.as_bytes(), &MatchLimits::default())
+    p.find_all(code.as_bytes(), &MatchLimits::default(), &CancelToken::new())
+        .matches
         .into_iter()
         .map(|m| (m.text, m.captures.into_iter().collect()))
         .collect()
@@ -137,39 +139,157 @@ fn bad_patterns_are_refused_with_a_message_that_says_what_to_fix() {
 }
 
 #[test]
-fn bounds_hold_on_hostile_input() {
+fn bounds_hold_on_hostile_input_counted_in_steps_and_nodes_not_seconds() {
     let p = Pattern::compile(ParseLanguage::Rust, "$X.unwrap()").unwrap();
     let code = format!("fn f() {{ {} }}", "a.unwrap(); ".repeat(5000));
+    let live = CancelToken::new();
+    let found = p.find_all(
+        code.as_bytes(),
+        &MatchLimits {
+            max_matches: 10,
+            ..MatchLimits::default()
+        },
+        &live,
+    );
+    assert_eq!((found.matches.len(), found.truncated), (10, Some(Truncated::Matches)));
+    let found = p.find_all(
+        code.as_bytes(),
+        &MatchLimits {
+            max_nodes: 5,
+            ..MatchLimits::default()
+        },
+        &live,
+    );
+    assert_eq!((found.matches.len() < 10, found.truncated), (true, Some(Truncated::Nodes)));
+    // the whole file shares one step budget, however many attempts it holds
+    let found = p.find_all(
+        code.as_bytes(),
+        &MatchLimits {
+            max_steps: 100,
+            ..MatchLimits::default()
+        },
+        &live,
+    );
+    assert_eq!(found.truncated, Some(Truncated::Steps));
+    assert!(found.matches.len() < 100);
+    let found = p.find_all(&vec![b' '; 2 * 1024 * 1024 + 1], &MatchLimits::default(), &live);
     assert_eq!(
-        p.find_all(
-            code.as_bytes(),
-            &MatchLimits {
-                max_nodes: 500_000,
-                max_matches: 10
-            }
-        )
-        .len(),
-        10
+        found.truncated,
+        Some(Truncated::TooLarge {
+            len: 2 * 1024 * 1024 + 1,
+            max: 2 * 1024 * 1024
+        })
     );
     assert!(
-        p.find_all(
-            code.as_bytes(),
-            &MatchLimits {
-                max_nodes: 5,
-                max_matches: 10
-            }
-        )
-        .len()
-            < 10
-    );
-    assert!(
-        p.find_all(&[0xff, 0xfe, 0x00], &MatchLimits::default()).is_empty(),
+        p.find_all(&[0xff, 0xfe, 0x00], &MatchLimits::default(), &live).matches.is_empty(),
         "bytes that are not text match nothing"
     );
+    // a cancel ends the walk (checked every 256 nodes)
+    let stopped = CancelToken::new();
+    stopped.cancel();
+    assert_eq!(
+        p.find_all(code.as_bytes(), &MatchLimits::default(), &stopped).truncated,
+        Some(Truncated::Cancelled)
+    );
+    // deep nesting and runs next to runs end by the step budget of the attempt
     let nested = format!("{}x{}", "f(".repeat(2000), ")".repeat(2000));
-    let _ = p.find_all(format!("fn g() {{ {nested} }}").as_bytes(), &MatchLimits::default());
-    // a run placeholder next to another must not blow up: the step budget ends the attempt
+    let _ = p.find_all(format!("fn g() {{ {nested} }}").as_bytes(), &MatchLimits::default(), &live);
     let q = Pattern::compile(ParseLanguage::Rust, "f($$$A, $$$B, $$$C, $$$D, x)").unwrap();
     let args = (0..40).map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
-    let _ = q.find_all(format!("fn g() {{ f({args}, y); }}").as_bytes(), &MatchLimits::default());
+    let found = q.find_all(
+        format!("fn g() {{ f({args}, y); }}").as_bytes(),
+        &MatchLimits {
+            max_steps: 50_000,
+            ..MatchLimits::default()
+        },
+        &live,
+    );
+    assert!(found.matches.is_empty());
+}
+
+#[test]
+fn member_access_patterns_work_in_java_and_csharp_and_tsx_compiles() {
+    assert_eq!(
+        find(ParseLanguage::Java, "$X.length", "class A { int m(int[] a) { return a.length; } }").len(),
+        1
+    );
+    assert_eq!(
+        find(
+            ParseLanguage::CSharp,
+            "$X.Length",
+            "class A { int M(int[] a) { return a.Length; } }"
+        )
+        .len(),
+        1
+    );
+    assert_eq!(find(ParseLanguage::Rust, "$X.len", "fn f() { let n = v.len; }").len(), 1);
+    assert_eq!(
+        find(
+            ParseLanguage::Tsx,
+            "console.log($X)",
+            "function F() { console.log(1); return <div/>; }"
+        )
+        .len(),
+        1
+    );
+}
+
+#[test]
+fn tokens_are_compared_not_text_and_a_dollar_in_a_string_is_literal() {
+    let hits = find(ParseLanguage::Rust, "$A == $A", "fn f() { if a.b == a . b {} if a.b == a.c {} }");
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    let lit = find(ParseLanguage::Rust, "say(\"$X\")", "fn f() { say(\"$X\"); say(\"hello\"); }");
+    assert_eq!(lit.len(), 1, "a placeholder inside a string matches only itself: {lit:?}");
+    assert_eq!(find(ParseLanguage::Python, "say('$X')", "say('$X')\nsay('hi')\n").len(), 1);
+}
+
+#[test]
+fn a_pattern_is_one_statement_or_expression() {
+    let err = Pattern::compile(ParseLanguage::Rust, "a(); b();").unwrap_err();
+    assert!(
+        matches!(err, PatternError::Syntax { .. }) && err.to_string().contains("one statement or one expression"),
+        "{err}"
+    );
+}
+
+/// A measurement helper, not a test (rule 48): `cargo test --release -p pacenotes-rules --test it -- --ignored --nocapture measure_matcher`.
+/// Times a typical rule over a realistic file, and the hostile cases against their budgets.
+#[test]
+#[ignore = "a measurement, run by hand"]
+fn measure_matcher() {
+    use std::time::Instant;
+    let live = CancelToken::new();
+    let file = (0..2000)
+        .map(|i| format!("fn f{i}(a: Option<u32>) -> u32 {{ let b = a.unwrap(); let c = g(b, {i}); c + 1 }}\n"))
+        .collect::<String>();
+    println!("typical file: {} bytes", file.len());
+    for (name, pattern) in [("unwrap", "$X.unwrap()"), ("plus", "$A + $B"), ("run g", "g($$$A)")] {
+        let p = Pattern::compile(ParseLanguage::Rust, pattern).unwrap();
+        let t = Instant::now();
+        let found = p.find_all(
+            file.as_bytes(),
+            &MatchLimits {
+                max_matches: 100_000,
+                ..MatchLimits::default()
+            },
+            &live,
+        );
+        println!(
+            "typical {name}: {:?} for {} matches ({:?})",
+            t.elapsed(),
+            found.matches.len(),
+            found.truncated
+        );
+    }
+    let q = Pattern::compile(ParseLanguage::Rust, "f($$$A, $$$B, $$$C, $$$D, x)").unwrap();
+    let args = (0..40).map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
+    let hostile = format!("fn g() {{ f({args}, y); }}");
+    let t = Instant::now();
+    let found = q.find_all(hostile.as_bytes(), &MatchLimits::default(), &live);
+    println!("hostile run-against-run: {:?} ({:?})", t.elapsed(), found.truncated);
+    let nested = format!("fn g() {{ {}x{} }}", "f(".repeat(2000), ")".repeat(2000));
+    let p = Pattern::compile(ParseLanguage::Rust, "$X.unwrap()").unwrap();
+    let t = Instant::now();
+    let found = p.find_all(nested.as_bytes(), &MatchLimits::default(), &live);
+    println!("hostile 2000-deep nesting: {:?} ({:?})", t.elapsed(), found.truncated);
 }

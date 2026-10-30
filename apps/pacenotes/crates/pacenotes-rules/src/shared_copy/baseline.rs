@@ -154,6 +154,31 @@ pub fn assign_ordinals(findings: &[Finding]) -> Vec<u32> {
         .collect()
 }
 
+/// A finding's state against a baseline (SARIF `baselineState`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BaselineState {
+    /// Not in the baseline: CI fails on it.
+    New,
+    /// In the baseline, same ordinal.
+    Unchanged,
+    /// In the baseline, but its ordinal moved.
+    Updated,
+    /// In the baseline and no longer found.
+    Absent,
+}
+
+impl BaselineState {
+    /// The SARIF word.
+    pub fn sarif_name(self) -> &'static str {
+        match self {
+            BaselineState::New => "new",
+            BaselineState::Unchanged => "unchanged",
+            BaselineState::Updated => "updated",
+            BaselineState::Absent => "absent",
+        }
+    }
+}
+
 /// Findings against a baseline, by index into the slice that was compared.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Compared {
@@ -161,20 +186,38 @@ pub struct Compared {
     pub new: Vec<usize>,
     /// In the baseline, same ordinal.
     pub known: Vec<usize>,
-    /// The fingerprint is in the baseline but its ordinal moved (an identical snippet above it came or went): not new.
+    /// In the baseline, but its ordinal moved (an identical snippet above it came or went): not new.
     pub updated: Vec<usize>,
 }
 
+impl Compared {
+    /// One state per compared finding, in order, for the SARIF writer.
+    pub fn states(&self, len: usize) -> Vec<Option<BaselineState>> {
+        let mut out = vec![None; len];
+        for (list, state) in [
+            (&self.new, BaselineState::New),
+            (&self.known, BaselineState::Unchanged),
+            (&self.updated, BaselineState::Updated),
+        ] {
+            for i in list {
+                if let Some(slot) = out.get_mut(*i) {
+                    *slot = Some(state);
+                }
+            }
+        }
+        out
+    }
+}
+
 /// Compares findings with a baseline. `aliases` maps a deprecated rule id to its current one, so a renamed rule does not turn every
-/// baselined finding new.
+/// baselined finding new. For each (rule, fingerprint) the baseline holds `n` entries: the first `n` findings in file order are known
+/// (same ordinal) or updated (the ordinal moved), and any beyond `n` are new, so a copy-pasted finding is never absorbed.
 pub fn compare(findings: &[Finding], baseline: &Baseline, aliases: &BTreeMap<RuleId, RuleId>) -> Compared {
     let canon = |r: &RuleId| aliases.get(r).cloned().unwrap_or_else(|| r.clone());
-    let exact: BTreeSet<(RuleId, FindingFingerprint, u32)> = baseline
-        .entries
-        .iter()
-        .map(|e| (canon(&e.rule), e.fingerprint, e.ordinal))
-        .collect();
-    let loose: BTreeSet<(RuleId, FindingFingerprint)> = baseline.entries.iter().map(|e| (canon(&e.rule), e.fingerprint)).collect();
+    let mut recorded: BTreeMap<(RuleId, FindingFingerprint), BTreeSet<u32>> = BTreeMap::new();
+    for e in &baseline.entries {
+        recorded.entry((canon(&e.rule), e.fingerprint)).or_default().insert(e.ordinal);
+    }
     let ordinals = assign_ordinals(findings);
     let mut out = Compared::default();
     for (i, f) in findings.iter().enumerate() {
@@ -182,13 +225,15 @@ pub fn compare(findings: &[Finding], baseline: &Baseline, aliases: &BTreeMap<Rul
             out.new.push(i);
             continue;
         };
-        let rule = canon(&f.rule);
-        if exact.contains(&(rule.clone(), fp, ordinals[i])) {
-            out.known.push(i);
-        } else if loose.contains(&(rule, fp)) {
-            out.updated.push(i);
-        } else {
-            out.new.push(i);
+        match recorded.get(&(canon(&f.rule), fp)) {
+            Some(set) if ordinals[i] as usize <= set.len() => {
+                if set.contains(&ordinals[i]) {
+                    out.known.push(i);
+                } else {
+                    out.updated.push(i);
+                }
+            }
+            _ => out.new.push(i),
         }
     }
     out

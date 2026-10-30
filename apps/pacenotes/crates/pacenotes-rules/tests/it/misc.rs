@@ -94,7 +94,7 @@ fn rdjson_bounds_hold() {
             stats.columns_dropped,
             got[0].finding.location.as_ref().unwrap().span.start().column()
         ),
-        (1, 1),
-        "no text: the line only"
+        (0, 2),
+        "bytes need no text to be read"
     );
 }

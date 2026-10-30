@@ -6,7 +6,7 @@ use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use super::{Finding, FindingFingerprint, FixSentence, FixSource, Imported, Reason, Report, Rule, RuleId};
+use super::{BaselineState, Finding, FindingFingerprint, FixSentence, FixSource, HiddenFinding, Imported, Reason, Report, Rule, RuleId};
 
 /// The key of our fingerprint in `partialFingerprints`.
 pub const FINGERPRINT_KEY: &str = "paddockFindingHash/v1";
@@ -66,49 +66,95 @@ pub enum SarifError {
     NotSarif(&'static str),
 }
 
-/// The byte index where line `line` (1-based) starts.
-pub(super) fn line_start(text: &str, line: u32) -> Option<usize> {
-    if line == 0 {
-        return None;
+/// A file's text with the byte index of each line start, so a line is found by binary search instead of by scanning from the top.
+pub(super) struct TextIndex {
+    text: String,
+    starts: Vec<usize>,
+}
+
+impl TextIndex {
+    pub(super) fn new(text: String) -> TextIndex {
+        let mut starts = vec![0usize];
+        starts.extend(text.match_indices('\n').map(|(i, _)| i + 1));
+        TextIndex { text, starts }
     }
-    let mut start = 0usize;
-    for _ in 1..line {
-        start += text[start..].find('\n')? + 1;
+
+    pub(super) fn line_start(&self, line: u32) -> Option<usize> {
+        self.starts
+            .get((line as usize).checked_sub(1)?)
+            .copied()
+            .filter(|s| *s <= self.text.len())
     }
-    Some(start)
-}
 
-fn line_of(text: &str, line: u32) -> Option<&str> {
-    let start = line_start(text, line)?;
-    let rest = &text[start..];
-    Some(rest.split('\n').next().unwrap_or(rest))
-}
+    fn line(&self, line: u32) -> Option<&str> {
+        let start = self.line_start(line)?;
+        let end = self.starts.get(line as usize).map_or(self.text.len(), |e| e - 1);
+        self.text.get(start..end.max(start))
+    }
 
-/// 1-based byte column to 1-based code-point column on `line`.
-pub(super) fn byte_to_code_point(text: &str, line: u32, column: u32) -> Option<u32> {
-    let row = line_of(text, line)?;
-    let at = (column as usize).checked_sub(1)?;
-    row.is_char_boundary(at).then(|| row[..at].chars().count() as u32 + 1)
-}
+    /// 1-based byte column to 1-based code-point column on `line`.
+    pub(super) fn byte_to_code_point(&self, line: u32, column: u32) -> Option<u32> {
+        let row = self.line(line)?;
+        let at = (column as usize).checked_sub(1)?;
+        row.is_char_boundary(at).then(|| row[..at].chars().count() as u32 + 1)
+    }
 
-/// The column to bytes, from code points (`utf16` false) or UTF-16 code units (`utf16` true).
-pub(super) fn to_byte_column(text: &str, line: u32, column: u32, utf16: bool) -> Option<u32> {
-    let row = line_of(text, line)?;
-    let mut want = (column as usize).checked_sub(1)?;
-    let mut bytes = 0usize;
-    for c in row.chars() {
-        if want == 0 {
-            break;
+    /// The column to bytes, from code points (`utf16` false) or UTF-16 code units (`utf16` true).
+    pub(super) fn to_byte_column(&self, line: u32, column: u32, utf16: bool) -> Option<u32> {
+        let row = self.line(line)?;
+        let mut want = (column as usize).checked_sub(1)?;
+        let mut bytes = 0usize;
+        for c in row.chars() {
+            if want == 0 {
+                break;
+            }
+            let units = if utf16 { c.len_utf16() } else { 1 };
+            want = want.checked_sub(units)?;
+            bytes += c.len_utf8();
         }
-        let units = if utf16 { c.len_utf16() } else { 1 };
-        want = want.checked_sub(units)?;
-        bytes += c.len_utf8();
+        (want == 0).then_some(bytes as u32 + 1)
     }
-    (want == 0).then_some(bytes as u32 + 1)
+
+    /// True when the 1-based byte column is the start of a character (or the end of the line) on `line`.
+    pub(super) fn on_boundary(&self, line: u32, column: u32) -> bool {
+        self.line(line).is_some_and(|row| {
+            (column as usize)
+                .checked_sub(1)
+                .is_some_and(|at| row.is_char_boundary(at) && at <= row.len())
+        })
+    }
 }
 
-/// A finding with the reason that hid it and whether that was in the source, when something did.
-type Entry<'a> = (&'a Finding, Option<(&'a Reason, bool)>);
+/// Fetches each file's text once per run, whatever the number of results in it.
+pub(super) struct Texts<'a> {
+    fetch: &'a dyn Fn(&RepoPath) -> Option<String>,
+    cache: std::cell::RefCell<BTreeMap<String, Option<std::rc::Rc<TextIndex>>>>,
+}
+
+impl<'a> Texts<'a> {
+    pub(super) fn new(fetch: &'a dyn Fn(&RepoPath) -> Option<String>) -> Texts<'a> {
+        Texts {
+            fetch,
+            cache: std::cell::RefCell::new(BTreeMap::new()),
+        }
+    }
+
+    pub(super) fn get(&self, path: &RepoPath) -> Option<std::rc::Rc<TextIndex>> {
+        self.cache
+            .borrow_mut()
+            .entry(path.as_str().to_owned())
+            .or_insert_with(|| (self.fetch)(path).map(|t| std::rc::Rc::new(TextIndex::new(t))))
+            .clone()
+    }
+}
+
+/// A finding in a report, with what hid it and its state against a baseline.
+#[derive(Clone, Copy)]
+struct Item<'a> {
+    finding: &'a Finding,
+    hidden: Option<&'a HiddenFinding>,
+    baseline: Option<BaselineState>,
+}
 
 fn level(s: Severity) -> &'static str {
     match s {
@@ -118,25 +164,23 @@ fn level(s: Severity) -> &'static str {
     }
 }
 
-fn region(span: &Span, text: Option<&str>) -> Value {
+fn region(span: &Span, text: Option<&TextIndex>) -> Value {
     let (s, e) = (span.start(), span.end());
     let mut r = json!({ "startLine": s.line(), "endLine": e.line() });
-    if let Some(text) = text
+    if let Some(ix) = text
         && let (Some(sc), Some(ec)) = (
-            byte_to_code_point(text, s.line(), s.column()),
-            byte_to_code_point(text, e.line(), e.column()),
+            ix.byte_to_code_point(s.line(), s.column()),
+            ix.byte_to_code_point(e.line(), e.column()),
         )
     {
         r["startColumn"] = json!(sc);
         r["endColumn"] = json!(ec);
-        if let Some(start) = line_start(text, s.line()) {
+        if let (Some(start), Some(end_line)) = (ix.line_start(s.line()), ix.line_start(e.line())) {
             let from = start + s.column() as usize - 1;
-            if let Some(end_line) = line_start(text, e.line()) {
-                let to = end_line + e.column() as usize - 1;
-                if to >= from && to <= text.len() {
-                    r["byteOffset"] = json!(from);
-                    r["byteLength"] = json!(to - from);
-                }
+            let to = end_line + e.column() as usize - 1;
+            if to >= from && to <= ix.text.len() {
+                r["byteOffset"] = json!(from);
+                r["byteLength"] = json!(to - from);
             }
         }
     }
@@ -166,20 +210,15 @@ fn rule_descriptor(id: &str, rule: Option<&Rule>, sample: Option<&Finding>) -> V
     Value::Object(d)
 }
 
-fn result(
-    f: &Finding,
-    rule_index: usize,
-    rule_id: &str,
-    texts: &dyn Fn(&RepoPath) -> Option<String>,
-    suppression: Option<(&Reason, bool)>,
-) -> Value {
+fn result(item: Item<'_>, rule_index: usize, rule_id: &str, texts: &Texts<'_>) -> Value {
+    let f = item.finding;
     let mut r = Map::new();
     r.insert("ruleId".into(), json!(rule_id));
     r.insert("ruleIndex".into(), json!(rule_index));
     r.insert("level".into(), json!(level(f.severity)));
     r.insert("message".into(), json!({ "text": f.message }));
     if let Some(loc) = &f.location {
-        let text = texts(&loc.path);
+        let text = texts.get(&loc.path);
         r.insert(
             "locations".into(),
             json!([{ "physicalLocation": {
@@ -191,11 +230,8 @@ fn result(
     if let Some(fp) = &f.fingerprint {
         r.insert("partialFingerprints".into(), json!({ FINGERPRINT_KEY: fp.to_hex() }));
     }
-    if let Some(diff) = &f.fix_diff {
-        r.insert(
-            "fixes".into(),
-            json!([{ "description": { "text": f.fix.as_str() }, "properties": { "diff": diff } }]),
-        );
+    if let Some(state) = item.baseline {
+        r.insert("baselineState".into(), json!(state.sarif_name()));
     }
     let mut props = Map::new();
     props.insert("severity".into(), json!(f.severity.name()));
@@ -206,12 +242,25 @@ fn result(
             json!(if f.fix_source == FixSource::Rule { "rule" } else { "tool" }),
         );
     }
+    // a suggested change is a unified diff, which SARIF's `fixes` (artifact changes with replacements) cannot carry as it is
+    if let Some(diff) = &f.fix_diff {
+        props.insert("fixDiff".into(), json!(diff));
+    }
     r.insert("properties".into(), Value::Object(props));
-    if let Some((reason, in_source)) = suppression {
-        r.insert(
-            "suppressions".into(),
-            json!([{ "kind": if in_source { "inSource" } else { "external" }, "status": "accepted", "justification": reason.as_str() }]),
-        );
+    if let Some(h) = item.hidden {
+        let mut sup =
+            json!({ "kind": if h.in_source { "inSource" } else { "external" }, "status": "accepted", "justification": h.reason.as_str() });
+        let mut p = Map::new();
+        if let Some(e) = h.expires {
+            p.insert("expires".into(), json!(e.to_string()));
+        }
+        if let Some(o) = &h.owner {
+            p.insert("owner".into(), json!(o));
+        }
+        if !p.is_empty() {
+            sup["properties"] = Value::Object(p);
+        }
+        r.insert("suppressions".into(), json!([sup]));
     }
     Value::Object(r)
 }
@@ -220,25 +269,40 @@ fn result(
 /// `run`** with its raw rule id. Suppressed results stay in `results` with `suppressions` set (`hidden` pairs a finding with the
 /// reason that hid it and whether that was in the source). `texts` gives a file's text so byte columns can be written as code points; a
 /// finding whose file has no text keeps its lines and loses its columns.
-pub fn write_sarif(report: &Report, hidden: &[(Finding, Reason, bool)], texts: &dyn Fn(&RepoPath) -> Option<String>) -> String {
-    let mut ours: Vec<Entry<'_>> = Vec::new();
-    let mut theirs: BTreeMap<&str, Vec<Entry<'_>>> = BTreeMap::new();
+pub fn write_sarif(
+    report: &Report,
+    hidden: &[HiddenFinding],
+    baseline: &[Option<BaselineState>],
+    fetch: &dyn Fn(&RepoPath) -> Option<String>,
+) -> String {
+    let texts = Texts::new(fetch);
+    let mut ours: Vec<Item<'_>> = Vec::new();
+    let mut theirs: BTreeMap<&str, Vec<Item<'_>>> = BTreeMap::new();
     let all = report
         .findings
         .iter()
-        .map(|f| (f, None))
-        .chain(hidden.iter().map(|(f, r, s)| (f, Some((r, *s)))));
-    for (f, sup) in all {
-        match &f.rule {
-            RuleId::Local(_) => ours.push((f, sup)),
-            RuleId::External(e) => theirs.entry(e.tool()).or_default().push((f, sup)),
+        .enumerate()
+        .map(|(i, f)| Item {
+            finding: f,
+            hidden: None,
+            baseline: baseline.get(i).copied().flatten(),
+        })
+        .chain(hidden.iter().map(|h| Item {
+            finding: &h.finding,
+            hidden: Some(h),
+            baseline: None,
+        }));
+    for item in all {
+        match &item.finding.rule {
+            RuleId::Local(_) => ours.push(item),
+            RuleId::External(e) => theirs.entry(e.tool()).or_default().push(item),
         }
     }
     let mut runs = Vec::new();
     // our run
     let mut ids: Vec<String> = report.rules.iter().map(|r| r.id.to_string()).collect();
-    for (f, _) in &ours {
-        let id = f.rule.to_string();
+    for item in &ours {
+        let id = item.finding.rule.to_string();
         if !ids.contains(&id) {
             ids.push(id);
         }
@@ -249,16 +313,16 @@ pub fn write_sarif(report: &Report, hidden: &[(Finding, Reason, bool)], texts: &
             rule_descriptor(
                 id,
                 report.rules.iter().find(|r| &r.id.to_string() == id),
-                ours.iter().map(|(f, _)| *f).find(|f| &f.rule.to_string() == id),
+                ours.iter().map(|i| i.finding).find(|f| &f.rule.to_string() == id),
             )
         })
         .collect();
     let results: Vec<Value> = ours
         .iter()
-        .map(|(f, sup)| {
-            let id = f.rule.to_string();
+        .map(|item| {
+            let id = item.finding.rule.to_string();
             let index = ids.iter().position(|x| *x == id).unwrap_or(0);
-            result(f, index, &id, texts, *sup)
+            result(*item, index, &id, &texts)
         })
         .collect();
     runs.push(json!({
@@ -270,8 +334,8 @@ pub fn write_sarif(report: &Report, hidden: &[(Finding, Reason, bool)], texts: &
     }));
     for (tool, items) in theirs {
         let mut raw: Vec<&str> = Vec::new();
-        for (f, _) in &items {
-            if let RuleId::External(e) = &f.rule
+        for item in &items {
+            if let RuleId::External(e) = &item.finding.rule
                 && !raw.contains(&e.id())
             {
                 raw.push(e.id());
@@ -285,19 +349,19 @@ pub fn write_sarif(report: &Report, hidden: &[(Finding, Reason, bool)], texts: &
                     None,
                     items
                         .iter()
-                        .map(|(f, _)| *f)
+                        .map(|i| i.finding)
                         .find(|f| matches!(&f.rule, RuleId::External(e) if e.id() == *id)),
                 )
             })
             .collect();
         let results: Vec<Value> = items
             .iter()
-            .map(|(f, sup)| {
-                let id = match &f.rule {
+            .map(|item| {
+                let id = match &item.finding.rule {
                     RuleId::External(e) => e.id(),
                     RuleId::Local(_) => "",
                 };
-                result(f, raw.iter().position(|x| *x == id).unwrap_or(0), id, texts, *sup)
+                result(*item, raw.iter().position(|x| *x == id).unwrap_or(0), id, &texts)
             })
             .collect();
         runs.push(json!({
@@ -319,7 +383,7 @@ fn text_of<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
     v.get(key)?.get("text")?.as_str()
 }
 
-fn cut(s: &str, max: usize) -> String {
+pub(super) fn cut(s: &str, max: usize) -> String {
     let mut end = s.len().min(max);
     while !s.is_char_boundary(end) {
         end -= 1;
@@ -369,8 +433,9 @@ pub fn read_sarif(
     text: &str,
     limits: &SarifLimits,
     own_tool: &str,
-    texts: &dyn Fn(&RepoPath) -> Option<String>,
+    fetch: &dyn Fn(&RepoPath) -> Option<String>,
 ) -> Result<(Vec<Imported>, ReadStats), SarifError> {
+    let texts = Texts::new(fetch);
     if text.len() > limits.max_bytes {
         return Err(SarifError::TooBig {
             len: text.len(),
@@ -445,7 +510,7 @@ pub fn read_sarif(
                 })
                 .or(Some("warning"));
             let severity = severity_of(level, r.pointer("/properties/severity").and_then(Value::as_str));
-            let location = location_of(r, utf16, texts, &mut stats);
+            let location = location_of(r, utf16, &texts, &mut stats);
             let message = cut(text_of(r, "message").unwrap_or(""), limits.max_message);
             let own_fix = r.pointer("/properties/fix").and_then(Value::as_str);
             let own_source = if r.pointer("/properties/fixSource").and_then(Value::as_str) == Some("rule") {
@@ -469,14 +534,19 @@ pub fn read_sarif(
                 .and_then(|p| p.get(FINGERPRINT_KEY))
                 .and_then(Value::as_str)
                 .and_then(FindingFingerprint::from_hex);
-            let fix_diff = r
-                .pointer("/fixes/0/properties/diff")
-                .and_then(Value::as_str)
-                .map(|d| cut(d, 64 * 1024));
-            let suppressed_by = r.get("suppressions").and_then(Value::as_array).and_then(|a| a.first()).map(|s| {
-                Reason::parse(s.get("justification").and_then(Value::as_str).unwrap_or(""))
-                    .unwrap_or_else(|_| Reason::known("suppressed in the source tool (no reason given)"))
-            });
+            let fix_diff = r.pointer("/properties/fixDiff").and_then(Value::as_str).map(|d| cut(d, 64 * 1024));
+            // only an accepted suppression (or one with no status) hides a result; `rejected` and `underReview` do not
+            let suppressed_by = r
+                .get("suppressions")
+                .and_then(Value::as_array)
+                .and_then(|a| {
+                    a.iter()
+                        .find(|s| s.get("status").and_then(Value::as_str).is_none_or(|st| st == "accepted"))
+                })
+                .map(|s| {
+                    Reason::parse(s.get("justification").and_then(Value::as_str).unwrap_or(""))
+                        .unwrap_or_else(|_| Reason::known("suppressed in the source tool (no reason given)"))
+                });
             out.push(Imported {
                 finding: Finding {
                     rule,
@@ -498,7 +568,7 @@ pub fn read_sarif(
     Ok((out, stats))
 }
 
-fn location_of(r: &Value, utf16: bool, texts: &dyn Fn(&RepoPath) -> Option<String>, stats: &mut ReadStats) -> Option<Location> {
+fn location_of(r: &Value, utf16: bool, texts: &Texts<'_>, stats: &mut ReadStats) -> Option<Location> {
     let phys = r.pointer("/locations/0/physicalLocation")?;
     let uri = phys.pointer("/artifactLocation/uri").and_then(Value::as_str)?;
     let Ok(path) = RepoPath::parse(uri) else {
@@ -506,43 +576,34 @@ fn location_of(r: &Value, utf16: bool, texts: &dyn Fn(&RepoPath) -> Option<Strin
         return None;
     };
     let region = phys.get("region");
-    let line = region
-        .and_then(|g| g.get("startLine"))
-        .and_then(Value::as_u64)
-        .and_then(|l| u32::try_from(l).ok())
-        .filter(|l| *l > 0);
-    let Some(start_line) = line else {
-        stats.bad_location += 1;
-        return None;
-    };
-    let end_line = region
-        .and_then(|g| g.get("endLine"))
-        .and_then(Value::as_u64)
-        .and_then(|l| u32::try_from(l).ok())
-        .filter(|l| *l >= start_line)
-        .unwrap_or(start_line);
-    let col = |key: &str| {
+    let num = |key: &str| {
         region
             .and_then(|g| g.get(key))
             .and_then(Value::as_u64)
-            .and_then(|c| u32::try_from(c).ok())
-            .filter(|c| *c > 0)
+            .and_then(|l| u32::try_from(l).ok())
+            .filter(|l| *l > 0)
     };
-    let (sc, ec) = (col("startColumn"), col("endColumn"));
-    if let (Some(sc), Some(ec)) = (sc, ec) {
-        match texts(&path) {
-            Some(text) => {
-                if let (Some(sb), Some(eb)) = (
-                    to_byte_column(&text, start_line, sc, utf16),
-                    to_byte_column(&text, end_line, ec, utf16),
-                ) && let (Some(a), Some(b)) = (Position::new(start_line, sb), Position::new(end_line, eb))
+    let Some(start_line) = num("startLine") else {
+        stats.bad_location += 1;
+        return None;
+    };
+    let end_line = num("endLine").filter(|l| *l >= start_line).unwrap_or(start_line);
+    match (num("startColumn"), num("endColumn")) {
+        (Some(sc), Some(ec)) => match texts.get(&path) {
+            Some(ix) => {
+                if let (Some(sb), Some(eb)) = (ix.to_byte_column(start_line, sc, utf16), ix.to_byte_column(end_line, ec, utf16))
+                    && let (Some(a), Some(b)) = (Position::new(start_line, sb), Position::new(end_line, eb))
                     && let Ok(span) = Span::new(a, b)
                 {
                     return Some(Location { path, span });
                 }
+                stats.columns_dropped += 1;
             }
             None => stats.columns_dropped += 1,
-        }
+        },
+        // a start without an end cannot be turned into a span
+        (Some(_), None) | (None, Some(_)) => stats.columns_dropped += 1,
+        (None, None) => {}
     }
     Span::lines(start_line, end_line).ok().map(|span| Location { path, span })
 }

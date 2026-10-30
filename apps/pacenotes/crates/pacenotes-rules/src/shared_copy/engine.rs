@@ -7,6 +7,21 @@ use super::{
     Finding, FindingFingerprint, FixSentence, FixSource, IsoDate, Origin, RuleId, Suppression, SuppressionScope, Waiver, path_matches,
 };
 
+/// Turns the problems of a leniently read waiver file into `W002` findings; the good entries of the file still apply.
+pub fn waiver_problems(errors: &[super::WaiverError], file: &str) -> Vec<Finding> {
+    errors
+        .iter()
+        .filter_map(|e| {
+            engine_finding(
+                "w002",
+                Severity::High,
+                format!("{file}: {e}"),
+                "Fix the entry in the file, or delete it.",
+            )
+        })
+        .collect()
+}
+
 /// What hid a finding: the index of the waiver or suppression in the slice that was passed in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HiddenBy {
@@ -116,7 +131,7 @@ pub fn apply_waivers(
             Some(e) if e < today => engine.extend(engine_finding(
                 "w001",
                 Severity::High,
-                format!("a suppression ({:?}) expired on {e}", s.scope),
+                format!("a suppression ({}) expired on {e}", s.scope),
                 "Fix the finding, or renew the suppression with a new date and a reason.",
             )),
             _ => live_suppression[i] = true,
@@ -186,7 +201,7 @@ pub fn apply_waivers(
             engine.extend(engine_finding(
                 "w003",
                 Severity::Medium,
-                format!("a suppression ({:?}) hides nothing", s.scope),
+                format!("a suppression ({}) hides nothing", s.scope),
                 "Delete the suppression; the finding is gone.",
             ));
         }
