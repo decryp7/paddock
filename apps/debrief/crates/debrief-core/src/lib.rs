@@ -61,9 +61,9 @@ pub mod store;
 pub mod survey;
 pub mod svg;
 pub mod template;
-pub mod text_format;
 #[cfg(test)]
 pub(crate) mod test_dirs;
+pub mod text_format;
 pub mod threads;
 pub mod tiles;
 pub mod timestamp_issue;
