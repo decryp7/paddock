@@ -37,7 +37,8 @@ Conventional Commits; one semver tag for the whole repo.
 - `StartJudge`, `StartWatch`, `Patience`, `StallReport`: a start is judged on liveness, a ready handshake, progress
   ticks and the tree's CPU time, counted in ticks; no wall-clock give-up for a working process.
 - `InstanceLock::claim` (`Acquired`/`Held`/`Unsupported`) and the `hint` module (a discovery file is only a hint).
-- `paddock-chromium`: the fixed `START_LIMIT` / `LaunchOptions::start_limit` are gone. A start is judged on the browser's run state (`LaunchOptions::patience`, `LaunchOptions::cpu_sampler`); a start the caller's `max_lifetime` ends says "did not start within N s (its time limit)". `Chromium::start_page`'s wait stays (C51 lists it).
+- `paddock-chromium`: the fixed `START_LIMIT` / `LaunchOptions::start_limit` are gone. A start is judged on the browser's run state (`LaunchOptions::patience`, `LaunchOptions::cpu_sampler`); a start the caller's `max_lifetime` ends says "did not start within N s (its time limit)". `Chromium::start_page`'s wait stays (C51 lists it). A browser that starts but does nothing is now given up on after the idle patience (60 s, or the 300 s hang guard when it cannot be observed) instead of 20 s; a stuck start fails with `Error::Launch` carrying the reason (a refused DevTools port is still `Error::Connection`).
+- `StartJudge` reports a stall once per episode (the slow note once); the hang guard also counts ticks without any CPU reading. `ProcessSource::cpu_sample` returns the CPU time with the process's start time from the same OS call; `tree_cpu_time_from` drops a reading from another process (rule 53).
 - Conformance check C51 (report-only): fixed start and spawn waits.
 - `tree_cpu_time_from`, `tree_cpu_time_of` and `ProcessSource::cpu_micros` read the CPU time one pid at a time.
 

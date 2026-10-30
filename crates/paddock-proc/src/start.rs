@@ -19,12 +19,13 @@ use std::time::Duration;
 /// When a start is stuck rather than slow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Patience {
-    /// Stuck when the tree used this much CPU time without becoming ready (spinning; load does not inflate it).
+    /// Stuck when the tree used this much CPU time without becoming ready (spinning; load does not inflate it). CPU time is
+    /// summed over cores and processes, so a multi-threaded tree reaches it faster than the wall clock.
     pub spin: Duration,
     /// Stuck when the tree used no CPU and reported no progress for this long (counted in ticks) while alive.
     pub idle: Duration,
-    /// Only when nothing can be observed (no CPU reading from the OS): stuck after this long (counted in ticks). The one
-    /// time-based bound of the judge, for a process that cannot be judged any other way.
+    /// Only when nothing can be observed (the OS gives no CPU reading, or the caller never reads one): stuck after this
+    /// long (counted in ticks). The one time-based bound of the judge, for a process that cannot be judged any other way.
     pub hang_guard: Duration,
     /// After this many ticks alive and not ready, a [`StallCause::Slow`] note is reported (the wait goes on). 0: never.
     pub note_after: u32,
@@ -98,8 +99,10 @@ pub enum StartState {
     Starting,
     /// The handshake happened.
     Ready,
-    /// It looks stuck, or is worth a note ([`StallCause::is_stuck`] tells which). The judge goes on judging; the caller
-    /// decides whether to end the process.
+    /// It looks stuck, or is worth a note ([`StallCause::is_stuck`] tells which). Each kind is reported once when it
+    /// begins (the note once ever, a stuck cause once per episode, until the process runs or reports progress again); the
+    /// judge goes on judging and answers `Starting` while the same stall continues. The caller decides whether to end the
+    /// process.
     Stalled(StallReport),
     /// The process is gone.
     Exited(ExitInfo),
@@ -117,6 +120,10 @@ pub struct StartJudge {
     last_progress: u64,
     idle: Duration,
     blind: Duration,
+    /// CPU used since the start or the last progress.
+    spun: Duration,
+    /// The stall kinds already reported in the current episode (bits of `Kind`): each is reported once.
+    reported: u8,
 }
 
 impl StartJudge {
@@ -132,6 +139,8 @@ impl StartJudge {
             last_progress: 0,
             idle: Duration::ZERO,
             blind: Duration::ZERO,
+            spun: Duration::ZERO,
+            reported: 0,
         }
     }
 
@@ -155,7 +164,13 @@ impl StartJudge {
         }
         let window = self.patience.tick.saturating_mul(self.since_cpu_read);
         match r.cpu {
-            Cpu::NotRead => {}
+            Cpu::NotRead => {
+                // A caller that never reads the CPU time is as blind as one the OS cannot answer: past twice the read
+                // interval the surplus ticks count toward the hang guard, so there is always a bound.
+                if self.since_cpu_read > self.patience.cpu_every.max(1).saturating_mul(2) {
+                    self.blind += self.patience.tick;
+                }
+            }
             Cpu::Unavailable => {
                 self.blind += window;
                 self.since_cpu_read = 0;
@@ -170,28 +185,54 @@ impl StartJudge {
                     self.idle += window;
                 }
                 self.last_cpu = Some(c);
-                let used = c.saturating_sub(first);
-                if used >= self.patience.spin {
-                    return self.stalled(StallCause::Spinning(used));
-                }
-                if self.idle >= self.patience.idle {
-                    return self.stalled(StallCause::Idle(self.idle));
-                }
+                self.spun = c.saturating_sub(first);
             }
         }
-        if self.blind >= self.patience.hang_guard {
-            return self.stalled(StallCause::Hung(self.blind));
+        // The episodes: a kind is reported once when it begins, and again only after it has ended.
+        if self.spun < self.patience.spin {
+            self.reported &= !SPIN;
         }
-        if self.patience.note_after > 0 && self.ticks >= self.patience.note_after {
-            return self.stalled(StallCause::Slow);
+        if self.idle < self.patience.idle {
+            self.reported &= !IDLE;
+        }
+        if self.blind < self.patience.hang_guard {
+            self.reported &= !HUNG;
+        }
+        let note = self.patience.note_after > 0 && self.ticks >= self.patience.note_after;
+        let causes = [
+            (
+                SPIN,
+                self.spun >= self.patience.spin,
+                StallCause::Spinning(self.spun),
+            ),
+            (
+                IDLE,
+                self.idle >= self.patience.idle,
+                StallCause::Idle(self.idle),
+            ),
+            (
+                HUNG,
+                self.blind >= self.patience.hang_guard,
+                StallCause::Hung(self.blind),
+            ),
+            (SLOW, note, StallCause::Slow),
+        ];
+        // The first kind that holds and has not been reported in this episode; one that was is not repeated, and does not
+        // hide another.
+        for (kind, holds, cause) in causes {
+            if holds && self.reported & kind == 0 {
+                self.reported |= kind;
+                return StartState::Stalled(StallReport::new(cause, &self.what));
+            }
         }
         StartState::Starting
     }
-
-    fn stalled(&self, cause: StallCause) -> StartState {
-        StartState::Stalled(StallReport::new(cause, &self.what))
-    }
 }
+
+const SPIN: u8 = 1;
+const IDLE: u8 = 2;
+const HUNG: u8 = 4;
+const SLOW: u8 = 8;
 
 /// What a [`StartWatch`] reads from the world, once per tick.
 pub trait StartProbe {
@@ -218,12 +259,18 @@ pub fn tree_cpu(root: ProcessId) -> Cpu {
     tree_cpu_time(root).map_or(Cpu::Unavailable, Cpu::Used)
 }
 
-/// The end of a file's content as text, at most `max` bytes, cut at a character boundary and trimmed; `None` when the file
+/// The end of a file's content as text, at most `max` bytes (only that much is read: the file is seeked, not loaded), cut at a
+/// character boundary and trimmed; `None` when the file
 /// is missing or empty. For the error output of a process that exited.
 pub fn tail_of(path: &std::path::Path, max: usize) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
-    let from = bytes.len().saturating_sub(max);
-    let text = String::from_utf8_lossy(&bytes[from..]);
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(max as u64)))
+        .ok()?;
+    let mut bytes = Vec::new();
+    file.take(max as u64).read_to_end(&mut bytes).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
     let text = text.trim_matches(|c: char| c.is_whitespace() || c == '\u{fffd}');
     (!text.is_empty()).then(|| text.to_string())
 }
@@ -258,8 +305,9 @@ impl<P: StartProbe, C: Pace> StartWatch<P, C> {
         }
     }
 
-    /// Looks and waits tick by tick until the start is ready, exited, stalled or cancelled. A stall is returned and does
-    /// not end the watch: call again to keep waiting (the caller decides whether to end the process).
+    /// Looks and waits tick by tick until the start is ready, exited, stalled or cancelled. A stall is returned once
+    /// ([`StartState::Stalled`]) and does not end the watch: call again to keep waiting for the next event (the same stall
+    /// is not repeated; a different one, or the process becoming ready or exiting, is).
     pub fn wait(&mut self) -> Watched {
         loop {
             let reading = self.read();
@@ -539,11 +587,12 @@ mod tests {
             self.cpu.pop_front().flatten()
         }
     }
-    struct Ticks<'a>(&'a RefCell<Vec<Duration>>, bool);
+    /// A pace that records its waits and is cancelled once it has waited `.1` times.
+    struct Ticks<'a>(&'a RefCell<Vec<Duration>>, usize);
     impl Pace for Ticks<'_> {
         fn wait(&mut self, tick: Duration) -> bool {
             self.0.borrow_mut().push(tick);
-            !(self.1 && self.0.borrow().len() >= 3)
+            self.0.borrow().len() < self.1
         }
     }
     fn script(cpu: Vec<Option<Duration>>) -> Script {
@@ -560,7 +609,7 @@ mod tests {
         let waits = RefCell::new(Vec::new());
         let mut s = script(vec![]);
         s.ready_after = Some(3);
-        let mut w = StartWatch::new(patience(), "x", s, Ticks(&waits, false));
+        let mut w = StartWatch::new(patience(), "x", s, Ticks(&waits, usize::MAX));
         assert_eq!(w.wait(), Watched::State(StartState::Ready));
         assert_eq!(waits.borrow().len(), 3);
         assert_eq!(waits.borrow()[0], S(1));
@@ -568,11 +617,11 @@ mod tests {
     }
 
     #[test]
-    fn the_watch_returns_an_exit_a_stall_and_a_cancel_and_can_go_on_after_a_stall() {
+    fn the_watch_returns_an_exit_a_stall_and_a_cancel_and_waits_again_after_a_stall() {
         let waits = RefCell::new(Vec::new());
         let mut s = script(vec![]);
         s.exit_after = Some(1);
-        let mut w = StartWatch::new(patience(), "x", s, Ticks(&waits, false));
+        let mut w = StartWatch::new(patience(), "x", s, Ticks(&waits, usize::MAX));
         assert!(matches!(w.wait(), Watched::State(StartState::Exited(i)) if i.status == Some(2)));
 
         let waits = RefCell::new(Vec::new());
@@ -581,25 +630,159 @@ mod tests {
             ..patience()
         };
         let s = script(vec![Some(S(1)); 20]);
-        let mut w = StartWatch::new(p, "x", s, Ticks(&waits, false));
+        let mut w = StartWatch::new(p, "x", s, Ticks(&waits, usize::MAX));
         let st = state(w.wait());
         assert!(matches!(cause(&st), Some(StallCause::Idle(_))));
+        let before = waits.borrow().len();
+        // Waiting again does not repeat the stall: it waits (the pace is called) until something else happens, here the
+        // script running out of CPU readings, which is the OS saying nothing (the hang guard).
         let again = state(w.wait());
         assert!(
-            matches!(cause(&again), Some(StallCause::Idle(_))),
-            "the judge goes on judging"
+            matches!(cause(&again), Some(StallCause::Hung(_))),
+            "{again:?}"
+        );
+        assert!(
+            waits.borrow().len() > before + 3,
+            "the second wait paced itself, it did not busy-poll"
+        );
+        let probe = w.into_probe();
+        assert!(
+            probe.cpu.is_empty(),
+            "the CPU was read every second tick: {} readings left",
+            probe.cpu.len()
         );
 
         let waits = RefCell::new(Vec::new());
         let s = script(vec![Some(S(1)); 20]);
-        let mut w = StartWatch::new(patience(), "x", s, Ticks(&waits, true));
+        let mut w = StartWatch::new(patience(), "x", s, Ticks(&waits, 3));
         assert_eq!(w.wait(), Watched::Cancelled);
+    }
+
+    #[test]
+    fn a_stall_is_reported_once_per_episode_and_the_note_once() {
+        let mut j = StartJudge::new(
+            Patience {
+                note_after: 2,
+                ..patience()
+            },
+            "x",
+        );
+        let mut stalls = 0;
+        // Idle for a long time: the note, then the idle stall, each once.
+        for _ in 0..30 {
+            if matches!(j.observe(&run(used(1))), StartState::Stalled(_)) {
+                stalls += 1;
+            }
+        }
+        assert_eq!(stalls, 2, "the note and the idle stall, once each");
+        // The process runs: the episode ends; going idle again is a new episode.
+        j.observe(&run(used(2)));
+        for _ in 0..4 {
+            assert_eq!(j.observe(&run(used(2))), StartState::Starting);
+        }
+        assert!(
+            matches!(cause(&j.observe(&run(used(2)))), Some(StallCause::Idle(_))),
+            "a new episode is reported again"
+        );
+        assert_eq!(j.observe(&run(used(2))), StartState::Starting);
+    }
+
+    #[test]
+    fn a_progress_or_a_reading_clears_blindness_and_spin_and_idle() {
+        // Blind for 7 of 8 s, then a reading: the blindness starts again from zero.
+        let mut j = StartJudge::new(patience(), "x");
+        for _ in 0..7 {
+            j.observe(&run(Cpu::Unavailable));
+        }
+        j.observe(&run(used(1)));
+        for _ in 0..7 {
+            assert_eq!(
+                j.observe(&run(Cpu::Unavailable)),
+                StartState::Starting,
+                "a reading reset the blindness"
+            );
+        }
+        // Blind for 7 s, then progress: also reset.
+        let mut j = StartJudge::new(patience(), "x");
+        for _ in 0..7 {
+            j.observe(&run(Cpu::Unavailable));
+        }
+        j.observe(&Reading {
+            progress: 1,
+            ..run(Cpu::Unavailable)
+        });
+        for _ in 0..6 {
+            assert_eq!(
+                j.observe(&run(Cpu::Unavailable)),
+                StartState::Starting,
+                "progress reset the blindness"
+            );
+        }
+        // Idle for 4 of 5 s, then progress: idle starts again.
+        let mut j = StartJudge::new(patience(), "x");
+        for _ in 0..5 {
+            j.observe(&run(used(1)));
+        }
+        j.observe(&Reading {
+            progress: 1,
+            ..run(used(1))
+        });
+        for _ in 0..3 {
+            assert_eq!(
+                j.observe(&run(used(1))),
+                StartState::Starting,
+                "progress reset idle"
+            );
+        }
+    }
+
+    #[test]
+    fn a_caller_that_never_reads_the_cpu_is_bounded_by_the_hang_guard() {
+        let p = Patience {
+            cpu_every: 1,
+            hang_guard: S(5),
+            ..patience()
+        };
+        let mut j = StartJudge::new(p, "x");
+        let mut last = StartState::Starting;
+        for _ in 0..100 {
+            last = j.observe(&run(Cpu::NotRead));
+            if last != StartState::Starting {
+                break;
+            }
+        }
+        assert!(
+            matches!(cause(&last), Some(StallCause::Hung(_))),
+            "{last:?}"
+        );
+    }
+
+    #[test]
+    fn the_cpu_is_read_only_every_cpu_every_ticks() {
+        let waits = RefCell::new(Vec::new());
+        let p = Patience {
+            cpu_every: 5,
+            idle: S(1000),
+            spin: S(1000),
+            hang_guard: S(1000),
+            ..patience()
+        };
+        let mut s = script(vec![Some(S(1)); 100]);
+        s.ready_after = Some(21);
+        let mut w = StartWatch::new(p, "x", s, Ticks(&waits, usize::MAX));
+        assert_eq!(w.wait(), Watched::State(StartState::Ready));
+        let probe = w.into_probe();
+        assert_eq!(
+            100 - probe.cpu.len(),
+            5,
+            "21 ticks at one read in 5: ticks 0, 5, 10, 15 and 20"
+        );
     }
 
     #[test]
     fn a_probe_without_cpu_time_is_bounded_by_the_hang_guard() {
         let waits = RefCell::new(Vec::new());
-        let mut w = StartWatch::new(patience(), "x", script(vec![]), Ticks(&waits, false));
+        let mut w = StartWatch::new(patience(), "x", script(vec![]), Ticks(&waits, usize::MAX));
         let st = state(w.wait());
         assert!(
             matches!(cause(&st), Some(StallCause::Hung(_))),

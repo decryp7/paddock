@@ -474,5 +474,13 @@ per process of the tree, never a table scan (ADR 0024 rule 4): about 0.1% of a c
 process, at the caller's priority. Cheaper than reading the CPU is not reading it while the handshake is near: the watch
 reads the handshake first. Measurements are recorded when the apps adopt it (rule 48).
 
-**Conformance C51** starts in report-only mode (warn), flagging fixed start and spawn waits; it turns to failing with the
+**Conformance C51** starts as the narrow first step of section 8, in report-only mode (warn): it flags fixed *start and
+spawn* waits only (names with START, SPAWN, LAUNCH or READY, and waits inside `start*`, `spawn*`, `launch*` and `boot*`
+functions), not every `Duration` wait the section lists. It widens to section 8's patterns and turns to failing with the
 waiver-list targets above.
+
+**Semantics of the shared judge, for adopters.** A stall is reported once per episode (the slow note once ever), so a
+watch that returned a stall waits for the next event when called again. The hang guard also counts ticks in which the
+caller never read the CPU time, so a caller that passes no CPU reading is still bounded. A start that is slow but alive
+is no longer failed by the browser driver: a broken browser that does nothing is now given up on after the idle patience
+(60 s) or, when it cannot be observed, the hang guard (300 s), not after 20 s.

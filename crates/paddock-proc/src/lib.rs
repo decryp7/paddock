@@ -63,8 +63,8 @@ pub use tree::{
     terminate,
 };
 pub use usage::{
-    MAX_TREE, OsSource, ProcEntry, ProcessSource, Row, Table, descendants, identity, parse_pss,
-    process_memory, read_children, read_pss, snapshot, table_from, tree_cpu_time,
+    CpuSample, MAX_TREE, OsSource, ProcEntry, ProcessSource, Row, Table, descendants, identity,
+    parse_pss, process_memory, read_children, read_pss, snapshot, table_from, tree_cpu_time,
     tree_cpu_time_from, tree_cpu_time_of, tree_memory, tree_memory_from, tree_memory_of,
     tree_memory_with,
 };
