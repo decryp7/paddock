@@ -8,6 +8,7 @@ use crate::{Error, Result};
 use paddock_jobs::CancelToken;
 use paddock_jobs::time::{Clock, Deadline, SystemClock};
 use paddock_proc::{MemoryCap, Sampler, Supervised};
+use paddock_runtime::OsKind;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -114,8 +115,8 @@ pub struct LaunchOptions {
     pub memory_cap: Option<u64>,
     /// A limit for the browser's disk cache (a kept profile must not grow without bound).
     pub disk_cache_bytes: Option<u64>,
-    /// [`QUIET_FLAGS`]: no GPU process, no component downloads, no throttling of a window nobody sees. For a browser
-    /// that reads pages; an interactive window the user browses in may turn them off.
+    /// [`QUIET_FLAGS`] and [`QUIET_DISABLED_FEATURES`]: no GPU process, no component downloads, no throttling of a window
+    /// nobody sees. For a browser that reads pages; an interactive window the user browses in may turn them off.
     pub quiet: bool,
     /// More switches (before the start page).
     pub extra_args: Vec<String>,
@@ -172,13 +173,51 @@ pub const QUIET_FLAGS: &[&str] = &[
     "--disable-background-timer-throttling",
     "--disable-renderer-backgrounding",
     "--disable-backgrounding-occluded-windows",
-    "--disable-features=Translate,OptimizationHints,MediaRouter,AutofillServerCommunication,msEdgeShopping,msEdgeSync",
 ];
+
+/// Browser features the quiet browser starts without (in the one `--disable-features` switch, see
+/// [`command_line_for`]).
+pub const QUIET_DISABLED_FEATURES: &[&str] = &[
+    "Translate",
+    "OptimizationHints",
+    "MediaRouter",
+    "AutofillServerCommunication",
+    "msEdgeShopping",
+    "msEdgeSync",
+];
+
+/// Browser features every browser on Windows starts without: the network-service sandbox.
+///
+/// Chrome for Testing turns that sandbox on for Windows (its field-trial testing config, study
+/// `NetworkServiceSandboxWindows`). Before it starts the sandboxed network service, Chrome checks that an app container can
+/// read and run the program; a program in a user's folder (`C:\Users\<name>\...`: the runtime store under the app's local
+/// data, CI's test browser) grants app containers nothing, so the check fails ("Sandbox cannot access executable",
+/// launch error 45, Windows error 5), Chrome records the failed launch and starts the network service again unsandboxed.
+/// Requests in flight in the profile at the switch-over are lost: a page load ends in `net::ERR_ABORTED` with no connection
+/// made (Windows CI runs 7149 and 7154: every browser log shows the second start, and each failed load was in flight when
+/// the profile's own sign-in request failed with `net::ERR_FAILED`; loads started before or after it passed). Starting the
+/// network service unsandboxed at once is what Chrome falls back to anyway, without the second start and the lost loads.
+/// Chromium sources read 2026-10-30 (156.0.8078.47): `sandbox/policy/win/sandbox_win.cc` (the access check),
+/// `chrome/browser/net/system_network_context_manager.cc` (the fallback), `testing/variations/fieldtrial_testing_config.json`.
+pub const WINDOWS_DISABLED_FEATURES: &[&str] = &["NetworkServiceSandbox"];
+
+const DISABLE_FEATURES: &str = "--disable-features=";
 
 /// The whole command line the browser starts with: every switch, then [`START_PAGE`] last. This is the only place the
 /// arguments are assembled, so no switch can end up after the start page. `--enable-automation` keeps Chrome's
 /// "controlled by automated test software" banner and `navigator.webdriver = true`; nothing hides either.
 pub fn command_line(data_dir: &Path, opts: &LaunchOptions, sandbox: Sandbox) -> Vec<String> {
+    command_line_for(crate::discover::this_os(), data_dir, opts, sandbox)
+}
+
+/// [`command_line`] for a browser on `os`. Every feature to turn off goes into one `--disable-features` switch, the
+/// caller's own (in [`LaunchOptions::extra_args`]) merged in, so none is lost to a second switch.
+pub fn command_line_for(
+    os: OsKind,
+    data_dir: &Path,
+    opts: &LaunchOptions,
+    sandbox: Sandbox,
+) -> Vec<String> {
     let mut a = vec![
         "--remote-debugging-port=0".to_string(),
         format!("--user-data-dir={}", data_dir.display()),
@@ -220,10 +259,30 @@ pub fn command_line(data_dir: &Path, opts: &LaunchOptions, sandbox: Sandbox) -> 
         // Containers have a small /dev/shm.
         a.push("--disable-dev-shm-usage".into());
     }
+    let mut disabled: Vec<String> = Vec::new();
+    let mut disable = |f: &str| {
+        if !f.is_empty() && !disabled.iter().any(|d| d == f) {
+            disabled.push(f.to_string());
+        }
+    };
+    if opts.quiet {
+        QUIET_DISABLED_FEATURES.iter().for_each(|f| disable(f));
+    }
+    if os == OsKind::Windows {
+        WINDOWS_DISABLED_FEATURES.iter().for_each(|f| disable(f));
+    }
+    for x in &opts.extra_args {
+        if let Some(list) = x.strip_prefix(DISABLE_FEATURES) {
+            list.split(',').map(str::trim).for_each(&mut disable);
+        }
+    }
+    if !disabled.is_empty() {
+        a.push(format!("{DISABLE_FEATURES}{}", disabled.join(",")));
+    }
     a.extend(
         opts.extra_args
             .iter()
-            .filter(|x| x.as_str() != START_PAGE)
+            .filter(|x| x.as_str() != START_PAGE && !x.starts_with(DISABLE_FEATURES))
             .cloned(),
     );
     a.push(START_PAGE.into());
@@ -359,6 +418,15 @@ pub enum Gone {
     Disconnected,
     /// The page was closed (the user closed its window or tab); on macOS the browser keeps running without a window.
     PageClosed,
+}
+
+/// How many helper processes a browser started, and how many of its tries failed ([`Chromium::helper_starts`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HelperStarts {
+    /// Helper processes that started.
+    pub started: u64,
+    /// Tries that failed (each is followed by another).
+    pub failed: u64,
 }
 
 /// Why the supervisor ended the browser.
@@ -536,6 +604,32 @@ impl Chromium {
             }
             let _ = self.clock.wait(POLL, &CancelToken::new());
         }
+    }
+
+    /// How the browser's helper processes (its network service, storage and audio services) started so far, as the
+    /// browser counts them in its own histograms. A helper that could not start is started again, and what was in flight
+    /// on the first try is lost: for the network service, a page load ends in `net::ERR_ABORTED` (see
+    /// [`WINDOWS_DISABLED_FEATURES`]).
+    pub fn helper_starts(&self) -> Result<HelperStarts> {
+        let r = self.conn.call(
+            None,
+            "Browser.getHistograms",
+            json!({"query": "ChildProcess.Launch"}),
+            Duration::from_secs(5),
+        )?;
+        let count = |name: &str| -> u64 {
+            r.get("histograms")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|h| h.get("name").and_then(Value::as_str) == Some(name))
+                .filter_map(|h| h.get("count").and_then(Value::as_u64))
+                .sum()
+        };
+        Ok(HelperStarts {
+            started: count("ChildProcess.Launched.UtilityProcessHash"),
+            failed: count("ChildProcess.LaunchFailed.UtilityProcessErrorCode"),
+        })
     }
 
     fn pages(&self) -> Result<Vec<Value>> {

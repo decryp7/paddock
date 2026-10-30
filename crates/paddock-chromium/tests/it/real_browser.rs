@@ -93,6 +93,41 @@ fn a_new_tab_loads_a_page_at_once() {
     assert!(b.close(), "Browser.close ends it by itself");
 }
 
+/// Every helper process the browser needs starts on the first try. On Windows CI each browser's network service failed to
+/// start in its sandbox (Chrome could not read the program in the runner's user folder: error 45, access denied) and was
+/// started again unsandboxed; a load that ran into that restart ended in `net::ERR_ABORTED` before it reached the network
+/// (runs 7149, 7154). A failed start is counted in the browser's own histogram, so this checks the cause itself, not the
+/// race it opens: it fails on every such browser, not only on the unlucky ones.
+#[test]
+fn every_helper_process_starts_on_the_first_try() {
+    let Some(exe) = require_browser() else { return };
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for s in listener.incoming().flatten() {
+            std::thread::spawn(move || answer(s, |_| Some("<title>Up</title>".into())));
+        }
+    });
+    let base = tempfile::tempdir().unwrap();
+    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let page = b.new_page().unwrap();
+    page.navigate(
+        &format!("http://127.0.0.1:{port}/"),
+        Duration::from_secs(30),
+    )
+    .unwrap();
+    let starts = b.helper_starts().unwrap();
+    assert!(
+        starts.started > 0,
+        "the browser reports its helper starts: {starts:?}"
+    );
+    assert_eq!(
+        starts.failed, 0,
+        "a helper process (the network service) could not start and was started again: {starts:?}"
+    );
+    assert!(close_by_itself(&mut b).0, "Browser.close ends it by itself");
+}
+
 #[test]
 fn a_real_browser_reads_a_page_and_closes_cleanly() {
     let Some(exe) = find_for_tests() else {

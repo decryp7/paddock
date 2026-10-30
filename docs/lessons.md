@@ -769,3 +769,15 @@ or verify its identity (`paddock_proc::ProcessId`, pid plus start time) right be
 job membership. Clippy's `disallowed-methods` and check C53 enforce it. **Also:** when a flaky test fails right after
 another test in the same binary ended something, suspect the ending before the failing test; and test an identity source
 with a process of another user, not only your own.
+
+## A flaky abort with no connection was a helper process started twice (2026-10-30)
+Windows CI failed one real-browser load in nearly every crate job with `net::ERR_ABORTED` and no connection at the test
+server. Four rounds guessed at the driver (first navigation, pid reuse, a network-service restart during the load) and a
+local Windows VM never reproduced it: it is Arm, and Chrome never sandboxes the network service on Arm. The cause was in
+the Chrome logs CI had already kept as artifacts: in every Windows browser the sandboxed network service could not start
+(Chrome for Testing in a user folder grants app containers nothing), Chrome started it again unsandboxed, and loads in
+flight at that moment were lost. **Rule:** for a flake, read the evidence the failing environment already wrote (logs,
+artifacts, the program's own counters) before building a local reproduction, and check that the reproduction can take the
+same code path (architecture, feature flags, sandbox). A test of the cause (here: the browser's own count of failed helper
+starts is zero) fails on every run, not only on the unlucky ones.
+

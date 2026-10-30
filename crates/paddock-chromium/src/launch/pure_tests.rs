@@ -1,6 +1,7 @@
 //! The pure parts of the launch: the command line, the sandbox decision, display check, theme and profiles (every OS).
 
 use super::*;
+use paddock_runtime::OsKind;
 
 fn opts(base: &Path) -> LaunchOptions {
     let mut o = LaunchOptions::new(Profile::Throwaway(base.to_path_buf()));
@@ -97,6 +98,65 @@ fn the_start_page_is_last_for_every_combination_of_options() {
             }
         }
     }
+}
+
+/// Chrome for Testing turns on its network-service sandbox on Windows (its field-trial testing config). That sandbox
+/// cannot read a browser kept in a user's folder (`C:\\Users\\...`, where the runtime store and CI keep it), so Chrome
+/// starts the network service a second time, unsandboxed, and a load that runs into that restart ends in
+/// `net::ERR_ABORTED` before it reaches the network (Windows CI runs 7149 and 7154). The driver starts it unsandboxed at
+/// once, on Windows only, in the one `--disable-features` switch the browser reads (Chrome keeps only the last one).
+#[test]
+fn windows_starts_the_network_service_unsandboxed_and_keeps_one_feature_switch() {
+    for quiet in [true, false] {
+        for extra in [
+            vec![],
+            vec![
+                "--disable-features=Foo,NetworkServiceSandbox".to_string(),
+                "--lang=de".to_string(),
+            ],
+        ] {
+            let mut o = opts(Path::new("/b"));
+            (o.quiet, o.extra_args) = (quiet, extra.clone());
+            for os in [OsKind::Windows, OsKind::Macos, OsKind::Linux] {
+                let a = command_line_for(os, Path::new("/p"), &o, Sandbox::On);
+                let switches: Vec<&String> = a
+                    .iter()
+                    .filter(|x| x.starts_with("--disable-features="))
+                    .collect();
+                assert!(switches.len() <= 1, "{a:?}");
+                let features: Vec<&str> = switches
+                    .first()
+                    .map(|s| s["--disable-features=".len()..].split(',').collect())
+                    .unwrap_or_default();
+                assert_eq!(
+                    features.contains(&"NetworkServiceSandbox"),
+                    os == OsKind::Windows || !extra.is_empty(),
+                    "{os:?} quiet={quiet}: {a:?}"
+                );
+                assert_eq!(features.contains(&"Translate"), quiet, "{a:?}");
+                assert_eq!(
+                    features.contains(&"Foo"),
+                    !extra.is_empty(),
+                    "the caller's features are kept: {a:?}"
+                );
+                let mut unique = features.clone();
+                unique.sort_unstable();
+                unique.dedup();
+                assert_eq!(unique.len(), features.len(), "no feature twice: {a:?}");
+                assert_eq!(a.contains(&"--lang=de".to_string()), !extra.is_empty());
+            }
+        }
+    }
+    let here = command_line(Path::new("/p"), &opts(Path::new("/b")), Sandbox::On);
+    assert_eq!(
+        here,
+        command_line_for(
+            crate::discover::this_os(),
+            Path::new("/p"),
+            &opts(Path::new("/b")),
+            Sandbox::On
+        )
+    );
 }
 
 #[test]

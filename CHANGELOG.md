@@ -4,6 +4,17 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-chromium`: the network service starts once on Windows
+- Every browser on Windows starts with `--disable-features=NetworkServiceSandbox` (`launch::WINDOWS_DISABLED_FEATURES`).
+  Chrome for Testing turns the network-service sandbox on for Windows, cannot start it for a program in a user's folder
+  (the runtime store, CI's test browser: "Sandbox cannot access executable", launch error 45, access denied) and starts
+  the network service a second time, unsandboxed; page loads in flight at that switch-over ended in `net::ERR_ABORTED`
+  before reaching the network (the Windows CI flake of runs 7110 to 7158).
+- The command line has one `--disable-features` switch: the quiet features (now `launch::QUIET_DISABLED_FEATURES`; the
+  switch left `QUIET_FLAGS`), the Windows ones and any the caller passes in `extra_args`, merged without repeats.
+- New `launch::command_line_for(os, ..)` (`command_line` is it for this OS) and `Chromium::helper_starts()`
+  (`HelperStarts { started, failed }` from the browser's own `ChildProcess.Launch*` histograms).
+
 ### `paddock-proc`: processes by identity (ADR 0033, rule 53)
 - New `ProcessId` (pid plus `StartTime`), `Holder`, `Ending`, `TreeEnding`, `holder`, `usage::Row` and `usage::identity`. `kill_tree` (now returning a `TreeEnding`), `end`, `ask` and `terminate` take a `ProcessId` and act only if its pid still belongs to it: one handle on Windows, a pidfd on Linux, a check then the signal on macOS; skipped and refused kills are logged. `processes_mentioning` and `descendants_of` return `ProcessId`s. `ProcessId::of_recorded(pid, written_ms)` is for a pid read from a file. `Supervised::process()` is new.
 - Walks follow parents by age: `usage::descendants`, `tree_memory_with` and the per-pid `tree_memory_from` (now taking a `ProcessId`) count a process as a child only if it started no earlier than its parent. `Table` rows are `Row { parent, rss, started }`, `ProcEntry` has `started`, `ProcessSource` has `started`.
