@@ -71,6 +71,8 @@ toml = "0.9"
 # The shell plugin on Tauri's mock runtime (no window, no user folders).
 tauri = { version = "2.12.4", features = ["test"] }
 paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray", "mock-runtime"] }
+# The real-browser gate in the renderer's launch and self-test (rule 7): without it the app's own tests compile it out.
+spotter-render = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true

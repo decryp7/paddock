@@ -128,12 +128,19 @@ pub fn find_installed_with(os: Os, env: &dyn Fn(&str) -> Option<String>, exists:
 }
 
 /// Environment variable naming the one browser executable tests may launch.
+#[cfg(any(test, feature = "testing"))]
 pub const TEST_BROWSER_ENV: &str = "SPOTTER_TEST_BROWSER";
 
 /// Environment variable overriding the folder that holds the test browser (default: see [`test_browser_dir`]).
+#[cfg(any(test, feature = "testing"))]
 pub const TEST_BROWSER_DIR_ENV: &str = "SPOTTER_TEST_BROWSER_DIR";
 
+/// Set to `1` by CI where the test browser must be there: a missing one fails the test instead of skipping it.
+#[cfg(any(test, feature = "testing"))]
+pub const REQUIRE_TEST_BROWSER_ENV: &str = "SPOTTER_REQUIRE_TEST_BROWSER";
+
 /// Where the pinned Chrome for Testing build for tests is installed (`node scripts/install-test-browser.mjs`).
+#[cfg(any(test, feature = "testing"))]
 pub fn test_browser_dir(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
     if let Some(d) = env(TEST_BROWSER_DIR_ENV).filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(d));
@@ -142,23 +149,62 @@ pub fn test_browser_dir(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf>
     Some(PathBuf::from(home).join(".cache").join("spotter-test-browser"))
 }
 
-/// The browser tests may launch: `SPOTTER_TEST_BROWSER` or the pinned Chrome for Testing in the test cache folder.
-/// Never an installed Edge, Chrome or Chromium: killing a launched system Chrome leaves a code-sign clone of the
-/// whole app behind on macOS, and tests must not touch the browser the user works in.
-pub fn find_for_tests() -> Option<Browser> {
-    find_for_tests_with(Os::CURRENT, &|k| std::env::var(k).ok(), &|p| p.is_file())
+/// The browser a test may launch in `mode`: `SPOTTER_TEST_BROWSER` or the pinned Chrome for Testing in the test cache
+/// folder, never an installed Edge, Chrome or Chromium (killing a launched system Chrome leaves a code-sign clone of the
+/// whole app behind on macOS, and tests must not touch the browser the user works in), and only where a real browser may
+/// start at all: Linux in a throwaway CI session, under a virtual display for a window (`paddock_testkit::live_browser`;
+/// never in a user's session, headless or not, rule 7). `None` after printing why (the test then returns); panics on a
+/// job set up wrongly or a missing browser where [`REQUIRE_TEST_BROWSER_ENV`] is set.
+#[cfg(any(test, feature = "testing"))]
+pub fn find_for_tests(mode: crate::launch::Mode) -> Option<Browser> {
+    use paddock_testkit::live_browser::{found_or_skip, process_env};
+    found_or_skip(find_for_tests_with(
+        Os::CURRENT,
+        paddock_testkit::live_browser::Host::current().test_vm,
+        &process_env,
+        &|p| p.is_file(),
+        mode,
+    ))
 }
 
 /// [`find_for_tests`] with the OS, environment and file check injected.
-pub fn find_for_tests_with(os: Os, env: &dyn Fn(&str) -> Option<String>, exists: &dyn Fn(&Path) -> bool) -> Option<Browser> {
-    if let Some(p) = env(TEST_BROWSER_ENV).filter(|p| !p.is_empty()).map(PathBuf::from) {
-        return exists(&p).then_some(Browser {
-            flavor: Flavor::Chromium,
-            path: p,
-        });
-    }
-    let dir = test_browser_dir(env)?;
-    crate::install::locate_executable(&dir, os)
+#[cfg(any(test, feature = "testing"))]
+fn find_for_tests_with(
+    os: Os,
+    test_vm: bool,
+    env: &dyn Fn(&str) -> Option<String>,
+    exists: &dyn Fn(&Path) -> bool,
+    mode: crate::launch::Mode,
+) -> Result<paddock_testkit::live_browser::TestBrowser<Browser>, String> {
+    use paddock_testkit::live_browser::{find_test_browser, BrowserWindow};
+    let window = match mode {
+        crate::launch::Mode::Headless => BrowserWindow::Headless,
+        crate::launch::Mode::OffScreen | crate::launch::Mode::OnScreen => BrowserWindow::Shown,
+    };
+    let os_name = match os {
+        Os::Windows => "windows",
+        Os::Mac => "macos",
+        Os::Linux => "linux",
+    };
+    let hint = "run `node scripts/install-test-browser.mjs` (pinned Chrome for Testing) or set SPOTTER_TEST_BROWSER to its \
+                executable; installed browsers are never used in tests";
+    find_test_browser(
+        paddock_testkit::live_browser::Host { os: os_name, test_vm },
+        env,
+        window,
+        REQUIRE_TEST_BROWSER_ENV,
+        hint,
+        || {
+            if let Some(p) = env(TEST_BROWSER_ENV).filter(|p| !p.is_empty()).map(PathBuf::from) {
+                return exists(&p).then_some(Browser {
+                    flavor: Flavor::Chromium,
+                    path: p,
+                });
+            }
+            let dir = test_browser_dir(env)?;
+            crate::install::locate_executable(&dir, os)
+        },
+    )
 }
 
 /// Where [`crate::install`] puts a downloaded Chromium inside the app data folder.
@@ -168,6 +214,7 @@ pub fn downloaded_dir(data_dir: &Path) -> PathBuf {
 
 /// Environment variable that makes the test launch paths start the test browser without its sandbox. Only for a CI
 /// job that runs as root in a container (Chrome refuses to start as root otherwise). The product never reads it.
+#[cfg(any(test, feature = "testing"))]
 pub const TEST_NO_SANDBOX_ENV: &str = "SPOTTER_TEST_BROWSER_NO_SANDBOX";
 
 /// The flags [`test_browser_flags_with`] always gives: the tests only talk to loopback servers by IP address, so the test
@@ -177,6 +224,7 @@ pub const TEST_NO_SANDBOX_ENV: &str = "SPOTTER_TEST_BROWSER_NO_SANDBOX";
 /// configuration first. The host rule: no host resolves but loopback (the rule applies to IP literals too), so the requests Chrome for Testing 156 makes on its own
 /// even with `--disable-background-networking` (measured 2026-10-28 with `--log-net-log`: www.google.com,
 /// accounts.google.com, update.googleapis.com, clients2.google.com) fail at once instead of reaching real hosts.
+#[cfg(any(test, feature = "testing"))]
 pub const TEST_ISOLATION_FLAGS: [&str; 2] = [
     "--no-proxy-server",
     "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1",
@@ -184,6 +232,7 @@ pub const TEST_ISOLATION_FLAGS: [&str; 2] = [
 
 /// Extra flags the tests pass to the test browser: [`TEST_ISOLATION_FLAGS`], plus `--no-sandbox` and
 /// `--disable-dev-shm-usage` when [`TEST_NO_SANDBOX_ENV`] is `1`.
+#[cfg(any(test, feature = "testing"))]
 pub fn test_browser_flags_with(env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
     let mut flags: Vec<String> = TEST_ISOLATION_FLAGS.iter().map(|f| f.to_string()).collect();
     if env(TEST_NO_SANDBOX_ENV).as_deref() == Some("1") {
@@ -193,6 +242,7 @@ pub fn test_browser_flags_with(env: &dyn Fn(&str) -> Option<String>) -> Vec<Stri
 }
 
 /// [`test_browser_flags_with`] for the process environment.
+#[cfg(any(test, feature = "testing"))]
 pub fn test_browser_flags() -> Vec<String> {
     test_browser_flags_with(&|k| std::env::var(k).ok())
 }
@@ -202,9 +252,18 @@ pub fn find_downloaded(data_dir: &Path) -> Option<Browser> {
     crate::install::locate_executable(&downloaded_dir(data_dir), Os::CURRENT)
 }
 
+/// The test-build gate of every program this driver starts (a launch, a self-test): never an installed browser, and no
+/// real program outside a throwaway session (rule 7; `paddock_testkit::live_browser::check_launch`), however it was found.
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn check_test_launch(exe: &Path, window: paddock_testkit::live_browser::BrowserWindow) -> Result<(), String> {
+    let installed = candidates(Os::CURRENT, &|k| std::env::var(k).ok()).into_iter().map(|b| b.path);
+    paddock_testkit::live_browser::check_launch(exe, installed, window)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::launch::Mode;
 
     fn env(k: &str) -> Option<String> {
         match k {
@@ -253,6 +312,16 @@ mod tests {
         assert!(find_installed_with(Os::Windows, &|_| None, &|_| true).is_none());
     }
 
+    /// The finder's search alone, as on a Linux CI job that may start the browser.
+    fn found(os: Os, env: &dyn Fn(&str) -> Option<String>, exists: &dyn Fn(&Path) -> bool) -> Option<Browser> {
+        use paddock_testkit::live_browser::{TestBrowser, LIVE_BROWSER_VAR};
+        let allowed = |k: &str| if k == LIVE_BROWSER_VAR { Some("1".to_string()) } else { env(k) };
+        match find_for_tests_with(os, false, &allowed, exists, Mode::Headless) {
+            Ok(TestBrowser::Found(b)) => Some(b),
+            _ => None,
+        }
+    }
+
     #[test]
     fn test_discovery_never_returns_a_system_install() {
         // Everything a user could have installed exists, and SPOTTER_CHROMIUM_PATH is set: tests still get nothing.
@@ -261,18 +330,63 @@ mod tests {
             "SPOTTER_CHROMIUM_PATH" => Some("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".to_string()),
             _ => None,
         };
-        for os in [Os::Windows, Os::Mac, Os::Linux] {
-            assert!(find_for_tests_with(os, &all, &|_| true).is_none(), "{os:?}");
-        }
+        assert!(found(Os::Linux, &all, &|_| true).is_none());
         // The explicit variable is honoured only when the file exists.
         let explicit = |k: &str| (k == TEST_BROWSER_ENV).then(|| "/opt/cft/chrome".to_string());
         assert_eq!(
-            find_for_tests_with(Os::Linux, &explicit, &|p| p == Path::new("/opt/cft/chrome"))
-                .unwrap()
-                .path,
+            found(Os::Linux, &explicit, &|p| p == Path::new("/opt/cft/chrome")).unwrap().path,
             PathBuf::from("/opt/cft/chrome")
         );
-        assert!(find_for_tests_with(Os::Linux, &explicit, &|_| false).is_none());
+        assert!(found(Os::Linux, &explicit, &|_| false).is_none());
+    }
+
+    /// Regression (rule 7; Debrief CI 7141, 7146, the same class here): the Mac and Windows runners run in a user's
+    /// session, so a test browser there, headless or not, is a process of that session (and a headful one a window, a Dock
+    /// or taskbar entry and the focus). A test browser is handed out only on Linux in a throwaway CI session.
+    #[test]
+    fn tests_get_no_browser_in_a_desktop_session() {
+        use paddock_testkit::live_browser::{TestBrowser, LIVE_BROWSER_VAR};
+        let ci = |k: &str| match k {
+            TEST_BROWSER_ENV => Some("/opt/cft/chrome".to_string()),
+            LIVE_BROWSER_VAR | REQUIRE_TEST_BROWSER_ENV => Some("1".to_string()),
+            "DISPLAY" => Some(":99".to_string()),
+            _ => None,
+        };
+        for os in [Os::Mac, Os::Windows] {
+            for mode in [Mode::Headless, Mode::OffScreen, Mode::OnScreen] {
+                assert!(
+                    matches!(find_for_tests_with(os, false, &ci, &|_| true, mode), Ok(TestBrowser::Skip(_))),
+                    "{os:?} {mode:?}"
+                );
+            }
+        }
+        for mode in [Mode::Headless, Mode::OffScreen, Mode::OnScreen] {
+            assert!(
+                matches!(
+                    find_for_tests_with(Os::Linux, false, &ci, &|_| true, mode),
+                    Ok(TestBrowser::Found(_))
+                ),
+                "{mode:?}"
+            );
+        }
+        // A window needs the virtual display; headless does not.
+        let no_display = |k: &str| if k == "DISPLAY" { None } else { ci(k) };
+        assert!(find_for_tests_with(Os::Linux, false, &no_display, &|_| true, Mode::OffScreen).is_err());
+        assert!(find_for_tests_with(Os::Linux, false, &no_display, &|_| true, Mode::Headless).is_ok());
+        // A macOS or Windows test VM with `PADDOCK_LIVE_BROWSER=vm` may (the release's VM check); a desktop with `vm` fails.
+        let vm = |k: &str| match k {
+            TEST_BROWSER_ENV => Some("/opt/cft/chrome".to_string()),
+            LIVE_BROWSER_VAR => Some("vm".to_string()),
+            _ => None,
+        };
+        for os in [Os::Mac, Os::Windows] {
+            assert!(matches!(
+                find_for_tests_with(os, true, &vm, &|_| true, Mode::OffScreen),
+                Ok(TestBrowser::Found(_))
+            ));
+            assert!(find_for_tests_with(os, false, &vm, &|_| true, Mode::Headless).is_err());
+        }
+        let _ = find_for_tests(Mode::Headless);
     }
 
     #[test]

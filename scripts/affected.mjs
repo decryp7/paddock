@@ -733,9 +733,9 @@ export function matrix(plan, { cargo, apps }, { narrow = false, webkit = false }
         notices: linux && app.notices && (rust || ui) ? 'true' : 'false',
         process_patterns: (app.processPatterns ?? []).join('\n'),
         test_browser_prefix: app.testBrowser?.envPrefix ?? '',
-        test_browser_catalogue: app.testBrowser?.catalogue ?? '',
         test_browser_no_sandbox: linux && app.testBrowser?.noSandboxOnLinux ? 'true' : 'false',
-        display: linux && app.display ? 'true' : 'false',
+        // Every leg: the Linux one runs the tests under xvfb-run with PADDOCK_LIVE_BROWSER=1, a host leg says where they run.
+        display: app.display ? 'true' : 'false',
         rust,
         ui: linux && ui,
         filter,

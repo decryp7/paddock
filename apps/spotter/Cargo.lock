@@ -3601,6 +3601,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-testkit"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "socket2",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-updater"
 version = "0.2.0"
 dependencies = [
@@ -5112,10 +5123,12 @@ dependencies = [
  "paddock-download",
  "paddock-jobs",
  "paddock-proc",
+ "paddock-testkit",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "spotter-core",
+ "spotter-render",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

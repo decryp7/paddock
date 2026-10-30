@@ -27,7 +27,7 @@ fn fake_zip(dir: &Path) -> (Vec<u8>, String) {
     let mut z = zip::ZipWriter::new(std::fs::File::create(&p).unwrap());
     let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     z.start_file("chrome-linux/chrome", stored).unwrap();
-    z.write_all(b"#!/bin/sh\necho Chromium 1\n").unwrap();
+    z.write_all(b"#!/bin/sh\n# paddock-fake-browser\necho Chromium 1\n").unwrap();
     z.start_file("chrome-linux/locales.pak", stored).unwrap();
     z.write_all(&(0..BIG).map(|i| (i % 249) as u8).collect::<Vec<_>>()).unwrap();
     z.finish().unwrap();
@@ -327,6 +327,7 @@ async fn the_real_pinned_archive_extracts_and_runs() {
         Os::Linux
     };
     let exe = spotter_render::install::locate_executable(&out.path().join("tree"), os).unwrap();
+    // conformance: no-launch — the pinned build from SPOTTER_TEST_CHROMIUM_ZIP (ignored by default); the launch gate refuses it outside a throwaway session
     let version = spotter_render::install::self_test(&exe.path).unwrap();
     assert!(version.contains(&manifest.version[..3]), "{version}");
 }

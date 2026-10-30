@@ -235,6 +235,10 @@ impl Chromium {
         reason = "the browser, a GUI program: this crate cannot use Debrief's process helper"
     )]
     fn launch_with(exe: &Browser, opts: &LaunchOptions, sandbox: Sandbox) -> Result<Chromium> {
+        // Test builds: no installed browser, and no real one outside a throwaway session (rule 7), however it was found.
+        // This driver always opens a window.
+        #[cfg(any(test, feature = "test-support"))]
+        crate::discover::check_test_launch(&exe.path, paddock_testkit::live_browser::BrowserWindow::Shown).map_err(Error::Launch)?;
         let (dir, throwaway) = match &opts.profile {
             Profile::Throwaway => (unique_dir(), true),
             Profile::Persistent(p) => (p.clone(), false),
@@ -759,6 +763,22 @@ mod tests {
         assert_eq!(wait_gone(&mut b, &p), Gone::Disconnected);
         assert!(matches!(p.evaluate("1"), Err(Error::Closed)));
         b.kill();
+    }
+
+    /// Regression (review P1-1): a test that found a browser around the test-browser finder (`find()`, a hard-coded path)
+    /// launched it. In test builds the launch itself refuses an installed browser.
+    #[test]
+    fn a_test_build_never_launches_an_installed_browser() {
+        let env = |k: &str| std::env::var(k).ok();
+        // conformance: no-launch — the gate under test refuses each candidate before anything starts
+        for exe in crate::discover::candidates(crate::discover::Os::CURRENT, &env) {
+            let e = Chromium::launch(&exe, &LaunchOptions::default()).err().unwrap();
+            assert!(
+                matches!(&e, Error::Launch(m) if m.contains("installed")),
+                "{}: {e}",
+                exe.path.display()
+            );
+        }
     }
 
     #[test]

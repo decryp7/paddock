@@ -842,7 +842,8 @@ impl Drop for Renderers {
 }
 
 /// The machine's own browser when nothing is configured or installed. Under test only the pinned test browser
-/// counts: a test run never launches the user's installed Chrome.
+/// counts, and only where its window lands on a virtual display: a test run never launches the user's installed Chrome
+/// and never opens a window on the user's desktop (`chromium_driver::find_for_tests`, Paddock rule 7).
 #[cfg(not(test))]
 pub(super) fn fallback_browser() -> Option<chromium_driver::BrowserExe> {
     chromium_driver::find()
