@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, openSettingsWindow } from './app';
 
 // One primary action per region (UI review 2 rule 1, design guide: Buttons): on every route and tab, at most one filled
 // Material button (`matButton="filled"`, the accent fill) is visible in each page region (the page header, a card or panel,
@@ -66,7 +66,6 @@ const SCREENS: readonly Screen[] = [
   },
   { name: 'playground', hash: '/playground' },
   { name: 'benchmarks', hash: '/benchmarks' },
-  { name: 'settings', hash: '/settings' },
   { name: 'tray', hash: '/tray' },
 ];
 
@@ -97,6 +96,15 @@ async function filledByRegion(page: Page): Promise<{ inRows: string[]; regions: 
 }
 
 test.describe('one primary action per region (UI review 2 rule 1)', () => {
+  // Settings is the shell's Settings window (its own OS window, rule 17), loaded by its URL as Rust loads it.
+  test('the Settings window: at most one filled button per region, none in a row', async ({ page }) => {
+    await openSettingsWindow(page);
+    await page.waitForLoadState('networkidle');
+    const { inRows, regions } = await filledByRegion(page);
+    expect(inRows, 'a filled button in a table or list row').toEqual([]);
+    expect(Object.entries(regions).filter(([, labels]) => labels.length > 1), 'regions with more than one filled button').toEqual([]);
+  });
+
   for (const s of SCREENS) {
     test(`${s.name}: at most one filled button per region, none in a row`, async ({ page }) => {
       await openApp(page, s.hash, `mock-fast&mock-static${s.query ? '&' + s.query : ''}`);

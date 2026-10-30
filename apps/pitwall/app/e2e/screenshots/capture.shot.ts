@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { resolve } from 'node:path';
+import { dialogWindowUrl } from '../../../../../ui/projects/paddock-e2e/src/index.ts';
 
 const OUT = resolve(__dirname, '../../../docs/screenshots');
 const WIDTH = 1440;
@@ -17,6 +18,8 @@ interface Screen {
   snapList?: string;
   /** Capture only this element (full height, whatever the window shows) instead of the page. */
   element?: string;
+  /** A dialog window (its id) opened by its URL, as Rust loads it in its own OS window, instead of a page of the main window. */
+  window?: string;
   /** Waits for the screen and drives it into the state to show. */
   prepare?: (page: Page) => Promise<void>;
 }
@@ -164,7 +167,8 @@ const SCREENS: Screen[] = [
   { name: 'benchmarks', path: '/benchmarks', prepare: (p) => expect(p.locator('h1')).toBeVisible() },
   {
     name: 'settings-quit',
-    path: '/settings',
+    path: '',
+    window: 'pd.settings',
     element: '#set-general',
     prepare: async (p) => {
       await p.getByRole('radio', { name: 'Ask each time' }).click();
@@ -173,16 +177,17 @@ const SCREENS: Screen[] = [
   },
   {
     name: 'settings-cache',
-    path: '/settings',
+    path: '',
+    window: 'pd.settings',
     element: '#set-cache',
     prepare: async (p) => {
-      await p.locator('.subnav').getByRole('button', { name: 'Caching' }).click();
       await expect(p.locator('#set-cache .cache-stats').first()).toBeVisible();
     },
   },
   {
     name: 'settings',
-    path: '/settings',
+    path: '',
+    window: 'pd.settings',
     prepare: async (p) => {
       // Model updates switched on and checked once, as a user who opted in would see it.
       const panel = p.locator('#set-model-updates');
@@ -198,7 +203,7 @@ const ONLY = process.env['SHOT_ONLY']?.split(',');
 
 async function open(page: Page, path: string, theme: 'dark' | 'light', query = '') {
   await page.clock.install({ time: NOW });
-  await page.addInitScript((t) => localStorage.setItem('pitwall.theme', t), theme);
+  // The theme follows the system (the shell's Appearance default), emulated here.
   await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
   await page.goto(`/?mock-static&mock-fast${query ? '&' + query : ''}#${path}`);
 }
@@ -223,6 +228,25 @@ async function fitHeight(page: Page): Promise<number> {
 for (const theme of ['dark', 'light'] as const) {
   for (const s of SCREENS.filter((x) => !ONLY || ONLY.includes(x.name))) {
     test(`${s.name} ${theme}`, async ({ page }) => {
+      if (s.window) {
+        // The Settings window at its own size (the contract's 880x700), as the shell opens it.
+        await page.clock.install({ time: NOW });
+        await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+        await page.setViewportSize({ width: 880, height: 700 });
+        await page.goto(dialogWindowUrl(s.window, {}, { title: 'Settings', query: `?mock-static&mock-fast${s.query ? '&' + s.query : ''}` }));
+        await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
+        await s.prepare?.(page);
+        await page.clock.runFor(1500);
+        await page.mouse.move(2, 2);
+        await page.waitForTimeout(600);
+        if (s.element) {
+          await page.locator(s.element).scrollIntoViewIfNeeded();
+          await page.locator(s.element).screenshot({ path: `${OUT}/${s.name}-${theme}.png` });
+        } else {
+          await page.screenshot({ path: `${OUT}/${s.name}-${theme}.png` });
+        }
+        return;
+      }
       await open(page, s.path, theme, s.query);
       await expect(page.locator('h1').first()).toBeVisible();
       await s.prepare?.(page);

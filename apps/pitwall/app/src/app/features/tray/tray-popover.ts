@@ -252,6 +252,12 @@ import { MatTooltip } from '@angular/material/tooltip';
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: var(--pd-space-2);
+      /* Two actions side by side in a 360 px popover: each on one line, with less side padding than a page button. */
+      button {
+        min-width: 0;
+        white-space: nowrap;
+        --mat-button-outlined-horizontal-padding: var(--pd-space-2);
+      }
       .wide {
         grid-column: 1 / -1;
         --mat-button-filled-container-height: 32px;
