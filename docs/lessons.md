@@ -806,3 +806,18 @@ bug by freezing the processes (`docker pause`, SIGSTOP) on an injected clock, ne
 "try again" in every socket loop with a read timeout. **Follow-up:** the same EINTR and wall-clock patterns are in
 Spotter's `spotter-render` and the shared `paddock-chromium`: the three Chromium drivers have diverged and need
 consolidating onto `paddock-chromium` (plan X14), and `Budget` and `is_transient` belong there.
+
+## 2026-10-30: a test app built the plugins binary inside the test (Debrief)
+
+`browser::renderer::tests::fake::a_research_nobody_touched_closes_its_browser_when_it_ends` hit nextest's 300 s limit
+in two parallel `cargo nextest run -p debrief-app` container runs, and two fake-browser tests took 146 to 166 s in another
+`-p debrief-app` run, though each passes alone in 2 s. Neither the fake browser nor any wait of the test was the cause:
+`test_support::test_app` ran `cargo build -p debrief-plugins` when the plugins binary was missing (a `-p debrief-app`
+build does not make it; CI's `--workspace` build does), and the test waited for that build. Every test-app test process
+started the same build and waited on cargo's build-folder lock. Reproduced deterministically with a `CARGO` that never
+returns: the test waits as long as the build does. The test apps now never build anything: a missing binary is reported
+once with the command that builds it, and the tests that need plugins fail with that reason. **Lesson:** a test never
+starts a build or any other unbounded external work; it uses what the build made, or fails at once and says what to
+build. The second instance, the real store-worker test in `health::commands::tests` (it built `debrief-store-worker`
+when missing), hit the same 300 s limit while this was checked and is fixed the same way.
+

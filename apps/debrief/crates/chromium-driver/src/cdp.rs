@@ -17,6 +17,9 @@ use tungstenite::protocol::WebSocketConfig;
 use tungstenite::Message;
 
 const MAX_MESSAGE: usize = 32 << 20;
+/// The most the connection buffers of frames not yet written (tungstenite's default is unbounded): a browser that stops
+/// reading ends the connection instead of growing it. Commands are a few kilobytes; a page script at most a few hundred.
+const MAX_WRITE_BUFFER: usize = 4 << 20;
 const MAX_EVENTS: usize = 1024;
 
 #[derive(Debug, Clone)]
@@ -73,9 +76,7 @@ impl Connection {
         let req = format!("ws://127.0.0.1:{port}{path}")
             .into_client_request()
             .map_err(|e| Error::Connection(e.to_string()))?;
-        let mut cfg = WebSocketConfig::default();
-        cfg.max_message_size = Some(MAX_MESSAGE);
-        cfg.max_frame_size = Some(MAX_MESSAGE);
+        let cfg = ws_config();
         let (ws, _) = tungstenite::client::client_with_config(req, stream, Some(cfg)).map_err(|e| Error::Connection(e.to_string()))?;
         let _ = ws.get_ref().set_read_timeout(Some(Duration::from_millis(20)));
         let inner = Arc::new(Inner {
@@ -214,10 +215,17 @@ fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
         while let Ok(m) = rx.try_recv() {
             match ws.send(Message::text(m)) {
                 Ok(()) => {}
-                // The frame is queued; the next read or send writes it (tungstenite's `send`).
+                // The frame stays queued; the flush below writes it.
                 Err(tungstenite::Error::Io(e)) if is_transient(e.kind()) => {}
                 Err(_) => break 'outer,
             }
+        }
+        // Writes what an interrupted send left queued: `read` flushes only pongs and close frames, so a command whose
+        // send was interrupted would otherwise wait for the next send.
+        match ws.flush() {
+            Ok(()) => {}
+            Err(tungstenite::Error::Io(e)) if is_transient(e.kind()) => {}
+            Err(_) => break,
         }
         match ws.read() {
             Ok(Message::Text(t)) => dispatch(&inner, t.as_str()),
@@ -234,6 +242,15 @@ fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
     lock(&inner.pending).clear();
     inner.cv.notify_all();
     let _ = ws.close(None);
+}
+
+/// The WebSocket settings of a DevTools connection: bounded messages, frames and write buffer.
+fn ws_config() -> WebSocketConfig {
+    let mut cfg = WebSocketConfig::default();
+    cfg.max_message_size = Some(MAX_MESSAGE);
+    cfg.max_frame_size = Some(MAX_MESSAGE);
+    cfg.max_write_buffer_size = MAX_WRITE_BUFFER;
+    cfg
 }
 
 /// A socket read or write that ended without an error of the connection (a timeout, or a signal): try again.
@@ -356,6 +373,14 @@ mod tests {
                 script: method.starts_with("Runtime."),
             },
         );
+    }
+
+    #[test]
+    fn the_write_buffer_is_bounded_and_holds_a_buffer_and_a_command() {
+        let cfg = ws_config();
+        assert_eq!(cfg.max_write_buffer_size, MAX_WRITE_BUFFER);
+        assert!(cfg.max_write_buffer_size > cfg.write_buffer_size + (1 << 20), "{cfg:?}");
+        assert!(cfg.max_write_buffer_size < usize::MAX);
     }
 
     #[test]

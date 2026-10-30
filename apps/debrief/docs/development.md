@@ -256,6 +256,9 @@ the CI job's packages, and the x86 CI image only to confirm.
   the child-process tests serialised in their own group. `--profile ci` (CI) never retries a test (a flaky test is fixed,
   not retried) and writes `target/nextest/ci/junit.xml`. nextest skips doc tests: `cargo test --workspace --doc`. On a
   shared machine cap it: `cargo nextest run -j 6`.
+- **The app's tests use the built plugins binary:** `cargo nextest run --workspace` builds it; before a
+  `cargo nextest run -p debrief-app`, run `cargo build -p debrief-plugins` once. Without it the test apps have no plugins
+  (they say so once) and the tests that need plugins fail; a test never builds it itself.
 - **One integration-test binary per crate:** `tests/it/main.rs` declares a module per file (`tests/it/<name>.rs`),
   shared helpers live in `tests/it/common/` (or `support/`). Linking a binary per file cost more than the tests took. A new
   test file is a new `mod` line in `main.rs`, never a new `tests/<name>.rs`. Run one file's tests with
