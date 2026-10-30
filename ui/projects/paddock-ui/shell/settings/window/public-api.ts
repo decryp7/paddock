@@ -9,4 +9,5 @@ export { PdSettingField } from './src/setting-field';
 export { PdSettingsSection, PdSettingsSectionPage, SETTINGS_PAGE } from './src/settings-section';
 export { PdSettingsWindow, SETTINGS_WINDOW_PAGES, SETTINGS_RESTART } from './src/settings-window';
 export { SettingsStatus, settingsPageStatus } from './src/settings-status';
+export { SettingsCloseGuards, settingsPageCloseGuard, type SettingsCloseGuard, type SettingsCloseVerdict } from './src/settings-close';
 export { settingsWindowProviders, type SettingsWindowOptions } from './src/provide-settings';
