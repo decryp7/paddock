@@ -115,9 +115,11 @@ const isBinary = (p) => ['.exe', '.dll'].includes(extname(p).toLowerCase());
 /**
  * Every *.exe and *.dll below `paths` (files are taken as given; symbolic links to folders are not followed). Never
  * throws: a path that cannot be read becomes a problem.
+ * @param {string[]} paths
+ * @param {{ readdirSync: typeof readdirSync }} [io] the folder lister, injectable so tests can make a folder unreadable under any user
  * @returns {{ files: string[], problems: string[] }}
  */
-export function collect(paths) {
+export function collect(paths, io = { readdirSync }) {
   const files = [];
   const problems = [];
   const visit = (p, explicit) => {
@@ -143,7 +145,7 @@ export function collect(paths) {
     if (st.isDirectory()) {
       let entries;
       try {
-        entries = readdirSync(p).sort();
+        entries = io.readdirSync(p).sort();
       } catch (e) {
         problems.push(`${p}: cannot be listed (${e.code ?? e.message})`);
         return;

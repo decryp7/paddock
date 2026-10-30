@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cargoBinaryNames, check, collect, mergePatch, needsRedist, peImports, shippedFiles } from '../release/windows-crt-imports.mjs';
@@ -89,20 +89,21 @@ test('check: a sidecar importing VCRUNTIME140 fails, a clean one passes, a non-P
 
 test('collect never throws: an unreadable path or folder is a problem, a linked folder is not followed', { skip: process.platform === 'win32' && 'needs POSIX permissions and symlinks' }, () => {
   const root = makeApp({ 'a/x.exe': pe({ imports: SYSTEM }), 'outside/y.exe': pe({ imports: ['VCRUNTIME140.dll'] }), 'locked/z.exe': pe() });
+  // The lock is injected, not chmod: root (CI containers) ignores permission bits, an injected EACCES is the same for every user.
+  const locked = join(root, 'locked');
+  const io = { readdirSync: (p) => { if (p === locked) throw Object.assign(new Error('denied'), { code: 'EACCES' }); return readdirSync(p); } };
   symlinkSync(join(root, 'outside'), join(root, 'a/linked-folder'));
   symlinkSync(join(root, 'a'), join(root, 'a/loop'));
   symlinkSync(join(root, 'outside/y.exe'), join(root, 'a/linked.exe'));
   symlinkSync(join(root, 'nowhere.exe'), join(root, 'a/broken.exe'));
-  chmodSync(join(root, 'locked'), 0o000);
-  try {
+  {
     let r;
-    assert.doesNotThrow(() => { r = collect([join(root, 'a'), join(root, 'locked'), join(root, 'missing')]); });
+    assert.doesNotThrow(() => { r = collect([join(root, 'a'), locked, join(root, 'missing')], io); });
     assert.deepEqual(r.files.map((f) => f.slice(root.length + 1)), ['a/linked.exe', 'a/x.exe'], 'linked folders are not entered; a linked file is read');
-    assert.equal(r.problems.length, process.getuid?.() === 0 ? 2 : 3, r.problems.join('\n'));
+    assert.equal(r.problems.length, 3, r.problems.join('\n'));
     assert.ok(r.problems.some((p) => /broken\.exe: a broken symbolic link/.test(p)));
     assert.ok(r.problems.some((p) => /missing: cannot be read \(ENOENT\)/.test(p)));
-  } finally {
-    chmodSync(join(root, 'locked'), 0o755);
+    assert.ok(r.problems.some((p) => /locked: cannot be listed \(EACCES\)/.test(p)));
   }
 });
 
