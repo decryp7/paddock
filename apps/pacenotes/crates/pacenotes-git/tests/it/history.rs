@@ -11,18 +11,18 @@ use pacenotes_git::{OpenError, open, rank_hot_spots};
 use paddock_jobs::CancelToken;
 use paddock_testkit::Scratch;
 
-fn p(s: &str) -> RepoPath {
+pub fn p(s: &str) -> RepoPath {
     RepoPath::parse(s).unwrap()
 }
 
-struct Repo {
+pub struct Repo {
     _scratch: Scratch,
-    dir: PathBuf,
+    pub dir: PathBuf,
     home: PathBuf,
 }
 
 impl Repo {
-    fn new() -> Repo {
+    pub fn new() -> Repo {
         let scratch = Scratch::new();
         let dir = scratch.path("repo");
         std::fs::create_dir_all(&dir).unwrap();
@@ -36,7 +36,7 @@ impl Repo {
         repo
     }
 
-    fn git(&self, args: &[&str], time: i64) -> String {
+    pub fn git(&self, args: &[&str], time: i64) -> String {
         let date = format!("@{time} +0000");
         let out = std::process::Command::new("git")
             .current_dir(&self.dir)
@@ -54,7 +54,7 @@ impl Repo {
     }
 
     /// Writes `files` (an empty content is an empty file), stages everything and commits at `time` by `author`.
-    fn commit(&self, time: i64, author: &str, files: &[(&str, &str)]) -> Rev {
+    pub fn commit(&self, time: i64, author: &str, files: &[(&str, &str)]) -> Rev {
         for (name, content) in files {
             let path = self.dir.join(name);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -68,7 +68,7 @@ impl Repo {
     }
 }
 
-fn live() -> CancelToken {
+pub fn live() -> CancelToken {
     CancelToken::new()
 }
 

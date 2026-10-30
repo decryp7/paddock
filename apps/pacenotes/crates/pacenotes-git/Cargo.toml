@@ -11,7 +11,7 @@ publish = false
 [dependencies]
 pacenotes-core = { workspace = true }
 paddock-jobs = { workspace = true }
-gix = { version = "0.90", default-features = false, features = ["sha1", "revision", "parallel"] }
+gix = { version = "0.90", default-features = false, features = ["sha1", "revision", "parallel", "blame"] }
 thiserror = "2"
 
 [dev-dependencies]

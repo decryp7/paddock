@@ -106,3 +106,22 @@ used; the C2 tests use small generated repositories.
   legitimate clones. The cost of a hard-linked pack is that it is the same bytes as in the other repository, which is the
   repository's own data, not a way out of the workspace.
 - Rename detection is exact only in v1; a moved-and-edited file shows as delete plus add.
+
+## Amendment (2026-10-30, package C2b): blame, and what it changes in the "no blob diff" rule
+
+Ownership figures need per-line authorship, and gix's blame (`gix` feature `blame`, `gix-blame` 0.20) diffs blobs. Decision 4 above said
+the compiler enforces "no blob diff" because gix's `blob-diff` feature was off. **That is no longer true**: the `blame` feature turns
+on `gix-diff`'s blob diffing, and the dependency graph now contains `gix-command` and `gix-filter` (they are compiled in; nothing here
+calls them). What replaces the compiler's guarantee:
+
+- **Only one door.** The crate calls blame through `GixHistory::blame` and nowhere else; the source scan test (`the_sources_never_start_a_process`) still refuses `Command::new`, `std::process`, `gix::command` and `gix_command` in the crate's sources.
+- **Blame reads the object database only.** `Repository::blame_file` takes a commit id and a path; its diff resource cache is the tree-diff one (`diff_resource_cache_for_tree_diff`: mode "to git", attributes from the tree's own `.gitattributes`, **no worktree roots**). Blobs are read as stored: no worktree, no index, no filter run, no text conversion, no external diff (those are only used by modes and calls this crate never makes).
+- **A trap row proves it.** `blame_runs_nothing_a_repository_configures`: a repository whose config names `diff.<n>.textconv`, `diff.<n>.command`, `filter.<n>.clean`, `filter.<n>.smudge` and `core.fsmonitor`, each set to a command that creates a marker file, and whose `.gitattributes` assigns them to the blamed file, is blamed; the blame is correct and the marker file does not exist. The commits are made before the config is set, because the git binary that builds the fixture would itself run a clean filter.
+- **If a gix upgrade changes this, the trap row fails.** An upgrade of `gix` or `gix-blame` re-runs it before it merges.
+
+Other facts of the adapter: blame works on a commit (never the working tree; that is the index's), follows renames (`Rewrites::default()`),
+returns hunks in line order with the author's email (cut at 128 bytes, as in the log), the commit time and the source name when it
+differs, and is cut at 50,000 hunks (`truncated`). `since` and the line range bound the work on a large history; gix's blame cannot be
+interrupted, so `cancel` is looked at before it starts and a deadline is not offered (ADR 0031). A file missing at the revision is
+`NotFound`; a bad range is an error that says the range is 1-based. Author text is personal data: it is returned to the caller for the
+ownership view and is not logged.

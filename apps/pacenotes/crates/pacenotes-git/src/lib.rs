@@ -7,10 +7,12 @@
 //! index, a filter, a blob diff or an attribute, so nothing a repository configures (`core.fsmonitor`, `filter.*`,
 //! `diff.*.textconv`, hooks) can run.
 
+pub mod blame;
 pub mod churn;
 pub mod history;
 pub mod open;
 
+pub use blame::{Blame, BlameHunk, MAX_BLAME_HUNKS};
 pub use churn::{CommitChanges, FileChurn, HotSpot, churn, rank_hot_spots};
 pub use history::{GixHistory, MAX_LOG_COMMITS};
 pub use open::{OpenError, open};

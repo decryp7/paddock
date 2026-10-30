@@ -17,7 +17,7 @@ pub const MAX_FILES_PER_COMMIT: usize = 10_000;
 /// The longest author text kept.
 pub const MAX_AUTHOR_BYTES: usize = 128;
 
-fn cut_text(s: &mut String, max: usize) {
+pub(crate) fn cut_text(s: &mut String, max: usize) {
     if s.len() > max {
         let mut end = max;
         while !s.is_char_boundary(end) {
@@ -124,6 +124,10 @@ fn hash_of(id: gix::ObjectId) -> Result<CommitHash, HistoryError> {
 impl GixHistory {
     pub(crate) fn new(repo: gix::ThreadSafeRepository, root: PathBuf) -> GixHistory {
         GixHistory { repo, root }
+    }
+
+    pub(crate) fn thread_local_repo(&self) -> gix::Repository {
+        self.repo.to_thread_local()
     }
 
     /// The canonical workspace root this history was opened for.
