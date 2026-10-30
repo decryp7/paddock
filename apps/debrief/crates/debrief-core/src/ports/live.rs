@@ -60,6 +60,9 @@ pub struct TailAppend {
     /// (annotators) pick up. `None` when no event was added.
     #[serde(default)]
     pub first_new: Option<NewEvents>,
+    /// What the user should know although the refresh worked (e.g. the events could not be put in time order).
+    #[serde(default)]
+    pub notices: Vec<String>,
 }
 
 /// Where the events a refresh added start (ids only grow, so they are all at and after `id`).

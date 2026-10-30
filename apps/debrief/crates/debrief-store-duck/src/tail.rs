@@ -432,17 +432,27 @@ impl Inner {
                 ts: done.iter().filter(|a| a.events > 0).filter_map(|a| a.from).min(),
             });
             out.sources_changed.extend(done.iter().filter(|a| a.events > 0).map(|a| a.id));
-            if let Err(e) = pos::append(conn, first_new, before) {
-                log::warn!("time-order positions could not be extended: {e}");
-            }
-            match compact::pending(conn) {
-                Ok(p) if !p.is_empty() => {
-                    if let Err(e) = compact::compact(conn, &self.dir, &self.schema) {
-                        log::warn!("segment compaction failed: {e:#}");
-                    }
+            // The new events follow the positioned ones (the usual case) or every event is put in order again.
+            let mut reorder = match pos::append(conn, first_new, before) {
+                Ok(extended) => !extended,
+                Err(e) => {
+                    log::warn!("time-order positions could not be extended: {e}");
+                    true
                 }
+            };
+            match compact::pending(conn) {
+                Ok(p) if !p.is_empty() => match compact::compact(conn, &self.dir, &self.schema) {
+                    // Merging small segments keeps every event; rewriting out rows of removed sources leaves positions
+                    // of events that are gone, so the events are ordered again only then.
+                    Ok(c) if c.replaced > 0 => reorder |= !pos::complete(conn).unwrap_or(false),
+                    Ok(_) => {}
+                    Err(e) => log::warn!("segment compaction failed: {e:#}"),
+                },
                 Ok(_) => {}
                 Err(e) => log::warn!("segment compaction could not be planned: {e:#}"),
+            }
+            if reorder {
+                out.notices.extend(self.reorder(conn));
             }
             self.generation.fetch_add(1, Ordering::SeqCst);
             self.bump_version(conn)?;
@@ -666,7 +676,7 @@ impl Inner {
                 save_tracked(&conn, id, &t).map_err(engine)?;
             }
             crate::parsers::record(&conn, &parser_set).map_err(engine)?;
-            self.maintain(&conn, None);
+            report.notices.extend(self.maintain(&conn, None));
             self.bump_version(&conn)?;
         }
         if !rest.is_empty() {

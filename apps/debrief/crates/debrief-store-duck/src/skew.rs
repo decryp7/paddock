@@ -12,7 +12,7 @@ use crate::schema::{parquet_from, READY};
 use crate::segments::{Segment, SegmentWriter, SEGMENTS_DIR};
 use crate::sql::ident;
 use crate::writer::{self, delete_segment, insert_segment, meta_u64, refresh_view, set_meta};
-use crate::{engine, lock, pos, DuckStore};
+use crate::{engine, lock, DuckStore};
 use anyhow::Result;
 use debrief_core::batch::{EventBatch, EventId, EventSchema, BATCH_ROWS};
 use debrief_core::ports::{EventsRequest, Query, Skew, StoreError, StoreResult};
@@ -209,11 +209,13 @@ impl DuckStore {
             }
         }
         if !shifts.is_empty() {
-            if let Err(e) = pos::rebuild(&conn) {
-                log::warn!("time-order positions could not be rebuilt: {e}");
-            }
+            // A failed ordering is marked stale and done again by the next open or import; the correction itself holds.
+            let notice = inner.reorder(&conn);
             inner.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             inner.bump_version(&conn)?;
+            if let Some(notice) = notice {
+                return Err(StoreError::Engine(format!("The clock correction is applied. {notice}")));
+            }
         }
         Ok(())
     }

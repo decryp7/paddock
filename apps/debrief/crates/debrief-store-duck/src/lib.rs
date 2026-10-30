@@ -113,23 +113,48 @@ impl Default for StoreOptions {
     }
 }
 
-/// Runs `f` with DuckDB's memory limit at `raised` and sets it back to `normal` afterwards, also when `f` fails (the
-/// limit is the database's, so every connection sees it while `f` runs).
-pub(crate) fn with_memory<T, E>(
-    conn: &Connection,
-    raised: &str,
-    normal: &str,
-    f: impl FnOnce(&Connection) -> Result<T, E>,
-) -> Result<T, E> {
-    let set = |limit: &str| conn.execute_batch(&format!("SET memory_limit = '{}'", limit.replace('\'', "''")));
-    if let Err(e) = set(raised) {
-        log::warn!("could not raise DuckDB's memory limit to {raised}: {e}");
+/// DuckDB's memory limit raised while it lives; dropping it (also when the work fails or panics) sets the limit to what
+/// `normal` returns then, so a `configure` that ran meanwhile is not undone.
+struct RaisedMemory<'c, N: Fn() -> String> {
+    conn: &'c Connection,
+    normal: N,
+}
+
+fn set_memory_limit(conn: &Connection, limit: &str) -> duckdb::Result<()> {
+    conn.execute_batch(&format!("SET memory_limit = '{}'", limit.replace('\'', "''")))
+}
+
+impl<'c, N: Fn() -> String> RaisedMemory<'c, N> {
+    fn new(conn: &'c Connection, raised: &str, normal: N) -> Self {
+        if let Err(e) = set_memory_limit(conn, raised) {
+            log::warn!("could not raise DuckDB's memory limit to {raised}: {e}");
+        }
+        RaisedMemory { conn, normal }
     }
-    let result = f(conn);
-    if let Err(e) = set(normal) {
-        log::error!("could not set DuckDB's memory limit back to {normal}: {e}");
+}
+
+impl<N: Fn() -> String> Drop for RaisedMemory<'_, N> {
+    fn drop(&mut self) {
+        let normal = (self.normal)();
+        if let Err(e) = set_memory_limit(self.conn, &normal) {
+            log::error!("could not set DuckDB's memory limit back to {normal}: {e}");
+        }
     }
-    result
+}
+
+/// Runs `f` with DuckDB's memory limit at `raised`, then sets it to what `normal` returns at that moment, also when `f`
+/// fails or panics (the limit is the database's, so every connection sees it while `f` runs).
+pub(crate) fn with_memory<T>(conn: &Connection, raised: &str, normal: impl Fn() -> String, f: impl FnOnce(&Connection) -> T) -> T {
+    let _raised = RaisedMemory::new(conn, raised, normal);
+    f(conn)
+}
+
+/// What the user is told when the events could not be put in time order.
+pub(crate) fn reorder_notice(e: &dyn std::fmt::Display) -> String {
+    format!(
+        "Debrief could not put the events in time order ({e}), so the event list may be incomplete. It tries again \
+         when the project opens and after the next import."
+    )
 }
 
 /// The spill folder of the store in `dir` below the chosen spill folder `base`: one folder per store (stores never
@@ -360,35 +385,30 @@ impl Inner {
         };
         let mut notices = Vec::new();
         let tc = std::time::Instant::now();
-        let (raised, normal) = {
-            let o = read_lock(&self.options);
-            (o.import_memory_limit.clone(), o.memory_limit.clone())
-        };
         // No catalogue query runs beside the compaction and the ordering, which get the import's memory: the ordering
         // ran out of memory beside eight catalogue workers once, leaving the events unordered.
         let _heavy = lock(&self.heavy);
-        let ordered = with_memory(conn, &raised, &normal, |conn| {
-            if progress.is_some_and(|p| p.cancel_flag().load(Ordering::SeqCst)) {
-                log::info!("import cancelled: segment compaction skipped");
-            } else {
-                stage("Compacting segments");
-                match compact::compact(conn, &self.dir, &self.schema) {
-                    Ok(c) if c.replaced > 0 => log::info!("compacted {} segments into {}", c.replaced, c.written),
-                    Ok(_) => {}
-                    Err(e) => log::warn!("segment compaction failed: {e:#}"),
-                }
+        // Cancel may have come while waiting for the lock: then only the ordering runs (what was read stays usable).
+        if progress.is_some_and(|p| p.cancel_flag().load(Ordering::SeqCst)) {
+            log::info!("import cancelled: segment compaction skipped");
+        } else {
+            stage("Compacting segments");
+            let raised = read_lock(&self.options).import_memory_limit.clone();
+            let compacted = with_memory(
+                conn,
+                &raised,
+                || read_lock(&self.options).memory_limit.clone(),
+                |conn| compact::compact(conn, &self.dir, &self.schema),
+            );
+            match compacted {
+                Ok(c) if c.replaced > 0 => log::info!("compacted {} segments into {}", c.replaced, c.written),
+                Ok(_) => {}
+                Err(e) => log::warn!("segment compaction failed: {e:#}"),
             }
-            stage("Ordering events by time");
-            log::debug!("import: compact {:?}", tc.elapsed());
-            pos::rebuild_or_mark(conn)
-        });
-        if let Err(e) = ordered {
-            log::error!("time-order positions could not be rebuilt: {e}");
-            notices.push(format!(
-                "Debrief could not put the events in time order ({e}), so the event list may be incomplete. It tries \
-                 again when the project opens and after the next import."
-            ));
         }
+        stage("Ordering events by time");
+        log::debug!("import: compact {:?}", tc.elapsed());
+        notices.extend(self.reorder_holding_heavy(conn));
         log::debug!("import: pos {:?}", tc.elapsed());
         stage("Saving the index");
         // Write the catalog into the database file now, so a reopen does not replay the WAL.
@@ -405,6 +425,32 @@ impl Inner {
         // The burst's free pages go back to the OS now: the process may idle afterwards.
         debrief_alloc::release();
         notices
+    }
+
+    /// Puts the events in time order again: the one way the positions are rebuilt (imports, live refreshes,
+    /// compaction, removals, skew corrections, the Store pane). Under the `heavy` lock, with the import memory as
+    /// DuckDB's limit, tried twice and marked stale when both fail ([`pos::rebuild_or_mark`]). `None` when the
+    /// positions are complete, else what to tell the user.
+    pub(crate) fn reorder(&self, conn: &Connection) -> Option<String> {
+        let _heavy = lock(&self.heavy);
+        self.reorder_holding_heavy(conn)
+    }
+
+    /// [`Inner::reorder`] for a caller that holds the `heavy` lock.
+    fn reorder_holding_heavy(&self, conn: &Connection) -> Option<String> {
+        let raised = read_lock(&self.options).import_memory_limit.clone();
+        match with_memory(
+            conn,
+            &raised,
+            || read_lock(&self.options).memory_limit.clone(),
+            pos::rebuild_or_mark,
+        ) {
+            Ok(()) => None,
+            Err(e) => {
+                log::error!("time-order positions could not be rebuilt: {e}");
+                Some(reorder_notice(&e))
+            }
+        }
     }
 
     pub(crate) fn conn(&self) -> StoreResult<Conn<'_>> {
@@ -837,11 +883,10 @@ impl DuckStore {
         conn.execute_batch(schema::CACHE_DDL).map_err(engine)?;
         conn.execute_batch(lanes::DDL).map_err(engine)?;
         conn.execute_batch(schema::ADDED_DDL).map_err(engine)?;
-        // A rebuild of the positions that failed (pos::STALE) is done again now: they must never stay missing.
+        // Positions a failed ordering left stale (pos::STALE) or that are missing are not rebuilt here, inside the
+        // open call: the app sees `positioned() < total` and runs MaintenanceAction::OrderEvents as a job.
         if pos::is_stale(&conn) {
-            if let Err(e) = with_memory(&conn, &opts.import_memory_limit, &opts.memory_limit, pos::rebuild_or_mark) {
-                log::error!("time-order positions are still missing after a retry: {e}");
-            }
+            log::warn!("the events' time order is stale; it is rebuilt by the next ordering");
         }
         Ok(Self::with(dir, conn, schema, parsers, registry, opts))
     }
@@ -1123,14 +1168,17 @@ impl Ingest for DuckStore {
                 log::warn!("could not remove source {id} from the full-text index: {e:#}");
             }
         }
-        self.inner.maintain(&conn, None);
+        let notices = self.inner.maintain(&conn, None);
         let mut s = write_lock(&self.inner.state);
         let p = PathBuf::from(&path);
         s.roots.retain(|r| *r != p);
         s.removed.insert(p);
         drop(s);
         self.changed();
-        Ok(())
+        match notices.first() {
+            None => Ok(()),
+            Some(n) => Err(StoreError::Engine(format!("The source was removed. {n}"))),
+        }
     }
 
     fn clear(&self) -> StoreResult<()> {

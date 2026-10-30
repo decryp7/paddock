@@ -172,6 +172,7 @@ impl Ingest for WorkspaceStore {
             deleted: r.deleted,
             held: Vec::new(),
             first_new: None,
+            notices: Vec::new(),
         })
     }
 }

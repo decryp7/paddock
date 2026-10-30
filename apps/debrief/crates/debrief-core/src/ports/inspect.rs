@@ -316,6 +316,9 @@ pub enum MaintenanceAction {
     RebuildIndex,
     /// Forget the cached analyses (they are computed again on next use).
     ClearCachedAnalyses,
+    /// Put the events in time order again (the positions the event list pages by), after an ordering that failed or
+    /// is missing. The app starts it after opening a store whose positions are incomplete.
+    OrderEvents,
 }
 
 impl MaintenanceAction {
@@ -325,6 +328,7 @@ impl MaintenanceAction {
             MaintenanceAction::Compact => "Compacting segments",
             MaintenanceAction::RebuildIndex => "Clearing the index",
             MaintenanceAction::ClearCachedAnalyses => "Clearing cached analyses",
+            MaintenanceAction::OrderEvents => "Ordering events by time",
         }
     }
 
@@ -334,6 +338,7 @@ impl MaintenanceAction {
             MaintenanceAction::Compact => "Compact the store",
             MaintenanceAction::RebuildIndex => "Rebuild the full-text index",
             MaintenanceAction::ClearCachedAnalyses => "Clear cached analyses",
+            MaintenanceAction::OrderEvents => "Put the events in time order",
         }
     }
 }

@@ -78,5 +78,11 @@ export function maintenanceText(a: MaintenanceAction): { title: string; message:
         message: $localize`:@@store.maintain.clearMessage:Forget the cached analyses? They are computed again when you next open them.`,
         confirm: $localize`:@@store.maintain.clearConfirm:Clear`,
       };
+    case 'orderEvents':
+      return {
+        title: $localize`:@@store.maintain.orderTitle:Put events in time order`,
+        message: $localize`:@@store.maintain.orderMessage:Put every event in time order again? The event list pages by this order; reading goes on meanwhile.`,
+        confirm: $localize`:@@store.maintain.orderConfirm:Order events`,
+      };
   }
 }

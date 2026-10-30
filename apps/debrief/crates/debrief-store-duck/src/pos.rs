@@ -7,7 +7,7 @@ use crate::schema::{canonical_columns, parquet_from, READY};
 use crate::segments::SEGMENTS_DIR;
 use crate::{engine, lock, DuckStore};
 use debrief_core::batch::{EventBatch, EventId, BATCH_ROWS};
-use debrief_core::ports::{Positions, StoreResult, MAX_PAGE_ROWS};
+use debrief_core::ports::{Positions, StoreError, StoreResult, MAX_PAGE_ROWS};
 use duckdb::arrow::array::{RecordBatch, StructArray};
 use duckdb::{params, Connection};
 
@@ -23,7 +23,9 @@ pub(crate) const STALE: &str = "ord_stale";
 pub(crate) const ATTEMPTS: usize = 2;
 
 /// [`rebuild`], tried [`ATTEMPTS`] times; marks the positions [`STALE`] when every attempt failed (and clears the mark
-/// when one succeeded). The error is the last attempt's.
+/// when one succeeded). The error is the last attempt's. Between attempts a `CHECKPOINT` writes out what the catalog
+/// holds in memory, so its blocks can be evicted and the second attempt has the memory the first ran out of (the caller
+/// already gave it the import memory, `Inner::reorder`).
 pub(crate) fn rebuild_or_mark(conn: &Connection) -> duckdb::Result<()> {
     let mut last = None;
     for attempt in 1..=ATTEMPTS {
@@ -37,6 +39,11 @@ pub(crate) fn rebuild_or_mark(conn: &Connection) -> duckdb::Result<()> {
             Err(e) => {
                 log::warn!("time-order positions could not be rebuilt (attempt {attempt} of {ATTEMPTS}): {e}");
                 last = Some(e);
+                if attempt < ATTEMPTS {
+                    if let Err(e) = conn.execute_batch("CHECKPOINT") {
+                        log::warn!("checkpoint before the next ordering attempt failed: {e}");
+                    }
+                }
             }
         }
     }
@@ -44,6 +51,14 @@ pub(crate) fn rebuild_or_mark(conn: &Connection) -> duckdb::Result<()> {
         log::error!("could not mark the positions stale: {e:#}");
     }
     Err(last.unwrap_or(duckdb::Error::QueryReturnedNoRows))
+}
+
+/// Whether there are as many positions as visible events (rows rewritten out by compaction leave more positions than
+/// events; missing positions leave fewer). A count, not a check of every id: cheap enough after each compaction.
+pub(crate) fn complete(conn: &Connection) -> duckdb::Result<bool> {
+    conn.query_row("SELECT (SELECT count(*) FROM ord) = (SELECT count(*) FROM events)", [], |r| {
+        r.get(0)
+    })
 }
 
 /// Whether a failed rebuild left the positions stale.
@@ -97,9 +112,10 @@ fn last_key(conn: &Connection) -> Option<(i64, u32, u32)> {
 }
 
 /// Positions the events with ids from `first_new` on after the ones already positioned, when they all sort after
-/// them (the usual case when files grow); otherwise renumbers everything. `before` is the number of events that
-/// were visible before the new ones: positions are only extended when exactly that many are positioned.
-pub(crate) fn append(conn: &Connection, first_new: u64, before: u64) -> duckdb::Result<()> {
+/// them (the usual case when files grow). `before` is the number of events that were visible before the new ones:
+/// positions are only extended when exactly that many are positioned. False when they cannot be extended and every
+/// event must be renumbered (the caller does that through `Inner::reorder`, never here).
+pub(crate) fn append(conn: &Connection, first_new: u64, before: u64) -> duckdb::Result<bool> {
     let positioned = conn.query_row("SELECT count(*) FROM ord", [], |r| r.get::<_, u64>(0))?;
     let smallest = conn.query_row(
         "SELECT coalesce(ts, 9223372036854775807), source, line FROM events WHERE id >= ? ORDER BY 1, 2, 3 LIMIT 1",
@@ -109,18 +125,23 @@ pub(crate) fn append(conn: &Connection, first_new: u64, before: u64) -> duckdb::
     let smallest = match smallest {
         Ok(k) => k,
         // The new ids hold no visible events.
-        Err(duckdb::Error::QueryReturnedNoRows) => return Ok(()),
+        Err(duckdb::Error::QueryReturnedNoRows) => return Ok(true),
         Err(e) => return Err(e),
     };
     match last_key(conn) {
         Some(last) if positioned == before && smallest > last => {}
-        _ => return rebuild(conn),
+        _ => return Ok(false),
     }
     conn.execute(
         "INSERT INTO ord SELECT (? + row_number() OVER (ORDER BY coalesce(ts, 9223372036854775807), source, line, id) - 1)::UBIGINT, id FROM events WHERE id >= ? ORDER BY 1",
         params![positioned, first_new],
     )?;
-    remember_last(conn)
+    remember_last(conn)?;
+    // The positions are complete again (they were before, and the new events follow them).
+    if let Err(e) = crate::writer::set_meta(conn, STALE, 0) {
+        log::warn!("could not clear {STALE}: {e:#}");
+    }
+    Ok(true)
 }
 
 impl Positions for DuckStore {
@@ -242,10 +263,13 @@ impl DuckStore {
         Ok(n)
     }
 
-    /// Renumbers the events now (normally done by imports and removals).
+    /// Renumbers the events now (normally done by imports and removals), through `Inner::reorder`.
     pub fn rebuild_positions(&self) -> StoreResult<()> {
         let _writing = lock(&self.inner.write_lock);
         let conn = self.inner.conn()?;
-        rebuild(&conn).map_err(engine)
+        match self.inner.reorder(&conn) {
+            None => Ok(()),
+            Some(notice) => Err(StoreError::Engine(notice)),
+        }
     }
 }

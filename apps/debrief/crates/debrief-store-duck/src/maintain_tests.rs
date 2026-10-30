@@ -215,28 +215,152 @@ fn segments_written_by_arrow_58_and_60_read_and_compact_together() {
     assert_eq!(store.positioned().unwrap(), before as u64);
 }
 
-#[test]
-fn a_failed_time_ordering_is_reported_kept_and_done_again_when_the_store_opens() {
-    let dir = Dir::new("ordering-fails");
+/// A store with the sample logs whose positions can no longer be written: every ordering fails, as one that runs out
+/// of memory does.
+fn unorderable(dir: &Dir) -> DuckStore {
     let store = DuckStore::create(&dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
     store.open(&samples()).unwrap().wait().unwrap();
+    assert_eq!(store.positioned().unwrap(), store.summary().unwrap().total as u64);
+    store.inner.conn().unwrap().execute_batch("DROP TABLE ord").unwrap();
+    store
+}
+
+fn stale(store: &DuckStore) -> u64 {
+    crate::writer::meta_u64(&store.inner.conn().unwrap(), pos::STALE)
+}
+
+#[test]
+fn a_failed_time_ordering_is_reported_kept_and_done_again_by_the_ordering_job() {
+    let dir = Dir::new("ordering-fails");
+    let store = unorderable(&dir);
     let events = store.summary().unwrap().total as u64;
-    assert_eq!(store.positioned().unwrap(), events);
-    {
+    let notices = {
         let conn = store.inner.conn().unwrap();
-        // Every attempt to write the positions fails (as a rebuild that runs out of memory does).
-        conn.execute_batch("DROP TABLE ord").unwrap();
-        let notices = store.inner.maintain(&conn, Some(&ImportProgress::default()));
-        assert!(
-            notices.iter().any(|n| n.contains("time order") && n.contains("again")),
-            "the import says so: {notices:?}"
-        );
-        assert_eq!(crate::writer::meta_u64(&conn, pos::STALE), 1, "and the store remembers it");
-    }
+        store.inner.maintain(&conn, Some(&ImportProgress::default()))
+    };
+    assert!(
+        notices.iter().any(|n| n.contains("time order") && n.contains("again")),
+        "the import says so: {notices:?}"
+    );
+    assert_eq!(stale(&store), 1, "and the store remembers it");
     drop(store);
+    // Opening does not order inside the open call; the app sees the gap and runs the ordering job.
     let store = DuckStore::open(&dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
-    assert_eq!(store.positioned().unwrap(), events, "ordered again when the store opened");
-    assert_eq!(crate::writer::meta_u64(&store.inner.conn().unwrap(), pos::STALE), 0);
+    assert!(store.positioned().unwrap() < events, "the gap the app checks");
+    use debrief_core::ports::{Maintain, MaintenanceAction};
+    store.maintain(MaintenanceAction::OrderEvents).unwrap();
+    assert_eq!(store.positioned().unwrap(), events, "ordered again by the job");
+    assert_eq!(stale(&store), 0);
+}
+
+#[test]
+fn every_path_that_reorders_reports_a_failure_and_marks_the_positions_stale() {
+    use debrief_core::ports::{Maintain, MaintenanceAction};
+    // rebuild_positions
+    let dir = Dir::new("reorder-api");
+    let store = unorderable(&dir);
+    let e = store.rebuild_positions().unwrap_err().to_string();
+    assert!(e.contains("time order"), "{e}");
+    assert_eq!(stale(&store), 1, "rebuild_positions");
+    drop(store);
+    // Store pane: Compact (with rows of a removed source to rewrite)
+    let dir = Dir::new("reorder-compact");
+    let store = with_garbage(&dir);
+    store.inner.conn().unwrap().execute_batch("DROP TABLE ord").unwrap();
+    let e = store.maintain(MaintenanceAction::Compact).unwrap_err().to_string();
+    assert!(e.contains("Compacted") && e.contains("time order"), "{e}");
+    assert_eq!(stale(&store), 1, "Compact");
+    drop(store);
+    // Removing a source
+    let dir = Dir::new("reorder-remove");
+    let store = unorderable(&dir);
+    let source = store
+        .inner
+        .conn()
+        .unwrap()
+        .query_row("SELECT min(id) FROM sources", [], |r| r.get::<_, u32>(0))
+        .unwrap();
+    let e = store.remove_source(SourceId(source)).unwrap_err().to_string();
+    assert!(e.contains("removed") && e.contains("time order"), "{e}");
+    assert_eq!(stale(&store), 1, "remove_source");
+}
+
+/// A store following one CLEF file (one line per event, so nothing is held back), and reading `more` folders.
+fn followed(dir: &Dir, more: &[PathBuf]) -> (DuckStore, PathBuf) {
+    let logs = dir.0.join("logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    let file = logs.join("a.clef");
+    let line = |i: u32| format!("{{\"@t\":\"2026-10-14T10:00:{i:02}Z\",\"@mt\":\"event {i}\",\"@l\":\"Information\"}}\n");
+    std::fs::write(&file, (0..3).map(line).collect::<String>()).unwrap();
+    let store = DuckStore::create(&dir.0.join("store"), Profile::default_profile(), PluginRegistry::new()).unwrap();
+    let mut roots = vec![logs];
+    roots.extend_from_slice(more);
+    store.open(&roots).unwrap().wait().unwrap();
+    let mut f = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
+    std::io::Write::write_all(&mut f, (3..5).map(line).collect::<String>().as_bytes()).unwrap();
+    (store, file)
+}
+
+#[test]
+fn a_live_refresh_that_cannot_order_the_new_events_says_so_and_marks_the_positions_stale() {
+    let dir = Dir::new("reorder-tail");
+    let (store, file) = followed(&dir, &[]);
+    store.inner.conn().unwrap().execute_batch("DROP TABLE ord").unwrap();
+    let r = store.append_tail(std::slice::from_ref(&file)).unwrap();
+    assert_eq!(r.appended, 2, "{r:?}");
+    assert!(r.notices.iter().any(|n| n.contains("time order")), "{r:?}");
+    assert_eq!(stale(&store), 1, "the append's fallback goes through the one ordering");
+}
+
+#[test]
+fn a_live_refresh_that_compacts_orders_the_events_again() {
+    let dir = Dir::new("reorder-tail-compact");
+    let (store, file) = followed(&dir, &samples());
+    let files_before = {
+        // A sample source is removed from the catalog without its compaction: its rows are garbage the refresh's
+        // compaction rewrites, and their positions must go with them.
+        let conn = store.inner.conn().unwrap();
+        let victim: u32 = conn
+            .query_row("SELECT min(id) FROM sources WHERE path NOT LIKE '%a.clef'", [], |r| r.get(0))
+            .unwrap();
+        conn.execute("DELETE FROM sources WHERE id = ?", params![victim]).unwrap();
+        // The catalog's live counts are refreshed by compaction; mark the segments so the refresh plans one.
+        conn.execute_batch("UPDATE segments SET live = rows - 1").unwrap();
+        segment_files(&conn)
+    };
+    let r = store.append_tail(std::slice::from_ref(&file)).unwrap();
+    assert_eq!(r.appended, 2, "{r:?}");
+    assert!(r.notices.is_empty(), "{r:?}");
+    let conn = store.inner.conn().unwrap();
+    assert_ne!(segment_files(&conn), files_before, "the garbage segments were rewritten");
+    assert_eq!(
+        store.positioned().unwrap(),
+        store.summary().unwrap().total as u64,
+        "every visible event, no other"
+    );
+    assert_eq!(crate::writer::meta_u64(&conn, pos::STALE), 0);
+}
+
+#[test]
+fn the_catalogue_waits_while_heavy_work_holds_the_store() {
+    let dir = Dir::new("heavy-catalogue");
+    let store = DuckStore::create(&dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
+    store.open(&samples()).unwrap().wait().unwrap();
+    assert!(store.wait_for_catalogue(std::time::Duration::from_secs(60)).unwrap());
+    // Heavy work holds the store (an import's ordering) while the catalogue has to be built again.
+    let held = lock(&store.inner.heavy);
+    catalogue::forget(&store.inner.conn().unwrap(), None).unwrap();
+    if let Some(c) = &store.inner.catalogue {
+        c.wake();
+    }
+    // It cannot run its per-source aggregate meanwhile...
+    assert!(
+        !store.wait_for_catalogue(std::time::Duration::from_millis(1500)).unwrap(),
+        "built beside heavy work"
+    );
+    drop(held);
+    // ...and finishes once the lock is free.
+    assert!(store.wait_for_catalogue(std::time::Duration::from_secs(60)).unwrap());
 }
 
 #[test]
@@ -248,10 +372,34 @@ fn maintenance_runs_with_the_import_memory_and_gives_it_back() {
             .unwrap()
     };
     let normal = limit(&conn);
-    let inside = with_memory(&conn, "512MB", "64MB", |c| Ok::<_, duckdb::Error>(limit(c))).unwrap();
+    let inside = with_memory(&conn, "512MB", || "64MB".to_string(), |c| limit(c));
     assert_ne!(inside, normal, "raised while it runs");
     assert_eq!(limit(&conn), normal, "given back");
-    let failed = with_memory(&conn, "512MB", "64MB", |c| c.execute_batch("SELECT * FROM no_such_table"));
+    let failed = with_memory(
+        &conn,
+        "512MB",
+        || "64MB".to_string(),
+        |c| c.execute_batch("SELECT * FROM no_such_table"),
+    );
     assert!(failed.is_err());
     assert_eq!(limit(&conn), normal, "given back after a failure too");
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        with_memory(&conn, "512MB", || "64MB".to_string(), |_| panic!("the work panics"))
+    }));
+    assert!(panicked.is_err());
+    assert_eq!(limit(&conn), normal, "given back after a panic too");
+    // A limit configured while the work runs is the one set back, not the one from before.
+    let configured = std::sync::Mutex::new("64MB".to_string());
+    with_memory(
+        &conn,
+        "512MB",
+        || configured.lock().unwrap().clone(),
+        |_| *configured.lock().unwrap() = "96MB".into(),
+    );
+    let expected = {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch("SET memory_limit = '96MB'").unwrap();
+        limit(&c)
+    };
+    assert_eq!(limit(&conn), expected);
 }
