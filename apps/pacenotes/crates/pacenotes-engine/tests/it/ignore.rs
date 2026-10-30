@@ -90,3 +90,95 @@ fn measure_ignore_walk() {
         );
     }
 }
+
+/// Counts what the walk reports.
+#[derive(Default)]
+struct Count(std::sync::Mutex<(u64, Option<u64>)>);
+
+impl pacenotes_index::Progress for Count {
+    fn phase(&self, _: &'static str, _: &'static str, _: Option<u64>) {}
+    fn add(&self, n: u64) {
+        self.0.lock().unwrap().0 += n;
+    }
+    fn set_total(&self, total: u64) {
+        self.0.lock().unwrap().1 = Some(total);
+    }
+}
+
+#[test]
+fn finding_files_shows_a_growing_count_and_ends_with_the_total() {
+    let r = rig(&[
+        (".gitignore", "target/\n"),
+        ("a.rs", "x"),
+        ("src/b.rs", "x"),
+        ("src/c.rs", "x"),
+        ("target/d.rs", "x"),
+    ]);
+    let progress = Count::default();
+    let ignore = RepoFilesIgnore::scan_cancellable(
+        &r.scratch.path("ws"),
+        WalkLimits::default(),
+        paddock_jobs::Workers::new(2),
+        &paddock_jobs::CancelToken::new(),
+        &progress,
+    )
+    .unwrap();
+    assert_eq!(
+        *progress.0.lock().unwrap(),
+        (5, Some(5)),
+        "every file of the tree was counted as it was found"
+    );
+    assert!(ignore.visible_file(&p("src/b.rs")) && !ignore.visible_file(&p("target/d.rs")));
+}
+
+/// ER-19: Cancel works in "Finding files". The shared walk is blocked here and never returns until the test lets it; the call
+/// still returns, as cancelled, the moment the token fires.
+#[test]
+fn cancel_ends_finding_files_while_the_shared_walk_is_still_running() {
+    use std::sync::mpsc;
+    let cancel = paddock_jobs::CancelToken::new();
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let canceller = {
+        let cancel = cancel.clone();
+        std::thread::spawn(move || {
+            entered_rx.recv().unwrap();
+            cancel.cancel();
+        })
+    };
+    let result = RepoFilesIgnore::scan_with(
+        move || {
+            entered_tx.send(()).unwrap();
+            let _ = release_rx.recv();
+            Ok(vec!["late.rs".to_owned()])
+        },
+        || Ok(()),
+        &cancel,
+    );
+    assert!(matches!(result, Err(paddock_jobs::JobError::Cancelled(_))), "{:?}", result.err());
+    canceller.join().unwrap();
+    drop(release_tx);
+}
+
+#[test]
+fn cancel_ends_the_count_too_and_a_failed_walk_is_a_failure_with_its_message() {
+    let cancel = paddock_jobs::CancelToken::new();
+    cancel.cancel();
+    let r = rig(&[("a.rs", "x")]);
+    let err = RepoFilesIgnore::scan_cancellable(
+        &r.scratch.path("ws"),
+        WalkLimits::default(),
+        paddock_jobs::Workers::one(),
+        &cancel,
+        &pacenotes_index::NoProgress,
+    );
+    assert!(matches!(err, Err(paddock_jobs::JobError::Cancelled(_))), "{:?}", err.err());
+    let err = RepoFilesIgnore::scan_cancellable(
+        &r.scratch.path("ws/a.rs"),
+        WalkLimits::default(),
+        paddock_jobs::Workers::one(),
+        &paddock_jobs::CancelToken::new(),
+        &pacenotes_index::NoProgress,
+    );
+    assert!(matches!(err, Err(paddock_jobs::JobError::Failed(_))), "{:?}", err.err());
+}

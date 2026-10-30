@@ -126,8 +126,7 @@ fn run(setup: &IndexSetup, ctx: &JobContext) -> Result<IndexOutcome, JobError> {
         max_files: setup.limits.snapshot.max_entries,
         max_depth: setup.limits.snapshot.max_depth,
     };
-    let ignore = RepoFilesIgnore::scan(fs.root(), limits).map_err(failed)?;
-    ctx.check()?;
+    let ignore = RepoFilesIgnore::scan_cancellable(fs.root(), limits, setup.read_workers, ctx.cancel_token(), &progress)?;
     if let Some(dir) = setup.store_path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| JobError::Failed(format!("could not create the index folder: {}", e.kind())))?;
     }
