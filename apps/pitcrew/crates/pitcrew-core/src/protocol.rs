@@ -35,7 +35,7 @@ use std::io::{Read, Write};
 /// The protocol version this build speaks. 2: push events, maintenance, settings, registration, history, disk.
 /// 3: the runner's configuration file (get, preview, save) and the processes a runner started.
 /// 4: holds, update deadlines and loops in the snapshot; container engine hygiene and the Actions cache folder.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 /// Largest frame either side sends or accepts.
 pub const MAX_FRAME: usize = 1024 * 1024;
 /// Longest secret (registration token) accepted.
@@ -306,6 +306,12 @@ pub enum Request {
         /// The limits.
         limits: CacheLimits,
     },
+    /// Asks one of the service's jobs (a download, `ServiceEvent::Job`) to stop; it ends `cancelled` within a moment and keeps
+    /// its partial file for a resume.
+    CancelJob {
+        /// The service's job id.
+        id: u64,
+    },
 }
 
 impl Request {
@@ -476,6 +482,12 @@ pub enum ServiceEvent {
     Notification {
         /// What.
         notification: Notification,
+    },
+    /// A long job of the service (a runner download) as of now: phases, counts and its end (rules 10-11, ADR 0008). The app
+    /// shows it in the shell's Jobs list and asks the service to cancel with `Request::CancelJob`.
+    Job {
+        /// The whole job, as `paddock-jobs` reports it.
+        job: paddock_jobs::JobSnapshot,
     },
 }
 

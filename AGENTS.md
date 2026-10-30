@@ -67,6 +67,8 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   plan job asks `node scripts/affected.mjs --ci --app <app>`; extra jobs are `<app>-<what>.yml` (Debrief's fuzz, bench,
   corpus, mutants). An app whose gates fit one Linux job (the demos) is a leg of ci.yml and releases through
   `<app>-release.yml`. Any of these files marks only its app in the plan.
+- **Moving an app onto the shell.** Follow [docs/plans/shell-adoption-checklist.md](docs/plans/shell-adoption-checklist.md) (screenshots
+  through `captureScreen`, `expectFullyVisible`, `expectPageFillsHost`; jobs through the shell's job follow).
 - **A new app** gets `apps/<app>/paddock.ci.json` (`workflow` for its own workflow, or its leg: Cargo workspace,
   prepare, checks, UI commands), a CODEOWNERS line and its workflow. `scripts/affected.test.mjs` checks all three.
 

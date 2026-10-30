@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, OnInit, signal } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
-import { RouterLink } from '@angular/router';
+import { SettingsLauncher } from '../../shell/settings-launcher';
 import type { RepoInsight } from '../../core/api.types';
 import { ThemeService } from '../../core/theme.service';
 import { Chart } from '../../shared/charts/chart';
@@ -14,7 +14,7 @@ import { INSIGHTS_DAYS, InsightsStore, type InsightsDays } from './insights.stor
 /** How workflows run on the runners: advice, queue times, success per repository, slow and flaky jobs, runner load. */
 @Component({
   selector: 'pc-insights-page',
-  imports: [RouterLink, MatIcon, Chart, LoadState, EmptyState],
+  imports: [MatIcon, Chart, LoadState, EmptyState],
   providers: [InsightsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './insights-page.html',
@@ -22,6 +22,7 @@ import { INSIGHTS_DAYS, InsightsStore, type InsightsDays } from './insights.stor
 })
 export class InsightsPage implements OnInit {
   protected readonly store = inject(InsightsStore);
+  protected readonly settingsWindow = inject(SettingsLauncher);
   private readonly theme = inject(ThemeService);
 
   protected readonly dayOptions = INSIGHTS_DAYS.map((d) => ({ key: d, label: `${d} days` }));

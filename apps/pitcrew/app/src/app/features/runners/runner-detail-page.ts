@@ -74,7 +74,7 @@ export class RunnerDetailPage {
   });
   protected readonly usageNow = computed(() => {
     const u = this.runner()?.usage;
-    return u ? { cpu: formatPermille(u.cpuPermille), mem: formatBytes(u.memBytes), processes: u.processes, peakCpu: formatPermille(u.cpuPeakPermille) } : null;
+    return u ? { cpu: formatPermille(u.cpuPermille), mem: formatBytes(u.memBytes), processes: u.processes } : null;
   });
   protected readonly usageCpu = computed(() => this.usage().map((p) => p.cpuPermille));
   protected readonly usageMem = computed(() => this.usage().map((p) => p.memBytes));
@@ -85,8 +85,6 @@ export class RunnerDetailPage {
 
   protected readonly cpuPeakLabel = computed(() => `peak ${this.usagePeak()?.cpu ?? '—'}`);
   protected readonly memPeakLabel = computed(() => `peak ${this.usagePeak()?.mem ?? '—'}`);
-  /** The memory chart's scale tops out at its own peak, so the label says so. */
-  protected readonly memTop = computed(() => this.usagePeak()?.mem ?? '');
 
   protected readonly session = computed(() => {
     const r = this.runner();

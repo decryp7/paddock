@@ -1,7 +1,7 @@
 import { Overlay } from '@angular/cdk/overlay';
 import { TestBed } from '@angular/core/testing';
 import { MockBackend } from '../../core/mock-backend';
-import { NOW, appProviders, byText, flush, makeMock, settle, text } from '../../../testing/test-helpers';
+import { NOW, NoticeLog, appProviders, byText, flush, makeMock, settle, text } from '../../../testing/test-helpers';
 import { ProcessesPanel } from './processes-panel';
 
 describe('ProcessesPanel', () => {
@@ -26,7 +26,9 @@ describe('ProcessesPanel', () => {
     return { f, el: f.nativeElement as HTMLElement };
   }
   const row = (el: HTMLElement, name: string) => Array.from(el.querySelectorAll('tbody tr')).find((r) => text(r.querySelector('.name-line')).startsWith(name)) as HTMLElement;
-  const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement | null;
+  const log = () => TestBed.inject(NoticeLog);
+  /** What the confirmation window was last opened with (its words are tested with the dialog itself). */
+  const asked = () => log().dialogs.at(-1)?.inputs as { name: string; pid: number; isRunner: boolean; jobRunning: boolean };
 
   it('summarises the processes, the cleanup state and whether a job runs', async () => {
     const { el } = await mount();
@@ -79,16 +81,13 @@ describe('ProcessesPanel', () => {
     const { f, el } = await mount();
     (row(el, 'sleep.exe').querySelector('button[aria-label^="Stop sleep.exe"]') as HTMLElement).click();
     await settle(f, 2);
-    expect(text(dialog())).toContain('Stop sleep.exe?');
-    expect(text(dialog())).toContain('asked to stop first');
-    expect(text(dialog())).toContain('Only processes the runner started');
-    byText<HTMLButtonElement>(dialog()!, 'button', 'Cancel')!.click();
-    await settle(f, 2);
+    expect(log().dialogs.at(-1)?.id).toBe('pc.stop-process');
+    expect(asked()).toMatchObject({ name: 'sleep.exe', isRunner: false });
+    // Dismissed: the row stays.
     expect(row(el, 'sleep.exe')).toBeDefined();
+    log().answerNext(true);
     (row(el, 'sleep.exe').querySelector('button[aria-label^="Stop sleep.exe"]') as HTMLElement).click();
-    await settle(f, 2);
-    byText<HTMLButtonElement>(dialog()!, 'button', 'Stop now')!.click();
-    await settle(f, 6);
+    await settle(f, 8);
     expect(row(el, 'sleep.exe')).toBeUndefined();
     expect(text(el.querySelector('[data-testid="process-summary"]'))).toContain('2 leftovers');
   });
@@ -98,12 +97,10 @@ describe('ProcessesPanel', () => {
     const spy = vi.spyOn(mock, 'stopProcess');
     (row(el, 'gitea-runner.exe').querySelector('button[aria-label^="More actions"]') as HTMLElement).click();
     await settle(f, 2);
+    log().answerNext(true);
     (document.querySelector('[cdkMenuItem]') as HTMLElement).click();
-    await settle(f, 2);
-    expect(text(dialog())).toContain('Stop the runner process?');
-    expect(text(dialog())).toContain('Pitcrew will restart it');
-    byText<HTMLButtonElement>(dialog()!, 'button', 'End the runner process')!.click();
-    await settle(f, 4);
+    await settle(f, 6);
+    expect(asked().isRunner).toBe(true);
     expect(spy.mock.calls[0]![3]).toBe(true);
   });
 
@@ -113,17 +110,14 @@ describe('ProcessesPanel', () => {
     await settle(f, 2);
     (document.querySelector('[cdkMenuItem]') as HTMLElement).click();
     await settle(f, 2);
-    expect(text(dialog())).toContain('The job that is running now will fail.');
-    byText<HTMLButtonElement>(dialog()!, 'button', 'Cancel')!.click();
-    await settle(f, 2);
+    expect(asked()).toMatchObject({ isRunner: true, jobRunning: true });
   });
 
   it('shows the engine’s text when a stop is refused', async () => {
     const { f, el } = await mount();
     vi.spyOn(mock, 'stopProcess').mockRejectedValueOnce({ code: 'badRequest', message: 'that process is not part of this runner’s process tree (gone)' });
+    log().answerNext(true);
     (row(el, 'node.exe').querySelector('button[aria-label^="Stop node.exe"]') as HTMLElement).click();
-    await settle(f, 2);
-    byText<HTMLButtonElement>(dialog()!, 'button', 'Stop now')!.click();
     await settle(f, 6);
     expect(text(el.querySelector('[role="alert"]'))).toContain('not part of this runner’s process tree');
     byText<HTMLButtonElement>(el, 'button', 'Dismiss')!.click();
@@ -138,8 +132,12 @@ describe('ProcessesPanel', () => {
     (row(el, 'sleep.exe').querySelector('button[aria-label^="Copy the command"]') as HTMLElement).click();
     await flush();
     expect(write).toHaveBeenCalledWith('sleep 3600');
+    // Confirmed on the button itself, not as a notice.
+    await settle(f, 2);
+    expect(row(el, 'sleep.exe').querySelector('button[aria-label$="copied"]')).toBeTruthy();
+    expect(TestBed.inject(NoticeLog).notices).toHaveLength(0);
     write.mockRejectedValueOnce(new Error('denied'));
-    (row(el, 'sleep.exe').querySelector('button[aria-label^="Copy the command"]') as HTMLElement).click();
+    (row(el, 'sleep.exe').querySelector('button[aria-label$="copied"]') as HTMLElement).click();
     await settle(f, 2);
   });
 

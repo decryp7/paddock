@@ -2,12 +2,12 @@ import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { flush, makeMock } from '../../../testing/test-helpers';
-import { ToastStore } from '../../state/toast.store';
+import { NoticeLog, recordShell } from '../../../testing/test-helpers';
 import { PREVIEW_DEBOUNCE_MS, RunnerConfigStore } from './runner-config.store';
 
 function setup() {
   const mock = makeMock();
-  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, RunnerConfigStore] });
+  TestBed.configureTestingModule({ providers: [...recordShell(), { provide: BACKEND, useValue: mock }, RunnerConfigStore] });
   return { mock, store: TestBed.inject(RunnerConfigStore) };
 }
 
@@ -176,7 +176,7 @@ describe('RunnerConfigStore', () => {
 
   it('saves against the file’s fingerprint, then reloads and keeps the result notice', async () => {
     const store = await loaded('build-win');
-    const toasts = TestBed.inject(ToastStore);
+    const toasts = TestBed.inject(NoticeLog);
     const before = store.file()!.fingerprint;
     store.patch({ capacity: 2 });
     await previewed(store);
@@ -187,7 +187,8 @@ describe('RunnerConfigStore', () => {
     expect(store.file()!.fingerprint).not.toBe(before);
     expect(store.file()!.restartPending).toBe(true);
     expect(store.dirty()).toBe(false);
-    expect(toasts.toasts()[0]!.title).toBe('Configuration saved');
+    // The panel's saved banner says it; no notice.
+    expect(toasts.notices).toHaveLength(0);
     store.dismissSaved();
     expect(store.saved()).toBeNull();
     store.patch({ capacity: 3 });
@@ -198,14 +199,14 @@ describe('RunnerConfigStore', () => {
     expect(store.saved()).toBeNull();
   });
 
-  it('shows no changed keys in the toast for a comment-only save', async () => {
+  it('keeps the comment-only save quiet: no changed keys, no notice', async () => {
     const store = await loaded();
     store.setMode('raw');
     store.setRaw(`# note\n${store.rawText()}`);
     await previewed(store);
     await store.save();
     expect(store.saved()?.restart).toBe('notNeeded');
-    expect(TestBed.inject(ToastStore).toasts()[0]!.body).toBeNull();
+    expect(TestBed.inject(NoticeLog).notices).toHaveLength(0);
   });
 
   it('turns a stale base into a conflict that Reload clears', async () => {

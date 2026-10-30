@@ -20,6 +20,18 @@ crate-type = ["rlib"]
 tauri-build = { version = "2.7.3", features = [] }
 
 [dependencies]
+# The Paddock app shell (ADR 0012): the plugin and the crates whose types the app names itself (path dependencies inside the
+# monorepo; an app outside it names them from the `decryp7` registry, crates/README.md "Consuming the crates").
+paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray", "install", "native-dialogs"] }
+paddock-commands = { path = "../../../../crates/paddock-commands", features = ["tauri"] }
+paddock-dialogs = { path = "../../../../crates/paddock-dialogs", features = ["tauri"] }
+paddock-health = { path = "../../../../crates/paddock-health", features = ["tauri"] }
+paddock-jobs = { path = "../../../../crates/paddock-jobs", features = ["tauri"] }
+paddock-settings = { path = "../../../../crates/paddock-settings", features = ["tauri"] }
+paddock-startup = { path = "../../../../crates/paddock-startup", features = ["tauri"] }
+paddock-updater = { path = "../../../../crates/paddock-updater", features = ["tauri"] }
+paddock-window = { path = "../../../../crates/paddock-window", features = ["tauri", "tray", "wry"] }
+tauri-plugin-dialog = "2"
 pitcrew-core.workspace = true
 notify-channels = { path = "../../crates/notify-channels" }
 serde.workspace = true
@@ -60,3 +72,12 @@ objc2-service-management = { version = "0.3", default-features = false, features
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tauri = { version = "2.12.4", features = ["test"] }
+paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray", "install", "native-dialogs", "mock-runtime"] }
+paddock-dialogs = { path = "../../../../crates/paddock-dialogs", features = ["tauri", "mock-runtime"] }
+# The capabilities are resolved through Tauri's own ACL in the tests.
+tauri-utils = "2.10"
+tempfile = "3"
+toml = "0.9"

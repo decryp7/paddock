@@ -76,7 +76,7 @@
                 }
               }</span
             >
-            <button type="button" class="copy" aria-label="Copy this line" (click)="copy(l)"><mat-icon svgIcon="pc:copy" aria-hidden="true" /></button>
+            <button type="button" class="copy" [class.copied]="copiedSeq() === l.seq" [attr.aria-label]="copiedSeq() === l.seq ? 'Line copied' : 'Copy this line'" (click)="copy(l)"><mat-icon [svgIcon]="copiedSeq() === l.seq ? 'pc:check' : 'pc:copy'" aria-hidden="true" /></button>
           </div>
         </cdk-virtual-scroll-viewport>
       }

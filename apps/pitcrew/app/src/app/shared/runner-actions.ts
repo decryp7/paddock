@@ -1,5 +1,5 @@
-import { Dialog } from '@angular/cdk/dialog';
 import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { Router } from '@angular/router';
@@ -86,7 +86,7 @@ export class RunnerActions {
     this.store.clean(this.runner().name);
   }
   private readonly router = inject(Router);
-  private readonly dialog = inject(Dialog);
+  private readonly ports = inject(SHELL_PORTS);
 
   protected readonly busy = computed(() => this.store.inFlight()[this.runner().name] !== undefined);
   protected readonly can = computed(() => {
@@ -115,7 +115,7 @@ export class RunnerActions {
 
   protected async remove(): Promise<void> {
     const name = this.runner().name;
-    const ok = await confirmAction(this.dialog, {
+    const ok = await confirmAction(this.ports, {
       title: `Remove ${name}?`,
       body: 'Pitcrew stops supervising this runner and removes it from pitcrew.toml (after its current job). Its folder, registration and logs stay on disk.',
       confirm: 'Remove runner',

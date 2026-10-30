@@ -1,10 +1,51 @@
-import type { EnvironmentProviders, Provider } from '@angular/core';
+import { inject, type EnvironmentProviders, type Provider } from '@angular/core';
+import { BrowserAppearanceBackend, SHELL_COMMAND_RUNNER, SHELL_PORTS, provideAppearance, type ShellNotice } from '@decryp7/paddock-ui/shell';
 import type { ComponentFixture } from '@angular/core/testing';
 import { provideRouter, withComponentInputBinding, type Routes } from '@angular/router';
 import { BACKEND } from '../app/core/backend';
 import { MockBackend, type MockOptions } from '../app/core/mock-backend';
 import { CHART_LOADER, type ChartInstance } from '../app/shared/charts/chart';
 import { provideIcons } from '../app/shared/icons';
+
+/** What the user was told (the notices handed to the shell's notification host), in order. */
+export class NoticeLog {
+  readonly notices: ShellNotice[] = [];
+  /** Every dialog asked for, with the inputs it was opened with. */
+  readonly dialogs: { id: string; inputs: unknown }[] = [];
+  private readonly answers: unknown[] = [];
+
+  /** The next dialog asked for is answered with `value` (the window's result); unanswered dialogs are dismissed. */
+  answerNext(value: unknown): void {
+    this.answers.push(value);
+  }
+
+  /** @internal Used by the recording ports. */
+  open(id: string, inputs: unknown): unknown {
+    this.dialogs.push({ id, inputs });
+    return this.answers.shift();
+  }
+
+  /** The messages only. */
+  messages(): string[] {
+    return this.notices.map((n) => n.message);
+  }
+}
+
+/** Records the notices and dialogs a component or store asks the shell for; nothing reaches a window. */
+export function recordShell(): Provider[] {
+  return [
+    NoticeLog,
+    { provide: SHELL_COMMAND_RUNNER, useValue: () => Promise.resolve(true) },
+    provideAppearance({ accent: 'pitcrew', backend: () => new BrowserAppearanceBackend({ storage: null, channel: null }) }) as unknown as Provider,
+    {
+      provide: SHELL_PORTS,
+      useFactory: () => {
+        const log = inject(NoticeLog);
+        return { showPage: () => undefined, openDialog: (id: string, inputs?: unknown) => Promise.resolve(log.open(id, inputs)), notify: (n: ShellNotice) => void log.notices.push(n) };
+      },
+    },
+  ];
+}
 
 /** Fixed "now" for deterministic mock data (22 Oct 2026, 12:00 local). */
 export const NOW = new Date(2026, 9, 22, 12, 0, 0).getTime();
@@ -34,6 +75,7 @@ export function appProviders(backend: MockBackend, routes: Routes = []): (Provid
     { provide: CHART_LOADER, useValue: () => Promise.resolve(() => fakeChart()) },
     provideIcons(),
     provideRouter(routes, withComponentInputBinding()),
+    ...recordShell(),
   ];
 }
 

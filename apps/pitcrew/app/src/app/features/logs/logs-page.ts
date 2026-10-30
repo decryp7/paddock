@@ -1,5 +1,5 @@
 import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, untracked, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { MatTooltip } from '@angular/material/tooltip';
 import { Router } from '@angular/router';
@@ -9,7 +9,7 @@ import { ClockService } from '../../core/clock.service';
 import { DebriefButton } from '../../shared/ui/debrief-button';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { StatusStore } from '../../state/status.store';
-import { ToastStore } from '../../state/toast.store';
+import { Notify } from '../../state/notify';
 import { highlight, levelTone, parseLogLine } from './log-line';
 import { LogsStore } from './logs.store';
 
@@ -35,7 +35,7 @@ export class LogsPage {
   private readonly clock = inject(ClockService);
   private readonly router = inject(Router);
   private readonly backend = inject(BACKEND);
-  private readonly toasts = inject(ToastStore);
+  private readonly toasts = inject(Notify);
   private readonly viewport = viewChild(CdkVirtualScrollViewport);
 
   protected readonly row = ROW;
@@ -106,10 +106,16 @@ export class LogsPage {
     this.lastOffset = offset;
   }
 
+  /** The line just copied: its button shows a check for a moment (inline, not a notice). */
+  protected readonly copiedSeq = signal<number | null>(null);
+  private copiedTimer: ReturnType<typeof setTimeout> | undefined;
+
   protected async copy(line: LogLine): Promise<void> {
     try {
       await navigator.clipboard.writeText(line.text);
-      this.toasts.show({ tone: 'success', icon: 'copy', title: 'Line copied', body: null });
+      this.copiedSeq.set(line.seq);
+      clearTimeout(this.copiedTimer);
+      this.copiedTimer = setTimeout(() => this.copiedSeq.set(null), 1800);
     } catch {
       this.toasts.show({ tone: 'warning', icon: 'alert', title: 'Could not copy', body: 'The clipboard is not available here.' });
     }

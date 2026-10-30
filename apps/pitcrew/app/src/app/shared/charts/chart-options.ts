@@ -332,7 +332,7 @@ export function loadOption(points: LoadPoint[], format: (v: number) => string, m
       },
     },
     xAxis: timeAxis(t, hours),
-    yAxis: { ...valueAxis(t, format), min: 0, ...(max === undefined ? {} : { max }) },
+    yAxis: { ...valueAxis(t, format), min: 0, ...(max === undefined ? {} : { max, interval: max / 4 }) },
     dataZoom: [{ type: 'inside', throttle: 50 }],
     series: [area('Runners', t.series[0], runners), area('Rest of machine', t.muted, rest)],
   };

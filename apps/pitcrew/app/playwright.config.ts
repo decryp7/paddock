@@ -12,13 +12,15 @@ appBuildGuard(resolve(__dirname, './'), resolve(__dirname, '../../../ui'));
  */
 const PORT = e2ePortOrCiDefault('PW_PORT', 4310);
 
-export default defineConfig({
+export default assertChromeForTesting(
+  defineConfig({
   testDir: './e2e',
   // Inside .angular/, which git ignores.
   outputDir: './.angular/playwright-results',
   fullyParallel: false,
   workers: 1,
   retries: process.env['CI'] ? 1 : 0,
+  // TODO: add '@decryp7/paddock-e2e/retried-reporter' once the package resolves as a workspace package (the built file is not loadable by path).
   reporter: 'list',
   timeout: 60_000,
   use: {
@@ -27,10 +29,10 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   projects: [
-    { name: 'chromium', testIgnore: /screenshots\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
+    { name: 'chromium', testIgnore: /screenshots.*\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
     // Only on request, so a plain `npx playwright test` never rewrites the documentation images.
     ...(process.env['SCREENSHOTS']
-      ? [{ name: 'screenshots', testMatch: /screenshots\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 } }]
+      ? [{ name: 'screenshots', testMatch: /screenshots.*\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 } }]
       : []),
   ],
   webServer: {
@@ -39,4 +41,5 @@ export default defineConfig({
     reuseExistingServer: reuseServer(),
     timeout: 180_000,
   },
-});
+  }),
+);

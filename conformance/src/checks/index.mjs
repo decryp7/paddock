@@ -21,6 +21,7 @@ import C36 from './C36-parser-hardening.mjs';
 import C37 from './C37-test-binaries.mjs';
 import C39 from './C39-freed-port.mjs';
 import C43 from './C43-sticky-headers.mjs';
+import C44 from './C44-job-events.mjs';
 import C45 from './C45-dialog-markers.mjs';
 import C48 from './C48-dialog-capability.mjs';
 import C50 from './C50-shell-start.mjs';
@@ -31,4 +32,4 @@ import C56 from './C56-build-env-names.mjs';
 import C57 from './C57-tracked-symlinks.mjs';
 
 /** Every check, in id order. A check is { id, title, rule, run(ctx) -> findings[] | Promise<findings[]> }. */
-export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C39, C43, C45, C48, C50, C51, C53, C54, C56, C57];
+export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C39, C43, C44, C45, C48, C50, C51, C53, C54, C56, C57];

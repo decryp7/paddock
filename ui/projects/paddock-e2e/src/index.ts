@@ -48,6 +48,18 @@ export {
 export { LAYOUT_WIDTHS, WINDOW_SIZES, horizontalOverflow, expectNoHorizontalScroll, expectWithinWidth, resize, isSilentlyClipped, isAcceptedEllipsis, unacceptedTextClips, ELLIPSIS_NEVER_WITHIN, ELLIPSIS_NEVER_SELF, textClippedWithoutEllipsis, textCutOffWithoutTooltip, type TextClip, expectNoSilentClipping, type ClipProbe } from './layout.ts';
 export { headerCovers, headerTrack, expectHeaderOnTop, isOpaqueColor, type GridParts, type HeaderCover, type HeaderFrame, type HeaderReport } from './grid.ts';
 export { waitForStableFrame, captureStable, type StableFrameOptions } from './screenshot.ts';
+export {
+  captureScreen,
+  waitForCapturable,
+  expectFullyVisible,
+  expectPageFillsHost,
+  problemsOf,
+  MAIN_SELECTOR,
+  BUSY_SELECTOR,
+  type CaptureOptions,
+  type FillsHostOptions,
+  type PageProbe,
+} from './capture.ts';
 export { installTauriFake, TauriFake, START_REPLIES, SHELL_PLUGIN_PREFIX, type IpcCall, type TauriFakeOptions } from './ipc.ts';
 export {
   ShellApp,

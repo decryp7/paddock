@@ -10,6 +10,7 @@
       </button>
     }
   </header>
+  <pc-saved-note />
 
   @if (status.status() && status.runners().length === 0) {
     <section class="card"><pc-empty-state icon="updates" title="No runners" text="Register a runner to manage its updates here." /></section>
@@ -181,52 +182,14 @@
     <section class="card self" aria-labelledby="self-title">
       <header class="card-header">
         <h2 id="self-title">Pitcrew</h2>
-        @if (app().value; as a) {
-          <span class="meta num">version {{ a.currentVersion }}</span>
-        }
       </header>
       <div class="card-body body">
-        <pc-load-state what="Pitcrew's update status" [hasValue]="!!app().value" [error]="app().error" [skeleton]="[20, 30]" (retry)="loadApp()">
-          @if (app().value; as a) {
-            @if (!a.available) {
-              <div class="callout">
-                <mat-icon svgIcon="pc:info" aria-hidden="true" />
-                <div class="callout-body">
-                  <strong>Self-update is off</strong>
-                  <span class="muted">{{ a.reason ?? 'Updates are not available in this build.' }}</span>
-                </div>
-              </div>
-            } @else {
-              <p class="muted">Pitcrew checks its signed releases and installs them when you say so. The service and runners keep running.</p>
-              @if (found() === null) {
-                <p class="tone-success">Pitcrew is up to date.</p>
-              } @else if (found(); as f) {
-                <div class="callout info">
-                  <mat-icon svgIcon="pc:sparkle" aria-hidden="true" />
-                  <div class="callout-body">
-                    <strong>Pitcrew {{ f.version }} is available</strong>
-                    @if (f.notes) {
-                      <span class="muted notes">{{ f.notes }}</span>
-                    }
-                  </div>
-                </div>
-              }
-              <div class="btn-row">
-                <button type="button" class="btn" (click)="checkApp()" [disabled]="appBusy() !== null">
-                  <mat-icon svgIcon="pc:refresh" aria-hidden="true" [class.spin]="appBusy() === 'check'" />Check for updates
-                </button>
-                @if (found()) {
-                  <button type="button" class="btn primary" (click)="installApp()" [disabled]="appBusy() !== null">
-                    <mat-icon svgIcon="pc:download" aria-hidden="true" />{{ appBusy() === 'install' ? 'Installing…' : 'Install and restart' }}
-                  </button>
-                }
-              </div>
-            }
-            @if (appError(); as e) {
-              <p class="tone-danger small" role="alert">{{ e.message }}</p>
-            }
-          }
-        </pc-load-state>
+        <p class="muted">Pitcrew’s own updates are checked, downloaded and installed from signed releases; the service and runners keep running.</p>
+        <div class="btn-row">
+          <button type="button" class="btn" (click)="openAppUpdates()">
+            <mat-icon svgIcon="pc:refresh" aria-hidden="true" />Check for Pitcrew updates…
+          </button>
+        </div>
       </div>
     </section>
   </div>

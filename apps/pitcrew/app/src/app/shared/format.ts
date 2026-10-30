@@ -31,7 +31,11 @@ export function formatDuration(ms: number | null | undefined): string {
 /** A rounded duration for axis ticks: `45s`, `8 min`, `2 h`. */
 export function formatAxisDuration(ms: number): string {
   if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)} min`;
+  if (ms < 3_600_000) {
+    const s = Math.round(ms / 1000);
+    // A tick that is not a whole minute keeps its seconds, so neighbouring ticks never read the same ("1 min", "1 min").
+    return ms < 600_000 && s % 60 !== 0 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${Math.round(ms / 60_000)} min`;
+  }
   return `${(ms / 3_600_000).toFixed(1).replace(/\.0$/, '')} h`;
 }
 

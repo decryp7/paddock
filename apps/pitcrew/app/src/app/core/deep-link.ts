@@ -3,7 +3,7 @@ import { Router } from '@angular/router';
 import { BACKEND } from './backend';
 
 /** The screens a deep link may open (the first path segment). */
-const PAGES = new Set(['runners', 'activity', 'logs', 'updates', 'settings']);
+const PAGES = new Set(['runners', 'activity', 'insights', 'storage', 'logs', 'updates']);
 /** The runner page's sections a deep link may open. */
 const RUNNER_TABS = new Set(['updates', 'processes', 'config', 'disk']);
 /** A runner name as Pitcrew accepts it. */

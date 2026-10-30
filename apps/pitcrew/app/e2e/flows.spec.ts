@@ -1,7 +1,24 @@
-import { expect, test } from '@playwright/test';
+import { axeViolations, expect, expectFullyVisible, expectPageFillsHost, test, THEMES } from '@decryp7/paddock-e2e';
+import type { Page } from '@playwright/test';
 
 // The browser build with the mock backend; `simulate=0` keeps the demo still (no pushed toasts mid-test).
 const APP = '/?simulate=0#';
+
+/** Opens Settings (the shell's window; in the browser build it opens in the page) at a page of its navigation. */
+async function openSettings(page: Page, section?: string) {
+  await page.getByRole('navigation', { name: 'Pages' }).waitFor();
+  await page.keyboard.press('ControlOrMeta+,');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(dialog).toBeVisible();
+  if (section) await dialog.getByRole('button', { name: section, exact: true }).click();
+  return dialog;
+}
+
+/** Picks `label` in the themed select named `name` (a combobox button; its list lives in the page's overlay). */
+async function choose(page: Page, scope: ReturnType<Page['locator']>, label: string, name = 'Theme') {
+  await scope.getByRole('combobox', { name }).click();
+  await page.getByRole('option', { name: label, exact: true }).click();
+}
 
 test.describe('Pitcrew in the browser (mock backend)', () => {
   test('the dashboard is about the runners, with the machine as context', async ({ page }) => {
@@ -19,13 +36,14 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'build-win' }).first()).toBeVisible();
 
-    const nav = page.getByRole('navigation', { name: 'Main' });
+    const nav = page.getByRole('navigation', { name: 'Pages' });
     for (const [link, heading] of [
       ['Runners', 'Runners'],
       ['Activity', 'Activity'],
+      ['Insights', 'Insights'],
+      ['Storage', 'Storage'],
       ['Logs', 'Logs'],
       ['Updates', 'Updates'],
-      ['Settings', 'Settings'],
       ['Dashboard', 'Dashboard'],
     ] as const) {
       await nav.getByRole('link', { name: link }).click();
@@ -35,14 +53,14 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
 
   test('the sidebar is keyboard navigable with arrow keys', async ({ page }) => {
     await page.goto(`${APP}/`);
-    const nav = page.getByRole('navigation', { name: 'Main' });
+    const nav = page.getByRole('navigation', { name: 'Pages' });
     await nav.getByRole('link', { name: 'Dashboard' }).focus();
     await page.keyboard.press('ArrowDown');
     await expect(nav.getByRole('link', { name: /Runners/ })).toBeFocused();
     await page.keyboard.press('End');
-    await expect(nav.getByRole('link', { name: 'Settings' })).toBeFocused();
+    await expect(nav.getByRole('link', { name: 'Updates' })).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Updates' })).toBeVisible();
   });
 
   test('drains a runner from its actions menu and resumes it', async ({ page }) => {
@@ -66,23 +84,25 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
     await expect(row.getByRole('cell').nth(1)).toHaveText('5.3.0', { timeout: 20_000 });
   });
 
-  test('switches the theme and remembers it', async ({ page }) => {
-    await page.goto(`${APP}/settings`);
-    await page.getByRole('radio', { name: 'Dark' }).click();
+  test('switches the theme in Settings > Appearance and remembers it', async ({ page }) => {
+    await page.goto(`${APP}/`);
+    const settings = await openSettings(page, 'Appearance');
+    await choose(page, settings, 'Dark');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await page.reload();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-    await page.getByRole('radio', { name: 'Light' }).click();
+    const again = await openSettings(page, 'Appearance');
+    await choose(page, again, 'Light');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-    await page.getByRole('radio', { name: 'Follow system' }).click();
+    await choose(page, again, 'Same as the system');
     await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/);
   });
 
   test('the registration wizard checks each step and registers a runner', async ({ page }) => {
     await page.goto(`${APP}/runners`);
     await page.getByRole('button', { name: 'Register runner' }).first().click();
-    const dialog = page.getByRole('dialog');
-    await expect(dialog.getByRole('heading', { name: 'Register a runner' })).toBeVisible();
+    const dialog = page.getByRole('dialog', { name: 'Register a runner' });
+    await expect(dialog.getByText('Pitcrew registers it with your server')).toBeVisible();
 
     await dialog.getByRole('button', { name: 'Continue' }).click();
     await expect(dialog.getByRole('alert')).toContainText('Enter the server');
@@ -99,18 +119,62 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
     await dialog.getByRole('button', { name: 'Continue' }).click();
     await expect(dialog.getByText('nightly', { exact: true })).toBeVisible();
     await dialog.getByRole('button', { name: 'Register' }).click();
-
+    // The registration is a job: it shows in the Jobs list and ends by itself.
     await expect(dialog).toBeHidden();
     await expect(page.getByRole('link', { name: 'nightly', exact: true })).toBeVisible();
   });
 
-  test('shows the banner and a way out when the service is not installed', async ({ page }) => {
+  test('a service that is not installed is one chip that says so, with its repair (Install), and it brings the runners back', async ({ page, app }) => {
     await page.goto('/?simulate=0&mock=notInstalled#/');
-    const banner = page.getByRole('alert').filter({ hasText: 'not installed' });
-    await expect(banner).toBeVisible();
-    await banner.getByRole('button', { name: 'Install service' }).click();
-    await expect(banner).toBeHidden();
+    // The chip says why in the shell's words (a build of ui/dist from before the cause words says "stopped": this fails then).
+    await expect(app.statusBar.chip).toContainText('not installed');
+    await app.statusBar.chip.click();
+    await expect(app.notifications.services).toContainText('is not installed');
+    await app.notifications.services.getByRole('button', { name: /^Install/ }).click();
+    await expect(app.notifications.services).toBeHidden();
     await expect(page.getByRole('link', { name: 'build-win' }).first()).toBeVisible();
+  });
+
+  test('cleaning a disk is a job with progress that ends on its own', async ({ page, app }) => {
+    await page.goto(`${APP}/runners/build-win?tab=disk`);
+    await page.getByRole('button', { name: /Clean up now|Clean now/ }).first().click();
+    await app.statusBar.jobs.click();
+    await expect(app.jobs.list).toContainText('Cleaning up the disk');
+    await expect(app.jobs.list).toContainText(/Done|done|Finished/, { timeout: 15_000 });
+    // A job its page waits for is not announced a second time by the shell.
+    await expect(page.locator('pd-notification-host').getByText(/Cleaning up the disk/)).toHaveCount(0);
+  });
+
+  test('copying a log line is confirmed on its button, not by a notice', async ({ page }) => {
+    // The clipboard of the test browser is a stand-in: what matters is the confirmation, not the system clipboard.
+    await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { value: { writeText: async () => undefined }, configurable: true }));
+    await page.goto(`${APP}/logs`);
+    // The viewer follows the end of the log and scrolls: hold on to one line by its number.
+    const seq = (await page.locator('[role=log] .line .seq').last().textContent())!.trim();
+    const line = page.locator('[role=log] .line').filter({ has: page.locator('.seq', { hasText: new RegExp(`^\\s*${seq}\\s*$`) }) });
+    await line.hover();
+    await line.getByRole('button', { name: 'Copy this line' }).click();
+    await expect(line.getByRole('button', { name: 'Line copied' })).toBeVisible();
+    await expect(page.locator('pd-notification-host').getByText(/copied/i)).toHaveCount(0);
+  });
+
+  test('About, Updates and What’s New are windows of the shell', async ({ page, app }) => {
+    await page.goto(`${APP}/`);
+    await (await app.menus.item('Help', 'About')).click();
+    await expect(page.getByRole('dialog', { name: /About/ })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await (await app.menus.item('Help', 'Check for Updates…')).click();
+    await expect(page.getByRole('dialog', { name: /Updates/ })).toBeVisible();
+  });
+
+  test('has no accessibility violations in either theme', async ({ page }) => {
+    for (const colorScheme of THEMES) {
+      await page.emulateMedia({ colorScheme });
+      await page.goto(`${APP}/runners`);
+      await expect(page.getByRole('heading', { level: 1, name: 'Runners' })).toBeVisible();
+      // Retried: a button mid-transition or a loading skeleton is not a finding.
+      await expect.poll(() => axeViolations(page), { timeout: 10_000 }).toEqual([]);
+    }
   });
 });
 
@@ -145,6 +209,98 @@ test.describe('native feel (ADR 0008)', () => {
     expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
   });
 
+  test('right-clicking selected code opens the shell’s Copy menu, and not the browser’s', async ({ page }) => {
+    await page.goto(`${APP}/`);
+    await page.getByRole('navigation', { name: 'Pages' }).waitFor();
+    // Text is selectable where it is code or a text field (the app chrome is not); a command line is the usual case.
+    await page.evaluate(() => {
+      const pre = document.createElement('pre');
+      pre.id = 'sample-command';
+      pre.textContent = 'gitea-runner daemon --config config.yaml';
+      pre.style.cssText = 'position:fixed;top:120px;left:400px;z-index:9999;background:white;color:black;padding:8px';
+      document.body.append(pre);
+    });
+    const sample = page.locator('#sample-command');
+    await sample.click({ clickCount: 3 });
+    await sample.click({ button: 'right' });
+    await expect(page.getByRole('menuitem', { name: 'Copy' })).toBeVisible();
+  });
+
+  test('the log viewer fills the page: at least 400 px tall with its lines visible, in every way into Logs', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    for (const path of ['/logs', '/logs/build-win', '/logs?runner=build-win']) {
+      await page.goto(`${APP}${path}`);
+      const viewport = page.locator('cdk-virtual-scroll-viewport[role=log]');
+      await expect(viewport).toBeVisible();
+      await expect.poll(async () => (await viewport.boundingBox())?.height ?? 0, { message: path }).toBeGreaterThanOrEqual(400);
+      await expect(page.locator('[role=log] .line .msg').first()).toBeVisible();
+      await expectPageFillsHost(page, { page: 'pc-logs-page' });
+    }
+  });
+
+  test('the config diff window scrolls its changes inside and keeps Save and apply fully visible', async ({ page, app }) => {
+    const lines = Array.from({ length: 60 }, (_, i) => ({
+      kind: i % 2 ? 'added' : 'removed',
+      text: `  key_${i}: ${'a very long value that does not fit the window '.repeat(6)}`,
+      oldNo: i % 2 ? null : i + 1,
+      newNo: i % 2 ? i + 1 : null,
+    }));
+    const preview = { text: '', changed: true, restartNeeded: true, diff: { hunks: [{ lines }], added: 30, removed: 30, truncated: false }, issues: [], changedKeys: ['runner.capacity'], labels: [] };
+    await page.setViewportSize({ width: 720, height: 560 });
+    await app.dialogs.openWindow('pc.config-diff', { preview, maxBackups: 5 });
+    await app.dialogs.loaded();
+    const save = page.getByRole('button', { name: 'Save and apply' });
+    await expect(save).toBeVisible();
+    await expectFullyVisible(save, 'Save and apply');
+    // The changes scroll inside their own region, both ways; the window itself does not scroll.
+    const diff = page.getByRole('region', { name: 'Changes to config.yaml' });
+    expect(await diff.evaluate((e) => e.scrollWidth > e.clientWidth && e.scrollHeight > e.clientHeight)).toBe(true);
+    expect(await page.locator('main.pd-body').evaluate((e) => e.scrollHeight <= e.clientHeight && e.scrollWidth <= e.clientWidth)).toBe(true);
+    // One title: the window's, not a second heading inside it.
+    await expect(page.getByRole('heading', { name: 'Review changes' })).toHaveCount(0);
+  });
+
+  test('the register window keeps its buttons fully visible on every step, the fields scroll above them', async ({ page, app }) => {
+    await page.setViewportSize({ width: 660, height: 640 });
+    await app.dialogs.openWindow('pc.register', {});
+    await app.dialogs.loaded();
+    const dialog = page.locator('pd-dialog-shell');
+    const buttonsInside = async (name: RegExp) => {
+      await expectFullyVisible(dialog.getByRole('button', { name }).last(), String(name));
+    };
+    await dialog.getByLabel('Server URL').fill('https://git.example.com');
+    await dialog.getByLabel('Registration token').fill('demo-registration-token');
+    await buttonsInside(/Continue/);
+    await dialog.getByRole('button', { name: 'Continue' }).click();
+    await dialog.getByLabel('Name in Pitcrew').fill('nightly');
+    await buttonsInside(/Continue/);
+    await dialog.getByRole('button', { name: 'Continue' }).click();
+    await dialog.getByText('Run as the service account').click();
+    await buttonsInside(/Continue/);
+    await dialog.getByRole('button', { name: 'Continue' }).click();
+    await buttonsInside(/^Register$/);
+    expect(await page.locator('main.pd-body').evaluate((e) => e.scrollHeight <= e.clientHeight)).toBe(true);
+  });
+
+  test('every Settings page renders its content in the real Settings window (a window without the main window\'s router)', async ({ page, app }) => {
+    const pages: [string, string][] = [
+      ['pc.general', 'Start-up'],
+      ['pc.service', 'Pitcrew service'],
+      ['pc.defaults', 'Leftover processes'],
+      ['pc.channels', 'Notification channels'],
+      ['pc.tokens', 'Gitea read tokens'],
+      ['pc.diagnostics', 'Diagnostics'],
+    ];
+    await page.setViewportSize({ width: 920, height: 1500 });
+    for (const [id, heading] of pages) {
+      // A new document each time: a window opens its page once.
+      await page.goto('about:blank');
+      await app.dialogs.openWindow('pd.settings', { page: id });
+      await app.dialogs.loaded();
+      await expect(page.getByRole('heading', { name: heading, exact: true }), id).toBeVisible();
+    }
+  });
+
   test('edits the runner configuration, reviews the diff and saves', async ({ page }) => {
     await page.goto(`${APP}/runners/build-win?tab=config`);
     await expect(page.getByRole('heading', { name: 'Runner configuration' })).toBeVisible();
@@ -156,7 +312,7 @@ test.describe('native feel (ADR 0008)', () => {
     await expect(review).toBeEnabled();
     await review.click();
 
-    const dialog = page.getByRole('dialog', { name: 'Review changes' });
+    const dialog = page.getByRole('dialog', { name: 'Review configuration changes' });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText('capacity: 4')).toBeVisible();
     await expect(dialog.locator('tr.added').first()).toContainText('+');
@@ -197,7 +353,7 @@ test.describe('native feel (ADR 0008)', () => {
     await page.goto(`${APP}/runners/ui-tests?tab=config`);
     await page.getByLabel('Capacity').fill('3');
     await page.getByRole('button', { name: 'Review changes' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Review changes' });
+    const dialog = page.getByRole('dialog', { name: 'Review configuration changes' });
     await expect(dialog).toBeVisible();
     await expect(dialog.locator(':focus')).toHaveCount(1);
     await page.keyboard.press('Escape');
@@ -219,7 +375,7 @@ test.describe('native feel (ADR 0008)', () => {
     await expect(sleep.getByTestId('fate')).toContainText('stops in 1 h 0');
 
     await sleep.getByRole('button', { name: /^Stop sleep.exe now/ }).click();
-    const dialog = page.getByRole('dialog', { name: 'Stop sleep.exe?' });
+    const dialog = page.getByRole('dialog', { name: 'Stop process' });
     await expect(dialog).toContainText('asked to stop first');
     await dialog.getByRole('button', { name: 'Stop now' }).click();
     await expect(page.locator('tr', { hasText: 'sleep.exe' })).toHaveCount(0);
@@ -232,7 +388,7 @@ test.describe('native feel (ADR 0008)', () => {
     await expect(runner.getByRole('button', { name: /^Stop / })).toHaveCount(0);
     await runner.getByRole('button', { name: /More actions for/ }).click();
     await page.getByRole('menuitem', { name: 'Stop the runner process…' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Stop the runner process?' });
+    const dialog = page.getByRole('dialog', { name: 'Stop process' });
     await expect(dialog).toContainText('Pitcrew will restart it');
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toBeHidden();
@@ -245,7 +401,8 @@ test.describe('native feel (ADR 0008)', () => {
   });
 
   test('Settings > Defaults edits the leftover process rules', async ({ page }) => {
-    await page.goto(`${APP}/settings?section=defaults`);
+    await page.goto(`${APP}/`);
+    await openSettings(page, 'Defaults');
     await expect(page.getByRole('heading', { name: 'Leftover processes' })).toBeVisible();
     await page.getByRole('button', { name: 'Add rule' }).last().click();
     await page.getByLabel('Pattern of rule 6').fill('*chrome*');
@@ -255,7 +412,8 @@ test.describe('native feel (ADR 0008)', () => {
   });
 
   test('with the service down after an update, Settings still shows the service and Repair brings it back', async ({ page }) => {
-    await page.goto('/?simulate=0&mock-down&mock-startfailed#/settings?section=service');
+    await page.goto('/?simulate=0&mock-down&mock-startfailed#/');
+    await openSettings(page, 'Service');
     await expect(page.getByTestId('service-start-failed').first()).toContainText('could not start after the update');
     await expect(page.getByText('Installed, not running')).toBeVisible();
     await page.getByRole('button', { name: 'Repair service' }).click();
@@ -263,12 +421,11 @@ test.describe('native feel (ADR 0008)', () => {
     await expect(page.getByTestId('service-start-failed')).toHaveCount(0);
   });
 
-  test('the global notice repairs the service when it could not start after the update', async ({ page }) => {
+  test('the service chip repairs the service when it could not start after the update (rule 19: the repair is the shell’s)', async ({ page, app }) => {
     await page.goto('/?simulate=0&mock-down&mock-startfailed#/');
-    const notice = page.getByTestId('service-start-failed');
-    await expect(notice).toContainText('could not start after the update');
-    await notice.getByRole('button', { name: 'Repair' }).click();
-    await expect(notice).toHaveCount(0);
-    await expect(page.getByRole('alert').filter({ hasText: 'cannot reach its service' })).toHaveCount(0);
+    await expect(app.statusBar.chip).toBeVisible();
+    await app.statusBar.chip.click();
+    await app.notifications.services.getByRole('button', { name: 'Restart' }).click();
+    await expect(app.notifications.services).toBeHidden();
   });
 });

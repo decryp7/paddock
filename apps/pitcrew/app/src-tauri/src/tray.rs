@@ -5,18 +5,13 @@
 //! Icons are the suite's (`icons/tray/`): macOS template images (the system tints them), and on Windows a light
 //! and a dark variant chosen from the taskbar's theme. Each state has its own shape, not only its own colour.
 
-use crate::events::Actions;
+use crate::events::{Actions, Latest};
+use paddock_window::tauri::{NativeTray, Tray};
+use paddock_window::tray::{disabled, item, submenu, TrayEntry, TrayView, MAX_ID, QUIT_ID, SHOW_ID};
 use pitcrew_core::health::RunnerStatus;
 use pitcrew_core::protocol::RunnerSnapshot;
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Runtime};
-
-/// The tray's id.
-pub const TRAY_ID: &str = "pitcrew";
-const OPEN: &str = "open";
-const QUIT: &str = "quit";
 
 /// What the tray icon shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -142,47 +137,6 @@ pub fn dark_taskbar() -> bool {
     }
 }
 
-/// Shows and focuses the main window, creating it again from the configuration when it was closed (closing the
-/// window destroys it: the app keeps running in the tray without a webview).
-pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
-    use tauri::Manager;
-    if let Some(w) = app.get_webview_window(MAIN) {
-        let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
-        return;
-    }
-    let Some(cfg) = app.config().app.windows.iter().find(|w| w.label == MAIN).cloned() else {
-        return;
-    };
-    match tauri::WebviewWindowBuilder::from_config(app, &cfg).and_then(|b| b.build()) {
-        Ok(w) => {
-            crate::native_feel::apply(&w);
-            let _ = w.set_focus();
-        }
-        Err(e) => eprintln!("Pitcrew could not open its window: {e}"),
-    }
-}
-
-/// The main window's label (`tauri.conf.json`).
-pub const MAIN: &str = "main";
-
-/// Marks an app whose tray icon could not be created (Linux without an appindicator): there is no way back to a
-/// closed window, so closing it must exit.
-pub struct NoTray;
-
-/// Whether the app has a tray icon.
-pub fn has_tray<R: Runtime>(app: &AppHandle<R>) -> bool {
-    use tauri::Manager;
-    app.try_state::<NoTray>().is_none()
-}
-
-/// Whether an exit request leaves the app running: closing the last window does when there is a tray to reopen it
-/// from; Quit (an explicit exit code) never does.
-pub fn keeps_running(exit_code: Option<i32>, tray: bool) -> bool {
-    exit_code.is_none() && tray
-}
-
 /// A menu item id for a runner action: `runner:<action>:<name>`.
 pub fn action_id(action: &str, runner: &str) -> String {
     format!("runner:{action}:{runner}")
@@ -194,28 +148,20 @@ pub fn parse_action_id(id: &str) -> Option<(&str, &str)> {
     rest.split_once(':')
 }
 
-fn build_menu<R: Runtime>(app: &AppHandle<R>, runners: &[RunnerSnapshot], connected: bool) -> tauri::Result<Menu<R>> {
-    let mut menu = MenuBuilder::new(app);
-    let header = MenuItem::with_id(app, "header", tooltip(runners, connected), false, None::<&str>)?;
-    menu = menu.item(&header).item(&PredefinedMenuItem::separator(app)?);
+/// The tray's menu: a summary line, each runner with its quick actions, then the shell's Open and Quit items.
+pub fn menu(runners: &[RunnerSnapshot], connected: bool) -> Vec<TrayEntry> {
+    let mut menu = vec![disabled(&tooltip(runners, connected)), TrayEntry::Separator];
     for r in runners {
-        let title = format!("{} — {}", r.name, status_words(r.status));
-        let mut sub = SubmenuBuilder::new(app, title);
+        let mut items = Vec::new();
         if let Some(job) = &r.current_job {
             let what = job.info.repository.clone().unwrap_or_else(|| "a job".into());
-            let job_name = job.info.job.clone().map(|j| format!(" · {j}")).unwrap_or_default();
-            sub = sub.item(&MenuItem::with_id(
-                app,
-                format!("job:{}", r.name),
-                format!("{what}{job_name}"),
-                false,
-                None::<&str>,
-            )?);
-            sub = sub.separator();
+            let job_name = job.info.job.clone().map(|j| format!(" \u{b7} {j}")).unwrap_or_default();
+            items.push(disabled(&format!("{what}{job_name}")));
+            items.push(TrayEntry::Separator);
         }
         let paused = matches!(r.status, RunnerStatus::Paused | RunnerStatus::Draining);
         let running = r.running_since.is_some();
-        let items: Vec<(&str, &str, bool)> = vec![
+        let actions: [(&str, &str, bool); 9] = [
             ("restart", "Restart after the current job", running),
             (
                 if paused { "resume" } else { "drain" },
@@ -226,90 +172,79 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>, runners: &[RunnerSnapshot], connec
             ("stop", "Stop after the current job", running),
             ("applyUpdate", "Update now", r.update_target.is_some()),
             ("clean", "Clean up now", true),
-            ("processes", "Processes…", true),
-            ("config", "Configuration…", true),
+            ("processes", "Processes\u{2026}", true),
+            ("config", "Configuration\u{2026}", true),
             ("logs", "Open logs", true),
         ];
-        for (action, label, enabled) in items {
-            sub = sub.item(&MenuItem::with_id(
-                app,
-                action_id(action, r.name.as_str()),
-                label,
-                enabled,
-                None::<&str>,
-            )?);
+        for (action, label, enabled) in actions {
+            let id = action_id(action, r.name.as_str());
+            // An id the tray cannot carry would make it refuse the whole menu: leave that one action out.
+            if !enabled || id.len() > MAX_ID {
+                continue;
+            }
+            items.push(item(id, label));
         }
-        menu = menu.item(&sub.build()?);
+        menu.push(submenu(&format!("{} \u{2014} {}", r.name, status_words(r.status)), items));
     }
     if !runners.is_empty() {
-        menu = menu.item(&PredefinedMenuItem::separator(app)?);
+        menu.push(TrayEntry::Separator);
     }
-    menu.item(&MenuItem::with_id(app, OPEN, "Open Pitcrew", true, None::<&str>)?)
-        .item(&PredefinedMenuItem::separator(app)?)
-        .item(&MenuItem::with_id(
-            app,
-            QUIT,
-            "Quit Pitcrew (runners keep running)",
-            true,
-            None::<&str>,
-        )?)
-        .build()
+    menu.push(item(SHOW_ID, "Open Pitcrew"));
+    menu.push(TrayEntry::Separator);
+    menu.push(item(QUIT_ID, "Quit Pitcrew (runners keep running)"));
+    menu
 }
 
-/// Creates the tray icon.
-pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    let menu = build_menu(app, &[], false)?;
-    let icon = Image::from_bytes(icon_bytes(TrayState::Error, dark_taskbar()))?;
-    TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip(tooltip(&[], false))
-        .icon(icon)
-        .icon_as_template(cfg!(target_os = "macos"))
-        .menu(&menu)
-        .show_menu_on_left_click(cfg!(target_os = "macos"))
-        .on_menu_event(|app, event| {
-            let id = event.id().as_ref();
-            match id {
-                OPEN => show_main(app),
-                // Quitting the app never stops the runners: the service keeps them going.
-                QUIT => app.exit(0),
-                _ => {
-                    if let Some((action, runner)) = parse_action_id(id) {
-                        if crate::events::page_route(action, runner).is_some() {
-                            show_main(app);
-                        }
-                        app.state::<Actions>().run(app, action, runner);
-                    }
-                }
-            }
-        })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                if !cfg!(target_os = "macos") {
-                    show_main(tray.app_handle());
-                }
-            }
-        })
-        .build(app)?;
-    Ok(())
-}
-
-/// Updates icon, tooltip and menu.
-pub fn update<R: Runtime>(app: &AppHandle<R>, runners: &[RunnerSnapshot], connected: bool) {
-    let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
+/// What the tray shows now: the worst state of all runners (the service being unreachable is an error).
+pub fn view(runners: &[RunnerSnapshot], connected: bool) -> TrayView {
     let state = if connected { tray_state(runners) } else { TrayState::Error };
-    if let Ok(icon) = Image::from_bytes(icon_bytes(state, dark_taskbar())) {
-        let _ = tray.set_icon(Some(icon));
-        let _ = tray.set_icon_as_template(cfg!(target_os = "macos"));
+    TrayView::new(&tooltip(runners, connected), menu(runners, connected), state.key())
+}
+
+impl TrayState {
+    /// The icon's name in the tray view.
+    pub fn key(self) -> &'static str {
+        match self {
+            TrayState::Ok => "ok",
+            TrayState::Busy => "busy",
+            TrayState::Warning => "warning",
+            TrayState::Error => "error",
+        }
     }
-    let _ = tray.set_tooltip(Some(tooltip(runners, connected)));
-    if let Ok(menu) = build_menu(app, runners, connected) {
-        let _ = tray.set_menu(Some(menu));
+
+    fn from_key(key: &str) -> TrayState {
+        match key {
+            "ok" => TrayState::Ok,
+            "busy" => TrayState::Busy,
+            "warning" => TrayState::Warning,
+            _ => TrayState::Error,
+        }
     }
+}
+
+/// The tray over the shell's window layer: its model reads what the event thread keeps current in [`Latest`], and a left
+/// click shows the window (menu on macOS). Returns whether the icon exists (Linux without an app indicator: closing the
+/// last window then quits, which the window layer decides).
+pub fn create<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let native = NativeTray::new(|key| Image::from_bytes(icon_bytes(TrayState::from_key(key), dark_taskbar())).ok());
+    let tray = Tray::new(native, |app: &AppHandle<R>| {
+        let latest = app.state::<Latest>();
+        let connected = matches!(latest.connection(), crate::dto::ConnectionState::Connected { .. });
+        let runners = if connected {
+            latest.status().map(|s| s.runners).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        view(&runners, connected)
+    })
+    .on_action(|app, id| {
+        let Some((action, runner)) = parse_action_id(id) else { return };
+        if crate::events::page_route(action, runner).is_some() {
+            let _ = paddock_window::tauri::reveal(app, "main");
+        }
+        app.state::<Actions>().run(app, action, runner);
+    });
+    paddock_window::tauri::create_tray(app, tray)
 }
 
 #[cfg(test)]
@@ -352,14 +287,6 @@ mod tests {
     }
 
     #[test]
-    fn closing_the_last_window_keeps_running_and_quit_exits() {
-        assert!(keeps_running(None, true));
-        assert!(!keeps_running(Some(0), true));
-        // No tray (Linux without an appindicator): the window is the only way in, so closing it exits.
-        assert!(!keeps_running(None, false));
-    }
-
-    #[test]
     fn menu_ids_round_trip_and_tooltips_count() {
         let id = action_id("drain", "build-pc");
         assert_eq!(parse_action_id(&id), Some(("drain", "build-pc")));
@@ -375,5 +302,26 @@ mod tests {
         let a = Usage::tick(120, 2 * 1024 * 1024 * 1024, 4);
         let b = Usage::tick(60, 1024 * 1024 * 1024 + 512 * 1024 * 1024, 2);
         assert_eq!(load_text([a, b].iter()).as_deref(), Some("CPU 18% · 3.5 GB"));
+    }
+}
+
+#[cfg(test)]
+mod view_tests {
+    use super::*;
+
+    #[test]
+    fn without_the_service_the_tray_shows_an_error_and_only_open_and_quit() {
+        let v = view(&[], false);
+        assert_eq!(v.icon, "error");
+        assert!(paddock_window::tray::validate(&v.menu).is_ok());
+        assert!(v.menu.iter().any(|e| matches!(e, TrayEntry::Item { id, .. } if id == SHOW_ID)));
+        assert!(v.menu.iter().any(|e| matches!(e, TrayEntry::Item { id, .. } if id == QUIT_ID)));
+    }
+
+    #[test]
+    fn icon_keys_round_trip() {
+        for s in [TrayState::Ok, TrayState::Busy, TrayState::Warning, TrayState::Error] {
+            assert_eq!(TrayState::from_key(s.key()), s);
+        }
     }
 }

@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "base": [
+    "window_pong",
+    "window_ready"
+  ],
+  "dialogs": {
+    "pc.config-diff": {
+      "kind": "form",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": []
+    },
+    "pc.confirm": {
+      "kind": "decision",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": []
+    },
+    "pc.register": {
+      "kind": "form",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": [
+        "connection_state",
+        "job_cancel",
+        "job_result",
+        "jobs_snapshot",
+        "platform_name",
+        "register_runner",
+        "runner_status"
+      ]
+    },
+    "pc.stop-process": {
+      "kind": "decision",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": []
+    },
+    "pd.about": {
+      "kind": "viewer",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "minSize": {
+        "width": 680,
+        "height": 560
+      },
+      "commands": [
+        "about_info",
+        "about_legal"
+      ]
+    },
+    "pd.settings": {
+      "kind": "tool",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": [
+        "channel_secret_clear",
+        "channel_secret_present",
+        "channel_secret_set",
+        "channel_test",
+        "clear_api_token",
+        "connection_state",
+        "dialog_open",
+        "export_diagnostics",
+        "get_autostart",
+        "get_settings",
+        "has_api_token",
+        "install_service",
+        "notification_channels_get",
+        "notification_channels_save",
+        "open_page",
+        "open_url",
+        "pitcrew_open_login_items",
+        "platform_name",
+        "repair_service",
+        "runner_status",
+        "save_settings",
+        "service_install_state",
+        "set_api_token",
+        "set_autostart",
+        "settings_overview",
+        "settings_reset",
+        "settings_set",
+        "uninstall_service"
+      ]
+    },
+    "pd.updates": {
+      "kind": "tool",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": [
+        "updates_cancel",
+        "updates_check",
+        "updates_download",
+        "updates_install_on_quit",
+        "updates_restart",
+        "updates_set_preferences",
+        "updates_status"
+      ]
+    },
+    "pd.whats-new": {
+      "kind": "viewer",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "minSize": {
+        "width": 680,
+        "height": 560
+      },
+      "commands": [
+        "about_whats_new"
+      ]
+    }
+  }
+}

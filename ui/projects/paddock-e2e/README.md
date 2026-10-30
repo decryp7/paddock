@@ -79,3 +79,11 @@ for (const colorScheme of THEMES) {
 
 Build: `npm run build:e2e` in `ui/` (writes `ui/dist/paddock-e2e`). Its unit tests run with `npm run test:scripts`; the screenshot runner is
 also run for real on `data:` pages: `npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=screenshots`.
+
+## Screenshots and layout checks (`capture.ts`)
+
+`captureScreen(page, path, { fullPage?: 'viewport' | 'main', scrollTop?, allow?, busy? })` is the only way to take a review or
+documentation image of an app page: it waits until nothing is loading (`pd-skeleton`, `.skeleton`, `[aria-busy=true]`), fonts are
+ready, every `img` is decoded, no animation runs in main and the layout holds for two looks; it scrolls only the main scroller,
+fails when the frame scrolled, an element is cut at the bottom edge (rows cut by an inner scroller, such as a virtual list, are its own business), or an opaque, empty cover sits over the app (any CSS colour, pseudo-elements, fixed and sticky bars; `allow` never excuses a cover). To shoot a running state ("Still working"), emulate `reducedMotion: 'reduce'` or name the spinner in `animated`. A whole page (`fullPage: 'main'`) grows the window up to `FRAME_MAX_HEIGHT`. `captureDocScreens` uses it, so its screens are held to the same rules. `expectFullyVisible(locator)`
+(for primary actions) and `expectPageFillsHost(page, { page?, fill? })` (the real page component fills the host, no rendered virtual viewport has 0 height; `fill: false` for content-high pages) are the assertions behind it; both poll until the layout holds. See [docs/plans/shell-adoption-checklist.md](../../../docs/plans/shell-adoption-checklist.md).

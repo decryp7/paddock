@@ -34,10 +34,4 @@ describe('GeneralSection', () => {
     el.querySelector<HTMLButtonElement>('button[aria-label="Turn on all Updates"]')!.click();
     expect(prefs.isEnabled('updated')).toBe(true);
   });
-
-  it('marks the chosen theme with a check as well as the border', async () => {
-    const { el } = await mount();
-    expect(el.querySelectorAll('.theme[aria-checked="true"] .check').length).toBe(1);
-    expect(el.querySelectorAll('.theme[aria-checked="false"] .check').length).toBe(0);
-  });
 });

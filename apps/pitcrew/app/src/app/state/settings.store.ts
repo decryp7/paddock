@@ -5,32 +5,34 @@ import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { idle, pending, settle, type Loadable } from './loadable';
 import { StatusStore } from './status.store';
-import { ToastStore } from './toast.store';
+import { Notify } from './notify';
 
 interface SettingsState {
   settings: Loadable<SettingsReply>;
   saving: boolean;
+  /** What the last save said ("Disk guard saved"), shown inline by the page that saved; cleared by the next save. */
+  savedNote: string | null;
 }
 
 /** `pitcrew.toml` as the service has it, and saving it (the service validates and may refuse). */
 export const SettingsStore = signalStore(
   { providedIn: 'root' },
-  withState<SettingsState>({ settings: idle<SettingsReply>(), saving: false }),
+  withState<SettingsState>({ settings: idle<SettingsReply>(), saving: false, savedNote: null }),
   withComputed(({ settings }) => ({
     config: computed(() => settings().value?.config ?? null),
     readOnly: computed(() => settings().value?.readOnly ?? false),
     problems: computed(() => settings().value?.problems ?? []),
   })),
-  withMethods((store, backend = inject(BACKEND), toasts = inject(ToastStore), status = inject(StatusStore)) => {
+  withMethods((store, backend = inject(BACKEND), toasts = inject(Notify), status = inject(StatusStore)) => {
     const load = async () => {
       patchState(store, { settings: pending(store.settings()) });
       patchState(store, { settings: await settle(store.settings(), () => backend.settings()) });
     };
     const save = async (config: Config, what = 'Settings saved'): Promise<boolean> => {
-      patchState(store, { saving: true });
+      patchState(store, { saving: true, savedNote: null });
       try {
         await backend.saveSettings(config);
-        toasts.show({ tone: 'success', icon: 'check-circle', title: what, body: null });
+        patchState(store, { savedNote: what });
         await Promise.all([load(), status.load()]);
         return true;
       } catch (e) {

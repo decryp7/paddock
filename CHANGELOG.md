@@ -285,6 +285,30 @@ Conventional Commits; one semver tag for the whole repo.
 - `.pd-switch` stays in `_controls.scss` until its last users (the view form and the gallery) have moved.
 
 
+### Shell: Pitcrew's service cause words
+- The health chip has words for Pitcrew's cause codes (`CAUSE_WORDS`): `pc.service.not-installed` ("not installed"),
+  `pc.service.unavailable` ("not reachable"), `pc.service.mismatch` ("different version") and `pc.service.repair`
+  ("repair failed"); the three new texts are in the i18n catalogs (`pd.health.state.not-reachable`,
+  `different-version`, `repair-failed`). `cause-codes.spec.ts` keeps the table and the Rust sources in step.
+
+### Shell adoption checks (ER-21: Spotter and Pitcrew moves hit the same review findings)
+- `@decryp7/paddock-e2e`: `captureScreen` (waits for no skeleton or busy marker, fonts, decoded images, no running animation in
+  main, a stable layout; scrolls only the main scroller; refuses a cut-off bottom edge, a scrolled frame and an opaque cover;
+  `fullPage: 'main'` grows the window by the hidden height), `waitForCapturable`, `expectFullyVisible` (in the window, not
+  clipped by an ancestor's overflow, not covered) and `expectPageFillsHost` (the page fills the host, no collapsed
+  `cdk-virtual-scroll-viewport`). Tested against fixture pages in `selftest/capture.spec.ts`.
+- `pd-page-host` is a flex column that fills `<main>` (`height: 100%`, `min-height: 0`), and the loaded page's box is a shrinkable
+  flex item, so `height: 100%` inside a routed page resolves instead of collapsing to 0.
+- Conformance C44 (rule 42): an app must not name `paddock://jobs` or a `JOBS_EVENT` imported from paddock-ui (aliases and
+  namespaces too; an app's own constant of that name is fine), nor listen on a `JobsBackend`/`TauriJobsBackend`/`MemoryJobsBackend`
+  (constructing one in provider wiring or a mock is fine) or inject `JobsBackend` outside `provide*.ts`, `*.config.ts`, `main.ts`; apps wait through `JobFollow` / `JobsStore.follow` (documented in
+  `shell/jobs`). It runs in every app's gates (`app-gates` action) and in Paddock's conformance job; the e2e kit's self-test
+  runs in the `ui` job of ci.yml.
+- `captureDocScreens` goes through `captureScreen` (settled, not cut, not scrolled, no cover); its `element` and `clip` crops
+  are removed (a crop can hide content). `FRAME_MAX_HEIGHT` moved to `capture.ts` (still exported from the package).
+- Behaviour change: a routed page with `height: 100%` and `overflow: hidden` is clipped to the host instead of making `<main>`
+  scroll; use `overflow: auto` or no fixed height. The page box's rule lives in `pd-part-outlet`'s `:host(.pd-page)`.
+- New [docs/plans/shell-adoption-checklist.md](docs/plans/shell-adoption-checklist.md), linked from AGENTS.md.
 ### Shell: About, health chip, notices and jobs popover fixes
 - About, Updates and What's new are styled again: `ABOUT_STYLES` selected the pre-`pd-` class names (b88a387a1). A new spec
   (`shell/testing/src/template-classes.spec.ts`) checks that every class a shell template uses has a selector in its styles, so the

@@ -1,11 +1,8 @@
 import { DOCUMENT } from '@angular/common';
-import { Injectable, computed, inject, signal } from '@angular/core';
-import { readLocal, writeLocal } from './storage';
+import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
+import { AppearanceStore } from '@decryp7/paddock-ui/shell';
 
-export type ThemePreference = 'system' | 'light' | 'dark';
 export type Theme = 'light' | 'dark';
-
-const KEY = 'pitcrew.theme';
 
 /** The colours charts need, read from the CSS tokens of the current theme. */
 export interface ChartTokens {
@@ -27,43 +24,31 @@ export interface ChartTokens {
   accent: string;
 }
 
-function isPreference(v: string | null): v is ThemePreference {
-  return v === 'system' || v === 'light' || v === 'dark';
-}
-
-/** The theme: follows the system unless the user picked one (remembered in localStorage). */
+/**
+ * The colours charts need, read from the CSS tokens of the current look. The look itself (theme, contrast, accent) is the
+ * shell's appearance (Settings > Appearance, the same in every window); this only reads what it produced.
+ */
 @Injectable({ providedIn: 'root' })
 export class ThemeService {
   private readonly doc = inject(DOCUMENT);
-  private readonly media = this.doc.defaultView?.matchMedia?.('(prefers-color-scheme: dark)') ?? null;
-  private readonly systemDark = signal(this.media?.matches ?? false);
-  private readonly pref = signal<ThemePreference>(((v) => (isPreference(v) ? v : 'system'))(readLocal(KEY)));
+  private readonly appearance = inject(AppearanceStore);
+  /** Bumped when the page's look attributes change, so tokens are read after the shell applied them (not before). */
+  private readonly applied = signal(0);
 
-  /** What the user picked. */
-  readonly preference = this.pref.asReadonly();
   /** The theme in effect. */
-  readonly theme = computed<Theme>(() => {
-    const p = this.pref();
-    return p === 'system' ? (this.systemDark() ? 'dark' : 'light') : p;
+  readonly theme = computed<Theme>(() => this.appearance.resolved().scheme);
+  /** Chart colours for the theme in effect (re-read whenever the look changes). */
+  readonly chartTokens = computed<ChartTokens>(() => {
+    this.applied();
+    return this.readTokens(this.theme());
   });
-  /** Chart colours for the theme in effect (re-read whenever it changes). */
-  readonly chartTokens = computed<ChartTokens>(() => this.readTokens(this.theme()));
 
   constructor() {
-    this.media?.addEventListener?.('change', (e) => this.systemDark.set(e.matches));
-    this.apply(this.pref());
-  }
-
-  setPreference(p: ThemePreference): void {
-    this.apply(p);
-    this.pref.set(p);
-    writeLocal(KEY, p);
-  }
-
-  private apply(p: ThemePreference): void {
-    const root = this.doc.documentElement;
-    if (p === 'system') delete root.dataset['theme'];
-    else root.dataset['theme'] = p;
+    const MO = this.doc.defaultView?.MutationObserver;
+    if (!MO) return;
+    const observer = new MO(() => this.applied.update((n) => n + 1));
+    observer.observe(this.doc.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-contrast', 'data-accent'] });
+    inject(DestroyRef).onDestroy(() => observer.disconnect());
   }
 
   private readTokens(theme: Theme): ChartTokens {

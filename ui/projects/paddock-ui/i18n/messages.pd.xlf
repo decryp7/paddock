@@ -809,6 +809,9 @@
       <trans-unit id="pd.health.state.degraded" datatype="html">
         <source>limited</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.different-version" datatype="html">
+        <source>different version</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.incompatible" datatype="html">
         <source>incompatible</source>
       </trans-unit>
@@ -833,6 +836,9 @@
       <trans-unit id="pd.health.state.not-installed" datatype="html">
         <source>not installed</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.not-reachable" datatype="html">
+        <source>not reachable</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.not-running" datatype="html">
         <source>not running</source>
       </trans-unit>
@@ -853,6 +859,9 @@
       </trans-unit>
       <trans-unit id="pd.health.state.refused" datatype="html">
         <source>refused by the system</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.repair-failed" datatype="html">
+        <source>repair failed</source>
       </trans-unit>
       <trans-unit id="pd.health.state.repairing" datatype="html">
         <source>repairing</source>

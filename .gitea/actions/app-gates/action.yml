@@ -125,6 +125,18 @@ runs:
         if [ "$RUNNER_OS" = Linux ]; then step cargo deny --all-features --workspace check; fi
         exit $status
 
+    # The app rules a repo-level run can decide from the sources alone (conformance C44: jobs only through the shell's job follow).
+    - name: App rules (${{ inputs.app }})
+      if: ${{ !cancelled() && steps.prepare.outcome != 'failure' }}
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+      run: |
+        set -euo pipefail
+        if [ -d "apps/$APP/app" ]; then
+          node "${{ github.action_path }}/../../../conformance/bin/paddock-conformance.mjs" --app "$APP" --root "apps/$APP" --only C44
+        fi
+
     - name: UI (${{ inputs.app }})
       if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.ui == 'true' && inputs.ui-checks != '' }}
       shell: bash

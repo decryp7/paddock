@@ -59,6 +59,21 @@ pub fn page_route(action: &str, runner: &str) -> Option<String> {
     }
 }
 
+/// The main-window page a window may ask to be opened (`open_page`): a known screen and nothing else, so an argument from a
+/// webview can never name a path of its own. The UI's `core/deep-link.ts` has the same list for what the shell sends in.
+pub fn open_page_route(raw: &str) -> Option<&'static str> {
+    match raw {
+        "/" => Some("/"),
+        "/runners" => Some("/runners"),
+        "/activity" => Some("/activity"),
+        "/insights" => Some("/insights"),
+        "/storage" => Some("/storage"),
+        "/logs" => Some("/logs"),
+        "/updates" => Some("/updates"),
+        _ => None,
+    }
+}
+
 /// The last page the shell asked the window to open, until a window takes it (one created by that same action only
 /// starts listening after it was asked).
 #[derive(Default)]
@@ -134,9 +149,8 @@ fn connection<R: Runtime>(app: &AppHandle<R>, c: ConnectionState) {
         return;
     }
     latest.set_connection(c.clone());
-    let connected = matches!(c, ConnectionState::Connected { .. });
-    let runners = latest.status().map(|s| s.runners).unwrap_or_default();
-    crate::tray::update(app, if connected { &runners } else { &[] }, connected);
+    paddock_window::tauri::refresh_tray(app);
+    crate::health::report(app, &c);
     emit(app, BackendEvent::Connection { connection: c });
 }
 
@@ -186,12 +200,19 @@ pub fn start<R: Runtime>(app: AppHandle<R>) {
                                 ServiceEvent::Status { runners, service } => {
                                     let status = StatusReply { runners, service };
                                     let key = menu_key(&status);
+                                    a.state::<Latest>().set_status(status.clone());
                                     if key != last_menu {
                                         last_menu = key;
-                                        crate::tray::update(&a, &status.runners, true);
+                                        // The tray model reads `Latest`; it redraws only when the menu really changed.
+                                        paddock_window::tauri::refresh_tray(&a);
                                     }
-                                    a.state::<Latest>().set_status(status.clone());
                                     emit(&a, BackendEvent::Status { status });
+                                }
+                                ServiceEvent::Job { job } => {
+                                    if let Ok(registry) = crate::jobs::registry(&a) {
+                                        a.state::<crate::service_jobs::Mirror>()
+                                            .apply(&registry, &a.state::<SharedClient>(), &job);
+                                    }
                                 }
                                 ServiceEvent::Notification { notification } => {
                                     notify(&a, &notification);
@@ -242,6 +263,24 @@ mod tests {
 #[cfg(test)]
 mod nav_tests {
     use super::*;
+
+    #[test]
+    fn a_window_can_ask_for_a_known_screen_and_nothing_else() {
+        assert_eq!(open_page_route("/updates"), Some("/updates"));
+        assert_eq!(open_page_route("/"), Some("/"));
+        for bad in [
+            "",
+            "updates",
+            "//evil.example",
+            "https://evil.example",
+            "/settings",
+            "/runners/../x",
+            "/updates?x=1",
+            "/logs/a b",
+        ] {
+            assert_eq!(open_page_route(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn tray_pages_have_routes_and_a_pending_route_is_taken_once() {

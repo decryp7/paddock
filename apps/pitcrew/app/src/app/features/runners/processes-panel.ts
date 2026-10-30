@@ -1,6 +1,6 @@
-import { Dialog } from '@angular/cdk/dialog';
 import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, untracked } from '@angular/core';
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import type { KeepFor, ProcessEntry, ProcessOverride, ProcessPolicy } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
@@ -9,7 +9,7 @@ import { ProcessOverrideEditor } from '../../shared/policy/process-override-edit
 import { KEEP_EXTRAS, cleanupSummary, fateText } from '../../shared/process-format';
 import { LoadState } from '../../shared/ui/load-state';
 import { SettingsStore } from '../../state/settings.store';
-import { ToastStore } from '../../state/toast.store';
+import { Notify } from '../../state/notify';
 import { ProcessesStore } from './processes.store';
 import { confirmStopProcess } from './stop-process-dialog';
 
@@ -39,8 +39,8 @@ export class ProcessesPanel {
   protected readonly store = inject(ProcessesStore);
   protected readonly settings = inject(SettingsStore);
   private readonly clock = inject(ClockService);
-  private readonly dialog = inject(Dialog);
-  private readonly toasts = inject(ToastStore);
+  private readonly ports = inject(SHELL_PORTS);
+  private readonly toasts = inject(Notify);
 
   protected readonly extras = KEEP_EXTRAS;
   protected readonly list = computed(() => this.store.list().value);
@@ -82,14 +82,20 @@ export class ProcessesPanel {
   }
 
   protected async stop(entry: ProcessEntry): Promise<void> {
-    const ok = await confirmStopProcess(this.dialog, { name: entry.name, pid: entry.pid, isRunner: entry.isRunner, jobRunning: !!this.list() && !this.list()!.idle });
+    const ok = await confirmStopProcess(this.ports, { name: entry.name, pid: entry.pid, isRunner: entry.isRunner, jobRunning: !!this.list() && !this.list()!.idle });
     if (ok) await this.store.stop(entry, entry.isRunner);
   }
+
+  /** The process whose command was just copied: its button shows a check for a moment (inline, not a notice). */
+  protected readonly copiedPid = signal<number | null>(null);
+  private copiedTimer: ReturnType<typeof setTimeout> | undefined;
 
   protected async copy(entry: ProcessEntry): Promise<void> {
     try {
       await navigator.clipboard.writeText(entry.command);
-      this.toasts.show({ tone: 'success', icon: 'check-circle', title: 'Command copied', body: null });
+      this.copiedPid.set(entry.pid);
+      clearTimeout(this.copiedTimer);
+      this.copiedTimer = setTimeout(() => this.copiedPid.set(null), 1800);
     } catch {
       this.toasts.show({ tone: 'warning', icon: 'alert', title: 'Could not copy', body: 'Select the command and press Ctrl/Cmd+C instead.' });
     }

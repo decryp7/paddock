@@ -101,7 +101,7 @@ export function demoInsights(now: number, days: number): Insights {
     runners: [
       { runner: 'build-win', jobs: 118, busyPermille: 860 },
       { runner: 'ui-tests', jobs: 54, busyPermille: 410 },
-      { runner: 'mac-mini', jobs: 40, busyPermille: 270 },
+      { runner: 'docker-lab', jobs: 40, busyPermille: 270 },
     ],
     advice,
   };
@@ -119,8 +119,8 @@ export function demoEngineReport(now: number): EngineReport {
       { what: 'Build Cache', total: 212, active: 0, bytes: 9.6 * GB, reclaimableBytes: 9.6 * GB },
     ],
     folders: [
-      { label: 'Action checkouts (act)', path: 'C:\\Users\\decryp7\\.cache\\act', exists: true, bytes: 2.7 * GB, entries: 61, truncated: false },
-      { label: 'Cache server (default)', path: 'C:\\Users\\decryp7\\.cache\\actcache', exists: true, bytes: 6.8 * GB, entries: 143, truncated: false },
+      { label: 'Action checkouts (act)', path: 'C:\\Users\\ci\\.cache\\act', exists: true, bytes: 2.7 * GB, entries: 61, truncated: false },
+      { label: 'Cache server (default)', path: 'C:\\Users\\ci\\.cache\\actcache', exists: true, bytes: 6.8 * GB, entries: 143, truncated: false },
     ],
     at: now,
   };

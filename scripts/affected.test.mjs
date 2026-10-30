@@ -37,8 +37,8 @@ describe('the graph of this tree', () => {
     const r = run('crates/paddock-jobs/src/lib.rs');
     assert.ok(r.crates && !r.ui);
     // Debrief's store worker and Spotter's renderer depend on paddock-proc by path (the memory figure and the supervised child),
-    // so the shared crates reach Debrief and Spotter too; Dyno takes the shell crates by path.
-    assert.deepEqual(r.apps, ['debrief', 'dyno', 'shell-demo', 'spotter', 'workbench-demo']);
+    // so the shared crates reach Debrief and Spotter too; Dyno and Pitcrew take the shell crates by path.
+    assert.deepEqual(r.apps, ['debrief', 'dyno', 'pitcrew', 'shell-demo', 'spotter', 'workbench-demo']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust']);
     assert.deepEqual(r.kinds.debrief, ['rust']);
     assert.ok(r.packages.crates.includes('paddock-jobs'));
@@ -70,10 +70,11 @@ describe('the graph of this tree', () => {
   test('a ui change marks the Tauri shells that embed a ui build (frontendDist), both halves', () => {
     const r = run('ui/projects/paddock-ui/shell/src/public-api.ts');
     assert.ok(r.ui);
-    // Spotter and Dyno map @decryp7/paddock-ui to ui/dist in their tsconfig (a path edge, no npm edge).
-    assert.deepEqual(r.apps, ['dyno', 'shell-demo', 'spotter', 'workbench-demo']);
+    // Spotter, Dyno and Pitcrew map @decryp7/paddock-ui to ui/dist in their tsconfig (a path edge, no npm edge).
+    assert.deepEqual(r.apps, ['dyno', 'pitcrew', 'shell-demo', 'spotter', 'workbench-demo']);
     assert.deepEqual(r.kinds.spotter, ['ui']);
     assert.deepEqual(r.kinds.dyno, ['ui']);
+    assert.deepEqual(r.kinds.pitcrew, ['ui']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust', 'ui']);
   });
 
@@ -111,6 +112,15 @@ describe('the graph of this tree', () => {
     assert.deepEqual([c.apps, c.kinds['shell-demo']], [['shell-demo'], ['rust', 'ui']]);
     const rules = run('docs/rules.md');
     assert.deepEqual([rules.conformance, rules.tools, rules.docs, rules.apps], [true, true, false, []]);
+  });
+
+  test('a docs-only change to Pitcrew runs its doc-images check (its README, docs and screenshots are inputs of that test)', () => {
+    for (const f of ['apps/pitcrew/README.md', 'apps/pitcrew/docs/features.md', 'apps/pitcrew/docs/screenshots/dark/dashboard.png', 'apps/pitcrew/docs/diagrams/architecture.svg']) {
+      const r = run(f);
+      assert.deepEqual(r.apps, ['pitcrew'], f);
+      assert.equal(r.docs, false, f);
+    }
+    assert.deepEqual(run('apps/spotter/README.md').apps, [], 'another app\'s docs are not');
   });
 
   test('global inputs mark everything; an app release workflow marks one app', () => {

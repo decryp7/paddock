@@ -23,7 +23,7 @@ import { positiveInt } from './update-policy-editor';
       <div class="field">
         <label [for]="id() + '-timeout'">Stop timeout</label>
         <div class="with-unit">
-          <input class="input" type="number" min="1" max="300" [id]="id() + '-timeout'" [value]="d.stop_timeout_secs" (change)="setTimeoutSecs($any($event.target))" [disabled]="readOnly()" />
+          <input class="input" type="number" min="1" max="300" [id]="id() + '-timeout'" [value]="d.stop_timeout_secs" (change)="setStopSecs($any($event.target))" [disabled]="readOnly()" />
           <span>seconds</span>
         </div>
         <span class="hint">It is asked to stop first, and ended after this long.</span>
@@ -72,7 +72,7 @@ export class ProcessPolicyEditor {
     this.draft.update((d) => ({ ...d, ...patch }));
   }
 
-  protected setTimeoutSecs(el: HTMLInputElement): void {
+  protected setStopSecs(el: HTMLInputElement): void {
     const n = positiveInt(el.value);
     if (n === null) el.value = String(this.draft().stop_timeout_secs);
     else this.set({ stop_timeout_secs: n });

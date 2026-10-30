@@ -3,12 +3,12 @@
 //! an app-side job (credential store, Gitea API, diagnostics file, OS integration), off the UI thread.
 
 use crate::dto::{
-    ActivityReply, AppUpdateInfo, AppUpdateStatusDto, CommandError, CommandErrorCode, ConfigSaved, ConnectionState, DiskReply,
-    MetricsReply, RegisterRequest, RunnerConfigReply, ServiceInstall, SettingsReply, StatusReply,
+    ActivityReply, CommandError, CommandErrorCode, ConfigSaved, ConnectionState, DiskReply, MetricsReply, RegisterRequest,
+    RunnerConfigReply, ServiceInstall, SettingsReply, StatusReply,
 };
 use crate::events::Latest;
 use crate::service_client::{ClientError, ServiceClient};
-use crate::{credentials, diagnostics, gitea, service_install, updater};
+use crate::{credentials, diagnostics, gitea, service_install};
 use pitcrew_core::config::{check_server_url, Config, RunnerConfig};
 use pitcrew_core::distribution::RunnerKind;
 use pitcrew_core::gitea_api::{job_days, job_hours, with_outcomes, RunDetails};
@@ -20,7 +20,7 @@ use pitcrew_core::time::Timestamp;
 use pitcrew_core::version::RunnerVersion;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -158,9 +158,8 @@ pub fn register(client: &dyn ServiceClient, req: RegisterRequest) -> Result<(), 
 
 // ---- Tauri commands -------------------------------------------------------------------------------------------------
 
-/// `platform_name`.
-#[tauri::command]
-pub fn platform_name() -> &'static str {
+/// The platform's name as the UI knows it.
+pub fn platform() -> &'static str {
     if cfg!(windows) {
         "windows"
     } else if cfg!(target_os = "macos") {
@@ -168,6 +167,12 @@ pub fn platform_name() -> &'static str {
     } else {
         "linux"
     }
+}
+
+/// `platform_name`.
+#[tauri::command]
+pub async fn platform_name() -> &'static str {
+    platform()
 }
 
 /// `runner_status`.
@@ -179,14 +184,30 @@ pub async fn runner_status(client: State<'_, SharedClient>) -> Result<StatusRepl
 
 /// `take_pending_navigation`: the page the tray asked for before this window listened (once).
 #[tauri::command]
-pub fn take_pending_navigation(pending: State<'_, crate::events::PendingNav>) -> Option<String> {
-    pending.take()
+pub async fn take_pending_navigation(pending: State<'_, crate::events::PendingNav>) -> Result<Option<String>, CommandError> {
+    Ok(pending.take())
+}
+
+/// `open_page`: shows the main window at a screen. A dialog window (Settings) has no pages of its own, so it asks for one here; the
+/// route is checked against the known screens, and the main window opens it as it does the tray's (it may not listen yet, so the
+/// route is kept until it asks).
+#[tauri::command]
+pub async fn open_page<R: Runtime>(
+    app: AppHandle<R>,
+    pending: State<'_, crate::events::PendingNav>,
+    route: String,
+) -> Result<(), CommandError> {
+    let route = crate::events::open_page_route(&route).ok_or_else(|| CommandError::bad("That is not a screen Pitcrew can open."))?;
+    pending.set(route.to_string());
+    let _ = app.emit(crate::events::NAVIGATE, route);
+    let _ = paddock_window::tauri::reveal(&app, "main");
+    Ok(())
 }
 
 /// `connection_state`.
 #[tauri::command]
-pub fn connection_state(latest: State<'_, Latest>) -> ConnectionState {
-    latest.connection()
+pub async fn connection_state(latest: State<'_, Latest>) -> Result<ConnectionState, CommandError> {
+    Ok(latest.connection())
 }
 
 /// `runner_action`.
@@ -355,17 +376,26 @@ pub async fn runner_disk(client: State<'_, SharedClient>, runner: String) -> Res
 
 /// `clean_disk`.
 #[tauri::command]
-pub async fn clean_disk(
+pub async fn clean_disk<R: Runtime>(
+    app: AppHandle<R>,
     client: State<'_, SharedClient>,
+    work: State<'_, crate::jobs::Work>,
     runner: String,
-) -> Result<pitcrew_core::housekeeping::CleanupReport, CommandError> {
-    let req = Request::CleanDisk { runner: name(&runner)? };
+) -> Result<u64, CommandError> {
+    let n = name(&runner)?;
+    let req = Request::CleanDisk { runner: n.clone() };
     let c = client.inner().clone();
-    blocking(move || match ask(c.as_ref(), req)? {
-        Response::Cleaned { report } => Ok(report),
-        other => Err(unexpected(other)),
-    })
-    .await
+    let jobs = crate::jobs::registry(&app)?;
+    work.start(
+        &jobs,
+        "pitcrew.clean-disk",
+        "Cleaning up the disk",
+        Some(n.as_str()),
+        move || match ask(c.as_ref(), req)? {
+            Response::Cleaned { report } => Ok(report),
+            other => Err(unexpected(other)),
+        },
+    )
 }
 
 /// `runner_config_get`: the runner's `config.yaml` for the editor.
@@ -562,9 +592,22 @@ pub async fn remove_runner(client: State<'_, SharedClient>, runner: String) -> R
 
 /// `register_runner`.
 #[tauri::command]
-pub async fn register_runner(client: State<'_, SharedClient>, request: RegisterRequest) -> Result<(), CommandError> {
+pub async fn register_runner<R: Runtime>(
+    app: AppHandle<R>,
+    client: State<'_, SharedClient>,
+    work: State<'_, crate::jobs::Work>,
+    request: RegisterRequest,
+) -> Result<u64, CommandError> {
     let c = client.inner().clone();
-    blocking(move || register(c.as_ref(), request)).await
+    let jobs = crate::jobs::registry(&app)?;
+    let subject = request.runner.clone();
+    work.start(
+        &jobs,
+        crate::jobs::DIALOG_JOB_KIND,
+        "Registering the runner",
+        Some(&subject),
+        move || register(c.as_ref(), request),
+    )
 }
 
 /// `has_api_token`.
@@ -619,41 +662,26 @@ pub async fn repair_service<R: Runtime>(app: AppHandle<R>) -> Result<(), Command
     blocking(move || service_install::request_repair(&dir)).await
 }
 
-/// `open_login_items`: opens System Settings ▸ General ▸ Login Items (macOS).
+/// `pitcrew_open_login_items`: opens System Settings ▸ General ▸ Login Items (macOS).
 #[tauri::command]
-pub async fn open_login_items() -> Result<(), CommandError> {
+pub async fn pitcrew_open_login_items() -> Result<(), CommandError> {
     blocking(service_install::open_login_items).await
-}
-
-/// `app_update_status`: whether this build can update itself.
-#[tauri::command]
-pub fn app_update_status<R: Runtime>(app: AppHandle<R>) -> AppUpdateStatusDto {
-    updater::status(&app)
-}
-
-/// `check_app_update`.
-#[tauri::command]
-pub async fn check_app_update<R: Runtime>(app: AppHandle<R>) -> Result<Option<AppUpdateInfo>, CommandError> {
-    updater::check(&app).await
-}
-
-/// `install_app_update`.
-#[tauri::command]
-pub async fn install_app_update<R: Runtime>(app: AppHandle<R>) -> Result<(), CommandError> {
-    updater::install(&app).await
 }
 
 /// `get_autostart`.
 #[tauri::command]
-pub fn get_autostart<R: Runtime>(app: AppHandle<R>) -> Result<bool, CommandError> {
-    app.autolaunch().is_enabled().map_err(|e| CommandError::internal(e.to_string()))
+pub async fn get_autostart<R: Runtime>(app: AppHandle<R>) -> Result<bool, CommandError> {
+    blocking(move || app.autolaunch().is_enabled().map_err(|e| CommandError::internal(e.to_string()))).await
 }
 
 /// `set_autostart`.
 #[tauri::command]
-pub fn set_autostart<R: Runtime>(app: AppHandle<R>, enabled: bool) -> Result<(), CommandError> {
-    let a = app.autolaunch();
-    if enabled { a.enable() } else { a.disable() }.map_err(|e| CommandError::internal(e.to_string()))
+pub async fn set_autostart<R: Runtime>(app: AppHandle<R>, enabled: bool) -> Result<(), CommandError> {
+    blocking(move || {
+        let a = app.autolaunch();
+        if enabled { a.enable() } else { a.disable() }.map_err(|e| CommandError::internal(e.to_string()))
+    })
+    .await
 }
 
 /// `export_diagnostics`: writes the redacted bundle to the Downloads folder and returns its path.
@@ -681,7 +709,7 @@ pub async fn export_diagnostics<R: Runtime>(app: AppHandle<R>, client: State<'_,
         };
         sections.push(DiagnosticsSection {
             name: "app.txt".into(),
-            text: format!("Pitcrew app {version}\nplatform: {}\nconnection: {connection}\n", platform_name()),
+            text: format!("Pitcrew app {version}\nplatform: {}\nconnection: {connection}\n", platform()),
         });
         let stamp = pitcrew_core::time::format_rfc3339(pitcrew_core::time::Timestamp(
             u64::try_from(
@@ -702,18 +730,21 @@ pub async fn export_diagnostics<R: Runtime>(app: AppHandle<R>, client: State<'_,
 
 /// `open_url`: http(s) links only (e.g. a run's page).
 #[tauri::command]
-pub fn open_url<R: Runtime>(app: AppHandle<R>, url: String) -> Result<(), CommandError> {
+pub async fn open_url<R: Runtime>(app: AppHandle<R>, url: String) -> Result<(), CommandError> {
     if !(url.starts_with("https://") || url.starts_with("http://")) || url.len() > 2048 || url.chars().any(char::is_control) {
         return Err(CommandError::bad("only http(s) links can be opened"));
     }
-    app.opener()
-        .open_url(url, None::<&str>)
-        .map_err(|e| CommandError::internal(e.to_string()))
+    blocking(move || {
+        app.opener()
+            .open_url(url, None::<&str>)
+            .map_err(|e| CommandError::internal(e.to_string()))
+    })
+    .await
 }
 
 /// `reveal_logs`: shows the runner's log file in the file manager.
 #[tauri::command]
-pub fn reveal_logs<R: Runtime>(app: AppHandle<R>, runner: String) -> Result<(), CommandError> {
+pub async fn reveal_logs<R: Runtime>(app: AppHandle<R>, runner: String) -> Result<(), CommandError> {
     let n = name(&runner)?;
     let r = app
         .state::<Latest>()
@@ -721,9 +752,12 @@ pub fn reveal_logs<R: Runtime>(app: AppHandle<R>, runner: String) -> Result<(), 
         .and_then(|s| s.runners.into_iter().find(|r| r.name == n))
         .ok_or_else(|| CommandError::new(CommandErrorCode::UnknownRunner, format!("no runner is named {n}")))?;
     let log = PathBuf::from(r.dir).join("logs").join(pitcrew_core::layout::LOG_FILE);
-    app.opener()
-        .reveal_item_in_dir(log)
-        .map_err(|e| CommandError::internal(e.to_string()))
+    blocking(move || {
+        app.opener()
+            .reveal_item_in_dir(log)
+            .map_err(|e| CommandError::internal(e.to_string()))
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -832,7 +866,7 @@ mod tests {
             CommandError::from(ClientError::Protocol("p".into())).code,
             CommandErrorCode::Internal
         );
-        assert!(matches!(platform_name(), "windows" | "macos" | "linux"));
+        assert!(matches!(platform(), "windows" | "macos" | "linux"));
         assert!(version("x").is_err());
     }
 

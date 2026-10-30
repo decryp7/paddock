@@ -1,11 +1,11 @@
-import { DialogRef } from '@angular/cdk/dialog';
+import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import type { LoggedOffMode, RegisterRequest, SessionMode } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { StatusStore } from '../../state/status.store';
-import { ToastStore } from '../../state/toast.store';
+import { Notify } from '../../state/notify';
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const URL_RE = /^https?:\/\/[^\s/]+/;
@@ -62,10 +62,10 @@ export function toRequest(d: RegisterDraft): RegisterRequest {
   styleUrl: './register-wizard.scss',
 })
 export class RegisterWizard {
-  private readonly ref = inject(DialogRef);
+  private readonly ref = inject<DialogRef<boolean>>(DIALOG_REF);
   private readonly backend = inject(BACKEND);
   private readonly status = inject(StatusStore);
-  private readonly toasts = inject(ToastStore);
+  private readonly toasts = inject(Notify);
 
   protected readonly steps = STEPS;
   protected readonly step = signal(0);
@@ -152,6 +152,6 @@ export class RegisterWizard {
   }
 
   protected close(): void {
-    this.ref.close(false);
+    this.ref.close();
   }
 }

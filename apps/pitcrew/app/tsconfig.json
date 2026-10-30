@@ -12,7 +12,14 @@
     "experimentalDecorators": true,
     "importHelpers": true,
     "target": "ES2022",
-    "module": "preserve"
+    "module": "preserve",
+    "resolveJsonModule": true,
+    "paths": {
+      "@decryp7/paddock-ui": ["../../../ui/dist/paddock-ui"],
+      "@decryp7/paddock-ui/*": ["../../../ui/dist/paddock-ui/*"],
+      // TODO: drop this path once @decryp7/paddock-e2e resolves as a workspace package.
+      "@decryp7/paddock-e2e": ["../../../ui/dist/paddock-e2e"]
+    }
   },
   "angularCompilerOptions": {
     "strictInjectionParameters": true,
@@ -20,5 +27,12 @@
     "strictTemplates": true
   },
   "files": [],
-  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.spec.json" }]
+  "references": [
+    {
+      "path": "./tsconfig.app.json"
+    },
+    {
+      "path": "./tsconfig.spec.json"
+    }
+  ]
 }

@@ -1,12 +1,11 @@
-import { Dialog } from '@angular/cdk/dialog';
 import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
+import { SHELL_COMMAND_RUNNER, SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { ChangeDetectionStrategy, Component, ElementRef, Injector, afterNextRender, computed, inject, signal, viewChild } from '@angular/core';
+import { SavedNote } from '../../shared/ui/saved-note';
 import { MatIcon } from '@angular/material/icon';
 import { Router, RouterLink } from '@angular/router';
-import type { AppUpdateInfo, AppUpdateStatus, CommandError, RunnerSnapshot, UpdatePolicy } from '../../core/api.types';
-import { BACKEND } from '../../core/backend';
+import type { RunnerSnapshot, UpdatePolicy } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
-import { toCommandError } from '../../core/command-error';
 import { formatCount, formatDateTime, formatRelative, plural } from '../../shared/format';
 import { outcomeLook, updateModeLabel } from '../../shared/labels';
 import { UpdatePolicyEditor } from '../../shared/policy/update-policy-editor';
@@ -14,15 +13,14 @@ import { confirmAction } from '../../shared/ui/confirm-dialog';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { LoadState } from '../../shared/ui/load-state';
 import { UpdateProgress } from '../../shared/ui/update-progress';
-import { idle, pending, settle, type Loadable } from '../../state/loadable';
 import { SettingsStore } from '../../state/settings.store';
 import { StatusStore } from '../../state/status.store';
-import { ToastStore } from '../../state/toast.store';
+import { Notify } from '../../state/notify';
 
 /** Runner versions and updates in progress, the default update schedule, and Pitcrew's own updates. */
 @Component({
   selector: 'pc-updates-page',
-  imports: [MatIcon, RouterLink, CdkMenu, CdkMenuItem, CdkMenuTrigger, UpdateProgress, UpdatePolicyEditor, LoadState, EmptyState],
+  imports: [MatIcon, RouterLink, SavedNote, CdkMenu, CdkMenuItem, CdkMenuTrigger, UpdateProgress, UpdatePolicyEditor, LoadState, EmptyState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown.escape)': 'close()' },
   templateUrl: './updates-page.html',
@@ -32,17 +30,13 @@ export class UpdatesPage {
   protected readonly status = inject(StatusStore);
   protected readonly settings = inject(SettingsStore);
   protected readonly clock = inject(ClockService);
-  private readonly backend = inject(BACKEND);
 
-  protected readonly app = signal<Loadable<AppUpdateStatus>>(idle());
-  protected readonly found = signal<AppUpdateInfo | null | undefined>(undefined);
-  protected readonly appBusy = signal<'check' | 'install' | null>(null);
-  protected readonly appError = signal<CommandError | null>(null);
+  private readonly runCommand = inject(SHELL_COMMAND_RUNNER);
 
   protected readonly plural = plural;
   private readonly router = inject(Router);
-  private readonly dialog = inject(Dialog);
-  private readonly toasts = inject(ToastStore);
+  private readonly ports = inject(SHELL_PORTS);
+  private readonly toasts = inject(Notify);
   private readonly injector = inject(Injector);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly panelEl = viewChild<ElementRef<HTMLElement>>('panel');
@@ -72,37 +66,12 @@ export class UpdatesPage {
   protected readonly updateAllLabel = computed(() => `Update all (${formatCount(this.updatable().length)})`);
 
   constructor() {
-    void this.loadApp();
     if (!this.settings.settings().value) void this.settings.load();
   }
 
-  protected async loadApp(): Promise<void> {
-    this.app.set(pending(this.app()));
-    this.app.set(await settle(this.app(), () => this.backend.appUpdateStatus()));
-  }
-
-  protected async checkApp(): Promise<void> {
-    this.appBusy.set('check');
-    this.appError.set(null);
-    try {
-      this.found.set(await this.backend.checkAppUpdate());
-    } catch (e) {
-      this.appError.set(toCommandError(e));
-    } finally {
-      this.appBusy.set(null);
-    }
-  }
-
-  protected async installApp(): Promise<void> {
-    this.appBusy.set('install');
-    this.appError.set(null);
-    try {
-      await this.backend.installAppUpdate();
-    } catch (e) {
-      this.appError.set(toCommandError(e));
-    } finally {
-      this.appBusy.set(null);
-    }
+  /** Pitcrew's own updates are the shell's Updates window. */
+  protected openAppUpdates(): void {
+    void this.runCommand('pd.updates.open');
   }
 
   protected saveDefaults(policy: UpdatePolicy): void {
@@ -203,7 +172,7 @@ export class UpdatesPage {
     const list = this.updatable();
     if (list.length === 0) return;
     if (list.length > 1) {
-      const ok = await confirmAction(this.dialog, {
+      const ok = await confirmAction(this.ports, {
         title: `Update ${plural(list.length, 'runner')}?`,
         body: `${list.map((r) => `${r.name} (to ${r.updateTarget})`).join(', ')}. Each runner finishes its current job first.`,
         confirm: `Update ${formatCount(list.length)} runners`,

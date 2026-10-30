@@ -1,10 +1,10 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, untracked } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
-import { RouterLink } from '@angular/router';
 import type { ActivityReply, FinishedJob } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
 import { ThemeService } from '../../core/theme.service';
-import { RegisterLauncher } from '../../layout/register-launcher';
+import { RegisterLauncher } from '../../shell/register-launcher';
+import { SettingsLauncher } from '../../shell/settings-launcher';
 import { Chart } from '../../shared/charts/chart';
 import { diskOption, durationOption, jobsPerDayOption, loadOption, queueOption, sumJobDays } from '../../shared/charts/chart-options';
 import { formatBytes, formatDateTime, formatPermille, plural } from '../../shared/format';
@@ -18,11 +18,12 @@ import { EventsFeed } from './events-feed';
 import { feedItems } from './feed';
 import { MachineTiles } from './machine-tiles';
 import { RunnerTile } from './runner-tile';
+import { ServiceOffline } from './service-offline';
 
 /** The home screen: live runner tiles, the machine, history charts and the events feed. */
 @Component({
   selector: 'pc-dashboard-page',
-  imports: [MatIcon, RouterLink, RunnerTile, MachineTiles, Chart, Timeline, EventsFeed, LoadState, EmptyState],
+  imports: [MatIcon, RunnerTile, MachineTiles, Chart, Timeline, EventsFeed, LoadState, EmptyState, ServiceOffline],
   providers: [DashboardStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './dashboard-page.html',
@@ -33,6 +34,7 @@ export class DashboardPage {
   protected readonly store = inject(DashboardStore);
   protected readonly clock = inject(ClockService);
   protected readonly register = inject(RegisterLauncher);
+  protected readonly settingsWindow = inject(SettingsLauncher);
   private readonly theme = inject(ThemeService);
 
   protected readonly ranges = Object.entries(RANGES).map(([key, v]) => ({ key: key as Range, label: v.label }));

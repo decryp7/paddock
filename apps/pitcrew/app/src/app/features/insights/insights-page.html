@@ -24,7 +24,7 @@
           <mat-icon svgIcon="pc:alert" aria-hidden="true" />
           <div class="callout-body">
             <strong>Outcomes and queue times need a Gitea read token</strong>
-            <span class="muted">Add one under <a routerLink="/settings" [queryParams]="{ section: 'tokens' }">Settings, API tokens</a>.</span>
+            <span class="muted">Add one under <button type="button" class="btn sm ghost" (click)="settingsWindow.open('pc.tokens')">Settings, Gitea tokens</button>.</span>
           </div>
         </div>
       }

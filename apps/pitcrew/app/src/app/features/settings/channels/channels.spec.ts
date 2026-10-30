@@ -1,8 +1,7 @@
-import { Dialog } from '@angular/cdk/dialog';
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../../core/backend';
 import type { MockBackend } from '../../../core/mock-backend';
-import { appProviders, byText, flush, makeMock, settle, text, type as typeInto } from '../../../../testing/test-helpers';
+import { NoticeLog, appProviders, byText, makeMock, settle, text, type as typeInto } from '../../../../testing/test-helpers';
 import { KIND_GROUPS, blankChannel, newChannelId, secretKeyFor, setKinds, splitAddresses, withSecretKey } from './channels-model';
 import { ChannelsSection } from './channels-section';
 import { ChannelsStore } from './channels.store';
@@ -36,7 +35,6 @@ describe('ChannelsSection', () => {
     TestBed.configureTestingModule({ providers: appProviders(mock) });
   });
   afterEach(() => {
-    TestBed.inject(Dialog).closeAll();
     mock.dispose();
     TestBed.resetTestingModule();
   });
@@ -59,7 +57,7 @@ describe('ChannelsSection', () => {
 
   it('shows the empty state with an Add channel button', async () => {
     const { el } = await mount();
-    expect(text(el)).toContain('No channels. Pitcrew only shows desktop notifications.');
+    expect(text(el)).toContain('Pitcrew only shows desktop notifications.');
     expect(btn(el, 'Add channel')).toBeTruthy();
   });
 
@@ -194,19 +192,17 @@ describe('ChannelsSection', () => {
     const id = (await mock.channels()).channels[0]!.id;
     btn(el, 'Edit').click();
     await settle(f);
+    // Dismissed: the channel stays.
     btn(el, 'Delete channel').click();
-    await flush();
-    for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('.pc-dialog-panel button'))) if (b.textContent?.includes('Cancel')) b.click();
     await settle(f);
+    expect(TestBed.inject(NoticeLog).dialogs.at(-1)?.id).toBe('pc.confirm');
     expect((await mock.channels()).channels).toHaveLength(1);
+    TestBed.inject(NoticeLog).answerNext(true);
     btn(el, 'Delete channel').click();
-    await flush();
-    const ok = Array.from(document.querySelectorAll<HTMLButtonElement>('.pc-dialog-panel button')).find((b) => b.textContent?.includes('Delete channel'))!;
-    ok.click();
     await settle(f);
     expect((await mock.channels()).channels).toHaveLength(0);
     expect(await mock.hasChannelSecret(secretKeyFor(id))).toBe(false);
-    expect(text(el)).toContain('No channels.');
+    expect(text(el)).toContain('No channels');
   });
 });
 

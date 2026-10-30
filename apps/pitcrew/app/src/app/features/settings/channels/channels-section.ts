@@ -1,5 +1,5 @@
-import { Dialog } from '@angular/cdk/dialog';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { MatSlideToggle } from '@angular/material/slide-toggle';
 import type { ChannelConfig, ChannelTransport } from '../../../core/api.types';
 import { notificationKindLabel } from '../../../shared/labels';
@@ -176,7 +176,7 @@ import { ChannelsStore, type TestResult } from './channels.store';
             </form>
           } @else {
             @if (store.list().length === 0) {
-              <pc-empty-state icon="bell" title="No channels" text="No channels. Pitcrew only shows desktop notifications.">
+              <pc-empty-state icon="bell" title="No channels" text="Pitcrew only shows desktop notifications. Add a channel to be told elsewhere too.">
                 <button type="button" class="btn primary" (click)="add()">Add channel</button>
               </pc-empty-state>
             } @else {
@@ -295,7 +295,7 @@ import { ChannelsStore, type TestResult } from './channels.store';
 })
 export class ChannelsSection {
   protected readonly store = inject(ChannelsStore);
-  private readonly dialog = inject(Dialog);
+  private readonly ports = inject(SHELL_PORTS);
 
   protected readonly types = TRANSPORT_TYPES;
   protected readonly severities = SEVERITIES;
@@ -415,7 +415,7 @@ export class ChannelsSection {
   protected async remove(): Promise<void> {
     const d = this.draft();
     if (!d) return;
-    const ok = await confirmAction(this.dialog, {
+    const ok = await confirmAction(this.ports, {
       title: `Delete ${d.name || 'this channel'}?`,
       body: 'The channel and its stored secret are removed. Notifications are no longer sent to it.',
       confirm: 'Delete channel',

@@ -56,6 +56,10 @@ describe('formatAxisDuration', () => {
     expect(formatAxisDuration(480_000)).toBe('8 min');
     expect(formatAxisDuration(7_200_000)).toBe('2 h');
     expect(formatAxisDuration(5_400_000)).toBe('1.5 h');
+    // Two ticks never read the same: a minute and a bit is not "1 min" again.
+    expect(formatAxisDuration(60_000)).toBe('1 min');
+    expect(formatAxisDuration(80_000)).toBe('1m 20s');
+    expect(formatAxisDuration(100_000)).toBe('1m 40s');
   });
 });
 
