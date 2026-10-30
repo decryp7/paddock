@@ -888,18 +888,28 @@ On Linux the same goes for the idle I/O class: Dyno's systemd unit now says `IOS
 and the shared `paddock-service` renderer's `low_priority()` output moves off the starvable levels then: the systemd
 text (`IOSchedulingClass=idle`) to best effort 7, and the launchd text's `LowPriorityIO` (I/O throttled like the background
 band), both still in its golden files.
+
 ## 2026-10-30: on Windows a `BELOW_NORMAL` thread does not run while normal threads are ready (Dyno)
 The batch that lowered every Dyno agent thread to `THREAD_PRIORITY_BELOW_NORMAL` (rule 52's gentle Windows level) turned
 three Windows CI tests red (runs 7166 and 7168): the baselines test found no sample because the sampler had not ticked
 yet, and the counters listing passed its 10 s deadline (2.5 to 7.4 s at normal priority on main). Windows schedules
 strictly by priority: a ready thread of a higher priority always runs first, and a lower one is preempted the moment one
-becomes ready ([Scheduling Priorities](https://learn.microsoft.com/en-us/windows/win32/procthread/scheduling-priorities));
-the dynamic boosts ([Priority Boosts](https://learn.microsoft.com/en-us/windows/win32/procthread/priority-boosts)) and
-the balance-set manager's starvation boost (Windows Internals; seconds, not milliseconds, not on Microsoft Learn) do not
-make it share the CPU the way macOS QoS or Linux nice do. So on a machine whose cores are busy with normal work, a lowered
-thread waits seconds at a time. **Rule (rule 52, amended):** on Windows, live work (the sampler behind a live view, the
-threads that answer requests, a request a person waits on) stays at `THREAD_PRIORITY_NORMAL`; only bulk background work
-is lowered. Dyno decides it in one place, `dyno_platform::priority::level(ThreadRole, Os)`, with a test over the mapping.
+becomes ready ([Scheduling Priorities](https://learn.microsoft.com/en-us/windows/win32/procthread/scheduling-priorities)).
+The dynamic boosts are for foreground windows, input and finished waits
+([Priority Boosts](https://learn.microsoft.com/en-us/windows/win32/procthread/priority-boosts)); the anti-starvation boost
+for a ready thread that has not run comes only after seconds. That figure is from Windows Internals, not checked against
+Microsoft Learn: its [Priority Inversion](https://learn.microsoft.com/en-us/windows/win32/procthread/priority-inversion)
+page (fetched 2026-10-30) describes AutoBoost, priority floors for the owner of a lock a higher thread waits on, not a
+timed boost. None of this shares the CPU the way macOS QoS or Linux nice do, so on a machine whose cores are busy with
+normal work, a lowered thread waits seconds at a time. A review then found more threads a person waits on that ran
+lowered: the pinned counters reading (it holds one of the two slots the Counters page's requests use, so stalled readings
+would make a request come back Busy), the reverse DNS behind Look up names, the Network page's traffic refresh and the
+deadline probes at the start of a scan. **Rule (rule 52, amended):** every thread has a role. Live work is what a person
+waits on within a deadline or for a screen to fill (requests, probes with a deadline, a sampler, a page refresh) and stays
+at `THREAD_PRIORITY_NORMAL` on Windows; bulk work is long work with progress and Cancel (walks, scans, compaction,
+exports), is lowered on every OS, and on Windows accepts stalls of seconds. Dyno decides the level in one place,
+`dyno_platform::priority::level(ThreadRole, Os)`, and a test per call site reads the role back
+(`priority::current_role`).
 
 ## 2026-10-30: a stored UTC offset nobody filled in made every "local" day a UTC day (Dyno)
 The Issues e2e test failed on CI at 00:07 UTC: it ran on the wall clock against mock issues dated relative to it (the newest

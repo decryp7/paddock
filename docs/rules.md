@@ -182,20 +182,21 @@ changes here, every app's copy is updated in the same change.
     `SCHED_IDLE` (`chrt --idle`) and the idle I/O class (`IOPRIO_CLASS_IDLE`, `ionice -c3`). The same levels set for a
     whole service count too: launchd `ProcessType` `Background` (and `Adaptive` when the service has no XPC
     `MachServices` to raise it), `LowPriorityIO` or `LowPriorityBackgroundIO` `true`, systemd `CPUSchedulingPolicy=idle`
-    and `IOSchedulingClass=idle`. Lowered work that a caller may wait for (an analysis behind a report, a pool an import
-    waits on through a lock, a download, anything a person started) uses the gentle level instead: `QOS_CLASS_UTILITY`
-    on macOS, nice 10 (with best-effort I/O) on Linux, `THREAD_PRIORITY_BELOW_NORMAL` on Windows (Debrief's
-    `debrief_core::threads::lower_priority`; family ADR 0020's `Background` class). A busy machine slows such work but
-    never stops it. **Live work stays at the normal level on Windows:** what someone is watching or waiting on right now
-    (the sampler behind a live view, the threads that answer the app's requests, a request the user is waiting on)
-    keeps `THREAD_PRIORITY_NORMAL` there; only bulk background work (walks, scans, compaction, exports) is lowered to
-    `BELOW_NORMAL`. Windows always runs a ready thread of a higher priority before a lower one, and a lowered thread
-    behind busy normal threads only runs when a starvation boost comes, seconds later
-    ([Scheduling Priorities](https://learn.microsoft.com/en-us/windows/win32/procthread/scheduling-priorities),
-    [Priority Boosts](https://learn.microsoft.com/en-us/windows/win32/procthread/priority-boosts)); macOS QoS and Linux
-    nice share the CPU by weight, so live work may use their gentle levels. A starvable level is only for work nobody
-    waits on (ADR 0020's `Idle` class), and each use says why with a `conformance: background-qos — <why nobody waits on
-    it>` comment (check C54). (`THREAD_PRIORITY_LOWEST` is not on the list, but like `BELOW_NORMAL` it waits behind busy
+    and `IOSchedulingClass=idle`. Every other thread has a role. **Live** work is what a person waits on within a
+    deadline or for a screen to fill: requests, probes with a deadline, a sampler behind a live view, a page refresh.
+    **Bulk** work is long work that shows progress and can be cancelled: walks, scans, compaction, exports. Bulk work
+    runs at the gentle level: `QOS_CLASS_UTILITY` on macOS, nice 10 (with best-effort I/O) on Linux,
+    `THREAD_PRIORITY_BELOW_NORMAL` on Windows (Debrief's `debrief_core::threads::lower_priority`; family ADR 0020's
+    `Background` class); a busy machine slows it, and on Windows it accepts stalls of seconds. Live work may use the
+    gentle level on macOS and Linux, whose schedulers share the CPU by weight, but stays at `THREAD_PRIORITY_NORMAL` on
+    Windows: Windows always runs a ready thread of a higher priority before a lower one
+    ([Scheduling Priorities](https://learn.microsoft.com/en-us/windows/win32/procthread/scheduling-priorities)), its
+    dynamic boosts are for foreground windows, input and finished waits
+    ([Priority Boosts](https://learn.microsoft.com/en-us/windows/win32/procthread/priority-boosts)), and its
+    anti-starvation boost for a ready thread that has not run comes only after seconds (Windows Internals; Microsoft
+    Learn's [Priority Inversion](https://learn.microsoft.com/en-us/windows/win32/procthread/priority-inversion) page now
+    describes AutoBoost for lock owners instead). A starvable level is only for work nobody waits on (ADR 0020's `Idle`
+    class), and each use says why with a `conformance: background-qos — <why nobody waits on it>` comment (check C54). (`THREAD_PRIORITY_LOWEST` is not on the list, but like `BELOW_NORMAL` it waits behind busy
     normal threads, so it is for bulk work only; `THREAD_PRIORITY_IDLE` sits below all of the dynamic band.) *Why:* at
     these levels a thread gets the CPU or the disk only after all other work at higher levels, for as long as there is
     any (macOS `BACKGROUND` also keeps it to the efficiency cores), so a caller waiting on it waits as long as the
