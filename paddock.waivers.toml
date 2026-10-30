@@ -113,12 +113,6 @@ expires = "2026-12-31"
 
 [[waiver]]
 check = "C54"
-path = "crates/paddock-service/src/spec.rs"
-reason = "paddock-service: ProcessType::Background maps to launchd Background; to follow ADR 0020's priority helper"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C54"
 path = "crates/paddock-service/src/golden.rs"
 reason = "paddock-service: the golden specs request ProcessType::Background as the apps do today; changes with the renderer (ADR 0020 helper)"
 expires = "2026-12-31"

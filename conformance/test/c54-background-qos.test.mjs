@@ -210,23 +210,92 @@ test('C54 through the runner: an error per unwaived use, none for UTILITY or wai
   assert.match(f.find((x) => x.file.endsWith('w.rs')).message, /Windows thread background mode/);
 });
 
+// ---- review round 3: prefixes, constants, pairing, arms, argument lists -----------------------------------------------
+
+test('C54 systemd Exec lines: each prefix belongs to the first word only, and `@` skips argv[0]', () => {
+  for (const p of ['', '-', '@', ':', '+', '!', '!!', '-@']) {
+    const argv0 = p.includes('@') ? ' ionice-alias' : '';
+    assert.deepEqual(names(`[Service]\nExecStart=${p}/usr/bin/ionice${argv0} -c3 /x\n`, 'a.service'), [[2, 'ionice -c3']], `prefix "${p}"`);
+  }
+  assert.deepEqual(names('[Service]\nExecStart=-/usr/bin/ionice -c2 -n7 /x\n', 'a.service'), []);
+});
+
+test('C54 more starvable levels: taskpolicy maintenance and throttle, constants, 3 << 13, the thread-priority crate', () => {
+  const lines = [
+    'Command::new("taskpolicy").args(["-c", "maintenance", exe]);',
+    'Command::new("taskpolicy").args(["-d", "throttle", exe]);',
+    'const IDLE_FLAGS: u32 = 0x40 | 0x0800_0000;',
+    'cmd.creation_flags(IDLE_FLAGS);',
+    'const BG: i32 = 0x0001_0000;',
+    'unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY(BG)) };',
+    'unsafe { libc::syscall(libc::SYS_ioprio_set, 1, 0, 3 << 13) };',
+    'set_current_thread_priority(ThreadPriority::Min)?;',
+    'set_thread_priority_and_policy(t, p, ThreadSchedulePolicy::Normal(NormalThreadSchedulePolicy::Idle))?;',
+    'set_winapi_thread_priority(h, WinAPIThreadPriority::BackgroundModeBegin)?;',
+  ];
+  assert.deepEqual(names(lines.join('\n')), [
+    [1, 'taskpolicy -c maintenance'],
+    [2, 'taskpolicy -d throttle'],
+    [4, 'IDLE_PRIORITY_CLASS (0x40, through IDLE_FLAGS)'],
+    [6, 'THREAD_MODE_BACKGROUND_BEGIN (0x10000, through BG)'],
+    [7, 'IOPRIO_CLASS_IDLE (3 << 13)'],
+    [8, 'thread-priority ThreadPriority::Min'],
+    [9, 'thread-priority NormalThreadSchedulePolicy::Idle'],
+    [10, 'thread-priority WinAPIThreadPriority::BackgroundModeBegin'],
+  ]);
+  assert.deepEqual(rs('const GENTLE: u32 = 0x4000;\ncmd.creation_flags(GENTLE);\nlet x = 2 << 13;\n'), []);
+});
+
+test('C54 no false alarms: values with their own keys, test modules, match arms, other commands\' flags', () => {
+  // `<true/>` belongs to the key written right before it, not to LowPriorityIO two keys back.
+  const render = [
+    'fn plist(o: &mut String, spec: &Spec) {',
+    '    key(o, "LowPriorityIO");',
+    '    string(o, "    ", spec.io());',
+    '    key(o, "RunAtLoad");',
+    '    o.push_str("    <true/>\\n");',
+    '}',
+  ].join('\n');
+  assert.deepEqual(rs(render), []);
+  // Identifiers in a test module (asserting what a level is) are not uses.
+  assert.deepEqual(rs('fn f() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() { assert_ne!(class(), QOS_CLASS_BACKGROUND); }\n}\n'), []);
+  // A match arm that reads a level (decoding what the OS reports) is not a use.
+  assert.deepEqual(rs('match class {\n    QOS_CLASS_BACKGROUND => "background",\n    Some(SCHED_IDLE) => "idle",\n    _ => "other",\n}\n'), []);
+  assert.deepEqual(rs('match self {\n    ProcessType::Background => "Background",\n}\n'), []);
+  // A flag of another statement or another shell command is not this command's.
+  assert.deepEqual(rs('Command::new("taskpolicy").args(["-c", "utility", exe]).spawn()?;\nlet ls = ["-b"];\n'), []);
+  assert.deepEqual(rs('sh("taskpolicy -c utility make; ls -b");\nsh("chrt --batch 0 make && grep -i x");\n'), []);
+});
+
 // ---- cost ------------------------------------------------------------------------------------------------------------
 
-test('C54 stays linear on hostile input (the old gap regex backtracked exponentially on 90 bytes)', () => {
+/** The work C54 does on `text`, in steps (each character lexed, each tag, token, line and look-ahead visited). */
+const steps = (text, file) => {
+  const stats = { steps: 0 };
+  starvableUses(text, file, stats);
+  return stats.steps;
+};
+
+test('C54 work grows linearly: ten times the input takes about ten times the steps, on hostile input too', () => {
+  // The old gap regex backtracked exponentially on these (about 90 bytes never finished); the scans count their work, so
+  // linear growth is checked by counting, not by a clock.
   const hostile = [
-    `<key>ProcessType</key>${'" "'.repeat(70)}`,
-    `<key>ProcessType</key>${'"" '.repeat(70)}`,
-    `"<key>LowPriorityIO</key>${'" "'.repeat(70)}`,
-    `IOSchedulingClass${' '.repeat(100)}=${' '.repeat(100)}x`,
-    `"taskpolicy" ${'"-x" '.repeat(50)}`,
+    `<key>ProcessType</key>${'" "'.repeat(20)}`,
+    `<key>ProcessType</key>${'"" '.repeat(20)}`,
+    `"<key>LowPriorityIO</key>${'" "'.repeat(20)}"`,
+    `IOSchedulingClass${' '.repeat(40)}=${' '.repeat(40)}x\n`,
+    `"taskpolicy" ${'"-x" '.repeat(20)}\n`,
+    'cmd.creation_flags(creation_flags(creation_flags(0x40)));\n',
+    'creation_flags(THREAD_PRIORITY(',
+    '#[cfg(test)]\nmod t {\n}\n',
+    `${'/* /* */ */'.repeat(5)} "\\" r#"x"# 'a' 'b\n`,
   ];
   for (const h of hostile) {
     for (const file of ['src/x.rs', 'a.plist', 'a.service']) {
-      const started = process.hrtime.bigint();
-      starvableUses(h, file);
-      const ms = Number(process.hrtime.bigint() - started) / 1e6;
-      // A hang guard, not a speed claim: linear work on 200 characters takes well under a millisecond.
-      assert.ok(ms < 1000, `${file}: ${ms} ms on ${h.slice(0, 40)}...`);
+      const n = steps(h.repeat(10), file);
+      const tenN = steps(h.repeat(100), file);
+      // Linear work gives about 10 (copies can lex a little differently at their seams); quadratic would give about 100.
+      assert.ok(tenN <= 15 * n, `${file}: ${n} steps for 10 copies, ${tenN} for 100, on ${JSON.stringify(h.slice(0, 30))}`);
     }
   }
 });
