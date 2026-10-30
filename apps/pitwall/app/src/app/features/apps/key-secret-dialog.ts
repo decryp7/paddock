@@ -23,12 +23,13 @@ export const KEY_SECRET_DIALOG_ID = 'pw.key-secret';
       <span><b>Copy it now: you won't see it again.</b> Pitwall keeps only a hash. If you lose it, revoke it and create a new one.</span>
     </div>
     <label class="sr-only" for="pw-key-secret">Secret key</label>
+    <!-- The whole key, wrapped (never cut): it is the one thing the user must get right. -->
     <mat-form-field class="secret pitwall-selectable">
-      <input matInput id="pw-key-secret" class="mono" readonly aria-describedby="pw-key-warn" [value]="secret()" (focus)="$any($event.target).select()" spellcheck="false" autocomplete="off" />
+      <textarea matInput id="pw-key-secret" class="mono" rows="2" readonly aria-describedby="pw-key-warn" [value]="secret()" (focus)="$any($event.target).select()" spellcheck="false" autocomplete="off"></textarea>
     </mat-form-field>
     <p class="meta">
       <span>Prefix <span class="mono">{{ prefix() }}</span></span>
-      <span class="status" role="status" aria-live="polite">
+      <span class="copy-note" role="status" aria-live="polite">
         @if (copyFailed()) {
           Copying isn't allowed here. Select the key and press Ctrl+C.
         } @else if (copied()) {
@@ -52,8 +53,9 @@ export const KEY_SECRET_DIALOG_ID = 'pw.key-secret';
       mat-icon { flex: none; width: 16px; height: 16px; color: var(--pd-warning); margin-top: 1px; }
     }
     .secret { width: 100%; }
+    .secret textarea { resize: none; word-break: break-all; font-size: var(--pd-text-label); line-height: 1.5; }
     .meta { display: flex; justify-content: space-between; gap: var(--pd-space-3); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
-    .status { text-align: end; }
+    .copy-note { text-align: end; }
   `,
 })
 export class KeySecretDialog implements DialogContent<true> {
@@ -83,7 +85,7 @@ export class KeySecretDialog implements DialogContent<true> {
       this.copyFailed.set(false);
     } catch {
       this.copyFailed.set(true);
-      (this.doc.getElementById('pw-key-secret') as HTMLInputElement | null)?.select();
+      (this.doc.getElementById('pw-key-secret') as HTMLTextAreaElement | null)?.select();
     }
   }
 }

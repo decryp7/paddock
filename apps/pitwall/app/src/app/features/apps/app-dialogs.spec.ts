@@ -53,7 +53,7 @@ describe('KeySecretDialog (pw.key-secret)', () => {
     const d = await open();
     expect(d.heading()).toBe('New key for Raycast');
     expect(d.q('key-warning')!.textContent).toContain("you won't see it again");
-    expect(d.el.querySelector<HTMLInputElement>('#pw-key-secret')!.value).toBe(SECRET);
+    expect(d.el.querySelector<HTMLTextAreaElement>('#pw-key-secret')!.value).toBe(SECRET);
     expect(d.actions().sort()).toEqual(['copy', 'saved']);
     expect(d.action('dismiss')).toBeNull();
     expect(document.activeElement).toBe(d.action('copy'));
