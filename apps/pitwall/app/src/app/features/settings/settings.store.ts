@@ -6,6 +6,7 @@ import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Toasts } from '../../core/toasts';
 import { PRESET_LABEL } from '../../shared/labels';
+import { bytes, seconds } from '../../shared/format';
 
 type Section = keyof Settings;
 
@@ -14,7 +15,9 @@ export const SETTINGS_SAVE_DELAY = new InjectionToken<number>('PitwallSettingsSa
 
 /**
  * Where edits not yet confirmed by the server are written down, so a window that goes without waiting (the app quits, the
- * webview is torn down) loses none: the next Settings page sends them. The app's own origin storage, shared by its windows.
+ * webview is torn down) loses none: the next Settings page sends them, each only if the server still has the value it was
+ * made over (compare-and-set; otherwise it is shown as unsent, see `UnsentEdit`). The app's own origin storage, shared by its
+ * windows.
  */
 export const SETTINGS_JOURNAL = new InjectionToken<() => Storage | null>('PitwallSettingsJournal', {
   factory: () => () => globalThis.localStorage ?? null,
@@ -30,11 +33,52 @@ export interface SettingField {
   readonly label: string;
 }
 
-/** An edit of one setting: the values it changes in one section. */
+/** An edit of one setting: the values it changes in one section, over `base`, the server's values of those keys when it was made. */
 interface Edit {
   readonly field: SettingField;
   readonly section: Section;
   readonly values: Readonly<Record<string, unknown>>;
+  readonly base: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * An edit a window left unsent whose setting changed on the server since (another window, the tray, a preset): it is not sent
+ * over the newer value, but shown with "Apply it anyway" and "Discard".
+ */
+export interface UnsentEdit {
+  readonly field: SettingField;
+  /** The value it would set, as the page shows it ("12000", "on"). */
+  readonly value: string;
+}
+
+/** "Port was changed elsewhere before your edit was sent. Your value: 12000." */
+export function unsentText(u: UnsentEdit): string {
+  return `${u.field.label} was changed elsewhere before your edit was sent. Your value: ${u.value}.`;
+}
+
+const MIB = 1024 ** 2;
+
+/** The words of the settings' choices, as the page's menus show them. */
+const CHOICE_TEXT: Readonly<Record<string, string>> = {
+  keepServing: 'Keep serving',
+  stopServing: 'Stop serving',
+  ask: 'Ask each time',
+  disk: 'On disk',
+  memory: 'Memory only',
+};
+
+/** One setting's value as the page shows it (`key` is the setting's): 50 MB, 5 min, 30 days, on, Keep serving. */
+export function shownValue(key: string, v: unknown): string {
+  if (typeof v === 'boolean') return v ? 'on' : 'off';
+  if (v === null) return key === 'hotCapBytes' ? 'what fits' : 'automatic';
+  if (typeof v === 'string') return CHOICE_TEXT[v] ?? v;
+  if (typeof v !== 'number') return JSON.stringify(v) ?? '';
+  if (key.endsWith('Bytes')) return bytes(v);
+  if (key.endsWith('Mib')) return bytes(v * MIB);
+  if (key.endsWith('Secs')) return seconds(v);
+  if (key.endsWith('Days')) return `${v} ${v === 1 ? 'day' : 'days'}`;
+  if (key.endsWith('Percent')) return `${v}%`;
+  return String(v);
 }
 
 /** A setting the server refused: its edit stays in the form, with the server's reason, until it is edited, retried or undone. */
@@ -53,6 +97,17 @@ export function undoText(r: Refusal): string {
   return `Undo ${lowerFirst(r.field.label)} change`;
 }
 
+/**
+ * What a close waits for, as the Settings window's "Saving …" and "Still saving …" name it: "port", "port and request
+ * timeout", "3 settings", or "your settings" while only a preset is on its way.
+ */
+export function savingLabel(labels: readonly string[]): string {
+  const names = [...new Set(labels)].map(lowerFirst);
+  if (names.length === 0) return 'your settings';
+  if (names.length > 2) return `${names.length} settings`;
+  return names.join(' and ');
+}
+
 /** The first letter in lower case, unless the word is an abbreviation ("LAN port" stays). */
 function lowerFirst(text: string): string {
   return /^[A-Z][A-Z]/.test(text) ? text : text.charAt(0).toLowerCase() + text.slice(1);
@@ -69,6 +124,8 @@ interface SettingsState {
   error: CommandError | null;
   /** The settings the server refused, in the order refused; each is shown with its reason, Undo and Retry. */
   refusals: readonly Refusal[];
+  /** Edits a window left unsent whose setting changed on the server since; each is shown with "Apply it anyway" and "Discard". */
+  unsent: readonly UnsentEdit[];
   /** The caches' sizes and hit counts (ADR 0019); null until loaded. */
   cacheInfo: CacheInfo | null;
   cacheError: CommandError | null;
@@ -76,7 +133,7 @@ interface SettingsState {
   clearing: boolean;
 }
 
-const initial: SettingsState = { saved: null, draft: null, loading: false, saving: false, error: null, refusals: [], cacheInfo: null, cacheError: null, clearing: false };
+const initial: SettingsState = { saved: null, draft: null, loading: false, saving: false, error: null, refusals: [], unsent: [], cacheInfo: null, cacheError: null, clearing: false };
 
 /** Applies an edit to one section; any memory edit other than the preset itself makes the preset `custom`. */
 export function editSettings<S extends Section>(s: Settings, section: S, values: Partial<Settings[S]>): Settings {
@@ -107,6 +164,8 @@ export const SettingsStore = signalStore(
     const refused = new Map<string, Edit>();
     /** Typed values waiting for their pause. */
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    /** Unsent edits whose setting changed on the server since, by field id (`unsent` shows them). */
+    const conflicts = new Map<string, Edit>();
     /** The edit on its way to the server. */
     let sending: Edit | null = null;
     /** The one chain every save and preset runs through. */
@@ -130,6 +189,11 @@ export const SettingsStore = signalStore(
       patchState(store, { refusals: store.refusals().filter((r) => refused.has(r.field.id)) });
     }
 
+    /** The shown unsent edits follow `conflicts`. */
+    function syncUnsent(): void {
+      patchState(store, { unsent: [...conflicts.values()].map((e) => ({ field: e.field, value: Object.entries(e.values).map(([k, v]) => shownValue(k, v)).join(', ') })) });
+    }
+
     /** Writes down every edit the server has not confirmed (waiting or on its way). */
     function journal(): void {
       const unsent = [...(sending ? [sending] : []), ...pending.values()];
@@ -143,7 +207,15 @@ export const SettingsStore = signalStore(
       }
     }
 
-    /** The edits a window left unsent, once (the record is removed): fresh, well-formed, for a known section. */
+    /** The values of `keys` in `section` as the server has them now. */
+    function serverValues(saved: Settings, section: Section, keys: Iterable<string>): Record<string, unknown> {
+      const current = saved[section] as unknown as Record<string, unknown>;
+      return Object.fromEntries([...keys].map((k) => [k, current[k]]));
+    }
+
+    const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+    /** The edits a window left unsent, once (the record is removed): fresh, well-formed, for a known section, with a base. */
     function takeJournal(saved: Settings): Edit[] {
       try {
         const storage = journalStorage();
@@ -158,9 +230,8 @@ export const SettingsStore = signalStore(
             typeof e.field.label === 'string' &&
             typeof e.section === 'string' &&
             Object.hasOwn(saved, e.section) &&
-            typeof e.values === 'object' &&
-            e.values !== null &&
-            !Array.isArray(e.values),
+            isRecord(e.values) &&
+            isRecord(e.base),
         );
       } catch {
         return [];
@@ -231,9 +302,14 @@ export const SettingsStore = signalStore(
     function edit<S extends Section>(field: SettingField, section: S, values: Partial<Settings[S]>, how: 'now' | 'typed' = 'now'): void {
       if (!store.saved()) return;
       if (refused.delete(field.id)) syncRefusals();
+      // A new edit of a setting shown as unsent replaces it.
+      if (conflicts.delete(field.id)) syncUnsent();
       const prev = pending.get(field.id);
       pending.delete(field.id);
-      pending.set(field.id, { field, section, values: { ...(prev?.section === section ? prev.values : {}), ...values } });
+      const before = prev?.section === section ? prev : null;
+      // The base is the server's value when the edit was first made: a key the edit already held keeps its base.
+      const base = { ...serverValues(store.saved()!, section, Object.keys(values)), ...before?.base };
+      pending.set(field.id, { field, section, values: { ...before?.values, ...values }, base });
       journal();
       // A typed value is in its field already: drawing the form again mid-word would rewrite it ("2.5" shown as "3").
       if (how === 'now') redraw();
@@ -258,8 +334,17 @@ export const SettingsStore = signalStore(
           const settings = await backend.settings();
           patchState(store, { saved: settings, loading: false });
           redraw();
-          // Edits a window left unsent (it went without waiting) are sent now, in the order they were made.
-          for (const e of takeJournal(settings)) edit(e.field, e.section, e.values as Partial<Settings[Section]>, 'now');
+          // Edits a window left unsent (it went without waiting) are sent now, in the order they were made, each only if the
+          // server still has the value it was made over; one made over a value changed since is shown instead, never sent.
+          for (const e of takeJournal(settings)) {
+            const keys = Object.keys(e.values);
+            if (same(serverValues(settings, e.section, keys), Object.fromEntries(keys.map((k) => [k, e.base[k]])))) {
+              edit(e.field, e.section, e.values as Partial<Settings[Section]>, 'now');
+            } else {
+              conflicts.set(e.field.id, e);
+            }
+          }
+          syncUnsent();
         } catch (e) {
           patchState(store, { loading: false, error: toCommandError(e) });
         }
@@ -310,6 +395,20 @@ export const SettingsStore = signalStore(
         redraw();
       },
 
+      /** Sends an unsent edit over the server's newer value (the user chose "Apply it anyway"). */
+      applyUnsent(id: string): void {
+        const e = conflicts.get(id);
+        if (!e) return;
+        conflicts.delete(id);
+        syncUnsent();
+        edit(e.field, e.section, e.values as Partial<Settings[Section]>, 'now');
+      },
+
+      /** Forgets an unsent edit: the server's value stays. */
+      discardUnsent(id: string): void {
+        if (conflicts.delete(id)) syncUnsent();
+      },
+
       /** Sends a refused setting again (`id`), or every one; true when all were kept. */
       async retry(id?: string): Promise<boolean> {
         const ids = id === undefined ? [...refused.keys()] : refused.has(id) ? [id] : [];
@@ -328,7 +427,10 @@ export const SettingsStore = signalStore(
 
       /** What the Settings window's close hook hears: wait for a save, say what was refused and why, or close. */
       closeVerdict(): SettingsCloseVerdict {
-        if (timers.size > 0 || pending.size > 0 || queued > 0) return { kind: 'wait', done: flush() };
+        if (timers.size > 0 || pending.size > 0 || queued > 0) {
+          const label = savingLabel([...(sending ? [sending] : []), ...pending.values()].map((e) => e.field.label));
+          return { kind: 'wait', done: flush(), label };
+        }
         const refusals = store.refusals();
         if (refusals.length === 0) return { kind: 'close' };
         return { kind: 'warn', message: refusals.map((r) => `${r.field.label} was not saved: ${r.error.message}`).join(' ') };

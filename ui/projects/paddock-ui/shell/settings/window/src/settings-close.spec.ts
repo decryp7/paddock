@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { defineSettingsPage, msg } from '@decryp7/paddock-ui/shell';
 import { DIALOG_REF } from '@decryp7/paddock-ui/shell/dialogs';
 import { MemorySettingsBackend } from '@decryp7/paddock-ui/shell/settings';
-import { SettingsCloseGuards, settingsPageCloseGuard, type SettingsCloseVerdict } from './settings-close';
+import { SettingsCloseGuards, settingsPageCloseGuard, STILL_SAVING_AFTER_MS, type SettingsCloseVerdict } from './settings-close';
 import { PdSettingsWindow } from './settings-window';
 import { settingsBed, settle, SPEC_PAGES } from './spec-helpers';
 
@@ -24,8 +24,8 @@ describe('SettingsCloseGuards', () => {
     guards.add(() => ({ kind: 'warn', message: 'Port was not saved: in use.' }), page.ref);
     expect(guards.check()).toEqual({ kind: 'warn', message: 'Port was not saved: in use.' });
     const done = Promise.resolve();
-    const stop = guards.add(() => ({ kind: 'wait', done }), lifetime().ref);
-    expect(guards.check()).toEqual({ kind: 'wait', done });
+    const stop = guards.add(() => ({ kind: 'wait', done, label: 'Port' }), lifetime().ref);
+    expect(guards.check()).toEqual({ kind: 'wait', done, label: 'Port' });
     stop();
     stop();
     page.end();
@@ -79,12 +79,104 @@ describe('pd-settings-window close with a page’s guard', () => {
     return { fixture: fixture.ref, window: fixture.ref.componentInstance, closed, el: fixture.ref.nativeElement as HTMLElement };
   }
 
-  afterEach(() => (TypedPage.verdict = () => ({ kind: 'close' })));
+  afterEach(() => {
+    TypedPage.verdict = () => ({ kind: 'close' });
+    vi.useRealTimers();
+  });
+
+  describe('a save that does not settle', () => {
+    /** A page whose save never settles unless the test settles it. */
+    async function waiting() {
+      let finish!: () => void;
+      const done = new Promise<void>((r) => (finish = r));
+      TypedPage.verdict = () => ({ kind: 'wait', done, label: 'Port' });
+      const opened = await open();
+      vi.useFakeTimers();
+      expect(opened.window.dialogCanClose()).toBe(false);
+      opened.fixture.detectChanges();
+      const banner = (): HTMLElement | null => opened.el.querySelector('[data-testid="settings-still-saving"]');
+      const button = (text: string): HTMLButtonElement => Array.from(banner()!.querySelectorAll('button')).find((b) => b.textContent!.includes(text))!;
+      return { ...opened, finish, banner, button };
+    }
+
+    it('says "Saving <setting>…" in the footer while the close waits', async () => {
+      const { window, banner } = await waiting();
+      expect(window.dialogStatus()).toBe('Saving Port…');
+      expect(banner()).toBeNull();
+    });
+
+    it('offers "Close anyway" and "Keep waiting" after the delay, and not before', async () => {
+      const { fixture, window, banner, closed } = await waiting();
+      vi.advanceTimersByTime(STILL_SAVING_AFTER_MS - 1);
+      fixture.detectChanges();
+      expect(banner()).toBeNull();
+      vi.advanceTimersByTime(1);
+      fixture.detectChanges();
+      expect(banner()!.textContent).toContain('Still saving Port.');
+      expect(banner()!.getAttribute('role')).toBe('alertdialog');
+      expect(window.dialogStatus()).toBe('Saving Port…');
+      expect(closed).not.toHaveBeenCalled();
+    });
+
+    it('"Close anyway" closes, and the save settling later closes nothing again', async () => {
+      const { fixture, finish, button, closed, window } = await waiting();
+      vi.advanceTimersByTime(STILL_SAVING_AFTER_MS);
+      fixture.detectChanges();
+      button('Close anyway').click();
+      expect(closed).toHaveBeenCalledTimes(1);
+      expect(window.dialogStatus()).not.toBe('Saving Port…');
+      finish();
+      await settle();
+      expect(closed).toHaveBeenCalledTimes(1);
+    });
+
+    it('"Keep waiting" keeps the window open, asks again after the same delay, and closes once the save is done', async () => {
+      const { fixture, finish, banner, button, closed, window } = await waiting();
+      vi.advanceTimersByTime(STILL_SAVING_AFTER_MS);
+      fixture.detectChanges();
+      button('Keep waiting').click();
+      fixture.detectChanges();
+      expect(banner()).toBeNull();
+      expect(closed).not.toHaveBeenCalled();
+      expect(window.dialogStatus()).toBe('Saving Port…');
+      // Another close while it waits is still held, and does not restart the delay.
+      expect(window.dialogCanClose()).toBe(false);
+      vi.advanceTimersByTime(STILL_SAVING_AFTER_MS);
+      fixture.detectChanges();
+      expect(banner()).not.toBeNull();
+      button('Keep waiting').click();
+      TypedPage.verdict = () => ({ kind: 'close' });
+      finish();
+      await settle();
+      expect(closed).toHaveBeenCalledTimes(1);
+      // The delay ended with the wait: nothing shows later.
+      vi.advanceTimersByTime(STILL_SAVING_AFTER_MS);
+      fixture.detectChanges();
+      expect(banner()).toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('closes when the save is done before the delay', async () => {
+      const { finish, closed, window } = await waiting();
+      TypedPage.verdict = () => ({ kind: 'close' });
+      finish();
+      await settle();
+      expect(closed).toHaveBeenCalledTimes(1);
+      expect(window.dialogStatus()).not.toBe('Saving Port…');
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('stops its timer when the window goes', async () => {
+      const { fixture } = await waiting();
+      fixture.destroy();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  });
 
   it('waits for a save still on its way, then closes once it is done', async () => {
     let finish!: () => void;
     const done = new Promise<void>((r) => (finish = r));
-    TypedPage.verdict = () => ({ kind: 'wait', done });
+    TypedPage.verdict = () => ({ kind: 'wait', done, label: 'Port' });
     const { window, closed } = await open();
     expect(window.dialogCanClose()).toBe(false);
     // Asked again while it waits (a second Cmd+W): still waiting, one wait only.
@@ -96,7 +188,7 @@ describe('pd-settings-window close with a page’s guard', () => {
   });
 
   it('a wait that fails still asks again', async () => {
-    TypedPage.verdict = () => ({ kind: 'wait', done: Promise.reject(new Error('lost')) });
+    TypedPage.verdict = () => ({ kind: 'wait', done: Promise.reject(new Error('lost')), label: 'Port' });
     const { window, closed } = await open();
     expect(window.dialogCanClose()).toBe(false);
     TypedPage.verdict = () => ({ kind: 'close' });
