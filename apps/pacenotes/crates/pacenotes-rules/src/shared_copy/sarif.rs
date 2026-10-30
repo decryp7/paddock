@@ -125,13 +125,16 @@ impl TextIndex {
     }
 }
 
+/// The cached texts by path, and the order they came in (the oldest goes first).
+type TextCache = (BTreeMap<String, Option<std::rc::Rc<TextIndex>>>, std::collections::VecDeque<String>);
+
 /// How many files' texts are kept at once.
 pub(super) const TEXT_CACHE_FILES: usize = 16;
 
 /// Fetches each file's text once per run, whatever the number of results in it.
 pub(super) struct Texts<'a> {
     fetch: &'a dyn Fn(&RepoPath) -> Option<String>,
-    cache: std::cell::RefCell<(BTreeMap<String, Option<std::rc::Rc<TextIndex>>>, std::collections::VecDeque<String>)>,
+    cache: std::cell::RefCell<TextCache>,
 }
 
 impl<'a> Texts<'a> {
