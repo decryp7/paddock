@@ -3,6 +3,10 @@
 //! temporary file and swapped in for the old ones in one catalog transaction (the view changes with it), so
 //! a reader sees either the old or the new files. Old files a reader still has open (Windows refuses to
 //! delete them) go to `trash` and are deleted later.
+//!
+//! Only segments in the full-text index are compacted (ADR 0062 section 3): an unindexed segment waits for a later
+//! compaction, after it is indexed, so the index's "delete a block's documents, then add them" stays exact whatever
+//! compaction did meanwhile. The merged segment is indexed, as its parts were.
 
 use crate::schema::{canonical_columns, parquet_from, READY};
 use crate::segments::{Segment, SegmentWriter, SEGMENTS_DIR, SEGMENT_ROWS};
@@ -34,8 +38,7 @@ struct Listed {
     end_id: u64,
     rows: u64,
     live: u64,
-    /// In the full-text index (merged segments keep the flag; indexed and unindexed ones are never merged
-    /// together, so a merged segment is never indexed twice).
+    /// In the full-text index (only indexed segments are compacted).
     indexed: bool,
 }
 
@@ -144,10 +147,10 @@ pub(crate) fn compact(conn: &Connection, dir: &Path, schema: &Arc<EventSchema>) 
     compact_with(conn, dir, schema, false)
 }
 
-/// The catalog's view of what the next compaction rewrites (by `live` as last counted): segments with rows of
-/// removed sources, and the small ones once there are more than [`MAX_SMALL_SEGMENTS`].
+/// The catalog's view of what the next compaction rewrites (by `live` as last counted): indexed segments with rows of
+/// removed sources, and the small indexed ones once there are more than [`MAX_SMALL_SEGMENTS`].
 pub(crate) fn pending(conn: &Connection) -> Result<std::collections::HashSet<String>> {
-    let mut stmt = conn.prepare("SELECT file, rows, live FROM segments")?;
+    let mut stmt = conn.prepare("SELECT file, rows, live FROM segments WHERE indexed")?;
     let listed = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u64>(1)?, r.get::<_, u64>(2)?)))?
         .collect::<duckdb::Result<Vec<_>>>()?;
@@ -165,7 +168,7 @@ pub(crate) fn compact_with(conn: &Connection, dir: &Path, schema: &Arc<EventSche
     empty_trash(conn)?;
     let live = live_rows(conn, dir)?;
     let listed: Vec<Listed> = {
-        let mut stmt = conn.prepare("SELECT file, first_id, end_id, rows, indexed FROM segments ORDER BY indexed, first_id")?;
+        let mut stmt = conn.prepare("SELECT file, first_id, end_id, rows, indexed FROM segments ORDER BY first_id")?;
         let rows = stmt.query_map([], |r| {
             Ok(Listed {
                 file: r.get(0)?,
@@ -190,19 +193,20 @@ pub(crate) fn compact_with(conn: &Connection, dir: &Path, schema: &Arc<EventSche
     // Rows of removed or aborted sources: rewritten, so the catalog and histograms stay exact.
     let garbage = |l: &Listed| l.live < l.rows;
     let small = |l: &Listed| l.rows < SEGMENT_ROWS / 2;
+    // Unindexed segments wait (see the module docs).
+    let indexed: Vec<&Listed> = listed.iter().filter(|l| l.indexed).collect();
     // Every import leaves up to one partial segment per parse thread: small segments are merged only once
     // there are many of them.
-    let smalls = listed.iter().filter(|l| small(l)).count();
+    let smalls = indexed.iter().filter(|l| small(l)).count();
     let merge_small = smalls > MAX_SMALL_SEGMENTS || (force && smalls > 1);
-    let candidates: Vec<&Listed> = listed.iter().filter(|l| garbage(l) || (merge_small && small(l))).collect();
+    let candidates: Vec<&Listed> = indexed.into_iter().filter(|l| garbage(l) || (merge_small && small(l))).collect();
     if candidates.is_empty() {
         return Ok(Compaction::default());
     }
     let mut groups: Vec<Vec<&Listed>> = vec![Vec::new()];
     let mut acc = 0;
     for c in candidates {
-        let other_kind = groups.last().and_then(|g| g.last()).is_some_and(|l| l.indexed != c.indexed);
-        if acc >= SEGMENT_ROWS || other_kind {
+        if acc >= SEGMENT_ROWS {
             groups.push(Vec::new());
             acc = 0;
         }
@@ -243,7 +247,7 @@ pub(crate) fn compact_with(conn: &Connection, dir: &Path, schema: &Arc<EventSche
                 delete_segment(conn, &l.file)?;
             }
             if let Some(seg) = &new {
-                insert_segment(conn, seg, seg.rows, group[0].indexed)?;
+                insert_segment(conn, seg, seg.rows, true)?;
             }
             refresh_view(conn, dir, schema)
         })();
