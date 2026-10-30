@@ -1033,3 +1033,53 @@ right after `frame.open()` was stale on a slow machine. **Rule:** e2e code press
 platform with `pageModKey` / `isMac` (platform and user agent, as the app does), never `ControlOrMeta` or `process.platform`;
 the lint rule `paddock/no-control-or-meta` (Debrief: `no-restricted-syntax`) bans the first; and a test counts page links
 only after the app context has loaded.
+the focus (Spotter's case). The Mac keeps the fake-browser tests of the whole life cycle; the live ones run once, on Linux.
+
+## 2026-10-30: a stall counted as the browser's silence; EINTR counted as a closed connection (Debrief)
+
+Debrief's two live renderer tests failed together, 1 run in 10 in the paddock-ci container on the Mac, both at about
+12.7 s with `Timeout`: each was waiting for the browser's reply to `Page.enable` (the start page, `Chromium::start_page`)
+when the whole container stalled (the Mac's load was at 240 to 280, OrbStack's VM got no CPU for seconds). Chrome stopped
+with the test, so it could not answer, but the driver's 10 s command bound was read off the wall clock and expired during
+the stall. Freezing the container for 12 s with `docker pause` right after both `Page.enable`s were sent reproduces it
+exactly (both tests, same moment, same error); no CPU load is needed. A fake-browser test failing in the same run fits:
+every wall-clock bound in the VM expired at once. The same freeze at another moment showed a second bug: Linux ends a
+socket read that has a timeout (`SO_RCVTIMEO`) with EINTR after a stop and continue, or after any handled signal
+(signal(7)), and the DevTools reader (and the fake browser) took EINTR for the end of the connection, so every page said
+"closed". In-process `cargo test` runs of chromium-driver in the amd64 container (Rosetta) lost 4 to 6 fake-browser
+connections per run that way. **Fix:** chromium-driver's waits do not count a stall (`clock::Budget`): work between
+waits (a DevTools call, however slow) counts in full; a wait counts as its time unless it ended more than 2 s late, then
+as what it asked for; a wall-clock ceiling of three times the bound ends it whatever the stalls, and each forgiven stall
+is logged. EINTR is a transient read or write error like WouldBlock (`cdp::is_transient`). Also fixed on the way:
+`Page::challenge` turned a script that timed out into "no challenge" and `settle` turned a failed `load_finished` into
+"loaded", so a hung page counted as solved; Timeout and Closed are errors now, while a script that fails because the
+page moved on (the user solved the check) only means "look again". A page held by a JavaScript dialog answers no
+script: the driver sees `Page.javascriptDialogOpening` and fails the call at once with the dialog's message.
+
+The review of the first fix found its own wall-clock trap: the budget judged "wait plus the work after it" as one wait,
+so a `Target.getTargets` answering in 2.5 s looked like a stall and counted as 0.1 s, stretching the 5 s start-page wait
+to minutes. The budget is now told where each wait starts and ends (`next_wait_at`, `waited_at`, `poll`), and the
+start-page loop is tested on an injected clock. `Instant` already leaves out a sleeping computer on macOS and Linux; what
+this fixes is a paused or starved process.
+
+**Lesson:** a timeout that waits for another process must not count time in which neither could run, and must count
+everything else, slow work included: measure the wait itself, not the gap between two looks at the clock. Test a timing
+bug by freezing the processes (`docker pause`, SIGSTOP) on an injected clock, never by adding CPU load. Treat EINTR as
+"try again" in every socket loop with a read timeout. **Follow-up:** the same EINTR and wall-clock patterns are in
+Spotter's `spotter-render` and the shared `paddock-chromium`: the three Chromium drivers have diverged and need
+consolidating onto `paddock-chromium` (plan X14), and `Budget` and `is_transient` belong there.
+
+## 2026-10-30: a test app built the plugins binary inside the test (Debrief)
+
+`browser::renderer::tests::fake::a_research_nobody_touched_closes_its_browser_when_it_ends` hit nextest's 300 s limit
+in two parallel `cargo nextest run -p debrief-app` container runs, and two fake-browser tests took 146 to 166 s in another
+`-p debrief-app` run, though each passes alone in 2 s. Neither the fake browser nor any wait of the test was the cause:
+`test_support::test_app` ran `cargo build -p debrief-plugins` when the plugins binary was missing (a `-p debrief-app`
+build does not make it; CI's `--workspace` build does), and the test waited for that build. Every test-app test process
+started the same build and waited on cargo's build-folder lock. Reproduced deterministically with a `CARGO` that never
+returns: the test waits as long as the build does. The test apps now never build anything: a missing binary is reported
+once with the command that builds it, and the tests that need plugins fail with that reason. **Lesson:** a test never
+starts a build or any other unbounded external work; it uses what the build made, or fails at once and says what to
+build. The second instance, the real store-worker test in `health::commands::tests` (it built `debrief-store-worker`
+when missing), hit the same 300 s limit while this was checked and is fixed the same way.
+
