@@ -3,6 +3,12 @@
   "cargo": ".",
   "os": ["ubuntu-latest", "windows-latest", "macos-latest"],
   "angularDir": "app",
+  "notices": {
+    "name": "Pitwall",
+    "manifests": ["app/src-tauri/Cargo.toml", "crates/pitwall-server/Cargo.toml"],
+    "npm": "app",
+    "out": ["app/src-tauri/resources"]
+  },
   "lastPackages": ["pitwall-app"],
   "windowsClippy": true,
   "processPatterns": ["[/\\\\]\\.paddock-ci[/\\\\]target-pitwall-app[/\\\\]debug[/\\\\]pitwall-server(\\.exe)? .*--fake-engine"],
