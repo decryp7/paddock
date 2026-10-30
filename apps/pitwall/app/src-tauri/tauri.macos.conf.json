@@ -5,6 +5,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Pitwall",
         "width": 1200,
         "height": 780,

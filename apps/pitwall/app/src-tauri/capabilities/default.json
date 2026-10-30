@@ -1,13 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "the main window's webview: events, plus dragging the window by its title bar and sidebar header (data-tauri-drag-region; the macOS window has an overlay title bar) and double-click to zoom. Every other Pitwall command is an app command (no plugin commands are granted to the webview), so the UI cannot reach the file system, the shell, the updater or the network directly",
-  "windows": [
-    "main"
-  ],
+  "description": "The main window (and further top-level windows, w-*): Tauri's events, dragging the window by its title bar and sidebar header (data-tauri-drag-region; the macOS window has an overlay title bar), double-click to zoom, and the shell's main set. Pitwall's own commands are app commands behind the shell's guard (src-tauri/src/lib.rs COMMANDS), so the UI cannot reach the file system, the shell, the updater or the network directly",
+  "windows": ["main", "w-*"],
   "permissions": [
     "core:event:default",
     "core:window:allow-start-dragging",
-    "core:window:allow-internal-toggle-maximize"
+    "core:window:allow-internal-toggle-maximize",
+    "paddock-shell:main"
   ]
 }

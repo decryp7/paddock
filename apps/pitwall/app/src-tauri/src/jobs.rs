@@ -52,7 +52,7 @@ pub enum JobEvent {
         total: Option<u64>,
         /// What `done` and `total` count (`items` or `bytes`); the UI formats a size for bytes.
         unit: Unit,
-        /// The UI may offer "Stop waiting" (`job_stop_waiting`): Cancel did not take effect, the job goes on.
+        /// The UI may offer "Stop waiting" (`app_job_stop_waiting`): Cancel did not take effect, the job goes on.
         can_stop_waiting: bool,
         /// Whole seconds since the job started.
         elapsed_secs: u64,
@@ -83,7 +83,7 @@ pub enum JobEvent {
     Cancelled {
         /// The job's id.
         job_id: u64,
-        /// The user stopped waiting (`job_stop_waiting`): the server's cancel did not take effect, so it may still be
+        /// The user stopped waiting (`app_job_stop_waiting`): the server's cancel did not take effect, so it may still be
         /// working on this. False for a cancel the server carried out.
         stopped_waiting: bool,
     },

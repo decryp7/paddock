@@ -1,7 +1,7 @@
 # 12. Native feel: Pitwall's windows behave like a desktop application, not a web page
 
 - Status: accepted (2026-10-22)
-- Related: Debrief ADR 0028 (the reference this ports), `app/src/app/core/native-feel.ts`, `app/src-tauri/src/native_feel.rs`
+- Related: Debrief ADR 0028 (the reference this ports), `app/src/app/core/native-feel.ts`, `app/src-tauri/src/native_feel.rs` (since 1.1 the shell's `paddock-window` applies it)
 
 ## Context
 

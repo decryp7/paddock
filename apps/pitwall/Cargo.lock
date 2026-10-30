@@ -1196,6 +1196,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
+name = "email-encoding"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "420b9da095f052ea597503e39073b5b3c522f7db933fbac202d91d24492693fd"
+dependencies = [
+ "base64 0.23.1",
+ "memchr",
+]
+
+[[package]]
 name = "email_address"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1408,6 +1418,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs4"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8640e34b88f7652208ce9e88b1a37a2ae95227d84abec377ccd3c5cfeb141ed4"
+dependencies = [
+ "rustix",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2419,6 +2439,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "lazy_static"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
+
+[[package]]
+name = "lettre"
+version = "0.11.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2c646bd5cc763b1087b15493e29a64be6147ba8f19342004fa52048ee596eae"
+dependencies = [
+ "base64 0.23.1",
+ "email-encoding",
+ "email_address",
+ "fastrand",
+ "httpdate",
+ "idna",
+ "mime",
+ "nom",
+ "percent-encoding",
+ "quoted_printable",
+ "rustls",
+ "rustls-platform-verifier",
+ "socket2",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "libappindicator"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2673,6 +2722,15 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+]
+
+[[package]]
+name = "nom"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -3085,6 +3143,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-channels"
+version = "0.1.0"
+dependencies = [
+ "lettre",
+ "paddock-commands",
+ "paddock-dialogs",
+ "paddock-download",
+ "paddock-env",
+ "paddock-jobs",
+ "paddock-net",
+ "paddock-secrets",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tauri",
+]
+
+[[package]]
 name = "paddock-cli"
 version = "0.1.0"
 dependencies = [
@@ -3097,8 +3173,59 @@ dependencies = [
 name = "paddock-commands"
 version = "0.2.0"
 dependencies = [
+ "log",
  "paddock-workspace-hack",
  "serde",
+ "serde_json",
+ "tauri",
+]
+
+[[package]]
+name = "paddock-diag"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "log",
+ "paddock-commands",
+ "paddock-dialogs",
+ "paddock-env",
+ "paddock-jobs",
+ "paddock-log",
+ "paddock-settings",
+ "paddock-workspace-hack",
+ "regex",
+ "serde",
+ "serde_json",
+ "tauri",
+ "zip",
+]
+
+[[package]]
+name = "paddock-dialogs"
+version = "0.2.0"
+dependencies = [
+ "log",
+ "objc2-app-kit",
+ "paddock-commands",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tauri",
+]
+
+[[package]]
+name = "paddock-download"
+version = "0.2.0"
+dependencies = [
+ "fs4",
+ "httpdate",
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tauri",
+ "ureq",
 ]
 
 [[package]]
@@ -3112,15 +3239,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-files"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-proc",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tauri",
+]
+
+[[package]]
 name = "paddock-health"
 version = "0.2.0"
 dependencies = [
  "chrono",
  "log",
+ "paddock-commands",
  "paddock-jobs",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "tauri",
 ]
 
 [[package]]
@@ -3129,10 +3272,102 @@ version = "0.2.0"
 dependencies = [
  "croner",
  "jiff",
+ "paddock-commands",
  "paddock-env",
  "paddock-workspace-hack",
  "serde",
  "sha2 0.10.9",
+ "tauri",
+]
+
+[[package]]
+name = "paddock-log"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "log",
+ "paddock-env",
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-log",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "paddock-mcp"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "log",
+ "paddock-commands",
+ "paddock-dialogs",
+ "paddock-env",
+ "paddock-jobs",
+ "paddock-log",
+ "paddock-secrets",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tauri",
+]
+
+[[package]]
+name = "paddock-menu"
+version = "0.2.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tauri",
+]
+
+[[package]]
+name = "paddock-net"
+version = "0.1.0"
+dependencies = [
+ "paddock-download",
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "rustls",
+ "ureq",
+ "url",
+]
+
+[[package]]
+name = "paddock-packs"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-health",
+ "paddock-jobs",
+ "paddock-watch",
+ "paddock-workspace-hack",
+ "regex",
+ "serde",
+ "serde_ignored",
+ "tauri",
+ "toml 0.9.12+spec-1.1.0",
+]
+
+[[package]]
+name = "paddock-pitwall"
+version = "0.1.0"
+dependencies = [
+ "paddock-env",
+ "paddock-health",
+ "paddock-proc",
+ "paddock-secrets",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3143,6 +3378,14 @@ dependencies = [
  "paddock-workspace-hack",
  "sysinfo 0.39.6",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "paddock-secrets"
+version = "0.1.0"
+dependencies = [
+ "paddock-workspace-hack",
+ "zeroize",
 ]
 
 [[package]]
@@ -3163,6 +3406,7 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "tauri",
  "windows 0.62.2",
  "windows-service",
 ]
@@ -3172,10 +3416,88 @@ name = "paddock-settings"
 version = "0.2.0"
 dependencies = [
  "log",
+ "paddock-commands",
+ "paddock-health",
  "paddock-workspace-hack",
  "regex",
  "serde",
  "serde_json",
+ "tauri",
+]
+
+[[package]]
+name = "paddock-shell"
+version = "0.3.0"
+dependencies = [
+ "log",
+ "paddock-channels",
+ "paddock-commands",
+ "paddock-diag",
+ "paddock-dialogs",
+ "paddock-download",
+ "paddock-env",
+ "paddock-files",
+ "paddock-health",
+ "paddock-jobs",
+ "paddock-log",
+ "paddock-mcp",
+ "paddock-menu",
+ "paddock-packs",
+ "paddock-pitwall",
+ "paddock-service",
+ "paddock-settings",
+ "paddock-siblings",
+ "paddock-startup",
+ "paddock-storage",
+ "paddock-updater",
+ "paddock-window",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+]
+
+[[package]]
+name = "paddock-siblings"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-env",
+ "paddock-proc",
+ "paddock-window",
+ "paddock-workspace-hack",
+ "serde",
+]
+
+[[package]]
+name = "paddock-startup"
+version = "0.2.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-log",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "sysinfo 0.39.6",
+ "tauri",
+]
+
+[[package]]
+name = "paddock-storage"
+version = "0.1.0"
+dependencies = [
+ "paddock-commands",
+ "paddock-dialogs",
+ "paddock-env",
+ "paddock-files",
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tauri",
 ]
 
 [[package]]
@@ -3186,6 +3508,50 @@ dependencies = [
  "paddock-workspace-hack",
  "socket2",
  "tempfile",
+]
+
+[[package]]
+name = "paddock-updater"
+version = "0.2.0"
+dependencies = [
+ "base64 0.22.1",
+ "log",
+ "minisign-verify",
+ "paddock-commands",
+ "paddock-dialogs",
+ "paddock-download",
+ "paddock-files",
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "semver",
+ "serde",
+ "serde_json",
+ "tauri",
+]
+
+[[package]]
+name = "paddock-watch"
+version = "0.1.0"
+dependencies = [
+ "paddock-jobs",
+ "paddock-workspace-hack",
+]
+
+[[package]]
+name = "paddock-window"
+version = "0.2.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-dialogs",
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tauri",
+ "url",
+ "webview2-com",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -3403,9 +3769,14 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "objc2-service-management",
+ "paddock-commands",
+ "paddock-dialogs",
  "paddock-jobs",
  "paddock-service",
+ "paddock-shell",
+ "paddock-startup",
  "paddock-testkit",
+ "paddock-window",
  "pitwall-core",
  "pitwall-loopback",
  "serde",
@@ -3749,6 +4120,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "quoted_printable"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "478e0585659a122aa407eb7e3c0e1fa51b1d8a870038bd29f0cf4a8551eea972"
+
+[[package]]
 name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4022,6 +4399,7 @@ version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -4314,6 +4692,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_ignored"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115dffd5f3853e06e746965a20dcbae6ee747ae30b543d91b0e089668bb07798"
+dependencies = [
+ "serde",
+ "serde_core",
+]
+
+[[package]]
 name = "serde_json"
 version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4462,6 +4850,15 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
  "digest 0.11.3",
+]
+
+[[package]]
+name = "sharded-slab"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
+dependencies = [
+ "lazy_static",
 ]
 
 [[package]]
@@ -5221,6 +5618,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "thread_local"
+version = "1.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "time"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5514,6 +5920,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-log"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
+dependencies = [
+ "log",
+ "once_cell",
+ "tracing-core",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
+dependencies = [
+ "sharded-slab",
+ "thread_local",
+ "tracing-core",
+]
+
+[[package]]
 name = "tray-icon"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5595,6 +6023,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
+name = "ureq"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cde93ff05758a36a851a398a772b0b79a82fbe3c186a46f2696baaeaf84c966b"
+dependencies = [
+ "base64 0.23.1",
+ "log",
+ "percent-encoding",
+ "rustls",
+ "rustls-pki-types",
+ "rustls-platform-verifier",
+ "ureq-proto",
+ "utf8-zero",
+]
+
+[[package]]
+name = "ureq-proto"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "841583fc36089d7d59419568ae157f43a5a03a2e5a81ba87c77d1596ef46e922"
+dependencies = [
+ "base64 0.23.1",
+ "http",
+ "httparse",
+ "log",
+]
+
+[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5618,6 +6074,12 @@ dependencies = [
  "serde",
  "url",
 ]
+
+[[package]]
+name = "utf8-zero"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8c0a043c9540bae7c578c88f91dda8bd82e59ae27c21baca69c8b191aaf5a6e"
 
 [[package]]
 name = "utf8_iter"
@@ -6217,6 +6679,15 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
+dependencies = [
+ "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets 0.52.6",
 ]

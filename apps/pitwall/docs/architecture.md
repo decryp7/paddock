@@ -118,9 +118,9 @@ server only through a `ServerClient` trait (loopback HTTP to the management API 
 | `server_client.rs`, `live.rs` | The management client and the live feed that is forwarded to the UI and the tray |
 | `credentials.rs` | The app's copy of the admin key in the OS credential store (Windows Credential Manager, macOS Keychain, Secret Service), falling back to `admin.key` when the store is unavailable |
 | `service_install.rs` | Registering the server with the OS: `SMAppService` and the launch agent inside the bundle on macOS, the NSIS installer's service on Windows, a systemd user unit written by `pitwall-server install` on Linux. Elevation and approval are always the OS's own |
-| `window.rs`, `tray.rs`, `tray_model.rs` | Window lifecycle as pure decisions (closing destroys the window, tray Open and Dock reopen rebuild it, only Quit exits, no tray means closing quits) and the tray menu |
+| `lib.rs`, `tray.rs`, `tray_model.rs` | Pitwall on the Paddock shell (`paddock-shell`, ADR 0029): the shell opens the tray and the main window after every plugin is set up, owns the window lifecycle (closing destroys the window, tray Open and Dock reopen rebuild it, only Quit exits, no tray means closing quits), the exit and its watchdog, and guards Pitwall's commands (`COMMANDS`); `tray.rs` draws Pitwall's tray model on the shell's tray |
 | `updater.rs` | The opt-in minisign-verified updater; inert in unsigned builds |
-| `native_feel.rs` | [ADR 0012](adr/0012-native-feel.md): selection opt-in, one context-menu policy, browser keys blocked |
+| (shell) | [ADR 0012](adr/0012-native-feel.md): the shell's window layer applies the native feel (no browser zoom, extensions or, in release builds, WebView2 browser keys); the UI guard does the rest |
 
 Closing or quitting the app never stops the server. The shell has been type-checked and unit-tested; running it on
 real Windows and Linux desktops is not verified yet (see the [roadmap](roadmap.md)).

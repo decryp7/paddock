@@ -122,8 +122,11 @@ Pacenotes: toolsets `orient`, `code`, `review`, `diagrams`, `requirements` and `
   scale is gone; the chart colours are derived from the shared tokens (`scripts/ci/tokens.test.mjs`).
 - **Done (WP-2.2).** No layout problem at 900, 1024 and 1280 px in Chromium and WebKit (`e2e/layout.baseline.json` is
   empty): tables fit their panel, the detail panel lies over a list too narrow for both, forms and toolbars step down.
-- **Next.** WP-2.3 (Material and paddock-ui components), WP-2.4 (the app crate on `paddock-shell`) and WP-2.7 (About and
-  notices) can run in parallel; then WP-2.5, 2.6, 2.8, 2.9.
+- **Done (WP-2.4, Rust).** The app crate runs on `paddock-shell`: the shell opens the tray and the main window (ADR 0029),
+  owns the windows, the exit and its watchdog, and guards Pitwall's commands; start tests on the mock runtime. The main
+  window is opaque (user, 2026-10-30).
+- **Next.** WP-2.3 (Material, in progress), WP-2.7 (About and notices; waits for the updater decision in the plan), then
+  WP-2.5, 2.6, 2.8, 2.9.
 
 ## Next (hand-off, 2026-10-22)
 

@@ -105,28 +105,15 @@ impl PendingAsk {
     }
 }
 
-/// How long a quit may take before the watchdog ends the process: the server's own bound for stopping serving
-/// (`stop_serving` times out at 30 s in `commands::timeout_for`) plus time to close the windows.
-pub const EXIT_STALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(40);
-
-/// Ends a quit that stalls (an engine that never stops, a webview that never closes): after `limit` without the
-/// process having exited, calls `end(code)`. The engines belong to the service, which keeps running, so ending the
-/// process loses nothing. Starts a thread; returns whether it was started.
-fn spawn_exit_watchdog(limit: std::time::Duration, code: i32, end: impl FnOnce(i32) + Send + 'static) -> bool {
-    let spawned = std::thread::Builder::new().name("pitwall-exit-watchdog".into()).spawn(move || {
-        std::thread::sleep(limit);
-        eprintln!("Pitwall: quitting stalled for {} s; ending the process", limit.as_secs());
-        end(code);
-    });
-    spawned.is_ok()
-}
-
-/// Arms the exit watchdog once per process, at the start of a quit.
-pub fn arm_exit_watchdog(code: i32) {
-    static ARMED: AtomicBool = AtomicBool::new(false);
-    if !ARMED.swap(true, Ordering::SeqCst) {
-        spawn_exit_watchdog(EXIT_STALL_LIMIT, code, |code| std::process::exit(code));
+/// Starts quitting: arms the shell's exit watchdog first (an engine that never stops would otherwise hang the quit in
+/// `apply`; the watchdog ends the process after `crate::EXIT_STALL_LIMIT`, and the engines belong to the service, which
+/// keeps running, so nothing is lost), applies the choice about serving, then quits through the window layer.
+async fn quit_now<R: Runtime>(app: &AppHandle<R>, client: &dyn ServerClient, choice: QuitChoice, remember_choice: bool) {
+    paddock_window::tauri::arm_exit_watchdog(app, 0);
+    for p in apply(client, choice, remember_choice).await {
+        eprintln!("Pitwall: {p}");
     }
+    paddock_window::tauri::quit(app);
 }
 
 /// The user asked to quit with `forced` (the "Quit and stop serving" items) or by the setting (`None`).
@@ -137,16 +124,13 @@ pub async fn request<R: Runtime>(app: &AppHandle<R>, forced: Option<QuitChoice>)
         None => read_plan(client.as_ref()).await,
     };
     match plan {
-        Plan::Quit(choice) => {
-            arm_exit_watchdog(0);
-            for p in apply(client.as_ref(), choice, false).await {
-                eprintln!("Pitwall: {p}");
-            }
-            app.exit(0);
-        }
+        Plan::Quit(choice) => quit_now(app, client.as_ref(), choice, false).await,
         Plan::Ask => {
-            // The dialog lives in the window: open (or focus) it, and tell it, now and when it loads.
-            crate::shell::handle(app, crate::window::Lifecycle::TrayOpen);
+            // The dialog lives in the window: open (or focus) it, and tell it, now and when it loads. A cancelled question
+            // never reaches the window layer, so nothing is left half-quitting.
+            if let Err(e) = paddock_window::tauri::reveal(app, "main") {
+                eprintln!("Pitwall: the window could not be shown to ask about quitting ({})", e.message);
+            }
             app.state::<PendingAsk>().set();
             let _ = app.emit(ASK_EVENT, ());
         }
@@ -166,11 +150,7 @@ pub async fn quit_app<R: Runtime>(
     } else {
         QuitChoice::KeepServing
     };
-    arm_exit_watchdog(0);
-    for p in apply(client.as_ref(), choice, remember_choice).await {
-        eprintln!("Pitwall: {p}");
-    }
-    app.exit(0);
+    quit_now(&app, client.as_ref(), choice, remember_choice).await;
     Ok(())
 }
 
@@ -194,39 +174,6 @@ mod tests {
     use super::*;
     use crate::server_client::fake::{FakeServer, Reply};
     use pitwall_core::mgmt::{CommandError, ErrorCode};
-
-    #[tokio::test]
-    async fn a_quit_whose_engine_never_stops_is_ended_by_the_watchdog() {
-        use crate::server_client::BoxFuture;
-        // A server whose stop never answers (an engine that will not die); the call's own timeout is far away.
-        struct NeverStops;
-        impl ServerClient for NeverStops {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Option<std::time::Duration>) -> BoxFuture<'a, Result<Value, CommandError>> {
-                Box::pin(std::future::pending())
-            }
-            fn open_stream<'a>(
-                &'a self,
-                _: &'a str,
-                _: Option<Value>,
-                _: std::time::Duration,
-            ) -> BoxFuture<'a, Result<Box<dyn crate::server_client::FrameStream>, CommandError>> {
-                Box::pin(std::future::pending())
-            }
-        }
-        let (tx, rx) = std::sync::mpsc::channel();
-        assert!(spawn_exit_watchdog(std::time::Duration::from_millis(20), 7, move |code| {
-            let _ = tx.send(code);
-        }));
-        // The quit itself hangs in the stop, as it did before the watchdog existed...
-        let quit = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            apply(&NeverStops, QuitChoice::StopServing, false),
-        )
-        .await;
-        assert!(quit.is_err(), "the stop never finishes");
-        // ...and the watchdog has ended the process with the quit's exit code.
-        assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(10)), Ok(7));
-    }
 
     #[test]
     fn the_setting_decides_and_defaults_to_keep_serving() {
