@@ -62,6 +62,7 @@ mod notes;
 mod notification_centre;
 mod notify;
 mod opener;
+mod ordering;
 mod panel_windows;
 mod parsers;
 mod paste;

@@ -322,8 +322,10 @@ fn a_stale_order_stays_marked_through_live_refreshes_until_the_ordering_job_repa
         store.summary().unwrap().total as u64,
         "the new events are listed (positioned at the end) while the order waits for its repair"
     );
-    assert!(r.notices.iter().any(|n| n.contains("time order")), "the refresh says so: {r:?}");
-    assert!(r.order_incomplete, "and tells the app to run the ordering job");
+    assert!(
+        r.order_incomplete,
+        "the refresh tells the app (which runs the ordering job once per episode)"
+    );
     assert!(!store.order_complete().unwrap());
     use debrief_core::ports::{Maintain, MaintenanceAction};
     store.maintain(MaintenanceAction::OrderEvents).unwrap();

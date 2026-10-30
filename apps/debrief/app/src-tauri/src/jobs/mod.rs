@@ -57,6 +57,8 @@ pub fn wire<R: Runtime>(app: &AppHandle<R>, jobs: &Jobs) {
     jobs.set_retry(JobKind::Import, move |job| crate::workspace_commands::retry_import(&h, job));
     let h = app.clone();
     jobs.set_retry(JobKind::Research, move |job| crate::browser::research::retry(&h, job));
+    let h = app.clone();
+    jobs.set_retry(JobKind::Maintenance, move |job| crate::store_pane::retry_maintenance(&h, job));
     let mirrored = Mutex::new(HashSet::<String>::new());
     let sent = Mutex::new(Sent::default());
     jobs.subscribe(move |event| match event {
@@ -64,7 +66,10 @@ pub fn wire<R: Runtime>(app: &AppHandle<R>, jobs: &Jobs) {
             emit_all(&handle, &service, &sent);
             mirror(&handle, &service, &mirrored);
         }
-        JobsEvent::Finished(f) => finished(&handle, f),
+        JobsEvent::Finished(f) => {
+            crate::store_pane::ordering_job_finished(&handle, &f.job);
+            finished(&handle, f)
+        }
         JobsEvent::Paused { kind, reason } => paused(&handle, *kind, reason),
     });
 }

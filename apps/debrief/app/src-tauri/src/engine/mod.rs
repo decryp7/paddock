@@ -188,6 +188,8 @@ pub(crate) struct Engine {
     progress: Mutex<debrief_core::workspace::ProgressSnapshot>,
     /// The store worker's restarts this window has checked the time order after.
     seen_restarts: std::sync::atomic::AtomicUsize,
+    /// Where putting the events in time order stands (`crate::ordering`).
+    pub(crate) ordering: Mutex<crate::ordering::State>,
 }
 
 /// Scratch folders made by this process (unique per window and store).
@@ -205,6 +207,7 @@ impl Engine {
             last_report: Mutex::default(),
             progress: Mutex::new(debrief_core::workspace::ProgressSnapshot::stopped()),
             seen_restarts: std::sync::atomic::AtomicUsize::new(host.restarts()),
+            ordering: Mutex::new(crate::ordering::State::default()),
             host,
         }
     }

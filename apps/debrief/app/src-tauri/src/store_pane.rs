@@ -83,40 +83,120 @@ fn monotonic_percent(best: &std::sync::atomic::AtomicU64, p: debrief_core::ql::Q
     })
 }
 
-/// After an open job: orders the window's events by time when its store says the order is incomplete.
+/// The cause of the message that the events are not in time order (resolved when an ordering succeeds).
+const ORDERING_CAUSE: &str = "ordering:incomplete";
+
+/// After an open job: a new ordering episode, and the ordering job when the store's order is incomplete.
+pub(crate) fn order_events_after_open<R: Runtime>(app: &AppHandle<R>, state: &CurrentWindow) {
+    ordering_event(app, state, crate::ordering::Event::Opened);
+    order_events_if_incomplete(app, state);
+}
+
+/// The ordering job when the window's store says its order is incomplete (a live refresh, a worker restart, a failed
+/// clock correction), at most once per episode (`crate::ordering`).
 pub(crate) fn order_events_if_incomplete<R: Runtime>(app: &AppHandle<R>, state: &CurrentWindow) {
     if let Ok(store) = state.engine.store() {
         order_events_if_needed(app, state, store.as_ref());
     }
 }
 
-/// Orders the events by time as a job of the window when the store's order is incomplete (an ordering failed, or
-/// positions are missing; `Positions::order_complete`, two counts and a flag): the store does not do it inside the open
-/// call, which has a time limit. At most one such job per window at a time.
+/// [`order_events_if_incomplete`] with the store given: `Positions::order_complete` (two counts and a flag) decides;
+/// the store does not order inside the open call, which has a time limit.
 pub(crate) fn order_events_if_needed<R: Runtime>(app: &AppHandle<R>, state: &CurrentWindow, store: &dyn debrief_core::ports::Positions) {
-    if !matches!(store.order_complete(), Ok(false)) || ordering_running(app, state.label()) {
+    if matches!(store.order_complete(), Ok(false)) {
+        ordering_event(app, state, crate::ordering::Event::Incomplete);
+    }
+}
+
+/// Feeds `event` to the window's ordering state machine and does what it says.
+pub(crate) fn ordering_event<R: Runtime>(app: &AppHandle<R>, state: &CurrentWindow, event: crate::ordering::Event) {
+    use crate::ordering::Action;
+    let action = {
+        let mut s = crate::sync::lock(&state.engine.ordering);
+        let (next, action) = crate::ordering::step(*s, event);
+        *s = next;
+        action
+    };
+    match action {
+        Action::Nothing => {}
+        Action::StartJob => {
+            log::warn!("The events' time order is incomplete; ordering them again");
+            if let Err(e) = spawn_maintenance(app, state, MaintenanceAction::OrderEvents) {
+                log::warn!("the ordering job could not start: {}", e.message);
+                *crate::sync::lock(&state.engine.ordering) = crate::ordering::State::LeftToUser;
+            }
+        }
+        Action::AskUser { job } => {
+            use crate::notification_centre::centre::{NewNotice, NoticeAction, NoticeScope, NoticeSeverity, NoticeSource};
+            let notice = NewNotice::new(
+                ORDERING_CAUSE,
+                NoticeSource::Workspace,
+                NoticeSeverity::Warning,
+                "The events are not fully in time order",
+                NoticeScope::Project,
+            )
+            .body(
+                "Putting them in time order was cancelled or did not finish. New events are listed at the end until it is \
+                 done; Debrief does not start it again by itself.",
+            )
+            .primary(NoticeAction::RetryJob { job_id: job });
+            crate::notification_centre::post(app, Some(state.label()), notice, None);
+        }
+        Action::Resolve => crate::notification_centre::resolve_cause(app, ORDERING_CAUSE),
+    }
+}
+
+/// An ordering job of a window ended (the jobs service's finished event, also for a job cancelled before it started).
+pub(crate) fn ordering_job_finished<R: Runtime>(app: &AppHandle<R>, job: &crate::jobs::model::Job) {
+    use crate::jobs::JobState;
+    use crate::ordering::Outcome;
+    if job.kind != JobKind::Maintenance || job.title != MaintenanceAction::OrderEvents.title() {
         return;
     }
-    log::warn!("The events' time order is incomplete; ordering them again");
-    if let Err(e) = start_maintenance(app, state, MaintenanceAction::OrderEvents) {
-        log::warn!("the ordering job could not start: {}", e.message);
+    let Some(label) = job.window() else { return };
+    let outcome = match job.state() {
+        JobState::Done => Outcome::Done,
+        JobState::Cancelled => Outcome::Cancelled,
+        JobState::Failed | JobState::Interrupted => Outcome::Failed,
+        JobState::Queued | JobState::Running => return,
+    };
+    if let Ok(win) = CurrentWindow::of(app, label) {
+        ordering_event(app, &win, crate::ordering::Event::Finished { outcome, job: job.id.0 });
     }
 }
 
-/// Whether the window has an ordering job queued or running.
-fn ordering_running<R: Runtime>(app: &AppHandle<R>, label: &str) -> bool {
-    use tauri::Manager;
-    let Some(jobs) = app.try_state::<crate::jobs::Jobs>() else {
-        return false;
-    };
-    let title = MaintenanceAction::OrderEvents.title();
-    // Queued and running jobs, shown or not yet (a snapshot leaves out jobs too young to show).
-    !jobs.find_active(|j| j.window() == Some(label) && j.title == title).is_empty()
+/// Retry of a maintenance job (the message's "Put events in time order", the Jobs pane): the user starts it again.
+pub(crate) fn retry_maintenance<R: Runtime>(
+    app: &AppHandle<R>,
+    job: &crate::jobs::model::Job,
+) -> Result<Option<crate::jobs::JobId>, String> {
+    let action: MaintenanceAction = job
+        .request
+        .as_ref()
+        .and_then(|r| r.get("action"))
+        .and_then(|a| serde_json::from_value(a.clone()).ok())
+        .ok_or("this job cannot be run again")?;
+    let label = job.window().ok_or("this job has no window")?;
+    let win = CurrentWindow::of(app, label).map_err(|e| e.message)?;
+    start_maintenance(app, &win, action)
+        .map(|id| Some(crate::jobs::JobId(id)))
+        .map_err(|e| e.message)
 }
 
-/// [`store_maintenance`]: spawns the job and returns its id.
+/// [`store_maintenance`]: the user starts a maintenance job (for the ordering, the state machine hears so); its id.
 pub(crate) fn start_maintenance<R: Runtime>(app: &AppHandle<R>, state: &CurrentWindow, action: MaintenanceAction) -> CmdResult<u64> {
-    let spec = JobSpec::new(JobKind::Maintenance, action.title()).window(state.label());
+    if action == MaintenanceAction::OrderEvents {
+        ordering_event(app, state, crate::ordering::Event::UserStarted);
+    }
+    spawn_maintenance(app, state, action)
+}
+
+/// Spawns a maintenance job of the window and returns its id; the ordering can be retried (the message's action).
+fn spawn_maintenance<R: Runtime>(app: &AppHandle<R>, state: &CurrentWindow, action: MaintenanceAction) -> CmdResult<u64> {
+    let mut spec = JobSpec::new(JobKind::Maintenance, action.title()).window(state.label());
+    if action == MaintenanceAction::OrderEvents {
+        spec = spec.retry_with(serde_json::json!({ "action": action }));
+    }
     let win = state.arc().clone();
     let (controls, control) = crate::jobs::store_cancel(Controls::default());
     // The ordering is one long statement: DuckDB's estimate of it, relayed to the control, is the job's percentage,
@@ -422,6 +502,70 @@ mod tests {
         );
         assert_eq!(monotonic_percent(&best, p(180, 200)), Some(90));
         assert_eq!(monotonic_percent(&best, p(300, 200)), Some(100), "never above 100");
+    }
+
+    #[test]
+    fn an_ordering_job_cancelled_during_live_follow_is_not_restarted_by_the_next_refresh() {
+        use tauri::Manager;
+        let app = opened();
+        let jobs = app.state::<crate::jobs::Jobs>().inner().clone();
+        let active = || jobs.find_active(|j| j.title == MaintenanceAction::OrderEvents.title());
+        jobs.hold_starts(true);
+        order_events_if_needed(app.handle(), &main_window(&app), &Incomplete);
+        let started = active();
+        assert_eq!(started.len(), 1, "the incomplete order starts the job");
+        // The user cancels it.
+        jobs.cancel(started[0]).unwrap();
+        crate::jobs::wait_until("the cancelled ordering job to end", || active().is_empty());
+        // The next live refresh still finds the order incomplete: the job is left to the user, not started again.
+        order_events_if_needed(app.handle(), &main_window(&app), &Incomplete);
+        order_events_if_needed(app.handle(), &main_window(&app), &Incomplete);
+        assert!(active().is_empty(), "not restarted after the user's Cancel");
+        jobs.hold_starts(false);
+    }
+
+    #[test]
+    fn a_failed_ordering_is_left_to_the_user_with_a_message_resolved_when_an_ordering_succeeds() {
+        use crate::jobs::model::Job;
+        use crate::jobs::JobState;
+        use tauri::Manager;
+        let app = opened();
+        let jobs = app.state::<crate::jobs::Jobs>().inner().clone();
+        let active = || jobs.find_active(|j| j.title == MaintenanceAction::OrderEvents.title());
+        let message = || {
+            app.state::<crate::notification_centre::NotificationCentre>()
+                .snapshot("main")
+                .notices
+                .into_iter()
+                .find(|n| n.cause == ORDERING_CAUSE)
+        };
+        let ended = |state| {
+            Job::finished_for_test(
+                JobSpec::new(JobKind::Maintenance, MaintenanceAction::OrderEvents.title()).window("main"),
+                state,
+            )
+        };
+        jobs.hold_starts(true);
+        order_events_if_needed(app.handle(), &main_window(&app), &Incomplete);
+        let started = active();
+        assert_eq!(started.len(), 1);
+        // The ordering ran out of memory.
+        ordering_job_finished(app.handle(), &ended(JobState::Failed));
+        let m = message().expect("the user is told");
+        assert!(
+            matches!(m.primary, Some(crate::notification_centre::centre::NoticeAction::RetryJob { .. })),
+            "{m:?}"
+        );
+        // Later refreshes and checks do not start it again (it would fail the same way).
+        jobs.cancel(started[0]).unwrap();
+        crate::jobs::wait_until("the queued ordering job to end", || active().is_empty());
+        order_events_if_needed(app.handle(), &main_window(&app), &Incomplete);
+        assert!(active().is_empty(), "not restarted after a failure");
+        // The user runs it (the message's action, the Store pane), it succeeds: the message goes.
+        ordering_event(app.handle(), &main_window(&app), crate::ordering::Event::UserStarted);
+        ordering_job_finished(app.handle(), &ended(JobState::Done));
+        assert!(message().is_none(), "resolved once the events are in time order");
+        jobs.hold_starts(false);
     }
 
     #[test]

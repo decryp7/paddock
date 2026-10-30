@@ -35,11 +35,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-/// What a live refresh says while the positions are stale (the ordering job repairs them; the app starts it when a
-/// refresh says this).
-pub(crate) const STALE_NOTICE: &str = "The events are not fully in time order (an earlier ordering failed): new events are listed at \
-     the end until Debrief has put the events in time order again.";
-
 /// How long live tail waits for a running import before it gives up for this change.
 pub(crate) const TAIL_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -444,7 +439,7 @@ impl Inner {
                 if let Err(e) = pos::append_at_end(conn, first_new) {
                     log::warn!("the new events could not be positioned: {e}");
                 }
-                out.notices.push(STALE_NOTICE.to_string());
+                // The app's ordering state machine says so to the user once and starts the job once per episode.
                 out.order_incomplete = true;
             } else {
                 // The new events follow the positioned ones (the usual case) or every event is put in order again.
