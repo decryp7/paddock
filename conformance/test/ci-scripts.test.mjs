@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { buildEnv } from '../ci/build-env.mjs';
-import { checkPin, executableIn, grantCommand, install, parseArgs, parseRustPin, platformId, urlFor } from '../ci/install-test-browser.mjs';
+import { checkPin, defaultGrant, executableIn, grantCommand, install, parseArgs, parseRustPin, platformId, urlFor } from '../ci/install-test-browser.mjs';
 import { decide, tagFor } from '../ci/plan.mjs';
 import { firstLaunch, releaseNotes } from '../ci/release-notes.mjs';
 import { makeApp, PADDOCK } from './helpers.mjs';
@@ -143,6 +143,22 @@ test('install-test-browser: on Windows, app containers may read and run the brow
   const [cmd, args] = grantCommand('C:\\ci\\browser', 'win32', { SystemRoot: 'C:\\Windows' });
   assert.equal(cmd, 'C:\\Windows\\System32\\icacls.exe');
   assert.deepEqual(args, ['C:\\ci\\browser', '/grant', '*S-1-15-2-1:(OI)(CI)(RX)', '/grant', '*S-1-15-2-2:(OI)(CI)(RX)', '/Q']);
+});
+
+test('install-test-browser: a failed grant warns and the install carries on; no command runs nothing', () => {
+  const ran = [];
+  const warned = [];
+  const warn = (m) => warned.push(m);
+  defaultGrant('C:\\ci\\browser', { command: ['icacls.exe', ['x']], run: (c, a) => ran.push([c, a]), warn });
+  assert.deepEqual(ran, [['icacls.exe', ['x']]]);
+  assert.deepEqual(warned, []);
+  assert.doesNotThrow(() =>
+    defaultGrant('C:\\ci\\browser', { command: ['icacls.exe', ['x']], run: () => { throw new Error('Access is denied.'); }, warn }),
+  );
+  assert.equal(warned.length, 1);
+  assert.match(warned[0], /warning: could not let app containers read C:\\ci\\browser \(Access is denied\.\)/);
+  defaultGrant('/d', { command: null, run: () => assert.fail('nothing to run'), warn });
+  assert.equal(warned.length, 1);
 });
 
 test('install-test-browser: a wrong checksum extracts nothing; a missing platform and a short archive are errors', async () => {

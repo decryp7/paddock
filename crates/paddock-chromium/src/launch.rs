@@ -415,6 +415,7 @@ pub enum Gone {
 /// How a browser's helper processes started ([`Chromium::helper_starts`]), from its histograms (names as in Chrome for
 /// Testing 156.0.8078.47: `ChildProcess.Launched.UtilityProcessHash`, `ChildProcess.LaunchFailed.UtilityProcessErrorCode`,
 /// `Chrome.SystemNetworkContextManager.NetworkSandboxLaunchFailed.ErrorCode` and `...NetworkSandboxState`).
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct HelperStarts {
     /// Helper processes that started.
@@ -642,6 +643,7 @@ impl Chromium {
     /// ([`HelperStarts`]). `None` when the browser does not say: it does not know `Browser.getHistograms` (an experimental
     /// DevTools method) or answers without histograms. A helper that could not start is started again, and requests in
     /// flight on the first try are lost (see [`NO_TESTING_FIELD_TRIALS`]). For tests and diagnostics.
+    #[doc(hidden)]
     pub fn helper_starts(&self) -> Result<Option<HelperStarts>> {
         let Some(launch) = self.histograms("ChildProcess.Launch")? else {
             return Ok(None);

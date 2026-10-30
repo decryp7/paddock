@@ -116,9 +116,18 @@ export function grantCommand(dir, platform = process.platform, env = process.env
   return [icacls, [dir, '/grant', '*S-1-15-2-1:(OI)(CI)(RX)', '/grant', '*S-1-15-2-2:(OI)(CI)(RX)', '/Q']];
 }
 
-function defaultGrant(dir) {
-  const c = grantCommand(dir);
-  if (c) execFileSync(c[0], c[1], { timeout: 5 * 60 * 1000 });
+/**
+ * Runs `grantCommand` for `dir`. The grant is defence in depth (Chromium builds start without the testing config that
+ * turns the network-service sandbox on, so CI run 7170's browsers never sandboxed it), so a failed `icacls` warns on
+ * stderr and the install carries on. `command`, `run` and `warn` are injectable.
+ */
+export function defaultGrant(dir, { command = grantCommand(dir), run = (cmd, args) => execFileSync(cmd, args, { timeout: 5 * 60 * 1000 }), warn = (m) => console.warn(m) } = {}) {
+  if (!command) return;
+  try {
+    run(command[0], command[1]);
+  } catch (e) {
+    warn(`install-test-browser: warning: could not let app containers read ${dir} (${e.message}); the browser still works, but a sandboxed helper of it may not start`);
+  }
 }
 
 async function defaultFetch(url) {
