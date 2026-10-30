@@ -107,8 +107,12 @@ impl ChromiumPage {
     /// A challenge page (consent, CAPTCHA) waits for the user in the browser window, which is already on screen; once
     /// it is gone the work continues. The user took part, so the window is not closed when the work ends.
     fn hand_off_challenges(&self, s: &Session) -> Result<(), BrowserError> {
-        if s.page.challenge().ok().flatten().is_none() {
-            return Ok(());
+        match s.page.challenge() {
+            Ok(Some(_)) => {}
+            // A page that does not answer, or is gone, is not a page without a check.
+            Err(e @ (DriverError::Timeout(_) | DriverError::Closed)) => return Err(failed(e)),
+            // No check, or the document changed under the script (a navigation): nothing for the user.
+            Ok(None) | Err(_) => return Ok(()),
         }
         s.handed_off.store(true, Ordering::SeqCst);
         let url = s.page.info().map(|i| i.url).unwrap_or_default();
@@ -136,9 +140,15 @@ impl ChromiumPage {
     /// After an action or navigation: wait for the load it started, hand off challenges, enforce the chat's site rules.
     fn settle(&self, s: &Session, activity: Activity) -> Result<(), BrowserError> {
         std::thread::sleep(SETTLE);
+        // A page still loading after the bound is read as it is; a page that does not answer (or is gone) is an error.
         let end = Instant::now() + ACT_LOAD_TIMEOUT;
-        while !s.page.load_finished().unwrap_or(true) && Instant::now() < end {
-            std::thread::sleep(Duration::from_millis(100));
+        while Instant::now() < end {
+            match s.page.load_finished() {
+                Ok(true) => break,
+                Err(e @ (DriverError::Timeout(_) | DriverError::Closed)) => return Err(failed(e)),
+                // Still loading, or the document changed under the script (a navigation): look again.
+                Ok(false) | Err(_) => std::thread::sleep(Duration::from_millis(100)),
+            }
         }
         self.hand_off_challenges(s)?;
         let url = s.page.info().map(|i| i.url).unwrap_or_default();
@@ -695,6 +705,18 @@ mod tests {
             );
             drop(s);
             assert!(!r.renderers.kept_profile_status().in_use, "not held by the failed start");
+            r.renderers.kill_all();
+        }
+
+        /// Regression: after a load, a page that answered no script counted as loaded (`load_finished` failing was
+        /// "finished") and as one without a challenge, so the work went on with a hung page.
+        #[test]
+        fn a_page_that_does_not_answer_scripts_fails_the_navigation_with_a_timeout() {
+            let r = rig(Mode::Obey, 1);
+            research_step(&r);
+            r.fake.act(UserAction::HangScripts).unwrap();
+            let got = r.page.navigate(&WebUrl::parse("http://127.0.0.1:9/next").unwrap());
+            assert_eq!(got, Err(BrowserError::Timeout));
             r.renderers.kill_all();
         }
 

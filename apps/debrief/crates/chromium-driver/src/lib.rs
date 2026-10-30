@@ -15,6 +15,7 @@
 
 pub mod cdp;
 pub mod challenge;
+pub mod clock;
 pub mod cue;
 pub mod discover;
 #[cfg(any(test, feature = "test-support"))]

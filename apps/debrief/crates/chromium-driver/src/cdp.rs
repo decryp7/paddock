@@ -3,14 +3,15 @@
 //! gone when the browser reports them detached, destroyed or crashed (the user closed the window), whatever the log
 //! has dropped since.
 
+use crate::clock::Budget;
 use crate::{Error, Result};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::protocol::WebSocketConfig;
 use tungstenite::Message;
@@ -100,7 +101,7 @@ impl Connection {
         lock(&self.inner.watched).get(id).copied().unwrap_or(false)
     }
 
-    /// Sends a command and waits for its reply.
+    /// Sends a command and waits for its reply (`timeout` counts only time this process ran: [`Budget`]).
     pub fn call(&self, session: Option<&str>, method: &str, params: Value, timeout: Duration) -> Result<Value> {
         if self.is_closed() {
             return Err(Error::Closed);
@@ -116,7 +117,17 @@ impl Connection {
             lock(&self.inner.pending).remove(&id);
             return Err(Error::Closed);
         }
-        match rx.recv_timeout(timeout) {
+        let mut budget = Budget::new(timeout);
+        let r = loop {
+            let Some(wait) = budget.next_wait() else {
+                break Err(RecvTimeoutError::Timeout);
+            };
+            match rx.recv_timeout(wait) {
+                Err(RecvTimeoutError::Timeout) => continue,
+                other => break other,
+            }
+        };
+        match r {
             Ok(Ok(v)) => Ok(v),
             Ok(Err(m)) => Err(Error::Protocol(m)),
             Err(_) => {
@@ -135,9 +146,10 @@ impl Connection {
         lock(&self.inner.events).seq
     }
 
-    /// Waits for an event after `since` that `pred` accepts.
+    /// Waits for an event after `since` that `pred` accepts (`timeout` counts only time this process ran:
+    /// [`Budget`]).
     pub fn wait_event(&self, since: u64, timeout: Duration, pred: impl Fn(&Event) -> bool) -> Option<Event> {
-        let end = Instant::now() + timeout;
+        let mut budget = Budget::new(timeout);
         let mut g = lock(&self.inner.events);
         loop {
             if let Some((_, e)) = g.log.iter().find(|(s, e)| *s > since && pred(e)) {
@@ -146,8 +158,8 @@ impl Connection {
             if self.is_closed() {
                 return None;
             }
-            let left = end.checked_duration_since(Instant::now())?;
-            g = self.inner.cv.wait_timeout(g, left).unwrap_or_else(|e| e.into_inner()).0;
+            let wait = budget.next_wait()?;
+            g = self.inner.cv.wait_timeout(g, wait).unwrap_or_else(|e| e.into_inner()).0;
         }
     }
 }
@@ -163,15 +175,21 @@ type Ws = tungstenite::WebSocket<TcpStream>;
 fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
     'outer: while !inner.closed.load(Ordering::Acquire) {
         while let Ok(m) = rx.try_recv() {
-            if ws.send(Message::text(m)).is_err() {
-                break 'outer;
+            match ws.send(Message::text(m)) {
+                Ok(()) => {}
+                // The frame is queued; the next read or send writes it (tungstenite's `send`).
+                Err(tungstenite::Error::Io(e)) if is_transient(e.kind()) => {}
+                Err(_) => break 'outer,
             }
         }
         match ws.read() {
             Ok(Message::Text(t)) => dispatch(&inner, t.as_str()),
             Ok(Message::Close(_)) => break,
             Ok(_) => {}
-            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            // A read interrupted by a signal is not the end of the connection: Linux does not restart a socket read
+            // with a timeout after one (signal(7)), and the stop and continue of a stalled process or a paused
+            // container is one.
+            Err(tungstenite::Error::Io(e)) if is_transient(e.kind()) => {}
             Err(_) => break,
         }
     }
@@ -179,6 +197,12 @@ fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
     lock(&inner.pending).clear();
     inner.cv.notify_all();
     let _ = ws.close(None);
+}
+
+/// A socket read or write that ended without an error of the connection (a timeout, or a signal): try again.
+pub(crate) fn is_transient(kind: std::io::ErrorKind) -> bool {
+    use std::io::ErrorKind::{Interrupted, TimedOut, WouldBlock};
+    matches!(kind, WouldBlock | TimedOut | Interrupted)
 }
 
 fn dispatch(inner: &Inner, text: &str) {

@@ -772,3 +772,23 @@ Considered and rejected: a test-only headless or off-screen launch option for De
 Mac. Headless tests a mode the product never runs (the challenge test is about the window coming to the front), the option
 would be a product code path that must never be used, and an off-screen headful window still shows in the Dock and takes
 the focus (Spotter's case). The Mac keeps the fake-browser tests of the whole life cycle; the live ones run once, on Linux.
+
+## 2026-10-30: a stall counted as the browser's silence; EINTR counted as a closed connection (Debrief)
+
+Debrief's two live renderer tests failed together, 1 run in 10 in the paddock-ci container on the Mac, both at about
+12.7 s with `Timeout`: each was waiting for the browser's reply to `Page.enable` (the start page, `Chromium::start_page`)
+when the whole container stalled (the Mac's load was at 240 to 280, OrbStack's VM got no CPU for seconds). Chrome stopped
+with the test, so it could not answer, but the driver's 10 s command bound was read off the wall clock and expired during
+the stall. Freezing the container for 12 s with `docker pause` right after both `Page.enable`s were sent reproduces it
+exactly (both tests, same moment, same error); no CPU load is needed. A fake-browser test failing in the same run fits:
+every wall-clock bound in the VM expired at once. The same freeze at another moment showed a second bug: Linux ends a
+socket read that has a timeout (`SO_RCVTIMEO`) with EINTR after a stop and continue, or after any handled signal
+(signal(7)), and the DevTools reader (and the fake browser) took EINTR for the end of the connection, so every page said
+"closed". In-process `cargo test` runs of chromium-driver in the amd64 container (Rosetta) lost 4 to 6 fake-browser
+connections per run that way. **Fix:** chromium-driver's waits count only time the process ran (`clock::Budget`: short
+slices; a slice that ends more than 2 s late was a stall and counts as the slice it asked for, so ordinary slowness still
+counts and a silent browser still fails); EINTR is a transient read or write error like WouldBlock. Also fixed on the way:
+`Page::challenge` turned a script that timed out into "no challenge" and `settle` turned a failed `load_finished` into
+"loaded", so a hung page counted as solved; both are errors now. **Lesson:** a timeout that waits for another process
+must not count time in which neither could run; test a timing bug by freezing the processes (`docker pause`, SIGSTOP),
+never by adding CPU load. Treat EINTR as "try again" in every socket loop with a read timeout.

@@ -9,6 +9,10 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 - **Updates:** Debrief now updates from the Paddock repository's releases, signed with the Paddock family's update key. A copy installed before this release cannot update itself to it: download this release once by hand and install it over the old one; later releases update as usual
 
+### Fixed
+
+- **Research:** A page that stops answering is no longer taken for a page without a "verify you are human" check (research went on reading a hung page); research says the browser did not answer instead. A computer that sleeps or pauses for a moment while the research browser starts or loads a page no longer makes research fail with "the browser did not answer in time", and the research browser no longer closes when Debrief is paused and resumed.
+
 ## 1.1.1 (2026-10-24)
 
 ### Added

@@ -159,10 +159,12 @@ impl Page {
         Ok(self.evaluate("document.readyState")?.as_str() == Some("complete"))
     }
 
-    /// The challenge this page shows, if any.
+    /// The challenge this page shows, if any. A page that cannot be read (a script timed out, the page closed) is an
+    /// error, never "no challenge": a hung page is not one the user solved.
     pub fn challenge(&self) -> Result<Option<crate::Challenge>> {
         let i = self.info()?;
-        Ok(crate::detect_challenge(&i.url, &i.title, &self.text_excerpt().unwrap_or_default()))
+        let text = self.text_excerpt()?;
+        Ok(crate::detect_challenge(&i.url, &i.title, &text))
     }
 
     /// A PNG of the page, base64-encoded (diagnostics of the live test).

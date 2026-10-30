@@ -2,6 +2,7 @@
 //! supervised process. The real user agent and the automation banner are kept on purpose: no stealth.
 
 use crate::cdp::Connection;
+use crate::clock::Budget;
 use crate::discover::Browser;
 use crate::page::Page;
 use crate::process::Supervised;
@@ -317,16 +318,16 @@ impl Chromium {
     /// one beside it: the window then has exactly one tab, and any further page is one the user opened. Waits up to
     /// [`START_PAGE_WAIT`] for it to appear; a browser that shows none by then gets a new page.
     pub fn start_page(&self) -> Result<Page> {
-        let end = Instant::now() + START_PAGE_WAIT;
+        let mut budget = Budget::new(START_PAGE_WAIT);
         loop {
             if let Some(target) = self.first_page_target()? {
                 return Page::adopt(self.conn.clone(), target);
             }
-            if Instant::now() >= end {
+            let Some(wait) = budget.next_wait() else {
                 log::warn!("The browser showed no start page within {START_PAGE_WAIT:?}; a new one is opened");
                 return self.new_page();
-            }
-            std::thread::sleep(Duration::from_millis(50));
+            };
+            std::thread::sleep(wait.min(Duration::from_millis(50)));
         }
     }
 
@@ -405,9 +406,10 @@ fn cleanup(dir: &Path, throwaway: bool) {
     }
 }
 
-/// Waits for the `DevToolsActivePort` file Chrome writes into the profile and connects to the browser endpoint.
+/// Waits for the `DevToolsActivePort` file Chrome writes into the profile and connects to the browser endpoint (the
+/// bound counts only time this process ran: [`Budget`]).
 fn connect(dir: &Path, process: &mut Supervised) -> Result<Connection> {
-    let end = Instant::now() + Duration::from_secs(20);
+    let mut budget = Budget::new(Duration::from_secs(20));
     loop {
         if let Ok(s) = std::fs::read_to_string(dir.join("DevToolsActivePort")) {
             let mut l = s.lines();
@@ -418,10 +420,10 @@ fn connect(dir: &Path, process: &mut Supervised) -> Result<Connection> {
         if !process.is_running() {
             return Err(Error::Launch("the browser exited right after it started".into()));
         }
-        if Instant::now() > end {
+        let Some(wait) = budget.next_wait() else {
             return Err(Error::Timeout("the browser start"));
-        }
-        std::thread::sleep(Duration::from_millis(50));
+        };
+        std::thread::sleep(wait.min(Duration::from_millis(50)));
     }
 }
 
@@ -695,6 +697,85 @@ mod tests {
         let r = load.join().unwrap();
         assert!(matches!(r, Err(Error::Closed)), "{r:?}");
         assert!(started.elapsed() < Duration::from_secs(5), "no wait for the load timeout");
+    }
+
+    /// Regression: `challenge()` turned a script that timed out into "no challenge", so a hung page counted as one
+    /// the user had solved and the work went on with it.
+    #[cfg(unix)]
+    #[test]
+    fn a_page_that_does_not_answer_scripts_is_a_timeout_not_a_page_without_a_challenge() {
+        let (_d, fake, b) = launch_fake(crate::fake::Mode::Obey, 1);
+        let p = b.new_page().unwrap();
+        fake.act(crate::fake::UserAction::HangScripts).unwrap();
+        // Both at once: each waits out one command timeout.
+        let (challenge, loaded) = std::thread::scope(|s| {
+            let c = s.spawn(|| p.challenge());
+            let l = s.spawn(|| p.load_finished());
+            (c.join().unwrap(), l.join().unwrap())
+        });
+        assert!(matches!(challenge, Err(Error::Timeout(_))), "{challenge:?}");
+        assert!(matches!(loaded, Err(Error::Timeout(_))), "{loaded:?}");
+    }
+
+    /// Regression (a paused CI container): Linux ends a socket read that has a timeout with EINTR when the process is
+    /// stopped and continued (signal(7)), and the connection took that for its end, so every page said "closed".
+    /// The test runs itself again as a child process (so no other test is stopped), stops and continues the child a
+    /// few times while it holds a connection, then lets it check the connection. They talk through files in a
+    /// temporary folder: `ready` (the child's connection is up) and `go` (the stops are over).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_stopped_and_continued_process_keeps_its_browser_connection() {
+        const CHILD: &str = "CHROMIUM_DRIVER_STOP_CHILD";
+        let wait_for = |what: &str, cond: &dyn Fn() -> bool| {
+            let end = Instant::now() + Duration::from_secs(20);
+            while !cond() {
+                assert!(Instant::now() < end, "{what}");
+                std::thread::yield_now();
+            }
+        };
+        if let Some(dir) = std::env::var_os(CHILD).map(std::path::PathBuf::from) {
+            let (_d, _fake, mut b) = launch_fake(crate::fake::Mode::Obey, 1);
+            let p = b.new_page().unwrap();
+            std::fs::write(dir.join("ready"), "").unwrap();
+            wait_for("the parent said go", &|| dir.join("go").exists());
+            assert_eq!(b.gone(&p), None, "the connection outlived the stops");
+            assert!(p.exists().unwrap());
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "launch::tests::a_stopped_and_continued_process_keeps_its_browser_connection",
+                "--exact",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD, dir.path())
+            .stdin(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id().to_string();
+        let end = Instant::now() + Duration::from_secs(20);
+        while !dir.path().join("ready").exists() {
+            assert!(child.try_wait().unwrap().is_none(), "the child ended before it was ready");
+            assert!(Instant::now() < end, "the child is ready");
+            std::thread::yield_now();
+        }
+        let kill = |sig: &str| assert!(std::process::Command::new("kill").args([sig, &pid]).status().unwrap().success());
+        // The child's state in /proc: `T` once the stop took effect.
+        let stopped = || {
+            std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|s| s.rsplit_once(") ").map(|(_, rest)| rest.starts_with('T')))
+                .unwrap_or(false)
+        };
+        for _ in 0..5 {
+            kill("-STOP");
+            wait_for("the child stopped", &stopped);
+            kill("-CONT");
+        }
+        std::fs::write(dir.path().join("go"), "").unwrap();
+        assert!(child.wait().unwrap().success(), "the child's checks failed (its output is above)");
     }
 
     #[cfg(unix)]

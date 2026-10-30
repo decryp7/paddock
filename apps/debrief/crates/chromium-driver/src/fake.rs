@@ -39,6 +39,8 @@ pub enum UserAction {
     DropConnection,
     /// Page loads stop finishing (a page that never fires its load event).
     StallLoads,
+    /// The page stops answering scripts: `Runtime.evaluate` gets no reply (a hung renderer).
+    HangScripts,
 }
 
 impl UserAction {
@@ -48,6 +50,7 @@ impl UserAction {
             UserAction::Quit => "quit",
             UserAction::DropConnection => "drop-connection",
             UserAction::StallLoads => "stall-loads",
+            UserAction::HangScripts => "hang-scripts",
         }
     }
 }
@@ -192,6 +195,7 @@ pub fn serve_if_requested() {
 static WINDOW_CLOSED: AtomicBool = AtomicBool::new(false);
 static CONNECTION_DROPPED: AtomicBool = AtomicBool::new(false);
 static LOADS_STALLED: AtomicBool = AtomicBool::new(false);
+static SCRIPTS_HUNG: AtomicBool = AtomicBool::new(false);
 /// Pages opened over DevTools (`Target.createTarget`), besides the ones the browser started with.
 static CREATED: AtomicUsize = AtomicUsize::new(0);
 
@@ -217,6 +221,7 @@ fn apply_control() {
             "close-window" => WINDOW_CLOSED.store(true, Ordering::SeqCst),
             "drop-connection" => CONNECTION_DROPPED.store(true, Ordering::SeqCst),
             "stall-loads" => LOADS_STALLED.store(true, Ordering::SeqCst),
+            "hang-scripts" => SCRIPTS_HUNG.store(true, Ordering::SeqCst),
             "quit" => std::process::exit(0),
             _ => {}
         }
@@ -255,7 +260,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
         }
         let msg = match ws.read() {
             Ok(m) => m,
-            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => continue,
+            Err(tungstenite::Error::Io(e)) if crate::cdp::is_transient(e.kind()) => continue,
             Err(_) => return,
         };
         let Message::Text(t) = msg else { continue };
@@ -268,6 +273,10 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
         };
         let method = req["method"].as_str().unwrap_or("");
         record_call(method);
+        if method == "Runtime.evaluate" && SCRIPTS_HUNG.load(Ordering::SeqCst) {
+            // A hung renderer: the command is never answered.
+            continue;
+        }
         let url = || std::fs::read_to_string(url_file).unwrap_or_else(|_| "about:blank".into());
         let on_page = req.get("sessionId").is_some() || method == "Target.getTargetInfo";
         let mut reply = if closed && on_page {
@@ -345,10 +354,7 @@ mod tests {
                 "unexpected answer before the request was complete: {:?}",
                 String::from_utf8_lossy(&b[..n])
             ),
-            Err(e) => assert!(
-                matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut),
-                "{e}"
-            ),
+            Err(e) => assert!(crate::cdp::is_transient(e.kind()), "{e}"),
         }
         c.write_all(
             b"Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
