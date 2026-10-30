@@ -586,26 +586,35 @@ mod tests {
 
     #[test]
     fn cancel_stops_a_parallel_walk_long_before_it_would_have_finished() {
+        // A walker looks at the cancel every `CANCEL_CHECK_ITEMS` entries of a folder (counting them first) and starts no
+        // folder after it, so a cancel at the first count leaves at most two such batches per worker counted. The fixture
+        // is sized from that bound, not larger: creating files is slow on Windows (16 000 took 30 to 60 s on the CI runner
+        // and ran into the test timeout, CI run 7166).
+        use paddock_jobs::CANCEL_CHECK_ITEMS;
+        const WORKERS: usize = 2;
+        const DIRS: usize = 8;
+        const PER_DIR: usize = CANCEL_CHECK_ITEMS + CANCEL_CHECK_ITEMS / 4;
+        let bound = (WORKERS * 2 * CANCEL_CHECK_ITEMS) as u64;
+        let total = (DIRS * PER_DIR) as u64;
+        assert!(bound < total / 2, "the fixture is big enough to tell a stop from a finish");
         let t = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(t.path()).unwrap().join("many");
-        const PER_DIR: usize = 2_000;
-        for d in 0..8 {
+        for d in 0..DIRS {
             std::fs::create_dir_all(root.join(format!("d{d}"))).unwrap();
             for i in 0..PER_DIR {
                 std::fs::write(root.join(format!("d{d}")).join(format!("f{i}")), b"x").unwrap();
             }
         }
         let job = Run::new().cancel_when("walk", 100);
-        let out = job.job(|ctx| run(ctx, &query(&root, FinderMode::Both), "s", Limits::default(), w(4), lg()));
+        let out = job.job(|ctx| run(ctx, &query(&root, FinderMode::Both), "s", Limits::default(), w(WORKERS), lg()));
         assert!(matches!(out, Err(JobError::Cancelled(_))));
         let seen = job.phases()[0].counts.last().copied().unwrap();
         assert!(
-            seen < (8 * PER_DIR / 2) as u64,
-            "looked at {seen} of {} entries after the cancel",
-            8 * PER_DIR
+            seen <= bound,
+            "looked at {seen} of {total} entries after the cancel (at most {bound})"
         );
         assert!(matches!(job.end_state(), JobState::Cancelled { .. }));
-        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 8, "nothing was changed");
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), DIRS, "nothing was changed");
     }
 
     #[test]

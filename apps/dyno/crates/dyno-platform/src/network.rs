@@ -147,7 +147,10 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(50));
             rows = OsSockets.sockets().unwrap();
         }
-        let listening = rows.iter().find(|r| is_listener(r)).expect("the test's own listener is listed");
+        let listening = rows.iter().find(|r| is_listener(r)).unwrap_or_else(|| {
+            let mine: Vec<&SocketRow> = rows.iter().filter(|r| r.local_port == port).collect();
+            panic!("the test's own listener is listed: its port has {mine:?}")
+        });
         assert_eq!(listening.pid, Some(me), "its owner is this process");
         assert!(listening.local.is_loopback() && listening.remote.is_none());
         let connected = rows

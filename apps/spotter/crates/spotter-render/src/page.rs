@@ -665,11 +665,15 @@ mod tests {
                     json!({"method": "Page.frameStoppedLoading", "sessionId": "S1", "params": {"frameId": main}}),
                 );
             }
+            // Replies and events that did not fit the socket go out now.
+            let _ = ws.flush();
             let t = match ws.read() {
                 Ok(tungstenite::Message::Text(t)) => t,
                 Ok(_) => continue,
-                Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
-                    continue
+                // Nothing to read: look again after a tick (and at `finish`).
+                Err(tungstenite::Error::Io(e)) if crate::cdp::is_transient(e.kind()) => {
+                    std::thread::sleep(TICK);
+                    continue;
                 }
                 Err(_) => return,
             };
@@ -734,7 +738,9 @@ mod tests {
         // Bounded far above any scheduling delay, so a client that never sends its upgrade request cannot hold the thread.
         let _ = stream.set_read_timeout(Some(HANDSHAKE));
         let ws = tungstenite::accept(stream).ok()?;
-        let _ = ws.get_ref().set_read_timeout(Some(TICK));
+        // The session never reads with a timeout (as the client, `cdp::io_loop`): it polls a socket that does not block.
+        ws.get_ref().set_read_timeout(None).ok()?;
+        ws.get_ref().set_nonblocking(true).ok()?;
         Some(ws)
     }
 
@@ -760,8 +766,8 @@ mod tests {
         tungstenite::client(url.as_str(), raw).expect("the late handshake completes");
         assert_eq!(
             served.join().unwrap(),
-            Some(Some(TICK)),
-            "the session ticks once the handshake is done"
+            Some(None),
+            "the session starts once the handshake is done, and reads without a timeout"
         );
     }
 

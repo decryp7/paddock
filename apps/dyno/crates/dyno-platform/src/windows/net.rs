@@ -34,6 +34,15 @@ pub fn tcp_state(state: u32) -> &'static str {
     }
 }
 
+/// The state shown for a row: its MIB_TCP_STATE name, or the number of a state Windows does not document (`UNKNOWN (n)`),
+/// so what the OS said is not lost.
+pub fn state_name(state: u32) -> String {
+    match tcp_state(state) {
+        "UNKNOWN" => format!("UNKNOWN ({state})"),
+        name => name.into(),
+    }
+}
+
 /// A port as stored in the tables (network byte order in the low 16 bits).
 pub fn port(raw: u32) -> u16 {
     u16::from_be(raw as u16)
@@ -117,7 +126,7 @@ pub fn connections(pid: Pid) -> Option<Vec<Connection>> {
                     } else {
                         v4(r.dwRemoteAddr, r.dwRemotePort)
                     },
-                    state: tcp_state(r.dwState).into(),
+                    state: state_name(r.dwState),
                 }),
         );
     }
@@ -135,7 +144,7 @@ pub fn connections(pid: Pid) -> Option<Vec<Connection>> {
                     } else {
                         v6(r.ucRemoteAddr, r.dwRemotePort)
                     },
-                    state: tcp_state(r.dwState).into(),
+                    state: state_name(r.dwState),
                 }),
         );
     }
@@ -183,6 +192,9 @@ mod tests {
         assert_eq!(tcp_state(2), "LISTEN");
         assert_eq!(tcp_state(100), "BOUND");
         assert_eq!(tcp_state(99), "UNKNOWN");
+        // A state Windows does not document keeps its number, so a report says which (CI runs 7145 to 7168).
+        assert_eq!(state_name(2), "LISTEN");
+        assert_eq!(state_name(99), "UNKNOWN (99)");
         assert_eq!(v6([0; 16], u32::from(443u16.to_be())), "[::]:443");
         let mut buf = 2u32.to_ne_bytes().to_vec();
         buf.extend(7u32.to_ne_bytes());
