@@ -48,13 +48,22 @@ export async function pageModKey(page: Page): Promise<'Meta' | 'Control'> {
   return modKey(await page.evaluate(() => ({ platform: navigator.platform, userAgent: navigator.userAgent })));
 }
 
+/** The `Mod` of a binding replaced by `mod` (`Mod+Shift+P` becomes `Meta+Shift+P`); every other key is kept. Pure. */
+export function bindingFor(binding: string, mod: 'Meta' | 'Control'): string {
+  return binding.split('+').map((key, i, keys) => (key === 'Mod' && i < keys.length - 1 ? mod : key)).join('+');
+}
+
 /**
- * Presses a binding written with `Mod` (`Mod+Shift+P`, `Mod+Comma`) with the modifier the page binds it to
- * ({@link pageModKey}). Use it instead of Playwright's `ControlOrMeta` for the app's own shortcuts.
+ * Presses a binding written with `Mod` (`Mod+Shift+P`, `Mod+Alt+K`, `Mod+Comma`) with the modifier the page binds it to
+ * ({@link pageModKey}), on the page or, given a locator, on that element (focused first, as `Locator.press` does). Use it
+ * instead of Playwright's `ControlOrMeta` for the app's own shortcuts; the lint rule `paddock/no-control-or-meta` bans that.
  */
-export async function pressMod(page: Page, binding: string): Promise<void> {
-  const mod = await pageModKey(page);
-  await page.keyboard.press(binding.replace(/^Mod\+/, `${mod}+`));
+export async function pressMod(target: Page | Locator, binding: string): Promise<void> {
+  const isPage = 'keyboard' in target;
+  const mod = await pageModKey(isPage ? target : target.page());
+  const key = bindingFor(binding, mod);
+  if (isPage) await target.keyboard.press(key);
+  else await target.press(key);
 }
 
 /** One element the focus stopped on. */

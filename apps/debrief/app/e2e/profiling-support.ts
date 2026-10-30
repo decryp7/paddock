@@ -1,6 +1,7 @@
 import { expect, Page } from '@playwright/test';
 import { APP_LOAD_TIMEOUT } from './app';
 import { chooseMenu } from './menu-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 /**
  * Opens the app (browser build, mock backends) and opens the demo captures through File › Open
@@ -17,7 +18,7 @@ export async function openProfiles(page: Page, search = ''): Promise<void> {
 
 /** Runs a palette command by (part of) its title. */
 export async function runCommand(page: Page, title: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill(title);
   await expect(page.locator('debrief-command-palette').getByRole('option').first()).toContainText(title);

@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { closeStatusDetails, openStatusDetails } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith, runCommand } from './tools-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 test.describe('projects', () => {
   test('save, change, reopen: the query comes back and the unsaved dot follows', async ({ page }) => {
@@ -89,7 +90,7 @@ test.describe('projects', () => {
 
   test('Mod+S saves the project', async ({ page }) => {
     await openAppWith(page);
-    await page.keyboard.press('ControlOrMeta+s');
+    await pressMod(page, 'Mod+s');
     await expect(page.getByRole('status').filter({ hasText: 'Saved' })).toBeVisible();
   });
 });

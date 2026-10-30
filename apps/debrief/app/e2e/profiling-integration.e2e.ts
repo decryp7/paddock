@@ -2,6 +2,7 @@ import { expect, Page, test } from '@playwright/test';
 import { APP_LOAD_TIMEOUT } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { hotspots, openProfiles, runCommand, showCaptures } from './profiling-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 /** Clicks the timeline's chip with this name, or its entry in the "+N" menu when it did not fit in the strip. */
 async function openFromStrip(page: Page, name: string): Promise<void> {
@@ -19,7 +20,7 @@ test.describe('Profiling with the logs', () => {
   test('capture spans on the log timeline open the profile', async ({ page }, testInfo) => {
     await openProfiles(page);
     // Opening a capture switched to the Profiling perspective; the log timeline is in Investigate.
-    await page.keyboard.press('ControlOrMeta+1');
+    await pressMod(page, 'Mod+1');
     await page.getByRole('tab', { name: /Timeline/ }).click();
     await runCommand(page, 'Profiling: show captures');
     // Two rows of chips in the header strip; the rest of the five captures are in its "+N" menu.

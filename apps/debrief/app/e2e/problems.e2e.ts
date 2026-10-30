@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
 import { openAppWith } from './mock-url';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // A file whose timestamps the engine cannot read (the mock stands in: a path naming "no-timestamps" imports
 // without timestamps, with the format the engine would propose; see src/app/core/mock/mock-timestamps.ts).
@@ -41,7 +42,7 @@ test('Problems pane: reachable from the View menu and the command palette', asyn
   await openAppWith(page, '');
   await chooseMenu(page, 'View', 'Problems');
   await expect(page.locator('debrief-problems-panel')).toBeVisible();
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill('View: Problems');
   await page.getByRole('option', { name: /View: Problems/ }).first().click();

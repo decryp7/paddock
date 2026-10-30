@@ -945,3 +945,14 @@ out (debrief.yml run 7175, at load 40; fixed in b935d03a6). This is the second i
 a count of a queue's contents is a reservation taken before the send and given back after the take, never a separate copy
 updated after; then it stays between what the queue holds and its capacity by construction, needs no clamp, and doubles
 as the back-pressure. Test such a race by stalling one thread at the hand-over point (a probe or barrier), never by load.
+
+## E2E keys and the platform follow the page, never the test machine (2026-10-30)
+WebKit on a Linux runner emulates `devices['Desktop Safari']`: `navigator.platform` says Linux but the user agent says
+Macintosh, so the app binds `Mod` to Cmd and shows ⌘ in menus, while Playwright's `ControlOrMeta` presses Ctrl and
+`process.platform` is `linux`. Moving the WebKit job into the Linux container showed it as seven failures (a perspective
+shortcut, the settings shortcut, two menu-key texts) after CI run 7134 had shown the first instance; the same kind came
+back (ER-21). A second race came with it: until the app context loads the shell offers every page, so a link count taken
+right after `frame.open()` was stale on a slow machine. **Rule:** e2e code presses `Mod` with `pressMod` and reads the
+platform with `pageModKey` / `isMac` (platform and user agent, as the app does), never `ControlOrMeta` or `process.platform`;
+the lint rule `paddock/no-control-or-meta` (Debrief: `no-restricted-syntax`) bans the first; and a test counts page links
+only after the app context has loaded.

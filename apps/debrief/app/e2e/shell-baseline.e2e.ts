@@ -6,6 +6,7 @@ import { runCommand } from './analysis-support';
 import { openApp } from './app';
 import { settleAnimations, settleDockLayout } from './axe';
 import { openAppWith } from './mock-url';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 /**
  * Shell baseline (Paddock X50, plan package W0): screenshots of the shell and workbench layer taken BEFORE any
@@ -253,7 +254,7 @@ for (const scheme of SCHEMES) {
     test('command palette open', async ({ page }) => {
       await race(page, async () => {
         await openThemedApp(page, scheme, DESKTOP);
-        await page.keyboard.press('ControlOrMeta+k');
+        await pressMod(page, 'Mod+k');
         await expect(page.getByRole('combobox', { name: 'Type a command' })).toBeFocused();
         await expect(page.locator('debrief-command-palette').getByRole('option').first()).toBeVisible();
         await shot(page, 'palette', scheme);

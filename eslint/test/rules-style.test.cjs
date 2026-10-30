@@ -53,3 +53,18 @@ html().run('dialog-frame-footer (ADR 0026)', rules['dialog-frame-footer'], {
     { code: '<button type="button">OK</button><button>Close</button>', errors: [{ messageId: 'wayOut' }, { messageId: 'wayOut' }] },
   ],
 });
+
+ts().run('no-control-or-meta (e2e keys follow the page)', rules['no-control-or-meta'], {
+  valid: [
+    "await pressMod(page, 'Mod+k');",
+    "await rows.nth(1).click({ modifiers: [await pageModKey(page)] });",
+    "await page.keyboard.press('Control+k');",
+    '// ControlOrMeta in a comment is fine\nconst a = 1;',
+  ],
+  invalid: [
+    { code: "await page.keyboard.press('ControlOrMeta+k');", errors: [{ message: /Use `pressMod/ }] },
+    { code: "await input.press('ControlOrMeta+Enter');", errors: 1 },
+    { code: "await row.click({ modifiers: ['ControlOrMeta'] });", errors: 1 },
+    { code: 'await page.keyboard.press(`ControlOrMeta+${key}`);', errors: 1 },
+  ],
+});

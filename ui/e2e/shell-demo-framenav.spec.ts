@@ -74,8 +74,9 @@ for (const colorScheme of THEMES) {
       expect(icon.left - item.left).toBeGreaterThanOrEqual(8);
     });
 
-    test('in the rail every icon is centred in its row', async ({ app }) => {
+    test('in the rail every icon is centred in its row', async ({ app, page }) => {
       await app.frame.open();
+      await pageListSettled(app, page);
       await app.frame.toggle.click();
       await expect.poll(() => app.frame.sidebarMode()).toBe('rail');
       const off = await app.sidebar.links.evaluateAll((els) =>

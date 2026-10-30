@@ -32,6 +32,7 @@ export {
   tabKey,
   pageTabKey,
   pressTab,
+  bindingFor,
   modKey,
   pageModKey,
   pressMod,
