@@ -519,6 +519,14 @@ impl AgentLink {
     /// not exit, also while it is still starting. Returns whether an agent of this app was stopped (see
     /// [`stop_agent_on_quit`]).
     pub fn shutdown(&self, stop_agent: bool) -> bool {
+        let running = matches!(self.launcher.child(), Child::Running { .. });
+        self.shutdown_with(stop_agent, running)
+    }
+
+    /// [`AgentLink::shutdown`] given whether the process this app started was running when the decision was made. It
+    /// is read once, before the agent is asked to exit: asking it makes the process end, and a later look would find it
+    /// gone and report that nothing was stopped (a Linux CI run did, with the log saying the agent was stopped).
+    fn shutdown_with(&self, stop_agent: bool, was_running: bool) -> bool {
         // First: nothing may start an agent after this point (the loop sees `stopping`, the launcher is closed).
         self.launcher.close();
         *lock(&self.stopping) = true;
@@ -529,7 +537,7 @@ impl AgentLink {
             if let Some(p) = peer.as_ref().filter(|_| self.started_by_this_app()) {
                 stopped = p.call(Message::Request(Box::new(Request::Shutdown)), REQUEST_TIMEOUT).is_ok();
             }
-            stopped |= matches!(self.launcher.child(), Child::Running { .. });
+            stopped |= was_running;
             // shutdown: the process this app started gets a few seconds to exit, then it is ended through its handle.
             self.launcher.finish(Duration::from_secs(3));
         }
@@ -544,7 +552,8 @@ impl AgentLink {
         if self.quit_done.swap(true, Ordering::SeqCst) {
             return false;
         }
-        let ours = self.started_by_this_app() || matches!(self.launcher.child(), Child::Running { .. });
+        let running = matches!(self.launcher.child(), Child::Running { .. });
+        let ours = self.started_by_this_app() || running;
         let stop = stop_agent_on_quit(ours, self.service_installed.load(Ordering::SeqCst));
         logging::info(&format!(
             "quitting; the agent {}",
@@ -554,7 +563,7 @@ impl AgentLink {
                 "keeps running"
             }
         ));
-        self.shutdown(stop)
+        self.shutdown_with(stop, running)
     }
 
     fn try_connect(&self, d: &Discovery) -> Result<Arc<Peer<Message>>, String> {
@@ -2057,6 +2066,39 @@ mod tests {
         assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 1);
         assert!(r.link.quit());
         handle.join().unwrap();
+    }
+
+    /// A launcher whose process is seen running once and gone afterwards: what asking an agent to exit does to it.
+    struct RunsOnce(AtomicUsize);
+
+    impl Launcher for RunsOnce {
+        fn launch(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn child(&self) -> Child {
+            if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                Child::Running { pid: 4242 }
+            } else {
+                Child::Exited { code: Some(0) }
+            }
+        }
+        fn finish(&self, _: Duration) {}
+    }
+
+    #[test]
+    fn quit_reports_the_agent_it_stopped_even_though_asking_it_to_exit_ended_its_process() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (tx, _rx) = channel();
+        let link = AgentLink::new(
+            Dirs::at(tmp.path().join("data")),
+            env!("CARGO_PKG_VERSION"),
+            Recorder::new(tx),
+            Box::new(RunsOnce(AtomicUsize::new(0))),
+        );
+        assert!(
+            link.quit(),
+            "the process this app started was running when it quit, and quit logged that it stopped it"
+        );
     }
 
     #[test]
