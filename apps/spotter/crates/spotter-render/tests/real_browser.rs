@@ -287,13 +287,13 @@ fn the_watchdog_kills_the_whole_tree_at_the_wall_clock_limit() {
     opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
     // The limit runs from the spawn, so it has to leave room for a slow start on a loaded runner (which is not what is tested).
-    opts.max_lifetime = spotter_render::launch::START_LIMIT + Duration::from_secs(4);
+    opts.max_lifetime = spotter_render::launch::START_ALLOWANCE + Duration::from_secs(4);
     let mut c = Chromium::launch(&b, &opts).unwrap();
     let dir = c.profile_dir().to_path_buf();
     assert!(c.is_running());
     let marker = dir.to_string_lossy().to_string();
     assert!(!processes_mentioning(&marker).is_empty());
-    let end = Instant::now() + spotter_render::launch::START_LIMIT + Duration::from_secs(30);
+    let end = Instant::now() + spotter_render::launch::START_ALLOWANCE + Duration::from_secs(30);
     while c.is_running() && Instant::now() < end {
         std::thread::sleep(Duration::from_millis(100));
     }

@@ -1009,3 +1009,12 @@ otherwise, and for TypeScript, revert the fix and run the new test), in the revi
 (`-p <crate>`, `--timeout-multiplier`, `CARGO_BUILD_JOBS=2`), and reports whether the test fails. **Follow-up, not
 built:** a CI job that runs `cargo mutants --in-diff` over the shared crates' changes, to be added after the releases.
 
+
+## A fixed browser-start deadline failed a slow runner, not a stuck browser (2026-10-30, Spotter)
+`spotter-render::real_browser a_download_address_is_reported_as_a_download` failed in main's CI run 7194 with "the browser
+did not answer in time (the browser start)": Spotter's driver waited a fixed 20 s for the `DevToolsActivePort` file. It
+was not a shared port or profile (port 0, a unique profile folder per start); nextest runs each test in its own process,
+beside every other binary of the job, so a start on a loaded runner can simply take longer. Reproduced in a Linux
+container with a wrapper that delays the real browser by 24 s (fails at 20 s before, passes after). **Rule (ADR 0031):** a
+start is judged on run state by the shared `paddock_proc::StartWatch`, never on a fixed time; the driver gives it a probe
+(liveness with exit code and stderr tail, the port file, the tree's CPU time) and only the render's cap ends a slow one.
