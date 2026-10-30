@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { verdict } from '../ci/release-verdict.mjs';
+import { failedJobNames, verdict } from '../ci/release-verdict.mjs';
 import { PADDOCK } from './helpers.mjs';
 
 const read = (...p) => readFileSync(join(PADDOCK, ...p), 'utf8');
@@ -45,6 +45,25 @@ test('a nightly the change gate skipped (main and the image unchanged) says so a
   assert.match(v.line, /^installers: not built \(dyno\): main and the toolchain image are unchanged/);
 });
 
+test('a tag whose gates failed names the failed gates and says the tag was not released', async () => {
+  const v = verdict({ app: 'dyno', event: 'push', ref: 'refs/tags/dyno-v1.0.0', planRun: 'true', releaseResult: 'skipped', gatesResult: 'failure', failedGates: ['app dyno (windows-latest)', 'app dyno (ubuntu-latest, e2e-1)'] });
+  assert.equal(v.ok, false);
+  assert.equal(v.line, 'installers: not built (dyno): the gates were failure: app dyno (windows-latest), app dyno (ubuntu-latest, e2e-1), so the tag was not released');
+  assert.match(verdict({ app: 'dyno', event: 'push', ref: 'refs/tags/dyno-v1', releaseResult: 'skipped', gatesResult: 'failure' }).line, /the gates were failure, so the tag/);
+  const jobs = { jobs: [{ name: 'plan', conclusion: 'success' }, { name: 'app dyno (windows-latest)', conclusion: 'failure' }, { name: 'installers verdict', conclusion: null }, { name: 'bundle (macos-latest)', conclusion: 'success' }] };
+  assert.deepEqual(await failedJobNames({ SERVER_URL: 'https://x', REPOSITORY: 'a/b', RUN_ID: '1', TOKEN: 't' }, async () => ({ ok: true, json: async () => jobs })), ['app dyno (windows-latest)']);
+  assert.deepEqual(await failedJobNames({}, async () => { throw new Error('down'); }), [], 'an unreachable API still gives a verdict');
+});
+
+test('the verdict of every release workflow also gets the gates result, and none of them runs on a push to main', () => {
+  for (const app of APPS) {
+    const wf = read('.gitea', 'workflows', `${app}-release.yml`);
+    assert.match(wf.slice(wf.indexOf('\n  verdict:')), /needs: \[plan, gates, installers, release\]/, app);
+    assert.match(wf, /gates-result: \$\{\{ needs\.gates\.result \}\}/, app);
+    assert.match(wf, /\non:\n  push:\n    tags: \["/, `${app}: a tag push only; the nightly builds the installers`);
+  }
+});
+
 test('a push the plan said to build, with no installers, is a warning that says the run proves nothing', () => {
   const v = verdict({ app: 'dyno', event: 'push', ref: 'refs/heads/main', planRun: 'true', releaseResult: 'skipped' });
   assert.deepEqual([v.ok, v.level], [true, 'warning']);
@@ -55,7 +74,7 @@ test('every app release workflow ends in a verdict job that always runs and read
   for (const app of APPS) {
     const wf = read('.gitea', 'workflows', `${app}-release.yml`);
     const job = wf.slice(wf.indexOf('\n  verdict:'));
-    assert.match(job, /needs: \[plan, installers, release\]/, app);
+    assert.match(job, /needs: \[plan, gates, installers, release\]/, app);
     assert.match(job, /if: \$\{\{ always\(\) \}\}/, app);
     assert.match(job, new RegExp(`uses: \\./\\.gitea/actions/release-verdict\\n\\s+with:\\n\\s+app: ${app}\\n\\s+plan-run: \\$\\{\\{ needs\\.plan\\.outputs\\.run \\}\\}\\n\\s+release-result: \\$\\{\\{ needs\\.release\\.result != 'skipped' && needs\\.release\\.result \\|\\| needs\\.installers\\.result \\}\\}`), app);
     assert.doesNotMatch(wf, /^\s+schedule:/m, `${app}: the nightly installers are nightly.yml's (a scheduled run here skipped them)`);
@@ -87,7 +106,7 @@ test('the nightly builds every app\'s installers with the app\'s own release inp
   for (const app of APPS) assert.match(verdictJob.slice(0, verdictJob.indexOf('steps:')), new RegExp(`installers-${app}`), `${app}: in the verdict's needs`);
   assert.match(verdictJob, /if: \$\{\{ always\(\) \}\}/);
   for (const app of APPS) assert.match(verdictJob, new RegExp(`app: ${app}\\n\\s+plan-run: \\$\\{\\{ needs\\.installers-gate\\.outputs\\.run \\}\\}`), `${app}: the verdict knows the gate's answer`);
-  assert.match(nightly, /\n  installers-gate:\n(?:.*\n)*?.*nightly-installers-\$\{\{ github\.sha \}\}-\$\{\{ hashFiles\('ci-image\/\*\*'\) \}\}/, 'the gate keys on the commit and the toolchain image');
+  assert.match(nightly, /\n  installers-gate:\n(?:.*\n)*?.*nightly-installers-\$\{\{ github\.sha \}\}-\$\{\{ hashFiles\('ci-image\/\*\*', 'rust-toolchain\*', '\.nvmrc'\) \}\}/, 'the gate keys on the commit, the toolchain image and the pinned Rust and Node');
   assert.match(nightly, /\n  installers-mark:\n(?:.*\n)*?    needs: \[installers-dyno, installers-spotter, installers-pitcrew, installers-pitwall\]/, 'the marker is saved only after every build');
 });
 

@@ -16,7 +16,14 @@ function fakeGuest({ bug = null } = {}) {
   let clock = 0, pid = 100, procs = [], agentJson = null, loginOn = false;
   const spawn = (name, ppid, args = '') => { const p = { pid: ++pid, ppid, born: clock, command: `${B}/Contents/MacOS/${name}${args}` }; procs.push(p); return p; };
   const startApp = () => {
-    if (procs.some((p) => p.command.includes('dyno-app'))) return; // single instance
+    if (procs.some((p) => p.command.includes('dyno-app'))) { // single instance
+      if (bug === 'swap-on-second-launch') { // the agent is replaced at once: never two at a time, two over the step
+        const app = procs.find((p) => p.command.includes('dyno-app'));
+        procs = procs.filter((p) => !p.command.includes('dyno-agent'));
+        agentJson = JSON.stringify({ pid: spawn('dyno-agent', app.pid, ' run').pid });
+      }
+      return;
+    }
     const app = spawn('dyno-app', 1);
     const agent = spawn('dyno-agent', loginOn ? 1 : app.pid, ' run');
     agentJson = JSON.stringify({ pid: agent.pid });
@@ -28,13 +35,14 @@ function fakeGuest({ bug = null } = {}) {
   };
   const timers = [];
   const setTimeout_ = (after, fn) => timers.push({ at: clock + after, fn });
+  const lst = (s) => `Fri Oct 30 14:${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')} 2026`;
   const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
   const calls = [];
   const exec = async (cmd) => {
     calls.push(cmd);
     const ok = (stdout = '') => ({ code: 0, stdout, stderr: '' });
     if (cmd.startsWith('printf %s "$HOME"')) return ok('/Users/admin');
-    if (cmd.startsWith('ps -axww')) return ok(procs.map((p) => `${p.pid} ${p.ppid} ${fmt(clock - p.born)} ${p.command}`).join('\n'));
+    if (cmd.startsWith('ps -axww')) return ok(procs.map((p) => `${p.pid} ${p.ppid} ${fmt(clock - p.born)} ${lst(p.born)} ${p.command}`).join('\n'));
     if (cmd.includes('agent.json') && cmd.startsWith('cat')) return agentJson ? ok(agentJson) : { code: 1, stdout: '', stderr: '' };
     if (cmd.startsWith('rm -f') && cmd.includes('agent.json')) { agentJson = null; return ok(); }
     if (cmd.startsWith('open -a')) { if (bug !== 'no-start') startApp(); return ok(); }
@@ -136,6 +144,15 @@ test('Dyno has no scripted Launch at login toggle: the step is a manual SKIP tha
   const s = await c.loginHandover();
   assert.equal(s.status, 'skip');
   assert.match(s.summary, /SMAppService/);
+});
+
+test('a helper replaced during the second launch fails that step through its own trace', async () => {
+  const f = fakeGuest({ bug: 'swap-on-second-launch' });
+  const c = new Check(f.guest, { ...config, settleSec: 12, readyTimeoutSec: 30 });
+  await c.startAndJudge({ title: 'x' });
+  const s = await c.secondLaunch();
+  assert.equal(s.status, 'fail');
+  assert.match(s.checks.filter((x) => !x.ok).map((x) => x.detail).join(' '), /dyno-agent: 2 distinct/);
 });
 
 test('arguments: one app, exactly one installer source, macOS only', () => {

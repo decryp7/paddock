@@ -2,7 +2,7 @@
 # of ci.yml (apps/dyno/paddock.ci.json: Rust on Linux, Windows and macOS, the frontend with the Chromium and WebKit e2e), and its bundles, the macOS seal check,
 # the sidecar start and the release are the shared app-release.yml. This file is only the triggers and the app's facts.
 #
-#   push to main      installers on three OS and the real-app smoke when the change reaches Dyno (the same plan as ci.yml); no gates
+#   push to main      nothing: the nightly (nightly.yml) builds the installers, so a push does not spend three OS builds
 #   a dyno-v* tag     the gates (ci.yml, only Dyno's legs, WebKit e2e included), then installers, then the Gitea release with latest.json on
 #                     the release and on the moving dyno-latest release, which installed copies update from
 #   nightly           no longer here: nightly.yml builds the installers (installers-dyno), see the verdict job below
@@ -18,7 +18,6 @@ name: dyno-release
 
 on:
   push:
-    branches: [main]
     tags: ["dyno-v*"]
   workflow_dispatch:
     inputs:
@@ -67,7 +66,7 @@ jobs:
       # A manual run with gates is the "one CI build with bundles" before a tag: WebKit included.
       webkit: ${{ github.event_name == 'workflow_dispatch' }}
 
-  # Installers for every run that is not a tag (push to main that reaches Dyno, manual run): they need only the plan, never `gates`.
+  # Installers for a manual run: they need only the plan, never `gates`.
   # Gitea 28.2 skips a reusable-workflow job whose need was skipped, whatever its `if` says (125 of 133 green release runs
   # built nothing), so a job that waits on the optional `gates` job can not be the one that builds on a push or a dispatch.
   # A manual run with `gates: true` runs the gates beside the installers; both must be green for the run to be.
@@ -159,7 +158,7 @@ jobs:
   # red run when a manual run or a tag was meant to build them and did not. The verdict reads whichever of the two installer jobs ran.
   verdict:
     name: installers verdict
-    needs: [plan, installers, release]
+    needs: [plan, gates, installers, release]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     container:
@@ -171,3 +170,4 @@ jobs:
           app: dyno
           plan-run: ${{ needs.plan.outputs.run }}
           release-result: ${{ needs.release.result != 'skipped' && needs.release.result || needs.installers.result }}
+          gates-result: ${{ needs.gates.result }}

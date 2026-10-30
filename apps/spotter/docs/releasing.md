@@ -4,8 +4,7 @@ A `spotter-v*` tag on `main` runs `.gitea/workflows/spotter-release.yml` (repo r
 (Rust on Linux, Windows and macOS, the frontend with the Chromium and WebKit e2e), then the shared `app-release.yml` builds the
 installers (Windows NSIS, the macOS `.dmg` sealed ad hoc and verified, Linux `.deb` and AppImage) and publishes a Gitea release
 with the installers, release notes (`RELEASE_NOTES.md`, from git-cliff) and `latest.json`, the release information Spotter's
-updater reads. It also puts `latest.json` on the moving `spotter-latest` release, which installed copies read. Installers are
-also built for pushes to `main` that reach Spotter, the nightly run and manual runs (`workflow_dispatch`, no release; `gates: true`
+updater reads. It also puts `latest.json` on the moving `spotter-latest` release, which installed copies read. Installers are also built by the nightly run (`nightly.yml`) and by manual runs (`workflow_dispatch`, no release; `gates: true`
 also runs Spotter's `ci.yml` legs first).
 
 ```sh
