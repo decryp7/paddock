@@ -15,6 +15,8 @@
 
 use std::borrow::Cow;
 
+pub use roxmltree;
+
 /// Bounds of one parse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct XmlLimits {

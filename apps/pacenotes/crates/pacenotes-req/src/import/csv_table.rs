@@ -23,7 +23,7 @@ pub(super) fn read(bytes: &[u8], limits: &ImportLimits) -> Result<Table, ReqErro
     let mut rows = Vec::new();
     let mut cells = 0usize;
     for (i, record) in reader.records().enumerate() {
-        let record = record.map_err(|e| malformed("CSV", format!("row {}: {e}", i + 1)))?;
+        let record = record.map_err(|e| malformed("CSV", format!("line {}: {e}", e.position().map_or(i + 1, |p| p.line() as usize))))?;
         if rows.len() >= limits.max_rows {
             return Err(ReqError::Limit {
                 what: "rows",
@@ -51,5 +51,6 @@ pub(super) fn read(bytes: &[u8], limits: &ImportLimits) -> Result<Table, ReqErro
     Ok(Table {
         place: "csv".to_owned(),
         rows,
+        ..Table::default()
     })
 }

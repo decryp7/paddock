@@ -8,7 +8,7 @@
 //! header_row = 1
 //! fill_down = ["Section"] # empty cells take the value above (merged or continued cells)
 //! [columns]
-//! id = "Req ID"           # a header text (any case) or a column letter ("A")
+//! id = "Req ID"           # a header text (any case), or `column:A` for a column letter, which is never mistaken for a header
 //! text = "Description"
 //! title = "Title"
 //! [columns.extra]
@@ -16,6 +16,7 @@
 //! ```
 
 use std::collections::BTreeMap;
+use std::num::NonZeroUsize;
 
 use serde::Deserialize;
 
@@ -81,9 +82,9 @@ pub struct MappingPack {
     /// The sheet to read (xlsx).
     pub table_name: Option<String>,
     /// The table to read (docx, Markdown), 1-based.
-    pub table_index: usize,
+    pub table_index: NonZeroUsize,
     /// The row that holds the headers, 1-based.
-    pub header_row: usize,
+    pub header_row: NonZeroUsize,
     /// Columns whose empty cells take the value above.
     pub fill_down: Vec<String>,
     /// The id column.
@@ -147,14 +148,12 @@ impl MappingPack {
             }
             check("columns.extra", v)?;
         }
-        let header_row = raw.table.header_row.unwrap_or(1);
-        if header_row == 0 || header_row > 10_000 {
-            return Err(field("table.header_row", "rows count from 1, at most 10000"));
-        }
-        let table_index = raw.table.index.unwrap_or(1);
-        if table_index == 0 || table_index > 10_000 {
-            return Err(field("table.index", "tables count from 1"));
-        }
+        let header_row = NonZeroUsize::new(raw.table.header_row.unwrap_or(1))
+            .filter(|n| n.get() <= 10_000)
+            .ok_or_else(|| field("table.header_row", "rows count from 1, at most 10000"))?;
+        let table_index = NonZeroUsize::new(raw.table.index.unwrap_or(1))
+            .filter(|n| n.get() <= 10_000)
+            .ok_or_else(|| field("table.index", "tables count from 1, at most 10000"))?;
         if let Some(n) = &raw.table.name
             && (n.trim().is_empty() || n.len() > 200)
         {

@@ -25,17 +25,31 @@ fn cells(line: &str) -> Vec<String> {
     out
 }
 
+/// A separator row (`|:--|---|`): only pipes, dashes, colons and spaces, with at least one of each of `|` and `-`. A scan, so a huge line
+/// costs nothing but its length.
 fn is_separator(line: &str) -> bool {
-    let c = cells(line);
-    !c.is_empty()
-        && c.iter()
-            .all(|s| !s.is_empty() && s.trim_matches(':').bytes().all(|b| b == b'-') && s.contains('-'))
+    line.contains('|') && line.contains('-') && line.bytes().all(|b| matches!(b, b'|' | b'-' | b':' | b' ' | b'\t'))
+}
+
+/// The cells of a line, after checking from the count of `|` (a byte scan, nothing allocated) that there are not more columns than the
+/// limit allows: 4 MB of `|` would otherwise become four million strings before any bound was looked at.
+fn bounded_cells(line: &str, limits: &ImportLimits) -> Result<Vec<String>, ReqError> {
+    let pipes = line.bytes().filter(|b| *b == b'|').count();
+    if pipes > limits.max_cols + 1 {
+        return Err(ReqError::Limit {
+            what: "columns",
+            got: pipes as u64 - 1,
+            max: limits.max_cols as u64,
+        });
+    }
+    Ok(cells(line))
 }
 
 pub(super) fn read(bytes: &[u8], pack: &MappingPack, limits: &ImportLimits) -> Result<Table, ReqError> {
     let text = std::str::from_utf8(bytes).map_err(|_| malformed("Markdown", "the file is not UTF-8 text"))?;
     let lines: Vec<&str> = text.lines().collect();
-    let mut tables: Vec<Vec<Vec<String>>> = Vec::new();
+    let wanted = pack.table_index.get();
+    let (mut found, mut chosen, mut cell_count) = (0usize, Vec::<Vec<String>>::new(), 0usize);
     let mut i = 0;
     let mut fenced = false;
     while i < lines.len() {
@@ -43,40 +57,55 @@ pub(super) fn read(bytes: &[u8], pack: &MappingPack, limits: &ImportLimits) -> R
         if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
             fenced = !fenced;
         }
-        if !fenced && line.contains('|') && lines.get(i + 1).is_some_and(|l| is_separator(l)) {
-            let mut rows = vec![cells(line)];
+        let pipes = line.bytes().filter(|b| *b == b'|').count();
+        if !fenced && pipes > 0 && lines.get(i + 1).is_some_and(|l| is_separator(l)) {
+            found += 1;
+            // only the table the pack asks for is collected; the others are walked past
+            let keep = found == wanted;
+            let mut rows = Vec::new();
+            if keep {
+                rows.push(bounded_cells(line, limits)?);
+            }
             i += 2;
             while i < lines.len() && lines[i].contains('|') && !lines[i].trim().is_empty() {
-                rows.push(cells(lines[i]));
-                if rows.len() > limits.max_rows {
-                    return Err(ReqError::Limit {
-                        what: "rows",
-                        got: rows.len() as u64,
-                        max: limits.max_rows as u64,
-                    });
+                if keep {
+                    let row = bounded_cells(lines[i], limits)?;
+                    cell_count += row.len();
+                    if rows.len() >= limits.max_rows {
+                        return Err(ReqError::Limit {
+                            what: "rows",
+                            got: rows.len() as u64 + 1,
+                            max: limits.max_rows as u64,
+                        });
+                    }
+                    if cell_count > limits.max_cells {
+                        return Err(ReqError::Limit {
+                            what: "cells",
+                            got: cell_count as u64,
+                            max: limits.max_cells as u64,
+                        });
+                    }
+                    rows.push(row);
                 }
                 i += 1;
             }
-            tables.push(rows);
+            if keep {
+                chosen = rows;
+            }
             continue;
         }
         i += 1;
     }
-    let have = tables.len();
-    let rows = tables.into_iter().nth(pack.table_index - 1).ok_or_else(|| ReqError::NoTable {
-        what: "table",
-        name: pack.table_index.to_string(),
-        have: format!("{have} pipe table(s)"),
-    })?;
-    if rows.iter().any(|r| r.len() > limits.max_cols) {
-        return Err(ReqError::Limit {
-            what: "columns",
-            got: rows.iter().map(Vec::len).max().unwrap_or(0) as u64,
-            max: limits.max_cols as u64,
+    if found < wanted {
+        return Err(ReqError::NoTable {
+            what: "table",
+            name: wanted.to_string(),
+            have: format!("{found} pipe table(s)"),
         });
     }
     Ok(Table {
         place: "markdown".to_owned(),
-        rows,
+        rows: chosen,
+        ..Table::default()
     })
 }

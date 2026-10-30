@@ -164,19 +164,34 @@ pub fn import_from(source: &dyn RequirementSource, pack: &MappingPack, limits: &
     import(&bytes, format, pack, limits)
 }
 
-/// Parses XML with the DTD off and the node count bounded.
-pub(crate) fn xml<'a>(text: &'a str, part: &str, limits: &ImportLimits) -> Result<roxmltree::Document<'a>, ReqError> {
-    let options = roxmltree::ParsingOptions {
-        allow_dtd: false,
-        nodes_limit: limits.max_xml_nodes,
-    };
-    roxmltree::Document::parse_with_options(text, options).map_err(|e| match e {
-        roxmltree::Error::DtdDetected => ReqError::Dtd { part: part.to_owned() },
-        roxmltree::Error::NodesLimitReached => ReqError::Limit {
-            what: "XML nodes",
-            got: u64::from(options.nodes_limit),
-            max: u64::from(options.nodes_limit),
-        },
-        other => malformed("XML", format!("{part}: {other}")),
-    })
+impl From<pacenotes_xml::XmlError> for ReqError {
+    fn from(e: pacenotes_xml::XmlError) -> ReqError {
+        match e {
+            pacenotes_xml::XmlError::Dtd { part, .. } => ReqError::Dtd { part },
+            pacenotes_xml::XmlError::Depth { max, .. } => ReqError::Limit {
+                what: "XML nesting depth",
+                got: max as u64 + 1,
+                max: max as u64,
+            },
+            pacenotes_xml::XmlError::Nodes { max, .. } => ReqError::Limit {
+                what: "XML nodes",
+                got: u64::from(max),
+                max: u64::from(max),
+            },
+            pacenotes_xml::XmlError::Syntax { part, message } => malformed("XML", format!("{part}: {message}")),
+        }
+    }
+}
+
+/// The XML limits of an import.
+pub(crate) fn xml_limits(limits: &ImportLimits) -> pacenotes_xml::XmlLimits {
+    pacenotes_xml::XmlLimits {
+        max_nodes: limits.max_xml_nodes,
+        ..pacenotes_xml::XmlLimits::default()
+    }
+}
+
+/// Parses XML text that [`zipx::Archive::xml_text`] returned (cleaned: no declarations, bounded nesting).
+pub(crate) fn xml<'a>(cleaned: &'a str, part: &str, limits: &ImportLimits) -> Result<pacenotes_xml::roxmltree::Document<'a>, ReqError> {
+    Ok(pacenotes_xml::parse(cleaned, part, &xml_limits(limits))?)
 }

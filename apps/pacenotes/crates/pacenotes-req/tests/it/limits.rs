@@ -9,7 +9,7 @@ const MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 fn id_text() -> pacenotes_req::MappingPack {
-    pack("[columns]\nid = \"A\"\ntext = \"B\"\n")
+    pack("[columns]\nid = \"column:A\"\ntext = \"column:B\"\n")
 }
 
 fn docx_of(rows: &str) -> Vec<u8> {

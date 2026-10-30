@@ -26,8 +26,19 @@ impl<'b> Archive<'b> {
         Ok(Archive { zip, total: 0, format })
     }
 
-    /// The text of a part, or `None` when it is not in the archive. The sizes the archive declares are not believed: the part is
-    /// read through a limit, and the ratio is checked against what was really read.
+    /// The text of an XML part, cleaned by `pacenotes-xml` (declarations refused, nesting bounded) so it is safe to parse, or `None`
+    /// when the part is not in the archive. Every XML part goes through here: nothing reaches the parser uncleaned.
+    pub(super) fn xml_text(&mut self, name: &str, limits: &ImportLimits) -> Result<Option<String>, ReqError> {
+        match self.text(name, limits)? {
+            None => Ok(None),
+            Some(text) => Ok(Some(pacenotes_xml::clean(&text, name, &super::xml_limits(limits))?.into_owned())),
+        }
+    }
+
+    /// The text of a part, or `None` when it is not in the archive. The part is read through hard limits on its bytes and on the whole
+    /// package, which no archive can talk its way around. The ratio check divides the bytes really read by the compressed size the
+    /// archive *declares*: a declared size that is too small can only make the check stricter, and one that is too large cannot get past
+    /// the byte limits.
     pub(super) fn text(&mut self, name: &str, limits: &ImportLimits) -> Result<Option<String>, ReqError> {
         let mut entry = match self.zip.by_name(name) {
             Ok(e) => e,

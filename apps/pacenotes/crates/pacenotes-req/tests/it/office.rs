@@ -43,7 +43,7 @@ fn a_generated_sheet_with_merged_cells_maps_by_its_pack() {
 
 #[test]
 fn without_a_sheet_name_the_first_sheet_is_read_and_a_missing_one_lists_the_sheets() {
-    let p = pack("[columns]\nid = \"A\"\ntext = \"A\"\n");
+    let p = pack("[columns]\nid = \"column:A\"\ntext = \"column:A\"\n");
     let set = read(&xlsx(), Format::Xlsx, &p);
     assert!(
         set.requirements.is_empty() || set.requirements[0].text == "just notes",
@@ -52,7 +52,7 @@ fn without_a_sheet_name_the_first_sheet_is_read_and_a_missing_one_lists_the_shee
     let err = import(
         &xlsx(),
         Format::Xlsx,
-        &pack("[table]\nname = \"Nope\"\n[columns]\nid = \"A\"\ntext = \"B\"\n"),
+        &pack("[table]\nname = \"Nope\"\n[columns]\nid = \"column:A\"\ntext = \"column:B\"\n"),
         &ImportLimits::default(),
     )
     .unwrap_err();
@@ -85,7 +85,7 @@ fn a_word_table_is_read_with_spans_vertical_merges_and_paragraphs() {
     let err = import(
         &docx(),
         Format::Docx,
-        &pack("[table]\nindex = 5\n[columns]\nid = \"A\"\ntext = \"B\"\n"),
+        &pack("[table]\nindex = 5\n[columns]\nid = \"column:A\"\ntext = \"column:B\"\n"),
         &ImportLimits::default(),
     )
     .unwrap_err();

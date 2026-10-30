@@ -7,7 +7,10 @@ use crate::support::{BASIC, pack, read};
 #[test]
 fn a_pack_is_checked_and_every_refusal_says_what_to_fix() {
     let ok = MappingPack::from_toml("version = 1\nname = \"n\"\n[table]\nname = \"S\"\nindex = 2\nheader_row = 3\nfill_down = [\"A\"]\n[columns]\nid = \"I\"\ntext = \"T\"\ntitle = \"Ti\"\n[columns.extra]\nowner = \"Owner\"\n").unwrap();
-    assert_eq!((ok.table_name.as_deref(), ok.table_index, ok.header_row), (Some("S"), 2, 3));
+    assert_eq!(
+        (ok.table_name.as_deref(), ok.table_index.get(), ok.header_row.get()),
+        (Some("S"), 2, 3)
+    );
     let bad = [
         ("not toml [", "cannot be read"),
         ("version = 2\nname = \"n\"\n[columns]\nid = \"a\"\ntext = \"b\"\n", "version 2"),
@@ -41,15 +44,11 @@ fn a_pack_is_checked_and_every_refusal_says_what_to_fix() {
     }
     assert!(matches!(MappingPack::from_toml(&"#".repeat(70_000)), Err(PackError::Syntax(_))));
     let many: String = (0..65).map(|i| format!("f{i} = \"c\"\n")).collect();
-    assert!(
-        MappingPack::from_toml(&format!(
-            "version = 1\nname = \"n\"\n[columns]\nid = \"a\"\ntext = \"b\"\n[columns.extra]\n{many}"
-        ))
-        .unwrap_err()
-        .to_string()
-        .contains("65")
-            || true
-    );
+    let err = MappingPack::from_toml(&format!(
+        "version = 1\nname = \"n\"\n[columns]\nid = \"a\"\ntext = \"b\"\n[columns.extra]\n{many}"
+    ))
+    .unwrap_err();
+    assert!(err.to_string().contains("more than 64 extra columns"), "{err}");
 }
 
 #[test]

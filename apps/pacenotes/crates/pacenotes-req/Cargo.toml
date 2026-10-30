@@ -10,11 +10,11 @@ publish = false
 
 [dependencies]
 csv = "1"
-roxmltree = "0.20"
+pacenotes-xml = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 toml = "1"
-zip = { version = "9", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 paddock-testkit = { workspace = true }

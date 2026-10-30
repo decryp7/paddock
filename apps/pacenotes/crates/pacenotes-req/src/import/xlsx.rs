@@ -21,10 +21,12 @@ fn cell_ref(r: &str) -> Option<(usize, usize)> {
     let col = letters
         .bytes()
         .fold(0usize, |n, b| n * 26 + usize::from(b.to_ascii_uppercase() - b'A' + 1));
-    Some((digits.parse().ok()?, col))
+    let row: usize = digits.parse().ok()?;
+    // cells count from A1: row 0 is not a cell
+    (row > 0 && col > 0).then_some((row, col))
 }
 
-fn plain_text(n: roxmltree::Node<'_, '_>) -> String {
+fn plain_text(n: pacenotes_xml::roxmltree::Node<'_, '_>) -> String {
     n.descendants()
         .filter(|d| d.has_tag_name("t") && !d.ancestors().any(|a| a.has_tag_name("rPh")))
         .filter_map(|d| d.text())
@@ -34,7 +36,7 @@ fn plain_text(n: roxmltree::Node<'_, '_>) -> String {
 pub(super) fn read(bytes: &[u8], pack: &MappingPack, limits: &ImportLimits) -> Result<Table, ReqError> {
     let mut zip = Archive::open(bytes, FORMAT, limits)?;
     let workbook_text = zip
-        .text("xl/workbook.xml", limits)?
+        .xml_text("xl/workbook.xml", limits)?
         .ok_or_else(|| malformed(FORMAT, "xl/workbook.xml is missing; this is not a workbook"))?;
     let workbook = xml(&workbook_text, "xl/workbook.xml", limits)?;
     let sheets: Vec<(String, String)> = workbook
@@ -60,7 +62,7 @@ pub(super) fn read(bytes: &[u8], pack: &MappingPack, limits: &ImportLimits) -> R
         have: sheets.iter().map(|(n, _)| format!("{n:?}")).collect::<Vec<_>>().join(", "),
     })?;
     let rels_text = zip
-        .text("xl/_rels/workbook.xml.rels", limits)?
+        .xml_text("xl/_rels/workbook.xml.rels", limits)?
         .ok_or_else(|| malformed(FORMAT, "xl/_rels/workbook.xml.rels is missing"))?;
     let rels = xml(&rels_text, "xl/_rels/workbook.xml.rels", limits)?;
     let target = rels
@@ -72,7 +74,7 @@ pub(super) fn read(bytes: &[u8], pack: &MappingPack, limits: &ImportLimits) -> R
         Some(abs) => abs.to_owned(),
         None => format!("xl/{target}"),
     };
-    let shared: Vec<String> = match zip.text("xl/sharedStrings.xml", limits)? {
+    let shared: Vec<String> = match zip.xml_text("xl/sharedStrings.xml", limits)? {
         Some(text) => xml(&text, "xl/sharedStrings.xml", limits)?
             .descendants()
             .filter(|n| n.has_tag_name("si"))
@@ -81,14 +83,43 @@ pub(super) fn read(bytes: &[u8], pack: &MappingPack, limits: &ImportLimits) -> R
         None => Vec::new(),
     };
     let sheet_text = zip
-        .text(&sheet_path, limits)?
+        .xml_text(&sheet_path, limits)?
         .ok_or_else(|| malformed(FORMAT, format!("{sheet_path} is missing")))?;
     let sheet = xml(&sheet_text, &sheet_path, limits)?;
     let mut cells: BTreeMap<(usize, usize), String> = BTreeMap::new();
+    let mut bad_cells = 0u32;
     for c in sheet.descendants().filter(|n| n.has_tag_name("c")) {
         let Some((row, col)) = c.attribute("r").and_then(cell_ref) else {
+            bad_cells += 1;
             continue;
         };
+        let at = c.attribute("r").unwrap_or("?");
+        let value = c.children().find(|n| n.has_tag_name("v")).and_then(|v| v.text()).unwrap_or("");
+        let text = match c.attribute("t") {
+            Some("s") => {
+                let index = value.trim().parse::<usize>().ok();
+                match index.and_then(|i| shared.get(i)) {
+                    Some(t) => t.clone(),
+                    None => {
+                        return Err(malformed(
+                            FORMAT,
+                            format!(
+                                "cell {at} of {:?} names shared string {value:?}, which does not exist (line {})",
+                                chosen.0,
+                                pacenotes_xml::line_of(&sheet, c)
+                            ),
+                        ));
+                    }
+                }
+            }
+            Some("inlineStr") => c.children().find(|n| n.has_tag_name("is")).map(plain_text).unwrap_or_default(),
+            Some("b") => (if value.trim() == "1" { "TRUE" } else { "FALSE" }).to_owned(),
+            _ => value.to_owned(),
+        };
+        // only a cell with a value counts against the bounds: a styled, empty cell far away costs nothing and is not a reason to refuse
+        if text.is_empty() {
+            continue;
+        }
         if row > limits.max_rows {
             return Err(ReqError::Limit {
                 what: "rows",
@@ -103,28 +134,13 @@ pub(super) fn read(bytes: &[u8], pack: &MappingPack, limits: &ImportLimits) -> R
                 max: limits.max_cols as u64,
             });
         }
-        let value = c.children().find(|n| n.has_tag_name("v")).and_then(|v| v.text()).unwrap_or("");
-        let text = match c.attribute("t") {
-            Some("s") => value
-                .trim()
-                .parse::<usize>()
-                .ok()
-                .and_then(|i| shared.get(i))
-                .cloned()
-                .unwrap_or_default(),
-            Some("inlineStr") => c.children().find(|n| n.has_tag_name("is")).map(plain_text).unwrap_or_default(),
-            Some("b") => (if value.trim() == "1" { "TRUE" } else { "FALSE" }).to_owned(),
-            _ => value.to_owned(),
-        };
-        if !text.is_empty() {
-            cells.insert((row, col), text);
-            if cells.len() > limits.max_cells {
-                return Err(ReqError::Limit {
-                    what: "cells",
-                    got: cells.len() as u64,
-                    max: limits.max_cells as u64,
-                });
-            }
+        cells.insert((row, col), text);
+        if cells.len() > limits.max_cells {
+            return Err(ReqError::Limit {
+                what: "cells",
+                got: cells.len() as u64,
+                max: limits.max_cells as u64,
+            });
         }
     }
     // merged ranges: every cell of the range shows the top-left value
@@ -164,5 +180,6 @@ pub(super) fn read(bytes: &[u8], pack: &MappingPack, limits: &ImportLimits) -> R
     Ok(Table {
         place: chosen.0.clone(),
         rows,
+        bad_cells,
     })
 }

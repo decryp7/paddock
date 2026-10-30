@@ -8,9 +8,25 @@ use crate::table::Table;
 
 const FORMAT: &str = "docx";
 
-fn cell_text(tc: roxmltree::Node<'_, '_>) -> String {
+/// The children of `node` named `name`, also those wrapped in a content control (`w:sdt > w:sdtContent`), which Word uses for rows,
+/// cells and paragraphs alike.
+fn children_named<'a, 'i>(node: pacenotes_xml::roxmltree::Node<'a, 'i>, name: &'static str) -> Vec<pacenotes_xml::roxmltree::Node<'a, 'i>> {
+    let mut out = Vec::new();
+    for c in node.children() {
+        if c.has_tag_name(name) {
+            out.push(c);
+        } else if c.has_tag_name("sdt")
+            && let Some(content) = c.children().find(|n| n.has_tag_name("sdtContent"))
+        {
+            out.extend(children_named(content, name));
+        }
+    }
+    out
+}
+
+fn cell_text(tc: pacenotes_xml::roxmltree::Node<'_, '_>) -> String {
     let mut paragraphs = Vec::new();
-    for p in tc.children().filter(|n| n.has_tag_name("p")) {
+    for p in children_named(tc, "p") {
         let mut s = String::new();
         for n in p.descendants() {
             if n.has_tag_name("t") {
@@ -29,21 +45,21 @@ fn cell_text(tc: roxmltree::Node<'_, '_>) -> String {
 pub(super) fn read(bytes: &[u8], pack: &MappingPack, limits: &ImportLimits) -> Result<Table, ReqError> {
     let mut zip = Archive::open(bytes, FORMAT, limits)?;
     let text = zip
-        .text("word/document.xml", limits)?
+        .xml_text("word/document.xml", limits)?
         .ok_or_else(|| malformed(FORMAT, "word/document.xml is missing; this is not a Word document"))?;
     let doc = xml(&text, "word/document.xml", limits)?;
     let tables: Vec<_> = doc
         .descendants()
         .filter(|n| n.has_tag_name("tbl") && !n.ancestors().skip(1).any(|a| a.has_tag_name("tbl")))
         .collect();
-    let tbl = tables.get(pack.table_index - 1).ok_or_else(|| ReqError::NoTable {
+    let tbl = tables.get(pack.table_index.get() - 1).ok_or_else(|| ReqError::NoTable {
         what: "table",
-        name: pack.table_index.to_string(),
+        name: pack.table_index.get().to_string(),
         have: format!("{} table(s)", tables.len()),
     })?;
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut cells = 0usize;
-    for tr in tbl.children().filter(|n| n.has_tag_name("tr")) {
+    for tr in children_named(*tbl, "tr") {
         if rows.len() >= limits.max_rows {
             return Err(ReqError::Limit {
                 what: "rows",
@@ -52,7 +68,7 @@ pub(super) fn read(bytes: &[u8], pack: &MappingPack, limits: &ImportLimits) -> R
             });
         }
         let mut row: Vec<String> = Vec::new();
-        for tc in tr.children().filter(|n| n.has_tag_name("tc")) {
+        for tc in children_named(tr, "tc") {
             let props = tc.children().find(|n| n.has_tag_name("tcPr"));
             let span = props
                 .and_then(|p| p.children().find(|n| n.has_tag_name("gridSpan")))
@@ -92,7 +108,8 @@ pub(super) fn read(bytes: &[u8], pack: &MappingPack, limits: &ImportLimits) -> R
         rows.push(row);
     }
     Ok(Table {
-        place: format!("table {}", pack.table_index),
+        place: format!("table {}", pack.table_index.get()),
         rows,
+        ..Table::default()
     })
 }

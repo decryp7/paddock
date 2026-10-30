@@ -26,7 +26,7 @@ fn a_column_may_be_named_by_its_letter_and_the_header_row_may_be_lower_down() {
     let set = read(
         csv.as_bytes(),
         Format::Csv,
-        &pack("[table]\nheader_row = 3\n[columns]\nid = \"A\"\ntext = \"C\"\n"),
+        &pack("[table]\nheader_row = 3\n[columns]\nid = \"column:A\"\ntext = \"column:C\"\n"),
     );
     assert_eq!(
         (set.requirements[0].id.as_str(), set.requirements[0].text.as_str()),
@@ -54,7 +54,7 @@ fn markdown_pipe_tables_are_found_by_number_and_code_blocks_are_skipped() {
     let err = import(
         md.as_bytes(),
         Format::Markdown,
-        &pack("[table]\nindex = 3\n[columns]\nid = \"A\"\ntext = \"B\"\n"),
+        &pack("[table]\nindex = 3\n[columns]\nid = \"column:A\"\ntext = \"column:B\"\n"),
         &ImportLimits::default(),
     )
     .unwrap_err();
@@ -72,7 +72,7 @@ fn text_limits_and_encodings_are_errors_that_say_what_to_do() {
         max_cells: 100,
         ..ImportLimits::default()
     };
-    let p = pack("[columns]\nid = \"A\"\ntext = \"B\"\n");
+    let p = pack("[columns]\nid = \"column:A\"\ntext = \"column:B\"\n");
     assert!(matches!(
         import(b"a,b\n1,2\n3,4\n", Format::Csv, &p, &limits),
         Err(ReqError::Limit { what: "rows", .. })

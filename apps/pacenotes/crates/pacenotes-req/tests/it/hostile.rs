@@ -6,7 +6,7 @@ use paddock_testkit::{corpus, never_panics};
 use crate::support::{BASIC, docx, pack, xlsx, zip_of};
 
 fn sheet_pack() -> pacenotes_req::MappingPack {
-    pack("[table]\nname = \"s\"\n[columns]\nid = \"A\"\ntext = \"B\"\n")
+    pack("[table]\nname = \"s\"\n[columns]\nid = \"column:A\"\ntext = \"column:B\"\n")
 }
 
 fn workbook_with(sheet: &str) -> Vec<u8> {

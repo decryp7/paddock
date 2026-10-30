@@ -17,6 +17,8 @@ pub struct Table {
     pub place: String,
     /// The rows, top to bottom.
     pub rows: Vec<Vec<String>>,
+    /// Cells whose reference was not a cell (row 0, no column), counted so the figure is not quietly smaller.
+    pub bad_cells: u32,
 }
 
 /// What a mapping left out, counted.
@@ -32,6 +34,8 @@ pub struct Skipped {
     pub missing_text: u32,
     /// Texts and fields cut to their limit.
     pub cut: u32,
+    /// Spreadsheet cells with a reference that is not a cell.
+    pub bad_cells: u32,
 }
 
 fn cut(s: &str, max: usize, skipped: &mut Skipped) -> String {
@@ -60,13 +64,14 @@ fn letter(s: &str) -> Option<usize> {
     )
 }
 
-/// The column a name stands for: a header text (any case) first, else a column letter.
+/// The column a name stands for: `column:C` is the third column, whatever the headers say; anything else is a header text (any case).
+/// A column letter has to be written as one, so a header that happens to look like a letter (`ID`) is never taken for a column.
 fn column(headers: &[String], name: &str, width: usize) -> Option<usize> {
+    if let Some(letters) = name.trim().strip_prefix("column:") {
+        return letter(letters).filter(|i| *i < width);
+    }
     let want = name.trim().to_lowercase();
-    headers
-        .iter()
-        .position(|h| h.trim().to_lowercase() == want)
-        .or_else(|| letter(name).filter(|i| *i < width))
+    headers.iter().position(|h| h.trim().to_lowercase() == want)
 }
 
 /// The mapping failed before any row was read.
@@ -94,9 +99,9 @@ pub enum TableError {
 
 /// Maps the rows below the header onto requirements. An empty cell in a `fill_down` column takes the value above it.
 pub fn apply(table: &Table, pack: &MappingPack) -> Result<RequirementSet, TableError> {
-    let header = table.rows.get(pack.header_row - 1).ok_or(TableError::NoHeader {
+    let header = table.rows.get(pack.header_row.get() - 1).ok_or(TableError::NoHeader {
         rows: table.rows.len(),
-        header: pack.header_row,
+        header: pack.header_row.get(),
     })?;
     let width = table.rows.iter().map(Vec::len).max().unwrap_or(0);
     let find = |name: &str, field: &str| {
@@ -117,8 +122,9 @@ pub fn apply(table: &Table, pack: &MappingPack) -> Result<RequirementSet, TableE
     let fill: Vec<usize> = pack.fill_down.iter().map(|f| find(f, "fill_down")).collect::<Result<_, _>>()?;
     let mut above: Vec<String> = vec![String::new(); fill.len()];
     let mut set = RequirementSet::default();
+    set.skipped.bad_cells = table.bad_cells;
     let mut seen = BTreeSet::new();
-    for (i, row) in table.rows.iter().enumerate().skip(pack.header_row) {
+    for (i, row) in table.rows.iter().enumerate().skip(pack.header_row.get()) {
         let mut row: Vec<String> = row.clone();
         for (k, c) in fill.iter().enumerate() {
             if row.get(*c).is_none_or(|v| v.trim().is_empty()) {
@@ -145,13 +151,15 @@ pub fn apply(table: &Table, pack: &MappingPack) -> Result<RequirementSet, TableE
             set.skipped.missing_text += 1;
             continue;
         }
-        if !seen.insert(id.to_owned()) {
+        // the id is cut first and the cut id is what must be unique: two long ids that differ only past the cut are the same id
+        let mut skipped = set.skipped;
+        let id = cut(id, MAX_FIELD_BYTES, &mut skipped);
+        if !seen.insert(id.clone()) {
             set.skipped.duplicate_id += 1;
             continue;
         }
-        let mut skipped = set.skipped;
         let requirement = Requirement {
-            id: cut(id, MAX_FIELD_BYTES, &mut skipped),
+            id,
             text: cut(text, MAX_TEXT_BYTES, &mut skipped),
             title: title_col
                 .map(get)
