@@ -4,13 +4,18 @@ import { DestroyRef, inject, Injectable } from '@angular/core';
  * What a settings page says when its window is asked to close (by Close, Escape, Cmd/Ctrl+W or the OS):
  * - `close`: nothing waits;
  * - `wait`: an edit is still being saved (a typed value waiting for its pause); the window stays until `done` settles and
- *   then asks again, so the edit reaches the engine before the window goes;
+ *   then asks again, so the edit reaches the engine before the window goes. Meanwhile the footer says "Saving `label`…", and
+ *   after `STILL_SAVING_AFTER_MS` the window says "Still saving `label`." with Close anyway and Keep waiting: the save goes
+ *   on whatever the user chooses (the window never times out a save), but the close is never held without bound;
  * - `warn`: an edit could not be saved; the window says `message` (which edit, and why) and closes only when the user says so.
  */
 export type SettingsCloseVerdict =
   | { readonly kind: 'close' }
-  | { readonly kind: 'wait'; readonly done: Promise<unknown> }
+  | { readonly kind: 'wait'; readonly done: Promise<unknown>; readonly label: string }
   | { readonly kind: 'warn'; readonly message: string };
+
+/** How long a close waits for a page's save before the window offers Close anyway and Keep waiting (ms). */
+export const STILL_SAVING_AFTER_MS = 4000;
 
 /** One page's say on closing: asked synchronously, each time the window is asked to close. */
 export type SettingsCloseGuard = () => SettingsCloseVerdict;

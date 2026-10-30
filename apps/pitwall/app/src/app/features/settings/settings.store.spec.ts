@@ -4,7 +4,7 @@ import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { Toasts } from '../../core/toasts';
 import { demoSettings } from '../../core/mock-data';
-import { SETTINGS_JOURNAL, SETTINGS_JOURNAL_KEY, SETTINGS_JOURNAL_TTL_MS, SETTINGS_SAVE_DELAY, SettingsStore, editSettings, refusalText, undoText } from './settings.store';
+import { SETTINGS_JOURNAL, SETTINGS_JOURNAL_KEY, SETTINGS_JOURNAL_TTL_MS, SETTINGS_SAVE_DELAY, SettingsStore, editSettings, refusalText, savingLabel, shownValue, undoText, unsentText } from './settings.store';
 
 describe('editSettings', () => {
   it('merges values into one section and leaves the others alone', () => {
@@ -113,7 +113,7 @@ describe('SettingsStore', () => {
     await store.load();
     store.edit(CONC, 'server', { maxConcurrent: 12 }, 'typed');
     const verdict = store.closeVerdict();
-    expect(verdict.kind).toBe('wait');
+    expect(verdict).toMatchObject({ kind: 'wait', label: 'requests at once' });
     await (verdict as { done: Promise<unknown> }).done;
     expect((await backend.settings()).server.maxConcurrent).toBe(12);
     expect(store.closeVerdict()).toEqual({ kind: 'close' });
@@ -272,22 +272,146 @@ describe('SettingsStore', () => {
     expect(journal.has(SETTINGS_JOURNAL_KEY)).toBe(false);
   });
 
-  it('ignores a stale, malformed or foreign journal', async () => {
-    const backend = new MockBackend();
-    const { store } = setup(backend);
-    const save = vi.spyOn(backend, 'saveSettings');
-    for (const raw of [
-      JSON.stringify({ at: Date.now() - SETTINGS_JOURNAL_TTL_MS - 1, edits: [{ field: CONC, section: 'server', values: { maxConcurrent: 7 } }] }),
-      JSON.stringify({ at: Date.now(), edits: [{ field: CONC, section: 'nope', values: {} }, { field: { id: 1 }, section: 'server', values: {} }, { field: CONC, section: 'server', values: [] }, null] }),
-      JSON.stringify({ at: Date.now(), edits: 'x' }),
-      '{broken',
-      'null',
-    ]) {
-      journal.set(SETTINGS_JOURNAL_KEY, raw);
+  it('journals each edit over the server value it was made on, and keeps the first base while the edit waits', async () => {
+    const { store } = setup(new MockBackend(), 60_000);
+    await store.load();
+    const before = store.saved()!.server.maxConcurrent;
+    store.edit(CONC, 'server', { maxConcurrent: 7 }, 'typed');
+    store.edit(CONC, 'server', { maxConcurrent: 8 }, 'typed');
+    expect(JSON.parse(journal.get(SETTINGS_JOURNAL_KEY)!).edits).toEqual([{ field: CONC, section: 'server', values: { maxConcurrent: 8 }, base: { maxConcurrent: before } }]);
+  });
+
+  describe('replaying a journal (compare-and-set)', () => {
+    /** A journal a window left: CONC set to 7 over `base`. */
+    function left(base: number, at = Date.now()): string {
+      return JSON.stringify({ at, edits: [{ field: CONC, section: 'server', values: { maxConcurrent: 7 }, base: { maxConcurrent: base } }] });
+    }
+
+    it('base X, journal Y, server X: Y is sent', async () => {
+      const backend = new MockBackend();
+      const { store } = setup(backend);
+      const x = (await backend.settings()).server.maxConcurrent;
+      journal.set(SETTINGS_JOURNAL_KEY, left(x));
       await store.load();
       await store.flush();
-    }
-    expect(save).not.toHaveBeenCalled();
+      expect((await backend.settings()).server.maxConcurrent).toBe(7);
+      expect(store.unsent()).toEqual([]);
+      expect(journal.has(SETTINGS_JOURNAL_KEY)).toBe(false);
+    });
+
+    it('base X, journal Y, server Z: nothing is sent; it is shown as unsent with its value', async () => {
+      const backend = new MockBackend();
+      const { store } = setup(backend);
+      const x = (await backend.settings()).server.maxConcurrent;
+      await backend.saveSettings(editSettings(await backend.settings(), 'server', { maxConcurrent: x + 3 }));
+      const save = vi.spyOn(backend, 'saveSettings');
+      journal.set(SETTINGS_JOURNAL_KEY, left(x));
+      await store.load();
+      await store.flush();
+      expect(save).not.toHaveBeenCalled();
+      expect(store.saved()!.server.maxConcurrent).toBe(x + 3);
+      expect(store.draft()!.server.maxConcurrent).toBe(x + 3);
+      expect(store.unsent()).toEqual([{ field: CONC, value: '7' }]);
+      expect(unsentText(store.unsent()[0]!)).toBe('Requests at once was changed elsewhere before your edit was sent. Your value: 7.');
+      expect(journal.has(SETTINGS_JOURNAL_KEY)).toBe(false);
+      expect(store.closeVerdict()).toEqual({ kind: 'close' });
+    });
+
+    it('"Apply it anyway" sends the unsent value over the newer one; "Discard" keeps the server’s', async () => {
+      const backend = new MockBackend();
+      const { store } = setup(backend);
+      const x = (await backend.settings()).server.maxConcurrent;
+      await backend.saveSettings(editSettings(await backend.settings(), 'server', { maxConcurrent: x + 3 }));
+      journal.set(SETTINGS_JOURNAL_KEY, left(x));
+      await store.load();
+      store.applyUnsent(CONC.id);
+      store.applyUnsent(CONC.id);
+      await store.flush();
+      expect(store.unsent()).toEqual([]);
+      expect((await backend.settings()).server.maxConcurrent).toBe(7);
+
+      journal.set(SETTINGS_JOURNAL_KEY, left(x));
+      await store.load();
+      expect(store.unsent()).toHaveLength(1);
+      const save = vi.spyOn(backend, 'saveSettings');
+      store.discardUnsent(CONC.id);
+      store.discardUnsent(CONC.id);
+      await store.flush();
+      expect(store.unsent()).toEqual([]);
+      expect(save).not.toHaveBeenCalled();
+      expect((await backend.settings()).server.maxConcurrent).toBe(7);
+    });
+
+    it('a new edit of the setting replaces its unsent edit', async () => {
+      const backend = new MockBackend();
+      const { store } = setup(backend);
+      const x = (await backend.settings()).server.maxConcurrent;
+      await backend.saveSettings(editSettings(await backend.settings(), 'server', { maxConcurrent: x + 3 }));
+      journal.set(SETTINGS_JOURNAL_KEY, left(x));
+      await store.load();
+      store.edit(CONC, 'server', { maxConcurrent: 9 });
+      expect(store.unsent()).toEqual([]);
+      await store.flush();
+      expect((await backend.settings()).server.maxConcurrent).toBe(9);
+    });
+
+    it('an old or damaged journal is ignored and cleared', async () => {
+      const backend = new MockBackend();
+      const { store } = setup(backend);
+      const x = (await backend.settings()).server.maxConcurrent;
+      const save = vi.spyOn(backend, 'saveSettings');
+      for (const raw of [
+        left(x, Date.now() - SETTINGS_JOURNAL_TTL_MS - 1),
+        // Written before edits had a base: it cannot be compared, so it is not sent.
+        JSON.stringify({ at: Date.now(), edits: [{ field: CONC, section: 'server', values: { maxConcurrent: 7 } }] }),
+        JSON.stringify({ at: Date.now(), edits: [{ field: CONC, section: 'server', values: { maxConcurrent: 7 }, base: [x] }] }),
+        JSON.stringify({ at: Date.now(), edits: [{ field: CONC, section: 'nope', values: {}, base: {} }, { field: { id: 1 }, section: 'server', values: {}, base: {} }, { field: CONC, section: 'server', values: [], base: {} }, null] }),
+        JSON.stringify({ at: Date.now(), edits: 'x' }),
+        '{broken',
+        'null',
+      ]) {
+        journal.set(SETTINGS_JOURNAL_KEY, raw);
+        await store.load();
+        await store.flush();
+        expect(journal.has(SETTINGS_JOURNAL_KEY)).toBe(false);
+      }
+      expect(save).not.toHaveBeenCalled();
+      expect(store.unsent()).toEqual([]);
+    });
+  });
+
+  it('names what a close waits for', () => {
+    expect(savingLabel([])).toBe('your settings');
+    expect(savingLabel(['Port', 'Port'])).toBe('port');
+    expect(savingLabel(['LAN port', 'Request timeout'])).toBe('LAN port and request timeout');
+    expect(savingLabel(['Port', 'Request timeout', 'Offline mode'])).toBe('3 settings');
+  });
+
+  it('a close while only a preset is on its way waits for "your settings"', async () => {
+    const { store } = setup();
+    await store.load();
+    const applied = store.applyPreset('performance');
+    expect(store.closeVerdict()).toMatchObject({ kind: 'wait', label: 'your settings' });
+    await applied;
+  });
+
+  it('shows an unsent value the way the page does', () => {
+    expect(shownValue('allowKeylessLocal', true)).toBe('on');
+    expect(shownValue('offline', false)).toBe('off');
+    expect(shownValue('hotCapBytes', null)).toBe('what fits');
+    expect(shownValue('promptCacheMib', null)).toBe('automatic');
+    expect(shownValue('onQuit', 'keepServing')).toBe('Keep serving');
+    expect(shownValue('embeddingsStorage', 'disk')).toBe('On disk');
+    expect(shownValue('theme', 'dark')).toBe('dark');
+    expect(shownValue('maxRequestBytes', 50 * 1024 ** 2)).toBe('50.0 MB');
+    expect(shownValue('responsesMaxMib', 512)).toBe('512 MB');
+    expect(shownValue('idleUnloadSecs', 300)).toBe('5 min');
+    expect(shownValue('keepWarmDays', 1)).toBe('1 day');
+    expect(shownValue('metricsRetentionDays', 30)).toBe('30 days');
+    expect(shownValue('pressureAvailablePercent', 15)).toBe('15%');
+    expect(shownValue('port', 11500)).toBe('11500');
+    expect(shownValue('odd', { a: 1 })).toBe('{"a":1}');
+    expect(shownValue('odd', undefined)).toBe('');
   });
 
   it('survives storage that refuses', async () => {

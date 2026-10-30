@@ -5,7 +5,7 @@ import { LiveStore } from '../../core/live.store';
 import { Toasts } from '../../core/toasts';
 import { button, dialogsAnswering, render, settle } from '../../../testing/render';
 import { OWN_TOAST_HOST, SettingsPage, checkNumber } from './settings-page';
-import { SETTINGS_SAVE_DELAY, SettingsStore } from './settings.store';
+import { SETTINGS_JOURNAL_KEY, SETTINGS_SAVE_DELAY, SettingsStore, editSettings } from './settings.store';
 
 describe('checkNumber', () => {
   it('takes a number in range and says what to fix otherwise', () => {
@@ -249,6 +249,42 @@ describe('SettingsPage', () => {
     await type(fixture, el, 'srv-conc', '20');
     await saved(fixture);
     expect(store.closeVerdict()).toEqual({ kind: 'warn', message: 'Requests at once was not saved: At most 8 on this computer.' });
+  });
+
+  it('shows an edit a window left unsent over a value changed since, and applies or discards it on request', async () => {
+    const backend = new MockBackend();
+    const base = (await backend.settings()).server.maxConcurrent;
+    await backend.saveSettings(editSettings(await backend.settings(), 'server', { maxConcurrent: base + 3 }));
+    const leave = () =>
+      localStorage.setItem(
+        SETTINGS_JOURNAL_KEY,
+        JSON.stringify({ at: Date.now(), edits: [{ field: { id: 'srv-conc', label: 'Requests at once' }, section: 'server', values: { maxConcurrent: 7 }, base: { maxConcurrent: base } }] }),
+      );
+    leave();
+    const save = vi.spyOn(backend, 'saveSettings');
+    const { fixture, el } = await setup(backend);
+    const notice = () => el.querySelector<HTMLElement>('[data-testid="unsent-edit"]');
+    expect(save).not.toHaveBeenCalled();
+    expect(input(el, 'srv-conc').value).toBe(String(base + 3));
+    expect(notice()!.getAttribute('role')).toBe('status');
+    expect(notice()!.textContent).toContain('Requests at once was changed elsewhere before your edit was sent. Your value: 7.');
+    button(notice()!, 'Apply it anyway').click();
+    await saved(fixture);
+    expect(notice()).toBeNull();
+    expect((await backend.settings()).server.maxConcurrent).toBe(7);
+    expect(input(el, 'srv-conc').value).toBe('7');
+
+    fixture.destroy();
+    TestBed.resetTestingModule();
+    await backend.saveSettings(editSettings(await backend.settings(), 'server', { maxConcurrent: base + 3 }));
+    leave();
+    save.mockClear();
+    const again = await setup(backend);
+    button(again.el.querySelector<HTMLElement>('[data-testid="unsent-edit"]')!, 'Discard').click();
+    await saved(again.fixture);
+    expect(again.el.querySelector('[data-testid="unsent-edit"]')).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+    expect((await backend.settings()).server.maxConcurrent).toBe(base + 3);
   });
 
   it('loses nothing when the page goes right after a keystroke', async () => {

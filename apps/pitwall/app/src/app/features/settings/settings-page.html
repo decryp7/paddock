@@ -16,6 +16,15 @@
     </div>
   }
 
+  @for (u of store.unsent(); track u.field.id) {
+    <div class="save-error unsent" role="status" data-testid="unsent-edit" [attr.data-field]="u.field.id">
+      <mat-icon svgIcon="pw:info" aria-hidden="true" />
+      <span class="msg">{{ unsentText(u) }}</span>
+      <button type="button" matButton (click)="store.discardUnsent(u.field.id)">Discard</button>
+      <button type="button" matButton="outlined" (click)="store.applyUnsent(u.field.id)">Apply it anyway</button>
+    </div>
+  }
+
   @if (store.error() && !d()) {
     <pw-panel heading="Settings" icon="settings" [error]="store.error()" [ready]="false" (retry)="store.load()" />
   }

@@ -209,6 +209,13 @@
   button {
     flex: none;
   }
+  /* An edit a window left unsent, over a value changed since: a question, not an error. */
+  &.unsent {
+    border-left-color: var(--pd-border-strong);
+    mat-icon {
+      color: var(--pd-text-muted);
+    }
+  }
 }
 
 /* Compact switches that sit with 13 px text (Material's default is sized for touch). */
