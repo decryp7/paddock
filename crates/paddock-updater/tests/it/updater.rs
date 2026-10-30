@@ -1099,7 +1099,11 @@ fn offline_mode_refuses_every_check_and_download_before_the_network() {
         tempfile::tempdir().unwrap(),
         move |u| {
             u.with_offline_mode(Arc::new(move || {
-                flag.load(std::sync::atomic::Ordering::SeqCst)
+                if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    OfflineState::On
+                } else {
+                    OfflineState::Off
+                }
             }))
         },
     );
@@ -1146,7 +1150,11 @@ fn offline_mode_switched_on_mid_way_stops_before_the_network() {
         tempfile::tempdir().unwrap(),
         move |u| {
             u.with_offline_mode(Arc::new(move || {
-                flag.load(std::sync::atomic::Ordering::SeqCst)
+                if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    OfflineState::On
+                } else {
+                    OfflineState::Off
+                }
             }))
         },
     );
@@ -1180,16 +1188,36 @@ fn offline_mode_switched_on_mid_way_stops_before_the_network() {
     assert!(r.downloads().is_empty());
 }
 
-/// The predicate fails closed: one that panics counts as Offline mode on. Without a predicate the updater is online.
+/// Not confirmed off blocks like on (fail closed) but says so with its own kind and words; a predicate that panics
+/// counts as not confirmed. Without a predicate the updater is online.
 #[test]
-fn a_panicking_offline_predicate_counts_as_offline() {
+fn an_unknown_or_panicking_offline_state_blocks_and_says_it_could_not_be_confirmed() {
     let r = rig_with("1.0.0", Some(key()), tempfile::tempdir().unwrap(), |u| {
+        u.with_offline_mode(Arc::new(|| OfflineState::Unknown))
+    });
+    r.publish("9.9.9", "update.bin.sig");
+    let refused = r.updater.begin_check().unwrap_err();
+    assert_eq!(refused, UpdateError::OfflineUnknown);
+    assert_eq!(refused.kind(), UpdateErrorKind::OfflineUnknown);
+    assert!(
+        refused.message().contains("could not be confirmed"),
+        "{}",
+        refused.message()
+    );
+    assert!(
+        !refused.message().contains("is on"),
+        "unknown is not said to be on"
+    );
+    assert_eq!(r.server.hits(MANIFEST_URL), 0);
+    assert!(!r.updater.auto_check_due());
+
+    let panics = rig_with("1.0.0", Some(key()), tempfile::tempdir().unwrap(), |u| {
         u.with_offline_mode(Arc::new(|| panic!("the setting could not be read")))
     });
-    assert!(r.updater.offline_mode());
+    assert!(panics.updater.offline_mode());
     assert_eq!(
-        r.updater.begin_check().unwrap_err(),
-        UpdateError::OfflineMode
+        panics.updater.begin_check().unwrap_err(),
+        UpdateError::OfflineUnknown
     );
     assert!(!rig().updater.offline_mode());
 }
