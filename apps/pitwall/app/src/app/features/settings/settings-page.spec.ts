@@ -266,7 +266,7 @@ describe('SettingsPage', () => {
       .click();
     await settle(fixture);
     expect((await backend.settings()).memory.preset).toBe('performance');
-    expect(input(el, 'mem-hot').value).toBe('4');
+    expect(input(el, 'mem-hot').value).toBe('6');
     expect(el.querySelector('#set-memory')!.textContent).toContain('Keep models hot, use what fits.');
     await change(fixture, el, 'mem-hot', '2');
     expect(el.querySelector('#mem-preset')!.textContent).toContain('Custom');

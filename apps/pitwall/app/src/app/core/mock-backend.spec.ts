@@ -313,7 +313,7 @@ describe('MockBackend', () => {
     const r = await mock.runBenchmark('qwen3.5-4b-q4_k_m');
     expect(r.genTps).toBeGreaterThan(0);
     await expect(mock.runBenchmark('nope')).rejects.toMatchObject({ code: 'notFound' });
-    expect((await mock.applyPreset('performance')).memory.maxHotModels).toBe(4);
+    expect((await mock.applyPreset('performance')).memory.maxHotModels).toBe(6);
     expect((await mock.applyPreset('custom')).memory.preset).toBe('custom');
     await mock.cancelJob('job-42');
     await expect(mock.cancelJob('job-42')).rejects.toMatchObject({ code: 'notFound' });
