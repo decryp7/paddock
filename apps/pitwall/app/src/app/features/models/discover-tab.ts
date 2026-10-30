@@ -1,14 +1,18 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, signal } from '@angular/core';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatChipListbox, MatChipOption } from '@angular/material/chips';
+import { MatFormField, MatPrefix } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInput } from '@angular/material/input';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { Fit, QuantVariant, Recommendation } from '../../core/api.types';
 import { ago, bytes, compact, concurrencyText } from '../../shared/format';
 import { fitLook } from '../../shared/labels';
-import { EmptyState } from '../../shared/ui/empty-state';
 import { Panel } from '../../shared/ui/panel';
 import { contextText } from './library-tab';
 import { ModelsStore } from './models.store';
+import { SuEmptyState } from '@decryp7/paddock-ui';
 
 /** What a fit needs, in one line: `6.1 GB VRAM + 0.9 GB RAM · all layers on the GPU`. */
 export function fitDetail(f: Fit): string {
@@ -22,19 +26,19 @@ export function fitDetail(f: Fit): string {
 /** Hugging Face search (GGUF) and a repo's quantisation variants, each with a "will this fit?" verdict. */
 @Component({
   selector: 'pw-discover-tab',
-  imports: [MatIconModule, MatTooltipModule, MatSlideToggleModule, Panel, EmptyState],
+  imports: [MatButton, MatIconButton, MatChipListbox, MatChipOption, MatFormField, MatPrefix, MatInput, MatIconModule, MatTooltipModule, MatSlideToggleModule, Panel, SuEmptyState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel class="recs" heading="Recommended for this machine" icon="sparkles" [sub]="recsSub()" [flush]="true" [loading]="store.packsLoading()" [error]="store.packsError()" [ready]="!!store.packs()" [skeletonLines]="3" (retry)="store.loadPacks()">
-      <div class="chips" role="group" aria-label="Filter recommendations by tag">
-        <button type="button" class="chip" [attr.aria-pressed]="store.packTag() === null" (click)="store.loadPacks(null)">All</button>
+      <mat-chip-listbox class="chips" aria-label="Filter recommendations by tag" hideSingleSelectionIndicator [value]="store.packTag() ?? ''" (change)="store.loadPacks($event.value || null)">
+        <mat-chip-option value="">All</mat-chip-option>
         @for (t of store.packTags(); track t) {
-          <button type="button" class="chip" [attr.aria-pressed]="store.packTag() === t" (click)="store.loadPacks(t)">{{ t }}</button>
+          <mat-chip-option [value]="t">{{ t }}</mat-chip-option>
         }
-      </div>
+      </mat-chip-listbox>
       @if (store.packs(); as p) {
         @if (p.recommendations.length === 0) {
-          <pw-empty-state icon="models" heading="Nothing recommended" text="No catalog model with this tag fits this machine. Try another tag." />
+          <pd-empty-state heading="Nothing recommended" description="No catalog model with this tag fits this machine. Try another tag."><mat-icon slot="icon" svgIcon="pw:models" aria-hidden="true" /></pd-empty-state>
         } @else {
           <ul class="rec-list" aria-label="Recommended models">
             @for (r of p.recommendations; track r.id) {
@@ -46,7 +50,7 @@ export function fitDetail(f: Fit): string {
                   @if (isLocal(r)) {
                     <span class="faint in-lib">In library</span>
                   } @else {
-                    <button type="button" class="btn ghost icon sm reveal" [disabled]="store.isBusy()('rec:' + r.id) || r.fit.verdict === 'wontFit'" [attr.aria-label]="'Download ' + r.name" matTooltip="Download" (click)="store.downloadRecommendation(r)">
+                    <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()('rec:' + r.id) || r.fit.verdict === 'wontFit'" [attr.aria-label]="'Download ' + r.name" matTooltip="Download" (click)="store.downloadRecommendation(r)">
                       <mat-icon svgIcon="pw:download" aria-hidden="true" />
                     </button>
                   }
@@ -85,16 +89,17 @@ export function fitDetail(f: Fit): string {
     }
 
     <form class="search" role="search" (submit)="$event.preventDefault(); store.search(q.value)">
-      <mat-icon svgIcon="pw:search" aria-hidden="true" />
-      <label class="sr-only" for="hf-q">Search Hugging Face for GGUF models</label>
-      <input #q id="hf-q" class="input" type="search" placeholder="Search GGUF models on Hugging Face — e.g. qwen3, gemma, llama" [value]="store.query()" autocomplete="off" (input)="typed.set(q.value.trim() !== '')" />
-      <button type="submit" class="btn" [class.primary]="hasText()" [disabled]="store.searching()">Search</button>
+      <mat-form-field class="field">
+        <mat-icon matPrefix svgIcon="pw:search" aria-hidden="true" />
+        <input #q matInput id="hf-q" type="search" aria-label="Search Hugging Face for GGUF models" placeholder="Search GGUF models on Hugging Face — e.g. qwen3, gemma, llama" [value]="store.query()" autocomplete="off" (input)="typed.set(q.value.trim() !== '')" />
+      </mat-form-field>
+      <button type="submit" [matButton]="hasText() ? 'filled' : 'outlined'" [disabled]="store.searching()">Search</button>
     </form>
 
     <div class="cols">
       <pw-panel class="results" heading="Results" icon="globe" [sub]="store.searched() ? store.results().length + ' repos' : ''" [flush]="true" [loading]="store.searching()" [error]="store.searchError()" [ready]="store.searched()" [skeletonLines]="8" (retry)="store.search(store.query())">
         @if (store.results().length === 0) {
-          <pw-empty-state icon="search" heading="No GGUF repos found" text="Try a model family (qwen, llama, gemma) or an author." />
+          <pd-empty-state heading="No GGUF repos found" description="Try a model family (qwen, llama, gemma) or an author."><mat-icon slot="icon" svgIcon="pw:search" aria-hidden="true" /></pd-empty-state>
         }
         <ul class="list" aria-label="Search results">
           @for (r of store.results(); track r.repo) {
@@ -116,10 +121,10 @@ export function fitDetail(f: Fit): string {
 
       <pw-panel class="repo-panel" [heading]="store.repoName() ?? 'Quantisations'" icon="models" [sub]="repoSub()" [loading]="store.repoLoading()" [error]="store.repoError()" [ready]="!store.repoName() || !!store.repo()" [skeletonLines]="8" (retry)="store.openRepo(store.repoName()!)">
         @if (store.repoName()) {
-          <button panel-actions type="button" class="btn ghost icon sm" aria-label="Close repo" (click)="store.closeRepo()"><mat-icon svgIcon="pw:close" aria-hidden="true" /></button>
+          <button panel-actions type="button" matIconButton aria-label="Close repo" matTooltip="Close repo" (click)="store.closeRepo()"><mat-icon svgIcon="pw:close" aria-hidden="true" /></button>
         }
         @if (!store.repoName()) {
-          <pw-empty-state icon="models" heading="Pick a repo" text="Its quantisations appear here with a verdict on whether each fits this machine's free RAM and VRAM." />
+          <pd-empty-state heading="Pick a repo" description="Its quantisations appear here with a verdict on whether each fits this machine's free RAM and VRAM."><mat-icon slot="icon" svgIcon="pw:models" aria-hidden="true" /></pd-empty-state>
         }
         @if (store.repo(); as repo) {
           @if (repo.gated) {
@@ -163,7 +168,7 @@ export function fitDetail(f: Fit): string {
                       <span class="faint in-lib">In library</span>
                     } @else {
                       <span class="row-actions">
-                        <button type="button" class="btn ghost icon sm reveal" [disabled]="store.isBusy()('download:' + v.file)" [attr.aria-label]="'Download ' + v.file" matTooltip="Download" (click)="download(v)">
+                        <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()('download:' + v.file)" [attr.aria-label]="'Download ' + v.file" matTooltip="Download" (click)="download(v)">
                           <mat-icon svgIcon="pw:download" aria-hidden="true" />
                         </button>
                       </span>
@@ -200,51 +205,21 @@ export function fitDetail(f: Fit): string {
       gap: var(--pd-space-3);
     }
     .search {
-      position: relative;
       display: flex;
+      align-items: center;
       gap: var(--pd-space-2);
-      mat-icon {
-        position: absolute;
-        left: 11px;
-        top: 9px;
-        width: 15px;
-        height: 15px;
-        color: var(--pd-text-subtle);
-      }
-      .input {
+      .field {
         flex: 1;
-        height: 34px;
-        padding-left: 34px;
+        min-width: 0;
       }
-      .btn {
-        height: 34px;
+      mat-icon[matPrefix] {
+        margin: 0 var(--pd-space-2) 0 var(--pd-space-3);
+        color: var(--pd-text-subtle);
       }
     }
     .chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: var(--pd-space-1);
+      display: block;
       padding: 0 var(--pd-space-4) var(--pd-space-2);
-    }
-    .chip {
-      height: 24px;
-      padding: 0 var(--pd-space-3);
-      font: inherit;
-      font-size: var(--pd-text-label);
-      color: var(--pd-text-muted);
-      background: none;
-      border: 1px solid var(--pd-border-strong);
-      border-radius: var(--pd-radius-pill);
-      cursor: default;
-      &:hover {
-        color: var(--pd-text);
-        background: var(--pd-hover);
-      }
-      &[aria-pressed='true'] {
-        color: var(--pd-accent);
-        background: var(--pd-accent-tint);
-        border-color: var(--pd-accent);
-      }
     }
     /* A recommendation is one line: name, what it is, the verdict, and a download that appears on hover. */
     .rec-list {

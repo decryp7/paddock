@@ -7,7 +7,8 @@ import { usageChart, type UsageMetric } from '../../shared/charts/chart-options'
 import { EChart } from '../../shared/charts/echart';
 import { bytes, clock, compact, duration, int } from '../../shared/format';
 import { LIMIT_LABEL, limitStateLook, statusTone } from '../../shared/labels';
-import { EmptyState } from '../../shared/ui/empty-state';
+import { MatIcon } from '@angular/material/icon';
+import { SuEmptyState, SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { Panel } from '../../shared/ui/panel';
 import { CacheTiles } from './cache-tiles';
 import { barWidth, limitValue, tokensOf, USAGE_RANGES, USAGE_RANGE_TEXT } from './usage-format';
@@ -22,22 +23,14 @@ const METRICS: { id: UsageMetric; label: string }[] = [
 /** One app's usage over time, where each of its limits stands, and its latest requests (metadata only). */
 @Component({
   selector: 'pw-app-usage',
-  imports: [Panel, EChart, EmptyState, CacheTiles, MatTooltipModule],
+  imports: [Panel, EChart, SuEmptyState, SuSegmentedControl, MatIcon, CacheTiles, MatTooltipModule],
   providers: [UsageStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel heading="Usage over time" icon="activity" [sub]="rangeText()" [loading]="store.loading()" [error]="store.error()" [ready]="!!store.series()" [skeletonLines]="6" (retry)="store.reload()">
       <div panel-actions class="controls">
-        <div class="seg" role="radiogroup" aria-label="Metric">
-          @for (m of metrics; track m.id) {
-            <button type="button" role="radio" [attr.aria-checked]="metric() === m.id" (click)="metric.set(m.id)">{{ m.label }}</button>
-          }
-        </div>
-        <div class="seg" role="radiogroup" aria-label="Usage range">
-          @for (r of ranges; track r) {
-            <button type="button" role="radio" [attr.aria-checked]="store.range() === r" (click)="store.select(r)">{{ r }}</button>
-          }
-        </div>
+        <pd-segmented-control label="Metric" [options]="metricSegs" [value]="metric()" (valueChange)="pickMetric($event)" />
+        <pd-segmented-control label="Usage range" [options]="rangeSegs" [value]="store.range()" (valueChange)="store.select($any($event))" />
       </div>
       @if (store.series(); as s) {
         <dl class="figures" aria-label="Totals for the range">
@@ -85,7 +78,7 @@ const METRICS: { id: UsageMetric; label: string }[] = [
 
     <pw-panel heading="Recent requests" icon="requests" [sub]="recent().length ? recent().length + ' latest' : ''" [flush]="true" [loading]="store.loading() && !store.detail()" [ready]="!!store.detail()">
       @if (recent().length === 0) {
-        <pw-empty-state icon="requests" heading="No requests yet" text="Requests from this app appear here with their model, status and size. Prompt text is never shown here." />
+        <pd-empty-state heading="No requests yet" description="Requests from this app appear here with their model, status and size. Prompt text is never shown here."><mat-icon slot="icon" svgIcon="pw:requests" aria-hidden="true" /></pd-empty-state>
       } @else {
         <table class="table recent fit">
           <colgroup>
@@ -154,32 +147,6 @@ const METRICS: { id: UsageMetric; label: string }[] = [
       flex-wrap: wrap;
       justify-content: flex-end;
       gap: var(--pd-space-2);
-    }
-    .seg {
-      display: inline-flex;
-      padding: 2px;
-      background: var(--pd-pressed);
-      border-radius: var(--pd-radius-control);
-      button {
-        height: 24px;
-        padding: 0 var(--pd-space-3);
-        font: inherit;
-        font-size: var(--pd-text-label);
-        font-weight: var(--pd-weight-medium);
-        color: var(--pd-text-muted);
-        background: none;
-        border: none;
-        border-radius: var(--pd-radius-tag);
-        cursor: default;
-        &:hover {
-          color: var(--pd-text);
-        }
-        &[aria-checked='true'] {
-          color: var(--pd-text);
-          background: var(--pd-surface-1);
-          box-shadow: var(--pd-shadow-1);
-        }
-      }
     }
     /* The totals are a row of figures on the card, not a boxed grid inside it. */
     .figures {
@@ -289,9 +256,15 @@ export class AppUsage {
   protected readonly store = inject(UsageStore);
   private readonly theme = inject(ThemeService);
 
-  protected readonly metrics = METRICS;
-  protected readonly ranges = USAGE_RANGES;
+  protected readonly metricSegs: SuSegment[] = METRICS.map((m) => ({ value: m.id, label: m.label }));
+  protected readonly rangeSegs: SuSegment[] = USAGE_RANGES.map((r) => ({ value: r, label: r }));
   protected readonly metric = signal<UsageMetric>('tokens');
+
+  /** The segmented control speaks strings: only a known metric is taken. */
+  protected pickMetric(v: string): void {
+    const m = METRICS.find((x) => x.id === v);
+    if (m) this.metric.set(m.id);
+  }
   protected readonly label = LIMIT_LABEL;
   protected readonly look = (l: LimitStatus) => limitStateLook(l.state);
   protected readonly value = (l: LimitStatus, n: number) => limitValue(l.kind, n);

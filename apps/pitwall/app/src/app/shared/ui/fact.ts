@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
+import { MatIconButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { Toasts } from '../../core/toasts';
@@ -9,7 +10,7 @@ import { Toasts } from '../../core/toasts';
  */
 @Component({
   selector: 'pw-fact',
-  imports: [MatIconModule, MatTooltipModule],
+  imports: [MatIconModule, MatTooltipModule, MatIconButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <span class="label">{{ label() }}</span>
@@ -17,7 +18,7 @@ import { Toasts } from '../../core/toasts';
       <ng-content>{{ value() }}</ng-content>
     </span>
     @if (copy() && value()) {
-      <button type="button" class="btn ghost icon sm" [attr.aria-label]="'Copy ' + label().toLowerCase()" matTooltip="Copy" (click)="copyValue()">
+      <button type="button" matIconButton class="copy" [attr.aria-label]="'Copy ' + label().toLowerCase()" matTooltip="Copy" (click)="copyValue()">
         <mat-icon svgIcon="pw:copy" aria-hidden="true" />
       </button>
     }

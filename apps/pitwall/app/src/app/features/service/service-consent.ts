@@ -2,6 +2,7 @@ import { Dialog, DialogRef } from '@angular/cdk/dialog';
 import { ChangeDetectionStrategy, Component, Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { ServiceStore } from './service.store';
+import { MatButton } from '@angular/material/button';
 
 /** What the first-run question answers with. */
 export type ConsentAnswer = 'install' | 'later' | 'decline';
@@ -24,6 +25,7 @@ export function consentDetail(platform: string): string {
  */
 @Component({
   selector: 'pw-service-consent',
+  imports: [MatButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'pw-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'pw-consent-title', 'aria-describedby': 'pw-consent-msg' },
   template: `
@@ -34,9 +36,9 @@ export function consentDetail(platform: string): string {
     </p>
     <p class="faint">{{ detail }}</p>
     <div class="row">
-      <button type="button" class="btn" (click)="ref.close('decline')">No thanks</button>
-      <button type="button" class="btn" (click)="ref.close('later')">Not now</button>
-      <button type="button" class="btn primary" cdkFocusInitial (click)="ref.close('install')">Run in the background</button>
+      <button type="button" matButton="outlined" (click)="ref.close('decline')">No thanks</button>
+      <button type="button" matButton="outlined" (click)="ref.close('later')">Not now</button>
+      <button type="button" matButton="filled" cdkFocusInitial (click)="ref.close('install')">Run in the background</button>
     </div>
   `,
   styles: `

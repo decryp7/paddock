@@ -1,18 +1,20 @@
 import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
+import { SuEmptyState } from '@decryp7/paddock-ui';
 import { MatIconModule } from '@angular/material/icon';
 import { LiveStore } from '../../core/live.store';
 import { ago } from '../../shared/format';
 import { REASON_LABEL, eventIcon, severityTone } from '../../shared/labels';
-import { EmptyState } from '../../shared/ui/empty-state';
 
 /** What Pitwall did and why: loads and releases (with the reason), restarts, errors, downloads, pairings. */
 @Component({
   selector: 'pw-events-feed',
-  imports: [MatIconModule, EmptyState],
+  // The feed scrolls on its own: a keyboard user can focus it and scroll it (axe scrollable-region-focusable).
+  host: { tabindex: '0', role: 'region', 'aria-label': 'Event feed' },
+  imports: [MatIconModule, SuEmptyState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (live.events().length === 0) {
-      <pw-empty-state icon="activity" heading="No events yet" text="Loads, releases and errors show up here as they happen." />
+      <pd-empty-state heading="No events yet" description="Loads, releases and errors show up here as they happen."><mat-icon slot="icon" svgIcon="pw:activity" aria-hidden="true" /></pd-empty-state>
     }
     <ol aria-label="Events" aria-live="off">
       @for (e of live.events().slice(0, limit()); track e.id) {

@@ -36,7 +36,7 @@ const SCREENS: Screen[] = [
       const panel = p.getByRole('complementary', { name: 'Qwen3.5 9B' });
       await expect(panel).toBeVisible();
       // Pin it to the CUDA build, as a user holding one model on a known-good engine would.
-      await panel.getByRole('button', { name: /^Engine build for Qwen3.5 9B/ }).click();
+      await panel.getByRole('combobox', { name: /^Engine build for Qwen3.5 9B/ }).click();
       await p.getByRole('option', { name: /^Pin to CUDA 13/ }).click();
       await expect(panel.locator('.pinned-build')).toBeVisible();
     },
@@ -228,7 +228,7 @@ for (const theme of ['dark', 'light'] as const) {
       await s.prepare?.(page);
       await page.clock.runFor(1500);
       // No toast, tooltip or hover state in a documentation shot.
-      for (const close of await page.locator('pw-toast-host button[aria-label="Dismiss"]').all()) await close.click();
+      for (const close of await page.locator('pd-notification-host [data-testid="notification-dismiss"]').all()) await close.click();
       await page.mouse.move(WIDTH - 2, 2);
       // Focusing a control at a card's edge can scroll a table sideways, which slices its first column in the shot.
       await page.evaluate(() => document.querySelectorAll('*').forEach((e) => e.scrollLeft > 0 && (e.scrollLeft = 0)));

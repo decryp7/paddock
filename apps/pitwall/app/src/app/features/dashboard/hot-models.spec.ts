@@ -79,11 +79,11 @@ describe('HotModels', () => {
 
   it('shows the empty state with a link to the library, or a bare one when compact', async () => {
     const full = await mountWith([]);
-    expect(full.el.querySelector('pw-empty-state')!.textContent).toContain('No model loaded');
+    expect(full.el.querySelector('pd-empty-state')!.textContent).toContain('No model loaded');
     expect(full.el.querySelector('a[href="/models"]')).not.toBeNull();
     TestBed.resetTestingModule();
     const compact = await mountWith([], { compact: true });
-    expect(compact.el.querySelector('pw-empty-state')!.textContent).toContain('No model loaded');
+    expect(compact.el.querySelector('pd-empty-state')!.textContent).toContain('No model loaded');
     expect(compact.el.querySelector('a[href="/models"]')).toBeNull();
   });
 

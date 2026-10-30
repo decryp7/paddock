@@ -1,7 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["vitest/globals"],
+    "types": ["vitest/globals", "@angular/localize"],
     "resolveJsonModule": true
   },
   "include": ["src/**/*.d.ts", "src/**/*.spec.ts", "src/test-setup.ts", "src/testing/**/*.ts"]

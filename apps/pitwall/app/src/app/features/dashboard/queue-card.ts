@@ -5,13 +5,15 @@ import type { Job, Priority } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { compact, duration } from '../../shared/format';
 import { PRIORITY_LABEL } from '../../shared/labels';
+import { MatIconButton } from '@angular/material/button';
+import { MatProgressBar } from '@angular/material/progress-bar';
 
 const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
 
 /** Queue depth by priority and the running and waiting jobs, each cancellable. */
 @Component({
   selector: 'pw-queue-card',
-  imports: [MatIconModule, MatTooltipModule],
+  imports: [MatProgressBar, MatIconButton, MatIconModule, MatTooltipModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (live.queue(); as q) {
@@ -26,7 +28,7 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
       <ul class="jobs" aria-label="Jobs">
         @for (j of jobs().slice(0, max()); track j.id) {
           <li>
-            <span class="job-dot" [attr.data-state]="j.state" [attr.aria-label]="j.state === 'running' ? 'Running' : 'Waiting'"></span>
+            <span class="job-dot" role="img" [attr.data-state]="j.state" [attr.aria-label]="j.state === 'running' ? 'Running' : 'Waiting'"></span>
             <div class="main">
               <div class="line1">
                 <span class="app">{{ appName(j.appId) }}</span>
@@ -44,12 +46,10 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
                 }
               </div>
               @if (j.progress !== null && j.state === 'running') {
-                <div class="meter prog" role="progressbar" [attr.aria-valuenow]="pct(j)" aria-valuemin="0" aria-valuemax="100" [attr.aria-label]="'Progress of ' + appName(j.appId) + ' ' + j.kind">
-                  <span [style.width.%]="pct(j)"></span>
-                </div>
+                <mat-progress-bar class="prog" mode="determinate" [value]="pct(j)" [attr.aria-label]="'Progress of ' + appName(j.appId) + ' ' + j.kind" />
               }
             </div>
-            <button type="button" class="btn ghost icon sm cancel" [attr.aria-label]="'Cancel ' + appName(j.appId) + ' ' + j.kind" matTooltip="Cancel request" [disabled]="live.isBusy()('job:' + j.id)" (click)="live.cancelJob(j.id)">
+            <button type="button" matIconButton class="cancel" [attr.aria-label]="'Cancel ' + appName(j.appId) + ' ' + j.kind" matTooltip="Cancel request" [disabled]="live.isBusy()('job:' + j.id)" (click)="live.cancelJob(j.id)">
               <mat-icon svgIcon="pw:close" aria-hidden="true" />
             </button>
           </li>
@@ -152,7 +152,8 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
       color: var(--pd-text-subtle);
     }
     .prog {
-      height: 3px;
+      --mat-progress-bar-active-indicator-height: 3px;
+      --mat-progress-bar-track-height: 3px;
       margin-top: 5px;
     }
   `,

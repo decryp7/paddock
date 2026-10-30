@@ -5,10 +5,10 @@
       <p class="sub">Try local models. Nothing you type here leaves this computer.</p>
     </div>
     <div class="actions">
-      <button type="button" class="btn" [attr.aria-pressed]="store.compare()" [class.on]="store.compare()" (click)="store.setCompare(!store.compare())">
+      <button type="button" matButton="outlined" [attr.aria-pressed]="store.compare()" [class.on]="store.compare()" (click)="store.setCompare(!store.compare())">
         <mat-icon svgIcon="pw:compare" aria-hidden="true" />Compare
       </button>
-      <button type="button" class="btn ghost" [disabled]="store.empty()" (click)="store.clear()"><mat-icon svgIcon="pw:trash" aria-hidden="true" />Clear</button>
+      <button type="button" matButton [disabled]="store.empty()" (click)="store.clear()"><mat-icon svgIcon="pw:trash" aria-hidden="true" />Clear</button>
     </div>
   </header>
 
@@ -23,8 +23,7 @@
           @let pane = store.panes()[i];
           <section class="pane" [attr.aria-label]="store.compare() ? 'Conversation ' + (i + 1) : 'Conversation'">
             <header class="pane-head">
-              <label class="sr-only" [for]="'pg-model-' + i">Model{{ store.compare() ? ' ' + (i + 1) : '' }}</label>
-              <pw-select class="model" [inputId]="'pg-model-' + i" [label]="'Model' + (store.compare() ? ' ' + (i + 1) : '')" [options]="modelOptions()" [value]="pane.modelId ?? ''" [disabled]="store.streaming()" (changed)="store.setModel(i, $event)" />
+              <pd-select class="model" [inputId]="'pg-model-' + i" [ariaLabel]="'Model' + (store.compare() ? ' ' + (i + 1) : '')" [options]="modelOptions()" [value]="pane.modelId ?? ''" [disabled]="store.streaming()" (valueChange)="store.setModel(i, $event)" />
               @if (model(pane.modelId); as m) {
                 <span class="status" [attr.data-tone]="m.loaded ? 'ok' : 'muted'" [matTooltip]="m.loaded ? 'Loaded: answers start at once' : 'Not loaded: the first answer includes a cold start'">{{ m.loaded ? 'Hot' : 'Cold' }}</span>
                 <span class="faint meta">{{ size(m.sizeBytes) }}{{ m.paramsB ? ' · ' + m.paramsB + 'B' : '' }}</span>
@@ -76,22 +75,24 @@
       </div>
 
       <form class="composer" (submit)="$event.preventDefault(); send()">
-        <label class="sr-only" for="pg-prompt">Message</label>
-        <textarea
-          id="pg-prompt"
-          class="input"
-          rows="2"
-          [placeholder]="store.compare() ? 'Message both models…' : 'Message the model…'"
-          [value]="prompt()"
-          (input)="prompt.set(value($event))"
-          (keydown)="onKey($event)"
-        ></textarea>
+        <mat-form-field class="prompt">
+          <textarea
+            matInput
+            id="pg-prompt"
+            aria-label="Message"
+            rows="2"
+            [placeholder]="store.compare() ? 'Message both models…' : 'Message the model…'"
+            [value]="prompt()"
+            (input)="prompt.set(value($event))"
+            (keydown)="onKey($event)"
+          ></textarea>
+        </mat-form-field>
         <div class="composer-row">
           <span class="faint hint"><kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line</span>
           @if (store.streaming()) {
-            <button type="button" class="btn" (click)="store.stop()"><mat-icon svgIcon="pw:stop" aria-hidden="true" />Stop</button>
+            <button type="button" matButton="outlined" (click)="store.stop()"><mat-icon svgIcon="pw:stop" aria-hidden="true" />Stop</button>
           } @else {
-            <button type="submit" class="btn primary" [disabled]="!prompt().trim() || !store.chatModels().length"><mat-icon svgIcon="pw:send" aria-hidden="true" />Send</button>
+            <button type="submit" matButton="filled" [disabled]="!prompt().trim() || !store.chatModels().length"><mat-icon svgIcon="pw:send" aria-hidden="true" />Send</button>
           }
         </div>
       </form>
@@ -99,22 +100,24 @@
 
     <aside class="params" aria-label="Parameters">
       <pw-panel heading="Parameters" icon="sliders" [loading]="store.loading()" [ready]="!store.loading() || store.models().length > 0">
-        <div class="field">
-          <label for="pg-system">System prompt</label>
-          <textarea id="pg-system" class="input" rows="5" placeholder="You are a helpful assistant." [value]="store.system()" (input)="store.setSystem(value($event))"></textarea>
-        </div>
+        <mat-form-field class="field">
+          <mat-label>System prompt</mat-label>
+          <textarea matInput id="pg-system" rows="5" placeholder="You are a helpful assistant." [value]="store.system()" (input)="store.setSystem(value($event))"></textarea>
+        </mat-form-field>
         <div class="field">
           <div class="field-head">
             <label for="pg-temp">Temperature</label>
             <output class="num" for="pg-temp">{{ store.temperature().toFixed(2) }}</output>
           </div>
-          <input id="pg-temp" class="range" type="range" min="0" max="2" step="0.05" [value]="store.temperature()" (input)="store.setTemperature(+value($event))" />
+          <mat-slider class="range" min="0" max="2" step="0.05">
+            <input matSliderThumb id="pg-temp" [value]="store.temperature()" (input)="store.setTemperature(+value($event))" />
+          </mat-slider>
           <div class="scale faint"><span>Precise</span><span>Creative</span></div>
         </div>
-        <div class="field">
-          <label for="pg-max">Max tokens</label>
-          <input id="pg-max" class="input num" type="number" min="1" max="32768" [value]="store.maxTokens()" (change)="store.setMaxTokens(+value($event))" />
-        </div>
+        <mat-form-field class="field">
+          <mat-label>Max tokens</mat-label>
+          <input matInput id="pg-max" class="num" type="number" min="1" max="32768" [value]="store.maxTokens()" (change)="store.setMaxTokens(+value($event))" />
+        </mat-form-field>
         <p class="faint note">Requests run as <b>Pitwall</b> at interactive priority and show up in Requests.</p>
       </pw-panel>
     </aside>

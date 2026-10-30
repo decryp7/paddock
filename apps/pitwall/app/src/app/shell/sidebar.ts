@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterLink, RouterLinkActive } from '@angular/router';
@@ -38,7 +39,7 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
 /** The window's navigation: product, serving state, screens, memory at a glance and the theme switch. */
 @Component({
   selector: 'pw-sidebar',
-  imports: [RouterLink, RouterLinkActive, MatIconModule, MatTooltipModule],
+  imports: [MatButtonToggleGroup, MatButtonToggle, RouterLink, RouterLinkActive, MatIconModule, MatTooltipModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="brand" data-tauri-drag-region>
@@ -91,13 +92,13 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
           <mat-icon svgIcon="pw:settings" aria-hidden="true" />
           <span class="label">Settings</span>
         </a>
-        <div class="theme" role="radiogroup" aria-label="Theme">
+        <mat-button-toggle-group class="theme" hideSingleSelectionIndicator aria-label="Theme" [value]="theme.choice()" (change)="theme.set($event.value)">
           @for (t of themes; track t.value) {
-            <button type="button" role="radio" [attr.aria-checked]="theme.choice() === t.value" [attr.aria-label]="t.label" [matTooltip]="t.label" (click)="theme.set(t.value)">
+            <mat-button-toggle [value]="t.value" [aria-label]="t.label" [matTooltip]="t.label">
               <mat-icon [svgIcon]="'pw:' + t.icon" aria-hidden="true" />
-            </button>
+            </mat-button-toggle>
           }
-        </div>
+        </mat-button-toggle-group>
       </div>
     </div>
   `,
@@ -262,32 +263,18 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
         flex: 1;
       }
     }
+    /* The theme switch: three icon segments, as small as the sidebar's footer row. */
     .theme {
-      display: flex;
-      padding: 2px;
-      background: var(--pd-hover);
-      border-radius: var(--pd-radius-control);
-      button {
-        display: grid;
-        place-items: center;
-        width: 24px;
-        height: 22px;
-        padding: 0;
-        color: var(--pd-text-subtle);
-        background: none;
-        border: none;
-        border-radius: var(--pd-radius-tag);
-        cursor: default;
-        mat-icon {
-          width: 13px;
-          height: 13px;
-        }
-        &[aria-checked='true'] {
-          color: var(--pd-text);
-          background: var(--pd-surface-1);
-          box-shadow: var(--pd-shadow-1);
-        }
+      --mat-button-toggle-height: 24px;
+      --mat-button-toggle-label-text-line-height: 24px;
+      flex: none;
+      mat-icon {
+        width: 13px;
+        height: 13px;
       }
+    }
+    .theme ::ng-deep .mat-button-toggle-label-content {
+      padding: 0 6px;
     }
   `,
 })
