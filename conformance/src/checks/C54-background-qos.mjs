@@ -578,7 +578,7 @@ export default {
   run(ctx) {
     const out = [];
     const fix =
-      'Lower work a caller may wait for gently (rule 52): `QOS_CLASS_UTILITY` on macOS, nice 10 on Linux, `THREAD_PRIORITY_BELOW_NORMAL` on Windows; work nobody waits on carries a `conformance: background-qos — <why nobody waits on it>` comment.';
+      'Give the thread its rule 52 role: bulk work (long, with progress and Cancel) runs at `QOS_CLASS_UTILITY` on macOS, nice 10 on Linux, `THREAD_PRIORITY_BELOW_NORMAL` on Windows; live work (a person waits on it within a deadline or for a screen to fill) may use the first two but stays at the normal level on Windows; work nobody waits on carries a `conformance: background-qos — <why nobody waits on it>` comment.';
     for (const f of ctx.files()) {
       if (!kindOf(f)) continue;
       const text = ctx.read(f);
