@@ -406,12 +406,17 @@ mod updater_tests {
     /// a throw-away key) may, and only over https, so a stray variable cannot point a shipped copy somewhere else.
     #[test]
     fn only_a_test_build_may_take_its_feed_from_the_build() {
-        let other = Some("https://192.168.64.1:8089/latest.json");
+        const FEED: &str = "https://192.168.64.1:8089/latest.json";
+        let other = Some(FEED);
         assert_eq!(update_feed("1.0.0", other), UPDATE_FEED, "a release build ignores the override");
         assert_eq!(update_feed("1.0.0-rc.1", other), UPDATE_FEED, "so does a release candidate");
-        assert_eq!(update_feed("1.0.0-test.1", other), other.unwrap());
+        assert_eq!(update_feed("1.0.0-test.1", other), FEED);
         assert_eq!(update_feed("1.0.0-test.1", None), UPDATE_FEED);
-        assert_eq!(update_feed("1.0.0-test.1", Some("http://192.168.64.1/latest.json")), UPDATE_FEED, "https only");
+        assert_eq!(
+            update_feed("1.0.0-test.1", Some("http://192.168.64.1/latest.json")),
+            UPDATE_FEED,
+            "https only"
+        );
         assert_eq!(update_feed("1.0.0-test.1", Some("")), UPDATE_FEED);
     }
 
