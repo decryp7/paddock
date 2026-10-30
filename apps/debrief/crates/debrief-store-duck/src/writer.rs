@@ -1,9 +1,15 @@
 //! The import writer (ADR 0014 R2b notes): every parse thread writes its own Parquet segment (no single
 //! writer to wait for), and one catalog connection records sources, diagnostics and finished segments.
 //!
-//! - Ids: a segment reserves a block of [`SEGMENT_ROWS`] ids when it opens; the next free id is kept in
-//!   `meta` with every listing (and as soon as a block is reserved when batches are observed, since the
-//!   observer sees ids before they are listed), so listed ids are never reused, even after a crash.
+//! - Ids: a segment reserves a block of ids (its segment size, [`SEGMENT_ROWS`] by default) when it opens. The
+//!   next free id is persisted in `meta` ahead of use: the sink persists a reserve of [`RESERVE_BLOCKS`] blocks
+//!   when it starts and with every listing, and a segment that would open beyond the persisted mark persists a
+//!   new mark first, so no id handed out (to a segment, or to `observe` before it is listed) is ever handed out
+//!   again, even after a crash. The last listing persists the exact next id.
+//! - Locks are taken in one order: a parse thread's slot, then `catalog`, then `ids` (`write` holds its slot
+//!   while `register` tries `catalog` and `open_segment` takes `ids`; `finish` empties the slots before it
+//!   lists). `sources`, `pending`, `shifts`, `keep` and `fingerprints` are leaves: nothing is taken while one
+//!   is held. No lock is held across an `observe` call (ADR 0062 section 3; the 16-thread test checks it).
 //! - Visibility: a source becomes ready (visible through the `events` view) when it is finished and every
 //!   segment holding its rows has been listed. A segment is closed when it is full, when it has been open
 //!   for [`SEGMENT_AGE`](crate::segments::SEGMENT_AGE), or at the end of the import; closed segments are
@@ -29,6 +35,10 @@ use std::time::{Duration, Instant};
 
 /// Closed segments are listed (and the view rebound) at most this often while importing.
 pub const LIST_EVERY: Duration = Duration::from_secs(1);
+
+/// Id blocks persisted ahead of use (see the module docs): a segment opens without touching the catalog while
+/// its block lies below the persisted mark.
+pub const RESERVE_BLOCKS: u64 = 64;
 
 pub(crate) fn meta_u64(conn: &Connection, key: &str) -> u64 {
     conn.query_row("SELECT value FROM meta WHERE key = ?", params![key], |r| r.get::<_, String>(0))
@@ -195,6 +205,8 @@ struct SourceState {
 struct Ids {
     event: u64,
     source: u32,
+    /// The next event id persisted in `meta`: blocks below it are handed out without touching the catalog.
+    persisted: u64,
 }
 
 /// Receives each batch once it has its ids (the full-text indexer).
@@ -216,6 +228,8 @@ pub struct SegmentSink {
     list_every: Duration,
     /// [`SEGMENT_AGE`](crate::segments::SEGMENT_AGE) (tests change it: a wall-clock age makes row counts depend on load).
     segment_age: Duration,
+    /// Rows (ids) of a segment, [`SEGMENT_ROWS`] (tests make it tiny to open and list many segments).
+    segment_rows: u64,
     generation: Arc<AtomicU64>,
     /// Distinguishes the files of rewritten segments.
     file_generation: u64,
@@ -247,9 +261,13 @@ impl SegmentSink {
             [],
             |r| Ok((r.get::<_, u64>(0)?, r.get::<_, u32>(1)?)),
         )?;
+        let event = meta_u64(&conn, "next_id").max(max_end);
+        let persisted = event.saturating_add(RESERVE_BLOCKS * SEGMENT_ROWS);
+        set_meta(&conn, "next_id", persisted)?;
         let ids = Ids {
-            event: meta_u64(&conn, "next_id").max(max_end),
+            event,
             source: u32::try_from(meta_u64(&conn, "next_source")).unwrap_or(u32::MAX).max(max_source),
+            persisted,
         };
         let file_generation = meta_u64(&conn, "file_generation") + 1;
         set_meta(&conn, "file_generation", file_generation)?;
@@ -265,6 +283,7 @@ impl SegmentSink {
             pending: Mutex::new((Vec::new(), None)),
             list_every: LIST_EVERY,
             segment_age: SEGMENT_AGE,
+            segment_rows: SEGMENT_ROWS,
             generation,
             file_generation,
             observe,
@@ -303,16 +322,42 @@ impl SegmentSink {
         &self.slots[i]
     }
 
-    /// A new segment with a fresh id block of at least `rows` ids.
+    /// Ids persisted ahead of use (see the module docs).
+    fn reserve(&self) -> u64 {
+        RESERVE_BLOCKS.saturating_mul(self.segment_rows)
+    }
+
+    /// A new segment with a fresh id block of at least `rows` ids. Takes only `ids` while the block lies below the
+    /// persisted mark; beyond it, `catalog` then `ids` (the lock order), to persist a new mark first.
     fn open_segment(&self, rows: u64) -> Result<SegmentWriter> {
-        let mut ids = lock(&self.ids);
-        let first = ids.event;
-        let end = first + SEGMENT_ROWS.max(rows);
-        if self.observe.is_some() {
-            set_meta(&lock(&self.catalog), "next_id", end)?;
-        }
-        ids.event = end;
-        drop(ids);
+        let size = self.segment_rows.max(rows);
+        let block = |ids: &Ids| -> Result<(u64, u64)> {
+            let first = ids.event;
+            Ok((first, first.checked_add(size).context("out of event ids")?))
+        };
+        let below_mark = {
+            let mut ids = lock(&self.ids);
+            let (first, end) = block(&ids)?;
+            (end <= ids.persisted).then(|| {
+                ids.event = end;
+                (first, end)
+            })
+        };
+        let (first, end) = match below_mark {
+            Some(b) => b,
+            None => {
+                let conn = lock(&self.catalog);
+                let mut ids = lock(&self.ids);
+                let (first, end) = block(&ids)?;
+                if end > ids.persisted {
+                    let mark = end.saturating_add(self.reserve());
+                    set_meta(&conn, "next_id", mark)?;
+                    ids.persisted = mark;
+                }
+                ids.event = end;
+                (first, end)
+            }
+        };
         SegmentWriter::create(&self.seg_dir, &self.schema, first, end, self.file_generation)
     }
 
@@ -338,9 +383,11 @@ impl SegmentSink {
     }
 
     /// Lists closed segments and makes the sources they complete ready, in one catalog transaction (a
-    /// commit costs tens of milliseconds); `last` also persists the next source id.
+    /// commit costs tens of milliseconds), and persists the next event id with a new reserve; `last` persists the
+    /// exact next event id and the next source id. The caller holds `catalog`.
     fn list(&self, conn: &Connection, segs: Vec<Segment>, last: bool) -> Result<()> {
         let ready = completed(&mut lock(&self.sources), &segs);
+        let mut mark = 0;
         conn.execute_batch("BEGIN TRANSACTION")?;
         let done = (|| -> Result<()> {
             insert_segments(conn, &segs, |seg| (seg.rows, false))?;
@@ -349,14 +396,21 @@ impl SegmentSink {
                 let ids = lock(&self.ids);
                 (ids.event, ids.source)
             };
-            set_meta(conn, "next_id", event)?;
+            mark = if last { event } else { event.saturating_add(self.reserve()) };
+            set_meta(conn, "next_id", mark)?;
             if last {
                 set_meta(conn, "next_source", source as u64)?;
             }
             refresh_view(conn, &self.dir, &self.schema)
         })();
         match done {
-            Ok(()) => conn.execute_batch("COMMIT")?,
+            Ok(()) => {
+                conn.execute_batch("COMMIT")?;
+                if !last {
+                    let mut ids = lock(&self.ids);
+                    ids.persisted = ids.persisted.max(mark);
+                }
+            }
             Err(e) => {
                 let _ = conn.execute_batch("ROLLBACK");
                 for seg in &segs {
@@ -777,6 +831,8 @@ mod tests {
         let mut w = sink_for(&c, &dir, Some(seen.clone()), THREADS);
         w.list_every = Duration::ZERO;
         w.segment_age = Duration::ZERO;
+        // Tiny segments: blocks run past the persisted mark often, so segments also open through `catalog`.
+        w.segment_rows = 8;
         let w = Arc::new(w);
         let ids: Vec<SourceId> = (0..THREADS * SOURCES_PER_THREAD)
             .map(|i| {
