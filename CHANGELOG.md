@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-chromium`: an interrupted socket read is not a closed connection
+- The DevTools reader (and the fake browser) took `EINTR` (`ErrorKind::Interrupted`) for the end of the connection. Linux ends a socket read that has a timeout with it after a stop and continue or a handled signal (signal(7)), so every page then reported closed. Interrupted now counts as idle like a timeout, for reads and sends (`is_transient`); EOF and reset errors still end the connection.
+
 ### `paddock-jobs`: `WalkOptions::with_modified`
 - `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
 

@@ -794,3 +794,95 @@ fn going_back_ends_at_once_when_the_window_is_closed_meanwhile() {
 fn the_page_size_cap_is_sixteen_mebibytes() {
     assert_eq!(MAX_HTML, 16 << 20);
 }
+
+/// Kills the stopped-and-continued child's whole process group (the child and the fake browser it started) when
+/// dropped, also on a panic of the parent: continue first, then kill and reap.
+#[cfg(target_os = "linux")]
+struct ChildGuard(std::process::Child);
+
+#[cfg(target_os = "linux")]
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        // Signal only a child that is still unreaped: once it was waited for, its pid may belong to another process.
+        if let Ok(None) = self.0.try_wait() {
+            // SAFETY: plain signals to the process group this guard's still-unreaped child leads (set at spawn).
+            unsafe {
+                libc::killpg(self.0.id() as i32, libc::SIGCONT);
+                libc::killpg(self.0.id() as i32, libc::SIGKILL);
+            }
+        }
+        let _ = self.0.wait();
+    }
+}
+
+/// Regression: Linux ends a socket read that has a timeout with EINTR when the process is stopped and continued
+/// (signal(7)), and the DevTools reader took that for the end of the connection, so every page said closed. The test
+/// runs itself again as a child process (so no other test is stopped), stops and continues the child a few times while
+/// it holds a connection to the fake browser, then lets it check the connection. They talk through files in a
+/// temporary folder: `ready` (the child's connection is up) and `go` (the stops are over).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_stopped_and_continued_process_keeps_its_browser_connection() {
+    const CHILD: &str = "PADDOCK_CHROMIUM_STOP_CHILD";
+    // The wait is on the condition; the short sleep only keeps the poll from spinning (a hang guard bounds it).
+    let wait_for = |what: &str, cond: &mut dyn FnMut() -> bool| {
+        let end = Instant::now() + Duration::from_secs(20);
+        while !cond() {
+            // conformance: hang-guard — a stuck child must fail the test, not hang it
+            assert!(Instant::now() < end, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    if let Some(dir) = std::env::var_os(CHILD).map(PathBuf::from) {
+        let f = Fixture::new(Mode::Obey, 1);
+        let mut b = f.launch();
+        let p = b.start_page().unwrap();
+        std::fs::write(dir.join("ready"), "").unwrap();
+        wait_for("the parent said go", &mut || dir.join("go").exists());
+        assert_eq!(b.gone(&p), None, "the connection outlived the stops");
+        assert!(p.exists().unwrap());
+        return;
+    }
+    use std::os::unix::process::CommandExt;
+    let dir = tempfile::tempdir().unwrap();
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "launch::tests::a_stopped_and_continued_process_keeps_its_browser_connection",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD, dir.path())
+        .stdin(std::process::Stdio::null())
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    let mut child = ChildGuard(child);
+    wait_for("the child to be ready", &mut || {
+        assert!(
+            child.0.try_wait().unwrap().is_none(),
+            "the child ended before it was ready"
+        );
+        dir.path().join("ready").exists()
+    });
+    // The child's state in /proc: `T` once the stop took effect.
+    let stopped = || {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|s| s.rsplit_once(") ").map(|(_, rest)| rest.starts_with('T')))
+            .unwrap_or(false)
+    };
+    let kill = |sig: i32| assert_eq!(unsafe { libc::kill(pid as i32, sig) }, 0);
+    for _ in 0..5 {
+        kill(libc::SIGSTOP);
+        wait_for("the child to stop", &mut || stopped());
+        kill(libc::SIGCONT);
+        wait_for("the child to run again", &mut || !stopped());
+    }
+    std::fs::write(dir.path().join("go"), "").unwrap();
+    assert!(
+        child.0.wait().unwrap().success(),
+        "the child's checks failed (its output is above)"
+    );
+}

@@ -189,15 +189,20 @@ type Ws = tungstenite::WebSocket<TcpStream>;
 fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
     'outer: while !inner.closed.load(Ordering::Acquire) {
         while let Ok(m) = rx.try_recv() {
-            if ws.send(Message::text(m)).is_err() {
-                break 'outer;
+            match ws.send(Message::text(m)) {
+                Ok(()) => {}
+                // The frame is queued; the next read or send writes it (tungstenite's `send`).
+                Err(tungstenite::Error::Io(e)) if is_transient(e.kind()) => {}
+                Err(_) => break 'outer,
             }
         }
         match ws.read() {
             Ok(Message::Text(t)) => dispatch(&inner, t.as_str()),
             Ok(Message::Close(_)) => break,
             Ok(_) => {}
-            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            // A read interrupted by a signal is not the end of the connection: Linux does not restart a socket read with
+            // a timeout after one (signal(7)), and the stop and continue of a stalled process is one.
+            Err(tungstenite::Error::Io(e)) if is_transient(e.kind()) => {}
             Err(_) => break,
         }
     }
@@ -205,6 +210,13 @@ fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
     lock(&inner.pending).clear();
     inner.cv.notify_all();
     let _ = ws.close(None);
+}
+
+/// A socket read or write that ended without an error of the connection: a timeout, or a signal. EOF and reset errors
+/// are not transient.
+pub(crate) fn is_transient(kind: std::io::ErrorKind) -> bool {
+    use std::io::ErrorKind::{Interrupted, TimedOut, WouldBlock};
+    matches!(kind, WouldBlock | TimedOut | Interrupted)
 }
 
 /// Whether an event goes into the bounded log. Network events are only wanted for documents (a failed load's trace,
