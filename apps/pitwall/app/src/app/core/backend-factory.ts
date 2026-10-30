@@ -9,12 +9,13 @@ import { withTimeout } from './timeout-backend';
  * fail, `?mock-empty` starts with nothing, `?mock-static` stops the simulated live updates, `?mock-down` takes the server
  * down (the service controls keep working), `?mock-startfailed` shows launchd refusing the service after an update,
  * `?mock-consent` shows the first-run service question, `?mock-updates` offers model updates, `?mock-install` shows
- * llama.cpp installing itself, `?mock-quit` opens the "Quit Pitwall?" question and `?mock-clean` leaves no old files on
- * disk.
+ * llama.cpp installing itself, `?mock-quit` opens the quit question, `?mock-clean` leaves no old files on
+ * disk and `?mock-os=windows` (or `linux`) words the background service for that OS.
  */
 export function mockOptionsFrom(search: string): MockOptions {
   const q = new URLSearchParams(search);
   const fail = q.get('mock-fail');
+  const os = q.get('mock-os');
   return {
     latencyMs: q.has('mock-fast') ? 0 : 120,
     autoTick: !q.has('mock-static'),
@@ -28,6 +29,7 @@ export function mockOptionsFrom(search: string): MockOptions {
     installing: q.has('mock-install'),
     noLeftovers: q.has('mock-clean'),
     quitAsk: q.has('mock-quit'),
+    ...(os === 'windows' || os === 'linux' || os === 'macos' ? { platform: os } : {}),
     failing: fail ? (fail.split(',') as (keyof PitwallBackend)[]) : [],
   };
 }

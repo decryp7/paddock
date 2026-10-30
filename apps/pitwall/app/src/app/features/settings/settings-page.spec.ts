@@ -3,25 +3,23 @@ import { MockBackend } from '../../core/mock-backend';
 import { LiveStore } from '../../core/live.store';
 import { Toasts } from '../../core/toasts';
 import { button, dialogsAnswering, render, settle } from '../../../testing/render';
-import { OWN_TOAST_HOST, SettingsPage, parseNumber } from './settings-page';
+import { OWN_TOAST_HOST, SettingsPage, checkNumber } from './settings-page';
+import { SETTINGS_SAVE_DELAY, SettingsStore } from './settings.store';
 
-describe('parseNumber', () => {
-  it('clamps, and rejects empty or non-numeric input', () => {
-    expect(parseNumber('5', 1, 10)).toBe(5);
-    expect(parseNumber('50', 1, 10)).toBe(10);
-    expect(parseNumber('-3', 1, 10)).toBe(1);
-    expect(parseNumber('  ')).toBeNull();
-    expect(parseNumber('abc')).toBeNull();
-    expect(parseNumber('Infinity')).toBeNull();
+describe('checkNumber', () => {
+  it('takes a number in range and says what to fix otherwise', () => {
+    expect(checkNumber('5', 1, 10)).toEqual({ ok: true, value: 5 });
+    expect(checkNumber('2.5', 0, 10)).toEqual({ ok: true, value: 2.5 });
+    for (const bad of ['50', '-3', '  ', 'abc', 'Infinity']) expect(checkNumber(bad, 1, 10)).toEqual({ ok: false, error: 'Enter a number from 1 to 10.' });
   });
 });
 
 describe('SettingsPage', () => {
   /** How the confirmation's window answers (`true`: the affirmative). */
   let confirmAnswer = true;
-  async function setup(backend = new MockBackend()) {
+  async function setup(backend = new MockBackend(), saveDelay = 0) {
     const dialogs = dialogsAnswering(() => (confirmAnswer ? true : undefined));
-    TestBed.configureTestingModule({ providers: [dialogs] });
+    TestBed.configureTestingModule({ providers: [dialogs, { provide: SETTINGS_SAVE_DELAY, useValue: saveDelay }] });
     const r = await render(SettingsPage, backend);
     return { ...r, toasts: TestBed.inject(Toasts), opened: dialogs.opened };
   }
@@ -32,6 +30,22 @@ describe('SettingsPage', () => {
     i.dispatchEvent(new Event('change'));
     await settle(fixture);
   }
+  /** Waits for the page's own save of what was edited (it saves by itself a moment after each edit). */
+  async function saved(fixture: Parameters<typeof settle>[0]) {
+    await settle(fixture);
+    await fixture!.debugElement.injector.get(SettingsStore).flush();
+    await settle(fixture);
+  }
+  /** Chooses `label` in the pd-select whose trigger has id `id`. */
+  async function pick(fixture: Parameters<typeof settle>[0], el: HTMLElement, id: string, label: string) {
+    el.querySelector<HTMLElement>('#' + id)!.click();
+    await settle(fixture);
+    const panels = Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container .mat-mdc-select-panel'));
+    Array.from(panels.at(-1)!.querySelectorAll<HTMLElement>('mat-option'))
+      .find((o) => o.textContent!.trim() === label)!
+      .click();
+    await settle(fixture);
+  }
   const switchOf = (el: HTMLElement, labelId: string) => el.querySelector<HTMLButtonElement>(`button[aria-labelledby="${labelId}"], [aria-labelledby="${labelId}"] button`)!;
 
   beforeEach(() => {
@@ -39,9 +53,10 @@ describe('SettingsPage', () => {
     confirmAnswer = true;
   });
 
-  it('renders every section from the loaded settings as the Settings window’s Pitwall page, with no save bar', async () => {
+  it('renders every section from the loaded settings as the Settings window’s Pitwall page, with no save bar or save wording', async () => {
     const { el } = await setup();
     expect(el.querySelector('h2.pd-title')?.textContent).toBe('Pitwall');
+    expect(el.textContent).not.toMatch(/when you save|unsaved|Save changes/i);
     expect(el.querySelector('h1')).toBeNull();
     for (const id of ['general', 'server', 'memory', 'network', 'model-updates', 'privacy', 'service']) expect(el.querySelector('#set-' + id)).not.toBeNull();
     // Appearance and app updates are the shell's pages of the window: no theme switch and no Updates section here.
@@ -54,6 +69,8 @@ describe('SettingsPage', () => {
     // Rule 47: every number field is a Material field, no native select or legacy button is left.
     for (const id of ['srv-port', 'srv-max', 'mem-idle', 'prv-ret']) expect(input(el, id).closest('mat-form-field')).not.toBeNull();
     expect(el.querySelector('select, [class*="btn"]')).toBeNull();
+    // Every immediate setting is a switch or a select: no segmented toggles or radio cards are left.
+    expect(el.querySelector('mat-button-toggle-group, [role="radio"]')).toBeNull();
   });
 
   it('in a window of its own reads the overview itself and shows its confirmations there', async () => {
@@ -82,6 +99,13 @@ describe('SettingsPage', () => {
     await settle(fixture);
     expect(el.querySelector('[data-testid="service-pill"]')?.textContent).toContain('Running');
     expect(toasts.toasts().at(-1)?.message).toBe('Pitwall now runs as a service.');
+    // Removal says what it does, not how installing works; its button keeps its label on one line.
+    const hint = el.querySelector('[data-testid="service-action-hint"]')!.textContent!;
+    expect(hint).toContain('stops running in the background');
+    expect(hint).toContain('only while Pitwall is open');
+    expect(hint).toContain('models and settings stay');
+    expect(hint).not.toContain('asks you to allow');
+    expect(getComputedStyle(button(el, 'Remove service')).whiteSpace).toBe('nowrap');
     await button(el, 'Remove service').click();
     await settle(fixture);
     expect(el.querySelector('[data-testid="service-pill"]')?.textContent).toContain('Not installed');
@@ -122,39 +146,76 @@ describe('SettingsPage', () => {
     expect(el.querySelector<HTMLButtonElement>('button[aria-labelledby="lbl-login"]')!.getAttribute('aria-checked')).toBe('true');
   });
 
-  it('edits a number, shows the save bar, and saves it', async () => {
-    const { fixture, el, toasts } = await setup();
+  it('saves an edited number by itself, with no save bar and no toast', async () => {
+    const { fixture, el, toasts, backend } = await setup();
     await change(fixture, el, 'srv-port', '12345');
-    const bar = el.querySelector('.savebar')!;
-    expect(bar.textContent).toContain('unsaved changes');
-    button(el, 'Save changes').click();
-    await settle(fixture);
     expect(el.querySelector('.savebar')).toBeNull();
-    expect(toasts.toasts().at(-1)?.message).toBe('Settings saved.');
+    await saved(fixture);
+    expect((await backend.settings()).server.port).toBe(12345);
     expect(input(el, 'srv-port').value).toBe('12345');
+    expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+    expect(toasts.toasts()).toEqual([]);
   });
 
-  it('shows the save error next to the bar and lets the user discard', async () => {
-    const { fixture, el } = await setup();
-    await change(fixture, el, 'srv-port', '80');
-    expect(input(el, 'srv-port').value).toBe('80');
-    button(el, 'Save changes').click();
-    await settle(fixture);
-    expect(el.querySelector('.savebar [role="alert"]')?.textContent).toContain('between 1024 and 65535');
-    button(el, 'Discard').click();
-    await settle(fixture);
-    expect(el.querySelector('.savebar')).toBeNull();
-    expect(input(el, 'srv-port').value).toBe('11500');
-  });
-
-  it('ignores empty or invalid numbers and clamps the rest', async () => {
+  it('a refused save says so inline, keeps the edit, and Undo change puts the saved value back', async () => {
     const { fixture, el, backend } = await setup();
-    await change(fixture, el, 'srv-port', '');
-    expect(el.querySelector('.savebar')).toBeNull();
-    await change(fixture, el, 'srv-conc', '500');
-    button(el, 'Save changes').click();
+    const real = backend.saveSettings.bind(backend);
+    const save = vi.spyOn(backend, 'saveSettings').mockRejectedValueOnce({ code: 'serverUnavailable', message: 'The Pitwall server is not responding.' });
+    await change(fixture, el, 'srv-timeout', '120');
+    await saved(fixture);
+    const error = el.querySelector('[data-testid="save-error"]')!;
+    expect(error.getAttribute('role')).toBe('alert');
+    expect(error.textContent).toContain('Your last change was not saved.');
+    expect(error.textContent).toContain('not responding');
+    expect(input(el, 'srv-timeout').value).toBe('120');
+    // Retry saves the kept edit once the server answers.
+    save.mockImplementation(real);
+    button(error as HTMLElement, 'Retry').click();
+    await saved(fixture);
+    expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+    expect((await backend.settings()).server.requestTimeoutSecs).toBe(120);
+
+    save.mockRejectedValueOnce({ code: 'badRequest', message: 'No.' });
+    await change(fixture, el, 'srv-timeout', '90');
+    await saved(fixture);
+    button(el.querySelector('[data-testid="save-error"]') as HTMLElement, 'Undo change').click();
     await settle(fixture);
-    expect((await backend.settings()).server.maxConcurrent).toBe(64);
+    expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+    expect(input(el, 'srv-timeout').value).toBe('120');
+  });
+
+  it('says inline what to fix in a number out of range or empty, and saves nothing for it', async () => {
+    const { fixture, el, backend } = await setup();
+    const save = vi.spyOn(backend, 'saveSettings');
+    await change(fixture, el, 'srv-port', '80');
+    await change(fixture, el, 'srv-conc', '');
+    await saved(fixture);
+    expect(save).not.toHaveBeenCalled();
+    expect(input(el, 'srv-port').getAttribute('aria-invalid')).toBe('true');
+    expect(input(el, 'srv-port').closest('mat-form-field')!.classList).toContain('invalid');
+    expect(el.querySelector('#set-server')!.textContent).toContain('Enter a number from 1024 to 65535.');
+    expect(el.querySelector('#set-server')!.textContent).toContain('Enter a number from 1 to 64.');
+    await change(fixture, el, 'srv-port', '12000');
+    await saved(fixture);
+    expect(input(el, 'srv-port').getAttribute('aria-invalid')).toBe('false');
+    expect(el.querySelector('#set-server')!.textContent).not.toContain('from 1024 to 65535');
+    expect((await backend.settings()).server.port).toBe(12000);
+  });
+
+  it('loses nothing when the window closes right after an edit', async () => {
+    // A long wait, so only the close can have saved it.
+    const { fixture, el, backend } = await setup(new MockBackend(), 60_000);
+    await change(fixture, el, 'prv-ret', '14');
+    expect((await backend.settings()).privacy.metricsRetentionDays).toBe(30);
+    fixture.destroy();
+    await vi.waitFor(async () => expect((await backend.settings()).privacy.metricsRetentionDays).toBe(14));
+  });
+
+  it('saves an edit still waiting when the window hides', async () => {
+    const { fixture, el, backend } = await setup(new MockBackend(), 60_000);
+    await change(fixture, el, 'prv-ret', '21');
+    window.dispatchEvent(new Event('pagehide'));
+    await vi.waitFor(async () => expect((await backend.settings()).privacy.metricsRetentionDays).toBe(21));
   });
 
   it('converts units for every numeric field', async () => {
@@ -167,8 +228,7 @@ describe('SettingsPage', () => {
     await change(fixture, el, 'mem-min', '2.5');
     await change(fixture, el, 'mem-hot', '2');
     await change(fixture, el, 'prv-ret', '14');
-    button(el, 'Save changes').click();
-    await settle(fixture);
+    await saved(fixture);
     const s = await backend.settings();
     expect(s.server.maxRequestBytes).toBe(64 * 1024 ** 2);
     expect(s.server.requestTimeoutSecs).toBe(120);
@@ -184,53 +244,49 @@ describe('SettingsPage', () => {
   it('switches the memory hot cap between what fits and a limit', async () => {
     const { fixture, el, backend } = await setup();
     expect(el.querySelector('[aria-label="Memory limit for hot models in GB"]')).toBeNull();
-    button(el, 'Limit').click();
-    await settle(fixture);
+    await pick(fixture, el, 'mem-cap-mode', 'Set a limit');
     const cap = el.querySelector<HTMLInputElement>('[aria-label="Memory limit for hot models in GB"]')!;
     expect(cap.value).toBe('16');
-    cap.value = '24';
-    cap.dispatchEvent(new Event('change'));
-    await settle(fixture);
-    button(el, 'Save changes').click();
-    await settle(fixture);
+    await change(fixture, el, 'mem-cap', '24');
+    await saved(fixture);
     expect((await backend.settings()).memory.hotCapBytes).toBe(24 * 1024 ** 3);
-    button(el, 'What fits').click();
-    await settle(fixture);
+    await pick(fixture, el, 'mem-cap-mode', 'What fits');
     expect(el.querySelector('[aria-label="Memory limit for hot models in GB"]')).toBeNull();
   });
 
-  it('applies a memory preset straight away', async () => {
+  it('applies a memory preset straight away from its select; Custom is shown, never chosen', async () => {
     const { fixture, el, backend } = await setup();
-    button(el, 'Performance').click();
+    expect(el.querySelector('#mem-preset')!.textContent).toContain('Balanced');
+    el.querySelector<HTMLElement>('#mem-preset')!.click();
+    await settle(fixture);
+    const custom = Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container mat-option')).find((o) => o.textContent!.trim() === 'Custom')!;
+    expect(custom.getAttribute('aria-disabled')).toBe('true');
+    Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container mat-option'))
+      .find((o) => o.textContent!.trim() === 'Performance')!
+      .click();
     await settle(fixture);
     expect((await backend.settings()).memory.preset).toBe('performance');
     expect(input(el, 'mem-hot').value).toBe('4');
-    expect(el.querySelector('.savebar')).toBeNull();
+    expect(el.querySelector('#set-memory')!.textContent).toContain('Keep models hot, use what fits.');
+    await change(fixture, el, 'mem-hot', '2');
+    expect(el.querySelector('#mem-preset')!.textContent).toContain('Custom');
+    expect(el.querySelector('#set-memory')!.textContent).toContain('Your own values below.');
   });
 
   it('toggles offline mode and saves it to the server', async () => {
     const { fixture, el, backend } = await setup();
     switchOf(el, 'lbl-offline').click();
-    await settle(fixture);
-    expect(el.querySelector('.savebar')).not.toBeNull();
-    button(el, 'Save changes').click();
-    await settle(fixture);
+    await saved(fixture);
     expect((await backend.settings()).network.offline).toBe(true);
   });
 
-  it('chooses what quitting does about serving and saves it', async () => {
+  it('chooses what quitting does about serving from a select and saves it', async () => {
     const { fixture, el, backend } = await setup();
-    const group = el.querySelector('[aria-labelledby="lbl-quit"]')!;
-    const radios = Array.from(group.querySelectorAll<HTMLButtonElement>('[role=radio]'));
-    expect(radios.map((r) => r.textContent!.trim())).toEqual(['Keep serving in the background', 'Stop serving', 'Ask each time']);
-    expect(radios.map((r) => r.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
-    radios[2]!.click();
-    await settle(fixture);
-    expect(radios[2]!.getAttribute('aria-checked')).toBe('true');
-    expect(group.tagName.toLowerCase()).toBe('mat-button-toggle-group');
-    button(el, 'Save changes').click();
-    await settle(fixture);
+    expect(el.querySelector('#gen-quit')!.textContent).toContain('Keep serving');
+    await pick(fixture, el, 'gen-quit', 'Ask each time');
+    await saved(fixture);
     expect((await backend.settings()).general.onQuit).toBe('ask');
+    expect(el.querySelector('#gen-quit')!.textContent).toContain('Ask each time');
   });
 
   it('warns when keyless local access is on and shows LAN details once saved', async () => {
@@ -251,10 +307,8 @@ describe('SettingsPage', () => {
     switchOf(el, 'lbl-lan').click();
     await settle(fixture);
     expect(el.querySelector('.note.info')).not.toBeNull();
-    expect(el.textContent).toContain('appear here once you save');
     await change(fixture, el, 'net-port', '12000');
-    button(el, 'Save changes').click();
-    await settle(fixture);
+    await saved(fixture);
     expect(el.querySelector('dl.lan')?.textContent).toContain('https://192.168.1.42:12000');
     expect(el.querySelector('dl.lan code.fp')?.textContent).toContain('4F:9A');
   });
@@ -265,9 +319,7 @@ describe('SettingsPage', () => {
     await live.load();
     live.connect();
     switchOf(el, 'lbl-lan').click();
-    await settle(fixture);
-    button(el, 'Save changes').click();
-    await settle(fixture);
+    await saved(fixture);
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     button(el, 'Copy address').click();
@@ -395,27 +447,21 @@ describe('SettingsPage', () => {
       const options = Array.from(overlay().querySelectorAll<HTMLElement>('mat-option')).map((o) => o.textContent!.trim());
       expect(options).toEqual(['1 hour after it is stored', '1 day after it is stored', '7 days after it is stored', '30 days after it is stored', '90 days after it is stored', 'Never (size cap only)']);
       overlay().querySelectorAll<HTMLElement>('mat-option')[0]!.click();
-      await settle(fixture);
-      button(el, 'Save changes').click();
-      await settle(fixture);
+      await saved(fixture);
       expect((await backend.settings()).cache.responsesTtlSecs).toBe(3600);
 
       el.querySelector<HTMLElement>('#set-cache pd-select mat-select[aria-label="Embeddings expiry"]')!.click();
       await settle(fixture);
       Array.from(overlay().querySelectorAll<HTMLElement>('.mat-mdc-select-panel')).at(-1)!.querySelectorAll<HTMLElement>('mat-option')[5]!.click();
-      await settle(fixture);
-      button(el, 'Save changes').click();
-      await settle(fixture);
+      await saved(fixture);
       expect((await backend.settings()).cache.embeddingsTtlSecs).toBe(0);
     });
 
     it('edits storage, size, embeddings, prompt cache and keep-warm days, saved with the rest', async () => {
       const { fixture, el, backend } = await setup();
-      const radio = (group: string, text: string) => Array.from(el.querySelectorAll<HTMLButtonElement>(`[aria-labelledby="${group}"] button`)).find((b) => b.textContent!.trim() === text)!;
-      radio('lbl-responses-storage', 'Memory only').click();
-      radio('lbl-embeddings-storage', 'Memory only').click();
-      radio('lbl-prompt-cache', 'Set size').click();
-      await settle(fixture);
+      await pick(fixture, el, 'cache-responses-storage', 'Memory only');
+      await pick(fixture, el, 'cache-embeddings-storage', 'Memory only');
+      await pick(fixture, el, 'cache-prompt-mode', 'Set a size');
       await change(fixture, el, 'cache-responses-max', '128');
       await change(fixture, el, 'cache-embeddings-max', '64');
       await change(fixture, el, 'cache-keep-warm', '14');
@@ -423,9 +469,7 @@ describe('SettingsPage', () => {
       el.querySelector<HTMLInputElement>('input[aria-label="Prompt cache size in MiB"]')!.dispatchEvent(new Event('change'));
       switchOf(el, 'lbl-affinity').click();
       switchOf(el, 'lbl-emb-on').click();
-      await settle(fixture);
-      button(el, 'Save changes').click();
-      await settle(fixture);
+      await saved(fixture);
       expect((await backend.settings()).cache).toMatchObject({
         responsesStorage: 'memory',
         embeddingsStorage: 'memory',
@@ -436,8 +480,7 @@ describe('SettingsPage', () => {
         prefixAffinity: false,
         embeddings: false,
       });
-      radio('lbl-prompt-cache', 'Automatic').click();
-      await settle(fixture);
+      await pick(fixture, el, 'cache-prompt-mode', 'Automatic');
       expect(el.querySelector('input[aria-label="Prompt cache size in MiB"]')).toBeNull();
     });
 

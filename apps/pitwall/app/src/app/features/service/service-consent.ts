@@ -17,11 +17,11 @@ export interface ConsentAnswer {
 export function consentDetail(platform: string): string {
   switch (platform) {
     case 'windows':
-      return 'Windows asks you to approve this once (an administrator prompt). The service starts with Windows, before you sign in.';
+      return 'Pitwall registers a Windows service. Windows asks you to approve it once (an administrator prompt). It starts with Windows, before you sign in.';
     case 'macos':
-      return 'macOS asks you to allow Pitwall under System Settings, General, Login Items. The service starts when you sign in.';
+      return 'Pitwall adds a launch agent. macOS asks you to allow it in System Settings › General › Login Items. It starts when you sign in.';
     default:
-      return 'Pitwall adds a systemd user service; nothing needs administrator rights. It starts when you sign in.';
+      return 'Pitwall adds a systemd user unit; nothing needs administrator rights. It starts when you sign in.';
   }
 }
 
@@ -36,8 +36,8 @@ export function consentDetail(platform: string): string {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <p class="msg" data-testid="consent-message">
-      Apps on this computer can then use your models even when this window is closed and after a restart. Pitwall never sends anything off
-      this computer.
+      Apps on this computer can then use your models when this window is closed and after a restart. Prompts and answers stay on this
+      computer; the service makes no network requests except the ones you turn on, such as checks for model updates.
     </p>
     <p class="detail" data-testid="consent-detail">{{ detail() }}</p>
     <mat-checkbox class="never" data-testid="consent-never" [checked]="dontAsk()" (change)="dontAsk.set($event.checked)">Don't ask again</mat-checkbox>

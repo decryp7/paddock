@@ -19,7 +19,7 @@
   gap: var(--pd-space-4);
   padding-bottom: 72px;
   pw-panel {
-    scroll-margin-top: var(--pd-space-6);
+    scroll-margin-top: var(--pd-space-3);
   }
 }
 
@@ -78,8 +78,9 @@
   width: 200px;
 }
 
-.toggles {
+.select-sm {
   flex: none;
+  width: 148px;
 }
 
 /* The control keeps its size; the label beside it wraps. */
@@ -87,59 +88,19 @@
   display: flex;
   flex: none;
   align-items: center;
-  gap: var(--pd-space-3);
-}
-
-.presets {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--pd-space-2);
-  margin-bottom: var(--pd-space-4);
 }
 
-.preset {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--pd-space-3);
-  font: inherit;
-  color: var(--pd-text);
-  text-align: left;
-  background: var(--pd-surface-1);
-  border: 1px solid var(--pd-border-strong);
-  border-radius: var(--pd-radius-control);
-  cursor: default;
-  transition:
-    border-color var(--pd-duration-micro) var(--pd-ease-move),
-    background var(--pd-duration-micro) var(--pd-ease-move);
-  .p-name {
-    font-weight: var(--pd-weight-semibold);
-  }
-  .p-hint {
-    font-size: var(--pd-text-label);
-    color: var(--pd-text-muted);
-    line-height: 1.35;
-  }
-  &:hover:not(:disabled):not(.custom) {
-    background: var(--pd-hover);
-  }
-  &[aria-checked='true'],
-  &.custom.on {
-    border-color: var(--pd-accent);
-    background: var(--pd-accent-tint);
-    box-shadow: inset 0 0 0 1px var(--pd-accent);
-  }
-  &:disabled {
-    cursor: default;
-  }
-  &.custom {
-    cursor: default;
-    border-style: dashed;
-    /* Not chosen: the name recedes to the hint's colour (no opacity, which took the hint under 4.5:1). */
-    &:not(.on) .p-name {
-      color: var(--pd-text-muted);
-    }
-  }
+/* A number that was not taken: the field's outline and one line under the label say what to fix. */
+.num-field.invalid {
+  --mat-form-field-outlined-outline-color: var(--pd-danger);
+  --mat-form-field-outlined-hover-outline-color: var(--pd-danger);
+  --mat-form-field-outlined-focus-outline-color: var(--pd-danger);
+}
+.field-error {
+  margin-top: var(--pd-space-1);
+  font-size: var(--pd-text-label);
+  color: var(--pd-danger);
 }
 
 /* A note is a callout: one status bar on the surface, the icon in the status colour, never a filled block. */
@@ -204,30 +165,49 @@
   padding: var(--pd-space-2) 0;
 }
 
-.savebar {
-  /* Sticks to the bottom of whatever scrolls the page (the Settings window's page area), centred under the cards. */
+/* "Saving…" while a change is on its way: quiet, beside the title, never moving the layout. */
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--pd-space-4);
+}
+.save-state {
+  flex: none;
+  min-width: 64px;
+  padding-top: 4px;
+  font-size: var(--pd-text-label);
+  color: var(--pd-text-muted);
+  text-align: end;
+}
+
+/* A save the server refused: one callout above the sections, with the server's reason, Undo and Retry. */
+.save-error {
   position: sticky;
-  bottom: var(--pd-space-4);
-  width: fit-content;
-  max-width: 100%;
-  margin: 0 auto;
-  z-index: 100;
+  top: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
-  gap: var(--pd-space-3);
-  padding: var(--pd-space-2) var(--pd-space-2) var(--pd-space-2) var(--pd-space-4);
-  background: var(--pd-surface-3);
+  gap: var(--pd-space-2);
+  max-width: 880px;
+  margin: 0 0 var(--pd-space-4);
+  padding: var(--pd-space-2) var(--pd-space-2) var(--pd-space-2) var(--pd-space-3);
+  font-size: var(--pd-text-label);
+  background: var(--pd-surface-1);
   border: 1px solid var(--pd-hairline);
-  border-radius: var(--pd-radius-card);
-  box-shadow: var(--pd-shadow-3);
-  animation: pw-pop var(--pd-duration) var(--pd-ease-move);
-  .msg {
-    font-size: var(--pd-text-label);
-    color: var(--pd-text-muted);
-    max-width: 420px;
-  }
-  .err {
+  border-left: 3px solid var(--pd-danger);
+  border-radius: var(--pd-radius-tag);
+  box-shadow: var(--pd-shadow-2);
+  mat-icon {
+    flex: none;
     color: var(--pd-danger);
+  }
+  .msg {
+    flex: 1;
+    min-width: 0;
+  }
+  button {
+    flex: none;
   }
 }
 

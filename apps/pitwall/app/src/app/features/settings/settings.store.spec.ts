@@ -4,7 +4,7 @@ import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { Toasts } from '../../core/toasts';
 import { demoSettings } from '../../core/mock-data';
-import { SettingsStore, editSettings } from './settings.store';
+import { SETTINGS_SAVE_DELAY, SettingsStore, editSettings } from './settings.store';
 
 describe('editSettings', () => {
   it('merges values into one section and leaves the others alone', () => {
@@ -26,7 +26,7 @@ describe('editSettings', () => {
 
 describe('SettingsStore', () => {
   function setup(backend: PitwallBackend = new MockBackend()) {
-    TestBed.configureTestingModule({ providers: [SettingsStore, { provide: BACKEND, useValue: backend }] });
+    TestBed.configureTestingModule({ providers: [SettingsStore, { provide: BACKEND, useValue: backend }, { provide: SETTINGS_SAVE_DELAY, useValue: 5 }] });
     return { store: TestBed.inject(SettingsStore), toasts: TestBed.inject(Toasts), backend };
   }
 
@@ -57,13 +57,13 @@ describe('SettingsStore', () => {
     expect(store.loading()).toBe(false);
   });
 
-  it('tracks dirty state across edits and discard', async () => {
+  it('tracks dirty state across edits and revert', async () => {
     const { store } = setup();
     await store.load();
     store.edit('general', { onQuit: 'ask' });
     expect(store.dirty()).toBe(true);
     expect(store.saved()?.general.onQuit).toBe('keepServing');
-    store.discard();
+    store.revert();
     expect(store.dirty()).toBe(false);
     expect(store.draft()?.general.onQuit).toBe('keepServing');
     store.edit('general', { onQuit: 'ask' });
@@ -71,36 +71,54 @@ describe('SettingsStore', () => {
     expect(store.dirty()).toBe(false);
   });
 
-  it('ignores edits before load and discard with nothing saved', () => {
+  it('ignores edits before load and revert with nothing saved', () => {
     const { store } = setup();
     store.edit('server', { port: 2000 });
     expect(store.draft()).toBeNull();
-    store.discard();
+    store.revert();
     expect(store.draft()).toBeNull();
   });
 
-  it('saves the draft, adopts what the server kept and toasts', async () => {
-    const { store, toasts } = setup();
+  it('saves an edit by itself a moment later, once for a burst, without a toast', async () => {
+    const { store, toasts, backend } = setup();
+    const save = vi.spyOn(backend, 'saveSettings');
     await store.load();
     store.edit('server', { port: 12000 });
-    expect(await store.save()).toBe(true);
-    expect(store.saved()?.server.port).toBe(12000);
-    expect(store.dirty()).toBe(false);
+    store.edit('server', { maxConcurrent: 6 });
+    expect(save).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(store.dirty()).toBe(false));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(store.saved()?.server).toMatchObject({ port: 12000, maxConcurrent: 6 });
     expect(store.saving()).toBe(false);
-    expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'ok', message: 'Settings saved.' });
+    expect(toasts.toasts()).toEqual([]);
   });
 
-  it('does not save before load or while a save is running', async () => {
-    const { store } = setup();
+  it('saves now when asked, and does nothing before load or when all is saved', async () => {
+    const { store, backend } = setup();
     expect(await store.save()).toBe(false);
+    await store.load();
+    const save = vi.spyOn(backend, 'saveSettings');
+    expect(await store.save()).toBe(true);
+    expect(save).not.toHaveBeenCalled();
+    store.edit('server', { port: 12001 });
+    expect(await store.save()).toBe(true);
+    expect(store.saved()?.server.port).toBe(12001);
+  });
+
+  it('saves an edit made while a save is on its way after it, keeping it in the form meanwhile', async () => {
+    const { store, backend } = setup();
     await store.load();
     store.edit('server', { port: 12001 });
     const first = store.save();
-    expect(await store.save()).toBe(false);
+    store.edit('server', { port: 12002 });
     expect(await first).toBe(true);
+    expect(store.draft()?.server.port).toBe(12002);
+    expect(store.dirty()).toBe(true);
+    expect(await store.save()).toBe(true);
+    expect((await backend.settings()).server.port).toBe(12002);
   });
 
-  it('keeps the draft and shows the error when the server refuses a save', async () => {
+  it('keeps the edit and shows the error when the server refuses a save; an edit clears it, revert undoes it', async () => {
     const { store, toasts } = setup();
     await store.load();
     store.edit('server', { port: 80 });
@@ -109,26 +127,46 @@ describe('SettingsStore', () => {
     expect(store.draft()?.server.port).toBe(80);
     expect(store.dirty()).toBe(true);
     expect(store.saving()).toBe(false);
-    expect(toasts.toasts().at(-1)?.tone).toBe('bad');
+    // The error is shown inline, once: no toast on top of it.
+    expect(toasts.toasts()).toEqual([]);
     store.edit('server', { port: 12000 });
     expect(store.saveError()).toBeNull();
+    store.edit('server', { port: 81 });
+    await vi.waitFor(() => expect(store.saveError()?.code).toBe('badRequest'));
+    store.revert();
+    expect(store.saveError()).toBeNull();
+    expect(store.draft()?.server.port).toBe(11500);
   });
 
-  it('reports a failing save call', async () => {
-    const { store } = setup(new MockBackend({ failing: ['saveSettings'] }));
+  it('a failed save keeps the edit, and Retry saves it once the server answers', async () => {
+    const backend = new MockBackend();
+    const { store } = setup(backend);
     await store.load();
+    vi.spyOn(backend, 'saveSettings').mockRejectedValueOnce({ code: 'serverUnavailable', message: 'down' });
     store.edit('general', { onQuit: 'ask' });
     expect(await store.save()).toBe(false);
     expect(store.saveError()?.code).toBe('serverUnavailable');
-    store.discard();
+    expect(store.draft()?.general.onQuit).toBe('ask');
+    expect(await store.save()).toBe(true);
     expect(store.saveError()).toBeNull();
+    expect((await backend.settings()).general.onQuit).toBe('ask');
   });
 
-  it('applies a preset: server memory values are shown and other unsaved edits stay', async () => {
+  it('flush saves an edit still waiting, and is a no-op when nothing waits', async () => {
+    const { store, backend } = setup();
+    await store.load();
+    expect(await store.flush()).toBe(true);
+    store.edit('privacy', { metricsRetentionDays: 14 });
+    expect(await store.flush()).toBe(true);
+    expect((await backend.settings()).privacy.metricsRetentionDays).toBe(14);
+  });
+
+  it('applies a preset after saving the edit still waiting, and shows its memory values', async () => {
     const { store, toasts } = setup();
     await store.load();
     store.edit('general', { onQuit: 'ask' });
     await store.applyPreset('lowMemory');
+    expect(store.saved()?.general.onQuit).toBe('ask');
     expect(store.draft()?.memory.preset).toBe('lowMemory');
     expect(store.draft()?.memory.maxHotModels).toBe(1);
     expect(store.draft()?.general.onQuit).toBe('ask');
@@ -198,7 +236,7 @@ describe('SettingsStore caching', () => {
     expect(store.clearing()).toBe(false);
   });
 
-  it('edits the cache section like any other and marks the form dirty', async () => {
+  it('edits the cache section like any other and marks the form dirty until it is saved', async () => {
     const { store } = setup();
     await store.load();
     store.edit('cache', { responsesTtlSecs: 3600 });

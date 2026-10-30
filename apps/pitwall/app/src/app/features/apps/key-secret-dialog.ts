@@ -1,7 +1,4 @@
 import { ChangeDetectionStrategy, Component, DOCUMENT, computed, inject, input, signal } from '@angular/core';
-import { MatFormField } from '@angular/material/form-field';
-import { MatIconModule } from '@angular/material/icon';
-import { MatInput } from '@angular/material/input';
 import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 
 /** The id of the new key's dialog (`src-tauri/src/dialogs.rs`). */
@@ -14,19 +11,30 @@ export const KEY_SECRET_DIALOG_ID = 'pw.key-secret';
  */
 @Component({
   selector: 'pw-key-secret-dialog',
-  imports: [MatFormField, MatIconModule, MatInput],
+  imports: [],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <p class="sub">Paste it into {{ appName() }}'s settings.</p>
-    <div class="warn" id="pw-key-warn" role="note" data-testid="key-warning">
-      <mat-icon svgIcon="pw:alert" aria-hidden="true" />
-      <span><b>Copy it now: you won't see it again.</b> Pitwall keeps only a hash. If you lose it, revoke it and create a new one.</span>
-    </div>
-    <label class="sr-only" for="pw-key-secret">Secret key</label>
-    <!-- The whole key, wrapped (never cut): it is the one thing the user must get right. -->
-    <mat-form-field class="secret pitwall-selectable">
-      <textarea matInput id="pw-key-secret" class="mono" rows="2" readonly aria-describedby="pw-key-warn" [value]="secret()" (focus)="$any($event.target).select()" spellcheck="false" autocomplete="off"></textarea>
-    </mat-form-field>
+    <!-- A callout (one status bar, no icon of its own): the decision's icon beside the heading is the dialog's one icon. -->
+    <p class="warn" id="pw-key-warn" role="note" data-testid="key-warning">
+      <b>Copy it now: you won't see it again.</b> Pitwall keeps only a hash. If you lose it, revoke it and create a new one.
+    </p>
+    <!--
+      The whole key, centred in one read-only mono field and never cut: a 46-character key does not fit one line of a
+      400 px window, so it wraps into two balanced lines (a soft wrap: copying it gives the key without a line break).
+      Focus selects all of it (a click does too, by user-select: all).
+    -->
+    <div
+      id="pw-key-secret"
+      class="secret pitwall-selectable"
+      role="textbox"
+      aria-readonly="true"
+      aria-label="Secret key"
+      aria-describedby="pw-key-warn"
+      tabindex="0"
+      data-testid="key-secret"
+      (focus)="selectKey()"
+    >{{ secret() }}</div>
     <p class="meta">
       <span>Prefix <span class="mono">{{ prefix() }}</span></span>
       <span class="copy-note" role="status" aria-live="polite">
@@ -43,17 +51,28 @@ export const KEY_SECRET_DIALOG_ID = 'pw.key-secret';
     p { margin: 0; }
     .sub { color: var(--pd-text-muted); }
     .warn {
-      display: flex;
-      gap: var(--pd-space-2);
-      align-items: flex-start;
       padding: var(--pd-space-2) var(--pd-space-3);
       font-size: var(--pd-text-label);
-      background: var(--pd-warning-tint);
-      border-radius: var(--pd-radius-control);
-      mat-icon { flex: none; width: 16px; height: 16px; color: var(--pd-warning); margin-top: 1px; }
+      line-height: 1.45;
+      background: var(--pd-surface-2);
+      border-left: 3px solid var(--pd-warning);
+      border-radius: var(--pd-radius-tag);
     }
-    .secret { width: 100%; }
-    .secret textarea { resize: none; word-break: break-all; font-size: var(--pd-text-label); line-height: 1.5; }
+    .secret {
+      padding: var(--pd-space-2) var(--pd-space-3);
+      font-family: var(--pd-font-mono);
+      font-size: var(--pd-text-body);
+      line-height: 1.5;
+      text-align: center;
+      text-wrap: balance;
+      word-break: break-all;
+      user-select: all;
+      color: var(--pd-text);
+      background: var(--pd-surface-1);
+      border: 1px solid var(--pd-border-control);
+      border-radius: var(--pd-radius-control);
+      &:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 1px; }
+    }
     .meta { display: flex; justify-content: space-between; gap: var(--pd-space-3); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .copy-note { text-align: end; }
   `,
@@ -76,6 +95,17 @@ export class KeySecretDialog implements DialogContent<true> {
     { kind: 'answer', id: 'saved', label: "I've saved it", role: 'secondary', answer: () => true as const },
   ]);
 
+  /** Selects the whole key (a click or focus), so a manual copy takes all of it. */
+  protected selectKey(): void {
+    const el = this.doc.getElementById('pw-key-secret');
+    const sel = this.doc.defaultView?.getSelection();
+    if (!el || !sel) return;
+    const range = this.doc.createRange();
+    range.selectNodeContents(el);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
   private async copy(): Promise<void> {
     try {
       const clip = this.doc.defaultView?.navigator.clipboard;
@@ -85,7 +115,7 @@ export class KeySecretDialog implements DialogContent<true> {
       this.copyFailed.set(false);
     } catch {
       this.copyFailed.set(true);
-      (this.doc.getElementById('pw-key-secret') as HTMLTextAreaElement | null)?.select();
+      this.selectKey();
     }
   }
 }

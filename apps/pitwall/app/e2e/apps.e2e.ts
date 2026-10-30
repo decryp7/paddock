@@ -10,7 +10,7 @@ test.describe('apps and keys', () => {
     await form.getByLabel('Name').fill('My script');
     await form.getByTestId('dialog-action-create').click();
     const secret = page.getByRole('alertdialog', { name: /New key for My script/ });
-    await expect(secret.locator('#pw-key-secret')).toHaveValue(/^pw_/);
+    await expect(secret.locator('#pw-key-secret')).toHaveText(/^pw_/);
     // A required choice: Escape does not lose the key.
     await page.keyboard.press('Escape');
     await expect(secret).toBeVisible();

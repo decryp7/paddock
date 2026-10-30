@@ -8,6 +8,19 @@ import { TrayPopover } from '../features/tray/tray-popover';
 import { provideIcons } from '../shared/icons';
 import { providePitwallAppearance } from './appearance';
 
+/**
+ * The backend calls the tray popover may make: each is a command open to the TRAY class in `src-tauri/src/lib.rs`
+ * (`overview`, `set_serving`, `release_memory`, `update_check_status`, `update_notices`, `pairings`, `approve_pairing`,
+ * `deny_pairing`) or the live event feed (`subscribe`, no command). `tray-window.spec.ts` holds the popover to it.
+ */
+export const TRAY_BACKEND_CALLS = ['overview', 'subscribe', 'setServing', 'releaseMemory', 'updateCheckStatus', 'updateNotices', 'pairings', 'approvePairing', 'denyPairing'] as const;
+
+/** What the popover window starts with: the overview alone, then the live feed. */
+export function startTrayFeed(live: LiveStore): void {
+  void live.loadOverview();
+  live.connect();
+}
+
 @Component({
   selector: 'pw-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -29,11 +42,7 @@ export function bootTrayWindow(): Promise<unknown> {
       providePaddockMaterial(),
       providePitwallAppearance(),
       { provide: BACKEND, useFactory: createBackend },
-      provideAppInitializer(() => {
-        const live = inject(LiveStore);
-        void live.loadOverview();
-        live.connect();
-      }),
+      provideAppInitializer(() => startTrayFeed(inject(LiveStore))),
     ],
   });
 }

@@ -37,6 +37,9 @@ export class CreateAppDialog implements DialogContent<string> {
   protected readonly name = signal('');
   private readonly trimmed = computed(() => this.name().trim());
 
+  /** The window is titled "New app"; the heading says what this form does. */
+  readonly dialogHeading = signal<string | null>('Add an app by hand');
+
   readonly dialogActions = computed<readonly DialogAction<string>[]>(() => {
     const name = this.trimmed();
     return [
