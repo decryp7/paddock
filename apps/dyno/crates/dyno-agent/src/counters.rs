@@ -158,14 +158,17 @@ impl CounterCentre {
         f: impl FnOnce(&Arc<Inner>) -> T + Send + 'static,
     ) -> Result<T, AgentError> {
         let (tx, rx) = mpsc::channel();
-        self.start(what, move |inner| {
-            let _ = tx.send(f(inner));
+        self.start(what, move |inner, slot| {
+            let out = f(inner);
+            // The caller may act on the result at once, so the slot is free before it can see it.
+            drop(slot);
+            let _ = tx.send(out);
         })?;
         rx.recv_timeout(deadline).map_err(|_| timed_out(what, deadline))
     }
 
-    /// Runs `f` on its own thread, counted as a call in flight until it ends; refused when [`MAX_IN_FLIGHT`] are.
-    fn start(&self, what: &str, f: impl FnOnce(&Arc<Inner>) + Send + 'static) -> Result<(), AgentError> {
+    /// Runs `f` on its own thread, counted as a call in flight until it ends or drops the [`Slot`] it is given; refused when [`MAX_IN_FLIGHT`] are.
+    fn start(&self, what: &str, f: impl FnOnce(&Arc<Inner>, Slot) + Send + 'static) -> Result<(), AgentError> {
         if self.inner.in_flight.fetch_add(1, Ordering::SeqCst) >= MAX_IN_FLIGHT {
             self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
             return Err(AgentError::new(
@@ -178,8 +181,7 @@ impl CounterCentre {
         let spawned = std::thread::Builder::new().name("dyno-counters".into()).spawn(move || {
             // The user waits for it on the Counters page: live work (rule 52).
             dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
-            let _slot = slot;
-            f(&inner);
+            f(&inner, slot);
         });
         if let Err(e) = spawned {
             self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
@@ -208,13 +210,15 @@ impl CounterCentre {
                 None => {
                     let l = Arc::new(Listing::default());
                     let mine = l.clone();
-                    self.start(WHAT, move |inner| {
+                    self.start(WHAT, move |inner, slot| {
                         let found = inner.source.catalog().map(|c| Arc::new(CounterCatalog::bounded(c.objects)));
                         if let Ok(c) = &found {
                             *lock(&inner.catalog) = Some((Instant::now(), c.clone()));
                         }
                         // Ended: a later call starts afresh (after a failure, too); callers already waiting get this result.
                         *lock(&inner.listing) = None;
+                        // A caller told of the result may start the next call at once: the slot is free first.
+                        drop(slot);
                         *lock(&mine.result) = Some(found);
                         mine.done.notify_all();
                     })?;
@@ -662,5 +666,19 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(*lock(&src.0), vec![Some(ThreadRole::Live); 3]);
+    }
+
+    /// Regression (CI run 7230): a call that returned to its caller still held its slot until its thread wound down, so
+    /// an immediate `poll_pinned` was refused as if two reads were in flight. A finished call has left no slot behind.
+    #[test]
+    fn a_finished_call_holds_no_slot_when_the_caller_sees_its_result() {
+        let src = Arc::new(Roles(Mutex::new(Vec::new())));
+        let c = CounterCentre::new(src);
+        for _ in 0..200 {
+            c.objects().ok();
+            c.inner.catalog.lock().unwrap().take();
+            c.values(&["\\Memory\\Free".into()], Timestamp(1)).unwrap();
+            assert_eq!(c.inner.in_flight.load(Ordering::SeqCst), 0, "a returned call still holds its slot");
+        }
     }
 }
