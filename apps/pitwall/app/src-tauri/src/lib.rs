@@ -199,6 +199,8 @@ pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
             pitwall_setup(app, installed);
             Ok(())
         })
+        // Quit in the menu bar with the last window closed to the tray goes through Pitwall's own quit (the setting, or the ask).
+        .menu_quit_without_window(|app| drop(quit::request_from_menu(app)))
         .updater(move |app| updater(app, test_dir, update_client, update_offline))
         .windows(move |app| windows(app, installed));
     if installed {
@@ -251,6 +253,8 @@ fn windows<R: Runtime>(app: &AppHandle<R>, installed: bool) -> Windows<R> {
         .min_size(860.0, 560.0)
         .exit_stall_limit(EXIT_STALL_LIMIT);
     let b = Windows::builder(config).prefs(Arc::new(FixedPrefs::new(OnClose::Tray, OpenFilesIn::NewWindow)));
+    // A test composes the app on the mock runtime, which cannot exit: the quit runs to its end and the exit is a no-op.
+    let b = if installed { b } else { b.exit_app(|_, _| ()) };
     match app.path().app_data_dir() {
         Ok(dir) if installed => b.bounds_file(dir.join("window-state.json")).build(),
         _ => b.build(),

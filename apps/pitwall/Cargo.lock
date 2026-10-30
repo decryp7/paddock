@@ -3375,6 +3375,7 @@ name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "log",
  "paddock-workspace-hack",
  "sysinfo 0.39.6",
  "windows-sys 0.61.2",
@@ -3773,6 +3774,7 @@ dependencies = [
  "paddock-commands",
  "paddock-dialogs",
  "paddock-jobs",
+ "paddock-menu",
  "paddock-service",
  "paddock-shell",
  "paddock-startup",

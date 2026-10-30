@@ -1,4 +1,5 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, type Provider } from '@angular/core';
+import { APP_QUIT } from '@decryp7/paddock-ui/shell';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import type { OnQuit } from '../../core/api.types';
 import { BACKEND, type Unsubscribe } from '../../core/backend';
@@ -74,3 +75,16 @@ export class QuitFlow {
     }
   }
 }
+
+/**
+ * Quit in the shell's app menu (Mod+Q, the native menu) runs Pitwall's quit flow instead of the shell's plain quit: the setting
+ * "When you quit Pitwall" decides, and "Ask each time" opens `pw.quit`. The shell contributes the command; Pitwall only
+ * provides this (never a second `pd.app.quit`).
+ */
+export const PITWALL_APP_QUIT: Provider = {
+  provide: APP_QUIT,
+  useFactory: () => {
+    const flow = inject(QuitFlow);
+    return () => flow.quit(null);
+  },
+};

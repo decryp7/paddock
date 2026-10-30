@@ -118,9 +118,9 @@ Pacenotes: toolsets `orient`, `code`, `review`, `diagrams`, `requirements` and `
 
 ## 1.1: on the shared shell (WP-2, plan `docs/plans/1.1-wp2.md`)
 
-- **Release gate (code review 2026-10-30).** Pitwall 1.1 is not tagged until `fix/menu-quit-without-window` is on `main`,
-  Pitwall uses it (`Builder::menu_quit_without_window` with `quit::request`, `APP_QUIT` in the UI) and the test
-  `quit_from_the_menu_with_no_window_open_still_quits_or_asks` (`app/src-tauri/tests/shell.rs`) is un-ignored and passes.
+- **Quit gate (code review 2026-10-30): met.** Pitwall uses the shared Quit (`APP_QUIT`, `Builder::menu_quit_without_window` with
+  `quit::request_from_menu`) and `quit_from_the_menu_with_no_window_open_still_quits_or_asks` (`app/src-tauri/tests/shell.rs`) is
+  un-ignored and passes.
 
 - **Done (WP-2.1).** The UI uses paddock-ui's `--pd-*` tokens and Material theme (`data-accent="pitwall"`); Pitwall's own
   scale is gone; the chart colours are derived from the shared tokens (`scripts/ci/tokens.test.mjs`).

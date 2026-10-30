@@ -2,16 +2,16 @@ import { Injector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { BrowserAppearanceBackend, buildManifest, CommandService, ContributionRegistry, manifestDrift, provideAppearance, serializeManifest, SHELL_COMMANDS, ShellContextHost } from '@decryp7/paddock-ui/shell';
-import { provideMenus, provideSubmenus } from '@decryp7/paddock-ui/shell/menu';
+import { provideMenus, provideSubmenus, QUIT_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/menu';
 import { SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { assertContributionsValid, dialogTableProblems, provideShellTesting } from '@decryp7/paddock-ui/shell/testing';
 import { BACKEND } from '../core/backend';
 import { LiveStore } from '../core/live.store';
 import { MockBackend } from '../core/mock-backend';
-import { QuitFlow } from '../features/quit/quit-flow';
+import { PITWALL_APP_QUIT, QuitFlow } from '../features/quit/quit-flow';
 import { APP_COMMANDS } from '../generated/app-commands';
 import { DIALOG_BASE } from '../generated/dialog-contracts';
-import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS, DIALOGS, QUIT_COMMAND } from './contributions';
+import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS, DIALOGS } from './contributions';
 import { pitwallContext } from './context';
 import { DIALOG_BASE_COMMANDS } from './dialog-base';
 import { NAV } from './nav';
@@ -24,10 +24,13 @@ interface NodeFs {
 const nodeFs = (): Promise<NodeFs> => import(/* @vite-ignore */ ['node', 'fs'].join(':')) as Promise<NodeFs>;
 const env = (name: string): string | undefined => (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env[name];
 
+/** The shell's Quit command, which the frames contribute; Pitwall only provides what it does (`PITWALL_APP_QUIT`). */
+const QUIT_COMMAND = 'pd.app.quit';
+
 /** Rust reads this file (`paddock_shell::Builder::problems`, `app/src-tauri/tests/shell.rs`). */
 const MANIFEST = 'paddock-manifest.json';
 
-function configure(contributions = [CONTRIBUTIONS], backend = new MockBackend()): MockBackend {
+function configure(contributions = [CONTRIBUTIONS, QUIT_CONTRIBUTIONS], backend = new MockBackend()): MockBackend {
   TestBed.configureTestingModule({
     providers: [
       { provide: BACKEND, useValue: backend },
@@ -35,7 +38,7 @@ function configure(contributions = [CONTRIBUTIONS], backend = new MockBackend())
       ...provideShellTesting({
         contributions,
         context: () => Promise.resolve(pitwallContext),
-        providers: [provideMenus({ appName: 'Pitwall' }), provideSubmenus(), provideAppearance({ accent: 'pitwall', backend: () => new BrowserAppearanceBackend({ storage: null, channel: null }) })],
+        providers: [PITWALL_APP_QUIT, provideMenus({ appName: 'Pitwall' }), provideSubmenus(), provideAppearance({ accent: 'pitwall', backend: () => new BrowserAppearanceBackend({ storage: null, channel: null }) })],
       }),
     ],
   });
@@ -93,7 +96,7 @@ describe('Pitwall contributions', () => {
     live.disconnect();
   });
 
-  it('quit through Pitwall’s quit flow: Quit asks the setting, "and stop serving" is forced', async () => {
+  it('quit through Pitwall’s quit flow: the shell’s Quit asks the setting, "and stop serving" is forced', async () => {
     configure();
     await TestBed.inject(ShellContextHost).load();
     const quit = vi.spyOn(TestBed.inject(QuitFlow), 'quit').mockResolvedValue();
@@ -108,8 +111,8 @@ describe('Pitwall contributions', () => {
     configure();
     const own = TestBed.inject(ContributionRegistry)
       .commands()
-      .filter((c) => c.id.startsWith('pw.') || c.id === QUIT_COMMAND);
-    expect(own.map((c) => c.id)).toEqual(['pw.pause-serving', 'pw.resume-serving', 'pw.release-memory', QUIT_COMMAND, 'pw.quit-stop']);
+      .filter((c) => c.id.startsWith('pw.'));
+    expect(own.map((c) => c.id)).toEqual(['pw.pause-serving', 'pw.resume-serving', 'pw.release-memory', 'pw.quit-stop']);
     for (const c of own) {
       expect(c.category).toBeDefined();
       expect(c.title.text).toMatch(/^[A-Z][a-z]/);
@@ -133,7 +136,7 @@ describe('Pitwall dialogs', () => {
 
 describe('Pitwall manifest', () => {
   it('keeps paddock-manifest.json equal to the main window’s contributions', async () => {
-    configure([CONTRIBUTIONS, ABOUT_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS] as never);
+    configure([CONTRIBUTIONS, QUIT_CONTRIBUTIONS, ABOUT_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS] as never);
     const manifest = buildManifest(TestBed.inject(ContributionRegistry));
     expect([...manifest.healthServices]).toEqual([]);
     const fs = await nodeFs();

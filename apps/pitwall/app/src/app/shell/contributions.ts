@@ -1,7 +1,6 @@
 import {
   defineCommand,
   defineDialog,
-  defineKeybinding,
   defineMenuItem,
   definePage,
   defineSettingsPage,
@@ -20,9 +19,6 @@ import { NAV } from './nav';
 
 // The registration file of Pitwall: static data and loaders only (lazy by construction). Its lints run in
 // contributions.spec.ts (`assertContributionsValid`, the manifest and the dialog contracts).
-
-/** The id of the shell's Quit command: the macOS app menu places it last; Pitwall runs it through its quit flow. */
-export const QUIT_COMMAND = 'pd.app.quit';
 
 /**
  * The Settings window: the shell's window as Pitwall's own dialog, since its pages are the app's choice (the contract is in
@@ -135,22 +131,14 @@ export const CONTRIBUTIONS: ContributionBatch<PitwallContext> = {
       run: (ctx) => ctx.releaseMemory(),
     }),
     defineCommand<PitwallContext>({
-      id: QUIT_COMMAND,
-      title: msg('pw.app.quit', 'Quit Pitwall'),
-      category: APP,
-      run: (ctx) => ctx.quit(null),
-    }),
-    defineCommand<PitwallContext>({
       id: 'pw.quit-stop',
       title: msg('pw.quit-stop', 'Quit Pitwall and stop serving'),
       category: APP,
       run: (ctx) => ctx.quit('stopServing'),
     }),
   ],
-  keybindings: [defineKeybinding({ command: QUIT_COMMAND, key: 'Mod+Q' })],
   menus: [
     defineMenuItem<PitwallContext>({ menu: 'app', command: 'pw.quit-stop', group: 'quit', order: 900 }),
-    defineMenuItem<PitwallContext>({ menu: 'app', command: QUIT_COMMAND, group: 'quit', order: 1000 }),
   ],
   pages: PAGES,
   statusItems: [

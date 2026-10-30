@@ -85,3 +85,5 @@ tokio = { workspace = true, features = ["time", "sync", "rt", "rt-multi-thread",
 tauri = { version = "2.12.4", features = ["test"] }
 # The shell plugin on Tauri's mock runtime: the start test (ADR 0029, C50) opens no window and touches no user folder.
 paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray", "mock-runtime"] }
+# The menu bar's no-window route (Quit with the last window closed to the tray) is tested with the shell's NativeMenu state.
+paddock-menu = { path = "../../../../crates/paddock-menu", features = ["tauri"] }

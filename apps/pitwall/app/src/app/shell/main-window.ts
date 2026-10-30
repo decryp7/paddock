@@ -17,7 +17,7 @@ import { createBackend } from '../core/backend-factory';
 import { LiveStore } from '../core/live.store';
 import { Toasts } from '../core/toasts';
 import { WINDOW_CONTROL } from '../core/window-control';
-import { QuitFlow } from '../features/quit/quit-flow';
+import { PITWALL_APP_QUIT, QuitFlow } from '../features/quit/quit-flow';
 import { ServiceConsentPrompt } from '../features/service/service-consent';
 import { ServiceStore } from '../features/service/service.store';
 import { provideIcons } from '../shared/icons';
@@ -95,6 +95,8 @@ export function bootMainWindow(): Promise<unknown> {
         useValue: { storage: new LocalStorageLanguageStorage(), systemLanguages: () => navigator.languages, shipped: [], reload: () => location.reload() },
       },
       provideContributions<PitwallContext>(CONTRIBUTIONS),
+      // Quit in the app menu (shell-contributed) runs Pitwall's quit flow.
+      PITWALL_APP_QUIT,
       // The desktop build asks the shell plugin for its version once (ADR 0012 §3): a different one is a plain error.
       ...(ipc ? [provideShellVersionCheck(ipc.invoke)] : []),
       provideContributions(ABOUT_CONTRIBUTIONS),

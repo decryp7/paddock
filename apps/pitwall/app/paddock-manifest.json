@@ -7,7 +7,7 @@
     },
     {
       "id": "pd.app.quit",
-      "title": "pw.app.quit"
+      "title": "pd.app.quit"
     },
     {
       "id": "pd.settings.open",
@@ -245,6 +245,7 @@
   "messages": {
     "pd.about.open": "About",
     "pd.about.title": "About",
+    "pd.app.quit": "Quit",
     "pd.category.app": "Application",
     "pd.category.help": "Help",
     "pd.confirm.title": "Confirm",
@@ -256,7 +257,6 @@
     "pd.updates.title": "Updates",
     "pd.whats-new.open": "What’s new",
     "pd.whats-new.title": "What’s new",
-    "pw.app.quit": "Quit Pitwall",
     "pw.category.server": "Server",
     "pw.create-app.title": "New app",
     "pw.key-secret.title": "New key",

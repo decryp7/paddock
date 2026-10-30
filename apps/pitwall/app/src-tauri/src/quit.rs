@@ -137,6 +137,14 @@ pub async fn request<R: Runtime>(app: &AppHandle<R>, forced: Option<QuitChoice>)
     }
 }
 
+/// Quit chosen in the menu bar with no window open (the last one was closed to the tray): the same path as the tray's Quit,
+/// by the "When you quit" setting. The shell calls this on the main thread, so the work runs on the async runtime; the handle
+/// lets a test wait for it to finish.
+pub fn request_from_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::async_runtime::JoinHandle<()> {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move { request(&app, None).await })
+}
+
 /// The user's answer in the "When you quit" dialog: quit now, stopping serving or not, optionally remembering it.
 #[tauri::command]
 pub async fn quit_app<R: Runtime>(

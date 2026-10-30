@@ -260,29 +260,62 @@ fn the_updater_is_gated_by_what_the_server_said_about_offline_mode() {
     assert!(dir.path().join("offline-known.json").is_file(), "the last confirmed value is kept");
 }
 
-/// Quit from the macOS app menu with no window open must still quit (or ask). Today the shell's menu routes `pd.app.quit`
-/// to a window and drops it when none is open (paddock-menu `route`); the shared fix (a "no target window" handler, branch
-/// `fix/menu-quit-without-window`) is not on this branch yet. Run with `--ignored` to see it fail.
+/// Nothing is drawn: the menu bar of the test shows nothing (macOS builds native menus on the main thread only).
+struct NoBar;
+
+impl paddock_menu::tauri::NativeBar<tauri::test::MockRuntime> for NoBar {
+    fn build(&self, _: &tauri::AppHandle<tauri::test::MockRuntime>, _: &[paddock_menu::NativeNode]) -> tauri::Result<()> {
+        Ok(())
+    }
+    fn set_states(&self, _: &tauri::AppHandle<tauri::test::MockRuntime>, _: &[paddock_menu::model::Item]) -> tauri::Result<bool> {
+        Ok(true)
+    }
+}
+
+/// Quit from the menu bar with no window open (the main window was closed to the tray) must still quit, or ask: the shell's
+/// no-window handler (`Builder::menu_quit_without_window`) runs Pitwall's own quit (`quit::request`, by the "When you quit"
+/// setting). The server is not there, so the setting reads as its default (keep serving) and the quit begins.
 #[test]
-#[ignore = "fails until the shell's no-window menu handler lands (fix/menu-quit-without-window); then Pitwall wires quit::request to it"]
 fn quit_from_the_menu_with_no_window_open_still_quits_or_asks() {
+    use paddock_menu::tauri::{menu_chosen, NativeMenu};
     use tauri::Manager;
     let dir = tempfile::tempdir().unwrap();
+    let shell = shell(Place::Test {
+        dir: dir.path().to_path_buf(),
+    })
+    .setup(|app| {
+        app.manage(NativeMenu::<tauri::test::MockRuntime>::with_bar("Pitwall", true, NoBar));
+        Ok(())
+    });
     // Started in the tray (`--hidden`): no window is open, as after the user closed the main window.
-    let app = composed(
-        dir.path(),
-        LaunchArgs {
-            hidden: true,
-            ..Default::default()
-        },
-    )
-    .build(tauri::test::mock_context(tauri::test::noop_assets()))
-    .unwrap();
+    let launch = LaunchArgs {
+        hidden: true,
+        ..Default::default()
+    };
+    let app = app(tauri::test::mock_builder(), shell, launch, paddock_window::tauri::HeadlessTray)
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .unwrap();
     assert!(app.get_webview_window("main").is_none(), "no window is open");
-    paddock_window::tauri::menu_chosen(app.handle(), "pd.app.quit");
-    let pending = app.state::<pitwall_app_lib::quit::PendingAsk>().take();
-    let quitting = app.state::<paddock_window::tauri::Windows<tauri::test::MockRuntime>>().quitting();
-    assert!(pending || quitting, "the menu's Quit asked or quit with no window open");
+    let wire = serde_json::json!({ "menus": [{ "id": "app", "label": "Pitwall", "items": [
+        { "kind": "item", "id": "pd.app.quit", "label": "Quit", "keybinding": null, "checked": null, "enabled": true }
+    ] }] });
+    let model = paddock_menu::model::parse(serde_json::from_value(wire).unwrap()).unwrap();
+    app.state::<NativeMenu<tauri::test::MockRuntime>>()
+        .apply(app.handle(), &model)
+        .unwrap();
+    menu_chosen(app.handle(), "pd.app.quit");
+    // The quit runs on the async runtime: wait on its outcome (a quit begun, or the question asked), not on a time; the
+    // deadline only bounds a failing run.
+    let windows = app.state::<paddock_window::tauri::Windows<tauri::test::MockRuntime>>();
+    let ask = app.state::<pitwall_app_lib::quit::PendingAsk>();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !(windows.quitting() || ask.take()) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the menu's Quit neither asked nor quit with no window open"
+        );
+        std::thread::yield_now();
+    }
 }
 
 /// The tray popover's "Open Pitwall" and "Review": with no window open (main is destroyed when closed), the popover asks the
