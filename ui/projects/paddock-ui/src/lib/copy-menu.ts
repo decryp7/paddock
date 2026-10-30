@@ -2,6 +2,7 @@ import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem } from '@angular/cdk/menu';
 import { DOCUMENT } from '@angular/common';
 import { afterNextRender, ChangeDetectionStrategy, Component, effect, inject, Injectable, Injector, signal, untracked, viewChild } from '@angular/core';
 import { copyText } from './clipboard';
+import { preserveSelection, type PreservedSelection } from './selection';
 
 /** The open Copy menu: where, and what it copies. */
 export interface PdCopyMenuState {
@@ -21,6 +22,10 @@ export class PdCopyMenu {
   private readonly stateSignal = signal<PdCopyMenuState | null>(null);
   /** The open menu, or null. */
   readonly state = this.stateSignal.asReadonly();
+  private readonly document = inject(DOCUMENT);
+  private readonly injector = inject(Injector);
+  /** The selection the menu opened on (see `close`). */
+  private selection: PreservedSelection | null = null;
 
   /**
    * Opens the menu at the pointer for `text`. Pass the `contextmenu` event that asked for it: where that event comes on the
@@ -28,12 +33,21 @@ export class PdCopyMenu {
    * `auxclick` outside the menu would close it again at once.
    */
   open(x: number, y: number, text: string, event?: MouseEvent): void {
+    this.selection ??= preserveSelection(this.document);
     this.stateSignal.set(event ? { x, y, text, event } : { x, y, text });
   }
 
-  /** Closes the menu. */
-  close(): void {
+  /**
+   * Closes the menu. Closed by Escape, by Copy or by the app (`restoreSelection` true), it gives back the text selection it
+   * opened on, as a native menu keeps it: WebKit drops the selection when focus moves into the menu. A press elsewhere
+   * (`false`) leaves the selection to that press, and a focused text field always keeps its caret (`preserveSelection`).
+   */
+  close(restoreSelection = true): void {
+    const selection = this.selection;
+    this.selection = null;
     this.stateSignal.set(null);
+    // After the render, so after the CDK has moved the focus back (which in WebKit can clear the selection again).
+    if (selection && restoreSelection) afterNextRender(() => selection.restore(), { injector: this.injector });
   }
 
   /** Copies the text and closes the menu; a clipboard that is not available only leaves the menu closed (Ctrl/Cmd+C still works). */
@@ -46,15 +60,15 @@ export class PdCopyMenu {
 
 /**
  * Draws the Copy menu at the pointer as a CDK context menu: it focuses Copy, and Escape, a click elsewhere or losing focus
- * closes it (the CDK menu's own behaviour). Closed, it gives back the text selection it opened on, as a native menu keeps it:
- * WebKit drops the selection when focus moves into the menu. A selection the user made meanwhile stays.
+ * closes it (the CDK menu's own behaviour). A press outside the menu is remembered, so that close leaves the selection alone.
  */
 @Component({
   selector: 'pd-copy-menu',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { '(document:pointerdown)': 'notePress($event)' },
   imports: [CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
   template: `
-    <span class="pd-anchor" [cdkContextMenuTriggerFor]="panel" (cdkContextMenuClosed)="menu.close()"></span>
+    <span class="pd-anchor" [cdkContextMenuTriggerFor]="panel" (cdkContextMenuClosed)="menu.close(!pressedOutside)"></span>
     <ng-template #panel>
       <div cdkMenu class="pd-menu" [attr.aria-label]="label">
         <button type="button" cdkMenuItem class="pd-item" (cdkMenuItemTriggered)="menu.copy()">{{ label }}</button>
@@ -77,9 +91,8 @@ export class PdCopyMenuHost {
   /** The menu panel, once it is open (its template is declared here, so the query finds it in the overlay). */
   private readonly panel = viewChild(CdkMenu);
   private readonly injector = inject(Injector);
-  private readonly document = inject(DOCUMENT);
-  /** The selection when the menu opened (copies of its ranges), given back when it closes; null while closed. */
-  private saved: Range[] | null = null;
+  /** A press landed outside the open menu: the close that follows is a dismissal, not Escape or Copy. */
+  protected pressedOutside = false;
 
   constructor() {
     // The service's state is the one truth: the CDK menu is opened and closed to follow it (a DOM overlay is outside the signal graph).
@@ -89,15 +102,12 @@ export class PdCopyMenuHost {
       untracked(() => {
         if (!s) {
           trigger.close();
-          const saved = this.saved;
-          this.saved = null;
-          // After the render, so after the CDK has moved the focus back (which in WebKit can clear the selection again).
-          if (saved) afterNextRender(() => this.restoreSelection(saved), { injector: this.injector });
           return;
         }
-        this.saved ??= this.saveSelection();
-        // Opened with the right click itself, the CDK skips that click's own auxclick (the CDK's `_openOnContextMenu`, its
-        // public host listener); a programmatic open has none to skip.
+        this.pressedOutside = false;
+        // Opened with the right click itself, the CDK skips that click's own auxclick. `_openOnContextMenu` is the CDK's host
+        // listener: public in its typings but not documented API, so the parts.spec test "stays open through the release of the
+        // right click" guards it on every CDK update.
         if (s.event) trigger._openOnContextMenu(s.event);
         else trigger.open({ x: s.x, y: s.y });
         afterNextRender(() => this.panel()?.focusFirstItem('program'), { injector: this.injector });
@@ -105,19 +115,8 @@ export class PdCopyMenuHost {
     });
   }
 
-  private saveSelection(): Range[] {
-    const sel = this.document.getSelection();
-    if (!sel) return [];
-    return Array.from({ length: sel.rangeCount }, (_, i) => sel.getRangeAt(i).cloneRange());
-  }
-
-  /** Puts the saved ranges back unless the user selected something else meanwhile (a selection that is not just a caret). */
-  private restoreSelection(saved: readonly Range[]): void {
-    const sel = this.document.getSelection();
-    if (!sel || saved.length === 0 || (sel.rangeCount > 0 && !sel.isCollapsed)) return;
-    const live = saved.filter((r) => r.startContainer.isConnected && r.endContainer.isConnected);
-    if (live.length === 0) return;
-    sel.removeAllRanges();
-    for (const r of live) sel.addRange(r);
+  protected notePress(e: PointerEvent): void {
+    if (!this.menu.state()) return;
+    this.pressedOutside = !(e.target instanceof Element && e.target.closest('.pd-menu'));
   }
 }

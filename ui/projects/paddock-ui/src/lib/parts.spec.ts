@@ -313,6 +313,52 @@ describe('pd-copy-menu', () => {
     }
   });
 
+  it('leaves the selection to a press elsewhere, and never takes the caret from a text field the user clicked into', async () => {
+    const f = TestBed.createComponent(PdCopyMenuHost);
+    const menu = TestBed.inject(PdCopyMenu);
+    f.detectChanges();
+    const p = document.createElement('p');
+    p.textContent = 'keep me selected';
+    const input = document.createElement('input');
+    document.body.append(p, input);
+    const r = document.createRange();
+    r.selectNodeContents(p);
+    try {
+      document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); // no menu open: nothing to note
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(r);
+      menu.open(1, 2, 'keep me selected');
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      item()!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); // a press inside the menu is not a dismissal
+      getSelection()!.removeAllRanges(); // WebKit, as the menu took the focus
+      // The user clicks into a field: the press is outside the menu, and the CDK closes it on the click.
+      input.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      input.focus();
+      input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await vi.waitFor(() => expect(menu.state()).toBeNull());
+      await f.whenStable();
+      expect(document.activeElement).toBe(input);
+      expect(getSelection()!.toString()).toBe('');
+
+      // Closed by the app while a field has the focus: the field keeps its caret too.
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(r);
+      menu.open(1, 2, 'keep me selected');
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      input.focus();
+      getSelection()!.collapse(input, 0);
+      menu.close();
+      await vi.waitFor(() => expect(panel()).toBeNull());
+      await f.whenStable();
+      expect(document.activeElement).toBe(input);
+      expect(getSelection()!.toString()).toBe('');
+    } finally {
+      getSelection()!.removeAllRanges();
+      p.remove();
+      input.remove();
+    }
+  });
+
   it('closes when the service closes it, and a failing clipboard only closes the menu', async () => {
     stubClipboard(() => Promise.reject(new Error('denied')));
     const f = TestBed.createComponent(PdCopyMenuHost);

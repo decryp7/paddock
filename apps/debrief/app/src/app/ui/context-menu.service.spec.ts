@@ -54,4 +54,34 @@ describe('ContextMenuService', () => {
     menus.close(); // closing a closed menu does nothing
     expect(menus.menu()).toBeNull();
   });
+  it('never takes the caret from a focused text field, saves no caret, and leaves the selection to a press elsewhere', () => {
+    const menus = TestBed.inject(ContextMenuService);
+    const input = document.createElement('input');
+    document.body.append(input);
+    try {
+      // The menu was opened from a field (its returnFocus): closing it gives the field its focus and caret back, untouched.
+      select(p);
+      menus.open(1, 2, [{ label: 'Copy', run: () => undefined }], input);
+      getSelection()!.removeAllRanges();
+      menus.close();
+      expect(document.activeElement).toBe(input);
+      expect(getSelection()!.toString()).toBe('');
+
+      // A caret is not a selection to give back.
+      input.blur();
+      getSelection()!.collapse(p.firstChild!, 3);
+      menus.open(1, 2, [{ label: 'Copy', run: () => undefined }], null);
+      expect(menus.menu()!.selection).toEqual([]);
+      menus.close();
+
+      // Dismissed by a press elsewhere (the backdrop): the selection is left to that press.
+      select(p);
+      menus.open(1, 2, [{ label: 'Copy', run: () => undefined }], null);
+      getSelection()!.removeAllRanges();
+      menus.close(true, false);
+      expect(getSelection()!.toString()).toBe('');
+    } finally {
+      input.remove();
+    }
+  });
 });

@@ -31,3 +31,30 @@ test('a right click on selected text opens Copy, focused; the release keeps it o
   await expect(page.getByRole('menuitem', { name: 'Copy' })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(words);
 });
+
+test('clicking into a text field dismisses the menu and the field keeps its caret: typing lands there', async ({ page }) => {
+  await page.goto('/');
+  const text = page.locator('h1').first();
+  await expect(text).toBeVisible();
+  // A text field beside the selected text (the dashboard has none of its own there).
+  await text.evaluate((el) => {
+    el.classList.add('pd-selectable');
+    const field = document.createElement('input');
+    field.setAttribute('data-testid', 'probe-field');
+    field.setAttribute('aria-label', 'Probe');
+    el.after(field);
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    getSelection()?.removeAllRanges();
+    getSelection()?.addRange(r);
+  });
+  await text.click({ button: 'right', position: { x: 8, y: 8 } });
+  const item = page.getByRole('menuitem', { name: 'Copy' });
+  await expect(item).toBeFocused();
+  const field = page.getByTestId('probe-field');
+  await field.click();
+  await expect(item).toHaveCount(0);
+  await expect(field).toBeFocused();
+  await page.keyboard.type('hello');
+  await expect(field).toHaveValue('hello');
+});

@@ -93,4 +93,44 @@ describe('the Copy menu', () => {
       other.remove();
     }
   });
+  it('leaves the selection to a press elsewhere, and never takes the caret from a text field', async () => {
+    const fixture = TestBed.createComponent(CopyMenuHost);
+    const menu = TestBed.inject(CopyMenu);
+    fixture.detectChanges();
+    const p = document.createElement('p');
+    p.textContent = 'keep me selected';
+    const input = document.createElement('input');
+    document.body.append(p, input);
+    const r = document.createRange();
+    r.selectNodeContents(p);
+    try {
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(r);
+      menu.open(1, 2, 'keep me selected');
+      await fixture.whenStable();
+      getSelection()!.removeAllRanges(); // WebKit, as the item took the focus
+      input.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); // the user clicks into a field
+      input.focus();
+      await fixture.whenStable();
+      expect(menu.state()).toBeNull();
+      expect(document.activeElement).toBe(input);
+      expect(getSelection()!.toString()).toBe('');
+
+      // Closed by the app while a field has the focus: the field keeps its caret too.
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(r);
+      menu.open(1, 2, 'keep me selected');
+      await fixture.whenStable();
+      input.focus();
+      getSelection()!.collapse(input, 0);
+      menu.close();
+      await fixture.whenStable();
+      expect(document.activeElement).toBe(input);
+      expect(getSelection()!.toString()).toBe('');
+    } finally {
+      getSelection()!.removeAllRanges();
+      p.remove();
+      input.remove();
+    }
+  });
 });
