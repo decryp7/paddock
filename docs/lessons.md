@@ -987,3 +987,19 @@ was deleted. **Rule:** every wait without a time limit reports a cause and a Ret
 discovery file must be newer than the wait or answer (a stale file caused exit-3 launch loops and a false "Agent
 stopped"), and a supervisor's claim is checked against the lock, which nothing can fake. Open: kickstart after hand-over,
 re-probing `RequiresApproval`, the `is_held` probe rate, the `/tmp/Dyno` fallback (ADR 0010 §11).
+
+## Five fixes in two days meant a supervisor with no owner and no state (2026-10-30, Dyno)
+Dyno's agent link needed five rounds of fixes on the release path (a fixed wait that doubled the agent, endless silent waits,
+a stale discovery file taken as ready, a launch before a Windows lock was released, a quit outcome read twice), each approved in
+review and each followed by a failure on another OS. The cause was not any one interleaving: the supervisor had no single
+owner and no explicit state. Five threads wrote 12 flags, "which wait are we in" was the function being executed, and each
+decision was assembled from several reads that other threads and the OS changed in between. **Rule:** a supervisor of a
+process (start, find, hand over, stop) is a pure `step(event) -> commands` machine with one owner thread; its phase says what
+it waits for; every answer from the world carries the number of the thing it is about (look, connect, child generation,
+connection) and a stale one is dropped; a child is held until its end is reported; a decision that must not change (the quit
+outcome) is taken once, in `step`, and stored; the owner never blocks (slow ports answer as events); every transition is
+published and tests wait on it, not on flags or sleeps. Prove the machine with a bounded model check of every interleaving,
+and prove the check by making each historical bug a mutant it must catch (Dyno ADR 0025). Two things the first prototype got
+wrong and a review caught: releasing the child before it is gone (a second agent while the first still runs), and an event
+without the generation it is about (an old child's exit taken for the new one's).
+
