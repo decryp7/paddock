@@ -373,6 +373,10 @@ p95 during the import stays under 0.5 s, and the worker's total peak physical fo
 WP-1 runs first; if A meets the target, WP-4 to WP-7 are reconsidered before they start. WP-3's fixes are worth having
 either way.
 
+In `docs/plans/debrief-1-2.md` (each day counted once): WP-1 is SR1 (which absorbs IX0 and IX-A); WP-2 and WP-3 are
+IX-B1; WP-4 and WP-5 are IX-B2; WP-6 is P4 (the tee's tally) with SR3 (the workers); joining C is IX-C; WP-7 is IX-S;
+WP-8 is IX-M. SR2 is superseded if B or C is adopted.
+
 ## Decisions (user, 2026-10-30)
 
 1. **Search lag during an import.** Search may show an event up to about 10 s after the event list does; the index
