@@ -36,4 +36,28 @@ test.describe('tray popover', () => {
       for (const b of fit.buttons) expect(b, b.text).toMatchObject({ oneLine: true, inside: true });
     });
   }
+
+  // The browser build plays both windows in one tab: the popover leaves the route for the main window, which takes it as it
+  // starts, as a main window the shell rebuilt does in the app.
+  test('"Open Pitwall" opens the main window on the dashboard', async ({ page }) => {
+    await openApp(page, '/tray');
+    await page.locator('footer').getByRole('button', { name: 'Open Pitwall' }).click();
+    await expect(page.locator('pd-shell-frame')).toBeVisible();
+    await expect(page).toHaveURL(/#\/dashboard$/);
+    await expect(page.locator('pw-tray-popover')).toHaveCount(0);
+  });
+
+  test('a model update\'s "Review" opens the main window on Models', async ({ page }) => {
+    await openApp(page, '/tray', 'mock-fast&mock-static&mock-updates');
+    await page.getByRole('button', { name: /model updates? (is|are) available/ }).click();
+    await expect(page.locator('pd-shell-frame')).toBeVisible();
+    await expect(page).toHaveURL(/#\/models$/);
+  });
+
+  test('a pairing\'s "Review" opens the main window on the dashboard', async ({ page }) => {
+    await openApp(page, '/tray');
+    await page.getByRole('button', { name: /wants? to pair/ }).click();
+    await expect(page.locator('pd-shell-frame')).toBeVisible();
+    await expect(page).toHaveURL(/#\/dashboard$/);
+  });
 });

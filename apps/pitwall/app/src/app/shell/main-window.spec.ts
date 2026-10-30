@@ -43,10 +43,23 @@ describe('the main window’s start', () => {
     expect(opened.map((o) => o.id).sort()).toEqual(['pw.quit', 'pw.service-consent']);
   });
 
-  it('goes to the screen the tray popover asks for', async () => {
+  it('goes to the screen the tray popover asks for once the window has routed', async () => {
     const { navigate } = setup(new MockBackend());
-    const go = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const router = TestBed.inject(Router);
+    vi.spyOn(router, 'navigated', 'get').mockReturnValue(true);
+    const go = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
     navigate('/models');
     expect(go).toHaveBeenCalledWith('/models');
+  });
+
+  it('a route taken while the window starts waits for its first navigation, so the start does not undo it', async () => {
+    const { navigate } = setup(new MockBackend());
+    const router = TestBed.inject(Router);
+    const real = router.navigateByUrl.bind(router);
+    const go = vi.spyOn(router, 'navigateByUrl').mockImplementation((url) => (url === '/models' ? Promise.resolve(true) : real(url)));
+    navigate('/models');
+    expect(go).not.toHaveBeenCalled();
+    await router.navigateByUrl('/');
+    expect(go).toHaveBeenLastCalledWith('/models');
   });
 });
