@@ -144,3 +144,30 @@ fn a_call_that_finishes_does_not_wait_for_the_monitor() {
     hung.join().unwrap();
     assert_eq!(samples.count(), 0, "a call that ends before the first beat asks the probe nothing");
 }
+
+/// Cancel ends a stuck call at once, not at the monitor's next beat: the beat here is an hour, so only a monitor that is woken by the
+/// cancel can end the call. The guard is a hang guard, not a measured time.
+#[test]
+fn cancel_wakes_the_monitor_instead_of_waiting_for_the_next_beat() {
+    let w = Arc::new(ParseWorkers::new(
+        pacenotes_worker::WorkerSettings {
+            beat: Duration::from_secs(3600),
+            ..settings()
+        },
+        Arc::new(FixedProbe::stopped()),
+    ));
+    let token = CancelToken::new();
+    let (t, w2) = (token.clone(), w.clone());
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        tx.send(w2.extract(&p("wait.block"), b"x", &t)).unwrap();
+    });
+    while w.started() < 1 {
+        std::thread::yield_now();
+    }
+    token.cancel();
+    let result = rx
+        .recv_timeout(Duration::from_secs(60))
+        .expect("the cancel waited for the monitor's beat");
+    assert_eq!(result, Err(SourceError::Cancelled));
+}

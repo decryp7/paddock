@@ -178,7 +178,15 @@ impl SymbolSource for ParseWorkers {
             bytes: bytes.to_vec(),
             max_nodes: self.settings.max_nodes,
         };
-        let watch = (Mutex::new(Watch::default()), Condvar::new());
+        let watch = Arc::new((Mutex::new(Watch::default()), Condvar::new()));
+        // a cancel wakes the monitor at once (it takes the lock first, so the wake cannot fall between its check and its wait)
+        let _wake = cancel.on_cancel({
+            let watch = watch.clone();
+            move || {
+                drop(lock(&watch.0));
+                watch.1.notify_all();
+            }
+        });
         let result = std::thread::scope(|scope| {
             scope.spawn(|| self.monitor(&child, pid, cancel, &watch));
             let result = child.peer().request::<ParseRequest, ParseReply>(&request, None);
@@ -235,7 +243,7 @@ impl ParseWorkers {
         loop {
             // one wake-up is one tick, however late it comes; a call that already ended is not waited for (the notify may have come
             // before this thread first took the lock)
-            if !guard.done {
+            if !guard.done && !cancel.is_cancelled() {
                 guard = wake
                     .wait_timeout(guard, self.settings.beat)
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
