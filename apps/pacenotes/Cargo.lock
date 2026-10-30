@@ -2446,6 +2446,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pacenotes-xml"
+version = "0.1.0"
+dependencies = [
+ "roxmltree",
+ "thiserror",
+]
+
+[[package]]
 name = "paddock-env"
 version = "0.1.0"
 dependencies = [
