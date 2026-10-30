@@ -707,10 +707,15 @@ mod tests {
         for _ in 0..7 {
             j.observe(&run(Cpu::Unavailable));
         }
-        j.observe(&Reading {
-            progress: 1,
-            ..run(Cpu::Unavailable)
-        });
+        // The 8th blind tick would be the hang guard; the progress reading itself must not stall.
+        assert_eq!(
+            j.observe(&Reading {
+                progress: 1,
+                ..run(Cpu::Unavailable)
+            }),
+            StartState::Starting,
+            "progress reset the blindness at once"
+        );
         for _ in 0..6 {
             assert_eq!(
                 j.observe(&run(Cpu::Unavailable)),
@@ -734,6 +739,50 @@ mod tests {
                 "progress reset idle"
             );
         }
+    }
+
+    #[test]
+    fn a_stall_is_reported_again_after_a_hang_or_a_spin_episode_ends() {
+        // Hung, then a CPU reading ends the blindness, then blind again: a new episode.
+        let mut j = StartJudge::new(patience(), "x");
+        let mut hung = 0;
+        for _ in 0..8 {
+            hung += usize::from(matches!(
+                cause(&j.observe(&run(Cpu::Unavailable))),
+                Some(StallCause::Hung(_))
+            ));
+        }
+        assert_eq!(hung, 1);
+        assert_eq!(
+            j.observe(&run(Cpu::Unavailable)),
+            StartState::Starting,
+            "the same episode is not repeated"
+        );
+        assert_eq!(j.observe(&run(used(1))), StartState::Starting);
+        let mut again = 0;
+        for _ in 0..8 {
+            again += usize::from(matches!(
+                cause(&j.observe(&run(Cpu::Unavailable))),
+                Some(StallCause::Hung(_))
+            ));
+        }
+        assert_eq!(again, 1, "a new blind episode is reported");
+
+        // Spinning, then progress ends the episode, then spinning again: reported again.
+        let mut j = StartJudge::new(patience(), "x");
+        let mut c = 0;
+        let mut spins = 0;
+        for p in [0, 0, 1] {
+            for _ in 0..8 {
+                c += 2;
+                let state = j.observe(&Reading {
+                    progress: p,
+                    ..run(used(c))
+                });
+                spins += usize::from(matches!(cause(&state), Some(StallCause::Spinning(_))));
+            }
+        }
+        assert_eq!(spins, 2, "once before the progress, once after it");
     }
 
     #[test]

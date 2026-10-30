@@ -29,6 +29,12 @@ test('C51 sees code after a test module and does not flag connect functions', ()
   assert.deepEqual(lines('fn connect_pipe() {\n    rx.recv_timeout(d);\n}\nfn start_launchctl_job() {\n    // pace: poll\n    rx.recv_timeout(d);\n}\n'), []);
 });
 
+test('C51 does not take a function that merely begins with a start word', () => {
+  assert.deepEqual(lines('fn launchctl(d: Duration) {\n    rx.recv_timeout(d);\n}\nfn starting_up() {\n    rx.recv_timeout(d);\n}\n'), []);
+  assert.deepEqual(lines('fn launch() {\n    rx.recv_timeout(d);\n}\n'), [2]);
+  assert.deepEqual(lines('fn launch_agent() {\n    rx.recv_timeout(d);\n}\n'), [2]);
+});
+
 test('C51 through the runner: warnings only, for source in scope only', async () => {
   const bad = 'pub const START_LIMIT: Duration = D;\n';
   const f = await findingsOf(
@@ -45,5 +51,5 @@ test('C51 through the runner: warnings only, for source in scope only', async ()
     }),
   );
   assert.deepEqual(f.map((x) => x.file).sort(), ['apps/x/app/src-tauri/src/l.rs', 'apps/x/crates/y/src/lib.rs', 'crates/a/src/lib.rs', 'tools/t/src/main.rs']);
-  assert.ok(f.every((x) => x.severity === 'warn' && /StartJudge/.test(x.fix)));
+  assert.ok(f.every((x) => x.severity === 'warn' && x.rule === 40 && /StartJudge/.test(x.fix)));
 });

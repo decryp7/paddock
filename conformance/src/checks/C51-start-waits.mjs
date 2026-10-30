@@ -19,7 +19,7 @@ const KIND = '(?:START|SPAWN|LAUNCH|READY)';
 const BOUND = '(?:TIMEOUT|LIMIT|DEADLINE|WAIT|GRACE|BUDGET|WINDOW)';
 const NAMED = new RegExp(`\\b((?:const|static)\\s+)?([A-Za-z0-9_]*${KIND}[A-Za-z0-9_]*${BOUND}[A-Za-z0-9_]*)\\s*:\\s*(?:Option<\\s*)?(?:std::time::)?Duration\\b`, 'i');
 const IN_START_FN = /\b(?:Deadline::after|Instant::now\(\)\s*\+|\.recv_timeout|\.wait_timeout(?:_while)?)\s*\(?/;
-const START_FN = /\bfn\s+((?:start|spawn|launch|boot)\w*)/;
+const START_FN = /\bfn\s+((?:start|spawn|launch|boot)(?:_\w*)?)\b/;
 
 const lineAt = (text, index) => text.slice(0, index).split('\n').length;
 
@@ -79,7 +79,7 @@ export default {
       const text = ctx.read(f);
       if (!text) continue;
       for (const s of startWaits(text)) {
-        out.push(warn('C51', 51, f, s.line, `${s.what}: a working start must not fail only because time passed (ADR 0031, ER-19)`, 'Judge it with `paddock_proc::StartJudge` / `StartWatch`, or mark a real cap with `// cap: <why>` (also `external`, `shutdown`, `ui`, `pace`).'));
+        out.push(warn('C51', 40, f, s.line, `${s.what}: a working start must not fail only because time passed (ADR 0031, ER-19)`, 'Judge it with `paddock_proc::StartJudge` / `StartWatch`, or mark a real cap with `// cap: <why>` (also `external`, `shutdown`, `ui`, `pace`).'));
       }
     }
     return out;
