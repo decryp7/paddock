@@ -44,18 +44,19 @@ the reader accepts both and the writer keeps the name it found (new cells use `o
 All records are custom data in the file, so one save carries them. DG1 must confirm with real saves that each survives.
 
 - **Page record**, on the root cell as `<object id="0" gen_page="...">`: the generated ids in generation order, the **tombstones**
-  (generated ids the user deleted and chose to remember, H7), and a format version. Bounded: at most `MAX_ITEMS` ids.
+  (generated ids the user deleted and chose to remember, H7), and a format version. One combined bound: ids plus tombstones together are at most `MAX_ITEMS`.
 - **Per-cell record**, as wrapper attributes on the cell: `gen_key` (the identity string: qualified name, kind, language, plus an app
   tag value such as `pacenotes`), `gen_label` and `gen_style` (one hash per part, of what was **last written**), `gen_geo`
-  (the written `x,y,w,h`), `gen_pts` (the written waypoints of an edge) and `gen_parent` (the written parent).
+  (the written `x,y,w,h`), `gen_pts` (the written waypoints of an edge, and its label offset), `gen_ends` (the written source and
+  target ids of an edge) and `gen_parent` (the written parent).
 - **Names are neutral.** The shared crate reserves the prefix `gen_`; the app tag lives in the value, or the app declares its own
   prefix in `diagrams.json`. `pn_` is not used. The marker `pnGen=1` in the style string is dropped: the presence of `gen_key` is the
   only mark of a generated cell. `pn_rev` is dropped too: a revision stamp changes on every commit and would make every file differ in
   every regeneration, while the hashes already say exactly which parts changed.
 - **Ids** are `pn:<kind>:<hash>` of the identity string (proposal 9.2), so order never matters. The hash is the first 16 hex digits
   (64 bits) of SHA-256 over the identity string; part hashes are the first 16 hex digits of SHA-256 of the part's canonical text. A
-  collision between two different identities (about 2 in 10^10 at 20,000 items) is detected when generating (two identities, one id):
-  the generator fails with both names and extends the hash for that diagram to 24 digits. It is never merged silently.
+  collision between two different identities (about n^2/2^65, roughly 1.1e-11 for 20,000 ids) is detected when generating (two identities, one id):
+  the generator fails with both names and extends the hash for that diagram to 24 digits, and the extension is recorded in the page record so ids do not flip back. It is never merged silently.
 - Wrapper attributes that are not in the generated-meta names (link, tooltip, tags, Edit Data fields, a person's own) are **kept
   verbatim**; the merge owns only the `gen_` names.
 
@@ -86,17 +87,17 @@ H6). Off-grid numbers are a difference like any other and count as H3, not as se
 | H8 | Cell reparented, grouped, moved to another layer | F parent differs from `gen_parent` | Parent kept; geometry is then judged in the parent's frame. Layers are kept as cells; the generator writes to the default layer |
 | H9 | Z-order changed | order of ids in F differs from the page record's order | Kept for pinned cells; new cells go in front of generated, behind manual |
 | H10 | Id changed by draw.io | no cell with the derived id, one with the `gen_key` | Section 3 rule 2; the id is restored and manual edges that referenced it are rewritten (below) |
-| H11 | Page renamed, diagram id changed | page name or id differs | Not content: name from data, id normalised, reported as `reformat_only` |
+| H11 | Page renamed, diagram id changed | page name or id differs | Not content: name from G, id normalised, reported as `reformat_only` |
 | H12 | Re-serialised by draw.io (key order, spacing, whitespace) | `--check` passes, `--strict` fails | Serialisation only; regeneration normalises once |
 | H13 | Code element gone | id in the page record, not in G | Cell marked "removed in code" and kept until the user confirms; its tombstone, if any, is dropped |
-| H14 | A generated edge reconnected to another cell | source or target differs from R | Pinned with the edge; reported "reconnected" |
-| H15 | Edge label (child vertex of the edge, or an offset) | a child cell with the edge as parent, or label geometry | Kept as a manual child; offset treated as geometry (H3) |
+| H14 | A generated edge reconnected to another cell | source or target differs from `gen_ends` (the written source and target ids) | Pinned with the edge; reported "reconnected". An edge's identity includes both end identities, so a changed code relationship is a new edge, not a reconnection |
+| H15 | Edge label (child vertex of the edge, or an offset) | a child cell with the edge as parent, or label geometry | Kept as a manual child; the label offset is folded into `gen_pts` and pinned with the waypoints (H6) |
 | H16 | Link, tooltip, tags, Edit Data on a generated cell | wrapper attributes outside the `gen_` names | Kept verbatim |
 | H17 | `visible=0` or `locked` | style or attribute on the cell | Kept; `visible=0` cells still count as present (not deleted) |
 | H18 | Collapsed container, layer visibility | container and layer attributes | Kept; children keep their pins |
-| H19 | Page view toggles (grid, guides, page size, background) | model attributes differ from the canonical set | Normalised to canonical and reported as `reformat_only`; not refused and not merged |
+| H19 | Page view toggles (grid, guides, page view, page size; also background, shadow, math) | model attributes differ from the canonical set | Only grid, guides, page view and page size are normalised and reported as `reformat_only`. Background, shadow and math are kept verbatim on merge-managed files (a change to them is a visible change that the generator does not overwrite) |
 
-**H7, deleted generated cells.** Detection is the page record. The non-interactive default is: do **not** re-add, report "deleted by
+**H7, deleted generated cells.** Detection is the page record, and the tombstone is tested only after matching rules 1 and 2 (section 3) have failed for that id. The non-interactive default is: do **not** re-add, report "deleted by
 you (pending)", and do **not** fail `--check`. In the preview the user chooses *restore* (the cell is placed fresh, as a new item,
 not at the old position) or *remember* (the id goes into the page record's tombstones, and is not reported again). Tombstones are
 removed when the code element is removed (H13). A rename gives a new id, so it is a new item, not a tombstone hit.
@@ -125,7 +126,7 @@ for a pinned cell), so a pin stays a pin until the user chooses "re-layout" (whi
    model item, because the merge works on files.
 4. **Item metadata** is read and written only by the merge and the strict writer: a bounded map (reserved `gen_` prefix, length
    bounds), `UserObject` accepted. The strict parse accepts exactly the reserved names and the page record, and refuses other unknown
-   attributes. The set of style keys kept verbatim on manual cells is a configuration allow-list in `diagrams.json`, not code.
+   attributes. Manual cells and pinned raw styles pass through unfiltered; there is no style-key allow-list.
 5. **`dev diagrams merge`**, opted in per diagram in `diagrams.json`: writes the merged file and prints the change list. `merge
    --check` fails on a stale generated part (identity set or part hashes differ from G) and ignores manual cells. **Merge-managed
    files are exempt from `generate`'s "committed file needs a data file" rule**; `merge --check` checks them instead, and `generate
@@ -143,7 +144,7 @@ reported in name order). The costly step is the **draw.io CLI export** (an Elect
 bound set by RAM (a few at a time; the tool's default stays one until measured), and it is **skipped when the diagram's hash is
 unchanged** since the last export (hash of the `.drawio` kept next to the SVG/PNG, git-ignored). `--check` is a pure compare and
 needs no draw.io. The merge on a 20,000-item diagram is measured when item 2 lands, budget under one second, and the number goes in
-the tool's `docs/performance.md` and the family `docs/benchmarks.md` (not in this ADR).
+`apps/<app>/docs/performance.md` and the family `docs/benchmarks.md` (not in this ADR).
 
 ## Consequences
 
