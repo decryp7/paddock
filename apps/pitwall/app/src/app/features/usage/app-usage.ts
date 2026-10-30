@@ -6,7 +6,10 @@ import type { AppPermissions, LimitStatus, RequestRecord } from '../../core/api.
 import { ThemeService } from '../../core/theme';
 import { usageChart, type UsageMetric } from '../../shared/charts/chart-options';
 import { EChart } from '../../shared/charts/echart';
-import { bytes, clock, compact, durationIn, durationUnit, int, varies } from '../../shared/format';
+import { bytes, clock, compact, int, varies } from '../../shared/format';
+import { LiveStore } from '../../core/live.store';
+import { shortModel } from '../dashboard/dashboard';
+import { secondsCell } from '../requests/request-labels';
 import { LIMIT_LABEL, limitStateLook, statusTone } from '../../shared/labels';
 import { MatIcon } from '@angular/material/icon';
 import { SuEmptyState, SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
@@ -92,7 +95,7 @@ const METRICS: { id: UsageMetric; label: string }[] = [
           </ng-container>
           <ng-container matColumnDef="model">
             <th mat-header-cell *matHeaderCellDef scope="col">Model</th>
-            <td mat-cell *matCellDef="let r" [matTooltip]="r.modelId ?? ''" matTooltipShowDelay="600">{{ r.modelId ?? '—' }}</td>
+            <td mat-cell *matCellDef="let r" [matTooltip]="r.modelId ?? ''" matTooltipShowDelay="600">{{ r.modelId ? modelName(r.modelId) : '—' }}</td>
           </ng-container>
           <ng-container matColumnDef="status">
             <th mat-header-cell *matHeaderCellDef scope="col">Status</th>
@@ -107,8 +110,8 @@ const METRICS: { id: UsageMetric; label: string }[] = [
             <td mat-cell *matCellDef="let r" class="right num">{{ count(tokens(r)) }}</td>
           </ng-container>
           <ng-container matColumnDef="took">
-            <th mat-header-cell *matHeaderCellDef scope="col" class="right">Took {{ tookUnit() }}</th>
-            <td mat-cell *matCellDef="let r" class="right num">{{ durIn(r.totalMs, tookUnit()) }}</td>
+            <th mat-header-cell *matHeaderCellDef scope="col" class="right">Took s</th>
+            <td mat-cell *matCellDef="let r" class="right num">{{ secs(r.totalMs) }}</td>
           </ng-container>
           <tr mat-header-row *matHeaderRowDef="columns(); sticky: true"></tr>
           <tr mat-row *matRowDef="let r; columns: columns()"></tr>
@@ -144,20 +147,25 @@ const METRICS: { id: UsageMetric; label: string }[] = [
       justify-content: flex-end;
       gap: var(--pd-space-2);
     }
-    /* The totals are a row of figures on the card, not a boxed grid inside it. */
+    /* The totals are a row of figures that wraps whole figures, never a label inside one ("Completion tokens"). */
     .figures {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: var(--pd-space-4);
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--pd-space-3) var(--pd-space-6);
+      > div {
+        flex: 1 0 auto;
+      }
       margin: 0 0 var(--pd-space-3);
       padding-bottom: var(--pd-space-3);
       border-bottom: 1px solid var(--pd-hairline);
       dt {
         font-size: var(--pd-text-label);
         color: var(--pd-text-muted);
+        white-space: nowrap;
       }
       dd {
         margin: 2px 0 0;
+        white-space: nowrap;
         font-size: var(--pd-text-subtitle);
         font-weight: var(--pd-weight-semibold);
       }
@@ -285,11 +293,16 @@ export class AppUsage {
     const r = this.recent();
     if (!r.length) return '';
     const cols = this.columns();
-    const shared = [cols.includes('endpoint') || r.length < 2 ? '' : r[0]!.endpoint, cols.includes('model') || r.length < 2 ? '' : (r[0]!.modelId ?? '')].filter(Boolean);
+    const shared = [cols.includes('endpoint') || r.length < 2 ? '' : r[0]!.endpoint, cols.includes('model') || r.length < 2 || !r[0]!.modelId ? '' : this.modelName(r[0]!.modelId)].filter(Boolean);
     return [`${r.length} latest`, ...shared.map((v) => `all ${v}`)].join(' · ');
   });
-  protected readonly tookUnit = computed(() => durationUnit(this.recent().map((r) => r.totalMs)));
-  protected readonly durIn = durationIn;
+  /** A request's time in seconds, as the request log's Total column: the same unit for every app, whatever its requests took. */
+  protected readonly secs = secondsCell;
+  private readonly live = inject(LiveStore);
+  /** A model by its display name when Pitwall has it loaded, else its id without the quantisation (the tooltip has the id). */
+  protected modelName(id: string): string {
+    return this.live.models().find((m) => m.modelId === id)?.name ?? shortModel(id);
+  }
   protected readonly byId = (_: number, r: RequestRecord) => r.id;
   protected readonly chartKey = computed(() => `${this.theme.resolved()}:${this.store.range()}:${this.metric()}`);
   protected readonly option = computed<EChartsCoreOption>(() => {

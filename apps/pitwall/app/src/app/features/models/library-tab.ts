@@ -478,7 +478,19 @@ export class LibraryTab {
     const lib = this.store.library();
     if (!lib.length) return '';
     const loaded = lib.filter((m) => m.loaded).length;
-    return `${lib.length} models · ${loaded} loaded`;
+    return [`${lib.length} models · ${loaded} loaded`, ...this.shared()].join(' · ');
+  });
+
+  /** What every model shares, said once in the toolbar instead of in a constant column (UI review 2 rule 7): `all 8.2B · all 32k context`. */
+  protected readonly shared = computed(() => {
+    const lib = this.store.library();
+    const cols = this.columns();
+    const first = lib[0];
+    if (!first || lib.length < 3) return [];
+    return [
+      cols.includes('params') || first.paramsB === null ? '' : `all ${paramsText(first.paramsB)}`,
+      cols.includes('context') || first.contextMax === null ? '' : `all ${contextText(first.contextMax)} context`,
+    ].filter(Boolean);
   });
 
   /** The columns that say something: parameters and context only when they differ between models (UI review 2 rule 7). */

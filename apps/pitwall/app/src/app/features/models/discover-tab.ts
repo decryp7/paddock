@@ -9,7 +9,7 @@ import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { Fit, QuantVariant, Recommendation } from '../../core/api.types';
 import { ago, bytes, bytesIn, bytesUnit, compact, concurrencyText } from '../../shared/format';
-import { fitLook } from '../../shared/labels';
+import { fitLook, sentenceCase } from '../../shared/labels';
 import { Panel } from '../../shared/ui/panel';
 import { contextText } from './library-tab';
 import { ModelsStore } from './models.store';
@@ -17,12 +17,22 @@ import { SuEmptyState } from '@decryp7/paddock-ui';
 
 /** What a fit needs, in one line: `6.1 GB VRAM + 0.9 GB RAM · all layers on the GPU`. */
 export function fitDetail(f: Fit): string {
+  return `${fitMemory(f)} · ${OFFLOAD_TEXT[f.offload]}`;
+}
+
+/** What a file needs in memory: `3.2 GB VRAM + 2.3 GB RAM`. */
+export function fitMemory(f: Fit): string {
   const parts: string[] = [];
   if (f.needVram > 0) parts.push(`${bytes(f.needVram)} VRAM`);
   if (f.needRam > 0) parts.push(`${bytes(f.needRam)} RAM`);
-  const offload = { all: 'all layers on the GPU', partial: 'part of the layers on the GPU', none: 'CPU only' }[f.offload];
-  return `${parts.join(' + ') || 'Nothing'} · ${offload}`;
+  return parts.join(' + ') || 'Nothing';
 }
+
+/** Where the layers run, short enough for a table cell's second line. */
+export const OFFLOAD_SHORT: Record<Fit['offload'], string> = { all: 'All on the GPU', partial: 'Split GPU and CPU', none: 'CPU only' };
+
+/** Where the layers run. */
+export const OFFLOAD_TEXT: Record<Fit['offload'], string> = { all: 'all layers on the GPU', partial: 'part of the layers on the GPU', none: 'CPU only' };
 
 /** Hugging Face search (GGUF) and a repo's quantisation variants, each with a "will this fit?" verdict. */
 @Component({
@@ -34,7 +44,7 @@ export function fitDetail(f: Fit): string {
       <mat-chip-listbox class="chips" aria-label="Filter recommendations by tag" hideSingleSelectionIndicator [value]="store.packTag() ?? ''" (change)="store.loadPacks($event.value || null)">
         <mat-chip-option value="">All</mat-chip-option>
         @for (t of store.packTags(); track t) {
-          <mat-chip-option [value]="t">{{ t }}</mat-chip-option>
+          <mat-chip-option [value]="t">{{ sentence(t) }}</mat-chip-option>
         }
       </mat-chip-listbox>
       @if (store.packs(); as p) {
@@ -141,7 +151,7 @@ export function fitDetail(f: Fit): string {
             <ng-container matColumnDef="quant">
               <th mat-header-cell *matHeaderCellDef scope="col">Quant</th>
               <td mat-cell *matCellDef="let v" [matTooltip]="v.parts > 1 ? (v.quant ?? v.file) + ', ' + v.parts + ' parts' : (v.quant ?? v.file)" matTooltipShowDelay="600">
-                <span class="q mono">{{ v.quant ?? v.file }}</span>
+                <span class="q ver">{{ v.quant ?? v.file }}</span>
                 @if (v.parts > 1) {
                   <span class="faint parts">{{ v.parts }} parts</span>
                 }
@@ -159,7 +169,10 @@ export function fitDetail(f: Fit): string {
             </ng-container>
             <ng-container matColumnDef="needs">
               <th mat-header-cell *matHeaderCellDef scope="col">Needs</th>
-              <td mat-cell *matCellDef="let v" class="needs" [matTooltip]="needsText(v)">{{ needsText(v) }}</td>
+              <td mat-cell *matCellDef="let v" class="needs" [matTooltip]="needsText(v)">
+                <span class="line">{{ memory(v.fit) }}</span>
+                <span class="line faint">{{ needsMore(v) }}</span>
+              </td>
             </ng-container>
             <ng-container matColumnDef="act">
               <th mat-header-cell *matHeaderCellDef scope="col" class="act"><span class="sr-only">Download</span></th>
@@ -338,6 +351,13 @@ export function fitDetail(f: Fit): string {
       margin: 0 calc(-1 * var(--pd-space-4));
       width: calc(100% + 2 * var(--pd-space-4));
     }
+    /* The quantisation is a short tag and the verdict a word: what it needs (two lines) has the rest of the row. */
+    .quants {
+      --mat-table-row-item-container-height: 48px;
+    }
+    .mat-column-quant {
+      width: 112px;
+    }
     .mat-column-size {
       width: 80px;
     }
@@ -345,10 +365,12 @@ export function fitDetail(f: Fit): string {
       width: 104px;
     }
     .mat-column-act {
-      width: 96px;
+      width: 88px;
     }
-    .q {
-      font-weight: var(--pd-weight-medium);
+    .needs .line {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .parts {
       margin-left: var(--pd-space-2);
@@ -378,6 +400,17 @@ export class DiscoverTab implements OnInit {
   protected readonly sizeIn = bytesIn;
   /** The quantisations' Size column unit, in its header. */
   protected readonly sizeUnit = computed(() => bytesUnit(this.store.repo()?.variants.map((v) => v.sizeBytes) ?? []));
+
+  protected readonly memory = fitMemory;
+  protected readonly sentence = sentenceCase;
+
+  /** The Needs cell's second line: where the layers run and, when it fits, how many requests it serves at once. */
+  protected needsMore(v: QuantVariant): string {
+    const where = OFFLOAD_SHORT[v.fit.offload];
+    const fits = v.fit.verdict !== 'wontFit' && v.fit.verdict !== 'unknown';
+    if (!fits) return where;
+    return `${where} · ${v.maxSlots <= 1 ? 'one request at a time' : `${v.maxSlots} requests at once`}`;
+  }
 
   /** What a quantisation needs and, when it fits, how many requests it serves at once. */
   protected needsText(v: QuantVariant): string {

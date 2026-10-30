@@ -31,8 +31,8 @@ describe('msCell', () => {
   it('formats table milliseconds compactly', () => {
     expect(msCell(null)).toBe('—');
     expect(msCell(212.4)).toBe('212');
-    expect(msCell(1460)).toBe('1.5 s');
-    expect(msCell(12_400)).toBe('12 s');
+    expect(msCell(1460)).toBe('1,460');
+    expect(msCell(12_400)).toBe('12,400');
   });
 });
 
@@ -55,7 +55,7 @@ describe('request cells', () => {
     const all = layout(new Set(COLUMNS.filter((c) => c.optional).map((c) => c.id)));
     expect(all.cols.length).toBe(COLUMNS.length);
     expect(base.narrow).not.toBe(base.template);
-    expect(base.compact).toBe('68px minmax(88px, 160px) minmax(88px, 1fr) 72px 132px 32px');
+    expect(base.compact).toBe('68px minmax(88px, 1fr) minmax(88px, 1fr) 72px 132px 32px');
     expect(base.tiny).toBe('68px minmax(100px, 1fr) 132px 32px');
   });
 });

@@ -7,7 +7,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import type { BuildCapability, Engine, InstalledBuild } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { ago, bytes, bytesIn, bytesUnit, percent, varies } from '../../shared/format';
-import { availabilityLook, capabilityLook, downloadActive, healthLook, selfTestLook } from '../../shared/labels';
+import { availabilityLook, capabilityLook, downloadActive, healthLook, SELF_TEST_WORD, selfTestLook } from '../../shared/labels';
 import { confirm } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
@@ -72,18 +72,20 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
             <ng-container matColumnDef="build">
               <th mat-header-cell *matHeaderCellDef scope="col">Build</th>
               <td mat-cell *matCellDef="let b" [matTooltip]="b.devices.length ? b.label + ' · ' + b.devices.join(', ') : b.label" matTooltipShowDelay="600">
-                <span class="bname">{{ b.label }}</span>
-                @if (b.active) {
-                  <span class="active"><mat-icon svgIcon="pw:check" aria-hidden="true" />Active</span>
-                }
-                @if (isPinned(b)) {
-                  <mat-icon class="pinned" svgIcon="pw:pin" role="img" aria-label="Pinned for all models" matTooltip="Pinned for all models: automatic choice is off" />
-                }
+                <span class="bline">
+                  <span class="bname">{{ b.label }}</span>
+                  @if (b.active) {
+                    <span class="active"><mat-icon svgIcon="pw:check" aria-hidden="true" />Active</span>
+                  }
+                  @if (isPinned(b)) {
+                    <mat-icon class="pinned" svgIcon="pw:pin" role="img" aria-label="Pinned for all models" matTooltip="Pinned for all models: automatic choice is off" />
+                  }
+                </span>
               </td>
             </ng-container>
             <ng-container matColumnDef="release">
               <th mat-header-cell *matHeaderCellDef scope="col">Release</th>
-              <td mat-cell *matCellDef="let b"><span class="mono">{{ b.tag }}</span></td>
+              <td mat-cell *matCellDef="let b"><span class="ver">{{ b.tag }}</span></td>
             </ng-container>
             <ng-container matColumnDef="size">
               <th mat-header-cell *matHeaderCellDef scope="col" class="right">Size {{ sizeUnit() }}</th>
@@ -91,7 +93,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
             </ng-container>
             <ng-container matColumnDef="test">
               <th mat-header-cell *matHeaderCellDef scope="col">Self-test</th>
-              <td mat-cell *matCellDef="let b"><span class="status" [attr.data-tone]="test(b).tone" [matTooltip]="b.selfTestMessage ?? ''">{{ test(b).label }}</span></td>
+              <td mat-cell *matCellDef="let b"><span class="status" [attr.data-tone]="test(b).tone" [matTooltip]="b.selfTestMessage ?? test(b).label">{{ testWord(b) }}</span></td>
             </ng-container>
             <ng-container matColumnDef="devices">
               <th mat-header-cell *matHeaderCellDef scope="col">Devices</th>
@@ -167,7 +169,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
           @for (c of catalogRows(); track c.id + c.tag) {
             <li>
               <span class="bname">{{ c.label }}</span>
-              <span class="faint num"><span class="mono">{{ c.tag }}</span> · {{ size(c.downloadBytes) }} download</span>
+              <span class="faint num cmeta" [matTooltip]="size(c.downloadBytes) + ' to download'"><span class="ver">{{ c.tag }}</span> · {{ size(c.downloadBytes) }}</span>
               <span class="rec">
                 @if (c.suggested) {
                   <mat-icon svgIcon="pw:sparkles" aria-hidden="true" />Suggested
@@ -241,11 +243,12 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
       display: grid;
       gap: var(--pd-space-3);
     }
+    /* Each column as wide as its header and its widest value (a tag, "Not tested"): the build's name has the rest. */
     .mat-column-release {
-      width: 112px;
+      width: 84px;
     }
     .mat-column-test {
-      width: 132px;
+      width: 112px;
     }
     .mat-column-size {
       width: 80px;
@@ -324,15 +327,27 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
         text-decoration: underline;
       }
     }
+    /* The name, then its markers on the same centre line; the name gives way (ellipsis, tooltip) before a marker does. */
+    .bline {
+      display: flex;
+      align-items: center;
+      gap: var(--pd-space-2);
+      min-width: 0;
+      > * {
+        flex: none;
+      }
+    }
     .bname {
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
       font-weight: var(--pd-weight-semibold);
-      margin-right: var(--pd-space-2);
     }
     .active {
       display: inline-flex;
       align-items: center;
       gap: 3px;
-      margin-right: var(--pd-space-2);
       font-size: var(--pd-text-label);
       color: var(--pd-text-muted);
       mat-icon {
@@ -341,10 +356,12 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
         color: var(--pd-success);
       }
     }
+    .cmeta {
+      white-space: nowrap;
+    }
     .pinned {
       width: 13px;
       height: 13px;
-      vertical-align: -2px;
       color: var(--pd-accent);
     }
     .devices {
@@ -378,7 +395,8 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
       list-style: none;
       li {
         display: grid;
-        grid-template-columns: minmax(180px, 1fr) minmax(0, 1.4fr) 110px 92px;
+        /* The name has the flex; the release and download size are one short line that never wraps. */
+        grid-template-columns: minmax(0, 1fr) auto 110px 92px;
         align-items: center;
         gap: var(--pd-space-3);
         min-height: 44px;
@@ -470,6 +488,7 @@ export class EngineCard {
   protected readonly pct = percent;
   protected readonly model = modelLabel;
   protected readonly test = (b: InstalledBuild) => selfTestLook(b.selfTest);
+  protected readonly testWord = (b: InstalledBuild) => SELF_TEST_WORD[b.selfTest];
   protected readonly health = healthLook;
   protected readonly buildOptions = computed<PdSelectOption[]>(() => [
     { value: 'auto', label: 'Automatic' + (this.activeBuild() ? ' — uses ' + this.activeBuild()!.label : '') },

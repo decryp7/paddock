@@ -172,7 +172,7 @@ describe('AppsPage', () => {
       const panel = Array.from(el.querySelectorAll('pw-panel')).find((p) => p.textContent!.includes('Cached answers'))!;
       expect(panel.textContent).toContain('on for this app');
       const figures = Array.from(panel.querySelectorAll('.cache-stats div')).map((d) => d.textContent!.trim());
-      expect(figures).toEqual(['Cache hits212', 'Misses388', 'Hit rate35 %', 'Prompt tokens reused1.2M']);
+      expect(figures).toEqual(['Cache hits212', 'Misses388', 'Hit rate35%', 'Prompt tokens reused1.2M']);
     });
 
     it('shows a dash for the hit rate and says how to turn caching on for an app that has none', async () => {

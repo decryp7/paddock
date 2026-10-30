@@ -100,10 +100,10 @@ describe('Models page: recommendations and engines', () => {
     const all = rows().length;
     expect(all).toBeGreaterThan(3);
     const chip = (name: string) => Array.from(r.el.querySelectorAll<HTMLElement>('pw-discover-tab mat-chip-option')).find((c) => c.textContent?.trim() === name)!;
-    chip('code').querySelector<HTMLElement>('[role=option]')!.click();
+    chip('Code').querySelector<HTMLElement>('[role=option]')!.click();
     await r.settle();
     expect(rows().length).toBeLessThan(all);
-    expect(chip('code').querySelector('[role=option]')!.getAttribute('aria-selected')).toBe('true');
+    expect(chip('Code').querySelector('[role=option]')!.getAttribute('aria-selected')).toBe('true');
     (r.el.querySelector('button[aria-label^="Download Qwen3.6 35B-A3B"]') as HTMLButtonElement).click();
     await r.settle();
     expect((await backend.downloads())[0]!.name).toContain('Qwen3.6-35B-A3B');
