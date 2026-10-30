@@ -117,6 +117,11 @@ test('describeTree prints pid, age and parent for the evidence', () => {
   assert.deepEqual(describeTree([], config, BUNDLE), ["(none of the app's processes)"]);
 });
 
+test('parseLaunchctlPrint reads a two-word state as launchd prints it for a waiting job (spawn scheduled)', () => {
+  const t = 'gui/501/net.decryptology.dyno.agent = {\n\tactive count = 0\n\tpath = (submitted by smd.87)\n\tstate = spawn scheduled\n\tlast exit code = 0\n}\n';
+  assert.equal(parseLaunchctlPrint(t).state, 'spawn scheduled');
+});
+
 test('parseLaunchctlPrint reads state, pid and program; a missing job gives nulls', () => {
   const text = 'gui/501/net.decryptology.dyno.agent = {\n\tactive count = 1\n\tprogram = /Applications/Dyno.app/Contents/MacOS/dyno-agent\n\tstate = running\n\tpid = 1360\n}\n';
   assert.deepEqual(parseLaunchctlPrint(text), { state: 'running', pid: 1360, program: '/Applications/Dyno.app/Contents/MacOS/dyno-agent' });
