@@ -12,7 +12,7 @@
 //! over the cap from its header before reading it, and counts objects read as the progress figure.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
 use pacenotes_core::ports::{Blame, BlameError, BlameHunk, BlameRequest, Blamer};
 use pacenotes_core::{RepoPath, Rev};
@@ -47,10 +47,30 @@ struct Guarded<'a, O> {
     objects: AtomicU64,
     stop: AtomicU8,
     stopped_size: AtomicU64,
+    /// Set when a blob read during the walk had a NUL in its first 8000 bytes.
+    saw_binary: AtomicBool,
     progress: &'a dyn Fn(u64),
 }
 
 impl<O> Guarded<'_, O> {
+    /// The typed error for a lookup that failed: the guard's own reason if it stopped it, else the backend's words.
+    fn error(&self, request: &BlameRequest, e: &gix::Error) -> BlameError {
+        match self.reason() {
+            Some(Stop::Cancelled) => BlameError::Cancelled,
+            Some(Stop::Objects) => BlameError::Limit {
+                what: "objects read",
+                got: self.objects.load(Ordering::Relaxed),
+                max: request.limits.max_objects,
+            },
+            Some(Stop::Blob) => BlameError::Limit {
+                what: "file size in bytes",
+                got: self.stopped_size.load(Ordering::SeqCst),
+                max: request.limits.max_blob_bytes,
+            },
+            None => BlameError::Backend(e.to_string()),
+        }
+    }
+
     fn halt(&self, why: Stop) -> gix::Error {
         self.stop.store(why as u8, Ordering::SeqCst);
         gix::Error::from_error(match why {
@@ -101,7 +121,14 @@ impl<O: gix::objs::Find + gix::objs::FindHeader> gix::objs::Find for Guarded<'_,
             self.stopped_size.store(h.size, Ordering::SeqCst);
             return Err(self.halt(Stop::Blob));
         }
-        self.inner.try_find(id, buffer)
+        let found = self.inner.try_find(id, buffer)?;
+        if let Some(data) = &found
+            && data.kind == gix::objs::Kind::Blob
+            && data.data.iter().take(8000).any(|b| *b == 0)
+        {
+            self.saw_binary.store(true, Ordering::Relaxed);
+        }
+        Ok(found)
     }
 }
 
@@ -127,7 +154,18 @@ impl Blamer for GixHistory {
             return Err(BlameError::UnknownRev(rev.to_string()));
         };
         let repo = self.thread_local_repo();
-        repo.find_commit(id).map_err(|_| BlameError::UnknownRev(rev.to_string()))?;
+        let commit = repo.find_commit(id).map_err(|_| BlameError::UnknownRev(rev.to_string()))?;
+        // is the file there? looked up in the commit's tree, so a missing path is `NotFound` deterministically, whatever words gix's own
+        // errors use (and a damaged object database stays a backend error)
+        let entry = commit
+            .tree()
+            .and_then(|tree| tree.lookup_entry_by_path(path.as_str()))
+            .map_err(|e| BlameError::Backend(e.to_string()))?
+            .filter(|e| e.mode().is_blob());
+        let Some(entry) = entry else {
+            return Err(BlameError::NotFound(path.clone()));
+        };
+        let blob_id = entry.object_id();
         let ranges = match request.range {
             Some((a, b)) if a >= 1 && b >= a => {
                 gix::blame::BlameRanges::from_one_based_inclusive_range(a..=b).map_err(|e| BlameError::Backend(e.to_string()))?
@@ -171,8 +209,29 @@ impl Blamer for GixHistory {
             objects: AtomicU64::new(0),
             stop: AtomicU8::new(0),
             stopped_size: AtomicU64::new(0),
+            saw_binary: AtomicBool::new(false),
             progress,
         };
+        // the blamed blob is read once, through the guard (so the cap, the budget and the cancel apply), before the walk: the range is
+        // checked against its real line count and a binary file is refused here, not after a walk that would be thrown away
+        let mut buf = Vec::new();
+        let blob = match gix::objs::Find::try_find(&guard, &blob_id, &mut buf) {
+            Ok(Some(data)) => data.data.to_vec(),
+            Ok(None) => return Err(BlameError::NotFound(path.clone())),
+            Err(e) => return Err(guard.error(request, &e)),
+        };
+        // git's own test for binary: a NUL in the first 8000 bytes. gix then gives the whole file to the oldest commit, which is not an
+        // attribution, so it is refused.
+        if blob.iter().take(8000).any(|b| *b == 0) {
+            return Err(BlameError::Binary(path.clone()));
+        }
+        let lines = line_count(&blob);
+        if let Some((first, last)) = request.range
+            && last > lines
+        {
+            return Err(BlameError::RangeOutsideFile { first, last, lines });
+        }
+        drop(blob);
         let outcome = gix::blame::file(
             &guard,
             gix::blame::Start::Commit(id),
@@ -185,39 +244,13 @@ impl Blamer for GixHistory {
         progress(objects);
         let outcome = match outcome {
             Ok(o) => o,
-            Err(e) => {
-                return Err(match guard.reason() {
-                    Some(Stop::Cancelled) => BlameError::Cancelled,
-                    Some(Stop::Objects) => BlameError::Limit {
-                        what: "objects read",
-                        got: objects,
-                        max: request.limits.max_objects,
-                    },
-                    Some(Stop::Blob) => BlameError::Limit {
-                        what: "file size in bytes",
-                        got: guard.stopped_size.load(Ordering::SeqCst),
-                        max: request.limits.max_blob_bytes,
-                    },
-                    None if e.to_string().contains("wasn't found") => BlameError::NotFound(path.clone()),
-                    None => BlameError::Backend(e.to_string()),
-                });
-            }
+            Err(e) => return Err(guard.error(request, &e)),
         };
-        let lines = line_count(&outcome.blob);
-        if let Some((first, last)) = request.range
-            && last > lines
-        {
-            return Err(BlameError::RangeOutsideFile { first, last, lines });
-        }
-        // git's own test for binary: a NUL in the first 8000 bytes. gix then gives the whole file to the oldest commit, which is not an
-        // attribution, so it is refused.
-        if outcome.blob.iter().take(8000).any(|b| *b == 0) {
-            return Err(BlameError::Binary(path.clone()));
-        }
         let mut entries = outcome.entries;
         entries.sort_by_key(|e| e.start_in_blamed_file);
         let mut blame = Blame {
             objects_read: objects,
+            approximate: guard.saw_binary.load(Ordering::Relaxed),
             ..Blame::default()
         };
         let mut who: BTreeMap<gix::ObjectId, (String, i64)> = BTreeMap::new();

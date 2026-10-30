@@ -404,7 +404,7 @@ fn the_sources_never_start_a_process_and_reach_blame_only_through_one_wrapper() 
         // index or the attributes of the repository are in none
         let is_blame = path.file_name().is_some_and(|n| n == "blame.rs");
         for forbidden in [
-            "diff_resource_cache(",
+            "diff_resource_cache",
             "Mode::ToWorktree",
             "ToWorktreeAndBinaryToText",
             "filter_pipeline",

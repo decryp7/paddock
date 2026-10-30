@@ -363,6 +363,13 @@ fn binding_a_run_allocates_linearly_in_the_arguments() {
     assert!(large <= small * 5, "4x the arguments allocated {large} bytes against {small}");
 }
 
+/// What the Rust side of one search may allocate in the rebinding test below. tree-sitter allocates its tree through C `malloc`, which
+/// the counting allocator cannot see, so what is counted is the matcher's own work: the sibling lists it builds (64,000 arguments are
+/// 128,000 children, built once per node it descends into) and the captures. Measured: about 8.4 MB (2026-10-30). The budget is a flat
+/// 16 MiB, twice that. The eager version, which collected the whole capture on every comparison, allocated 40 GB on this input, so the
+/// margin against the bug it guards is more than three orders of magnitude.
+const REBIND_BYTES_BUDGET: usize = 16 * 1024 * 1024;
+
 /// Starting to compare an already bound run must not cost the size of the run: `f($$$A, $$$A)` against 64,000 arguments with a small step
 /// budget ends by its steps, and neither the steps nor the bytes allocated run away.
 #[test]
@@ -377,25 +384,8 @@ fn rebinding_a_run_is_bounded_by_steps_in_work_and_in_bytes() {
     let (found, bytes) = crate::alloc::allocated_by(|| p.find_all(code.as_bytes(), &limits, &CancelToken::new()));
     assert_eq!(found.truncated, Some(Truncated::Steps));
     assert!(found.steps <= limits.max_steps + 1_000, "{} steps", found.steps);
-    let parse_and_tree = {
-        let small = format!(
-            "fn g() {{ f({}); }}",
-            (0..64_000).map(|i| i.to_string()).collect::<Vec<_>>().join(", ")
-        );
-        crate::alloc::allocated_by(|| {
-            p.find_all(
-                small.as_bytes(),
-                &MatchLimits {
-                    max_steps: 1,
-                    ..MatchLimits::default()
-                },
-                &CancelToken::new(),
-            )
-        })
-        .1
-    };
     assert!(
-        bytes <= parse_and_tree * 4 + 8 * 1024 * 1024,
-        "{bytes} bytes against {parse_and_tree} for a search of one step"
+        bytes <= REBIND_BYTES_BUDGET,
+        "{bytes} bytes allocated against a budget of {REBIND_BYTES_BUDGET}"
     );
 }

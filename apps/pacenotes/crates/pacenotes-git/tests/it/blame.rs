@@ -498,3 +498,61 @@ fn measure_blame() {
         );
     }
 }
+
+/// The range is judged from one guarded read of the blamed blob, before the walk: with a budget of one object, which the walk would
+/// exceed at once, a range past the end is still `RangeOutsideFile`, and one inside the file is the walk's `Limit`.
+#[test]
+fn the_range_is_checked_before_the_walk_starts() {
+    let repo = Repo::new();
+    let (_, _, c) = three(&repo);
+    let history = open(&repo.dir).unwrap();
+    let one = BlameLimits {
+        max_objects: 1,
+        ..BlameLimits::default()
+    };
+    let past = BlameRequest {
+        range: Some((1, 9)),
+        limits: one,
+        ..BlameRequest::default()
+    };
+    assert_eq!(
+        blame(&history, &c, "f.rs", &past),
+        Err(BlameError::RangeOutsideFile {
+            first: 1,
+            last: 9,
+            lines: 3
+        })
+    );
+    let inside = BlameRequest {
+        range: Some((1, 3)),
+        limits: one,
+        ..BlameRequest::default()
+    };
+    assert!(matches!(
+        blame(&history, &c, "f.rs", &inside),
+        Err(BlameError::Limit { what: "objects read", .. })
+    ));
+}
+
+/// An older version that is binary cannot be compared by git, so the lines older than it are attributed to the commit where the file turned
+/// binary. That is not hidden: the answer says it is approximate.
+#[test]
+fn an_older_binary_version_makes_the_answer_approximate_and_says_so() {
+    let repo = Repo::new();
+    repo.commit(1_000, "ann", &[("f.txt", "1\n2\0\n3\n")]);
+    let b = repo.commit(2_000, "bob", &[("f.txt", "1\n2\n3\n")]);
+    let c = repo.commit(3_000, "cat", &[("f.txt", "1\n2\n3\n4\n")]);
+    let history = open(&repo.dir).unwrap();
+    let got = blame(&history, &c, "f.txt", &BlameRequest::default()).unwrap();
+    assert_eq!(who(&got), [(1, 3, hash(&b)), (4, 4, hash(&c))], "{got:?}");
+    assert!(
+        got.approximate,
+        "lines 1 to 3 really came from ann; the answer must say it cannot tell"
+    );
+    // a text-only history is exact
+    let clean = Repo::new();
+    clean.commit(1_000, "ann", &[("f.txt", "1\n2\n3\n")]);
+    let d = clean.commit(2_000, "bob", &[("f.txt", "1\n2\n3\n4\n")]);
+    let history = open(&clean.dir).unwrap();
+    assert!(!blame(&history, &d, "f.txt", &BlameRequest::default()).unwrap().approximate);
+}
