@@ -393,12 +393,7 @@ fn history(shared: &Shared, range: dyno_core::history::HistoryRange, end: Option
         top_consumers: top_consumers(&rows, 8),
         disk_trends,
         boots: s.boots(w.from.minus(30 * DAY), w.to).map_err(internal)?,
-        crashes: dyno_core::issues::crash_days(
-            &s.issues(w.from, w.to, 20_000).map_err(internal)?,
-            w.from,
-            w.to,
-            core.settings.alarms.utc_offset_minutes,
-        ),
+        crashes: dyno_core::issues::crash_days(&s.issues(w.from, w.to, 20_000).map_err(internal)?, w.from, w.to, core.zone.as_ref()),
         core_points: {
             let raw = s.core_points(w.tier, w.from, w.to).map_err(internal)?;
             if w.resolution_ms > w.tier.step_ms() {

@@ -283,7 +283,7 @@ pub fn from_baseline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::alarms::{AlarmEngine, AlarmState};
+    use crate::alarms::{AlarmConfig, AlarmEngine, AlarmState};
 
     fn alert(kind: AlertKind, title: &str) -> Alert {
         Alert {
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn alerts_become_one_off_alarms_that_expire() {
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), crate::time::FixedZone::shared(0));
         let o = from_alert(&alert(AlertKind::LowDisk, "C: is almost full"));
         assert_eq!(
             (o.rule().as_str(), o.key().as_str()),
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn thresholds_raise_and_return() {
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), crate::time::FixedZone::shared(0));
         let up = from_threshold("gpu-limit", Metric::GpuLoad, Severity::Warning, 97.0, 90.0, true);
         let c = e.apply(up.into_event(Timestamp(1)));
         assert_eq!(c[0].alarm.current_value, Some(97.0));
@@ -350,7 +350,7 @@ mod tests {
         assert_eq!(o.severity, Severity::Critical);
         assert!(o.one_off && o.active);
         assert_eq!(o.detail, "I/O error on disk3");
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), crate::time::FixedZone::shared(0));
         e.apply(o.into_event(Timestamp(5)));
         assert_eq!(e.alarms().len(), 1);
         assert!(alarms_on(IssueKind::BadShutdown));

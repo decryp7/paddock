@@ -1255,6 +1255,7 @@ version = "0.1.0"
 dependencies = [
  "dns-lookup",
  "dyno-core",
+ "jiff",
  "libc",
  "netstat2",
  "paddock-proc",

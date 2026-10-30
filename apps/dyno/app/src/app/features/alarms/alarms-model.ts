@@ -68,14 +68,13 @@ export function clockToMinutes(text: string): number | null {
 }
 
 /** The engine's default when settings carry no alarm configuration yet. */
-export function defaultAlarmConfig(utcOffsetMinutes: number): AlarmConfig {
+export function defaultAlarmConfig(): AlarmConfig {
   return {
     quiet: { enabled: false, startMinute: 22 * 60, endMinute: 7 * 60, criticalBypass: true },
     chatterTransitions: 6,
     chatterWindowMinutes: 30,
     maxAlarms: 500,
     keepClearedDays: 14,
-    utcOffsetMinutes,
   };
 }
 

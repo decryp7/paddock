@@ -751,3 +751,12 @@ composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor D
 crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
 (`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
 not by guessing at the VM.
+
+## 2026-10-30: a stored UTC offset nobody filled in made every "local" day a UTC day (Dyno)
+The Issues e2e test failed on CI at 00:07 UTC: it ran on the wall clock against mock issues dated relative to it (the newest
+35 minutes ago), so there was nothing "Today" in the first 35 minutes after midnight (a test bug, fixed by pinning the clock
+and zone). The audit behind it found a real one: the engine took local days from a setting, `utcOffsetMinutes`, that defaulted
+to 0 and that nothing in the product set, so today's score, quiet hours, "until tomorrow", maintenance windows, baseline words
+and Time Machine dates were all in UTC while the UI showed local days. **Rule:** local time is a port read from the OS for each
+instant (daylight saving included), never a stored offset; every day boundary goes through one set of day functions; and a test
+of anything with "today" in it pins both its clock and its time zone, and runs once in a zone far from UTC (Dyno ADR 0024).

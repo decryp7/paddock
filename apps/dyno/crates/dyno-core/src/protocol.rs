@@ -987,7 +987,9 @@ mod tests {
                 path: "/x.md".into(),
                 bytes: 1,
             }),
-            Reply::Maintenance(crate::extras::maintenance::MaintenanceSettings::default().status(Timestamp(0), 0)),
+            Reply::Maintenance(
+                crate::extras::maintenance::MaintenanceSettings::default().status(Timestamp(0), &crate::time::FixedZone::UTC),
+            ),
             Reply::Backup(Box::default()),
             Reply::CounterObjects(Box::default()),
             Reply::CounterHits(vec![]),

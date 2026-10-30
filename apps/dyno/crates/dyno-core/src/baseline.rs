@@ -8,7 +8,7 @@
 
 use crate::hardware::Confidence;
 use crate::stats::{median, quantile};
-use crate::time::{Timestamp, DAY, HOUR, MINUTE};
+use crate::time::{to_local, LocalZone, Timestamp, DAY, HOUR};
 use crate::units::bytes;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -239,9 +239,13 @@ pub struct Baseline {
     pub days: u32,
 }
 
-/// The local weekday (0 = Monday) and hour of `at`, given the local offset from UTC in minutes.
-pub fn local_slot(at: Timestamp, utc_offset_minutes: i32) -> (u8, u8) {
-    let local = at.millis().saturating_add(i64::from(utc_offset_minutes) * MINUTE);
+/// The local weekday (0 = Monday) and hour of `at` in `zone`.
+pub fn local_slot(at: Timestamp, zone: &dyn LocalZone) -> (u8, u8) {
+    slot_of_local(to_local(at, zone))
+}
+
+/// The weekday (0 = Monday) and hour of a local wall time (milliseconds since the local epoch).
+fn slot_of_local(local: i64) -> (u8, u8) {
     let day = local.div_euclid(DAY);
     // 1970-01-01 was a Thursday (weekday 3 with Monday = 0).
     let weekday = (day + 3).rem_euclid(7) as u8;
@@ -251,10 +255,10 @@ pub fn local_slot(at: Timestamp, utc_offset_minutes: i32) -> (u8, u8) {
 
 /// Learns a baseline from `(time, value)` pairs in any order. Non-finite values are ignored; each local hour counts once
 /// (its mean), so a dense history does not outweigh a sparse one.
-pub fn learn(samples: &[(Timestamp, f64)], utc_offset_minutes: i32) -> Baseline {
+pub fn learn(samples: &[(Timestamp, f64)], zone: &dyn LocalZone) -> Baseline {
     let mut hours: BTreeMap<i64, (f64, u32)> = BTreeMap::new();
     for (at, v) in samples.iter().filter(|(_, v)| v.is_finite()) {
-        let local = at.millis().saturating_add(i64::from(utc_offset_minutes) * MINUTE);
+        let local = to_local(*at, zone);
         let e = hours.entry(local.div_euclid(HOUR)).or_insert((0.0, 0));
         e.0 += v;
         e.1 += 1;
@@ -265,7 +269,7 @@ pub fn learn(samples: &[(Timestamp, f64)], utc_offset_minutes: i32) -> Baseline 
     let mut days = std::collections::BTreeSet::new();
     for (h, (sum, n)) in hours {
         let mean = sum / f64::from(n);
-        let (weekday, hod) = local_slot(Timestamp(h * HOUR), 0);
+        let (weekday, hod) = slot_of_local(h.saturating_mul(HOUR));
         days.insert(h.div_euclid(24));
         exact.entry((weekday, hod)).or_default().push(mean);
         day_type.entry((weekday >= 5, hod)).or_default().push(mean);
@@ -281,8 +285,8 @@ pub fn learn(samples: &[(Timestamp, f64)], utc_offset_minutes: i32) -> Baseline 
 
 impl Baseline {
     /// What is normal at `at`: the most specific slot with enough observations, if any.
-    pub fn expect(&self, at: Timestamp, utc_offset_minutes: i32) -> Option<Expectation> {
-        let (weekday, hour) = local_slot(at, utc_offset_minutes);
+    pub fn expect(&self, at: Timestamp, zone: &dyn LocalZone) -> Option<Expectation> {
+        let (weekday, hour) = local_slot(at, zone);
         let pick =
             |s: Option<&SlotStats>, min: usize, level: Level| s.filter(|s| s.n as usize >= min).map(|s| Expectation { stats: *s, level });
         pick(self.exact.get(&(weekday, hour)), MIN_EXACT, Level::WeekdayHour)
@@ -363,8 +367,8 @@ fn part_of_day(hour: u8) -> &'static str {
 }
 
 /// "Tuesday mornings", "weekday mornings", "this time of day".
-fn when_words(level: Level, at: Timestamp, utc_offset_minutes: i32) -> String {
-    let (weekday, hour) = local_slot(at, utc_offset_minutes);
+fn when_words(level: Level, at: Timestamp, zone: &dyn LocalZone) -> String {
+    let (weekday, hour) = local_slot(at, zone);
     match level {
         Level::WeekdayHour => format!("{} {}", WEEKDAYS[usize::from(weekday) % 7], part_of_day(hour)),
         Level::DayTypeHour => format!("{} {}", if weekday >= 5 { "weekend" } else { "weekday" }, part_of_day(hour)),
@@ -373,8 +377,8 @@ fn when_words(level: Level, at: Timestamp, utc_offset_minutes: i32) -> String {
 }
 
 /// Judges `value` (a recent average, not a single reading) against what is normal at `at`.
-pub fn judge(baseline: &Baseline, metric: BaselineMetric, value: f64, at: Timestamp, utc_offset_minutes: i32) -> Judgement {
-    let Some(e) = baseline.expect(at, utc_offset_minutes) else {
+pub fn judge(baseline: &Baseline, metric: BaselineMetric, value: f64, at: Timestamp, zone: &dyn LocalZone) -> Judgement {
+    let Some(e) = baseline.expect(at, zone) else {
         return Judgement {
             state: State::NoBaseline,
             confidence: Confidence::Low,
@@ -386,7 +390,7 @@ pub fn judge(baseline: &Baseline, metric: BaselineMetric, value: f64, at: Timest
             usual: String::new(),
         };
     };
-    let when = when_words(e.level, at, utc_offset_minutes);
+    let when = when_words(e.level, at, zone);
     let threshold = (SPREADS * e.stats.spread).max(metric.min_deviation());
     let diff = value - e.stats.median;
     let usual = metric.format(e.stats.median);
@@ -482,6 +486,9 @@ impl Persistence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time::{FixedZone, MINUTE};
+
+    const UTC: &FixedZone = &FixedZone::UTC;
 
     /// 2026-10-05 was a Monday; midnight UTC.
     const MONDAY: i64 = 1_791_158_400_000;
@@ -504,23 +511,39 @@ mod tests {
 
     #[test]
     fn slots_follow_the_local_clock() {
-        assert_eq!(local_slot(at(0, 9), 0), (0, 9));
-        assert_eq!(local_slot(at(1, 23), 0), (1, 23));
-        assert_eq!(local_slot(at(5, 3), 0), (5, 3));
-        assert_eq!(local_slot(at(0, 23), 120), (1, 1), "UTC+2 is already Tuesday 01:00");
-        assert_eq!(local_slot(at(0, 1), -120), (6, 23), "UTC-2 is still Sunday evening");
-        assert_eq!(local_slot(Timestamp(0), 0), (3, 0), "the epoch was a Thursday");
+        assert_eq!(local_slot(at(0, 9), UTC), (0, 9));
+        assert_eq!(local_slot(at(1, 23), UTC), (1, 23));
+        assert_eq!(local_slot(at(5, 3), UTC), (5, 3));
+        assert_eq!(local_slot(at(0, 23), &FixedZone(120)), (1, 1), "UTC+2 is already Tuesday 01:00");
+        assert_eq!(local_slot(at(0, 1), &FixedZone(-120)), (6, 23), "UTC-2 is still Sunday evening");
+        assert_eq!(local_slot(Timestamp(0), UTC), (3, 0), "the epoch was a Thursday");
+    }
+
+    #[test]
+    fn slots_are_learned_and_judged_in_the_local_zone() {
+        // The same office week, lived in UTC+8: the samples are 8 hours earlier in UTC.
+        let utc8 = FixedZone(480);
+        let shifted: Vec<(Timestamp, f64)> = office(70).into_iter().map(|(t, v)| (t.minus(8 * HOUR), v)).collect();
+        let b = learn(&shifted, &utc8);
+        let busy = judge(&b, BaselineMetric::Cpu, 72.0, at(70, 10).minus(8 * HOUR), &utc8);
+        assert_eq!(busy.state, State::Usual, "{busy:?}");
+        assert!(busy.phrase.starts_with("Usual for Monday mornings"), "{}", busy.phrase);
+        // Read as UTC, 10:00 local is 02:00 on a Monday night, where 72 is far above the usual.
+        assert_ne!(
+            judge(&b, BaselineMetric::Cpu, 72.0, at(70, 10).minus(8 * HOUR), UTC).state,
+            State::Usual
+        );
     }
 
     #[test]
     fn a_busy_morning_is_usual_and_a_busy_night_is_not() {
-        let b = learn(&office(70), 0);
+        let b = learn(&office(70), UTC);
         assert_eq!(b.days, 70);
-        let busy = judge(&b, BaselineMetric::Cpu, 72.0, at(70, 10), 0);
+        let busy = judge(&b, BaselineMetric::Cpu, 72.0, at(70, 10), UTC);
         assert_eq!(busy.state, State::Usual, "{busy:?}");
         assert!(busy.phrase.starts_with("Usual for Monday mornings"), "{}", busy.phrase);
         assert_eq!(busy.confidence, Confidence::High);
-        let night = judge(&b, BaselineMetric::Cpu, 72.0, at(70, 3), 0);
+        let night = judge(&b, BaselineMetric::Cpu, 72.0, at(70, 3), UTC);
         assert_eq!(night.state, State::Higher(Strength::Strong), "{night:?}");
         assert_eq!(night.phrase, "Higher than usual for Monday nights");
         assert!(
@@ -529,18 +552,18 @@ mod tests {
             night.explanation
         );
         assert!(night.is_unusual() && !busy.is_unusual());
-        let quiet_morning = judge(&b, BaselineMetric::Cpu, 5.0, at(70, 10), 0);
+        let quiet_morning = judge(&b, BaselineMetric::Cpu, 5.0, at(70, 10), UTC);
         assert_eq!(quiet_morning.state, State::Lower(Strength::Strong), "{quiet_morning:?}");
         assert!(quiet_morning.phrase.starts_with("Lower than usual"));
     }
 
     #[test]
     fn small_differences_never_count() {
-        let b = learn(&office(28), 0);
+        let b = learn(&office(28), UTC);
         // 10 -> 25 is far in spreads (spread is ~1.5) but under the 20-point floor for CPU.
-        assert_eq!(judge(&b, BaselineMetric::Cpu, 25.0, at(28, 3), 0).state, State::Usual);
+        assert_eq!(judge(&b, BaselineMetric::Cpu, 25.0, at(28, 3), UTC).state, State::Usual);
         assert_eq!(
-            judge(&b, BaselineMetric::Cpu, 35.0, at(28, 3), 0).state,
+            judge(&b, BaselineMetric::Cpu, 35.0, at(28, 3), UTC).state,
             State::Higher(Strength::Notable)
         );
     }
@@ -548,24 +571,24 @@ mod tests {
     #[test]
     fn sparse_history_falls_back_and_admits_it() {
         // Two weeks: each weekday-hour slot has 2 observations (< 3), weekday-hour has 10 (>= 6).
-        let b = learn(&office(14), 0);
-        let j = judge(&b, BaselineMetric::Cpu, 70.0, at(14, 10), 0);
+        let b = learn(&office(14), UTC);
+        let j = judge(&b, BaselineMetric::Cpu, 70.0, at(14, 10), UTC);
         assert_eq!(j.state, State::Usual);
         assert!(j.phrase.contains("weekday mornings"), "{}", j.phrase);
         assert_eq!(j.confidence, Confidence::Low);
         // Three days: nothing has enough days behind it.
-        let tiny = learn(&office(3), 0);
-        let none = judge(&tiny, BaselineMetric::Cpu, 70.0, at(3, 10), 0);
+        let tiny = learn(&office(3), UTC);
+        let none = judge(&tiny, BaselineMetric::Cpu, 70.0, at(3, 10), UTC);
         assert_eq!(none.state, State::NoBaseline);
         assert!(none.phrase.contains("Not enough history"));
-        assert!(learn(&[], 0).expect(at(0, 0), 0).is_none());
+        assert!(learn(&[], UTC).expect(at(0, 0), UTC).is_none());
     }
 
     #[test]
     fn the_hour_fallback_is_used_for_the_weekend_with_little_data() {
         // 9 days: weekend slots have 2 days of data per hour (< MIN_DAY_TYPE) but any-day-at-this-hour has 9.
-        let b = learn(&office(9), 0);
-        let j = judge(&b, BaselineMetric::Cpu, 70.0, at(12, 3), 0); // a Saturday night
+        let b = learn(&office(9), UTC);
+        let j = judge(&b, BaselineMetric::Cpu, 70.0, at(12, 3), UTC); // a Saturday night
         assert!(j.phrase.contains("this time of day"), "{}", j.phrase);
         assert_eq!(j.state, State::Higher(Strength::Strong));
     }
@@ -580,8 +603,8 @@ mod tests {
         }
         dense.push((at(1, 1), f64::NAN));
         dense.push((at(1, 1), f64::INFINITY));
-        let b = learn(&dense, 0);
-        let e = b.expect(at(28, 10), 0).unwrap();
+        let b = learn(&dense, UTC);
+        let e = b.expect(at(28, 10), UTC).unwrap();
         assert_eq!(e.level, Level::WeekdayHour);
         assert_eq!(e.stats.n, 4, "four Mondays, not sixteen readings");
         assert!(e.stats.q1 <= e.stats.median && e.stats.median <= e.stats.q3);

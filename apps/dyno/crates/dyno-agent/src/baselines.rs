@@ -13,7 +13,7 @@ use dyno_core::baseline::{
 use dyno_core::hardware::Confidence;
 use dyno_core::history::{AppMinute, HistoryPoint, Tier};
 use dyno_core::metrics::SystemSample;
-use dyno_core::time::{Timestamp, DAY, MINUTE};
+use dyno_core::time::{LocalZone, Timestamp, DAY, MINUTE};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -64,7 +64,7 @@ impl BaselineCentre {
     }
 
     /// Learns from the store if the cache is stale. `apps` are the apps to learn per-app baselines for.
-    fn ensure(&self, store: &Store, apps: &[String], t: Timestamp, offset: i32) {
+    fn ensure(&self, store: &Store, apps: &[String], t: Timestamp, zone: &dyn LocalZone) {
         let mut cache = lock(&self.learned);
         let fresh = cache
             .as_ref()
@@ -76,7 +76,7 @@ impl BaselineCentre {
         let points = store.points(Tier::QuarterHour, from, t).unwrap_or_default();
         let system = BaselineMetric::SYSTEM
             .iter()
-            .map(|m| (*m, learn(&series(&points, *m), offset)))
+            .map(|m| (*m, learn(&series(&points, *m), zone)))
             .collect();
         let rows = if apps.is_empty() {
             Vec::new()
@@ -91,8 +91,8 @@ impl BaselineCentre {
         }
         let mut learned = HashMap::new();
         for (app, (cpu, mem)) in by_app {
-            learned.insert((app.to_string(), BaselineMetric::AppCpu), learn(&cpu, offset));
-            learned.insert((app.to_string(), BaselineMetric::AppMemory), learn(&mem, offset));
+            learned.insert((app.to_string(), BaselineMetric::AppCpu), learn(&cpu, zone));
+            learned.insert((app.to_string(), BaselineMetric::AppMemory), learn(&mem, zone));
         }
         *cache = Some(Learned {
             at: Instant::now(),
@@ -105,7 +105,7 @@ impl BaselineCentre {
     /// The comparison of the last minutes with the baselines.
     pub fn overview(&self, shared: &Shared) -> BaselineOverview {
         let t = now();
-        let (settings, offset, first_seen, recent, rows) = {
+        let (settings, zone, first_seen, recent, rows) = {
             let core = lock(&shared.core);
             let first = core.store.first_seen(t).ok();
             let recent: Vec<SystemSample> = core
@@ -115,13 +115,7 @@ impl BaselineCentre {
                 .cloned()
                 .collect();
             let rows = core.store.app_minutes(t.minus(RECENT_MINUTES * MINUTE), t).unwrap_or_default();
-            (
-                core.settings.baselines,
-                core.settings.alarms.utc_offset_minutes,
-                first,
-                recent,
-                rows,
-            )
+            (core.settings.baselines, core.zone.clone(), first, recent, rows)
         };
         let learning = learning_status(&settings, first_seen, t);
         let mut overview = BaselineOverview {
@@ -136,20 +130,20 @@ impl BaselineCentre {
         let names: Vec<String> = current_apps.iter().map(|a| a.0.clone()).collect();
         {
             let core = lock(&shared.core);
-            self.ensure(&core.store, &names, t, offset);
+            self.ensure(&core.store, &names, t, zone.as_ref());
         }
         let cache = lock(&self.learned);
         let Some(l) = cache.as_ref() else { return overview };
         let mut items = Vec::new();
         for (metric, baseline) in &l.system {
             if let Some(v) = system_value(&recent, *metric) {
-                items.push(item("System", *metric, v, &judge(baseline, *metric, v, t, offset)));
+                items.push(item("System", *metric, v, &judge(baseline, *metric, v, t, zone.as_ref())));
             }
         }
         for (app, cpu, mem) in &current_apps {
             for (metric, v) in [(BaselineMetric::AppCpu, *cpu), (BaselineMetric::AppMemory, *mem)] {
                 if let Some(b) = l.apps.get(&(app.clone(), metric)) {
-                    items.push(item(app, metric, v, &judge(b, metric, v, t, offset)));
+                    items.push(item(app, metric, v, &judge(b, metric, v, t, zone.as_ref())));
                 }
             }
         }
@@ -329,7 +323,13 @@ mod tests {
 
     #[test]
     fn items_have_stable_ids_from_the_metric_and_the_subject() {
-        let j = judge(&Baseline::default(), BaselineMetric::Cpu, 5.0, Timestamp(0), 0);
+        let j = judge(
+            &Baseline::default(),
+            BaselineMetric::Cpu,
+            5.0,
+            Timestamp(0),
+            &dyno_core::time::FixedZone::UTC,
+        );
         assert_eq!(item("System", BaselineMetric::Cpu, 5.0, &j).id, "cpu:System");
         assert_eq!(item("Chrome", BaselineMetric::AppMemory, 5.0, &j).id, "appMemory:Chrome");
         for m in BaselineMetric::SYSTEM.iter().chain(BaselineMetric::APP.iter()) {

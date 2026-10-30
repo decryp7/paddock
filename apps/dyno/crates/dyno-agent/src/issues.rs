@@ -212,14 +212,7 @@ pub fn overview(shared: &Shared, query: IssuesQuery) -> Result<IssuesOverview, A
         .store
         .issues(from, t, PAGE_ROWS)
         .map_err(|e| AgentError::new(ErrorCode::Internal, e.to_string()))?;
-    Ok(build_overview(
-        t,
-        q.days,
-        core.settings.alarms.utc_offset_minutes,
-        &issues,
-        sources,
-        scanned_at,
-    ))
+    Ok(build_overview(t, q.days, core.zone.as_ref(), &issues, sources, scanned_at))
 }
 
 /// Writes the issues of the last `days` days as JSON lines to `path` (chosen by the user in the OS save dialog).

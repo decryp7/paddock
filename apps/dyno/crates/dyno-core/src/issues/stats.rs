@@ -1,11 +1,11 @@
 //! Statistics over stored issues, all pure: the daily stability score, per-app and per-kind leaderboards, the trend
-//! against the window before, and the per-day crash counts the history chart reads. Local days are computed from a
-//! UTC offset the caller passes (the app's clock), never from the machine's time zone database.
+//! against the window before, and the per-day crash counts the history chart reads. Local days come from the
+//! [`LocalZone`] port the caller passes (the OS's zone, daylight saving included), never from UTC dates.
 
 use super::{Issue, IssueKind, SourceState, SourceStatus, MAX_LISTED};
 use crate::anomaly::{Anomaly, AnomalyKind, Evidence};
 use crate::protocol::DayCount;
-use crate::time::{Timestamp, DAY, HOUR, MINUTE};
+use crate::time::{day_start, next_day_start, previous_day_start, LocalZone, Timestamp, HOUR};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -58,10 +58,16 @@ pub fn day_score(counts: &[(IssueKind, u32)]) -> u32 {
     100u32.saturating_sub(doubled / 2)
 }
 
-/// The start of the local day containing `at` (as a UTC timestamp).
-pub fn day_start(at: Timestamp, utc_offset_minutes: i32) -> Timestamp {
-    let shift = i64::from(utc_offset_minutes) * MINUTE;
-    Timestamp((at.millis().saturating_add(shift)).div_euclid(DAY) * DAY - shift)
+/// Most local days a window or chart spans (a bound on every loop over days).
+const MAX_DAYS: u32 = 400;
+
+/// The start of the local day `back` days before the one that contains `at`.
+fn days_back(at: Timestamp, back: u32, zone: &dyn LocalZone) -> Timestamp {
+    let mut day = day_start(at, zone);
+    for _ in 0..back.min(MAX_DAYS) {
+        day = previous_day_start(day, zone);
+    }
+    day
 }
 
 /// One day's score.
@@ -77,13 +83,12 @@ pub struct DayScore {
 }
 
 /// Scores for the `days` local days ending with the day that contains `now`, oldest first.
-pub fn daily_scores(issues: &[Issue], now: Timestamp, days: u32, utc_offset_minutes: i32) -> Vec<DayScore> {
-    let today = day_start(now, utc_offset_minutes);
-    (0..days)
+pub fn daily_scores(issues: &[Issue], now: Timestamp, days: u32, zone: &dyn LocalZone) -> Vec<DayScore> {
+    (0..days.min(MAX_DAYS))
         .rev()
         .map(|back| {
-            let start = today.minus(i64::from(back) * DAY);
-            let end = start.plus(DAY);
+            let start = days_back(now, back, zone);
+            let end = next_day_start(start, zone);
             let mut counts: HashMap<IssueKind, u32> = HashMap::new();
             for i in issues.iter().filter(|i| i.at >= start && i.at < end) {
                 *counts.entry(i.kind).or_default() += 1;
@@ -100,11 +105,11 @@ pub fn daily_scores(issues: &[Issue], now: Timestamp, days: u32, utc_offset_minu
 
 /// Application crashes per local day in `[from, to)`, one entry per day (zero days included). `restarts` is 0: no OS log
 /// says an app was relaunched.
-pub fn crash_days(issues: &[Issue], from: Timestamp, to: Timestamp, utc_offset_minutes: i32) -> Vec<DayCount> {
+pub fn crash_days(issues: &[Issue], from: Timestamp, to: Timestamp, zone: &dyn LocalZone) -> Vec<DayCount> {
     let mut out = Vec::new();
-    let mut day = day_start(from, utc_offset_minutes);
-    while day < to && out.len() < 400 {
-        let end = day.plus(DAY);
+    let mut day = day_start(from, zone);
+    while day < to && out.len() < MAX_DAYS as usize {
+        let end = next_day_start(day, zone);
         let crashes = issues
             .iter()
             .filter(|i| i.kind == IssueKind::AppCrash && i.at >= day && i.at < end)
@@ -282,20 +287,19 @@ pub struct IssuesOverview {
 pub fn build_overview(
     now: Timestamp,
     days: u32,
-    utc_offset_minutes: i32,
+    zone: &dyn LocalZone,
     issues: &[Issue],
     sources: Vec<SourceStatus>,
     scanned_at: Option<Timestamp>,
 ) -> IssuesOverview {
-    let today = day_start(now, utc_offset_minutes);
-    let from = today.minus(i64::from(days.saturating_sub(1)) * DAY);
-    let previous_from = from.minus(i64::from(days) * DAY);
+    let from = days_back(now, days.saturating_sub(1), zone);
+    let previous_from = days_back(from, days, zone);
     let mut window: Vec<Issue> = issues.iter().filter(|i| i.at >= from && i.at <= now).cloned().collect();
     window.sort_by(|a, b| b.at.cmp(&a.at).then(a.id.cmp(&b.id)));
     let previous = issues.iter().filter(|i| i.at >= previous_from && i.at < from).count() as u32;
     let any_readable = sources.iter().any(SourceStatus::is_readable);
     let daily = if any_readable {
-        daily_scores(&window, now, days, utc_offset_minutes)
+        daily_scores(&window, now, days, zone)
     } else {
         Vec::new()
     };
@@ -332,7 +336,9 @@ impl SourceState {
 mod tests {
     use super::*;
     use crate::issues::IssueSourceId;
+    use crate::time::{FixedZone, DAY, MINUTE};
 
+    const UTC: FixedZone = FixedZone::UTC;
     const T0: i64 = 1_761_091_200_000; // 2025-10-22 00:00 UTC
 
     fn at(day: i64, hour: i64, kind: IssueKind, app: &str) -> Issue {
@@ -392,14 +398,23 @@ mod tests {
     }
 
     #[test]
-    fn local_days_follow_the_offset() {
-        let t = Timestamp(T0 + 23 * 3_600_000); // 23:00 UTC
-        assert_eq!(day_start(t, 0), Timestamp(T0));
-        // In UTC+2 it is already the next day, which started at 22:00 UTC.
-        assert_eq!(day_start(t, 120), Timestamp(T0 + 22 * 3_600_000));
-        // In UTC-5 the day started at 05:00 UTC.
-        assert_eq!(day_start(t, -300), Timestamp(T0 + 5 * 3_600_000));
-        assert_eq!(day_start(Timestamp(T0), 0), Timestamp(T0));
+    fn local_days_follow_the_zone() {
+        // 23:00 UTC on day 2: in UTC+8 it is 07:00 on day 3, so the issue at 23:00 UTC counts for local day 3, and the
+        // window and scores start at local midnights (16:00 UTC), not UTC ones.
+        let zone = FixedZone(480);
+        let issues = vec![at(2, 23, IssueKind::AppCrash, "late"), at(2, 15, IssueKind::AppCrash, "early")];
+        let now = Timestamp(T0 + 3 * DAY);
+        let d = daily_scores(&issues, now, 2, &zone);
+        assert_eq!(
+            d.iter().map(|x| x.day).collect::<Vec<_>>(),
+            vec![Timestamp(T0 + DAY + 16 * HOUR), Timestamp(T0 + 2 * DAY + 16 * HOUR)]
+        );
+        assert_eq!(d.iter().map(|x| x.issues).collect::<Vec<_>>(), vec![1, 1]);
+        let o = build_overview(now, 1, &zone, &issues, vec![ok(IssueSourceId::MacReports)], None);
+        assert_eq!(o.from, Timestamp(T0 + 2 * DAY + 16 * HOUR));
+        assert_eq!(o.total, 1, "only the late issue is today in UTC+8");
+        let c = crash_days(&issues, Timestamp(T0 + 2 * DAY), now, &zone);
+        assert_eq!(c[0].day, Timestamp(T0 + DAY + 16 * HOUR));
     }
 
     #[test]
@@ -410,12 +425,12 @@ mod tests {
             at(2, 9, IssueKind::BadShutdown, ""),
         ];
         let now = Timestamp(T0 + 2 * DAY + 12 * 3_600_000);
-        let d = daily_scores(&issues, now, 3, 0);
+        let d = daily_scores(&issues, now, 3, &UTC);
         assert_eq!(d.iter().map(|x| x.score).collect::<Vec<_>>(), vec![88, 100, 80]);
         assert_eq!(d.iter().map(|x| x.issues).collect::<Vec<_>>(), vec![2, 0, 1]);
         assert_eq!(d[0].day, Timestamp(T0));
         assert_eq!(d[2].day, Timestamp(T0 + 2 * DAY));
-        assert!(daily_scores(&[], now, 0, 0).is_empty());
+        assert!(daily_scores(&[], now, 0, &UTC).is_empty());
     }
 
     #[test]
@@ -426,10 +441,10 @@ mod tests {
             at(2, 1, IssueKind::AppCrash, "B"),
             at(2, 5, IssueKind::AppCrash, "B"),
         ];
-        let days = crash_days(&issues, Timestamp(T0), Timestamp(T0 + 3 * DAY), 0);
+        let days = crash_days(&issues, Timestamp(T0), Timestamp(T0 + 3 * DAY), &UTC);
         assert_eq!(days.iter().map(|d| d.crashes).collect::<Vec<_>>(), vec![1, 0, 2]);
         assert!(days.iter().all(|d| d.restarts == 0));
-        assert!(crash_days(&issues, Timestamp(T0 + DAY), Timestamp(T0), 0).is_empty());
+        assert!(crash_days(&issues, Timestamp(T0 + DAY), Timestamp(T0), &UTC).is_empty());
     }
 
     #[test]
@@ -555,7 +570,7 @@ mod tests {
             at(3, 1, IssueKind::AppCrash, "a"),
             at(5, 0, IssueKind::AppHang, "b"),
         ];
-        let o = build_overview(now, 3, 0, &issues, vec![ok(IssueSourceId::MacReports)], Some(Timestamp(7)));
+        let o = build_overview(now, 3, &UTC, &issues, vec![ok(IssueSourceId::MacReports)], Some(Timestamp(7)));
         assert_eq!(o.total, 2);
         assert_eq!(o.trend, Trend { current: 2, previous: 2 });
         assert_eq!(o.issues[0].app, "b");
@@ -568,7 +583,7 @@ mod tests {
         let blind = build_overview(
             now,
             3,
-            0,
+            &UTC,
             &[],
             vec![SourceStatus {
                 source: IssueSourceId::Journal,
@@ -600,7 +615,7 @@ mod tests {
                 )
             })
             .collect();
-        let o = build_overview(now, 2, 0, &issues, vec![ok(IssueSourceId::MacReports)], None);
+        let o = build_overview(now, 2, &UTC, &issues, vec![ok(IssueSourceId::MacReports)], None);
         assert_eq!(o.issues.len(), MAX_LISTED);
         assert_eq!(o.total as usize, MAX_LISTED + 25);
     }

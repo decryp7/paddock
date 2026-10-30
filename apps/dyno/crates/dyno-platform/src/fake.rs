@@ -132,7 +132,7 @@ impl Fake {
         self.lock().failures.clear();
     }
 
-    /// A [`Platform`] whose ports are these fakes.
+    /// A [`Platform`] whose ports are these fakes, in UTC (a test that cares about local days sets `zone`).
     pub fn platform(&self) -> Platform {
         Platform {
             sensors: Box::new(self.clone()),
@@ -143,6 +143,7 @@ impl Fake {
             activity: Box::new(self.clone()),
             issues: Vec::new(),
             links: Box::new(self.clone()),
+            zone: dyno_core::time::FixedZone::shared(0),
         }
     }
 }

@@ -6,7 +6,7 @@ use crate::store::Store;
 use dyno_core::alarms::feed::{from_alert, Observation};
 use dyno_core::alarms::{Alarm, AlarmChange, AlarmConfig, AlarmEngine, AlarmEvent, AlarmFilter, AlarmStats, ChangeKind, ShelveFor};
 use dyno_core::alerts::Alert;
-use dyno_core::time::Timestamp;
+use dyno_core::time::{Timestamp, Zone};
 
 /// How often [`AlarmCentre::tick`] does any work.
 const TICK_EVERY_MS: i64 = 30_000;
@@ -21,11 +21,11 @@ pub struct AlarmCentre {
 
 impl AlarmCentre {
     /// Restores the open alarms and muted rules from `store`.
-    pub fn load(store: &Store, config: AlarmConfig) -> AlarmCentre {
+    pub fn load(store: &Store, config: AlarmConfig, zone: Zone) -> AlarmCentre {
         let alarms = store.alarms(LOAD_LIMIT).unwrap_or_default();
         let muted = store.muted_rules().unwrap_or_default();
         AlarmCentre {
-            engine: AlarmEngine::restore(config, alarms, muted),
+            engine: AlarmEngine::restore(config, zone, alarms, muted),
             last_tick: Timestamp(0),
         }
     }
