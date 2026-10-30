@@ -476,6 +476,37 @@ pub fn read_children(proc_root: &Path, pid: u32) -> Option<Vec<u32>> {
 mod tests {
     use super::*;
 
+    /// The real OS reader against a process started here: a busy loop's CPU time grows, an idle one's does not move much,
+    /// and a gone process has none (this runs on macOS and Linux; Windows is checked by its CI run).
+    #[cfg(unix)]
+    #[test]
+    fn the_os_reads_the_cpu_time_of_a_busy_child_and_of_its_tree() {
+        let mut cmd = crate::command("sh");
+        cmd.args(["-c", "while :; do :; done"]);
+        let mut child = crate::Supervised::spawn(cmd).expect("a busy child");
+        let id = child.process().expect("its identity");
+        let os = OsSource::default();
+        let first = os.cpu_micros(id.pid()).expect("the OS reports a CPU time");
+        let t = std::time::Instant::now();
+        // Busy until the OS has charged some CPU (a condition, not a sleep); bounded only as a safety net.
+        while os
+            .cpu_micros(id.pid())
+            .is_some_and(|now| now <= first + 20_000)
+            && t.elapsed() < std::time::Duration::from_secs(60)
+        {
+            std::thread::yield_now();
+        }
+        let later = os.cpu_micros(id.pid()).expect("still reported");
+        assert!(later > first + 20_000, "{first} -> {later}");
+        let tree = tree_cpu_time_from(&os, id).expect("the tree's time");
+        assert!(
+            tree.as_micros() >= u128::from(later),
+            "the tree includes the root"
+        );
+        child.kill();
+        assert_eq!(os.cpu_micros(u32::MAX - 1), None, "no such process");
+    }
+
     #[test]
     fn cpu_time_is_read_from_the_stat_line_after_the_last_parenthesis() {
         let stat = "1234 (a (weird) name) S 1 1234 1234 0 -1 4194560 100 0 0 0 5 3 0 0 20 0 1 0 98765 1000000 50";

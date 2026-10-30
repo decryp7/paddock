@@ -37,6 +37,8 @@ Conventional Commits; one semver tag for the whole repo.
 - `StartJudge`, `StartWatch`, `Patience`, `StallReport`: a start is judged on liveness, a ready handshake, progress
   ticks and the tree's CPU time, counted in ticks; no wall-clock give-up for a working process.
 - `InstanceLock::claim` (`Acquired`/`Held`/`Unsupported`) and the `hint` module (a discovery file is only a hint).
+- `paddock-chromium`: the fixed `START_LIMIT` / `LaunchOptions::start_limit` are gone. A start is judged on the browser's run state (`LaunchOptions::patience`, `LaunchOptions::cpu_sampler`); a start the caller's `max_lifetime` ends says "did not start within N s (its time limit)". `Chromium::start_page`'s wait stays (C51 lists it).
+- Conformance check C51 (report-only): fixed start and spawn waits.
 - `tree_cpu_time_from`, `tree_cpu_time_of` and `ProcessSource::cpu_micros` read the CPU time one pid at a time.
 
 ### `paddock-proc`: processes by identity (ADR 0033, rule 53)

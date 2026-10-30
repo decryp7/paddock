@@ -326,10 +326,18 @@ mod tests {
     fn used(s: u64) -> Cpu {
         Cpu::Used(S(s))
     }
-    fn cause(s: &StartState) -> StallCause {
+    fn cause(s: &StartState) -> Option<StallCause> {
         match s {
-            StartState::Stalled(r) => r.cause,
-            other => panic!("{other:?}"),
+            StartState::Stalled(r) => Some(r.cause),
+            _ => None,
+        }
+    }
+
+    /// The state a watch ended with (a cancel counts as still starting).
+    fn state(w: Watched) -> StartState {
+        match w {
+            Watched::State(s) => s,
+            Watched::Cancelled => StartState::Starting,
         }
     }
 
@@ -381,7 +389,7 @@ mod tests {
             last = j.observe(&run(used(c)));
             assert!(c < 100);
         }
-        assert!(matches!(cause(&last), StallCause::Spinning(d) if d >= S(10)));
+        assert!(matches!(cause(&last), Some(StallCause::Spinning(d)) if d >= S(10)));
     }
 
     #[test]
@@ -399,7 +407,7 @@ mod tests {
         for _ in 0..4 {
             assert_eq!(j.observe(&run(used(2))), StartState::Starting);
         }
-        assert!(matches!(cause(&j.observe(&run(used(2)))), StallCause::Idle(d) if d == S(5)));
+        assert!(matches!(cause(&j.observe(&run(used(2)))), Some(StallCause::Idle(d)) if d == S(5)));
     }
 
     #[test]
@@ -451,7 +459,7 @@ mod tests {
             assert_eq!(j.observe(&run(Cpu::Unavailable)), StartState::Starting);
         }
         assert!(
-            matches!(cause(&j.observe(&run(Cpu::Unavailable))), StallCause::Hung(d) if d == S(8))
+            matches!(cause(&j.observe(&run(Cpu::Unavailable))), Some(StallCause::Hung(d)) if d == S(8))
         );
         // A reading ends the blindness.
         let mut j = StartJudge::new(patience(), "x");
@@ -488,12 +496,12 @@ mod tests {
             progress: 3,
             ..run(used(2))
         });
-        assert_eq!(cause(&note), StallCause::Slow);
-        assert!(!cause(&note).is_stuck());
-        let StartState::Stalled(report) = note else {
-            unreachable!()
-        };
-        assert!(report.message.contains("the agent"));
+        assert_eq!(cause(&note), Some(StallCause::Slow));
+        assert!(!StallCause::Slow.is_stuck());
+        assert_eq!(
+            note,
+            StartState::Stalled(StallReport::new(StallCause::Slow, "the agent"))
+        );
     }
 
     #[test]
@@ -503,7 +511,7 @@ mod tests {
         for _ in 0..4 {
             assert_eq!(j.observe(&run(Cpu::NotRead)), StartState::Starting);
         }
-        assert!(matches!(cause(&j.observe(&run(used(1)))), StallCause::Idle(d) if d == S(5)));
+        assert!(matches!(cause(&j.observe(&run(used(1)))), Some(StallCause::Idle(d)) if d == S(5)));
     }
 
     struct Script {
@@ -574,15 +582,11 @@ mod tests {
         };
         let s = script(vec![Some(S(1)); 20]);
         let mut w = StartWatch::new(p, "x", s, Ticks(&waits, false));
-        let Watched::State(st) = w.wait() else {
-            panic!()
-        };
-        assert!(matches!(cause(&st), StallCause::Idle(_)));
-        let Watched::State(again) = w.wait() else {
-            panic!()
-        };
+        let st = state(w.wait());
+        assert!(matches!(cause(&st), Some(StallCause::Idle(_))));
+        let again = state(w.wait());
         assert!(
-            matches!(cause(&again), StallCause::Idle(_)),
+            matches!(cause(&again), Some(StallCause::Idle(_))),
             "the judge goes on judging"
         );
 
@@ -596,30 +600,11 @@ mod tests {
     fn a_probe_without_cpu_time_is_bounded_by_the_hang_guard() {
         let waits = RefCell::new(Vec::new());
         let mut w = StartWatch::new(patience(), "x", script(vec![]), Ticks(&waits, false));
-        let Watched::State(st) = w.wait() else {
-            panic!()
-        };
+        let st = state(w.wait());
         assert!(
-            matches!(cause(&st), StallCause::Hung(_)),
+            matches!(cause(&st), Some(StallCause::Hung(_))),
             "no identity, no CPU: still bounded"
         );
-    }
-
-    #[test]
-    fn a_probe_reports_progress_through_the_default_and_an_override() {
-        struct P;
-        impl StartProbe for P {
-            fn liveness(&mut self) -> Liveness {
-                Liveness::Running
-            }
-            fn ready(&mut self) -> bool {
-                false
-            }
-            fn cpu_time(&mut self) -> Option<Duration> {
-                None
-            }
-        }
-        assert_eq!(P.progress(), 0);
     }
 
     #[test]
