@@ -38,11 +38,31 @@ fn opts(base: &Path) -> LaunchOptions {
 /// Ten years: limits a test runs out on purpose only (the fake time a launch pumps through never reaches them).
 const FAR: Duration = Duration::from_secs(10 * 365 * 24 * 3600);
 
+/// A CPU reading that grows at every look: a browser that is working, whatever the fake time says.
+fn busy() -> CpuSampler {
+    let used = std::sync::atomic::AtomicU64::new(0);
+    Arc::new(move |_| Some(Duration::from_millis(used.fetch_add(1, Ordering::Relaxed))))
+}
+
 /// Options whose limits and waits run on `clock`.
 fn opts_on(f: &Fixture, clock: &FakeClock) -> LaunchOptions {
     let mut o = opts(&f.base());
-    (o.clock, o.max_lifetime, o.start_limit) = (Arc::new(clock.clone()), FAR, FAR);
+    (o.clock, o.max_lifetime, o.cpu_sampler) = (Arc::new(clock.clone()), FAR, Some(busy()));
     o
+}
+
+/// Launches `exe` with `o` (whose clock is `clock`) and moves the fake time on whenever the launch waits.
+fn launch_on_options(exe: &Browser, clock: &FakeClock, o: LaunchOptions) -> Result<Chromium> {
+    std::thread::scope(|s| {
+        let h = s.spawn(|| Chromium::launch_with(exe, &o, Sandbox::On));
+        while !h.is_finished() {
+            if clock.waiters() >= 2 {
+                clock.advance(POLL);
+            }
+            std::thread::yield_now();
+        }
+        h.join().unwrap()
+    })
 }
 
 /// Launches with a fake clock: the start-up wait polls on it, so time is moved on whenever the watchdog and the start-up
@@ -268,26 +288,109 @@ fn a_browser_without_a_start_page_gets_a_new_one_after_the_wait_on_its_clock() {
 }
 
 #[test]
-fn the_start_up_wait_runs_on_the_clock() {
+fn a_start_that_does_nothing_is_stuck_on_the_clock_not_after_a_fixed_wait() {
     let d = tempfile::tempdir().unwrap();
     let silent = script(d.path(), "silent.sh", "exec sleep 30");
     let clock = FakeClock::new();
     let mut o = opts(&d.path().join("p"));
-    (o.clock, o.max_lifetime, o.start_limit) = (
-        Arc::new(clock.clone()),
-        Duration::from_secs(3600),
-        Duration::from_secs(20),
+    // No CPU at all: idle for the patience's 2 s of ticks, counted on the fake clock.
+    o.cpu_sampler = Some(Arc::new(|_| Some(Duration::from_millis(5))));
+    o.patience = Patience {
+        idle: Duration::from_secs(2),
+        cpu_every: 1,
+        ..o.patience
+    };
+    (o.clock, o.max_lifetime) = (Arc::new(clock.clone()), FAR);
+    let e = launch_on_options(&silent, &clock, o).err().unwrap();
+    assert!(
+        matches!(&e, Error::Launch(m) if m.contains("the browser")),
+        "{e}"
     );
-    std::thread::scope(|s| {
+}
+
+#[test]
+fn a_busy_start_is_waited_for_and_a_spinning_one_is_given_up_on() {
+    let d = tempfile::tempdir().unwrap();
+    let silent = script(d.path(), "silent.sh", "exec sleep 30");
+    let clock = FakeClock::new();
+    let mut o = opts(&d.path().join("p"));
+    // CPU time grows: not idle; at 3 CPU seconds without a port it is spinning.
+    let used = std::sync::atomic::AtomicU64::new(0);
+    o.cpu_sampler = Some(Arc::new(move |_| {
+        Some(Duration::from_millis(used.fetch_add(50, Ordering::Relaxed)))
+    }));
+    o.patience = Patience {
+        spin: Duration::from_secs(3),
+        cpu_every: 1,
+        ..o.patience
+    };
+    (o.clock, o.max_lifetime) = (Arc::new(clock.clone()), FAR);
+    let e = launch_on_options(&silent, &clock, o).err().unwrap();
+    assert!(
+        matches!(&e, Error::Launch(m) if m.contains("the browser")),
+        "{e}"
+    );
+}
+
+#[test]
+fn a_start_that_cannot_be_observed_is_bounded_by_the_hang_guard() {
+    let d = tempfile::tempdir().unwrap();
+    let silent = script(d.path(), "silent.sh", "exec sleep 30");
+    let clock = FakeClock::new();
+    let mut o = opts(&d.path().join("p"));
+    // The OS gives no CPU time (no identity, no reading): the judge could never conclude, so the guard ends it.
+    o.cpu_sampler = Some(Arc::new(|_| None));
+    o.patience = Patience {
+        hang_guard: Duration::from_secs(2),
+        cpu_every: 1,
+        ..o.patience
+    };
+    (o.clock, o.max_lifetime) = (Arc::new(clock.clone()), FAR);
+    let e = launch_on_options(&silent, &clock, o).err().unwrap();
+    assert!(
+        matches!(&e, Error::Launch(m) if m.contains("the browser")),
+        "{e}"
+    );
+}
+
+#[test]
+fn a_start_ended_by_the_callers_cap_says_it_was_the_time_limit() {
+    let d = tempfile::tempdir().unwrap();
+    let silent = script(d.path(), "silent.sh", "exec sleep 300");
+    let clock = FakeClock::new();
+    let mut o = opts(&d.path().join("p"));
+    (o.clock, o.max_lifetime, o.cpu_sampler) = (
+        Arc::new(clock.clone()),
+        Duration::from_secs(2),
+        Some(busy()),
+    );
+    let e = std::thread::scope(|s| {
         let h = s.spawn(|| Chromium::launch_with(&silent, &o, Sandbox::On));
+        // Both waits are registered (the watchdog's 2 s and the start loop's tick) before time moves. From then on the
+        // clock is moved on whenever anything waits: once the cap has fired the watchdog is gone and only the start loop
+        // waits, and it must still be given the time to look again and find the browser ended (rule 49).
         assert!(
             clock.wait_for_waiters(2, Duration::from_secs(20)),
             "the watchdog and the start-up wait"
         );
-        clock.advance(Duration::from_secs(20));
-        let e = h.join().unwrap().err().unwrap();
-        assert!(matches!(e, Error::Timeout("the browser start")), "{e}");
+        while !h.is_finished() {
+            if clock.waiters() >= 1 {
+                clock.advance(POLL);
+            }
+            std::thread::yield_now();
+        }
+        h.join().unwrap().err().unwrap()
     });
+    assert!(
+        matches!(&e, Error::Launch(m) if m.contains("did not start within 2 s")),
+        "{e}"
+    );
+    assert!(!e.to_string().contains("exited"), "{e}");
+    assert!(
+        paddock_proc::processes_mentioning(&d.path().join("silent.sh").to_string_lossy())
+            .is_empty(),
+        "the browser was ended"
+    );
 }
 
 #[test]
@@ -562,7 +665,7 @@ fn a_quick_browser_over_the_cap_is_caught_when_it_connects() {
 }
 
 #[test]
-fn a_port_that_refuses_is_tried_again_until_the_start_limit() {
+fn a_port_that_refuses_is_tried_again_until_the_start_is_judged_stuck() {
     let d = tempfile::tempdir().unwrap();
     // A port file that names a closed port (1), then the browser waits.
     let refusing = script(
@@ -572,11 +675,14 @@ fn a_port_that_refuses_is_tried_again_until_the_start_limit() {
     );
     let clock = FakeClock::new();
     let mut o = opts(&d.path().join("p"));
-    (o.clock, o.max_lifetime, o.start_limit) = (
-        Arc::new(clock.clone()),
-        Duration::from_secs(3600),
-        Duration::from_secs(20),
-    );
+    (o.clock, o.max_lifetime) = (Arc::new(clock.clone()), Duration::from_secs(3600));
+    // No CPU: idle after 2 s of ticks, which ends the retries of the refused port.
+    o.cpu_sampler = Some(Arc::new(|_| Some(Duration::from_millis(5))));
+    o.patience = Patience {
+        idle: Duration::from_secs(2),
+        cpu_every: 1,
+        ..o.patience
+    };
     std::thread::scope(|s| {
         let h = s.spawn(|| Chromium::launch_with(&refusing, &o, Sandbox::On));
         let written = || {
@@ -598,8 +704,12 @@ fn a_port_that_refuses_is_tried_again_until_the_start_limit() {
             );
             clock.advance(POLL);
         }
-        assert!(clock.wait_for_waiters(2, Duration::from_secs(20)));
-        clock.advance(Duration::from_secs(20));
+        while !h.is_finished() {
+            if clock.waiters() >= 2 {
+                clock.advance(POLL);
+            }
+            std::thread::yield_now();
+        }
         let e = h.join().unwrap().err().unwrap();
         assert!(matches!(e, Error::Connection(_)), "{e}");
     });
@@ -804,12 +914,20 @@ fn a_garbled_port_file_or_a_silent_browser_fails_the_launch() {
         .unwrap();
     assert!(matches!(e, Error::Launch(_)), "{e}");
     let silent = script(d.path(), "silent.sh", "exec sleep 30");
+    let clock = FakeClock::new();
     let mut o = opts(&d.path().join("p"));
-    o.start_limit = Duration::ZERO;
-    let e = Chromium::launch_with(&silent, &o, Sandbox::On)
-        .err()
-        .unwrap();
-    assert!(matches!(e, Error::Timeout("the browser start")), "{e}");
+    o.cpu_sampler = Some(Arc::new(|_| Some(Duration::ZERO)));
+    o.patience = Patience {
+        idle: Duration::ZERO,
+        cpu_every: 1,
+        ..o.patience
+    };
+    o.clock = Arc::new(clock.clone());
+    let e = launch_on_options(&silent, &clock, o).err().unwrap();
+    assert!(
+        matches!(&e, Error::Launch(m) if m.contains("the browser")),
+        "{e}"
+    );
     assert!(
         paddock_proc::processes_mentioning(&d.path().join("silent.sh").to_string_lossy())
             .is_empty(),

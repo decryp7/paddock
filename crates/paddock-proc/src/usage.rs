@@ -11,6 +11,15 @@ use std::collections::HashMap;
 use std::path::Path;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
+/// A CPU time and the start time of the process it was read from, when the OS gave both in one call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CpuSample {
+    /// User + system CPU time in microseconds.
+    pub micros: u64,
+    /// When the process started, from the same call; `None` when the OS call did not carry it.
+    pub started: Option<StartTime>,
+}
+
 /// `pid -> row` for real processes only.
 pub type Table = HashMap<u32, Row>;
 
@@ -194,10 +203,16 @@ pub trait ProcessSource {
     /// When the process that holds `pid` now started; `None` when there is none (ADR 0033: a walk follows a parent link
     /// only to a child that started no earlier than its parent).
     fn started(&self, pid: u32) -> Option<StartTime>;
-    /// The CPU time (user + system) `pid` has used so far, in microseconds; `None` when there is no such process or the OS
-    /// did not say. Reads that pid only (a start judge reads it every beat: ADR 0031 section 4, about 0.1% of a core).
-    fn cpu_micros(&self, _pid: u32) -> Option<u64> {
+    /// The CPU time (user + system) `pid` has used so far, with the start time of the process it was read from, taken in
+    /// the same call where the OS gives both (rule 53: a reading is only that process's if the identity came with it, not
+    /// from a look before or after). `None` when there is no such process or the OS did not say. Reads that pid only (a
+    /// start judge reads it every beat: ADR 0031 section 4, about 0.1% of a core).
+    fn cpu_sample(&self, _pid: u32) -> Option<CpuSample> {
         None
+    }
+    /// [`ProcessSource::cpu_sample`]'s CPU time in microseconds, without the identity.
+    fn cpu_micros(&self, pid: u32) -> Option<u64> {
+        self.cpu_sample(pid).map(|s| s.micros)
     }
     /// The whole process table (every process of the machine: the expensive read).
     fn table(&self) -> Table;
@@ -283,8 +298,8 @@ impl ProcessSource for OsSource {
         crate::sys::start_time(pid)
     }
 
-    fn cpu_micros(&self, pid: u32) -> Option<u64> {
-        crate::sys::cpu_micros(pid)
+    fn cpu_sample(&self, pid: u32) -> Option<CpuSample> {
+        crate::sys::cpu_sample(pid)
     }
 
     fn table(&self) -> Table {
@@ -331,31 +346,41 @@ pub const MAX_TREE: usize = 4096;
 /// identity (ADR 0033): a root whose pid now names another process counts nothing; a child counts only if it started no
 /// earlier than its parent, and a parent's children count only if the parent still held its pid after they were listed.
 pub fn tree_memory_from(source: &impl ProcessSource, root: ProcessId) -> u64 {
-    tree_fold(source, root, |p| source.memory(p)).unwrap_or(0)
+    tree_fold(source, root, |p, _| source.memory(p)).unwrap_or(0)
 }
 
 /// The CPU time (user + system) of `root` and everything below it, reading one pid at a time through `source` and never
-/// its whole table, by identity like [`tree_memory_from`]. `None` when `root` is gone or the OS did not report its time.
-/// A child whose time cannot be read counts nothing. The sum only grows while the tree lives, so two readings tell
-/// whether it ran in between; load does not change it (a starved process uses none, a busy one does).
+/// its whole table, by identity like [`tree_memory_from`]: each reading carries the start time of the process it came from
+/// when the OS gives it in the same call, and a reading whose start differs from the one expected counts nothing. `None`
+/// when `root` is gone or the OS did not report its time. A child whose time cannot be read counts nothing.
+///
+/// The sum grows while the tree runs, but it can also fall: a child that exits takes its time out of the sum. Two readings
+/// therefore tell that the tree ran in between only when the second is larger; an equal or smaller one says nothing more
+/// (the start judge counts it as no growth). Load does not change the sum (a starved process uses none, a busy one does).
 pub fn tree_cpu_time_from(
     source: &impl ProcessSource,
     root: ProcessId,
 ) -> Option<std::time::Duration> {
-    tree_fold(source, root, |p| source.cpu_micros(p)).map(std::time::Duration::from_micros)
+    tree_fold(source, root, |p, expected| {
+        source
+            .cpu_sample(p)
+            .filter(|s| s.started.is_none_or(|t| t == expected))
+            .map(|s| s.micros)
+    })
+    .map(std::time::Duration::from_micros)
 }
 
-/// Adds `read` over `root` and its descendants (the walk of [`tree_memory_from`]); `None` when the root is not that
+/// Adds `read(pid, expected start)` over `root` and its descendants (the walk of [`tree_memory_from`]); `None` when the root is not that
 /// process any more or `read` has nothing for it.
 fn tree_fold(
     source: &impl ProcessSource,
     root: ProcessId,
-    read: impl Fn(u32) -> Option<u64>,
+    read: impl Fn(u32, StartTime) -> Option<u64>,
 ) -> Option<u64> {
     if source.started(root.pid()) != Some(root.started()) {
         return None;
     }
-    let mut total = read(root.pid())?;
+    let mut total = read(root.pid(), root.started())?;
     let mut seen = std::collections::HashSet::from([root.pid()]);
     let mut frontier = vec![root];
     while let Some(p) = frontier.pop() {
@@ -380,7 +405,7 @@ fn tree_fold(
             else {
                 continue;
             };
-            if let Some(m) = read(kid) {
+            if let Some(m) = read(kid, started) {
                 total = total.saturating_add(m);
                 frontier.push(ProcessId::new(kid, started));
             }
@@ -413,7 +438,7 @@ pub fn tree_cpu_time_of(source: &impl ProcessSource, pids: &[u32]) -> Option<std
     let mut any = false;
     let sum = pids
         .iter()
-        .filter_map(|&p| source.cpu_micros(p))
+        .filter_map(|&p| source.cpu_sample(p).map(|s| s.micros))
         .inspect(|_| any = true)
         .fold(0u64, u64::saturating_add);
     any.then(|| std::time::Duration::from_micros(sum))
@@ -476,6 +501,43 @@ pub fn read_children(proc_root: &Path, pid: u32) -> Option<Vec<u32>> {
 mod tests {
     use super::*;
 
+    /// The real OS reader against a process started here: a busy loop's CPU time grows, an idle one's does not move much,
+    /// and a gone process has none (this runs on macOS and Linux; Windows is checked by its CI run).
+    #[cfg(unix)]
+    #[test]
+    fn the_os_reads_the_cpu_time_of_a_busy_child_and_of_its_tree() {
+        let mut cmd = crate::command("sh");
+        cmd.args(["-c", "while :; do :; done"]);
+        let mut child = crate::Supervised::spawn(cmd).expect("a busy child");
+        let id = child.process().expect("its identity");
+        let os = OsSource::default();
+        let sample = os.cpu_sample(id.pid()).expect("the OS reports a sample");
+        assert_eq!(
+            sample.started,
+            Some(id.started()),
+            "the reading carries the process's own start time"
+        );
+        let first = os.cpu_micros(id.pid()).expect("the OS reports a CPU time");
+        let t = std::time::Instant::now();
+        // Busy until the OS has charged some CPU (a condition, not a sleep); bounded only as a safety net.
+        while os
+            .cpu_micros(id.pid())
+            .is_some_and(|now| now <= first + 20_000)
+            && t.elapsed() < std::time::Duration::from_secs(60)
+        {
+            std::thread::yield_now();
+        }
+        let later = os.cpu_micros(id.pid()).expect("still reported");
+        assert!(later > first + 20_000, "{first} -> {later}");
+        let tree = tree_cpu_time_from(&os, id).expect("the tree's time");
+        assert!(
+            tree.as_micros() >= u128::from(later),
+            "the tree includes the root"
+        );
+        child.kill();
+        assert_eq!(os.cpu_micros(u32::MAX - 1), None, "no such process");
+    }
+
     #[test]
     fn cpu_time_is_read_from_the_stat_line_after_the_last_parenthesis() {
         let stat = "1234 (a (weird) name) S 1 1234 1234 0 -1 4194560 100 0 0 0 5 3 0 0 20 0 1 0 98765 1000000 50";
@@ -511,14 +573,27 @@ mod tests {
         );
     }
 
-    /// A tree 1 -> 2 -> 3 whose members used 10, 20 and 30 ms; every read is counted.
-    struct Cpu3 {
+    /// A tree 1 -> 2 -> 3 whose members used 10, 20 and 30 ms; every read is counted. `mute`: the OS says nothing.
+    /// `child_start`: the start time process 2's readings carry (`None`: none), as when its pid was handed on.
+    struct Fake {
         reads: std::cell::Cell<u32>,
         tables: std::cell::Cell<u32>,
+        mute: bool,
+        child_start: Option<StartTime>,
     }
-    impl ProcessSource for Cpu3 {
-        fn memory(&self, _pid: u32) -> Option<u64> {
-            Some(1)
+    impl Fake {
+        fn new() -> Fake {
+            Fake {
+                reads: 0.into(),
+                tables: 0.into(),
+                mute: false,
+                child_start: Some(StartTime::from_micros(2)),
+            }
+        }
+    }
+    impl ProcessSource for Fake {
+        fn memory(&self, pid: u32) -> Option<u64> {
+            Some(u64::from(pid))
         }
         fn children(&self, pid: u32) -> Vec<u32> {
             match pid {
@@ -532,9 +607,20 @@ mod tests {
                 .contains(&pid)
                 .then(|| StartTime::from_micros(u64::from(pid)))
         }
-        fn cpu_micros(&self, pid: u32) -> Option<u64> {
+        fn cpu_sample(&self, pid: u32) -> Option<CpuSample> {
             self.reads.set(self.reads.get() + 1);
-            (1..=3).contains(&pid).then_some(u64::from(pid) * 10_000)
+            if self.mute || !(1..=3).contains(&pid) {
+                return None;
+            }
+            let started = if pid == 2 {
+                self.child_start
+            } else {
+                self.started(pid)
+            };
+            Some(CpuSample {
+                micros: u64::from(pid) * 10_000,
+                started,
+            })
         }
         fn table(&self) -> Table {
             self.tables.set(self.tables.get() + 1);
@@ -544,10 +630,7 @@ mod tests {
 
     #[test]
     fn tree_cpu_time_sums_the_tree_one_pid_at_a_time_and_by_identity() {
-        let src = Cpu3 {
-            reads: 0.into(),
-            tables: 0.into(),
-        };
+        let src = Fake::new();
         let root = ProcessId::new(1, StartTime::from_micros(1));
         assert_eq!(
             tree_cpu_time_from(&src, root),
@@ -563,35 +646,63 @@ mod tests {
         );
         let gone = ProcessId::new(7, StartTime::from_micros(7));
         assert_eq!(tree_cpu_time_from(&src, gone), None);
+        // The fake's other answers, which the memory walk uses.
+        assert_eq!(tree_memory_from(&src, root), 6);
+        assert!(src.table().is_empty());
+    }
+
+    #[test]
+    fn a_reading_from_another_process_than_the_expected_one_counts_nothing() {
+        let root = ProcessId::new(1, StartTime::from_micros(1));
+        let ms = std::time::Duration::from_millis;
+        assert_eq!(tree_cpu_time_from(&Fake::new(), root), Some(ms(60)));
+        let handed = Fake {
+            child_start: Some(StartTime::from_micros(99)),
+            ..Fake::new()
+        };
+        assert_eq!(
+            tree_cpu_time_from(&handed, root),
+            Some(ms(10)),
+            "the child's reading is dropped, and with it its subtree"
+        );
+        let unknown = Fake {
+            child_start: None,
+            ..Fake::new()
+        };
+        assert_eq!(
+            tree_cpu_time_from(&unknown, root),
+            Some(ms(60)),
+            "no start in the sample: accepted, as documented"
+        );
+        let wrong_root = ProcessId::new(2, StartTime::from_micros(2));
+        assert_eq!(
+            tree_cpu_time_from(&handed, wrong_root),
+            None,
+            "the root's own reading came from someone else"
+        );
     }
 
     #[test]
     fn a_source_that_cannot_say_has_no_cpu_time() {
-        struct Mute;
-        impl ProcessSource for Mute {
-            fn memory(&self, _: u32) -> Option<u64> {
-                Some(1)
-            }
-            fn children(&self, _: u32) -> Vec<u32> {
-                vec![]
-            }
-            fn started(&self, pid: u32) -> Option<StartTime> {
-                Some(StartTime::from_micros(u64::from(pid)))
-            }
-            fn table(&self) -> Table {
-                Table::new()
-            }
-        }
-        let root = ProcessId::new(1, StartTime::from_micros(1));
-        assert_eq!(tree_cpu_time_from(&Mute, root), None);
-        assert_eq!(tree_cpu_time_of(&Mute, &[1, 2]), None);
-        let src = Cpu3 {
-            reads: 0.into(),
-            tables: 0.into(),
+        let mute = Fake {
+            mute: true,
+            ..Fake::new()
         };
+        let root = ProcessId::new(1, StartTime::from_micros(1));
+        assert_eq!(tree_cpu_time_from(&mute, root), None);
+        assert_eq!(tree_cpu_time_of(&mute, &[1, 2]), None);
+        assert_eq!(mute.cpu_micros(1), None);
+        let src = Fake::new();
+        assert_eq!(
+            src.cpu_micros(1),
+            Some(10_000),
+            "the bare reading is the sample's time"
+        );
+        let ms = std::time::Duration::from_millis;
         assert_eq!(
             tree_cpu_time_of(&src, &[1, 2, 9]),
-            Some(std::time::Duration::from_millis(30))
+            Some(ms(30)),
+            "a member that is gone counts nothing"
         );
     }
 
@@ -837,6 +948,10 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
     /// read per process of its tree.
     #[test]
     fn a_tick_reads_no_whole_table_and_one_read_per_process_of_the_tree() {
+        // A source that does not override the CPU reading says nothing (the trait's default).
+        let plain = Counting::new(&[(1, &[], 1)]);
+        assert_eq!(plain.cpu_sample(1), None);
+        assert_eq!(plain.cpu_micros(1), None);
         let src = Counting::new(&[
             (1, &[2, 3], 10),
             (2, &[4], 20),
