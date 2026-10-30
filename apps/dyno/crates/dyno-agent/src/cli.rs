@@ -40,6 +40,19 @@ fn on_signal_decision(running: bool, stopped: bool, waited_too_long: bool) -> On
     }
 }
 
+/// Ends the process now, without running destructors or at-exit handlers (they may be what hangs, and the main thread may be
+/// inside them): the OS releases the lock and the sockets, as for a crash.
+#[allow(unsafe_code)]
+fn end_process(code: i32) -> ! {
+    #[cfg(unix)]
+    // SAFETY: `_exit` only ends this process; it takes no pointers.
+    unsafe {
+        libc::_exit(code)
+    }
+    #[cfg(not(unix))]
+    std::process::exit(code)
+}
+
 /// Watches for a signal on a thread of its own, so that TERM ends a slow start too (the main thread only looks at the flag once
 /// the agent runs). Once the agent runs, the main loop stops it cleanly (store closed, lock released, discovery file removed);
 /// this thread only makes sure the process ends if that stop hangs.
@@ -55,11 +68,11 @@ fn spawn_signal_watch() {
             match on_signal_decision(RUNNING.load(Ordering::SeqCst), STOPPED.load(Ordering::SeqCst), late) {
                 OnSignal::EndNow => {
                     eprintln!("dyno-agent: ended by a signal while starting");
-                    std::process::exit(143);
+                    end_process(143);
                 }
                 OnSignal::EndAnyway => {
                     eprintln!("dyno-agent: ended by a signal; the stop did not finish in time");
-                    std::process::exit(143);
+                    end_process(143);
                 }
                 OnSignal::WaitForStop if STOPPED.load(Ordering::SeqCst) => return,
                 OnSignal::WaitForStop => std::thread::sleep(Duration::from_millis(100)),

@@ -1086,17 +1086,42 @@ fn a_connection_to_an_agent_with_another_pid_is_not_ours_even_while_a_child_is_h
 }
 
 #[test]
-fn the_looks_of_a_start_in_progress_leave_the_agent_lock_alone() {
-    // The lock probe holds the lock for an instant; the agent this app launched claims it at the start, and the two meeting
-    // made the agent's claim fail (exit 3, a second launch). The judge needs the process and the file, not the lock.
+fn the_agent_lock_is_probed_only_by_the_looks_that_need_it() {
+    // The lock probe holds the lock for an instant; the agent this app launched, or the one the service starts, claims it at
+    // its start, and the two meeting makes that agent's claim fail (exit 3, a second launch). A start in progress never probes.
     let mut s = starting();
     let cmds = s.step(Event::Tick);
     assert!(matches!(cmds[..], [Command::Look { lock: false, .. }]), "{cmds:?}");
-    // Every other wait reads it.
+    // A wait for a holder probes on every LOCK_EVERY-th tick only; the deciding look and a retired agent's wait always do.
     let (mut s, _) = first(|l| Look {
         lock: Some(LockSeen::Held),
         ..l
     });
-    let cmds = s.step(Event::Tick);
+    let mut probed = Vec::new();
+    for _ in 0..LOCK_EVERY {
+        let cmds = s.step(Event::Tick);
+        let Some((seq, _)) = find_look(&cmds) else { panic!("{cmds:?}") };
+        probed.push(matches!(cmds[..], [Command::Look { lock: true, .. }]));
+        s.step(Event::Looked(Look { lock: None, ..look(seq) }));
+    }
+    assert_eq!(probed.iter().filter(|p| **p).count(), 1, "{probed:?}");
+    assert!(probed[(LOCK_EVERY - 1) as usize]);
+}
+
+#[test]
+fn a_look_that_did_not_probe_the_lock_never_launches_and_asks_again_with_the_lock() {
+    // In a wait: it goes on (the file may still be worth a connection, the lock is not known).
+    let (mut s, _) = first(|l| Look {
+        lock: Some(LockSeen::Held),
+        ..l
+    });
+    let seq = tick_look(&mut s);
+    let cmds = s.step(Event::Looked(Look { lock: None, ..look(seq) }));
+    assert_eq!(launches(&cmds), 0);
+    assert_eq!(*s.phase(), Phase::WaitingForHolder);
+    // In a decision: it probes.
+    let (mut s, seq) = begun();
+    let cmds = s.step(Event::Looked(Look { lock: None, ..look(seq) }));
+    assert_eq!(launches(&cmds), 0);
     assert!(matches!(cmds[..], [Command::Look { lock: true, .. }]), "{cmds:?}");
 }

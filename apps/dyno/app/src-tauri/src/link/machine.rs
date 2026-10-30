@@ -45,6 +45,8 @@ pub const TICKS_PER_SECOND: u32 = 10;
 pub const CONNECTED_FOR: u32 = 30;
 /// The start judge reads the child's CPU time every this many ticks (one system call per process of its tree).
 pub const CPU_EVERY: u32 = 20;
+/// While waiting for the service's agent or a holder, the lock is probed every this many ticks.
+pub const LOCK_EVERY: u32 = 5;
 /// The agent's exit code when another agent holds the data folder.
 const EXIT_ALREADY_RUNNING: i32 = dyno_agent::cli::EXIT_ALREADY_RUNNING;
 
@@ -64,6 +66,9 @@ pub struct Tuning {
     pub ticks_per_second: u32,
     /// The start judge reads the child's CPU time every this many ticks.
     pub cpu_every: u32,
+    /// While waiting for the service's agent or a holder, the agent lock is probed every this many ticks (a probe holds the
+    /// lock for an instant, which would refuse an agent that starts at that very moment).
+    pub lock_every: u32,
 }
 
 impl Default for Tuning {
@@ -75,6 +80,7 @@ impl Default for Tuning {
             connected_for: CONNECTED_FOR,
             ticks_per_second: TICKS_PER_SECOND,
             cpu_every: CPU_EVERY,
+            lock_every: LOCK_EVERY,
         }
     }
 }
@@ -474,6 +480,8 @@ pub enum Mutant {
     LaunchOnPeerClosed,
     /// Bug 5: the quit outcome is read again after the child has gone.
     QuitOutcomeReread,
+    /// The lock is never probed: a holder that has not written its file yet is not seen, and an agent is launched beside it.
+    NeverProbeLock,
     /// The hole of the first draft: a child's end is taken for the current child's, and Retry lets go of the child at once.
     GenerationBlind,
 }
@@ -785,7 +793,14 @@ impl Supervisor {
         if wants_look && self.look_out.is_none() {
             let service = matches!(self.phase, Phase::WaitingForService) && self.wait.ticks.is_multiple_of(self.tuning.service_recheck);
             let cpu = matches!(self.phase, Phase::Starting { .. }) && self.wait.ticks.is_multiple_of(self.tuning.cpu_every);
-            let lock = !matches!(self.phase, Phase::Starting { .. });
+            // The lock is probed on the ticks that need it: never while our own agent starts, on the recheck ticks while a
+            // service's agent or a holder is awaited, every tick only while a retired agent is awaited (its release is the
+            // event waited for, and nothing is starting).
+            let lock = match self.phase {
+                Phase::Starting { .. } => false,
+                Phase::WaitingForService | Phase::WaitingForHolder => service || self.wait.ticks.is_multiple_of(self.tuning.lock_every),
+                _ => true,
+            };
             self.issue_look(service, cpu, lock, out);
         }
         #[cfg(test)]
@@ -860,7 +875,7 @@ impl Supervisor {
                     // The lock tells a service that supervises on paper from one that starts nothing.
                     if look.lock == Some(LockSeen::Held) {
                         self.wait.idle_rechecks = 0;
-                    } else if self.service.supervises {
+                    } else if look.lock == Some(LockSeen::Free) && self.service.supervises {
                         self.wait.idle_rechecks += 1;
                         if self.wait.idle_rechecks >= self.tuning.idle_rechecks {
                             self.fallback = true;
@@ -967,10 +982,27 @@ impl Supervisor {
         }
         if self.service.supervises && !self.fallback {
             self.set_phase(Phase::WaitingForService, out);
-        } else if look.lock == Some(LockSeen::Held) && !self.launch_anyway {
-            self.set_phase(Phase::WaitingForHolder, out);
-        } else {
-            self.launch(out);
+            return;
+        }
+        #[cfg(test)]
+        let look = Look {
+            lock: if self.mutant == Mutant::NeverProbeLock {
+                Some(LockSeen::Free)
+            } else {
+                look.lock
+            },
+            ..look
+        };
+        match look.lock {
+            Some(LockSeen::Held) if !self.launch_anyway => self.set_phase(Phase::WaitingForHolder, out),
+            Some(_) => self.launch(out),
+            // A look that did not probe the lock decides nothing about launching: a wait goes on, and a decision asks again
+            // with the lock (the file and the service were all it could tell).
+            None => {
+                if !matches!(self.phase, Phase::WaitingForService | Phase::WaitingForHolder) {
+                    self.start_looking(out);
+                }
+            }
         }
     }
 
@@ -1057,7 +1089,7 @@ impl Supervisor {
                 self.set_phase(Phase::Connected { peer, owner }, out);
                 out.push(Command::Report(AgentStatus::new(AgentState::Running, None)));
                 // What the service says now decides hand-over and take-back, and what a quit does.
-                self.issue_look(true, false, true, out);
+                self.issue_look(true, false, false, out);
             }
             Purpose::AskToExit => {
                 out.push(Command::AskToExit { peer });

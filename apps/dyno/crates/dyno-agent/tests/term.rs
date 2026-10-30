@@ -3,14 +3,19 @@
 //! wait for it to exit; the wait is the family hang guard of 40 s, which only keeps a broken agent from hanging the test.
 
 #![cfg(unix)]
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use paddock_proc::ProcessId;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
 const HANG_GUARD: Duration = Duration::from_secs(40);
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test starts the real agent binary, with a temporary data folder and no console"
+)]
 fn start(dir: &std::path::Path) -> Child {
     Command::new(env!("CARGO_BIN_EXE_dyno-agent"))
         .arg("run")
@@ -22,13 +27,11 @@ fn start(dir: &std::path::Path) -> Child {
         .expect("the agent program starts")
 }
 
+/// Asks the child to stop with SIGTERM through paddock-proc, by the identity of the process this test holds (its own unreaped
+/// `Child`, so its pid cannot have been handed on).
 fn term(child: &Child) {
-    let status = Command::new("kill")
-        .arg("-TERM")
-        .arg(child.id().to_string())
-        .status()
-        .expect("kill runs");
-    assert!(status.success());
+    let id = ProcessId::of(child.id()).expect("the child is running");
+    assert!(paddock_proc::ask(id), "the TERM was not delivered");
 }
 
 /// Waits for the child to exit (on a thread, so the wait itself is bounded by the guard); ends it and fails when it does not.
@@ -45,7 +48,9 @@ fn exits(mut child: Child) -> std::process::ExitStatus {
             status
         }
         Err(_) => {
-            let _ = Command::new("kill").arg("-KILL").arg(id.to_string()).status();
+            if let Some(id) = ProcessId::of(id) {
+                let _ = paddock_proc::end(id);
+            }
             panic!("the agent ignored TERM (it had to be killed)");
         }
     }

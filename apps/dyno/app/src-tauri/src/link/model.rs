@@ -23,6 +23,7 @@ const TUNING: Tuning = Tuning {
     connected_for: 2,
     ticks_per_second: 1,
     cpu_every: 2,
+    lock_every: 2,
 };
 
 /// The most states a search may visit; a search that gets there fails.
@@ -51,6 +52,8 @@ impl Proc {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Other {
     None,
+    /// Holds the lock, has not written its file yet (a slow start).
+    Slow,
     Ready,
     Exiting,
 }
@@ -99,6 +102,10 @@ struct World {
     peers: Vec<(PeerId, Target)>,
     next_peer: PeerId,
     inbox: Vec<Event>,
+    /// For each look in flight: whether another agent held the lock when it was taken (the truth, whatever the look says).
+    truth: Vec<(Seq, bool)>,
+    /// The look being decided on found another agent holding the lock.
+    deciding_held: bool,
     budget: Budget,
     at_quit: Option<(bool, bool)>,
     violation: Option<&'static str>,
@@ -126,6 +133,8 @@ impl World {
             peers: vec![],
             next_peer: 0,
             inbox: vec![],
+            truth: vec![],
+            deciding_held: false,
             budget,
             at_quit: None,
             violation: None,
@@ -150,7 +159,7 @@ impl World {
         };
         if matches!(self.own, Proc::Ready | Proc::Exiting) {
             Some(seen(self.own_pid(), self.own_started_ms, true))
-        } else if self.other != Other::None {
+        } else if matches!(self.other, Other::Ready | Other::Exiting) {
             Some(seen(9, 0, !self.other_old_build))
         } else if self.stale_hint {
             Some(seen(1, 0, true))
@@ -179,7 +188,7 @@ impl World {
     fn answering(&self) -> Option<Target> {
         if matches!(self.own, Proc::Ready | Proc::Exiting) {
             Some(Target::Own)
-        } else if self.other != Other::None {
+        } else if matches!(self.other, Other::Ready | Other::Exiting) {
             Some(Target::Other)
         } else {
             None
@@ -250,6 +259,10 @@ impl World {
                     child: self.child_view(),
                     cpu: Cpu::Unavailable,
                 };
+                self.truth.push((seq, self.other != Other::None));
+                if self.truth.len() > 6 {
+                    self.truth.remove(0);
+                }
                 self.looks.push(look);
             }
             Command::Launch { child, anyway } => {
@@ -258,6 +271,9 @@ impl World {
                 }
                 if self.own.alive() || self.jobs.iter().any(|j| matches!(j, Job::Launch(..))) {
                     self.violation = Some("a second own agent was launched while the first was still held");
+                }
+                if self.deciding_held && !anyway {
+                    self.violation = Some("launched on a look that did not see the agent holding the data folder");
                 }
                 if self.asked_other && self.other == Other::Exiting && !anyway {
                     self.violation = Some("launched before the agent it asked to exit released the data folder");
@@ -331,7 +347,9 @@ impl World {
             let mut w = self.clone();
             let l = w.looks.remove(i);
             let label = format!("a look (seq {}) arrives", l.seq);
+            w.deciding_held = w.truth.iter().find(|(s, _)| *s == l.seq).is_some_and(|(_, held)| *held);
             w.feed(Event::Looked(l));
+            w.deciding_held = false;
             v.push((label, w));
         }
         for i in 0..self.connects.len() {
@@ -339,7 +357,7 @@ impl World {
             let (seq, target) = w.connects.remove(i);
             let still = target.filter(|t| match t {
                 Target::Own => matches!(w.own, Proc::Ready | Proc::Exiting),
-                Target::Other => w.other != Other::None,
+                Target::Other => matches!(w.other, Other::Ready | Other::Exiting),
             });
             let label = format!("connect {seq} answered {still:?}");
             match still {
@@ -424,6 +442,11 @@ impl World {
             _ => {}
         }
         // The other agent (the service's, or a foreign one).
+        if self.other == Other::Slow {
+            let mut w = self.clone();
+            w.other = Other::Ready;
+            v.push(("the foreign agent writes its file".into(), w));
+        }
         if self.other == Other::Exiting {
             let mut w = self.clone();
             w.other = Other::None;
@@ -542,6 +565,15 @@ fn scenarios(mutant: Mutant, budget: Budget) -> Vec<(&'static str, World)> {
             "an exiting foreign holder",
             mk(&|w| {
                 w.other = Other::Exiting;
+                w.budget.add = 0;
+                w.budget.removal = 0;
+                w.budget.ticks = 3;
+            }),
+        ),
+        (
+            "a foreign agent holds the folder and is slow to write its file",
+            mk(&|w| {
+                w.other = Other::Slow;
                 w.budget.add = 0;
                 w.budget.removal = 0;
                 w.budget.ticks = 3;
@@ -670,6 +702,12 @@ fn bug_4_launching_when_the_connection_closes_before_the_lock_is_released_is_cau
 fn bug_5_a_quit_outcome_read_again_after_the_exit_is_caught() {
     let found = caught(Mutant::QuitOutcomeReread);
     assert!(found.contains("different outcome"), "{found}");
+}
+
+#[test]
+fn never_probing_the_lock_is_caught_beside_a_holder_that_has_not_written_its_file() {
+    let found = caught(Mutant::NeverProbeLock);
+    assert!(found.contains("did not see the agent holding"), "{found}");
 }
 
 #[test]
