@@ -113,8 +113,9 @@ or per-user settings, [ADR 0010](docs/adr/0010-platforms-and-services.md)). Dyno
 
 ### macOS (13 or newer)
 
-The build is **not notarised**; it is signed ad hoc. Open the `.dmg`, drag Dyno to Applications, open it the first time
-with right-click > Open. Turn on **Settings > Launch at login**: Dyno registers its launch agent with `SMAppService` and
+The build is **not notarised**; it is signed ad hoc. Open the `.dmg`, drag Dyno to Applications and open it from there. The first time macOS says "Not Opened": choose Done, then
+System Settings > Privacy & Security > **Open Anyway**, **Open Anyway** again in the "Open “Dyno”?" dialog, and enter an
+administrator's name and password (macOS 26 flow, once). Turn on **Settings > Launch at login**: Dyno registers its launch agent with `SMAppService` and
 macOS may ask you to allow it under **System Settings > General > Login Items & Extensions**. Details and verification:
 [docs/macos.md](docs/macos.md).
 

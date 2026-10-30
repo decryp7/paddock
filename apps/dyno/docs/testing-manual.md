@@ -37,7 +37,7 @@ Record: date, OS and version, Dyno version, load average at the time, result per
 
 | # | Steps | Expected |
 | --- | --- | --- |
-| 21 | `dyno-agent service status` after Launch at login | "installed, running" |
+| 21 | macOS: `launchctl print gui/$(id -u)/net.decryptology.dyno.agent` after Launch at login (the bundled `dyno-agent service status` refuses inside the app on macOS: it shares this launchd label with the `SMAppService` agent). Linux and Windows: `dyno-agent service status` | macOS: `state = running`; Linux and Windows: "installed, running". Login Items shows one Dyno row |
 | 22 | Install a newer build over the old one | The agent restarts into the new build; the app reconnects; no manual step (macOS: re-registration happens by itself) |
 | 23 | `kill` the agent | It comes back within seconds (macOS, Linux); on Windows the app starts it |
 | 24 | Install and update in a throwaway VM | The plan [below](#install-and-update-in-a-throwaway-vm), rows 24a to 24i |
@@ -95,13 +95,13 @@ shared folder. Test bundles are never uploaded, tagged or published (ER-15); del
 | # | Steps | Expected |
 | --- | --- | --- |
 | 24a | Windows VM, standard user: run the CI-built `Dyno_1.0.0_x64-setup.exe` | Installs per user with no administrator prompt; Dyno starts; SmartScreen shows the documented "More info > Run anyway" path |
-| 24b | macOS VM, standard user: open the CI-built `.dmg`, drag Dyno to Applications, right-click > Open once | Starts after the Open Anyway step; the agent is registered (`dyno-agent service status`: installed, running); no administrator prompt |
+| 24b | macOS VM, standard user: open the CI-built `.dmg`, drag Dyno to Applications, open it, then Done > Privacy & Security > Open Anyway > Open Anyway | An administrator name and password sheet appears (macOS 26); Dyno starts after it; the agent is registered (`launchctl print gui/$(id -u)/net.decryptology.dyno.agent`: running) |
 | 24c | Revert each VM to its clean snapshot (24a and 24b left Dyno installed). Install `1.0.0-test`, turn on update checks, let the dashboard fill for a minute, note the agent's process id | History is recording; About reads `1.0.0-test` |
 | 24d | Windows: with the feed running, Settings > Updates > Check for updates, then Install | The NSIS installer runs **passively** (progress only, no wizard pages, no prompt); Dyno restarts on `1.0.1-test` (About); the earlier history is still there |
 | 24e | macOS: the same on the Tart VM | The `.app.tar.gz` is downloaded, verified and swapped into place; the app relaunches on `1.0.1-test`; `codesign --verify --deep` still passes on the new bundle; no second copy is left behind |
 | 24f | After 24d and 24e: `dyno status`, the process list of the agent | The agent runs from the new build (new process id; `dyno-agent --version` shows the new version), the app reconnected by itself, nothing was started by hand; kill the agent: it comes back within seconds (macOS) or the app starts it (Windows) |
 | 24g | Reset the VM to the `1.0.0-test` snapshot. Corrupt one byte of the `.sig` in the feed folder (or point `latest.json` at a `.sig` of another version), then check and install | The update is refused with a signature message; the installed version, the agent and the history are untouched. Put the good `.sig` back: the update installs. Repeat once with a `latest.json` that names the `1.0.1-test` bundle but a `.sig` made with a different test key |
-| 24h | Uninstall on each VM (Windows: Apps > Dyno > Uninstall; macOS: quit Dyno, then `dyno-agent service uninstall` if offered, drag the app to the Bin) | The agent process is gone; Windows: no `Dyno` entry under `HKCU\...\Run`, no folder under `%LOCALAPPDATA%\Dyno` program files; macOS: no `~/Library/LaunchAgents/net.decryptology.dyno.agent.plist` or Login Items entry; history kept or removed as the uninstaller says |
+| 24h | Uninstall on each VM (Windows: Apps > Dyno > Uninstall; macOS: quit Dyno, turn off Settings > Launch at login, drag the app to the Bin; do not run `dyno-agent service uninstall`, it refuses inside the app on macOS) | The agent process is gone; Windows: no `Dyno` entry under `HKCU\...\Run`, no folder under `%LOCALAPPDATA%\Dyno` program files; macOS: no `~/Library/LaunchAgents/net.decryptology.dyno.agent.plist` or Login Items entry; history kept or removed as the uninstaller says |
 | 24i | Revert both VMs. Check the host: no test key in the repository or the worktree, no test bundle in a release folder, the feed server stopped | Nothing to publish or clean up; record date, VM image, macOS and Windows versions, and the result per row |
 
 ## Privileges
