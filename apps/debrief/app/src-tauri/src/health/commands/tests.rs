@@ -135,32 +135,19 @@ fn an_error_names_a_service_outage_only_while_that_service_is_down() {
 /// the installed app is never touched.
 ///
 /// The workspace test build (`cargo nextest run --workspace`, as CI runs it) builds it for the worker crate's own tests,
-/// and it is used as it is. It used to be rebuilt here on every run: `cargo build -p debrief-store-worker` resolves
-/// features for that one package, unlike the workspace build, so it recompiled part of the dependency graph inside the
-/// test and swapped the binary under the other tests, and on a busy CI runner the test ran past nextest's five-minute
-/// limit. Like the plugins binary (`test_support::ensure_plugins_binary`), it is built only when it is missing (a
-/// `cargo test -p debrief-app` without a workspace build).
+/// and it is used as it is. A test never builds it: a `cargo build -p debrief-store-worker` started here (first on
+/// every run, later only when the binary was missing) is unbounded work inside a test, and ran past nextest's
+/// five-minute limit in a `cargo nextest run -p debrief-app`. Missing, it fails at once with what to build, as the test
+/// apps do for the plugins binary (`test_support::plugins_binary_at`).
 fn built_store_worker() -> std::path::PathBuf {
     let test_exe = std::env::current_exe().unwrap();
     let profile_dir = test_exe.parent().and_then(std::path::Path::parent).unwrap().to_path_buf();
-    let release = profile_dir.file_name().is_some_and(|n| n == "release");
-    store_worker_in(&profile_dir, || {
-        let mut build = debrief_plugin_api::process::quiet_command(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
-        build.args(["build", "-q", "-p", "debrief-store-worker"]);
-        if release {
-            build.arg("--release");
-        }
-        let status = build.current_dir(env!("CARGO_MANIFEST_DIR")).status().expect("cargo runs");
-        assert!(status.success(), "the store worker builds");
-    })
+    store_worker_in(&profile_dir)
 }
 
-/// The worker in `profile_dir`, running `build` only when it is not there.
-fn store_worker_in(profile_dir: &std::path::Path, build: impl FnOnce()) -> std::path::PathBuf {
+/// The worker in `profile_dir`; a missing one fails the test at once, saying what to build.
+fn store_worker_in(profile_dir: &std::path::Path) -> std::path::PathBuf {
     let exe = profile_dir.join(format!("debrief-store-worker{}", std::env::consts::EXE_SUFFIX));
-    if !exe.is_file() {
-        build();
-    }
     assert!(
         exe.is_file(),
         "{} is missing: build it with `cargo build -p debrief-store-worker` (or run `cargo nextest run --workspace`)",
@@ -169,22 +156,17 @@ fn store_worker_in(profile_dir: &std::path::Path, build: impl FnOnce()) -> std::
     exe
 }
 
+/// Regression: the test of the real worker built the worker when it was missing, inside the test (it ran past nextest's
+/// 300 s limit). A missing worker fails at once with the command that builds it; a present one is used as it is.
 #[test]
-fn the_real_worker_test_uses_the_built_worker_and_builds_one_only_when_it_is_missing() {
+fn the_real_worker_test_uses_the_built_worker_and_never_builds_one() {
     let tmp = crate::test_support::TempDir::new("health-worker-binary");
     let exe = tmp.0.join(format!("debrief-store-worker{}", std::env::consts::EXE_SUFFIX));
-    // Missing: built once, and a build that produces nothing fails at once with what to do.
-    let builds = std::cell::Cell::new(0);
-    let missing = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        store_worker_in(&tmp.0, || builds.set(builds.get() + 1))
-    }))
-    .expect_err("a worker that is still missing fails");
-    assert_eq!(builds.get(), 1);
+    let missing = std::panic::catch_unwind(|| store_worker_in(&tmp.0)).expect_err("a missing worker fails");
     let message = missing.downcast_ref::<String>().cloned().unwrap_or_default();
     assert!(message.contains("cargo build -p debrief-store-worker"), "{message}");
-    // Present (the workspace build made it): used as it is, never rebuilt.
     std::fs::write(&exe, b"").unwrap();
-    assert_eq!(store_worker_in(&tmp.0, || panic!("an existing worker is never rebuilt")), exe);
+    assert_eq!(store_worker_in(&tmp.0), exe);
 }
 
 fn process_is_alive(pid: u32) -> bool {
