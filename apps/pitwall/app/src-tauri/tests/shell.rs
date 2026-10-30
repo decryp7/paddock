@@ -284,3 +284,38 @@ fn quit_from_the_menu_with_no_window_open_still_quits_or_asks() {
     let quitting = app.state::<paddock_window::tauri::Windows<tauri::test::MockRuntime>>().quitting();
     assert!(pending || quitting, "the menu's Quit asked or quit with no window open");
 }
+
+/// The tray popover's "Open Pitwall" and "Review": with no window open (main is destroyed when closed), the popover asks the
+/// shell to focus `main` (`window_focus`), which builds it again; then it closes itself (`tray_close`). The tray's
+/// capability grants the shell's tray set, and that set holds both commands.
+#[test]
+fn the_tray_popover_opens_the_main_window_when_none_is_open() {
+    use tauri::Manager;
+    let dir = tempfile::tempdir().unwrap();
+    let app = composed(
+        dir.path(),
+        LaunchArgs {
+            hidden: true,
+            ..Default::default()
+        },
+    )
+    .build(tauri::test::mock_context(tauri::test::noop_assets()))
+    .unwrap();
+    assert!(app.get_webview_window("main").is_none(), "started in the tray: no window");
+    // `window_focus` is `paddock_window::tauri::reveal` (crates/paddock-window/src/tauri/commands.rs); Tauri's mock context
+    // carries no plugin ACL, so the command's body is called here and the grant is checked from the files below.
+    paddock_window::tauri::reveal(app.handle(), "main").expect("window_focus(main) from the tray");
+    assert!(
+        app.get_webview_window("main").is_some(),
+        "window_focus from the tray built the main window again"
+    );
+
+    let caps: serde_json::Value = serde_json::from_str(include_str!("../capabilities/tray.json")).unwrap();
+    assert!(caps["permissions"].as_array().unwrap().iter().any(|p| p == "paddock-shell:tray"));
+    let sets = include_str!("../../../../../crates/paddock-shell/permissions/window-classes.toml");
+    let tray_set = &sets[sets.find("identifier = \"tray\"").unwrap()..];
+    let tray_set = &tray_set[..tray_set.find("]").unwrap()];
+    for p in ["allow-window-focus", "allow-tray-close"] {
+        assert!(tray_set.contains(p), "the shell's tray set grants {p}");
+    }
+}
