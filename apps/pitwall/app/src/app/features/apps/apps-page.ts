@@ -242,8 +242,9 @@ import { PermissionsEditor } from './permissions-editor';
       .c-day {
         width: 112px;
       }
+      /* The "..." button with the cell's padding. */
       .c-act {
-        width: 48px;
+        width: 56px;
       }
     }
     .lim {
