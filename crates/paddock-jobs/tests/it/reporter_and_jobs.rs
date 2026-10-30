@@ -370,3 +370,180 @@ fn many_threads_share_one_reporter() {
         "events arrive in order"
     );
 }
+
+#[test]
+fn a_phase_publishes_its_last_throttled_count_before_the_next_phase_starts() {
+    let sink = Collect::new();
+    let clock = FakeClock::new();
+    let r = reporter(sink.clone(), &clock);
+    r.begin_phase(Phase::discovering("walk", "Finding"));
+    r.add(4);
+    r.add(1); // within the interval: pending, not yet published
+    r.begin_phase(Phase::items("read", "Reading", 10));
+    let walk_counts: Vec<u64> = sink
+        .all()
+        .iter()
+        .filter_map(|s| match &s.state {
+            JobState::Running { phase: Some(p) } if p.phase.id == "walk" => Some(p.done),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        walk_counts.last(),
+        Some(&5),
+        "the walk's final count is lost: {walk_counts:?}"
+    );
+}
+
+fn last_done(sink: &Collect) -> Option<u64> {
+    sink.all().iter().rev().find_map(|s| match &s.state {
+        JobState::Running { phase: Some(p) } => Some(p.done),
+        _ => None,
+    })
+}
+
+#[test]
+fn finish_publishes_the_last_throttled_count_first() {
+    let sink = Collect::new();
+    let clock = FakeClock::new();
+    let r = reporter(sink.clone(), &clock);
+    r.begin_phase(Phase::discovering("walk", "Finding"));
+    r.add(4);
+    r.add(1); // inside the interval: pending
+    assert!(r.finish(JobState::Done));
+    assert_eq!(
+        last_done(&sink),
+        Some(5),
+        "the final count is published before the terminal event"
+    );
+    assert_eq!(sink.all().last().unwrap().state, JobState::Done);
+}
+
+/// A clock that adds one to the job on its n-th read: an update landing in the middle of an emit. `emit_locked` reads the
+/// clock twice (`now`, then the elapsed time in `build`); the second read is after the count was read, so the add must stay
+/// pending.
+struct AddsDuringEmit {
+    job: std::sync::OnceLock<Reporter>,
+    reads_left: std::sync::atomic::AtomicUsize,
+}
+
+impl Clock for AddsDuringEmit {
+    fn monotonic(&self) -> Duration {
+        use std::sync::atomic::Ordering::SeqCst;
+        let left = self.reads_left.load(SeqCst);
+        if left > 0 {
+            self.reads_left.store(left - 1, SeqCst);
+            if left == 1
+                && let Some(r) = self.job.get()
+            {
+                r.add(1);
+            }
+        }
+        Duration::ZERO
+    }
+    fn wall(&self) -> std::time::SystemTime {
+        std::time::UNIX_EPOCH
+    }
+    fn wait(&self, _: Duration, _: &CancelToken) -> Result<(), Cancelled> {
+        Ok(())
+    }
+}
+
+#[test]
+fn an_update_landing_during_an_emit_is_published_by_the_next_flush() {
+    let sink = Collect::new();
+    let clock = Arc::new(AddsDuringEmit {
+        job: std::sync::OnceLock::new(),
+        reads_left: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let r = Reporter::with_clock(
+        JobId(1),
+        JobKind::new("scan"),
+        "Scan",
+        None,
+        sink.clone(),
+        clock.clone(),
+        100,
+    );
+    assert!(clock.job.set(r.clone()).is_ok());
+    r.begin_phase(Phase::discovering("walk", "Finding"));
+    clock
+        .reads_left
+        .store(2, std::sync::atomic::Ordering::SeqCst);
+    r.set_total(9); // an emit; the add lands on its second clock read, after the count was read
+    assert_eq!(
+        last_done(&sink),
+        Some(0),
+        "the snapshot carries the count read before the add"
+    );
+    r.flush();
+    assert_eq!(
+        last_done(&sink),
+        Some(1),
+        "the update made during the emit is not lost"
+    );
+}
+
+/// Adds 7 from another thread while the first running-phase emit holds the lock, so that add's `try_lock` fails.
+struct AddsWhileLocked {
+    inner: Arc<Collect>,
+    job: std::sync::OnceLock<Reporter>,
+    armed: std::sync::atomic::AtomicBool,
+}
+
+impl EventSink for AddsWhileLocked {
+    fn emit(&self, snapshot: &JobSnapshot) {
+        if self.armed.swap(false, std::sync::atomic::Ordering::SeqCst)
+            && let Some(r) = self.job.get()
+        {
+            std::thread::scope(|s| {
+                s.spawn(|| r.add(7));
+            });
+        }
+        self.inner.emit(snapshot);
+    }
+}
+
+fn busy_lock_setup() -> (Arc<Collect>, Reporter, Arc<AddsWhileLocked>) {
+    let collect = Collect::new();
+    let sink = Arc::new(AddsWhileLocked {
+        inner: collect.clone(),
+        job: std::sync::OnceLock::new(),
+        armed: std::sync::atomic::AtomicBool::new(false),
+    });
+    let r = Reporter::with_clock(
+        JobId(1),
+        JobKind::new("scan"),
+        "Scan",
+        None,
+        sink.clone(),
+        Arc::new(FakeClock::new()),
+        0,
+    );
+    assert!(sink.job.set(r.clone()).is_ok());
+    r.begin_phase(Phase::discovering("walk", "Finding"));
+    sink.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    r.set_total(9); // the sink adds 7 on another thread while this emit holds the lock: that add cannot emit
+    assert_eq!(last_done(&collect), Some(0), "the busy add emitted nothing");
+    (collect, r, sink)
+}
+
+#[test]
+fn an_update_dropped_by_a_busy_lock_is_published_by_flush() {
+    let (sink, r, _keep) = busy_lock_setup();
+    r.flush();
+    assert_eq!(last_done(&sink), Some(7));
+}
+
+#[test]
+fn finish_publishes_an_update_dropped_by_a_busy_lock_before_the_terminal_event() {
+    let (sink, r, _keep) = busy_lock_setup();
+    assert!(r.finish(JobState::Done));
+    let all = sink.all();
+    assert_eq!(all.last().unwrap().state, JobState::Done);
+    assert_eq!(
+        last_done(&sink),
+        Some(7),
+        "the 7 went out before the terminal snapshot"
+    );
+}
