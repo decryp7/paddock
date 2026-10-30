@@ -112,7 +112,8 @@ struct RawWaiver {
     path: String,
     reason: String,
     expires: Option<String>,
-    max_count: Option<u32>,
+    /// ADR 0021's key; the model field is `max_count`.
+    count: Option<u32>,
     owner: Option<String>,
 }
 
@@ -181,7 +182,7 @@ impl SuppressionFile {
                 path: w.path.clone(),
                 reason: Reason::parse(&w.reason).map_err(|e| bad(e.to_string()))?,
                 expires,
-                max_count: w.max_count,
+                max_count: w.count,
                 owner: w.owner.clone(),
                 origin: Origin::File,
             });
@@ -236,7 +237,7 @@ rule = "no-unwrap"
 path = "src/legacy/**"
 reason = "old code, scheduled for removal"
 expires = "2026-12-31"
-max_count = 3
+count = 3
 owner = "decryp7"
 
 [[suppression]]
