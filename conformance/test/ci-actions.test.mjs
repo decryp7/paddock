@@ -1554,34 +1554,39 @@ const buildJobs = (env, args = []) =>
 const jobsOf = (r) => /^CARGO_BUILD_JOBS=(\d+)$/m.exec(r.stdout)?.[1];
 // The hosts of 2026-10-30 (the RAM a host reports is a little under its nominal size).
 const MAC = { RUNNER_OS: 'macOS', PADDOCK_CI_CORES: '14', PADDOCK_CI_RAM_MB: '65536' };
-const WINDOWS = { RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '16', PADDOCK_CI_RAM_MB: '32600' };
+const WINDOWS = { RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '8', PADDOCK_CI_RAM_MB: '16316' };
 const LINUX = { RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '32', PADDOCK_CI_RAM_MB: '131072' };
 
 test('build-jobs gives each runner class its share of the host, never the agents\' cap of two', () => {
-  // The Mac runs one job and keeps 10 of its 14 cores for the agents that share it (5 x 2, ER-24); Windows runs two jobs.
+  // The Mac runs one job and keeps 10 of its 14 cores for the agents that share it (5 x 2, ER-24).
   assert.equal(jobsOf(buildJobs(MAC)), '4');
   assert.equal(jobsOf(buildJobs({ ...MAC, PADDOCK_CI_RESERVED_CORES: '1' })), '13');
-  assert.equal(jobsOf(buildJobs(WINDOWS)), '8');
+  // Windows, which runs two jobs at once, gets its share once the runner says so.
+  assert.equal(jobsOf(buildJobs({ ...WINDOWS, PADDOCK_CI_JOBS_PER_HOST: '2' })), '4');
   // A runner's own settings win: the jobs its host runs at once, or an exact number.
   assert.equal(jobsOf(buildJobs({ ...LINUX, PADDOCK_CI_JOBS_PER_HOST: '4' })), '8');
   assert.equal(jobsOf(buildJobs({ ...LINUX, PADDOCK_CI_BUILD_JOBS: '12' })), '12');
   assert.equal(jobsOf(buildJobs({ ...WINDOWS, PADDOCK_CI_CORES: '2', PADDOCK_CI_JOBS_PER_HOST: '4' })), '1', 'never below one');
 });
 
-test('build-jobs leaves Linux on cargo\'s default until its share is measured, and names the cores in the log', () => {
-  const r = buildJobs(LINUX);
-  assert.equal(r.status, 0);
-  assert.equal(jobsOf(r), undefined);
-  assert.match(r.stderr, /32 cores/);
-  assert.match(r.stderr, /stays unset/);
+test('build-jobs leaves Linux and Windows on cargo\'s default until their share is measured, and names the cores in the log', () => {
+  for (const [host, cores] of [[LINUX, 32], [WINDOWS, 8]]) {
+    const r = buildJobs(host);
+    assert.equal(r.status, 0);
+    assert.equal(jobsOf(r), undefined, host.RUNNER_OS);
+    assert.match(r.stderr, new RegExp(`${cores} cores`));
+    assert.match(r.stderr, /stays unset/);
+  }
 });
 
 test('build-jobs caps the share by memory: (RAM - kept) / (jobs per host x MB per rustc)', () => {
-  assert.equal(jobsOf(buildJobs({ ...WINDOWS, PADDOCK_CI_RAM_MB: '16384' })), '4'); // (16384 - 2048) / (2 x 1536)
-  assert.equal(jobsOf(buildJobs({ ...WINDOWS, PADDOCK_CI_RUSTC_MB: '4096' })), '3'); // (32600 - 2048) / (2 x 4096)
+  const W2 = { ...WINDOWS, PADDOCK_CI_CORES: '16', PADDOCK_CI_RAM_MB: '32600', PADDOCK_CI_JOBS_PER_HOST: '2' };
+  assert.equal(jobsOf(buildJobs(W2)), '8');
+  assert.equal(jobsOf(buildJobs({ ...W2, PADDOCK_CI_RAM_MB: '16384' })), '4'); // (16384 - 2048) / (2 x 1536)
+  assert.equal(jobsOf(buildJobs({ ...W2, PADDOCK_CI_RUSTC_MB: '4096' })), '3'); // (32600 - 2048) / (2 x 4096)
   assert.equal(jobsOf(buildJobs({ ...MAC, PADDOCK_CI_RESERVED_CORES: '0', PADDOCK_CI_RESERVED_RAM_MB: '49152' })), '10');
   // Without a RAM figure the cores decide.
-  const probeless = buildJobs({ ...WINDOWS, PADDOCK_CI_RAM_MB: 'x' });
+  const probeless = buildJobs({ ...W2, PADDOCK_CI_RAM_MB: 'x' });
   assert.equal(jobsOf(probeless), '8');
   assert.match(probeless.stderr, /no memory ceiling/);
 });
@@ -1613,23 +1618,23 @@ test('build-jobs rejects nonsense and leading zeros (bash would read 010 as 8 an
   assert.equal(jobsOf(all), '1');
   assert.match(all.stdout, /::warning::PADDOCK_CI_RESERVED_CORES \(10\) keeps all of this host's 8 cores/);
   // Without a count of cores the variable stays unset (cargo's own default), and the step stays green.
-  const unknown = buildJobs({ ...WINDOWS, PADDOCK_CI_CORES: 'many' });
+  const unknown = buildJobs({ ...MAC, PADDOCK_CI_CORES: 'many' });
   assert.equal(unknown.status, 0);
   assert.equal(jobsOf(unknown), undefined);
 });
 
 test('build-jobs logs on stderr, prints only the assignment, appends it to GITHUB_ENV, and probes this machine', () => {
-  const r = buildJobs(WINDOWS);
-  assert.equal(r.stdout, 'CARGO_BUILD_JOBS=8\n');
-  assert.match(r.stderr, /^build-jobs: this host: 16 cores, 32600 MB of RAM/m);
+  const r = buildJobs(MAC);
+  assert.equal(r.stdout, 'CARGO_BUILD_JOBS=4\n');
+  assert.match(r.stderr, /^build-jobs: this host: 14 cores, 65536 MB of RAM/m);
   const dir = mkdtempSync(join(tmpdir(), 'build-jobs-'));
   const envFile = join(dir, 'env');
   writeFileSync(envFile, '');
-  assert.equal(buildJobs({ ...WINDOWS, GITHUB_ENV: envFile }).status, 0);
-  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=8\n');
+  assert.equal(buildJobs({ ...MAC, GITHUB_ENV: envFile }).status, 0);
+  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\n');
   rmSync(dir, { recursive: true, force: true });
   // The real probes count something on this machine.
-  const real = buildJobs({ RUNNER_OS: 'Windows' });
+  const real = buildJobs({ RUNNER_OS: 'macOS', PADDOCK_CI_RESERVED_CORES: '0' });
   assert.match(real.stderr, /this host: [1-9]\d* cores, [1-9]\d* MB of RAM/);
   assert.match(real.stdout, /^CARGO_BUILD_JOBS=[1-9]\d*$/m);
 });

@@ -14,20 +14,22 @@
 #   2. Otherwise the smaller of
 #        cores:  (the host's cores - PADDOCK_CI_RESERVED_CORES) / PADDOCK_CI_JOBS_PER_HOST
 #        memory: (the host's RAM - PADDOCK_CI_RESERVED_RAM_MB) / (PADDOCK_CI_JOBS_PER_HOST x PADDOCK_CI_RUSTC_MB)
-#      divided by <split>, at least 1. PADDOCK_CI_RUSTC_MB defaults to 1536: the Windows PC (32 GB) ran out of memory with
-#      two builds of 16 rustc each (about 1 GB per rustc) and is fine with two of 8, so 1.5 GB per rustc keeps a margin.
+#      divided by <split>, at least 1. PADDOCK_CI_RUSTC_MB defaults to 1536 (about 1 GB per debug rustc was seen on the
+#      Windows runner, which ran out of memory with two builds of 16 rustc; 1.5 GB keeps a margin).
 #      Without the runner.envs, the runner class's known layout (verified 2026-10-30 from Gitea's job list: the most jobs
 #      one runner ran at once over the last 100 runs):
 #                 jobs/host  cores kept  RAM kept
-#        Linux    -          -           -        d-gtr9, capacity 4, containers without a CPU limit. Left unset, as before
-#                                                 (cargo: every core, per job), until a measured A/B of job durations
-#                                                 decides the share (docs/benchmarks.md, Gaps); the log names the cores.
-#        Windows  2          0           2 GB     decryp7ology-dev, two jobs at once; 16 cores, 32 GB: 8 each, as before
+#        Linux    -          -           -        d-gtr9, capacity 4, 16 cores, 128 GB, containers without a CPU limit.
+#                                                 Left unset, as before (cargo: every core, per job), until a measured
+#                                                 A/B of job durations decides the share (docs/benchmarks.md, Gaps).
+#        Windows  -          -           -        decryp7ology-dev, two jobs at once; 8 cores, 16 GB (its job log of
+#                                                 2026-10-30). Left unset: cargo's default is its 8 cores, the 8 the
+#                                                 workflows spelled before; the share (4 each) waits for the same A/B.
 #        macOS    1          10          32 GB    d7-mac-mini, capacity 1, on the developer Mac its agents share: up to 5
 #                                                 agents with CARGO_BUILD_JOBS=2 each (ER-24) keep 10 of its 14 cores, so
 #                                                 CI gets 4, as before. PADDOCK_CI_RESERVED_CORES=1 when the Mac is CI's
 #                                                 alone (13).
-#      A Linux runner that sets PADDOCK_CI_JOBS_PER_HOST gets the formula (0 cores and 2 GB kept unless it sets them).
+#      A Linux or Windows runner that sets PADDOCK_CI_JOBS_PER_HOST gets the formula (0 cores and 2 GB kept unless set).
 #
 # Cores: nproc (Linux and Git Bash; honours the container's cpuset), else sysctl hw.ncpu (macOS), else NUMBER_OF_PROCESSORS,
 # else getconf. RAM: the cgroup's memory.max when it is a number, else /proc/meminfo (Linux and Git Bash), else sysctl
@@ -91,7 +93,7 @@ setting() {
 class_default() { # <share|cores|ram>
   case "${RUNNER_OS:-}:$1" in
     Linux:share) echo - ;;
-    Windows:share) echo 2 ;;
+    Windows:share) echo - ;;
     macOS:cores) echo 10 ;;
     macOS:ram) echo 32768 ;;
     *:share) echo 1 ;;
@@ -121,14 +123,14 @@ fi
 
 share=$(setting PADDOCK_CI_JOBS_PER_HOST "$(class_default share)")
 if [ "$share" = - ]; then
-  # Linux keeps cargo's default (every core per job) until its share is measured. A split job (cargo mutants) still divides
-  # the cores between its builds.
+  # Linux and Windows keep cargo's default (every core per job) until their share is measured. A split job (cargo mutants)
+  # still divides the cores between its builds.
   if [ "$split" -gt 1 ] && is_count "$n"; then
     jobs=$((n / split))
     [ "$jobs" -ge 1 ] || jobs=1
     emit "$jobs" "$n cores / $split builds at once; otherwise the runner class keeps cargo's default"
   else
-    say "CARGO_BUILD_JOBS stays unset: cargo uses all ${n:-its} cores, as before (the Linux share is not measured yet)"
+    say "CARGO_BUILD_JOBS stays unset: cargo uses all ${n:-its} cores, as before (this runner class's share is not measured yet)"
   fi
   exit 0
 fi
