@@ -457,3 +457,44 @@ fn blame_runs_nothing_a_repository_configures() {
     assert_eq!(got.hunks.iter().map(|h| h.lines()).sum::<u32>(), 3);
     assert!(!marker.exists(), "blame ran a command the repository configured");
 }
+
+/// A measurement helper, not a test (rule 48): `cargo test --release -p pacenotes-git --test it -- --ignored --nocapture measure_blame`.
+/// Builds invented repositories in the scratch area (never a real one) and times a whole-file blame with gix's similarity rename
+/// tracking (`Rewrites::default()`), with a history of edits and with a history that also renames the file every tenth commit.
+#[test]
+#[ignore = "a measurement, run by hand"]
+fn measure_blame() {
+    for (name, rename_every) in [("edits only", 0usize), ("a rename every 10th commit", 10)] {
+        let repo = Repo::new();
+        let lines = |round: usize| {
+            (0..2000)
+                .map(|i| {
+                    if i % 300 == round % 300 {
+                        format!("line {i} edited in round {round}\n")
+                    } else {
+                        format!("line {i}\n")
+                    }
+                })
+                .collect::<String>()
+        };
+        let mut current = "src/hot0.rs".to_owned();
+        let mut last = repo.commit(1_000, "ann", &[(&current, &lines(0))]);
+        for round in 1..=300usize {
+            if rename_every > 0 && round % rename_every == 0 {
+                let next = format!("src/hot{round}.rs");
+                repo.git(&["mv", &current, &next], 1_000 + round as i64);
+                current = next;
+            }
+            last = repo.commit(1_000 + round as i64, "ann", &[(&current, &lines(round))]);
+        }
+        let history = open(&repo.dir).unwrap();
+        let started = std::time::Instant::now();
+        let got = blame(&history, &last, &current, &BlameRequest::default()).unwrap();
+        println!(
+            "{name}: 300 commits, 2000 lines: {:?}, {} hunks, {} objects read",
+            started.elapsed(),
+            got.hunks.len(),
+            got.objects_read
+        );
+    }
+}
