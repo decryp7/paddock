@@ -23,6 +23,19 @@ const DEFAULT_IGNORES = ['dist/**', '.angular/**', 'coverage/**', 'node_modules/
  * @param {string} [options.storeFlagsAllowedIn] regex of files that may hold `loading`/`error` state flags (the withRequestStatus feature itself)
  * @param {boolean} [options.signalForms]    rule 37: forbid new reactive forms (off while existing forms stay)
  */
+/**
+ * ER-12: browser specs (`e2e/`) run axe through a helper that waits for animations (`axeViolations` of the kit, or an app's
+ * own `axe.ts`, which is exempt). Part of the preset; an app with its own config adds this block alone.
+ */
+function e2eAxe() {
+  return {
+    files: ['e2e/**/*.ts', '**/e2e/**/*.ts'],
+    ignores: ['**/axe.ts'],
+    plugins: { paddock: plugin },
+    rules: { 'paddock/e2e-axe-through-kit': 'error' },
+  };
+}
+
 function preset(options) {
   if (!options || !options.prefix) throw new Error('paddock-eslint preset: { prefix } is required (the app\'s selector prefix)');
   const eslint = peer('@eslint/js');
@@ -86,6 +99,7 @@ function preset(options) {
         ...(options.templateRules ?? {}),
       },
     },
+    e2eAxe(),
     {
       // ADR 0026 §2: a dialog content declares its actions; the frame draws the footer (inline templates of `*dialog*.ts`).
       files: ['**/*dialog*.ts/*.html', '**/*dialog*.html'],
@@ -97,4 +111,4 @@ function preset(options) {
   ];
 }
 
-module.exports = { preset, DEFAULT_IGNORES };
+module.exports = { preset, e2eAxe, DEFAULT_IGNORES };

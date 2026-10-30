@@ -1,5 +1,4 @@
-import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, settleTransitions, test, type Page } from '@decryp7/paddock-e2e';
 import { PD_ICON_DOTS } from '../projects/paddock-ui/icons/src/paths';
 
 const DOTS = Object.fromEntries(Object.entries(PD_ICON_DOTS).map(([k, v]) => [k, (v ?? []).map((d) => [d[0], d[1]])]));
@@ -9,15 +8,17 @@ const THEMES = ['dark', 'light'] as const;
 async function open(page: Page, theme: string, accent: string, density = 'standard'): Promise<void> {
   await page.goto(`/?theme=${theme}&accent=${accent}&density=${density}`);
   await page.locator('[data-testid="card"] pd-card').first().waitFor();
-  // Let the chart draw (animation 300 ms) and fonts settle.
-  await page.waitForTimeout(600);
+  // Wait on the conditions, not a clock (ER-12): the chart has its canvas, the fonts are loaded, and the CSS animations and
+  // transitions have ended (the chart's own drawing is in the canvas, which no check here reads).
+  await page.locator('section[data-testid="chart-theme"] canvas').first().waitFor();
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  await settleTransitions(page);
 }
 
 for (const theme of THEMES) {
   test(`axe finds no violations (${theme})`, async ({ page }) => {
     await open(page, theme, 'debrief');
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
-    expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+    expect(await axeViolations(page)).toEqual([]);
   });
 }
 

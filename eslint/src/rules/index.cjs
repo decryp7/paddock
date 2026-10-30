@@ -9,6 +9,7 @@ module.exports = {
   'signal-read-before-await': require('./signal-read-before-await.cjs'),
   'store-rules': require('./store-rules.cjs'),
   'no-raw-style-values': require('./no-raw-style-values.cjs'),
+  'e2e-axe-through-kit': require('./e2e-axe.cjs'),
   ...templateRules,
   ...dialogRules,
 };

@@ -7,6 +7,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ### Changed
 
+- **Menus on macOS:** closing a context menu with Escape or one of its items keeps the text you had selected, as a native menu does (WebKit used to drop the highlight). Clicking elsewhere to dismiss it gives the selection back too (that click only closes the menu); a text field with the focus keeps its cursor.
 - **Updates:** Debrief now updates from the Paddock repository's releases, signed with the Paddock family's update key. A copy installed before this release cannot update itself to it: download this release once by hand and install it over the old one; later releases update as usual
 
 ### Fixed

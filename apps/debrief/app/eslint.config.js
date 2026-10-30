@@ -5,6 +5,8 @@ const eslint = require('@eslint/js');
 const { defineConfig } = require('eslint/config');
 const tseslint = require('typescript-eslint');
 const angular = require('angular-eslint');
+// The family's ESLint package, from the repo (Debrief keeps its own config and takes single blocks of it).
+const { e2eAxe } = require('../../../eslint/src/index.cjs');
 
 module.exports = defineConfig(
   {
@@ -80,4 +82,6 @@ module.exports = defineConfig(
       '@angular-eslint/template/interactive-supports-focus': 'off',
     },
   },
+  // ER-12: browser specs run axe through `e2e/axe.ts` (it waits for animations); only that helper imports @axe-core/playwright.
+  e2eAxe(),
 );
