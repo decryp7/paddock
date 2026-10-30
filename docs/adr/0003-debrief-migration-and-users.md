@@ -1,7 +1,8 @@
 # 3. Moving Debrief onto the platform, and who uses what
 
 - Status: Accepted (2026-10-31), after an independent review and a confirmation review. Proposed 2026-10-23; revised
-  2026-10-31 with the user's decisions of that day: no binary legacy mode; grants reset, trusted keys migrated.
+  2026-10-31 with the user's decisions of that day: no legacy support at all (no binary legacy mode, no source shim;
+  old plugins are removed), grants reset, trusted keys migrated.
 - Related: ADRs 0001 (the platform), 0002 (views), 0014 (monorepo); Debrief ADRs 0003 (scoped by this move), 0017, 0027;
   plan [debrief-1-2.md](../plans/debrief-1-2.md) packages PH1 to PH4, 2.6a to 2.6d, 0.5 (D1: move in 1.2)
 
@@ -10,8 +11,9 @@
 Debrief has the mature implementation, 11 first-party plugin crates (`debrief-plugin-formats`, `-dotnet`, `-dumps`,
 `-native`, `-otel`, `-profiling`, `-registry`, `-syslog`, `-tools`, `-web`, `-windows`) served by the `debrief-plugins` bundle,
 and a published SDK (Debrief ADR 0027). The move must not break those plugins or Debrief's release. Under the "no backward
-compatibility before v1" rule there is no binary promise. The user asked that existing plugin *sources* keep compiling
-(the shim, phase 3), and decided on 2026-10-31 that already built protocol-1 binaries are refused, not served.
+compatibility before v1" rule there is no compatibility promise, and no third-party plugins are known. The user decided on
+2026-10-31: "no need to keep legacy plugins. Just remove them." So there is neither a binary legacy mode nor a source
+shim.
 
 ## Decision
 
@@ -29,17 +31,15 @@ compatibility before v1" rule there is no binary promise. The user asked that ex
 2. **Platform protocol 2** (PH2a contract half, PH2b host half). Debrief's protocol-1 `PluginRequest` / `HostRequest` map to
    platform requests and `debrief.*` namespaces as in the table below; Debrief hosts its plugins through
    `paddock-plugin-host`.
-3. **Source compatibility shim** (PH3; kept for two Debrief minor releases, removed in 1.4). `debrief-plugin-api` re-exports
-   every public name it has in 1.1 (`Plugin`, `Contributions`, `serve`, `prelude`, ...), implemented on
-   `paddock-plugin-api` + `debrief-plugin-ext`, so a plugin's source recompiles unchanged. **No binary legacy mode:** a
-   binary built for protocol 1 is never started. It is refused with `Refusal::Legacy`, whose text says to rebuild it from
-   source with the 1.2 SDK and reinstall it. The shared host has no hook for old protocols; the frozen `fixture_v1` in
-   `paddock-plugin-test` keeps the handshake refusal tested.
+3. **Old plugins removed** (PH3). On the first start of 1.2, installed format-1 (protocol-1) plugins are removed (see
+   "Migration of user state"). A protocol-1 binary or `.debriefplugin` file is never started or installed: it is refused
+   with `Refusal::Legacy`, whose text says the plugin is no longer supported. There is no source shim:
+   `debrief-plugin-api`'s 1.1 names are not kept, and a plugin is written against `paddock-plugin-api` +
+   `debrief-plugin-ext`. The shared host has no hook for old protocols; the frozen `fixture_v1` in `paddock-plugin-test`
+   keeps the handshake refusal tested. **In the same change**, the SDK docs (`apps/debrief/docs/plugin-sdk.md`, Debrief ADR
+   0027) move to Paddock `docs/plugin-sdk.md` and describe the platform SDK plus `debrief-plugin-ext`.
 4. **First-party plugins rebuilt** against protocol 2 in the same release (PH4).
-5. **Remove the shim** after two minors (1.4). In the same change, the SDK docs (`apps/debrief/docs/plugin-sdk.md`,
-   Debrief ADR 0027) move to Paddock `docs/plugin-sdk.md` and describe the platform SDK plus `debrief-plugin-ext`.
-
-Order: 1 (done), then 0 and 2's contract half (PH2a), 2's host half (PH2b), 3 (PH3) and 4 (PH4); 5 in 1.4.
+Order: 1 (done), then 0 and 2's contract half (PH2a), 2's host half (PH2b), 3 (PH3) and 4 (PH4). There is no later phase.
 
 **Safe fallbacks:** phases 1 and 0 change no wire bytes. Phase 2 is the only wire change, and it ships together with
 phase 4's rebuilt first-party plugins, so a release never pairs a protocol-2 host with protocol-1 first-party binaries.
@@ -81,17 +81,18 @@ with round-trip tests of every body.
 ### Migration of user state
 
 What a 1.1 install has on disk, and what 1.2 does with it. Each row has a test for a missing file and a corrupt file (PH3,
-with fixtures of invented content, never a user's files).
+with fixtures of invented content, never a user's files). The removal of old plugins has two more: an old install record
+and its folder are removed and the notice is shown; a missing or corrupt old record does not stop startup.
 
 | State (1.1) | Where | 1.2 | Missing / corrupt |
 |---|---|---|---|
-| Installed format-1 packages (`.debriefplugin`, protocol-1 binaries) | `<data>/plugins/<id>/install.json` (Debrief `InstallRecord`, `format` 1), `v-<version>-<digest>/`, `data/` | **Kept, not run.** Before `PluginsDir` reads the folder, a one-time step moves each Debrief-format plugin to `<data>/plugins-1.1/<id>/`. Both apps use `install.json` format 1 with different shapes, so the shared reader would see an empty or damaged record. The Plugins view lists them as "Built for Debrief 1.1: rebuild it from source and reinstall it", with Remove. Installing a rebuilt package with the same id moves its `data/` folder over | a missing record: listed by folder name as unreadable, with Remove; a corrupt one: the same, and the file is left as it is |
-| Installing a `.debriefplugin` file in 1.2 | the install dialog | **Refused** with the same rebuild text (`Refusal::Legacy`) | not applicable |
+| Installed format-1 packages (`.debriefplugin`, protocol-1 binaries) | `<data>/plugins/<id>/install.json` (Debrief `InstallRecord`, `format` 1), `v-<version>-<digest>/`, `data/` | **Removed** on the first start of 1.2, before `PluginsDir` reads the folder (both apps use `install.json` format 1 with different shapes, so the shared reader must never see a Debrief record): the plugin's install record and files, its `data/` folder included, are deleted; one notice is logged with the removed ids; the user sees one line, "Plugins built for older Debrief versions were removed; they are no longer supported." Debrief's own built-in plugins are installed again as signed platform packages (`Builtin`, the family plugin key, ADR 0001) | a missing record: the folder is recognised by its version folders and removed all the same; a corrupt one: removed too; a folder that cannot be deleted (locked, no rights) is logged and retried at the next start. Startup never stops for any of these |
+| Installing a `.debriefplugin` file in 1.2 | the install dialog | **Refused** with "no longer supported" (`Refusal::Legacy`) | not applicable |
 | Trusted publisher keys | `settings.json`, "Plugin trust" section, `trustedKeys` lines `Name = debrief-plugin-public-key ed25519 <hex>` | **Migrated:** the same Ed25519 key, rewritten with the `paddock-plugin-public-key ed25519` prefix on first load and saved once | missing: none trusted (the default); a corrupt line is dropped with a notice naming the line, and the others are kept |
 | Developer mode | the same section, `developerMode` | **Kept** | missing or corrupt: off |
-| Grants of third-party plugins | `install.json` `granted` (Debrief `Permission`) | **Reset:** default deny. The rebuilt package's manifest asks again (grants by `GrantRef`, ADR 0001); the old grants are shown as a hint in the install dialog | not applicable (kept in `plugins-1.1/`) |
+| Grants of third-party plugins | `install.json` `granted` (Debrief `Permission`) | **Reset:** removed with the plugin; a platform package starts at default deny (grants by `GrantRef`, ADR 0001) | not applicable |
 | Enabled flags, first-party plugins | `<config>/plugins.json` (`disabled` ids, version 1) | **Kept**: first-party plugin ids do not change in 1.2 | missing or corrupt: all enabled (`VersionedFile` defaults) |
-| Enabled flags, third-party plugins | `install.json` `enabled` | **Migrated** to the rebuilt package's install record when its id is installed again | not applicable |
+| Enabled flags, third-party plugins | `install.json` `enabled` | **Removed** with the plugin | not applicable |
 | Quarantine | none: Debrief 1.1 keeps quarantine in memory only (`debrief-core/src/guard.rs`, no state file) | **New** shared `paddock-guard` state file, starting empty | missing or corrupt: defaults (`paddock-guard`'s own tests) |
 
 ### Who uses what
@@ -111,10 +112,11 @@ small copy and adopts the platform when tier 3 is built.
 ## Consequences
 
 - Debrief 1.2 hosts plugins only through the shared platform, with OS enforcement from `paddock-sandbox`.
-- Third-party plugin authors must rebuild once; their sources compile unchanged until 1.4.
-- The shim is the only code that exists to serve the old contract, and it has a removal release.
+- No code serves the old contract: no shim, no legacy mode, no removal release to plan.
+- A third-party plugin (none known) must be ported to the platform SDK and installed again; its 1.1 data is gone.
 
 ## Decided questions
 
-- Does the shim also cover third-party plugins built from the published ADR 0027 SDK (none known)? **Yes for sources**
-  (it is the same re-export and costs nothing extra), **never for binaries** (user decision, 2026-10-31).
+- Is anything of 1.1's plugin contract kept (a source shim for ADR 0027 SDK plugins, a binary legacy mode, old installed
+  plugins)? **No** (user decision, 2026-10-31: "no need to keep legacy plugins. Just remove them."). Kept from 1.1's plugin
+  state are only the trusted keys, developer mode and the built-in plugins' enabled flags.

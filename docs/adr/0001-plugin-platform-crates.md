@@ -221,14 +221,15 @@ count as writing. Whatever the flags say, the OS sandbox still bounds what a plu
   `HostCall`, and `PLATFORM_PROTOCOL` stays 2.0: no app has shipped protocol 2.0, and there is no compatibility promise
   before v1. The minor rule above applies from the first release that ships protocol 2.0; the same holds for the
   `Progress` frames of package 2.6d.
-- **No binary compatibility across a major.** A plugin built for an older major is refused with a message telling the
-  user to rebuild it from source with the current SDK: `Refusal::PluginTooOld`, or `Refusal::Legacy` for Debrief's
-  protocol 1 (user decision, 2026-10-31). The shared host has no hook for serving an old protocol.
-- **Support window for the previous major.** When a new major ships, the SDK keeps a source-level shim for the previous
-  major for two minor releases of each app that hosts plugins, then removes it. The shim re-exports the old names over the
-  new API, so a plugin recompiles unchanged. The release notes of the major give the removal release.
-- The refusal text says who must act ("plugin X needs Debrief 1.4 or newer", or "plugin X was built for an older contract;
-  rebuild it from source").
+- **No compatibility across a major, binary or source.** A plugin built for an older major is refused
+  (`Refusal::PluginTooOld`), and Debrief's protocol 1 is refused as no longer supported (`Refusal::Legacy`). There is no
+  binary legacy mode and no source shim (user decision, 2026-10-31: "no need to keep legacy plugins. Just remove them."),
+  and the shared host has no hook for serving an old protocol.
+- **No support window before v1.** Whether a later major keeps the previous one working for a while is decided by an ADR
+  when the platform has shipped a major to third parties; until then the rule above holds.
+- The refusal text says who must act ("plugin X needs Debrief 1.4 or newer", "plugin X was built for an older contract;
+  install a version built for this app", or for protocol 1 "plugin X was built for an older Debrief and is no longer
+  supported").
 - Wire types never use `untagged`, `flatten`, internal tags or `skip_serializing_if` (postcard). Fuzz targets for the
   decoders live in `paddock-ipc`, `paddock-plugin-package` and `paddock-view`.
 
@@ -305,8 +306,8 @@ Built as described, with these deliberate differences:
   by `paddock-plugin-package` and `paddock-plugin-api`. `HostInfo` in `paddock-plugin-api::compat` is the host's policy and
   words the refusals on top of it. `GrantRef` likewise exists once, in `paddock-view`, re-exported by the package.
 - Protocol 1 (Debrief's own) is refused by the version gate: at the handshake (`IpcError::Version`, tested with the frozen
-  `fixture_v1`) and from a manifest (`Refusal::Legacy`). There is no binary legacy mode (user decision, 2026-10-31); the only
-  compatibility is Debrief's source-level shim (ADR 0003 phase 3).
+  `fixture_v1`) and from a manifest (`Refusal::Legacy`). There is no binary legacy mode and no source shim (user decision,
+  2026-10-31); Debrief removes old installed plugins on the first start of 1.2 (ADR 0003 phase 3).
 - Still to build after the 2026-10-31 revision: `paddock-sandbox` (PH1); `Remote::stream`, `StreamContract`,
   `HostCall::Extension`, `Contract::role` (package 2.6b); resource requests with one memory policy and the lifecycle
-  (2.6a); the liveness conversion (2.6c, 2.6d); refusal texts that say "rebuild it from source" (PH3).
+  (2.6a); the liveness conversion (2.6c, 2.6d); the refusal texts above (PH3).
