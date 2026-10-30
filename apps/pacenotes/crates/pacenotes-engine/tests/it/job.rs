@@ -75,3 +75,64 @@ fn a_job_cancelled_while_queued_never_starts() {
     assert!(matches!(handle.join(), Err(paddock_jobs::JobError::Cancelled(_))));
     assert!(!r.scratch.path("index/index.db").exists(), "nothing was written");
 }
+
+/// The reviewer's probe: an index file inside the repository is itself a file of the repository, so every run changed it and the next
+/// run saw a change, forever. It is refused before anything runs.
+#[test]
+fn a_store_inside_the_workspace_is_refused_by_start_and_watch_with_a_message_that_says_what_to_change() {
+    for inside in ["ws/.pacenotes/index.db", "ws/index.db", "ws/a/b/c/index.db"] {
+        let mut r = rig(&[("a.rs", "fn a() {}\n")]);
+        let setup = pacenotes_engine::IndexSetup {
+            store_path: r.scratch.path(inside),
+            root: r.scratch.path("ws"),
+            source: std::sync::Arc::new(crate::support::NoLanguages),
+            denylist: std::sync::Arc::new(pacenotes_index::Denylist::new()),
+            limits: pacenotes_index::IndexLimits::default(),
+            read_workers: paddock_jobs::Workers::one(),
+            parse_workers: paddock_jobs::Workers::one(),
+        };
+        r.service = pacenotes_engine::IndexService::new(r.registry.clone(), r.pool.clone(), std::sync::Arc::new(setup));
+        let err = r.service.start().err().unwrap_or_else(|| panic!("{inside} was accepted"));
+        assert!(matches!(err, pacenotes_engine::EngineError::StoreInsideWorkspace { .. }), "{err:?}");
+        assert!(err.to_string().contains("outside the repository"), "{err}");
+        let source = paddock_watch::FakeSource::new();
+        let timing = pacenotes_engine::WatchTiming::default();
+        assert!(r.service.watch(&source, std::sync::Arc::new(r.clock.clone()), timing).is_err());
+        assert!(r.sink.all().is_empty(), "nothing was registered");
+        assert!(
+            !r.scratch.path("ws/.pacenotes").exists() && !r.scratch.path("ws/index.db").exists(),
+            "nothing was written"
+        );
+    }
+}
+
+#[test]
+fn a_store_beside_the_workspace_is_fine_and_a_run_with_no_changes_writes_nothing() {
+    let r = rig(&[("a.rs", "fn a() {}\n"), ("b.rs", "fn b() {}\n")]);
+    // files edited within the last two seconds are read again on purpose (the racy rule) and that is a write; these are old
+    for name in ["a.rs", "b.rs"] {
+        let file = std::fs::File::options()
+            .write(true)
+            .open(r.scratch.path(&format!("ws/{name}")))
+            .unwrap();
+        file.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
+            .unwrap();
+    }
+    r.service.start().unwrap().join().unwrap();
+    let store = r.scratch.path("index/index.db");
+    let before = std::fs::read(&store).unwrap();
+    let folder_before: Vec<_> = std::fs::read_dir(store.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    for _ in 0..3 {
+        let again = r.service.start().unwrap().join().unwrap();
+        assert!(again.report.generation.is_none(), "{:?}", again.report);
+    }
+    assert_eq!(std::fs::read(&store).unwrap(), before, "the index file is byte for byte the same");
+    let folder_after: Vec<_> = std::fs::read_dir(store.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(folder_before.len(), folder_after.len());
+}

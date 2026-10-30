@@ -11,6 +11,6 @@ mod progress;
 mod watcher;
 
 pub use ignore::{IgnoreError, RepoFilesIgnore};
-pub use job::{IndexOutcome, IndexService, IndexSetup, JOB_KIND};
+pub use job::{EngineError, IndexOutcome, IndexService, IndexSetup, JOB_KIND};
 pub use progress::JobProgress;
 pub use watcher::WatchTiming;

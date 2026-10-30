@@ -1,6 +1,6 @@
 //! The folder watcher that keeps the index fresh.
 
-use crate::IndexService;
+use crate::{EngineError, IndexService};
 use paddock_jobs::time::Clock;
 use paddock_watch::{ChangeSource, Debouncer, WatchError, WatchHandle, spawn};
 use std::sync::Arc;
@@ -31,7 +31,8 @@ impl IndexService {
     /// are debounced into the next run (the plan sees the folder as it is then, so none is lost). The source reports that
     /// something changed, not what, so every change starts a run; the shortcut (ADR 0006) makes a run over an unchanged
     /// tree cheap. Dropping the handle stops the watch; a run in flight finishes.
-    pub fn watch(&self, source: &dyn ChangeSource, clock: Arc<dyn Clock>, timing: WatchTiming) -> Result<WatchHandle, WatchError> {
+    pub fn watch(&self, source: &dyn ChangeSource, clock: Arc<dyn Clock>, timing: WatchTiming) -> Result<WatchHandle, EngineError> {
+        self.setup.check()?;
         let debouncer = Arc::new(Debouncer::new(clock, timing.quiet, timing.max_wait));
         let service = IndexService {
             registry: self.registry.clone(),
@@ -43,5 +44,6 @@ impl IndexService {
                 let _ = job.join();
             }
         })
+        .map_err(|e: WatchError| EngineError::Watch(e.to_string()))
     }
 }
