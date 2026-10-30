@@ -95,6 +95,7 @@ reinstall from the releases page and revoke the old secrets.
 4. Run the [testing manual](testing-manual.md) smoke test on every platform you can, including the real-model test.
 5. Tag `vX.Y.Z` and push the tag; check the release page for the installers (and `latest.json` once signing is set up).
 6. Install over the previous version on a real machine and confirm the server restarts into the new binary.
+7. Before the tag (rule 54): a `pitwall-release` dispatch with `gates: true` whose three `bundle (...)` jobs passed and whose verdict job says `installers: built`; then `source ~/.zshenv; scripts/vm-smoke/vm-smoke.sh --app pitwall --run <that run id>` passes on a fresh clone, and its result file is attached (see [scripts/vm-smoke/README.md](../../../scripts/vm-smoke/README.md)).
 
 ## Verification status
 

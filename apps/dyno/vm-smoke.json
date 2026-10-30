@@ -1,0 +1,67 @@
+{
+  "$comment": "The processes Dyno may start, for scripts/vm-smoke (docs: scripts/vm-smoke/README.md). Each process is Contents/MacOS/<name> of the installed bundle. parents: who may be its parent (app = the app process; launchd = parent pid 1, allowed only while Launch at login is on). argsPattern keeps the CLI calls of the check itself (dyno-agent status) out of the count. stateFiles name the discovery file the app finds its helper by: the pid in it must be the one live helper, and it is gone after Quit. ready: a command that exits 0 once the helper answers.",
+  "id": "dyno",
+  "app": "Dyno",
+  "bundle": "Dyno.app",
+  "dataDir": "~/Library/Application Support/Dyno",
+  "logs": [
+    "~/Library/Application Support/Dyno/logs/app.log",
+    "~/Library/Logs/Dyno/agent.log"
+  ],
+  "quit": {
+    "appleScriptName": "Dyno"
+  },
+  "updateHost": "dev.decryptology.net",
+  "readyTimeoutSec": 180,
+  "settleSec": 20,
+  "processes": [
+    {
+      "name": "dyno-app",
+      "role": "app",
+      "max": 1
+    },
+    {
+      "name": "dyno-agent",
+      "role": "helper",
+      "max": 1,
+      "argsPattern": "^ run( |$)",
+      "parents": [
+        "app",
+        "launchd"
+      ]
+    }
+  ],
+  "stateFiles": [
+    {
+      "path": "~/Library/Application Support/Dyno/agent.json",
+      "helper": "dyno-agent",
+      "jsonPidField": "pid",
+      "removedAfterQuit": true
+    }
+  ],
+  "ready": {
+    "command": [
+      "Contents/MacOS/dyno-agent",
+      "status"
+    ]
+  },
+  "loginService": {
+    "label": "net.decryptology.dyno.agent",
+    "on": [
+      "Contents/MacOS/dyno-agent",
+      "service",
+      "install"
+    ],
+    "off": [
+      "Contents/MacOS/dyno-agent",
+      "service",
+      "uninstall"
+    ],
+    "status": [
+      "Contents/MacOS/dyno-agent",
+      "service",
+      "status"
+    ],
+    "approval": "System Settings > General > Login Items & Extensions may ask to allow the item (manual)."
+  }
+}

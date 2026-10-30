@@ -271,6 +271,10 @@ jobs:
       - name: new-app templates
         run: node --test scripts/new-app.test.mjs scripts/coverage-gate.test.mjs
 
+      # The VM start check's evidence parsers and judges (scripts/vm-smoke): a fake guest, no VM.
+      - name: VM start check
+        run: node --test scripts/vm-smoke/*.test.mjs
+
       # The plan's rules and the repo contracts it checks (doc inputs, app CI files, CODEOWNERS, Renovate, one npm lock).
       - name: Affected rules and repo contracts
         run: node --test scripts/affected.test.mjs

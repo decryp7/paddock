@@ -1,0 +1,23 @@
+{
+  "$comment": "The processes Spotter may start, for scripts/vm-smoke (see apps/dyno/vm-smoke.json for the field list). min 0: a helper that is started on demand.",
+  "id": "spotter",
+  "app": "Spotter",
+  "bundle": "Spotter.app",
+  "dataDir": "~/Library/Application Support/Spotter",
+  "logs": [
+    "~/Library/Application Support/Spotter/logs/app.log"
+  ],
+  "quit": {
+    "appleScriptName": "Spotter"
+  },
+  "updateHost": "dev.decryptology.net",
+  "readyTimeoutSec": 180,
+  "settleSec": 20,
+  "processes": [
+    {
+      "name": "spotter-app",
+      "role": "app",
+      "max": 1
+    }
+  ]
+}
