@@ -3,9 +3,12 @@
 //! processes cannot be resolved without elevation on macOS and Linux: those sockets come back with no pid and the page
 //! says so; Dyno never asks for root for this.
 
-use dyno_core::network::{Proto, SocketRow, SocketState};
+use dyno_core::network::SocketRow;
+#[cfg(not(windows))]
+use dyno_core::network::{Proto, SocketState};
 use dyno_core::network_traffic::TrafficCounter;
 use dyno_core::ports::{NetworkSockets, PlatformError, ProcessTraffic, ReverseDns};
+#[cfg(not(windows))]
 use netstat2::{get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState};
 use std::net::IpAddr;
 use std::time::Duration;
@@ -14,6 +17,7 @@ use std::time::Duration;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct OsSockets;
 
+#[cfg(not(windows))]
 fn state(s: TcpState) -> SocketState {
     match s {
         TcpState::Listen => SocketState::Listen,
@@ -30,6 +34,15 @@ fn state(s: TcpState) -> SocketState {
 }
 
 impl NetworkSockets for OsSockets {
+    /// Windows: Dyno's own reader of the IP Helper tables, which knows a listener by the table it is in (netstat2 reads
+    /// only the table of all endpoints and takes a listener whose `dwState` is 0, as newer Windows 11 builds report it,
+    /// for an unknown state).
+    #[cfg(windows)]
+    fn sockets(&self) -> Result<Vec<SocketRow>, PlatformError> {
+        crate::windows::net::sockets().ok_or_else(|| PlatformError::Failed("The OS would not list the open sockets.".into()))
+    }
+
+    #[cfg(not(windows))]
     fn sockets(&self) -> Result<Vec<SocketRow>, PlatformError> {
         let infos = get_sockets_info(
             AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6,
@@ -123,6 +136,7 @@ impl ProcessTraffic for OsTraffic {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dyno_core::network::{Proto, SocketState};
     use std::net::{TcpListener, TcpStream, UdpSocket};
 
     #[test]
@@ -136,17 +150,10 @@ mod tests {
         let udp = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp.local_addr().unwrap().port();
 
-        // Windows can list a new listener as bound, not listening, for a moment after `listen` returned (CI job 21972):
-        // the table is read again until it shows the listener, up to a hang guard.
+        // A listener is listed as listening on every OS and Windows build (on Windows by the table it is in: newer
+        // builds report its `dwState` as 0, CI job 22533).
         let is_listener = |r: &SocketRow| r.proto == Proto::Tcp && r.state == SocketState::Listen && r.local_port == port;
-        let mut rows = OsSockets.sockets().unwrap();
-        for _ in 0..200 {
-            if rows.iter().any(is_listener) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            rows = OsSockets.sockets().unwrap();
-        }
+        let rows = OsSockets.sockets().unwrap();
         let listening = rows.iter().find(|r| is_listener(r)).unwrap_or_else(|| {
             let mine: Vec<&SocketRow> = rows.iter().filter(|r| r.local_port == port).collect();
             panic!("the test's own listener is listed: its port has {mine:?}")
@@ -164,6 +171,7 @@ mod tests {
             .any(|r| r.proto == Proto::Udp && r.local_port == udp_port && r.pid == Some(me)));
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn every_state_maps_to_something() {
         for s in [

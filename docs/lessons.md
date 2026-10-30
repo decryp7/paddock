@@ -911,6 +911,22 @@ exports), is lowered on every OS, and on Windows accepts stalls of seconds. Dyno
 `dyno_platform::priority::level(ThreadRole, Os)`, and a test per call site reads the role back
 (`priority::current_role`).
 
+## 2026-10-30: newer Windows 11 builds list a listener with `dwState` 0; the table says it listens (Dyno)
+Dyno's Windows socket tests failed on the CI runner from 2026-10-29 on, with the same commit that had passed hours before.
+A first fix assumed a short-lived BOUND state (100) and re-read the tables for ten seconds; the real value, printed only
+after the reader kept undocumented states as `UNKNOWN (n)` (CI job 22533), was 0, which `MIB_TCP_STATE` does not define,
+for the test's own listener, while the accepted connection on the same port was ESTABLISHED. The runner had just
+installed the optional preview update KB5127653 (Windows 11 26H1, build 28000.3365, 2026-10-28); its release notes say
+nothing about the TCP tables
+([Release Preview build 28000.3351](https://learn.microsoft.com/en-us/windows-insider/release-notes/release-preview-26h1/build-28000-3351)),
+and another project saw the same on build 26340.9596
+([Hyact/workbuddy-switch-plus#2](https://github.com/Hyact/workbuddy-switch-plus/pull/2)); a build 26300 VM still reports 2.
+**Rule:** never decide what an OS record is from an undocumented or drifting field when a documented source says it:
+Windows documents `TCP_TABLE_OWNER_PID_LISTENER` as all listening endpoints
+([TCP_TABLE_CLASS](https://learn.microsoft.com/en-us/windows/win32/api/iprtrmib/ne-iprtrmib-tcp_table_class)), so Dyno
+reads the listener and connections tables and keeps a value it cannot name as `UNKNOWN (n)`. And when a test fails on
+a value nobody can see, first make the product report the raw value, before guessing a fix.
+
 ## 2026-10-30: a stored UTC offset nobody filled in made every "local" day a UTC day (Dyno)
 The Issues e2e test failed on CI at 00:07 UTC: it ran on the wall clock against mock issues dated relative to it (the newest
 35 minutes ago), so there was nothing "Today" in the first 35 minutes after midnight (a test bug, fixed by pinning the clock
