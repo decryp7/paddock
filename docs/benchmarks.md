@@ -220,6 +220,47 @@ These measure tooling, not a product. They are kept where they are.
   0.53–1.77 ms of that. Windows is not measured.
 - [Lessons](lessons.md): test-binary consolidation, 239 → 99 binaries, nextest 301 s → 196 s.
 
+### 2026-10-30, linker for Dyno's incremental debug rebuilds: ld-prime against rust-lld (ci/build-parallelism)
+
+- **Commit:** ddf0becda (origin/main); no code change, the linker is chosen per run.
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2, Xcode 27.2 (ld-prime `ld-27106.1`), rustc 1.99.1 (LLVM 23.1.1).
+- **Load:** 1-minute load 5.7–10.8 at the start of each rebuild run (up to 13.9 at the end of one) (each started only when the 5-minute load was below 10,
+  aborted above 15; none was); 11–20 during the link-only runs, so those are an indication, compared only with each other.
+  Other agents were working on the machine throughout.
+- **Build:** debug (`dev` profile: workspace crates at opt-level 0, dependencies at 2, `debug = "line-tables-only"`), no
+  sccache, `CARGO_INCREMENTAL=1`, `CARGO_BUILD_JOBS=13` (cores − 1), under `nice -n 10`. Three warm build folders, one per
+  linker set-up: `ldprime27` (the default: ld-prime, SDK 27.2), `ldprime` (ld-prime, SDK 26.5) and `lld` (rust-lld from the
+  toolchain's sysroot through `-C link-arg=-fuse-ld=lld -C link-arg=-B<sysroot>/lib/rustlib/aarch64-apple-darwin/bin/gcc-ld`,
+  SDK 26.5). rust-lld cannot link against the 27.2 SDK at all: its `libSystem.tbd` lists an `arm64e.x1-macos` target that
+  LLVM 23.1's TAPI reader rejects ("unknown target"), so the like-for-like pair is `ldprime` against `lld` on SDK 26.5. The
+  `LC_BUILD_VERSION` of each binary names its linker (tool 3 = ld, tool 4 = lld).
+- **Corpus:** none (a build). Scenarios: `touch crates/dyno-agent/src/rollup.rs` (a leaf of the agent) or
+  `touch crates/dyno-core/src/forecast.rs` (the core, which every other crate depends on), then build.
+- **Command:** `env -u RUSTC_WRAPPER CARGO_TARGET_DIR=<dir> CARGO_BUILD_JOBS=13 CARGO_INCREMENTAL=1 [SDKROOT=<26.5 SDK>]
+  [CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS=<lld flags>] nice -n 10 cargo build -q -p dyno-agent -p dyno-cli` in
+  `apps/dyno`; an untimed build before each touch. Link only: rustc's own linker command (`cargo rustc ... -- -C save-temps
+  --print link-args`) rerun with and without the lld flags, output to a scratch file.
+- **Runs:** 5 rebuilds per scenario and set-up, interleaved (ldprime27, ldprime, lld per round); 7 interleaved link-only
+  pairs per binary. Medians and ranges.
+- **Numbers:**
+
+  | Measure | ld-prime, SDK 27.2 (default) | ld-prime, SDK 26.5 | rust-lld, SDK 26.5 | Budget | Verdict |
+  |---|---|---|---|---|---|
+  | Rebuild after touching dyno-agent | 2.43 s (1.72–3.89) | 1.75 s (1.43–2.77) | 2.20 s (1.87–3.01) | > 20 % faster to adopt | no gain |
+  | Rebuild after touching dyno-core | 4.97 s (4.36–6.95) | 5.12 s (4.08–7.01) | 5.43 s (3.84–7.67) | > 20 % faster to adopt | no gain |
+  | Link of `dyno-agent` alone (33–35 MB) | – | 0.34 s (0.25–0.43) | 0.42 s (0.40–0.46) | – | ld-prime faster |
+  | Link of `dyno` (the CLI) alone | – | 0.12 s (0.08–0.14) | 0.145 s (0.13–0.17) | – | ld-prime faster |
+
+- **Memory measure:** not measured (a build).
+- **Notes:** linking is 0.1–0.4 s of a 1.5–5 s rebuild; the rest is rustc on the touched crate and its dependants, so no
+  linker could make the rebuild 20 % faster, and rust-lld is the slower of the two here. An earlier pass at the same load
+  timed with a 0.5 s polling clock and is discarded. mold and sold were not tried: mold produces no Mach-O any more, and
+  sold (the commercial macOS fork) was archived in November 2024, its README pointing to Apple's new linker. Linux and
+  Windows were not measured: on `x86_64-unknown-linux-gnu` rustc already links with rust-lld (default since 1.90; the CI
+  image's rustc 1.99.1 passes `-fuse-ld=lld` and `-B<sysroot>/.../gcc-ld`, checked with `--print link-args` in the image),
+  and the repo's `.cargo/config.toml` already sets `linker = "rust-lld.exe"` for `x86_64-pc-windows-msvc`.
+  Raw output: `/Volumes/d7sst7/dev-targets/linker-bench/` (`results.tsv`, `link-only*.tsv`).
+
 ## Gaps
 
 These are ordered by impact.
@@ -246,6 +287,10 @@ These are ordered by impact.
    - Pitwall request latency and queueing.
    - Spotter check throughput and Chrome memory: about 17 GB idle was seen on Linux, see the lessons.
    - Windows and Linux runs of anything except CI.
+   - CI build parallelism: a clean, CI-shaped Dyno build (`cargo test --no-run --workspace --exclude dyno-app`, no sccache,
+     no incremental) with `CARGO_BUILD_JOBS=4` (the Mac leg's share) against 13 (cores − 1). Tried on 2026-10-30; the
+     5-minute load never fell below 10 in an hour, so nothing was recorded (`conformance/ci/build-jobs.sh` keeps 4 on the
+     shared Mac until it is measured). Also the Linux runner's core count, which no job log prints.
    - Memory is not checked outside Debrief.
 4. **Results on loaded machines that need a quiet re-run:**
    - Nearly every Debrief result since 2026-10-20 (Windows VM at about 80% load; Mac mini at load 9–220).
