@@ -295,7 +295,7 @@ fn updater<R: Runtime>(test_dir: Option<std::path::PathBuf>, app: &tauri::AppHan
         .releases_page(RELEASES_PAGE)
         .homepage("https://dev.decryptology.net/decryp7/paddock")
         .changelog(include_str!("../../../CHANGELOG.md"))
-        .build_info(option_env!("SPOTTER_COMMIT"), option_env!("SPOTTER_BUILT"));
+        .build_info(option_env!("PADDOCK_BUILD_COMMIT"), option_env!("PADDOCK_BUILD_DATE"));
     match test_dir {
         None => b,
         Some(dir) => b.dirs(dir.join("config"), dir.join("cache")).background(false),
