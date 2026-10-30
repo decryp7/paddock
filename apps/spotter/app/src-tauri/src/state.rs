@@ -18,10 +18,16 @@ pub struct AppState {
     pub data_dir: PathBuf,
     /// Where downloads go when the settings name no folder.
     pub default_downloads: PathBuf,
-    /// HTTP for downloads and the renderer install.
+    /// HTTP for small requests (checksum files).
     pub http: Http,
-    /// The long operations running now, by the id the UI gave them.
-    pub jobs: Arc<crate::jobs::Jobs>,
+    /// The app's one downloader (the shell's: its per-host caps hold across every download).
+    pub downloader: Arc<paddock_download::Downloader>,
+    /// Downloads as shell jobs (release files, the browser).
+    pub downloads: crate::jobs::Downloads,
+    /// The wizard's test that runs now: a newer test stops it (the user edited the form again).
+    pub last_test: std::sync::Mutex<Option<paddock_jobs::JobId>>,
+    /// The page the tray or a toast asked the main window to show, for a window that could not listen yet.
+    pub pending_route: std::sync::Mutex<Option<String>>,
     /// Tells the background tasks to stop.
     pub stop: tokio::sync::watch::Sender<bool>,
 }

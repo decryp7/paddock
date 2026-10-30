@@ -44,6 +44,8 @@ function message(e: unknown): string {
 export function finishedNotice(job: SuJobSnapshot): ShellNotice | null {
   switch (job.state) {
     case 'done':
+      // The owner of the job said its success is not news (a source test that runs with every edit of a form).
+      if (job.quietOnSuccess) return null;
       return { level: 'success', kind: JOB_NOTICE_KINDS.finished, message: $localize`:@@pd.jobs.notice.done:${job.title}:title:: done` };
     case 'failed':
       return { level: 'error', kind: JOB_NOTICE_KINDS.failed, message: $localize`:@@pd.jobs.notice.failed:${job.title}:title: failed: ${job.message}:cause:` };

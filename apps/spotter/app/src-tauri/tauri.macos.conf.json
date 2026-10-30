@@ -13,9 +13,18 @@
         "resizable": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 18, "y": 24 },
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 24
+        },
         "transparent": true,
-        "windowEffects": { "effects": ["sidebar"], "state": "followsWindowActiveState" }
+        "windowEffects": {
+          "effects": [
+            "sidebar"
+          ],
+          "state": "followsWindowActiveState"
+        },
+        "create": false
       }
     ]
   },

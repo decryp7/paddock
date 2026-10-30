@@ -7,8 +7,8 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use quick_xml::XmlVersion;
 
-/// Largest list read (2 MiB).
-pub const MAX_IMPORT_BYTES: usize = 2 << 20;
+/// Largest list read (2 MB).
+pub const MAX_IMPORT_BYTES: usize = 2_000_000;
 
 /// A list format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,7 +45,7 @@ pub struct Imported {
 /// Reads a list. `Err` only when the text cannot be read at all (not JSON, not XML, too large).
 pub fn import(format: ImportFormat, text: &str) -> Result<Imported, String> {
     if text.len() > MAX_IMPORT_BYTES {
-        return Err("The list is larger than 2 MiB.".into());
+        return Err("The list is larger than 2 MB.".into());
     }
     let text = text.trim_start_matches('\u{feff}');
     let mut out = match format {
@@ -295,11 +295,21 @@ mod tests {
         assert!(import(ImportFormat::Opml, "<opml><body></opml>").unwrap_err().contains("OPML"));
     }
 
+    /// The limit is the 2 MB the message names (decimal), not 2 MiB.
+    #[test]
+    fn the_limit_is_two_million_bytes() {
+        assert_eq!(MAX_IMPORT_BYTES, 2_000_000);
+        let at_limit = " ".repeat(MAX_IMPORT_BYTES);
+        assert!(import(ImportFormat::Brewfile, &at_limit).is_ok());
+        let msg = import(ImportFormat::Brewfile, &(at_limit + " ")).unwrap_err();
+        assert_eq!(msg, "The list is larger than 2 MB.");
+    }
+
     #[test]
     fn imports_are_bounded_and_formats_parse() {
         assert!(import(ImportFormat::Brewfile, &" ".repeat(MAX_IMPORT_BYTES + 1))
             .unwrap_err()
-            .contains("2 MiB"));
+            .contains("2 MB"));
         let many: String = (0..MAX_WATCHES + 5).map(|i| format!("brew \"pkg{i}\"\n")).collect();
         let out = import(ImportFormat::Brewfile, &many).unwrap();
         assert_eq!((out.drafts.len(), out.skipped.len()), (MAX_WATCHES, 1));

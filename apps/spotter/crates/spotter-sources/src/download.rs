@@ -1,17 +1,32 @@
-//! Downloading or copying a release into a folder: into `<name>.part`, resuming a part left by an interrupted run,
-//! hashing as it goes, verifying the publisher's SHA-256 (or a `.sha256` file next to the release) and only then
-//! renaming it into place. A file that fails verification is deleted, never left looking finished.
+//! Downloading or copying a release into a folder. A release at an http(s) address is fetched by `paddock-download`
+//! (rule 15): segmented Range downloads with per-host caps, 429 back-off, resume of a kept `<name>.part`, one SHA-256
+//! computed while writing and checked against the publisher's digest (or a `.sha256` file next to the release), the
+//! free-space check and Cancel in every phase, reported as phases of the shell's job. A release on a drive or share is
+//! copied here with the same `.part`, resume and checksum rules. A file that fails verification is deleted, never left
+//! looking finished.
 
-use crate::http::{read_bounded, transport, Http};
-use reqwest::header::{CONTENT_RANGE, RANGE};
-use reqwest::StatusCode;
+use crate::http::{read_bounded, Http};
+use paddock_download::{DownloadError, Downloader, Integrity, Request};
+use paddock_jobs::{JobContext, Phase as ShellPhase};
 use spotter_core::action::{file_name, resume_offset};
 use spotter_core::checksum::{find_in_checksum_file, Hasher, Sha256Digest};
 use spotter_core::job::{Job, Phase, Unit, CANCELLED};
 use spotter_core::limits::MAX_CHECKSUM_FILE;
 use spotter_core::release::Release;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+
+/// Everything a download needs besides the release: the app's one downloader (its host caps hold across downloads), the
+/// metadata client for the checksum file, and the shell job the network phases report to.
+pub struct Fetch<'a> {
+    /// The app's downloader.
+    pub downloader: &'a Arc<Downloader>,
+    /// Small requests (the `.sha256` file).
+    pub http: &'a Http,
+    /// The shell job.
+    pub ctx: &'a JobContext,
+}
 
 /// Read and write chunk for local files and shares.
 const IO_BUFFER: usize = 1 << 20;
@@ -37,15 +52,25 @@ fn is_http(location: &str) -> bool {
     l.starts_with("https://") || l.starts_with("http://")
 }
 
-/// Downloads (URL) or copies (path) `release` into `folder`, with nobody watching or cancelling.
-pub async fn download(http: &Http, release: &Release, folder: &Path, verify: bool) -> Result<Downloaded, String> {
-    download_job(http, release, folder, verify, &Job::none()).await
+/// The message of a download that ended without a file.
+fn describe(e: DownloadError, name: &str) -> String {
+    match e {
+        DownloadError::Cancelled(_) => CANCELLED.to_string(),
+        DownloadError::ChecksumMismatch { expected, actual } => {
+            format!("{name} does not match the publisher's checksum (expected {expected}, got {actual}); the file was deleted.")
+        }
+        DownloadError::TooLarge { .. } => format!("{name} is larger than {} GiB.", MAX_DOWNLOAD >> 30),
+        DownloadError::Network { .. } | DownloadError::Stalled { .. } | DownloadError::Throttled { .. } => {
+            format!("The download of {name} was interrupted ({e}); it resumes next time.")
+        }
+        other => other.to_string(),
+    }
 }
 
-/// [`download`] reporting its phases to `job` (checksum lookup, checking a part left by an earlier run, downloading
-/// or copying with bytes from the first one) and stopping when `job` is cancelled; the `.part` file stays so the
-/// next run resumes it. The checksum is computed while writing; nothing is read a second time.
-pub async fn download_job(http: &Http, release: &Release, folder: &Path, verify: bool, job: &Job) -> Result<Downloaded, String> {
+/// Downloads (URL) or copies (path) `release` into `folder`, reporting to the shell job in `fetch` (and to `job` for a
+/// copy) and stopping when either is cancelled; the `.part` file stays so the next run resumes it. The checksum is
+/// computed while writing; nothing is read a second time.
+pub async fn download_release(fetch: &Fetch<'_>, release: &Release, folder: &Path, verify: bool, job: &Job) -> Result<Downloaded, String> {
     let location = release.location.as_str();
     let remote = is_http(location);
     if !remote && !Path::new(location).is_absolute() {
@@ -58,22 +83,25 @@ pub async fn download_job(http: &Http, release: &Release, folder: &Path, verify:
         .map_err(|e| format!("The folder {} could not be created: {e}", folder.display()))?;
     let name = file_name(release);
     let target = folder.join(&name);
-    let part = folder.join(format!("{name}.part"));
     let expected = match release.sha256 {
         Some(d) => Some(d),
         None if verify => {
-            job.report(Phase::FetchingChecksum, Unit::Count, 0, None);
-            or_cancel(job, sidecar(http, location, &name)).await?
+            if remote {
+                fetch.ctx.phase(ShellPhase::discovering("checksum", "Fetching the checksum"));
+            } else {
+                job.report(Phase::FetchingChecksum, Unit::Count, 0, None);
+            }
+            or_cancel(job, sidecar(fetch.http, location, &name)).await?
         }
         None => None,
     };
     stopped(job)?;
+    if remote {
+        return fetch_remote(fetch, location, &target, &name, expected).await;
+    }
+    let part = folder.join(format!("{name}.part"));
     let mut hasher = Hasher::new();
-    let size = if remote {
-        fetch(http, location, &part, &mut hasher, MAX_DOWNLOAD, job).await?
-    } else {
-        copy(Path::new(location), &part, &mut hasher, job).await?
-    };
+    let size = copy(Path::new(location), &part, &mut hasher, job).await?;
     let digest = hasher.finish();
     let verified = match expected {
         Some(want) if want != digest => {
@@ -93,6 +121,34 @@ pub async fn download_job(http: &Http, release: &Release, folder: &Path, verify:
         path: target,
         size,
         verified,
+    })
+}
+
+/// The network half: one `paddock-download` request on a blocking thread (it supervises its transfer threads and notices
+/// a cancel of the shell job within a fraction of a second, in every phase).
+async fn fetch_remote(
+    fetch: &Fetch<'_>,
+    url: &str,
+    target: &Path,
+    name: &str,
+    expected: Option<Sha256Digest>,
+) -> Result<Downloaded, String> {
+    let integrity = match expected {
+        Some(d) => Integrity::Sha256(paddock_download::Sha256Digest::from_hex(&d.to_string()).map_err(|e| e.to_string())?),
+        None => Integrity::Unpinned,
+    };
+    let request = Request::new(url, target, integrity)
+        .map_err(|e| e.to_string())?
+        .max_bytes(MAX_DOWNLOAD);
+    let (downloader, ctx) = (fetch.downloader.clone(), fetch.ctx.clone());
+    let done = tokio::task::spawn_blocking(move || downloader.download(&ctx, &request))
+        .await
+        .map_err(|e| format!("The download stopped unexpectedly: {e}"))?
+        .map_err(|e| describe(e, name))?;
+    Ok(Downloaded {
+        path: done.path,
+        size: done.bytes,
+        verified: expected.is_some(),
     })
 }
 
@@ -189,73 +245,6 @@ async fn open_part(part: &Path, offset: u64) -> Result<tokio::fs::File, String> 
     Ok(f)
 }
 
-/// Downloads `url` into `part` (resuming it), refusing anything larger than `max` bytes, announced or streamed.
-/// The request goes out while a part from an earlier run is being checked, so resuming costs the longer of the two.
-async fn fetch(http: &Http, url: &str, part: &Path, hasher: &mut Hasher, max: u64, job: &Job) -> Result<u64, String> {
-    let have = part_len(part).await;
-    if have == 0 {
-        // Bytes from the first moment: the bar exists before the server has answered.
-        job.report(Phase::Downloading, Unit::Bytes, 0, None);
-    }
-    let send = async {
-        let mut req = http.client().get(url);
-        if have > 0 {
-            req = req.header(RANGE, format!("bytes={have}-"));
-        }
-        req.send().await.map_err(|e| transport(e, url).to_string())
-    };
-    let (hashed, sent) = tokio::join!(hash_existing(part, have, hasher, job), or_cancel(job, send));
-    let have = hashed?;
-    let mut response = sent??;
-    let mut offset = have;
-    match response.status() {
-        StatusCode::PARTIAL_CONTENT if response.headers().get(CONTENT_RANGE).is_some() => {}
-        s if s.is_success() => {
-            // The server ignored the range: start over.
-            *hasher = Hasher::new();
-            offset = 0;
-        }
-        StatusCode::RANGE_NOT_SATISFIABLE => {
-            // The part is no good for this file; start over without a range.
-            *hasher = Hasher::new();
-            offset = 0;
-            response = or_cancel(job, http.client().get(url).send())
-                .await?
-                .map_err(|e| transport(e, url).to_string())?;
-            if !response.status().is_success() {
-                return Err(format!("{url} answered HTTP {}.", response.status().as_u16()));
-            }
-        }
-        s => return Err(format!("{url} answered HTTP {}.", s.as_u16())),
-    }
-    let total = response.content_length().map(|n| n + offset);
-    if total.is_some_and(|t| t > max) {
-        return Err(format!("{url} is larger than {} GiB.", max >> 30));
-    }
-    let offset = resume_offset(offset, total);
-    let mut file = open_part(part, offset).await?;
-    let mut written = offset;
-    job.report_done(Phase::Downloading, Unit::Bytes, written, total);
-    while let Some(chunk) = or_cancel(job, response.chunk())
-        .await?
-        .map_err(|e| format!("The download of {url} was interrupted ({e}); it resumes next time."))?
-    {
-        written += chunk.len() as u64;
-        if written > max {
-            return Err(format!("{url} is larger than {} GiB.", max >> 30));
-        }
-        stopped(job)?;
-        hasher.update(&chunk);
-        file.write_all(&chunk)
-            .await
-            .map_err(|e| format!("{} could not be written: {e}", part.display()))?;
-        job.report(Phase::Downloading, Unit::Bytes, written, total);
-    }
-    file.flush().await.map_err(|e| e.to_string())?;
-    job.report_done(Phase::Downloading, Unit::Bytes, written, total.or(Some(written)));
-    Ok(written)
-}
-
 async fn copy(source: &Path, part: &Path, hasher: &mut Hasher, job: &Job) -> Result<u64, String> {
     let meta = tokio::fs::metadata(source)
         .await
@@ -300,48 +289,4 @@ async fn copy(source: &Path, part: &Path, hasher: &mut Hasher, job: &Job) -> Res
     file.flush().await.map_err(|e| e.to_string())?;
     job.report_done(Phase::Copying, Unit::Bytes, written, Some(total));
     Ok(written)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::{Read, Write};
-
-    /// Serves one chunked answer (no length announced) on a local port and returns its address.
-    fn chunked_server() -> String {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}/stream", l.local_addr().unwrap());
-        std::thread::spawn(move || {
-            if let Ok((mut s, _)) = l.accept() {
-                let mut buf = [0u8; 1024];
-                let _ = s.read(&mut buf);
-                let _ = s.write_all(
-                    b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n6\r\nabcdef\r\n6\r\nghijkl\r\n0\r\n\r\n",
-                );
-            }
-        });
-        url
-    }
-
-    #[tokio::test]
-    async fn a_stream_that_outgrows_the_limit_is_refused_while_reading() {
-        let dir = tempfile::tempdir().unwrap();
-        let part = dir.path().join("a.part");
-        let http = Http::new("test").unwrap();
-        let e = fetch(&http, &chunked_server(), &part, &mut Hasher::new(), 8, &Job::none())
-            .await
-            .unwrap_err();
-        assert!(e.contains("larger than 0 GiB"), "{e}");
-        let ok = fetch(
-            &http,
-            &chunked_server(),
-            &dir.path().join("b.part"),
-            &mut Hasher::new(),
-            64,
-            &Job::none(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(ok, 12);
-    }
 }

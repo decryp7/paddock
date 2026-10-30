@@ -11,7 +11,12 @@
         "minHeight": 520,
         "resizable": true,
         "transparent": true,
-        "windowEffects": { "effects": ["mica"] }
+        "windowEffects": {
+          "effects": [
+            "mica"
+          ]
+        },
+        "create": false
       }
     ]
   },

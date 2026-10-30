@@ -54,6 +54,7 @@ struct Shared {
     done: AtomicU64,
     last_emit_ms: AtomicU64,
     sink_panics: AtomicU64,
+    quiet_on_success: AtomicBool,
     inner: Mutex<Inner>,
 }
 
@@ -109,6 +110,7 @@ impl Reporter {
             done: AtomicU64::new(0),
             last_emit_ms: AtomicU64::new(NEVER),
             sink_panics: AtomicU64::new(0),
+            quiet_on_success: AtomicBool::new(false),
             inner: Mutex::new(Inner {
                 state: JobState::Queued,
                 seq: 0,
@@ -134,6 +136,12 @@ impl Reporter {
         self.0.id
     }
 
+    /// Marks the job as one whose success is not announced (see [`JobSnapshot::quiet_on_success`]); every later snapshot
+    /// carries it, the terminal one included.
+    pub fn set_quiet_on_success(&self) {
+        self.0.quiet_on_success.store(true, Ordering::Relaxed);
+    }
+
     /// The current snapshot (does not count as an emit).
     pub fn snapshot(&self) -> JobSnapshot {
         let g = lock(&self.0.inner);
@@ -156,6 +164,7 @@ impl Reporter {
             eta_ms: g.eta_ms,
             cancellable: g.cancellable,
             not_cancellable_reason: g.reason.clone(),
+            quiet_on_success: self.0.quiet_on_success.load(Ordering::Relaxed),
         }
     }
 

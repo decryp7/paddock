@@ -1,24 +1,20 @@
-//! The shell's side of long operations: a registry of running jobs (so the UI can cancel one by id) and the
-//! `spotter://job` events that carry their phase-labelled progress to the windows. The progress and cancel types are
-//! `spotter_core::job`; this module only names jobs, bounds them and forwards their reports.
+//! Spotter's long operations on the shell's job registry (`paddock-jobs`, ADR 0008): the engine keeps reporting through
+//! `spotter_core::job::Job` (pure, no app types); this module registers each operation as a shell job, forwards the
+//! engine's phase reports to it and lets the shell's Cancel (the Jobs list, `job_cancel`) stop the engine's work.
+//! The shell owns ids, events and the end state; there is no second job channel.
 
-use crate::dto::CommandError;
+use paddock_download::Downloader;
+use paddock_jobs::{CancelReason, JobContext, JobRegistry, JobState, Phase as ShellPhase};
 use serde::Serialize;
-use spotter_core::job::{Cancel, Job, Progress};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use spotter_core::job::{Cancel, Job, Phase, Progress, Unit};
+use spotter_core::release::Release;
+use spotter_sources::download::{Downloaded, Fetch};
+use spotter_sources::http::Http;
+use std::sync::Arc;
 
-/// The event the UI listens to for job progress.
-pub const JOB_EVENT: &str = "spotter://job";
-/// Longest job id accepted from the webview.
-const MAX_ID: usize = 64;
-/// Most jobs running at once; a webview asking for more is refused.
-const MAX_JOBS: usize = 32;
-
-/// What a job is, so the UI knows where to show it.
+/// What a job is, as the shell's `kind` slug (the UI picks icons and grouping from it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum JobKind {
+pub enum Kind {
     /// Downloading or copying a release.
     Download,
     /// Installing the browser for JavaScript pages.
@@ -31,217 +27,359 @@ pub enum JobKind {
     TestSource,
 }
 
-/// How a job stands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum JobState {
-    /// Working; `progress` says where.
-    Running,
-    /// Done.
-    Finished,
-    /// Stopped by the user.
-    Cancelled,
-    /// Ended with an error (the command's answer carries it).
-    Failed,
-}
+impl Kind {
+    /// Every kind (the UI's mock takes its list from here: tests generate `src/app/generated/job-kinds.ts`).
+    pub const ALL: [Kind; 5] = [Kind::Download, Kind::InstallRenderer, Kind::Check, Kind::CheckAll, Kind::TestSource];
 
-/// `JobEvent`: the payload on `spotter://job`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct JobEventDto {
-    /// The id the UI gave the command.
-    pub job_id: String,
-    /// What the job is.
-    pub kind: JobKind,
-    /// How it stands.
-    pub state: JobState,
-    /// The phase it is in (running jobs only).
-    pub progress: Option<Progress>,
-}
-
-/// Sends an event to the windows (the app's `emit`, or a recorder in tests).
-pub type Emit = Arc<dyn Fn(JobEventDto) + Send + Sync>;
-
-/// The running jobs, by id.
-#[derive(Default)]
-pub struct Jobs {
-    running: Mutex<HashMap<String, Cancel>>,
-}
-
-fn id_ok(id: &str) -> bool {
-    !id.is_empty() && id.len() <= MAX_ID && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-}
-
-impl Jobs {
-    fn table(&self) -> std::sync::MutexGuard<'_, HashMap<String, Cancel>> {
-        self.running.lock().unwrap_or_else(PoisonError::into_inner)
+    /// Whether the success of this kind of job is left out of the notifications: the wizard's source test (it runs again with
+    /// every edit of the form) and the check of one watch (the dashboard shows what it found).
+    pub fn quiet_on_success(self) -> bool {
+        matches!(self, Kind::TestSource | Kind::Check)
     }
 
-    /// Registers a job under the webview's `id` and returns the [`Job`] to hand to the operation plus the guard that
-    /// ends it. Invalid, duplicate and excess ids are refused (the webview is not trusted).
-    pub fn begin(self: &Arc<Self>, emit: Emit, id: &str, kind: JobKind) -> Result<(Job, JobGuard), CommandError> {
-        if !id_ok(id) {
-            return Err(CommandError::bad("The job id is not valid."));
-        }
-        let cancel = Cancel::new();
-        {
-            let mut table = self.table();
-            if table.len() >= MAX_JOBS || table.contains_key(id) {
-                return Err(CommandError::bad("Too many operations are running, or that one already is."));
-            }
-            table.insert(id.to_string(), cancel.clone());
-        }
-        let (job_id, sink_emit) = (id.to_string(), emit.clone());
-        let job = Job::new(cancel, move |p| {
-            sink_emit(JobEventDto {
-                job_id: job_id.clone(),
-                kind,
-                state: JobState::Running,
-                progress: Some(p.clone()),
-            });
-        });
-        let guard = JobGuard {
-            jobs: self.clone(),
-            emit,
-            id: id.to_string(),
-            kind,
-            ended: false,
-        };
-        Ok((job, guard))
-    }
-
-    /// Asks a running job to stop. Unknown ids are fine (it may just have ended).
-    pub fn cancel(&self, id: &str) {
-        if let Some(c) = self.table().get(id) {
-            c.cancel();
+    /// The shell's slug.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Kind::Download => "sp.download",
+            Kind::InstallRenderer => "sp.install-renderer",
+            Kind::Check => "sp.check",
+            Kind::CheckAll => "sp.check-all",
+            Kind::TestSource => "sp.test-source",
         }
     }
-
-    /// How many jobs run now.
-    pub fn count(&self) -> usize {
-        self.table().len()
-    }
 }
 
-/// Ends a job: unregisters it and tells the windows how it ended. Dropping it unfinished (a panic) counts as failed.
-pub struct JobGuard {
-    jobs: Arc<Jobs>,
-    emit: Emit,
-    id: String,
-    kind: JobKind,
+/// A registered operation: what to run it with, and how to end it.
+pub struct Operation {
+    ctx: JobContext,
+    /// The handle the engine reports to and polls.
+    pub job: Job,
+    /// Set once the operation was ended on purpose; a drop without it ends the job (see [`Drop`]).
     ended: bool,
 }
 
-impl JobGuard {
-    /// Ends the job as `state`.
-    pub fn end(mut self, state: JobState) {
-        self.close(state);
-    }
-
-    /// Ends the job from the operation's outcome: finished, cancelled (when `job` was cancelled) or failed.
-    pub fn end_with(self, job: &Job, ok: bool) {
-        let state = if ok {
-            JobState::Finished
-        } else if job.is_cancelled() {
-            JobState::Cancelled
-        } else {
-            JobState::Failed
-        };
-        self.end(state);
-    }
-
-    fn close(&mut self, state: JobState) {
-        if std::mem::replace(&mut self.ended, true) {
-            return;
-        }
-        self.jobs.table().remove(&self.id);
-        (self.emit)(JobEventDto {
-            job_id: self.id.clone(),
-            kind: self.kind,
-            state,
-            progress: None,
-        });
+/// The stable slug of a phase (tests and translations).
+fn slug(phase: Phase) -> &'static str {
+    match phase {
+        Phase::FetchingChecksum => "checksum",
+        Phase::CheckingExisting => "existing",
+        Phase::Downloading => "download",
+        Phase::Copying => "copy",
+        Phase::Unpacking => "unpack",
+        Phase::SelfTest => "test",
+        Phase::Finding => "find",
+        Phase::Settling => "settle",
+        Phase::Checking => "check",
     }
 }
 
-impl Drop for JobGuard {
+/// The shell's phase for an engine report.
+pub fn shell_phase(p: &Progress) -> ShellPhase {
+    match (p.unit, p.total) {
+        (Unit::Bytes, total) => ShellPhase::bytes(slug(p.phase), p.label, total),
+        (Unit::Count, Some(total)) => ShellPhase::items(slug(p.phase), p.label, total),
+        (Unit::Count, None) => ShellPhase::discovering(slug(p.phase), p.label),
+    }
+}
+
+/// Registers an operation (queued, then running) and builds the engine's `Job` for it: its reports become the shell
+/// job's phases and counts, and the shell's cancel token stops it.
+pub fn begin(registry: &JobRegistry, kind: Kind, title: &str, subject: Option<&str>) -> Operation {
+    let mut ctx = registry.register(kind.slug(), title, subject);
+    if kind.quiet_on_success() {
+        // The shell announces a failure, never the success (rule: no news is good news for what runs with every edit).
+        ctx = ctx.quiet_on_success();
+    }
+    ctx.reporter().start();
+    let source = ctx.cancel_token().clone();
+    let sink_ctx = ctx.clone();
+    let state = std::sync::Mutex::new((None::<Phase>, None::<u64>));
+    let job = Job::new(Cancel::linked(move || source.is_cancelled()), move |p| {
+        let mut seen = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if seen.0 != Some(p.phase) {
+            sink_ctx.phase(shell_phase(p));
+            *seen = (Some(p.phase), p.total);
+        } else if p.total != seen.1 {
+            if let Some(total) = p.total {
+                sink_ctx.set_total(total);
+            }
+            seen.1 = p.total;
+        }
+        sink_ctx.set(p.done);
+    });
+    Operation { ctx, job, ended: false }
+}
+
+impl Operation {
+    /// The shell job the network phases of `paddock-download` report to.
+    pub fn ctx(&self) -> &JobContext {
+        &self.ctx
+    }
+
+    /// The shell's id of the job.
+    pub fn id(&self) -> paddock_jobs::JobId {
+        self.ctx.id()
+    }
+
+    /// Ends the operation from its outcome: done, cancelled (the user asked) or failed with `message`.
+    pub fn end(self, ok: bool, message: &str) {
+        let cancelled = self.job.is_cancelled();
+        self.end_as(ok, cancelled, message);
+    }
+
+    /// As [`end`](Self::end), with the caller saying whether the user cancelled (a download learns it from the shell's
+    /// token inside `paddock-download`).
+    pub fn end_as(mut self, ok: bool, cancelled: bool, message: &str) {
+        self.ended = true;
+        self.ctx.reporter().flush();
+        let state = if ok {
+            JobState::Done
+        } else if cancelled {
+            JobState::Cancelled {
+                reason: CancelReason::User,
+            }
+        } else {
+            JobState::Failed {
+                message: message.to_string(),
+            }
+        };
+        self.ctx.reporter().finish(state);
+    }
+}
+
+/// An operation that is dropped without being ended (its task was aborted, or it panicked) must not stay "running" in the Jobs
+/// list for ever: it ends as cancelled when the user asked for that, else as failed.
+impl Drop for Operation {
     fn drop(&mut self) {
-        self.close(JobState::Failed);
+        if self.ended {
+            return;
+        }
+        let state = if self.job.is_cancelled() {
+            JobState::Cancelled {
+                reason: CancelReason::User,
+            }
+        } else {
+            JobState::Failed {
+                message: if std::thread::panicking() {
+                    "Spotter hit an internal error.".to_string()
+                } else {
+                    "The operation stopped before it finished.".to_string()
+                },
+            }
+        };
+        self.ctx.reporter().finish(state);
+    }
+}
+
+/// Checks every watch in the background as a shell job (progress "n of m" and Cancel in the Jobs list). The tray menu, the
+/// Sources repair and the check command share it.
+pub fn spawn_check_all(registry: &JobRegistry, engine: spotter_engine::Engine) {
+    let op = begin(registry, Kind::CheckAll, "Checking every watch", None);
+    tauri::async_runtime::spawn(async move {
+        let result = engine.check_now_job(None, &op.job).await;
+        op.end(result.is_ok(), &result.as_ref().err().map(ToString::to_string).unwrap_or_default());
+    });
+}
+
+/// Downloads as shell jobs: the job registry, the app's one downloader (its per-host caps hold across every download, the
+/// user's and the automatic ones) and the metadata client. Cheap to clone.
+#[derive(Clone)]
+pub struct Downloads {
+    registry: Arc<JobRegistry>,
+    downloader: Arc<Downloader>,
+    http: Http,
+}
+
+impl Downloads {
+    /// The download service over `registry` and `downloader`.
+    pub fn new(registry: Arc<JobRegistry>, downloader: Arc<Downloader>, http: Http) -> Downloads {
+        Downloads {
+            registry,
+            downloader,
+            http,
+        }
+    }
+
+    /// Downloads (or copies) `release` into `folder` as a job titled `title`, and ends the job from the outcome.
+    pub async fn release(
+        &self,
+        title: &str,
+        subject: Option<&str>,
+        release: &Release,
+        folder: &std::path::Path,
+        verify: bool,
+    ) -> Result<Downloaded, String> {
+        let op = begin(&self.registry, Kind::Download, title, subject);
+        let fetch = Fetch {
+            downloader: &self.downloader,
+            http: &self.http,
+            ctx: op.ctx(),
+        };
+        let result = spotter_sources::download::download_release(&fetch, release, folder, verify, &op.job).await;
+        let cancelled = op.job.is_cancelled() || result.as_ref().err().is_some_and(|e| e == spotter_core::job::CANCELLED);
+        op.end_as(result.is_ok(), cancelled, result.as_ref().err().map_or("", |e| e.as_str()));
+        result
+    }
+}
+
+/// The shell's job registry of the app.
+pub fn registry<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<Arc<JobRegistry>> {
+    use tauri::Manager;
+    app.try_state::<paddock_jobs::tauri::Jobs>().map(|j| j.registry().clone())
+}
+
+/// Asks every job that still runs to stop (Quit: the engine's work ends at its next cancel check).
+pub fn cancel_all(registry: &JobRegistry) {
+    for snapshot in registry.snapshots() {
+        if !snapshot.state.is_terminal() {
+            registry.cancel(snapshot.id);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use spotter_core::job::{Phase, Unit};
+    use paddock_jobs::{EventSink, JobSnapshot};
+    use std::sync::Mutex;
 
-    fn recorder() -> (Emit, Arc<Mutex<Vec<JobEventDto>>>) {
-        let seen: Arc<Mutex<Vec<JobEventDto>>> = Arc::default();
-        let sink = seen.clone();
-        (Arc::new(move |e| sink.lock().unwrap().push(e)), seen)
-    }
-
-    #[test]
-    fn progress_becomes_running_events_and_the_end_is_announced_once() {
-        let jobs = Arc::new(Jobs::default());
-        let (emit, seen) = recorder();
-        let (job, guard) = jobs.begin(emit, "dl-1", JobKind::Download).unwrap();
-        assert_eq!(jobs.count(), 1);
-        job.report(Phase::Downloading, Unit::Bytes, 5, Some(10));
-        guard.end_with(&job, true);
-        assert_eq!(jobs.count(), 0);
-        let seen = seen.lock().unwrap();
-        assert_eq!(seen.len(), 2);
-        assert_eq!((seen[0].state, seen[0].kind), (JobState::Running, JobKind::Download));
-        assert_eq!(seen[0].progress.as_ref().unwrap().done, 5);
-        assert_eq!((seen[1].state, seen[1].progress.is_none()), (JobState::Finished, true));
-        let json = serde_json::to_value(&seen[0]).unwrap();
-        assert_eq!(json["jobId"], "dl-1");
-        assert_eq!(json["progress"]["label"], "Downloading");
-    }
-
-    #[test]
-    fn cancel_reaches_the_running_job_and_ends_it_as_cancelled() {
-        let jobs = Arc::new(Jobs::default());
-        let (emit, seen) = recorder();
-        let (job, guard) = jobs.begin(emit, "c_1", JobKind::CheckAll).unwrap();
-        jobs.cancel("nobody");
-        assert!(!job.is_cancelled());
-        jobs.cancel("c_1");
-        assert!(job.is_cancelled());
-        guard.end_with(&job, false);
-        assert_eq!(seen.lock().unwrap().last().unwrap().state, JobState::Cancelled);
-    }
-
-    #[test]
-    fn a_failure_and_a_dropped_guard_are_announced_as_failed() {
-        let jobs = Arc::new(Jobs::default());
-        let (emit, seen) = recorder();
-        let (job, guard) = jobs.begin(emit.clone(), "f1", JobKind::Check).unwrap();
-        guard.end_with(&job, false);
-        assert_eq!(seen.lock().unwrap().last().unwrap().state, JobState::Failed);
-        let (_job, guard) = jobs.begin(emit, "f2", JobKind::Check).unwrap();
-        drop(guard);
-        assert_eq!(seen.lock().unwrap().last().unwrap().state, JobState::Failed);
-        assert_eq!(jobs.count(), 0, "a dropped guard does not leak the job");
-    }
-
-    #[test]
-    fn ids_and_numbers_are_bounded() {
-        let jobs = Arc::new(Jobs::default());
-        let (emit, _) = recorder();
-        for bad in ["", "has space", "../x", &"a".repeat(MAX_ID + 1), "nul\0"] {
-            assert!(jobs.begin(emit.clone(), bad, JobKind::Download).is_err(), "{bad:?}");
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<JobSnapshot>>);
+    impl EventSink for Recorder {
+        fn emit(&self, s: &JobSnapshot) {
+            self.0.lock().unwrap().push(s.clone());
         }
-        let _kept = jobs.begin(emit.clone(), "same", JobKind::Download).unwrap();
+    }
+
+    fn registry_with_recorder() -> (JobRegistry, Arc<Recorder>) {
+        let rec = Arc::new(Recorder::default());
+        (
+            JobRegistry::with_clock(rec.clone(), Arc::new(paddock_jobs::FakeClock::new()), 0),
+            rec,
+        )
+    }
+
+    /// `Kind::ALL` lists every kind: the match below stops compiling when a variant is added, and then fails here until it is listed.
+    #[test]
+    fn all_lists_every_kind() {
+        fn index(k: Kind) -> usize {
+            match k {
+                Kind::Download => 0,
+                Kind::InstallRenderer => 1,
+                Kind::Check => 2,
+                Kind::CheckAll => 3,
+                Kind::TestSource => 4,
+            }
+        }
+        let mut seen: Vec<usize> = Kind::ALL.iter().map(|k| index(*k)).collect();
+        seen.sort_unstable();
+        assert_eq!(seen, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn only_the_source_test_and_the_single_check_are_quiet_on_success() {
+        let (registry, rec) = registry_with_recorder();
+        for kind in [Kind::TestSource, Kind::Check, Kind::CheckAll, Kind::Download, Kind::InstallRenderer] {
+            begin(&registry, kind, "t", None).end(true, "");
+            let last = rec.0.lock().unwrap().last().cloned().unwrap();
+            assert_eq!(last.quiet_on_success, matches!(kind, Kind::TestSource | Kind::Check), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn a_dropped_operation_does_not_stay_running() {
+        let (registry, rec) = registry_with_recorder();
+        drop(begin(&registry, Kind::Check, "Checking a", None));
+        let last = rec.0.lock().unwrap().last().cloned().unwrap();
+        assert!(matches!(last.state, JobState::Failed { .. }), "{:?}", last.state);
+
+        let cancelled = begin(&registry, Kind::Check, "Checking b", None);
+        registry.cancel(cancelled.id());
+        drop(cancelled);
+        let last = rec.0.lock().unwrap().last().cloned().unwrap();
+        assert!(matches!(last.state, JobState::Cancelled { .. }), "{:?}", last.state);
+    }
+
+    #[test]
+    fn a_panicking_operation_ends_as_failed() {
+        let (registry, rec) = registry_with_recorder();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _op = begin(&registry, Kind::Check, "Checking c", None);
+            panic!("boom");
+        }));
+        assert!(result.is_err());
+        let last = rec.0.lock().unwrap().last().cloned().unwrap();
         assert!(
-            jobs.begin(emit.clone(), "same", JobKind::Download).is_err(),
-            "no two jobs with one id"
+            matches!(&last.state, JobState::Failed { message } if message.contains("internal")),
+            "{:?}",
+            last.state
         );
-        let mut guards = Vec::new();
-        for i in 0..MAX_JOBS - 1 {
-            guards.push(jobs.begin(emit.clone(), &format!("j{i}"), JobKind::Check).unwrap());
+    }
+
+    #[test]
+    fn an_ended_operation_is_not_ended_twice() {
+        let (registry, rec) = registry_with_recorder();
+        begin(&registry, Kind::Check, "Checking d", None).end(true, "");
+        let n = rec.0.lock().unwrap().len();
+        let last = rec.0.lock().unwrap().last().cloned().unwrap();
+        assert!(matches!(last.state, JobState::Done));
+        assert!(n >= 2);
+    }
+
+    #[test]
+    fn the_engines_phases_become_the_shells_phases_on_their_own_scales() {
+        let (registry, rec) = registry_with_recorder();
+        let op = begin(&registry, Kind::Download, "Downloading", Some("Lumen 2.4"));
+        op.job.report(Phase::Finding, Unit::Count, 3, None);
+        op.job.report(Phase::Downloading, Unit::Bytes, 5, Some(10));
+        let last = registry.snapshots().pop().unwrap();
+        match last.state {
+            JobState::Running { phase: Some(p) } => {
+                assert_eq!((p.phase.id.as_str(), p.done, p.phase.total), ("download", 5, Some(10)));
+            }
+            other => panic!("{other:?}"),
         }
-        assert!(jobs.begin(emit, "one-too-many", JobKind::Check).is_err());
+        op.end(true, "");
+        assert!(registry.snapshots().pop().unwrap().state == JobState::Done);
+        assert!(
+            rec.0.lock().unwrap().len() >= 3,
+            "queued, running, phases and the end were announced"
+        );
+    }
+
+    #[test]
+    fn the_shells_cancel_stops_the_engines_job_and_ends_it_cancelled() {
+        let (registry, _) = registry_with_recorder();
+        let op = begin(&registry, Kind::CheckAll, "Checking every watch", None);
+        let id = registry.snapshots()[0].id;
+        assert!(!op.job.is_cancelled());
+        assert!(registry.cancel(id));
+        assert!(op.job.is_cancelled(), "the engine sees the shell's cancel");
+        assert!(op.job.muted().is_cancelled(), "so does every part of it");
+        op.end(false, "Cancelled.");
+        assert!(matches!(registry.snapshots()[0].state, JobState::Cancelled { .. }));
+    }
+
+    #[test]
+    fn a_failure_carries_its_message_and_quit_cancels_whatever_runs() {
+        let (registry, _) = registry_with_recorder();
+        begin(&registry, Kind::Check, "a", None).end(false, "The share is offline.");
+        assert!(matches!(&registry.snapshots()[0].state, JobState::Failed { message } if message == "The share is offline."));
+        let running = begin(&registry, Kind::Check, "b", None);
+        cancel_all(&registry);
+        assert!(running.job.is_cancelled());
+    }
+
+    #[test]
+    fn the_total_arriving_late_is_passed_on() {
+        let (registry, _) = registry_with_recorder();
+        let op = begin(&registry, Kind::Download, "d", None);
+        let job = op.job.clone().with_interval(std::time::Duration::ZERO);
+        job.report(Phase::Downloading, Unit::Bytes, 1, None);
+        job.report(Phase::Downloading, Unit::Bytes, 2, Some(100));
+        match registry.snapshots()[0].state.clone() {
+            JobState::Running { phase: Some(p) } => assert_eq!(p.phase.total, Some(100)),
+            other => panic!("{other:?}"),
+        }
     }
 }

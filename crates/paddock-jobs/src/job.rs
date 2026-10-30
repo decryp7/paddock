@@ -25,6 +25,13 @@ impl JobContext {
         &self.reporter
     }
 
+    /// The job's success is not announced to the user (a failure still is); see [`JobSnapshot::quiet_on_success`](crate::JobSnapshot).
+    #[must_use]
+    pub fn quiet_on_success(self) -> Self {
+        self.reporter.set_quiet_on_success();
+        self
+    }
+
     /// The token to hand to helpers ([`par_walk`](crate::par_walk), [`copy_hashed`](crate::copy_hashed), ...).
     pub fn cancel_token(&self) -> &CancelToken {
         &self.cancel

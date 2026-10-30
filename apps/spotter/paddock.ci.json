@@ -31,6 +31,7 @@
   ],
   "e2e": [
     "npm run build -w ui",
+    "npm run build:e2e -w ui",
     "cd apps/spotter/app",
     "PW_PORT=$((4369 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=$E2E_SHARD"
   ],
@@ -38,7 +39,18 @@
   "e2eArtifacts": "apps/spotter/app/.angular/playwright-results",
   "e2eWebkit": [
     "npm run build -w ui",
+    "npm run build:e2e -w ui",
     "cd apps/spotter/app",
     "PW_PORT=4372 npx playwright test --project=webkit --workers=1"
-  ]
+  ],
+  "notices": {
+    "name": "Spotter",
+    "manifests": [
+      "app/src-tauri/Cargo.toml"
+    ],
+    "npm": "app",
+    "out": [
+      "app/src-tauri/resources"
+    ]
+  }
 }

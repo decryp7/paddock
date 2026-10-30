@@ -109,6 +109,12 @@ describe('JobsStore', () => {
     expect(finishedNotice(snap(5, 1, 'queued'))).toBeNull();
   });
 
+  it('does not announce the success of a quiet job, but its failure', () => {
+    expect(finishedNotice({ ...snap(6, 2, 'done'), quietOnSuccess: true })).toBeNull();
+    expect(finishedNotice({ ...snap(6, 2, 'failed', { message: 'The share is offline' }), quietOnSuccess: true })).toMatchObject({ level: 'error' });
+    expect(finishedNotice(snap(6, 2, 'done'))).toMatchObject({ level: 'success' });
+  });
+
   it('shows "Still working" for a running job without events, and only while it is quiet', async () => {
     const { backend, clock } = jobsBed({ stillWorkingAfterMs: 3_000 });
     const store = TestBed.inject(JobsStore);

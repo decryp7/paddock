@@ -1,10 +1,11 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideShellTesting, shellPorts } from '@decryp7/paddock-ui/shell/testing';
 import { provideIcons } from '../icons';
 import type { CommandError, WatchSummary } from '../../core/api.types';
 import { idle, type Loadable } from '../../state/loadable';
-import { byText, flush, settle, text } from '../../../testing/test-helpers';
-import { Confirm } from './confirm-dialog';
+import { byText, settle, text } from '../../../testing/test-helpers';
+import { Confirm, deleteWatchPrompt } from './confirm';
 import { KindIcon } from './kind-icon';
 import { Panel } from './panel';
 import { WatchStatus } from './watch-status';
@@ -45,6 +46,16 @@ describe('Panel', () => {
     expect(f.componentInstance.retries).toBe(1);
   });
 
+  it('offers Retry as a plain button: several failed panels on one page never show several primary actions', () => {
+    const f = make();
+    f.componentInstance.state.set({ value: null, loading: false, error: err });
+    f.detectChanges();
+    const retry = byText(f.nativeElement, 'button', /retry/i) as HTMLButtonElement;
+    expect(retry.classList.contains('btn')).toBe(true);
+    expect(retry.classList.contains('primary')).toBe(false);
+    expect(f.nativeElement.querySelector('[role=alert]')).not.toBeNull();
+  });
+
   it('shows the content, and keeps it with an inline notice when a refresh fails', () => {
     const f = make();
     f.componentInstance.state.set({ value: 'ok', loading: false, error: null });
@@ -83,27 +94,21 @@ describe('KindIcon and WatchStatus', () => {
 });
 
 describe('Confirm', () => {
-  afterEach(() => document.querySelectorAll('.cdk-overlay-container').forEach((e) => (e.innerHTML = '')));
+  const input = deleteWatchPrompt('Acme');
+  beforeEach(() => TestBed.configureTestingModule({ providers: [...provideShellTesting()] }));
 
-  const data = { title: 'Delete it?', message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true };
-
-  it('resolves true on the confirm button and shows the texts', async () => {
-    const answer = TestBed.inject(Confirm).ask(data);
-    await flush(10);
-    const dialog = document.querySelector('sp-confirm-dialog')!;
-    expect(dialog.getAttribute('aria-label') ?? dialog.querySelector('[role=alertdialog]')?.getAttribute('aria-label')).toBe('Delete it?');
-    expect(text(dialog)).toContain('This cannot be undone.');
-    expect(dialog.querySelector('.danger-fill')).not.toBeNull();
-    (byText(dialog, 'button', 'Delete') as HTMLButtonElement).click();
-    expect(await answer).toBe(true);
+  it('asks the shell for the shared pd.confirm decision and resolves true when it is confirmed', async () => {
+    shellPorts().dialogAnswers.set('pd.confirm', true);
+    expect(await TestBed.inject(Confirm).ask(input)).toBe(true);
+    expect(shellPorts().dialogs).toEqual([
+      {
+        id: 'pd.confirm',
+        inputs: { heading: 'Delete "Acme"?', message: 'Spotter stops watching it and forgets its history. Downloaded files stay where they are.', confirm: { label: 'Delete watch', destructive: true } },
+      },
+    ]);
   });
 
-  it('resolves false on Cancel and uses the primary style for non-dangerous questions', async () => {
-    const answer = TestBed.inject(Confirm).ask({ ...data, danger: false });
-    await flush(10);
-    const dialog = document.querySelector('sp-confirm-dialog')!;
-    expect(dialog.querySelector('.primary')).not.toBeNull();
-    (byText(dialog, 'button', 'Cancel') as HTMLButtonElement).click();
-    expect(await answer).toBe(false);
+  it('resolves false when dismissed', async () => {
+    expect(await TestBed.inject(Confirm).ask(input)).toBe(false);
   });
 });
