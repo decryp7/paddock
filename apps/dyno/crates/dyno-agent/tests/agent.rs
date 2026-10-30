@@ -571,9 +571,15 @@ fn the_counters_browser_lists_searches_reads_and_charts_this_machines_counters()
     let h = Harness::start();
     let peer = h.client();
     let ask_slow = |r| ask_within(&peer, r, Duration::from_secs(30));
-    let Reply::CounterObjects(objects) = ask_slow(Request::CounterObjects).unwrap() else {
-        panic!("objects")
-    };
+    // Listing every counter can take longer than the agent waits on a busy machine (Windows CI run 7166); it then says to
+    // try again, and the retry joins the listing still running. Asked again as the message says (a bounded hang guard).
+    let objects = (0..5)
+        .find_map(|_| match ask_slow(Request::CounterObjects) {
+            Ok(Reply::CounterObjects(o)) => Some(o),
+            Err(e) if e.contains("took too long") => None,
+            other => panic!("objects: {other:?}"),
+        })
+        .expect("the counters were listed");
     assert!(objects.objects.iter().any(|o| o.name == "Memory" && o.counters > 0));
     let Reply::CounterObject(memory) = ask_slow(Request::CounterObject { name: "Memory".into() }).unwrap() else {
         panic!("object")
