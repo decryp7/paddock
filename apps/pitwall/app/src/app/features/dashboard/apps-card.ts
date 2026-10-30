@@ -11,16 +11,29 @@ import { MatButton } from '@angular/material/button';
 import { MatIcon } from '@angular/material/icon';
 import { SuEmptyState, SuSparkline } from '@decryp7/paddock-ui';
 
-/** The limits that are set, in short (`600/min · 5M tok/day`), or `No limits`. */
-export function limitsText(l: AppLimits): string {
+/** Each limit that is set, in words: `600 requests/min`, `5.0M tokens/day`, `2 requests at once`, `up to 40% of RAM`. */
+export function limitParts(l: AppLimits): string[] {
   const parts: string[] = [];
-  if (l.requestsPerMin !== null) parts.push(`${l.requestsPerMin}/min`);
-  if (l.requestsPerDay !== null) parts.push(`${compact(l.requestsPerDay)} req/day`);
-  if (l.tokensPerDay !== null) parts.push(`${compact(l.tokensPerDay)}/day`);
-  if (l.tokensPerMonth !== null) parts.push(`${compact(l.tokensPerMonth)}/mo`);
-  if (l.maxMemoryPercent !== null) parts.push(`≤${l.maxMemoryPercent}% RAM`);
-  if (l.maxConcurrent !== null) parts.push(`×${l.maxConcurrent}`);
+  if (l.requestsPerMin !== null) parts.push(`${int(l.requestsPerMin)} requests/min`);
+  if (l.requestsPerDay !== null) parts.push(`${compact(l.requestsPerDay)} requests/day`);
+  if (l.tokensPerDay !== null) parts.push(`${compact(l.tokensPerDay)} tokens/day`);
+  if (l.tokensPerMonth !== null) parts.push(`${compact(l.tokensPerMonth)} tokens/month`);
+  if (l.maxConcurrent !== null) parts.push(`${l.maxConcurrent} ${l.maxConcurrent === 1 ? 'request' : 'requests'} at once`);
+  if (l.maxMemoryPercent !== null) parts.push(`up to ${l.maxMemoryPercent}% of RAM`);
+  return parts;
+}
+
+/** The limits that are set, in words and in full (`600 requests/min · 2 requests at once`), or `None`. */
+export function limitsText(l: AppLimits): string {
+  const parts = limitParts(l);
   return parts.length ? parts.join(' · ') : 'None';
+}
+
+/** The limits for a narrow cell: the one limit (`4 at once`, `60/min`), or how many there are (the tooltip has them all). */
+export function limitsShort(l: AppLimits): string {
+  const parts = limitParts(l);
+  if (parts.length !== 1) return parts.length ? `${parts.length} limits` : 'None';
+  return l.maxConcurrent !== null ? `${l.maxConcurrent} at once` : parts[0]!;
 }
 
 /** Connected apps with today's requests, tokens, busy time, errors and limits, and a trend over the chart range. */
@@ -64,7 +77,7 @@ export function limitsText(l: AppLimits): string {
         </ng-container>
         <ng-container matColumnDef="limits">
           <th mat-header-cell *matHeaderCellDef scope="col">Limits</th>
-          <td mat-cell *matCellDef="let a" class="limits" [matTooltip]="limits(a.permissions.limits)">{{ limits(a.permissions.limits) }}</td>
+          <td mat-cell *matCellDef="let a" class="limits" [matTooltip]="limits(a.permissions.limits)">{{ limitsShort(a.permissions.limits) }}</td>
         </ng-container>
         <ng-container matColumnDef="trend">
           <th mat-header-cell *matHeaderCellDef scope="col"><span class="sr-only">Trend</span></th>
@@ -73,6 +86,9 @@ export function limitsText(l: AppLimits): string {
         <tr mat-header-row *matHeaderRowDef="columns(); sticky: true"></tr>
         <tr mat-row *matRowDef="let a; columns: columns()"></tr>
       </table>
+      @if (sharedLimits(); as shared) {
+        <p class="shared">Limits for every app: {{ shared }}</p>
+      }
     }
   `,
   styles: `
@@ -81,14 +97,29 @@ export function limitsText(l: AppLimits): string {
       container-type: inline-size;
       margin: 0 calc(-1 * var(--pd-space-4)) calc(-1 * var(--pd-space-2));
     }
+    /* Each number column as wide as its header and its widest figure, so the app's name has the rest (UI review 2 rule 8). */
     .mat-column-requests,
-    .mat-column-tokens,
-    .mat-column-busy,
+    .mat-column-busy {
+      width: 84px;
+    }
+    .mat-column-tokens {
+      width: 72px;
+    }
     .mat-column-errors {
-      width: 88px;
+      width: 68px;
+    }
+    .mat-column-limits {
+      width: 96px;
+    }
+    /* The trend is a 56 px sparkline with the cell's padding. */
+    .mat-column-trend {
+      width: 76px;
+    }
+    .trend pd-sparkline {
+      width: 56px;
     }
     /* A narrow card keeps the app's name and its numbers: the trend goes first, then the limits (both are on Apps & keys). */
-    @container (max-width: 640px) {
+    @container (max-width: 680px) {
       .mat-column-trend {
         display: none;
       }
@@ -97,15 +128,6 @@ export function limitsText(l: AppLimits): string {
       .mat-column-limits {
         display: none;
       }
-    }
-    .mat-column-limits {
-      width: 96px;
-    }
-    .mat-column-trend {
-      width: 88px;
-    }
-    .trend pd-sparkline {
-      width: 64px;
     }
     .mat-mdc-header-cell:last-child,
     .mat-mdc-cell:last-child {
@@ -153,6 +175,11 @@ export function limitsText(l: AppLimits): string {
       color: var(--pd-danger);
       font-weight: var(--pd-weight-medium);
     }
+    .shared {
+      margin: var(--pd-space-2) var(--pd-space-4) 0;
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
+    }
     .limits {
       color: var(--pd-text-muted);
       font-size: var(--pd-text-label);
@@ -183,6 +210,14 @@ export class AppsCard {
     ];
   });
   protected readonly limits = limitsText;
+  /** The limits every app shares, said once under the table when their column is hidden as constant (UI review 2 rule 7). */
+  protected readonly sharedLimits = computed(() => {
+    const apps = this.live.apps();
+    if (!apps.length || this.columns().includes('limits')) return '';
+    const text = limitsText(apps[0]!.permissions.limits);
+    return text === 'None' ? 'none' : text;
+  });
+  protected readonly limitsShort = limitsShort;
   protected readonly apps = computed(() => [...this.live.apps()].sort((a, b) => b.today.requests - a.today.requests));
   private readonly byKey = computed(() => new Map(this.series().map((s) => [s.key, s.values])));
 

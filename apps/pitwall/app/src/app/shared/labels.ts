@@ -130,6 +130,9 @@ export function healthLook(h: ProcessHealth): Look {
   return map[h];
 }
 
+/** A self-test result in a column headed "Self-test": the word alone (`Passed`), the header says what passed. */
+export const SELF_TEST_WORD: Record<SelfTest, string> = { passed: 'Passed', failed: 'Failed', notRun: 'Not tested' };
+
 export function selfTestLook(s: SelfTest): Look {
   const map: Record<SelfTest, Look> = {
     passed: { label: 'Self-test passed', tone: 'ok' },
@@ -262,3 +265,8 @@ export const UPDATE_KIND_LABEL: Record<UpdateKind, string> = {
   betterQuant: 'better quantisation',
   imatrix: 'imatrix build',
 };
+
+/** A tag or key shown as a label in sentence case: `chat` → `Chat`, `code` → `Code` (UI review 2 rule 11). */
+export function sentenceCase(text: string): string {
+  return text ? text[0]!.toUpperCase() + text.slice(1) : text;
+}

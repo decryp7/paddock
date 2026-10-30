@@ -1,7 +1,7 @@
 import type { HistoryPoint, PitwallEvent } from '../../core/api.types';
 import { demoHistory, demoUsageSeries } from '../../core/mock-data';
 import { THEME_TOKENS } from '../theme-tokens';
-import { MAX_BARS, bucketKeyed, eventMark, foldKeyed, latencyChart, memoryChart, stackedRequestsChart, throughputChart, timeLabel, usageChart } from './chart-options';
+import { MAX_BARS, bucketKeyed, eventMark, foldKeyed, latencyChart, latencyUnit, memoryChart, stackedLegend, stackedRequestsChart, throughputChart, timeLabel, usageChart } from './chart-options';
 
 const t = THEME_TOKENS.dark;
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
@@ -93,12 +93,24 @@ describe('chart options', () => {
     expect(yAxes[1]!.axisLabel.formatter(500)).toBe('500');
   });
 
-  it('shows latency percentiles in ms and s', () => {
+  it('shows latency percentiles in one unit per axis', () => {
     const o = latencyChart(h.points, '1h', t) as unknown as Opt;
     expect(o.series.map((s) => s['name'])).toEqual(['p50', 'p95']);
     const y = (o['yAxis'] as { axisLabel: { formatter: (v: number) => string } }).axisLabel.formatter;
-    expect(y(250)).toBe('250 ms');
+    // The demo's p95 passes a second, so every tick is in seconds: never `0 ms` under `1.0 s`.
+    expect(y(0)).toBe('0 s');
+    expect(y(250)).toBe('0.3 s');
     expect(y(2500)).toBe('2.5 s');
+    const fast = latencyChart(h.points.map((p) => ({ ...p, p50Ms: 120, p95Ms: 480 })), '1h', t) as unknown as Opt;
+    const yFast = (fast['yAxis'] as { axisLabel: { formatter: (v: number) => string } }).axisLabel.formatter;
+    expect(yFast(0)).toBe('0 ms');
+    expect(yFast(250)).toBe('250 ms');
+  });
+
+  it('picks a latency unit from the largest value', () => {
+    expect(latencyUnit([])(0)).toBe('0 ms');
+    expect(latencyUnit([200, null, 999])(500)).toBe('500 ms');
+    expect(latencyUnit([200, 1000])(1500)).toBe('1.5 s');
   });
 
   it('folds extra series into Other and buckets dense bars', () => {
@@ -129,6 +141,17 @@ describe('chart options', () => {
     expect(y(15)).toBe('15');
     const other = stackedRequestsChart([], Array.from({ length: 7 }, (_, i) => ({ key: `m${i}`, values: [i] })), '7d', t) as unknown as Opt;
     expect(other.series[4]!['name']).toBe('Other');
+    // The legend is the card's, so it wraps instead of running into the time axis.
+    expect((o['legend'] as { show: boolean }).show).toBe(false);
+  });
+
+  it('gives the card a legend in the order and colours of the chart', () => {
+    const entries = stackedLegend(h.requestsByApp, t, (k) => k.toUpperCase());
+    expect(entries.map((e) => e.name)).toEqual(['DEBRIEF', 'SPOTTER', 'NIGHTLY-REPORT', 'PITCREW', 'DYNO']);
+    expect(entries[0]!.color).toBe(t.series[0]);
+    const folded = stackedLegend(Array.from({ length: 7 }, (_, i) => ({ key: `m${i}`, values: [i] })), t);
+    expect(folded.length).toBe(5);
+    expect(folded[4]!.name).toBe('Other');
   });
 
   describe('usageChart', () => {
@@ -182,11 +205,13 @@ describe('chart options', () => {
       expect(axis.axisLabel.formatter(2 * 1024 ** 3)).toBe('2 GB');
     });
 
-    it('labels daily buckets by date and gives a legend row of room for many apps', () => {
+    it('labels daily buckets by date; by app the card names the colours, by kind the chart has its legend', () => {
       const month = demoUsageSeries('30d', NOW2, null);
       const o = usageChart(month, 'tokens', 'app', t) as unknown as Opt;
       expect((o['xAxis'] as { axisLabel: { formatter: (v: number) => string } }).axisLabel.formatter(NOW2)).toBe('22 Oct');
-      expect((o['grid'] as { bottom: number }).bottom).toBe(64);
+      expect((o['legend'] as { show: boolean }).show).toBe(false);
+      expect((o['grid'] as { bottom: number }).bottom).toBe(4);
+      expect((usageChart(one, 'tokens', 'kind', t) as unknown as { legend: { show: boolean } }).legend.show).toBe(true);
       expect((usageChart(one, 'tokens', 'kind', t) as unknown as { grid: { bottom: number } }).grid.bottom).toBe(44);
     });
   });

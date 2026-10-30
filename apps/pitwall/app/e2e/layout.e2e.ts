@@ -214,3 +214,119 @@ test.describe('layout of every dialog window at its contract width', () => {
     });
   }
 });
+
+// Tables at every supported width (Pitwall 1.1 WP-2 review, P1): a table fills the container it is in; its column
+// headers, its status cells and its number cells are never cut (only a name, a target or a path may end in an ellipsis,
+// with its full value in a tooltip and the detail panel); and a grid list (the request log) lays out exactly the cells it
+// shows, one track each. These lines have no baseline: any one fails the test.
+const TABLE_WIDTHS = [900, 1024, 1280, 1440] as const;
+
+const TABLE_STATES: readonly State[] = [
+  { id: 'dashboard', hash: '/' },
+  { id: 'models-library', hash: '/models' },
+  {
+    id: 'models-library-detail',
+    hash: '/models',
+    act: async (page) => {
+      await page.getByRole('row', { name: /Qwen3.5 9B/ }).click();
+      await expect(page.getByRole('complementary', { name: 'Qwen3.5 9B' })).toBeVisible();
+    },
+  },
+  { id: 'models-presets', hash: '/models', act: openTab(/Presets/) },
+  {
+    id: 'models-discover-repo',
+    hash: '/models',
+    act: async (page) => {
+      await openTab(/Discover/)(page);
+      await page.getByLabel('Search Hugging Face for GGUF models').fill('gemma');
+      await page.getByRole('button', { name: 'Search', exact: true }).click();
+      await page.locator('pw-discover-tab .hit').first().click();
+      await expect(page.getByText('Will it fit?')).toBeVisible();
+    },
+  },
+  {
+    id: 'models-slots',
+    hash: '/models',
+    act: async (page) => {
+      await page.getByRole('row', { name: /Qwen3.5 9B/ }).click();
+      await page.getByRole('button', { name: /^Parallel slots for Qwen3.5 9B/ }).click();
+      await expect(page.locator('pw-slots-panel table tbody tr').first()).toBeVisible();
+    },
+  },
+  { id: 'engines', hash: '/engines' },
+  {
+    id: 'apps-detail',
+    hash: '/apps',
+    act: async (page) => {
+      await page.getByRole('button', { name: /Spotter/ }).first().click();
+      await expect(page.locator('pw-app-usage table')).toBeVisible();
+    },
+  },
+  { id: 'requests', hash: '/requests' },
+  {
+    id: 'requests-detail',
+    hash: '/requests',
+    act: async (page) => {
+      await page.getByRole('row').nth(1).click();
+      await expect(page.locator('pw-request-detail')).toBeVisible();
+    },
+  },
+  { id: 'benchmarks', hash: '/benchmarks' },
+];
+
+/** Runs in the page: every table problem as a short readable line. */
+function measureTables(): string[] {
+  const out: string[] = [];
+  const shown = (e: Element) => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+  const where = (e: Element) => {
+    const table = e.closest('table, [role="table"]');
+    return table?.getAttribute('aria-label') ?? table?.className.toString().split(' ')[0] ?? e.tagName.toLowerCase();
+  };
+  const text = (e: Element) => (e.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40);
+  const cut = (e: Element) => e.scrollWidth > e.clientWidth + 1;
+  for (const table of Array.from(document.querySelectorAll('table.mat-mdc-table')).filter(shown)) {
+    const parent = table.parentElement!;
+    const ps = getComputedStyle(parent);
+    const room = parent.clientWidth - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight);
+    const width = table.getBoundingClientRect().width;
+    if (width < room - 2) out.push(`table ${where(table)} is ${Math.round(width)}px in ${Math.round(room)}px`);
+  }
+  // A column header, a number and a status are never cut (a hidden "Actions" header is visually hidden on purpose).
+  const cells = [
+    ...document.querySelectorAll('table.mat-mdc-table th, [role="table"] [role="columnheader"]'),
+    ...document.querySelectorAll('table.mat-mdc-table td.num, table.mat-mdc-table td.right, [role="table"] [role="cell"].num'),
+    ...Array.from(document.querySelectorAll('table.mat-mdc-table .status, [role="table"] [role="cell"] .status')).map((s) => s.closest('td, [role="cell"]')!),
+  ];
+  for (const cell of new Set(cells.filter((c) => c && shown(c) && text(c) && !c.querySelector('.sr-only:only-child')))) {
+    if (cut(cell)) out.push(`${where(cell)}: "${text(cell)}" is cut (needs ${cell.scrollWidth}px, has ${cell.clientWidth}px)`);
+  }
+  // A grid list: one track per cell it shows, so no cell slides into another column's track.
+  for (const row of Array.from(document.querySelectorAll('[role="table"] [role="row"]')).filter(shown)) {
+    const cs = getComputedStyle(row);
+    if (cs.display !== 'grid') continue;
+    const tracks = cs.gridTemplateColumns.split(' ').filter(Boolean).length;
+    const visible = Array.from(row.children).filter(shown).length;
+    if (tracks !== visible) {
+      out.push(`${where(row)}: a row shows ${visible} cells in ${tracks} tracks`);
+      break;
+    }
+  }
+  return [...new Set(out)];
+}
+
+test.describe('tables fill their container and never cut a header, a number or a status', () => {
+  for (const state of TABLE_STATES) {
+    for (const width of TABLE_WIDTHS) {
+      test(`${state.id}@${width}`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await openApp(page, state.hash, `mock-fast&mock-static${state.query ? `&${state.query}` : ''}`);
+        await page.waitForLoadState('networkidle');
+        await state.act?.(page);
+        await page.waitForLoadState('networkidle');
+        await page.evaluate(() => document.fonts.ready);
+        await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+        expect(await page.evaluate(measureTables), `${state.id}@${width}`).toEqual([]);
+      });
+    }
+  }
+});

@@ -12,6 +12,7 @@ import { ThemeService } from '../../core/theme';
 import { AppearanceStore, BrowserAppearanceBackend, provideAppearance } from '@decryp7/paddock-ui/shell';
 import { registerIcons } from '../../shared/icons';
 import { FakeChart, fakeChartProvider, settle } from '../../../testing/render';
+import { BROWSER_VERSION } from '../../shell/engines';
 import { Dashboard, PerfMeter, shortModel } from './dashboard';
 
 async function mount(opts: { backend?: MockBackend; load?: boolean; patch?: (o: Overview) => Overview } = {}) {
@@ -90,7 +91,9 @@ describe('Dashboard', () => {
   it('shows the server version, uptime and connected apps', async () => {
     const { el, live } = await mount();
     const sub = el.querySelector('.sub')!.textContent!.replace(/\s+/g, ' ');
-    expect(sub).toContain('Pitwall 1.0.3');
+    // The version comes from its one source (ER-13): the browser build's, which About shows too.
+    expect(sub).toContain(`Pitwall ${BROWSER_VERSION} `);
+    expect(BROWSER_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
     expect(sub).toMatch(/up 5 h 1\d min/);
     expect(sub).toContain(`${live.apps().filter((a) => a.connected).length} apps connected`);
     expect(sub).not.toContain('Offline mode');
@@ -262,16 +265,22 @@ describe('Dashboard', () => {
     expect(el.querySelectorAll('pw-panel [role="alert"]').length).toBe(0);
   });
 
-  it('names apps and models in the request charts, falling back to a shortened id for unloaded ones', async () => {
+  it('names apps and models in the request charts by their display names', async () => {
     const { fixture } = await mount();
     await settle(fixture);
     await new Promise((r) => requestAnimationFrame(() => r(null)));
-    const legend = (i: number) => ((FakeChart.all[i]!.options.at(-1)!.option as { legend: { data: string[] } }).legend.data);
+    const series = (i: number) => (FakeChart.all[i]!.options.at(-1)!.option as { series: { name: string }[] }).series.map((s) => s.name);
     // chart order: memory, requests by app, tokens per second, latency, requests by model
-    expect(legend(1)).toContain('Debrief');
-    expect(legend(1)).toContain('Spotter');
-    expect(legend(4)).toContain('Qwen3.5 9B');
-    expect(legend(4)).toContain('gemma-4-12b-it');
+    expect(series(1)).toContain('Debrief');
+    expect(series(1)).toContain('Spotter');
+    // A model that is not loaded now still has its display name, from the library; never its raw id.
+    expect(series(4)).toContain('Qwen3.5 9B');
+    expect(series(4)).toContain('Gemma 4 12B');
+    expect(series(4)).not.toContain('gemma-4-12b-it');
+    // The legends are the cards' own, under the charts, in the same names.
+    const legends = Array.from(fixture.nativeElement.querySelectorAll('.series-legend') as NodeListOf<HTMLElement>).map((l) => l.textContent!);
+    expect(legends[0]).toContain('Nightly report script');
+    expect(legends[1]).toContain('Gemma 4 12B');
   });
 
   it('renders the legend with theme colours and hides the perf readout by default', async () => {

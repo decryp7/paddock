@@ -47,6 +47,9 @@ describe('parseLimit', () => {
     expect(parseLimit('-3')).toBe('invalid');
     expect(parseLimit('1.5')).toBe('invalid');
     expect(parseLimit('abc')).toBe('invalid');
+    expect(parseLimit('120,000,000')).toBe(120_000_000);
+    expect(parseLimit('1,50')).toBe('invalid');
+    expect(parseLimit(',000')).toBe('invalid');
     expect(parseLimit('99999999999999999999')).toBe('invalid');
     expect(parseLimit('100', 100)).toBe(100);
     expect(parseLimit('101', 100)).toBe('invalid');

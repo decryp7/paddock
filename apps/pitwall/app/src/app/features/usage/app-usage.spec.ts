@@ -91,6 +91,6 @@ describe('AppUsage', () => {
   it('shows the cache tiles for the app over the range', async () => {
     const { el } = await mount();
     expect(el.querySelector('pw-cache-tiles')!.textContent).toContain('Cache hit rate');
-    expect(el.querySelector('pw-cache-tiles .value')!.textContent).toMatch(/^\d+ %$/);
+    expect(el.querySelector('pw-cache-tiles .value')!.textContent).toMatch(/^\d+%$/);
   });
 });

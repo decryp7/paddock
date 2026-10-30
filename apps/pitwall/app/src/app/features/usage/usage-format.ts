@@ -28,10 +28,10 @@ export function cacheHitRate(c: Pick<UsageCounters, 'cacheHits' | 'cacheMisses'>
   return total > 0 ? c.cacheHits / total : null;
 }
 
-/** The hit rate as `42 %`, or an em dash before any eligible request. */
+/** The hit rate as `42%` (no space, so the sign never wraps onto a line of its own), or an em dash before any eligible request. */
 export function cacheHitRateText(c: Pick<UsageCounters, 'cacheHits' | 'cacheMisses'>): string {
   const r = cacheHitRate(c);
-  return r === null ? '—' : `${Math.round(r * 100)} %`;
+  return r === null ? '—' : `${Math.round(r * 100)}%`;
 }
 
 /** Tokens the caches saved: prompt tokens reused from the prompt cache plus tokens cache hits skipped. */
