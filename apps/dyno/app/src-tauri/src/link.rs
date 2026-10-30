@@ -248,6 +248,8 @@ pub struct AgentLink {
     stall_shown: AtomicBool,
     /// How many times a wait has looked again ([`AgentLink::looks`]).
     looks: AtomicU64,
+    /// Retry ended the wait for a holder of the data folder: launch anyway, once.
+    launch_anyway: AtomicBool,
 }
 
 impl AgentLink {
@@ -275,6 +277,7 @@ impl AgentLink {
             service_fallback: AtomicBool::new(false),
             stall_shown: AtomicBool::new(false),
             looks: AtomicU64::new(0),
+            launch_anyway: AtomicBool::new(false),
         })
     }
 
@@ -667,6 +670,12 @@ impl AgentLink {
             logging::info("the agent this app started is still starting; waiting for it");
         } else if !self.service_fallback.load(Ordering::SeqCst) && self.probe_service().is_some_and(|s| s.supervises) {
             return self.wait_for_service(seen_retry);
+        } else if dyno_agent::instance::is_held(&self.dirs) && !self.launch_anyway.swap(false, Ordering::SeqCst) {
+            // An agent of nobody this app launched still holds the data folder (the former service's agent that was just
+            // asked to exit: on Windows the lock goes only when its process has fully exited). A launch now would be
+            // refused (exit 3) and wasted: wait for the lock like for any other holder, with the stall and Retry.
+            logging::info("an agent still holds the data folder; waiting for it before starting one");
+            return self.wait_for_other_agent(seen_retry);
         } else {
             logging::info("starting the agent");
             self.launcher.launch()?;
@@ -781,7 +790,13 @@ impl AgentLink {
         let mut looks = 0u32;
         while !self.is_stopping() {
             let live = Discovery::read(&self.dirs.discovery()).is_some_and(|d| self.names_live_agent(&d, since));
-            if live || !dyno_agent::instance::is_held(&self.dirs) || self.retry_chosen(&mut seen_retry) {
+            if self.retry_chosen(&mut seen_retry) {
+                // Retry: the next pass launches whatever holds the folder (the loser of two exits with code 3).
+                self.launch_anyway.store(true, Ordering::SeqCst);
+                self.clear_stall();
+                return Ok(());
+            }
+            if live || !dyno_agent::instance::is_held(&self.dirs) {
                 self.clear_stall();
                 return Ok(());
             }
@@ -1855,11 +1870,7 @@ mod tests {
         stale_file().write(&r.link.dirs.discovery()).unwrap();
         let handle = r.link.spawn().unwrap();
         assert!(until(HANG_GUARD, || r.link.looks() >= 100), "the link never waited");
-        assert_eq!(
-            r.launcher.launches(),
-            1,
-            "the old file made the link launch agents that exit at once"
-        );
+        assert_eq!(r.launcher.launches(), 0, "the link launched agents that the holder's lock refuses");
         let seen = drained(&r.statuses);
         assert!(
             seen.iter().all(|s| !matches!(s.state, AgentState::Failed | AgentState::Restarting)),
@@ -1868,7 +1879,7 @@ mod tests {
         // The holder writes its file: the link connects, still without another launch.
         fresh.write(&r.link.dirs.discovery()).unwrap();
         wait_for(&r.statuses, AgentState::Running);
-        assert_eq!(r.launcher.launches(), 1);
+        assert_eq!(r.launcher.launches(), 0);
         r.link.shutdown(false);
         handle.join().unwrap();
         holder.stop();
@@ -1914,11 +1925,11 @@ mod tests {
             until(HANG_GUARD, || r.sink.stalled_with(Stall::OtherAgentHolds)),
             "no stall was reported while another agent holds the data folder"
         );
-        assert_eq!(r.launcher.launches(), 1);
+        assert_eq!(r.launcher.launches(), 0);
         // Retry runs the connection steps again (and finds the holder still there).
         r.link.retry();
         assert!(
-            until(HANG_GUARD, || r.launcher.launches() == 2),
+            until(HANG_GUARD, || r.launcher.launches() == 1),
             "Retry did not run establish again"
         );
         fresh.write(&r.link.dirs.discovery()).unwrap();
@@ -1962,6 +1973,41 @@ mod tests {
         r.link.quit();
         handle.join().unwrap();
         r.launcher.finish(Duration::ZERO);
+    }
+
+    #[test]
+    fn taking_the_agent_back_waits_for_the_former_agent_to_release_the_data_folder_before_launching() {
+        let r = rig(false);
+        r.link.set_poll(Duration::from_millis(1));
+        let manager = FakeServiceManager::new(r.link.dirs.clone(), true, true);
+        r.link.set_service_probe(manager.probe());
+        // The service's agent, started by somebody else. It releases the data folder (the lock) only when the test
+        // lets it, as on Windows where the lock goes only once the process has fully exited.
+        let former = other_agent(&r.link.dirs);
+        let handle = r.link.spawn().unwrap();
+        wait_for(&r.statuses, AgentState::Running);
+        r.link.refresh_service();
+        manager.set(false, false);
+        r.link.refresh_service();
+        assert!(until(HANG_GUARD, || former.stopped()), "the former agent was not asked to exit");
+        // It has been asked to exit but still holds the folder: the link must wait, looking again, and launch nothing.
+        assert!(
+            until(HANG_GUARD, || r.link.looks() >= 50),
+            "the link did not wait for the former agent to release the folder"
+        );
+        assert_eq!(
+            r.launcher.launches.load(Ordering::SeqCst),
+            0,
+            "launched while the former agent held the folder"
+        );
+        former.stop();
+        assert!(
+            until(HANG_GUARD, || r.link.connected() && r.link.started_by_this_app()),
+            "no agent of the app's own after the former agent released the folder"
+        );
+        assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 1);
+        assert!(r.link.quit());
+        handle.join().unwrap();
     }
 
     #[test]
