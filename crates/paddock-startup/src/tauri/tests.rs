@@ -17,6 +17,9 @@ type App = ::tauri::App<MockRuntime>;
 /// Every log record of this crate, as (level, window, message).
 static LOGGED: Mutex<Vec<(log::Level, String, String)>> = Mutex::new(Vec::new());
 
+/// Every record of the start guard's own target.
+static GUARD_LOGGED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 struct Capture;
 
 impl log::Log for Capture {
@@ -26,6 +29,9 @@ impl log::Log for Capture {
     fn log(&self, record: &log::Record<'_>) {
         if !record.target().starts_with("paddock_startup") {
             return;
+        }
+        if record.target() == "paddock_startup::tauri::start_guard" {
+            lock(&GUARD_LOGGED).push(record.args().to_string());
         }
         let window = record
             .key_values()
@@ -730,10 +736,9 @@ fn start_logged(level: log::Level, text: &str) -> bool {
 
 fn fast_guard() -> crate::StartTiming {
     crate::StartTiming {
-        first_report: Duration::from_millis(50),
-        repeat: Duration::from_millis(50),
+        first_report: 5,
+        repeat: 5,
         tick: Duration::from_millis(5),
-        pause_gap: Duration::from_secs(10),
     }
 }
 
@@ -750,8 +755,12 @@ fn the_start_guard_logs_a_stuck_start_by_phase_until_it_is_ready() {
         "once per app"
     );
     start_guard::phase(app.handle(), crate::StartPhase::MainWindow);
+    assert_eq!(
+        start_guard::current(app.handle()),
+        Some(crate::StartPhase::MainWindow)
+    );
     assert!(eventually(|| start_logged(
-        log::Level::Error,
+        log::Level::Warn,
         "it is in opening the main window (still waiting)"
     )));
     assert!(eventually(|| start_logged(
@@ -759,29 +768,36 @@ fn the_start_guard_logs_a_stuck_start_by_phase_until_it_is_ready() {
         "The start is still in opening the main window"
     )));
     start_guard::ready(app.handle());
-    assert!(start_logged(
-        log::Level::Warn,
-        "The start reached the event loop after"
-    ));
+    assert!(start_logged(log::Level::Warn, "The start went on after"));
     thread.join().expect("the guard's thread ended at ready");
     start_guard::ready(app.handle());
+    assert!(
+        !log_of("").iter().any(|(l, _)| *l == log::Level::Error),
+        "a slow start is never an error"
+    );
 }
 
-/// Without `begin`, the phase and ready calls do nothing; a start on time ends the guard's thread without a report.
+/// Without `begin`, the phase and ready calls do nothing; a start on time ends the guard's thread and the guard logs
+/// nothing at all.
 #[test]
 fn the_start_guard_is_optional_and_silent_for_a_start_on_time() {
     capture();
     let app = mock_builder().build(mock_context(noop_assets())).unwrap();
     start_guard::phase(app.handle(), crate::StartPhase::Tray);
     start_guard::ready(app.handle());
+    assert_eq!(start_guard::current(app.handle()), None);
 
     let timing = crate::StartTiming {
-        first_report: Duration::from_secs(600),
+        first_report: 1_000_000,
         ..fast_guard()
     };
     let app = mock_builder().build(mock_context(noop_assets())).unwrap();
     let thread = start_guard::begin(app.handle(), timing).expect("the guard's thread started");
+    start_guard::phase(app.handle(), crate::StartPhase::Tray);
     start_guard::ready(app.handle());
     thread.join().expect("ended at ready without a report");
-    assert!(!start_logged(log::Level::Warn, "after 600"));
+    assert!(
+        lock(&GUARD_LOGGED).is_empty(),
+        "the start guard logged nothing"
+    );
 }

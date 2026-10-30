@@ -184,7 +184,8 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>) -> Builder<R> {
     builder = builder.windows(move |app| windows(app, test_dir.is_none()));
     match place {
         Place::Installed => builder,
-        Place::Test { .. } => builder.in_memory().native_menu(false),
+        // No start guard: a test's app never reaches `RunEvent::Ready`, so it would tick on.
+        Place::Test { .. } => builder.in_memory().native_menu(false).start_guard(None),
     }
 }
 

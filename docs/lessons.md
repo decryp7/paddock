@@ -1089,10 +1089,15 @@ when missing), hit the same 300 s limit while this was checked and is fixed the 
 Spotter 1.0's first VM update test (2026-10-29) stopped at its first launch: no window and an empty log. The cause was
 ADR 0029's deadlock, found only by sampling a debug build. The page watchdog could not have seen it: it watches pages,
 and a start blocked in a plugin's set-up has none yet, so no part of the app said where the start was. The shell now has
-a start guard (`paddock_startup::tauri::start_guard`): its own thread logs the phase (plugins' set-up, tray, main window,
-event loop) after 20 s and every minute after that, and only logs (ER-19). Re-run on the fixed build in a fresh Tart VM
+a start guard (`paddock_startup::tauri::start_guard`): from the shell plugin's set-up to `RunEvent::Ready`, its own
+thread logs the phase (the shell plugin's set-up, starting the event loop, opening the tray, opening the main window)
+after 20 ticks and every 60 after that (ADR 0031: ticks, not time), as warnings, and only logs (ER-19). Tauri runs the
+app's `setup` only once the native event loop has started, so the gap between the last plugin's set-up and the tray is
+a phase of its own. Not covered: Tauri's build and the set-ups of the plugins registered before the shell (single
+instance and the other OS plugins). Follow-up: start the guard before `tauri::Builder` in each app's `run()` and hand it
+to the shell, so the whole start is covered. Re-run on the fixed build in a fresh Tart VM
 (2026-10-30), the start opened its window, but the first start after boot took 76 s and its page went blank: WebKit's
 GPU process took 48 s to launch, was killed as unresponsive again and again, and WebKit terminated every web content
-process. Later starts in the same VM took about 1 s. **Lesson:** every part of a start logs where it is from a thread that
-the start cannot block, from the first moment; and a VM check runs after the guest has settled (one WebKit app started
+process. Later starts in the same VM took about 1 s. **Lesson:** a start logs where it is from a thread that the start cannot
+block, from as early as it can (and says which part it does not cover); and a VM check runs after the guest has settled (one WebKit app started
 once), with the guest's `log show` for WebKit's process lines kept as evidence, before calling a blank window a bug.

@@ -151,7 +151,10 @@ terminated every web content process (`WebProcessPool::terminateAllWebContentPro
 process of window main terminated" and reloaded). That is the cold VM's paravirtual GPU, not Spotter: every later start
 in the same VM was normal. Run the VM checks after the first boot has settled (start Safari or Spotter once first).
 
-Since this run the shell also has a start guard: a start that has not reached the event loop is logged with its phase
-after 20 s (then every minute), so a hang before the window can never again leave the log empty.
+Since this run the shell also has a start guard: from the shell plugin's set-up on, a start that has not got to
+`RunEvent::Ready` is logged with its phase (the shell plugin's set-up, starting the event loop, opening the tray, opening
+the main window) after 20 ticks of 1 s and every 60 after that, so a hang there no longer leaves the log empty. It does
+not cover what runs before the shell plugin's set-up: Tauri's build and the set-ups of the plugins registered before it
+(single instance, notification, opener, dialog, updater, autostart). A hang there still shows only in `sample`.
 
 The 2026-10-29 hang was the start-up deadlock of ADR 0029 (a window built inside a plugin hook), fixed before the 1.0.0 release and verified on 2026-10-30 (above). The update steps (runbook `spotter-1.0-vm-runbook.md`, section 1 step 5) still have to be run on the CI-built bundles before the tag.

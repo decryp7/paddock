@@ -30,6 +30,7 @@ fn identity() -> AppIdentity {
 
 fn shell() -> Builder<MockRuntime> {
     Builder::new(identity())
+        .start_guard(None)
         .in_memory()
         .native_menu(false)
         .windows(|_| Windows::builder(WindowConfig::new("Shell Demo")).build())
@@ -96,6 +97,7 @@ fn quit_from_the_menu_bar_works_when_the_last_window_was_destroyed() {
     let exits = Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen = exits.clone();
     let app = app(Builder::new(identity())
+        .start_guard(None)
         .in_memory()
         .native_menu(false)
         .windows(move |_| {
@@ -168,7 +170,10 @@ fn tray_ids_and_menu_bar_ids_do_not_overlap() {
 
 #[test]
 fn a_click_without_a_window_quits_or_brings_the_main_window_back() {
-    let plain = app(Builder::new(identity()).in_memory().native_menu(false));
+    let plain = app(Builder::new(identity())
+        .start_guard(None)
+        .in_memory()
+        .native_menu(false));
     assert!(plain.try_state::<Windows<MockRuntime>>().is_none());
     let exited = std::cell::Cell::new(0);
     menu_without_window_using(plain.handle(), "pd.app.quit", None, |_| {
@@ -194,6 +199,7 @@ fn a_click_without_a_window_quits_or_brings_the_main_window_back() {
 #[test]
 fn a_menu_click_without_a_window_layer_reaches_the_policy() {
     let app = app(Builder::new(identity())
+        .start_guard(None)
         .in_memory()
         .native_menu(false)
         .setup(|app| {
@@ -228,6 +234,7 @@ fn a_menu_item_without_a_window_reopens_the_main_window() {
 #[test]
 fn window_events_without_the_window_layer_still_reach_the_other_parts() {
     let app = app(Builder::new(identity())
+        .start_guard(None)
         .in_memory()
         .native_menu(false)
         .setup(|app| {
@@ -276,7 +283,10 @@ fn a_clean_exit_ends_the_run_by_removing_the_running_marker() {
 
 #[test]
 fn run_events_without_the_window_layer_or_the_parts_are_harmless() {
-    let app = app(Builder::new(identity()).in_memory().native_menu(false));
+    let app = app(Builder::new(identity())
+        .start_guard(None)
+        .in_memory()
+        .native_menu(false));
     assert!(app.try_state::<Windows<MockRuntime>>().is_none());
     on_run_event(app.handle(), &RunEvent::Ready);
     on_run_event(app.handle(), &RunEvent::Exit);
@@ -435,6 +445,7 @@ fn a_start_that_cannot_open_its_window_exits_with_code_1() {
     let exits = Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen = exits.clone();
     let app = app(Builder::new(identity())
+        .start_guard(None)
         .in_memory()
         .native_menu(false)
         .windows(move |_| {
@@ -523,21 +534,21 @@ fn wait_until(cond: impl Fn() -> bool) -> bool {
     false
 }
 
-/// A start stuck before the event loop (here the app's set-up blocks, as the window built inside a plugin hook did in
-/// Spotter 1.0's first VM run, ADR 0029) is logged from the start guard's own thread with the phase it is stuck in, while
-/// it is stuck; once it goes on, the guard says how long it took and the start completes (nothing is ended or restarted).
+/// A start stuck in the shell plugin's set-up (here the app's set-up blocks, as the window built inside a plugin hook did
+/// in Spotter 1.0's first VM run, ADR 0029) is logged from the start guard's own thread with that phase while it is stuck.
+/// Once the set-up returns, the start is in "starting the event loop" until Tauri's `RunEvent::Ready` (Tauri runs the
+/// app's `setup` only then), which the guard reports too if it lasts; at Ready the guard says the start went on.
 #[test]
 fn a_start_stuck_in_the_set_up_is_logged_with_its_phase_while_it_is_stuck() {
     let _ = log::set_logger(&GuardCapture);
     log::set_max_level(log::LevelFilter::Trace);
     let (release, blocked) = std::sync::mpsc::channel::<()>();
     let timing = StartTiming {
-        first_report: std::time::Duration::from_millis(100),
-        repeat: std::time::Duration::from_secs(600),
+        first_report: 10,
+        repeat: 5,
         tick: std::time::Duration::from_millis(10),
-        pause_gap: std::time::Duration::from_secs(10),
     };
-    let shell = shell().start_guard(timing).setup(move |_| {
+    let shell = shell().start_guard(Some(timing)).setup(move |_| {
         let _ = blocked.recv_timeout(std::time::Duration::from_secs(30));
         Ok(())
     });
@@ -549,7 +560,7 @@ fn a_start_stuck_in_the_set_up_is_logged_with_its_phase_while_it_is_stuck() {
         let _ = tx.send(app.map(|a| a.handle().clone()).map_err(|e| e.to_string()));
     });
     assert!(
-        wait_until(|| guard_logged(log::Level::Error, "it is in the plugins' set-up")),
+        wait_until(|| guard_logged(log::Level::Warn, "it is in the shell plugin's set-up")),
         "the stuck start was logged with its phase while it was stuck"
     );
     release.send(()).unwrap();
@@ -557,9 +568,25 @@ fn a_start_stuck_in_the_set_up_is_logged_with_its_phase_while_it_is_stuck() {
         .recv_timeout(std::time::Duration::from_secs(30))
         .expect("the start went on once the set-up returned")
         .expect("the start succeeded");
+    assert_eq!(
+        paddock_startup::tauri::start_guard::current(&app),
+        Some(StartPhase::StartingEventLoop),
+        "after the plugins' set-up the event loop starts; the app's setup has not run yet"
+    );
+    assert!(
+        wait_until(|| guard_logged(log::Level::Warn, "still in starting the event loop")),
+        "the gap until Ready is reported with its own phase"
+    );
     on_run_event(&app, &RunEvent::Ready);
-    assert!(guard_logged(
-        log::Level::Warn,
-        "The start reached the event loop after"
-    ));
+    assert!(guard_logged(log::Level::Warn, "The start went on after"));
+}
+
+/// The test shell has no start guard: a mock app never reaches Ready, so a guard would tick on and report it.
+#[test]
+fn the_test_shell_has_no_start_guard() {
+    let app = app(shell());
+    assert_eq!(
+        paddock_startup::tauri::start_guard::current(app.handle()),
+        None
+    );
 }
