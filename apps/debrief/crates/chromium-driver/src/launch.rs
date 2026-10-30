@@ -756,12 +756,16 @@ mod tests {
     #[cfg(target_os = "linux")]
     impl Drop for ChildGuard {
         fn drop(&mut self) {
-            // SAFETY: signals to our own child, which is not reaped yet (its pid cannot have been reused).
-            unsafe {
-                libc::kill(self.0.id() as libc::pid_t, libc::SIGCONT);
+            // Only a child not reaped yet still owns its pid (rule 53, ADR 0033): once `wait` reaped it, the pid may be
+            // another process's, so nothing is sent.
+            if let Ok(None) = self.0.try_wait() {
+                // SAFETY: our own child, checked unreaped just above; nothing else reaps it, so the pid is still its.
+                unsafe {
+                    libc::kill(self.0.id() as libc::pid_t, libc::SIGCONT);
+                }
+                let _ = self.0.kill();
+                let _ = self.0.wait();
             }
-            let _ = self.0.kill();
-            let _ = self.0.wait();
         }
     }
 
@@ -833,6 +837,10 @@ mod tests {
         assert!(matches!(&r, Err(Error::Dialog(m)) if m == "Leave site?"), "{r:?}");
         assert!(started.elapsed() < Duration::from_secs(5), "no wait for the command timeout");
         assert!(r.unwrap_err().to_string().contains("shows a dialog"));
+        // The dialog goes away without the browser saying so: the next script is answered, not refused.
+        fake.act(crate::fake::UserAction::CloseDialogUnreported).unwrap();
+        assert!(p.evaluate("1").is_ok(), "a missed close does not hold the page");
+        assert!(p.evaluate("1").is_ok());
     }
 
     #[cfg(unix)]

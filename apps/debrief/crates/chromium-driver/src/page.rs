@@ -69,10 +69,8 @@ impl Page {
         if self.is_closed() {
             return Err(Error::Closed);
         }
+        // No check before sending: a dialog seen earlier may have closed unreported, and the page then answers at once.
         let blocked = || self.conn.dialog(&self.session);
-        if let Some(why) = blocked() {
-            return Err(Error::Dialog(why));
-        }
         self.closed_wins(self.conn.call_unless(Some(&self.session), method, params, CALL, blocked))
     }
 
