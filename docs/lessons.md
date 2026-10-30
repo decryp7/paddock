@@ -751,3 +751,11 @@ composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor D
 crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
 (`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
 not by guessing at the VM.
+
+## An unbuilt UI hid a broken installer build because tests passed (2026-10-30, Dyno)
+Dyno's release workflow had no `prepare: npm run build -w ui`. Every test passed, but every installer build failed on a
+clean runner; a leftover `ui/dist` in the working trees had hidden it. **Rule:** a change to an app's release path
+(release workflow, shared app-release workflow, bundle and prepare steps, Tauri config, imports of shared packages) is
+proved by building that app's installers (`<app>-release.yml` with gates on and the bundle built) before it lands on
+main (rule 54). The ci-actions test now checks that every release workflow whose app imports `@decryp7/paddock-ui`
+builds the UI.
