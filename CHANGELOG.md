@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Outlined Material fields: room for the floated label
+- `@decryp7/paddock-ui` scss (`_material.scss`, built into `css/material.css`): a labelled outlined `mat-form-field` is `--pd-control-height` plus 8 px above and below its text row (40 / 44 / 48 px at compact / standard / comfortable), so the floated label in the notch never overlaps the text and the text keeps at least 8 px from the outline's inner edge. A textarea keeps the same top and bottom padding and grows from there (its first line no longer runs under the label). A field without a label (a toolbar filter, the paginator) stays the control height; a select's arrow box is one text row, so a select is as tall as an input beside it. Material places the label and sizes the notch from the same height. Forms in every app get taller labelled fields; a layout that aligned a labelled field with a 28 px control on one line re-checks its alignment. The gallery's "Material controls" adds a value field, a textarea and an unlabelled field, and `e2e/material.spec.ts` measures the geometry in both themes at standard and compact density.
+
 ### `paddock-jobs`: `WalkOptions::with_modified`
 - `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
 

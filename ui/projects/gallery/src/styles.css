@@ -49,6 +49,7 @@
 .gal-states-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-3); }
 
 .gal-row--center { align-items: center; }
+.gal-field-wide { width: 420px; max-width: 100%; }
 .gal-states--card { background: var(--pd-surface-1); border: 1px solid var(--pd-hairline); }
 .gal-states--inset { background: var(--pd-surface-2); }
 .gal-path--plain240 { width: 240px; padding: 0; box-sizing: border-box; }
