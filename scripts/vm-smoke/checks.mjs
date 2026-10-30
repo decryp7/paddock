@@ -62,11 +62,16 @@ export class Check {
   async reset() {
     const procs = await this.snapshot();
     const left = this.config.processes.flatMap((s) => instancesOf(procs, s, this.bundle));
-    for (const p of left) {
+    const stillThere = async () => { const now = await this.snapshot(); return left.filter((p) => now.some((q) => q.pid === p.pid && q.command === p.command)); };
+    const end = async (p, signal) => {
       const lstart = (await this.g.exec(`ps -o lstart= -p ${p.pid}`)).stdout.trim();
-      await this.g.exec(`[ "$(ps -o lstart= -p ${p.pid})" = ${sq(lstart)} ] && ps -p ${p.pid} -o command= | grep -qxF -- ${sq(p.command)} && kill ${p.pid}`);
-    }
-    const gone = await this.until(async () => (await this.snapshot()).every((q) => !left.some((p) => p.pid === q.pid && p.command === q.command)), 20_000);
+      await this.g.exec(`[ "$(ps -o lstart= -p ${p.pid})" = ${sq(lstart)} ] && ps -p ${p.pid} -o command= | grep -qxF -- ${sq(p.command)} && kill ${signal} ${p.pid}`);
+    };
+    for (const p of left) await end(p, '-TERM');
+    // An agent that ignores TERM (the orphan of the 7207 run did) is ended with KILL, after the same identity check.
+    await this.until(async () => (await stillThere()).length === 0, 8_000);
+    for (const p of await stillThere()) await end(p, '-KILL');
+    const gone = await this.until(async () => (await stillThere()).length === 0, 12_000);
     for (const f of this.config.stateFiles ?? []) await this.g.exec(`rm -f ${sq(await this.path(f.path))}`);
     return { ended: left.length, gone: gone.ok };
   }
