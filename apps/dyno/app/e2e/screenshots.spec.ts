@@ -264,7 +264,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
     name: 'command-palette',
     path: '/#/',
     ready: async (page) => {
-      await page.keyboard.press('ControlOrMeta+p');
+      await pressMod(page, 'Mod+p');
       await expect(page.getByRole('combobox', { name: /Type a command/ })).toBeFocused();
       await page.clock.runFor(500);
       await expect(page.getByRole('option').first()).toBeVisible();
