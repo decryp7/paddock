@@ -19,6 +19,7 @@ as Debrief's two accessibility rules), `storeFlagsAllowedIn` (regex of the file 
 | Rule | Rule no. | What |
 |---|---|---|
 | `paddock/onpush-explicit` | 27 | `changeDetection: ChangeDetectionStrategy.OnPush` is written out; `Eager`/`Default` needs a comment |
+| `paddock/no-control-or-meta` | e2e | no `ControlOrMeta` in e2e code: press `Mod` with `pressMod` (the page's platform, not the test machine's) |
 | `paddock/no-zone` | 27, 38 | no `zone.js`, no `provideZoneChangeDetection`, no `fakeAsync`/`tick`/`waitForAsync` |
 | `paddock/effect-state` | 28 | an effect that writes state has an `// effect-state: <reason>` comment above it |
 | `paddock/signal-read-before-await` | 29 | `this.<signal>()` after the first `await` (class fields from `signal`, `computed`, `input`, ...); `// after-await:` marks a race guard |

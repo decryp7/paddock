@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { modKey, tabKey, walkStep } from './keyboard.ts';
+import { bindingFor, modKey, tabKey, walkStep } from './keyboard.ts';
 
 test('a walk goes on while every stop is new', () => {
   assert.equal(walkStep([], 'a'), 'continue');
@@ -46,4 +46,16 @@ test('Mod is the key the page binds it to: Cmd for a Mac or iOS navigator, Ctrl 
   assert.equal(modKey({ platform: 'Win32', userAgent: chrome }), 'Control');
   assert.equal(modKey({ platform: 'Linux x86_64', userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15' }), 'Control');
   assert.equal(modKey({}), 'Control');
+});
+
+test('a binding keeps every key and swaps only its Mod, wherever the combination puts it', () => {
+  assert.equal(bindingFor('Mod+Shift+P', 'Meta'), 'Meta+Shift+P');
+  assert.equal(bindingFor('Mod+Alt+K', 'Control'), 'Control+Alt+K');
+  assert.equal(bindingFor('Mod+Comma', 'Meta'), 'Meta+Comma');
+  assert.equal(bindingFor('Shift+Mod+z', 'Control'), 'Shift+Control+z');
+  assert.equal(bindingFor('Mod+Enter', 'Meta'), 'Meta+Enter');
+  assert.equal(bindingFor('Mod++', 'Meta'), 'Meta++');
+  assert.throws(() => bindingFor('Mod', 'Meta'), /no Mod modifier/, 'a lone Mod is a key name, not a modifier');
+  assert.throws(() => bindingFor('Shift+z', 'Meta'), /no Mod modifier/);
+  assert.throws(() => bindingFor('Mdo+k', 'Control'), /Mdo\+k/);
 });

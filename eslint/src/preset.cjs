@@ -87,6 +87,12 @@ function preset(options) {
       },
     },
     {
+      // E2E code presses `Mod` with `pressMod`, never `ControlOrMeta` (WebKit on a Linux runner emulates a Mac).
+      files: ['e2e/**/*.ts', '**/e2e/**/*.ts', 'scripts/**/*.ts'],
+      plugins: { paddock: plugin },
+      rules: { 'paddock/no-control-or-meta': 'error' },
+    },
+    {
       files: ['**/*.html'],
       extends: [angular.configs.templateRecommended, angular.configs.templateAccessibility],
       plugins: { paddock: plugin },

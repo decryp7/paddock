@@ -3,9 +3,10 @@ import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith, openView, runCommand } from './tools-support';
 import { chooseMenu } from './menu-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 async function exportEvents(page: Page) {
-  await page.keyboard.press('ControlOrMeta+Shift+e');
+  await pressMod(page, 'Mod+Shift+e');
   const dialog = page.getByRole('dialog', { name: 'Export events' });
   await expect(dialog.getByRole('status')).toContainText('events will be exported');
   await dialog.getByRole('button', { name: 'Export…' }).click();

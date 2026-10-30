@@ -1022,3 +1022,14 @@ Mac. Headless tests a mode the product never runs (the challenge test is about t
 would be a product code path that must never be used, and an off-screen headful window still shows in the Dock and takes
 the focus (Spotter's case). Also rejected: keeping the headless tests on the hosts, since even a headless Chrome is a
 process of the user's session.
+
+## E2E keys and the platform follow the page, never the test machine (2026-10-30)
+WebKit on a Linux runner emulates `devices['Desktop Safari']`: `navigator.platform` says Linux but the user agent says
+Macintosh, so the app binds `Mod` to Cmd and shows ⌘ in menus, while Playwright's `ControlOrMeta` presses Ctrl and
+`process.platform` is `linux`. Moving the WebKit job into the Linux container showed it as seven failures (a perspective
+shortcut, the settings shortcut, two menu-key texts) after CI run 7134 had shown the first instance; the same kind came
+back (ER-21). A second race came with it: until the app context loads the shell offers every page, so a link count taken
+right after `frame.open()` was stale on a slow machine. **Rule:** e2e code presses `Mod` with `pressMod` and reads the
+platform with `pageModKey` / `isMac` (platform and user agent, as the app does), never `ControlOrMeta` or `process.platform`;
+the lint rule `paddock/no-control-or-meta` (Debrief: `no-restricted-syntax`) bans the first; and a test counts page links
+only after the app context has loaded.

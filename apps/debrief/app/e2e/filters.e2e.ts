@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { gridTotal, initialTotal, openApp, parseCount } from './app';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 test.describe('filters', () => {
   test.beforeEach(async ({ page }) => openApp(page));
@@ -59,7 +60,7 @@ test.describe('filters', () => {
     await initialTotal(page);
     // Close the Explorer first: with it open the search field is only ~200 px wide at this window size, and once the
     // "+N" partial-match note joins the inline buttons the text area has no width left (see the report).
-    await page.keyboard.press('ControlOrMeta+b');
+    await pressMod(page, 'Mod+b');
     const search = page.getByTestId('query-field');
     // "imeout" is never a whole word: every hit is a partial match the background scan adds.
     await search.fill('imeout');

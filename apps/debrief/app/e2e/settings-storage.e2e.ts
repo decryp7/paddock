@@ -1,6 +1,7 @@
 import { expect, Page, test } from '@playwright/test';
 import { openApp, APP_LOAD_TIMEOUT } from './app';
 import { expectNoSeriousViolations } from './axe';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // Settings ▸ Storage against the browser build's mock storage backend
 // (src/app/settings/storage/mock-storage-backend.ts), which mimics the engine's categories and protections.
@@ -10,7 +11,7 @@ const table = (page: Page) => settingsDialog(page).getByRole('table', { name: "D
 const row = (page: Page, id: string) => settingsDialog(page).locator(`tr[data-category="${id}"]`);
 
 async function openStorage(page: Page) {
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   await expect(settingsDialog(page)).toBeVisible();
   await settingsDialog(page).getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Disk usage' }).click();
   await expect(table(page)).toBeVisible();
@@ -62,7 +63,7 @@ test('a data category asks on its own; cancelling keeps it, confirming clears it
 test('a failed measurement shows an inline error with Retry', async ({ page }) => {
   await page.goto('/?mockStorageFail=1');
   await expect(page.getByRole('grid', { name: 'Events' })).toBeVisible({ timeout: APP_LOAD_TIMEOUT });
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   await settingsDialog(page).getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Disk usage' }).click();
   const alert = settingsDialog(page).getByRole('alert');
   await expect(alert).toContainText("Could not measure Debrief's storage");
@@ -74,7 +75,7 @@ test('a failed measurement shows an inline error with Retry', async ({ page }) =
 
 test('"Clear cache…" in the command palette opens the Storage section', async ({ page }) => {
   await openApp(page);
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill('clear cache');
   await expect(page.locator('debrief-command-palette').getByRole('option').first()).toContainText('Clear cache…');

@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { openApp } from './app';
 import { runCommand } from './analysis-support';
 import { expectNoSeriousViolations } from './axe';
+import { pageModKey } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 test.describe('grid multi-select', () => {
   test.beforeEach(async ({ page }) => openApp(page));
@@ -34,7 +35,7 @@ test.describe('grid multi-select', () => {
 
     await rows.nth(1).click();
     await rows.nth(2).click({ modifiers: ['Shift'] });
-    await rows.nth(4).click({ modifiers: ['ControlOrMeta'] });
+    await rows.nth(4).click({ modifiers: [await pageModKey(page)] });
     await expect(page.locator('debrief-events-grid [role=row][aria-selected=true]')).toHaveCount(3);
 
     await runCommand(page, 'Infer pattern from selected lines');
@@ -49,9 +50,9 @@ test.describe('grid multi-select', () => {
     const selected = page.locator('debrief-events-grid [role=row][aria-selected=true]');
 
     await rows.nth(0).click();
-    await rows.nth(3).click({ modifiers: ['ControlOrMeta'] });
+    await rows.nth(3).click({ modifiers: [await pageModKey(page)] });
     await expect(selected).toHaveCount(2);
-    await rows.nth(3).click({ modifiers: ['ControlOrMeta'] });
+    await rows.nth(3).click({ modifiers: [await pageModKey(page)] });
     await expect(selected).toHaveCount(1);
 
     await rows.nth(4).click();

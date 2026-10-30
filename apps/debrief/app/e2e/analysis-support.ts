@@ -1,8 +1,9 @@
 import { expect, Page } from '@playwright/test';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 /** Runs a command from the palette by its title. */
 export async function runCommand(page: Page, title: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await expect(input).toBeFocused();
   await input.fill(title);

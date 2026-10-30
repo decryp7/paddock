@@ -3,6 +3,7 @@ import { initialTotal, openApp } from './app';
 import { runCommand } from './analysis-support';
 import { openAppWith } from './mock-url';
 import { showProfileEditor } from './menu-support';
+import { pressHostMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 async function openProfile(page: Page) {
   await openApp(page);
@@ -47,7 +48,8 @@ test.describe('profile editor', () => {
     await openProfile(page);
     await page.getByRole('tab', { name: 'TOML', exact: true }).click();
     const toml = page.getByRole('textbox', { name: 'Profile TOML' });
-    await toml.press('ControlOrMeta+Home');
+    // A plain textarea: the browser's own Ctrl+Home, which follows the machine, not the page's platform.
+    await pressHostMod(toml, 'Mod+Home');
     await page.keyboard.type('this is = = not toml\n');
 
     const problem = page.locator('debrief-toml-editor .problem');

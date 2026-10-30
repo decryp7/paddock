@@ -8,6 +8,7 @@ module.exports = {
   'effect-state': require('./effect-state.cjs'),
   'signal-read-before-await': require('./signal-read-before-await.cjs'),
   'store-rules': require('./store-rules.cjs'),
+  'no-control-or-meta': require('./no-control-or-meta.cjs'),
   'no-raw-style-values': require('./no-raw-style-values.cjs'),
   'e2e-axe-through-kit': require('./e2e-axe.cjs'),
   ...templateRules,

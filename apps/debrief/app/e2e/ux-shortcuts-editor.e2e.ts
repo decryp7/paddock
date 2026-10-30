@@ -2,13 +2,14 @@ import { expect, Page, test } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // The shortcut editor (Settings ▸ Keyboard) and the cheat sheet that follows it. Overrides live in localStorage.
 
 const ALT_J = /Alt\+J|⌥J/;
 
 async function openEditor(page: Page) {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   await page.getByRole('combobox', { name: 'Type a command' }).fill('Edit keyboard shortcuts');
   await page.keyboard.press('Enter');
   const dialog = page.getByRole('dialog', { name: 'Settings' });
@@ -34,7 +35,7 @@ test.describe('shortcut editor', () => {
     // A key that another command already uses asks before it is taken.
     await row.locator('button.key').click();
     await expect(row.locator('button.key')).toContainText('Press keys');
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     const conflict = dialog.getByTestId('shortcut-conflict');
     await expect(conflict).toBeVisible();
     await dialog.getByTestId('shortcut-cancel').click();
