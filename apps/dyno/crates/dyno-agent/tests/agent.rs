@@ -807,8 +807,10 @@ fn baselines_learn_silently_then_judge_and_alarm_only_when_asked() {
     assert!(o.items.is_empty());
     // Four weeks of quiet history, first seen long ago.
     let now = dyno_agent::agent::now();
+    let held = h.fake.hold_samples();
+    assert!(held.wait_parked(Duration::from_secs(20)), "the sampler reached the hold");
     {
-        let core = dyno_agent::agent::lock(&s.core);
+        let mut core = dyno_agent::agent::lock(&s.core);
         core.store.set_meta("firstSeen", &now.minus(30 * DAY).millis().to_string()).unwrap();
         for q in 0..(28 * 96) {
             let p = HistoryPoint {
@@ -819,17 +821,32 @@ fn baselines_learn_silently_then_judge_and_alarm_only_when_asked() {
             };
             core.store.put_point(Tier::QuarterHour, &p).unwrap();
         }
+        // The judged values are the agent's recent samples, and whether its sampler has run yet depends on the machine (on
+        // the busy Windows runner it had not, CI runs 7166 and 7168): start from none, so the test never depends on it.
+        core.recent.clear();
     }
     h.fake.push_sample(dyno_platform::fake::quiet_sample(Timestamp(0)));
     let Reply::Baselines(o) = ask(&peer, Request::Baselines).unwrap() else {
         panic!("baselines")
     };
     assert!(matches!(o.learning, Learning::Ready { .. }), "{:?}", o.learning);
-    let cpu = o
-        .items
-        .iter()
-        .find(|i| i.subject == "System" && i.label == "CPU")
-        .expect("a CPU item");
+    assert!(o.items.is_empty(), "nothing is judged before a sample: {:?}", o.items);
+    // Sampling goes on: the CPU is judged once the agent has sampled it (waited for, whenever its sampler runs; the loop
+    // is a hang guard).
+    drop(held);
+    s.wake_sampler();
+    let mut judged = None;
+    for _ in 0..100 {
+        let Reply::Baselines(o) = ask(&peer, Request::Baselines).unwrap() else {
+            panic!("baselines")
+        };
+        judged = o.items.into_iter().find(|i| i.subject == "System" && i.label == "CPU");
+        if judged.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let cpu = judged.expect("a CPU item");
     assert_eq!(cpu.judgement.state, State::Usual, "{cpu:?}");
     assert!(cpu.judgement.phrase.starts_with("Usual for"), "{}", cpu.judgement.phrase);
 

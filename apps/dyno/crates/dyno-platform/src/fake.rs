@@ -20,7 +20,8 @@ use dyno_core::startup::StartupEntry;
 use dyno_core::time::Timestamp;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::Duration;
 
 /// A fallible fake operation, for [`Fake::fail`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -88,6 +89,62 @@ impl FakeState {
 #[derive(Debug, Clone, Default)]
 pub struct Fake {
     state: Arc<Mutex<FakeState>>,
+    gate: Arc<Gate>,
+}
+
+/// Whether [`SystemSensors::sample`] is held, and whether a caller waits at the hold.
+#[derive(Debug, Default)]
+struct Gate {
+    state: Mutex<GateState>,
+    changed: Condvar,
+}
+
+#[derive(Debug, Default)]
+struct GateState {
+    held: bool,
+    parked: bool,
+}
+
+impl Gate {
+    fn lock(&self) -> MutexGuard<'_, GateState> {
+        self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Waits while held (the sampler's side).
+    fn pass(&self) {
+        let mut g = self.lock();
+        while g.held {
+            g.parked = true;
+            self.changed.notify_all();
+            g = self.changed.wait(g).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        g.parked = false;
+    }
+}
+
+/// Holds the fake's sensors (from [`Fake::hold_samples`]): every [`SystemSensors::sample`] waits until this is dropped.
+#[derive(Debug)]
+pub struct SampleHold(Arc<Gate>);
+
+impl SampleHold {
+    /// Waits until a sampler waits at the hold, so no sample is on its way any more; false if none came within `limit`
+    /// (a hang guard).
+    pub fn wait_parked(&self, limit: Duration) -> bool {
+        let g = self.0.lock();
+        let (g, _) = self
+            .0
+            .changed
+            .wait_timeout_while(g, limit, |g| !g.parked)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        g.parked
+    }
+}
+
+impl Drop for SampleHold {
+    fn drop(&mut self) {
+        self.0.lock().held = false;
+        self.0.changed.notify_all();
+    }
 }
 
 impl Fake {
@@ -103,6 +160,13 @@ impl Fake {
     /// Reads or changes the shared state.
     pub fn with<R>(&self, f: impl FnOnce(&mut FakeState) -> R) -> R {
         f(&mut self.lock())
+    }
+
+    /// Holds sampling until the returned guard is dropped: a test can then see the agent before its next sample, whenever
+    /// its sampler thread happens to run.
+    pub fn hold_samples(&self) -> SampleHold {
+        self.gate.lock().held = true;
+        SampleHold(self.gate.clone())
     }
 
     /// Queues a sample.
@@ -163,6 +227,7 @@ impl NetworkLinks for Fake {
 
 impl SystemSensors for Fake {
     fn sample(&mut self, now: Timestamp) -> SystemSample {
+        self.gate.pass();
         let mut st = self.lock();
         let mut s = match st.samples.pop_front() {
             Some(s) => s,
