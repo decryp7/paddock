@@ -1,5 +1,7 @@
 //! Path globs for waivers: `*` within a segment, `**` as a whole segment across segments, `?` one character.
 //!
+//! A pattern whose only wildcard is a trailing `*` is a prefix match, as in conformance's `pathMatches` (`apps/*` covers `apps/x/y`).
+//!
 //! Matching is linear in the product of the pattern and the path (the classic two-pointer wildcard algorithm per segment, and a
 //! table over segments for `**`), never exponential, and a pattern is bounded when it is read ([`validate_glob`]).
 
@@ -55,6 +57,13 @@ fn segment(p: &[u8], t: &[u8], steps: &mut usize) -> bool {
 
 /// [`path_matches`] and the number of steps it took (a test of the bound counts steps, not seconds).
 pub fn path_matches_counted(pattern: &str, path: &str) -> (bool, usize) {
+    // conformance's dialect (`pathMatches`): a pattern whose only wildcard is a trailing `*` is a prefix match, so `apps/*` covers
+    // everything below `apps/` and `*` covers everything
+    if let Some(prefix) = pattern.strip_suffix('*')
+        && !prefix.contains(['*', '?'])
+    {
+        return (path.starts_with(prefix), prefix.len().min(path.len()) + 1);
+    }
     let mut steps = 0usize;
     let ps: Vec<&[u8]> = pattern.split('/').map(str::as_bytes).collect();
     let ts: Vec<&[u8]> = path.split('/').map(str::as_bytes).collect();
@@ -90,7 +99,14 @@ mod tests {
         assert!(m("src/*.rs", "src/a.rs") && !m("src/*.rs", "src/x/a.rs"));
         assert!(m("src/**", "src/x/y/a.rs") && m("**/*.rs", "a.rs") && m("**/*.rs", "src/x/a.rs"));
         assert!(!m("*.rs", "src/a.rs") && m("a?c", "abc") && !m("a?c", "a/c"));
-        assert!(m("apps/*", "apps/pitcrew") && !m("apps/*", "apps/pitcrew/x"));
+        assert!(
+            m("apps/*", "apps/pitcrew")
+                && m("apps/*", "apps/pitcrew/x")
+                && !m("apps/*", "app/x")
+                && m("*", "any/thing")
+                && m("src/fo*", "src/foo/bar")
+        );
+        assert!(!m("src/*.rs", "src/x/a.rs"), "a star in the middle still stays in its segment");
         assert!(m("exact.toml", "exact.toml") && !m("exact.toml", "exact.tom"));
         assert!(m("a*b*c", "aXXbYYc") && !m("a*b*c", "aXXbYY") && m("*", "") && m("**", "") && m("src/**/x.rs", "src/x.rs"));
     }

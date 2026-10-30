@@ -125,26 +125,40 @@ impl TextIndex {
     }
 }
 
+/// How many files' texts are kept at once.
+pub(super) const TEXT_CACHE_FILES: usize = 16;
+
 /// Fetches each file's text once per run, whatever the number of results in it.
 pub(super) struct Texts<'a> {
     fetch: &'a dyn Fn(&RepoPath) -> Option<String>,
-    cache: std::cell::RefCell<BTreeMap<String, Option<std::rc::Rc<TextIndex>>>>,
+    cache: std::cell::RefCell<(BTreeMap<String, Option<std::rc::Rc<TextIndex>>>, std::collections::VecDeque<String>)>,
 }
 
 impl<'a> Texts<'a> {
     pub(super) fn new(fetch: &'a dyn Fn(&RepoPath) -> Option<String>) -> Texts<'a> {
         Texts {
             fetch,
-            cache: std::cell::RefCell::new(BTreeMap::new()),
+            cache: std::cell::RefCell::new((BTreeMap::new(), std::collections::VecDeque::new())),
         }
     }
 
+    /// The file's text, from the cache when it is there. The cache keeps the last [`TEXT_CACHE_FILES`] files, so a report that spreads
+    /// over thousands of files does not hold them all in memory (the results of one file are normally together).
     pub(super) fn get(&self, path: &RepoPath) -> Option<std::rc::Rc<TextIndex>> {
-        self.cache
-            .borrow_mut()
-            .entry(path.as_str().to_owned())
-            .or_insert_with(|| (self.fetch)(path).map(|t| std::rc::Rc::new(TextIndex::new(t))))
-            .clone()
+        let key = path.as_str();
+        if let Some(hit) = self.cache.borrow().0.get(key) {
+            return hit.clone();
+        }
+        let fresh = (self.fetch)(path).map(|t| std::rc::Rc::new(TextIndex::new(t)));
+        let mut cache = self.cache.borrow_mut();
+        if cache.1.len() >= TEXT_CACHE_FILES
+            && let Some(old) = cache.1.pop_front()
+        {
+            cache.0.remove(&old);
+        }
+        cache.1.push_back(key.to_owned());
+        cache.0.insert(key.to_owned(), fresh.clone());
+        fresh
     }
 }
 

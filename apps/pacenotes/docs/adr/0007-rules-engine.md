@@ -47,9 +47,9 @@ rule parses the file again** (`find_all` parses its target), and a file with a m
 enclosing symbol; so a pack of N rules costs N parses per file. Taking the index's single parse tree in `find_all` (and the outline from
 the same parse) is the follow-up and belongs with the engine wiring. Hostile input is bounded in counted steps, not seconds: 2 MiB
 per file (the parser's default), 500,000 nodes, 1,000 matches, 5,000,000 steps per file over all attempts and 100,000 per attempt, and
-a `CancelToken` checked every 256 nodes; a search that stops early returns a `Truncated` reason and the caller reports a partial result
+a `CancelToken` checked every 256 nodes and every 4,096 match steps (every token compared for a repeated placeholder is a step, compared lazily with an early exit, so no comparison escapes the budget; an attempt that runs out marks the result truncated); a search that stops early returns a `Truncated` reason and the caller reports a partial result
 (exit code 3). Waiver globs are matched in time linear in pattern length times path length and bounded when read (256 bytes, 16 stars).
-SARIF and rdjson fetch each file's text once per run and find lines by binary search over a line-start index.
+SARIF `absent` baseline states are produced only when the report asks for them (a baselined finding no longer found has no location). SARIF and rdjson fetch each file's text once per run (the cache keeps the last 16 files) and find lines by binary search over a line-start index.
 
 ## Consequences
 

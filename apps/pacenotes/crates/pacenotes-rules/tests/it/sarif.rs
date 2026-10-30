@@ -438,3 +438,29 @@ fn a_clippy_sarif_fixture_imports_with_its_ids_severities_and_byte_columns() {
         "no help text: the generated sentence"
     );
 }
+
+#[test]
+fn the_text_cache_is_bounded_so_a_wide_report_does_not_hold_every_file() {
+    let calls = std::cell::Cell::new(0usize);
+    let fetch = |_: &RepoPath| {
+        calls.set(calls.get() + 1);
+        Some("one\n".to_owned())
+    };
+    let names: Vec<String> = (0..20).map(|i| format!("src/f{i}.rs")).collect();
+    let grouped: Vec<_> = names
+        .iter()
+        .flat_map(|n| (0..3).map(move |l| finding("mine", Severity::Low, n, 1, &format!("{n}{l}"))))
+        .collect();
+    write_sarif(&report(grouped, vec![]), &[], &[], &fetch);
+    assert_eq!(calls.get(), 20, "results of one file together: one fetch each");
+    calls.set(0);
+    let cyclic: Vec<_> = (0..2)
+        .flat_map(|r| names.iter().map(move |n| finding("mine", Severity::Low, n, 1, &format!("{n}{r}"))))
+        .collect();
+    write_sarif(&report(cyclic, vec![]), &[], &[], &fetch);
+    assert_eq!(
+        calls.get(),
+        40,
+        "more files than the cache holds are fetched again, so memory stays bounded"
+    );
+}

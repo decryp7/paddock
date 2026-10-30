@@ -313,7 +313,14 @@ impl SuppressionFile {
         for key in table.keys().filter(|k| !matches!(k.as_str(), "version" | "waiver" | "suppression")) {
             errors.push(WaiverError::Syntax(format!("unknown key {key:?} at the top")));
         }
-        let list = |name: &str| table.get(name).and_then(toml::Value::as_array).cloned().unwrap_or_default();
+        let mut list = |name: &str| match table.get(name) {
+            None => Vec::new(),
+            Some(toml::Value::Array(a)) => a.clone(),
+            Some(_) => {
+                errors.push(WaiverError::Syntax(format!("`{name}` must be written as `[[{name}]]` tables")));
+                Vec::new()
+            }
+        };
         let (waivers, suppressions) = (list("waiver"), list("suppression"));
         if waivers.len() + suppressions.len() > MAX_ENTRIES {
             return whole(WaiverError::Syntax(format!("more than {MAX_ENTRIES} entries")));
@@ -440,6 +447,15 @@ expires = "2027-01-01"
             assert!(err.contains(expect), "{text:?} -> {err}");
         }
         assert!(SuppressionFile::parse(&"#".repeat(MAX_FILE_BYTES + 1)).is_err());
+    }
+
+    #[test]
+    fn a_wrongly_typed_top_level_value_is_reported_and_the_rest_still_applies() {
+        let (file, errors) = SuppressionFile::parse_lenient(
+            "version = 1\nwaiver = \"oops\"\n[[suppression]]\nscope = \"file\"\npath = \"a.rs\"\nreason = \"r\"\n",
+        );
+        assert_eq!((file.suppressions.len(), errors.len()), (1, 1));
+        assert!(errors[0].to_string().contains("`waiver` must be written as `[[waiver]]` tables"));
     }
 
     #[test]

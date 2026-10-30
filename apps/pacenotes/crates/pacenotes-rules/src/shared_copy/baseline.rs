@@ -122,16 +122,24 @@ impl Baseline {
             return Err(BaselineError::Syntax(format!("more than {MAX_ENTRIES} findings")));
         }
         let mut entries = Vec::with_capacity(raw.finding.len());
+        let mut seen = BTreeSet::new();
         for (i, e) in raw.finding.iter().enumerate() {
             let bad = |problem: String| BaselineError::Entry { number: i + 1, problem };
-            entries.push(BaselineEntry {
+            let entry = BaselineEntry {
                 rule: rule_id(&e.rule).map_err(bad)?,
                 rule_version: e.rule_version,
                 fingerprint: FindingFingerprint::from_hex(&e.fingerprint)
                     .ok_or_else(|| bad("the fingerprint is not 64 hex digits".to_owned()))?,
                 ordinal: e.ordinal,
                 first_seen: IsoDate::parse(&e.first_seen).map_err(|err| bad(err.to_string()))?,
-            });
+            };
+            if !seen.insert((entry.rule.clone(), entry.fingerprint, entry.ordinal)) {
+                return Err(bad(format!(
+                    "the finding {} with this fingerprint and ordinal {} is listed twice; delete one",
+                    entry.rule, entry.ordinal
+                )));
+            }
+            entries.push(entry);
         }
         Ok(Baseline { entries })
     }

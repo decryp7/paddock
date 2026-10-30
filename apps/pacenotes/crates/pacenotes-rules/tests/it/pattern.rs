@@ -293,3 +293,35 @@ fn measure_matcher() {
     let found = p.find_all(nested.as_bytes(), &MatchLimits::default(), &live);
     println!("hostile 2000-deep nesting: {:?} ({:?})", t.elapsed(), found.truncated);
 }
+
+/// The reviewer's shape: a repeated run placeholder against a call with many large arguments compared tokens without counting them.
+/// Every token compared is a step now, so the search ends by its budget and says so.
+#[test]
+fn a_repeated_run_placeholder_cannot_escape_the_step_budget() {
+    let arg = (0..100).map(|i| format!("v{i}")).collect::<Vec<_>>().join(" + ");
+    let args = (0..60).map(|i| format!("({arg} + {i})")).collect::<Vec<_>>().join(", ");
+    let code = format!("fn g() {{ f({args}, y); }}");
+    let p = Pattern::compile(ParseLanguage::Rust, "f($$$A, $$$A, z)").unwrap();
+    let found = p.find_all(
+        code.as_bytes(),
+        &MatchLimits {
+            max_steps: 200_000,
+            ..MatchLimits::default()
+        },
+        &CancelToken::new(),
+    );
+    assert!(found.matches.is_empty());
+    assert_eq!(found.truncated, Some(Truncated::Steps), "the result must say it is partial");
+}
+
+#[test]
+fn a_cancel_is_noticed_inside_a_match_attempt() {
+    let arg = (0..100).map(|i| format!("v{i}")).collect::<Vec<_>>().join(" + ");
+    let args = (0..60).map(|i| format!("({arg} + {i})")).collect::<Vec<_>>().join(", ");
+    let code = format!("fn g() {{ f({args}, y); }}");
+    let p = Pattern::compile(ParseLanguage::Rust, "f($$$A, $$$A, z)").unwrap();
+    let stopped = CancelToken::new();
+    stopped.cancel();
+    let found = p.find_all(code.as_bytes(), &MatchLimits::default(), &stopped);
+    assert_eq!(found.truncated, Some(Truncated::Cancelled));
+}

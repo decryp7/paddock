@@ -405,8 +405,13 @@ impl Pattern {
                     steps: 0,
                     total: &mut total_steps,
                     total_max: limits.max_steps,
+                    cancel,
+                    exhausted: false,
+                    cancelled: false,
                 };
-                if m.node(root_pattern, node) {
+                let matched = m.node(root_pattern, node);
+                let (exhausted, cancelled) = (m.exhausted, m.cancelled);
+                if matched {
                     let (s, e) = (node.start_position(), node.end_position());
                     if let (Some(a), Some(b)) = (
                         Position::new(s.row as u32 + 1, s.column as u32 + 1),
@@ -421,9 +426,16 @@ impl Pattern {
                         });
                     }
                 }
-                if total_steps > limits.max_steps {
-                    found.truncated = Some(Truncated::Steps);
+                if cancelled {
+                    found.truncated = Some(Truncated::Cancelled);
                     break;
+                }
+                if exhausted {
+                    // an attempt that ran out is reported, never silently "no match"; the file ends when its whole budget is gone
+                    found.truncated.get_or_insert(Truncated::Steps);
+                    if total_steps > limits.max_steps {
+                        break;
+                    }
                 }
             }
             if cursor.goto_first_child() {
@@ -449,23 +461,33 @@ fn range_text(src: &str, nodes: &[Node<'_>]) -> String {
     }
 }
 
-/// The significant leaf tokens under `nodes` (comments and layout left out), so `a.b` and `a . b` are the same.
-fn tokens<'t>(src: &'t str, nodes: &[Node<'t>]) -> Vec<&'t str> {
-    let mut out = Vec::new();
-    let mut stack: Vec<Node<'t>> = nodes.iter().rev().copied().collect();
-    while let Some(n) = stack.pop() {
-        if n.is_extra() {
-            continue;
-        }
-        if n.child_count() == 0 {
-            out.push(&src[n.byte_range()]);
-        } else {
-            let mut cursor = n.walk();
-            let kids: Vec<Node<'t>> = n.children(&mut cursor).collect();
-            stack.extend(kids.into_iter().rev());
+/// The significant leaf tokens under some nodes (comments and layout left out), produced one at a time, so `a.b` and `a . b` are the
+/// same and a comparison can stop at the first difference.
+struct Leaves<'t> {
+    stack: Vec<Node<'t>>,
+}
+
+impl<'t> Leaves<'t> {
+    fn new(nodes: &[Node<'t>]) -> Leaves<'t> {
+        Leaves {
+            stack: nodes.iter().rev().copied().collect(),
         }
     }
-    out
+
+    fn next(&mut self, src: &'t str) -> Option<&'t str> {
+        while let Some(n) = self.stack.pop() {
+            if n.is_extra() {
+                continue;
+            }
+            if n.child_count() == 0 {
+                return Some(&src[n.byte_range()]);
+            }
+            let mut cursor = n.walk();
+            let kids: Vec<Node<'t>> = n.children(&mut cursor).collect();
+            self.stack.extend(kids.into_iter().rev());
+        }
+        None
+    }
 }
 
 struct Matcher<'a, 't> {
@@ -478,6 +500,11 @@ struct Matcher<'a, 't> {
     /// Steps of the whole file.
     total: &'a mut usize,
     total_max: usize,
+    cancel: &'a CancelToken,
+    /// Set when this attempt or the file ran out of steps.
+    exhausted: bool,
+    /// Set when the cancel token fired.
+    cancelled: bool,
 }
 
 impl<'t> Matcher<'_, 't> {
@@ -489,12 +516,37 @@ impl<'t> Matcher<'_, 't> {
     fn step(&mut self) -> bool {
         self.steps += 1;
         *self.total += 1;
-        self.steps <= MAX_STEPS && *self.total <= self.total_max
+        if self.steps.is_multiple_of(4096) && self.cancel.is_cancelled() {
+            self.cancelled = true;
+            return false;
+        }
+        if self.cancelled || self.steps > MAX_STEPS || *self.total > self.total_max {
+            self.exhausted = true;
+            return false;
+        }
+        true
+    }
+
+    /// Whether two captures are the same tokens, compared lazily with an early exit; every token compared is a step.
+    fn same_tokens(&mut self, a: &[Node<'t>], b: &[Node<'t>]) -> bool {
+        let (mut ia, mut ib) = (Leaves::new(a), Leaves::new(b));
+        loop {
+            match (ia.next(self.tgt), ib.next(self.tgt)) {
+                (None, None) => return true,
+                (Some(x), Some(y)) => {
+                    if !self.step() || x != y {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
+        }
     }
 
     fn bind(&mut self, name: &str, nodes: &[Node<'t>]) -> bool {
-        if let Some((_, old)) = self.caps.iter().find(|(n, _)| n == name) {
-            return tokens(self.tgt, old) == tokens(self.tgt, nodes);
+        if let Some(i) = self.caps.iter().position(|(n, _)| n == name) {
+            let old = self.caps[i].1.clone();
+            return self.same_tokens(&old, nodes);
         }
         self.caps.push((name.to_owned(), nodes.to_vec()));
         true

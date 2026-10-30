@@ -105,3 +105,23 @@ fn a_baseline_round_trips_and_a_bad_one_is_refused_with_a_message() {
     assert!(Baseline::from_toml("not toml [").is_err());
     assert!(Baseline::from_toml(&"#".repeat(9 * 1024 * 1024)).is_err());
 }
+
+#[test]
+fn a_baseline_that_lists_a_finding_twice_is_refused_with_a_message() {
+    let f = finding("r", Severity::Low, "a.rs", 1, "x");
+    let text = Baseline {
+        entries: vec![entry_of(&f, 1), entry_of(&f, 1)],
+    }
+    .to_toml();
+    let err = Baseline::from_toml(&text).unwrap_err().to_string();
+    assert!(err.contains("finding number 2") && err.contains("listed twice"), "{err}");
+    assert!(
+        Baseline::from_toml(
+            &Baseline {
+                entries: vec![entry_of(&f, 1), entry_of(&f, 2)]
+            }
+            .to_toml()
+        )
+        .is_ok()
+    );
+}
