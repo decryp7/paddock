@@ -731,7 +731,7 @@ mod tests {
         cmd.args(["-c", "sleep 1"]);
         let mut process = Supervised::spawn(cmd).unwrap();
         // 1 s at 1 ms ticks is about 1000 ticks, ten times the idle limit of 100 ticks: only the CPU use keeps the wait going.
-        let quit = wait_to_quit(&mut process, CLOSE_PATIENCE, working(), Yield);
+        let quit = wait_to_quit(&mut process, CLOSE_PATIENCE, working(), Yield(0));
         assert!(quit);
     }
 
@@ -743,7 +743,7 @@ mod tests {
         let mut cmd = std::process::Command::new("/bin/sh");
         cmd.args(["-c", "exec sleep 300"]);
         let mut process = Supervised::spawn(cmd).unwrap();
-        let quit = wait_to_quit(&mut process, CLOSE_PATIENCE, |_| Some(Duration::from_secs(1)), Yield);
+        let quit = wait_to_quit(&mut process, CLOSE_PATIENCE, |_| Some(Duration::from_secs(1)), Yield(0));
         assert!(!quit);
         process.kill();
     }
