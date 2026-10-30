@@ -1,9 +1,9 @@
 # 1. The `paddock-plugin` family: one out-of-process plugin platform for Debrief, Pacenotes and Dyno
 
-- Status: proposed (2026-10-23; revised 2026-10-31 after an independent review). **Built** in Paddock 0.3.0 (plan X51,
-  2026-10-25) with the differences under "Implementation notes". The revision adds what Debrief 1.2 needs before PH1 to
-  PH4 start: the OS sandbox in Paddock, streamed and host-side extension calls, liveness, and parallelism and cost. The
-  coordinator accepts it after a confirmation review.
+- Status: Accepted (2026-10-31), after an independent review and a confirmation review. Proposed 2026-10-23; **built**
+  in Paddock 0.3.0 (plan X51, 2026-10-25) with the differences under "Implementation notes"; revised 2026-10-31 with what
+  Debrief 1.2 needs before PH1 to PH4 start: the OS sandbox in Paddock, streamed and host-side extension calls, liveness,
+  and parallelism and cost.
 - Versioning and consumption follow ADR 0014 §4 and §5 (one repository, path dependencies, tags per app), which
   supersede ADR 0006's versioning and consumption parts; this ADR does not depend on ADR 0006.
 - Related: Debrief ADR 0017 (one IPC, out-of-process plugins) and 0027 (plugin SDK); ADRs 0002 (declarative views), 0003
@@ -50,7 +50,7 @@ types `Record`, `Level`, `WireEvent`; ADR 0003), `pacenotes-plugin-api` (index q
 As built in `crates/paddock-plugin-api/src/protocol.rs` (abridged; what this revision adds is marked **new**):
 
 ```rust
-pub const PLATFORM_PROTOCOL: ProtocolVersion = ProtocolVersion::new(2, 0); // 1.x was Debrief's own protocol: refused
+pub const PLATFORM_PROTOCOL: ProtocolVersion = ProtocolVersion::new(2, 0); // stays 2.0 (see Versioning); 1.x refused
 
 pub enum PlatformRequest {                                   // app -> plugin
     Describe,                                                // -> Json(Described)
@@ -70,7 +70,7 @@ pub enum HostCall {                                          // plugin -> app, w
     Output { name: String, bytes: Vec<u8>, last: bool },     // -> Option<SavedOutput>; pieces <= OUTPUT_CHUNK (256 KiB)
     Elevated { tool: String, op: String, args: Json, timeout_ms: u64 }, // -> Result<Json, Fail>; granted ops only
     Log { lines: Vec<String>, dropped: u64 },                // -> (); at most 64 lines of at most 4 KiB
-    Extension { ns: String, minor: u16, body: Vec<u8> },     // new, at the end (a minor change): an app contract's host side
+    Extension { ns: String, minor: u16, body: Vec<u8> },     // new, appended at the end: an app contract's host side
 }
 ```
 
@@ -94,7 +94,7 @@ pub enum HostCall {                                          // plugin -> app, w
 `extension::Contract::NS` documents) and sends the minor with each call. A manifest lists each namespace and its minor as a
 contribution (`kind = "extension"`, `ns = "debrief.import.v1/0"`). The platform routes by `ns` and never decodes `body`.
 
-**Streamed extension calls (new, package 2.6).** The platform stays domain free, so it gets no `import_stream`. A contract
+**Streamed extension calls (new, package 2.6b).** The platform stays domain free, so it gets no `import_stream`. A contract
 may stream instead:
 
 - host: `Remote<C>::stream(&self, request: &C::Request, credit: u32) -> Result<RemoteStream<C>, HostError>`, where
@@ -106,7 +106,7 @@ may stream instead:
 - each item counts as call progress for the stall judgement (ADR 0031 §2);
 - Debrief's log, tail, profile and document imports are streamed calls of their `debrief.*` namespaces (ADR 0003).
 
-**Host-side extension calls (new, package 2.6).** `HostCall::Extension { ns, minor, body }` lets a plugin call an app
+**Host-side extension calls (new, package 2.6b).** `HostCall::Extension { ns, minor, body }` lets a plugin call an app
 contract back while it answers (Debrief's `View*` reads during an annotation). The app registers one handler per namespace on
 `HostServices`. As with `ReadFile`, while a host-side call is outstanding the host owes the plugin an answer, so the plugin
 gets no blocked ticks (ADR 0031 §2).
@@ -133,7 +133,9 @@ items, `Report`, answered host calls, lent-file reads), the child's CPU time and
 | `config.rs` `HostConfig::stop_grace` | 2 s to exit after a stop | S | stays |
 | `supervisor.rs` `NO_BUDGET` | 1 h for a call without a budget | L; C | a cap only where an operation declares one |
 
-Package 2.6 converts them, tested with a fake clock and fake run states (no sleeps). Until then they stay as listed.
+Packages 2.6c and 2.6d of the 1.2 plan convert them: ADR 0031's judge and run-state probe built once in `paddock-jobs` and
+`paddock-proc` (its WP-A1 and WP-A2 written directly as WP-B1), then `paddock-ipc` and `paddock-plugin-host` on the judge
+(WP-B2, WP-B3). Tests use a fake clock and fake run states (no sleeps). Until then they stay as listed.
 
 ### Capabilities, permissions and resources
 
@@ -150,7 +152,7 @@ Three separate things, all in the manifest:
 Decision: the manifest's `[resources]` (`memory_mib`, `cpu_percent`) is a *request*. The app's `MemoryPolicy` (`Cap { bytes }`
 or `Unlimited { machine_floor }` from `paddock-proc`, per plugin in the grants) sets the cap. The request is where the policy
 starts and what the Plugins view shows. `Permission::Memory`, `Permission::Cpu` and `Described::memory_limit` are removed in
-package 2.6 (no compatibility before v1). A cap stop is `LimitExceeded`, not a fault (plan 2.6).
+package 2.6a (no compatibility before v1). A cap stop is `LimitExceeded`, not a fault (plan 2.6a).
 
 `sandbox_for(&Manifest, &Grants) -> SandboxSpec` stays a pure function (tested table). The default is `SandboxSpec::locked()`.
 
@@ -192,9 +194,13 @@ AppContainer capabilities on Windows under `Launcher` containment. Without conta
 `.paddockplugin` = zip with `manifest.toml`, per-platform binaries (`bin/<target>/name`), `SHA256SUMS`, and a detached Ed25519
 `signature` over the canonical manifest plus sums. Trust levels:
 
-- `Builtin`: shipped with the app and **signed by the family plugin key**, one key for every app's built-in plugins (like
-  the single updater key from ADR 0014's amendment). The key is a CI secret and never on a workstation; the app passes
-  its public half as its built-in key list.
+- `Builtin`: shipped with the app and **signed by the family plugin key**, one key for every app's built-in plugins (one
+  per family, like the single updater key of ADR 0014's amendment, but **not that key**: the updater key is a
+  password-protected minisign key that Tauri's updater reads, while packages are signed with a plain Ed25519 seed in the
+  `paddock-plugin-secret-key` form that `paddock-plugin-package` reads; and one key per purpose keeps a leak of either
+  from signing the other kind of artifact). Its secret half lives only in the CI secret `PADDOCK_PLUGIN_SIGNING_KEY` and
+  the owner's backup; its public half is committed as each app's built-in key list. How to create it:
+  [plugin-signing-key.md](../plugin-signing-key.md).
 - `Signed`: a publisher key the user trusted.
 - `Unsigned`: for development only, refused unless the app's developer mode is on.
 
@@ -211,6 +217,10 @@ count as writing. Whatever the flags say, the OS sandbox still bounds what a plu
 - The plugin's `PLATFORM_PROTOCOL` major must equal the host's, and its minor must be one the host knows (the host runs
   older minors). Each `Extension` namespace carries its own major (in the name) and minor under the same rule. The rule
   exists once, in `paddock_ipc::ProtocolVersion` (`accepts`, `skew`, `introduced_in`, `mismatch`).
+- **The protocol stays 2.0 for this revision** (decided 2026-10-31). `HostCall::Extension` is appended at the end of
+  `HostCall`, and `PLATFORM_PROTOCOL` stays 2.0: no app has shipped protocol 2.0, and there is no compatibility promise
+  before v1. The minor rule above applies from the first release that ships protocol 2.0; the same holds for the
+  `Progress` frames of package 2.6d.
 - **No binary compatibility across a major.** A plugin built for an older major is refused with a message telling the
   user to rebuild it from source with the current SDK: `Refusal::PluginTooOld`, or `Refusal::Legacy` for Debrief's
   protocol 1 (user decision, 2026-10-31). The shared host has no hook for serving an old protocol.
@@ -224,7 +234,7 @@ count as writing. Whatever the flags say, the OS sandbox still bounds what a plu
 
 ### Parallelism and cost (rule 51, ER-20)
 
-- **Processes.** One process per plugin, started on first use and stopped when idle. Package 2.6's lifecycle replaces
+- **Processes.** One process per plugin, started on first use and stopped when idle. Package 2.6a's lifecycle replaces
   Debrief's `warm_up` of every built-in plugin
   (`debrief-plugin-host/src/builtins.rs`), so a project starts only the plugins it needs. Each process has its own memory
   cap (default 1 GiB, range 64 MiB to 4 GiB, `grants.rs`), measured as physical memory (rule 26).
@@ -237,20 +247,20 @@ count as writing. Whatever the flags say, the OS sandbox still bounds what a plu
   `FrameLimit`) and by convention about 64 KiB of events, so a stream holds about `credit x item size` in flight. The default
   is a `HostConfig` value behind an "Auto" setting; changing it needs a recorded benchmark.
 - **Parse threads.** A plugin that parses in parallel sizes its pool with `paddock_proc::threads(kind, class)` (ADR 0024
-  §1). CPU-bound work gets cores minus one **in total**, so the app limits concurrent bulk calls across plugins; each
+  §1; to be built, ADR 0024 rollout step 1). CPU-bound work gets cores minus one **in total**, so the app limits concurrent bulk calls across plugins; each
   plugin does not take cores minus one for itself.
 - **Priority class.** A plugin child serves live requests (sniffs, views, tools), so it is launched at `User`, never at
   `Background` or `Idle` (ADR 0024 §1). Today `Supervisor` leaves `ChildSpec::lower_priority` off. Priority is set per call:
   `Contract::role(&Request) -> WorkRole` (default `Live`) marks which requests are **Bulk** (an import) and which are
-  **Live** (a sniff, a tail the user is watching). These are rule 52's roles; rule 52 is on its way to main with
-  `fix/dyno-bundle-ui`. `serve` runs Bulk calls at the gentle level (`QOS_CLASS_UTILITY` on macOS, nice 10 on Linux,
+  **Live** (a sniff, a tail the user is watching). These are rule 52's roles (rule 52 is pending on main; its text is on
+  `fix/dyno-bundle-ui`). `serve` runs Bulk calls at the gentle level (`QOS_CLASS_UTILITY` on macOS, nice 10 on Linux,
   `THREAD_PRIORITY_BELOW_NORMAL` on Windows) and Live calls at normal level. Nothing a person waits on runs at a starvable
   level (`PRIO_DARWIN_BG`, QoS `BACKGROUND`, `SCHED_IDLE`).
 - **Cheaper operations.** Files are lent by range (`ReadFile`, 1 MiB pieces), not copied whole. Events cross in batches
   per item, not one per frame. Sniffing is declarative where it can be (extensions and magic in the manifest, so no process
-  starts; plan 2.6). Contract bodies are postcard, not JSON.
+  starts; plan 2.6a). Contract bodies are postcard, not JSON.
 - **Benchmark to record (rule 48).** Per-call overhead on each OS: an empty unary `Extension` round trip, and a streamed call
-  of N 64 KiB items at credits 1, 4 and 16, in-process fake against a real child. Package 2.6 records it in
+  of N 64 KiB items at credits 1, 4 and 16, in-process fake against a real child. Package 2.6b records it in
   `docs/benchmarks.md` (shared code) before any number is quoted, and the default credit is chosen from it.
 
 ## Consequences
@@ -261,11 +271,21 @@ count as writing. Whatever the flags say, the OS sandbox still bounds what a plu
 - Cost: one more indirection (`Extension` bytes) for app contracts. Accepted, because it keeps the platform closed to change.
 - The OS sandbox becomes a family crate, so one tested implementation contains every child (plugins and workers).
 
-## Open questions
+## Alternatives considered
 
-- Async runtime in `paddock-ipc`: none (a synchronous core on threads), settled by the build.
-- Whether `HostCall::Extension` raises the protocol to 2.1, or keeps 2.0 because no app has shipped protocol 2.0 (pre-v1,
-  no compatibility promise). Default: 2.1, the rule as written.
+- **gRPC (protobuf over HTTP/2), or FlatBuffers.** Not chosen.
+  - *Weight:* gRPC brings an HTTP/2 stack, an async runtime and code generation (`protoc` or `tonic-build`) into every
+    plugin and host, for a link between two local processes. FlatBuffers adds a schema compiler and generated code.
+  - *Sandbox:* gRPC over TCP needs sockets that `paddock-sandbox` would then have to allow; a plugin with no network grant
+    should open none. The platform's endpoint is a private Unix socket or owner-only named pipe, inherited at launch.
+  - *Local first:* apps open no listener (offline by default; every network feature is opt-in), and a gRPC server is one.
+  - *Speed:* items are small (64 KiB batches of events, 1 MiB file pieces), so postcard over length-prefixed frames is
+    fast enough and FlatBuffers' zero-copy reads gain little. Package 2.6b's per-call benchmark (rule 48) confirms or
+    refutes this.
+  - *Languages:* plugins are Rust only (Debrief ADR 0017 dropped the polyglot SDK), so a language-neutral schema buys
+    nothing today. If non-Rust plugins are ever supported, a language-neutral schema such as protobuf can travel inside
+    the same frames (`Extension` bodies are opaque bytes), without HTTP/2.
+- **An async runtime in `paddock-ipc`.** Not chosen: a synchronous core on threads, with bounded queues, as built.
 
 ## Implementation notes (plan X51, 2026-10-25)
 
@@ -288,5 +308,5 @@ Built as described, with these deliberate differences:
   `fixture_v1`) and from a manifest (`Refusal::Legacy`). There is no binary legacy mode (user decision, 2026-10-31); the only
   compatibility is Debrief's source-level shim (ADR 0003 phase 3).
 - Still to build after the 2026-10-31 revision: `paddock-sandbox` (PH1); `Remote::stream`, `StreamContract`,
-  `HostCall::Extension`, `Contract::role`, resource requests with one memory policy, and the liveness conversion
-  (package 2.6); refusal texts that say "rebuild it from source" (PH3).
+  `HostCall::Extension`, `Contract::role` (package 2.6b); resource requests with one memory policy and the lifecycle
+  (2.6a); the liveness conversion (2.6c, 2.6d); refusal texts that say "rebuild it from source" (PH3).

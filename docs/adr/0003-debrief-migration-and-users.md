@@ -1,9 +1,9 @@
 # 3. Moving Debrief onto the platform, and who uses what
 
-- Status: proposed (2026-10-23; revised 2026-10-31 after an independent review and the user's decision of 2026-10-31: no
-  binary legacy mode). The coordinator accepts it after a confirmation review.
+- Status: Accepted (2026-10-31), after an independent review and a confirmation review. Proposed 2026-10-23; revised
+  2026-10-31 with the user's decisions of that day: no binary legacy mode; grants reset, trusted keys migrated.
 - Related: ADRs 0001 (the platform), 0002 (views), 0014 (monorepo); Debrief ADRs 0003 (scoped by this move), 0017, 0027;
-  plan [debrief-1-2.md](../plans/debrief-1-2.md) packages PH1 to PH4, 2.6, 0.5 (D1: move in 1.2)
+  plan [debrief-1-2.md](../plans/debrief-1-2.md) packages PH1 to PH4, 2.6a to 2.6d, 0.5 (D1: move in 1.2)
 
 ## Context
 
@@ -57,7 +57,7 @@ parallelism and cost).
 | `InvokeTool { tool, op, args, data_dir }` | `PlatformRequest::Invoke { tool, op, args }` | unary | `data_dir` dropped: the host starts the process in the plugin's data folder (`supervisor.rs`, `current_dir`) |
 | `StopTask { tool, task, data_dir }` | `PlatformRequest::Stop { task }` | unary | task ids are unique per plugin (`ToolTask::id`) |
 | `PullOutput { stream }` | removed: the plugin pushes `HostCall::Output` pieces | | see `SaveOutput` |
-| `Sniff { importer, file, head }` | `debrief.import.v1` `Sniff` | unary, Live | skipped when the manifest's declarative sniff decides (plan 2.6) |
+| `Sniff { importer, file, head }` | `debrief.import.v1` `Sniff` | unary, Live | skipped when the manifest's declarative sniff decides (plan 2.6a) |
 | `Import { importer, file, content }` | `debrief.import.v1` `Import` | stream of `Vec<WireEvent>`, Bulk; reply `ImportDone` | `content` stays a lent host file |
 | `ImportTail { importer, file, head, tail }` | `debrief.import.v1` `Tail` | stream, Live; reply `TailDone` | |
 | `SniffConfig`, `ParseConfig` | `debrief.config.v1` `Sniff`, `Parse` | unary; Live, Bulk | `Limits` carried in the body |
@@ -114,7 +114,7 @@ small copy and adopts the platform when tier 3 is built.
 - Third-party plugin authors must rebuild once; their sources compile unchanged until 1.4.
 - The shim is the only code that exists to serve the old contract, and it has a removal release.
 
-## Open questions
+## Decided questions
 
-- Whether the shim should also cover third-party plugins built from the published ADR 0027 SDK (none known). Proposal: yes
-  for sources (it costs nothing extra, it is the same re-export), never for binaries.
+- Does the shim also cover third-party plugins built from the published ADR 0027 SDK (none known)? **Yes for sources**
+  (it is the same re-export and costs nothing extra), **never for binaries** (user decision, 2026-10-31).

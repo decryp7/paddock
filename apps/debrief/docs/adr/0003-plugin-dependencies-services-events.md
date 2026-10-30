@@ -1,6 +1,7 @@
 # 3. Plugin dependencies, services, extension points and events
 
-- Status: accepted; **scoped and partly superseded** by [ADR 0017](0017-one-ipc-out-of-process-plugins.md) and family
+- Status: Accepted (2026-10-31, confirmation review of the amendment; first accepted 2026-10-17); **scoped and
+  partly superseded** by [ADR 0017](0017-one-ipc-out-of-process-plugins.md) and family
   [ADR 0001](../../../../docs/adr/0001-plugin-platform-crates.md) (see "Amendment: scope after the plugin platform" at
   the end)
 - Date: 2026-10-17
