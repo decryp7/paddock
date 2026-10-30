@@ -35,6 +35,9 @@ function executableOf(command, bundleDir) {
 
 /**
  * The live processes of one declared process spec: the installed bundle's Contents/MacOS/<name>, with the optional args pattern.
+ * A helper that launchd starts from an SMAppService plist (`BundleProgram`) shows the bare program name as its command line
+ * (`dyno-agent run`, measured on macOS 26.6.2), not the bundle path; such a bare `<name>` counts as the bundle's process too, or a
+ * check would not see the login item's agent at all. The guest is a throw-away VM, so no other program has that name.
  * @param {ReturnType<typeof parsePs>} procs
  * @param {{name:string, argsPattern?:string}} spec
  * @param {string} bundleDir e.g. /Applications/Dyno.app
@@ -42,7 +45,11 @@ function executableOf(command, bundleDir) {
 export function instancesOf(procs, spec, bundleDir) {
   const exe = `${bundleDir}/Contents/MacOS/${spec.name}`;
   const re = spec.argsPattern ? new RegExp(spec.argsPattern) : null;
-  return procs.filter((p) => executableOf(p.command, bundleDir) === exe && (!re || re.test(p.command.slice(exe.length))));
+  return procs.filter((p) => {
+    const e = executableOf(p.command, bundleDir);
+    if (e !== exe && e !== spec.name) return false;
+    return !re || re.test(p.command.slice(e.length));
+  });
 }
 
 /** Names of the config's processes that run from the bundle in this snapshot, with their pids: the compact evidence line. */
