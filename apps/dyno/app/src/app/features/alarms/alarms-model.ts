@@ -67,15 +67,14 @@ export function clockToMinutes(text: string): number | null {
   return h < 24 && min < 60 ? h * 60 + min : null;
 }
 
-/** The engine's default when settings carry no alarm configuration yet. */
-export function defaultAlarmConfig(utcOffsetMinutes: number): AlarmConfig {
+/** The engine's default (`AlarmConfig::default` in dyno-core) while the settings have not arrived yet. */
+export function defaultAlarmConfig(): AlarmConfig {
   return {
     quiet: { enabled: false, startMinute: 22 * 60, endMinute: 7 * 60, criticalBypass: true },
-    chatterTransitions: 6,
-    chatterWindowMinutes: 30,
+    chatterTransitions: 5,
+    chatterWindowMinutes: 10,
     maxAlarms: 500,
-    keepClearedDays: 14,
-    utcOffsetMinutes,
+    keepClearedDays: 7,
   };
 }
 

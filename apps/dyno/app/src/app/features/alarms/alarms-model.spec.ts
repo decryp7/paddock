@@ -65,10 +65,10 @@ describe('clock conversion', () => {
     expect(clockToMinutes('')).toBeNull();
   });
   it('patches the quiet hours only', () => {
-    const c = withQuiet(defaultAlarmConfig(60), { enabled: true });
+    const c = withQuiet(defaultAlarmConfig(), { enabled: true });
     expect(c.quiet.enabled).toBe(true);
     expect(c.quiet.startMinute).toBe(1320);
-    expect(c.utcOffsetMinutes).toBe(60);
+    expect(c.chatterTransitions).toBe(defaultAlarmConfig().chatterTransitions);
   });
 });
 

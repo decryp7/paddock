@@ -39,7 +39,7 @@ const KEY_SINCE: &str = "changes.since";
 /// Whether Dyno may start heavier background work now (always, unless the user set maintenance windows).
 pub fn maintenance_open(shared: &Shared) -> bool {
     let core = lock(&shared.core);
-    core.settings.maintenance.is_open(now(), core.settings.alarms.utc_offset_minutes)
+    core.settings.maintenance.is_open(now(), core.zone.as_ref())
 }
 
 fn bad(msg: impl Into<String>) -> AgentError {
@@ -124,8 +124,7 @@ pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentErro
         Request::SaveInventoryReport { path, format } => save_inventory(shared, &path, format).map(Reply::InventorySaved),
         Request::Maintenance => {
             let core = lock(&shared.core);
-            let off = core.settings.alarms.utc_offset_minutes;
-            Ok(Reply::Maintenance(core.settings.maintenance.status(now(), off)))
+            Ok(Reply::Maintenance(core.settings.maintenance.status(now(), core.zone.as_ref())))
         }
         Request::Backup => Ok(Reply::Backup(Box::new(backup_check::report(shared)))),
         other => Err(bad(format!("{other:?} is not an extras request."))),

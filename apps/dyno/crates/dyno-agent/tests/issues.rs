@@ -6,11 +6,11 @@
 use dyno_agent::cli::{ask, connect, run_job};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
-use dyno_core::issues::stats::day_start;
 use dyno_core::issues::{Issue, IssueKind, IssueSource, IssueSourceId, IssuesQuery, SourceState};
 use dyno_core::jobs::{JobOutput, JobSpec};
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{LiveDetail, Message, Reply, Request};
+use dyno_core::time::day_start;
 use dyno_core::time::{Timestamp, HOUR, MINUTE};
 use dyno_ipc::Peer;
 use dyno_platform::fake::{process, Fake};
@@ -110,12 +110,12 @@ fn crash(minutes_ago: i64, app: &str, key: &str) -> Issue {
     )
 }
 
-/// A crash early on the current local day (the agent's default offset is 0): the day's score counts it however close to
+/// A crash early on the current local day (the fake platform's zone is UTC): the day's score counts it however close to
 /// midnight the test runs, which "N minutes ago" does not.
 fn crash_today(order: i64, app: &str, key: &str) -> Issue {
     Issue::new(
         IssueSourceId::MacReports,
-        day_start(real_now(), 0).plus(order),
+        day_start(real_now(), &dyno_core::time::FixedZone::UTC).plus(order),
         IssueKind::AppCrash,
         app,
         "t",

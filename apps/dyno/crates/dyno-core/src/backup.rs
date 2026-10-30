@@ -6,7 +6,7 @@
 use crate::alarms::feed::{Observation, Source};
 use crate::health::Severity;
 use crate::issues::days_from_civil;
-use crate::time::{Timestamp, DAY, HOUR, MINUTE, SECOND};
+use crate::time::{from_local, FixedZone, LocalZone, Timestamp, DAY, HOUR, MINUTE, SECOND};
 use serde::{Deserialize, Serialize};
 
 /// A backup tool Dyno knows how to read.
@@ -173,9 +173,9 @@ impl BackupSettings {
     }
 }
 
-/// Parses an RFC 3339 time: `2026-10-23T02:00:01.123456789+08:00`, `...Z`, or `...` without a zone (local time at
-/// `default_offset_minutes`, which is what Borg prints).
-pub fn parse_rfc3339(text: &str, default_offset_minutes: i32) -> Option<Timestamp> {
+/// Parses an RFC 3339 time: `2026-10-23T02:00:01.123456789+08:00`, `...Z`, or `...` without a zone (a local wall time
+/// in `zone`, which is what Borg prints and Time Machine's folder names hold).
+pub fn parse_rfc3339(text: &str, zone: &dyn LocalZone) -> Option<Timestamp> {
     let t = text.trim();
     if t.len() < 19 || !t.is_char_boundary(19) || t.as_bytes()[10] != b'T' && t.as_bytes()[10] != b' ' {
         return None;
@@ -195,8 +195,9 @@ pub fn parse_rfc3339(text: &str, default_offset_minutes: i32) -> Option<Timestam
         ms = format!("{digits:0<3}")[..3].parse::<i64>().ok()?;
         rest = &frac[digits.len()..];
     }
+    let wall = days_from_civil(y, mo as u32, d as u32) * DAY + h * HOUR + mi * MINUTE + s * SECOND + ms;
     let offset = match rest {
-        "" => i64::from(default_offset_minutes),
+        "" => return Some(from_local(wall, zone)),
         "Z" | "z" => 0,
         r => {
             let sign = match r.as_bytes()[0] {
@@ -211,13 +212,11 @@ pub fn parse_rfc3339(text: &str, default_offset_minutes: i32) -> Option<Timestam
             sign * (z[..2].parse::<i64>().ok()? * 60 + z[2..].parse::<i64>().ok()?)
         }
     };
-    Some(Timestamp(
-        days_from_civil(y, mo as u32, d as u32) * DAY + h * HOUR + mi * MINUTE + s * SECOND + ms - offset * MINUTE,
-    ))
+    Some(Timestamp(wall - offset * MINUTE))
 }
 
-/// A backup folder name such as `2026-10-23-151501.backup` (also inside a longer path) as a local time.
-pub fn parse_tmutil_backup_name(text: &str, utc_offset_minutes: i32) -> Option<Timestamp> {
+/// A backup folder name such as `2026-10-23-151501.backup` (also inside a longer path), a local wall time in `zone`.
+pub fn parse_tmutil_backup_name(text: &str, zone: &dyn LocalZone) -> Option<Timestamp> {
     let name = text.trim().rsplit('/').next()?;
     let stamp = name.split(['.']).next()?;
     let b = stamp.as_bytes();
@@ -231,7 +230,7 @@ pub fn parse_tmutil_backup_name(text: &str, utc_offset_minutes: i32) -> Option<T
         stamp.get(13..15)?,
         stamp.get(15..17)?
     );
-    parse_rfc3339(&iso, utc_offset_minutes)
+    parse_rfc3339(&iso, zone)
 }
 
 /// How a `tmutil destinationinfo` answer reads: any destination configured?
@@ -244,7 +243,7 @@ pub fn time_machine_status(
     destinations: Result<&str, &str>,
     latest: Result<&str, &str>,
     now: Timestamp,
-    utc_offset_minutes: i32,
+    zone: &dyn LocalZone,
     stale_after_hours: u32,
 ) -> BackupStatus {
     let tool = BackupTool::TimeMachine;
@@ -260,7 +259,7 @@ pub fn time_machine_status(
         Ok(_) => {}
     }
     match latest {
-        Ok(path) => match parse_tmutil_backup_name(path, utc_offset_minutes) {
+        Ok(path) => match parse_tmutil_backup_name(path, zone) {
             Some(at) => judged(tool, at, now, stale_after_hours),
             None => cannot_check(tool, "Time Machine's answer was not recognised."),
         },
@@ -308,7 +307,7 @@ pub fn parse_event_log_latest(xml: &str) -> Option<(Timestamp, bool)> {
             .split("SystemTime='")
             .nth(1)
             .and_then(|r| r.split('\'').next())
-            .and_then(|t| parse_rfc3339(t, 0));
+            .and_then(|t| parse_rfc3339(t, &FixedZone::UTC));
         let level = ev
             .split("<Level>")
             .nth(1)
@@ -328,17 +327,17 @@ pub fn parse_restic_latest(json: &str) -> Option<Timestamp> {
     let v: serde_json::Value = serde_json::from_str(json).ok()?;
     v.as_array()?
         .iter()
-        .filter_map(|s| parse_rfc3339(s.get("time")?.as_str()?, 0))
+        .filter_map(|s| parse_rfc3339(s.get("time")?.as_str()?, &FixedZone::UTC))
         .max()
 }
 
 /// `borg list --last 1 --json`: the newest archive's `time` (Borg prints local time without a zone).
-pub fn parse_borg_latest(json: &str, utc_offset_minutes: i32) -> Option<Timestamp> {
+pub fn parse_borg_latest(json: &str, zone: &dyn LocalZone) -> Option<Timestamp> {
     let v: serde_json::Value = serde_json::from_str(json).ok()?;
     v.get("archives")?
         .as_array()?
         .iter()
-        .filter_map(|a| parse_rfc3339(a.get("time")?.as_str()?, utc_offset_minutes))
+        .filter_map(|a| parse_rfc3339(a.get("time")?.as_str()?, zone))
         .max()
 }
 
@@ -456,31 +455,37 @@ pub fn observation(status: &BackupStatus) -> Option<Observation> {
 mod tests {
     use super::*;
 
+    const UTC: &FixedZone = &FixedZone::UTC;
+
     // 2026-10-23T08:00:00Z
     const NOW: Timestamp = Timestamp(1_792_742_400_000);
 
     #[test]
     fn rfc3339_forms() {
-        let z = parse_rfc3339("2026-10-23T08:00:00Z", 0).unwrap();
+        let z = parse_rfc3339("2026-10-23T08:00:00Z", UTC).unwrap();
         assert_eq!(z, NOW);
         assert_eq!(
-            parse_rfc3339("2026-10-23T16:00:00.123456789+08:00", 0).unwrap(),
+            parse_rfc3339("2026-10-23T16:00:00.123456789+08:00", UTC).unwrap(),
             Timestamp(NOW.0 + 123)
         );
         // No zone: local time at the default offset (+08:00 means 8 hours earlier in UTC).
-        assert_eq!(parse_rfc3339("2026-10-23T16:00:00", 480).unwrap(), NOW);
-        assert_eq!(parse_rfc3339("2026-13-23T16:00:00", 0), None);
-        assert_eq!(parse_rfc3339("garbage", 0), None);
-        assert_eq!(parse_rfc3339("2026-10-23T16:00:00+8", 0), None);
-        assert_eq!(parse_rfc3339("é".repeat(12).as_str(), 0), None);
+        assert_eq!(parse_rfc3339("2026-10-23T16:00:00", &FixedZone(480)).unwrap(), NOW);
+        assert_eq!(parse_rfc3339("2026-13-23T16:00:00", UTC), None);
+        assert_eq!(parse_rfc3339("garbage", UTC), None);
+        assert_eq!(parse_rfc3339("2026-10-23T16:00:00+8", UTC), None);
+        assert_eq!(parse_rfc3339("é".repeat(12).as_str(), UTC), None);
     }
 
     #[test]
     fn time_machine_names() {
-        let at = parse_tmutil_backup_name("/Volumes/.timemachine/ABC/2026-10-23-160000.backup/2026-10-23-160000.backup\n", 480).unwrap();
+        let at = parse_tmutil_backup_name(
+            "/Volumes/.timemachine/ABC/2026-10-23-160000.backup/2026-10-23-160000.backup\n",
+            &FixedZone(480),
+        )
+        .unwrap();
         assert_eq!(at, NOW);
-        assert_eq!(parse_tmutil_backup_name("2026-10-23.backup", 0), None);
-        assert_eq!(parse_tmutil_backup_name("", 0), None);
+        assert_eq!(parse_tmutil_backup_name("2026-10-23.backup", UTC), None);
+        assert_eq!(parse_tmutil_backup_name("", UTC), None);
     }
 
     const DEST: &str = "====================================================\nName          : TimeMachine\nKind          : Network\n";
@@ -488,35 +493,35 @@ mod tests {
     #[test]
     fn time_machine_verdicts() {
         let now = NOW.plus(5 * HOUR);
-        let ok = time_machine_status(Ok(DEST), Ok("/x/2026-10-23-160000.backup"), now, 480, 48);
+        let ok = time_machine_status(Ok(DEST), Ok("/x/2026-10-23-160000.backup"), now, &FixedZone(480), 48);
         assert_eq!(ok.state, BackupState::Healthy);
         assert!(ok.summary.contains("5 hours ago"));
-        let stale = time_machine_status(Ok(DEST), Ok("/x/2026-10-23-160000.backup"), now.plus(5 * DAY), 480, 48);
+        let stale = time_machine_status(Ok(DEST), Ok("/x/2026-10-23-160000.backup"), now.plus(5 * DAY), &FixedZone(480), 48);
         assert_eq!(stale.state, BackupState::Stale);
         assert!(stale.summary.contains("2 days you allow"));
         assert!(stale.next_step.is_some());
-        let none = time_machine_status(Ok("No destinations configured.\n"), Ok(""), now, 0, 48);
+        let none = time_machine_status(Ok("No destinations configured.\n"), Ok(""), now, UTC, 48);
         assert_eq!(none.state, BackupState::NotConfigured);
         let fda = time_machine_status(
             Ok(DEST),
             Err("tmutil: latestbackup requires Full Disk Access privileges."),
             now,
-            0,
+            UTC,
             48,
         );
         assert_eq!(fda.state, BackupState::CannotCheck);
         assert!(fda.next_step.unwrap().contains("Full Disk Access"));
-        let first = time_machine_status(Ok(DEST), Err("tmutil: No machine directory found for host."), now, 0, 48);
+        let first = time_machine_status(Ok(DEST), Err("tmutil: No machine directory found for host."), now, UTC, 48);
         assert_eq!(first.state, BackupState::NoBackupYet);
-        let off = time_machine_status(Ok(DEST), Err("tmutil: Failed to mount"), now, 0, 48);
+        let off = time_machine_status(Ok(DEST), Err("tmutil: Failed to mount"), now, UTC, 48);
         assert_eq!(off.state, BackupState::NoBackupYet);
         assert!(off.summary.contains("not connected"));
         assert_eq!(
-            time_machine_status(Err("timed out"), Ok(""), now, 0, 48).state,
+            time_machine_status(Err("timed out"), Ok(""), now, UTC, 48).state,
             BackupState::CannotCheck
         );
         assert_eq!(
-            time_machine_status(Ok(DEST), Ok("nonsense"), now, 0, 48).state,
+            time_machine_status(Ok(DEST), Ok("nonsense"), now, UTC, 48).state,
             BackupState::CannotCheck
         );
     }
@@ -541,8 +546,8 @@ mod tests {
         assert_eq!(parse_restic_latest("[]"), None);
         assert_eq!(parse_restic_latest("Fatal: repository does not exist"), None);
         let b = r#"{"archives":[{"time":"2026-10-23T16:00:00.000000","name":"a"},{"time":"2026-10-22T16:00:00.000000"}]}"#;
-        assert_eq!(parse_borg_latest(b, 480).unwrap(), NOW);
-        assert_eq!(parse_borg_latest("{}", 0), None);
+        assert_eq!(parse_borg_latest(b, &FixedZone(480)).unwrap(), NOW);
+        assert_eq!(parse_borg_latest("{}", UTC), None);
     }
 
     #[test]

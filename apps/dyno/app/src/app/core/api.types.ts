@@ -1087,8 +1087,6 @@ export interface AlarmConfig {
   maxAlarms: number;
   /** 1..90 */
   keepClearedDays: number;
-  /** Local offset from UTC in minutes (set from `-new Date().getTimezoneOffset()`). */
-  utcOffsetMinutes: number;
 }
 
 export interface AlarmSuggestion {

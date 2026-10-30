@@ -888,3 +888,11 @@ On Linux the same goes for the idle I/O class: Dyno's systemd unit now says `IOS
 and the shared `paddock-service` renderer's `low_priority()` output moves off the starvable levels then: the systemd
 text (`IOSchedulingClass=idle`) to best effort 7, and the launchd text's `LowPriorityIO` (I/O throttled like the background
 band), both still in its golden files.
+## 2026-10-30: a stored UTC offset nobody filled in made every "local" day a UTC day (Dyno)
+The Issues e2e test failed on CI at 00:07 UTC: it ran on the wall clock against mock issues dated relative to it (the newest
+35 minutes ago), so there was nothing "Today" in the first 35 minutes after midnight (a test bug, fixed by pinning the clock
+and zone). The audit behind it found a real one: the engine took local days from a setting, `utcOffsetMinutes`, that defaulted
+to 0 and that nothing in the product set, so today's score, quiet hours, "until tomorrow", maintenance windows, baseline words
+and Time Machine dates were all in UTC while the UI showed local days. **Rule:** local time is a port read from the OS for each
+instant (daylight saving included), never a stored offset; every day boundary goes through one set of day functions; and a test
+of anything with "today" in it pins both its clock and its time zone, and runs once in a zone far from UTC (Dyno ADR 0024).

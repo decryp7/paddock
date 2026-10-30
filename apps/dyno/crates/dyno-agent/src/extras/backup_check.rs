@@ -146,9 +146,9 @@ fn end_check(x: &ExtrasCentre) {
 /// on every way out.
 fn run_check(shared: &Arc<Shared>, job: Option<&JobContext>) -> Result<(), JobError> {
     let x = &shared.extras;
-    let (settings, off) = {
+    let (settings, zone) = {
         let core = lock(&shared.core);
-        (core.settings.backup.clone(), core.settings.alarms.utc_offset_minutes)
+        (core.settings.backup.clone(), core.zone.clone())
     };
     let resolver = lock(&x.resolver).clone();
     let t = now();
@@ -173,7 +173,7 @@ fn run_check(shared: &Arc<Shared>, job: Option<&JobContext>) -> Result<(), JobEr
         // interrupted; it ends at its own timeout.
         let _step = job.map(|j| j.uncancellable("A backup tool is being asked; Cancel takes effect when it has answered."));
         if let Ok(s) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            backup_status_of(&env, tool, t, off, settings.stale_after_hours)
+            backup_status_of(&env, tool, t, zone.as_ref(), settings.stale_after_hours)
         })) {
             statuses.push(s);
         }

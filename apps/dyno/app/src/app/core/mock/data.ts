@@ -190,7 +190,7 @@ export function demoSettings(): Settings {
     dashboard: layoutFromPreset('overview'),
     ipLookup: { ipTemplate: 'https://ipinfo.io/{ip}', asnTemplate: '' },
     trayItems: defaultTrayItems(),
-    alarms: { quiet: { enabled: false, startMinute: 22 * 60, endMinute: 7 * 60, criticalBypass: true }, chatterTransitions: 6, chatterWindowMinutes: 30, maxAlarms: 500, keepClearedDays: 14, utcOffsetMinutes: 0 },
+    alarms: { quiet: { enabled: false, startMinute: 22 * 60, endMinute: 7 * 60, criticalBypass: true }, chatterTransitions: 6, chatterWindowMinutes: 30, maxAlarms: 500, keepClearedDays: 14 },
     flightRecorder: true,
     customAlerts: [{ id: 'gpu-load', name: 'GPU load', metric: 'gpuLoad', op: 'above', limit: 90, forSecs: 120, severity: 'warning', enabled: true }],
     networkAlerts: { newExposedListener: false, newRemoteHost: false },
