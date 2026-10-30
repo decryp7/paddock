@@ -150,7 +150,7 @@ pub const LEGAL: [(&str, &str, &str); 3] = [
 
 /// Where the app runs: installed (the user's folders, the OS credential store) or in a test (nothing outside `dir`, no
 /// native menu, no OS credential store, no service repair).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Place {
     /// The installed app.
     Installed,
@@ -158,22 +158,25 @@ pub enum Place {
     Test {
         /// The only folder the test touches.
         dir: std::path::PathBuf,
+        /// A stand-in for the Pitwall server; none: the real client, which never leaves the loopback port in `dir`'s
+        /// discovery file (not the well-known one, where an installed Pitwall may listen, ER-14).
+        server: Option<SharedClient>,
     },
 }
 
 /// The client of the server, its offline knowledge and the tray's facts, for `place`. A test's client never falls back to the
 /// well-known port (a Pitwall installed on the machine may be using it, ER-14), or is `server` when the test gives one.
-fn state(place: &Place, server: Option<SharedClient>) -> (SharedClient, Arc<offline::OfflineKnown>, SharedModel) {
+fn state(place: &Place) -> (SharedClient, Arc<offline::OfflineKnown>, SharedModel) {
     let (data_dir, store): (std::path::PathBuf, Box<dyn credentials::KeyStore>) = match place {
         Place::Installed => (app_state::data_dir().unwrap_or_default(), Box::new(credentials::OsKeyStore)),
-        Place::Test { dir } => (dir.clone(), Box::new(credentials::NoKeyStore)),
+        Place::Test { dir, .. } => (dir.clone(), Box::new(credentials::NoKeyStore)),
     };
     let keys = Arc::new(credentials::StoredAdminKey::new(store, data_dir.join("admin.key")));
     let known_offline = Arc::new(offline::OfflineKnown::at(data_dir.join("offline-known.json")));
-    let inner: SharedClient = match (place, server) {
-        (Place::Test { .. }, Some(server)) => server,
-        (Place::Test { .. }, None) => Arc::new(server_client::LoopbackClient::new(data_dir, keys).discovery_port_only()),
-        (Place::Installed, _) => Arc::new(server_client::LoopbackClient::new(data_dir, keys)),
+    let inner: SharedClient = match place {
+        Place::Test { server: Some(server), .. } => server.clone(),
+        Place::Test { server: None, .. } => Arc::new(server_client::LoopbackClient::new(data_dir, keys).discovery_port_only()),
+        Place::Installed => Arc::new(server_client::LoopbackClient::new(data_dir, keys)),
     };
     let client: SharedClient = Arc::new(offline::Observing::new(inner, known_offline.clone()));
     (client, known_offline, Arc::new(Mutex::new(TrayModel::new())))
@@ -182,16 +185,11 @@ fn state(place: &Place, server: Option<SharedClient>) -> (SharedClient, Arc<offl
 /// The shell plugin with Pitwall's parts: its commands, its state and the live feed (set-up: state only, no window; the
 /// shell opens the tray and the window after every plugin, ADR 0029) and the window layer.
 pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
-    shell_with_server(place, None)
-}
-
-/// [`shell`] with the server given: a test's stand-in for the Pitwall server (ignored for the installed app).
-pub fn shell_with_server<R: Runtime>(place: Place, server: Option<SharedClient>) -> Builder<R> {
     let installed = matches!(place, Place::Installed);
-    let (client, known_offline, model) = state(&place, server);
+    let (client, known_offline, model) = state(&place);
     let test_dir = match &place {
         Place::Installed => None,
-        Place::Test { dir } => Some(dir.clone()),
+        Place::Test { dir, .. } => Some(dir.clone()),
     };
     let (update_client, update_offline) = (client.clone(), known_offline.clone());
     let builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))

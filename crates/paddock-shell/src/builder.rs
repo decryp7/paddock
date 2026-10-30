@@ -370,12 +370,17 @@ impl<R: Runtime> Builder<R> {
     /// What a click on the menu item `id` does when no window is open (the last one was closed to the tray), for an app item
     /// whose command lives in the window (such as "Quit and stop serving"): without this the click only brings the main
     /// window back. `f` runs instead, on the main thread; the item is shown in the menu bar, so only a shown id reaches it.
-    /// Registering the same id again replaces the earlier handler. Quit itself is [`Builder::menu_quit_without_window`].
+    /// Registering the same id again replaces the earlier handler. Quit itself is [`Builder::menu_quit_without_window`]:
+    /// giving the Quit id here is a programming error and panics at once (it would silently override that hook).
     pub fn menu_without_window(
         mut self,
         id: &str,
         f: impl Fn(&AppHandle<R>) + Send + Sync + 'static,
     ) -> Self {
+        assert!(
+            id != paddock_menu::model::QUIT_COMMAND,
+            "Quit without a window is set with `menu_quit_without_window`, not `menu_without_window`"
+        );
         self.menu_no_window.retain(|(i, _)| i != id);
         self.menu_no_window.push((id.to_owned(), Arc::new(f)));
         self

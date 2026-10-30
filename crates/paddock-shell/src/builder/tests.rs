@@ -170,21 +170,40 @@ fn an_app_item_can_have_its_own_handler_without_a_window() {
         }));
     let menu = app.state::<NativeMenu<MockRuntime>>();
     let wire = serde_json::json!({ "menus": [{ "id": "app", "label": "Shell Demo", "items": [
-        { "kind": "item", "id": "app.stop", "label": "Stop", "keybinding": null, "checked": null, "enabled": true }
+        { "kind": "item", "id": "app.stop", "label": "Stop", "keybinding": null, "checked": null, "enabled": true },
+        { "kind": "item", "id": "app.other", "label": "Other", "keybinding": null, "checked": null, "enabled": true }
     ] }] });
     let model = paddock_menu::model::parse(serde_json::from_value(wire).unwrap()).unwrap();
     menu.apply(app.handle(), &model).unwrap();
     assert_eq!(menu.target(), None, "no window is the menu bar's target");
     paddock_menu::tauri::menu_chosen(app.handle(), "app.stop");
-    assert_eq!(
-        *seen.lock().unwrap(),
-        ["second"],
-        "the handler ran once, instead of reopening the window"
-    );
+    assert_eq!(*seen.lock().unwrap(), ["second"], "the handler ran once");
+    // The deferred work has run (a reopen would be in it): the window did not come back.
+    let (tx, rx) = std::sync::mpsc::channel();
+    paddock_window::tauri::after_plugin_hook(app.handle(), move |_| {
+        let _ = tx.send(());
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the deferred work ran");
     assert!(
         app.get_webview_window("main").is_none(),
         "the window did not come back"
     );
+    // An item without a handler still brings it back.
+    paddock_menu::tauri::menu_chosen(app.handle(), "app.other");
+    wait_for_main(&app);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        ["second"],
+        "the other item ran no handler"
+    );
+}
+
+/// Quit has its own hook; giving its id to the generic one would silently override it.
+#[test]
+#[should_panic(expected = "menu_quit_without_window")]
+fn the_quit_id_cannot_be_given_to_the_generic_no_window_hook() {
+    let _ = shell().menu_without_window("pd.app.quit", |_| ());
 }
 
 /// The policy for a click with no window open, on both kinds of shell: Quit goes to the override, else the window layer's

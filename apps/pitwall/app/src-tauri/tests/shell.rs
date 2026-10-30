@@ -8,7 +8,7 @@ use paddock_window::launch::LaunchArgs;
 use pitwall_app_lib::commands::SharedClient;
 use pitwall_app_lib::quit::{MenuQuit, PendingAsk, QUIT_STOP_COMMAND};
 use pitwall_app_lib::server_client::{unavailable, BoxFuture, FrameStream, ServerClient};
-use pitwall_app_lib::{app, shell, shell_with_server, Place, COMMANDS};
+use pitwall_app_lib::{app, shell, Place, COMMANDS};
 use pitwall_core::mgmt::CommandError;
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,7 +16,10 @@ use tauri::Manager;
 
 /// Pitwall as `run` composes it, its state and live feed included (its files in `dir`, a server that is not there).
 fn composed(dir: &std::path::Path, launch: LaunchArgs) -> tauri::Builder<tauri::test::MockRuntime> {
-    let shell = shell(Place::Test { dir: dir.to_path_buf() });
+    let shell = shell(Place::Test {
+        dir: dir.to_path_buf(),
+        server: None,
+    });
     app(tauri::test::mock_builder(), shell, launch, paddock_window::tauri::HeadlessTray)
 }
 
@@ -67,6 +70,7 @@ fn the_manifest_the_contracts_and_the_tables_agree() {
     let dir = tempfile::tempdir().unwrap();
     let problems = shell::<tauri::test::MockRuntime>(Place::Test {
         dir: dir.path().to_path_buf(),
+        server: None,
     })
     .problems(Some(MANIFEST));
     assert!(problems.is_empty(), "{problems:#?}");
@@ -326,7 +330,11 @@ impl ServerClient for QuitServer {
 /// the menu bar showing Quit and "Quit and stop serving".
 fn tray_only_app(dir: &std::path::Path, server: Arc<QuitServer>) -> tauri::App<tauri::test::MockRuntime> {
     use paddock_menu::tauri::NativeMenu;
-    let shell = shell_with_server(Place::Test { dir: dir.to_path_buf() }, Some(server as SharedClient)).setup(|app| {
+    let shell = shell(Place::Test {
+        dir: dir.to_path_buf(),
+        server: Some(server as SharedClient),
+    })
+    .setup(|app| {
         app.manage(NativeMenu::<tauri::test::MockRuntime>::with_bar("Pitwall", true, NoBar));
         Ok(())
     });
