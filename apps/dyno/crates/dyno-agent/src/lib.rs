@@ -81,7 +81,8 @@ impl Running {
             std::thread::Builder::new()
                 .name("dyno-sampler".into())
                 .spawn(move || {
-                    dyno_platform::priority::lower_current_thread();
+                    // The live view: lowered gently where that never stalls it, normal on Windows (rule 52).
+                    dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
                     sampler::Sampler::new(sensors, processes).run(&s)
                 })
                 .map_err(|e| format!("could not start the sampler: {e}"))?,

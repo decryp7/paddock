@@ -176,7 +176,8 @@ impl CounterCentre {
         let slot = Slot(self.inner.clone());
         let inner = self.inner.clone();
         let spawned = std::thread::Builder::new().name("dyno-counters".into()).spawn(move || {
-            dyno_platform::priority::lower_current_thread();
+            // The user waits for it on the Counters page: live work (rule 52).
+            dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
             let _slot = slot;
             f(&inner);
         });
@@ -296,7 +297,8 @@ impl CounterCentre {
         let slot = Slot(self.inner.clone());
         let inner = self.inner.clone();
         let spawned = std::thread::Builder::new().name("dyno-counters-pinned".into()).spawn(move || {
-            dyno_platform::priority::lower_current_thread();
+            // It holds one of the two slots the page's requests use, and the live sampler starts it: live work (rule 52).
+            dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
             let _slot = slot;
             let raws = inner.source.read(&parsed);
             record(&inner, raws, now);
@@ -624,5 +626,41 @@ mod tests {
         let listed = c.catalog_within(Duration::from_secs(20)).unwrap();
         assert!(listed.object("Memory").is_some());
         assert_eq!(src.calls.load(Ordering::SeqCst), 1, "listed once");
+    }
+
+    /// Records the thread role every call into the OS ran at.
+    struct Roles(Mutex<Vec<Option<dyno_platform::priority::ThreadRole>>>);
+
+    impl CounterSource for Roles {
+        fn catalog(&self) -> Result<CounterCatalog, PlatformError> {
+            lock(&self.0).push(dyno_platform::priority::current_role());
+            FakeCounters::new(vec![Entry::new("Memory", None, "Free", U::Bytes, CounterKind::Gauge, 1.0)]).catalog()
+        }
+
+        fn read(&self, _: &[CounterPath]) -> Vec<RawCounter> {
+            lock(&self.0).push(dyno_platform::priority::current_role());
+            vec![]
+        }
+    }
+
+    /// Rule 52 (coordinator review, 2026-10-30): the Counters page's requests and the pinned reading hold the same two
+    /// slots, and both are live work. A bulk pinned read stalled behind busy normal threads on Windows would make the
+    /// user's request come back Busy.
+    #[test]
+    fn requests_and_the_pinned_reading_run_as_live_work() {
+        use dyno_platform::priority::ThreadRole;
+        let src = Arc::new(Roles(Mutex::new(Vec::new())));
+        let c = CounterCentre::new(src.clone());
+        c.objects().unwrap();
+        c.values(&["\\Memory\\Free".into()], Timestamp(1)).unwrap();
+        assert!(c.poll_pinned(&["\\Memory\\Free".into()], Timestamp(2)));
+        // The background reading ends on its own thread: wait for it (a hang guard bounds the loop).
+        for _ in 0..500 {
+            if lock(&src.0).len() == 3 && c.inner.in_flight.load(Ordering::SeqCst) == 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(*lock(&src.0), vec![Some(ThreadRole::Live); 3]);
     }
 }

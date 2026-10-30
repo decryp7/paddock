@@ -362,7 +362,8 @@ impl DiskCentre {
         }
         let me = self.clone();
         let spawned = std::thread::Builder::new().name("dyno-volumes".into()).spawn(move || {
-            dyno_platform::priority::lower_current_thread();
+            // The Disk map's volume list fills from it: live work (rule 52).
+            dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
             me.refresh();
             me.refreshing.store(false, Ordering::SeqCst);
         });
@@ -456,7 +457,8 @@ impl DiskCentre {
                 // the volume list as last asked for), so a share that does not answer cannot hold back scans of this computer's disks.
                 let host = self.folder_host(path);
                 let (alive, p) = (lock(&self.live).entry(host).or_default().enter(), path.clone());
-                let root = super::volumes::within(STAT_LIMIT, move || {
+                // The start of the scan waits for it within a deadline: live work (rule 52).
+                let root = super::volumes::within(STAT_LIMIT, dyno_platform::priority::ThreadRole::Live, move || {
                     let _alive = alive;
                     folder::check(&p)
                 })

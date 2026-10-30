@@ -31,14 +31,18 @@ pub trait VolumeLister: Send + Sync {
     }
 }
 
-/// Runs `f` on its own thread and waits at most `limit` for the answer; `None` when it did not come in time (the thread
-/// is left to finish whenever the OS lets it, its answer dropped).
-pub fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+/// Runs `f` on its own thread as `role` (rule 52) and waits at most `limit` for the answer; `None` when it did not come in
+/// time (the thread is left to finish whenever the OS lets it, its answer dropped).
+pub fn within<T: Send + 'static>(
+    limit: Duration,
+    role: dyno_platform::priority::ThreadRole,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
     let (tx, rx) = mpsc::channel();
     std::thread::Builder::new()
         .name("dyno-disk-probe".into())
         .spawn(move || {
-            dyno_platform::priority::lower_current_thread();
+            dyno_platform::priority::set_current_thread(role);
             let _ = tx.send(f());
         })
         .ok()?;
@@ -79,7 +83,8 @@ fn probe_network(
     let ask = capacity.clone();
     let marker = Marker(inflight.clone(), mount.clone());
     let spawned = std::thread::Builder::new().name("dyno-disk-probe".into()).spawn(move || {
-        dyno_platform::priority::lower_current_thread();
+        // The volume list waits for it within a deadline: live work (rule 52).
+        dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
         let _marker = marker;
         let _ = tx.send(ask(&mount));
     });
@@ -169,13 +174,21 @@ mod tests {
 
     #[test]
     fn an_answer_in_time_is_returned() {
-        assert_eq!(within(Duration::from_secs(30), || 7), Some(7));
+        assert_eq!(
+            within(Duration::from_secs(30), dyno_platform::priority::ThreadRole::Live, || 7),
+            Some(7)
+        );
     }
 
     #[test]
     fn a_call_that_never_returns_is_given_up() {
         let (release, wait) = channel::<()>();
-        assert_eq!(within(Duration::from_millis(0), move || wait.recv().ok()), None);
+        assert_eq!(
+            within(Duration::from_millis(0), dyno_platform::priority::ThreadRole::Live, move || wait
+                .recv()
+                .ok()),
+            None
+        );
         release.send(()).unwrap();
     }
 
@@ -299,5 +312,30 @@ mod tests {
             std::thread::yield_now();
         }
         assert!(probe_network("/Volumes/x".into(), &|_: &str| None, &inflight).is_some());
+    }
+
+    /// Rule 52 (coordinator review, 2026-10-30): the start of a scan waits for these probes within a deadline, so they run
+    /// as the role they are given (live for every caller now), and a network volume's capacity probe is live work.
+    #[test]
+    fn probes_run_as_live_work() {
+        use dyno_platform::priority::{current_role, ThreadRole};
+        assert_eq!(
+            within(Duration::from_secs(20), ThreadRole::Live, current_role),
+            Some(Some(ThreadRole::Live))
+        );
+        let inflight = InFlight::default();
+        let role = Arc::new(Mutex::new(None));
+        let seen = role.clone();
+        let rx = probe_network(
+            "/Volumes/y".into(),
+            &move |_: &str| {
+                *lock(&seen) = current_role();
+                Some((2, 1))
+            },
+            &inflight,
+        )
+        .unwrap();
+        assert_eq!(rx.recv().unwrap(), Some((2, 1)));
+        assert_eq!(*lock(&role), Some(ThreadRole::Live));
     }
 }

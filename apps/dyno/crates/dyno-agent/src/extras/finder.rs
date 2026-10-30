@@ -52,7 +52,8 @@ pub fn resolve_root(folder: &str) -> Result<PathBuf, String> {
 /// [`resolve_root`] that gives up after `limit`: a dead share can hold the look at it for as long as the server is gone.
 fn resolve_within(folder: &str, limit: Duration) -> Result<PathBuf, String> {
     let folder = folder.to_string();
-    crate::disk::volumes::within(limit, move || resolve_root(&folder)).unwrap_or_else(|| {
+    // The start of the search waits for it within a deadline: live work; the walk is bulk (rule 52).
+    crate::disk::volumes::within(limit, dyno_platform::priority::ThreadRole::Live, move || resolve_root(&folder)).unwrap_or_else(|| {
         Err("That folder did not answer in time. Check that the drive or share is reachable, or choose another folder.".into())
     })
 }
