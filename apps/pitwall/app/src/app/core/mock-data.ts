@@ -352,7 +352,7 @@ export function presetMemory(preset: Settings['memory']['preset'], current: Sett
     case 'balanced':
       return { ...current, preset, idleUnloadSecs: 600, deepIdleSecs: 1800, releaseContextFirst: true, pressureAvailablePercent: 15, minFreeBytes: 4 * GiB, maxHotModels: 3, hotCapBytes: null };
     case 'performance':
-      return { ...current, preset, idleUnloadSecs: 3600, deepIdleSecs: 4 * 3600, releaseContextFirst: false, pressureAvailablePercent: 8, minFreeBytes: 2 * GiB, maxHotModels: 4, hotCapBytes: null };
+      return { ...current, preset, idleUnloadSecs: 3600, deepIdleSecs: 4 * 3600, releaseContextFirst: false, pressureAvailablePercent: 8, minFreeBytes: 2 * GiB, maxHotModels: 6, hotCapBytes: null };
     default:
       return { ...current, preset };
   }

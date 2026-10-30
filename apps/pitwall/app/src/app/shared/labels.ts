@@ -38,7 +38,7 @@ export const PRESET_LABEL: Record<Preset, string> = {
 
 export const PRESET_HINT: Record<Exclude<Preset, 'custom'>, string> = {
   lowMemory: 'Release fast, one model at a time',
-  balanced: 'Sensible idle times, two hot models',
+  balanced: 'Sensible idle times, three hot models',
   performance: 'Keep models hot, use what fits',
 };
 
