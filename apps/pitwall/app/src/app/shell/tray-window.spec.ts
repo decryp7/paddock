@@ -27,7 +27,7 @@ describe('the tray popover window', () => {
     });
     TestBed.configureTestingModule({
       imports: [TrayPopover],
-      providers: [{ provide: BACKEND, useValue: backend }, { provide: WINDOW_CONTROL, useValue: { openMain: async () => undefined, onNavigate: () => () => undefined } }],
+      providers: [{ provide: BACKEND, useValue: backend }, { provide: WINDOW_CONTROL, useValue: { openMain: async () => undefined, onNavigate: () => () => undefined, fitTray: async () => undefined } }],
     });
     registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
     startTrayFeed(TestBed.inject(LiveStore));

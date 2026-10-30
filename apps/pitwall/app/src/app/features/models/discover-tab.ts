@@ -121,7 +121,7 @@ export const OFFLOAD_TEXT: Record<Fit['offload'], string> = { all: 'all layers o
                   <span><mat-icon svgIcon="pw:download" aria-hidden="true" />{{ count(r.downloads) }}</span>
                   <span><mat-icon svgIcon="pw:heart" aria-hidden="true" />{{ count(r.likes) }}</span>
                   @if (r.updatedAt) {
-                    <span>updated {{ when(r.updatedAt, now()) }}</span>
+                    <span>Updated {{ when(r.updatedAt, now()) }}</span>
                   }
                 </span>
               </button>

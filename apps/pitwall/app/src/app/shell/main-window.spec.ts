@@ -23,7 +23,7 @@ describe('the main window’s start', () => {
         { provide: BACKEND, useValue: backend },
         provideRouter([]),
         dialogs,
-        { provide: WINDOW_CONTROL, useValue: { openMain: () => Promise.resolve(), onNavigate: (h: (r: string) => void) => ((navigate = h), () => undefined) } },
+        { provide: WINDOW_CONTROL, useValue: { openMain: () => Promise.resolve(), onNavigate: (h: (r: string) => void) => ((navigate = h), () => undefined), fitTray: () => Promise.resolve() } },
       ],
     });
     TestBed.runInInjectionContext(startMainWindow);

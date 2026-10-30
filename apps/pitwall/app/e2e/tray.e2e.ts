@@ -16,7 +16,7 @@ test.describe('tray popover', () => {
     await expect(page.getByRole('button', { name: /Review|pair/ }).first()).toBeVisible();
   });
 
-  // The real popover is 360x520: nothing wraps, nothing is clipped and no loaded model is cut off, with one banner or two.
+  // The real popover is 360 wide and at most 520 tall: nothing wraps, nothing is clipped and no loaded model is cut off, with one banner or two.
   for (const query of ['mock-fast&mock-static', 'mock-fast&mock-static&mock-updates']) {
     test(`fits at 360x520 with every action on one line (${query})`, async ({ page }) => {
       await openApp(page, '/tray', query);
@@ -31,7 +31,11 @@ test.describe('tray popover', () => {
         });
         return { tray: [tray.scrollHeight, tray.clientHeight, box(tray).width], models: models.scrollHeight <= models.clientHeight, buttons };
       });
-      expect(fit.tray).toEqual([520, 520, 360]);
+      // As tall as its content (the shell fits the window to it), never taller than the 520 px the layout allows.
+      const [scrollH, clientH, width] = fit.tray;
+      expect(width).toBe(360);
+      expect(scrollH).toBe(clientH);
+      expect(clientH).toBeLessThanOrEqual(520);
       expect(fit.models).toBe(true);
       for (const b of fit.buttons) expect(b, b.text).toMatchObject({ oneLine: true, inside: true });
     });

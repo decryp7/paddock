@@ -17,7 +17,8 @@ const GiB = 1024 ** 3;
 
 function fakeWindows() {
   const openMain = vi.fn().mockResolvedValue(undefined);
-  const windows: WindowControl = { openMain, onNavigate: () => () => undefined };
+  const fitTray = vi.fn().mockResolvedValue(undefined);
+  const windows: WindowControl = { openMain, onNavigate: () => () => undefined, fitTray };
   return { windows, openMain };
 }
 

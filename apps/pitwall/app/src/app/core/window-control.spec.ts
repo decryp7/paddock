@@ -102,6 +102,13 @@ describe('TauriWindowControl', () => {
     expect(JSON.parse(storage.getItem(PENDING_ROUTE_KEY)!).route).toBe('/models');
   });
 
+  it('fits the popover to its content through the shell', async () => {
+    const { port, calls } = fakePort();
+    await new TauriWindowControl(port, new PendingRoute(memoryStorage)).fitTray(431);
+    expect(calls).toEqual(['invoke plugin:paddock-shell|tray_fit_height {"height":431}']);
+    await expect(new BrowserWindowControl().fitTray()).resolves.toBeUndefined();
+  });
+
   it('opens on the dashboard by default', async () => {
     const storage = memoryStorage();
     const { port } = fakePort();
