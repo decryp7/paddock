@@ -86,7 +86,7 @@ pub enum WidgetKind {
     Health,
     /// The CPU card: load, history, the per-core view and a link to the CPU details.
     Cpu,
-    /// The plain-language reading of what is slowing the PC down (the "Why slow" summary).
+    /// The plain-language reading of what is slowing the computer down (the "Why slow" summary).
     Diagnosis,
     /// What happened lately: alarms, rule actions and Dyno's own changes.
     Events,

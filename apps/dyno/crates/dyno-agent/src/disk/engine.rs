@@ -1,7 +1,7 @@
 //! The walk of the disk scan: worker threads read folders through the [`DirSource`] port and commit each folder's totals
-//! into the shared [`DiskIndex`] in one step, so the index adds up at every moment. Bounded parallelism, background
-//! priority, no sleeps: workers wait on a condition for work, Cancel sets a flag and returns at once, and a worker that is
-//! stuck inside a call to a dead network share is abandoned, never awaited.
+//! into the shared [`DiskIndex`] in one step, so the index adds up at every moment. Bounded parallelism, lowered priority
+//! (never starved: the person watches the scan), no sleeps: workers wait on a condition for work, Cancel sets a flag and
+//! returns at once, and a worker that is stuck inside a call to a dead network share is abandoned, never awaited.
 
 use dyno_core::disk::index::{DiskIndex, NodeId, ScanLimits, Sizes};
 use dyno_core::disk::reason::{unreadable_reason, ReasonContext};
@@ -201,7 +201,7 @@ pub struct Snapshot {
 }
 
 impl Walk {
-    /// Starts walking `root`. Returns at once; the walk runs on its own threads at background priority.
+    /// Starts walking `root`. Returns at once; the walk runs on its own threads at lowered priority.
     pub fn start(
         source: Arc<dyn DirSource>,
         root: PathBuf,
@@ -214,7 +214,8 @@ impl Walk {
             // The thread that looks is one of the host's live threads while it is inside the call: if the call never returns,
             // later starts see it as abandoned and are refused after a few, instead of piling up.
             let alive = cfg.live.enter();
-            super::volumes::within(cfg.stat_limit, move || {
+            // The first look waits within a deadline before the scan starts: live work; the walk itself is bulk (rule 52).
+            super::volumes::within(cfg.stat_limit, dyno_platform::priority::ThreadRole::Live, move || {
                 let _alive = alive;
                 src.stat(&path)
             })
@@ -282,7 +283,7 @@ impl Walk {
             let spawned = (self.cfg.spawn)(
                 format!("dyno-disk-scan-{n}"),
                 Box::new(move || {
-                    dyno_platform::priority::background_current_thread();
+                    dyno_platform::priority::lower_current_thread();
                     // A bug in one reader ends the scan with a message; it never takes the agent down.
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| w.worker(epoch))).is_err() {
                         w.fail(ScanFailure::Internal {
@@ -1172,6 +1173,34 @@ mod tests {
 
     fn no_threads(_: String, _: Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()> {
         Err(std::io::Error::other("no more threads"))
+    }
+
+    /// The person watches the scan, so its readers are lowered gently and never starved (rule 52): each worker leaves its
+    /// thread at `UTILITY`, read back through the spawn hook once the worker's job is over.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn every_reader_runs_at_the_gentle_level() {
+        static CLASSES: (Mutex<Vec<u32>>, std::sync::Condvar) = (Mutex::new(Vec::new()), std::sync::Condvar::new());
+        fn recording(name: String, job: Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()> {
+            os_spawn(
+                name,
+                Box::new(move || {
+                    job();
+                    lock(&CLASSES.0).push(dyno_platform::priority::current_qos_class());
+                    CLASSES.1.notify_all();
+                }),
+            )
+        }
+        let mut c = cfg(3);
+        c.spawn = recording;
+        let fs = Arc::new(sample());
+        let (_w, _rec, end) = run(fs.clone(), fs.root(), c);
+        assert_eq!(end, End::Done);
+        let mut classes = lock(&CLASSES.0);
+        while classes.len() < 3 {
+            classes = CLASSES.1.wait(classes).unwrap_or_else(|p| p.into_inner());
+        }
+        assert!(classes.iter().all(|c| *c == dyno_platform::priority::UTILITY), "{classes:?}");
     }
 
     #[test]

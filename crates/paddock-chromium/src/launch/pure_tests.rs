@@ -12,7 +12,12 @@ fn opts(base: &Path) -> LaunchOptions {
 
 #[test]
 fn keeps_the_automation_banner_and_hides_nothing() {
-    let a = command_line(Path::new("/tmp/p"), &opts(Path::new("/b")), Sandbox::On);
+    let a = command_line(
+        Flavor::Chromium,
+        Path::new("/tmp/p"),
+        &opts(Path::new("/b")),
+        Sandbox::On,
+    );
     assert!(a.contains(&"--enable-automation".to_string()));
     assert!(
         a.iter()
@@ -27,7 +32,7 @@ fn the_window_modes() {
     let with = |w: Window| {
         let mut o = opts(Path::new("/b"));
         o.window = w;
-        command_line(Path::new("/p"), &o, Sandbox::On)
+        command_line(Flavor::Chromium, Path::new("/p"), &o, Sandbox::On)
     };
     let placed = with(Window::OnScreen(Some(WindowBounds {
         x: -1800,
@@ -70,7 +75,7 @@ fn the_start_page_is_last_for_every_combination_of_options() {
                 ] {
                     let mut o = opts(Path::new("/b"));
                     (o.quiet, o.disk_cache_bytes, o.extra_args) = (quiet, cache, extra.clone());
-                    let a = command_line(Path::new("/p"), &o, sandbox);
+                    let a = command_line(Flavor::Chromium, Path::new("/p"), &o, sandbox);
                     assert_eq!(a.last().map(String::as_str), Some(START_PAGE), "{a:?}");
                     assert_eq!(a.iter().filter(|x| *x == START_PAGE).count(), 1, "{a:?}");
                     assert_eq!(
@@ -97,6 +102,97 @@ fn the_start_page_is_last_for_every_combination_of_options() {
             }
         }
     }
+}
+
+/// A Chromium build (Chrome for Testing) starts without its field-trial testing config; branded Chrome and Edge never
+/// apply it and get no switch. On Windows CI that config's network-service sandbox could not start for a browser in the
+/// runner's user folder and Chrome started the network service a second time (all 12 Chrome logs of runs 7149 and 7154);
+/// loads were lost in those runs (see [`NO_TESTING_FIELD_TRIALS`]). Every feature to turn off is in one
+/// `--disable-features` switch, the caller's merged in without repeats.
+#[test]
+fn chromium_builds_start_without_testing_field_trials_and_one_feature_switch() {
+    for quiet in [true, false] {
+        for extra in [
+            vec![],
+            vec![
+                "--disable-features=Foo,Translate".to_string(),
+                "--lang=de".to_string(),
+            ],
+        ] {
+            let mut o = opts(Path::new("/b"));
+            (o.quiet, o.extra_args) = (quiet, extra.clone());
+            for flavor in [Flavor::Chromium, Flavor::Chrome, Flavor::Edge] {
+                let a = command_line(flavor, Path::new("/p"), &o, Sandbox::On);
+                assert_eq!(
+                    a.contains(&NO_TESTING_FIELD_TRIALS.to_string()),
+                    flavor == Flavor::Chromium,
+                    "{flavor:?}: {a:?}"
+                );
+                assert_eq!(a.last().map(String::as_str), Some(START_PAGE), "{a:?}");
+                let switches: Vec<&String> = a
+                    .iter()
+                    .filter(|x| x.starts_with("--disable-features="))
+                    .collect();
+                assert!(switches.len() <= 1, "{a:?}");
+                let features: Vec<&str> = switches
+                    .first()
+                    .map(|s| s["--disable-features=".len()..].split(',').collect())
+                    .unwrap_or_default();
+                assert_eq!(
+                    features.contains(&"Translate"),
+                    quiet || !extra.is_empty(),
+                    "{a:?}"
+                );
+                assert_eq!(
+                    features.contains(&"Foo"),
+                    !extra.is_empty(),
+                    "the caller's features are kept: {a:?}"
+                );
+                let mut unique = features.clone();
+                unique.sort_unstable();
+                unique.dedup();
+                assert_eq!(unique.len(), features.len(), "no feature twice: {a:?}");
+                assert_eq!(a.contains(&"--lang=de".to_string()), !extra.is_empty());
+            }
+        }
+    }
+}
+
+/// The helper counts come from the browser's histograms; missing ones count nothing.
+#[test]
+fn helper_starts_are_read_from_the_histograms() {
+    let launch = vec![
+        json!({"name": "ChildProcess.Launched.UtilityProcessHash", "count": 3}),
+        json!({"name": "ChildProcess.LaunchFailed.UtilityProcessErrorCode", "count": 1}),
+        json!({"name": "ChildProcess.LaunchFailed.WinLastError", "count": 1}),
+    ];
+    let sandbox = vec![
+        json!({"name": "Chrome.SystemNetworkContextManager.NetworkSandboxLaunchFailed.ErrorCode", "count": 1}),
+        json!({"name": "Chrome.SystemNetworkContextManager.NetworkSandboxState", "count": 6,
+               "buckets": [{"low": 1, "high": 2, "count": 3}, {"low": 4, "high": 5, "count": 3}]}),
+    ];
+    assert_eq!(
+        HelperStarts::from_histograms(&launch, &sandbox),
+        HelperStarts {
+            started: 3,
+            failed: 1,
+            network_sandbox_failed: 1,
+            network_sandbox_given_up: 3
+        }
+    );
+    assert_eq!(
+        HelperStarts::from_histograms(&[], &[]),
+        HelperStarts::default()
+    );
+    let odd = vec![
+        json!({"name": "Chrome.SystemNetworkContextManager.NetworkSandboxState"}),
+        json!({"count": 9}),
+        json!(null),
+    ];
+    assert_eq!(
+        HelperStarts::from_histograms(&odd, &odd),
+        HelperStarts::default()
+    );
 }
 
 #[test]

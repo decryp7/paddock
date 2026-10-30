@@ -6,6 +6,10 @@
       "title": "pd.about.open"
     },
     {
+      "id": "pd.app.quit",
+      "title": "pd.app.quit"
+    },
+    {
       "id": "pd.diagnostics.report",
       "title": "pd.diag.open"
     },
@@ -112,6 +116,12 @@
       "scope": "window"
     },
     {
+      "command": "pd.app.quit",
+      "key": "Mod+Q",
+      "accelerator": "CmdOrCtrl+Q",
+      "scope": "window"
+    },
+    {
       "command": "sd.greet",
       "key": "Mod+Shift+H",
       "accelerator": "CmdOrCtrl+Shift+H",
@@ -137,6 +147,13 @@
       "group": "settings",
       "order": 100,
       "accelerator": "CmdOrCtrl+,"
+    },
+    {
+      "menu": "app",
+      "command": "pd.app.quit",
+      "group": "quit",
+      "order": 1000,
+      "accelerator": "CmdOrCtrl+Q"
     },
     {
       "menu": "edit",
@@ -565,6 +582,7 @@
     "pd.about.open": "About",
     "pd.about.title": "About",
     "pd.activity.page": "Activity",
+    "pd.app.quit": "Quit",
     "pd.category.app": "Application",
     "pd.category.help": "Help",
     "pd.channels.remove.title": "Remove channel",

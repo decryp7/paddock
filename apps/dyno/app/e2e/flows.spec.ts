@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 /** Browser flows against the mock backend (a macOS laptop; `?mock=desktop` has no battery or sensors). */
 const url = (path = '/', query = '') => `/?latency=0${query}#${path}`;
@@ -13,7 +14,7 @@ async function choose(page: Page, label: string, option: string | RegExp): Promi
 async function openSettings(page: Page): Promise<void> {
   await page.goto(url('/'));
   await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await dialog.getByText('Dyno', { exact: true }).click();
@@ -33,7 +34,7 @@ test.describe('screens', () => {
       ['Health', 'Health'],
       ['Backup health', 'Backup health'],
       ['Extras', 'Extras'],
-      ['Lifespan', 'Disk and battery life'],
+      ['Lifespan', 'Lifespan'],
       ['Diagnostics', 'Diagnostics bundle'],
       ['Dashboard', 'Dashboard'],
     ] as const) {
@@ -67,7 +68,7 @@ test.describe('command palette', () => {
   test('Mod+P goes to a page: type its name and press Enter, and the focus lands on the page', async ({ page }) => {
     await dashboard(page);
     const sidebarPages = await page.getByRole('navigation', { name: 'Pages' }).getByRole('link').count();
-    await page.keyboard.press('ControlOrMeta+p');
+    await pressMod(page, 'Mod+p');
     await expect(input(page)).toBeFocused();
     // Every page of the sidebar is listed, whatever their number.
     await expect(page.getByRole('option')).toHaveCount(sidebarPages);
@@ -81,7 +82,7 @@ test.describe('command palette', () => {
 
   test('going to the page that is already shown also lands the focus on the page', async ({ page }) => {
     await dashboard(page);
-    await page.keyboard.press('ControlOrMeta+p');
+    await pressMod(page, 'Mod+p');
     await input(page).fill('dashboard');
     await page.keyboard.press('Enter');
     await expect(input(page)).toBeHidden();
@@ -91,11 +92,11 @@ test.describe('command palette', () => {
   test('keys typed right after the shortcut are kept, and an early Enter runs nothing', async ({ page }) => {
     await dashboard(page);
     // The first command of a window waits for the app's context chunk; once it is loaded the palette opens at once.
-    await page.keyboard.press('ControlOrMeta+Shift+P');
+    await pressMod(page, 'Mod+Shift+P');
     await expect(input(page)).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(input(page)).toBeHidden();
-    await page.keyboard.press('ControlOrMeta+Shift+P');
+    await pressMod(page, 'Mod+Shift+P');
     // No waiting for the input: this is how fast people type.
     await page.keyboard.type('check backup');
     await page.keyboard.press('Enter');
@@ -105,7 +106,7 @@ test.describe('command palette', () => {
 
   test('Mod+Shift+P runs a command on its page, and Escape closes the palette', async ({ page }) => {
     await dashboard(page);
-    await page.keyboard.press('ControlOrMeta+Shift+P');
+    await pressMod(page, 'Mod+Shift+P');
     await expect(input(page)).toBeFocused();
     await input(page).fill('> system logs');
     await expect(page.getByRole('option')).toHaveCount(1);
@@ -115,7 +116,7 @@ test.describe('command palette', () => {
     await expect(page.getByText(/Read the system logs/)).toBeVisible();
     await expect(input(page)).toBeHidden();
 
-    await page.keyboard.press('ControlOrMeta+Shift+P');
+    await pressMod(page, 'Mod+Shift+P');
     await expect(input(page)).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(input(page)).toBeHidden();
@@ -123,10 +124,10 @@ test.describe('command palette', () => {
 
   test('a command of another page shows that page: Why slow runs again where its result appears', async ({ page }) => {
     await dashboard(page);
-    await page.keyboard.press('ControlOrMeta+Shift+P');
+    await pressMod(page, 'Mod+Shift+P');
     await input(page).fill('> why slow run again');
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('heading', { level: 1, name: 'Why is my PC slow?' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Why is my computer slow?' })).toBeVisible();
     await expect(page.locator('#pd-main')).toBeFocused();
   });
 });
@@ -496,7 +497,7 @@ test.describe('network', () => {
 
   test('lifespan: a disk and a battery forecast with ranges, confidence and what they stand on', async ({ page }) => {
     await page.goto(url('/lifespan'));
-    await expect(page.getByRole('heading', { level: 1, name: 'Disk and battery life' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Lifespan' })).toBeVisible();
     await expect(page.getByText('Replace in about 23 months (17 to 31 months)')).toBeVisible();
     await expect(page.getByText('Confidence: medium')).toHaveCount(2);
     await expect(page.getByRole('img', { name: /Soonest 17 months, expected 23 months/ })).toBeVisible();
@@ -512,14 +513,14 @@ test.describe('network', () => {
   test('dashboard: "Is this normal?" lists only what is unusual, with the current and the usual value', async ({ page }) => {
     await page.goto(url('/'));
     const card = page.getByRole('region', { name: 'Is this normal?' });
-    await expect(card.getByText('Higher than usual for Tuesday mornings').first()).toBeVisible();
+    await expect(card.getByText('Higher than usual for Thursday afternoons').first()).toBeVisible();
     await expect(card.getByText('71% now · usually 14%')).toBeVisible();
     await expect(card.getByText(/^Usual for/)).toHaveCount(0);
   });
 
   test('dashboard: ?hw=learning shows one quiet line while Dyno learns', async ({ page }) => {
     await page.goto(url('/', '&hw=learning'));
-    await expect(page.getByText('Learning what is normal for this PC: day 3 of 7')).toBeVisible();
+    await expect(page.getByText('Learning what is normal for this computer: day 3 of 7')).toBeVisible();
     await expect(page.getByRole('region', { name: 'Is this normal?' }).getByRole('listitem')).toHaveCount(0);
   });
 
@@ -539,17 +540,37 @@ test.describe('network', () => {
 });
 
 test.describe('issues', () => {
-  test('shows the stability score, the apps with trouble and the events grouped by day; a row opens its evidence as plain text', async ({ page }) => {
-    await page.goto(url('/issues'));
-    await expect(page.getByRole('heading', { name: 'Issues', exact: true })).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Stability' })).toBeVisible();
-    const table = page.getByRole('treegrid', { name: 'Issues', exact: true });
-    await expect(table.getByText('Today').first()).toBeVisible();
-    await table.getByRole('row', { name: /Safari/ }).click();
-    const detail = page.getByRole('complementary', { name: 'Issue details' });
-    await expect(detail.getByText('What the system said')).toBeVisible();
-    await expect(detail.getByText('Safari stopped responding')).toBeVisible();
-    await page.keyboard.press('Escape');
+  test.describe('grouped by the local day', () => {
+    // The mock dates its issues relative to the clock (the newest 35 minutes ago), so the day headings depend on the
+    // time of day: pin the zone (UTC+8, no daylight saving) and the clock, or the test fails in the first 35 minutes
+    // after the runner's midnight.
+    test.use({ timezoneId: 'Asia/Singapore' });
+    const AFTERNOON = Date.parse('2026-10-22T14:30:00+08:00');
+    const JUST_AFTER_MIDNIGHT = Date.parse('2026-10-23T00:10:00+08:00');
+
+    test('shows the stability score, the apps with trouble and the events grouped by day; a row opens its evidence as plain text', async ({ page }) => {
+      await page.clock.setFixedTime(AFTERNOON);
+      await page.goto(url('/issues'));
+      await expect(page.getByRole('heading', { name: 'Issues', exact: true })).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Stability' })).toBeVisible();
+      const table = page.getByRole('treegrid', { name: 'Issues', exact: true });
+      await expect(table.getByText('Today').first()).toBeVisible();
+      await table.getByRole('row', { name: /Safari/ }).click();
+      const detail = page.getByRole('complementary', { name: 'Issue details' });
+      await expect(detail.getByText('What the system said')).toBeVisible();
+      await expect(detail.getByText('Safari stopped responding')).toBeVisible();
+      await page.keyboard.press('Escape');
+    });
+
+    test('just after local midnight nothing happened today yet: the newest issues are under Yesterday, not by the UTC date', async ({ page }) => {
+      // 00:10 in UTC+8 is 16:10 UTC of the day before, the same UTC day as the newest issue (23:35 local): grouping by
+      // the UTC date would put it under Today.
+      await page.clock.setFixedTime(JUST_AFTER_MIDNIGHT);
+      await page.goto(url('/issues'));
+      const table = page.getByRole('treegrid', { name: 'Issues', exact: true });
+      await expect(table.getByText('Yesterday').first()).toBeVisible();
+      await expect(table.getByText('Today')).toHaveCount(0);
+    });
   });
 
   test('a row\'s context menu opens with Shift+F10, reaches every action, and Escape gives the focus back to the row', async ({ page }) => {
@@ -736,7 +757,7 @@ test.describe('extras', () => {
     await expect(page.getByRole('grid', { name: 'Recent wakes' })).toContainText('Lid open');
     await page.getByRole('tab', { name: 'Boot' }).click();
     await expect(page.getByRole('region', { name: 'Last start-up' })).toContainText('47.2 s');
-    await expect(page.getByRole('grid', { name: 'What slowed start-up' })).toContainText('Docker Desktop');
+    await expect(page.getByRole('grid', { name: 'What slowed start-up' })).toContainText('VirtualBox');
     await page.getByRole('tab', { name: 'Apps' }).click();
     await expect(page.getByRole('grid', { name: 'Network and energy per app' })).toContainText('Google Chrome');
     await page.getByRole('tab', { name: 'GPU' }).click();
@@ -752,7 +773,7 @@ test.describe('extras', () => {
     await page.goto(url('/extras', '').replace('#/extras', '#/extras?tab=inventory'));
     await page.getByRole('button', { name: /Export report/ }).click();
     await page.getByRole('menuitem', { name: /Markdown/ }).click();
-    await expect(page.getByText('/Users/sam/Documents/dyno-inventory.md')).toBeVisible();
+    await expect(page.getByText('/Users/alex/Documents/dyno-inventory.md')).toBeVisible();
   });
 
   test('Maintenance windows can be edited and saved', async ({ page }) => {

@@ -27,6 +27,7 @@ so the numbering is fixed.
 | [0020](0020-extras-backup-checks-and-taming-proof.md) | Extras and backup health behind a ToolRunner; the login-shell PATH resolver; taming rules that expire and prove their effect |
 | [0021](0021-monitoring-only.md) | Monitoring only; any privileged helper is read-only and there is none in 1.0 (supersedes 0004 and 0005, amends 0006, 0007, 0016, 0018) |
 | [0023](0023-paddock-app-shell.md) | The UI runs on the Paddock app shell and the shared dialog API: pages as contributions, OS-window dialogs with declared actions, the shell's settings, notifications and tray popover, a token bridge over `--pd-*` |
+| [0024](0024-local-days-through-a-zone-port.md) | Local days, hours and minutes come from a time-zone port read from the OS (daylight saving included), never a stored offset |
 
 New records: copy the shape of an existing one (status, related, context, decision, consequences). ADR numbers are
 allocated at merge time; renumber on a clash and fix the code comments that cite them.

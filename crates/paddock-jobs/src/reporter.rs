@@ -2,7 +2,7 @@ use crate::eta::EtaEstimator;
 use crate::model::{JobId, JobKind, JobSnapshot, JobState, Phase, PhaseProgress};
 use crate::time::{Clock, SystemClock};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Default floor between two events of one job: 10 per second.
@@ -37,6 +37,9 @@ struct Inner {
     eta_ms: Option<u64>,
     cancellable: bool,
     reason: Option<String>,
+    /// The count the last emitted snapshot carried; a later `done` is a pending update. Kept under the lock, so no atomic
+    /// ordering decides whether an update is pending.
+    published: u64,
 }
 
 struct Shared {
@@ -50,7 +53,6 @@ struct Shared {
     start_ms: u64,
     done: AtomicU64,
     last_emit_ms: AtomicU64,
-    dirty: AtomicBool,
     sink_panics: AtomicU64,
     inner: Mutex<Inner>,
 }
@@ -106,7 +108,6 @@ impl Reporter {
             start_ms,
             done: AtomicU64::new(0),
             last_emit_ms: AtomicU64::new(NEVER),
-            dirty: AtomicBool::new(false),
             sink_panics: AtomicU64::new(0),
             inner: Mutex::new(Inner {
                 state: JobState::Queued,
@@ -115,6 +116,7 @@ impl Reporter {
                 eta_ms: None,
                 cancellable: true,
                 reason: None,
+                published: 0,
             }),
         }));
         let g = lock(&r.0.inner);
@@ -134,13 +136,14 @@ impl Reporter {
 
     /// The current snapshot (does not count as an emit).
     pub fn snapshot(&self) -> JobSnapshot {
-        self.build(&lock(&self.0.inner))
+        let g = lock(&self.0.inner);
+        self.build(&g, self.0.done.load(Ordering::Relaxed))
     }
 
-    fn build(&self, g: &Inner) -> JobSnapshot {
+    fn build(&self, g: &Inner, done: u64) -> JobSnapshot {
         let mut state = g.state.clone();
         if let JobState::Running { phase: Some(p) } = &mut state {
-            p.done = self.0.done.load(Ordering::Relaxed);
+            p.done = done;
         }
         JobSnapshot {
             id: self.0.id,
@@ -158,13 +161,16 @@ impl Reporter {
 
     fn emit_locked(&self, mut g: MutexGuard<'_, Inner>) {
         let now = self.0.clock.now_ms();
+        // The count is read once, after the clock, and the snapshot and `published` both carry that value: an add that lands later
+        // is above `published`, so `flush` sees it.
+        let done = self.0.done.load(Ordering::Relaxed);
         if let JobState::Running { phase: Some(p) } = &g.state {
-            let (done, total) = (self.0.done.load(Ordering::Relaxed), p.phase.total);
+            let total = p.phase.total;
             g.eta_ms = g.eta.observe(now, done, total);
         }
         g.seq += 1;
-        let snap = self.build(&g);
-        self.0.dirty.store(false, Ordering::Relaxed);
+        g.published = done;
+        let snap = self.build(&g, done);
         self.0.last_emit_ms.store(now, Ordering::Relaxed);
         if catch_unwind(AssertUnwindSafe(|| self.0.sink.emit(&snap))).is_err() {
             self.0.sink_panics.fetch_add(1, Ordering::Relaxed);
@@ -173,9 +179,8 @@ impl Reporter {
 
     /// Progress after the end of the job is dropped: the terminal snapshot is the last event.
     fn emit_live(&self, g: MutexGuard<'_, Inner>) {
-        if g.state.is_terminal() {
-            self.0.dirty.store(false, Ordering::Relaxed);
-        } else {
+        // Nothing is published after the end.
+        if !g.state.is_terminal() {
             self.emit_locked(g);
         }
     }
@@ -190,7 +195,13 @@ impl Reporter {
     }
 
     /// Starts a new phase on its own scale: the count restarts at 0 and the event goes out at once. Starts the job if needed.
+    ///
+    /// The previous phase's pending count is published first. Calling [`add`](Self::add) or [`set`](Self::set) from another thread
+    /// while a phase begins is a caller error: which phase the count belongs to is then undefined. End a phase's workers before
+    /// starting the next.
     pub fn begin_phase(&self, phase: Phase) {
+        // The previous phase's last throttled count goes out first: it is that phase's final value and the reset below drops it.
+        self.flush();
         let mut g = lock(&self.0.inner);
         if g.state.is_terminal() {
             return;
@@ -231,20 +242,22 @@ impl Reporter {
         let s = &self.0;
         let last = s.last_emit_ms.load(Ordering::Relaxed);
         if last != NEVER && s.clock.now_ms().saturating_sub(last) < s.min_interval_ms {
-            s.dirty.store(true, Ordering::Relaxed);
             return;
         }
-        // Busy (another thread is emitting) or poisoned: leave it pending; the next call or `flush` publishes the newest value.
-        match self.0.inner.try_lock() {
-            Ok(g) => self.emit_live(g),
-            Err(_) => s.dirty.store(true, Ordering::Relaxed),
+        // Busy (another thread is emitting) or poisoned: leave it pending (`done` is above `published`); the next call or `flush`
+        // publishes the newest value.
+        if let Ok(g) = self.0.inner.try_lock() {
+            self.emit_live(g);
         }
     }
 
     /// Emits the newest value if a throttled update is waiting. Call at the end of a loop and before blocking for a long time.
     pub fn flush(&self) {
-        if self.0.dirty.load(Ordering::Relaxed) {
-            self.emit_live(lock(&self.0.inner));
+        let g = lock(&self.0.inner);
+        if matches!(g.state, JobState::Running { phase: Some(_) })
+            && self.0.done.load(Ordering::Relaxed) != g.published
+        {
+            self.emit_locked(g);
         }
     }
 
@@ -262,6 +275,8 @@ impl Reporter {
 
     /// Ends the job in a terminal state. Returns false (and changes nothing) if it already ended or the transition is illegal.
     pub fn finish(&self, to: JobState) -> bool {
+        // The last throttled count goes out first, so the phase ends on its final value.
+        self.flush();
         let mut g = lock(&self.0.inner);
         if !to.is_terminal() {
             return false;

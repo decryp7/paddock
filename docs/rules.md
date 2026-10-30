@@ -34,7 +34,8 @@ changes here, every app's copy is updated in the same change.
     consistent (build new data, then swap).
 12. **The UI never times out a running job;** it shows "Still working".
 13. **Parallel where it helps, bounded by the kind of work** (CPU: cores−1 or the Performance setting; SSD I/O 4–8; HDD
-    1–2; network a few per host; memory-heavy by RAM), background priority, deterministic results.
+    1–2; network a few per host; memory-heavy by RAM), lowered priority that never starves (rule 52), deterministic
+    results.
 14. **Multi-stage work is a pipeline:** producers → bounded queue → workers, stage-specific thread counts, back-pressure,
     cancel across stages, per-stage progress; determinism by commit-time ordering. IDs: number only new items in sorted
     canonical relative path order; existing IDs never change; moved/renamed files are matched by path, then fingerprint.
@@ -162,7 +163,8 @@ changes here, every app's copy is updated in the same change.
 51. **Slow means: more parallelism, or a cheaper operation.** When any operation is slow (import, indexing, scans, queries,
     CI steps, tests), the analysis answers two questions with measurements:
     (a) Can more threads or workers be assigned? Bounded by the kind of work (ER-20): CPU-bound work gets cores minus one,
-    I/O a few, memory-heavy work is limited by RAM; it runs at background priority with deterministic results.
+    I/O a few, memory-heavy work is limited by RAM; it runs at a lowered priority that never starves (rule 52), with
+    deterministic results.
     (b) Can the operation be made cheaper? For example less work per item, no repeated work, a cheaper algorithm or format,
     caching, batching, skipping.
     Thread counts and similar tunables are Settings values with an "Auto" default, validated in the engine, not
@@ -171,6 +173,53 @@ changes here, every app's copy is updated in the same change.
     *Why:* Debrief's import was bound by 2 Tantivy writer threads and a single-threaded catalogue, and regex was 38% of parse
     time; these were found by accident, and should be found by design.
 
+## Thread priority (user, 2026-10-30)
+52. **Work a person waits for never runs at an OS's starvable background level.** Starvable levels: on macOS QoS
+    `BACKGROUND`, process background (`PRIO_DARWIN_BG`, `taskpolicy -b`, `-c background` or `-c maintenance`) and
+    throttled I/O (`IOPOL_THROTTLE`, `taskpolicy -d throttle`); on Windows `THREAD_MODE_BACKGROUND_BEGIN`,
+    `PROCESS_MODE_BACKGROUND_BEGIN` (both also drop I/O and memory priority to the lowest), `IDLE_PRIORITY_CLASS`,
+    `THREAD_PRIORITY_IDLE` and EcoQoS (`ProcessPowerThrottling` / `ThreadPowerThrottling` execution speed); on Linux
+    `SCHED_IDLE` (`chrt --idle`) and the idle I/O class (`IOPRIO_CLASS_IDLE`, `ionice -c3`). The same levels set for a
+    whole service count too: launchd `ProcessType` `Background` (and `Adaptive` when the service has no XPC
+    `MachServices` to raise it), `LowPriorityIO` or `LowPriorityBackgroundIO` `true`, systemd `CPUSchedulingPolicy=idle`
+    and `IOSchedulingClass=idle`. Every other thread has a role. **Live** work is what a person waits on within a
+    deadline or for a screen to fill: requests, probes with a deadline, a sampler behind a live view, a page refresh.
+    **Bulk** work is long work that shows progress and can be cancelled: walks, scans, compaction, exports. Bulk work
+    runs at the gentle level: `QOS_CLASS_UTILITY` on macOS, nice 10 (with best-effort I/O) on Linux,
+    `THREAD_PRIORITY_BELOW_NORMAL` on Windows (Debrief's `debrief_core::threads::lower_priority`; family ADR 0020's
+    `Background` class); a busy machine slows it, and on Windows it accepts stalls of seconds. A thread holding a lock
+    that live work waits on is live, or must not hold the lock across slow work. Live work may use the
+    gentle level on macOS and Linux, whose schedulers share the CPU by weight, but stays at `THREAD_PRIORITY_NORMAL` on
+    Windows: Windows always runs a ready thread of a higher priority before a lower one
+    ([Scheduling Priorities](https://learn.microsoft.com/en-us/windows/win32/procthread/scheduling-priorities)), its
+    dynamic boosts are for foreground windows, input and finished waits
+    ([Priority Boosts](https://learn.microsoft.com/en-us/windows/win32/procthread/priority-boosts)), and its
+    anti-starvation boost for a ready thread that has not run comes only after seconds (Windows Internals; Microsoft
+    Learn's [Priority Inversion](https://learn.microsoft.com/en-us/windows/win32/procthread/priority-inversion) page now
+    describes AutoBoost for lock owners instead). A starvable level is only for work nobody waits on (ADR 0020's `Idle`
+    class), and each use says why with a `conformance: background-qos — <why nobody waits on it>` comment (check C54). (`THREAD_PRIORITY_LOWEST` is not on the list, but like `BELOW_NORMAL` it waits behind busy
+    normal threads, so it is for bulk work only; `THREAD_PRIORITY_IDLE` sits below all of the dynamic band.) *Why:* at
+    these levels a thread gets the CPU or the disk only after all other work at higher levels, for as long as there is
+    any (macOS `BACKGROUND` also keeps it to the efficiency cores), so a caller waiting on it waits as long as the
+    machine is busy. Debrief's mining pool ran in QoS `BACKGROUND`, and on the loaded CI Mac `debrief report` waited
+    minutes for its analyses and timed out (Debrief ADR 0052, amended 2026-10-30; lessons 2026-10-30). On the Windows CI
+    runner Dyno's sampler and counters listing, lowered to `BELOW_NORMAL`, did not run for seconds while tests filled the
+    cores (CI runs 7166 and 7168; lessons 2026-10-30).
+
+## Process identity (user, 2026-10-30)
+53. **Never act on a reusable OS name read earlier.** A process id, a port or a temp path read earlier may name something
+    else by the time it is used. Hold the thing itself (a process handle, a job object, a bound listener, an open file)
+    or verify its identity immediately before acting (for a process: its pid plus its start time,
+    `paddock_proc::ProcessId`). A tree is followed by age (a child never started before its parent) or by job
+    membership, never by parent pids alone. Kills go through `paddock_proc` (`kill_tree`, `end`, `ask`, `terminate`,
+    `Supervised`). Clippy's `disallowed-methods` (lint/clippy.toml: `libc::kill`, `libc::killpg`, nix's `kill`/`killpg`,
+    sysinfo's `Process::kill`/`kill_with`) and conformance check C53 (`taskkill`, kill commands, `Stop-Process`,
+    `TerminateProcess`, `TerminateJobObject`, open ADR 0033 follow-ups) enforce it. ADR
+    [0033](adr/0033-processes-by-identity-never-by-a-bare-pid.md); ADR [0023](adr/0023-tests-never-free-a-port-they-probe.md)
+    is the same rule for ports.
+    *Why:* Windows hands a freed pid on at once. `kill_tree` killed the pids of a stale snapshot, which can end another
+    test's Chrome helper; the same mistake was in four shapes in five apps. (It was suspected of causing the Windows
+    `ERR_ABORTED` failures; the suspected cause was disproved by run 7158; the flake has another cause, ADR 0033 WP-4.)
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:

@@ -89,7 +89,7 @@ describe('ExtrasStore: file finder', () => {
     await store.search();
     expect(store.finder().data).toBeNull();
     await store.chooseFolder();
-    expect(store.folder()).toBe('/Users/sam/Projects');
+    expect(store.folder()).toBe('/Users/alex/Projects');
     expect(store.finder().data?.large).toHaveLength(8);
   });
 
@@ -215,7 +215,7 @@ describe('ExtrasStore: the file finder as a job', () => {
     expect(store.finder().error?.message).toBe('Give the full path of the folder.');
     expect(store.finderJob()).toBeNull();
     vi.spyOn(mock, 'jobResult').mockResolvedValueOnce({ finder: { ...store.finder().data!, limit: { limit: 'files', message: 'Stopped after 500000 files and folders. Choose a smaller folder to see everything in it.' } } });
-    vi.spyOn(mock, 'pickFolder').mockResolvedValueOnce('/Users/sam/Projects');
+    vi.spyOn(mock, 'pickFolder').mockResolvedValueOnce('/Users/alex/Projects');
     await store.chooseFolder();
     expect(store.finder().data?.limit?.message).toContain('Choose a smaller folder');
   });

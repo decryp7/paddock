@@ -5,7 +5,7 @@
   "angularDir": "app",
   "lastPackages": ["pitwall-app"],
   "windowsClippy": true,
-  "processPatterns": ["[/\\\\]\\.paddock-ci[/\\\\]target-pitwall-app[/\\\\]debug[/\\\\]pitwall-server(\\.exe)? .*--fake-engine"],
+  "processPatterns": ["{build}[/\\\\]debug[/\\\\]pitwall-server(\\.exe)? .*--fake-engine"],
   "checks": [
     "cd apps/pitwall",
     "node --test scripts/ci/*.test.mjs",

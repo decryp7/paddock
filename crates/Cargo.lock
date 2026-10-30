@@ -3714,6 +3714,7 @@ name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "log",
  "paddock-testkit",
  "paddock-workspace-hack",
  "sysinfo",

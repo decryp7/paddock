@@ -13,11 +13,12 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { SHELL_IDLE, ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { DEFAULT_APP_QUIT, provideContributions, SHELL_IDLE, shellCommand, ShellContextHost } from '@decryp7/paddock-ui/shell';
 import { windowReady } from '@decryp7/paddock-ui/shell/startup';
 import { MENU_EVENT, MENU_SET_COMMAND, type MenuApplied, type NativeMenuEntry, type NativeMenuModel } from '../generated/menu';
 import { AppMenu } from './app-menu';
 import { Keymap } from './keymap';
+import { QUIT_CONTRIBUTIONS } from './quit';
 import type { MenuNode, TopMenu } from './menu-model';
 
 /** The shell side of the native menu bar (`paddock-menu` on macOS); fakes in tests. */
@@ -26,6 +27,8 @@ export interface NativeMenuPort {
   setAppMenu(menu: NativeMenuModel): Promise<MenuApplied | void>;
   /** Calls `handler` with the item id when a native menu item is chosen while this window is the menu bar's. */
   onMenu(handler: (id: string) => void): Promise<() => void>;
+  /** Quits the app (the shell's `app_quit`): the default of `ShellCore.quitApp`, which an app overrides with `APP_QUIT`. */
+  quitApp?(): Promise<void>;
 }
 
 /** The IPC an app hands to `tauriNativeMenuPort` (from `@tauri-apps/api`: `invoke`, and the current window's `listen`). */
@@ -43,6 +46,7 @@ export interface NativeMenuIpc {
 export function tauriNativeMenuPort(ipc: NativeMenuIpc, command: string = MENU_SET_COMMAND): NativeMenuPort {
   return {
     setAppMenu: async (menu) => (await ipc.invoke(command, { menu })) as MenuApplied,
+    quitApp: async () => void (await ipc.invoke(shellCommand('app_quit'), {})),
     onMenu: (handler) =>
       ipc.listen(MENU_EVENT, (payload) => {
         if (typeof payload === 'string') handler(payload);
@@ -250,7 +254,11 @@ function messageOf(e: unknown): string {
  * mode is native. Only the main window class provides it; dialogs have no menus of their own.
  */
 export function provideNativeMenu(options: { readonly port?: NativeMenuPort; readonly gate?: () => Signal<boolean> } = {}): EnvironmentProviders {
+  const port = options.port;
   return makeEnvironmentProviders([
+    // Quit <App> (Mod+Q) for every shell app that can quit (a port with `quitApp`: the desktop build), and the shell's
+    // quit as its default; the browser build has nothing to quit.
+    ...(port?.quitApp ? [provideContributions(QUIT_CONTRIBUTIONS), { provide: DEFAULT_APP_QUIT, useValue: () => port.quitApp?.() ?? Promise.resolve() }] : []),
     ...(options.port ? [{ provide: NATIVE_MENU_PORT, useValue: options.port }] : []),
     ...(options.gate ? [{ provide: NATIVE_MENU_GATE, useFactory: options.gate }] : []),
     provideEnvironmentInitializer(() => {

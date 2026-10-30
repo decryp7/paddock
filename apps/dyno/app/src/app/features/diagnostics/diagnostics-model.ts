@@ -36,5 +36,5 @@ export function middlePath(path: string, max = 44): string {
 /** File sizes as a bare number (the unit is in the column header). */
 export function sizeInKb(bytes: number): string {
   const kb = bytes / 1024;
-  return kb < 10 ? kb.toFixed(1) : Math.round(kb).toLocaleString('en-US');
+  return kb < 10 ? kb.toFixed(1) : Math.round(kb).toLocaleString();
 }

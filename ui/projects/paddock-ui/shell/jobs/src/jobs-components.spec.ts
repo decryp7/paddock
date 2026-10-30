@@ -128,6 +128,10 @@ describe('pd-jobs-status', () => {
     expect(button.getAttribute('aria-expanded')).toBe('true');
     const panel = el.querySelector('[role="region"]') as HTMLElement;
     expect(panel.id).toBe(button.getAttribute('aria-controls'));
+    // The popover names itself with a visible heading.
+    const heading = panel.querySelector('h2') as HTMLElement;
+    expect(heading.textContent?.trim()).toBe('Jobs');
+    expect(panel.getAttribute('aria-labelledby')).toBe(heading.id);
     expect(panel.querySelectorAll('li')).toHaveLength(2);
 
     panel.dispatchEvent(new Event('pointerdown', { bubbles: true }));

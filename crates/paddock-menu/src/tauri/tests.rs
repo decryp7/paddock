@@ -486,3 +486,38 @@ fn the_tauri_bar_sets_the_app_menu_and_install_manages_the_platform_state() {
 fn find_item(menu: &Menu<MockRuntime>, id: &str) -> Option<MenuItemKind<MockRuntime>> {
     find(menu.items().ok()?, id).ok()?
 }
+
+#[test]
+fn a_shown_item_without_a_target_window_goes_to_the_no_window_handler_only() {
+    let bar = FakeBar::new();
+    let app = native_app(&bar);
+    let main = window(&app, "main");
+    invoke(&main, wire(true, true, "Find")).expect("shown");
+    let calls = Arc::new(Mutex::new(Vec::<String>::new()));
+    // No handler yet: the click is dropped.
+    assert_eq!(menu_chosen(app.handle(), QUIT_COMMAND), None);
+    let seen = calls.clone();
+    assert!(state(&app).on_no_window_by_default(move |_, id| lock(&seen).push(id.to_string())));
+    // A default never replaces a handler that is set.
+    assert!(!state(&app).on_no_window_by_default(|_, _| unreachable!("the first stays")));
+    assert_eq!(menu_chosen(app.handle(), QUIT_COMMAND), None);
+    assert_eq!(menu_chosen(app.handle(), "sd.find"), None);
+    assert_eq!(*lock(&calls), [QUIT_COMMAND, "sd.find"]);
+    // Ids that are not shown never reach it.
+    assert_eq!(menu_chosen(app.handle(), "tray.quit"), None);
+    assert_eq!(lock(&calls).len(), 2);
+    // A target window gets the click itself.
+    on_window_event(&main.as_ref().window(), &WindowEvent::Focused(true));
+    assert_eq!(
+        menu_chosen(app.handle(), QUIT_COMMAND).as_deref(),
+        Some("main")
+    );
+    assert_eq!(lock(&calls).len(), 2);
+    // The last window destroyed: the handler again; an explicit handler replaces the default.
+    on_window_event(&main.as_ref().window(), &WindowEvent::Destroyed);
+    let replaced = Arc::new(Mutex::new(0));
+    let r = replaced.clone();
+    state(&app).on_no_window(move |_, _| *lock(&r) += 1);
+    assert_eq!(menu_chosen(app.handle(), QUIT_COMMAND), None);
+    assert_eq!((*lock(&replaced), lock(&calls).len()), (1, 2));
+}

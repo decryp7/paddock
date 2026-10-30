@@ -9,7 +9,7 @@ pub mod feed;
 pub mod stats;
 
 use crate::health::Severity;
-use crate::time::{Timestamp, DAY, HOUR, MINUTE};
+use crate::time::{local_minute, next_day_start, Timestamp, Zone, DAY, HOUR, MINUTE};
 use crate::widgets::Metric;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, VecDeque};
@@ -188,9 +188,6 @@ pub struct AlarmConfig {
     pub max_alarms: u32,
     /// How long cleared alarms stay listed, days (1-90).
     pub keep_cleared_days: u32,
-    /// The local offset from UTC in minutes (-840..840); the app fills it in from the user's clock, so quiet hours
-    /// and "until tomorrow" follow local time.
-    pub utc_offset_minutes: i32,
 }
 
 impl Default for AlarmConfig {
@@ -201,7 +198,6 @@ impl Default for AlarmConfig {
             chatter_window_minutes: 10,
             max_alarms: 500,
             keep_cleared_days: 7,
-            utc_offset_minutes: 0,
         }
     }
 }
@@ -215,7 +211,6 @@ impl AlarmConfig {
         self.chatter_window_minutes = self.chatter_window_minutes.clamp(1, 240);
         self.max_alarms = self.max_alarms.clamp(50, 5_000);
         self.keep_cleared_days = self.keep_cleared_days.clamp(1, 90);
-        self.utc_offset_minutes = self.utc_offset_minutes.clamp(-14 * 60, 14 * 60);
         self
     }
 }
@@ -335,23 +330,6 @@ pub struct AlarmChange {
     pub at: Timestamp,
 }
 
-/// The minute of the local day for `at` given the local offset from UTC in minutes.
-pub fn local_minute(at: Timestamp, utc_offset_minutes: i32) -> u16 {
-    let minutes = at.millis().div_euclid(MINUTE) + i64::from(utc_offset_minutes);
-    minutes.rem_euclid(1_440) as u16
-}
-
-/// The next local midnight after `at`.
-pub fn next_local_midnight(at: Timestamp, utc_offset_minutes: i32) -> Timestamp {
-    let local = at.millis().saturating_add(i64::from(utc_offset_minutes) * MINUTE);
-    let start_of_day = local.div_euclid(DAY) * DAY;
-    Timestamp(
-        start_of_day
-            .saturating_add(DAY)
-            .saturating_sub(i64::from(utc_offset_minutes) * MINUTE),
-    )
-}
-
 fn clip(s: &str, max: usize) -> String {
     s.chars().filter(|c| !c.is_control() || *c == '\n').take(max).collect()
 }
@@ -360,7 +338,8 @@ fn clip(s: &str, max: usize) -> String {
 #[derive(Debug)]
 pub struct AlarmEngine {
     config: AlarmConfig,
-    utc_offset_minutes: i32,
+    /// The user's local zone: quiet hours and "until tomorrow" follow it.
+    zone: Zone,
     alarms: Vec<Alarm>,
     muted_rules: BTreeSet<String>,
     transitions: HashMap<String, VecDeque<Timestamp>>,
@@ -369,18 +348,12 @@ pub struct AlarmEngine {
     next_id: u64,
 }
 
-impl Default for AlarmEngine {
-    fn default() -> Self {
-        AlarmEngine::new(AlarmConfig::default())
-    }
-}
-
 impl AlarmEngine {
-    /// An empty engine.
-    pub fn new(config: AlarmConfig) -> AlarmEngine {
+    /// An empty engine in the user's local `zone`.
+    pub fn new(config: AlarmConfig, zone: Zone) -> AlarmEngine {
         let config = config.clamped();
         AlarmEngine {
-            utc_offset_minutes: config.utc_offset_minutes,
+            zone,
             config,
             alarms: Vec::new(),
             muted_rules: BTreeSet::new(),
@@ -392,8 +365,8 @@ impl AlarmEngine {
     }
 
     /// An engine continuing from stored alarms and muted rules.
-    pub fn restore(config: AlarmConfig, alarms: Vec<Alarm>, muted_rules: Vec<String>) -> AlarmEngine {
-        let mut e = AlarmEngine::new(config);
+    pub fn restore(config: AlarmConfig, zone: Zone, alarms: Vec<Alarm>, muted_rules: Vec<String>) -> AlarmEngine {
+        let mut e = AlarmEngine::new(config, zone);
         e.next_id = alarms.iter().map(|a| a.id).max().map_or(1, |m| m.saturating_add(1));
         for a in &alarms {
             *e.raises.entry(a.rule.clone()).or_insert(0) += 1;
@@ -409,12 +382,6 @@ impl AlarmEngine {
     /// Replaces the settings.
     pub fn set_config(&mut self, config: AlarmConfig) {
         self.config = config.clamped();
-        self.utc_offset_minutes = self.config.utc_offset_minutes;
-    }
-
-    /// The local offset from UTC in minutes (for quiet hours and "until tomorrow").
-    pub fn set_utc_offset_minutes(&mut self, minutes: i32) {
-        self.utc_offset_minutes = minutes.clamp(-14 * 60, 14 * 60);
     }
 
     /// All alarms, newest first.
@@ -448,7 +415,7 @@ impl AlarmEngine {
 
     fn quiet(&self, at: Timestamp, severity: Severity) -> bool {
         let q = self.config.quiet;
-        q.contains(local_minute(at, self.utc_offset_minutes)) && !(q.critical_bypass && severity == Severity::Critical)
+        q.contains(local_minute(at, self.zone.as_ref())) && !(q.critical_bypass && severity == Severity::Critical)
     }
 
     fn record_transition(&mut self, key: &str, at: Timestamp) -> bool {
@@ -646,7 +613,7 @@ impl AlarmEngine {
     fn shelve(&mut self, id: u64, how: ShelveFor, at: Timestamp) -> Vec<AlarmChange> {
         let shelf = match how {
             ShelveFor::OneHour => Shelf::Until(at.plus(HOUR)),
-            ShelveFor::UntilTomorrow => Shelf::Until(next_local_midnight(at, self.utc_offset_minutes)),
+            ShelveFor::UntilTomorrow => Shelf::Until(next_day_start(at, self.zone.as_ref())),
             ShelveFor::UntilReboot => Shelf::UntilReboot,
             ShelveFor::Custom(t) if t > at => Shelf::Until(t),
             ShelveFor::Custom(_) => return Vec::new(),
@@ -818,6 +785,11 @@ impl AlarmFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time::FixedZone;
+
+    fn utc() -> Zone {
+        FixedZone::shared(0)
+    }
 
     fn raise(key: &str, sev: Severity, at: i64) -> AlarmEvent {
         AlarmEvent::Raise {
@@ -846,7 +818,7 @@ mod tests {
 
     #[test]
     fn lifecycle_follows_isa_18_2() {
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), utc());
         let c = e.apply(raise("cpu:a", Severity::Warning, 1_000));
         assert_eq!((c[0].kind, c[0].notify), (ChangeKind::Raised, true));
         let id = c[0].alarm.id;
@@ -882,7 +854,7 @@ mod tests {
 
     #[test]
     fn repeats_are_deduplicated_and_escalation_notifies() {
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), utc());
         let id = e.apply(raise("disk:c", Severity::Warning, 1_000))[0].alarm.id;
         let c = e.apply(raise("disk:c", Severity::Warning, 2_000));
         assert_eq!((c[0].kind, c[0].notify, c[0].alarm.repeat_count), (ChangeKind::Repeated, false, 2));
@@ -909,8 +881,7 @@ mod tests {
 
     #[test]
     fn shelving_muting_and_notes() {
-        let mut e = AlarmEngine::default();
-        e.set_utc_offset_minutes(60);
+        let mut e = AlarmEngine::new(AlarmConfig::default(), FixedZone::shared(60));
         let id = e.apply(raise("cpu:a", Severity::Warning, 0))[0].alarm.id;
         assert!(e
             .apply(AlarmEvent::Shelve {
@@ -1008,7 +979,7 @@ mod tests {
     fn quiet_hours_with_critical_bypass() {
         let mut cfg = AlarmConfig::default();
         cfg.quiet.enabled = true; // 22:00 - 07:00
-        let mut e = AlarmEngine::new(cfg);
+        let mut e = AlarmEngine::new(cfg, utc());
         let night = 23 * HOUR;
         assert!(!e.apply(raise("a:1", Severity::Warning, night))[0].notify);
         assert!(e.apply(raise("b:1", Severity::Critical, night))[0].notify, "critical bypasses");
@@ -1016,8 +987,8 @@ mod tests {
         cfg.quiet.critical_bypass = false;
         e.set_config(cfg);
         assert!(!e.apply(raise("d:1", Severity::Critical, night))[0].notify);
-        // With a UTC offset, 20:00 UTC is 23:00 local at +3.
-        e.set_utc_offset_minutes(3 * 60);
+        // In UTC+3, 20:00 UTC is 23:00 local.
+        let mut e = AlarmEngine::new(cfg, FixedZone::shared(3 * 60));
         assert!(!e.apply(raise("e:1", Severity::Warning, 20 * HOUR))[0].notify);
         let q = QuietHours {
             enabled: true,
@@ -1033,13 +1004,13 @@ mod tests {
         }
         .contains(5));
         assert!(!QuietHours { enabled: false, ..q }.contains(61));
-        assert_eq!(local_minute(Timestamp(-MINUTE), 0), 1_439);
-        assert_eq!(next_local_midnight(Timestamp(0), -60), Timestamp(HOUR));
+        assert_eq!(local_minute(Timestamp(-MINUTE), &FixedZone::UTC), 1_439);
+        assert_eq!(next_day_start(Timestamp(0), &FixedZone(-60)), Timestamp(HOUR));
     }
 
     #[test]
     fn chattering_alarms_are_flagged_and_quiet() {
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), utc());
         let mut notified = 0;
         let mut flagged = false;
         for i in 0..8 {
@@ -1060,10 +1031,13 @@ mod tests {
 
     #[test]
     fn one_off_events_expire_and_old_alarms_are_pruned() {
-        let mut e = AlarmEngine::new(AlarmConfig {
-            keep_cleared_days: 1,
-            ..AlarmConfig::default()
-        });
+        let mut e = AlarmEngine::new(
+            AlarmConfig {
+                keep_cleared_days: 1,
+                ..AlarmConfig::default()
+            },
+            utc(),
+        );
         let mut ev = raise("cleanup:done", Severity::Info, 1_000);
         if let AlarmEvent::Raise { ttl_ms, .. } = &mut ev {
             *ttl_ms = Some(5_000);
@@ -1084,19 +1058,25 @@ mod tests {
 
     #[test]
     fn the_list_is_bounded() {
-        let mut e = AlarmEngine::new(AlarmConfig {
-            max_alarms: 50,
-            ..AlarmConfig::default()
-        });
+        let mut e = AlarmEngine::new(
+            AlarmConfig {
+                max_alarms: 50,
+                ..AlarmConfig::default()
+            },
+            utc(),
+        );
         for i in 0..60 {
             e.apply(raise(&format!("r{i}:k"), Severity::Info, 1_000 + i));
         }
         assert_eq!(e.alarms().len(), 50);
         // Cleared alarms go first.
-        let mut e = AlarmEngine::new(AlarmConfig {
-            max_alarms: 50,
-            ..AlarmConfig::default()
-        });
+        let mut e = AlarmEngine::new(
+            AlarmConfig {
+                max_alarms: 50,
+                ..AlarmConfig::default()
+            },
+            utc(),
+        );
         let first = e.apply(raise("old:k", Severity::Info, 1))[0].alarm.id;
         e.apply(AlarmEvent::Acknowledge {
             ids: vec![first],
@@ -1112,7 +1092,7 @@ mod tests {
 
     #[test]
     fn restore_continues_ids_and_clamps_config() {
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), utc());
         e.apply(raise("a:1", Severity::Info, 1));
         e.apply(AlarmEvent::Mute {
             rule: "a".into(),
@@ -1123,7 +1103,7 @@ mod tests {
             ids: vec![id],
             at: Timestamp(500),
         });
-        let r = AlarmEngine::restore(AlarmConfig::default(), e.alarms(), e.muted_rules());
+        let r = AlarmEngine::restore(AlarmConfig::default(), utc(), e.alarms(), e.muted_rules());
         assert_eq!(r.stats(Timestamp(0)).mean_time_to_acknowledge_ms, Some(499));
         assert_eq!(r.alarms().len(), 1);
         assert_eq!(r.muted_rules(), vec!["a".to_string()]);
@@ -1142,7 +1122,6 @@ mod tests {
             chatter_window_minutes: 0,
             max_alarms: 0,
             keep_cleared_days: 0,
-            utc_offset_minutes: 99_999,
             quiet: QuietHours {
                 start_minute: 9_999,
                 end_minute: 9_999,
@@ -1155,14 +1134,12 @@ mod tests {
             (3, 1, 50, 1)
         );
         assert_eq!((c.quiet.start_minute, c.quiet.end_minute), (1_439, 1_439));
-        assert_eq!(c.utc_offset_minutes, 840);
-        assert_eq!(c.utc_offset_minutes, 840);
-        assert_eq!(AlarmEngine::default().alarm(1), None);
+        assert_eq!(AlarmEngine::new(AlarmConfig::default(), utc()).alarm(1), None);
     }
 
     #[test]
     fn filters_and_serde() {
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), utc());
         let a = e.apply(raise("cpu:a", Severity::Warning, 1))[0].alarm.id;
         e.apply(raise("disk:b", Severity::Critical, 2));
         e.apply(AlarmEvent::Shelve {

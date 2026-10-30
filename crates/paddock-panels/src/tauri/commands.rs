@@ -4,7 +4,7 @@
 use super::{dock_back, focus, list, open, publish, set_keep_on_top};
 use crate::wire::{GhostRequest, PanelError, PopOutBounds, PopOutInfo, PopOutRequest, SyncPublish};
 use ::tauri::ipc::Invoke;
-use ::tauri::{AppHandle, Runtime, Window};
+use ::tauri::{AppHandle, Manager, Runtime, Window};
 
 /// The invoke handler of [`COMMANDS`](crate::COMMANDS) (put it behind `paddock_commands::tauri::Guard`).
 pub fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
@@ -106,6 +106,8 @@ pub async fn drag_ghost_end<R: Runtime>(
 
 /// Whether the primary mouse button is held anywhere on screen (`null` when the platform cannot tell).
 #[::tauri::command]
-pub async fn pointer_button_down() -> Option<bool> {
-    super::native::primary_button_down()
+pub async fn pointer_button_down<R: Runtime>(app: AppHandle<R>) -> Option<bool> {
+    app.try_state::<super::Panels>()?
+        .pointer()
+        .primary_button_down()
 }

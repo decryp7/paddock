@@ -10,15 +10,15 @@ import { hintPath } from '../why-slow/why-slow-model';
 import { MatButton } from '@angular/material/button';
 import { FullTextTip } from '../../shared/full-text-tip';
 
-/** "Why is my PC slow?": one button, and the engine's latest answer (headline, top cause, evidence, what to do). */
+/** "Why is my computer slow?": one button, and the engine's latest answer (headline, top cause, evidence, what to do). */
 @Component({
   selector: 'dy-diagnosis-card',
   imports: [FullTextTip, MatButton, Icon, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="card" aria-label="Why is my PC slow?">
+    <section class="card" aria-label="Why is my computer slow?">
       <div class="card-head">
-        <h2><dy-icon name="why" /> Why is my PC slow?</h2>
+        <h2><dy-icon name="why" /> Why is my computer slow?</h2>
         <span class="spacer"></span>
         @if (store.diagnosis()) {
           <a matButton="text" routerLink="/why-slow">See the evidence</a>

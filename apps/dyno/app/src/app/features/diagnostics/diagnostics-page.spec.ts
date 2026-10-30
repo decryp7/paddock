@@ -38,7 +38,7 @@ describe('dy-diagnostics-page', () => {
     await settle(f);
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    btn(el, 'Save bundle...')!.click();
+    btn(el, 'Save bundle…')!.click();
     await settle(f);
     expect(mock.savedBundles).toHaveLength(1);
     expect(el.querySelector('.note.ok .path')?.textContent).toBe(mock.savedBundles[0]!.path);
@@ -52,17 +52,17 @@ describe('dy-diagnostics-page', () => {
     const { f, el, mock } = render();
     await settle(f);
     mock.saveDiagnostics = () => Promise.resolve(null);
-    btn(el, 'Save bundle...')!.click();
+    btn(el, 'Save bundle…')!.click();
     await settle(f);
     expect(el.querySelector('.note')).toBeNull();
-    expect(btn(el, 'Save bundle...')!.disabled).toBe(false);
+    expect(btn(el, 'Save bundle…')!.disabled).toBe(false);
   });
 
   it('shows a failed save inline with Retry', async () => {
     const { f, el, mock } = render();
     await settle(f);
     mock.saveDiagnostics = () => Promise.reject({ code: 'accessDenied', message: 'The folder is read-only.' });
-    btn(el, 'Save bundle...')!.click();
+    btn(el, 'Save bundle…')!.click();
     await settle(f);
     expect(el.querySelector('.note.bad')?.textContent).toContain('The folder is read-only.');
     mock.saveDiagnostics = () => Promise.resolve({ path: '/tmp/x.zip', bytes: 2048, files: 1 });
@@ -76,7 +76,7 @@ describe('dy-diagnostics-page', () => {
     const { f, el } = render(['diagnosticsPreview']);
     await settle(f);
     expect(el.querySelector('[role="alert"]')).not.toBeNull();
-    expect(btn(el, 'Save bundle...')!.disabled).toBe(true);
+    expect(btn(el, 'Save bundle…')!.disabled).toBe(true);
   });
 
   it('shows an empty state when there are no files, and refreshes', async () => {

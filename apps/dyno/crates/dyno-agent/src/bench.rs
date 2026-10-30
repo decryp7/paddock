@@ -182,6 +182,7 @@ impl BenchCentre {
         };
         self.inner.cancel.store(false, Ordering::SeqCst);
         let me = self.clone();
+        // Not lowered (rule 52): it measures how fast this machine is, which a lowered thread would understate.
         let spawned = std::thread::Builder::new().name("dyno-bench".into()).spawn({
             let run_id = run_id.clone();
             move || me.execute(&run_id, plan, phase, load, machine)

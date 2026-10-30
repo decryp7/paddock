@@ -18,7 +18,7 @@ interface DiagnosisState {
   anomaliesError: CommandError | null;
 }
 
-/** "Why is my PC slow?" (the engine's diagnosis, run on demand) and the anomalies it found in the history. */
+/** "Why is my computer slow?" (the engine's diagnosis, run on demand) and the anomalies it found in the history. */
 export const DiagnosisStore = signalStore(
   { providedIn: 'root' },
   withState<DiagnosisState>({ diagnosis: null, history: [], running: false, error: null, anomalies: [], anomaliesLoaded: false, anomaliesError: null }),

@@ -182,6 +182,7 @@ impl Child {
         match self {
             // SAFETY: a valid process handle; failure (already gone) is ignored.
             Child::Session(p, _) => unsafe {
+                // conformance: pid-kill — a process handle we own (the process object cannot be handed on while it is open)
                 let _ = TerminateProcess(p.0, 1);
             },
             Child::Plain(c) => {

@@ -80,8 +80,9 @@ pub struct ClientConfig {
     pub peer: PeerOptions,
     /// The clock every wait runs on.
     pub clock: Arc<dyn Clock>,
-    /// Whether a pid runs (`paddock_proc::is_alive`; tests inject one).
-    pub is_alive: Arc<dyn Fn(u32) -> bool + Send + Sync>,
+    /// Whether the process a discovery file names still runs ([`discovery::is_running`]: the pid's holder must have started
+    /// before the file was written, ADR 0033; tests inject one).
+    pub is_alive: Arc<dyn Fn(&Discovery) -> bool + Send + Sync>,
 }
 
 impl ClientConfig {
@@ -107,7 +108,7 @@ impl ClientConfig {
             },
             peer: PeerOptions::new(label),
             clock: Arc::new(SystemClock),
-            is_alive: Arc::new(paddock_proc::is_alive),
+            is_alive: Arc::new(discovery::is_running),
         }
     }
 }
@@ -387,7 +388,7 @@ impl Runner {
 
     fn found(&self) -> Found {
         let alive = self.config.is_alive.clone();
-        discovery::read(&self.config.discovery, move |pid| alive(pid))
+        discovery::read(&self.config.discovery, move |d| alive(d))
     }
 
     /// Connects, starting or replacing the companion when needed (three rounds at most).
@@ -444,7 +445,10 @@ impl Runner {
             ));
         }
         let alive = self.config.is_alive.clone();
-        let gone = |pid: u32| !alive(pid);
+        let gone = |d: &Discovery| !alive(d);
+        // The pid comes from the file and may name another process by now: only the process that started before the file
+        // was written is ended (ADR 0033).
+        let companion = paddock_proc::ProcessId::of_recorded(d.pid, d.started_ms);
         match &self.config.replace {
             Replace::Never => {
                 return Err(format!(
@@ -453,15 +457,19 @@ impl Runner {
                 ));
             }
             Replace::Terminate { grace } => {
-                paddock_proc::terminate(d.pid, *grace);
+                if let Some(id) = companion {
+                    paddock_proc::terminate(id, *grace);
+                }
             }
             Replace::Ask { ask, grace } => {
-                if !(ask(d) && self.poll_until(*grace, || gone(d.pid))) {
-                    paddock_proc::terminate(d.pid, Duration::ZERO);
+                if !(ask(d) && self.poll_until(*grace, || gone(d)))
+                    && let Some(id) = companion
+                {
+                    paddock_proc::terminate(id, Duration::ZERO);
                 }
             }
         }
-        if !self.poll_until(self.config.start_wait, || gone(d.pid)) {
+        if !self.poll_until(self.config.start_wait, || gone(d)) {
             return Err(format!("{label} of build {} did not exit", d.build));
         }
         Discovery::remove_if_owned_by(&self.config.discovery, d.pid);

@@ -373,3 +373,20 @@ From the performance research (its section 7), decided 2026-10-28:
 | D10 | Names | `autoload` is **off by default** (the model loads on first AI use); there is **no large curated names pack**: 1.2 builds names from log metadata (Sysmon Description/Product, Service Control Manager display names, msinfo32, journald), the abbreviation and splitting rules, Model2Vec "did you mean" and persisted user corrections; the pack mechanism ships empty or with a few dozen entries (N3, N4, N2, N7) |
 | D12 | Video "describe all frames" | **Kept**, behind a confirmation that shows the frame count and the estimated time (N6) |
 | D11 | One family ADR for the background-work patterns | **Yes**: ADR 0024 (Accepted 2026-10-28, A1) |
+
+Decided by the user on 2026-10-29:
+
+| # | Decision | Taken |
+|---|---|---|
+| D13 | A zip that names the same full path more than once | **Keep every entry**: the second becomes `<stem> (2)<.ext>` in the same folder (`logs/app.log` -> `logs/app (2).log`), then `(3)` and so on, never the name of a real entry; the import report's notices list each renamed entry; the per-entry and per-archive limits apply to every entry. Built in `debrief_core::archive::expand` (it walks the central directory, which zip's own index hides repeated names from) on `fix/debrief-archive-duplicates` |
+
+## 7. Follow-ups
+
+- **A quit can lose the kept research profile's cookies or sign-in** (review of `ci/c30-grace-error`, P2-32). A normal
+  close gives a browser on the kept profile `KEPT_CLOSE_GRACE` (20 s), but at quit `close_all(QUIT_GRACE)` ends it by
+  force after 1.2 s, and the median exit after `Browser.close` under load was 0.9–1.4 s (Paddock's
+  [benchmarks](../benchmarks.md#2026-10-29-paddock-chromium-browserclose-exit-time-under-load-fixflaky-browser-close)),
+  so a quit regularly ends Chrome during its shutdown. Likely fix: send `Browser.close` at the very start of the quit and
+  let a kept-profile browser that has answered finish on its own, or give the teardown room for the kept grace. This is
+  a shutdown bound, class **S** in ADR 0031 (patience, not wall clocks; proposed on `docs/adr-patience-not-wall-clocks`):
+  it stays on the real clock, so the fix is ordering and budget, not patience.

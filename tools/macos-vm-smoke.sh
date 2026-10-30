@@ -2,7 +2,10 @@
 # Runs a smoke that REGISTERS REAL SERVICES inside a throw-away VM on this Mac (Tart, Apple Virtualization.framework), so
 # rule 7 holds: the developer's session and the shared runner are never touched (conformance C21, catalogue R03). One fresh
 # VM per run, cloned from a pinned base image (copy-on-write, so cheap), booted headless, always stopped and deleted again
-# (trap: success, failure, Ctrl-C, timeout). At most one VM at a time (a lock), disk and load are checked first.
+# (trap: success, failure, Ctrl-C, timeout). VMs are serialised host-wide (every runner and developer of this Mac) by a
+# VM slot: an OS file lock under TART_HOME taken with `./dev ci slot acquire` (ADR 0022/0025; the kernel frees it when its
+# holder dies, so there is no stale lock to break), at most PADDOCK_VM_MAX at once (default 1; never more than 2, the
+# number of macOS VMs Apple's licence and Virtualization.framework allow on one Mac). Disk and load are checked first.
 #
 #   bash paddock/tools/macos-vm-smoke.sh --old <N build> --new <N+1 build> [--guest macos|linux] [--smoke <script>]
 #     [--then <script>]
@@ -18,7 +21,10 @@
 # Environment: TART (default tart), TART_HOME (where the images live; the free-space check looks there),
 #   PADDOCK_VM_IMAGE (override the pinned image), PADDOCK_VM_MIN_FREE_GB (60), PADDOCK_VM_MAX_LOAD (16),
 #   PADDOCK_VM_LOAD_WAIT (seconds to wait for the load to fall, 1800), PADDOCK_VM_PULL_TIMEOUT (3600), PADDOCK_VM_BOOT_TIMEOUT (300),
-#   PADDOCK_VM_RUN_TIMEOUT (1200), PADDOCK_VM_POLL (seconds between polls, 5), PADDOCK_SMOKE_* (forwarded to the guest), PADDOCK_VM_LOG_DIR (default: a folder of the run).
+#   PADDOCK_VM_RUN_TIMEOUT (1200), PADDOCK_VM_POLL (seconds between polls, 5), PADDOCK_SMOKE_* (forwarded to the guest), PADDOCK_VM_LOG_DIR (default: a folder of the run),
+#   PADDOCK_VM_MAX (VMs at once on this Mac, 1 or 2), PADDOCK_VM_SLOT_WAIT (seconds to wait for a VM slot, 3600),
+#   PADDOCK_VM_PREFIX (the VM name's start, default paddock-smoke-; a CI job passes one of its own so its leftover check
+#   never sees another job's VM), PADDOCK_DEV (the paddock-dev program; default the repository's ./dev).
 set -euo pipefail
 
 MACOS_IMAGE="ghcr.io/cirruslabs/macos-tahoe-base@sha256:4aaa751fa7538902d73c767f27a066fc87e83f183069da4e4b5022863abd4c77"
@@ -55,8 +61,10 @@ tart="${TART:-tart}"
 command -v "$tart" >/dev/null 2>&1 || { echo "macos-vm-smoke: tart is needed (https://tart.run; brew install cirruslabs/cli/tart)" >&2; exit 1; }
 tart_home="${TART_HOME:-$HOME/.tart}"
 min_free="${PADDOCK_VM_MIN_FREE_GB:-60}"; max_load="${PADDOCK_VM_MAX_LOAD:-16}"; poll="${PADDOCK_VM_POLL:-5}"
-vm="paddock-smoke-$guest-$(date +%Y%m%d%H%M%S)-$$"
-run_pid=""; stage=""; lock=""; started_pull=0
+prefix="${PADDOCK_VM_PREFIX:-paddock-smoke-}"
+[[ "$prefix" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "macos-vm-smoke: PADDOCK_VM_PREFIX may hold letters, digits, '.', '_' and '-'" >&2; exit 2; }
+vm="$prefix$guest-$(date +%Y%m%d%H%M%S)-$$"
+run_pid=""; stage=""; vm_slot=""; vm_token=""; owner=""; started_pull=0
 
 log() { echo "macos-vm-smoke: $*" >&2; }
 
@@ -72,7 +80,10 @@ run_to() {
   return "$rc"
 }
 
-# Always: stop the VM, delete it, remove the staging folder and the lock. Never leaves a VM or its disk behind.
+# dev <args>: paddock-dev (PADDOCK_DEV, else the repository's ./dev, which must run inside the repository).
+dev() { if [ -n "${PADDOCK_DEV:-}" ]; then "$PADDOCK_DEV" "$@"; else (cd "$here/.." && bash ./dev "$@"); fi; }
+
+# Always: stop the VM, delete it, remove the staging folder and give the VM slot back. Never leaves a VM or its disk behind.
 cleanup() {
   local rc=$?
   trap - EXIT INT TERM HUP
@@ -84,23 +95,27 @@ cleanup() {
   fi
   [ -z "$run_pid" ] || wait "$run_pid" 2>/dev/null || true
   [ -z "$stage" ] || rm -rf "$stage"
-  [ -z "$lock" ] || rm -rf "$lock"
+  [ -z "$vm_slot" ] || dev ci slot release --slot "$vm_slot" --token "$vm_token" --root "$tart_home/.paddock-vm" >/dev/null 2>&1 || true
+  [ -z "$owner" ] || rm -rf "$owner" # its holder ends with this folder in any case
   exit "$rc"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
 
-# --- one VM at a time -------------------------------------------------------------------------------------------------
+# --- VM slots: host-wide, at most PADDOCK_VM_MAX VMs at once ------------------------------------------------------------
 mkdir -p "$tart_home"
-lock="$tart_home/.paddock-vm-smoke.lock"
-if ! mkdir "$lock" 2>/dev/null; then
-  other=$(cat "$lock/pid" 2>/dev/null || true)
-  if [ -n "$other" ] && kill -0 "$other" 2>/dev/null; then
-    lock=""; log "another smoke VM run is active (pid $other); only one VM at a time"; exit 3
-  fi
-  log "removing the stale lock of a dead run ($other)"; rm -rf "$lock"; mkdir "$lock"
-fi
-echo $$ >"$lock/pid"
+vm_max="${PADDOCK_VM_MAX:-1}"
+case "$vm_max" in 1 | 2) ;; *) echo "macos-vm-smoke: PADDOCK_VM_MAX is 1 or 2 (macOS runs at most two macOS VMs at once)" >&2; exit 2 ;; esac
+owner="$(mktemp -d "${TMPDIR:-/tmp}/paddock-vm-owner-XXXXXX")" # the slot's holder lives as long as this folder
+slot_wait="${PADDOCK_VM_SLOT_WAIT:-3600}"; waited=0
+while :; do
+  src=0; said="$(dev ci slot acquire --max "$vm_max" --owner "$owner" --root "$tart_home/.paddock-vm")" || src=$?
+  if [ "$src" = 0 ]; then read -r vm_slot vm_token <<< "$said"; break; fi
+  [ "$src" = 4 ] || { log "could not take a VM slot (paddock-dev exit $src)"; exit 3; }
+  [ "$waited" -lt "$slot_wait" ] || { log "every VM slot of this Mac stayed held for ${slot_wait}s (another smoke run); not starting a VM"; exit 3; }
+  log "another smoke VM run holds this Mac's VM slots; waiting"; sleep "$poll"; waited=$((waited + poll + 1))
+done
+log "VM slot $vm_slot"
 
 # --- disk and load ----------------------------------------------------------------------------------------------------
 free_gb=$(df -k "$tart_home" | awk 'NR==2 {print int($4/1048576)}')

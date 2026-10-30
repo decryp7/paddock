@@ -22,7 +22,10 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 > ([ADR 0021](docs/adr/0021-monitoring-only.md)). [docs/features.md](docs/features.md) says exactly what is real and
 > [docs/roadmap.md](docs/roadmap.md) lists what is left.
 
-![The dashboard](docs/screenshots/dashboard-dark.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dashboard-full-dark.png">
+  <img alt="The dashboard" src="docs/screenshots/dashboard-full-light.png">
+</picture>
 
 ## At a glance
 

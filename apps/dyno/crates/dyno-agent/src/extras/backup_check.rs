@@ -66,15 +66,26 @@ pub fn report(shared: &Arc<Shared>) -> BackupReport {
         want
     };
     if start {
-        let s = shared.clone();
-        let spawned = std::thread::Builder::new().name("dyno-backup-check".into()).spawn(move || {
+        let spawned = first_check(shared.clone(), |s| {
             let _ = run_check(&s, None);
         });
-        if spawned.is_err() {
+        if !spawned {
             end_check(x);
         }
     }
     snapshot(x)
+}
+
+/// Runs the first check on its own thread as live work (rule 52): the Backups page polls until it fills. Returns whether
+/// the thread started.
+fn first_check<T: Send + 'static>(state: T, check: impl FnOnce(T) + Send + 'static) -> bool {
+    std::thread::Builder::new()
+        .name("dyno-backup-check".into())
+        .spawn(move || {
+            dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
+            check(state);
+        })
+        .is_ok()
 }
 
 /// The report and whether a check runs, without starting one.
@@ -145,9 +156,9 @@ fn end_check(x: &ExtrasCentre) {
 /// on every way out.
 fn run_check(shared: &Arc<Shared>, job: Option<&JobContext>) -> Result<(), JobError> {
     let x = &shared.extras;
-    let (settings, off) = {
+    let (settings, zone) = {
         let core = lock(&shared.core);
-        (core.settings.backup.clone(), core.settings.alarms.utc_offset_minutes)
+        (core.settings.backup.clone(), core.zone.clone())
     };
     let resolver = lock(&x.resolver).clone();
     let t = now();
@@ -172,7 +183,7 @@ fn run_check(shared: &Arc<Shared>, job: Option<&JobContext>) -> Result<(), JobEr
         // interrupted; it ends at its own timeout.
         let _step = job.map(|j| j.uncancellable("A backup tool is being asked; Cancel takes effect when it has answered."));
         if let Ok(s) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            backup_status_of(&env, tool, t, off, settings.stale_after_hours)
+            backup_status_of(&env, tool, t, zone.as_ref(), settings.stale_after_hours)
         })) {
             statuses.push(s);
         }
@@ -209,5 +220,22 @@ fn raise_alarms(shared: &Shared, statuses: &[BackupStatus], t: dyno_core::time::
             core.alarms.observe(&core.store, o, t)
         };
         crate::sampler::push_alarm_changes(shared, changes);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Rule 52 (coordinator re-review, 2026-10-30): the first check fills the screen the Backups page polls for, so it runs
+    /// as live work.
+    #[test]
+    fn the_first_check_runs_as_live_work() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        assert!(super::first_check(tx, |tx| {
+            let _ = tx.send(dyno_platform::priority::current_role());
+        }));
+        let role = rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("the check ran (a hang guard)");
+        assert_eq!(role, Some(dyno_platform::priority::ThreadRole::Live));
     }
 }

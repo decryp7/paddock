@@ -28,6 +28,6 @@ export const itemName = (i: BaselineItem): string => (i.subject === 'System' ? i
 export function normalLine(o: BaselineOverview, unusualCount: number): string | null {
   const l = o.learning;
   if (l === 'off') return null;
-  if ('learning' in l) return `Learning what is normal for this PC: day ${Math.max(1, l.learning.daysDone)} of ${l.learning.daysNeeded}`;
+  if ('learning' in l) return `Learning what is normal for this computer: day ${Math.max(1, l.learning.daysDone)} of ${l.learning.daysNeeded}`;
   return unusualCount === 0 ? 'Everything looks usual for this time of the week' : null;
 }

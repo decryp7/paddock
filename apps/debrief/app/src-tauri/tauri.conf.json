@@ -4,6 +4,7 @@
   "version": "1.1.1",
   "identifier": "net.decryptology.debrief",
   "build": {
+    "windows": { "staticVCRuntime": false },
     "frontendDist": "../dist/app/browser",
     "devUrl": "http://localhost:4200",
     "beforeDevCommand": "npm run start",

@@ -27,6 +27,36 @@ export async function pressTab(page: Page, back = false): Promise<void> {
   await page.keyboard.press(pageTabKey(page, back));
 }
 
+/** The navigator fields that decide the platform of the page (`platform`, `userAgent`). */
+export interface NavigatorPlatform {
+  readonly platform?: string;
+  readonly userAgent?: string;
+}
+
+/**
+ * The key a binding's `Mod` presses in a page with this navigator: `Meta` (Cmd) on macOS and iOS, `Control` elsewhere. It
+ * follows the page, as the app does (paddock-ui's `currentPlatform` in `shell/menu/src/keys.ts`, the same test), not the
+ * machine the tests run on, which is what Playwright's `ControlOrMeta` follows: WebKit on a Linux runner emulates
+ * `devices['Desktop Safari']`, a Mac, so the app wants Cmd there while `ControlOrMeta` presses Ctrl (CI run 7134). Pure.
+ */
+export function modKey(nav: NavigatorPlatform): 'Meta' | 'Control' {
+  return /Mac|iPhone|iPad/.test(`${nav.platform ?? ''} ${nav.userAgent ?? ''}`) ? 'Meta' : 'Control';
+}
+
+/** {@link modKey} for the page's own navigator. */
+export async function pageModKey(page: Page): Promise<'Meta' | 'Control'> {
+  return modKey(await page.evaluate(() => ({ platform: navigator.platform, userAgent: navigator.userAgent })));
+}
+
+/**
+ * Presses a binding written with `Mod` (`Mod+Shift+P`, `Mod+Comma`) with the modifier the page binds it to
+ * ({@link pageModKey}). Use it instead of Playwright's `ControlOrMeta` for the app's own shortcuts.
+ */
+export async function pressMod(page: Page, binding: string): Promise<void> {
+  const mod = await pageModKey(page);
+  await page.keyboard.press(binding.replace(/^Mod\+/, `${mod}+`));
+}
+
 /** One element the focus stopped on. */
 export interface FocusStop {
   /** Identifies the element within the page: its `data-testid`, else its `id`, else its position in the DOM. */

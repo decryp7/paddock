@@ -3,4 +3,13 @@
 disallowed-methods = [
     { path = "std::process::Command::new", reason = "use debrief_core::process::quiet_command: it opens no console window on Windows" },
     { path = "tokio::process::Command::new", allow-invalid = true, reason = "use debrief_core::process::quiet_command: it opens no console window on Windows" },
+    # ADR 0033: nothing is ended by a bare pid. A pid may name another process by the time it is signalled; end it through
+    # paddock-proc with a ProcessId, or through a handle or job this process owns. A justified site carries
+    # #[expect(clippy::disallowed_methods, reason = "...")].
+    { path = "libc::kill", allow-invalid = true, reason = "signals a bare pid: use paddock_proc::end / kill_tree with a ProcessId (ADR 0033)" },
+    { path = "libc::killpg", allow-invalid = true, reason = "signals a process group by a bare pid: use paddock_proc::kill_tree with a ProcessId (ADR 0033)" },
+    { path = "nix::sys::signal::kill", allow-invalid = true, reason = "signals a bare pid: use paddock_proc::end / ask with a ProcessId (ADR 0033)" },
+    { path = "nix::sys::signal::killpg", allow-invalid = true, reason = "signals a process group by a bare pid: use paddock_proc::kill_tree with a ProcessId (ADR 0033)" },
+    { path = "sysinfo::Process::kill", allow-invalid = true, reason = "ends a process found by pid: use paddock_proc::end with a ProcessId (ADR 0033)" },
+    { path = "sysinfo::Process::kill_with", allow-invalid = true, reason = "ends a process found by pid: use paddock_proc::end / ask with a ProcessId (ADR 0033)" },
 ]

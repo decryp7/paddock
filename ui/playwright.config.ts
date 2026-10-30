@@ -33,9 +33,9 @@ export default assertChromeForTesting(
     outputDir: './.angular/playwright-results',
     fullyParallel: false,
     workers: 1,
-    retries: process.env['CI'] ? 1 : 0,
-    // Flakes (passed only after a retry) are listed, never hidden.
-    reporter: [['list'], ['./projects/paddock-e2e/src/retried-reporter.ts']],
+    // A flake is fixed, not retried (rule 5, ER-12): a retry hides it and runs the test twice on every CI failure.
+    retries: 0,
+    reporter: [['list']],
     timeout: 120_000,
     use: {
       ...devices['Desktop Chrome'],

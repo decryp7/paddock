@@ -140,9 +140,9 @@ export class ThrottlingPage implements OnInit, OnDestroy {
   protected readonly columns: PdColumn<ThrottleEpisode>[] = [
     { key: 'start', header: 'Started', value: (e) => e.start, text: (e) => this.stamp(e.start), width: '150px' },
     { key: 'duration', header: 'Duration', value: (e) => episodeSeconds(e, this.overview()?.at ?? e.start), text: (e) => this.duration(e), align: 'end', width: '80px' },
-    { key: 'cause', header: 'Cause', value: (e) => CAUSE_LABEL[e.cause], width: 'minmax(120px, 1fr)' },
-    { key: 'lost', header: 'Speed lost, average (%)', value: (e) => e.avgLostPercent, align: 'end', width: '150px' },
-    { key: 'peak', header: 'Peak temperature (°C)', value: (e) => e.peakTemperatureC, text: (e) => (e.peakTemperatureC === null ? '—' : String(e.peakTemperatureC)), align: 'end', width: '150px' },
+    { key: 'cause', header: 'Cause', value: (e) => this.causeLabelOf(e), width: 'minmax(120px, 1fr)' },
+    { key: 'lost', header: 'Speed lost, average (%)', value: (e) => e.avgLostPercent, align: 'end', width: '168px' },
+    { key: 'peak', header: 'Peak temperature (°C)', value: (e) => e.peakTemperatureC, text: (e) => (e.peakTemperatureC === null ? '—' : String(e.peakTemperatureC)), align: 'end', width: '168px' },
   ];
   protected readonly userOpen = signal<boolean | null>(null);
 

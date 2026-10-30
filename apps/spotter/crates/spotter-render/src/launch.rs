@@ -2,7 +2,7 @@
 //! caps. The real user agent and the automation banner are kept on purpose: no stealth.
 
 use crate::cdp::Connection;
-use crate::discover::Browser;
+use crate::discover::{Browser, Flavor};
 use crate::page::Page;
 use crate::process::{self, Supervised};
 use crate::{Error, Result};
@@ -108,12 +108,30 @@ pub const STABILITY_FLAGS: &[&str] = &[
     "--disable-background-timer-throttling",
     "--disable-renderer-backgrounding",
     "--disable-backgrounding-occluded-windows",
-    "--disable-features=Translate,OptimizationHints,MediaRouter,AutofillServerCommunication,msEdgeShopping,msEdgeSync",
 ];
 
-/// The command-line arguments. `--enable-automation` keeps Chrome's "controlled by automated test software"
-/// banner and `navigator.webdriver = true`; nothing hides either. No extensions, no sync.
-pub fn args(data_dir: &Path, mode: Mode) -> Vec<String> {
+/// Browser features every browser starts without, in the one `--disable-features` switch of [`args`].
+pub const STABILITY_DISABLED_FEATURES: &[&str] = &[
+    "Translate",
+    "OptimizationHints",
+    "MediaRouter",
+    "AutofillServerCommunication",
+    "msEdgeShopping",
+    "msEdgeSync",
+];
+
+/// Keeps a Chromium build (Chrome for Testing) from applying the field-trial testing config it carries, as Puppeteer and
+/// Playwright do; branded Chrome and Edge never apply it. That config turns on the network-service sandbox on Windows,
+/// which could not start for a browser in a user folder on Paddock's Windows CI (all 12 Chrome logs of runs 7149 and
+/// 7154), and real-browser loads ended in `net::ERR_ABORTED` in those runs (paddock-chromium's `NO_TESTING_FIELD_TRIALS`).
+pub const NO_TESTING_FIELD_TRIALS: &str = "--disable-field-trial-config";
+
+const DISABLE_FEATURES: &str = "--disable-features=";
+
+/// The command-line arguments for `flavor`, the caller's `extra` included and `about:blank` last. `--enable-automation`
+/// keeps Chrome's "controlled by automated test software" banner and `navigator.webdriver = true`; nothing hides either.
+/// No extensions, no sync. Every feature to turn off is in one `--disable-features` switch, the caller's merged in.
+pub fn args(data_dir: &Path, mode: Mode, flavor: Flavor, extra: &[String]) -> Vec<String> {
     let mut a = vec![
         "--remote-debugging-port=0".to_string(),
         format!("--user-data-dir={}", data_dir.display()),
@@ -133,6 +151,26 @@ pub fn args(data_dir: &Path, mode: Mode) -> Vec<String> {
         Mode::Headless => a.push("--headless=new".into()),
         Mode::OnScreen => {}
     }
+    let mut disabled: Vec<String> = Vec::new();
+    let caller = extra
+        .iter()
+        .filter_map(|x| x.strip_prefix(DISABLE_FEATURES))
+        .flat_map(|l| l.split(','));
+    for f in STABILITY_DISABLED_FEATURES.iter().copied().chain(caller).map(str::trim) {
+        if !f.is_empty() && !disabled.iter().any(|d| d == f) {
+            disabled.push(f.to_string());
+        }
+    }
+    a.push(format!("{DISABLE_FEATURES}{}", disabled.join(",")));
+    if flavor == Flavor::Chromium {
+        a.push(NO_TESTING_FIELD_TRIALS.into());
+    }
+    a.extend(
+        extra
+            .iter()
+            .filter(|x| x.as_str() != "about:blank" && !x.starts_with(DISABLE_FEATURES))
+            .cloned(),
+    );
     a.push("about:blank".into());
     a
 }
@@ -150,7 +188,8 @@ pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
 
 const NONE: u8 = 0;
 const TIMED_OUT: u8 = 1;
-const OVER_MEMORY: u8 = 2;
+/// How often the supervisor looks at the browser's memory.
+const MEMORY_LOOK: Duration = Duration::from_millis(500);
 
 /// Why the watchdog ended the browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,18 +228,36 @@ fn unique_dir(base: &Path) -> PathBuf {
 
 impl Chromium {
     /// Starts `exe` with a fresh profile and connects to it.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the browser, a GUI program: std Command, as the driver is copied between apps"
+    )]
     pub fn launch(exe: &Browser, opts: &LaunchOptions) -> Result<Chromium> {
         check_display(opts.mode, cfg!(target_os = "linux"), |k| std::env::var(k).ok())?;
         let dir = unique_dir(&opts.profile_base);
         std::fs::create_dir_all(&dir).map_err(|e| Error::Launch(format!("the profile folder could not be created: {e}")))?;
         let mut cmd = std::process::Command::new(&exe.path);
         let stderr = std::fs::File::create(dir.join(STDERR_FILE)).map_or_else(|_| std::process::Stdio::null(), std::process::Stdio::from);
-        cmd.args(args(&dir, opts.mode))
-            .args(&opts.extra_args)
+        cmd.args(args(&dir, opts.mode, exe.flavor, &opts.extra_args))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(stderr);
-        let mut process = match Supervised::spawn(cmd) {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(paddock_proc::CREATE_NO_WINDOW);
+        }
+        // The memory cap is watched by the shared supervisor from the process start, also while it is still starting: it
+        // reads the pids of the tree only (on Windows the members of the child's job object), never the process table.
+        let spawned = match opts.memory_cap {
+            Some(limit) => {
+                let mut cap = paddock_proc::MemoryCap::new(limit, "the browser");
+                cap.every = MEMORY_LOOK;
+                Supervised::spawn_capped(cmd, cap)
+            }
+            None => Supervised::spawn(cmd),
+        };
+        let mut process = match spawned {
             Ok(p) => p,
             Err(e) => {
                 cleanup(&dir);
@@ -210,7 +267,7 @@ impl Chromium {
         let alive = Arc::new(AtomicBool::new(true));
         let ended_by = Arc::new(AtomicU8::new(NONE));
         // The caps run from the process start, also while it is still starting.
-        watchdog(process.id(), alive.clone(), ended_by.clone(), opts.max_lifetime, opts.memory_cap);
+        watchdog(process.process(), alive.clone(), ended_by.clone(), opts.max_lifetime);
         match connect(&dir, &mut process) {
             Ok(conn) => Ok(Chromium {
                 conn: Arc::new(conn),
@@ -247,7 +304,7 @@ impl Chromium {
     pub fn ended_by(&self) -> EndedBy {
         match self.ended_by.load(Ordering::Acquire) {
             TIMED_OUT => EndedBy::TimeLimit,
-            OVER_MEMORY => EndedBy::MemoryCap,
+            _ if self.process.stopped_over_memory().is_some() => EndedBy::MemoryCap,
             _ => EndedBy::Nothing,
         }
     }
@@ -286,29 +343,21 @@ impl Drop for Chromium {
     }
 }
 
-/// Ends the tree when time or memory is up, even if nobody calls anything. Stops when `alive` is cleared.
-fn watchdog(pid: Option<u32>, alive: Arc<AtomicBool>, ended_by: Arc<AtomicU8>, max: Duration, cap: Option<u64>) {
-    let Some(pid) = pid else { return };
+/// Ends the tree when the time is up, even if nobody calls anything. Stops when `alive` is cleared.
+fn watchdog(root: Option<paddock_proc::ProcessId>, alive: Arc<AtomicBool>, ended_by: Arc<AtomicU8>, max: Duration) {
+    let Some(root) = root else { return };
     let end = Instant::now() + max;
     let _ = std::thread::Builder::new().name("render-watchdog".into()).spawn(move || {
-        let mut tick = 0u32;
         while alive.load(Ordering::Acquire) {
-            let reason = if Instant::now() >= end {
-                Some(TIMED_OUT)
-            } else if tick % 4 == 3 && cap.is_some_and(|c| process::current_tree_memory(pid) > c) {
-                Some(OVER_MEMORY)
-            } else {
-                None
-            };
+            let reason = if Instant::now() >= end { Some(TIMED_OUT) } else { None };
             if let Some(r) = reason {
-                // Re-check right before killing so a reused pid is never signalled after a normal end.
+                // By identity (ADR 0033): a pid handed on after the browser ended is left alone.
                 if alive.swap(false, Ordering::AcqRel) {
                     ended_by.store(r, Ordering::Release);
-                    process::kill_tree(pid);
+                    process::kill_tree(root);
                 }
                 return;
             }
-            tick = tick.wrapping_add(1);
             std::thread::sleep(Duration::from_millis(250));
         }
     });
@@ -357,7 +406,7 @@ mod tests {
 
     #[test]
     fn keeps_the_automation_banner_and_hides_nothing() {
-        let a = args(Path::new("/tmp/p"), Mode::OffScreen);
+        let a = args(Path::new("/tmp/p"), Mode::OffScreen, Flavor::Chromium, &[]);
         assert!(a.contains(&"--enable-automation".to_string()));
         assert!(a
             .iter()
@@ -370,7 +419,7 @@ mod tests {
     #[test]
     fn carries_the_stability_flags_in_every_mode() {
         for mode in [Mode::OffScreen, Mode::Headless, Mode::OnScreen] {
-            let a = args(Path::new("/p"), mode);
+            let a = args(Path::new("/p"), mode, Flavor::Chromium, &[]);
             for f in [
                 "--disable-gpu",
                 "--disable-component-update",
@@ -424,18 +473,51 @@ mod tests {
         );
     }
 
+    /// A Chromium build starts without its testing field trials, branded Chrome and Edge get no switch; the caller's
+    /// arguments come before `about:blank` and their features join the one `--disable-features` switch.
+    #[test]
+    fn chromium_builds_start_without_testing_field_trials_and_extras_merge() {
+        let extra = vec![
+            "--disable-features=Foo,Translate".to_string(),
+            "--lang=de".to_string(),
+            "about:blank".to_string(),
+        ];
+        for flavor in [Flavor::Chromium, Flavor::Chrome, Flavor::Edge] {
+            let a = args(Path::new("/p"), Mode::Headless, flavor, &extra);
+            assert_eq!(
+                a.contains(&NO_TESTING_FIELD_TRIALS.to_string()),
+                flavor == Flavor::Chromium,
+                "{a:?}"
+            );
+            assert_eq!(a.last().map(String::as_str), Some("about:blank"), "{a:?}");
+            assert_eq!(a.iter().filter(|x| *x == "about:blank").count(), 1, "{a:?}");
+            assert!(a.contains(&"--lang=de".to_string()));
+            let features: Vec<&String> = a.iter().filter(|x| x.starts_with("--disable-features=")).collect();
+            assert_eq!(
+                features,
+                [
+                    &"--disable-features=Translate,OptimizationHints,MediaRouter,AutofillServerCommunication,msEdgeShopping,msEdgeSync,Foo"
+                        .to_string()
+                ],
+                "{a:?}"
+            );
+        }
+    }
+
     #[test]
     fn extra_arguments_are_not_part_of_the_default_command_line() {
         assert!(LaunchOptions::new("/p").extra_args.is_empty());
-        assert!(!args(Path::new("/p"), Mode::Headless).iter().any(|a| a.contains("no-sandbox")));
+        assert!(!args(Path::new("/p"), Mode::Headless, Flavor::Chromium, &[])
+            .iter()
+            .any(|a| a.contains("no-sandbox")));
     }
 
     #[test]
     fn modes() {
-        assert!(!args(Path::new("/p"), Mode::OnScreen)
+        assert!(!args(Path::new("/p"), Mode::OnScreen, Flavor::Chromium, &[])
             .iter()
             .any(|x| x.starts_with("--window-position") || x.starts_with("--headless")));
-        assert!(args(Path::new("/p"), Mode::Headless).contains(&"--headless=new".to_string()));
+        assert!(args(Path::new("/p"), Mode::Headless, Flavor::Chromium, &[]).contains(&"--headless=new".to_string()));
     }
 
     #[test]

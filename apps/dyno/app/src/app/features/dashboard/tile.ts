@@ -4,7 +4,7 @@ import type { IconName } from '../../shared/icons';
 
 /**
  * A dashboard tile: icon and title, a slot for a badge, and the body. When the platform cannot provide the reading
- * the body is replaced by "Not available on this PC" with the engine's reason; until the first update a skeleton
+ * the body is replaced by "Not available on this computer" with the engine's reason; until the first update a skeleton
  * shows. Nothing in a tile ever shows an invented zero.
  */
 @Component({
@@ -21,7 +21,7 @@ import type { IconName } from '../../shared/icons';
     </header>
     @if (reason(); as why) {
       <div class="na">
-        <strong>Not available on this PC</strong>
+        <strong>Not available on this computer</strong>
         <span>{{ why }}</span>
       </div>
     } @else if (!ready()) {
