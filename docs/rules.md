@@ -187,7 +187,8 @@ changes here, every app's copy is updated in the same change.
     **Bulk** work is long work that shows progress and can be cancelled: walks, scans, compaction, exports. Bulk work
     runs at the gentle level: `QOS_CLASS_UTILITY` on macOS, nice 10 (with best-effort I/O) on Linux,
     `THREAD_PRIORITY_BELOW_NORMAL` on Windows (Debrief's `debrief_core::threads::lower_priority`; family ADR 0020's
-    `Background` class); a busy machine slows it, and on Windows it accepts stalls of seconds. Live work may use the
+    `Background` class); a busy machine slows it, and on Windows it accepts stalls of seconds. A thread holding a lock
+    that live work waits on is live, or must not hold the lock across slow work. Live work may use the
     gentle level on macOS and Linux, whose schedulers share the CPU by weight, but stays at `THREAD_PRIORITY_NORMAL` on
     Windows: Windows always runs a ready thread of a higher priority before a lower one
     ([Scheduling Priorities](https://learn.microsoft.com/en-us/windows/win32/procthread/scheduling-priorities)), its

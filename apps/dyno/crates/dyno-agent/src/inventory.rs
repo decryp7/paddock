@@ -8,10 +8,17 @@ use std::sync::Arc;
 /// Starts reading the inventory in the background so the first request is instant. Failure to spawn is harmless:
 /// the first request reads it.
 pub fn warm(shared: &Arc<Shared>) {
-    let s = shared.clone();
-    let _ = std::thread::Builder::new().name("dyno-inventory".into()).spawn(move || {
-        dyno_platform::priority::lower_current_thread();
+    in_background(shared.clone(), |s| {
         let _ = get(&s);
+    });
+}
+
+/// Runs the warm-up `read` on its own thread as live work (rule 52): it holds the gate a Hardware page request waits on
+/// with no deadline, so on Windows it must not stall behind busy normal threads.
+fn in_background<T: Send + 'static>(state: T, read: impl FnOnce(T) + Send + 'static) {
+    let _ = std::thread::Builder::new().name("dyno-inventory".into()).spawn(move || {
+        dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
+        read(state);
     });
 }
 
@@ -81,5 +88,22 @@ fn cpu_info() -> CpuInfo {
         physical_cores: sysinfo::System::physical_core_count().map_or(0, |n| n as u32),
         logical_cores: cpus.len() as u32,
         frequency_mhz: first.map_or(0, |c| c.frequency() as u32),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Rule 52 (coordinator re-review, 2026-10-30): the warm-up holds the gate a Hardware page request waits on, so it runs
+    /// as live work.
+    #[test]
+    fn the_warm_up_runs_as_live_work() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        super::in_background(tx, |tx| {
+            let _ = tx.send(dyno_platform::priority::current_role());
+        });
+        let role = rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("the warm-up ran (a hang guard)");
+        assert_eq!(role, Some(dyno_platform::priority::ThreadRole::Live));
     }
 }

@@ -24,4 +24,5 @@
   `IOSchedulingClass=idle`): bulk work (long, with progress and Cancel: walks, scans, compaction, exports) uses
   `QOS_CLASS_UTILITY`, nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`; live work (a person waits on it within a deadline or
   for a screen to fill: requests, probes, a sampler, a page refresh) may use the first two but stays at the normal level
-  on Windows; a starvable level only for work nobody waits on, with a `conformance: background-qos — <why>` comment (C54).
+  on Windows; a thread holding a lock that live work waits on is live, or must not hold the lock across slow work; a
+  starvable level only for work nobody waits on, with a `conformance: background-qos — <why>` comment (C54).
