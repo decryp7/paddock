@@ -186,7 +186,7 @@ pub(super) fn start<R: Runtime>(
     if loaded {
         push_content(app);
     }
-    native::spawn_tracker(app.clone(), id).map_err(|e| {
+    native::spawn_tracker(app.clone(), id, panels.pointer()).map_err(|e| {
         panels.ghost().finish(host);
         PanelError::new(PanelErrorCode::Failed, e.to_string())
     })?;

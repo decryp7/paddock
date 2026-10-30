@@ -35,8 +35,31 @@ fn app_with(panels: Option<Panels>) -> ::tauri::App<MockRuntime> {
     app
 }
 
+/// A mouse button the test sets: tests never read the user's mouse (rule 7).
+#[derive(Clone, Default)]
+struct Button(Arc<Mutex<Option<bool>>>);
+
+impl Button {
+    fn set(&self, down: Option<bool>) {
+        *self.0.lock().unwrap() = down;
+    }
+}
+
+impl Pointer for Button {
+    fn primary_button_down(&self) -> Option<bool> {
+        *self.0.lock().unwrap()
+    }
+}
+
+/// The test app, with a pointer that cannot tell (as on Linux) unless a test sets it through [`app_with_button`].
 fn app() -> ::tauri::App<MockRuntime> {
-    app_with(Some(Panels::builder().build()))
+    app_with_button().0
+}
+
+fn app_with_button() -> (::tauri::App<MockRuntime>, Button) {
+    let button = Button::default();
+    let app = app_with(Some(Panels::builder().pointer(button.clone()).build()));
+    (app, button)
 }
 
 fn window(app: &::tauri::App<MockRuntime>, label: &str) -> WebviewWindow<MockRuntime> {
@@ -717,14 +740,10 @@ fn commands_are_guarded_by_window_class_and_size() {
     );
     assert_eq!(heard.lock().unwrap().len(), 1);
     assert!(invoke(&guest, "panel_dock_back", json!({})).is_ok());
-    let pointer = invoke(&main, "pointer_button_down", json!({})).unwrap();
+    // The test app's pointer cannot tell (the command answers from the layer's pointer, never the user's mouse).
     assert_eq!(
-        pointer,
-        if cfg!(any(target_os = "macos", windows)) {
-            json!(false)
-        } else {
-            Value::Null
-        }
+        invoke(&main, "pointer_button_down", json!({})).unwrap(),
+        Value::Null
     );
     // The drag ghost window can call nothing and no label of the scheme is its own.
     for spec in crate::COMMANDS.specs() {
@@ -854,6 +873,69 @@ fn a_malformed_request_is_refused_before_anything_happens() {
             .code,
         PanelErrorCode::NotReady
     );
+}
+
+/// Regression: the tests read the user's real mouse button (`NSEvent::pressedMouseButtons`, `GetAsyncKeyState`). A blur
+/// kept the session while the user happened to hold the button (`the_session_ends_with_the_drag_so_the_ghost_never_stays`
+/// failed at "the window lost focus"), and `pointer_button_down` answered with the user's button. Every path that reads
+/// the button runs here with the default pointer of a test build; reading the OS panics (`native::refuse_in_tests`).
+#[test]
+fn the_test_app_never_reads_the_users_mouse() {
+    let app = app_with(Some(Panels::builder().build()));
+    let h = app.handle().clone();
+    assert!(ghost::start(&h, "main", ghost_request().parse().unwrap(), screens()).unwrap());
+    ghost::show_for(&h, "main", true);
+    on_window_event(&os_window(&app, "main"), &WindowEvent::Focused(false));
+    assert_eq!(
+        invoke(&window(&app, "main"), "pointer_button_down", json!({})).unwrap(),
+        Value::Null,
+        "a test build's default pointer cannot tell"
+    );
+    end_for(&h, "main");
+}
+
+/// The guard behind it: the OS pointer refuses in a test build, so a test that would read the user's mouse fails at the read.
+#[test]
+#[should_panic(expected = "a test read the user's mouse button")]
+fn reading_the_users_mouse_in_a_test_fails_at_the_read() {
+    let _ = super::native::OsPointer.primary_button_down();
+}
+
+/// A blur while the button is held is the drag leaving the window (the session goes on); with the button up it ends the
+/// drag. The command answers the same source. Only the blur ends a session here: with the button up and no blur, the
+/// session stays (the tracker only hides the ghost when the button is released; it never ends the session).
+#[test]
+fn a_blur_ends_the_session_only_with_the_button_up() {
+    let (app, button) = app_with_button();
+    let h = app.handle().clone();
+    let main = window(&app, "main");
+    let start =
+        || assert!(ghost::start(&h, "main", ghost_request().parse().unwrap(), screens()).unwrap());
+    for down in [Some(true), Some(false)] {
+        button.set(down);
+        assert_eq!(
+            invoke(&main, "pointer_button_down", json!({})).unwrap(),
+            json!(down)
+        );
+        start();
+        assert!(live(&app), "started");
+        on_window_event(&os_window(&app, "main"), &WindowEvent::Focused(false));
+        assert_eq!(
+            live(&app),
+            down == Some(true),
+            "after the blur, button down: {down:?}"
+        );
+        end_for(&h, "main");
+    }
+    // The button up without a blur: the session is still there after the tracker has seen the release many times over.
+    button.set(Some(false));
+    start();
+    let id = state(&app).ghost().session_id().unwrap();
+    for _ in 0..crate::ghost::RELEASED_TICKS * 4 {
+        let _ = ghost::step(&h, id, crate::ghost::RELEASED_TICKS, Duration::ZERO);
+    }
+    assert!(live(&app), "the tracker never ends a session; the blur did");
+    end_for(&h, "main");
 }
 
 #[test]
