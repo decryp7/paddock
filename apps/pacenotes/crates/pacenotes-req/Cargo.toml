@@ -1,0 +1,23 @@
+[package]
+name = "pacenotes-req"
+description = "Pacenotes' requirement importers (RQ1): xlsx, docx, csv and Markdown tables behind RequirementSource, bounded against zip bombs, entity tricks and huge sheets, and a mapping pack that says which columns are which requirement fields."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+csv = "1"
+roxmltree = "0.20"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+toml = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+paddock-testkit = { workspace = true }
+
+[lints]
+workspace = true
