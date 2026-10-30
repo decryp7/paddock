@@ -1,6 +1,17 @@
-/** Is this a macOS-like platform, where "Mod" means Cmd instead of Ctrl? */
-export function isMac(): boolean {
-  return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform ?? '');
+/** The navigator fields that decide the platform. */
+export interface NavigatorPlatform {
+  readonly platform?: string;
+  readonly userAgent?: string;
+}
+
+/**
+ * Is this a macOS-like platform, where "Mod" means Cmd instead of Ctrl? Decided on the navigator's platform and user agent
+ * together, as the shell does (paddock-ui `currentOs`, shell/menu/src/keys.ts: the same pattern, mirrored here because Debrief
+ * does not import @decryp7/paddock-ui): WebKit on Linux emulating Safari reports `Linux` as its platform and a Mac in its
+ * user agent, and a page must agree with the Cmd key that browser sends.
+ */
+export function isMac(nav: NavigatorPlatform | undefined = typeof navigator === 'undefined' ? undefined : navigator): boolean {
+  return /Mac|iPhone|iPad/.test(`${nav?.platform ?? ''} ${nav?.userAgent ?? ''}`);
 }
 
 const ARROWS = new Set(['left', 'right', 'up', 'down']);

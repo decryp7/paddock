@@ -59,6 +59,7 @@ ts().run('no-control-or-meta (e2e keys follow the page)', rules['no-control-or-m
     "await pressMod(page, 'Mod+k');",
     "await rows.nth(1).click({ modifiers: [await pageModKey(page)] });",
     "await page.keyboard.press('Control+k');",
+    "const skip = process.platform === 'darwin' ? 'a' : 'b';",
     '// ControlOrMeta in a comment is fine\nconst a = 1;',
   ],
   invalid: [
@@ -66,5 +67,7 @@ ts().run('no-control-or-meta (e2e keys follow the page)', rules['no-control-or-m
     { code: "await input.press('ControlOrMeta+Enter');", errors: 1 },
     { code: "await row.click({ modifiers: ['ControlOrMeta'] });", errors: 1 },
     { code: 'await page.keyboard.press(`ControlOrMeta+${key}`);', errors: 1 },
+    { code: "const mod = process.platform === 'darwin' ? 'Meta' : 'Control';", errors: [{ message: /by hand/ }] },
+    { code: "await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Comma' : 'Control+Comma');", errors: [{ message: /by hand/ }] },
   ],
 });

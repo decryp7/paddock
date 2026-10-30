@@ -35,6 +35,7 @@ export {
   bindingFor,
   modKey,
   pageModKey,
+  pressHostMod,
   pressMod,
   expectTabOrder,
   expectReachableByKeyboard,

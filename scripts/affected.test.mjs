@@ -59,8 +59,8 @@ describe('the graph of this tree', () => {
     assert.deepEqual(r.packages['apps/shell-demo/src-tauri'], ['paddock-shell-demo', 'shell-demo-agent']);
   });
 
-  test('the e2e port and build guard (imported by relative path by every app config) mark the UI half of every app', () => {
-    for (const f of ['ui/projects/paddock-e2e/src/env.ts', 'ui/projects/paddock-e2e/src/build-guard.ts']) {
+  test('the e2e port, build guard and keyboard helpers (imported by relative path by every app config; keyboard.ts by the Debrief e2e) mark the UI half of every app', () => {
+    for (const f of ['ui/projects/paddock-e2e/src/env.ts', 'ui/projects/paddock-e2e/src/build-guard.ts', 'ui/projects/paddock-e2e/src/keyboard.ts']) {
       const r = run(f);
       for (const a of APPS) assert.ok(r.apps.includes(a), `${f} reaches ${a}`);
     }

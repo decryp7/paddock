@@ -55,6 +55,7 @@ test('a binding keeps every key and swaps only its Mod, wherever the combination
   assert.equal(bindingFor('Shift+Mod+z', 'Control'), 'Shift+Control+z');
   assert.equal(bindingFor('Mod+Enter', 'Meta'), 'Meta+Enter');
   assert.equal(bindingFor('Mod++', 'Meta'), 'Meta++');
-  assert.equal(bindingFor('Mod', 'Meta'), 'Mod', 'a lone Mod is a key name, not a modifier');
-  assert.equal(bindingFor('Shift+z', 'Meta'), 'Shift+z');
+  assert.throws(() => bindingFor('Mod', 'Meta'), /no Mod modifier/, 'a lone Mod is a key name, not a modifier');
+  assert.throws(() => bindingFor('Shift+z', 'Meta'), /no Mod modifier/);
+  assert.throws(() => bindingFor('Mdo+k', 'Control'), /Mdo\+k/);
 });
