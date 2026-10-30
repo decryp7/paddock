@@ -133,7 +133,15 @@ Pacenotes: toolsets `orient`, `code`, `review`, `diagrams`, `requirements` and `
   more rows is hidden and its value said once; the request log stays a virtual grid.
 - **Done (updater, shared part).** `paddock-updater` gains an Offline mode predicate that fails closed (on this branch until
   shared code unfreezes); Pitwall moves to the shared updater with WP-2.5.
-- **Next.** WP-2.5 and WP-2.6 (the UI on the shell, the dialogs as windows, About), then WP-2.8 and WP-2.9.
+- **Done (WP-2.5, WP-2.6, WP-2.7, WP-2.9).** The UI runs on the shell: one bundle, three kinds of window; the pages frame;
+  the Settings window; About, Updates and What's new from the shared updater with Offline mode failing closed; the macOS
+  menu's Quit items through Pitwall's quit flow; Pitwall's four dialogs and every confirmation (`pd.confirm`) as OS
+  windows that fit their content.
+- **WP-2.8.** Screenshots recaptured (`docs/screenshots`); the independent review (ER-23) is still to come.
+- **Left.** Mod+Q while no window is open (the shell's native menu runs commands in a window); the Settings window's
+  footer says "saved as you make them" for a page that saves with its own bar (a paddock-ui gap); the tray popover
+  (`#/tray`) is not opened by the native tray yet; the C4 UI diagrams show the 1.0 sidebar; `.changelog()` for What's new
+  once `CHANGELOG.md` lands with the 1.1.0 bump.
 
 ## Next (hand-off, 2026-10-22)
 
