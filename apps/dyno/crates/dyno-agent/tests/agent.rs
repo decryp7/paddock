@@ -894,3 +894,20 @@ fn baselines_learn_silently_then_judge_and_alarm_only_when_asked() {
     }
     assert!(alarm_rules(&peer).contains(&"baseline:cpu".to_string()), "{:?}", alarm_rules(&peer));
 }
+
+/// Rule 52 (coordinator review, 2026-10-30): the sampler fills the live view, so it runs as live work (normal priority on
+/// Windows, never stalled behind busy normal threads).
+#[test]
+fn the_sampler_runs_as_live_work() {
+    let h = Harness::start();
+    let mut role = None;
+    // Waits for the sampler's first sample (a hang guard bounds the loop).
+    for _ in 0..200 {
+        role = h.fake.with(|s| s.sample_role);
+        if role.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(role, Some(dyno_platform::priority::ThreadRole::Live));
+}

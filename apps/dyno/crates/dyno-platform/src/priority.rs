@@ -68,6 +68,7 @@ pub const fn level(role: ThreadRole, os: Os) -> Level {
 /// Sets the calling thread's priority for `role` on this OS ([`level`]). Returns whether the OS accepted it (true when
 /// nothing needs changing). It stays in effect until the thread ends, so call it only on threads made for this work.
 pub fn set_current_thread(role: ThreadRole) -> bool {
+    ROLE.with(|r| r.set(Some(role)));
     match level(role, Os::CURRENT) {
         Level::Normal => true,
         #[cfg(target_os = "macos")]
@@ -104,6 +105,16 @@ pub fn set_current_thread(role: ThreadRole) -> bool {
 /// machine work somebody waits for stalls (Debrief's report took 100 s instead of 3 s on a loaded Mac).
 pub fn lower_current_thread() -> bool {
     set_current_thread(ThreadRole::Bulk)
+}
+
+thread_local! {
+    static ROLE: std::cell::Cell<Option<ThreadRole>> = const { std::cell::Cell::new(None) };
+}
+
+/// The role the calling thread was given ([`set_current_thread`]), `None` when none was: for tests that check where work
+/// runs, on every OS.
+pub fn current_role() -> Option<ThreadRole> {
+    ROLE.with(std::cell::Cell::get)
 }
 
 thread_local! {
@@ -155,7 +166,22 @@ mod tests {
         assert_eq!(level(ThreadRole::Bulk, Os::MacOs), Level::Utility);
         assert_eq!(level(ThreadRole::Live, Os::Linux), Level::Nice10);
         assert_eq!(level(ThreadRole::Bulk, Os::Linux), Level::Nice10);
+        assert_eq!(level(ThreadRole::Live, Os::Other), Level::Normal);
         assert_eq!(level(ThreadRole::Bulk, Os::Other), Level::Normal);
+    }
+
+    #[test]
+    fn a_thread_knows_the_role_it_was_given() {
+        let roles = std::thread::spawn(|| {
+            let before = super::current_role();
+            super::set_current_thread(ThreadRole::Live);
+            let live = super::current_role();
+            super::lower_current_thread();
+            (before, live, super::current_role())
+        })
+        .join()
+        .unwrap();
+        assert_eq!(roles, (None, Some(ThreadRole::Live), Some(ThreadRole::Bulk)));
     }
 
     #[cfg(target_os = "macos")]

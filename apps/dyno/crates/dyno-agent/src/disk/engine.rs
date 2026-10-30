@@ -214,7 +214,8 @@ impl Walk {
             // The thread that looks is one of the host's live threads while it is inside the call: if the call never returns,
             // later starts see it as abandoned and are refused after a few, instead of piling up.
             let alive = cfg.live.enter();
-            super::volumes::within(cfg.stat_limit, move || {
+            // The first look waits within a deadline before the scan starts: live work; the walk itself is bulk (rule 52).
+            super::volumes::within(cfg.stat_limit, dyno_platform::priority::ThreadRole::Live, move || {
                 let _alive = alive;
                 src.stat(&path)
             })

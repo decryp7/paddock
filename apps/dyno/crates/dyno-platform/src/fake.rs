@@ -59,6 +59,8 @@ pub struct FakeState {
     pub net: Option<dyno_core::netchange::NetState>,
     /// Injected failures and how many more calls they affect (`None`: every call).
     pub failures: HashMap<FakeOp, (PlatformError, Option<u32>)>,
+    /// The thread role the last sample was taken at ([`crate::priority::current_role`]).
+    pub sample_role: Option<crate::priority::ThreadRole>,
 }
 
 impl FakeState {
@@ -234,6 +236,7 @@ impl SystemSensors for Fake {
             None => st.last_sample.clone().unwrap_or_else(|| quiet_sample(now)),
         };
         s.at = now;
+        st.sample_role = crate::priority::current_role();
         st.last_sample = Some(s.clone());
         s
     }
