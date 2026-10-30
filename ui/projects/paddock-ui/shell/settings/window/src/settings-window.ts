@@ -23,6 +23,7 @@ import { fieldText, matchesQuery, settingsNav, type SettingsNavItem, SettingsSto
 import { PdSettingsSection, PdSettingsSectionPage, SETTINGS_PAGE } from './settings-section';
 import { SettingsDrafts } from './settings-drafts';
 import { SettingsStatus } from './settings-status';
+import { SettingsCloseGuards } from './settings-close';
 
 /** The settings pages a Settings window lists (the app's `settingsPages` contributions plus the shell's). */
 export const SETTINGS_WINDOW_PAGES = new InjectionToken<readonly SettingsPageDef[]>('PADDOCK_SETTINGS_WINDOW_PAGES', {
@@ -87,6 +88,13 @@ interface LoadedPage {
       <div class="pd-banner pd-warn" role="alertdialog" aria-labelledby="pd-settings-unsaved" data-testid="settings-unsaved">
         <span id="pd-settings-unsaved">{{ unsavedText() }}</span>
         <button matButton="outlined" type="button" (click)="discardAndClose()">{{ t.discard }}</button>
+        <button matButton="filled" type="button" (click)="keepEditing()">{{ t.keepEditing }}</button>
+      </div>
+    }
+    @if (pageWarning(); as w) {
+      <div class="pd-banner pd-warn" role="alertdialog" aria-labelledby="pd-settings-not-saved" data-testid="settings-not-saved">
+        <span id="pd-settings-not-saved">{{ w }}</span>
+        <button matButton="outlined" type="button" (click)="closeAnyway()">{{ t.closeAnyway }}</button>
         <button matButton="filled" type="button" (click)="keepEditing()">{{ t.keepEditing }}</button>
       </div>
     }
@@ -197,6 +205,7 @@ export class PdSettingsWindow implements DialogContent {
     restartNow: $localize`:@@pd.settings.restart-now:Restart now`,
     discard: $localize`:@@pd.settings.unsaved.discard:Discard changes`,
     keepEditing: $localize`:@@pd.settings.unsaved.keep:Keep editing`,
+    closeAnyway: $localize`:@@pd.settings.not-saved.close:Close anyway`,
     dismiss: $localize`:@@pd.settings.dismiss:Dismiss`,
     pages: $localize`:@@pd.settings.pages:Settings pages`,
     unsaved: $localize`:@@pd.settings.unsaved:Unsaved changes`,
@@ -211,6 +220,7 @@ export class PdSettingsWindow implements DialogContent {
   protected readonly store = inject(SettingsStore);
   private readonly drafts = inject(SettingsDrafts);
   private readonly pageStatus = inject(SettingsStatus, { optional: true });
+  private readonly closeGuards = inject(SettingsCloseGuards, { optional: true });
   private readonly pages = inject(SETTINGS_WINDOW_PAGES);
   private readonly environment = inject(EnvironmentInjector);
   private readonly injector = inject(Injector);
@@ -223,6 +233,12 @@ export class PdSettingsWindow implements DialogContent {
 
   /** "Discard changes / Keep editing" is showing. */
   protected readonly asking = signal(false);
+  /** A page's "this edit was not saved, and why" with "Close anyway / Keep editing" (`settingsPageCloseGuard`). */
+  protected readonly pageWarning = signal<string | null>(null);
+  /** The user chose "Close anyway": the pages' warnings are not asked again for this close. */
+  private overrideWarnings = false;
+  /** A page is finishing a save; the window closes when it settles. */
+  private waiting = false;
 
   // Every page is listed: a Settings window boots with its own small provider set and no app context (rule 34), so a
   // page's `when` is not evaluated here; a page that depends on a condition says so in its own content.
@@ -323,13 +339,43 @@ export class PdSettingsWindow implements DialogContent {
 
   /** Unsaved edits keep the window open, by any route that closes it, and ask first. */
   dialogCanClose(): boolean {
-    if (!this.unsaved().length) return true;
-    this.asking.set(true);
-    return false;
+    if (this.unsaved().length) {
+      this.asking.set(true);
+      return false;
+    }
+    if (this.waiting) return false;
+    const verdict = this.closeGuards?.check() ?? { kind: 'close' };
+    if (verdict.kind === 'wait') {
+      // A page still saves a typed value: the window stays until it is saved, then asks again (the save may be refused).
+      this.waiting = true;
+      void verdict.done.then(
+        () => this.closeAfterWait(),
+        () => this.closeAfterWait(),
+      );
+      return false;
+    }
+    if (verdict.kind === 'warn' && !this.overrideWarnings) {
+      this.pageWarning.set(verdict.message);
+      return false;
+    }
+    return true;
+  }
+
+  private closeAfterWait(): void {
+    this.waiting = false;
+    this.close();
   }
 
   protected keepEditing(): void {
     this.asking.set(false);
+    this.pageWarning.set(null);
+    this.overrideWarnings = false;
+  }
+
+  protected closeAnyway(): void {
+    this.pageWarning.set(null);
+    this.overrideWarnings = true;
+    this.close();
   }
 
   protected discardAndClose(): void {
