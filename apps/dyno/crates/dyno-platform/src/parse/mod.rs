@@ -17,6 +17,7 @@ pub mod mac_tools;
 pub mod pdh_list;
 pub mod powercfg;
 pub mod sock_diag;
+pub mod socket_owner;
 pub mod startup_approved;
 pub mod time;
 pub mod wifi;
