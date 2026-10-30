@@ -21,7 +21,10 @@ changes here, every app's copy is updated in the same change.
 7. **Tests never touch the user's machine:** no real launchd/Login Items/services, no installed apps, never the
    installed Google Chrome (pinned Chrome for Testing or an explicit env var only), no `~/Documents`, `~/Desktop`,
    `~/Downloads`, no real user data, no windows on the desktop, no processes left behind. Docker: only containers you
-   created.
+   created. A real browser (headless or not) or the real app starts only in a throwaway Linux CI container
+   (`PADDOCK_LIVE_BROWSER=1`, under `xvfb-run` for a window) or a test VM (`PADDOCK_LIVE_BROWSER=vm`), never on the
+   macOS or Windows host runners, which run in a user's session: the drivers' finders and launches ask
+   `paddock_testkit::live_browser`, and conformance C55 is the backstop.
 8. **Every lesson goes into [lessons.md](lessons.md)**, every rule here; no `Co-Authored-By` or AI attribution anywhere.
 9. **Releases only from a tag in CI**, never from a local machine; a local build for the user to try is fine but is never
    published. Never tag a `[skip ci]` commit.

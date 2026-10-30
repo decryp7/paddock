@@ -260,4 +260,9 @@ shell, the windows, the WebView2 or WKWebView glue, the sidecars or the bundle l
   and `node scripts/ci/startup-bench.mjs <Debrief.app> --runs 5` (the medians against `scripts/ci/startup-budgets.json`).
   CI still starts the sidecars of the macOS bundle (`macos-verify-bundle.sh` in the `bundle` job), but no longer the app.
 
-Record each VM run (date, version, result) in the release notes of the release it gates.
+- **Real-browser tests (both VMs):** the driver's and the renderer's live tests, with `CHROMIUM_TEST_PATH` naming the
+  pinned Chrome for Testing in the VM:
+  `PADDOCK_LIVE_BROWSER=vm DEBRIEF_REQUIRE_TEST_BROWSER=1 cargo nextest run -p chromium-driver -p debrief-app -E '(binary(it) & test(/^real_browser::/)) | test(/browser::renderer::tests::(reads_a_scripted|a_challenge_page)/)'`.
+  `vm` is honoured only inside a test VM (docs/dev-setup.md, repo root, "Test VMs and real browsers").
+
+Record each VM run in the release notes of the release it gates: **VM smoke: <date> <version> pass**.

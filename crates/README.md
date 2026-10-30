@@ -334,9 +334,10 @@ the show the page's viewport equals the measured content height, the page does n
 visible; the parent is a visible host window and the dialog is modal, and the probe asserts the dialog window was still
 hidden when its `dialog_ready` arrived. It reports from a synchronous read and a short timer, never animation frames
 (a sleeping display runs none). It exits 0 at once unless `PADDOCK_REAL_WINDOWS=1` (and says so when `PADDOCK_PROBE_DIST`
-is missing), so the ordinary run skips it. In `nightly.yml` the job `dialog-window-probe` is off by default (it opens real
-windows, ER-14, and the Mac host's displays sleep at night): it runs on a manual run or when the variable
-`PADDOCK_REAL_WINDOW_PROBE` is `true`, and gates nothing. Run it by hand from `crates` (`--features tauri`, not
+is missing), so the ordinary run skips it. In `nightly.yml` the job `dialog-window-probe` runs it on Linux only, under
+`xvfb-run` in the CI container (it opens real windows, which rule 7 allows only in a throwaway Linux container or a test
+VM): on a manual run or when the variable `PADDOCK_REAL_WINDOW_PROBE` is `true`, and it gates nothing. The macOS and
+Windows probe runs in the local test VMs (docs/dev-setup.md, "Test VMs and real browsers"). Run it there from `crates` (`--features tauri`, not
 `--all-features`, which pulls in the mock runtime):
 `PADDOCK_REAL_WINDOWS=1 PADDOCK_PROBE_DIST=../ui/dist/shell-demo/browser cargo test -p paddock-dialogs --features tauri --test show_probe -- --nocapture`. Exit 0 passes, 1 fails
 (the reason is printed), 2 means no report within 90 s (the calls the page made are printed with it; none means the page's

@@ -17,6 +17,20 @@ not offered to users: updaters read `latest.json` of the *latest* release.
 
 This is about **Spotter's own** updates, not the releases Spotter watches for.
 
+## Before the tag: the test VMs
+
+CI runs Spotter's real-browser tests (`spotter-render`'s `real_browser`) only in the Linux leg, under Xvfb: the macOS and
+Windows runners run in a user's session, where a test never starts a browser (Paddock rule 7). Before every tag, run them
+in the local macOS (Tart) and Windows test VMs, never on a desktop and never in CI (docs/dev-setup.md, "Test VMs and real
+browsers", repo root):
+
+```sh
+PADDOCK_LIVE_BROWSER=vm SPOTTER_REQUIRE_TEST_BROWSER=1 cargo nextest run -p spotter-render -E 'binary(real_browser)'
+```
+
+with `SPOTTER_TEST_BROWSER` naming the pinned Chrome for Testing in the VM (`node scripts/install-test-browser.mjs`).
+Release-notes checklist item: **VM smoke: <date> <version> pass** (macOS and Windows).
+
 ## How Spotter's updates work
 
 - **Opt-in.** Spotter never checks on its own unless the user turns on automatic update checks (off by default); a

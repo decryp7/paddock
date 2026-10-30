@@ -773,6 +773,21 @@ variable) fails instead of skipping. C55 is the backstop: no read of the test br
 test that launches a window after asking the finder for none. Mac and Windows lose this coverage on purpose; the
 WebView2 and macOS real-app smoke and the macOS start-up budgets run in the local test VMs before a release.
 
+A second review found the gate still had holes, each now closed in the structure rather than by a check alone: the
+finders were gated but a test could find a browser another way (`chromium_driver::find()`, `discover::find`, Spotter's
+renderer without `with_browser` falling through to `find_installed`, a downloaded runtime, a hard-coded path) and launch
+it, so in test builds each driver's launch now asks `paddock_testkit::live_browser::check_launch` before it starts any
+program: never an installed browser, and no real program (anything but a script, which is what the fakes are) outside a
+throwaway session. C55 had pre-filtered files on the finder's names (a file without them was never read) and ran only
+when conformance/ changed; it now reads every Rust file, flags the product's browser search, a renderer without its
+browser, a browser or app started by name and an installed browser's path in test code, and runs in the crates job, every
+app leg and Debrief's lint job. Two more jobs put windows on the host desktops (the WebKit e2e on the Mac runner, the
+nightly real-window probe on macOS and Windows): both now run in the Linux container, and a CI test fails any host job
+that runs Playwright, the real-window probe, the real-app smoke or a real-browser test binary. The macOS and Windows
+coverage moved to the local test VMs: `PADDOCK_LIVE_BROWSER=vm` is honoured only where the VM marker is
+(`kern.hv_vmm_present` on macOS, `%ProgramData%\Paddock\test-vm` on Windows), and each release records
+"VM smoke: <date> <version> pass". Rule 7 now says so.
+
 Considered and rejected: a test-only headless or off-screen launch option for Debrief's live tests, to keep them on the
 Mac. Headless tests a mode the product never runs (the challenge test is about the window coming to the front), the option
 would be a product code path that must never be used, and an off-screen headful window still shows in the Dock and takes
