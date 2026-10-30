@@ -1,160 +1,260 @@
 //! Per-file and per-range authorship (package C2b): who wrote each line of a file at a revision, renames followed, for the ownership
-//! figures. gix's blame diffs blobs, which ADR 0004 had refused outright; the amendment of C2b says what makes it safe here and the trap
-//! test proves it: the repository is opened isolated as always, blame reads only objects from the object database (never the worktree,
-//! the index or a filter), and a `diff.*.textconv` or `filter.*` that the repository's own config or attributes name is never run.
+//! figures. gix's blame diffs blobs, which ADR 0004 had refused outright; its C2b amendment says what makes it safe here, in two layers
+//! that this module is the only place to touch:
+//!
+//! 1. the repository is opened isolated and with reduced trust (see [`crate::open`]), which drops `diff.*`, `filter.*` and
+//!    `core.attributesFile`, and `core.bigFileThreshold` is pinned there;
+//! 2. the diff resource cache is built here, by hand, in mode "to git" with **no worktree roots** and an **empty attribute stack**: no
+//!    `.gitattributes` from anywhere (not the tree, not the index, not `info/attributes`) can switch a file to "binary", turn on a filter
+//!    or name a text conversion, and the index is never read.
+//!
+//! The object database is reached through [`Guarded`], which checks the cancel token and a budget on every lookup, refuses a blob
+//! over the cap from its header before reading it, and counts objects read as the progress figure.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
-use pacenotes_core::ports::HistoryError;
-use pacenotes_core::{CommitHash, RepoPath, Rev};
+use pacenotes_core::ports::{Blame, BlameError, BlameHunk, BlameRequest, Blamer};
+use pacenotes_core::{RepoPath, Rev};
 use paddock_jobs::CancelToken;
 
-use crate::history::{GixHistory, MAX_AUTHOR_BYTES};
+use crate::history::{GixHistory, MAX_AUTHOR_BYTES, commit_id, cut_text, hash_of};
 
-/// The most hunks one blame returns.
-pub const MAX_BLAME_HUNKS: usize = 50_000;
-
-/// A run of lines written by one commit.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlameHunk {
-    /// The first line in the blamed revision (1-based).
-    pub first_line: u32,
-    /// The last line in the blamed revision (1-based, inclusive).
-    pub last_line: u32,
-    /// The commit that introduced them.
-    pub commit: CommitHash,
-    /// The author's email (bounded), as the log gives it.
-    pub author: String,
-    /// The commit time, seconds since the Unix epoch.
-    pub time: i64,
-    /// The file's name in that commit when it differs from the blamed one (the file was renamed since).
-    pub source_path: Option<RepoPath>,
+/// Why the guarded object database stopped a lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stop {
+    Cancelled = 1,
+    Objects = 2,
+    Blob = 3,
 }
 
-impl BlameHunk {
-    /// How many lines the hunk covers.
-    pub fn lines(&self) -> u32 {
-        self.last_line - self.first_line + 1
+#[derive(Debug, thiserror::Error)]
+enum Stopped {
+    #[error("the blame was cancelled")]
+    Cancelled,
+    #[error("the blame read more objects than its limit")]
+    Objects,
+    #[error("the blame met a file larger than its limit")]
+    Blob,
+}
+
+/// The object database with a leash.
+struct Guarded<'a, O> {
+    inner: &'a O,
+    cancel: &'a CancelToken,
+    max_objects: u64,
+    max_blob: u64,
+    objects: AtomicU64,
+    stop: AtomicU8,
+    stopped_size: AtomicU64,
+    progress: &'a dyn Fn(u64),
+}
+
+impl<O> Guarded<'_, O> {
+    fn halt(&self, why: Stop) -> gix::Error {
+        self.stop.store(why as u8, Ordering::SeqCst);
+        gix::Error::from_error(match why {
+            Stop::Cancelled => Stopped::Cancelled,
+            Stop::Objects => Stopped::Objects,
+            Stop::Blob => Stopped::Blob,
+        })
     }
-}
 
-/// The authorship of a file.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Blame {
-    /// The hunks, in line order.
-    pub hunks: Vec<BlameHunk>,
-    /// Set when the list was cut at [`MAX_BLAME_HUNKS`].
-    pub truncated: bool,
-}
-
-impl Blame {
-    /// Lines per author, most lines first (ties by author), for the ownership figures.
-    pub fn lines_by_author(&self) -> Vec<(String, u32)> {
-        let mut by: BTreeMap<&str, u32> = BTreeMap::new();
-        for h in &self.hunks {
-            *by.entry(h.author.as_str()).or_insert(0) += h.lines();
+    fn tick(&self) -> Result<(), gix::Error> {
+        if self.cancel.is_cancelled() {
+            return Err(self.halt(Stop::Cancelled));
         }
-        let mut out: Vec<(String, u32)> = by.into_iter().map(|(a, n)| (a.to_owned(), n)).collect();
-        out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        out
+        let n = self.objects.fetch_add(1, Ordering::Relaxed) + 1;
+        if n > self.max_objects {
+            return Err(self.halt(Stop::Objects));
+        }
+        if n.is_multiple_of(64) {
+            (self.progress)(n);
+        }
+        Ok(())
+    }
+
+    fn reason(&self) -> Option<Stop> {
+        match self.stop.load(Ordering::SeqCst) {
+            1 => Some(Stop::Cancelled),
+            2 => Some(Stop::Objects),
+            3 => Some(Stop::Blob),
+            _ => None,
+        }
     }
 }
 
-fn backend(e: impl std::fmt::Display) -> HistoryError {
-    HistoryError::Backend(e.to_string())
+impl<O: gix::objs::FindHeader> gix::objs::FindHeader for Guarded<'_, O> {
+    fn try_header(&self, id: &gix::oid) -> Result<Option<gix::objs::Header>, gix::Error> {
+        self.inner.try_header(id)
+    }
 }
 
-impl GixHistory {
-    /// Who wrote each line of `path` at `rev`, or of lines `range` (1-based, inclusive) only. Renames are followed. `since` (seconds
-    /// since the epoch) stops the walk at commits older than that; lines whose origin lies further back are attributed to the last commit the walk reached. gix's blame cannot be interrupted, so `cancel` is looked at before it starts; `since` and the
-    /// line range are what bound the work on a large history.
-    pub fn blame(
-        &self,
-        rev: &Rev,
-        path: &RepoPath,
-        range: Option<(u32, u32)>,
-        since: Option<i64>,
-        cancel: &CancelToken,
-    ) -> Result<Blame, HistoryError> {
-        self.blame_limited(rev, path, range, since, MAX_BLAME_HUNKS, cancel)
+impl<O: gix::objs::Find + gix::objs::FindHeader> gix::objs::Find for Guarded<'_, O> {
+    fn try_find<'b>(&self, id: &gix::oid, buffer: &'b mut Vec<u8>) -> Result<Option<gix::objs::Data<'b>>, gix::Error> {
+        self.tick()?;
+        // the header first: a blob over the cap is refused before a byte of it is read or inflated
+        if let Some(h) = self.inner.try_header(id)?
+            && h.kind == gix::objs::Kind::Blob
+            && h.size > self.max_blob
+        {
+            self.stopped_size.store(h.size, Ordering::SeqCst);
+            return Err(self.halt(Stop::Blob));
+        }
+        self.inner.try_find(id, buffer)
     }
+}
 
-    /// As [`blame`](Self::blame), keeping at most `max_hunks` hunks (the answer says it was cut).
-    pub fn blame_limited(
+/// The lines of a blamed file (a last line without a newline counts).
+fn line_count(blob: &[u8]) -> u32 {
+    let n = blob.iter().filter(|b| **b == b'\n').count() + usize::from(blob.last().is_some_and(|b| *b != b'\n'));
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+impl Blamer for GixHistory {
+    fn blame(
         &self,
         rev: &Rev,
         path: &RepoPath,
-        range: Option<(u32, u32)>,
-        since: Option<i64>,
-        max_hunks: usize,
+        request: &BlameRequest,
+        progress: &dyn Fn(u64),
         cancel: &CancelToken,
-    ) -> Result<Blame, HistoryError> {
+    ) -> Result<Blame, BlameError> {
         if cancel.is_cancelled() {
-            return Err(HistoryError::Cancelled);
+            return Err(BlameError::Cancelled);
         }
-        let Rev::Commit(hash) = rev else {
-            return Err(HistoryError::UnknownRev(format!(
-                "{rev} (the working tree is served by the index, not by history)"
-            )));
+        let Ok(id) = commit_id(rev) else {
+            return Err(BlameError::UnknownRev(rev.to_string()));
         };
-        let id = gix::ObjectId::from_hex(hash.as_str().as_bytes()).map_err(|_| HistoryError::UnknownRev(rev.to_string()))?;
         let repo = self.thread_local_repo();
-        repo.find_commit(id).map_err(|_| HistoryError::UnknownRev(rev.to_string()))?;
-        let ranges = match range {
-            Some((a, b)) if a >= 1 && b >= a => gix::blame::BlameRanges::from_one_based_inclusive_range(a..=b).map_err(backend)?,
-            Some(_) => {
-                return Err(HistoryError::Backend(
-                    "the line range must be 1-based with the end not before the start".to_owned(),
-                ));
+        repo.find_commit(id).map_err(|_| BlameError::UnknownRev(rev.to_string()))?;
+        let ranges = match request.range {
+            Some((a, b)) if a >= 1 && b >= a => {
+                gix::blame::BlameRanges::from_one_based_inclusive_range(a..=b).map_err(|e| BlameError::Backend(e.to_string()))?
             }
+            Some((first, last)) => return Err(BlameError::InvalidRange { first, last }),
             None => gix::blame::BlameRanges::default(),
         };
-        let options = gix::repository::blame_file::Options {
-            diff_algorithm: Some(gix::diff::blob::Algorithm::Myers),
+        let options = gix::blame::Options {
+            diff_algorithm: gix::diff::blob::Algorithm::Myers,
             ranges,
-            since: since.map(|s| gix::date::Time::new(s, 0)),
+            since: request.since.map(|s| gix::date::Time::new(s, 0)),
             rewrites: Some(gix::diff::Rewrites::default()),
+            debug_track_path: false,
         };
-        let outcome = repo.blame_file(path.as_str().into(), id, options).map_err(|e| {
-            let text = e.to_string();
-            if text.contains("wasn't found") {
-                HistoryError::NotFound(path.clone())
-            } else {
-                backend(text)
+        // an attribute stack with nothing in it: no globals, no `info/attributes`, no `.gitattributes` from any tree or index
+        let attributes = gix::worktree::stack::state::Attributes::new(
+            gix::attrs::Search::default(),
+            None,
+            gix::worktree::stack::state::attributes::Source::IdMapping,
+            gix::attrs::search::MetadataCollection::default(),
+        );
+        let stack = gix::worktree::Stack::new(
+            repo.git_dir(),
+            gix::worktree::stack::State::AttributesStack(attributes),
+            gix::glob::pattern::Case::Sensitive,
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut cache = gix::diff::resource_cache(
+            &repo,
+            gix::diff::blob::pipeline::Mode::ToGit,
+            stack,
+            gix::diff::blob::pipeline::WorktreeRoots::default(),
+        )
+        .map_err(|e| BlameError::Backend(e.to_string()))?;
+        let guard = Guarded {
+            inner: &repo.objects,
+            cancel,
+            max_objects: request.limits.max_objects,
+            max_blob: request.limits.max_blob_bytes,
+            objects: AtomicU64::new(0),
+            stop: AtomicU8::new(0),
+            stopped_size: AtomicU64::new(0),
+            progress,
+        };
+        let outcome = gix::blame::file(
+            &guard,
+            gix::blame::Start::Commit(id),
+            None,
+            &mut cache,
+            path.as_str().into(),
+            options,
+        );
+        let objects = guard.objects.load(Ordering::Relaxed);
+        progress(objects);
+        let outcome = match outcome {
+            Ok(o) => o,
+            Err(e) => {
+                return Err(match guard.reason() {
+                    Some(Stop::Cancelled) => BlameError::Cancelled,
+                    Some(Stop::Objects) => BlameError::Limit {
+                        what: "objects read",
+                        got: objects,
+                        max: request.limits.max_objects,
+                    },
+                    Some(Stop::Blob) => BlameError::Limit {
+                        what: "file size in bytes",
+                        got: guard.stopped_size.load(Ordering::SeqCst),
+                        max: request.limits.max_blob_bytes,
+                    },
+                    None if e.to_string().contains("wasn't found") => BlameError::NotFound(path.clone()),
+                    None => BlameError::Backend(e.to_string()),
+                });
             }
-        })?;
+        };
+        let lines = line_count(&outcome.blob);
+        if let Some((first, last)) = request.range
+            && last > lines
+        {
+            return Err(BlameError::RangeOutsideFile { first, last, lines });
+        }
+        // git's own test for binary: a NUL in the first 8000 bytes. gix then gives the whole file to the oldest commit, which is not an
+        // attribution, so it is refused.
+        if outcome.blob.iter().take(8000).any(|b| *b == 0) {
+            return Err(BlameError::Binary(path.clone()));
+        }
         let mut entries = outcome.entries;
         entries.sort_by_key(|e| e.start_in_blamed_file);
-        let mut blame = Blame::default();
+        let mut blame = Blame {
+            objects_read: objects,
+            ..Blame::default()
+        };
         let mut who: BTreeMap<gix::ObjectId, (String, i64)> = BTreeMap::new();
         for e in entries {
-            if blame.hunks.len() >= max_hunks {
+            if blame.hunks.len() >= request.limits.max_hunks {
                 blame.truncated = true;
                 break;
             }
             let (author, time) = match who.get(&e.commit_id) {
                 Some(known) => known.clone(),
                 None => {
-                    let commit = repo.find_commit(e.commit_id).map_err(backend)?;
-                    let mut author = commit.author().map_err(backend)?.email.to_string();
-                    crate::history::cut_text(&mut author, MAX_AUTHOR_BYTES);
-                    let time = commit.time().map_err(backend)?.seconds;
+                    let commit = repo.find_commit(e.commit_id).map_err(|e| BlameError::Backend(e.to_string()))?;
+                    let mut author = commit.author().map_err(|e| BlameError::Backend(e.to_string()))?.email.to_string();
+                    cut_text(&mut author, MAX_AUTHOR_BYTES);
+                    let time = commit.time().map_err(|e| BlameError::Backend(e.to_string()))?.seconds;
                     who.insert(e.commit_id, (author.clone(), time));
                     (author, time)
                 }
             };
             let first = e.start_in_blamed_file + 1;
+            let source_path = match e.source_file_name.as_deref() {
+                None => None,
+                Some(name) => match std::str::from_utf8(name).ok().and_then(|n| RepoPath::parse(n).ok()) {
+                    Some(p) => Some(p),
+                    None => {
+                        blame.unnamed_sources += 1;
+                        None
+                    }
+                },
+            };
             blame.hunks.push(BlameHunk {
                 first_line: first,
                 last_line: first + e.len.get() - 1,
-                commit: CommitHash::parse(&e.commit_id.to_string()).map_err(backend)?,
+                commit: hash_of(e.commit_id).map_err(|e| BlameError::Backend(e.to_string()))?,
                 author,
                 time,
-                source_path: e
-                    .source_file_name
-                    .as_deref()
-                    .and_then(|n| std::str::from_utf8(n).ok())
-                    .and_then(|n| RepoPath::parse(n).ok()),
+                source_path,
             });
         }
         Ok(blame)

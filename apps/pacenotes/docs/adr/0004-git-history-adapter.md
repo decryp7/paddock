@@ -49,9 +49,9 @@ and a `.git` file to any place on disk. The analysed repository is hostile input
 4. **What gix is never asked to do:** no worktree, index, status or checkout (so `core.fsmonitor` is never reached); no
    filter pipeline (blobs are read from the object database as stored, so `filter.*` and `.gitattributes` are never
    consulted); no blob diff, so no `diff.*.textconv` or external diff (changes come from the pure tree-to-tree diff of
-   `gix-diff`, which reads trees only; **gix's `blob-diff` feature is not enabled, so the compiler enforces it**); no resource cache and no attribute stack; no hooks; no network.
+   `gix-diff`, which reads trees only; **gix's `blob-diff` feature was not enabled, so the compiler enforced it. Blame (C2b) enables it: see the amendment for what guards it instead**); no resource cache and no attribute stack except the one empty stack blame builds; no hooks; no network.
 5. **Renames are found from data we already have:** a deleted and an added entry with the same blob id are a rename (exact);
-   no similarity pass, because that would read blobs through the diff pipeline, which is where textconv lives.
+   no similarity pass in `changed_between`, because that would read blobs through the diff pipeline, which is where textconv lives. (Blame follows renames with similarity; see the amendment.)
 
 ### The trap test is the proof (plan A3a row, C2 part)
 
@@ -105,23 +105,52 @@ used; the C2 tests use small generated repositories.
   count above one is normal and cannot be told from a file shared with an outside repository; refusing them would reject
   legitimate clones. The cost of a hard-linked pack is that it is the same bytes as in the other repository, which is the
   repository's own data, not a way out of the workspace.
-- Rename detection is exact only in v1; a moved-and-edited file shows as delete plus add.
+- Rename detection in `changed_between` is exact only in v1; a moved-and-edited file shows as delete plus add. Blame follows renames with similarity (gix's default rewrite limits), so it can attribute lines across a moved-and-edited file.
 
 ## Amendment (2026-10-30, package C2b): blame, and what it changes in the "no blob diff" rule
 
-Ownership figures need per-line authorship, and gix's blame (`gix` feature `blame`, `gix-blame` 0.20) diffs blobs. Decision 4 above said
-the compiler enforces "no blob diff" because gix's `blob-diff` feature was off. **That is no longer true**: the `blame` feature turns
-on `gix-diff`'s blob diffing, and the dependency graph now contains `gix-command` and `gix-filter` (they are compiled in; nothing here
-calls them). What replaces the compiler's guarantee:
+Ownership figures need per-line authorship, and gix's blame (`gix` feature `blame`, `gix-blame` 0.20) diffs blobs. Decision 4 said the
+compiler enforces "no blob diff" because gix's `blob-diff` feature was off, and decision 5 said renames come from the tree diff with no
+similarity pass. **Both change for blame.** The `blame` feature turns on `gix-diff`'s blob diffing; the dependency graph now contains
+`gix-command` and `gix-filter` (compiled in; nothing here calls them); and blame follows renames with gix's similarity tracking
+(`Rewrites::default()`), which reads blobs. The compiler's guarantee is replaced by two layers and a test for each:
 
-- **Only one door.** The crate calls blame through `GixHistory::blame` and nowhere else; the source scan test (`the_sources_never_start_a_process`) still refuses `Command::new`, `std::process`, `gix::command` and `gix_command` in the crate's sources.
-- **Blame reads the object database only.** `Repository::blame_file` takes a commit id and a path; its diff resource cache is the tree-diff one (`diff_resource_cache_for_tree_diff`: mode "to git", attributes from the tree's own `.gitattributes`, **no worktree roots**). Blobs are read as stored: no worktree, no index, no filter run, no text conversion, no external diff (those are only used by modes and calls this crate never makes).
-- **A trap row proves it.** `blame_runs_nothing_a_repository_configures`: a repository whose config names `diff.<n>.textconv`, `diff.<n>.command`, `filter.<n>.clean`, `filter.<n>.smudge` and `core.fsmonitor`, each set to a command that creates a marker file, and whose `.gitattributes` assigns them to the blamed file, is blamed; the blame is correct and the marker file does not exist. The commits are made before the config is set, because the git binary that builds the fixture would itself run a clean filter.
-- **If a gix upgrade changes this, the trap row fails.** An upgrade of `gix` or `gix-blame` re-runs it before it merges.
+**Layer 1: what the repository can configure is dropped at open.** The repository is opened isolated (no system or global config, no
+`include`, no environment) and with reduced trust, which drops `diff.*`, `filter.*` and `core.attributesFile` from the repository's own
+config; `core.fsmonitor` is forced off and **`core.bigFileThreshold` is pinned** at 1 GiB, so a repository cannot make gix treat a
+blob as "too big to diff" (which empties it and corrupts the attribution; in debug builds it panicked inside gix-blame).
 
-Other facts of the adapter: blame works on a commit (never the working tree; that is the index's), follows renames (`Rewrites::default()`),
-returns hunks in line order with the author's email (cut at 128 bytes, as in the log), the commit time and the source name when it
-differs, and is cut at 50,000 hunks (`truncated`). `since` and the line range bound the work on a large history; gix's blame cannot be
-interrupted, so `cancel` is looked at before it starts and a deadline is not offered (ADR 0031). A file missing at the revision is
-`NotFound`; a bad range is an error that says the range is 1-based. Author text is personal data: it is returned to the caller for the
-ownership view and is not logged.
+**Layer 2: the diff cache is built by hand, in `blame.rs`, and is empty of attributes.** Mode "to git", no worktree roots, and an
+attribute stack with no globals, no `info/attributes` and no id mappings. So no `.gitattributes` from the tree, the index or
+`.git/info/attributes` can mark a file `-diff` or `binary`, name a `diff=` driver or a `filter=`, and the **index is never read**. (The
+first version used gix's `diff_resource_cache_for_tree_diff`, which reads attributes from the index and `info/attributes`, and which
+reads `.git/index`: a committed `*.rs -diff`, a staged one, an `info/attributes` one each sent every line to the root author. The
+regression tests below are those cases.)
+
+- **One door.** `GixHistory::blame` is the only caller of `gix::blame::file` and of `gix::diff::resource_cache`; a source scan test
+  refuses `diff_resource_cache(`, `Mode::ToWorktree`, `filter_pipeline`, `blame_file(`, `attributes_only(` and the index loaders in the
+  crate, and refuses `resource_cache(`, `blame::file(` and `worktree::Stack` outside `blame.rs`; the spawn scan (`Command::new`,
+  `std::process`, `gix::command`) still covers everything.
+- **Tests.** One per trigger, each asserting the right commit per line: a committed `*.rs -diff`, an attribute only staged in the
+  index, `.git/info/attributes`, `core.bigFileThreshold 1` (each fails without its fix; checked by reverting it); the trap repository
+  (`filter`/`diff` drivers and `.gitattributes` binding them to every file) is blamed with no marker created; and a repository whose
+  config names `textconv`, diff `command`, `filter.clean`/`smudge` and `fsmonitor`, plus an `info/attributes` binding them, is blamed
+  with no marker (the commits are made before the config is set, because the git binary that builds the fixture would itself run a
+  clean filter).
+- **A binary file is refused**, not attributed: gix detects a NUL in the content and gives the whole file to the oldest commit, which
+  would pass for authorship; `BlameError::Binary` says so.
+- **If a gix upgrade changes any of this, the tests fail.** An upgrade of `gix` or `gix-blame` re-runs them before it merges.
+
+**Bounded and cancellable.** gix's blame is handed an object database wrapped in a guard (`Guarded`) that, on every lookup, checks the
+cancel token and an object budget (2,000,000 by default), reads the header first and refuses a blob over the cap (2 MiB by default)
+**before** reading or inflating it, and counts the objects read, which is the progress figure (ER-18) the caller sees growing. A limit
+is `BlameError::Limit` with a message that says to narrow the range, set `since`, or raise the limit; nothing partial is returned. The
+earlier "gix's blame cannot be interrupted" caveat is gone. (gix cannot read objects over 16 MiB through this path at all; such a file
+is reported as a backend error, and the 2 MiB cap normally refuses it first.)
+
+**The port.** Blame is a core port (`Blamer`, with `Blame`, `BlameHunk`, `BlameRequest`, `BlameLimits` and a typed `BlameError`:
+`NotFound`, `UnknownRev`, `InvalidRange`, `RangeOutsideFile`, `Binary`, `Limit`, `Cancelled`, `Backend`) with an in-memory fake and a
+contract test that the real adapter passes too. A range past the end of the file is an error, never an empty answer. A renamed source
+path that is not a valid repository path is counted (`unnamed_sources`), not mapped to nothing. Author text (the email, cut at 128
+bytes) is personal data: it is returned to the caller for the ownership view and is not logged. `since` bounds the walk on a large
+history; lines whose origin lies further back are attributed to the last commit the walk reached.

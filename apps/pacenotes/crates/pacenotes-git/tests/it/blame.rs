@@ -1,10 +1,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods)]
-//! C2b: who wrote each line, renames followed, and the safe-open rules of ADR 0004 unchanged. Repositories are built with the git
-//! binary under the same isolation as in `history.rs`; the product code never runs it.
+//! C2b: who wrote each line, renames followed, bounded and cancellable, and the safe-open rules of ADR 0004 unchanged. Repositories are
+//! built with the git binary under the same isolation as in `history.rs`; the product code never runs it.
 
-use pacenotes_core::ports::HistoryError;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use pacenotes_core::contract::{BlameFixture, blame_contract};
+use pacenotes_core::ports::{Blame, BlameError, BlameLimits, BlameRequest, Blamer};
 use pacenotes_core::{CommitHash, Rev};
-use pacenotes_git::open;
+use pacenotes_git::{GixHistory, open};
 use paddock_jobs::CancelToken;
 
 use crate::history::{Repo, live, p};
@@ -16,6 +19,27 @@ fn hash(r: &Rev) -> CommitHash {
     }
 }
 
+fn blame(h: &GixHistory, rev: &Rev, path: &str, req: &BlameRequest) -> Result<Blame, BlameError> {
+    h.blame(rev, &p(path), req, &|_| {}, &live())
+}
+
+fn who(b: &Blame) -> Vec<(u32, u32, CommitHash)> {
+    b.hunks.iter().map(|h| (h.first_line, h.last_line, h.commit.clone())).collect()
+}
+
+/// Three commits that each change one line of `f.rs`: line 1 is the third's, line 2 the second's, line 3 the first's.
+fn three(repo: &Repo) -> (Rev, Rev, Rev) {
+    let a = repo.commit(1_000, "ann", &[("f.rs", "1\n2\n3\n")]);
+    let b = repo.commit(2_000, "bob", &[("f.rs", "1\nX\n3\n")]);
+    let c = repo.commit(3_000, "cat", &[("f.rs", "Y\nX\n3\n")]);
+    (a, b, c)
+}
+
+fn expect_three(history: &GixHistory, a: &Rev, b: &Rev, c: &Rev) {
+    let got = blame(history, c, "f.rs", &BlameRequest::default()).unwrap();
+    assert_eq!(who(&got), [(1, 1, hash(c)), (2, 2, hash(b)), (3, 3, hash(a))], "{got:?}");
+}
+
 #[test]
 fn blame_gives_each_line_to_the_commit_and_author_that_wrote_it_and_follows_a_rename() {
     let repo = Repo::new();
@@ -24,8 +48,8 @@ fn blame_gives_each_line_to_the_commit_and_author_that_wrote_it_and_follows_a_re
     let b = repo.commit(2_000, "bob", &[("src/new.rs", "one\ntwo\nthree\nfour\n")]);
     let c = repo.commit(3_000, "cat", &[("src/new.rs", "one\nTWO\nthree\nfour\n")]);
     let history = open(&repo.dir).unwrap();
-    let blame = history.blame(&c, &p("src/new.rs"), None, None, &live()).unwrap();
-    let rows: Vec<_> = blame
+    let got = blame(&history, &c, "src/new.rs", &BlameRequest::default()).unwrap();
+    let rows: Vec<_> = got
         .hunks
         .iter()
         .map(|h| (h.first_line, h.last_line, h.commit.clone(), h.author.as_str()))
@@ -40,14 +64,14 @@ fn blame_gives_each_line_to_the_commit_and_author_that_wrote_it_and_follows_a_re
         ]
     );
     assert_eq!(
-        blame.hunks[0].source_path.as_ref().map(|p| p.as_str()),
+        got.hunks[0].source_path.as_ref().map(|p| p.as_str()),
         Some("src/old.rs"),
         "the first line came from the old name"
     );
-    assert!(blame.hunks[1].source_path.is_none() && !blame.truncated);
-    assert_eq!(blame.hunks[3].time, 2_000);
+    assert!(got.hunks[1].source_path.is_none() && !got.truncated && got.unnamed_sources == 0);
+    assert_eq!(got.hunks[3].time, 2_000);
     assert_eq!(
-        blame.lines_by_author(),
+        got.lines_by_author(),
         [
             ("ann@example.invalid".to_owned(), 2),
             ("bob@example.invalid".to_owned(), 1),
@@ -57,68 +81,354 @@ fn blame_gives_each_line_to_the_commit_and_author_that_wrote_it_and_follows_a_re
 }
 
 #[test]
+fn the_real_adapter_passes_the_blame_contract() {
+    let repo = Repo::new();
+    let (_, _, c) = three(&repo);
+    let history = open(&repo.dir).unwrap();
+    blame_contract(&BlameFixture {
+        blamer: &history,
+        rev: c,
+        path: p("f.rs"),
+        lines: 3,
+        missing: p("missing.rs"),
+        unknown: Rev::Commit(CommitHash::parse(&"0".repeat(40)).unwrap()),
+    });
+}
+
+#[test]
 fn a_range_since_a_date_and_the_old_revision_all_narrow_the_answer() {
     let repo = Repo::new();
     let a = repo.commit(1_000, "ann", &[("f.rs", "1\n2\n3\n")]);
     let b = repo.commit(2_000, "bob", &[("f.rs", "1\n2\n3\n4\n5\n")]);
     let history = open(&repo.dir).unwrap();
-    let ranged = history.blame(&b, &p("f.rs"), Some((4, 5)), None, &live()).unwrap();
+    let ranged = blame(
+        &history,
+        &b,
+        "f.rs",
+        &BlameRequest {
+            range: Some((4, 5)),
+            ..BlameRequest::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(who(&ranged), [(4, 5, hash(&b))]);
     assert_eq!(
-        (
-            ranged.hunks.len(),
-            ranged.hunks[0].first_line,
-            ranged.hunks[0].last_line,
-            ranged.hunks[0].commit.clone()
-        ),
-        (1, 4, 5, hash(&b))
-    );
-    let at_a = history.blame(&a, &p("f.rs"), None, None, &live()).unwrap();
-    assert_eq!(
-        (at_a.hunks.len(), at_a.hunks[0].commit.clone(), at_a.hunks[0].lines()),
-        (1, hash(&a), 3),
+        who(&blame(&history, &a, "f.rs", &BlameRequest::default()).unwrap()),
+        [(1, 3, hash(&a))],
         "blame at an older revision"
     );
-    let windowed = history.blame(&b, &p("f.rs"), None, Some(1_500), &live()).unwrap();
+    let windowed = blame(
+        &history,
+        &b,
+        "f.rs",
+        &BlameRequest {
+            since: Some(1_500),
+            ..BlameRequest::default()
+        },
+    )
+    .unwrap();
     assert_eq!(
         windowed.hunks.last().map(|h| (h.first_line, h.commit.clone())),
         Some((4, hash(&b))),
-        "the newer lines keep their commit: {windowed:?}"
+        "{windowed:?}"
+    );
+}
+
+// ---- a repository's attributes and config must not change the attribution (P1) -----------------------------------------------
+
+#[test]
+fn a_committed_dash_diff_attribute_does_not_corrupt_the_attribution() {
+    let repo = Repo::new();
+    let a = repo.commit(1_000, "ann", &[(".gitattributes", "*.rs -diff\n"), ("f.rs", "1\n2\n3\n")]);
+    let b = repo.commit(2_000, "bob", &[("f.rs", "1\nX\n3\n")]);
+    let c = repo.commit(3_000, "cat", &[("f.rs", "Y\nX\n3\n")]);
+    expect_three(&open(&repo.dir).unwrap(), &a, &b, &c);
+}
+
+#[test]
+fn an_attribute_that_is_only_staged_in_the_index_does_not_corrupt_it() {
+    let repo = Repo::new();
+    let (a, b, c) = three(&repo);
+    std::fs::write(repo.dir.join(".gitattributes"), "*.rs -diff\n*.rs binary\n").unwrap();
+    repo.git(&["add", ".gitattributes"], 4_000);
+    expect_three(&open(&repo.dir).unwrap(), &a, &b, &c);
+}
+
+#[test]
+fn the_info_attributes_file_does_not_corrupt_it() {
+    let repo = Repo::new();
+    let (a, b, c) = three(&repo);
+    std::fs::create_dir_all(repo.dir.join(".git/info")).unwrap();
+    std::fs::write(repo.dir.join(".git/info/attributes"), "*.rs -diff\n* binary\n").unwrap();
+    expect_three(&open(&repo.dir).unwrap(), &a, &b, &c);
+}
+
+#[test]
+fn a_tiny_big_file_threshold_does_not_corrupt_it() {
+    let repo = Repo::new();
+    let (a, b, c) = three(&repo);
+    repo.git(&["config", "core.bigFileThreshold", "1"], 4_000);
+    expect_three(&open(&repo.dir).unwrap(), &a, &b, &c);
+}
+
+#[test]
+fn a_binary_file_is_a_typed_refusal_not_a_whole_file_given_to_the_oldest_commit() {
+    let repo = Repo::new();
+    repo.commit(1_000, "ann", &[("data.bin", "\0\0\0abc\n")]);
+    let b = repo.commit(2_000, "bob", &[("data.bin", "\0\0\0abc\nmore\n")]);
+    let history = open(&repo.dir).unwrap();
+    assert_eq!(
+        blame(&history, &b, "data.bin", &BlameRequest::default()),
+        Err(BlameError::Binary(p("data.bin")))
     );
 }
 
 #[test]
-fn blame_refuses_what_it_cannot_serve_with_a_typed_error() {
+fn a_source_name_that_is_not_a_repository_path_is_counted_not_dropped() {
     let repo = Repo::new();
-    let a = repo.commit(1_000, "ann", &[("f.rs", "1\n")]);
+    // a file name with a backslash is legal in git and not a RepoPath
+    let a = repo.commit(1_000, "ann", &[("a\\b.rs", "one\ntwo\n")]);
+    repo.git(&["mv", "a\\b.rs", "f.rs"], 2_000);
+    let b = repo.commit(2_000, "bob", &[("f.rs", "one\ntwo\nthree\n")]);
+    let history = open(&repo.dir).unwrap();
+    let got = blame(&history, &b, "f.rs", &BlameRequest::default()).unwrap();
+    assert_eq!(who(&got), [(1, 2, hash(&a)), (3, 3, hash(&b))]);
+    assert_eq!((got.unnamed_sources, got.hunks[0].source_path.is_none()), (1, true), "{got:?}");
+}
+
+// ---- bounded, cancellable, with progress (P1) --------------------------------------------------------------------------------
+
+#[test]
+fn a_blob_over_the_cap_is_refused_before_it_is_read() {
+    let repo = Repo::new();
+    // 24 MiB of zeros: a few kilobytes in the object store, 24 MiB if it were inflated
+    let big = repo.commit(1_000, "ann", &[("big.txt", &"0".repeat(24 * 1024 * 1024))]);
+    let history = open(&repo.dir).unwrap();
+    let err = blame(&history, &big, "big.txt", &BlameRequest::default()).unwrap_err();
+    assert!(
+        matches!(&err, BlameError::Limit { what: "file size in bytes", got, max } if *got == 24 * 1024 * 1024 && *max == 2 * 1024 * 1024),
+        "{err:?}"
+    );
+    // the cap is the caller's: a file of 8 MiB is read when the cap allows it
+    let repo = Repo::new();
+    let mid = repo.commit(1_000, "ann", &[("mid.txt", &"0".repeat(8 * 1024 * 1024))]);
     let history = open(&repo.dir).unwrap();
     assert!(matches!(
-        history.blame(&a, &p("missing.rs"), None, None, &live()),
-        Err(HistoryError::NotFound(_) | HistoryError::Backend(_))
+        blame(&history, &mid, "mid.txt", &BlameRequest::default()),
+        Err(BlameError::Limit { .. })
     ));
-    assert!(matches!(history.blame(&a, &p("f.rs"), Some((0, 3)), None, &live()), Err(HistoryError::Backend(m)) if m.contains("1-based")));
-    assert!(matches!(
-        history.blame(&a, &p("f.rs"), Some((3, 1)), None, &live()),
-        Err(HistoryError::Backend(_))
-    ));
+    let allowed = BlameRequest {
+        limits: BlameLimits {
+            max_blob_bytes: 32 * 1024 * 1024,
+            ..BlameLimits::default()
+        },
+        ..BlameRequest::default()
+    };
+    let ok = blame(&history, &mid, "mid.txt", &allowed);
+    assert!(ok.is_ok(), "{ok:?}");
+}
+
+#[test]
+fn the_object_budget_stops_a_long_walk_and_the_progress_grows_to_the_figure_in_the_answer() {
+    let repo = Repo::new();
+    let origin = repo.commit(1_000, "ann", &[("f.rs", "0\n")]);
+    let mut last = origin.clone();
+    for i in 1..=200 {
+        last = repo.commit(1_000 + i, "ann", &[("other.txt", &format!("{i}\n"))]);
+    }
+    let _ = &last;
+    let history = open(&repo.dir).unwrap();
+    let tight = BlameRequest {
+        limits: BlameLimits {
+            max_objects: 10,
+            ..BlameLimits::default()
+        },
+        ..BlameRequest::default()
+    };
+    let err = blame(&history, &last, "f.rs", &tight).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            BlameError::Limit {
+                what: "objects read",
+                max: 10,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+    assert!(err.to_string().contains("narrow the range, set `since`"));
+    let seen = AtomicU64::new(0);
+    let monotonic = std::sync::atomic::AtomicBool::new(true);
+    let got = history
+        .blame(
+            &last,
+            &p("f.rs"),
+            &BlameRequest::default(),
+            &|n| {
+                if n < seen.swap(n, Ordering::SeqCst) {
+                    monotonic.store(false, Ordering::SeqCst);
+                }
+            },
+            &live(),
+        )
+        .unwrap();
+    assert!(monotonic.load(Ordering::SeqCst), "progress never goes backwards");
+    assert_eq!(
+        seen.load(Ordering::SeqCst),
+        got.objects_read,
+        "and ends at the figure the answer reports"
+    );
+    assert!(got.objects_read > 200, "{}", got.objects_read);
+    assert_eq!(
+        who(&got),
+        [(1, 1, hash(&origin))],
+        "the walk went back through 200 commits to the one that wrote the line"
+    );
+}
+
+#[test]
+fn a_cancel_during_the_walk_stops_it() {
+    let repo = Repo::new();
+    repo.commit(1_000, "ann", &[("f.rs", "0\n")]);
+    let mut last = repo.commit(1_001, "ann", &[("other.txt", "0\n")]);
+    for i in 2..=200 {
+        last = repo.commit(1_000 + i, "ann", &[("other.txt", &format!("{i}\n"))]);
+    }
+    let history = open(&repo.dir).unwrap();
+    let cancel = CancelToken::new();
+    let token = cancel.clone();
+    let err = history
+        .blame(
+            &last,
+            &p("f.rs"),
+            &BlameRequest::default(),
+            &|n| {
+                if n >= 64 {
+                    token.cancel();
+                }
+            },
+            &cancel,
+        )
+        .unwrap_err();
+    assert_eq!(err, BlameError::Cancelled);
+}
+
+// ---- typed refusals ------------------------------------------------------------------------------------------------------------
+
+#[test]
+fn blame_refuses_what_it_cannot_serve_with_a_typed_error() {
+    let repo = Repo::new();
+    let a = repo.commit(1_000, "ann", &[("f.rs", "1\n2\n")]);
+    let history = open(&repo.dir).unwrap();
+    assert_eq!(
+        blame(&history, &a, "missing.rs", &BlameRequest::default()),
+        Err(BlameError::NotFound(p("missing.rs")))
+    );
+    assert_eq!(
+        blame(
+            &history,
+            &a,
+            "f.rs",
+            &BlameRequest {
+                range: Some((0, 3)),
+                ..BlameRequest::default()
+            }
+        ),
+        Err(BlameError::InvalidRange { first: 0, last: 3 })
+    );
+    assert_eq!(
+        blame(
+            &history,
+            &a,
+            "f.rs",
+            &BlameRequest {
+                range: Some((3, 1)),
+                ..BlameRequest::default()
+            }
+        ),
+        Err(BlameError::InvalidRange { first: 3, last: 1 })
+    );
+    assert_eq!(
+        blame(
+            &history,
+            &a,
+            "f.rs",
+            &BlameRequest {
+                range: Some((2, 9)),
+                ..BlameRequest::default()
+            }
+        ),
+        Err(BlameError::RangeOutsideFile {
+            first: 2,
+            last: 9,
+            lines: 2
+        }),
+        "a range past the end is an error, never an empty answer"
+    );
+    assert_eq!(
+        blame(
+            &history,
+            &a,
+            "f.rs",
+            &BlameRequest {
+                range: Some((5, 6)),
+                ..BlameRequest::default()
+            }
+        ),
+        Err(BlameError::RangeOutsideFile {
+            first: 5,
+            last: 6,
+            lines: 2
+        })
+    );
     let unknown = Rev::Commit(CommitHash::parse(&"0".repeat(40)).unwrap());
     assert!(matches!(
-        history.blame(&unknown, &p("f.rs"), None, None, &live()),
-        Err(HistoryError::UnknownRev(_))
+        blame(&history, &unknown, "f.rs", &BlameRequest::default()),
+        Err(BlameError::UnknownRev(_))
     ));
     assert!(matches!(
-        history.blame(&Rev::WorkingTree(pacenotes_core::Generation(1)), &p("f.rs"), None, None, &live()),
-        Err(HistoryError::UnknownRev(_))
+        blame(
+            &history,
+            &Rev::WorkingTree(pacenotes_core::Generation(1)),
+            "f.rs",
+            &BlameRequest::default()
+        ),
+        Err(BlameError::UnknownRev(_))
     ));
     let stopped = CancelToken::new();
     stopped.cancel();
-    assert!(matches!(
-        history.blame(&a, &p("f.rs"), None, None, &stopped),
-        Err(HistoryError::Cancelled)
-    ));
+    assert_eq!(
+        history.blame(&a, &p("f.rs"), &BlameRequest::default(), &|_| {}, &stopped),
+        Err(BlameError::Cancelled)
+    );
 }
 
-/// The trap row for blame: a repository whose own config and attributes name a text-conversion command and a filter must not make
-/// blame run anything.
+#[test]
+fn a_blame_with_more_hunks_than_the_limit_is_cut_and_says_so() {
+    let repo = Repo::new();
+    let (_, _, c) = three(&repo);
+    let history = open(&repo.dir).unwrap();
+    let cut = BlameRequest {
+        limits: BlameLimits {
+            max_hunks: 2,
+            ..BlameLimits::default()
+        },
+        ..BlameRequest::default()
+    };
+    let got = blame(&history, &c, "f.rs", &cut).unwrap();
+    assert_eq!((got.hunks.len(), got.truncated), (2, true));
+    let ok = BlameRequest {
+        limits: BlameLimits {
+            max_hunks: 3,
+            ..BlameLimits::default()
+        },
+        ..BlameRequest::default()
+    };
+    assert!(!blame(&history, &c, "f.rs", &ok).unwrap().truncated);
+}
+
+/// A measurement is not a test; but a configured command must never run, with the attributes and drivers a repository names.
 #[test]
 fn blame_runs_nothing_a_repository_configures() {
     let repo = Repo::new();
@@ -131,25 +441,19 @@ fn blame_runs_nothing_a_repository_configures() {
     );
     let b = repo.commit(2_000, "bob", &[("f.rs", "1\n2\n3\n")]);
     // configured after the commits: the git binary that builds this repository would itself run a clean filter
-    repo.git(&["config", "diff.evil.textconv", &evil], 0);
-    repo.git(&["config", "diff.evil.command", &evil], 0);
-    repo.git(&["config", "filter.evil.clean", &evil], 0);
-    repo.git(&["config", "filter.evil.smudge", &evil], 0);
-    repo.git(&["config", "core.fsmonitor", &evil], 0);
+    for key in [
+        "diff.evil.textconv",
+        "diff.evil.command",
+        "filter.evil.clean",
+        "filter.evil.smudge",
+        "core.fsmonitor",
+    ] {
+        repo.git(&["config", key, &evil], 0);
+    }
+    std::fs::create_dir_all(repo.dir.join(".git/info")).unwrap();
+    std::fs::write(repo.dir.join(".git/info/attributes"), "*.rs diff=evil filter=evil\n").unwrap();
     let history = open(&repo.dir).unwrap();
-    let blame = history.blame(&b, &p("f.rs"), None, None, &live()).unwrap();
-    assert_eq!(blame.hunks.iter().map(|h| h.lines()).sum::<u32>(), 3);
+    let got = blame(&history, &b, "f.rs", &BlameRequest::default()).unwrap();
+    assert_eq!(got.hunks.iter().map(|h| h.lines()).sum::<u32>(), 3);
     assert!(!marker.exists(), "blame ran a command the repository configured");
-}
-
-#[test]
-fn a_blame_with_more_hunks_than_the_limit_is_cut_and_says_so() {
-    let repo = Repo::new();
-    repo.commit(1_000, "ann", &[("f.rs", "1\n2\n3\n")]);
-    repo.commit(2_000, "bob", &[("f.rs", "1\nX\n3\n")]);
-    let c = repo.commit(3_000, "cat", &[("f.rs", "Y\nX\n3\n")]);
-    let history = open(&repo.dir).unwrap();
-    let cut = history.blame_limited(&c, &p("f.rs"), None, None, 2, &live()).unwrap();
-    assert_eq!((cut.hunks.len(), cut.truncated), (2, true));
-    assert!(!history.blame_limited(&c, &p("f.rs"), None, None, 3, &live()).unwrap().truncated);
 }

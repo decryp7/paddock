@@ -13,9 +13,9 @@ use paddock_jobs::CancelToken;
 use crate::ids::{ChunkId, FileId};
 use crate::path::RepoPath;
 use crate::ports::{
-    ChangeKind, ChangeSet, Completion, EmbedError, Embedder, FileChange, History, HistoryError, LanguageServer, Llm, LlmError, LspError,
-    LspReply, LspRequest, MAX_EMBED_TEXT_BYTES, MAX_EMBED_TEXTS, ModelId, Store, StoreError, SymbolPage, SymbolRecord, TokenBudget,
-    VectorError, VectorHit, VectorIndex,
+    Blame, BlameError, BlameHunk, BlameRequest, Blamer, ChangeKind, ChangeSet, Completion, EmbedError, Embedder, FileChange, History,
+    HistoryError, LanguageServer, Llm, LlmError, LspError, LspReply, LspRequest, MAX_EMBED_TEXT_BYTES, MAX_EMBED_TEXTS, ModelId, Store,
+    StoreError, SymbolPage, SymbolRecord, TokenBudget, VectorError, VectorHit, VectorIndex,
 };
 use crate::rev::{Generation, Rev};
 
@@ -167,6 +167,165 @@ pub fn history_contract(fx: &HistoryFixture<'_>) {
     assert_eq!(h.head(&dead), Err(HistoryError::Cancelled));
     assert_eq!(h.read_at(&fx.rev_a, &fx.present.0, 1 << 20, &dead), Err(HistoryError::Cancelled));
     assert_eq!(h.changed_between(&fx.rev_a, &fx.rev_b, 10, &dead), Err(HistoryError::Cancelled));
+}
+
+// ---- Blame ---------------------------------------------------------------------------------------------------------
+
+/// An in-memory [`Blamer`]: files with a fixed list of hunks at one revision.
+pub struct MemoryBlame {
+    rev: Rev,
+    files: BTreeMap<RepoPath, (u32, Vec<BlameHunk>)>,
+}
+
+impl MemoryBlame {
+    /// `files` maps a path to its number of lines and its hunks at `rev`.
+    pub fn new(rev: Rev, files: Vec<(RepoPath, u32, Vec<BlameHunk>)>) -> MemoryBlame {
+        MemoryBlame {
+            rev,
+            files: files.into_iter().map(|(p, n, h)| (p, (n, h))).collect(),
+        }
+    }
+}
+
+impl Blamer for MemoryBlame {
+    fn blame(
+        &self,
+        rev: &Rev,
+        path: &RepoPath,
+        request: &BlameRequest,
+        progress: &dyn Fn(u64),
+        cancel: &CancelToken,
+    ) -> Result<Blame, BlameError> {
+        if cancel.is_cancelled() {
+            return Err(BlameError::Cancelled);
+        }
+        if *rev != self.rev {
+            return Err(BlameError::UnknownRev(rev.to_string()));
+        }
+        let (lines, hunks) = self.files.get(path).ok_or_else(|| BlameError::NotFound(path.clone()))?;
+        let (first, last) = request.range.unwrap_or((1, (*lines).max(1)));
+        if first == 0 || last < first {
+            return Err(BlameError::InvalidRange { first, last });
+        }
+        if last > *lines {
+            return Err(BlameError::RangeOutsideFile {
+                first,
+                last,
+                lines: *lines,
+            });
+        }
+        progress(hunks.len() as u64);
+        let mut out = Blame {
+            objects_read: hunks.len() as u64,
+            ..Blame::default()
+        };
+        for h in hunks.iter().filter(|h| h.last_line >= first && h.first_line <= last) {
+            if out.hunks.len() >= request.limits.max_hunks {
+                out.truncated = true;
+                break;
+            }
+            out.hunks.push(BlameHunk {
+                first_line: h.first_line.max(first),
+                last_line: h.last_line.min(last),
+                ..h.clone()
+            });
+        }
+        Ok(out)
+    }
+}
+
+/// What [`blame_contract`] needs: `path` has `lines` lines at `rev`, with at least two hunks from different commits; `missing` exists
+/// nowhere; `unknown` is not a revision of the repository.
+pub struct BlameFixture<'a> {
+    /// The adapter under test.
+    pub blamer: &'a dyn Blamer,
+    /// The revision to blame at.
+    pub rev: Rev,
+    /// A file with at least two hunks.
+    pub path: RepoPath,
+    /// How many lines it has.
+    pub lines: u32,
+    /// A path that does not exist.
+    pub missing: RepoPath,
+    /// A revision the repository does not know.
+    pub unknown: Rev,
+}
+
+/// Runs the contract of [`Blamer`].
+pub fn blame_contract(fx: &BlameFixture<'_>) {
+    let live = CancelToken::new();
+    let none = |_: u64| {};
+    let b = fx.blamer;
+    let whole = b.blame(&fx.rev, &fx.path, &BlameRequest::default(), &none, &live).unwrap();
+    assert!(whole.hunks.len() >= 2 && !whole.truncated);
+    assert_eq!(whole.hunks.first().unwrap().first_line, 1, "hunks start at line 1");
+    assert_eq!(whole.hunks.last().unwrap().last_line, fx.lines, "and end at the last line");
+    for pair in whole.hunks.windows(2) {
+        assert_eq!(
+            pair[0].last_line + 1,
+            pair[1].first_line,
+            "hunks follow each other with no gap and no overlap"
+        );
+    }
+    assert_eq!(whole.hunks.iter().map(BlameHunk::lines).sum::<u32>(), fx.lines);
+    // a range narrows the answer to those lines
+    let ranged = b
+        .blame(
+            &fx.rev,
+            &fx.path,
+            &BlameRequest {
+                range: Some((1, 1)),
+                ..BlameRequest::default()
+            },
+            &none,
+            &live,
+        )
+        .unwrap();
+    assert_eq!(
+        (ranged.hunks.len(), ranged.hunks[0].first_line, ranged.hunks[0].last_line),
+        (1, 1, 1)
+    );
+    // typed refusals
+    assert_eq!(
+        b.blame(&fx.rev, &fx.missing, &BlameRequest::default(), &none, &live),
+        Err(BlameError::NotFound(fx.missing.clone()))
+    );
+    assert_eq!(
+        b.blame(&fx.unknown, &fx.path, &BlameRequest::default(), &none, &live),
+        Err(BlameError::UnknownRev(fx.unknown.to_string()))
+    );
+    for (first, last) in [(0, 3), (3, 1)] {
+        assert_eq!(
+            b.blame(
+                &fx.rev,
+                &fx.path,
+                &BlameRequest {
+                    range: Some((first, last)),
+                    ..BlameRequest::default()
+                },
+                &none,
+                &live
+            ),
+            Err(BlameError::InvalidRange { first, last })
+        );
+    }
+    let past = BlameRequest {
+        range: Some((1, fx.lines + 1)),
+        ..BlameRequest::default()
+    };
+    assert_eq!(
+        b.blame(&fx.rev, &fx.path, &past, &none, &live),
+        Err(BlameError::RangeOutsideFile {
+            first: 1,
+            last: fx.lines + 1,
+            lines: fx.lines
+        }),
+        "a range past the end is an error, never an empty answer"
+    );
+    assert_eq!(
+        b.blame(&fx.rev, &fx.path, &BlameRequest::default(), &none, &cancelled()),
+        Err(BlameError::Cancelled)
+    );
 }
 
 // ---- Store ---------------------------------------------------------------------------------------------------------
@@ -591,6 +750,47 @@ mod tests {
         assert_eq!(
             h.read_at(&rev('c'), &p("src/keep.rs"), 10, &CancelToken::new()),
             Err(HistoryError::UnknownRev(rev('c').to_string()))
+        );
+    }
+
+    #[test]
+    fn memory_blame_passes_the_blame_contract() {
+        let a = rev('a');
+        let hunk = |first, last, c: char, who: &str| BlameHunk {
+            first_line: first,
+            last_line: last,
+            commit: CommitHash::parse(&c.to_string().repeat(40)).unwrap(),
+            author: who.to_owned(),
+            time: 1,
+            source_path: None,
+        };
+        let m = MemoryBlame::new(
+            a.clone(),
+            vec![(p("src/a.rs"), 5, vec![hunk(1, 2, 'b', "ann@x"), hunk(3, 5, 'c', "bob@x")])],
+        );
+        blame_contract(&BlameFixture {
+            blamer: &m,
+            rev: a,
+            path: p("src/a.rs"),
+            lines: 5,
+            missing: p("nope.rs"),
+            unknown: rev('f'),
+        });
+        let whole = m
+            .blame(&rev('a'), &p("src/a.rs"), &BlameRequest::default(), &|_| {}, &CancelToken::new())
+            .unwrap();
+        assert_eq!(whole.lines_by_author(), [("bob@x".to_owned(), 3), ("ann@x".to_owned(), 2)]);
+        let cut = BlameRequest {
+            limits: crate::ports::BlameLimits {
+                max_hunks: 1,
+                ..Default::default()
+            },
+            ..BlameRequest::default()
+        };
+        assert!(
+            m.blame(&rev('a'), &p("src/a.rs"), &cut, &|_| {}, &CancelToken::new())
+                .unwrap()
+                .truncated
         );
     }
 

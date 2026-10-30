@@ -371,6 +371,12 @@ fn trap_row_a_trapped_repository_that_leads_out_is_refused_and_one_that_does_not
     assert!(String::from_utf8_lossy(&text).contains("trap_macros::boom!()"));
     let log = history.log(&head, 10, &live()).unwrap();
     assert_eq!(log.len(), 2);
+    // blame goes through the same trapped repository: every file is bound to the planted filter and diff driver, and it runs neither
+    let blame = pacenotes_core::ports::Blamer::blame(&history, &head, &p("src/lib.rs"), &Default::default(), &|_| {}, &live()).unwrap();
+    assert_eq!(
+        blame.hunks.iter().map(|h| h.lines()).sum::<u32>() as usize,
+        String::from_utf8_lossy(&text).lines().count()
+    );
     let first = log[1].commit.clone();
     let changes = history.changed_between(&Rev::Commit(first), &head, 10, &live()).unwrap();
     assert_eq!(
@@ -386,13 +392,34 @@ fn trap_row_a_trapped_repository_that_leads_out_is_refused_and_one_that_does_not
 }
 
 #[test]
-fn the_sources_never_start_a_process() {
+fn the_sources_never_start_a_process_and_reach_blame_only_through_one_wrapper() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     for entry in std::fs::read_dir(src).unwrap() {
         let path = entry.unwrap().path();
         let text = std::fs::read_to_string(&path).unwrap();
         for forbidden in ["Command::new", "std::process", "tokio::process", "gix::command", "gix_command"] {
             assert!(!text.contains(forbidden), "{} mentions {forbidden}", path.display());
+        }
+        // the ways to a blob diff, a filter or an attribute lookup exist in one file only, and the repository-level shortcuts that read the
+        // index or the attributes of the repository are in none
+        let is_blame = path.file_name().is_some_and(|n| n == "blame.rs");
+        for forbidden in [
+            "diff_resource_cache(",
+            "Mode::ToWorktree",
+            "ToWorktreeAndBinaryToText",
+            "filter_pipeline",
+            "blame_file(",
+            "attributes_only(",
+            "index_or_load_from_head",
+        ] {
+            assert!(!text.contains(forbidden), "{} mentions {forbidden}", path.display());
+        }
+        for wrapper_only in ["resource_cache(", "blame::file(", "worktree::Stack"] {
+            assert!(
+                is_blame || !text.contains(wrapper_only),
+                "{} mentions {wrapper_only}, which only blame.rs may",
+                path.display()
+            );
         }
     }
 }

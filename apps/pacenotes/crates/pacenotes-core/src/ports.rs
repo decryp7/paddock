@@ -12,7 +12,7 @@ use crate::ids::{ChunkId, FileId, SymbolId, SymbolKind};
 use crate::location::{Location, Position, Span};
 use crate::pack::LspFeature;
 use crate::path::RepoPath;
-use crate::rev::{Generation, Rev};
+use crate::rev::{CommitHash, Generation, Rev};
 use crate::tier::Confidence;
 
 // ---- History -------------------------------------------------------------------------------------------------------
@@ -97,6 +97,153 @@ pub trait History: Send + Sync {
 
     /// The files that changed from `from` to `to`, sorted by path, at most `limit` of them.
     fn changed_between(&self, from: &Rev, to: &Rev, limit: usize, cancel: &CancelToken) -> Result<ChangeSet, HistoryError>;
+}
+
+// ---- Blame ---------------------------------------------------------------------------------------------------------
+
+/// A run of lines written by one commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlameHunk {
+    /// The first line in the blamed revision (1-based).
+    pub first_line: u32,
+    /// The last line (1-based, inclusive).
+    pub last_line: u32,
+    /// The commit that introduced them.
+    pub commit: CommitHash,
+    /// The author's email (bounded), as the log gives it.
+    pub author: String,
+    /// The commit time, seconds since the Unix epoch.
+    pub time: i64,
+    /// The file's name in that commit when it differs from the blamed one (the file was renamed since).
+    pub source_path: Option<RepoPath>,
+}
+
+impl BlameHunk {
+    /// How many lines the hunk covers.
+    pub fn lines(&self) -> u32 {
+        self.last_line - self.first_line + 1
+    }
+}
+
+/// The authorship of a file.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Blame {
+    /// The hunks, in line order.
+    pub hunks: Vec<BlameHunk>,
+    /// Set when the list was cut at the hunk limit.
+    pub truncated: bool,
+    /// Hunks whose source file name was not a valid repository path (counted, the hunk is kept without it).
+    pub unnamed_sources: u32,
+    /// Objects the history walk read (the figure the progress callback grew to).
+    pub objects_read: u64,
+}
+
+impl Blame {
+    /// Lines per author, most lines first (ties by author), for the ownership figures.
+    pub fn lines_by_author(&self) -> Vec<(String, u32)> {
+        let mut by: std::collections::BTreeMap<&str, u32> = std::collections::BTreeMap::new();
+        for h in &self.hunks {
+            *by.entry(h.author.as_str()).or_insert(0) += h.lines();
+        }
+        let mut out: Vec<(String, u32)> = by.into_iter().map(|(a, n)| (a.to_owned(), n)).collect();
+        out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        out
+    }
+}
+
+/// Bounds of one blame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlameLimits {
+    /// Most hunks returned.
+    pub max_hunks: usize,
+    /// Most objects the walk may read; past it the blame stops with a limit error.
+    pub max_objects: u64,
+    /// The largest file blob that is read (the walk refuses a bigger one before reading it).
+    pub max_blob_bytes: u64,
+}
+
+impl Default for BlameLimits {
+    fn default() -> Self {
+        BlameLimits {
+            max_hunks: 50_000,
+            max_objects: 2_000_000,
+            max_blob_bytes: 2 * 1024 * 1024,
+        }
+    }
+}
+
+/// What to blame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BlameRequest {
+    /// Only these lines (1-based, inclusive); the whole file when `None`.
+    pub range: Option<(u32, u32)>,
+    /// Stop the walk at commits older than this (seconds since the epoch); lines whose origin lies further back are attributed to the
+    /// last commit the walk reached.
+    pub since: Option<i64>,
+    /// Bounds.
+    pub limits: BlameLimits,
+}
+
+/// Why a [`Blamer`] call failed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum BlameError {
+    /// The path does not exist at that revision.
+    #[error("{0} does not exist at that revision")]
+    NotFound(RepoPath),
+    /// The revision is unknown to the repository.
+    #[error("unknown revision {0}")]
+    UnknownRev(String),
+    /// The range is not 1-based with the end at or after the start.
+    #[error("the line range {first}..{last} is not valid; lines count from 1 and the end is not before the start")]
+    InvalidRange {
+        /// The first line asked for.
+        first: u32,
+        /// The last line asked for.
+        last: u32,
+    },
+    /// The range reaches past the end of the file.
+    #[error("the line range {first}..{last} reaches past the end of the file, which has {lines} lines")]
+    RangeOutsideFile {
+        /// The first line asked for.
+        first: u32,
+        /// The last line asked for.
+        last: u32,
+        /// The lines the file has.
+        lines: u32,
+    },
+    /// The file is binary (a NUL in its first 8000 bytes): it has no lines to attribute.
+    #[error("{0} is a binary file; it has no lines to attribute")]
+    Binary(RepoPath),
+    /// A bound was passed; nothing partial is returned.
+    #[error("the blame passes a limit: {what} ({got} against at most {max}); narrow the range, set `since`, or raise the limit")]
+    Limit {
+        /// What was counted.
+        what: &'static str,
+        /// How many there were (or more).
+        got: u64,
+        /// The limit.
+        max: u64,
+    },
+    /// Cancelled by the caller.
+    #[error("cancelled")]
+    Cancelled,
+    /// The backend failed (for logs; no consumer serves it to a client).
+    #[error("history backend: {0}")]
+    Backend(String),
+}
+
+/// Per-line authorship of a file at a revision, renames followed. The adapter (gix, in process) never runs the `git` binary, never
+/// touches the working tree, and is bounded and cancellable: `progress` is called with the growing count of objects read (ER-18).
+pub trait Blamer: Send + Sync {
+    /// Who wrote each line of `path` at `rev`.
+    fn blame(
+        &self,
+        rev: &Rev,
+        path: &RepoPath,
+        request: &BlameRequest,
+        progress: &dyn Fn(u64),
+        cancel: &CancelToken,
+    ) -> Result<Blame, BlameError>;
 }
 
 // ---- Store (read side) ---------------------------------------------------------------------------------------------

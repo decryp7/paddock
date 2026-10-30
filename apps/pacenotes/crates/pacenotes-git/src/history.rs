@@ -95,7 +95,7 @@ pub struct GixHistory {
     root: PathBuf,
 }
 
-fn backend(e: impl std::fmt::Display) -> HistoryError {
+pub(crate) fn backend(e: impl std::fmt::Display) -> HistoryError {
     HistoryError::Backend(e.to_string())
 }
 
@@ -108,7 +108,7 @@ fn live(cancel: &CancelToken) -> Result<(), HistoryError> {
 }
 
 /// The commit a revision names. A working-tree revision is not served here: this port never touches the working tree.
-fn commit_id(rev: &Rev) -> Result<gix::ObjectId, HistoryError> {
+pub(crate) fn commit_id(rev: &Rev) -> Result<gix::ObjectId, HistoryError> {
     match rev {
         Rev::Commit(hash) => gix::ObjectId::from_hex(hash.as_str().as_bytes()).map_err(|_| HistoryError::UnknownRev(rev.to_string())),
         Rev::WorkingTree(_) => Err(HistoryError::UnknownRev(format!(
@@ -117,7 +117,7 @@ fn commit_id(rev: &Rev) -> Result<gix::ObjectId, HistoryError> {
     }
 }
 
-fn hash_of(id: gix::ObjectId) -> Result<CommitHash, HistoryError> {
+pub(crate) fn hash_of(id: gix::ObjectId) -> Result<CommitHash, HistoryError> {
     CommitHash::parse(&id.to_string()).map_err(backend)
 }
 
