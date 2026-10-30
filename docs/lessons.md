@@ -751,3 +751,21 @@ composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor D
 crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
 (`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
 not by guessing at the VM.
+
+## A pid is not a process: one test's close could kill another test's browser (2026-10-30)
+`paddock_proc::kill_tree` read the process table, ran `taskkill /T /F`, then killed every pid from that table again. By then
+those pids were free, and Windows hands a freed pid on at once: with four real-browser tests in parallel, the next owner was
+likely another test's Chrome helper, and killing its network service gives exactly the `ERR_ABORTED` trace of the Windows
+flake. That was the suspected cause, **not a confirmed one**: CI run 7154 still showed an abort with no response while the
+network service stayed the same process, so the flake has at least one other cause (handled apart, with a local Windows
+reproduction). Do not call a cause confirmed until a run shows it. The sweep
+found the same mistake in four shapes across the family: a snapshot killed later, a tree built from parent pids (which outlive
+their processes on Windows; an "explorer orphan" then joins a browser's tree and its memory cap), a `killpg(child.id())`
+after `try_wait` had reaped the child, and a pid trusted from a file. The first fix had a gap of its own: macOS's
+`proc_pidinfo` refuses a setuid child (EPERM), so such a child had no identity and ran unsupervised; the start time comes
+from `sysctl(KERN_PROC_PID)` instead, which answers for every process.
+**Rule 53 (ADR 0033):** never act on a reusable OS name (pid, port, temp path) read earlier: hold it (handle, job, listener)
+or verify its identity (`paddock_proc::ProcessId`, pid plus start time) right before acting; trees follow parents by age or
+job membership. Clippy's `disallowed-methods` and check C53 enforce it. **Also:** when a flaky test fails right after
+another test in the same binary ended something, suspect the ending before the failing test; and test an identity source
+with a process of another user, not only your own.

@@ -174,6 +174,9 @@ Pitcrew runs privileged (a Windows service as LocalSystem), downloads executable
 - Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
+- Never act on a reusable OS name read earlier (rule 53): hold it (handle, job, listener) or verify its identity (pid plus
+  start time, `paddock_proc::ProcessId`) immediately before acting; kills go through `paddock_proc` (Clippy
+  `disallowed-methods` and C53 check it, ADR 0033).
 - Research official sources before choosing libraries or relying on a runner's behaviour (release layout, log
   messages, signals), and record what you found and when in the ADR or doc comment.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they are available instead of

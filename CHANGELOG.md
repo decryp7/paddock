@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-proc`: processes by identity (ADR 0033, rule 53)
+- New `ProcessId` (pid plus `StartTime`), `Holder`, `Ending`, `TreeEnding`, `holder`, `usage::Row` and `usage::identity`. `kill_tree` (now returning a `TreeEnding`), `end`, `ask` and `terminate` take a `ProcessId` and act only if its pid still belongs to it: one handle on Windows, a pidfd on Linux, a check then the signal on macOS; skipped and refused kills are logged. `processes_mentioning` and `descendants_of` return `ProcessId`s. `ProcessId::of_recorded(pid, written_ms)` is for a pid read from a file. `Supervised::process()` is new.
+- Walks follow parents by age: `usage::descendants`, `tree_memory_with` and the per-pid `tree_memory_from` (now taking a `ProcessId`) count a process as a child only if it started no earlier than its parent. `Table` rows are `Row { parent, rss, started }`, `ProcEntry` has `started`, `ProcessSource` has `started`.
+- macOS start times come from `sysctl(KERN_PROC_PID)` (`p_starttime`), which also answers for setuid children and zombies.
+- Windows: a supervised child's job members are its tree (`Job::members`, each confirmed with `IsProcessInJob`); `Supervised::kill` and the memory cap end the job first; nothing runs `taskkill /T`; `ask` holds a handle across its close request.
+- `paddock-chromium` ends leftover helpers by identity; `paddock-ipc`'s `ClientConfig::is_alive` takes the `Discovery` and defaults to `discovery::is_running` (a file whose pid was handed on is stale).
+- Clippy `disallowed-methods` in lint/clippy.toml (and every workspace): `libc::kill`, `libc::killpg`, nix `kill`/`killpg`, sysinfo `Process::kill`/`kill_with`. New conformance check C53 for kill programs, Win32 kills and open ADR 0033 follow-ups.
+
 ### `paddock-jobs`: `WalkOptions::with_modified`
 - `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
 

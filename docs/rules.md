@@ -171,6 +171,21 @@ changes here, every app's copy is updated in the same change.
     *Why:* Debrief's import was bound by 2 Tantivy writer threads and a single-threaded catalogue, and regex was 38% of parse
     time; these were found by accident, and should be found by design.
 
+## Process identity (user, 2026-10-30)
+53. **Never act on a reusable OS name read earlier.** A process id, a port or a temp path read earlier may name something
+    else by the time it is used. Hold the thing itself (a process handle, a job object, a bound listener, an open file)
+    or verify its identity immediately before acting (for a process: its pid plus its start time,
+    `paddock_proc::ProcessId`). A tree is followed by age (a child never started before its parent) or by job
+    membership, never by parent pids alone. Kills go through `paddock_proc` (`kill_tree`, `end`, `ask`, `terminate`,
+    `Supervised`). Clippy's `disallowed-methods` (lint/clippy.toml: `libc::kill`, `libc::killpg`, nix's `kill`/`killpg`,
+    sysinfo's `Process::kill`/`kill_with`) and conformance check C53 (`taskkill`, kill commands, `Stop-Process`,
+    `TerminateProcess`, `TerminateJobObject`, open ADR 0033 follow-ups) enforce it. ADR
+    [0033](adr/0033-processes-by-identity-never-by-a-bare-pid.md); ADR [0023](adr/0023-tests-never-free-a-port-they-probe.md)
+    is the same rule for ports.
+    *Why:* Windows hands a freed pid on at once. `kill_tree` killed the pids of a stale snapshot, which can end another
+    test's Chrome helper (a suspected, unconfirmed cause of the Windows `ERR_ABORTED` failures); the same mistake was in
+    four shapes in five apps.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:
