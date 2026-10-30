@@ -18,6 +18,8 @@ const PLATFORMS = {
   win: { platform: 'Win32', ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36' },
 } as const;
 const Q = '?mock-fast&mock-static&mock-updates';
+/** The capture's fixed clock (capture.shot.ts uses the same). */
+const NOW = new Date('2026-10-22T14:30:00').getTime();
 /** The window titles Rust gives the dialogs (as their openers pass them). */
 const TITLES: Record<string, string> = {
   'pw.quit': 'Quit Pitwall',
@@ -56,13 +58,18 @@ test.describe('WP-2.5 screenshots', () => {
     test.describe(scheme, () => {
       test.use({ colorScheme: scheme });
       test('tray popover window', async ({ page }) => {
-        // The popover window as the tray opens it (360x520), with a pairing and model updates waiting.
+        // The popover window as the tray opens it (360 wide, fitted to its content), with a pairing and model updates waiting;
+        // a fixed clock and the static mock, so the light and dark pictures show the same figures and countdowns.
+        await page.clock.install({ time: NOW });
         await page.setViewportSize({ width: 360, height: 520 });
         await page.goto(`/${Q}#/tray`);
         await expect(page.getByRole('heading', { name: 'Pitwall' })).toBeVisible();
         await expect(page.locator('pw-hot-models .more')).toBeVisible();
-        await page.waitForTimeout(800);
-        await shot(page, `tray-${scheme}.png`, 'Tray popover window (360x520)', `tray popover, ${scheme}`);
+        await page.clock.runFor(1500);
+        const height = await page.locator('.tray').evaluate((e) => Math.ceil(e.getBoundingClientRect().height));
+        await page.setViewportSize({ width: 360, height });
+        await page.waitForTimeout(400);
+        await shot(page, `tray-${scheme}.png`, 'Tray popover window (360 wide, fitted)', `tray popover, ${scheme}`);
       });
       for (const name of [...SECTIONS, 'appearance', 'save-refused']) {
         test(`settings window, ${name}`, async ({ page }) => {

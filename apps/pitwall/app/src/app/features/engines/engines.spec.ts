@@ -105,6 +105,17 @@ describe('EnginesPage', () => {
     await settle();
   }
 
+  it('the build the first start installs offers no Install in the catalog; the others do', async () => {
+    const { el, live, settle } = await render(new MockBackend({ installing: true }));
+    await live.load();
+    await settle();
+    const rows = Array.from(el.querySelectorAll('ul.catalog li'));
+    const cuda13 = rows.find((r) => r.textContent!.includes('CUDA 13'))!;
+    expect(cuda13.textContent).toContain('Installing…');
+    expect(cuda13.querySelector('button')).toBeNull();
+    expect(rows.filter((r) => r.querySelector('button')).length).toBe(rows.length - 1);
+  });
+
   it('names models in the process table', () => {
     expect(modelLabel('qwen3.5-9b-q4_k_m')).toBe('qwen3.5-9b');
     expect(modelLabel('qwen3-embedding-0.6b-q8_0')).toBe('qwen3-embedding-0.6b');
@@ -154,6 +165,9 @@ describe('EnginesPage', () => {
     backend.tick();
     await settle();
     expect(el.querySelector('.installing')?.textContent).toContain('llama.cpp CUDA 13');
+    // The build on its way offers no second Install: its row says it is installing.
+    expect(el.querySelector('button[aria-label="Install CUDA 13 (NVIDIA) b11702"]')).toBeNull();
+    expect(el.querySelector('ul.catalog')?.textContent).toContain('Installing…');
     for (let i = 0; i < 6; i++) backend.tick();
     await settle();
     expect(el.textContent).toContain('b11702');

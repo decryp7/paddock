@@ -7,12 +7,12 @@
     <span class="save-state" role="status" aria-live="polite" data-testid="save-state">{{ store.saving() ? 'Saving…' : '' }}</span>
   </header>
 
-  @if (store.saveError(); as e) {
-    <div class="save-error" role="alert" data-testid="save-error">
+  @for (r of store.refusals(); track r.field.id) {
+    <div class="save-error" role="alert" data-testid="save-error" [attr.data-field]="r.field.id">
       <mat-icon svgIcon="pw:error" aria-hidden="true" />
-      <span class="msg"><b>Your last change was not saved.</b> {{ e.message }}</span>
-      <button type="button" matButton (click)="store.revert()">Undo change</button>
-      <button type="button" matButton="outlined" [disabled]="store.saving()" (click)="store.save()">Retry</button>
+      <span class="msg">{{ refusalText(r) }}</span>
+      <button type="button" matButton (click)="store.revert(r.field.id)">{{ undoText(r) }}</button>
+      <button type="button" matButton="outlined" (click)="store.retry(r.field.id)">Retry</button>
     </div>
   }
 
@@ -53,23 +53,23 @@
         <pw-panel id="set-server" heading="Server" icon="server" sub="Local API on 127.0.0.1">
           <div class="row">
             <div class="lbl"><label class="name" for="srv-port">Port</label><p class="hint">Apps find it in the discovery file; changing it restarts the server.</p>@if (fieldError('srv-port'); as e) {<p class="field-error">{{ e }}</p>}</div>
-            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('srv-port')"><input matInput class="num" id="srv-port" [attr.aria-invalid]="!!fieldError('srv-port')" type="number" min="1024" max="65535" [value]="s.server.port" (change)="setPort(value($event))" /></mat-form-field>
+            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('srv-port')"><input matInput class="num" id="srv-port" [attr.aria-invalid]="!!fieldError('srv-port')" type="number" min="1024" max="65535" [value]="s.server.port" (input)="setPort(value($event), 'typed')" (change)="setPort(value($event), 'now')" /></mat-form-field>
           </div>
           <div class="row">
             <div class="lbl"><label class="name" for="srv-max">Largest request</label><p class="hint">Bigger requests are refused (images, long prompts).</p>@if (fieldError('srv-max'); as e) {<p class="field-error">{{ e }}</p>}</div>
-            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('srv-max')"><input matInput class="num" id="srv-max" [attr.aria-invalid]="!!fieldError('srv-max')" type="number" min="1" [value]="mb(s.server.maxRequestBytes)" (change)="setMaxRequest(value($event))" /><span matTextSuffix>MB</span></mat-form-field>
+            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('srv-max')"><input matInput class="num" id="srv-max" [attr.aria-invalid]="!!fieldError('srv-max')" type="number" min="1" [value]="mb(s.server.maxRequestBytes)" (input)="setMaxRequest(value($event), 'typed')" (change)="setMaxRequest(value($event), 'now')" /><span matTextSuffix>MB</span></mat-form-field>
           </div>
           <div class="row">
             <div class="lbl"><label class="name" for="srv-timeout">Request timeout</label><p class="hint">A request running longer is cancelled.</p>@if (fieldError('srv-timeout'); as e) {<p class="field-error">{{ e }}</p>}</div>
-            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('srv-timeout')"><input matInput class="num" id="srv-timeout" [attr.aria-invalid]="!!fieldError('srv-timeout')" type="number" min="5" [value]="s.server.requestTimeoutSecs" (change)="setTimeoutSecs(value($event))" /><span matTextSuffix>s</span></mat-form-field>
+            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('srv-timeout')"><input matInput class="num" id="srv-timeout" [attr.aria-invalid]="!!fieldError('srv-timeout')" type="number" min="5" [value]="s.server.requestTimeoutSecs" (input)="setTimeoutSecs(value($event), 'typed')" (change)="setTimeoutSecs(value($event), 'now')" /><span matTextSuffix>s</span></mat-form-field>
           </div>
           <div class="row">
             <div class="lbl"><label class="name" for="srv-conc">Requests at once</label><p class="hint">More wait in the queue by priority.</p>@if (fieldError('srv-conc'); as e) {<p class="field-error">{{ e }}</p>}</div>
-            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('srv-conc')"><input matInput class="num" id="srv-conc" [attr.aria-invalid]="!!fieldError('srv-conc')" type="number" min="1" max="64" [value]="s.server.maxConcurrent" (change)="setMaxConcurrent(value($event))" /></mat-form-field>
+            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('srv-conc')"><input matInput class="num" id="srv-conc" [attr.aria-invalid]="!!fieldError('srv-conc')" type="number" min="1" max="64" [value]="s.server.maxConcurrent" (input)="setMaxConcurrent(value($event), 'typed')" (change)="setMaxConcurrent(value($event), 'now')" /></mat-form-field>
           </div>
           <div class="row">
             <div class="lbl"><span class="name" id="lbl-keyless">Accept local requests without a key</span><p class="hint">For tools that speak the Ollama API and can't send a key.</p></div>
-            <mat-slide-toggle hideIcon aria-labelledby="lbl-keyless" [checked]="s.server.allowKeylessLocal" (change)="store.edit('server', { allowKeylessLocal: $event.checked })" />
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-keyless" [checked]="s.server.allowKeylessLocal" (change)="toggle('server', 'allowKeylessLocal', $event.checked)" />
           </div>
           @if (s.server.allowKeylessLocal) {
             <div class="note warn" role="note">
@@ -83,48 +83,48 @@
         <pw-panel id="set-memory" heading="Memory" icon="memory" sub="When models are loaded and released">
           <div class="row">
             <div class="lbl"><label class="name" for="mem-preset">Preset</label><p class="hint">{{ presetHint(s.memory.preset) }}</p></div>
-            <pd-select class="select" inputId="mem-preset" ariaLabel="Memory preset" [options]="presetOptions" [value]="s.memory.preset" [disabled]="store.saving()" (valueChange)="setPreset($event)" />
+            <pd-select class="select" inputId="mem-preset" ariaLabel="Memory preset" [options]="presetOptions" [value]="s.memory.preset" (valueChange)="setPreset($event)" />
           </div>
           <div class="row">
             <div class="lbl"><label class="name" for="mem-idle">Release a model after idle</label><p class="hint">Per-model overrides are in Models.</p>@if (fieldError('mem-idle'); as e) {<p class="field-error">{{ e }}</p>}</div>
-            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('mem-idle')"><input matInput class="num" id="mem-idle" [attr.aria-invalid]="!!fieldError('mem-idle')" type="number" min="0.5" step="0.5" [value]="minutes(s.memory.idleUnloadSecs)" (change)="setIdleMinutes('idleUnloadSecs', value($event))" /><span matTextSuffix>min</span></mat-form-field>
+            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('mem-idle')"><input matInput class="num" id="mem-idle" [attr.aria-invalid]="!!fieldError('mem-idle')" type="number" min="0.5" step="0.5" [value]="minutes(s.memory.idleUnloadSecs)" (input)="setIdleMinutes('idleUnloadSecs', value($event), 'typed')" (change)="setIdleMinutes('idleUnloadSecs', value($event), 'now')" /><span matTextSuffix>min</span></mat-form-field>
           </div>
           <div class="row">
             <div class="lbl"><label class="name" for="mem-deep">Stop engines after idle</label><p class="hint">Deep idle: every engine process exits and gives back all memory.</p>@if (fieldError('mem-deep'); as e) {<p class="field-error">{{ e }}</p>}</div>
-            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('mem-deep')"><input matInput class="num" id="mem-deep" [attr.aria-invalid]="!!fieldError('mem-deep')" type="number" min="1" [value]="minutes(s.memory.deepIdleSecs)" (change)="setIdleMinutes('deepIdleSecs', value($event))" /><span matTextSuffix>min</span></mat-form-field>
+            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('mem-deep')"><input matInput class="num" id="mem-deep" [attr.aria-invalid]="!!fieldError('mem-deep')" type="number" min="1" [value]="minutes(s.memory.deepIdleSecs)" (input)="setIdleMinutes('deepIdleSecs', value($event), 'typed')" (change)="setIdleMinutes('deepIdleSecs', value($event), 'now')" /><span matTextSuffix>min</span></mat-form-field>
           </div>
           <div class="row">
             <div class="lbl"><span class="name" id="lbl-ctx">Release the context first</span><p class="hint">Free the KV cache early and keep the weights until the idle limit.</p></div>
-            <mat-slide-toggle hideIcon aria-labelledby="lbl-ctx" [checked]="s.memory.releaseContextFirst" (change)="store.edit('memory', { releaseContextFirst: $event.checked })" />
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-ctx" [checked]="s.memory.releaseContextFirst" (change)="toggle('memory', 'releaseContextFirst', $event.checked)" />
           </div>
           <div class="row">
             <div class="lbl"><label class="name" for="mem-pressure">Memory pressure</label><p class="hint">Release idle models when free RAM drops below this share.</p>@if (fieldError('mem-pressure'); as e) {<p class="field-error">{{ e }}</p>}</div>
-            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('mem-pressure')"><input matInput class="num" id="mem-pressure" [attr.aria-invalid]="!!fieldError('mem-pressure')" type="number" min="1" max="90" [value]="s.memory.pressureAvailablePercent" (change)="setPressure(value($event))" /><span matTextSuffix>%</span></mat-form-field>
+            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('mem-pressure')"><input matInput class="num" id="mem-pressure" [attr.aria-invalid]="!!fieldError('mem-pressure')" type="number" min="1" max="90" [value]="s.memory.pressureAvailablePercent" (input)="setPressure(value($event), 'typed')" (change)="setPressure(value($event), 'now')" /><span matTextSuffix>%</span></mat-form-field>
           </div>
           <div class="row">
             <div class="lbl"><label class="name" for="mem-min">Always keep free</label><p class="hint">A load never leaves less than this for your other apps.</p>@if (fieldError('mem-min'); as e) {<p class="field-error">{{ e }}</p>}</div>
-            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('mem-min')"><input matInput class="num" id="mem-min" [attr.aria-invalid]="!!fieldError('mem-min')" type="number" min="0" step="0.5" [value]="gb(s.memory.minFreeBytes)" (change)="setMinFree(value($event))" /><span matTextSuffix>GB</span></mat-form-field>
+            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('mem-min')"><input matInput class="num" id="mem-min" [attr.aria-invalid]="!!fieldError('mem-min')" type="number" min="0" step="0.5" [value]="gb(s.memory.minFreeBytes)" (input)="setMinFree(value($event), 'typed')" (change)="setMinFree(value($event), 'now')" /><span matTextSuffix>GB</span></mat-form-field>
           </div>
           <div class="row">
             <div class="lbl"><label class="name" for="mem-hot">Hot models at once</label><p class="hint">The least recently used one is released to make room.</p>@if (fieldError('mem-hot'); as e) {<p class="field-error">{{ e }}</p>}</div>
-            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('mem-hot')"><input matInput class="num" id="mem-hot" [attr.aria-invalid]="!!fieldError('mem-hot')" type="number" min="1" max="16" [value]="s.memory.maxHotModels" (change)="setMaxHot(value($event))" /></mat-form-field>
+            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('mem-hot')"><input matInput class="num" id="mem-hot" [attr.aria-invalid]="!!fieldError('mem-hot')" type="number" min="1" max="16" [value]="s.memory.maxHotModels" (input)="setMaxHot(value($event), 'typed')" (change)="setMaxHot(value($event), 'now')" /></mat-form-field>
           </div>
           <div class="row">
             <div class="lbl"><span class="name" id="lbl-cap">Memory for hot models</span><p class="hint">Together, across RAM and VRAM.</p>@if (fieldError('mem-cap'); as e) {<p class="field-error">{{ e }}</p>}</div>
             <div class="cap">
               @if (s.memory.hotCapBytes !== null) {
-                <mat-form-field class="num-field w-xs" [class.invalid]="fieldError('mem-cap')"><input matInput class="num" id="mem-cap" type="number" min="1" max="1024" aria-label="Memory limit for hot models in GB" [attr.aria-invalid]="!!fieldError('mem-cap')" [value]="gb(s.memory.hotCapBytes)" (change)="setHotCap(value($event))" /><span matTextSuffix>GB</span></mat-form-field>
+                <mat-form-field class="num-field w-xs" [class.invalid]="fieldError('mem-cap')"><input matInput class="num" id="mem-cap" type="number" min="1" max="1024" aria-label="Memory limit for hot models in GB" [attr.aria-invalid]="!!fieldError('mem-cap')" [value]="gb(s.memory.hotCapBytes)" (input)="setHotCap(value($event), 'typed')" (change)="setHotCap(value($event), 'now')" /><span matTextSuffix>GB</span></mat-form-field>
               }
               <pd-select class="select-sm" inputId="mem-cap-mode" ariaLabel="Memory for hot models" [options]="capOptions" [value]="s.memory.hotCapBytes === null ? 'fits' : 'limit'" (valueChange)="setCapMode($event)" />
             </div>
           </div>
           <div class="row">
             <div class="lbl"><span class="name" id="lbl-yield">Yield to full-screen apps</span><p class="hint">Release idle models when a game or full-screen app is in front.</p></div>
-            <mat-slide-toggle hideIcon aria-labelledby="lbl-yield" [checked]="s.memory.yieldToForeground" (change)="store.edit('memory', { yieldToForeground: $event.checked })" />
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-yield" [checked]="s.memory.yieldToForeground" (change)="toggle('memory', 'yieldToForeground', $event.checked)" />
           </div>
           <div class="row">
             <div class="lbl"><span class="name" id="lbl-notify">Notify when memory is released</span><p class="hint">A quiet notification says which model and why.</p></div>
-            <mat-slide-toggle hideIcon aria-labelledby="lbl-notify" [checked]="s.memory.notifyOnRelease" (change)="store.edit('memory', { notifyOnRelease: $event.checked })" />
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-notify" [checked]="s.memory.notifyOnRelease" (change)="toggle('memory', 'notifyOnRelease', $event.checked)" />
           </div>
         </pw-panel>
 
@@ -142,13 +142,13 @@
           <h3 class="group">Prompt reuse</h3>
           <div class="row">
             <div class="lbl"><span class="name" id="lbl-affinity">Keep a conversation on one slot</span><p class="hint">Sends a conversation's requests to the same engine slot so its saved prompt is found.</p></div>
-            <mat-slide-toggle hideIcon aria-labelledby="lbl-affinity" [checked]="s.cache.prefixAffinity" (change)="store.edit('cache', { prefixAffinity: $event.checked })" />
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-affinity" [checked]="s.cache.prefixAffinity" (change)="toggle('cache', 'prefixAffinity', $event.checked)" />
           </div>
           <div class="row">
             <div class="lbl"><span class="name" id="lbl-prompt-cache">Prompt cache size</span><p class="hint">Host memory each model may use to keep prompts. Automatic sizes it from this computer's memory.</p>@if (fieldError('cache-prompt-mib'); as e) {<p class="field-error">{{ e }}</p>}</div>
             <div class="cap">
               @if (s.cache.promptCacheMib !== null) {
-                <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('cache-prompt-mib')"><input matInput class="num" id="cache-prompt-mib" type="number" min="0" aria-label="Prompt cache size in MiB" [attr.aria-invalid]="!!fieldError('cache-prompt-mib')" [value]="s.cache.promptCacheMib" (change)="setPromptCacheMib(value($event))" /><span matTextSuffix>MiB</span></mat-form-field>
+                <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('cache-prompt-mib')"><input matInput class="num" id="cache-prompt-mib" type="number" min="0" aria-label="Prompt cache size in MiB" [attr.aria-invalid]="!!fieldError('cache-prompt-mib')" [value]="s.cache.promptCacheMib" (input)="setPromptCacheMib(value($event), 'typed')" (change)="setPromptCacheMib(value($event), 'now')" /><span matTextSuffix>MiB</span></mat-form-field>
               }
               <pd-select class="select-sm" inputId="cache-prompt-mode" ariaLabel="Prompt cache size" [options]="promptCacheOptions" [value]="s.cache.promptCacheMib === null ? 'auto' : 'size'" (valueChange)="setPromptCacheMode($event)" />
             </div>
@@ -160,7 +160,7 @@
             @if (k.id === 'embeddings') {
               <div class="row">
                 <div class="lbl"><span class="name" id="lbl-emb-on">Cache embeddings</span><p class="hint">Off means every embedding request runs the model.</p></div>
-                <mat-slide-toggle hideIcon aria-labelledby="lbl-emb-on" [checked]="s.cache.embeddings" (change)="store.edit('cache', { embeddings: $event.checked })" />
+                <mat-slide-toggle hideIcon aria-labelledby="lbl-emb-on" [checked]="s.cache.embeddings" (change)="toggle('cache', 'embeddings', $event.checked)" />
               </div>
             }
             <div class="row">
@@ -169,7 +169,7 @@
             </div>
             <div class="row">
               <div class="lbl"><label class="name" [for]="'cache-' + k.id + '-max'">Largest size</label><p class="hint">The oldest entries go first when it is full.</p>@if (fieldError('cache-' + k.id + '-max'); as e) {<p class="field-error">{{ e }}</p>}</div>
-              <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('cache-' + k.id + '-max')"><input matInput class="num" [id]="'cache-' + k.id + '-max'" [attr.aria-invalid]="!!fieldError('cache-' + k.id + '-max')" type="number" min="1" [value]="maxMib(k.id)" (change)="setMaxMib(k.id, value($event))" /><span matTextSuffix>MiB</span></mat-form-field>
+              <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('cache-' + k.id + '-max')"><input matInput class="num" [id]="'cache-' + k.id + '-max'" [attr.aria-invalid]="!!fieldError('cache-' + k.id + '-max')" type="number" min="1" [value]="maxMib(k.id)" (input)="setMaxMib(k.id, value($event), 'typed')" (change)="setMaxMib(k.id, value($event), 'now')" /><span matTextSuffix>MiB</span></mat-form-field>
             </div>
             <div class="row">
               <div class="lbl"><span class="name" [id]="'lbl-' + k.id + '-ttl'">Expires after</span><p class="hint">{{ k.ttlHint }}</p></div>
@@ -197,7 +197,7 @@
           <h3 class="group">Kept-warm prompts</h3>
           <div class="row">
             <div class="lbl"><label class="name" for="cache-keep-warm">Keep unused files for</label><p class="hint">A preset's system prompt can be saved when its model unloads and restored on load. Files unused for this long are deleted.</p>@if (fieldError('cache-keep-warm'); as e) {<p class="field-error">{{ e }}</p>}</div>
-            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('cache-keep-warm')"><input matInput class="num" id="cache-keep-warm" [attr.aria-invalid]="!!fieldError('cache-keep-warm')" type="number" min="1" max="3650" [value]="s.cache.keepWarmDays" (change)="setKeepWarmDays(value($event))" /><span matTextSuffix>days</span></mat-form-field>
+            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('cache-keep-warm')"><input matInput class="num" id="cache-keep-warm" [attr.aria-invalid]="!!fieldError('cache-keep-warm')" type="number" min="1" max="3650" [value]="s.cache.keepWarmDays" (input)="setKeepWarmDays(value($event), 'typed')" (change)="setKeepWarmDays(value($event), 'now')" /><span matTextSuffix>days</span></mat-form-field>
           </div>
 
           @if (store.cacheError(); as e) {
@@ -227,11 +227,11 @@
         <pw-panel id="set-network" heading="Network" icon="globe">
           <div class="row">
             <div class="lbl"><span class="name" id="lbl-offline">Offline mode</span><p class="hint">No network requests at all: no model search, downloads or engine updates.</p></div>
-            <mat-slide-toggle hideIcon aria-labelledby="lbl-offline" [checked]="s.network.offline" (change)="store.edit('network', { offline: $event.checked })" />
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-offline" [checked]="s.network.offline" (change)="toggle('network', 'offline', $event.checked)" />
           </div>
           <div class="row">
             <div class="lbl"><span class="name" id="lbl-lan">Serve other devices on your network</span><p class="hint">Off by default. Pitwall only listens on this computer.</p></div>
-            <mat-slide-toggle hideIcon aria-labelledby="lbl-lan" [checked]="s.network.lanEnabled" (change)="store.edit('network', { lanEnabled: $event.checked })" />
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-lan" [checked]="s.network.lanEnabled" (change)="toggle('network', 'lanEnabled', $event.checked)" />
           </div>
           @if (s.network.lanEnabled) {
             <div class="note info" role="note">
@@ -243,7 +243,7 @@
             </div>
             <div class="row">
               <div class="lbl"><label class="name" for="net-port">Network port</label>@if (fieldError('net-port'); as e) {<p class="field-error">{{ e }}</p>}</div>
-              <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('net-port')"><input matInput class="num" id="net-port" [attr.aria-invalid]="!!fieldError('net-port')" type="number" min="1024" max="65535" [value]="s.network.lanPort" (change)="setLanPort(value($event))" /></mat-form-field>
+              <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('net-port')"><input matInput class="num" id="net-port" [attr.aria-invalid]="!!fieldError('net-port')" type="number" min="1024" max="65535" [value]="s.network.lanPort" (input)="setLanPort(value($event), 'typed')" (change)="setLanPort(value($event), 'now')" /></mat-form-field>
             </div>
             @if (lan(); as l) {
               @if (l.enabled && l.url) {
@@ -297,11 +297,11 @@
               <span class="name" id="lbl-content">Keep request content</span>
               <p class="hint">Off by default: the inspector records timings and token counts only. On: prompts and answers are kept on this computer so you can open them in Requests.</p>
             </div>
-            <mat-slide-toggle hideIcon aria-labelledby="lbl-content" [checked]="s.privacy.keepRequestContent" (change)="store.edit('privacy', { keepRequestContent: $event.checked })" />
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-content" [checked]="s.privacy.keepRequestContent" (change)="toggle('privacy', 'keepRequestContent', $event.checked)" />
           </div>
           <div class="row">
             <div class="lbl"><label class="name" for="prv-ret">Keep metrics and history for</label><p class="hint">Older data is deleted.</p>@if (fieldError('prv-ret'); as e) {<p class="field-error">{{ e }}</p>}</div>
-            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('prv-ret')"><input matInput class="num" id="prv-ret" [attr.aria-invalid]="!!fieldError('prv-ret')" type="number" min="1" max="365" [value]="s.privacy.metricsRetentionDays" (change)="setRetention(value($event))" /><span matTextSuffix>days</span></mat-form-field>
+            <mat-form-field class="num-field w-sm" [class.invalid]="fieldError('prv-ret')"><input matInput class="num" id="prv-ret" [attr.aria-invalid]="!!fieldError('prv-ret')" type="number" min="1" max="365" [value]="s.privacy.metricsRetentionDays" (input)="setRetention(value($event), 'typed')" (change)="setRetention(value($event), 'now')" /><span matTextSuffix>days</span></mat-form-field>
           </div>
         </pw-panel>
 

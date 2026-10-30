@@ -86,6 +86,8 @@ test.describe('models', () => {
     await expect(preview).toContainText('Cannot be saved');
     await expect(page.getByRole('button', { name: 'Create preset' })).toBeDisabled();
     await page.getByRole('combobox', { name: 'Serves from' }).fill('auto:chat,small');
+    // Leave the field (Tab): with the taller outlined fields its suggestions lie over the form's buttons while it has focus.
+    await page.getByRole('combobox', { name: 'Serves from' }).press('Tab');
     await page.getByRole('button', { name: 'Create preset' }).click();
     await expect(list.getByRole('row', { name: /dyno-notes/ })).toContainText('Temperature 0.4');
 

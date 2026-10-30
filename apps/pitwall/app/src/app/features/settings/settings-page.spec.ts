@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { LiveStore } from '../../core/live.store';
 import { Toasts } from '../../core/toasts';
@@ -28,6 +29,13 @@ describe('SettingsPage', () => {
     const i = input(el, id);
     i.value = value;
     i.dispatchEvent(new Event('change'));
+    await settle(fixture);
+  }
+  /** Types `value` into the field without committing it (no Enter, no leaving the field). */
+  async function type(fixture: Parameters<typeof settle>[0], el: HTMLElement, id: string, value: string) {
+    const i = input(el, id);
+    i.value = value;
+    i.dispatchEvent(new Event('input'));
     await settle(fixture);
   }
   /** Waits for the page's own save of what was edited (it saves by itself a moment after each edit). */
@@ -157,7 +165,7 @@ describe('SettingsPage', () => {
     expect(toasts.toasts()).toEqual([]);
   });
 
-  it('a refused save says so inline, keeps the edit, and Undo change puts the saved value back', async () => {
+  it('a refused save names the setting and the server’s reason, keeps the edit, and its Undo puts the saved value back', async () => {
     const { fixture, el, backend } = await setup();
     const real = backend.saveSettings.bind(backend);
     const save = vi.spyOn(backend, 'saveSettings').mockRejectedValueOnce({ code: 'serverUnavailable', message: 'The Pitwall server is not responding.' });
@@ -165,8 +173,7 @@ describe('SettingsPage', () => {
     await saved(fixture);
     const error = el.querySelector('[data-testid="save-error"]')!;
     expect(error.getAttribute('role')).toBe('alert');
-    expect(error.textContent).toContain('Your last change was not saved.');
-    expect(error.textContent).toContain('not responding');
+    expect(error.textContent).toContain('Request timeout could not be saved: The Pitwall server is not responding.');
     expect(input(el, 'srv-timeout').value).toBe('120');
     // Retry saves the kept edit once the server answers.
     save.mockImplementation(real);
@@ -178,7 +185,7 @@ describe('SettingsPage', () => {
     save.mockRejectedValueOnce({ code: 'badRequest', message: 'No.' });
     await change(fixture, el, 'srv-timeout', '90');
     await saved(fixture);
-    button(el.querySelector('[data-testid="save-error"]') as HTMLElement, 'Undo change').click();
+    button(el.querySelector('[data-testid="save-error"]') as HTMLElement, 'Undo request timeout change').click();
     await settle(fixture);
     expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
     expect(input(el, 'srv-timeout').value).toBe('120');
@@ -202,10 +209,51 @@ describe('SettingsPage', () => {
     expect((await backend.settings()).server.port).toBe(12000);
   });
 
-  it('loses nothing when the window closes right after an edit', async () => {
-    // A long wait, so only the close can have saved it.
+  it('saves a switch at once, without waiting for the pause', async () => {
     const { fixture, el, backend } = await setup(new MockBackend(), 60_000);
-    await change(fixture, el, 'prv-ret', '14');
+    switchOf(el, 'lbl-offline').click();
+    await settle(fixture);
+    await vi.waitFor(async () => expect((await backend.settings()).network.offline).toBe(true));
+  });
+
+  it('saves a typed number after the pause, with no Enter and no leaving the field', async () => {
+    const { fixture, el, backend } = await setup(new MockBackend(), 30);
+    await type(fixture, el, 'prv-ret', '1');
+    await type(fixture, el, 'prv-ret', '14');
+    expect((await backend.settings()).privacy.metricsRetentionDays).toBe(30);
+    await vi.waitFor(async () => expect((await backend.settings()).privacy.metricsRetentionDays).toBe(14));
+    // A value out of range while typing waits quietly; leaving the field says what to fix.
+    await type(fixture, el, 'prv-ret', '999');
+    expect(el.querySelector('#set-privacy')!.textContent).not.toContain('Enter a number');
+    await change(fixture, el, 'prv-ret', '999');
+    expect(el.querySelector('#set-privacy')!.textContent).toContain('Enter a number from 1 to 365.');
+  });
+
+  it('a typed number is saved at close when that comes before the pause: the close waits for it', async () => {
+    // A long pause, so only the close can have saved it.
+    const { fixture, el, backend } = await setup(new MockBackend(), 60_000);
+    await type(fixture, el, 'prv-ret', '14');
+    const store = fixture.debugElement.injector.get(SettingsStore);
+    const verdict = store.closeVerdict();
+    expect(verdict.kind).toBe('wait');
+    await (verdict as { done: Promise<unknown> }).done;
+    expect((await backend.settings()).privacy.metricsRetentionDays).toBe(14);
+    expect(store.closeVerdict().kind).toBe('close');
+  });
+
+  it('closing with a refused setting says which and why', async () => {
+    const { fixture, el } = await setup();
+    await change(fixture, el, 'srv-conc', '12');
+    const store = fixture.debugElement.injector.get(SettingsStore);
+    vi.spyOn(TestBed.inject(BACKEND), 'saveSettings').mockRejectedValueOnce({ code: 'badRequest', message: 'At most 8 on this computer.' });
+    await type(fixture, el, 'srv-conc', '20');
+    await saved(fixture);
+    expect(store.closeVerdict()).toEqual({ kind: 'warn', message: 'Requests at once was not saved: At most 8 on this computer.' });
+  });
+
+  it('loses nothing when the page goes right after a keystroke', async () => {
+    const { fixture, el, backend } = await setup(new MockBackend(), 60_000);
+    await type(fixture, el, 'prv-ret', '14');
     expect((await backend.settings()).privacy.metricsRetentionDays).toBe(30);
     fixture.destroy();
     await vi.waitFor(async () => expect((await backend.settings()).privacy.metricsRetentionDays).toBe(14));
@@ -213,7 +261,7 @@ describe('SettingsPage', () => {
 
   it('saves an edit still waiting when the window hides', async () => {
     const { fixture, el, backend } = await setup(new MockBackend(), 60_000);
-    await change(fixture, el, 'prv-ret', '21');
+    await type(fixture, el, 'prv-ret', '21');
     window.dispatchEvent(new Event('pagehide'));
     await vi.waitFor(async () => expect((await backend.settings()).privacy.metricsRetentionDays).toBe(21));
   });

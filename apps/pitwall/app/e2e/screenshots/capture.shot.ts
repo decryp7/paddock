@@ -18,6 +18,8 @@ interface Screen {
   query?: string;
   /** A virtual list that must end on a whole row: the viewport shrinks by the partial row at its bottom. */
   snapList?: string;
+  /** A scroller (a detail panel's body) whose whole content the shot shows: the viewport grows by what it hides. */
+  fitScroller?: string;
   /** Capture only this element (full height, whatever the window shows) instead of the page. */
   element?: string;
   /** A dialog window (its id) opened by its URL, as Rust loads it in its own OS window, instead of a page of the main window. */
@@ -168,6 +170,7 @@ const SCREENS: Screen[] = [
     name: 'requests-cache',
     path: '/requests',
     snapList: 'cdk-virtual-scroll-viewport',
+    fitScroller: 'pw-detail-panel .body',
     prepare: async (p) => {
       await p.getByRole('row').filter({ has: p.locator('.cached') }).first().click();
       await expect(p.locator('pw-request-detail')).toContainText('Cache hit');
@@ -263,6 +266,8 @@ for (const theme of ['dark', 'light'] as const) {
           const asked = await page.evaluate(() => ({ h: Number(document.documentElement.dataset['fittedHeight'] ?? '0'), min: document.documentElement.dataset['minContent'] ?? '0x0' }));
           await page.setViewportSize({ width: contract.width, height: Math.max(asked.h, Number(asked.min.split('x')[1] ?? '0')) });
         }
+        // No focus ring in a documentation shot (a choice just made keeps the focus on its control).
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
         // The shot starts at the top of a section, never mid-card.
         if (s.section) await page.locator(s.section).evaluate((e) => e.scrollIntoView({ block: 'start' }));
         await page.waitForTimeout(600);
@@ -289,6 +294,13 @@ for (const theme of ['dark', 'light'] as const) {
         return;
       }
       await fitHeight(page);
+      if (s.fitScroller) {
+        const hidden = await page.locator(s.fitScroller).evaluate((e) => e.scrollHeight - e.clientHeight);
+        // Plus one list row: snapping the list to whole rows below takes back less than a row.
+        const row = s.snapList ? await page.evaluate((sel) => document.querySelector<HTMLElement>(`${sel} [role="row"]`)?.offsetHeight ?? 0, s.snapList) : 0;
+        if (hidden > 0) await page.setViewportSize({ width: WIDTH, height: (page.viewportSize()?.height ?? HEIGHT) + Math.ceil(hidden) + row });
+        await page.waitForTimeout(250);
+      }
       if (s.snapList) {
         const rest = await page.evaluate((sel) => {
           const vp = document.querySelector<HTMLElement>(sel);
@@ -303,7 +315,7 @@ for (const theme of ['dark', 'light'] as const) {
   }
 
   if (!ONLY || ONLY.includes('tray')) {
-    // The tray popover window (`#/tray`, 360x520 logical) as the tray opens it, with both banners (a pairing and model
+    // The tray popover window (`#/tray`, 360 logical px wide, fitted to its content) as the tray opens it, with both banners (a pairing and model
     // updates) and the loaded models summarised under them.
     test(`tray ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width: 360, height: 520 });
@@ -314,10 +326,13 @@ for (const theme of ['dark', 'light'] as const) {
       await expect(tray).toBeVisible();
       await page.clock.runFor(1500);
       await page.waitForTimeout(400);
+      // The window is fitted to the content, as the shell does: the shot is the popover with no empty space.
       const box = await tray.boundingBox();
       expect(box?.width).toBe(360);
-      expect(box?.height).toBe(520);
+      expect(box?.height).toBeLessThanOrEqual(520);
       expect(await tray.evaluate((e) => e.scrollHeight <= e.clientHeight)).toBe(true);
+      await page.setViewportSize({ width: 360, height: Math.ceil(box?.height ?? 520) });
+      await page.waitForTimeout(200);
       await tray.screenshot({ path: `${OUT}/tray-${theme}.png` });
     });
   }

@@ -7,7 +7,7 @@ import { MatInput } from '@angular/material/input';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import type { CacheClearScope, CacheInfo, CacheKindInfo, CacheStorage, OnQuit, Preset } from '../../core/api.types';
+import type { CacheClearScope, CacheInfo, CacheKindInfo, CacheStorage, OnQuit, Preset, Settings } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { Toasts } from '../../core/toasts';
 import { PRESET_HINT, PRESET_LABEL } from '../../shared/labels';
@@ -21,11 +21,48 @@ import { ServiceStore } from '../service/service.store';
 import { checkSummary } from '../updates/update-text';
 import { UpdatesStore } from '../updates/updates.store';
 import { injectNow } from '../../shared/now';
-import { SettingsStore } from './settings.store';
+import { refusalText, SettingsStore, undoText, type SettingField } from './settings.store';
+import { settingsPageCloseGuard } from '@decryp7/paddock-ui/shell/settings/window';
 
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;
 const PRESETS: Exclude<Preset, 'custom'>[] = ['lowMemory', 'balanced', 'performance'];
+
+/** A typed value saves after the pause; `now` is a commit (Enter, leaving the field). */
+type How = 'now' | 'typed';
+
+/** The settings with a field of their own, by the name the page shows (the id is the input's, so its inline error follows it). */
+const FIELD = {
+  onQuit: { id: 'gen-quit', label: 'When you quit Pitwall' },
+  port: { id: 'srv-port', label: 'Port' },
+  maxRequest: { id: 'srv-max', label: 'Largest request' },
+  timeout: { id: 'srv-timeout', label: 'Request timeout' },
+  concurrent: { id: 'srv-conc', label: 'Requests at once' },
+  idle: { id: 'mem-idle', label: 'Release a model after idle' },
+  deepIdle: { id: 'mem-deep', label: 'Stop engines after idle' },
+  pressure: { id: 'mem-pressure', label: 'Memory pressure' },
+  minFree: { id: 'mem-min', label: 'Always keep free' },
+  maxHot: { id: 'mem-hot', label: 'Hot models at once' },
+  // The choice and the number of one value are one setting: the later edit replaces the earlier.
+  hotCap: { id: 'mem-cap', label: 'Memory for hot models' },
+  lanPort: { id: 'net-port', label: 'Network port' },
+  retention: { id: 'prv-ret', label: 'Keep metrics and history for' },
+  promptCache: { id: 'cache-prompt-mib', label: 'Prompt cache size' },
+  keepWarm: { id: 'cache-keep-warm', label: 'Keep unused files for' },
+} as const satisfies Record<string, SettingField>;
+
+/** The switches' names, by their setting. */
+const SWITCH_LABEL: Readonly<Record<string, string>> = {
+  allowKeylessLocal: 'Accept local requests without a key',
+  releaseContextFirst: 'Release the context first',
+  yieldToForeground: 'Yield to full-screen apps',
+  notifyOnRelease: 'Notify when memory is released',
+  prefixAffinity: 'Keep a conversation on one slot',
+  embeddings: 'Cache embeddings',
+  offline: 'Offline mode',
+  lanEnabled: 'Serve other devices on your network',
+  keepRequestContent: 'Keep request content',
+};
 
 /**
  * Set in a window of its own (the Settings window booted by URL): the page shows its confirmations itself, since no pages frame
@@ -98,7 +135,12 @@ export class SettingsPage implements OnInit {
   /** What to fix in a number field (by the input's id) whose value was not taken. */
   protected readonly fieldErrors = signal<Readonly<Record<string, string>>>({});
 
+  protected readonly refusalText = refusalText;
+  protected readonly undoText = undoText;
+
   constructor() {
+    // The Settings window asks before it closes: a typed value still waiting is saved first, a refused one is named.
+    settingsPageCloseGuard(() => this.store.closeVerdict());
     // Settings save themselves: an edit still waiting is saved when the page goes away or its window hides or closes.
     const doc = inject(DOCUMENT);
     const flush = () => void this.store.flush();
@@ -135,21 +177,30 @@ export class SettingsPage implements OnInit {
     return this.fieldErrors()[id] ?? null;
   }
 
-  /** Takes a number field's value when it is valid, or says inline what to fix (and saves nothing for it). */
-  private num(id: string, v: string, min: number, max: number, apply: (n: number) => void): void {
+  /**
+   * Takes a number field's value: while typing (`typed`) a valid value is saved after the pause and an invalid one waits
+   * quietly; on Enter or leaving the field (`now`) a valid value is saved at once and an invalid one says inline what to fix.
+   */
+  private num(field: SettingField, v: string, how: How, min: number, max: number, apply: (n: number) => void): void {
     const r = checkNumber(v, min, max);
+    if (!r.ok && how === 'typed') return;
     this.fieldErrors.update((all) => {
-      const { [id]: _gone, ...rest } = all;
-      return r.ok ? rest : { ...rest, [id]: r.error };
+      const { [field.id]: _gone, ...rest } = all;
+      return r.ok ? rest : { ...rest, [field.id]: r.error };
     });
     if (r.ok) apply(r.value);
+  }
+
+  /** A switch: saved at once. */
+  protected toggle<S extends keyof Settings>(section: S, key: keyof Settings[S] & string, on: boolean): void {
+    this.store.edit({ id: `${section}.${key}`, label: SWITCH_LABEL[key] ?? key }, section, { [key]: on } as Partial<Settings[S]>);
   }
 
   protected setPreset(v: string): void {
     if (v === 'lowMemory' || v === 'balanced' || v === 'performance') void this.store.applyPreset(v);
   }
   protected setOnQuit(v: string): void {
-    if (v === 'keepServing' || v === 'stopServing' || v === 'ask') this.store.edit('general', { onQuit: v });
+    if (v === 'keepServing' || v === 'stopServing' || v === 'ask') this.store.edit(FIELD.onQuit, 'general', { onQuit: v });
   }
 
   protected value(e: Event): string {
@@ -168,44 +219,45 @@ export class SettingsPage implements OnInit {
     return String(Math.round((secs / 60) * 10) / 10);
   }
 
-  protected setPort(v: string): void {
-    this.num('srv-port', v, 1024, 65535, (n) => this.store.edit('server', { port: Math.round(n) }));
+  protected setPort(v: string, how: How): void {
+    this.num(FIELD.port, v, how, 1024, 65535, (n) => this.store.edit(FIELD.port, 'server', { port: Math.round(n) }, how));
   }
-  protected setMaxRequest(v: string): void {
-    this.num('srv-max', v, 1, 4096, (n) => this.store.edit('server', { maxRequestBytes: Math.round(n) * MB }));
+  protected setMaxRequest(v: string, how: How): void {
+    this.num(FIELD.maxRequest, v, how, 1, 4096, (n) => this.store.edit(FIELD.maxRequest, 'server', { maxRequestBytes: Math.round(n) * MB }, how));
   }
-  protected setTimeoutSecs(v: string): void {
-    this.num('srv-timeout', v, 5, 86_400, (n) => this.store.edit('server', { requestTimeoutSecs: Math.round(n) }));
+  protected setTimeoutSecs(v: string, how: How): void {
+    this.num(FIELD.timeout, v, how, 5, 86_400, (n) => this.store.edit(FIELD.timeout, 'server', { requestTimeoutSecs: Math.round(n) }, how));
   }
-  protected setMaxConcurrent(v: string): void {
-    this.num('srv-conc', v, 1, 64, (n) => this.store.edit('server', { maxConcurrent: Math.round(n) }));
+  protected setMaxConcurrent(v: string, how: How): void {
+    this.num(FIELD.concurrent, v, how, 1, 64, (n) => this.store.edit(FIELD.concurrent, 'server', { maxConcurrent: Math.round(n) }, how));
   }
-  protected setIdleMinutes(key: 'idleUnloadSecs' | 'deepIdleSecs', v: string): void {
-    this.num(key === 'idleUnloadSecs' ? 'mem-idle' : 'mem-deep', v, 0.5, 1440, (n) => {
+  protected setIdleMinutes(key: 'idleUnloadSecs' | 'deepIdleSecs', v: string, how: How): void {
+    const field = key === 'idleUnloadSecs' ? FIELD.idle : FIELD.deepIdle;
+    this.num(field, v, how, 0.5, 1440, (n) => {
       const secs = Math.round(n * 60);
-      this.store.edit('memory', key === 'idleUnloadSecs' ? { idleUnloadSecs: secs } : { deepIdleSecs: secs });
+      this.store.edit(field, 'memory', key === 'idleUnloadSecs' ? { idleUnloadSecs: secs } : { deepIdleSecs: secs }, how);
     });
   }
-  protected setPressure(v: string): void {
-    this.num('mem-pressure', v, 1, 90, (n) => this.store.edit('memory', { pressureAvailablePercent: Math.round(n) }));
+  protected setPressure(v: string, how: How): void {
+    this.num(FIELD.pressure, v, how, 1, 90, (n) => this.store.edit(FIELD.pressure, 'memory', { pressureAvailablePercent: Math.round(n) }, how));
   }
-  protected setMinFree(v: string): void {
-    this.num('mem-min', v, 0, 1024, (n) => this.store.edit('memory', { minFreeBytes: Math.round(n * GB) }));
+  protected setMinFree(v: string, how: How): void {
+    this.num(FIELD.minFree, v, how, 0, 1024, (n) => this.store.edit(FIELD.minFree, 'memory', { minFreeBytes: Math.round(n * GB) }, how));
   }
-  protected setMaxHot(v: string): void {
-    this.num('mem-hot', v, 1, 16, (n) => this.store.edit('memory', { maxHotModels: Math.round(n) }));
+  protected setMaxHot(v: string, how: How): void {
+    this.num(FIELD.maxHot, v, how, 1, 16, (n) => this.store.edit(FIELD.maxHot, 'memory', { maxHotModels: Math.round(n) }, how));
   }
-  protected setHotCap(v: string): void {
-    this.num('mem-cap', v, 1, 1024, (n) => this.store.edit('memory', { hotCapBytes: Math.round(n * GB) }));
+  protected setHotCap(v: string, how: How): void {
+    this.num(FIELD.hotCap, v, how, 1, 1024, (n) => this.store.edit(FIELD.hotCap, 'memory', { hotCapBytes: Math.round(n * GB) }, how));
   }
   protected setCapMode(v: string): void {
-    this.store.edit('memory', { hotCapBytes: v === 'fits' ? null : 16 * GB });
+    this.store.edit(FIELD.hotCap, 'memory', { hotCapBytes: v === 'fits' ? null : 16 * GB });
   }
-  protected setLanPort(v: string): void {
-    this.num('net-port', v, 1024, 65535, (n) => this.store.edit('network', { lanPort: Math.round(n) }));
+  protected setLanPort(v: string, how: How): void {
+    this.num(FIELD.lanPort, v, how, 1024, 65535, (n) => this.store.edit(FIELD.lanPort, 'network', { lanPort: Math.round(n) }, how));
   }
-  protected setRetention(v: string): void {
-    this.num('prv-ret', v, 1, 365, (n) => this.store.edit('privacy', { metricsRetentionDays: Math.round(n) }));
+  protected setRetention(v: string, how: How): void {
+    this.num(FIELD.retention, v, how, 1, 365, (n) => this.store.edit(FIELD.retention, 'privacy', { metricsRetentionDays: Math.round(n) }, how));
   }
 
   protected storage(k: 'embeddings' | 'responses'): CacheStorage {
@@ -230,25 +282,30 @@ export class SettingsPage implements OnInit {
   protected ttlChoices(k: 'embeddings' | 'responses') {
     return ttlOptions(this.ttl(k), k === 'embeddings');
   }
+  private cacheField(k: 'embeddings' | 'responses', what: 'storage' | 'max' | 'expiry'): SettingField {
+    const title = this.cacheKinds.find((c) => c.id === k)?.title ?? k;
+    return { id: `cache-${k}-${what}`, label: what === 'max' ? `${title} size` : `${title} ${what}` };
+  }
   protected setStorage(k: 'embeddings' | 'responses', v: string): void {
     if (v !== 'disk' && v !== 'memory') return;
-    this.store.edit('cache', k === 'embeddings' ? { embeddingsStorage: v } : { responsesStorage: v });
+    this.store.edit(this.cacheField(k, 'storage'), 'cache', k === 'embeddings' ? { embeddingsStorage: v } : { responsesStorage: v });
   }
-  protected setMaxMib(k: 'embeddings' | 'responses', v: string): void {
-    this.num(`cache-${k}-max`, v, 1, 1_048_576, (n) => this.store.edit('cache', k === 'embeddings' ? { embeddingsMaxMib: Math.round(n) } : { responsesMaxMib: Math.round(n) }));
+  protected setMaxMib(k: 'embeddings' | 'responses', v: string, how: How): void {
+    const field = { ...this.cacheField(k, 'max'), id: `cache-${k}-max` };
+    this.num(field, v, how, 1, 1_048_576, (n) => this.store.edit(field, 'cache', k === 'embeddings' ? { embeddingsMaxMib: Math.round(n) } : { responsesMaxMib: Math.round(n) }, how));
   }
   protected setTtl(k: 'embeddings' | 'responses', v: string): void {
     const n = Number(v);
-    if (Number.isFinite(n) && n >= 0) this.store.edit('cache', k === 'embeddings' ? { embeddingsTtlSecs: n } : { responsesTtlSecs: n });
+    if (Number.isFinite(n) && n >= 0) this.store.edit(this.cacheField(k, 'expiry'), 'cache', k === 'embeddings' ? { embeddingsTtlSecs: n } : { responsesTtlSecs: n });
   }
   protected setPromptCacheMode(v: string): void {
-    this.store.edit('cache', { promptCacheMib: v === 'auto' ? null : 1024 });
+    this.store.edit(FIELD.promptCache, 'cache', { promptCacheMib: v === 'auto' ? null : 1024 });
   }
-  protected setPromptCacheMib(v: string): void {
-    this.num('cache-prompt-mib', v, 0, 1_048_576, (n) => this.store.edit('cache', { promptCacheMib: Math.round(n) }));
+  protected setPromptCacheMib(v: string, how: How): void {
+    this.num(FIELD.promptCache, v, how, 0, 1_048_576, (n) => this.store.edit(FIELD.promptCache, 'cache', { promptCacheMib: Math.round(n) }, how));
   }
-  protected setKeepWarmDays(v: string): void {
-    this.num('cache-keep-warm', v, 1, 3650, (n) => this.store.edit('cache', { keepWarmDays: Math.round(n) }));
+  protected setKeepWarmDays(v: string, how: How): void {
+    this.num(FIELD.keepWarm, v, how, 1, 3650, (n) => this.store.edit(FIELD.keepWarm, 'cache', { keepWarmDays: Math.round(n) }, how));
   }
   protected cacheSize(k: CacheKindInfo): string {
     return sizeText(k);
