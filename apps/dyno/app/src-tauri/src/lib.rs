@@ -245,7 +245,7 @@ fn agent_setup<R: Runtime>(
     let repair = link.clone();
     // The old route (`tauri-plugin-autostart`) left `~/Library/LaunchAgents/Dyno.plist`; `SMAppService.mainApp` replaces it.
     #[cfg(target_os = "macos")]
-    std::thread::spawn(login::remove_legacy_login_plist);
+    std::thread::spawn(login::migrate_legacy_login_at_start);
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(5));
         match login::platform_service().repair(&|| repair.connected()) {
@@ -258,31 +258,23 @@ fn agent_setup<R: Runtime>(
 }
 
 /// macOS: `SMAppService.mainApp` starts the app at login without `--hidden`; macOS says it was a login start in the
-/// open-application Apple Event instead ([`login::launched_as_login_item`]), which exists only while Tauri's setup runs.
-/// This plugin's setup runs inside it, so it decides there: the shell was told to start in the tray (`launch.hidden`), and
-/// unless the flag or the login event asked for that, the main window is opened right after the setup (tray first).
+/// open-application Apple Event instead ([`login::launched_as_login_item`]), which is readable only while that event is
+/// being handled, i.e. inside `applicationDidFinishLaunching`. Plugin setups run earlier (in `Builder::build`), so the
+/// decision is made in the run loop's `Ready` event, which tao emits from `applicationDidFinishLaunching` right after the
+/// App's setup. The shell was told to start in the tray (`launch.hidden`); unless the flag or the login event asked for
+/// that, the main window is opened here (the tray exists by then). A missed detection shows the window, never hides one.
 #[cfg(target_os = "macos")]
-fn login_start_plugin(asked_hidden: bool) -> tauri::plugin::TauriPlugin<tauri::Wry> {
-    tauri::plugin::Builder::new("dyno-login-start")
-        .setup(move |app, _| {
-            let hidden = login_item::hidden_at_start(asked_hidden, login::launched_as_login_item());
-            logging::info(&format!(
-                "started {}",
-                if hidden { "hidden (flag or login item)" } else { "with a window" }
-            ));
-            if !hidden {
-                let handle = app.clone();
-                app.run_on_main_thread(move || {
-                    if handle.get_webview_window(paddock_commands::labels::MAIN_LABEL).is_none() {
-                        if let Err(e) = paddock_window::tauri::create_main(&handle) {
-                            log::error!(Error = e.message.as_str(); "The main window could not be opened");
-                        }
-                    }
-                })?;
-            }
-            Ok(())
-        })
-        .build()
+fn on_ready(app: &tauri::AppHandle, asked_hidden: bool) {
+    let hidden = login_item::hidden_at_start(asked_hidden, login::launched_as_login_item());
+    logging::info(&format!(
+        "started {}",
+        if hidden { "hidden (flag or login item)" } else { "with a window" }
+    ));
+    if !hidden && app.get_webview_window(paddock_commands::labels::MAIN_LABEL).is_none() {
+        if let Err(e) = paddock_window::tauri::create_main(app) {
+            log::error!(Error = e.message.as_str(); "The main window could not be opened");
+        }
+    }
 }
 
 /// Starts the app.
@@ -304,8 +296,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
-    #[cfg(target_os = "macos")]
-    let builder = builder.plugin(login_start_plugin(asked_hidden));
     // Linux and Windows register the app itself with the autostart plugin; macOS uses `SMAppService.mainApp` (login.rs).
     #[cfg(not(target_os = "macos"))]
     let builder = builder.plugin(tauri_plugin_autostart::init(
@@ -317,9 +307,18 @@ pub fn run() {
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     let builder = builder.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated);
-    if let Err(e) = builder.run(tauri::generate_context!()) {
-        eprintln!("Dyno could not start: {e}");
-        std::process::exit(1);
+    // `Builder::run` is `build` then `run` with no callback; the callback is only for macOS's login-start decision.
+    match builder.build(tauri::generate_context!()) {
+        Ok(app) => app.run(move |_handle, _event| {
+            #[cfg(target_os = "macos")]
+            if matches!(_event, tauri::RunEvent::Ready) {
+                on_ready(_handle, asked_hidden);
+            }
+        }),
+        Err(e) => {
+            eprintln!("Dyno could not start: {e}");
+            std::process::exit(1);
+        }
     }
 }
 

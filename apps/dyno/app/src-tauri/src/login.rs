@@ -72,6 +72,21 @@ pub fn apply_launch_at_login(
     }
 }
 
+/// Removes the old route's `Dyno.plist` from `launch_agents` (only a file of exactly that shape) and, because its
+/// existence means the switch was on, registers the app's new entry through `autostart` so the switch never says on with
+/// nothing registered. An unstable `location` removes the file but registers nothing (the user is told at the next toggle).
+pub fn migrate_legacy_login(
+    launch_agents: &std::path::Path,
+    location: Result<(), String>,
+    autostart: &mut dyn Autostart,
+) -> Result<crate::login_item::LegacyPlist, String> {
+    let result = crate::login_item::remove_legacy_plist(launch_agents).map_err(|e| e.to_string())?;
+    if result == crate::login_item::LegacyPlist::Removed && location.is_ok() {
+        autostart.set(true)?;
+    }
+    Ok(result)
+}
+
 /// Whether the running executable may be registered to start at login.
 pub fn current_location() -> Result<(), String> {
     match std::env::current_exe() {
@@ -133,7 +148,7 @@ impl AgentService for CliService {
 // ---------------------------------------------------------------------------------------------------------- macOS
 
 #[cfg(target_os = "macos")]
-pub use mac::{launched_as_login_item, remove_legacy_login_plist, MainAppLogin, SmService};
+pub use mac::{launched_as_login_item, migrate_legacy_login_at_start, MainAppLogin, SmService};
 
 #[cfg(target_os = "macos")]
 mod mac {
@@ -186,14 +201,16 @@ mod mac {
         }
     }
 
-    /// Removes the file the old route (`tauri-plugin-autostart`) wrote, only when it has exactly that shape.
-    pub fn remove_legacy_login_plist() {
+    /// Moves a start-at-login the old route (`tauri-plugin-autostart`) wrote to `SMAppService.mainApp` ([`super::migrate_legacy_login`]).
+    pub fn migrate_legacy_login_at_start() {
         let Some(home) = std::env::var_os("HOME") else { return };
         let dir = PathBuf::from(home).join("Library/LaunchAgents");
-        match crate::login_item::remove_legacy_plist(&dir) {
-            Ok(crate::login_item::LegacyPlist::Removed) => crate::logging::info("removed the old start-at-login file Dyno.plist"),
+        match super::migrate_legacy_login(&dir, super::current_location(), &mut MainAppLogin) {
+            Ok(crate::login_item::LegacyPlist::Removed) => {
+                crate::logging::info("moved start at login from the old Dyno.plist to a Login Items entry")
+            }
             Ok(_) => {}
-            Err(e) => crate::logging::info(&format!("the old start-at-login file could not be removed: {e}")),
+            Err(e) => crate::logging::info(&format!("the old start-at-login file could not be moved: {e}")),
         }
     }
 
@@ -607,5 +624,44 @@ mod tests {
         assert!(calls.0.lock().unwrap().is_empty(), "nothing was registered");
         assert_eq!(apply_launch_at_login(false, bad(), &mut s, &mut a), Ok(()));
         assert_eq!(calls.0.lock().unwrap().len(), 2, "both were removed");
+    }
+
+    #[test]
+    fn a_removed_legacy_file_registers_the_new_entry_once_and_nothing_else_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n<key>Label</key>\n<string>Dyno</string>\n\
+            <key>AssociatedBundleIdentifiers</key>\n<array></array>\n<key>ProgramArguments</key>\n<array><string>/Applications/Dyno.app/Contents/MacOS/dyno-app</string>\
+            <string>--hidden</string></array>\n<key>RunAtLoad</key>\n<true/>\n</dict>\n</plist>";
+        let calls = Calls::default();
+        let mut a = FakeAutostart {
+            calls: calls.0.clone(),
+            fail: false,
+        };
+        // Nothing there: nothing registered.
+        assert_eq!(
+            migrate_legacy_login(dir.path(), Ok(()), &mut a),
+            Ok(crate::login_item::LegacyPlist::Absent)
+        );
+        // A foreign file is kept and nothing is registered.
+        std::fs::write(dir.path().join("Dyno.plist"), "mine").unwrap();
+        assert_eq!(
+            migrate_legacy_login(dir.path(), Ok(()), &mut a),
+            Ok(crate::login_item::LegacyPlist::Foreign)
+        );
+        assert!(calls.0.lock().unwrap().is_empty());
+        // The old file: removed, new entry registered.
+        std::fs::write(dir.path().join("Dyno.plist"), old).unwrap();
+        assert_eq!(
+            migrate_legacy_login(dir.path(), Ok(()), &mut a),
+            Ok(crate::login_item::LegacyPlist::Removed)
+        );
+        assert_eq!(*calls.0.lock().unwrap(), vec!["autostart true".to_string()]);
+        // From an unstable place the file goes but nothing is registered.
+        std::fs::write(dir.path().join("Dyno.plist"), old).unwrap();
+        assert_eq!(
+            migrate_legacy_login(dir.path(), Err("x".into()), &mut a),
+            Ok(crate::login_item::LegacyPlist::Removed)
+        );
+        assert_eq!(calls.0.lock().unwrap().len(), 1);
     }
 }

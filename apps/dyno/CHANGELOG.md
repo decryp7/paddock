@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- macOS: turning on Launch at login adds one Dyno row to Login Items (the app registers itself with `SMAppService.mainApp`; no second "dyno-app" row, nothing under `~/Library/LaunchAgents`), it is refused with a message when Dyno runs from the disk image or a quarantined download, and a login start still opens in the tray. `dyno-agent service` refuses inside the app on macOS. The "First launch" notes describe the macOS 26 steps.
+- macOS: turning on Launch at login adds Dyno's own two entries to Login Items, the app and its agent (the app registers itself with `SMAppService.mainApp`; no extra "dyno-app, unidentified developer" row, nothing under `~/Library/LaunchAgents`), it is refused with a message when Dyno runs from the disk image or a quarantined download, and a login start still opens in the tray. `dyno-agent service` refuses inside the app on macOS. The "First launch" notes describe the macOS 26 steps.
 
 ### Added
 

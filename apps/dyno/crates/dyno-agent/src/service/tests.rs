@@ -282,4 +282,11 @@ fn inside_a_mac_app_bundle_the_service_commands_are_refused_with_the_way_to_mana
         refuse_inside_app_bundle(Os::Mac, Path::new("/Users/a/.app/dyno-agent")).is_ok(),
         "a folder named just .app"
     );
+    for outside in [
+        "/Users/a/tools.app/bin/dyno-agent",
+        "/Users/a/Dyno.app/Contents/Resources/dyno-agent",
+        "/Contents/MacOS/dyno-agent",
+    ] {
+        assert!(refuse_inside_app_bundle(Os::Mac, Path::new(outside)).is_ok(), "{outside}");
+    }
 }

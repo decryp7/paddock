@@ -93,9 +93,11 @@ pub fn refuse_inside_app_bundle(os: Os, exe: &Path) -> Result<(), String> {
     if os != Os::Mac {
         return Ok(());
     }
-    let in_bundle = exe
-        .components()
-        .any(|c| c.as_os_str().to_str().is_some_and(|n| n.len() > 4 && n.ends_with(".app")));
+    // `<name>.app/Contents/MacOS/<program>`: the program inside a bundle, not any folder that happens to end in `.app`.
+    let parts: Vec<&str> = exe.components().filter_map(|c| c.as_os_str().to_str()).collect();
+    let in_bundle = parts
+        .windows(4)
+        .any(|w| w[0].len() > 4 && w[0].ends_with(".app") && w[1] == "Contents" && w[2] == "MacOS" && !w[3].is_empty());
     if in_bundle {
         return Err(
             "this dyno-agent is part of the Dyno app, which registers it with macOS itself under the same label \

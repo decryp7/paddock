@@ -35,8 +35,8 @@ pub fn refuse_unstable_location(exe: &Path) -> Result<(), String> {
     let path = exe.to_string_lossy();
     if path.contains("/AppTranslocation/") || path.starts_with("/Volumes/") {
         return Err(
-            "Dyno is running from a temporary location (the disk image or a quarantined download). Move Dyno to the \
-             Applications folder, open it from there, and turn on Start at login again."
+            "Dyno is running from a temporary location (a disk image, another disk or a quarantined download). Move Dyno to the \
+             Applications folder on this Mac's startup disk (not another disk or a disk image), open it from there, and turn on Start at login again."
                 .into(),
         );
     }
@@ -87,8 +87,19 @@ pub fn is_legacy_plugin_plist(xml: &str) -> bool {
     }
 }
 
+/// `<folder>/Dyno.app/Contents/MacOS/dyno-app`: the app's executable inside its bundle, nothing looser.
 fn is_app_path(program: &str) -> bool {
-    Path::new(program).is_absolute() && Path::new(program).file_name().is_some_and(|n| n == APP_EXE)
+    use std::path::Component::Normal;
+    let p = Path::new(program);
+    if !p.is_absolute() {
+        return false;
+    }
+    let tail: Vec<_> = p.components().rev().take(4).collect();
+    matches!(
+        tail.as_slice(),
+        [Normal(exe), Normal(macos), Normal(contents), Normal(bundle)]
+            if *exe == APP_EXE && *macos == "MacOS" && *contents == "Contents" && *bundle == "Dyno.app"
+    )
 }
 
 /// What [`remove_legacy_plist`] did.
@@ -149,7 +160,7 @@ mod tests {
             "/Volumes/Dyno/Dyno.app/Contents/MacOS/dyno-app",
         ] {
             let m = refuse_unstable_location(Path::new(bad)).unwrap_err();
-            assert!(m.contains("Applications"), "{m}");
+            assert!(m.contains("Applications") && m.contains("another disk"), "{m}");
         }
         for good in [EXE, "/Users/a/Applications/Dyno.app/Contents/MacOS/dyno-app", "/home/a/dyno"] {
             assert!(refuse_unstable_location(Path::new(good)).is_ok(), "{good}");
@@ -187,6 +198,9 @@ mod tests {
             plugin_plist("Other", &[EXE, "--hidden"], ""),
             plugin_plist("Dyno", &["/usr/bin/evil", "--hidden"], ""),
             plugin_plist("Dyno", &["dyno-app"], ""),
+            plugin_plist("Dyno", &["/usr/local/bin/dyno-app"], ""),
+            plugin_plist("Dyno", &["/Applications/Other.app/Contents/MacOS/dyno-app"], ""),
+            plugin_plist("Dyno", &["/Applications/Dyno.app/Contents/Resources/dyno-app"], ""),
             plugin_plist("Dyno", &[EXE, "--other"], ""),
             plugin_plist("Dyno", &[EXE, "--hidden", "x"], ""),
             plugin_plist("Dyno", &[], ""),
