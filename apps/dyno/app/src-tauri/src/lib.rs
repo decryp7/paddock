@@ -15,6 +15,7 @@ pub mod logging;
 pub mod login;
 pub mod service_repair;
 pub mod shell;
+pub mod supervise;
 pub mod tray;
 pub mod tray_model;
 

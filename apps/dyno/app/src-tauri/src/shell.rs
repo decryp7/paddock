@@ -298,9 +298,5 @@ impl<R: Runtime> Sink for ShellOf<R> {
             Ok(_) => {}
             Err(e) => logging::info(&format!("could not read the settings: {}", e.message)),
         }
-        // Is a service keeping the agent alive? (decides what Quit does; a supervising one takes the agent over). Off this
-        // thread: the OS may be slow, and a hand-over waits for the app's own agent to exit.
-        let link = link.clone();
-        std::thread::spawn(move || link.refresh_service());
     }
 }

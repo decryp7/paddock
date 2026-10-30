@@ -49,6 +49,12 @@ pub fn stall_problem(stall: Stall) -> Cause {
         Stall::AgentNotAnswering => Cause::new("The Dyno agent is still starting.")
             .hint("A slow disk or a busy computer can take a minute. If it stays, choose Retry to end it and start it again.")
             .code("dy.agent.starting"),
+        Stall::ServiceNotAnswering => Cause::new("Dyno is waiting for the system to answer.")
+            .hint("The login service or the agent's files are not answering. Choose Retry to look again.")
+            .code("dy.agent.system-silent"),
+        Stall::AgentKeepsFailing => Cause::new("The Dyno agent keeps failing to start.")
+            .hint("Its log is in the Dyno data folder. Choose Retry to try again now; if it stays, reinstall Dyno.")
+            .code("dy.agent.keeps-failing"),
         Stall::OtherAgentHolds => Cause::new("Another Dyno agent holds the data folder and has not answered.")
             .hint(
                 "It may still be starting. If it stays, choose Retry; if the data folder is shared with another computer, quit Dyno there.",
@@ -97,12 +103,9 @@ impl<R: Runtime> Hub<R> {
             .ok_or_else(|| Cause::new("Dyno is still starting.").hint("Try again in a moment."))?;
         // A wait in progress (starting, the login service, another agent) acts on it; otherwise the link retries by itself.
         link.retry();
-        let end = std::time::Instant::now() + REPAIR_WAIT;
-        while std::time::Instant::now() < end {
-            if link.connected() {
-                return Ok(());
-            }
-            std::thread::sleep(Duration::from_millis(200));
+        // The wait is on the link's published state, not a poll. cap: a repair says "did not answer" after this long.
+        if link.wait_connected(REPAIR_WAIT) {
+            return Ok(());
         }
         Err(Cause::new("The Dyno agent did not answer.")
             .hint("Dyno keeps trying to start it. If it does not come back, reinstall Dyno.")
@@ -164,6 +167,8 @@ mod tests {
             (Stall::WaitingForService, "dy.agent.waiting-service", "login"),
             (Stall::AgentNotAnswering, "dy.agent.starting", "Retry"),
             (Stall::OtherAgentHolds, "dy.agent.other-holds", "data folder"),
+            (Stall::ServiceNotAnswering, "dy.agent.system-silent", "system"),
+            (Stall::AgentKeepsFailing, "dy.agent.keeps-failing", "failing"),
         ] {
             let cause = stall_problem(stall);
             assert_eq!(cause.code.as_deref(), Some(code));
