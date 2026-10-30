@@ -16,7 +16,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 sha2.workspace = true
 toml.workspace = true
-sysinfo.workspace = true
+paddock-proc = { path = "../../../../crates/paddock-proc" }
 tokio.workspace = true
 reqwest.workspace = true
 tungstenite.workspace = true

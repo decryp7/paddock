@@ -432,6 +432,14 @@ Conventional Commits; one semver tag for the whole repo.
   Loading" (CI run 6563). `DialogHarnessOptions.maxTurns` is removed; a loader that never answers is now reported by the
   runner's test timeout.
 
+### paddock-proc: watchers read one pid, never the process table (ADR 0024 rule 4)
+- New public API: `ProcessSource` (the port: `memory`, `children`, `table`), `OsSource` (the OS as a source; make one per walk),
+  `tree_memory_from` / `tree_memory_of` (a tree or a job's member list, read pid by pid), `MAX_TREE` (the most processes a walk
+  visits) and `read_children` (`/proc/<pid>/task/*/children`). `tree_memory` and `process_memory` now read only the pids of the tree
+  (macOS `proc_listchildpids`, Linux `children` files; Windows takes one id snapshot per walk, or none for a supervised child, whose
+  kill-on-close job lists its members). One watcher over a synthetic child: 4.9% of a core before, 0.1% after (1,202 processes).
+- `Supervised` on Windows hands its job to the memory watcher. Spotter's `process` module is now a re-export of `paddock-proc`.
+
 ### Spotter on the shared CI kit (WP-C3)
 - Spotter is a leg of `ci.yml` (`apps/spotter/paddock.ci.json`) and releases through the shared `app-release.yml` from a thin
   `spotter-release.yml`; `spotter.yml` and Spotter's copies of `scripts/release/*`, `macos-verify-bundle.sh`, `commit-lint`,
