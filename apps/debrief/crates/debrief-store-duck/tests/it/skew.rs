@@ -5,7 +5,7 @@
 use crate::common;
 
 use common::{assert_blocks_consistent, pair_of, store_with, TempDir};
-use debrief_core::ports::{Filter, Ingest, PageQuery, Positions, Query, Skew};
+use debrief_core::ports::{Filter, Ingest, PageQuery, Positions, Query, Search, SearchRequest, Skew};
 use debrief_core::skew::{OffsetSpec, SetOffsetRequest, SuggestRequest};
 use debrief_core::{PluginRegistry, Profile};
 use debrief_store_duck::DuckStore;
@@ -55,6 +55,60 @@ fn an_offset_moves_the_id_blocks_with_the_rows() {
         "every block is kept"
     );
     assert_eq!(store.bench_sql("SELECT file FROM segments").unwrap(), files);
+}
+
+/// The full-text index holds each event's time and orders hits by it (ADR 0062, defect 3): after an offset the moved
+/// events are indexed again with their new times, so hits come back once each, in the new time order.
+#[test]
+fn search_hits_follow_an_offset_in_time_order() {
+    let logs = TempDir::new("skew-search-logs");
+    std::fs::write(
+        logs.0.join("a.log"),
+        "2026-10-14 10:00:00 INFO alpha a1\n2026-10-14 10:00:10 INFO alpha a2\n",
+    )
+    .unwrap();
+    std::fs::write(
+        logs.0.join("b.log"),
+        "2026-10-14 10:00:05 INFO alpha b1\n2026-10-14 10:00:15 INFO alpha b2\n",
+    )
+    .unwrap();
+    let dir = TempDir::new("skew-search-store");
+    let (store, _) = store_with(&dir, Profile::default_profile(), std::slice::from_ref(&logs.0)).unwrap();
+    let wait = |store: &DuckStore| assert!(store.wait_for_index(std::time::Duration::from_secs(60)).unwrap().ready);
+    let hits = |store: &DuckStore| {
+        store
+            .search(&SearchRequest {
+                text: "alpha".into(),
+                limit: 0,
+            })
+            .unwrap()
+    };
+    let in_time_order = |store: &DuckStore| {
+        store
+            .page(&PageQuery {
+                limit: 10,
+                ..PageQuery::default()
+            })
+            .unwrap()
+            .rows
+            .iter()
+            .map(|r| r.id)
+            .collect::<Vec<_>>()
+    };
+    wait(&store);
+    let before = hits(&store);
+    assert_eq!((before.total, &before.ids), (4, &in_time_order(&store)));
+    store.set_source_offset(&manual(source_of(&store, "b.log"), 20_000)).unwrap();
+    let order: Vec<String> = times(&store).into_iter().map(|(m, _)| m).collect();
+    assert_eq!(
+        order,
+        ["alpha a1", "alpha a2", "alpha b1", "alpha b2"],
+        "b's events moved after a's"
+    );
+    wait(&store);
+    let after = hits(&store);
+    assert_eq!(after.total, 4, "each event once");
+    assert_eq!(after.ids, in_time_order(&store), "hits in the new time order");
 }
 
 #[test]
