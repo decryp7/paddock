@@ -65,7 +65,6 @@ test.describe('model updates', () => {
     await expect(panel.getByRole('combobox', { name: /^How often/ })).toBeDisabled();
 
     await settingsDialog(page).getByRole('switch', { name: 'Offline mode' }).click();
-    await settingsDialog(page).getByRole('button', { name: 'Save changes' }).click();
     await expect(panel.getByRole('button', { name: 'Check now' })).toBeDisabled();
     await expect(panel).toContainText('Offline mode is on, so no check can run.');
   });
