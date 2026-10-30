@@ -81,7 +81,7 @@ monitor thread, which sampled the worker (a `ps` process on macOS) before lookin
 The read pass used 4 threads in all three. The gain flattens because the apply and SQLite steps are serial and the machine was
 loaded; the Auto default (cores minus one, at most 8) stays, to be re-measured on an idle machine.
 
-**The shortcut.** A second run over the unchanged tree: 0.26 to 0.29 s, with 20,596 of 20,596 files not read (all shortcut hits),
+**The shortcut.** A second run over the unchanged tree of 20,596 files (2.3 GB on disk, build output included): 0.26 to 0.29 s, with 20,596 of 20,596 files not read (all shortcut hits),
 against 9.8 to 20.6 s for the first run, so about 35x to 80x less. That is the cost of the folder watcher waking for an event that
 changed nothing (an event inside `.git`, for instance).
 
@@ -89,3 +89,9 @@ changed nothing (an event inside `.git`, for instance).
 rules 220 to 230 ms (20,780 files; the first round 790 ms, cold cache); the shared walk 83 to 115 ms; the index's walk with the
 ignore rules 120 to 128 ms (11,470 files). So honouring `.gitignore` costs about 205 ms against 225 ms without it, that is nothing
 extra, and keeps 9,310 build-output files from being read and parsed.
+
+**Cancellable "Finding files" (same day).** The shared `paddock_repo_files::walk` cannot be cancelled and reports nothing until it
+ends (7.5 s for 120,000 files on the reviewer's machine), so the engine runs it on its own thread and, meanwhile, a parallel
+counting walk (`par_walk`, 4 workers) feeds the live count; a cancel returns at once and abandons the shared walk. On the 20,780-file
+tree: shared walk alone 80 to 85 ms, shared walk plus counting walk 92 to 98 ms wall, that is 8 to 13 ms for the live count and the
+cancel. Run it with `-p pacenotes-engine ... measure_ignore_walk`.

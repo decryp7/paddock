@@ -48,7 +48,8 @@ The host never puts a deadline on a parse. Three things end a call early, none o
 3. **Cancel**: the worker is killed. A parse call holds no state worth keeping (its result is a set of facts that nothing has
    stored yet), so there is nothing to wind down: the pool ends the process, drops the call and starts a fresh worker for the next
    file. The worker would also stop a call on an IPC cancel (the parser checks the call's token), but the host does not send one and
-   wait: killing is immediate and cannot hang on a worker that is stuck.
+   wait. The call's token wakes the monitor through `on_cancel` (not at its next beat), and the monitor kills the worker; killing
+   cannot hang on a worker that is stuck.
 
 The probe of a worker's state is a port (`ProcessProbe`); the adapter reads `/proc/<pid>/stat` on Linux and asks `ps` through
 `paddock_proc::run_bounded` on macOS. **Windows has no adapter, and falls back on purpose.** `ProcessProbe::sample` returns `None`, which the judge reads as "no
@@ -105,10 +106,34 @@ file, visible folder) and `RepoFilesIgnore` answers it from one `paddock_repo_fi
 the shared walk lists it; a folder when a visible file lies under it, so an ignored folder is not entered by the index's own walk
 at all. Why not walk once with the shared crate and skip the index's own: the index's walk also applies the denylist, counts links
 and denied entries, bounds depth and entries and is cancellable per directory, none of which the shared walk does. The price is a
-second walk of the tree (measured in `docs/performance.md`; it is repaid by the files it keeps out). **The denylist is checked
+second walk of the tree (measured in `docs/performance.md`; it is repaid by the files it keeps out).
+
+**Cancel and progress in this phase.** The shared walk takes no cancel token and reports no count, and on a large tree it runs for
+seconds (7.5 s for 120,000 files). `RepoFilesIgnore::scan_cancellable` therefore runs it on a thread of its own and, on the job
+thread, runs `paddock_jobs::par_walk` (cancellable, parallel) as a counting walk that feeds "Finding files" with the files found so
+far and ends with the total. The wait for the shared walk is woken by the job's cancel token (`on_cancel`), not by ticks. **On cancel
+the shared walk is abandoned**: the job returns Cancelled at once, the walk finishes by itself in the background holding only its
+own data, and its result is dropped. The count ignores `.gitignore` (an upper bound) and costs one extra parallel walk, 8 to 13 ms
+on a 20,000-file tree. **TODO (after the shared-code freeze):** give `paddock_repo_files::walk` a cancel token and a progress
+counter, and make this one walk again; the abandoned thread and the counting walk then go away.
+
+**Reuse of the walk (rule 51), not done.** Skipping the shared walk when no `.gitignore` changed cannot be done safely here: a new
+file still has to be judged against the ignore rules, and the rules are only reachable through the walk (the shared crate has no
+matcher API). Cost per run on a 20,000-file tree is about 85 ms, and the index's own walk is the dearer half. A cached matcher needs
+the same shared change as the TODO above.
+
+**The index file is never inside the repository.** `IndexService::start` and `watch` refuse a `store_path` whose canonical parent
+lies inside the canonical root (`EngineError::StoreInsideWorkspace`, with the message "keep the index outside the repository"):
+the file would be one of the repository's own files, every run would change it and the watcher would never stop. **The denylist is checked
 first and still wins**: a secret that `.gitignore` also lists is counted as withheld, never merely ignored, and an `!allow` line in
 `.gitignore` cannot make a denied file readable. The shared walk stops with an error at its file cap; the run then fails with that
 message instead of indexing a partial set.
+
+**Probing workers: one `ps` for all, not done.** Batching the macOS `ps` into one call per tick for every worker would need one
+sampler thread shared by all monitors and a cache of its answers. The measurement that asked for it was the per-file `ps`, which is
+gone: a monitor takes no sample before its first beat (one second), so a file that parses in under a second, which is nearly every
+file, costs no `ps` at all. What remains is one `ps` per beat per call that runs longer than a beat. Batching is worth doing when a
+measurement shows many slow calls at once.
 
 ## Parallelism and cost (rule 51)
 

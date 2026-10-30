@@ -72,6 +72,17 @@ fn measure_ignore_walk() {
         let ignore = RepoFilesIgnore::scan(&repo, WalkLimits::default()).unwrap();
         let shared = t.elapsed();
         let t = std::time::Instant::now();
+        let both = RepoFilesIgnore::scan_cancellable(
+            &repo,
+            WalkLimits::default(),
+            paddock_jobs::Workers::new(4),
+            &paddock_jobs::CancelToken::new(),
+            &pacenotes_index::NoProgress,
+        )
+        .unwrap();
+        let cancellable = t.elapsed();
+        drop(both);
+        let t = std::time::Instant::now();
         let with = pacenotes_index::snapshot_with(
             &fs,
             &deny,
@@ -82,7 +93,7 @@ fn measure_ignore_walk() {
         )
         .unwrap();
         println!(
-            "round {round}: index walk without ignore rules {own:?} ({} files); shared walk {shared:?}; index walk with them {:?} ({} files, {} ignored)",
+            "round {round}: index walk without ignore rules {own:?} ({} files); shared walk {shared:?}; shared plus counting walk {cancellable:?}; index walk with them {:?} ({} files, {} ignored)",
             snap.files.len(),
             t.elapsed(),
             with.files.len(),
