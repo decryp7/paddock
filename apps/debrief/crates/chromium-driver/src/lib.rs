@@ -50,6 +50,8 @@ pub enum Error {
     Protocol(String),
     #[error("the browser was closed")]
     Closed,
+    #[error("the page shows a dialog (\"{0}\"); answer it in the browser window, or try again")]
+    Dialog(String),
     #[error("{0}")]
     Install(String),
 }

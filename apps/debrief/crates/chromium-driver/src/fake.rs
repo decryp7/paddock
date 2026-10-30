@@ -41,6 +41,10 @@ pub enum UserAction {
     StallLoads,
     /// The page stops answering scripts: `Runtime.evaluate` gets no reply (a hung renderer).
     HangScripts,
+    /// The next script fails as when the page navigates under it ("Execution context was destroyed").
+    FailNextScript,
+    /// The page opens a JavaScript dialog: it is reported once, and scripts get no reply while it is open.
+    OpenDialog,
 }
 
 impl UserAction {
@@ -51,6 +55,8 @@ impl UserAction {
             UserAction::DropConnection => "drop-connection",
             UserAction::StallLoads => "stall-loads",
             UserAction::HangScripts => "hang-scripts",
+            UserAction::FailNextScript => "fail-next-script",
+            UserAction::OpenDialog => "open-dialog",
         }
     }
 }
@@ -196,6 +202,11 @@ static WINDOW_CLOSED: AtomicBool = AtomicBool::new(false);
 static CONNECTION_DROPPED: AtomicBool = AtomicBool::new(false);
 static LOADS_STALLED: AtomicBool = AtomicBool::new(false);
 static SCRIPTS_HUNG: AtomicBool = AtomicBool::new(false);
+static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
+/// Set by each `fail-next-script` line; the next `Runtime.evaluate` takes it.
+static FAIL_NEXT_SCRIPT: AtomicBool = AtomicBool::new(false);
+/// How many `fail-next-script` lines were applied (each line once, though the control file is read again and again).
+static SCRIPT_FAILURES_SEEN: AtomicUsize = AtomicUsize::new(0);
 /// Pages opened over DevTools (`Target.createTarget`), besides the ones the browser started with.
 static CREATED: AtomicUsize = AtomicUsize::new(0);
 
@@ -216,12 +227,24 @@ fn apply_control() {
     let Ok(ctl) = std::env::var(CTL_ENV) else { return };
     let words = std::fs::read_to_string(ctl).unwrap_or_default();
     let start = *CONTROL_START.get_or_init(|| words.len());
+    let mut failures = 0;
     for w in words.get(start..).unwrap_or("").lines() {
         match w.trim() {
+            "fail-next-script" => {
+                failures += 1;
+                // Only the thread that moves the count past this line arms the failure.
+                if SCRIPT_FAILURES_SEEN
+                    .compare_exchange(failures - 1, failures, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
+                    FAIL_NEXT_SCRIPT.store(true, Ordering::SeqCst);
+                }
+            }
             "close-window" => WINDOW_CLOSED.store(true, Ordering::SeqCst),
             "drop-connection" => CONNECTION_DROPPED.store(true, Ordering::SeqCst),
             "stall-loads" => LOADS_STALLED.store(true, Ordering::SeqCst),
             "hang-scripts" => SCRIPTS_HUNG.store(true, Ordering::SeqCst),
+            "open-dialog" => DIALOG_OPEN.store(true, Ordering::SeqCst),
             "quit" => std::process::exit(0),
             _ => {}
         }
@@ -234,12 +257,21 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
     let Ok(mut ws) = tungstenite::accept(stream) else { return };
     let _ = ws.get_ref().set_read_timeout(Some(TICK));
     let mut told_closed = false;
+    let mut told_dialog = false;
     // Applies the user's actions; false when the connection is to end. The browser reports a closed window once, as
     // Chrome does: the page's session detaches and its target is destroyed.
     let mut user_acts = |ws: &mut tungstenite::WebSocket<std::net::TcpStream>| -> bool {
         apply_control();
         if CONNECTION_DROPPED.load(Ordering::SeqCst) {
             return false;
+        }
+        if DIALOG_OPEN.load(Ordering::SeqCst) && !told_dialog {
+            told_dialog = true;
+            let ev = json!({"method": "Page.javascriptDialogOpening", "sessionId": "S1",
+                "params": {"message": "Leave site?", "type": "beforeunload", "url": "about:blank"}});
+            if ws.send(Message::text(ev.to_string())).is_err() {
+                return false;
+            }
         }
         if WINDOW_CLOSED.load(Ordering::SeqCst) && !told_closed {
             told_closed = true;
@@ -273,8 +305,8 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
         };
         let method = req["method"].as_str().unwrap_or("");
         record_call(method);
-        if method == "Runtime.evaluate" && SCRIPTS_HUNG.load(Ordering::SeqCst) {
-            // A hung renderer: the command is never answered.
+        if method == "Runtime.evaluate" && (SCRIPTS_HUNG.load(Ordering::SeqCst) || DIALOG_OPEN.load(Ordering::SeqCst)) {
+            // A hung renderer, or a page held by its dialog: the command is never answered.
             continue;
         }
         let url = || std::fs::read_to_string(url_file).unwrap_or_else(|_| "about:blank".into());
@@ -282,6 +314,9 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
         let mut reply = if closed && on_page {
             // The window is gone: its page answers no more, as Chrome answers for a closed target.
             json!({"id": req["id"], "error": {"code": -32001, "message": "No session or target with given id found"}})
+        } else if method == "Runtime.evaluate" && FAIL_NEXT_SCRIPT.swap(false, Ordering::SeqCst) {
+            // Chrome's answer when the page navigates while the script runs.
+            json!({"id": req["id"], "error": {"code": -32000, "message": "Execution context was destroyed."}})
         } else {
             let result = match method {
                 "Target.createTarget" => {

@@ -11,7 +11,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ### Fixed
 
-- **Research:** A page that stops answering is no longer taken for a page without a "verify you are human" check (research went on reading a hung page); research says the browser did not answer instead. A computer that sleeps or pauses for a moment while the research browser starts or loads a page no longer makes research fail with "the browser did not answer in time", and the research browser no longer closes when Debrief is paused and resumed.
+- **Research:** A page that stops answering is no longer taken for a page without a "verify you are human" check (research went on reading a hung page); research says the browser did not answer instead. When Debrief does not get the processor for a few seconds (a very busy computer, or Debrief paused and resumed) while the research browser starts or loads a page, research no longer fails with "the browser did not answer in time", and the research browser no longer closes. A page that shows a dialog (such as "Leave site?") now says so instead of timing out.
 
 ## 1.1.1 (2026-10-24)
 

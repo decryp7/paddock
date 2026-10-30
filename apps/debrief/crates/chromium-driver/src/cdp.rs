@@ -39,6 +39,8 @@ struct Inner {
     closed: AtomicBool,
     /// Watched session and target ids; true once the browser said it is gone.
     watched: Mutex<HashMap<String, bool>>,
+    /// The JavaScript dialog (alert, confirm, prompt, "leave site?") each session's page shows, by its message.
+    dialogs: Mutex<HashMap<String, String>>,
 }
 
 /// Events that end a page: its session detached, its target destroyed or crashed.
@@ -73,6 +75,7 @@ impl Connection {
             cv: Condvar::new(),
             closed: AtomicBool::new(false),
             watched: Mutex::new(HashMap::new()),
+            dialogs: Mutex::new(HashMap::new()),
         });
         let (out, rx) = channel();
         let i2 = inner.clone();
@@ -101,8 +104,27 @@ impl Connection {
         lock(&self.inner.watched).get(id).copied().unwrap_or(false)
     }
 
+    /// The message of the JavaScript dialog the page of `session` shows, if it shows one (the page answers no script
+    /// meanwhile). Seen only on a session with the `Page` domain enabled.
+    pub fn dialog(&self, session: &str) -> Option<String> {
+        lock(&self.inner.dialogs).get(session).cloned()
+    }
+
     /// Sends a command and waits for its reply (`timeout` counts only time this process ran: [`Budget`]).
     pub fn call(&self, session: Option<&str>, method: &str, params: Value, timeout: Duration) -> Result<Value> {
+        self.call_unless(session, method, params, timeout, || None)
+    }
+
+    /// [`Connection::call`] that gives up early with [`Error::Dialog`] once `blocked` names a reason the reply will
+    /// not come (it is asked between short waits).
+    pub fn call_unless(
+        &self,
+        session: Option<&str>,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+        blocked: impl Fn() -> Option<String>,
+    ) -> Result<Value> {
         if self.is_closed() {
             return Err(Error::Closed);
         }
@@ -119,12 +141,15 @@ impl Connection {
         }
         let mut budget = Budget::new(timeout);
         let r = loop {
-            let Some(wait) = budget.next_wait() else {
-                break Err(RecvTimeoutError::Timeout);
-            };
-            match rx.recv_timeout(wait) {
-                Err(RecvTimeoutError::Timeout) => continue,
-                other => break other,
+            match budget.wait(|d| rx.recv_timeout(d)) {
+                None => break Err(RecvTimeoutError::Timeout),
+                Some(Err(RecvTimeoutError::Timeout)) => {
+                    if let Some(why) = blocked() {
+                        lock(&self.inner.pending).remove(&id);
+                        return Err(Error::Dialog(why));
+                    }
+                }
+                Some(other) => break other,
             }
         };
         match r {
@@ -160,6 +185,7 @@ impl Connection {
             }
             let wait = budget.next_wait()?;
             g = self.inner.cv.wait_timeout(g, wait).unwrap_or_else(|e| e.into_inner()).0;
+            budget.waited();
         }
     }
 }
@@ -219,6 +245,19 @@ fn dispatch(inner: &Inner, text: &str) {
         if GONE_EVENTS.contains(&m) {
             mark_gone(inner, v.get("params").unwrap_or(&Value::Null));
         }
+        if let Some(s) = v.get("sessionId").and_then(Value::as_str) {
+            match m {
+                "Page.javascriptDialogOpening" => {
+                    let message = v.pointer("/params/message").and_then(Value::as_str).unwrap_or("");
+                    let message: String = message.chars().take(200).collect();
+                    lock(&inner.dialogs).insert(s.to_string(), message);
+                }
+                "Page.javascriptDialogClosed" => {
+                    lock(&inner.dialogs).remove(s);
+                }
+                _ => {}
+            }
+        }
         let mut g = lock(&inner.events);
         g.seq += 1;
         let seq = g.seq;
@@ -262,7 +301,24 @@ mod tests {
             cv: Condvar::new(),
             closed: AtomicBool::new(false),
             watched: Mutex::new(HashMap::new()),
+            dialogs: Mutex::new(HashMap::new()),
         }
+    }
+
+    #[test]
+    fn a_dialog_is_seen_per_session_until_it_closes() {
+        let i = inner();
+        dispatch(
+            &i,
+            r#"{"method":"Page.javascriptDialogOpening","sessionId":"S1","params":{"message":"Leave site?","type":"beforeunload"}}"#,
+        );
+        assert_eq!(lock(&i.dialogs).get("S1").map(String::as_str), Some("Leave site?"));
+        assert!(!lock(&i.dialogs).contains_key("S2"));
+        dispatch(
+            &i,
+            r#"{"method":"Page.javascriptDialogClosed","sessionId":"S1","params":{"result":false}}"#,
+        );
+        assert!(lock(&i.dialogs).is_empty());
     }
 
     #[test]

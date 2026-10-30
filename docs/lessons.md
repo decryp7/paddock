@@ -785,10 +785,24 @@ every wall-clock bound in the VM expired at once. The same freeze at another mom
 socket read that has a timeout (`SO_RCVTIMEO`) with EINTR after a stop and continue, or after any handled signal
 (signal(7)), and the DevTools reader (and the fake browser) took EINTR for the end of the connection, so every page said
 "closed". In-process `cargo test` runs of chromium-driver in the amd64 container (Rosetta) lost 4 to 6 fake-browser
-connections per run that way. **Fix:** chromium-driver's waits count only time the process ran (`clock::Budget`: short
-slices; a slice that ends more than 2 s late was a stall and counts as the slice it asked for, so ordinary slowness still
-counts and a silent browser still fails); EINTR is a transient read or write error like WouldBlock. Also fixed on the way:
+connections per run that way. **Fix:** chromium-driver's waits do not count a stall (`clock::Budget`): work between
+waits (a DevTools call, however slow) counts in full; a wait counts as its time unless it ended more than 2 s late, then
+as what it asked for; a wall-clock ceiling of three times the bound ends it whatever the stalls, and each forgiven stall
+is logged. EINTR is a transient read or write error like WouldBlock (`cdp::is_transient`). Also fixed on the way:
 `Page::challenge` turned a script that timed out into "no challenge" and `settle` turned a failed `load_finished` into
-"loaded", so a hung page counted as solved; both are errors now. **Lesson:** a timeout that waits for another process
-must not count time in which neither could run; test a timing bug by freezing the processes (`docker pause`, SIGSTOP),
-never by adding CPU load. Treat EINTR as "try again" in every socket loop with a read timeout.
+"loaded", so a hung page counted as solved; Timeout and Closed are errors now, while a script that fails because the
+page moved on (the user solved the check) only means "look again". A page held by a JavaScript dialog answers no
+script: the driver sees `Page.javascriptDialogOpening` and fails the call at once with the dialog's message.
+
+The review of the first fix found its own wall-clock trap: the budget judged "wait plus the work after it" as one wait,
+so a `Target.getTargets` answering in 2.5 s looked like a stall and counted as 0.1 s, stretching the 5 s start-page wait
+to minutes. The budget is now told where each wait starts and ends (`next_wait_at`, `waited_at`, `poll`), and the
+start-page loop is tested on an injected clock. `Instant` already leaves out a sleeping computer on macOS and Linux; what
+this fixes is a paused or starved process.
+
+**Lesson:** a timeout that waits for another process must not count time in which neither could run, and must count
+everything else, slow work included: measure the wait itself, not the gap between two looks at the clock. Test a timing
+bug by freezing the processes (`docker pause`, SIGSTOP) on an injected clock, never by adding CPU load. Treat EINTR as
+"try again" in every socket loop with a read timeout. **Follow-up:** the same EINTR and wall-clock patterns are in
+Spotter's `spotter-render` and the shared `paddock-chromium`: the three Chromium drivers have diverged and need
+consolidating onto `paddock-chromium` (plan X14), and `Budget` and `is_transient` belong there.

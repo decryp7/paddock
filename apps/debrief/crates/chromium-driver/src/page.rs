@@ -69,7 +69,11 @@ impl Page {
         if self.is_closed() {
             return Err(Error::Closed);
         }
-        self.closed_wins(self.conn.call(Some(&self.session), method, params, CALL))
+        let blocked = || self.conn.dialog(&self.session);
+        if let Some(why) = blocked() {
+            return Err(Error::Dialog(why));
+        }
+        self.closed_wins(self.conn.call_unless(Some(&self.session), method, params, CALL, blocked))
     }
 
     fn closed_wins<T>(&self, r: Result<T>) -> Result<T> {
