@@ -7,7 +7,6 @@ import type {
   Edit,
   KindInfo,
   Layout,
-  LayoutView,
   MenuBarItem,
   MenuBarKind,
   Metric,

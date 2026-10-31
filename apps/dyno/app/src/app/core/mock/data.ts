@@ -180,7 +180,6 @@ export function demoSettings(): Settings {
     launchAtLogin: true,
     sampling: { intervalMs: 1000, processIntervalMs: 2000 },
     retention: { rawHours: 24, minuteDays: 14, quarterHourDays: 90, hourDays: 730 },
-    tray: { metrics: ['cpu', 'memory', 'disk'], style: 'graph' },
     alerts: { enabled: true, lowDiskPercent: 10, overheatCelsius: 95, longHighCpuMinutes: 10 },
     // What the engine's DiskSettings::default() gives (crates/dyno-core/src/disk/settings.rs).
     disk: { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64 },

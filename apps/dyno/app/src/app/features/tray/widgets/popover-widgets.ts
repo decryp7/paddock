@@ -30,7 +30,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
   encapsulation: ViewEncapsulation.None,
   imports: [PdWidget, PdSkeleton, PdStatusGlyph, Sparkline],
   template: `
-    <ng-template pdWidget="activeAlarms" [pdWidgetCalm]="true" let-value>
+    <ng-template pdWidget="activeAlarms" [pdWidgetOf]="witness" [pdWidgetCalm]="true" let-value>
       @let a = alarms(value);
       <ul class="dy-pw-list" aria-label="Active alarms">
         @for (r of a?.rows ?? skAlarms; track r.id) {
@@ -48,7 +48,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       }
     </ng-template>
 
-    <ng-template pdWidget="diskSpace" let-value>
+    <ng-template pdWidget="diskSpace" [pdWidgetOf]="witness" let-value>
       @let d = disks(value);
       <ul class="dy-pw-list" aria-label="Volumes">
         @for (v of d?.rows ?? skVolumes; track v.id) {
@@ -65,7 +65,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       }
     </ng-template>
 
-    <ng-template pdWidget="cpuMemory" let-value>
+    <ng-template pdWidget="cpuMemory" [pdWidgetOf]="witness" let-value>
       @let c = cpuMem(value);
       <div class="dy-pw-two">
         <div class="dy-pw-half" [attr.data-tone]="c?.cpuTone ?? 'ok'">
@@ -76,12 +76,12 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
         <div class="dy-pw-half" [attr.data-tone]="c?.memoryTone ?? 'ok'">
           <span class="dy-pw-muted" pdSkeleton>Memory {{ bytes(c?.memoryUsed ?? 0) }} of {{ bytes(c?.memoryTotal ?? 0) }}</span>
           <span class="dy-pw-big" pdSkeleton>{{ big(c?.memoryPercent ?? 0) }}<small>%</small></span>
-          <dy-sparkline [values]="c ? [c.memoryPercent, c.memoryPercent] : []" [max]="100" color="var(--chart-1)" label="Memory in use" style="--spark-h: 28px" />
+          <span class="dy-pw-meter dy-pw-tall" role="img" [attr.aria-label]="'Memory in use ' + big(c?.memoryPercent ?? 0) + '%'" pdSkeleton><i [style.width.%]="c?.memoryPercent ?? 0"></i></span>
         </div>
       </div>
     </ng-template>
 
-    <ng-template pdWidget="network" let-value>
+    <ng-template pdWidget="network" [pdWidgetOf]="witness" let-value>
       @let n = net(value);
       <button type="button" class="dy-pw-plain" (click)="open('network')">
         <span class="dy-pw-big" pdSkeleton>↓ {{ rate(n?.rxBps ?? 0)[0] }}<small>{{ rate(n?.rxBps ?? 0)[1] }}</small></span>
@@ -90,7 +90,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       </button>
     </ng-template>
 
-    <ng-template pdWidget="backupHealth" let-value>
+    <ng-template pdWidget="backupHealth" [pdWidgetOf]="witness" let-value>
       @let b = backup(value) ?? skBackup;
       <button type="button" class="dy-pw-plain" (click)="open('backups')">
         <span class="dy-pw-flag" [attr.data-state]="b.state" pdSkeleton><pd-status-glyph [status]="b.state === 'healthy' ? 'success' : 'warning'" [size]="14" />{{ b.state === 'healthy' ? 'OK' : b.state === 'stale' ? 'Out of date' : 'No backup yet' }}</span>
@@ -99,7 +99,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       </button>
     </ng-template>
 
-    <ng-template pdWidget="lastIssue" [pdWidgetCalm]="true" let-value>
+    <ng-template pdWidget="lastIssue" [pdWidgetOf]="witness" [pdWidgetCalm]="true" let-value>
       @let i = issue(value) ?? skIssue;
       <button type="button" class="dy-pw-row" (click)="open('issues')">
         <span class="dy-pw-lvl" [attr.data-level]="i.level" pdSkeleton><pd-status-glyph [status]="status(i.level)" [size]="14" />{{ word(i.level) }}</span>
@@ -108,7 +108,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       </button>
     </ng-template>
 
-    <ng-template pdWidget="pinnedCounters" let-value>
+    <ng-template pdWidget="pinnedCounters" [pdWidgetOf]="witness" let-value>
       @let p = counters(value);
       <ul class="dy-pw-list" aria-label="Pinned counters">
         @for (r of p?.rows ?? skCounters; track r.path) {
@@ -117,7 +117,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       </ul>
     </ng-template>
 
-    <ng-template pdWidget="topApps" let-value>
+    <ng-template pdWidget="topApps" [pdWidgetOf]="witness" let-value>
       @let t = apps(value);
       <ul class="dy-pw-list" aria-label="Busiest apps">
         @for (r of t?.rows ?? skApps; track r.name) {
@@ -145,6 +145,8 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
     .dy-pw-meter { display: block; height: 4px; border-radius: 2px; background: var(--pd-surface-3); overflow: hidden; }
     .dy-pw-meter i { display: block; height: 100%; background: var(--pd-meter-neutral); }
     .dy-pw-vol[data-tone='warn'] .dy-pw-meter i { background: var(--pd-warning); } .dy-pw-vol[data-tone='bad'] .dy-pw-meter i { background: var(--pd-danger); }
+    .dy-pw-half > .dy-pw-muted { overflow: hidden; text-overflow: ellipsis; }
+    .dy-pw-tall { height: 28px; align-self: end; }
     .dy-pw-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .dy-pw-half { display: grid; gap: 2px; min-width: 0; }
     .dy-pw-big { font-size: 22px; font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; line-height: 1.2; }
@@ -154,12 +156,14 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
 })
 export class DynoPopoverWidgets {
   /** The templates, for `pd-widget-area [templates]`. */
-  readonly templates = viewChildren(PdWidget);
+  readonly templates = viewChildren<PdWidget<PopoverValue>>(PdWidget);
   /** A widget's button (open a page). */
   readonly action = output<WidgetActionId>();
   /** The clock for relative times; null reads the system clock. */
   readonly now = input<number | null>(null);
 
+  /** The type witness of every template: what the area hands each one (`pdWidgetOf`). */
+  protected readonly witness: PopoverValue | null = null;
   protected readonly skAlarms = SK_ALARMS;
   protected readonly skVolumes = SK_VOLUMES;
   protected readonly skCounters = SK_COUNTERS;
@@ -194,15 +198,15 @@ export class DynoPopoverWidgets {
     this.action.emit({ openPage: page });
   }
 
-  private pick<K extends string>(v: unknown, key: K): Value<K> | null {
-    return v !== null && typeof v === 'object' && key in v ? (v as Record<K, Value<K>>)[key] : null;
+  private pick<K extends string>(v: PopoverValue | null, key: K): Value<K> | null {
+    return v !== null && typeof v === 'object' && key in v ? (v as unknown as Record<K, Value<K>>)[key] : null;
   }
-  protected readonly alarms = (v: unknown) => this.pick(v, 'activeAlarms');
-  protected readonly disks = (v: unknown) => this.pick(v, 'diskSpace');
-  protected readonly cpuMem = (v: unknown) => this.pick(v, 'cpuMemory');
-  protected readonly net = (v: unknown) => this.pick(v, 'network');
-  protected readonly backup = (v: unknown) => this.pick(v, 'backupHealth');
-  protected readonly issue = (v: unknown) => this.pick(v, 'lastIssue');
-  protected readonly counters = (v: unknown) => this.pick(v, 'pinnedCounters');
-  protected readonly apps = (v: unknown) => this.pick(v, 'topApps');
+  protected readonly alarms = (v: PopoverValue | null) => this.pick(v, 'activeAlarms');
+  protected readonly disks = (v: PopoverValue | null) => this.pick(v, 'diskSpace');
+  protected readonly cpuMem = (v: PopoverValue | null) => this.pick(v, 'cpuMemory');
+  protected readonly net = (v: PopoverValue | null) => this.pick(v, 'network');
+  protected readonly backup = (v: PopoverValue | null) => this.pick(v, 'backupHealth');
+  protected readonly issue = (v: PopoverValue | null) => this.pick(v, 'lastIssue');
+  protected readonly counters = (v: PopoverValue | null) => this.pick(v, 'pinnedCounters');
+  protected readonly apps = (v: PopoverValue | null) => this.pick(v, 'topApps');
 }

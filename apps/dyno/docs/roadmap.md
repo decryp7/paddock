@@ -58,7 +58,7 @@ Status words are honest: **built** (code and tests committed), **in progress** (
 | WP-34 | Startup manager filter: hide OS and signed entries | built: engine-side filter with counts, remembered; "signed" needs a publisher, which macOS launch agents do not report yet |
 | WP-35 | Network change events (Wi-Fi joins, VPN up/down, IP changes) on the timeline | built: `dyno_core::netchange`, per-OS Wi-Fi readers, slow polling; macOS may hide the Wi-Fi name; Windows and Linux readers are fixture-tested only |
 | WP-36 | Taming acceptance rules | dropped ([ADR 0021](adr/0021-monitoring-only.md)) |
-| WP-38 | Customizable tray popup widgets | planned for 1.0; the tag waits for it (user, 2026-10-31); design: family ADR 0035 |
+| WP-38 | Customizable tray popup widgets | done (UI, WP-C2): popup, Settings chooser, dashboard and menu-bar editors on the shared components; the tag waits for the real-app smoke and screenshots (WP-D); design: family ADR 0035 |
 
 ## Still open in v1
 

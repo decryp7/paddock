@@ -88,7 +88,7 @@ for (const scheme of ['dark', 'light'] as const) {
         await page.clock.install({ time: FROZEN });
         const win = await openWindow(page, dialogWindowUrl('pd.settings', {}, { title: 'Settings' }), 'Settings', 880, height);
         await win.in.getByText('Dyno', { exact: true }).first().click();
-        await expect(win.in.getByRole('region', { name: 'Menu bar items' })).toBeVisible();
+        await expect(win.in.getByRole('region', { name: 'Menu bar' })).toBeVisible();
         // The sample history (the menu bar preview draws it) fills as it does on a page: a minute of fake time.
         await page.clock.runFor(45_000);
         if (name === 'settings-menu-bar') {
@@ -96,18 +96,12 @@ for (const scheme of ['dark', 'light'] as const) {
             await win.in.getByRole('combobox', { name: label }).click();
             await win.in.getByRole('option', { name: option, exact: true }).click();
           };
-          const section = win.in.getByRole('region', { name: 'Menu bar items' });
-          await section.getByRole('button', { name: 'Add item' }).click();
-          await expect(section.getByRole('listitem')).toHaveCount(3);
-          await section.getByRole('button', { name: 'Add item' }).click();
-          await expect(section.getByRole('listitem')).toHaveCount(4);
-          await choose('Style of item 1', 'Graph and number');
-          await choose('Metric of item 2', 'Memory');
-          await choose('Style of item 2', 'Ring');
-          await choose('Metric of item 3', 'Network down');
-          await choose('Style of item 3', 'Line graph');
-          await choose('Metric of item 4', 'Temperature');
-          await choose('Style of item 4', 'Number');
+          const section = win.in.locator('dy-menu-bar-items');
+          await section.getByRole('button', { name: 'Add Line graph' }).click();
+          await expect(section.locator('ul.pd-wc-list').first().getByRole('listitem')).toHaveCount(3);
+          await section.getByRole('button', { name: 'Add Number' }).click();
+          await expect(section.locator('ul.pd-wc-list').first().getByRole('listitem')).toHaveCount(4);
+          await choose('Metric of number', 'Temperature');
           await section.evaluate((el) => el.scrollIntoView({ block: 'start' }));
         }
         await win.frame.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());

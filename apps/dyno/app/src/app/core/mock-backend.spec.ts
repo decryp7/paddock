@@ -37,7 +37,7 @@ describe('mockOptionsFromUrl', () => {
   });
 
   it('defaults to a macOS laptop with latency', () => {
-    expect(mockOptionsFromUrl('')).toEqual({ machine: 'laptop', os: 'macos', latencyMs: 150, fail: new Set() });
+    expect(mockOptionsFromUrl('')).toEqual({ machine: 'laptop', os: 'macos', latencyMs: 150, fail: new Set(), widgetStorage: true, widgets: { popup: {}, agentStopped: false } });
   });
   it.each(['windows', 'macos', 'linux'] as const)('?mock=%s picks the OS', (os) => {
     expect(mockOptionsFromUrl(`?mock=${os}`).os).toBe(os);

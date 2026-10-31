@@ -2,6 +2,7 @@
  * The UI ↔ app wire contract (camelCase JSON). Mirrors the Rust types in `crates/dyno-core` (serde, externally
  * tagged enums: a unit variant is a string, a data variant is `{ variant: data }`). Change both sides together.
  */
+import type { Metric } from './generated/widgets';
 
 /** Milliseconds since the Unix epoch. */
 export type Timestamp = number;
@@ -942,7 +943,7 @@ export interface Alarm {
   repeatCount: number;
   currentValue: number | null;
   /** The metric to chart (null when none). */
-  metric: WidgetMetric | null;
+  metric: Metric | null;
   notes: AlarmNote[];
   acknowledgedAt: Timestamp | null;
   clearedAt: Timestamp | null;

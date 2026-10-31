@@ -12,7 +12,8 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
 import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
 import { ANOMALY_ICON, ANOMALY_LABEL } from '../../shared/labels';
-import type { Widget, WidgetKind } from '../../core/api.types';
+import type { DashboardKind, DashboardWidget, Placement } from '../../core/generated/widgets';
+import { WidgetLayouts } from '../../state/widget-layouts';
 import { AnimatedNumber } from './animated-number';
 import { HealthHero } from '../dashboard/health-hero';
 import { CpuTile } from '../dashboard/tiles';
@@ -20,10 +21,13 @@ import { DiagnosisCard } from '../dashboard/diagnosis-card';
 import { EventsFeed } from '../dashboard/events-feed';
 import { ConsumersPanel, DiskTrendPanel, HistoryPanel } from '../dashboard/history-panels';
 import { CountersStore } from '../../state/counters.store';
-import { PANEL_KINDS, KIND_LABEL, metricLabel, readCounter, sentenceCase, readMetric, seriesFor, thresholdTone } from './widget-model';
+import { metricLabel, readCounter, sentenceCase, readMetric, seriesFor } from './metric-reading';
+
+/** Kinds that draw a panel of their own and ignore the metric. */
+const PANEL_KINDS: readonly DashboardKind[] = ['health', 'issues', 'cpu', 'diagnosis', 'events', 'history', 'consumers', 'diskTrend'];
 import { MatTooltip } from '@angular/material/tooltip';
 
-const ICON: Record<WidgetKind, IconName> = {
+const ICON: Record<DashboardKind, IconName> = {
   graph: 'trend',
   bigNumber: 'gauge',
   bars: 'reports',
@@ -62,13 +66,13 @@ const ICON: Record<WidgetKind, IconName> = {
     }
     @switch (widget().kind) {
       @case ('bigNumber') {
-        <div class="hero" [attr.data-tone]="tone()"><b><dy-animated-number [value]="reading().text[0]" /></b><small>{{ reading().text[1] }}</small></div>
+        <div class="hero"><b><dy-animated-number [value]="reading().text[0]" /></b><small>{{ reading().text[1] }}</small></div>
         @if (reading().reason; as why) {
           <p class="note">{{ why }}</p>
         }
       }
       @case ('graph') {
-        <div class="hero" [attr.data-tone]="tone()"><b><dy-animated-number [value]="reading().text[0]" /></b><small>{{ reading().text[1] }}</small></div>
+        <div class="hero"><b><dy-animated-number [value]="reading().text[0]" /></b><small>{{ reading().text[1] }}</small></div>
         @if (series(); as s) {
           <dy-sparkline [values]="s.values" [values2]="s.values2" [max]="percent() ? 100 : null" [zoom]="zoomed() && percent()" [fill]="widget().options.fill" [color]="accent()" color2="var(--text-3)" [label]="title() + ' over the last minute'" style="--spark-h: 48px" />
         } @else {
@@ -76,17 +80,17 @@ const ICON: Record<WidgetKind, IconName> = {
         }
       }
       @case ('bars') {
-        <div class="hero" [attr.data-tone]="tone()"><b><dy-animated-number [value]="reading().text[0]" /></b><small>{{ reading().text[1] }}</small></div>
-        <div class="bar-track" [attr.data-tone]="barTone()" role="img" [attr.aria-label]="title() + ' ' + reading().text.join(' ')"><span [style.width.%]="reading().percent ?? 0"></span></div>
+        <div class="hero"><b><dy-animated-number [value]="reading().text[0]" /></b><small>{{ reading().text[1] }}</small></div>
+        <div class="bar-track" role="img" [attr.aria-label]="title() + ' ' + reading().text.join(' ')"><span [style.width.%]="reading().percent ?? 0"></span></div>
       }
       @case ('ring') {
         @if (widget().metric === 'battery') {
-          <div class="hero" [attr.data-tone]="tone()"><b><dy-animated-number [value]="reading().text[0]" /></b><small>{{ reading().text[1] }}</small></div>
-          <div class="bar-track" [attr.data-tone]="barTone()" role="img" [attr.aria-label]="title() + ' ' + reading().text.join(' ')"><span [style.width.%]="reading().percent ?? 0"></span></div>
+          <div class="hero"><b><dy-animated-number [value]="reading().text[0]" /></b><small>{{ reading().text[1] }}</small></div>
+          <div class="bar-track" role="img" [attr.aria-label]="title() + ' ' + reading().text.join(' ')"><span [style.width.%]="reading().percent ?? 0"></span></div>
           <p class="note">{{ reading().reason ?? 'Charge level' }}</p>
         } @else {
         <div class="ringrow">
-          <dy-ring [value]="reading().percent ?? 0" [tone]="ringTone()" [label]="title() + ' ' + reading().text.join('')" style="--ring-size: 84px">
+          <dy-ring [value]="reading().percent ?? 0" tone="accent" [label]="title() + ' ' + reading().text.join('')" style="--ring-size: 84px">
             <span class="rn"><dy-animated-number [value]="reading().text[0]" /></span>
           </dy-ring>
           <p class="note">{{ reading().reason ?? title() }}</p>
@@ -130,7 +134,7 @@ const ICON: Record<WidgetKind, IconName> = {
       @case ('consumers') { <dy-consumers-panel /> }
       @case ('diskTrend') { <dy-disk-trend-panel /> }
       @case ('health') {
-        @if (widget().size !== 's') {
+        @if (placement().span > 3) {
           <dy-health-hero />
         } @else {
         @if (health.report(); as r) {
@@ -154,8 +158,6 @@ const ICON: Record<WidgetKind, IconName> = {
     header dy-icon { --icon-size: 16px; color: var(--text-3); }
     h3 { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-2); flex: 1; }
     .faint { color: var(--text-3); font-size: var(--fs-xs); }
-    .hero[data-tone='warn'] b { color: var(--warn); }
-    .hero[data-tone='bad'] b { color: var(--bad); }
     .note { color: var(--text-3); font-size: var(--fs-xs); display: flex; align-items: center; gap: 6px; }
     .note.ok { color: var(--ok); }
     .bar-track { height: 6px; }
@@ -177,15 +179,18 @@ const ICON: Record<WidgetKind, IconName> = {
   `,
 })
 export class WidgetView {
-  readonly widget = input.required<Widget>();
+  /** The dashboard placement to draw (its span is the width on the 12-column board). */
+  readonly placement = input.required<Placement<DashboardWidget>>();
+  protected readonly widget = computed(() => this.placement().widget);
+  private readonly layouts = inject(WidgetLayouts);
   protected readonly live = inject(LiveStore);
   protected readonly health = inject(HealthStore);
   private readonly diagnosis = inject(DiagnosisStore);
   private readonly counters = inject(CountersStore);
 
-  protected readonly title = computed(() => (this.widget().kind === 'topProcesses' ? `Top apps by ${sentenceCase(metricLabel(this.widget().metric))}` : PANEL_KINDS.includes(this.widget().kind) ? KIND_LABEL[this.widget().kind] : metricLabel(this.widget().metric)));
+  protected readonly title = computed(() => (this.widget().kind === 'topProcesses' ? `Top apps by ${sentenceCase(metricLabel(this.widget().metric))}` : PANEL_KINDS.includes(this.widget().kind) ? this.kindTitle() : metricLabel(this.widget().metric)));
   /** The panel kinds are cards of their own (they bring header, loading and error states). */
-  protected readonly ownCard = computed(() => ['cpu', 'diagnosis', 'events', 'history', 'consumers', 'diskTrend'].includes(this.widget().kind) || (this.widget().kind === 'health' && this.widget().size !== 's'));
+  protected readonly ownCard = computed(() => ['cpu', 'diagnosis', 'events', 'history', 'consumers', 'diskTrend'].includes(this.widget().kind) || (this.widget().kind === 'health' && this.placement().span > 3));
   protected readonly icon = computed(() => ICON[this.widget().kind]);
   /** The performance counter this widget shows, when it shows one. */
   private readonly counterPath = computed(() => {
@@ -197,9 +202,8 @@ export class WidgetView {
     return path === null ? readMetric(this.widget().metric, this.live.system()) : readCounter(this.counters.readings()[path]);
   });
   protected readonly percent = computed(() => this.reading().percent !== null);
-  protected readonly tone = computed(() => thresholdTone(this.reading().value, this.widget().thresholds));
-  protected readonly barTone = computed(() => (this.tone() === 'ok' ? null : this.tone()));
-  protected readonly ringTone = computed<'ok' | 'warn' | 'bad' | 'accent'>(() => (this.tone() === 'ok' ? 'accent' : this.tone()));
+  /** The kind's title from the engine's catalogue. */
+  private readonly kindTitle = computed(() => this.layouts.dashboard()?.catalogue.kinds.find((k) => k.kind === this.widget().kind)?.title ?? this.widget().kind);
   protected readonly accent = computed(() => this.widget().options.accent ?? 'var(--accent)');
   protected readonly series = computed(() => {
     const path = this.counterPath();

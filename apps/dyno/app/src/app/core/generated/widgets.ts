@@ -492,11 +492,11 @@ export type CounterUnit = "percent" | "bytes" | "bytesPerSec" | "perSec" | "coun
 
 export type Page = "overview" | "alarms" | "disk" | "network" | "issues" | "backups" | "counters" | "processes";
 
-export type SettingsSection = "popupWidgets";
+export type SettingsSection = "popupWidgets" | "general";
 
 export type Navigate = { "page": Page } | { "settings": SettingsSection };
 
-export type WidgetActionId = { "openPage": Page } | { "retry": PlacementId } | "chooseVolume" | "pinCounters" | "setUpBackupChecks" | "startBackupCheck" | "restartAgent" | "customizeWidgets";
+export type WidgetActionId = { "openPage": Page } | { "retry": PlacementId } | "chooseVolume" | "pinCounters" | "setUpBackupChecks" | "startBackupCheck" | "restartAgent" | "customizeWidgets" | "openSettings";
 
 export type Level = "info" | "warning" | "critical";
 

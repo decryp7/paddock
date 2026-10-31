@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, TrayItem, UnusualSettings } from '../../core/api.types';
+import type { BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -9,7 +9,8 @@ import { Notifier } from '../../shared/notifier';
 import { MatSlideToggle } from '@angular/material/slide-toggle';
 import { SettingsStore } from '../../state/settings.store';
 import { LOOKUP_PRESETS, presetIdFor, templateProblem } from './ip-lookup-presets';
-import { TrayItemsEditor } from './tray-items-editor';
+import { MenuBarItems } from './menu-bar-items';
+import { PopupWidgets } from './popup-widgets';
 import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
 import { MatButton } from '@angular/material/button';
 import { MatError, MatFormField, MatSuffix } from '@angular/material/form-field';
@@ -20,7 +21,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 /** Dyno's page of the Settings window (Appearance, Updates and About are the shell's): start-up, sampling and retention, the tray, alert thresholds, the observe-only posture and plugins. */
 @Component({
   selector: 'dy-settings-page',
-  imports: [PdSelect, MatError, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, TrayItemsEditor],
+  imports: [PdSelect, MatError, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, MenuBarItems, PopupWidgets],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page narrow">
@@ -76,10 +77,14 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               </div>
             </section>
 
-            <section class="card" aria-label="Menu bar items">
-              <h2>Menu bar items</h2>
-              <p class="sub">What the tray / menu-bar icon draws live. Add up to four, drag to reorder; the preview follows your choices.</p>
-              <dy-tray-items-editor [items]="d.trayItems?.items ?? []" (itemsChange)="setTrayItems($event)" />
+            <section class="card" aria-label="Menu bar">
+              <h2>Menu bar</h2>
+              <h3 id="menu-bar-items">Menu bar items</h3>
+              <p class="sub">What the tray / menu-bar icon draws live. Add up to four, drag to reorder. Changes apply at once; Undo is in the message that follows.</p>
+              <dy-menu-bar-items />
+              <h3 id="popup-widgets">Popup widgets</h3>
+              <p class="sub">What the popup shows when you click the icon, and in what order. The preview follows your choices.</p>
+              <dy-popup-widgets />
             </section>
 
             <section class="card" aria-label="IP lookup">
@@ -417,9 +422,6 @@ export class SettingsPage implements OnInit {
   }
   protected setHardwareAlarms(p: Partial<HardwareAlarms>): void {
     this.draft.update((d) => (d ? { ...d, hardwareAlarms: { ...this.hardwareAlarms(), ...p } } : d));
-  }
-  protected setTrayItems(items: TrayItem[]): void {
-    this.draft.update((d) => (d ? { ...d, trayItems: { version: d.trayItems?.version ?? 1, items } } : d));
   }
   protected async save(): Promise<void> {
     const d = this.draft();

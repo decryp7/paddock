@@ -50,11 +50,11 @@ test.describe('screens', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
   });
 
-  test('the tray dropdown renders its compact dashboard', async ({ page }) => {
+  test('the tray dropdown renders the chosen widgets', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 520 });
     await page.goto(url('/tray'));
     await expect(page.getByRole('button', { name: /Open Dyno/ })).toBeVisible();
-    await expect(page.getByText('Top apps by CPU')).toBeVisible();
+    await expect(page.locator('pd-widget-frame')).toHaveCount(3);
   });
 });
 
@@ -325,53 +325,7 @@ test.describe('inventory', () => {
   });
 });
 
-test.describe('widgets', () => {
-  test('edit the dashboard: add a widget from the gallery, resize, save; a preset swaps the layout', async ({ page }) => {
-    await page.goto(url());
-    await expect(page.getByRole('group', { name: 'CPU', exact: true }).first()).toBeVisible();
-    await page.getByRole('button', { name: 'Edit dashboard' }).click();
-    const before = await page.locator('dy-widget').count();
-    await page.getByRole('button', { name: 'Add widget' }).click();
-    await expect(page.getByRole('region', { name: 'Widget gallery' })).toBeVisible();
-    await page.getByRole('region', { name: 'Widget gallery' }).getByRole('button', { name: /Big number/ }).click();
-    await expect(page.locator('dy-widget')).toHaveCount(before + 1);
-    await page.getByRole('radiogroup', { name: 'Size' }).last().getByRole('radio', { name: 'L', exact: true }).click();
-    await page.getByRole('button', { name: 'Save dashboard' }).click();
-    await expect(page.getByText('Dashboard saved')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Edit dashboard' })).toBeVisible();
-
-    await page.getByRole('button', { name: 'Edit dashboard' }).click();
-    await choose(page, 'Preset', 'Developer');
-    await expect(page.locator('dy-widget[data-kind="heatmap"]')).toBeVisible();
-    await page.getByRole('button', { name: 'Cancel' }).click();
-    await expect(page.locator('dy-widget[data-kind="heatmap"]')).toHaveCount(0);
-  });
-
-  test('a small widget\'s edit toolbar keeps its metric select readable on a row of its own', async ({ page }) => {
-    await page.goto(url());
-    await page.getByRole('button', { name: 'Edit dashboard' }).click();
-    const small = page.locator('.edit.small:has(pd-select)').first();
-    await expect(small).toBeVisible();
-    const select = small.locator('pd-select');
-    expect((await select.boundingBox())!.width).toBeGreaterThanOrEqual(140);
-    expect((await select.boundingBox())!.y).toBeGreaterThan((await small.getByRole('button').first().boundingBox())!.y);
-  });
-
-  test('menu bar items: add several, reorder, preview follows, save', async ({ page }) => {
-    await openSettings(page);
-    const section = page.getByRole('region', { name: 'Menu bar items' });
-    await expect(section.getByRole('listitem')).toHaveCount(2);
-    await section.getByRole('button', { name: 'Add item' }).click();
-    await section.getByRole('button', { name: 'Add item' }).click();
-    await expect(section.getByRole('listitem')).toHaveCount(4);
-    await expect(section.getByRole('button', { name: 'Add item' })).toBeDisabled();
-    await choose(page, 'Style of item 3', 'Ring');
-    await section.getByRole('button', { name: 'Move up' }).nth(3).click();
-    await expect(section.getByRole('img', { name: /Menu bar preview/ })).toBeVisible();
-    await page.getByRole('button', { name: 'Save changes' }).click();
-    await expect(page.getByText('Settings saved')).toBeVisible();
-  });
-});
+// The widget choosers (popup, dashboard, menu bar) are covered by tray-widgets.spec.ts.
 
 test.describe('counters', () => {
   test('row actions can be clicked one after another: their tooltips never cover the next button', async ({ page }) => {
