@@ -1,6 +1,7 @@
 //! What goes out and what comes back.
 
 use crate::error::NetError;
+use crate::reach::LanAccess;
 use paddock_download::{Header, parse_retry_after};
 use std::fmt;
 use std::time::{Duration, SystemTime};
@@ -52,10 +53,8 @@ pub struct Request {
     pub headers: Vec<Header>,
     /// The body of a POST.
     pub body: Vec<u8>,
-    /// Refuse a destination on a private network even when the policy's reach allows it (see [`Request::without_lan`]).
-    pub deny_lan: bool,
-    /// Allow plain `http://` to a private network (see [`Request::plain_http_on_lan`]).
-    pub plain_http_lan: bool,
+    /// How private-network addresses are treated (see [`Request::without_lan`], [`Request::plain_http_on_lan`]).
+    pub lan: LanAccess,
 }
 
 impl fmt::Debug for Request {
@@ -79,24 +78,22 @@ impl Request {
             url: url.to_string(),
             headers: Vec::new(),
             body: Vec::new(),
-            deny_lan: false,
-            plain_http_lan: false,
+            lan: LanAccess::Policy,
         }
     }
 
     /// Refuses a destination on a private network even when the policy's reach is [`Reach::Lan`](crate::Reach::Lan) or farther,
     /// so one egress with a wide reach can still serve requests that must stay public. This computer is not affected.
     pub fn without_lan(mut self) -> Request {
-        self.deny_lan = true;
-        self.plain_http_lan = false;
+        self.lan = LanAccess::Deny;
         self
     }
 
     /// Allows plain `http://` to a host that is spelled like a private-network host ([`host_may_be_lan`](crate::host_may_be_lan)) and
-    /// whose addresses are all private. Needs a policy reach of [`Reach::Lan`](crate::Reach::Lan) or farther.
+    /// **whose addresses are all private**, checked before the hop and again on the addresses the socket connects to. Needs a
+    /// policy reach of [`Reach::Lan`](crate::Reach::Lan) or farther.
     pub fn plain_http_on_lan(mut self) -> Request {
-        self.plain_http_lan = true;
-        self.deny_lan = false;
+        self.lan = LanAccess::PlainHttp;
         self
     }
 
