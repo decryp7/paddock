@@ -283,6 +283,74 @@ jobs:
       - name: Affected rules and repo contracts
         run: node --test scripts/affected.test.mjs
 
+  # `wiki` (tools/wiki, the LLM-wiki lint, log and page tool): its own Cargo workspace; Linux only (it reads text and runs git).
+  # Its tests include a lint of this repository's docs/wiki, so the pilot wiki is checked whenever the tool changes.
+  wiki:
+    name: wiki tool
+    needs: [plan]
+    if: ${{ needs.plan.outputs.tools == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    defaults:
+      run:
+        working-directory: tools/wiki
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      # The whole history: the lint reads the rules on origin/main and on the open rule branches (origin/docs/*).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The engineering rules, one more rules source for the copied-text check. Optional: when the runner's token cannot read
+      # that repository the step fails softly and the lint skips the missing file.
+      - uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: decryp7/engineering-rules
+          path: engineering-rules
+
+      - uses: ./.gitea/actions/build-jobs
+
+      - uses: ./.gitea/actions/job-isolation
+
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/wiki
+          name: paddock-${{ github.job }}
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          components: clippy,rustfmt
+
+      - name: Lockfile is current
+        run: |
+          cargo metadata --locked --format-version 1 > /dev/null || {
+            echo "::error::tools/wiki/Cargo.lock is stale, run cargo update -w in tools/wiki and commit it"; exit 1; }
+
+      - name: Format
+        if: ${{ !cancelled() }}
+        run: cargo fmt --check
+
+      - name: Clippy
+        if: ${{ !cancelled() }}
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Tests
+        if: ${{ !cancelled() }}
+        run: cargo nextest run --profile ci --locked --no-fail-fast
+
+      - name: Deny
+        if: ${{ !cancelled() }}
+        run: cargo deny check
+
+      # The tool lints the wiki the way a person runs it (stale pages only warn).
+      - name: Lint the wiki
+        if: ${{ !cancelled() }}
+        run: cargo run --locked -- --repo ../.. lint --er ../../engineering-rules/RULES.md
+
   # The family icons (icons/): the pipeline's tests (seam scan, coverage, tray shapes, .icns frames, docs copies) and the check that every
   # installed copy in the apps and the docs equals the build. Without the second step a hand edit of an app's icons goes unnoticed.
   icons:

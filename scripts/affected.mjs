@@ -101,6 +101,7 @@ export const CI_JOBS = {
   'e2e-webkit': ['ui'], // runs on push to main, tags and manual runs only, never on a pull request
   conformance: ['conformance'],
   tools: ['tools'],
+  wiki: ['tools'], // tools/wiki, the LLM-wiki tool: a leg of the tools output
   icons: ['icons'],
   'eslint-preset': ['eslint'],
   crates: ['crates'],

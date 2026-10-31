@@ -55,11 +55,11 @@ Summary in three to five lines.
 
 - **Ingest** (after a merged batch, an incident, a decision of the user): collect the "Wiki notes:" of the agents'
   hand-offs and the sources; for each affected page change the claim, set its source, set `verified`; update `index.md`;
-  append a line to `log.md` (`## [YYYY-MM-DD] ingest | page | subject`, date from `date +%F`); run
-  `node scripts/wiki-lint.mjs`; commit `docs(wiki): ...` as its own commit.
+  append a line to `log.md` (`wiki log ingest "page | subject"` writes `## [YYYY-MM-DD] ingest | page | subject` with the
+  clock's date); run `wiki lint`; commit `docs(wiki): ...` as its own commit.
 - **Query**: read `index.md`, then the pages it points to, and answer with the sources of the page. If the answer was
   missing or wrong, leave a wiki note for the next ingest.
-- **Lint**: `node scripts/wiki-lint.mjs` (links resolve and their anchors exist; no clock-time citation of the steward log; every page is in the index; no orphan; every
+- **Lint**: `wiki lint` (the [wiki tool](../../tools/wiki/README.md), installed with `cargo install --path tools/wiki --locked`; settings in `wiki-lint.json`; `wiki new <slug> --title ...` creates a page and its index line) (links resolve and their anchors exist; no clock-time citation of the steward log; every page is in the index; no orphan; every
   page has `verified:` and `sources:`; every bullet names a source; pages older than 30 days are flagged; no run of 8 or more
   words is shared with any rules source: `docs/rules.md`, `origin/main`, the open rule branches and engineering-rules
   `RULES.md`, given with `--rules`). A second, reading pass by a reviewer checks pages against the rules and ADRs they
