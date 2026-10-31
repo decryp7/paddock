@@ -927,6 +927,7 @@ status = "built"
 [[mechanism]]
 id = "widget-layouts"
 title = "Versioned widget and tray-item layouts: the data model, validation, presets with undo, reorder and bounded counts (Dyno ADR 0012)"
+adr = "docs/adr/0035-widget-layouts-are-shared.md"
 canonical = "paddock-widgets"
 paths = ["crates/paddock-widgets/src/**"]
 status = "planned"
@@ -935,12 +936,19 @@ status = "planned"
   paths = ["apps/dyno/crates/dyno-core/src/widgets.rs"]
   symbols = ["item:WidgetKind", "item:WidgetSize", "item:WidgetOptions", "item:Widget", "item:DashboardLayout", "item:TrayItemStyle", "item:TrayItem", "item:TrayItems"]
   owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "Dyno's layout model (ADR 0012, WP-21, WP-38). Moves onto paddock-widgets first; the copy is deleted in the same change."
+  delete_by = "dyno-v1.0.0"
+  note = "Dyno's layout model (ADR 0012, WP-21, WP-38). Moves onto paddock-widgets first (family ADR 0035); the copy is deleted in the same change."
 
   [[mechanism.copy]]
   paths = ["apps/dyno/crates/dyno-core/src/settings.rs"]
   symbols = ["item:TrayMetric", "item:TrayStyle", "item:Tray"]
   owner = "dyno"
-  delete_by = "dyno-v1.1.0"
+  delete_by = "dyno-v1.0.0"
   note = "The settings types for the tray items. The icon renderer in dyno-core/src/tray.rs is not a layout model and is not listed."
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/app/src/app/features/widgets/widget-model.ts"]
+  symbols = ["item:MAX_WIDGETS", "item:MAX_TRAY_ITEMS", "item:accepts", "item:newWidget", "item:moveWidget", "item:resizeWidget", "item:removeWidget", "item:applyPreset"]
+  owner = "dyno"
+  delete_by = "dyno-v1.0.0"
+  note = "The same catalogue limits, compatibility rule and edits repeated in TypeScript (found 2026-10-31 for ADR 0035). The chooser sends edits to the engine instead."

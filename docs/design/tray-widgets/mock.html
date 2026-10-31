@@ -1,0 +1,469 @@
+<!doctype html>
+<!--
+  Mock-up for family ADR 0035 (widget layouts are shared) and Dyno roadmap WP-38: the tray popup built from widgets, every
+  widget's loading, empty and error state, and the chooser in Dyno's Settings window. Tokens only (tokens.generated.css is
+  compiled from ui/projects/paddock-ui/scss by render.mjs); no colour literals except the desktop backdrop, which is not
+  part of the product. ?theme=light|dark. Each <figure id="f-..."> is shot on its own.
+-->
+<html lang="en" data-accent="dyno">
+<head>
+<meta charset="utf-8" />
+<title>Tray widgets mock-up</title>
+<link rel="stylesheet" href="tokens.generated.css" />
+<script>
+  document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') === 'light' ? 'light' : 'dark';
+</script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--pd-bg); color: var(--pd-text); font: var(--pd-text-body) / var(--pd-lh-body) var(--pd-font-sans); -webkit-font-smoothing: antialiased; }
+  figure { margin: 0 0 40px; display: inline-block; vertical-align: top; }
+  .num { font-variant-numeric: tabular-nums; }
+  svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  svg.i * { vector-effect: non-scaling-stroke; }
+  svg.i.s14 { width: 14px; height: 14px; }
+  svg.i .dot { fill: currentColor; stroke: none; }
+  .spacer { flex: 1; }
+  .muted { color: var(--pd-text-muted); }
+  .subtle { color: var(--pd-text-subtle); }
+  .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+  /* ---------- desktop backdrop (not product UI) ---------- */
+  .desk { width: 440px; padding: 0 0 24px; background: linear-gradient(180deg, #2b3039, #353b46); }
+  [data-theme=light] .desk { background: linear-gradient(180deg, #c3cad5, #d6dbe3); }
+  .menubar { height: 24px; display: flex; align-items: center; gap: 14px; padding: 0 12px; font-size: 13px; color: #eceef1; background: rgb(20 22 26 / 0.72); }
+  [data-theme=light] .menubar { color: #14171c; background: rgb(246 247 249 / 0.78); }
+  .menubar b { font-weight: 600; }
+  .menubar .extra { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; height: 20px; border-radius: 4px; background: rgb(255 255 255 / 0.16); }
+  [data-theme=light] .menubar .extra { background: rgb(15 20 30 / 0.1); }
+  .desk .pop { margin: 10px auto 0; }
+
+  /* ---------- the popover (pd-tray-popover, unchanged) ---------- */
+  .pop { width: var(--pd-tray-width); display: flex; flex-direction: column; background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: 12px; box-shadow: var(--pd-shadow-2); overflow: hidden; }
+  .pop-head { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); }
+  .pop-head strong { font-weight: var(--pd-weight-semibold); }
+  .grade { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-pill); background: var(--pd-success-tint); color: var(--pd-success); font-size: var(--pd-text-label); }
+  .grade b { font-weight: var(--pd-weight-semibold); }
+  .agent { display: inline-flex; align-items: center; gap: 6px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+  .agent i { width: 7px; height: 7px; border-radius: 50%; background: var(--pd-success); }
+  .pop-body { padding: 0 var(--pd-space-4) var(--pd-space-3); }
+  .pop-foot { display: flex; align-items: center; gap: var(--pd-space-1); padding: var(--pd-space-2) var(--pd-space-4); border-top: 1px solid var(--pd-hairline); }
+
+  /* ---------- pd-widget-area and pd-widget-frame ---------- */
+  .area { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pd-space-2); }
+  .w { grid-column: span 2; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 10px var(--pd-space-3) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: color-mix(in srgb, var(--pd-surface-2) 55%, transparent); }
+  .w.span1 { grid-column: span 1; }
+  .w-head { display: flex; align-items: center; gap: 6px; height: 16px; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); white-space: nowrap; }
+  .w-head .meta { margin-left: auto; font-weight: var(--pd-weight-regular); color: var(--pd-text-subtle); }
+  .hero { font-size: 20px; line-height: 24px; font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .hero small { font-size: var(--pd-text-body); font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); margin-left: 2px; }
+
+  /* rows inside a widget (alarms, volumes, counters, apps): flat, no nested borders */
+  .rows { display: grid; margin: 0 calc(-1 * var(--pd-space-2)); }
+  .row { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 28px; padding: 2px var(--pd-space-2); border-radius: var(--pd-radius-control); font-size: var(--pd-text-body); }
+  .row .when { color: var(--pd-text-subtle); font-size: var(--pd-text-label); }
+  .row.hover { background: var(--pd-hover); }
+  .row .chev { color: var(--pd-text-muted); }
+  .more { font-size: var(--pd-text-label); color: var(--pd-text-muted); padding: 0 var(--pd-space-2); }
+
+  .badge { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px 0 5px; border-radius: var(--pd-radius-pill); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); flex: none; }
+  .badge svg.i { width: 14px; height: 14px; }
+  .b-warn { background: var(--pd-warning-tint); color: var(--pd-warning); }
+  .b-bad { background: var(--pd-danger-tint); color: var(--pd-danger); }
+  .b-info { background: var(--pd-info-tint); color: var(--pd-info); }
+  .b-ok { background: var(--pd-success-tint); color: var(--pd-success); }
+
+  .vol { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px var(--pd-space-2); align-items: baseline; padding: 4px 0; }
+  .vol .name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .vol .free { font-size: var(--pd-text-label); color: var(--pd-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--pd-chart-grid); overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 2px; background: var(--pd-chart-neutral-bar); }
+  .bar.warn i { background: var(--pd-warning); }
+
+  .split { display: grid; grid-template-columns: 1fr 1px 1fr; gap: var(--pd-space-3); }
+  .split > .div { background: var(--pd-hairline); }
+  .metric { display: grid; gap: 2px; min-width: 0; }
+  .metric .k { font-size: var(--pd-text-label); color: var(--pd-text-muted); white-space: nowrap; }
+  .spark { display: block; width: 100%; height: 24px; margin-top: 4px; }
+
+  /* states */
+  .skel { border-radius: 4px; background: color-mix(in srgb, var(--pd-text) 9%, transparent); }
+  .st { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 2px 6px; align-items: start; padding: 2px 0; }
+  .st > svg.i { width: 14px; height: 14px; margin-top: 3px; color: var(--pd-text-muted); }
+  .st > .t { grid-column: 2; }
+  .st .t { font-weight: var(--pd-weight-semibold); }
+  .st .d { grid-column: 2; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
+  .st .act { grid-column: 2; justify-self: start; margin: 4px 0 0 -8px; }
+  .st.err > svg.i { color: var(--pd-danger); }
+  .calm { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 28px; margin: 0 calc(-1 * var(--pd-space-2)); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); }
+  .calm .ok { color: var(--pd-success); }
+
+  /* ---------- buttons (matButton through the family bridge) ---------- */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid transparent; font: var(--pd-weight-medium) var(--pd-text-body) / 1 var(--pd-font-sans); color: var(--pd-text); background: none; white-space: nowrap; }
+  .btn.filled { background: var(--pd-accent-fill); color: var(--pd-on-accent); padding: 0 var(--pd-space-4); }
+  .btn.outlined { background: var(--pd-surface-2); border-color: var(--pd-border-strong); }
+  .btn.text { color: var(--pd-accent); padding: 0 var(--pd-space-2); height: 24px; }
+  .btn.sm { height: var(--pd-control-height); padding: 0 10px; }
+  .btn[disabled] { color: var(--pd-text-subtle); background: none; border-color: transparent; }
+  .ibtn { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: var(--pd-radius-control); color: var(--pd-text-muted); border: 0; background: none; }
+  .ibtn.sm { width: 28px; height: 28px; }
+  .focus { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
+
+  /* ---------- states sheet ---------- */
+  .sheet { padding: 24px; background: var(--pd-surface-3); display: grid; grid-template-columns: 148px repeat(3, 328px); gap: 16px 20px; align-items: start; }
+  .sheet .colh { font-size: var(--pd-text-label); font-weight: var(--pd-weight-semibold); color: var(--pd-text-muted); padding-bottom: 2px; border-bottom: 1px solid var(--pd-hairline); }
+  .sheet .kind { padding-top: 10px; }
+  .sheet .kind b { display: block; font-weight: var(--pd-weight-semibold); }
+  .sheet .kind span { font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+  .sheet .cell { min-width: 0; }
+  .sheet .cell.half { width: 156px; }
+  .sheet .na { font-size: var(--pd-text-label); color: var(--pd-text-subtle); padding-top: 12px; }
+  .sheet h2, .chooser h2 { grid-column: 1 / -1; margin: 0; font-size: var(--pd-text-title); line-height: var(--pd-lh-title); font-weight: var(--pd-weight-semibold); }
+  .sheet .lede { grid-column: 1 / -1; margin: -12px 0 4px; color: var(--pd-text-muted); }
+
+  /* ---------- chooser (Settings window) ---------- */
+  .win { width: 1040px; background: var(--pd-bg); border-radius: 10px; overflow: hidden; border: 1px solid var(--pd-hairline); position: relative; }
+  .win-title { height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-1); font-weight: var(--pd-weight-semibold); }
+  .lights { display: inline-flex; gap: 8px; margin-right: 54px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; background: var(--pd-border-strong); }
+  .win-main { display: grid; grid-template-columns: 184px minmax(0, 1fr); }
+  .nav { padding: 12px 8px; border-right: 1px solid var(--pd-hairline); background: var(--pd-surface-1); display: grid; align-content: start; gap: 2px; }
+  .nav a { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: var(--pd-radius-control); color: var(--pd-text); font-size: var(--pd-text-body); text-decoration: none; }
+  .nav a svg.i { color: var(--pd-text-muted); }
+  .nav a.sel { background: var(--pd-accent-tint); font-weight: var(--pd-weight-semibold); box-shadow: inset 2px 0 0 var(--pd-accent); }
+  .nav a.sel svg.i { color: var(--pd-accent); }
+  .page { padding: 20px 24px 24px; display: grid; gap: 16px; align-content: start; }
+  .page-title h1 { margin: 0; font-size: var(--pd-text-title); line-height: var(--pd-lh-title); font-weight: var(--pd-weight-semibold); }
+  .page-title p { margin: 2px 0 0; color: var(--pd-text-muted); }
+  .card { background: var(--pd-surface-1); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); padding: var(--pd-card-padding); }
+  .card > header h2 { margin: 0; font-size: var(--pd-text-subtitle); line-height: var(--pd-lh-subtitle); font-weight: var(--pd-weight-semibold); }
+  .card > header p { margin: 2px 0 0; color: var(--pd-text-muted); }
+  .ch { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 24px; margin-top: 16px; align-items: start; }
+  .ch-label { display: flex; align-items: baseline; justify-content: space-between; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); margin: 0 0 6px; }
+  .ch-label .count { font-weight: var(--pd-weight-regular); color: var(--pd-text-subtle); }
+  .list { border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); overflow: hidden; }
+  .item { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 48px; padding: 6px 8px 6px 4px; background: var(--pd-surface-1); }
+  .item + .item { border-top: 1px solid var(--pd-hairline); }
+  .item .grip { display: inline-grid; place-items: center; width: 24px; height: 32px; border-radius: var(--pd-radius-control); color: var(--pd-text-subtle); cursor: grab; }
+  .item .kicon { color: var(--pd-text-muted); }
+  .item .txt { display: grid; min-width: 0; flex: 1; }
+  .item .txt b { font-weight: var(--pd-weight-medium); white-space: nowrap; }
+  .item .txt span { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
+  .item.add { padding-left: 12px; }
+  .item.dragging { box-shadow: var(--pd-shadow-2); border-radius: var(--pd-radius-control); position: relative; z-index: 1; }
+  .item.ghost { background: var(--pd-accent-tint); }
+  .item.ghost > * { visibility: hidden; }
+  .select { display: inline-flex; align-items: center; gap: 6px; height: var(--pd-control-height); padding: 0 6px 0 10px; border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-input); font-size: var(--pd-text-body); background: var(--pd-surface-1); white-space: nowrap; }
+  .select svg.i { color: var(--pd-text-muted); }
+  .toggle { display: inline-flex; height: var(--pd-control-height); border: 1px solid var(--pd-border-strong); border-radius: var(--pd-radius-control); overflow: hidden; font-size: var(--pd-text-label); }
+  .toggle span { display: inline-grid; place-items: center; padding: 0 10px; }
+  .toggle span + span { border-left: 1px solid var(--pd-border-strong); }
+  .toggle span.on { background: var(--pd-accent-tint); color: var(--pd-text); font-weight: var(--pd-weight-semibold); box-shadow: inset 0 0 0 1px var(--pd-accent); }
+  .hint { display: flex; align-items: center; gap: 6px; margin: 8px 0 20px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+  kbd { white-space: nowrap; font: var(--pd-weight-medium) 11px/16px var(--pd-font-sans); padding: 0 4px; border-radius: 4px; border: 1px solid var(--pd-border-strong); background: var(--pd-surface-2); color: var(--pd-text); }
+  .ch-foot { display: flex; align-items: center; margin: 12px 0 0 -8px; }
+  .preview-label { font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); margin: 0 0 6px; }
+  .preview { padding: 16px 0; border-radius: var(--pd-radius-card); background: var(--pd-surface-2); display: grid; justify-items: center; }
+  .preview .pop { width: 328px; }
+  .preview .pop .pop-body { padding: 0 12px 12px; }
+  .preview .pop .pop-head { padding: 10px 12px; }
+  .menu { position: absolute; width: 200px; padding: 4px; background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-popover); box-shadow: var(--pd-shadow-2); z-index: 5; }
+  .menu div { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: var(--pd-radius-control); }
+  .menu div.hi { background: var(--pd-hover); }
+  .menu div.dis { color: var(--pd-text-subtle); }
+  .menu div.danger { color: var(--pd-danger); }
+  .menu hr { border: 0; border-top: 1px solid var(--pd-hairline); margin: 4px 0; }
+  .menu kbd { margin-left: auto; }
+  .snack { position: absolute; right: 16px; bottom: 16px; width: 360px; display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 16px; background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-popover); box-shadow: var(--pd-shadow-2); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Dyno's icon set (app/src/app/shared/icons.ts) and paddock-ui's generic glyphs; 24 px grid, 1.5 px stroke. -->
+    <symbol id="cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/><rect x="9.5" y="9.5" width="5" height="5" rx=".5"/><path d="M9 2.5V6M15 2.5V6M9 18v3.5M15 18v3.5M2.5 9H6M2.5 15H6M18 9h3.5M18 15h3.5"/></symbol>
+    <symbol id="memory" viewBox="0 0 24 24"><rect x="2.5" y="7" width="19" height="9" rx="1.5"/><path d="M6 10v3M10 10v3M14 10v3M18 10v3M5 16v2.5M19 16v2.5M9 16v2.5M15 16v2.5"/></symbol>
+    <symbol id="disk" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="12" cy="11" r="4"/><circle class="dot" cx="12" cy="11" r=".9"/><circle class="dot" cx="7" cy="17" r=".9"/></symbol>
+    <symbol id="network" viewBox="0 0 24 24"><path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M2 9a14.5 14.5 0 0 1 20 0"/><circle class="dot" cx="12" cy="19.2" r=".9"/></symbol>
+    <symbol id="bell" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></symbol>
+    <symbol id="shield-check" viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z"/><path d="m8.8 12 2.2 2.2 4.2-4.4"/></symbol>
+    <symbol id="issue" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M9.2 9.2a2 2 0 1 1 2.8 1.8c-.6.3-1 .8-1 1.5"/><circle class="dot" cx="11" cy="15" r=".9"/></symbol>
+    <symbol id="pin" viewBox="0 0 24 24"><path d="M9 4h6l-.8 5.5 3 3.2H6.8l3-3.2z"/><path d="M12 12.7V20"/></symbol>
+    <symbol id="processes" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 13h8M8 16.5h5"/></symbol>
+    <symbol id="alert" viewBox="0 0 24 24"><path d="M10.3 4.2 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4.5"/><circle class="dot" cx="12" cy="17.2" r=".9"/></symbol>
+    <symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle class="dot" cx="12" cy="7.8" r=".9"/></symbol>
+    <symbol id="error" viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM9 9l6 6M15 9l-6 6"/></symbol>
+    <symbol id="check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8.2 12.3 2.6 2.6 5-5.4"/></symbol>
+    <symbol id="check" viewBox="0 0 24 24"><path d="m4.5 12.5 5 5 10-11"/></symbol>
+    <symbol id="chevron-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="more" viewBox="0 0 24 24"><circle class="dot" cx="5.5" cy="12" r="1.25"/><circle class="dot" cx="12" cy="12" r="1.25"/><circle class="dot" cx="18.5" cy="12" r="1.25"/></symbol>
+    <symbol id="grip" viewBox="0 0 24 24"><circle class="dot" cx="9" cy="6.5" r="1.25"/><circle class="dot" cx="15" cy="6.5" r="1.25"/><circle class="dot" cx="9" cy="12" r="1.25"/><circle class="dot" cx="15" cy="12" r="1.25"/><circle class="dot" cx="9" cy="17.5" r="1.25"/><circle class="dot" cx="15" cy="17.5" r="1.25"/></symbol>
+    <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66L20 8.5M20 4v4.5h-4.5"/></symbol>
+    <symbol id="power" viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></symbol>
+    <symbol id="arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></symbol>
+    <symbol id="tune" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+    <symbol id="trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12.5h10L18 7M9 7V4.5h6V7"/></symbol>
+    <symbol id="keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M7 14.5h10"/><circle class="dot" cx="6.5" cy="10" r=".9"/><circle class="dot" cx="10" cy="10" r=".9"/><circle class="dot" cx="13.5" cy="10" r=".9"/><circle class="dot" cx="17" cy="10" r=".9"/></symbol>
+    <symbol id="dashboard" viewBox="0 0 24 24"><path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4-5"/><circle class="dot" cx="12" cy="15" r="1.4"/><path d="M4 19h16"/></symbol>
+    <symbol id="settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="monitor" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8.5 21h7M12 17v4"/></symbol>
+  </defs>
+</svg>
+
+<!-- ======================= 1. The popup with the default widgets ======================= -->
+<figure id="f-popover">
+  <div class="desk">
+    <div class="menubar"><b>Dyno</b><span>File</span><span>View</span><span>Window</span><span>Help</span><span class="spacer"></span><span class="extra"><svg class="i s14"><use href="#dashboard"/></svg><span class="num">76</span></span><span class="num">Sat 31 Oct 14:30</span></div>
+    <div class="pop" role="dialog" aria-label="Dyno">
+      <div class="pop-head"><img src="dyno-16.svg" width="16" height="16" alt="" /><strong>Dyno</strong><span class="spacer"></span><span class="grade"><b class="num">80</b> Good</span><span class="agent"><i></i>Monitoring</span></div>
+      <div class="pop-body"><div class="area" data-widgets="alarms disk cpumem"></div></div>
+      <div class="pop-foot"><button class="ibtn" aria-label="Customize widgets"><svg class="i"><use href="#tune"/></svg></button><span class="spacer"></span><button class="btn filled"><svg class="i"><use href="#arrow-right"/></svg>Open Dyno</button><button class="ibtn" aria-label="Quit Dyno"><svg class="i"><use href="#power"/></svg></button></div>
+    </div>
+  </div>
+</figure>
+
+<!-- ======================= 2. The other kinds, ready ======================= -->
+<figure id="f-popover-more">
+  <div class="desk">
+    <div class="menubar"><b>Dyno</b><span>File</span><span>View</span><span>Window</span><span>Help</span><span class="spacer"></span><span class="extra"><svg class="i s14"><use href="#dashboard"/></svg><span class="num">41</span></span><span class="num">Sat 31 Oct 14:30</span></div>
+    <div class="pop" role="dialog" aria-label="Dyno">
+      <div class="pop-head"><img src="dyno-16.svg" width="16" height="16" alt="" /><strong>Dyno</strong><span class="spacer"></span><span class="grade"><b class="num">80</b> Good</span><span class="agent"><i></i>Monitoring</span></div>
+      <div class="pop-body"><div class="area" data-widgets="net backup issue counters"></div></div>
+      <div class="pop-foot"><button class="ibtn" aria-label="Customize widgets"><svg class="i"><use href="#tune"/></svg></button><span class="spacer"></span><button class="btn filled"><svg class="i"><use href="#arrow-right"/></svg>Open Dyno</button><button class="ibtn" aria-label="Quit Dyno"><svg class="i"><use href="#power"/></svg></button></div>
+    </div>
+  </div>
+</figure>
+
+<!-- ======================= 3. Loading, empty and error per kind ======================= -->
+<figure id="f-states">
+  <div class="sheet" id="sheet">
+    <h2>Popup widgets: loading, empty and error</h2>
+    <p class="lede">The head (icon and title) comes from the catalogue and shows at once; only the body changes. Loading keeps the ready state's height.</p>
+    <div></div><div class="colh">Loading</div><div class="colh">Empty</div><div class="colh">Error</div>
+  </div>
+</figure>
+
+<!-- ======================= 4. The chooser in Settings ======================= -->
+<figure id="f-chooser">
+  <div class="win">
+    <div class="win-title"><span class="lights"><i></i><i></i><i></i></span>Settings</div>
+    <div class="win-main">
+      <nav class="nav" aria-label="Settings">
+        <a><svg class="i"><use href="#settings"/></svg>General</a>
+        <a><svg class="i"><use href="#dashboard"/></svg>Dashboard</a>
+        <a class="sel"><svg class="i"><use href="#monitor"/></svg>Menu bar</a>
+        <a><svg class="i"><use href="#bell"/></svg>Alarms</a>
+        <a><svg class="i"><use href="#pin"/></svg>Counters</a>
+        <a><svg class="i"><use href="#shield-check"/></svg>Backup</a>
+        <a><svg class="i"><use href="#clock"/></svg>History</a>
+      </nav>
+      <main class="page">
+        <div class="page-title"><h1>Menu bar</h1><p>What Dyno shows in the menu bar and in the popup that opens from it.</p></div>
+        <section class="card" aria-labelledby="pw-h">
+          <header><h2 id="pw-h">Popup widgets</h2><p>Choose what the popup shows, and in what order. Changes apply at once.</p></header>
+          <div class="ch">
+            <div>
+              <p class="ch-label" id="shown-l"><span>Shown in the popup</span><span class="count num">3 of 8</span></p>
+              <div class="list" role="list" aria-labelledby="shown-l">
+                <div class="item" role="listitem">
+                  <span class="grip" aria-label="Reorder Active alarms, position 1 of 3"><svg class="i"><use href="#grip"/></svg></span>
+                  <svg class="i kicon"><use href="#bell"/></svg>
+                  <span class="txt"><b>Active alarms</b><span class="truncate">Most severe first, up to 3</span></span>
+                  <button class="ibtn sm" aria-label="More for Active alarms"><svg class="i"><use href="#more"/></svg></button>
+                </div>
+                <div class="item" role="listitem">
+                  <span class="grip focus" aria-label="Reorder Disk space, position 2 of 3"><svg class="i"><use href="#grip"/></svg></span>
+                  <svg class="i kicon"><use href="#disk"/></svg>
+                  <span class="txt"><b>Disk space</b><span class="truncate">Free space per volume</span></span>
+                  <span class="select" aria-label="Volumes">All volumes<svg class="i s14"><use href="#chevron-down"/></svg></span>
+                  <button class="ibtn sm" aria-label="More for Disk space"><svg class="i"><use href="#more"/></svg></button>
+                </div>
+                <div class="item" role="listitem">
+                  <span class="grip" aria-label="Reorder CPU and memory, position 3 of 3"><svg class="i"><use href="#grip"/></svg></span>
+                  <svg class="i kicon"><use href="#cpu"/></svg>
+                  <span class="txt"><b>CPU and memory</b><span class="truncate">Load and use now, with the last minute</span></span>
+                  <button class="ibtn sm" aria-label="More for CPU and memory"><svg class="i"><use href="#more"/></svg></button>
+                </div>
+              </div>
+              <p class="hint"><svg class="i s14"><use href="#keyboard"/></svg>Drag to reorder, or focus a handle and press <kbd>⌥ ↑</kbd> or <kbd>⌥ ↓</kbd></p>
+
+              <p class="ch-label" id="add-l"><span>Add a widget</span></p>
+              <div class="list" role="list" aria-labelledby="add-l">
+                <div class="item add" role="listitem"><svg class="i kicon"><use href="#network"/></svg><span class="txt"><b>Network</b><span class="truncate">Download and upload now</span></span><button class="btn outlined sm"><svg class="i"><use href="#plus"/></svg>Add</button></div>
+                <div class="item add" role="listitem"><svg class="i kicon"><use href="#shield-check"/></svg><span class="txt"><b>Backup</b><span class="truncate">When the last backup finished</span></span><button class="btn outlined sm"><svg class="i"><use href="#plus"/></svg>Add</button></div>
+                <div class="item add" role="listitem"><svg class="i kicon"><use href="#issue"/></svg><span class="txt"><b>Last issue</b><span class="truncate">The newest problem Dyno found</span></span><button class="btn outlined sm"><svg class="i"><use href="#plus"/></svg>Add</button></div>
+                <div class="item add" role="listitem"><svg class="i kicon"><use href="#pin"/></svg><span class="txt"><b>Pinned counters</b><span class="truncate">Up to 4 of the counters you pinned</span></span><button class="btn outlined sm"><svg class="i"><use href="#plus"/></svg>Add</button></div>
+                <div class="item add" role="listitem"><svg class="i kicon"><use href="#processes"/></svg><span class="txt"><b>Top apps</b><span class="truncate">The five busiest apps by CPU</span></span><button class="btn outlined sm"><svg class="i"><use href="#plus"/></svg>Add</button></div>
+              </div>
+              <div class="ch-foot"><button class="btn text">Reset to defaults</button></div>
+            </div>
+            <div>
+              <p class="preview-label">Preview</p>
+              <div class="preview">
+                <div class="pop" aria-label="Preview of the popup">
+                  <div class="pop-head"><img src="dyno-16.svg" width="16" height="16" alt="" /><strong>Dyno</strong><span class="spacer"></span><span class="grade"><b class="num">80</b> Good</span></div>
+                  <div class="pop-body"><div class="area" data-widgets="alarms disk2 cpumem"></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</figure>
+
+<!-- ======================= 5. Row menu, dragging and undo ======================= -->
+<figure id="f-chooser-actions">
+  <div class="win" style="width: 640px">
+    <div class="win-title"><span class="lights"><i></i><i></i><i></i></span>Settings</div>
+    <div class="page" style="min-height: 540px">
+      <section class="card" aria-labelledby="pw-h2">
+        <header><h2 id="pw-h2">Popup widgets</h2><p>Choose what the popup shows, and in what order. Changes apply at once.</p></header>
+        <div style="margin-top: 16px; max-width: 520px; position: relative">
+          <p class="ch-label"><span>Shown in the popup</span><span class="count num">4 of 8</span></p>
+          <div class="list" role="list">
+            <div class="item" role="listitem"><span class="grip"><svg class="i"><use href="#grip"/></svg></span><svg class="i kicon"><use href="#bell"/></svg><span class="txt"><b>Active alarms</b><span class="truncate">Most severe first, up to 3</span></span><button class="ibtn sm"><svg class="i"><use href="#more"/></svg></button></div>
+            <div class="item ghost" role="listitem"><span class="grip"><svg class="i"><use href="#grip"/></svg></span><span class="txt"><b>x</b><span>x</span></span></div>
+            <div class="item" role="listitem"><span class="grip"><svg class="i"><use href="#grip"/></svg></span><svg class="i kicon"><use href="#cpu"/></svg><span class="txt"><b>CPU and memory</b><span class="truncate">Load and use now, with the last minute</span></span><button class="ibtn sm focus" aria-expanded="true"><svg class="i"><use href="#more"/></svg></button></div>
+            <div class="item" role="listitem"><span class="grip"><svg class="i"><use href="#grip"/></svg></span><svg class="i kicon"><use href="#network"/></svg><span class="txt"><b>Network</b><span class="truncate">Download and upload now</span></span><span class="toggle"><span class="on">Half</span><span>Full</span></span><button class="ibtn sm"><svg class="i"><use href="#more"/></svg></button></div>
+          </div>
+          <div class="item dragging" style="position:absolute; left: 10px; right: -10px; top: 74px; border: 1px solid var(--pd-hairline)"><span class="grip" style="cursor:grabbing"><svg class="i"><use href="#grip"/></svg></span><svg class="i kicon"><use href="#disk"/></svg><span class="txt"><b>Disk space</b><span class="truncate">Free space per volume</span></span><span class="select">All volumes<svg class="i s14"><use href="#chevron-down"/></svg></span><button class="ibtn sm"><svg class="i"><use href="#more"/></svg></button></div>
+          <div class="menu" role="menu" style="left: 312px; top: 156px">
+            <div class="hi" role="menuitem"><svg class="i"><use href="#arrow-up"/></svg>Move up<kbd>⌥ ↑</kbd></div>
+            <div role="menuitem"><svg class="i"><use href="#arrow-down"/></svg>Move down<kbd>⌥ ↓</kbd></div>
+            <div role="menuitem"><svg class="i" style="visibility:hidden"><use href="#arrow-up"/></svg>Move to top</div>
+            <div role="menuitem"><svg class="i" style="visibility:hidden"><use href="#arrow-up"/></svg>Move to bottom</div>
+            <hr />
+            <div class="danger" role="menuitem"><svg class="i"><use href="#trash"/></svg>Remove</div>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="snack" role="status"><span class="spacer">Backup removed from the popup.</span><button class="btn text" style="height:28px">Undo</button></div>
+  </div>
+</figure>
+
+<script>
+  // Deterministic sample series (no randomness between renders).
+  function series(seed, n, base, amp, wobble = 0.35) {
+    let x = seed, out = [];
+    for (let i = 0; i < n; i++) { x = (x * 9301 + 49297) % 233280; const r = x / 233280; base += (r - 0.5) * amp * wobble; out.push(Math.max(2, Math.min(98, base + Math.sin(i / 3 + seed) * amp * 0.25))); }
+    return out;
+  }
+  function spark(values, color, { fill = true, dash = false, max = 100, w = 132, h = 24 } = {}) {
+    const step = w / (values.length - 1);
+    const pts = values.map((v, i) => [i * step, h - 1 - (v / max) * (h - 2)]);
+    const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('');
+    const area = fill ? `<path d="${d}L${w} ${h}L0 ${h}Z" fill="${color}" fill-opacity="0.13"/>` : '';
+    const last = pts[pts.length - 1];
+    return `${area}<path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" ${dash ? 'stroke-dasharray="3 2"' : ''}/>` + (fill ? `<circle cx="${last[0] - 2}" cy="${last[1]}" r="2" fill="${color}"/>` : '');
+  }
+  const svgSpark = (inner, label, w = 132) => `<svg class="spark" viewBox="0 0 ${w} 24" preserveAspectRatio="none" role="img" aria-label="${label}">${inner}</svg>`;
+  const icon = (id, cls = '') => `<svg class="i ${cls}"><use href="#${id}"/></svg>`;
+  const head = (id, title, meta = '') => `<div class="w-head">${icon(id, 's14')}<span>${title}</span>${meta ? `<span class="meta num">${meta}</span>` : ''}</div>`;
+
+  const W = {
+    alarms: () => `<section class="w" aria-label="Active alarms">${head('bell', 'Active alarms', '2 active')}
+      <div class="rows">
+        <div class="row"><span class="badge b-warn">${icon('alert')}Warning</span><span class="truncate spacer">Memory pressure is high</span><span class="when num">4 min ago</span></div>
+        <div class="row hover"><span class="badge b-info">${icon('info')}Info</span><span class="truncate spacer">New login item: Docker Desktop</span><span class="when num">1 h ago</span>${icon('chevron-right', 's14 chev')}</div>
+      </div></section>`,
+    disk: () => `<section class="w" aria-label="Disk space">${head('disk', 'Disk space', '3 volumes')}
+      <div>
+        <div class="vol"><span class="name truncate">Macintosh HD</span><span class="free">182 GB free of 994 GB</span><span class="bar"><i style="width:82%"></i></span></div>
+        <div class="vol"><span class="name"><span class="truncate">Projects</span><span class="badge b-warn" style="height:18px">${icon('alert')}Low</span></span><span class="free">19 GB free of 500 GB</span><span class="bar warn"><i style="width:96%"></i></span></div>
+        <div class="vol"><span class="name truncate">Time Machine</span><span class="free">1.21 TB free of 4 TB</span><span class="bar"><i style="width:70%"></i></span></div>
+      </div></section>`,
+    disk2: () => `<section class="w" aria-label="Disk space">${head('disk', 'Disk space', '3 volumes')}
+      <div>
+        <div class="vol"><span class="name truncate">Macintosh HD</span><span class="free">182 GB free</span><span class="bar"><i style="width:82%"></i></span></div>
+        <div class="vol"><span class="name"><span class="truncate">Projects</span><span class="badge b-warn" style="height:18px">${icon('alert')}Low</span></span><span class="free">19 GB free</span><span class="bar warn"><i style="width:96%"></i></span></div>
+        <div class="vol"><span class="name truncate">Time Machine</span><span class="free">1.21 TB free</span><span class="bar"><i style="width:70%"></i></span></div>
+      </div></section>`,
+    cpumem: () => `<section class="w" aria-label="CPU and memory">${head('cpu', 'CPU and memory', 'last minute')}
+      <div class="split">
+        <div class="metric"><span class="k">CPU</span><span class="hero">76<small>%</small></span>${svgSpark(spark(series(3, 40, 70, 30), 'var(--pd-accent)'), 'CPU, last minute')}</div>
+        <span class="div"></span>
+        <div class="metric"><span class="k">Memory <span class="subtle num">16.3 of 32 GB</span></span><span class="hero">51<small>%</small></span>${svgSpark(spark(series(11, 40, 50, 12, 0.15), 'var(--pd-chart-1)'), 'Memory, last minute')}</div>
+      </div></section>`,
+    net: () => `<section class="w span1" aria-label="Network">${head('network', 'Network')}
+      <span class="hero"><span class="subtle" style="font-weight:400" aria-label="down">↓</span> 2.4<small>MB/s</small></span>
+      <span class="muted num" style="font-size:12px;line-height:16px"><span aria-label="up">↑</span> 310 KB/s</span>
+      ${svgSpark(spark(series(5, 30, 40, 50), 'var(--pd-text-muted)') + spark(series(9, 30, 12, 14), 'var(--pd-text-subtle)', { fill: false, dash: true }), 'Network, last minute', 132)}</section>`,
+    backup: () => `<section class="w span1" aria-label="Backup">${head('shield-check', 'Backup')}
+      <span style="display:flex;align-items:center;gap:6px"><span class="badge b-ok">${icon('check')}OK</span></span>
+      <span style="font-size:13px">Last backup <b class="num" style="font-weight:600">2 h ago</b></span>
+      <span class="subtle" style="font-size:12px;line-height:16px">Time Machine</span></section>`,
+    issue: () => `<section class="w" aria-label="Last issue">${head('issue', 'Last issue', 'last 7 days')}
+      <div class="rows"><div class="row"><span class="badge b-bad">${icon('error')}Error</span><span class="truncate spacer">Disk write errors on disk4</span><span class="when num">Yesterday</span>${icon('chevron-right', 's14 chev')}</div></div></section>`,
+    counters: () => `<section class="w" aria-label="Pinned counters">${head('pin', 'Pinned counters', '3 pinned')}
+      <div class="rows">
+        <div class="row"><span class="truncate spacer">GPU memory in use</span><span class="num">3.2 GB</span></div>
+        <div class="row"><span class="truncate spacer">Compressed memory</span><span class="num">1.14 GB</span></div>
+        <div class="row"><span class="truncate spacer">Context switches per second</span><span class="num">18,420</span></div>
+      </div></section>`,
+    apps: () => `<section class="w" aria-label="Top apps">${head('processes', 'Top apps', 'by CPU')}
+      <div class="rows">
+        <div class="row"><span class="truncate spacer">Rust build (cargo)</span><span class="num" style="width:44px;text-align:right">42%</span><span class="num subtle" style="width:60px;text-align:right">3.15 GB</span></div>
+        <div class="row"><span class="truncate spacer">Google Chrome</span><span class="num" style="width:44px;text-align:right">6.8%</span><span class="num subtle" style="width:60px;text-align:right">4.3 GB</span></div>
+        <div class="row"><span class="truncate spacer">WindowServer</span><span class="num" style="width:44px;text-align:right">4.1%</span><span class="num subtle" style="width:60px;text-align:right">305 MB</span></div>
+      </div></section>`,
+  };
+  document.querySelectorAll('.area[data-widgets]').forEach((a) => { a.innerHTML = a.dataset.widgets.split(' ').map((k) => W[k]()).join(''); });
+
+  // ---------- states sheet ----------
+  const sk = (w, h, extra = '') => `<span class="skel" style="display:block;width:${w};height:${h}px;${extra}"></span>`;
+  const frame = (id, title, body, half = false) => `<section class="w${half ? ' span1' : ''}" style="${half ? 'width:156px' : ''}">${head(id, title)}${body}</section>`;
+  const empty = (ic, t, d, act) => `<div class="st"><span class="t">${t}</span><span class="d">${d}</span>${act ? `<button class="btn text act">${act}</button>` : ''}</div>`;
+  const err = (t, d, act = 'Retry') => `<div class="st err">${icon('error')}<span class="t">${t}</span><span class="d">${d}</span><button class="btn text act">${act === 'Retry' ? icon('refresh', 's14') : ''}${act}</button></div>`;
+  const rowsSk = (n) => Array.from({ length: n }, (_, i) => `<div style="display:flex;gap:8px;align-items:center;height:28px">${sk('64px', 16, 'border-radius:999px')}${sk(['60%', '48%', '54%', '40%', '50%'][i], 10)}</div>`).join('');
+  const volSk = (n) => Array.from({ length: n }, (_, i) => `<div style="display:grid;gap:8px;padding:6px 0 4px">${sk(['46%', '38%', '52%'][i], 10)}${sk('100%', 4)}</div>`).join('');
+  const rows = [
+    ['bell', 'Active alarms', 'span 2 · max 1', false,
+      rowsSk(2),
+      `<div class="calm">${icon('check-circle', 'ok')}<span class="spacer"><span style="color:var(--pd-success);font-weight:600">No active alarms</span> <span class="subtle" style="font-size:12px">· checked 14:30</span></span>${icon('chevron-right', 's14 chev')}</div>`,
+      err("Couldn't read alarms", 'The alarm store is busy. Your alarms are safe.')],
+    ['disk', 'Disk space', 'span 2 · max 4', false,
+      volSk(3),
+      empty('disk', "Time Machine isn't connected", 'This widget shows one volume. Connect the disk, or show another one.', 'Choose another volume'),
+      err("Couldn't read volumes", 'Dyno could not list the mounted volumes.')],
+    ['cpu', 'CPU and memory', 'span 2 · max 1', false,
+      `<div class="split"><div class="metric">${sk('28px', 10)}${sk('52px', 20, 'margin-top:4px')}${sk('100%', 24, 'margin-top:4px')}</div><span class="div"></span><div class="metric">${sk('40px', 10)}${sk('52px', 20, 'margin-top:4px')}${sk('100%', 24, 'margin-top:4px')}</div></div>`,
+      null,
+      err('Agent stopped', 'Dyno’s monitoring agent is not running, so there are no live readings.', 'Restart agent')],
+    ['network', 'Network', 'span 1 or 2 · max 1', true,
+      `${sk('70%', 20)}${sk('80%', 10)}${sk('100%', 24, 'margin-top:2px')}`,
+      empty('network', 'Not connected', 'No network is up.', 'Open network'),
+      err('Agent stopped', 'No live readings.', 'Restart agent')],
+    ['shield-check', 'Backup', 'span 1 or 2 · max 1', true,
+      `${sk('44px', 20, 'border-radius:999px')}${sk('90%', 12)}${sk('70%', 10)}`,
+      empty('shield-check', 'No backups', 'No backup tool found.', 'Set up checks'),
+      err("Couldn't check", 'tmutil did not answer.')],
+    ['issue', 'Last issue', 'span 2 · max 1', false,
+      rowsSk(1),
+      empty('check-circle', 'No issues this week', 'Dyno looked at the system logs of the last 7 days.', 'Open issues'),
+      err("Couldn't read issues", 'The issue index is being rebuilt. Try again in a minute.')],
+    ['pin', 'Pinned counters', 'span 2 · max 1', false,
+      Array.from({ length: 3 }, (_, i) => `<div style="display:flex;justify-content:space-between;align-items:center;height:28px">${sk(['55%', '45%', '62%'][i], 10)}${sk('44px', 10)}</div>`).join(''),
+      empty('pin', 'No pinned counters', 'Pin the counters you watch most, and they show here.', 'Pin counters'),
+      err("Couldn't read counters", 'None of the 3 pinned counters answered.')],
+    ['processes', 'Top apps', 'span 2 · max 1', false,
+      Array.from({ length: 3 }, (_, i) => `<div style="display:flex;gap:12px;justify-content:space-between;align-items:center;height:28px">${sk(['50%', '40%', '45%'][i], 10)}${sk('36px', 10)}</div>`).join(''),
+      null,
+      err('Agent stopped', 'No live readings.', 'Restart agent')],
+  ];
+  const sheet = document.getElementById('sheet');
+  for (const [ic, title, rule, half, loading, emp, error] of rows) {
+    const cell = (body) => body === null ? `<div class="na">No empty state: a reading always exists once the agent runs; before it, loading.</div>` : `<div class="cell${half ? ' half' : ''}">${frame(ic, title, body, half)}</div>`;
+    sheet.insertAdjacentHTML('beforeend', `<div class="kind"><b>${title}</b><span>${rule}</span></div>${cell(loading)}${cell(emp)}${cell(error)}`);
+  }
+  sheet.insertAdjacentHTML('beforeend', `<div class="kind"><b>No widgets</b><span>the whole area</span></div><div class="cell">${`<div class="st" style="padding:8px 4px">${icon('tune')}<span class="t">No widgets in the popup</span><span class="d">Choose what the popup shows: alarms, disk space, live load and more.</span><button class="btn text act">Choose widgets</button></div>`}</div><div></div><div></div>`);
+</script>
+</body>
+</html>
