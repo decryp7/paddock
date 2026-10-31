@@ -23,6 +23,7 @@ use crate::paths::{is_appimage_path, launchd_plist_path, systemd_unit_path};
 use crate::port::RegisterError;
 use crate::spec::{Kind, ServiceSpec};
 use paddock_env::{Os, Vars};
+use paddock_proc::RunState;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -139,6 +140,9 @@ pub struct StartFacts {
     pub last_exit: Option<i32>,
     /// The job process's CPU time so far, when it could be read.
     pub cpu: Option<Duration>,
+    /// Whether the OS has stopped the job's process ([`RunState::Stopped`]: App Tamer, a signal); `Unknown` when the OS
+    /// does not say (Windows, no pid, a process of another user).
+    pub run_state: RunState,
 }
 
 impl StartFacts {
@@ -150,6 +154,7 @@ impl StartFacts {
             runs: None,
             last_exit: None,
             cpu: None,
+            run_state: RunState::Unknown,
         }
     }
 }

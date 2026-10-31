@@ -15,7 +15,9 @@
 //! systemd, Windows) is not watched; its repair keeps the fixed wait of [`Timings::start_wait`](crate::Timings).
 
 use crate::backend::{Job, StartFacts};
-use paddock_proc::{Cpu, Liveness, Patience, Reading, StartJudge, StartState};
+use paddock_proc::{
+    Cpu, Liveness, Patience, Reading, RunState, StallCause, StartJudge, StartState,
+};
 use std::time::Duration;
 
 /// How often the service is asked while waiting (one poll is one tick of the judge); the default of
@@ -165,7 +167,9 @@ impl StartWait {
             self.pid = Some(pid);
         }
         // A job the OS has not started yet (or between restarts) is `Paused`: it spends no patience.
-        let liveness = if running {
+        // Also a process the OS or an app (App Tamer) has stopped: it goes on when it is resumed, so it is waited for.
+        let stopped = running && f.run_state == RunState::Stopped;
+        let liveness = if running && !stopped {
             Liveness::Running
         } else {
             Liveness::Paused
@@ -185,10 +189,24 @@ impl StartWait {
             StartState::Starting | StartState::Ready | StartState::Exited(_) => {
                 StartVerdict::Waiting
             }
-            StartState::Stalled(report) if report.cause.is_stuck() => {
-                StartVerdict::Failed(format!("{} (observed: {seen})", report.message))
-            }
-            StartState::Stalled(_) => StartVerdict::StillWorking(self.note(&seen)),
+            StartState::Stalled(report) => match report.cause {
+                // A job the OS has not started yet is also fed as paused; only a stopped process is worth saying.
+                StallCause::Paused if !stopped => StartVerdict::Waiting,
+                StallCause::Paused => StartVerdict::StillWorking(self.said(format!(
+                    "the service is paused by the system; waiting (observed: {seen})"
+                ))),
+                // Idle is only a sign of a stuck process when the OS says the process is not stopped; where it cannot say
+                // (Windows, another user's process) a flat CPU time is a reason to say so, not to give up.
+                StallCause::Idle(_) if f.run_state != RunState::Running => {
+                    StartVerdict::StillWorking(self.said(format!(
+                        "still working: the service is using no CPU and the system does not say whether it is paused; waiting (observed: {seen})"
+                    )))
+                }
+                cause if cause.is_stuck() => {
+                    StartVerdict::Failed(format!("{} (observed: {seen})", report.message))
+                }
+                _ => StartVerdict::StillWorking(self.note(&seen)),
+            },
         };
         // The judge spends no patience on a job that is not running, so it never notes one; the note is counted here.
         if verdict == StartVerdict::Waiting
@@ -204,8 +222,15 @@ impl StartWait {
     }
 
     fn note(&mut self, seen: &str) -> String {
+        self.said(format!(
+            "still working: the service has not answered yet (observed: {seen})"
+        ))
+    }
+
+    /// A note said: the generic one is not repeated after it.
+    fn said(&mut self, text: String) -> String {
         self.noted = true;
-        format!("still working: the service has not answered yet (observed: {seen})")
+        text
     }
 }
 
@@ -240,6 +265,7 @@ fn describe(f: &StartFacts) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use paddock_proc::RunState;
 
     fn facts(job: Job) -> StartFacts {
         StartFacts {
@@ -260,7 +286,12 @@ mod tests {
             runs: Some(1),
             last_exit: None,
             cpu: Some(Duration::from_secs(cpu)),
+            run_state: RunState::Running,
         })
+    }
+    fn with_state(mut o: StartObservation, state: RunState) -> StartObservation {
+        o.facts.run_state = state;
+        o
     }
     fn pending() -> StartObservation {
         obs(StartFacts {
@@ -343,6 +374,55 @@ mod tests {
         o.facts.last_exit = Some(3);
         o.facts.pid = Some(9);
         assert!(matches!(w.observe(&o), StartVerdict::Failed(_)));
+    }
+
+    #[test]
+    fn a_running_job_with_flat_cpu_whose_process_is_stopped_keeps_being_waited_for() {
+        let mut w = StartWait::new();
+        let mut notes = Vec::new();
+        for i in 0..150 {
+            match w.observe(&with_state(running(5), RunState::Stopped)) {
+                StartVerdict::Failed(m) => panic!("poll {i}: {m}"),
+                StartVerdict::StillWorking(m) => notes.push(m),
+                _ => {}
+            }
+        }
+        assert!(
+            notes
+                .iter()
+                .any(|m| m.contains("paused by the system") && m.contains("waiting")),
+            "{notes:?}"
+        );
+        // Resumed with the same flat CPU: the idle count goes on from where it was, so it ends as idle soon after.
+        let mut ended = None;
+        for _ in 0..40 {
+            if let StartVerdict::Failed(m) = w.observe(&running(5)) {
+                ended = Some(m);
+                break;
+            }
+        }
+        assert!(ended.is_some_and(|m| m.contains("observed: running")));
+    }
+
+    #[test]
+    fn the_same_job_not_stopped_ends_as_idle_and_an_unreadable_run_state_never_does() {
+        let mut w = StartWait::new();
+        assert!(
+            (0..40).any(|_| matches!(w.observe(&running(5)), StartVerdict::Failed(_))),
+            "a known-running idle start is stuck"
+        );
+        for state in [RunState::Unknown, RunState::Exited] {
+            let mut w = StartWait::new();
+            let mut notes = 0;
+            for i in 0..150 {
+                match w.observe(&with_state(running(5), state)) {
+                    StartVerdict::Failed(m) => panic!("{state:?} poll {i}: {m}"),
+                    StartVerdict::StillWorking(_) => notes += 1,
+                    _ => {}
+                }
+            }
+            assert!(notes >= 1, "{state:?} says it is still working");
+        }
     }
 
     #[test]

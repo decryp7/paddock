@@ -9,6 +9,7 @@ use crate::paths::{LAUNCHCTL, launchd_domain, launchd_target};
 use crate::port::{AppService, AppServiceStatus, RegisterError, System};
 use crate::render::{LaunchdProgram, launchd_plist};
 use crate::spec::ServiceSpec;
+use paddock_proc::RunState;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -40,15 +41,14 @@ fn start_facts(sys: &mut dyn System, target: &str) -> StartFacts {
     let Some(report) = job_report(sys, target) else {
         return StartFacts::unknown();
     };
+    let running_pid = report.pid.filter(|_| report.running);
     StartFacts {
         job: job_of(Some(report)),
         pid: report.pid,
         runs: report.runs,
         last_exit: report.last_exit,
-        cpu: report
-            .pid
-            .filter(|_| report.running)
-            .and_then(|pid| sys.cpu_time(pid)),
+        cpu: running_pid.and_then(|pid| sys.cpu_time(pid)),
+        run_state: running_pid.map_or(RunState::Unknown, |pid| sys.run_state(pid)),
     }
 }
 

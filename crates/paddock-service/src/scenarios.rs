@@ -1682,3 +1682,34 @@ fn the_windows_service_runs_sc_by_full_path_by_default() {
         "{cmds:?}"
     );
 }
+
+#[test]
+fn a_job_with_flat_cpu_is_waited_for_when_its_process_is_stopped_or_unreadable_and_fails_when_it_runs()
+ {
+    use paddock_proc::RunState;
+    let flat = |_: u32| {
+        Output::ok(
+            "\tstate = running\n\tpid = 41\n\truns = 1\n\tproperties = keepalive | has LWCR\n",
+        )
+    };
+    let run = |state: Option<RunState>| {
+        let d = tempfile::tempdir().unwrap();
+        let sys = FakeSystem::new();
+        sys.set_cpu_time(41, Duration::from_secs(1));
+        if let Some(s) = state {
+            sys.set_run_state(41, s);
+        }
+        // The service answers on the 100th ask, far past the idle patience (20 polls) of a flat CPU time.
+        let mut m = watched_manager(&sys, d.path(), flat, 100, true);
+        m.install(&no_cancel())
+    };
+    assert_eq!(
+        run(Some(RunState::Stopped)).unwrap(),
+        RepairOutcome::Recovered
+    );
+    assert_eq!(run(None).unwrap(), RepairOutcome::Recovered);
+    let Err(ServiceError::Failed(why)) = run(Some(RunState::Running)) else {
+        panic!()
+    };
+    assert!(why.contains("done nothing"), "{why}");
+}

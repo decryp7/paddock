@@ -42,6 +42,7 @@ struct Inner {
     read_error: Option<std::io::ErrorKind>,
     spawn_error: Option<String>,
     cpu_times: BTreeMap<u32, Duration>,
+    run_states: BTreeMap<u32, paddock_proc::RunState>,
 }
 
 /// A recording [`System`]. Clones share one state, so a test keeps a handle while the backend owns another. Commands
@@ -129,6 +130,12 @@ impl FakeSystem {
     /// Makes `pid` have used `cpu` of CPU time (what [`System::cpu_time`] answers; other pids are not known).
     pub fn set_cpu_time(&self, pid: u32, cpu: Duration) -> &Self {
         self.lock().cpu_times.insert(pid, cpu);
+        self
+    }
+
+    /// Makes `pid` have the run state `state` (what [`System::run_state`] answers; other pids are `Unknown`).
+    pub fn set_run_state(&self, pid: u32, state: paddock_proc::RunState) -> &Self {
+        self.lock().run_states.insert(pid, state);
         self
     }
 
@@ -245,6 +252,14 @@ impl System for FakeSystem {
 
     fn cpu_time(&mut self, pid: u32) -> Option<Duration> {
         self.lock().cpu_times.get(&pid).copied()
+    }
+
+    fn run_state(&mut self, pid: u32) -> paddock_proc::RunState {
+        self.lock()
+            .run_states
+            .get(&pid)
+            .copied()
+            .unwrap_or(paddock_proc::RunState::Unknown)
     }
 }
 

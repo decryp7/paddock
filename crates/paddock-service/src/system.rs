@@ -105,6 +105,11 @@ impl System for RealSystem {
     fn cpu_time(&mut self, pid: u32) -> Option<Duration> {
         paddock_proc::ProcessId::of(pid).and_then(paddock_proc::tree_cpu_time)
     }
+
+    fn run_state(&mut self, pid: u32) -> paddock_proc::RunState {
+        paddock_proc::ProcessId::of(pid)
+            .map_or(paddock_proc::RunState::Unknown, paddock_proc::run_state)
+    }
 }
 
 /// Copies `exe` to `<data>/bin/<file name>` (atomically, executable) and returns the copy: an AppImage's own files
@@ -176,6 +181,11 @@ mod tests {
         // Only this test process is looked at (read-only).
         assert!(sys.cpu_time(std::process::id()).is_some());
         assert_eq!(sys.cpu_time(u32::MAX), None);
+        assert_eq!(
+            sys.run_state(std::process::id()),
+            paddock_proc::RunState::Running
+        );
+        assert_eq!(sys.run_state(u32::MAX), paddock_proc::RunState::Unknown);
     }
 
     #[test]
