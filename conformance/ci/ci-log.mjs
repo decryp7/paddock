@@ -8,7 +8,20 @@
 //
 // Every failure prints exactly one `::error::` line, cause then "Next step:". The prefix is assembled here, so grepping a log
 // for `::error::` finds what failed, never the echoed text of a script.
+//
+// Secrets: pass them to a program through the environment, never as arguments or in messages. As a second line of defence,
+// CI_MASK may name environment variables (space-separated) whose values are replaced by *** in everything printed here.
 import { appendFileSync } from 'node:fs';
+
+/** `text` with the value of every variable `env.CI_MASK` names replaced by ***. */
+export function scrub(text, env = process.env) {
+  let out = String(text);
+  for (const name of String(env.CI_MASK ?? '').split(/\s+/).filter(Boolean)) {
+    const value = env[name];
+    if (value) out = out.split(value).join('***');
+  }
+  return out;
+}
 
 /** "12.3 s" for a duration in milliseconds. */
 export function formatDuration(ms) {
@@ -17,21 +30,22 @@ export function formatDuration(ms) {
 }
 
 /** The one-line annotation for a failure: its cause and the next step, newlines folded so it stays one line. */
-export function formatError(cause, next = '') {
+export function formatError(cause, next = '', env = process.env) {
   const msg = next ? `${cause}. Next step: ${next}` : String(cause);
-  return `::${'error'}::${msg.replace(/\r/g, '').replace(/\n/g, ' / ')}`;
+  return `::${'error'}::${scrub(msg.replace(/\r/g, '').replace(/\n/g, ' / '), env)}`;
 }
 
 /** Prints `formatError(cause, next)` (to stdout, where the runner reads annotations). */
-export function ciError(cause, next = '', out = (l) => console.log(l)) {
-  out(formatError(cause, next));
+export function ciError(cause, next = '', out = (l) => console.log(l), env = process.env) {
+  out(formatError(cause, next, env));
 }
 
 /**
  * Runs one phase of a long step and logs its outcome and duration; a failure is logged with its message and rethrown.
  * Works for sync and async functions.
  */
-export async function phase(label, fn, { log = (l) => console.log(l), now = () => Date.now() } = {}) {
+export async function phase(label, fn, { log: raw = (l) => console.log(l), now = () => Date.now(), env = process.env } = {}) {
+  const log = (l) => raw(scrub(l, env));
   const start = now();
   log(`ci: ${label}: started`);
   try {
@@ -49,11 +63,12 @@ export async function phase(label, fn, { log = (l) => console.log(l), now = () =
  * renders job summaries depends on its and the runner's version, go-gitea/gitea#23721). Never throws.
  */
 export function writeSummary(markdown, { env = process.env, log = (l) => console.log(l) } = {}) {
-  for (const line of String(markdown).trimEnd().split('\n')) log(`ci: ${line}`);
+  const md = scrub(String(markdown).trimEnd(), env);
+  for (const line of md.split('\n')) log(`ci: ${line}`);
   const file = env.GITHUB_STEP_SUMMARY;
   if (!file) return false;
   try {
-    appendFileSync(file, `${String(markdown).trimEnd()}\n\n`);
+    appendFileSync(file, `${md}\n\n`);
     return true;
   } catch (e) {
     log(`ci: could not write the step summary to ${file} (${e.code ?? e.message}); the log above has it`);

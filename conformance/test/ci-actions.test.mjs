@@ -1131,7 +1131,7 @@ test("app-gates runs every command list through run-commands.sh, which names the
   const run = (commands, env = {}) => spawnSync('bash', [join(PADDOCK, 'conformance', 'ci', 'run-commands.sh')], { cwd: dir, env: { PATH: '/usr/bin:/bin', COMMANDS: commands, ...env }, encoding: 'utf8' });
   const bad = run('cd sub\npwd > here\nprintf x\nexit 7\ntouch never');
   assert.equal(bad.status, 7, 'the failing command\'s exit code');
-  assert.match(bad.stdout, /::error::command failed \(exit 7, after \d+\.\d s\): exit 7 \(in .*sub\)\. Next step: .*reproduce with: \(cd .*sub && exit 7\)/, 'it names itself, its folder and how to reproduce it');
+  assert.match(bad.stdout, /::error::command failed \(exit 7, after (?:<1 s|~\d+ s|\d+\.\d s)\): exit 7 \(in .*sub\)\. Next step: .*reproduce with: \(cd \S*sub && exit 7\)/, 'it names itself, its folder and how to reproduce it');
   assert.equal(bad.stdout.split('\n').filter((l) => l.startsWith('::error::')).length, 1, 'one annotation per failure');
   assert.equal(existsSync(join(dir, 'sub', 'here')), true, 'a cd holds for the lines after it');
   assert.equal(existsSync(join(dir, 'sub', 'never')), false, 'the lines after a failure do not run');
