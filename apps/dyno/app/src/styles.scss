@@ -690,7 +690,9 @@ kbd,
 
 
 /* One control height in a toolbar: buttons as tall as fields and segmented controls. The family's Material section sits on body and
-   beats any --mat-* token set here, so the height is tuned through the family token it reads. */
-:root {
+   beats any --mat-* token set here, so the height is tuned through the family token it reads. `:root[data-density]` too: the family's own density rules (`:root[data-density='compact']`) set the button height
+   with higher specificity. */
+:root,
+:root[data-density] {
   --pd-button-height: var(--control-h);
 }

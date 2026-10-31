@@ -23,6 +23,13 @@ Conventional Commits; one semver tag for the whole repo.
   Spotter on main) keeps Material's own sizes until it adopts the bridge; C61 lists them. Dyno loads it: its toolbar height now comes
   from `--pd-button-height` (`styles.scss` no longer sets `--mat-button-*-container-height` on `:root`). A family-section `--mat-*`
   token set on an app's `:root` or `html` is dead: apps tune the family through `--pd-*`.
+- Dyno: every family control that reads `--pd-button-height` (the dialog footer buttons, the Settings search box, the Material
+  buttons) now matches Dyno's field height (`--control-h`): 28 px in Standard instead of the family's 32, 32 in Comfortable, 24 in
+  Compact (Dyno sets it on `:root, :root[data-density]` so the family's compact and comfortable rules do not win). Measured on Dyno's
+  Processes page: button and field equal at all three densities. Dyno screenshots that show these controls and need retaking before
+  the Dyno tag: `settings-{light,dark}`, `settings-menu-bar-{light,dark}`, `alarms-rules-{light,dark}`, `diagnostics-{light,dark}`,
+  `widgets-edit-{light,dark}`, `backup-{light,dark}`, `reports-{light,dark}`, `web-search-{light,dark}`, `tray-{light,dark}`, and the
+  dialog images of `e2e/screenshots-dialogs.spec.ts` (every dialog's footer buttons).
 - New conformance check C61 (report-only): every app's `angular.json` loads `paddock-ui` `css/material.css`, and no app has a
   `mat.theme` of its own.
 - When `shared/channels-lan-events` meets this branch, delete the channels-only `:host` density block in
