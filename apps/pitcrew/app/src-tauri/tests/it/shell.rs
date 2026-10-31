@@ -168,7 +168,7 @@ impl ServiceClient for Down {
     }
 }
 
-const REGENERATE: &str = "cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test shell";
+const REGENERATE: &str = "cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test it";
 
 #[test]
 fn the_uis_command_names_are_generated_from_the_apps_table() {

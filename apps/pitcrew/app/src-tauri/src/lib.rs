@@ -39,10 +39,10 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Where the releases are (About's "Release notes", Updates' "Open the releases page"): the family's page filtered to
 /// Pitcrew's tags.
 pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/paddock/releases?q=pitcrew-v";
-/// The update feed: the moving release that pitcrew-release.yml publishes `latest.json` on (`tests/shell.rs` ties it to the
+/// The update feed: the moving release that pitcrew-release.yml publishes `latest.json` on (`tests/it/shell.rs` ties it to the
 /// workflow's `latest-tag`; `tauri.conf.json` names the same address for the updater plugin).
 pub const UPDATE_FEED: &str = "https://dev.decryptology.net/decryp7/paddock/releases/download/pitcrew-latest/latest.json";
-/// The UI's `paddock-manifest.json` (checked against the plugin in `tests/shell.rs`).
+/// The UI's `paddock-manifest.json` (checked against the plugin in `tests/it/shell.rs`).
 pub const MANIFEST: &str = include_str!("../paddock-manifest.json");
 
 paddock_commands::command_table! {

@@ -24,7 +24,7 @@ projects' releases (ADR 0002), independently of this.
   `pitcrew-v` tags (`RELEASES_PAGE`).
 - **One endpoint.** A check is one HTTPS GET of
   `https://dev.decryptology.net/decryp7/paddock/releases/download/pitcrew-latest/latest.json` (the moving `pitcrew-latest` release of the Paddock monorepo; copies installed before the move are reinstalled once by hand)
-  (`UPDATE_FEED` in `app/src-tauri/src/lib.rs`, and `plugins.updater.endpoints` in `tauri.conf.json`; `tests/shell.rs` ties both to the
+  (`UPDATE_FEED` in `app/src-tauri/src/lib.rs`, and `plugins.updater.endpoints` in `tauri.conf.json`; `tests/it/shell.rs` ties both to the
   workflow's `latest-tag`). It carries no identifier or usage data.
 - **Signatures are mandatory.** Every update is verified with the minisign public key built into the app before it
   is installed, and `requireSignedVersion` binds each signature to its version (GHSA-j38x-g3m3-95fr). A build without

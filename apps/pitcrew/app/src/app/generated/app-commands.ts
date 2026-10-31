@@ -1,4 +1,4 @@
-// Generated from the command table by paddock-commands. Do not edit: cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test shell.
+// Generated from the command table by paddock-commands. Do not edit: cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test it.
 
 /** Every command of the table: its kind, the window classes that may call it and its largest request in bytes. */
 export const APP_COMMANDS = {
