@@ -8,12 +8,12 @@
 // - `read` with a timeout option `-t <n>` anywhere among its options (`-s -n 1 -t 20`, `-p "x" -t 5`, `-d "" -t 5`, `-rt 2`,
 //   `-t5`, `-t 0.5`), n above 0 (`-t 0` is a poll for input, not a wait); a variable timeout (`-t "$T"`, `-t ${DELAY:-5}`)
 //   counts as a wait;
-// - when that command's stdin is one of the sources above, with or without a space before the `<`; `2</dev/null` is not stdin.
+// - when that command's stdin is one of the sources above (`<> /dev/null` too; with `-u N`, fd N redirected as `N</dev/zero`), with or without a space before the `<`; `2</dev/null` is not stdin.
 // Simple commands are split at `;`, `&&`, `||`, a single `&`, a single `|` and `)` (in Rust/TS/JS strings also at a literal
 // `\n`), so a later command's redirect is not charged to the read; shell lines are cut at ` #`.
 // Limits (documented, not checked): a `read -t` on an inherited stdin, a file, a fifo or a variable-built redirect is not
 // flagged (a real fifo or a terminal prompt is fine); a `read` split over lines with `\` continuation is not joined; a pipe
-// whose source is on an earlier line is not seen; a source other than the listed trivial ones is not judged; comment lines
+// whose source is on an earlier line is not seen; a source other than the listed trivial ones is not judged; a group redirect (`{ …; } </dev/null`) and a quoted `|` before `-t` are not followed; `while read -t N` fed by a pipe is not flagged (the loop ends with its input); comment lines
 // are skipped (`#` in shell and YAML; `//`, `/*`, `*` in code). The fix: `sleep N`, or `perl -e 'select(undef,undef,undef,N)'`
 // where sleep is unavailable. A justified case carries `# conformance: busy-wait-read — <reason>` (shell, YAML) or
 // `// conformance: busy-wait-read — <reason>` (Rust, TS, JS) on the line or the line above. The conformance package's own
@@ -30,7 +30,7 @@ const READ_T = /(?:^|[\s(`"'{])read\s+(?:\S+\s+)*?-[A-Za-z]*t\s*(?:(\d+(?:\.\d+)
 const STDIN = '(?:^|[^\\d<>&]|(?<=\\S)\\d)0?'; // not an fd redirect such as 2<, but a digit ending a word (-t5) is fine
 /** A stdin that returns at once: /dev/zero|null, a here-string or heredoc, a closed stdin, a trivial process substitution. */
 const DEAD_INPUT = new RegExp(
-  `${STDIN}<(?![<&(])\\s*["']?\\/dev\\/(?:zero|null)\\b|${STDIN}<<|${STDIN}<&-|${STDIN}<\\s*<\\(\\s*(?::|true|false|echo|printf)(?=[\\s)]|$)`,
+  `${STDIN}<>?(?![<&(])\\s*["']?\\/dev\\/(?:zero|null)\\b|${STDIN}<<|${STDIN}<&-|${STDIN}<\\s*<\\(\\s*(?::|true|false|echo|printf)(?=[\\s)]|$)`,
 );
 /** A command that ends at once, as the left side of a pipe. */
 const DEAD_SOURCE = /^\s*(?:do\s+|then\s+|\{\s*|\(\s*)?(?:(?::|true|false|yes|echo|printf)(?=\s|$)|cat\s+\/dev\/(?:zero|null)\b)/;
@@ -74,7 +74,12 @@ export function busyReads(text, kind = 'shell') {
     const hit = commands(l, code).some((c) => {
       const m = READ_T.exec(c.text);
       if (!m || (m[1] !== undefined && Number(m[1]) === 0)) return false;
-      return DEAD_INPUT.test(c.text) || (c.pipe !== null && DEAD_SOURCE.test(c.pipe));
+      if (DEAD_INPUT.test(c.text)) return true;
+      // `-u N` reads fd N: dead when that fd is redirected from a dead file (`3</dev/zero`).
+      const fd = /\s-[A-Za-z]*u\s*(\d+)/.exec(c.text);
+      if (fd && new RegExp(`(?:^|\\s)${fd[1]}<>?\\s*["']?\\/dev\\/(?:zero|null)\\b`).test(c.text)) return true;
+      // A `while`/`until read` loop fed by a pipe ends with its input, so it is not a busy wait.
+      return c.pipe !== null && DEAD_SOURCE.test(c.pipe) && !/^\s*(?:while|until)\s/.test(c.text);
     });
     if (!hit) return;
     const here = `${raw}\n${lines[i - 1] ?? ''}`;
