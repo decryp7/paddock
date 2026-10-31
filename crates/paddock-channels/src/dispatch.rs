@@ -353,6 +353,7 @@ impl Dispatcher {
                     subject: msg.title.clone(),
                     body: msg.body.clone(),
                     step_timeout: self.policy.timeout,
+                    lan: cfg.allow_lan,
                 })
             }
         }

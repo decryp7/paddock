@@ -231,8 +231,55 @@ fn an_address_is_judged_as_the_network_layer_reads_it() {
 }
 
 #[test]
-fn the_switch_is_for_webhook_and_ntfy_only() {
-    let mut c = email("m", None);
-    c.allow_lan = true;
-    assert!(valid(c).unwrap_err().contains("webhook and ntfy"));
+fn an_smtp_server_on_the_home_network_follows_the_same_rule() {
+    for host in ["192.168.1.20", "mail.local", "mailserver", "[fd00::5]"] {
+        let mut c = email("m", None);
+        if let Transport::Email { host: h, .. } = &mut c.transport {
+            *h = host.into();
+        }
+        let off = valid(c.clone()).unwrap_err();
+        assert!(off.contains("home network"), "{host}: {off}");
+        c.allow_lan = true;
+        assert_eq!(valid(c), Ok(()), "{host}");
+    }
+    // A public server and this computer need no switch.
+    for host in ["mail.example.org", "localhost"] {
+        let mut c = email("m", None);
+        if let Transport::Email { host: h, .. } = &mut c.transport {
+            *h = host.into();
+        }
+        assert_eq!(valid(c), Ok(()), "{host}");
+    }
+}
+
+#[test]
+fn a_dispatched_mail_carries_the_switch_to_the_sender() {
+    let mut lan = email("m", None);
+    lan.allow_lan = true;
+    if let Transport::Email { host, .. } = &mut lan.transport {
+        *host = "mail.local".into();
+    }
+    let plain = email("p", None);
+    let r = rig(
+        vec![lan, plain],
+        FakePoster::new(),
+        FakeMail::new(),
+        store(),
+    );
+    r.dispatcher
+        .dispatch(&message("diskLow", Severity::Error), &CancelToken::new());
+    let mut seen: Vec<(String, bool)> = r
+        .mailer
+        .mails()
+        .into_iter()
+        .map(|m| (m.host, m.lan))
+        .collect();
+    seen.sort();
+    assert_eq!(
+        seen,
+        [
+            ("mail.example.org".to_string(), false),
+            ("mail.local".to_string(), true)
+        ]
+    );
 }

@@ -101,8 +101,7 @@ pub struct ChannelConfig {
     #[serde(default)]
     pub min_severity: Severity,
     /// The channel's server is on the user's home network: validation accepts a private address (and plain http to it), and the
-    /// poster reaches private networks for this channel only. Webhook and ntfy channels only: e-mail does not go through
-    /// `paddock-net`, and validation refuses the switch on it. Off by default; files from before this field load as off.
+    /// poster reaches private networks for this channel only. It covers an e-mail channel's SMTP server too. Off by default; files from before this field load as off.
     #[serde(default)]
     pub allow_lan: bool,
     /// Delivery details.
@@ -155,11 +154,6 @@ impl ChannelConfig {
         for e in &self.events {
             check_text("Event kind", e, 64)?;
         }
-        if self.allow_lan && matches!(self.transport, Transport::Email { .. }) {
-            return Err(
-                "The home network switch is for webhook and ntfy channels; e-mail is sent by the mail server you name".into(),
-            );
-        }
         match &self.transport {
             Transport::Webhook { url, .. } => check_http_url("Webhook URL", url, self.allow_lan),
             Transport::Ntfy { server, topic, .. } => {
@@ -185,6 +179,12 @@ impl ChannelConfig {
                 ..
             } => {
                 check_host(host)?;
+                if !self.allow_lan && paddock_net::host_may_be_lan(host.trim()) {
+                    return Err(
+                        "SMTP host is a private network address; turn on \"This channel is on my home network\" to use it"
+                            .into(),
+                    );
+                }
                 if *port == 0 {
                     return Err("SMTP port must not be 0".into());
                 }
