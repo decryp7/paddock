@@ -206,6 +206,10 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
   branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.
 - A change that touches an app's release path builds that app's installers before it lands on main (rule 54): the batch
   dispatches `<app>-release.yml` with gates on and the bundle built; passing tests alone is not enough.
+- One implementation per mechanism (rule 55): a mechanism listed in `docs/known-copies.toml` is fixed in its canonical
+  implementation and every copy in the same change, each with a failing test first, or a copy is waived with
+  `Copies-waived: <id> <path or *>: <reason>`; a freeze does not stop such a fix; a new copy needs its entry and a
+  delete-by tag (ADR 0034, check C58).
 - Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.

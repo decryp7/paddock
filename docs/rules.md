@@ -255,6 +255,23 @@ changes here, every app's copy is updated in the same change.
     *Why:* Dyno's release workflow had no `prepare: npm run build -w ui`. Tests passed, but every installer build failed
     on a clean runner; a leftover `ui/dist` had hidden it.
 
+## Copies (user, 2026-10-31; ADR 0034, rule 40)
+55. **One implementation per mechanism; copies are registered, fixed together and expire.** A mechanism that exists more
+    than once (a shared crate or package and an app's copy, or two apps' copies) is listed in `docs/known-copies.toml` with
+    its canonical implementation and, for each copy, the app that deletes it and the tag by which it is gone.
+    (a) A change that touches one member of a listed mechanism makes the same change in every other member, each with its
+    own failing test first (rule 11), or waives a member with the commit trailer
+    `Copies-waived: <mechanism-id> <path or *>: <reason>`.
+    (b) A shared-code freeze (rule 1) does not freeze fixes to a listed mechanism: the fix lands in the canonical
+    implementation and every copy in the same change. The shared API stays frozen.
+    (c) A new copy is allowed only with its register entry, a delete-by tag and the reason, in the same change. A tag is
+    refused while its app still holds a copy whose delete-by tag it has reached; moving that date is a reviewed change.
+    (d) Enforced by conformance check C58 (follow-up, ADR 0034 WP-1); until it lands, the reviewer and the steward check
+    the register by hand.
+    *Why:* launchd's job report existed four times. The shared one already skipped nested blocks; Dyno's copy did not and
+    replaced its healthy agent at every login (Dyno 1.0 blocker B4). The Windows network-sandbox fix of the browser driver
+    sat in the one copy no app used, and the EBADF fix had to be made in two IPC endpoints.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:

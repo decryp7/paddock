@@ -1042,3 +1042,14 @@ and prove the check by making each historical bug a mutant it must catch (Dyno A
 wrong and a review caught: releasing the child before it is gone (a second agent while the first still runs), and an event
 without the generation it is about (an old child's exit taken for the new one's).
 
+## A fix in the shared crate reached nobody; the app copy had the bug (2026-10-31, family)
+Dyno 1.0's login blocker B4 (the app replaced its healthy launchd agent four times at every login) came from Dyno's
+`service_repair.rs`, ported from Pitwall. `paddock-service` already had the fix (its parser skips launchd's nested blocks),
+but no app used that part of it, and the copies in Pitwall and Pitcrew had the same defect. In the same week the Windows
+network-sandbox switch went into `paddock-chromium`, which no app depends on, and the EBADF fix turned out to be needed in two
+IPC endpoints. About 15 shared crates had no direct app dependency at all. Rules 42 and 43 said what to do once code is
+shared; nothing tracked the copies in between, the freeze sent quick fixes to the app copy only, and "deleted later" had no
+date. **Rule (55, ADR 0034):** every mechanism that exists more than once is listed in `docs/known-copies.toml`; a fix goes to
+the canonical implementation and every copy in the same change (a freeze does not stop it) or a copy is waived with a reason;
+each copy has an owner and a tag by which it is deleted, and that tag is refused while the copy exists. Before fixing a bug in
+any service, IPC, driver or UI helper, look it up in the register first.
