@@ -93,7 +93,8 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
 3. **Training: the `rfdetr` package** (Apache-2.0), version-pinned, inside the managed Python training runtime (user
    decision of 2026-10-24, recorded in proposal section 6 and the family note; this ADR closes proposal section 15
    question 1). The runtime is itself a `paddock-runtime` entry (pinned, hashed, self-tested, quarantined on failure).
-   The training worker runs with no network: `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, and the sandbox denies
+   Mirrored `.pth` checkpoints are loaded only there, with `torch.load(..., weights_only=True)`, after their SHA-256 matched the
+   catalogue ([weights.md](../weights.md)). The training worker runs with no network: `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, and the sandbox denies
    outbound connections. **Where the DINOv2 files come from offline** (read in the `rfdetr` 1.11.2 wheel,
    `rfdetr/models/backbone/dinov2.py` and `rfdetr/config.py`, 2026-10-29): N, S, M and L use the windowed backbone with
    `patch_size` 16; for a patch size other than 14 the backbone sets `load_dinov2_weights = False` and builds
