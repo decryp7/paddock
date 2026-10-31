@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, DestroyRef, ElementRef, inject, input, output, signal, viewChild } from '@angular/core';
 
 export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
 
@@ -21,7 +21,15 @@ export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
   },
   template: `
     <header class="pd-header"><ng-content select="[slot=header]" /></header>
-    <div class="pd-content"><ng-content /></div>
+    <div
+      #content
+      class="pd-content"
+      [attr.tabindex]="scrolls() ? 0 : null"
+      [attr.role]="scrolls() ? 'region' : null"
+      [attr.aria-label]="scrolls() ? label() + ' content' : null"
+    >
+      <ng-content />
+    </div>
     <footer class="pd-footer"><ng-content select="[slot=footer]" /></footer>
   `,
   styles: `
@@ -45,6 +53,7 @@ export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
     /* The OS material (vibrancy, Acrylic) shows through; the solid colour is the designed fallback. */
     :host(.pd-tray--translucent) { background: color-mix(in srgb, var(--pd-surface-3) 72%, transparent); }
     .pd-header { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); }
+    .pd-content:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: -2px; }
     .pd-header:empty, .pd-footer:empty { display: none; }
     .pd-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 var(--pd-space-4) var(--pd-space-3); }
     .pd-footer { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-4); border-top: 1px solid var(--pd-hairline); }
@@ -53,10 +62,31 @@ export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
   `,
 })
 export class SuTrayPopover {
+  private readonly content = viewChild.required<ElementRef<HTMLElement>>('content');
+  /** True while the content scrolls (past 520 px): the region is then focusable and named, so a keyboard can scroll it (WCAG 2.1.1). */
+  protected readonly scrolls = signal(false);
+
   /** Accessible name, e.g. "Dyno". */
   readonly label = input.required<string>();
   readonly platform = input<SuTrayPlatform>('macos');
   /** The shell draws an OS material behind the page; let it show through. */
   readonly translucent = input<boolean>(false);
   readonly dismissed = output<void>();
+
+  constructor() {
+    const destroy = inject(DestroyRef);
+    afterNextRender(() => {
+      const el = this.content().nativeElement;
+      const check = (): void => this.scrolls.set(el.scrollHeight > el.clientHeight + 1);
+      const resize = new ResizeObserver(check);
+      resize.observe(el);
+      const mutation = new MutationObserver(check);
+      mutation.observe(el, { childList: true, subtree: true, characterData: true });
+      destroy.onDestroy(() => {
+        resize.disconnect();
+        mutation.disconnect();
+      });
+      check();
+    });
+  }
 }
