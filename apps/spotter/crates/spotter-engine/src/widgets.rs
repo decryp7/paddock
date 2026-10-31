@@ -10,17 +10,11 @@ use paddock_widgets::{Layout, PlacementState, Progress, SurfaceNotice, SurfaceVa
 use spotter_core::state::WatchStatus;
 use spotter_core::time::ClockTime;
 use spotter_core::watch::Settings;
-use spotter_core::widgets::{
+use spotter_core::widgets::{CHANGE_ROWS, FAILURE_ROWS, SITE_ROWS, 
     ChangeRow, FailureKind, FailureRow, NotificationMode, PopoverState, PopoverValue, PopoverValues, PopoverWidget, SiteRow, SiteState,
     WidgetActionId,
 };
 
-/// Rows Watched sites lists.
-pub const SITE_ROWS: usize = 4;
-/// Rows Recent changes lists.
-pub const CHANGE_ROWS: usize = 1;
-/// Rows Failures lists.
-pub const FAILURE_ROWS: usize = 2;
 /// Watches due within this long after the next one are counted with it (milliseconds).
 const SAME_TIME_MS: i64 = 60_000;
 
@@ -163,9 +157,10 @@ fn recent_changes(i: &Inputs) -> PopoverState {
     }
     found.sort_by(|a, b| b.first_seen_ms.cmp(&a.first_seen_ms).then_with(|| a.name.cmp(&b.name)));
     let total = found.len();
+    let unseen = count(found.iter().filter(|c| c.unseen).count());
     found.truncate(CHANGE_ROWS);
     let more = count(total - found.len());
-    ready(PopoverValue::RecentChanges { rows: found, more }, i.now_ms)
+    ready(PopoverValue::RecentChanges { rows: found, more, unseen }, i.now_ms)
 }
 
 fn next_check(i: &Inputs) -> PopoverState {
@@ -447,11 +442,43 @@ mod tests {
         let PopoverValue::WatchedSites { total, rows, more } = with(&ws, &s, |i| value_of(state(PopoverWidget::WatchedSites, i))) else {
             panic!("watched sites")
         };
-        assert_eq!((total, rows.len(), more), (6, SITE_ROWS, 2));
+        assert_eq!((total, rows.len(), more), (6, 4, 2));
         let states: Vec<SiteState> = rows.iter().map(|r| r.state).collect();
         assert_eq!(states, [SiteState::Attention, SiteState::New, SiteState::Checking, SiteState::Ok]);
         assert_eq!(rows[0].id, "w5");
         assert_eq!(rows[0].version.as_deref(), Some("1.2.0"));
+    }
+
+    #[test]
+    fn a_pending_watch_is_listed_before_an_ok_one_and_after_a_running_one() {
+        let mut ok = watch("ok");
+        ok.name = "Ok tool".into();
+        let mut pending = watch("pending");
+        pending.status = WatchStatus::Pending;
+        let mut running = watch("running");
+        running.checking = true;
+        let s = settings();
+        let PopoverValue::WatchedSites { rows, .. } = with(&[ok, pending, running], &s, |i| value_of(state(PopoverWidget::WatchedSites, i))) else {
+            panic!("watched sites")
+        };
+        let order: Vec<(&str, SiteState)> = rows.iter().map(|r| (r.id.as_str(), r.state)).collect();
+        assert_eq!(order, [("running", SiteState::Checking), ("pending", SiteState::Pending), ("ok", SiteState::Ok)]);
+    }
+
+    #[test]
+    fn the_pause_notice_words_the_minute_hour_and_hours_boundaries() {
+        let layout = Stored::<PopoverCatalogue>::default().layout().clone();
+        let detail = |minutes: i64| {
+            let mut s = settings();
+            s.notifications_paused_until = Some(NOW + minutes * 60_000);
+            with(&[], &s, |i| popover_values(&layout, i)).notice.unwrap().detail
+        };
+        assert_eq!(detail(59), "Paused for 59 more minutes.");
+        assert_eq!(detail(60), "Paused for about an hour more.");
+        assert_eq!(detail(119), "Paused for about an hour more.");
+        assert_eq!(detail(120), "Paused for 2 more hours.");
+        assert_eq!(detail(149), "Paused for 2 more hours.");
+        assert_eq!(detail(150), "Paused for 3 more hours.");
     }
 
     #[test]
@@ -474,13 +501,12 @@ mod tests {
         ws[0].latest = None;
         ws[4].unseen = true;
         let s = settings();
-        let PopoverValue::RecentChanges { rows, more } = with(&ws, &s, |i| value_of(state(PopoverWidget::RecentChanges, i))) else {
+        let PopoverValue::RecentChanges { rows, more, unseen } = with(&ws, &s, |i| value_of(state(PopoverWidget::RecentChanges, i))) else {
             panic!("recent changes")
         };
         // w0 has no release, so four are found; the newest first, the first CHANGE_ROWS listed, the rest counted.
-        let newest_first = ["w4", "w3", "w2", "w1"];
-        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), newest_first[..CHANGE_ROWS]);
-        assert_eq!(more as usize, newest_first.len() - CHANGE_ROWS);
+        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["w4"]);
+        assert_eq!((more, unseen), (3, 1), "four found, one listed, one of them unseen");
         assert!(rows[0].unseen);
     }
 
@@ -599,12 +625,8 @@ mod tests {
             panic!("failures")
         };
         // Worst first: the failing, unpaused watches are w1 (7), w3 (3), w0 (2) and w2 (1); the list shows the first FAILURE_ROWS.
-        let worst_first = ["w1", "w3", "w0", "w2"];
-        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), worst_first[..FAILURE_ROWS]);
-        assert_eq!(
-            (more, rows[0].kind, rows[0].message.as_str()),
-            ((worst_first.len() - FAILURE_ROWS) as u32, FailureKind::NeedsYou, "Log in.")
-        );
+        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["w1", "w3"]);
+        assert_eq!((more, rows[0].kind, rows[0].message.as_str()), (2, FailureKind::NeedsYou, "Log in."));
         assert_eq!(rows[1].kind, FailureKind::AuthNeeded);
     }
 

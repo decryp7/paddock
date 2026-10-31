@@ -4,6 +4,16 @@ export type SpotterSurface = "popover";
 
 export type PopoverWidget = "watchedSites" | "recentChanges" | "nextCheck" | "quietHours" | "failures" | "notifications";
 
+export type LoadingRows = { 
+/**
+ * The widget kind.
+ */
+kind: PopoverWidget, 
+/**
+ * How many placeholder rows its loading twin draws.
+ */
+rows: number, };
+
 export type SiteState = "ok" | "new" | "checking" | "paused" | "attention" | "pending";
 
 export type SiteRow = { 
@@ -96,7 +106,11 @@ rows: Array<ChangeRow>,
 /**
  * Releases not listed.
  */
-more: number, } | { "kind": "nextCheck", 
+more: number, 
+/**
+ * Watches with a release nobody has seen yet (the widget's head says "3 new").
+ */
+unseen: number, } | { "kind": "nextCheck", 
 /**
  * The watch id.
  */

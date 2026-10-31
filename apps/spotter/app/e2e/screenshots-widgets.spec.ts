@@ -16,22 +16,27 @@ for (const scheme of ['light', 'dark'] as const) {
       mkdirSync(OUT, { recursive: true });
     });
 
-    /** The popup, sized to its content like the shell sizes the window. */
+    /** The popup, drawn at the height the shell gives it (its content up to the family cap) and clipped to its own box. */
     for (const [name, url] of [
       ['tray-popup', '/#/tray'],
       ['tray-popup-empty', '/?mock=empty#/tray'],
+      ['tray-popup-worst', '/?mock=worst#/tray'],
     ] as const) {
       test(name, async ({ page }) => {
         await page.setViewportSize({ width: 372, height: 1000 });
         await page.goto(url);
-        await expect(page.locator('pd-tray-popover')).toBeVisible();
+        const popup = page.locator('pd-tray-popover');
+        await expect(popup).toBeVisible();
         // Every widget has its values (none is still loading), so the popup is shot in the state a person sees.
-        await expect(page.locator('pd-tray-popover section.pd-w').first()).toBeVisible();
-        await expect(page.locator('pd-tray-popover [aria-busy="true"]')).toHaveCount(0);
+        await expect(popup.locator('section.pd-w').first()).toBeVisible();
+        await expect(popup.locator('[aria-busy="true"]')).toHaveCount(0);
         await page.evaluate(async () => document.fonts.ready);
-        const height = await page.locator('pd-tray-popover').evaluate((e) => Math.ceil(e.getBoundingClientRect().height));
-        await page.setViewportSize({ width: 372, height: height + 12 });
-        await page.screenshot({ path: `${OUT}/${name}-${scheme}.png` });
+        // The default popup, also in its worst state (failures, a check running, paused notifications), is whole within the cap.
+        const box = await popup.boundingBox();
+        expect(box?.height ?? 0, `${name} is at most 520 px tall`).toBeLessThanOrEqual(520);
+        const scroller = popup.locator('.pd-content');
+        expect(await scroller.evaluate((e) => e.scrollHeight - e.clientHeight), `${name} needs no scrolling`).toBeLessThanOrEqual(0);
+        await popup.screenshot({ path: `${OUT}/${name}-${scheme}.png` });
       });
     }
 
@@ -42,6 +47,16 @@ for (const scheme of ['light', 'dark'] as const) {
       await expect(page.locator('pd-skeleton')).toHaveCount(0);
       await page.evaluate(async () => document.fonts.ready);
       await page.screenshot({ path: `${OUT}/tray-chooser-${scheme}.png` });
+    });
+
+    // Wide enough for the live preview beside the list (the chooser shows it from this width on).
+    test('chooser with the live preview', async ({ page, app }) => {
+      await page.setViewportSize({ width: 1100, height: 720 });
+      await app.settings.open({ page: 'sp.tray-popup' });
+      await expect(page.locator('pd-widget-chooser')).toBeVisible();
+      await expect(page.locator('pd-tray-popover[aria-label="Preview of the popup"] section.pd-w').first()).toBeVisible();
+      await page.evaluate(async () => document.fonts.ready);
+      await page.screenshot({ path: `${OUT}/tray-chooser-preview-${scheme}.png` });
     });
   });
 }

@@ -5,7 +5,7 @@
 
 use paddock_widgets::Edit;
 use spotter_core::time::Timestamp;
-use spotter_core::widgets::{PopoverValue, PopoverWidget};
+use spotter_core::widgets::PopoverWidget;
 use spotter_engine::clock::ManualClock;
 use spotter_engine::notifier::RecordingNotifier;
 use spotter_engine::secrets::MemorySecrets;
@@ -142,5 +142,37 @@ fn values_follow_the_layout() {
         .placements
         .iter()
         .all(|p| !matches!(p.state, paddock_widgets::WidgetState::Error { .. })));
-    let _ = PopoverValue::Failures { rows: vec![], more: 0 };
+}
+
+/// Edits and settings saves race on the same document: with the one write lock no edit is lost to a stale copy. The window is
+/// narrow, so the two sides run many rounds; a lost edit shows as a widget missing at the end.
+#[test]
+fn edits_racing_with_settings_saves_are_never_lost() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = open(dir.path());
+    let saver = {
+        let engine = engine.clone();
+        std::thread::spawn(move || {
+            for n in 0..150 {
+                let mut s = engine.settings();
+                s.notifications = n % 2 == 0;
+                engine.save_settings(s).unwrap();
+            }
+        })
+    };
+    for kind in [PopoverWidget::QuietHours, PopoverWidget::Notifications, PopoverWidget::WatchedSites] {
+        engine
+            .edit_popover(Edit::Add {
+                widget: kind,
+                span: None,
+                at: None,
+            })
+            .unwrap();
+    }
+    saver.join().unwrap();
+    for kind in [PopoverWidget::QuietHours, PopoverWidget::Notifications, PopoverWidget::WatchedSites] {
+        assert!(kinds(&engine).contains(&kind), "{kind:?} was lost");
+    }
+    let reopened = open(dir.path());
+    assert_eq!(kinds(&reopened), kinds(&engine), "and saved");
 }

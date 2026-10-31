@@ -131,6 +131,8 @@ export interface SpotterBackend {
   editPopover(edit: PopoverEdit): Promise<PopoverView>;
   /** What the popup's widgets show now. */
   popoverValues(): Promise<PopoverValues>;
+  /** How many rows each widget draws, loading or ready (the engine's row limits): loading twins are as tall as ready widgets. */
+  popoverShape(): Promise<LoadingRows[]>;
 
   /** Subscribes to pushed state; returns the unsubscribe function. */
   onState(handler: (push: StatePush) => void): Promise<() => void>;

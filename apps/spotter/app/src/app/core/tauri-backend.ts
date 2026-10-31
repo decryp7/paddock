@@ -189,6 +189,9 @@ export class TauriBackend implements SpotterBackend {
   popoverValues(): Promise<PopoverValues> {
     return this.run('popover_values');
   }
+  popoverShape(): Promise<LoadingRows[]> {
+    return this.run('popover_shape');
+  }
   showMainWindow(route: string | null): Promise<void> {
     return this.run('show_main_window', { route });
   }

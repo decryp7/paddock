@@ -19,6 +19,7 @@ fn types() -> String {
         // Spotter's catalogue.
         SpotterSurface::decl(),
         PopoverWidget::decl(),
+        LoadingRows::decl(),
         // What the popup's widgets show.
         SiteState::decl(),
         SiteRow::decl(),

@@ -13,7 +13,7 @@ pub mod values;
 #[cfg(test)]
 mod generated;
 
-pub use popover::{PopoverCatalogue, PopoverKind, PopoverWidget};
+pub use popover::{loading_shape, rows_of, LoadingRows, PopoverCatalogue, PopoverKind, PopoverWidget, CHANGE_ROWS, FAILURE_ROWS, SITE_ROWS};
 pub use values::{
     ChangeRow, FailureKind, FailureRow, NotificationMode, PopoverPlacementState, PopoverState, PopoverValue, PopoverValues, SiteRow,
     SiteState, WidgetActionId,

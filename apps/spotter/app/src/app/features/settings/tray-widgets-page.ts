@@ -31,7 +31,7 @@ import { WidgetSet } from '../tray/widget-set';
           <pd-widget-chooser [view]="view" [widgetFor]="widgetFor" [preview]="true" (edit)="edit($event)">
             <div slot="preview">
               <sp-widget-set #set />
-              <pd-tray-popover label="Preview of the popup" platform="macos">
+              <pd-tray-popover label="Preview of the popup" platform="macos" inert>
                 <div slot="header" class="head"><strong>Spotter</strong></div>
                 <pd-widget-area [placements]="view.layout.placements" [catalogue]="view.catalogue" [values]="store.values()" [templates]="set.widgets()" />
               </pd-tray-popover>
