@@ -49,7 +49,9 @@ for (const c of cases) {
     symlinkSync('target-app-s1', join(root, 'home/linkroot'));
     mkdirSync(join(root, 'outside'));
     writeFileSync(join(root, 'outside/canary'), 'x');
-    const folder = c.folder === '' ? '' : join(root, c.folder);
+    // "" is no folder, "//" the top of the disk, a leading "/" is appended to the scratch root as written (it may hold ".."),
+    // anything else is a path below the scratch root.
+    const folder = c.folder === '' ? '' : c.folder === '//' ? '/' : c.folder.startsWith('/') ? root + c.folder : join(root, c.folder);
     let r;
     if (c.mode === 'plain') {
       r = spawnSync('bash', [join(repo, 'tools/prune-build-folders.sh'), folder, c.cap], { env: { PATH: '/usr/bin:/bin', PADDOCK_PRUNE_UNIT: 'kb' }, encoding: 'utf8' });
