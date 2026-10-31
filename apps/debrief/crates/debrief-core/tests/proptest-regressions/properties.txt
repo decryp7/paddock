@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 712593cdc540f467813048c7dd164f0d1bb23fba70a1a55358aeefa9e62b8a99 # shrinks to recs = [GenRec { ts: None, level: 0, message: "_", machine: 0, cpu: 0 }], q = Query { from: None, to: None, levels: [], text: "", regex: false, case_sensitive: false, text_mode: Substring, filters: [], group_by: [], groups: [], markers: [], ql: "", window: None, sources: [] }, size = 1, desc = false
+cc f7fbc6a243522f1b07bb985b30c67a07b487922b42c33a859d1cff41156f0d03 # shrinks to recs = [GenRec { ts: None, level: 0, message: " ", machine: 0, cpu: 0 }], q = Query { from: None, to: None, levels: [], text: "", regex: false, case_sensitive: false, text_mode: Substring, filters: [], group_by: [], groups: [], markers: [], ql: "", window: None, sources: [] }, size = 1, desc = false

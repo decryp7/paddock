@@ -26,6 +26,8 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 const CASES: u32 = 256;
+/// Cases of the properties that share one workspace per thread (cheap: about 2 ms a case).
+const WORKSPACE_CASES: u32 = 2048;
 const HANG_LIMIT: Duration = Duration::from_secs(15);
 
 /// Runs `f` on a helper thread and fails if it panics or takes longer than [`HANG_LIMIT`].
@@ -957,13 +959,19 @@ fn gen_query() -> impl Strategy<Value = Query> {
         prop::option::of(1_790_000_000_000i64..1_792_000_000_000),
         prop::collection::vec(0usize..6, 0..3),
         prop::sample::select(vec!["", "a", "e", "1", "x y", "."]),
-        prop::option::of(prop::sample::select(vec![
-            ("Cpu", ">", "100"),
-            ("Cpu", "<", "0"),
-            ("MachineName", "=", "WEB01"),
-            ("MachineName", "!=", "WEB00"),
-            ("@message", "contains", "a"),
-        ])),
+        // Most cases carry no filter, so full multi-row pages are common.
+        prop::option::weighted(
+            0.3,
+            prop::sample::select(vec![
+                ("Cpu", ">", "100"),
+                ("Cpu", "<", "0"),
+                ("MachineName", "=", "WEB01"),
+                ("MachineName", "!=", "WEB00"),
+                ("@message", "contains", "a"),
+            ]),
+        ),
+        // About one case in ten keeps the range as generated, so a reversed one is still tried.
+        prop::bool::weighted(0.1),
         prop::sample::select(vec![
             "",
             "Cpu > 10",
@@ -972,9 +980,18 @@ fn gen_query() -> impl Strategy<Value = Query> {
             "not exists(nope)",
         ]),
     )
-        .prop_map(|(from, to, levels, text, filter, ql)| Query {
-            from,
-            to,
+        .prop_map(|(from, to, levels, text, filter, keep_order, ql)| Query {
+            // Mostly a range that runs forwards (a reversed one matches nothing).
+            from: if keep_order {
+                from
+            } else {
+                from.zip(to).map(|(a, b)| a.min(b)).or(from)
+            },
+            to: if keep_order {
+                to
+            } else {
+                from.zip(to).map(|(a, b)| a.max(b)).or(to)
+            },
             levels: levels.into_iter().map(|i| Level::ALL[i]).collect(),
             text: text.to_string(),
             filters: filter
@@ -990,56 +1007,138 @@ fn gen_query() -> impl Strategy<Value = Query> {
         })
 }
 
+thread_local! {
+    /// One full workspace per test thread, reused by every case of a property: `Workspace::new` compiles the whole
+    /// parser library (about 70 ms), which took 150-180 s over 256 cases on the loaded macOS runner (CI 7267).
+    static CASE_WORKSPACE: std::cell::RefCell<Workspace> =
+        std::cell::RefCell::new(Workspace::new(Profile::default_profile()).expect("the default profile compiles"));
+}
+
+/// Runs one case on this thread's workspace, cleared first so no case sees another's files.
+fn with_case_workspace<R>(f: impl FnOnce(&mut Workspace) -> R) -> R {
+    CASE_WORKSPACE.with(|ws| {
+        let mut ws = ws.borrow_mut();
+        ws.clear();
+        f(&mut ws)
+    })
+}
+
+#[test]
+fn a_case_workspace_shows_only_the_files_of_its_own_case() {
+    let first = TempDir::new();
+    std::fs::write(first.0.join("a.clef"), "{\"@t\":\"2026-10-01T00:00:00Z\",\"@mt\":\"first one\"}\n{\"@t\":\"2026-10-01T00:00:01Z\",\"@mt\":\"first two\"}\n{\"@mt\":\"first three\"}\n").unwrap();
+    let second = TempDir::new();
+    std::fs::write(
+        second.0.join("b.clef"),
+        "{\"@t\":\"2026-10-02T00:00:00Z\",\"@mt\":\"second only\"}\n",
+    )
+    .unwrap();
+    with_case_workspace(|ws| {
+        ws.open(std::slice::from_ref(&first.0)).unwrap();
+        assert_eq!(ws.records().len(), 3);
+        // Warm the caches, so a clear() that leaves them behind would show.
+        let q = Query::default();
+        assert_eq!(ws.matching(&q).unwrap().len(), 3);
+        let page = ws
+            .page(&PageRequest {
+                query: q.clone(),
+                offset: 0,
+                limit: 50,
+                descending: false,
+                anchor: None,
+            })
+            .unwrap();
+        assert_eq!(page.total, 3);
+        ws.timeline(&TimelineRequest {
+            query: q,
+            buckets: 10,
+            always_show_lifecycle: true,
+        })
+        .unwrap();
+    });
+    with_case_workspace(|ws| {
+        assert!(ws.records().is_empty() && ws.sources().is_empty(), "cleared before the case starts");
+        ws.open(std::slice::from_ref(&second.0)).unwrap();
+        assert_eq!(ws.records().len(), 1);
+        assert_eq!(ws.records()[0].message, "second only");
+        assert_eq!(ws.records()[0].id, 0, "ids restart in a cleared workspace");
+        assert_eq!(ws.sources().len(), 1);
+        assert_eq!(ws.matching(&Query::default()).unwrap().len(), 1);
+        let page = ws
+            .page(&PageRequest {
+                query: Query::default(),
+                offset: 0,
+                limit: 50,
+                descending: false,
+                anchor: None,
+            })
+            .unwrap();
+        assert_eq!((page.total, page.rows.len()), (1, 1));
+        let tl = ws
+            .timeline(&TimelineRequest {
+                query: Query::default(),
+                buckets: 10,
+                always_show_lifecycle: true,
+            })
+            .unwrap();
+        assert_eq!(tl.histogram.iter().flat_map(|b| b.iter()).map(|n| *n as u64).sum::<u64>(), 1);
+    });
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(CASES))]
+    #![proptest_config(ProptestConfig::with_cases(WORKSPACE_CASES))]
 
     #[test]
     fn paging_partitions_results(recs in prop::collection::vec(gen_rec(), 1..40), q in gen_query(), size in 1usize..15, desc in any::<bool>()) {
         let dir = TempDir::new();
         std::fs::write(dir.0.join("a.clef"), clef_text(&recs)).unwrap();
-        let mut ws = Workspace::new(Profile::default_profile()).unwrap();
-        ws.open(std::slice::from_ref(&dir.0)).unwrap();
-        prop_assert_eq!(ws.records().len(), recs.len());
+        with_case_workspace(|ws| -> Result<(), TestCaseError> {
+            ws.open(std::slice::from_ref(&dir.0)).unwrap();
+            prop_assert_eq!(ws.records().len(), recs.len());
 
-        let matching = ws.matching(&q).unwrap();
-        let req = |offset, limit| PageRequest { query: q.clone(), offset, limit, descending: desc, anchor: None };
-        let full = ws.page(&req(0, 5000)).unwrap();
-        prop_assert_eq!(full.total, matching.len());
-        let full_ids: Vec<u32> = full.rows.iter().map(|r| r.id).collect();
-        let mut expected: Vec<u32> = matching.to_vec();
-        if desc { expected.reverse(); }
-        prop_assert_eq!(&full_ids, &expected);
+            let matching = ws.matching(&q).unwrap();
+            let req = |offset, limit| PageRequest { query: q.clone(), offset, limit, descending: desc, anchor: None };
+            let full = ws.page(&req(0, 5000)).unwrap();
+            prop_assert_eq!(full.total, matching.len());
+            let full_ids: Vec<u32> = full.rows.iter().map(|r| r.id).collect();
+            let mut expected: Vec<u32> = matching.to_vec();
+            if desc { expected.reverse(); }
+            prop_assert_eq!(&full_ids, &expected);
 
-        let mut seen = Vec::new();
-        let mut offset = 0;
-        loop {
-            let p = ws.page(&req(offset, size)).unwrap();
-            prop_assert_eq!(p.total, matching.len());
-            if p.rows.is_empty() { break; }
-            prop_assert!(p.rows.len() <= size);
-            seen.extend(p.rows.iter().map(|r| r.id));
-            offset += size;
-            if offset >= p.total { break; }
-        }
-        prop_assert_eq!(&seen, &expected, "pages must concatenate to the full result");
-        let mut dedup = seen.clone();
-        dedup.sort_unstable();
-        dedup.dedup();
-        prop_assert_eq!(dedup.len(), seen.len(), "no duplicates");
+            let mut seen = Vec::new();
+            let mut offset = 0;
+            loop {
+                let p = ws.page(&req(offset, size)).unwrap();
+                prop_assert_eq!(p.total, matching.len());
+                if p.rows.is_empty() { break; }
+                prop_assert!(p.rows.len() <= size);
+                seen.extend(p.rows.iter().map(|r| r.id));
+                offset += size;
+                if offset >= p.total { break; }
+            }
+            prop_assert_eq!(&seen, &expected, "pages must concatenate to the full result");
+            let mut dedup = seen.clone();
+            dedup.sort_unstable();
+            dedup.dedup();
+            prop_assert_eq!(dedup.len(), seen.len(), "no duplicates");
+            Ok(())
+        })?;
     }
 
     #[test]
     fn timeline_histogram_counts_matching_timestamped_records(recs in prop::collection::vec(gen_rec(), 1..40), q in gen_query(), buckets in 10usize..300) {
         let dir = TempDir::new();
         std::fs::write(dir.0.join("a.clef"), clef_text(&recs)).unwrap();
-        let mut ws = Workspace::new(Profile::default_profile()).unwrap();
-        ws.open(std::slice::from_ref(&dir.0)).unwrap();
-        let matching = ws.matching(&q).unwrap();
-        let with_ts = matching.iter().filter(|id| ws.records()[**id as usize].ts.is_some()).count();
-        let tl = ws.timeline(&TimelineRequest { query: q.clone(), buckets, always_show_lifecycle: true }).unwrap();
-        let total: u64 = tl.histogram.iter().flat_map(|b| b.iter()).map(|n| *n as u64).sum();
-        prop_assert_eq!(total, with_ts as u64);
-        prop_assert_eq!(tl.histogram.len(), buckets);
+        with_case_workspace(|ws| -> Result<(), TestCaseError> {
+            ws.open(std::slice::from_ref(&dir.0)).unwrap();
+            let matching = ws.matching(&q).unwrap();
+            let with_ts = matching.iter().filter(|id| ws.records()[**id as usize].ts.is_some()).count();
+            let tl = ws.timeline(&TimelineRequest { query: q.clone(), buckets, always_show_lifecycle: true }).unwrap();
+            let total: u64 = tl.histogram.iter().flat_map(|b| b.iter()).map(|n| *n as u64).sum();
+            prop_assert_eq!(total, with_ts as u64);
+            prop_assert_eq!(tl.histogram.len(), buckets);
+            Ok(())
+        })?;
     }
 }
 

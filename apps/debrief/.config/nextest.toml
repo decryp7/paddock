@@ -68,12 +68,6 @@ path = "junit.xml"
 filter = 'all()'
 retries = 0
 
-# waiver: the query-language properties generate whole workspaces per case (95-99 s on the Linux runner, 115 s on the Mac
-# host in CI 6381); fewer cases would weaken them.
-[[profile.ci.overrides]]
-filter = "package(debrief-core) & binary(it) & test(/^properties::/)"
-slow-timeout = { period = "30s", terminate-after = 6 }
-
 # waiver: the DuckDB store answers every query and analysis of the sample workspaces like the reference engine, one profile
 # per test (47-81 s in CI 6381), and the large-folder import measures progress over a generated folder of many files (89 s).
 [[profile.ci.overrides]]
