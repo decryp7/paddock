@@ -134,8 +134,25 @@ pub mod builtin {
         }
     }
 
-    /// The app's settings file with secret values masked: `settings.json`.
-    pub struct Settings;
+    /// The app's settings file with secret values masked: `settings.json` by default, or the file the app names
+    /// ([`Settings::file`]; the shell's own is `shell-settings.json`, so an app's `settings.json` in another format is
+    /// never read as the shell's).
+    pub struct Settings {
+        file: String,
+    }
+
+    impl Settings {
+        /// The settings file `name` in the config folder.
+        pub fn file(name: impl Into<String>) -> Self {
+            Settings { file: name.into() }
+        }
+    }
+
+    impl Default for Settings {
+        fn default() -> Self {
+            Settings::file(paddock_settings::FILE_NAME)
+        }
+    }
 
     impl Section for Settings {
         fn id(&self) -> &str {
@@ -143,7 +160,7 @@ pub mod builtin {
         }
 
         fn collect(&self, cx: &Context<'_>) -> SectionOutput {
-            let path = cx.dirs.config().join(paddock_settings::FILE_NAME);
+            let path = cx.dirs.config().join(&self.file);
             let meta = match std::fs::metadata(&path) {
                 Ok(m) => m,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -177,7 +194,7 @@ pub mod builtin {
                 });
             match parsed {
                 Ok(value) => SectionOutput::one(SectionFile {
-                    name: "settings.json".into(),
+                    name: self.file.clone(),
                     kind: FileKind::Settings,
                     summary: "Your settings; passwords, tokens and keys are replaced by ***".into(),
                     content: Content::Json(value),
@@ -272,7 +289,7 @@ pub mod builtin {
     pub fn all() -> Vec<Arc<dyn Section>> {
         vec![
             Arc::new(SystemInfo),
-            Arc::new(Settings),
+            Arc::new(Settings::default()),
             Arc::new(Crash),
             Arc::new(Logs::new()),
         ]

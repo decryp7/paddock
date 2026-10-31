@@ -4,6 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-diag`: the settings file in a report can be named
+- `builtin::Settings::file(name)` and `tauri::Setup::settings_file(name)` report that file of the config folder (masked, listed
+  under its own name) instead of `settings.json`; the shell demo passes `shell-settings.json`, so a report never shows an app's
+  own `settings.json` (another format) as the shell's. The default stays `settings.json`.
+
 ### `paddock-shell`: the shell keeps its settings in its own file
 - `logging::install` and the shell's settings service read and write `shell-settings.json` in the app's config folder
   (`logging::SHELL_SETTINGS_FILE`, `shell_settings_path`), not `settings.json`. An app that keeps its own `settings.json` in

@@ -185,12 +185,23 @@ pub fn run_bounded(program: &str, args: &[&str], timeout: Duration) -> Option<St
             let _ = tx.send(stdout.read_to_end(&mut bytes).map(|_| bytes));
         })
         .ok()?;
+    let started = std::time::Instant::now();
     let read = rx.recv_timeout(timeout);
-    // Reading ended (the program closed its output) or the time is up: either way it is reaped, never left behind.
-    if read.is_err() {
-        let _ = child.kill();
+    // The output ended (the program closed it) or the time is up. A program can close its output and carry on, so the exit
+    // is waited for within the same time too; whatever is still running then is killed and reaped, never left behind.
+    let mut finished = read.is_ok();
+    while finished {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if started.elapsed() < timeout => std::thread::sleep(Duration::from_millis(20)),
+            _ => finished = false,
+        }
     }
-    let _ = child.wait();
+    if !finished {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
     let bytes = read.ok()?.ok()?;
     Some(String::from_utf8_lossy(&bytes).into_owned())
 }
@@ -504,6 +515,10 @@ mod tests {
         let started = std::time::Instant::now();
         assert_eq!(run_bounded("/bin/sh", &["-c", "exec sleep 30"], Duration::from_millis(300)), None);
         assert!(started.elapsed() < Duration::from_secs(10), "killed at the timeout, not waited for");
+        // It closes its output and carries on: the exit is bounded too.
+        let started = std::time::Instant::now();
+        assert_eq!(run_bounded("/bin/sh", &["-c", "exec >&-; exec sleep 30"], Duration::from_millis(300)), None);
+        assert!(started.elapsed() < Duration::from_secs(10), "not waited for after its output closed");
         assert_eq!(run_bounded("/nonexistent/tool", &[], Duration::from_secs(1)), None);
         assert_eq!(run_bounded("/bin/sh", &["-c", "printf ok"], Duration::from_secs(20)), Some("ok".to_string()));
     }
