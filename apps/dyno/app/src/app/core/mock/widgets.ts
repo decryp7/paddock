@@ -413,6 +413,7 @@ export function mockWidgetChoices(): WidgetChoices {
   const title = (m: Metric) => METRIC_TITLES.find(([x]) => x === m)?.[1] ?? String(m);
   const choice = (metric: Metric) => ({ metric, title: title(metric) });
   return {
+    popover: POPOVER_KINDS.map((k) => ({ kind: k.kind as PopoverKind, default: (k.kind === 'diskSpace' ? { diskSpace: { volume: 'all' } } : k.kind) as PopoverWidget })),
     dashboard: DASHBOARD_KINDS.map((k) => {
       const metrics = accepted(k.kind as DashboardKind).map(choice);
       return { kind: k.kind as DashboardKind, default: dw(k.kind as DashboardKind, metrics[0]!.metric), metrics };

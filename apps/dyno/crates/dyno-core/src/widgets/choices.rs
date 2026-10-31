@@ -4,6 +4,7 @@
 use super::dashboard::{DashboardKind, DashboardWidget};
 use super::menu_bar::{MenuBarItem, MenuBarKind};
 use super::metric::Metric;
+use super::popover::{PopoverKind, PopoverWidget, VolumeChoice};
 use paddock_widgets::Catalogue;
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +32,17 @@ pub struct DashboardKindChoices {
     pub metrics: Vec<MetricChoice>,
 }
 
+/// What the chooser needs to add a popup widget of one kind.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct PopoverKindChoices {
+    /// The kind.
+    pub kind: PopoverKind,
+    /// A valid widget of this kind with default options (disk space shows all volumes).
+    pub default: PopoverWidget,
+}
+
 /// What the chooser needs to add a menu-bar item of one kind.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
@@ -47,6 +59,8 @@ pub struct MenuBarKindChoices {
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct WidgetChoices {
+    /// Popup kinds, in the catalogue's order.
+    pub popover: Vec<PopoverKindChoices>,
     /// Dashboard kinds, in the catalogue's order.
     pub dashboard: Vec<DashboardKindChoices>,
     /// Menu-bar kinds, in the catalogue's order.
@@ -78,6 +92,19 @@ fn menu_bar_default(kind: MenuBarKind) -> MenuBarItem {
     }
 }
 
+fn popover_default(kind: PopoverKind) -> PopoverWidget {
+    match kind {
+        PopoverKind::ActiveAlarms => PopoverWidget::ActiveAlarms,
+        PopoverKind::DiskSpace => PopoverWidget::disk(VolumeChoice::All),
+        PopoverKind::CpuMemory => PopoverWidget::CpuMemory,
+        PopoverKind::Network => PopoverWidget::Network,
+        PopoverKind::BackupHealth => PopoverWidget::BackupHealth,
+        PopoverKind::LastIssue => PopoverWidget::LastIssue,
+        PopoverKind::PinnedCounters => PopoverWidget::PinnedCounters,
+        PopoverKind::TopApps => PopoverWidget::TopApps,
+    }
+}
+
 /// The choices, built from the catalogues.
 pub fn widget_choices() -> WidgetChoices {
     let dashboard = super::DashboardCatalogue::kinds()
@@ -104,7 +131,15 @@ pub fn widget_choices() -> WidgetChoices {
             default: menu_bar_default(spec.kind),
         })
         .collect();
+    let popover = super::PopoverCatalogue::kinds()
+        .iter()
+        .map(|spec| PopoverKindChoices {
+            kind: spec.kind,
+            default: popover_default(spec.kind),
+        })
+        .collect();
     WidgetChoices {
+        popover,
         dashboard,
         menu_bar,
         menu_bar_metrics: Metric::CHOICES.iter().cloned().map(choice).collect(),
@@ -129,6 +164,18 @@ mod tests {
             assert_eq!(k.default.validate(), Ok(()), "{:?}", k.kind);
             assert_eq!(k.default.kind(), k.kind);
         }
+    }
+
+    #[test]
+    fn every_popup_default_is_valid_and_of_its_kind() {
+        let c = widget_choices();
+        assert_eq!(c.popover.len(), super::super::PopoverCatalogue::kinds().len());
+        for k in &c.popover {
+            assert_eq!(k.default.validate(), Ok(()), "{:?}", k.kind);
+            assert_eq!(k.default.kind(), k.kind);
+        }
+        let disk = c.popover.iter().find(|k| k.kind == PopoverKind::DiskSpace).unwrap();
+        assert_eq!(disk.default, PopoverWidget::disk(VolumeChoice::All));
     }
 
     #[test]

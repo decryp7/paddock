@@ -1,7 +1,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { counterTitle } from '../features/counters/counters-model';
 import { BACKEND } from '../core/backend';
-import type { DashboardKind, DashboardWidget, MenuBarItem, MenuBarKind, Metric, MetricChoice, WidgetChoices } from '../core/generated/widgets';
+import type { DashboardKind, DashboardWidget, MenuBarItem, MenuBarKind, Metric, MetricChoice, PopoverKind, PopoverWidget, WidgetChoices } from '../core/generated/widgets';
 
 /**
  * What the dashboard and menu-bar choosers may offer, as the engine says it (family ADR 0035): a ready default widget per kind
@@ -35,6 +35,13 @@ export class WidgetChoicesStore {
   dashboardDefault(kind: DashboardKind): DashboardWidget {
     const found = this._choices()?.dashboard.find((k) => k.kind === kind);
     if (!found) throw new Error(`The engine offers no dashboard widget “${kind}”.`);
+    return found.default;
+  }
+
+  /** A valid popup widget of `kind` with default options. */
+  popoverDefault(kind: PopoverKind): PopoverWidget {
+    const found = this._choices()?.popover.find((k) => k.kind === kind);
+    if (!found) throw new Error(`The engine offers no popup widget “${kind}”.`);
     return found.default;
   }
 

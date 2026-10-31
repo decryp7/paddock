@@ -724,6 +724,16 @@ default: DashboardWidget,
  */
 metrics: Array<MetricChoice>, };
 
+export type PopoverKindChoices = { 
+/**
+ * The kind.
+ */
+kind: PopoverKind, 
+/**
+ * A valid widget of this kind with default options (disk space shows all volumes).
+ */
+default: PopoverWidget, };
+
 export type MenuBarKindChoices = { 
 /**
  * The kind.
@@ -735,6 +745,10 @@ kind: MenuBarKind,
 default: MenuBarItem, };
 
 export type WidgetChoices = { 
+/**
+ * Popup kinds, in the catalogue's order.
+ */
+popover: Array<PopoverKindChoices>, 
 /**
  * Dashboard kinds, in the catalogue's order.
  */

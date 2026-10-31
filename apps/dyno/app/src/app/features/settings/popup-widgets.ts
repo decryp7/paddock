@@ -8,13 +8,9 @@ import type { Edit, Placement, PopoverKind, PopoverWidget, VolumeChoice } from '
 import { PlatformService } from '../../core/platform';
 import { Notifier } from '../../shared/notifier';
 import { PopoverValues } from '../../state/popover-values';
+import { WidgetChoicesStore } from '../../state/widget-choices';
 import { WidgetLayouts } from '../../state/widget-layouts';
 import { DynoPopoverWidgets } from '../tray/widgets/popover-widgets';
-
-/** A new popup widget of `kind` with its default options (the engine validates it). */
-export function newPopoverWidget(kind: PopoverKind): PopoverWidget {
-  return kind === 'diskSpace' ? { diskSpace: { volume: 'all' } } : kind;
-}
 
 const volumeKey = (v: VolumeChoice): string => (typeof v === 'string' ? v : `mount:${v.mount}`);
 const volumeOf = (key: string): VolumeChoice => (key.startsWith('mount:') ? { mount: key.slice(6) } : key === 'system' ? 'system' : 'all');
@@ -29,6 +25,7 @@ const volumeOf = (key: string): VolumeChoice => (key.startsWith('mount:') ? { mo
   imports: [MatButton, PdSelect, PdWidgetArea, PdWidgetChooser, PdWidgetOption, SuTrayPopover, DynoPopoverWidgets],
   template: `
     @if (view(); as v) {
+      @if (choices.ready()) {
       <pd-widget-chooser [view]="v" [widgetFor]="widgetFor" [again]="again" [preview]="true" (edit)="edit($event)">
         <ng-template pdWidgetOption="diskSpace" let-p>
           <pd-select [options]="volumeOptions()" [value]="volumeOf(p)" [ariaLabel]="'Volume of ' + p.id" (valueChange)="setVolume(p, $event)" />
@@ -41,6 +38,7 @@ const volumeOf = (key: string): VolumeChoice => (key.startsWith('mount:') ? { mo
           </pd-tray-popover>
         </div>
       </pd-widget-chooser>
+      }
       <dy-popover-widgets />
     } @else {
       <p class="faint" role="status">Reading the popup layout…</p>
@@ -64,7 +62,8 @@ export class PopupWidgets implements OnInit {
     return p === 'browser' ? 'macos' : p;
   })();
   protected readonly view = this.layouts.popover;
-  protected readonly widgetFor = newPopoverWidget;
+  protected readonly choices = inject(WidgetChoicesStore);
+  protected readonly widgetFor = (kind: PopoverKind): PopoverWidget => this.choices.popoverDefault(kind);
   protected readonly again = { diskSpace: 'Add volume' };
   protected readonly tpl = viewChild(DynoPopoverWidgets);
   private readonly volumes = signal<PdSelectOption[]>([]);
@@ -77,6 +76,7 @@ export class PopupWidgets implements OnInit {
 
   ngOnInit(): void {
     void this.layouts.use('popover');
+    void this.choices.load();
     void this.values.start();
     void this.backend
       .diskVolumes()

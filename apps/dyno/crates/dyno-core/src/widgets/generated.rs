@@ -75,6 +75,7 @@ fn types() -> String {
         // What the choosers offer and what a reading says.
         MetricChoice::decl(),
         DashboardKindChoices::decl(),
+        PopoverKindChoices::decl(),
         MenuBarKindChoices::decl(),
         WidgetChoices::decl(),
         MetricReading::decl(),

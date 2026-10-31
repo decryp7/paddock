@@ -21,7 +21,7 @@ pub mod wire;
 #[cfg(test)]
 mod generated;
 
-pub use choices::{widget_choices, DashboardKindChoices, MenuBarKindChoices, MetricChoice, WidgetChoices};
+pub use choices::{widget_choices, DashboardKindChoices, MenuBarKindChoices, MetricChoice, PopoverKindChoices, WidgetChoices};
 pub use dashboard::{DashboardCatalogue, DashboardKind, DashboardWidget, Thresholds, WidgetOptions};
 pub use menu_bar::{MenuBarCatalogue, MenuBarItem, MenuBarKind};
 pub use metric::Metric;

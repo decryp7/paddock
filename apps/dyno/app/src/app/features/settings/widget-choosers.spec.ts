@@ -4,7 +4,7 @@ import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { WidgetChoicesStore } from '../../state/widget-choices';
 import { MenuBarItems } from './menu-bar-items';
-import { PopupWidgets, newPopoverWidget } from './popup-widgets';
+import { PopupWidgets } from './popup-widgets';
 
 const NOW = 1_700_000_000_000;
 
@@ -61,9 +61,12 @@ describe('dy-popup-widgets', () => {
     await vi.waitFor(() => expect(document.querySelector('.pd-undo-snack')).not.toBeNull());
   });
 
-  it('builds a default widget for a kind', () => {
-    expect(newPopoverWidget('diskSpace')).toEqual({ diskSpace: { volume: 'all' } });
-    expect(newPopoverWidget('network')).toBe('network');
+  it('takes the default widget of a kind from the engine choices', async () => {
+    setup(PopupWidgets);
+    const choices = TestBed.inject(WidgetChoicesStore);
+    await choices.load();
+    expect(choices.popoverDefault('diskSpace')).toEqual({ diskSpace: { volume: 'all' } });
+    expect(choices.popoverDefault('network')).toBe('network');
   });
 });
 
