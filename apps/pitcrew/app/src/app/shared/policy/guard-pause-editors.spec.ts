@@ -151,12 +151,30 @@ describe('PauseEditor', () => {
     expect(add().disabled).toBe(true);
   });
 
+  it('pre-fills a newly added window with Monday to Friday, once', async () => {
+    const { f, el, saved } = mount(pause({ mode: 'schedule' }));
+    await settle(f);
+    el.querySelector<HTMLButtonElement>('.pd-add')!.click();
+    await settle(f);
+    const picked = () => Array.from(el.querySelectorAll<HTMLElement>('.pd-window:nth-of-type(2) pd-day-picker button')).filter((b) => b.getAttribute('aria-pressed') === 'true');
+    expect(picked()).toHaveLength(5);
+    expect(save(el).disabled).toBe(false);
+    save(el).click();
+    expect(saved[0]!.windows[1]).toEqual({ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '22:00', end: '06:00' });
+    // Unticking every day is the user's choice: it is not filled again, and Save is blocked by pauseProblem.
+    for (const b of picked()) b.click();
+    await settle(f);
+    expect(picked()).toHaveLength(0);
+    expect(save(el).disabled).toBe(true);
+    expect(el.querySelector('p.tone-danger[role="alert"]')?.textContent).toContain('at least one day');
+  });
+
   it('discards edits and honours read-only', async () => {
     const { f, el } = mount(pause({ mode: 'schedule' }));
     await settle(f);
     el.querySelector<HTMLButtonElement>('.pd-add')!.click();
     await settle(f);
-    expect(save(el).disabled).toBe(true); // the new window has no day
+    expect(save(el).disabled).toBe(false); // the new window has Monday to Friday and the draft differs
     byText<HTMLButtonElement>(el, 'button', 'Discard changes')!.click();
     await settle(f);
     expect(el.querySelectorAll('.pd-window')).toHaveLength(1);

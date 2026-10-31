@@ -1,5 +1,5 @@
 import type { UpdateWindow } from '../../core/api.types';
-import { fromPauseWindows, toPauseWindows } from './pause-windows';
+import { fillAddedWindow, fromPauseWindows, toPauseWindows } from './pause-windows';
 
 describe('pause window mapping', () => {
   const windows: UpdateWindow[] = [
@@ -23,5 +23,23 @@ describe('pause window mapping', () => {
 
   it('drops a zone the policy cannot hold', () => {
     expect(fromPauseWindows({ windows: [{ days: ['sat'], start: '01:00', end: '02:00' }], zone: 'Europe/Berlin' })).toEqual([{ days: ['sat'], start: '01:00', end: '02:00' }]);
+  });
+
+  describe('fillAddedWindow', () => {
+    const weekdays = ['mon', 'tue', 'wed', 'thu', 'fri'];
+    const one: UpdateWindow = { days: ['sat'], start: '01:00', end: '02:00' };
+    const blank: UpdateWindow = { days: [], start: '22:00', end: '06:00' };
+
+    it('gives a window that just appeared Monday to Friday', () => {
+      expect(fillAddedWindow([one], [one, blank])).toEqual([one, { ...blank, days: weekdays }]);
+      expect(fillAddedWindow([], [blank])).toEqual([{ ...blank, days: weekdays }]);
+    });
+
+    it('leaves an edit of an existing day-less window, a removal and a window with days alone', () => {
+      expect(fillAddedWindow([blank], [{ ...blank, start: '23:00' }])).toEqual([{ ...blank, start: '23:00' }]);
+      expect(fillAddedWindow([one, blank], [one])).toEqual([one]);
+      expect(fillAddedWindow([one], [one, one])).toEqual([one, one]);
+      expect(fillAddedWindow([one, blank], [one, { ...blank, days: [] }])).toEqual([one, blank]);
+    });
   });
 });

@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, input, linkedSignal, output } from '@angular/core';
 import { MAX_PAUSE_WINDOWS, PdPauseEditor, type PauseWindows } from '@decryp7/paddock-ui/schedule';
 import type { PauseMode, PausePolicy } from '../../core/api.types';
-import { fromPauseWindows, toPauseWindows } from './pause-windows';
+import { fillAddedWindow, fromPauseWindows, toPauseWindows } from './pause-windows';
 
 const MODES: { key: PauseMode; label: string; hint: string }[] = [
   { key: 'off', label: 'Never', hint: 'Runners take jobs at any time.' },
@@ -159,7 +159,7 @@ export class PauseEditor {
   protected readonly shared = computed(() => toPauseWindows(this.draft().windows));
 
   protected setWindows(value: PauseWindows): void {
-    this.set({ windows: fromPauseWindows(value) });
+    this.set({ windows: fillAddedWindow(this.draft().windows, fromPauseWindows(value)) });
   }
 
   protected setNumber(key: 'busy_percent' | 'quiet_minutes', value: string): void {
