@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ENDPOINT_PATTERN, groupLeaks, leakPattern, listEndpointLeaks, listLeaks, main, newLeaks, sharedDirs } from './check-temp-leaks.mjs';
+import { enclosingTest, ENDPOINT_PATTERN, findCreators, groupLeaks, leakPattern, listEndpointLeaks, listLeaks, main, newLeaks, sharedDirs, sourceFiles } from './check-temp-leaks.mjs';
 
 const quiet = () => {
   const out = [];
@@ -171,5 +171,67 @@ test('an empty --socket-dir fails with 2 on Unix (a missing socket base is never
     assert.equal(main(['--dir', temp.dir, '--socket-dir', ''], quiet().log, () => [], 'win32'), 0, 'named pipes: no socket folder');
   } finally {
     temp.done();
+  }
+});
+
+// Rule 56: a leak names the test that left it, not only the folder (a triager had to grep the tree by hand, 2026-10-31).
+function sources(dir) {
+  mkdirSync(join(dir, 'src', 'deep'), { recursive: true });
+  mkdirSync(join(dir, 'target', 'debug'), { recursive: true });
+  writeFileSync(
+    join(dir, 'src', 'perf.rs'),
+    [
+      '#[test]',
+      'fn writes_the_preset() {',
+      '    let dir = std::env::temp_dir().join(format!("debrief-tools-perfmon-{}", std::process::id()));',
+      '}',
+      '#[test]',
+      'fn overwrite_needs_a_yes() {',
+      '    let dir = std::env::temp_dir().join(format!("debrief-tools-perfmon-ow-{}", std::process::id()));',
+      '}',
+    ].join('\n'),
+  );
+  writeFileSync(join(dir, 'src', 'deep', 'store.spec.ts'), "describe('x', () => {\n  it('keeps a scratch store', () => {\n    const d = `debrief-store-${n}`;\n  });\n});\n");
+  writeFileSync(join(dir, 'target', 'debug', 'built.rs'), 'format!("debrief-tools-perfmon-{}")');
+}
+
+test('findCreators names the source line and the test around it; a longer name is not blamed; build output is not searched', () => {
+  const s = scratch();
+  try {
+    sources(s.dir);
+    const files = sourceFiles(s.dir);
+    assert.ok(!files.some((f) => f.includes('target')), 'target/ is skipped');
+    assert.deepEqual(findCreators('debrief-tools-perfmon-*', files, s.dir), [join('src', 'perf.rs') + ':3 (in writes_the_preset)']);
+    assert.deepEqual(findCreators('debrief-tools-perfmon-ow-*', files, s.dir), [join('src', 'perf.rs') + ':7 (in overwrite_needs_a_yes)']);
+    assert.deepEqual(findCreators('debrief-store-*', files, s.dir), [join('src', 'deep', 'store.spec.ts') + ':3 (in keeps a scratch store)']);
+    assert.deepEqual(findCreators('debrief-made-at-runtime-*', files, s.dir), []);
+  } finally {
+    s.done();
+  }
+});
+
+test('enclosingTest finds the nearest Rust fn or it()/test() above a line', () => {
+  assert.equal(enclosingTest(['fn a() {', '  x', '}', 'fn b() {', '  y'], 4), 'b');
+  assert.equal(enclosingTest(["test('does a thing', () => {", '  y'], 1), 'does a thing');
+  assert.equal(enclosingTest(['let x = 1;'], 0), '');
+});
+
+test('a leak ends with one ::error:: naming the offending test, and lists each folder with its modified time', () => {
+  const tmp = scratch();
+  const src = scratch();
+  try {
+    sources(src.dir);
+    mkdirSync(join(tmp.dir, 'debrief-tools-perfmon-4242'));
+    const a = quiet();
+    assert.equal(main(['--dir', tmp.dir, '--source', src.dir], a.log), 1);
+    const text = a.out.join('\n');
+    assert.match(text, /debrief-tools-perfmon-\*\n\s+src.perf\.rs:3 \(in writes_the_preset\)/);
+    assert.match(text, /debrief-tools-perfmon-4242 {2}\d{4}-\d\d-\d\dT/);
+    const errors = a.out.filter((l) => l.startsWith('::error::'));
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /1 temp folder\(s\) left behind by the tests: debrief-tools-perfmon-\*\. Next step: .*src.perf\.rs:3 \(in writes_the_preset\)/);
+  } finally {
+    tmp.done();
+    src.done();
   }
 });

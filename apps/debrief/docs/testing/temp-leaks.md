@@ -5,7 +5,9 @@ Tests must not leave `debrief-*` or `imt-*` folders in the OS temp directory. CI
 
 - **Check**: `scripts/ci/check-temp-leaks.mjs`. `--snapshot <file>` records the matching folders that exist before the
   tests; `--check <file>` exits 1 naming the ones that appeared since. Without a baseline every matching folder counts.
-  `--dir <path>` scans another folder. Its test is `scripts/ci/check-temp-leaks.test.mjs`.
+  `--dir <path>` scans another folder. For each offender it names the source lines that spell the folder's name and the
+  test around them (searched under `apps/debrief`, or `--source <dir>`), each folder's modified time (to match against the
+  JUnit report) and ends with one `::error::` naming them. Its test is `scripts/ci/check-temp-leaks.test.mjs`.
 - **Shared folders**: when the temp folder is too long for a socket path (96 bytes; macOS' is), an endpoint folder
   falls back to `$XDG_RUNTIME_DIR` or `/tmp`. Without `--dir` the check also scans those two for names of exactly the
   endpoint shape (`debrief-<prefix>-<12 hex>`, or a confined test folder `dbw` plus six characters), never other files.
