@@ -228,7 +228,8 @@ export function diskTrendOption(trend: DiskTrend, t: ThemeTokens): EChartsCoreOp
         return p ? `${formatDate(p.axisValue)}<br/>${p.seriesName}: <b>${formatBytes(p.value[1])}</b> free` : '';
       },
     },
-    xAxis: { type: 'time', interval: tick, axisLine: { lineStyle: { color: t.border } }, axisTick: { show: false }, axisLabel: { ...axisText(t), hideOverlap: true, formatter: '{d} {MMM}' }, splitLine: { show: false } },
+    // A value axis in milliseconds: its ticks are exactly `tick` apart (a time axis rounds them to month and day boundaries).
+    xAxis: { type: 'value', min: first, max: end, interval: tick, axisLine: { lineStyle: { color: t.border } }, axisTick: { show: false }, axisLabel: { ...axisText(t), hideOverlap: true, formatter: (v: number) => formatDate(v) }, splitLine: { show: false } },
     yAxis: {
       type: 'value',
       min: 0,

@@ -26,12 +26,22 @@ test.describe('the popup fits its cap', () => {
       const cap = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--pd-tray-max-height')));
       expect(cap).toBe(520);
       const popover = page.locator('pd-tray-popover');
+      let measured = 'the popup was never measured';
+      let last = measured;
       await expect(async () => {
-        const box = (await popover.boundingBox())!;
-        const overflow = await page.locator('pd-tray-popover [role="region"]').evaluate((el) => el.scrollHeight - el.clientHeight);
-        expect(box.height, `the popup is ${box.height} px; its content is ${overflow} px taller than the room it has`).toBeLessThanOrEqual(cap);
-        expect(overflow, `the content scrolls by ${overflow} px in a popup of ${box.height} px`).toBeLessThanOrEqual(1);
-      }).toPass({ timeout: 10_000 });
+        try {
+          const box = (await popover.boundingBox())!;
+          const overflow = await page.locator('pd-tray-popover .pd-content').evaluate((el) => el.scrollHeight - el.clientHeight);
+          measured = `the popup is ${box.height} px and its content scrolls by ${overflow} px`;
+          expect(box.height, measured).toBeLessThanOrEqual(cap);
+          expect(overflow, measured).toBeLessThanOrEqual(1);
+        } catch (e) {
+          last = `${measured} (${String(e).split('\n')[0]})`;
+          throw e;
+        }
+      }, 'the popup fits').toPass({ timeout: 10_000 }).catch(() => {
+        throw new Error(last);
+      });
     });
   }
 });

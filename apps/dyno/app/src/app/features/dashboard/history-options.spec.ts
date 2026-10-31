@@ -133,6 +133,18 @@ describe('diskTrendOption', () => {
   });
 });
 
+describe('diskTrendOption date axis', () => {
+  const day = 24 * 3600 * 1000;
+  it('puts its ticks a whole number of days apart, about five across the line and its forecast', () => {
+    const points = Array.from({ length: 31 }, (_, i) => ({ at: i * day, free: 100 - i }));
+    const o = diskTrendOption({ disk: 'C:', total: 1000, points, forecast: { fullInDays: 41 } }, LIGHT) as { xAxis: { type: string; min: number; max: number; interval: number } };
+    expect(o.xAxis.type).toBe('value');
+    expect(o.xAxis.interval % day).toBe(0);
+    expect((o.xAxis.max - o.xAxis.min) / o.xAxis.interval).toBeGreaterThanOrEqual(4);
+    expect((o.xAxis.max - o.xAxis.min) / o.xAxis.interval).toBeLessThanOrEqual(6);
+  });
+});
+
 describe('byteAxis', () => {
   const GB = 1024 ** 3;
   it('steps in round numbers of the unit the axis is read in', () => {
