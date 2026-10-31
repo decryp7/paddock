@@ -48,7 +48,7 @@ describe('MetricReadings', () => {
 
   it('keeps the last readings when the engine does not answer', async () => {
     const { mock } = setup();
-    const out = runInInjectionContext(TestBed.inject(Injector), () => TestBed.inject(MetricReadings).follow(() => [q('cpuTotal')]));
+    const out = runInInjectionContext(TestBed.inject(Injector), () => TestBed.inject(MetricReadings).follow(() => [named('c', q('cpuTotal'))]));
     TestBed.tick();
     await vi.waitFor(() => expect(out().size).toBe(1));
     vi.spyOn(mock, 'metricReadings').mockRejectedValue(new Error('down'));
