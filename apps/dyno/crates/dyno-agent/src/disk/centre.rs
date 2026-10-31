@@ -904,6 +904,38 @@ mod tests {
         }
     }
 
+    /// The cached list is `None` before the first listing (the request itself never lists), starts one in the background and
+    /// is the listed volumes afterwards.
+    #[test]
+    fn the_cached_volumes_never_list_on_the_request() {
+        let fs = Arc::new(FakeFs::new());
+        let r = rig(fs.clone(), vec![vol("Macintosh HD", &fs.root(), VolumeLocation::Internal)]);
+        assert_eq!(
+            r.centre.cached_volumes(),
+            None,
+            "the first call lists nothing on the caller's thread"
+        );
+        let began = std::time::Instant::now();
+        let listed = loop {
+            if let Some(v) = r.centre.cached_volumes() {
+                break v;
+            }
+            assert!(
+                began.elapsed() < std::time::Duration::from_secs(60),
+                "the background listing never finished"
+            );
+            std::thread::yield_now();
+        };
+        assert_eq!(listed.len(), 1);
+        let after = r.lister.1.load(Ordering::SeqCst);
+        assert_eq!(r.centre.cached_volumes().map(|v| v.len()), Some(1));
+        assert_eq!(
+            r.lister.1.load(Ordering::SeqCst),
+            after,
+            "a cached read never asks the system again"
+        );
+    }
+
     /// root with a (5 MB + 100 B), b (3 MB), c (2 KB), loose 7 B.
     fn tree(fs: &FakeFs, root: &Path) {
         let a = fs.dir(root, "a");
