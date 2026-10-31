@@ -293,6 +293,20 @@ describe('pd-widget-frame', () => {
     expect(q(f, 'mat-progress-bar')!.getAttribute('aria-valuenow')).toBe('0');
   });
 
+  it('draws unknown progress as an indeterminate bar with the phase and no count text', async () => {
+    const f = await setup();
+    expect(progressText('unknown', 'en')).toBe('');
+    f.componentInstance.state.set({ state: 'working', title: 'Checking', phase: 'Time Machine', progress: 'unknown', last: null, cancel: null });
+    await settle(f);
+    expect(q(f, '.pd-w-t')!.textContent).toBe('Checking');
+    expect(q(f, '.pd-w-d')!.textContent!.trim()).toBe('Time Machine');
+    expect(q(f, 'mat-progress-bar')!.getAttribute('mode')).toBe('indeterminate');
+    f.componentInstance.state.set({ state: 'working', title: 'Checking', phase: '', progress: 'unknown', last: null, cancel: null });
+    await settle(f);
+    expect(q(f, '.pd-w-d')).toBeNull();
+    expect(q(f, 'mat-progress-bar')!.getAttribute('mode')).toBe('indeterminate');
+  });
+
   it('shows only the progress when the phase is empty, with no leading separator', async () => {
     const f = await setup();
     f.componentInstance.state.set({ state: 'working', title: 'Checking backup', phase: '', progress: { count: { done: 2, unit: 'items' } }, last: null, cancel: null });
