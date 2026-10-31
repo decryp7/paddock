@@ -763,3 +763,14 @@ fn a_percent_counter_has_a_scale_and_a_tone_from_the_engine() {
     assert_eq!((rows[0].percent, rows[0].tone), (Some(95.0), ValueTone::Bad));
     assert_eq!((rows[1].percent, rows[1].tone), (Some(10.0), ValueTone::Ok));
 }
+
+#[test]
+fn the_surface_says_what_its_notice_is_about_on_the_wire() {
+    let calm = surface_values(None, vec![]);
+    assert_eq!(serde_json::to_value(&calm).unwrap()["noticeKind"], serde_json::Value::Null);
+    let stopped = surface_values(Some((PopoverNoticeKind::AgentStopped, agent_stopped(None, &FixedZone(0)))), vec![]);
+    let j = serde_json::to_value(&stopped).unwrap();
+    assert_eq!(j["noticeKind"], "agentStopped");
+    assert_eq!(j["notice"]["title"], "Agent stopped");
+    assert!(j["placements"].is_array());
+}

@@ -2,6 +2,7 @@
 
 use super::*;
 use dyno_core::time::{FixedZone, HOUR, SECOND};
+use dyno_core::widgets::popover_values::PopoverNoticeKind;
 use dyno_core::widgets::popover_values::{PopoverValue, WidgetActionId};
 use dyno_core::widgets::VolumeChoice;
 use dyno_platform::fake::quiet_sample;
@@ -228,7 +229,8 @@ fn an_answer_for_an_older_layout_is_dropped() {
 fn losing_the_agent_before_any_reading_does_not_claim_a_time() {
     let mut m = model();
     m.agent_lost(T0);
-    let notice = m.values(T0, &zone()).notice.expect("the notice");
+    let notice = m.values(T0, &zone()).notice.clone().expect("the notice");
     assert_eq!(notice.title, "Agent stopped");
     assert_eq!(notice.detail, "No readings yet");
+    assert_eq!(m.values(T0, &zone()).notice_kind, Some(PopoverNoticeKind::AgentStopped));
 }

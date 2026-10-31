@@ -12,7 +12,8 @@
 use dyno_core::protocol::LiveUpdate;
 use dyno_core::time::{LocalZone, Timestamp};
 use dyno_core::widgets::popover_values::{
-    agent_stopped, is_live_push, mark_stale, state, surface_values, Inputs, Minute, PopoverState, PopoverSurfaceValues, Source,
+    agent_stopped, is_live_push, mark_stale, state, surface_values, Inputs, Minute, PopoverNoticeKind, PopoverState, PopoverSurfaceValues,
+    Source,
 };
 use dyno_core::widgets::{PopoverCatalogue, PopoverWidget};
 use paddock_widgets::{Catalogue, Placement, PlacementId, Refresh, Widget};
@@ -257,7 +258,9 @@ impl PopoverModel {
     pub fn values(&self, now: Timestamp, zone: &dyn LocalZone) -> PopoverSurfaceValues {
         match &self.link {
             Link::Up => surface_values(None, self.states(now)),
-            Link::Down { since, frozen } => surface_values(Some(agent_stopped(*since, zone)), frozen.clone()),
+            Link::Down { since, frozen } => {
+                surface_values(Some((PopoverNoticeKind::AgentStopped, agent_stopped(*since, zone))), frozen.clone())
+            }
         }
     }
 

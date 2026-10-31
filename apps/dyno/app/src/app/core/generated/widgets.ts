@@ -811,6 +811,22 @@ metric: Metric,
  */
 thresholds: Thresholds, };
 
+export type PopoverNoticeKind = "agentStopped";
+
+export type PopoverSurfaceValues = { 
+/**
+ * What the notice is about; none when there is no notice.
+ */
+noticeKind: PopoverNoticeKind | null, 
+/**
+ * A message for the whole surface.
+ */
+notice: SurfaceNotice<WidgetActionId> | null, 
+/**
+ * Each placement's state.
+ */
+placements: Array<PlacementState<PopoverValue, WidgetActionId>>, };
+
 export type SurfaceView = { "popover": LayoutView<DynoSurface, PopoverWidget, PopoverKind> } | { "dashboard": LayoutView<DynoSurface, DashboardWidget, DashboardKind> } | { "menuBar": LayoutView<DynoSurface, MenuBarItem, MenuBarKind> };
 
 export type SurfaceEdit = { "popover": Edit<PopoverWidget> } | { "dashboard": Edit<DashboardWidget> } | { "menuBar": Edit<MenuBarItem> };

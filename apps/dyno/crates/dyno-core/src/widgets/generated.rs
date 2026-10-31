@@ -3,8 +3,8 @@
 //! types the Dyno types are built on, so the app compiles on its own until it imports them from `@decryp7/paddock-ui`.
 
 use super::popover_values::{
-    AlarmRow, AppRow, BackupValue, BackupVerdict, CounterRow, IssueValue, Level, Navigate, Page, PopoverValue, SettingsSection, VolumeRow,
-    WidgetActionId,
+    AlarmRow, AppRow, BackupValue, BackupVerdict, CounterRow, IssueValue, Level, Navigate, Page, PopoverNoticeKind, PopoverSurfaceValues,
+    PopoverValue, SettingsSection, VolumeRow, WidgetActionId,
 };
 use super::*;
 use paddock_commands::testing::{self, WriteMode};
@@ -80,6 +80,8 @@ fn types() -> String {
         WidgetChoices::decl(),
         MetricReading::decl(),
         ReadingQuery::decl(),
+        PopoverNoticeKind::decl(),
+        PopoverSurfaceValues::decl(),
         // The wire of the link.
         SurfaceView::decl(),
         SurfaceEdit::decl(),

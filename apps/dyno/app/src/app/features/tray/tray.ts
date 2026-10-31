@@ -99,7 +99,7 @@ export class Tray implements OnInit {
   protected readonly quitKey = shortcutLabel(this.platform, 'quit');
   protected readonly meta = popoverMeta;
   /** The agent is away: the header says so, with no health score and no "Monitoring". */
-  protected readonly stopped = computed(() => this.live.agent().state === 'failed' || this.values.values()?.notice != null);
+  protected readonly stopped = computed(() => this.live.agent().state === 'failed' || this.values.values()?.noticeKind === 'agentStopped');
   protected readonly score = (v: number) => Math.round(v).toString();
   protected readonly grade = computed(() => (this.health.report() ? GRADE_LABEL[this.health.report()!.grade] : ''));
   protected readonly tone = computed(() => (this.health.report() ? GRADE_TONE[this.health.report()!.grade] : 'accent'));

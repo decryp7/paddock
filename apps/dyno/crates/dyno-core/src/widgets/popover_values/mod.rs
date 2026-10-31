@@ -158,7 +158,35 @@ type State = WidgetState<PopoverValue, WidgetActionId>;
 /// A widget's state by placement.
 pub type PopoverState = PlacementState<PopoverValue, WidgetActionId>;
 /// All of the popup's values, with the surface notice.
-pub type PopoverSurfaceValues = SurfaceValues<PopoverValue, WidgetActionId>;
+pub type PopoverSurface = SurfaceValues<PopoverValue, WidgetActionId>;
+
+/// What the popup's one notice is about. The UI reads this, never the notice's text or action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum PopoverNoticeKind {
+    /// The agent is not running: nothing is being measured.
+    AgentStopped,
+}
+
+/// Everything the popup shows: the notice and its kind, and each placement's state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct PopoverSurfaceValues {
+    /// What the notice is about; none when there is no notice.
+    pub notice_kind: Option<PopoverNoticeKind>,
+    /// The notice and the placements.
+    #[serde(flatten)]
+    pub surface: PopoverSurface,
+}
+
+impl std::ops::Deref for PopoverSurfaceValues {
+    type Target = PopoverSurface;
+    fn deref(&self) -> &PopoverSurface {
+        &self.surface
+    }
+}
 
 /// How serious an alarm or issue is (always drawn with its word).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -932,8 +960,18 @@ pub fn agent_stopped(paused_at: Option<Timestamp>, zone: &dyn crate::time::Local
 
 /// The popup's values from states the caller collected: the live kinds from the app's push, the slow ones from the
 /// agent's last answer, in the layout's order. A placement with no state yet is left out (the UI shows it loading).
-pub fn surface_values(notice: Option<SurfaceNotice<WidgetActionId>>, placements: Vec<PopoverState>) -> PopoverSurfaceValues {
-    SurfaceValues { notice, placements }
+pub fn surface_values(
+    notice: Option<(PopoverNoticeKind, SurfaceNotice<WidgetActionId>)>,
+    placements: Vec<PopoverState>,
+) -> PopoverSurfaceValues {
+    let (notice_kind, notice) = match notice {
+        Some((kind, n)) => (Some(kind), Some(n)),
+        None => (None, None),
+    };
+    PopoverSurfaceValues {
+        notice_kind,
+        surface: SurfaceValues { notice, placements },
+    }
 }
 
 #[cfg(test)]

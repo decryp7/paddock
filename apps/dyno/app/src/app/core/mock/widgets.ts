@@ -352,7 +352,7 @@ export class MockWidgets {
     if (this.agentStopped) {
       for (const p of placements) if (p.state.state === 'ready') p.state = { ...p.state, staleSince: stoppedAt };
     }
-    return { notice, placements };
+    return { notice, noticeKind: notice ? 'agentStopped' : null, placements };
   }
 
   private stateOf(p: Placement<PopoverWidget>, kind: PopoverKind, state: MockWidgetState, at: number): WidgetState<PopoverValue, WidgetActionId> {

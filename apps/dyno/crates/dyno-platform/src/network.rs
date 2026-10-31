@@ -278,11 +278,22 @@ mod tests {
             // deadline is a hang guard).
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        let rows = OsSockets.sockets().unwrap();
-        let listening: Vec<&SocketRow> = rows
-            .iter()
-            .filter(|r| r.proto == Proto::Tcp && r.state == SocketState::Listen && r.local_port == port)
-            .collect();
+        // The parents of the holders are read from the process table at the moment of the listing; under load that read can miss
+        // a process that has only just started, and the child then counts as an owner for that one listing. Wait on the folded
+        // answer (a hang guard bounds it); a fold that never happens still fails with what was listed.
+        let listed = || {
+            OsSockets
+                .sockets()
+                .unwrap()
+                .into_iter()
+                .filter(|r| r.proto == Proto::Tcp && r.state == SocketState::Listen && r.local_port == port)
+                .collect::<Vec<SocketRow>>()
+        };
+        let mut listening = listed();
+        while listening.len() != 1 && std::time::Instant::now() < end {
+            std::thread::yield_now();
+            listening = listed();
+        }
         assert_eq!(listening.len(), 1, "{listening:?}");
         assert_eq!(listening[0].pid, Some(me), "the parent owns it, not child {kid}");
     }
