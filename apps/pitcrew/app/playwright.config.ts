@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
+import { assertChromeForTesting } from '../../../ui/projects/paddock-e2e/src/browser.ts';
 import { appBuildGuard, reuseServer } from '../../../ui/projects/paddock-e2e/src/build-guard.ts';
 import { e2ePortOrCiDefault } from '../../../ui/projects/paddock-e2e/src/env.ts';
 
