@@ -20,8 +20,8 @@ Conventional Commits; one semver tag for the whole repo.
   `--pd-skeleton` (the surface-2 colour) vanishes. `npm run test:tokens` checks both.
 ### `paddock-widgets`: new crate for widget layouts (ADR 0035, WP-A)
 - A pure crate for layouts of widgets on a surface (popover, dashboard, menu bar): the app's closed `Catalogue`, `Layout`
-  and `Placement`, limits on every read and edit, lenient versioned `read` and `Stored` (a damaged, newer or oversized
-  layout gives the defaults and one note, a bad entry is dropped alone with a count), `Edit` and `apply` with one level
+  and `Placement`, limits on every read and edit, lenient versioned `read` and `Stored` (a layout that cannot be read gives the defaults and one note and is kept and written back unchanged until the first
+  edit, a newer one for good; a bad entry is dropped alone with a count), `Edit` and `apply` with one level
   of undo, `LayoutView` for the chooser and the `WidgetState` envelope. Wire types are generated into
   `ui/projects/paddock-ui/widgets/generated/widgets.ts`. Dyno's own copies of this model go in WP-C.
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`

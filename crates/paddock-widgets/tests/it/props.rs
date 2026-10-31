@@ -126,3 +126,40 @@ proptest! {
         }
     }
 }
+
+/// Documents the reader sees, for a surface that needs at least one widget: presets may hold few or no valid entries.
+fn needy_documents() -> impl Strategy<Value = Value> {
+    let entry = prop_oneof![
+        Just(json!({ "id": "a", "span": 1, "widget": { "kind": "clock" } })),
+        Just(json!({ "id": "b", "span": 2, "widget": { "kind": "diskSpace", "volume": "all" } })),
+        Just(json!({ "id": "c", "span": 1, "widget": { "kind": "alarms", "rows": 1 } })),
+        Just(json!({ "id": "bad", "span": 7, "widget": { "kind": "clock" } })),
+        Just(json!(3)),
+    ];
+    let preset = (
+        prop_oneof![Just("mine"), Just("p2"), Just("compact")],
+        prop::collection::vec(entry.clone(), 0..5),
+    )
+        .prop_map(|(id, placements)| json!({ "id": id, "name": id, "placements": placements }));
+    (prop::collection::vec(entry, 0..5), prop::collection::vec(preset, 0..4))
+        .prop_map(|(placements, presets)| json!({ "version": 2, "placements": placements, "presets": presets }))
+}
+
+proptest! {
+    #[test]
+    fn a_surface_that_needs_a_widget_never_goes_below_its_fewest(
+        document in needy_documents(),
+        edits in prop::collection::vec(arbitrary_edit(), 0..30),
+    ) {
+        type Needy = crate::catalogue::Cat<1, 2>;
+        let mut layout = read::<Needy>(&document).layout;
+        prop_assert_eq!(layout.validate::<Needy>(), Ok(()));
+        for edit in edits {
+            if let Ok(next) = apply::<Needy>(&layout, edit) {
+                prop_assert!(!next.placements.is_empty());
+                prop_assert_eq!(next.validate::<Needy>(), Ok(()));
+                layout = next;
+            }
+        }
+    }
+}

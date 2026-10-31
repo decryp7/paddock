@@ -600,12 +600,13 @@ builder.setup(move |app| {
 Widget layouts, shared: everything about a layout that is not what a widget shows. Pure: no I/O, no Tauri, no `tauri`
 feature (the commands stay in the app, which owns where settings live).
 
-- `Catalogue` (an app's closed `Widget` enum, `Surface` limits, `KindSpec` per kind, `defaults()`, `presets()`),
+- `Catalogue` (an app's closed `Widget` enum, `Surface` limits and `noun`, `KindSpec` per kind, `defaults()`, `presets()`),
   `check_catalogue` (the app's one test of it), `assign_ids`.
 - `Layout`, `Placement`, `Preset`, `PlacementId`, `PresetId` (1 to 64 of `a-z0-9-`, parsed once); the app names its
   surfaces (`Catalogue::SurfaceId`) and its action enum (`WidgetAction<A>`).
-- `read::<C>(&Value)` never fails: damaged or oversized gives the defaults and one `Note`, a newer version's layout is shown as the defaults but kept
-  unchanged (`Read::unread`) and refused for edits (`Stored::edit` gives `NewerLayout`); each invalid, unknown,
+- `read::<C>(&Value)` never fails: a layout that cannot be read (damaged, oversized, newer) gives the defaults and one `Note` and is kept unchanged
+  (`Read::unread`, written back as the same JSON value); a newer one is refused for edits (`Stored::edit` gives
+  `NewerLayout`), a damaged or oversized one is replaced by the first edit; each invalid, unknown,
   duplicate or surplus entry is dropped on its own with a count (at most twice the limit is looked at). `Stored<C>` is
   the same as a `#[serde(default)]` settings field.
 - `Edit` (add, remove, move, resize, replace, apply/save/delete preset, reset, undo) and `apply::<C>(&layout, edit)`,

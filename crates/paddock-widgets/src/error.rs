@@ -46,7 +46,7 @@ pub struct Note {
 }
 
 /// Why an edit was refused (the message says what to do).
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum WidgetError {
     /// No placement has this id.
@@ -59,18 +59,22 @@ pub enum WidgetError {
     #[error("Two items share the id \"{0}\"; ids must be unique.")]
     DuplicateId(String),
     /// A count limit of the surface is reached.
-    #[error("At most {max} {} fit; remove one first.", counted.noun())]
+    #[error("{}", too_many(*.counted, *.max, .noun))]
     TooMany {
         /// What there are too many of.
         counted: Counted,
         /// The limit.
         max: u16,
+        /// The surface's noun ("popup").
+        noun: String,
     },
     /// A kind is placed as often as its catalogue entry allows.
-    #[error("At most {max} of this widget fit; remove one first.")]
+    #[error("At most {max} of this widget {} in the {noun}; remove one first.", fits(u16::from(*.max)))]
     KindLimit {
         /// Its `max_instances`.
         max: u8,
+        /// The surface's noun.
+        noun: String,
     },
     /// The span is not one the kind allows.
     #[error("This widget can be {} columns wide.", join_spans(.allowed))]
@@ -79,10 +83,12 @@ pub enum WidgetError {
         allowed: Vec<u8>,
     },
     /// Fewer placements than the surface needs.
-    #[error("At least {min} widgets are needed here.")]
+    #[error("At least {min} {} needed in the {noun}.", if *.min == 1 { "widget is" } else { "widgets are" })]
     TooFew {
         /// The surface's `min_placements`.
         min: u16,
+        /// The surface's noun.
+        noun: String,
     },
     /// The widget's own options (or the edit) are not valid; the text says what to change.
     #[error("{0}")]
@@ -100,14 +106,29 @@ pub enum WidgetError {
 }
 
 impl Counted {
-    /// The words for the count in a message.
-    pub fn noun(self) -> &'static str {
-        match self {
-            Counted::Placements => "widgets",
-            Counted::UserPresets => "saved presets",
-            Counted::PresetPlacements => "widgets in a saved preset",
+    /// The words for the count in a message, singular for 1.
+    pub fn noun(self, count: u16) -> &'static str {
+        match (self, count == 1) {
+            (Counted::Placements, true) => "widget",
+            (Counted::Placements, false) => "widgets",
+            (Counted::UserPresets, true) => "saved preset",
+            (Counted::UserPresets, false) => "saved presets",
+            (Counted::PresetPlacements, true) => "widget in a saved preset",
+            (Counted::PresetPlacements, false) => "widgets in a saved preset",
         }
     }
+}
+
+fn fits(count: u16) -> &'static str {
+    if count == 1 { "fits" } else { "fit" }
+}
+
+fn too_many(counted: Counted, max: u16, noun: &str) -> String {
+    format!(
+        "At most {max} {} {} in the {noun}; remove one first.",
+        counted.noun(max),
+        fits(max)
+    )
 }
 
 fn join_spans(spans: &[u8]) -> String {
