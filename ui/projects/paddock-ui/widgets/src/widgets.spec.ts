@@ -445,12 +445,14 @@ describe('pd-widget-area', () => {
   imports: [PdWidgetChooser, PdWidgetOption],
   template: `
     <pd-widget-chooser [view]="v()" [error]="err()" [widgetFor]="widgetFor" [again]="{ disk: 'Add volume' }" [preview]="preview()" (edit)="edits.push($event)">
-      <ng-template pdWidgetOption="disk" let-p><span class="opt">volume of {{ p.id }}</span></ng-template>
+      <ng-template pdWidgetOption="disk" [pdWidgetOptionOf]="sample" let-p><span class="opt">volume of {{ p.id }}:{{ p.widget.kind }}</span></ng-template>
       <div slot="preview" class="pv">preview</div>
     </pd-widget-chooser>
   `,
 })
 class ChooserHost {
+  /** Types `let-p` of the option template as `Placement<W>` (a compile-time check: `p.widget.kind` has no cast). */
+  readonly sample: W | null = null;
   readonly v = signal(view());
   readonly preview = signal(false);
   readonly err = signal<string | null>(null);
@@ -490,7 +492,7 @@ describe('pd-widget-chooser', () => {
     expect(grip(f, 1).getAttribute('aria-label')).toBe('Reorder Disk space, position 2 of 4');
     expect(grip(f, 1).getAttribute('aria-describedby')).toBe(q(f, '.pd-wc-hint')!.id);
     expect(qa(f, '.pd-wc-item .pd-wc-txt b').slice(0, 4).map((b) => b.textContent)).toEqual(['Active alarms', 'Disk space', 'CPU and memory', 'Network']);
-    expect(qa(f, '.opt').map((o) => o.textContent)).toEqual(['volume of disk']);
+    expect(qa(f, '.opt').map((o) => o.textContent)).toEqual(['volume of disk:disk']);
     const toggles = qa(f, 'mat-button-toggle');
     expect(toggles.map((t) => t.textContent!.trim())).toEqual(['Half', 'Full']);
     expect(qa(f, '.pd-wc-more').map((b) => b.getAttribute('aria-label'))[1]).toBe('More actions for Disk space');
@@ -681,6 +683,26 @@ describe('pd-widget-chooser', () => {
     f.componentInstance.v.set(view({ canUndo: true }));
     await settle(f);
     expect(document.querySelector('.mat-mdc-snack-bar-container')).toBeNull();
+  });
+
+  it('opens a toast for an edit sent after a refusal was cleared, and tells a refusal from an error still shown', async () => {
+    const f = await setup();
+    qa(f, '.pd-wc-more')[3]!.click();
+    await settle(f);
+    menuItems()[4]!.click();
+    await settle(f);
+    f.componentInstance.err.set('Refused once.');
+    await settle(f);
+    f.componentInstance.err.set(null);
+    await settle(f);
+    // a second remove, accepted this time
+    qa(f, '.pd-wc-more')[2]!.click();
+    await settle(f);
+    menuItems()[4]!.click();
+    await settle(f);
+    f.componentInstance.v.set(view({ canUndo: true }, PLACEMENTS.slice(0, 2)));
+    await settle(f);
+    expect(document.querySelector('.mat-mdc-snack-bar-container')!.textContent).toContain('CPU and memory removed from the popup.');
   });
 
   it('says the only widget cannot move, and cancels the delete confirm with Escape', async () => {

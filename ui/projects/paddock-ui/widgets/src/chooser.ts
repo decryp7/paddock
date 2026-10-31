@@ -228,7 +228,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-limit { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0 0 var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-info-tint); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
     .pd-wc-limit pd-status-glyph { color: var(--pd-info); }
     .pd-wc-list + .pd-wc-label, .pd-wc-hint + .pd-wc-label { margin-top: var(--pd-space-6); }
-    .pd-wc-save mat-form-field { --mat-form-field-container-height: var(--pd-control-height); --mat-form-field-container-vertical-padding: var(--pd-space-1); --mat-form-field-container-text-size: var(--pd-text-body); --mat-form-field-outlined-label-text-populated-size: var(--pd-text-label); }
+    .pd-wc-save mat-form-field { --mat-form-field-container-height: var(--pd-control-height); --mat-form-field-container-vertical-padding: var(--pd-space-1); --mat-form-field-container-text-size: var(--pd-text-body); --mat-form-field-outlined-label-text-populated-size: var(--pd-text-label); --mat-form-field-outlined-label-text-size: var(--pd-text-label); }
     .pd-wc-save input { font-size: var(--pd-text-body); }
     .pd-wc-save button { height: var(--pd-control-height); }
     .pd-wc-foot button { --mat-button-text-label-text-color: var(--pd-accent); }
@@ -263,7 +263,7 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   readonly kindOf = input<(widget: W) => string>(defaultKindOf);
   /** The Add label of a kind that can be placed again, by kind ("Add volume"); the default is "Add another". */
   readonly again = input<Readonly<Record<string, string>>>({});
-  /** The engine's message for an edit it refused (`WidgetError`'s display text, which the app gets with the error): shown at the top until the app clears it. */
+  /** The engine's message for an edit it refused (`WidgetError`'s display text, which the app gets with the error): shown at the top until the app clears it. Clear it (set null) before sending the next edit; a new value arriving after an edit means that edit was refused. */
   readonly error = input<string | null>(null);
   /** Show the preview column (project the preview with `slot="preview"`). */
   readonly preview = input(false);
@@ -291,6 +291,9 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   /** A move waiting for the engine's answer: announced only when the new view shows it. */
   private pendingMove: { id: string; to: number; text: string } | null = null;
   private pendingFocus: (() => HTMLElement | null | undefined) | null = null;
+  /** How many edits this chooser has sent (the refusal check compares an `error` arrival with it). */
+  private readonly sent = signal(0);
+  private lastError: string | null = null;
   private toast: MatSnackBarRef<TextOnlySnackBar> | null = null;
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** The modifier's name and glyphs on this platform (Option on a Mac, Alt elsewhere). */
@@ -326,16 +329,24 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
       });
     });
     effect(() => {
-      // A refused edit changed nothing: it has no toast to open and no move to announce.
-      if (this.error() === null) return;
+      // A refusal is a new `error` value arriving after the last edit sent: that edit changed nothing, so it has no toast and no move
+      // to announce. Edits sent while the same error is still shown are not refused by it (apps clear `error` before each edit).
+      const e = this.error();
       untracked(() => {
-        this.pendingUndo = null;
-        this.pendingMove = null;
+        if (e !== null && e !== this.lastError && this.sent() > 0) {
+          this.pendingUndo = null;
+          this.pendingMove = null;
+        }
+        this.lastError = e;
       });
     });
     inject(DestroyRef).onDestroy(() => this.toast?.dismiss());
   }
 
+  private send(edit: Edit<W>): void {
+    this.sent.update((n) => n + 1);
+    this.edit.emit(edit);
+  }
   private focusSoon(find: () => HTMLElement | null | undefined): void {
     afterNextRender(() => find()?.focus(), { injector: this.injector });
   }
@@ -371,18 +382,18 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   }
 
   protected add(k: KindInfo<K>): void {
-    this.edit.emit({ add: { widget: this.widgetFor()(k.kind), span: null, at: null } });
+    this.send({ add: { widget: this.widgetFor()(k.kind), span: null, at: null } });
   }
   protected resize(p: Placement<W>, span: number): void {
-    this.edit.emit({ resize: { id: p.id, span } });
+    this.send({ resize: { id: p.id, span } });
   }
   protected remove(p: Placement<W>): void {
     this.pendingUndo = `${this.titleOf(p)} removed from the ${this.noun()}.`;
-    this.edit.emit({ remove: { id: p.id } });
+    this.send({ remove: { id: p.id } });
   }
   protected reset(): void {
     this.pendingUndo = `The ${this.noun()} is back to the defaults.`;
-    this.edit.emit('resetToDefaults');
+    this.send('resetToDefaults');
   }
 
   protected presetNameInput(e: Event): void {
@@ -390,7 +401,7 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   }
   protected applyPreset(p: Preset<W>): void {
     this.pendingUndo = `The ${this.noun()} now uses the ${p.name} preset.`;
-    this.edit.emit({ applyPreset: { id: p.id } });
+    this.send({ applyPreset: { id: p.id } });
   }
   /** First step of deleting a saved preset: a confirm in the row (a preset has no undo: the engine's undo restores placements only). */
   protected askDelete(p: Preset<W>): void {
@@ -408,11 +419,11 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
     const near = list[at + 1] ?? list[at - 1];
     this.confirming.set(null);
     this.pendingFocus = near ? () => this.query(`[data-preset-apply="${near.id}"]`) : () => this.query('.pd-wc-save input');
-    this.edit.emit({ deletePreset: { id: p.id } });
+    this.send({ deletePreset: { id: p.id } });
   }
   protected savePreset(): void {
     if (!this.canSave()) return;
-    this.edit.emit({ savePreset: { name: this.presetName().trim() } });
+    this.send({ savePreset: { name: this.presetName().trim() } });
     this.presetName.set('');
   }
 
@@ -443,7 +454,7 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   private moveTo(p: Placement<W>, to: number, keepFocus: boolean): void {
     if (keepFocus) this.pendingFocus = () => this.grip(p.id);
     this.pendingMove = { id: p.id, to, text: `${this.titleOf(p)} moved to position ${to + 1} of ${this.placements().length}` };
-    this.edit.emit({ move: { id: p.id, to } });
+    this.send({ move: { id: p.id, to } });
   }
 
   /** Shows the undo snack bar for `text`. */
@@ -456,6 +467,6 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
     this.closeToast();
     const ref = this.snackBar.open(text, 'Undo', { duration: UNDO_SECONDS * 1000, horizontalPosition: 'end', verticalPosition: 'bottom', panelClass: UNDO_SNACK_CLASS });
     this.toast = ref;
-    ref.onAction().subscribe(() => this.edit.emit('undo'));
+    ref.onAction().subscribe(() => this.send('undo'));
   }
 }
