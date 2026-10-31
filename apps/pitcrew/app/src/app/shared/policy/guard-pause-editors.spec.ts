@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import type { DiskGuardPolicy, PausePolicy } from '../../core/api.types';
-import { appProviders, byText, makeMock, text, type as typeInto } from '../../../testing/test-helpers';
+import { appProviders, byText, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
 import { DiskGuardEditor, diskGuardProblem, mbToGb } from './disk-guard-editor';
 import { PauseEditor, pauseProblem } from './pause-editor';
 
@@ -104,47 +104,66 @@ describe('PauseEditor', () => {
   const save = (el: HTMLElement) => byText<HTMLButtonElement>(el, 'button', 'Save')!;
   const radio = (el: HTMLElement, v: string) => el.querySelector<HTMLInputElement>(`input[type="radio"][value="${v}"]`)!;
 
-  it('switches between the three modes and shows the matching fields', () => {
+  it('switches between the three modes and shows the matching fields', async () => {
     const { f, el } = mount();
+    await settle(f);
     expect(radio(el, 'off').checked).toBe(true);
-    expect(el.querySelector('.window')).toBeNull();
+    expect(el.querySelector('pd-pause-editor')).toBeNull();
     radio(el, 'schedule').click();
-    f.detectChanges();
-    expect(el.querySelectorAll('.window')).toHaveLength(1);
+    await settle(f);
+    expect(el.querySelectorAll('.pd-window')).toHaveLength(1);
     radio(el, 'when-idle').click();
-    f.detectChanges();
-    expect(el.querySelector('.window')).toBeNull();
+    await settle(f);
+    expect(el.querySelector('pd-pause-editor')).toBeNull();
     expect(el.querySelector<HTMLInputElement>('#pause-busy')!.value).toBe('40');
     expect(el.querySelector<HTMLInputElement>('#pause-quiet')!.value).toBe('5');
   });
 
-  it('edits, adds and removes windows (at most 14)', () => {
+  it('shares the windows editor without a time zone, and saves its windows in the policy shape', async () => {
     const { f, el, saved } = mount(pause({ mode: 'schedule' }));
-    el.querySelector<HTMLInputElement>('.day input')!.click(); // mon off
-    f.detectChanges();
+    await settle(f);
+    expect(el.querySelector('[data-testid="pause-zone"]')).toBeNull();
+    const days = () => Array.from(el.querySelectorAll<HTMLButtonElement>('pd-day-picker button'));
+    days()[0]!.click(); // mon off: the window has no day, which Pitcrew's policy does not allow
+    await settle(f);
     expect(save(el).disabled).toBe(true);
-    expect(el.querySelector('[role="alert"]')?.textContent).toContain('at least one day');
-    el.querySelectorAll<HTMLInputElement>('.day input')[5]!.click(); // sat on
-    f.detectChanges();
+    expect(el.querySelector('p.tone-danger[role="alert"]')?.textContent).toContain('at least one day');
+    days()[5]!.click(); // sat on
+    await settle(f);
     expect(save(el).disabled).toBe(false);
-    const times = el.querySelectorAll<HTMLInputElement>('input[type="time"]');
-    typeInto(times[0]!, '23:30', 'change');
-    typeInto(times[1]!, '', 'change');
-    f.detectChanges();
-    expect(times[0]!.value).toBe('23:30');
-    byText<HTMLButtonElement>(el, 'button', 'Add window')!.click();
-    f.detectChanges();
-    expect(el.querySelectorAll('.window')).toHaveLength(2);
-    byText<HTMLButtonElement>(el, 'button', 'Remove')!.click();
-    f.detectChanges();
-    expect(el.querySelectorAll('.window')).toHaveLength(1);
     save(el).click();
-    expect(saved[0]!.windows).toEqual([{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '22:00', end: '06:00' }]);
-    for (let i = 0; i < 20; i++) byText<HTMLButtonElement>(el, 'button', 'Add window')!.click();
-    f.detectChanges();
-    expect(el.querySelectorAll('.window')).toHaveLength(14);
-    expect(byText<HTMLButtonElement>(el, 'button', 'Add window')!.disabled).toBe(true);
-    expect(text(el)).toContain('At most 14 windows');
+    expect(saved).toEqual([pause({ mode: 'schedule', windows: [{ days: ['sat'], start: '22:00', end: '06:00' }] })]);
+  });
+
+  it('adds and removes windows, at most 14', async () => {
+    const { f, el } = mount(pause({ mode: 'schedule' }));
+    await settle(f);
+    const add = () => el.querySelector<HTMLButtonElement>('.pd-add')!;
+    add().click();
+    await settle(f);
+    expect(el.querySelectorAll('.pd-window')).toHaveLength(2);
+    el.querySelector<HTMLButtonElement>('button[aria-label="Remove window 2"]')!.click();
+    await settle(f);
+    expect(el.querySelectorAll('.pd-window')).toHaveLength(1);
+    for (let i = 0; i < 20; i++) add().click();
+    await settle(f);
+    expect(el.querySelectorAll('.pd-window')).toHaveLength(14);
+    expect(add().disabled).toBe(true);
+  });
+
+  it('discards edits and honours read-only', async () => {
+    const { f, el } = mount(pause({ mode: 'schedule' }));
+    await settle(f);
+    el.querySelector<HTMLButtonElement>('.pd-add')!.click();
+    await settle(f);
+    expect(save(el).disabled).toBe(true); // the new window has no day
+    byText<HTMLButtonElement>(el, 'button', 'Discard changes')!.click();
+    await settle(f);
+    expect(el.querySelectorAll('.pd-window')).toHaveLength(1);
+    f.componentRef.setInput('readOnly', true);
+    await settle(f);
+    expect(byText(el, 'button', 'Save')).toBeNull();
+    expect((el.querySelector('.pd-add') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('validates the idle thresholds', () => {

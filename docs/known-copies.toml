@@ -743,11 +743,6 @@ paths = ["ui/projects/paddock-ui/schedule/src/pause-editor.ts", "ui/projects/pad
 status = "built"
 
   [[mechanism.copy]]
-  paths = ["apps/pitcrew/app/src/app/shared/policy/pause-editor.ts"]
-  owner = "pitcrew"
-  delete_by = "pitcrew-v1.1.0"
-
-  [[mechanism.copy]]
   paths = ["apps/spotter/app/src/app/features/editor/schedule-editor.ts"]
   owner = "spotter"
   delete_by = "spotter-v1.1.0"

@@ -1,8 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, input, linkedSignal, output } from '@angular/core';
-import type { PauseMode, PausePolicy, UpdateWindow, Weekday } from '../../core/api.types';
-import { WEEKDAYS } from './update-policy-editor';
-
-export const MAX_PAUSE_WINDOWS = 14;
+import { MAX_PAUSE_WINDOWS, PdPauseEditor, type PauseWindows } from '@decryp7/paddock-ui/schedule';
+import type { PauseMode, PausePolicy } from '../../core/api.types';
+import { fromPauseWindows, toPauseWindows } from './pause-windows';
 
 const MODES: { key: PauseMode; label: string; hint: string }[] = [
   { key: 'off', label: 'Never', hint: 'Runners take jobs at any time.' },
@@ -27,6 +26,7 @@ export function pauseProblem(p: PausePolicy): string | null {
 /** Edits the pause policy (ADR 0013): never, on a schedule, or only while the machine is idle. */
 @Component({
   selector: 'pc-pause-editor',
+  imports: [PdPauseEditor],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let d = draft();
@@ -44,39 +44,7 @@ export function pauseProblem(p: PausePolicy): string | null {
     </fieldset>
 
     @if (d.mode === 'schedule') {
-      <div class="windows">
-        @for (w of d.windows; track $index; let i = $index) {
-          <div class="window" role="group" [attr.aria-label]="'Window ' + (i + 1)">
-            <div class="days" role="group" aria-label="Days">
-              @for (day of weekdays; track day.key) {
-                <label class="day" [class.on]="w.days.includes(day.key)">
-                  <input type="checkbox" [checked]="w.days.includes(day.key)" (change)="toggleDay(i, day.key)" [disabled]="readOnly()" />
-                  {{ day.label }}
-                </label>
-              }
-            </div>
-            <label class="time">
-              <span class="visually-hidden">From</span>
-              <input class="input sm" type="time" [value]="w.start" (change)="setTime(i, 'start', $any($event.target).value)" [disabled]="readOnly()" />
-            </label>
-            <span class="faint">to</span>
-            <label class="time">
-              <span class="visually-hidden">Until</span>
-              <input class="input sm" type="time" [value]="w.end" (change)="setTime(i, 'end', $any($event.target).value)" [disabled]="readOnly()" />
-            </label>
-            @if (w.end < w.start) {
-              <span class="faint small">spans midnight</span>
-            }
-            <button type="button" class="btn ghost sm" (click)="removeWindow(i)" [disabled]="readOnly()" [attr.aria-label]="'Remove window ' + (i + 1)">Remove</button>
-          </div>
-        }
-        <div class="btn-row">
-          <button type="button" class="btn sm" (click)="addWindow()" [disabled]="readOnly() || d.windows.length >= max">Add window</button>
-          @if (d.windows.length >= max) {
-            <span class="faint small">At most 14 windows.</span>
-          }
-        </div>
-      </div>
+      <pd-pause-editor [value]="shared()" [showZone]="false" [disabled]="readOnly()" (valueChange)="setWindows($event)" />
     }
 
     @if (d.mode === 'when-idle') {
@@ -170,53 +138,6 @@ export function pauseProblem(p: PausePolicy): string | null {
       font-size: var(--text-sm);
       color: var(--text-2);
     }
-    .windows {
-      display: grid;
-      gap: var(--space-3);
-    }
-    .window {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: var(--space-2);
-      padding-bottom: var(--space-3);
-      border-bottom: 1px solid var(--border);
-    }
-    .days {
-      display: inline-flex;
-      gap: 2px;
-      margin-right: var(--space-2);
-    }
-    .day {
-      position: relative;
-      display: inline-flex;
-      align-items: center;
-      height: var(--control-height-sm);
-      padding: 0 var(--space-2);
-      border: 1px solid var(--border-strong);
-      border-radius: var(--radius-sm);
-      background: var(--surface);
-      color: var(--text-2);
-      font-size: var(--text-sm);
-      cursor: pointer;
-    }
-    .day.on {
-      border-color: transparent;
-      background: var(--accent-bg);
-      color: var(--on-accent);
-    }
-    .day input {
-      position: absolute;
-      opacity: 0;
-      pointer-events: none;
-    }
-    .day:has(input:focus-visible) {
-      outline: 2px solid var(--focus-ring);
-      outline-offset: 2px;
-    }
-    .small {
-      font-size: var(--text-sm);
-    }
   `,
 })
 export class PauseEditor {
@@ -227,8 +148,6 @@ export class PauseEditor {
   readonly save = output<PausePolicy>();
 
   protected readonly modes = MODES;
-  protected readonly weekdays = WEEKDAYS;
-  protected readonly max = MAX_PAUSE_WINDOWS;
   protected readonly draft = linkedSignal(() => structuredClone(this.policy()));
   protected readonly dirty = computed(() => JSON.stringify(this.draft()) !== JSON.stringify(this.policy()));
   protected readonly problem = computed(() => pauseProblem(this.draft()));
@@ -237,26 +156,10 @@ export class PauseEditor {
     this.draft.update((d) => ({ ...d, ...patch }));
   }
 
-  private setWindow(i: number, change: (w: UpdateWindow) => UpdateWindow): void {
-    this.draft.update((d) => ({ ...d, windows: d.windows.map((w, j) => (j === i ? change(w) : w)) }));
-  }
+  protected readonly shared = computed(() => toPauseWindows(this.draft().windows));
 
-  protected addWindow(): void {
-    if (this.draft().windows.length >= MAX_PAUSE_WINDOWS) return;
-    this.draft.update((d) => ({ ...d, windows: [...d.windows, { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '22:00', end: '06:00' }] }));
-  }
-
-  protected removeWindow(i: number): void {
-    this.draft.update((d) => ({ ...d, windows: d.windows.filter((_, j) => j !== i) }));
-  }
-
-  protected toggleDay(i: number, day: Weekday): void {
-    this.setWindow(i, (w) => ({ ...w, days: WEEKDAYS.map((x) => x.key).filter((k) => (k === day ? !w.days.includes(k) : w.days.includes(k))) }));
-  }
-
-  protected setTime(i: number, which: 'start' | 'end', value: string): void {
-    if (!/^\d{2}:\d{2}$/.test(value)) return;
-    this.setWindow(i, (w) => ({ ...w, [which]: value }));
+  protected setWindows(value: PauseWindows): void {
+    this.set({ windows: fromPauseWindows(value) });
   }
 
   protected setNumber(key: 'busy_percent' | 'quiet_minutes', value: string): void {
