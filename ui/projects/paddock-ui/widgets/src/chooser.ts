@@ -2,7 +2,6 @@ import { CdkDrag, CdkDragHandle, CdkDragPlaceholder, CdkDropList, type CdkDragDr
 import { LiveAnnouncer } from '@angular/cdk/a11y';
 import { NgTemplateOutlet } from '@angular/common';
 import {
-  afterEveryRender,
   afterNextRender,
   ChangeDetectionStrategy,
   Component,
@@ -17,7 +16,6 @@ import {
   output,
   signal,
   untracked,
-  viewChild,
   viewChildren,
   ViewEncapsulation,
 } from '@angular/core';
@@ -347,19 +345,6 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
         this.lastError = e;
       });
     });
-    effect(() => {
-      // A refusal is a new `error` value arriving after the last edit sent: that edit changed nothing, so it has no toast and no move
-      // to announce. Edits sent while the same error is still shown are not refused by it (apps clear `error` before each edit).
-      const e = this.error();
-      untracked(() => {
-        if (e !== null && e !== this.lastError && this.sent() > 0) {
-          this.pendingUndo = null;
-          this.pendingMove = null;
-        }
-        this.lastError = e;
-      });
-    });
-    afterEveryRender(() => this.updateFade());
     inject(DestroyRef).onDestroy(() => this.toast?.dismiss());
   }
 
