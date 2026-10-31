@@ -206,6 +206,20 @@
       "height": null,
       "commands": []
     },
+    "pd.report-problem": {
+      "kind": "form",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 720,
+      "height": null,
+      "commands": [
+        "diagnostics_cancel",
+        "diagnostics_preview",
+        "diagnostics_save",
+        "log_from_webview"
+      ]
+    },
     "pd.settings": {
       "kind": "tool",
       "modality": "modeless",
@@ -308,6 +322,7 @@
     "pd.category.app": "Application",
     "pd.category.help": "Help",
     "pd.confirm.title": "Confirm",
+    "pd.diag.title": "Report a problem",
     "pd.settings.appearance": "Appearance",
     "pd.settings.open": "Settings…",
     "pd.settings.title": "Settings",

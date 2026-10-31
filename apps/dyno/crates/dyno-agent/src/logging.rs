@@ -24,6 +24,14 @@ pub fn log_places(dirs: &Dirs, data_dir_overridden: bool, app_dirs: Option<&AppD
     }
 }
 
+/// The folder the agent's and the app's dated logs are in: the app's log folder, or the data folder's own `logs` when
+/// `DYNO_DATA_DIR` moved it (the same rule the install uses).
+pub fn log_dir(dirs: &Dirs) -> PathBuf {
+    let overridden = std::env::var_os("DYNO_DATA_DIR").is_some_and(|v| !v.is_empty());
+    let app_dirs = AppId::new(APP_ID, APP_NAME).ok().and_then(|app| AppDirs::for_app(&app).ok());
+    log_places(dirs, overridden, app_dirs.as_ref()).0
+}
+
 /// Installs the agent's log as the first thing `dyno-agent run` does. `None` when a log is installed already or the id is
 /// refused: the agent then runs without a file log (and says so on standard error).
 pub fn install(dirs: &Dirs) -> Option<LogHandle> {
