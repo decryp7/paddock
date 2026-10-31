@@ -368,7 +368,7 @@ impl Elevator for FakeElevator {
         &mut self,
         program: &Path,
         args: &[&str],
-        _timeout: Duration,
+        _ceiling: Duration,
     ) -> Result<i32, RegisterError> {
         self.log.record(Call::Os(format!(
             "elevated {} {}",

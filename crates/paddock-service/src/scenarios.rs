@@ -19,6 +19,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// Where the tests say `sc.exe` is.
+const SC_EXE: &str = r"C:\Windows\System32\sc.exe";
 const LABEL: &str = "net.decryptology.pitwall.service";
 const TARGET: &str = "gui/501/net.decryptology.pitwall.service";
 
@@ -197,9 +199,9 @@ fn changes(sys: &FakeSystem) -> Vec<String> {
             Call::Run(s) if s.starts_with("systemctl") && !s.contains("is-") => Some(s),
             Call::Run(s) if s.starts_with("reg add") || s.starts_with("reg delete") => Some(s),
             Call::Run(s)
-                if s.starts_with("sc ")
-                    && !s.starts_with("sc query")
-                    && !s.starts_with("sc qc") =>
+                if s.starts_with("C:\\Windows\\System32\\sc.exe ")
+                    && !s.starts_with("C:\\Windows\\System32\\sc.exe query")
+                    && !s.starts_with("C:\\Windows\\System32\\sc.exe qc") =>
             {
                 Some(s)
             }
@@ -1063,41 +1065,49 @@ fn the_windows_service_is_created_with_sc_and_its_errors_are_read_by_number() {
         .build()
         .unwrap();
     let exe = r"C:\Program Files\Pitwall\pitwall-server.exe";
-    let mut b = WindowsService::new(svc.clone(), Target::exe(exe), Box::new(sys.clone()));
+    let mut b =
+        WindowsService::new(svc.clone(), Target::exe(exe), Box::new(sys.clone())).with_sc(SC_EXE);
     b.register().unwrap();
     assert_eq!(
         sys.commands(),
         [
             format!(
-                "sc create Pitwall binPath= \"{exe}\" --service start= delayed-auto DisplayName= Pitwall local LLM server"
+                "C:\\Windows\\System32\\sc.exe create Pitwall binPath= \"{exe}\" --service start= delayed-auto DisplayName= Pitwall local LLM server"
             ),
-            "sc description Pitwall Serves local language models.".to_string(),
-            "sc failure Pitwall reset= 86400 actions= restart/10000/restart/60000/restart/300000"
+            "C:\\Windows\\System32\\sc.exe description Pitwall Serves local language models.".to_string(),
+            "C:\\Windows\\System32\\sc.exe failure Pitwall reset= 86400 actions= restart/10000/restart/60000/restart/300000"
                 .to_string(),
-            "sc failureflag Pitwall 1".to_string(),
-            "sc start Pitwall".to_string(),
+            "C:\\Windows\\System32\\sc.exe failureflag Pitwall 1".to_string(),
+            "C:\\Windows\\System32\\sc.exe start Pitwall".to_string(),
         ]
     );
-    sys.answer("sc create", Output::code(5));
+    sys.answer("C:\\Windows\\System32\\sc.exe create", Output::code(5));
     assert_eq!(b.register(), Err(RegisterError::NeedsElevation));
-    sys.answer("sc create", Output::code(1072));
+    sys.answer("C:\\Windows\\System32\\sc.exe create", Output::code(1072));
     assert!(matches!(b.register(), Err(RegisterError::Other(e)) if e.contains("Services window")));
-    sys.on("sc create", |_, _| Err(RunError::TimedOut("sc".into())));
+    sys.on("C:\\Windows\\System32\\sc.exe create", |_, _| {
+        Err(RunError::TimedOut("sc".into()))
+    });
     assert!(b.register().is_err());
-    sys.answer("sc create", Output::code(0));
-    sys.answer("sc start", Output::code(1056));
+    sys.answer("C:\\Windows\\System32\\sc.exe create", Output::code(0));
+    sys.answer("C:\\Windows\\System32\\sc.exe start", Output::code(1056));
     assert!(b.register().is_ok(), "already running");
-    sys.answer("sc start", Output::code(1053));
+    sys.answer("C:\\Windows\\System32\\sc.exe start", Output::code(1053));
     assert!(b.register().is_err());
-    sys.on("sc start", |_, _| Err(RunError::TimedOut("sc".into())));
+    sys.on("C:\\Windows\\System32\\sc.exe start", |_, _| {
+        Err(RunError::TimedOut("sc".into()))
+    });
     assert!(b.register().is_err());
     // Inspect.
-    sys.answer("sc query", Output::code(1060));
+    sys.answer("C:\\Windows\\System32\\sc.exe query", Output::code(1060));
     assert_eq!(b.inspect(), crate::backend::Inspection::absent());
     assert!(b.job_gone());
-    sys.answer("sc query", Output::ok("STATE : 4  RUNNING"));
     sys.answer(
-        "sc qc",
+        "C:\\Windows\\System32\\sc.exe query",
+        Output::ok("STATE : 4  RUNNING"),
+    );
+    sys.answer(
+        "C:\\Windows\\System32\\sc.exe qc",
         Output::ok(&format!(
             "START_TYPE : 2 AUTO_START\r\nBINARY_PATH_NAME : \"{exe}\" --service\r\n"
         )),
@@ -1114,35 +1124,47 @@ fn the_windows_service_is_created_with_sc_and_its_errors_are_read_by_number() {
         )
     );
     assert!(!b.job_gone());
-    sys.answer("sc qc", Output::ok("START_TYPE : 4 DISABLED\r\n"));
+    sys.answer(
+        "C:\\Windows\\System32\\sc.exe qc",
+        Output::ok("START_TYPE : 4 DISABLED\r\n"),
+    );
     assert_eq!(b.inspect().registration, Registration::SwitchedOff);
-    sys.answer("sc query", Output::ok("STATE : 1  STOPPED"));
+    sys.answer(
+        "C:\\Windows\\System32\\sc.exe query",
+        Output::ok("STATE : 1  STOPPED"),
+    );
     assert_eq!(b.inspect().job, Job::NotRunning);
     assert!(b.job_gone());
-    sys.answer("sc query", Output::ok("garbage"));
+    sys.answer("C:\\Windows\\System32\\sc.exe query", Output::ok("garbage"));
     assert_eq!(b.inspect().job, Job::Unknown);
-    sys.answer("sc query", Output::code(5));
+    sys.answer("C:\\Windows\\System32\\sc.exe query", Output::code(5));
     assert!(matches!(
         b.inspect().registration,
         Registration::Unavailable(_)
     ));
-    sys.on("sc query", |_, _| Err(RunError::NotStarted("sc".into())));
+    sys.on("C:\\Windows\\System32\\sc.exe query", |_, _| {
+        Err(RunError::NotStarted("sc".into()))
+    });
     assert!(matches!(
         b.inspect().registration,
         Registration::Unavailable(_)
     ));
     // Remove and stop.
     for (code, ok) in [(0, true), (1060, true), (1072, true), (5, false)] {
-        sys.answer("sc delete", Output::code(code));
+        sys.answer("C:\\Windows\\System32\\sc.exe delete", Output::code(code));
         assert_eq!(b.unregister().is_ok(), ok, "{code}");
     }
-    sys.on("sc delete", |_, _| Err(RunError::TimedOut("sc".into())));
+    sys.on("C:\\Windows\\System32\\sc.exe delete", |_, _| {
+        Err(RunError::TimedOut("sc".into()))
+    });
     assert!(b.unregister().is_err());
     for (code, ok) in [(0, true), (1062, true), (1060, true), (5, false)] {
-        sys.answer("sc stop", Output::code(code));
+        sys.answer("C:\\Windows\\System32\\sc.exe stop", Output::code(code));
         assert_eq!(b.evict().is_ok(), ok, "{code}");
     }
-    sys.on("sc stop", |_, _| Err(RunError::TimedOut("sc".into())));
+    sys.on("C:\\Windows\\System32\\sc.exe stop", |_, _| {
+        Err(RunError::TimedOut("sc".into()))
+    });
     assert!(b.evict().is_err());
 }
 
@@ -1156,9 +1178,12 @@ fn from_the_app_the_service_changes_only_through_one_prompt_on_request() {
         .unwrap();
     let exe = PathBuf::from(r"C:\Program Files\Pitwall\pitwall-server.exe");
     sys.put_program(&exe);
-    sys.answer("sc query", Output::ok("STATE : 4  RUNNING"));
     sys.answer(
-        "sc qc",
+        "C:\\Windows\\System32\\sc.exe query",
+        Output::ok("STATE : 4  RUNNING"),
+    );
+    sys.answer(
+        "C:\\Windows\\System32\\sc.exe qc",
         Output::ok("BINARY_PATH_NAME : \"C:\\Other\\pitwall-server.exe\" --service\r\n"),
     );
     sys.put_program("C:\\Other\\pitwall-server.exe");
@@ -1168,7 +1193,8 @@ fn from_the_app_the_service_changes_only_through_one_prompt_on_request() {
         exe.clone(),
         Box::new(sys.clone()),
         Box::new(elevator.clone()),
-    );
+    )
+    .with_sc(SC_EXE);
     let mut m = Manager::new("Pitwall", Box::new(b), d.path(), LABEL, "1.0.0", || true);
     crate::record::RecordFile::new(d.path(), LABEL)
         .save("1.0.0", None)
@@ -1195,25 +1221,29 @@ fn from_the_app_the_service_changes_only_through_one_prompt_on_request() {
     );
     // Uninstall: one elevated uninstall.
     sys.clear_calls();
-    sys.answer("sc query", Output::code(1060));
+    sys.answer("C:\\Windows\\System32\\sc.exe query", Output::code(1060));
     m.uninstall().unwrap();
     assert_eq!(
         changes(&sys),
         [format!("elevated {} uninstall", exe.display())]
     );
     elevator.results([Err(RegisterError::Declined)]);
-    sys.answer("sc query", Output::ok("STATE : 4  RUNNING"));
+    sys.answer(
+        "C:\\Windows\\System32\\sc.exe query",
+        Output::ok("STATE : 4  RUNNING"),
+    );
     assert!(matches!(m.uninstall(), Err(ServiceError::Failed(e)) if e.contains("declined")));
     // The installer re-registered it for this version: only remembered.
     sys.answer(
-        "sc qc",
+        "C:\\Windows\\System32\\sc.exe qc",
         Output::ok(&format!(
             "BINARY_PATH_NAME : \"{}\" --service\r\n",
             exe.display()
         )),
     );
     let b =
-        ElevatedWindowsService::new(svc, exe.clone(), Box::new(sys.clone()), Box::new(elevator));
+        ElevatedWindowsService::new(svc, exe.clone(), Box::new(sys.clone()), Box::new(elevator))
+            .with_sc(SC_EXE);
     let mut m = Manager::new("Pitwall", Box::new(b), d.path(), LABEL, "1.0.1", || true);
     assert_eq!(m.on_start(&no_cancel()), Started::Marked);
 }
@@ -1372,11 +1402,15 @@ fn backend_contract_details() {
         .kind(Kind::SystemService)
         .build()
         .unwrap();
-    let mut ws = WindowsService::new(svc.clone(), Target::exe("C:\\p.exe"), Box::new(sys.clone()));
+    let mut ws = WindowsService::new(svc.clone(), Target::exe("C:\\p.exe"), Box::new(sys.clone()))
+        .with_sc(SC_EXE);
     assert_eq!(ws.mechanism(), Mechanism::WindowsService);
     assert!(ws.capabilities().automatic);
-    sys.answer("sc query", Output::ok("STATE : 4  RUNNING"));
-    sys.answer("sc qc", Output::code(5));
+    sys.answer(
+        "C:\\Windows\\System32\\sc.exe query",
+        Output::ok("STATE : 4  RUNNING"),
+    );
+    sys.answer("C:\\Windows\\System32\\sc.exe qc", Output::code(5));
     let i = ws.inspect();
     assert_eq!(
         (i.registration, i.job, i.program),
@@ -1388,11 +1422,12 @@ fn backend_contract_details() {
         "C:\\p.exe".into(),
         Box::new(sys.clone()),
         Box::new(FakeElevator::new(&sys)),
-    );
+    )
+    .with_sc(SC_EXE);
     assert!(el.register().is_ok() && el.evict().is_ok());
     assert_eq!(el.mechanism(), Mechanism::WindowsService);
     assert!(!el.capabilities().automatic);
-    sys.answer("sc query", Output::code(1060));
+    sys.answer("C:\\Windows\\System32\\sc.exe query", Output::code(1060));
     assert!(el.job_gone());
 }
 
@@ -1623,4 +1658,27 @@ fn a_launchd_file_job_is_observed_with_its_pid_runs_exit_and_cpu() {
     // Not answerable: unknown, not gone.
     sys.answer("/bin/launchctl print gui", Output::code(1));
     assert_eq!(b.observe_start().unwrap().job, Job::Unknown);
+}
+
+#[test]
+fn the_windows_service_runs_sc_by_full_path_by_default() {
+    let sys = FakeSystem::new();
+    let svc = ServiceSpec::builder(
+        "net.decryptology.pitwall.service",
+        "Pitwall",
+        "pitwall-server",
+    )
+    .kind(Kind::SystemService)
+    .build()
+    .unwrap();
+    let mut ws = WindowsService::new(svc, Target::exe("C:\\p.exe"), Box::new(sys.clone()));
+    crate::backend::Backend::inspect(&mut ws);
+    let cmds = sys.commands();
+    assert!(
+        cmds.len() == 2
+            && cmds
+                .iter()
+                .all(|c| c.to_ascii_lowercase().contains(r"\system32\sc.exe ")),
+        "{cmds:?}"
+    );
 }

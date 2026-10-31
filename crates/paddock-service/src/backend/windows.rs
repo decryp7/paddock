@@ -8,16 +8,19 @@ use crate::parse::{
     SC_DISABLED, SC_RUNNING, SC_STOPPED, run_value_program, sc_config, sc_exit, sc_state,
     startup_switched_off,
 };
-use crate::paths::{REG, SC, WINDOWS_RUN_KEY, WINDOWS_STARTUP_APPROVED_KEY};
+use crate::paths::{REG, WINDOWS_RUN_KEY, WINDOWS_STARTUP_APPROVED_KEY, sc_exe};
 use crate::port::{Elevator, RegisterError, System};
 use crate::render::{sc_commands, scm_config, windows_command_line};
 use crate::spec::ServiceSpec;
 use crate::verbs::Verb;
+use paddock_env::ProcessVars;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// How long an elevated `install`/`uninstall` may take (it stops and waits for the old service).
-pub const ELEVATED_TIMEOUT: Duration = Duration::from_secs(120);
+/// The backstop for an elevated `install`/`uninstall` (it stops and waits for the old service): the elevated program is
+/// waited for, and said to be still working in the log, until it ends or this ceiling comes; a program still running then
+/// is reported as such, not as failed (ER-19).
+pub const ELEVATED_CEILING: Duration = Duration::from_secs(15 * 60);
 
 /// The per-user `Run` value: Windows starts the agent at log-in in the user's session.
 pub struct WindowsRun {
@@ -178,6 +181,8 @@ pub struct WindowsService {
     spec: ServiceSpec,
     target: Target,
     sys: Box<dyn System>,
+    /// `sc.exe` by full path ([`sc_exe`]).
+    sc: String,
 }
 
 fn sc_failure(what: &str, o: &crate::port::Output) -> RegisterError {
@@ -193,12 +198,24 @@ fn sc_failure(what: &str, o: &crate::port::Output) -> RegisterError {
 impl WindowsService {
     /// The service named after the app, starting `target --service`.
     pub fn new(spec: ServiceSpec, target: Target, sys: Box<dyn System>) -> Self {
-        Self { spec, target, sys }
+        Self {
+            spec,
+            target,
+            sys,
+            sc: sc_exe(&ProcessVars),
+        }
+    }
+
+    /// Another `sc.exe` (tests; the default is `%SystemRoot%\\System32\\sc.exe`).
+    #[must_use]
+    pub fn with_sc(mut self, path: &str) -> Self {
+        self.sc = path.to_string();
+        self
     }
 
     fn state(&mut self) -> Result<Option<u32>, String> {
         let name = self.spec.name().to_string();
-        match self.sys.run(SC, &["query", &name]) {
+        match self.sys.run(&self.sc, &["query", &name]) {
             Ok(o) if o.code == Some(sc_exit::DOES_NOT_EXIST) => Ok(None),
             Ok(o) if o.success() => Ok(Some(sc_state(&o.stdout).unwrap_or(0))),
             Ok(o) => Err(format!("sc query: {}", o.reason())),
@@ -233,7 +250,7 @@ impl Backend for WindowsService {
             }
         };
         let name = self.spec.name().to_string();
-        let (program, start) = match self.sys.run(SC, &["qc", &name]) {
+        let (program, start) = match self.sys.run(&self.sc, &["qc", &name]) {
             Ok(o) if o.success() => sc_config(&o.stdout),
             _ => (None, None),
         };
@@ -263,13 +280,13 @@ impl Backend for WindowsService {
         let config = scm_config(&self.spec, &self.target.exe_text());
         for call in sc_commands(&config) {
             let args: Vec<&str> = call.iter().map(String::as_str).collect();
-            match self.sys.run(SC, &args) {
+            match self.sys.run(&self.sc, &args) {
                 Ok(o) if o.success() => {}
                 Ok(o) => return Err(sc_failure(&format!("sc {}", args[0]), &o)),
                 Err(e) => return Err(RegisterError::Other(format!("sc.exe {e}"))),
             }
         }
-        match self.sys.run(SC, &["start", &config.name]) {
+        match self.sys.run(&self.sc, &["start", &config.name]) {
             // 1056: already running.
             Ok(o) if o.success() || o.code == Some(1056) => Ok(()),
             Ok(o) => Err(sc_failure("sc start", &o)),
@@ -279,8 +296,8 @@ impl Backend for WindowsService {
 
     fn unregister(&mut self) -> Result<(), String> {
         let name = self.spec.name().to_string();
-        let _ = self.sys.run(SC, &["stop", &name]);
-        match self.sys.run(SC, &["delete", &name]) {
+        let _ = self.sys.run(&self.sc, &["stop", &name]);
+        match self.sys.run(&self.sc, &["delete", &name]) {
             Ok(o)
                 if o.success()
                     || o.code == Some(sc_exit::DOES_NOT_EXIST)
@@ -295,7 +312,7 @@ impl Backend for WindowsService {
 
     fn evict(&mut self) -> Result<(), String> {
         let name = self.spec.name().to_string();
-        match self.sys.run(SC, &["stop", &name]) {
+        match self.sys.run(&self.sc, &["stop", &name]) {
             Ok(o)
                 if o.success()
                     || o.code == Some(sc_exit::NOT_ACTIVE)
@@ -340,10 +357,17 @@ impl ElevatedWindowsService {
         }
     }
 
+    /// Another `sc.exe` for the reads (tests).
+    #[must_use]
+    pub fn with_sc(mut self, path: &str) -> Self {
+        self.inner = self.inner.with_sc(path);
+        self
+    }
+
     fn elevated(&mut self, verb: Verb) -> Result<(), RegisterError> {
         match self
             .elevator
-            .run_elevated(&self.program, &[verb.word()], ELEVATED_TIMEOUT)?
+            .run_elevated(&self.program, &[verb.word()], ELEVATED_CEILING)?
         {
             0 => Ok(()),
             code => Err(RegisterError::Other(format!(

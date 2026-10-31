@@ -17,8 +17,28 @@ pub const LAUNCHCTL: &str = "/bin/launchctl";
 pub const SYSTEMCTL: &str = "systemctl";
 /// `reg.exe`.
 pub const REG: &str = "reg";
-/// `sc.exe`.
-pub const SC: &str = "sc";
+/// Where Windows lives when `SystemRoot` is not set (or not a full path).
+pub const WINDOWS_DIR_FALLBACK: &str = r"C:\Windows";
+
+/// `sc.exe` by full path, `%SystemRoot%\System32\sc.exe`: a bare `sc` is looked up on `PATH` (and in the current folder),
+/// where another program of that name could stand in for it, and `sc` is also a PowerShell alias. `SystemRoot` is
+/// ignored unless it is a full path (`C:\Windows`, `\\?\C:\Windows`).
+pub fn sc_exe(vars: &dyn Vars) -> String {
+    let root = vars
+        .get("SystemRoot")
+        .and_then(|v| v.into_string().ok())
+        .map(|v| v.trim_end_matches(['\\', '/']).to_string())
+        .filter(|v| {
+            let b = v.as_bytes();
+            (b.len() > 2
+                && b[0].is_ascii_alphabetic()
+                && b[1] == b':'
+                && matches!(b[2], b'\\' | b'/'))
+                || v.starts_with(r"\\")
+        })
+        .unwrap_or_else(|| WINDOWS_DIR_FALLBACK.to_string());
+    format!(r"{root}\System32\sc.exe")
+}
 
 fn home(vars: &dyn Vars) -> Result<PathBuf, ServiceError> {
     vars.get("HOME")
@@ -163,6 +183,33 @@ mod tests {
         );
         assert_eq!(systemctl_scope(Kind::UserAgent), ["--user"]);
         assert!(systemctl_scope(Kind::SystemService).is_empty());
+    }
+
+    #[test]
+    fn sc_is_run_by_full_path_from_the_system_root_with_a_fallback() {
+        let want = r"C:\Windows\System32\sc.exe";
+        assert_eq!(sc_exe(&MapVars::new()), want);
+        assert_eq!(
+            sc_exe(&MapVars::new().with("SystemRoot", r"D:\WINNT")),
+            r"D:\WINNT\System32\sc.exe"
+        );
+        assert_eq!(
+            sc_exe(&MapVars::new().with("SystemRoot", r"E:\Windows\")),
+            r"E:\Windows\System32\sc.exe"
+        );
+        assert_eq!(
+            sc_exe(&MapVars::new().with("SystemRoot", r"\\?\C:\Windows")),
+            r"\\?\C:\Windows\System32\sc.exe"
+        );
+        // Not a full path (a planted relative folder, empty, a bare drive): never used.
+        for bad in ["", "Windows", r".\evil", "C:", r"C:evil", "/usr"] {
+            assert_eq!(
+                sc_exe(&MapVars::new().with("SystemRoot", bad)),
+                want,
+                "{bad:?}"
+            );
+        }
+        assert!(!sc_exe(&MapVars::new()).eq_ignore_ascii_case("sc"));
     }
 
     #[test]

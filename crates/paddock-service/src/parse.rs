@@ -285,9 +285,11 @@ pub fn startup_switched_off(reg_query: &str, value: &str) -> bool {
         .is_some_and(|b| b & 1 == 1)
 }
 
-/// The service state number in `sc query` output (`STATE : 4  RUNNING`; numbers do not depend on the language).
+/// The service state number in `sc query` output (`STATE : 4  RUNNING`). The numbers do not depend on the display
+/// language but the labels do (German `ZUSTAND`), so when `STATE` is not there the state is the second indented
+/// `label : number` line (after `TYPE`), whatever the label says.
 pub fn sc_state(sc_query: &str) -> Option<u32> {
-    sc_field(sc_query, "STATE")?
+    sc_value(sc_query, "STATE", 1)?
         .split_whitespace()
         .next()?
         .parse()
@@ -308,14 +310,26 @@ fn sc_field<'a>(text: &'a str, name: &str) -> Option<&'a str> {
     })
 }
 
-/// The program and start type in `sc qc` output.
+/// The value of the indented `label : value` lines of `sc` output, in order (the unindented `SERVICE_NAME:` header and the
+/// `[SC]` line are not entries; a wrapped flags line has no colon).
+fn sc_entries(text: &str) -> impl Iterator<Item = &str> {
+    text.lines()
+        .filter(|l| l.starts_with([' ', '\t']))
+        .filter_map(|l| l.split_once(':').map(|(_, v)| v.trim()))
+}
+
+/// The value labelled `label` (English), or the one at `position` among the entries when the labels are in another
+/// language.
+fn sc_value<'a>(text: &'a str, label: &str, position: usize) -> Option<&'a str> {
+    sc_field(text, label).or_else(|| sc_entries(text).nth(position))
+}
+
+/// The program and start type in `sc qc` output. In another display language they are the fourth and the second entry
+/// (`TYPE`, `START_TYPE`, `ERROR_CONTROL`, `BINARY_PATH_NAME`).
 pub fn sc_config(sc_qc: &str) -> (Option<String>, Option<u32>) {
-    let program = sc_qc.lines().find_map(|l| {
-        let (k, v) = l.split_once(':')?;
-        (k.trim() == "BINARY_PATH_NAME").then(|| windows_program_of(v.trim()))?
-    });
+    let program = sc_value(sc_qc, "BINARY_PATH_NAME", 3).and_then(windows_program_of);
     let start =
-        sc_field(sc_qc, "START_TYPE").and_then(|v| v.split_whitespace().next()?.parse().ok());
+        sc_value(sc_qc, "START_TYPE", 1).and_then(|v| v.split_whitespace().next()?.parse().ok());
     (program, start)
 }
 
@@ -518,6 +532,41 @@ mod tests {
         );
         assert_eq!(sc_config(""), (None, None));
         assert_eq!(sc_exit::EXISTS, 1073);
+    }
+
+    /// `sc query` / `sc qc` as a localised Windows prints them: the labels change with the display language (invented
+    /// same-shape text), the line order and the numbers do not.
+    const SC_QUERY_DE: &str = "\r\nSERVICE_NAME: Pitwall\r\n        TYP                : 10  WIN32_OWN_PROCESS\r\n        ZUSTAND            : 4  RUNNING\r\n                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)\r\n        WIN32_EXIT_CODE    : 0  (0x0)\r\n";
+    const SC_QUERY_FR: &str = "\r\nSERVICE_NAME: Pitwall\r\n        TYPE               : 10  WIN32_OWN_PROCESS\r\n        ETAT               : 1  STOPPED\r\n        CODE_DE_SORTIE     : 0  (0x0)\r\n";
+    const SC_QC_DE: &str = "[SC] QueryServiceConfig ERFOLGREICH\r\n\r\nSERVICE_NAME: Pitwall\r\n        TYP                : 10  WIN32_OWN_PROCESS\r\n        START_TYP          : 4   DISABLED\r\n        FEHLERSTEUERUNG    : 1   NORMAL\r\n        BINAERPFADNAME     : \"C:\\Program Files\\Pitwall\\pitwall-server.exe\" --service\r\n        LADEREIHENFOLGE    :\r\n        ANZEIGENAME        : Pitwall\r\n";
+    const SC_QC_FR: &str = "[SC] QueryServiceConfig R\u{c9}USSITE\r\n\r\nSERVICE_NAME: Pitwall\r\n        TYPE               : 10  WIN32_OWN_PROCESS\r\n        TYPE_DEMARRAGE     : 2   AUTO_START  (DELAYED)\r\n        CONTROLE_ERREUR    : 1   NORMAL\r\n        NOM_CHEMIN_BINAIRE : C:\\Pitwall\\pitwall-server.exe --service\r\n";
+
+    #[test]
+    fn sc_output_is_read_in_other_display_languages_by_position_and_number() {
+        assert_eq!(sc_state(SC_QUERY_DE), Some(SC_RUNNING));
+        assert_eq!(sc_state(SC_QUERY_FR), Some(SC_STOPPED));
+        assert_eq!(
+            sc_config(SC_QC_DE),
+            (
+                Some("C:\\Program Files\\Pitwall\\pitwall-server.exe".into()),
+                Some(SC_DISABLED)
+            )
+        );
+        assert_eq!(
+            sc_config(SC_QC_FR),
+            (Some("C:\\Pitwall\\pitwall-server.exe".into()), Some(2))
+        );
+        // An English label still wins over position, and unindented lines (the header) are never entries.
+        assert_eq!(
+            sc_state("SERVICE_NAME: P\r\n  TYPE : 10  X\r\n  STATE : 1  STOPPED\r\n"),
+            Some(SC_STOPPED)
+        );
+        assert_eq!(sc_state("STATE: 4  RUNNING"), Some(SC_RUNNING));
+        assert_eq!(sc_state("SERVICE_NAME: P\r\n  TYPE : 10  X\r\n"), None);
+        assert_eq!(
+            sc_config("SERVICE_NAME: P\r\n  TYPE : 10  X\r\n  A : 2  Y\r\n"),
+            (None, Some(2))
+        );
     }
 
     /// A real `launchctl print` of a healthy job (macOS 26.6.2, 2026-10-31): the whole report, label and ids invented.

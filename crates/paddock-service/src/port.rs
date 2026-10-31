@@ -157,14 +157,41 @@ pub trait AppService: Send {
     fn open_login_items(&mut self);
 }
 
+/// How the wait for an elevated program ended, as the adapter observed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElevatedEnd {
+    /// The program exited with this code.
+    Exited(u32),
+    /// The OS gave no process to watch (it finished before it could be): nothing says it failed.
+    NoProcess,
+    /// It still ran when the backstop ceiling came; it was not stopped.
+    StillRunning(Duration),
+}
+
+/// What an elevated run's end means for the caller: the exit code, or, for a program still running at the ceiling, an
+/// error that says so (ER-19: a run that has not ended is not a failed one, and its caller must not report it failed).
+pub fn elevated_result(program: &Path, end: ElevatedEnd) -> Result<i32, RegisterError> {
+    match end {
+        ElevatedEnd::Exited(code) => Ok(i32::try_from(code).unwrap_or(1)),
+        ElevatedEnd::NoProcess => Ok(0),
+        ElevatedEnd::StillRunning(waited) => Err(RegisterError::Other(format!(
+            "{} was still running after {} minutes and has not been stopped; it may still finish. Check the service in the Services window, then press Repair again if it did not",
+            program.display(),
+            waited.as_secs() / 60
+        ))),
+    }
+}
+
 /// Runs a program with the OS's own elevation prompt (Windows UAC) and waits for it.
 pub trait Elevator: Send {
-    /// Runs `program args…` elevated; `Ok(exit code)`, or [`RegisterError::Declined`] when the user said no.
+    /// Runs `program args…` elevated and waits for it to end, up to `ceiling` (a backstop, not a judge: a program that is
+    /// still running then is reported as such by [`elevated_result`], never as failed; the adapter says it is still working
+    /// in the log while it waits). `Ok(exit code)`, or [`RegisterError::Declined`] when the user said no.
     fn run_elevated(
         &mut self,
         program: &Path,
         args: &[&str],
-        timeout: Duration,
+        ceiling: Duration,
     ) -> Result<i32, RegisterError>;
 }
 
@@ -192,6 +219,26 @@ mod tests {
             RunError::TimedOut("launchctl".into())
                 .to_string()
                 .contains("in time")
+        );
+    }
+
+    #[test]
+    fn an_elevated_program_still_running_is_not_reported_failed() {
+        let p = Path::new("C:\\app\\server.exe");
+        assert_eq!(elevated_result(p, ElevatedEnd::Exited(0)), Ok(0));
+        assert_eq!(elevated_result(p, ElevatedEnd::Exited(5)), Ok(5));
+        assert_eq!(elevated_result(p, ElevatedEnd::Exited(u32::MAX)), Ok(1));
+        assert_eq!(elevated_result(p, ElevatedEnd::NoProcess), Ok(0));
+        let Err(RegisterError::Other(why)) =
+            elevated_result(p, ElevatedEnd::StillRunning(Duration::from_secs(900)))
+        else {
+            panic!()
+        };
+        assert!(
+            why.contains("still running after 15 minutes")
+                && why.contains("not been stopped")
+                && !why.contains("failed"),
+            "{why}"
         );
     }
 
