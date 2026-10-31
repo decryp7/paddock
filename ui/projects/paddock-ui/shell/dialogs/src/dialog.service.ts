@@ -21,7 +21,7 @@ export type AnyDialogDef = DialogDef<string, any, string, any>;
 /**
  * Opens contributed dialogs (ADR 0009): as OS windows on the desktop, in the page in the browser build; the calls are
  * the same. Pass the definition for a typed result (`open(RENAME_DIALOG)` resolves to what its `result` declares) or an
- * id; the handle's `closed` resolves to the dialog's outcome (answered with a value, or dismissed). One window per dialog id (per input for an `instanced` one): opening it again focuses the open one, delivers the new `inputs` to it (any declared input is set again) and returns its
+ * id; the handle's `closed` resolves to the dialog's outcome (answered with a value, or dismissed). One window per dialog id (per input for an `instanced` one): opening it again focuses the open one, delivers the new `inputs` to it (any declared input is set again; not for an `instanced` dialog, whose instances are told apart by their inputs) and returns its
  * ref. In the page only modeless dialogs are single; modal ones stack, each blocking the last.
  */
 @Injectable({ providedIn: 'root' })
@@ -51,7 +51,7 @@ export class DialogService {
     const existing = single ? this.open_.get(key) : undefined;
     if (existing?.session.isOpen()) {
       // Opened again with inputs: the open window is pointed at them (Settings at a section), not only focused.
-      if (options.inputs) sendDialogInputs(def.id, inputs);
+      if (options.inputs && !def.instanced) sendDialogInputs(def.id, inputs);
       existing.session.focus();
       return existing.ref;
     }

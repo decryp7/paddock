@@ -225,7 +225,8 @@ CDK (rule 47):
     progress bar (indeterminate for a count), the last value under it when there is one; no timeout (ER-19).
   - *Empty*: 16 px muted icon that never repeats the head's icon (`info`, or one with its own meaning such as `plug`
     for a disconnected disk), 13/600 title starting with the benefit, one muted line, the next step as a text button.
-    Exception: a calm empty that means "all good" (Dyno: no active alarms, no issues) is one real `button` row: success
+    Exception: a calm empty that means "all good" (Dyno: no active alarms, no issues) is one real `button` row (the engine
+    decides: `WidgetState::Empty { calm: true }`, false by default; an app binds nothing in the UI): success
     icon, neutral text, relative time or range, chevron, accessible name such as "No active alarms, checked 2 min ago.
     Open alarms".
   - *Error*: danger icon, the title in plain words, the cause muted, the next step (Retry with its icon) as a text

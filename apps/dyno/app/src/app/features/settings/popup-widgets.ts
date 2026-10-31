@@ -58,6 +58,10 @@ const volumeOf = (key: string): VolumeChoice => (key.startsWith('mount:') ? { mo
   styles: `
     :host { display: block; }
     .preview { max-width: 100%; }
+    /* The volume choice is compact: it sits beside the row's text and menu without crowding them. */
+    pd-select { width: 11rem; min-width: 0; }
+    /* The volume choice is compact: it sits beside the row's text and menu without crowding them. */
+    pd-select { width: 11rem; min-width: 0; }
     .head { display: flex; align-items: center; gap: var(--sp-2); flex: 1; }
     .grade-pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 var(--sp-2); border-radius: var(--r-pill); font-size: var(--fs-xs); background: var(--ok-soft); color: var(--ok); }
     .grade-pill[data-tone='warn'] { background: var(--warn-soft); color: var(--warn); }

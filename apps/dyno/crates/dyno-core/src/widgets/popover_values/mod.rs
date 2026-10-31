@@ -607,7 +607,7 @@ fn alarms(id: &PlacementId, inputs: &Inputs<'_>) -> Option<State> {
         return Some(WidgetState::Empty {
             title: "No active alarms".into(),
             calm: true,
-            detail: "Nothing needs your attention.".into(),
+            detail: "All clear.".into(),
             next: action(WidgetActionId::OpenPage(Page::Alarms), "Open alarms"),
         });
     }

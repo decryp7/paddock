@@ -364,7 +364,7 @@ export class MockWidgets {
     const stale = state === 'stale';
     switch (kind) {
       case 'activeAlarms':
-        if (state === 'empty') return empty('No active alarms', 'Nothing needs your attention.', 'Open alarms', { openPage: 'alarms' }, true);
+        if (state === 'empty') return empty('No active alarms', 'All clear.', 'Open alarms', { openPage: 'alarms' }, true);
         if (state === 'error') return error("Couldn't read alarms", "The alarm store didn't answer.");
         return ready({ activeAlarms: { rows: [{ id: 1, title: 'Memory pressure is high', level: 'warning', since: at - 4 * 60_000, acknowledged: false }, { id: 2, title: 'New login item: Docker Desktop', level: 'info', since: at - 3_600_000, acknowledged: false }], more: 3 } }, stale);
       case 'diskSpace': {

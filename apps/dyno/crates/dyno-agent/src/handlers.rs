@@ -181,11 +181,10 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::CounterObjects => shared.counters.objects().map(|o| Reply::CounterObjects(Box::new(o))),
         Request::CounterObject { name } => shared.counters.object(&name).map(|o| Reply::CounterObject(Box::new(o))),
         Request::CounterSearch { query, limit } => shared.counters.search(&query, limit).map(Reply::CounterHits),
-        Request::CounterValues { paths } => shared.counters.values(&paths, now()).map(|readings| {
-            // A counter a dashboard widget shows is toned with that widget's own thresholds.
-            let layout = lock(&shared.core).settings.dashboard.layout().placements.clone();
-            Reply::CounterValues(dyno_core::widgets::with_dashboard_thresholds(readings, &layout))
-        }),
+        Request::CounterValues { paths } => shared
+            .counters
+            .values(&paths, now())
+            .map(|readings| Reply::CounterValues(toned_by_dashboard(readings, &lock(&shared.core).settings))),
         Request::CounterHistory { paths, minutes } => shared
             .counters
             .history(&paths, minutes, now(), |from, to| {
@@ -646,4 +645,53 @@ fn plugins(shared: &Shared) -> Vec<PluginInfo> {
             contributes: p.contributes.iter().map(|c| c.as_str().to_string()).collect(),
         })
         .collect()
+}
+
+/// Counter readings toned with the thresholds of the dashboard widget that shows each one (not the popup's or the menu bar's).
+fn toned_by_dashboard(
+    readings: Vec<dyno_core::counters::CounterReading>,
+    settings: &dyno_core::settings::Settings,
+) -> Vec<dyno_core::counters::CounterReading> {
+    dyno_core::widgets::with_dashboard_thresholds(readings, &settings.dashboard.layout().placements)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dyno_core::counters::{CounterReading, CounterUnit};
+    use dyno_core::metrics::Reading;
+    use dyno_core::settings::Settings;
+    use dyno_core::widgets::dashboard::{Thresholds, ValueTone};
+    use dyno_core::widgets::{DashboardKind, DashboardWidget, Metric};
+    use paddock_widgets::Edit;
+
+    const PATH: &str = r"\Processor(_Total)\% Processor Time";
+
+    fn reading() -> CounterReading {
+        CounterReading::new(PATH.into(), CounterUnit::Percent, Reading::Available(60.0))
+    }
+
+    /// The `CounterValues` reply tones a counter with the dashboard widget's own thresholds: the handler reads the dashboard layout
+    /// of the settings (wiring), and a counter no dashboard widget shows keeps its default tone.
+    #[test]
+    fn counter_values_are_toned_by_the_dashboard_widget_that_shows_them() {
+        let mut settings = Settings::default();
+        let mut w = DashboardWidget::new(DashboardKind::Graph, Metric::PerfCounter(PATH.into()));
+        w.thresholds = Thresholds {
+            warning: Some(50.0),
+            critical: Some(80.0),
+        };
+        settings
+            .dashboard
+            .edit(Edit::Add {
+                widget: w,
+                span: None,
+                at: None,
+            })
+            .unwrap();
+        let toned = toned_by_dashboard(vec![reading()], &Settings::default());
+        assert_eq!(toned[0].tone, ValueTone::Ok, "no widget shows it: the default thresholds");
+        let toned = toned_by_dashboard(vec![reading()], &settings);
+        assert_eq!(toned[0].tone, ValueTone::Warn, "the widget's thresholds");
+    }
 }

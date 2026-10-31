@@ -409,6 +409,18 @@ describe('dialogs in the page (browser build)', () => {
     first.dismiss();
   });
 
+  it('does not cross-talk between instances of an instanced dialog when one is opened again', async () => {
+    const { service, root, settle } = await setup();
+    service.open(INSTANCED, { inputs: { who: 'Ada' } });
+    service.open(INSTANCED, { inputs: { who: 'Grace' } });
+    await settle();
+    const names = () => [...root.querySelectorAll('[data-testid=who]')].map((e) => e.textContent?.trim()).sort();
+    expect(names()).toEqual(['Ada', 'Grace']);
+    service.open(INSTANCED, { inputs: { who: 'Ada' } });
+    await settle();
+    expect(names()).toEqual(['Ada', 'Grace']);
+  });
+
   it('stays hidden until it is ready, and shows Loading with its Cancel at the show deadline', async () => {
     const never = d('t.slow', { load: () => new Promise(() => undefined) });
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideContributions({ dialogs: [never] }), provideDialogs()] });
@@ -600,6 +612,17 @@ describe('dialogs as windows', () => {
     io.closed('d-main-1', 't.viewer', { dx: 1, dy: 2, width: 800, height: 600 });
     expect(await ref.closed).toEqual({ kind: 'answered', value: { ok: true } });
     expect(loadDialogBounds()['t.viewer']).toEqual({ dx: 1, dy: 2, width: 800, height: 600 });
+  });
+
+  it('points a window another window opened at the new inputs', async () => {
+    const { io, service } = setup();
+    await io.open({ dialogId: 't.viewer', title: 'x', input: {}, theme: 'light' });
+    const heard: unknown[] = [];
+    const probe = new BroadcastChannel('paddock-dialog-inputs');
+    probe.onmessage = (e: MessageEvent<unknown>) => heard.push(e.data);
+    service.open(VIEWER, { inputs: { page: 'popup-widgets' } });
+    await vi.waitFor(() => expect(heard).toEqual([expect.objectContaining({ dialogId: 't.viewer', inputs: { page: 'popup-widgets' } })]));
+    probe.close();
   });
 
   it('blocks the window while a modal window is open, focuses an open one and forwards a dismissal as a request', async () => {

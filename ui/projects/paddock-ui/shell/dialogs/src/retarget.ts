@@ -2,19 +2,24 @@ import { reflectComponentType, type ComponentRef } from '@angular/core';
 
 /** What re-targeting an open dialog carries: its id and the new inputs (plain data). */
 interface Retarget {
+  /** The page that sent it, so a page ignores its own echo (it already told its own dialogs directly). */
+  readonly from: string;
   readonly dialogId: string;
   readonly inputs: Readonly<Record<string, unknown>>;
 }
 
 const CHANNEL = 'paddock-dialog-inputs';
+const PAGE = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `p${Math.random().toString(36).slice(2)}`;
 type Listener = (inputs: Readonly<Record<string, unknown>>) => void;
 const local = new Map<string, Set<Listener>>();
 let outgoing: BroadcastChannel | null | undefined;
 
 function parse(data: unknown): Retarget | null {
   if (typeof data !== 'object' || data === null) return null;
-  const { dialogId, inputs } = data as Record<string, unknown>;
-  return typeof dialogId === 'string' && typeof inputs === 'object' && inputs !== null && !Array.isArray(inputs) ? { dialogId, inputs: inputs as Record<string, unknown> } : null;
+  const { from, dialogId, inputs } = data as Record<string, unknown>;
+  return typeof from === 'string' && typeof dialogId === 'string' && typeof inputs === 'object' && inputs !== null && !Array.isArray(inputs)
+    ? { from, dialogId, inputs: inputs as Record<string, unknown> }
+    : null;
 }
 
 function channel(): BroadcastChannel | null {
@@ -30,7 +35,7 @@ function channel(): BroadcastChannel | null {
 export function sendDialogInputs(dialogId: string, inputs: Readonly<Record<string, unknown>>): void {
   for (const l of local.get(dialogId) ?? []) l(inputs);
   try {
-    channel()?.postMessage({ dialogId, inputs } satisfies Retarget);
+    channel()?.postMessage({ from: PAGE, dialogId, inputs } satisfies Retarget);
   } catch {
     // Not cloneable or no channel: only this page's dialogs hear it.
   }
@@ -51,7 +56,7 @@ export function followDialogInputs(dialogId: string, ref: ComponentRef<unknown>)
     incoming = new BroadcastChannel(CHANNEL);
     incoming.onmessage = (e: MessageEvent<unknown>) => {
       const m = parse(e.data);
-      if (m && m.dialogId === dialogId) apply(m.inputs);
+      if (m && m.from !== PAGE && m.dialogId === dialogId) apply(m.inputs);
     };
   }
   return () => {

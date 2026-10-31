@@ -6,6 +6,7 @@ import { InPageDialogBackend } from './in-page';
 import { DIALOG_IO } from './io';
 import { raiseToKindMinimum } from './kind';
 import { errorText, isRecord } from './mount';
+import { sendDialogInputs } from './retarget';
 import { DialogPresenter, type DialogSession, type DialogShowRequest } from './types';
 
 /** A result event of the dialog layer; `null` when malformed. */
@@ -85,6 +86,8 @@ export class WindowDialogBackend extends DialogPresenter {
         await this.listen();
         const info = await this.io.open(sent);
         label = info.label;
+        // A window another window opened is pointed at the new inputs (it only comes forward otherwise).
+        if (info.existing && Object.keys(request.inputs).length > 0 && !request.def.instanced) sendDialogInputs(request.def.id, request.inputs);
         this.pending.set(info.label, { dialogId: request.def.id, resolve, shown, result: null });
         // An existing window that is on screen already will not announce itself again; a pending one (or a new one) does.
         if ((info.existing && !info.pending) || this.shownEarly.delete(info.label)) shown();

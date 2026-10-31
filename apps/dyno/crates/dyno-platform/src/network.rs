@@ -100,7 +100,8 @@ impl NetworkSockets for OsSockets {
     }
 }
 
-/// The parents of `pids` (the holders of shared sockets: usually none, so usually nothing is read).
+/// The parents of `pids` (the holders of shared sockets: usually none, so usually nothing is read). A holder whose parent cannot
+/// be read yet is listed on its own until the next listing.
 #[cfg(not(windows))]
 fn parents_of(pids: impl Iterator<Item = u32>) -> std::collections::HashMap<u32, u32> {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
@@ -291,7 +292,8 @@ mod tests {
         };
         let mut listening = listed();
         while listening.len() != 1 && std::time::Instant::now() < end {
-            std::thread::yield_now();
+            // Paced: each listing runs lsof-like OS calls, so look again a few milliseconds later, not in a spin.
+            std::thread::sleep(std::time::Duration::from_millis(20));
             listening = listed();
         }
         assert_eq!(listening.len(), 1, "{listening:?}");
