@@ -222,24 +222,30 @@ pub const CLOSE_PATIENCE: paddock_proc::Patience = paddock_proc::Patience {
 };
 
 /// When a self-test (`<browser> --version`) is stuck rather than slow: a first start that is scanned, paged in or loaded still uses
-/// CPU or exits, and is waited for; one that uses none and does not exit for `idle` is hung (ADR 0031, no fixed time).
+/// CPU or exits, and is waited for; one that uses none and does not exit for `idle` is hung (ADR 0031, no fixed time). `idle` is
+/// 60 s because the scans that delay a first start (Gatekeeper, XProtect and amfid on macOS, Defender on Windows) run in their own
+/// processes: the browser looks idle while it is blocked on them, so a short idle limit would give up on a healthy start.
 pub const SELF_TEST_PATIENCE: paddock_proc::Patience = paddock_proc::Patience {
     spin: Duration::from_secs(120),
-    idle: Duration::from_secs(20),
+    idle: Duration::from_secs(60),
     hang_guard: Duration::from_secs(300),
     note_after: 0,
     tick: Duration::from_millis(50),
     cpu_every: 20,
 };
 
-/// Waits until a short-lived program (a self-test) has exited, judged on its run state; `false` when it is stuck or the pace
-/// ended the wait. `cpu` and `pace` are seams for tests.
+/// The most a browser self-test may take, however it looks (a product limit, 3 minutes): past it the wait ends, the program is
+/// killed and the failure says so. It bounds the status and health replies too, which run the self-test for each browser found.
+pub const SELF_TEST_CAP: Duration = Duration::from_secs(180);
+
+/// Waits until a short-lived program (a self-test) has exited, judged on its run state; says how the wait ended (the cause when
+/// it is stuck). `cpu` and `pace` are seams for tests.
 pub(crate) fn wait_to_exit(
     process: &mut Supervised,
     cpu: impl FnMut(paddock_proc::ProcessId) -> Option<Duration>,
     pace: impl paddock_proc::Pace,
-) -> bool {
-    wait_to_quit(process, SELF_TEST_PATIENCE, cpu, pace) == Quit::Exited
+) -> Quit {
+    wait_to_quit(process, SELF_TEST_PATIENCE, cpu, pace)
 }
 
 /// The most a quit may take, however it looks: a browser with a throwaway profile is safe to end after it (the profile is
@@ -500,31 +506,43 @@ impl<F: FnMut(paddock_proc::ProcessId) -> Option<Duration>> paddock_proc::StartP
     }
 }
 
-/// Waits for one tick on the real clock, and says the wait is over (cancelled) once `cap` has passed.
-struct CappedSleep {
+/// Waits for one tick on the real clock, and says the wait is over (cancelled) once the end has passed or the job's cancel is set.
+pub(crate) struct CappedSleep {
     end: Instant,
+    cancel: Option<spotter_core::job::Cancel>,
 }
 
 impl CappedSleep {
-    fn new(cap: Duration) -> CappedSleep {
-        CappedSleep { end: Instant::now() + cap }
+    pub(crate) fn new(cap: Duration) -> CappedSleep {
+        CappedSleep::until(Instant::now() + cap)
+    }
+
+    /// Ends at `end` (a deadline shared by several waits).
+    pub(crate) fn until(end: Instant) -> CappedSleep {
+        CappedSleep { end, cancel: None }
+    }
+
+    /// Also ends when `cancel` is set.
+    pub(crate) fn cancelled_by(mut self, cancel: spotter_core::job::Cancel) -> CappedSleep {
+        self.cancel = Some(cancel);
+        self
     }
 }
 
 impl paddock_proc::Pace for CappedSleep {
     fn wait(&mut self, tick: Duration) -> bool {
         std::thread::sleep(tick);
-        Instant::now() < self.end
+        Instant::now() < self.end && !self.cancel.as_ref().is_some_and(spotter_core::job::Cancel::is_cancelled)
     }
 }
 
 /// How a wait for the browser to quit ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Quit {
+pub(crate) enum Quit {
     /// The process exited.
     Exited,
-    /// Judged stuck on its run state (no CPU and no exit, or spinning).
-    Stuck,
+    /// Judged stuck on its run state (no CPU and no exit, or spinning), with the cause.
+    Stuck(paddock_proc::StallCause),
     /// The pace's cap ended the wait.
     Capped,
 }
@@ -543,8 +561,10 @@ fn wait_to_quit(
     loop {
         match watch.wait() {
             Watched::State(StartState::Stalled(r)) if !r.cause.is_stuck() => {}
+            Watched::State(StartState::Stalled(r)) => return Quit::Stuck(r.cause),
             Watched::State(StartState::Ready | StartState::Exited(_)) => return Quit::Exited,
-            Watched::State(_) => return Quit::Stuck,
+            // Not produced by the judge once a wait returns; treated as stuck without a better cause.
+            Watched::State(StartState::Starting) => return Quit::Stuck(paddock_proc::StallCause::Slow),
             Watched::Cancelled => return Quit::Capped,
         }
     }
@@ -605,7 +625,7 @@ impl<F: FnMut(paddock_proc::ProcessId) -> Option<Duration>> paddock_proc::StartP
     }
 }
 
-/// Waits for one tick on the real clock.
+/// Waits for one tick on the real clock, with no end of its own (the launch's wall-clock cap, the watchdog, ends it).
 pub(crate) struct SleepPace;
 
 impl paddock_proc::Pace for SleepPace {
@@ -925,7 +945,7 @@ mod tests {
         let mut process = Supervised::spawn(cmd).unwrap();
         let mut pace = Yield(0);
         let quit = wait_to_quit(&mut process, CLOSE_PATIENCE, |_| Some(Duration::from_secs(1)), &mut pace);
-        assert_eq!(quit, Quit::Stuck);
+        assert!(matches!(quit, Quit::Stuck(paddock_proc::StallCause::Idle(_))), "{quit:?}");
         assert!(pace.0 < 1_000, "judged after {} ticks", pace.0);
         process.kill();
     }
