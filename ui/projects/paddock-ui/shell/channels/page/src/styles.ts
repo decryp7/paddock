@@ -43,7 +43,7 @@ export const CHANNELS_STYLES = `
   .pd-ch__check { font-weight: var(--pd-weight-medium); }
   mat-checkbox.pd-ch__check { margin-inline-start: calc((var(--pd-control-height) - 18px) / -2); }
   .pd-ch__lan { display: flex; flex-direction: column; gap: var(--pd-space-1); }
-  .pd-ch__events-picker { display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; }
+  .pd-ch__events-picker { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; }
   .pd-ch__legend { font-weight: var(--pd-weight-medium); }
   .pd-ch__group { margin: 0; padding: var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); display: flex; flex-direction: column; gap: var(--pd-space-1); min-width: 0; }
   .pd-ch__group legend { padding: 0 var(--pd-space-1); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }

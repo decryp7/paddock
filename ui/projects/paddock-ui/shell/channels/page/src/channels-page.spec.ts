@@ -490,7 +490,7 @@ describe('the Notification channels page', () => {
     const box = p.q('channel-allow-lan')!;
     expect(text(box)).toBe('This channel is on my home network (allow a private address)');
     expect(box.querySelector('input')!.getAttribute('aria-describedby')).toBe('pd-ch-h-lan');
-    expect(text(p.el.querySelector('#pd-ch-h-lan')!)).toContain('Turn this on only for a server in your own home or office network');
+    expect(text(p.el.querySelector('#pd-ch-h-lan')!)).toContain('Turn this on only for a web address or ntfy server in your own home or office network');
     expect(box.querySelector('input')!.checked).toBe(false);
     await p.type('channel-server', 'http://ntfy.lan');
     await p.click('channel-allow-lan');
@@ -500,7 +500,7 @@ describe('the Notification channels page', () => {
     expect(saved?.transport).toMatchObject({ server: 'http://ntfy.lan' });
   });
 
-  it('shows the checkbox for webhook and email channels too, and a private address is refused without it', async () => {
+  it('shows the checkbox for webhook channels, hides it for email, and a private address is refused without it', async () => {
     const p = await open();
     await p.click(p.rowButton('slack', 'channel-edit'));
     expect(p.q('channel-allow-lan')).not.toBeNull();
@@ -512,7 +512,21 @@ describe('the Notification channels page', () => {
     expect(p.q('channel-editor')).toBeNull();
     await p.click('channel-add');
     await p.choose('pd-ch-type', 'Email');
-    expect(p.q('channel-allow-lan')).not.toBeNull();
+    expect(p.q('channel-allow-lan')).toBeNull();
+  });
+
+  it('switching to email clears the switch so it is never saved on a mail channel', async () => {
+    const p = await open();
+    await p.click(p.rowButton('slack', 'channel-edit'));
+    await p.click('channel-allow-lan');
+    await p.choose('pd-ch-type', 'Email');
+    await p.type('channel-host', 'smtp.example.com');
+    await p.type('channel-from', 'app@example.com');
+    await p.type('channel-to', 'me@example.com');
+    await p.click('channel-save');
+    const saved = (await p.memory.get()).settings.channels.find((c) => c.id === 'slack');
+    expect(saved?.transport.type).toBe('email');
+    expect(saved?.allowLan).toBe(false);
   });
 
   describe('with declared events', () => {
@@ -521,14 +535,14 @@ describe('the Notification channels page', () => {
       await p.click(p.rowButton('slack', 'channel-edit'));
       expect(p.q('channel-events')).toBeNull();
       const groups = [...p.el.querySelectorAll('fieldset')].map((g) => text(g.querySelector('legend')!));
-      expect(groups).toEqual(['Storage', 'Jobs', 'Other events']);
+      expect(groups).toEqual(['Events', 'Storage', 'Jobs', 'Other events']);
       const disk = p.q('channel-event-diskLow')!;
       expect(text(disk)).toBe('diskLow');
       expect(disk.querySelector('input')!.type).toBe('checkbox');
       expect(disk.querySelector('input')!.checked).toBe(true);
       expect(p.q('channel-event-jobDone')!.querySelector('input')!.checked).toBe(false);
-      expect(p.q('channel-event-jobDone')!.querySelector('input')!.getAttribute('aria-describedby')).toBe('pd-ch-ev-jobDone');
-      expect(text(p.el.querySelector('#pd-ch-ev-jobDone')!)).toBe('A background job finished.');
+      expect(p.q('channel-event-jobDone')!.querySelector('input')!.getAttribute('aria-describedby')).toBe('pd-ch-ev-1-1');
+      expect(text(p.el.querySelector('#pd-ch-ev-1-1')!)).toBe('A background job finished.');
     });
 
     it('toggling checkboxes changes the channel’s event names and saving keeps them', async () => {
@@ -557,8 +571,14 @@ describe('the Notification channels page', () => {
       await p.click(p.rowButton('odd', 'channel-edit'));
       expect(p.q('channel-event-remove-oldEvent')!.getAttribute('aria-label')).toBe('Remove event oldEvent');
       await p.click('channel-event-remove-oldEvent');
+      // Focus moves to the chip that took its place, not to the page.
+      expect(document.activeElement).toBe(p.q('channel-event-remove-legacyEvent'));
+      await p.click('channel-event-remove-legacyEvent');
+      expect(document.activeElement).toBe(p.q('channel-event-other-input'));
+      await p.type('channel-event-other-input', 'legacyEvent');
+      await p.click('channel-event-other-add');
       await p.click('channel-save');
-      expect((await p.memory.get()).settings.channels[0]!.events).toEqual(['diskLow', 'legacyEvent', 'jobDone']);
+      expect((await p.memory.get()).settings.channels[0]!.events).toEqual(['diskLow', 'jobDone', 'legacyEvent']);
     });
 
     it('still takes a free-text name under Other events, and Enter adds it without saving the form', async () => {

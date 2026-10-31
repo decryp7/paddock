@@ -77,6 +77,7 @@ function channelProblem(c: ChannelConfig): string | null {
   if (!c.name.trim()) return `Channel ${c.id} needs a name.`;
   if (c.events.length > MAX_EVENTS) return `${name} lists more than ${MAX_EVENTS} events.`;
   const t = c.transport;
+  if (c.allowLan && t.type === 'email') return `${name}: the home network switch is for webhook and ntfy channels.`;
   switch (t.type) {
     case 'webhook': {
       const p = urlProblem('The address', t.url, c.allowLan);
