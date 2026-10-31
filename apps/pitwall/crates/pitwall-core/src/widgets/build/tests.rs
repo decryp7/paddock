@@ -540,7 +540,7 @@ fn the_notice_is_a_lost_server_first_then_apps_waiting_to_pair() {
     assert_eq!(notice(&f).unwrap().action.unwrap().label, "Review");
     f.set_disconnected(NOW);
     let n = notice(&f).unwrap();
-    assert_eq!((n.tone, n.title.as_str()), (Tone::Danger, "The server is not responding"));
+    assert_eq!((n.tone, n.title.as_str()), (Tone::Danger, "The server is not answering"));
     let mut never = Facts::new();
     never.set_disconnected(NOW);
     assert_eq!(notice(&never).unwrap().title, "The server is not running");

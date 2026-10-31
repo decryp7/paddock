@@ -22,7 +22,7 @@ describe('the mock popup (the engine\'s recorded output)', () => {
     expect(demo.notice).toBeNull();
     expect(demo.placements.map((p) => p.state.state)).toEqual(['ready', 'ready', 'ready', 'ready', 'working', 'ready', 'ready']);
     const down = popup.values('down', NOW);
-    expect(down.notice?.title).toBe('The server is not responding');
+    expect(down.notice?.title).toBe('The server is not answering');
     const server = down.placements[0]!.state;
     expect(server.state === 'ready' && server.staleSince).toBe(NOW);
     const errors = popup.values('demo', NOW).placements.find((p) => p.id === 'recent-errors')!.state;

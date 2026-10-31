@@ -57,6 +57,9 @@ test.describe('the tray popup', () => {
         }),
       );
       expect(bad).toEqual([]);
+      // The main word of a widget (its state, its figure) is never cut, not even by the ellipsis kept as a safety net.
+      const cut = await popup.locator('section.pd-w .big').evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth).map((e) => e.textContent!.trim()));
+      expect(cut, 'no main word is truncated').toEqual([]);
     });
   }
 
@@ -87,8 +90,8 @@ test.describe('the tray popup', () => {
 
   test('says the server is down once, above the widgets, and marks the last readings', async ({ page }) => {
     const popup = await openTray(page, 'down');
-    await expect(popup.getByText('The server is not responding')).toHaveCount(1);
-    await expect(popup.locator('pw-status-pill')).toContainText('Not responding');
+    await expect(popup.getByText('The server is not answering')).toHaveCount(1);
+    await expect(popup.locator('pw-status-pill')).toContainText('No answer');
     await expect(popup.getByRole('region', { name: 'Memory' })).toBeVisible();
   });
 

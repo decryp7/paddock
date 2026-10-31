@@ -330,7 +330,7 @@
           "label": "Repair server"
         },
         "detail": "Showing the last readings. Pitwall keeps trying.",
-        "title": "The server is not responding",
+        "title": "The server is not answering",
         "tone": "danger"
       }
     },

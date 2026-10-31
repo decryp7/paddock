@@ -100,9 +100,9 @@ describe('the tray popup', () => {
 
   it('with the server down says so once above the widgets and in the pill, and marks the readings stale', async () => {
     const { el, widget } = await mount({ popover: 'down' });
-    expect(pill(el)).toBe('Not responding');
-    expect(el.textContent).toContain('The server is not responding');
-    expect(widget('Server').textContent).toContain('Not responding');
+    expect(pill(el)).toBe('No answer');
+    expect(el.textContent).toContain('The server is not answering');
+    expect(widget('Server').textContent).toContain('No answer');
     expect(widget('Server').textContent, 'no stale engine health').not.toContain('Engines ready');
     expect(Array.from(el.querySelectorAll('button')).filter((b) => b.textContent!.includes('Open Pitwall')).length, 'one Open Pitwall button').toBe(1);
     expect(widget('Memory').textContent).toMatch(/As of|Updated/);

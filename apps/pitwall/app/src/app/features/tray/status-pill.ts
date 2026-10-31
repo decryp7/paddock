@@ -4,7 +4,7 @@ import type { PopoverStatus } from '../../core/generated/widgets';
 
 /**
  * The popup header's one status pill: how the local AI is doing overall, as the engine decided it ("Serving on :11435",
- * "Paused", "2 engine problems", "Not responding"). An icon and a word, never colour alone; "Connecting…" until the first answer.
+ * "Paused", "2 engine problems", "No answer"). An icon and a word, never colour alone; "Connecting…" until the first answer.
  */
 @Component({
   selector: 'pw-status-pill',
@@ -65,7 +65,7 @@ export class StatusPill {
       case 'problems':
         return { tone: 'danger', glyph: 'error', text: `${s.count} engine ${s.count === 1 ? 'problem' : 'problems'}` };
       case 'unreachable':
-        return { tone: 'danger', glyph: 'error', text: 'Not responding' };
+        return { tone: 'danger', glyph: 'error', text: 'No answer' };
       default:
         return { tone: 'neutral', glyph: 'info', text: 'Connecting…' };
     }

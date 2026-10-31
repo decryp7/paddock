@@ -24,7 +24,7 @@ const SERVER: Record<ServerState, { icon: string; word: string }> = {
   serving: { icon: 'pw:success', word: 'Serving' },
   paused: { icon: 'pw:pause', word: 'Paused' },
   stopped: { icon: 'pw:stop', word: 'Stopped' },
-  unreachable: { icon: 'pw:error', word: 'Not responding' },
+  unreachable: { icon: 'pw:error', word: 'No answer' },
 };
 
 const MODEL: Record<ModelRowState, { icon: string; word: string }> = {
@@ -251,7 +251,7 @@ const PRESSURE: Record<MemoryLevel, string | null> = { normal: null, elevated: '
       grid-column: 1;
       min-width: 0;
     }
-    /* The word never leaves its widget: at half width a long one ("Not responding") is cut with an ellipsis and has a tooltip. */
+    /* The word never leaves its widget: at half width an unexpectedly long one is cut with an ellipsis and has a tooltip. */
     .big {
       display: block;
       min-width: 0;

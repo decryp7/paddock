@@ -453,7 +453,7 @@ pub fn state(kind: PopoverWidget, f: &Facts, now_ms: i64) -> PopoverState {
 fn notice(f: &Facts) -> Option<SurfaceNotice<WidgetActionId>> {
     if !f.connected() && f.failed() {
         let (title, detail) = if f.known() {
-            ("The server is not responding", "Showing the last readings. Pitwall keeps trying.")
+            ("The server is not answering", "Showing the last readings. Pitwall keeps trying.")
         } else {
             ("The server is not running", "Open Pitwall to start or repair it.")
         };

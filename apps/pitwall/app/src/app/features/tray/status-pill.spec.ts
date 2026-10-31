@@ -20,7 +20,7 @@ describe('the status pill', () => {
     [{ kind: 'stopped' }, 'Stopped', 'warning'],
     [{ kind: 'problems', count: 1 }, '1 engine problem', 'danger'],
     [{ kind: 'problems', count: 3 }, '3 engine problems', 'danger'],
-    [{ kind: 'unreachable' }, 'Not responding', 'danger'],
+    [{ kind: 'unreachable' }, 'No answer', 'danger'],
   ])('%j reads "%s" in the %s tone, always with an icon', (status, text, tone) => {
     expect(pill(status)).toEqual({ text, tone, glyph: true });
   });
