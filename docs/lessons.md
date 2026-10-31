@@ -1006,6 +1006,7 @@ proved by building that app's installers (`<app>-release.yml` with gates on and 
 main (rule 54). The ci-actions test now checks that every release workflow whose app imports `@decryp7/paddock-ui`
 builds the UI.
 
+<<<<<<< HEAD
 ## A discovery file is a hint, never proof (2026-10-30, Dyno)
 Dyno's `agent.json` (the file that names the agent's pid and port) outlived its agent. The app read it, took it for a
 live agent, showed a false "Agent stopped" and looped on exit code 3. Separately, `Plan::Replace` deleted a
@@ -1113,3 +1114,17 @@ its own build folder), `std::fs::copy` truncating (the source itself was 0 bytes
 binary was not relinked). **Lesson:** a build script must never write into the build folder next to cargo's own outputs;
 while the sidecars are placeholders, Dyno hides `externalBin` from tauri-build (a `TAURI_CONFIG` merge patch), and a test
 that copies a built program first checks it is not empty. Pitwall and Pitcrew write the same placeholders.
+=======
+## A test server in the runner's process is deaf while the runner waits synchronously (2026-10-31, Spotter)
+The Windows update test failed every case: the installed old Spotter reported "timeout: connect" for the test feed, while
+`Test-NetConnection` and `curl.exe` in the guest reached it. The old build was the shell-based Spotter (the
+`release/spotter-1.0` line, 1.0.0-test.1), whose updater fetches through `paddock-download`'s ureq transport. The feed was an HTTPS server in the same Node process as the
+runner, and the runner waited for each guest job with `spawnSync` for up to 15 minutes. With the event loop blocked the
+kernel still accepted the TCP connection, but no TLS handshake came, and ureq counts the handshake against its connect
+timeout. The probes passed because they ran while the runner was not blocked. A probe binary with Spotter's own
+`paddock-download` transport in the same desktop session, and the old build against a feed in its own process, connected
+in milliseconds; a host test that fetches from the feed inside a `spawnSync` call hung until killed. **Rule:** a fake
+server a test drives runs in its own process (or the runner never blocks while the system under test may call it); a
+"connect" timeout over TLS can be a server that accepted but never answered, so check the server's event loop before the
+client's network stack. The feed now runs in a child process (`scripts/vm-smoke/update-feed.mjs`) with a test for this.
+>>>>>>> origin/spotter/update-smoke

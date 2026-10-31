@@ -195,7 +195,7 @@ describe('verify.sh', () => {
     const put = (name, text) => { writeFileSync(join(bin, name), `#!/bin/bash\n${text}\n`); chmodSync(join(bin, name), 0o755); };
     const tools = {
       rustc: 'echo "rustc 1.99.1 (x 2026-10-13)"', cargo: 'case "$1" in clippy) echo "clippy 0.1.99";; nextest) echo "cargo-nextest 0.9.149";; llvm-cov) echo "cargo-llvm-cov 0.9.1";; deny) echo "cargo-deny 0.20.2";; hakari) echo "cargo-hakari 0.9.39";; machete) echo "0.9.2";; *) echo "cargo 1.99.1";; esac',
-      rustfmt: 'echo "rustfmt 1.10.0-stable"', sccache: 'echo "sccache 0.18.0"', shellcheck: 'printf "ShellCheck - tool\\nversion: 0.11.0\\n"', node: 'echo "v24.19.0"', npm: 'echo "11.17.0"', 'xvfb-run': 'true',
+      rustfmt: 'echo "rustfmt 1.10.0-stable"', sccache: 'echo "sccache 0.18.0"', shellcheck: 'printf "ShellCheck - tool\\nversion: 0.11.0\\n"', node: 'echo "v24.19.0"', npm: 'echo "11.17.0"', openssl: 'echo "OpenSSL 3.0.13 30 Jan 2024"', 'xvfb-run': 'true',
       'pkg-config': 'case "$2" in webkit2gtk-4.1) [ "$1" = "--modversion" ] && echo 2.52.6; exit 0;; gtk+-3.0) exit 0;; esac; exit 1',
       ...over.tools,
     };
@@ -223,16 +223,17 @@ describe('verify.sh', () => {
     const r = run(mc);
     assert.equal(r.code, 0, r.out);
     const text = readFileSync(mc.manifest, 'utf8');
-    for (const s of ['rustc 1.99.1', 'cargo-nextest 0.9.149', 'cargo-hakari 0.9.39', 'cargo-machete: 0.9.2', 'sccache: sccache 0.18.0', 'node: v24.19.0', 'chrome for testing: Google Chrome for Testing 156.0.8078.47', 'libduckdb 1.5.6', 'shellcheck: 0.11.0', 'playwright chromium', 'webkit2gtk-4.1: 2.52.6']) {
+    for (const s of ['rustc 1.99.1', 'cargo-nextest 0.9.149', 'cargo-hakari 0.9.39', 'cargo-machete: 0.9.2', 'sccache: sccache 0.18.0', 'node: v24.19.0', 'chrome for testing: Google Chrome for Testing 156.0.8078.47', 'libduckdb 1.5.6', 'shellcheck: 0.11.0', 'playwright chromium', 'webkit2gtk-4.1: 2.52.6', 'openssl: OpenSSL 3.0.13']) {
       assert.ok(text.includes(s), `${s}\n${text}`);
     }
   });
 
   test('a missing tool fails the build and is named, without writing a manifest', () => {
-    const mc = machine({ tools: { sccache: null, 'xvfb-run': null } });
+    const mc = machine({ tools: { sccache: null, 'xvfb-run': null, openssl: null } });
     const r = run(mc);
     assert.equal(r.code, 1);
     assert.match(r.out, /sccache is missing/);
+    assert.match(r.out, /openssl is missing/);
     assert.match(r.out, /xvfb-run \(xvfb\) is missing/);
     assert.ok(!existsSync(mc.manifest));
   });

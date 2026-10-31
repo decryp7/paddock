@@ -36,6 +36,22 @@ test('instancesOf matches the installed bundle executable and its args, not a CL
   assert.deepEqual(instancesOf(p, config.processes[0], BUNDLE).map((x) => x.pid), [10]);
 });
 
+test('instancesOf counts the login item agent that launchd starts with the bare program name (BundleProgram)', () => {
+  const p = ps([
+    [10, 1, '00:30', APP],
+    [20, 1, '00:31', 'dyno-agent run'],
+    [21, 1, '00:05', 'dyno-agent service status'],
+    [22, 1, '00:05', 'vim dyno-agent'],
+    [23, 1, '00:05', 'dyno-agent-helper run'],
+  ]);
+  assert.deepEqual(instancesOf(p, config.processes[1], BUNDLE).map((x) => x.pid), [20]);
+  const r = judgeSnapshot(p, config, BUNDLE, { running: true, loginService: true });
+  assert.ok(r.ok, JSON.stringify(r.checks));
+  // Two agents, one from the bundle path (the app's child) and one bare (launchd's): a duplicate, and it is seen.
+  const two = judgeSnapshot(ps([[10, 1, '00:30', APP], [11, 10, '00:29', `${AGENT} run`], [20, 1, '00:31', 'dyno-agent run']]), config, BUNDLE, { running: true, loginService: true });
+  assert.equal(two.checks.find((c) => c.id === 'count:dyno-agent').ok, false);
+});
+
 test('judgeSnapshot passes one app with one agent whose parent is the app', () => {
   const r = judgeSnapshot(ps([[10, 1, '00:30', APP], [11, 10, '00:29', `${AGENT} run`]]), config, BUNDLE, { running: true });
   assert.equal(r.ok, true, JSON.stringify(r.checks));
@@ -99,6 +115,11 @@ test('describeTree prints pid, age and parent for the evidence', () => {
   const lines = describeTree(ps([[10, 1, '00:30', APP], [11, 10, '00:29', `${AGENT} run`]]), config, BUNDLE);
   assert.deepEqual(lines, ['dyno-app pid 10 age 00:30 parent 1 (launchd)', 'dyno-agent pid 11 age 00:29 parent 10 (dyno-app)']);
   assert.deepEqual(describeTree([], config, BUNDLE), ["(none of the app's processes)"]);
+});
+
+test('parseLaunchctlPrint reads a two-word state as launchd prints it for a waiting job (spawn scheduled)', () => {
+  const t = 'gui/501/net.decryptology.dyno.agent = {\n\tactive count = 0\n\tpath = (submitted by smd.87)\n\tstate = spawn scheduled\n\tlast exit code = 0\n}\n';
+  assert.equal(parseLaunchctlPrint(t).state, 'spawn scheduled');
 });
 
 test('parseLaunchctlPrint reads state, pid and program; a missing job gives nulls', () => {
