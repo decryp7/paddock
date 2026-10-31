@@ -6,8 +6,7 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### `paddock-channels`, `paddock-net` and the channels page: a home-network switch and a grouped event picker (additive)
 - `ChannelConfig.allow_lan: bool` (wire `allowLan`, serde default false, so files and engines from before it load unchanged), for
-  every webhook and ntfy channel; e-mail does not go through `Egress`, so `validate` refuses the switch on an e-mail channel and
-  the page hides it there (known follow-up: Offline mode and reach do not govern SMTP). With it on, validation accepts a private address (`paddock_net::host_may_be_lan`: an IP literal that `classify` calls `Lan`, or a
+  for a webhook, an ntfy server and an e-mail channel's SMTP host. With it on, validation accepts a private address (`paddock_net::host_may_be_lan`: an IP literal that `classify` calls `Lan`, or a
   single-label / `.local` / `.lan` / `.home.arpa` / `.internal` / `.localdomain` name) and plain `http://` to it; with it off,
   such an address is refused (https too) and plain http stays for this computer only. Link-local (169.254/16, fe80::/10) stays
   unreachable: `paddock-net` classifies it `Never`. `PostRequest` has a new `lan` field; `EgressPoster` sends a `lan` channel
@@ -21,6 +20,14 @@ Conventional Commits; one semver tag for the whole repo.
   differently the second time, is refused). `classify` now reads NAT64 (`64:ff9b::/96`, `64:ff9b:1::/48`), IPv4-compatible
   (`::a.b.c.d`) and 6to4 (`2002::/16`) addresses by the IPv4 inside, and calls site-local `fec0::/10` never reachable. Settings
   validation parses addresses with the `url` crate, as the network layer does. Existing requests behave as before.
+- E-mail now goes through the outbound policy (it ignored Offline mode and reach before). **Breaking, before v1:**
+  `LettreSender` is no longer a unit struct: `LettreSender::new(egress)` takes the app's `Egress` (the one built with
+  `channel_policy(..)`), and `MailRequest` has a `lan` field. Before connecting, `LettreSender` calls the new
+  `Egress::check_host(host, port, lan)`: Offline refuses with nothing resolved or connected, the allow-list applies, every resolved
+  address is checked against the reach (a private SMTP server needs `allow_lan`; link-local and metadata never), and the socket is
+  opened to the checked address (the TLS name stays the host), so a name cannot rebind. Offline and policy refusals are
+  `SendError::Invalid` (not retried). Validation also refuses a private SMTP host without the switch, and the page shows the
+  switch for e-mail again.
 - `@decryp7/paddock-ui/shell/channels`: `ChannelConfig.allowLan` (generated; `parseChannel` reads a missing value as false), the
   draft's `allowLan`, and on the page a checkbox "This channel is on my home network (allow a private address)" with helper text.
 - `defineChannelsSettingsPage({ events })` takes the app's `ChannelEventDecl[]` (`name`, `group`, `description`; also the
