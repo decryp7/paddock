@@ -2,7 +2,8 @@
 
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use ts_rs::TS;
 
 use crate::error::WidgetError;
@@ -11,9 +12,8 @@ use crate::error::WidgetError;
 pub const MAX_ID: usize = 64;
 
 /// An id of 1 to 64 characters of `a-z`, `0-9` and `-`. Placement ids are unique within a layout and preset ids within
-/// a surface. Parsed at the edge (`serde` goes through `TryFrom<String>`), so a held id is always valid.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
-#[serde(try_from = "String", into = "String")]
+/// a surface. Parsed at the edge (`Deserialize` goes through [`PlacementId::new`]), so a held id is always valid.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, TS)]
 #[ts(as = "String")]
 pub struct PlacementId(String);
 
@@ -42,6 +42,19 @@ impl TryFrom<String> for PlacementId {
     type Error = WidgetError;
     fn try_from(text: String) -> Result<PlacementId, WidgetError> {
         PlacementId::new(&text)
+    }
+}
+
+impl Serialize for PlacementId {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for PlacementId {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        PlacementId::new(&text).map_err(D::Error::custom)
     }
 }
 

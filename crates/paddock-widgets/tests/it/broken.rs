@@ -127,3 +127,88 @@ fn builtin_presets_drop_invalid_placements_and_are_marked() {
     assert!(presets[0].builtin);
     assert_eq!(presets[0].placements.len(), 1);
 }
+
+/// A catalogue that uses the trait's defaults: no clamping, no presets.
+mod minimal {
+    use paddock_widgets::{
+        Catalogue, Edit, KindSpec, Layout, Placement, Refresh, Surface, Widget, apply, assign_ids,
+        builtin_presets, check_catalogue, read,
+    };
+    use serde::{Deserialize, Serialize};
+    use serde_json::json;
+    use ts_rs::TS;
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+    #[serde(tag = "kind", rename_all = "camelCase")]
+    enum Lamp {
+        Lamp,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+    #[serde(rename_all = "camelCase")]
+    enum LampKind {
+        Lamp,
+    }
+
+    impl Widget for Lamp {
+        type Kind = LampKind;
+        fn kind(&self) -> LampKind {
+            LampKind::Lamp
+        }
+        fn validate(&self) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    static KINDS: [KindSpec<LampKind>; 1] = [KindSpec {
+        kind: LampKind::Lamp,
+        title: "Lamp",
+        summary: "A lamp",
+        icon: "lamp",
+        spans: &[1],
+        max_instances: 2,
+        refresh: Refresh::OnChange,
+    }];
+
+    struct Lamps;
+
+    impl Catalogue for Lamps {
+        type Widget = Lamp;
+        const SURFACE: Surface = Surface {
+            id: "menuBar",
+            schema_version: 1,
+            columns: 1,
+            max_placements: 2,
+            min_placements: 0,
+            max_user_presets: 0,
+            max_preset_placements: 0,
+            max_bytes: 1024,
+        };
+        fn kinds() -> &'static [KindSpec<LampKind>] {
+            &KINDS
+        }
+        fn defaults() -> Vec<Placement<Lamp>> {
+            assign_ids([(1, Lamp::Lamp)])
+        }
+    }
+
+    #[test]
+    fn the_trait_defaults_do_nothing() {
+        assert_eq!(check_catalogue::<Lamps>(), Ok(()));
+        assert!(builtin_presets::<Lamps>().is_empty());
+        assert_eq!(Lamp::Lamp.clamped(), Lamp::Lamp);
+        let layout = Layout::defaults::<Lamps>();
+        let more = apply::<Lamps>(
+            &layout,
+            Edit::Add {
+                widget: Lamp::Lamp,
+                span: None,
+                at: None,
+            },
+        )
+        .expect("a second lamp fits");
+        assert_eq!(more.placements.len(), 2);
+        let read = read::<Lamps>(&json!({ "version": 1, "placements": [] }));
+        assert!(read.layout.placements.is_empty());
+    }
+}
