@@ -218,7 +218,7 @@ fn run_exit_code(out: Result<(), StartError>) -> i32 {
         }
         Err(StartError::Failed(e)) => {
             eprintln!("dyno-agent: {e}");
-            log::error!(Error = e.as_str(); "Agent could not start");
+            log::error!(ErrorCode = "StartFailed", ErrorChain = e.as_str(); "Agent could not start");
             1
         }
     }
@@ -230,6 +230,7 @@ fn run() -> Result<(), StartError> {
     let _log = crate::logging::install(&dirs);
     log::info!(
         ParentPid = crate::logging::parent_pid(),
+        ParentName = crate::logging::parent_name(),
         Arch = crate::logging::arch(),
         OsVersion = crate::logging::os_version().as_str(),
         Version = env!("CARGO_PKG_VERSION");

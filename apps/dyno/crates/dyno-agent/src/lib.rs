@@ -135,17 +135,21 @@ impl Running {
             }
             Err(e @ instance::LockError::Held { .. }) => {
                 let err = StartError::AlreadyRunning(e);
-                log::warn!(ExitCode = cli::EXIT_ALREADY_RUNNING, ElapsedMs = logging::elapsed_ms(); "Agent refused: another agent holds the data folder");
-                instance::note(&dirs, &format!("dyno-agent: {err}"));
+                // The holder's pid comes from its discovery file when there is one (a start in progress has not written it yet).
+                let holder = discovery::Discovery::read(&dirs.discovery()).map_or(0, |d| d.pid);
+                log::warn!(
+                    ExitCode = cli::EXIT_ALREADY_RUNNING,
+                    Reason = "the data folder is held by another agent",
+                    HolderPid = holder,
+                    ParentName = logging::parent_name(),
+                    ElapsedMs = logging::elapsed_ms();
+                    "Agent refused: another agent holds the data folder"
+                );
                 return Err(err);
             }
             // A folder that cannot hold a lock file cannot hold the history either (it is kept in memory); go on.
             Err(e) => {
-                log::warn!("dyno-agent: {e}");
-                instance::note(
-                    &dirs,
-                    &format!("dyno-agent: {e}; starting without the guard against a second agent"),
-                );
+                log::warn!(Reason = "the data folder cannot hold the agent lock", ElapsedMs = logging::elapsed_ms(); "dyno-agent: {e}; starting without the guard against a second agent");
                 unguarded = Some(e.to_string());
                 None
             }
@@ -162,7 +166,7 @@ impl Running {
         }
         let (host, discovery) = server::bind(&shared).map_err(|e| format!("Dyno could not open its private endpoint: {e}"))?;
         // `bind` wrote `agent.json` (the discovery file the app connects by): this line is when the agent became findable.
-        log::info!(ElapsedMs = logging::elapsed_ms(), DiscoveryWritten = true; "Agent endpoint bound");
+        log::info!(ElapsedMs = logging::elapsed_ms(), DiscoveryWritten = true, AgentRun = paddock_log::fingerprint(&discovery.endpoint); "Agent endpoint bound");
         let mut threads = Vec::new();
         let s = shared.clone();
         threads.push(

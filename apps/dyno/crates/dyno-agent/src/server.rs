@@ -47,6 +47,8 @@ pub fn bind(shared: &Shared) -> std::io::Result<(Host, Discovery)> {
 /// Accepts connections until the agent stops. Each connection gets a [`Peer`] whose handler answers requests.
 pub fn serve(shared: &Arc<Shared>, mut host: Host) {
     let mut peers: Vec<(u64, Arc<Peer<Message>>, std::time::Instant)> = Vec::new();
+    // The same fingerprint the app writes when it connects: a connect in the app's log and this run's lines are one story.
+    let run = paddock_log::fingerprint(host.name());
     while !shared.stopped() {
         // A closed connection loses its subscription; dropping the sender ends its push thread.
         let gone: Vec<u64> = peers.iter().filter(|(_, p, _)| p.is_closed()).map(|(id, _, _)| *id).collect();
@@ -61,7 +63,7 @@ pub fn serve(shared: &Arc<Shared>, mut host: Host) {
         match host.accept(Duration::from_millis(400)) {
             Ok(conn) => match connect(shared, conn) {
                 Ok((id, peer)) => {
-                    log::info!(ConnectionId = id, SinceStartMs = crate::logging::elapsed_ms(); "Client connected");
+                    log::info!(ConnectionId = id, AgentRun = run.as_str(), SinceStartMs = crate::logging::elapsed_ms(); "Client connected");
                     peers.push((id, peer, std::time::Instant::now()));
                 }
                 Err(e) => log::error!("dyno-agent: could not start a connection: {e}"),

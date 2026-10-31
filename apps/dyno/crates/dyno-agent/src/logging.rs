@@ -74,6 +74,17 @@ pub fn parent_pid() -> u32 {
     }
 }
 
+/// What the parent process is, for the start lines: the service manager when the parent is pid 1 (launchd under SMAppService,
+/// init or systemd elsewhere), else the app or a shell that started the agent.
+pub fn parent_name() -> &'static str {
+    match parent_pid() {
+        1 if cfg!(target_os = "macos") => "launchd",
+        1 => "init",
+        0 => "unknown",
+        _ => "another program",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
