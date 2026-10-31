@@ -407,8 +407,8 @@ describe('dy-disk-map-page', () => {
     await vi.waitFor(async () => {
       await settle(r.f);
       expect(arc(r.el, 'pending')).not.toBeNull();
+      expect(arc(r.el, 'hidden')).toBeNull();
     });
-    expect(arc(r.el, 'hidden')).toBeNull();
     expect(r.el.querySelector('pd-sunburst .pd-fade')).toBeNull();
   });
 
