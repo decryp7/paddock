@@ -20,6 +20,7 @@ for (const scheme of ['light', 'dark'] as const) {
     for (const [name, url] of [
       ['tray-popup', '/#/tray'],
       ['tray-popup-empty', '/?mock=empty#/tray'],
+      ['tray-popup-unchecked', '/?mock=unchecked#/tray'],
       ['tray-popup-worst', '/?mock=worst#/tray'],
     ] as const) {
       test(name, async ({ page }) => {

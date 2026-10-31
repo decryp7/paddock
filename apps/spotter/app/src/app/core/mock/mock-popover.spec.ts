@@ -68,6 +68,7 @@ describe('MockPopover (the mock of the engine layout, for browser development an
     expect(p.status('worst')).toEqual({ kind: 'failing', count: 4 });
     expect(p.status('empty')).toEqual({ kind: 'unknown' });
     expect(p.status('demo').kind).toBe('failing');
+    expect(p.status('unchecked')).toEqual({ kind: 'unchecked', count: 2 });
   });
 
   it('moves the engine\'s times to the mock\'s now', () => {

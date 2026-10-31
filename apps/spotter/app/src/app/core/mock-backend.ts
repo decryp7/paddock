@@ -43,7 +43,7 @@ import type { LoadingRows, PopoverStatus } from './generated/widgets';
 import { LOADING_SHAPE, type PopoverScenario } from './mock/mock-popover';
 import { MOCK_SCHEMES, mockExtraction, mockSuggest, mockTest, patternProblem } from './mock/mock-extraction';
 
-export type MockScenario = 'demo' | 'empty' | 'broken' | 'products' | 'worst';
+export type MockScenario = 'demo' | 'empty' | 'broken' | 'products' | 'unchecked' | 'worst';
 
 export interface MockOptions {
   scenario?: MockScenario;
@@ -686,7 +686,7 @@ export class MockBackend implements SpotterBackend {
 
   /** Which of the engine's recorded popup scenarios the popup shows: its own, or the demo one. */
   private popupScenario(): PopoverScenario {
-    return this.scenario === 'empty' ? 'empty' : this.scenario === 'worst' ? 'worst' : 'demo';
+    return this.scenario === 'empty' || this.scenario === 'worst' || this.scenario === 'unchecked' ? this.scenario : 'demo';
   }
 
   getSettings(): Promise<Settings> {

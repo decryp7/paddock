@@ -928,6 +928,23 @@ mod tests {
                 ws.push(paused);
                 (ws, s)
             }
+            "unchecked" => {
+                // Some watches were checked, some never: the header says so, and the Failures row does not claim "all good".
+                let never = |id: &str, name: &str| {
+                    let mut w = watch(id);
+                    w.name = name.into();
+                    w.latest = None;
+                    w.status = WatchStatus::Pending;
+                    w
+                };
+                let ws = vec![
+                    found("w-1", "Orbit API image", "2.2.0", 3_600_000, false),
+                    found("w-2", "tinyparse", "2.1.0", 5 * 3_600_000, false),
+                    never("w-3", "Lumen CLI"),
+                    never("w-4", "Fjord UI kit"),
+                ];
+                (ws, s)
+            }
             "worst" => {
                 // The worst the default popup meets: more failures than rows, a check running, notifications paused.
                 let mut ws = vec![
@@ -987,7 +1004,7 @@ mod tests {
         }
         let without_notifications = Stored::<PopoverCatalogue>::default();
         let mut scenarios = serde_json::Map::new();
-        for name in ["demo", "empty", "worst"] {
+        for name in ["demo", "empty", "unchecked", "worst"] {
             let (ws, s) = scenario(name);
             let values = with(&ws, &s, |i| popover_values(all.layout(), i));
             let by_kind: serde_json::Map<String, serde_json::Value> = all

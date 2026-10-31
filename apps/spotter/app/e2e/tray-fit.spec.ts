@@ -8,6 +8,7 @@ import { expect, test } from '@decryp7/paddock-e2e';
 for (const [name, url] of [
   ['demo', '/#/tray'],
   ['empty', '/?mock=empty#/tray'],
+  ['unchecked', '/?mock=unchecked#/tray'],
   ['worst', '/?mock=worst#/tray'],
 ] as const) {
   test(`the default popup fits 520 px without scrolling: ${name}`, async ({ page }) => {

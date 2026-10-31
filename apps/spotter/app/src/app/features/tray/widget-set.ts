@@ -99,10 +99,10 @@ const FAILURE: Record<FailureKind, string> = {
       <ul class="rows">
         @for (r of v?.rows ?? placeholders('failures'); track $index) {
           <li class="fail">
-            <button type="button" class="row" [disabled]="!r" [attr.aria-label]="r ? r.name + ', ' + failure(r.kind) + ', open' : null" (click)="r && run.emit({ type: 'openWatch', id: r.id })">
+            <button type="button" class="row" [disabled]="!r" [matTooltip]="r ? failure(r.kind) + ': ' + r.message : ''" [attr.aria-label]="r ? r.name + ', ' + failure(r.kind) + ': ' + r.message + ', open' : null" (click)="r && run.emit({ type: 'openWatch', id: r.id })">
               <mat-icon class="ic st-attention" svgIcon="sp:alert" aria-hidden="true" pdSkeleton />
               <span class="name truncate" pdSkeleton>{{ r?.name ?? 'Watch name' }}</span>
-              <span class="meta truncate" [matTooltip]="r ? failure(r.kind) + ': ' + r.message : ''" pdSkeleton>{{ r ? failure(r.kind) + ': ' + r.message : 'Check failed: the place did not answer' }}</span>
+              <span class="meta truncate" pdSkeleton>{{ r ? failure(r.kind) + ': ' + r.message : 'Check failed: the place did not answer' }}</span>
             </button>
             <button type="button" class="retry" [disabled]="!r" [attr.aria-label]="r ? 'Retry check of ' + r.name : null" (click)="r && run.emit({ type: 'retryCheck', id: r.id })" pdSkeleton>
               <mat-icon class="ic-inline" svgIcon="sp:refresh" aria-hidden="true" />Retry
