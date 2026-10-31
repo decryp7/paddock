@@ -614,14 +614,7 @@ impl FtsService {
             Some(w) => w,
             None => slot.insert(fts.writer()?),
         };
-        let done = f(w).and_then(|()| {
-            #[cfg(test)]
-            if self.shared.fail_writes.load(Ordering::SeqCst) {
-                anyhow::bail!("an injected index write failure");
-            }
-            Ok(())
-        });
-        let done = done.and_then(|()| fts.commit(w, self.epoch));
+        let done = f(w).and_then(|()| self.injected_failure()).and_then(|()| fts.commit(w, self.epoch));
         if done.is_err() {
             // What was queued must not ride along with the next commit (the indexer's).
             if let Err(e) = w.rollback() {
@@ -629,6 +622,20 @@ impl FtsService {
             }
         }
         done
+    }
+
+    /// Tests: fails while [`FtsShared::fail_writes`] is set.
+    #[cfg(test)]
+    fn injected_failure(&self) -> Result<()> {
+        if self.shared.fail_writes.load(Ordering::SeqCst) {
+            anyhow::bail!("an injected index write failure");
+        }
+        Ok(())
+    }
+
+    #[cfg(not(test))]
+    fn injected_failure(&self) -> Result<()> {
+        Ok(())
     }
 
     /// Deletes a source's documents (it was removed).
