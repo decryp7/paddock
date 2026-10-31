@@ -15,6 +15,31 @@ pub enum Reach {
     Loopback,
 }
 
+/// How a request treats private-network addresses, on top of the policy's [`Reach`]. One value instead of two flags, so the two
+/// cannot disagree; the wire applies it to the addresses it connects to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub enum LanAccess {
+    /// Whatever the policy's reach allows.
+    #[default]
+    Policy,
+    /// Never a private-network address, even when the policy's reach allows them (this computer is not affected).
+    Deny,
+    /// Plain `http://` is allowed, but only to private-network addresses: every address the host resolves to must be one
+    /// (this computer excepted). `https://` is as with [`LanAccess::Policy`].
+    PlainHttp,
+}
+
+/// Whether a connection may go to a public address, on top of the policy's [`Reach`] (which always allows them). For
+/// protocols that are not encrypted (VNC): "this computer and private networks only". Used by [`Egress::check_host_with`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub enum PublicAccess {
+    /// Public addresses are reachable (the policy's default).
+    #[default]
+    Policy,
+    /// Never a public address: this computer and private networks only.
+    Deny,
+}
+
 /// What an address is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Class {
@@ -79,11 +104,36 @@ fn classify_v4(ip: Ipv4Addr) -> Class {
     }
 }
 
+/// The IPv4 address an IPv6 address carries, if it is one of the forms that tunnel or translate IPv4: NAT64 (`64:ff9b::/96`,
+/// `64:ff9b:1::/48` with RFC 6052's /48 layout), IPv4-compatible (`::a.b.c.d`) and 6to4 (`2002::/16`). Such an address is as far
+/// away as the IPv4 address inside it.
+fn embedded_v4(ip: Ipv6Addr) -> Option<Ipv4Addr> {
+    let s = ip.segments();
+    let o = ip.octets();
+    if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0]
+        || (s[..6] == [0, 0, 0, 0, 0, 0] && s[6..] != [0, 0] && s[6..] != [0, 1])
+    {
+        return Some(Ipv4Addr::new(o[12], o[13], o[14], o[15]));
+    }
+    if s[0] == 0x64 && s[1] == 0xff9b && s[2] == 1 {
+        return Some(Ipv4Addr::new(o[6], o[7], o[9], o[10]));
+    }
+    if s[0] == 0x2002 {
+        return Some(Ipv4Addr::new(o[2], o[3], o[4], o[5]));
+    }
+    None
+}
+
 fn classify_v6(ip: Ipv6Addr) -> Class {
     let s0 = ip.segments()[0];
-    if ip.is_loopback() {
+    if let Some(v4) = embedded_v4(ip) {
+        classify_v4(v4)
+    } else if ip.is_loopback() {
         Class::Loopback
-    } else if ip.is_unspecified() || ip.is_multicast() || (s0 & 0xffc0) == 0xfe80 {
+    } else if ip.is_unspecified() || ip.is_multicast() || (s0 & 0xffc0) == 0xfe80
+        // Site-local (fec0::/10) is deprecated and was never a private-network range worth reaching.
+        || (s0 & 0xffc0) == 0xfec0
+    {
         Class::Never
     } else if (s0 & 0xfe00) == 0xfc00 {
         Class::Lan
@@ -100,6 +150,29 @@ pub fn host_is_loopback(host: &str) -> bool {
     }
     h.parse::<IpAddr>()
         .is_ok_and(|ip| classify(ip) == Class::Loopback)
+}
+
+/// Whether a host is spelled like one on a private network: an IP literal that [`classify`] calls [`Class::Lan`], or a name that
+/// is a single label (`nas`) or ends in `.local`, `.lan`, `.home.arpa`, `.internal` or `.localdomain`. A name cannot be
+/// classified without resolving it, so this is the spelling check for forms and plain-http decisions; [`vet`] still checks the
+/// addresses the name resolves to.
+pub fn host_may_be_lan(host: &str) -> bool {
+    let h = host
+        .trim_matches(['[', ']'])
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if h.is_empty() {
+        return false;
+    }
+    if let Ok(ip) = h.parse::<IpAddr>() {
+        return classify(ip) == Class::Lan;
+    }
+    if !h.contains('.') {
+        return h != "localhost";
+    }
+    [".local", ".lan", ".home.arpa", ".internal", ".localdomain"]
+        .iter()
+        .any(|suffix| h.ends_with(suffix))
 }
 
 /// Why a name's addresses were refused.
@@ -119,6 +192,7 @@ impl fmt::Display for Refusal {
             Refusal::NoAddress => "the name has no address",
             Refusal::Never => "the name points at a link-local, unspecified or multicast address",
             Refusal::TooFar(Class::Loopback) => "the name points at this computer",
+            Refusal::TooFar(Class::Public) => "the name points at a public address",
             Refusal::TooFar(_) => "the name points at a private network",
         })
     }

@@ -4,6 +4,7 @@ use crate::message::{Message, Severity};
 use paddock_secrets::{Name, Secrets, SecretsError};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use url::Url;
 
 /// Most channels a [`Settings`] value may hold.
 pub const MAX_CHANNELS: usize = 8;
@@ -99,6 +100,10 @@ pub struct ChannelConfig {
     /// Messages below this severity are skipped.
     #[serde(default)]
     pub min_severity: Severity,
+    /// The channel's server is on the user's home network: validation accepts a private address (and plain http to it), and the
+    /// poster reaches private networks for this channel only. It covers an e-mail channel's SMTP server too. Off by default; files from before this field load as off.
+    #[serde(default)]
+    pub allow_lan: bool,
     /// Delivery details.
     pub transport: Transport,
 }
@@ -150,9 +155,9 @@ impl ChannelConfig {
             check_text("Event kind", e, 64)?;
         }
         match &self.transport {
-            Transport::Webhook { url, .. } => check_http_url("Webhook URL", url),
+            Transport::Webhook { url, .. } => check_http_url("Webhook URL", url, self.allow_lan),
             Transport::Ntfy { server, topic, .. } => {
-                check_http_url("ntfy server", server)?;
+                check_http_url("ntfy server", server, self.allow_lan)?;
                 if topic.is_empty()
                     || topic.len() > 64
                     || !topic
@@ -174,6 +179,12 @@ impl ChannelConfig {
                 ..
             } => {
                 check_host(host)?;
+                if !self.allow_lan && paddock_net::host_may_be_lan(host.trim()) {
+                    return Err(
+                        "SMTP host is a private network address; turn on \"This channel is on my home network\" to use it"
+                            .into(),
+                    );
+                }
                 if *port == 0 {
                     return Err("SMTP port must not be 0".into());
                 }
@@ -276,37 +287,43 @@ fn check_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn check_http_url(what: &str, url: &str) -> Result<(), String> {
+fn check_http_url(what: &str, url: &str, allow_lan: bool) -> Result<(), String> {
     check_text(what, url, MAX_URL)?;
-    let (plain, rest) = match url.strip_prefix("https://") {
-        Some(rest) => (false, rest),
-        None => match url.strip_prefix("http://") {
-            Some(rest) => (true, rest),
-            None => {
-                return Err(format!(
-                    "{what} must start with https:// (http:// is only for this computer)"
-                ));
-            }
-        },
+    let plain = match (url.starts_with("https://"), url.starts_with("http://")) {
+        (true, _) => false,
+        (_, true) => true,
+        _ => {
+            return Err(format!(
+                "{what} must start with https:// (http:// is only for this computer)"
+            ));
+        }
     };
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    if host.is_empty() || host.starts_with(':') || host.contains(char::is_whitespace) {
-        return Err(format!("{what} needs a valid host name"));
-    }
-    if host.contains('@') {
+    // The same parser the network layer uses, so what passes here is the address that is later checked (0300.0250.1.20 is
+    // 192.168.1.20 to both).
+    let parsed = Url::parse(url).map_err(|_| format!("{what} needs a valid host name"))?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(format!(
             "{what} must not contain a login; use the token field"
         ));
     }
-    // A bracketed IPv6 literal keeps its colons; any other host loses its port.
-    let name = if host.starts_with('[') {
-        host.split(']').next().unwrap_or("")
-    } else {
-        host.split(':').next().unwrap_or("")
-    };
+    // An http(s) address always has a host once it parses; an IPv6 literal keeps its brackets, which the checks trim.
+    let name = parsed.host().map(|h| h.to_string()).unwrap_or_default();
+    let name = name.as_str();
+    let lan = paddock_net::host_may_be_lan(name);
     if plain && !paddock_net::host_is_loopback(name) {
+        if !allow_lan {
+            return Err(format!(
+                "{what} must use https:// (plain http is only for this computer, or for your home network when you turn on \"This channel is on my home network\")"
+            ));
+        }
+        if !lan {
+            return Err(format!(
+                "{what} must use https:// (plain http is only for this computer or an address on your home network)"
+            ));
+        }
+    } else if lan && !allow_lan {
         return Err(format!(
-            "{what} must use https:// (plain http is only for this computer)"
+            "{what} is a private network address; turn on \"This channel is on my home network\" to use it"
         ));
     }
     Ok(())

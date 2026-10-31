@@ -11,6 +11,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import {
   CHANNELS_REMOVE_DIALOG_ID,
   CHANNELS_SECRET_DIALOG_ID,
+  CHANNEL_EVENTS,
   ChannelsStore,
   EMPTY_DRAFT,
   MAX_CHANNELS,
@@ -18,7 +19,11 @@ import {
   draftFromChannel,
   draftHints,
   draftToChannel,
+  groupEvents,
   secretKind,
+  toggleEvent,
+  tokens,
+  unknownEvents,
   type ChannelConfig,
   type ChannelDraft,
   type DraftField,
@@ -204,11 +209,49 @@ import { CHANNELS_STYLES } from './styles';
             }
           }
 
-          <label class="pd-ch__field pd-ch__field--wide">
-            <span>{{ t.fEvents }}</span>
-            <textarea rows="2" [formField]="f.events" autocomplete="off" spellcheck="false" data-testid="channel-events" aria-describedby="pd-ch-h-events"></textarea>
-            <span id="pd-ch-h-events" class="pd-ch__hint">{{ t.eventsHint }}</span>
-          </label>
+          @if (eventGroups().length > 0) {
+            <fieldset class="pd-ch__events-picker pd-ch__field--wide" data-testid="channel-events-picker" aria-describedby="pd-ch-h-events">
+              <legend class="pd-ch__legend">{{ t.fEvents }}</legend>
+              <span class="pd-ch__hint" id="pd-ch-h-events">{{ t.eventsPickHint }}</span>
+              @for (g of eventGroups(); track g.group; let gi = $index) {
+                <fieldset class="pd-ch__group" [attr.data-testid]="'channel-event-group-' + g.group">
+                  <legend>{{ g.group }}</legend>
+                  @for (e of g.events; track e.name; let ei = $index) {
+                    <div class="pd-ch__event">
+                      <mat-checkbox [checked]="isOn(e.name)" (change)="setEvent(e.name, $event.checked)" [aria-describedby]="'pd-ch-ev-' + gi + '-' + ei" [attr.data-testid]="'channel-event-' + e.name">{{ e.name }}</mat-checkbox>
+                      <span class="pd-ch__hint pd-ch__event-help" [id]="'pd-ch-ev-' + gi + '-' + ei">{{ e.description }}</span>
+                    </div>
+                  }
+                </fieldset>
+              }
+              <fieldset class="pd-ch__group" data-testid="channel-events-other">
+                <legend>{{ t.otherEvents }}</legend>
+                @if (otherEvents().length > 0) {
+                  <ul class="pd-ch__chips" #chips>
+                    @for (name of otherEvents(); track name; let i = $index) {
+                      <li class="pd-ch__chip">
+                        <span>{{ name }}</span>
+                        <button type="button" class="pd-ch__chip-x" [attr.aria-label]="t.removeEvent(name)" [attr.data-testid]="'channel-event-remove-' + name" (click)="removeOther(name, i)"><pd-glyph name="close" [size]="12" /></button>
+                      </li>
+                    }
+                  </ul>
+                }
+                <div class="pd-ch__other-add">
+                  <label class="pd-ch__field">
+                    <span>{{ t.otherAdd }}</span>
+                    <input #otherInput type="text" autocomplete="off" spellcheck="false" data-testid="channel-event-other-input" [value]="otherText()" (input)="otherText.set($any($event.target).value)" (keydown.enter)="$event.preventDefault(); addOther()" />
+                  </label>
+                  <button matButton="outlined" type="button" data-testid="channel-event-other-add" [disabled]="!hasOtherNames()" (click)="addOther()">{{ t.otherAddButton }}</button>
+                </div>
+              </fieldset>
+            </fieldset>
+          } @else {
+            <label class="pd-ch__field pd-ch__field--wide">
+              <span>{{ t.fEvents }}</span>
+              <textarea rows="2" [formField]="f.events" autocomplete="off" spellcheck="false" data-testid="channel-events" aria-describedby="pd-ch-h-events"></textarea>
+              <span id="pd-ch-h-events" class="pd-ch__hint">{{ t.eventsHint }}</span>
+            </label>
+          }
           <div class="pd-ch__field">
             <label for="pd-ch-severity">{{ t.fSeverity }}</label>
             <pd-select inputId="pd-ch-severity" [options]="severityOptions" [value]="d.minSeverity" (valueChange)="patch({ minSeverity: $any($event) })" data-testid="channel-severity" />
@@ -218,6 +261,10 @@ import { CHANNELS_STYLES } from './styles';
           @if (d.type !== 'email') {
             <mat-checkbox class="pd-ch__check pd-ch__field--wide" [formField]="f.auth" data-testid="channel-auth">{{ t.fAuth }}</mat-checkbox>
           }
+          <div class="pd-ch__lan pd-ch__field--wide" data-testid="channel-lan-field">
+            <mat-checkbox class="pd-ch__check" [formField]="f.allowLan" aria-describedby="pd-ch-h-lan" data-testid="channel-allow-lan">{{ t.fLan }}</mat-checkbox>
+            <span id="pd-ch-h-lan" class="pd-ch__hint">{{ t.lanHint }}</span>
+          </div>
           @if (draftNeedsSecret()) {
             <div class="pd-ch__secret" data-testid="channel-secret" role="group" [attr.aria-label]="secretWord(d.type)">
               <span data-testid="channel-secret-state">{{ secretStored() ? t.secretStored : t.secretMissing }}</span>
@@ -275,9 +322,20 @@ export class PdChannelsPage {
   protected readonly store = inject(ChannelsStore);
   private readonly dialogs = inject(DialogService);
   private readonly injector = inject(Injector);
+  private readonly chips = viewChild<ElementRef<HTMLElement>>('chips');
+  private readonly otherInput = viewChild<ElementRef<HTMLInputElement>>('otherInput');
   private readonly nameInput = viewChild<ElementRef<HTMLInputElement>>('nameInput');
 
   protected readonly maxRecipients = 10;
+  private readonly declared = inject(CHANNEL_EVENTS, { optional: true }) ?? [];
+  /** The app's declared events by group; empty when the app declared none (then the page shows the free-text field). */
+  protected readonly eventGroups = signal(groupEvents(this.declared)).asReadonly();
+  private readonly selected = computed(() => tokens(this.model().events));
+  /** Names the channel has that the app did not declare: kept, shown as removable chips. */
+  protected readonly otherEvents = computed(() => unknownEvents(this.selected(), this.declared));
+  protected readonly otherText = signal('');
+  /** Whether the add field holds at least one name (just commas or spaces is not one). */
+  protected readonly hasOtherNames = computed(() => tokens(this.otherText()).length > 0);
   /** The draft being edited, or null when no editor is open. */
   protected readonly draft = computed(() => (this.open() ? this.model() : null));
   private readonly open = signal(false);
@@ -340,6 +398,13 @@ export class PdChannelsPage {
     eventsHint: $localize`:@@pd.channels.events-hint:Names of the events this channel hears of, separated by commas or new lines, for example diskLow.`,
     fSeverity: $localize`:@@pd.channels.f-severity:Minimum severity`,
     fEnabled: $localize`:@@pd.channels.f-enabled:Send notifications on this channel`,
+    fLan: $localize`:@@pd.channels.f-lan:This channel is on my home network (allow a private address)`,
+    lanHint: $localize`:@@pd.channels.lan-hint:Turn this on only for a web address, ntfy server or mail server in your own home or office network, such as a NAS. Other channels still cannot reach private addresses, and Offline mode still stops this one.`,
+    eventsPickHint: $localize`:@@pd.channels.events-pick-hint:Choose the events this channel hears of.`,
+    otherEvents: $localize`:@@pd.channels.other-events:Other events`,
+    otherAdd: $localize`:@@pd.channels.other-add:Add another event name`,
+    otherAddButton: $localize`:@@pd.channels.other-add-button:Add event`,
+    removeEvent: (name: string) => $localize`:@@pd.channels.remove-event:Remove event ${name}:name:`,
     fAuth: $localize`:@@pd.channels.f-auth:This channel needs a token`,
     secretStored: $localize`:@@pd.channels.secret-stored:Secret stored`,
     secretMissing: $localize`:@@pd.channels.secret-missing:No secret yet`,
@@ -437,12 +502,41 @@ export class PdChannelsPage {
   private begin(d: ChannelDraft): void {
     this.store.dismissSaveError();
     this.f().reset(d);
+    this.otherText.set('');
     this.open.set(true);
     afterNextRender(() => this.nameInput()?.nativeElement.focus(), { injector: this.injector });
   }
 
   protected patch(change: Partial<ChannelDraft>): void {
     this.model.update((d) => ({ ...d, ...change }));
+  }
+
+  protected isOn(name: string): boolean {
+    return this.selected().includes(name);
+  }
+
+  protected setEvent(name: string, on: boolean): void {
+    this.patch({ events: toggleEvent(this.selected(), name, on).join(', ') });
+  }
+
+  /** Removes a chip and moves focus to the chip that took its place, else to the add field (focus must not fall to the page). */
+  protected removeOther(name: string, index: number): void {
+    this.setEvent(name, false);
+    afterNextRender(
+      () => {
+        const buttons = this.chips()?.nativeElement.querySelectorAll<HTMLElement>('.pd-ch__chip-x') ?? [];
+        (buttons[Math.min(index, buttons.length - 1)] ?? this.otherInput()?.nativeElement)?.focus();
+      },
+      { injector: this.injector },
+    );
+  }
+
+  /** Adds the typed names (separated like the free-text field) to the channel's events. */
+  protected addOther(): void {
+    const names = tokens(this.otherText());
+    if (names.length === 0) return;
+    this.patch({ events: [...new Set([...this.selected(), ...names])].join(', ') });
+    this.otherText.set('');
   }
 
   protected setType(type: string): void {

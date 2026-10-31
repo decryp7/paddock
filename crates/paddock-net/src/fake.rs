@@ -1,6 +1,7 @@
 //! In-process fakes of the wire and the resolver, for the apps' own tests: nothing opens a socket.
 
 use crate::error::NetError;
+use crate::reach::Reach;
 use crate::request::Method;
 use crate::wire::{Lookup, Wire, WireRequest, WireResponse};
 use std::collections::{HashMap, VecDeque};
@@ -70,6 +71,8 @@ pub struct Seen {
     pub headers: Vec<(String, String)>,
     /// The body.
     pub body: Vec<u8>,
+    /// The reach the request went out with (the policy's, narrowed to where the first hop's addresses are).
+    pub reach: Reach,
 }
 
 /// A [`Wire`] that answers from a script (200 with an empty body when it is used up) and records every request. `sends()` is
@@ -120,6 +123,7 @@ impl Wire for FakeWire {
                 .map(|h| (h.name.clone(), h.value.clone()))
                 .collect(),
             body: r.body.to_vec(),
+            reach: r.reach,
         });
         let step = lock(&self.script)
             .pop_front()

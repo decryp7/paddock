@@ -17,6 +17,7 @@ import {
   defineChannelsSecretDialog,
   defineChannelsSettingsPage,
 } from './channels.contributions';
+import { CHANNEL_EVENTS, groupEvents, toggleEvent, unknownEvents } from './events';
 import { EMPTY_DRAFT, channelNeedsSecret, draftFromChannel, draftHints, draftToChannel, newChannelId, secretKind, tokens } from './draft';
 import { MemoryChannelsBackend, settingsProblem, type MemoryChannelsOptions } from './memory';
 import { provideChannelsBackend, provideShellChannels } from './provide-channels';
@@ -33,6 +34,7 @@ export const WEBHOOK: ChannelConfig = {
   enabled: true,
   events: ['diskLow', 'jobFailed'],
   minSeverity: 'warning',
+  allowLan: false,
   transport: { type: 'webhook', url: 'https://hooks.example.com/services/abc', auth: true },
 };
 export const NTFY: ChannelConfig = {
@@ -41,6 +43,7 @@ export const NTFY: ChannelConfig = {
   enabled: false,
   events: [],
   minSeverity: 'error',
+  allowLan: false,
   transport: { type: 'ntfy', server: 'https://ntfy.sh', topic: 'my_topic', auth: false },
 };
 export const EMAIL: ChannelConfig = {
@@ -49,6 +52,7 @@ export const EMAIL: ChannelConfig = {
   enabled: true,
   events: ['diskLow'],
   minSeverity: 'info',
+  allowLan: false,
   transport: { type: 'email', host: 'smtp.example.com', port: 587, security: 'startTls', username: 'me', from: 'app@example.com', to: ['me@example.com'] },
 };
 
@@ -552,5 +556,66 @@ describe('the contributions', () => {
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideChannelsBackend({ backend: () => new MemoryChannelsBackend() })] });
     expect(TestBed.inject(ChannelsBackend)).toBeInstanceOf(MemoryChannelsBackend);
     expect(() => TestBed.inject(ChannelsStore)).toThrow();
+  });
+});
+
+describe('the home-network switch', () => {
+  it('is read from the engine, off when an older engine sends none, and must be a boolean', () => {
+    const { allowLan: _off, ...old } = WEBHOOK;
+    expect(parseChannel(old)).toEqual({ ...WEBHOOK, allowLan: false });
+    expect(parseChannel({ ...WEBHOOK, allowLan: true })).toMatchObject({ allowLan: true });
+    expect(parseChannel({ ...WEBHOOK, allowLan: 'yes' })).toBeNull();
+  });
+
+  it('goes through the draft both ways', () => {
+    expect(EMPTY_DRAFT.allowLan).toBe(false);
+    const on = { ...WEBHOOK, allowLan: true };
+    expect(draftFromChannel(on).allowLan).toBe(true);
+    expect(draftToChannel(draftFromChannel(on), []).allowLan).toBe(true);
+  });
+
+  it('is what the in-memory engine checks a private address against', () => {
+    const lan = (allowLan: boolean, url: string): ChannelConfig => ({ ...WEBHOOK, allowLan, transport: { type: 'webhook', url, auth: false } });
+    for (const url of ['http://192.168.1.20/x', 'http://nas.local/x', 'https://10.0.0.5/x']) {
+      expect(settingsProblem({ channels: [lan(false, url)] })).toMatch(/home network/);
+      expect(settingsProblem({ channels: [lan(true, url)] })).toBeNull();
+    }
+    expect(settingsProblem({ channels: [lan(true, 'http://hooks.example.com/x')] })).toMatch(/https/);
+    expect(settingsProblem({ channels: [lan(false, 'http://localhost:8080/x')] })).toBeNull();
+    const mail = (allowLan: boolean, host: string): ChannelConfig => ({ ...EMAIL, allowLan, transport: { ...(EMAIL.transport as Extract<ChannelConfig['transport'], { type: 'email' }>), host } });
+    expect(settingsProblem({ channels: [mail(false, 'mail.local')] })).toMatch(/home network/);
+    expect(settingsProblem({ channels: [mail(true, 'mail.local')] })).toBeNull();
+    expect(settingsProblem({ channels: [mail(false, 'smtp.example.com')] })).toBeNull();
+  });
+});
+
+describe('declared events', () => {
+  const E = [
+    { name: 'a', group: 'One', description: 'A.' },
+    { name: 'b', group: 'Two', description: 'B.' },
+    { name: 'c', group: 'One', description: 'C.' },
+    { name: 'a', group: 'Two', description: 'repeat' },
+  ];
+
+  it('are grouped in order of first appearance, a repeated name once', () => {
+    expect(groupEvents(E).map((g) => [g.group, g.events.map((e) => e.name)])).toEqual([['One', ['a', 'c']], ['Two', ['b']]]);
+    expect(groupEvents([])).toEqual([]);
+  });
+
+  it('leave the names not declared, and toggling adds last or removes', () => {
+    expect(unknownEvents(['a', 'x', 'b', 'y'], E)).toEqual(['x', 'y']);
+    expect(toggleEvent(['a', 'x'], 'b', true)).toEqual(['a', 'x', 'b']);
+    expect(toggleEvent(['a', 'x', 'b'], 'x', false)).toEqual(['a', 'b']);
+    expect(toggleEvent(['a'], 'a', true)).toEqual(['a']);
+  });
+
+  it('default to none, and the page definition provides them next to the app’s providers', async () => {
+    expect(TestBed.inject(CHANNEL_EVENTS, null)).toBeNull();
+    const providers = async () => [];
+    const load = async () => class {};
+    const plain = defineChannelsSettingsPage({ providers, load });
+    expect(plain.providers).toBe(providers);
+    const declared = defineChannelsSettingsPage({ providers, load, events: E });
+    expect(await declared.providers!()).toEqual([{ provide: CHANNEL_EVENTS, useValue: E }]);
   });
 });

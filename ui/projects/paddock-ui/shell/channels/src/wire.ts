@@ -41,12 +41,14 @@ function parseTransport(v: unknown): Transport | null {
 /** A `ChannelConfig`, or null when the payload is not one. */
 export function parseChannel(v: unknown): ChannelConfig | null {
   if (!isObject(v)) return null;
-  const { id, name, enabled, minSeverity } = v;
+  const { id, name, enabled, minSeverity, allowLan = false } = v;
   const events = strings(v['events']);
   const transport = parseTransport(v['transport']);
   if (typeof id !== 'string' || typeof name !== 'string' || typeof enabled !== 'boolean' || !events || !transport) return null;
   if (typeof minSeverity !== 'string' || !SEVERITIES.has(minSeverity)) return null;
-  return { id, name, enabled, events, minSeverity: minSeverity as MinSeverity, transport };
+  // An engine from before the switch sends no `allowLan`: that is off.
+  if (typeof allowLan !== 'boolean') return null;
+  return { id, name, enabled, events, minSeverity: minSeverity as MinSeverity, allowLan, transport };
 }
 
 /** A `ChannelsView` from `channels_get` / `channels_save`, or null when the payload is not one. */

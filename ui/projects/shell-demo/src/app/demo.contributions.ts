@@ -15,7 +15,7 @@ import {
 import { defineSubmenu, type SubmenuDef } from '@decryp7/paddock-ui/shell/menu';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/paddock-ui/shell/diagnostics';
-import { defineChannelsRemoveDialog, defineChannelsSecretDialog, defineChannelsSettingsPage } from '@decryp7/paddock-ui/shell/channels';
+import { type ChannelEventDecl, defineChannelsRemoveDialog, defineChannelsSecretDialog, defineChannelsSettingsPage } from '@decryp7/paddock-ui/shell/channels';
 import { defineMcpKeyDialog, defineMcpRevokeDialog, defineMcpSettingsPage } from '@decryp7/paddock-ui/shell/mcp';
 import { defineLanguageSettingsPage } from '@decryp7/paddock-ui/shell/i18n/settings';
 import { defineStorageConfirmDialog, defineStorageSettingsPage } from '@decryp7/paddock-ui/shell/storage';
@@ -94,8 +94,18 @@ export const PACKS_PAGE = definePacksSettingsPage({
   load: () => import('@decryp7/paddock-ui/shell/packs/page').then((m) => m.PdPacksPage),
 });
 
+/** The events the demo app sends: grouped checkboxes on the channels page (a channel's other names stay under "Other events"). */
+const DEMO_CHANNEL_EVENTS: readonly ChannelEventDecl[] = [
+  { name: 'diskLow', group: 'Storage', description: 'A drive is nearly full.' },
+  { name: 'serviceDown', group: 'Service', description: 'The background service stopped unexpectedly.' },
+  { name: 'jobFailed', group: 'Jobs', description: 'A background job ended with an error.' },
+  { name: 'jobDone', group: 'Jobs', description: 'A background job finished.' },
+];
+
 /** Settings > Notification channels (plan X17): a table of channels with an inline editor; its providers load with the page. */
 export const CHANNELS_PAGE = defineChannelsSettingsPage({
+  // `?channels-events=none`: an app that declares no events (the free-text field is the whole control).
+  events: new URLSearchParams(globalThis.location?.search ?? '').get('channels-events') === 'none' ? [] : DEMO_CHANNEL_EVENTS,
   providers: () => import('./channels.providers').then((m) => m.CHANNELS_PROVIDERS),
   load: () => import('@decryp7/paddock-ui/shell/channels/page').then((m) => m.PdChannelsPage),
 });
