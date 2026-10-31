@@ -86,6 +86,16 @@ export type NotificationMode = { "kind": "on" } | { "kind": "paused",
  */
 untilMs: number, } | { "kind": "off" };
 
+export type PopoverStatus = { "kind": "unknown" } | { "kind": "allGood" } | { "kind": "failing", 
+/**
+ * How many.
+ */
+count: number, } | { "kind": "unchecked", 
+/**
+ * How many.
+ */
+count: number, };
+
 export type PopoverValue = { "kind": "watchedSites", 
 /**
  * All watches.
@@ -126,7 +136,11 @@ atMs: number,
 /**
  * Other watches due at the same time or earlier than a minute after it.
  */
-alsoDue: number, } | { "kind": "quietHours", 
+alsoDue: number, 
+/**
+ * The check is due or overdue (`at_ms` is not after now): the UI says "Due now", never "In now".
+ */
+due: boolean, } | { "kind": "quietHours", 
 /**
  * Start, `HH:MM` (local).
  */

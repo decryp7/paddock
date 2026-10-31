@@ -28,6 +28,7 @@
           "value": {
             "alsoDue": 1,
             "atMs": 1800000900000,
+            "due": false,
             "id": "w-6",
             "kind": "nextCheck",
             "name": "Orbit server"
@@ -112,7 +113,11 @@
           }
         }
       },
-      "noticeWithoutNotificationsWidget": null
+      "noticeWithoutNotificationsWidget": null,
+      "status": {
+        "count": 2,
+        "kind": "failing"
+      }
     },
     "empty": {
       "byKind": {
@@ -188,7 +193,10 @@
           "title": "See your watches here"
         }
       },
-      "noticeWithoutNotificationsWidget": null
+      "noticeWithoutNotificationsWidget": null,
+      "status": {
+        "kind": "unknown"
+      }
     },
     "worst": {
       "byKind": {
@@ -215,6 +223,7 @@
           "last": {
             "alsoDue": 3,
             "atMs": 1800000900000,
+            "due": false,
             "id": "w-4",
             "kind": "nextCheck",
             "name": "Internal mirror"
@@ -314,11 +323,15 @@
           "action": {
             "type": "resumeNotifications"
           },
-          "label": "Resume notifications"
+          "label": "Resume"
         },
         "detail": "Paused for about an hour more.",
         "title": "Notifications are paused",
         "tone": "info"
+      },
+      "status": {
+        "count": 4,
+        "kind": "failing"
       }
     }
   },

@@ -85,6 +85,26 @@ pub struct FailureRow {
     pub failures: u32,
 }
 
+/// How the watches are doing overall, for the popup's header pill (the engine decides; the UI words nothing else).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "kind")]
+pub enum PopoverStatus {
+    /// Nothing to say: no watches, or none checked yet.
+    Unknown,
+    /// Every active watch was checked and none failed.
+    AllGood,
+    /// Some active watches failed.
+    Failing {
+        /// How many.
+        count: u32,
+    },
+    /// Some active watches were never checked (and none failed).
+    Unchecked {
+        /// How many.
+        count: u32,
+    },
+}
+
 /// Whether notifications go out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "kind")]
@@ -134,6 +154,8 @@ pub enum PopoverValue {
         at_ms: i64,
         /// Other watches due at the same time or earlier than a minute after it.
         also_due: u32,
+        /// The check is due or overdue (`at_ms` is not after now): the UI says "Due now", never "In now".
+        due: bool,
     },
     /// The quiet hours.
     QuietHours {

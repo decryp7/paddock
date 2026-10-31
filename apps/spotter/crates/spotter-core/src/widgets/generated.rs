@@ -27,6 +27,7 @@ fn types() -> String {
         FailureKind::decl(),
         FailureRow::decl(),
         NotificationMode::decl(),
+        PopoverStatus::decl(),
         PopoverValue::decl(),
         WidgetActionId::decl(),
     ];

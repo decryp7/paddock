@@ -27,6 +27,7 @@ export const APP_COMMANDS = {
   pause_notifications: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   pending_route: { kind: 'mutation', windows: ['main'], limit: 262144 },
   popover_shape: { kind: 'query', windows: ['main', 'popout', 'dialog', 'tray'], limit: 262144 },
+  popover_status: { kind: 'query', windows: ['main', 'popout', 'dialog', 'tray'], limit: 262144 },
   popover_values: { kind: 'query', windows: ['main', 'popout', 'dialog', 'tray'], limit: 262144 },
   popover_view: { kind: 'query', windows: ['main', 'popout', 'dialog', 'tray'], limit: 262144 },
   preset_avatar: { kind: 'quiet', windows: ['main'], limit: 262144 },

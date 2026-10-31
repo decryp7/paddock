@@ -375,6 +375,12 @@ pub async fn popover_view(state: State<'_, Shared>) -> Out<PopoverView> {
     Ok(state.engine.popover_view())
 }
 
+/// `popover_status`: how the watches are doing overall (the popup's header pill).
+#[tauri::command]
+pub async fn popover_status(state: State<'_, Shared>) -> Out<spotter_core::widgets::PopoverStatus> {
+    Ok(state.engine.popover_status())
+}
+
 /// `popover_shape`: the rows each popup widget draws, so loading twins have the height of ready widgets.
 #[tauri::command]
 pub async fn popover_shape(state: State<'_, Shared>) -> Out<Vec<spotter_core::widgets::LoadingRows>> {

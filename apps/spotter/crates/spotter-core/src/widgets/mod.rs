@@ -17,8 +17,8 @@ pub use popover::{
     loading_shape, rows_of, LoadingRows, PopoverCatalogue, PopoverKind, PopoverWidget, CHANGE_ROWS, FAILURE_ROWS, SITE_ROWS,
 };
 pub use values::{
-    ChangeRow, FailureKind, FailureRow, NotificationMode, PopoverPlacementState, PopoverState, PopoverValue, PopoverValues, SiteRow,
-    SiteState, WidgetActionId,
+    ChangeRow, FailureKind, FailureRow, NotificationMode, PopoverPlacementState, PopoverState, PopoverStatus, PopoverValue, PopoverValues,
+    SiteRow, SiteState, WidgetActionId,
 };
 
 use serde::{Deserialize, Serialize};
