@@ -18,6 +18,6 @@ export function popoverMeta(_id: PlacementId, state: WidgetState<PopoverValue, W
     return `${n} ${n === 1 ? 'volume' : 'volumes'}`;
   }
   if ('pinnedCounters' in v) return `${v.pinnedCounters.rows.length + v.pinnedCounters.more} pinned`;
-  if ('lastIssue' in v) return 'last 7 days';
+  if ('lastIssue' in v) return `last ${v.lastIssue.days} days`;
   return null;
 }

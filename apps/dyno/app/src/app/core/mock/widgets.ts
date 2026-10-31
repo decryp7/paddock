@@ -387,7 +387,7 @@ export class MockWidgets {
         if (state === 'empty') return empty('No issues in the last 7 days', 'Dyno reads the system logs for crashes and hangs.', 'Open issues', { openPage: 'issues' });
         if (state === 'error') return error("Couldn't read issues", 'The issue index is unavailable.');
         if (state === 'working') return { state: 'working', title: 'Last issue', phase: 'Reading system logs · Indexing', progress: { count: { done: 12400, unit: 'events' } }, last: null, cancel: null };
-        return ready({ lastIssue: { title: 'Disk write errors on disk4', app: 'disk4', kind: 'Disk error', level: 'critical', at: at - 86_400_000 } }, stale);
+        return ready({ lastIssue: { title: 'Disk write errors on disk4', app: 'disk4', kind: 'Disk error', level: 'critical', at: at - 86_400_000, days: 7 } }, stale);
       case 'pinnedCounters':
         if (state === 'empty') return empty('Watch your own counters here', 'Pin counters in Dyno; the first 4 show here.', 'Pin counters', 'pinCounters');
         if (state === 'error') return error("Couldn't read counters", 'None of the 3 pinned counters answered.');

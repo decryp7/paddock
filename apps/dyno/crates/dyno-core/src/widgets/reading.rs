@@ -175,6 +175,31 @@ pub fn read_metric(metric: &Metric, update: &LiveUpdate, thresholds: &Thresholds
     }
 }
 
+/// Gives each counter reading the tone of the dashboard widget that shows it, against that widget's own thresholds (the first
+/// widget showing the counter, when several do). A counter no dashboard widget shows keeps the default tone.
+pub fn with_dashboard_thresholds(
+    readings: Vec<crate::counters::CounterReading>,
+    layout: &[paddock_widgets::Placement<super::DashboardWidget>],
+) -> Vec<crate::counters::CounterReading> {
+    let key = |p: &str| {
+        p.parse::<crate::counters::CounterPath>()
+            .map_or_else(|_| p.to_string(), |c| c.to_string())
+    };
+    readings
+        .into_iter()
+        .map(|r| {
+            let own = key(&r.path);
+            match layout
+                .iter()
+                .find(|p| matches!(&p.widget.metric, Metric::PerfCounter(path) if key(path) == own))
+            {
+                Some(p) => r.with_thresholds(&p.widget.thresholds),
+                None => r,
+            }
+        })
+        .collect()
+}
+
 /// Reads every query from the last live update, in order; before the first update every reading says it is waiting. At most
 /// [`MAX_QUERIES`] are read, the rest are left out.
 pub fn read_all(queries: &[ReadingQuery], update: Option<&LiveUpdate>) -> Vec<MetricReading> {
@@ -338,6 +363,28 @@ mod tests {
         let r = read_metric(&Metric::PerfCounter("\\A\\B".into()), &update(), &none());
         assert_eq!(r.value, None);
         assert!(r.reason.is_some());
+    }
+
+    #[test]
+    fn a_dashboard_counter_widget_tones_its_counter_with_its_own_thresholds() {
+        use crate::counters::{CounterReading, CounterUnit};
+        use crate::widgets::{DashboardKind, DashboardWidget};
+        let reading = |path: &str| CounterReading::new(path.into(), CounterUnit::Percent, Reading::Available(60.0));
+        let mut w = DashboardWidget::new(
+            DashboardKind::Graph,
+            Metric::PerfCounter(r"\Processor(_Total)\% Processor Time".into()),
+        );
+        w.thresholds = Thresholds {
+            warning: Some(50.0),
+            critical: Some(80.0),
+        };
+        let layout = paddock_widgets::assign_ids([(6, w)]);
+        let out = with_dashboard_thresholds(
+            vec![reading(r"\Processor(_Total)\% Processor Time"), reading(r"\Other\Counter")],
+            &layout,
+        );
+        assert_eq!(out[0].tone, ValueTone::Warn, "the widget's thresholds");
+        assert_eq!(out[1].tone, ValueTone::Ok, "no widget: the default thresholds");
     }
 
     #[test]

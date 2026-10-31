@@ -1150,6 +1150,10 @@ export class MockBackend implements DynoBackend {
     return this.reply('popoverValues', () => this.widgets.values());
   }
 
+  popoverPreview(): Promise<PopoverSurfaceValues> {
+    return this.reply('popoverPreview', () => this.widgets.values());
+  }
+
   popoverSnapshot(): Promise<PopoverSurfaceValues> {
     return this.reply('popoverSnapshot', () => this.widgets.values());
   }

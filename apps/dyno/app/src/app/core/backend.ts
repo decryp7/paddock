@@ -254,6 +254,8 @@ export interface DynoBackend {
   popoverValues(): Promise<PopoverSurfaceValues>;
   /** The popup's values as they are now, for the Settings preview: asking changes nothing about the popover's visibility or its pushes. */
   popoverSnapshot(): Promise<PopoverSurfaceValues>;
+  /** The values for the Settings preview, with the slow widgets asked of the agent now. It never marks the popover visible. */
+  popoverPreview(): Promise<PopoverSurfaceValues>;
   /** A widget's button: open a page, retry, start the backup check, restart the agent, open Settings. */
   runWidgetAction(action: WidgetActionId): Promise<void>;
   /** The popup's values, pushed while the popover is visible (`dyno://popover-values`). */

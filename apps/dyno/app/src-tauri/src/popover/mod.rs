@@ -142,6 +142,25 @@ impl PopoverModel {
         opened
     }
 
+    /// The slow placements, for a preview that is not the popup: nothing is marked visible, nothing is stamped as asked.
+    pub fn preview_ask(&self) -> Option<Ask> {
+        let ids: Vec<PlacementId> = self
+            .placements
+            .iter()
+            .filter(|p| !is_live_push(p.widget.kind()))
+            .map(|p| p.id.clone())
+            .collect();
+        (!ids.is_empty()).then_some(Ask {
+            generation: self.generation,
+            ids,
+        })
+    }
+
+    /// Whether a refresh of the slow kinds is wanted at the next tick.
+    pub fn refresh_wanted(&self) -> bool {
+        self.force
+    }
+
     /// Whether the popup is visible.
     pub fn visible(&self) -> bool {
         self.visible

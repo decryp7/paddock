@@ -632,7 +632,11 @@ level: Level,
 /**
  * When it happened, ms since the epoch.
  */
-at: number, };
+at: number, 
+/**
+ * How many days back the widget looks ([`ISSUE_DAYS`]); the UI says "last N days" from it.
+ */
+days: number, };
 
 export type PopoverValue = { "activeAlarms": { 
 /**

@@ -181,7 +181,11 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::CounterObjects => shared.counters.objects().map(|o| Reply::CounterObjects(Box::new(o))),
         Request::CounterObject { name } => shared.counters.object(&name).map(|o| Reply::CounterObject(Box::new(o))),
         Request::CounterSearch { query, limit } => shared.counters.search(&query, limit).map(Reply::CounterHits),
-        Request::CounterValues { paths } => shared.counters.values(&paths, now()).map(Reply::CounterValues),
+        Request::CounterValues { paths } => shared.counters.values(&paths, now()).map(|readings| {
+            // A counter a dashboard widget shows is toned with that widget's own thresholds.
+            let layout = lock(&shared.core).settings.dashboard.layout().placements.clone();
+            Reply::CounterValues(dyno_core::widgets::with_dashboard_thresholds(readings, &layout))
+        }),
         Request::CounterHistory { paths, minutes } => shared
             .counters
             .history(&paths, minutes, now(), |from, to| {

@@ -292,6 +292,28 @@ impl<R: Runtime> ShellOf<R> {
         lock(&self.popover).visible()
     }
 
+    /// The Settings preview's values: the slow widgets are asked of the agent now and the answer is kept, but the popup is
+    /// never marked visible and nothing is broadcast. Blocking (it waits for the agent): call it off the async runtime.
+    pub fn popover_preview(&self) -> PopoverSurfaceValues {
+        let ask = lock(&self.popover).preview_ask();
+        let link = lock(&self.link).clone();
+        if let (Some(ask), Some(link)) = (ask, link) {
+            match link.call(Request::PopoverValues { placements: ask.ids }) {
+                Ok(Reply::PopoverValues(values)) => {
+                    lock(&self.popover).on_slow(ask.generation, values.0);
+                }
+                Ok(_) => {}
+                Err(e) => logging::info(&format!("could not read the popup preview: {}", e.message)),
+            }
+        }
+        self.popover_snapshot()
+    }
+
+    /// Whether the slow kinds are due to be asked again at the next tick.
+    pub fn popover_refresh_wanted(&self) -> bool {
+        lock(&self.popover).refresh_wanted()
+    }
+
     /// Reads metrics from the newest live update, for the dashboard and the previews.
     pub fn metric_readings(&self, queries: &[ReadingQuery]) -> Vec<MetricReading> {
         dyno_core::widgets::read_all(queries, lock(&self.last_live).as_ref())

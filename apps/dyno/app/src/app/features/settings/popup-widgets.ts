@@ -91,7 +91,7 @@ export class PopupWidgets implements OnInit {
   protected readonly volumeOptions = computed<PdSelectOption[]>(() => [{ value: 'all', label: 'All volumes' }, { value: 'system', label: 'System volume' }, ...this.volumes()]);
 
   constructor() {
-    const timer = setInterval(() => void this.values.snapshot(), 5_000);
+    const timer = setInterval(() => void this.values.preview(), 5_000);
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
   }
 
@@ -99,7 +99,7 @@ export class PopupWidgets implements OnInit {
     void this.health.loadReport();
     void this.layouts.use('popover');
     void this.choices.load();
-    void this.values.start();
+    void this.values.preview();
     void this.backend
       .diskVolumes()
       .then((list) => this.volumes.set(list.map((v) => ({ value: `mount:${v.mount}`, label: v.name }))))
@@ -118,7 +118,7 @@ export class PopupWidgets implements OnInit {
   protected async edit(e: Edit<PopoverWidget>): Promise<void> {
     const failed = await this.layouts.edit('popover', e);
     if (failed) this.notifier.error(failed);
-    else void this.values.snapshot();
+    else void this.values.preview();
   }
 
   protected setVolume(p: Placement<PopoverWidget>, key: string): void {

@@ -531,6 +531,10 @@ export class TauriBackend implements DynoBackend {
     return this.command<PopoverSurfaceValues>('popover_values');
   }
 
+  popoverPreview(): Promise<PopoverSurfaceValues> {
+    return this.command<PopoverSurfaceValues>('popover_preview');
+  }
+
   popoverSnapshot(): Promise<PopoverSurfaceValues> {
     return this.command<PopoverSurfaceValues>('popover_snapshot');
   }

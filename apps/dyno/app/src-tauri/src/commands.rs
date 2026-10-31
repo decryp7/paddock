@@ -75,10 +75,31 @@ pub async fn popover_values(shell: State<'_, Arc<Shell>>) -> Result<Value, Comma
     serde_json::to_value(shell.popover_opened()).map_err(|e| CommandError::internal(format!("The popup values could not be read: {e}")))
 }
 
-/// The popup's values as known now, for the Settings preview: it does not mark the popup visible, ask the agent or broadcast.
+/// The popup's values as known now (the body of `popover_snapshot`): no visibility change, no ask, no broadcast.
+pub fn snapshot_value<R: tauri::Runtime>(shell: &crate::shell::ShellOf<R>) -> Result<Value, CommandError> {
+    serde_json::to_value(shell.popover_snapshot()).map_err(|e| CommandError::internal(format!("The popup values could not be read: {e}")))
+}
+
+/// The Settings preview's values (the body of `popover_preview`): the slow widgets are asked of the agent, the popup is
+/// not marked visible. Blocking.
+pub fn preview_value<R: tauri::Runtime>(shell: &crate::shell::ShellOf<R>) -> Result<Value, CommandError> {
+    serde_json::to_value(shell.popover_preview()).map_err(|e| CommandError::internal(format!("The popup values could not be read: {e}")))
+}
+
+/// The popup's values as known now, for a view that does not open the popup.
 #[tauri::command]
 pub async fn popover_snapshot(shell: State<'_, Arc<Shell>>) -> Result<Value, CommandError> {
-    serde_json::to_value(shell.popover_snapshot()).map_err(|e| CommandError::internal(format!("The popup values could not be read: {e}")))
+    snapshot_value(shell.inner())
+}
+
+/// The popup's values for the Settings preview, with the slow widgets asked of the agent now. It does not mark the popup
+/// visible (only `popover_values`, the popup's own first paint, does).
+#[tauri::command]
+pub async fn popover_preview(shell: State<'_, Arc<Shell>>) -> Result<Value, CommandError> {
+    let shell = shell.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || preview_value(&shell))
+        .await
+        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
 }
 
 /// Readings of metrics from the newest live update, with the tone of each against its thresholds: the dashboard's widgets

@@ -302,6 +302,8 @@ pub struct IssueValue {
     /// When it happened, ms since the epoch.
     #[cfg_attr(any(test, feature = "ts"), ts(type = "number"))]
     pub at: i64,
+    /// How many days back the widget looks ([`ISSUE_DAYS`]); the UI says "last N days" from it.
+    pub days: u32,
 }
 
 /// What one popup widget shows, by kind.
@@ -830,6 +832,7 @@ fn last_issue(id: &PlacementId, inputs: &Inputs<'_>) -> Option<State> {
             kind: i.kind.label().into(),
             level: i.severity.into(),
             at: i.at.millis(),
+            days: ISSUE_DAYS as u32,
         })
     });
     if let Some(done) = issues.reading {

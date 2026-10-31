@@ -515,6 +515,7 @@ fn the_last_issue_is_the_newest_of_the_last_seven_days() {
     assert_eq!(v.title, "Notes quit 2");
     assert_eq!(v.kind, "App crash");
     assert_eq!(v.level, Level::Warning);
+    assert_eq!(v.days, 7, "the engine sends the range");
 }
 
 #[test]

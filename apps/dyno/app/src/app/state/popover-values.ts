@@ -31,9 +31,9 @@ export class PopoverValues {
     await this.read(() => this.backend.popoverValues());
   }
 
-  /** Asks for a snapshot for the Settings preview (the popover is hidden then, so nothing is pushed): no change to the popover's visibility. */
-  async snapshot(): Promise<void> {
-    await this.read(() => this.backend.popoverSnapshot());
+  /** Asks for the Settings preview's values (the slow widgets are asked of the agent): the popover is never marked visible. */
+  async preview(): Promise<void> {
+    await this.read(() => this.backend.popoverPreview());
   }
 
   private async read(ask: () => Promise<PopoverSurfaceValues>): Promise<void> {

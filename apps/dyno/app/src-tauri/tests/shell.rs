@@ -442,6 +442,35 @@ mod widget_wiring {
         assert!(shell.popover_wants_values());
     }
 
+    /// The commands' bodies: a snapshot and a preview never mark the popup visible (only the popup's own first paint does).
+    #[test]
+    fn the_snapshot_and_preview_commands_never_open_the_popup() {
+        let app = app();
+        let shell = shell(&app);
+        shell.live(update(5.0));
+        shell.set_popover_gate(Arc::new(|| false));
+        dyno_app_lib::commands::snapshot_value(&shell).unwrap();
+        assert!(!shell.popover_wants_values(), "snapshot_value opened the popup");
+        let v = dyno_app_lib::commands::preview_value(&shell).unwrap();
+        assert!(!shell.popover_wants_values(), "preview_value opened the popup");
+        assert!(
+            v["placements"]
+                .as_array()
+                .is_some_and(|p| p.iter().any(|x| x["id"] == "cpu-memory")),
+            "{v}"
+        );
+    }
+
+    /// With no link to ask, the wish to ask is kept (the on-change kinds stay due), not used up.
+    #[test]
+    fn asking_with_no_link_keeps_the_wish() {
+        let app = app();
+        let shell = shell(&app);
+        shell.live(update(5.0));
+        let _ = shell.popover_opened();
+        assert!(shell.popover_refresh_wanted(), "the ask found no link and must stay due");
+    }
+
     /// A navigation waits for the main window, once, and the event goes to the main window only.
     #[test]
     fn a_navigation_is_kept_for_the_main_window_and_goes_to_it_alone() {

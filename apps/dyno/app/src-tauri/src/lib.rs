@@ -71,6 +71,8 @@ paddock_commands::command_table! {
     Mutation [MAIN | TRAY] => commands::run_widget_action,
     /// The popup's values as known now, without opening it: the Settings preview.
     Query [MAIN | DIALOG] => commands::popover_snapshot,
+    /// The popup's values for the Settings preview with the slow widgets asked of the agent; never marks the popup visible.
+    Query [MAIN | DIALOG] => commands::popover_preview,
     /// Readings (value, text, scale and tone) of metrics from the newest live update: the dashboard and the previews.
     Query [MAIN | DIALOG] => commands::metric_readings,
     /// The kinds the choosers can add, each with a default widget and the metrics the engine accepts for it.

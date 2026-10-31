@@ -74,6 +74,14 @@ impl CounterReading {
             tone,
         }
     }
+
+    /// The tone against a dashboard widget's own thresholds instead of the default ones (a percent counter only).
+    pub fn with_thresholds(mut self, thresholds: &crate::widgets::dashboard::Thresholds) -> CounterReading {
+        if let Some(p) = self.percent {
+            self.tone = thresholds.tone(Some(f64::from(p)));
+        }
+        self
+    }
 }
 
 #[cfg(test)]
@@ -92,6 +100,19 @@ mod reading_tests {
         assert_eq!(read(CounterUnit::Percent, -5.0).percent, Some(0.0));
         assert_eq!(read(CounterUnit::Percent, 80.0).tone, ValueTone::Warn);
         assert_eq!(read(CounterUnit::Percent, 10.0).tone, ValueTone::Ok);
+    }
+
+    #[test]
+    fn a_widgets_own_thresholds_replace_the_default_ones() {
+        use crate::widgets::dashboard::Thresholds;
+        let r = read(CounterUnit::Percent, 60.0);
+        assert_eq!(r.tone, ValueTone::Ok);
+        let strict = Thresholds {
+            warning: Some(50.0),
+            critical: Some(70.0),
+        };
+        assert_eq!(r.clone().with_thresholds(&strict).tone, ValueTone::Warn);
+        assert_eq!(read(CounterUnit::Bytes, 60.0).with_thresholds(&strict).tone, ValueTone::Ok);
     }
 
     #[test]
