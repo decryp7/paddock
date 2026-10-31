@@ -1,5 +1,5 @@
 import { DestroyRef, EnvironmentProviders, inject, isDevMode, makeEnvironmentProviders, provideEnvironmentInitializer } from '@angular/core';
-import { CopyMenu } from '../shared/ui/copy-menu';
+import { PdCopyMenu } from '@decryp7/paddock-ui';
 
 /**
  * Makes Pitcrew's windows feel like a desktop app rather than a web page (ADR 0008): the browser's own context menu, reload,
@@ -226,7 +226,7 @@ export function provideNativeFeel(): EnvironmentProviders {
   return makeEnvironmentProviders([
     provideEnvironmentInitializer(() => {
       if (typeof window === 'undefined') return;
-      const menu = inject(CopyMenu);
+      const menu = inject(PdCopyMenu);
       const remove = installNativeFeel(window, { release: !isDevMode(), mac: isMac() }, { copyMenu: (x, y, text) => menu.open(x, y, text) });
       inject(DestroyRef).onDestroy(remove);
     }),

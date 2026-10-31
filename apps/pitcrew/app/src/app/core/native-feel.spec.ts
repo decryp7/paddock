@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { CopyMenu } from '../shared/ui/copy-menu';
+import { PdCopyMenu } from '@decryp7/paddock-ui';
 import { EnvironmentInjector, createEnvironmentInjector } from '@angular/core';
 import {
   browserKeyAction,
@@ -291,7 +291,7 @@ describe('provideNativeFeel', () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 6 });
     p.dispatchEvent(e);
-    const menu = TestBed.inject(CopyMenu);
+    const menu = TestBed.inject(PdCopyMenu);
     expect(e.defaultPrevented).toBe(true);
     expect(menu.state()).toEqual({ x: 5, y: 6, text: 'copy me' });
     await menu.copy();

@@ -717,12 +717,6 @@ paths = ["ui/projects/paddock-ui/src/lib/copy-menu.ts"]
 status = "built"
 
   [[mechanism.copy]]
-  paths = ["apps/pitcrew/app/src/app/shared/ui/copy-menu.ts"]
-  owner = "pitcrew"
-  delete_by = "pitcrew-v1.1.0"
-  note = "87 lines against the canonical's 88. Two copy-menu mechanisms blocked a merge before (SP8)."
-
-  [[mechanism.copy]]
   paths = ["apps/spotter/app/src/app/shared/ui/copy-menu.ts"]
   owner = "spotter"
   delete_by = "spotter-v1.0.0"
