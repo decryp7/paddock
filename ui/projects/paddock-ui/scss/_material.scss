@@ -109,14 +109,11 @@
   --mat-sys-label-small-line-height: var(--pd-lh-caption);
   --mat-sys-title-medium-line-height: var(--pd-lh-body-lg);
   --mat-sys-title-large-line-height: var(--pd-lh-subtitle);
-  // Material draws the floated outlined label at scale(0.75) of this size, so ask for the size / 0.75: it renders at the 12 px label size.
-  --mat-form-field-outlined-label-text-populated-size: calc(var(--pd-text-label) / 0.75);
-  --mat-form-field-outlined-label-text-size: calc(var(--pd-text-label) / 0.75);
+
   // The field's own outline is the keyboard ring (the floated label sits on the border, so no ring around it): the family ring colour
-  // at 3 px, because the resting border is already 1 px and SC 2.4.13 wants 2 px of new pixels.
+  // (its 3 px width is in the family controls section below: the resting border is already 1 px and SC 2.4.13 wants 2 px of new pixels).
   --mat-form-field-outlined-focus-outline-color: var(--pd-focus-ring);
-  --mat-form-field-outlined-focus-outline-width: calc(var(--pd-focus-width) + 1px);
-  --mat-icon-button-state-layer-size: var(--pd-control-height);
+
   // State layers: Material draws an opaque ink at these opacities, and without them (the bridge alone, no `mat.theme`) the opacity
   // is undefined and computes to 1: a solid disc. They are the alpha of --pd-hover (hover and keyboard focus) and --pd-pressed, so a
   // hovered or pressed Material control looks like the family's own; Material's defaults (0.08 / 0.12 / 0.12) are heavier.
@@ -124,7 +121,7 @@
   --mat-sys-focus-state-layer-opacity: var(--pd-hover-alpha);
   --mat-sys-pressed-state-layer-opacity: var(--pd-pressed-alpha);
   --mat-icon-button-state-layer-color: var(--pd-text);
-  --mat-icon-button-icon-size: var(--pd-space-4);
+
   --mat-focus-indicator-border-color: var(--pd-focus-ring);
   --mat-focus-indicator-display: block;
 
@@ -157,8 +154,6 @@
   --mat-slide-toggle-unselected-pressed-handle-color: var(--pd-text);
   --mat-slide-toggle-unselected-icon-color: var(--pd-surface-3);
   --mat-slide-toggle-label-text-color: var(--pd-text);
-  --mat-slide-toggle-label-text-font: var(--pd-font-sans);
-  --mat-slide-toggle-label-text-size: var(--pd-text-body);
 
   // ---- Checkbox and radio.
   --mat-checkbox-selected-icon-color: var(--pd-accent-control);
@@ -183,11 +178,7 @@
   --mat-radio-label-text-size: var(--pd-text-body);
 
   // ---- Form field and input (outlined, compact).
-  --mat-form-field-container-height: var(--pd-control-height);
-  --mat-form-field-container-vertical-padding: 0px;
-  --mat-form-field-container-text-font: var(--pd-font-sans);
-  --mat-form-field-container-text-size: var(--pd-text-body);
-  --mat-form-field-container-text-line-height: var(--pd-lh-body);
+
   --mat-form-field-input-text-color: var(--pd-text);
   --mat-form-field-input-text-placeholder-color: var(--pd-text-subtle);
   --mat-form-field-outlined-input-text-color: var(--pd-text);
@@ -202,7 +193,7 @@
   --mat-form-field-outlined-focus-label-text-color: var(--pd-accent);
   --mat-form-field-outlined-error-label-text-color: var(--pd-danger);
   --mat-form-field-outlined-caret-color: var(--pd-accent);
-  --mat-form-field-outlined-container-shape: var(--pd-radius-input);
+
   --mat-form-field-subscript-text-color: var(--pd-text-muted);
   --mat-form-field-error-text-color: var(--pd-danger);
   --mat-form-field-error-focus-trailing-icon-color: var(--pd-danger);
@@ -218,8 +209,7 @@
   --mat-select-enabled-arrow-color: var(--pd-text-muted);
   --mat-select-focused-arrow-color: var(--pd-accent);
   --mat-select-invalid-arrow-color: var(--pd-danger);
-  --mat-select-trigger-text-font: var(--pd-font-sans);
-  --mat-select-trigger-text-size: var(--pd-text-body);
+
   --mat-autocomplete-background-color: var(--pd-surface-3);
   --mat-autocomplete-container-shape: var(--pd-radius-popover);
   --mat-option-label-text-color: var(--pd-text);
@@ -340,11 +330,6 @@
   --mat-button-toggle-disabled-selected-state-background-color: var(--pd-surface-3);
   --mat-button-toggle-disabled-selected-state-text-color: var(--pd-text-subtle);
   --mat-button-toggle-divider-color: var(--pd-hairline);
-  --mat-button-toggle-height: var(--pd-control-height);
-  --mat-button-toggle-shape: var(--pd-radius-control);
-  --mat-button-toggle-label-text-font: var(--pd-font-sans);
-  --mat-button-toggle-label-text-size: var(--pd-text-body);
-  --mat-button-toggle-label-text-line-height: var(--pd-lh-body);
 
   // Badge.
   --mat-badge-background-color: var(--pd-accent-fill);
@@ -422,7 +407,7 @@
   --mat-slider-disabled-handle-color: var(--pd-text-subtle);
 
   // Chips (the filled, selected and outline looks).
-  --mat-chip-container-shape-radius: var(--pd-radius-pill);
+
   --mat-chip-selected-label-text-color: var(--pd-text);
   --mat-chip-elevated-selected-container-color: var(--pd-accent-tint);
   --mat-chip-disabled-label-text-color: var(--pd-text-subtle);
@@ -435,9 +420,6 @@
   --mat-chip-focus-state-layer-color: var(--pd-hover);
   --mat-chip-selected-hover-state-layer-color: var(--pd-hover);
   --mat-chip-selected-focus-state-layer-color: var(--pd-hover);
-  --mat-chip-label-text-font: var(--pd-font-sans);
-  --mat-chip-label-text-size: var(--pd-text-label);
-  --mat-chip-container-height: var(--pd-control-height);
 
   // Tabs (more).
   --mat-tab-background-color: transparent;
@@ -457,11 +439,11 @@
   --mat-checkbox-disabled-unselected-icon-color: var(--pd-text-subtle);
   --mat-checkbox-selected-hover-state-layer-color: var(--pd-accent-ring);
   --mat-checkbox-unselected-hover-state-layer-color: var(--pd-hover);
-  --mat-checkbox-state-layer-size: var(--pd-control-height);
+
   --mat-radio-disabled-label-color: var(--pd-text-subtle);
   --mat-radio-disabled-selected-icon-color: var(--pd-text-subtle);
   --mat-radio-disabled-unselected-icon-color: var(--pd-text-subtle);
-  --mat-radio-state-layer-size: var(--pd-control-height);
+
   --mat-slide-toggle-disabled-label-text-color: var(--pd-text-subtle);
   --mat-select-container-elevation-shadow: var(--pd-shadow-2);
   --mat-autocomplete-container-elevation-shadow: var(--pd-shadow-2);
@@ -479,8 +461,6 @@
   --mat-form-field-outlined-disabled-label-text-color: var(--pd-text-subtle);
   --mat-form-field-outlined-disabled-outline-color: var(--pd-hairline);
   --mat-form-field-select-option-text-color: var(--pd-text);
-  --mat-form-field-subscript-text-font: var(--pd-font-sans);
-  --mat-form-field-subscript-text-size: var(--pd-text-label);
 
   // ---- matButton, every variant (the user's decision 2026-10-28: matButton everywhere).
   // filled = primary (accent fill), outlined = secondary (surface-2 + strong border), text = ghost, tonal = accent tint,
@@ -520,37 +500,83 @@
   --mat-button-protected-pressed-container-elevation-shadow: var(--pd-shadow-1);
   --mat-button-protected-disabled-container-color: var(--pd-pressed);
   --mat-button-protected-disabled-label-text-color: var(--pd-text-subtle);
-  --mat-button-filled-label-text-transform: none;
-  --mat-button-outlined-label-text-transform: none;
-  --mat-button-text-label-text-transform: none;
-  --mat-button-tonal-label-text-transform: none;
-  --mat-button-protected-label-text-transform: none;
-  --mat-button-filled-container-height: var(--pd-button-height);
-  --mat-button-outlined-container-height: var(--pd-button-height);
-  --mat-button-text-container-height: var(--pd-button-height);
-  --mat-button-tonal-container-height: var(--pd-button-height);
-  --mat-button-protected-container-height: var(--pd-button-height);
-  --mat-button-filled-container-shape: var(--pd-radius-control);
-  --mat-button-outlined-container-shape: var(--pd-radius-control);
-  --mat-button-text-container-shape: var(--pd-radius-control);
-  --mat-button-tonal-container-shape: var(--pd-radius-control);
-  --mat-button-protected-container-shape: var(--pd-radius-control);
-  --mat-button-filled-label-text-font: var(--pd-font-sans);
-  --mat-button-outlined-label-text-font: var(--pd-font-sans);
-  --mat-button-text-label-text-font: var(--pd-font-sans);
-  --mat-button-tonal-label-text-font: var(--pd-font-sans);
-  --mat-button-protected-label-text-font: var(--pd-font-sans);
-  --mat-button-filled-label-text-size: var(--pd-text-body);
-  --mat-button-outlined-label-text-size: var(--pd-text-body);
-  --mat-button-text-label-text-size: var(--pd-text-body);
-  --mat-button-tonal-label-text-size: var(--pd-text-body);
-  --mat-button-protected-label-text-size: var(--pd-text-body);
-  --mat-button-filled-label-text-weight: var(--pd-weight-medium);
-  --mat-button-outlined-label-text-weight: var(--pd-weight-medium);
-  --mat-button-text-label-text-weight: var(--pd-weight-medium);
-  --mat-button-tonal-label-text-weight: var(--pd-weight-medium);
-  --mat-button-protected-label-text-weight: var(--pd-weight-medium);
+
+
 }
+
+
+// ---- Family controls: geometry and type of the Material controls the shared surfaces draw (ER-21: ONE section, one mechanism).
+// These sit on `body`, not `:root`: a custom property on a descendant beats any `html` or `:root` declaration by inheritance, so a
+// host app's own Material theme (Pitwall: `mat.theme` density -2 on `:root`; Material's own defaults where no bridge is loaded:
+// 56px fields, large type, pill buttons) cannot override them, and the cdk overlays (select panels, the undo snack bar), which
+// are children of `body`, inherit them too. Colour never goes here. Covered: buttons, the outlined form field and its select,
+// the button toggle (segmented control), the icon-button, checkbox and radio state layers, chips and the slide toggle's label
+// (the settings pages use all of them); the slide toggle's own track and handle are sized by the `.mat-mdc-slide-toggle` rule
+// below (scaled as a whole), which no theme token reaches. Material draws the floated outlined label at scale(0.75) of its size,
+// so the label sizes are asked for as size / 0.75 and render at the 12 px label size. A spec keeps every such token in this
+// section and nowhere else in this file.
+// family-controls:begin
+body {
+  --mat-button-filled-container-height: var(--pd-button-height);
+  --mat-button-filled-container-shape: var(--pd-radius-control);
+  --mat-button-filled-label-text-font: var(--pd-font-sans);
+  --mat-button-filled-label-text-size: var(--pd-text-body);
+  --mat-button-filled-label-text-transform: none;
+  --mat-button-filled-label-text-weight: var(--pd-weight-medium);
+  --mat-button-outlined-container-height: var(--pd-button-height);
+  --mat-button-outlined-container-shape: var(--pd-radius-control);
+  --mat-button-outlined-label-text-font: var(--pd-font-sans);
+  --mat-button-outlined-label-text-size: var(--pd-text-body);
+  --mat-button-outlined-label-text-transform: none;
+  --mat-button-outlined-label-text-weight: var(--pd-weight-medium);
+  --mat-button-protected-container-height: var(--pd-button-height);
+  --mat-button-protected-container-shape: var(--pd-radius-control);
+  --mat-button-protected-label-text-font: var(--pd-font-sans);
+  --mat-button-protected-label-text-size: var(--pd-text-body);
+  --mat-button-protected-label-text-transform: none;
+  --mat-button-protected-label-text-weight: var(--pd-weight-medium);
+  --mat-button-text-container-height: var(--pd-button-height);
+  --mat-button-text-container-shape: var(--pd-radius-control);
+  --mat-button-text-label-text-font: var(--pd-font-sans);
+  --mat-button-text-label-text-size: var(--pd-text-body);
+  --mat-button-text-label-text-transform: none;
+  --mat-button-text-label-text-weight: var(--pd-weight-medium);
+  --mat-button-toggle-height: var(--pd-control-height);
+  --mat-button-toggle-label-text-font: var(--pd-font-sans);
+  --mat-button-toggle-label-text-line-height: var(--pd-lh-body);
+  --mat-button-toggle-label-text-size: var(--pd-text-body);
+  --mat-button-toggle-shape: var(--pd-radius-control);
+  --mat-button-tonal-container-height: var(--pd-button-height);
+  --mat-button-tonal-container-shape: var(--pd-radius-control);
+  --mat-button-tonal-label-text-font: var(--pd-font-sans);
+  --mat-button-tonal-label-text-size: var(--pd-text-body);
+  --mat-button-tonal-label-text-transform: none;
+  --mat-button-tonal-label-text-weight: var(--pd-weight-medium);
+  --mat-checkbox-state-layer-size: var(--pd-control-height);
+  --mat-chip-container-height: var(--pd-control-height);
+  --mat-chip-container-shape-radius: var(--pd-radius-pill);
+  --mat-chip-label-text-font: var(--pd-font-sans);
+  --mat-chip-label-text-size: var(--pd-text-label);
+  --mat-form-field-container-height: var(--pd-control-height);
+  --mat-form-field-container-text-font: var(--pd-font-sans);
+  --mat-form-field-container-text-line-height: var(--pd-lh-body);
+  --mat-form-field-container-text-size: var(--pd-text-body);
+  --mat-form-field-container-vertical-padding: 0px;
+  --mat-form-field-outlined-container-shape: var(--pd-radius-input);
+  --mat-form-field-outlined-focus-outline-width: calc(var(--pd-focus-width) + 1px);
+  --mat-form-field-outlined-label-text-populated-size: calc(var(--pd-text-label) / 0.75);
+  --mat-form-field-outlined-label-text-size: calc(var(--pd-text-label) / 0.75);
+  --mat-form-field-subscript-text-font: var(--pd-font-sans);
+  --mat-form-field-subscript-text-size: var(--pd-text-label);
+  --mat-icon-button-icon-size: var(--pd-space-4);
+  --mat-icon-button-state-layer-size: var(--pd-control-height);
+  --mat-radio-state-layer-size: var(--pd-control-height);
+  --mat-select-trigger-text-font: var(--pd-font-sans);
+  --mat-select-trigger-text-size: var(--pd-text-body);
+  --mat-slide-toggle-label-text-font: var(--pd-font-sans);
+  --mat-slide-toggle-label-text-size: var(--pd-text-body);
+}
+// family-controls:end
 
 // A projected glyph (pd-glyph, mat-icon, an svg) sits centred on the label with a 4 px gap: the label is a flex row, not a text line
 // (in a line box the 16 px glyph rests on the baseline, about 4 px above the text centre, with no gap).

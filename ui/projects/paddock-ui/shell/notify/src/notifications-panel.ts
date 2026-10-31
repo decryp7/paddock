@@ -25,7 +25,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [SuEmptyState, SuSegmentedControl],
   template: `
-    <div class="pd-bar">
+    <div class="pd-bar" data-testid="notices-filter-bar">
       <pd-segmented-control [label]="t.filter" [options]="filters()" [value]="store.read()" (valueChange)="setRead($event)" />
       <span class="pd-spacer"></span>
       <button type="button" class="pd-btn pd-ghost" [disabled]="!store.unread()" data-testid="notices-mark-all" (click)="store.markAllRead()">{{ t.markAllRead }}</button>

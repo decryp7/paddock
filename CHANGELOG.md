@@ -123,6 +123,34 @@ Conventional Commits; one semver tag for the whole repo.
 ### `paddock-service`: a pending or running launchd job is never stale; shared launchctl helpers
 - `JobReport::stale()` no longer counts "has a launch constraint and is not running": every healthy `SMAppService` job has `has LWCR`, so a pending job at login read as refused and the repair killed the healthy agent (Dyno B4; Pitwall 1.1 had the same logic). Stale now means found, not running, and spawn failed, exit 78 or "needs LWCR update". New `JobReport::needs_repair(answers)` (stale and the service does not answer) is the one decision for every app, and `JobReport::describe()` the observed state in words for logs and messages. Also affects `Job::Refused` in the launchd backend (a running job is never refused).
 - New `parse::launchctl_output` (stdout of a successful `launchctl` call through the `System` port, bounded and read while it runs; output past the cap comes back truncated) and new public module `launchctl` with `job_report` (`None` = launchd could not be asked, distinct from "does not know the job") and `bootout` (exit 3, 113 or "No such process" is success), moved out of the launchd backend. Pitwall uses them and drops its copies; Dyno and Pitcrew adopt them on their own branches.
+### Family Material density and shape: one section of `_material.scss`, on `body` (ER-21)
+- Shared surfaces drew 56px fields with large type, pill buttons and tall segmented controls where the host app's Material theme
+  differed from the bridge. Root cause (Material 22.2.4): `mat.theme` emits density tokens only when the scale is not 0, so an app that
+  loads no `paddock-ui/css/material.css` gets Material's own defaults (Pitcrew: its `angular.json` lists none; Debrief and Spotter list
+  none either), and an app with its own theme at another density fights the bridge (Pitwall: density -2 on `:root`).
+- The geometry and type of the controls the shared surfaces draw (buttons, the outlined form field and select, the button toggle,
+  the icon-button, checkbox and radio state layers, chips) are now ONE section of `scss/_material.scss`, set on `body`, not `:root`:
+  a custom property on a descendant beats any `html`/`:root` theme, and the cdk overlays (select panels, the undo snack bar) inherit
+  it. This covers every shared settings page and panel, the setup and report-problem dialogs, the workbench dialogs, `pd-field`, the
+  schedule editors and the toast, with no per-component copy. A spec keeps every such token in that section and nowhere else in the
+  file. Moved into the section as well: the outlined label sizes, the focus outline width, the subscript size and font, the icon-button, checkbox, radio
+  and chip geometry. (The earlier per-host `PD_FAMILY_CONTROLS` block is gone; nothing needs it.)
+- **This applies only to apps that load `paddock-ui` `css/material.css`.** An app that does not (today Debrief, Pitcrew, Pitwall and
+  Spotter on main) keeps Material's own sizes until it adopts the bridge; C61 lists them. Dyno loads it: its toolbar height now comes
+  from `--pd-button-height` (`styles.scss` no longer sets `--mat-button-*-container-height` on `:root`). A family-section `--mat-*`
+  token set on an app's `:root` or `html` is dead: apps tune the family through `--pd-*`.
+- Dyno: every family control that reads `--pd-button-height` (the dialog footer buttons, the Settings search box, the Material
+  buttons) now matches Dyno's field height (`--control-h`): 28 px in Standard instead of the family's 32, 32 in Comfortable, 24 in
+  Compact (Dyno sets it on `:root, :root[data-density]` so the family's compact and comfortable rules do not win). Measured on Dyno's
+  Processes page: button and field equal at all three densities. Dyno screenshots that show these controls and need retaking before
+  the Dyno tag: `settings-{light,dark}`, `settings-menu-bar-{light,dark}`, `alarms-rules-{light,dark}`, `diagnostics-{light,dark}`,
+  `widgets-edit-{light,dark}`, `backup-{light,dark}`, `reports-{light,dark}`, `web-search-{light,dark}`, `tray-{light,dark}`, and the
+  dialog images of `e2e/screenshots-dialogs.spec.ts` (every dialog's footer buttons).
+- New conformance check C61 (report-only): every app's `angular.json` loads `paddock-ui` `css/material.css`, and no app has a
+  `mat.theme` of its own.
+- When `shared/channels-lan-events` meets this branch, delete the channels-only `:host` density block in
+  `ui/projects/paddock-ui/shell/channels/page/src/styles.ts` (lines 4-7 there); this section replaces it.
+
 
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
