@@ -491,6 +491,19 @@ mod tests {
     }
 
     #[test]
+    fn a_watch_that_keeps_no_state_needs_no_reset() {
+        struct Stateless;
+        impl StartWatch for Stateless {
+            fn poll(&mut self, _: &StartObservation) -> StartVerdict {
+                StartVerdict::Up
+            }
+        }
+        let mut w = Stateless;
+        w.reset();
+        assert_eq!(w.poll(&pending()), StartVerdict::Up);
+    }
+
+    #[test]
     fn the_default_wait_polls_at_the_default_rate() {
         assert_eq!(StartWait::default().tick, POLL);
         assert_eq!(POLL, crate::Timings::default().start_poll);
