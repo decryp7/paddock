@@ -261,7 +261,8 @@ changes here, every app's copy is updated in the same change.
     its canonical implementation and, for each copy, the app that deletes it and the tag by which it is gone.
     (a) A change that touches one member of a listed mechanism (its non-test source) makes the same change in every other
     copy and in a built canonical, each with its own failing test first (rule 11), or waives a member with the trailer
-    `Copies-waived: <mechanism-id> <path>: <reason>` in a commit that touches the mechanism. Hand-written plugin wiring
+    `Copies-waived: <mechanism-id> <path>: <reason>` in a commit that touches the mechanism (`*` for the path only when
+    the mechanism has at most two members besides wiring). Hand-written plugin wiring
     (`kind = "wiring"`) is held to its delete-by tag only.
     (b) A shared-code freeze (rule 1) does not freeze fixes to a listed mechanism: the fix lands in the canonical
     implementation and every copy in the same change. The shared API stays frozen.
@@ -269,11 +270,12 @@ changes here, every app's copy is updated in the same change.
     leaves the register only together with its copy's files, or with the trailer `Copies-removed: <mechanism-id> <path>:
     <reason>`.
     (d) A tag is refused while its app still holds a copy whose delete-by tag it has reached. A delete-by date moves only
-    with the trailer `Copies-date: <mechanism-id> <path>: <old> -> <new>: <reason>`, approved by the coordinator; a move
-    past the owner's next release also needs the user's approval.
+    with the trailer `Copies-date: <mechanism-id> <path>: <old> -> <new>: approved: <coordinator|user>: <reason>`; a
+    move to a later release line (a higher major or minor version) needs `approved: user`.
     (e) Enforced by conformance check C58 (follow-up, ADR 0034 WP-1). A register-only change is docs-only and gets no CI
-    run (rule 50), so the steward runs `paddock-conformance copies` (register validity) locally before it lands. Until C58
-    exists, the reviewer and the steward check the register by hand.
+    run (rule 50), so the steward runs `node conformance/bin/paddock-conformance.mjs copies --check-register` locally
+    before it lands. Batches run `copies --range <base>..HEAD` before pushing, and the steward runs `copies --tag <tag>`
+    before creating a tag. Until C58 exists, the reviewer and the steward check the register by hand.
     *Why:* launchd's job report existed four times. The shared one already skipped nested blocks; Dyno's copy did not and
     replaced its healthy agent at every login (Dyno 1.0 blocker B4). The Windows network-sandbox fix of the browser driver
     sat in the one copy no app used, and the EBADF fix had to be made in two IPC endpoints.

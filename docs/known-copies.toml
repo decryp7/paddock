@@ -15,13 +15,15 @@
 # Check C58 (ADR 0034 §3, follow-up WP-1):
 #   - a change that touches one member of a mechanism touches every other copy and a built canonical, or waives a member
 #     in a commit that touches the mechanism:  Copies-waived: <mechanism-id> <member-path>: <reason>
+#     (`*` for the member path only when the mechanism has at most two members besides wiring)
 #   - an entry leaves the register only with its copy's files, or with:  Copies-removed: <mechanism-id> <path>: <reason>
-#   - a delete_by date moves only with:  Copies-date: <mechanism-id> <path>: <old> -> <new>: <reason>  (rule 55(d))
+#   - a delete_by date moves only with:  Copies-date: <mechanism-id> <path>: <old> -> <new>: approved: <coordinator|user>: <reason>
+#     (rule 55(d); a move to a later release line needs approved: user)
 #   - a tag `<app>-vX.Y.Z` is refused while a copy owned by that app has a delete_by version <= X.Y.Z.
 #
 # Seeded 2026-10-31 from the family survey (family-redesign-and-sharing-2026-10-31) and from the shared crates' own
-# "Taken from" / "Ported from" doc comments, at origin/main c3404cdc7. Paths are as they are on main. A release batch that
-# deletes a copy removes its entry in the same batch, before its tag.
+# "Taken from" / "Ported from" / "Extracted from" doc comments in crates/ and ui/, at origin/main c3404cdc7. Paths are
+# as they are on main. A release batch that deletes a copy removes its entry in the same batch, before its tag.
 # Not listed on purpose (ADR 0034 §1): documentation (AGENTS.md sections synced from docs/blocks, READMEs), templates/**
 # (the source of new standalone repositories), the per-app clippy.toml presets (C13), and domain code that only looks
 # alike (Dyno's socket lister, Pitcrew's and Pitwall's transports, supervisor transitions; rule 42).
@@ -292,14 +294,14 @@ adr = "0012"
 
   [[mechanism.copy]]
   paths = ["apps/debrief/app/src-tauri/src/lib.rs"]
-  symbols = ["text:tauri_plugin_single_instance"]
+  symbols = ["text:tauri_plugin_single_instance::init(|"]
   kind = "wiring"
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
 
   [[mechanism.copy]]
   paths = ["apps/pitwall/app/src-tauri/src/lib.rs"]
-  symbols = ["text:tauri_plugin_single_instance"]
+  symbols = ["text:tauri_plugin_single_instance::init(|"]
   kind = "wiring"
   owner = "pitwall"
   delete_by = "pitwall-v1.1.0"
@@ -307,7 +309,7 @@ adr = "0012"
 
   [[mechanism.copy]]
   paths = ["apps/spotter/app/src-tauri/src/lib.rs"]
-  symbols = ["text:tauri_plugin_single_instance"]
+  symbols = ["text:tauri_plugin_single_instance::init(|"]
   kind = "wiring"
   owner = "spotter"
   delete_by = "spotter-v1.0.0"
@@ -363,7 +365,7 @@ adr = "0012"
 
 [[mechanism]]
 id = "tray"
-title = "The tray or menu-bar icon and its menu model"
+title = "The tray or menu-bar icon: building it, its menu and its actions"
 canonical = "paddock-window"
 paths = ["crates/paddock-window/src/tray.rs", "crates/paddock-window/src/tauri/tray.rs"]
 status = "built"
@@ -371,14 +373,53 @@ adr = "0012"
 
   [[mechanism.copy]]
   paths = ["apps/debrief/app/src-tauri/src/tray.rs"]
+  symbols = ["item:MenuEntry", "item:TrayAction", "item:parse_action", "item:create", "item:build", "item:to_menu", "item:refresh_now"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
+  note = "The canonical tray.rs was ported from this file. Debrief's menu content (windows, recent projects, tasks) stays Debrief's."
 
   [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/tray.rs", "apps/pitwall/app/src-tauri/src/tray_model.rs"]
+  paths = ["apps/pitwall/app/src-tauri/src/tray.rs"]
+  symbols = ["item:build_menu", "item:create", "item:update"]
+  owner = "pitwall"
+  delete_by = "pitwall-v1.1.0"
+  note = "Builds the tray by hand with TrayIconBuilder; Pitwall 1.1 builds it through paddock-window and drops these items."
+
+  [[mechanism.copy]]
+  paths = ["apps/pitwall/app/src-tauri/src/tray_model.rs"]
+  symbols = ["item:Entry", "item:TrayView", "item:TrayAction"]
   owner = "pitwall"
   delete_by = "pitwall-v1.2.0"
-  note = "The canonical tray.rs was ported from these files; Pitwall 1.1 keeps them. Not compared line by line: Pitwall's own menu items stay Pitwall's."
+  note = "Its own menu-entry and view types beside paddock-window's TrayEntry and TrayView; Pitwall 1.1 keeps them."
+
+  [[mechanism.copy]]
+  paths = ["apps/pitcrew/app/src-tauri/src/tray.rs"]
+  symbols = ["item:build_menu", "item:create", "item:update"]
+  owner = "pitcrew"
+  delete_by = "pitcrew-v1.1.0"
+  note = "Builds the tray by hand with TrayIconBuilder; Pitcrew 1.1 builds it through paddock-window and drops these items."
+
+  [[mechanism.copy]]
+  paths = ["apps/spotter/app/src-tauri/src/tray.rs"]
+  symbols = ["item:build_menu", "item:create"]
+  owner = "spotter"
+  delete_by = "spotter-v1.0.0"
+  note = "Builds the tray by hand with TrayIconBuilder; Spotter 1.0 builds it through paddock-window and drops these items. Its menu model (MenuEntry, menu_model) is Spotter's own content."
+
+[[mechanism]]
+id = "tray-popover"
+title = "The popover window opened from the tray icon: position, height, toggle"
+canonical = "paddock-window"
+paths = ["crates/paddock-window/src/popover.rs", "crates/paddock-window/src/tauri/popover.rs"]
+status = "built"
+adr = "0012"
+
+  [[mechanism.copy]]
+  paths = ["apps/spotter/app/src-tauri/src/tray.rs"]
+  symbols = ["item:popup_position", "item:fitted_height", "item:fitted_top", "item:toggle_popup", "item:fit_popup"]
+  owner = "spotter"
+  delete_by = "spotter-v1.0.0"
+  note = "Spotter 1.0 drops these items for paddock-window's popover (itself ported from Dyno's popover)."
 
 [[mechanism]]
 id = "window-feel"
@@ -589,6 +630,52 @@ status = "built"
   delete_by = "spotter-v1.1.0"
   note = "Its own lettre on aws-lc-rs."
 
+[[mechanism]]
+id = "loopback-http-client"
+title = "A small HTTP/1.1 client for 127.0.0.1: fast Cancel, separate connect, first-byte and chunk-gap limits"
+canonical = "paddock-pitwall"
+paths = ["crates/paddock-pitwall/src/loopback.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/debrief-ai/src/engine/pitwall/http.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "The canonical was extracted from this file."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/debrief-ai-worker/src/http.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Debrief's llama-server client; the canonical's doc says it moves onto the same module (plan X16)."
+
+[[mechanism]]
+id = "personal-data-redaction"
+title = "Removing personal details from diagnostics text: home folders, profiles, machine and user names, e-mail, IP addresses"
+canonical = "paddock-diag"
+paths = ["crates/paddock-diag/src/personal.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/crates/dyno-core/src/diagnostics.rs"]
+  symbols = ["item:Redactor", "item:RedactionCounts", "item:replace_word", "item:replace_profiles", "item:replace_emails", "item:replace_ipv4"]
+  owner = "dyno"
+  delete_by = "dyno-v1.1.0"
+  note = "personal.rs was ported from this file. Debrief's log redaction (redaction rules over imported logs) is product domain and not listed."
+
+[[mechanism]]
+id = "schedules"
+title = "Schedule maths: every N, times of day, cron, zones, daylight saving, minimum interval, jitter"
+canonical = "paddock-jobs"
+paths = ["crates/paddock-jobs/src/schedule/**"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/spotter/crates/spotter-core/src/schedule.rs"]
+  owner = "spotter"
+  delete_by = "spotter-v1.1.0"
+  note = "paddock-jobs' schedule tests say the maths was ported from this file; Spotter 1.0 still uses its own."
+
 # =====================================================================================================================
 # UI (@decryp7/paddock-ui)
 # =====================================================================================================================
@@ -711,6 +798,58 @@ adr = "0013"
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
   note = "The approved shared workbench move (docs/plans/2026-10-29-shared-workbench-move.md, Debrief 1.2 Track U)."
+
+[[mechanism]]
+id = "palette-ranking"
+title = "Ranking the command palette's entries and the did-you-mean suggestion"
+canonical = "@decryp7/paddock-ui"
+paths = ["ui/projects/paddock-ui/workbench/palette/src/match.ts"]
+status = "built"
+adr = "0013"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src/app/palette/palette-match.ts", "apps/debrief/app/src/app/palette/did-you-mean.ts"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+
+[[mechanism]]
+id = "palette-recent"
+title = "The commands last run from the palette"
+canonical = "@decryp7/paddock-ui"
+paths = ["ui/projects/paddock-ui/workbench/palette/src/recent.ts"]
+status = "built"
+adr = "0013"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src/app/palette/palette-recent.ts"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+
+[[mechanism]]
+id = "shell-regions"
+title = "The frame's regions and the F6 / Shift+F6 cycle"
+canonical = "@decryp7/paddock-ui"
+paths = ["ui/projects/paddock-ui/shell/src/frame/regions.ts"]
+status = "built"
+adr = "0012"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src/app/shell/regions.ts"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+
+[[mechanism]]
+id = "ui-locale"
+title = "The UI language and the locale every formatter uses"
+canonical = "@decryp7/paddock-ui"
+paths = ["ui/projects/paddock-ui/shell/i18n/src/locale.ts"]
+status = "built"
+adr = "0012"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src/app/i18n/locale.ts"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
 
 # =====================================================================================================================
 # Scripts

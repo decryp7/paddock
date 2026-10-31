@@ -1,8 +1,9 @@
 # 34. One implementation per mechanism: copies are registered, fixed together and expire
 
-- Status: Proposed (2026-10-31). The direction was accepted by the user on 2026-10-31 (family survey
-  `family-redesign-and-sharing-2026-10-31`); this text waits for an independent review. The binding rule is rule 55.
-  Revised 2026-10-31 after review round 1 (false positives, dropped entries, register errors).
+- Status: Accepted (2026-10-31, by the user), after independent review rounds 1-2. The binding rule is rule 55. The
+  direction came from the family survey `family-redesign-and-sharing-2026-10-31`; round 1 added the counted-files rule,
+  the entry guard, the wiring kind and register fixes; round 2 added the copies found in `ui/`, the narrowed tray
+  entries, the approver on date moves and the exact commands.
 - Date: 2026-10-31
 - Related: rule 40 / ER-21 (recurring bugs mean a missing design rule), rules 39, 42 and 43 / ER-22 (share first, shared
   behaviour tested once), rule 1 (one release at a time, the shared-code freeze), rule 50 (CI runs only what a change
@@ -117,10 +118,19 @@ line changes in it:
 
 ### 3. The check (C58, follow-up package WP-1)
 
-`paddock-conformance.mjs copies` gets three modes. The implementation is a follow-up package; this is its specification.
+The subcommand `copies` of `conformance/bin/paddock-conformance.mjs` gets three modes, one flag each. The
+implementation is a follow-up package; this is its specification, and rule 55 names the same commands.
 
-**a. Register validity** (in every conformance run with `--app paddock`, and locally before a register-only change
-lands; see rule 55(e)):
+| Mode | Command |
+|---|---|
+| a. register validity | `node conformance/bin/paddock-conformance.mjs copies --check-register` |
+| b. range check | `node conformance/bin/paddock-conformance.mjs copies --range <base>..HEAD` |
+| c. tag check | `node conformance/bin/paddock-conformance.mjs copies --tag <tag>` |
+
+The `--app paddock` conformance run also runs mode a as check C58.
+
+**a. Register validity** (`copies --check-register`: in every conformance run with `--app paddock`, and locally before a
+register-only change lands; see rule 55(e)):
 
 - the file parses; `version = 1`; ids are unique and kebab-case;
 - every `owner` is `paddock` or a folder under `apps/` (the list is read from the tree, not written in the check);
@@ -139,7 +149,10 @@ HEAD)`, next to commit-lint, and the steward runs it before pushing a batch):
    exists at `base` and not at `HEAD` is an error unless none of its paths match a tracked file at `HEAD` (the copy was
    deleted in the range), or a commit in the range carries `Copies-removed: <mechanism-id> <path>: <reason>` (for
    example a copy that turned out to be domain code). A changed `delete_by` is an error unless a commit carries
-   `Copies-date: <mechanism-id> <path>: <old> -> <new>: <reason>` (rule 55(d) says who approves it).
+   `Copies-date: <mechanism-id> <path>: <old> -> <new>: approved: <who>: <reason>`, where `<old>` and `<new>` match
+   the register at `base` and `HEAD`, and `<who>` is `coordinator` or `user`. When `<new>` is a later release line than
+   `<old>` (a higher major or minor version), `<who>` must be `user`; otherwise the check reports the missing approval
+   (rule 55(d)).
 2. **Touches.** For every mechanism, compute the touched members (§2), leaving out `wiring` copies.
 3. **Touch alike.** For a mechanism with at least one touched member, every other `copy` member and a `built` canonical
    must be touched too, by any commit of the range, or waived. A `planned` canonical is never required (its files do not
@@ -165,8 +178,11 @@ Typical reasons: "the copy does not have this code path (Windows-only branch)", 
 
 **c. Tag check** (`copies --tag <tag>`):
 
-- For the tag's app and version, every `copy` or `wiring` entry whose `owner` is that app and whose `delete_by` version
-  is lower than or equal to the tag's version is an error ("dyno-v1.1.0: apps/dyno/crates/dyno-ipc/src/endpoint/** is
+- A copy **exists** while one of its paths matches a tracked file and, when it has `symbols`, while one of its `item:`
+  spans or `text:` literals is still found in those files. So a copy narrowed to items (Pitwall's hand-built tray) is
+  gone once those items are, even if the file stays.
+- For the tag's app and version, every existing `copy` or `wiring` entry whose `owner` is that app and whose `delete_by`
+  version is lower than or equal to the tag's version is an error ("dyno-v1.1.0: apps/dyno/crates/dyno-ipc/src/endpoint/** is
   still a copy of paddock-ipc; delete it, or move its date (rule 55(d))"). When the mechanism's canonical is `planned`,
   the message names that as the cause ("the canonical icons/check.mjs is not built yet").
 - A shared-packages tag `vX.Y.Z` checks the `paddock` entries the same way.
@@ -193,19 +209,19 @@ allowed only with its register entry, a `delete_by` tag and the reason, in the s
 ### 5. Seed and dates
 
 `docs/known-copies.toml` is seeded with every copy found by the 2026-10-31 survey and by the shared crates' own "Taken
-from" notes: 38 mechanisms, 75 entries. The `delete_by` dates follow the agreed order (Dyno 1.0, Spotter 1.0,
+from" notes in `crates/` and `ui/`: 46 mechanisms, 87 entries. The `delete_by` dates follow the agreed order (Dyno 1.0, Spotter 1.0,
 Pitwall 1.1, Pitcrew 1.1, Debrief 1.2, Pacenotes, Sighter) and are proposals for the review and the user to confirm:
 
 | Owner | Deleted by | Copies |
 |---|---|---|
-| Spotter | `spotter-v1.0.0` | `native-feel.ts`, `copy-menu.ts`, `updater.rs`, single-instance wiring (all deleted by the Spotter 1.0 batch) |
-| Pitwall | `pitwall-v1.1.0` | `native-feel.ts`, `sparkline.ts`, `updater.rs`, `window.rs`, single-instance wiring (all deleted by the Pitwall 1.1 batch) |
-| Pitcrew | `pitcrew-v1.1.0` | `service_repair.rs`, `service_install.rs`, `notify-channels`, `updater.rs`, its UI copies, login wiring |
-| Dyno | `dyno-v1.1.0` | `service_repair.rs`, the login and service parts of `login.rs`/`login_item.rs`, `dyno-ipc` endpoint, frames, peer and child, `sparkline.ts`, login wiring |
+| Spotter | `spotter-v1.0.0` | `native-feel.ts`, `copy-menu.ts`, `updater.rs`, the hand-built tray and popover, single-instance wiring (all deleted by the Spotter 1.0 batch) |
+| Pitwall | `pitwall-v1.1.0` | `native-feel.ts`, `sparkline.ts`, `updater.rs`, `window.rs`, the hand-built tray, single-instance wiring (all deleted by the Pitwall 1.1 batch) |
+| Pitcrew | `pitcrew-v1.1.0` | `service_repair.rs`, `service_install.rs`, `notify-channels`, `updater.rs`, the hand-built tray, its UI copies, login wiring |
+| Dyno | `dyno-v1.1.0` | `service_repair.rs`, the login and service parts of `login.rs`/`login_item.rs`, `dyno-ipc` endpoint, frames, peer and child, the redaction in `diagnostics.rs`, `sparkline.ts`, login wiring |
 | Dyno | `dyno-v1.2.0` | `dyno-plugin-api`, `dyno-plugin-host` (Dyno tier 3, ADR 0001) |
-| Spotter | `spotter-v1.1.0` | `spotter-render`, `mail.rs`, `pack.rs`, `time.rs`, `schedule-editor.ts`, `clipboard.ts`, `check-icons.mjs`, login wiring |
-| Pitwall | `pitwall-v1.2.0` | the rest of `service_repair.rs`, `service_install.rs`, `packs.rs`, `tray.rs`/`tray_model.rs`, `check-icons.mjs`, login wiring |
-| Debrief | `debrief-v1.2.0` | `chromium-driver`, the `debrief-ipc` parts, the `debrief-plugin-*` platform crates, the agent lock, and the shell move: window manager, launch plan, lifecycle, tray, commands, dialogs, menu, panels, health, notification centre, updater, start-up watchdog, settings schema, model download, prompted tools, UI copies, the dock, scripts |
+| Spotter | `spotter-v1.1.0` | `spotter-render`, `mail.rs`, `pack.rs`, `time.rs`, `schedule.rs`, `schedule-editor.ts`, `clipboard.ts`, `check-icons.mjs`, login wiring |
+| Pitwall | `pitwall-v1.2.0` | the rest of `service_repair.rs`, `service_install.rs`, `packs.rs`, the tray model types, `check-icons.mjs`, login wiring |
+| Debrief | `debrief-v1.2.0` | `chromium-driver`, the `debrief-ipc` parts, the `debrief-plugin-*` platform crates, the agent lock, and the shell move: window manager, launch plan, lifecycle, tray, commands, dialogs, menu, panels, health, notification centre, updater, start-up watchdog, settings schema, model download, prompted tools, the loopback HTTP clients, UI copies (palette, regions, locale and more), the dock, scripts |
 | Pacenotes, Sighter | `pacenotes-v1.0.0`, `sighter-v1.0.0` | `scripts/release/publish.mjs`, `scripts/export-diagrams.sh` |
 
 **The Pitwall 1.1 exception.** Pitwall 1.1 already uses the shared `parse_job`, so its copy is only the repair sequence
@@ -242,6 +258,6 @@ ADR it is one change: `crates/paddock-service/src/parse.rs` and the Dyno and Pit
 
 | WP | What | Size | When |
 |---|---|---|---|
-| WP-1 | C58 in `conformance/src/checks/C58-known-copies.mjs` plus the `copies` subcommand (modes a-c). Good and bad fixtures for each rule: a member touched alone; a test-only, manifest-only and whitespace-only change (no error); a waiver in a commit that does not touch the mechanism (ignored); `*` on a mechanism with three members (error); a wiring copy touched alone (no error); a planned canonical (not required; tag message names it); a dropped entry with and without its files and with `Copies-removed`; a moved `delete_by` with and without `Copies-date`; an expired copy at a tag; a stale entry; an unknown owner; a crate-root glob. Wiring: mode a in the `--app paddock` run, mode b in the plan job and the steward's pre-push, mode c in the steward's pre-tag step and the app release tag step | 2.5 d | right after the Dyno tag |
+| WP-1 | C58 in `conformance/src/checks/C58-known-copies.mjs` plus the `copies` subcommand (modes a-c). Good and bad fixtures for each rule: a member touched alone; a test-only, manifest-only and whitespace-only change (no error); a waiver in a commit that does not touch the mechanism (ignored); `*` on a mechanism with three members (error); a wiring copy touched alone (no error); a planned canonical (not required; tag message names it); a dropped entry with and without its files and with `Copies-removed`; a moved `delete_by` with and without `Copies-date`, with `approved: coordinator` on a later release line (error) and `approved: user` (passes); a copy narrowed to items whose items are gone while the file stays (gone at the tag); an expired copy at a tag; a stale entry; an unknown owner; a crate-root glob. Wiring: mode a in the `--app paddock` run, mode b in the plan job and the steward's pre-push, mode c in the steward's pre-tag step and the app release tag step | 2.5 d | right after the Dyno tag |
 | WP-2 | `fix/service-stale-shared`: the shared `stale()` and `plan()` fix in `paddock-service` with the Dyno and Pitcrew copies, test first with an untrimmed real `launchctl print` | 0.5 d | before the Pitwall 1.1 tag |
 | WP-3 | Each owner's deletions by its `delete_by` tag, through the app's normal work packages | per app | per tag |
