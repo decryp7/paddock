@@ -5,10 +5,12 @@ import { KNOWN_CAUSE_CODES } from './service-status-text';
 // can produce, so a new emitter cannot hide from the scan. Read from disk; the repo root is found by walking up to `crates/`.
 // Follow-up (docs/plans/shared-next.md): declare the codes once in Rust and generate the TypeScript union.
 
-interface NodeFs {
+/** What the source listing needs: one directory read that already says which entries are folders (no stat per entry). */
+interface ListFs {
+  readdirSync(path: string, options: { withFileTypes: true }): { name: string; isDirectory(): boolean }[];
+}
+interface NodeFs extends ListFs {
   readFileSync(path: string, encoding: 'utf8'): string;
-  readdirSync(path: string): string[];
-  statSync(path: string): { isDirectory(): boolean };
   existsSync(path: string): boolean;
 }
 const nodeFs = (): Promise<NodeFs> => import(/* @vite-ignore */ ['node', 'fs'].join(':')) as Promise<NodeFs>;
@@ -26,11 +28,14 @@ const NON_LITERAL: Readonly<Record<string, readonly string[]>> = {
 /** Table entries no non-test Rust code emits, each with the reason it stays. */
 const TABLE_ONLY: Readonly<Record<string, string>> = {};
 
-function rustSources(fs: NodeFs, dir: string): string[] {
-  return fs.readdirSync(dir).flatMap((name) => {
+export function rustSources(fs: ListFs, dir: string): string[] {
+  // `withFileTypes` gives the entry kind from the directory read itself: a `statSync` per entry is a disk round trip each, which on a
+  // cold volume (a fresh worktree) took 4 s to 90 s over the ~2k Rust sources' folders and timed the spec out.
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const name = entry.name;
     if (name === 'target' || name === 'node_modules' || name === 'tests' || name === 'benches') return [];
     const path = `${dir}/${name}`;
-    if (fs.statSync(path).isDirectory()) return rustSources(fs, path);
+    if (entry.isDirectory()) return rustSources(fs, path);
     return path.endsWith('.rs') && name !== 'tests.rs' ? [path] : [];
   });
 }
@@ -54,6 +59,24 @@ export function withoutTestModules(text: string): string {
 }
 
 describe('health cause codes', () => {
+  it('lists Rust sources without a stat per entry and without entering skipped folders', () => {
+    const tree: Record<string, { name: string; dir: boolean }[]> = {
+      r: [{ name: 'a.rs', dir: false }, { name: 'tests', dir: true }, { name: 'target', dir: true }, { name: 'src', dir: true }, { name: 'x.ts', dir: false }],
+      'r/src': [{ name: 'b.rs', dir: false }, { name: 'tests.rs', dir: false }, { name: 'sub', dir: true }],
+      'r/src/sub': [{ name: 'c.rs', dir: false }],
+    };
+    const read: string[] = [];
+    const fake = {
+      readdirSync: (dir: string, o: { withFileTypes: true }) => {
+        expect(o.withFileTypes).toBe(true);
+        read.push(dir);
+        return (tree[dir] ?? []).map((e) => ({ name: e.name, isDirectory: () => e.dir }));
+      },
+    };
+    expect(rustSources(fake, 'r')).toEqual(['r/a.rs', 'r/src/b.rs', 'r/src/sub/c.rs']);
+    expect(read).toEqual(['r', 'r/src', 'r/src/sub']);
+  });
+
   it('strips only test modules', () => {
     const src = 'a(); #[cfg(test)] mod t { fn x() { b(); } } c();';
     expect(withoutTestModules(src)).toBe('a();  c();');
