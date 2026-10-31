@@ -7,6 +7,7 @@ import { MockPopover } from '../../core/mock/mock-popover';
 import type { PopoverWidget } from '../../core/generated/widgets';
 import { appProviders, makeMock, NOW, settle, text } from '../../../testing/test-helpers';
 import { ClockService } from '../../core/clock.service';
+import { TrayWidgetsStore } from '../../state/tray-widgets.store';
 import { WidgetSet } from './widget-set';
 
 const ready = (value: PopoverValue): PopoverState => ({ state: 'ready', value, asOf: NOW, staleSince: null });
@@ -21,7 +22,7 @@ function values(states: PopoverState[]): PopoverValues {
 }
 
 const FULL = values([
-  ready({ kind: 'recentChanges', rows: [{ id: 'w1', name: 'Nightly build', version: 'R3.10.00T32', firstSeenMs: NOW - 3_600_000, unseen: true }, { id: 'w2', name: 'Tool', version: '1.2.0', firstSeenMs: NOW - 86_400_000, unseen: false }], more: 2 }),
+  ready({ kind: 'recentChanges', rows: [{ id: 'w1', name: 'Nightly build', version: 'R3.10.00T32', firstSeenMs: NOW - 3_600_000, unseen: true }, { id: 'w2', name: 'Tool', version: '1.2.0', firstSeenMs: NOW - 86_400_000, unseen: false }], more: 2, unseen: 1 }),
   ready({
     kind: 'watchedSites',
     total: 6,
@@ -43,7 +44,7 @@ const FULL = values([
   imports: [PdWidgetArea, WidgetSet],
   template: `
     <sp-widget-set #set (run)="ran.push($event)" />
-    <pd-widget-area [placements]="view().layout.placements" [catalogue]="view().catalogue" [values]="vals()" [templates]="set.widgets()" [now]="now" (action)="ran.push($event)" />
+    <pd-widget-area [placements]="view().layout.placements" [catalogue]="view().catalogue" [values]="vals()" [templates]="set.widgets()" [meta]="set.meta" [now]="now" (action)="ran.push($event)" />
   `,
 })
 class Host {
@@ -56,6 +57,7 @@ class Host {
 async function make(vals: PopoverValues | null = FULL) {
   TestBed.configureTestingModule({ providers: appProviders(makeMock()) });
   TestBed.inject(ClockService).set(NOW);
+  await TestBed.inject(TrayWidgetsStore).load(); // the loading twins' rows come from the engine's shape
   const f = TestBed.createComponent(Host);
   f.componentInstance.vals.set(vals);
   await settle(f);
@@ -92,7 +94,8 @@ describe('Spotter widget set', () => {
     expect(changes).toContain('R3.10.00');
     expect(changes).toContain('New');
     expect(changes).toContain('1 h');
-    expect(changes).toContain('+2 more in Spotter');
+    expect(changes, 'the head says how many are new').toContain('1 new');
+    expect(text(frames()[2]!), 'and how many are failing').toContain('1 failing');
   });
 
   it('opens the watch of a row, and retries a failing watch', async () => {
@@ -159,7 +162,7 @@ describe('Spotter widget set', () => {
   });
 
   it('keeps empty, working and error states in the frame, with the next step as a button', async () => {
-    const empty: PopoverState = { state: 'empty', title: 'See your watches here', detail: 'No watches yet.', next: { action: { type: 'addWatch' }, label: 'Add a watch' } };
+    const empty: PopoverState = { state: 'empty', title: 'See your watches here', detail: 'No watches yet.', next: { action: { type: 'addWatch' }, label: 'Add a watch' }, calm: false };
     const working: PopoverState = { state: 'working', title: 'Checking now', phase: 'Checking watches', progress: { count: { done: 2, unit: 'watches' } }, last: null, cancel: null };
     const error: PopoverState = { state: 'error', title: "Couldn't read this", cause: 'The engine did not answer.', next: { action: { type: 'checkAll' }, label: 'Retry' } };
     const { frames, ran, f } = await make(values([empty, error, working, empty, empty]));
@@ -171,5 +174,20 @@ describe('Spotter widget set', () => {
     Array.from(frames()[1]!.querySelectorAll('button')).find((b) => text(b).includes('Retry'))!.click();
     await settle(f);
     expect(ran).toEqual([{ type: 'addWatch' }, { type: 'checkAll' }]);
+  });
+
+  it('draws the all-good check row only when the engine says the empty state is calm', async () => {
+    const calmState = (calm: boolean): PopoverState => ({ state: 'empty', title: 'No failures', detail: 'Last checked 12 min ago.', next: { action: { type: 'openWatches' }, label: 'Open watches' }, calm });
+    const states = (calm: boolean) => {
+      const base = FULL.placements.map((p) => p.state);
+      base[2] = calmState(calm);
+      return values(base);
+    };
+    const calm = await make(states(true));
+    expect(calm.frames()[2]!.querySelector('.pd-w-calm'), 'calm: the check row').not.toBeNull();
+    expect(text(calm.frames()[2]!)).toContain('Last checked 12 min ago.');
+    TestBed.resetTestingModule();
+    const notCalm = await make(states(false));
+    expect(notCalm.frames()[2]!.querySelector('.pd-w-calm'), 'not calm: no check row').toBeNull();
   });
 });

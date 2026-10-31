@@ -27,6 +27,7 @@ import type {
   WatchSummary,
 } from './api.types';
 import type { PopoverEdit, PopoverValues, PopoverView } from './widgets.types';
+import type { LoadingRows } from './generated/widgets';
 
 /**
  * Everything the UI asks the backend. Components never call Tauri directly: they get this through DI — the real

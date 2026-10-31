@@ -1,0 +1,459 @@
+{
+  "nowMs": 1800000000000,
+  "scenarios": {
+    "demo": {
+      "byKind": {
+        "failures": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "failures",
+            "more": 1,
+            "rows": [
+              {
+                "failures": 3,
+                "id": "w-6",
+                "kind": "unreachable",
+                "message": "gitlab.example did not answer within 20 seconds. It will be tried again in 15 minutes.",
+                "name": "Orbit server"
+              }
+            ]
+          }
+        },
+        "nextCheck": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "alsoDue": 1,
+            "atMs": 1800000900000,
+            "id": "w-6",
+            "kind": "nextCheck",
+            "name": "Orbit server"
+          }
+        },
+        "notifications": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "notifications",
+            "mode": {
+              "kind": "on"
+            }
+          }
+        },
+        "quietHours": {
+          "calm": false,
+          "detail": "No quiet hours are set.",
+          "next": {
+            "action": {
+              "type": "openSettings"
+            },
+            "label": "Set quiet hours"
+          },
+          "state": "empty",
+          "title": "Mute notifications overnight"
+        },
+        "recentChanges": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "recentChanges",
+            "more": 7,
+            "rows": [
+              {
+                "firstSeenMs": 1799999940000,
+                "id": "w-1",
+                "name": "Orbit API image",
+                "unseen": true,
+                "version": "2.2.0"
+              }
+            ],
+            "unseen": 4
+          }
+        },
+        "watchedSites": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "watchedSites",
+            "more": 4,
+            "rows": [
+              {
+                "id": "w-6",
+                "name": "Orbit server",
+                "state": "attention",
+                "version": "1.0.0"
+              },
+              {
+                "id": "w-7",
+                "name": "Vendor registry",
+                "state": "attention",
+                "version": "1.0.0"
+              },
+              {
+                "id": "w-1",
+                "name": "Orbit API image",
+                "state": "new",
+                "version": "2.2.0"
+              },
+              {
+                "id": "w-2",
+                "name": "tinyparse",
+                "state": "new",
+                "version": "2.1.0"
+              }
+            ],
+            "total": 8
+          }
+        }
+      },
+      "noticeWithoutNotificationsWidget": null
+    },
+    "empty": {
+      "byKind": {
+        "failures": {
+          "calm": false,
+          "detail": "No watches yet.",
+          "next": {
+            "action": {
+              "type": "addWatch"
+            },
+            "label": "Add a watch"
+          },
+          "state": "empty",
+          "title": "See failures here"
+        },
+        "nextCheck": {
+          "calm": false,
+          "detail": "No watches yet.",
+          "next": {
+            "action": {
+              "type": "addWatch"
+            },
+            "label": "Add a watch"
+          },
+          "state": "empty",
+          "title": "See when Spotter looks next"
+        },
+        "notifications": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "notifications",
+            "mode": {
+              "kind": "on"
+            }
+          }
+        },
+        "quietHours": {
+          "calm": false,
+          "detail": "No quiet hours are set.",
+          "next": {
+            "action": {
+              "type": "openSettings"
+            },
+            "label": "Set quiet hours"
+          },
+          "state": "empty",
+          "title": "Mute notifications overnight"
+        },
+        "recentChanges": {
+          "calm": false,
+          "detail": "No watches yet.",
+          "next": {
+            "action": {
+              "type": "addWatch"
+            },
+            "label": "Add a watch"
+          },
+          "state": "empty",
+          "title": "See new releases here"
+        },
+        "watchedSites": {
+          "calm": false,
+          "detail": "No watches yet.",
+          "next": {
+            "action": {
+              "type": "addWatch"
+            },
+            "label": "Add a watch"
+          },
+          "state": "empty",
+          "title": "See your watches here"
+        }
+      },
+      "noticeWithoutNotificationsWidget": null
+    },
+    "worst": {
+      "byKind": {
+        "failures": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "failures",
+            "more": 3,
+            "rows": [
+              {
+                "failures": 7,
+                "id": "w-1",
+                "kind": "needsYou",
+                "message": "The page asks for a login before it shows the download. Open it, sign in, then check again.",
+                "name": "Vendor download page"
+              }
+            ]
+          }
+        },
+        "nextCheck": {
+          "cancel": null,
+          "last": {
+            "alsoDue": 3,
+            "atMs": 1800000900000,
+            "id": "w-4",
+            "kind": "nextCheck",
+            "name": "Internal mirror"
+          },
+          "phase": "Checking watches",
+          "progress": {
+            "count": {
+              "done": 1,
+              "unit": "watch"
+            }
+          },
+          "state": "working",
+          "title": "Checking now"
+        },
+        "notifications": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "notifications",
+            "mode": {
+              "kind": "paused",
+              "untilMs": 1800005700000
+            }
+          }
+        },
+        "quietHours": {
+          "calm": false,
+          "detail": "No quiet hours are set.",
+          "next": {
+            "action": {
+              "type": "openSettings"
+            },
+            "label": "Set quiet hours"
+          },
+          "state": "empty",
+          "title": "Mute notifications overnight"
+        },
+        "recentChanges": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "recentChanges",
+            "more": 5,
+            "rows": [
+              {
+                "firstSeenMs": 1799999940000,
+                "id": "w-5",
+                "name": "Orbit API image",
+                "unseen": true,
+                "version": "2.2.0"
+              }
+            ],
+            "unseen": 2
+          }
+        },
+        "watchedSites": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "watchedSites",
+            "more": 2,
+            "rows": [
+              {
+                "id": "w-1",
+                "name": "Vendor download page",
+                "state": "attention",
+                "version": "1.0.0"
+              },
+              {
+                "id": "w-2",
+                "name": "Orbit server",
+                "state": "attention",
+                "version": "1.0.0"
+              },
+              {
+                "id": "w-3",
+                "name": "Vendor registry",
+                "state": "attention",
+                "version": "1.0.0"
+              },
+              {
+                "id": "w-4",
+                "name": "Internal mirror",
+                "state": "attention",
+                "version": "1.0.0"
+              }
+            ],
+            "total": 6
+          }
+        }
+      },
+      "noticeWithoutNotificationsWidget": {
+        "action": {
+          "action": {
+            "type": "resumeNotifications"
+          },
+          "label": "Resume notifications"
+        },
+        "detail": "Paused for about an hour more.",
+        "title": "Notifications are paused",
+        "tone": "info"
+      }
+    }
+  },
+  "shape": [
+    {
+      "kind": "watchedSites",
+      "rows": 4
+    },
+    {
+      "kind": "recentChanges",
+      "rows": 1
+    },
+    {
+      "kind": "nextCheck",
+      "rows": 0
+    },
+    {
+      "kind": "quietHours",
+      "rows": 0
+    },
+    {
+      "kind": "failures",
+      "rows": 1
+    },
+    {
+      "kind": "notifications",
+      "rows": 0
+    }
+  ],
+  "view": {
+    "builtinPresets": [],
+    "canUndo": false,
+    "catalogue": {
+      "kinds": [
+        {
+          "icon": "sp:watches",
+          "kind": "watchedSites",
+          "maxInstances": 1,
+          "refresh": "onChange",
+          "spans": [
+            2
+          ],
+          "summary": "Your watches and how each one is doing",
+          "title": "Watched sites"
+        },
+        {
+          "icon": "sp:history",
+          "kind": "recentChanges",
+          "maxInstances": 1,
+          "refresh": "onChange",
+          "spans": [
+            2
+          ],
+          "summary": "The newest releases Spotter found",
+          "title": "Recent changes"
+        },
+        {
+          "icon": "sp:clock",
+          "kind": "nextCheck",
+          "maxInstances": 1,
+          "refresh": "onChange",
+          "spans": [
+            1,
+            2
+          ],
+          "summary": "Which watch is checked next, and when",
+          "title": "Next check"
+        },
+        {
+          "icon": "sp:moon",
+          "kind": "quietHours",
+          "maxInstances": 1,
+          "refresh": "onChange",
+          "spans": [
+            1,
+            2
+          ],
+          "summary": "When notifications wait",
+          "title": "Quiet hours"
+        },
+        {
+          "icon": "sp:alert",
+          "kind": "failures",
+          "maxInstances": 1,
+          "refresh": "onChange",
+          "spans": [
+            2
+          ],
+          "summary": "Watches that could not be checked, with Retry",
+          "title": "Failures"
+        },
+        {
+          "icon": "sp:bell",
+          "kind": "notifications",
+          "maxInstances": 1,
+          "refresh": "onChange",
+          "spans": [
+            1,
+            2
+          ],
+          "summary": "Whether notifications are on, paused or off",
+          "title": "Notifications"
+        }
+      ],
+      "surface": {
+        "columns": 2,
+        "id": "popover",
+        "maxPlacements": 6,
+        "maxUserPresets": 0,
+        "minPlacements": 0,
+        "noun": "popup"
+      }
+    },
+    "editable": true,
+    "layout": {
+      "placements": [
+        {
+          "id": "recent-changes",
+          "span": 2,
+          "widget": "recentChanges"
+        },
+        {
+          "id": "failures",
+          "span": 2,
+          "widget": "failures"
+        },
+        {
+          "id": "next-check",
+          "span": 2,
+          "widget": "nextCheck"
+        }
+      ],
+      "presets": [],
+      "version": 1
+    },
+    "notes": []
+  }
+}

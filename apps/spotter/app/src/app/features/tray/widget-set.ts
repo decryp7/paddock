@@ -2,7 +2,9 @@ import { ChangeDetectionStrategy, Component, computed, inject, output, viewChild
 import { MatIcon } from '@angular/material/icon';
 import { PdSkeleton, PdWidget } from '@decryp7/paddock-ui/widgets';
 import { ClockService } from '../../core/clock.service';
-import type { FailureKind, NotificationMode, PopoverValue, SiteState, WidgetActionId } from '../../core/generated/widgets';
+import type { PopoverState } from '../../core/widgets.types';
+import { TrayWidgetsStore } from '../../state/tray-widgets.store';
+import type { FailureKind, NotificationMode, PopoverValue, PopoverWidget, SiteState, WidgetActionId } from '../../core/generated/widgets';
 import { formatShortDateTime } from '../../shared/format';
 import { AgoShortPipe, UntilShortPipe } from '../../shared/ui/ago.pipe';
 import { Version } from '../../shared/ui/version';
@@ -27,9 +29,6 @@ const FAILURE: Record<FailureKind, string> = {
   failed: 'Check failed',
 };
 
-/** Placeholder rows of the loading twin: the same rows as the ready widget, so the loading height is the ready height. */
-const PLACEHOLDERS = [null, null, null] as const;
-
 /**
  * Spotter's templates for the popup's widget kinds (family ADR 0035): one `ng-template` per kind, drawn by `pd-widget-area`
  * inside a `pd-widget-frame`, which owns the head and the loading, working, empty, error and stale states. The same set draws
@@ -43,7 +42,7 @@ const PLACEHOLDERS = [null, null, null] as const;
   template: `
     <ng-template pdWidget="watchedSites" [pdWidgetOf]="sites" let-v>
       <ul class="rows">
-        @for (r of v?.rows ?? placeholders; track $index) {
+        @for (r of v?.rows ?? placeholders('watchedSites'); track $index) {
           <li>
             <button type="button" class="row" [disabled]="!r" [attr.aria-label]="r ? r.name + ', ' + site(r.state).word + ', open' : null" (click)="r && run.emit({ type: 'openWatch', id: r.id })">
               <mat-icon class="ic" [class]="'ic ' + (r ? 'st-' + r.state : '')" [svgIcon]="r ? site(r.state).icon : 'sp:watches'" aria-hidden="true" pdSkeleton />
@@ -51,6 +50,7 @@ const PLACEHOLDERS = [null, null, null] as const;
               <span class="meta truncate" pdSkeleton>
                 {{ r ? site(r.state).word : 'Up to date' }}@if (r?.version; as ver) { · <sp-ver [value]="ver" /> }
               </span>
+              <mat-icon class="chev" svgIcon="sp:chevron-right" aria-hidden="true" />
             </button>
           </li>
         }
@@ -62,7 +62,7 @@ const PLACEHOLDERS = [null, null, null] as const;
 
     <ng-template pdWidget="recentChanges" [pdWidgetOf]="changes" let-v>
       <ul class="rows">
-        @for (r of v?.rows ?? placeholders; track $index) {
+        @for (r of v?.rows ?? placeholders('recentChanges'); track $index) {
           <li>
             <button type="button" class="row" [disabled]="!r" [attr.aria-label]="r ? r.name + ' ' + r.version + (r.unseen ? ', new' : '') + ', open' : null" (click)="r && run.emit({ type: 'openWatch', id: r.id })">
               <mat-icon class="ic" [class]="'ic ' + (r?.unseen ? 'st-new' : '')" [svgIcon]="r?.unseen ? 'sp:sparkle' : 'sp:history'" aria-hidden="true" pdSkeleton />
@@ -70,19 +70,18 @@ const PLACEHOLDERS = [null, null, null] as const;
               <span class="meta truncate" pdSkeleton>
                 @if (r) { <sp-ver [value]="r.version" /> · @if (r.unseen) {New · }{{ r.firstSeenMs | agoShort }} } @else { 1.2.0 · 3 h }
               </span>
+              <mat-icon class="chev" svgIcon="sp:chevron-right" aria-hidden="true" />
             </button>
           </li>
         }
       </ul>
-      @if (v && v.more > 0) {
-        <p class="more">+{{ v.more }} more in Spotter</p>
-      }
     </ng-template>
 
     <ng-template pdWidget="nextCheck" [pdWidgetOf]="next" let-v>
       <button type="button" class="block" [disabled]="!v" [attr.aria-label]="v ? 'Next check: ' + v.name + ' in ' + (v.atMs | untilShort) + ', open' : null" (click)="v && run.emit({ type: 'openWatch', id: v.id })">
-        <span class="big" pdSkeleton>{{ v ? (v.atMs | untilShort) : '12 min' }}</span>
+        <span class="big" pdSkeleton>In {{ v ? (v.atMs | untilShort) : '12 min' }}</span>
         <span class="meta truncate" pdSkeleton>{{ v?.name ?? 'Watch name' }}@if (v && v.alsoDue > 0) { · +{{ v.alsoDue }} more }</span>
+        <mat-icon class="chev" svgIcon="sp:chevron-right" aria-hidden="true" />
       </button>
     </ng-template>
 
@@ -95,14 +94,15 @@ const PLACEHOLDERS = [null, null, null] as const;
       </div>
     </ng-template>
 
-    <ng-template pdWidget="failures" [pdWidgetCalm]="true" [pdWidgetOf]="failures" let-v>
+    <ng-template pdWidget="failures" [pdWidgetOf]="failures" let-v>
       <ul class="rows">
-        @for (r of v?.rows ?? placeholders; track $index) {
+        @for (r of v?.rows ?? placeholders('failures'); track $index) {
           <li class="fail">
             <button type="button" class="row" [disabled]="!r" [attr.aria-label]="r ? r.name + ', ' + failure(r.kind) + ', open' : null" (click)="r && run.emit({ type: 'openWatch', id: r.id })">
               <mat-icon class="ic st-attention" svgIcon="sp:alert" aria-hidden="true" pdSkeleton />
               <span class="name truncate" pdSkeleton>{{ r?.name ?? 'Watch name' }}</span>
               <span class="meta truncate" pdSkeleton>{{ r ? failure(r.kind) + ': ' + r.message : 'Check failed: the place did not answer' }}</span>
+              <mat-icon class="chev" svgIcon="sp:chevron-right" aria-hidden="true" />
             </button>
             <button type="button" class="retry" [disabled]="!r" [attr.aria-label]="r ? 'Retry check of ' + r.name : null" (click)="r && run.emit({ type: 'retryCheck', id: r.id })" pdSkeleton>
               <mat-icon class="ic-inline" svgIcon="sp:refresh" aria-hidden="true" />Retry
@@ -110,9 +110,6 @@ const PLACEHOLDERS = [null, null, null] as const;
           </li>
         }
       </ul>
-      @if (v && v.more > 0) {
-        <p class="more">+{{ v.more }} more in Spotter</p>
-      }
     </ng-template>
 
     <ng-template pdWidget="notifications" [pdWidgetOf]="notices" let-v>
@@ -142,12 +139,14 @@ const PLACEHOLDERS = [null, null, null] as const;
     }
     .row {
       display: grid;
-      grid-template-columns: 16px minmax(0, 1fr);
+      grid-template-columns: 16px minmax(0, 1fr) 14px;
       column-gap: var(--pd-space-2);
       align-items: center;
-      width: 100%;
-      min-height: 32px;
-      padding: var(--pd-space-1) var(--pd-space-1);
+      min-height: 30px;
+      /* The icon sits on the widget head's left edge; the hover tint reaches past it. */
+      width: calc(100% + 2 * var(--pd-space-1));
+      margin: 0 calc(-1 * var(--pd-space-1));
+      padding: 1px var(--pd-space-1);
       border: 0;
       border-radius: var(--pd-radius-control);
       background: transparent;
@@ -170,6 +169,18 @@ const PLACEHOLDERS = [null, null, null] as const;
       width: 16px;
       height: 16px;
       color: var(--pd-text-muted);
+    }
+    .chev {
+      grid-column: 3;
+      grid-row: 1 / span 2;
+      width: 14px;
+      height: 14px;
+      color: var(--pd-text-subtle);
+    }
+    button.block .chev {
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      align-self: center;
     }
     .name {
       font-weight: var(--pd-weight-medium);
@@ -197,7 +208,8 @@ const PLACEHOLDERS = [null, null, null] as const;
     }
     .block {
       display: grid;
-      gap: 2px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 0 var(--pd-space-2);
       width: 100%;
       padding: 0;
       border: 0;
@@ -211,7 +223,13 @@ const PLACEHOLDERS = [null, null, null] as const;
       background: var(--pd-hover);
     }
     .block .meta {
-      grid-column: auto;
+      grid-column: 1;
+    }
+    .block .big {
+      grid-column: 1;
+    }
+    .block > :not(.chev):not(.big):not(.meta) {
+      grid-column: 1 / -1;
     }
     .big {
       font-size: var(--pd-text-title);
@@ -263,13 +281,28 @@ export class WidgetSet {
   readonly widgets = computed(() => this.dirs() as readonly PdWidget<PopoverValue>[]);
 
   // Type witnesses for the templates' `let-v` (never read).
+  /** The head's meta text of a ready widget ("3 failing", "8 new"): the engine's counts, worded. */
+  readonly meta = (_id: string, state: PopoverState): string | null => {
+    if (state.state !== 'ready') return null;
+    const v = state.value;
+    if (v.kind === 'failures') return `${v.rows.length + v.more} failing`;
+    if (v.kind === 'recentChanges' && v.unseen > 0) return `${v.unseen} new`;
+    return null;
+  };
+
   protected readonly sites: Of<'watchedSites'> | null = null;
   protected readonly changes: Of<'recentChanges'> | null = null;
   protected readonly next: Of<'nextCheck'> | null = null;
   protected readonly quiet: Of<'quietHours'> | null = null;
   protected readonly failures: Of<'failures'> | null = null;
   protected readonly notices: Of<'notifications'> | null = null;
-  protected readonly placeholders = PLACEHOLDERS;
+  private readonly store = inject(TrayWidgetsStore);
+
+  /** The placeholder rows of a kind's loading twin: as many as the engine says the ready widget draws, so a popup does not change height. */
+  protected placeholders(kind: PopoverWidget): null[] {
+    const rows = this.store.shape().find((s) => s.kind === kind)?.rows ?? 0;
+    return Array.from({ length: rows }, () => null);
+  }
 
   protected site(s: SiteState): { icon: string; word: string } {
     return SITE[s];

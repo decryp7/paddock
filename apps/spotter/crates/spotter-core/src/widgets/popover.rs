@@ -103,7 +103,7 @@ pub const SITE_ROWS: usize = 4;
 /// Rows Recent changes lists.
 pub const CHANGE_ROWS: usize = 1;
 /// Rows Failures lists.
-pub const FAILURE_ROWS: usize = 2;
+pub const FAILURE_ROWS: usize = 1;
 
 /// How many rows a widget draws when it has values: what its loading twin draws too, so loading and ready are the same
 /// height. The one source of the row limits (the engine truncates to these; the UI reads them from the engine).
@@ -176,11 +176,19 @@ mod tests {
         assert_eq!(shape.len(), 6);
         let rows = |k| shape.iter().find(|(w, _)| *w == k).unwrap().1;
         assert_eq!(
-            [rows(PopoverWidget::WatchedSites), rows(PopoverWidget::RecentChanges), rows(PopoverWidget::Failures)],
-            [4, 1, 2]
+            [
+                rows(PopoverWidget::WatchedSites),
+                rows(PopoverWidget::RecentChanges),
+                rows(PopoverWidget::Failures)
+            ],
+            [4, 1, 1]
         );
         assert_eq!(
-            [rows(PopoverWidget::NextCheck), rows(PopoverWidget::QuietHours), rows(PopoverWidget::Notifications)],
+            [
+                rows(PopoverWidget::NextCheck),
+                rows(PopoverWidget::QuietHours),
+                rows(PopoverWidget::Notifications)
+            ],
             [0, 0, 0]
         );
     }

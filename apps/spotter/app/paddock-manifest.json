@@ -180,6 +180,7 @@
         "mail_status",
         "open",
         "pause_notifications",
+        "popover_shape",
         "popover_values",
         "popover_view",
         "renderer_status",

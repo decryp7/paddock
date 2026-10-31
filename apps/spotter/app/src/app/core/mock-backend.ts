@@ -39,9 +39,11 @@ import { mockDescribe, mockSchedulePreview, mockScheduleProblems } from './mock/
 import { MockJobs } from './mock/mock-jobs';
 import { MockPopover } from './mock/mock-popover';
 import type { PopoverEdit, PopoverValues, PopoverView } from './widgets.types';
+import type { LoadingRows } from './generated/widgets';
+import { LOADING_SHAPE, type PopoverScenario } from './mock/mock-popover';
 import { MOCK_SCHEMES, mockExtraction, mockSuggest, mockTest, patternProblem } from './mock/mock-extraction';
 
-export type MockScenario = 'demo' | 'empty' | 'broken' | 'products';
+export type MockScenario = 'demo' | 'empty' | 'broken' | 'products' | 'worst';
 
 export interface MockOptions {
   scenario?: MockScenario;
@@ -262,7 +264,7 @@ export class MockBackend implements SpotterBackend {
 
   /** Test helper: delivers a pushed state to subscribers. */
   push(): void {
-    const p = { watches: this.summaries(), popover: this.popover.view(), popoverValues: this.popover.values(this.summaries(), this.settings, this.now()) };
+    const p = { watches: this.summaries(), popover: this.popover.view(), popoverValues: this.popover.values(this.popupScenario(), this.now()) };
     this.stateHandlers.forEach((h) => h(p));
   }
 
@@ -671,7 +673,16 @@ export class MockBackend implements SpotterBackend {
   }
 
   popoverValues(): Promise<PopoverValues> {
-    return this.call('popoverValues', () => this.popover.values(this.summaries(), this.settings, this.now()));
+    return this.call('popoverValues', () => this.popover.values(this.popupScenario(), this.now()));
+  }
+
+  popoverShape(): Promise<LoadingRows[]> {
+    return this.call('popoverShape', () => LOADING_SHAPE);
+  }
+
+  /** Which of the engine's recorded popup scenarios the popup shows: its own, or the demo one. */
+  private popupScenario(): PopoverScenario {
+    return this.scenario === 'empty' ? 'empty' : this.scenario === 'worst' ? 'worst' : 'demo';
   }
 
   getSettings(): Promise<Settings> {

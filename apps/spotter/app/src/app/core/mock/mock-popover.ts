@@ -1,32 +1,41 @@
-import type { KindInfo, Placement, PlacementState } from '@decryp7/paddock-ui/widgets';
-import type { CommandError, Settings, WatchSummary } from '../api.types';
-import type { PopoverValue, PopoverWidget, WidgetActionId } from '../generated/widgets';
+import type { KindInfo, Placement } from '@decryp7/paddock-ui/widgets';
+import type { CommandError } from '../api.types';
+import type { LoadingRows, PopoverWidget } from '../generated/widgets';
 import type { PopoverEdit, PopoverState, PopoverValues, PopoverView } from '../widgets.types';
+import fixtures from './popover-fixtures.json';
 
 /**
- * The mock's popup layout and values (browser development and tests only). It mimics the engine's contract with plausible
- * data and the edits the chooser sends; the Rust engine (`paddock-widgets`, `spotter-engine`'s `widgets`) is the reference.
+ * The mock's popup layout and values (browser development and tests only). It decides nothing: the catalogue, the default
+ * layout, the loading shape and every widget's state are what the Rust engine produced for the named scenarios
+ * (`popover-fixtures.json`, written by `spotter-engine`'s `widgets` tests and checked on every run), so the mock cannot drift
+ * from the engine. Only the layout edits the chooser sends are handled here, as the engine's `paddock-widgets` would.
  */
-const KINDS: KindInfo<PopoverWidget>[] = [
-  { kind: 'watchedSites', title: 'Watched sites', summary: 'Your watches and how each one is doing', icon: 'sp:watches', spans: [2], maxInstances: 1, refresh: 'onChange' },
-  { kind: 'recentChanges', title: 'Recent changes', summary: 'The newest releases Spotter found', icon: 'sp:history', spans: [2], maxInstances: 1, refresh: 'onChange' },
-  { kind: 'nextCheck', title: 'Next check', summary: 'Which watch is checked next, and when', icon: 'sp:clock', spans: [1, 2], maxInstances: 1, refresh: 'onChange' },
-  { kind: 'quietHours', title: 'Quiet hours', summary: 'When notifications wait', icon: 'sp:moon', spans: [1, 2], maxInstances: 1, refresh: 'onChange' },
-  { kind: 'failures', title: 'Failures', summary: 'Watches that could not be checked, with Retry', icon: 'sp:alert', spans: [2], maxInstances: 1, refresh: 'onChange' },
-  { kind: 'notifications', title: 'Notifications', summary: 'Whether notifications are on, paused or off', icon: 'sp:bell', spans: [1, 2], maxInstances: 1, refresh: 'onChange' },
-];
-const MAX = 6;
-/** Rows Recent changes and Failures list (the engine's `CHANGE_ROWS` and `FAILURE_ROWS`): one change and two failures keep the default popup within the family's 520 px. */
-const CHANGE_ROWS = 1;
-const FAILURE_ROWS = 2;
-/** The popup a fresh install shows (the Rust defaults, `PopoverCatalogue::defaults`): is everything fine, and what is next. */
-export const DEFAULTS: [number, PopoverWidget][] = [
-  [2, 'recentChanges'],
-  [2, 'failures'],
-  [2, 'nextCheck'],
-];
+export type PopoverScenario = 'demo' | 'empty' | 'worst';
+interface Fixture {
+  readonly nowMs: number;
+  readonly view: PopoverView;
+  readonly shape: LoadingRows[];
+  readonly scenarios: Record<PopoverScenario, { readonly byKind: Record<string, PopoverState>; readonly noticeWithoutNotificationsWidget: PopoverValues['notice'] }>;
+}
+const FIXTURE = fixtures as unknown as Fixture;
+const KINDS: KindInfo<PopoverWidget>[] = FIXTURE.view.catalogue.kinds as KindInfo<PopoverWidget>[];
+const MAX = FIXTURE.view.catalogue.surface.maxPlacements;
+/** The popup a fresh install shows, as the engine's defaults say. */
+export const DEFAULTS: [number, PopoverWidget][] = FIXTURE.view.layout.placements.map((p) => [p.span, p.widget]);
 /** The kinds of [`DEFAULTS`], in order: specs read the default popup from here, never a hand-written list. */
 export const DEFAULT_KINDS: PopoverWidget[] = DEFAULTS.map(([, kind]) => kind);
+/** How many rows each kind draws, loading or ready (the engine's). */
+export const LOADING_SHAPE: LoadingRows[] = FIXTURE.shape;
+
+/** Times in the fixtures are the engine's test clock's; the mock moves them to its own now. */
+const TIME_FIELDS = new Set(['asOf', 'staleSince', 'firstSeenMs', 'atMs', 'untilMs']);
+function rebase<T>(value: T, delta: number): T {
+  if (Array.isArray(value)) return value.map((v) => rebase(v, delta)) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, TIME_FIELDS.has(k) && typeof v === 'number' ? v + delta : rebase(v, delta)])) as T;
+  }
+  return value;
+}
 
 function refused(message: string): CommandError {
   return { code: 'badRequest', message, problems: [] };
@@ -97,49 +106,12 @@ export class MockPopover {
     return this.view();
   }
 
-  values(watches: WatchSummary[], settings: Settings, now: number): PopoverValues {
-    const ready = (value: PopoverValue): PopoverState => ({ state: 'ready', value, asOf: now, staleSince: null });
-    const empty = (title: string, detail: string, action: WidgetActionId, label: string): PopoverState => ({ state: 'empty', title, detail, next: { action, label } });
-    const failing = watches.filter((w) => !w.paused && !['pending', 'ok', 'noMatch'].includes(w.status.kind));
-    const found = watches.filter((w) => w.latest).sort((a, b) => (b.latest?.firstSeenMs ?? 0) - (a.latest?.firstSeenMs ?? 0));
-    const next = watches.filter((w) => !w.paused && w.nextCheckMs !== null).sort((a, b) => (a.nextCheckMs ?? 0) - (b.nextCheckMs ?? 0))[0];
-    const paused = settings.notificationsPausedUntilMs !== null && settings.notificationsPausedUntilMs > now;
-    const state = (kind: PopoverWidget): PopoverState => {
-      switch (kind) {
-        case 'watchedSites':
-          return watches.length === 0
-            ? empty('See your watches here', 'No watches yet.', { type: 'addWatch' }, 'Add a watch')
-            : ready({
-                kind: 'watchedSites',
-                total: watches.length,
-                rows: watches.slice(0, 4).map((w) => ({ id: w.id, name: w.name, state: w.paused ? 'paused' : w.checking ? 'checking' : failing.includes(w) ? 'attention' : w.unseen ? 'new' : 'ok', version: w.latest?.version ?? null })),
-                more: Math.max(0, watches.length - 4),
-              });
-        case 'recentChanges':
-          return found.length === 0
-            ? empty('See new releases here', 'Nothing found yet.', { type: 'checkAll' }, 'Check all now')
-            : ready({ kind: 'recentChanges', rows: found.slice(0, CHANGE_ROWS).map((w) => ({ id: w.id, name: w.name, version: w.latest?.version ?? '', firstSeenMs: w.latest?.firstSeenMs ?? 0, unseen: w.unseen })), more: Math.max(0, found.length - CHANGE_ROWS) });
-        case 'nextCheck':
-          return next
-            ? ready({ kind: 'nextCheck', id: next.id, name: next.name, atMs: next.nextCheckMs ?? now, alsoDue: 0 })
-            : empty('See when Spotter looks next', 'No check is scheduled yet.', { type: 'checkAll' }, 'Check all now');
-        case 'quietHours':
-          return settings.quietHours
-            ? ready({ kind: 'quietHours', start: settings.quietHours.start, end: settings.quietHours.end, active: false })
-            : empty('Mute notifications overnight', 'No quiet hours are set.', { type: 'openSettings' }, 'Set quiet hours');
-        case 'failures':
-          return failing.length === 0
-            ? empty('No failures', 'Every watch is fine.', { type: 'openWatches' }, 'Open watches')
-            : ready({ kind: 'failures', rows: failing.slice(0, FAILURE_ROWS).map((w) => ({ id: w.id, name: w.name, kind: 'failed', message: 'The check failed.', failures: w.failures })), more: Math.max(0, failing.length - FAILURE_ROWS) });
-        case 'notifications':
-          return ready({ kind: 'notifications', mode: !settings.notifications ? { kind: 'off' } : paused ? { kind: 'paused', untilMs: settings.notificationsPausedUntilMs ?? now } : { kind: 'on' } });
-      }
-    };
-    const placements: PlacementState<PopoverValue, WidgetActionId>[] = this.placements.map((p) => ({ id: p.id, state: state(p.widget) }));
-    const notice =
-      paused && !this.placements.some((p) => p.widget === 'notifications')
-        ? { tone: 'info' as const, title: 'Notifications are paused', detail: 'Paused for a while.', action: { action: { type: 'resumeNotifications' as const }, label: 'Resume notifications' } }
-        : null;
+  /** What the widgets show in a named scenario: the engine's output for it, for the placed kinds. */
+  values(scenario: PopoverScenario, now: number): PopoverValues {
+    const fx = FIXTURE.scenarios[scenario];
+    const delta = now - FIXTURE.nowMs;
+    const placements: PopoverValues['placements'] = this.placements.map((p) => ({ id: p.id, state: rebase(fx.byKind[p.widget]!, delta) }));
+    const notice = this.placements.some((p) => p.widget === 'notifications') ? null : rebase(fx.noticeWithoutNotificationsWidget, delta);
     return { notice, placements };
   }
 }
