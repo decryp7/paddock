@@ -4,7 +4,8 @@ import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { Notifier } from '../../shared/notifier';
 import { SettingsStore } from '../../state/settings.store';
-import { rememberSettingsAnchor, takeSettingsAnchor } from './settings-anchor';
+import { signal } from '@angular/core';
+import { SETTINGS_ANCHOR, type SettingsAnchor } from '@decryp7/paddock-ui/shell/settings/window';
 import { SettingsPage } from './settings-page';
 
 const NOW = 1_700_000_000_000;
@@ -88,17 +89,25 @@ describe('SettingsPage', () => {
     expect(card.querySelectorAll('dy-menu-bar-items .pd-wc-list')[0]!.querySelectorAll('li')).toHaveLength(2);
     expect(Object.keys(await mock.settings())).not.toContain('trayItems');
   });
-  it('opens at the section a widget button asked for, once', async () => {
-    const scroll = vi.fn();
-    Element.prototype.scrollIntoView = scroll;
-    rememberSettingsAnchor('popup-widgets');
-    const { f, el } = await make();
+  it('scrolls to the section the Settings window was asked for, and again when it is asked again', async () => {
+    Element.prototype.scrollIntoView = () => undefined;
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const anchor = signal<SettingsAnchor | null>({ id: 'popup-widgets', at: 1 });
+    const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
+    TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }, { provide: SETTINGS_ANCHOR, useValue: anchor }] });
+    const f = TestBed.createComponent(SettingsPage);
+    await settle(f);
     await vi.waitFor(() => {
       f.detectChanges();
       expect(scroll).toHaveBeenCalled();
     });
-    expect(scroll.mock.contexts[0]).toBe(el.querySelector('#popup-widgets'));
-    expect(takeSettingsAnchor()).toBeNull();
+    expect(scroll.mock.contexts.at(-1)).toBe((f.nativeElement as HTMLElement).querySelector('#popup-widgets'));
+    const times = scroll.mock.calls.length;
+    anchor.set({ id: 'popup-widgets', at: 2 });
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(scroll.mock.calls.length).toBeGreaterThan(times);
+    });
   });
   it('a rejected save keeps the draft and the bar and toasts the engine message', async () => {
     const { f, mock, el, saveButton } = await make();

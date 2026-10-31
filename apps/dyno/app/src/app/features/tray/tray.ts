@@ -51,7 +51,7 @@ import { MatButton, MatIconButton } from '@angular/material/button';
       <div slot="footer" class="foot">
         <span class="spacer"></span>
         <button type="button" matButton="filled" (click)="openMain()"><dy-icon name="arrow-right" /> Open Dyno</button>
-        <button type="button" matIconButton [matMenuTriggerFor]="more" aria-label="More actions" matTooltip="More actions" matTooltipPosition="left"><dy-icon name="more" /></button>
+        <button type="button" matIconButton class="more" #trigger="matMenuTrigger" [class.open]="trigger.menuOpen" [matMenuTriggerFor]="more" aria-label="More actions" matTooltip="More actions" matTooltipPosition="left"><dy-icon name="more" /></button>
         <mat-menu #more="matMenu" yPosition="above" xPosition="before">
           <button mat-menu-item type="button" (click)="run('customizeWidgets')"><dy-icon name="sliders" />Customize widgets…</button>
           <button mat-menu-item type="button" (click)="run('openSettings')"><dy-icon name="settings" />Settings…@if (settingsKey; as k) {<kbd aria-hidden="true">{{ k }}</kbd>}</button>
@@ -76,6 +76,8 @@ import { MatButton, MatIconButton } from '@angular/material/button';
     .grade-pill[data-tone='bad'] { background: var(--bad-soft); color: var(--bad); }
     /* The shared menu icon size: 16 px. */
     .mat-mdc-menu-item dy-icon { flex: none; width: 16px; height: 16px; --icon-size: 16px; margin: 0 12px 0 0; vertical-align: middle; }
+    /* The ⋯ trigger shows while its menu is open: a tint and a ring, so it is clear what the menu belongs to. */
+    .more.open { background: var(--pd-hover); box-shadow: inset 0 0 0 var(--pd-focus-width) var(--pd-focus-ring); }
     .sep { border: 0; border-top: 1px solid var(--pd-hairline); margin: 4px 0; }
     kbd { margin-left: auto; padding: 0 4px; border: 1px solid var(--pd-border-strong); border-radius: 4px; font: inherit; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .foot { display: flex; align-items: center; gap: var(--sp-1); flex: 1; }

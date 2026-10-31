@@ -1,9 +1,9 @@
 import { inject, provideAppInitializer } from '@angular/core';
 import { Router } from '@angular/router';
-import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
+import { SETTINGS_DIALOG_ID } from '@decryp7/paddock-ui/shell/settings';
 import { BACKEND, type DynoBackend } from '../core/backend';
 import type { Navigate, Page, SettingsSection } from '../core/generated/widgets';
-import { rememberSettingsAnchor } from '../features/settings/settings-anchor';
 
 /** The main window's route for each page a widget can open (`dyno://navigate`). */
 export const PAGE_ROUTE: Readonly<Record<Page, string>> = {
@@ -59,7 +59,10 @@ export function followNavigation(backend: Pick<DynoBackend, 'onNavigate' | 'take
 export function provideWidgetNavigation() {
   return provideAppInitializer(() => {
     const router = inject(Router);
-    const openSettings = inject(OPEN_SETTINGS, { optional: true });
-    followNavigation(inject(BACKEND), { route: (url) => void router.navigateByUrl(url), settings: openSettings ? (page, anchor) => (rememberSettingsAnchor(anchor), openSettings(page)) : null });
+    const dialogs = inject(DialogService);
+    // Opening Settings again while it is open points the open window at the section (the dialog service delivers the inputs).
+    const openSettings = (page: string, anchor: string | null): void =>
+      void dialogs.open(SETTINGS_DIALOG_ID, { inputs: { page, ...(anchor ? { anchor: { id: anchor, at: Date.now() } } : {}) } });
+    followNavigation(inject(BACKEND), { route: (url) => void router.navigateByUrl(url), settings: openSettings });
   });
 }

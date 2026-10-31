@@ -392,6 +392,23 @@ describe('dialogs in the page (browser build)', () => {
     before.remove();
   });
 
+  it('points an open modeless dialog at new inputs when it is opened again, and returns the same ref', async () => {
+    const { service, root, settle } = await setup();
+    const first = service.open(MODELESS, { inputs: { who: 'Ada', n: 1 } });
+    await settle();
+    expect(root.querySelector('[data-testid=who]')!.textContent).toBe('Ada 1');
+    const again = service.open(MODELESS, { inputs: { who: 'Grace', n: 1 } });
+    await settle();
+    expect(again).toBe(first);
+    expect(root.querySelectorAll('[data-dialog="t.form"]')).toHaveLength(1);
+    expect(root.querySelector('[data-testid=who]')!.textContent).toBe('Grace 1');
+    // Opened again with no inputs it only comes forward: what it shows stays.
+    service.open(MODELESS);
+    await settle();
+    expect(root.querySelector('[data-testid=who]')!.textContent).toBe('Grace 1');
+    first.dismiss();
+  });
+
   it('stays hidden until it is ready, and shows Loading with its Cancel at the show deadline', async () => {
     const never = d('t.slow', { load: () => new Promise(() => undefined) });
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideContributions({ dialogs: [never] }), provideDialogs()] });

@@ -403,9 +403,12 @@ describe('dy-disk-map-page', () => {
     await settle(r.f);
     await vi.advanceTimersByTimeAsync(0);
     r.store.receive({ ...r.store.status()!, seq: 70, state: 'running' });
-    await settle(r.f);
-    expect(arc(r.el, 'pending')).not.toBeNull();
-    expect(arc(r.el, 'hidden')).toBeNull();
+    // The sunburst draws after the status arrives: wait for the ghost arc, not for a fixed number of ticks.
+    await vi.waitFor(async () => {
+      await settle(r.f);
+      expect(arc(r.el, 'pending')).not.toBeNull();
+      expect(arc(r.el, 'hidden')).toBeNull();
+    });
     expect(r.el.querySelector('pd-sunburst .pd-fade')).toBeNull();
   });
 
