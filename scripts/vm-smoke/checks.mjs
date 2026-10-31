@@ -31,6 +31,22 @@ export class Check {
     return p.replace(/^~/, await this.home_());
   }
 
+  /**
+   * The log file to read: `spec` is a path or a list of candidates (a `*` in the file name is a glob). The first candidate with a
+   * file wins, the newest match of a glob; when none exists yet the first candidate is returned as written, so a size read of it is 0.
+   */
+  async logPath(spec) {
+    const list = Array.isArray(spec) ? spec : [spec];
+    for (const candidate of list) {
+      const full = await this.path(candidate);
+      const slash = full.lastIndexOf('/');
+      const target = `${sq(full.slice(0, slash))}/${full.slice(slash + 1).replace(/[^A-Za-z0-9_.*-]/g, '')}`;
+      const found = (await this.g.exec(`ls -t ${target} 2>/dev/null`)).stdout.split('\n').map((l) => l.trim()).find(Boolean);
+      if (found) return found;
+    }
+    return await this.path(list[0]);
+  }
+
   async snapshot() {
     const r = await this.g.exec('ps -axww -o pid=,ppid=,etime=,lstart=,command=');
     const procs = parsePs(r.stdout);
@@ -280,7 +296,7 @@ export class Check {
   async logs() {
     const evidence = [];
     for (const l of this.config.logs ?? []) {
-      const r = await this.g.exec(`tail -n 40 ${sq(await this.path(l))} 2>&1`);
+      const r = await this.g.exec(`tail -n 40 ${sq(await this.logPath(l))} 2>&1`);
       evidence.push(`--- ${l}`, ...(r.stdout.trim() ? r.stdout.trimEnd().split('\n') : ['(empty or absent)']));
     }
     return { title: 'Logs at the end', status: 'info', summary: 'last 40 lines of each log, for reading', evidence };
