@@ -56,7 +56,7 @@ tempfile.workspace = true
 [lints]
 workspace = true
 
-[target.'cfg(not(windows))'.dependencies]
-# Sockets with their owning process on macOS (libproc) and Linux (/proc/net) (MIT/Apache-2.0); Windows reads the IP
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+# Sockets with their owning process on Linux (/proc/net) (MIT/Apache-2.0); macOS reads the kernel's socket lists (Dyno ADR 0026) and Windows the IP
 # Helper tables itself (src/windows/net.rs).
 netstat2 = "0.11"

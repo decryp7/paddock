@@ -1,12 +1,14 @@
-//! macOS adapters: memory pressure and GPU load for the sensors, volume tidying (APFS system volumes), `lsof` for open files, connections
-//! and "what is locking this file", `codesign` for signers, launch agents for the startup manager, `sw_vers` /
+//! macOS adapters: memory pressure and GPU load for the sensors, volume tidying (APFS system volumes), `libproc` for open files, mapped libraries and "what is locking this file", the kernel socket lists for connections,
+//! `codesign` for signers, launch agents for the startup manager, `sw_vers` /
 //! `pmset` facts and user activity through CoreGraphics.
 
 pub mod activity;
 pub mod background;
 pub mod details;
 pub mod facts;
+pub mod libproc;
 pub mod locks;
+pub mod pcblist;
 pub mod probe;
 pub mod procinfo;
 pub mod startup;

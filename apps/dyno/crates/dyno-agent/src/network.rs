@@ -57,6 +57,17 @@ pub struct NetCentre {
     names: Names,
 }
 
+/// The error code a failed platform read is reported with: a refusal or an unsupported system is not a bug.
+fn error_code(e: &PlatformError) -> ErrorCode {
+    match e {
+        PlatformError::NotFound(_) => ErrorCode::NotFound,
+        PlatformError::AccessDenied(_) => ErrorCode::AccessDenied,
+        PlatformError::Unsupported(_) => ErrorCode::Unsupported,
+        PlatformError::Timeout(_) => ErrorCode::Timeout,
+        PlatformError::Failed(_) => ErrorCode::Internal,
+    }
+}
+
 impl NetCentre {
     /// A centre reading through `sockets`, resolving names through `dns` and reading traffic through `traffic`.
     pub fn new(sockets: Box<dyn NetworkSockets>, dns: Arc<dyn ReverseDns>, traffic: Box<dyn ProcessTraffic>) -> NetCentre {
@@ -85,21 +96,22 @@ impl NetCentre {
                 return Ok((rows.clone(), Vec::new()));
             }
         }
-        let rows = self
-            .sockets
-            .sockets()
-            .map_err(|e| AgentError::new(ErrorCode::Internal, e.to_string()))?;
+        let rows = self.sockets.sockets().map_err(|e| AgentError::new(error_code(&e), e.to_string()))?;
         let events = s.tracker.update(now(), &rows, processes);
         s.cache = Some((Instant::now(), rows.clone()));
         Ok((rows, events))
     }
 
-    /// Established connections per process id, for the program baseline. A refused read is "none": the baseline then simply
-    /// has no connection counts this time.
+    /// Established connections per process id, for the program baseline. A refused read (a cut-down list on macOS
+    /// included) is "none": the baseline then simply has no connection counts this time, and the reason goes to the
+    /// agent's log, so a list the OS cut down is not mistaken for programs that have no connections.
     pub fn connection_counts(&self) -> HashMap<u32, u32> {
         let rows = match self.sockets.sockets() {
             Ok(r) => r,
-            Err(_) => return HashMap::new(),
+            Err(e) => {
+                eprintln!("dyno-agent: no connection counts for the program baseline: {e}");
+                return HashMap::new();
+            }
         };
         let mut out: HashMap<u32, u32> = HashMap::new();
         for r in rows
@@ -295,6 +307,15 @@ mod tests {
         }
     }
 
+    /// A port that always refuses with one error.
+    struct Refusing(PlatformError);
+
+    impl NetworkSockets for Refusing {
+        fn sockets(&self) -> Result<Vec<SocketRow>, PlatformError> {
+            Err(self.0.clone())
+        }
+    }
+
     fn listener(port: u16) -> SocketRow {
         SocketRow {
             proto: Proto::Tcp,
@@ -423,6 +444,25 @@ mod tests {
         let e = c.look(&[]).unwrap_err();
         assert_eq!(e.code, ErrorCode::Internal);
         assert!(e.to_string().contains("denied"));
+    }
+
+    #[test]
+    fn a_refused_or_unsupported_socket_read_keeps_its_own_error_code() {
+        for (err, code) in [
+            (PlatformError::AccessDenied("cut down".into()), ErrorCode::AccessDenied),
+            (PlatformError::Unsupported("new format".into()), ErrorCode::Unsupported),
+            (PlatformError::Timeout("slow".into()), ErrorCode::Timeout),
+            (PlatformError::NotFound("gone".into()), ErrorCode::NotFound),
+            (PlatformError::Failed("boom".into()), ErrorCode::Internal),
+        ] {
+            let c = NetCentre::new(
+                Box::new(Refusing(err)),
+                Arc::new(Dns(Arc::default())),
+                Box::new(NoTraffic(Ok(vec![]))),
+            );
+            let e = c.look(&[]).unwrap_err();
+            assert_eq!(e.code, code, "{e:?}");
+        }
     }
 
     /// Rule 52 (coordinator review, 2026-10-30): the user waits for host names (Look up names) and for the traffic the

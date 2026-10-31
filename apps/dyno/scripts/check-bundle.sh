@@ -5,7 +5,7 @@
 #   folders (never a build directory), and that dyno-app, dyno-agent and the dyno command are present.
 # macOS: checks that every Mach-O's LC_RPATH is @executable_path/@loader_path relative or a system folder, that the
 #   .app seal verifies (ad-hoc is fine; a linker-signed bundle is refused by SMAppService), and that the agent and the dyno command are bundled;
-#   then the agent measures once from the built .app (`dyno-agent once`, read-only: the real-app smoke). The hardened runtime,
+#   the sidecars' code-signing identifiers (Dyno ADR 0026: they must start with net.decryptology.dyno.), then the agent measures once from the built .app (`dyno-agent once`, read-only: the real-app smoke). The hardened runtime,
 #   TeamIdentifier and sidecar-start checks (Paddock rule 23) are the shared macos-verify action's, run by app-release.yml.
 # app-release.yml runs it through `bundle-check` (dyno-release.yml), from the repository root.
 # Windows is not checked here (no run paths); the Windows runner's tests and the installer smoke cover it.
@@ -62,6 +62,13 @@ case "$(uname -s)" in
     done < <(find "$app/Contents" -type f -perm -u+x)
     (( found_agent )) || err "the .app has no dyno-agent executable"
     (( found_cli )) || err "the .app has no dyno (command line) executable"
+    # Dyno ADR 0026: macOS 27.2 shows a process the whole kernel socket list only when its code-signing identifier has a dot, and
+    # Tauri re-signs the sidecars with `codesign --force -s -`: the identifier must come from the embedded Info.plist.
+    for sidecar in dyno-agent dyno; do
+      ident="$(codesign -dv "$app/Contents/MacOS/$sidecar" 2>&1 | sed -n 's/^Identifier=//p')"
+      echo "code-signing identifier of $sidecar: ${ident:-none}"
+      [[ "$ident" =~ ^net\.decryptology\.dyno\. ]] || err "$sidecar has the code-signing identifier '${ident:-none}', not net.decryptology.dyno.* (the Network page would see no sockets of other programs)"
+    done
     agent="$app/Contents/MacOS/dyno-agent"
     if [[ -x "$agent" ]]; then
       out="$(mktemp "${TMPDIR:-/tmp}/dyno-once-ci.XXXXXX")"
