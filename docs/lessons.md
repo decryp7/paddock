@@ -1091,8 +1091,10 @@ back what the spy had wrapped: the fake, bound to a clock that was gone. Vitest 
 after `mockRestore()`, so this happens even when the spec restores its spy itself. Specs share one window per worker
 (`isolate: false`), so every later spec in that worker that waited on a real timer (the snapshot's 5 ms "too slow" case,
 the notify reference app's two repair tests in run 7276) hung until the test timeout; with one worker, 16 tests in 8 files
-failed. Which spec failed depended only on which files the scheduler put after it. **Rule:** the test kit
-(`installTestKit`) restores spies before switching to real timers, records the real timer globals at the first install in
-a worker, and after every test puts back any it finds replaced and fails that test by name. Never `vi.spyOn` a timer while
-fake timers are on; count timers with `vi.getTimerCount()`. Measure inside the failing run before fixing the suspected
-cost: the leading hypothesis (CSS piling up) was wrong.
+failed. Which spec failed depended only on which files the scheduler put after it. **Kit behaviour (no new rule):** the
+test kit (`installTestKit`) restores spies before switching to real timers, records the real timer globals at the first
+install in a worker, puts back any it finds replaced around every test, and fails the test that left one replaced by
+something other than a spy, after every `afterEach` (a throw inside the hook chain skipped Angular's TestBed clean-up and
+failed the next TestBed test too). Never `vi.spyOn` a timer while fake timers are on; count timers with
+`vi.getTimerCount()`. Measure inside the failing run before fixing the suspected cost: the leading hypothesis (CSS piling
+up) was wrong.
