@@ -159,6 +159,7 @@ fn widget_states_have_the_agreed_shape() {
             title: "No alarms".into(),
             detail: "All clear".into(),
             next: Some(action()),
+            calm: true,
         },
         WidgetState::Error {
             title: "Couldn't read".into(),
@@ -203,6 +204,7 @@ fn surface_values_carry_a_notice_and_the_placements() {
                 title: "t".into(),
                 detail: "d".into(),
                 next: None,
+                calm: false,
             },
         }],
     };
@@ -230,4 +232,20 @@ fn ids_from_the_kinds_are_unique() {
         ids(&Layout::new(2, placed, vec![])),
         ["disk-space", "disk-space-2", "clock", "disk-space-3"]
     );
+}
+
+#[test]
+fn an_empty_state_is_not_calm_unless_the_engine_says_so() {
+    let old = serde_json::json!({"state": "empty", "title": "t", "detail": "d", "next": null});
+    let state: WidgetState<u8, String> =
+        serde_json::from_value(old).expect("an empty state without calm still reads");
+    assert!(matches!(state, WidgetState::Empty { calm: false, .. }));
+    let calm = serde_json::to_value(WidgetState::<u8, String>::Empty {
+        title: "t".into(),
+        detail: "d".into(),
+        next: None,
+        calm: true,
+    })
+    .expect("serialises");
+    assert_eq!(calm["calm"], true);
 }

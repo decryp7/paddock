@@ -78,6 +78,10 @@ pub enum WidgetState<V, A> {
         detail: String,
         /// The next step.
         next: Option<WidgetAction<A>>,
+        /// `true`: the empty state means "all good" (no active alarms), drawn as one calm row with a success check.
+        /// `false` (the default): "nothing here yet", drawn with the info icon and the next step.
+        #[serde(default)]
+        calm: bool,
     },
     /// The source failed. A busy source is `Working` or a stale `Ready`, never an error.
     Error {

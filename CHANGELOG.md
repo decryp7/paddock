@@ -38,6 +38,12 @@ Conventional Commits; one semver tag for the whole repo.
   `--pd-skeleton` (the surface-2 colour) vanishes. `npm run test:tokens` checks both.
 ### `paddock-widgets`: type skeleton (ADR 0035)
 - New crate, scaffold only: the layout, catalogue, edit and widget-state types of ADR 0035 §2; the behaviour comes with WP-A.
+### `paddock-widgets` and `@decryp7/paddock-ui/widgets`: the engine decides which empty state is calm (ADR 0035)
+- `WidgetState::Empty` gets `calm: bool` (serde default `false`; generated TypeScript `calm: boolean`): `true` means "all good" and is
+  drawn as one calm row with a success check, `false` means "nothing here yet" and is drawn with the info icon and the next step.
+- Breaking, before v1: `pdWidgetCalm` on `*pdWidget` and `[calm]` on `pd-widget-frame` are removed; the frame reads `calm` from the empty
+  state. Apps drop `[pdWidgetCalm]` and set `calm` in the engine.
+
 ### `paddock-widgets`: new crate for widget layouts (ADR 0035, WP-A)
 - A pure crate for layouts of widgets on a surface (popover, dashboard, menu bar): the app's closed `Catalogue`, `Layout`
   and `Placement`, limits on every read and edit, lenient versioned `read` and `Stored` (a layout that cannot be read gives the defaults and one note and is kept and written back unchanged until the first

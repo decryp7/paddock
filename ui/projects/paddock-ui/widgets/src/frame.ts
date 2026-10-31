@@ -48,7 +48,7 @@ interface Meta {
       </header>
       @let s = state();
       @if (s?.state === 'empty') {
-        @if (calm() && s.next) {
+        @if (s.calm && s.next) {
           <button type="button" class="pd-w-calm" [attr.aria-label]="s.title + ', ' + s.detail + '. ' + s.next.label" (click)="action.emit(s.next.action)">
             <pd-glyph class="pd-w-ok" name="check-circle" [size]="16" />
             <span class="pd-w-calm-text"><span>{{ s.title }}</span><span class="pd-w-subtle">&nbsp;· {{ s.detail }}</span></span>
@@ -139,8 +139,6 @@ export class PdWidgetFrame<V = unknown, A = unknown> {
   readonly template = input<TemplateRef<PdWidgetContext<V>> | null>(null);
   /** Columns spanned in the area's grid. */
   readonly span = input(2);
-  /** The kind's empty state means "all good": drawn as one button row. */
-  readonly calm = input(false);
   /** A live kind says "Paused at 14:28" when stale; the others say "Updated 4 min ago". */
   readonly live = input(false);
   /**
