@@ -32,7 +32,7 @@ case "$(uname -s)" in
     found_app=0 found_service=0
     while IFS= read -r f; do
       case "$(basename "$f")" in pitcrew-app) found_app=1 ;; pitcrew-service) found_service=1 ;; esac
-      file -b "$f" | grep -q '^ELF' || continue
+      case "$(file -b "$f")" in ELF*) ;; *) continue ;; esac
       paths=$(readelf -d "$f" 2>/dev/null | sed -n 's/.*(R\(UN\)\{0,1\}PATH).*\[\(.*\)\]/\2/p')
       echo "run paths of ${f#"$tree"}: ${paths:-none}"
       IFS=: read -ra entries <<< "$paths"
@@ -51,7 +51,7 @@ case "$(uname -s)" in
     found_service=0
     while IFS= read -r f; do
       [[ "$(basename "$f")" == pitcrew-service ]] && found_service=1
-      file -b "$f" | grep -q 'Mach-O' || continue
+      case "$(file -b "$f")" in *Mach-O*) ;; *) continue ;; esac
       paths=$(otool -l "$f" | awk '/cmd LC_RPATH/ { getline; getline; print $2 }')
       echo "run paths of ${f#"$app"/}: $(echo "$paths" | paste -sd: -)"
       while IFS= read -r p; do
