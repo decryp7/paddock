@@ -784,12 +784,7 @@ mod tests {
     }
 
     fn mgr(dirs: &Dirs) -> LlamaCpp {
-        LlamaCpp::new(
-            dirs.clone(),
-            Egress::new(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true))),
-            Hardware::default(),
-            BuildChoice::Auto,
-        )
+        LlamaCpp::new(dirs.clone(), Egress::unreachable(), Hardware::default(), BuildChoice::Auto)
     }
 
     #[test]
@@ -867,7 +862,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn availability_and_offline_install() {
+    async fn availability_and_failed_install() {
         let (_d, dirs) = dirs();
         let m = mgr(&dirs);
         assert!(m.installed().is_empty() && m.binary().is_none());

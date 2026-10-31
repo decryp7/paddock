@@ -238,13 +238,17 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         }
         "search_models" => {
             let q: String = arg(a, "query")?;
-            ok(st.library.search(&q).await.map_err(offline_or)?)
+            ok(st.library.search(&q).await.map_err(download_failed)?)
         }
         "repo_files" => {
             let repo: String = arg(a, "repo")?;
             let s = st.cfg();
             let room = crate::system::room_from(&st.serving.memory_now(), &st.hardware, st.serving.hot_ram().0);
-            ok(st.library.repo(&repo, s.models.default_context, &room).await.map_err(offline_or)?)
+            ok(st
+                .library
+                .repo(&repo, s.models.default_context, &room)
+                .await
+                .map_err(download_failed)?)
         }
         "download_model" => {
             let repo: String = arg(a, "repo")?;
@@ -608,21 +612,14 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
             let ui: UiSettings = arg(a, "settings")?;
             let s = st.cfg().with_ui(ui).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?;
             let saved = st.save_settings(s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?.ui();
-            // Every window (the app's Offline gate among them) hears the new server state at once, not at the next read.
-            st.push(&LiveUpdate::Server {
-                server: overview(st).server,
-            });
             ok(saved)
         }
         _ => Err(err(mgmt::ErrorCode::NotImplemented, format!("unknown call \"{method}\""))),
     }
 }
 
-fn offline_or(e: crate::egress::DownloadError) -> CommandError {
-    match e {
-        crate::egress::DownloadError::Egress(pitwall_core::privacy::EgressError::Offline) => err(mgmt::ErrorCode::Offline, e.to_string()),
-        other => err(mgmt::ErrorCode::ServerUnavailable, other.to_string()),
-    }
+fn download_failed(e: crate::egress::DownloadError) -> CommandError {
+    err(mgmt::ErrorCode::ServerUnavailable, e.to_string())
 }
 
 fn update_prefs(st: &AppState, id: &ModelId, f: impl FnOnce(&mut pitwall_core::config::ModelPrefs)) -> R<()> {
@@ -643,7 +640,11 @@ fn downloads(st: &AppState) -> Vec<Download> {
 async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: Option<&str>) -> R<Value> {
     let s = st.cfg();
     let room = crate::system::room_from(&st.serving.memory_now(), &st.hardware, st.serving.hot_ram().0);
-    let r = st.library.repo(repo, s.models.default_context, &room).await.map_err(offline_or)?;
+    let r = st
+        .library
+        .repo(repo, s.models.default_context, &room)
+        .await
+        .map_err(download_failed)?;
     let q = r
         .variants
         .iter()
@@ -663,8 +664,8 @@ async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: O
     // Rebuild the core variant (parts/sha) from the tree again: the DTO carries only the first file.
     let tree = {
         let id = pitwall_core::hf::RepoId::parse(repo).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?;
-        let url = pitwall_core::hf::tree_url(&id).map_err(|e| err(mgmt::ErrorCode::Offline, e.to_string()))?;
-        pitwall_core::hf::parse_tree(&st.egress.get_json(&url, 8 << 20).await.map_err(offline_or)?)
+        let url = pitwall_core::hf::tree_url(&id).map_err(|e| err(mgmt::ErrorCode::BadRequest, e.to_string()))?;
+        pitwall_core::hf::parse_tree(&st.egress.get_json(&url, 8 << 20).await.map_err(download_failed)?)
             .map_err(|e| err(mgmt::ErrorCode::ServerUnavailable, e))?
     };
     let mut want: Vec<&pitwall_core::hf::Variant> = tree.variants.iter().filter(|v| v.file == file).collect();
@@ -691,7 +692,7 @@ async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: O
                     st2.updates.downloaded(&repo_name, &file_name);
                 }
             })
-            .map_err(offline_or)?;
+            .map_err(download_failed)?;
         if first.is_none() {
             first = st.library.downloads().into_iter().find(|d| d.id == id);
         }
@@ -785,12 +786,6 @@ fn engines(st: &AppState) -> Vec<mgmt::Engine> {
 }
 
 fn install_build(st: &Arc<AppState>, id: &str) -> R<Value> {
-    if st.offline.load(std::sync::atomic::Ordering::SeqCst) {
-        return Err(err(
-            mgmt::ErrorCode::Offline,
-            pitwall_core::privacy::EgressError::Offline.to_string(),
-        ));
-    }
     let platform = st.llama.platform();
     if st.llama.catalog().find(&platform, id).is_none() {
         return Err(err(mgmt::ErrorCode::NotFound, format!("there is no build \"{id}\" for {platform}")));
@@ -822,7 +817,6 @@ fn overview(st: &Arc<AppState>) -> mgmt::Overview {
             } else {
                 mgmt::ServingState::Serving
             },
-            offline: cfg.network.offline,
             lan: mgmt::LanStatus {
                 enabled: false,
                 url: None,

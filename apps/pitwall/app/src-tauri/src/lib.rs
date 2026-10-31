@@ -16,7 +16,6 @@ pub mod credentials;
 pub mod dialogs;
 pub mod jobs;
 pub mod live;
-pub mod offline;
 pub mod quit;
 pub mod server_client;
 pub mod service_install;
@@ -164,40 +163,37 @@ pub enum Place {
     },
 }
 
-/// The client of the server, its offline knowledge and the tray's facts, for `place`. A test's client never falls back to the
+/// The client of the server and the tray's facts, for `place`. A test's client never falls back to the
 /// well-known port (a Pitwall installed on the machine may be using it, ER-14), or is `server` when the test gives one.
-fn state(place: &Place) -> (SharedClient, Arc<offline::OfflineKnown>, SharedModel) {
+fn state(place: &Place) -> (SharedClient, SharedModel) {
     let (data_dir, store): (std::path::PathBuf, Box<dyn credentials::KeyStore>) = match place {
         Place::Installed => (app_state::data_dir().unwrap_or_default(), Box::new(credentials::OsKeyStore)),
         Place::Test { dir, .. } => (dir.clone(), Box::new(credentials::NoKeyStore)),
     };
     let keys = Arc::new(credentials::StoredAdminKey::new(store, data_dir.join("admin.key")));
-    let known_offline = Arc::new(offline::OfflineKnown::at(data_dir.join("offline-known.json")));
-    let inner: SharedClient = match place {
+    let client: SharedClient = match place {
         Place::Test { server: Some(server), .. } => server.clone(),
         Place::Test { server: None, .. } => Arc::new(server_client::LoopbackClient::new(data_dir, keys).discovery_port_only()),
         Place::Installed => Arc::new(server_client::LoopbackClient::new(data_dir, keys)),
     };
-    let client: SharedClient = Arc::new(offline::Observing::new(inner, known_offline.clone()));
-    (client, known_offline, Arc::new(Mutex::new(TrayModel::new())))
+    (client, Arc::new(Mutex::new(TrayModel::new())))
 }
 
 /// The shell plugin with Pitwall's parts: its commands, its state and the live feed (set-up: state only, no window; the
 /// shell opens the tray and the window after every plugin, ADR 0029) and the window layer.
 pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
     let installed = matches!(place, Place::Installed);
-    let (client, known_offline, model) = state(&place);
+    let (client, model) = state(&place);
     let test_dir = match &place {
         Place::Installed => None,
         Place::Test { dir, .. } => Some(dir.clone()),
     };
-    let (update_client, update_offline) = (client.clone(), known_offline.clone());
+    let update_client = client.clone();
     let builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))
         .app_commands(&COMMANDS)
         .dialogs(&[&dialogs::DIALOGS])
         .setup(move |app| {
             app.manage(client);
-            app.manage(known_offline);
             app.manage(model);
             app.manage(Arc::new(commands::Streams::default()));
             app.manage(Arc::new(jobs::Jobs::default()));
@@ -211,7 +207,7 @@ pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
         .menu_without_window(quit::QUIT_STOP_COMMAND, |app| {
             quit::request_from_menu(app, Some(quit::QuitChoice::StopServing))
         })
-        .updater(move |app| updater(app, test_dir, update_client, update_offline))
+        .updater(move |app| updater(app, test_dir, update_client))
         .windows(move |app| windows(app, installed));
     if installed {
         builder
@@ -220,15 +216,13 @@ pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
     }
 }
 
-/// Updates, About and What's New on the shell's updater (the `pitwall-latest` feed, the family's key from CI). Offline mode
-/// blocks every check and download, and so does an Offline mode never confirmed off (local first, fails closed). The service
+/// Updates, About and What's New on the shell's updater (the `pitwall-latest` feed, the family's key from CI). The service
 /// hooks re-register Pitwall's service after a version change. Without the CI's key the build cannot update itself and says
 /// so ("Updates are not available in this build"). The installer is `tauri-plugin-updater` (registered in [`run`]).
 fn updater<R: Runtime>(
     app: &AppHandle<R>,
     test_dir: Option<std::path::PathBuf>,
     client: SharedClient,
-    known_offline: Arc<offline::OfflineKnown>,
 ) -> paddock_updater::tauri::UpdatesBuilder {
     let key = option_env!("TAURI_UPDATER_PUBKEY");
     let b = LEGAL
@@ -239,7 +233,6 @@ fn updater<R: Runtime>(
     let b = b
         .channel("stable", "Stable", UPDATE_FEED)
         .public_key(key)
-        .offline_mode(move || known_offline.state())
         .releases_page(RELEASES_PAGE)
         .homepage("https://dev.decryptology.net/decryp7/paddock")
         .build_info(option_env!("PADDOCK_BUILD_COMMIT"), option_env!("PADDOCK_BUILD_DATE"));
@@ -250,6 +243,9 @@ fn updater<R: Runtime>(
                 app.clone(),
                 key.unwrap_or_default(),
             ))),
+        // TODO(batch integrator): once main with the shared updater guard is merged into this line, add `.no_install()` here:
+        // the guard refuses an UpdatesBuilder that declares neither `.installer(..)` nor `.no_install()`, and this test/dev arm
+        // has no installer.
         Some(dir) => b.dirs(dir.join("config"), dir.join("cache")).background(false),
     }
 }
@@ -318,28 +314,9 @@ impl<R: Runtime> live::LiveSink for AppSink<R> {
     }
 }
 
-/// Cancels the update check or download in flight (Offline mode turned on); nothing else is touched.
-fn stop_update_transfer<R: Runtime>(app: &AppHandle<R>) {
-    let Some(updates) = app.try_state::<Arc<paddock_updater::tauri::Updates>>() else {
-        return;
-    };
-    let busy = matches!(
-        updates.updater.status().phase,
-        paddock_updater::UpdatePhase::Checking { .. } | paddock_updater::UpdatePhase::Downloading { .. }
-    );
-    if busy && updates.cancel().is_ok() {
-        eprintln!("Pitwall: Offline mode turned on; the update transfer was stopped");
-    }
-}
-
 /// Pitwall's own set-up, after its state is managed: the live feed (UI events and the tray, reconnecting on its own),
 /// resuming serving after a "stop serving" quit and, installed on macOS, repairing a service registration launchd refuses.
 fn pitwall_setup<R: Runtime>(app: &AppHandle<R>, installed: bool) {
-    // Offline mode turned on while an update check or download runs: cancel it now, so the transfer stops instead of
-    // finishing (the shared updater also refuses the next step before the network). A verified download is kept.
-    let handle = app.clone();
-    app.state::<Arc<offline::OfflineKnown>>()
-        .watch(move || stop_update_transfer(&handle));
     let client = app.state::<SharedClient>().inner().clone();
     let sink = AppSink {
         app: app.clone(),

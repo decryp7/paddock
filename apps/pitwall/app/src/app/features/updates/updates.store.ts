@@ -86,7 +86,7 @@ export const UpdatesStore = signalStore(
         if (!store.loaded() && !store.loading()) await load();
       },
 
-      /** "Check now": asks Hugging Face about the repositories you downloaded from (never in offline mode). */
+      /** "Check now": asks Hugging Face about the repositories you downloaded from . */
       async checkNow(): Promise<void> {
         if (store.checking()) return;
         patchState(store, { checking: true });
@@ -165,13 +165,12 @@ export const UpdatesStore = signalStore(
   }),
   withHooks((store, live = inject(LiveStore)) => ({
     onInit() {
-      // A pushed "model update" event, a finished download or a change of offline mode changes what is shown.
+      // A pushed "model update" event, or a finished download changes what is shown.
       let seen = '';
       effect(() => {
         const update = live.events().find((e) => e.kind === 'modelUpdate');
         const done = live.downloads().filter((d) => d.state === 'done').length;
-        // Offline mode flips what a check can do, so the state is read again when it changes.
-        const key = `${update?.id ?? ''}|${done}|${live.server()?.offline ?? ''}`;
+        const key = `${update?.id ?? ''}|${done}`;
         untracked(() => {
           const changed = key !== seen;
           seen = key;

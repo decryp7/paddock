@@ -211,9 +211,9 @@ describe('SettingsPage', () => {
 
   it('saves a switch at once, without waiting for the pause', async () => {
     const { fixture, el, backend } = await setup(new MockBackend(), 60_000);
-    switchOf(el, 'lbl-offline').click();
+    switchOf(el, 'lbl-lan').click();
     await settle(fixture);
-    await vi.waitFor(async () => expect((await backend.settings()).network.offline).toBe(true));
+    await vi.waitFor(async () => expect((await backend.settings()).network.lanEnabled).toBe(true));
   });
 
   it('saves a typed number after the pause, with no Enter and no leaving the field', async () => {
@@ -357,11 +357,11 @@ describe('SettingsPage', () => {
     expect(el.querySelector('#set-memory')!.textContent).toContain('Your own values below.');
   });
 
-  it('toggles offline mode and saves it to the server', async () => {
+  it('toggles serving on the local network and saves it to the server', async () => {
     const { fixture, el, backend } = await setup();
-    switchOf(el, 'lbl-offline').click();
+    switchOf(el, 'lbl-lan').click();
     await saved(fixture);
-    expect((await backend.settings()).network.offline).toBe(true);
+    expect((await backend.settings()).network.lanEnabled).toBe(true);
   });
 
   it('chooses what quitting does about serving from a select and saves it', async () => {
@@ -456,15 +456,6 @@ describe('SettingsPage', () => {
       expect(panel(el).textContent).toContain('Asked Hugging Face about');
       expect(panel(el).textContent).toContain('Last checked');
       expect(TestBed.inject(Toasts).toasts().at(-1)?.message).toBe('Checked: 2 updates available.');
-    });
-
-    it('cannot check while offline mode is on, and says so', async () => {
-      const mock = new MockBackend();
-      const s = await mock.settings();
-      await mock.saveSettings({ ...s, network: { ...s.network, offline: true } });
-      const { el } = await setup(mock);
-      expect(button(panel(el) as HTMLElement, 'Check now').disabled).toBe(true);
-      expect(panel(el).textContent).toContain('Offline mode is on, so no check can run.');
     });
 
     it('shows an error with Retry when the state cannot be read', async () => {

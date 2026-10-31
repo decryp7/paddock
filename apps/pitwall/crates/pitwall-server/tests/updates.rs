@@ -1,5 +1,5 @@
 //! Model update notices end to end (ADR 0017) over a fake Hugging Face: nothing is asked before the user opts in or
-//! while offline mode is on, a changed file becomes a notice that can be dismissed, notices and dismissals survive a
+//! a changed file becomes a notice that can be dismissed, notices and dismissals survive a
 //! restart and a damaged state file, "Check now" is rate limited, and a check never downloads anything.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -69,47 +69,19 @@ async fn notices(h: &Harness) -> Vec<Value> {
     h.rpc("update_notices", json!({})).await.json().as_array().unwrap().clone()
 }
 
-fn enable(h: &Harness, enabled: bool) {
-    let mut s = h.st.cfg();
-    s.models.update_check.enabled = enabled;
-    h.st.save_settings(s).unwrap();
-}
-
-fn go_offline(h: &Harness) {
-    let mut s = h.st.cfg();
-    s.network.offline = true;
-    h.st.save_settings(s).unwrap();
-}
-
 #[tokio::test]
 async fn nothing_is_asked_before_the_user_opts_in_and_the_status_says_so() {
     let (h, fake) = setup().await;
     let st = h.rpc("update_check_status", json!({})).await.json();
     assert_eq!(st["settings"], json!({"enabled": false, "schedule": "weekly"}));
     assert_eq!(
-        (st["host"].as_str(), st["offline"].as_bool(), st["running"].as_bool()),
-        (Some("huggingface.co"), Some(false), Some(false))
+        (st["host"].as_str(), st["running"].as_bool()),
+        (Some("huggingface.co"), Some(false))
     );
     assert!(st["nextCheckAt"].is_null() && st["lastCheckedAt"].is_null());
     assert!(h.st.scheduled_update_tick().await.is_none(), "disabled: the schedule does nothing");
     assert_eq!(fake.calls.load(Ordering::SeqCst), 0);
     assert!(notices(&h).await.is_empty());
-}
-
-#[tokio::test]
-async fn offline_mode_makes_zero_requests_for_both_check_now_and_the_schedule() {
-    let (h, fake) = setup().await;
-    enable(&h, true);
-    go_offline(&h);
-    let r = h.rpc("check_updates_now", json!({})).await;
-    assert_eq!(r.status, 200, "{}", r.body);
-    let r = r.json();
-    assert_eq!(r["outcome"], "offline");
-    assert!(r["message"].as_str().unwrap().contains("Offline mode"));
-    assert!(h.st.scheduled_update_tick().await.is_none());
-    let st = h.rpc("update_check_status", json!({})).await.json();
-    assert_eq!((st["offline"].as_bool(), st["nextCheckAt"].is_null()), (Some(true), true));
-    assert_eq!(fake.calls.load(Ordering::SeqCst), 0, "no request while offline");
 }
 
 #[tokio::test]

@@ -34,10 +34,10 @@ describe('EngineSetupBanner', () => {
 
   it('shows why it failed with Retry, which clears the failure', async () => {
     const { fixture, el, backend } = await open();
-    backend.setEngineSetup({ state: 'failed', error: 'Pitwall is in offline mode. Then press Retry.', download: null });
+    backend.setEngineSetup({ state: 'failed', error: 'The network is unreachable. Then press Retry.', download: null });
     await settle(fixture);
     expect(el.querySelector('.setup')?.getAttribute('data-state')).toBe('failed');
-    expect(el.textContent).toContain('offline mode');
+    expect(el.textContent).toContain('network is unreachable');
     el.querySelector<HTMLButtonElement>('button')!.click();
     await settle(fixture);
     expect(el.querySelector('.setup')).toBeNull();

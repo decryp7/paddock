@@ -171,7 +171,7 @@ Options:
 Keys: the admin key comes from PITWALL_ADMIN_KEY, --key-file or the OS credential store (the same entry the
 Pitwall window uses); chat uses a per-app key from PITWALL_API_KEY. Keys are never command-line arguments.
 
-Exit codes: 0 ok, 1 error, 2 usage, 3 server not running, 4 refused (not enough memory, offline, busy).
+Exit codes: 0 ok, 1 error, 2 usage, 3 server not running, 4 refused (not enough memory, busy).
 "
     .to_string()
 }

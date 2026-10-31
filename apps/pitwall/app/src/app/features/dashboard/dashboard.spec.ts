@@ -96,15 +96,11 @@ describe('Dashboard', () => {
     expect(BROWSER_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
     expect(sub).toMatch(/up 5 h 1\d min/);
     expect(sub).toContain(`${live.apps().filter((a) => a.connected).length} apps connected`);
-    expect(sub).not.toContain('Offline mode');
   });
 
-  it('says it is connecting before the overview arrives and flags offline mode', async () => {
+  it('says it is connecting before the overview arrives ', async () => {
     const pre = await mount({ load: false });
     expect(pre.el.querySelector('.sub')!.textContent).toContain('Connecting to the server…');
-    TestBed.resetTestingModule();
-    const off = await mount({ patch: (o) => ({ ...o, server: { ...o.server, offline: true } }) });
-    expect(off.el.querySelector('.offline')!.textContent).toBe('Offline mode');
   });
 
   it('has no quick-link row: the sidebar already goes everywhere', async () => {

@@ -30,7 +30,7 @@ describe('SettingsStore', () => {
   const QUIT = { id: 'gen-quit', label: 'When you quit Pitwall' };
   const HOT = { id: 'mem-hot', label: 'Hot models at once' };
   const RETAIN = { id: 'prv-ret', label: 'Keep metrics and history for' };
-  const OFFLINE = { id: 'network.offline', label: 'Offline mode' };
+  const LAN = { id: 'network.lanEnabled', label: 'Serve other devices on your network' };
   let journal: Map<string, string>;
 
   function setup(backend: PitwallBackend = new MockBackend(), delay = 5) {
@@ -83,10 +83,10 @@ describe('SettingsStore', () => {
     const { store, backend, toasts } = setup(new MockBackend(), 60_000);
     await store.load();
     const save = vi.spyOn(backend, 'saveSettings');
-    store.edit(OFFLINE, 'network', { offline: true });
-    expect(store.draft()?.network.offline).toBe(true);
+    store.edit(LAN, 'network', { lanEnabled: true });
+    expect(store.draft()?.network.lanEnabled).toBe(true);
     expect(store.saving()).toBe(true);
-    await vi.waitFor(() => expect(store.saved()?.network.offline).toBe(true));
+    await vi.waitFor(() => expect(store.saved()?.network.lanEnabled).toBe(true));
     expect(save).toHaveBeenCalledTimes(1);
     expect(store.saving()).toBe(false);
     expect(toasts.toasts()).toEqual([]);
@@ -384,7 +384,7 @@ describe('SettingsStore', () => {
     expect(savingLabel([])).toBe('your settings');
     expect(savingLabel(['Port', 'Port'])).toBe('port');
     expect(savingLabel(['LAN port', 'Request timeout'])).toBe('LAN port and request timeout');
-    expect(savingLabel(['Port', 'Request timeout', 'Offline mode'])).toBe('3 settings');
+    expect(savingLabel(['Port', 'Request timeout', 'Keep request content'])).toBe('3 settings');
   });
 
   it('a close while only a preset is on its way waits for "your settings"', async () => {
@@ -397,7 +397,7 @@ describe('SettingsStore', () => {
 
   it('shows an unsent value the way the page does', () => {
     expect(shownValue('allowKeylessLocal', true)).toBe('on');
-    expect(shownValue('offline', false)).toBe('off');
+    expect(shownValue('lanEnabled', false)).toBe('off');
     expect(shownValue('hotCapBytes', null)).toBe('what fits');
     expect(shownValue('promptCacheMib', null)).toBe('automatic');
     expect(shownValue('onQuit', 'keepServing')).toBe('Keep serving');

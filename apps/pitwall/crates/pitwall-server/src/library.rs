@@ -587,9 +587,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn offline_search_and_repo_are_refused_and_downloads_fail_cleanly() {
+    async fn unreachable_search_and_repo_fail_and_downloads_fail_cleanly() {
         let d = tempfile::tempdir().unwrap();
-        let lib = Library::new(Dirs::at(d.path()), Egress::new(Arc::new(std::sync::atomic::AtomicBool::new(true))));
+        let lib = Library::new(Dirs::at(d.path()), Egress::unreachable());
         assert!(lib.search("qwen").await.is_err());
         assert!(lib.repo("o/r", 4096, &Room::default()).await.is_err());
         let v = hf::Variant {
@@ -608,7 +608,7 @@ mod tests {
         }
         let dl = &lib.downloads()[0];
         assert_eq!((dl.id.as_str(), dl.state), (id.as_str(), DownloadState::Failed));
-        assert!(dl.error.as_ref().unwrap().contains("offline"));
+        assert!(!dl.error.as_ref().unwrap().is_empty());
         assert!(lib.cancel(&id) && !lib.cancel("nope"));
         assert!(lib.download("../x", &v, |_| {}).is_err());
     }
@@ -616,7 +616,7 @@ mod tests {
     #[tokio::test]
     async fn a_download_waits_queued_for_its_gate_and_fails_with_the_gates_reason() {
         let d = tempfile::tempdir().unwrap();
-        let lib = Library::new(Dirs::at(d.path()), Egress::new(Arc::new(std::sync::atomic::AtomicBool::new(true))));
+        let lib = Library::new(Dirs::at(d.path()), Egress::unreachable());
         let v = hf::Variant {
             file: "m-Q4_K_M.gguf".into(),
             parts: vec!["m-Q4_K_M.gguf".into()],

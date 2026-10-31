@@ -15,7 +15,7 @@ pub enum Exit {
     Usage = 2,
     /// The server is not running.
     NotRunning = 3,
-    /// The server refused: not enough memory, offline mode, busy, not available here.
+    /// The server refused: not enough memory, busy, not available here.
     Refused = 4,
 }
 
@@ -70,9 +70,7 @@ impl From<UsageError> for CliError {
 pub fn exit_for(code: ErrorCode) -> Exit {
     match code {
         ErrorCode::ServerUnavailable => Exit::NotRunning,
-        ErrorCode::InsufficientMemory | ErrorCode::Offline | ErrorCode::Busy | ErrorCode::Conflict | ErrorCode::NotAvailable => {
-            Exit::Refused
-        }
+        ErrorCode::InsufficientMemory | ErrorCode::Busy | ErrorCode::Conflict | ErrorCode::NotAvailable => Exit::Refused,
         ErrorCode::Unauthorized
         | ErrorCode::Forbidden
         | ErrorCode::NotFound
@@ -89,7 +87,6 @@ fn hint(code: ErrorCode) -> &'static str {
             " The admin key was refused: set PITWALL_ADMIN_KEY or --key-file <path> to the key in the Pitwall data folder (admin.key)."
         }
         ErrorCode::Forbidden => " Only the admin key may use this command.",
-        ErrorCode::Offline => " Turn off offline mode in Pitwall > Settings > Privacy to download.",
         ErrorCode::InsufficientMemory => " Unload a model (pitwall ps, pitwall unload <model>) or pick a smaller quantisation.",
         ErrorCode::Busy => " Try again in a moment.",
         _ => "",
@@ -137,7 +134,6 @@ mod tests {
         for (c, want) in [
             (ServerUnavailable, Exit::NotRunning),
             (InsufficientMemory, Exit::Refused),
-            (Offline, Exit::Refused),
             (Busy, Exit::Refused),
             (Conflict, Exit::Refused),
             (NotAvailable, Exit::Refused),
@@ -162,7 +158,7 @@ mod tests {
         assert!(e.message.starts_with("needs 9 GB.") && e.message.contains("pitwall unload"));
         let e: CliError = CommandError::new(ErrorCode::NotFound, "no such model").into();
         assert_eq!(e.message, "no such model.");
-        for c in [ErrorCode::Forbidden, ErrorCode::Offline, ErrorCode::Busy] {
+        for c in [ErrorCode::Forbidden, ErrorCode::Busy] {
             assert!(CliError::from(CommandError::new(c, "x")).message.len() > 3);
         }
     }

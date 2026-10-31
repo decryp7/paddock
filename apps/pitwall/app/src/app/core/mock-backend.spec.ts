@@ -123,14 +123,12 @@ describe('MockBackend', () => {
     await expect(mock.installBuild('nope')).rejects.toMatchObject({ code: 'notFound' });
   });
 
-  it('refuses network work in offline mode', async () => {
+  it('shows the LAN address only while LAN serving is on', async () => {
     const mock = new MockBackend({ now: clock });
     const s = await mock.settings();
-    await mock.saveSettings({ ...s, network: { ...s.network, offline: true, lanEnabled: true } });
+    await mock.saveSettings({ ...s, network: { ...s.network, lanEnabled: true } });
     expect((await mock.overview()).server.lan.url).toContain('https://');
-    await expect(mock.searchModels('x')).rejects.toMatchObject({ code: 'offline' });
-    await expect(mock.installBuild('cpu')).rejects.toMatchObject({ code: 'offline' });
-    await mock.saveSettings({ ...s, network: { ...s.network, offline: false, lanEnabled: false } });
+    await mock.saveSettings({ ...s, network: { ...s.network, lanEnabled: false } });
     expect((await mock.overview()).server.lan.enabled).toBe(false);
     await expect(mock.saveSettings({ ...s, server: { ...s.server, port: 80 } })).rejects.toMatchObject({ code: 'badRequest' });
   });
@@ -531,16 +529,11 @@ describe('MockBackend model updates', () => {
     expect((await mock.updateCheckStatus()).lastCheckedAt).not.toBeNull();
   });
 
-  it('turns the schedule on, reports the next check, and does nothing offline', async () => {
+  it('turns the schedule on, reports the next check', async () => {
     const mock = new MockBackend();
     const on = await mock.setUpdateCheck(true, 'daily');
     expect(on.settings).toEqual({ enabled: true, schedule: 'daily' });
     expect(on.nextCheckAt).not.toBeNull();
-    const s = await mock.settings();
-    await mock.saveSettings({ ...s, network: { ...s.network, offline: true } });
-    const off = await mock.updateCheckStatus();
-    expect(off).toMatchObject({ offline: true, nextCheckAt: null });
-    expect(await mock.checkUpdatesNow()).toMatchObject({ outcome: 'offline', notices: 0 });
     expect(await mock.updateNotices()).toEqual([]);
   });
 

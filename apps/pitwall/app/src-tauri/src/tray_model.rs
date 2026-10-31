@@ -280,7 +280,7 @@ mod tests {
     fn server(paused: bool) -> ServerInfo {
         serde_json::from_value(json!({
             "version": "0.1.0", "apiVersion": 1, "pid": 1, "port": 11435, "startedAt": 0,
-            "serving": if paused { "paused" } else { "serving" }, "offline": false,
+            "serving": if paused { "paused" } else { "serving" },
             "lan": {"enabled": false, "url": null, "certFingerprint": null}
         }))
         .unwrap()

@@ -146,7 +146,7 @@ export interface PitwallBackend {
   // Model update notices (check only; downloading is the user's decision)
   updateCheckStatus(): Promise<UpdateCheckStatus>;
   updateNotices(): Promise<UpdateNotice[]>;
-  /** Asks Hugging Face now about the repositories you downloaded from; refused in offline mode. */
+  /** Asks Hugging Face now about the repositories you downloaded from. */
   checkUpdatesNow(): Promise<UpdateCheckResult>;
   /** Turns the scheduled check on or off (off until you turn it on) and sets how often it runs. */
   setUpdateCheck(enabled: boolean, schedule: UpdateSchedule): Promise<UpdateCheckStatus>;
