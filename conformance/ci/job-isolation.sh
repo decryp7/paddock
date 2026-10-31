@@ -300,7 +300,7 @@ holder_matches() {
   for t in "$temp" "$(fill "$temp" / "$bs")"; do
     for h in "$home" "$(fill "$home" / "$bs")"; do
       line="$h/tools/paddock-dev/bin/0/paddock-dev ci slot hold --max 4 --owner $t --root $h --poll-ms 500 --max-hold-secs 12600"
-      if printf '%s\n' "$line" | grep -Eq -- "$re" 2>/dev/null; then return 0; fi
+      if grep -Eq -- "$re" <<<"$line" 2>/dev/null; then return 0; fi
     done
   done
   return 1

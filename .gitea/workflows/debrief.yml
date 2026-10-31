@@ -1106,7 +1106,7 @@ jobs:
           # http address, which the updater must never be given.
           BASE_URL: https://dev.decryptology.net/${{ github.repository }}/releases/download/${{ github.ref_name }}
         run: |
-          if ! find artifacts -name '*.sig' | grep -q .; then
+          if [ -z "$(find artifacts -name '*.sig')" ]; then  # no `| grep -q .`: under pipefail it can fail on a match (C62)
             echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
             exit 0
           fi

@@ -1053,3 +1053,12 @@ date. **Rule (55, ADR 0034):** every mechanism that exists more than once is lis
 the canonical implementation and every copy in the same change (a freeze does not stop it) or a copy is waived with a reason;
 each copy has an owner and a tag by which it is deleted, and that tag is refused while the copy exists. Before fixing a bug in
 any service, IPC, driver or UI helper, look it up in the register first.
+
+## An echoed script in a CI log is not a failure (2026-10-31, CI)
+Three jobs were filed as "sccache checksum mismatch" (23982, 24210, 24144). The runner echoes every step's script into the
+log, so the text `checksum mismatch` was there in all three, but the sccache step had passed. The jobs failed on a stale
+`tools/paddock-dev/Cargo.lock` and on a Dyno clippy error and test. When triaging a log, grep for the `::error::` lines and
+`##[error]Process completed` (the step that failed and the message it printed), never for words that also occur in the
+scripts. In the same change, `| grep -q` under pipefail was found a second time (setup-rust read an installed component as
+missing): **check C62** (report-only) now flags a pipe-fed quiet grep in every pipefail script and bash step; match with
+`grep -q … <<<"$out"` instead.
