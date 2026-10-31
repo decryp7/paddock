@@ -158,3 +158,13 @@ sequence against a fake guest with seeded faults (a second agent ten seconds lat
 starts). The GUI sequence runs against a fake GUI guest (`gui.test.mjs`) with seeded faults: a drag that does not take, a lost
 Login Items press, a translocated first launch, an unidentified legacy row, a window at the login start, a second agent after the
 login, Gatekeeper off. They need no VM.
+
+## Update test (`--update-test`, Spotter)
+
+`scripts/vm-smoke/spotter-update-assets.sh --src <checkout> --out <dir>` builds the OLD (`1.0.0-test.1`) and NEW (`1.0.0-test.2`) macOS
+builds with TEST keys made for the run (never the family key), a throw-away CA and a local feed folder (`ok`, `badsig`, `wrongkey`).
+`scripts/vm-smoke/vm-smoke.sh --app spotter --update-test <dir>` then installs the old build like a user (Safari, drag, Gatekeeper),
+trusts the CA in the VM only, serves the feed over HTTPS on the VM bridge, and drives the Updates window: feed down (message, app keeps
+running), one signature character changed (refused), a different key (refused), and the success (found, downloaded, verified,
+installed, relaunched on the new version, `codesign` passes, one process). A `-test.N` build may take its feed from
+`SPOTTER_TEST_UPDATE_FEED` (`update_feed` in Spotter's `lib.rs`); a release build ignores it.
