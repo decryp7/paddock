@@ -4,6 +4,16 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-proc`: a stopped process is waited for, not called idle (ADR 0031)
+- New `RunState { Running, Stopped, Exited, Unknown }` and `run_state(ProcessId) -> RunState`, identity-checked (a pid handed on is
+  `Exited`): macOS reads `pbi_status == SSTOP` from the `proc_pidinfo` call that also gives the CPU time, Linux `/proc/<pid>/stat`
+  field 3 (`T`, `t`), Windows says `Unknown`. `CpuSample` has a new `stopped: Option<bool>` from the same call.
+- `StartProbe` has default methods `pid() -> Option<ProcessId>` (None) and `run_state()`; a probe that names its process now gets
+  `Liveness::Paused` from `StartWatch` while it is stopped (SIGSTOP, App Tamer). New `liveness_of(id, exited)` for users of
+  `StartJudge` that build their own readings. Before, nothing produced `Paused`: a stopped child showed no CPU, became
+  `StallCause::Idle` (stuck) and was killed or offered a Retry that killed it.
+- New `StallCause::Paused` (not stuck, `StallAction::Wait`): "{what} is paused by macOS or another app; it goes on when it is
+  resumed." The judge says it once per pause; no tick counts and nothing resets while paused.
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.

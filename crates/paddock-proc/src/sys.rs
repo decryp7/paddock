@@ -595,6 +595,7 @@ pub fn cpu_sample(pid: u32) -> Option<crate::usage::CpuSample> {
     Some(crate::usage::CpuSample {
         micros: crate::usage::cpu_micros_from_stat(&stat, hz)?,
         started: crate::identity::parse_stat_start(&stat).and_then(start_from_ticks),
+        stopped: crate::runstate::parse_stat_state(&stat).map(crate::runstate::is_stop_letter),
     })
 }
 
@@ -630,7 +631,7 @@ pub fn cpu_sample(pid: u32) -> Option<crate::usage::CpuSample> {
             size,
         )
     };
-    let (task, started) = if got == size {
+    let (task, started, stopped) = if got == size {
         // SAFETY: filled by the call, which returned its whole size.
         let all = unsafe { all.assume_init() };
         let secs: u64 = all.pbsd.pbi_start_tvsec;
@@ -638,6 +639,7 @@ pub fn cpu_sample(pid: u32) -> Option<crate::usage::CpuSample> {
             all.ptinfo,
             secs.checked_mul(1_000_000)?
                 .checked_add(all.pbsd.pbi_start_tvusec)?,
+            Some(all.pbsd.pbi_status == SSTOP),
         )
     } else {
         // This call carries no identity: the start time is read before it and after it, and the sample is dropped if the
@@ -663,13 +665,19 @@ pub fn cpu_sample(pid: u32) -> Option<crate::usage::CpuSample> {
         return (start_time(raw)? == before).then_some(crate::usage::CpuSample {
             micros,
             started: Some(before),
+            stopped: None,
         });
     };
     Some(crate::usage::CpuSample {
         micros: task_micros(task, numer, denom),
         started: Some(crate::StartTime::from_micros(started)).filter(|t| t.as_micros() > 0),
+        stopped,
     })
 }
+
+/// `pbi_status` of a process stopped by a signal (`SSTOP` in `<sys/proc.h>`).
+#[cfg(target_os = "macos")]
+const SSTOP: u32 = 4;
 
 #[cfg(target_os = "macos")]
 fn task_micros(info: libc::proc_taskinfo, numer: u32, denom: u32) -> u64 {
@@ -709,6 +717,7 @@ pub fn cpu_sample(pid: u32) -> Option<crate::usage::CpuSample> {
             micros: ft(&t[2]).saturating_add(ft(&t[3])) / 10,
             started: crate::identity::micros_from_filetime(ft(&t[0]))
                 .map(crate::StartTime::from_micros),
+            stopped: None,
         })
     }
 }
@@ -717,4 +726,21 @@ pub fn cpu_sample(pid: u32) -> Option<crate::usage::CpuSample> {
 #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 pub fn cpu_sample(_pid: u32) -> Option<crate::usage::CpuSample> {
     None
+}
+
+/// The run state of `id`: `/proc/<pid>/stat` field 3 (`T` or `t` is stopped), read once with the start tick that names the
+/// process.
+#[cfg(target_os = "linux")]
+pub fn run_state(id: crate::ProcessId) -> crate::RunState {
+    match std::fs::read_to_string(format!("/proc/{}/stat", id.pid())) {
+        Ok(stat) => crate::runstate::from_stat(id, &stat, start_from_ticks),
+        Err(_) => crate::RunState::Exited,
+    }
+}
+
+/// The run state of `id` from the CPU sample (macOS: `pbi_status` of the same `proc_pidinfo` call as the CPU time and the
+/// start time); `Unknown` where the sample carries no state (Windows).
+#[cfg(not(target_os = "linux"))]
+pub fn run_state(id: crate::ProcessId) -> crate::RunState {
+    crate::runstate::from_sample(id, cpu_sample(id.pid()), || start_time(id.pid()))
 }
