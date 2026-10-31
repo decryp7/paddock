@@ -20,3 +20,13 @@ The developer and CI tool of ADR 0022. Run it with `./dev <command>` (`dev.cmd` 
 `tests/golden/`, and the script itself as a live oracle while it exists). Not ported until R4: `--ci` (the base from the event, the
 Gitea API for the last green run, the job outputs and summary), `--app` / `PLAN_APP`, the CI matrix legs and nextest narrowing.
 The prebuilt download of the binary, `dev-tool.yml` and the `dev-build` job, and `setup-rust`'s image fast path are R0b too.
+
+## `notices`
+
+`./dev notices <app> [--check]` regenerates (or verifies) `apps/<app>/.../THIRD_PARTY_NOTICES.md` from the `notices` block of
+`apps/<app>/paddock.ci.json`; it is the port of `conformance/src/notices` and `scripts/notices.sh`, which stay CI's tools until the
+call sites switch (both are registered in `docs/known-copies.toml`). Rust licences come from one bounded `cargo about generate` per
+manifest (the pinned cargo-about 0.9.2 is installed when another version is found, `npm ci --ignore-scripts` runs when there is no
+`node_modules`; `--no-install` skips both). `--check` exits 5 (findings) for a stale or missing file or a refused licence; `--json`
+lists counts, warnings, refused licences and each file's state. The output is reproduced byte for byte against golden files recorded
+from the old generator (`tests/golden/notices/`, `record.mjs`).

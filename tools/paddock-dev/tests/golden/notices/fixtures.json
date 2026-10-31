@@ -1,0 +1,53 @@
+{
+ "workspace": {
+  "args": [
+   "--root",
+   "<root>",
+   "--config",
+   "apps/x/paddock.ci.json"
+  ],
+  "files": {
+   "package-lock.json": "{\n  \"lockfileVersion\": 3,\n  \"packages\": {\n    \"\": {\n      \"workspaces\": [\n        \"apps/x/app\",\n        \"ui\"\n      ]\n    },\n    \"apps/x/app\": {\n      \"dependencies\": {\n        \"shipped\": \"1\",\n        \"@fontsource/inter\": \"5\",\n        \"uilib\": \"1\",\n        \"ghost\": \"1\"\n      },\n      \"optionalDependencies\": {\n        \"optional-thing\": \"1\"\n      },\n      \"peerDependencies\": {\n        \"peerlib\": \"3\",\n        \"peer-opt\": \"1\",\n        \"devpeer\": \"1\"\n      },\n      \"peerDependenciesMeta\": {\n        \"peer-opt\": {\n          \"optional\": true\n        }\n      },\n      \"devDependencies\": {\n        \"devpeer\": \"1\",\n        \"tooling\": \"1\"\n      }\n    },\n    \"ui\": {\n      \"dependencies\": {\n        \"other\": \"1\"\n      }\n    },\n    \"node_modules/shipped\": {\n      \"version\": \"1.0.0\",\n      \"license\": \"MIT\",\n      \"dependencies\": {\n        \"nested\": \"2\",\n        \"ghost2\": \"1\"\n      }\n    },\n    \"node_modules/shipped/node_modules/nested\": {\n      \"version\": \"2.0.0\",\n      \"license\": \"Apache-2.0\"\n    },\n    \"node_modules/nested\": {\n      \"version\": \"9.0.0\",\n      \"license\": \"MIT\",\n      \"dev\": true\n    },\n    \"node_modules/@fontsource/inter\": {\n      \"version\": \"5.0.0\",\n      \"license\": \"OFL-1.1\"\n    },\n    \"node_modules/uilib\": {\n      \"resolved\": \"ui\",\n      \"link\": true\n    },\n    \"node_modules/optional-thing\": {\n      \"version\": \"1.2.0\",\n      \"license\": \"ISC\"\n    },\n    \"node_modules/peerlib\": {\n      \"version\": \"3.0.0\",\n      \"license\": \"(MIT OR GPL-3.0-only)\"\n    },\n    \"node_modules/peer-opt\": {\n      \"version\": \"1.0.0\",\n      \"license\": \"MIT\"\n    },\n    \"node_modules/devpeer\": {\n      \"version\": \"1.0.0\",\n      \"license\": \"MIT\"\n    },\n    \"node_modules/tooling\": {\n      \"version\": \"1.0.0\",\n      \"license\": \"GPL-3.0-only\",\n      \"dev\": true\n    },\n    \"node_modules/other\": {\n      \"version\": \"4.0.0\",\n      \"license\": \"MIT\"\n    }\n  }\n}\n",
+   "apps/x/app/package.json": "{\"name\":\"x-app\"}\n",
+   "node_modules/shipped/LICENSE": "MIT License\r\n\r\nCopyright (c) Invented Author One  \r\n\r\nPermission is hereby granted, free of charge, to any person obtaining a copy.\r\n",
+   "node_modules/shipped/package.json": "{\"license\":\"MIT\"}\n",
+   "node_modules/shipped/node_modules/nested/LICENSE-APACHE": "Apache License\nVersion 2.0, January 2004\n\nInvented text for the fixture.\n",
+   "node_modules/shipped/node_modules/nested/NOTICE": "Nested notice\r\nline two\r\n",
+   "node_modules/shipped/node_modules/nested/licensing.js": "module.exports = 1;",
+   "node_modules/@fontsource/inter/LICENSE": "Copyright 2020 The Invented Font Authors\n\nSIL OPEN FONT LICENSE Version 1.1\n",
+   "node_modules/optional-thing/package.json": "{\"license\":\"ISC\"}\n",
+   "node_modules/peerlib/COPYING": "Invented copying terms.\n",
+   "node_modules/peerlib/license.md": "Second text of peerlib.\n",
+   "node_modules/peer-opt/LICENSE-MIT": "MIT License\n\nCopyright (c) Invented Author One  \n\nPermission is hereby granted, free of charge, to any person obtaining a copy.\n",
+   "node_modules/devpeer/LICENSE": "MIT License\r\n\r\nCopyright (c) Invented Author Two  \r\n\r\nPermission is hereby granted, free of charge, to any person obtaining a copy.\r\n",
+   "apps/x/app/about-a.json": "{\"crates\":[{\"package\":{\"name\":\"x-app\",\"version\":\"1.0.0\",\"source\":null},\"license\":\"MIT\"},{\"package\":{\"name\":\"serde-like\",\"version\":\"1.0.1\",\"source\":\"registry+https://example.invalid/index\"},\"license\":\"MIT OR Apache-2.0\"},{\"package\":{\"name\":\"zeta-crate\",\"version\":\"0.4.0\",\"source\":\"registry+https://example.invalid/index\"},\"license\":\"MIT\"},{\"package\":{\"name\":\"alpha-crate\",\"version\":\"2.0.0\",\"source\":\"registry+https://example.invalid/index\"},\"license\":\"Apache-2.0\"}],\"licenses\":[{\"id\":\"MIT\",\"text\":\"MIT License\\r\\n\\r\\nCopyright (c) Invented Rust Author A  \\r\\n\\r\\nPermission is hereby granted, free of charge, to any person obtaining a copy.\\r\\n\",\"used_by\":[{\"crate\":{\"name\":\"serde-like\",\"version\":\"1.0.1\"}},{\"crate\":{\"name\":\"zeta-crate\",\"version\":\"0.4.0\"}}]},{\"id\":\"Apache-2.0\",\"text\":\"Apache License\\nVersion 2.0, January 2004\\n\\nInvented text for the fixture.\\n\",\"used_by\":[{\"crate\":{\"name\":\"serde-like\",\"version\":\"1.0.1\"}},{\"crate\":{\"name\":\"alpha-crate\",\"version\":\"2.0.0\"}},{\"crate\":{\"name\":\"not-listed\",\"version\":\"9.9.9\"}}]}]}",
+   "apps/x/app/about-b.json": "{\"crates\":[{\"package\":{\"name\":\"serde-like\",\"version\":\"1.0.1\",\"source\":\"registry+https://example.invalid/index\"},\"license\":\"MIT OR Apache-2.0\"},{\"package\":{\"name\":\"beta-crate\",\"version\":\"3.1.0\",\"source\":\"registry+https://example.invalid/index\"},\"license\":\"MIT\"},{\"package\":{\"name\":\"notext-crate\",\"version\":\"1.0.0\",\"source\":\"registry+https://example.invalid/index\"},\"license\":\"BSD-3-Clause\"}],\"licenses\":[{\"id\":\"MIT\",\"text\":\"MIT License\\r\\n\\r\\nCopyright (c) Invented Rust Author B  \\r\\n\\r\\nPermission is hereby granted, free of charge, to any person obtaining a copy.\\r\\n\",\"used_by\":[{\"crate\":{\"name\":\"beta-crate\",\"version\":\"3.1.0\"}}]}]}",
+   "apps/x/paddock.ci.json": "{\"notices\":{\"name\":\"Fixture X\",\"npm\":\"app\",\"out\":[\"app/resources\",\"app/second\"],\"rustJson\":[\"app/about-a.json\",\"app/about-b.json\"]}}"
+  }
+ },
+ "flat": {
+  "args": [
+   "--app",
+   "Flat Demo",
+   "--root",
+   "<root>",
+   "--npm",
+   "app",
+   "--rust-json",
+   "about.json",
+   "--out",
+   "out"
+  ],
+  "files": {
+   "app/package-lock.json": "{\n  \"lockfileVersion\": 3,\n  \"packages\": {\n    \"\": {},\n    \"node_modules/a\": {\n      \"version\": \"1.0.0\",\n      \"license\": \"MIT\"\n    },\n    \"node_modules/x/node_modules/a\": {\n      \"version\": \"1.0.0\",\n      \"license\": \"MIT\"\n    },\n    \"node_modules/legacy\": {\n      \"version\": \"0.1.0\",\n      \"licenses\": [\n        {\n          \"type\": \"MIT\"\n        },\n        {\n          \"type\": \"BSD-3-Clause\"\n        }\n      ]\n    },\n    \"node_modules/gplthing\": {\n      \"version\": \"2.0.0\",\n      \"license\": \"GPL-3.0-only\"\n    },\n    \"node_modules/unlicensed\": {\n      \"version\": \"0.0.1\"\n    },\n    \"node_modules/seelic\": {\n      \"version\": \"1.1.0\",\n      \"license\": \"SEE LICENSE IN LICENSE.md\"\n    },\n    \"node_modules/caniuse-lite\": {\n      \"version\": \"1.0.1\",\n      \"license\": \"CC-BY-4.0\"\n    },\n    \"node_modules/llvmish\": {\n      \"version\": \"1.0.0\",\n      \"license\": \"Apache-2.0 WITH LLVM-exception\"\n    },\n    \"node_modules/plus\": {\n      \"version\": \"1.0.0\",\n      \"license\": \"MIT+\"\n    },\n    \"node_modules/nested-expr\": {\n      \"version\": \"1.0.0\",\n      \"license\": \"(MIT AND (ISC OR GPL-2.0-only))\"\n    },\n    \"node_modules/mixed\": {\n      \"version\": \"1.0.0\",\n      \"license\": \"MIT AND GPL-2.0-only\"\n    },\n    \"node_modules/lower\": {\n      \"version\": \"1.0.0\",\n      \"license\": \"mit or isc\"\n    },\n    \"node_modules/badjson\": {\n      \"version\": \"1.0.0\",\n      \"license\": \"ISC\"\n    },\n    \"node_modules/dev-thing\": {\n      \"version\": \"5.0.0\",\n      \"license\": \"GPL-3.0-only\",\n      \"dev\": true\n    },\n    \"node_modules/dev-opt\": {\n      \"version\": \"5.0.0\",\n      \"license\": \"GPL-3.0-only\",\n      \"devOptional\": true\n    }\n  }\n}\n",
+   "app/node_modules/a/LICENSE": "MIT License\r\n\r\nCopyright (c) Invented Author A  \r\n\r\nPermission is hereby granted, free of charge, to any person obtaining a copy.\r\n",
+   "app/node_modules/legacy/LICENSE.md": "Legacy licence text\n   \n\n",
+   "app/node_modules/gplthing/LICENSE": "Invented GPL stand-in text\n",
+   "app/node_modules/unlicensed/package.json": "{}",
+   "app/node_modules/badjson/package.json": "{ not json",
+   "app/node_modules/badjson/LICENSE": "MIT License\r\n\r\nCopyright (c) Invented Author A  \r\n\r\nPermission is hereby granted, free of charge, to any person obtaining a copy.\r\n",
+   "app/node_modules/mixed/COPYING": "Mixed text\n",
+   "about.json": "{\"crates\":[{\"package\":{\"name\":\"flat-app\",\"version\":\"1.0.0\",\"source\":null},\"license\":\"MIT\"},{\"package\":{\"name\":\"empty-lic\",\"version\":\"1.0.0\",\"source\":\"registry+https://example.invalid/index\"},\"license\":\"\"},{\"package\":{\"name\":\"no-lic-field\",\"version\":\"1.0.0\",\"source\":\"registry+https://example.invalid/index\"}},{\"package\":{\"name\":\"lgpl-or-mit\",\"version\":\"2.0.0\",\"source\":\"registry+https://example.invalid/index\"},\"license\":\"MIT OR LGPL-2.1-or-later\"},{\"package\":{\"name\":\"unicode-crate\",\"version\":\"1.0.0\",\"source\":\"registry+https://example.invalid/index\"},\"license\":\"Unicode-3.0\"},{\"package\":{\"name\":\"astral-crate\",\"version\":\"1.0.0\",\"source\":\"registry+https://example.invalid/index\"},\"license\":\"ISC\"},{\"package\":{\"name\":\"bmp-crate\",\"version\":\"1.0.0\",\"source\":\"registry+https://example.invalid/index\"},\"license\":\"ISC\"}],\"licenses\":[{\"id\":\"Unicode-3.0\",\"text\":\"UNICODE LICENSE © 2020 — invented\\r\\n\",\"used_by\":[{\"crate\":{\"name\":\"unicode-crate\",\"version\":\"1.0.0\"}}]},{\"id\":\"ISC\",\"text\":\"ISC text 𝒜 astral\\n\",\"used_by\":[{\"crate\":{\"name\":\"astral-crate\",\"version\":\"1.0.0\"}}]},{\"id\":\"ISC\",\"text\":\"ISC text ～ bmp\\n\",\"used_by\":[{\"crate\":{\"name\":\"bmp-crate\",\"version\":\"1.0.0\"}}]},{\"id\":\"MIT\",\"text\":\"MIT License\\r\\n\\r\\nCopyright (c) Invented Author A  \\r\\n\\r\\nPermission is hereby granted, free of charge, to any person obtaining a copy.\\r\\n\",\"used_by\":[{\"crate\":{\"name\":\"lgpl-or-mit\",\"version\":\"2.0.0\"}}]}]}"
+  }
+ }
+}

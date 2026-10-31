@@ -1,0 +1,5 @@
+err: warning: rust notext-crate@1.0.0: no licence text found (declared BSD-3-Clause)
+err: warning: npm optional-thing@1.2.0: no licence file found (declared ISC)
+out: notices: 5 Rust crates, 5 npm packages, 8 distinct licence texts, 7 licence expressions
+out: wrote <root>/apps/x/app/resources/THIRD_PARTY_NOTICES.md
+out: wrote <root>/apps/x/app/second/THIRD_PARTY_NOTICES.md

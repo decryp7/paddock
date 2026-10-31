@@ -130,3 +130,18 @@ fn self_hash_outside_a_repository_or_without_an_input_list_names_the_next_step()
     assert_eq!(code, 1);
     assert!(err.contains("inputs.txt"), "{err}");
 }
+
+#[test]
+fn notices_help_lists_it_and_a_missing_app_is_a_usage_error_with_one_json_object() {
+    let (code, out, _) = dev(&["--help"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("notices"));
+    let dir = std::env::temp_dir();
+    let (code, out, _) = dev(&["--json", "notices", "--root", &dir.display().to_string()]);
+    assert_eq!(code, 2);
+    let v: Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!((v["ok"].clone(), v["kind"].clone()), (false.into(), "usage".into()));
+    let (code, _, err) = dev(&["notices", "../etc", "--root", &dir.display().to_string()]);
+    assert_eq!(code, 2);
+    assert!(err.contains("not an app folder name"), "{err}");
+}

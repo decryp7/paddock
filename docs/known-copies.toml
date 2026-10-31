@@ -919,3 +919,23 @@ status = "built"
   owner = "sighter"
   delete_by = "sighter-v1.0.0"
   note = "Byte-identical to the canonical."
+
+[[mechanism]]
+id = "third-party-notices"
+title = "Generating THIRD_PARTY_NOTICES.md from cargo-about JSON and the npm lock (ADR 0022 R6)"
+canonical = "paddock-dev"
+paths = ["tools/paddock-dev/src/notices/**"]
+status = "built"
+adr = "0022"
+
+  [[mechanism.copy]]
+  paths = [
+    "conformance/src/notices/cli.mjs",
+    "conformance/src/notices/generate.mjs",
+    "conformance/src/notices/licences.mjs",
+    "conformance/bin/paddock-notices.mjs",
+    "scripts/notices.sh",
+  ]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "The generator and its wrapper script that CI and the apps' release gates still call (`scripts/notices.sh <app> [--check]`). `dev notices` is its port, golden-tested against its output (tools/paddock-dev/tests/golden/notices). The call sites switch and these files go after the app tags (ADR 0022 §3.7)."

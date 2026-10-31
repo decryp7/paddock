@@ -24,6 +24,7 @@ clap = { version = "4", default-features = false, features = ["std", "derive", "
 # Keep the key order of the JSON the planner prints, as scripts/affected.mjs does.
 serde_json = { version = "1", features = ["preserve_order"] }
 regex = "1"
+sha2 = "0.10"
 paddock-cli = { path = "../../crates/paddock-cli" }
 paddock-proc = { path = "../../crates/paddock-proc" }
 paddock-repo-graph = { path = "../../crates/paddock-repo-graph", features = ["git-history", "cargo-metadata"] }

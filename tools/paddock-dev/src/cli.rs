@@ -1,4 +1,4 @@
-use crate::{input_hash, plan, slots};
+use crate::{input_hash, notices, plan, slots};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -33,6 +33,8 @@ enum Command {
         #[command(subcommand)]
         command: GraphCommand,
     },
+    /// Regenerate (or with --check, verify) an app's THIRD_PARTY_NOTICES.md (the port of conformance's paddock-notices).
+    Notices(notices::Args),
 }
 
 #[derive(Subcommand)]
@@ -141,5 +143,6 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             base: a.base,
             head: a.head,
         }),
+        Command::Notices(a) => notices::command(&a),
     }
 }

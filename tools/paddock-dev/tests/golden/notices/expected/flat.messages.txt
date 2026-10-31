@@ -1,0 +1,19 @@
+err: warning: rust empty-lic@1.0.0: no licence text found (declared UNKNOWN)
+err: warning: rust no-lic-field@1.0.0: no licence text found (declared UNKNOWN)
+err: warning: npm unlicensed@0.0.1: no licence file found (declared UNKNOWN)
+err: warning: npm seelic@1.1.0: no licence file found (declared SEE LICENSE IN LICENSE.md)
+err: warning: npm caniuse-lite@1.0.1: no licence file found (declared CC-BY-4.0)
+err: warning: npm llvmish@1.0.0: no licence file found (declared Apache-2.0 WITH LLVM-exception)
+err: warning: npm plus@1.0.0: no licence file found (declared MIT+)
+err: warning: npm nested-expr@1.0.0: no licence file found (declared (MIT AND (ISC OR GPL-2.0-only)))
+err: warning: npm lower@1.0.0: no licence file found (declared mit or isc)
+err: warning: npm badjson@1.0.0: package.json is not valid JSON
+err: NON-PERMISSIVE: rust empty-lic@1.0.0: UNKNOWN
+err: NON-PERMISSIVE: rust no-lic-field@1.0.0: UNKNOWN
+err: NON-PERMISSIVE: npm gplthing@2.0.0: GPL-3.0-only
+err: NON-PERMISSIVE: npm unlicensed@0.0.1: UNKNOWN
+err: NON-PERMISSIVE: npm seelic@1.1.0: SEE LICENSE IN LICENSE.md
+err: NON-PERMISSIVE: npm mixed@1.0.0: MIT AND GPL-2.0-only
+err: NON-PERMISSIVE: npm lower@1.0.0: mit or isc
+out: notices: 6 Rust crates, 12 npm packages, 7 distinct licence texts, 14 licence expressions
+out: wrote <root>/out/THIRD_PARTY_NOTICES.md
