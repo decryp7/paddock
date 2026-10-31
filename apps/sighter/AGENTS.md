@@ -1,8 +1,8 @@
 # Sighter — engineering rules for coding agents and contributors
 
 Sighter finds UI elements by sight: a recorder, a labelling and training studio, and a local locator server that tests
-query. The stack follows the Paddock family: a Rust core, a Tauri 2 shell and an Angular UI. **No product code exists
-yet**; the design is `docs/proposal.md` (open questions pending). Read it and `docs/suite-lessons.md` before building.
+query. The stack follows the Paddock family: a Rust core, a Tauri 2 shell and an Angular UI. **Only the pure core exists
+yet** (`crates/sighter-core`: coordinate chain, detection model, tile grid, HUD core, benchmark harness; no model runtime, capture or UI); the design is `docs/proposal.md` (open questions pending). Read it and `docs/suite-lessons.md` before building.
 
 ## Paddock rules (binding)
 
@@ -32,15 +32,20 @@ Apply these deliberately. They are not decoration:
 
 ## Sighter-specific rules
 
-- **Vision first.** Locating works from pixels alone. Accessibility trees (UIA, AX, AT-SPI, DOM) are an optional
-  `LabelSource` that speeds up labelling; nothing at run time may depend on them.
+- **100 % computer vision** (ADR 0001 decision 9). Sighter uses only pixels, for local and remote windows: it never
+  calls UIA, AX, MSAA or AT-SPI, reads no DOM and uses no app hooks. OS window bounds, titles and the pointer position
+  are allowed only to pick and follow the capture target. A user's own test-framework adapter may pass rectangles it
+  already has as optional hints; hints never replace detection and are recorded as hint-sourced.
 - **Licences of models.** No AGPL, GPL or non-commercial models or weights: no Ultralytics YOLO (v5/v8/v11/v12), no
-  YOLOv9/v10, no YOLO-NAS weights, no OmniParser `icon_detect`. Prefer Apache-2.0/MIT detectors (RT-DETR, D-FINE, DEIM,
-  YOLOX, RF-DETR after verifying weights). Record every model's licence (including base weights) in the model card and
+  YOLOv9/v10, no YOLO-NAS weights, no OmniParser `icon_detect`. The detector is **RF-DETR, Apache-2.0 sizes only** (Nano, Small, Medium, Large), with D-FINE
+  (COCO-only checkpoints) as the fallback; the PML sizes, DEIMv2 and UI-DETR-1 are refused and RT-DETRv4 is pending a licence
+  review (ADR 0001 decisions 1 and 2). Record every model's licence (including base weights) in the model card and
   verify it against the official repo before adopting.
 - **Never click blindly.** Anything that acts on the UI acts on a located, scored element. Unreviewed elements block
   unattended runs; low confidence returns "needs labelling" rather than a guess.
-- **Recordings may contain secrets.** Redaction is applied before anything is written, password fields pause capture,
+- **Recordings may contain secrets.** Redaction is applied before anything is written or sent: password fields detected
+  from pixels get a **permanent solid fill, never a blur** (text inputs filled by default until classified, a pause
+  hotkey; frames carry a `redacted` flag; ADR 0001),
   typed key text is not stored by default, run folders have retention caps, and recordings are never logged, uploaded or
   committed.
 - **Tests never touch TCC-protected folders or real user data** (Desktop, Documents, Downloads, Photos, and similar),

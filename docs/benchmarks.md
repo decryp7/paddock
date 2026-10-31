@@ -93,7 +93,7 @@ Not benchmarks, though the names suggest it:
 | Pitwall | Angular budgets. Its Benchmarks page and `pitwall-core/src/benchmarks.rs` are a **product feature** (model benchmarks) | [apps/pitwall/docs/performance.md](../apps/pitwall/docs/performance.md) |
 | Spotter | Angular budgets | [apps/spotter/docs/performance.md](../apps/spotter/docs/performance.md) |
 | Pacenotes | The embedding comparison of ADR 0001 (research harness, no code in the tree) | [apps/pacenotes/docs/performance.md](../apps/pacenotes/docs/performance.md) |
-| Sighter | none (budgets only, in the proposal and the design review) | [apps/sighter/docs/performance.md](../apps/sighter/docs/performance.md) |
+| Sighter | one indicative upstream run: RF-DETR Nano/Small ONNX on CPU and CoreML (2026-10-29, load 18–24); budgets in the proposal and the design review | [apps/sighter/docs/performance.md](../apps/sighter/docs/performance.md) |
 | shell-demo, workbench-demo | Angular budgets in `ui/angular.json` (above); no other benchmark | this page |
 
 ### Workflows that run benchmarks
@@ -162,7 +162,10 @@ One line each. The dated records are in the app files.
   a 200 MB peak. BM25 plus potion-code meets the quality bar (0.750 / +28%).
 - **Pitcrew** (branch `docs/pitcrew-autoscale`, simulation): auto-scaling 1–4 runners cuts the mean wait from 171 to
   9.7 min with no contention.
-- **Pitwall, Spotter, Sighter, demos:** no recorded results beyond bundle budgets.
+- **Pitwall, Spotter, demos:** no recorded results beyond bundle budgets.
+- **Sighter:** no code yet; one indicative upstream measurement (RF-DETR Nano/Small ONNX on CPU and CoreML,
+  2026-10-29, at load 18–24, indicative) in [apps/sighter/docs/performance.md](../apps/sighter/docs/performance.md), for its
+  ADR 0001.
 
 ## Shared-crate results
 

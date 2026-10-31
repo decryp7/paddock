@@ -12,7 +12,7 @@ UI automation testing needs computer vision, so a fast model like YOLO; an LLM i
 
 Refinements:
 - **Identity comes from detector + OCR + layout anchors**, not from the detector alone: the detector gives class and box, OCR gives text, layout anchors (near, inside, nth) disambiguate repeats.
-- **A permissive YOLO-style detector**: RT-DETR, D-FINE or YOLOX (Apache-2.0/MIT). Ultralytics YOLO is AGPL and is excluded (section 8).
+- **A permissive DETR-style detector**: RF-DETR (Apache-2.0 sizes only) with D-FINE as the fallback, behind one ONNX adapter ([ADR 0001](adr/0001-object-detector.md) decisions 1 and 2). Ultralytics YOLO is AGPL and is excluded (section 8).
 - **Active-learning loop on UI change**: when the UI changes, low-confidence or unknown results are flagged, the LLM/VLM (Pitwall, optional) proposes labels, a human reviews them, and the model is retrained.
 - **Training for variation**: DPI, theme and size variation (section 6) so one model survives scaling, dark/light and resized windows.
 - **Two ways to test, one engine**: engineers' own code tests through the API, and tests Sighter authors and runs itself (section 7.8), both on the same models and resolver.
@@ -31,8 +31,7 @@ Refinements:
 Sighter is "Pitwall for UI vision": a local server that engineers call from their own test scripts to find things on a screen. Send a
 screenshot (or ask it to capture a window) and a query ("the Save button", text "Export", the third checkbox under "Options"); it answers
 with boxes, confidence and which layer found it. **It works from pixels alone**, so it covers legacy apps with no or broken accessibility:
-old desktop tools, custom-drawn UIs, remote sessions, games. Accessibility trees (UIA, AX, AT-SPI, DOM) are an optional label source that
-speeds up labelling; nothing at run time depends on them. It is a built-in optional module, not a plugin process.
+old desktop tools, custom-drawn UIs, remote sessions, games. Sighter is 100 % computer vision ([ADR 0001](adr/0001-object-detector.md) decision 9): it never reads accessibility trees (UIA, AX, MSAA, AT-SPI, DOM); a user's own framework adapter may pass rectangles as optional hints (7.11).
 
 Five parts:
 1. **Recorder**: captures windows/screens plus input events from the studio or headlessly on test machines.
@@ -66,9 +65,9 @@ watcher). Decision: **Sighter**.
 ```
  RECORD            IDENTIFY             REVIEW             TRAIN            SERVE              TEST
  recorder  ->  frames + events  ->  suggestions from  ->  human labels  ->  per-app model  ->  sighter-server  ->  engineer's
- (window/      scene-change,        OCR, template,        (queue, "same     (RT-DETRv2 /      layered resolver     scripts call
- screen/       dedup, click         detector, Pitwall     as...", track)    D-FINE/YOLOX)     /v1/locate ...       /v1/* (CI too)
- video import) boxes                VLM, a11y (optional)       |            ONNX, versioned        |
+ (window/      scene-change,        OCR, template,        (queue, "same     (RF-DETR /         layered resolver     scripts call
+ screen/       dedup, click         detector, Pitwall     as...", track)    D-FINE)           /v1/locate ...       /v1/* (CI too)
+ video import) boxes                VLM (names only)          |            ONNX, versioned        |
                                           ^                    |                                  v
                                           +---- flag for labelling <---- low confidence / unknown at run time
 ```
@@ -112,14 +111,18 @@ click is a strong labelling signal ("box from click": pixel differences before/a
 did you click?") and a step signal (what the user did next). Key text is not stored by default; see section 10.
 
 **Session metadata**: OS and version, display DPI/scale per monitor, theme (light/dark/high contrast), window title, process name,
-resolution, locale and font settings where known. Optional accessibility snapshot (any enabled `LabelSource`); the recorder works with
-an empty accessibility track.
+resolution, locale and font settings where known. No accessibility snapshot: Sighter is pixels only (ADR 0001 decision 9).
 
-**Privacy**: redaction regions drawn before recording (applied before anything is written), and automatic pause around password fields
-when detectable (UIA `IsPassword`, AX secure text field). See section 10.
+**Privacy**: redaction regions drawn before recording (applied before anything is written), and automatic redaction or pause around
+password fields detected from pixels, classified in memory at capture time: a masked-glyph (dot) check, an OCR label cue ("Password",
+"PIN", localised), a `password_field` detector class, text inputs filled by default until classified, and a user hotkey to pause.
+Redaction is a **solid, permanent fill, never a blur**; stored frames carry a `redacted` flag; the same redaction runs before every
+store or send (imports, run recordings and screenshots, exports, diagnostics, Pitwall crops) (ADR 0001, "Password fields and secrets,
+from pixels", with its limits). See section 10.
 
-**Importing videos**: existing recordings (mp4/mkv/webm/mov) import with no event track; labelled by OCR + detector + VLM + review only
-(marked lower quality in the project).
+**Importing videos**: existing recordings (mp4/mkv/webm/mov) import with no event track; boxes by OCR + templates + the app's detector +
+review only, names and classes optionally suggested by the VLM for those boxes (marked lower quality in the project). Only redacted
+frames are stored; the source video is never copied into the project (ADR 0001, "Training from test-run videos").
 
 **Encoding**: our own recordings are stored as PNG/WebP frames with timestamps, plus an optional H.264/H.265 4:4:4 stream through the
 OS encoder (Media Foundation, VideoToolbox/AVFoundation, GStreamer/VA-API) or ffmpeg as an LGPL dynamic build. The common path needs no
@@ -129,7 +132,7 @@ but the container/codec matrix is too wide. **Proposal**: extract the shared par
 launcher, ffprobe, frame extraction) into a Paddock crate `paddock-video`, which also helps Debrief.
 
 **Permissions** (explained and tested by a preflight screen in the UI, per OS): macOS Screen Recording (prompts repeat on unsigned
-builds, so signing and notarisation matter) and Accessibility (for event capture and optional AX); Windows needs no prompt but DRM
+builds, so signing and notarisation matter) and Accessibility (for event capture only; no AX reading); Windows needs no prompt but DRM
 content captures black and elevated windows need an elevated recorder to receive input events; Wayland portal consent per session.
 Unsandboxed with hardened runtime on macOS. Each OS update may re-prompt.
 
@@ -151,16 +154,16 @@ Pitwall; each suggestion shows its source and confidence.
 frames. "Same as..." applies one label to all look-alike crops (preview grid, uncheck exceptions).
 
 **Class taxonomy**: button, text field, checkbox, radio, toggle, dropdown, tab, menu item, icon, link, list row, slider, scrollbar,
-dialog, toast, progress, image, label, plus custom classes. UIA ControlType / AX role / ARIA role map to classes by a TOML table (data,
-not code).
+dialog, toast, progress, image, label, password field, plus custom classes (a TOML table, data not code). No mapping from UIA / AX /
+ARIA roles: Sighter reads no accessibility data (ADR 0001 decision 9).
 
-**Dataset**: splits by session (never by frame, to avoid leakage between near-identical frames), quality checks (duplicates,
+**Dataset**: splits by session and by screen fingerprint (never by frame, to avoid leakage between near-identical frames; ADR 0001), quality checks (duplicates,
 overlapping or tiny boxes, class imbalance, label/source disagreements), export to COCO JSON and YOLO txt (CVAT XML for round-tripping),
 and import of existing labels (COCO, YOLO, Label Studio JSON) so users can bring prior work.
 
 ### The review queue (manual labelling)
 Anything not identified automatically is flagged; nothing is silently dropped or guessed. Flag when:
-- no source proposes an element the pixels say exists (edge density, VLM or detector box without another source), or a region is only seen by one weak source;
+- no source proposes an element the pixels say exists (edge density, or a detector box without another source; the VLM never proposes boxes, ADR 0001), or a region is only seen by one weak source;
 - a source's confidence is below the threshold (default 0.6) or it returned no class;
 - sources disagree on class, or on box (IoU below 0.5), or two classes are within 0.1;
 - the class is unknown (not in the taxonomy) or OCR is unreadable.
@@ -168,8 +171,7 @@ Anything not identified automatically is flagged; nothing is silently dropped or
 Fusion (pure Rust, unit-testable): boxes from different sources merge at IoU >= 0.6 (class-aware NMS); score is a weighted agreement
 (weights in a TOML profile, calibrated per model by temperature scaling on reviewed data); two independent sources agreeing raises to
 0.95, disagreement lowers and flags. A label is **auto-accepted** only at score >= 0.85 with no disagreeing source. Reviewed labels carry
-`source=human, score=1`. If an accessibility source is enabled, its nodes are verified by pixels (reject off-screen, zero-sized,
-occluded or uniform crops) because trees can be stale or DPI-shifted.
+`source=human, score=1`. Adapter hints (7.11) enter fusion as `source=hint` with a low weight and never create a box on their own.
 
 Queue UI: items grouped by look-alike (crop embeddings), sorted by **impact** (frames containing the element times scripts/flows that
 depend on it). Each row shows the crop, full-frame context, the reason and one-click suggestions with source and score. Keys: number
@@ -187,15 +189,14 @@ disagreement, disagreement between the last two model versions).
 
 **Variation without image generation.** Diffusion models are too heavy for an 8 GB GPU and bad at UI text and layout. Use, in this order:
 1. **Real variation captured by the recorder**: DPI 100/125/150/200 percent, window sizes, light/dark/high-contrast themes, fonts, languages. The recorder's session metadata makes each axis explicit, and the studio shows coverage ("no 150 percent dark sessions yet").
-2. **Classic augmentation** designed for UIs: colour/theme jitter, scale 50 to 300 percent, font smoothing, JPEG, crop, blur, noise. No flips or rotations (text and layout are not symmetric).
+2. **Classic augmentation** designed for UIs: colour/theme jitter, scale jitter 0.9 to 1.1 only (frames are normalised to logical 100 % at run time and in training; display scales 100 to 300 percent are covered by that normalising and by HiDPI simulation, ADR 0001 "Training geometry matches inference"; amended 2026-10-29, was "scale 50 to 300 percent"), font smoothing, JPEG, crops on the inference tile grid, blur, noise. No flips or rotations (text and layout are not symmetric).
 3. **Synthetic compositing** of labelled elements: paste real labelled crops onto other real backgrounds/screens at varied positions and scales, with exact labels for free.
 
 Diffusion is at most an optional "Later" experiment.
 
-**Presets**: Fast (RT-DETR-R18-class, small GPU/CPU, minutes), Balanced (D-FINE/DEIM small/medium or RF-DETR), Accurate (D-FINE-L/X with
-the DEIM recipe; DEIMv2 if its DINOv3 weight licence is clean, verify). YOLOX-Nano for the CPU-only runner. Resume, pause, early stop,
-live loss/mAP chart, hardware estimate before start ("about 25 min on this GPU, 4 GB"). Fine-tune from COCO-pretrained Apache weights;
-1k to 5k frames per app is practical. Export ONNX (opset 17+, fixed input size per model, 640 default, 960/1280 for dense screens).
+**Presets** (ADR 0001 decision 1, user 2026-10-29): **Balanced = RF-DETR Small (default)**, **Fast = RF-DETR Nano** (CPU-only runners), **Accurate = RF-DETR Medium or Large**; the Apache-2.0 sizes only (Atto, Femto, Pico, XL and 2XL are refused). D-FINE-S/M (COCO-only checkpoints, DEIM recipe) is the fallback behind the same adapter. YOLOX, RT-DETR/RT-DETRv2 and DEIMv2 are not presets. Resume, pause, early stop,
+live loss/mAP chart, hardware estimate before start ("about 25 min on this GPU, 4 GB"). Fine-tune from the mirrored COCO checkpoints on Roboflow's Apache-2.0 label (ADR 0001 decisions 1 and 6);
+1k to 5k frames per app is practical. Export ONNX (fixed input size per model, sides multiples of 32; frames are cut into 640 tiles on the inference grid, ADR 0001 "Screen resolutions and HiDPI").
 
 **Evaluate**: mAP@0.5 and @0.5:0.95 per class, PR curves, F1-optimal threshold per class, per-class confusion matrix (click a cell for
 crops), hard-cases gallery, held-out session test (different theme/scale/OS), side-by-side version compare.
@@ -209,10 +210,30 @@ crops), hard-cases gallery, held-out session test (different theme/scale/OS), si
 | Rust-native (burn, candle) | Not for v1: no maintained RT-DETR/D-FINE recipe with augmentation, EMA, matcher losses, mAP tooling. Revisit for a tiny YOLOX-style detector later. |
 | **Managed sandboxed Python/PyTorch runtime, downloaded on request** (recommended) | Like Debrief's FFmpeg/llama.cpp runtimes (ADR 0009/0033): pinned bundle (python-build-standalone + torch wheels per OS/accelerator + vendored training code), SHA-256 pinned, self-tested on a generated mini dataset, out-of-process worker over the one IPC, no network, only the dataset readable and output writable, memory/time caps, cancel. CUDA torch is 2 to 3 GB, so not in the installer. Python is downloaded data, not shipped app code; needs an ADR exception clause for the "Rust + Angular only" rule. **User decision 2026-10-24: Python is acceptable for training when there is no viable Rust choice** (the ADR records the exception; inference in the app stays Rust). |
 | Export-only | Always provided: COCO + YOLO txt + generated script + README, for users with their own GPU box or who reject a Python runtime. |
-| User-chosen remote host over SSH | Same runtime image by checksum, dataset pushed, weights pulled. No third-party cloud. |
+| User-chosen remote host over SSH | **Not in v1** (ADR 0001, "Training from test-run videos": local training only, opt-in CUDA). Possible later, through its own ADR: opt-in through `paddock-net` `Egress`, off by default, blocked by Offline mode, redacted frames only, a per-job allow-list and a confirmation with the frame count. |
 
 Accelerators: CUDA (Windows/Linux), ROCm (Linux, best effort), Apple MPS (smaller models, op gaps fall back to CPU), CPU everywhere.
 Import of an externally trained ONNX model with a compatibility check (input size, output layout, class list).
+
+### 6.1 Main training path: video → auto-label → review → train (user, 2026-10-29)
+The main way an app gets its own model, decided in [ADR 0001](adr/0001-object-detector.md) ("Training from test-run
+videos", decision 10):
+1. **Import** a test-run video of the viewer window (or a local window) as a job with phases, progress and Cancel;
+   near-duplicate frames are dropped (perceptual hash plus a mean-difference threshold, robust to codec noise).
+2. **Auto-label**, started by the user after a confirmation that states the frame count and the expected time (rule 46,
+   section 9.1): boxes from computer vision only (OCR, templates, and the app's own detector once one exists); Pitwall's
+   VLM never places boxes, it names and describes the boxed regions and suggests a class.
+3. **Review queue**: uncertain labels first; quick accept or fix.
+4. **Train** RF-DETR Small as the app's own model on the GPU (MPS on Apple Silicon, opt-in CUDA on NVIDIA).
+5. **After training**, later videos are pre-labelled by the app's own model; the VLM is used only for new, unknown
+   screens.
+
+### 6.2 Augmentation and synthetic data
+Detailed in ADR 0001 ("Augmentation and synthetic data"): photometric, the remote-codec preset, geometric without flips
+or rotations, composition (copy-paste, occlusion), text re-rendering, label economy (tracking, active learning,
+hard negatives, class balancing) and synthetic screens recorded from the app under test, on 640 tiles cut on the
+inference grid with random-offset crops (no mosaic); every technique is kept only
+if a held-out set of real, unaugmented frames (split by session and by screen fingerprint) shows a gain.
 
 ## 7. The server API, clients and test layer
 
@@ -251,6 +272,12 @@ opens in the studio and exports a Debrief bundle.
 anchor under 100 ms with a region, 150 to 500 ms full screen on CPU (cache OCR by fingerprint); detector under 50 ms on a discrete/Apple
 GPU at 640 px (5 to 20 ms inference + 10 to 25 ms capture/pre-processing), "under 250 ms at 640" on an 8-core CPU for a small model
 (dense 1080p at 960 to 1280 px reaches 300 to 800 ms); VLM 1 to 5 s on GPU, 10+ s on CPU, never in those budgets.
+These are per-stage goals. The locate budgets are two tiers (ADR 0001 "Latency budgets: gate and target"; constants in
+`sighter_core::bench::budgets`, read by benchmarks only; list in [performance.md](performance.md)): the **gate**, one
+full-frame locate (capture excluded) at p95 of 500 ms on CoreML or DirectML and 2 s on the CPU at 1920 x 1200, and 1 s
+(GPU) or 4 s (CPU) at 3840 x 2160; and the **target**, end to end at 1080p, p50 80 ms and p95 250 ms on a GPU, p95 600 ms
+on an 8-core CPU. Only the gate can fail a release. At run time a locate has no budget of its own, only the caller's step
+timeout (ADR 0001 "Locate at run time").
 
 ### 7.1 Test model: the app state graph
 Screens are nodes, actions are edges, both built from recordings and run history (this is the Eggplant DAI idea, without the cloud: DAI models
@@ -486,7 +513,7 @@ User decision 2026-10-23: include Pitwall in the mix; if a test is stuck, go bac
 User decisions 2026-10-23: engineers who code their tests with FlaUI can keep using FlaUI and use the Sighter API for the UI FlaUI cannot handle, and the same holds for **any other UI testing framework** (Java and Python have their own). This is a key selling point: Sighter is an **add-on, not a replacement**, for existing UIA/Appium/pywinauto/Robot suites. No suite has to be rewritten to adopt it. FlaUI is the lead example. Familiar to Playwright users; FlaUI users keep their FlaUI code and add Sighter locators where UIA can't see.
 
 **The shared integration pattern** (works with any framework):
-1. **Scope**: nearly every framework exposes an element's **bounding rectangle** and/or a **window handle (hwnd) or process id**. The adapter passes that to Sighter, which searches only inside that region or window (`region` in `locate`, or a window-bound session from 7.12). A custom-drawn grid or canvas inside an otherwise accessible window is the typical case.
+1. **Scope (optional hints)**: nearly every framework exposes an element's **bounding rectangle** and/or a **window handle (hwnd) or process id**. The user's adapter may pass what it already has to Sighter as an **optional hint** (ADR 0001 decision 9): Sighter itself never calls UIA, AX, MSAA or AT-SPI; a hint narrows the search and ranks candidates but never replaces detection, and results record it as hint-sourced. Sighter then searches only inside that region or window (`region` in `locate`, or a window-bound session from 7.12). A custom-drawn grid or canvas inside an otherwise accessible window is the typical case.
 2. **Fallback helper** ("framework first, vision when it misses"): `FirstOf(frameworkQuery, sighterLocator)` tries the framework, falls back to vision when it throws or finds nothing, and logs which one answered, so a team sees where its locators fail.
 3. **Shared input in one coordinate space**: framework mouse/keyboard and Sighter actions both use the OS input, so they interleave safely when the adapter does all coordinate conversion in one helper with per-monitor DPI awareness (the same helper as 7.12). Sighter returns the centre in screen coordinates; the adapter converts for the framework when it needs window-relative ones.
 4. **Shared waits**: Sighter's auto-waiting and `Expect` work on either side; `FirstOf` accepts both in one wait.
@@ -599,7 +626,7 @@ User point 2026-10-23: very old C++ applications have no UIA, so Sighter may be 
 
 **Cheap helpers that are not UIA** (optional, Windows only, never required; the pixel path works without them):
 - **Win32 window info**: HWND enumeration, window titles, class names and process ids. Used to identify, activate and scope windows and dialogs reliably (7.12 uses the same data), even without UIA.
-- **MSAA (IAccessible)**: some old controls expose it even without UIA. It is an optional extra `LabelSource` (like the other accessibility sources, section 5), never a run-time dependency.
+- **MSAA (IAccessible)**: not used by Sighter (ADR 0001 decision 9). A user's own helper may read it and pass rectangles as optional hints (7.11), like any adapter.
 
 **Legacy-specific considerations**
 - **Non-DPI-aware apps** are bitmap-scaled by Windows: record and train at the DPI the tests run at, or let Sighter normalise the scale (detect the scale factor from the window's client size versus its logical size).
@@ -694,7 +721,7 @@ A small `Target` interface: `frames()` (screenshots), `input()` (keyboard and mo
 Per request, configurable: **cache** (screen fingerprint + query + model version) -> **template** (stored crop, fingerprint matches) ->
 **OCR anchor** (query has text, or the element has a name) -> **trained detector** (class + context scored with OCR text) -> **Pitwall
 VLM grounding** (opt-in; never the default for unattended runs) -> **needs labelling** (flag, with screenshot). The detector is a
-backend behind a `Detector` trait; if a better permissive model appears, swap the ONNX. The product does not promise YOLO and uses no
+backend behind a `Detector` trait: **RF-DETR** (Apache-2.0 sizes) is primary and **D-FINE** the fallback, both through one "ONNX DETR, fixed input, no NMS" adapter in `sighter-infer`; if a better permissive model appears, swap the ONNX file and the catalogue entry. The product does not promise YOLO and uses no
 Ultralytics code or weights.
 
 **Pitwall's role**: identifies and names elements ("Settings (gear)"), resolves ambiguity ("which of these numbered crops is the Save
@@ -707,7 +734,7 @@ estimate and a hard cap per project.
 ### Evaluation of the locating approaches
 | Approach | Accuracy on GUIs | Speed CPU / GPU | Training data | Deterministic | Licence | Rust / ONNX |
 |---|---|---|---|---|---|---|
-| Trained detector (RT-DETRv2, D-FINE/DEIM, RF-DETR, YOLOX) | Per-app: mAP@0.5 of 0.8 to 0.95 on a consistent app is typical (to be measured); poor on unseen apps. COCO: RT-DETRv2-L 53.4 AP, D-FINE/DEIM-L 54.7 AP (not UI numbers) | CPU ~60 to 250 ms small model at 640 to 960 px; GPU ~5 to 20 ms | 300 to 3000 labelled frames per app/theme family | Yes | Apache-2.0 per sources (verify weights/backbones) | ONNX export routine; `ort` or `tract` |
+| Trained detector (RF-DETR primary, D-FINE fallback; RT-DETRv2, DEIM and YOLOX as general reference) | Per-app: mAP@0.5 of 0.8 to 0.95 on a consistent app is typical (to be measured); poor on unseen apps. COCO: RT-DETRv2-L 53.4 AP, D-FINE/DEIM-L 54.7 AP (not UI numbers) | CPU ~60 to 250 ms small model at 640 to 960 px; GPU ~5 to 20 ms | 300 to 3000 labelled frames per app/theme family | Yes | Apache-2.0 per sources (verify weights/backbones) | ONNX export routine; `ort` or `tract` |
 | Open-vocabulary detectors (OWLv2, Grounding DINO, Florence-2) | Natural-image training; weak on dense UIs and icons (no ScreenSpot-Pro figure found, verify) | Seconds CPU, 100 to 400 ms GPU | None to start | Mostly | Grounding DINO Apache-2.0, Florence-2 MIT, SAM 2 Apache-2.0 (per Roboflow, verify); OWLv2 unconfirmed; OmniParser icon_detect AGPL (no) | Florence-2 and OWL have ONNX exports; Grounding DINO awkward |
 | GUI-grounding VLMs (UI-TARS, ShowUI, OS-Atlas, SeeClick, Qwen-VL) | ScreenSpot-Pro: GPT-4o ~0.8%, SeeClick 1.1%, ShowUI-2B 7.7%, OS-Atlas-4B 3.7%, OS-Atlas-7B 18.9%, Qwen2.5-VL-7B 29.0% (3B 24.2, 32B 39.4, 72B 43.6), UI-TARS-72B 38.1%, UI-TARS-1.5-7B ~49.6% (blog, verify). ScreenSpot: OS-Atlas-7B 84.1, UI-TARS-7B 91.6. Good on ordinary screens, mediocre on dense pro/legacy apps | Seconds to tens of seconds CPU (3B to 7B); ~1 to 4 s consumer GPU | None | No (sampling, version drift) | UI-TARS Apache-2.0 (verify), Qwen-VL Apache-2.0 for most sizes, ShowUI MIT (verify), OS-Atlas/SeeClick (verify) | llama.cpp GGUF via Pitwall |
 | Template / feature matching (SikuliX style) | Excellent on a static UI at fixed scale/theme; fails on theme, DPI, font smoothing, language change | 1 to 30 ms (FFT NCC on a region) | One crop per element | Yes | Own code or `imageproc`/`fast_image_resize` (MIT); OpenCV avoided (heavy C++) | Pure Rust |
@@ -721,11 +748,11 @@ runner has no GPU/Pitwall, or icons have no text.
 ### Detector licence table (confirm in the repos before adoption)
 | Model | Licence | Facts | Verdict |
 |---|---|---|---|
-| **RT-DETR / RT-DETRv2** | Apache-2.0 (repo; verify weights) | v2: L 53.4 AP ~108 FPS, X 54.3 AP ~74 FPS on T4 TensorRT FP16 (arXiv 2407.17140); NMS-free, clean ONNX export | **Primary** (Fast/Balanced) |
-| **D-FINE** | Apache-2.0 code and weights | DEIM-D-FINE L 54.7 AP / 124 FPS, X 56.5 / 78 FPS on T4 (Roboflow summary); D-FINE-M 52.3 | **Accuracy tier**; better localisation for click targets |
-| **DEIM / DEIMv2** | Apache-2.0 (DEIM repo; DEIMv2 verify) | DEIMv2-S 50.9 AP, 11M params, 26 GFLOPs; X 57.8 AP (arXiv 2509.20787); DEIM is a recipe on D-FINE/RT-DETR | Use the recipe; DEIMv2 (DINOv3 backbone, own licence, verify) as Accurate if clean |
-| **RF-DETR** (Roboflow) | Apache-2.0 per Roboflow licensing page (verify backbone weights) | DINOv2 backbone, fast fine-tuning | Candidate for Balanced; no platform dependency |
-| **YOLOX** | Apache-2.0 | 2021, Nano/Tiny/S run on CPU, anchor-free, needs NMS | CPU/tiny preset; burn port target |
+| **RT-DETR / RT-DETRv2** | Apache-2.0 (repo; verify weights) | v2: L 53.4 AP ~108 FPS, X 54.3 AP ~74 FPS on T4 TensorRT FP16 (arXiv 2407.17140); NMS-free, clean ONNX export | Not in the catalogue; the same adapter would load it. **RT-DETRv4 is pending** a licence review (ADR 0001 decision 2, plan item P4) |
+| **D-FINE** | Apache-2.0 code and weights | DEIM-D-FINE L 54.7 AP / 124 FPS, X 56.5 / 78 FPS on T4 (Roboflow summary); D-FINE-M 52.3 | **Fallback** (S/M, COCO-only checkpoints; the `obj365` and `obj2coco` ones are not used), used if RF-DETR misses the CPU budget or fails on an execution provider |
+| **DEIM / DEIMv2** | DEIM: Apache-2.0; DEIMv2: non-commercial (ADR 0001 research) | DEIMv2-S 50.9 AP, 11M params, 26 GFLOPs; X 57.8 AP (arXiv 2509.20787); DEIM is a recipe on D-FINE/RT-DETR | Use the DEIM recipe for D-FINE; **DEIMv2 excluded** by licence |
+| **RF-DETR** (Roboflow) | Apache-2.0 for Nano, Small, Medium and Large; the larger PML sizes (Atto to Pico, XL, 2XL) are refused. Objects365 lineage accepted for personal use (ADR 0001 decision 1) | DINOv2 backbone, fast fine-tuning | **Primary**: Small default (Balanced), Nano (Fast), Medium or Large (Accurate); no platform dependency |
+| **YOLOX** | Apache-2.0 | 2021, Nano/Tiny/S run on CPU, anchor-free, needs NMS | Not used in v1 (needs NMS, no adapter); Nano is the CPU preset instead |
 | PP-YOLOE (PaddleDetection) | Apache-2.0; MMYOLO's port is GPL-3 | Second DL stack | Skip |
 | YOLO-NAS | Code Apache-2.0, **weights non-commercial** (Frigate docs; Roboflow page conflicts) | | **Excluded** |
 | Ultralytics YOLOv5/8/11/12, YOLOv10 (THU-MIG) | **AGPL-3.0** | | **Excluded**, also OmniParser icon_detect |
@@ -736,7 +763,7 @@ runner has no GPU/Pitwall, or icons have no text.
 |---|---|---|
 | Qwen2.5-VL (3B/7B) / Qwen3-VL (2B to 32B) | Apache-2.0 for most sizes (3B and 72B Qwen2.5-VL used a Qwen licence, verify per size) | Primary recommendation: pixel-coordinate grounding, good OCR. Check Qwen3-VL support in Pitwall's pinned llama.cpp (`capabilities.json`). |
 | UI-TARS (1.5-7B and successors) | Apache-2.0 (verify checkpoint) | Qwen2.5-VL fine-tuned for GUI grounding; best "locate" model per size; verify llama.cpp compatibility. Qwen3-VL as "describe" model. |
-| Florence-2 (0.23B/0.77B) | MIT | Tiny open-vocabulary detection/OCR; not llama.cpp, run as ONNX in Rust. CPU-only bootstrap labeller (the no-Pitwall path). |
+| Florence-2 (0.23B/0.77B) | MIT | Tiny open-vocabulary detection/OCR; not llama.cpp, run as ONNX in Rust. Not used for boxes in v1 (ADR 0001 decision 5). |
 | OmniParser v2 caption model | MIT for icon_caption; **icon_detect AGPL, never use** | Reuse the idea (detect then caption crops), not the detector. |
 | MiniCPM-V 2.6 / 4.x | Apache-2.0 code; weights under MiniCPM licence (free commercial after registration, verify) | Optional. |
 | Gemma 3 (4B/12B vision) | Gemma Terms of Use (custom, not OSI) | Optional user-installed only, not default or bundled. |
@@ -749,8 +776,8 @@ runner has no GPU/Pitwall, or icons have no text.
 
 ### `LabelSource` trait
 `propose(frame, context) -> Vec<Proposal{box, class?, name?, score, source}>`. Providers, all interchangeable and fused by
-`sighter-core`: `Ocr`, `Template`, `Detector` (active learning), `Vlm` (Pitwall), `Human`, and the optional `A11yUia`, `A11yAx`,
-`A11yAtspi`, `Dom` (CDP, reusing Paddock's `chromium-driver`). Runs never import them.
+`sighter-core`: `Ocr`, `Template`, `Detector` (active learning), `Vlm` (Pitwall, names and classes for existing boxes only), `Human`.
+No accessibility or DOM sources (ADR 0001 decision 9); adapter hints are not a `LabelSource` but a recorded hint on a query.
 
 ## 9. Family integrations
 - **Debrief**: a run produces `run.mp4` (from capture frames), a step timeline JSON and a clock-offset record; "Open run in Debrief" imports via the video feature (ADR 0033) with steps as markers so a failed step at 10:42:07 sits beside the app's log lines. Needs a small versioned file contract (Paddock ADR). Shared `paddock-video` crate.
@@ -769,7 +796,7 @@ runner has no GPU/Pitwall, or icons have no text.
 
   | Pitwall-assisted feature | Non-AI path (always works) | Without Pitwall you lose |
   |---|---|---|
-  | Label suggestions (list elements on a frame) | OCR + template + detector pre-labels + click-derived boxes + optional Florence-2 ONNX on CPU (MIT) + edge/connected-component heuristics | speed on a new app |
+  | Label suggestions (list elements on a frame) | OCR + template + detector pre-labels + click-derived boxes + edge/connected-component heuristics (no Florence-2 box bootstrap in v1, ADR 0001) | speed on a new app |
   | Element naming ("Settings (gear)") | OCR text of the element or its neighbours; otherwise `icon-17` with a human name in the queue; "same as..." | automatic icon names |
   | Grounding fallback at run time | none: step fails or pauses as "needs labelling" (the safe default anyway) | recovery from unseen UI changes |
   | Step descriptions in reports | templated text from the recorded step ("Click 'Checkout' (button) on Cart") | prose descriptions |
@@ -778,14 +805,23 @@ runner has no GPU/Pitwall, or icons have no text.
   | Plan drafting | the codebase tool is a separate decision; hand-written plans work | AI-drafted cases (the codebase tool's concern) |
   | Localisation language id / "is this translated" | OCR language detection (PaddleOCR lang models) and string comparison | semantic checks |
 - **One GPU.** Batch labelling and description jobs go to Pitwall at **batch priority and run only when idle** (no training, no interactive Playground request, optionally only when the machine is not in use); they pause and resume, are cancellable, and show an estimate and a per-project cap. Training reserves the GPU: Sighter asks Pitwall to unload the VLM first and restores it after. Interactive `locate` never waits on a batch job.
-- **Licences and privacy**: no AGPL/GPL/non-commercial models or code (section 8 table; UI-TARS Desktop and OmniParser's detector excluded as code or weights as stated there); strictly local (loopback, no cloud model, no telemetry); recordings may contain secrets (section 10: redaction before storage, no key text, secrets only by reference in plans and data tables, nothing leaves the machine except the two opt-in egresses: model/runtime downloads and the user-chosen test-management or training host); never click blindly.
+- **Licences and privacy**: no AGPL/GPL/non-commercial models or code (section 8 table; UI-TARS Desktop and OmniParser's detector excluded as code or weights as stated there); strictly local (loopback, no cloud model, no telemetry); recordings may contain secrets (section 10: redaction before storage, no key text, secrets only by reference in plans and data tables, nothing leaves the machine except the opt-in egresses: model/runtime downloads and the user-chosen test-management host; no training host in v1, ADR 0001); never click blindly.
 
 ### 9.1 Sighter to Pitwall contract (vision)
 **What Sighter sends**: Pitwall's OpenAI-compatible `/v1/chat/completions` with images inline (base64), under a Pitwall app key for Sighter
 (pairing code, key in the OS credential store, local only), at low job priority with cancel. Five request kinds, temperature 0:
-1. **Label suggestions**: "list the interactive elements" on a distinct frame -> boxes + classes (feeds the review queue).
+1. **Names and classes for existing boxes**: a frame with its computer-vision boxes numbered -> a name and a suggested
+   class per box (feeds the review queue). **The VLM never places boxes** (ADR 0001 decision 5; runtime grounding, kind 3,
+   is the one exception, used for one action and never stored). **Only for a small selection of frames the user
+   chooses, or after a confirmation that states the frame count and the expected time** (rule 46; amended 2026-10-29 by
+   the user, [ADR 0001](adr/0001-object-detector.md) decision 5; wording aligned in ADR 0001 revision 4, it was "label
+   suggestions: list the interactive elements -> boxes + classes"). Whole recordings are pre-labelled by the app's own
+   trained detector; before the first model exists, by OCR, templates and the review queue only (Sighter is 100 %
+   computer vision, ADR 0001 decision 9).
 2. **Element naming**: a numbered grid sheet of crops -> a name per crop ("Settings (gear)").
-3. **Grounding fallback**: "where is X" -> box, only when cheaper layers fail (never the default for unattended runs).
+3. **Grounding fallback**: "where is X" -> box, only when cheaper layers fail (never the default for unattended runs); the box is
+   used for that one action after the re-check, marked `source=vlm-grounding`, and never written into the dataset, the cache or the
+   review queue (ADR 0001, Context).
 4. **Step descriptions**: before/after frames + the click -> "Click the gear icon in the toolbar to open Settings" for reports and search.
 5. **Screen-state descriptions**: a short name and summary for a screen ("Save as dialog"), used for fingerprints and `assert_screen`.
 
@@ -802,13 +838,13 @@ UI-TARS-1.5-7B or Qwen2.5-VL-7B). Sighter asks by capability (`vision`, `auto:vi
 
 **Model fit on 8 GB**: at most a 7B 4-bit model (about 5 to 6 GB); Pitwall's memory management unloads it while Sighter trains.
 **Without Pitwall**: everything works (record, OCR, template, detector, training, serving); you lose automatic naming, step descriptions and the
-VLM fallback, and the review queue picks up the slack (Florence-2 ONNX optionally bootstraps boxes on CPU).
+VLM fallback, and the review queue picks up the slack (Florence-2 box bootstrapping is not in v1, ADR 0001).
 
 ## 10. Safety and privacy
 - **Never a blind click**: low confidence pauses (attended) or fails (unattended) with a screenshot and candidates; confidence gates per class (section 5).
 - **`act` guards**: off by default; per-key permission; bound to a window/process; deny-list of titles ("Delete account", UAC, Keychain prompts); no keystrokes into password fields; refuses secure-desktop surfaces; dry-run and step-by-step modes; max-actions cap; global panic hotkey (default Ctrl+Alt+Shift+Esc) and a visible "Sighter is driving" border; physical input pauses the run.
 - **Recorder privacy**: redaction regions applied before storage; auto-pause on password fields; typed key text not stored by default (keys recorded as events without characters unless the user opts in per project); consent screen before input capture; permission preflight per OS.
-- **Data**: recordings and datasets stay in the project folder; optional encrypted at rest; "delete recording but keep labels"; no network except user-requested runtime/model downloads and the user-chosen training host; VLM calls only to local Pitwall. Server: loopback only, hashed per-app keys, size caps, rate limits, logs hold no screenshots unless run logging is enabled per key.
+- **Data**: recordings and datasets stay in the project folder; optional encrypted at rest; "delete recording but keep labels"; no network except user-requested runtime/model downloads (no remote training host in v1, ADR 0001); VLM calls only to local Pitwall. Server: loopback only, hashed per-app keys, size caps, rate limits, logs hold no screenshots unless run logging is enabled per key.
 - **Agent mode and MCP rules** (7.14, user 2026-10-23): enforced in the MCP server, never in the client, so they hold for every host. Allow-listed apps and windows; confirmation by the user for destructive actions (send, delete, pay, install); step and time budget; a visible "agent in control" overlay with a stop hotkey; a full replay log of observations and actions; stdio or loopback only, local models only. Remote targets (7.15): the user confirms before a run starts on a remote PC; RDP credentials come from the OS credential store, never from plans, prompts or logs; the model sees screenshots only through local Pitwall.
 - Per AGENTS.md: validate every IPC/HTTP argument in Rust, parsers never panic, bounded inputs (image size, frame count, regex), plugin-free module guarded by `guard::catch`, every failure mode tested.
 
@@ -816,10 +852,10 @@ VLM fallback, and the review queue picks up the slack (Florence-2 ONNX optionall
 
 **Crates** (Rust workspace, Paddock conventions: pure core, thin edges, ports and adapters):
 - `sighter-core`: domain types, taxonomy, fusion/confidence, dataset assembly, resolver, fingerprints, metrics (mAP, confusion), active-learning scoring, version registry. Pure. Ports: `ScreenSource`, `LabelSource`, `Detector`, `Trainer`, `Vlm`, `InputDriver`, `Store`.
-- `sighter-record`: per-OS `ScreenSource` and event-capture adapters (WGC/DXGI, ScreenCaptureKit, PipeWire/XShm), out-of-process helper, optional a11y snapshot adapters.
+- `sighter-record`: per-OS `ScreenSource` and event-capture adapters (WGC/DXGI, ScreenCaptureKit, PipeWire/XShm), out-of-process helper (no accessibility adapters).
 - `paddock-video` (shared, extracted from Debrief): ffmpeg runtime, encoders, frame extraction. `sighter-frames`: sampling, scene-change, dedup (`image`, `fast_image_resize`, perceptual hash, SSIM).
 - `sighter-model` (state graph, coverage, path generation; pure), `sighter-plan` (`.sighterplan` parser, resolution, task list, traceability; uses shared `paddock-testplan`), `sighter-report` (JUnit/TRX/Allure/JSON writers, matrices, visual-diff levels).
-- `sighter-ocr`, `sighter-infer` (`ort`/`tract`), `sighter-train` (`ManagedPython` default, `ExportOnly`, later `Burn`), `sighter-pitwall` (job queue and prompts on top of the shared `paddock-pitwall` client).
+- `sighter-ocr`, `sighter-infer` (`ort` with a self-built ONNX Runtime, in its own sidecar; ADR 0001 decision 4), `sighter-train` (`ManagedPython` default, `ExportOnly`, later `Burn`), `sighter-pitwall` (job queue and prompts on top of the shared `paddock-pitwall` client).
 - `sighter-target` (the `Target` interface of 7.15 with the Local adapter; RDP adapter on FreeRDP, VNC and IP-KVM adapters later), `sighter-mcp` (MCP server, tool definitions and the safety guard of 7.14) and `sighter-agent` (the `sighter do` loop over the shared `paddock-pitwall` chat client; v1).
 - `sighter-server` (axum-style HTTP, OpenAPI generation), `sighter-input` (optional `act`: SendInput, CGEvent, XTEST, RemoteDesktop portal/libei, scoped), `sighter` CLI (reuse `paddock-cli`).
 - `app/src-tauri` + `app/src` (Angular 22, `paddock-ui`): Home dashboard, Recordings, Label (canvas + queue), Models, Playground (drop a screenshot or capture live, type a query, see every layer's candidates and timing), Runs, Keys and permissions, Settings. Backend service by DI token with a mock for browser dev.
@@ -834,7 +870,7 @@ weight licence; optional FP16/INT8). Project = SQLite (sessions, frames, events,
 ## 12. VRAM and hardware (8 GB GPU target)
 | Workload | VRAM | Notes |
 |---|---|---|
-| Training RT-DETR-R18 / D-FINE-S / YOLOX-S at 640 px | ~3 to 7 GB, small batches (4 to 8), AMP | Fits 8 GB; 2k frames feasible on 6 GB or CPU slowly; Accurate presets (L/X, DEIMv2) want 12+ GB, so fall back to Fast or a remote host |
+| Training RF-DETR Small (Nano/Medium) or D-FINE-S at 640 px | ~3 to 7 GB, small batches (4 to 8), AMP | Fits 8 GB; 2k frames feasible on 6 GB or CPU slowly; Accurate presets (Medium/Large) want more (measure in the spike), so fall back to Fast (no remote host in v1) |
 | Inference detector (ONNX, 640 px) | under 1 GB | Also runs on CPU |
 | OCR (PaddleOCR mobile) | a few hundred MB | CPU is fine |
 | 4-bit 7B VLM (Qwen2.5-VL / UI-TARS GGUF) | ~5 to 6 GB | **Not concurrent with training**; Pitwall's memory management unloads/loads and queues jobs |
@@ -867,7 +903,7 @@ Second pass, with what was confirmed and what we take from each:
 | **Katalon Studio** | Web image locators need Enterprise licence, pixel compare against the displayed element; mobile uses Appium image finding with OpenCV ([web](https://docs.katalon.com/katalon-studio/test-objects/web-test-objects/web-image-based-testing), [mobile](https://docs.katalon.com/katalon-studio/manage-projects/set-up-projects/mobile-testing/mobile-image-based-testing-in-katalon-studio)) | Nothing new; image locators are a paid add-on there | |
 | **SikuliX** | `Pattern` with similarity and target offset, `find`/`wait`/`exists`, event handlers (appear/vanish/change), OpenCV template matching, scores 0 to 1 ([basics](https://sikulix-2014.readthedocs.io/en/latest/basicinfo.html)) | Similarity + offset per target; appear/vanish/change events as `wait_for`; the classic pitfall that settings chains drop the offset (builder API must be immutable and tested) | OCR support, current maintenance |
 | **AutoIt** | Not searched in detail; known for `PixelSearch`/`PixelGetColor` and window/control automation (general knowledge) | Pixel-colour probes as a cheap `assert_pixel` | everything (verify) |
-| **FlaUI** | MIT .NET wrapper over UIA2/UIA3 for Win32/WinForms/WPF/Store; 5.0.0 reported Feb 2025 ([listing](https://dev.co/testing/open-source/flaui), third-party) | Reference for the optional `A11yUia` label source; we stay Rust (`windows` crate UIA), no .NET | Release/licence from the repo itself |
+| **FlaUI** | MIT .NET wrapper over UIA2/UIA3 for Win32/WinForms/WPF/Store; 5.0.0 reported Feb 2025 ([listing](https://dev.co/testing/open-source/flaui), third-party) | Reference for the user-side `Sighter.FlaUI` adapter, which may pass rectangles as optional hints (7.11); Sighter itself never calls UIA (ADR 0001 decision 9) | Release/licence from the repo itself |
 | **WinAppDriver** | Unmaintained for years; Appium recommends NovaWindows driver ([appium](https://github.com/appium/appium-windows-driver)) | Do not depend on it; UIA via the OS API | Exact archive status |
 | **Eggplant DAI** | Model of states and actions (screens, dialogs, menus as states), transitions, parameters; learning algorithms choose paths each run; coverage heatmap, Extended coverage = sequences of three actions/states; max coverage may be below 100 % ([docs](https://docs.eggplantsoftware.com/dai/DAI%2026.1/dai-using-eggplant-dai), [coverage](https://docs.eggplantsoftware.com/dai/DAI%207.2/dai-coverage-report)) | App state graph, coverage, weighted path generation (7.1) | Learning algorithm details |
 | **Testim / mabl / Functionize** | Testim Smart Locators weigh hundreds of attributes; mabl auto-heals across web/API; Functionize Architect is an AI recorder and a Create Agent from plain language (all vendor/secondary: [Momentic](https://momentic.ai/blog/ai-test-automation-tools), [Functionize](https://www.functionize.com/blog/a-beginners-guide-to-creating-tests-with-functionize-architect)). Two healing styles: stored alternative locators tried in order vs intent-based re-resolution ([Shiplight](https://www.shiplight.ai/blog/best-self-healing-test-tools), vendor) | Our resolver is already both: ordered layers and intent (query) re-resolution; healing = explicit proposals | Web-only mostly; no evidence on desktop |
@@ -892,25 +928,25 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 | Record | Multi-monitor and per-monitor DPI handling | v1 | Eggplant, Applitools |
 | Record | **Remote-session client windows (RDP, Citrix, Horizon, VNC viewer) as capture targets**, remote-codec augmentation, stability defaults | v1 | UiPath CV, AISense, Power Automate (recorder image mode in Citrix/RDP) |
 | Record | Direct RDP/VNC pixel stream capture (no client window) | Later | Eggplant |
-| Record | Recorder mode toggle: pixel-only vs with optional a11y track | v1 | Ranorex |
+| Record | Pixel-only recording (no accessibility track; ADR 0001 decision 9) | v1 | Ranorex |
 | Record | Android/iOS capture (scrcpy/adb) | Later | Airtest, Appium |
 | Label | Frame timeline, scene-change + near-duplicate removal | v1 | CVAT, Roboflow |
 | Label | Box + polygon editor, taxonomy, "same as...", keyboard review queue | v1 | Label Studio, CVAT |
 | Label | Auto-suggestions with source/confidence (OCR, template, detector, Pitwall if present) | v1 | Label Studio pre-annotation, OmniParser |
-| Label | Non-AI bootstrap (Florence-2 ONNX on CPU, OCR, click boxes) and visible "needs local AI" state | v1 | (family rule) |
+| Label | Non-AI bootstrap (OCR, templates, click boxes; no Florence-2 boxes in v1) and visible "needs local AI" state | v1 | (family rule) |
 | Label | Batch labelling via Pitwall at batch priority, only when idle (one GPU) | v1 | (family rule) |
 | Label | Box-from-click suggestions | v1 | (own idea) |
 | Label | Tracking with interpolation | v1 | CVAT |
 | Label | **"Record this screen" task list** (from plans and graph gaps) | v1 | (own idea) |
 | Label | SAM 2 mask tracking | Later | CVAT |
-| Label | Optional a11y label sources (UIA/AX/AT-SPI/DOM) | Later (Windows UIA first) | Tosca/TestComplete hybrid, FlaUI (ref) |
+| Label | ~~Optional a11y label sources (UIA/AX/AT-SPI/DOM)~~ | Dropped (ADR 0001 decision 9; adapter hints instead, 7.11) | Tosca/TestComplete hybrid, FlaUI (ref) |
 | Dataset | Splits by session, COCO/YOLO export, COCO/YOLO/Label Studio import | v1 | Roboflow, Label Studio |
 | Dataset | Dataset health: class balance bands, near-duplicates, tiny/overlapping boxes, missing labels, annotation position heatmap | v1 | Roboflow |
 | Dataset | Dataset versions/snapshots, augmentation, synthetic compositing | v1 | Roboflow |
 | Dataset | Variation coverage view (DPI/theme/language/codec gaps) | v1 | (own idea) |
 | Dataset | Sampled capture of uncertain run frames into the queue (active-learning loop) | v1 | Roboflow Dataset Upload |
 | Dataset | CVAT XML import/export | Later | CVAT |
-| Train & evaluate | Managed training, presets, export-only, remote SSH host | v1 (SSH Later) | Roboflow |
+| Train & evaluate | Managed training, presets, export-only; remote SSH host | v1 (remote host not in v1; Later only through its own ADR) | Roboflow |
 | Train & evaluate | mAP, confusion matrix, hard cases, held-out session test | v1 | Roboflow |
 | Train & evaluate | Active learning (uncertainty to review queue) | v1 | Roboflow |
 | Train & evaluate | Per-app model registry, versions, promote/rollback, compare | v1 | Roboflow, Tosca |
@@ -932,7 +968,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 | Script & test | **Locator API (C#, Java, Python, TypeScript, C++)**: one Playwright-style client surface; lazy locators, auto-waiting/actionability, strict matching, retrying `Expect`, vision-only filters (`Near`, `RightOf`, `Within`, `ByImage`, `MinConfidence`), `Cell(row, column)`, typed failures, element info with `Confidence`/`ResolvedBy`/`ModelVersion` (7.9) | v1 | Playwright (API design, Apache-2.0; no code reused) |
 | Script & test | **Hybrid adapters v1: `Sighter.FlaUI` (C#), `sighter-pywinauto` (Python), `sighter-appium` (Java, Python), Robot Framework `SighterLibrary`**: scope a vision search to a framework element rect/window, "framework first, vision when it misses" fallback with logging, shared waits, runner reporting hooks (7.11) | v1 | FlaUI, pywinauto, Appium, Robot (peer dependencies only) |
 | Script & test | **Pure-vision legacy-app testing from C#** (MFC/Win32/VB6/Delphi/PowerBuilder, no UIA, no FlaUI): 7.9 locator API only, plus optional Win32 window info (HWND, class, pid) (7.13) | v1 | UiPath CV, Eggplant, SikuliX |
-| Label | Optional MSAA (IAccessible) `LabelSource` for old controls | Later (after Windows UIA) | (own idea) |
+| Label | ~~Optional MSAA (IAccessible) `LabelSource` for old controls~~ | Dropped (ADR 0001 decision 9) | (own idea) |
 | Script & test | Further hybrid adapters and recipes: `sighter-appium` JS, `sighter-nutjs`, `sighter-pyautogui` shim, Swing/JavaFX/Selenium/Playwright/Qt/Squish/raw-UIA/Mac2/dogtail recipes; drop-in `find`/`click` shim for SikuliX/PyAutoGUI/nut.js users (7.11) | Later | SikuliX, PyAutoGUI, nut.js |
 | Script & test | **Multi-application tests**: several sessions per test, per-app models plus OS dialogs model, `Activate`/`WaitForWindow`/`WaitForProcess`, cross-app copy/paste/drag, `Sighter.Desktop` search, per-monitor DPI, focus-following recorder (7.12) | v1 | UiPath, Power Automate Desktop |
 | Script & test | **AI-assisted recovery via Pitwall**: diagnose-only (default when Pitwall is present) and recover with guardrails (closed action vocabulary, no destructive actions, bounded attempts, "passed with recovery" state, `RecoveryPolicy`, diagnosis in failure exceptions, recovery transcript in Debrief bundles) (7.10) | v1 | (own idea; Functionize/mabl heal differently) |
@@ -980,7 +1016,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - **Model graph drift**: fingerprint merging can wrongly merge or split screens, silently skewing coverage. Mitigation: human confirm/merge, similarity thresholds shown, coverage reports list low-confidence merges.
 - **Plan trust**: a generated plan (possibly by an LLM) may be wrong or hostile; the importer is a pure parser, plans never execute without review, secrets by reference only, destructive steps follow the deny-list.
 - **Test-management push**: third-party API drift (TestRail, Xray), tokens and an extra network egress; Later, opt-in, JUnit/Allure files first.
-- **Accessibility-source quality** (when enabled): stale boxes, DPI, virtualised lists, Electron exposing nothing; pixel-verified.
+- **Adapter-hint quality**: hints from a user's framework can be stale or DPI-shifted; they only rank candidates and are recorded, never trusted alone.
 - **Safety and privacy**: section 10; recordings contain secrets, `act` is dangerous; evidence screenshots in reports and pushes may show secrets (redaction applies before storage and before any export).
 - **Scope**: recorder, studio, server and now a test layer (plans, graph, management, matrices) are four products; v1 is desktop, remote-session windows and browsers, one OS pair per phase. The test layer is cut to the v1 items in section 13; the rest is Later. Sighter-authored tests (7.8) are now v1 and add scope; the cut line is the Later rows, not this.
 - **AI recovery (7.10)**: non-determinism (a recovered run can differ from the last) and masking real bugs (a dialog that should not appear gets dismissed). Mitigated by the "passed with recovery" warning state, CI default "warn", diagnose-only as the default policy, a closed action vocabulary, bounded attempts, and proposals that need human acceptance.
@@ -991,12 +1027,12 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - **8 GB ceiling**: Accurate presets and concurrent VLM + training do not fit; handled by gating and queueing (one GPU rule, section 9).
 
 ## 15. Open questions for the user (19; merged from revision 3; questions 2 and 3 narrowed by the 2026-10-23 decisions)
-1. Is a downloaded sandboxed Python/PyTorch **training runtime** an acceptable exception to "Rust + Angular only" (data, not shipped code), Burn-native later?
+1. **Decided** (user 2026-10-24, closed by ADR 0001 decision 3, 2026-10-30): a downloaded sandboxed Python/PyTorch **training runtime** (the `rfdetr` package, version-pinned, no network) is an accepted exception to "Rust + Angular only" (data, not shipped code); inference stays Rust; Burn-native later.
 2. Generated clients (C#, Java, C++, Python, TS are decided as first-class): in a separate `sighter-clients` repo as proposed, and is Robot Framework wanted in v1 or Later? Which C++ HTTP/JSON dependency is acceptable for the C++ client? (Decided 2026-10-23: one API style, locators, 7.9; raw verbs stay underneath.)
 3. Decided (2026-10-23): `/v1/act` and the flow recorder/runner are in v1, because Sighter runs its own tests (7.8); `act` stays default off and guarded. Remaining: which guard defaults for unattended CI runs?
 4. First OS pair and targets: Windows + macOS, then Linux X11, then Wayland; desktop + browsers + **remote-session client windows (Citrix/RDP/Horizon/VNC) in v1**, mobile Later?
 5. How important is unattended CI (interactive logged-in session on runners; implications for Pitcrew)? Is recording on CI runners wanted, or studio-only recording?
-6. No-Pitwall and starter models (merged 6+9): confirm the rule "Pitwall optional, non-AI path for everything" (table in section 9) and that Florence-2 ONNX + OCR + review is good enough for imported videos; and may we ever ship a starter model trained on third-party datasets, or strictly the user's own recordings?
+6. No-Pitwall and starter models (merged 6+9): confirm the rule "Pitwall optional, non-AI path for everything" (table in section 9) and that OCR + templates + review (no Florence-2 boxes in v1, ADR 0001) is good enough for imported videos; and may we ever ship a starter model trained on third-party datasets, or strictly the user's own recordings?
 7. Confidence and safety rules (merged 7+10): auto-accept 0.85 / flag below 0.6 or stricter (two agreeing sources); panic key, scope binding, overlay, deny-list; "no unattended run of flows with unreviewed dependencies or Needs-recording cases" as a hard rule?
 8. Extract Debrief's video crate into `paddock-video` now (affects Debrief mid-rename), or copy and consolidate later? Same question for the new `paddock-pitwall` client crate (extract from Pitwall's or Debrief's existing client, or write fresh).
 9. Recorder consent and storage (merged 11+12): input capture opt-in per project, key text off, redaction regions required on first run, auto-pause on password fields as best effort; PNG/WebP vs 4:4:4 video; retention and encryption defaults for recordings showing real data.
@@ -1015,7 +1051,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 19. **Agent mode in v1 or Later** (7.14): resolved (user, 2026-10-23): agent mode is in v1, with Pitwall optional.
 
 ## 16. Size (one capable agent team, rough, excluding polish and design pass)
-- Spike (2 to 3 weeks): recorder on one OS, 500 labelled frames, train RT-DETRv2 + D-FINE, ONNX in `ort`, measure mAP, wrong-click rate, latency on CPU/GPU, resolver layers on 5 legacy apps, plus one remote-session capture to measure the accuracy loss.
+- Spike (2 to 3 weeks): recorder on one OS, 500 labelled frames, train RF-DETR Small + D-FINE, ONNX in `ort` (spike items S1 to S8 of ADR 0001), measure mAP, wrong-click rate, latency on CPU/GPU, resolver layers on 5 legacy apps, plus one remote-session capture to measure the accuracy loss.
 - Recorder (capture, events, encoding, preflight, video import, remote-session windows): large, 4 to 6 weeks (three OS, Wayland hardest).
 - Studio labelling (timeline, editor, tracking, review queue, import/export): large, 6 to 8 weeks; the canvas and queue are the biggest UI.
 - Managed training runtime + evaluate + versioning: 4 to 6 weeks, mostly cross-platform packaging.

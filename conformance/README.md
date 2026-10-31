@@ -118,7 +118,14 @@ workflow that uses the actions can drop the steps they replace, and C03, C04 and
 `windows-crt-imports.mjs --src-tauri <dir> --bin-dir <dir> [--config <file.json>]...` (ADR 0032: fails when a binary the
 Windows installer ships, named by the Tauri configuration, imports the VC++ runtime, VCRUNTIME140.dll, MSVCP140.dll and
 kin, or is missing; `<file-or-folder>...` checks given paths; pure Node, no dumpbin; `tauri-bundle.sh` runs it after
-every NSIS build).
+every NSIS build). Extra import rules for a binary that links optional DLLs: `--delay-load <dll>` (only a delay-load
+import), `--not-direct <dll>` (delay-loaded if imported at all), `--no-import <dll>` and `--no-network` (no WinHTTP, WinINet, URLMon, WebSocket or Winsock import); with given paths only, never with
+`--src-tauri`, since they apply to every file alike. Sighter's ONNX Runtime builds use them.
+
+`telemetry-bytes.mjs [--allow-telemetry-group] <file>...` fails when a native library or binary carries a way to send
+telemetry to Microsoft: the 1DS SDK (plain or mangled), curl, mbedTLS, a collector host, or a TraceLogging provider in the
+Microsoft telemetry group. It searches the bytes in ASCII and UTF-16LE, in chunks; it reports ETW provider names without
+failing on them. Sighter's ONNX Runtime pipeline uses it, and Pacenotes' will.
 
 ## Sidecars (`paddock-sidecar`, plan X34)
 

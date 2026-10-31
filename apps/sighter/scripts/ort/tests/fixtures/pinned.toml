@@ -1,0 +1,11 @@
+# Synthetic: every pin real-shaped.
+format = 1
+name = "onnxruntime"
+version = "1.0.0-p1"
+license = "MIT"
+
+[[platform]]
+key = "linux-x86_64"
+url = "https://example.invalid/onnxruntime-1.0.0-p1-linux-x64-cpu.tar.gz"
+size = 1234
+sha256 = "ad7f2b49a4dc679af286b1b1b386670d93ca7868079f69012d21ba0ac8293df3"
