@@ -1,7 +1,7 @@
 # 36. Logging for root cause: one log per process, typed start, phase, process, connect, job and error events, the bundle reads them all
 
-- Status: Proposed; decisions taken 2026-10-31 (section "Decisions (user, 2026-10-31)"). Independent review round 1:
-  changes requested and made in this revision.
+- Status: Accepted (2026-10-31), after the user's decisions (section "Decisions (user, 2026-10-31)") and independent
+  review rounds 1 and 2.
 - Date: 2026-10-31
 - Related: rule 56 (logs explain every failure; on `docs/rule-logs-explain-failures`, `ef8f52349`), rule 48 (recorded
   measurements), rule 51 (slow means more parallelism or cheaper), rule 55 / ADR 0034 (one implementation per
@@ -116,6 +116,12 @@ depends on this.
 
 Thin helpers with fixed property names (the table in section 2.1), no new dependency, no Tauri.
 
+**Layering.** paddock-log depends on no paddock crate except paddock-env. Its clock port moves out of paddock-jobs (into
+paddock-env or a leaf `paddock-time`), so paddock-commands, paddock-jobs, paddock-ipc and paddock-proc can call
+`paddock_log::event` without a cycle (today paddock-log depends on paddock-jobs, which depends on paddock-commands and
+paddock-env). paddock-env cannot: it logs its state-file events through `log` with the property names of section 2.1. A
+`cargo tree` test in paddock-log asserts this.
+
 ```rust
 /// Written once by `Logging::install` (and by `LogHandle::banner` for processes that learn their start reason later).
 pub struct StartFacts { pub launch: Launch, pub parent_pid: Option<u32>, pub previous_run: Option<&'static str> }
@@ -202,7 +208,8 @@ never their contents (decision U4).
   become **sections**: they ask the background process when it answers and otherwise read its files from disk and say so.
 - **WP-6a:** the Logs window is 4 MB (decision U1), split in **per-process shares**: equal shares across the `<id>*`
   prefixes found, an unused share passed to the others, newest first, so a chatty process cannot push the agent's or
-  service's log out. `MAX_LOG_FILES` follows from it.
+  service's log out. `MAX_LOG_FILES` follows from it. The Crash section lists every `crash-<process>.json`, not only the
+  app's; a process's next clean start clears its own marker (the agent's included).
 - `system-info.json` adds OS version, kernel version, machine uptime and the app's install location kind.
 
 ### 6. What may be written (redaction at rest)
@@ -213,7 +220,9 @@ again. This section is the rule for what reaches the disk.
 - **Never at any level:** file contents, record contents, prompts, queries, clipboard, secrets.
 - **One secret scanner, applied before the write.** `redact_secrets` moves from `paddock-diag/src/secrets.rs` into
   paddock-log (one implementation, rule 55; paddock-diag calls it). Every text written to disk passes it: the message,
-  string properties, `ErrorChain`, stderr tails, child output and command lines. WP-10 measures its cost per line.
+  string properties, `ErrorChain`, stderr tails, child output and command lines. At rest the scanner applies the keyed,
+  bearer, JWT, URL-credential and connection patterns to string values only; the long-hex and card heuristics run only in
+  the bundle layer. WP-10 measures its cost per line.
 - **Spawns:** `Program` (file name) at info; arguments at debug only, each scanned, user paths through `path_hint`.
 - **Stderr tails and child output:** debug only, scanned.
 - **Paths:** an app-owned path (its data, log, config folders, its binaries) is written as is; the bundle's personal
@@ -223,6 +232,9 @@ again. This section is the rule for what reaches the disk.
   machine names and account names as a fingerprint at info, plain at debug (decision U3).
 - **Fingerprints are keyed.** `fingerprint` becomes a keyed hash with a per-install salt kept in the app's data folder,
   never put in the bundle, so a fingerprint cannot be reversed by hashing guesses; two lines of one install still match.
+  Fingerprints stay at most 16 hex digits (so the at-rest scanner never mistakes one for a secret). UI fingerprints
+  (Debrief's `privacy.ts` and `define-dialog.ts`) come from a backend command, never a hash in TypeScript; a root/SYSTEM
+  service reads the app's salt, or its fingerprints are marked as from another key.
 - **Debug is visible.** When the level is Debug or Trace, Report a problem's preview says so and that the log may hold
   file names and hosts.
 - The default redactor gains `path`-like and `host`-like key rules and a test per rule; a test logs synthetic personal
@@ -236,8 +248,9 @@ again. This section is the rule for what reaches the disk.
   `eprintln!`/`println!` (CLI output functions carry `// cli-output`). An own logger fails unless registered (C58).
 - **C64, logged spawn, connect and job.** Not a new scanner: the apps' clippy `disallowed-methods` (Dyno's exists,
   `apps/dyno/clippy.toml:3`) gain `std::process::Command::new`, `UnixStream::connect`, the named-pipe opens and
-  `JobRegistry::register` outside the shared helpers, with a reason pointing at the logged helper. Report-only first
-  (a warning listed in the conformance report), an error once every app is on the helpers.
+  `JobRegistry::register` outside the shared helpers, with a reason pointing at the logged helper. Existing sites get
+  `#[expect(clippy::disallowed_methods, reason = "logged: <phase>")]` in the same change; new sites fail from day one.
+  The conformance report lists the remaining `expect`s until every app is on the helpers.
 - **C65, every error shown is logged.** A `#[tauri::command]` returns paddock-commands' error type (which logs through
   `error_shown`), never `Result<_, String>`.
 - **A runtime check in the start smoke** (paddock-e2e / each app's VM smoke): after a start, each process's newest log has
@@ -314,7 +327,7 @@ references are secondary and must be re-read by whoever fixes them.
 | WP | What | Size | Owner |
 |---|---|---|---|
 | D1-D7 | Dyno's fix list (appendix) | S each, D6 about half a day | Dyno lead |
-| WP-1 | `paddock_log::event`: `StartFacts`, `phase` (with "ended without a result"), `Transitions` (static cause, flapping guard), `error_shown`, `chain`, `UptimeMs`; dedupe extended to warn and the typed connect and stall events | M | paddock-log |
+| WP-1 | Layering first (clock port out of paddock-jobs, the `cargo tree` test); `paddock_log::event`: `StartFacts`, `phase` (with "ended without a result"), `Transitions` (static cause, flapping guard), `error_shown`, `chain`, `UptimeMs`; dedupe extended to warn and the typed connect and stall events | M | paddock-log |
 | WP-2 | `paddock_env::os::version()` (in-process) and the banner in `paddock-shell::logging::install`; `commit` from the build | S | shared |
 | WP-3 | paddock-proc and paddock-ipc events; the optional `op` frame field with round-trip tests both ways | M | shared |
 | WP-4 | paddock-jobs events and the `JobId` span; paddock-commands `error_shown` and `ipc_span` in `route` | M | shared |
@@ -322,7 +335,7 @@ references are secondary and must be re-read by whoever fixes them.
 | WP-6a | paddock-diag: 4 MB log window with per-process shares (in the Dyno 1.0 set) | S | paddock-diag |
 | WP-6 | paddock-diag: OS facts, crash-report names, the Debug warning in the preview, sections that read files when IPC is down | M | paddock-diag |
 | WP-7 | The secret scanner moved into paddock-log and applied before the write; path and host key rules; `path_hint`; keyed fingerprints with a per-install salt; the synthetic-data test | M | paddock-log |
-| WP-8 | C63, C64 (clippy `disallowed-methods`), C65, report-only first; the start-smoke log assertions | M | conformance |
+| WP-8 | C63, C64 (clippy `disallowed-methods` with `expect`s on existing sites), C65; the start-smoke log assertions | M | conformance |
 | WP-9 | Per app, before its tag: onto paddock-log and paddock-diag, own loggers deleted (section 1's table) | M-L per app | app leads |
 | WP-10 | Measure the cost per line and per burst, with and without the scan; record in `docs/benchmarks.md`; writer thread only if over the bound | S | paddock-log |
 | WP-11 | Merge `docs/rule-logs-explain-failures` (rule 56) first | S | steward |
@@ -334,10 +347,11 @@ references are secondary and must be re-read by whoever fixes them.
 3. WP-1, WP-2, WP-7.
 4. WP-3, WP-4, WP-5.
 5. WP-6.
-6. WP-8, report-only.
+6. WP-8.
 7. WP-9 per app, in release order.
 
-WP-11 is merged before any of them lands, so each change can cite rule 56.
+WP-11 is merged before any of them lands, so each change can cite rule 56. The per-tag minimum below (WP-9's first part)
+runs from step 1 in parallel; full adoption of the typed events follows step 4.
 
 **The minimum before any app's next tag:** every process installs paddock-log with the panic hook and a crash marker;
 `Builder::diagnostics` with per-process log shares (WP-6a); the app's own logger deleted (C58 holds it to its
@@ -350,7 +364,8 @@ WP-11 is merged before any of them lands, so each change can cite rule 56.
 - **User content or a secret slips into a message string.** Mitigated by typed helpers (values as properties), the
   scanner before the write, `path_hint`, static causes, the synthetic-data test, and the bundle's personal layer.
 - **The scan costs too much on a hot path.** WP-10 measures it before WP-3 and WP-4 add volume.
-- **Churn in shared crates during releases (ER-1).** WP-1 to WP-5 add lines and helpers without changing behaviour.
+- **Churn in shared crates during releases (ER-1).** WP-1 to WP-5 add lines and helpers without changing behaviour; the
+  one exception is WP-3's optional `op` wire field, covered by the round-trip tests in both directions.
 - **Root/SYSTEM services' log folders** need care with permissions (no user-writable path a privileged process trusts).
 
 ## Decisions (user, 2026-10-31)
@@ -392,9 +407,8 @@ repeating line below is written **on change only**.
   `extras/mod.rs:210`, `cli.rs:70`, `:74` (those two keep stderr as well: they run while ending the process).
 - `src/server.rs`: info `Client connected` with the client's app version and protocol, info `Client disconnected` with
   `ElapsedMs`, info `Shutdown requested by a client`; a refused connection (`:66`) at warn, on change.
-- `src/instance.rs:73` `note`: writes through `log::warn!`; `agent.log` stays only as the fallback when the log could not
-  be installed, and goes with the rest of the copy (`delete_by = "dyno-v1.0.0"`, or registered for `dyno-v1.1.0` if the
-  fallback is kept).
+- `src/instance.rs:73` `note` goes: its lines are written through `log::warn!`, and the `agent.log` writer is deleted
+  with no fallback (`delete_by = "dyno-v1.0.0"`).
 
 **D2. The app's own lines go to the same file as the shared crates' lines** (`app/src-tauri/src/logging.rs`).
 - `info()` (`:53-60`) calls `log::info!(target: "dyno", "{message}")` instead of writing `app.log`; `init()` and the
@@ -427,7 +441,7 @@ repeating line below is written **on change only**.
 needs WP-6a in the same set, or the agent's share can be pushed out of the 4-file window).
 - `builder.diagnostics(..)` with paddock-diag's built-in sections (system facts, settings, the crash markers of `app` and
   `agent`, the log window over `dyno*.log` with per-process shares) and a Dyno section that reads `agent.log` from the
-  data folder while it exists. The shell then also registers "Diagnostics > Logging". The agent's "Save bundle" stays for
+  data folder while an old file is there. The shell then also registers "Diagnostics > Logging". The agent's "Save bundle" stays for
   its data (inventory, recorder) and its README points to Report a problem for logs. Check the Help menu entry in the UI
   e2e.
 
