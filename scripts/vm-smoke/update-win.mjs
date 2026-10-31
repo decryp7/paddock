@@ -45,7 +45,7 @@ function main(argv) {
     return ok;
   };
   let feed;
-  const cleanup = async () => { feed?.close(); vm(['stop']); vm(['revert']); rmSync(scratch, { recursive: true, force: true }); };
+  const cleanup = async () => { await feed?.close(); vm(['stop']); vm(['revert']); rmSync(scratch, { recursive: true, force: true }); };
   return (async () => {
     try {
       log('revert to gui-baseline and start');
@@ -65,10 +65,10 @@ function main(argv) {
       if (!push('Old test build installed (silent NSIS, per-user)', parseChecks(inst.out))) throw new Error(`install failed: ${inst.out.slice(-300)}`);
       for (const id of ['down', 'badsig', 'wrongkey', 'ok']) {
         const cs = CASES.find((c) => c.id === id);
-        feed.setCase(id); feed.clearFeedLog();
+        await feed.setCase(id); await feed.clearFeedLog();
         const res = job(`case-${id}`, `$CaseId = '${id}'; $Old = '${plan.old}'; $New = '${plan.new}'\n. C:\\paddock-test\\uia.ps1\n. C:\\paddock-test\\case.ps1\n`, 900);
         const checks = parseChecks(res.out);
-        const log_ = feed.feedLog();
+        const log_ = await feed.feedLog();
         if (id !== 'down') {
           checks.push({ ok: log_.some((l) => /latest\.json/.test(l)), detail: 'the feed saw the manifest request' });
           checks.push({ ok: log_.some((l) => /\.exe /.test(l)) === cs.tarballRequested, detail: `the feed ${cs.tarballRequested ? 'served' : 'did not serve'} the installer (${log_.length} request(s))` });
