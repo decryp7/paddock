@@ -1019,6 +1019,7 @@ impl Supervisor {
                 held.pid,
             ),
             Some((g, Child::Running { pid })) if g == child => (Liveness::Running, Some(pid)),
+            Some((g, Child::Stopped { pid })) if g == child => (Liveness::Paused, Some(pid)),
             _ => (Liveness::Running, held.pid),
         };
         if let (Some(h), None) = (self.child.as_mut(), held.pid) {
@@ -1030,6 +1031,7 @@ impl Supervisor {
                 Some(p) => h.pid == p && h.started_ms >= held.launched_ms,
                 None => h.started_ms >= held.launched_ms,
             });
+        let liveness_now = liveness.clone();
         let reading = Reading {
             liveness,
             ready,
@@ -1041,10 +1043,15 @@ impl Supervisor {
             None => return,
         };
         match state {
-            StartState::Starting => {}
+            StartState::Starting => {
+                // It runs again after a pause: the note of the pause is withdrawn.
+                if matches!(self.stall, Some((_, Stall::AgentPaused))) && !matches!(liveness_now, Liveness::Paused) {
+                    self.clear_stall(out);
+                }
+            }
             StartState::Ready => self.connect(Purpose::Use, look, out),
             StartState::Stalled(report) => {
-                if matches!(report.cause, StallCause::Slow) || report.cause.is_stuck() {
+                if matches!(report.cause, StallCause::Slow | StallCause::Paused) || report.cause.is_stuck() {
                     self.show_stall(Stall::from(report.cause), &report.message, out);
                 }
             }
@@ -1165,6 +1172,10 @@ impl Supervisor {
             if self.stall.map(|(s, _)| s) != Some(id) {
                 return; // it answers a stall that is over
             }
+        }
+        // A paused agent is never ended or replaced by a Retry (ADR 0031): it continues by itself.
+        if matches!(self.stall, Some((_, Stall::AgentPaused))) {
+            return;
         }
         match self.phase.clone() {
             Phase::Starting { child } => {

@@ -31,6 +31,9 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
         <div class="titles"><h2 class="pd-title" id="dy-settings-title">Dyno</h2></div>
         @if (store.saveError(); as failed) {
           <span class="save-error" role="alert">{{ failed.message }}</span>
+          @if (retryDraft() && !dirty()) {
+            <button type="button" matButton="outlined" (click)="retry()">Retry</button>
+          }
         }
         @if (dirty()) {
           <button type="button" matButton="outlined" (click)="revert()">Discard changes</button>
@@ -438,9 +441,29 @@ export class SettingsPage implements OnInit {
   protected setHardwareAlarms(p: Partial<HardwareAlarms>): void {
     this.draft.update((d) => (d ? { ...d, hardwareAlarms: { ...this.hardwareAlarms(), ...p } } : d));
   }
+  /**
+   * The edit a save could not deliver because the agent was not running: the page shows what the engine has again (the
+   * control never claims a value nothing stored) and Retry sends the edit once more. An engine refusal keeps the edit instead,
+   * so it can be corrected.
+   */
+  protected readonly retryDraft = signal<Settings | null>(null);
+
   protected async save(): Promise<void> {
     const d = this.draft();
-    if (d) await this.store.save(d);
+    if (!d) return;
+    if (await this.store.save(d)) {
+      this.retryDraft.set(null);
+    } else if (this.store.saveError()?.code === 'agentUnavailable') {
+      this.revert();
+      this.retryDraft.set(d);
+    }
+  }
+  protected async retry(): Promise<void> {
+    const d = this.retryDraft();
+    if (!d) return;
+    this.retryDraft.set(null);
+    this.draft.set(structuredClone(d));
+    await this.save();
   }
   protected revert(): void {
     const s = this.store.settings();

@@ -119,6 +119,40 @@ describe('SettingsPage', () => {
     expect(saveButton()).toBeDefined();
     expect(TestBed.inject(Notifier).recent().at(-1)).toMatchObject({ tone: 'bad', text: 'Nope.' });
   });
+  it('a save that never reached the engine (agent not running) puts the control back to the stored value and offers Retry', async () => {
+    // Regression (Dyno login blockers): the page kept the unsaved switch position after "The Dyno agent is not running", so the
+    // next press equalled the stored value and nothing was ever saved.
+    const { f, mock, el, saveButton, store } = await make();
+    const stored = store.settings()!.launchAtLogin;
+    const spy = vi.spyOn(mock, 'saveSettings').mockRejectedValueOnce({ code: 'agentUnavailable', message: 'The Dyno agent is not running.' });
+    toggle(el, 'Start Dyno at login').click();
+    f.detectChanges();
+    saveButton()!.click();
+    await settle(f);
+    expect(toggle(el, 'Start Dyno at login').getAttribute('aria-checked')).toBe(String(stored));
+    expect(saveButton()).toBeUndefined();
+    expect(el.querySelector('.save-error')!.textContent).toContain('The Dyno agent is not running.');
+    const retry = [...el.querySelectorAll<HTMLButtonElement>('header button')].find((b) => b.textContent?.includes('Retry'));
+    expect(retry).toBeDefined();
+    retry!.click();
+    await settle(f);
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy.mock.calls[1]![0].launchAtLogin).toBe(!stored);
+    expect(store.settings()!.launchAtLogin).toBe(!stored);
+    expect(el.querySelector('.save-error')).toBeNull();
+    expect([...el.querySelectorAll('header button')].some((b) => b.textContent?.includes('Retry'))).toBe(false);
+  });
+  it('a refusal by the engine keeps the edit so it can be corrected, and a new edit drops a pending Retry', async () => {
+    const { f, mock, el, saveButton } = await make();
+    vi.spyOn(mock, 'saveSettings').mockRejectedValueOnce({ code: 'agentUnavailable', message: 'The Dyno agent is not running.' });
+    toggle(el, 'Start Dyno at login').click();
+    f.detectChanges();
+    saveButton()!.click();
+    await settle(f);
+    toggle(el, 'Alerts').click();
+    f.detectChanges();
+    expect([...el.querySelectorAll('header button')].some((b) => b.textContent?.includes('Retry'))).toBe(false);
+  });
   it('shows an inline error with Retry when settings cannot load', async () => {
     const mock = new MockBackend({ latencyMs: 0, now: () => NOW, fail: new Set(['settings']) });
     TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });

@@ -55,11 +55,22 @@ pub fn stall_problem(stall: Stall) -> Cause {
         Stall::AgentKeepsFailing => Cause::new("The Dyno agent keeps failing to start.")
             .hint("Its log is in the Dyno data folder. Choose Retry to try again now; if it stays, reinstall Dyno.")
             .code("dy.agent.keeps-failing"),
+        Stall::AgentPaused => Cause::new("The Dyno agent is paused. Paused by macOS or another app.")
+            .hint("It continues by itself when it is allowed to run again (an app such as App Tamer or the system stopped it). Dyno waits and does not restart it.")
+            .code("dy.agent.paused"),
         Stall::OtherAgentHolds => Cause::new("Another Dyno agent holds the data folder and has not answered.")
             .hint(
                 "It may still be starting. If it stays, choose Retry; if the data folder is shared with another computer, quit Dyno there.",
             )
             .code("dy.agent.other-holds"),
+    }
+}
+
+/// What the chip offers for a stall: Retry, except for a paused agent (nothing to retry: it continues by itself, ADR 0031).
+pub fn stall_repair(stall: Stall) -> Option<RepairAction> {
+    match stall {
+        Stall::AgentPaused => None,
+        _ => Some(RepairAction::Retry),
     }
 }
 
@@ -119,7 +130,7 @@ impl<R: Runtime> Hub<R> {
         };
         match stall {
             Some(stall) => {
-                health.down(AGENT, stall_problem(stall), Some(RepairAction::Retry));
+                health.down(AGENT, stall_problem(stall), stall_repair(stall));
             }
             None => {
                 if health.is_in_outage(AGENT) {
@@ -178,6 +189,13 @@ mod tests {
             );
             assert!(cause.hint.as_deref().is_some_and(|h| h.contains("Retry")), "{cause:?}");
         }
+        // A stopped agent is paused by macOS or another app: said so, and nothing to retry (ADR 0031).
+        let paused = stall_problem(Stall::AgentPaused);
+        assert_eq!(paused.code.as_deref(), Some("dy.agent.paused"));
+        assert!(paused.message.contains("Paused by macOS or another app"), "{paused:?}");
+        assert!(!paused.hint.as_deref().unwrap_or("").contains("Retry"), "{paused:?}");
+        assert_eq!(stall_repair(Stall::AgentPaused), None);
+        assert_eq!(stall_repair(Stall::AgentNotAnswering), Some(RepairAction::Retry));
         // The plain "still starting" status stays no outage: only the stall the link reports after a while is one.
         assert!(agent_problem(&status(AgentState::Starting, Some("still starting"))).is_none());
     }

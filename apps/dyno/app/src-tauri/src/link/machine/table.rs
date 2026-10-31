@@ -1158,3 +1158,66 @@ fn a_look_that_did_not_probe_the_lock_never_launches_and_asks_again_with_the_loc
     assert_eq!(launches(&cmds), 0);
     assert!(matches!(cmds[..], [Command::Look { lock: true, .. }]), "{cmds:?}");
 }
+
+/// ADR 0031: an agent the OS or another app (App Tamer) has stopped is waited for, never ended. The chip says it is paused and
+/// has no Retry; a Retry that arrives anyway does nothing; when it runs again the note goes away.
+#[test]
+fn a_stopped_agent_is_reported_as_paused_and_is_never_ended_or_replaced() {
+    let mut s = starting();
+    let stopped = |s: &mut Supervisor| {
+        let seq = tick_look(s);
+        s.step(Event::Looked(Look {
+            child: Some((1, Child::Stopped { pid: PID })),
+            ..look(seq)
+        }))
+    };
+    let cmds = stopped(&mut s);
+    assert_eq!(stall_of(&cmds), Some(Stall::AgentPaused), "{cmds:?}");
+    assert!(matches!(s.phase(), Phase::Starting { child: 1 }));
+    assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::AgentPaused));
+    // Looks go on for as long as it is stopped (a minute, an hour): nothing is ended, launched or said again.
+    for _ in 0..500 {
+        let cmds = stopped(&mut s);
+        assert!(
+            cmds.iter()
+                .all(|c| !matches!(c, Command::EndHeldChild { .. } | Command::Launch { .. } | Command::Stall { .. })),
+            "{cmds:?}"
+        );
+    }
+    assert!(matches!(s.phase(), Phase::Starting { child: 1 }));
+    // A Retry (by the stall's id, or without one) does not end a stopped agent.
+    let id = s.snapshot().stall.map(|(i, _)| i);
+    for retry in [Event::Retry { stall: id }, Event::Retry { stall: None }] {
+        let cmds = s.step(retry);
+        assert!(
+            cmds.iter()
+                .all(|c| !matches!(c, Command::EndHeldChild { .. } | Command::Launch { .. })),
+            "{cmds:?}"
+        );
+        assert!(matches!(s.phase(), Phase::Starting { child: 1 }));
+    }
+    // It runs again (App Tamer resumed it): the note is withdrawn and the start is judged as before.
+    let seq = tick_look(&mut s);
+    let cmds = s.step(Event::Looked(Look {
+        child: Some((1, Child::Running { pid: PID })),
+        ..look(seq)
+    }));
+    assert!(cmds.iter().any(|c| matches!(c, Command::ClearStall)), "{cmds:?}");
+    assert_eq!(s.snapshot().stall, None);
+}
+
+#[test]
+fn a_stopped_agent_that_is_gone_when_next_looked_at_is_judged_as_exited() {
+    let mut s = starting();
+    let seq = tick_look(&mut s);
+    s.step(Event::Looked(Look {
+        child: Some((1, Child::Stopped { pid: PID })),
+        ..look(seq)
+    }));
+    let seq = tick_look(&mut s);
+    let cmds = s.step(Event::Looked(Look {
+        child: Some((1, Child::Exited { code: Some(1) })),
+        ..look(seq)
+    }));
+    assert!(matches!(s.phase(), Phase::BackingOff { .. }), "{cmds:?}");
+}
