@@ -95,6 +95,7 @@
         ]
       },
       "needsApprovalText": "macOS needs your approval[^|]*",
+      "savedLog": { "on": "start at login is now on", "off": "start at login is now off" },
       "helperParentAfterLogin": "launchd"
     },
     "loginStart": {

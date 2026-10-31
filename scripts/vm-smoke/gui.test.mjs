@@ -82,7 +82,7 @@ function fakeGui({ bug = null } = {}) {
       if (bug === 'app-press-lost' && st.appSwitch === 0 && st.btm === 'refused' && !st.appLost) { st.appLost = true; return ok('pressed'); }
       st.appSwitch = 1 - st.appSwitch; st.dirty = true;
     }
-    else if (app === 'Dyno' && m('Save changes')) { st.dirty = false; if (st.appSwitch) register(); else { st.job = false; st.agents = st.agents.map((a) => (a.ppid === 1 && st.app ? { pid: ++pid, ppid: st.app.pid } : a)); } }
+    else if (app === 'Dyno' && m('Save changes')) { st.dirty = false; if (!st.appSwitch && bug !== 'off-not-saved') st.log += 'start at login is now off\n'; if (st.appSwitch) register(); else { st.job = false; st.agents = st.agents.map((a) => (a.ppid === 1 && st.app ? { pid: ++pid, ppid: st.app.pid } : a)); } }
     else if (app === 'System Settings' && role === 'AXCheckBox') {
       if (st.lostPress) { st.lostPress = false; return ok('pressed'); }
       st.liSwitch = 1 - st.liSwitch;
@@ -117,6 +117,7 @@ function fakeGui({ bug = null } = {}) {
     if (cmd.startsWith('sudo sfltool')) return ok(st.btm ? ` #1:\n                 Name: dyno-agent\n          Disposition: ${disp()}\n           Identifier: 8.${LABEL}\n` : '');
     if (cmd.startsWith('launchctl print')) return st.job ? ok(`gui/501/${LABEL} = {\n\tstate = ${st.agents.some((a) => a.ppid === 1) ? 'running' : 'spawn scheduled'}\n}`) : ok('Could not find service');
     if (cmd.startsWith('ps -axww')) return ok(procs());
+    if (cmd.startsWith('grep -c -E')) return ok(String((st.log.match(new RegExp(words(cmd)[0], 'g')) ?? []).length));
     if (cmd.startsWith('stat -f %z')) return ok(String(st.log.length));
     if (cmd.startsWith('tail -c +')) { const n = Number(/tail -c \+(\d+)/.exec(cmd)[1]); return ok(st.log.slice(n - 1)); }
     if (cmd.startsWith('tail -n')) return ok(st.log);
@@ -258,4 +259,13 @@ test('an in-app switch press lost while the Settings page re-renders is pressed 
   const r = await run('app-press-lost');
   const s = r.by['Login Items approval (requiresApproval path)'];
   assert.equal(s.status, 'pass', s.summary);
+});
+
+test('a Launch at login off that the app never saved fails the approval step, whatever the switch shows', async () => {
+  // Regression (Dyno 7245 run): the first off was pressed while the helper restarted after the refusal; the switch showed off,
+  // nothing was saved, the later on changed nothing and Login Items never opened. The step judged the switch only.
+  const r = await run('off-not-saved');
+  const s = r.by['Login Items approval (requiresApproval path)'];
+  assert.equal(s.status, 'fail', s.summary);
+  assert.ok(JSON.stringify(s).includes('did not go off and on again'), JSON.stringify(s));
 });
