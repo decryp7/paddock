@@ -58,11 +58,18 @@ fn run_binary(name: &str, strict: bool) -> (i32, Vec<String>) {
     if strict {
         cmd.arg("--strict");
     }
-    // The golden is the same everywhere: no CI annotations, no local settings.
-    cmd.env_remove("CI");
+    // The golden is the same everywhere: no CI annotations, no local settings, and no log file in the user's folders.
+    cmd.env_remove("CI")
+        .env_remove("GITHUB_ACTIONS")
+        .env_remove("GITEA_ACTIONS")
+        .env("WIKI_LOG_DIR", "off");
     let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(60))).unwrap();
     let code = match out.outcome {
-        paddock_proc::Outcome::Exited(s) => s.code().unwrap_or(-1),
+        // paddock-cli's "findings" (5) is the Node lint's exit 1.
+        paddock_proc::Outcome::Exited(s) => match s.code().unwrap_or(-1) {
+            5 => 1,
+            other => other,
+        },
         other => panic!("{name}: {other:?}"),
     };
     // The one deliberate difference: the Node lint knew only the steward log and said so in the message; the tool takes the
@@ -74,9 +81,28 @@ fn run_binary(name: &str, strict: bool) -> (i32, Vec<String>) {
         .lines()
         .filter(|l| l.starts_with("error ") || l.starts_with("warning "))
         .map(|l| l.replace(generic, node))
+        .flat_map(|l| per_source(&l))
         .collect();
     lines.sort();
     (code, lines)
+}
+
+/// A copy finding that names several rules sources (`shared with 2 rules sources: a, b`) as the Node lint printed it: one line
+/// per source. Other lines are returned as they are.
+fn per_source(line: &str) -> Vec<String> {
+    let Some(at) = line.find(" rules sources: ") else {
+        return vec![line.to_string()];
+    };
+    let head_end = line[..at].rfind("shared with ").map_or(0, |i| i + "shared with ".len());
+    let tail_start = at + " rules sources: ".len();
+    let Some(close) = line[tail_start..].find("): \"") else {
+        return vec![line.to_string()];
+    };
+    let names = &line[tail_start..tail_start + close];
+    names
+        .split(", ")
+        .map(|n| format!("{}{}{}", &line[..head_end], n, &line[tail_start + close..]))
+        .collect()
 }
 
 fn rust_result(name: &str) -> String {

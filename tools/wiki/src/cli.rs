@@ -2,7 +2,7 @@ use crate::date::{self, Day};
 use crate::lint::{self, Finding, MAX_AGE_DAYS, Request, RuleSource};
 use crate::ops::{self, NewPage, OpError};
 use crate::sources::{self, ReadError};
-use crate::trace::Trace;
+use crate::trace::{self, Trace};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use serde_json::{Value, json};
@@ -52,11 +52,12 @@ enum Command {
 
 #[derive(Args)]
 struct LintArgs {
-    /// A rules source for the copied-text check: a file, or `<git ref>:<path>` (repeatable). Default: docs/rules.md and
-    /// origin/main:docs/rules.md under --repo, if readable.
+    /// A rules source for the copied-text check: a file, or `<git ref>:<path>` (repeatable; replaces the config file's `rules`).
+    /// With none given anywhere: docs/rules.md and origin/main:docs/rules.md under the settings folder, each if readable.
     #[arg(long = "rules")]
     rules: Vec<String>,
-    /// One more rules file (the engineering rules), used when it exists.
+    /// One more rules file (the engineering rules); a warning if it does not exist. Default: ../engineering-rules/RULES.md next
+    /// to the settings folder, when that exists.
     #[arg(long)]
     er: Option<PathBuf>,
     /// A rules file on every branch matching a pattern: `<ref glob>:<path>`, for example `origin/docs/*:docs/rules.md`
@@ -98,23 +99,14 @@ struct NewArgs {
     sources: Vec<String>,
 }
 
-/// The process exit code of an outcome (engineering-rules' templates/wiki/LINT.md): 0 ok; 1 findings, a bad settings file, a
-/// missing wiki folder, an unreadable rules file or a refused write; 2 a wrong command line.
-fn code(exit: Exit) -> i32 {
-    match exit {
-        Exit::Ok => 0,
-        Exit::Findings | Exit::Failure | Exit::Refused => 1,
-        Exit::Interrupted => Exit::Interrupted.code(),
-        _ => 2,
-    }
-}
-
 /// What the tool takes from its surroundings, so tests can inject it.
 pub struct Context {
     /// Today's local calendar day.
     pub clock: fn() -> Day,
     /// Print `::error::` annotations (set when the `CI` variable is).
     pub ci: bool,
+    /// The folder of the per-run log file; `None` writes none (tests).
+    pub log_dir: Option<PathBuf>,
 }
 
 impl Context {
@@ -125,6 +117,7 @@ impl Context {
             ci: ["CI", "GITHUB_ACTIONS", "GITEA_ACTIONS"]
                 .iter()
                 .any(|k| std::env::var(k).is_ok_and(|v| v == "true")),
+            log_dir: trace::default_log_dir(),
         }
     }
 }
@@ -152,32 +145,49 @@ pub fn run_with(args: &[String], out: &mut dyn Write, err: &mut dyn Write, ctx: 
             let message = e.render().to_string();
             let first = message.lines().next().unwrap_or("").trim_start_matches("error: ").to_string();
             let hint = "Run `wiki --help` for the commands.";
-            return code(finish(format, Err(CliError::usage(first).with_hint(hint)), out, err));
+            return finish(format, Err(CliError::usage(first).with_hint(hint)), out, err).code();
         }
     };
-    let (result, trace) = match Trace::new(cli.verbose, cli.log_file.as_deref()) {
-        Ok(trace) => (dispatch(&cli, ctx, &trace), trace),
-        Err(m) => (
-            Err(io_error(m).with_hint("Check the --log-file path and the permissions.")),
-            Trace::off(),
-        ),
+    let operation_id = trace::new_operation_id();
+    let log_file = match &cli.log_file {
+        Some(p) => Some(p.clone()),
+        None => ctx.log_dir.as_deref().and_then(|d| trace::default_log_file(d, &operation_id)),
     };
-    match &result {
-        Ok(r) => trace.info(
-            &format!("summary: {}", r.text.lines().last().unwrap_or("done")),
-            &[("exit", json!(r.exit.code())), ("ok", json!(true))],
-        ),
-        Err(e) => trace.event(
-            "Error",
-            &format!("summary: failed: {}", e.text().replace('\n', " ")),
-            &[("exit", json!(e.exit.code())), ("ok", json!(false))],
-        ),
-    }
-    for line in trace.take_lines() {
-        let _ = writeln!(err, "{line}");
-    }
+    let result = {
+        let live: Option<&mut dyn Write> = if cli.verbose { Some(&mut *err) } else { None };
+        match Trace::new(operation_id, live, log_file.as_deref()) {
+            Ok(trace) => {
+                trace.info(
+                    &format!("wiki {} started", env!("CARGO_PKG_VERSION")),
+                    &[
+                        ("version", json!(env!("CARGO_PKG_VERSION"))),
+                        ("args", json!(args)),
+                        ("os", json!(std::env::consts::OS)),
+                        ("arch", json!(std::env::consts::ARCH)),
+                        ("ci", json!(ctx.ci)),
+                        ("log_file", json!(log_file.as_ref().map(|p| p.display().to_string()))),
+                    ],
+                );
+                let result = dispatch(&cli, ctx, &trace);
+                let ms = trace.elapsed_ms();
+                match &result {
+                    Ok(r) => trace.info(
+                        &format!("summary: {}", r.text.lines().last().unwrap_or("done")),
+                        &[("exit", json!(r.exit.code())), ("ok", json!(true)), ("ms", json!(ms))],
+                    ),
+                    Err(e) => trace.event(
+                        "Error",
+                        &format!("summary: failed: {}", e.text().replace('\n', " ")),
+                        &[("exit", json!(e.exit.code())), ("ok", json!(false)), ("ms", json!(ms))],
+                    ),
+                }
+                result
+            }
+            Err(m) => Err(io_error(m).with_hint("Check the --log-file path and the permissions.")),
+        }
+    };
     emit_errors(&result, ctx, cli.json, err);
-    code(finish(if cli.json { Format::Json } else { Format::Text }, result, out, err))
+    finish(if cli.json { Format::Json } else { Format::Text }, result, out, err).code()
 }
 
 /// The error findings of a lint (standard error: `error file:line: message`, or in CI an annotation), and in CI the failure of
@@ -271,7 +281,7 @@ impl Layout {
     }
 }
 
-fn dispatch(cli: &Cli, ctx: &Context, trace: &Trace) -> Result<Report, CliError> {
+fn dispatch(cli: &Cli, ctx: &Context, trace: &Trace<'_>) -> Result<Report, CliError> {
     let (layout, config) = trace.phase("config discovery", || -> Result<(Layout, Config), CliError> {
         let layout = Layout::discover(cli)?;
         let config = Config::load(layout.config_file.as_deref())?;
@@ -427,7 +437,7 @@ fn unreadable_ref(name: &str, e: &ReadError) -> Finding {
 }
 
 /// [`sources::read`], recording whether the source was found.
-fn read_logged(name: &str, target: &str, repo: &Path, trace: &Trace) -> Result<RuleSource, ReadError> {
+fn read_logged(name: &str, target: &str, repo: &Path, trace: &Trace<'_>) -> Result<RuleSource, ReadError> {
     let r = sources::read(name, target, repo, trace);
     match &r {
         Ok(s) => trace.info(
@@ -486,6 +496,14 @@ fn lint_command(
         (&config.rules, &layout.root)
     };
     trace.phase("rules sources", || -> Result<(), CliError> {
+        if given.is_empty() {
+            // Nothing listed in the flags or the settings: the defaults, each used only when readable.
+            for spec in ["docs/rules.md", "origin/main:docs/rules.md"] {
+                if let Ok(src) = read_logged(spec, &resolve_spec(spec, &layout.root), git_dir, trace) {
+                    rules.push(src);
+                }
+            }
+        }
         for spec in given {
             let target = resolve_spec(spec, base);
             read_or_warn(spec, &target, git_dir, &mut rules, &mut notes, trace)?;
@@ -518,10 +536,22 @@ fn lint_command(
             (None, Some(e)) => Some(lint::normalize(&layout.root.join(expand_home(e)))),
             (None, None) => None,
         };
-        // The extra engineering rules are used when the file exists; one that exists but cannot be read is an error.
-        if let Some(er) = er.filter(|e| e.exists()) {
+        // The engineering rules are one more source: the file named by `--er` / `er` (a warning when it is missing), else
+        // `../engineering-rules/RULES.md` next to the settings folder when that exists. One that exists but cannot be read is
+        // an error.
+        let explicit = er.is_some();
+        let er = er.unwrap_or_else(|| layout.root.join("../engineering-rules/RULES.md"));
+        if er.exists() {
             let name = er.to_string_lossy();
             rules.push(read_logged(&name, &name, git_dir, trace).map_err(|e| read_error(&e))?);
+        } else if explicit {
+            trace.event("Warning", &format!("engineering rules file {} does not exist", er.display()), &[]);
+            notes.push(Finding {
+                file: er.to_string_lossy().into_owned(),
+                line: 0,
+                message: "the engineering rules file does not exist, so the copied-rule check skips it. Check out engineering-rules there, or fix --er / `er`."
+                    .to_string(),
+            });
         }
         Ok(())
     })?;

@@ -51,7 +51,7 @@ fn fail(cause: String, next_step: &str) -> ReadError {
 }
 
 /// Runs `git <args>` in `repo`, recording the exact command and how it ended.
-fn git(repo: &Path, args: &[&str], trace: &Trace) -> Result<paddock_proc::Output, String> {
+fn git(repo: &Path, args: &[&str], trace: &Trace<'_>) -> Result<paddock_proc::Output, String> {
     let mut cmd = command("git");
     cmd.args(args).current_dir(repo);
     let shown = format!("git {}", args.join(" "));
@@ -69,14 +69,24 @@ fn git(repo: &Path, args: &[&str], trace: &Trace) -> Result<paddock_proc::Output
                 paddock_proc::Outcome::TimedOut => "timed out".to_string(),
                 paddock_proc::Outcome::OutputCap => "output cap".to_string(),
             };
-            trace.info(
+            let mut props = vec![
+                ("command", json!(shown)),
+                ("cwd", json!(cwd)),
+                ("exit", json!(exit)),
+                ("ms", json!(ms)),
+            ];
+            let failed = !out.success();
+            if failed {
+                // The tail of git's complaint (its last lines, bounded), which is what says why.
+                let text = out.stderr_text();
+                let tail: Vec<&str> = text.trim().lines().rev().take(4).collect();
+                let tail: String = tail.into_iter().rev().collect::<Vec<_>>().join(" / ");
+                props.push(("stderr_tail", json!(tail.chars().take(500).collect::<String>())));
+            }
+            trace.event(
+                if failed { "Warning" } else { "Information" },
                 &format!("{shown} exit {exit}"),
-                &[
-                    ("command", json!(shown)),
-                    ("cwd", json!(cwd)),
-                    ("exit", json!(exit)),
-                    ("ms", json!(ms)),
-                ],
+                &props,
             );
         }
         Err(e) => trace.event(
@@ -95,7 +105,7 @@ fn first_line(out: &paddock_proc::Output) -> String {
 
 /// Reads one rules source called `name`: the file `target` if it exists, else `target` as `<ref>:<path>` from git run in
 /// `repo`. The error names the source, the cause and the next step.
-pub fn read(name: &str, target: &str, repo: &Path, trace: &Trace) -> Result<RuleSource, ReadError> {
+pub fn read(name: &str, target: &str, repo: &Path, trace: &Trace<'_>) -> Result<RuleSource, ReadError> {
     let path = Path::new(target);
     if path.exists() {
         let meta = std::fs::metadata(path).map_err(|e| {
@@ -177,7 +187,7 @@ pub fn read(name: &str, target: &str, repo: &Path, trace: &Trace) -> Result<Rule
 }
 
 /// The branches matching `glob` (`origin/docs/*`): local and remote-tracking branches, as short names, sorted.
-pub fn branches(glob: &str, repo: &Path, trace: &Trace) -> Result<Vec<String>, ReadError> {
+pub fn branches(glob: &str, repo: &Path, trace: &Trace<'_>) -> Result<Vec<String>, ReadError> {
     if glob.starts_with('-') || glob.is_empty() {
         return Err(fail(
             format!("ruleBranches entry `{glob}` is not a branch pattern."),

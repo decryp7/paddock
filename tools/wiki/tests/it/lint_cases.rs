@@ -166,11 +166,11 @@ fn the_cli_exits_1_on_errors_and_on_warnings_only_with_strict() {
         a.extend_from_slice(extra);
         cli(&a).0
     };
-    // --er names a file that does not exist: it is skipped (it is an extra source), as the Node script did.
+    // --er names a file that does not exist: a warning, and the lint goes on without it.
     assert_eq!(base(&[]), 0);
     std::fs::write(&none, "Nothing shared with the pages.\n").unwrap();
     assert_eq!(base(&[]), 0);
-    assert_eq!(base(&["--strict"]), 1);
+    assert_eq!(base(&["--strict"]), 5);
     assert_eq!(base(&["--max-age", "90", "--strict"]), 0);
     let bad = wiki(&[("index.md", s("# Index\n"))]);
     let a = [
@@ -184,7 +184,7 @@ fn the_cli_exits_1_on_errors_and_on_warnings_only_with_strict() {
         "--today",
         "2026-10-31",
     ];
-    assert_eq!(cli(&a).0, 1);
+    assert_eq!(cli(&a).0, 5);
     // an unreadable rules source is exit 1 (LINT.md) and names the source
     let mut a = a.to_vec();
     let missing = stale.path().join("unreadable.txt");
@@ -272,4 +272,40 @@ fn the_real_docs_wiki_passes_against_docs_rules_stale_pages_only_warn() {
         lint::MAX_AGE_DAYS,
     );
     assert_eq!(r.errors, vec![]);
+}
+
+#[test]
+fn one_copied_span_is_one_finding_naming_the_sources_that_contain_it() {
+    let dir = wiki(&[(
+        "one.md",
+        s(&page(
+            "2026-10-20",
+            "[a]",
+            "- The coordinator watches load and free disk continuously and keeps the machine busy [two](two.md)\n",
+        )),
+    )]);
+    let same = |name: &str| RuleSource {
+        name: name.into(),
+        text: RULES.into(),
+    };
+    let other = RuleSource {
+        name: "other".into(),
+        text: "Specs: never wait on a fixed number of event loop turns ever again.".into(),
+    };
+    let r = lint_with(
+        dir.path(),
+        &[same("a"), same("b"), other.clone(), same("c"), same("d"), same("e")],
+        "2026-10-31",
+        30,
+    );
+    let copies: Vec<_> = r.errors.iter().filter(|f| f.message.contains("copies rule text")).collect();
+    assert_eq!(copies.len(), 1, "{copies:?}");
+    assert!(
+        copies[0].message.contains("shared with 5 rules sources: a, b, c and 2 more"),
+        "{}",
+        copies[0].message
+    );
+    // a single source keeps the short form
+    let r = lint_with(dir.path(), &[same("only"), other], "2026-10-31", 30);
+    assert!(has(&r.errors, "shared with only):"), "{:?}", r.errors);
 }

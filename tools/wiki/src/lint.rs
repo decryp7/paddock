@@ -19,6 +19,8 @@ const SPECIAL: [&str; 3] = ["README.md", "index.md", "log.md"];
 pub const MAX_AGE_DAYS: i64 = 30;
 /// Most Markdown files read from a wiki folder.
 pub const MAX_FILES: usize = 5_000;
+/// Rules sources named in one copy finding; the rest are counted.
+pub const MAX_NAMED_SOURCES: usize = 3;
 /// Largest file read, in bytes.
 pub const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -317,18 +319,32 @@ pub fn lint(req: &Request<'_>) -> Result<Outcome, LintError> {
         .collect();
     for f in &names {
         let mine = text::windows(text::parse_page(&texts[f.as_str()]).body, COPY_WORDS);
+        // One finding per distinct copied span, naming the rules sources that contain it (not one per source).
+        let mut spans: Vec<(&String, Vec<&str>)> = Vec::new();
         for (src, idx) in &sets {
             let set = &window_sets[*idx];
             if let Some(hit) = mine.iter().find(|w| set.contains(*w)) {
-                out.errors.push(at(
-                    f,
-                    0,
-                    format!(
-                        "copies rule text ({COPY_WORDS}+ words shared with {}): \"{hit}...\"; link the rule instead",
-                        src.name
-                    ),
-                ));
+                match spans.iter_mut().find(|(h, _)| *h == hit) {
+                    Some((_, names)) => names.push(&src.name),
+                    None => spans.push((hit, vec![&src.name])),
+                }
             }
+        }
+        for (hit, names) in spans {
+            let shared = match names.as_slice() {
+                [one] => (*one).to_string(),
+                many => {
+                    let shown: Vec<&str> = many.iter().take(MAX_NAMED_SOURCES).copied().collect();
+                    let more = many.len() - shown.len();
+                    let tail = if more > 0 { format!(" and {more} more") } else { String::new() };
+                    format!("{} rules sources: {}{tail}", many.len(), shown.join(", "))
+                }
+            };
+            out.errors.push(at(
+                f,
+                0,
+                format!("copies rule text ({COPY_WORDS}+ words shared with {shared}): \"{hit}...\"; link the rule instead"),
+            ));
         }
     }
     Ok(out)

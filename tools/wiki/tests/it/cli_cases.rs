@@ -10,7 +10,7 @@ fn p(d: &tempfile::TempDir) -> String {
 fn json_is_one_object_with_the_findings() {
     let dir = wiki(&[("index.md", s("# Index\n"))]);
     let (code, out, _) = cli(&["lint", "--json", "--wiki", &p(&dir), "--rules", &p(&dir), "--today", "2026-10-31"]);
-    // a directory is not a readable rules file: exit 1 (LINT.md) and a JSON error object
+    // a directory is not a readable rules file: exit 1 and a JSON error object
     assert_eq!(code, 1);
     assert_eq!(serde_json::from_str::<Value>(out.trim()).unwrap()["ok"], false);
     let rules = dir.path().join("r.txt");
@@ -25,7 +25,7 @@ fn json_is_one_object_with_the_findings() {
         "--today",
         "2026-10-31",
     ]);
-    assert_eq!(code, 1);
+    assert_eq!(code, 5);
     let v: Value = serde_json::from_str(out.trim()).unwrap();
     assert_eq!(v["error_count"], 2);
     assert_eq!(v["errors"][0]["file"].as_str().map(|f| f.ends_with("one.md")), Some(true));
@@ -131,7 +131,7 @@ fn new_creates_a_page_and_its_index_line_and_never_overwrites() {
     assert_eq!(out.errors, vec![]);
     // refuses an existing page, leaves it and the index alone
     let (code, _, err) = cli(&["new", "three-topic", "--title", "Other", "--wiki", &w]);
-    assert_eq!((code, err.contains("already exists")), (1, true));
+    assert_eq!((code, err.contains("already exists")), (4, true));
     assert_eq!(std::fs::read_to_string(dir.path().join("three-topic.md")).unwrap(), page);
     assert_eq!(std::fs::read_to_string(dir.path().join("index.md")).unwrap(), index);
     // reserved names and traversal
@@ -165,13 +165,9 @@ fn git_ref_sources_run_in_the_repository_and_an_unreadable_one_is_a_warning_with
         std::fs::write(wiki_dir.join(n), t).unwrap();
     }
     let r = p(&repo);
-    // no rules given: the copy check is skipped, with a note (LINT.md)
-    let (code, out, _) = cli(&["lint", "--repo", &r, "--today", "2026-10-31"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(out.contains("note: no rules source"), "{out}");
     // an explicit git-ref source is read with git in the repository
     let (code, out, err) = cli(&["lint", "--repo", &r, "--rules", "HEAD:docs/rules.md", "--today", "2026-10-31"]);
-    assert_eq!(code, 1, "{out}");
+    assert_eq!(code, 5, "{out}");
     assert!(err.contains("shared with HEAD:docs/rules.md"), "{err}");
     // an unreadable ref names the source, the cause and the next step, and only warns
     let (code, out, _) = cli(&["lint", "--repo", &r, "--rules", "nope:docs/rules.md", "--today", "2026-10-31"]);
@@ -211,7 +207,7 @@ fn the_config_file_supplies_settings_and_flags_win() {
     let (code, out, _) = cli(&["lint", "--repo", &d, "--today", "2026-10-31", "--er", &p(&dir)]);
     assert_eq!(code, 1, "an --er that is a folder is unreadable: {out}");
     let (code, out, err) = cli(&["lint", "--repo", &d, "--today", "2026-10-31"]);
-    assert_eq!(code, 1, "{out}");
+    assert_eq!(code, 5, "{out}");
     assert!(
         err.contains("cites merge-log.md by clock time; cite `merge-log.md:<line>` instead"),
         "{out}"
@@ -246,7 +242,11 @@ fn the_config_file_supplies_settings_and_flags_win() {
 }
 
 fn ctx(ci: bool) -> paddock_wiki::Context {
-    paddock_wiki::Context { clock: fixed_clock, ci }
+    paddock_wiki::Context {
+        clock: fixed_clock,
+        ci,
+        log_dir: None,
+    }
 }
 
 #[test]
@@ -268,7 +268,7 @@ fn today_comes_from_the_injected_clock_for_log_new_and_freshness() {
     );
     // the pages are verified 2026-10-20: in the future for the injected clock of 2026-05-17
     let (code, _, err) = cli_in(&["lint", "--wiki", &w], &ctx(false));
-    assert_eq!(code, 1);
+    assert_eq!(code, 5);
     assert!(err.contains("verified 2026-10-20 is in the future"), "{err}");
 }
 
@@ -280,7 +280,7 @@ fn ci_mode_prints_annotations_and_every_unreadable_source_has_a_cause_and_a_next
     ]);
     let w = p(&dir);
     let (code, out, err) = cli_in(&["lint", "--wiki", &w, "--today", "2026-10-31"], &ctx(true));
-    assert_eq!(code, 1);
+    assert_eq!(code, 5);
     assert!(
         err.lines()
             .any(|l| l.starts_with("::error::wiki-lint: ") && l.ends_with("two.md: not listed in index.md")),
@@ -334,11 +334,11 @@ fn the_config_is_found_from_a_subfolder_and_paths_resolve_against_its_folder() {
     std::fs::write(r.join("wiki-lint.json"), r#"{"wiki": "docs/wiki", "rules": ["docs/rules.md"]}"#).unwrap();
     let sub = p(&tempfile::TempDir::new_in(r.join("docs/wiki/deeper")).unwrap());
     let (code, out, err) = cli(&["lint", "--repo", &sub, "--today", "2026-10-31"]);
-    assert_eq!(code, 1, "{out}");
+    assert_eq!(code, 5, "{out}");
     assert!(err.contains("shared with docs/rules.md"), "{err}");
     // the same settings found from the repository's top folder, JSON mode
     let (code, out, _) = cli(&["lint", "--json", "--repo", r.to_str().unwrap(), "--today", "2026-10-31"]);
-    assert_eq!(code, 1);
+    assert_eq!(code, 5);
     assert_eq!(
         serde_json::from_str::<Value>(out.trim()).unwrap()["rules_sources"][0],
         "docs/rules.md"
@@ -385,7 +385,7 @@ fn rule_branches_are_read_with_git_and_a_missing_ref_or_file_only_warns() {
     .unwrap();
     let d = r.to_str().unwrap();
     let (code, out, err) = cli(&["lint", "--repo", d, "--today", "2026-10-31"]);
-    assert_eq!(code, 1, "{out}{err}");
+    assert_eq!(code, 5, "{out}{err}");
     assert!(err.contains("shared with docs/new:docs/rules.md"), "{err}");
     assert!(!err.contains("shared with docs/rules.md"), "main's rules do not match: {err}");
     // the ref origin/main does not exist here, and docs/old lacks the file: warnings, not errors
@@ -398,7 +398,7 @@ fn rule_branches_are_read_with_git_and_a_missing_ref_or_file_only_warns() {
     // the warnings alone do not fail the lint, but --strict makes them
     std::fs::write(r.join("docs/wiki/one.md"), page("2026-10-20", "[a]", "- Fine [two](two.md)\n")).unwrap();
     assert_eq!(cli(&["lint", "--repo", d, "--today", "2026-10-31"]).0, 0);
-    assert_eq!(cli(&["lint", "--repo", d, "--today", "2026-10-31", "--strict"]).0, 1);
+    assert_eq!(cli(&["lint", "--repo", d, "--today", "2026-10-31", "--strict"]).0, 5);
 }
 
 /// A repository with a two-page wiki whose first page copies the committed rule.
@@ -440,7 +440,7 @@ fn verbose_shows_phases_every_git_command_with_its_exit_code_and_every_source() 
         "2026-10-31",
         "--verbose",
     ]);
-    assert_eq!(code, 1, "{err}");
+    assert_eq!(code, 5, "{err}");
     for key in [
         "phase config discovery done in",
         "settings file: none found, using defaults",
@@ -478,7 +478,7 @@ fn log_file_gets_clef_lines_without_file_contents() {
         "--log-file",
         log.to_str().unwrap(),
     ]);
-    assert_eq!(code, 1, "{err}");
+    assert_eq!(code, 5, "{err}");
     assert!(!err.contains("[wiki +"), "a log file alone does not print: {err}");
     let lines: Vec<Value> = std::fs::read_to_string(&log)
         .unwrap()
@@ -522,4 +522,127 @@ fn a_failure_in_ci_is_one_error_annotation_with_cause_and_next_step() {
         annotations[0].contains("docs/missing.md") && annotations[0].contains("no such file") && annotations[0].contains("Fix the path"),
         "{err}"
     );
+}
+
+fn ctx_logged(dir: &std::path::Path) -> paddock_wiki::Context {
+    paddock_wiki::Context {
+        clock: fixed_clock,
+        ci: true,
+        log_dir: Some(dir.to_path_buf()),
+    }
+}
+
+#[test]
+fn with_no_rules_listed_the_defaults_are_docs_rules_and_the_sibling_engineering_rules() {
+    // docs/rules.md of the settings folder is read by default (origin/main is absent here and skipped quietly)
+    let repo = repo_with_wiki();
+    let r = p(&repo);
+    let (code, out, err) = cli(&["lint", "--repo", &r, "--today", "2026-10-31"]);
+    assert_eq!(code, 5, "{out}");
+    assert!(err.contains("shared with docs/rules.md"), "{err}");
+    assert!(out.contains("wiki-lint: 1 error(s), 0 warning(s); 1 rules source(s)"), "{out}");
+    // ../engineering-rules/RULES.md next to the settings folder is added when it exists
+    let outer = tempfile::tempdir().unwrap();
+    let project = outer.path().join("project");
+    std::fs::create_dir_all(project.join("w")).unwrap();
+    std::fs::create_dir_all(outer.path().join("engineering-rules")).unwrap();
+    std::fs::write(
+        outer.path().join("engineering-rules/RULES.md"),
+        "Siblings rule: always check the engineering rules folder next to the repository root before anything else happens.\n",
+    )
+    .unwrap();
+    std::fs::write(project.join("wiki-lint.json"), r#"{"wiki": "w"}"#).unwrap();
+    for (n, t) in [
+        (
+            "one.md",
+            page(
+                "2026-10-20",
+                "[a]",
+                "- Always check the engineering rules folder next to the repository root before anything else [two](two.md)\n",
+            ),
+        ),
+        ("two.md", page("2026-10-20", "[a]", "- Two [one](one.md).\n")),
+        ("index.md", "- [One](one.md)\n- [Two](two.md)\n".to_string()),
+        ("log.md", "# Log\n".to_string()),
+    ] {
+        std::fs::write(project.join("w").join(n), t).unwrap();
+    }
+    let (code, _, err) = cli(&["lint", "--repo", project.to_str().unwrap(), "--today", "2026-10-31"]);
+    assert_eq!(code, 5, "{err}");
+    assert!(err.contains("engineering-rules/RULES.md"), "{err}");
+    // an --er that is named but missing is a warning (a ::warning:: in CI), not silence
+    let missing = outer.path().join("nowhere/RULES.md");
+    let (code, out, _) = cli_in(
+        &[
+            "lint",
+            "--repo",
+            project.to_str().unwrap(),
+            "--er",
+            missing.to_str().unwrap(),
+            "--today",
+            "2026-10-31",
+        ],
+        &ctx(true),
+    );
+    assert_eq!(code, 0, "the named file replaces the sibling default, so nothing is copied: {out}");
+    assert!(
+        out.lines()
+            .any(|l| l.starts_with("::warning::wiki-lint: ") && l.contains("does not exist")),
+        "{out}"
+    );
+}
+
+#[test]
+fn every_run_writes_a_log_file_that_starts_with_the_run_and_keeps_only_the_latest_files() {
+    let repo = repo_with_wiki();
+    let r = p(&repo);
+    let logs = tempfile::tempdir().unwrap();
+    for i in 0..25 {
+        std::fs::write(logs.path().join(format!("wiki-20200101-0000{i:02}-old.log")), "{}\n").unwrap();
+    }
+    let (code, _, _) = cli_in(&["lint", "--repo", &r, "--today", "2026-10-31"], &ctx_logged(logs.path()));
+    assert_eq!(code, 5);
+    let mut files: Vec<_> = std::fs::read_dir(logs.path()).unwrap().map(|e| e.unwrap().path()).collect();
+    files.sort();
+    assert_eq!(files.len(), paddock_wiki::trace::KEEP_LOG_FILES);
+    let mine = files.iter().find(|f| !f.to_string_lossy().ends_with("-old.log")).unwrap();
+    let lines: Vec<Value> = std::fs::read_to_string(mine)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let first = &lines[0];
+    assert!(first["@m"].as_str().unwrap().starts_with("wiki "), "{first}");
+    assert_eq!(first["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(first["os"], std::env::consts::OS);
+    assert_eq!(first["ci"], true);
+    assert!(first["args"].as_array().unwrap().iter().any(|a| a == "lint"));
+    let id = first["OperationId"].as_str().unwrap();
+    assert!(!id.is_empty() && lines.iter().all(|l| l["OperationId"] == id));
+    assert!(mine.to_string_lossy().contains(id), "the file name carries the id");
+    let last = lines.last().unwrap();
+    assert_eq!(last["exit"], 5, "the summary logs the real exit code: {last}");
+}
+
+#[test]
+fn a_failing_git_command_logs_the_tail_of_its_standard_error_live() {
+    let repo = repo_with_wiki();
+    let r = p(&repo);
+    let (code, _, err) = cli(&[
+        "lint",
+        "--repo",
+        &r,
+        "--rules",
+        "HEAD:docs/nope.md",
+        "--today",
+        "2026-10-31",
+        "--verbose",
+    ]);
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("git show HEAD:docs/nope.md exit 128"), "{err}");
+    assert!(
+        err.contains("stderr_tail=fatal: path 'docs/nope.md' does not exist in 'HEAD'"),
+        "{err}"
+    );
+    assert!(err.contains(" started") && err.contains("os=") && err.contains("ci=false"), "{err}");
 }

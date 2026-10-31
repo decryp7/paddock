@@ -90,6 +90,7 @@ pub fn cli(args: &[&str]) -> (i32, String, String) {
         &paddock_wiki::Context {
             clock: paddock_wiki::date::today_local,
             ci: false,
+            log_dir: None,
         },
     )
 }

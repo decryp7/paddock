@@ -10,21 +10,30 @@ wiki log <ingest|lint|fix> "<page | subject>"      # appends `## [today] kind | 
 wiki new <slug> --title "..." [--summary "..."] [--source ...]...   # page from the template, plus its index.md line
 ```
 
-- **Exit codes** (this tool's contract): 0 ok, 1 findings (errors, or warnings with `--strict`), 2 usage or I/O errors (a rules
-  source or the wiki folder cannot be read, a bad argument, a page that already exists). `paddock-cli`'s own numbers differ
-  (findings 5); this tool keeps the 0/1/2 the Node lints had, so existing callers do not change.
-- **`--json`**: standard output is exactly one object (`errors`, `warnings` as `{file, line, message}`, counts,
-  `rules_sources`; or the error object with `ok: false`). With the `CI` variable set, annotations
-  (`::error file=...,line=...::message`) go to standard error, and so does `::error::` for a failure.
+- **Exit codes** are `paddock-cli`'s (ADR 0022): 0 ok; 1 an I/O failure (an unreadable wiki folder, settings or rules file);
+  2 a wrong command line; 4 refused (`wiki new` on a page that exists); 5 findings (errors, or warnings with `--strict`).
+- **Output**: errors as `error <file>:<line>: <message>` on standard error; warnings, notes and the summary
+  `wiki-lint: N error(s), M warning(s); K rules source(s)` on standard output. With `CI`, `GITHUB_ACTIONS` or `GITEA_ACTIONS`
+  equal to `true` each finding is `::error::wiki-lint: ...` or `::warning::wiki-lint: ...`, and a failure is one
+  `::error::wiki-lint: <cause> <next step>`. `--json`: standard output is exactly one object (`errors`, `warnings` as
+  `{file, line, message}`, counts, `rules_sources`; or the error object with `ok: false`).
+- **Log (ER-27)**: every run writes a per-run CLEF JSON-lines file (`wiki-<time>-<OperationId>.log`) in `$WIKI_LOG_DIR` (`off`
+  disables), else `~/Library/Logs/wiki`, `$XDG_STATE_HOME/wiki` or `~/.local/state/wiki`, `%LOCALAPPDATA%\wiki\logs`; the
+  newest 20 are kept. Its first line has the version, arguments, OS and whether CI mode is on; then phases with durations, every
+  git command exactly as run with its exit code (and the tail of its standard error when it failed), every rules source and
+  whether it was found, pages checked, and a summary with the exit code. `--log-file <file>` appends to a file of your choice;
+  `--verbose` prints the same lines live on standard error. Never file contents.
 - **Settings**: `wiki-lint.json` (`wiki`, `rules`, `ruleBranches`, `citeByLine`, `maxAge`, `er`), found by walking up from
   `--repo` (default: the current folder) to the git top folder, so it works from any subfolder. Paths in it are relative to its
   folder; flags are relative to where you run the command, and win. `--config <file>` names it explicitly.
 - **Rules sources** (`--rules`, repeatable, or `rules`): a file, or `<git ref>:<path>` read with `git show`. `ruleBranches` are
   patterns such as `origin/docs/*`, resolved with `git for-each-ref`: every rules *file* is also read from each matching
   branch (open rule branches). A listed ref that does not exist here, or a file a branch lacks, is a **warning**; any other
-  unreadable source is an **error** with the cause and the next step. With no rules the defaults are `docs/rules.md` and
-  `origin/main:docs/rules.md` (when readable); the engineering rules (`--er`, default `../engineering-rules/RULES.md` next to
-  the settings folder) are added when the file exists.
+  unreadable source is an **error** with the cause and the next step. With no rules listed in the flags or the settings the
+  defaults are `docs/rules.md` and `origin/main:docs/rules.md` under the settings folder (each when readable). The engineering
+  rules are one more source: `--er` / `er` (a **warning** if that file does not exist), else `../engineering-rules/RULES.md`
+  next to the settings folder when it exists. One copied span is one finding, naming up to three of the rules sources that
+  contain it and counting the rest.
 - **`--cite-by-line <name>`** (or `citeByLine`): a line that mentions the log `name` and a clock time like 14:33 is an error;
   cite `name:<line>` instead (the generalised steward-log check).
 - **Dates** are the machine's local date, like `date +%F` (the clock is injectable in tests; `--today` overrides). A log line's
