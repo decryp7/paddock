@@ -253,7 +253,7 @@ that decide restarts, failures or quarantine, and their neighbours; section 8's 
 | `paddock-guard` quarantine window | quarantine | C | already on the injected `Clock`: give it the host-tick clock |
 | `paddock-startup` `ready_timeout` (10 s), `terminate_window` (60 s), `dialog_show_deadline` (1 s) | the page-ready handshake of a starting window (ready), the end of a stalled start (terminate), a dialog shown anyway (show) | L; S; U | ADR 0026, 0029 |
 | `paddock-chromium` `START_LIMIT` (20 s), `START_PAGE_WAIT` (5 s), `SELF_TEST_LIMIT` (30 s); `CLOSE_GRACE` (5 s) | the research and test browser | L; S | Chromium is ours to start: judged on its run state |
-| `paddock-service` `HELPER_TIMEOUT` (30 s), `ELEVATED_TIMEOUT` (120 s), `STOP_VERB_TIMEOUT` (10 s) | privileged helper, OS service manager | X | the OS and the user's prompt |
+| `paddock-service` `HELPER_TIMEOUT` (30 s), `ELEVATED_CEILING` (15 min), `STOP_VERB_TIMEOUT` (10 s) | privileged helper, OS service manager | X | the OS and the user's prompt. The elevated step is waited for in 30 s slices with a log line each, and a program still running at the ceiling is reported as such, not as failed. 15 minutes, not the 1 h of `MAX_ELEVATED_CALL`: a UAC consent, a busy runner's service stop and a 1072 (marked for deletion) retry fit well inside 15 minutes, and an hour would leave a hung elevated process invisible for too long |
 | `paddock-mcp` `loopback::HANDSHAKE_TIMEOUT` (10 s) | MCP client | X | |
 | `paddock-channels` `dispatch::DEFAULT_TIMEOUT` (15 s) | notification channels | X | |
 | Dyno app `link` `REQUEST_TIMEOUT` (15 s), `SPAWN_WAIT` (5 s), `CONNECT_GRACE` (8 s); `dyno-ipc` `CONNECT_TIMEOUT`, `PUSH_TIMEOUT` (5 s) | app to agent | L | the agent is our child or service |

@@ -17,17 +17,15 @@ pub const LAUNCHCTL: &str = "/bin/launchctl";
 pub const SYSTEMCTL: &str = "systemctl";
 /// `reg.exe`.
 pub const REG: &str = "reg";
-/// Where Windows lives when `SystemRoot` is not set (or not a full path).
-pub const WINDOWS_DIR_FALLBACK: &str = r"C:\Windows";
+/// Windows' system folder when the OS cannot be asked (or says something that is not a full path).
+pub const SYSTEM_DIR_FALLBACK: &str = r"C:\Windows\System32";
 
-/// `sc.exe` by full path, `%SystemRoot%\System32\sc.exe`: a bare `sc` is looked up on `PATH` (and in the current folder),
-/// where another program of that name could stand in for it, and `sc` is also a PowerShell alias. `SystemRoot` is
-/// ignored unless it is a full path (`C:\Windows`, `\\?\C:\Windows`).
-pub fn sc_exe(vars: &dyn Vars) -> String {
-    let root = vars
-        .get("SystemRoot")
-        .and_then(|v| v.into_string().ok())
-        .map(|v| v.trim_end_matches(['\\', '/']).to_string())
+/// `sc.exe` by full path in `system_dir`, Windows' system folder (`None`, or a value that is not a full path such as
+/// `C:\Windows\System32` or `\\?\C:\Windows\System32`, gives [`SYSTEM_DIR_FALLBACK`]). The pure part of
+/// [`default_sc_exe`], so it is tested on every OS with an injected folder.
+pub fn sc_exe_in(system_dir: Option<&str>) -> String {
+    let dir = system_dir
+        .map(|v| v.trim_end_matches(['\\', '/']))
         .filter(|v| {
             let b = v.as_bytes();
             (b.len() > 2
@@ -36,8 +34,31 @@ pub fn sc_exe(vars: &dyn Vars) -> String {
                 && matches!(b[2], b'\\' | b'/'))
                 || v.starts_with(r"\\")
         })
-        .unwrap_or_else(|| WINDOWS_DIR_FALLBACK.to_string());
-    format!(r"{root}\System32\sc.exe")
+        .unwrap_or(SYSTEM_DIR_FALLBACK);
+    format!(r"{dir}\sc.exe")
+}
+
+/// `sc.exe` by full path in the folder the OS names (`GetSystemDirectoryW`), never from an environment variable: a bare
+/// `sc` is looked up on `PATH` (and `sc` is a PowerShell alias), and `%SystemRoot%` is the user's to change while this
+/// runs elevated. Off Windows the fallback folder (the commands only exist there).
+pub fn default_sc_exe() -> String {
+    sc_exe_in(system_directory().as_deref())
+}
+
+#[cfg(windows)]
+fn system_directory() -> Option<String> {
+    use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
+    let mut buf = [0u16; 260];
+    // SAFETY: the buffer is valid for its length for the call.
+    let n = unsafe { GetSystemDirectoryW(Some(&mut buf)) } as usize;
+    (n > 0 && n <= buf.len())
+        .then(|| String::from_utf16(&buf[..n]).ok())
+        .flatten()
+}
+
+#[cfg(not(windows))]
+fn system_directory() -> Option<String> {
+    None
 }
 
 fn home(vars: &dyn Vars) -> Result<PathBuf, ServiceError> {
@@ -186,30 +207,34 @@ mod tests {
     }
 
     #[test]
-    fn sc_is_run_by_full_path_from_the_system_root_with_a_fallback() {
+    fn sc_is_run_by_full_path_from_the_system_directory_with_a_fallback() {
         let want = r"C:\Windows\System32\sc.exe";
-        assert_eq!(sc_exe(&MapVars::new()), want);
+        assert_eq!(sc_exe_in(None), want);
         assert_eq!(
-            sc_exe(&MapVars::new().with("SystemRoot", r"D:\WINNT")),
-            r"D:\WINNT\System32\sc.exe"
+            sc_exe_in(Some(r"D:\WINNT\system32")),
+            r"D:\WINNT\system32\sc.exe"
         );
         assert_eq!(
-            sc_exe(&MapVars::new().with("SystemRoot", r"E:\Windows\")),
+            sc_exe_in(Some(r"E:\Windows\System32\")),
             r"E:\Windows\System32\sc.exe"
         );
         assert_eq!(
-            sc_exe(&MapVars::new().with("SystemRoot", r"\\?\C:\Windows")),
+            sc_exe_in(Some(r"\\?\C:\Windows\System32")),
             r"\\?\C:\Windows\System32\sc.exe"
         );
         // Not a full path (a planted relative folder, empty, a bare drive): never used.
-        for bad in ["", "Windows", r".\evil", "C:", r"C:evil", "/usr"] {
-            assert_eq!(
-                sc_exe(&MapVars::new().with("SystemRoot", bad)),
-                want,
-                "{bad:?}"
-            );
+        for bad in [
+            "", "Windows", r".\evil", "C:", r"C:evil", "/usr", r"ab\x", r"1:\x",
+        ] {
+            assert_eq!(sc_exe_in(Some(bad)), want, "{bad:?}");
         }
-        assert!(!sc_exe(&MapVars::new()).eq_ignore_ascii_case("sc"));
+        assert!(!sc_exe_in(None).eq_ignore_ascii_case("sc"));
+        // The real lookup answers a full path ending in sc.exe on any OS.
+        let real = default_sc_exe();
+        assert!(
+            real.to_ascii_lowercase().ends_with(r"\sc.exe") && real.contains('\\'),
+            "{real}"
+        );
     }
 
     #[test]

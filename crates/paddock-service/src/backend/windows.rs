@@ -8,12 +8,11 @@ use crate::parse::{
     SC_DISABLED, SC_RUNNING, SC_STOPPED, run_value_program, sc_config, sc_exit, sc_state,
     startup_switched_off,
 };
-use crate::paths::{REG, WINDOWS_RUN_KEY, WINDOWS_STARTUP_APPROVED_KEY, sc_exe};
+use crate::paths::{REG, WINDOWS_RUN_KEY, WINDOWS_STARTUP_APPROVED_KEY, default_sc_exe};
 use crate::port::{Elevator, RegisterError, System};
 use crate::render::{sc_commands, scm_config, windows_command_line};
 use crate::spec::ServiceSpec;
 use crate::verbs::Verb;
-use paddock_env::ProcessVars;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -181,7 +180,7 @@ pub struct WindowsService {
     spec: ServiceSpec,
     target: Target,
     sys: Box<dyn System>,
-    /// `sc.exe` by full path ([`sc_exe`]).
+    /// `sc.exe` by full path ([`default_sc_exe`]).
     sc: String,
 }
 
@@ -202,11 +201,11 @@ impl WindowsService {
             spec,
             target,
             sys,
-            sc: sc_exe(&ProcessVars),
+            sc: default_sc_exe(),
         }
     }
 
-    /// Another `sc.exe` (tests; the default is `%SystemRoot%\\System32\\sc.exe`).
+    /// Another `sc.exe` (tests; the default is the system folder's `sc.exe`).
     #[must_use]
     pub fn with_sc(mut self, path: &str) -> Self {
         self.sc = path.to_string();
