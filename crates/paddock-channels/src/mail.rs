@@ -135,12 +135,11 @@ mod real {
             let message = builder
                 .header(ContentType::TEXT_PLAIN)
                 .body(mail.body.clone())
-                .map_err(|e| SendError::Failed(e.to_string()))?;
+                .map_err(failed)?;
             let tls = match mail.security {
                 Security::None => Tls::None,
                 s => {
-                    let params = TlsParameters::new(host.to_string())
-                        .map_err(|_| SendError::Invalid(SERVER_NAME.into()))?;
+                    let params = TlsParameters::new(host.to_string()).map_err(unusable_name)?;
                     if s == Security::Implicit {
                         Tls::Wrapper(params)
                     } else {
@@ -175,6 +174,17 @@ mod real {
         }
     }
 
+    /// A message the library refused to build (a missing header; the checks above make it unreachable in practice).
+    fn failed(e: lettre::error::Error) -> SendError {
+        SendError::Failed(e.to_string())
+    }
+
+    /// The certificate check could not take the host as a name (rustls with the platform verifier accepts nearly anything, so
+    /// this is a guard rather than an expected path).
+    fn unusable_name<E>(_: E) -> SendError {
+        SendError::Invalid(SERVER_NAME.into())
+    }
+
     /// Maps a library error to what the user should know.
     fn classify(e: &lettre::transport::smtp::Error, host: &str) -> SendError {
         let mut chain = e.to_string().to_ascii_lowercase();
@@ -207,6 +217,24 @@ mod real {
             return SendError::Failed("the server's answer was not understood".into());
         }
         SendError::Connect(host.to_string())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn a_name_the_certificate_check_cannot_take_asks_for_a_server_name() {
+            assert!(
+                matches!(unusable_name(()), SendError::Invalid(t) if t.contains("mail server"))
+            );
+        }
+
+        #[test]
+        fn a_message_the_library_refuses_is_a_failure_with_its_reason() {
+            let e = Message::builder().body(String::new()).unwrap_err();
+            assert!(matches!(failed(e), SendError::Failed(why) if !why.is_empty()));
+        }
     }
 }
 
