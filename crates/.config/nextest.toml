@@ -4,6 +4,16 @@
 # Each crate's integration tests are one binary, `it` (tests/it/main.rs, one module per former tests/<name>.rs): a
 # former binary is a test-name prefix, `cargo nextest run -p paddock-jobs -E 'test(/^pool::/)'`.
 
+# paddock-chromium's real-browser tests (tests/it/real_browser.rs) take turns: Chrome for Testing cold starts side by side
+# starve each other on a loaded runner (Debrief's copy of the driver failed so in CI 7213 and 7250). The start itself is
+# judged on the browser's run state (ADR 0031); the group keeps them from competing with each other.
+[test-groups]
+real-browser = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(paddock-chromium) & binary(it) & test(/^real_browser::/)'
+test-group = 'real-browser'
+
 [profile.default]
 # One test per core but one (rules.md 13), so a full run leaves the machine usable.
 test-threads = -1

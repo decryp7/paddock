@@ -1053,3 +1053,13 @@ date. **Rule (55, ADR 0034):** every mechanism that exists more than once is lis
 the canonical implementation and every copy in the same change (a freeze does not stop it) or a copy is waived with a reason;
 each copy has an owner and a tag by which it is deleted, and that tag is refused while the copy exists. Before fixing a bug in
 any service, IPC, driver or UI helper, look it up in the register first.
+
+## The fixed start wait hid in a helper named `connect` (2026-10-31, Debrief chromium-driver)
+Debrief's `chromium-driver` real-browser tests failed three times on the loaded Mac runner (CI 7213, 7250 and the run after)
+with `launch: Timeout("the browser start")` after 20 s: two Chrome for Testing cold starts side by side, beside the heavy
+suites, did not write `DevToolsActivePort` within the fixed 20 s of `launch.rs`'s `connect`. ADR 0031's start judge had
+already replaced the same limit in `paddock-chromium` (the canonical), but the fix never reached the copy (rule 55), and C51
+did not flag it because it looks for fixed waits only inside functions named `start*`, `spawn*`, `launch*` or `boot*`.
+**Rule:** a start's readiness wait is judged by `paddock_proc::StartWatch` wherever it lives, whatever the helper is called;
+when a fix lands in a canonical implementation, check `docs/known-copies.toml` and fix or waive each copy in the same change.
+Real-browser tests take turns in a nextest `real-browser` group (max-threads 1) in every workspace that runs them.

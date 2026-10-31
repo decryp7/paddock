@@ -18,6 +18,10 @@ child-processes = { max-threads = 1 }
 # the rest of the workspace fills the other threads. The filter is the whole binary, so a new test there joins the group
 # without a list to update (conformance/test/ci-actions.test.mjs checks it).
 app-plugin-processes = { max-threads = 6 }
+# chromium-driver's real-browser tests (tests/it/real_browser.rs) take turns: two Chrome for Testing cold starts side by side,
+# beside the heavy suites, starved each other on the loaded Mac runner (CI 7213, 7250 and the run after). The start itself is
+# judged on the browser's run state (ADR 0031); the group keeps them from competing with each other.
+real-browser = { max-threads = 1 }
 
 [profile.default]
 # One test per core but one (Paddock rule 13), so a full run leaves the machine usable.
@@ -40,6 +44,10 @@ filter = '''
 '''
 test-group = 'child-processes'
 retries = 2
+
+[[profile.default.overrides]]
+filter = 'package(chromium-driver) & binary(it) & test(/^real_browser::/)'
+test-group = 'real-browser'
 
 [[profile.default.overrides]]
 filter = 'package(debrief-app) & kind(lib)'
