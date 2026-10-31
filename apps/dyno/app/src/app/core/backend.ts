@@ -252,6 +252,8 @@ export interface DynoBackend {
   editWidgetLayout(edit: SurfaceEdit): Promise<SurfaceView>;
   /** The popup's values now (the first paint; later ones are pushed). */
   popoverValues(): Promise<PopoverSurfaceValues>;
+  /** The popup's values as they are now, for the Settings preview: asking changes nothing about the popover's visibility or its pushes. */
+  popoverSnapshot(): Promise<PopoverSurfaceValues>;
   /** A widget's button: open a page, retry, start the backup check, restart the agent, open Settings. */
   runWidgetAction(action: WidgetActionId): Promise<void>;
   /** The popup's values, pushed while the popover is visible (`dyno://popover-values`). */

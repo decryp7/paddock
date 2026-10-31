@@ -14,7 +14,7 @@ const LEVEL_WORD: Record<Level, string> = { info: 'Info', warning: 'Warning', cr
 /** Shapes drawn while a widget is loading: the same rows as a ready one, so the heights agree (their text is hidden). */
 const SK_ALARMS: AlarmRow[] = [1, 2].map((id) => ({ id, title: 'Memory pressure is high', level: 'warning', since: 0, acknowledged: false }));
 const SK_VOLUMES: VolumeRow[] = [1, 2, 3].map((n) => ({ id: `${n}`, name: 'Macintosh HD', usedPercent: 50, freeBytes: 1, totalBytes: 2, tone: 'ok', reachable: true }));
-const SK_COUNTERS: CounterRow[] = [1, 2, 3, 4].map((n) => ({ path: `${n}`, name: 'GPU memory in use', value: 1, unit: 'bytes' }));
+const SK_COUNTERS: CounterRow[] = [1, 2, 3, 4].map((n) => ({ path: `${n}`, name: 'GPU memory in use', value: 1, unit: 'bytes', percent: null, tone: 'ok' }));
 const SK_APPS: AppRow[] = [1, 2, 3].map((n) => ({ name: `App ${n}`, cpuPercent: 10 }));
 const SK_ISSUE: IssueValue = { title: 'Disk write errors on disk4', app: '', kind: '', level: 'warning', at: 0 };
 const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBackup: 0, summary: '', tools: 1 };
@@ -114,7 +114,10 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       @let p = counters(value);
       <ul class="dy-pw-list" aria-label="Pinned counters">
         @for (r of p?.rows ?? skCounters; track r.path) {
-          <li class="dy-pw-line"><span class="dy-pw-grow" pdSkeleton>{{ r.name }}</span><span [class.dy-pw-muted]="r.value === null" pdSkeleton>{{ r.value === null ? 'Unavailable' : counter(r) }}</span></li>
+          <li class="dy-pw-line" [attr.data-tone]="r.tone"><span class="dy-pw-grow" pdSkeleton>{{ r.name }}</span>
+            <span class="dy-pw-val" [class.dy-pw-muted]="r.value === null" pdSkeleton>
+              @if (r.tone !== 'ok') { <pd-status-glyph [status]="r.tone === 'bad' ? 'error' : 'warning'" [size]="14" /> }
+              {{ r.value === null ? 'Unavailable' : counter(r) }}</span></li>
         }
       </ul>
     </ng-template>
@@ -155,6 +158,8 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
     .dy-pw-half { display: grid; gap: 2px; min-width: 0; }
     .dy-pw-big { font-size: 22px; font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; line-height: 1.2; }
     .dy-pw-big small { font-size: var(--pd-text-label); font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); margin-left: 2px; }
+    .dy-pw-val { display: inline-flex; align-items: center; gap: 4px; }
+    .dy-pw-line[data-tone='warn'] .dy-pw-val { color: var(--pd-warning); } .dy-pw-line[data-tone='bad'] .dy-pw-val { color: var(--pd-danger); }
     .dy-pw-line { display: flex; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
   `,
 })

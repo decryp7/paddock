@@ -376,6 +376,7 @@ export class MockWidgets {
       case 'cpuMemory':
         return ready({ cpuMemory: { cpuPercent: 76, cpuTone: 'warn', memoryUsed: 16.3e9, memoryTotal: 32e9, memoryPercent: 51, memoryTone: 'ok', cpuMinute: wave(70, 12) } }, stale);
       case 'network':
+        if (state === 'empty') return empty('See traffic when online', 'Offline now.', 'Open network', { openPage: 'network' });
         return ready({ network: { rxBps: 2.4e6, txBps: 310e3, rxMinute: wave(2e6, 5e5), txMinute: wave(3e5, 5e4) } }, stale);
       case 'backupHealth':
         if (state === 'empty') return empty('Know when backups ran', 'No backup set up.', 'Set up checks', 'setUpBackupChecks');
@@ -390,7 +391,7 @@ export class MockWidgets {
       case 'pinnedCounters':
         if (state === 'empty') return empty('Watch your own counters here', 'Pin counters in Dyno; the first 4 show here.', 'Pin counters', 'pinCounters');
         if (state === 'error') return error("Couldn't read counters", 'None of the 3 pinned counters answered.');
-        return ready({ pinnedCounters: { rows: [{ path: '\\GPU\\Memory in use', name: 'GPU memory in use', value: 3.2e9, unit: 'bytes' }, { path: '\\Memory\\Compressed', name: 'Compressed memory', value: 1.14e9, unit: 'bytes' }, { path: '\\System\\Context switches per second', name: 'Context switches per second', value: null, unit: 'perSec' }], more: 0 } }, stale);
+        return ready({ pinnedCounters: { rows: [{ path: '\\GPU\\Memory in use', name: 'GPU memory in use', value: 3.2e9, unit: 'bytes', percent: null, tone: 'ok' }, { path: '\\Memory\\Compressed', name: 'Compressed memory', value: 1.14e9, unit: 'bytes', percent: null, tone: 'ok' }, { path: '\\System\\Context switches per second', name: 'Context switches per second', value: null, unit: 'perSec', percent: null, tone: 'ok' }], more: 0 } }, stale);
       case 'topApps':
         return ready({ topApps: { rows: [{ name: 'Rust build (cargo)', cpuPercent: 42 }, { name: 'Google Chrome', cpuPercent: 6.8 }, { name: 'WindowServer', cpuPercent: 4.1 }] } }, stale);
     }

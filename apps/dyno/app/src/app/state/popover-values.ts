@@ -26,10 +26,19 @@ export class PopoverValues {
     await this.refresh();
   }
 
-  /** Asks for the values now (the Settings preview, which is not pushed to while the popover is hidden). */
+  /** Asks for the values now (the popup's first paint). */
   async refresh(): Promise<void> {
+    await this.read(() => this.backend.popoverValues());
+  }
+
+  /** Asks for a snapshot for the Settings preview (the popover is hidden then, so nothing is pushed): no change to the popover's visibility. */
+  async snapshot(): Promise<void> {
+    await this.read(() => this.backend.popoverSnapshot());
+  }
+
+  private async read(ask: () => Promise<PopoverSurfaceValues>): Promise<void> {
     try {
-      this._values.set(await this.backend.popoverValues());
+      this._values.set(await ask());
     } catch {
       // The widgets stay as they were (loading, or their last values).
     }

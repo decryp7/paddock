@@ -96,6 +96,12 @@ describe('MockWidgets popup values', () => {
     expect(w.values().notice).toBeNull();
   });
 
+  it('shows the network widget empty, as the engine does when offline', () => {
+    const w = new MockWidgets({ popup: { network: 'empty' } });
+    w.edit({ popover: { add: { widget: 'network', span: null, at: null } } });
+    expect(w.values().placements.find((p) => p.id === 'network')!.state).toMatchObject({ state: 'empty', title: 'See traffic when online', detail: 'Offline now.', next: { label: 'Open network' } });
+  });
+
   it('reads the switches from the URL and ignores nonsense', () => {
     expect(mockWidgetOptionsFromUrl('?popup=diskSpace:error,network:bogus,nope:empty&agent=stopped')).toEqual({ popup: { diskSpace: 'error' }, agentStopped: true });
     expect(mockWidgetOptionsFromUrl('')).toEqual({ popup: {}, agentStopped: false });

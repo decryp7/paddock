@@ -212,8 +212,6 @@ test.describe('screenshots for the independent review', () => {
       };
       const p1 = await open('');
       await snap(p1, 'popup', p1.locator('pd-tray-popover'));
-      const p2 = await open('&popup=activeAlarms:empty,diskSpace:error,cpuMemory:stale');
-      await snap(p2, 'popup-states', p2.locator('pd-tray-popover'));
       const p3 = await open('&agent=stopped');
       await snap(p3, 'popup-agent', p3.locator('pd-tray-popover'));
       const p4 = await open('', 560);
@@ -221,16 +219,23 @@ test.describe('screenshots for the independent review', () => {
       await snap(p4, 'popup-menu');
       await page.setViewportSize({ width: 1100, height: 2400 });
       const chooser = await openChooser(page);
-      await chooser.getByRole('button', { name: 'Add Network' }).click();
-      await expect(shown(chooser)).toHaveCount(4);
+      for (const [name, count] of [['Network', 4], ['Backup', 5], ['Last issue', 6], ['Pinned counters', 7]] as const) {
+        await chooser.getByRole('button', { name: `Add ${name}` }).click();
+        await expect(shown(chooser)).toHaveCount(count);
+      }
       // The whole Popup widgets section, from its heading: list, handles, volume select, Half/Full, counter, hint and the preview.
       await page.getByRole('heading', { name: 'Popup widgets' }).scrollIntoViewIfNeeded();
       const head = await page.getByRole('heading', { name: 'Popup widgets' }).boundingBox();
       const body = await chooser.boundingBox();
       await page.evaluate(() => document.fonts.ready);
       await page.screenshot({ path: join(SHOTS!, `chooser-${theme}.png`), clip: { x: head!.x - 16, y: head!.y - 8, width: Math.min(1100 - head!.x, body!.width + 32), height: body!.y + body!.height - head!.y + 24 } });
-      await chooser.getByRole('button', { name: 'More actions for Network' }).click();
+      await chooser.getByRole('button', { name: /^More actions for Network/ }).click();
       await page.screenshot({ path: join(SHOTS!, `chooser-menu-${theme}.png`), clip: { x: head!.x - 16, y: head!.y - 8, width: Math.min(1100 - head!.x, body!.width + 32), height: body!.y + body!.height - head!.y + 24 } });
+      await page.keyboard.press('Escape');
+      const p2 = await open('&popup=activeAlarms:empty,diskSpace:error,cpuMemory:stale,network:empty,backupHealth:working,lastIssue:error,pinnedCounters:ready', 1500);
+      await snap(p2, 'popup-states', p2.locator('pd-tray-popover'));
+      const p5 = await open('', 1500);
+      await snap(p5, 'popup-more', p5.locator('pd-tray-popover'));
     });
   }
 });
