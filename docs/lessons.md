@@ -1006,7 +1006,6 @@ proved by building that app's installers (`<app>-release.yml` with gates on and 
 main (rule 54). The ci-actions test now checks that every release workflow whose app imports `@decryp7/paddock-ui`
 builds the UI.
 
-<<<<<<< HEAD
 ## A discovery file is a hint, never proof (2026-10-30, Dyno)
 Dyno's `agent.json` (the file that names the agent's pid and port) outlived its agent. The app read it, took it for a
 live agent, showed a false "Agent stopped" and looped on exit code 3. Separately, `Plan::Replace` deleted a
@@ -1114,7 +1113,7 @@ its own build folder), `std::fs::copy` truncating (the source itself was 0 bytes
 binary was not relinked). **Lesson:** a build script must never write into the build folder next to cargo's own outputs;
 while the sidecars are placeholders, Dyno hides `externalBin` from tauri-build (a `TAURI_CONFIG` merge patch), and a test
 that copies a built program first checks it is not empty. Pitwall and Pitcrew write the same placeholders.
-=======
+
 ## A test server in the runner's process is deaf while the runner waits synchronously (2026-10-31, Spotter)
 The Windows update test failed every case: the installed old Spotter reported "timeout: connect" for the test feed, while
 `Test-NetConnection` and `curl.exe` in the guest reached it. The old build was the shell-based Spotter (the
@@ -1127,4 +1126,11 @@ in milliseconds; a host test that fetches from the feed inside a `spawnSync` cal
 server a test drives runs in its own process (or the runner never blocks while the system under test may call it); a
 "connect" timeout over TLS can be a server that accepted but never answered, so check the server's event loop before the
 client's network stack. The feed now runs in a child process (`scripts/vm-smoke/update-feed.mjs`) with a test for this.
->>>>>>> origin/spotter/update-smoke
+
+## One harness developed on three branches (2026-11-01, vm-smoke)
+The VM smoke harness grew in parallel on `steward/s28c-dyno-1.0` (Dyno's fixes), `spotter/update-smoke` (the update test) and
+`feat/vm-smoke-gui` (the GUI mode and Dyno's judge fixes), with cherry-picked copies of the same fixes on two of them. The
+three were add/add conflicts with no common base, so merging was a hand job and could have dropped fixes. **Recurring class
+(ER-21):** a shared tool developed by several agents at once. Rule: one branch owns a shared harness at a time; others
+rebase onto it before adding to it; a cherry-pick of a fix is replaced by a merge of its branch. Unified in
+`tools/vm-smoke-unified`.
