@@ -1,19 +1,21 @@
 //! Judging a process that is starting (ADR 0031): patience, not a wall clock. The judge is pure: it is handed one
 //! [`Reading`] per tick (liveness, the ready handshake, progress ticks, the tree's CPU time) and answers [`StartState`].
-//! A starved or paused process is waited for; only a process that spins without becoming ready, does nothing at all, or
-//! cannot be observed for a long time is called stuck. Elapsed time alone never fails a start.
+//! A starved process is waited for, and so is a stopped one ([`Liveness::Paused`], read from the OS by [`run_state`]: a
+//! probe that names its process by [`StartProbe::pid`] gets it); only a process that spins without becoming ready, does
+//! nothing at all, or cannot be observed for a long time is called stuck. Elapsed time alone never fails a start.
 //!
 //! Idle and blindness are counted in ticks (observations), never in wall seconds: every observation adds one
 //! [`Patience::tick`], however late it came, so a host that was paused or starved counts one tick, not the pause
 //! (ADR 0031 section 2). A hung process with timer threads can keep using a little CPU and so keep resetting the idle
 //! count: the judge cannot call that stuck, and the caller's own cap (its recorded product limit) is the real bound. When
-//! the OS gives no CPU reading at all, [`Patience::hang_guard`] bounds the wait, so there is always a bound.
+//! the OS gives no CPU reading at all, [`Patience::hang_guard`] bounds the wait, so there is always a bound, except while
+//! the process is stopped (then nothing counts and the caller's cap bounds the wait).
 //!
 //! [`StartWatch`] is the thin edge: it asks a [`StartProbe`] for the readings, feeds the judge and paces itself through a
 //! [`Pace`] (a clock in production, a fake in tests). It reads the CPU time every [`Patience::cpu_every`] ticks, one pid
 //! at a time ([`crate::tree_cpu_time`]), never the whole process table.
 
-use crate::{ProcessId, StallCause, StallReport, tree_cpu_time};
+use crate::{ProcessId, RunState, StallCause, StallReport, run_state, tree_cpu_time};
 use std::time::Duration;
 
 /// When a start is stuck rather than slow.
@@ -152,8 +154,16 @@ impl StartJudge {
         }
         match &r.liveness {
             Liveness::Exited(info) => return StartState::Exited(info.clone()),
-            Liveness::Paused => return StartState::Starting,
-            Liveness::Running => {}
+            Liveness::Paused => {
+                // Nothing counts while it is stopped and nothing resets: the idle count resumes where it was. The pause is
+                // said once per episode.
+                if self.reported & PAUSED == 0 {
+                    self.reported |= PAUSED;
+                    return StartState::Stalled(StallReport::new(StallCause::Paused, &self.what));
+                }
+                return StartState::Starting;
+            }
+            Liveness::Running => self.reported &= !PAUSED,
         }
         self.ticks = self.ticks.saturating_add(1);
         self.since_cpu_read = self.since_cpu_read.saturating_add(1);
@@ -234,11 +244,22 @@ const SPIN: u8 = 1;
 const IDLE: u8 = 2;
 const HUNG: u8 = 4;
 const SLOW: u8 = 8;
+const PAUSED: u8 = 16;
 
 /// What a [`StartWatch`] reads from the world, once per tick.
 pub trait StartProbe {
     /// Whether the process is there.
     fn liveness(&mut self) -> Liveness;
+    /// The process being started, by identity, when the probe knows it. [`StartProbe::run_state`] reads its run state from
+    /// the OS; without it a stopped process cannot be told from an idle one.
+    fn pid(&self) -> Option<ProcessId> {
+        None
+    }
+    /// Whether the process is stopped (see [`run_state`]); [`RunState::Unknown`] without a [`StartProbe::pid`]. The watch
+    /// asks it every tick while [`StartProbe::liveness`] says running, and a stopped process reads as [`Liveness::Paused`].
+    fn run_state(&mut self) -> RunState {
+        self.pid().map_or(RunState::Unknown, run_state)
+    }
     /// Whether the ready handshake has happened. May do work (try a connection); remember its result.
     fn ready(&mut self) -> bool;
     /// The start's progress counter (see [`Reading::progress`]); 0 when the app has none.
@@ -253,6 +274,16 @@ pub trait StartProbe {
 pub trait Pace {
     /// Waits `tick`; `false` when the wait was cancelled.
     fn wait(&mut self, tick: Duration) -> bool;
+}
+
+/// The [`Liveness`] of `id`: `exited` when the caller has already seen it end (its wait status), else [`Liveness::Paused`]
+/// when the OS says it is stopped, else running. For users of [`StartJudge`] that build their own [`Reading`]s.
+pub fn liveness_of(id: ProcessId, exited: Option<ExitInfo>) -> Liveness {
+    match exited {
+        Some(info) => Liveness::Exited(info),
+        None if run_state(id) == RunState::Stopped => Liveness::Paused,
+        None => Liveness::Running,
+    }
 }
 
 /// The CPU time of the tree at `root` as a [`Cpu`] reading.
@@ -292,6 +323,8 @@ pub struct StartWatch<P, C> {
     pace: C,
     patience: Patience,
     ticks: u32,
+    /// The last run state read said stopped.
+    stopped: bool,
 }
 
 impl<P: StartProbe, C: Pace> StartWatch<P, C> {
@@ -303,6 +336,7 @@ impl<P: StartProbe, C: Pace> StartWatch<P, C> {
             pace,
             patience,
             ticks: 0,
+            stopped: false,
         }
     }
 
@@ -324,9 +358,17 @@ impl<P: StartProbe, C: Pace> StartWatch<P, C> {
 
     fn read(&mut self) -> Reading {
         let ready = self.probe.ready();
-        let liveness = self.probe.liveness();
+        let mut liveness = self.probe.liveness();
         let every = self.patience.cpu_every.max(1);
-        let cpu = if self.ticks.is_multiple_of(every) {
+        let on_cadence = self.ticks.is_multiple_of(every);
+        // The run state costs a system call: read on the CPU cadence, and kept between reads.
+        if on_cadence && liveness == Liveness::Running {
+            self.stopped = self.probe.run_state() == RunState::Stopped;
+        }
+        if liveness == Liveness::Running && self.stopped {
+            liveness = Liveness::Paused;
+        }
+        let cpu = if on_cadence {
             self.probe.cpu_time().map_or(Cpu::Unavailable, Cpu::Used)
         } else {
             Cpu::NotRead
@@ -495,6 +537,7 @@ mod tests {
             liveness: Liveness::Paused,
             ..run(used(1))
         };
+        assert_eq!(cause(&j.observe(&paused)), Some(StallCause::Paused));
         for _ in 0..100 {
             assert_eq!(j.observe(&paused), StartState::Starting);
         }
@@ -561,6 +604,130 @@ mod tests {
             assert_eq!(j.observe(&run(Cpu::NotRead)), StartState::Starting);
         }
         assert!(matches!(cause(&j.observe(&run(used(1)))), Some(StallCause::Idle(d)) if d == S(5)));
+    }
+
+    #[test]
+    fn a_stopped_process_is_said_to_be_paused_once_and_never_idle() {
+        let mut j = StartJudge::new(patience(), "the browser");
+        assert_eq!(j.observe(&run(used(1))), StartState::Starting);
+        for _ in 0..4 {
+            assert_eq!(j.observe(&run(used(1))), StartState::Starting);
+        }
+        let paused = Reading {
+            liveness: Liveness::Paused,
+            ..run(Cpu::NotRead)
+        };
+        let mut stalls = Vec::new();
+        for _ in 0..1000 {
+            if let StartState::Stalled(r) = j.observe(&paused) {
+                stalls.push(r);
+            }
+        }
+        assert_eq!(stalls.len(), 1, "{stalls:?}");
+        assert_eq!(stalls[0].cause, StallCause::Paused);
+        assert_eq!(stalls[0].action, crate::StallAction::Wait);
+        // Nothing was counted or reset: the fifth idle second after the resume is still the idle stall, and then a new pause
+        // is a new episode.
+        assert!(matches!(cause(&j.observe(&run(used(1)))), Some(StallCause::Idle(d)) if d == S(5)));
+        assert_eq!(cause(&j.observe(&paused)), Some(StallCause::Paused));
+        assert_eq!(j.observe(&paused), StartState::Starting);
+    }
+
+    #[test]
+    fn ready_and_exit_win_over_a_pause() {
+        let mut j = StartJudge::new(patience(), "x");
+        let mut r = Reading {
+            liveness: Liveness::Paused,
+            ..run(Cpu::NotRead)
+        };
+        r.ready = true;
+        assert_eq!(j.observe(&r), StartState::Ready);
+    }
+
+    struct Stopped(RunState, std::cell::Cell<u32>);
+    impl StartProbe for Stopped {
+        fn liveness(&mut self) -> Liveness {
+            Liveness::Running
+        }
+        fn ready(&mut self) -> bool {
+            false
+        }
+        fn cpu_time(&mut self) -> Option<Duration> {
+            Some(S(1))
+        }
+        fn run_state(&mut self) -> RunState {
+            self.1.set(self.1.get() + 1);
+            self.0
+        }
+    }
+
+    #[test]
+    fn the_watch_reads_a_stopped_process_as_paused_and_any_other_state_as_running() {
+        for (run, paused) in [
+            (RunState::Stopped, true),
+            (RunState::Running, false),
+            (RunState::Exited, false),
+            (RunState::Unknown, false),
+        ] {
+            let waits = RefCell::new(Vec::new());
+            let mut w = StartWatch::new(
+                patience(),
+                "x",
+                Stopped(run, Default::default()),
+                Ticks(&waits, 12),
+            );
+            let got = w.wait();
+            if paused {
+                assert_eq!(cause(&state(got)), Some(StallCause::Paused), "{run:?}");
+            } else {
+                assert!(
+                    matches!(cause(&state(got)), Some(StallCause::Idle(_))),
+                    "{run:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_run_state_is_read_on_the_cpu_cadence_and_kept_between_reads() {
+        let waits = RefCell::new(Vec::new());
+        let p = Patience {
+            cpu_every: 4,
+            ..patience()
+        };
+        let mut w = StartWatch::new(
+            p,
+            "x",
+            Stopped(RunState::Stopped, Default::default()),
+            Ticks(&waits, 9),
+        );
+        let mut stalls = 0;
+        while let Watched::State(StartState::Stalled(r)) = w.wait() {
+            assert_eq!(r.cause, StallCause::Paused);
+            stalls += 1;
+        }
+        assert_eq!(stalls, 1, "paused from the first reading, once");
+        assert_eq!(w.into_probe().1.get(), 3, "ticks 0, 4 and 8 of 9");
+    }
+
+    #[test]
+    fn a_probe_without_a_pid_has_an_unknown_run_state_and_liveness_of_maps_it() {
+        let mut p = script(vec![]);
+        assert_eq!(p.pid(), None);
+        assert_eq!(p.run_state(), RunState::Unknown);
+        let info = ExitInfo {
+            status: Some(1),
+            stderr_tail: None,
+        };
+        let me = ProcessId::of(std::process::id()).unwrap();
+        assert_eq!(liveness_of(me, Some(info.clone())), Liveness::Exited(info));
+        assert_eq!(liveness_of(me, None), Liveness::Running);
+        let gone = ProcessId::new(me.pid(), crate::StartTime::from_micros(1));
+        assert_eq!(
+            liveness_of(gone, None),
+            Liveness::Running,
+            "exit is the caller's wait status, not ours"
+        );
     }
 
     struct Script {

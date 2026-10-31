@@ -22,6 +22,17 @@ Conventional Commits; one semver tag for the whole repo.
 - `JobReport::stale()` no longer counts "has a launch constraint and is not running": every healthy `SMAppService` job has `has LWCR`, so a pending job at login read as refused and the repair killed the healthy agent (Dyno B4; Pitwall 1.1 had the same logic). Stale now means found, not running, and spawn failed, exit 78 or "needs LWCR update". New `JobReport::needs_repair(answers)` (stale and the service does not answer) is the one decision for every app, and `JobReport::describe()` the observed state in words for logs and messages. Also affects `Job::Refused` in the launchd backend (a running job is never refused).
 - New `parse::launchctl_output` (stdout of a successful `launchctl` call through the `System` port, bounded and read while it runs; output past the cap comes back truncated) and new public module `launchctl` with `job_report` (`None` = launchd could not be asked, distinct from "does not know the job") and `bootout` (exit 3, 113 or "No such process" is success), moved out of the launchd backend. Pitwall uses them and drops its copies; Dyno and Pitcrew adopt them on their own branches.
 
+
+### `paddock-proc`: a stopped process is waited for, not called idle (ADR 0031)
+- New `RunState { Running, Stopped, Exited, Unknown }` and `run_state(ProcessId) -> RunState`, identity-checked (a pid handed on is
+  `Exited`): macOS reads `pbi_status == SSTOP` from the `proc_pidinfo` call that also gives the CPU time, Linux `/proc/<pid>/stat`
+  field 3 (`T`, `t`), Windows says `Unknown`. `CpuSample` has a new `stopped: Option<bool>` from the same call.
+- `StartProbe` has default methods `pid() -> Option<ProcessId>` (None) and `run_state()`; a probe that names its process now gets
+  `Liveness::Paused` from `StartWatch` while it is stopped (SIGSTOP, App Tamer). New `liveness_of(id, exited)` for users of
+  `StartJudge` that build their own readings. Before, nothing produced `Paused`: a stopped child showed no CPU, became
+  `StallCause::Idle` (stuck) and was killed or offered a Retry that killed it.
+- New `StallCause::Paused` (not stuck, `StallAction::Wait`): "{what} is paused by macOS or another app; it goes on when it is
+  resumed." The judge says it once per pause; no tick counts and nothing resets while paused.
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.

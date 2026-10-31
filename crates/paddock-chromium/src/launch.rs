@@ -871,6 +871,10 @@ struct BrowserProbe<'a> {
 }
 
 impl StartProbe for BrowserProbe<'_> {
+    fn pid(&self) -> Option<ProcessId> {
+        self.id
+    }
+
     fn liveness(&mut self) -> Liveness {
         if lock(self.process).is_running() {
             return Liveness::Running;
