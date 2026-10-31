@@ -1,3 +1,4 @@
+#![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 //! A forked child that has not exec'd yet holds a copy of the agent's lock. This test forks on purpose, so it lives in a binary
@@ -20,7 +21,6 @@ fn start_on(dirs: &Dirs) -> Result<Running, String> {
 /// folder locked for a while after the agent that held it is gone; a loaded macOS runner showed it (the third start of
 /// `a_second_agent…` was refused). This holds a child in that state on purpose, without a clock: it blocks on a pipe the test
 /// closes.
-#[cfg(unix)]
 #[test]
 #[expect(
     unsafe_code,
