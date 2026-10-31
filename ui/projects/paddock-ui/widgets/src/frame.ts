@@ -1,5 +1,5 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, inject, Injector, input, output, TemplateRef, ViewEncapsulation } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, Injector, input, LOCALE_ID, output, TemplateRef, ViewEncapsulation } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { MatProgressBar } from '@angular/material/progress-bar';
 import { MatButton } from '@angular/material/button';
@@ -50,7 +50,7 @@ interface Meta {
       @if (s?.state === 'empty') {
         @if (calm() && s.next) {
           <button type="button" class="pd-w-calm" [attr.aria-label]="s.title + ', ' + s.detail + '. ' + s.next.label" (click)="action.emit(s.next.action)">
-            <pd-status-glyph class="pd-w-ok" status="success" [size]="16" />
+            <pd-glyph class="pd-w-ok" name="check-circle" [size]="16" />
             <span class="pd-w-calm-text"><span>{{ s.title }}</span><span class="pd-w-subtle">&nbsp;· {{ s.detail }}</span></span>
             <pd-glyph class="pd-w-chev" name="chevron-right" [size]="14" />
           </button>
@@ -79,7 +79,7 @@ interface Meta {
         <div class="pd-w-st">
           <pd-glyph name="refresh" [size]="16" />
           <span class="pd-w-t">{{ s.title }}</span>
-          <span class="pd-w-d">{{ s.phase }} · {{ progressText(s.progress) }}</span>
+          <span class="pd-w-d">{{ s.phase }} · {{ progressText(s.progress, locale) }}</span>
           <mat-progress-bar class="pd-w-prog" [mode]="percent(s.progress) === null ? 'indeterminate' : 'determinate'" [value]="percent(s.progress) ?? 0" [attr.aria-label]="s.title" />
           @if (s.cancel; as c) {
             <button matButton="text" type="button" class="pd-w-act" (click)="action.emit(c.action)">{{ c.label }}</button>
@@ -97,24 +97,24 @@ interface Meta {
     .pd-widget-frame { display: block; min-width: 0; }
     .pd-w { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; min-width: 0; padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-card); background: var(--pd-surface-2); color: var(--pd-text); }
     .pd-w-head { display: flex; align-items: center; gap: 6px; height: 16px; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); white-space: nowrap; }
-    .pd-w-icon { width: 14px; height: 14px; flex: none; }
+    .pd-w-icon.mat-icon { width: 14px; height: 14px; flex: none; }
     .pd-w-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .pd-w-meta { flex: none; margin-left: auto; font-weight: var(--pd-weight-regular); color: var(--pd-text-subtle); overflow: hidden; text-overflow: ellipsis; }
-    .pd-w-meta--stale { display: inline-flex; align-items: center; gap: 4px; color: var(--pd-text-muted); }
+    .pd-w-meta--stale { display: inline-flex; align-items: center; gap: var(--pd-space-1); color: var(--pd-text-muted); }
     .pd-w-subtle { color: var(--pd-text-subtle); }
     .pd-w .pd-sk { color: transparent !important; border-radius: var(--pd-radius-tag); background: linear-gradient(90deg, var(--pd-skeleton-raised) 0 35%, var(--pd-skeleton-raised-shine) 50%, var(--pd-skeleton-raised) 65% 100%); background-size: 300% 100%; animation: pd-w-shimmer 1.6s linear infinite; }
     .pd-w .pd-sk * { visibility: hidden; }
     @keyframes pd-w-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
     @media (prefers-reduced-motion: reduce) { :root:not([data-motion='full']) .pd-w .pd-sk { animation: none; background: var(--pd-skeleton-raised); } }
     :root[data-motion='reduce'] .pd-w .pd-sk { animation: none; background: var(--pd-skeleton-raised); }
-    .pd-w-st { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 2px var(--pd-space-2); align-items: start; padding: 2px 0; }
-    .pd-w-st > pd-glyph, .pd-w-st > pd-status-glyph { margin-top: 2px; color: var(--pd-text-muted); }
+    .pd-w-st { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--pd-space-0) var(--pd-space-2); align-items: start; padding: var(--pd-space-0) 0; }
+    .pd-w-st > pd-glyph, .pd-w-st > pd-status-glyph { margin-top: var(--pd-space-0); color: var(--pd-text-muted); }
     .pd-w-st .pd-w-bad { color: var(--pd-danger); }
     .pd-w-t { font-weight: var(--pd-weight-semibold); }
     .pd-w-d { grid-column: 2; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
     .pd-w-act, .pd-w-st .pd-w-prog { grid-column: 2; }
-    .pd-w-act { justify-self: start; margin: 4px 0 0 -8px; --mat-button-text-label-text-color: var(--pd-accent); color: var(--pd-accent); }
-    .pd-w-prog { height: 4px; margin-top: 4px; border-radius: 2px; }
+    .pd-w-act { justify-self: start; margin: var(--pd-space-1) 0 0 calc(-1 * var(--pd-space-2)); --mat-button-text-label-text-color: var(--pd-accent); color: var(--pd-accent); }
+    .pd-w-prog { height: 4px; margin-top: var(--pd-space-1); border-radius: 2px; }
     .pd-w-calm { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 28px; width: calc(100% + 2 * var(--pd-space-2)); margin: 0 calc(-1 * var(--pd-space-2)); padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-control); background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
     .pd-w-calm:hover { background: var(--pd-hover); }
     .pd-w-calm:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
@@ -143,7 +143,10 @@ export class PdWidgetFrame<V = unknown, A = unknown> {
   readonly calm = input(false);
   /** A live kind says "Paused at 14:28" when stale; the others say "Updated 4 min ago". */
   readonly live = input(false);
-  /** The clock (ms since the epoch) for relative times; null reads the system clock when the state changes. */
+  /**
+   * The clock (ms since the epoch) for "Updated 4 min ago". Nothing here ticks: the text is computed when `state` or `now` changes, so an
+   * app that keeps a popup open passes a `now` that advances (a signal updated every minute). Null reads the system clock when the state changes.
+   */
   readonly now = input<number | null>(null);
   /** Right-aligned text of the head for a fresh reading ("3 volumes"). */
   readonly metaText = input<string | null>(null);
@@ -172,6 +175,7 @@ export class PdWidgetFrame<V = unknown, A = unknown> {
     return m ? { text: m, full: m, stale: false } : null;
   });
 
+  protected readonly locale = inject(LOCALE_ID);
   protected progressText = progressText;
   protected percent = percent;
 }
@@ -182,8 +186,8 @@ function percent(p: Progress): number | null {
 }
 
 /** The working state's progress as words: a growing count when the total is unknown ("12,400 events so far"), else "2 of 3". */
-export function progressText(p: Progress): string {
-  const n = new Intl.NumberFormat('en');
+export function progressText(p: Progress, locale: string): string {
+  const n = new Intl.NumberFormat(locale);
   if ('count' in p) return `${n.format(p.count.done)} ${p.count.unit} so far`.replace('  ', ' ').trim();
   return `${n.format(p.fraction.done)} of ${n.format(p.fraction.total)} ${p.fraction.unit}`.trim();
 }
