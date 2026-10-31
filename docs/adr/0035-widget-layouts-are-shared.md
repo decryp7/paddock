@@ -15,7 +15,8 @@
   kinds, footer menu), `popover-agent` (agent stopped), `states` (every kind's loading, empty, error, working or stale),
   `chooser` (Settings with the live preview), `chooser-limit` (8 of 8, added kinds, widths), `chooser-actions` (drag
   placeholder, row menu, Undo). Source `mock.html`, rendered by `render.mjs` with Playwright's pinned Chromium.
-- Code: the type skeleton of §2 is `crates/paddock-widgets/src/lib.rs` on this branch; WP-A builds on it.
+- Code: the type skeleton of §2 is `crates/paddock-widgets/src/lib.rs` on this branch; WP-A builds on it
+  (`feat/paddock-widgets`), with the rulings of §2a.
 
 ## Context
 
@@ -63,7 +64,8 @@ No I/O, no Tauri, no app types. It owns everything about a layout that is not wh
 - **Lenient, versioned reading that never loses data.** A layout never fails its settings file:
   - each invalid, unknown, duplicate or over-limit entry is dropped on its own, with one `Dropped { count }` note;
   - only a layout that is not a layout at all (not an object, wrong shape, version 0, missing or not a number) or too
-    large gives the defaults, with one note; `null` or a missing field gives the defaults without a note;
+    large gives the defaults, with one note, and the value is kept unread (written back unchanged) until the person's
+    first edit of that surface replaces it; `null` or a missing field gives the defaults without a note;
   - if every entry was dropped, the defaults are used; an honest empty list stays empty when the surface allows 0;
   - a layout written by a **newer** schema version is kept as it was read (`Read::unread`) and written back unchanged;
     the surface shows the defaults, the chooser is read-only (`LayoutView::editable = false`) and every edit is refused
@@ -76,7 +78,7 @@ No I/O, no Tauri, no app types. It owns everything about a layout that is not wh
   name.
 - **One level of undo.** `Layout`'s previous placements are private and never serialised. Remove, apply preset and
   reset set them; add, move, resize and replace clear them; save and delete preset leave them. `LayoutView::can_undo`
-  reports them; the UI's undo toast is shown while it is true and dismissed by the next edit.
+  reports them; the UI's undo toast is shown while it is true and dismissed when it turns false.
 - **The widget state envelope** every surface renders the same way (§2): ready (with its time and, when late, the time it
   went stale), working (phase-labelled progress), empty or error, plus one notice for the whole surface. *Loading* is not
   on the wire: it is the UI's state before the first value arrives.
@@ -91,7 +93,7 @@ The types and traits are committed as a compiling skeleton; this is their shape.
 ```rust
 pub struct PlacementId(String);   // [a-z0-9-]{1,64}; TS `string`; (de)serialised through TryFrom<String>
 pub struct PresetId(String);      // same rules, a user preset only
-pub struct Surface { schema_version, columns, max_placements, min_placements, max_user_presets,
+pub struct Surface { noun, schema_version, columns, max_placements, min_placements, max_user_presets,
                      max_preset_placements, max_bytes }
 pub enum Refresh { Live, Every { secs }, OnChange }
 pub struct KindSpec<K> { kind, title, summary, icon, spans: &[u8], max_instances: u8, refresh }
@@ -124,7 +126,7 @@ pub enum WidgetError { UnknownPlacement, UnknownPreset, DuplicateId, TooMany { c
                        SpanNotAllowed { allowed }, TooFew { min }, Invalid(String), BuiltinPreset, NothingToUndo, NewerLayout }
                        // serialised camelCase, externally tagged; Display says what to do (design guide §10)
 
-pub struct SurfaceInfo<S> { id: S, columns, max_placements, min_placements, max_user_presets }
+pub struct SurfaceInfo<S> { id: S, noun, columns, max_placements, min_placements, max_user_presets }
 pub struct KindInfo<K> { kind: K, title, summary, icon, spans, max_instances, refresh }
 pub struct CatalogueInfo<S, K> { surface: SurfaceInfo<S>, kinds: Vec<KindInfo<K>> }
 pub struct LayoutView<S, W, K> { layout, catalogue, builtin_presets: Vec<Preset<W>>, notes, can_undo: bool, editable: bool }
@@ -154,6 +156,38 @@ pub fn view<C: Catalogue>(stored: &Stored<C>) -> LayoutView<C::SurfaceId, C::Wid
 Rules the types carry: a busy source is `Working` or a stale `Ready`, never an `Error`; an `Error` is never the place
 for a problem of the whole surface (that is the `SurfaceNotice`); `Empty::title` starts with what the person gains
 (design guide §10). The crate has no `tauri` feature: the commands stay in the app, which owns where settings live.
+
+### 2a. Rulings on WP-A's open points (2026-10-31, after round 1)
+
+WP-A (`feat/paddock-widgets`) made decisions this ADR left open; these are binding:
+
+1. `LayoutView::builtin_presets` is part of the view (confirmed).
+2. Apps edit through `Stored::edit(edit) -> Result<LayoutView, WidgetError>` and read `Stored::editable()`; only `Stored`
+   knows whether a newer layout is held, so it refuses with `NewerLayout`. `apply` stays public as the pure step for
+   tests and for `Stored`, and is never called by an app directly.
+3. A value kept unread is written back as the same JSON value it was read as (structure and values, not bytes: the
+   settings file is rewritten as a whole and its formatting is the writer's).
+4. Undo: remove, apply preset and reset set it; add, move, resize and replace clear it; save preset and delete preset
+   leave it (they do not change the placements, which is all that undo restores). The undo toast follows `can_undo`.
+5. Wire shapes (serde's defaults, camelCase): `Edit` and `NoteCode` are externally tagged, a unit variant is a string
+   (`{"add":{"widget":…,"span":null,"at":null}}`, `"resetToDefaults"`, `{"newer":{"version":3}}`, `"damaged"`);
+   `Note` is nested `{ "code": NoteCode, "message": string }`; `WidgetState` is internally tagged by `"state"`
+   (`{"state":"ready","value":…,"asOf":…,"staleSince":null}`); `WidgetError` is externally tagged like `Edit`. WP-B and
+   WP-C use the generated TypeScript, never hand-written shapes.
+6. `WidgetError` derives `Serialize` and `TS`; its messages name what a limit counts through `Counted::noun()`.
+7. `Read` and `Stored` implement `Clone`, `Debug` and `PartialEq` by hand, so a catalogue type needs no derives.
+8. Messages name the surface and count correctly: `Surface` gains `noun: &'static str` ("popup", "dashboard", "menu
+   bar"), carried in `SurfaceInfo` and in the error variants that mention a limit; counts use singular and plural ("At
+   least 1 widget is needed in the menu bar.", "At most 8 widgets fit in the popup; remove one first.").
+9. Convenience constructors and `assign_ids` (ids from the kind's kebab wire name plus `-2`, `-3`): confirmed.
+10. `info::<C>()`, `view(&Stored<C>)` and `builtin_presets::<C>()`: confirmed.
+11. The reading and drop rules, the check order, defaults when every entry was dropped, and the `2 × max` scan of §1:
+    confirmed.
+12. Nothing is lost silently: **any** value that could not be read cleanly (damaged, too large or newer) is kept unread
+    and written back unchanged. A newer one stays until the app is updated (edits refused). A damaged or too-large one
+    stays until the person's first edit of that surface, which replaces it; its note says so ("The popup layout could not
+    be read; Dyno shows the defaults and keeps the old layout until you change this one."). The size is bounded by the
+    settings file's own limit.
 
 ### 3. The TypeScript contract is generated (ADR 0026 §3)
 
@@ -205,7 +239,7 @@ CDK (rule 47):
     and "Added" (a check and muted text, not a button) for a kind at its count. At the surface limit the counter says
     "8 of 8", an info line says "The popup holds 8 widgets. Remove one to add another." and every Add is disabled.
   - **Reset to defaults** (text button). Remove, preset and reset show a Material snack bar with Undo through the family
-    toast area while `can_undo` is true; the next edit dismisses it.
+    toast area while `can_undo` is true; it is dismissed when `can_undo` turns false.
   - **Preview** beside the lists at widths of 840 px and more (container query): the real `pd-tray-popover` at 360 px
     with the same `pd-widget-area` and the same values as the popup, scrolling past 520 px like the popup.
   - When `editable` is false (a newer layout), the lists are read-only and the note explains why.
