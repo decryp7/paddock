@@ -77,7 +77,6 @@ function channelProblem(c: ChannelConfig): string | null {
   if (!c.name.trim()) return `Channel ${c.id} needs a name.`;
   if (c.events.length > MAX_EVENTS) return `${name} lists more than ${MAX_EVENTS} events.`;
   const t = c.transport;
-  if (c.allowLan && t.type === 'email') return `${name}: the home network switch is for webhook and ntfy channels.`;
   switch (t.type) {
     case 'webhook': {
       const p = urlProblem('The address', t.url, c.allowLan);
@@ -90,6 +89,7 @@ function channelProblem(c: ChannelConfig): string | null {
     }
     case 'email':
       if (!t.host.trim()) return `${name}: the mail server is missing.`;
+      if (!c.allowLan && HOME.test(t.host.trim()) && !LOCAL.test(t.host.trim())) return `${name}: the mail server is a private network address; turn on "This channel is on my home network" to use it.`;
       if (!Number.isInteger(t.port) || t.port < 1 || t.port > 65535) return `${name}: the port must be between 1 and 65535.`;
       if (!EMAIL.test(t.from)) return `${name}: the sender is not an email address.`;
       if (t.to.length === 0) return `${name}: add at least one recipient.`;

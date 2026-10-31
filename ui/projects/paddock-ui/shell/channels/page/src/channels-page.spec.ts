@@ -490,7 +490,7 @@ describe('the Notification channels page', () => {
     const box = p.q('channel-allow-lan')!;
     expect(text(box)).toBe('This channel is on my home network (allow a private address)');
     expect(box.querySelector('input')!.getAttribute('aria-describedby')).toBe('pd-ch-h-lan');
-    expect(text(p.el.querySelector('#pd-ch-h-lan')!)).toContain('Turn this on only for a web address or ntfy server in your own home or office network');
+    expect(text(p.el.querySelector('#pd-ch-h-lan')!)).toContain('Turn this on only for a web address, ntfy server or mail server in your own home or office network');
     expect(box.querySelector('input')!.checked).toBe(false);
     await p.type('channel-server', 'http://ntfy.lan');
     await p.click('channel-allow-lan');
@@ -500,7 +500,7 @@ describe('the Notification channels page', () => {
     expect(saved?.transport).toMatchObject({ server: 'http://ntfy.lan' });
   });
 
-  it('shows the checkbox for webhook channels, hides it for email, and a private address is refused without it', async () => {
+  it('shows the checkbox for webhook and email channels, and a private address is refused without it', async () => {
     const p = await open();
     await p.click(p.rowButton('slack', 'channel-edit'));
     expect(p.q('channel-allow-lan')).not.toBeNull();
@@ -512,21 +512,23 @@ describe('the Notification channels page', () => {
     expect(p.q('channel-editor')).toBeNull();
     await p.click('channel-add');
     await p.choose('pd-ch-type', 'Email');
-    expect(p.q('channel-allow-lan')).toBeNull();
+    expect(p.q('channel-allow-lan')).not.toBeNull();
   });
 
-  it('switching to email clears the switch so it is never saved on a mail channel', async () => {
+  it('saves the switch on an email channel whose mail server is on the home network', async () => {
     const p = await open();
-    await p.click(p.rowButton('slack', 'channel-edit'));
-    await p.click('channel-allow-lan');
+    await p.click('channel-add');
     await p.choose('pd-ch-type', 'Email');
-    await p.type('channel-host', 'smtp.example.com');
+    await p.type('channel-name', 'Home mail');
+    await p.type('channel-host', 'mail.local');
     await p.type('channel-from', 'app@example.com');
     await p.type('channel-to', 'me@example.com');
     await p.click('channel-save');
-    const saved = (await p.memory.get()).settings.channels.find((c) => c.id === 'slack');
-    expect(saved?.transport.type).toBe('email');
-    expect(saved?.allowLan).toBe(false);
+    expect(text(p.q('channel-save-error')!)).toContain('home network');
+    await p.click('channel-allow-lan');
+    await p.click('channel-save');
+    const saved = (await p.memory.get()).settings.channels.find((c) => c.id === 'Home-mail');
+    expect(saved?.allowLan).toBe(true);
   });
 
   describe('with declared events', () => {

@@ -582,7 +582,10 @@ describe('the home-network switch', () => {
     }
     expect(settingsProblem({ channels: [lan(true, 'http://hooks.example.com/x')] })).toMatch(/https/);
     expect(settingsProblem({ channels: [lan(false, 'http://localhost:8080/x')] })).toBeNull();
-    expect(settingsProblem({ channels: [{ ...EMAIL, allowLan: true }] })).toMatch(/webhook and ntfy/);
+    const mail = (allowLan: boolean, host: string): ChannelConfig => ({ ...EMAIL, allowLan, transport: { ...(EMAIL.transport as Extract<ChannelConfig['transport'], { type: 'email' }>), host } });
+    expect(settingsProblem({ channels: [mail(false, 'mail.local')] })).toMatch(/home network/);
+    expect(settingsProblem({ channels: [mail(true, 'mail.local')] })).toBeNull();
+    expect(settingsProblem({ channels: [mail(false, 'smtp.example.com')] })).toBeNull();
   });
 });
 

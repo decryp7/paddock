@@ -73,8 +73,7 @@ events: Array<string>,
 minSeverity: MinSeverity, 
 /**
  * The channel's server is on the user's home network: validation accepts a private address (and plain http to it), and the
- * poster reaches private networks for this channel only. Webhook and ntfy channels only: e-mail does not go through
- * `paddock-net`, and validation refuses the switch on it. Off by default; files from before this field load as off.
+ * poster reaches private networks for this channel only. It covers an e-mail channel's SMTP server too. Off by default; files from before this field load as off.
  */
 allowLan: boolean, 
 /**
