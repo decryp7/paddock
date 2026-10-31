@@ -157,7 +157,7 @@ the owner hands it back with "Let auto-scale manage"). Held slots stay held: the
 **Linux: one capacity-4 runner, not a pool.** d-gtr9 runs one runner instance with `runner.capacity: 4`. The pool
 model (several capacity-1 slots started and drained) is for the host-mode machines, where a job's load and shared
 folders make the number of jobs at once worth controlling. On d-gtr9 it is not needed now: container jobs are isolated
-from each other (apart from the shared `/sccache` mount and its Angular cache, family ADR 0025 §7), and the decided max
+from each other (apart from the shared `/sccache` mount and its Angular cache, family ADR 0025 §8), and the decided max
 is already reached. The scaler leaves that runner as it is: no pool, no automatic change of its capacity, because
 changing `runner.capacity` needs a restart of a runner that is rarely idle, which D1 avoids (Option B). Its load still
 counts in the host's metrics and Insights. Should Linux later need load control, it becomes a pool by registering slots;
@@ -167,10 +167,10 @@ this ADR does not plan that.
 concurrent jobs. A pool declares `ci_isolation = "none" | "slots"`. With `"none"` (the default) its effective `max` is 1
 and the pool page says why ("two jobs on one host share the CI home; needs family ADR 0025"). The owner sets `"slots"`
 only once family ADR 0025 is merged **with its Rust slot lock** (the shell lock it replaces has a reclaim race) and, for
-container pools, once containers get slots on the shared mount (ADR 0025 §7). Pitcrew cannot see the CI kit, so this is a
+container pools, once containers get slots on the shared mount (ADR 0025 §8). Pitcrew cannot see the CI kit, so this is a
 declared precondition, not a detection. With `"slots"`:
 
-- **One CI home per host.** Every slot of the host shares the host's CI home; ADR 0025 derives the kept folders and port
+- **One CI home per slot space.** Every slot of a space shares the space's CI home (a space is one account's home, family ADR 0025's amendment 2026-10-31; a host has one space per account that runs runners, numbered `PADDOCK_CI_SPACE`); ADR 0025 derives the kept folders and port
   blocks from the slot number, so separate homes per runner would only multiply disk. Pitcrew's config check rejects
   `runner.envs.PADDOCK_CI_HOME` on a pool slot (with a Fix that removes it: the migration from the interim runbook).
 - **`PADDOCK_CI_KEEP_SLOTS` = the pool's `max`,** written into every slot's `runner.envs` through ADR 0011's editor, so
@@ -178,7 +178,7 @@ declared precondition, not a detection. With `"slots"`:
 
 ### 1a. Session and headless slots (the owner, 2026-10-31)
 
-Auto-scale does not imply headless. Headless (ADR 0023: LaunchDaemon, systemd system unit, one Windows service per runner) is
+Auto-scale does not imply headless. Headless (Pitcrew's headless ADR, to be written: LaunchDaemon, systemd system unit, one Windows service per runner) is
 an opt-in **per runner**; the scaler never changes it.
 
 - **Inheritance.** A slot has the mode of the runner it was made from (its template: `SessionMode::Interactive` in the
@@ -199,12 +199,14 @@ an opt-in **per runner**; the scaler never changes it.
 - **Mixed pools.** A pool may hold session and headless slots. The decision is per slot and pure (below): the planner asks
   `slot_mode::decide(slot_mode, session_present, label_needs_session)` for each candidate and only starts those that
   answer `Start`; demand it cannot meet is reported ("waiting for a desktop session"), not moved to another mode.
-- **Family ADR 0025 (slots per host).** The CI home is per account. Session slots run as the logged-in user and share one
-  CI home (one slot space, the rule above). Headless slots run as the service account or per-runner virtual account (ADR
-  0023) and therefore have a **different** CI home: the scaler treats them as a separate slot space, `PADDOCK_CI_KEEP_SLOTS`
-  and `ci_isolation` apply per space, and a pool whose slots span two accounts must declare `ci_isolation = "slots"` for
-  each space or its effective `max` is 1 per space. A headless slot that runs as the same user as session slots shares
-  their home and the same slot space.
+- **Family ADR 0025 (slots per host), amendment 2026-10-31.** The unit is a *slot space*: one CI home, one account. Session
+  slots run as the logged-in user and share that user's space. Headless slots of a machine run as **one dedicated service
+  account when their caches are shared** (the owner's decision), which is one more space; only a runner whose caches are not
+  shared gets its own virtual account (a space of one slot). No `PADDOCK_CI_HOME` is shared between two accounts, and Pitcrew
+  rejects one that two accounts resolve to. `ci_isolation`, `PADDOCK_CI_SLOTS`/`KEEP_SLOTS` (the sum of `runner.capacity` of
+  every runner in the space) and the space number `PADDOCK_CI_SPACE` (which keeps host-wide ports apart) are per space and
+  are checked on the composed environment, comparing canonical paths. A pool spanning two spaces needs `ci_isolation` for
+  each, or its effective `max` is 1 per space.
 - **Pure core.** `pitcrew_core::autoscale::slot_mode` holds the decision as a pure function over values (no OS calls); the
   service supplies `session_present` from the session probe. Tests, written first: session slot with a session starts;
   without one it waits with the reason `NoDesktopSession` and is never `StartHeadless`; headless slot starts regardless of

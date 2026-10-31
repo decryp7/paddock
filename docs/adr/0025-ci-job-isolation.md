@@ -159,78 +159,113 @@ Two kinds of per-host state, one mechanism, declared lists:
   the first time a job acquires a slot; until the prebuilt download (ADR 0022, R0b) exists.
 - The CI home follows `PADDOCK_CI_HOME` (ci-home.sh, the one implementation); `job-isolation.sh` calls it.
 
-## Amendment 2026-10-31 (draft for review): slot spaces, Pitcrew's session and headless runners, and the open items
+## Amendment 2026-10-31 (draft 2, after review 1): slot spaces, Pitcrew's session and headless runners, host-wide state, open items
 
-Written for Pitcrew 1.1 (ADR 0021 §1 and §1a, ADR 0023). Status of this amendment: **Proposed**; the ADR as a whole stays
-Proposed until an independent review accepts both. Nothing above changes for a host with one account.
+Written for Pitcrew 1.1 (Pitcrew ADR 0021 §1 and §1a; the headless modes' ADR is planned and not written yet, so this text
+names the modes, not an ADR). Status of this amendment: **Proposed**; the ADR as a whole stays Proposed until an
+independent review accepts both. Nothing above changes for a host with one account and one space. Review 1 (CHANGES, 7 P1s)
+is answered here; the owner's decisions of 2026-10-31 are marked.
 
-**A. A slot space is one CI home.** The slot lock lives in `<ci-home>/slots/`, so the unit of isolation is the CI home, and
-a CI home is per account unless `PADDOCK_CI_HOME` says otherwise. Two jobs collide only inside one slot space. Definitions:
+**A. A slot space is one CI home, and a CI home belongs to one account.** The slot lock lives in `<ci-home>/slots/`, so the
+unit of isolation is the CI home. Jobs collide only inside one space (their kept folders and their lock), but **ports, the
+sccache server and the macOS VM limit are host-wide**, so they need a second coordinate (B and C). Spaces on a host:
 
-- *Session runners* (Pitcrew session mode) run as the logged-in user: one space, `~/.paddock-ci`.
-- *Headless runners* (ADR 0023: LaunchDaemon, systemd system unit, per-runner Windows service) run as the service account or
-  a per-runner virtual account. Their home differs from the user's, and on Windows from each other (`NT SERVICE\<name>` has
-  its own profile), so by default each headless runner is **its own space with one slot**: no collision, no sharing, cold
-  caches. To share warm caches, the owner sets one explicit `PADDOCK_CI_HOME` for those runners, a folder all their accounts may
-  write (`/Users/Shared/paddock-ci`, `/var/lib/paddock-ci`, `%ProgramData%\paddock-ci`), created by Pitcrew with that
-  access when the pool is configured. Runners sharing that folder are one space.
-- Session and headless runners are separate spaces unless the owner points both at one folder. Pitcrew does not do it for
-  them: the account that writes the folder differs, and a permission mix-up costs more than a cold cache.
+- *Session runners* (Pitcrew session mode) run as the logged-in user: one space, that user's CI home.
+- *Headless runners* (LaunchDaemon, systemd system unit, Windows service: the modes of Pitcrew 1.1) of one machine **run as one
+  dedicated service account when their caches are shared** (owner's decision): `UserName` of the LaunchDaemon, `User=` of the
+  unit, one local Windows account. That account's CI home is one more space. Only when caches are *not* shared may Pitcrew give
+  a runner its own virtual account; such a runner is a space of one slot.
+- The *shared-folder variant is dropped*: no `PADDOCK_CI_HOME` is ever shared between two accounts. Pitcrew rejects a
+  `PADDOCK_CI_HOME` that two accounts resolve to (an error with a Fix that removes the override from one of them).
+- Space identity is derived, not typed: `SlotSpace { home: CanonicalPath, accounts: Vec<Account> }`, computed by Pitcrew from
+  each runner's effective environment (`environment::compose`, Pitcrew ADR 0022) and its account, with the home resolved and
+  canonicalised (symlinks, case on Windows and macOS, trailing separators). Two runners are in one space exactly when their
+  canonical homes are equal.
 
-**B. What Pitcrew declares and checks (ADR 0021 §1).** A pool declares `ci_isolation = "slots"` **per space**. For each space
-Pitcrew writes `PADDOCK_CI_SLOTS` = `PADDOCK_CI_KEEP_SLOTS` = the number of runners of the pool in that space (default cap 4, as
-`PADDOCK_CI_SLOTS` above) into every runner's `runner.envs`; a space with one runner needs no slots. Pitcrew's config check
-rejects: two runners of one space with different `PADDOCK_CI_HOME`; a pool whose runners share an account but name different
-homes; `PADDOCK_CI_HOME` on a session slot that differs from the user's default when other session slots keep the default.
-Each check offers a Fix through ADR 0011's editor. Pitcrew cannot see the kit, so `ci_isolation` stays a declared precondition.
+**B. A space number keeps host-wide ports apart (P1-1).** Ports are bound on the host, not in a home: two spaces that both
+take `s1` would both bind sccache `4227`. So Pitcrew assigns each space on a host a number `k` (1 to `PADDOCK_CI_SPACES_MAX`,
+4), stable like `env_number` (kept while the space exists, lowest free, never reused while it exists), and writes it as
+`PADDOCK_CI_SPACE` into every runner of the space. `ports.txt` blocks become
+`base + ((k-1) * PADDOCK_CI_SLOTS_MAX + (n-1)) * stride` for space `k`, slot `n`; `PADDOCK_CI_SLOTS_MAX` is 4 (the default of
+`PADDOCK_CI_SLOTS`), and a space with no `PADDOCK_CI_SPACE` is space 1 (a host with one account is unchanged).
+`job-isolation.sh port` adds the term; the conformance test checks that no two blocks overlap for any `k <= 4` and `n <= 4`
+and none overlaps an end-to-end port (it fails today for two spaces: both take `s1` and the same block).
+`PADDOCK_CI_SPACES_MAX` is a constant of the kit; a host with more spaces than it is refused by Pitcrew's check.
 
-**C. Session loss.** A session runner stops when its session ends (Pitcrew drains it between jobs, ADR 0021 §4). A job that
-dies with the session leaves the holder with it: the holder is a child of the job's step, the kernel releases the lock, and the
-next acquirer sweeps by `with_idle`. No change to the lock. A *headless* runner is unaffected by logon state.
+**C. Host-wide limits that are not per space (P1-2).** The Tart VM smoke takes a VM slot under `TART_HOME`, which today lies in
+one account's home, but Apple's limit of 2 macOS guests is per host. Decision: **one host-wide VM lock directory**,
+`/Users/Shared/paddock-vm/slots` (mode 1777; the lock files 0666, created by the first account), used by
+`macos-vm-smoke.sh` for every account regardless of `TART_HOME`; `PADDOCK_VM_MAX` is read from the job's environment as today
+and must be equal for every runner (Pitcrew writes it, with the others in D). VM jobs therefore work in any space; the
+alternative (VM jobs only on session runners through a `needs_session` label) is kept for hosts where the owner prefers it
+and costs nothing extra. Conformance: `macos-vm-smoke.sh` must not derive its lock path from the account's home.
 
-**D. Closing the "Still open" items.**
-1. *Concurrency with two or three runners on one host.* Becomes an acceptance test: `tools/paddock-dev` integration tests
-   already run eight parallel acquires with real processes; add one that uses three real `act`-style job folders under a fake
-   runner (Pitcrew's `fake_runner` example) on the three OS, run on the CI hosts at the end. The real first runs stay a rollout
-   step, watched with `job-isolation.sh status`.
-2. *Windows `runner.timeout`.* The holder's age limit (3 h + 30 min) assumes the runner's job timeout is at most 3 h. Pitcrew
-   reads `runner.timeout` from every runner's `config.yaml` (it does, ADR 0011) and reports a pool runner whose timeout is
-   longer than `RUNNER_JOB_TIMEOUT_SECS` as an error with a Fix (set it back, or the owner raises the constant in the same
-   change, as this ADR requires). This makes the unverified Windows value irrelevant: Pitcrew checks the file on every host.
-3. *Linux stays one job per host until containers take slots.* **Conflict to resolve in review:** ADR 0021 records that d-gtr9 runs
-   one runner with `runner.capacity: 4` (container jobs), the decided Linux maximum, while §8 above says one job per Linux host
-   is the rule because every container shares the `/sccache` mount and sccache's local cache takes one server. Either (a) the
-   four concurrent jobs already race on sccache and the cache needs per-container slots now, or (b) they work today because
-   sccache is per-container and §8 is too strict. The measurement decides: run four concurrent Linux jobs, read the sccache
-   server logs and stats of each, record the result here. The measurement is the 4-concurrent-job runs of the Linux CI
-   build-share A/B on d-gtr9 (`handoff/linux-ci-share-ab.md`, throw-away `ci-share-ab.yml`), after the Spotter and Pitwall tags.
-   Evidence to collect from every one of those runs, per job (J1..J4) and for the run as a whole:
-   - *sccache:* the server's start line and port as each job sees it (`sccache --show-stats` at the job's start and end; the
-     process list of `sccache` servers inside and outside each container); whether one server served several jobs; cache
-     writes that fail or report "address in use", a corrupted-entry or lock message in any job log; hits and misses per job
-     against the same job run alone (a drop that is not explained by cold start is a collision).
-   - *The `/sccache` mount:* file count and size before and after; any `*.tmp`/partial file left; two jobs writing one path
-     (an `lsof`/inotify-free check: compare the mount's change list per job by the job-start and job-end listing).
-   - *Ports:* every port each job binds (`ss -ltnp` inside the container at the job's busiest step: the e2e shards, sccache
-     4227, the test browsers) and any `EADDRINUSE`/"address already in use" in a log; the Docker network name of each job
-     (expected distinct: `GITEA-ACTIONS-TASK-<n>-...`).
-   - *Temp and caches:* `RUNNER_TEMP` and `TMPDIR` of each job (expected distinct), and the npm and Angular cache folders as
-     seen by each (shared or private); any "file exists", "ENOENT" or "lock" error in a log that the single-job baseline
-     does not have.
-   - *Outcome differences:* for each job, result, duration and failed-step names against its single-job baseline; any test
-     that fails only when concurrent; the final line counts of warnings. A run of the four in different orders (start offsets
-     of 0 and 30 s) to cover the race windows.
-   - *Verdict rule:* no collision and no outcome difference in all runs => (b), section 8 is relaxed to "one sccache server per
-     container is safe, the mount is shared read-mostly" with the evidence cited; any collision => (a) and package I1b. If (a), slots on the mount are the same Rust lock with the mount's
-   `slots/` folder, a per-slot `/sccache/s<n>` (cap = budget divided), and acquire/release stop being no-ops in a container;
-   package I1b.
-4. *Disk budgets per space.* `PADDOCK_CI_SCCACHE_GB` and `PADDOCK_CI_MIN_FREE_GB` apply per space; on a host with two spaces
-   the owner sets them so the sum fits (Pitcrew's pool page shows the sum and warns above the volume's free space, ER-24).
+**D. What Pitcrew declares and checks.** (Pitcrew ADR 0021 §1: `ci_isolation` is a field of `[[autoscale.pools]]`, one value
+per space: `ci_isolation = { "<space-home>" = "slots" | "none" }`, written by Pitcrew once the owner confirms; a pool with
+one space may write the plain string.) Every check runs on the composed environment of each runner and compares **canonical
+resolved paths**, never `runner.envs` strings.
+1. *Slots.* `PADDOCK_CI_SLOTS` = `PADDOCK_CI_KEEP_SLOTS` = the **sum of `runner.capacity` over every registered runner whose
+   CI home resolves to the space**, all pools and loose runners alike, capped at `PADDOCK_CI_SLOTS_MAX`; a total above the cap
+   is an error ("N jobs can run at once here, the kit isolates at most 4"). Pitcrew rewrites the values whenever a runner is
+   added, removed or has its capacity changed and restarts the idle runners of the space after their jobs (ADR 0011); the
+   check flags any runner whose value differs. A space whose total is 1 needs neither.
+2. *Homes.* Two runners of one space with different `PADDOCK_CI_HOME` strings that resolve to one path are fine; one path
+   resolved by two accounts is the error of A; a home on a volume with less than the space's budget (D5) warns.
+3. *Space numbers.* `PADDOCK_CI_SPACE` equal for the runners of a space, distinct between spaces, written by Pitcrew.
+4. *Linux host mode (P1-5).* `job-isolation.sh` treats every Linux machine as a container and does nothing for acquire and
+   release. A pool with a Linux **host-mode** runner therefore gets no isolation: Pitcrew rejects `ci_isolation = "slots"` for
+   it and caps its effective `max` at 1, until the kit can tell a container from a host (an explicit `PADDOCK_CI_CONTAINER=1`
+   in the container image, tested).
+5. *Job timeout.* A runner whose `runner.timeout` is longer than `RUNNER_JOB_TIMEOUT_SECS` is an error with a Fix (the holder's
+   age limit is that value plus 30 minutes, above). The constant has one source: `tools/paddock-dev/src/slots.rs`; Pitcrew
+   gets it from a generated `crates/paddock-slots` constant exported to Pitcrew, and a test asserts the two are equal (no
+   second copy).
+6. *Disk.* `PADDOCK_CI_SCCACHE_GB` and `PADDOCK_CI_MIN_FREE_GB` apply per space; the pool page shows the sum over a host's
+   spaces and warns above the volume's free space (ER-24). A space starved by another's folders reports "the free disk is
+   taken by <other space's home>, <size>" naming the folder, so the owner knows where to clean.
 
-**E. Implementation (package I1, after the review accepts this).** (1) `paddock-slots`: nothing new for A; add the explicit
-`PADDOCK_CI_HOME` permission note to the crate docs. (2) `conformance/ci/job-isolation.sh`: `status` prints the space (the home)
-and its holders. (3) Pitcrew (ADR 0021 WP-5): the three config checks of B and the timeout check of D2, tests first with
-fake `config.yaml` text. (4) The concurrency test of D1. (5) Linux per D3 only if the measurement says (a).
+**E. Session loss and leftovers (P2).** A session runner stops when its session ends (Pitcrew drains it between jobs, ADR
+0021 §4). A job that dies with the session leaves its holder as a child of the job's step: the kernel releases the lock if the
+holder dies, but a holder that survives because its job folder is never deleted (the runner is gone) waits for
+`DEFAULT_MAX_HOLD_SECS`. To end it earlier, Pitcrew's start of a session runner, and its stop of one, remove job folders under the
+runner's `workdir_parent` that no process uses (the runner's own clean-up would have), which lets detached holders see their
+folder disappear and exit; the pool page names each one removed. A headless runner is unaffected by logon state.
+
+**F. Closing the "Still open" items.**
+1. *Concurrency with two or three runners on one host.* An acceptance test using **temporary CI homes only** (ER-14; never the
+   user's `~/.paddock-ci`): three job folders under a fake runner (Pitcrew's `fake_runner` example) in one space, and a second
+   test with **two spaces** (two temporary homes, both taking `s1`): all jobs get distinct slots in a space, the two spaces'
+   ports differ (fails today, B), kept folders never overlap. Run on the CI hosts at the end; the real first runs stay a
+   rollout step watched with `job-isolation.sh status`.
+2. *Windows `runner.timeout`.* Closed by D5, which reads the file on every host.
+3. *Linux, one job per host.* **The code and the ADR disagree today.** ADR 0021 records that d-gtr9 runs one runner with
+   `runner.capacity: 4` (container jobs), while §8 says one job per Linux host is the rule because every container shares
+   one sccache disk cache and sccache's docs say concurrent servers on one local cache race. The CI kit puts every
+   container's sccache in `/sccache`; if `docker inspect` of the four containers shows the same host source for `/sccache`,
+   the race holds **by construction** and d-gtr9 breaks §8 today. d-gtr9 stays as it is until the measurement. The
+   measurement is the 4-concurrent-job runs of the Linux CI build-share A/B on d-gtr9 (`handoff/linux-ci-share-ab.md`,
+   throw-away `ci-share-ab.yml`), after the Spotter and Pitwall tags, which also confirms the mount and its sizes. It compares
+   three arms, **3 cold and 3 warm rounds each**, four jobs at once:
+   - *A, shared:* today's single `/sccache` for all containers.
+   - *B, per-slot folders:* `/sccache/s<n>`, a quarter of the budget each, slots from the same Rust lock on the mount (acquire
+     and release stop being no-ops in a container).
+   - *C, Redis:* one network cache server for the host's containers (sccache's Redis backend), the budget in the server.
+   Per job and per round it records: `sccache --show-stats` at the job's end (cache errors, compilation failures, hits and
+   misses), wall time, the cache folder's size against its cap, the load average and free memory (sampled every 10 s), plus the
+   isolation evidence: the server and port each job sees, ports bound at the busiest step (`ss -ltnp`) and any "address in use",
+   the Docker network name of each job, `RUNNER_TEMP`/`TMPDIR` and cache folders as each job sees them, and any "file exists",
+   "ENOENT" or lock message the single-job baseline lacks; job result, duration and failed steps against that baseline, with
+   start offsets of 0 and 30 s for the race windows. Rules: **arm A is rejected** on any cache error, any failed compilation
+   attributable to the cache, or a cache folder more than 10% over its cap; between B and C, choose the arm with the higher warm
+   hit rate and, on a tie within 5%, the lower median wall time. If A passes everything in all rounds, §8 is relaxed to "one
+   server per container is safe" with the evidence cited. The results go in `apps/pitcrew/docs/performance.md` and the family
+   `docs/benchmarks.md` (only like-for-like numbers are compared there). Package I1b implements the chosen arm.
+
+**G. Implementation (package I1, after the review accepts this).** (1) `paddock-slots` and `job-isolation.sh`: the space term
+in `port`, `PADDOCK_CI_CONTAINER`, the VM lock path of C, `status` printing the space (home, `k`) and its holders. (2)
+Conformance: block overlap for spaces, the VM lock path, the test of F1 (including two spaces). (3) Pitcrew (ADR 0021 WP-5): the
+checks of A and D, the writing of `PADDOCK_CI_SPACE`, `PADDOCK_CI_SLOTS`, `PADDOCK_CI_KEEP_SLOTS` and `PADDOCK_VM_MAX`, tests
+first on composed environments with fake homes. (4) Linux per F3 (I1b), only after the measurement.
 
 ## Rollout
 

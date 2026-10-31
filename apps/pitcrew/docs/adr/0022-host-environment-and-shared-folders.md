@@ -70,7 +70,7 @@ options and volumes of config.yaml (`startJobContainer` sets its own `RUNNER_TOO
 `RUNNER_TEMP=/tmp`).
 
 **What the CI kit decided** (family ADR 0025, proposed): host jobs keep folders under one CI home (`PADDOCK_CI_HOME`), one
-per host, with per-slot folders under an OS file lock (`flock`/`LockFileEx`); the kept-folder list puts **sccache's disk
+per slot space (account), with per-slot folders under an OS file lock (`flock`/`LockFileEx`); the kept-folder list puts **sccache's disk
 cache and npm's cache per slot**, and declares one sccache port block per slot (`ports.txt`). sccache's local disk cache
 "only supports a single sccache server at a time" (sccache `docs/Local.md`, read 2026-10-28), and two sccache servers
 cannot share a port. Pitcrew is a general tool, but its defaults must not contradict this.
@@ -120,7 +120,7 @@ date. v1's built-in presets (each source re-checked in WP-3):
 | npm cache | `npm_config_cache` (folder) | per-runner | `empty` | ADR 0025 keeps it per slot; Pitcrew follows that rather than relying on cacache's concurrent-writer design |
 | Playwright browsers | `PLAYWRIGHT_BROWSERS_PATH` (folder) | shared | `empty` (jobs reinstall) | installs are renamed into place (ADR 0025's `shared` criterion) |
 | Gradle home | `GRADLE_USER_HOME` (folder) | shared | subfolders `caches`, `wrapper/dists` | `gradle.properties` may hold credentials; never emptied |
-| Paddock CI home | `PADDOCK_CI_HOME` (folder) | shared | `none` (the kit cleans its own slots under its lock) | one per host; the kit takes per-slot folders with `flock` (ADR 0025) |
+| Paddock CI home | `PADDOCK_CI_HOME` (folder) | shared | `none` (the kit cleans its own slots under its lock) | one per slot space (one account's home; ADR 0025's amendment 2026-10-31); the kit takes per-slot folders with `flock` (ADR 0025) |
 
 A remote sccache backend is future work (decision 2).
 
