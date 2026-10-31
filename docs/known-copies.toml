@@ -393,14 +393,6 @@ adr = "0012"
   note = "Its own menu-entry and view types beside paddock-window's TrayEntry and TrayView; Pitwall 1.1 keeps them."
 
   [[mechanism.copy]]
-  paths = ["apps/pitcrew/app/src-tauri/src/tray.rs"]
-  symbols = ["item:tray", "item:native"]
-  kind = "wiring"
-  owner = "pitcrew"
-  delete_by = "pitcrew-v1.1.0"
-  note = "Builds the tray through paddock-window's Tray and NativeTray; what is left is Pitcrew's menu content and these two hook-ups."
-
-  [[mechanism.copy]]
   paths = ["apps/spotter/app/src-tauri/src/tray.rs"]
   symbols = ["item:build_menu", "item:create"]
   owner = "spotter"
