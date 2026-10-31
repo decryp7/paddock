@@ -4,6 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Tokens: `--pd-meter-neutral`, `--pd-skeleton-raised`, `--pd-skeleton-raised-shine`
+- `--pd-meter-neutral` (dark #747d8b, light #767f8d) is a meter's neutral fill (disk space, quotas): 3:1 or more on surface-1, -2 and
+  -3. `--pd-chart-neutral-bar` stays for charts; on a surface-2 widget it measured 2.8:1 in dark (ADR 0035).
+- `--pd-skeleton-raised` and `--pd-skeleton-raised-shine` are the skeleton pair for content on a surface-2 fill, where
+  `--pd-skeleton` (the surface-2 colour) vanishes. `npm run test:tokens` checks both.
 ### `paddock-widgets`: new crate for widget layouts (ADR 0035, WP-A)
 - A pure crate for layouts of widgets on a surface (popover, dashboard, menu bar): the app's closed `Catalogue`, `Layout`
   and `Placement`, limits on every read and edit, lenient versioned `read` and `Stored` (a damaged, newer or oversized
