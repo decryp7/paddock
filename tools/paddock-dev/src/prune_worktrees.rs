@@ -1,6 +1,7 @@
 //! The pure plan of `dev host prune worktrees` (rules in [`crate::prune`]): which folders are candidates, which are kept, and
 //! how a row prints.
 
+use crate::prune::FileId;
 use std::path::PathBuf;
 
 /// The most `--keep` suffixes.
@@ -61,6 +62,8 @@ pub struct Candidate {
     pub symlink: bool,
     /// It has a Cargo marker at its top level; a folder without one is never removed.
     pub cargo: bool,
+    /// Its identity when it was listed; removal checks it is still the same folder.
+    pub id: Option<FileId>,
 }
 
 /// What happens to a candidate.
@@ -103,6 +106,8 @@ pub struct Row {
     pub bytes: u64,
     /// What happens to it.
     pub action: Action,
+    /// The folder's identity captured at listing time.
+    pub id: Option<FileId>,
 }
 
 /// Decides every candidate's action.
@@ -127,6 +132,7 @@ pub fn plan_rows(app: &str, keep: &[String], remove: bool, dry_run: bool, candid
                 path: c.path.clone(),
                 bytes: c.bytes,
                 action,
+                id: c.id,
             }
         })
         .collect()
@@ -214,6 +220,7 @@ mod tests {
             bytes,
             symlink,
             cargo,
+            id: None,
         };
         vec![
             c(".d-target-6c", 1 << 30, false, true),
@@ -252,6 +259,7 @@ mod tests {
         assert_eq!(format_gb(1234 * (1 << 30)), "1,234.0");
         assert_eq!(format_gb(1_234_567 * (1 << 30)), "1,234,567.0");
         let row = Row {
+            id: None,
             path: PathBuf::from("/h/agent-9"),
             bytes: 3 << 30,
             action: Action::Removing,

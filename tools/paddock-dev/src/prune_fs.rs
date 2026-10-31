@@ -189,7 +189,9 @@ pub const CARGO_MARKERS: [&str; 2] = ["CACHEDIR.TAG", ".rustc_info.json"];
 
 /// Whether `dir` looks like a Cargo target folder: a regular file `CACHEDIR.TAG` or `.rustc_info.json` at its top level.
 pub fn is_cargo_folder(dir: &Path) -> bool {
-    CARGO_MARKERS.iter().any(|m| kind(&dir.join(m)) == Kind::Other)
+    CARGO_MARKERS
+        .iter()
+        .any(|m| fs::symlink_metadata(dir.join(m)).is_ok_and(|md| md.file_type().is_file()))
 }
 
 /// A folder found by [`list_dirs`].
@@ -205,6 +207,8 @@ pub struct Listed {
     pub symlink: bool,
     /// It has a Cargo marker at its top level ([`is_cargo_folder`]).
     pub cargo: bool,
+    /// Its identity at listing time (`None` for a symlink, or where the platform has none).
+    pub id: Option<FileId>,
 }
 
 /// Whether two paths are the same folder: by device and inode where the platform has them (so a symlinked part or a case
@@ -235,6 +239,7 @@ pub fn list_dirs(parent: &Path, wanted: &dyn Fn(&str) -> bool) -> (Vec<Listed>, 
         let candidate = match kind(&path) {
             Kind::Dir => match scan(&path) {
                 Ok(s) => Listed {
+                    id: s.tree.id,
                     bytes: crate::prune::measure(&s.tree, &Default::default()).apparent,
                     cargo: is_cargo_folder(&path),
                     path,
@@ -252,6 +257,7 @@ pub fn list_dirs(parent: &Path, wanted: &dyn Fn(&str) -> bool) -> (Vec<Listed>, 
                 bytes: 0,
                 symlink: true,
                 cargo: false,
+                id: None,
             },
             _ => continue,
         };
@@ -494,6 +500,17 @@ mod tests {
         let u = tempfile::tempdir().unwrap();
         put(u.path(), "CACHEDIR.TAG", 3);
         assert!(is_cargo_folder(u.path()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_marker_is_not_a_marker() {
+        let t = tempfile::tempdir().unwrap();
+        put(t.path(), "real", 3);
+        std::os::unix::fs::symlink(t.path().join("real"), t.path().join("CACHEDIR.TAG")).unwrap();
+        assert!(!is_cargo_folder(t.path()));
+        std::os::unix::fs::symlink("missing", t.path().join(".rustc_info.json")).unwrap();
+        assert!(!is_cargo_folder(t.path()), "nor a dangling one");
     }
 
     #[test]

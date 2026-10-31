@@ -212,8 +212,18 @@ fn cap_with(a: &CapArgs, rm: &dyn Remover) -> Result<Report, CliError> {
     } else {
         Exit::Ok
     };
-    let report = cap_report(a, Some(max), unit, run);
-    Ok(report.with_exit(exit))
+    let (not_cargo, folder_failed) = (run.not_cargo, run.folder_failed);
+    let report = cap_report(a, Some(max), unit, run).with_exit(exit);
+    Ok(if not_cargo {
+        report.with_message(prune::not_cargo_message(&a.root.display().to_string()), prune::NOT_CARGO_HINT)
+    } else if folder_failed {
+        report.with_message(
+            format!("The build folder {} could not be removed.", a.root.display()),
+            "See the errors listed, close whatever uses the folder, then run it again.",
+        )
+    } else {
+        report
+    })
 }
 
 /// The CI form never fails: whatever is wrong becomes a notice and nothing is removed (exit 0, as the script).
@@ -288,6 +298,14 @@ fn cap_run(a: &CapArgs, max: u64, unit: Unit, home: &Path, rm: &dyn Remover) -> 
     let plan = prune::plan_cap(&scan.tree, &gone, max, unit);
     run.size_before = Some(plan.size_before);
     run.size_after = Some(plan.size_before);
+    if plan.over && !ci && !prune_fs::is_cargo_folder(work) {
+        // The plain form refuses before it removes anything, dry run or not.
+        run.action = "not-cargo";
+        run.not_cargo = true;
+        run.lines.push(prune::not_cargo_message(&display));
+        run.lines.push(prune::NOT_CARGO_HINT.to_string());
+        return Ok(run);
+    }
     if plan.over {
         run.action = "incremental";
         run.lines.push(prune::over_message(&display, plan.size_before, max));
@@ -370,6 +388,12 @@ fn remove_folder_itself(work: &Path, id: Option<FileId>, errors: &mut Vec<String
 
 /// `host prune worktrees`.
 pub fn worktrees(a: &WorktreeArgs) -> Result<Report, CliError> {
+    worktrees_with(a, &FsRemover)
+}
+
+/// `worktrees` with the removal seam. The listing exits 0 even when a row is `not-cargo` or a removal failed (it is a bulk
+/// listing; the failures are in `errors`); `cap`, which names one folder, exits 4 for the same folder.
+fn worktrees_with(a: &WorktreeArgs, rm: &dyn Remover) -> Result<Report, CliError> {
     if !wt::valid_app(&a.app) {
         return Err(error(PruneError::BadApp(a.app.clone())));
     }
@@ -391,6 +415,7 @@ pub fn worktrees(a: &WorktreeArgs) -> Result<Report, CliError> {
             bytes: l.bytes,
             symlink: l.symlink,
             cargo: l.cargo,
+            id: l.id,
         })
         .collect();
     errors.extend(more_errors);
@@ -398,7 +423,7 @@ pub fn worktrees(a: &WorktreeArgs) -> Result<Report, CliError> {
     for row in rows.iter().filter(|r| r.action == Action::Removing) {
         if let Some(why) = refuse_candidate(&row.path, &home) {
             errors.push(why);
-        } else if let Err(e) = prune_fs::remove_rel(&row.path, &Vec::new(), None) {
+        } else if let Err(e) = rm.remove(&row.path, &Vec::new(), row.id) {
             errors.push(e);
         }
     }
@@ -574,6 +599,104 @@ mod tests {
         let report = cap_with(&a, &fake).unwrap();
         assert_eq!(report.exit, Exit::Refused);
         assert!(fake.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_failed_bundle_removal_is_listed_and_the_run_goes_on() {
+        let (_t, root) = scratch();
+        let folder = build(&root, true);
+        fs::create_dir_all(folder.join("dist/bundle")).unwrap();
+        fs::write(folder.join("dist/bundle/app.dmg"), vec![1u8; 1024]).unwrap();
+        let fake = Fake::failing(&[&["dist", "bundle"]]);
+        let mut a = args(&root, &folder, "650", true);
+        a.drop_bundles = true;
+        let report = cap_with(&a, &fake).unwrap();
+        assert_eq!(report.exit, Exit::Ok);
+        let v = report.json();
+        assert_eq!(v["errors"].as_array().unwrap().len(), 1);
+        assert!(v["errors"][0].as_str().unwrap().contains("injected failure"));
+        assert!(!v["removed"].as_array().unwrap().iter().any(|r| r == "dist/bundle"), "{v}");
+        assert!(folder.join("dist/bundle/app.dmg").exists());
+        assert!(report.text.contains("could not remove"), "{}", report.text);
+    }
+
+    #[test]
+    fn a_folder_without_a_marker_is_refused_before_anything_is_removed() {
+        let (_t, root) = scratch();
+        let folder = build(&root, false);
+        let fake = Fake::failing(&[]);
+        let report = cap_with(&args(&root, &folder, "650", false), &fake).unwrap();
+        assert_eq!(report.exit, Exit::Refused);
+        assert!(fake.calls.borrow().is_empty(), "nothing was removed: {:?}", fake.calls.borrow());
+        assert!(folder.join("debug/incremental/a").exists());
+        let v = report.json();
+        assert_eq!(v["removed"].as_array().unwrap().len(), 0);
+        assert!(v["error"].as_str().unwrap().contains("not a Cargo build folder"));
+        assert!(v["hint"].as_str().unwrap().contains("Cargo target folder"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_marker_does_not_count() {
+        let (_t, root) = scratch();
+        let folder = build(&root, false);
+        fs::write(root.join("real-tag"), "x").unwrap();
+        std::os::unix::fs::symlink(root.join("real-tag"), folder.join("CACHEDIR.TAG")).unwrap();
+        let fake = Fake::failing(&[]);
+        let report = cap_with(&args(&root, &folder, "0", false), &fake).unwrap();
+        assert_eq!(report.exit, Exit::Refused);
+        assert!(fake.calls.borrow().is_empty());
+    }
+
+    fn worktree_args(root: &Path, remove: bool) -> WorktreeArgs {
+        let home = root.join("home");
+        fs::create_dir_all(&home).unwrap();
+        WorktreeArgs {
+            app: "debrief".into(),
+            repo: Some(root.join("repo")),
+            home: Some(home),
+            remove,
+            keep: Vec::new(),
+            dry_run: false,
+        }
+    }
+
+    #[test]
+    fn worktrees_removes_through_the_seam_and_lists_the_one_that_failed() {
+        let (_t, root) = scratch();
+        for n in [".debrief-target-1", ".debrief-target-2"] {
+            let d = root.join("home").join(n);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55").unwrap();
+            fs::write(d.join("f"), vec![1u8; 100]).unwrap();
+        }
+        let a = worktree_args(&root, true);
+        let bad = root.join("home/.debrief-target-1");
+        // Fails the removal of one folder, keyed on the folder it is given as `root`, and records every call.
+        struct ByName(PathBuf, Fake);
+        impl Remover for ByName {
+            fn remove(&self, root: &Path, rel: &RelPath, id: Option<FileId>) -> Result<(), String> {
+                assert!(id.is_some() == cfg!(unix), "the listing's identity is passed on");
+                self.1.calls.borrow_mut().push(rel.clone());
+                if root == self.0 {
+                    Err(format!("{}: injected failure", root.display()))
+                } else {
+                    FsRemover.remove(root, rel, id)
+                }
+            }
+        }
+        let fake = ByName(bad.clone(), Fake::failing(&[]));
+        let report = worktrees_with(&a, &fake).unwrap();
+        assert_eq!(report.exit, Exit::Ok, "a bulk listing exits 0");
+        let v = report.json();
+        assert_eq!(v["ok"], true);
+        let errors = v["errors"].as_array().unwrap();
+        assert_eq!(errors.len(), 1, "{v}");
+        assert!(errors[0].as_str().unwrap().contains("injected failure"));
+        assert!(report.text.contains("could not remove or list"), "{}", report.text);
+        assert!(bad.exists(), "the failed one is still there");
+        assert!(!root.join("home/.debrief-target-2").exists(), "the other was removed");
+        assert_eq!(fake.1.calls.borrow().len(), 2);
     }
 
     #[test]
