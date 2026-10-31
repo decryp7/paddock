@@ -6,6 +6,7 @@
 
 use paddock_commands::testing::{sync_generated, WriteMode};
 use paddock_shell::{AppIdentity, PLUGIN_NAME};
+use pitcrew_app_lib::dialogs::DIALOGS;
 use pitcrew_app_lib::dto::ConnectionState;
 use pitcrew_app_lib::service_client::{ClientError, ServiceClient};
 use pitcrew_app_lib::{health, invoke_handler, shell, Place, APP_ID, APP_NAME, COMMANDS, MANIFEST, RELEASES_PAGE, UPDATE_FEED, VERSION};
@@ -172,7 +173,15 @@ const REGENERATE: &str = "cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --te
 #[test]
 fn the_uis_command_names_are_generated_from_the_apps_table() {
     let text = paddock_commands::ts::names_module(&COMMANDS, "APP_COMMANDS", "AppCommand", REGENERATE).unwrap();
-    let path = ui_dir().join("app/shell/generated/app-commands.ts");
+    let path = ui_dir().join("app/generated/app-commands.ts");
+    sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// The UI's dialog contracts are generated from the dialogs table, so Rust and TypeScript cannot disagree (ADR 0026 §3).
+#[test]
+fn the_uis_dialog_contracts_are_generated_from_the_table() {
+    let text = paddock_dialogs::ts::contracts_module("the app", &DIALOGS, REGENERATE);
+    let path = ui_dir().join("app/generated/dialog-contracts.ts");
     sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
 }
 

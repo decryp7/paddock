@@ -1,7 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
-import type { ShellPorts } from '@decryp7/paddock-ui/shell';
-import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import { answerOf, type ShellPorts } from '@decryp7/paddock-ui/shell';
+import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import type { ConfigPreview } from '../../../core/api.types';
 import { diffSymbol, diffWord } from './config-issues';
 import { FieldIssues } from './field-issues';
@@ -67,11 +67,6 @@ export interface ConfigDiffData {
         }
       </ul>
       </div>
-
-      <div class="btn-row end">
-        <button type="button" class="btn" data-dialog-close (click)="ref.close()">Cancel</button>
-        <button type="button" class="btn primary" data-default (click)="ref.close(true)">Save and apply</button>
-      </div>
     </div>
   `,
   styles: `
@@ -96,9 +91,6 @@ export interface ConfigDiffData {
       min-height: 0;
       min-width: 0;
       overflow: auto;
-    }
-    .btn-row {
-      flex: none;
     }
     .counts {
       display: inline-flex;
@@ -188,16 +180,17 @@ export interface ConfigDiffData {
       height: 16px;
       margin-top: 2px;
     }
-    .end {
-      justify-content: flex-end;
-    }
   `,
 })
-export class ConfigDiffDialog {
+export class ConfigDiffDialog implements DialogContent<boolean> {
   readonly preview = input.required<ConfigPreview>();
   readonly maxBackups = input.required<number>();
   protected readonly data = computed<ConfigDiffData>(() => ({ preview: this.preview(), maxBackups: this.maxBackups() }));
-  protected readonly ref = inject<DialogRef<boolean>>(DIALOG_REF);
+  /** Cancel, and Save and apply: the frame draws the footer. */
+  readonly dialogActions = computed<readonly DialogAction<boolean>[]>(() => [
+    { kind: 'dismiss', id: 'cancel', label: 'Cancel' },
+    { kind: 'answer', id: 'save', label: 'Save and apply', role: 'primary', answer: () => true },
+  ]);
   protected readonly sym = diffSymbol;
   protected readonly word = diffWord;
 }
@@ -207,5 +200,5 @@ export const CONFIG_DIFF_DIALOG_ID = 'pc.config-diff';
 
 /** Opens the review as its own window (modal); resolves true when the user chose Save and apply. */
 export async function reviewConfigChanges(ports: Pick<ShellPorts, 'openDialog'>, data: ConfigDiffData): Promise<boolean> {
-  return (await ports.openDialog(CONFIG_DIFF_DIALOG_ID, data)) === true;
+  return answerOf(await ports.openDialog(CONFIG_DIFF_DIALOG_ID, data)) === true;
 }

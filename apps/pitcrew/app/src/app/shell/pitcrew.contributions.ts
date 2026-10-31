@@ -14,11 +14,8 @@ import {
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import type { Routes } from '@angular/router';
 import { PAGE_DATA } from '@decryp7/paddock-ui/shell/pages';
-import { CONFIG_DIFF_DIALOG_ID } from '../features/runners/config/config-diff-dialog';
-import { STOP_PROCESS_DIALOG_ID } from '../features/runners/stop-process-dialog';
-import { CONFIRM_DIALOG_ID } from '../shared/ui/confirm-dialog';
+import { DIALOG_CONTRACTS } from '../generated/dialog-contracts';
 import type { PitcrewContext } from './pitcrew-context';
-import { REGISTER_DIALOG_ID } from './register-launcher';
 
 // The registration file of Pitcrew on the shell: static data and loaders only. Its lints run in `pitcrew.contributions.spec.ts`
 // (contributions, dialog contracts and the manifest the Rust side checks).
@@ -29,96 +26,40 @@ export const SERVICE_ID = 'pc.service';
 // TODO(ADR 0026 §7, Pitcrew row): `pc.confirm` (shared/ui/confirm-dialog.ts, six callers) and `pc.stop-process` become `pd.confirm`
 // of the shared dialog API (the callers pass the same inputs); delete both definitions and their components then.
 /** A confirmation of something that cannot be undone: modal, fitted to its content. */
-export const CONFIRM_DIALOG = defineDialog({
-  id: CONFIRM_DIALOG_ID,
-  kind: 'decision',
+export const CONFIRM_DIALOG = defineDialog(DIALOG_CONTRACTS['pc.confirm'], {
   title: msg('pc.dialog.confirm', 'Please confirm'),
-  width: 440,
   result: type<boolean>(),
-  commands: [],
   load: () => import('../shared/ui/confirm-dialog').then((m) => m.ConfirmDialog),
 });
 
 /** Stopping one process of a runner's tree. */
-export const STOP_PROCESS_DIALOG = defineDialog({
-  id: STOP_PROCESS_DIALOG_ID,
-  kind: 'decision',
+export const STOP_PROCESS_DIALOG = defineDialog(DIALOG_CONTRACTS['pc.stop-process'], {
   title: msg('pc.dialog.stop-process', 'Stop process'),
-  width: 460,
   result: type<boolean>(),
-  commands: [],
   load: () => import('../features/runners/stop-process-dialog').then((m) => m.StopProcessDialog),
 });
 
 // TODO(ADR 0026 §7, Pitcrew row): the configuration diff becomes a wide decision of the shared dialog API.
 /** What saving a runner's configuration would change: a modal form with Cancel and Save and apply. */
-export const CONFIG_DIFF_DIALOG = defineDialog({
-  id: CONFIG_DIFF_DIALOG_ID,
-  kind: 'form',
-  modality: 'modal',
-  title: msg('pc.dialog.config-diff', 'Review configuration changes'),
+export const CONFIG_DIFF_DIALOG = defineDialog(DIALOG_CONTRACTS['pc.config-diff'], {
   // No height: the window is fitted to its content (the changes scroll inside their own region, up to a fixed height).
-  width: 720,
+  title: msg('pc.dialog.config-diff', 'Review configuration changes'),
   result: type<boolean>(),
-  commands: [],
   load: () => import('../features/runners/config/config-diff-dialog').then((m) => m.ConfigDiffDialog),
 });
 
 /** The registration wizard: a modal form; it registers the runner (a job) and needs the status. */
-export const REGISTER_DIALOG = defineDialog({
-  id: REGISTER_DIALOG_ID,
-  kind: 'form',
-  modality: 'modal',
+export const REGISTER_DIALOG = defineDialog(DIALOG_CONTRACTS['pc.register'], {
   title: msg('pc.dialog.register', 'Register a runner'),
-  width: 660,
-  height: 640,
   result: type<boolean>(),
-  commands: ['register_runner', 'runner_status', 'connection_state', 'platform_name', 'job_result', 'jobs_snapshot', 'job_cancel'],
   providers: () => import('./register-window').then((m) => m.REGISTER_WINDOW_PROVIDERS),
   load: () => import('../features/register/register-wizard').then((m) => m.RegisterWizard),
 });
 
-/** The commands Pitcrew's settings pages call (the Settings window is a dialog, so its contract names them). */
-export const SETTINGS_COMMANDS = [
-  'dialog_open',
-  'settings_overview',
-  'settings_reset',
-  'settings_set',
-  'get_settings',
-  'save_settings',
-  'runner_status',
-  'connection_state',
-  'platform_name',
-  'get_autostart',
-  'set_autostart',
-  'service_install_state',
-  'install_service',
-  'uninstall_service',
-  'repair_service',
-  'pitcrew_open_login_items',
-  'notification_channels_get',
-  'notification_channels_save',
-  'channel_secret_set',
-  'channel_secret_clear',
-  'channel_secret_present',
-  'channel_test',
-  'has_api_token',
-  'set_api_token',
-  'clear_api_token',
-  'export_diagnostics',
-  'open_url',
-  'open_page',
-] as const;
-
 // TODO(ADR 0026 §7): settings, About and Updates become the shared dialogs; the pages above stay Pitcrew's sections.
-/** The Settings window (the shell's) as the app's own dialog, so its contract is in this registry. */
-export const SETTINGS_DIALOG = defineDialog({
-  id: 'pd.settings',
-  kind: 'tool',
+/** The Settings window (the shell's) as the app's own dialog; its contract is in `src-tauri/src/dialogs.rs`. */
+export const SETTINGS_DIALOG = defineDialog(DIALOG_CONTRACTS['pd.settings'], {
   title: msg('pd.settings.title', 'Settings'),
-  width: 920,
-  height: 680,
-  commands: SETTINGS_COMMANDS,
   providers: () => import('./settings-window').then((m) => m.PITCREW_SETTINGS_WINDOW),
   load: () => import('@decryp7/paddock-ui/shell/settings/window').then((m) => m.PdSettingsWindow),
 });

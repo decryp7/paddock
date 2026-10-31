@@ -12,11 +12,11 @@ import {
   SHELL_COMMANDS,
   type DialogDef,
 } from '@decryp7/paddock-ui/shell';
-import { dialogContractFile, serializeDialogContracts } from '@decryp7/paddock-ui/shell/dialogs';
 import { provideMenus } from '@decryp7/paddock-ui/shell/menu';
 import { SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { assertContributionsValid, assertDialogBoots, dialogTableProblems, provideShellTesting } from '@decryp7/paddock-ui/shell/testing';
-import { APP_COMMANDS } from './generated/app-commands';
+import { APP_COMMANDS } from '../generated/app-commands';
+import { DIALOG_BASE } from '../generated/dialog-contracts';
 import { DIALOG_BASE_COMMANDS, dialogBaseProviders } from './dialog-base';
 import { pitcrewContext } from './pitcrew-context';
 import { ABOUT_CONTRIBUTIONS, PITCREW_CONTRIBUTIONS, PITCREW_DIALOGS, PITCREW_SETTINGS_PAGES, SERVICE_ID } from './pitcrew.contributions';
@@ -34,7 +34,6 @@ interface NodeFs {
 const nodeFs = (): Promise<NodeFs> => import(/* @vite-ignore */ ['node', 'fs'].join(':')) as Promise<NodeFs>;
 const env = (name: string): string | undefined => (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env[name];
 const MANIFEST = 'src-tauri/paddock-manifest.json';
-const CONTRACTS = 'src-tauri/dialog-contracts.json';
 
 function configure(): void {
   TestBed.configureTestingModule({
@@ -109,11 +108,7 @@ describe('Pitcrew dialogs', () => {
     expect(dialogTableProblems(DIALOGS, { ...APP_COMMANDS, ...SHELL_COMMANDS }, DIALOG_BASE_COMMANDS)).toEqual([]);
   });
 
-  // Regenerate with PADDOCK_WRITE_CONTRACTS=1 npx ng test --watch=false --include=**/pitcrew.contributions.spec.ts
-  it('keep dialog-contracts.json equal to the registry (Rust’s guard reads it)', async () => {
-    const fs = await nodeFs();
-    const want = serializeDialogContracts(dialogContractFile(DIALOGS, { base: DIALOG_BASE_COMMANDS }));
-    if (env('PADDOCK_WRITE_CONTRACTS') === '1') fs.writeFileSync(CONTRACTS, want);
-    expect(fs.readFileSync(CONTRACTS, 'utf8')).toBe(want);
+  it('take the base commands from the Rust table', () => {
+    expect([...DIALOG_BASE]).toEqual([...DIALOG_BASE_COMMANDS].sort());
   });
 });

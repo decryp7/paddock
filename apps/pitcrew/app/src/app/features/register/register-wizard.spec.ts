@@ -2,7 +2,7 @@ import { DIALOG_REF } from '@decryp7/paddock-ui/shell/dialogs';
 import { TestBed } from '@angular/core/testing';
 import { MockBackend } from '../../core/mock-backend';
 import { NoticeLog } from '../../../testing/test-helpers';
-import { appProviders, byText, flush, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
+import { appProviders, flush, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
 import { RegisterWizard, stepErrors, toRequest, type RegisterDraft } from './register-wizard';
 
 const draft = (over: Partial<RegisterDraft> = {}): RegisterDraft => ({
@@ -64,32 +64,39 @@ describe('toRequest', () => {
 
 describe('RegisterWizard', () => {
   let mock: MockBackend;
-  const ref = { close: vi.fn() };
-
+  
   function mount(options: Parameters<typeof makeMock>[0] = {}) {
     mock = makeMock(options);
-    TestBed.configureTestingModule({ providers: [...appProviders(mock), { provide: DIALOG_REF, useValue: ref }] });
+    TestBed.configureTestingModule({ providers: [...appProviders(mock), { provide: DIALOG_REF, useValue: { answer: vi.fn(), dismiss: vi.fn() } }] });
     const f = TestBed.createComponent(RegisterWizard);
     f.detectChanges();
     return { f, el: f.nativeElement as HTMLElement };
   }
   afterEach(() => {
     mock.dispose();
-    ref.close.mockClear();
   });
 
   const input = (el: HTMLElement, sel: string) => el.querySelector(sel) as HTMLInputElement;
-  const submit = (el: HTMLElement) => (el.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { cancelable: true }));
+  type Wizard = ReturnType<typeof mount>['f'];
+  const signal = new AbortController().signal;
+  /** The footer's declared actions, as the frame would lay them out. */
+  const actions = (f: Wizard) => f.componentInstance.dialogActions();
+  /** Runs the declared action `id` the way the frame does on its click. */
+  const act = (f: Wizard, id: string) => {
+    const a = actions(f).find((x) => x.id === id);
+    if (!a) throw new Error(`no action ${id}`);
+    return a.kind === 'run' ? a.run(signal) : a.kind === 'answer' ? a.answer(signal) : undefined;
+  };
 
   it('blocks Continue with messages until the step is valid', () => {
     const { f, el } = mount();
     expect(text(el.querySelector('header.top'))).toContain('Pitcrew registers it with your server');
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
     expect(el.querySelectorAll('.errors li')).toHaveLength(2);
     typeInto(input(el, '#reg-url'), 'https://git.example.com');
     typeInto(input(el, '#reg-token'), 'abcdefgh');
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
     expect(el.querySelector('.errors')).toBeNull();
     expect(el.querySelector('#reg-name')).not.toBeNull();
@@ -100,7 +107,7 @@ describe('RegisterWizard', () => {
     typeInto(input(el, '#reg-url'), 'https://git.example.com/');
     typeInto(input(el, '#reg-token'), 'abcdefgh');
     (input(el, '.check input') as HTMLInputElement).click();
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
     typeInto(input(el, '#reg-name'), 'New-Runner');
     typeInto(input(el, '#reg-display'), 'Shown');
@@ -110,9 +117,9 @@ describe('RegisterWizard', () => {
     lab.value = 'x64,';
     lab.dispatchEvent(new KeyboardEvent('keydown', { key: ',', cancelable: true }));
     f.detectChanges();
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
   }
 
@@ -120,7 +127,7 @@ describe('RegisterWizard', () => {
     const { f, el } = mount();
     typeInto(input(el, '#reg-url'), 'https://git.example.com');
     typeInto(input(el, '#reg-token'), 'abcdefgh');
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
     const lab = input(el, '#reg-labels');
     for (const v of ['a', 'b', 'a']) {
@@ -152,29 +159,28 @@ describe('RegisterWizard', () => {
     expect(review).toContain('windows, x64');
     expect(review).toContain('remembered in Windows Credential Manager');
     expect(review).toContain('waits for log-on');
-    byText<HTMLButtonElement>(el, 'button', 'Register')!.click();
-    submit(el);
+    const answer = act(f, 'register');
     await settle(f);
     expect(register).toHaveBeenCalledWith(expect.objectContaining({ runner: 'new-runner', serverUrl: 'https://git.example.com', displayName: 'Shown', labels: ['windows', 'x64'], rememberToken: true }));
     expect(TestBed.inject(NoticeLog).notices.at(-1)?.message).toContain('Registered new-runner');
-    expect(ref.close).toHaveBeenCalledWith(true);
+    expect(await answer).toBe(true);
   });
 
   it('offers adopt folder and session choices on the third step', () => {
     const { f, el } = mount();
     typeInto(input(el, '#reg-url'), 'https://git.example.com');
     typeInto(input(el, '#reg-token'), 'abcdefgh');
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
     typeInto(input(el, '#reg-name'), 'runner-two');
     f.detectChanges();
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
     expect(el.querySelector('input[aria-label="Folder to adopt"]')).toBeNull();
     expect(el.querySelector('.callout.warning')).toBeNull();
     (el.querySelector('input[name="folder"][type="radio"]:not(:checked)') as HTMLInputElement).click();
     f.detectChanges();
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
     expect(text(el.querySelector('.errors'))).toContain('Enter the folder');
     typeInto(input(el, 'input[aria-label="Folder to adopt"]'), 'C:\\runners\\x');
@@ -185,7 +191,7 @@ describe('RegisterWizard', () => {
     f.detectChanges();
     expect(el.querySelector('input[name="off"]')).toBeNull();
     expect(text(el.querySelector('.callout.warning'))).toContain('Every job');
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
     expect(text(el.querySelector('.review'))).toContain('Adopt C:\\runners\\x');
     expect(text(el.querySelector('.review'))).toContain('Service session');
@@ -195,49 +201,44 @@ describe('RegisterWizard', () => {
     const { f, el } = mount();
     typeInto(input(el, '#reg-url'), 'https://git.example.com');
     typeInto(input(el, '#reg-token'), 'abcdefgh');
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
     const steps = Array.from(el.querySelectorAll('.stepper button')) as HTMLButtonElement[];
     expect(steps.map((b) => b.disabled)).toEqual([false, true, true, true]);
     steps[0]!.click();
     f.detectChanges();
     expect(el.querySelector('#reg-url')).not.toBeNull();
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
-    byText<HTMLButtonElement>(el, 'button', 'Back')!.click();
+    void act(f, 'back');
     f.detectChanges();
     expect(el.querySelector('#reg-url')).not.toBeNull();
-    expect(byText(el, 'button', 'Back')).toBeNull();
+    expect(actions(f).map((a) => a.id)).toEqual(['cancel', 'continue']);
   });
 
-  it('shows the failure and stays open when registration fails', async () => {
+  it('refuses with the failure (the frame shows it and stays open) when registration fails', async () => {
     const { f, el } = mount();
     typeInto(input(el, '#reg-url'), 'https://git.example.com');
     typeInto(input(el, '#reg-token'), 'short');
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
     typeInto(input(el, '#reg-name'), 'ok-name');
     f.detectChanges();
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
-    submit(el);
+    void act(f, 'continue');
     f.detectChanges();
-    submit(el);
+    const failed = act(f, 'register');
+    await expect(failed).rejects.toThrow(/registration token/);
     await settle(f);
-    expect(text(el.querySelector('.callout.danger'))).toContain('Registration failed');
-    expect(text(el.querySelector('.callout.danger'))).toContain('registration token');
-    expect(ref.close).not.toHaveBeenCalled();
-    expect((byText(el, 'button', 'Register') as HTMLButtonElement).disabled).toBe(false);
+    expect(actions(f).find((a) => a.id === 'register')?.enabled).not.toBe(false);
   });
 
-  it('closes with Cancel (the window’s Escape key) and names the Keychain on macOS', async () => {
-    const { el } = mount({ platform: 'macos' });
+  it('declares Cancel as the dismissal and names the Keychain on macOS', async () => {
+    const { f, el } = mount({ platform: 'macos' });
     expect(text(el)).toContain('macOS Keychain');
-    const cancel = byText<HTMLButtonElement>(el, 'button', 'Cancel')!;
-    expect(cancel.hasAttribute('data-dialog-close')).toBe(true);
-    cancel.click();
-    expect(ref.close).toHaveBeenCalledTimes(1);
-    expect(ref.close).toHaveBeenCalledWith();
+    expect(actions(f).find((a) => a.id === 'cancel')?.kind).toBe('dismiss');
+    expect(el.querySelector('footer')).toBeNull();
     await flush();
   });
 });

@@ -8,6 +8,7 @@ pub mod channels;
 pub mod commands;
 pub mod credentials;
 pub mod diagnostics;
+pub mod dialogs;
 pub mod dto;
 pub mod events;
 pub mod gitea;
@@ -41,14 +42,12 @@ pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/paddock/re
 /// The update feed: the moving release that pitcrew-release.yml publishes `latest.json` on (`tests/shell.rs` ties it to the
 /// workflow's `latest-tag`; `tauri.conf.json` names the same address for the updater plugin).
 pub const UPDATE_FEED: &str = "https://dev.decryptology.net/decryp7/paddock/releases/download/pitcrew-latest/latest.json";
-/// The dialog contracts and the manifest, written by the UI's specs from its registry (`app/src/app/shell/`).
-pub const DIALOG_CONTRACTS: &str = include_str!("../dialog-contracts.json");
 /// The UI's `paddock-manifest.json` (checked against the plugin in `tests/shell.rs`).
 pub const MANIFEST: &str = include_str!("../paddock-manifest.json");
 
 paddock_commands::command_table! {
     /// Pitcrew's own commands behind the shell's guard. Windows and dialogs may call them; each dialog's contract
-    /// (`dialog-contracts.json`) narrows a dialog to the few it needs.
+    /// (`dialogs.rs`) narrows a dialog to the few it needs.
     pub static COMMANDS, macro handler;
     Query [MAIN | DIALOG] => commands::platform_name,
     Query [MAIN] => commands::take_pending_navigation,
@@ -131,7 +130,7 @@ pub fn shell<R: Runtime>(client: SharedClient, place: Place) -> Builder<R> {
     let updates_dir = test_dir.clone();
     let mut builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))
         .app_commands(&COMMANDS)
-        .dialog_contracts(DIALOG_CONTRACTS)
+        .dialogs(&[&dialogs::DIALOGS])
         .health(vec![health::spec()])
         .updater(move |_| updater(updates_dir))
         .windows(move |app| windows(app, installed))

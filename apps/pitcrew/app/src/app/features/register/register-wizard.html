@@ -21,7 +21,7 @@
     }
   </ol>
 
-  <form class="body" (submit)="$event.preventDefault(); step() === steps.length - 1 ? submit() : next()">
+  <form class="body" (submit)="$event.preventDefault()">
     <div class="fields">
     @switch (step()) {
       @case (0) {
@@ -125,12 +125,6 @@
           <dt>Session</dt>
           <dd>{{ d.session === 'interactive' ? 'Logged-on user’s desktop' : 'Service session' }}{{ d.session === 'interactive' ? (d.loggedOff === 'wait' ? '; waits for log-on' : '; service account while logged off') : '' }}</dd>
         </dl>
-        @if (failure(); as f) {
-          <div class="callout danger" role="alert">
-            <mat-icon svgIcon="pc:alert" aria-hidden="true" />
-            <div class="callout-body"><strong>Registration failed</strong><span>{{ f }}</span></div>
-          </div>
-        }
       }
     }
 
@@ -144,23 +138,5 @@
 
     </div>
 
-    <footer class="actions">
-      @if (step() > 0) {
-        <button type="button" class="btn" (click)="back()" [disabled]="submitting()">Back</button>
-      }
-      <span class="spacer"></span>
-      <button type="button" class="btn ghost" data-dialog-close (click)="close()" [disabled]="submitting()">Cancel</button>
-      @if (step() < steps.length - 1) {
-        <button type="submit" class="btn primary">Continue</button>
-      } @else {
-        <button type="submit" class="btn primary" [disabled]="submitting()">
-          @if (submitting()) {
-            <mat-icon svgIcon="pc:loader" class="spin" aria-hidden="true" />Registering…
-          } @else {
-            Register
-          }
-        </button>
-      }
-    </footer>
   </form>
 </div>

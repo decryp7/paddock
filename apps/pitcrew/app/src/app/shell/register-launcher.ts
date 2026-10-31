@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import { answerOf, SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 
 /** The registration wizard's dialog id (`pc.register` in the contributions). */
 export const REGISTER_DIALOG_ID = 'pc.register';
@@ -17,7 +17,7 @@ export class RegisterLauncher {
   async open(): Promise<boolean> {
     this.openNow.set(true);
     try {
-      return (await this.ports.openDialog(REGISTER_DIALOG_ID)) === true;
+      return answerOf(await this.ports.openDialog(REGISTER_DIALOG_ID)) === true;
     } finally {
       this.openNow.set(false);
     }

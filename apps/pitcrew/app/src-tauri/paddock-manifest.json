@@ -114,7 +114,8 @@
       "modality": "modal",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 720,
+      "height": null,
       "commands": []
     },
     "pc.confirm": {
@@ -122,7 +123,8 @@
       "modality": "modal",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 400,
+      "height": null,
       "commands": []
     },
     "pc.register": {
@@ -130,7 +132,8 @@
       "modality": "modal",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 720,
+      "height": null,
       "commands": [
         "connection_state",
         "job_cancel",
@@ -146,7 +149,8 @@
       "modality": "modal",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 400,
+      "height": null,
       "commands": []
     },
     "pd.about": {
@@ -154,13 +158,12 @@
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": {
-        "width": 680,
-        "height": 560
-      },
+      "width": 720,
+      "height": 560,
       "commands": [
         "about_info",
-        "about_legal"
+        "about_legal",
+        "files_open_url"
       ]
     },
     "pd.settings": {
@@ -168,7 +171,8 @@
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 920,
+      "height": 680,
       "commands": [
         "channel_secret_clear",
         "channel_secret_present",
@@ -194,18 +198,17 @@
         "service_install_state",
         "set_api_token",
         "set_autostart",
-        "settings_overview",
-        "settings_reset",
-        "settings_set",
+        "settings_*",
         "uninstall_service"
       ]
     },
     "pd.updates": {
-      "kind": "tool",
+      "kind": "form",
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 560,
+      "height": null,
       "commands": [
         "updates_cancel",
         "updates_check",
@@ -221,10 +224,8 @@
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": {
-        "width": 680,
-        "height": 560
-      },
+      "width": 720,
+      "height": 560,
       "commands": [
         "about_whats_new"
       ]

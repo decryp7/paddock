@@ -1,4 +1,4 @@
-import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import { DialogActionError, type DialogAction, type DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import type { LoggedOffMode, RegisterRequest, SessionMode } from '../../core/api.types';
@@ -61,8 +61,7 @@ export function toRequest(d: RegisterDraft): RegisterRequest {
   templateUrl: './register-wizard.html',
   styleUrl: './register-wizard.scss',
 })
-export class RegisterWizard {
-  private readonly ref = inject<DialogRef<boolean>>(DIALOG_REF);
+export class RegisterWizard implements DialogContent<boolean> {
   private readonly backend = inject(BACKEND);
   private readonly status = inject(StatusStore);
   private readonly toasts = inject(Notify);
@@ -84,7 +83,19 @@ export class RegisterWizard {
   protected readonly touched = signal(false);
   protected readonly errors = computed(() => stepErrors(this.step(), this.draft()));
   protected readonly submitting = signal(false);
-  protected readonly failure = signal<string | null>(null);
+  /** Cancel, Back, and Continue (a step) or Register (the last): the frame draws the footer, a refusal shows in its alert. */
+  readonly dialogActions = computed<readonly DialogAction<boolean>[]>(() => {
+    const last = this.step() === STEPS.length - 1;
+    const busy = this.submitting();
+    return [
+      { kind: 'dismiss', id: 'cancel', label: 'Cancel', enabled: !busy },
+      ...(this.step() > 0 ? [{ kind: 'run' as const, id: 'back', label: 'Back', role: 'secondary' as const, lead: true, enabled: !busy, run: () => this.back() }] : []),
+      last
+        ? { kind: 'answer' as const, id: 'register', label: 'Register', busyLabel: 'Registering…', role: 'primary' as const, answer: () => this.submit() }
+        : { kind: 'run' as const, id: 'continue', label: 'Continue', role: 'primary' as const, run: () => this.next() },
+    ];
+  });
+
   protected readonly credentialStore = inject(BACKEND).platform() === 'macos' ? 'macOS Keychain' : 'Windows Credential Manager';
 
   protected set<K extends keyof RegisterDraft>(key: K, value: RegisterDraft[K]): void {
@@ -136,22 +147,17 @@ export class RegisterWizard {
     }
   }
 
-  protected async submit(): Promise<void> {
+  private async submit(): Promise<true> {
     this.submitting.set(true);
-    this.failure.set(null);
     try {
       await this.backend.register(toRequest(this.draft()));
       this.toasts.show({ tone: 'success', icon: 'check-circle', title: `Registered ${this.draft().runner}`, body: 'Pitcrew starts it now and keeps it running.' });
       await this.status.load();
-      this.ref.close(true);
+      return true;
     } catch (e) {
-      this.failure.set(toCommandError(e).message);
+      throw new DialogActionError(toCommandError(e).message);
     } finally {
       this.submitting.set(false);
     }
-  }
-
-  protected close(): void {
-    this.ref.close();
   }
 }

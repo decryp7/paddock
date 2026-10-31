@@ -1,5 +1,5 @@
 import { inject, type EnvironmentProviders, type Provider } from '@angular/core';
-import { BrowserAppearanceBackend, SHELL_COMMAND_RUNNER, SHELL_PORTS, provideAppearance, type ShellNotice } from '@decryp7/paddock-ui/shell';
+import { answered, BrowserAppearanceBackend, DISMISSED, SHELL_COMMAND_RUNNER, SHELL_PORTS, provideAppearance, type ShellNotice } from '@decryp7/paddock-ui/shell';
 import type { ComponentFixture } from '@angular/core/testing';
 import { provideRouter, withComponentInputBinding, type Routes } from '@angular/router';
 import { BACKEND } from '../app/core/backend';
@@ -41,7 +41,7 @@ export function recordShell(): Provider[] {
       provide: SHELL_PORTS,
       useFactory: () => {
         const log = inject(NoticeLog);
-        return { showPage: () => undefined, openDialog: (id: string, inputs?: unknown) => Promise.resolve(log.open(id, inputs)), notify: (n: ShellNotice) => void log.notices.push(n) };
+        return { showPage: () => undefined, openDialog: (id: string, inputs?: unknown) => Promise.resolve((v => (v === undefined ? DISMISSED : answered(v)))(log.open(id, inputs))), notify: (n: ShellNotice) => void log.notices.push(n) };
       },
     },
   ];

@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import type { ConfigPreview } from '../../../core/api.types';
 import { appProviders, byText, makeMock, text, type as typeInto } from '../../../../testing/test-helpers';
-import { DIALOG_REF } from '@decryp7/paddock-ui/shell/dialogs';
+import { answered, DISMISSED } from '@decryp7/paddock-ui/shell';
 import { ConfigDiffDialog, reviewConfigChanges } from './config-diff-dialog';
 import { FieldIssues } from './field-issues';
 import { StringList } from './string-list';
@@ -62,17 +62,15 @@ describe('config parts', () => {
 
   /** The dialog's content in a fake dialog window: its inputs as the opener sends them, and the choice it closes with. */
   function mountDiff(inputs: { preview: typeof preview; maxBackups: number }) {
-    const close = vi.fn();
-    TestBed.configureTestingModule({ providers: [{ provide: DIALOG_REF, useValue: { close } }] });
     const f = TestBed.createComponent(ConfigDiffDialog);
     f.componentRef.setInput('preview', inputs.preview);
     f.componentRef.setInput('maxBackups', inputs.maxBackups);
     f.detectChanges();
-    return { f, d: f.nativeElement as HTMLElement, close };
+    return { f, d: f.nativeElement as HTMLElement, c: f.componentInstance };
   }
 
-  it('the diff dialog shows hunks with symbols and words, notes, and closes with the choice', () => {
-    const { d, close } = mountDiff({ preview, maxBackups: 10 });
+  it('the diff dialog shows hunks with symbols and words and notes, and declares Cancel', () => {
+    const { d, c } = mountDiff({ preview, maxBackups: 10 });
     expect(text(d.querySelector('.counts'))).toContain('+1');
     expect(d.querySelectorAll('table')).toHaveLength(2);
     expect(text(d)).toContain('Removed:old');
@@ -80,25 +78,21 @@ describe('config parts', () => {
     expect(text(d)).toContain('The list of changes is cut off');
     expect(text(d)).toContain('Warning: Odd key.');
     expect(text(d)).toContain('does not need to restart');
-    const cancel = byText<HTMLButtonElement>(d, 'button', 'Cancel')!;
-    expect(cancel.hasAttribute('data-dialog-close')).toBe(true);
-    cancel.click();
-    expect(close).toHaveBeenCalledWith();
+    expect(c.dialogActions().find((a) => a.id === 'cancel')?.kind).toBe('dismiss');
   });
 
-  it('the diff dialog says when no lines changed', () => {
-    const { d, close } = mountDiff({ preview: { ...preview, diff: { hunks: [], added: 0, removed: 0, truncated: false }, changedKeys: ['runner.capacity'], restartNeeded: true }, maxBackups: 3 });
+  it('the diff dialog says when no lines changed', async () => {
+    const { d, c } = mountDiff({ preview: { ...preview, diff: { hunks: [], added: 0, removed: 0, truncated: false }, changedKeys: ['runner.capacity'], restartNeeded: true }, maxBackups: 3 });
     expect(text(d)).toContain('No lines changed');
     expect(text(d)).toContain('Changes: runner.capacity');
     expect(text(d)).toContain('the last 3 are kept');
-    const save = byText<HTMLButtonElement>(d, 'button', 'Save and apply')!;
-    expect(save.hasAttribute('data-default')).toBe(true);
-    save.click();
-    expect(close).toHaveBeenCalledWith(true);
+    const save = c.dialogActions().find((a) => a.id === 'save')!;
+    expect(save).toMatchObject({ kind: 'answer', label: 'Save and apply', role: 'primary' });
+    expect(save.kind === 'answer' && (await save.answer(new AbortController().signal))).toBe(true);
   });
 
   it('opens as a window of its own and answers with the choice', async () => {
-    const openDialog = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(undefined);
+    const openDialog = vi.fn().mockResolvedValueOnce(answered(true)).mockResolvedValueOnce(DISMISSED);
     expect(await reviewConfigChanges({ openDialog }, { preview, maxBackups: 10 })).toBe(true);
     expect(openDialog).toHaveBeenCalledWith('pc.config-diff', { preview, maxBackups: 10 });
     expect(await reviewConfigChanges({ openDialog }, { preview, maxBackups: 10 })).toBe(false);
