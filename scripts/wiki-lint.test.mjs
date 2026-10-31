@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -146,12 +147,22 @@ test('a steward-log citation by clock time is an error; by line number it passes
   assert.deepEqual(lint({ 'one.md': page('2026-10-20', '[a]', '- The runner starts at 14:33 [two](two.md)\n') }).errors, []);
 });
 
-test('a rules source is a file, or a git ref:path, or unreadable', () => {
-  const { rules } = wiki({});
+test('a rules source is a file, or a git ref:path (read from a temp repository), or unreadable', () => {
+  const { rules, dir } = wiki({});
   assert.equal(readRulesSource(rules).text, RULES);
   assert.equal(readRulesSource('no/such/file.md'), null);
-  assert.equal(readRulesSource('no-such-ref-xyz:docs/rules.md', dirname(fileURLToPath(import.meta.url))), null);
-  assert.match(readRulesSource('HEAD:docs/rules.md', dirname(fileURLToPath(import.meta.url))).text, /# Paddock rules/);
+  // A throwaway repository, so the test does not depend on the checkout it runs in (a `git archive` copy has no .git).
+  const repo = mkdtempSync(join(tmpdir(), 'wiki-lint-git-'));
+  roots.push(repo);
+  const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repo, stdio: 'ignore' });
+  git('init', '-q');
+  writeFileSync(join(repo, 'rules.md'), RULES);
+  git('add', 'rules.md');
+  git('commit', '-q', '-m', 'rules');
+  assert.equal(readRulesSource('HEAD:rules.md', repo).text, RULES);
+  assert.equal(readRulesSource('no-such-ref-xyz:rules.md', repo), null);
+  assert.equal(readRulesSource('HEAD:nothing.md', repo), null);
+  assert.equal(readRulesSource('HEAD:rules.md', dir), null); // not a git work tree: skipped, not an error
 });
 
 test('the real docs/wiki passes against docs/rules.md and the engineering rules (stale pages only warn)', () => {

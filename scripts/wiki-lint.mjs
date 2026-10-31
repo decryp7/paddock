@@ -202,7 +202,10 @@ export function lintWiki({ wikiDir, rules = [], today, maxAge = MAX_AGE_DAYS }) 
   return { errors, warnings };
 }
 
-/** One rules source: a file, or `<ref>:<path>` from git. Returns `{ name, text }` or null when it cannot be read. */
+/**
+ * One rules source: a file, or `<ref>:<path>` read by `git show` run in `cwd` (the repository; honours GIT_DIR, and a copy made
+ * by `git archive` has none, so a ref source is then skipped). Returns `{ name, text }` or null when it cannot be read.
+ */
 export function readRulesSource(spec, cwd = process.cwd()) {
   if (existsSync(spec)) return { name: spec, text: readFileSync(spec, 'utf8') };
   if (!/^[^/][^:]*:[^:]+$/.test(spec)) return null;
@@ -226,7 +229,7 @@ export function main(argv, { out = console.log, err = console.error } = {}) {
   if (existsSync(er)) specs.push(er);
   const rules = [];
   for (const spec of specs) {
-    const src = readRulesSource(spec, repo);
+    const src = readRulesSource(spec, process.cwd());
     if (src) rules.push(src);
     else if (given.includes(spec)) err(`error cannot read rules source ${spec}`);
   }

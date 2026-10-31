@@ -14,9 +14,9 @@ apps onto them. Status as of origin/main `233c1339b`. Steward-log citations are 
 - Rule 56 is not in `docs/rules.md` on main; it is on branch `origin/docs/rule-logs-explain-failures` at `ef8f52349` and was approved for the next
   shared batch. Source: src: `git show origin/docs/rule-logs-explain-failures:docs/rules.md`; src: `merge-steward.md:702, 707`.
 - ADR 0036 (logging for root cause) is approved at `021dc3c8d` on branch `origin/docs/adr-logging-root-cause` and queued in the docs batch; it is not on
-  main yet. Source: src: `git show origin/docs/adr-logging-root-cause:docs/adr/0036-logging-for-root-cause.md`; src: coordinator note of 2026-10-31 (approved, queued); src: `merge-steward.md:712, 714`.
-- The audit behind the ADR found that no shipped app's bundle could find a root cause from its logs; the user decided: Dyno gets
-  D6 in 1.0, a 20 MB, 7 day, 4 MB bundle budget, Info as the default level, and each app replaces its own logger before its next tag. Source: src: `merge-steward.md:708`.
+  main yet. Source: src: `git show origin/docs/adr-logging-root-cause:docs/adr/0036-logging-for-root-cause.md`; src: `merge-steward.md:715` (approved, docs batch queued).
+- The audit behind the ADR found that no shipped app's bundle could find a root cause from its logs; the user's decisions on
+  the Dyno set, the bundle budget, the default level and the logger replacement are in the ADR's Decisions (user, 2026-10-31) section. Source: src: `git show origin/docs/adr-logging-root-cause:docs/adr/0036-logging-for-root-cause.md` (Decisions section); src: `merge-steward.md:708`.
 - The ADR lists work packages WP-1 to WP-11 (dedupe, OS banner, proc and ipc events, jobs events, a 4 MB log window WP-6a, the secret scanner,
   conformance checks C63 to C65, per-app adoption WP-9, cost measurement WP-10, merging rule 56 first WP-11). Source: src: `git show origin/docs/adr-logging-root-cause:docs/adr/0036-logging-for-root-cause.md` (Work packages).
 - The user also asked for logs for CI and tooling failures, and for rules 56 and ER-27 to cover them; ER-27 to ER-29 are on engineering-rules
