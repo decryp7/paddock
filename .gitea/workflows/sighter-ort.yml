@@ -1,5 +1,3 @@
-# DRAFT, NOT YET APPROVED: a workflow file is a shared integration point (AGENTS.md); the integrator reviews and merges it.
-#
 # Sighter's ONNX Runtime builds (stage-2 plan SW5, ADR 0001 decision 4 and P5): one job per variant builds the pinned ONNX
 # Runtime with telemetry compiled out, static, Release (apps/sighter/scripts/ort/build-ort.sh: CMake's telemetry switches
 # and the compile flags checked, the merged library byte-checked), links and runs the minimal `ort` program on it
