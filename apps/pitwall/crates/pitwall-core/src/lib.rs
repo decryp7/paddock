@@ -10,6 +10,8 @@
 //! - Security and privacy: [`privacy`] (the download allow-list, ADR 0001), [`keys`] and [`limits`] (ADR 0007).
 //! - State: [`config`] (versioned settings), [`metrics`], [`events`], [`usage`], [`discovery`], [`mgmt`] (the UI's
 //!   wire contract), [`tasks`] (versioned task prompts), [`tokens`], [`cache`].
+//! - The tray popup: [`widgets`] (the closed widget catalogue of the popup, what each widget shows and the rules behind it,
+//!   on the shared `paddock-widgets`, family ADR 0035).
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod affinity;
@@ -50,6 +52,7 @@ pub mod tokens;
 pub mod update_state;
 pub mod updates;
 pub mod usage;
+pub mod widgets;
 
 #[cfg(test)]
 mod testing;
