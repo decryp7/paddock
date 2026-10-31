@@ -33,16 +33,42 @@ function executableOf(command, bundleDir) {
   return command.split(/\s/)[0];
 }
 
+/** Every process whose command line is the spec's program (and args pattern), forks included. */
+function matchingSpec(procs, spec, bundleDir) {
+  const exe = `${bundleDir}/Contents/MacOS/${spec.name}`;
+  const re = spec.argsPattern ? new RegExp(spec.argsPattern) : null;
+  return procs.filter((p) => {
+    const e = executableOf(p.command, bundleDir);
+    if (e !== exe && e !== spec.name) return false;
+    return !re || re.test(p.command.slice(e.length));
+  });
+}
+
 /**
  * The live processes of one declared process spec: the installed bundle's Contents/MacOS/<name>, with the optional args pattern.
+ * A helper that launchd starts from an SMAppService plist (`BundleProgram`) shows the bare program name as its command line
+ * (`dyno-agent run`, measured on macOS 26.6.2), not the bundle path; such a bare `<name>` counts as the bundle's process too, or a
+ * check would not see the login item's agent at all. The guest is a throw-away VM, so no other program has that name.
  * @param {ReturnType<typeof parsePs>} procs
  * @param {{name:string, argsPattern?:string}} spec
  * @param {string} bundleDir e.g. /Applications/Dyno.app
  */
 export function instancesOf(procs, spec, bundleDir) {
-  const exe = `${bundleDir}/Contents/MacOS/${spec.name}`;
-  const re = spec.argsPattern ? new RegExp(spec.argsPattern) : null;
-  return procs.filter((p) => executableOf(p.command, bundleDir) === exe && (!re || re.test(p.command.slice(exe.length))));
+  const matching = matchingSpec(procs, spec, bundleDir);
+  // A process the program forked itself (same program, its pid as parent) still shows the parent's command line until it execs
+  // (measured on macOS 26.6.2: a helper's transient fork): not a second instance of the process.
+  const pids = new Set(matching.map((p) => p.pid));
+  return matching.filter((p) => !pids.has(p.ppid));
+}
+
+/** How long a fork of the helper may still show the parent's command line before it counts as one that never exec'd (seconds). */
+export const FORK_EXEC_GRACE_SEC = 10;
+
+/** The processes `instancesOf` leaves out as forks of their own program (same command line, the parent's pid as parent), per spec. */
+export function forkedChildren(procs, spec, bundleDir) {
+  const matching = matchingSpec(procs, spec, bundleDir);
+  const pids = new Set(matching.map((p) => p.pid));
+  return matching.filter((p) => pids.has(p.ppid));
 }
 
 /** Names of the config's processes that run from the bundle in this snapshot, with their pids: the compact evidence line. */
@@ -53,6 +79,9 @@ export function describeTree(procs, config, bundleDir) {
       const parent = procs.find((q) => q.pid === p.ppid);
       lines.push(`${spec.name} pid ${p.pid} age ${p.etime} parent ${p.ppid}${p.ppid === 1 ? ' (launchd)' : parent ? ` (${parent.command.split(/\s/)[0].split('/').pop()})` : ' (gone)'}`);
     }
+  }
+  for (const spec of config.processes) {
+    for (const p of forkedChildren(procs, spec, bundleDir)) lines.push(`${spec.name} pid ${p.pid} age ${p.etime} forked by pid ${p.ppid} (not counted as another ${spec.name}; shown, not hidden)`);
   }
   return lines.length ? lines : ['(none of the app\'s processes)'];
 }
@@ -79,6 +108,16 @@ export function judgeSnapshot(procs, config, bundleDir, want) {
       ok: countOk,
       detail: `${spec.name}: ${found.length} running (allowed ${min}..${max}); ${found.map((p) => `pid ${p.pid}`).join(', ') || 'none'}`,
     });
+    if (want.running) {
+      for (const p of forkedChildren(procs, spec, bundleDir)) {
+        const stuck = p.ageSec > FORK_EXEC_GRACE_SEC;
+        checks.push({
+          id: `fork:${spec.name}:${p.pid}`,
+          ok: !stuck,
+          detail: `${spec.name} pid ${p.pid} forked by pid ${p.ppid}: ${stuck ? `never exec'd after ${p.ageSec} s, still the parent's command line (a stuck fork)` : `${p.ageSec} s old, not counted as another ${spec.name}`}`,
+        });
+      }
+    }
     if (!want.running || spec.role === 'app') continue;
     for (const p of found) {
       const viaApp = (spec.parents ?? ['app']).includes('app') && appPids.has(p.ppid);
@@ -151,7 +190,7 @@ export function parseLaunchctlPrint(text) {
   const t = String(text ?? '');
   const field = (re) => re.exec(t)?.[1] ?? null;
   const pid = field(/^\s*pid = (\d+)\s*$/m);
-  return { state: field(/^\s*state = (\S+)\s*$/m), pid: pid === null ? null : Number(pid), program: field(/^\s*program = (.+?)\s*$/m) };
+  return { state: field(/^\s*state = (.+?)\s*$/m), pid: pid === null ? null : Number(pid), program: field(/^\s*program = (.+?)\s*$/m) };
 }
 
 /**

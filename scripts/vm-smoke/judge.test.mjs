@@ -36,6 +36,22 @@ test('instancesOf matches the installed bundle executable and its args, not a CL
   assert.deepEqual(instancesOf(p, config.processes[0], BUNDLE).map((x) => x.pid), [10]);
 });
 
+test('instancesOf counts the login item agent that launchd starts with the bare program name (BundleProgram)', () => {
+  const p = ps([
+    [10, 1, '00:30', APP],
+    [20, 1, '00:31', 'dyno-agent run'],
+    [21, 1, '00:05', 'dyno-agent service status'],
+    [22, 1, '00:05', 'vim dyno-agent'],
+    [23, 1, '00:05', 'dyno-agent-helper run'],
+  ]);
+  assert.deepEqual(instancesOf(p, config.processes[1], BUNDLE).map((x) => x.pid), [20]);
+  const r = judgeSnapshot(p, config, BUNDLE, { running: true, loginService: true });
+  assert.ok(r.ok, JSON.stringify(r.checks));
+  // Two agents, one from the bundle path (the app's child) and one bare (launchd's): a duplicate, and it is seen.
+  const two = judgeSnapshot(ps([[10, 1, '00:30', APP], [11, 10, '00:29', `${AGENT} run`], [20, 1, '00:31', 'dyno-agent run']]), config, BUNDLE, { running: true, loginService: true });
+  assert.equal(two.checks.find((c) => c.id === 'count:dyno-agent').ok, false);
+});
+
 test('judgeSnapshot passes one app with one agent whose parent is the app', () => {
   const r = judgeSnapshot(ps([[10, 1, '00:30', APP], [11, 10, '00:29', `${AGENT} run`]]), config, BUNDLE, { running: true });
   assert.equal(r.ok, true, JSON.stringify(r.checks));
@@ -101,6 +117,11 @@ test('describeTree prints pid, age and parent for the evidence', () => {
   assert.deepEqual(describeTree([], config, BUNDLE), ["(none of the app's processes)"]);
 });
 
+test('parseLaunchctlPrint reads a two-word state as launchd prints it for a waiting job (spawn scheduled)', () => {
+  const t = 'gui/501/net.decryptology.dyno.agent = {\n\tactive count = 0\n\tpath = (submitted by smd.87)\n\tstate = spawn scheduled\n\tlast exit code = 0\n}\n';
+  assert.equal(parseLaunchctlPrint(t).state, 'spawn scheduled');
+});
+
 test('parseLaunchctlPrint reads state, pid and program; a missing job gives nulls', () => {
   const text = 'gui/501/net.decryptology.dyno.agent = {\n\tactive count = 1\n\tprogram = /Applications/Dyno.app/Contents/MacOS/dyno-agent\n\tstate = running\n\tpid = 1360\n}\n';
   assert.deepEqual(parseLaunchctlPrint(text), { state: 'running', pid: 1360, program: '/Applications/Dyno.app/Contents/MacOS/dyno-agent' });
@@ -157,4 +178,34 @@ test('every app config lists an app process, only known keys, and helpers whose 
     if (c.loginService) assert.match(c.loginService.label, /^net\.decryptology\./);
   }
   assert.ok(seen.includes('dyno'), `configs found: ${seen}`);
+});
+
+test('a process the helper itself forked (same program, its own pid as parent) is not a second helper', () => {
+  // Measured in the VM (2026-10-31, step 8): launchd's agent 666 forks a child that still shows the agent's command line until it
+  // execs; the judge counted it as a second agent whose parent (666) is "not allowed".
+  const p = ps([
+    [458, 1, '01:03', APP],
+    [666, 1, '00:24', 'dyno-agent run'],
+    [739, 666, '00:01', 'dyno-agent run'],
+    [740, 666, '00:01', `${AGENT} run`],
+  ]);
+  assert.deepEqual(instancesOf(p, config.processes[1], BUNDLE).map((x) => x.pid), [666]);
+  const v = judgeSnapshot(p, config, BUNDLE, { running: true, loginService: true });
+  assert.ok(v.checks.every((c) => c.ok), JSON.stringify(v.checks));
+  assert.deepEqual(peakCounts([p], config, BUNDLE)['dyno-agent'], 1);
+  // Two real agents (neither is the other's child) are still two.
+  const two = ps([[458, 1, '01:03', APP], [666, 1, '00:24', 'dyno-agent run'], [700, 458, '00:10', `${AGENT} run`]]);
+  assert.deepEqual(instancesOf(two, config.processes[1], BUNDLE).map((x) => x.pid), [666, 700]);
+});
+
+test('a fork of the helper is shown in the evidence, and one that never execs fails the snapshot instead of being dropped silently', () => {
+  // A helper's transient fork shows the parent's command line until it execs: not a second helper, but not invisible either.
+  const young = ps([[458, 1, '01:03', APP], [666, 1, '00:24', 'dyno-agent run'], [739, 666, '00:01', 'dyno-agent run']]);
+  assert.deepEqual(instancesOf(young, config.processes[1], BUNDLE).map((x) => x.pid), [666]);
+  assert.ok(describeTree(young, config, BUNDLE).some((l) => /dyno-agent pid 739 .*forked by pid 666/.test(l)), describeTree(young, config, BUNDLE).join('\n'));
+  assert.ok(judgeSnapshot(young, config, BUNDLE, { running: true, loginService: true }).ok);
+  // Still the same command line a minute later: it never exec'd (a stuck fork, a second agent in disguise).
+  const stuck = ps([[458, 1, '01:03', APP], [666, 1, '01:24', 'dyno-agent run'], [739, 666, '01:00', 'dyno-agent run']]);
+  const v = judgeSnapshot(stuck, config, BUNDLE, { running: true, loginService: true });
+  assert.ok(!v.ok && v.checks.some((c) => !c.ok && /never exec/.test(c.detail) && /739/.test(c.detail)), JSON.stringify(v.checks));
 });
