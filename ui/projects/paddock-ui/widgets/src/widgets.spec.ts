@@ -736,6 +736,37 @@ describe('pd-widget-chooser', () => {
     expect(document.activeElement).toBe(q(f, '[data-preset-delete="mine"]'));
   });
 
+  it('balances the keyboard hint so no word is left alone on the last line', async () => {
+    const f = await setup();
+    const text = q(f, '.pd-wc-hint-text')!;
+    expect(text.textContent).toContain('hold Alt with');
+    expect(getComputedStyle(text).textWrap).toMatch(/balance|pretty/);
+  });
+
+  it('shows a bottom fade on the add list only while there is more to scroll', async () => {
+    const f = await setup();
+    const list = q(f, '.pd-wc-addlist')!;
+    expect(list.tabIndex).toBe(0);
+    // The test DOM has no layout: the box is stubbed (100 px tall holding 300 px of rows).
+    let top = 0;
+    let content = 300;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, get: () => 100 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => content });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => (top = v) });
+    list.dispatchEvent(new Event('scroll'));
+    await settle(f);
+    expect(q(f, '.pd-wc-fade')).not.toBeNull();
+    top = 200;
+    list.dispatchEvent(new Event('scroll'));
+    await settle(f);
+    expect(q(f, '.pd-wc-fade')).toBeNull();
+    top = 0;
+    content = 100;
+    list.dispatchEvent(new Event('scroll'));
+    await settle(f);
+    expect(q(f, '.pd-wc-fade')).toBeNull();
+  });
+
   it('writes the Option glyph and name on a Mac', async () => {
     TestBed.overrideProvider(KEY_PLATFORM, { useValue: 'mac' });
     const f = await setup();
