@@ -969,3 +969,15 @@ clean runner; a leftover `ui/dist` in the working trees had hidden it. **Rule:**
 proved by building that app's installers (`<app>-release.yml` with gates on and the bundle built) before it lands on
 main (rule 54). The ci-actions test now checks that every release workflow whose app imports `@decryp7/paddock-ui`
 builds the UI.
+
+## A test server in the runner's process is deaf while the runner waits synchronously (2026-10-31, Spotter)
+The Windows update test failed every case: the installed old Spotter reported "timeout: connect" for the test feed, while
+`Test-NetConnection` and `curl.exe` in the guest reached it. The feed was an HTTPS server in the same Node process as the
+runner, and the runner waited for each guest job with `spawnSync` for up to 15 minutes. With the event loop blocked the
+kernel still accepted the TCP connection, but no TLS handshake came, and ureq counts the handshake against its connect
+timeout. The probes passed because they ran while the runner was not blocked. A probe binary with Spotter's own
+`paddock-download` transport in the same desktop session, and the old build against a feed in its own process, connected
+in milliseconds; a host test that fetches from the feed inside a `spawnSync` call hung until killed. **Rule:** a fake
+server a test drives runs in its own process (or the runner never blocks while the system under test may call it); a
+"connect" timeout over TLS can be a server that accepted but never answered, so check the server's event loop before the
+client's network stack. The feed now runs in a child process (`scripts/vm-smoke/update-feed.mjs`) with a test for this.

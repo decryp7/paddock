@@ -11,7 +11,7 @@ const CA_IN_GUEST = '/Volumes/My Shared Files/stage/ca.pem';
 export class UpdateTest {
   /**
    * @param {import('./gui.mjs').GuiCheck} check  the GUI check (guest, AX helpers, steps)
-   * @param {{ setFeedCase(id: string): void, feedLog(): string[], clearFeedLog(): void }} feed  the host's local HTTPS feed
+   * @param {{ setCase(id: string): Promise<void>, feedLog(): Promise<string[]>, clearFeedLog(): Promise<void> }} feed  the host's local HTTPS feed (update-feed.mjs)
    * @param {{ old: string, new: string }} plan
    */
   constructor(check, feed, plan) {
@@ -63,8 +63,8 @@ export class UpdateTest {
     const checks = [];
     const before = await this.installedVersion();
     const startedPids = await this.pids();
-    this.feed.clearFeedLog();
-    this.feed.setCase(cs.id);
+    await this.feed.clearFeedLog();
+    await this.feed.setCase(cs.id);
     const opened = await this.openUpdates();
     checks.push({ ok: opened, detail: opened ? 'Help > Check for updates… opened the Updates window' : 'the Updates window did not open' });
     if (!opened) { await this.c.shot(`${cs.id}-no-window`); return this.c.step(title, checks); }
@@ -84,7 +84,7 @@ export class UpdateTest {
     checks.push({ ok: await this.button('Download'), detail: 'pressed Download' });
     const done = await this.waitState(cs.failed ? ['failed'] : ['ready']);
     await this.c.shot(`${cs.id}-after-download`);
-    const log = this.feed.feedLog();
+    const log = await this.feed.feedLog();
     checks.push({ ok: log.some((l) => /latest\.json/.test(l)), detail: 'the feed saw the manifest request' });
     checks.push({ ok: log.some((l) => /\.app\.tar\.gz( |$)/.test(l)) === cs.tarballRequested, detail: `the feed ${cs.tarballRequested ? 'served' : 'did not serve'} the update file (${log.length} request(s))` });
     if (cs.failed) {
