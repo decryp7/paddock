@@ -65,7 +65,10 @@ async function prepare(page: Page, theme: 'dark' | 'light', mock = 'macos'): Pro
  * Lands the page's clock on one fixed time and holds it there: the mock's live values are a function of the clock, and a running clock
  * moves them by the real time the page took to load, so the light and the dark run would show different numbers.
  */
+const frozen = new WeakSet<Page>();
 async function freezeClock(page: Page): Promise<void> {
+  if (frozen.has(page)) return;
+  frozen.add(page);
   const target = FROZEN + 300_000;
   const now = await page.evaluate(() => Date.now());
   if (now < target) await page.clock.runFor(target - now);
@@ -92,7 +95,14 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
       await page.getByRole('button', { name: 'Expand Rust build (cargo)' }).click();
       await page.locator('[role=row][data-key^="p"]').first().click();
       await expect(page.getByRole('complementary', { name: 'Process details' }).getByText('Command line')).toBeVisible();
-      await page.clock.runFor(1_000);
+      // The selected row and the pane's "Now" are two reads of the same process: with the clock held they are the same second's sample, so select
+      // again after the hold (another row, then this one) to read the pane at the held time.
+      await freezeClock(page);
+      await page.locator('[role=row][data-key^="p"]').nth(1).click();
+      await page.clock.runFor(100);
+      await page.locator('[role=row][data-key^="p"]').first().click();
+      await expect(page.getByRole('complementary', { name: 'Process details' }).getByText('Command line')).toBeVisible();
+      await page.clock.runFor(100);
     },
   },
   {
@@ -304,8 +314,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
   {
     name: 'tray',
     path: '/#/tray',
-    // Tall enough for the whole default popup: the real popup scrolls when the screen is short, but the picture shows every card.
-    size: { width: 440, height: 820 },
+    size: { width: 440, height: 660 },
     ready: async (page) => void (await expect(page.getByRole('button', { name: /Open Dyno/ })).toBeVisible()),
   },
 ];
@@ -331,8 +340,7 @@ for (const theme of ['dark', 'light'] as const) {
         // tray window's root is `html.pd-tray`; the shot fails if the backdrop did not apply (a renamed root would leave it plain).
         const wall = theme === 'dark' ? 'linear-gradient(160deg, #262a33 0%, #3b414d 100%)' : 'linear-gradient(160deg, #c3c7cf 0%, #e1e3e8 100%)';
         await page.addStyleTag({
-          // The real popup stops at --pd-tray-max-height (520 px) and scrolls; the picture lifts that so every card of the default layout is whole.
-          content: `html.pd-tray { background: ${wall} !important; --pd-tray-max-height: 780px; }
+          content: `html.pd-tray { background: ${wall} !important; }
             html.pd-tray body { padding: 34px 40px 0 !important; }
             #mac-menubar { position: fixed; inset: 0 0 auto 0; height: 24px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font: 13px -apple-system, 'Helvetica Neue', Arial, sans-serif; color: ${theme === 'dark' ? '#f2f2f5' : '#1d1d1f'}; background: rgb(${theme === 'dark' ? '20 20 24 / 55%' : '255 255 255 / 55%'}); backdrop-filter: blur(20px); z-index: 0; }
             #mac-menubar span { margin-right: 14px; } #mac-menubar b { margin-right: 14px; } #mac-menubar .right { display: flex; align-items: center; } #mac-menubar .right span { margin: 0 0 0 14px; }`,

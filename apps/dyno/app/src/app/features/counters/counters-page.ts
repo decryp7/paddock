@@ -40,7 +40,7 @@ import { MatMenuModule } from '@angular/material/menu';
       </header>
 
       <div class="bar" role="group" aria-label="Counters toolbar">
-        <dy-search-field label="Search counters" placeholder="Search counters, e.g. disk queue" [value]="store.query()" (valueChange)="onSearch($event)" />
+        <dy-search-field class="wide" label="Search counters" placeholder="Search counters, for example disk queue" [value]="store.query()" (valueChange)="onSearch($event)" />
         <span class="spacer"></span>
         <button type="button" matButton="outlined" [matMenuTriggerFor]="setsMenu"><dy-icon name="layers" /> Sets @if (store.sets().length) { <span class="count num">{{ store.sets().length }}</span> }</button>
         <pd-segmented-control label="Range" [options]="rangeSegs" [value]="store.minutes() + ''" (valueChange)="store.setMinutes(+$event)" />
@@ -218,6 +218,8 @@ import { MatMenuModule } from '@angular/material/menu';
     :host { display: block; }
     .page { display: grid; gap: var(--sp-3); align-content: start; }
     .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; min-height: 44px; }
+    /* The placeholder names an example, so the field is wide enough to show all of it. */
+    .bar dy-search-field.wide { flex-basis: 360px; max-width: 400px; }
     .count { margin-left: 4px; padding: 0 6px; border-radius: var(--r-pill); background: var(--surface-active); color: var(--text-2); font-size: var(--fs-xs); }
     .namebar { display: flex; gap: var(--sp-2); align-items: center; }
     .cols { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: var(--sp-3); align-items: start; }

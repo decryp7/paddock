@@ -79,11 +79,14 @@ export class MenuBarItems implements OnInit {
   private queue: Promise<void> = Promise.resolve();
 
   private editRow(id: string, change: (now: Placement<MenuBarItem>) => MenuBarItem | null): void {
-    this.queue = this.queue.then(async () => {
-      const now = this.view()?.layout.placements.find((x) => x.id === id);
-      const widget = now ? change(now) : null;
-      if (now && widget) await this.edit({ replace: { id, widget } });
-    });
+    // A failed edit is reported by `edit` itself; whatever else throws must not stop the edits queued behind it.
+    this.queue = this.queue
+      .then(async () => {
+        const now = this.view()?.layout.placements.find((x) => x.id === id);
+        const widget = now ? change(now) : null;
+        if (now && widget) await this.edit({ replace: { id, widget } });
+      })
+      .catch(() => undefined);
   }
 
   protected setMetric(p: Placement<MenuBarItem>, title: string): void {

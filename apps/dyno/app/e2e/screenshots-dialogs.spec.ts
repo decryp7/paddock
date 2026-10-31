@@ -8,11 +8,21 @@ const UI = '../../../ui/projects/paddock-ui/shell';
 const CONTRACTS = dialogContracts('src/app/generated/dialog-contracts.ts', ...['about', 'confirm'].map((p) => `${UI}/${p}/generated/dialog-contracts.ts`));
 const OUT = process.env['DIALOG_SHOTS_DIR'] ?? '';
 const PLATFORMS = { mac: { platform: 'MacIntel', ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/130 Safari/537.36' }, win: { platform: 'Win32', ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36' } } as const;
-const FIXTURES: Record<string, unknown> = {
-  ...Object.fromEntries(Object.entries(DIALOG_FIXTURES).map(([id, list]) => [id, list[0]])),
-  // The contract fixture carries a user name and an address to prove they are removed, which leaves "Slack crashed for at": a text that reads well once redacted.
-  'dy.web-search': { text: 'Slack crashed with EXC_BAD_ACCESS on macOS 27', subject: 'Slack' },
+const BASE: Record<string, unknown> = Object.fromEntries(Object.entries(DIALOG_FIXTURES).map(([id, list]) => [id, list[0]]));
+/** What a dialog is opened with in the picture: the contract fixtures prove redaction with a user name and an address, which leaves odd text. */
+const OVERRIDES: Record<'mac' | 'win', Record<string, unknown>> = {
+  mac: {
+    'dy.web-search': { text: 'Slack crashed with EXC_BAD_ACCESS on macOS 27', subject: 'Slack' },
+    'dy.file-hash': { source: { path: '/Applications/Slack.app/Contents/MacOS/Slack' }, name: 'Slack' },
+  },
+  win: {
+    'dy.web-search': { text: 'Slack crashed with 0xC0000005 on Windows 11', subject: 'Slack' },
+    'dy.file-hash': { source: { path: 'C:\\Users\\alex\\AppData\\Local\\slack\\slack.exe' }, name: 'Slack' },
+  },
 };
+/** The path typed into What is locking this file: each frame shows its own system's. */
+const LOCKED_PATH = { mac: '~/Projects/dyno/build.log', win: 'C:\\Users\\alex\\Projects\\dyno\\build.log' } as const;
+const fixtureFor = (id: string, os: 'mac' | 'win'): unknown => OVERRIDES[os][id] ?? BASE[id] ?? {};
 const CAP = 0.75;
 /** What shows that a dialog has its content (not the loading skeleton): the shot waits for it, then for the refit it causes. */
 const LOADED: Record<string, string> = {
@@ -35,14 +45,16 @@ test.describe('Dyno dialog screenshots', () => {
           try {
             const page = await context.newPage();
             // The mock machine is the platform the frame shows (About reports its system).
-            await page.goto(dialogWindowUrl(id, FIXTURES[id] ?? {}, { title: id, query: `?mock=${os === 'mac' ? 'macos' : 'windows'}` }));
+            await page.goto(dialogWindowUrl(id, fixtureFor(id, os as 'mac' | 'win'), { title: id, query: `?mock=${os === 'mac' ? 'macos' : 'windows'}` }));
             await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
             if (id === 'dy.lockers') {
               // The empty state is a form and one line in a tall window: the picture shows what the dialog is for, a found list.
-              await page.getByRole('textbox').fill('~/Projects/dyno/build.log');
+              await page.getByRole('textbox').fill(LOCKED_PATH[os as 'mac' | 'win']);
               await page.getByRole('button', { name: 'Find' }).click();
               await expect(page.locator('li strong').first()).toBeVisible();
             }
+            // A rule's name is a value a person typed, not the placeholder (which is muted).
+            if (id === 'dy.alert-rule') await page.getByRole('textbox', { name: 'Name' }).fill('High CPU while idle');
             const loaded = LOADED[id];
             if (loaded) {
               await expect(page.locator(loaded).first()).toBeVisible({ timeout: 15_000 });

@@ -135,15 +135,15 @@ impl IssueCentre {
                 }
                 return Ok(false);
             }
+            // Everything that can fail is done before the flag goes up; setting it and making the guard that brings it down are the last
+            // two statements of the critical section, so there is no moment in which the flag is up and nothing will lower it.
+            let since = st.last_scan.map_or(now().minus(FIRST_DAYS * DAY), |l| l.minus(OVERLAP_MS));
             st.scanning = true;
-            // The guard is made in the same critical section that sets the flag, so there is no moment in which the flag is up and
-            // nothing will bring it down. It only holds references; it takes the lock when it is dropped, after `st` is gone.
             let running = RunningRead {
                 state: &self.state,
                 ended: &self.ended,
             };
-            let t = now();
-            break (st.last_scan.map_or(t.minus(FIRST_DAYS * DAY), |l| l.minus(OVERLAP_MS)), running);
+            break (since, running);
         };
         let until = now();
         // The read stays "running" until its results are stored: the flag comes down (and the waiters are woken) only when `running`
