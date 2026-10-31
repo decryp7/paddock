@@ -70,14 +70,16 @@
 //!   identity at check time must be the scanned one before anything is removed.
 //! - `worktrees` lists hidden folders of `<repo>/target` as well (the `.ps1` listed them only under the home, with `-Force`).
 //!
-//! Open follow-ups: file identity on Windows (the comparison falls back to case-insensitive names; no dependency was added for
-//! file handles), and a Cargo-build-folder marker check before a whole-folder removal (see below).
+//! Open follow-up: file identity on Windows (the comparison falls back to case-insensitive names; no dependency was added for
+//! file handles). The Cargo-build-folder marker check is described below.
 //!
 //! Whole-folder removal (`cap`, and `worktrees --remove`) demands that the folder looks like a Cargo build folder: a regular
-//! file `CACHEDIR.TAG` or `.rustc_info.json` at its top level. Without one the folder is left alone (`not-cargo`), after the
-//! incremental caches went: the CI form says so and exits 0, the plain form exits 4 with a hint, `worktrees` lists the row as
-//! `not-cargo`. This departs from the scripts for safety (they removed any folder); the golden fixture carries a CACHEDIR.TAG
-//! and two cases record the departure by hand.
+//! file `CACHEDIR.TAG` or `.rustc_info.json` at its top level (a symlink does not count). Without one the folder is left alone
+//! (`not-cargo`). The plain form checks this before it removes anything: a folder over its cap without a marker exits 4 with a
+//! hint and nothing removed (the dry run predicts the same). The CI form removes the incremental caches, says the folder stays
+//! and exits 0. `worktrees` lists the row as `not-cargo` and exits 0 (a bulk listing; `cap` names one folder and exits 4). This
+//! departs from the scripts for safety (they removed any folder); the golden fixture carries a CACHEDIR.TAG and two cases
+//! record the departure by hand.
 //!
 //! No rule depends on time, so no clock is injected. The `.ps1` listing has no golden recorded from the real script (no
 //! PowerShell here); its rules are ported by reading and pinned by unit and integration tests only.

@@ -44,10 +44,15 @@ function tree(dir, prefix = '') {
 const mask = (text, root) => text.split(root).join('<ROOT>').replace(/ is \d+ \(cap/g, ' is <N> (cap').replace(/still \d+;/g, 'still <N>;');
 
 const result = {};
+// The cap the real script is run with to learn which tree the CI-form departure leaves. The cases ask for 100, where the
+// script would remove the whole folder after the caches; at 300 it stops after the incremental caches, which is the tree
+// `dev host prune` must leave when the folder stays. (The plain-form departure removes nothing, so it needs no probe.)
+const DEPARTURE_PROBE_CAP = '300';
 // INTENTIONAL DEPARTURES (ADR 0022 R5, review): `dev host prune` removes a whole folder only when it has a Cargo marker
 // (CACHEDIR.TAG or .rustc_info.json) at its top level; the real scripts remove any folder. A case with `departure` is
 // therefore not recorded from the scripts: its expected output is written by hand below. The incremental caches go as in the
-// script (the tree is the one the real script leaves when the cap is only just exceeded), and the folder stays.
+// script in the CI form (the tree is the one the real script leaves when the cap is only just exceeded), and the folder stays. The
+// plain form checks the marker first and removes nothing at all: its tree is the untouched fixture and it prints only the notice.
 for (const c of cases) {
   noMarker = !!c.noMarker;
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-prune-golden-')));
@@ -66,10 +71,10 @@ for (const c of cases) {
         symlinkSync('target-app-s1', join(probe, 'home/linkroot'));
         mkdirSync(join(probe, 'outside'));
         writeFileSync(join(probe, 'outside/canary'), 'x');
-        spawnSync('bash', [join(repo, 'tools/prune-build-folders.sh'), join(probe, c.folder), '300'], { env: { PATH: '/usr/bin:/bin', PADDOCK_PRUNE_UNIT: 'kb' }, encoding: 'utf8' });
+        if (c.mode !== 'plain') spawnSync('bash', [join(repo, 'tools/prune-build-folders.sh'), join(probe, c.folder), DEPARTURE_PROBE_CAP], { env: { PATH: '/usr/bin:/bin', PADDOCK_PRUNE_UNIT: 'kb' }, encoding: 'utf8' });
         result[c.name] = {
           exit: c.mode === 'plain' ? 4 : 0,
-          stdout: `prune: <ROOT>/${c.folder} is <N> (cap ${c.cap}); removing incremental caches\nprune: <ROOT>/${c.folder} is not a Cargo build folder (no CACHEDIR.TAG or .rustc_info.json); leaving it alone\nRun it on a Cargo target folder, or remove the folder yourself.\n`,
+          stdout: `${c.mode === 'plain' ? '' : `prune: <ROOT>/${c.folder} is <N> (cap ${c.cap}); removing incremental caches\n`}prune: <ROOT>/${c.folder} is not a Cargo build folder (no CACHEDIR.TAG or .rustc_info.json); leaving it alone\nRun it on a Cargo target folder, or remove the folder yourself.\n`,
           tree: tree(probe),
         };
       } finally {
