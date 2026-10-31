@@ -10,15 +10,16 @@ function seq(file, { title, desc, parts, script, pw = 152, gap }) {
   gap ??= Math.min(160, Math.floor((1464 - parts.length * pw) / (parts.length - 1)));
   const w = 96 + parts.length * pw + (parts.length - 1) * gap;
   const d = P({ title, kind: 'UML · Sequence diagram', desc, w });
-  const s = sequence(d, parts.map(([id, name, tech, role]) => ({ id, name, tech, role })), { pw, gap });
+  const s = sequence(d, parts.map(([id, name, tech, role]) => ({ id, name, tech, role })), { pw, gap, selfLeftOnLast: true });
   const idx = Object.fromEntries(parts.map((p, i) => [p[0], i]));
   const px = (id) => 48 + idx[id] * (pw + gap) + pw / 2;
-  const stack = {}; const bars = []; const held = {};
+  const stack = {}; const bars = []; const held = {}; let arrow;
   for (const [k, ...a] of script) {
     if (k === 'm') {
       const span = Math.abs(idx[a[0]] - idx[a[1]]) * (pw + gap) - 24;
       if (tw(a[2], 12) + 8 > span) console.warn(`${file}: label "${a[2]}" is ${tw(a[2], 12)} px, room ${span}`);
       const y0 = s.y;
+      arrow = y0 + 24;
       s.msg(a[0], a[1], a[2], { reply: !!a[3] });
       if (!a[3]) (stack[a[1]] ??= []).push(y0 + 24);
       else {
@@ -26,7 +27,7 @@ function seq(file, { title, desc, parts, script, pw = 152, gap }) {
         if (st?.length) bars.push([a[0], st.length - 1, st.pop(), s.y - 10]);
       }
     } else if (k === 's') s.self(a[0], a[1], a[2]);
-    else if (k === 'b') held[a[0]] = s.y;
+    else if (k === 'b') held[a[0]] = arrow ?? s.y;
     else if (k === 'x') bars.push([a[0], 0, held[a[0]], s.y - 10]);
     else if (k === 'o') s.open(a[0], a[1]);
     else if (k === 'e') s.else(a[0]);
@@ -129,7 +130,7 @@ seq('uml-seq-chat-cache', {
     ['m', 'sv', 'ap', 'Events', 1],
     ['m', 'ap', 'cl', 'Answer, `X-Pitwall-Cache: miss`', 1],
     ['m', 'ap', 'ca', '`put(key, answer)` (only a completed answer)'],
-    ['s', 'ca', 'Writer thread saves it; least-recently-used entries go over the size cap'],
+    ['s', 'ca', 'Writer thread saves it; least-recently-used entries are dropped when the cache is over its size cap'],
     ['c'],
     ['n', 'ap', 'Usage records cacheHits, cacheMisses, prefixTokens (cache_n) and savedTokens. A hit is not queued, loads no model and is recorded as a request.', 400],
   ],

@@ -42,9 +42,10 @@ export function cls(d, id, x, y, w, { name, stereotype, attrs = [], ops = [], ro
 
 /**
  * Sequence diagram. parts: [{ id, name, tech, role }]. Returns an object whose methods advance a cursor downwards;
+ * `selfLeftOnLast` (default off) draws a self-message on the last lifeline to its left, so a wide note keeps the page narrow.
  * call done() last: it draws the lifelines behind everything and returns the bottom y.
  */
-export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48 } = {}) {
+export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48, selfLeftOnLast = false } = {}) {
   const px = (i) => x0 + i * (pw + gap) + pw / 2;
   const idx = Object.fromEntries(parts.map((p, i) => [p.id, i]));
   const headH = Math.max(...parts.map((p) => d.fit(pw, { name: p.name, tech: p.tech })));
@@ -69,12 +70,12 @@ export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48 } = 
       d.line([xa, ly], [xb, ly], { dash: reply, arrow: reply ? 'open' : 'block' });
       y = ly + 16;
     },
-    /** A message to itself: the loop and its text go right, or left on the last lifeline so the page keeps its width. */
+    /** A message to itself: the loop and its text go right (left on the last lifeline with `selfLeftOnLast`). */
     self(p, label, maxw) {
       const slack = maxw === undefined ? 8 : 24; // a text given its own width gets room so the browser never re-wraps it
       maxw ??= pw + gap - 44;
       const x = px(idx[p]);
-      const left = idx[p] === parts.length - 1 && parts.length > 1;
+      const left = selfLeftOnLast && idx[p] === parts.length - 1 && parts.length > 1;
       const lines = wrap(label, 12, maxw);
       const lh = lines.length * 16;
       const h = Math.max(28, lh + 4);

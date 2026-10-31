@@ -11,6 +11,7 @@ Conventional Commits; one semver tag for the whole repo.
 ### Pitwall: Offline mode is removed
 - Offline mode is removed; settings saved with it still load. The Settings > Network switch, the "Offline mode" mark on the dashboard and the offline messages are gone, and `pitwall status` no longer prints "(offline mode)". Pitwall's other network behaviour is unchanged: it reaches only Hugging Face and GitHub, only for what you ask for (and the model update check you turn on), and model serving stays local.
 - `pitwall pull`, search and file lists no longer report "server not running" (exit 3) when the network is down: they exit 4 with a message naming the host that could not be reached.
+- Developer note: the diagram kit's `sequence()` takes an opt-in `selfLeftOnLast` that draws a self-message on the last lifeline to its left; Pitwall's diagrams use it, other apps' diagrams are unchanged.
 - Developer note: new management `ErrorCode::Upstream` (wire `upstream`, HTTP 502, CLI exit 4) for an outside host that could not be reached, refused or sent bad data; a blocked download URL is now `badRequest`. `api.types.ts` and the Tauri 502 fallback mirror it.
 - Developer note: `paddock-pitwall`'s `Health` has no `offline` field (an old server's extra field is ignored).
 
