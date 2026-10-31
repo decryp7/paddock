@@ -96,7 +96,7 @@ export async function renderFramed(component: Type<unknown>, options: FramedOpti
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [DialogFrame],
   host: { '(keydown)': 'frame().handleKey($event)' },
-  template: `<pd-dialog-frame dialogId="t.framed" [kind]="kind()" [modality]="modality()" state="ready" [content]="content()" (answered)="answers.push($event.value)" (dismissed)="dismissals = dismissals + 1"><ng-container #host /></pd-dialog-frame>`,
+  template: `<pd-dialog-frame dialogId="t.framed" [kind]="kind()" [modality]="modality()" state="ready" [content]="content()" [contentView]="contentView()" (answered)="answers.push($event.value)" (dismissed)="dismissals = dismissals + 1"><ng-container #host /></pd-dialog-frame>`,
 })
 export class FramedContentHost {
   /** What the frame answered, in order. */
@@ -106,6 +106,7 @@ export class FramedContentHost {
   readonly kind = signal<DialogKind>('tool');
   readonly modality = signal<DialogModality>('modeless');
   readonly content = signal<DialogContent | null>(null);
+  readonly contentView = signal<{ detectChanges(): void } | null>(null);
   readonly frame = viewChild.required(DialogFrame);
   readonly host = viewChild.required('host', { read: ViewContainerRef });
 }
@@ -121,6 +122,7 @@ export function createFramed<T>(component: Type<T>, options: { readonly kind?: D
   fixture.componentInstance.modality.set(options.modality ?? 'modeless');
   fixture.detectChanges();
   const ref = fixture.componentInstance.host().createComponent(component);
+  fixture.componentInstance.contentView.set(ref.changeDetectorRef);
   fixture.componentInstance.content.set(ref.instance as DialogContent);
   fixture.detectChanges();
   return Object.assign(fixture, { instance: ref.instance });
