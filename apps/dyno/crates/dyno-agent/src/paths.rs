@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct Dirs {
     root: PathBuf,
+    /// Where the dated logs are when that is not `<root>/logs` (the app's log folder in an install).
+    log_folder: Option<PathBuf>,
 }
 
 impl Dirs {
@@ -26,12 +28,15 @@ impl Dirs {
             };
             found.unwrap_or_else(|| std::env::temp_dir().join("Dyno"))
         });
-        Dirs { root }
+        Dirs { root, log_folder: None }
     }
 
     /// A folder chosen by the caller.
     pub fn at(root: impl Into<PathBuf>) -> Dirs {
-        Dirs { root: root.into() }
+        Dirs {
+            root: root.into(),
+            log_folder: None,
+        }
     }
 
     /// The data folder.
@@ -62,6 +67,18 @@ impl Dirs {
     /// The lock only one agent per data folder can hold ([`crate::instance`]).
     pub fn instance_lock(&self) -> PathBuf {
         self.root.join("agent.lock")
+    }
+
+    /// The same folders with the dated logs read from `folder` (set once by `run` from the install's log places).
+    pub fn with_log_folder(mut self, folder: PathBuf) -> Dirs {
+        self.log_folder = Some(folder);
+        self
+    }
+
+    /// The folder the agent's and the app's dated logs are in: the one `run` named, else this folder's own [`Dirs::logs`], so a
+    /// harness on a temporary folder never reads the machine's real logs.
+    pub fn log_folder(&self) -> PathBuf {
+        self.log_folder.clone().unwrap_or_else(|| self.logs())
     }
 
     /// The agent's log folder.
