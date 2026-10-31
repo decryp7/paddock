@@ -46,7 +46,6 @@ const TONE_STATUS: Record<Tone, PdStatus> = { info: 'info', warning: 'warning', 
             [span]="row.span"
             [state]="row.state"
             [template]="row.widget?.template ?? null"
-            [calm]="row.widget?.pdWidgetCalm() ?? false"
             [live]="row.info?.refresh === 'live'"
             [now]="now()"
             [metaText]="row.meta"
