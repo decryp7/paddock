@@ -156,13 +156,22 @@ export async function snapshotPanel(el: HTMLElement | null, target: Size, raster
     const clone = cloneForSnapshot(el);
     if (!clone) return null;
     const url = svgUrl(snapshotSvg(snapshotDocument(el, clone, box.width, box.height), box.width, box.height));
-    for (const s of [scale, scale / 2]) {
-      const png = await withTimeout(rasterize(url, box.width, box.height, s), timeoutMs);
-      if (!png || !png.startsWith('data:image/png;base64,')) return null;
-      if (png.length <= SNAPSHOT_MAX_BYTES) return png;
-    }
-    return null;
+    return await rasterizeFitting(url, box, scale, rasterize, timeoutMs);
   } catch {
     return null;
   }
+}
+
+/**
+ * Draws `url` at `scale`, and once more at half that when the PNG exceeds {@link SNAPSHOT_MAX_BYTES}: the PNG data URL,
+ * or null when the rasterizer fails, is too slow or yields something that is not a PNG. Pure of the DOM, so the
+ * size and failure rules are testable without building a snapshot document.
+ */
+export async function rasterizeFitting(url: string, box: Size, scale: number, rasterize: Rasterize, timeoutMs = SNAPSHOT_TIMEOUT_MS): Promise<string | null> {
+  for (const s of [scale, scale / 2]) {
+    const png = await withTimeout(rasterize(url, box.width, box.height, s), timeoutMs);
+    if (!png || !png.startsWith('data:image/png;base64,')) return null;
+    if (png.length <= SNAPSHOT_MAX_BYTES) return png;
+  }
+  return null;
 }
