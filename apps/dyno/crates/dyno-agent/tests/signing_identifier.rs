@@ -9,6 +9,12 @@ fn the_agent_keeps_a_dotted_identifier_when_it_is_re_signed_the_way_tauri_does()
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("dyno-agent");
     std::fs::copy(env!("CARGO_BIN_EXE_dyno-agent"), &copy).unwrap();
+    // A 0-byte program is signed as a generic file named `<file>-<SHA-1 of the content>`; say so instead of a puzzling identifier.
+    assert!(
+        std::fs::metadata(&copy).unwrap().len() > 0,
+        "{} is empty: something overwrote the linked program (the app's build script once copied its sidecar placeholder there)",
+        env!("CARGO_BIN_EXE_dyno-agent")
+    );
     #[allow(clippy::disallowed_methods)]
     let sign = std::process::Command::new("/usr/bin/codesign")
         .args(["--force", "-s", "-"])
