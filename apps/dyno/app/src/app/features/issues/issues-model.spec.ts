@@ -36,6 +36,12 @@ describe('issues model', () => {
     expect(collapsed.map((r) => r.kind)).toEqual(['day', 'day', 'issue']);
     expect(collapsed[0]).toMatchObject({ open: false });
     expect(dayLabel(NOW - 5 * 86_400_000, NOW)).toMatch(/17/);
+    // Yesterday is the calendar day before, also late on a 25-hour day (clocks set back): 24 hours before 23:30 is still
+    // today then. 2026's 25-hour days in Auckland (CI's second zone), Berlin and New York.
+    for (const [y, m, d] of [[2026, 3, 5], [2026, 9, 25], [2026, 10, 1]] as const) {
+      expect(dayLabel(new Date(y, m, d - 1, 23, 50).getTime(), new Date(y, m, d, 23, 30).getTime())).toBe('Yesterday');
+      expect(dayLabel(new Date(y, m, d, 0, 30).getTime(), new Date(y, m, d, 23, 30).getTime())).toBe('Today');
+    }
   });
 
   it('words the trend and the sources', () => {

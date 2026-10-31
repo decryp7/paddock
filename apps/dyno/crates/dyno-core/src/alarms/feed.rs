@@ -73,7 +73,7 @@ pub struct Observation {
 impl Observation {
     /// The same observation with the person's own name for the rule in its title.
     pub fn titled(mut self, name: &str) -> Observation {
-        self.title = format!("{name} is past its limit");
+        self.title = format!("{name} is over its limit");
         self
     }
 
@@ -154,7 +154,7 @@ pub fn from_threshold(name: &str, metric: Metric, severity: Severity, value: f64
         name: name.into(),
         subject: String::new(),
         severity,
-        title: format!("{name} is past its limit"),
+        title: format!("{name} is over its limit"),
         detail: format!("The value is {value:.1}; the limit is {limit:.1}."),
         value: Some(value),
         metric: Some(metric),
@@ -192,7 +192,12 @@ pub fn alarms_on(kind: crate::issues::IssueKind) -> bool {
 
 /// A throttling episode that has lasted long enough to count; `active` is false once it ended. Heat is a warning (it can
 /// damage a machine over time), the other causes are information.
-pub fn from_throttle(e: &crate::throttle::ThrottleEpisode, active: bool, confidence: crate::hardware::Confidence) -> Observation {
+pub fn from_throttle(
+    e: &crate::throttle::ThrottleEpisode,
+    active: bool,
+    confidence: crate::hardware::Confidence,
+    zone: &dyn crate::time::LocalZone,
+) -> Observation {
     use crate::throttle::ThrottleCause;
     Observation {
         source: Source::Throttling,
@@ -209,8 +214,9 @@ pub fn from_throttle(e: &crate::throttle::ThrottleEpisode, active: bool, confide
             e.cause.label().to_lowercase()
         ),
         detail: format!(
-            "Throttling since {} with {} confidence. Open Throttling for the cause and what could help.",
-            crate::report::utc_time(e.start),
+            "Throttling since {} ({}) with {} confidence. Open Throttling for the cause and what could help.",
+            crate::report::local_time(e.start, zone),
+            crate::time::offset_label(e.start, zone),
             confidence.word()
         ),
         value: Some(f64::from(e.avg_lost_percent)),
@@ -283,7 +289,7 @@ pub fn from_baseline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::alarms::{AlarmEngine, AlarmState};
+    use crate::alarms::{AlarmConfig, AlarmEngine, AlarmState};
 
     fn alert(kind: AlertKind, title: &str) -> Alert {
         Alert {
@@ -298,7 +304,7 @@ mod tests {
 
     #[test]
     fn alerts_become_one_off_alarms_that_expire() {
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), crate::time::FixedZone::shared(0));
         let o = from_alert(&alert(AlertKind::LowDisk, "C: is almost full"));
         assert_eq!(
             (o.rule().as_str(), o.key().as_str()),
@@ -327,7 +333,7 @@ mod tests {
 
     #[test]
     fn thresholds_raise_and_return() {
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), crate::time::FixedZone::shared(0));
         let up = from_threshold("gpu-limit", Metric::GpuLoad, Severity::Warning, 97.0, 90.0, true);
         let c = e.apply(up.into_event(Timestamp(1)));
         assert_eq!(c[0].alarm.current_value, Some(97.0));
@@ -350,7 +356,7 @@ mod tests {
         assert_eq!(o.severity, Severity::Critical);
         assert!(o.one_off && o.active);
         assert_eq!(o.detail, "I/O error on disk3");
-        let mut e = AlarmEngine::default();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), crate::time::FixedZone::shared(0));
         e.apply(o.into_event(Timestamp(5)));
         assert_eq!(e.alarms().len(), 1);
         assert!(alarms_on(IssueKind::BadShutdown));
@@ -387,7 +393,14 @@ mod tests {
             peak_lost_percent: 40.0,
             peak_temperature_c: Some(99.0),
         };
-        let o = from_throttle(&e, true, Confidence::High);
+        let o = from_throttle(&e, true, Confidence::High, &crate::time::FixedZone::UTC);
+        assert!(o.detail.starts_with("Throttling since 1970-01-01 00:00 (UTC) "), "{}", o.detail);
+        let east = from_throttle(&e, true, Confidence::High, &crate::time::FixedZone(480));
+        assert!(
+            east.detail.starts_with("Throttling since 1970-01-01 08:00 (UTC+08:00) "),
+            "{}",
+            east.detail
+        );
         assert_eq!((o.rule().as_str(), o.key().as_str()), ("throttling:cpu", "throttling:cpu"));
         assert_eq!(o.severity, Severity::Warning);
         assert!(
@@ -401,6 +414,7 @@ mod tests {
             },
             false,
             Confidence::Medium,
+            &crate::time::FixedZone::UTC,
         );
         assert_eq!(power.severity, Severity::Info);
         assert!(!power.active);

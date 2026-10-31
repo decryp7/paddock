@@ -4,9 +4,10 @@
 use super::ExtrasCentre;
 use crate::agent::{lock, now, Shared};
 use dyno_core::backup::{observation, BackupReport, BackupSettings, BackupStatus, BackupTool};
-use dyno_platform::extras::{backup_statuses, BackupEnv};
+use dyno_platform::extras::{backup_status_of, backup_tools_present, BackupEnv};
 use dyno_platform::issues::ToolRunner;
 use dyno_platform::toolpath::{PathResolver, PathRunner};
+use paddock_jobs::{JobContext, JobError, Phase};
 use std::sync::Arc;
 
 /// The last report and whether a check is running.
@@ -51,27 +52,44 @@ impl BackupEnv for Env<'_> {
     }
 }
 
-/// The report: the last one, or (when `refresh` or nothing was ever checked) a new check is started in the background and
-/// the report says `checking`. The caller polls `Request::Backup` until `checking` is false.
-pub fn report(shared: &Arc<Shared>, refresh: bool) -> BackupReport {
+/// The report: the last one, or (when nothing was ever checked) a new check is started in the background and the report
+/// says `checking`. The caller polls `Request::Backup` until `checking` is false. A check the person asks for is the job
+/// [`refresh`].
+pub fn report(shared: &Arc<Shared>) -> BackupReport {
     let x = &shared.extras;
     let start = {
         let mut slot = lock(&x.backup);
-        let want = (refresh || slot.report.checked_at.is_none()) && !slot.checking;
+        let want = slot.report.checked_at.is_none() && !slot.checking;
         if want {
             slot.checking = true;
         }
         want
     };
     if start {
-        let s = shared.clone();
-        let spawned = std::thread::Builder::new()
-            .name("dyno-backup-check".into())
-            .spawn(move || run_check(&s));
-        if spawned.is_err() {
-            lock(&x.backup).checking = false;
+        let spawned = first_check(shared.clone(), |s| {
+            let _ = run_check(&s, None);
+        });
+        if !spawned {
+            end_check(x);
         }
     }
+    snapshot(x)
+}
+
+/// Runs the first check on its own thread as live work (rule 52): the Backups page polls until it fills. Returns whether
+/// the thread started.
+fn first_check<T: Send + 'static>(state: T, check: impl FnOnce(T) + Send + 'static) -> bool {
+    std::thread::Builder::new()
+        .name("dyno-backup-check".into())
+        .spawn(move || {
+            dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
+            check(state);
+        })
+        .is_ok()
+}
+
+/// The report and whether a check runs, without starting one.
+pub fn peek(x: &ExtrasCentre) -> BackupReport {
     snapshot(x)
 }
 
@@ -92,27 +110,93 @@ pub fn check_now(shared: &Arc<Shared>) {
         }
         slot.checking = true;
     }
-    run_check(shared);
+    let _ = run_check(shared, None);
 }
 
-fn run_check(shared: &Arc<Shared>) {
+/// The check the person asked for, as the job `job`: one step per backup tool, Cancel between tools, and the report is
+/// replaced only when every tool was read. A check that is already running (the scheduled one) is waited for, not repeated.
+pub fn refresh(shared: &Arc<Shared>, job: &JobContext) -> Result<BackupReport, JobError> {
     let x = &shared.extras;
-    let (settings, off) = {
+    if lock(&x.backup).checking {
+        job.phase(Phase::discovering("waiting", "Waiting for the backup check that is running"));
+        // The waker goes in BEFORE the lock is taken: a token that is already cancelled runs it on the spot, and it takes this
+        // same lock. The end of that check wakes the wait, and so does Cancel: no polling.
+        let (state, done) = (x.backup.clone(), x.backup_done.clone());
+        let _wake = job.cancel_token().on_cancel(move || {
+            let _held = lock(&state);
+            done.notify_all();
+        });
+        let mut slot = lock(&x.backup);
+        while slot.checking {
+            job.check()?;
+            slot = x.backup_done.wait(slot).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        job.check()?;
+    }
+    {
+        let mut slot = lock(&x.backup);
+        if slot.checking {
+            // Another check started in between: wait for it as well rather than run two.
+            drop(slot);
+            return refresh(shared, job);
+        }
+        slot.checking = true;
+    }
+    run_check(shared, Some(job))?;
+    Ok(snapshot(x))
+}
+
+/// Marks the check as over without a new report (it failed to start or was cancelled) and wakes whoever waits for it.
+fn end_check(x: &ExtrasCentre) {
+    lock(&x.backup).checking = false;
+    x.backup_done.notify_all();
+}
+
+/// Reads every tool and, when that completed, swaps the report in. `checking` must be set by the caller; it is cleared
+/// on every way out.
+fn run_check(shared: &Arc<Shared>, job: Option<&JobContext>) -> Result<(), JobError> {
+    let x = &shared.extras;
+    let (settings, zone) = {
         let core = lock(&shared.core);
-        (core.settings.backup.clone(), core.settings.alarms.utc_offset_minutes)
+        (core.settings.backup.clone(), core.zone.clone())
     };
     let resolver = lock(&x.resolver).clone();
     let t = now();
-    // One tool failing or panicking must not stop the others, nor leave `checking` set.
-    let statuses = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let env = Env {
-            resolver: &resolver,
-            settings: &settings,
-            scripted: lock(&x.backup_tools).clone(),
-        };
-        backup_statuses(&env, x.os(), t, off, settings.stale_after_hours)
-    }))
-    .unwrap_or_default();
+    let env = Env {
+        resolver: &resolver,
+        settings: &settings,
+        scripted: lock(&x.backup_tools).clone(),
+    };
+    let tools = backup_tools_present(&env, x.os());
+    if let Some(j) = job {
+        j.phase(Phase::items("tools", "Checking backup tools", tools.len() as u64));
+    }
+    let mut statuses = Vec::with_capacity(tools.len());
+    for tool in tools {
+        if let Some(j) = job {
+            if let Err(e) = j.check() {
+                end_check(x);
+                return Err(e);
+            }
+        }
+        // One tool failing or panicking must not stop the others, nor leave `checking` set. One tool run cannot be
+        // interrupted; it ends at its own timeout.
+        let _step = job.map(|j| j.uncancellable("A backup tool is being asked; Cancel takes effect when it has answered."));
+        if let Ok(s) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            backup_status_of(&env, tool, t, zone.as_ref(), settings.stale_after_hours)
+        })) {
+            statuses.push(s);
+        }
+        if let Some(j) = job {
+            j.add(1);
+        }
+    }
+    if let Some(j) = job {
+        if let Err(e) = j.check() {
+            end_check(x);
+            return Err(e);
+        }
+    }
     if settings.alert_when_stale {
         raise_alarms(shared, &statuses, t);
     }
@@ -124,6 +208,8 @@ fn run_check(shared: &Arc<Shared>) {
         login_path_used: resolver.login_path_used(),
     };
     slot.checking = false;
+    x.backup_done.notify_all();
+    Ok(())
 }
 
 fn raise_alarms(shared: &Shared, statuses: &[BackupStatus], t: dyno_core::time::Timestamp) {
@@ -134,5 +220,22 @@ fn raise_alarms(shared: &Shared, statuses: &[BackupStatus], t: dyno_core::time::
             core.alarms.observe(&core.store, o, t)
         };
         crate::sampler::push_alarm_changes(shared, changes);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Rule 52 (coordinator re-review, 2026-10-30): the first check fills the screen the Backups page polls for, so it runs
+    /// as live work.
+    #[test]
+    fn the_first_check_runs_as_live_work() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        assert!(super::first_check(tx, |tx| {
+            let _ = tx.send(dyno_platform::priority::current_role());
+        }));
+        let role = rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("the check ran (a hang guard)");
+        assert_eq!(role, Some(dyno_platform::priority::ThreadRole::Live));
     }
 }

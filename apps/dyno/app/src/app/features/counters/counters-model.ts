@@ -46,7 +46,7 @@ export const UNIT_WORD: Record<CounterUnit, string> = {
 
 function plain(v: number): string {
   const a = Math.abs(v);
-  if (a >= 100 || Number.isInteger(v)) return Math.round(v).toLocaleString('en-US');
+  if (a >= 100 || Number.isInteger(v)) return Math.round(v).toLocaleString();
   return a >= 10 ? v.toFixed(1) : v.toFixed(2);
 }
 

@@ -3463,6 +3463,7 @@ dependencies = [
  "paddock-commands",
  "paddock-env",
  "paddock-workspace-hack",
+ "postcard",
  "proptest",
  "serde",
  "serde_json",
@@ -3713,10 +3714,12 @@ name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "log",
  "paddock-testkit",
  "paddock-workspace-hack",
  "sysinfo",
  "tempfile",
+ "thiserror 2.0.21",
  "windows-sys 0.61.2",
 ]
 

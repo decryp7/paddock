@@ -33,9 +33,9 @@ export default assertChromeForTesting(
     outputDir: './.angular/playwright-results',
     fullyParallel: false,
     workers: 1,
-    retries: process.env['CI'] ? 1 : 0,
-    // Flakes (passed only after a retry) are listed, never hidden.
-    reporter: [['list'], ['./projects/paddock-e2e/src/retried-reporter.ts']],
+    // A flake is fixed, not retried (rule 5, ER-12): a retry hides it and runs the test twice on every CI failure.
+    retries: 0,
+    reporter: [['list']],
     timeout: 120_000,
     use: {
       ...devices['Desktop Chrome'],
@@ -43,7 +43,7 @@ export default assertChromeForTesting(
       deviceScaleFactor: 1,
     },
     projects: [
-      { name: 'gallery', testMatch: ['gallery.spec.ts', 'data.spec.ts', 'view.spec.ts', 'material.spec.ts', 'grid-header.spec.ts'], use: { baseURL: `http://localhost:${PORT}` } },
+      { name: 'gallery', testMatch: ['gallery.spec.ts', 'data.spec.ts', 'view.spec.ts', 'material.spec.ts', 'grid-header.spec.ts', 'sunburst.spec.ts'], use: { baseURL: `http://localhost:${PORT}` } },
       { name: 'review', testMatch: ['contact-sheet.spec.ts', 'contact-sheet-x21.spec.ts', 'contact-sheet-x50.spec.ts', 'contact-sheet-x3x.spec.ts', 'contact-sheet-x51.spec.ts'] },
       // The documentation screenshots (e2e/screenshots.spec.ts, the kit's captureDocScreens): `SCREENSHOTS=1 npx playwright test --project=screenshots`.
       { name: 'screenshots', testMatch: SCREENSHOT_SPECS, use: { deviceScaleFactor: 2 } },
@@ -51,7 +51,7 @@ export default assertChromeForTesting(
       { name: 'workbench-demo', testMatch: /workbench-demo(-[a-z]+)?\.spec\.ts$/, use: { baseURL: `http://localhost:${WORKBENCH_DEMO_PORT}` } },
       ...(webkit
         ? [
-            { name: 'gallery-webkit', testMatch: ['gallery.spec.ts', 'data.spec.ts', 'view.spec.ts', 'grid-header.spec.ts'], use: { ...safari, baseURL: `http://localhost:${PORT}` } },
+            { name: 'gallery-webkit', testMatch: ['gallery.spec.ts', 'data.spec.ts', 'view.spec.ts', 'grid-header.spec.ts', 'sunburst.spec.ts'], use: { ...safari, baseURL: `http://localhost:${PORT}` } },
             { name: 'shell-demo-webkit', testMatch: /shell-demo(-[a-z0-9]+)?\.spec\.ts$/, use: { ...safari, baseURL: `http://localhost:${SHELL_DEMO_PORT}` } },
             { name: 'workbench-demo-webkit', testMatch: /workbench-demo(-[a-z]+)?\.spec\.ts$/, use: { ...safari, baseURL: `http://localhost:${WORKBENCH_DEMO_PORT}` } },
           ]

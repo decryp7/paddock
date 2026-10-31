@@ -1,9 +1,9 @@
 import { ChangeDetectionStrategy, Component, input, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Title } from '@angular/platform-browser';
-import { CommandService, defineCommand, defineKeybinding, msg, provideShellContext, SHELL_IDLE, SHELL_PORTS, ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { CommandService, ContributionRegistry, defineCommand, defineKeybinding, msg, provideShellContext, SHELL_IDLE, SHELL_PORTS, ShellContextHost } from '@decryp7/paddock-ui/shell';
 import { MemoryJobsBackend } from '@decryp7/paddock-ui/shell/jobs';
-import { KEY_PLATFORM } from '@decryp7/paddock-ui/shell/menu';
+import { KEY_PLATFORM, type NativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
 import { MemoryNotificationCentre, MemoryServiceHealth } from '@decryp7/paddock-ui/shell/notify';
 import { MockStartupBackend } from '@decryp7/paddock-ui/shell/startup';
 import { assertContributionsValid, settle } from '@decryp7/paddock-ui/shell/testing';
@@ -157,6 +157,24 @@ async function boot(options: { ro?: unknown; dock?: boolean; plan?: ExplorerPlan
   await settle(fixture);
   return { fixture, element: fixture.nativeElement as HTMLElement, dock, storage };
 }
+
+
+/** A desktop build's native menu port: it can quit, which is what puts Quit in the menu bar. */
+function quittingPort(quits: string[]): NativeMenuPort {
+  return { setAppMenu: () => Promise.resolve(), onMenu: () => Promise.resolve(() => undefined), quitApp: () => Promise.resolve(void quits.push('quit')) };
+}
+
+describe('Quit in the workbench frame', () => {
+  it('is in the app menu with Mod+Q for an app with a native menu, and quits through the port', async () => {
+    const quits: string[] = [];
+    await boot({ extra: { nativeMenu: quittingPort(quits) } });
+    const registry = TestBed.inject(ContributionRegistry);
+    expect(registry.menus().filter((m) => m.menu === 'app' && m.command === 'pd.app.quit')).toHaveLength(1);
+    expect(registry.keybindings().find((k) => k.command === 'pd.app.quit')?.key).toBe('Mod+Q');
+    await (await TestBed.inject(ShellContextHost).load()).quitApp();
+    expect(quits).toEqual(['quit']);
+  });
+});
 
 describe('activity layout helpers', () => {
   it('fits the top buttons and keeps a slot for More', () => {

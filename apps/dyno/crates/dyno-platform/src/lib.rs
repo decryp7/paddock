@@ -32,6 +32,7 @@ pub mod toolpath;
 #[allow(unsafe_code)]
 pub mod unix_proc;
 pub mod volumes;
+pub mod zone;
 
 #[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
@@ -66,6 +67,8 @@ pub struct Platform {
     pub issues: Vec<Box<dyn dyno_core::issues::IssueSource>>,
     /// The network interfaces and the Wi-Fi network joined (network change events).
     pub links: Box<dyn dyno_core::ports::NetworkLinks>,
+    /// The user's local time zone (local days, quiet hours, maintenance windows).
+    pub zone: dyno_core::time::Zone,
 }
 
 /// The ports for the current OS.

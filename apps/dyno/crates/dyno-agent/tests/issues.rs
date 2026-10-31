@@ -3,13 +3,14 @@
 //! Issues (WP-06) and new and unusual programs (WP-07) end to end over the fake platform: scripted log sources, a real
 //! IPC connection and a real SQLite file in a temp folder. Nothing here reads the machine's own logs.
 
-use dyno_agent::cli::{ask, connect};
+use dyno_agent::cli::{ask, connect, run_job};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
-use dyno_core::issues::stats::day_start;
 use dyno_core::issues::{Issue, IssueKind, IssueSource, IssueSourceId, IssuesQuery, SourceState};
+use dyno_core::jobs::{JobOutput, JobSpec};
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{LiveDetail, Message, Reply, Request};
+use dyno_core::time::day_start;
 use dyno_core::time::{Timestamp, HOUR, MINUTE};
 use dyno_ipc::Peer;
 use dyno_platform::fake::{process, Fake};
@@ -109,12 +110,12 @@ fn crash(minutes_ago: i64, app: &str, key: &str) -> Issue {
     )
 }
 
-/// A crash early on the current local day (the agent's default offset is 0): the day's score counts it however close to
+/// A crash early on the current local day (the fake platform's zone is UTC): the day's score counts it however close to
 /// midnight the test runs, which "N minutes ago" does not.
 fn crash_today(order: i64, app: &str, key: &str) -> Issue {
     Issue::new(
         IssueSourceId::MacReports,
-        day_start(real_now(), 0).plus(order),
+        day_start(real_now(), &dyno_core::time::FixedZone::UTC).plus(order),
         IssueKind::AppCrash,
         app,
         "t",
@@ -125,12 +126,13 @@ fn crash_today(order: i64, app: &str, key: &str) -> Issue {
 
 fn overview(peer: &Peer<Message>, rescan: bool) -> dyno_core::issues::IssuesOverview {
     let query = IssuesQuery { days: 14 };
-    let req = if rescan {
-        Request::RescanIssues { query }
-    } else {
-        Request::Issues { query }
-    };
-    let Reply::Issues(o) = ask(peer, req).unwrap() else {
+    if rescan {
+        let JobOutput::Issues(o) = run_job(peer, JobSpec::RescanIssues { query }, Duration::from_secs(30)).unwrap() else {
+            panic!("issues")
+        };
+        return *o;
+    }
+    let Reply::Issues(o) = ask(peer, Request::Issues { query }).unwrap() else {
         panic!("issues")
     };
     *o

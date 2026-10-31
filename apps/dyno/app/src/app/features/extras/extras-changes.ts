@@ -1,4 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
+import type { Change } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatClock, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -6,12 +8,16 @@ import { ExtrasStore } from '../../state/extras.store';
 import { CHANGE_KIND_LABEL, CHANGE_WINDOWS, changeRows, changeTone, watchingNote } from './extras-model';
 import { EXTRAS_STYLES } from './extras-styles';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
-import { FullTextTip } from '../../shared/full-text-tip';
+
+interface ChangeLine extends Change {
+  readonly key: string;
+  readonly day: string;
+}
 
 /** What changed on this computer: installs, updates, new start-up items and setting changes, grouped by day. */
 @Component({
   selector: 'dy-extras-changes',
-  imports: [FullTextTip, SuSegmentedControl, AsyncState, Icon],
+  imports: [AsyncState, Icon, PdTable, PdCell, SuSegmentedControl],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Window">
@@ -28,37 +34,14 @@ import { FullTextTip } from '../../shared/full-text-tip';
             <span>No installs, updates, start-up items or setting changes were recorded. {{ watching() }}</span>
           </div>
         } @else {
-          <div class="tablewrap">
-            <table class="table tbl changes" aria-label="What changed">
-              <thead><tr><th class="time">Time</th><th class="kind">Kind</th><th>Change</th><th>Details</th></tr></thead>
-              <tbody>
-                @for (r of rows(); track r.key) {
-                  @if (r.kind === 'day') {
-                    <tr class="day"><td colspan="4"><strong>{{ r.label }}</strong><span class="faint cnt">{{ plural(r.count, 'change') }}</span></td></tr>
-                  } @else {
-                    <tr>
-                      <td class="time num muted">{{ clock(r.change.at) }}</td>
-                      <td class="kind"><span class="dot" [attr.data-tone]="tone(r.change.kind)" aria-hidden="true"></span>{{ kindLabel(r.change.kind) }}</td>
-                      <td><span class="ell" [dyFullText]="r.change.title">{{ r.change.title }}</span></td>
-                      <td class="muted"><span class="ell" [dyFullText]="r.change.detail">{{ r.change.detail }}</span></td>
-                    </tr>
-                  }
-                }
-              </tbody>
-            </table>
-          </div>
+          <pd-table [toolbar]="false" label="What changed" [rows]="rows()" [columns]="columns" [rowKey]="changeKey" [filterable]="false" [maxHeight]="620" groupBy="day">
+            <ng-template pdCell="kind" let-c><span class="dot" [attr.data-tone]="tone(c.kind)" aria-hidden="true"></span>{{ kindLabel(c.kind) }}</ng-template>
+          </pd-table>
         }
       }
     </dy-async>
   `,
-  styles: [
-    EXTRAS_STYLES,
-    `
-      .changes th.time, .changes td.time { width: 72px; }
-      .changes th.kind, .changes td.kind { width: 180px; }
-      .changes td:nth-child(3) { width: 38%; }
-    `,
-  ],
+  styles: [EXTRAS_STYLES],
 })
 export class ExtrasChanges implements OnInit {
   protected readonly store = inject(ExtrasStore);
@@ -66,10 +49,25 @@ export class ExtrasChanges implements OnInit {
   protected readonly windowSegs: SuSegment[] = CHANGE_WINDOWS.map((w) => ({ value: String(w.hours), label: w.label }));
   protected readonly state = this.store.changes;
   protected readonly data = computed(() => this.store.changes().data);
-  protected readonly rows = computed(() => {
+  /** The changes, each with the day it belongs to (the model builds the day headings; the table groups by them). */
+  protected readonly rows = computed<ChangeLine[]>(() => {
     const t = this.data();
-    return t ? changeRows(t.changes, t.to) : [];
+    const out: ChangeLine[] = [];
+    let day = '';
+    for (const r of t ? changeRows(t.changes, t.to) : []) {
+      if (r.kind === 'day') day = r.label;
+      else out.push({ ...r.change, key: r.key, day });
+    }
+    return out;
   });
+  protected readonly changeKey = (c: ChangeLine): string => c.key;
+  protected readonly columns: PdColumn<ChangeLine>[] = [
+    { key: 'day', header: 'Day', value: (c) => c.day, hidden: true, sortable: false },
+    { key: 'time', header: 'Time', value: (c) => c.at, text: (c) => formatClock(c.at), width: '72px', sortable: false },
+    { key: 'kind', header: 'Kind', value: (c) => CHANGE_KIND_LABEL[c.kind], width: '180px', sortable: false },
+    { key: 'title', header: 'Change', value: (c) => c.title, required: true, width: 'minmax(0, 1.4fr)', sortable: false },
+    { key: 'detail', header: 'Details', value: (c) => c.detail, width: 'minmax(0, 2fr)', hideBelow: 640, sortable: false },
+  ];
   protected readonly watching = computed(() => {
     const t = this.data();
     return t ? watchingNote(t.watchingSince, t.from, t.to) : '';

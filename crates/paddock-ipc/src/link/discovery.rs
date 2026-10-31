@@ -67,9 +67,16 @@ impl Discovery {
     }
 }
 
-/// Reads the discovery file at `path`, with `is_alive` deciding whether its process runs (`paddock_proc::is_alive` in
-/// apps; tests inject one).
-pub fn read(path: &Path, is_alive: impl Fn(u32) -> bool) -> Found {
+/// Whether the process `d` names still runs: its pid is held by a process that started before the file was written
+/// (`paddock_proc::ProcessId::of_recorded`). A pid handed on to a newer process makes the file stale (ADR 0033).
+pub fn is_running(d: &Discovery) -> bool {
+    paddock_proc::ProcessId::of_recorded(d.pid, d.started_ms)
+        .is_some_and(paddock_proc::ProcessId::is_alive)
+}
+
+/// Reads the discovery file at `path`, with `is_alive` deciding whether its process runs ([`is_running`] in apps; tests
+/// inject one).
+pub fn read(path: &Path, is_alive: impl Fn(&Discovery) -> bool) -> Found {
     let Ok(meta) = std::fs::metadata(path) else {
         return Found::Nothing;
     };
@@ -85,7 +92,7 @@ pub fn read(path: &Path, is_alive: impl Fn(u32) -> bool) -> Found {
     else {
         return Found::Nothing;
     };
-    if is_alive(d.pid) {
+    if is_alive(&d) {
         Found::Live(d)
     } else {
         Found::Stale(d)

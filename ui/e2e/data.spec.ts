@@ -1,5 +1,4 @@
-import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, test, type Page } from '@decryp7/paddock-e2e';
 
 // The data parts of paddock-ui (plan X21) in the gallery: the table's sorting, filter, keyboard, menus and virtual rows, the
 // chart wrapper over a real ECharts, and the forms helpers, in both themes, with axe and without horizontal scroll at 320 px.
@@ -19,8 +18,8 @@ for (const theme of THEMES) {
   test(`axe finds no violations in the table, chart and forms (${theme})`, async ({ page }) => {
     await open(page, theme);
     await page.locator('section[data-testid="chart"] canvas').first().waitFor();
-    const results = await new AxeBuilder({ page }).include('section[data-testid="table"]').include('section[data-testid="chart"]').include('section[data-testid="forms"]').withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
-    expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+    // Colours are read at rest: the field hints fade in over 300 ms (Material's subscript animation), and axe can read them half way.
+    expect(await axeViolations(page, { include: ['section[data-testid="table"]', 'section[data-testid="chart"]', 'section[data-testid="forms"]'] })).toEqual([]);
   });
 }
 
@@ -367,4 +366,30 @@ test('table: folding a group from the keyboard keeps the focus on its row after 
     await page.keyboard.press(key);
     await expect(focusedGroup, `after ${key}`).toHaveAttribute('aria-expanded', expanded);
   }
+});
+
+test('table: a tree grid has levels, and Right and Left unfold, enter and fold the rows', async ({ page }) => {
+  await open(page);
+  const tree = page.locator('[data-testid="table-tree"] [role=treegrid]');
+  await expect(tree).toBeVisible();
+  const row = (name: string) => tree.getByRole('row', { name: new RegExp(name) });
+  // "Report builder" starts folded: its renderer is not there; the other tops show their levels.
+  await expect(row('Report builder')).toHaveAttribute('aria-expanded', 'false');
+  await expect(row('Renderer')).toHaveCount(0);
+  await expect(row('Syslog service')).toHaveAttribute('aria-level', '1');
+  await expect(row('Collector')).toHaveAttribute('aria-level', '2');
+  await expect(row('Parser worker')).toHaveAttribute('aria-level', '3');
+  // Right unfolds the folded row, and on the unfolded row moves to its first child.
+  await row('Report builder').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(row('Report builder')).toHaveAttribute('aria-expanded', 'true');
+  await expect(row('Renderer')).toHaveAttribute('aria-level', '2');
+  await page.keyboard.press('ArrowRight');
+  await expect(row('Renderer')).toBeFocused();
+  // Left from a leaf goes up to its parent, and Left on an unfolded parent folds it.
+  await page.keyboard.press('ArrowLeft');
+  await expect(row('Report builder')).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(row('Report builder')).toHaveAttribute('aria-expanded', 'false');
+  await expect(row('Renderer')).toHaveCount(0);
 });

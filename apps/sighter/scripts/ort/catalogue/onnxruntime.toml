@@ -1,0 +1,38 @@
+# PLACEHOLDER PINS: every sha256 below is all zeros and every size is 1 until the first run of
+# .gitea/workflows/sighter-ort.yml publishes the archives; that run prints the real lines (<archive>.catalogue.txt).
+# check-catalogue.sh fails on a placeholder, so no app build or release can use this file as it is.
+#
+# Sighter's ONNX Runtime build per platform, the one a release links (stage-2 plan SW5, ADR 0001 decision 4, P5): built
+# by apps/sighter/scripts/ort/build-ort.sh with --no_telemetry, static, Release; published as a Gitea generic package.
+# Format: crates/paddock-runtime/src/catalogue.rs (one entry per platform key). The Windows CPU-only build is in
+# onnxruntime-cpu.toml (a catalogue has one entry per platform).
+format = 1
+name = "onnxruntime"
+version = "1.31.1-p1"
+source = "ONNX Runtime 1.31.1 (6af1a932e), built by Sighter's pipeline: --no_telemetry, static"
+license = "MIT"
+
+# build-ort.sh macos-arm64-coreml: CoreML EP, macOS 13.4 and later.
+[[platform]]
+key = "macos-aarch64"
+url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-onnxruntime/1.31.1-p1/onnxruntime-1.31.1-p1-macos-arm64-coreml.tar.gz"
+size = 1
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+# build-ort.sh windows-x64-directml: DirectML EP, static CRT (ADR 0032). DirectML.dll is not in the archive
+# (fetch-directml.sh; the DirectML gate P6 decides whether it ships).
+[[platform]]
+key = "windows-x86_64"
+url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-onnxruntime/1.31.1-p1/onnxruntime-1.31.1-p1-windows-x64-directml.tar.gz"
+size = 1
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+# build-ort.sh linux-x64-cpu: CPU only, for CI and tests (Sighter ships no Linux build).
+[[platform]]
+key = "linux-x86_64"
+url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-onnxruntime/1.31.1-p1/onnxruntime-1.31.1-p1-linux-x64-cpu.tar.gz"
+size = 1
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+# Windows arm64 with DirectML (stage-2 plan SW5) is not built yet: no arm64 runner; a cross build on the Windows x64 VM
+# is the candidate (docs/research/2026-10-ort-builds.md).

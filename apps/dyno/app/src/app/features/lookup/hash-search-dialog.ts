@@ -1,9 +1,10 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, input } from '@angular/core';
 import { DialogActionError, type DialogAction, type DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import type { HashSource } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
 import { formatBytes } from '../../shared/format';
 import { Icon } from '../../shared/icon';
+import { JobProgressCard } from '../../shared/job-progress';
 import { LookupStore } from '../../state/lookup.store';
 import { FullTextTip } from '../../shared/full-text-tip';
 
@@ -13,7 +14,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
  */
 @Component({
   selector: 'dy-hash-search-dialog',
-  imports: [FullTextTip, Icon],
+  imports: [FullTextTip, Icon, JobProgressCard],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
       <p class="subject"><strong>{{ name() }}</strong></p>
@@ -28,8 +29,12 @@ import { FullTextTip } from '../../shared/full-text-tip';
           </dd>
         </dl>
       } @else if (!store.error()) {
-        <div class="skeleton line" aria-busy="true" aria-label="Reading the file"></div>
-        <p class="wait">Reading the file…</p>
+        @if (store.hashJob(); as job) {
+          <dy-job-progress [progress]="job" (cancel)="store.cancelHash()" />
+        } @else {
+          <div class="skeleton line" aria-busy="true" aria-label="Reading the file"></div>
+          <p class="wait">Reading the file…</p>
+        }
       }
       @if (store.error(); as e) {
         <div class="err" role="alert"><dy-icon name="alert" /><span>{{ e.message }} @if (hint(); as t) {<small>{{ t }}</small>}</span></div>
@@ -52,7 +57,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
     .err small { display: block; color: var(--text-2); }
   `,
 })
-export class HashSearchDialog implements DialogContent<true>, OnInit {
+export class HashSearchDialog implements DialogContent<true>, OnInit, OnDestroy {
   /** Which program's file to read. */
   readonly source = input<HashSource | null>(null);
   /** The program's name, for the heading. */
@@ -80,6 +85,11 @@ export class HashSearchDialog implements DialogContent<true>, OnInit {
   ngOnInit(): void {
     this.store.reset();
     void this.load();
+  }
+
+  /** Closing the dialog stops reading a file that is still being read. */
+  ngOnDestroy(): void {
+    this.store.reset();
   }
 
   private load(): Promise<void> {

@@ -1,4 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import { PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
+import type { BundleFileInfo } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatBytes, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -6,7 +8,6 @@ import { DiagnosticsStore } from '../../state/diagnostics.store';
 import { middlePath, redactionRows, redactionTotal, sizeInKb } from './diagnostics-model';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
-import { FullTextTip } from '../../shared/full-text-tip';
 
 const NEVER = [
   'The contents of your documents or any file outside Dyno',
@@ -18,7 +19,7 @@ const NEVER = [
 /** The diagnostics bundle: a preview of what a bug-report zip contains and one button that asks where to save it. Nothing is sent anywhere. */
 @Component({
   selector: 'dy-diagnostics-page',
-  imports: [FullTextTip, MatTooltip, MatButton, MatIconButton, AsyncState, Icon],
+  imports: [AsyncState, Icon, PdTable, MatTooltip, MatButton, MatIconButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -28,7 +29,7 @@ const NEVER = [
           <p>A zip for a bug report. Made only when you ask, saved where you choose, never sent anywhere.</p>
         </div>
         <button type="button" matButton="filled" [disabled]="store.saving() || !store.preview()" (click)="store.save()">
-          <dy-icon name="file" />{{ store.saving() ? 'Saving…' : 'Save bundle...' }}
+          <dy-icon name="file" />{{ store.saving() ? 'Saving…' : 'Save bundle…' }}
         </button>
       </header>
 
@@ -62,20 +63,9 @@ const NEVER = [
                 <h2>Files</h2>
                 <button type="button" matIconButton class="refresh" aria-label="Refresh the preview" matTooltipPosition="left" [matTooltip]="'Refresh the preview'" (click)="store.loadPreview()"><dy-icon name="refresh" /></button>
               </div>
-              <table class="table">
-                <caption class="visually-hidden">Files in the diagnostics bundle</caption>
-                <colgroup><col class="c-path" /><col /><col class="c-size" /></colgroup>
-                <thead><tr><th>Path</th><th>What it holds</th><th class="r">Size (KB)</th></tr></thead>
-                <tbody>
-                  @for (f of p.files; track f.path) {
-                    <tr>
-                      <td><span class="mono ell" [matTooltip]="f.path">{{ short(f.path) }}</span></td>
-                      <td><span class="ell" [dyFullText]="f.description">{{ f.description }}</span></td>
-                      <td class="r">{{ kb(f.bytes) }}</td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
+              <div class="tablewrap">
+                <pd-table [toolbar]="false" label="Files in the diagnostics bundle" [rows]="p.files" [columns]="columns" [rowKey]="fileKey" [filterable]="false" [maxHeight]="480" />
+              </div>
             </section>
 
             <aside class="side">
@@ -118,9 +108,7 @@ const NEVER = [
     .cols { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--sp-4); align-items: start; }
     @media (max-width: 1180px) { .cols { grid-template-columns: minmax(0, 1fr); } }
     .files .card-head .refresh { margin-left: auto; }
-    .files .table { table-layout: fixed; margin-top: var(--sp-2); }
-    .c-path { width: 42%; }
-    .c-size { width: 104px; }
+    .tablewrap { margin: var(--sp-2) var(--sp-4) var(--sp-3); }
     .ell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .mono { font: 12px/1.4 var(--font-mono); }
     .side { display: grid; gap: var(--sp-4); }
@@ -140,6 +128,12 @@ export class DiagnosticsPage implements OnInit {
   protected readonly bytes = formatBytes;
   protected readonly short = middlePath;
   protected readonly kb = sizeInKb;
+  protected readonly fileKey = (f: BundleFileInfo): string => f.path;
+  protected readonly columns: PdColumn<BundleFileInfo>[] = [
+    { key: 'path', header: 'Path', value: (f) => f.path, truncate: 'middle', required: true, sortable: false, width: 'minmax(0, 1.2fr)' },
+    { key: 'what', header: 'What it holds', value: (f) => f.description, sortable: false, width: 'minmax(0, 2fr)', hideBelow: 520 },
+    { key: 'size', header: 'Size (KB)', value: (f) => f.bytes, text: (f) => sizeInKb(f.bytes), align: 'end', sortable: false, width: '104px' },
+  ];
   protected readonly files = computed(() => this.store.preview()?.files ?? []);
   protected readonly redactions = computed(() => {
     const p = this.store.preview();

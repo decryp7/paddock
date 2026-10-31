@@ -19,6 +19,33 @@ use std::time::{Duration, Instant};
 const CLOSE_GRACE: Duration = Duration::from_secs(3);
 #[cfg(test)]
 const CLOSE_GRACE: Duration = Duration::from_millis(600);
+/// The grace of a browser on the kept research profile: ending Chrome by force during its shutdown can lose cookies or a
+/// sign-in it is still writing, so it gets longer than the slowest exit measured under load (11.7 s; Paddock's
+/// docs/benchmarks.md, "paddock-chromium: Browser.close exit time").
+#[cfg(not(test))]
+const KEPT_CLOSE_GRACE: Duration = Duration::from_secs(20);
+#[cfg(test)]
+const KEPT_CLOSE_GRACE: Duration = Duration::from_millis(2000);
+
+/// The close grace for a browser on the kept profile (`kept`) or a throwaway one.
+fn close_grace_for(kept: bool) -> Duration {
+    if kept {
+        KEPT_CLOSE_GRACE
+    } else {
+        CLOSE_GRACE
+    }
+}
+
+/// How a window's browser is ended.
+enum Ending {
+    /// Gracefully within its own grace ([`close_grace_for`]).
+    Close,
+    /// Gracefully within this grace (Debrief is quitting: the teardown step has a limit).
+    Within(Duration),
+    /// At once.
+    Kill,
+}
+
 /// The shorter grace when Debrief itself is quitting (the teardown step has a limit).
 pub const QUIT_GRACE: Duration = Duration::from_millis(1200);
 /// Where a browser may come from, in order: the user's setting, the one Debrief installed, one found on the machine.
@@ -126,6 +153,11 @@ impl Session {
     /// Closes the browser (gracefully, then by force) and removes its throwaway profile.
     fn close(&self, grace: Duration) {
         crate::sync::lock(&self.chromium).close_gracefully(grace);
+    }
+
+    /// This browser's own close grace: longer on the kept research profile.
+    fn close_grace(&self) -> Duration {
+        close_grace_for(self._kept.is_some())
     }
 
     /// Why this browser got a throwaway profile although the kept research profile is on (damaged, too large, did not
@@ -340,7 +372,7 @@ impl Inner {
         drop(slots);
         log::info!("The AI browser of {owner} is gone ({reason:?}); the next use starts a new one");
         self.tell(owner, l);
-        session.close(CLOSE_GRACE);
+        session.close(session.close_grace());
         true
     }
 
@@ -692,7 +724,7 @@ impl Renderers {
 
     /// Debrief ends the window's browser (`grace`: gracefully first; none: at once). Ready or launching: it goes
     /// through closing to gone; a launch in progress ends when it started. True when a browser was running or starting.
-    fn end(&self, owner: &str, grace: Option<Duration>) -> bool {
+    fn end(&self, owner: &str, ending: Ending) -> bool {
         let mut slots = crate::sync::lock(&self.inner.slots);
         let (generation, session) = match slots.get(owner) {
             Some(Slot::Ready { generation, session, .. }) => (*generation, Some(session.clone())),
@@ -703,9 +735,10 @@ impl Renderers {
         drop(slots);
         self.inner.tell(owner, l);
         let Some(session) = session else { return true };
-        match grace {
-            Some(g) => session.close(g),
-            None => session.kill(),
+        match ending {
+            Ending::Close => session.close(session.close_grace()),
+            Ending::Within(g) => session.close(g),
+            Ending::Kill => session.kill(),
         }
         let mut slots = crate::sync::lock(&self.inner.slots);
         let l = matches!(slots.get(owner), Some(Slot::Closing { generation: g }) if *g == generation)
@@ -719,7 +752,7 @@ impl Renderers {
 
     /// Ends the window's browser at once; true when one was running.
     pub fn kill(&self, owner: &str) -> bool {
-        self.end(owner, None)
+        self.end(owner, Ending::Kill)
     }
 
     /// Research ended (done, cancelled or failed): closes the window's browser unless the user took part in it (then
@@ -755,7 +788,7 @@ impl Renderers {
             return Finish::KeptOpen(how);
         }
         drop(s);
-        if self.end(owner, Some(CLOSE_GRACE)) {
+        if self.end(owner, Ending::Close) {
             Finish::Closed
         } else {
             Finish::NotRunning
@@ -764,7 +797,7 @@ impl Renderers {
 
     /// Closes the window's browser whatever happened in it (the user asked); true when one was running.
     pub fn close(&self, owner: &str) -> bool {
-        self.end(owner, Some(CLOSE_GRACE))
+        self.end(owner, Ending::Close)
     }
 
     /// Debrief quits: every browser is closed (gracefully for `grace`, then by force).
@@ -772,7 +805,7 @@ impl Renderers {
         let owners: Vec<String> = crate::sync::lock(&self.inner.slots).keys().cloned().collect();
         std::thread::scope(|s| {
             for o in &owners {
-                s.spawn(move || self.end(o, Some(grace)));
+                s.spawn(move || self.end(o, Ending::Within(grace)));
             }
         });
     }
@@ -780,7 +813,7 @@ impl Renderers {
     pub fn kill_all(&self) {
         let owners: Vec<String> = crate::sync::lock(&self.inner.slots).keys().cloned().collect();
         for o in owners {
-            self.end(&o, None);
+            self.end(&o, Ending::Kill);
         }
     }
 
@@ -818,4 +851,18 @@ pub(super) fn fallback_browser() -> Option<chromium_driver::BrowserExe> {
 #[cfg(test)]
 pub(super) fn fallback_browser() -> Option<chromium_driver::BrowserExe> {
     chromium_driver::find_for_tests()
+}
+
+#[cfg(test)]
+mod close_grace_tests {
+    use super::*;
+
+    /// A browser on the kept research profile gets the long grace: ending Chrome by force during its shutdown can lose
+    /// cookies or a sign-in it is still writing. A throwaway one keeps the short grace.
+    #[test]
+    fn a_kept_profile_gets_the_long_close_grace() {
+        assert_eq!(close_grace_for(false), CLOSE_GRACE);
+        assert_eq!(close_grace_for(true), KEPT_CLOSE_GRACE);
+        assert!(KEPT_CLOSE_GRACE > CLOSE_GRACE);
+    }
 }

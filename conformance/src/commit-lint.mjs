@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 export const TYPES = ['feat', 'fix', 'perf', 'refactor', 'test', 'docs', 'ci', 'chore', 'build', 'style', 'revert'];
-const HEADER = new RegExp(`^(${TYPES.join('|')})(\\([a-z0-9][a-z0-9._/-]*\\))?!?: \\S.*$`);
+const HEADER = new RegExp(`^(${TYPES.join('|')})(\\([a-z0-9][a-z0-9._/-]*(?:,[a-z0-9][a-z0-9._/-]*)*\\))?!?: \\S.*$`);
 const MAX_HEADER = 100;
 
 /** Lines that credit a co-author or an AI tool. Each entry: [pattern, what it is]. */

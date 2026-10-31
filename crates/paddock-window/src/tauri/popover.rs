@@ -186,6 +186,7 @@ fn open<R: Runtime>(
     spec: &PopoverSpec,
     icon: Rect,
 ) -> Result<(), WindowError> {
+    super::plugin_hook::check_can_build(label)?;
     let style = pops.style;
     let feel = WebviewFeel::current();
     let b = WebviewWindowBuilder::new(app, label, WebviewUrl::App(spec.route.clone().into()))

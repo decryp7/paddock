@@ -287,6 +287,9 @@ const OWNERS = [
 /** An app's `src-tauri/Cargo.toml` and `capabilities/`, which conformance C48 reads (the app itself is marked as their owner). */
 export const APP_CAPABILITY_INPUT = /^apps\/[^/]+\/(app\/)?src-tauri\/(Cargo\.toml|capabilities\/)/;
 
+/** The notices script and the shared cargo-about configuration (and the tool, conformance/src/notices/): inputs of every app with a `notices` block. */
+export const NOTICES_INPUTS = /^(scripts\/notices\.sh|templates\/repo\/about\.toml|conformance\/src\/notices\/.*)$/;
+
 /** Generated TypeScript and JSON of the shared crates, written by their tests (a `generated` folder under ui, `.ts` or `.json`). */
 export const GENERATED = /^ui\/.*\/generated\/[^/]+\.(ts|json)$/;
 
@@ -633,6 +636,15 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     // An app's Cargo dependencies and capabilities are read by conformance C48 (a shell app grants its dialog windows the
     // shell's dialog set), which runs in the conformance job.
     if (APP_CAPABILITY_INPUT.test(f)) mark('conformance', `C48 reads ${f}`);
+    // The notices tool and its cargo-about configuration decide the committed THIRD_PARTY_NOTICES.md of every app with a
+    // `notices` block (conformance/src/notices/** is covered by the rule below): they are inputs of those apps.
+    if (NOTICES_INPUTS.test(f)) {
+      for (const [a, cfg] of apps) {
+        if (!cfg.notices) continue;
+        mark(`app:${a}`, `notices tool ${f}`);
+        kind(`app:${a}`, 'all');
+      }
+    }
     // The rest of conformance/ (bin, src) runs in every app's gates through the shared actions.
     if (f.startsWith('conformance/') && !/^conformance\/(test|fixtures)\//.test(f)) {
       for (const a of apps.keys()) {
@@ -718,7 +730,7 @@ export function matrix(plan, { cargo, apps }, { narrow = false, webkit = false }
         angular_dir: linux && app.angularDir ? posix.join(app.dir, app.angularDir) : '',
         last_packages: (app.lastPackages ?? []).join(' '),
         windows_clippy: app.windowsClippy ? 'true' : 'false',
-        processes: (app.processes ?? []).join(' '),
+        notices: linux && app.notices && (rust || ui) ? 'true' : 'false',
         process_patterns: (app.processPatterns ?? []).join('\n'),
         test_browser_prefix: app.testBrowser?.envPrefix ?? '',
         test_browser_catalogue: app.testBrowser?.catalogue ?? '',
@@ -746,6 +758,7 @@ export function matrix(plan, { cargo, apps }, { narrow = false, webkit = false }
         rust: false,
         ui: false,
         display: 'false',
+        notices: 'false', // the main leg checks them once
         e2e_checks: app.e2e.join('\n'),
         e2e_shard: `${i}/${shards}`,
         e2e_leg: `e2e-${i}`,
@@ -753,7 +766,7 @@ export function matrix(plan, { cargo, apps }, { narrow = false, webkit = false }
     }
     // `e2eWebkit` (commands): the WebKit end-to-end tests, a leg of their own when the run asks for WebKit (see wantsWebkit).
     if (ui && webkit && app.e2eWebkit?.length) {
-      legs.push({ ...base, prepare: '', checks: '', ui_checks: '', rust: false, ui: false, display: 'false', e2e_checks: app.e2eWebkit.join('\n'), e2e_shard: '', e2e_leg: 'e2e-webkit' });
+      legs.push({ ...base, prepare: '', checks: '', ui_checks: '', rust: false, ui: false, display: 'false', notices: 'false', e2e_checks: app.e2eWebkit.join('\n'), e2e_shard: '', e2e_leg: 'e2e-webkit' });
     }
     return legs;
   });
@@ -894,7 +907,7 @@ export function planFor({ base = null, head = 'HEAD', files = null, all = false,
 }
 
 /** The ci.yml job outputs of a plan (the plan job declares and wires exactly these names; a test checks ci.yml against them). */
-export function ciOutputs(plan, legs) {
+export function ciOutputs(plan, legs, base = null) {
   return {
     crates: plan.crates,
     ui: plan.ui,
@@ -905,7 +918,26 @@ export function ciOutputs(plan, legs) {
     paddock_dev: plan.paddockDev,
     apps: JSON.stringify(legs),
     any_app: legs.length > 0,
+    // The commit lint's range start (empty: no base, only the head commit is linted).
+    base: base ?? '',
   };
+}
+
+/**
+ * The commits the commit lint checks, as a git revision range, or null to skip it. Only what a change adds is linted, so an
+ * old bad commit never keeps main red: a pull request lints since its target branch, a push the commits it added
+ * (`before..sha`; a new branch, an all-zero `before`, lints the head commit only), a manual run from the plan's base (the
+ * head commit alone without one); `known(commit)` says whether a commit is in the clone. Tags and a call with an `app` (an app's tag gates, ER-15) and every other event skip it:
+ * a release must not fail on an old commit's subject.
+ */
+export function commitLintRange({ event, ref = '', before = '', sha = 'HEAD', base = '', baseRef = '', app = '', known = () => true }) {
+  if (app || ref.startsWith('refs/tags/')) return null;
+  const head = `${sha}^!`;
+  if (event === 'pull_request') return baseRef ? `origin/${baseRef}..HEAD` : null;
+  // A `before` missing from the history (after a force push) lints the head commit only.
+  if (event === 'push') return before && !/^0+$/.test(before) && known(before) ? `${before}..${sha}` : head;
+  if (event === 'workflow_dispatch') return base ? `${base}..${sha}` : head;
+  return null;
 }
 
 /** A short Markdown summary of a plan for the job summary. */
@@ -965,7 +997,7 @@ async function ci(env, { app = null } = {}) {
     console.log(String(run));
     return;
   }
-  const outputs = ciOutputs(plan, legs);
+  const outputs = ciOutputs(plan, legs, env.PLAN_APP ? null : base);
   if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, Object.entries(outputs).map(([k, v]) => `${k}=${v}\n`).join(''));
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, summary(plan, reason, legs));
 }
@@ -1007,6 +1039,20 @@ export function parseArgs(args) {
 
 if (isMain(import.meta.url)) {
   try {
+    if (process.argv[2] === '--commit-range') {
+      const e = process.env;
+      const gitHas = (c) => {
+        try {
+          git(['cat-file', '-e', `${c}^{commit}`]);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const range = commitLintRange({ event: e.EVENT, ref: e.REF, before: e.BEFORE, sha: e.SHA, base: e.PLAN_BASE, baseRef: e.BASE_REF, app: e.INPUT_APP, known: gitHas });
+      console.log(range ?? 'skip');
+      process.exit(0);
+    }
     const { files, base, head, all, ci: isCi, app, explain } = parseArgs(process.argv.slice(2));
     if (isCi) await ci(process.env, { app });
     else {

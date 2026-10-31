@@ -18,7 +18,7 @@ rights, without verdicts and without reading what the user did not choose.
 2. **Normalise once, store once.** One `Issue` type with a stable id (re-reading never duplicates), bounded plain text, kind
    and severity decided by the engine. Table `issues` in SQLite, pruned with the other long tiers.
 3. **Statistics are pure.** The daily score, leaderboards, trend, crash days and crash loops are functions over issues with the
-   local-day offset passed in. Crashes feed `history.crashes`, the health reason and the weekly report; serious kinds raise
+   local zone passed in (a port since ADR 0024). Crashes feed `history.crashes`, the health reason and the weekly report; serious kinds raise
    alarms (one per issue, recent only), a crash loop feeds the crash-loop alert.
 4. **A baseline, not a blacklist.** `dyno_core::unusual` scores facts about a program with independent reasons and reports
    reasons in words ("unusual because it..."), never "malware". The baseline learns silently for a configurable period; the first

@@ -3,7 +3,7 @@
 
 use super::ghost::{self, hide, release_page};
 use super::popout::{notify, saved_of};
-use super::{Panels, TARGET, native};
+use super::{Panels, TARGET};
 use crate::ghost::GHOST_LABEL;
 use crate::wire::PanelsEvent;
 use ::tauri::{AppHandle, Manager, Runtime, Window, WindowEvent};
@@ -135,14 +135,17 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
         _ => {}
     }
     match event {
-        WindowEvent::Focused(false)
-            if label != GHOST_LABEL && native::primary_button_down() != Some(true) =>
-        {
+        WindowEvent::Focused(false) if label != GHOST_LABEL && button_down(app) != Some(true) => {
             ghost::end_for(app, label);
         }
         WindowEvent::Destroyed if label == GHOST_LABEL => release_page(app),
         _ => {}
     }
+}
+
+/// The primary mouse button, from the panel layer's pointer source (`None` without the layer).
+fn button_down<R: Runtime>(app: &AppHandle<R>) -> Option<bool> {
+    app.try_state::<Panels>()?.pointer().primary_button_down()
 }
 
 /// With no application window left, the hidden ghost goes too, so it never keeps the app running.

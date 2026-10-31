@@ -54,6 +54,13 @@ pub fn route(id: &str, shown: &[&str], target: Option<&str>) -> Option<String> {
     target.map(|label| resolve(label).to_string())
 }
 
+/// Whether a click on item `id` is the host's to run: it is one of the shown items and no window is the target (the last
+/// window was closed to the tray and the menu bar still shows its model), so no window can take it. The host runs it
+/// ([`crate::tauri::NativeMenu::on_no_window`]): Quit quits, any other item brings the main window back. Pure.
+pub fn runs_without_window(id: &str, shown: &[&str], target: Option<&str>) -> bool {
+    target.is_none() && shown.contains(&id)
+}
+
 /// Whether a model sent by window `caller` is shown: the menu bar shows the focused window's menus, so a model is applied
 /// when its window has the focus, is the target, or no window is the target yet (the first window at start).
 pub fn applies(caller: &str, caller_focused: bool, target: Option<&str>) -> bool {
@@ -80,6 +87,18 @@ mod tests {
         // Not ours (a tray's items), or no window.
         assert_eq!(route("quit", &ids, Some("main")), None);
         assert_eq!(route("pw.view.compact", &ids, None), None);
+    }
+
+    #[test]
+    fn a_shown_item_is_the_hosts_only_when_no_window_is_the_target() {
+        let ids = ["pd.app.quit", "pd.about"];
+        assert!(runs_without_window("pd.app.quit", &ids, None));
+        assert!(runs_without_window("pd.about", &ids, None));
+        assert!(!runs_without_window("tray.quit", &ids, None), "not shown");
+        assert!(
+            !runs_without_window("pd.app.quit", &ids, Some("main")),
+            "a window is the target: it gets the click"
+        );
     }
 
     #[test]

@@ -2,12 +2,48 @@
   "version": 1,
   "commands": [
     {
+      "id": "dy.add-alarm-rule",
+      "title": "dy.add-alarm-rule"
+    },
+    {
       "id": "dy.capture",
       "title": "dy.capture"
     },
     {
+      "id": "dy.check-backup",
+      "title": "dy.check-backup"
+    },
+    {
+      "id": "dy.export-issues",
+      "title": "dy.export-issues"
+    },
+    {
+      "id": "dy.export-report",
+      "title": "dy.export-report"
+    },
+    {
+      "id": "dy.refresh-history",
+      "title": "dy.refresh-history"
+    },
+    {
+      "id": "dy.rescan-issues",
+      "title": "dy.rescan-issues"
+    },
+    {
+      "id": "dy.run-why-slow",
+      "title": "dy.run-why-slow"
+    },
+    {
+      "id": "dy.save-diagnostics",
+      "title": "dy.save-diagnostics"
+    },
+    {
       "id": "pd.about.open",
       "title": "pd.about.open"
+    },
+    {
+      "id": "pd.app.quit",
+      "title": "pd.app.quit"
     },
     {
       "id": "pd.settings.open",
@@ -28,6 +64,12 @@
       "key": "Mod+,",
       "accelerator": "CmdOrCtrl+,",
       "scope": "window"
+    },
+    {
+      "command": "pd.app.quit",
+      "key": "Mod+Q",
+      "accelerator": "CmdOrCtrl+Q",
+      "scope": "window"
     }
   ],
   "menus": [
@@ -37,6 +79,13 @@
       "group": "settings",
       "order": 100,
       "accelerator": "CmdOrCtrl+,"
+    },
+    {
+      "menu": "app",
+      "command": "pd.app.quit",
+      "group": "quit",
+      "order": 1000,
+      "accelerator": "CmdOrCtrl+Q"
     },
     {
       "menu": "help",
@@ -67,6 +116,7 @@
     "dy.counters",
     "dy.dashboard",
     "dy.diagnostics",
+    "dy.disk-map",
     "dy.extras",
     "dy.health",
     "dy.inventory",
@@ -209,9 +259,20 @@
     }
   },
   "messages": {
+    "dy.add-alarm-rule": "Add rule…",
     "dy.alert-rule.title": "Alert rule",
     "dy.capture": "Capture the last ten minutes",
+    "dy.category.alarms": "Alarms",
+    "dy.category.backup": "Backup health",
+    "dy.category.dashboard": "Dashboard",
+    "dy.category.diagnostics": "Diagnostics",
+    "dy.category.issues": "Issues",
     "dy.category.recorder": "Flight recorder",
+    "dy.category.reports": "Reports",
+    "dy.category.why-slow": "Why slow",
+    "dy.check-backup": "Check now",
+    "dy.export-issues": "Export for Debrief…",
+    "dy.export-report": "Export Markdown…",
     "dy.file-hash.title": "Search the file's hash on VirusTotal",
     "dy.health.agent": "the Dyno agent",
     "dy.lockers.title": "What is locking this file?",
@@ -222,6 +283,7 @@
     "dy.page.counters": "Counters",
     "dy.page.dashboard": "Dashboard",
     "dy.page.diagnostics": "Diagnostics",
+    "dy.page.disk-map": "Disk map",
     "dy.page.extras": "Extras",
     "dy.page.health": "Health",
     "dy.page.inventory": "Inventory",
@@ -233,11 +295,16 @@
     "dy.page.reports": "Reports",
     "dy.page.throttling": "Throttling",
     "dy.page.why-slow": "Why slow",
+    "dy.refresh-history": "Refresh history",
+    "dy.rescan-issues": "Read the system logs now",
+    "dy.run-why-slow": "Run again",
+    "dy.save-diagnostics": "Save bundle…",
     "dy.settings.general": "Dyno",
     "dy.status.agent": "The Dyno agent",
     "dy.web-search.title": "Search the web",
     "pd.about.open": "About",
     "pd.about.title": "About",
+    "pd.app.quit": "Quit",
     "pd.category.app": "Application",
     "pd.category.help": "Help",
     "pd.confirm.title": "Confirm",

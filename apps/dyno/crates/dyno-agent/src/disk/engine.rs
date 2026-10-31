@@ -1,9 +1,10 @@
 //! The walk of the disk scan: worker threads read folders through the [`DirSource`] port and commit each folder's totals
-//! into the shared [`DiskIndex`] in one step, so the index adds up at every moment. Bounded parallelism, background
-//! priority, no sleeps: workers wait on a condition for work, Cancel sets a flag and returns at once, and a worker that is
-//! stuck inside a call to a dead network share is abandoned, never awaited.
+//! into the shared [`DiskIndex`] in one step, so the index adds up at every moment. Bounded parallelism, lowered priority
+//! (never starved: the person watches the scan), no sleeps: workers wait on a condition for work, Cancel sets a flag and
+//! returns at once, and a worker that is stuck inside a call to a dead network share is abandoned, never awaited.
 
 use dyno_core::disk::index::{DiskIndex, NodeId, ScanLimits, Sizes};
+use dyno_core::disk::reason::{unreadable_reason, ReasonContext};
 use dyno_core::disk::scan::{ScanFailure, ScanProgress, UNREADABLE_LISTED};
 use dyno_core::disk::source::{DirEntryInfo, DirSource, EntryKind, ReadError};
 use dyno_core::time::Timestamp;
@@ -117,6 +118,8 @@ pub struct WalkConfig {
     pub stat_limit: std::time::Duration,
     /// A folder being listed reports its progress every this many entries (a huge folder is no longer silent).
     pub listing_progress_every: usize,
+    /// What decides why a folder was refused (the OS, Full Disk Access, the user's home); tests choose.
+    pub reasons: ReasonContext,
 }
 
 /// Entries read between two progress reports inside one folder.
@@ -193,10 +196,12 @@ pub struct Snapshot {
     pub truncated: bool,
     /// The first unreadable folders.
     pub unreadable_first: Vec<String>,
+    /// Whether some refused folder would be readable with Full Disk Access.
+    pub needs_full_disk_access: bool,
 }
 
 impl Walk {
-    /// Starts walking `root`. Returns at once; the walk runs on its own threads at background priority.
+    /// Starts walking `root`. Returns at once; the walk runs on its own threads at lowered priority.
     pub fn start(
         source: Arc<dyn DirSource>,
         root: PathBuf,
@@ -209,7 +214,8 @@ impl Walk {
             // The thread that looks is one of the host's live threads while it is inside the call: if the call never returns,
             // later starts see it as abandoned and are refused after a few, instead of piling up.
             let alive = cfg.live.enter();
-            super::volumes::within(cfg.stat_limit, move || {
+            // The first look waits within a deadline before the scan starts: live work; the walk itself is bulk (rule 52).
+            super::volumes::within(cfg.stat_limit, dyno_platform::priority::ThreadRole::Live, move || {
                 let _alive = alive;
                 src.stat(&path)
             })
@@ -277,7 +283,7 @@ impl Walk {
             let spawned = (self.cfg.spawn)(
                 format!("dyno-disk-scan-{n}"),
                 Box::new(move || {
-                    dyno_platform::priority::background_current_thread();
+                    dyno_platform::priority::lower_current_thread();
                     // A bug in one reader ends the scan with a message; it never takes the agent down.
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| w.worker(epoch))).is_err() {
                         w.fail(ScanFailure::Internal {
@@ -397,7 +403,7 @@ impl Walk {
             let mut i = lock(&self.index);
             for (id, (_, refused)) in &left {
                 if *refused {
-                    i.mark_unreadable(*id);
+                    i.restore_unreadable(*id);
                 } else {
                     i.mark_unread(*id);
                 }
@@ -431,6 +437,7 @@ impl Walk {
             },
             truncated,
             unreadable_first: lock(&self.problems).unreadable_first.clone(),
+            needs_full_disk_access: self.cfg.reasons.fda_missing && lock(&self.index).needing_full_disk_access() > 0,
         }
     }
 
@@ -588,7 +595,7 @@ impl Walk {
         let mut big: Vec<DirEntryInfo> = Vec::new();
         let (mut small, mut small_items, mut small_newest) = (Sizes::default(), 0u64, Timestamp(0));
         let mut unreachable: Option<String> = None;
-        let mut entry_denied = false;
+        let mut entry_denied: Option<ReadError> = None;
         let mut linked: Vec<DirEntryInfo> = Vec::new();
         let mut listing_ids: HashSet<(u64, u64)> = HashSet::new();
         // Entries seen that will be committed: counted at once as pending, so a huge folder shows its progress while it is read.
@@ -635,7 +642,9 @@ impl Walk {
                         }
                     }
                 },
-                Err(ReadError::PermissionDenied) => entry_denied = true,
+                Err(e @ (ReadError::PermissionDenied | ReadError::NotPermitted)) => {
+                    entry_denied.get_or_insert(e);
+                }
                 Err(ReadError::Unreachable(d)) => {
                     unreachable = Some(d);
                     return false;
@@ -650,7 +659,7 @@ impl Walk {
             return Vec::new();
         }
         let unreadable_here = match &listed {
-            Ok(()) => false,
+            Ok(()) => None,
             Err(ReadError::Unreachable(d)) => {
                 self.pending_items.fetch_sub(seen, Ordering::Relaxed);
                 self.fail(ScanFailure::VolumeUnreachable { detail: d.clone() });
@@ -658,15 +667,15 @@ impl Walk {
             }
             // Gone since it was listed: nothing to read. On a retry the path was rebuilt from the index, so "not found" may mean
             // the path is wrong; the folder then stays refused rather than being called complete and empty.
-            Err(ReadError::NotFound) if !task.retry => false,
-            Err(_) => {
+            Err(ReadError::NotFound) if !task.retry => None,
+            Err(e) => {
                 self.note_unreadable(&task.path);
-                true
+                Some(unreadable_reason(e, &self.cfg.reasons, &task.path))
             }
         };
         // A folder that listed but had entries the OS refused is partial: counted once, and incomplete for good.
-        let partial = entry_denied && !unreadable_here;
-        if partial {
+        let partial = entry_denied.filter(|_| unreadable_here.is_none());
+        if partial.is_some() {
             self.note_unreadable(&task.path);
         }
 
@@ -727,11 +736,11 @@ impl Walk {
             if small_items > 0 {
                 i.add_folded_files(task.node, small, small_items, small_newest);
             }
-            if unreadable_here {
-                i.mark_unreadable(task.node);
+            if let Some(reason) = unreadable_here {
+                i.mark_unreadable(task.node, reason);
             }
-            if partial {
-                i.mark_partial(task.node);
+            if let Some(e) = &partial {
+                i.mark_partial(task.node, unreadable_reason(e, &self.cfg.reasons, &task.path));
             }
             lock(&self.reopened).remove(&task.node);
             // Taken off and put in the index in one step (the lock is held), so the count shown never dips or doubles.
@@ -775,6 +784,7 @@ mod tests {
     }
 
     fn cfg(threads: usize) -> WalkConfig {
+        use dyno_core::disk::reason::Os;
         WalkConfig {
             threads,
             limits: ScanLimits {
@@ -788,6 +798,11 @@ mod tests {
             spawn: os_spawn,
             stat_limit: std::time::Duration::from_secs(30),
             listing_progress_every: LISTING_PROGRESS_EVERY,
+            reasons: ReasonContext {
+                os: Os::MacOs,
+                fda_missing: false,
+                home: None,
+            },
         }
     }
 
@@ -962,6 +977,65 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_folder_says_why_by_the_rules_of_the_os() {
+        use dyno_core::disk::reason::Os;
+        use dyno_core::disk::reason::UnreadableReason::{NeedsAdmin, NeedsFullDiskAccess, Other, Protected};
+        for (os, fda_missing, error, want) in [
+            (Os::MacOs, true, ReadError::NotPermitted, NeedsFullDiskAccess),
+            (Os::MacOs, false, ReadError::NotPermitted, Protected),
+            (Os::MacOs, true, ReadError::PermissionDenied, NeedsAdmin),
+            (Os::Linux, false, ReadError::PermissionDenied, NeedsAdmin),
+            (Os::Windows, false, ReadError::PermissionDenied, NeedsAdmin),
+            (Os::MacOs, true, ReadError::Other("input/output error".into()), Other),
+        ] {
+            let fs = FakeFs::new();
+            let r = fs.root();
+            let users = fs.dir(&r, "Users");
+            let alex = fs.dir(&users, "alex");
+            let lib = fs.dir(&alex, "Library");
+            let mail = fs.dir(&lib, "Mail");
+            fs.file(&alex, "x", 10);
+            fs.fail_open(&mail, error);
+            let mut c = cfg(2);
+            c.reasons = ReasonContext {
+                os,
+                fda_missing,
+                home: None,
+            };
+            let (w, _, end) = run(Arc::new(fs), r, c);
+            assert_eq!(end, End::Done);
+            let reason = w.with_index(|i| {
+                let mut at = i.root();
+                for name in ["Users", "alex", "Library"] {
+                    at = NodeId(
+                        i.children(at, 0, 50, 0.0)
+                            .unwrap()
+                            .children
+                            .iter()
+                            .find(|k| k.name == name)
+                            .unwrap()
+                            .id,
+                    );
+                }
+                i.children(at, 0, 50, 0.0)
+                    .unwrap()
+                    .children
+                    .iter()
+                    .find(|k| k.name == "Mail")
+                    .unwrap()
+                    .unreadable_reason
+            });
+            assert_eq!(reason, Some(want), "{os:?} fda_missing={fda_missing}");
+            // The status says Full Disk Access is the way out exactly when a refused folder would be readable with it.
+            assert_eq!(
+                w.snapshot().needs_full_disk_access,
+                want == NeedsFullDiskAccess,
+                "{os:?} fda_missing={fda_missing}"
+            );
+        }
+    }
+
+    #[test]
     fn a_retry_reads_only_the_refused_folders_and_completes_the_tree() {
         let (fs, lib, _) = with_two_refused();
         let (w, rec, end) = run(fs.clone(), fs.root(), cfg(2));
@@ -1099,6 +1173,34 @@ mod tests {
 
     fn no_threads(_: String, _: Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()> {
         Err(std::io::Error::other("no more threads"))
+    }
+
+    /// The person watches the scan, so its readers are lowered gently and never starved (rule 52): each worker leaves its
+    /// thread at `UTILITY`, read back through the spawn hook once the worker's job is over.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn every_reader_runs_at_the_gentle_level() {
+        static CLASSES: (Mutex<Vec<u32>>, std::sync::Condvar) = (Mutex::new(Vec::new()), std::sync::Condvar::new());
+        fn recording(name: String, job: Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()> {
+            os_spawn(
+                name,
+                Box::new(move || {
+                    job();
+                    lock(&CLASSES.0).push(dyno_platform::priority::current_qos_class());
+                    CLASSES.1.notify_all();
+                }),
+            )
+        }
+        let mut c = cfg(3);
+        c.spawn = recording;
+        let fs = Arc::new(sample());
+        let (_w, _rec, end) = run(fs.clone(), fs.root(), c);
+        assert_eq!(end, End::Done);
+        let mut classes = lock(&CLASSES.0);
+        while classes.len() < 3 {
+            classes = CLASSES.1.wait(classes).unwrap_or_else(|p| p.into_inner());
+        }
+        assert!(classes.iter().all(|c| *c == dyno_platform::priority::UTILITY), "{classes:?}");
     }
 
     #[test]

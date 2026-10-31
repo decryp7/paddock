@@ -35,7 +35,6 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
 - **Processes.** Applications are grouped; expand one to see its processes. Select a row for details (command line, working
   directory, modules, connections, signer), what is locking a file, and **Open location**. Take a snapshot and compare it with a
   later one. Dyno cannot end, suspend or change a process; use your system's own task manager for that.
-- **Command palette.** Ctrl or Cmd + K jumps to a screen or action.
 - **Tray.** The icon shows the metric you chose; its dropdown is a compact dashboard. Closing the window keeps Dyno in the
   tray and the agent measuring; **Quit** closes the app (the agent keeps measuring until you stop it).
 - **Why slow** explains the likeliest cause of a slow PC: what was measured, which apps are behind it, where to look closer.
@@ -152,6 +151,11 @@ Dyno 1.0 runs only with your own rights, so there is nothing to approve and noth
 that gives the readings Dyno cannot get today, and starting as administrator at login) is planned for Dyno 1.1.
 
 ## Troubleshooting
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/diagnostics-dark.png">
+  <img alt="The diagnostics bundle preview" src="screenshots/diagnostics-light.png">
+</picture>
 
 | Symptom | What to do |
 | --- | --- |

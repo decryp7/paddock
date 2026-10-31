@@ -13,6 +13,94 @@ pub const MAX_LISTED: usize = 200;
 pub const MAX_GROUPS: usize = 100;
 /// Most files one scan looks at before it stops and says so.
 pub const MAX_SCANNED: usize = 500_000;
+/// Deepest folder level the scan enters (the chosen folder is level 0).
+pub const MAX_DEPTH: u32 = 48;
+/// Most bytes the scan reads while comparing the content of files that could be duplicates.
+pub const MAX_HASH_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+
+/// What one scan may spend. The defaults are the product limits; they are Settings (`disk.finder*`), and tests pass small ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FinderLimits {
+    /// Most files and folders looked at.
+    pub files: usize,
+    /// Deepest folder level entered.
+    pub depth: u32,
+    /// Most bytes read comparing contents.
+    pub hash_bytes: u64,
+}
+
+impl Default for FinderLimits {
+    fn default() -> FinderLimits {
+        FinderLimits {
+            files: MAX_SCANNED,
+            depth: MAX_DEPTH,
+            hash_bytes: MAX_HASH_BYTES,
+        }
+    }
+}
+
+/// How many threads may read the chosen folder at once (ER-20, rule 51): 4 to 8 on an SSD (more cores, more threads, as the work
+/// is waiting for the disk), one on a spinning disk, two per server on the network. A drive whose kind is unknown is treated as
+/// an SSD.
+pub fn auto_finder_threads(location: &crate::disk::volume::VolumeLocation, rotational: Option<bool>, cores: usize) -> usize {
+    match location {
+        crate::disk::volume::VolumeLocation::Network { .. } => 2,
+        _ if rotational == Some(true) => 1,
+        _ => cores.saturating_sub(1).clamp(4, 8),
+    }
+}
+
+/// Which limit stopped a scan early. The scan still answers with what it found so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FinderLimit {
+    /// [`MAX_SCANNED`] files and folders were looked at.
+    Files,
+    /// Folders deeper than [`MAX_DEPTH`] levels were left out.
+    Depth,
+    /// [`MAX_HASH_BYTES`] were read comparing contents; some duplicates may be missing.
+    HashBytes,
+}
+
+/// The limit that stopped a scan, with the sentence the person reads (the engine words it; the UI only shows it).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitHit {
+    /// Which limit.
+    pub limit: FinderLimit,
+    /// What happened and what to do about it.
+    pub message: String,
+}
+
+impl LimitHit {
+    /// The limit that was hit, worded with the numbers the scan ran with.
+    pub fn new(limit: FinderLimit, limits: &FinderLimits) -> LimitHit {
+        LimitHit {
+            message: limit.message(limits),
+            limit,
+        }
+    }
+}
+
+impl FinderLimit {
+    /// What to tell the person, ending with what to do, with the numbers of the limits the scan ran with.
+    pub fn message(self, limits: &FinderLimits) -> String {
+        match self {
+            FinderLimit::Files => format!(
+                "Stopped after {} files and folders. Choose a smaller folder to see everything in it, or raise the limit in Settings.",
+                limits.files
+            ),
+            FinderLimit::Depth => format!(
+                "Folders more than {} levels down were left out. Choose a folder nearer to them, or raise the limit in Settings.",
+                limits.depth
+            ),
+            FinderLimit::HashBytes => format!(
+                "Stopped comparing contents after {} GiB. Some duplicates may be missing; choose a smaller folder or a larger minimum size, or raise the limit in Settings.",
+                limits.hash_bytes / (1024 * 1024 * 1024)
+            ),
+        }
+    }
+}
 
 /// What to look for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -91,8 +179,10 @@ pub struct FinderResult {
     pub duplicates: Vec<DuplicateGroup>,
     /// Files looked at.
     pub scanned: u32,
-    /// The scan stopped early (file limit or time limit); more exists.
-    pub truncated: bool,
+    /// Folders the walk could not read (no permission, a share that went away, a folder removed meanwhile); they are left out.
+    pub unreadable: u32,
+    /// The limit that stopped the scan early, when one did; more exists.
+    pub limit: Option<LimitHit>,
     /// Total wasted by the listed duplicate groups.
     pub wasted_bytes: u64,
 }

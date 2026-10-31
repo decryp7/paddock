@@ -274,12 +274,12 @@ mod tests {
             // Both attempts end at their timeout (a hanging shell gives no PATH); what counts is the outcome and that the
             // trees are gone, not how long it took.
             assert_eq!(ask_shell(&hang, Duration::from_millis(400)), None);
-            let left: Vec<u32> = crate::processes_mentioning(&marker)
+            let left: Vec<crate::ProcessId> = crate::processes_mentioning(&marker)
                 .into_iter()
-                .filter(|p| crate::is_alive(*p))
+                .filter(|p| p.is_alive())
                 .collect();
             assert!(
-                left.iter().all(|p| !crate::is_alive(*p)) && left.is_empty(),
+                left.iter().all(|p| !p.is_alive()) && left.is_empty(),
                 "left behind: {left:?}"
             );
         }

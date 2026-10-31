@@ -1,0 +1,25 @@
+# The minimal `ort` program of the ONNX Runtime pipeline (stage-2 plan SW5, ADR 0001 P5): links a built archive through
+# ORT_LIB_PATH exactly as sighter-infer will, registers one execution provider with error_on_failure, runs a one-node
+# model built in memory and checks the answer. Its own workspace and lockfile, outside Sighter's: it only links when
+# ORT_LIB_PATH points at a built archive, which a normal CI leg does not have.
+[package]
+name = "sighter-ort-smoke"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+# Custom-library mode (ADR 0001 decision 4): no download-binaries, no load-dynamic, no copy-dylibs.
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "api-31"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "api-31", "coreml"] }
+
+[target.'cfg(windows)'.dependencies]
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "api-31", "directml"] }
+
+[profile.release]
+debug = false

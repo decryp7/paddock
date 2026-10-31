@@ -1039,6 +1039,13 @@ against that list comes with the notices tooling.
 18. Latency budgets in two tiers: a **gate** (full frame p95 ≤ 500 ms GPU / 2 s CPU at 1920 × 1200, ≤ 1 s / 4 s at
     4K) and the old numbers as a **target**, as named constants ("Latency budgets: gate and target").
 
+**Amendment (user, 2026-10-30), the DirectML gate (decision 4, P6):** `DirectML.dll` registers a TraceLogging provider,
+`Microsoft.Windows.AI.MachineLearning.Dml`, in the Microsoft telemetry group
+([ORT builds note](../research/2026-10-ort-builds.md) section 5). It is bundled only if both checks pass:
+(1) the egress test shows **no outbound connection** while the DirectML EP runs; (2) the S2 ETW session shows that
+provider writes **no events** meanwhile. Windows' diagnostic settings then govern it like any OS component. It is fetched from nuget.org at build time, pinned by hash, and never mirrored. The P6 method
+(reading the DLL's bytes and recording its ETW events, no disassembly) is accepted under the licence's clause 3(b).
+
 ## Open questions for the user
 
 None. The only pending item is the RT-DETRv4 licence review (plan item P4); RT-DETRv4 stays out of the catalogue until

@@ -311,6 +311,10 @@ fn imports_and_queries_within(mode: MemoryMode, import_budget_mb: u64) {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "ADR 0033 WP-5 (test): kills the worker by the pid it reported; use paddock_proc::end"
+)]
 fn errors_pass_through_and_a_crash_is_recovered() {
     let logs = TempDir::new("crash-logs");
     std::fs::write(
@@ -407,6 +411,10 @@ fn a_project_exported_through_the_worker_opens_without_its_logs() {
 }
 
 /// Kills the worker process (as a crash would).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "ADR 0033 WP-5 (test): kills the worker by the pid it reported; use paddock_proc::end"
+)]
 fn kill(w: &StoreWorker) -> u32 {
     let pid = w.status().pid.unwrap();
     let mut sys = sysinfo::System::new();

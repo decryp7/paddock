@@ -8,6 +8,7 @@ import type {
   DiskChildren,
   DiskChildrenQuery,
   DiskNode,
+  UnreadableReason,
   DiskRings,
   DiskRingsQuery,
   RingNode,
@@ -26,7 +27,7 @@ const MB = 1024 ** 2;
 export function mockVolumes(): Volume[] {
   const base = { rotational: false, readOnly: false, reachable: true, wholeVolume: true };
   return [
-    { ...base, id: '/', name: 'Macintosh HD', mount: '/', fs: 'apfs', location: 'internal', capacity: Math.round(994.7 * GB), free: Math.round(378.2 * GB) },
+    { ...base, id: '/', name: 'Macintosh HD', mount: '/', fs: 'apfs', location: 'internal', capacity: Math.round(953 * GB), free: Math.round(210 * GB) },
     {
       ...base,
       id: '/Volumes/Photos',
@@ -82,6 +83,7 @@ function specFor(volumeId: string): Spec {
           dir('Movies', [leaf('screen-recording.mov', 18.4), leaf('conference.mp4', 7.7)], 2.2),
           dir('Documents', [leaf('archive-2019.zip', 5.2)], 11.8),
           dir('Downloads', [leaf('installer.dmg', 4.1)], 6.6),
+          dir('Projects', [leaf('monorepo', 96), leaf('build output', 58), leaf('node_modules', 14)], 5),
         ], 8.4),
       ]),
       dir('Applications', [leaf('Xcode.app', 38.9), leaf('Editor.app', 2.8)], 21.7),
@@ -90,7 +92,7 @@ function specFor(volumeId: string): Spec {
       dir('opt', [], 4.8),
       { name: 'Volumes', kind: 'mountPoint' as const },
     ],
-    9.3,
+    0,
   );
 }
 
@@ -110,6 +112,9 @@ interface Built {
 }
 
 /** A size tree built from a spec; ids follow the order of the spec. */
+/** The mock's only refused folder is ~/Library/Mail, which the engine on macOS reports as behind Full Disk Access. */
+const MOCK_UNREADABLE_REASON: UnreadableReason = 'needsFullDiskAccess';
+
 export class MockTree {
   private readonly nodes: Built[] = [];
 
@@ -146,7 +151,7 @@ export class MockTree {
 
   private info(id: number): DiskNode {
     const n = this.nodes[id]!;
-    return { id, name: n.name, kind: n.kind, bytes: n.bytes, logicalBytes: n.logical, items: n.items, newestChange: n.newest, complete: n.kind !== 'unreadable', hasChildren: n.kids.length > 0 || n.loose > 0 };
+    return { id, name: n.name, kind: n.kind, bytes: n.bytes, logicalBytes: n.logical, items: n.items, newestChange: n.newest, complete: n.kind !== 'unreadable', hasChildren: n.kids.length > 0 || n.loose > 0, unreadableReason: n.kind === 'unreadable' ? MOCK_UNREADABLE_REASON : null };
   }
 
   children(q: Pick<DiskChildrenQuery, 'node' | 'offset' | 'limit' | 'minFraction'>): DiskChildren | null {
@@ -207,6 +212,18 @@ export class MockTree {
   }
 }
 
+const scaleNode = (n: DiskNode, f: number): DiskNode => ({ ...n, bytes: Math.round(n.bytes * f), logicalBytes: Math.round(n.logicalBytes * f), items: Math.round(n.items * f) });
+const scaleFolded = (n: Folded, f: number): Folded => ({ ...n, bytes: Math.round(n.bytes * f), logicalBytes: Math.round(n.logicalBytes * f), items: Math.round(n.items * f) });
+
+/** A level as it looks when only the share `f` of the tree has been counted. */
+function scalePage(page: DiskChildren, f: number): DiskChildren {
+  return { ...page, node: scaleNode(page.node, f), children: page.children.map((c) => scaleNode(c, f)), other: scaleFolded(page.other, f), loose: scaleFolded(page.loose, f) };
+}
+
+function scaleRing(r: RingNode, f: number): RingNode {
+  return { node: scaleNode(r.node, f), children: r.children.map((c) => scaleRing(c, f)), other: scaleFolded(r.other, f), loose: scaleFolded(r.loose, f) };
+}
+
 interface Scan {
   status: DiskScanStatus;
   tree: MockTree;
@@ -255,7 +272,7 @@ export class MockDiskMap {
     if ('volume' in target && !volume) throw this.error('notFound', 'That volume is not mounted any more.');
     const running = [...this.scans.values()].find((s) => s.status.state === 'running' && JSON.stringify(s.status.target) === JSON.stringify(target));
     if (running) return structuredClone(running.status);
-    if ([...this.scans.values()].filter((s) => s.status.state === 'running').length >= 2) throw this.error('busy', 'Two scans are already running. Stop one or wait for it to finish.');
+    if ([...this.scans.values()].filter((s) => s.status.state === 'running').length >= 2) throw this.error('busy', 'There is not room for another scan next to the running ones. Finish or close a scan first.');
     if ('folder' in target && !/^([a-zA-Z]:)?[\\/]/.test(target.folder.path)) throw this.error('badRequest', 'Give the full path of a folder.');
     const id = volume?.id ?? '/';
     const tree = new MockTree(specFor(id), this.now());
@@ -324,7 +341,9 @@ export class MockDiskMap {
     const s = this.find(scan);
     if (s.status.state !== 'running') return;
     s.timers.forEach(clearTimeout);
-    this.emit(s, { state: 'cancelled', scannedAt: this.now() });
+    // Stopping keeps what the first pass had counted, so the partial result is never empty.
+    const floor = Math.round(s.tree.totalBytes * STEPS[0]!);
+    this.emit(s, { state: 'cancelled', scannedAt: this.now(), progress: { ...s.status.progress, bytes: Math.max(s.status.progress.bytes, floor) } });
   }
 
   /** Reads the folders that could not be opened again, and only those; the mock's Mail folder stays closed (no access). */
@@ -359,9 +378,12 @@ export class MockDiskMap {
 
   children(q: DiskChildrenQuery): DiskChildren {
     if (!(q.minFraction >= 0 && q.minFraction <= 1)) throw this.error('badRequest', 'The smallest share shown must be between 0 and 1.');
-    const page = this.find(q.scan).tree.children(q);
+    const scan = this.find(q.scan);
+    const page = scan.tree.children(q);
     if (!page) throw this.error('notFound', 'That folder is not in this scan.');
-    return page;
+    // The levels grow with what has been counted, so a scan that is not finished never shows more than its progress says.
+    const f = Math.min(1, scan.status.progress.bytes / Math.max(1, scan.tree.totalBytes));
+    return f >= 1 ? page : scalePage(page, f);
   }
 
   rings(q: DiskRingsQuery): DiskRings {
@@ -370,7 +392,9 @@ export class MockDiskMap {
     if (!(q.maxNodes >= 1 && q.maxNodes <= 2000)) throw this.error('badRequest', 'Ask for 1 to 2000 nodes.');
     const out = this.find(q.scan).tree.rings(q.node ?? 0, q.rings, q.minShare, q.maxNodes);
     if (!out) throw this.error('notFound', 'That folder is not in this scan.');
-    return out;
+    const scan = this.find(q.scan);
+    const f = Math.min(1, scan.status.progress.bytes / Math.max(1, scan.tree.totalBytes));
+    return f >= 1 ? out : { ...out, root: scaleRing(out.root, f) };
   }
 
   path(scan: number, node: number): string {

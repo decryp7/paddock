@@ -589,6 +589,33 @@ default provider, reqwest's `rustls`) sets `AWS_LC_SYS_NO_JITTER_ENTROPY = { val
 variant, which the build script reads first. Windows 0xc0000409 is any self-triggered abort (`abort()`, `__fastfail`,
 `/GS`), not proof of a buffer overrun: look for a C `abort()` first.
 
+## Per-host CI state keyed by app and job breaks with two jobs on one host (2026-10-28, CI kit)
+
+Planning several jobs at once on one host (more runners per host) showed that every kept folder of the kit was named
+after the app and job only: a second run of the same job would have replaced the first one's checkout
+(`stable-workspace`), killed its test processes and deleted its temp folders (`host-cleanup`), pruned its build folder,
+and stopped its sccache server (one fixed port). The runner already gives every job a folder of its own
+(`<workdir_parent>/<16 hex>/`, `RUNNER_TEMP` in it, removed after the job). **Rule (ADR 0025):** what need not outlive the
+job goes in the runner's job folder; what must stay warm is a kept folder of the job's slot, declared once in
+`conformance/ci/kept-folders.txt` and reached only through `conformance/ci/job-isolation.sh`; process patterns are
+anchored on `{tmp}`, `{build}` or `{slot}`, never on a shared name.
+
+## A lock that can be reclaimed races; take an OS lock and act while holding it (2026-10-28, CI kit)
+
+The first job-slot lock was a `mkdir` with an owner file and a reclaim when the owner looked dead; the review found two
+jobs could both hold a slot (rename away, check, move back), and the disk sweep checked "slot idle" and then deleted, so a
+job could take the slot in between. **Rule:** a lock between processes is an OS file lock held by a process that lives as
+long as the owner (`paddock-slots`, `./dev ci slot`: the kernel frees it when the holder dies, so nothing is reclaimed),
+and work that needs "nobody holds X" runs while holding X's lock (`./dev ci slot idle-run`), never after a check.
+
+## A CI script tested only on the Mac's bash 3.2 can break in bash 5 (2026-10-28, CI kit)
+
+`job-isolation.sh` passed every test on the Mac and failed in CI's containers (bash 5.2): `patsub_replacement` made a
+backslash in `${v//p/r}`'s replacement an escape (every scoped process pattern became an invalid regular expression), and
+command substitutions dropped `-e` (a missing CI home became an empty one). **Rule:** a CI shell script never puts a
+computed value into `${v//p/r}`'s replacement (concatenate instead), sets `shopt -s inherit_errexit`, checks a value a
+substitution must produce, and its tests are also run under the container's bash before pushing (`docker run node:22`).
+
 ## A fake clock next to real processes must not run away from the real one (2026-10-28, Pitcrew)
 Pitcrew's supervision tests drive the supervisor with a fake clock but real runner processes, and failed or timed out
 only on a loaded CI runner (run 6628): (1) a test took the runner's "task started" line for the job's process, then
@@ -691,6 +718,29 @@ Results: [Debrief](../apps/debrief/docs/performance.md#2026-10-29-incremental-re
 [Dyno release identity](../apps/dyno/docs/performance.md#2026-10-29-release-identity-of-the-rlib-only-crate-type-docslink-time);
 details: [research/2026-10-29-link-time.md](research/2026-10-29-link-time.md).
 
+## Test isolation (Debrief, 2026-10-29)
+- `import-range.spec.ts` failed now and then ("expected undefined to be ImportRangeDialog") in full `ng test` runs only.
+  `ImportRange` opens its dialog through `openLazy`, whose chunk arrives after an unknown number of event-loop turns; the
+  spec waited `settle(undefined, 2)`. On a loaded machine the dialog was not open yet. Earlier the same day `live/components.spec`
+  (commit a78de2d86) had patched `FakeDock.prototype.setTitle` and restored it only on the last line, so a failing `expect` leaked the patch.
+- **Wait on the condition, never on a count of event-loop turns.** `openDialog(dialogs)` (`testing/helpers.ts`) waits with
+  `vi.waitFor` and fails when no dialog opens. To prove a fix, model the slow case (a chunk that takes 25 turns) so the
+  old wait fails every time, not now and then.
+- **An optional chain never performs a test's action.** `dialogs.stack().at(-1)?.ref.close()` does nothing when the
+  dialog is missing, so the test passes or hangs on the next `await`.
+- **A prototype patch is always a `vi.spyOn` under `restoreMocks`,** also restored after each test by a global
+  `afterEach(vi.restoreAllMocks)` in `test-setup.ts` (specs share a page, `isolate: false`). Assigning to a prototype, or
+  `Object.defineProperty`/`assign` on one, is banned in specs by ESLint (rule 49, ER-21).
+- **Known gaps of the lint (Debrief only, today):** a prototype reached through a variable (`const proto = X.prototype;
+  proto.y = …`) and a patch on a shared object (`Object.defineProperty(navigator, …)`, `document`, `window`,
+  `globalThis`) are not flagged. **Follow-up branch (planned):** move the selectors into the shared
+  `@decryp7/paddock-eslint` preset, add a shared-object rule (fix: `vi.spyOn(obj, name, 'get')` or `vi.stubGlobal`) and
+  convert Debrief, Dyno and Pitcrew.
+  Non-dialog optional-chain actions (about 54 in Debrief specs, e.g. `buttons[1]?.click()`, `handlers[0]?.(…)`) are not
+  flagged yet; the follow-up bans `ExpressionStatement > ChainExpression` in specs, keeps cleanups such as
+  `getSelection()?.removeAllRanges()` with a disable comment, and converts the rest to `!` or `el()`. It also catches
+  `menu?.items[0]?.run()`.
+
 ## 2026-10-29: a "global" input must mean every build, or the branch runs everything (affected planner)
 
 `scripts/affected.mjs` treated the whole of `.gitea/`, the planner's own files, `.cargo/`, `lint/` and `conformance/(ci|release)/`
@@ -722,3 +772,273 @@ Nobody asked whether more workers or a cheaper operation would help until the nu
 any slow operation, measure both: can more threads or workers run it (bounded by the kind of work), and can each item cost
 less? Make thread counts Settings with an "Auto" default, and give long or bulk designs a "Parallelism and cost" section
 (rule 51).
+
+## Long work in an agent needs the shell's job mechanism, not a poll of our own (2026-10-29, Dyno)
+Dyno's first jobs (6c73efd75) polled the agent for their status with a runner of their own: the shell's Jobs view stayed empty,
+the pages had two mechanisms, every UI request still had a 15 s timer, and a log read could be cancelled only between logs.
+**Rule:** work that runs in another process pushes its `paddock_jobs::wire::WireSnapshot`s, the shell relays them as
+`paddock://jobs`, and the pages follow with `JobsStore` and `JobFollow`; the UI has no timer at all (the shared
+`uiTimeoutProblems` check runs over the app's sources as a test). A tool that streams its output is read line by line with
+`OnCancel` killing the child, so Cancel does not wait for the next line, and the reading happens on a thread of its own: a
+killed shell's own children keep its pipe open. Anything that waits for another read waits on a `Condvar` that Cancel also wakes.
+**Also:** a store that every dialog window shares must not ask for the shell's jobs store at construction (it sends a request the
+dialog's contract may not declare); resolve it when a job starts.
+
+## 2026-10-29: a window built inside a plugin hook deadlocks the main thread (Spotter, Dyno, Pitcrew, the demos)
+
+Spotter 1.0's release build never opened a window: the process kept running, `sample` showed the main thread waiting
+on a mutex and nothing reached the log. Symbolised (a debug build in a throwaway Tart VM), the main thread was in
+`tauri::Builder::build` → `AppManager::initialize_plugins` → the shell plugin's `setup` → the app's set-up closure →
+`paddock_window::tauri::start` → `create_main` → `WebviewManager::prepare_pending_webview` →
+`Mutex<PluginStore>::lock`. Tauri 2 holds its plugin store while it runs every plugin's `setup`, `on_event`,
+`on_page_load`, `on_window_ready` and `on_webview_ready`, and building a webview locks that store again on the same
+thread. Not VM-specific: the same deadlock reproduces on Tauri's mock runtime. Five apps had the same mistake (Spotter,
+Dyno, Pitcrew's shell branch and both demos) and the shell's run-event hook a sixth (Dock click, Finder "Open with").
+**Rule (ADR 0029):** the shell opens the start (`Builder::tray`, `Builder::launch`, `Builder::add_to`); apps never call
+`paddock_window::tauri::start`; window work a hook triggers runs after it (`after_plugin_hook`); every shared plugin
+marks its hooks with `plugin_hook_scope`, and Paddock's window builders refuse to build inside one. Each app tests its
+composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor Dyno installed a backend for the `log`
+crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
+(`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
+not by guessing at the VM.
+
+## A work-stealing test picked its victim by position (2026-10-29, paddock-download)
+`a_slow_range_is_split_so_neither_the_tail_nor_the_hash_waits_on_it` made the range at offset 0 slow and expected it to be
+split. On a loaded Windows runner (CI 7110) its worker was descheduled before sending the request, and the other workers
+split the unstarted range below the split threshold, so nothing was left to split. **Guidance:** a test about work stealing
+must not pick the victim by its position; gate the fake so the victim is in flight before a stealer can run (ADR 0031,
+rule 49).
+
+## 2026-10-29: a host runner's temp folder is the user's temp folder (CI hermeticity, ER-14)
+
+On the Mac host runner, `os.tmpdir()` and Rust's `temp_dir()` are the runner user's `/var/folders/.../T`, the same folder
+the agents' local test runs on that Mac use. Debrief's leak check snapshotted and checked it, so a local run that died
+during a CI job made the job fail with leaks it did not cause, and the CI tests wrote there too. **Guidance:** every job
+on a host runner that runs tests or checks a folder gets a folder of its own first: the shared `job-tmpdir` action
+(`RUNNER_TEMP/t` as `TMPDIR`, `TMP`/`TEMP` on Windows; removed as the last step), and checks name that folder explicitly
+(`--dir "$PADDOCK_JOB_TEMP"`). A conformance test holds every job that runs `check-temp-leaks.mjs` to it.
+
+Review of the fix (2026-10-29): a job's own temp folder is not enough. **Sockets fall back to `/tmp`** when the temp path is
+too long (the runner's per-job folder is), so the leak check and the tests still met other runs there. A short socket
+folder per job (`PADDOCK_SOCKET_BASE`, `/tmp/pd-XXXXXXXX` from mktemp) comes before `/tmp`; scanning all of `/tmp` (`--shared`) is only
+right in a Linux container, where `/tmp` is the job's. **One owner:** job-isolation's acquire already pointed `TMPDIR` at
+the runner's folder; two mechanisms would disagree, so `conformance/ci/job-tmpdir.sh` is the only code that sets
+`TMPDIR`, `TMP` or `TEMP` (a test fails on any other writer), and every host job gets it through acquire. **macOS'
+bash 3.2** (what `shell: bash` runs on the Mac host) cannot parse an apostrophe inside `${var:?word}`, `${var:-word}`,
+`${var:+word}` or `${var:=word}` within double quotes, nor a `case` with unparenthesised patterns (`a)`) inside `$(...)`:
+write `(a)`. A `$(...)` inside a case branch is fine (an earlier version of this lesson said otherwise). `bash -n` does not
+always catch the second, so a conformance check greps every CI script for both and also runs `/bin/bash -n` where it exists.
+## A fake server's polling timeout belongs after the handshake (2026-10-29)
+Spotter's and `paddock-chromium`'s fake DevTools servers set their 10 ms polling read timeout before
+`tungstenite::accept`, so on a loaded runner a client whose upgrade request came a tick late was dropped mid-handshake
+(Windows os error 10053). Debrief's copy had hit the same bug earlier ("Handshake not finished") and was fixed alone.
+**Rule:** a fake server completes its protocol handshake under a read bound far above any scheduling delay (seconds,
+not ticks) and only then sets its polling timeout; the
+regression test keeps the client quiet for many ticks before it shakes hands. A fix in one copy of duplicated code is
+searched for in the others the same day.
+## An unexplained browser abort needs its cause in the message (2026-10-29)
+`net::ERR_ABORTED` covers every load Chrome cancels before commit: a download, a replacing navigation, the tab's own first
+navigation, and a restart of the browser's network service. Fixing them one guess at a time cost three rounds of Windows
+CI. Ending the network service locally reproduced the Windows trace exactly. **Rule:** a driver error that can have
+several causes says which ones it ruled out (the trace, the network service's process), and a real-browser test drives
+each named cause on purpose (ADR 0030). Diagnostics land before a fix that would hide the cause.
+## 2026-10-29: `ControlOrMeta` follows the test machine, the app follows the page (Dyno's WebKit leg)
+
+Dyno's WebKit e2e on the Linux runner failed every shortcut test (command palette, Settings with `Mod+,`, and the axe
+pass over the palette): `devices['Desktop Safari']` gives the page a Mac user agent, so the shell's `currentPlatform`
+binds `Mod` to Cmd, while Playwright's `ControlOrMeta` resolves on the host (Linux) and pressed Ctrl. The branch runs are
+Chromium-only and the macOS runner has a Mac host and a Mac page, so only the WebKit-on-Linux leg (main pushes) saw it,
+and the Settings tests had been red there since that leg began. **Rule:** e2e tests press the app's shortcuts with
+`pressMod(page, 'Mod+…')` from `@decryp7/paddock-e2e`, which reads the page's navigator; never `ControlOrMeta` for an
+app shortcut. The selftest `mod-key.shot.ts` makes the mismatch on any host by giving the page the other platform.
+## 2026-10-30: CI runners have the VC++ runtime, so only a clean PC or an import check shows a missing one (Dyno, all apps)
+
+On a clean Windows 11 VM, Dyno 1.0's `dyno-agent.exe` exited with 0xC0000135 (`STATUS_DLL_NOT_FOUND`) until Microsoft's
+VC++ redistributable was installed: it imported `VCRUNTIME140.dll`. Every app with a sidecar shipped the same import.
+Tauri's `staticVCRuntime` covers only the main binary, and each sidecar is a crate of its own. No CI job could see it:
+the Windows runners have Visual Studio's build tools and therefore the redistributable, so every build, test, smoke
+run and installer test passed. **Rule (ADR 0032):** every Windows binary links the C runtime statically (`+crt-static`
+in the root `.cargo/config.toml`; every app sets Tauri's `staticVCRuntime` to false, because the two together do not
+link), and every Windows installer build runs `conformance/release/windows-crt-imports.mjs` over the files it ships. More
+generally, a dependency that the build machine has and a user's PC may lack (a runtime, a framework, a font, a driver)
+is checked on the artifact, with an import or bundle check, or on a clean machine, never inferred from a green CI.
+## A pid is not a process: one test's close could kill another test's browser (2026-10-30)
+`paddock_proc::kill_tree` read the process table, ran `taskkill /T /F`, then killed every pid from that table again. By then
+those pids were free, and Windows hands a freed pid on at once: with four real-browser tests in parallel, the next owner was
+likely another test's Chrome helper, and killing its network service gives exactly the `ERR_ABORTED` trace of the Windows
+flake. That was the suspected cause, and **the suspected cause was disproved by run 7158; the flake has another cause
+(WP-4)**: run 7158 failed with `ERR_ABORTED` on Windows with every identity fix in place and none of the ADR 0030 code
+(handled apart, with a local Windows reproduction). Do not call a cause confirmed until a run shows it, and keep the fix
+for a real mistake apart from the hunt for a flake's cause. The sweep
+found the same mistake in four shapes across the family: a snapshot killed later, a tree built from parent pids (which outlive
+their processes on Windows; an "explorer orphan" then joins a browser's tree and its memory cap), a `killpg(child.id())`
+after `try_wait` had reaped the child, and a pid trusted from a file. The first fix had a gap of its own: macOS's
+`proc_pidinfo` refuses a setuid child (EPERM), so such a child had no identity and ran unsupervised; the start time comes
+from `sysctl(KERN_PROC_PID)` instead, which answers for every process.
+**Rule 53 (ADR 0033):** never act on a reusable OS name (pid, port, temp path) read earlier: hold it (handle, job, listener)
+or verify its identity (`paddock_proc::ProcessId`, pid plus start time) right before acting; trees follow parents by age or
+job membership. Clippy's `disallowed-methods` and check C53 enforce it. **Also:** when a flaky test fails right after
+another test in the same binary ended something, suspect the ending before the failing test; and test an identity source
+with a process of another user, not only your own.
+## 2026-10-30: a caller that waits on macOS `BACKGROUND` threads waits as long as the machine is busy (Debrief)
+
+`debrief-cli`'s `the_report_is_written_as_html_and_never_overwritten_silently` took 3 to 9 s on the Mac runner most of
+the time, 36 s, 63 s and 102 s (timed out) on busy runs, and timed out again in debrief.yml run 7150; on Linux it never
+passed 10 s. The report's analyses run on Debrief's shared mining pool, whose threads
+`debrief_core::threads::lower_priority` put in macOS's QoS class `BACKGROUND`, the lowest class: it is kept to the
+efficiency cores and runs only after default and utility work, with its I/O throttled. While the shared Mac was loaded,
+the CLI's foreground thread waited on workers that barely ran. Measured on the Mac mini with 14 `nice -n 20` CPU hogs,
+which normal-priority threads preempt: the report build went from 0.16 s to as much as 12.7 s while the import beside it
+did not change; with `UTILITY` the same build stayed at 0.09-0.33 s
+([performance.md](../apps/debrief/docs/performance.md), 2026-10-30 block). **Lesson, now rule 52:** work a caller may
+wait for (a report, an analysis, an import blocked on a lock, a download) never runs at an OS's starvable background
+level; lowered means `UTILITY` on macOS, nice 10 on Linux and below-normal on Windows. Family ADR 0020 was amended the
+same day: its `Background` class uses those levels, and only `Idle` work, which nobody waits on, may use the starvable
+ones (check C54).
+## A launchd `Background` job is DARWIN_BG as a whole: thread QoS cannot lift it (2026-10-30, Dyno)
+After Debrief's report waited on `QOS_CLASS_BACKGROUND` pool threads (100 s instead of 3 s on a loaded Mac), Dyno's disk scan
+had the same class, and the agent itself ran as a launch agent with `ProcessType Background`. launchd spawns such a job as
+`POSIX_SPAWN_PROC_TYPE_DAEMON_BACKGROUND`; xnu makes that task DARWIN_BG "always, no exceptions" and clamps every thread of it
+to the `BACKGROUND` band (`osfmk/kern/task_policy.c`, `thread_policy.c`; `ps -M` shows priority 4 on every thread of such an
+agent). Every request of Dyno's app is answered inside the agent, so the whole UI waited on starvable threads, and a thread set
+to `UTILITY` there stays clamped.
+**Rule:** a process that answers requests somebody waits for is never a launchd `Background` (or `Adaptive` without XPC) job;
+use `Standard` and lower individual threads instead, at the gentle levels of rule 52 (`QOS_CLASS_UTILITY`, nice 10,
+`THREAD_PRIORITY_BELOW_NORMAL`). Tests read the class back (`pthread_get_qos_class_np`) and the plist's `ProcessType`.
+On Linux the same goes for the idle I/O class: Dyno's systemd unit now says `IOSchedulingClass=best-effort` with
+`IOSchedulingPriority=7`. **Follow-up (ADR 0020):** Dyno's `dyno_platform::priority::lower_current_thread` copies Debrief's
+`debrief_core::threads::lower_priority`; both go once the shared `paddock_jobs::exec::priority::apply_current(Class)` exists,
+and the shared `paddock-service` renderer's `low_priority()` output moves off the starvable levels then: the systemd
+text (`IOSchedulingClass=idle`) to best effort 7, and the launchd text's `LowPriorityIO` (I/O throttled like the background
+band), both still in its golden files.
+
+## 2026-10-30: on Windows a `BELOW_NORMAL` thread does not run while normal threads are ready (Dyno)
+The batch that lowered every Dyno agent thread to `THREAD_PRIORITY_BELOW_NORMAL` (rule 52's gentle Windows level) turned
+three Windows CI tests red (runs 7166 and 7168): the baselines test found no sample because the sampler had not ticked
+yet, and the counters listing passed its 10 s deadline (2.5 to 7.4 s at normal priority on main). Windows schedules
+strictly by priority: a ready thread of a higher priority always runs first, and a lower one is preempted the moment one
+becomes ready ([Scheduling Priorities](https://learn.microsoft.com/en-us/windows/win32/procthread/scheduling-priorities)).
+The dynamic boosts are for foreground windows, input and finished waits
+([Priority Boosts](https://learn.microsoft.com/en-us/windows/win32/procthread/priority-boosts)); the anti-starvation boost
+for a ready thread that has not run comes only after seconds. That figure is from Windows Internals, not checked against
+Microsoft Learn: its [Priority Inversion](https://learn.microsoft.com/en-us/windows/win32/procthread/priority-inversion)
+page (fetched 2026-10-30) describes AutoBoost, priority floors for the owner of a lock a higher thread waits on, not a
+timed boost. None of this shares the CPU the way macOS QoS or Linux nice do, so on a machine whose cores are busy with
+normal work, a lowered thread waits seconds at a time. A review then found more threads a person waits on that ran
+lowered: the pinned counters reading (it holds one of the two slots the Counters page's requests use, so stalled readings
+would make a request come back Busy), the reverse DNS behind Look up names, the Network page's traffic refresh and the
+deadline probes at the start of a scan. **Rule (rule 52, amended):** every thread has a role. Live work is what a person
+waits on within a deadline or for a screen to fill (requests, probes with a deadline, a sampler, a page refresh) and stays
+at `THREAD_PRIORITY_NORMAL` on Windows; bulk work is long work with progress and Cancel (walks, scans, compaction,
+exports), is lowered on every OS, and on Windows accepts stalls of seconds. Dyno decides the level in one place,
+`dyno_platform::priority::level(ThreadRole, Os)`, and a test per call site reads the role back
+(`priority::current_role`).
+
+## 2026-10-30: newer Windows 11 builds list a listener with `dwState` 0; the table says it listens (Dyno)
+Dyno's Windows socket tests failed on the CI runner from 2026-10-29 on, with the same commit that had passed hours before.
+A first fix assumed a short-lived BOUND state (100) and re-read the tables for ten seconds; the real value, printed only
+after the reader kept undocumented states as `UNKNOWN (n)` (CI job 22533), was 0, which `MIB_TCP_STATE` does not define,
+for the test's own listener, while the accepted connection on the same port was ESTABLISHED. The runner had just
+installed the optional preview update KB5127653 (Windows 11 26H1, build 28000.3365, 2026-10-28); its release notes say
+nothing about the TCP tables
+([Release Preview build 28000.3351](https://learn.microsoft.com/en-us/windows-insider/release-notes/release-preview-26h1/build-28000-3351)),
+and another project saw the same on build 26340.9596
+([Hyact/workbuddy-switch-plus#2](https://github.com/Hyact/workbuddy-switch-plus/pull/2)); a build 26300 VM still reports 2.
+**Rule:** never decide what an OS record is from an undocumented or drifting field when a documented source says it:
+Windows documents `TCP_TABLE_OWNER_PID_LISTENER` as all listening endpoints
+([TCP_TABLE_CLASS](https://learn.microsoft.com/en-us/windows/win32/api/iprtrmib/ne-iprtrmib-tcp_table_class)), so Dyno
+reads the listener and connections tables and keeps a value it cannot name as `UNKNOWN (n)`. And when a test fails on
+a value nobody can see, first make the product report the raw value, before guessing a fix.
+
+## 2026-10-30: a stored UTC offset nobody filled in made every "local" day a UTC day (Dyno)
+The Issues e2e test failed on CI at 00:07 UTC: it ran on the wall clock against mock issues dated relative to it (the newest
+35 minutes ago), so there was nothing "Today" in the first 35 minutes after midnight (a test bug, fixed by pinning the clock
+and zone). The audit behind it found a real one: the engine took local days from a setting, `utcOffsetMinutes`, that defaulted
+to 0 and that nothing in the product set, so today's score, quiet hours, "until tomorrow", maintenance windows, baseline words
+and Time Machine dates were all in UTC while the UI showed local days. **Rule:** local time is a port read from the OS for each
+instant (daylight saving included), never a stored offset; every day boundary goes through one set of day functions; and a test
+of anything with "today" in it pins both its clock and its time zone, and runs once in a zone far from UTC (Dyno ADR 0024).
+
+## Read the failing environment's own logs before building a reproduction (2026-10-30)
+Windows CI failed one real-browser load in nearly every crate job with `net::ERR_ABORTED` and no connection at the test
+server. Four rounds guessed at the driver (first navigation, pid reuse, a network-service restart during the load), and
+the local Windows VM never reproduced it: it is Arm, and Chrome never sandboxes the network service on Arm, so the VM
+cannot take the code path CI takes. The Chrome logs that CI had already kept as artifacts showed what differs on Windows:
+in every browser the testing config's sandboxed network service could not start (Chrome for Testing in a user folder
+grants app containers nothing) and was started again unsandboxed. The lost loads came 3 to 4 s later, when the profile's
+own requests failed too, so the restart was a lead, not a proven cause, until CI run 7170 (testing config off) ran 25
+Windows browsers with no second start, no failed profile request and no lost load. **Rule:**
+for a flake, read the evidence the failing environment already wrote (logs, artifacts, the program's own counters) before
+building a local reproduction; check that a reproduction can take the same code path (architecture, feature flags,
+sandbox); and write a cause down as confirmed only after a run without it. Test the suspected cause directly (the
+browser's own count of failed helper starts is zero), so the check fails on every run, not only on the unlucky ones.
+**Follow-up:** the apps' runtime store keeps Chrome for Testing under the user's local app data, which grants app
+containers nothing either; granting S-1-15-2-1 and S-1-15-2-2 read and execute there at install time is still to do.
+
+## A count of a queue's contents is a reservation, never a separate copy (2026-10-30, Debrief)
+The Event Log follower kept its queue length in an atomic counter beside the bounded channel: readers added after a send,
+the writer subtracted after taking a batch. The two updates were never atomic with the channel, so the count raced both
+ways: first it dipped below zero and showed 18446744073709551615 (7d38d47a0 clamped it, which hid the cause), then it
+showed 5 queued with a capacity of 4 when a reader refilled the slots the writer had freed before the writer counted them
+out (debrief.yml run 7175, at load 40; fixed in b935d03a6). This is the second instance of one pattern (ER-21). **Rule:**
+a count of a queue's contents is a reservation taken before the send and given back after the take, never a separate copy
+updated after; then it stays between what the queue holds and its capacity by construction, needs no clamp, and doubles
+as the back-pressure. Test such a race by stalling one thread at the hand-over point (a probe or barrier), never by load.
+
+## An unbuilt UI hid a broken installer build because tests passed (2026-10-30, Dyno)
+Dyno's release workflow had no `prepare: npm run build -w ui`. Every test passed, but every installer build failed on a
+clean runner; a leftover `ui/dist` in the working trees had hidden it. **Rule:** a change to an app's release path
+(release workflow, shared app-release workflow, bundle and prepare steps, Tauri config, imports of shared packages) is
+proved by building that app's installers (`<app>-release.yml` with gates on and the bundle built) before it lands on
+main (rule 54). The ci-actions test now checks that every release workflow whose app imports `@decryp7/paddock-ui`
+builds the UI.
+
+## A discovery file is a hint, never proof (2026-10-30, Dyno)
+Dyno's `agent.json` (the file that names the agent's pid and port) outlived its agent. The app read it, took it for a
+live agent, showed a false "Agent stopped" and looped on exit code 3. Separately, `Plan::Replace` deleted a
+file it no longer owned: it had read the file earlier and removed it later, after a newer agent had written its own.
+**Rule (53, amended):** a file that names a pid or port is only a hint. Act on it after a held lock or a live connection
+proves the process is there, and remove it only if it is still the same file (same pid and start time). This is rule 53's
+reusable-name rule applied to files.
+
+## A bug-fix review runs a mutation check (2026-10-30)
+Rule 5 asks for a failing test first, but a reviewer reading the diff cannot tell whether the new test would have
+failed without the fix: a test written after the fix may never have failed. **Rule (5, amended; user, 2026-10-30):**
+the reviewer of a bug fix runs a mutation check on the fix (`cargo mutants --in-diff <diff>` for Rust where available,
+otherwise, and for TypeScript, revert the fix and run the new test), in the reviewer's own worktree with a bounded run
+(`-p <crate>`, `--timeout-multiplier`, `CARGO_BUILD_JOBS=2`), and reports whether the test fails. **Follow-up, not
+built:** a CI job that runs `cargo mutants --in-diff` over the shared crates' changes, to be added after the releases.
+
+## A start window on a wall clock doubled Dyno's agent on a cold disk (2026-10-30, Dyno)
+In a fresh macOS VM (a 32 MB binary took 50 s to read) the first launch of Dyno 1.0 ran two `dyno-agent run` children
+on one `dyno.db`; after Quit one stayed as an orphan. The app's log showed the cause: the link gave up on its agent after
+a fixed 5 s (`SPAWN_WAIT`), started another after a 2 s backoff, and its launcher dropped the first process's handle when
+it stored the second, so Quit stopped only the newest. Nothing stopped a second agent either: no lock on the data folder,
+and a busy database looked damaged to the store, which moves a damaged file aside. **Rule:** a single-instance process
+holds an OS lock for its whole life (a file lock on its data folder) and a second one exits before it opens anything; a
+host waits for a child it started on the child's run state (ADR 0031), never starts another while it holds one, and ends
+it through the handle it holds (rule 53). Reproduce with a start gated by the test, not with load.
+
+**Follow-up (review of the hand-over, 2026-10-30):** a wait judged on run state still needs a way out the user can see.
+Three waits could show only "Starting..." forever: a service that "supervises" on paper (switched off in Login Items,
+job dropped), a child that runs but never writes its discovery file, and another agent holding the lock after its file
+was deleted. **Rule:** every wait without a time limit reports a cause and a Retry once it is long (ER-19), a "ready"
+discovery file must be newer than the wait or answer (a stale file caused exit-3 launch loops and a false "Agent
+stopped"), and a supervisor's claim is checked against the lock, which nothing can fake. Open: kickstart after hand-over,
+re-probing `RequiresApproval`, the `is_held` probe rate, the `/tmp/Dyno` fallback (ADR 0010 §11).
+
+## Five fixes in two days meant a supervisor with no owner and no state (2026-10-30, Dyno)
+Dyno's agent link needed five rounds of fixes on the release path (a fixed wait that doubled the agent, endless silent waits,
+a stale discovery file taken as ready, a launch before a Windows lock was released, a quit outcome read twice), each approved in
+review and each followed by a failure on another OS. The cause was not any one interleaving: the supervisor had no single
+owner and no explicit state. Five threads wrote 12 flags, "which wait are we in" was the function being executed, and each
+decision was assembled from several reads that other threads and the OS changed in between. **Rule:** a supervisor of a
+process (start, find, hand over, stop) is a pure `step(event) -> commands` machine with one owner thread; its phase says what
+it waits for; every answer from the world carries the number of the thing it is about (look, connect, child generation,
+connection) and a stale one is dropped; a child is held until its end is reported; a decision that must not change (the quit
+outcome) is taken once, in `step`, and stored; the owner never blocks (slow ports answer as events); every transition is
+published and tests wait on it, not on flags or sleeps. Prove the machine with a bounded model check of every interleaving,
+and prove the check by making each historical bug a mutant it must catch (Dyno ADR 0025). Two things the first prototype got
+wrong and a review caught: releasing the child before it is gone (a second agent while the first still runs), and an event
+without the generation it is about (an old child's exit taken for the new one's).
+

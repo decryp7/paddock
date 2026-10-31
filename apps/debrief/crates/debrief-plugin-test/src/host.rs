@@ -8,7 +8,8 @@ use debrief_plugin_api::protocol::{HostRequest, WireViewRecord, READ_CHUNK};
 use debrief_plugin_api::tools::ToolTask;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::Duration;
 
 /// A tool task report the plugin sent.
 #[derive(Debug, Clone, PartialEq)]
@@ -51,6 +52,8 @@ pub(crate) struct FakeHost {
     pub(crate) tasks: Mutex<Vec<TaskReport>>,
     /// Bytes the plugin read through `ReadFile`.
     pub(crate) bytes_read: AtomicU64,
+    /// Signalled after every read, so a waiter wakes on the bytes arriving instead of polling a clock.
+    read_signal: (Mutex<()>, Condvar),
 }
 
 impl FakeHost {
@@ -78,6 +81,16 @@ impl FakeHost {
         lock(&self.views).remove(&id);
     }
 
+    /// Waits up to `slice` for the plugin to have read `target` bytes in total; true once it has. Woken by each read.
+    pub(crate) fn wait_bytes_read(&self, target: u64, slice: Duration) -> bool {
+        let (mutex, cv) = &self.read_signal;
+        let guard = lock(mutex);
+        let (_guard, _) = cv
+            .wait_timeout_while(guard, slice, |_| self.bytes_read.load(Ordering::Acquire) < target)
+            .unwrap_or_else(|p| p.into_inner());
+        self.bytes_read.load(Ordering::Acquire) >= target
+    }
+
     fn view(&self, ticket: u64) -> Result<Arc<Vec<WireViewRecord>>, RemoteError> {
         lock(&self.views)
             .get(&ticket)
@@ -97,7 +110,10 @@ impl Handler for FakeHost {
                     .ok_or_else(|| RemoteError::new(code::INVALID, "unknown file"))?;
                 let start = usize::try_from(offset).unwrap_or(usize::MAX).min(data.len());
                 let end = start.saturating_add(len.min(READ_CHUNK) as usize).min(data.len());
-                self.bytes_read.fetch_add((end - start) as u64, Ordering::Relaxed);
+                self.bytes_read.fetch_add((end - start) as u64, Ordering::Release);
+                // Taking the lock orders this notify after a waiter's check, so no wake-up is lost.
+                drop(lock(&self.read_signal.0));
+                self.read_signal.1.notify_all();
                 encode_reply(&data[start..end].to_vec())
             }
             HostRequest::ViewSelect { ticket, filter, limit } => {

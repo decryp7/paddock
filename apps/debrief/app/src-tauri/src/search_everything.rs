@@ -111,6 +111,18 @@ pub async fn search_everything<R: Runtime>(
     state: CurrentWindow,
     request: SearchAllRequest,
 ) -> CmdResult<Option<SearchAllReply>> {
+    search_with(app, state, request, |replaced| Control::new(search_all::BUDGET, replaced)).await
+}
+
+/// [`search_everything`] with the search's [`Control`] made by `control` from the "a newer search replaced this one"
+/// check (the command gives it the time budget; tests give it no limit or a zero one, so the answer never depends on
+/// the machine's load).
+pub(crate) async fn search_with<R: Runtime>(
+    app: AppHandle<R>,
+    state: CurrentWindow,
+    request: SearchAllRequest,
+    control: impl for<'a> FnOnce(&'a (dyn Fn() -> bool + Sync)) -> Control<'a> + Send + 'static,
+) -> CmdResult<Option<SearchAllReply>> {
     let label = key(&app, state.label());
     let id = begin(&label);
     let corpus = corpus(&app, &state);
@@ -119,7 +131,8 @@ pub async fn search_everything<R: Runtime>(
         let label = label.clone();
         crate::sync::blocking("search everything", move || {
             let replaced = move || !is_newest(&label, id);
-            match search_all::run(store.as_ref(), &corpus, &request, &Control::new(search_all::BUDGET, &replaced)) {
+            let control = control(&replaced);
+            match search_all::run(store.as_ref(), &corpus, &request, &control) {
                 Ok(reply) => Ok(reply),
                 Err(SearchAllError::Cancelled) => Ok(None),
                 Err(e @ SearchAllError::Invalid(_)) => Err(CmdError::new(ErrorCode::Invalid, e.to_string())),
@@ -164,14 +177,33 @@ mod tests {
     use debrief_core::search_all::KindOutcome;
 
     fn search(app: &tauri::App<tauri::test::MockRuntime>, text: &str) -> CmdResult<Option<SearchAllReply>> {
-        block(search_everything(
+        search_in(app, text, |c| Control::unbounded(c))
+    }
+
+    fn search_in(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        text: &str,
+        control: impl for<'a> FnOnce(&'a (dyn Fn() -> bool + Sync)) -> Control<'a> + Send + 'static,
+    ) -> CmdResult<Option<SearchAllReply>> {
+        block(search_with(
             app.handle().clone(),
             main_window(app),
             SearchAllRequest {
                 text: text.into(),
                 limit: 0,
             },
+            control,
         ))
+    }
+
+    #[test]
+    fn a_search_out_of_budget_says_which_kinds_were_not_searched() {
+        let app = test_app(None);
+        let reply = search_in(&app, "timeout", |c| Control::new(std::time::Duration::ZERO, c))
+            .unwrap()
+            .expect("words");
+        assert_eq!(reply.notes.outcome, KindOutcome::TimedOut);
+        assert_eq!(reply.notes.total, 0);
     }
 
     #[test]
@@ -195,6 +227,7 @@ mod tests {
         let found = search(&app, "timeout").unwrap().expect("words");
         assert!(found.events.total > 0, "the samples log timeouts");
         assert!(found.events.items.iter().all(|e| e.snippet.iter().any(|p| p.mark)));
+        assert_eq!(found.notes.outcome, KindOutcome::Complete, "the notes search did not complete");
         assert_eq!(found.notes.total, 1);
         assert_eq!(found.notes.items[0].title, "Gateway timeouts");
         assert_eq!(found.notes.items[0].event, None);

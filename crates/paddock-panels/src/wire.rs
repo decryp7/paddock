@@ -153,6 +153,9 @@ pub enum PanelErrorCode {
     NotAllowed,
     /// The platform refused (the message says how).
     Failed,
+    /// Asked for inside a Tauri plugin hook, where building a webview would deadlock (a wiring bug: open pop-outs from
+    /// commands, events or after the hook).
+    InsidePluginHook,
 }
 
 /// Why a panel command failed (the command's error).

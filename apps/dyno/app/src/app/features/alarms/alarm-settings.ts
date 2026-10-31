@@ -77,7 +77,7 @@ export class AlarmSettings {
   protected readonly alarms = inject(AlarmsStore);
   private readonly notifier = inject(Notifier);
   protected readonly net = computed<NetworkAlerts>(() => this.settings.settings()?.networkAlerts ?? { newExposedListener: false, newRemoteHost: false });
-  protected readonly config = computed<AlarmConfig>(() => this.settings.settings()?.alarms ?? defaultAlarmConfig(-new Date().getTimezoneOffset()));
+  protected readonly config = computed<AlarmConfig>(() => this.settings.settings()?.alarms ?? defaultAlarmConfig());
   protected readonly quiet = computed(() => this.config().quiet);
   protected readonly clock = minutesToClock;
 

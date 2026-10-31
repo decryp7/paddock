@@ -1,6 +1,7 @@
 //! Running a program to completion with a timeout and an output cap. On a timeout, or when the output reaches the cap
 //! and the caller asked to stop there, the whole process tree is ended and reaped, so no helper is left behind.
 
+use crate::identity::ProcessId;
 use crate::tree::kill_tree;
 use std::io::Read;
 use std::process::{Command, ExitStatus, Stdio};
@@ -197,7 +198,15 @@ pub fn run_bounded(mut cmd: Command, limits: Limits) -> Result<Output, RunError>
         std::io::ErrorKind::PermissionDenied => RunError::PermissionDenied(name.clone()),
         _ => RunError::Spawn(name.clone(), e),
     })?;
-    let pid = child.id();
+    // Taken before the waiter thread can reap the child: by the time a timeout ends the tree, the program may have exited
+    // and its pid been handed on, so the tree is ended by identity (ADR 0033).
+    let root = ProcessId::of(child.id());
+    if root.is_none() {
+        log::warn!(
+            "The start time of {name} (pid {}) could not be read: a timeout or the output cap cannot end its tree",
+            child.id()
+        );
+    }
     let (tx, rx) = mpsc::channel();
     let mut pipes = 0;
     let out = child.stdout.take().map(|s| {
@@ -230,7 +239,9 @@ pub fn run_bounded(mut cmd: Command, limits: Limits) -> Result<Output, RunError>
             Ok(Event::Cap) => {
                 if killed_at.is_none() {
                     stopped = Some(Outcome::OutputCap);
-                    kill_tree(pid);
+                    if let Some(r) = root {
+                        kill_tree(r);
+                    }
                     killed_at = Some(Instant::now());
                 }
             }
@@ -240,7 +251,9 @@ pub fn run_bounded(mut cmd: Command, limits: Limits) -> Result<Output, RunError>
                     if status.is_none() {
                         stopped = Some(Outcome::TimedOut);
                     }
-                    kill_tree(pid);
+                    if let Some(r) = root {
+                        kill_tree(r);
+                    }
                     killed_at = Some(Instant::now());
                 } else {
                     break;
@@ -343,7 +356,12 @@ mod tests {
             .find_map(|l| l.strip_prefix("pid "))
             .and_then(|p| p.parse().ok())
             .expect("the child told its grandchild's pid before the timeout");
-        assert!(!crate::is_alive(pid), "the grandchild survived the timeout");
+        // The pipes reach EOF, and the run returns, a moment before the killed grandchild stops showing as running (Windows
+        // ends a process asynchronously): wait on that state with a deadline, as the other tree tests do.
+        assert!(
+            crate::testchild::is_gone(pid),
+            "the grandchild survived the timeout"
+        );
     }
 
     #[test]

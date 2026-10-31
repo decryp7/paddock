@@ -3,10 +3,11 @@
 //! Right-click search, hash search, startup filter and network change events end to end over the fake
 //! platform: a real IPC connection and a real SQLite file in a temp folder. Files are created only in temp folders.
 
-use dyno_agent::cli::{ask, connect};
+use dyno_agent::cli::{ask, connect, run_job};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_core::history::HistoryRange;
+use dyno_core::jobs::{JobOutput, JobSpec};
 use dyno_core::netchange::{Link, LinkKind, NetState};
 use dyno_core::process::ProcessRef;
 use dyno_core::protocol::{LiveDetail, Message, Reply, Request, TimelineEventKind};
@@ -126,21 +127,21 @@ fn a_search_seed_is_redacted_and_the_url_is_built_from_the_confirmed_text_only()
         .contains("Type something"));
 }
 
+/// Hashes through a job and waits for it.
+fn hash(peer: &Peer<Message>, source: HashSource) -> Result<dyno_core::weblinks::FileHashInfo, String> {
+    match run_job(peer, JobSpec::FileHash { source }, Duration::from_secs(30))? {
+        JobOutput::FileHash(info) => Ok(info),
+        other => panic!("{other:?}"),
+    }
+}
+
 #[test]
 fn a_file_hash_is_computed_here_and_the_virustotal_address_holds_only_the_hash() {
     let h = Harness::start(|_| {});
     let peer = h.client();
     let f = h.folder("progs").join("tool.bin");
     std::fs::write(&f, b"abc").unwrap();
-    let Reply::FileHash(info) = ask(
-        &peer,
-        Request::FileHash {
-            source: HashSource::Path(f.to_string_lossy().into_owned()),
-        },
-    )
-    .unwrap() else {
-        panic!("hash")
-    };
+    let info = hash(&peer, HashSource::Path(f.to_string_lossy().into_owned())).unwrap();
     assert_eq!(info.sha256, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     let Reply::Url(u) = ask(
         &peer,
@@ -157,13 +158,7 @@ fn a_file_hash_is_computed_here_and_the_virustotal_address_holds_only_the_hash()
         .contains("64 hexadecimal"));
     // A relative path, a folder and a missing file are refused with a reason.
     for bad in ["relative", h.tmp.path().to_str().unwrap(), "/definitely/not/here"] {
-        let e = ask(
-            &peer,
-            Request::FileHash {
-                source: HashSource::Path(bad.into()),
-            },
-        )
-        .unwrap_err();
+        let e = hash(&peer, HashSource::Path(bad.into())).unwrap_err();
         assert!(!e.is_empty(), "{bad}");
     }
     // A process that is not running (a reused pid) is not found.
@@ -171,14 +166,7 @@ fn a_file_hash_is_computed_here_and_the_virustotal_address_holds_only_the_hash()
         pid: 100,
         started: Some(Timestamp(1)),
     };
-    assert!(ask(
-        &peer,
-        Request::FileHash {
-            source: HashSource::Process(gone)
-        }
-    )
-    .unwrap_err()
-    .contains("exited"));
+    assert!(hash(&peer, HashSource::Process(gone)).unwrap_err().contains("exited"));
 }
 
 #[test]
@@ -192,15 +180,7 @@ fn a_running_process_is_hashed_from_the_file_it_runs_from() {
     let h = Harness::start(|f| f.add_process(p));
     let peer = h.client();
     h.wait_for_process(300);
-    let Reply::FileHash(answer) = ask(
-        &peer,
-        Request::FileHash {
-            source: HashSource::Process(target),
-        },
-    )
-    .unwrap() else {
-        panic!("hash")
-    };
+    let answer = hash(&peer, HashSource::Process(target)).unwrap();
     assert_eq!(answer.sha256, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 }
 

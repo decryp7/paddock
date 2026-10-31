@@ -195,6 +195,10 @@ fn process_is_alive(pid: u32) -> bool {
 }
 
 /// Kills the worker child this test started (its pid comes from the supervisor, never from a name).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "ADR 0033 WP-5 (test): kills the worker by the pid the supervisor reported; use paddock_proc::end"
+)]
 fn kill_process(pid: u32) {
     let p = sysinfo::Pid::from_u32(pid);
     let mut sys = sysinfo::System::new();

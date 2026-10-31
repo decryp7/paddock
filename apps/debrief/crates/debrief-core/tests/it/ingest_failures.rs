@@ -323,3 +323,66 @@ impl BatchSink for CancelAfterFirst {
         self.inner.abort_source(id)
     }
 }
+
+/// A zip that names one path twice imports both entries (the second as `<stem> (2)<.ext>`) and says so in a notice the
+/// import report lists (the user's decision of 2026-10-29).
+#[test]
+fn a_repeated_path_in_a_zip_imports_both_entries_and_notes_the_rename() {
+    let d = TempDir::new("dup-zip");
+    let files = [("web/app.log".to_string(), LOG.to_vec()), ("web/app.log".to_string(), LOG.to_vec())];
+    let p = d.write("dup.zip", &crate::common::stored_zip(&files));
+    let cancel = AtomicBool::new(false);
+    let mut sink = Sink::default();
+    let out = import_path(&env(&cancel), &p, "dup.zip", &HashSet::new(), &mut sink);
+    let imported: Vec<&str> = out
+        .iter()
+        .filter_map(|o| match o {
+            Outcome::Imported(r) => Some(r.name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(imported, ["dup.zip/web/app.log", "dup.zip/web/app (2).log"], "{out:?}");
+    let notices: Vec<&str> = out
+        .iter()
+        .filter_map(|o| match o {
+            Outcome::Notice(n) => Some(n.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(notices.len(), 1, "{out:?}");
+    assert!(
+        notices[0].contains("dup.zip/web/app (2).log") && notices[0].contains("web/app.log"),
+        "{notices:?}"
+    );
+}
+
+/// Regression (review of c9f283344): the notice for a renamed entry was written before the removed-source filter, so a
+/// source the user had removed still produced one.
+#[test]
+fn a_removed_renamed_entry_gets_no_notice() {
+    let d = TempDir::new("dup-zip-removed");
+    let files = [("web/app.log".to_string(), LOG.to_vec()), ("web/app.log".to_string(), LOG.to_vec())];
+    let p = d.write("dup.zip", &crate::common::stored_zip(&files));
+    let removed: HashSet<PathBuf> = [PathBuf::from(format!("{}!/web/app (2).log", p.to_string_lossy()))].into();
+    let cancel = AtomicBool::new(false);
+    let mut sink = Sink::default();
+    let out = import_path(&env(&cancel), &p, "dup.zip", &removed, &mut sink);
+    assert!(out.iter().all(|o| !matches!(o, Outcome::Notice(_))), "{out:?}");
+    assert_eq!(out.iter().filter(|o| matches!(o, Outcome::Imported(_))).count(), 1, "{out:?}");
+}
+
+/// A cancel set before the archive is opened stops the expansion: nothing is imported and the file is reported as not
+/// imported (ER-18).
+#[test]
+fn a_cancelled_import_does_not_expand_the_archive() {
+    let d = TempDir::new("dup-zip-cancel");
+    let files = [("web/app.log".to_string(), LOG.to_vec()), ("web/app.log".to_string(), LOG.to_vec())];
+    let p = d.write("dup.zip", &crate::common::stored_zip(&files));
+    let cancel = AtomicBool::new(true);
+    let mut sink = Sink::default();
+    let out = import_path(&env(&cancel), &p, "dup.zip", &HashSet::new(), &mut sink);
+    assert!(
+        matches!(out.as_slice(), [Outcome::Unrecognized(u)] if u.reason == NOT_IMPORTED),
+        "{out:?}"
+    );
+}

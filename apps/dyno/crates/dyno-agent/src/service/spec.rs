@@ -24,7 +24,7 @@ pub fn launch_agent_plist(exe: &Path, log_dir: &Path) -> String {
 \t<key>KeepAlive</key>\n\t<true/>\n\
 \t<key>ThrottleInterval</key>\n\t<integer>10</integer>\n\
 \t<key>LimitLoadToSessionType</key>\n\t<string>Aqua</string>\n\
-\t<key>ProcessType</key>\n\t<string>Background</string>\n\
+\t<key>ProcessType</key>\n\t<string>Standard</string>\n\
 \t<key>StandardErrorPath</key>\n\t<string>{log}</string>\n\
 \t<key>StandardOutPath</key>\n\t<string>{log}</string>\n\
 </dict>\n</plist>\n",
@@ -45,8 +45,8 @@ fn systemd_quote(s: &str) -> String {
 /// The systemd user unit: restarted whenever it exits, low priority, started with the user's manager.
 pub fn systemd_unit(exe: &Path) -> String {
     format!(
-        "[Unit]\nDescription=Dyno agent (measures and keeps your PC's history)\nDocumentation=https://dev.decryptology.net/decryp7/dyno\n\n\
-[Service]\nType=simple\nExecStart={exe} run\nRestart=always\nRestartSec=5\nNice=10\nCPUWeight=20\nIOSchedulingClass=idle\nMemoryHigh=256M\n\n\
+        "[Unit]\nDescription=Dyno agent (measures and keeps your computer's history)\nDocumentation=https://dev.decryptology.net/decryp7/dyno\n\n\
+[Service]\nType=simple\nExecStart={exe} run\nRestart=always\nRestartSec=5\nNice=10\nCPUWeight=20\nIOSchedulingClass=best-effort\nIOSchedulingPriority=7\nMemoryHigh=256M\n\n\
 [Install]\nWantedBy=default.target\n",
         exe = systemd_quote(&exe.to_string_lossy())
     )
@@ -81,6 +81,39 @@ mod tests {
         assert!(u.contains("ExecStart=\"/opt/Dyno App/dyno-agent\" run"));
         assert!(u.contains("Restart=always"));
         assert!(systemd_unit(Path::new("/usr/bin/dyno-agent")).contains("ExecStart=/usr/bin/dyno-agent run"));
+    }
+
+    /// The agent answers every request of the app and reads the folders of a disk scan the person watches, so its disk access
+    /// is never at Linux's idle I/O class, which reads only when nothing else uses the disk (rule 52): best effort at the
+    /// lowest priority instead, which a busy disk slows but never stops.
+    #[test]
+    fn the_unit_never_uses_the_idle_io_class() {
+        let u = systemd_unit(Path::new("/usr/bin/dyno-agent"));
+        let io: Vec<&str> = u.lines().filter(|l| l.starts_with("IOScheduling")).collect();
+        assert_eq!(io, ["IOSchedulingClass=best-effort", "IOSchedulingPriority=7"]);
+    }
+
+    /// Every request of the app is answered inside the agent, so the agent must not be a launchd `Background` job: launchd
+    /// spawns those as `POSIX_SPAWN_PROC_TYPE_DAEMON_BACKGROUND`, which xnu makes DARWIN_BG with no exceptions
+    /// (`osfmk/kern/task_policy.c`), clamping every thread to the `BACKGROUND` QoS band whatever the thread asks for.
+    /// Checked for both plists: the one `dyno-agent install` writes and the one in the bundle that `SMAppService` registers.
+    #[test]
+    fn the_launch_agent_is_never_a_background_job() {
+        let bundled_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../app/src-tauri/macos/net.decryptology.dyno.agent.plist");
+        let bundled = std::fs::read(&bundled_path).unwrap_or_else(|e| panic!("{}: {e}", bundled_path.display()));
+        let written = launch_agent_plist(
+            Path::new("/Applications/Dyno.app/Contents/MacOS/dyno-agent"),
+            Path::new("/tmp/logs"),
+        );
+        for (name, bytes) in [("bundled", bundled.as_slice()), ("written", written.as_bytes())] {
+            let value = plist::Value::from_reader_xml(bytes).unwrap_or_else(|e| panic!("{name}: not a valid plist: {e}"));
+            let kind = value.as_dictionary().and_then(|d| d.get("ProcessType")).and_then(|v| v.as_string());
+            assert_eq!(
+                kind,
+                Some("Standard"),
+                "{name}: the agent answers the app's requests, so it must not be DARWIN_BG"
+            );
+        }
     }
 
     #[test]

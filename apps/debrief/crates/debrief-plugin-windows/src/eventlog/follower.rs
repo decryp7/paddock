@@ -26,7 +26,7 @@ use debrief_plugin_api::model::{Level, Record};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
@@ -256,18 +256,83 @@ impl Stats {
     }
 }
 
-/// The queue length to report: a brief negative dip (see [`Shared::queued`]) is an empty queue.
-fn queued_now(value: isize) -> usize {
-    usize::try_from(value).unwrap_or(0)
+/// The queue's slots. A reader takes a slot before it sends a record and the writer gives slots back only after it
+/// took their records off the queue, so `used` is never below what the queue holds, never above the capacity, and is
+/// the length the status reports. (Counting after the fact let the status show more than the capacity: the writer
+/// had taken a batch and not yet counted it out when a reader refilled the freed slots.)
+struct Slots {
+    used: AtomicUsize,
+    capacity: usize,
+}
+
+impl Slots {
+    fn new(capacity: usize) -> Self {
+        Slots {
+            used: AtomicUsize::new(0),
+            capacity,
+        }
+    }
+
+    /// Takes one slot; false when all are in use.
+    fn try_take(&self) -> bool {
+        self.update(|used| (used < self.capacity).then_some(used + 1))
+    }
+
+    /// Gives back `n` slots whose records left the queue (or were never sent).
+    fn give_back(&self, n: usize) {
+        self.update(|used| Some(used.saturating_sub(n)));
+    }
+
+    /// Applies `f` atomically; false (and no change) when it returns `None`.
+    fn update(&self, f: impl Fn(usize) -> Option<usize>) -> bool {
+        let mut current = self.used.load(Ordering::SeqCst);
+        while let Some(next) = f(current) {
+            match self.used.compare_exchange_weak(current, next, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => return true,
+                Err(actual) => current = actual,
+            }
+        }
+        false
+    }
+
+    fn used(&self) -> usize {
+        self.used.load(Ordering::SeqCst)
+    }
 }
 
 struct Shared {
     stop: AtomicBool,
     paused: AtomicBool,
-    /// Events handed to the writer and not yet taken. Signed: the writer can take an event (and subtract) a
-    /// moment before the reader that sent it adds, so the value may dip below zero briefly.
-    queued: AtomicIsize,
+    /// The queue's slots; their use is the queue length the status reports.
+    slots: Slots,
     stats: Mutex<Stats>,
+    probe: Probe,
+}
+
+/// Points in the hand-over between readers and the writer, reported to a [`Probe`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HandOver {
+    /// The writer took a batch off the queue and has not written it yet.
+    Taken,
+    /// A reader found the queue full; `queued` is the length the status reported then.
+    Full { queued: usize },
+}
+
+/// Test seam: tests stall a thread at a [`HandOver`] point to force an interleaving; the app passes none.
+#[derive(Clone, Default)]
+pub(crate) struct Probe(Option<Arc<dyn Fn(HandOver) + Send + Sync>>);
+
+impl Probe {
+    #[cfg(test)]
+    pub(crate) fn new(f: impl Fn(HandOver) + Send + Sync + 'static) -> Self {
+        Probe(Some(Arc::new(f)))
+    }
+
+    fn at(&self, point: HandOver) {
+        if let Some(f) = &self.0 {
+            f(point);
+        }
+    }
 }
 
 impl Shared {
@@ -354,6 +419,19 @@ impl Follower {
         limits: Limits,
         on_end: Box<dyn FnOnce() + Send>,
     ) -> Result<Follower> {
+        Self::start_probed(log, config, sink, bookmarks, limits, on_end, Probe::default())
+    }
+
+    /// [`Follower::start`] with a [`Probe`] at the hand-over points.
+    pub(crate) fn start_probed(
+        log: Arc<dyn EventLog>,
+        config: FollowerConfig,
+        sink: Arc<dyn EventSink>,
+        bookmarks: Option<BookmarkStore>,
+        limits: Limits,
+        on_end: Box<dyn FnOnce() + Send>,
+        probe: Probe,
+    ) -> Result<Follower> {
         let live = config.live_xpath();
         let backfill = config.backfill_xpath();
         let mut starts = Vec::new();
@@ -369,10 +447,11 @@ impl Follower {
             });
             resumed.push(bookmark);
         }
+        let capacity = limits.queue.max(1);
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
             paused: AtomicBool::new(false),
-            queued: AtomicIsize::new(0),
+            slots: Slots::new(capacity),
             stats: Mutex::new(Stats {
                 channels: config
                     .channels
@@ -388,8 +467,8 @@ impl Follower {
                     .collect(),
                 ..Stats::default()
             }),
+            probe,
         });
-        let capacity = limits.queue.max(1);
         let (tx, rx) = sync_channel::<Item>(capacity);
         let mut readers = Vec::new();
         for (index, (channel, start)) in config.channels.iter().cloned().zip(starts).enumerate() {
@@ -474,7 +553,7 @@ impl Follower {
             channels: s.channels.clone(),
             errors: s.errors.iter().cloned().collect(),
             unreadable: s.unreadable,
-            queued: queued_now(self.shared.queued.load(Ordering::SeqCst)),
+            queued: self.shared.slots.used(),
             queue_capacity: self.capacity,
             xpath: self.xpath.clone(),
         }
@@ -644,18 +723,25 @@ impl Reader {
     /// Hands `item` to the writer, waiting while the queue is full. False when stopping.
     fn send(&self, mut item: Item) -> bool {
         loop {
-            match self.tx.try_send(item) {
-                Ok(()) => {
-                    self.shared.queued.fetch_add(1, Ordering::SeqCst);
-                    return true;
-                }
-                Err(TrySendError::Full(back)) => {
-                    item = back;
-                    if !self.shared.nap(Duration::from_millis(5)) {
+            if self.shared.slots.try_take() {
+                match self.tx.try_send(item) {
+                    Ok(()) => return true,
+                    // Not reached while every sender takes a slot first; give it back and wait as when full.
+                    Err(TrySendError::Full(back)) => {
+                        self.shared.slots.give_back(1);
+                        item = back;
+                    }
+                    Err(TrySendError::Disconnected(_)) => {
+                        self.shared.slots.give_back(1);
                         return false;
                     }
                 }
-                Err(TrySendError::Disconnected(_)) => return false,
+            }
+            self.shared.probe.at(HandOver::Full {
+                queued: self.shared.slots.used(),
+            });
+            if !self.shared.nap(Duration::from_millis(5)) {
+                return false;
             }
         }
     }
@@ -694,9 +780,8 @@ impl Writer {
                 Err(RecvTimeoutError::Disconnected) => true,
             };
             if !batch.is_empty() {
-                self.shared
-                    .queued
-                    .fetch_sub(isize::try_from(batch.len()).unwrap_or(isize::MAX), Ordering::SeqCst);
+                self.shared.probe.at(HandOver::Taken);
+                self.shared.slots.give_back(batch.len());
                 if let Err(e) = self.write(&mut batch) {
                     self.save();
                     let message = format!("writing the event log files failed: {e:#}");

@@ -6,10 +6,10 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { buildEnv } from '../ci/build-env.mjs';
-import { checkPin, executableIn, install, parseArgs, parseRustPin, platformId, urlFor } from '../ci/install-test-browser.mjs';
+import { checkPin, defaultGrant, executableIn, grantCommand, install, parseArgs, parseRustPin, platformId, urlFor } from '../ci/install-test-browser.mjs';
 import { decide, tagFor } from '../ci/plan.mjs';
 import { firstLaunch, releaseNotes } from '../ci/release-notes.mjs';
-import { makeApp, PADDOCK } from './helpers.mjs';
+import { makeApp, PADDOCK, pe } from './helpers.mjs';
 
 const CI = join(dirname(fileURLToPath(import.meta.url)), '..', 'ci');
 const node = (script, args, env = {}, cwd) => spawnSync(process.execPath, [join(CI, script), ...args], { encoding: 'utf8', cwd, env: { PATH: process.env.PATH, ...env } });
@@ -126,24 +126,51 @@ test('install-test-browser: downloads once, verifies the checksum before extract
     chmodSync(join(to, 'chrome-linux64', 'chrome'), 0o755);
   };
   const fetchBytes = async (url) => { fetched.push(url); return bytes; };
-  const exe = await install({ pin, dir, id: 'linux64', fetchBytes, extract });
+  const granted = [];
+  const grant = (d) => granted.push(d);
+  const exe = await install({ pin, dir, id: 'linux64', fetchBytes, extract, grant });
   assert.equal(exe, join(dir, 'chrome-linux64', 'chrome'));
-  assert.equal(await install({ pin, dir, id: 'linux64', fetchBytes, extract }), exe);
+  assert.equal(await install({ pin, dir, id: 'linux64', fetchBytes, extract, grant }), exe);
   assert.equal(fetched.length, 1, 'the second call found the pinned version');
-  await install({ pin: { ...pin, version: '10.0.0' }, dir, id: 'linux64', fetchBytes, extract });
+  assert.deepEqual(granted, [dir, dir], 'app containers get access on a fresh install and on a reused one');
+  await install({ pin: { ...pin, version: '10.0.0' }, dir, id: 'linux64', fetchBytes, extract, grant });
   assert.equal(fetched.length, 2, 'a new pin downloads again');
+});
+
+test('install-test-browser: on Windows, app containers may read and run the browser (Chrome checks it before a sandboxed helper starts)', () => {
+  assert.equal(grantCommand('/d', 'linux'), null);
+  assert.equal(grantCommand('/d', 'darwin'), null);
+  const [cmd, args] = grantCommand('C:\\ci\\browser', 'win32', { SystemRoot: 'C:\\Windows' });
+  assert.equal(cmd, 'C:\\Windows\\System32\\icacls.exe');
+  assert.deepEqual(args, ['C:\\ci\\browser', '/grant', '*S-1-15-2-1:(OI)(CI)(RX)', '/grant', '*S-1-15-2-2:(OI)(CI)(RX)', '/Q']);
+});
+
+test('install-test-browser: a failed grant warns and the install carries on; no command runs nothing', () => {
+  const ran = [];
+  const warned = [];
+  const warn = (m) => warned.push(m);
+  defaultGrant('C:\\ci\\browser', { command: ['icacls.exe', ['x']], run: (c, a) => ran.push([c, a]), warn });
+  assert.deepEqual(ran, [['icacls.exe', ['x']]]);
+  assert.deepEqual(warned, []);
+  assert.doesNotThrow(() =>
+    defaultGrant('C:\\ci\\browser', { command: ['icacls.exe', ['x']], run: () => { throw new Error('Access is denied.'); }, warn }),
+  );
+  assert.equal(warned.length, 1);
+  assert.match(warned[0], /warning: could not let app containers read C:\\ci\\browser \(Access is denied\.\)/);
+  defaultGrant('/d', { command: null, run: () => assert.fail('nothing to run'), warn });
+  assert.equal(warned.length, 1);
 });
 
 test('install-test-browser: a wrong checksum extracts nothing; a missing platform and a short archive are errors', async () => {
   const pin = { version: '1', base: 'https://x.test', sums: { linux64: 'c'.repeat(64) } };
   const dir = join(makeApp({ 'a.txt': '' }), 'browser');
   let extracted = false;
-  await assert.rejects(install({ pin, dir, id: 'linux64', fetchBytes: async () => Buffer.from('tampered'), extract: () => { extracted = true; } }), /checksum mismatch/);
+  await assert.rejects(install({ pin, dir, id: 'linux64', fetchBytes: async () => Buffer.from('tampered'), extract: () => { extracted = true; }, grant: () => assert.fail('nothing to grant') }), /checksum mismatch/);
   assert.equal(extracted, false);
   assert.equal(existsSync(dir), false);
   await assert.rejects(install({ pin, dir, id: 'win64', fetchBytes: async () => Buffer.alloc(0) }), /no checksum for win64/);
   const bytes = Buffer.from('z');
-  await assert.rejects(install({ pin: { ...pin, sums: { linux64: sha(bytes) } }, dir, id: 'linux64', fetchBytes: async () => bytes, extract: () => {} }), /did not contain/);
+  await assert.rejects(install({ pin: { ...pin, sums: { linux64: sha(bytes) } }, dir, id: 'linux64', fetchBytes: async () => bytes, extract: () => {}, grant: () => assert.fail('nothing to grant') }), /did not contain/);
 });
 
 // ---- tauri-bundle.sh ---------------------------------------------------------------------------------------------------
@@ -209,6 +236,34 @@ test('tauri-bundle: --root is where npm ci runs, and the build-folder action\'s 
   assert.ok(!existsSync(join(root, 'ignored')));
   assert.match(readFileSync(join(root, 'calls.log'), 'utf8'), /npm ci in ws/);
   assert.match(r.stdout + r.stderr, /No updater signing secrets/);
+});
+
+test('tauri-bundle: an NSIS build fails when the app, a sidecar or a bundled library imports the VC++ runtime (ADR 0032)', () => {
+  const conf = JSON.stringify({ version: '1.2.3', mainBinaryName: 'demo', bundle: { externalBin: ['binaries/demo-agent'], resources: { 'binaries/lib/': 'lib/' } } });
+  const nsis = (files) => {
+    const root = bundleRepo({ installers: [] });
+    writeFileSync(join(root, 'app/src-tauri/tauri.conf.json'), conf);
+    for (const [p, b] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, p)), { recursive: true });
+      writeFileSync(join(root, p), b);
+    }
+    return bundle(root, ['nsis']);
+  };
+  const clean = pe({ imports: ['KERNEL32.dll', 'api-ms-win-crt-runtime-l1-1-0.dll'] });
+  const dynamic = pe({ imports: ['KERNEL32.dll', 'VCRUNTIME140.dll'] });
+  const ok = nsis({ 'target/dist/demo.exe': clean, 'target/dist/demo-agent.exe': clean, 'app/src-tauri/binaries/lib/x.dll': clean, 'target/dist/stale-old.exe': dynamic });
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.match(ok.stdout, /3 Windows binaries checked/, 'the shipped files only: a stale exe in the kept build folder is not read');
+  const agent = nsis({ 'target/dist/demo.exe': clean, 'target/dist/demo-agent.exe': dynamic });
+  assert.equal(agent.status, 1);
+  assert.match(agent.stdout, /::error::.*demo-agent\.exe: imports VCRUNTIME140\.dll/);
+  const lib = nsis({ 'target/dist/demo.exe': clean, 'target/dist/demo-agent.exe': clean, 'app/src-tauri/binaries/lib/x.dll': dynamic });
+  assert.equal(lib.status, 1);
+  assert.match(lib.stdout, /x\.dll: imports VCRUNTIME140\.dll/);
+  const missing = nsis({ 'target/dist/demo-agent.exe': clean, 'target/dist/other.exe': clean });
+  assert.equal(missing.status, 1, 'a missing app binary is an error, not a pass');
+  assert.match(missing.stdout, /the app's binary is missing: none of demo\.exe/);
+  assert.doesNotMatch(bundle(bundleRepo(), ['deb']).stdout, /Windows binaries checked/, 'other bundles are not checked');
 });
 
 test('tauri-bundle: --prepare runs in --root after npm ci and before the build; a failing one stops the build', () => {

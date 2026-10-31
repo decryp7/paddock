@@ -89,6 +89,11 @@ impl State {
         self.session.is_some()
     }
 
+    /// The running session's id (its tracker's), if any.
+    pub fn session_id(&self) -> Option<u64> {
+        self.session.as_ref().map(|s| s.id)
+    }
+
     /// The content the page shows now.
     pub fn content(&self) -> Option<&GhostContent> {
         self.content.as_ref()

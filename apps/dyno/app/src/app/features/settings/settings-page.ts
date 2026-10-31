@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { BackupSettings, BackupTool, BaselineSettings, HardwareAlarms, IpLookupSettings, Settings, TrayItem, UnusualSettings } from '../../core/api.types';
+import type { BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, TrayItem, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -12,14 +12,15 @@ import { LOOKUP_PRESETS, presetIdFor, templateProblem } from './ip-lookup-preset
 import { TrayItemsEditor } from './tray-items-editor';
 import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
 import { MatButton } from '@angular/material/button';
-import { MatFormField, MatSuffix } from '@angular/material/form-field';
+import { MatError, MatFormField, MatSuffix } from '@angular/material/form-field';
+import { ErrorStateMatcher } from '@angular/material/core';
 import { MatInput } from '@angular/material/input';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 
 /** Dyno's page of the Settings window (Appearance, Updates and About are the shell's): start-up, sampling and retention, the tray, alert thresholds, the observe-only posture and plugins. */
 @Component({
   selector: 'dy-settings-page',
-  imports: [PdSelect, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, TrayItemsEditor],
+  imports: [PdSelect, MatError, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, TrayItemsEditor],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page narrow">
@@ -30,7 +31,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
         }
         @if (dirty()) {
           <button type="button" matButton="outlined" (click)="revert()">Discard changes</button>
-          <button type="button" matButton="filled" [disabled]="store.saving() || !!backupProblem()" (click)="save()">Save changes</button>
+          <button type="button" matButton="filled" [disabled]="store.saving() || !!backupProblem() || !!diskProblem()" (click)="save()">Save changes</button>
         }
       </header>
 
@@ -66,7 +67,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
                 <mat-form-field class="num-in"><input matInput type="number" min="1" max="30" aria-label="Days of 1-minute roll-ups" [ngModel]="d.retention.minuteDays" (ngModelChange)="setRetention({ minuteDays: +$event })" /><span matTextSuffix>days</span></mat-form-field>
               </div>
               <div class="row">
-                <div class="lbl"><strong>Keep 15-minute roll-ups</strong><small>The longest view of how your PC behaves.</small></div>
+                <div class="lbl"><strong>Keep 15-minute roll-ups</strong><small>The longest view of how your computer behaves.</small></div>
                 <mat-form-field class="num-in"><input matInput type="number" min="7" max="400" aria-label="Days of 15-minute roll-ups" [ngModel]="d.retention.quarterHourDays" (ngModelChange)="setRetention({ quarterHourDays: +$event })" /><span matTextSuffix>days</span></mat-form-field>
               </div>
               <div class="row">
@@ -109,6 +110,44 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               </div>
             </section>
 
+            <section class="card" aria-label="Disk map" id="disk-map">
+              <h2>Disk map</h2>
+              <p class="sub">Limits of a disk map scan. A larger scan is more complete and uses more memory; a scan that reaches a limit says so.</p>
+              <div class="row">
+                <div class="lbl"><strong>Items kept per scan</strong><small>The most folders and large files one scan keeps (10,000 to 5,000,000).</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="10000" max="5000000" step="10000" aria-label="Items kept per scan" [errorStateMatcher]="scanFoldersMatcher" [ngModel]="disk().scanFolders" (ngModelChange)="setDisk({ scanFolders: +$event })" /><span matTextSuffix>items</span>@if (diskErrors().scanFolders; as e) { <mat-error>{{ e }}</mat-error> }</mat-form-field>
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>Large file size</strong><small>Files at least this big get a place of their own in the map (1 to 1,024 MiB); smaller ones count toward their folder.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" max="1024" aria-label="Large file size" [errorStateMatcher]="notableFileMatcher" [ngModel]="disk().notableFileMib" (ngModelChange)="setDisk({ notableFileMib: +$event })" /><span matTextSuffix>MiB</span>@if (diskErrors().notableFileMib; as e) { <mat-error>{{ e }}</mat-error> }</mat-form-field>
+              </div>
+            </section>
+
+            <section class="card" aria-label="Parallelism and cost" id="parallelism">
+              <h2>Parallelism and cost</h2>
+              <p class="sub">How much of this computer Dyno's long reads may use at once. More threads finish sooner and use more of the disk; Auto picks by the kind of volume.</p>
+              <div class="row">
+                <div class="lbl"><strong>Threads reading folders</strong><small>For the disk map and the file finder. Auto: a few on an SSD, one on a spinning disk, two per server on the network.</small></div>
+                <pd-select [options]="readThreadChoices" [value]="threadsValue(disk().readThreads)" ariaLabel="Threads reading folders" (valueChange)="setDisk({ readThreads: threadsFrom($event) })" />
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>Jobs at once</strong><small>Searches, log reads and checks that run side by side; the rest wait their turn. Takes effect the next time Dyno starts.</small></div>
+                <pd-select [options]="jobWorkerChoices" [value]="threadsValue(jobs().workers)" ariaLabel="Jobs at once" (valueChange)="setJobs({ workers: threadsFrom($event) })" />
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>File finder: files looked at</strong><small>The search stops after this many files and folders and says so (1,000 to 5,000,000).</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="1000" max="5000000" step="1000" aria-label="File finder: files looked at" [errorStateMatcher]="finderFilesMatcher" [ngModel]="disk().finderFiles" (ngModelChange)="setDisk({ finderFiles: +$event })" /><span matTextSuffix>files</span>@if (diskErrors().finderFiles; as e) { <mat-error>{{ e }}</mat-error> }</mat-form-field>
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>File finder: folder depth</strong><small>Folders deeper than this are left out (1 to 256 levels).</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" max="256" aria-label="File finder: folder depth" [errorStateMatcher]="finderDepthMatcher" [ngModel]="disk().finderDepth" (ngModelChange)="setDisk({ finderDepth: +$event })" /><span matTextSuffix>levels</span>@if (diskErrors().finderDepth; as e) { <mat-error>{{ e }}</mat-error> }</mat-form-field>
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>File finder: content compared</strong><small>The most data read comparing the contents of files that could be duplicates (1 to 4,096 GiB).</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" max="4096" aria-label="File finder: content compared" [errorStateMatcher]="finderHashMatcher" [ngModel]="disk().finderHashGib" (ngModelChange)="setDisk({ finderHashGib: +$event })" /><span matTextSuffix>GiB</span>@if (diskErrors().finderHashGib; as e) { <mat-error>{{ e }}</mat-error> }</mat-form-field>
+              </div>
+            </section>
+
             <section class="card" aria-label="Alerts">
               <h2>Alerts</h2>
               <div class="row">
@@ -131,7 +170,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 
             <section class="card" aria-label="Hardware and baselines">
               <h2>Hardware and baselines</h2>
-              <p class="sub">Dyno learns what is normal for this PC at each time of the week, and watches the CPU speed, disks and battery. These only raise alarms when you allow it.</p>
+              <p class="sub">Dyno learns what is normal for this computer at each time of the week, and watches the CPU speed, disks and battery. These only raise alarms when you allow it.</p>
               <div class="row">
                 <div class="lbl"><strong>Learn what is normal</strong><small>Shows on the dashboard what is unusual for this time of the week. Nothing is highlighted while Dyno is still learning.</small></div>
                 <mat-slide-toggle [checked]="baselines().enabled" aria-label="Learn what is normal" (change)="setBaselines({ enabled: $event.checked })" />
@@ -156,9 +195,9 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 
             <section class="card" aria-label="New programs">
               <h2>New programs</h2>
-              <p class="sub">Dyno notes which programs run on this PC and lists new ones on the Issues page, with the reasons some may be worth a look. It only watches: it never ends or removes a program, and it says "unusual because", never "malware".</p>
+              <p class="sub">Dyno notes which programs run on this computer and lists new ones on the Issues page, with the reasons some may be worth a look. It only watches: it never ends or removes a program, and it says "unusual because", never "malware".</p>
               <div class="row">
-                <div class="lbl"><strong>Watch for new programs</strong><small>Keeps a list of the programs it has seen, on this PC only.</small></div>
+                <div class="lbl"><strong>Watch for new programs</strong><small>Keeps a list of the programs it has seen, on this computer only.</small></div>
                 <mat-slide-toggle [checked]="unusual().enabled" aria-label="Watch for new programs" (change)="setUnusual({ enabled: $event.checked })" />
               </div>
               <div class="row" [class.off]="!unusual().enabled">
@@ -220,6 +259,8 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     .card > h2 { margin-bottom: var(--sp-2); }
     .row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
     .row.off { opacity: 0.55; }
+    /* The whole name of every lookup site, not cut with an ellipsis. */
+    .site { min-width: min(22rem, 100%); }
     .ipt { display: flex; gap: var(--sp-2); flex: 1 1 380px; max-width: 560px; }
     .row.top { align-items: flex-start; }
     .ipt:has(textarea) { flex-direction: column; gap: var(--sp-1); }
@@ -250,6 +291,42 @@ export class SettingsPage implements OnInit {
   protected readonly presetId = computed(() => presetIdFor(this.ipLookup().ipTemplate));
   protected readonly ipProblem = computed(() => templateProblem(this.ipLookup().ipTemplate, 'ip'));
   protected readonly asnProblem = computed(() => templateProblem(this.ipLookup().asnTemplate, 'asn'));
+  /** The engine always sends the disk limits (its defaults when none were saved). */
+  protected readonly disk = computed<DiskSettings>(() => this.draft()?.disk ?? {});
+  protected readonly diskErrors = computed(() => {
+    const d = this.disk();
+    const bad = (v: number | undefined, lo: number, hi: number, what: string) =>
+      v === undefined || (Number.isInteger(v) && v >= lo && v <= hi) ? null : `${what} must be a whole number from ${lo.toLocaleString()} to ${hi.toLocaleString()}.`;
+    return {
+      scanFolders: bad(d.scanFolders, 10_000, 5_000_000, 'Items kept'),
+      notableFileMib: bad(d.notableFileMib, 1, 1024, 'Large file size'),
+      finderFiles: bad(d.finderFiles, 1_000, 5_000_000, 'Files looked at'),
+      finderDepth: bad(d.finderDepth, 1, 256, 'Folder depth'),
+      finderHashGib: bad(d.finderHashGib, 1, 4096, 'Content compared'),
+    };
+  });
+  protected readonly scanFoldersMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().scanFolders };
+  protected readonly notableFileMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().notableFileMib };
+  protected readonly finderFilesMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().finderFiles };
+  protected readonly finderDepthMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().finderDepth };
+  protected readonly finderHashMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().finderHashGib };
+  protected readonly diskProblem = computed(() => Object.values(this.diskErrors()).find((e) => e !== null) ?? null);
+  protected readonly jobs = computed<JobSettings>(() => this.draft()?.jobs ?? {});
+  protected readonly readThreadChoices = threadChoices(16);
+  protected readonly jobWorkerChoices = threadChoices(8);
+  protected threadsValue(t: Threads | undefined): string {
+    return t === undefined || t === 'auto' ? 'auto' : String(t.fixed);
+  }
+  protected threadsFrom(v: string): Threads {
+    return v === 'auto' ? 'auto' : { fixed: +v };
+  }
+  protected setJobs(p: JobSettings): void {
+    this.draft.update((d) => (d ? { ...d, jobs: { ...d.jobs, ...p } } : d));
+  }
+  /** Keeps what was typed so the field can say what is wrong; Save stays off until it is in range (the engine would clamp it, silently saving another number). */
+  protected setDisk(p: DiskSettings): void {
+    this.draft.update((d) => (d ? { ...d, disk: { ...d.disk, ...p } } : d));
+  }
   protected readonly baselines = computed<BaselineSettings>(() => this.draft()?.baselines ?? { enabled: true, learningDays: 7, alarms: false });
   protected readonly hardwareAlarms = computed<HardwareAlarms>(() => this.draft()?.hardwareAlarms ?? { throttling: true, lifespan: true });
   protected readonly systemChoices = [500, 1000, 2000, 5000].map((o): PdSelectOption => ({ value: String(o), label: this.every(o) }));
@@ -359,4 +436,9 @@ export class SettingsPage implements OnInit {
   }
   protected readonly pluginState = (s: string) => (s === 'running' ? 'Running' : s === 'stopped' ? 'Stopped' : s === 'failed' ? 'Failed' : 'Paused after failures');
   protected readonly pluginTone = (s: string) => (s === 'running' ? 'ok' : s === 'stopped' ? 'muted' : 'bad');
+}
+
+/** Auto, then 1 to `most`: the choices of a thread count setting. */
+function threadChoices(most: number): PdSelectOption[] {
+  return [{ value: 'auto', label: 'Auto' }, ...Array.from({ length: most }, (_, i): PdSelectOption => ({ value: String(i + 1), label: String(i + 1) }))];
 }

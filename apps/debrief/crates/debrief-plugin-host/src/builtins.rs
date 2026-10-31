@@ -114,8 +114,14 @@ pub struct Builtins {
 impl Builtins {
     /// The built-ins `exe` serves, each granted what it asks for (they are first-party).
     pub fn load(exe: &Path) -> Builtins {
+        Builtins::load_with(exe, |_| {})
+    }
+
+    /// Like [`Builtins::load`], with each plugin's start adjusted by `adjust` (tests: a connect window of
+    /// [`debrief_ipc::process::UNTIL_CONNECTED`]).
+    pub fn load_with(exe: &Path, adjust: impl Fn(&mut PluginSpec)) -> Builtins {
         match load_manifests(exe) {
-            Ok(manifests) => Builtins::from_manifests(exe, manifests),
+            Ok(manifests) => Builtins::from_manifests_with(exe, manifests, adjust),
             Err(e) => {
                 log::error!("Plugins unavailable: {e}");
                 Builtins {
@@ -128,11 +134,17 @@ impl Builtins {
 
     /// Processes for `manifests` served by `exe`.
     pub fn from_manifests(exe: &Path, manifests: Vec<Manifest>) -> Builtins {
+        Builtins::from_manifests_with(exe, manifests, |_| {})
+    }
+
+    /// [`Builtins::from_manifests`], each spec adjusted by `adjust`.
+    pub fn from_manifests_with(exe: &Path, manifests: Vec<Manifest>, adjust: impl Fn(&mut PluginSpec)) -> Builtins {
         let processes = manifests
             .into_iter()
             .map(|m| {
                 let mut spec = PluginSpec::new(exe, &m.id);
                 spec.granted = m.permissions.iter().map(|p| p.permission).collect();
+                adjust(&mut spec);
                 PluginProcess::new(m, spec)
             })
             .collect();

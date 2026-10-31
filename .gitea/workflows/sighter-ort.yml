@@ -1,0 +1,418 @@
+# Sighter's ONNX Runtime builds (stage-2 plan SW5, ADR 0001 decision 4 and P5): one job per variant builds the pinned ONNX
+# Runtime with telemetry compiled out, static, Release (apps/sighter/scripts/ort/build-ort.sh: CMake's telemetry switches
+# and the compile flags checked, the merged library byte-checked), links and runs the minimal `ort` program on it
+# (scripts/ort/smoke, built in the checkout's own target folder, which needs no build-folder action: no sccache, no
+# kept folder), checks the Windows imports (ADR 0032's checker with the delay-load and no-network rules), and
+# uploads the archive as an artifact. A separate publish job, which runs no build code, downloads those artifacts,
+# re-checks every .sha256 and publishes them as a Gitea generic package. App builds never compile ONNX Runtime: they fetch
+# the archives by the pins in apps/sighter/scripts/ort/catalogue/.
+#
+# Manual dispatch only, as part of release preparation (user, 2026-10-30): never on push, pull request or a schedule
+# (rule 50: CI runs only what a change needs; a cold build is long). A published file is never replaced: the same file
+# again is a success, different content under the same version fails (PIPELINE_REV + 1 in scripts/ort/pins.env).
+#
+# Runners: labels only, never a host name (user, 2026-10-30); any runner of the right OS takes a job. ubuntu-latest (the
+# paddock-ci image), macos-latest (must be Apple silicon: build-ort.sh refuses another host), windows-latest. Each job
+# works in a folder of its own, removed at the end whatever happened: $RUNNER_TEMP/ort, and on Windows a short folder on
+# the system drive named after the run (ONNX Runtime's build tree is deep; build-ort.sh refuses a work path over 40
+# characters there). Compile jobs are detected at run time (scripts/ort/detect-jobs.sh). The Windows variants run one
+# after the other (`needs`). Build times: apps/sighter/docs/research/2026-10-ort-builds.md.
+#
+# Caches (actions/cache) live at a stable path in the checkout, apps/sighter/.ort-cache, so their keys hit on any runner:
+# - downloads (scripts/ort/cache-sync.sh moves them in and out of the work folder): the third-party source archives CMake
+#   fetches, which CMake checks by their SHA-1 from cmake/deps.txt when used, and the DirectML package, which
+#   fetch-directml.sh re-verifies on every run. Every run uses them.
+# - the ONNX Runtime source tree (one key per OS and ORT_COMMIT) and ccache (2 GB, one key per variant and pin; Linux and
+#   macOS): only runs that do not publish. Any branch's run can write a cache, so a published build clones and compiles
+#   cold; a restored tree is used only if check-source.sh finds it pristine (HEAD, git fsck --full --strict, nothing
+#   changed, untracked or ignored).
+#
+# Depends on branch fix/windows-static-crt (ADR 0032), merged into this one: conformance/release/windows-crt-imports.mjs
+# (the import checks) and the root .cargo/config.toml's +crt-static, which the smoke program and sighter-infer need for
+# the static ONNX Runtime (built /MT). Also needs the PACKAGE_TOKEN secret (write:package) to publish; CMake >= 3.28,
+# Python >= 3.10, Git and Node on the macOS and Windows runners (the Linux job installs what its image lacks).
+
+name: sighter-ort
+
+on:
+  workflow_dispatch:
+    inputs:
+      variants:
+        description: "Variants to build, space separated (all: every one)"
+        required: false
+        default: "all"
+      publish:
+        description: "Publish the archives to the Gitea generic package (only from main)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+  CARGO_TERM_COLOR: always
+  # Gitea may hand a boolean input over as a string: compare with both, never test it bare ('false' is truthy).
+  PUBLISH: ${{ github.event_name == 'workflow_dispatch' && (inputs.publish == true || inputs.publish == 'true') && github.ref == 'refs/heads/main' }}
+
+jobs:
+  linux-x64-cpu:
+    name: onnxruntime linux-x64-cpu
+    if: inputs.variants == 'all' || contains(inputs.variants, 'linux-x64-cpu')
+    runs-on: ubuntu-latest
+    container: dev.decryptology.net/decryp7/paddock-ci:v2
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Work folder and pins
+        run: |
+          echo "ORT_WORK=$(cd "$RUNNER_TEMP" && pwd)/ort" >>"$GITHUB_ENV"
+          echo "ORT_CACHE=$(pwd)/apps/sighter/.ort-cache" >>"$GITHUB_ENV"
+          . apps/sighter/scripts/ort/pins.env
+          echo "ORT_COMMIT=$ORT_COMMIT" >>"$GITHUB_ENV"
+          echo "DML_KEY=$(printf '%s' "$DML_NUPKG_SHA512_B64" | tr '/+=' '_-.')" >>"$GITHUB_ENV"
+      - name: Build tools
+        run: |
+          missing=()
+          for t in cmake python3 git node; do command -v "$t" >/dev/null || missing+=("$t"); done
+          [ "$PUBLISH" = true ] || command -v ccache >/dev/null || missing+=(ccache)
+          if [ ${#missing[@]} -gt 0 ]; then
+            pkgs=("${missing[@]/node/nodejs}")
+            apt-get update && apt-get install -y --no-install-recommends "${pkgs[@]}"
+          fi
+          cmake --version | head -n 1
+      # Caches live at a stable path in the checkout (apps/sighter/.ort-cache), so their keys hit on every runner; the work
+      # folder's own path changes per run. Downloads are checked again when used (cache-sync.sh), so every run may use
+      # them. The source tree and the compiler cache are kept only by runs that do not publish: any branch's run can write
+      # a cache, and a published build must not start from something such a run left.
+      - name: Downloads cache (third-party source archives, DirectML package)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            apps/sighter/.ort-cache/deps
+            apps/sighter/.ort-cache/directml
+          key: sighter-ort-downloads-linux-x64-cpu-${{ env.ORT_COMMIT }}-${{ env.DML_KEY }}
+      - name: Source cache (runs that do not publish)
+        if: env.PUBLISH != 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: apps/sighter/.ort-cache/src
+          key: sighter-ort-src-${{ runner.os }}-${{ env.ORT_COMMIT }}
+      - name: Compiler cache (runs that do not publish)
+        if: env.PUBLISH != 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: apps/sighter/.ort-cache/ccache
+          key: sighter-ort-ccache-linux-x64-cpu-${{ env.ORT_COMMIT }}
+      - name: Downloads into the work folder
+        run: apps/sighter/scripts/ort/cache-sync.sh restore "$ORT_WORK" "$ORT_CACHE"
+      - name: Build ONNX Runtime
+        env:
+          ORT_USE_CCACHE: ${{ env.PUBLISH != 'true' && '1' || '0' }}
+          CCACHE_DIR: ${{ github.workspace }}/apps/sighter/.ort-cache/ccache
+          CCACHE_MAXSIZE: 2G
+        run: |
+          [ "$PUBLISH" = true ] || export ORT_SOURCE_CACHE="$ORT_CACHE/src"
+          apps/sighter/scripts/ort/build-ort.sh linux-x64-cpu "$ORT_WORK"
+      - name: Smoke (CPU EP)
+        run: |
+          stage=$(ls -d "$ORT_WORK"/stage/onnxruntime-*-linux-x64-cpu)
+          cd apps/sighter/scripts/ort/smoke
+          ORT_LIB_PATH="$stage/lib" cargo build --release --locked
+          target/release/sighter-ort-smoke cpu
+          node ../../../../../conformance/release/telemetry-bytes.mjs target/release/sighter-ort-smoke
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        with:
+          name: onnxruntime-linux-x64-cpu
+          path: ${{ env.ORT_WORK }}/out/
+          retention-days: 14
+      - name: Downloads into the cache folder
+        if: always()
+        run: apps/sighter/scripts/ort/cache-sync.sh save "$ORT_WORK" "$ORT_CACHE"
+      # The smoke program's build (and the DirectML.dll copied next to it) and the work folder, whatever happened.
+      - name: Remove the work folder and the smoke build
+        if: always()
+        run: rm -rf "$ORT_WORK" apps/sighter/scripts/ort/smoke/target
+
+  macos-arm64-coreml:
+    name: onnxruntime macos-arm64-coreml
+    if: inputs.variants == 'all' || contains(inputs.variants, 'macos-arm64-coreml')
+    runs-on: macos-latest
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Work folder and pins
+        run: |
+          echo "ORT_WORK=$(cd "$RUNNER_TEMP" && pwd)/ort" >>"$GITHUB_ENV"
+          echo "ORT_CACHE=$(pwd)/apps/sighter/.ort-cache" >>"$GITHUB_ENV"
+          . apps/sighter/scripts/ort/pins.env
+          echo "ORT_COMMIT=$ORT_COMMIT" >>"$GITHUB_ENV"
+          echo "DML_KEY=$(printf '%s' "$DML_NUPKG_SHA512_B64" | tr '/+=' '_-.')" >>"$GITHUB_ENV"
+      # Caches live at a stable path in the checkout (apps/sighter/.ort-cache), so their keys hit on every runner; the work
+      # folder's own path changes per run. Downloads are checked again when used (cache-sync.sh), so every run may use
+      # them. The source tree and the compiler cache are kept only by runs that do not publish: any branch's run can write
+      # a cache, and a published build must not start from something such a run left.
+      - name: Downloads cache (third-party source archives, DirectML package)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            apps/sighter/.ort-cache/deps
+            apps/sighter/.ort-cache/directml
+          key: sighter-ort-downloads-macos-arm64-coreml-${{ env.ORT_COMMIT }}-${{ env.DML_KEY }}
+      - name: Source cache (runs that do not publish)
+        if: env.PUBLISH != 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: apps/sighter/.ort-cache/src
+          key: sighter-ort-src-${{ runner.os }}-${{ env.ORT_COMMIT }}
+      - name: Compiler cache (runs that do not publish)
+        if: env.PUBLISH != 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: apps/sighter/.ort-cache/ccache
+          key: sighter-ort-ccache-macos-arm64-coreml-${{ env.ORT_COMMIT }}
+      - name: Downloads into the work folder
+        run: apps/sighter/scripts/ort/cache-sync.sh restore "$ORT_WORK" "$ORT_CACHE"
+      - name: Build ONNX Runtime
+        env:
+          ORT_USE_CCACHE: ${{ env.PUBLISH != 'true' && '1' || '0' }}
+          CCACHE_DIR: ${{ github.workspace }}/apps/sighter/.ort-cache/ccache
+          CCACHE_MAXSIZE: 2G
+        run: |
+          [ "$PUBLISH" = true ] || export ORT_SOURCE_CACHE="$ORT_CACHE/src"
+          apps/sighter/scripts/ort/build-ort.sh macos-arm64-coreml "$ORT_WORK"
+      - name: Smoke (CPU and CoreML EPs)
+        run: |
+          stage=$(ls -d "$ORT_WORK"/stage/onnxruntime-*-macos-arm64-coreml)
+          cd apps/sighter/scripts/ort/smoke
+          ORT_LIB_PATH="$stage/lib" cargo build --release --locked
+          target/release/sighter-ort-smoke cpu
+          target/release/sighter-ort-smoke coreml
+          node ../../../../../conformance/release/telemetry-bytes.mjs target/release/sighter-ort-smoke
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        with:
+          name: onnxruntime-macos-arm64-coreml
+          path: ${{ env.ORT_WORK }}/out/
+          retention-days: 14
+      - name: Downloads into the cache folder
+        if: always()
+        run: apps/sighter/scripts/ort/cache-sync.sh save "$ORT_WORK" "$ORT_CACHE"
+      # The smoke program's build (and the DirectML.dll copied next to it) and the work folder, whatever happened.
+      - name: Remove the work folder and the smoke build
+        if: always()
+        run: rm -rf "$ORT_WORK" apps/sighter/scripts/ort/smoke/target
+
+  windows-x64-directml:
+    name: onnxruntime windows-x64-directml
+    if: inputs.variants == 'all' || contains(inputs.variants, 'windows-x64-directml')
+    runs-on: windows-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Work folder and pins
+        run: |
+          echo "ORT_WORK=$(cygpath -m "$SYSTEMDRIVE")/ow/${{ github.run_id }}-${{ github.run_attempt }}-d" >>"$GITHUB_ENV"
+          echo "ORT_CACHE=$(pwd)/apps/sighter/.ort-cache" >>"$GITHUB_ENV"
+          . apps/sighter/scripts/ort/pins.env
+          echo "ORT_COMMIT=$ORT_COMMIT" >>"$GITHUB_ENV"
+          echo "DML_KEY=$(printf '%s' "$DML_NUPKG_SHA512_B64" | tr '/+=' '_-.')" >>"$GITHUB_ENV"
+      # Caches live at a stable path in the checkout (apps/sighter/.ort-cache), so their keys hit on every runner; the work
+      # folder's own path changes per run. Downloads are checked again when used (cache-sync.sh), so every run may use
+      # them. The source tree and the compiler cache are kept only by runs that do not publish: any branch's run can write
+      # a cache, and a published build must not start from something such a run left.
+      - name: Downloads cache (third-party source archives, DirectML package)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            apps/sighter/.ort-cache/deps
+            apps/sighter/.ort-cache/directml
+          key: sighter-ort-downloads-windows-x64-directml-${{ env.ORT_COMMIT }}-${{ env.DML_KEY }}
+      - name: Source cache (runs that do not publish)
+        if: env.PUBLISH != 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: apps/sighter/.ort-cache/src
+          key: sighter-ort-src-${{ runner.os }}-${{ env.ORT_COMMIT }}
+      - name: Downloads into the work folder
+        run: apps/sighter/scripts/ort/cache-sync.sh restore "$ORT_WORK" "$ORT_CACHE"
+      - name: Build ONNX Runtime
+        run: |
+          [ "$PUBLISH" = true ] || export ORT_SOURCE_CACHE="$ORT_CACHE/src"
+          apps/sighter/scripts/ort/build-ort.sh windows-x64-directml "$ORT_WORK"
+      - name: Smoke (CPU EP) and imports
+        run: |
+          stage=$(ls -d "$ORT_WORK"/stage/onnxruntime-*-windows-x64-directml)
+          dml=$(ls "$ORT_WORK"/cache/directml/*/x64/bin/DirectML.dll)
+          checks=$(pwd)/conformance/release
+          cd apps/sighter/scripts/ort/smoke
+          ORT_LIB_PATH="$stage/lib" cargo build --release --locked
+          exe=target/release/sighter-ort-smoke.exe
+          node "$checks/windows-crt-imports.mjs" --delay-load DirectML.dll --delay-load d3d12.dll --not-direct dxgi.dll \
+            --not-direct dxcore.dll --no-network "$exe"
+          node "$checks/windows-crt-imports.mjs" --no-network "$dml"
+          node "$checks/telemetry-bytes.mjs" "$exe"
+          node "$checks/telemetry-bytes.mjs" --allow-telemetry-group "$dml"
+          # CPU first, with no DirectML.dll beside the binary: the delay-loaded import must not stop the start.
+          "$exe" cpu
+      - name: Smoke (DirectML EP, informational)
+        # A runner may expose no DirectX 12 adapter (spike S2 records whether ours do); a failure here does not fail the run.
+        continue-on-error: true
+        run: |
+          exe=apps/sighter/scripts/ort/smoke/target/release/sighter-ort-smoke.exe
+          cp "$(ls "$ORT_WORK"/cache/directml/*/x64/bin/DirectML.dll)" "$(dirname "$exe")/"
+          "$exe" directml
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        with:
+          name: onnxruntime-windows-x64-directml
+          path: ${{ env.ORT_WORK }}/out/
+          retention-days: 14
+      - name: Downloads into the cache folder
+        if: always()
+        run: apps/sighter/scripts/ort/cache-sync.sh save "$ORT_WORK" "$ORT_CACHE"
+      # The smoke program's build (and the DirectML.dll copied next to it) and the work folder, whatever happened.
+      - name: Remove the work folder and the smoke build
+        if: always()
+        run: rm -rf "$ORT_WORK" apps/sighter/scripts/ort/smoke/target
+
+  windows-x64-cpu:
+    name: onnxruntime windows-x64-cpu
+    needs: [windows-x64-directml]
+    if: ${{ !cancelled() && (inputs.variants == 'all' || contains(inputs.variants, 'windows-x64-cpu')) }}
+    runs-on: windows-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Work folder and pins
+        run: |
+          echo "ORT_WORK=$(cygpath -m "$SYSTEMDRIVE")/ow/${{ github.run_id }}-${{ github.run_attempt }}-c" >>"$GITHUB_ENV"
+          echo "ORT_CACHE=$(pwd)/apps/sighter/.ort-cache" >>"$GITHUB_ENV"
+          . apps/sighter/scripts/ort/pins.env
+          echo "ORT_COMMIT=$ORT_COMMIT" >>"$GITHUB_ENV"
+          echo "DML_KEY=$(printf '%s' "$DML_NUPKG_SHA512_B64" | tr '/+=' '_-.')" >>"$GITHUB_ENV"
+      # Caches live at a stable path in the checkout (apps/sighter/.ort-cache), so their keys hit on every runner; the work
+      # folder's own path changes per run. Downloads are checked again when used (cache-sync.sh), so every run may use
+      # them. The source tree and the compiler cache are kept only by runs that do not publish: any branch's run can write
+      # a cache, and a published build must not start from something such a run left.
+      - name: Downloads cache (third-party source archives, DirectML package)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            apps/sighter/.ort-cache/deps
+            apps/sighter/.ort-cache/directml
+          key: sighter-ort-downloads-windows-x64-cpu-${{ env.ORT_COMMIT }}-${{ env.DML_KEY }}
+      - name: Source cache (runs that do not publish)
+        if: env.PUBLISH != 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: apps/sighter/.ort-cache/src
+          key: sighter-ort-src-${{ runner.os }}-${{ env.ORT_COMMIT }}
+      - name: Downloads into the work folder
+        run: apps/sighter/scripts/ort/cache-sync.sh restore "$ORT_WORK" "$ORT_CACHE"
+      - name: Build ONNX Runtime
+        run: |
+          [ "$PUBLISH" = true ] || export ORT_SOURCE_CACHE="$ORT_CACHE/src"
+          apps/sighter/scripts/ort/build-ort.sh windows-x64-cpu "$ORT_WORK"
+      - name: Smoke (CPU EP) and imports
+        run: |
+          stage=$(ls -d "$ORT_WORK"/stage/onnxruntime-*-windows-x64-cpu)
+          checks=$(pwd)/conformance/release
+          cd apps/sighter/scripts/ort/smoke
+          ORT_LIB_PATH="$stage/lib" cargo build --release --locked
+          exe=target/release/sighter-ort-smoke.exe
+          node "$checks/windows-crt-imports.mjs" --no-import DirectML.dll --no-network "$exe"
+          node "$checks/telemetry-bytes.mjs" "$exe"
+          "$exe" cpu
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        with:
+          name: onnxruntime-windows-x64-cpu
+          path: ${{ env.ORT_WORK }}/out/
+          retention-days: 14
+      - name: Downloads into the cache folder
+        if: always()
+        run: apps/sighter/scripts/ort/cache-sync.sh save "$ORT_WORK" "$ORT_CACHE"
+      # The smoke program's build (and the DirectML.dll copied next to it) and the work folder, whatever happened.
+      - name: Remove the work folder and the smoke build
+        if: always()
+        run: rm -rf "$ORT_WORK" apps/sighter/scripts/ort/smoke/target
+
+  # Publishing runs no build code: it downloads the build jobs' artifacts, re-checks every archive against its .sha256 and
+  # uploads them (scripts/ort/publish-ort.sh). Variants not built in this run are simply absent.
+  publish:
+    name: publish to the generic package
+    needs: [linux-x64-cpu, macos-arm64-coreml, windows-x64-directml, windows-x64-cpu]
+    if: ${{ !cancelled() && !failure() && github.event_name == 'workflow_dispatch' && (inputs.publish == true || inputs.publish == 'true') && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    container: dev.decryptology.net/decryp7/paddock-ci:v2
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3
+        with:
+          path: ${{ runner.temp }}/ort-artifacts
+      - name: Publish
+        env:
+          PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+        run: apps/sighter/scripts/ort/publish-ort.sh "$RUNNER_TEMP/ort-artifacts"
+      - name: Remove the artifacts
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ort-artifacts"
+
+  # OPTIONAL, NOT ENABLED: Windows arm64 with DirectML (stage-2 plan SW5), cross-built on an x64 Windows runner (ONNX
+  # Runtime's `--arm64`; pyke's equivalent job takes 40 min on a 4-vCPU runner). To enable it: add a
+  # `windows-arm64-directml` variant to build-ort.sh (host Windows x64, `--use_dml --enable_msvc_static_runtime --arm64`,
+  # `fetch-directml.sh arm64`, catalogue key windows-aarch64, lib.exe from Hostx64/arm64), uncomment this job, and add the
+  # entry to catalogue/onnxruntime.toml. An x64 runner cannot run the arm64 smoke program: it is only built (target
+  # aarch64-pc-windows-msvc) and its imports checked; running it needs an arm64 Windows PC.
+  #
+  # windows-arm64-directml:
+  #   name: onnxruntime windows-arm64-directml
+  #   needs: [windows-x64-cpu]
+  #   if: ${{ !cancelled() && contains(inputs.variants, 'windows-arm64-directml') }}
+  #   runs-on: windows-latest
+  #   timeout-minutes: 300
+  #   defaults:
+  #     run:
+  #       shell: bash
+  #   steps:
+  #     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+  #     - name: Work folder
+  #       run: echo "ORT_WORK=$(cygpath -m "$SYSTEMDRIVE")/ow/${{ github.run_id }}-${{ github.run_attempt }}-a" >>"$GITHUB_ENV"
+  #     - name: Build ONNX Runtime (cross, arm64)
+  #       run: apps/sighter/scripts/ort/build-ort.sh windows-arm64-directml "$ORT_WORK"
+  #     - name: Build the smoke program and check its imports
+  #       run: |
+  #         stage=$(ls -d "$ORT_WORK"/stage/onnxruntime-*-windows-arm64-directml)
+  #         dml=$(ls "$ORT_WORK"/cache/directml/*/arm64/bin/DirectML.dll)
+  #         checks=$(pwd)/conformance/release
+  #         rustup target add aarch64-pc-windows-msvc
+  #         cd apps/sighter/scripts/ort/smoke
+  #         ORT_LIB_PATH="$stage/lib" cargo build --release --locked --target aarch64-pc-windows-msvc
+  #         exe=target/aarch64-pc-windows-msvc/release/sighter-ort-smoke.exe
+  #         node "$checks/windows-crt-imports.mjs" --delay-load DirectML.dll --delay-load d3d12.dll --no-network "$exe"
+  #         node "$checks/windows-crt-imports.mjs" --no-network "$dml"
+  #         node "$checks/telemetry-bytes.mjs" "$exe"
+  #     - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+  #       with:
+  #         name: onnxruntime-windows-arm64-directml
+  #         path: ${{ env.ORT_WORK }}/out/
+  #         retention-days: 14
+  #     - name: Remove the work folder and the smoke build
+  #       if: always()
+  #       run: rm -rf "$ORT_WORK" apps/sighter/scripts/ort/smoke/target
+  #   (and add windows-arm64-directml to the publish job's needs)

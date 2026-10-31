@@ -367,6 +367,10 @@ on the disk the runners build on, so they must cost the jobs as little as possib
   WP-5 uses it once it exists and until then runs the walk on one thread per volume. There is no "yield while busy":
   Pitcrew has no I/O-busy signal (ADR 0013's `when-idle` is CPU), and building one (per-disk I/O counters per OS) is not
   worth it next to background I/O priority.
+  **Amended 2026-10-30 (Paddock rule 52, family ADR 0020's amendment):** `Class::Background` is now the gentle level,
+  so walkers and removers run at `QOS_CLASS_UTILITY` on macOS, nice 10 with best-effort I/O 7 on Linux and
+  `THREAD_PRIORITY_BELOW_NORMAL` on Windows, not QoS background, the idle I/O class or Windows background mode: a clean
+  the user started must finish on a busy machine. A running build still comes first.
 - The walk is `paddock-jobs`' `par_walk` under `paddock-storage`'s budget; Cancel is honoured within
   `CANCEL_CHECK_ITEMS`.
 

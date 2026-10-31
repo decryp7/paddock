@@ -51,6 +51,7 @@ pub fn platform() -> Platform {
         activity: Box::new(Unsupported),
         issues: Vec::new(),
         links: Box::new(crate::links::OsLinks::new()),
+        zone: std::sync::Arc::new(crate::zone::SystemZone),
     }
 }
 

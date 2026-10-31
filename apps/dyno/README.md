@@ -22,7 +22,10 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 > ([ADR 0021](docs/adr/0021-monitoring-only.md)). [docs/features.md](docs/features.md) says exactly what is real and
 > [docs/roadmap.md](docs/roadmap.md) lists what is left.
 
-![The dashboard](docs/screenshots/dashboard-dark.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dashboard-full-dark.png">
+  <img alt="The dashboard" src="docs/screenshots/dashboard-full-light.png">
+</picture>
 
 ## At a glance
 
@@ -76,7 +79,7 @@ Every feature, with its state, is in [docs/features.md](docs/features.md). Built
    recorder and the diagnostics bundle.
 9. **Tray** with a live metric and a compact dropdown; closing the window keeps Dyno measuring.
 10. **Native feel** ([ADR 0009](docs/adr/0009-native-feel.md)), light and dark themes, a colour-vision-checked palette
-    ([ADR 0011](docs/adr/0011-design-system.md)), a command palette (Ctrl or Cmd + K).
+    ([ADR 0011](docs/adr/0011-design-system.md)).
 11. **The `dyno` command line:** `status`, `why-slow`, `top`, `alarms`, `snapshot` and `counters` ([docs/cli.md](docs/cli.md)),
     shipped in the installers.
 12. **Extensible with sensors:** the core and out-of-process Rust plugins that add sensors
@@ -110,8 +113,9 @@ or per-user settings, [ADR 0010](docs/adr/0010-platforms-and-services.md)). Dyno
 
 ### macOS (13 or newer)
 
-The build is **not notarised**; it is signed ad hoc. Open the `.dmg`, drag Dyno to Applications, open it the first time
-with right-click > Open. Turn on **Settings > Launch at login**: Dyno registers its launch agent with `SMAppService` and
+The build is **not notarised**; it is signed ad hoc. Open the `.dmg`, drag Dyno to Applications and open it from there. The first time macOS says "Not Opened": choose Done, then
+System Settings > Privacy & Security > **Open Anyway**, **Open Anyway** again in the "Open “Dyno”?" dialog, and enter an
+administrator's name and password (macOS 26 flow, once). Turn on **Settings > Launch at login**: Dyno registers its launch agent with `SMAppService` and
 macOS may ask you to allow it under **System Settings > General > Login Items & Extensions**. Details and verification:
 [docs/macos.md](docs/macos.md).
 
@@ -128,7 +132,7 @@ status-notifier host (GNOME: the AppIndicator extension). Details: [docs/linux.m
 | Core | Built and unit-tested: model, grouping, diagnosis, anomalies, forecast, health, history, alarms, baselines, protocol. |
 | Agent | Sampling loop, SQLite history with rollups, alarms, issues, flight recorder, weekly report, disk usage, benchmarks, startup list (view), plugin host (sensors), service install/ensure. |
 | Platform adapters | macOS and Linux: sensors, details, locks, startup, facts, user activity (macOS tested on a real Mac, Linux in a container with `scripts/linux-verify.sh`). Windows: sensors and user activity; details, locks, startup and facts are not wired yet. |
-| App | Dashboard, processes, why slow, alarms, issues, reports, counters, extras, benchmarks, network, settings, tray, command palette, native feel against the real agent through the shell. |
+| App | Dashboard, processes, why slow, alarms, issues, reports, counters, extras, benchmarks, network, settings, tray, native feel against the real agent through the shell. |
 | Privileges | Dyno 1.0 has no privileged helper. Everything runs with your own rights; unreadable figures say why, other users' processes are one "Other users" row, and elevation (the helper and "start as administrator at login") is planned for 1.1 (ADR 0022). |
 | Installers | CI builds NSIS, `.dmg`, `.deb` and AppImage on `dyno-v*` tags, nightly and manual runs. Not yet published. |
 
@@ -157,7 +161,7 @@ dependencies and the files it touches, plus the known gaps in the foundation.
 
 ## Building from source
 
-Prerequisites: Rust stable (1.88+), Node 24 (`app/.nvmrc`), and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/)
+Prerequisites: Rust stable (1.89+), Node 24 (`app/.nvmrc`), and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/)
 for your OS (WebView2 on Windows, Xcode command line tools on macOS; on Linux `libwebkit2gtk-4.1-dev` and friends).
 
 ```sh

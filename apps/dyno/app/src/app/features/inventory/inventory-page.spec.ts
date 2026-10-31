@@ -25,7 +25,10 @@ describe('InventoryPage', () => {
     expect(el.textContent).toContain('Board maximum');
     [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Table')!.click();
     f.detectChanges();
-    expect(el.querySelectorAll('tbody tr')).toHaveLength(4);
+    await f.whenStable();
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    f.detectChanges();
+    expect(el.querySelectorAll('pd-table [role="row"][data-key]')).toHaveLength(4);
     expect(el.textContent).toContain('CMK16GX4M1E3200C16');
   });
 

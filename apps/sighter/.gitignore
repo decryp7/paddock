@@ -41,3 +41,6 @@ docs/images/diagrams/png/
 
 # Written by the shared build-folder action on CI hosts
 .cargo/ci.toml
+
+# ONNX Runtime pipeline caches (scripts/ort/cache-sync.sh, .gitea/workflows/sighter-ort.yml)
+/.ort-cache/

@@ -478,7 +478,13 @@ fn gzip(data: &[u8]) -> Vec<u8> {
     e.finish().unwrap()
 }
 
+/// A zip of `files`. Names may repeat, as in real archives: zip's writer refuses a repeated name, so such an archive is
+/// written by hand ([`crate::common::stored_zip`]).
 fn zip_of(files: &[(String, Vec<u8>)]) -> Vec<u8> {
+    let mut names = std::collections::HashSet::new();
+    if !files.iter().all(|(name, _)| names.insert(name.as_str())) {
+        return crate::common::stored_zip(files);
+    }
     let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     for (name, data) in files {
         w.start_file(name.as_str(), zip::write::SimpleFileOptions::default()).unwrap();
@@ -487,12 +493,41 @@ fn zip_of(files: &[(String, Vec<u8>)]) -> Vec<u8> {
     w.finish().unwrap().into_inner()
 }
 
+/// Regression (CI 7107, job 21333): the archive strategy drew two entries with the same name, and building the zip panicked
+/// inside the strategy (zip's writer refuses a duplicate name), outside the property's guard, so no input was shrunk or
+/// kept. Real archives can hold duplicate names (appending tools write them); the strategy must build them and `expand`
+/// must take them. Both entries are kept, the second as `a (2).log` (the user's decision of 2026-10-29).
+#[test]
+fn the_archive_strategy_builds_zips_with_duplicate_names_and_both_entries_are_kept() {
+    let z = zip_of(&[
+        ("a.log".to_string(), b"first".to_vec()),
+        ("b.log".to_string(), b"other".to_vec()),
+        ("a.log".to_string(), b"second".to_vec()),
+    ]);
+    let entries = archive::expand("dup.zip", z.clone()).expect("an archive with a duplicate name expands");
+    let got: Vec<(String, Vec<u8>)> = entries.into_iter().map(|e| (e.name.unwrap(), e.bytes)).collect();
+    assert_eq!(
+        got,
+        [
+            ("a.log".to_string(), b"first".to_vec()),
+            ("b.log".to_string(), b"other".to_vec()),
+            ("a (2).log".to_string(), b"second".to_vec())
+        ]
+    );
+    assert_eq!(archive::read_entry(z, "dup.zip", "a (2).log").unwrap(), b"second");
+}
+
 fn archive_bytes() -> impl Strategy<Value = Vec<u8>> {
     let payload = prop::collection::vec(any::<u8>(), 0..512);
     prop_oneof![
         prop::collection::vec(any::<u8>(), 0..1024),
         (payload.clone(), ops()).prop_map(|(p, o)| mutate(&gzip(&p), &o)),
-        (prop::collection::vec(("[a-zA-Z0-9_./\\\\-]{1,24}", payload), 0..4), ops()).prop_map(|(f, o)| mutate(&zip_of(&f), &o)),
+        (prop::collection::vec(("[a-zA-Z0-9_./\\\\-]{1,24}", payload.clone()), 0..4), ops()).prop_map(|(f, o)| mutate(&zip_of(&f), &o)),
+        // A name repeated (by chance the arm above draws one only rarely).
+        (prop::collection::vec(("[a-z.]{1,3}", payload), 1..4), ops()).prop_map(|(mut f, o)| {
+            f.push(f[0].clone());
+            mutate(&zip_of(&f), &o)
+        }),
         // Valid magic followed by garbage.
         prop::collection::vec(any::<u8>(), 0..256).prop_map(|mut v| {
             v.splice(0..0, *b"PK\x03\x04");
@@ -514,6 +549,32 @@ proptest! {
             let _ = archive::expand(&name, bytes.clone());
             let _ = archive::read_entry(bytes, &name, "a.log");
         });
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(CASES))]
+
+    /// A valid zip that repeats names (with or without data descriptors): every record comes out once under a unique name,
+    /// the repeats (and only they) say which path they had, and each name reads back its own bytes.
+    #[test]
+    fn a_valid_zip_with_repeated_paths_keeps_every_entry(
+        files in prop::collection::vec(("[a-c]{1,2}(\\.log)?", prop::collection::vec(any::<u8>(), 0..64)), 1..9),
+        descriptors in any::<bool>(),
+    ) {
+        let z = crate::common::stored_zip_flagged(&files, descriptors);
+        let entries = archive::expand("dup.zip", z.clone()).expect("a valid archive expands");
+        prop_assert_eq!(entries.len(), files.len());
+        let names: std::collections::HashSet<_> = entries.iter().map(|e| e.name.clone().unwrap()).collect();
+        prop_assert_eq!(names.len(), files.len(), "names are unique");
+        let mut seen = std::collections::HashSet::new();
+        for ((own, data), entry) in files.iter().zip(&entries) {
+            let repeat = !seen.insert(own.clone());
+            prop_assert_eq!(entry.renamed_from.as_deref(), repeat.then_some(own.as_str()));
+            prop_assert_eq!(&entry.bytes, data);
+            let read = archive::read_entry(z.clone(), "dup.zip", entry.name.as_deref().unwrap()).expect("read back");
+            prop_assert_eq!(&read, data);
+        }
     }
 }
 
@@ -789,8 +850,62 @@ impl TempDir {
 
 impl Drop for TempDir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        crate::scratch::remove_or_defer(&self.0);
     }
+}
+
+/// The lone process of [`a_property_folder_whose_removal_fails_is_gone_when_its_process_ends`]: a property folder whose
+/// removal fails when it is dropped (staged through [`crate::scratch::fail_next_removal`], as a transient error would),
+/// then the process ends normally. Does nothing in a normal run.
+#[test]
+#[cfg(unix)]
+fn a_property_folder_whose_removal_fails_is_gone_when_its_process_ends_in_a_lone_process() {
+    if std::env::var_os("DEBRIEF_PROP_LEAK_PROBE").is_none() {
+        return;
+    }
+    let dir = TempDir::new();
+    let path = dir.0.clone();
+    std::fs::write(path.join("a.clef"), b"x").unwrap();
+    crate::scratch::fail_next_removal();
+    drop(dir);
+    assert!(path.join("a.clef").exists(), "the removal failed, as staged");
+    println!("FOLDER {}", path.display());
+}
+
+/// Regression (CI 7108, job 21353): the workspace properties passed, yet `debrief-prop-<pid>-<n>` folders were left in
+/// the temp folder and the leak check failed. The fixture's `Drop` ignored a failed removal, so any error on a busy
+/// machine (or anything else that made it fail) left the folder for good. Counts the probe's folders after its process
+/// ended: none may be left.
+#[test]
+#[cfg(unix)]
+fn a_property_folder_whose_removal_fails_is_gone_when_its_process_ends() {
+    let name = "properties::a_property_folder_whose_removal_fails_is_gone_when_its_process_ends_in_a_lone_process";
+    let out = debrief_core::process::quiet_command(std::env::current_exe().unwrap())
+        .args(["--exact", name, "--test-threads=1", "--nocapture"])
+        .env("DEBRIEF_PROP_LEAK_PROBE", "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}{}", String::from_utf8_lossy(&out.stderr));
+    let folder = stdout
+        .lines()
+        .find_map(|l| l.split_once("FOLDER ").map(|(_, p)| PathBuf::from(p)))
+        .expect("the probe made its folder");
+    let prefix = folder
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .rsplit_once('-')
+        .unwrap()
+        .0
+        .to_string();
+    let left: Vec<_> = std::fs::read_dir(std::env::temp_dir())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(&format!("{prefix}-")))
+        .collect();
+    assert!(left.is_empty(), "left behind by the probe's process: {left:?}");
 }
 
 #[derive(Debug, Clone)]

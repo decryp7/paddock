@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, Wry};
+use tauri::{AppHandle, Manager, Runtime, Wry};
 
 /// The tray id of an item.
 pub fn tray_id(item: &str) -> String {
@@ -185,10 +185,10 @@ pub fn view() -> TrayView {
     TrayView::new("Dyno", vec![item(SHOW_ID, "Open Dyno"), item(QUIT_ID, "Quit Dyno")], "static")
 }
 
-/// Creates the tray (the icons of `items`) under the shell's tray state. Returns whether it exists (Linux without a
-/// status-notifier host has none: the window is then the only way in, and closing it quits).
-pub fn create(app: &AppHandle<Wry>, items: Vec<ItemSpec>) -> bool {
-    paddock_window::tauri::create_tray(app, Tray::new(DynoTray::new(items), |_| view()))
+/// The shell's tray drawn by `backend` ([`DynoTray`] with the icons of the items in the app, a headless one in tests).
+/// Without a tray (Linux without a status-notifier host) the window is the only way in, and closing it quits.
+pub fn tray<R: Runtime>(backend: impl TrayBackend<R>) -> Tray<R> {
+    Tray::new(backend, |_| view())
 }
 
 #[cfg(test)]

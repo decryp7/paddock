@@ -4,6 +4,7 @@ import { Title } from '@angular/platform-browser';
 import { ActivatedRouteSnapshot, provideRouter, Router, type Route } from '@angular/router';
 import {
   CommandService,
+  ContributionRegistry,
   definePage,
   msg,
   provideContributions,
@@ -13,7 +14,7 @@ import {
   type PageDef,
 } from '@decryp7/paddock-ui/shell';
 import { MemoryJobsBackend } from '@decryp7/paddock-ui/shell/jobs';
-import { Keymap, NATIVE_MENU_GATE, RESERVED_KEYS } from '@decryp7/paddock-ui/shell/menu';
+import { Keymap, NATIVE_MENU_GATE, RESERVED_KEYS, type NativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
 import { MemoryNotificationCentre, MemoryServiceHealth, NotificationsStore } from '@decryp7/paddock-ui/shell/notify';
 import { MockStartupBackend, UI_CHECKPOINT, WindowReady } from '@decryp7/paddock-ui/shell/startup';
 import { PdShellFrame } from './frame';
@@ -210,6 +211,12 @@ interface Ctx {
   readonly count: () => number;
   readonly fail: () => boolean;
 }
+
+/** A desktop build's native menu port: it can quit, which is what puts Quit in the menu bar. */
+function quittingPort(quits: string[]): NativeMenuPort {
+  return { setAppMenu: () => Promise.resolve(), onMenu: () => Promise.resolve(() => undefined), quitApp: () => Promise.resolve(void quits.push('quit')) };
+}
+
 const count = signal(0);
 
 @Component({ selector: 'p-one', template: `<h1>Page one</h1><input data-testid="field" />`, changeDetection: ChangeDetectionStrategy.OnPush })
@@ -286,6 +293,24 @@ describe('pd-shell-frame with provideShellPages', () => {
   }
 
   afterEach(() => vi.unstubAllGlobals());
+
+  // Every shell app has Quit with Mod+Q in its app menu from the frame (rule 42), and an app overrides what it does with
+  // `APP_QUIT`; the desktop build is the one with a native menu port.
+  it('puts Quit with Mod+Q in the app menu of an app with a native menu, and quits through the port', async () => {
+    const quits: string[] = [];
+    await boot({ nativeMenu: quittingPort(quits) });
+    const registry = TestBed.inject(ContributionRegistry);
+    expect(registry.menus().filter((m) => m.menu === 'app' && m.command === 'pd.app.quit')).toHaveLength(1);
+    expect(registry.keybindings().find((k) => k.command === 'pd.app.quit')?.key).toBe('Mod+Q');
+    await (await TestBed.inject(ShellContextHost).load()).quitApp();
+    expect(quits).toEqual(['quit']);
+  });
+
+  it('has no Quit without a native menu port (the browser)', async () => {
+    await boot();
+    expect(TestBed.inject(ContributionRegistry).menus().some((m) => m.command === 'pd.app.quit')).toBe(false);
+  });
+
 
   it('shows the title bar, the pages, the first page and the status bar; the window title names the page', async () => {
     const { el, router } = await boot();
@@ -403,6 +428,30 @@ describe('pd-shell-frame with provideShellPages', () => {
     expect(TestBed.inject(NotificationsStore).all().some((n) => n.title === 'hello' || n.body === 'hello')).toBe(true);
   });
 
+  it('go resolves once the page is shown, and refuses an unknown id', async () => {
+    const { router } = await boot();
+    expect(await TestBed.inject(ShellPages).go('t.about')).toBe(true);
+    expect(router.url).toBe('/about');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await TestBed.inject(ShellPages).go('t.none')).toBe(false);
+    expect(warn).toHaveBeenCalledWith('[paddock-pages] there is no page t.none');
+  });
+
+  it('goAndFocus shows the page and focuses the page region, also when the page is already shown', async () => {
+    const { router, el } = await boot();
+    document.body.append(el);
+    const pages = TestBed.inject(ShellPages);
+    expect(await pages.goAndFocus('t.about')).toBe(true);
+    expect(document.activeElement).toBe(el.querySelector('#pd-main'));
+    (document.activeElement as HTMLElement).blur();
+    // The same page again: no navigation happens, the focus still lands.
+    await pages.goAndFocus('t.about');
+    expect(router.url).toBe('/about');
+    expect(document.activeElement).toBe(el.querySelector('#pd-main'));
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await pages.goAndFocus('t.none')).toBe(false);
+  });
+
   it('the sidebar button collapses to the rail and back, and the rail names its links', async () => {
     const { el, fixture, frame } = await boot();
     const toggle = el.querySelector<HTMLButtonElement>('[data-testid="sidebar-toggle"]') as HTMLButtonElement;
@@ -477,6 +526,22 @@ describe('pd-shell-frame with provideShellPages', () => {
     await fixture.whenStable();
     expect(document.activeElement).toBe(field);
     field.remove();
+  });
+
+  it('a navigation chosen in the command palette focuses the page (the palette closes under the focus)', async () => {
+    const { el, router, fixture } = await boot();
+    document.body.append(el);
+    const palette = document.createElement('div');
+    palette.dataset['testid'] = 'palette';
+    const input = document.createElement('input');
+    palette.append(input);
+    document.body.append(palette);
+    input.focus();
+    await router.navigateByUrl('/about');
+    await settle();
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(el.querySelector('#pd-main'));
+    palette.remove();
   });
 
   it('F6 cycles the regions; a handled key is left alone; skip link focuses the page', async () => {

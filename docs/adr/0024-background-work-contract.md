@@ -63,6 +63,11 @@ at `User` with bounded threads.
 | Linux | nice 10 (`Background`) or nice 19 + `SCHED_IDLE` (`Idle`) in `pre_exec`; never raised again | `setpriority(PRIO_PROCESS, tid, …)`, `SCHED_IDLE` for `Idle` | `ioprio_set` best-effort 7 (`Background`), idle class (`Idle`) |
 | Windows | `BELOW_NORMAL_PRIORITY_CLASS` (`Background`) or `IDLE_PRIORITY_CLASS` (`Idle`) at `CreateProcess`, then `SetProcessInformation(child, ProcessMemoryPriority, MEMORY_PRIORITY_LOW / VERY_LOW)` and `SetProcessInformation(child, ProcessPowerThrottling, EXECUTION_SPEED)` (EcoQoS) | `SetThreadPriority(THREAD_MODE_BACKGROUND_BEGIN)` | memory priority as set; I/O priority of *another* process has no public API |
 
+**Amended 2026-10-30 (rule 52, ADR 0020's amendment):** a `Background` child gets the gentle level only (macOS nice 10,
+Linux nice 10 + `ioprio` best-effort 7, Windows `BELOW_NORMAL_PRIORITY_CLASS` with normal memory priority and no EcoQoS);
+`PRIO_DARWIN_BG`, `SCHED_IDLE`, the idle I/O class, `IDLE_PRIORITY_CLASS`, EcoQoS and background mode are for `Idle`
+children, each with a `conformance: background-qos` comment (check C54).
+
 `PROCESS_MODE_BACKGROUND_BEGIN` applies only to the calling process, so it cannot be set on llama-server or any other
 third-party child. Our own Rust children may enter it on themselves, which also lowers their I/O priority, but only
 through `paddock_proc::priority::enter_background_self()`, and only when they were **launched** at `Background` or

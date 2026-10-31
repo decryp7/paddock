@@ -52,6 +52,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # CARGO_BUILD_JOBS: this runner's share of the host (conformance/ci/build-jobs.sh; Linux keeps cargo's default).
+      - uses: ./.gitea/actions/build-jobs
+
       # A dated nightly (FUZZ_TOOLCHAIN) instead of the moving one: the build, and the cache keyed on it, change
       # only when the pin does, and a broken nightly cannot fail the run. Move it forward now and then.
       - uses: dtolnay/rust-toolchain@master

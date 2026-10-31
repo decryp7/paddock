@@ -1,6 +1,6 @@
 # 20. One shared executor: tasks, periodic checks and leases, with priorities
 
-- Status: Accepted (2026-10-27)
+- Status: Accepted (2026-10-27); amended 2026-10-30 (rule 52: `Background` uses the gentle level on every OS)
 - Date: 2026-10-27
 - Related: rules 10–14 (background work, progress, never time out, bounded parallelism at background priority,
   pipelines), rule 40 (recurring bugs mean a missing design rule), rule 42 (share first), rule 43 (shared behaviour tested
@@ -95,8 +95,20 @@ background activity in the family goes through it, except the declared exemption
 |---|---|---|---|---|
 | `Interactive` | what a user is waiting for right now: queries that paint, "Check now", chat turn, opening a file | `QOS_CLASS_USER_INITIATED` | nice 0 | normal |
 | `User` | work the user started and watches: imports, exports, analyses started by a click | `QOS_CLASS_UTILITY` | nice 5 (lowered once) | `THREAD_PRIORITY_BELOW_NORMAL` |
-| `Background` | work nobody waits for: indexing, mining, periodic checks (default), downloads | `QOS_CLASS_UTILITY` for checks, `QOS_CLASS_BACKGROUND` for bulk | nice 10 + `ioprio` best-effort 7 | `THREAD_MODE_BACKGROUND_BEGIN` |
-| `Idle` | maintenance that may wait for hours: compaction, cache sweeps, pruning | `QOS_CLASS_BACKGROUND` | `SCHED_IDLE` + `ioprio` idle | `THREAD_MODE_BACKGROUND_BEGIN` + `THREAD_PRIORITY_IDLE` |
+| `Background` | work nobody watches but someone may wait for: indexing, mining, periodic checks (default), downloads | `QOS_CLASS_UTILITY` | nice 10 + `ioprio` best-effort 7 | `THREAD_PRIORITY_BELOW_NORMAL` |
+| `Idle` | maintenance nobody waits for, which may wait for hours: compaction, cache sweeps, pruning | `QOS_CLASS_BACKGROUND` | `SCHED_IDLE` + `ioprio` idle | `THREAD_MODE_BACKGROUND_BEGIN` + `THREAD_PRIORITY_IDLE` |
+
+**Amended 2026-10-30 (rule 52).** `Background` was `QOS_CLASS_BACKGROUND` for bulk work on macOS and
+`THREAD_MODE_BACKGROUND_BEGIN` on Windows. Those levels starve a thread for as long as the machine is busy, and indexing,
+mining and downloads are waited on: a report waits for its analyses, an import for a lock the indexer holds, a chat for
+its model download (Debrief's `debrief report` timed out on the CI Mac this way; Debrief ADR 0052). `Background` is now
+the gentle level on every OS; the starvable levels are `Idle`'s alone, and each use carries a
+`conformance: background-qos` comment that says why nobody waits on it (check C54). Consequences: ADR 0024's
+`Background` child processes are launched at the gentle level (`BELOW_NORMAL_PRIORITY_CLASS` without EcoQoS on Windows,
+nice 10 without `PRIO_DARWIN_BG` on macOS); `PRIO_DARWIN_BG`, `IDLE_PRIORITY_CLASS`, EcoQoS and
+`PROCESS_MODE_BACKGROUND_BEGIN` are for `Idle` children only. Pitcrew ADR 0022's walkers and removers run in
+`Background`, so they use `QOS_CLASS_UTILITY`, nice 10 with best-effort I/O 7 and `THREAD_PRIORITY_BELOW_NORMAL`, not
+QoS background, the idle I/O class or Windows background mode: a clean the user started finishes on a busy machine.
 
 One helper, `paddock_jobs::exec::priority::apply_current(Class)`, replaces the three thread helpers and the two process
 helpers (`debrief-core/src/threads.rs`, `debrief-ai/src/models/priority.rs`, `paddock-proc/src/sys.rs`,

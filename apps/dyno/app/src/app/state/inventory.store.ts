@@ -10,7 +10,7 @@ interface InventoryState {
   error: CommandError | null;
 }
 
-/** What is installed in this PC (memory modules, CPU, disks) and the engine's upgrade hints. Read once per visit; no side effects. */
+/** What is installed in this computer (memory modules, CPU, disks) and the engine's upgrade hints. Read once per visit; no side effects. */
 export const InventoryStore = signalStore(
   { providedIn: 'root' },
   withState<InventoryState>({ inventory: null, loading: false, error: null }),

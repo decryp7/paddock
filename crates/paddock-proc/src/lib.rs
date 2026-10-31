@@ -11,18 +11,30 @@
 //!   skipped) on Linux, the physical footprint on macOS, the private working set on Windows (R07, rule 26).
 //! - [`login_path`]: the `PATH` of the user's login shell, for a service started by launchd or systemd.
 //!
+//! - [`StartJudge`], [`StartWatch`]: a start judged on run state, CPU time, progress and a ready handshake, never on a fixed
+//!   wait (ADR 0031); [`StallReport`] says why a wait looks stuck. [`InstanceLock`]: one instance per folder by a held OS
+//!   lock; [`hint`]: a discovery file is only a hint (rule 53).
+//!
 //! - [`self_test`]: the `--self-test` every sidecar answers, started from the built app by CI (rule 23).
 //!
-//! Unix children lead their own process group (killed with `killpg`); Windows trees end through `taskkill /T /F`, and every
-//! supervised Windows child runs in a kill-on-close job object, so its helpers end with it even when they left its tree or the
-//! app crashed. Both are backed by a walk of the process table for helpers that left the group.
+//! Processes are named by identity ([`ProcessId`]: pid plus start time), never by a bare pid, because the OS hands a freed
+//! pid on (Windows at once): anything ended is first checked to still be the process that was meant (ADR 0033).
+//!
+//! Unix children lead their own process group (killed with `killpg`); every supervised Windows child runs in a kill-on-close
+//! job object, which ends the whole tree by handle, so its helpers end with it even when they left its tree or the app
+//! crashed. Both are backed by a walk of the process table, by identity, for helpers that left the group or the job.
 
 mod command;
+pub mod hint;
+mod identity;
+mod instance;
 #[cfg(windows)]
 mod job;
 mod login;
 mod run;
 pub mod self_test;
+mod stall;
+mod start;
 mod supervised;
 mod sys;
 mod tree;
@@ -33,18 +45,28 @@ mod watch;
 mod testchild;
 
 pub use command::{CREATE_NO_WINDOW, KEPT_ENV, clean_env, command, lower_priority};
+pub use identity::{Ending, Holder, ProcessId, StartTime, holder};
+pub use instance::{Claim, InstanceError, InstanceLock, is_held};
 pub use login::{
     MAX_PATH_LEN, SHELL_TIMEOUT, ask_shell, login_path, merge_path, parse_probe_output,
     probe_script, shell_candidates,
 };
 pub use run::{DEFAULT_MAX_OUTPUT, Limits, Outcome, Output, RunError, run_bounded};
+pub use stall::{StallAction, StallCause, StallReport};
+pub use start::{
+    Cpu, ExitInfo, Liveness, Pace, Patience, Reading, StartJudge, StartProbe, StartState,
+    StartWatch, Watched, tail_of, tree_cpu,
+};
 pub use supervised::{MemoryCap, Registry, Sampler, Supervised, end_all, global_registry};
 pub use tree::{
-    Terminated, ask, descendants_of, end, is_alive, kill_tree, processes_mentioning, terminate,
+    Terminated, TreeEnding, ask, descendants_of, end, is_alive, kill_tree, processes_mentioning,
+    terminate,
 };
 pub use usage::{
-    ProcEntry, Table, descendants, parse_pss, process_memory, read_pss, snapshot, table_from,
-    tree_memory, tree_memory_with,
+    CpuSample, MAX_TREE, OsSource, ProcEntry, ProcessSource, Row, Table, descendants, identity,
+    parse_pss, process_memory, read_children, read_pss, snapshot, table_from, tree_cpu_time,
+    tree_cpu_time_from, tree_cpu_time_of, tree_memory, tree_memory_from, tree_memory_of,
+    tree_memory_with,
 };
 pub use watch::{
     MemoryEvent, MemoryListener, MemoryUse, MemoryWatch, REARM_PERCENT, Verdict, WARN_PERCENT,

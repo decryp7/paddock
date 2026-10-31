@@ -88,7 +88,7 @@ Not benchmarks, though the names suggest it:
 | App | Benchmarks | Where |
 |---|---|---|
 | Debrief | 16 Rust benches and measurement tests (engine criterion; store at 10M; reads; analysis, import and worker memory; idle CPU; plugin idle; evtx memory; streaming; names; spans; profile engine; layout bake-off; large folder; `fts_bench` on a branch), the start-up benchmark, first-paint JS, Angular budgets, the macOS `scripts/perf` toolkit | [apps/debrief/docs/performance.md](../apps/debrief/docs/performance.md) |
-| Dyno | `dyno-agent bench` (the agent's own CPU and memory); Angular budgets. `dyno-bench` and the Benchmarks page are a **product feature** (benchmarking the user's machine), not a test of Dyno | [apps/dyno/docs/performance.md](../apps/dyno/docs/performance.md) |
+| Dyno | `dyno-agent bench` (the agent's own CPU and memory); the file finder and the maintenance status (`finder_bench`, `maintenance_bench`); Angular budgets. `dyno-bench` and the Benchmarks page are a **product feature** (benchmarking the user's machine), not a test of Dyno | [apps/dyno/docs/performance.md](../apps/dyno/docs/performance.md) |
 | Pitcrew | Angular budgets; the auto-scale simulation (branch) | [apps/pitcrew/docs/performance.md](../apps/pitcrew/docs/performance.md) |
 | Pitwall | Angular budgets. Its Benchmarks page and `pitwall-core/src/benchmarks.rs` are a **product feature** (model benchmarks) | [apps/pitwall/docs/performance.md](../apps/pitwall/docs/performance.md) |
 | Spotter | Angular budgets | [apps/spotter/docs/performance.md](../apps/spotter/docs/performance.md) |
@@ -148,9 +148,16 @@ One line each. The dated records are in the app files.
   - `paddock-jobs` walk: about 1.3× faster than a sequential walk on a warm cache.
   - `paddock-download`: 4 connections against 1, 11.0 s → 2.7 s for 64 MiB.
   - `paddock-proc` per-pid watcher (branch): 4.9% → 0.1% of a core.
+  - `paddock-chromium` (2026-10-29, loaded Mac): a test browser exits 0.15 s (median) after `Browser.close` when alone,
+    up to 11.7 s (p95 6.3 s) with about 20 at once, past the 5 s `CLOSE_GRACE` in 18 of 178 closes. See
+    [the record](#2026-10-29-paddock-chromium-browserclose-exit-time-under-load-fixflaky-browser-close).
 - **CI** (2026-10-24, before the monorepo): Paddock `ci.yml` median 3m05s. App builds 15–37 min median; Debrief's is
   24 min. See [ci-timings](research/2026-10-ci-timings.md). The monorepo has no re-run yet.
+- **Dyno:** idle, nobody watching, the agent costs about 0.9–1.1% of one core and 30 MB (2026-10-30, release, load 21–61),
+  the same with its threads at `UTILITY` as before; the finder is about 4% slower at `UTILITY` on a busy machine. Earlier:
+  2.0–3.2% of one core and 24 MB (load 55–85, an upper bound, date not stated).
 - **Dyno:** the agent costs about 2.0–3.2% of one core and 24 MB (load 55–85, an upper bound, date not stated).
+- **Dyno:** the maintenance status takes 0.03 ms instead of 6–7 ms with 14 windows, by jumping to window edges (2026-10-30, load 20–30, A/B).
 - **Pacenotes** (2026-10-25/28): Model2Vec potion-code-16M-v2 embeds 6,365 chunks/s on 1 thread and 55,499 on 13, with
   a 200 MB peak. BM25 plus potion-code meets the quality bar (0.750 / +28%).
 - **Pitcrew** (branch `docs/pitcrew-autoscale`, simulation): auto-scaling 1–4 runners cuts the mean wait from 171 to
@@ -159,6 +166,42 @@ One line each. The dated records are in the app files.
 - **Sighter:** no code yet; one indicative upstream measurement (RF-DETR Nano/Small ONNX on CPU and CoreML,
   2026-10-29, at load 18–24, indicative) in [apps/sighter/docs/performance.md](../apps/sighter/docs/performance.md), for its
   ADR 0001.
+
+## Shared-crate results
+
+Results of shared crates (rule 48: shared code records here), newest first.
+
+### 2026-10-29, paddock-chromium: Browser.close exit time under load (fix/flaky-browser-close)
+
+- **Commit:** 18360f145 (origin/main) with temporary probe output in `Chromium::close_gracefully` (not committed): the
+  time from the `Browser.close` answer to the process's exit.
+- **Machine:** Mac mini (Mac16,11), 14 cores, macOS 27.2; the pinned Chrome for Testing 156.0.8078.47 (macOS arm64).
+- **Load:** single runs: 1-minute load 12–25. Parallel runs: 4 loops of the suite at once (about 20 test browsers),
+  1-minute load 145–210 at the end of the runs, with other agents' jobs on the machine.
+- **Build:** debug test build (`cargo test -p paddock-chromium --all-features --no-run`), `CARGO_BUILD_JOBS=2`.
+- **Corpus:** none; the real-browser tests' own local pages (synthetic).
+- **Command:** `CHROMIUM_TEST_PATH=<pinned Chrome for Testing> PADDOCK_REQUIRE_TEST_BROWSER=1 nice -n 10 <it binary>
+  real_browser --nocapture`, 40 runs one at a time; then 4 such loops of 15 runs at once, twice (before and after the
+  test fix).
+- **Runs:** 120 closes alone; 178 and 180 closes in the two parallel sets. Reported: median, p95, max.
+- **Numbers:**
+
+  | Measure | Alone | 4 suites at once (1) | 4 suites at once (2) | Budget | Verdict |
+  |---|---|---|---|---|---|
+  | Exit after `Browser.close` answered, median | 0.15 s | 1.39 s | 0.94 s | `CLOSE_GRACE` 5 s | pass |
+  | p95 | | 6.27 s | 3.31 s | 5 s | over in set 1 |
+  | max | 1.55 s | 11.68 s | 6.25 s | 5 s | over |
+  | Closes over 5 s | 0 of 120 | 18 of 178 | 4 of 180 | | |
+  | `Browser.close` answered | 120 of 120 | all | all | | |
+
+- **Memory measure:** not measured.
+- **Notes:** the browser always answered `Browser.close` and closed its DevTools connection; under load it was slow to
+  exit, not deaf. Tests that asserted the exit within `CLOSE_GRACE` failed on load alone (2 of 60 runs); they now wait
+  on the exit under a 40 s hang guard. **For the product:** past the grace the tree is ended, which is safe for throwaway
+  profiles (they are deleted); under heavy load about one close in ten ends by force. A kept profile
+  (`Profile::Persistent`) gets 20 s (`CLOSE_GRACE_KEPT`), longer than the slowest exit measured, because a forced end
+  during Chrome's shutdown can lose cookies or a sign-in. Raw output: the agent's scratch folder,
+  not kept in the repository.
 
 ## Other family measurements
 
@@ -174,7 +217,55 @@ These measure tooling, not a product. They are kept where they are.
 - [Package managers](research/2026-10-package-managers.md) (2026-10-25, load 11–20).
 - [Dialog windows that open hidden](research/2026-10-28-dialog-hidden-windows.md) (2026-10-28): ready latency per OS
   and scenario.
+- `paddock-proc` snapshot with start times ([ADR 0033](adr/0033-processes-by-identity-never-by-a-bare-pid.md), 2026-10-30,
+  macOS release build, about 1,130 processes, load 17–23, synthetic: the machine's own process table, nothing recorded):
+  `cargo run --release -p paddock-proc --example snapshot_cost`. A snapshot takes 13.6–14.7 ms, and the start times take
+  0.53–1.77 ms of that. Windows is not measured.
 - [Lessons](lessons.md): test-binary consolidation, 239 → 99 binaries, nextest 301 s → 196 s.
+
+### 2026-10-30, linker for Dyno's incremental debug rebuilds: ld-prime against rust-lld (ci/build-parallelism)
+
+- **Commit:** ddf0becda (origin/main); no code change, the linker is chosen per run.
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2, Xcode 27.2 (ld-prime `ld-27106.1`), rustc 1.99.1 (LLVM 23.1.1).
+- **Load:** 1-minute load 5.7–10.8 at the start of each rebuild run (up to 13.9 at the end of one) (each started only when the 5-minute load was below 10,
+  aborted above 15; none was); 11–20 during the link-only runs, so those are an indication, compared only with each other.
+  Other agents were working on the machine throughout.
+- **Build:** debug (`dev` profile: workspace crates at opt-level 0, dependencies at 2, `debug = "line-tables-only"`), no
+  sccache, `CARGO_INCREMENTAL=1`, `CARGO_BUILD_JOBS=13` (cores − 1), under `nice -n 10`. Three warm build folders, one per
+  linker set-up: `ldprime27` (the default: ld-prime, SDK 27.2), `ldprime` (ld-prime, SDK 26.5) and `lld` (rust-lld from the
+  toolchain's sysroot through `-C link-arg=-fuse-ld=lld -C link-arg=-B<sysroot>/lib/rustlib/aarch64-apple-darwin/bin/gcc-ld`,
+  SDK 26.5). rust-lld cannot link against the 27.2 SDK at all: its `libSystem.tbd` lists an `arm64e.x1-macos` target that
+  LLVM 23.1's TAPI reader rejects ("unknown target"), so the like-for-like pair is `ldprime` against `lld` on SDK 26.5. The
+  `LC_BUILD_VERSION` of each binary names its linker (tool 3 = ld, tool 4 = lld).
+- **Corpus:** none (a build). Scenarios: `touch crates/dyno-agent/src/rollup.rs` (a leaf of the agent) or
+  `touch crates/dyno-core/src/forecast.rs` (the core, which every other crate depends on), then build.
+- **Command:** `env -u RUSTC_WRAPPER CARGO_TARGET_DIR=<dir> CARGO_BUILD_JOBS=13 CARGO_INCREMENTAL=1 [SDKROOT=<26.5 SDK>]
+  [CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS=<lld flags>] nice -n 10 cargo build -q -p dyno-agent -p dyno-cli` in
+  `apps/dyno`; an untimed build before each touch. Link only: rustc's own linker command (`cargo rustc ... -- -C save-temps
+  --print link-args`) rerun with and without the lld flags, output to a scratch file.
+- **Runs:** 5 rebuilds per scenario and set-up, interleaved (ldprime27, ldprime, lld per round); 7 interleaved link-only
+  pairs per binary. Medians and ranges.
+- **Numbers:**
+
+  | Measure | ld-prime, SDK 27.2 (default) | ld-prime, SDK 26.5 | rust-lld, SDK 26.5 | Budget | Verdict |
+  |---|---|---|---|---|---|
+  | Rebuild after touching dyno-agent | 2.43 s (1.72–3.89) | 1.75 s (1.43–2.77) | 2.20 s (1.87–3.01) | > 20 % faster to adopt | ld-prime not slower (indication, loaded) |
+  | Rebuild after touching dyno-core | 4.97 s (4.36–6.95) | 5.12 s (4.08–7.01) | 5.43 s (3.84–7.67) | > 20 % faster to adopt | ld-prime not slower (indication, loaded) |
+  | Link of `dyno-agent` alone (33–35 MB) | – | 0.34 s (0.25–0.43) | 0.42 s (0.40–0.46) | – | ld-prime not slower (indication, loaded) |
+  | Link of `dyno` (the CLI) alone | – | 0.12 s (0.08–0.14) | 0.145 s (0.13–0.17) | – | ld-prime not slower (indication, loaded) |
+
+- **Memory measure:** not measured (a build).
+- **Notes:** noise floor: the same linker (ld-prime) on two SDKs, which should take the same time, differs by 39 % in the
+  dyno-agent medians (2.43 s against 1.75 s), so differences below that are noise at this load. Linking is 0.1–0.4 s of a
+  1.5–5 s rebuild; the rest is rustc on the touched crate and its dependants, so no
+  linker could make the rebuild 20 % faster, and rust-lld was not faster in any measure. This agrees with Dyno's
+  2026-10-29 link-time study (rust-lld +16 % on the app's rebuild, [performance.md](../apps/dyno/docs/performance.md)). An earlier pass at the same load
+  timed with a 0.5 s polling clock and is discarded. mold and sold were not tried: mold produces no Mach-O any more, and
+  sold (the commercial macOS fork) was archived in November 2024, its README pointing to Apple's new linker. Linux and
+  Windows were not measured: on `x86_64-unknown-linux-gnu` rustc already links with rust-lld (default since 1.90; the CI
+  image's rustc 1.99.1 passes `-fuse-ld=lld` and `-B<sysroot>/.../gcc-ld`, checked with `--print link-args` in the image),
+  and the repo's `.cargo/config.toml` already sets `linker = "rust-lld.exe"` for `x86_64-pc-windows-msvc`.
+  Raw output: `/Volumes/d7sst7/dev-targets/linker-bench/` (`results.tsv`, `link-only*.tsv`).
 
 ## Gaps
 
@@ -202,6 +293,21 @@ These are ordered by impact.
    - Pitwall request latency and queueing.
    - Spotter check throughput and Chrome memory: about 17 GB idle was seen on Linux, see the lessons.
    - Windows and Linux runs of anything except CI.
+   - CI build parallelism on Windows: the runner reports 8 cores and 16,316 MB (build-jobs' log, run 7209, job 23225),
+     not the 16 cores and 32 GB the workflows' comments said, and runs two jobs at once, so the workflows' fixed 8 was
+     every core per job. `build-jobs.sh` keeps that (unset: cargo's default is the 8 cores) until an A/B decides the
+     share of 4. Memory is the first thing the A/B should test: two jobs of 8 rustc each on 16 GB, against the
+     1.5 GB per rustc that `PADDOCK_CI_RUSTC_MB` assumes (an estimate, never measured). A single run with 4 (before this was changed back) is not evidence: Debrief's Windows bundle took
+     18.6 min (run 7209) against 14.5 min with 8 (run 7195), on different commits and caches.
+   - CI build parallelism on Linux: `conformance/ci/build-jobs.sh` leaves `CARGO_BUILD_JOBS` unset on the Linux runner
+     (cargo uses every core in each of up to four concurrent containers, as before 2026-10-30) and logs the host's cores:
+     16 cores and 127,941 MB in a container on d-gtr9 (run 7211, job 23231).
+     Its share (cores / 4 or cores / 2, `PADDOCK_CI_JOBS_PER_HOST` in d-gtr9's `runner.envs`) waits for one A/B of Gitea
+     job durations of the Rust jobs (crate, crates, app legs, Debrief's rust tests), the same commits with and without it.
+   - CI build parallelism: a clean, CI-shaped Dyno build (`cargo test --no-run --workspace --exclude dyno-app`, no sccache,
+     no incremental) with `CARGO_BUILD_JOBS=4` (the Mac leg's share) against 13 (cores − 1). Tried on 2026-10-30; the
+     5-minute load never fell below 10 in an hour, so nothing was recorded (`conformance/ci/build-jobs.sh` keeps 4 on the
+     shared Mac until it is measured).
    - Memory is not checked outside Debrief.
 4. **Results on loaded machines that need a quiet re-run:**
    - Nearly every Debrief result since 2026-10-20 (Windows VM at about 80% load; Mac mini at load 9–220).

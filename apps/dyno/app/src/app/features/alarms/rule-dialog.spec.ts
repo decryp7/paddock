@@ -6,7 +6,7 @@ import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { RuleDialog } from './rule-dialog';
 
-const GPU: CustomAlertRule = { id: 'gpu-limit', name: 'GPU limit', metric: 'gpuLoad', op: 'above', limit: 90, forSecs: 120, severity: 'warning', enabled: true };
+const GPU: CustomAlertRule = { id: 'gpu-load', name: 'GPU load', metric: 'gpuLoad', op: 'above', limit: 90, forSecs: 120, severity: 'warning', enabled: true };
 
 async function open(inputs: Record<string, unknown>, backend = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000 })) {
   const d = await renderFramed(RuleDialog, { id: 'dy.alert-rule', kind: 'form', modality: 'modal', inputs, providers: [provideIcons(), { provide: BACKEND, useValue: backend }] });
@@ -42,8 +42,8 @@ describe('RuleDialog (dy.alert-rule)', () => {
   });
 
   it('adds a rule with a generated unique id and answers true', async () => {
-    const { d, backend, set, click, settle } = await open({ rule: null, takenIds: ['gpu-limit'] });
-    await set('[aria-label="Name"]', 'GPU limit');
+    const { d, backend, set, click, settle } = await open({ rule: null, takenIds: ['gpu-load'] });
+    await set('[aria-label="Name"]', 'GPU load');
     await click('Critical');
     await click('Below');
     await click('Increase the limit');
@@ -51,7 +51,7 @@ describe('RuleDialog (dy.alert-rule)', () => {
     await d.press('save');
     await settle();
     const rules = await stored(backend);
-    expect(rules.at(-1)).toMatchObject({ id: 'gpu-limit-2', name: 'GPU limit', op: 'below', severity: 'critical', limit: 95, forSecs: 120 });
+    expect(rules.at(-1)).toMatchObject({ id: 'gpu-load-2', name: 'GPU load', op: 'below', severity: 'critical', limit: 95, forSecs: 120 });
     expect(d.outcome()).toEqual({ kind: 'answered', value: true });
   });
 
@@ -91,7 +91,7 @@ describe('RuleDialog (dy.alert-rule)', () => {
     await set('[aria-label="Name"]', 'GPU hot');
     await d.press('save');
     await settle();
-    expect((await stored(backend)).find((r) => r.id === 'gpu-limit')).toMatchObject({ name: 'GPU hot', limit: 85, forSecs: 120 });
+    expect((await stored(backend)).find((r) => r.id === 'gpu-load')).toMatchObject({ name: 'GPU hot', limit: 85, forSecs: 120 });
   });
 
   it('steps temperatures by one degree within bounds', async () => {

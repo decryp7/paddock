@@ -59,6 +59,11 @@ impl Dirs {
         self.root.join("agent.json")
     }
 
+    /// The lock only one agent per data folder can hold ([`crate::instance`]).
+    pub fn instance_lock(&self) -> PathBuf {
+        self.root.join("agent.lock")
+    }
+
     /// The agent's log folder.
     pub fn logs(&self) -> PathBuf {
         self.root.join("logs")
@@ -80,7 +85,7 @@ mod tests {
         assert_eq!(d.database(), Path::new("/x/dyno/dyno.db"));
         assert_eq!(d.discovery(), Path::new("/x/dyno/agent.json"));
         assert_eq!(d.root(), Path::new("/x/dyno"));
-        for p in [d.settings(), d.logs(), d.plugins()] {
+        for p in [d.settings(), d.logs(), d.plugins(), d.instance_lock()] {
             assert!(p.starts_with("/x/dyno"));
         }
     }

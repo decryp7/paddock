@@ -2,6 +2,7 @@ import type { Alarm, AlarmChange, CustomAlertRule } from '../../core/api.types';
 import { demoAlarms } from '../../core/mock/alarms';
 import {
   alarmSuffix,
+  ruleLabel,
   changeLabel,
   clockToMinutes,
   defaultAlarmConfig,
@@ -44,8 +45,8 @@ describe('rule summaries', () => {
 
 describe('uniqueRuleId', () => {
   it('slugs the name and avoids taken ids', () => {
-    expect(uniqueRuleId('GPU limit!', [])).toBe('gpu-limit');
-    expect(uniqueRuleId('GPU limit', ['gpu-limit', 'gpu-limit-2'])).toBe('gpu-limit-3');
+    expect(uniqueRuleId('GPU load!', [])).toBe('gpu-load');
+    expect(uniqueRuleId('GPU load', ['gpu-load', 'gpu-load-2'])).toBe('gpu-load-3');
     expect(uniqueRuleId('  ***  ', [])).toBe('rule');
     expect(uniqueRuleId('Ünïcode name', [])).toBe('unicode-name');
     expect(uniqueRuleId('a'.repeat(60), []).length).toBe(40);
@@ -64,10 +65,10 @@ describe('clock conversion', () => {
     expect(clockToMinutes('')).toBeNull();
   });
   it('patches the quiet hours only', () => {
-    const c = withQuiet(defaultAlarmConfig(60), { enabled: true });
+    const c = withQuiet(defaultAlarmConfig(), { enabled: true });
     expect(c.quiet.enabled).toBe(true);
     expect(c.quiet.startMinute).toBe(1320);
-    expect(c.utcOffsetMinutes).toBe(60);
+    expect(c.chatterTransitions).toBe(defaultAlarmConfig().chatterTransitions);
   });
 });
 
@@ -129,5 +130,23 @@ describe('alarm helpers', () => {
     expect(prependChange(log, c, 2)).toHaveLength(1);
     const more = prependChange(prependChange(log, change('raised', by(7), NOW - 10), 2), change('raised', by(6), NOW - 20), 2);
     expect(more.map((x) => x.at)).toEqual([NOW, NOW - 10]);
+  });
+});
+
+describe('ruleLabel', () => {
+  it('drops the source prefix and splits camelCase and kebab-case into words', () => {
+    expect(ruleLabel('alert:lowDisk')).toBe('Low disk');
+    expect(ruleLabel('network:newExposedListener')).toBe('New exposed listener');
+    expect(ruleLabel('threshold:gpu-load')).toBe('GPU load');
+    expect(ruleLabel('threshold:my_custom rule')).toBe('My custom rule');
+  });
+  it('keeps acronyms upper case, even inside camelCase', () => {
+    expect(ruleLabel('alert:longHighCpu')).toBe('Long high CPU');
+    expect(ruleLabel('alert:ssd-wear')).toBe('SSD wear');
+  });
+  it('works without a prefix and falls back to the key when nothing is left', () => {
+    expect(ruleLabel('crashLoop')).toBe('Crash loop');
+    expect(ruleLabel('alert:')).toBe('alert:');
+    expect(ruleLabel('')).toBe('');
   });
 });

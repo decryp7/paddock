@@ -70,7 +70,7 @@ width: number, height: number,
  */
 grabX: number, grabY: number, };
 
-export type PanelErrorCode = "notReady" | "closed" | "tooMany" | "invalid" | "tooLarge" | "rateLimited" | "notAllowed" | "failed";
+export type PanelErrorCode = "notReady" | "closed" | "tooMany" | "invalid" | "tooLarge" | "rateLimited" | "notAllowed" | "failed" | "insidePluginHook";
 
 export type PanelError = { code: PanelErrorCode, 
 /**

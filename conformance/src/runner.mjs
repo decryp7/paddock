@@ -26,7 +26,7 @@ export async function runChecks({ root, app, only = null, options = {}, registry
 
   const waiverText = ctx.read('paddock.waivers.toml');
   const parsed = waiverText ? parseWaivers(waiverText) : { waivers: [], problems: [] };
-  const applied = applyWaivers({ findings, ...parsed, now: ctx.now, pathMatches });
+  const applied = applyWaivers({ findings, ...parsed, now: ctx.now, pathMatches, checksRun: selected.map((c) => c.id) });
   findings = applied.findings;
   return {
     app: config.app,

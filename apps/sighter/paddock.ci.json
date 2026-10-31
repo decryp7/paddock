@@ -1,6 +1,17 @@
 {
-  "$comment": "Sighter's CI contract (scripts/affected.mjs, .gitea/actions/app-gates, ADR 0014 §6; the field list is in .gitea/actions/README.md): a Linux leg of ci.yml for the pure core (crates/sighter-core): fmt, clippy, nextest, doc tests and deny, plus `rustChecks`: the coverage gate (cargo llvm-cov, 99 % of lines, as Pitwall's core). The core has no OS-specific code yet, so there are no Windows or macOS legs; the capture and input adapters add them. There is no UI, installer or release yet.",
+  "$comment": "Sighter's CI contract (scripts/affected.mjs, .gitea/actions/app-gates, ADR 0014 §6; the field list is in .gitea/actions/README.md): a Linux leg of ci.yml for the pure core (crates/sighter-core): fmt, clippy, nextest, doc tests and deny, plus `rustChecks`: the coverage gate (cargo llvm-cov, 99 % of lines, as Pitwall's core). The core has no OS-specific code yet, so there are no Windows or macOS legs; the capture and input adapters add them. There is no UI, installer or release yet. `checks`: the ONNX Runtime pipeline scripts (scripts/ort, stage-2 plan SW5): shellcheck, their tests on synthetic fixtures, the shared byte and import checks they call (conformance/release/telemetry-bytes.mjs, windows-crt-imports.mjs), and cargo check and clippy of the smoke program, which links ONNX Runtime only in sighter-ort.yml.",
   "cargo": ".",
+  "checks": [
+    "cd apps/sighter/scripts/ort",
+    "shellcheck -x *.sh tests/*.sh",
+    "bash tests/run.sh",
+    "cd ../../../..",
+    "node --test conformance/test/telemetry-bytes.test.mjs conformance/test/windows-crt-imports.test.mjs",
+    "cd apps/sighter/scripts/ort/smoke",
+    "cargo fmt --check",
+    "cargo check --locked --all-targets",
+    "cargo clippy --locked --all-targets -- -D warnings"
+  ],
   "rustChecks": [
     "cd apps/sighter",
     "cargo llvm-cov nextest -p sighter-core --profile ci --summary-only --fail-under-lines 99"

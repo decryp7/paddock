@@ -2,12 +2,12 @@
 # of ci.yml (apps/spotter/paddock.ci.json: Rust on Linux, Windows and macOS, the frontend), and its bundles, the macOS seal check,
 # and the release are the shared app-release.yml. This file is only the triggers and the app's facts.
 #
-#   push to main      installers on three OS and the real-app smoke when the change reaches Spotter (the same plan as ci.yml)
+#   push to main      nothing: the nightly (nightly.yml) builds the installers, so a push does not spend three OS builds
 #   a spotter-v* tag  the gates (ci.yml, only Spotter's legs), then installers, then the Gitea release with latest.json on
 #                     the release and on the moving spotter-latest release, which installed copies update from
-#   nightly           installers again, so a toolchain or runner change shows up the night it happens
+#   nightly           no longer here: nightly.yml builds the installers (installers-spotter), see the verdict job below
 #   manual            installers without a release (the "one CI build with bundles" before a tag, rule 25); `gates: true`
-#                     also runs Spotter's ci.yml legs first
+#                     also runs Spotter's ci.yml legs beside them (not before). Rule 54: a run whose installers job did not run FAILS (verdict job).
 #
 # Runner labels: ubuntu-latest (the paddock-ci image), windows-latest and macos-latest (host runners; they install nothing
 # system-wide and leave no processes or launch agents behind). Secrets: the family's updater key
@@ -18,10 +18,7 @@ name: spotter-release
 
 on:
   push:
-    branches: [main]
     tags: ["spotter-v*"]
-  schedule:
-    - cron: "5 1 * * *"
   workflow_dispatch:
     inputs:
       gates:
@@ -69,10 +66,14 @@ jobs:
       # A manual run with gates is the "one CI build with bundles" before a tag: WebKit included, as the old bundles run was.
       webkit: ${{ github.event_name == 'workflow_dispatch' }}
 
-  release:
-    name: installers + release
-    needs: [plan, gates]
-    if: ${{ !cancelled() && needs.plan.outputs.run == 'true' && (needs.gates.result == 'success' || (needs.gates.result == 'skipped' && !startsWith(github.ref, 'refs/tags/'))) }}
+  # Installers for a manual run: they need only the plan, never `gates`.
+  # Gitea 28.2 skips a reusable-workflow job whose need was skipped, whatever its `if` says (125 of 133 green release runs
+  # built nothing), so a job that waits on the optional `gates` job can not be the one that builds on a push or a dispatch.
+  # A manual run with `gates: true` runs the gates beside the installers; both must be green for the run to be.
+  installers:
+    name: installers
+    needs: [plan]
+    if: ${{ needs.plan.outputs.run == 'true' && !startsWith(github.ref, 'refs/tags/') }}
     uses: ./.gitea/workflows/app-release.yml
     with:
       paddock-ref: ${{ github.sha }}
@@ -100,3 +101,55 @@ jobs:
       TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+  # A tag: the gates first (ER-15: no release past red gates), then the same installers and the Gitea release. Only a tag run has
+  # the gates, so this job never waits on a skipped need.
+  release:
+    name: installers + release
+    needs: [plan, gates]
+    if: ${{ needs.plan.outputs.run == 'true' && startsWith(github.ref, 'refs/tags/spotter-v') && needs.gates.result == 'success' }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: spotter
+      app-name: Spotter
+      app-dir: apps/spotter/app
+      cargo-dir: apps/spotter
+      tag-prefix: spotter-
+      latest-tag: spotter-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Spotter now updates from the Paddock releases, which a copy installed before this version does not look at."
+      # Spotter's UI imports the shared library from ui/dist, which the app build needs.
+      prepare: npm run build -w ui
+      cliff-config: apps/spotter/cliff.toml
+      cliff-paths: |
+        apps/spotter/**
+        crates/**
+        ui/**
+      # Spotter bundles no sidecar (no bundle.externalBin), so the macOS verify has none to start; the seal, the hardened-runtime
+      # and TeamIdentifier checks on the .app and the DMG still run. A sidecar added later is read from tauri.conf.json.
+      setup-node: false
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+  # What this run proves about the installers (rule 54): "installers: built" or "installers: not built (why)" in the summary, and a
+  # red run when a manual run or a tag was meant to build them and did not. The verdict reads whichever of the two installer jobs ran.
+  verdict:
+    name: installers verdict
+    needs: [plan, gates, installers, release]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.gitea/actions/release-verdict
+        with:
+          app: spotter
+          plan-run: ${{ needs.plan.outputs.run }}
+          release-result: ${{ needs.release.result != 'skipped' && needs.release.result || needs.installers.result }}
+          gates-result: ${{ needs.gates.result }}

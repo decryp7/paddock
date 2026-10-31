@@ -9,8 +9,8 @@
   "angularDir": "app",
   "windowsClippy": true,
   "processPatterns": [
-    "[/\\\\]\\.paddock-ci[/\\\\]target-dyno-app[/\\\\]debug[/\\\\](dyno-ipc-test-child|dyno-test-plugin|dyno-bench)(\\.exe)?( |$)",
-    "[/\\\\]dyno-it-plugins-[A-Za-z0-9]+[/\\\\][^/\\\\]+[/\\\\]plugin(\\.exe)?( |$)"
+    "{build}[/\\\\]debug[/\\\\](dyno-ipc-test-child|dyno-test-plugin|dyno-bench)(\\.exe)?( |$)",
+    "{tmp}[/\\\\]dyno-it-plugins-[A-Za-z0-9]+[/\\\\][^/\\\\]+[/\\\\]plugin(\\.exe)?( |$)"
   ],
   "checks": [
     "cd apps/dyno",
@@ -42,5 +42,17 @@
     "npm run build:e2e -w ui",
     "cd apps/dyno/app",
     "PW_PORT=4362 npx playwright test --project=webkit --workers=1"
-  ]
+  ],
+  "notices": {
+    "name": "Dyno",
+    "manifests": [
+      "app/src-tauri/Cargo.toml",
+      "crates/dyno-agent/Cargo.toml",
+      "crates/dyno-cli/Cargo.toml"
+    ],
+    "npm": "app",
+    "out": [
+      "app/src-tauri/resources"
+    ]
+  }
 }

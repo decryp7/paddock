@@ -76,7 +76,7 @@ export const firstLaunch = (app) => `### First launch
 
 Paddock ${app.title} is not code-signed yet, so your system may warn the first time you open it.
 
-- **macOS:** if it says the app cannot be opened, choose Done, then System Settings > Privacy & Security > scroll to the message about Paddock ${app.title} > **Open Anyway**.
+- **macOS:** first drag Paddock ${app.title} from the disk image to Applications and open it from there. The first time, macOS says "“Paddock ${app.title}” Not Opened": choose **Done** (not Move to Trash). Open System Settings > Privacy & Security, scroll down to "“Paddock ${app.title}” was blocked to protect your Mac." and choose **Open Anyway**. macOS asks once more, "Open “Paddock ${app.title}”?": choose **Open Anyway** again, then enter an administrator's name and password. You do this once; later starts open normally. If the button is missing, open Paddock ${app.title} again first.
 - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
 - **Linux:** install the .deb with your package manager, or make the AppImage executable and run it.
 

@@ -1,3 +1,5 @@
+import { PlatformService } from '../../core/platform';
+import { osTerms } from '../../shared/os-terms';
 import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
@@ -68,11 +70,11 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                     <span class="badge" [attr.data-tone]="sig().tone">@if (sig().verified) {<dy-icon name="shield-check" />} {{ sig().text }}</span>
                   </dd>
                   <dt>Started</dt><dd class="num">{{ show(x.process.started, since) }}</dd>
-                  <dt>Priority</dt><dd>{{ x.priority ? priorityLabel(x.priority) : 'Not available on this PC' }}</dd>
-                  <dt>Cores</dt><dd class="num">{{ x.affinity === null ? 'Not available on this PC' : affinity(x.affinity) }}</dd>
-                  <dt>Efficiency mode</dt><dd>{{ x.efficiencyMode === null ? 'Not available on this PC' : x.efficiencyMode ? 'On' : 'Off' }}</dd>
+                  <dt>Priority</dt><dd>{{ x.priority ? priorityLabel(x.priority) : 'Not available on this computer' }}</dd>
+                  <dt>Cores</dt><dd class="num">{{ x.affinity === null ? 'Not available on this computer' : affinity(x.affinity) }}</dd>
+                  <dt>Efficiency mode</dt><dd>{{ x.efficiencyMode === null ? 'Not available on this computer' : x.efficiencyMode ? 'On' : 'Off' }}</dd>
                   <dt>Threads</dt><dd class="num">{{ x.threads === null ? '—' : count(x.threads) }}</dd>
-                  <dt>Handles</dt><dd class="num">{{ x.handles === null ? '—' : count(x.handles) }}</dd>
+                  <dt>{{ terms.handles }}</dt><dd class="num">{{ x.handles === null ? '—' : count(x.handles) }}</dd>
                   <dt>Starts with</dt><dd>{{ x.startupSource ?? 'Not a startup item' }}</dd>
                   <dt>Now</dt><dd class="num">{{ show(x.process.cpu, pct) }} CPU · {{ show(x.process.memory, bytes) }}</dd>
                 </dl>
@@ -107,7 +109,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                     <h3>Listening</h3>
                     <ul class="plain dy-selectable">
                       @for (l of n.listeners; track $index) {
-                        <li class="mono"><b>{{ l.proto }}</b> {{ l.local }}:{{ l.port }} <span class="faint">{{ l.exposure === 'allInterfaces' ? 'exposed' : l.exposure === 'loopback' ? 'this PC only' : 'one interface' }}</span></li>
+                        <li class="mono"><b>{{ l.proto }}</b> {{ l.local }}:{{ l.port }} <span class="faint">{{ l.exposure === 'allInterfaces' ? 'exposed' : l.exposure === 'loopback' ? 'this computer only' : 'one interface' }}</span></li>
                       }
                     </ul>
                   }
@@ -158,7 +160,9 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
     .titles { flex: 1; min-width: 0; display: grid; }
     .faint { color: var(--text-3); font-size: var(--fs-xs); }
     .lock { display: flex; gap: var(--sp-2); align-items: center; margin: 0 var(--sp-4) var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--surface-inset); color: var(--text-2); font-size: var(--fs-sm); }
-    .tabs { padding: 0 var(--sp-3); }
+    .tabs { padding: 0 var(--sp-2); }
+    /* The five tabs fit the 380 px panel with the wider fonts of Linux: closer padding here, not a bar that paginates and cuts a label. */
+    .tabs .mat-mdc-tab-link.mdc-tab { padding-inline: var(--sp-2); }
     .content { flex: 1; overflow: auto; padding: var(--sp-3) var(--sp-4) var(--sp-4); }
     dl { margin: 0; display: grid; gap: 2px var(--sp-3); grid-template-columns: 96px minmax(0, 1fr); font-size: var(--fs-sm); }
     dt { color: var(--text-3); padding: 3px 0; }
@@ -183,6 +187,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
   `,
 })
 export class ProcessDetailsPanel {
+  protected readonly terms = osTerms(inject(PlatformService).platform);
   protected readonly store = inject(ProcessesStore);
   private readonly live = inject(LiveStore);
   protected readonly tab = signal<Tab>('overview');

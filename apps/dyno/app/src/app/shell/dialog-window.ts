@@ -1,3 +1,4 @@
+import type { EnvironmentProviders } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { DialogShell, dialogWindowConfig, mountDialogWindowHost, tauriDialogIo, type DialogRoute } from '@decryp7/paddock-ui/shell/dialogs';
 import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
@@ -8,8 +9,17 @@ import { provideIcons } from '../shared/icons';
 import { provideDynoAppearance } from './appearance';
 import { DIALOGS } from './contributions';
 import { dialogBaseProviders } from './dialog-base';
-import { settingsBackend } from './engines';
+import { provideShellJobs } from '@decryp7/paddock-ui/shell/jobs';
+import { jobsBackend, settingsBackend } from './engines';
 import { tauriBridge } from './ipc';
+
+/** The dialogs that start a job: only their windows get the shell's jobs store (it asks the agent for the job list, which another dialog's contract does not allow). */
+const JOB_DIALOGS: readonly string[] = ['dy.file-hash'];
+
+/** The shell's jobs for the dialog window `id`, when that dialog follows a job. */
+export function dialogJobsProviders(id: string): EnvironmentProviders[] {
+  return JOB_DIALOGS.includes(id) ? [provideShellJobs({ backend: jobsBackend })] : [];
+}
 
 /** A dialog window of Dyno: the dialog shell, the small base set and the dialog's own providers (rule 34). */
 export function bootDialogWindow(route: DialogRoute): Promise<unknown> {
@@ -22,7 +32,15 @@ export function bootDialogWindow(route: DialogRoute): Promise<unknown> {
     DialogShell,
     dialogWindowConfig({
       dialogs: DIALOGS,
-      providers: [provideIcons(), providePaddockMaterial(), { provide: BACKEND, useFactory: createBackend }, ...dialogBaseProviders(), ...appearance],
+      providers: [
+        provideIcons(),
+        providePaddockMaterial(),
+        { provide: BACKEND, useFactory: createBackend },
+        // A dialog that starts a job (the file hash) follows it with the shell's jobs store, like the main window.
+        ...dialogJobsProviders(route.id),
+        ...dialogBaseProviders(),
+        ...appearance,
+      ],
       route,
       ...(bridge ? { io: () => tauriDialogIo(bridge) } : {}),
     }),
