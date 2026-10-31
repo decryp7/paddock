@@ -10,7 +10,7 @@ publish = ["decryp7"]
 [features]
 # The Tauri adapter (`paddock_updater::tauri`: managed state, commands, the `paddock://updates` event, the automatic check
 # and the exit hook); the core never depends on Tauri.
-tauri = ["dep:tauri", "dep:log", "paddock-commands/tauri", "paddock-jobs/tauri", "paddock-download/tauri"]
+tauri = ["dep:tauri", "dep:log", "paddock-commands/tauri", "paddock-jobs/tauri", "paddock-download/tauri", "paddock-download/http"]
 # The installer over `tauri-plugin-updater` (`paddock_updater::tauri::PluginInstaller`): the plugin verifies the signature
 # again and installs the platform's package. The app registers the plugin.
 install = ["tauri", "dep:tauri-plugin-updater"]
