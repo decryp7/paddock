@@ -36,7 +36,7 @@ if (process.argv.includes('--open')) {
   const browser = await chromium.launch();
   try {
     for (const theme of ['light', 'dark']) {
-      const p = await browser.newPage({ viewport: { width: 1600, height: 1200 }, deviceScaleFactor: 2, colorScheme: theme });
+      const p = await browser.newPage({ viewport: { width: 1800, height: 1400 }, deviceScaleFactor: 2, colorScheme: theme });
       await p.goto(`file://${page}?theme=${theme}`);
       const ids = await p.$$eval('figure[id^="f-"]', (fs) => fs.map((f) => f.id));
       for (const id of ids) await p.locator(`#${id}`).screenshot({ path: join(out, `${id.slice(2)}-${theme}.png`), animations: 'disabled' });

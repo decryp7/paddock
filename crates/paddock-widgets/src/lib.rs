@@ -205,7 +205,7 @@ pub struct Layout<W> {
     /// replaces or clears it.
     #[serde(skip)]
     #[cfg_attr(any(test, feature = "ts"), ts(skip))]
-    pub previous: Option<Vec<Placement<W>>>,
+    previous: Option<Vec<Placement<W>>>,
 }
 
 /// What was wrong with a stored layout (shown once).
@@ -303,6 +303,8 @@ pub struct CatalogueInfo<S, K> {
 pub struct LayoutView<S, W, K> {
     pub layout: Layout<W>,
     pub catalogue: CatalogueInfo<S, K>,
+    /// The catalogue's built-in presets (never stored).
+    pub builtin_presets: Vec<Preset<W>>,
     pub notes: Vec<Note>,
     /// True right after an undoable edit; the next edit sets it again or clears it (the undo toast follows it).
     pub can_undo: bool,
@@ -395,6 +397,23 @@ pub struct SurfaceValues<V, A> {
 }
 }
 
+impl<W> Layout<W> {
+    /// A layout with nothing to undo.
+    pub fn new(version: u32, placements: Vec<Placement<W>>, presets: Vec<Preset<W>>) -> Self {
+        Layout {
+            version,
+            placements,
+            presets,
+            previous: None,
+        }
+    }
+
+    /// Whether an undoable edit was the last one (remove, apply preset, reset).
+    pub fn can_undo(&self) -> bool {
+        self.previous.is_some()
+    }
+}
+
 /// What reading a stored layout found.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Read<C: Catalogue> {
@@ -415,7 +434,9 @@ pub struct Stored<C: Catalogue> {
 }
 
 /// Why an edit was refused (the message says what to do).
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 pub enum WidgetError {
     #[error("No widget has the id \"{0}\".")]
     UnknownPlacement(String),

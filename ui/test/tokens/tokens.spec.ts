@@ -101,6 +101,15 @@ describe.each(MODES)('contrast, %s, %s contrast', (scheme, mode) => {
     expect(ratio(v, '--pd-chart-neutral-bar', '--pd-surface-1')).toBeGreaterThanOrEqual(3);
   });
 
+  it('the meter neutral fill is 3:1 on every surface a meter sits on (ADR 0035)', () => {
+    for (const s of ['--pd-surface-1', '--pd-surface-2', '--pd-surface-3']) expect(contrast(col(v, '--pd-meter-neutral'), col(v, s))).toBeGreaterThanOrEqual(3);
+  });
+
+  it('the raised skeleton shows on a surface-2 fill and its shine is a step apart (ADR 0035)', () => {
+    expect(contrast(col(v, '--pd-skeleton-raised'), col(v, '--pd-surface-2'))).toBeGreaterThanOrEqual(1.2);
+    expect(contrast(col(v, '--pd-skeleton-raised'), col(v, '--pd-skeleton-raised-shine'))).toBeGreaterThan(1.05);
+  });
+
   it('surfaces are told apart: each step differs from the next', () => {
     const l = (n: string): number => contrast(col(v, n), { r: 0, g: 0, b: 0, a: 1 });
     expect(l('--pd-bg')).not.toBeCloseTo(l('--pd-surface-1'), 3);
