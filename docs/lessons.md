@@ -428,14 +428,27 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
 - A live history view whose window ends at `now()`, exclusive, misses what was recorded in the same millisecond (Dyno's
   network timeline flake): a live window ends just after now. An accept loop with short windows must give a client that
   connected late the whole handshake time, or it drops the client unread and the client sees a reset (Dyno's helper).
-- A Unix socket on a loaded Mac (load 30-90) sometimes fails with no one at fault (Dyno's agent tests, 1 run in 15): `recv`
-  returns EBADF on an open, healthy socket (an interposed trace of every open, socket, accept, dup and close showed
-  nothing closed it; `fcntl` and `SO_ERROR` were fine, `kern.ipc.sodefunct_calls` did not move, data was waiting and the
-  same call made again worked), and now and then a fresh pair starts broken (the host's first call on its end EINVAL, the
-  client's read EBADF). A plain C loop of the same handshake did not reproduce it, so the trigger is not known yet. Dyno's
-  IPC tries a read or write again while the descriptor is still open (bounded, unit-tested), which cut the failures by
-  about two thirds; the broken-from-the-start pairs remain open work. Find a descriptor's history with a
-  `DYLD_INSERT_LIBRARIES` interposer before blaming a double close.
+- Socket I/O waits with `poll`, never inside the socket (2026-10-31, Dyno's agent tests, 1 run in 15 under load). On
+  macOS, closing a copy of a socket while another process inspects that copy (`proc_pidfdinfo`: netstat2, lsof, Activity
+  Monitor, Dyno's own socket lister) makes the kernel drain the descriptor, which sets `SS_DRAINING` on the SOCKET that
+  every copy shares, for good. From then on every `read` or `write` that has to WAIT inside the socket fails at once with
+  EBADF although the descriptor is open and healthy (`fcntl` and `SO_ERROR` fine, nothing of ours closed anything, "the
+  same call again worked" only because data had arrived). Calls that do not wait, and `poll`, keep working. A listener
+  marked this way hands every accepted connection the mark ("a fresh pair starts broken"). A `posix_spawn` child holds a
+  copy of EVERY descriptor, `O_CLOEXEC` ones included, until its exec closes them, so any spawn is a chance for it. An
+  immediate retry of the call cannot work (the mark never clears, and `F_GETFD` also passes for a reused number). So
+  paddock-ipc and dyno-ipc streams are non-blocking and wait on `poll` (the read timeout is the poll timeout), and a
+  partial write continues after `poll` says writable. The regression test puts a socket into the state on purpose.
+  Agent tests also stopped running the real socket lister, counters and hardware readers (ER-14): the platform owns
+  those ports and the fake supplies them. A forking test in a shared binary was a lesser trigger of the same thing.
+- A just-released lock can look held (2026-10-31, Dyno restart flakes): on macOS ANY spawn, `posix_spawn` included, gives
+  the child a copy of the descriptor table until it execs (measured: a thread spawning `true` in a loop against a thread
+  taking and dropping an `InstanceLock` fails every run). Closing the spawn path does not close this, so the lock judges:
+  `InstanceLock::claim` reports `Held` only after `HELD_CHECKS` consecutive checks a tick apart (a real holder stays held,
+  a copy clears). Tests and callers no longer retry on "already running". Separately, `pre_exec` is out of the shared
+  crates and the app preset (it forces fork+exec; priority is lowered on the held child after the spawn), and a test that
+  forks on purpose lives in a test binary of its own: in a shared one its child copied its neighbours' locks and was a
+  trigger of the random EBADF above (more copies of descriptors closed under inspection; see the entry on `poll`).
 - A Node script's "am I the main module" check must compare real paths: Node gives `import.meta.url` the resolved path
   and leaves `process.argv[1]` as given, so through a symlink (a CI work folder linked to a stable one, `node_modules`)
   `import.meta.url === pathToFileURL(process.argv[1]).href` is false and the script exits 0 doing nothing (the Chrome for

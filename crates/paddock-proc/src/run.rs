@@ -24,6 +24,8 @@ pub struct Limits {
     pub max_output: usize,
     /// End the tree as soon as a stream reaches `max_output` (an endless writer) instead of dropping the rest.
     pub stop_on_cap: bool,
+    /// Lower the child's priority right after the start (Unix; Windows needs [`crate::lower_priority`] on the command).
+    pub lowered: bool,
 }
 
 impl Limits {
@@ -33,12 +35,19 @@ impl Limits {
             timeout,
             max_output: DEFAULT_MAX_OUTPUT,
             stop_on_cap: false,
+            lowered: false,
         }
     }
 
     /// With another output cap.
     pub fn max_output(mut self, bytes: usize) -> Limits {
         self.max_output = bytes;
+        self
+    }
+
+    /// Lower the child's priority after it started, from here through the held child (no fork window).
+    pub fn lowered(mut self) -> Limits {
+        self.lowered = true;
         self
     }
 
@@ -198,6 +207,9 @@ pub fn run_bounded(mut cmd: Command, limits: Limits) -> Result<Output, RunError>
         std::io::ErrorKind::PermissionDenied => RunError::PermissionDenied(name.clone()),
         _ => RunError::Spawn(name.clone(), e),
     })?;
+    if limits.lowered {
+        crate::sys::lower_child(&child);
+    }
     // Taken before the waiter thread can reap the child: by the time a timeout ends the tree, the program may have exited
     // and its pid been handed on, so the tree is ended by identity (ADR 0033).
     let root = ProcessId::of(child.id());
@@ -293,6 +305,12 @@ mod tests {
 
     fn limits() -> Limits {
         Limits::new(Duration::from_secs(120))
+    }
+
+    #[test]
+    fn a_lowered_run_ends_like_any_other() {
+        let o = run_bounded(child(Mode::Exit3), limits().lowered()).unwrap();
+        assert!(matches!(o.outcome, Outcome::Exited(s) if s.code() == Some(3)));
     }
 
     #[test]

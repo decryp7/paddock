@@ -4,8 +4,29 @@
 //! (rule 53: hold the thing itself, never trust a pid read earlier). A discovery file ([`crate::hint`]) only says how to
 //! reach the holder.
 
+use crate::start::Pace;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+/// A refusal is reported as [`Claim::Held`] only after the lock was seen held on this many consecutive checks. Why: on
+/// macOS (measured) any spawn, `posix_spawn` included, gives the child a copy of the descriptor table until it execs, so
+/// the lock can look held for a moment after its holder let go. A real holder stays held on every check; a copy goes
+/// away within moments (ADR 0031: judged on observations at a pace, not on one reading or on elapsed time).
+pub const HELD_CHECKS: u32 = 5;
+
+/// The pace between two checks of a held lock.
+pub const HELD_TICK: Duration = Duration::from_millis(100);
+
+/// Waits a tick on the thread (the product's pace; tests give their own).
+struct ThreadPace;
+
+impl Pace for ThreadPace {
+    fn wait(&mut self, tick: Duration) -> bool {
+        std::thread::sleep(tick);
+        true
+    }
+}
 
 /// The held lock: dropping it (or the process ending) frees the folder.
 #[derive(Debug)]
@@ -36,15 +57,37 @@ pub struct InstanceError {
 }
 
 impl InstanceLock {
-    /// Takes the lock on `path` (created with its folder if missing, never written or truncated) without waiting.
+    /// Takes the lock on `path` (created with its folder if missing, never written or truncated). A lock that looks held
+    /// is checked [`HELD_CHECKS`] times, [`HELD_TICK`] apart, before it is reported held (so a refusal takes about
+    /// `(HELD_CHECKS - 1) * HELD_TICK`); a free lock is taken at once.
     pub fn claim(path: &Path) -> Result<Claim, InstanceError> {
-        Self::claim_with(path, File::try_lock)
+        Self::claim_paced(path, File::try_lock, &mut ThreadPace)
     }
 
-    /// [`InstanceLock::claim`] with the locking call given (tests make it answer what no real file system does).
-    fn claim_with(
+    /// [`InstanceLock::claim`] with the locking call and the pace given (tests drive both).
+    fn claim_paced(
         path: &Path,
-        lock: impl FnOnce(&File) -> Result<(), TryLockError>,
+        mut lock: impl FnMut(&File) -> Result<(), TryLockError>,
+        pace: &mut dyn Pace,
+    ) -> Result<Claim, InstanceError> {
+        let mut seen = 0;
+        loop {
+            match Self::claim_once(path, &mut lock)? {
+                Claim::Held => {
+                    seen += 1;
+                    if seen >= HELD_CHECKS || !pace.wait(HELD_TICK) {
+                        return Ok(Claim::Held);
+                    }
+                }
+                other => return Ok(other),
+            }
+        }
+    }
+
+    /// One look at the lock.
+    fn claim_once(
+        path: &Path,
+        lock: &mut impl FnMut(&File) -> Result<(), TryLockError>,
     ) -> Result<Claim, InstanceError> {
         let fail = |source| InstanceError {
             path: path.to_path_buf(),
@@ -89,9 +132,10 @@ fn judge(answer: Result<(), TryLockError>) -> std::io::Result<Verdict> {
     }
 }
 
-/// Whether some process holds the lock on `path` right now. A free lock is taken and dropped at once to find out, so an
-/// instance starting at that very instant may be refused (it exits; the caller finds one on its next pass). Anything
-/// that is not a clear "held" (unsupported, an error) is `false`.
+/// Whether some process holds the lock on `path` (held on every one of [`HELD_CHECKS`] checks, so a held lock costs
+/// about `(HELD_CHECKS - 1) * HELD_TICK`). A free lock is taken and dropped at once to find out, so an instance starting at
+/// that very instant may be refused (it exits; the caller finds one on its next pass). Anything that is not a clear "held"
+/// (unsupported, an error) is `false`.
 pub fn is_held(path: &Path) -> bool {
     matches!(InstanceLock::claim(path), Ok(Claim::Held))
 }
@@ -99,6 +143,109 @@ pub fn is_held(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pace that counts its waits and says "cancelled" once it has waited `limit` times.
+    struct Ticks {
+        waited: usize,
+        limit: usize,
+    }
+
+    impl Ticks {
+        fn new(limit: usize) -> Ticks {
+            Ticks { waited: 0, limit }
+        }
+    }
+
+    impl Pace for Ticks {
+        fn wait(&mut self, tick: Duration) -> bool {
+            assert_eq!(tick, HELD_TICK);
+            self.waited += 1;
+            self.waited < self.limit
+        }
+    }
+
+    /// Answers "held" `n` times, then "free".
+    fn held_times(n: usize) -> impl FnMut(&File) -> Result<(), TryLockError> {
+        let mut left = n;
+        move |_| {
+            if left == 0 {
+                Ok(())
+            } else {
+                left -= 1;
+                Err(TryLockError::WouldBlock)
+            }
+        }
+    }
+
+    #[test]
+    fn a_lock_that_looks_held_for_a_moment_is_taken_when_it_clears() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("a.lock");
+        let mut pace = Ticks::new(usize::MAX);
+        let got = InstanceLock::claim_paced(&path, held_times(HELD_CHECKS as usize - 1), &mut pace);
+        assert!(matches!(got, Ok(Claim::Acquired(_))));
+        assert_eq!(
+            pace.waited,
+            HELD_CHECKS as usize - 1,
+            "one tick between two checks"
+        );
+    }
+
+    #[test]
+    fn a_lock_held_on_every_check_is_held() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("a.lock");
+        let mut pace = Ticks::new(usize::MAX);
+        let got = InstanceLock::claim_paced(&path, held_times(usize::MAX), &mut pace);
+        assert!(matches!(got, Ok(Claim::Held)));
+        assert_eq!(pace.waited, HELD_CHECKS as usize - 1);
+    }
+
+    #[test]
+    fn a_cancelled_wait_reports_what_was_seen() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("a.lock");
+        let mut pace = Ticks::new(1);
+        let got = InstanceLock::claim_paced(&path, held_times(usize::MAX), &mut pace);
+        assert!(matches!(got, Ok(Claim::Held)));
+        assert_eq!(pace.waited, 1);
+    }
+
+    /// Regression (CI run 7230): a spawn gives the child a copy of the descriptor table until it execs (macOS, `posix_spawn`
+    /// too), so a lock just released looked held to the next claim. One thread spawns programs in a loop while another
+    /// takes and drops the lock: every claim must succeed, and a real holder stays held (see the tests above).
+    #[test]
+    fn a_lock_just_released_is_free_while_programs_are_being_spawned() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        /// Overlap that must have happened before the test may end, on a machine of any speed.
+        const MIN_SPAWNS: usize = 50;
+        const MIN_ROUNDS: usize = 200;
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("a.lock");
+        let stop = Arc::new(AtomicBool::new(false));
+        let spawned = Arc::new(AtomicUsize::new(0));
+        let spawner = {
+            let (stop, spawned) = (stop.clone(), spawned.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    let _ = crate::command("true").status();
+                    spawned.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+        };
+        // Takes and drops the lock until both sides did enough, so the two overlap for a minimum number of rounds.
+        let mut round = 0;
+        while round < MIN_ROUNDS || spawned.load(Ordering::SeqCst) < MIN_SPAWNS {
+            round += 1;
+            match InstanceLock::claim(&path).unwrap() {
+                Claim::Acquired(lock) => drop(lock),
+                other => panic!("round {round}: a released lock was reported {other:?}"),
+            }
+        }
+        stop.store(true, Ordering::SeqCst);
+        spawner.join().unwrap();
+    }
 
     /// Waits for `cond`: a child forked by a parallel test holds a copy of every descriptor open at that moment (also the
     /// lock's) until it execs, so a lock can look held for a moment after its holder let go. Bounded only as a safety net.
@@ -142,19 +289,31 @@ mod tests {
         let path = tmp.path().join("a.lock");
         let kind = |k| Err(TryLockError::Error(std::io::Error::from(k)));
         assert!(matches!(
-            InstanceLock::claim_with(&path, |_| Ok(())),
+            InstanceLock::claim_paced(&path, |_| Ok(()), &mut Ticks::new(usize::MAX)),
             Ok(Claim::Acquired(_))
         ));
         assert!(matches!(
-            InstanceLock::claim_with(&path, |_| Err(TryLockError::WouldBlock)),
+            InstanceLock::claim_paced(
+                &path,
+                |_| Err(TryLockError::WouldBlock),
+                &mut Ticks::new(usize::MAX)
+            ),
             Ok(Claim::Held)
         ));
         assert!(matches!(
-            InstanceLock::claim_with(&path, |_| kind(std::io::ErrorKind::Unsupported)),
+            InstanceLock::claim_paced(
+                &path,
+                |_| kind(std::io::ErrorKind::Unsupported),
+                &mut Ticks::new(usize::MAX)
+            ),
             Ok(Claim::Unsupported)
         ));
-        let e = InstanceLock::claim_with(&path, |_| kind(std::io::ErrorKind::PermissionDenied))
-            .unwrap_err();
+        let e = InstanceLock::claim_paced(
+            &path,
+            |_| kind(std::io::ErrorKind::PermissionDenied),
+            &mut Ticks::new(usize::MAX),
+        )
+        .unwrap_err();
         assert_eq!(e.source.kind(), std::io::ErrorKind::PermissionDenied);
         assert_eq!(e.path, path);
     }

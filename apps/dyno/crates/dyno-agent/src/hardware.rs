@@ -74,15 +74,6 @@ impl HardwareCentre {
         }
     }
 
-    /// The readers of this machine.
-    pub fn os() -> HardwareCentre {
-        HardwareCentre::new(
-            dyno_platform::hardware::throttle_signals(),
-            dyno_platform::hardware::disk_wear(),
-            dyno_platform::hardware::battery_capacity(),
-        )
-    }
-
     /// Replaces the readers (tests, and a future helper-backed reader).
     pub fn replace_sources(
         &self,

@@ -41,7 +41,8 @@ pub enum LockError {
 }
 
 impl InstanceLock {
-    /// Takes the lock for `dirs`, without waiting (the shared single-instance lock, `paddock_proc::InstanceLock`).
+    /// Takes the lock for `dirs`; a free lock is taken at once, a refusal takes about 400 ms (5 checks, 100 ms apart) before it
+    /// counts as held (the shared single-instance lock, `paddock_proc::InstanceLock`).
     pub fn acquire(dirs: &Dirs) -> Result<InstanceLock, LockError> {
         let path = dirs.instance_lock();
         match paddock_proc::InstanceLock::claim(&path) {

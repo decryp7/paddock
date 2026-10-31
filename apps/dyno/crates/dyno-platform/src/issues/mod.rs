@@ -58,7 +58,7 @@ impl ToolRunner for OsRunner {
         let mut cmd = crate::process::command(program);
         cmd.args(args);
         paddock_proc::lower_priority(&mut cmd);
-        crate::process::run_streaming(cmd, timeout, control, on_line)
+        crate::process::run_streaming_lowered(cmd, timeout, control, on_line)
     }
 }
 
