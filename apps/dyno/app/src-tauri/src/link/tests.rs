@@ -929,7 +929,11 @@ fn another_agent_that_holds_the_folder_without_answering_is_reported_with_retry(
     let fresh = holder.discovery.clone();
     let _ = std::fs::remove_file(r.link.dirs.discovery());
     let handle = r.link.spawn().unwrap();
-    let s = wait_state(&r.link, "a stall while another agent holds the data folder", |s| s.stall.is_some());
+    // The look that finds the lock held re-checks it at a pace (paddock-proc), so a stall may show for the look first: wait for the one
+    // that names the holder.
+    let s = wait_state(&r.link, "a stall that names the other agent holding the data folder", |s| {
+        s.stall.map(|(_, k)| k) == Some(Stall::OtherAgentHolds)
+    });
     assert_eq!(s.stall.map(|(_, k)| k), Some(Stall::OtherAgentHolds));
     assert_eq!(r.launcher.launches(), 0);
     // Retry launches although the folder is held (the loser of two exits with code 3).
