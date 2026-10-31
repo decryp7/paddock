@@ -22,6 +22,12 @@ paddock_dialogs::dialogs! {
             prefix(shell::settings::ALL, "settings_"),
             shell::dialogs::dialog_open,
             app::overview,
+            // The Tray popup page: the layout, what the widgets show, the header, the rows each draws and one edit at a time.
+            app::popover_view,
+            app::popover_values,
+            app::popover_header,
+            app::popover_shape,
+            app::edit_popover,
             app::settings,
             app::save_settings,
             app::apply_preset,

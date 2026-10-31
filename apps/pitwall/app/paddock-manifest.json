@@ -111,7 +111,8 @@
   ],
   "settingsPages": [
     "pd.appearance",
-    "pw.general"
+    "pw.general",
+    "pw.tray"
   ],
   "settingsForms": [
     "pd.appearance"
@@ -154,9 +155,14 @@
         "clear_cache",
         "decline_service",
         "dialog_open",
+        "edit_popover",
         "get_autostart",
         "open_service_login_items",
         "overview",
+        "popover_header",
+        "popover_shape",
+        "popover_values",
+        "popover_view",
         "save_settings",
         "service_state",
         "set_autostart",
@@ -274,6 +280,7 @@
     "pw.resume-serving": "Resume serving",
     "pw.service-consent.title": "Run in the background",
     "pw.settings.general": "Pitwall",
+    "pw.settings.tray": "Tray popup",
     "pw.status.memory": "Memory in use",
     "pw.status.serving": "The Pitwall server"
   }

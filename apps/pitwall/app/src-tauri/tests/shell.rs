@@ -166,8 +166,37 @@ fn the_command_table_covers_the_ui_and_narrows_the_tray() {
         .filter(|s| s.windows().contains(paddock_commands::WindowClass::Tray))
         .map(|s| s.name())
         .collect();
-    assert!(tray.contains(&"overview") && tray.contains(&"set_serving"), "{tray:?}");
     assert!(!tray.contains(&"delete_model") && !tray.contains(&"save_settings"), "{tray:?}");
+}
+
+/// The tray popup reaches exactly what it shows and does (least privilege): the popup's layout, values, header and shape, serving,
+/// free memory, cancelling a download and quit. The pairing and update calls of the old popover are the main window's.
+#[test]
+fn the_tray_popup_reaches_exactly_its_commands() {
+    let mut tray: Vec<&str> = COMMANDS
+        .specs()
+        .iter()
+        .filter(|s| s.windows().contains(paddock_commands::WindowClass::Tray))
+        .map(|s| s.name())
+        .collect();
+    tray.sort_unstable();
+    assert_eq!(
+        tray,
+        [
+            "cancel_download",
+            "popover_header",
+            "popover_shape",
+            "popover_values",
+            "popover_view",
+            "quit_from_tray",
+            "release_memory",
+            "set_serving"
+        ]
+    );
+    // Editing the layout is the Settings window's; the popup only reads it.
+    let edit = COMMANDS.spec("edit_popover").unwrap();
+    assert!(!edit.windows().contains(paddock_commands::WindowClass::Tray));
+    assert!(edit.windows().contains(paddock_commands::WindowClass::Dialog));
 }
 
 const REGENERATE: &str = "cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test shell";

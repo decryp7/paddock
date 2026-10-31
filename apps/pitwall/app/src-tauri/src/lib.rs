@@ -16,6 +16,7 @@ pub mod credentials;
 pub mod dialogs;
 pub mod jobs;
 pub mod live;
+pub mod popup;
 pub mod quit;
 pub mod server_client;
 pub mod service_install;
@@ -56,7 +57,12 @@ paddock_commands::command_table! {
     /// may call it: `WINDOW` is the main window and its dialogs (a dialog is narrowed further to its contract), `TRAY` the
     /// tray popover. Names and argument shapes are pinned by the UI's `tauri-backend.ts`.
     pub static COMMANDS, macro handler;
-    Query [WINDOW | TRAY] => commands::overview,
+    Query [WINDOW] => commands::overview,
+    Query [WINDOW | TRAY] => popup::popover_view,
+    Query [WINDOW | TRAY] => popup::popover_values,
+    Query [WINDOW | TRAY] => popup::popover_header,
+    Query [WINDOW | TRAY] => popup::popover_shape,
+    Mutation [WINDOW] => popup::edit_popover,
     Query [WINDOW] => commands::history,
     Query [WINDOW] => commands::usage_series,
     Query [WINDOW] => commands::app_detail,
@@ -77,13 +83,13 @@ paddock_commands::command_table! {
     Query [WINDOW] => commands::repo_files,
     Mutation [WINDOW] => commands::download_model,
     Query [WINDOW] => commands::downloads,
-    Mutation [WINDOW] => commands::cancel_download,
+    Mutation [WINDOW | TRAY] => commands::cancel_download,
     Mutation [WINDOW] => commands::delete_model,
     Mutation [WINDOW] => commands::unload_model,
     Mutation [WINDOW] => commands::pin_model,
     Mutation [WINDOW] => commands::set_model_idle,
-    Query [WINDOW | TRAY] => commands::update_check_status,
-    Query [WINDOW | TRAY] => commands::update_notices,
+    Query [WINDOW] => commands::update_check_status,
+    Query [WINDOW] => commands::update_notices,
     Mutation [WINDOW] => commands::set_update_check,
     Mutation [WINDOW] => commands::dismiss_update,
     Mutation [WINDOW] => commands::set_model_slots,
@@ -107,9 +113,9 @@ paddock_commands::command_table! {
     Mutation [WINDOW] => commands::create_key,
     Mutation [WINDOW] => commands::revoke_key,
     Mutation [WINDOW] => commands::set_permissions,
-    Mutation [WINDOW | TRAY] => commands::approve_pairing,
-    Mutation [WINDOW | TRAY] => commands::deny_pairing,
-    Query [WINDOW | TRAY] => commands::pairings,
+    Mutation [WINDOW] => commands::approve_pairing,
+    Mutation [WINDOW] => commands::deny_pairing,
+    Query [WINDOW] => commands::pairings,
     Query [WINDOW] => commands::requests,
     Query [WINDOW] => commands::request_content,
     Mutation [WINDOW] limit 9 * paddock_commands::MIB => commands::chat,
@@ -118,6 +124,7 @@ paddock_commands::command_table! {
     Query [WINDOW] => commands::settings,
     Mutation [WINDOW] => commands::save_settings,
     Mutation [WINDOW] => quit::quit_app,
+    Mutation [TRAY] => quit::quit_from_tray,
     Query [WINDOW] => quit::take_quit_ask,
     Query [WINDOW] => app_commands::service_state,
     Mutation [WINDOW] => app_commands::decline_service,
@@ -163,9 +170,9 @@ pub enum Place {
     },
 }
 
-/// The client of the server and the tray's facts, for `place`. A test's client never falls back to the
+/// The client of the server, the tray's facts and the popup's widgets, for `place`. A test's client never falls back to the
 /// well-known port (a Pitwall installed on the machine may be using it, ER-14), or is `server` when the test gives one.
-fn state(place: &Place) -> (SharedClient, SharedModel) {
+fn state(place: &Place) -> (SharedClient, SharedModel, popup::SharedPopup) {
     let (data_dir, store): (std::path::PathBuf, Box<dyn credentials::KeyStore>) = match place {
         Place::Installed => (app_state::data_dir().unwrap_or_default(), Box::new(credentials::OsKeyStore)),
         Place::Test { dir, .. } => (dir.clone(), Box::new(credentials::NoKeyStore)),
@@ -173,17 +180,18 @@ fn state(place: &Place) -> (SharedClient, SharedModel) {
     let keys = Arc::new(credentials::StoredAdminKey::new(store, data_dir.join("admin.key")));
     let client: SharedClient = match place {
         Place::Test { server: Some(server), .. } => server.clone(),
-        Place::Test { server: None, .. } => Arc::new(server_client::LoopbackClient::new(data_dir, keys).discovery_port_only()),
-        Place::Installed => Arc::new(server_client::LoopbackClient::new(data_dir, keys)),
+        Place::Test { server: None, .. } => Arc::new(server_client::LoopbackClient::new(data_dir.clone(), keys).discovery_port_only()),
+        Place::Installed => Arc::new(server_client::LoopbackClient::new(data_dir.clone(), keys)),
     };
-    (client, Arc::new(Mutex::new(TrayModel::new())))
+    let popup = Arc::new(popup::PopupState::load(Some(data_dir).filter(|d| !d.as_os_str().is_empty())));
+    (client, Arc::new(Mutex::new(TrayModel::new())), popup)
 }
 
 /// The shell plugin with Pitwall's parts: its commands, its state and the live feed (set-up: state only, no window; the
 /// shell opens the tray and the window after every plugin, ADR 0029) and the window layer.
 pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
     let installed = matches!(place, Place::Installed);
-    let (client, model) = state(&place);
+    let (client, model, popup) = state(&place);
     let test_dir = match &place {
         Place::Installed => None,
         Place::Test { dir, .. } => Some(dir.clone()),
@@ -195,6 +203,7 @@ pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
         .setup(move |app| {
             app.manage(client);
             app.manage(model);
+            app.manage(popup);
             app.manage(Arc::new(commands::Streams::default()));
             app.manage(Arc::new(jobs::Jobs::default()));
             app.manage(quit::PendingAsk::default());
@@ -285,16 +294,29 @@ pub fn app<R: Runtime>(
     shell.tray(move |app| tray::tray(app, tray_backend)).launch(launch).add_to(builder)
 }
 
-/// Where the live feed goes: the UI's event and the tray.
+/// Where the live feed goes: the UI's event, the tray and the popup's widgets.
 struct AppSink<R: Runtime> {
     app: AppHandle<R>,
     model: SharedModel,
+    popup: popup::SharedPopup,
+    client: SharedClient,
+}
+
+impl<R: Runtime> AppSink<R> {
+    /// Reads what the feed does not carry, in the background, then tells the windows.
+    fn read_extras(&self) {
+        let (app, client) = (self.app.clone(), self.client.clone());
+        tauri::async_runtime::spawn(popup::refresh_extras(app, client));
+    }
 }
 
 impl<R: Runtime> live::LiveSink for AppSink<R> {
     fn seed(&mut self, overview: &Overview) {
         self.model.lock().unwrap_or_else(|p| p.into_inner()).seed(overview);
         paddock_window::tauri::refresh_tray(&self.app);
+        popup::seed(&self.popup, overview);
+        popup::publish(&self.app);
+        self.read_extras();
     }
 
     fn update(&mut self, raw: &serde_json::Value, parsed: Option<&LiveUpdate>) {
@@ -302,12 +324,23 @@ impl<R: Runtime> live::LiveSink for AppSink<R> {
         if let Some(u) = parsed {
             self.model.lock().unwrap_or_else(|p| p.into_inner()).apply(u);
             paddock_window::tauri::refresh_tray(&self.app);
+            self.popup.with_facts(|f| f.apply(u, popup::now_ms()));
+            popup::publish(&self.app);
+            if popup::touches_updates(u) {
+                let (popup, client, app) = (self.popup.clone(), self.client.clone(), self.app.clone());
+                tauri::async_runtime::spawn(async move {
+                    popup::refresh_updates(&popup, client.as_ref()).await;
+                    popup::publish(&app);
+                });
+            }
         }
     }
 
     fn disconnected(&mut self) {
         self.model.lock().unwrap_or_else(|p| p.into_inner()).set_connected(false);
         paddock_window::tauri::refresh_tray(&self.app);
+        self.popup.with_facts(|f| f.set_disconnected(popup::now_ms()));
+        popup::publish(&self.app);
     }
 }
 
@@ -318,6 +351,8 @@ fn pitwall_setup<R: Runtime>(app: &AppHandle<R>, installed: bool) {
     let sink = AppSink {
         app: app.clone(),
         model: app.state::<SharedModel>().inner().clone(),
+        popup: app.state::<popup::SharedPopup>().inner().clone(),
+        client: client.clone(),
     };
     tauri::async_runtime::spawn(async move {
         let mut sink = sink;

@@ -182,6 +182,13 @@ pub async fn quit_app<R: Runtime>(
     Ok(())
 }
 
+/// "Quit Pitwall" in the tray popup: the same flow as the menu bar's Quit (the setting, or the question).
+#[tauri::command]
+pub async fn quit_from_tray<R: Runtime>(app: AppHandle<R>) -> Result<(), pitwall_core::mgmt::CommandError> {
+    request_from_menu(&app, None);
+    Ok(())
+}
+
 /// Whether a quit is waiting for the dialog (it was asked while no window was open): true once.
 #[tauri::command]
 pub async fn take_quit_ask(pending: tauri::State<'_, PendingAsk>) -> Result<bool, pitwall_core::mgmt::CommandError> {
