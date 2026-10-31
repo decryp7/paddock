@@ -17,5 +17,16 @@
     "npm run lint",
     "npx ng build",
     "npx ng test --watch=false --coverage"
-  ]
+  ],
+  "notices": {
+    "name": "Pitcrew",
+    "manifests": [
+      "app/src-tauri/Cargo.toml",
+      "crates/pitcrew-service/Cargo.toml"
+    ],
+    "npm": "app",
+    "out": [
+      "app/src-tauri/resources"
+    ]
+  }
 }

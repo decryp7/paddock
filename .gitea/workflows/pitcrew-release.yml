@@ -114,10 +114,22 @@ jobs:
       latest-tag: pitcrew-latest
       notes-extra: "**Existing installs:** download this version once by hand. Pitcrew now updates from the Paddock releases, which a copy installed before this version does not look at."
       cliff-config: apps/pitcrew/cliff.toml
+      # Only the commits that change Pitcrew or the shared crates it links: crates/** and ui/** as a whole would list every
+      # commit of the monorepo since pitcrew-v1.0.1 (847 at 2026-10-30).
       cliff-paths: |
         apps/pitcrew/**
-        crates/**
-        ui/**
+        crates/paddock-commands/**
+        crates/paddock-dialogs/**
+        crates/paddock-download/**
+        crates/paddock-health/**
+        crates/paddock-jobs/**
+        crates/paddock-settings/**
+        crates/paddock-shell/**
+        crates/paddock-startup/**
+        crates/paddock-updater/**
+        crates/paddock-window/**
+      # Run paths of the packaged binaries and the executables a package must carry, on Linux and macOS.
+      bundle-check: apps/pitcrew/scripts/check-bundle.sh
       # --version: Pitcrew's service has no --self-test; its --version loads every library and exits 0.
       sidecars: pitcrew-service:--version
       setup-node: false

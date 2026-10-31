@@ -161,6 +161,11 @@ fn updater(test_dir: Option<std::path::PathBuf>) -> UpdatesBuilder {
         .releases_page(RELEASES_PAGE)
         .homepage("https://dev.decryptology.net/decryp7/paddock")
         .changelog(include_str!("../../../CHANGELOG.md"))
+        .legal(
+            "notices",
+            "Third-party notices",
+            include_str!("../resources/THIRD_PARTY_NOTICES.md"),
+        )
         .legal("licence-mit", "MIT licence", include_str!("../../../LICENSE-MIT"))
         .legal("licence-apache", "Apache licence 2.0", include_str!("../../../LICENSE-APACHE"))
         .build_info(option_env!("PADDOCK_BUILD_COMMIT"), option_env!("PADDOCK_BUILD_DATE"));
