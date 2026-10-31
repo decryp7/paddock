@@ -3,5 +3,6 @@
 //! (it holds a `demo` module of its own).
 
 mod plugin;
+mod settings_clash;
 mod shell_demo;
 mod start;

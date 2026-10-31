@@ -1,10 +1,10 @@
 //! The shell never touches a settings file another owner writes (Dyno's agent keeps a flat `settings.json` in the same
-//! folder): the log installer reads the shell's own file and leaves `settings.json` as it is. Its own binary: it
-//! installs the process-wide log.
+//! folder): the log installer reads the shell's own file and leaves `settings.json` as it is. The test reads the file the way
+//! the installer does (`paddock_diag::logging::stored`) without installing the process-wide log, which this binary's other tests
+//! may already have installed.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use paddock_shell::AppIdentity;
-use paddock_shell::logging::{SHELL_SETTINGS_FILE, install_in, shell_settings_path};
+use paddock_shell::logging::{SHELL_SETTINGS_FILE, shell_settings_path};
 
 fn dirs_in(root: &std::path::Path) -> paddock_env::AppDirs {
     let id = paddock_env::AppId::new("demo", "Shell Demo").unwrap();
@@ -27,12 +27,13 @@ fn a_foreign_format_settings_file_is_left_untouched() {
     let flat = br#"{ "version": 1, "launchAtLogin": true }"#;
     std::fs::write(&foreign, flat).unwrap();
 
-    let installed = install_in(
-        &AppIdentity::new("demo", "Shell Demo", "1.2.3"),
-        &dirs,
-        false,
+    // What the installer reads for its saved log level: the shell's own file, which does not exist here.
+    let saved = paddock_diag::logging::stored(&shell_settings_path(&dirs));
+    assert_eq!(
+        saved,
+        Default::default(),
+        "the foreign file gave no saved level of its own"
     );
-    assert!(installed.is_some(), "the log installs");
 
     assert_eq!(
         std::fs::read(&foreign).unwrap(),
