@@ -88,8 +88,8 @@ export interface LayoutManageResult {
     .pd-lmd__name { flex: 1 1 8rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-lmd__row:has(.pd-lmd__rename) { align-items: flex-start; }
     .pd-lmd__rename { flex: 1 1 12rem; }
-    /* The buttons are the outline's height and start at its top, so their centres are the field's. */
-    .pd-lmd__rbtn { --mat-button-outlined-container-height: var(--pd-control-height); }
+    /* The buttons are the labelled outline's height and start at its top, so their centres are the field's. */
+    .pd-lmd__rbtn { --mat-button-outlined-container-height: var(--mat-form-field-container-height); }
     .pd-lmd__btn { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-button-height, 28px); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
     .pd-lmd__btn--primary { background: var(--pd-accent-fill); border-color: var(--pd-accent-fill); color: var(--pd-on-accent); }
     .pd-lmd__btn--danger { color: var(--pd-danger-text, var(--pd-danger)); }
