@@ -16,7 +16,7 @@ describe('StatusPill', () => {
     const failing = await pill({ kind: 'failing', count: 2 });
     expect(text(failing.querySelector('.pill'))).toBe('2 failing');
     expect(failing.querySelector('.pill')?.getAttribute('data-tone')).toBe('danger');
-    expect(failing.querySelector('.pill mat-icon')).not.toBeNull();
+    expect(failing.querySelector('.pill pd-status-glyph')?.getAttribute('data-status'), 'a glyph beside the word').toBe('warning');
     TestBed.resetTestingModule();
     const good = await pill({ kind: 'allGood' });
     expect(text(good.querySelector('.pill'))).toBe('All good');

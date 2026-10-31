@@ -62,6 +62,8 @@ import { WidgetSet } from '../tray/widget-set';
     }
     .head {
       display: flex;
+      flex: 1;
+      width: 100%;
       align-items: center;
       gap: var(--pd-space-2);
     }
