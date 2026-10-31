@@ -80,7 +80,8 @@ test.describe('Spotter against the mock backend', () => {
     await page.goto('/#/tray');
     await expect(page.getByText(/\d+ new/)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open Spotter' })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Mark .* as seen/ }).first()).toBeVisible();
+    // The popup's rows open the release's watch; an unseen one says so in its name (the popup no longer marks releases seen).
+    await expect(page.getByRole('button', { name: /, new, open$/ }).first()).toBeVisible();
   });
 
   test('a release opens a side panel that Esc closes', async ({ page }) => {
