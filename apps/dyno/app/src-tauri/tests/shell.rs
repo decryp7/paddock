@@ -245,6 +245,35 @@ fn the_start_opens_the_tray_and_the_main_window() {
     }
 }
 
+/// A tray click opens the shell's popover, which needs a spec registered at the start: the browser build's e2e of the `#/tray` page
+/// cannot see that (the 1.0 VM test found a tray that did nothing: "no tray popover is set up in this app").
+#[test]
+fn the_start_registers_the_tray_popover_a_click_opens() {
+    use paddock_window::tauri::Popovers;
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let has = composed(&data, paddock_window::launch::LaunchArgs::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .map(|mut app| {
+                // One iteration runs Tauri's set-up (the mock runtime has no event loop).
+                #[allow(deprecated)]
+                app.run_iteration(|_, _| {});
+                tauri::Manager::try_state::<Popovers>(app.handle()).map(|p| p.has(None))
+            })
+            .map_err(|e| e.to_string());
+        let _ = tx.send(has);
+    });
+    // A hang guard only a deadlocked start reaches.
+    let has = rx.recv_timeout(std::time::Duration::from_secs(60)).expect("the start finished");
+    assert_eq!(
+        has,
+        Ok(Some(true)),
+        "Dyno registers no tray popover, so a click on its tray icon opens nothing"
+    );
+}
+
 /// Started at log-in (`--hidden`) with a tray: Dyno stays in the tray without a window.
 #[test]
 fn a_hidden_start_stays_in_the_tray() {
