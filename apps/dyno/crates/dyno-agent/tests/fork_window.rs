@@ -1,10 +1,11 @@
-#![cfg(unix)]
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 //! A forked child that has not exec'd yet holds a copy of the agent's lock. This test forks on purpose, so it lives in a binary
 //! of its own: in `agent.rs` its child copied the descriptors of every agent the other tests had open at that moment (refusing
 //! their restarts as "already running") and, on macOS, a fork while other threads sit in socket calls is the trigger of the
 //! spurious EBADF on healthy sockets (docs/lessons.md). One test per binary means no neighbour to harm.
+//!
+//! Unix only (it forks): the doc comes before the `cfg` so the empty crate on Windows still has its crate doc.
+#![cfg(unix)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
