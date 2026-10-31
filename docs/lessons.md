@@ -1058,6 +1058,6 @@ any service, IPC, driver or UI helper, look it up in the register first.
 Two scripts "waited" with `read -t 20 < /dev/zero` (an agent's loop) and `read -t 1 _ </dev/null` (the embedded shell of a Rust
 test helper). `/dev/zero` is always readable and `/dev/null` is at EOF, so `read` returned at once and the loop spun a CPU core.
 The same holds for a here-string, a closed stdin or a pipe from `:`/`echo`. **Check:** conformance C60 flags these forms in
-tracked shell, YAML and Rust/TS/JS shell strings (rule 40). Agent scratch scripts outside the repo cannot be checked, so a brief
+shell, YAML and Rust/TS/JS shell strings (rule 40). Agent scratch scripts outside the repo cannot be checked, so a brief
 for such a script says: wait with `sleep N`, or `perl -e 'select(undef,undef,undef,N)'` where sleep is unavailable, never
 `read -t`. Lesson only; no rule change.

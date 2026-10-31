@@ -69,6 +69,19 @@ test('C60 good: a fifo, a terminal prompt, a file, an inherited stdin, a poll, a
   assert.deepEqual(code('// read -t 1 _ </dev/null\n * read -t 1 _ </dev/null'), []);
 });
 
+test('C60 good: a pipe-fed loop, and a dead word that is not the pipe source', () => {
+  assert.deepEqual(sh('printf \'%s\\n\' "$list" | while read -t 5 line; do :; done'), []);
+  assert.deepEqual(sh('foo echo | read -t 1 x'), []);
+});
+
+test('C60 bad: the case-arm paren split, <>, -u N and a code-mode star line', () => {
+  assert.deepEqual(sh('case $x in a) read -t 1 </dev/null;; esac'), [1]);
+  assert.deepEqual(sh('read -t 1 x <> /dev/null'), [1]);
+  assert.deepEqual(sh('read -u 3 -t 5 x 3</dev/zero'), [1]);
+  assert.deepEqual(sh('read -u 3 -t 5 x 4</dev/zero'), []);
+  assert.deepEqual(code('switch\n  *) read -t 1 </dev/null ;;'), [2]);
+});
+
 test('C60 good: a redirect that is not the read\'s stdin', () => {
   assert.deepEqual(sh('read -t 5 x 2</dev/null'), []);
   assert.deepEqual(sh('read -t 5 x < "$f" & foo </dev/null'), []);
@@ -91,6 +104,9 @@ test('C60 kindOf: extensions, shebang files without one, package.json', () => {
   assert.equal(kindOf('dev', 'plain'), null);
   assert.equal(kindOf('package.json', '{}'), 'code');
   assert.equal(kindOf('notes.md', ''), null);
+  // The extension wins over the shebang.
+  assert.equal(kindOf('x.mjs', '#!/bin/bash\n'), 'code');
+  assert.equal(kindOf('x.sh', '#!/usr/bin/env node\n'), 'shell');
 });
 
 test('C60 through the runner: shell, workflow, test-helper and extension-less files, error per site', async () => {
