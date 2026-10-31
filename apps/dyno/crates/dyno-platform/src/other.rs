@@ -52,6 +52,9 @@ pub fn platform() -> Platform {
         issues: Vec::new(),
         links: Box::new(crate::links::OsLinks::new()),
         zone: std::sync::Arc::new(crate::zone::SystemZone),
+        counters: std::sync::Arc::new(crate::counters::OsCounters),
+        network: crate::NetworkPorts::os(),
+        hardware: crate::HardwareReaders::os(),
     }
 }
 

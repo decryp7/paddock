@@ -8,7 +8,16 @@
 
 use std::path::{Path, PathBuf};
 
-const NEEDLES: [&str; 4] = ["OsVolumes", "DiskPorts::os", "start_os", "OsAccess"];
+const NEEDLES: [&str; 8] = [
+    "OsVolumes",
+    "DiskPorts::os",
+    "start_os",
+    "OsAccess",
+    "OsSockets",
+    "OsReverseDns",
+    "OsTraffic",
+    "OsCounters",
+];
 
 /// Where the real ones are defined or chosen: the production code of exactly these files.
 const ALLOWED: [&str; 5] = [

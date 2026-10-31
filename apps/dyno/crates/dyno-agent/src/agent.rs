@@ -359,6 +359,9 @@ impl Shared {
             issues,
             links,
             zone: _,
+            counters,
+            network,
+            hardware,
         } = platform;
         let shared = Arc::new_cyclic(|me| Shared {
             plugins: dyno_plugin_host::PluginHost::new(dyno_plugin_host::HostConfig::new(dirs.plugins())),
@@ -378,16 +381,12 @@ impl Shared {
             netwatch: crate::netwatch::NetWatchCentre::new(),
             jobs: crate::jobs::JobCentre::new(me.clone(), job_workers),
             hasher: crate::filehash::FileHasher::new(),
-            counters: crate::counters::CounterCentre::new(Arc::new(dyno_platform::counters::OsCounters)),
+            counters: crate::counters::CounterCentre::new(counters),
             issues: crate::issues::IssueCentre::new(issues),
             unusual,
             extras: crate::extras::ExtrasCentre::new(own_folder),
-            network: crate::network::NetCentre::new(
-                Box::new(dyno_platform::network::OsSockets),
-                Arc::new(dyno_platform::network::OsReverseDns),
-                Box::new(dyno_platform::network::OsTraffic),
-            ),
-            hardware: crate::hardware::HardwareCentre::os(),
+            network: crate::network::NetCentre::new(network.sockets, network.dns, network.traffic),
+            hardware: crate::hardware::HardwareCentre::new(hardware.signals, hardware.wear, hardware.battery),
             baselines: crate::baselines::BaselineCentre::new(),
             disk: Arc::new(crate::disk::centre::DiskCentre::new(
                 Arc::new(crate::disk::fs::OsDirSource),

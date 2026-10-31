@@ -31,12 +31,18 @@ impl Harness {
 
     /// Starts the agent over the fake, with `adapt` free to replace ports of the platform first.
     fn start_with(adapt: impl FnOnce(Platform) -> Platform) -> Harness {
+        Harness::start_seeded(|_| {}, adapt)
+    }
+
+    /// Like [`Harness::start_with`], with `seed` free to set the fake machine up before the agent first looks at it.
+    fn start_seeded(seed: impl FnOnce(&Fake), adapt: impl FnOnce(Platform) -> Platform) -> Harness {
         let tmp = tempfile::tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         for (pid, name, cpu) in [(100, "busy", 60.0), (101, "calm", 1.0), (102, "launchd", 0.1)] {
             fake.add_process(process(pid, name, cpu));
         }
+        seed(&fake);
         let running = Running::start(dirs.clone(), adapt(fake.platform()), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
         Harness {
             running: Some(running),
@@ -257,6 +263,44 @@ fn a_wrong_token_is_refused_and_the_agent_keeps_serving() {
 
 /// A generous deadline for requests that query the real machine (a loaded Windows runner needs well over 15 s).
 const SLOW: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// ER-14: the agent reads the sockets, names and traffic through the platform's ports, so a test agent over the fake sees
+/// exactly the fake's sockets and never the machine's (a real socket lister inspects every process's descriptors).
+#[test]
+fn the_network_page_shows_the_platforms_sockets_and_nothing_of_the_machine() {
+    use dyno_core::network::{NetworkQuery, Proto, SocketRow, SocketState};
+    let h = Harness::start_seeded(
+        |fake| {
+            fake.with(|s| {
+                s.sockets.push(SocketRow {
+                    proto: Proto::Tcp,
+                    local: std::net::IpAddr::from([10, 1, 2, 3]),
+                    local_port: 4_242,
+                    remote: None,
+                    state: SocketState::Listen,
+                    pid: Some(100),
+                });
+            });
+        },
+        |platform| platform,
+    );
+    let peer = h.client();
+    let Reply::Network(n) = ask(
+        &peer,
+        Request::Network {
+            query: NetworkQuery {
+                show_loopback: true,
+                ..NetworkQuery::default()
+            },
+        },
+    )
+    .unwrap() else {
+        panic!("network")
+    };
+    assert_eq!(n.listeners.len(), 1, "{:?}", n.listeners);
+    assert_eq!(n.listeners[0].port, 4_242);
+    assert!(n.connections.is_empty());
+}
 
 #[test]
 fn the_inventory_is_read_once_and_cached() {
@@ -565,9 +609,9 @@ fn the_weekly_report_is_built_from_stored_data_and_exported_as_markdown_and_html
     }
 }
 
-/// The counters browser against this machine's real counters (read-only): browse, search, read twice, chart.
+/// The counters browser against the fake machine's counters: browse, search, read twice, chart.
 #[test]
-fn the_counters_browser_lists_searches_reads_and_charts_this_machines_counters() {
+fn the_counters_browser_lists_searches_reads_and_charts_the_platforms_counters() {
     let h = Harness::start();
     let peer = h.client();
     let ask_slow = |r| ask_within(&peer, r, Duration::from_secs(30));

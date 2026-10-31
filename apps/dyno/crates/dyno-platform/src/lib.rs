@@ -69,6 +69,54 @@ pub struct Platform {
     pub links: Box<dyn dyno_core::ports::NetworkLinks>,
     /// The user's local time zone (local days, quiet hours, maintenance windows).
     pub zone: dyno_core::time::Zone,
+    /// The OS's performance counters.
+    pub counters: std::sync::Arc<dyn dyno_core::ports::CounterSource>,
+    /// The sockets, reverse DNS and per-process traffic.
+    pub network: NetworkPorts,
+    /// The throttle, SSD wear and battery readers.
+    pub hardware: HardwareReaders,
+}
+
+/// The network ports of a [`Platform`]: what the Network page reads.
+pub struct NetworkPorts {
+    /// The machine's sockets with their owners.
+    pub sockets: Box<dyn dyno_core::ports::NetworkSockets>,
+    /// Reverse DNS through the OS resolver.
+    pub dns: std::sync::Arc<dyn dyno_core::ports::ReverseDns>,
+    /// Cumulative bytes per process.
+    pub traffic: Box<dyn dyno_core::ports::ProcessTraffic>,
+}
+
+impl NetworkPorts {
+    /// This machine's own readers. Only the real wiring of each OS uses it, never a test (ER-14).
+    pub fn os() -> NetworkPorts {
+        NetworkPorts {
+            sockets: Box::new(network::OsSockets),
+            dns: std::sync::Arc::new(network::OsReverseDns),
+            traffic: Box::new(network::OsTraffic),
+        }
+    }
+}
+
+/// The hardware readers of a [`Platform`]: the throttle signals, SSD wear and battery capacity.
+pub struct HardwareReaders {
+    /// What the OS says about limits on the CPU's speed.
+    pub signals: Box<dyn dyno_core::ports::ThrottleSignals>,
+    /// SSD wear counters.
+    pub wear: Box<dyn dyno_core::ports::DiskWearSource>,
+    /// Battery capacity and cycles.
+    pub battery: Box<dyn dyno_core::ports::BatteryCapacitySource>,
+}
+
+impl HardwareReaders {
+    /// This machine's own readers. Only the real wiring of each OS uses it, never a test (ER-14).
+    pub fn os() -> HardwareReaders {
+        HardwareReaders {
+            signals: hardware::throttle_signals(),
+            wear: hardware::disk_wear(),
+            battery: hardware::battery_capacity(),
+        }
+    }
 }
 
 /// The ports for the current OS.

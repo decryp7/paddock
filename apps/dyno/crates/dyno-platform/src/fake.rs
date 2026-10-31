@@ -11,10 +11,15 @@
 //! assert_eq!(p.processes.processes().len(), 1);
 //! ```
 
-use crate::Platform;
+use crate::counters::Entry;
+use crate::{HardwareReaders, NetworkPorts, Platform};
+use dyno_core::counters::{CounterKind, CounterUnit};
 use dyno_core::facts::SystemFacts;
 use dyno_core::metrics::{CpuSample, DiskIo, MemoryPressure, MemorySample, Reading, SystemSample};
-use dyno_core::ports::{FactsSource, FileLocks, NetworkLinks, PlatformError, ProcessSource, StartupItems, SystemSensors, UserActivity};
+use dyno_core::ports::{
+    FactsSource, FileLocks, NetworkLinks, NetworkSockets, PlatformError, ProcessSource, ProcessTraffic, ReverseDns, StartupItems,
+    SystemSensors, UserActivity,
+};
 use dyno_core::process::{ListOrReason, Locker, Measured, Owner, Pid, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo};
 use dyno_core::startup::StartupEntry;
 use dyno_core::time::Timestamp;
@@ -57,6 +62,8 @@ pub struct FakeState {
     pub foreground: Option<Pid>,
     /// What the network looks like now (default: nothing; `None` makes the read fail).
     pub net: Option<dyno_core::netchange::NetState>,
+    /// The sockets the network port shows (default: none).
+    pub sockets: Vec<dyno_core::network::SocketRow>,
     /// Injected failures and how many more calls they affect (`None`: every call).
     pub failures: HashMap<FakeOp, (PlatformError, Option<u32>)>,
     /// The thread role the last sample was taken at ([`crate::priority::current_role`]).
@@ -210,7 +217,41 @@ impl Fake {
             issues: Vec::new(),
             links: Box::new(self.clone()),
             zone: dyno_core::time::FixedZone::shared(0),
+            counters: Arc::new(crate::counters::FakeCounters::new(vec![
+                Entry::new("Memory", None, "Free", CounterUnit::Bytes, CounterKind::Gauge, 5.0),
+                Entry::new("Memory", None, "Used", CounterUnit::Bytes, CounterKind::Gauge, 7.0),
+            ])),
+            network: NetworkPorts {
+                sockets: Box::new(self.clone()),
+                dns: Arc::new(self.clone()),
+                traffic: Box::new(self.clone()),
+            },
+            hardware: HardwareReaders {
+                signals: Box::new(crate::hardware::NoThrottleSignals("The fake machine has no throttle signals.")),
+                wear: Box::new(crate::hardware::FakeWear(Reading::unavailable("The fake machine has no SSD wear."))),
+                battery: Box::new(crate::hardware::FakeBattery(Reading::unavailable(
+                    "The fake machine has no battery.",
+                ))),
+            },
         }
+    }
+}
+
+impl NetworkSockets for Fake {
+    fn sockets(&self) -> Result<Vec<dyno_core::network::SocketRow>, PlatformError> {
+        Ok(self.lock().sockets.clone())
+    }
+}
+
+impl ReverseDns for Fake {
+    fn lookup(&self, _ip: std::net::IpAddr) -> Result<Option<String>, PlatformError> {
+        Ok(None)
+    }
+}
+
+impl ProcessTraffic for Fake {
+    fn counters(&self) -> Result<Vec<dyno_core::network_traffic::TrafficCounter>, PlatformError> {
+        Err(PlatformError::Unsupported("The fake machine has no per-process traffic.".into()))
     }
 }
 
