@@ -156,7 +156,7 @@ describe('UpdatesStore', () => {
     expect(asked[0]!.inputs['message']).not.toContain('replaces');
   });
 
-  it('shows the error when a download is refused ', async () => {
+  it('shows the error when a download is refused', async () => {
     const { store, toasts } = setup(failing('downloadModel'));
     await store.load();
     expect(await store.get(store.notices()[0]!)).toBe(false);

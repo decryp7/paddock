@@ -618,8 +618,17 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
     }
 }
 
+/// A failed outbound call is never "the local server is not running": an unreachable or failing host is "not available"
+/// (the CLI exits 4), a blocked URL is "not allowed", and a local write failure is ours.
 fn download_failed(e: crate::egress::DownloadError) -> CommandError {
-    err(mgmt::ErrorCode::ServerUnavailable, e.to_string())
+    use crate::egress::DownloadError as D;
+    let code = match &e {
+        D::Egress(_) => mgmt::ErrorCode::Forbidden,
+        D::Network(_) | D::Status(..) | D::Checksum { .. } => mgmt::ErrorCode::NotAvailable,
+        D::Io(_) => mgmt::ErrorCode::Internal,
+        D::Cancelled => mgmt::ErrorCode::Conflict,
+    };
+    err(code, e.to_string())
 }
 
 fn update_prefs(st: &AppState, id: &ModelId, f: impl FnOnce(&mut pitwall_core::config::ModelPrefs)) -> R<()> {
@@ -666,7 +675,7 @@ async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: O
         let id = pitwall_core::hf::RepoId::parse(repo).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?;
         let url = pitwall_core::hf::tree_url(&id).map_err(|e| err(mgmt::ErrorCode::BadRequest, e.to_string()))?;
         pitwall_core::hf::parse_tree(&st.egress.get_json(&url, 8 << 20).await.map_err(download_failed)?)
-            .map_err(|e| err(mgmt::ErrorCode::ServerUnavailable, e))?
+            .map_err(|e| err(mgmt::ErrorCode::NotAvailable, e))?
     };
     let mut want: Vec<&pitwall_core::hf::Variant> = tree.variants.iter().filter(|v| v.file == file).collect();
     if let Some(p) = projector {
@@ -1108,4 +1117,23 @@ fn preview_preset(st: &AppState, draft: mgmt::PresetDraft, editing: Option<&str>
             .map(|e| e.to_string());
     }
     mgmt::PresetPreview { problem, status }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::egress::DownloadError;
+    use pitwall_core::mgmt::ErrorCode;
+
+    #[test]
+    fn download_failures_are_not_reported_as_a_stopped_server() {
+        let net = download_failed(DownloadError::Network("cannot reach huggingface.co: down".into()));
+        assert_eq!(net.code, ErrorCode::NotAvailable);
+        assert!(net.message.contains("huggingface.co"));
+        assert_eq!(download_failed(DownloadError::Status(503, "")).code, ErrorCode::NotAvailable);
+        assert_eq!(download_failed(DownloadError::Io("disk".into())).code, ErrorCode::Internal);
+        assert_eq!(download_failed(DownloadError::Cancelled).code, ErrorCode::Conflict);
+        let blocked = download_failed(DownloadError::Egress(pitwall_core::privacy::EgressError::NotAllowed("x".into())));
+        assert_eq!(blocked.code, ErrorCode::Forbidden);
+    }
 }

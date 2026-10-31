@@ -86,7 +86,7 @@ export const UpdatesStore = signalStore(
         if (!store.loaded() && !store.loading()) await load();
       },
 
-      /** "Check now": asks Hugging Face about the repositories you downloaded from . */
+      /** "Check now": asks Hugging Face about the repositories you downloaded from. */
       async checkNow(): Promise<void> {
         if (store.checking()) return;
         patchState(store, { checking: true });
@@ -140,7 +140,7 @@ export const UpdatesStore = signalStore(
        */
       async get(n: UpdateNotice): Promise<boolean> {
         if (store.isBusy()(n.id)) return false;
-        const host = store.status()?.host ?? 'huggingface.co';
+        const host = store.status()?.host || 'huggingface.co';
         const replaces = n.kind === 'newerRevision' ? ' It replaces the copy you have once it finishes and is verified.' : '';
         const ok = await confirm(dialogs, {
           heading: `Download ${n.file}?`,

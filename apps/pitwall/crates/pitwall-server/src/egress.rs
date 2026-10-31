@@ -15,7 +15,7 @@ use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 /// Why a download failed.
 #[derive(Debug, thiserror::Error)]
 pub enum DownloadError {
-    /// Not allowed (offline, wrong host).
+    /// Not allowed (wrong scheme or host).
     #[error("{0}")]
     Egress(#[from] EgressError),
     /// The network failed.
@@ -256,5 +256,18 @@ mod tests {
         c.clone().cancel();
         assert!(c.is_cancelled());
         assert!(hint(403).contains("gated") && hint(500).is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_host_is_named_in_the_error() {
+        let url = DownloadUrl::parse("https://huggingface.co/api/models?search=x").unwrap();
+        let e = Egress::unreachable().get_json(&url, 1 << 10).await.unwrap_err();
+        assert!(matches!(&e, DownloadError::Network(m) if m.contains("huggingface.co")), "{e}");
+        let d = tempfile::tempdir().unwrap();
+        let e = Egress::unreachable()
+            .download(&url, &d.path().join("f.part"), None, &CancelFlag::default(), |_, _| {})
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("huggingface.co"), "{e}");
     }
 }

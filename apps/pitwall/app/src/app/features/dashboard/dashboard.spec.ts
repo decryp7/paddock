@@ -98,7 +98,7 @@ describe('Dashboard', () => {
     expect(sub).toContain(`${live.apps().filter((a) => a.connected).length} apps connected`);
   });
 
-  it('says it is connecting before the overview arrives ', async () => {
+  it('says it is connecting before the overview arrives', async () => {
     const pre = await mount({ load: false });
     expect(pre.el.querySelector('.sub')!.textContent).toContain('Connecting to the server…');
   });

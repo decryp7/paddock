@@ -232,7 +232,7 @@ Everything cached stays on this computer.
 ## Command line
 
 `pitwall` (crate `pitwall-cli`) controls the local server from a terminal or script: `status`, `ps`, `models`, `load`,
-`unload`, `pull` (a download job with progress, resumable, shows the host, resumable), `keys`
+`unload`, `pull` (a download job with progress, resumable, shows the host), `keys`
 (list, create, revoke; a new key is shown once), `presets`, `chat` (streams over the standard OpenAI endpoint with a per-app
 key from `PITWALL_API_KEY`) and `bench`. `--json` on every read command, a time limit on every call, stable exit codes
 (0 ok, 1 error, 2 usage, 3 server not running, 4 refused) and error messages that say what to fix. The admin key comes from

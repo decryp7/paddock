@@ -576,6 +576,18 @@ mod tests {
         assert!(back["network"].get("offline").is_none(), "{back}");
     }
 
+    /// The upgrade path through the real loader: a 1.0 TOML file with `network.offline` loads from the file, and what
+    /// is written back keeps the other keys but not `offline`.
+    #[test]
+    fn a_1_0_toml_file_with_network_offline_loads_from_the_file_and_is_written_back_without_it() {
+        let (s, how) = load(Some("[network]\noffline = true\nlanPort = 11444\n"), None);
+        assert_eq!(how, Loaded::File);
+        assert_eq!(s.network.lan_port, 11_444);
+        let out = s.to_toml();
+        assert!(!out.contains("offline"), "{out}");
+        assert!(out.contains("lanPort = 11444"), "{out}");
+    }
+
     #[test]
     fn cache_settings_have_documented_defaults_expiry_and_limits() {
         use crate::cache::Kind;

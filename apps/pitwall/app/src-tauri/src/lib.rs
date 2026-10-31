@@ -243,9 +243,6 @@ fn updater<R: Runtime>(
                 app.clone(),
                 key.unwrap_or_default(),
             ))),
-        // TODO(batch integrator): once main with the shared updater guard is merged into this line, add `.no_install()` here:
-        // the guard refuses an UpdatesBuilder that declares neither `.installer(..)` nor `.no_install()`, and this test/dev arm
-        // has no installer.
         Some(dir) => b.dirs(dir.join("config"), dir.join("cache")).background(false),
     }
 }
