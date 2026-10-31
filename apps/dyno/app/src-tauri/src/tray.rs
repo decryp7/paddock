@@ -8,7 +8,7 @@
 use crate::logging;
 use crate::tray_model::{Frame, ItemSpec};
 use paddock_window::popover::Rect;
-use paddock_window::tauri::{Tray, TrayBackend};
+use paddock_window::tauri::{PopoverSpec, Popovers, Tray, TrayBackend};
 use paddock_window::tray::{item, TrayView, QUIT_ID, SHOW_ID};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -185,6 +185,15 @@ pub fn view() -> TrayView {
     TrayView::new("Dyno", vec![item(SHOW_ID, "Open Dyno"), item(QUIT_ID, "Quit Dyno")], "static")
 }
 
+/// The route of the popup page (the UI's `#/tray`).
+pub const POPOVER_ROUTE: &str = "index.html#/tray";
+
+/// The popover a click on a tray icon opens, which the shell looks up by name: the popup page at the family's width. Without it
+/// a click only logs "no tray popover is set up in this app".
+pub fn popovers() -> Popovers {
+    Popovers::new().popover(None, PopoverSpec::new(POPOVER_ROUTE, "Dyno"))
+}
+
 /// The shell's tray drawn by `backend` ([`DynoTray`] with the icons of the items in the app, a headless one in tests).
 /// Without a tray (Linux without a status-notifier host) the window is the only way in, and closing it quits.
 pub fn tray<R: Runtime>(backend: impl TrayBackend<R>) -> Tray<R> {
@@ -194,6 +203,14 @@ pub fn tray<R: Runtime>(backend: impl TrayBackend<R>) -> Tray<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_popup_page_is_the_one_popover_of_the_tray_icons() {
+        let pops = popovers();
+        assert!(pops.has(None));
+        assert!(!pops.has(Some("cpu")), "Dyno has one popup, not one per icon");
+        assert_eq!(POPOVER_ROUTE, "index.html#/tray");
+    }
 
     #[test]
     fn the_static_icons_are_png_files() {
