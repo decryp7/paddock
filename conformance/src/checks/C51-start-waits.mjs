@@ -22,6 +22,7 @@
 // The waiver list may only shrink; the check turns to errors when the apps have adopted the judge (ADR 0031 section 8).
 import { warn } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
+import { withoutTestItems } from '../util/rust-test-items.mjs';
 
 const WAIVER = /\/\/\s*(?:cap|external|shutdown|ui|pace|hang-guard):\s*\S.{2,}/;
 const SCOPE = /^(?:crates\/|tools\/|apps\/[^/]+\/crates\/|apps\/[^/]+\/app\/src-tauri\/)/;
@@ -31,7 +32,7 @@ const BOUND = '(?:TIMEOUT|LIMIT|DEADLINE|WAIT|GRACE|BUDGET|WINDOW)';
 const NAMED = new RegExp(`\\b((?:const|static)\\s+)?([A-Za-z0-9_]*${KIND}[A-Za-z0-9_]*${BOUND}[A-Za-z0-9_]*)\\s*:\\s*(?:Option<\\s*)?(?:std::time::)?Duration\\b`, 'i');
 const IN_START_FN = /\b(?:Deadline::after|Instant::now\(\)\s*\+|\.recv_timeout|\.wait_timeout(?:_while)?)\s*\(?/;
 const START_FN = /\bfn\s+((?:start|spawn|launch|boot|connect|handshake|wait_for|ready|await)(?:_\w*)?)\b/;
-const DEADLINE = /\bInstant::now\(\)\s*\+|\bDeadline::after\s*\(|\b(?:let\s+(?:mut\s+)?)?\w*(?:end|deadline|limit|timeout|until|give_up)\w*\s*(?::[^=]+)?=[^;]*\bDuration::from_(?:secs|millis|secs_f64)\s*\(|\.elapsed\(\)\s*(?:>=?|<=?)/i;
+const DEADLINE = /\bInstant::now\(\)\s*\+|\bDeadline::after\s*\(|\b(?:let\s+(?:mut\s+)?)?\w*(?:end|deadline|limit|timeout|until|give_up)\w*\s*(?::[^=]+)?=(?![=>])[^;]*\bDuration::from_(?:secs|millis|secs_f64)\s*\(|\.elapsed\(\)\s*(?:>=?|<=?)/i;
 const LIVENESS = /\.(?:try_wait|is_running|is_alive)\s*\(|\bkill\s*\([^)]*,\s*0\s*\)/;
 const READINESS = /\bconnect\s*\(|\bread_to_string\s*\(|\.(?:wait_timeout(?:_while)?|recv_timeout)\s*\(/;
 // Functions that stop, kill, close or run something: a grace or run limit there is a cap, not a start wait. CDP event waits likewise.
@@ -45,39 +46,25 @@ const TIMEOUT_LITERAL = /\bTimeout\s*\(\s*(?:format!\s*\(\s*)?"[^"]*\b(?:start|l
 
 const lineAt = (text, index) => text.slice(0, index).split('\n').length;
 
-/** `text` with the items matching `head` (an attribute plus the item's opening brace) blanked up to their closing brace, newlines kept. */
-function blankItems(text, head) {
-  const masked = maskRust(text);
-  let out = text;
-  for (const m of masked.matchAll(head)) {
-    let depth = 0;
-    let end = masked.length;
-    for (let i = m.index + m[0].length - 1; i < masked.length; i++) {
-      if (masked[i] === '{') depth++;
-      else if (masked[i] === '}' && --depth === 0) {
-        end = i + 1;
-        break;
-      }
-    }
-    out = out.slice(0, m.index) + out.slice(m.index, end).replace(/[^\n]/g, ' ') + out.slice(end);
-  }
+/** `source` with every test item blanked (the shared helper works on the masked text; the same characters are blanked here, newlines kept). */
+function withoutTests(source) {
+  const plain = maskRust(source);
+  const kept = withoutTestItems(plain);
+  let out = '';
+  for (let i = 0; i < source.length; i++) out += kept[i] !== plain[i] && source[i] !== '\n' ? ' ' : source[i];
   return out;
 }
-
-const TEST_ATTR = String.raw`#\[(?:cfg\((?:all\(\s*)?test\b[^\]]*\)|(?:\w+::)?test\b[^\]]*)\]`;
-const TEST_ITEM = new RegExp(String.raw`${TEST_ATTR}\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:mod|fn)\s+\w+[^{;]*\{`, 'g');
-
-/** `text` with every test item (`#[cfg(test)]` / `#[cfg(all(test, ..))]` modules and functions, `#[test]` functions) blanked, so code after it still counts. */
-const withoutTests = (text) => blankItems(text, TEST_ITEM);
 
 /** The fixed start waits in one Rust source: [{ line, what }] for the sites that carry no waiver. */
 export function startWaits(source, path = '') {
   const text = withoutTests(source);
   const masked = maskRust(text);
   const lines = text.split('\n');
+  // A waiver on the line, or anywhere in the comment block directly above it.
   const waived = (line) => {
-    const near = `${lines[line - 1] ?? ''}\n${lines[line - 2] ?? ''}`;
-    return WAIVER.test(near) || /\bPatience\b/.test(lines[line - 1] ?? '');
+    if (WAIVER.test(lines[line - 1] ?? '') || /\bPatience\b/.test(lines[line - 1] ?? '')) return true;
+    for (let k = line - 2; k >= 0 && /^\s*\/\//.test(lines[k] ?? ''); k--) if (WAIVER.test(lines[k])) return true;
+    return false;
   };
   const out = [];
   masked.split('\n').forEach((l, i) => {
@@ -161,7 +148,7 @@ export default {
       const text = ctx.read(f);
       if (!text) continue;
       for (const s of startWaits(text, f)) {
-        out.push(warn('C51', 40, f, s.line, `${s.what}: a working start must not fail only because time passed (ADR 0031, ER-19)`, 'Judge it with `paddock_proc::StartJudge` / `StartWatch`, or mark a real cap with `// cap: <why>` (also `external`, `shutdown`, `ui`, `pace`).'));
+        out.push(warn('C51', 40, f, s.line, `${s.what}: a working start must not fail only because time passed (ADR 0031, ER-19)`, 'Judge it with `paddock_proc::StartJudge` / `StartWatch`, or mark a real cap with `// cap: <why>` (also `external`, `shutdown`, `ui`, `pace`, `hang-guard` for a test-only hang guard).'));
       }
     }
     return out;

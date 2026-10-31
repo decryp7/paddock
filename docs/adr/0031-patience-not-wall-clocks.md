@@ -278,7 +278,8 @@ It flags:
   WAIT, LIMIT, GRACE or BUDGET.
 
 A flagged site passes when its bound comes from `Patience`, or when the line or the item above it carries `// cap:`,
-`// external:`, `// shutdown:`, `// ui:` or **`// pace:`** with a reason. `pace` is for throttles and intervals that bound
+`// external:`, `// shutdown:`, `// ui:`, `// hang-guard:` (a test-only guard against a hang) or **`// pace:`** with a reason; the
+comment may be anywhere in the comment block directly above the line. `pace` is for throttles and intervals that bound
 nothing (a poll interval, a progress throttle, a debounce): they decide how often, not how long. Test code is exempt
 from the comment, not from ER-12. Today's sites are a waiver list that may only shrink, as C40-C42 do, with targets:
 

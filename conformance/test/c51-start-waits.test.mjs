@@ -200,3 +200,22 @@ test('C51 nested block comments, multi-line and format! timeout literals', () =>
   assert.deepEqual(lines('fn f() {\n    Err(Error::Timeout(format!("the {} request", n)))\n}\n'), []);
   assert.deepEqual(lines('// Error::Timeout("start")\nfn f() {}\n'), []);
 });
+
+test('C51 ignores match arms and comparisons that merely mention a Duration', () => {
+  const arm = 'fn attach() {\n    let r = match k {\n        A => Duration::from_secs(1),\n        _ => D,\n    };\n    let ok = limit == Duration::from_secs(1);\n    loop { child.try_wait(); }\n}\n';
+  assert.deepEqual(lines(arm), []);
+  assert.deepEqual(lines('fn attach() {\n    let end = Duration::from_secs(1);\n    loop { child.try_wait(); }\n}\n'), [2]);
+});
+
+test('C51 takes a waiver anywhere in the comment block directly above', () => {
+  const body = (c) => `fn f() {\n${c}    let end = Instant::now() + D;\n    loop { child.try_wait(); }\n}\n`;
+  assert.deepEqual(lines(body('')), [2]);
+  assert.deepEqual(lines(body('    // cap: the grace a child gets;\n    // more words about it\n    // and more\n')), []);
+  assert.deepEqual(lines(body('    // cap: the grace\n\n')), [4]);
+  assert.deepEqual(lines(body('    // just a note\n')), [3]);
+});
+
+test('C51 uses the shared test-item blanking: #[tokio::test], cfg(test) impl', () => {
+  assert.deepEqual(lines('#[tokio::test]\nasync fn start_it() {\n    rx.recv_timeout(d);\n}\n'), []);
+  assert.deepEqual(lines('#[cfg(test)]\nimpl Foo {\n    fn start() { rx.recv_timeout(d); }\n}\nconst SPAWN_WAIT: Duration = D;\n'), [5]);
+});

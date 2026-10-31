@@ -63,3 +63,10 @@ test('C39 through the runner: an error per freed port, none for held or waived o
   assert.match(f.find((x) => x.file.endsWith('bad.rs')).fix, /HeldPort/);
   assert.match(f.find((x) => x.file.endsWith('b.rs')).message, /no reason/);
 });
+
+test('maskRust: block comments nest', () => {
+  const m = maskRust('/* a /* TcpListener::bind(x) */ still comment */ real(); /* /* */ */ fine();');
+  assert.ok(!m.includes('TcpListener'));
+  assert.ok(!m.includes('still'));
+  assert.ok(m.includes('real();') && m.includes('fine();'));
+});
