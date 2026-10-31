@@ -25,11 +25,41 @@ fn main() {
     if let Ok(target) = std::env::var("TARGET") {
         let ext = if target.contains("windows") { ".exe" } else { "" };
         let dir = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default()).join("binaries");
+        let mut placeholders = false;
         for name in ["dyno-agent", "dyno"] {
             let sidecar = dir.join(format!("{name}-{target}{ext}"));
             if !sidecar.exists() {
                 let _ = std::fs::create_dir_all(&dir);
                 let _ = std::fs::write(&sidecar, b"");
+            }
+            placeholders |= std::fs::metadata(&sidecar).map(|m| m.len() == 0).unwrap_or(true);
+            println!("cargo:rerun-if-changed={}", sidecar.display());
+        }
+        // tauri-build copies every externalBin to target/<profile>/<name>, over the `dyno` and `dyno-agent` that cargo links
+        // there; with placeholders that left 0-byte programs in the build folder (a test copied an empty `dyno`, and
+        // codesign named it `dyno-da39a3ee…`, the SHA-1 of nothing). So while any sidecar is a placeholder, tauri-build sees
+        // no externalBin: TAURI_CONFIG is merged as a JSON merge patch, where null removes the key. Bundles and `tauri dev`
+        // build the real sidecars first (scripts/sidecar.mjs) and keep the copy.
+        if placeholders {
+            let mut patch: serde_json::Value = std::env::var("TAURI_CONFIG")
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default();
+            if !patch.is_object() {
+                patch = serde_json::json!({});
+            }
+            patch["bundle"]["externalBin"] = serde_json::Value::Null;
+            std::env::set_var("TAURI_CONFIG", patch.to_string());
+            // A build folder from before this fix still holds the 0-byte copies; a real program is never empty.
+            // OUT_DIR is target/<profile>/build/<package>-<hash>/out.
+            let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap_or_default());
+            if let Some(profile_dir) = out.ancestors().nth(3) {
+                for name in ["dyno-agent", "dyno"] {
+                    let copy = profile_dir.join(format!("{name}{ext}"));
+                    if std::fs::metadata(&copy).is_ok_and(|m| m.is_file() && m.len() == 0) {
+                        let _ = std::fs::remove_file(&copy);
+                    }
+                }
             }
         }
     }

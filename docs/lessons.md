@@ -1099,3 +1099,17 @@ with a dot), so a list is checked against its own announced count and owners, an
 never an empty page; (2) Tauri re-signs sidecars and resets a file's identifier, so the identifier comes from an embedded
 Info.plist and the built bundle is checked; (3) the header count includes dead entries, so it can only be used together
 with something else (here: no socket of another process in the list).
+
+## tauri-build copies every sidecar over the binary cargo just linked (2026-11-01, Dyno)
+
+Dyno's signing-identifier test for the dyno command failed in a release run and passed in CI on the same commit and
+runner: codesign named the copy `dyno-da39a3ee…` (the SHA-1 of nothing), `Format=generic`, 0 code pages. The app's
+build script writes empty sidecar placeholders (`binaries/<name>-<triple>`) so tauri-build accepts `bundle.externalBin`,
+and tauri-build then removes `target/<profile>/<name>` and copies each sidecar there: the 0-byte placeholder replaced the
+`dyno` and `dyno-agent` that cargo had just put there. Whether a test saw the real binary depended on whether the build
+script ran before or after cargo placed the binaries in that cargo run (20 of 20 failures in a loop that reruns the build
+script with the binaries fresh; 0 of 50 with the fix). Causes ruled out: a concurrent rewrite by another job (each slot has
+its own build folder), `std::fs::copy` truncating (the source itself was 0 bytes), codesign racing the linker (the
+binary was not relinked). **Lesson:** a build script must never write into the build folder next to cargo's own outputs;
+while the sidecars are placeholders, Dyno hides `externalBin` from tauri-build (a `TAURI_CONFIG` merge patch), and a test
+that copies a built program first checks it is not empty. Pitwall and Pitcrew write the same placeholders.

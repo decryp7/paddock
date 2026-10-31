@@ -18,6 +18,8 @@ crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.7.3", features = [] }
+# build.rs patches TAURI_CONFIG (no externalBin copy while the sidecars are placeholders).
+serde_json.workspace = true
 
 [dependencies]
 dyno-core.workspace = true
