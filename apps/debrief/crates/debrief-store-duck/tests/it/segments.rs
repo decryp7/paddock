@@ -214,6 +214,10 @@ fn id_blocks_follow_their_rows_through_listing_compaction_and_removal() {
     let store = DuckStore::open(&dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
     assert_blocks_consistent(&store, &dir.0);
     assert_eq!(blocks(&store), store.bench_sql("SELECT 1 FROM segments").unwrap());
+    // Clearing the store forgets the blocks with the segments.
+    store.clear().unwrap();
+    assert_eq!(blocks(&store), 0);
+    assert_blocks_consistent(&store, &dir.0);
 }
 
 #[test]
