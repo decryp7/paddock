@@ -33,11 +33,12 @@ test('static texts are read from an axdrive tree dump', () => {
 
 test('the feed serves the current case under the one URL the old build knows, and only that case\'s files', () => {
   assert.deepEqual(feedRoute('/ok/latest.json', 'badsig'), { file: 'badsig/latest.json', type: 'application/json' });
-  assert.deepEqual(feedRoute('/badsig/Spotter_aarch64.app.tar.gz', 'badsig'), { file: 'badsig/Spotter_aarch64.app.tar.gz', type: 'application/gzip' });
+  assert.deepEqual(feedRoute('/badsig/Spotter_aarch64.app.tar.gz', 'badsig'), { file: 'badsig/Spotter_aarch64.app.tar.gz', type: 'application/octet-stream' });
   assert.equal(feedRoute('/ok/Spotter_aarch64.app.tar.gz', 'badsig'), null, 'another case\'s file is not served');
   assert.equal(feedRoute('/ok/../keys/spotter-test.key', 'ok'), null);
   assert.equal(feedRoute('/ok/%2e%2e/keys/x', 'ok'), null);
   assert.equal(feedRoute('/etc/passwd', 'ok'), null);
+  assert.deepEqual(feedRoute('/ok/Spotter_1.0.0-test.2_x64-setup.exe', 'ok'), { file: 'ok/Spotter_1.0.0-test.2_x64-setup.exe', type: 'application/octet-stream' });
 });
 
 test('only an app version is read from the plist', () => {

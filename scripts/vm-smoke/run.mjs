@@ -8,7 +8,6 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { createServer } from 'node:http';
-import { createServer as createHttpsServer } from 'node:https';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statfsSync, writeFileSync, cpSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -17,7 +16,7 @@ import { Check, runAll } from './checks.mjs';
 import { GuiCheck, runGui } from './gui.mjs';
 import { renderResult } from './judge.mjs';
 import { runUpdateTest } from './update.mjs';
-import { feedRoute } from './update-judge.mjs';
+import { startFeed } from './update-feed.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -306,21 +305,8 @@ async function main(argv) {
       if (plan) {
         // The local HTTPS feed of the update test: the VM bridge address only, the test CA's server certificate, the current case's files.
         if (gw !== plan.host) throw new Error(`the guest's gateway is ${gw} but the old build has ${plan.host} built in as its feed; rebuild the assets with --host ${gw}`);
-        const root = join(resolve(o.updateTest), 'feed');
-        let current = 'ok';
-        let feedLog = [];
-        const feedServer = createHttpsServer({ key: readFileSync(join(resolve(o.updateTest), 'ca', 'server.key')), cert: readFileSync(join(resolve(o.updateTest), 'ca', 'server.pem')) }, (req, res) => {
-          if (current === 'down') { req.socket.destroy(); return; }
-          const route = feedRoute(req.url ?? '/', current);
-          feedLog.push(`${req.method} ${req.url} ${route ? 200 : 404}`);
-          if (!route || !existsSync(join(root, route.file))) { res.writeHead(404).end(); return; }
-          res.writeHead(200, { 'content-type': route.type, 'content-length': statSync(join(root, route.file)).size });
-          createReadStream(join(root, route.file)).pipe(res);
-        });
-        await new Promise((r, j) => { feedServer.once('error', j); feedServer.listen(plan.port, gw, r); });
-        // Closed with the other host children at cleanup.
-        children.add({ kill: () => feedServer.close() });
-        const feed = { setCase: (id) => { current = id; }, feedLog: () => feedLog, clearFeedLog: () => { feedLog = []; } };
+        const feed = await startFeed({ assets: resolve(o.updateTest), host: gw, port: plan.port });
+        children.add({ kill: () => feed.close() }); // closed with the other host children at cleanup
         ({ steps, version } = await runUpdateTest(check, feed, plan));
       } else ({ steps, version } = await runGui(check));
       // The screenshots (taken inside the guest) next to the result file.
