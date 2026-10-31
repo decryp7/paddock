@@ -164,17 +164,22 @@ counts in the host's metrics and Insights. Should Linux later need load control,
 this ADR does not plan that.
 
 **The family ADR 0025 gate.** A pool may run more than one job at once on a host only when the CI kit isolates
-concurrent jobs. A pool declares `ci_isolation = "none" | "slots"`. With `"none"` (the default) its effective `max` is 1
+concurrent jobs. A pool declares `ci_isolation = "none" | "slots"` **per slot space**, keyed by the space number (`ci_isolation = { 1 = "slots", 2 = "none" }`; a pool in one space may write the plain string). With `"none"` (the default) the pool's effective `max` in that space is 1
 and the pool page says why ("two jobs on one host share the CI home; needs family ADR 0025"). The owner sets `"slots"`
 only once family ADR 0025 is merged **with its Rust slot lock** (the shell lock it replaces has a reclaim race) and, for
 container pools, once containers get slots on the shared mount (ADR 0025 §8). Pitcrew cannot see the CI kit, so this is a
 declared precondition, not a detection. With `"slots"`:
 
-- **One CI home per slot space.** Every slot of a space shares the space's CI home (a space is one account's home, family ADR 0025's amendment 2026-10-31; a host has one space per account that runs runners, numbered `PADDOCK_CI_SPACE`); ADR 0025 derives the kept folders and port
-  blocks from the slot number, so separate homes per runner would only multiply disk. Pitcrew's config check rejects
-  `runner.envs.PADDOCK_CI_HOME` on a pool slot (with a Fix that removes it: the migration from the interim runbook).
-- **`PADDOCK_CI_KEEP_SLOTS` = the pool's `max`,** written into every slot's `runner.envs` through ADR 0011's editor, so
-  the kept folders exist for at most as many slots as the pool can run.
+- **One CI home per slot space** (family ADR 0025's amendment 2026-10-31, A). A space is one account's CI home; a host has
+  one space per account that runs runners, numbered `PADDOCK_CI_SPACE` (1 to 4) by Pitcrew, which keeps host-wide ports apart.
+  Every slot of a space shares its home; the kit derives the kept folders and port blocks from the space number and the slot
+  number. Pitcrew's checks run on the **composed environment** of each runner (ADR 0022 `compose`) and compare **canonical
+  resolved paths**, never `runner.envs` strings: one path resolved by two accounts is an error (Fix: remove the override from
+  one), and a second-account runner without `PADDOCK_CI_SPACE` is an error in the host check.
+- **`PADDOCK_CI_SLOTS` = `PADDOCK_CI_KEEP_SLOTS` = the sum of `runner.capacity` of every registered runner in the space**
+  (all pools and loose runners), capped at 4; Pitcrew writes them into every runner of the space through ADR 0011's editor
+  and rewrites them when a runner is added, removed or changes capacity, restarting idle runners after their job. The kit
+  fails an acquire when they exceed the cap.
 
 ### 1a. Session and headless slots (the owner, 2026-10-31)
 
@@ -335,7 +340,7 @@ service like the rest; an invalid section is ignored with a message and auto-sca
 | `slot_mem_mb`, `mem_reserve_mb` | 4096, 4096 | room needed to start one more job |
 | `up_after_s`, `start_gap_s`, `down_after_s`, `down_gap_s` | 20, 60, 600, 120 | hysteresis and pacing |
 | `ramp_s`, `job_cores` | 180, 4 | how long a new job takes to load the host, and how much it is assumed to use |
-| `pools[].ci_isolation` | `"none"` | `"slots"` only after family ADR 0025 is merged with its Rust slot lock; `"none"` caps the pool at one job |
+| `pools[].ci_isolation` | `"none"` | per slot space (keyed by the space number); `"slots"` only after family ADR 0025 and its amendment are accepted and its Rust slot lock is merged; `"none"` caps the pool at one job in that space |
 | `release_patterns` | `["^[a-z][a-z0-9-]*-v\\d+\\.\\d+\\.\\d+$", "^v\\d+\\.\\d+\\.\\d+$"]` | anchored tag patterns of jobs that are never starved (with a tag-push event) |
 | `count_remote_idle` | `true` | subtract idle runners on other hosts |
 
@@ -436,7 +441,7 @@ jobs waiting longer than 15 minutes, the thrash guard engaged, a slot not availa
 | WP-2 | `[autoscale]` config schema, validation, defaults; settings DTOs | implementer | 0.5 d |
 | WP-3 | Shared: load average and available memory in `paddock-metrics`' `MachineProbe` (Windows: CPU share); tests in the crate | integrating agent (shared crate) | 1 d |
 | WP-4 | Service adapters: Gitea `QueueSource` on `paddock-net`, token through `paddock-secrets`, the mode-2 check with backoff and demand, worker → supervisor messages | implementer | 1.5 d |
-| WP-5 | Supervisor wiring: slot availability, the busy rule per runner kind (container slots: task line + containers + API), actions through the controller, manual-override hand-back, the `ci_isolation` gate, `shutdown_timeout`, `PADDOCK_CI_KEEP_SLOTS` and no per-runner `PADDOCK_CI_HOME` (check and Fix), history events, notifications | implementer, independent review | 2 d |
+| WP-5 | Supervisor wiring: slot availability, the busy rule per runner kind (container slots: task line + containers + API), actions through the controller, manual-override hand-back, the `ci_isolation` gate, `shutdown_timeout`, the checks of family ADR 0025's amendment, A and D (space numbers, `PADDOCK_CI_SPACE`, `PADDOCK_CI_SLOTS`/`KEEP_SLOTS`, canonical-path homes, with Fixes), history events, notifications | implementer, independent review | 2 d |
 | WP-6 | Protocol: `SetAutoscaleToken`/`ClearAutoscaleToken`/`HasAutoscaleToken`, pool status in `Status`; `PROTOCOL_VERSION` bump; `dto.rs` and `api.types.ts` in the same commit | integrating agent | 1 d |
 | WP-7 | Register wizard "Add N slots" (names, labels from the first slot, env-var token) | implementer | 1 d |
 | WP-8 | UI: Settings > Auto-scale (Material), Dashboard pool card, reasons in Activity, mock backend | implementer | 1.5 d |
