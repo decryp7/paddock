@@ -958,6 +958,63 @@ mod tests {
         assert!(e.contains("done nothing") && e.contains("GPU process is waiting"), "{e}");
     }
 
+    /// A start that is slow but progressing (the browser keeps using CPU) is waited for far past the old fixed 20 s and past the
+    /// idle limit (60 s of ticks), on the fake clock: it is ended only when the process itself ends, never judged by elapsed time.
+    #[cfg(unix)]
+    #[test]
+    #[expect(clippy::disallowed_methods, reason = "a fake browser script and kill(1): std Command")]
+    fn a_slow_start_that_keeps_working_is_waited_for_not_cut_off_at_a_fixed_time() {
+        struct EndAt {
+            ticks: u32,
+            pid: u32,
+        }
+        impl paddock_proc::Pace for &mut EndAt {
+            fn wait(&mut self, _tick: Duration) -> bool {
+                std::thread::sleep(Duration::from_millis(1));
+                self.ticks += 1;
+                if self.ticks == 3000 {
+                    std::process::Command::new("kill")
+                        .args(["-9", &self.pid.to_string()])
+                        .status()
+                        .unwrap();
+                }
+                self.ticks < TICK_GUARD
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.args(["-c", "exec sleep 300"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::fs::File::create(dir.path().join(STDERR_FILE)).unwrap());
+        let mut process = Supervised::spawn(cmd).unwrap();
+        let mut pace = EndAt {
+            ticks: 0,
+            pid: process.process().unwrap().pid(),
+        };
+        let e = connect(
+            dir.path(),
+            &mut process,
+            paddock_proc::Patience::default(),
+            &AtomicU8::new(NONE),
+            Duration::from_secs(7),
+            working(),
+            &mut pace,
+            &mut |_| {},
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        process.kill();
+        // 3000 ticks of 50 ms are 150 s: waited for while it worked; ended only when the process ended.
+        assert!(
+            pace.ticks >= 3000,
+            "given up on after {} ticks while the browser was still working: {e}",
+            pace.ticks
+        );
+        assert!(e.contains("exited"), "{e}");
+    }
+
     /// The exit status and the stderr tail of a browser that ended during the start are named.
     #[cfg(unix)]
     #[test]
