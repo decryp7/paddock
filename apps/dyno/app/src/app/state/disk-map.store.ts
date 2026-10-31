@@ -90,6 +90,18 @@ export const DiskMapStore = signalStore(
     let token = 0;
     const keep = (status: DiskScanStatus) =>
       patchState(store, (s) => ({ kept: [...s.kept.filter((k) => k.scan !== status.scan), status].sort((a, b) => a.scan - b.scan) }));
+    /**
+     * The status a reply to a start or retry stands for: the reply, unless a newer status of the same scan was pushed while the
+     * request was out. Replies and pushed statuses travel apart, so the last status of a short pass can arrive before the reply.
+     * Only what was pushed during the request counts (`before` is the kept list when it was sent): an agent that started again
+     * numbers its scans from 1, and an old scan with the same number is not newer.
+     */
+    const adopt = (reply: DiskScanStatus, before: readonly DiskScanStatus[]): DiskScanStatus => {
+      const pushed = store.kept().find((k) => k.scan === reply.scan);
+      if (pushed && pushed.seq > reply.seq && !before.includes(pushed)) return pushed;
+      keep(reply);
+      return reply;
+    };
 
     /** Reads the centre's level for the list and, in the chart view, its rings in one more request; an older answer never replaces a newer one. */
     const refresh = async (): Promise<void> => {
@@ -155,9 +167,8 @@ export const DiskMapStore = signalStore(
       if (store.starting()) return false;
       patchState(store, { starting: true, startError: null });
       try {
-        const status = await backend.startDiskScan(target);
-        keep(status);
-        await show(status);
+        const before = store.kept();
+        await show(adopt(await backend.startDiskScan(target), before));
         return true;
       } catch (e) {
         patchState(store, { startError: toCommandError(e) });
@@ -328,9 +339,8 @@ export const DiskMapStore = signalStore(
         const s = store.status();
         if (!s) return false;
         try {
-          const status = await backend.retryDiskScan(s.scan);
-          keep(status);
-          await show(status);
+          const before = store.kept();
+          await show(adopt(await backend.retryDiskScan(s.scan), before));
           return true;
         } catch (e) {
           patchState(store, { startError: toCommandError(e) });

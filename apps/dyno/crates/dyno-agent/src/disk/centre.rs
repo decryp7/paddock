@@ -222,6 +222,16 @@ impl WalkHooks for Meta {
             p.scanned_at = Some(Timestamp(self.clock.wall_ms()));
         }
         self.publish(walk, false);
+        let (seq, pass_ms, first_pass) = {
+            let p = lock(&self.state);
+            (p.seq, self.clock.now_ms().saturating_sub(p.base.0), p.first_pass)
+        };
+        let outcome = match end {
+            End::Done => "done",
+            End::Cancelled => "cancelled",
+            End::Failed(_) => "failed",
+        };
+        log::info!(Scan = self.scan, Outcome = outcome, Seq = seq, PassMs = pass_ms, Retry = !first_pass; "Disk scan pass ended");
     }
 
     fn restarted(&self, walk: &Walk) {
@@ -699,7 +709,11 @@ impl DiskCentre {
             ),
             RetryError::NoThread => err(ErrorCode::Internal, "Dyno could not start a thread to read the folders again."),
         })?;
-        Ok(e.meta.current(&e.walk))
+        // The pass runs on its own threads and may already have ended: the reply says so, and its sequence number places it among
+        // the events (a consumer keeps the highest).
+        let status = e.meta.current(&e.walk);
+        log::info!(Scan = scan, State = state_name(&status.state), Seq = status.seq; "Disk scan retry started");
+        Ok(status)
     }
 
     /// Opens the system pane for Full Disk Access.
@@ -755,6 +769,16 @@ impl DiskCentre {
             .map_err(|x| err(ErrorCode::NotFound, x.to_string()))?;
         // The root's own name is the scan's name, not part of the path: its path is the folder the scan started from.
         Ok(super::names::join_components(&e.root, &names))
+    }
+}
+
+/// A state's name for the log (no paths or reasons: those can name the person's folders).
+fn state_name(s: &ScanState) -> &'static str {
+    match s {
+        ScanState::Running => "running",
+        ScanState::Done => "done",
+        ScanState::Cancelled => "cancelled",
+        ScanState::Failed { .. } => "failed",
     }
 }
 
@@ -1409,15 +1433,47 @@ mod tests {
         let reads = fs.reads.load(Ordering::SeqCst);
 
         fs.allow_open(&lib);
+        // The pass is held at its one read until the reply is in: a pass this small can end before the reply is built, and
+        // then the reply is honestly Done (see the next test).
+        let gate = Gate::new();
+        let g = gate.clone();
+        fs.on_read(move |_| g.pass());
         let again = r.centre.retry(s.scan).unwrap();
-        assert_eq!((again.scan, again.state), (s.scan, ScanState::Running));
+        assert_eq!((again.scan, again.state.clone()), (s.scan, ScanState::Running));
+        assert_eq!(again.seq, first.seq + 1, "the reply is the status the restart announced");
+        gate.open();
         let second = wait_final(&r, s.scan);
         assert_eq!(second.state, ScanState::Done);
         assert_eq!((second.progress.bytes, second.progress.unreadable), (30 + 5 * MB, 0));
         assert_eq!(fs.reads.load(Ordering::SeqCst), reads + 1, "only Library was read");
-        assert!(second.seq > first.seq);
+        assert!(second.seq > again.seq);
         let page = r.centre.children(s.scan, None, 0, 10, 0.0).unwrap();
         assert!(page.node.complete);
+    }
+
+    #[test]
+    fn the_reply_to_a_retry_is_running_or_done_with_what_was_read_and_never_newer_than_the_end() {
+        // Whether the pass ends before or after the reply is built depends on the scheduler; either way the reply is true, and
+        // its sequence number lies between the restart and the end, so a consumer that keeps the highest number ends on Done.
+        let (fs, lib) = refused_library();
+        let root = fs.root();
+        let r = rig(fs.clone(), vec![vol("V", &root, VolumeLocation::Internal)]);
+        let s = r.centre.start(DiskTarget::Volume { id: "V".into() }).unwrap();
+        let first = wait_final(&r, s.scan);
+        fs.allow_open(&lib);
+        let again = r.centre.retry(s.scan).unwrap();
+        let second = wait_final(&r, s.scan);
+        assert_eq!(second.state, ScanState::Done);
+        assert!(again.seq > first.seq && again.seq <= second.seq);
+        match again.state {
+            ScanState::Running => assert!(again.seq < second.seq, "a running reply is followed by the end"),
+            ScanState::Done => assert_eq!(
+                (again.progress.bytes, again.progress.unreadable),
+                (30 + 5 * MB, 0),
+                "done means read"
+            ),
+            other => panic!("unexpected state {other:?}"),
+        }
     }
 
     #[test]
