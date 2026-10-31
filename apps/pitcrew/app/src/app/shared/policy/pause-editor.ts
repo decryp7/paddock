@@ -43,7 +43,7 @@ export function pauseProblem(p: PausePolicy): string | null {
     </fieldset>
 
     @if (d.mode === 'schedule') {
-      <pd-pause-editor [value]="shared()" [showZone]="false" [disabled]="readOnly()" (valueChange)="setWindows($event)" />
+      <pd-pause-editor [value]="shared()" [showZone]="false" [showEmpty]="false" [compact]="true" [disabled]="readOnly()" (valueChange)="setWindows($event)" />
     }
 
     @if (d.mode === 'when-idle') {
@@ -80,21 +80,6 @@ export function pauseProblem(p: PausePolicy): string | null {
     }
   `,
   styles: `
-    /* The shared windows editor in Pitcrew's look: its Add button is the other Settings editors' small button, and its empty
-       text is left out because this editor's own message (below) says it. */
-    :host ::ng-deep .pd-add {
-      height: var(--control-height-sm);
-      padding: 0 var(--space-2);
-      border: 1px solid var(--border-strong);
-      border-radius: var(--radius-sm);
-      background: var(--surface);
-      color: var(--text);
-      font-size: var(--text-sm);
-      box-shadow: var(--shadow-sm);
-    }
-    :host ::ng-deep .pd-empty {
-      display: none;
-    }
     :host {
       display: grid;
       gap: var(--space-4);
