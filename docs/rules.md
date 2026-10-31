@@ -286,7 +286,9 @@ changes here, every app's copy is updated in the same change.
     outcome of each spawn, connect or job (success too, not only failure), correlation ids for jobs and requests, and every
     error with its cause chain and the next step shown to the user. A fix for a bug the logs could not explain adds the
     missing log lines in the same change, with a test that asserts the line where practical. No user content in logs by
-    default.
+    default. Before fixing a bug, establish the real flow that led to it: reproduce, then read the sequence of phases in
+    the logs, and follow the code for each step. If the logs cannot show that flow, add the logging first, reproduce
+    again, and only then fix. A fix based on a guessed flow is not done.
     *Why:* Paddock runs on users' machines where we cannot attach a debugger; Dyno's 30 s login connect could not be
     diagnosed from its logs (2026-11-01).
 

@@ -114,7 +114,9 @@ registered as literals (no icon fonts, no runtime URLs). Never run `prettier --w
 - Logs explain every failure (rule 56): a fix or feature that starts, connects, runs a job or can fail leaves the logs able
   to show the cause from a Report-a-problem bundle alone (phases with timestamps and durations, spawn, connect and job
   outcomes including success, correlation ids, errors with cause chain and next step); a bug the logs could not explain
-  gets the missing lines in the same change, with a test where practical; no user content in logs by default.
+  gets the missing lines in the same change, with a test where practical; no user content in logs by default. Before fixing,
+  establish the real flow from the logs (reproduce, read the phases, follow the code); if the logs cannot show it, add the
+  logging first and reproduce again; a fix based on a guessed flow is not done.
 - Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
