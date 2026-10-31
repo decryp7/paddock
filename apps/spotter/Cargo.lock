@@ -5123,6 +5123,7 @@ dependencies = [
 name = "spotter-render"
 version = "1.0.0"
 dependencies = [
+ "log",
  "paddock-download",
  "paddock-jobs",
  "paddock-proc",

@@ -22,9 +22,22 @@ pub enum Mode {
     OnScreen,
 }
 
+/// Told, in plain words, that the browser was stopped by macOS or another app while it started and is being waited for
+/// (ADR 0031: a stopped process is paused, not stuck, and the person is told).
+#[derive(Clone)]
+pub struct PauseNote(pub Arc<dyn Fn(&str) + Send + Sync>);
+
+impl std::fmt::Debug for PauseNote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PauseNote")
+    }
+}
+
 /// Launch parameters.
 #[derive(Debug, Clone)]
 pub struct LaunchOptions {
+    /// Called with "The browser is paused by macOS or another app; Spotter waits" once per pause while the browser starts.
+    pub on_paused: Option<PauseNote>,
     /// The throwaway profile is created below this folder and deleted afterwards.
     pub profile_base: PathBuf,
     /// Window behaviour.
@@ -51,6 +64,7 @@ impl LaunchOptions {
             memory_cap: Some(2 << 30),
             extra_args: Vec::new(),
             patience: paddock_proc::Patience::default(),
+            on_paused: None,
         }
     }
 }
@@ -68,6 +82,9 @@ pub fn check_display(mode: Mode, linux: bool, env: impl Fn(&str) -> Option<Strin
             .into(),
     ))
 }
+
+/// What the person is told while the browser is stopped by the OS or another app.
+pub const PAUSED_TEXT: &str = "The browser is paused by macOS or another app; Spotter waits";
 
 /// The browser's stderr is kept in this file inside the throwaway profile, so a failed start can say why.
 const STDERR_FILE: &str = "browser-stderr.log";
@@ -305,6 +322,11 @@ impl Chromium {
             opts.max_lifetime,
             paddock_proc::tree_cpu_time,
             SleepPace,
+            &mut |m| {
+                if let Some(n) = &opts.on_paused {
+                    (n.0)(m);
+                }
+            },
         ) {
             Ok(conn) => Ok(Chromium {
                 conn: Arc::new(conn),
@@ -566,6 +588,10 @@ impl paddock_proc::Pace for SleepPace {
 /// Waits for the `DevToolsActivePort` file Chrome writes into the profile and connects to the browser endpoint, judged on the
 /// browser's run state (ADR 0031) by the shared start judge: a slow start is waited for; the wall-clock cap (the watchdog)
 /// ends one that takes the whole allowance, and then the failure says so. `cpu` and `pace` are seams for tests.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the test seams (cpu, pace, the pause note) are arguments, not fields"
+)]
 fn connect(
     dir: &Path,
     process: &mut Supervised,
@@ -574,6 +600,7 @@ fn connect(
     max_lifetime: Duration,
     cpu: impl FnMut(paddock_proc::ProcessId) -> Option<Duration>,
     pace: impl paddock_proc::Pace,
+    on_paused: &mut dyn FnMut(&str),
 ) -> Result<Connection> {
     use paddock_proc::{StartState, StartWatch, Watched};
     let id = process.process();
@@ -588,9 +615,19 @@ fn connect(
     };
     let mut watch = StartWatch::new(patience, "the browser", probe, pace);
     // A note ("still starting") is not a reason to give up; only a stuck browser is.
+    let mut told = false;
     let seen = loop {
         match watch.wait() {
-            Watched::State(StartState::Stalled(r)) if !r.cause.is_stuck() => {}
+            Watched::State(StartState::Stalled(r)) if !r.cause.is_stuck() => {
+                if r.cause == paddock_proc::StallCause::Paused {
+                    if !told {
+                        on_paused(PAUSED_TEXT);
+                    }
+                    told = true;
+                } else {
+                    told = false;
+                }
+            }
             seen => break seen,
         }
     };
@@ -763,6 +800,7 @@ mod tests {
             Duration::from_secs(7),
             cpu,
             &mut Yield(0),
+            &mut |_| {},
         );
         process.kill();
         r
@@ -798,6 +836,7 @@ mod tests {
             .stdout(std::process::Stdio::null())
             .stderr(std::fs::File::create(dir.path().join(STDERR_FILE)).unwrap());
         let mut process = Supervised::spawn(cmd).unwrap();
+        let mut told: Vec<String> = Vec::new();
         let mut pace = ResumeAt {
             ticks: 0,
             pid: process.process().unwrap().pid(),
@@ -810,6 +849,7 @@ mod tests {
             Duration::from_secs(7),
             |_| Some(Duration::from_secs(1)),
             &mut pace,
+            &mut |m| told.push(m.to_string()),
         )
         .err()
         .unwrap();
@@ -821,6 +861,7 @@ mod tests {
             pace.ticks
         );
         assert!(!e.to_string().is_empty());
+        assert_eq!(told, [PAUSED_TEXT], "the person is told once that the browser is paused");
     }
 
     /// A browser that takes longer to quit than the old fixed 5 s grace, but works while it does, is waited for, not killed.

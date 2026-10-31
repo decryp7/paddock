@@ -135,6 +135,7 @@ impl ChromiumRenderer {
         opts.mode = self.mode;
         opts.extra_args = self.extra_args.clone();
         opts.memory_cap = self.memory_cap;
+        opts.on_paused = Some(launch::PauseNote(std::sync::Arc::new(|m| log::info!("{m}"))));
         // The watchdog is the backstop behind the page's own deadline.
         opts.max_lifetime = launch::lifetime_for(timeout);
         let (url, sel) = (url.to_string(), wait_selector.map(str::to_string));
