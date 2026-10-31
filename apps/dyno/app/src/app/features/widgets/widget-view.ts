@@ -156,10 +156,12 @@ const ICON: Record<DashboardKind, IconName> = {
     :host(.own-card) > * { display: block; height: 100%; min-width: 0; }
     :host(.own-card) { display: block; }
     :host(.own-card) { padding: 0; background: none; border: 0; border-radius: 0; box-shadow: none; min-height: 0; }
-    header { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-2); }
+    header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); color: var(--text-2); }
     header dy-icon { --icon-size: 16px; color: var(--text-3); }
     h3 { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-2); flex: 1; }
     .faint { color: var(--text-3); font-size: var(--fs-xs); }
+    /* "Not available" sits under the title instead of squeezing it to an ellipsis in a narrow card. */
+    header .faint { flex: 0 0 100%; }
     .hero[data-tone='warn'] b { color: var(--warn); }
     .hero[data-tone='bad'] b { color: var(--bad); }
     .note { color: var(--text-3); font-size: var(--fs-xs); display: flex; align-items: center; gap: 6px; }
