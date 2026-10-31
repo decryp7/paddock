@@ -20,7 +20,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 - **Event list:** After a large import the events could be left without their time order when the database ran out of memory, and the event list then missed events until the next import. The import now gives that step its memory, says so if it still fails, and orders the events again as a job when the project opens
 - **Browser on Windows:** the page browser Debrief downloads (Chrome for Testing) no longer starts its network service twice, which could make the first page it opened fail to load
 - **Event Log follower:** the status no longer shows more queued events than the queue holds while the writer is busy
-- **Clock offsets:** After you set a file's clock offset, search results came back in the old time order. The moved events are now indexed again with their new times (the Store pane shows them as indexing for a moment)
+- **Clock offsets:** After you set a file's clock offset, search results came back in the old time order. The moved events are now indexed again with their new times: until that is done (the Store pane shows indexing) word search does not find them. In a project from an earlier Debrief, data files whose event ranges overlap (after an earlier compaction) keep their old times in search until the index is rebuilt
 
 ## 1.1.1 (2026-10-24)
 
