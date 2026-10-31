@@ -1,8 +1,9 @@
 """Builds the sanitized fixtures next to it from this Mac's own kernel lists (macOS 27.2, build 26B123).
 
-Only the SHAPE is taken from the machine: one real group (inpcb, socket, two buffers, stats, tcpcb) per protocol is
-used as a template, and every address, port, pid and uid is overwritten with an invented value (documentation ranges
-192.0.2.0/24, 198.51.100.0/24, 2001:db8::/32). Nothing from the machine's real sockets is kept (ER-14).
+Only the SHAPE is taken from the machine: one real group (inpcb, socket, two buffers, stats, tcpcb) per protocol gives
+the record kinds and lengths. Every other byte is zeroed, then the fields the parser reads are set to invented values
+(documentation ranges 192.0.2.0/24, 198.51.100.0/24, 2001:db8::/32): no kernel handle, counter, uid or timer of the
+machine is kept (ER-14).
 Run: python3 -I make.py  (needs a binary the kernel shows all sockets to; /usr/bin/python3 is one).
 """
 import ctypes, struct, socket
@@ -44,6 +45,8 @@ def v6(a):
 
 def make(tmpl, vflag, laddr, lport, faddr, fport, pid, epid, state=None, proto=6, zero_socket=False):
     g = [bytearray(r) for r in tmpl]
+    for r in g:
+        r[8:] = bytes(len(r) - 8)
     inp, so = g[0], g[1]
     assert struct.unpack_from("<I", inp, 4)[0] == 0x10 and struct.unpack_from("<I", so, 4)[0] == 1
     struct.pack_into(">HH", inp, 16, fport, lport)
@@ -51,12 +54,8 @@ def make(tmpl, vflag, laddr, lport, faddr, fport, pid, epid, state=None, proto=6
     inp[48:64] = faddr
     inp[64:80] = laddr
     struct.pack_into("<q", inp, 28, 1000)  # inp_gencnt, below the header's generation
-    if zero_socket:
-        for i in range(8, len(so)):
-            so[i] = 0
-    else:
-        struct.pack_into("<i", so, 36, proto)
-        struct.pack_into("<I", so, 64, 501)
+    if not zero_socket:
+        struct.pack_into("<ii", so, 36, proto, 30 if vflag & 2 else 2)  # xso_protocol, xso_family
         struct.pack_into("<ii", so, 68, pid, epid)
     if state is not None:
         struct.pack_into("<i", g[-1], 36, state)
@@ -77,7 +76,7 @@ tcp_t = next(g for g in tcp_t if struct.unpack_from("<i", g[1], 36)[0] == 6 and 
 udp_t = next(g for g in groups(get("net.inet.udp.pcblist_n"), False) if struct.unpack_from("<i", g[1], 36)[0] == 17)
 Z4, Z6 = v4("0.0.0.0"), v6("::")
 tcp = [
-    make(tcp_t, 1, v4("192.0.2.10"), 49152, v4("198.51.100.7"), 443, 4242, 4242, state=4),
+    make(tcp_t, 1, v4("192.0.2.10"), 49152, v4("198.51.100.7"), 443, 4242, 0, state=4),
     make(tcp_t, 1, v4("127.0.0.1"), 8080, Z4, 0, 4243, 4243, state=1),
     make(tcp_t, 2, Z6, 5000, Z6, 0, 4244, 4244, state=1),
     make(tcp_t, 2, v6("2001:db8::1"), 50000, v6("2001:db8::2"), 443, 4245, 4246, state=4),  # delegated: epid differs

@@ -2,14 +2,22 @@
 //! no per-process and no per-descriptor access, so nothing is held on another program's sockets. Parsing is in
 //! [`crate::parse::mac_pcblist`].
 
-use crate::parse::mac_pcblist::{self, PcbError, PcbList, MAX_BYTES};
-use dyno_core::network::Proto;
+use crate::parse::mac_pcblist::{self, PcbError, PcbList, PcbSocket, MAX_BYTES};
+use dyno_core::network::{Proto, SocketRow};
+use dyno_core::ports::PlatformError;
+use dyno_core::process::Connection;
 use std::ffi::CString;
+use std::sync::Mutex;
 
-/// Reads one raw list. The list can grow between the size query and the read: the buffer gets slack and a short read
-/// (`ENOMEM`) is retried a few times with the size asked again.
+/// The buffer both lists are read into, kept between samples. The kernel copies the list out while it holds the
+/// protocol's pcb lock exclusively, so the pages must already be mapped: a fault in the copy would stall every
+/// socket operation of the machine. `resize` writes the zeros, which touches them.
+static BUF: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+
+/// Fills `buf` with one raw list and returns its length. The list can grow between the size query and the read: a short
+/// buffer (`ENOMEM`) is retried a few times with the size asked again.
 #[allow(unsafe_code)]
-fn raw(name: &str) -> Result<Vec<u8>, String> {
+fn raw(name: &str, buf: &mut Vec<u8>) -> Result<usize, String> {
     let cname = CString::new(name).map_err(|e| e.to_string())?;
     for _ in 0..8 {
         let mut size: libc::size_t = 0;
@@ -22,40 +30,122 @@ fn raw(name: &str) -> Result<Vec<u8>, String> {
         if cap > MAX_BYTES {
             return Err(format!("the list is {size} bytes, over the {MAX_BYTES} limit"));
         }
-        let mut buf = vec![0u8; cap];
-        let mut len: libc::size_t = cap;
+        if buf.len() < cap {
+            buf.clear();
+            buf.resize(cap, 0);
+        }
+        let mut len: libc::size_t = buf.len();
         // SAFETY: `buf` is `len` writable bytes; the kernel writes at most `len` and sets `len` to what it wrote.
         let rc = unsafe { libc::sysctlbyname(cname.as_ptr(), buf.as_mut_ptr().cast(), &mut len, std::ptr::null_mut(), 0) };
         if rc == 0 {
-            buf.truncate(len.min(cap));
-            return Ok(buf);
+            return Ok(len.min(buf.len()));
         }
         let e = std::io::Error::last_os_error();
         if e.raw_os_error() != Some(libc::ENOMEM) {
             return Err(e.to_string());
         }
+        // Ask again with more room than the list had.
+        let grow = buf.len().saturating_add(buf.len() / 2);
+        buf.clear();
+        buf.resize(grow.min(MAX_BYTES), 0);
     }
     Err("the list kept growing while it was read".into())
 }
 
-/// The kernel's list for `proto`, parsed.
-pub fn list(proto: Proto) -> Result<PcbList, PcbError> {
-    let name = match proto {
+fn name_of(proto: Proto) -> &'static str {
+    match proto {
         Proto::Tcp => "net.inet.tcp.pcblist_n",
         Proto::Udp => "net.inet.udp.pcblist_n",
-    };
-    let bytes = raw(name).map_err(|e| PcbError::Malformed(format!("The OS would not give the socket list ({e}).")))?;
-    mac_pcblist::parse(&bytes, proto)
+    }
 }
 
-/// The raw bytes of a list, for capturing test fixtures (tests only).
-#[cfg(test)]
-pub fn raw_for_tests(proto: Proto) -> Vec<u8> {
-    raw(match proto {
-        Proto::Tcp => "net.inet.tcp.pcblist_n",
-        Proto::Udp => "net.inet.udp.pcblist_n",
-    })
-    .unwrap()
+fn read(proto: Proto, buf: &mut Vec<u8>) -> Result<PcbList, PcbError> {
+    let n = raw(name_of(proto), buf).map_err(|e| PcbError::Malformed(format!("The OS would not give the socket list ({e}).")))?;
+    mac_pcblist::parse(&buf[..n], proto)
+}
+
+/// Both lists, merged into one (counts added).
+fn merged() -> Result<PcbList, PlatformError> {
+    let mut buf = BUF.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut all = PcbList::default();
+    for proto in [Proto::Tcp, Proto::Udp] {
+        let l = read(proto, &mut buf).map_err(|e| match e {
+            PcbError::UnknownLayout(_) => PlatformError::Unsupported(
+                "This version of macOS changed the format of its socket list, so Dyno cannot read it here.".into(),
+            ),
+            PcbError::Malformed(m) => PlatformError::Failed(m),
+        })?;
+        all.sockets.extend(l.sockets);
+        all.skipped += l.skipped;
+        all.unreadable += l.unreadable;
+        all.announced += l.announced;
+    }
+    Ok(all)
+}
+
+/// The merged lists, refused when the kernel cut the view down to this process's own sockets (ADR 0026). Unit tests
+/// run as linker-signed binaries whose identifier has no dot, so they always get that cut-down view: there the check
+/// is off and the tests look at their own sockets, which are always in it; `a_cut_down_view_is_refused_with_the_fix`
+/// covers the check itself.
+fn both() -> Result<PcbList, PlatformError> {
+    let all = merged()?;
+    if !cfg!(test) {
+        refuse_cut_down(&all, std::process::id())?;
+    }
+    Ok(all)
+}
+
+fn refuse_cut_down(all: &PcbList, own_pid: u32) -> Result<(), PlatformError> {
+    if all.restricted(own_pid) {
+        return Err(PlatformError::AccessDenied(
+            "macOS showed this program only its own sockets. The agent needs a code-signing identifier with a dot (net.decryptology.dyno.agent), which this build does not have.".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Every TCP and UDP socket of the machine with its owner.
+pub fn sockets() -> Result<Vec<SocketRow>, PlatformError> {
+    Ok(both()?.sockets.into_iter().map(|s: PcbSocket| s.row).collect())
+}
+
+/// The connections of one process (sockets it owns or works through), for the details of a process.
+pub fn connections_of(pid: u32) -> Result<Vec<Connection>, PlatformError> {
+    Ok(both()?
+        .sockets
+        .into_iter()
+        .filter(|s| s.row.pid == Some(pid) || s.via_pid == Some(pid))
+        .map(|s| connection(&s.row))
+        .collect())
+}
+
+fn endpoint(addr: std::net::IpAddr, port: u16) -> String {
+    let a = if addr.is_unspecified() {
+        "*".to_string()
+    } else if addr.is_ipv6() {
+        format!("[{addr}]")
+    } else {
+        addr.to_string()
+    };
+    if port == 0 {
+        format!("{a}:*")
+    } else {
+        format!("{a}:{port}")
+    }
+}
+
+fn connection(r: &SocketRow) -> Connection {
+    let six = if r.local.is_ipv6() { "6" } else { "" };
+    Connection {
+        protocol: format!("{}{six}", if r.proto == Proto::Tcp { "TCP" } else { "UDP" }),
+        local: endpoint(r.local, r.local_port),
+        remote: r.remote.map(|(a, p)| endpoint(a, p)).unwrap_or_default(),
+        state: if r.proto == Proto::Tcp {
+            r.state.label().to_string()
+        } else {
+            String::new()
+        },
+    }
 }
 
 #[cfg(test)]
@@ -64,6 +154,20 @@ mod tests {
     use dyno_core::network::SocketState;
     use std::collections::BTreeMap;
     use std::net::{TcpListener, TcpStream, UdpSocket};
+
+    #[test]
+    fn a_cut_down_view_is_refused_with_the_fix() {
+        let cut = PcbList {
+            announced: 50,
+            ..PcbList::default()
+        };
+        let e = refuse_cut_down(&cut, 1).unwrap_err();
+        assert!(
+            matches!(e, PlatformError::AccessDenied(ref m) if m.contains("net.decryptology.dyno.agent")),
+            "{e:?}"
+        );
+        assert!(refuse_cut_down(&PcbList::default(), 1).is_ok());
+    }
 
     #[test]
     fn the_kernel_lists_this_tests_own_sockets_with_this_process_as_owner() {
@@ -78,7 +182,7 @@ mod tests {
         let v6 = TcpListener::bind("[::1]:0").unwrap();
         let v6port = v6.local_addr().unwrap().port();
 
-        let tcp = list(Proto::Tcp).unwrap();
+        let tcp = read(Proto::Tcp, &mut Vec::new()).unwrap();
         let find = |l: &PcbList, p: u16, st: Option<SocketState>| {
             l.sockets
                 .iter()
@@ -93,7 +197,7 @@ mod tests {
         assert_eq!(c.row.remote.map(|r| r.1), Some(port));
         let v = find(&tcp, v6port, Some(SocketState::Listen)).expect("the IPv6 listener is listed");
         assert!(v.row.local.is_ipv6() && v.row.local.is_loopback());
-        let u = find(&list(Proto::Udp).unwrap(), uport, None).expect("the UDP socket is listed");
+        let u = find(&read(Proto::Udp, &mut Vec::new()).unwrap(), uport, None).expect("the UDP socket is listed");
         assert_eq!((u.row.pid, u.row.remote), (Some(me), None));
     }
 
@@ -141,14 +245,14 @@ mod tests {
 
     fn from_kernel(proto: Proto) -> Vec<Key> {
         let t0 = std::time::Instant::now();
-        let l = list(proto).unwrap();
+        let l = read(proto, &mut Vec::new()).unwrap();
         println!("{proto:?}: read and parsed in {:?}", t0.elapsed());
         println!(
             "{proto:?}: parsed {} skipped {} announced {} restricted {}",
             l.sockets.len(),
             l.skipped,
             l.announced,
-            l.restricted()
+            l.restricted(std::process::id())
         );
         l.sockets
             .into_iter()

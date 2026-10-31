@@ -22,7 +22,6 @@ const XINPGEN_LEN: usize = 24;
 const XSO_SOCKET: u32 = 0x001;
 const XSO_INPCB: u32 = 0x010;
 const XSO_TCPCB: u32 = 0x020;
-const XSO_STATS: u32 = 0x008;
 
 /// Bytes each record must cover for the fields read from it (offsets below, `#pragma pack(4)`).
 const MIN_INPCB: usize = 80; // laddr ends at 80
@@ -38,6 +37,7 @@ const INP_FADDR: usize = 48;
 const INP_LADDR: usize = 64;
 // xsocket_n offsets.
 const SO_PROTOCOL: usize = 36;
+const SO_FAMILY: usize = 40;
 const SO_LAST_PID: usize = 68;
 const SO_E_PID: usize = 72;
 // xtcpcb_n offsets.
@@ -47,6 +47,8 @@ const INP_IPV4: u8 = 0x1;
 const INP_IPV6: u8 = 0x2;
 const IPPROTO_TCP: i32 = 6;
 const IPPROTO_UDP: i32 = 17;
+const AF_INET: i32 = 2;
+const AF_INET6: i32 = 30;
 const TCPS_TIME_WAIT: i32 = 10;
 
 /// Why a list could not be read.
@@ -69,10 +71,12 @@ impl std::fmt::Display for PcbError {
 /// One socket of the kernel's list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PcbSocket {
-    /// The row for the page, with `pid` set to the last user of the socket when it is a live process.
+    /// The row for the page. `pid` is the process the socket works for: `so_e_pid` when the kernel set it (a delegated
+    /// socket, e.g. a browser's network process working for the browser), otherwise `so_last_pid`, the last process that
+    /// used it. `None` for a connection in TIME_WAIT (the kernel keeps no socket for it) or a process that is gone.
     pub row: SocketRow,
-    /// The effective pid when the socket works for another process (a delegated socket); `None` when the same or unset.
-    pub effective_pid: Option<u32>,
+    /// The process that last used the socket when it differs from the owner in `row.pid` (the delegate), else `None`.
+    pub via_pid: Option<u32>,
 }
 
 /// The result of parsing one list.
@@ -80,20 +84,27 @@ pub struct PcbSocket {
 pub struct PcbList {
     /// The sockets, in the kernel's order.
     pub sockets: Vec<PcbSocket>,
-    /// Groups left out: freed while the kernel copied them out, another protocol, or incomplete.
+    /// Groups left out for any reason: freed while the kernel copied them out, another protocol, or unreadable.
     pub skipped: usize,
-    /// How many sockets the kernel announced in the header (`xig_count`) when it started the list.
+    /// Of those, groups whose records were missing or contradicted each other (a kind or field this reader does not
+    /// find where it expects it): evidence that the layout changed.
+    pub unreadable: usize,
+    /// How many sockets the kernel announced in the header (`xig_count`). It counts dead control blocks too, so it
+    /// can be well above what is sent (measured 245 announced, 45 sent after UDP churn).
     pub announced: usize,
 }
 
 impl PcbList {
-    /// True when the kernel announced many more sockets than it sent. macOS 27.2 sends a process only its own sockets
-    /// unless the executable's code-signing identifier contains a dot (measured, ADR 0026); such a list is not the
-    /// machine's sockets and must not be shown as if it were. A few sockets come and go while the list is copied, so
-    /// a small gap is not a restriction.
-    pub fn restricted(&self) -> bool {
-        let seen = self.sockets.len() + self.skipped;
-        self.announced > seen + (self.announced / 4).max(16)
+    /// True when this looks like the cut-down list macOS 27.2 sends a process whose code-signing identifier has no dot
+    /// (ADR 0026): fewer sockets sent than announced AND none of them belongs to a process other than `own_pid`. The
+    /// announced count alone proves nothing, so the owners decide; a host whose only sockets are our own is reported as
+    /// restricted too, which is the safe side (the page says so instead of showing a list that may be missing sockets).
+    pub fn restricted(&self, own_pid: u32) -> bool {
+        let others = self
+            .sockets
+            .iter()
+            .any(|s| s.row.pid.is_some_and(|p| p != own_pid) || s.via_pid.is_some_and(|p| p != own_pid));
+        self.announced > self.sockets.len() + self.skipped && !others
     }
 }
 
@@ -152,47 +163,88 @@ struct Group<'a> {
     tcpcb: Option<&'a [u8]>,
 }
 
-fn build(g: &Group<'_>, proto: Proto, gen_limit: u64) -> Result<Option<PcbSocket>, PcbError> {
+/// Why a group was not turned into a socket.
+enum Left {
+    /// Freed during the copy, or a socket of another protocol: expected, not a sign of a changed layout.
+    Fine,
+    /// Records missing or contradicting each other.
+    Unreadable,
+}
+
+fn build(g: &Group<'_>, proto: Proto, gen_limit: u64) -> Result<PcbSocket, Left> {
     let (Some(inp), Some(so)) = (g.inpcb, g.socket) else {
-        return Ok(None);
+        return Err(Left::Unreadable);
     };
     // Freed while the kernel copied the list out (netstat skips these too).
     if u64_at(inp, INP_GENCNT).is_some_and(|g| g > gen_limit) {
-        return Ok(None);
+        return Err(Left::Fine);
     }
     let vflag = inp.get(INP_VFLAG).copied().unwrap_or(0);
     let (Some(local), Some(faddr)) = (address(inp, INP_LADDR, vflag), address(inp, INP_FADDR, vflag)) else {
-        return Ok(None);
+        return Err(Left::Unreadable);
     };
     let (Some(fport), Some(lport)) = (be16_at(inp, INP_FPORT), be16_at(inp, INP_LPORT)) else {
-        return Ok(None);
+        return Err(Left::Unreadable);
     };
-    let protocol = i32_at(so, SO_PROTOCOL).unwrap_or(0);
-    let state = match (proto, g.tcpcb) {
-        (Proto::Tcp, Some(t)) => tcp_state(i32_at(t, TCP_STATE).unwrap_or(0)),
-        (Proto::Tcp, None) => return Ok(None),
-        (Proto::Udp, _) => SocketState::Listen,
-    };
-    // A connection in TIME_WAIT has no socket any more: its record is zeroed (protocol 0, no pid).
+    let protocol = i32_at(so, SO_PROTOCOL).unwrap_or(-1);
+    let family = i32_at(so, SO_FAMILY).unwrap_or(-1);
+    let t_state = g.tcpcb.and_then(|t| i32_at(t, TCP_STATE));
+    // A connection in TIME_WAIT has no socket any more: its record is zeroed (protocol 0, family 0, no pid).
+    let time_wait = proto == Proto::Tcp && protocol == 0 && family == 0 && t_state == Some(TCPS_TIME_WAIT);
     let wanted = if proto == Proto::Tcp { IPPROTO_TCP } else { IPPROTO_UDP };
-    let time_wait = proto == Proto::Tcp && protocol == 0 && i32_at(g.tcpcb.unwrap_or(&[]), TCP_STATE) == Some(TCPS_TIME_WAIT);
-    if protocol != wanted && !time_wait {
-        return Ok(None);
+    if !time_wait {
+        if protocol != wanted {
+            return Err(Left::Fine);
+        }
+        // The socket's family and the control block's address flags must agree (a cross-check of the two records).
+        let v6 = vflag & INP_IPV6 != 0;
+        let agree = if v6 { family == AF_INET6 } else { family == AF_INET };
+        if !agree {
+            return Err(Left::Unreadable);
+        }
     }
+    let state = match proto {
+        Proto::Tcp => match t_state {
+            Some(t) => tcp_state(t),
+            None => return Err(Left::Unreadable),
+        },
+        Proto::Udp => SocketState::Listen,
+    };
     let last = u32_at(so, SO_LAST_PID).and_then(pid);
-    let eff = u32_at(so, SO_E_PID).and_then(pid).filter(|e| Some(*e) != last);
-    let connected = proto == Proto::Tcp && state != SocketState::Listen || (proto == Proto::Udp && fport != 0);
-    Ok(Some(PcbSocket {
+    let eff = u32_at(so, SO_E_PID).and_then(pid);
+    let (owner, via) = match eff {
+        Some(e) => (Some(e), last.filter(|l| *l != e)),
+        None => (last, None),
+    };
+    let connected = (proto == Proto::Tcp && state != SocketState::Listen) || (proto == Proto::Udp && fport != 0);
+    Ok(PcbSocket {
         row: SocketRow {
             proto,
             local,
             local_port: lport,
             remote: connected.then_some((faddr, fport)),
             state,
-            pid: last,
+            pid: owner,
         },
-        effective_pid: eff,
-    }))
+        via_pid: via,
+    })
+}
+
+/// Closes the pending group: a socket, or a count in `skipped` (and `unreadable`).
+fn close(group: &mut Group<'_>, proto: Proto, gen_limit: u64, out: &mut PcbList) {
+    let g = std::mem::take(group);
+    if g.inpcb.is_none() && g.socket.is_none() && g.tcpcb.is_none() {
+        return;
+    }
+    match build(&g, proto, gen_limit) {
+        Ok(s) if out.sockets.len() < MAX_SOCKETS => out.sockets.push(s),
+        Ok(_) => out.skipped += 1,
+        Err(Left::Fine) => out.skipped += 1,
+        Err(Left::Unreadable) => {
+            out.skipped += 1;
+            out.unreadable += 1;
+        }
+    }
 }
 
 /// Parses the bytes `sysctl net.inet.{tcp,udp}.pcblist_n` returned for `proto`.
@@ -216,7 +268,7 @@ pub fn parse(bytes: &[u8], proto: Proto) -> Result<PcbList, PcbError> {
     };
     let mut group = Group::default();
     let mut at = XINPGEN_LEN;
-    // The last 24 bytes are the trailer (another header with the generation at the end): records stop before it.
+    // The last 24 bytes are the trailer (another header): records stop before it, and so does the last group.
     while at.saturating_add(XINPGEN_LEN) < bytes.len() {
         let (Some(len), Some(kind)) = (u32_at(bytes, at), u32_at(bytes, at + 4)) else {
             break;
@@ -238,43 +290,33 @@ pub fn parse(bytes: &[u8], proto: Proto) -> Result<PcbList, PcbError> {
             XSO_TCPCB => Some(MIN_TCPCB),
             _ => None,
         };
-        if need.is_some_and(|n| len < n) {
+        if let Some(n) = need.filter(|n| len < *n) {
             return Err(PcbError::UnknownLayout(format!(
-                "The kernel's record of kind {kind:#x} is {len} bytes; this reader needs at least {}.",
-                need.unwrap_or(0)
+                "The kernel's record of kind {kind:#x} is {len} bytes; this reader needs at least {n}."
             )));
         }
         match kind {
+            // A new socket starts: whatever was pending ends here, complete or not.
             XSO_INPCB => {
-                // A new socket starts; whatever was pending is incomplete.
-                if group.inpcb.is_some() {
-                    out.skipped += 1;
-                }
-                group = Group {
-                    inpcb: Some(rec),
-                    ..Group::default()
-                };
+                close(&mut group, proto, gen_limit, &mut out);
+                group.inpcb = Some(rec);
             }
             XSO_SOCKET => group.socket = Some(rec),
             XSO_TCPCB => group.tcpcb = Some(rec),
             _ => {}
         }
-        // A TCP socket ends with its tcpcb, a UDP socket with its statistics.
-        let done = match proto {
-            Proto::Tcp => kind == XSO_TCPCB,
-            Proto::Udp => kind == XSO_STATS,
-        };
-        if done {
-            match build(&group, proto, gen_limit)? {
-                Some(s) if out.sockets.len() < MAX_SOCKETS => out.sockets.push(s),
-                _ => out.skipped += 1,
-            }
-            group = Group::default();
-        }
         at = match at.checked_add((len + 7) & !7) {
             Some(n) => n,
             None => break,
         };
+    }
+    close(&mut group, proto, gen_limit, &mut out);
+    // Nothing readable although the kernel announced sockets and many groups were unreadable: the layout is not ours.
+    if out.sockets.is_empty() && out.announced > 0 && out.unreadable > 0 && out.unreadable * 2 >= out.announced {
+        return Err(PcbError::UnknownLayout(format!(
+            "None of the {} sockets the kernel listed could be read: its record layout is not the one this reader knows.",
+            out.unreadable
+        )));
     }
     Ok(out)
 }
@@ -290,11 +332,27 @@ mod tests {
         s.parse().unwrap()
     }
 
+    /// The list without its records of `kind` (a kernel that renamed or dropped that record).
+    fn without_kind(list: &[u8], kind: u32) -> Vec<u8> {
+        let mut out = list[..XINPGEN_LEN].to_vec();
+        let mut at = XINPGEN_LEN;
+        while at + XINPGEN_LEN < list.len() {
+            let len = u32::from_le_bytes(list[at..at + 4].try_into().unwrap()) as usize;
+            let k = u32::from_le_bytes(list[at + 4..at + 8].try_into().unwrap());
+            let padded = (len + 7) & !7;
+            if k != kind {
+                out.extend_from_slice(&list[at..at + padded]);
+            }
+            at += padded;
+        }
+        out.extend_from_slice(&list[list.len() - XINPGEN_LEN..]);
+        out
+    }
+
     #[test]
     fn tcp_fixture_gives_every_state_address_family_and_owner() {
         let l = parse(TCP, Proto::Tcp).unwrap();
         assert_eq!((l.sockets.len(), l.skipped, l.announced), (7, 0, 7));
-        assert!(!l.restricted());
         let r: Vec<&SocketRow> = l.sockets.iter().map(|s| &s.row).collect();
         assert_eq!(
             r[0],
@@ -313,12 +371,9 @@ mod tests {
             (SocketState::Listen, ip("::"), 5000, Some(4244))
         );
         assert_eq!((r[3].local, r[3].remote), (ip("2001:db8::1"), Some((ip("2001:db8::2"), 443))));
-        assert_eq!(
-            l.sockets[3].effective_pid,
-            Some(4246),
-            "a delegated socket names its effective process too"
-        );
-        assert_eq!(l.sockets[0].effective_pid, None);
+        // A delegated socket belongs to the process it works for (4246), reached through the one that used it (4245).
+        assert_eq!((r[3].pid, l.sockets[3].via_pid), (Some(4246), Some(4245)));
+        assert_eq!(l.sockets[0].via_pid, None);
         assert_eq!(
             (r[4].state, r[4].pid),
             (SocketState::TimeWait, None),
@@ -343,16 +398,43 @@ mod tests {
     }
 
     #[test]
-    fn a_list_the_kernel_cut_down_to_own_sockets_is_restricted() {
-        // The header announces 7 sockets; rewrite it to announce 400 as a machine with many would.
+    fn a_cut_down_list_is_restricted_only_when_it_holds_nothing_of_other_processes() {
+        // Own sockets only (own pid 4242, every other pid rewritten away), many more announced: restricted.
+        let own = |pid: u32| PcbList {
+            sockets: vec![PcbSocket {
+                row: SocketRow {
+                    proto: Proto::Tcp,
+                    local: ip("127.0.0.1"),
+                    local_port: 1,
+                    remote: None,
+                    state: SocketState::Listen,
+                    pid: Some(pid),
+                },
+                via_pid: None,
+            }],
+            skipped: 0,
+            unreadable: 0,
+            announced: 160,
+        };
+        assert!(own(4242).restricted(4242));
+        // The same count but a socket of another process in the list: the view is whole, the extra count is dead pcbs.
+        assert!(!own(4242).restricted(9));
+        // Everything announced was sent: not restricted, even on a host that has only our sockets.
+        let mut quiet = own(4242);
+        quiet.announced = 1;
+        assert!(!quiet.restricted(4242));
+        // A quiet host with a few dead pcbs and only our sockets cannot be told from a cut-down list: reported as such.
+        quiet.announced = 3;
+        assert!(quiet.restricted(4242));
+    }
+
+    #[test]
+    fn the_whole_fixture_is_not_restricted() {
+        assert!(!parse(TCP, Proto::Tcp).unwrap().restricted(1));
         let mut b = TCP.to_vec();
         b[4..8].copy_from_slice(&400u32.to_le_bytes());
-        assert!(parse(&b, Proto::Tcp).unwrap().restricted());
-        b[4..8].copy_from_slice(&12u32.to_le_bytes());
-        assert!(
-            !parse(&b, Proto::Tcp).unwrap().restricted(),
-            "a few sockets coming and going is not a restriction"
-        );
+        // 400 announced, 7 sent, but they belong to other processes than ours: whole view with dead pcbs counted.
+        assert!(!parse(&b, Proto::Tcp).unwrap().restricted(1));
     }
 
     #[test]
@@ -361,13 +443,42 @@ mod tests {
         let mut b = TCP.to_vec();
         b[8..16].copy_from_slice(&3u64.to_le_bytes());
         let l = parse(&b, Proto::Tcp).unwrap();
-        assert_eq!((l.sockets.len(), l.skipped), (0, 7));
+        assert_eq!((l.sockets.len(), l.skipped, l.unreadable), (0, 7, 0));
     }
 
     #[test]
-    fn another_protocol_in_the_list_is_left_out() {
-        let l = parse(UDP, Proto::Tcp).unwrap();
-        assert!(l.sockets.is_empty());
+    fn sockets_of_the_other_protocol_are_left_out_and_are_not_a_layout_alarm() {
+        for (bytes, proto) in [(UDP, Proto::Tcp), (TCP, Proto::Udp)] {
+            let l = parse(bytes, proto).unwrap();
+            assert!(l.sockets.is_empty() && l.unreadable == 0, "{l:?}");
+        }
+    }
+
+    #[test]
+    fn a_kernel_that_drops_a_record_kind_is_an_unknown_layout_not_an_empty_list() {
+        // No tcpcb records at all: every TCP group is incomplete.
+        let b = without_kind(TCP, XSO_TCPCB);
+        assert!(matches!(parse(&b, Proto::Tcp), Err(PcbError::UnknownLayout(_))));
+        // No socket records: the same.
+        let b = without_kind(TCP, XSO_SOCKET);
+        assert!(matches!(parse(&b, Proto::Tcp), Err(PcbError::UnknownLayout(_))));
+        // UDP without its statistics records still parses (they are not read), and without sockets it does not.
+        assert_eq!(parse(&without_kind(UDP, 0x8), Proto::Udp).unwrap().sockets.len(), 3);
+        assert!(matches!(
+            parse(&without_kind(UDP, XSO_SOCKET), Proto::Udp),
+            Err(PcbError::UnknownLayout(_))
+        ));
+    }
+
+    #[test]
+    fn a_socket_whose_family_contradicts_its_address_flags_is_unreadable() {
+        let mut b = TCP.to_vec();
+        // First group's xsocket_n starts after its 104-byte xinpcb_n: set xso_family (offset 40) to 30 on an IPv4 socket.
+        let so = XINPGEN_LEN + 104;
+        assert_eq!(u32::from_le_bytes(b[so + 4..so + 8].try_into().unwrap()), XSO_SOCKET);
+        b[so + SO_FAMILY..so + SO_FAMILY + 4].copy_from_slice(&30i32.to_le_bytes());
+        let l = parse(&b, Proto::Tcp).unwrap();
+        assert_eq!((l.sockets.len(), l.unreadable), (6, 1));
     }
 
     #[test]
