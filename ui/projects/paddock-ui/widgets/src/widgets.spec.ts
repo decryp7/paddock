@@ -7,7 +7,7 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { DomSanitizer, By } from '@angular/platform-browser';
 import { registerPaddockIcons } from '@decryp7/paddock-ui/icons';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CatalogueInfo, Edit, KindInfo, LayoutView, Placement, Progress, SurfaceValues, WidgetState } from '../generated/widgets';
+import type { CatalogueInfo, Edit, KindInfo, LayoutView, Placement, Preset, Progress, SurfaceValues, WidgetState } from '../generated/widgets';
 import { PdWidgetArea } from './area';
 import { PdWidgetChooser } from './chooser';
 import { progressText, PdWidgetFrame } from './frame';
@@ -51,16 +51,17 @@ const values = (...p: [string, WidgetState<V, A>][]): SurfaceValues<V, A> => ({ 
   imports: [PdWidgetArea, PdWidget, PdSkeleton],
   template: `
     <pd-widget-area [placements]="placements()" [catalogue]="catalogue" [values]="vals()" [now]="now" [meta]="meta" (action)="actions.push($event)" (customize)="customized = customized + 1">
-      <ng-template pdWidget="cpu" let-v>
-        <div class="big" pdSkeleton>{{ $any(v)?.text ?? '00' }}</div>
-        <div class="line"><span pdSkeleton>{{ $any(v)?.text ?? 'xxxx' }}</span></div>
+      <ng-template pdWidget="cpu" [pdWidgetOf]="w" let-v>
+        <div class="big" pdSkeleton>{{ v?.text ?? '00' }}</div>
+        <div class="line"><span pdSkeleton>{{ v?.text ?? 'xxxx' }}</span></div>
       </ng-template>
-      <ng-template pdWidget="alarms" [pdWidgetCalm]="true" let-v><div pdSkeleton>{{ $any(v)?.text ?? 'none' }}</div></ng-template>
-      <ng-template pdWidget="disk" let-v let-stale="stale" let-loading="loading"><div pdSkeleton [attr.data-stale]="stale" [attr.data-loading]="loading">{{ $any(v)?.text ?? 'disk' }}</div></ng-template>
+      <ng-template pdWidget="alarms" [pdWidgetCalm]="true" [pdWidgetOf]="w" let-v><div pdSkeleton>{{ v?.text ?? 'none' }}</div></ng-template>
+      <ng-template pdWidget="disk" [pdWidgetOf]="w" let-v let-stale="stale" let-loading="loading"><div pdSkeleton [attr.data-stale]="stale" [attr.data-loading]="loading">{{ v?.text ?? 'disk' }}</div></ng-template>
     </pd-widget-area>
   `,
 })
 class AreaHost {
+  readonly w: V | null = null;
   readonly placements = signal<Placement<W>[]>(PLACEMENTS);
   readonly vals = signal<SurfaceValues<V, A> | null>(null);
   readonly catalogue = CATALOGUE;
@@ -75,10 +76,11 @@ class AreaHost {
   imports: [PdWidgetFrame, PdWidget],
   template: `
     <pd-widget-frame title="Disk space" icon="pd:folder" [state]="state()" [template]="dir()?.template ?? null" [span]="span()" [live]="live()" [calm]="calm()" [now]="now" metaText="3 volumes" (action)="actions.push($event)" />
-    <ng-template pdWidget="disk" let-v><p class="body">{{ $any(v)?.text ?? 'none' }}</p></ng-template>
+    <ng-template pdWidget="disk" [pdWidgetOf]="w" let-v><p class="body">{{ v?.text ?? 'none' }}</p></ng-template>
   `,
 })
 class FrameHost {
+  readonly w: V | null = null;
   readonly state = signal<WidgetState<V, A> | null | undefined>(undefined);
   readonly span = signal(2);
   readonly live = signal(false);
@@ -679,6 +681,82 @@ describe('pd-widget-chooser', () => {
     expect(qa(f, '.pd-wc-foot')).toHaveLength(0);
     // a placement whose kind is not in the catalogue still has a name
     expect(qa(f, '.pd-wc-txt b')[1]!.textContent).toBe('disk');
+  });
+
+  const preset = (id: string, name: string, builtin: boolean, n: number): Preset<W> => ({ id, name, builtin, placements: PLACEMENTS.slice(0, n) });
+  const withPresets = (max: number, user: Preset<W>[], builtin: Preset<W>[], over: Partial<LayoutView<string, W, string>> = {}) =>
+    view({ layout: { version: 1, placements: PLACEMENTS, presets: user }, builtinPresets: builtin, ...over }, PLACEMENTS, { ...CATALOGUE, surface: { ...CATALOGUE.surface, maxUserPresets: max } });
+  const nameInput = (f: ComponentFixture<unknown>) => q(f, '.pd-wc-save input') as HTMLInputElement;
+  const type = async (f: ComponentFixture<ChooserHost>, text: string) => {
+    nameInput(f).value = text;
+    nameInput(f).dispatchEvent(new Event('input', { bubbles: true }));
+    await settle(f);
+  };
+  const saveButton = (f: ComponentFixture<unknown>) => qa(f, '.pd-wc-save button')[0] as HTMLButtonElement;
+
+  it('shows no presets when the surface has none and keeps none', async () => {
+    const f = await setup();
+    expect(q(f, '.pd-wc-save')).toBeNull();
+    expect(qa(f, '.pd-wc-label').map((l) => l.textContent)).not.toContain('Presets');
+  });
+
+  it('lists built-in and saved presets, applies one, deletes only a saved one and says it in the undo toast', async () => {
+    const f = await setup();
+    f.componentInstance.v.set(withPresets(2, [preset('mine', 'Work', false, 1)], [preset('min', 'Minimal', true, 2)]));
+    await settle(f);
+    const items = qa(f, 'ul[aria-labelledby$="-presets"] li');
+    expect(items.map((i) => i.querySelector('b')!.textContent)).toEqual(['Minimal', 'Work']);
+    expect(items[0]!.textContent).toContain('2 widgets · Built in');
+    expect(items[1]!.textContent).toContain('1 widget');
+    expect(items[1]!.textContent).not.toContain('1 widgets');
+    expect(qa(f, '.pd-wc-count').map((c) => c.textContent)).toContain('1 of 2 saved');
+    expect(items[0]!.querySelector('button[aria-label^="Delete"]')).toBeNull();
+    (items[0]!.querySelector('button[aria-label="Apply the Minimal preset"]') as HTMLElement).click();
+    expect(f.componentInstance.edits.pop()).toEqual({ applyPreset: { id: 'min' } });
+    f.componentInstance.v.set(withPresets(2, [preset('mine', 'Work', false, 1)], [preset('min', 'Minimal', true, 2)], { canUndo: true }));
+    await settle(f);
+    expect(document.querySelector('.mat-mdc-snack-bar-container')!.textContent).toContain('The popup now uses the Minimal preset.');
+    (items[1]!.querySelector('button[aria-label="Delete the Work preset"]') as HTMLElement).click();
+    expect(f.componentInstance.edits.pop()).toEqual({ deletePreset: { id: 'mine' } });
+  });
+
+  it('saves the layout under a trimmed name, clears the field, ignores an empty name and says when the limit is reached', async () => {
+    const f = await setup();
+    f.componentInstance.v.set(withPresets(1, [], []));
+    await settle(f);
+    expect(qa(f, 'ul[aria-labelledby$="-presets"]')).toHaveLength(0);
+    expect(saveButton(f).disabled).toBe(true);
+    nameInput(f).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(f.componentInstance.edits).toEqual([]);
+    await type(f, '  Work  ');
+    expect(saveButton(f).disabled).toBe(false);
+    saveButton(f).click();
+    expect(f.componentInstance.edits.pop()).toEqual({ savePreset: { name: 'Work' } });
+    await settle(f);
+    expect(nameInput(f).value).toBe('');
+    await type(f, 'Again');
+    nameInput(f).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(f.componentInstance.edits.pop()).toEqual({ savePreset: { name: 'Again' } });
+    f.componentInstance.v.set(withPresets(1, [preset('mine', 'Work', false, 1)], []));
+    await settle(f);
+    await type(f, 'Third');
+    expect(saveButton(f).disabled).toBe(true);
+    expect(q(f, '.pd-wc-save + .pd-wc-limit')!.textContent).toContain('You can keep 1 preset. Delete one to save another.');
+    f.componentInstance.v.set(withPresets(2, [preset('a', 'A', false, 1), preset('b', 'B', false, 1)], []));
+    await settle(f);
+    expect(q(f, '.pd-wc-save + .pd-wc-limit')!.textContent).toContain('You can keep 2 presets.');
+  });
+
+  it('shows built-in presets without a save form when the person may not save any, and nothing to change when read-only', async () => {
+    const f = await setup();
+    f.componentInstance.v.set(withPresets(0, [], [preset('min', 'Minimal', true, 2)]));
+    await settle(f);
+    expect(qa(f, 'ul[aria-labelledby$="-presets"] li')).toHaveLength(1);
+    expect(q(f, '.pd-wc-save')).toBeNull();
+    f.componentInstance.v.set(withPresets(2, [preset('mine', 'Work', false, 1)], [preset('min', 'Minimal', true, 2)], { editable: false }));
+    await settle(f);
+    expect(qa(f, 'ul[aria-labelledby$="-presets"] button')).toHaveLength(0);
+    expect(q(f, '.pd-wc-save')).toBeNull();
   });
 
   it('shows the preview column only when asked', async () => {
