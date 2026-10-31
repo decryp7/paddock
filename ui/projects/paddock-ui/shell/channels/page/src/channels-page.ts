@@ -87,7 +87,7 @@ import { CHANNELS_STYLES } from './styles';
                   <span class="pd-ch__name">
                     <strong [matTooltip]="c.name">{{ c.name }}</strong>
                     <span class="pd-ch__muted pd-ch__endpoint" aria-hidden="true" [matTooltip]="endpoint(c)" [attr.data-testid]="'channel-endpoint-' + c.id">{{ endpointShort(c) }}</span>
-                    <span class="pd-sr">{{ endpoint(c) }}</span>
+                    <span class="pd-sr pd-ch__full">{{ endpoint(c) }}</span>
                     @if (store.tests()[c.id]; as test) {
                       <ng-container [ngTemplateOutlet]="result" [ngTemplateOutletContext]="{ $implicit: test, id: c.id }" />
                     }
@@ -267,7 +267,7 @@ import { CHANNELS_STYLES } from './styles';
           <mat-slide-toggle class="pd-ch__check" [formField]="f.enabled" data-testid="channel-enabled">{{ t.fEnabled }}</mat-slide-toggle>
 
           @if (d.type !== 'email') {
-            <mat-checkbox class="pd-ch__check pd-ch__field--wide" [formField]="f.auth" data-testid="channel-auth">{{ t.fAuth }}</mat-checkbox>
+            <mat-slide-toggle class="pd-ch__check pd-ch__field--wide" [formField]="f.auth" data-testid="channel-auth">{{ t.fAuth }}</mat-slide-toggle>
           }
           <div class="pd-ch__lan pd-ch__field--wide" data-testid="channel-lan-field">
             <mat-slide-toggle class="pd-ch__check" [formField]="f.allowLan" aria-describedby="pd-ch-h-lan" data-testid="channel-allow-lan">{{ t.fLan }}</mat-slide-toggle>
@@ -344,7 +344,9 @@ export class PdChannelsPage {
   protected readonly otherText = signal('');
   private readonly settings = inject(SettingsStore, { optional: true });
   /** "Other events" (names the app did not declare, and typing one) sits behind the Settings window's Show advanced; names a channel already has are always shown. */
-  protected readonly showOther = computed(() => this.otherEvents().length > 0 || (this.settings?.showAdvanced() ?? true));
+  protected readonly showOther = computed(() => this.hadOthers() || this.otherEvents().length > 0 || (this.settings?.showAdvanced() ?? true));
+  /** Whether the channel had undeclared names when the editor opened: the section then stays while they are removed (focus has somewhere to go). */
+  private readonly hadOthers = signal(false);
   /** Whether the add field holds at least one name (just commas or spaces is not one). */
   protected readonly hasOtherNames = computed(() => tokens(this.otherText()).length > 0);
   /** The draft being edited, or null when no editor is open. */
@@ -532,6 +534,7 @@ export class PdChannelsPage {
     this.store.dismissSaveError();
     this.f().reset(d);
     this.otherText.set('');
+    this.hadOthers.set(unknownEvents(tokens(d.events), this.declared).length > 0);
     this.open.set(true);
     afterNextRender(() => this.nameInput()?.nativeElement.focus(), { injector: this.injector });
   }

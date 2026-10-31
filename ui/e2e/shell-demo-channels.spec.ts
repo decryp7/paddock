@@ -21,7 +21,7 @@ test.describe('notification channels (plan X17)', () => {
     await page.getByTestId('channel-url').fill('https://hooks.example.com/services/abc');
     await page.getByTestId('channel-event-diskLow').getByRole('checkbox').check();
     await page.getByTestId('channel-event-jobFailed').getByRole('checkbox').check();
-    await page.getByTestId('channel-auth').getByRole('checkbox').check();
+    await page.getByTestId('channel-auth').getByRole('switch').click();
     await expect(page.getByTestId('channel-secret-state')).toHaveText('No secret yet');
 
     // The token is typed in the dialog and goes to the engine; the page only learns that one is stored.
