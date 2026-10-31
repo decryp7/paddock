@@ -35,6 +35,7 @@ paddock-download = { path = "../../../../crates/paddock-download", features = ["
 paddock-settings = { path = "../../../../crates/paddock-settings", features = ["tauri"] }
 paddock-startup = { path = "../../../../crates/paddock-startup", features = ["tauri"] }
 paddock-updater = { path = "../../../../crates/paddock-updater", features = ["tauri", "install"] }
+paddock-widgets = { path = "../../../../crates/paddock-widgets" }
 paddock-window = { path = "../../../../crates/paddock-window", features = ["tauri", "tray", "wry"] }
 log = { version = "0.4", features = ["kv"] }
 iana-time-zone = "0.1"

@@ -24,7 +24,7 @@ pub const SCHEMA_VERSION: u32 = 3;
 pub const OLDEST_SCHEMA: u32 = 1;
 
 /// The configuration.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ConfigDoc {
     /// App settings.
     pub settings: Settings,
@@ -33,7 +33,7 @@ pub struct ConfigDoc {
 }
 
 /// A loaded configuration and what was wrong with the file.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Loaded {
     /// The configuration.
     pub doc: ConfigDoc,

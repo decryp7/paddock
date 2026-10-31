@@ -26,6 +26,7 @@ pub mod preview;
 pub mod scheduler;
 pub mod secrets;
 pub mod view;
+pub mod widgets;
 
 pub use check::CheckReport;
 pub use engine::{Change, Engine, EngineConfig, Services};

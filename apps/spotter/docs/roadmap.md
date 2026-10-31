@@ -26,7 +26,7 @@ coverage (98.6% / 98.2% lines, see Engine); screenshots at 1440x900 @2x in `docs
    fault-injecting database or file layer. Added seams: the in-memory database returns an error (not an exit) and takes an injected opener, a size limit
    parameter for downloads, platform parameters for folder error messages, `Gathered::into_candidates`, `feeds_in`.
 6. App icons are guarded in CI (`scripts/ci/check-icons.mjs`, copied from Pitwall): the artwork must fill the canvas.
-7. Tray popup widgets on paddock-widgets and @decryp7/paddock-ui/widgets (ADR [0035](../../../docs/adr/0035-widget-layouts-are-shared.md)); planned, after the app's current release.
+7. Tray popup widgets on paddock-widgets and @decryp7/paddock-ui/widgets (ADR [0035](../../../docs/adr/0035-widget-layouts-are-shared.md)): done for 1.0 (user decision 2026-10-31: the 1.0 tag waited for it). The popup draws the person's widgets on the shared `pd-widget-area` in the shared popover; Spotter's catalogue is `spotter-core` `widgets` (watched sites, recent changes, next check, quiet hours, failures with Retry, notifications), its values are computed by `spotter-engine` `widgets` from the watches the engine already holds, and the chooser with a live preview is Settings > Tray popup. The hand-built popup, its `tray-popover` register copy and the old unseen list are gone. Open: only the tag's own checks (VM run of the popup on Windows and Linux).
 
 ## Renderer
 
