@@ -11,8 +11,8 @@ use spotter_core::state::WatchStatus;
 use spotter_core::time::ClockTime;
 use spotter_core::watch::Settings;
 use spotter_core::widgets::{
-    ChangeRow, FailureKind, FailureRow, NotificationMode, PopoverState, PopoverValue, PopoverValues, PopoverWidget, SiteRow, SiteState,
-    WidgetActionId, CHANGE_ROWS, FAILURE_ROWS, SITE_ROWS,
+    ChangeRow, FailureKind, FailureRow, NotificationMode, PopoverState, PopoverStatus, PopoverValue, PopoverValues, PopoverWidget, SiteRow,
+    SiteState, WidgetActionId, CHANGE_ROWS, FAILURE_ROWS, SITE_ROWS,
 };
 
 /// Watches due within this long after the next one are counted with it (milliseconds).
@@ -74,6 +74,31 @@ fn ago(now_ms: i64, then_ms: i64) -> String {
         1..=59 => format!("{minutes} min ago"),
         60..=1439 => format!("{} h ago", minutes / 60),
         _ => format!("{} d ago", minutes / 1440),
+    }
+}
+
+/// Active (unpaused) watches that were never checked.
+fn unchecked(i: &Inputs) -> usize {
+    i.watches.iter().filter(|w| !w.paused && w.last_check_ms.is_none()).count()
+}
+
+/// How the watches are doing overall: the header pill. Failures first, then "never checked", else all good.
+pub fn popover_status(i: &Inputs) -> PopoverStatus {
+    let failing = i.watches.iter().filter(|w| !w.paused && failure_kind(&w.status).is_some()).count();
+    if failing > 0 {
+        return PopoverStatus::Failing { count: count(failing) };
+    }
+    let never = unchecked(i);
+    if never > 0 && never == i.watches.iter().filter(|w| !w.paused).count() {
+        return PopoverStatus::Unknown;
+    }
+    if never > 0 {
+        return PopoverStatus::Unchecked { count: count(never) };
+    }
+    if i.watches.iter().all(|w| w.paused) {
+        PopoverStatus::Unknown
+    } else {
+        PopoverStatus::AllGood
     }
 }
 
@@ -207,6 +232,7 @@ fn next_check(i: &Inputs) -> PopoverState {
             name: w.name.clone(),
             at_ms: at,
             also_due: count(also),
+            due: at <= i.now_ms,
         }
     });
     if running > 0 {
@@ -286,6 +312,12 @@ fn failures(i: &Inputs) -> PopoverState {
                 "Nothing is checked yet.",
                 act(WidgetActionId::CheckAll, "Check all now"),
             ),
+            // Some never checked: "no failures" would claim more than the engine knows.
+            Some(_) if unchecked(i) > 0 => empty(
+                "No failures so far",
+                &format!("{} not checked yet.", unchecked(i)),
+                act(WidgetActionId::CheckAll, "Check all now"),
+            ),
             Some(at) => calm(
                 "No failures",
                 &format!("Last checked {}.", ago(i.now_ms, at)),
@@ -353,7 +385,7 @@ fn notice(layout: &Layout<PopoverWidget>, i: &Inputs) -> Option<SurfaceNotice<Wi
         tone: Tone::Info,
         title: "Notifications are paused".into(),
         detail,
-        action: act(WidgetActionId::ResumeNotifications, "Resume notifications"),
+        action: act(WidgetActionId::ResumeNotifications, "Resume"),
     })
 }
 
@@ -704,6 +736,60 @@ mod tests {
     }
 
     #[test]
+    fn a_never_checked_watch_keeps_the_failures_row_from_claiming_all_good() {
+        let s = settings();
+        let mut a = watch("a");
+        a.last_check_ms = Some(NOW - 60_000);
+        let (title, detail, next, calm) = match with(&[a, watch("b"), watch("c")], &s, |i| state(PopoverWidget::Failures, i)) {
+            WidgetState::Empty { title, detail, next, calm } => (title, detail, next.map(|n| n.action), calm),
+            other => panic!("not empty: {other:?}"),
+        };
+        assert_eq!(
+            (title.as_str(), detail.as_str(), next, calm),
+            ("No failures so far", "2 not checked yet.", Some(WidgetActionId::CheckAll), false)
+        );
+    }
+
+    #[test]
+    fn the_header_status_is_failing_unchecked_all_good_or_unknown() {
+        let s = settings();
+        let st = |ws: &[WatchSummary]| with(ws, &s, popover_status);
+        let mut ok = watch("ok");
+        ok.last_check_ms = Some(NOW);
+        let mut bad = watch("bad");
+        bad.status = WatchStatus::Failed("x".into());
+        let mut paused_bad = watch("pb");
+        paused_bad.status = WatchStatus::Failed("y".into());
+        paused_bad.paused = true;
+        assert_eq!(st(&[]), PopoverStatus::Unknown);
+        assert_eq!(st(&[watch("never")]), PopoverStatus::Unknown, "none checked yet says nothing");
+        assert_eq!(st(&[ok.clone()]), PopoverStatus::AllGood);
+        assert_eq!(st(&[ok.clone(), watch("never")]), PopoverStatus::Unchecked { count: 1 });
+        assert_eq!(
+            st(&[ok.clone(), bad.clone(), paused_bad.clone(), bad.clone()]),
+            PopoverStatus::Failing { count: 2 },
+            "paused ones do not count"
+        );
+        assert_eq!(st(&[paused_bad]), PopoverStatus::Unknown);
+    }
+
+    #[test]
+    fn the_next_check_is_due_when_its_time_is_not_after_now() {
+        let s = settings();
+        let due = |offset: i64| {
+            let mut w = watch("a");
+            w.next_check_ms = Some(NOW + offset);
+            match with(&[w], &s, |i| value_of(state(PopoverWidget::NextCheck, i))) {
+                PopoverValue::NextCheck { due, .. } => due,
+                other => panic!("{other:?}"),
+            }
+        };
+        assert!(due(-90_000), "overdue");
+        assert!(due(0), "exactly now");
+        assert!(!due(1), "a moment away");
+    }
+
+    #[test]
     fn how_long_ago_is_worded_in_minutes_hours_and_days() {
         assert_eq!(ago(NOW, NOW + 5), "just now");
         assert_eq!(ago(NOW, NOW - 30_000), "just now");
@@ -924,9 +1010,10 @@ mod tests {
                 })
                 .collect();
             let notice = with(&ws, &s, |i| popover_values(without_notifications.layout(), i)).notice;
+            let status = with(&ws, &s, popover_status);
             scenarios.insert(
                 name.into(),
-                serde_json::json!({ "byKind": by_kind, "noticeWithoutNotificationsWidget": notice }),
+                serde_json::json!({ "byKind": by_kind, "noticeWithoutNotificationsWidget": notice, "status": status }),
             );
         }
         // The catalogue (kinds, spans, limits), the default layout and the loading shape come from the same code the engine runs.

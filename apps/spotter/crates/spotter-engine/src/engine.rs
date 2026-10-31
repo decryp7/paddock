@@ -27,7 +27,7 @@ use spotter_core::state::{WatchState, WatchStatus};
 use spotter_core::time::Timestamp;
 use spotter_core::version::Version;
 use spotter_core::watch::{Settings, Watch, WatchId, WatchSpec};
-use spotter_core::widgets::{PopoverValues, PopoverView, PopoverWidget};
+use spotter_core::widgets::{PopoverStatus, PopoverValues, PopoverView, PopoverWidget};
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -925,6 +925,20 @@ impl Engine {
                 local,
             },
         )
+    }
+
+    /// How the watches are doing overall, for the popup's header pill ("2 failing", "All good").
+    pub fn popover_status(&self) -> PopoverStatus {
+        let now = self.now();
+        let (_, local) = local_parts(now, self.inner.svc.clock.utc_offset_minutes());
+        let settings = self.settings();
+        let watches = self.list_watches();
+        crate::widgets::popover_status(&crate::widgets::Inputs {
+            watches: &watches,
+            settings: &settings,
+            now_ms: now.0,
+            local,
+        })
     }
 
     /// Pauses notifications for `minutes` (`None` resumes).

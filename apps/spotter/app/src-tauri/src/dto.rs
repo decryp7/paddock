@@ -17,7 +17,7 @@ use spotter_core::state::{CheckRecord, WatchStatus};
 use spotter_core::time::QuietHours;
 use spotter_core::tracking::{ProductSetting, ProductsSpec, Tracking};
 use spotter_core::watch::{Settings, WatchSpec};
-use spotter_core::widgets::{PopoverValues, PopoverView};
+use spotter_core::widgets::{PopoverStatus, PopoverValues, PopoverView};
 use spotter_engine::avatar::{AvatarSource, AvatarView};
 use spotter_engine::channels::MailStatus;
 use spotter_engine::error::EngineError;
@@ -1338,6 +1338,8 @@ pub struct StatePush {
     pub popover: PopoverView,
     /// What the popup's widgets show now, computed by the engine.
     pub popover_values: PopoverValues,
+    /// How the watches are doing overall (the popup's header pill).
+    pub popover_status: PopoverStatus,
 }
 
 /// `CommandError.code`.

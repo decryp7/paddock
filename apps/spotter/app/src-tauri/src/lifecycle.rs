@@ -260,6 +260,7 @@ pub fn push_state<R: Runtime>(app: &AppHandle<R>, engine: &Engine) -> Vec<spotte
         watches: watches.iter().map(WatchSummaryDto::from).collect(),
         popover: engine.popover_view(),
         popover_values: engine.popover_values(),
+        popover_status: engine.popover_status(),
     };
     let _ = app.emit(STATE_EVENT, payload);
     tray::update(app);

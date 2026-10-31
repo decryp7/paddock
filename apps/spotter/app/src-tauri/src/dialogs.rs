@@ -28,6 +28,7 @@ paddock_dialogs::dialogs! {
             app::open,
             app::pause_notifications,
             app::popover_shape,
+            app::popover_status,
             app::popover_values,
             app::popover_view,
             app::renderer_status,
