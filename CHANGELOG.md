@@ -4,14 +4,23 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
-### `@decryp7/paddock-ui/material`: `PD_FAMILY_CONTROLS`, one place for the family's Material density and shape (ER-21)
-- A host app's own Material theme could make shared surfaces draw 56px fields with large type, pill buttons and tall segmented controls
-  (Pitcrew's Appearance page and notification centre). The family's geometry and type for buttons, form fields, selects and button
-  toggles is now one constant, put on the host of the Settings window (so every shared settings page), the notification centre,
-  `pd-select` and `su-segmented-control`; custom properties on a host beat any `:root` theme. No per-page copies. A spec keeps it equal to
-  `scss/_material.scss`, and a shell-demo e2e injects a hostile host theme and checks field, button and segmented-control heights.
-### `DialogFrame`: `contentView`, so a dialog's header, footer and body never show different steps (`@decryp7/paddock-ui/shell/dialogs`)
-- New optional input `contentView` on `DialogFrame` (the mounted content's change detector; `DialogShell` and `DialogHost` set it). `render()` now checks the content together with the frame. Before, a `run` action that changed the content's state (a wizard's Continue) refreshed the header slot and the footer at once while the body, which sits in the host's view, followed on the next tick: for one frame the stepper and the buttons showed the new step over the old, taller body (Pitcrew's register window overflowed its body by 165 px).
+### Family Material density and shape: one section of `_material.scss`, on `body` (ER-21)
+- Shared surfaces drew 56px fields with large type, pill buttons and tall segmented controls where the host app's Material theme
+  differed from the bridge. Root cause (Material 22.2.4): `mat.theme` emits density tokens only when the scale is not 0, so an app that
+  loads no `paddock-ui/css/material.css` gets Material's own defaults (Pitcrew: its `angular.json` lists none; Debrief and Spotter list
+  none either), and an app with its own theme at another density fights the bridge (Pitwall: density -2 on `:root`).
+- The geometry and type of the controls the shared surfaces draw (buttons, the outlined form field and select, the button toggle,
+  the icon-button, checkbox and radio state layers, chips) are now ONE section of `scss/_material.scss`, set on `body`, not `:root`:
+  a custom property on a descendant beats any `html`/`:root` theme, and the cdk overlays (select panels, the undo snack bar) inherit
+  it. This covers every shared settings page and panel, the setup and report-problem dialogs, the workbench dialogs, `pd-field`, the
+  schedule editors and the toast, with no per-component copy. A spec keeps every such token in that section and nowhere else in the
+  file. Moved into the section as well: the outlined label sizes, the focus outline width, the subscript size and font, the icon-button, checkbox, radio
+  and chip geometry. (The earlier per-host `PD_FAMILY_CONTROLS` block is gone; nothing needs it.)
+- New conformance check C61 (report-only): every app's `angular.json` loads `paddock-ui` `css/material.css`, and no app has a
+  `mat.theme` of its own.
+- When `shared/channels-lan-events` meets this branch, delete the channels-only `:host` density block in
+  `ui/projects/paddock-ui/shell/channels/page/src/styles.ts` (lines 4-7 there); this section replaces it.
+
 
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or

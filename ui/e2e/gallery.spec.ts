@@ -40,6 +40,19 @@ test('keyboard: arrows move the segmented control and Tab shows a focus ring', a
   expect(parseFloat(ring[2]!)).toBeGreaterThanOrEqual(2);
 });
 
+// ER-21: a pd-field keeps the family's field geometry and type under a host app's Material theme (see shell-demo-density.spec.ts).
+test('a pd-field keeps the family field height and text size under a hostile host theme', async ({ page }) => {
+  await open(page, 'light', 'debrief');
+  await page.addStyleTag({ content: ':root:root { --mat-form-field-container-height: 56px; --mat-form-field-container-text-size: 20px; --mat-form-field-container-vertical-padding: 16px; }' });
+  const field = page.getByTestId('native-select-field');
+  const read = (name: string) => field.evaluate((e, n) => getComputedStyle(e).getPropertyValue(n).trim(), name);
+  const control = await page.evaluate(() => { const d = document.createElement('div'); d.style.height = 'var(--pd-control-height)'; document.body.append(d); const h = getComputedStyle(d).height; d.remove(); return h; });
+  const bodySize = await page.evaluate(() => { const d = document.createElement('div'); d.style.fontSize = 'var(--pd-text-body)'; document.body.append(d); const h = getComputedStyle(d).fontSize; d.remove(); return h; });
+  expect(await read('--mat-form-field-container-height')).toBe(control);
+  expect(await read('--mat-form-field-container-text-size')).toBe(bodySize);
+  expect((await field.locator('.mat-mdc-form-field-infix').boundingBox())!.height).toBeLessThanOrEqual(parseFloat(control) + 2);
+});
+
 test('a native select in a pd-field draws Material\'s arrow, and a field with no control keeps the classic layout', async ({ page }) => {
   await open(page, 'light', 'debrief');
   const arrow = await page.getByTestId('native-select-field').locator('.mat-mdc-form-field-infix').evaluate((e) => {

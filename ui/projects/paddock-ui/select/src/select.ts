@@ -1,7 +1,6 @@
 import { afterNextRender, ChangeDetectionStrategy, Component, computed, DOCUMENT, effect, inject, Injector, input, model, signal, viewChild } from '@angular/core';
 import { ErrorStateMatcher, MatOption } from '@angular/material/core';
 import { MatFormField, MatLabel } from '@angular/material/form-field';
-import { PD_FAMILY_CONTROLS } from '@decryp7/paddock-ui/material';
 import { MatSelect, type MatSelectChange } from '@angular/material/select';
 
 /** One choice of a `pd-select`. */
@@ -56,7 +55,7 @@ let nextId = 0;
       </mat-select>
     </mat-form-field>
   `,
-  styles: PD_FAMILY_CONTROLS + `
+  styles: `
     :host { display: inline-flex; min-width: 0; max-width: 100%; }
     mat-form-field { width: 100%; min-width: 0; }
     :host ::ng-deep .mat-form-field-disabled .mdc-text-field--outlined { background: color-mix(in srgb, var(--pd-surface-2), var(--pd-text) 3%); border-radius: var(--pd-radius-input); }

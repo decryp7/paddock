@@ -1,7 +1,6 @@
 import { ChangeDetectionStrategy, Component, input, model } from '@angular/core';
 import { MatButtonToggle, MatButtonToggleChange, MatButtonToggleGroup } from '@angular/material/button-toggle';
 import { formatCount } from '@decryp7/paddock-ui/format';
-import { PD_FAMILY_CONTROLS } from '@decryp7/paddock-ui/material';
 
 export interface SuSegment {
   value: string;
@@ -32,7 +31,7 @@ export interface SuSegment {
       }
     </mat-button-toggle-group>
   `,
-  styles: PD_FAMILY_CONTROLS + `
+  styles: `
     :host { display: inline-flex; }
     /* A disabled option reads as disabled in both schemes. */
     :host ::ng-deep .mat-button-toggle-disabled:not(.mat-button-toggle-checked) { opacity: 0.5; }

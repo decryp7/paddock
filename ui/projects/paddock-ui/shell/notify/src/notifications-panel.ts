@@ -1,7 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, signal, untracked } from '@angular/core';
 import { SuEmptyState, SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { ContributionRegistry } from '@decryp7/paddock-ui/shell';
-import { PD_FAMILY_CONTROLS } from '@decryp7/paddock-ui/material';
 import { NoticeActions } from './notice-actions';
 import { LOCAL_SOURCE, NotificationsStore, type ReadFilter } from './notifications.store';
 import type { Notice, NoticeAction } from './wire.types';
@@ -26,7 +25,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [SuEmptyState, SuSegmentedControl],
   template: `
-    <div class="pd-bar">
+    <div class="pd-bar" data-testid="notices-filter-bar">
       <pd-segmented-control [label]="t.filter" [options]="filters()" [value]="store.read()" (valueChange)="setRead($event)" />
       <span class="pd-spacer"></span>
       <button type="button" class="pd-btn pd-ghost" [disabled]="!store.unread()" data-testid="notices-mark-all" (click)="store.markAllRead()">{{ t.markAllRead }}</button>
@@ -81,7 +80,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
       </ul>
     }
   `,
-  styles: PD_FAMILY_CONTROLS + `
+  styles: `
     :host { position: relative; display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; font-size: var(--pd-text-body); }
     .pd-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-1); }
     .pd-spacer, .pd-grow { flex: 1; }
