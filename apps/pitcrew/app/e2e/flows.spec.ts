@@ -426,9 +426,8 @@ test.describe('native feel (ADR 0008)', () => {
     await page.getByRole('radio', { name: /On a schedule/ }).check({ force: true });
     const window = page.locator('pc-pause-editor [data-testid="pause-window-0"]');
     await expect(window).toBeVisible();
-    const from = await window.getByRole('combobox').nth(0).boundingBox();
-    const until = await window.getByRole('combobox').nth(1).boundingBox();
-    expect(from && until && Math.abs(from.y - until.y) < 2).toBe(true);
+    const top = async (n: number) => (await window.getByRole('combobox').nth(n).boundingBox())?.y ?? Number.NaN;
+    await expect.poll(async () => Math.abs((await top(0)) - (await top(1))) < 2).toBe(true);
     // The same button kind as the other Settings editors' "Add rule": same corner radius and height.
     const look = (loc: ReturnType<Page['locator']>) => loc.evaluate((e) => ({ r: getComputedStyle(e).borderRadius, h: getComputedStyle(e).height }));
     expect(await look(page.locator('pc-pause-editor .pd-add'))).toEqual(await look(page.getByRole('button', { name: 'Add rule' }).last()));
