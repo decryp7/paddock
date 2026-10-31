@@ -350,6 +350,16 @@ describe('pd-pause-editor', () => {
     expect(t.value().windows).toEqual([]);
   });
 
+  it('keeps From, Until, the note and Remove together in one group, so a narrow row wraps them as a unit', async () => {
+    const t = pause({ windows: [{ days: ['mon'], start: '22:00', end: '06:00' }], zone: null });
+    await settle(t.f);
+    const group = t.q('.pd-window > .pd-times');
+    expect(group.querySelectorAll('pd-field')).toHaveLength(2);
+    expect(group.textContent).toContain('Ends the next day.');
+    expect(group.querySelector('button[aria-label="Remove window 1"]')).not.toBeNull();
+    expect(t.q('.pd-window > pd-day-picker')).not.toBeNull();
+  });
+
   it('stops at the engine limit, sets the zone and lists the problems', async () => {
     const full = Array.from({ length: 14 }, () => ({ days: [], start: '01:00', end: '02:00' }));
     const t = pause({ windows: full, zone: null }, ['A window needs a start that differs from its end.']);

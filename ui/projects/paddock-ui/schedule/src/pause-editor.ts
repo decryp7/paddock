@@ -32,22 +32,24 @@ import { dateToTime, TIME_PROVIDERS, TimeProblems, timeOptions, timeToDate } fro
       @for (w of value().windows; track $index) {
         <li class="pd-window" [attr.data-testid]="'pause-window-' + $index">
           <pd-day-picker [value]="w.days" [label]="daysLabel($index + 1)" [disabled]="disabled()" (valueChange)="patch($index, { days: $event })" />
-          <pd-field size="short" [label]="fromText" [suffix]="startToggle" [error]="timeProblems.shown($index + 'start') ? badTimeText : null">
-            <input pdFieldControl pdKeepTime [matTimepicker]="startPicker" [value]="dates()[$index]?.start ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTime($index, 'start', $event)" (keydown.escape)="closePicker($event, startPicker)" (blur)="timeProblems.leave($index + 'start')" />
-            <mat-timepicker #startPicker panelClass="pd-timepicker-panel" [options]="timeList" />
-            <ng-template #startToggle><mat-timepicker-toggle [for]="startPicker" [disabled]="disabled()" /></ng-template>
-          </pd-field>
-          <pd-field size="short" [label]="toText" [suffix]="endToggle" [error]="timeProblems.shown($index + 'end') ? badTimeText : null">
-            <input pdFieldControl pdKeepTime [matTimepicker]="endPicker" [value]="dates()[$index]?.end ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTime($index, 'end', $event)" (keydown.escape)="closePicker($event, endPicker)" (blur)="timeProblems.leave($index + 'end')" />
-            <mat-timepicker #endPicker panelClass="pd-timepicker-panel" [options]="timeList" />
-            <ng-template #endToggle><mat-timepicker-toggle [for]="endPicker" [disabled]="disabled()" /></ng-template>
-          </pd-field>
-          @if (w.start > w.end) {
-            <span class="pd-note">{{ overnightText }}</span>
-          }
-          <button type="button" matIconButton [attr.aria-label]="removeLabel($index + 1)" [matTooltip]="removeText" [disabled]="disabled()" (click)="remove($index)">
-            <pd-glyph name="close" [size]="14" />
-          </button>
+          <div class="pd-times">
+            <pd-field size="short" [label]="fromText" [suffix]="startToggle" [error]="timeProblems.shown($index + 'start') ? badTimeText : null">
+              <input pdFieldControl pdKeepTime [matTimepicker]="startPicker" [value]="dates()[$index]?.start ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTime($index, 'start', $event)" (keydown.escape)="closePicker($event, startPicker)" (blur)="timeProblems.leave($index + 'start')" />
+              <mat-timepicker #startPicker panelClass="pd-timepicker-panel" [options]="timeList" />
+              <ng-template #startToggle><mat-timepicker-toggle [for]="startPicker" [disabled]="disabled()" /></ng-template>
+            </pd-field>
+            <pd-field size="short" [label]="toText" [suffix]="endToggle" [error]="timeProblems.shown($index + 'end') ? badTimeText : null">
+              <input pdFieldControl pdKeepTime [matTimepicker]="endPicker" [value]="dates()[$index]?.end ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTime($index, 'end', $event)" (keydown.escape)="closePicker($event, endPicker)" (blur)="timeProblems.leave($index + 'end')" />
+              <mat-timepicker #endPicker panelClass="pd-timepicker-panel" [options]="timeList" />
+              <ng-template #endToggle><mat-timepicker-toggle [for]="endPicker" [disabled]="disabled()" /></ng-template>
+            </pd-field>
+            @if (w.start > w.end) {
+              <span class="pd-note">{{ overnightText }}</span>
+            }
+            <button type="button" matIconButton [attr.aria-label]="removeLabel($index + 1)" [matTooltip]="removeText" [disabled]="disabled()" (click)="remove($index)">
+              <pd-glyph name="close" [size]="14" />
+            </button>
+          </div>
         </li>
       }
     </ul>
@@ -68,6 +70,8 @@ import { dateToTime, TIME_PROVIDERS, TimeProblems, timeOptions, timeToDate } fro
     :host > .pd-zone { justify-self: stretch; }
     .pd-windows { display: grid; gap: var(--pd-space-2); width: 100%; margin: 0; padding: 0; list-style: none; }
     .pd-window { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); }
+    /* From, Until, the note and Remove stay together: when the row is too narrow they drop below the days as one group. */
+    .pd-times { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--pd-space-2); }
     .pd-add pd-glyph { margin-inline-end: var(--pd-space-1); vertical-align: middle; }
     .pd-note, .pd-empty { margin: 0; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-problem { display: flex; align-items: flex-start; gap: var(--pd-space-1); margin: 0; font-size: var(--pd-text-label); color: var(--pd-danger); }
