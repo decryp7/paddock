@@ -47,14 +47,43 @@ mod unix {
         cmd.process_group(0);
     }
 
-    /// Lowers the priority of `child`, which the caller still holds unreaped, so the pid is still its own (rule 53). Done
-    /// after the spawn, never in a `pre_exec` hook: a hook forces fork+exec instead of `posix_spawn`, and a concurrent
-    /// fork then carries a copy of every inheritable descriptor (a lock, an exec-status pipe) until it execs. The child
-    /// runs at normal priority for the few microseconds between its start and this call; for work that lasts at least
-    /// milliseconds that is harmless, and the `nice(1)` binary would drop `DYLD_*` on macOS. Returns whether it took.
+    /// Lowers the priority of `child` to [`LOWERED_NICE`] unless it is already at least that low (a niced parent passes
+    /// its level on; this never raises one). The caller still holds the child unreaped, so the pid is still its own
+    /// (rule 53). Done after the spawn, never in a `pre_exec` hook: a hook forces fork+exec instead of `posix_spawn`, and
+    /// the `nice(1)` binary would drop `DYLD_*` on macOS. The child runs at the parent's priority for the moment
+    /// between its start and this call; for work that lasts at least milliseconds that is harmless. True when the child
+    /// is at that level or lower afterwards.
     pub fn lower_child(child: &std::process::Child) -> bool {
+        let pid = child.id();
+        // SAFETY: getpriority takes two integers and has no memory effects.
+        if unsafe { libc::getpriority(libc::PRIO_PROCESS, pid) } >= LOWERED_NICE {
+            return true;
+        }
         // SAFETY: setpriority takes plain integers and has no memory effects; it only changes our own child's priority.
-        unsafe { libc::setpriority(libc::PRIO_PROCESS, child.id(), LOWERED_NICE) == 0 }
+        let main = unsafe { libc::setpriority(libc::PRIO_PROCESS, pid, LOWERED_NICE) == 0 };
+        // Linux nice values are per thread: the threads the child already started are lowered too (the ones it starts
+        // later inherit from the thread that starts them).
+        #[cfg(target_os = "linux")]
+        if main {
+            lower_other_threads(pid);
+        }
+        main
+    }
+
+    /// Lowers every thread of `pid` but the main one (Linux).
+    #[cfg(target_os = "linux")]
+    fn lower_other_threads(pid: u32) {
+        let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
+            return;
+        };
+        for tid in tasks
+            .filter_map(Result::ok)
+            .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
+            .filter(|tid| *tid != pid)
+        {
+            // SAFETY: as above; a thread that ended meanwhile makes it fail with ESRCH.
+            unsafe { libc::setpriority(libc::PRIO_PROCESS, tid, LOWERED_NICE) };
+        }
     }
 
     /// The niceness of a lowered child.

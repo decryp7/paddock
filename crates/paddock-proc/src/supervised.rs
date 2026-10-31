@@ -285,9 +285,12 @@ impl Supervised {
     }
 
     /// Lowers the child's priority (Unix; Windows lowered it at the start, see [`crate::lower_priority`]). Done through the
-    /// held child right after the spawn, so no fork window is needed. False when the child is gone or the OS refused.
-    pub fn lower_priority(&self) -> bool {
-        self.child.as_ref().is_some_and(crate::sys::lower_child)
+    /// held child right after the spawn, so no fork window is needed. Only a child that has not ended is touched (an ended one
+    /// may be reaped and its pid reused, rule 53). False when it is gone or the OS refused.
+    pub fn lower_priority(&mut self) -> bool {
+        self.child
+            .as_mut()
+            .is_some_and(|c| matches!(c.try_wait(), Ok(None)) && crate::sys::lower_child(c))
     }
 
     /// Whether the child runs in a kill-on-close job object (Windows; always false elsewhere, where the process group
@@ -862,32 +865,29 @@ mod tests {
         assert!(!s.lower_priority(), "nothing left to lower");
     }
 
-    /// Regression (CI run 7230, two restart tests): lowering a child in `pre_exec` made every spawn a fork, and a forked
-    /// child carries a copy of the parent's lock descriptor until it execs, so a restart right after the holder let go was
-    /// refused as "already running". Spawned lowered, the lock is free the moment it is dropped.
+    /// A child that ended is not touched: its pid may be reused once it is reaped (rule 53).
     #[cfg(unix)]
     #[test]
-    fn a_lowered_spawn_leaves_no_copy_of_a_held_lock() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("agent.lock");
-        let crate::Claim::Acquired(lock) = crate::InstanceLock::claim(&path).unwrap() else {
-            panic!("the lock was free");
-        };
-        let mut children: Vec<Supervised> = (0..8)
-            .map(|_| {
-                let s = Supervised::spawn(child(Mode::Sleep)).unwrap();
-                s.lower_priority();
-                s
-            })
-            .collect();
-        drop(lock);
-        assert!(
-            matches!(
-                crate::InstanceLock::claim(&path).unwrap(),
-                crate::Claim::Acquired(_)
-            ),
-            "a child still holds a copy of the lock"
-        );
-        children.iter_mut().for_each(Supervised::kill);
+    fn an_ended_child_is_not_lowered() {
+        let mut s = Supervised::spawn(child(Mode::Exit3)).unwrap();
+        while s.is_running() {
+            std::thread::yield_now();
+        }
+        assert!(!s.lower_priority());
+    }
+
+    /// A child already below the target keeps its level and counts as lowered; one above is lowered to it.
+    #[cfg(unix)]
+    #[test]
+    fn a_child_is_lowered_to_the_level_and_never_raised() {
+        // SAFETY: getpriority/setpriority take plain integers; the pid is a child we hold unreaped.
+        let nice = |pid: u32| unsafe { libc::getpriority(libc::PRIO_PROCESS, pid as libc::id_t) };
+        let mut s = Supervised::spawn(child(Mode::Sleep)).unwrap();
+        let pid = s.id().unwrap();
+        // The child starts at our level; make it lower than the target first.
+        unsafe { libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, 15) };
+        assert!(s.lower_priority(), "already below the target");
+        assert_eq!(nice(pid), 15, "never raised");
+        s.kill();
     }
 }

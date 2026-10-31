@@ -922,19 +922,6 @@ fn start_on(dirs: &Dirs) -> Result<Running, String> {
     Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).map_err(|e| e.to_string())
 }
 
-/// Starts an agent on `dirs` once the lock is free: a refusal for "already running" is waited out (the holder is gone, a forked
-/// child may still carry a copy of the lock's descriptor until it execs); any other failure is the test's.
-fn start_when_the_folder_is_free(dirs: &Dirs) -> Running {
-    let end = std::time::Instant::now() + Duration::from_secs(40); // hang guard of the harness only
-    loop {
-        match start_on(dirs) {
-            Ok(running) => return running,
-            Err(e) if e.contains("already running") && std::time::Instant::now() < end => std::thread::yield_now(),
-            Err(e) => panic!("the folder never became free: {e}"),
-        }
-    }
-}
-
 #[test]
 fn a_second_agent_on_the_same_data_folder_refuses_to_start_and_says_so() {
     let tmp = tempfile::tempdir().unwrap();
@@ -969,7 +956,7 @@ fn a_second_agent_on_the_same_data_folder_refuses_to_start_and_says_so() {
     // on a background thread) holds a copy of every descriptor open at its fork, the lock's included, until it execs, and on a
     // loaded macOS runner that exec can take a while. So the third start waits on the lock being free, as the lock's own test does.
     first.stop();
-    let third = start_when_the_folder_is_free(&dirs);
+    let third = start_on(&dirs).unwrap();
     assert_ne!(
         dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap().endpoint,
         before.endpoint

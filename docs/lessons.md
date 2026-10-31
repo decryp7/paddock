@@ -436,12 +436,14 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   IPC tries a read or write again while the descriptor is still open (bounded, unit-tested), which cut the failures by
   about two thirds; the broken-from-the-start pairs remain open work. Find a descriptor's history with a
   `DYLD_INSERT_LIBRARIES` interposer before blaming a double close.
-- A child between fork and exec holds copies of every descriptor of the process (a held lock, an exec-status pipe) and
-  forking while other threads sit in socket calls upsets macOS (2026-10-31, Dyno): `pre_exec` (to lower priority) turned
-  every spawn into a fork and refused restarts as "already running"; lower the held child after `posix_spawn` instead
-  (`Supervised::lower_priority`, `Limits::lowered`; `pre_exec` is a disallowed method in `crates/`). A test that forks on
-  purpose lives in a test binary of its own: in a shared one its child copied its neighbours' locks (the restart flake) and
-  was a trigger of the random EBADF above (after moving it, one failure in 20 loaded runs remained: that cause is still open).
+- A just-released lock can look held (2026-10-31, Dyno restart flakes): on macOS ANY spawn, `posix_spawn` included, gives
+  the child a copy of the descriptor table until it execs (measured: a thread spawning `true` in a loop against a thread
+  taking and dropping an `InstanceLock` fails every run). Closing the spawn path does not close this, so the lock judges:
+  `InstanceLock::claim` reports `Held` only after `HELD_CHECKS` consecutive checks a tick apart (a real holder stays held,
+  a copy clears). Tests and callers no longer retry on "already running". Separately, `pre_exec` is out of the shared
+  crates and the app preset (it forces fork+exec; priority is lowered on the held child after the spawn), and a test that
+  forks on purpose lives in a test binary of its own: in a shared one its child copied its neighbours' locks and was a
+  trigger of the random EBADF above (one failure in 20 loaded runs remained after moving it; that cause is still open).
 - A Node script's "am I the main module" check must compare real paths: Node gives `import.meta.url` the resolved path
   and leaves `process.argv[1]` as given, so through a symlink (a CI work folder linked to a stable one, `node_modules`)
   `import.meta.url === pathToFileURL(process.argv[1]).href` is false and the script exits 0 doing nothing (the Chrome for

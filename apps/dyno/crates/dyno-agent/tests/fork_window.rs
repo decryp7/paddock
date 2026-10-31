@@ -8,24 +8,11 @@
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_platform::fake::{process, Fake};
-use std::time::Duration;
 
 fn start_on(dirs: &Dirs) -> Result<Running, String> {
     let fake = Fake::new();
     fake.add_process(process(100, "busy", 60.0));
     Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).map_err(|e| e.to_string())
-}
-
-/// Starts an agent on `dirs` once the lock is free: a refusal for "already running" is waited out.
-fn start_when_the_folder_is_free(dirs: &Dirs) -> Running {
-    let end = std::time::Instant::now() + Duration::from_secs(40); // hang guard of the harness only
-    loop {
-        match start_on(dirs) {
-            Ok(running) => return running,
-            Err(e) if e.contains("already running") && std::time::Instant::now() < end => std::thread::yield_now(),
-            Err(e) => panic!("the folder never became free: {e}"),
-        }
-    }
 }
 
 /// A child between its fork and its exec holds a copy of every descriptor open at the fork, the lock's included (it is closed
@@ -94,7 +81,7 @@ fn a_child_forked_before_it_execs_keeps_the_folder_locked_until_it_does_and_the_
         libc::close(release[1]);
     }
     forker.join().unwrap();
-    start_when_the_folder_is_free(&dirs).stop();
+    start_on(&dirs).unwrap().stop();
     // SAFETY: closes the remaining ends.
     unsafe {
         libc::close(ready[0]);
