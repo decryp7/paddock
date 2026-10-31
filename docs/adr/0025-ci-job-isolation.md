@@ -1,7 +1,6 @@
 # 25. CI job isolation: any number of jobs per host, job-scoped state in the runner's job folder, kept folders per slot
 
-- Status: Proposed (2026-10-28; amended in draft 2026-10-31 for Pitcrew 1.1; independent review 2026-10-28: "not yet", two P1s and the P2s below; all addressed on
-  `ci/job-isolation`, see "Verified" and "Still open" at the end)
+- Status: Accepted (2026-10-31), after independent review of the amendment of 2026-10-31 (draft 3, approved); the original text was Proposed 2026-10-28. Package G (below) implements it
 - Date: 2026-10-28
 - Related: rule 2 (own worktrees, build folders and ports), rule 7 (tests never touch the machine), rule 40 (recurring bugs
   mean a missing design rule), rules 42/43 (share first); ADR 0014 §1 (build folders per app), ADR 0022 (all tooling in
@@ -205,6 +204,11 @@ opened with `O_NOFOLLOW` and an explicit 0666 (`fchmod` after create), anything 
 owner/release records named per uid (`sN.<uid>.owner`, `sN.<uid>.release`) so no account overwrites another's, tested with
 two uids where the OS allows it and otherwise in the VM test. (The alternative, a root-created folder with an ACL for the CI
 accounts and pre-created lock files, is rejected: it needs an admin step per host and breaks when a new account is added.)
+Two further requirements (review 1, package G notes). (1) The shared VM lock folder is created with an explicit mode 1777
+(`set_permissions` after create, so the umask cannot narrow it); a folder with any other mode, or one that is a symlink, is
+refused with a message that says how to fix it (`chmod 1777 <folder>`, or remove the link). (2) `./dev ci slot status` and
+`job-isolation.sh status` list every `sN.*.owner` record (one per uid), and a new holder clears only its own uid's release
+record, never another account's.
 
 **D. What Pitcrew declares and checks.** (Pitcrew ADR 0021 §1: `ci_isolation` is a field of `[[autoscale.pools]]`, one value
 per space: `ci_isolation = { <space number> = "slots" | "none" }`, never keyed by a path string, written by Pitcrew once the owner confirms; a
