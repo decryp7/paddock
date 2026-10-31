@@ -102,6 +102,8 @@ pub struct ServiceSpec {
     memory_high_mb: Option<u32>,
     docs_url: Option<String>,
     kill_mode: Option<KillMode>,
+    stop_timeout_secs: u32,
+    wait_for_network: bool,
 }
 
 impl ServiceSpec {
@@ -128,6 +130,8 @@ impl ServiceSpec {
                 memory_high_mb: None,
                 docs_url: None,
                 kill_mode: None,
+                stop_timeout_secs: 60,
+                wait_for_network: false,
             },
         }
     }
@@ -204,6 +208,16 @@ impl ServiceSpec {
     /// The documentation link (systemd `Documentation=`).
     pub fn docs_url(&self) -> Option<&str> {
         self.docs_url.as_deref()
+    }
+    /// How long the OS waits for the process to exit when stopping it, in seconds (systemd `TimeoutStopSec=`, launchd
+    /// `ExitTimeOut` of a daemon; default 60).
+    pub fn stop_timeout_secs(&self) -> u32 {
+        self.stop_timeout_secs
+    }
+    /// Whether a user unit starts only after the network is up (systemd `After=`/`Wants=network-online.target`; a system
+    /// unit always does).
+    pub fn wait_for_network(&self) -> bool {
+        self.wait_for_network
     }
     /// What systemd ends when it stops the unit; `None`: systemd's own default, no `KillMode=` line.
     pub fn kill_mode(&self) -> Option<KillMode> {
@@ -283,6 +297,17 @@ impl SpecBuilder {
         self.spec.memory_high_mb = Some(mb);
         self
     }
+    /// How long the OS waits for the process to exit when stopping it (default 60 s; 1 to 3600): a service that must finish
+    /// a running job needs longer.
+    pub fn stop_timeout_secs(mut self, secs: u32) -> Self {
+        self.spec.stop_timeout_secs = secs;
+        self
+    }
+    /// Start a systemd user unit only after the network is up (default: not; a system unit always waits).
+    pub fn wait_for_network(mut self, on: bool) -> Self {
+        self.spec.wait_for_network = on;
+        self
+    }
     /// What systemd ends when it stops the unit (`KillMode=`; default: not written, systemd's own default applies).
     pub fn kill_mode(mut self, mode: KillMode) -> Self {
         self.spec.kill_mode = Some(mode);
@@ -330,6 +355,9 @@ impl SpecBuilder {
         }
         if !(1..=3600).contains(&s.throttle_secs) {
             return Err(SpecError::new("throttle", "must be 1 to 3600 seconds"));
+        }
+        if !(1..=3600).contains(&s.stop_timeout_secs) {
+            return Err(SpecError::new("stop timeout", "must be 1 to 3600 seconds"));
         }
         if let Some(v) = &s.supervised_env {
             let ok = !v.is_empty()
@@ -512,6 +540,16 @@ mod tests {
         assert!(bad(base().supervised_env("1X")).contains("supervised"));
         assert!(bad(base().supervised_env("")).contains("supervised"));
         assert!(bad(base().memory_high_mb(1)).contains("memory"));
+        for secs in [0, 3601, u32::MAX] {
+            assert!(
+                bad(base().stop_timeout_secs(secs)).contains("stop timeout"),
+                "{secs}"
+            );
+        }
+        assert!(
+            base().stop_timeout_secs(1).build().is_ok()
+                && base().stop_timeout_secs(3600).build().is_ok()
+        );
         assert!(bad(base().docs_url("http://x")).contains("docs"));
         assert!(bad(base().docs_url("https://x y")).contains("docs"));
     }
