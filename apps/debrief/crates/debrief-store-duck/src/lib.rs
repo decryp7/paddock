@@ -626,7 +626,7 @@ impl Inner {
         let _writing = lock(&self.write_lock);
         let files = writer::segment_files(&conn, &self.dir).map_err(|e| engine(format!("{e:#}")))?;
         conn.execute_batch(
-            "BEGIN TRANSACTION; DELETE FROM segments; DELETE FROM segment_fields; DELETE FROM histogram; DELETE FROM ord; DELETE FROM diagnostics; DELETE FROM tail_offsets; DELETE FROM source_encodings; DELETE FROM source_fingerprints; DELETE FROM sources; COMMIT;",
+            "BEGIN TRANSACTION; DELETE FROM segments; DELETE FROM segment_fields; DELETE FROM segment_blocks; DELETE FROM histogram; DELETE FROM ord; DELETE FROM diagnostics; DELETE FROM tail_offsets; DELETE FROM source_encodings; DELETE FROM source_fingerprints; DELETE FROM sources; COMMIT;",
         )
         .map_err(engine)?;
         catalogue::forget(&conn, None).map_err(engine)?;
@@ -922,7 +922,11 @@ impl DuckStore {
         conn.execute_batch(schema::CACHE_DDL).map_err(engine)?;
         conn.execute_batch(lanes::DDL).map_err(engine)?;
         conn.execute_batch(schema::ADDED_DDL).map_err(engine)?;
-        conn.execute_batch(schema::BLOCKS_BACKFILL).map_err(engine)?;
+        // Rebuildable: a store whose blocks cannot be filled in still opens (its blockless segments are not compacted
+        // and keep their search entries through a clock offset).
+        if let Err(e) = conn.execute_batch(schema::BLOCKS_BACKFILL) {
+            log::warn!("the id blocks of older segments could not be filled in: {e}");
+        }
         // Positions a failed ordering left stale (pos::STALE) or that are missing are not rebuilt here, inside the
         // open call: the app sees `positioned() < total` and runs MaintenanceAction::OrderEvents as a job.
         if pos::is_stale(&conn) {

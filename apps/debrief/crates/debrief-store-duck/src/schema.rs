@@ -26,7 +26,10 @@ pub const CACHE_DDL: &str = "CREATE TABLE IF NOT EXISTS analysis_cache (
 /// (where live tail reads each followed file next: the byte and the line it continues at, the size it saw, whether
 /// it is read whole when it changes and why, whether its last event is held back and when it last grew) and
 /// `segment_blocks` (ADR 0062: the id blocks `first_id .. end_id` each segment file holds; blocks are reserved
-/// exclusively, so they never overlap whatever file holds them, and a rewrite moves them to the new file).
+/// exclusively, so they never overlap whatever file holds them, and a rewrite moves them to the new file; clearing the
+/// store deletes them. A reload sets `segments` aside but not yet this table (ADR 0062 WP-4 adds it to the aside
+/// tables): until then the blocks of files a reload dropped stay until [`BLOCKS_BACKFILL`] removes them on the next
+/// open, and nothing reads a block without joining `segments`).
 pub const ADDED_DDL: &str = "CREATE TABLE IF NOT EXISTS source_encodings (path VARCHAR PRIMARY KEY, label VARCHAR NOT NULL, confidence UTINYINT NOT NULL, origin VARCHAR NOT NULL);
 CREATE TABLE IF NOT EXISTS clock_offsets (path VARCHAR PRIMARY KEY, offset_ms BIGINT NOT NULL);
 CREATE TABLE IF NOT EXISTS tail_offsets (
