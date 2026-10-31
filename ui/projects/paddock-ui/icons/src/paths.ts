@@ -57,6 +57,12 @@ export const PD_ICON_PATHS = {
   keyboard: 'M2.5 6.5h19v11h-19zM7.5 14h9',
   columns: 'M4 5h16v14H4zM9.3 5v14M14.7 5v14',
   sort: 'M8 9l4-4 4 4M8 15l4 4 4-4',
+  'arrow-up': 'M12 19V5M6 11l6-6 6 6',
+  'arrow-down': 'M12 5v14M6 13l6 6 6-6',
+  'to-top': 'M5 4.5h14M12 20V9M6.5 14.5 12 9l5.5 5.5',
+  'to-bottom': 'M5 19.5h14M12 4v11M6.5 9.5 12 15l5.5-5.5',
+  // A drag handle (ADR 0035): six filled dots, no lines.
+  grip: '',
   activity: 'M2.5 12h4l3-7.5 4 15 3-7.5h5',
   // Workbench (plan X50, review 1): the assistant, its history, a window kept on top, a panel docked back.
   chat: 'M4.5 5.5h15v10h-8l-4.5 3.5v-3.5h-2.5z',
@@ -82,6 +88,14 @@ export const PD_ICON_DOTS: Readonly<Partial<Record<PdIconName, readonly PdIconDo
     [5, 12, 1.5],
     [12, 12, 1.5],
     [19, 12, 1.5],
+  ],
+  grip: [
+    [9, 6.5, 1.25],
+    [15, 6.5, 1.25],
+    [9, 12, 1.25],
+    [15, 12, 1.25],
+    [9, 17.5, 1.25],
+    [15, 17.5, 1.25],
   ],
   alert: [[12, 15.75, 0.9]],
   info: [[12, 7.5, 1]],
