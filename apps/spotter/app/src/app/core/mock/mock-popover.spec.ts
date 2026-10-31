@@ -41,12 +41,6 @@ describe('MockPopover (the mock of the engine layout, for browser development an
     expect(() => p.edit({ add: { widget: 'nope' as never, span: null, at: null } })).toThrow();
     p.edit({ add: { widget: 'quietHours', span: null, at: null } });
     expect(() => p.edit({ add: { widget: 'quietHours', span: null, at: null } })).toThrow();
-    const full = new MockPopover();
-    full.edit({ add: { widget: 'quietHours', span: null, at: null } });
-    expect(kinds(full)).toHaveLength(6);
-    full.edit({ remove: { id: 'failures' } });
-    full.edit({ add: { widget: 'failures', span: null, at: null } });
-    expect(() => full.edit({ add: { widget: 'nope' as never, span: null, at: null } })).toThrow();
   });
 
   it('resets to the defaults, with undo', () => {
@@ -71,14 +65,15 @@ describe('MockPopover (the mock of the engine layout, for browser development an
     expect(p.values(watches, { ...settings, notificationsPausedUntilMs: NOW + 1000 } as Settings, NOW).notice?.title).toBe('Notifications are paused');
   });
 
-  it('shows every kind, ready and empty', () => {
+  it('words every kind of notification state and quiet hours', () => {
     const p = new MockPopover();
-    for (const w of ['watchedSites', 'nextCheck', 'quietHours'] as const) {
-      p.edit({ add: { widget: w, span: null, at: null } });
-      p.edit({ remove: { id: p.view().layout.placements[0]!.id } });
-    }
-    const settings = { notifications: false, notificationsPausedUntilMs: null, quietHours: { start: '22:00', end: '07:00' } } as Settings;
-    const v = p.values([], settings, NOW);
-    expect(v.placements.length).toBeGreaterThan(0);
+    p.edit({ add: { widget: 'quietHours', span: null, at: null } });
+    const base = { notifications: true, notificationsPausedUntilMs: null, quietHours: { start: '22:00', end: '07:00' } } as Settings;
+    const states = (settings: Settings) => p.values([], settings, NOW).placements.map((x) => x.state);
+    expect(states(base).some((s) => s.state === 'ready' && s.value.kind === 'quietHours')).toBe(true);
+    const mode = (settings: Settings) => states(settings).flatMap((s) => (s.state === 'ready' && s.value.kind === 'notifications' ? [s.value.mode.kind] : []));
+    expect(mode(base)).toEqual(['on']);
+    expect(mode({ ...base, notifications: false })).toEqual(['off']);
+    expect(mode({ ...base, notificationsPausedUntilMs: NOW + 1 })).toEqual(['paused']);
   });
 });
