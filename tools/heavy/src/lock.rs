@@ -16,6 +16,7 @@ use crate::clock::Clock;
 use crate::config::Config;
 use crate::gate::{LoadSource, load_text};
 use crate::log::{Level, Logger};
+use crate::probe::file_id;
 use crate::procs::{Presence, Procs, evidence, pid_alive};
 use crate::record::{self, Owner, OwnerRead};
 use crate::timefmt::{clock_text, day_text, mins, oneline, utc_text};
@@ -52,6 +53,8 @@ pub struct Faults {
     pub ticket_fail: AtomicBool,
     /// Runs once inside a break, after the decision and before the rename (race tests).
     pub before_aside: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// Runs once inside a release, after the owner check and before the rename aside (race tests).
+    pub before_release: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 fn take_one(c: &AtomicU32) -> bool {
@@ -107,17 +110,6 @@ enum Take {
     Taken,
     Busy,
     WriteFailed,
-}
-
-/// Identity of a directory on disk, to notice that it was replaced.
-#[cfg(unix)]
-fn file_id(p: &Path) -> Option<(u64, u64)> {
-    use std::os::unix::fs::MetadataExt;
-    fs::metadata(p).ok().map(|m| (m.dev(), m.ino()))
-}
-#[cfg(not(unix))]
-fn file_id(p: &Path) -> Option<(u64, u64)> {
-    fs::metadata(p).ok().map(|_| (0, 0))
 }
 
 fn mtime(p: &Path) -> Option<u64> {
@@ -248,6 +240,7 @@ impl Heavy {
             epoch: None,
             cwd: req.cwd.clone(),
             cmd: req.cmdline.clone(),
+            child: None,
         };
         fs::write(file, record::format_owner(&o, epoch)).is_ok()
     }
@@ -279,6 +272,19 @@ impl Heavy {
         Take::Busy
     }
 
+    /// Whether the command a dead heavy started (line 7 of its record) still runs: the same pid with the same OS start time.
+    /// Like heavy.sh, a slot counts as taken while either lives.
+    pub fn child_alive(&self, o: &Owner) -> bool {
+        match o.child {
+            None => false,
+            Some((pid, start)) => match self.procs.probe(pid) {
+                Presence::Gone => false,
+                Presence::Present { start_micros: None } => true,
+                Presence::Present { start_micros: Some(s) } => s == start,
+            },
+        }
+    }
+
     /// Breaks the lock in `dir` only when its owner is dead or recycled (or the record is empty and the lock old). Renames it
     /// aside, re-checks identity and owner, and puts it back if either changed. Returns whether it was broken.
     pub fn break_if_stale(&self, dir: &Path, who: &str) -> bool {
@@ -286,7 +292,7 @@ impl Heavy {
         let first = self.read_owner(dir);
         let (victim, why, evid, kind) = match &first {
             OwnerRead::Ok(o) => {
-                if pid_alive(&*self.procs, o.pid, o.epoch) {
+                if pid_alive(&*self.procs, o.pid, o.epoch) || self.child_alive(o) {
                     return false;
                 }
                 (
@@ -532,7 +538,13 @@ impl Heavy {
             if dir.is_dir() {
                 match self.read_owner(&dir) {
                     OwnerRead::Ok(o) => {
-                        let alive = if pid_alive(&*self.procs, o.pid, o.epoch) { "yes" } else { "NO" };
+                        let alive = if pid_alive(&*self.procs, o.pid, o.epoch) {
+                            "yes"
+                        } else if self.child_alive(&o) {
+                            "heavy gone, its command still runs"
+                        } else {
+                            "NO"
+                        };
                         out += &format!(
                             "{pre}held by {} pid {} since '{}' for {} (alive: {alive})\n",
                             o.name,
@@ -824,6 +836,28 @@ impl<'a> Acquirer<'a> {
         }
     }
 
+    /// Records the command this run started (pid and OS start time) as line 7 of the owner record, atomically, so a heavy
+    /// that is killed while its command still runs does not let the next waiter break the lock.
+    pub fn set_child(&mut self, pid: u32, start_micros: u64) {
+        let (h, Some(i)) = (self.h, self.held) else { return };
+        let dir = h.slot_dir(i);
+        let OwnerRead::Ok(mut o) = h.read_owner(&dir) else { return };
+        if o.pid != h.pid || o.epoch != Some(self.epoch) {
+            return;
+        }
+        o.child = Some((pid, start_micros));
+        let tmp = dir.join("owner.tmp");
+        let ok = fs::write(&tmp, record::format_owner(&o, self.epoch)).is_ok() && fs::rename(&tmp, dir.join("owner")).is_ok();
+        if !ok {
+            let _ = fs::remove_file(&tmp);
+            h.log.warn(
+                "heavy.take",
+                "could not record the command's identity in the owner record",
+                &[("ChildPid", json!(pid))],
+            );
+        }
+    }
+
     /// Microseconds spent waiting for the lock (valid once held).
     pub fn waited_micros(&self) -> u64 {
         self.waited_micros
@@ -851,8 +885,42 @@ impl<'a> Acquirer<'a> {
             let dir = h.slot_dir(i);
             match h.read_owner(&dir) {
                 OwnerRead::Ok(o) if o.pid == h.pid && o.epoch == Some(self.epoch) => {
-                    let _ = fs::remove_dir_all(&dir);
-                    h.log.info("heavy.release", "released the lock", &[("Slot", json!(i + 1))]);
+                    let hook = h.faults.before_release.lock().ok().and_then(|mut x| x.take());
+                    if let Some(hook) = hook {
+                        hook();
+                    }
+                    // Rename aside first: what is removed is the directory we now own, re-checked, never a lock that was
+                    // replaced between the check and the removal.
+                    let aside = h.tmp_name("release.");
+                    if fs::rename(&dir, &aside).is_err() {
+                        h.log.warn(
+                            "heavy.release",
+                            "the lock could not be moved aside; left alone",
+                            &[("Slot", json!(i + 1))],
+                        );
+                        return;
+                    }
+                    match h.read_owner(&aside) {
+                        OwnerRead::Ok(now) if now.pid == h.pid && now.epoch == Some(self.epoch) => {
+                            let _ = fs::remove_dir_all(&aside);
+                            h.log.info("heavy.release", "released the lock", &[("Slot", json!(i + 1))]);
+                        }
+                        other => {
+                            if !dir.exists() && fs::rename(&aside, &dir).is_ok() {
+                                h.log.warn(
+                                    "heavy.release",
+                                    "the lock changed while it was being released; put back",
+                                    &[("Slot", json!(i + 1)), ("Found", json!(format!("{other:?}")))],
+                                );
+                            } else {
+                                h.blog(&format!(
+                                    "{} could not put back a changed lock at release; left at {}",
+                                    self.req.name,
+                                    aside.display()
+                                ));
+                            }
+                        }
+                    }
                 }
                 other => h.log.warn(
                     "heavy.release",

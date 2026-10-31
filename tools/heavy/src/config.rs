@@ -32,6 +32,8 @@ pub struct Config {
     pub stderr_tail: bool,
     /// Allow a build folder inside the home folder (ER-14 override).
     pub allow_home_target: bool,
+    /// How long to wait for the command's stderr pipe to close after the command exited (a background process may hold it).
+    pub drain: Duration,
 }
 
 /// Problems found while reading settings (shown once, then the default is used).
@@ -60,7 +62,7 @@ impl Config {
     /// Settings from an environment lookup (`std::env::var` in the program, a map in tests).
     pub fn from_env(get: &dyn Fn(&str) -> Option<String>, legacy_exists: bool) -> (Config, Warnings) {
         let mut w = Warnings::new();
-        let root = first(get, &["HEAVY_DIR", "PLOCK_DIR", "PLOCK_ROOT", "HEAVY_LOCK_DIR"])
+        let root = first(get, &["HEAVY_DIR", "PLOCK_DIR", "PLOCK_ROOT"])
             .map(PathBuf::from)
             .unwrap_or_else(|| {
                 if legacy_exists {
@@ -70,12 +72,26 @@ impl Config {
                     PathBuf::from(base).join("heavy-lock")
                 }
             });
+        if let Some(v) = first(get, &["HEAVY_LOCK_DIR"]) {
+            w.push(format!(
+                "HEAVY_LOCK_DIR={v:?} is heavy.sh's slot folder and is ignored: heavy uses {} (set HEAVY_DIR to choose; heavy.sh callers must move to heavy at the same time)",
+                root.display()
+            ));
+        }
         let poll = secs(get, &["HEAVY_POLL", "PLOCK_POLL"], 5.0, 0.01, &mut w);
         let wait_log = secs(get, &["HEAVY_WAIT_LOG", "PLOCK_WAIT_LOG"], 60.0, 0.0, &mut w);
         let unreadable = secs(get, &["HEAVY_UNREADABLE_LIMIT", "PLOCK_UNREADABLE_LIMIT"], 120.0, 0.0, &mut w);
         let gate_load = secs(get, &["HEAVY_GATE_LOAD", "PLOCK_GATE_LOAD"], 30.0, 0.0, &mut w);
         let gate_poll = secs(get, &["HEAVY_GATE_POLL", "PLOCK_GATE_POLL"], 20.0, 0.01, &mut w);
-        let slots = match first(get, &["HEAVY_SLOTS"]) {
+        // heavy.sh's HEAVY_SLOTS is often exported globally; the shell plock knows only one lock, so slots count only when
+        // the folder is chosen explicitly with HEAVY_DIR (or --slots is given). Otherwise the variable is ignored, with a warning.
+        let slots_var = first(get, &["HEAVY_SLOTS"]);
+        if slots_var.is_some() && first(get, &["HEAVY_DIR"]).is_none() {
+            w.push(
+                "HEAVY_SLOTS is ignored without HEAVY_DIR (the shell plock shares one lock; use --slots or set HEAVY_DIR to opt in)".into(),
+            );
+        }
+        let slots = match slots_var.filter(|_| first(get, &["HEAVY_DIR"]).is_some()) {
             None => 1,
             Some(v) => match v.trim().parse::<u32>() {
                 Ok(n) if (1..=64).contains(&n) => n,
@@ -98,6 +114,7 @@ impl Config {
             verbose: flag("HEAVY_VERBOSE"),
             stderr_tail: get("HEAVY_STDERR_TAIL").is_none_or(|v| v != "0"),
             allow_home_target: flag("HEAVY_ALLOW_HOME_TARGET"),
+            drain: Duration::from_millis(secs(get, &["HEAVY_DRAIN_MS"], 500.0, 0.0, &mut w) as u64),
         };
         (cfg, w)
     }
@@ -136,6 +153,19 @@ mod tests {
         assert_eq!(c.root, PathBuf::from("/c"));
         let (c, _) = cfg(&[("PLOCK_ROOT", "/b")]);
         assert_eq!(c.root, PathBuf::from("/b"));
+    }
+
+    #[test]
+    fn heavy_sh_variables_do_not_silently_diverge() {
+        let (c, w) = cfg(&[("PLOCK_DIR", "/a"), ("HEAVY_LOCK_DIR", "/slots"), ("HEAVY_SLOTS", "5")]);
+        assert_eq!((c.root, c.slots), (PathBuf::from("/a"), 1));
+        assert!(
+            w.iter().any(|m| m.contains("HEAVY_LOCK_DIR")) && w.iter().any(|m| m.contains("HEAVY_SLOTS is ignored")),
+            "{w:?}"
+        );
+        let (c, w) = cfg(&[("HEAVY_DIR", "/a"), ("HEAVY_SLOTS", "5")]);
+        assert_eq!(c.slots, 5);
+        assert!(w.is_empty(), "{w:?}");
     }
 
     #[test]

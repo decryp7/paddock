@@ -831,6 +831,7 @@ dependencies = [
  "signal-hook",
  "sysinfo",
  "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

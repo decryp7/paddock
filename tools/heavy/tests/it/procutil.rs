@@ -136,6 +136,11 @@ pub fn base_env(c: &mut std::process::Command, w: &World) {
         .env_remove("CARGO_TARGET_DIR")
         .env_remove("HEAVY_SLOTS")
         .env_remove("HEAVY_LOG_FILE")
+        .env_remove("DEVKIT_RUN_ID")
+        .env_remove("CARGO_BUILD_TARGET_DIR")
+        .env_remove("HEAVY_LOCK_DIR")
+        .env_remove("HEAVY_DRAIN_MS")
+        .env("CARGO_HOME", w.path("home/.cargo"))
         .stdin(Stdio::null());
 }
 
@@ -145,7 +150,15 @@ pub fn heavy(w: &World, args: &[&str]) -> Guard {
 }
 
 pub fn heavy_env(w: &World, args: &[&str], env: &[(&str, &str)]) -> Guard {
+    heavy_in(w, None, args, env)
+}
+
+/// Like `heavy_env`, in the folder `cwd`.
+pub fn heavy_in(w: &World, cwd: Option<&Path>, args: &[&str], env: &[(&str, &str)]) -> Guard {
     let mut c = command(BIN);
+    if let Some(d) = cwd {
+        c.current_dir(d);
+    }
     base_env(&mut c, w);
     c.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
     for (k, v) in env {
@@ -159,7 +172,12 @@ pub fn heavy_env(w: &World, args: &[&str], env: &[(&str, &str)]) -> Guard {
 
 /// Runs `heavy <args>` to the end and returns (exit code, stdout, stderr).
 pub fn heavy_out(w: &World, args: &[&str], env: &[(&str, &str)]) -> (i32, String, String) {
-    let mut g = heavy_env(w, args, env);
+    heavy_out_in(w, None, args, env)
+}
+
+/// Like `heavy_out`, in the folder `cwd`.
+pub fn heavy_out_in(w: &World, cwd: Option<&Path>, args: &[&str], env: &[(&str, &str)]) -> (i32, String, String) {
+    let mut g = heavy_in(w, cwd, args, env);
     let st = g.finish();
     let mut o = String::new();
     let mut e = String::new();

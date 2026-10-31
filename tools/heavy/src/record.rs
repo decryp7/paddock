@@ -24,6 +24,9 @@ pub struct Owner {
     pub cwd: String,
     /// The masked command line.
     pub cmd: String,
+    /// The command heavy started (pid, OS start time in microseconds), written as a 7th line `child <pid> <micros>` once it
+    /// runs. The shell plock reads six lines and ignores it. A lock whose heavy died but whose command still runs is not stale.
+    pub child: Option<(u32, u64)>,
 }
 
 /// What an owner file said.
@@ -69,14 +72,22 @@ pub fn parse_owner(bytes: &[u8], mtime: Option<u64>) -> OwnerRead {
         epoch: digits(&get(3)).or(mtime),
         cwd: get(4),
         cmd: get(5),
+        child: parse_child(&get(6)),
     })
 }
 
-/// Formats an owner record (6 lines, each ending in a newline). Fields are made single-line.
+fn parse_child(line: &str) -> Option<(u32, u64)> {
+    let mut it = line.strip_prefix("child ")?.split(' ');
+    let pid = u32::try_from(digits(it.next()?)?).ok()?;
+    Some((pid, digits(it.next()?)?))
+}
+
+/// Formats an owner record (6 lines, each ending in a newline; a 7th `child` line when known). Fields are made single-line.
 pub fn format_owner(o: &Owner, epoch: u64) -> String {
     let one = crate::timefmt::oneline;
+    let child = o.child.map_or(String::new(), |(p, s)| format!("child {p} {s}\n"));
     format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n",
+        "{}\n{}\n{}\n{}\n{}\n{}\n{child}",
         o.pid,
         one(&o.start_text),
         one(&o.name),
@@ -158,6 +169,7 @@ mod tests {
             epoch: None,
             cwd: "/w".into(),
             cmd: "cargo test".into(),
+            child: None,
         };
         let text = format_owner(&o, 1_700_000_000);
         assert_eq!(text.lines().count(), 6);
@@ -173,6 +185,36 @@ mod tests {
             panic!("not ok")
         };
         assert_eq!(unk.epoch, None);
+    }
+
+    #[test]
+    fn the_child_line_is_optional_and_total() {
+        let mut o = Owner {
+            pid: 1,
+            start_text: "x".into(),
+            name: "A".into(),
+            epoch: None,
+            cwd: "/".into(),
+            cmd: "c".into(),
+            child: Some((77, 123_456)),
+        };
+        let text = format_owner(&o, 10);
+        assert_eq!(text.lines().count(), 7);
+        let OwnerRead::Ok(back) = parse_owner(text.as_bytes(), None) else {
+            panic!("not ok")
+        };
+        assert_eq!(back.child, Some((77, 123_456)));
+        o.child = None;
+        let OwnerRead::Ok(none) = parse_owner(format_owner(&o, 10).as_bytes(), None) else {
+            panic!("not ok")
+        };
+        assert_eq!(none.child, None);
+        for bad in ["child", "child x y", "child 1", "child 99999999999 1", "kid 1 2"] {
+            let OwnerRead::Ok(r) = parse_owner(format!("1\nx\nA\n5\n/\nc\n{bad}\n").as_bytes(), None) else {
+                panic!("not ok")
+            };
+            assert_eq!(r.child, None, "{bad}");
+        }
     }
 
     #[test]

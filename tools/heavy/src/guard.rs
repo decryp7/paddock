@@ -46,9 +46,13 @@ pub fn abs_path(p: &str, home: Option<&Path>, cwd: &Path) -> PathBuf {
 }
 
 /// The build folders named by the environment value and the arguments.
-pub fn build_dirs(cargo_target_dir: Option<&str>, args: &[String]) -> Vec<String> {
+pub fn build_dirs(cargo_target_dir: Option<&str>, cargo_build_target_dir: Option<&str>, args: &[String]) -> Vec<String> {
     let mut dirs = Vec::new();
-    if let Some(v) = cargo_target_dir.filter(|v| !v.is_empty()) {
+    for v in [cargo_target_dir, cargo_build_target_dir]
+        .into_iter()
+        .flatten()
+        .filter(|v| !v.is_empty())
+    {
         dirs.push(v.to_string());
     }
     let mut prev = "";
@@ -77,4 +81,52 @@ pub fn violation(dirs: &[String], home: Option<&Path>, cwd: &Path) -> Option<Str
         let d = abs_path(v, Some(home), cwd);
         d.starts_with(&h).then(|| v.to_string())
     })
+}
+
+/// The `build.target-dir` values of `.cargo/config.toml` (or `.cargo/config`) files in `cwd` and its parents and in `cargo_home`,
+/// as cargo reads them; a relative value is relative to the folder that holds `.cargo`. A minimal reader, not a TOML parser:
+/// it understands `[build]` with `target-dir = "x"` and a top-level `build.target-dir = "x"`.
+pub fn config_target_dirs(cwd: &Path, cargo_home: Option<&Path>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut dirs: Vec<PathBuf> = cwd.ancestors().map(|a| a.join(".cargo")).collect();
+    if let Some(h) = cargo_home {
+        dirs.push(h.to_path_buf());
+    }
+    for d in dirs {
+        let base = d.parent().unwrap_or(&d).to_path_buf();
+        for name in ["config.toml", "config"] {
+            let Ok(text) = std::fs::read_to_string(d.join(name)) else {
+                continue;
+            };
+            if let Some(v) = target_dir_in(&text) {
+                let p = Path::new(&v);
+                out.push(if p.is_absolute() || v.starts_with('~') {
+                    v
+                } else {
+                    base.join(p).to_string_lossy().into_owned()
+                });
+            }
+        }
+    }
+    out
+}
+
+/// The value of `build.target-dir` in one config file's text.
+pub fn target_dir_in(text: &str) -> Option<String> {
+    let mut in_build = false;
+    for line in text.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if let Some(sec) = line.strip_prefix('[') {
+            in_build = sec.trim_end_matches(']').trim() == "build";
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else { continue };
+        let k = k.trim();
+        if (in_build && k == "target-dir") || k == "build.target-dir" {
+            let v = v.trim();
+            let v = v.strip_prefix(['"', '\'']).unwrap_or(v);
+            return Some(v.strip_suffix(['"', '\'']).unwrap_or(v).to_string());
+        }
+    }
+    None
 }

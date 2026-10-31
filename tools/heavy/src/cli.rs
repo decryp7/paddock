@@ -38,9 +38,9 @@ pub struct RunArgs {
 }
 
 /// Usage text.
-pub const USAGE: &str = "usage: heavy run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--verbose] [--log-file FILE] <agent-name> -- <command...>\n       heavy status\n";
+pub const USAGE: &str = "usage: heavy run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--verbose] [--log-file FILE] <agent-name> -- <command...>\n       heavy status\nExit codes: the command's own; 64 usage, 75 lock not taken, 78 refused (home guard), 126/127 cannot run it, 129/130/143 stopped by a signal.\n";
 
-/// Parses the arguments after the program name. Err is the message to print (exit 2).
+/// Parses the arguments after the program name. Err is the message to print (exit 64).
 pub fn parse(args: &[String]) -> Result<Cli, String> {
     let mut it = args.iter().peekable();
     match it.next().map(String::as_str) {

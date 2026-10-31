@@ -584,3 +584,170 @@ fn a_high_marker_that_vanishes_between_listing_and_reading_is_skipped() {
     let mut acq = Acquirer::new(&n.h, req("N")).unwrap();
     assert_eq!(acq.poll(), Poll::Held);
 }
+
+// ---- review fixes -------------------------------------------------------------------------------------------------------
+
+#[test]
+fn a_dead_heavy_whose_command_still_runs_keeps_the_lock_until_the_command_ends_or_is_recycled() {
+    let rig = Rig::new();
+    let w = rig.agent(12);
+    let start = rig.now() - 90;
+    rig.procs.run(300, start); // the command
+    rig.plant_lock(&format!(
+        "99200\nx\nkilled-heavy\n{}\n/w\ncargo test\nchild 300 {}\n",
+        rig.now() - 100,
+        start * 1_000_000
+    ));
+    let mut acq = Acquirer::new(&w.h, req("W")).unwrap();
+    for _ in 0..3 {
+        assert_eq!(acq.poll(), Poll::Waiting, "heavy is gone but its command runs");
+    }
+    assert!(rig.breaks_log().is_empty() && w.h.status().contains("heavy gone, its command still runs"));
+    // the pid is handed on to another process: no longer the command
+    rig.procs.run(300, start + 50);
+    assert_eq!(acquire(&mut acq, &w.h, 5), Poll::Held);
+    assert!(rig.breaks_log().contains("broke a stale lock of killed-heavy"));
+    // the command ended
+    let rig = Rig::new();
+    let w = rig.agent(12);
+    rig.plant_lock(&format!(
+        "99201\nx\nkilled-heavy\n{}\n/w\ncargo test\nchild 301 5\n",
+        rig.now() - 100
+    ));
+    let mut acq = Acquirer::new(&w.h, req("W")).unwrap();
+    assert_eq!(acquire(&mut acq, &w.h, 5), Poll::Held);
+}
+
+#[test]
+fn set_child_adds_the_seventh_line_and_keeps_the_first_six() {
+    let rig = Rig::new();
+    let a = rig.agent(11);
+    let mut acq = Acquirer::new(&a.h, req("C")).unwrap();
+    assert_eq!(acq.poll(), Poll::Held);
+    let before: Vec<String> = fs::read_to_string(rig.lock_dir().join("owner"))
+        .unwrap()
+        .lines()
+        .map(String::from)
+        .collect();
+    acq.set_child(555, 42);
+    let after: Vec<String> = fs::read_to_string(rig.lock_dir().join("owner"))
+        .unwrap()
+        .lines()
+        .map(String::from)
+        .collect();
+    assert_eq!(after.len(), 7);
+    assert_eq!(&after[..6], &before[..]);
+    assert_eq!(after[6], "child 555 42");
+    assert!(!rig.lock_dir().join("owner.tmp").exists());
+}
+
+#[test]
+fn release_never_removes_a_lock_that_was_replaced_just_before_the_removal() {
+    let rig = Rig::new();
+    let a = rig.agent(11);
+    let mut acq = Acquirer::new(&a.h, req("S")).unwrap();
+    assert_eq!(acq.poll(), Poll::Held);
+    let (dir, now) = (rig.lock_dir(), rig.now());
+    *a.h.faults.before_release.lock().unwrap() = Some(Box::new(move || {
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("owner"), format!("77\nx\nsomeone-else\n{now}\n")).unwrap();
+    }));
+    acq.release();
+    assert!(rig.lock_dir().exists(), "the other holder's lock survives");
+    assert_eq!(rig.owner_line(2), "someone-else");
+    assert_eq!(rig.count(".plock.release."), 0, "nothing is left aside");
+}
+
+#[test]
+fn release_removes_our_own_lock_through_a_rename_aside() {
+    let rig = Rig::new();
+    let a = rig.agent(11);
+    let mut acq = Acquirer::new(&a.h, req("S")).unwrap();
+    assert_eq!(acq.poll(), Poll::Held);
+    acq.release();
+    assert!(!rig.lock_dir().exists());
+    assert_eq!(rig.count(".plock."), 0);
+    assert!(a.h.log.has("released the lock"));
+}
+
+#[test]
+fn a_ticket_and_a_marker_of_a_pid_we_may_not_inspect_are_alive_too() {
+    let rig = Rig::new();
+    let n = rig.agent(12);
+    rig.procs.run_opaque(1);
+    let t = rig.root().join("pitcrew-heavy.ticket.0000000000000001-1");
+    fs::write(&t, format!("1\nx\ninit\n{}\n", rig.now() - 100)).unwrap();
+    let m = rig.root().join("pitcrew-heavy.high.1-init");
+    fs::write(&m, format!("1\nx\n{}\n", rig.now() - 100)).unwrap();
+    let mut acq = Acquirer::new(&n.h, req("N")).unwrap();
+    assert_eq!(acq.poll(), Poll::Waiting, "a live high marker goes first");
+    assert!(t.exists() && m.exists(), "EPERM is alive: neither is removed");
+    assert!(rig.breaks_log().is_empty());
+}
+
+#[test]
+fn masking_more_shapes() {
+    // a key ending in a colon, or holding a colon, hides the next word
+    assert_eq!(
+        args(&["npm", "config", "set", "//reg/:_authToken", "abc123"]),
+        "npm config set *** ***"
+    );
+    assert_eq!(args(&["tool", "X-Api-Key:", "k", "next"]), "tool *** *** next");
+    assert_eq!(args(&["sshpass", "-p", "hunter2", "ssh", "host"]), "sshpass -p *** ssh host");
+    assert_eq!(args(&["sshpass", "-pSECRET", "ssh"]), "sshpass -p*** ssh");
+    assert_eq!(
+        args(&["tool", "--pw", "hunter2", "--passphrase", "p2"]),
+        "tool --pw *** --passphrase ***"
+    );
+    for tok in [
+        "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+        "gho_abcdefghijklmnopqrstuvwxyz0123456789",
+        "github_pat_11ABCDEFG0abcdefghijklmnopqrstuvwxyz",
+        "glpat-abcdefghijklmnopqrst",
+        "xoxb-123456789012-abcdefghij",
+        "xoxp-123456789012-abcdefghij",
+        "AKIAIOSFODNN7EXAMPLE",
+        "ASIAIOSFODNN7EXAMPLE",
+        "sk-abcdefghijklmnopqrstuvwxyz012345",
+        "sk_live_abcdefghijklmnopqrstuvwx",
+    ] {
+        assert_eq!(args(&["tool", tok]), "tool ***", "{tok}");
+        assert_eq!(args(&["tool", &format!("--opt={tok}")]), "tool --opt=***", "{tok}");
+        assert_eq!(args(&["tool", &format!("https://h/p/{tok}/x")]), "tool https://h/p/***/x", "{tok}");
+    }
+    // not tokens: short, or a different word
+    assert_eq!(
+        args(&["cargo", "build", "-p", "skeleton", "AKIAshort", "ghp_short", "sk-x"]),
+        "cargo build -p skeleton AKIAshort ghp_short sk-x"
+    );
+}
+
+#[test]
+fn masking_free_text() {
+    let t = "error: token=SUPERSECRET42 failed\nAuthorization: Bearer abcdef\nplain line\n//reg/:_authToken abc123\nghp_abcdefghijklmnopqrstuvwxyz0123456789";
+    let m = heavy::mask::mask_text(t);
+    for leak in ["SUPERSECRET42", "abcdef", "abc123", "ghp_abcdef"] {
+        assert!(!m.contains(leak), "{leak} leaked: {m}");
+    }
+    assert!(m.contains("plain line") && m.contains("token=***") && m.lines().count() == 5, "{m}");
+}
+
+#[test]
+fn guard_config_reader() {
+    use heavy::guard::{config_target_dirs, target_dir_in};
+    assert_eq!(
+        target_dir_in("[build]\njobs = 2\ntarget-dir = \"/x/y\" # c\n").as_deref(),
+        Some("/x/y")
+    );
+    assert_eq!(target_dir_in("build.target-dir = 'rel'\n").as_deref(), Some("rel"));
+    assert_eq!(target_dir_in("[net]\ntarget-dir = \"no\"\n"), None);
+    assert_eq!(target_dir_in("[build]\n[other]\ntarget-dir = \"no\"\n"), None);
+    let rig = Rig::new();
+    let proj = rig.root().join("a/b");
+    fs::create_dir_all(rig.root().join("a/.cargo")).unwrap();
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(rig.root().join("a/.cargo/config.toml"), "[build]\ntarget-dir = \"out\"\n").unwrap();
+    let found = config_target_dirs(&proj, None);
+    assert_eq!(found, vec![rig.root().join("a/out").to_string_lossy().into_owned()]);
+}
