@@ -231,7 +231,7 @@ describe('MachineTiles', () => {
     expect(tiles[2]).toBe('Free disk: 50.0 GB, of 500 GB · 10% free');
     expect(text(el.querySelector('.own'))).toContain('2.5% CPU');
     expect(text(el.querySelector('.own'))).toContain('24.0 MB memory · up 1h 00m');
-    expect(el.querySelectorAll('pc-sparkline')).toHaveLength(3);
+    expect(el.querySelectorAll('pd-sparkline')).toHaveLength(3);
   });
 
   it('adds the whole machine as a muted context line, runners included', () => {
@@ -251,7 +251,7 @@ describe('MachineTiles', () => {
   it('warns about low free disk', () => {
     const low = { ...sample(1), diskFreeBytes: 10 * 1024 ** 3 };
     const el = mount([low], service(null));
-    const spark = el.querySelectorAll('pc-sparkline')[2] as HTMLElement;
+    const spark = el.querySelectorAll('pd-sparkline')[2] as HTMLElement;
     expect(spark.style.color).toContain('--warning');
   });
 });

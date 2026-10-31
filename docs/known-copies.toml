@@ -730,11 +730,6 @@ status = "built"
   delete_by = "dyno-v1.1.0"
 
   [[mechanism.copy]]
-  paths = ["apps/pitcrew/app/src/app/shared/ui/sparkline.ts"]
-  owner = "pitcrew"
-  delete_by = "pitcrew-v1.1.0"
-
-  [[mechanism.copy]]
   paths = ["apps/pitwall/app/src/app/shared/ui/sparkline.ts"]
   owner = "pitwall"
   delete_by = "pitwall-v1.1.0"

@@ -106,6 +106,6 @@ describe('RunnerDetailPage resource use', () => {
   it('copes with a history that cannot load', async () => {
     vi.spyOn(mock, 'metrics').mockRejectedValue(new Error('no'));
     const el = await mount('build-win');
-    expect(el.querySelectorAll('[aria-labelledby="use-title"] pc-sparkline')).toHaveLength(0);
+    expect(el.querySelectorAll('[aria-labelledby="use-title"] pd-sparkline')).toHaveLength(0);
   });
 });

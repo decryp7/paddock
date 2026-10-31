@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
 import { MatIcon } from '@angular/material/icon';
 import type { MachineSample, ServiceInfo } from '../../core/api.types';
 import { formatBytes, formatDuration, formatPermille } from '../../shared/format';
-import { Sparkline } from '../../shared/ui/sparkline';
+import { SuSparkline } from '@decryp7/paddock-ui';
 
 interface Tile {
   key: string;
@@ -21,7 +21,7 @@ interface Tile {
  */
 @Component({
   selector: 'pc-machine-tiles',
-  imports: [MatIcon, Sparkline],
+  imports: [MatIcon, SuSparkline],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @for (t of tiles(); track t.key) {
@@ -31,7 +31,7 @@ interface Tile {
         </div>
         <div class="value num">{{ t.value }}</div>
         <div class="sub faint">{{ t.sub }}</div>
-        <pc-sparkline class="spark" [style.color]="'var(--' + t.tone + ')'" [values]="t.values" [max]="t.max" [width]="160" [height]="34" />
+        <pd-sparkline class="spark" [style.color]="'var(--' + t.tone + ')'" [label]="t.label" [values]="t.values" [min]="0" [max]="t.max" [area]="true" [height]="34" />
       </section>
     }
     <section class="card tile own" aria-label="Pitcrew's own cost">

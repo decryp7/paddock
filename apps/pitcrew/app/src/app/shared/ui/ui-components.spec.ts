@@ -6,7 +6,6 @@ import { BrandLogo } from './brand-logo';
 import { EmptyState } from './empty-state';
 import { LoadState } from './load-state';
 import { ServiceStore } from '../../state/service.store';
-import { Sparkline } from './sparkline';
 import { StatusBadge } from './status-badge';
 import { Timeline, type TimelineRow } from './timeline';
 import { UpdateProgress } from './update-progress';
@@ -148,24 +147,6 @@ describe('LoadState with the service down', () => {
     f.detectChanges();
     expect(f.nativeElement.querySelector('[data-testid="repair-service"]')).toBeNull();
     mock.dispose();
-  });
-});
-
-describe('Sparkline', () => {
-  it('draws a line and area for the values', () => {
-    configure();
-    const f = TestBed.createComponent(Sparkline);
-    f.componentRef.setInput('values', [1, 5, 3]);
-    f.componentRef.setInput('width', 100);
-    f.componentRef.setInput('height', 20);
-    f.detectChanges();
-    const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 100 20');
-    expect(el.querySelector('path.line')?.getAttribute('d')).toMatch(/^M0\.0,/);
-    expect(el.querySelector('path.area')?.getAttribute('d')).toContain('Z');
-    f.componentRef.setInput('values', []);
-    f.detectChanges();
-    expect(el.querySelector('path.line')?.getAttribute('d')).toBe('');
   });
 });
 
