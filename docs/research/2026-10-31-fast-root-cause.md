@@ -1,4 +1,4 @@
-# Finding root causes fast (research, 2026-11-01)
+# Finding root causes fast (research, 2026-10-31)
 
 Question (user): how do we solve issues and find their root cause very quickly? Scope: the Paddock family (Tauri apps with a
 Rust core and an Angular UI, background agents and services on macOS, Windows and Linux), one Gitea CI with one Mac
@@ -14,7 +14,7 @@ measurement or a log line that could have existed from the start:
 | Case (lessons.md) | First explanation | Real cause | What would have shortened it |
 |---|---|---|---|
 | UI spec timeouts (2026-10-31, `fix/panel-snapshot-spec-cost`) | CSS cost piling up | A leaked fake timer from an earlier spec in the same worker (`isolate: false`) | A per-test leak check (now in the test kit) and a **polluter bisect** over the files run before the victim |
-| Dyno jobs test (2026-11-01 lesson) | "a flake" | A race in the issue scan | **Stress runs with a repeat count** and a hypothesis list that may not end in "flake" |
+| Dyno jobs test (2026-10-31 lesson) | "a flake" | A race in the issue scan | **Stress runs with a repeat count** and a hypothesis list that may not end in "flake" |
 | Windows rustup crash in CI (`ci/setup-tools-hardening`) | Unknown: exit 127 only | A native crash whose NTSTATUS Git Bash maps to 127 | A wrapper that **logs the raw exit code** (`conformance/ci/run-native.mjs`, on that branch) |
 | Dyno 30 s login connect (rule 56, branch `docs/rule-logs-explain-failures`) | Guessed from outside | Not visible: only failed connects were logged | **Phase spans with durations and success lines** |
 | A harness that blocked its own event loop | Slow product | Synchronous work on the harness's loop | An **event-loop stall watchdog** in the harness (measured below) |

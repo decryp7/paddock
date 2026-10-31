@@ -2,6 +2,12 @@
 
 Lessons from Debrief and Pitcrew (2026-10-22). Apply in every app from the start. Source: the Paddock brief.
 
+**Cause-class tag (from 2026-10-31).** A lesson about a fix ends with one line `Class: <slug>[, <slug>]`, a short, stable
+name for the kind of cause (not the symptom), for example `wait-on-time`, `leaked-test-state`, `reused-os-name`,
+`platform-drift`, `copy-drift`, `missing-logs`, `guessed-cause`. Reuse an existing slug (grep `^Class:`) before inventing one.
+Two lessons with the same class mean a pattern: stop fixing instances and write the recurring-bug ADR (rule 40, ER-21).
+Older lessons are tagged when they are next touched. Details: [research](research/2026-10-31-fast-root-cause.md), section 1.15.
+
 Build and bundle
 - Anchor ignore rules (`/logs/`, not `logs/`): an unanchored rule silently kept `app/src/app/features/logs/` out of git.
 - Angular production build: `"inlineCritical": false` (optimization.styles). Tauri adds a CSP nonce for inline
@@ -1053,6 +1059,7 @@ date. **Rule (55, ADR 0034):** every mechanism that exists more than once is lis
 the canonical implementation and every copy in the same change (a freeze does not stop it) or a copy is waived with a reason;
 each copy has an owner and a tag by which it is deleted, and that tag is refused while the copy exists. Before fixing a bug in
 any service, IPC, driver or UI helper, look it up in the register first.
+Class: copy-drift
 
 ## Dyno's 30 s login connect could not be explained from the logs (2026-10-31, Dyno)
 At login Dyno took about 30 s to connect to its agent, and neither the app log nor the agent log said why. Only failed
@@ -1065,3 +1072,4 @@ Two diagnoses on the same day were first guessed wrong and corrected only by mea
 cost, really a leaked fake timer) and Dyno's flaky jobs test (first called a flake, really a race in the issue scan). A fix
 built on a guessed flow is not done: establish the real flow from the logs first (reproduce, read the phases, follow the
 code); if the logs cannot show it, add the logging first.
+Class: missing-logs, guessed-cause, leaked-test-state

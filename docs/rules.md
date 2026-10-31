@@ -295,6 +295,19 @@ changes here, every app's copy is updated in the same change.
     Windows) and the tail of stderr; no secrets or user data in CI or tool logs; each job writes a short summary of what ran, what was skipped and why.
     *Why:* Paddock runs on users' machines where we cannot attach a debugger; Dyno's 30 s login connect could not be
     diagnosed from its logs (2026-10-31); a CI or tool step that fails with only an exit code costs a re-run to diagnose.
+57. **A cause is confirmed only by a run without it.** Before fixing a bug or a failing test, list every plausible cause
+    with the observation that rules it out, and record the list in the commit or the lesson. A cause counts as confirmed
+    only when the reproduction, run without it, stays green as often as the failure rate requires (n = ceil(ln 0.05 /
+    ln(1-p)) runs, for example 29 at p = 0.1), and fails again with it put back. "Flaky", "load" and "timing" are symptoms,
+    not causes: a failure called one of them is not diagnosed. (General form: ER-28.)
+    *Why:* four of five slow diagnoses on 2026-10-31 began with a wrong guess that one measurement would have refuted
+    ([research](research/2026-10-31-fast-root-cause.md)).
+58. **Shared-state test suites run shuffled every night, and an order-dependent failure is bisected to its polluter.** A suite
+    that shares state across files (Vitest with `isolate: false`, rule 49, or a single-process Rust test binary) runs once a
+    night in a random order with an explicit seed that the job prints (Vitest `--sequence.shuffle --sequence.seed=<n>`); a failure is reproduced with that seed and
+    `scripts/find-polluter.mjs` finds the file that leaked state, `scripts/bisect-flaky.sh` the commit that introduced a
+    flake. (General form: ER-29.)
+    *Why:* a leaked fake timer in one spec hung unrelated specs for days; only a fixed order hid it.
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
