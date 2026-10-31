@@ -5,10 +5,15 @@
 //! their restarts as "already running") and, on macOS, a fork while other threads sit in socket calls is the trigger of the
 //! spurious EBADF on healthy sockets (docs/lessons.md). One test per binary means no neighbour to harm.
 
+// The test forks and execs, so it exists on Unix only; its helper and imports are matched to it (dead code on Windows otherwise).
+#[cfg(unix)]
 use dyno_agent::paths::Dirs;
+#[cfg(unix)]
 use dyno_agent::Running;
+#[cfg(unix)]
 use dyno_platform::fake::{process, Fake};
 
+#[cfg(unix)]
 fn start_on(dirs: &Dirs) -> Result<Running, String> {
     let fake = Fake::new();
     fake.add_process(process(100, "busy", 60.0));
