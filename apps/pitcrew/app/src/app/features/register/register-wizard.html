@@ -1,5 +1,5 @@
 @let d = draft();
-<div class="wizard">
+<ng-template #head>
   <header class="top">
     <p class="muted small">Pitcrew registers it with your server, then keeps it running and up to date.</p>
   </header>
@@ -20,7 +20,9 @@
       </li>
     }
   </ol>
+</ng-template>
 
+<div class="wizard">
   <form class="body" (submit)="$event.preventDefault()">
     <div class="fields">
     @switch (step()) {

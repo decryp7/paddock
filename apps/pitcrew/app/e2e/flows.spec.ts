@@ -255,7 +255,7 @@ test.describe('native feel (ADR 0008)', () => {
     // The changes scroll inside their own region, both ways; the window itself does not scroll.
     const diff = page.getByRole('region', { name: 'Changes to config.yaml' });
     expect(await diff.evaluate((e) => e.scrollWidth > e.clientWidth && e.scrollHeight > e.clientHeight)).toBe(true);
-    expect(await page.locator('main.pd-body').evaluate((e) => e.scrollHeight <= e.clientHeight && e.scrollWidth <= e.clientWidth)).toBe(true);
+    expect(await page.locator('[data-testid="dialog-body"]').evaluate((e) => e.scrollHeight <= e.clientHeight && e.scrollWidth <= e.clientWidth)).toBe(true);
     // One title: the window's, not a second heading inside it.
     await expect(page.getByRole('heading', { name: 'Review changes' })).toHaveCount(0);
   });
@@ -265,8 +265,10 @@ test.describe('native feel (ADR 0008)', () => {
     await app.dialogs.openWindow('pc.register', {});
     await app.dialogs.loaded();
     const dialog = page.locator('pd-dialog-shell');
+    const heights: number[] = [];
     const buttonsInside = async (name: RegExp) => {
       await expectFullyVisible(dialog.getByRole('button', { name }).last(), String(name));
+      heights.push(await page.locator('[data-testid="dialog-body"]').evaluate((e) => e.getBoundingClientRect().height));
     };
     await dialog.getByLabel('Server URL').fill('https://git.example.com');
     await dialog.getByLabel('Registration token').fill('demo-registration-token');
@@ -279,7 +281,9 @@ test.describe('native feel (ADR 0008)', () => {
     await buttonsInside(/Continue/);
     await dialog.getByRole('button', { name: 'Continue' }).click();
     await buttonsInside(/^Register$/);
-    expect(await page.locator('main.pd-body').evaluate((e) => e.scrollHeight <= e.clientHeight)).toBe(true);
+    // The window keeps one height on every step (the body's minimum is the tallest step).
+    expect(new Set(heights.map(Math.round)).size, `body heights ${heights}`).toBe(1);
+    expect(await page.locator('[data-testid="dialog-body"]').evaluate((e) => e.scrollHeight <= e.clientHeight)).toBe(true);
   });
 
   test('every Settings page renders its content in the real Settings window (a window without the main window\'s router)', async ({ page, app }) => {

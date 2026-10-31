@@ -1,4 +1,3 @@
-import { DIALOG_REF } from '@decryp7/paddock-ui/shell/dialogs';
 import { TestBed } from '@angular/core/testing';
 import { MockBackend } from '../../core/mock-backend';
 import { NoticeLog } from '../../../testing/test-helpers';
@@ -67,10 +66,20 @@ describe('RegisterWizard', () => {
   
   function mount(options: Parameters<typeof makeMock>[0] = {}) {
     mock = makeMock(options);
-    TestBed.configureTestingModule({ providers: [...appProviders(mock), { provide: DIALOG_REF, useValue: { answer: vi.fn(), dismiss: vi.fn() } }] });
+    TestBed.configureTestingModule({ providers: [...appProviders(mock)] });
     const f = TestBed.createComponent(RegisterWizard);
     f.detectChanges();
-    return { f, el: f.nativeElement as HTMLElement };
+    const el = f.nativeElement as HTMLElement;
+    // The frame draws the header slot above the body; here it is rendered in front of the content and kept up to date.
+    const head = f.componentInstance.dialogHeader()!.createEmbeddedView({});
+    el.prepend(...head.rootNodes);
+    const detect = f.detectChanges.bind(f);
+    f.detectChanges = () => {
+      detect();
+      head.detectChanges();
+    };
+    f.detectChanges();
+    return { f, el };
   }
   afterEach(() => {
     mock.dispose();
@@ -87,6 +96,12 @@ describe('RegisterWizard', () => {
     if (!a) throw new Error(`no action ${id}`);
     return a.kind === 'run' ? a.run(signal) : a.kind === 'answer' ? a.answer(signal) : undefined;
   };
+
+  it('puts the intro and the stepper in the frame’s header slot and holds one body height for every step', () => {
+    const { f } = mount();
+    expect(f.componentInstance.dialogHeader()).not.toBeNull();
+    expect(f.componentInstance.dialogMinBodyHeight).toBeGreaterThanOrEqual(500);
+  });
 
   it('blocks Continue with messages until the step is valid', () => {
     const { f, el } = mount();

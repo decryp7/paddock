@@ -1,5 +1,5 @@
 import { DialogActionError, type DialogAction, type DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, TemplateRef, computed, inject, signal, viewChild } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import type { LoggedOffMode, RegisterRequest, SessionMode } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
@@ -9,6 +9,9 @@ import { Notify } from '../../state/notify';
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const URL_RE = /^https?:\/\/[^\s/]+/;
+
+/** The body's minimum height, px: the tallest step of the wizard. */
+const MIN_BODY_HEIGHT = 510;
 
 export const STEPS = ['Server', 'Runner', 'Where it runs', 'Review'] as const;
 
@@ -95,6 +98,12 @@ export class RegisterWizard implements DialogContent<boolean> {
         : { kind: 'run' as const, id: 'continue', label: 'Continue', role: 'primary' as const, run: () => this.next() },
     ];
   });
+
+  /** The intro and the stepper stay above the scrolling fields (the frame's header slot). */
+  private readonly head = viewChild.required<TemplateRef<unknown>>('head');
+  readonly dialogHeader = computed(() => this.head());
+  /** The tallest step (Where it runs, with its warning), so the window keeps one height on every step. */
+  readonly dialogMinBodyHeight = MIN_BODY_HEIGHT;
 
   protected readonly credentialStore = inject(BACKEND).platform() === 'macos' ? 'macOS Keychain' : 'Windows Credential Manager';
 
