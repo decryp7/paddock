@@ -1,7 +1,10 @@
 import type { SpotterBackend } from './backend';
 
-/** The pages a tray click, a toast click or the tray menu may ask the main window to show: the dashboard, the watches and one watch. */
-const SHOWN_ROUTE = /^\/(watches(\/(new|[\w-]+(\/edit)?))?)?$/;
+/** The pages a tray click, a toast click or the tray menu may ask the main window to show: the dashboard, the watches, one watch and Settings. */
+const SHOWN_ROUTE = /^\/(watches(\/(new|[\w-]+(\/edit)?))?|settings)?$/;
+
+/** The route that opens the Settings window instead of a page. */
+export const SETTINGS_ROUTE = '/settings';
 
 /** Is this route one the main window shows when asked (the engine and the tray only send these; anything else is ignored)? */
 export function isShownRoute(route: string): boolean {

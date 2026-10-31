@@ -39,6 +39,13 @@ export const SETTINGS_PAGES = [
     order: 100,
     load: () => import('../features/settings/settings-page').then((m) => m.SettingsPage),
   }),
+  defineSettingsPage({
+    id: 'sp.tray-popup',
+    group: 'application',
+    title: msg('sp.settings.tray-popup', 'Tray popup'),
+    order: 110,
+    load: () => import('../features/settings/tray-widgets-page').then((m) => m.TrayWidgetsPage),
+  }),
 ] as const;
 
 /** The shell's About, Updates and What's New; their windows boot Spotter's About providers. */

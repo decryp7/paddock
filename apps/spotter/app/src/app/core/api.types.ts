@@ -1,3 +1,4 @@
+import type { PopoverValues, PopoverView } from './widgets.types';
 /**
  * The UI ↔ backend wire contract (camelCase JSON). Mirrored by the Rust DTOs in `app/src-tauri/src/dto.rs`;
  * change both sides in the same commit. Times are milliseconds since the Unix epoch (UTC).
@@ -541,5 +542,9 @@ export interface CommandError {
 /** Pushed by the backend (Tauri event `spotter://state`) whenever watches change, checks start or end. */
 export interface StatePush {
   watches: WatchSummary[];
+  /** The tray popup's widget layout. */
+  popover: PopoverView;
+  /** What the popup's widgets show now (computed by the engine). */
+  popoverValues: PopoverValues;
 }
 

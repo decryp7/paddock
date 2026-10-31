@@ -4,6 +4,7 @@
 
 ### Added
 
+- The tray popup shows the widgets you choose, on the shared widget area: watched sites and how each is doing, recent changes, the next check, quiet hours, failing watches with Retry, and whether notifications are on or paused. Each one has a loading, an empty, a working and an error state; status is always an icon and a word. Choose and order them in Settings > Tray popup, with a live preview, undo and keyboard reordering; "Customize widgets…" in the popup's more menu opens it. The layout is kept in `spotter.toml`; one that cannot be read gives the defaults and is kept until you change it.
 - Spotter watches folders and shares, HTTP listings, JSON APIs, forges, feeds and web pages (including JavaScript pages) and tells you the moment a release appears.
 - Downloads (release files, the browser for JavaScript pages) go through the Paddock downloader: up to four connections per host over byte ranges, waits out "too many requests", resumes a cut or cancelled download, checks the publisher's checksum while writing and the free disk space first, and shows phases and Cancel in the status bar.
 - Runs on the Paddock app shell: one frame, notifications and service health, jobs with Cancel, settings, About, updates and What's New.

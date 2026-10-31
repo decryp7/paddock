@@ -37,6 +37,8 @@ import { blankDraft } from './draft';
 import { DAY, HOUR, MINUTE, PRESETS, SOURCE_KINDS, makeReleases, rng } from './mock/mock-data';
 import { mockDescribe, mockSchedulePreview, mockScheduleProblems } from './mock/mock-schedule';
 import { MockJobs } from './mock/mock-jobs';
+import { MockPopover } from './mock/mock-popover';
+import type { PopoverEdit, PopoverValues, PopoverView } from './widgets.types';
 import { MOCK_SCHEMES, mockExtraction, mockSuggest, mockTest, patternProblem } from './mock/mock-extraction';
 
 export type MockScenario = 'demo' | 'empty' | 'broken' | 'products';
@@ -236,6 +238,7 @@ export class MockBackend implements SpotterBackend {
   private readonly platform: AppInfo['platform'];
   private watches: MockWatch[];
   private settings: Settings = { ...DEFAULT_SETTINGS };
+  private readonly popover = new MockPopover();
   private autostart = false;
   private mailPassword = false;
   private renderer: RendererStatus = { kind: 'none', detail: 'No Chromium-based browser was found. Install one, or download the pinned Chromium (about 150 MB).', canDownload: true };
@@ -259,7 +262,7 @@ export class MockBackend implements SpotterBackend {
 
   /** Test helper: delivers a pushed state to subscribers. */
   push(): void {
-    const p = { watches: this.summaries() };
+    const p = { watches: this.summaries(), popover: this.popover.view(), popoverValues: this.popover.values(this.summaries(), this.settings, this.now()) };
     this.stateHandlers.forEach((h) => h(p));
   }
 
@@ -655,6 +658,22 @@ export class MockBackend implements SpotterBackend {
     });
   }
 
+  popoverView(): Promise<PopoverView> {
+    return this.call('popoverView', () => this.popover.view());
+  }
+
+  editPopover(edit: PopoverEdit): Promise<PopoverView> {
+    return this.call('editPopover', () => {
+      const view = this.popover.edit(edit);
+      this.emit();
+      return view;
+    });
+  }
+
+  popoverValues(): Promise<PopoverValues> {
+    return this.call('popoverValues', () => this.popover.values(this.summaries(), this.settings, this.now()));
+  }
+
   getSettings(): Promise<Settings> {
     return this.call('getSettings', () => ({ ...this.settings }));
   }
@@ -792,6 +811,10 @@ export class MockBackend implements SpotterBackend {
 
   hideTray(): Promise<void> {
     return this.call('hideTray', () => undefined);
+  }
+
+  quitApp(): Promise<void> {
+    return this.call('quitApp', () => undefined);
   }
 
   fitTray(_height: number): Promise<void> {

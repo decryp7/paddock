@@ -17,6 +17,7 @@ use spotter_core::state::{CheckRecord, WatchStatus};
 use spotter_core::time::QuietHours;
 use spotter_core::tracking::{ProductSetting, ProductsSpec, Tracking};
 use spotter_core::watch::{Settings, WatchSpec};
+use spotter_core::widgets::{PopoverValues, PopoverView};
 use spotter_engine::avatar::{AvatarSource, AvatarView};
 use spotter_engine::channels::MailStatus;
 use spotter_engine::error::EngineError;
@@ -1221,6 +1222,8 @@ impl SettingsDto {
             quiet_hours: self.quiet_hours,
             allow_os_webview: self.allow_os_webview,
             smtp: self.smtp,
+            // The layout is not the settings page's: `Engine::save_settings` keeps the stored one.
+            popover: Default::default(),
         }
     }
 }
@@ -1326,10 +1329,15 @@ pub struct AppUpdateCheckDto {
 }
 
 /// `StatePush`: the event payload on `spotter://state`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StatePush {
     /// Every watch.
     pub watches: Vec<WatchSummaryDto>,
+    /// The tray popup's layout (the popup and the Settings preview redraw from it; family ADR 0035).
+    pub popover: PopoverView,
+    /// What the popup's widgets show now, computed by the engine.
+    pub popover_values: PopoverValues,
 }
 
 /// `CommandError.code`.
