@@ -215,6 +215,10 @@ fn wait_state(link: &AgentLink, what: &str, cond: impl Fn(&Snapshot) -> bool) ->
         .unwrap_or_else(|| panic!("never reached: {what}; the link is at {:?}", link.transitions().current()))
 }
 
+/// How many looks a test waits for while an agent holds the lock: each such look takes about 0.4 s (the paced re-check of a held
+/// lock, `paddock_proc::HELD_CHECKS` x `HELD_TICK`), so a test counts few of them instead of timing them.
+const LOOKS_WHILE_HELD: u64 = 3;
+
 /// Waits until `more` further looks at the world have been answered (the link's published counter): a wait that lets the
 /// link keep looking, counted instead of timed.
 fn let_it_look(link: &AgentLink, more: u64) {
@@ -1004,8 +1008,12 @@ fn taking_the_agent_back_waits_for_the_former_agent_to_release_the_data_folder_b
         matches!(s.phase, Phase::TakingBack { .. })
     });
     assert!(until(HANG_GUARD, || former.stopped()), "the former agent was not asked to exit");
-    // It has been asked to exit but still holds the folder: the link must wait, looking again, and launch nothing.
-    let_it_look(&r.link, 50);
+    // It has been asked to exit but still holds the folder: the link must wait, looking again, and launch nothing. A look that
+    // finds the lock held re-checks it `HELD_CHECKS` times, `HELD_TICK` apart (about 0.4 s), so every look costs wall-clock time:
+    // 50 looks took 20 s on an idle machine and more than the hang guard on a loaded CI runner (macOS, 2026-10-31: stuck at 45 looks).
+    // Three answered looks after the ask show the link waiting and looking again; that no launch happens at any look is the
+    // machine's invariant (the model check covers every interleaving).
+    let_it_look(&r.link, LOOKS_WHILE_HELD);
     assert_eq!(
         r.launcher.launches.load(Ordering::SeqCst),
         0,
