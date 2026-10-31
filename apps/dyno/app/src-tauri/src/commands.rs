@@ -75,6 +75,12 @@ pub async fn popover_values(shell: State<'_, Arc<Shell>>) -> Result<Value, Comma
     serde_json::to_value(shell.popover_opened()).map_err(|e| CommandError::internal(format!("The popup values could not be read: {e}")))
 }
 
+/// The popup's values as known now, for the Settings preview: it does not mark the popup visible, ask the agent or broadcast.
+#[tauri::command]
+pub async fn popover_snapshot(shell: State<'_, Arc<Shell>>) -> Result<Value, CommandError> {
+    serde_json::to_value(shell.popover_snapshot()).map_err(|e| CommandError::internal(format!("The popup values could not be read: {e}")))
+}
+
 /// Readings of metrics from the newest live update, with the tone of each against its thresholds: the dashboard's widgets
 /// and the previews of the menu-bar and popup choosers. The answer is in the order of the queries.
 #[tauri::command]

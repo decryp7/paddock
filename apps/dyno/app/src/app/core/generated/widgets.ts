@@ -568,7 +568,15 @@ value: number | null,
 /**
  * What the value measures.
  */
-unit: CounterUnit, };
+unit: CounterUnit, 
+/**
+ * 0 to 100 for a percent counter, else none.
+ */
+percent: number | null, 
+/**
+ * Against [`COUNTER_THRESHOLDS`] for a percent counter; `ok` otherwise.
+ */
+tone: ValueTone, };
 
 export type AppRow = { 
 /**

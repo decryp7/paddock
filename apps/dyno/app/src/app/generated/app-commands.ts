@@ -6,6 +6,7 @@ export const APP_COMMANDS = {
   edit_widget_layout: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   metric_readings: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
   pick_folder: { kind: 'mutation', windows: ['main'], limit: 262144 },
+  popover_snapshot: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
   popover_values: { kind: 'query', windows: ['main', 'dialog', 'tray'], limit: 262144 },
   run_widget_action: { kind: 'mutation', windows: ['main', 'tray'], limit: 262144 },
   save_diagnostics: { kind: 'mutation', windows: ['main'], limit: 262144 },
