@@ -32,6 +32,10 @@ export const ALLOW = [
   { file: 'app/src/app/core/api.types.ts', text: 'quarantined', reason: 'the plugin host stops a crashing plugin: a state name, not a change to the computer' },
   { file: 'app/src/app/core/mock/data.ts', text: 'quarantined', reason: 'mock of that plugin state' },
   { file: 'app/src/app/state/counters.store.ts', text: 'Undo', reason: 'undoes deleting one of Dyno\'s own saved counter sets, a setting of Dyno, not of the computer' },
+  // The popup, dashboard and menu-bar widget layouts are Dyno's own settings (ADR 0012, family ADR 0035): an edit can be undone, and nothing on the computer changes.
+  { file: 'app/src/app/core/generated/widgets.ts', text: 'resetToDefaults undo', reason: 'wire name of the layout edit "undo" (generated from paddock-widgets)' },
+  { file: 'app/src/app/core/mock/widgets.ts', text: "undo", reason: 'mock of that layout edit and its refusal' },
+  { file: 'app/src/app/features/settings/settings-page.ts', text: 'Undo is in the message that follows', reason: 'a widget layout edit is saved at once and can be undone: a setting of Dyno, not of the computer' },
   { file: 'app/src/app/core/api.types.ts', text: 'tune retire', reason: 'wire value of the alarm statistics hint kind: adjust an alarm\'s own threshold' },
   { file: 'app/src/app/core/mock/alarms.ts', text: 'tune GPU load', reason: 'mock of that wire value' },
   { file: 'crates/dyno-plugin-host/Cargo.toml', text: 'quarantine', reason: 'the plugin host stops a crashing plugin (a state of the plugin, not a change to the computer)' },
