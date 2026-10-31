@@ -100,7 +100,7 @@ fn live_plan_matches_affected_mjs_on_sample_change_sets() {
             !crate::repo::ci_on(std::env::var("CI").ok().as_deref()),
             "node or scripts/affected.mjs is missing and CI is set: install node"
         );
-        eprintln!("SKIPPED: scripts/affected.mjs or node is not available (the recorded cases still run)");
+        crate::repo::skipped("scripts/affected.mjs or node is not available (the recorded cases still run)");
         return;
     }
     // One budget for all oracle runs.

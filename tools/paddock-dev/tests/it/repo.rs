@@ -61,7 +61,8 @@ pub fn ci_on(ci: Option<&str>) -> bool {
 
 /// Whether a `.git` (folder or file) exists at `root` or any folder above it.
 pub fn git_marker_present(root: &Path) -> bool {
-    root.ancestors().any(|a| a.join(".git").exists())
+    // symlink_metadata: a dangling `.git` symlink still counts as present (git cannot use it, so the test fails, not skips).
+    root.ancestors().any(|a| a.join(".git").symlink_metadata().is_ok())
 }
 
 /// The pure decision. `problem` is from [`repo_problem`]; `git_present` says a `.git` exists at or above the root. Only a tree
@@ -77,20 +78,25 @@ pub fn decide(root: PathBuf, problem: Option<String>, git_present: bool, ci: Opt
     }
 }
 
+/// Prints `SKIPPED: <what>` straight to stderr, past the test harness's capture.
+pub fn skipped(what: &str) {
+    use std::io::Write;
+    let mut err = std::io::stderr();
+    let _ = err.write_all(format!("SKIPPED: {what}\n").as_bytes());
+    let _ = err.flush();
+}
+
 /// The repository root when this tree is a git working tree; otherwise prints `SKIPPED: <test> needs a git checkout: <why>` and
 /// returns `None` (the caller returns), or panics when the decision is to fail. The line is written straight to stderr, past the
 /// test harness's capture; nextest shows it for these tests through `success-output` overrides in `.config/nextest.toml`.
 pub fn require_repo(test: &str) -> Option<PathBuf> {
-    use std::io::Write;
     let root = repo_root();
     let problem = repo_problem(&root, None);
     let (ci, req) = (std::env::var("CI").ok(), std::env::var("PADDOCK_REQUIRE_GIT").ok());
     match decide(root.clone(), problem, git_marker_present(&root), ci.as_deref(), req.as_deref()) {
         Need::Run(root) => Some(root),
         Need::Skip(why) => {
-            let mut err = std::io::stderr();
-            let _ = err.write_all(format!("SKIPPED: {test} needs a git checkout: {why}\n").as_bytes());
-            let _ = err.flush();
+            skipped(&format!("{test} needs a git checkout: {why}"));
             None
         }
         Need::Fail(why) => panic!("{test} needs a git checkout: {why}"),
@@ -114,6 +120,7 @@ fn without_a_repository_the_test_skips_unless_ci_or_require_git_is_set() {
 
 #[test]
 fn a_broken_git_file_fails_with_gits_message_and_no_git_at_all_skips() {
+    // Assumes the temp folder has no `.git` above it; GIT_CEILING_DIRECTORIES keeps git itself from looking further up.
     let dir = tempfile::tempdir().unwrap();
     let bare = dir.path().join("export");
     std::fs::create_dir(&bare).unwrap();
@@ -133,6 +140,21 @@ fn a_broken_git_file_fails_with_gits_message_and_no_git_at_all_skips() {
         Need::Fail(why) => assert!(why.contains("git said: fatal:"), "{why}"),
         other => panic!("{other:?}"),
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_dangling_git_symlink_counts_as_present_and_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let tree = dir.path().join("tree");
+    std::fs::create_dir(&tree).unwrap();
+    std::os::unix::fs::symlink(dir.path().join("missing"), tree.join(".git")).unwrap();
+    assert!(git_marker_present(&tree));
+    let problem = repo_problem(&tree, dir.path().parent());
+    assert!(matches!(
+        decide(tree.clone(), problem, git_marker_present(&tree), None, None),
+        Need::Fail(_)
+    ));
 }
 
 #[test]
