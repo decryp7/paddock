@@ -189,9 +189,16 @@ export class GuiCheck {
       for (const a of l.open) if (!(await this.act(a))) return false;
       if (!(await this.until(() => this.has(...l.switch), this.guard())).ok) return false;
     }
-    if ((await this.value(...l.switch)) !== (on ? '1' : '0')) await this.press(...l.switch);
+    // Judged by the switch's own value; a press while the page re-renders after the last change is lost (measured with an
+    // autosaving Settings page), so it is pressed again, at most three times. A save button, if the app has one, applies it.
+    const want = on ? '1' : '0';
+    for (let k = 0; k < 3; k++) {
+      if ((await this.value(...l.switch)) === want) break;
+      await this.press(...l.switch);
+      if ((await this.until(async () => (await this.value(...l.switch)) === want, 5_000)).ok) break;
+    }
     if (l.save && (await this.has(...l.save))) await this.press(...l.save);
-    return (await this.until(async () => (await this.value(...l.switch)) === (on ? '1' : '0'), this.guard())).ok;
+    return (await this.until(async () => (await this.value(...l.switch)) === want, this.guard())).ok;
   }
 
   async btm() { return btmItem(parseBtmDump((await this.g.exec('sudo sfltool dumpbtm 2>/dev/null', { timeoutMs: 60_000 })).stdout), this.gui.launchAtLogin.label); }
@@ -258,8 +265,8 @@ export class GuiCheck {
     const off = await this.setLoginItemsSwitch(sw, false);
     checks.push({ ok: off.ok, detail: `switched off in Login Items (as a user who refused it once, ${off.presses} press(es)): BTM ${(await this.btm())?.disposition ?? 'no record'}` });
     await this.closeSettings();
-    await this.setLaunchAtLogin(false);
-    await this.setLaunchAtLogin(true);
+    const again = (await this.setLaunchAtLogin(false)) && (await this.setLaunchAtLogin(true));
+    checks.push({ ok: again, detail: again ? 'Launch at login switched off and on again in the app' : 'the app\'s switch did not go off and on again' });
     const opened = await this.until(() => this.has('System Settings', sw, 'AXCheckBox'), this.guard());
     const said = (await this.ax(['tree', this.gui.windowOwner, '40'])).stdout.match(new RegExp(l.needsApprovalText))?.[0];
     await this.shot('needs-approval');
