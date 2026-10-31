@@ -5,6 +5,7 @@ import type { PopoverValue, WidgetActionId } from '../../core/generated/widgets'
 import type { PopoverState, PopoverValues, PopoverView } from '../../core/widgets.types';
 import { MockPopover } from '../../core/mock/mock-popover';
 import { appProviders, makeMock, NOW, settle, text } from '../../../testing/test-helpers';
+import { ClockService } from '../../core/clock.service';
 import { WidgetSet } from './widget-set';
 
 const ready = (value: PopoverValue): PopoverState => ({ state: 'ready', value, asOf: NOW, staleSince: null });
@@ -51,6 +52,7 @@ class Host {
 
 async function make(vals: PopoverValues | null = FULL) {
   TestBed.configureTestingModule({ providers: appProviders(makeMock()) });
+  TestBed.inject(ClockService).set(NOW);
   const f = TestBed.createComponent(Host);
   f.componentInstance.vals.set(vals);
   await settle(f);
@@ -86,7 +88,7 @@ describe('Spotter widget set', () => {
     const changes = text(frames()[0]!);
     expect(changes).toContain('R3.10.00');
     expect(changes).toContain('New');
-    expect(changes).toMatch(/1 h|60 min/);
+    expect(changes).toContain('1 h');
     expect(changes).toContain('+2 more in Spotter');
   });
 

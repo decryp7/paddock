@@ -132,7 +132,8 @@
   ],
   "settingsPages": [
     "pd.appearance",
-    "sp.general"
+    "sp.general",
+    "sp.tray-popup"
   ],
   "settingsForms": [
     "pd.appearance"
@@ -170,6 +171,7 @@
       "commands": [
         "app_info",
         "choose_folder",
+        "edit_popover",
         "get_autostart",
         "get_settings",
         "install_renderer",
@@ -178,6 +180,8 @@
         "mail_status",
         "open",
         "pause_notifications",
+        "popover_values",
+        "popover_view",
         "renderer_status",
         "save_settings",
         "send_test_email",
@@ -256,6 +260,7 @@
     "sp.pause-notifications": "Pause notifications for 1 hour",
     "sp.resume-notifications": "Resume notifications",
     "sp.settings.general": "Spotter",
+    "sp.settings.tray-popup": "Tray popup",
     "sp.status.paused": "Notifications are paused"
   }
 }
