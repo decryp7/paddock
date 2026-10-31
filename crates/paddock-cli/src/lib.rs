@@ -4,7 +4,8 @@
 //!
 //! - [`Exit`] and [`CliError`]: stable exit codes, and an error is a message that says what to do next.
 //! - [`Format`] and [`Report`]: `--json` makes standard output exactly one JSON object, failures included
-//!   (`{"ok":false,"error":..,"hint":..,"exit":..}`); text is for people. Data goes to stdout, notes and progress to stderr.
+//!   (`{"ok":false,"error":..,"hint":..,"exit":..,"kind":..}`; a report that did its work and ended unsuccessfully
+//!   carries its data too, with `error` and `hint` when it names them); text is for people. Data goes to stdout, notes and progress to stderr.
 //! - [`Table`]: results as aligned text, CSV or JSON, bounded cells, a truncation note on stderr.
 //! - [`Progress`]: throttled, de-duplicated phase lines on stderr, driven by an injected clock; [`StopFlag`] is the
 //!   Ctrl+C request an app's signal handler sets.

@@ -406,6 +406,27 @@ pub fn status(a: &StatusArgs) -> Result<Report, CliError> {
     Ok(Report::new(json!({"slots": rows}), text))
 }
 
+/// A slot name as `job-isolation.sh` accepts it: `s` and a number from 1, no leading zero.
+pub fn valid_slot(slot: &str) -> bool {
+    let digits = slot.strip_prefix('s').unwrap_or("");
+    !digits.is_empty() && !digits.starts_with('0') && digits.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// `job-isolation.sh owns <folder> target`: the resolved `folder` is `target-<name>-<slot>` directly in the resolved CI home.
+pub fn owns(ci_home: &Path, folder: &Path, slot: Option<&str>) -> bool {
+    let Some(slot) = slot.filter(|s| valid_slot(s)) else {
+        return false;
+    };
+    if folder.parent() != Some(ci_home) {
+        return false;
+    }
+    let name = folder.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let tail = format!("-{slot}");
+    name.strip_prefix("target-")
+        .and_then(|rest| rest.strip_suffix(tail.as_str()))
+        .is_some_and(|middle| !middle.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -544,5 +565,33 @@ mod tests {
     fn slot_errors_map_to_exit_kinds() {
         assert_eq!(failure(SlotError::Invalid("x".into())).exit, paddock_cli::Exit::Usage);
         assert_eq!(failure(SlotError::ReleaseTimeout("s1".into())).exit, paddock_cli::Exit::Failure);
+    }
+
+    #[test]
+    fn slots_are_s_and_a_number_from_one() {
+        for ok in ["s1", "s9", "s10", "s123"] {
+            assert!(valid_slot(ok), "{ok}");
+        }
+        for bad in ["", "s", "s0", "s01", "1", "S1", "s1a", "s-1", " s1"] {
+            assert!(!valid_slot(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn ownership_is_target_name_slot_directly_in_the_ci_home() {
+        let home = Path::new("/ci");
+        assert!(owns(home, Path::new("/ci/target-app-s1"), Some("s1")));
+        assert!(owns(home, Path::new("/ci/target-a-b-s1"), Some("s1")));
+        assert!(!owns(home, Path::new("/ci/target-app-s2"), Some("s1")), "another job's slot");
+        assert!(!owns(home, Path::new("/ci/target-app-s1"), None) && !owns(home, Path::new("/ci/target-app-s1"), Some("1")));
+        assert!(!owns(home, Path::new("/ci/target--s1"), Some("s1")), "the name may not be empty");
+        assert!(!owns(home, Path::new("/ci/target-s1"), Some("s1")));
+        assert!(!owns(home, Path::new("/ci/notes"), Some("s1")) && !owns(home, Path::new("/ci"), Some("s1")));
+        assert!(!owns(home, Path::new("/ci/sub/target-app-s1"), Some("s1")), "not nested");
+        assert!(
+            !owns(home, Path::new("/other/target-app-s1"), Some("s1")),
+            "not outside the CI home"
+        );
+        assert!(!owns(home, Path::new("/"), Some("s1")), "no file name");
     }
 }
