@@ -134,12 +134,20 @@ pub fn ranged(p: &Pair, q: Filter) -> Filter {
 /// and every block belongs to a listed segment and lies within its id range, no two blocks overlap whatever file holds
 /// them, and every row of every segment file lies in a block of its own file.
 pub fn assert_blocks_consistent(store: &DuckStore, dir: &std::path::Path) {
+    assert_blocks_consistent_with(store, dir, false);
+}
+
+/// [`assert_blocks_consistent`]; with `unscanned` a segment may have no blocks at all (an overlapping range from before
+/// `segment_blocks`, left for ADR 0062's WP-4 scan), but one that has blocks must hold every row in them.
+pub fn assert_blocks_consistent_with(store: &DuckStore, dir: &std::path::Path, unscanned: bool) {
     let count = |sql: &str| store.bench_sql(sql).unwrap_or_else(|e| panic!("{sql}: {e}"));
-    assert_eq!(
-        count("SELECT 1 FROM segments s WHERE NOT EXISTS (SELECT 1 FROM segment_blocks b WHERE b.file = s.file)"),
-        0,
-        "a listed segment without id blocks"
-    );
+    if !unscanned {
+        assert_eq!(
+            count("SELECT 1 FROM segments s WHERE NOT EXISTS (SELECT 1 FROM segment_blocks b WHERE b.file = s.file)"),
+            0,
+            "a listed segment without id blocks"
+        );
+    }
     assert_eq!(
         count("SELECT 1 FROM segment_blocks WHERE file NOT IN (SELECT file FROM segments)"),
         0,
@@ -165,7 +173,7 @@ pub fn assert_blocks_consistent(store: &DuckStore, dir: &std::path::Path) {
     if count("SELECT 1 FROM segments") > 0 {
         assert_eq!(
             count(&format!(
-                "SELECT 1 FROM read_parquet('{glob}', filename = true) e WHERE NOT EXISTS (SELECT 1 FROM segment_blocks b WHERE e.filename LIKE '%' || b.file AND e.id >= b.first_id AND e.id < b.end_id)"
+                "SELECT 1 FROM read_parquet('{glob}', filename = true) e WHERE EXISTS (SELECT 1 FROM segment_blocks k WHERE e.filename LIKE '%' || k.file) AND NOT EXISTS (SELECT 1 FROM segment_blocks b WHERE e.filename LIKE '%' || b.file AND e.id >= b.first_id AND e.id < b.end_id)"
             )),
             0,
             "a row outside the blocks of its file"
