@@ -15,10 +15,14 @@ import { feedRoute } from './update-judge.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 
+/** How long `close()` waits for the feed process to end before killing it. */
+const CLOSE_DEADLINE_MS = 3000;
+
 /**
  * Starts the feed process and resolves once it listens; rejects with the listen error (a port in use, say).
- * @param {{ assets: string, host: string, port: number }} o  assets: the folder with feed/ and ca/ (spotter-update-assets*.sh)
- * @returns {Promise<{ setCase(id: string): Promise<void>, feedLog(): Promise<string[]>, clearFeedLog(): Promise<void>, close(): Promise<void> }>}
+ * @param {{ assets: string, host: string, port: number }} o  assets: the folder with feed/ and ca/ (spotter-update-assets*.sh); port 0
+ *   lets the system pick one, which `port` then names
+ * @returns {Promise<{ port: number, setCase(id: string): Promise<void>, feedLog(): Promise<string[]>, clearFeedLog(): Promise<void>, close(): Promise<void> }>}
  */
 export function startFeed({ assets, host, port }) {
   const child = fork(SELF, ['--serve'], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
@@ -26,6 +30,10 @@ export function startFeed({ assets, host, port }) {
   const waiting = new Map();
   const exited = new Promise((r) => child.once('exit', r));
   const ended = () => child.exitCode !== null || child.signalCode !== null;
+  const fail = (id, e) => { const w = waiting.get(id); if (w) { waiting.delete(id); w.reject(e); } };
+  // A send to a process that has gone away is reported here and to the send's callback, never thrown at the runner (which must still
+  // stop and revert the VM).
+  child.on('error', (e) => { for (const id of [...waiting.keys()]) fail(id, e); });
   child.on('message', (m) => {
     const w = waiting.get(m.id);
     if (!w) return;
@@ -39,25 +47,32 @@ export function startFeed({ assets, host, port }) {
   });
   const ask = (op, arg) =>
     new Promise((resolve, reject) => {
-      if (ended()) { reject(new Error('the feed process has ended')); return; }
+      if (ended() || !child.connected) { reject(new Error('the feed process has ended')); return; }
       const id = ++next;
       waiting.set(id, { resolve, reject });
-      child.send({ id, op, arg });
+      child.send({ id, op, arg }, (e) => { if (e) fail(id, e); });
     });
   const feed = {
     setCase: (id) => ask('setCase', id),
     feedLog: () => ask('log'),
     clearFeedLog: () => ask('clear'),
+    // Ends the feed process; one that does not end within the deadline is killed through this handle (rule 53: never by a pid).
     close: async () => {
-      if (!ended()) {
+      if (ended()) return;
+      let timer;
+      const deadline = new Promise((r) => { timer = setTimeout(r, CLOSE_DEADLINE_MS, 'deadline'); });
+      const stop = (async () => {
         await ask('close').catch(() => {});
         if (child.connected) child.disconnect();
-      }
+        await exited;
+      })();
+      if ((await Promise.race([stop, deadline])) === 'deadline') child.kill('SIGKILL');
+      clearTimeout(timer);
       await exited;
     },
   };
   return ask('listen', { assets, host, port }).then(
-    () => feed,
+    (bound) => Object.assign(feed, { port: bound }),
     async (e) => { child.kill(); await exited; throw e; },
   );
 }
@@ -76,10 +91,10 @@ function serve() {
         log.push(`${req.method} ${req.url} ${route ? 200 : 404}`);
         if (!route || !existsSync(join(root, route.file))) { res.writeHead(404).end(); return; }
         res.writeHead(200, { 'content-type': route.type, 'content-length': statSync(join(root, route.file)).size });
-        createReadStream(join(root, route.file)).pipe(res);
+        createReadStream(join(root, route.file)).on('error', () => res.destroy()).pipe(res);
       });
       server.once('error', reject);
-      server.listen(port, host, () => resolve());
+      server.listen(port, host, () => resolve(server.address().port));
     }),
     setCase: (id) => { current = id; },
     log: () => log,

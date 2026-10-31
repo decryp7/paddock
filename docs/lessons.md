@@ -972,7 +972,8 @@ builds the UI.
 
 ## A test server in the runner's process is deaf while the runner waits synchronously (2026-10-31, Spotter)
 The Windows update test failed every case: the installed old Spotter reported "timeout: connect" for the test feed, while
-`Test-NetConnection` and `curl.exe` in the guest reached it. The feed was an HTTPS server in the same Node process as the
+`Test-NetConnection` and `curl.exe` in the guest reached it. The old build was the shell-based Spotter (the
+`release/spotter-1.0` line, 1.0.0-test.1), whose updater fetches through `paddock-download`'s ureq transport. The feed was an HTTPS server in the same Node process as the
 runner, and the runner waited for each guest job with `spawnSync` for up to 15 minutes. With the event loop blocked the
 kernel still accepted the TCP connection, but no TLS handshake came, and ureq counts the handshake against its connect
 timeout. The probes passed because they ran while the runner was not blocked. A probe binary with Spotter's own
