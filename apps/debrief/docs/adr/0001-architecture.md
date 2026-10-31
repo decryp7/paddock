@@ -1,6 +1,6 @@
 # 1. Desktop architecture: Rust engine, Tauri shell, Angular UI
 
-- Status: Accepted (2026-10-31, confirmation review of the amendment list; first accepted 2026-10-17); amended by
+- Status: Accepted (2026-10-30, confirmation review of the amendment list; first accepted 2026-10-17); amended by
   [0012](0012-jobs.md), [0014](0014-database-first-engine.md), [0017](0017-one-ipc-out-of-process-plugins.md) and
   [0042](0042-store-port-table.md)
 - Date: 2026-10-17

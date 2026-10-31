@@ -354,7 +354,16 @@ pub(crate) fn start_from_kinfo(
 /// When `pid` started: the boot time plus its start tick (`/proc/<pid>/stat`), or `None` when there is no such process.
 #[cfg(target_os = "linux")]
 pub fn start_time(pid: u32) -> Option<crate::StartTime> {
-    use crate::identity::{micros_from_ticks, parse_btime, parse_stat_start};
+    let ticks = crate::identity::parse_stat_start(
+        &std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?,
+    )?;
+    start_from_ticks(ticks)
+}
+
+/// The start time of a process that started `ticks` clock ticks after boot (field 22 of `/proc/<pid>/stat`).
+#[cfg(target_os = "linux")]
+fn start_from_ticks(ticks: u64) -> Option<crate::StartTime> {
+    use crate::identity::{micros_from_ticks, parse_btime};
     use std::sync::OnceLock;
     static BOOT: OnceLock<Option<u64>> = OnceLock::new();
     let boot = (*BOOT.get_or_init(|| {
@@ -366,7 +375,6 @@ pub fn start_time(pid: u32) -> Option<crate::StartTime> {
     }))?;
     // SAFETY: sysconf takes an integer and has no preconditions.
     let hz = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok()?;
-    let ticks = parse_stat_start(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)?;
     micros_from_ticks(boot, ticks, hz).map(crate::StartTime::from_micros)
 }
 
@@ -574,4 +582,139 @@ mod tests {
             assert!(!signal_pid(id, SIGTERM), "pid {id}");
         }
     }
+}
+
+/// The CPU time (user + system) `pid` has used, in microseconds, with the start time of that process from the same OS call
+/// where the OS gives both (rule 53); from a read of that pid only. `None` when there is no such process or the OS did not
+/// say.
+#[cfg(target_os = "linux")]
+pub fn cpu_sample(pid: u32) -> Option<crate::usage::CpuSample> {
+    // SAFETY: sysconf takes an integer and has no preconditions.
+    let hz = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok()?;
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    Some(crate::usage::CpuSample {
+        micros: crate::usage::cpu_micros_from_stat(&stat, hz)?,
+        started: crate::identity::parse_stat_start(&stat).and_then(start_from_ticks),
+    })
+}
+
+/// See the Linux version: `proc_pidinfo(PROC_PIDTASKALLINFO)` gives the BSD info (start time) and the task totals (in Mach
+/// absolute time units, not nanoseconds on Apple silicon, converted with `mach_timebase_info`) in one call. A process
+/// that call refuses (a setuid child) is read with `PROC_PIDTASKINFO` and has no start time in the sample.
+#[cfg(target_os = "macos")]
+#[allow(
+    deprecated,
+    reason = "libc marks the Mach timebase for mach2; one call, no new dependency"
+)]
+pub fn cpu_sample(pid: u32) -> Option<crate::usage::CpuSample> {
+    use std::sync::OnceLock;
+    static TIMEBASE: OnceLock<Option<(u32, u32)>> = OnceLock::new();
+    let (numer, denom) = (*TIMEBASE.get_or_init(|| {
+        let mut tb = libc::mach_timebase_info { numer: 0, denom: 0 };
+        // SAFETY: mach_timebase_info fills the struct it is given.
+        let rc = unsafe { libc::mach_timebase_info(&raw mut tb) };
+        (rc == 0 && tb.denom != 0).then_some((tb.numer, tb.denom))
+    }))?;
+    let raw = pid;
+    let pid = libc::c_int::try_from(pid).ok()?;
+    let mut all = std::mem::MaybeUninit::<libc::proc_taskallinfo>::zeroed();
+    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_taskallinfo>()).ok()?;
+    // SAFETY: proc_pidinfo fills at most `size` bytes of the zero-initialised struct; it is read only when the call
+    // returned the full size.
+    let got = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTASKALLINFO,
+            0,
+            all.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    let (task, started) = if got == size {
+        // SAFETY: filled by the call, which returned its whole size.
+        let all = unsafe { all.assume_init() };
+        let secs: u64 = all.pbsd.pbi_start_tvsec;
+        (
+            all.ptinfo,
+            secs.checked_mul(1_000_000)?
+                .checked_add(all.pbsd.pbi_start_tvusec)?,
+        )
+    } else {
+        // This call carries no identity: the start time is read before it and after it, and the sample is dropped if the
+        // pid changed hands in between (rule 53).
+        let before = start_time(raw)?;
+        let mut info = std::mem::MaybeUninit::<libc::proc_taskinfo>::zeroed();
+        let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_taskinfo>()).ok()?;
+        // SAFETY: as above, for the smaller struct.
+        let got = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTASKINFO,
+                0,
+                info.as_mut_ptr().cast(),
+                size,
+            )
+        };
+        if got != size {
+            return None;
+        }
+        // SAFETY: filled by the call, which returned its whole size.
+        let micros = task_micros(unsafe { info.assume_init() }, numer, denom);
+        return (start_time(raw)? == before).then_some(crate::usage::CpuSample {
+            micros,
+            started: Some(before),
+        });
+    };
+    Some(crate::usage::CpuSample {
+        micros: task_micros(task, numer, denom),
+        started: Some(crate::StartTime::from_micros(started)).filter(|t| t.as_micros() > 0),
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn task_micros(info: libc::proc_taskinfo, numer: u32, denom: u32) -> u64 {
+    crate::usage::mach_to_micros(
+        info.pti_total_user.saturating_add(info.pti_total_system),
+        numer,
+        denom,
+    )
+}
+
+/// See the Linux version: `GetProcessTimes` gives the creation time and the CPU times (kernel + user, in 100 ns units) in one
+/// call.
+#[cfg(windows)]
+pub fn cpu_sample(pid: u32) -> Option<crate::usage::CpuSample> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // SAFETY: OpenProcess takes plain values; the handle is closed below; four writable FILETIMEs.
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let mut t = [FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        }; 4];
+        let [c, e, k, u] = &mut t;
+        let ok = GetProcessTimes(h, c, e, k, u);
+        CloseHandle(h);
+        if ok == 0 {
+            return None;
+        }
+        let ft = |f: &FILETIME| (u64::from(f.dwHighDateTime) << 32) | u64::from(f.dwLowDateTime);
+        Some(crate::usage::CpuSample {
+            micros: ft(&t[2]).saturating_add(ft(&t[3])) / 10,
+            started: crate::identity::micros_from_filetime(ft(&t[0]))
+                .map(crate::StartTime::from_micros),
+        })
+    }
+}
+
+/// Elsewhere: not read.
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+pub fn cpu_sample(_pid: u32) -> Option<crate::usage::CpuSample> {
+    None
 }

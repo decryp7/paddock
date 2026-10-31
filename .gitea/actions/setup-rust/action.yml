@@ -1,5 +1,5 @@
 name: setup-rust
-description: Rust toolchain with components and targets, sccache (installed, checksum-verified, when the runner has none) on the shared Redis backend, and the Tauri Linux libraries on request.
+description: CARGO_BUILD_JOBS for the runner (build-jobs) when no earlier step set it, the Rust toolchain with components and targets, sccache (installed, checksum-verified, when the runner has none) on the shared Redis backend, and the Tauri Linux libraries on request.
 inputs:
   toolchain:
     description: Toolchain channel or version.
@@ -25,6 +25,11 @@ inputs:
 runs:
   using: composite
   steps:
+    # Every Rust job gets its runner's share of the host's cores, also when no build-jobs step ran before this one.
+    - name: Build jobs for this runner
+      shell: bash
+      run: |
+        if [ -z "${CARGO_BUILD_JOBS:-}" ]; then bash "${{ github.action_path }}/../../../conformance/ci/build-jobs.sh"; else echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"; fi
     - name: Rust toolchain
       shell: bash
       env:

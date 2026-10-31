@@ -107,12 +107,29 @@ fn parse<T: DeserializeOwned>(s: &str) -> Option<T> {
     serde_json::from_str(s).ok()
 }
 
+/// Whether `e` says another connection holds the database (not that the file is damaged).
+fn is_busy(e: &StoreError) -> bool {
+    matches!(
+        e,
+        StoreError::Sql(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked,
+                ..
+            },
+            _
+        ))
+    )
+}
+
 impl Store {
     /// Opens (or creates) the database at `path`. A file that isn't a usable database is renamed to
     /// `<name>.damaged-<at>` and a fresh one created; the returned note says so.
+    ///
+    /// A database another process is writing (busy or locked) is not damaged: that is an error, and the file stays.
     pub fn open(path: &Path, now: Timestamp) -> Result<(Store, Option<String>)> {
         match Self::try_open(path) {
             Ok(s) => Ok((s, None)),
+            Err(e) if is_busy(&e) => Err(e),
             Err(e) => {
                 let aside: PathBuf = path.with_extension(format!("damaged-{}", now.millis()));
                 let _ = std::fs::rename(path, &aside);
@@ -637,6 +654,25 @@ mod tests {
         }
         let (_, note) = Store::open(&path, Timestamp(9)).unwrap();
         assert!(note.unwrap().contains("newer"));
+    }
+
+    #[test]
+    fn a_database_another_process_is_writing_is_never_set_aside_as_damaged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.db");
+        // Another writer (a second agent, before the single-agent lock) holds the write lock on a fresh file.
+        let other = Connection::open(&path).unwrap();
+        other.execute_batch("BEGIN EXCLUSIVE; CREATE TABLE other (x INTEGER);").unwrap();
+        let opened = Store::open(&path, Timestamp(7));
+        assert!(
+            !dir.path().join("history.damaged-7").exists(),
+            "a busy database was moved aside as damaged"
+        );
+        assert!(opened.is_err(), "a busy database is an error, not a fresh start");
+        other.execute_batch("COMMIT").unwrap();
+        drop(other);
+        let (_, note) = Store::open(&path, Timestamp(8)).unwrap();
+        assert!(note.is_none(), "it opens as is once the other writer is done");
     }
 
     #[test]

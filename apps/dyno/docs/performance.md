@@ -35,6 +35,14 @@ Dyno has two things called "bench":
 
 ## Results (newest first)
 
+### 2026-10-30, ld-prime against rust-lld for incremental debug rebuilds (ci/build-parallelism)
+
+The family results block is in [docs/benchmarks.md](../../../docs/benchmarks.md#2026-10-30-linker-for-dynos-incremental-debug-rebuilds-ld-prime-against-rust-lld-cibuild-parallelism)
+(Mac mini M4 Pro, load 5.7–10.8, 5 interleaved runs): touching dyno-agent 1.75 s with ld-prime against 2.20 s with
+rust-lld, touching dyno-core 5.12 s against 5.43 s, both on SDK 26.5 (rust-lld cannot read the 27.2 SDK); the link alone
+0.34 s against 0.42 s. Verdict: ld-prime not slower (indication, loaded; the noise floor between two SDKs with the same
+linker was 39 %). It agrees with the 2026-10-29 block below: keep Apple's linker.
+
 ### 2026-10-30, agent threads at the gentle level (rule 52, fix/dyno-qos-utility-2)
 
 - **Commit:** A/B: base 1af0b346e (only the disk walk lowered; every other agent thread at the default class) → change: the

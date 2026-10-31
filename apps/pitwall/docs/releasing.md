@@ -97,6 +97,7 @@ reinstall from the releases page and replace the secrets. Because the key is sha
    installers, `RELEASE_NOTES.md` and `latest.json`, and that `pitwall-latest` carries the same `latest.json`.
 7. Install the published build (not the CI artifact) over the previous version on a real machine and confirm the server
    restarts into the new binary.
+8. Before the tag (rule 54): a `pitwall-release` dispatch with `gates: true` whose three `bundle (...)` jobs passed and whose verdict job says `installers: built`; then `source ~/.zshenv; scripts/vm-smoke/vm-smoke.sh --app pitwall --run <that run id>` passes on a fresh clone, and its result file is attached (see [scripts/vm-smoke/README.md](../../../scripts/vm-smoke/README.md)).
 
 ## Verification status
 

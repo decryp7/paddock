@@ -5,7 +5,7 @@ A `pitcrew-v*` tag on `main` runs `.gitea/workflows/pitcrew-release.yml` (repo r
 (Windows NSIS, the macOS `.dmg` sealed ad hoc and verified, Linux `.deb` and AppImage) and publishes a Gitea release with the
 installers, release notes (`RELEASE_NOTES.md`, from git-cliff) and `latest.json`, the release information Pitcrew's
 updater reads. It also puts `latest.json` on the moving `pitcrew-latest` release, which installed copies read. Installers
-are also built for pushes to `main` that reach Pitcrew, the nightly run and manual runs (`workflow_dispatch`, no release).
+are also built by the nightly run (`nightly.yml`) and by manual runs (`workflow_dispatch`, no release).
 
 ```sh
 git tag pitcrew-v0.2.0 && git push origin pitcrew-v0.2.0
@@ -68,6 +68,13 @@ Pitcrew needs its **own** key pair — never reuse another product's updater key
 **If the private key is lost**, no further update can be signed for the key built into installed copies: users
 install the next version by hand. **If it leaks**, generate a new pair, publish a release signed with the new key,
 tell users to reinstall from the releases page, and revoke the old secrets.
+
+## Before tagging (rule 54)
+
+- [ ] **`pitcrew-release.yml` dispatch with bundles green** (Actions > pitcrew-release > Run workflow, `gates` on): open the run and check that the three `bundle (...)` jobs ran and passed and that the verdict job says `installers: built`. A green run that says `installers: not built` proves nothing about the release path (rule 54).
+- [ ] **`scripts/vm-smoke` passes on a fresh clone**: `source ~/.zshenv; scripts/vm-smoke/vm-smoke.sh --app pitcrew --run <the run id above>` (one VM at a time, local only). Attach its result file to the release notes or the tagging PR; a failed step blocks the tag.
+
+See [scripts/vm-smoke/README.md](../../../scripts/vm-smoke/README.md) for what the check covers and what stays a manual row.
 
 ## First launch note
 

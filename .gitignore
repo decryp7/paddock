@@ -1,5 +1,5 @@
 # The root npm workspace (ADR 0014 §1): every package's dependencies, hoisted or nested, are never source.
-node_modules/
+node_modules
 
 # Anchored on purpose: an unanchored rule can hide source folders.
 /ui/node_modules/
@@ -39,3 +39,4 @@ node_modules/
 /apps/workbench-demo/src-tauri/gen/
 /apps/workbench-demo/src-tauri/target/
 /apps/workbench-demo/dist/
+/vm-smoke-results/

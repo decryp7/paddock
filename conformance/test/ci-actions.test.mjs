@@ -3,7 +3,7 @@
 // (The scripts themselves are tested in ci-scripts.test.mjs, tools/test and the release tests.)
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, lstatSync, statSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, lstatSync, statSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -825,8 +825,10 @@ test('a kit app lists the OS legs its old workflow had, keeps its build folder o
       assert.equal(existsSync(join(PADDOCK, 'apps', app, copy)), false, `${app}: ${copy} is the kit's (rule 42/43)`);
     }
     const wf = read(join(WORKFLOWS, `${app}-release.yml`));
-    // A release never publishes past skipped gates on a tag: skipped is fine only when there is no tag to publish.
-    assert.match(wf, /if: \$\{\{ !cancelled\(\) && needs\.plan\.outputs\.run == 'true' && \(needs\.gates\.result == 'success' \|\| \(needs\.gates\.result == 'skipped' && !startsWith\(github\.ref, 'refs\/tags\/'\)\)\) \}\}/, `${app}: the release job needs green gates on a tag`);
+    // A release never publishes past red or skipped gates on a tag; the installers of a push or a dispatch wait on nothing that can be skipped
+    // (Gitea 28.2 skips a job whose need was skipped, whatever its `if`).
+    assert.match(wf, new RegExp(`\\n  release:\\n(?:.*\\n)*?    needs: \\[plan, gates\\]\\n    if: \\$\\{\\{ needs\\.plan\\.outputs\\.run == 'true' && startsWith\\(github\\.ref, 'refs/tags/${app}-v'\\) && needs\\.gates\\.result == 'success' \\}\\}`), `${app}: the release job needs green gates on a tag`);
+    assert.match(wf, /\n  installers:\n(?:.*\n)*?    needs: \[plan\]\n    if: \$\{\{ needs\.plan\.outputs\.run == 'true' && !startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/, `${app}: the installers wait only on the plan`);
     assert.match(wf, new RegExp(`gates:\\n(?:.*\\n)*?\\s+if: .*startsWith\\(github\\.ref, 'refs/tags/${app}-v'\\)`), `${app}: a tag always runs the gates`);
     assert.match(wf, /cancel-in-progress: true/, `${app}: a newer push supersedes (a tag has its own ref)`);
     // Every sidecar the bundle carries (bundle.externalBin) is started from the built macOS app.
@@ -1541,4 +1543,193 @@ test('every release workflow whose app imports @decryp7/paddock-ui builds the sh
     const prepare = /^\s*prepare:\s*(.+)$/m.exec(text)?.[1] ?? '';
     assert.match(prepare, /build -w ui/, `${f}: ${appDir} imports @decryp7/paddock-ui, which resolves from ui/dist, so the bundle job needs prepare: npm run build -w ui`);
   }
+});
+
+// Build parallelism (docs/benchmarks.md, 2026-10-30): the agents' local cap of two rustc (ER-24) once leaked into CI scripts, and
+// the Mac and Windows legs each spelled their own number. CI sets CARGO_BUILD_JOBS in one place, conformance/ci/build-jobs.sh:
+// the runner's share of its host's cores and memory.
+const buildJobs = (env, args = []) =>
+  spawnSync('bash', [join(PADDOCK, 'conformance/ci/build-jobs.sh'), ...args], {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, ...env },
+  });
+const jobsOf = (r) => /^CARGO_BUILD_JOBS=(\d+)$/m.exec(r.stdout)?.[1];
+// The hosts of 2026-10-30 (the RAM a host reports is a little under its nominal size).
+const MAC = { RUNNER_OS: 'macOS', PADDOCK_CI_CORES: '14', PADDOCK_CI_RAM_MB: '65536' };
+const WINDOWS = { RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '8', PADDOCK_CI_RAM_MB: '16316' };
+const LINUX = { RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '32', PADDOCK_CI_RAM_MB: '131072' };
+
+test('build-jobs gives each runner class its share of the host, never the agents\' cap of two', () => {
+  // The Mac runs one job and keeps 10 of its 14 cores for the agents that share it (5 x 2, ER-24).
+  assert.equal(jobsOf(buildJobs(MAC)), '4');
+  assert.equal(jobsOf(buildJobs({ ...MAC, PADDOCK_CI_RESERVED_CORES: '1' })), '13');
+  // Windows, which runs two jobs at once, gets its share once the runner says so.
+  assert.equal(jobsOf(buildJobs({ ...WINDOWS, PADDOCK_CI_JOBS_PER_HOST: '2' })), '4');
+  // A runner's own settings win: the jobs its host runs at once, or an exact number.
+  assert.equal(jobsOf(buildJobs({ ...LINUX, PADDOCK_CI_JOBS_PER_HOST: '4' })), '8');
+  assert.equal(jobsOf(buildJobs({ ...LINUX, PADDOCK_CI_BUILD_JOBS: '12' })), '12');
+  assert.equal(jobsOf(buildJobs({ ...WINDOWS, PADDOCK_CI_CORES: '2', PADDOCK_CI_JOBS_PER_HOST: '4' })), '1', 'never below one');
+});
+
+test('build-jobs leaves Linux and Windows on cargo\'s default until their share is measured, and names the cores in the log', () => {
+  for (const [host, cores] of [[LINUX, 32], [WINDOWS, 8]]) {
+    const r = buildJobs(host);
+    assert.equal(r.status, 0);
+    assert.equal(jobsOf(r), undefined, host.RUNNER_OS);
+    assert.match(r.stderr, new RegExp(`${cores} cores`));
+    assert.match(r.stderr, /stays unset/);
+  }
+});
+
+test('build-jobs caps the share by memory: (RAM - kept) / (jobs per host x MB per rustc)', () => {
+  const W2 = { ...WINDOWS, PADDOCK_CI_CORES: '16', PADDOCK_CI_RAM_MB: '32600', PADDOCK_CI_JOBS_PER_HOST: '2' };
+  assert.equal(jobsOf(buildJobs(W2)), '8');
+  assert.equal(jobsOf(buildJobs({ ...W2, PADDOCK_CI_RAM_MB: '16384' })), '4'); // (16384 - 2048) / (2 x 1536)
+  assert.equal(jobsOf(buildJobs({ ...W2, PADDOCK_CI_RUSTC_MB: '4096' })), '3'); // (32600 - 2048) / (2 x 4096)
+  assert.equal(jobsOf(buildJobs({ ...MAC, PADDOCK_CI_RESERVED_CORES: '0', PADDOCK_CI_RESERVED_RAM_MB: '49152' })), '10');
+  // Without a RAM figure the cores decide.
+  const probeless = buildJobs({ ...W2, PADDOCK_CI_RAM_MB: 'x' });
+  assert.equal(jobsOf(probeless), '8');
+  assert.match(probeless.stderr, /no memory ceiling/);
+});
+
+test('build-jobs splits the share between the builds a job runs at once (cargo mutants --jobs N)', () => {
+  assert.equal(jobsOf(buildJobs(LINUX, ['2'])), '16');
+  assert.equal(jobsOf(buildJobs(MAC, ['2'])), '2');
+  assert.equal(jobsOf(buildJobs({ ...LINUX, PADDOCK_CI_BUILD_JOBS: '12' }, ['3'])), '4');
+  assert.equal(jobsOf(buildJobs(MAC, ['8'])), '1');
+  assert.notEqual(buildJobs(MAC, ['0']).status, 0);
+});
+
+test('build-jobs rejects nonsense and leading zeros (bash would read 010 as 8 and fail on 08), and warns when no core is left', () => {
+  for (const env of [
+    { PADDOCK_CI_BUILD_JOBS: '0' },
+    { PADDOCK_CI_JOBS_PER_HOST: 'two' },
+    { PADDOCK_CI_RESERVED_CORES: '-1' },
+    { PADDOCK_CI_RESERVED_CORES: '010' },
+    { PADDOCK_CI_RESERVED_CORES: '08' },
+    { PADDOCK_CI_RESERVED_RAM_MB: '01' },
+    { PADDOCK_CI_RUSTC_MB: '0' },
+  ]) {
+    const r = buildJobs({ ...MAC, ...env });
+    assert.notEqual(r.status, 0, JSON.stringify(env));
+    assert.match(r.stdout, /::error::PADDOCK_CI_(BUILD_JOBS|JOBS_PER_HOST|RESERVED_CORES|RESERVED_RAM_MB|RUSTC_MB) must be a whole number/);
+  }
+  assert.equal(jobsOf(buildJobs({ ...MAC, PADDOCK_CI_RESERVED_CORES: '0' })), '14');
+  const all = buildJobs({ ...MAC, PADDOCK_CI_CORES: '8' });
+  assert.equal(jobsOf(all), '1');
+  assert.match(all.stdout, /::warning::PADDOCK_CI_RESERVED_CORES \(10\) keeps all of this host's 8 cores/);
+  // Without a count of cores the variable stays unset (cargo's own default), and the step stays green.
+  const unknown = buildJobs({ ...MAC, PADDOCK_CI_CORES: 'many' });
+  assert.equal(unknown.status, 0);
+  assert.equal(jobsOf(unknown), undefined);
+});
+
+test('build-jobs logs on stderr, prints only the assignment, appends it to GITHUB_ENV, and probes this machine', () => {
+  const r = buildJobs(MAC);
+  assert.equal(r.stdout, 'CARGO_BUILD_JOBS=4\n');
+  assert.match(r.stderr, /^build-jobs: this host: 14 cores, 65536 MB of RAM/m);
+  const dir = mkdtempSync(join(tmpdir(), 'build-jobs-'));
+  const envFile = join(dir, 'env');
+  writeFileSync(envFile, '');
+  assert.equal(buildJobs({ ...MAC, GITHUB_ENV: envFile }).status, 0);
+  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\n');
+  rmSync(dir, { recursive: true, force: true });
+  // The real probes count something on this machine.
+  const real = buildJobs({ RUNNER_OS: 'macOS', PADDOCK_CI_RESERVED_CORES: '0' });
+  assert.match(real.stderr, /this host: [1-9]\d* cores, [1-9]\d* MB of RAM/);
+  assert.match(real.stdout, /^CARGO_BUILD_JOBS=[1-9]\d*$/m);
+});
+
+const workflowFiles = () => readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x));
+const uncommented = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+
+test('CI never pins the build jobs: only build-jobs sets CARGO_BUILD_JOBS, and no cargo command passes a fixed -j', () => {
+  const files = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(join(PADDOCK, dir), { withFileTypes: true })) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory()) walk(p);
+      else if (/\.(ya?ml|sh|mjs)$/.test(e.name)) files.push(p);
+    }
+  };
+  walk('.gitea');
+  walk('conformance/ci');
+  // The repo scripts the workflows run.
+  for (const f of workflowFiles()) {
+    for (const m of read(join(WORKFLOWS, f)).matchAll(/\b(scripts\/[\w./-]+\.(?:sh|mjs))\b/g)) if (existsSync(join(PADDOCK, m[1]))) files.push(m[1]);
+  }
+  const offenders = [];
+  for (const f of [...new Set(files)]) {
+    if (f === 'conformance/ci/build-jobs.sh') continue;
+    read(join(PADDOCK, f)).split('\n').forEach((line, i) => {
+      const code = line.replace(/^\s*(#|\/\/|rem\b).*$/i, '');
+      // A number (or a number as the fallback) for CARGO_BUILD_JOBS, in bash, cmd or YAML.
+      if (/CARGO_BUILD_JOBS["']?\s*(=|:)\s*["']?\d|CARGO_BUILD_JOBS:-\d/.test(code)) offenders.push(`${f}:${i + 1}: ${line.trim()}`);
+      // A fixed -j/--jobs on a cargo build or test. `cargo mutants --jobs N` is the number of mutants built at once; each
+      // build runs CARGO_BUILD_JOBS rustc, so the job runs N x that: the next test checks build-jobs splits the share by N.
+      if (/\bcargo\b(?!\s+mutants)[^\n]*\s(-j\s*|--jobs[ =])\d/.test(code)) offenders.push(`${f}:${i + 1}: ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(offenders, [], 'set build jobs with the build-jobs action (conformance/ci/build-jobs.sh) only');
+});
+
+test('a job that builds several mutants at once splits its build jobs between them first', () => {
+  let seen = 0;
+  for (const file of workflowFiles()) {
+    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+      const t = uncommented(job.text);
+      const m = /cargo mutants[^\n]*--jobs\s+"?(\$\w+|\d+)"?/.exec(t);
+      if (!m) continue;
+      seen++;
+      const before = t.slice(0, m.index);
+      const split = /uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/build-jobs\n(?:\s+if: [^\n]+\n)?\s+with:\n\s+split: ("?)([^\n"]+)\1\n[^]*$/.exec(before);
+      assert.ok(split, `${file} ${job.id}: build-jobs with split before cargo mutants --jobs`);
+      const want = /^\d+$/.test(m[1]) ? m[1] : '${{ inputs.jobs }}';
+      if (m[1] === '$JOBS') assert.match(t, /JOBS: \$\{\{ inputs\.jobs \}\}/, `${file} ${job.id}: JOBS is the jobs input`);
+      assert.equal(split[2], want, `${file} ${job.id}: the split is the --jobs number`);
+    }
+  }
+  assert.ok(seen >= 2, 'the mutants workflows are found');
+});
+
+test('every job that runs cargo sets its build jobs (build-jobs or setup-rust); a host job before it takes a slot', () => {
+  const builds = /\bcargo\s+(build|test|nextest|clippy|check|llvm-cov|mutants|fuzz|install|rustc|run|bench|doc|tauri)\b|\btauri build\b|actions\/(app-gates|tauri-bundle)\b|\bcargo\s+"\$\{[^}]+\}"\s+(clippy|test)\b/;
+  const missing = [];
+  for (const file of workflowFiles()) {
+    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+      const t = uncommented(job.text);
+      // A caller of a reusable workflow: the called workflow's jobs are checked themselves.
+      if (/^\s{4}uses: \.\//m.test(t)) continue;
+      // At least one of them unconditional (no `if:` of its own), so a skipped step never leaves the job without its jobs.
+      const unconditional = /- uses: \.\/(?:\.?paddock\/)?\.gitea\/actions\/(build-jobs|setup-rust)[^\n]*\n(?!\s+if:)/;
+      if (builds.test(t) && !unconditional.test(t)) missing.push(`${file} ${job.id}`);
+      const iso = t.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-isolation\s*\n/);
+      if (iso < 0 || !/runs-on:[^\n]*(macos|windows|\$\{\{)/.test(t)) continue;
+      const bj = t.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/build-jobs\b/);
+      assert.ok(bj >= 0 && bj < iso, `${file} ${job.id}: build-jobs before job-isolation (which builds paddock-dev with cargo)`);
+    }
+  }
+  assert.deepEqual(missing, [], 'these jobs run cargo without build-jobs or setup-rust');
+  const setup = read(join(ACTIONS, 'setup-rust', 'action.yml'));
+  assert.match(setup, /if \[ -z "\$\{CARGO_BUILD_JOBS:-\}" \]; then bash "\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\.\/conformance\/ci\/build-jobs\.sh"/);
+});
+
+test('every workflow step that runs the ui Playwright config provides every port variable that config requires on CI', () => {
+  const config = read(join(PADDOCK, 'ui', 'playwright.config.ts'));
+  const required = [...config.matchAll(/e2ePort\('([A-Z_]+)'/g)].map((m) => m[1]);
+  assert.ok(required.length >= 3, 'ui/playwright.config.ts names its port variables with e2ePort');
+  let checked = 0;
+  for (const f of readdirSync(WORKFLOWS).filter((n) => n.endsWith('.yml'))) {
+    const text = read(join(WORKFLOWS, f));
+    const uiShard = /^\s*working-directory: ui\s*$/m;
+    for (const step of text.split(/\n\s*- (?=name:|uses:|run:)/)) {
+      if (!/playwright test/.test(step) || !uiShard.test(step)) continue;
+      checked++;
+      for (const name of required) {
+        assert.match(step, new RegExp(`\\b${name}\\b`), `${f}: a step runs the ui Playwright config without setting ${name} (e2ePort refuses a default on CI)`);
+      }
+    }
+  }
+  assert.ok(checked >= 2, 'the check found the release workflows\' ui Playwright steps');
 });

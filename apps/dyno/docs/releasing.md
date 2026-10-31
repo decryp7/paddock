@@ -18,7 +18,7 @@ offered to users: updaters read `latest.json` of the *latest* release. The `rele
 - **Windows:** `Dyno_<version>_x64-setup.exe` (NSIS, per-user).
 - **macOS:** `Dyno_<version>_aarch64.dmg`, and with signing secrets also the `.app.tar.gz` the updater installs. The bundle is
   **ad-hoc signed** (`signingIdentity "-"` in `tauri.macos.conf.json`): `SMAppService` and launch agents refuse a
-  linker-signed bundle. It is not notarised: users open it once with right-click > Open. Developer ID signing and
+  linker-signed bundle. It is not notarised: users open it once through Privacy & Security > Open Anyway (twice, then an administrator password; macOS 26). Developer ID signing and
   notarisation are future work.
   While the build is ad hoc the **hardened runtime is off** (`"hardenedRuntime": false`, Paddock rule 23): ad-hoc code
   under the hardened runtime enforces library validation and cannot load a library signed by its vendor ("different
@@ -80,6 +80,10 @@ In this order, on one commit:
    release run fails without it. `main` is green.
 2. Run one **manual `dyno-release` with `gates: true`** on that commit (Actions > dyno-release > Run workflow, rule 25). It
    runs Dyno's legs of `ci.yml` (WebKit included) and builds the installers on all three systems.
+   Then confirm the run's verdict job says `installers: built` (all three `bundle (...)` jobs passed): a green run that says
+   `installers: not built` proves nothing about the release path (rule 54).
+2b. Run the scripted VM start check on those installers, on a fresh clone: `source ~/.zshenv; scripts/vm-smoke/vm-smoke.sh --app dyno --run <the run id>`
+   ([scripts/vm-smoke/README.md](../../../scripts/vm-smoke/README.md)). Attach its result file; a failed step blocks the tag.
 3. Run the install and update plan, rows 24a to 24i of [testing-manual.md](testing-manual.md#install-and-update-in-a-throwaway-vm),
    on those installers (the VM plan says how the test builds are made).
 4. Re-measure the overhead numbers in `docs/architecture.md` on a quiet machine (roadmap G13) and refresh `docs/screenshots`

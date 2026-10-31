@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, commitLintRange, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 /**
  * A paddock.ci.json process pattern as host-cleanup runs it: {tmp}, {build} and {slot} filled in by the real
@@ -381,6 +381,33 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     assert.equal(ciOutputs({}, []).any_app, false);
     assert.equal(ciOutputs({}, [{ app: 'x' }]).any_app, true);
     assert.equal(ciOutputs({}, [{ app: 'x' }]).apps, '[{"app":"x"}]');
+    assert.equal(ciOutputs({}, [], 'abc123').base, 'abc123');
+    assert.equal(ciOutputs({}, []).base, '', 'no base: the commit lint checks the head commit only');
+  });
+
+  test('commitLintRange lints only what a change adds, and skips tags and app gates', () => {
+    const Z = '0'.repeat(40);
+    assert.equal(commitLintRange({ event: 'pull_request', baseRef: 'main' }), 'origin/main..HEAD');
+    assert.equal(commitLintRange({ event: 'pull_request' }), null);
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'aaa', sha: 'bbb' }), 'aaa..bbb');
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/x', before: Z, sha: 'bbb' }), 'bbb^!', 'a new branch: the head commit');
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/x', before: '', sha: 'bbb' }), 'bbb^!');
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'gone', sha: 'bbb', known: () => false }), 'bbb^!', 'a force push: before is not in the clone');
+    assert.equal(commitLintRange({ event: 'workflow_dispatch', base: 'ccc', sha: 'bbb' }), 'ccc..bbb');
+    assert.equal(commitLintRange({ event: 'workflow_dispatch', sha: 'bbb' }), 'bbb^!');
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/tags/v1.0.0', before: Z, sha: 'bbb' }), null, 'a tag');
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/tags/dyno-v1.0.0', before: 'aaa', sha: 'bbb' }), null);
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'aaa', sha: 'bbb', app: 'dyno' }), null, 'an app tag call');
+    assert.equal(commitLintRange({ event: 'schedule', sha: 'bbb' }), null);
+  });
+
+  test('ci.yml has a commits job that asks commitLintRange for its range', () => {
+    const job = workflowJobs(readFileSync(join(ROOT, CI_FILE), 'utf8')).jobs.get('commits');
+    assert.ok(job, 'a commits job');
+    assert.match(job, /needs: \[plan\]/);
+    assert.match(job, /node scripts\/affected\.mjs --commit-range/);
+    assert.match(job, /fetch-depth: 0/);
+    for (const v of ['EVENT', 'REF', 'BEFORE', 'SHA', 'BASE_REF', 'PLAN_BASE', 'INPUT_APP']) assert.match(job, new RegExp(`${v}: \\$\\{\\{`), v);
   });
 });
 

@@ -718,6 +718,29 @@ Results: [Debrief](../apps/debrief/docs/performance.md#2026-10-29-incremental-re
 [Dyno release identity](../apps/dyno/docs/performance.md#2026-10-29-release-identity-of-the-rlib-only-crate-type-docslink-time);
 details: [research/2026-10-29-link-time.md](research/2026-10-29-link-time.md).
 
+## Test isolation (Debrief, 2026-10-29)
+- `import-range.spec.ts` failed now and then ("expected undefined to be ImportRangeDialog") in full `ng test` runs only.
+  `ImportRange` opens its dialog through `openLazy`, whose chunk arrives after an unknown number of event-loop turns; the
+  spec waited `settle(undefined, 2)`. On a loaded machine the dialog was not open yet. Earlier the same day `live/components.spec`
+  (commit a78de2d86) had patched `FakeDock.prototype.setTitle` and restored it only on the last line, so a failing `expect` leaked the patch.
+- **Wait on the condition, never on a count of event-loop turns.** `openDialog(dialogs)` (`testing/helpers.ts`) waits with
+  `vi.waitFor` and fails when no dialog opens. To prove a fix, model the slow case (a chunk that takes 25 turns) so the
+  old wait fails every time, not now and then.
+- **An optional chain never performs a test's action.** `dialogs.stack().at(-1)?.ref.close()` does nothing when the
+  dialog is missing, so the test passes or hangs on the next `await`.
+- **A prototype patch is always a `vi.spyOn` under `restoreMocks`,** also restored after each test by a global
+  `afterEach(vi.restoreAllMocks)` in `test-setup.ts` (specs share a page, `isolate: false`). Assigning to a prototype, or
+  `Object.defineProperty`/`assign` on one, is banned in specs by ESLint (rule 49, ER-21).
+- **Known gaps of the lint (Debrief only, today):** a prototype reached through a variable (`const proto = X.prototype;
+  proto.y = …`) and a patch on a shared object (`Object.defineProperty(navigator, …)`, `document`, `window`,
+  `globalThis`) are not flagged. **Follow-up branch (planned):** move the selectors into the shared
+  `@decryp7/paddock-eslint` preset, add a shared-object rule (fix: `vi.spyOn(obj, name, 'get')` or `vi.stubGlobal`) and
+  convert Debrief, Dyno and Pitcrew.
+  Non-dialog optional-chain actions (about 54 in Debrief specs, e.g. `buttons[1]?.click()`, `handlers[0]?.(…)`) are not
+  flagged yet; the follow-up bans `ExpressionStatement > ChainExpression` in specs, keeps cleanups such as
+  `getSelection()?.removeAllRanges()` with a disable comment, and converts the rest to `!` or `el()`. It also catches
+  `menu?.items[0]?.run()`.
+
 ## 2026-10-29: a "global" input must mean every build, or the branch runs everything (affected planner)
 
 `scripts/affected.mjs` treated the whole of `.gitea/`, the planner's own files, `.cargo/`, `lint/` and `conformance/(ci|release)/`
@@ -979,3 +1002,64 @@ clean runner; a leftover `ui/dist` in the working trees had hidden it. **Rule:**
 proved by building that app's installers (`<app>-release.yml` with gates on and the bundle built) before it lands on
 main (rule 54). The ci-actions test now checks that every release workflow whose app imports `@decryp7/paddock-ui`
 builds the UI.
+
+## A discovery file is a hint, never proof (2026-10-30, Dyno)
+Dyno's `agent.json` (the file that names the agent's pid and port) outlived its agent. The app read it, took it for a
+live agent, showed a false "Agent stopped" and looped on exit code 3. Separately, `Plan::Replace` deleted a
+file it no longer owned: it had read the file earlier and removed it later, after a newer agent had written its own.
+**Rule (53, amended):** a file that names a pid or port is only a hint. Act on it after a held lock or a live connection
+proves the process is there, and remove it only if it is still the same file (same pid and start time). This is rule 53's
+reusable-name rule applied to files.
+
+## A bug-fix review runs a mutation check (2026-10-30)
+Rule 5 asks for a failing test first, but a reviewer reading the diff cannot tell whether the new test would have
+failed without the fix: a test written after the fix may never have failed. **Rule (5, amended; user, 2026-10-30):**
+the reviewer of a bug fix runs a mutation check on the fix (`cargo mutants --in-diff <diff>` for Rust where available,
+otherwise, and for TypeScript, revert the fix and run the new test), in the reviewer's own worktree with a bounded run
+(`-p <crate>`, `--timeout-multiplier`, `CARGO_BUILD_JOBS=2`), and reports whether the test fails. **Follow-up, not
+built:** a CI job that runs `cargo mutants --in-diff` over the shared crates' changes, to be added after the releases.
+
+## A start window on a wall clock doubled Dyno's agent on a cold disk (2026-10-30, Dyno)
+In a fresh macOS VM (a 32 MB binary took 50 s to read) the first launch of Dyno 1.0 ran two `dyno-agent run` children
+on one `dyno.db`; after Quit one stayed as an orphan. The app's log showed the cause: the link gave up on its agent after
+a fixed 5 s (`SPAWN_WAIT`), started another after a 2 s backoff, and its launcher dropped the first process's handle when
+it stored the second, so Quit stopped only the newest. Nothing stopped a second agent either: no lock on the data folder,
+and a busy database looked damaged to the store, which moves a damaged file aside. **Rule:** a single-instance process
+holds an OS lock for its whole life (a file lock on its data folder) and a second one exits before it opens anything; a
+host waits for a child it started on the child's run state (ADR 0031), never starts another while it holds one, and ends
+it through the handle it holds (rule 53). Reproduce with a start gated by the test, not with load.
+
+**Follow-up (review of the hand-over, 2026-10-30):** a wait judged on run state still needs a way out the user can see.
+Three waits could show only "Starting..." forever: a service that "supervises" on paper (switched off in Login Items,
+job dropped), a child that runs but never writes its discovery file, and another agent holding the lock after its file
+was deleted. **Rule:** every wait without a time limit reports a cause and a Retry once it is long (ER-19), a "ready"
+discovery file must be newer than the wait or answer (a stale file caused exit-3 launch loops and a false "Agent
+stopped"), and a supervisor's claim is checked against the lock, which nothing can fake. Open: kickstart after hand-over,
+re-probing `RequiresApproval`, the `is_held` probe rate, the `/tmp/Dyno` fallback (ADR 0010 §11).
+
+## Five fixes in two days meant a supervisor with no owner and no state (2026-10-30, Dyno)
+Dyno's agent link needed five rounds of fixes on the release path (a fixed wait that doubled the agent, endless silent waits,
+a stale discovery file taken as ready, a launch before a Windows lock was released, a quit outcome read twice), each approved in
+review and each followed by a failure on another OS. The cause was not any one interleaving: the supervisor had no single
+owner and no explicit state. Five threads wrote 12 flags, "which wait are we in" was the function being executed, and each
+decision was assembled from several reads that other threads and the OS changed in between. **Rule:** a supervisor of a
+process (start, find, hand over, stop) is a pure `step(event) -> commands` machine with one owner thread; its phase says what
+it waits for; every answer from the world carries the number of the thing it is about (look, connect, child generation,
+connection) and a stale one is dropped; a child is held until its end is reported; a decision that must not change (the quit
+outcome) is taken once, in `step`, and stored; the owner never blocks (slow ports answer as events); every transition is
+published and tests wait on it, not on flags or sleeps. Prove the machine with a bounded model check of every interleaving,
+and prove the check by making each historical bug a mutant it must catch (Dyno ADR 0025). Two things the first prototype got
+wrong and a review caught: releasing the child before it is gone (a second agent while the first still runs), and an event
+without the generation it is about (an old child's exit taken for the new one's).
+
+## A fix in the shared crate reached nobody; the app copy had the bug (2026-10-31, family)
+Dyno 1.0's login blocker B4 (the app replaced its healthy launchd agent four times at every login) came from Dyno's
+`service_repair.rs`, ported from Pitwall. `paddock-service` already had the fix (its parser skips launchd's nested blocks),
+but no app used that part of it, and the copies in Pitwall and Pitcrew had the same defect. In the same week the Windows
+network-sandbox switch went into `paddock-chromium`, which no app depends on, and the EBADF fix turned out to be needed in two
+IPC endpoints. 37 of the 51 shared crates had no direct dependency from any app. Rules 42 and 43 said what to do once code is
+shared; nothing tracked the copies in between, the freeze sent quick fixes to the app copy only, and "deleted later" had no
+date. **Rule (55, ADR 0034):** every mechanism that exists more than once is listed in `docs/known-copies.toml`; a fix goes to
+the canonical implementation and every copy in the same change (a freeze does not stop it) or a copy is waived with a reason;
+each copy has an owner and a tag by which it is deleted, and that tag is refused while the copy exists. Before fixing a bug in
+any service, IPC, driver or UI helper, look it up in the register first.

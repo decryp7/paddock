@@ -5,7 +5,7 @@
 //! it.
 
 use crate::dto::{AgentState, AgentStatus};
-use crate::link::AgentLink;
+use crate::link::{AgentLink, Stall};
 use paddock_health::{Cause, Health, RepairAction, ServiceSpec};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -33,6 +33,33 @@ pub fn agent_problem(status: &AgentStatus) -> Option<Cause> {
                 .detail(status.message.clone().unwrap_or_default())
                 .code("dy.agent.failed"),
         ),
+    }
+}
+
+/// Why a long wait for the agent is shown on the chip (a "still starting" with its cause; Retry acts on it,
+/// [`AgentLink::retry`]). Not an error: the wait goes on, this is information and an action (ADR 0031).
+pub fn stall_problem(stall: Stall) -> Cause {
+    match stall {
+        Stall::WaitingForService => Cause::new("Dyno is waiting for the agent that your system starts at login.")
+            .hint(
+                "If it does not come, choose Retry to start Dyno's own agent, and check Dyno in System Settings, Login Items (macOS) \
+                 or the dyno-agent user service (Linux).",
+            )
+            .code("dy.agent.waiting-service"),
+        Stall::AgentNotAnswering => Cause::new("The Dyno agent is still starting.")
+            .hint("A slow disk or a busy computer can take a minute. If it stays, choose Retry to end it and start it again.")
+            .code("dy.agent.starting"),
+        Stall::ServiceNotAnswering => Cause::new("Dyno is waiting for the system to answer.")
+            .hint("The login service or the agent's files are not answering. Choose Retry to look again.")
+            .code("dy.agent.system-silent"),
+        Stall::AgentKeepsFailing => Cause::new("The Dyno agent keeps failing to start.")
+            .hint("Its log is in the Dyno data folder. Choose Retry to try again now; if it stays, reinstall Dyno.")
+            .code("dy.agent.keeps-failing"),
+        Stall::OtherAgentHolds => Cause::new("Another Dyno agent holds the data folder and has not answered.")
+            .hint(
+                "It may still be starting. If it stays, choose Retry; if the data folder is shared with another computer, quit Dyno there.",
+            )
+            .code("dy.agent.other-holds"),
     }
 }
 
@@ -74,16 +101,32 @@ impl<R: Runtime> Hub<R> {
             .get()
             .and_then(|a| a.try_state::<Arc<AgentLink>>().map(|l| l.inner().clone()))
             .ok_or_else(|| Cause::new("Dyno is still starting.").hint("Try again in a moment."))?;
-        let end = std::time::Instant::now() + REPAIR_WAIT;
-        while std::time::Instant::now() < end {
-            if link.connected() {
-                return Ok(());
-            }
-            std::thread::sleep(Duration::from_millis(200));
+        // A wait in progress (starting, the login service, another agent) acts on it; otherwise the link retries by itself.
+        link.retry();
+        // The wait is on the link's published state, not a poll. cap: a repair says "did not answer" after this long.
+        if link.wait_connected(REPAIR_WAIT) {
+            return Ok(());
         }
         Err(Cause::new("The Dyno agent did not answer.")
             .hint("Dyno keeps trying to start it. If it does not come back, reinstall Dyno.")
             .code("dy.agent.failed"))
+    }
+
+    /// Reports a long wait to the chip (with Retry), or that it is over.
+    pub fn report_stall(&self, stall: Option<Stall>) {
+        let Some(health) = self.app.get().and_then(|a| a.try_state::<Arc<Health>>().map(|h| h.inner().clone())) else {
+            return;
+        };
+        match stall {
+            Some(stall) => {
+                health.down(AGENT, stall_problem(stall), Some(RepairAction::Retry));
+            }
+            None => {
+                if health.is_in_outage(AGENT) {
+                    health.ok(AGENT);
+                }
+            }
+        }
     }
 
     /// Reports the link's status to the chip: an outage with its cause, or the recovery.
@@ -116,6 +159,27 @@ mod tests {
     fn a_running_or_starting_agent_is_not_an_outage() {
         assert!(agent_problem(&status(AgentState::Running, None)).is_none());
         assert!(agent_problem(&status(AgentState::Starting, None)).is_none());
+    }
+
+    #[test]
+    fn a_long_wait_is_shown_with_its_cause_and_a_way_out_but_is_not_an_error_state_of_its_own() {
+        for (stall, code, word) in [
+            (Stall::WaitingForService, "dy.agent.waiting-service", "login"),
+            (Stall::AgentNotAnswering, "dy.agent.starting", "Retry"),
+            (Stall::OtherAgentHolds, "dy.agent.other-holds", "data folder"),
+            (Stall::ServiceNotAnswering, "dy.agent.system-silent", "system"),
+            (Stall::AgentKeepsFailing, "dy.agent.keeps-failing", "failing"),
+        ] {
+            let cause = stall_problem(stall);
+            assert_eq!(cause.code.as_deref(), Some(code));
+            assert!(
+                cause.message.contains(word) || cause.hint.as_deref().is_some_and(|h| h.contains(word)),
+                "{cause:?}"
+            );
+            assert!(cause.hint.as_deref().is_some_and(|h| h.contains("Retry")), "{cause:?}");
+        }
+        // The plain "still starting" status stays no outage: only the stall the link reports after a while is one.
+        assert!(agent_problem(&status(AgentState::Starting, Some("still starting"))).is_none());
     }
 
     #[test]

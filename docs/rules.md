@@ -17,6 +17,12 @@ changes here, every app's copy is updated in the same change.
    Lint and type-check the touched files before every push.
 5. **Every bug fix starts with a failing regression test.** A test-only failure is fixed properly (deterministic, no
    sleeps), never silently skipped.
+   A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30), in their own worktree: for Rust,
+   `cargo mutants --in-diff <diff> -p <crate> --timeout-multiplier 3` with `CARGO_BUILD_JOBS=2` (install once with
+   `cargo install cargo-mutants --locked`); for TypeScript, revert the fix and run the new test. The review reports whether
+   the new test fails without the fix; a test that still passes proves nothing and is sent back. (A `cargo mutants
+   --in-diff` CI job on the shared crates comes after the releases; see
+   [lessons.md](lessons.md#a-bug-fix-review-runs-a-mutation-check-2026-10-30).)
 6. **Tests never hard-code the app version;** they read it from its single source and check its shape.
 7. **Tests never touch the user's machine:** no real launchd/Login Items/services, no installed apps, never the
    installed Google Chrome (pinned Chrome for Testing or an explicit env var only), no `~/Documents`, `~/Desktop`,
@@ -149,6 +155,18 @@ changes here, every app's copy is updated in the same change.
     decision or a budget. *Why:* results were scattered across ADRs, branches and expiring job logs, often without
     machine, load or build, so they could not be compared or reproduced, and stale numbers kept being quoted.
 
+## Test isolation (user, 2026-10-29)
+49. **Specs never wait a fixed number of event-loop turns and never leave a patch behind.** Specs of one bundle share a
+    page (the Angular builder runs Vitest with `isolate: false`), so: (a) wait on the condition, never on a count of
+    turns or timers: once `fix/debrief-import-range-flake` lands, Debrief's `openDialog()` (`testing/helpers.ts`) waits
+    with `vi.waitFor` for a lazily loaded dialog and fails when none opens; (b) an optional chain never performs a
+    test's action (no `stack().at(-1)?.ref.close()`): a missing thing must fail the test; (c) a patch on a prototype is
+    a `vi.spyOn`, put back by `restoreMocks` and by a global `afterEach(vi.restoreAllMocks)`, never an assignment,
+    `Object.defineProperty` or `Object.assign` on it. Once that branch lands, Debrief's ESLint (`no-restricted-syntax`
+    for specs) enforces (b) and (c); the other apps follow. *Why:* a fixed wait and a leaked patch each made a spec
+    fail now and then, only in the full run
+    ([lessons.md](lessons.md#test-isolation-debrief-2026-10-29)).
+
 ## CI economy (user, 2026-10-29)
 50. **CI runs only what a change needs, once.**
     (a) At most one CI run per branch head. Before dispatching, cancel any queued run on the same branch with an older head.
@@ -217,11 +235,16 @@ changes here, every app's copy is updated in the same change.
     `TerminateProcess`, `TerminateJobObject`, open ADR 0033 follow-ups) enforce it. ADR
     [0033](adr/0033-processes-by-identity-never-by-a-bare-pid.md); ADR [0023](adr/0023-tests-never-free-a-port-they-probe.md)
     is the same rule for ports.
+    A discovery file, a file that names a pid or a port (Dyno's `agent.json`), is only a hint: act on it only after a held
+    lock or a live connection proves the process is there, and remove it only if it is still the same file (same pid and
+    start time), never because it was the file read earlier.
     *Why:* Windows hands a freed pid on at once. `kill_tree` killed the pids of a stale snapshot, which can end another
     test's Chrome helper; the same mistake was in four shapes in five apps. (It was suspected of causing the Windows
     `ERR_ABORTED` failures; the suspected cause was disproved by run 7158; the flake has another cause, ADR 0033 WP-4.)
+    Dyno's stale `agent.json` made the app say "Agent stopped" and loop on exit 3 for a process that was gone or replaced
+    ([lessons.md](lessons.md#a-discovery-file-is-a-hint-never-proof-2026-10-30-dyno)).
 
-## Release path (user, 2026-10-31)
+## Release path (user, 2026-10-30)
 54. **Every change that touches an app's release path builds that app's installers before it lands on main.** The release
     path is the release workflow, the shared app-release workflow, the bundle and prepare steps, the Tauri config and the
     app's imports of shared packages.
@@ -231,6 +254,31 @@ changes here, every app's copy is updated in the same change.
     imports `@decryp7/paddock-ui` builds the UI.
     *Why:* Dyno's release workflow had no `prepare: npm run build -w ui`. Tests passed, but every installer build failed
     on a clean runner; a leftover `ui/dist` had hidden it.
+
+## Copies (user, 2026-10-31; ADR 0034, rule 40)
+55. **One implementation per mechanism; copies are registered, fixed together and expire.** A mechanism that exists more
+    than once (a shared crate or package and an app's copy, or two apps' copies) is listed in `docs/known-copies.toml` with
+    its canonical implementation and, for each copy, the app that deletes it and the tag by which it is gone.
+    (a) A change that touches one member of a listed mechanism (its non-test source) makes the same change in every other
+    copy and in a built canonical, each with its own failing test first (rule 11), or waives a member with the trailer
+    `Copies-waived: <mechanism-id> <path>: <reason>` in a commit that touches the mechanism (`*` for the path only when
+    the mechanism has at most two members besides wiring). Hand-written plugin wiring
+    (`kind = "wiring"`) is held to its delete-by tag only.
+    (b) A shared-code freeze (rule 1) does not freeze fixes to a listed mechanism: the fix lands in the canonical
+    implementation and every copy in the same change. The shared API stays frozen.
+    (c) A new copy is allowed only with its register entry, a delete-by tag and the reason, in the same change. An entry
+    leaves the register only together with its copy's files, or with the trailer `Copies-removed: <mechanism-id> <path>:
+    <reason>`.
+    (d) A tag is refused while its app still holds a copy whose delete-by tag it has reached. A delete-by date moves only
+    with the trailer `Copies-date: <mechanism-id> <path>: <old> -> <new>: approved: <coordinator|user>: <reason>`; a
+    move to a later release line (a higher major or minor version) needs `approved: user`.
+    (e) Enforced by conformance check C58 (follow-up, ADR 0034 WP-1). A register-only change is docs-only and gets no CI
+    run (rule 50), so the steward runs `node conformance/bin/paddock-conformance.mjs copies --check-register` locally
+    before it lands. Batches run `copies --range <base>..HEAD` before pushing, and the steward runs `copies --tag <tag>`
+    before creating a tag. Until C58 exists, the reviewer and the steward check the register by hand.
+    *Why:* launchd's job report existed four times. The shared one already skipped nested blocks; Dyno's copy did not and
+    replaced its healthy agent at every login (Dyno 1.0 blocker B4). The Windows network-sandbox fix of the browser driver
+    sat in the one copy no app used, and the EBADF fix had to be made in two IPC endpoints.
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:

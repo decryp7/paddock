@@ -1107,6 +1107,7 @@ dependencies = [
  "log",
  "paddock-workspace-hack",
  "sysinfo",
+ "thiserror",
  "windows-sys 0.61.2",
 ]
 

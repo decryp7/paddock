@@ -911,3 +911,187 @@ fn the_sampler_runs_as_live_work() {
     }
     assert_eq!(role, Some(dyno_platform::priority::ThreadRole::Live));
 }
+
+// ------------------------------------------------------------------------------------------------- one agent per folder
+// A second agent on the same data folder refuses to start, says why, and leaves the first one's discovery file and
+// history alone (a Dyno 1.0 test VM ran two agents on one `dyno.db` after a slow first start).
+
+fn start_on(dirs: &Dirs) -> Result<Running, String> {
+    let fake = Fake::new();
+    fake.add_process(process(100, "busy", 60.0));
+    Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).map_err(|e| e.to_string())
+}
+
+/// Starts an agent on `dirs` once the lock is free: a refusal for "already running" is waited out (the holder is gone, a forked
+/// child may still carry a copy of the lock's descriptor until it execs); any other failure is the test's.
+fn start_when_the_folder_is_free(dirs: &Dirs) -> Running {
+    let end = std::time::Instant::now() + Duration::from_secs(40); // hang guard of the harness only
+    loop {
+        match start_on(dirs) {
+            Ok(running) => return running,
+            Err(e) if e.contains("already running") && std::time::Instant::now() < end => std::thread::yield_now(),
+            Err(e) => panic!("the folder never became free: {e}"),
+        }
+    }
+}
+
+#[test]
+fn a_second_agent_on_the_same_data_folder_refuses_to_start_and_says_so() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    let first = start_on(&dirs).unwrap();
+    let before = dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap();
+
+    let second = start_on(&dirs);
+    let message = match second {
+        Ok(r) => {
+            r.stop();
+            panic!("a second agent started on the same data folder");
+        }
+        Err(e) => e,
+    };
+    assert!(message.contains("already running"), "{message}");
+    assert!(
+        message.contains("another computer"),
+        "a shared network home can hold it from elsewhere: {message}"
+    );
+    // The agent's log file says it too (the app starts the agent with stderr discarded; a service's stderr is elsewhere).
+    let log = std::fs::read_to_string(dirs.logs().join("agent.log")).unwrap_or_default();
+    assert!(log.contains("already running"), "agent.log: {log:?}");
+    assert_eq!(
+        dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap(),
+        before,
+        "the refused agent left the first one's discovery file alone"
+    );
+
+    // Once the first one is gone, the folder is free again (the lock ends with its holder). "Gone" is the moment the OS lets
+    // the lock go, not the moment `stop` returns: a program the agent just started (the hardware readers run `pmset` and the like
+    // on a background thread) holds a copy of every descriptor open at its fork, the lock's included, until it execs, and on a
+    // loaded macOS runner that exec can take a while. So the third start waits on the lock being free, as the lock's own test does.
+    first.stop();
+    let third = start_when_the_folder_is_free(&dirs);
+    assert_ne!(
+        dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap().endpoint,
+        before.endpoint
+    );
+    third.stop();
+}
+
+#[test]
+fn a_folder_that_cannot_lock_still_runs_the_agent_but_says_so_in_the_log_and_the_activity() {
+    use dyno_agent::instance::LockError;
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    let fake = Fake::new();
+    fake.add_process(process(100, "busy", 60.0));
+    let unsupported = LockError::Io {
+        path: dirs.instance_lock(),
+        source: std::io::Error::new(std::io::ErrorKind::Unsupported, "file locking is not supported here"),
+    };
+    let running = Running::start_with_lock(
+        dirs.clone(),
+        fake.platform(),
+        Box::new(fake.clone()),
+        Box::new(|_| Ok(())),
+        dyno_agent::disk::DiskPorts::none(),
+        Err(unsupported),
+    )
+    .unwrap();
+    let log = std::fs::read_to_string(dirs.logs().join("agent.log")).unwrap_or_default();
+    assert!(log.contains("not supported"), "agent.log: {log:?}");
+    let (peer, _) = connect(&dirs).unwrap();
+    let Reply::Activities(entries) = ask(&peer, Request::Activity { limit: 50 }).unwrap() else {
+        panic!("not activities")
+    };
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.title.contains("second agent") && e.detail.contains("not supported")),
+        "{entries:?}"
+    );
+    running.stop();
+}
+
+#[test]
+fn agents_on_different_data_folders_run_side_by_side() {
+    let tmp = tempfile::tempdir().unwrap();
+    let a = start_on(&Dirs::at(tmp.path().join("a"))).unwrap();
+    let b = start_on(&Dirs::at(tmp.path().join("b"))).unwrap();
+    a.stop();
+    b.stop();
+}
+
+/// A child between its fork and its exec holds a copy of every descriptor open at the fork, the lock's included (it is closed
+/// at the exec, `O_CLOEXEC`). The agent starts programs on background threads (the hardware readers), so the OS can keep the data
+/// folder locked for a while after the agent that held it is gone; a loaded macOS runner showed it (the third start of
+/// `a_second_agent…` was refused). This holds a child in that state on purpose, without a clock: it blocks on a pipe the test
+/// closes.
+#[cfg(unix)]
+#[test]
+#[expect(
+    unsafe_code,
+    reason = "pipe(2), read(2) and write(2) in the child between fork and exec, async-signal-safe calls only"
+)]
+#[expect(clippy::disallowed_methods, reason = "the test starts a trivial program to hold a forked child")]
+fn a_child_forked_before_it_execs_keeps_the_folder_locked_until_it_does_and_the_next_start_waits() {
+    use std::os::unix::process::CommandExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    let first = start_on(&dirs).unwrap();
+
+    let mut ready = [0i32; 2];
+    let mut release = [0i32; 2];
+    // SAFETY: two fresh pipes; the descriptors are closed below.
+    unsafe {
+        assert_eq!(libc::pipe(ready.as_mut_ptr()), 0);
+        assert_eq!(libc::pipe(release.as_mut_ptr()), 0);
+    }
+    let (ready_w, release_r, release_w) = (ready[1], release[0], release[1]);
+    let forker = std::thread::spawn(move || {
+        let mut cmd = std::process::Command::new("true");
+        // SAFETY: only `write` and `read` run in the child before the exec.
+        unsafe {
+            cmd.pre_exec(move || {
+                let byte = 1u8;
+                libc::write(ready_w, std::ptr::addr_of!(byte).cast(), 1);
+                // (its own copy of the write end would keep the read from ever ending)
+                libc::close(release_w);
+                let mut b = 0u8;
+                libc::read(release_r, std::ptr::addr_of_mut!(b).cast(), 1);
+                Ok(())
+            });
+        }
+        cmd.status().unwrap();
+    });
+    // The child has forked (it says so) and now waits, holding the descriptors it was born with.
+    let mut b = 0u8;
+    // SAFETY: reads one byte from our own pipe.
+    assert_eq!(unsafe { libc::read(ready[0], std::ptr::addr_of_mut!(b).cast(), 1) }, 1);
+
+    first.stop();
+    assert!(
+        dyno_agent::instance::is_held(&dirs),
+        "the stopped agent's lock should still be held by the forked child's copy of the descriptor"
+    );
+    match start_on(&dirs) {
+        Ok(r) => {
+            r.stop();
+            panic!("an agent started while a forked child still carried the lock");
+        }
+        Err(refused) => assert!(refused.contains("already running"), "{refused}"),
+    }
+
+    // The child execs (the read ends), its copy closes, the lock is free: the waiting start succeeds.
+    // SAFETY: closes our write end of the release pipe, which unblocks the child's read.
+    unsafe {
+        libc::close(release[1]);
+    }
+    forker.join().unwrap();
+    start_when_the_folder_is_free(&dirs).stop();
+    // SAFETY: closes the remaining ends.
+    unsafe {
+        libc::close(ready[0]);
+        libc::close(ready[1]);
+        libc::close(release[0]);
+    }
+}

@@ -7,11 +7,11 @@ rides on it. The decisions behind it are [ADR 0001](adr/0001-plugin-platform-cra
 code does.
 
 Status: the code read at `origin/main` `dfc9cdc94` (2026-10-30); the design read at the ADR commit as merged,
-`286f49dab`, whose decisions are dated 2026-10-31.
+`286f49dab`, whose decisions are dated 2026-10-30.
 
 - **Built** means it is in the code on `main`; every such statement cites the file and line.
-- **Designed** means it is decided in ADR 0001 as revised on 2026-10-31 (branch `docs/adr-plugin-platform` at
-  `a7c391053`) or in [ADR 0031](adr/0031-patience-not-wall-clocks.md) (with its 2026-10-31 amendment on that branch), and
+- **Designed** means it is decided in ADR 0001 as revised on 2026-10-30 (branch `docs/adr-plugin-platform` at
+  `a7c391053`) or in [ADR 0031](adr/0031-patience-not-wall-clocks.md) (with its 2026-10-30 amendment on that branch), and
   not built yet. Those parts are marked *Designed* where they appear.
 
 Paths are relative to the repository root. `paddock-ipc` is `crates/paddock-ipc/src/`, the plugin API is
@@ -378,13 +378,13 @@ extensible part in a `Json` value. Section 16 lists two places whose doc comment
 - **No compatibility across a major, binary or source.** A plugin built for an older major is refused at the handshake
   and from its manifest (`Refusal::PluginTooOld`), and Debrief's protocol 1 is refused as no longer supported
   (`Refusal::Legacy`). There is no binary legacy mode and no source shim; Debrief removes old installed plugins on the
-  first start of 1.2 (ADR 0001 and ADR 0003 at `docs/adr-plugin-platform` `a7c391053`, user decision 2026-10-31). The
+  first start of 1.2 (ADR 0001 and ADR 0003 at `docs/adr-plugin-platform` `a7c391053`, user decision 2026-10-30). The
   frozen protocol-1 program `paddock-plugin-fixture-v1` keeps the refusal tested
   (`crates/paddock-plugin-test/src/bin/fixture_v1.rs`; the expected text is asserted in
   `crates/paddock-plugin-host/tests/it/faults.rs:240`).
 - **Support window for the previous major: none before v1.** Whether a later major keeps the previous one working for a
   while is to be decided by an ADR once the platform has shipped a major to third parties (same source). An earlier draft
-  of that revision kept a source-level shim for two minor releases; it was withdrawn on 2026-10-31.
+  of that revision kept a source-level shim for two minor releases; it was withdrawn on 2026-10-30.
 
 ## 6. Message model
 

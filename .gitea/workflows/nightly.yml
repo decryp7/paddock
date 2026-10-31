@@ -4,7 +4,8 @@
 #
 # The night's run is skipped while main is unchanged since the last fully green nightly (the plan action's marker), and a
 # fully green run records that marker (nightly-mark). Imported apps add their own nightly jobs here (Debrief's bench,
-# corpus, fuzz and mutants, scoped to apps/debrief).
+# corpus, fuzz and mutants, scoped to apps/debrief). The installers-<app> jobs build every released app's installers (no publish) and the
+# verdict job fails the night when one was not built.
 
 name: nightly
 
@@ -104,6 +105,9 @@ jobs:
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
 
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
+
       # A slot of the host (job isolation; after Git bash on Windows): setup-rust's sccache folder and port are this job's.
       - uses: ./.gitea/actions/job-isolation
 
@@ -146,6 +150,219 @@ jobs:
         if: always()
         with:
           mode: release
+
+  # Rule 54, "green that proves something": the installers of every released app, built every night with nothing published (the
+  # release job of app-release.yml runs only for a tag). They need only installers-gate, a job that always runs: a skipped need
+  # skips a reusable-workflow job on this Gitea whatever its `if` says, so nothing here waits on a job that can be skipped.
+  # The gate skips the night while main, the toolchain image (ci-image/) and the pinned Rust and Node (rust-toolchain, .nvmrc) are
+  # unchanged since the last nightly that built every installer (rule 50); installers-mark records that. The host runners' own Xcode,
+  # MSVC and rustc are not visible from this Linux job, so a change of those alone does not wake the night: run the nightly by hand
+  # after upgrading a host. Pushes to main build no installers (the nightly does), the cheaper way to keep one marker honest.
+  # The inputs are copied from each app's installers job in <app>-release.yml; conformance/test/release-verdict.test.mjs fails when
+  # they drift apart. Debrief builds its installers in debrief.yml (its schedule has `full`), the demos have manual releases only.
+  installers-gate:
+    name: installers gate (main or the toolchain image changed since the last nightly build?)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: built
+        if: github.event_name == 'schedule'
+        uses: actions/cache/restore@v4
+        with:
+          path: .nightly-installers
+          key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**', 'rust-toolchain*', '.nvmrc') }}
+          lookup-only: true
+      - id: decide
+        shell: bash
+        env:
+          HIT: ${{ steps.built.outputs.cache-hit }}
+        run: |
+          if [ "$HIT" = true ]; then echo "run=false" >> "$GITHUB_OUTPUT"; echo "::notice::main and the toolchain image are unchanged since the last nightly that built the installers; skipping."
+          else echo "run=true" >> "$GITHUB_OUTPUT"; fi
+
+  installers-dyno:
+    name: installers (Dyno, no publish)
+    needs: [installers-gate]
+    if: ${{ needs.installers-gate.outputs.run == 'true' }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: dyno
+      app-name: Dyno
+      app-dir: apps/dyno/app
+      cargo-dir: apps/dyno
+      tag-prefix: dyno-
+      latest-tag: dyno-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Dyno now updates from the Paddock releases, which a copy installed before this version does not look at."
+      # Dyno's UI imports the shared library from ui/dist, which the app build (Tauri's beforeBuildCommand) needs.
+      prepare: npm run build -w ui
+      cliff-config: apps/dyno/cliff.toml
+      # The first release has no earlier dyno-v* tag, and crates/** and ui/** reach back through the whole monorepo: its notes
+      # are the CHANGELOG's [1.0.0] section. From dyno-v1.0.1 on git-cliff lists the commits since the previous tag.
+      first-release-changelog: apps/dyno/CHANGELOG.md
+      cliff-paths: |
+        apps/dyno/**
+        crates/**
+        ui/**
+      # Every sidecar (bundle.externalBin) is started from the built macOS app with --version, which exits 0 (the old
+      # macos-verify-bundle.sh ran the same); dyno-agent and the dyno command have no --self-test.
+      sidecars: |
+        dyno-agent:--version
+        dyno:--version
+      # Run paths of the packaged binaries, and the executables a package must carry, on Linux and macOS; on macOS the agent
+      # also measures once from the built app (read-only).
+      bundle-check: apps/dyno/scripts/check-bundle.sh
+      setup-node: false
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+  installers-spotter:
+    name: installers (Spotter, no publish)
+    needs: [installers-gate]
+    if: ${{ needs.installers-gate.outputs.run == 'true' }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: spotter
+      app-name: Spotter
+      app-dir: apps/spotter/app
+      cargo-dir: apps/spotter
+      tag-prefix: spotter-
+      latest-tag: spotter-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Spotter now updates from the Paddock releases, which a copy installed before this version does not look at."
+      # Spotter's UI imports the shared library from ui/dist, which the app build needs.
+      prepare: npm run build -w ui
+      cliff-config: apps/spotter/cliff.toml
+      cliff-paths: |
+        apps/spotter/**
+        crates/**
+        ui/**
+      # Spotter bundles no sidecar (no bundle.externalBin), so the macOS verify has none to start; the seal, the hardened-runtime
+      # and TeamIdentifier checks on the .app and the DMG still run. A sidecar added later is read from tauri.conf.json.
+      setup-node: false
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+  installers-pitcrew:
+    name: installers (Pitcrew, no publish)
+    needs: [installers-gate]
+    if: ${{ needs.installers-gate.outputs.run == 'true' }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: pitcrew
+      app-name: Pitcrew
+      app-dir: apps/pitcrew/app
+      cargo-dir: apps/pitcrew
+      tag-prefix: pitcrew-
+      latest-tag: pitcrew-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Pitcrew now updates from the Paddock releases, which a copy installed before this version does not look at."
+      cliff-config: apps/pitcrew/cliff.toml
+      cliff-paths: |
+        apps/pitcrew/**
+        crates/**
+        ui/**
+      # --version: Pitcrew's service has no --self-test; its --version loads every library and exits 0.
+      sidecars: pitcrew-service:--version
+      setup-node: false
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+  installers-pitwall:
+    name: installers (Pitwall, no publish)
+    needs: [installers-gate]
+    if: ${{ needs.installers-gate.outputs.run == 'true' }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: pitwall
+      app-name: Pitwall
+      app-dir: apps/pitwall/app
+      cargo-dir: apps/pitwall
+      tag-prefix: pitwall-
+      latest-tag: pitwall-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Pitwall now updates from the Paddock releases, which a copy installed before this version does not look at."
+      cliff-config: apps/pitwall/cliff.toml
+      cliff-paths: |
+        apps/pitwall/**
+        crates/**
+        ui/**
+      # --version: pitwall-server has no --self-test; its --version starts the binary from the built app and exits 0 (the old
+      # macos-verify-bundle.sh ran the same).
+      sidecars: pitwall-server:--version
+      setup-node: false
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+  installers-verdict:
+    name: installers verdict (the nightly built them, or it fails)
+    needs: [installers-gate, installers-dyno, installers-spotter, installers-pitcrew, installers-pitwall]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.gitea/actions/release-verdict
+        with:
+          app: dyno
+          plan-run: ${{ needs.installers-gate.outputs.run }}
+          release-result: ${{ needs.installers-dyno.result }}
+      - uses: ./.gitea/actions/release-verdict
+        with:
+          app: spotter
+          plan-run: ${{ needs.installers-gate.outputs.run }}
+          release-result: ${{ needs.installers-spotter.result }}
+      - uses: ./.gitea/actions/release-verdict
+        with:
+          app: pitcrew
+          plan-run: ${{ needs.installers-gate.outputs.run }}
+          release-result: ${{ needs.installers-pitcrew.result }}
+      - uses: ./.gitea/actions/release-verdict
+        with:
+          app: pitwall
+          plan-run: ${{ needs.installers-gate.outputs.run }}
+          release-result: ${{ needs.installers-pitwall.result }}
+
+  installers-mark:
+    name: mark the nightly that built every installer
+    needs: [installers-dyno, installers-spotter, installers-pitcrew, installers-pitwall]
+    if: ${{ github.event_name == 'schedule' && success() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir -p .nightly-installers && echo "${{ github.sha }}" > .nightly-installers/sha
+        shell: bash
+      - uses: actions/cache/save@v4
+        with:
+          path: .nightly-installers
+          key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**', 'rust-toolchain*', '.nvmrc') }}
 
   mark:
     name: mark the green nightly

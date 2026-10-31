@@ -14,6 +14,7 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `app-gates` | one app's matrix leg in the monorepo: its `paddock.ci.json` commands and the Rust gates of its Cargo workspace, only the halves the change reaches (ADR 0014 §6); on Windows and macOS legs only the Rust gates that one OS cannot decide for all | the per-app `shell-demo-app`/`workbench-demo-app` jobs and, at import, each app's `build.yml` |
 | `plan` | skip a nightly while main is unchanged since a green nightly; skip a main push whose commit is tagged | Debrief's `plan` job |
 | `nightly-mark` | record a fully green nightly (the marker `plan` looks up) | Debrief's `nightly-mark` job |
+| `release-verdict` | state in the job summary whether a release run built installers; fail a nightly, manual or tag run that built none | (new: rule 54, issues research 2026-10-30 pattern E) |
 | `cache-restore`, `cache-save` | the restore, then save-always cache pattern: a failing run still warms the cache; saved only when the key had no exact hit | the `actions/cache` blocks in every job |
 | `setup-rust` | toolchain with components and targets, sccache when the runner has it (shared Redis backend on every OS, `vars.SCCACHE_REDIS_ENDPOINT`/`_DB`; sccache is `RUSTC_WRAPPER` itself, never a script around it; a job with a build folder outside its checkout sets it with `--config build.target-dir=...`, not `CARGO_TARGET_DIR`, which sccache hashes), the Tauri Linux libraries | `dtolnay/rust-toolchain` + apt lines |
 | `job-isolation` | a host job's slot and its own temp folder (see Job isolation below): `acquire` first, `release` last with `if: always()`; nothing in a container | each job's ad hoc `~/.paddock-ci` paths |
@@ -25,6 +26,7 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `sccache-stats` | `sccache --show-stats` in the job log (last step, `if: always()`; composite actions have no post step) | new |
 | `setup-node` | Node from `app/.nvmrc`, npm cache | `actions/setup-node` blocks |
 | `strip-signing-keys` | whitespace out of the Tauri keys for the following steps (rule 25, C06) | inline `tr -d` |
+| `build-jobs` | `CARGO_BUILD_JOBS` = the smaller of (the host's cores − the cores kept for other work) / the jobs the host runs at once and (its RAM − the RAM kept) / (jobs per host × 1.5 GB per rustc), divided by `split` (the builds the job runs at once: `cargo mutants --jobs N`). Runner `runner.envs`: `PADDOCK_CI_JOBS_PER_HOST`, `PADDOCK_CI_RESERVED_CORES`, `PADDOCK_CI_RESERVED_RAM_MB`, `PADDOCK_CI_RUSTC_MB`, or an exact `PADDOCK_CI_BUILD_JOBS`; else the class's layout: macOS 1 job with 10 cores kept for the agents that share the developer Mac (5 × 2, ER-24: 4); Linux (16 cores, 4 jobs at once) and Windows (8 cores, 2 jobs at once) unset (cargo's default, every core, as before) until an A/B of job durations decides their share. One implementation, `conformance/ci/build-jobs.sh` (logs the host's cores and RAM). An early step of every job that runs cargo (before `job-isolation`, which builds paddock-dev); `setup-rust` runs it when no step did. Nothing else sets `CARGO_BUILD_JOBS` or a fixed cargo `-j` (conformance tests) | `CARGO_BUILD_JOBS=4` (macOS) and `=8` (Windows) in each workflow; the agents' local cap of 2 (ER-24) never applies on CI |
 | `build-env` | `PADDOCK_BUILD_COMMIT` and `PADDOCK_BUILD_DATE` for the About page (`option_env!`) | nothing set them before |
 | `tauri-bundle` | `tauri build` with or without updater signing (hardened runtime on only with a real Apple identity), `npm ci` at `root`, installers in `dist/`, version check; for NSIS, no shipped .exe or .dll imports the VC++ runtime (ADR 0032) | Pitwall `scripts/ci/tauri-bundle.sh`, Pitcrew's bundle step |
 | `macos-verify` | `codesign --verify --deep --strict` on the .app and the DMG, sidecars with `--self-test` (rule 23) | `macos-verify-bundle.sh` copies |
@@ -56,8 +58,7 @@ An app on the kit has no gates workflow of its own and no copy of a kit script. 
    `processPatterns` (`pkill -f` patterns for the test processes `host-cleanup` ends on a host; each is anchored on a folder of the job: `{tmp}` its own temp folder, `{build}` its build folder, `{slot}` its slot in a kept folder's name, e.g. `{build}[/\\]debug[/\\]pitwall-server`, never a bare program or runner name; there are no exact process names, which would match every job on the host). Remove `workflow`: an app with a `workflow` is not a leg.
    An app with host legs needs `include = [{ path = "ci.toml", optional = true }]` in its `.cargo/config.toml` and `.cargo/ci.toml`
    in its `.gitignore` (`build-folder` fails the leg otherwise).
-2. **`.gitea/workflows/<app>-release.yml`** is the thin caller (copy `pitcrew-release.yml`): triggers (push to main, `<app>-v*` tag,
-   nightly, manual), a `plan` job (the shared `plan` action with `app`, `tag-pattern: <app>-v*`: affected.mjs for the app, and the skip of a main push whose commit carries the tag), a `gates` job that
+2. **`.gitea/workflows/<app>-release.yml`** is the thin caller (copy `pitcrew-release.yml`): triggers (`<app>-v*` tag, manual; no push to main and no schedule: `nightly.yml` builds the installers), a `plan` job (the shared `plan` action with `app`, `tag-pattern: <app>-v*`: affected.mjs for the app), a `gates` job that
    calls `ci.yml` with `app: <app>` for a tag (every leg of that app, both halves, nothing else), and a `release` job that runs only when `needs.gates.result == 'success'` (`skipped` is allowed only when there is no tag: `!startsWith(github.ref, 'refs/tags/')`, so a tag never publishes past skipped gates) and calls
    `app-release.yml` with the app's facts (`app-dir`, `cargo-dir`, `tag-prefix`, `latest-tag`, `sidecars` (empty: every `bundle.externalBin`, with `--self-test`), `setup-node` (false in the Paddock CI image), `cliff-config`, `cliff-paths`,
    `notes-extra`) and maps the family's `PADDOCK_TAURI_*` secrets to the names the kit declares. The workflow's name marks only that
@@ -145,7 +146,8 @@ Every runner of a host uses the same CI home (same user, or the same `PADDOCK_CI
 
 **Adding runners to a host:** merge the change that adds this; set `PADDOCK_CI_SLOTS` in every runner's `runner.envs` to
 the pool's maximum (only above 4); then register the extra runners (Pitcrew, capacity 1 each). Keep each runner's
-`capacity: 1`.
+`capacity: 1`. Set `PADDOCK_CI_JOBS_PER_HOST` in every runner's `runner.envs` to the number of jobs the host now runs
+at once, so `build-jobs` divides the cores between them.
 
 **How disk is bounded.** A slot's kept folders are deleted only under `./dev ci slot idle-run`, which holds that slot's
 lock for the whole deletion, so no job can take the slot meanwhile and a held slot is never touched. At every acquire and
