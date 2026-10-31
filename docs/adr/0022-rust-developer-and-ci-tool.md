@@ -5,7 +5,8 @@
   something real stay non-Rust, each with its reason. The five open decisions were taken on 2026-10-28 (Decisions
   taken).
 - Amendment 2026-10-31 (generic tools `devkit`, `wiki`, `heavy`; extensibility; tool logging): **Proposed amendment**,
-  section "Amendment (2026-10-31, Proposed amendment)".
+  section "Amendment (2026-10-31, Proposed amendment)". Its three decisions were taken by the user on 2026-10-31 (G.10);
+  it stays Proposed until an independent review.
 - Date: 2026-10-27
 - Related: rules 3–5 (affected tests, fix locally, failing test first), rule 7 (tests never touch the machine), rule 13
   (bounded parallelism), rule 22 (independent review of images), rule 23 (ad-hoc sealing), rule 40 (recurring bugs mean
@@ -532,7 +533,8 @@ is the first.
 
 ## Amendment (2026-10-31, Proposed amendment): generic tools, extensibility and tool logging
 
-- Status: **Proposed amendment**, not yet accepted. The rest of this ADR stands; where this section differs, it describes
+- Status: **Proposed amendment**, not yet accepted: the user took its three decisions on 2026-10-31 (G.10); acceptance
+  waits for an independent review. The rest of this ADR stands; where this section differs, it describes
   the change being proposed.
 - Asked by the user on 2026-10-31: "start moving all to rust tooling", "consider which ones are generic and which are
   paddock", "perhaps rust tooling can be plugin based? and extensible?" ("but not sandboxing"), and the tools must log well
@@ -828,22 +830,22 @@ more to split engines from Paddock packs; R0 (3.5) is done.
 
 ### G.10 Decisions
 
-Decided (user, 2026-10-31): `wiki` and `heavy` are standalone generic tools; `wiki` in Paddock `tools/`, published to
-`decryp7`, its own repository later; **no sandbox for tool plugins**: plugins come only from the repository or a registry
-install, never fetched at run time.
+Decided (user, 2026-10-31), before the amendment: `wiki` and `heavy` are standalone generic tools; `wiki` in Paddock
+`tools/`, published to `decryp7`, its own repository later; **no sandbox for tool plugins**: plugins come only from the
+repository or a registry install, never fetched at run time.
 
-For the user:
+Decided (user, 2026-10-31), on this amendment, all three as recommended:
 
-1. **One generic `devkit` with subcommands (recommended), or a separate small binary per generic tool?** `wiki` and
-   `heavy` stay standalone either way.
-2. **Does conformance become a generic engine** (`paddock-repo-rules` plus data rule kinds, `devkit check` with a generic
-   pack, Paddock's code checks in `./dev check`; recommended, inside the R8a note the user already approves), or stay a
-   Paddock-only rules crate?
-3. **Extensibility: external subcommands plus a built-in registry plus TOML packs (recommended)**, with ADR 0001's plugin
-   platform not reused. Confirm, or ask for less (packs only).
+1. **One generic `devkit` with subcommands** for the small generic commands; `wiki` and `heavy` stay standalone (G.3).
+2. **Conformance becomes a generic rules engine**: `paddock-repo-rules` with data rule kinds, `devkit check` with a
+   generic pack, and Paddock's own checks in `./dev check` (G.4, R8; the R8a joint note still comes first).
+3. **Extensibility is the built-in registry, external `devkit-<name>` subcommands and TOML packs**; ADR 0001's plugin
+   platform is not reused, and there is no sandbox (G.4).
 
-Defaults the coordinator may change without the user: the name `devkit`; `wiki` adopting `paddock-cli`'s exit codes; the
-`devkit.toml` file name; the one-release overlap for engineering-rules scripts.
+Defaults that stand (coordinator, 2026-10-31): the name `devkit`; `wiki` on `paddock-cli`'s exit codes (findings exit 5);
+the project config file `devkit.toml`; a one-release overlap before engineering-rules' scripts are deleted.
+
+The amendment stays **Proposed** until an independent review; nothing is left for the user to decide.
 
 ### Appendix G: inventory and classification (2026-10-31)
 
