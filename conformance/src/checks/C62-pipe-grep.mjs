@@ -10,7 +10,9 @@
 // follows), whose workflow sets `defaults: run: shell: bash`, or whose script sets pipefail itself. A step with no shell
 // runs `bash -e {0}` (no pipefail) and is not flagged.
 // What is flagged: grep, egrep or fgrep with -q (in any option cluster: -q, -Eq, -qx, -Fxq), --quiet or --silent, right
-// after a single `|`, outside comments. Report-only (warnings): 30 sites when it was added, most in demo and app scripts.
+// after a single `|`, outside comments. Report-only (warnings): when it was added, the run over the repository root
+// (`--app paddock --root .`) found 24 sites; the 5 in shared CI and release code were fixed in the same change, leaving
+// 19 in app, demo and tool scripts.
 // A justified case carries `# conformance: pipe-grep — <reason>` on the line or the line above; a bare marker does not count.
 import { warn } from '../finding.mjs';
 import { parseSteps } from '../util/workflows.mjs';

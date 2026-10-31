@@ -92,12 +92,16 @@ runs:
         fi
         echo "Syncing Rust $TOOLCHAIN: $why"
 
-        # One sync per host at a time (the host's jobs share RUSTUP_HOME): a mkdir lock with its owner recorded. The owner is
-        # this job's RUNNER_TEMP (a random folder per job, never reused, deleted by the runner after the job), so a lock whose
-        # owner folder is gone belongs to a finished job: it is removed only after its owner file is read again, unchanged,
-        # under a name of this job's own (rule 53). A live owner is waited for (polling the lock, at most
-        # PADDOCK_RUSTUP_LOCK_WAIT s, default 900), then the job syncs without the lock. Only this job's own lock is removed.
+        # One sync per host at a time (the host's jobs share RUSTUP_HOME): a mkdir lock with its owner recorded (its job's
+        # RUNNER_TEMP, pid, host and start time). A live owner is waited for by polling, at most PADDOCK_RUSTUP_LOCK_WAIT s
+        # (default 900); then the job syncs without the lock. A lock is stale when its owner's RUNNER_TEMP is gone (the runner
+        # deletes it after the job and never reuses the name), when it was taken more than 2 x WAIT s ago (at least 60 s: a
+        # runner that crashed or rebooted leaves its folder behind), or when it has no owner file and is more than 60 s old
+        # (a job that died between mkdir and writing it). A stale lock is moved to a name of this job's own and deleted only
+        # if it still has the owner read (or still none); one that changed hands meanwhile is left under its new name and
+        # logged, never moved back (rule 53). Only this job's own lock is removed.
         OWNER="$(printf '%s\n' "temp=${RUNNER_TEMP:-}" "pid=$$" "host=$(hostname 2>/dev/null || echo unknown)" "since=$(date +%s)")"
+        MAX_AGE=$((2 * WAIT)); if [ "$MAX_AGE" -lt 60 ]; then MAX_AGE=60; fi
         locked=0
         codes=""
         unlock() {
@@ -107,24 +111,41 @@ runs:
         trap 'unlock; if [ -n "$codes" ]; then rm -rf "$codes"; fi' EXIT
         mkdir -p "$RUSTUP_DIR"
         deadline=$(($(date +%s) + WAIT))
+        n=0
+        held=""
         while :; do
           if mkdir "$LOCK" 2>/dev/null; then
-            printf '%s\n' "$OWNER" >"$LOCK/owner"
-            locked=1
-            break
-          fi
-          held="$(cat "$LOCK/owner" 2>/dev/null || true)"
-          held_temp="$(sed -n 's/^temp=//p' <<<"$held")"
-          if [ -n "$held_temp" ] && [ ! -d "$held_temp" ]; then
-            if mv "$LOCK" "$LOCK.stale.$$" 2>/dev/null; then
-              if [ "$(cat "$LOCK.stale.$$/owner" 2>/dev/null)" = "$held" ]; then
-                rm -rf "$LOCK.stale.$$"
-                echo "Removed the sync lock of a finished job (its folder $held_temp is gone)"
-              elif [ ! -e "$LOCK" ]; then
-                mv "$LOCK.stale.$$" "$LOCK" 2>/dev/null || true  # not the lock read: put it back
-              fi
+            if printf '%s\n' "$OWNER" >"$LOCK/owner" 2>/dev/null; then
+              locked=1
+              break
             fi
-            continue
+            rmdir "$LOCK" 2>/dev/null || true  # this job's own, still empty: an ownerless lock would hold everyone up
+            echo "could not record the sync lock's owner; waiting as if it were held"
+          else
+            held="$(cat "$LOCK/owner" 2>/dev/null || true)"
+            stale=""
+            now=$(date +%s)
+            if [ -z "$held" ]; then
+              if [ -d "$LOCK" ] && [ -z "$(find "$LOCK" -maxdepth 0 -mmin -1 2>/dev/null)" ]; then stale="it has no owner and is more than 60 s old"; fi
+            else
+              held_temp="$(sed -n 's/^temp=//p' <<<"$held")"
+              held_since="$(sed -n 's/^since=//p' <<<"$held")"
+              if [ -n "$held_temp" ] && [ ! -d "$held_temp" ]; then stale="its job's folder $held_temp is gone"
+              elif [[ "$held_since" =~ ^[0-9]+$ ]] && [ $((now - held_since)) -gt "$MAX_AGE" ]; then stale="it was taken $((now - held_since)) s ago, more than $MAX_AGE s"; fi
+            fi
+            if [ -n "$stale" ]; then
+              n=$((n + 1))
+              grave="$LOCK.stale.$$.$n"
+              if [ ! -e "$grave" ] && mv "$LOCK" "$grave" 2>/dev/null; then
+                if [ "$(cat "$grave/owner" 2>/dev/null || true)" = "$held" ]; then
+                  rm -rf "$grave"
+                  echo "Removed a stale Rust sync lock: $stale"
+                else
+                  echo "::warning::the Rust sync lock changed hands while it was reclaimed; left as $grave ($(tr '\n' ' ' <"$grave/owner" 2>/dev/null || true))"
+                fi
+              fi
+              continue
+            fi
           fi
           if [ "$(date +%s)" -ge "$deadline" ]; then
             echo "::warning::the Rust sync lock $LOCK is still held after ${WAIT}s (${held//$'\n'/ }); syncing without it"
@@ -181,8 +202,10 @@ runs:
         fi
         touch "$STAMP"
         # A host with no default yet (a fresh runner) gets this one, for steps that run before setup-rust (job-isolation's
-        # paddock-dev build); a host that has one keeps it.
-        if ! rustup default >/dev/null 2>&1; then rustup default "$TOOLCHAIN"; fi
+        # paddock-dev build); a host that has one keeps it. Only stable or an exact version: never a dated nightly.
+        if [ "$TOOLCHAIN" = stable ] || grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$' <<<"$TOOLCHAIN"; then
+          if ! rustup default >/dev/null 2>&1; then rustup default "$TOOLCHAIN"; fi
+        fi
         unlock
         use_toolchain
     - name: Install sccache

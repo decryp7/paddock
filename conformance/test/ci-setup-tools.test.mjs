@@ -40,10 +40,12 @@ const HOST = 'x86_64-pc-windows-msvc';
  * Runs the Rust toolchain step with a fake rustup. `toolchains` are `rustup toolchain list` lines; `rustup run <name>` works
  * for a name that is one of them minus `-<host>` and annotations, as rustup resolves names. `install` is the shell the fake
  * runs for `toolchain install` (after rustup's first stderr line); `stamp` is the age in hours of the last-sync stamp, or
- * null; `lock` is the owner file of a sync lock another job holds, or null; `onSleep` is shell the fake `sleep` runs (the
- * step sleeps only while it waits on a held lock).
+ * null; `lock` is the owner file of a sync lock another job holds ('' for a lock with no owner file), or null, and `lockAge`
+ * its folder's age in seconds; `onSleep` is shell the fake `sleep` runs (the step sleeps only while it waits on a held lock);
+ * `mv` is shell for a fake mv (the step's only mv is the move of a stale lock). FAKE_NO_DEFAULT=1 in `env` makes the host
+ * have no default toolchain.
  */
-function runToolchain(t, { env = {}, toolchains = [], components = [], componentsTail = 'true', targets = [], install = 'exit 0', stamp = null, lock = null, onSleep = '' } = {}) {
+function runToolchain(t, { env = {}, toolchains = [], components = [], componentsTail = 'true', targets = [], install = 'exit 0', stamp = null, lock = null, lockAge = null, onSleep = '', mv = null } = {}) {
   const dir = tempDir(t, 'paddock-rustup-skip-');
   mkdirSync(join(dir, 'bin'));
   const calls = join(dir, 'calls');
@@ -59,6 +61,7 @@ function runToolchain(t, { env = {}, toolchains = [], components = [], component
       `  "component list") ${list(components)}; ${componentsTail} ;;`,
       `  "target list") ${list(targets)} ;;`,
       `  "toolchain install") echo "info: syncing channel updates for stable-${HOST}" >&2; ${install} ;;`,
+      '  "default ") [ -n "$FAKE_NO_DEFAULT" ] && exit 1; exit 0 ;;',
       `  "run "*) [ "$RUSTUP_AUTO_INSTALL" = 0 ] || exit 9; for n in ${runnable}; do [ "$n" = "$2" ] && echo "rustc 1.99.1" && exit 0; done; exit 1 ;;`,
       'esac',
       'exit 0',
@@ -67,7 +70,8 @@ function runToolchain(t, { env = {}, toolchains = [], components = [], component
   );
   writeFileSync(join(dir, 'bin', 'sleep'), `#!/bin/bash\necho sleep >> '${calls}'\n${onSleep}\n`);
   for (const tool of ['rustc', 'cargo']) writeFileSync(join(dir, 'bin', tool), `#!/bin/sh\necho "${tool} 1.99.1 ($RUSTUP_TOOLCHAIN)"\n`);
-  for (const f of ['rustup', 'rustc', 'cargo', 'sleep']) chmodSync(join(dir, 'bin', f), 0o755);
+  if (mv !== null) writeFileSync(join(dir, 'bin', 'mv'), `#!/bin/bash\n${mv}\n`);
+  for (const f of ['rustup', 'rustc', 'cargo', 'sleep', ...(mv === null ? [] : ['mv'])]) chmodSync(join(dir, 'bin', f), 0o755);
   const rustupHome = join(dir, 'rustup-home');
   mkdirSync(rustupHome);
   const stampFile = join(rustupHome, `paddock-ci-synced-${env.TOOLCHAIN ?? 'stable'}`);
@@ -79,7 +83,11 @@ function runToolchain(t, { env = {}, toolchains = [], components = [], component
   const lockDir = join(rustupHome, 'paddock-ci-sync.lock');
   if (lock !== null) {
     mkdirSync(lockDir);
-    writeFileSync(join(lockDir, 'owner'), lock);
+    if (lock !== '') writeFileSync(join(lockDir, 'owner'), lock);
+    if (lockAge !== null) {
+      const a = Date.now() / 1000 - lockAge;
+      utimesSync(lockDir, a, a);
+    }
   }
   const runnerTemp = join(dir, 'runner-temp');
   mkdirSync(runnerTemp);
@@ -102,6 +110,7 @@ function runToolchain(t, { env = {}, toolchains = [], components = [], component
       ...env,
     },
     encoding: 'utf8',
+    timeout: 60_000, // a lock regression fails here instead of hanging the suite
   });
   const log = existsSync(calls) ? read(calls).split('\n') : [];
   return {
@@ -111,6 +120,7 @@ function runToolchain(t, { env = {}, toolchains = [], components = [], component
     calls: log,
     stampFile,
     lockDir,
+    rustupHome,
     runnerTemp,
     githubEnv: read(ghEnv),
   };
@@ -186,21 +196,26 @@ test('a long component list whose match comes first still counts as installed (n
   assert.equal(r.installs, 0, r.out);
 });
 
+const nowSecs = () => Math.floor(Date.now() / 1000);
+const owner = (temp, since = nowSecs(), host = 'h') => `temp=${temp}\npid=1\nhost=${host}\nsince=${since}`;
+const graves = (r) => readdirSync(r.rustupHome).filter((n) => n.startsWith('paddock-ci-sync.lock.stale.'));
+
 test('one sync per host: a live lock is waited for, a finished job\'s lock is removed, another job\'s lock is never removed', (t) => {
   const liveTemp = tempDir(t, 'paddock-live-owner-');
-  const live = `temp=${liveTemp}\npid=1\nhost=h\nsince=1`;
+  const live = owner(liveTemp);
   const waited = runToolchain(t, { ...INSTALLED, stamp: 30, lock: live, env: { PADDOCK_RUSTUP_LOCK_WAIT: '0' } });
   assert.equal(waited.status, 0, waited.out);
   assert.equal(waited.installs, 1);
-  assert.match(waited.out, /::warning::the Rust sync lock .* is still held after 0s \(temp=.* pid=1 host=h since=1\); syncing without it/);
+  assert.match(waited.out, /::warning::the Rust sync lock .* is still held after 0s \(temp=.* pid=1 host=h since=\d+\); syncing without it/);
   assert.equal(read(join(waited.lockDir, 'owner')), live, "another job's live lock is left as it was");
 
-  const stale = runToolchain(t, { ...INSTALLED, stamp: 30, lock: 'temp=/nonexistent/job-folder-gone\npid=1\nhost=h\nsince=1' });
+  const stale = runToolchain(t, { ...INSTALLED, stamp: 30, lock: owner('/nonexistent/job-folder-gone'), env: { PADDOCK_RUSTUP_LOCK_WAIT: '5' } });
   assert.equal(stale.status, 0, stale.out);
   assert.equal(stale.installs, 1);
-  assert.match(stale.out, /Removed the sync lock of a finished job \(its folder \/nonexistent\/job-folder-gone is gone\)/);
+  assert.match(stale.out, /Removed a stale Rust sync lock: its job's folder \/nonexistent\/job-folder-gone is gone/);
   assert.ok(!existsSync(stale.lockDir), 'and the job removes its own lock after the sync');
   assert.ok(!stale.calls.includes('sleep'), 'a finished job is not waited for');
+  assert.deepEqual(graves(stale), []);
 
   // While this job waits, the holder finishes its sync (stamp and lock): the job re-checks under the lock and skips.
   const meanwhile = runToolchain(t, {
@@ -219,6 +234,59 @@ test('one sync per host: a live lock is waited for, a finished job\'s lock is re
   const failed = runToolchain(t, { ...INSTALLED, stamp: 30, install: 'exit 1', env: { RUNNER_OS: 'Linux' } });
   assert.equal(failed.status, 1, failed.out);
   assert.ok(!existsSync(failed.lockDir));
+});
+
+// A runner that crashed or rebooted leaves its RUNNER_TEMP, and a job that died between mkdir and writing the owner leaves a
+// lock with no owner: without an age rule every later sync on the host waited the full PADDOCK_RUSTUP_LOCK_WAIT.
+test('an old lock is reclaimed by age: taken more than 2 x WAIT ago, or ownerless for more than 60 s; a young one is not', (t) => {
+  const liveTemp = tempDir(t, 'paddock-survivor-');
+  const aged = runToolchain(t, { ...INSTALLED, stamp: 30, lock: owner(liveTemp, nowSecs() - 1000), env: { PADDOCK_RUSTUP_LOCK_WAIT: '5' } });
+  assert.equal(aged.status, 0, aged.out);
+  assert.equal(aged.installs, 1);
+  assert.match(aged.out, /Removed a stale Rust sync lock: it was taken \d+ s ago, more than 60 s/);
+  assert.ok(!aged.calls.includes('sleep'), aged.out);
+  assert.ok(!existsSync(aged.lockDir));
+
+  const ownerless = runToolchain(t, { ...INSTALLED, stamp: 30, lock: '', lockAge: 300, env: { PADDOCK_RUSTUP_LOCK_WAIT: '5' } });
+  assert.equal(ownerless.status, 0, ownerless.out);
+  assert.match(ownerless.out, /Removed a stale Rust sync lock: it has no owner and is more than 60 s old/);
+  assert.ok(!existsSync(ownerless.lockDir));
+
+  const young = runToolchain(t, { ...INSTALLED, stamp: 30, lock: '', env: { PADDOCK_RUSTUP_LOCK_WAIT: '0' } });
+  assert.equal(young.status, 0, young.out);
+  assert.match(young.out, /still held after 0s/);
+  assert.ok(existsSync(young.lockDir), 'a lock just made (its owner not written yet) is left alone');
+});
+
+// Between reading a stale lock and moving it, its owner may change (another job reclaimed it and took it again).
+test('a lock that changed hands while it was reclaimed is left under its new name, never deleted or moved back', (t) => {
+  const other = owner('/elsewhere/live-job', nowSecs(), 'other');
+  const r = runToolchain(t, {
+    ...INSTALLED,
+    stamp: 30,
+    lock: owner('/nonexistent/job-folder-gone'),
+    env: { PADDOCK_RUSTUP_LOCK_WAIT: '5' },
+    mv: `printf '%s\\n' '${other.replaceAll('\n', "' '")}' > "$1/owner"; exec /bin/mv "$@"`,
+  });
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /::warning::the Rust sync lock changed hands while it was reclaimed; left as .*paddock-ci-sync\.lock\.stale\.\d+\.1 \(temp=\/elsewhere\/live-job pid=1 host=other/);
+  const left = graves(r);
+  assert.equal(left.length, 1, r.out);
+  assert.equal(read(join(r.rustupHome, left[0], 'owner')).trim(), other, 'the other job\'s lock is kept');
+  assert.equal(r.installs, 1, 'the job then takes a lock of its own and syncs');
+  assert.ok(!existsSync(r.lockDir), 'and removes only its own');
+});
+
+test('a sync sets the host default only on a host without one, and only to stable or an exact version', (t) => {
+  const fresh = runToolchain(t, { stamp: 30, env: { COMPONENTS: '', FAKE_NO_DEFAULT: '1' } });
+  assert.ok(fresh.calls.includes('default stable'), fresh.out);
+  const exact = runToolchain(t, { env: { TOOLCHAIN: '1.99.1', COMPONENTS: '', FAKE_NO_DEFAULT: '1' } });
+  assert.ok(exact.calls.includes('default 1.99.1'), exact.out);
+  const dated = runToolchain(t, { env: { TOOLCHAIN: 'nightly-2026-10-01', COMPONENTS: '', FAKE_NO_DEFAULT: '1' } });
+  assert.equal(dated.installs, 1, dated.out);
+  assert.ok(!dated.calls.some((c) => /^default \S/.test(c)), `a dated nightly never becomes the host default: ${dated.calls}`);
+  const has = runToolchain(t, { stamp: 30, env: { COMPONENTS: '' } });
+  assert.ok(!has.calls.some((c) => /^default \S/.test(c)), 'a host with a default keeps it');
 });
 
 test('a crashed install names the raw exit code and the last stderr lines, and is retried once; a reported error is not', (t) => {
