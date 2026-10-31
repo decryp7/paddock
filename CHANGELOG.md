@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `pd-sparkline`: `decorative`
+- New input `decorative` (default `false`, today's behaviour: an image named "<label>: latest X, peak Y"). With `true` the chart is
+  hidden from assistive technology (`aria-hidden="true"`, no role, no name), for a host that already says the numbers in its own
+  text, such as a tile whose label has the formatted values.
 ### `pd-pause-editor`: `showZone`
 - New input `showZone` (default `true`, today's behaviour). With `false` the "Time zone" field is not drawn and the editor never
   changes `value().zone`: it stays whatever the host passed in (adds, edits and removes keep it). For hosts whose windows are always

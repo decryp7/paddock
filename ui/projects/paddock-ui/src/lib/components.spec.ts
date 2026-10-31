@@ -151,6 +151,16 @@ describe('SuSparkline', () => {
     expect(el.querySelector('.pd-dot')).not.toBeNull();
     expect(el.querySelector('.pd-area')).toBeNull();
   });
+  it('is hidden from assistive technology when decorative, and still draws', () => {
+    const el = make({ values: [1, 9, 4], label: 'CPU', decorative: true });
+    const svg = el.querySelector('svg')!;
+    expect(svg.getAttribute('aria-hidden')).toBe('true');
+    expect(svg.hasAttribute('role')).toBe(false);
+    expect(svg.hasAttribute('aria-label')).toBe(false);
+    expect(svg.getAttribute('focusable')).toBe('false');
+    expect(el.querySelector('.pd-line')).not.toBeNull();
+    expect(make({ values: [1, 9, 4], label: 'CPU' }).querySelector('svg')?.hasAttribute('aria-hidden')).toBe(false);
+  });
   it('draws the area when asked', () => {
     expect(make({ values: [1, 2], area: true }).querySelector('.pd-area')).not.toBeNull();
   });

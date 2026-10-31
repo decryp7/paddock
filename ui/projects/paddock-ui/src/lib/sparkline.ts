@@ -38,7 +38,7 @@ export function sparklineGeometry(values: readonly number[], width: number, heig
   selector: 'pd-sparkline',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <svg [attr.viewBox]="'0 0 ' + width() + ' ' + height()" [attr.height]="height()" preserveAspectRatio="none" role="img" [attr.aria-label]="summary()">
+    <svg [attr.viewBox]="'0 0 ' + width() + ' ' + height()" [attr.height]="height()" preserveAspectRatio="none" [attr.role]="decorative() ? null : 'img'" [attr.aria-label]="decorative() ? null : summary()" [attr.aria-hidden]="decorative() ? 'true' : null" [attr.focusable]="decorative() ? 'false' : null">
       @if (area() && geometry().line) {
         <path [attr.d]="geometry().area" class="pd-area" />
       }
@@ -63,6 +63,8 @@ export class SuSparkline {
   readonly label = input<string>($localize`:@@pd.ui.sparkline:Trend`);
   readonly height = input<number>(32);
   readonly area = input<boolean>(false);
+  /** Hides the chart from assistive technology (no role, no name): for a host whose own text already says the numbers. */
+  readonly decorative = input<boolean>(false);
   /** Fixed scale shared by sparklines in one row; omitted: fitted to the data. */
   readonly min = input<number | undefined>(undefined);
   readonly max = input<number | undefined>(undefined);
