@@ -606,6 +606,7 @@ fn alarms(id: &PlacementId, inputs: &Inputs<'_>) -> Option<State> {
     if open.is_empty() {
         return Some(WidgetState::Empty {
             title: "No active alarms".into(),
+            calm: true,
             detail: "Nothing needs your attention.".into(),
             next: action(WidgetActionId::OpenPage(Page::Alarms), "Open alarms"),
         });
@@ -698,6 +699,7 @@ fn disk_space(choice: &VolumeChoice, id: &PlacementId, inputs: &Inputs<'_>) -> O
         };
         return Some(WidgetState::Empty {
             title,
+            calm: false,
             detail: detail.into(),
             next: action(WidgetActionId::ChooseVolume, "Choose another volume"),
         });
@@ -736,6 +738,7 @@ fn network(inputs: &Inputs<'_>) -> Option<State> {
     if live.system.network.is_empty() {
         return Some(WidgetState::Empty {
             title: "See traffic when online".into(),
+            calm: false,
             detail: "Offline now.".into(),
             next: action(WidgetActionId::OpenPage(Page::Network), "Open network"),
         });
@@ -814,6 +817,7 @@ fn backup(inputs: &Inputs<'_>) -> Option<State> {
     if configured.is_empty() {
         return Some(WidgetState::Empty {
             title: "Know when backups ran".into(),
+            calm: false,
             detail: "No backup set up.".into(),
             next: action(WidgetActionId::SetUpBackupChecks, "Set up checks"),
         });
@@ -879,6 +883,7 @@ fn last_issue(id: &PlacementId, inputs: &Inputs<'_>) -> Option<State> {
         Some(value) => ready(value, issues.scanned_at.unwrap_or(inputs.now)),
         None => Some(WidgetState::Empty {
             title: "No issues in the last 7 days".into(),
+            calm: true,
             detail: "Dyno reads the system logs for crashes and hangs.".into(),
             next: action(WidgetActionId::OpenPage(Page::Issues), "Open issues"),
         }),
@@ -894,6 +899,7 @@ fn counters(id: &PlacementId, inputs: &Inputs<'_>) -> Option<State> {
     if c.pinned == 0 {
         return Some(WidgetState::Empty {
             title: "Watch your own counters here".into(),
+            calm: false,
             detail: format!("Pin counters in Dyno; the first {COUNTER_ROWS} show here."),
             next: action(WidgetActionId::PinCounters, "Pin counters"),
         });

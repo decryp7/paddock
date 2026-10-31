@@ -358,13 +358,13 @@ export class MockWidgets {
   private stateOf(p: Placement<PopoverWidget>, kind: PopoverKind, state: MockWidgetState, at: number): WidgetState<PopoverValue, WidgetActionId> {
     const retry: WidgetActionId = { retry: p.id };
     const ready = (value: PopoverValue, stale = false): WidgetState<PopoverValue, WidgetActionId> => ({ state: 'ready', value, asOf: stale ? at - 4 * 60_000 : at, staleSince: stale ? at - 4 * 60_000 : null });
-    const empty = (title: string, detail: string, label: string, action: WidgetActionId): WidgetState<PopoverValue, WidgetActionId> => ({ state: 'empty', title, detail, next: { action, label } });
+    const empty = (title: string, detail: string, label: string, action: WidgetActionId, calm = false): WidgetState<PopoverValue, WidgetActionId> => ({ state: 'empty', title, detail, next: { action, label }, calm });
     const error = (title: string, cause: string): WidgetState<PopoverValue, WidgetActionId> => ({ state: 'error', title, cause, next: { action: retry, label: 'Retry' } });
     const wave = (base: number, amp: number) => Array.from({ length: 60 }, (_, i) => Math.round((base + Math.sin(i / 5) * amp) * 10) / 10);
     const stale = state === 'stale';
     switch (kind) {
       case 'activeAlarms':
-        if (state === 'empty') return empty('No active alarms', 'Nothing needs your attention.', 'Open alarms', { openPage: 'alarms' });
+        if (state === 'empty') return empty('No active alarms', 'Nothing needs your attention.', 'Open alarms', { openPage: 'alarms' }, true);
         if (state === 'error') return error("Couldn't read alarms", "The alarm store didn't answer.");
         return ready({ activeAlarms: { rows: [{ id: 1, title: 'Memory pressure is high', level: 'warning', since: at - 4 * 60_000, acknowledged: false }, { id: 2, title: 'New login item: Docker Desktop', level: 'info', since: at - 3_600_000, acknowledged: false }], more: 3 } }, stale);
       case 'diskSpace': {
@@ -384,7 +384,7 @@ export class MockWidgets {
         if (state === 'working') return { state: 'working', title: 'Checking backup', phase: '', progress: { count: { done: 2, unit: 'items' } }, last: null, cancel: null };
         return ready({ backupHealth: { name: 'Time Machine', state: 'healthy', lastBackup: at - 2 * 3_600_000, summary: 'Time Machine finished a backup.', tools: 1 } }, stale);
       case 'lastIssue':
-        if (state === 'empty') return empty('No issues in the last 7 days', 'Dyno reads the system logs for crashes and hangs.', 'Open issues', { openPage: 'issues' });
+        if (state === 'empty') return empty('No issues in the last 7 days', 'Dyno reads the system logs for crashes and hangs.', 'Open issues', { openPage: 'issues' }, true);
         if (state === 'error') return error("Couldn't read issues", 'The issue index is unavailable.');
         if (state === 'working') return { state: 'working', title: 'Last issue', phase: 'Reading system logs · Indexing', progress: { count: { done: 12400, unit: 'events' } }, last: null, cancel: null };
         return ready({ lastIssue: { title: 'Disk write errors on disk4', app: 'disk4', kind: 'Disk error', level: 'critical', at: at - 86_400_000, days: 7 } }, stale);

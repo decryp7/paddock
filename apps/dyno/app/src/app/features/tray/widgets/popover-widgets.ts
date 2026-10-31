@@ -30,7 +30,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
   encapsulation: ViewEncapsulation.None,
   imports: [PdWidget, PdSkeleton, PdGlyph, PdStatusGlyph, Sparkline],
   template: `
-    <ng-template pdWidget="activeAlarms" [pdWidgetOf]="witness" [pdWidgetCalm]="true" let-value>
+    <ng-template pdWidget="activeAlarms" [pdWidgetOf]="witness" let-value>
       @let a = alarms(value);
       <ul class="dy-pw-list" aria-label="Active alarms">
         @for (r of a?.rows ?? skAlarms; track r.id) {
@@ -100,7 +100,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       </button>
     </ng-template>
 
-    <ng-template pdWidget="lastIssue" [pdWidgetOf]="witness" [pdWidgetCalm]="true" let-value>
+    <ng-template pdWidget="lastIssue" [pdWidgetOf]="witness" let-value>
       @let i = issue(value) ?? skIssue;
       <button type="button" class="dy-pw-row" (click)="open('issues')">
         <span class="dy-pw-lvl" [attr.data-level]="i.level" pdSkeleton><pd-status-glyph [status]="status(i.level)" [size]="14" />{{ word(i.level) }}</span>

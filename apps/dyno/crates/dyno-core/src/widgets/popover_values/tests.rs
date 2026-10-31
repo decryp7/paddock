@@ -132,8 +132,9 @@ fn a_shelved_alarm_is_not_active_and_no_alarms_is_a_calm_empty_that_opens_alarms
     shelved.shelved = Some(crate::alarms::Shelf::Until(NOW.plus(HOUR)));
     let list = vec![shelved];
     let s = run(&PopoverWidget::ActiveAlarms, |i| i.alarms = Source::Ready(&list)).unwrap();
-    let S::Empty { title, next, .. } = s else { panic!("{s:?}") };
+    let S::Empty { title, next, calm, .. } = s else { panic!("{s:?}") };
     assert_eq!(title, "No active alarms");
+    assert!(calm, "no active alarms means all good: a calm row");
     assert_eq!(next.unwrap().action, WidgetActionId::OpenPage(Page::Alarms));
 }
 
@@ -236,7 +237,8 @@ fn a_disconnected_volume_is_an_empty_that_says_what_the_person_gains_and_offers_
         i.volumes = Source::Ready(&v)
     })
     .unwrap();
-    let S::Empty { title, detail, next } = s else { panic!("{s:?}") };
+    let S::Empty { title, detail, next, calm } = s else { panic!("{s:?}") };
+    assert!(!calm, "a disk that is not connected is not good news");
     assert_eq!(title, "See Time Machine's space when it's connected");
     assert_eq!(detail, "The disk isn't connected now.");
     assert_eq!(next.unwrap().action, WidgetActionId::ChooseVolume);
@@ -381,7 +383,8 @@ fn no_backup_set_up_is_an_empty_with_the_setup_action() {
             i.backup = Source::Ready(BackupInput { report: &r, job: None })
         })
         .unwrap();
-        let S::Empty { title, next, .. } = s else { panic!("{s:?}") };
+        let S::Empty { title, next, calm, .. } = s else { panic!("{s:?}") };
+        assert!(!calm);
         assert_eq!(title, "Know when backups ran");
         assert_eq!(next.unwrap().action, WidgetActionId::SetUpBackupChecks);
     }
@@ -529,7 +532,8 @@ fn no_issue_in_a_week_is_an_empty_that_opens_issues() {
         })
     })
     .unwrap();
-    let S::Empty { title, detail, next } = s else { panic!("{s:?}") };
+    let S::Empty { title, detail, next, calm } = s else { panic!("{s:?}") };
+    assert!(calm, "no issues means all good: a calm row");
     assert_eq!(title, "No issues in the last 7 days");
     assert!(!detail.is_empty());
     assert_eq!(next.unwrap().action, WidgetActionId::OpenPage(Page::Issues));
@@ -609,7 +613,8 @@ fn nothing_pinned_is_an_empty_and_none_answering_is_an_error() {
         })
     })
     .unwrap();
-    let S::Empty { title, next, .. } = s else { panic!("{s:?}") };
+    let S::Empty { title, next, calm, .. } = s else { panic!("{s:?}") };
+    assert!(!calm);
     assert_eq!(title, "Watch your own counters here");
     assert_eq!(next.unwrap().action, WidgetActionId::PinCounters);
     let rs = vec![
@@ -648,6 +653,7 @@ fn losing_the_agent_marks_ready_values_stale_since_they_were_read_and_leaves_the
                 title: "t".into(),
                 detail: "d".into(),
                 next: None,
+                calm: false,
             },
         },
         PlacementState {
@@ -740,7 +746,8 @@ fn no_network_is_the_offline_empty_with_open_network() {
     let mut l = live();
     l.system.network.clear();
     let s = run(&PopoverWidget::Network, |i| i.live = Source::Ready(&l)).unwrap();
-    let S::Empty { title, detail, next } = s else { panic!("{s:?}") };
+    let S::Empty { title, detail, next, calm } = s else { panic!("{s:?}") };
+    assert!(!calm);
     assert_eq!((title.as_str(), detail.as_str()), ("See traffic when online", "Offline now."));
     assert_eq!(next.unwrap().action, WidgetActionId::OpenPage(Page::Network));
 }

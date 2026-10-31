@@ -64,7 +64,7 @@ describe('MockWidgets popup values', () => {
   it('sends the engine\'s words: the calm alarms row has its next step, and the agent notice and widgets share one time', () => {
     const w = new MockWidgets({ popup: { activeAlarms: 'empty' }, now: () => Date.UTC(2026, 9, 31, 6, 30) });
     const alarms = w.values().placements.find((p) => p.id === 'active-alarms')!.state;
-    expect(alarms).toMatchObject({ state: 'empty', title: 'No active alarms', detail: 'Nothing needs your attention.', next: { label: 'Open alarms', action: { openPage: 'alarms' } } });
+    expect(alarms).toMatchObject({ state: 'empty', calm: true, title: 'No active alarms', detail: 'Nothing needs your attention.', next: { label: 'Open alarms', action: { openPage: 'alarms' } } });
     const stopped = new MockWidgets({ agentStopped: true, now: () => Date.UTC(2026, 9, 31, 6, 30) }).values();
     const times = new Set(stopped.placements.map((p) => (p.state.state === 'ready' ? p.state.staleSince : null)).filter((t) => t !== null));
     expect(times.size).toBe(1);

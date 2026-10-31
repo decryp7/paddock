@@ -334,7 +334,12 @@ detail: string,
 /**
  * The next step.
  */
-next: WidgetAction<A> | null, } | { "state": "error", 
+next: WidgetAction<A> | null, 
+/**
+ * `true`: the empty state means "all good" (no active alarms), drawn as one calm row with a success check.
+ * `false` (the default): "nothing here yet", drawn with the info icon and the next step.
+ */
+calm: boolean, } | { "state": "error", 
 /**
  * What failed, in plain words.
  */
