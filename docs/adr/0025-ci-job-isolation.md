@@ -202,7 +202,26 @@ next acquirer sweeps by `with_idle`. No change to the lock. A *headless* runner 
    is the rule because every container shares the `/sccache` mount and sccache's local cache takes one server. Either (a) the
    four concurrent jobs already race on sccache and the cache needs per-container slots now, or (b) they work today because
    sccache is per-container and §8 is too strict. The measurement decides: run four concurrent Linux jobs, read the sccache
-   server logs and stats of each, record the result here. If (a), slots on the mount are the same Rust lock with the mount's
+   server logs and stats of each, record the result here. The measurement is the 4-concurrent-job runs of the Linux CI
+   build-share A/B on d-gtr9 (`handoff/linux-ci-share-ab.md`, throw-away `ci-share-ab.yml`), after the Spotter and Pitwall tags.
+   Evidence to collect from every one of those runs, per job (J1..J4) and for the run as a whole:
+   - *sccache:* the server's start line and port as each job sees it (`sccache --show-stats` at the job's start and end; the
+     process list of `sccache` servers inside and outside each container); whether one server served several jobs; cache
+     writes that fail or report "address in use", a corrupted-entry or lock message in any job log; hits and misses per job
+     against the same job run alone (a drop that is not explained by cold start is a collision).
+   - *The `/sccache` mount:* file count and size before and after; any `*.tmp`/partial file left; two jobs writing one path
+     (an `lsof`/inotify-free check: compare the mount's change list per job by the job-start and job-end listing).
+   - *Ports:* every port each job binds (`ss -ltnp` inside the container at the job's busiest step: the e2e shards, sccache
+     4227, the test browsers) and any `EADDRINUSE`/"address already in use" in a log; the Docker network name of each job
+     (expected distinct: `GITEA-ACTIONS-TASK-<n>-...`).
+   - *Temp and caches:* `RUNNER_TEMP` and `TMPDIR` of each job (expected distinct), and the npm and Angular cache folders as
+     seen by each (shared or private); any "file exists", "ENOENT" or "lock" error in a log that the single-job baseline
+     does not have.
+   - *Outcome differences:* for each job, result, duration and failed-step names against its single-job baseline; any test
+     that fails only when concurrent; the final line counts of warnings. A run of the four in different orders (start offsets
+     of 0 and 30 s) to cover the race windows.
+   - *Verdict rule:* no collision and no outcome difference in all runs => (b), section 8 is relaxed to "one sccache server per
+     container is safe, the mount is shared read-mostly" with the evidence cited; any collision => (a) and package I1b. If (a), slots on the mount are the same Rust lock with the mount's
    `slots/` folder, a per-slot `/sccache/s<n>` (cap = budget divided), and acquire/release stop being no-ops in a container;
    package I1b.
 4. *Disk budgets per space.* `PADDOCK_CI_SCCACHE_GB` and `PADDOCK_CI_MIN_FREE_GB` apply per space; on a host with two spaces
