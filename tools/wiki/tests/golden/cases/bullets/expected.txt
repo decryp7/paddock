@@ -1,0 +1,11 @@
+exit 1
+exit-strict 1
+error cases/bullets/wiki/one.md:10: bullet names no source (add a link or `src: ...`)
+error cases/bullets/wiki/one.md:18: bullet names no source (add a link or `src: ...`)
+error cases/bullets/wiki/one.md:19: bullet names no source (add a link or `src: ...`)
+error cases/bullets/wiki/one.md:21: bullet names no source (add a link or `src: ...`)
+error cases/bullets/wiki/one.md:24: bullet names no source (add a link or `src: ...`)
+error cases/bullets/wiki/one.md:26: bullet names no source (add a link or `src: ...`)
+error cases/bullets/wiki/one.md:35: bullet names no source (add a link or `src: ...`)
+error cases/bullets/wiki/one.md:37: bullet names no source (add a link or `src: ...`)
+error cases/bullets/wiki/one.md:8: bullet names no source (add a link or `src: ...`)

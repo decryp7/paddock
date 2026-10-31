@@ -1,0 +1,9 @@
+exit 1
+exit-strict 1
+error cases/steward/wiki/log.md:2: cites the steward log by clock time; cite `merge-steward.md:<line>` instead
+error cases/steward/wiki/one.md:13: cites the steward log by clock time; cite `merge-steward.md:<line>` instead
+error cases/steward/wiki/one.md:15: cites the steward log by clock time; cite `merge-steward.md:<line>` instead
+error cases/steward/wiki/one.md:16: cites the steward log by clock time; cite `merge-steward.md:<line>` instead
+error cases/steward/wiki/one.md:19: cites the steward log by clock time; cite `merge-steward.md:<line>` instead
+error cases/steward/wiki/one.md:21: cites the steward log by clock time; cite `merge-steward.md:<line>` instead
+error cases/steward/wiki/one.md:8: cites the steward log by clock time; cite `merge-steward.md:<line>` instead

@@ -1,0 +1,2 @@
+Specs: never wait on a fixed number of event loop turns ever again.
+Hyphen-ated words stay-together in the rule-set of the long-running thing indeed.

@@ -1,0 +1,13 @@
+exit 1
+exit-strict 1
+error cases/broken-links/wiki/one.md:10: broken link: ../outside.md does not exist
+error cases/broken-links/wiki/one.md:10: broken link: two.md?x=1 does not exist
+error cases/broken-links/wiki/one.md:12: broken link: gone2.md does not exist
+error cases/broken-links/wiki/one.md:13: broken link: a1.md does not exist
+error cases/broken-links/wiki/one.md:13: broken link: a2.md does not exist
+error cases/broken-links/wiki/one.md:13: broken link: b does not exist
+error cases/broken-links/wiki/one.md:14: broken link: two.md has no heading #Current-State
+error cases/broken-links/wiki/one.md:18: broken link: gone4.md does not exist
+error cases/broken-links/wiki/one.md:9: broken link: missing.md does not exist
+error cases/broken-links/wiki/one.md:9: broken link: two.md has no heading #nope
+error cases/broken-links/wiki/three.md:12: broken link: two.md has no heading #under_score-and-tilde
