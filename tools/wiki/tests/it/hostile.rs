@@ -41,16 +41,49 @@ fn a_whole_wiki_of_hostile_pages_lints_without_panicking() {
     assert!(!r.errors.is_empty());
 }
 
+/// Runs `f` and fails when it takes 4 seconds or more (a debug build does these in well under one second when linear).
+fn linear<R>(shape: &str, f: impl FnOnce() -> R) -> R {
+    let start = std::time::Instant::now();
+    let r = f();
+    assert!(start.elapsed().as_secs() < 4, "{shape} took {:?}", start.elapsed());
+    r
+}
+
 #[test]
 fn adversarial_shapes_stay_linear() {
-    // Many unclosed brackets and backticks on one line must not take quadratic time.
+    // Many unclosed brackets and backticks on one line.
     let line = "[".repeat(200_000) + &"`".repeat(1000);
-    let start = std::time::Instant::now();
-    assert!(text::links_of(&line).is_empty());
-    assert!(text::windows(&line, 8).is_empty());
-    let many = "[a](".repeat(50_000);
-    assert!(text::windows(&many, 8).len() <= 1);
-    assert!(start.elapsed().as_secs() < 20, "took {:?}", start.elapsed());
+    linear("unclosed [ and `", || {
+        assert!(text::links_of(&line).is_empty());
+        assert!(text::windows(&line, 8).len() <= 1);
+    });
+    // Many '[' and one ']' (each '[' used to look for the same ']' again).
+    let many_open = "[".repeat(400_000) + "]";
+    linear("many [ one ]", || {
+        assert!(text::links_of(&many_open).is_empty());
+        assert!(text::windows(&many_open, 8).len() <= 1);
+    });
+    // Many "[a](" with no ')' and no space: each href scan used to run to the end.
+    let open_parens = "[a](".repeat(500_000);
+    linear("[a]( without ) or space", || {
+        assert!(text::links_of(&open_parens).is_empty());
+        assert!(text::windows(&open_parens, 8).len() <= 1);
+    });
+    // ... and with a space at the end of the run.
+    let run_then_space = "[a](".repeat(500_000) + " x";
+    linear("[a]( run then a space", || assert!(text::links_of(&run_then_space).is_empty()));
+    // A bullet of "](" with no ')' anywhere (32 s on 2 MB before).
+    let bullet = format!("- {}", "](".repeat(1_000_000));
+    linear("bullet of ](", || assert_eq!(text::bullets_without_source(&bullet), vec![1]));
+    let bullet_empty = format!("- {}", "](](".repeat(500_000));
+    linear("bullet of ](](", || {
+        assert_eq!(text::bullets_without_source(&bullet_empty), vec![1])
+    });
+    // Link syntax in the copy check's words.
+    let links = "[x](".repeat(500_000);
+    linear("words of [x](", || assert!(text::words(&links).len() < 600_000));
+    let balanced = "[x](y)".repeat(300_000);
+    linear("words of [x](y)", || assert_eq!(text::words(&balanced).len(), 1));
 }
 
 #[test]

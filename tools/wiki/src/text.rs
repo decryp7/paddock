@@ -244,33 +244,36 @@ pub fn links_of(text: &str) -> Vec<Link> {
 }
 
 /// The `(...)` parts of every `[text](href)` in `line` (`\[[^\]]*\]\(([^)\s]+)\)`, left to right, without overlap).
+///
+/// Linear time: every `[` before the same `]` fails the same way, so a failure resumes after that `]`; and a failed href scan
+/// ended at a terminator that every later start inside the same run meets too, so it is remembered (`fail_end`).
 fn hrefs(line: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut from = 0;
-    // The ']' that failed to continue with a valid "(href)": every other '[' before it fails the same way.
-    let mut failed_close: Option<usize> = None;
+    let mut fail_end = 0;
     while let Some(off) = line[from..].find('[') {
         let open = from + off;
         let Some(close_off) = line[open + 1..].find(']') else { break };
         let close = open + 1 + close_off;
-        if failed_close == Some(close) {
-            from = open + 1;
+        let start = close + 2;
+        let Some(inner) = line[close + 1..].strip_prefix('(') else {
+            from = close + 1;
+            continue;
+        };
+        if start <= fail_end {
+            from = close + 1;
             continue;
         }
-        let hit = line[close + 1..].strip_prefix('(').and_then(|inner| {
-            let len = inner.find(|c: char| c == ')' || is_ws(c))?;
-            (len > 0 && inner[len..].starts_with(')')).then_some((&inner[..len], close + 2 + len + 1))
-        });
-        match hit {
-            Some((href, end)) => {
-                out.push(href);
-                from = end;
-                failed_close = None;
-            }
-            None => {
-                failed_close = Some(close);
-                from = open + 1;
-            }
+        // No ')' or whitespace to the end of the line: no later start finds one either.
+        let Some(len) = inner.find(|c: char| c == ')' || is_ws(c)) else {
+            break;
+        };
+        if len > 0 && inner[len..].starts_with(')') {
+            out.push(&inner[..len]);
+            from = start + len + 1;
+        } else {
+            fail_end = start + len;
+            from = close + 1;
         }
     }
     out
@@ -337,9 +340,9 @@ fn names_source(text: &str) -> bool {
     let mut from = 0;
     while let Some(off) = text[from..].find("](") {
         let after = &text[from + off + 2..];
-        if let Some(len) = after.find(')')
-            && len > 0
-        {
+        // No ')' anywhere after: no later "](" has one either, so stop looking (keeps the scan linear).
+        let Some(len) = after.find(')') else { break };
+        if len > 0 {
             return true;
         }
         from += off + 2;
@@ -390,42 +393,33 @@ pub fn words(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// `[text](target)` becomes `text` (`\[([^\]]*)\]\([^)]*\)`).
+/// `[text](target)` becomes `text` (`\[([^\]]*)\]\([^)]*\)`). Linear time: a failure resumes after the `]` it met.
 fn replace_links(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut from = 0;
     let mut copied = 0;
-    let mut failed_close: Option<usize> = None;
     let mut no_more_paren = false;
     while let Some(off) = s[from..].find('[') {
         let open = from + off;
         let Some(close_off) = s[open + 1..].find(']') else { break };
         let close = open + 1 + close_off;
-        let next = if failed_close == Some(close) || no_more_paren {
+        let hit = if no_more_paren {
             None
         } else if let Some(inner) = s[close + 1..].strip_prefix('(') {
-            match inner.find(')') {
-                Some(len) => Some((close + 2 + len + 1, &s[open + 1..close])),
-                None => {
-                    no_more_paren = true;
-                    None
-                }
-            }
+            let end = inner.find(')');
+            no_more_paren = end.is_none();
+            end.map(|len| close + 2 + len + 1)
         } else {
             None
         };
-        match next {
-            Some((end, label)) => {
+        match hit {
+            Some(end) => {
                 out.push_str(&s[copied..open]);
-                out.push_str(label);
+                out.push_str(&s[open + 1..close]);
                 copied = end;
                 from = end;
-                failed_close = None;
             }
-            None => {
-                failed_close = Some(close);
-                from = open + 1;
-            }
+            None => from = close + 1,
         }
     }
     out.push_str(&s[copied..]);
