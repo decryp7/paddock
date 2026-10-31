@@ -224,8 +224,6 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-more { flex: none; }
     /* The row's ⋯ stays marked while its menu is open: a tint and a ring. */
     .pd-wc-more[aria-expanded='true'] { background: var(--pd-hover); box-shadow: inset 0 0 0 var(--pd-focus-width) var(--pd-focus-ring); }
-    /* The row's ⋯ stays marked while its menu is open: a tint and a ring. */
-    .pd-wc-more[aria-expanded='true'] { background: var(--pd-hover); box-shadow: inset 0 0 0 var(--pd-focus-width) var(--pd-focus-ring); }
     .pd-wc-addedlabel { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-wc-addedlabel pd-status-glyph { color: var(--pd-success); }
     .pd-wc-placeholder { background: var(--pd-accent-tint); outline: 1px dashed var(--pd-accent); outline-offset: -4px; min-height: 48px; }
