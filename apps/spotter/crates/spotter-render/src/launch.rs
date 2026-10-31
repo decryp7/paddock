@@ -221,6 +221,27 @@ pub const CLOSE_PATIENCE: paddock_proc::Patience = paddock_proc::Patience {
     cpu_every: 20,
 };
 
+/// When a self-test (`<browser> --version`) is stuck rather than slow: a first start that is scanned, paged in or loaded still uses
+/// CPU or exits, and is waited for; one that uses none and does not exit for `idle` is hung (ADR 0031, no fixed time).
+pub const SELF_TEST_PATIENCE: paddock_proc::Patience = paddock_proc::Patience {
+    spin: Duration::from_secs(120),
+    idle: Duration::from_secs(20),
+    hang_guard: Duration::from_secs(300),
+    note_after: 0,
+    tick: Duration::from_millis(50),
+    cpu_every: 20,
+};
+
+/// Waits until a short-lived program (a self-test) has exited, judged on its run state; `false` when it is stuck or the pace
+/// ended the wait. `cpu` and `pace` are seams for tests.
+pub(crate) fn wait_to_exit(
+    process: &mut Supervised,
+    cpu: impl FnMut(paddock_proc::ProcessId) -> Option<Duration>,
+    pace: impl paddock_proc::Pace,
+) -> bool {
+    wait_to_quit(process, SELF_TEST_PATIENCE, cpu, pace) == Quit::Exited
+}
+
 /// The most a quit may take, however it looks: a browser with a throwaway profile is safe to end after it (the profile is
 /// deleted).
 // cap: a bound on something that cannot report progress beyond CPU time; the judge ends a stuck quit much earlier.
@@ -585,7 +606,7 @@ impl<F: FnMut(paddock_proc::ProcessId) -> Option<Duration>> paddock_proc::StartP
 }
 
 /// Waits for one tick on the real clock.
-struct SleepPace;
+pub(crate) struct SleepPace;
 
 impl paddock_proc::Pace for SleepPace {
     fn wait(&mut self, tick: Duration) -> bool {

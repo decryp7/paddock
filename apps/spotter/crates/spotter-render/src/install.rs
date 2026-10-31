@@ -174,37 +174,44 @@ pub fn locate_executable(root: &Path, os: Os) -> Option<Browser> {
     None
 }
 
-/// Runs `<exe> --version` with a timeout and returns its output; the self-test of an installed browser.
+/// Runs `<exe> --version`, judged on the program's run state rather than a fixed time, and returns its output; the self-test of
+/// an installed browser.
+pub fn self_test(exe: &Path) -> Result<String> {
+    self_test_with(exe, paddock_proc::tree_cpu_time, crate::launch::SleepPace)
+}
+
+/// [`self_test`] judged on the program's run state by the shared start judge (ADR 0031): a first start that is slow because
+/// the disk is cold or the machine is busy is waited for while it works, a hung one is given up on after its idle ticks, and one
+/// that exits is judged by its status. `cpu` and `pace` are seams for tests (a fake clock).
 #[expect(
     clippy::disallowed_methods,
     reason = "the browser's self-test: std Command, as the driver is copied between apps"
 )]
-pub fn self_test(exe: &Path) -> Result<String> {
+pub(crate) fn self_test_with(
+    exe: &Path,
+    cpu: impl FnMut(paddock_proc::ProcessId) -> Option<Duration>,
+    pace: impl paddock_proc::Pace,
+) -> Result<String> {
     // Test builds: a self-test starts the browser too (headless), so it asks the same gate as a launch (rule 7).
     #[cfg(any(test, feature = "testing"))]
     crate::discover::check_test_launch(exe, paddock_testkit::live_browser::BrowserWindow::Headless).map_err(err)?;
-    let mut child = std::process::Command::new(exe)
-        .arg("--version")
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("--version")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| err(format!("the browser does not run: {e}")))?;
-    let end = std::time::Instant::now() + Duration::from_secs(15);
-    loop {
-        match child.try_wait() {
-            Ok(Some(s)) if s.success() => break,
-            Ok(Some(_)) => return Err(err("the browser exited with an error")),
-            Ok(None) if std::time::Instant::now() < end => std::thread::sleep(Duration::from_millis(50)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(err("the browser did not answer its self-test"));
-            }
-        }
+        .stderr(std::process::Stdio::null());
+    let mut process = paddock_proc::Supervised::spawn(cmd).map_err(|e| err(format!("the browser does not run: {e}")))?;
+    // The pipe is taken first: the handle goes with the child once it is waited for.
+    let stdout = process.take_stdout();
+    if !crate::launch::wait_to_exit(&mut process, cpu, pace) {
+        process.kill();
+        return Err(err("the browser did not answer its self-test"));
+    }
+    if !process.wait().is_some_and(|s| s.success()) {
+        return Err(err("the browser exited with an error"));
     }
     let mut s = String::new();
-    if let Some(mut o) = child.stdout.take() {
+    if let Some(mut o) = stdout {
         let _ = o.read_to_string(&mut s);
     }
     Ok(s.trim().to_string())
@@ -351,6 +358,78 @@ mod tests {
             let e = self_test(&b.path).unwrap_err().to_string();
             assert!(e.contains("installed"), "{}: {e}", b.path.display());
         }
+    }
+
+    /// 1 ms ticks for the judge: it counts ticks (the idle limit is 400 of them at 50 ms), so the verdicts are the same as in real
+    /// time; the process is real and needs the time. Past the guard the wait is cancelled, so a broken judge fails in seconds.
+    #[cfg(unix)]
+    struct FastTicks(u32);
+
+    #[cfg(unix)]
+    impl paddock_proc::Pace for &mut FastTicks {
+        fn wait(&mut self, _tick: Duration) -> bool {
+            std::thread::sleep(Duration::from_millis(1));
+            self.0 += 1;
+            self.0 < 20_000
+        }
+    }
+
+    #[cfg(unix)]
+    fn fake_browser(dir: &Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("fake-chrome.sh");
+        std::fs::write(&path, format!("#!/bin/sh\n# paddock-fake-browser\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    /// A first start that takes far longer than the old fixed 15 s but keeps working is waited for and answers.
+    #[cfg(unix)]
+    #[test]
+    fn a_slow_self_test_that_keeps_working_is_waited_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = fake_browser(dir.path(), "sleep 2; echo 'Chromium 1.2.3'");
+        let mut n = 0u64;
+        let mut ticks = FastTicks(0);
+        let out = self_test_with(
+            &exe,
+            move |_| {
+                n += 1;
+                Some(Duration::from_micros(n))
+            },
+            &mut ticks,
+        )
+        .unwrap();
+        assert_eq!(out, "Chromium 1.2.3");
+        assert!(
+            ticks.0 > 400,
+            "waited {} ticks, longer than the idle limit, because it was working",
+            ticks.0
+        );
+    }
+
+    /// A self-test that does nothing and does not exit is hung: given up on after the idle ticks, not after a wall-clock time.
+    #[cfg(unix)]
+    #[test]
+    fn a_hung_self_test_is_given_up_on_by_run_state_and_ended() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = fake_browser(dir.path(), "exec sleep 300");
+        let mut ticks = FastTicks(0);
+        let e = self_test_with(&exe, |_| Some(Duration::from_secs(1)), &mut ticks)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("did not answer"), "{e}");
+        assert!(ticks.0 < 2_000, "judged after {} ticks", ticks.0);
+    }
+
+    /// A self-test that exits with an error is judged by its exit (not as hung): the message says it exited with an error.
+    #[cfg(unix)]
+    #[test]
+    fn a_self_test_that_exits_with_an_error_fails_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = fake_browser(dir.path(), "exit 3");
+        let e = self_test_with(&exe, |_| None, &mut FastTicks(0)).unwrap_err().to_string();
+        assert!(e.contains("exited with an error"), "{e}");
     }
 
     #[test]
