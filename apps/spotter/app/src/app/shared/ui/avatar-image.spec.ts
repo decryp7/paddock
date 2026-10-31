@@ -1,5 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { BACKEND } from '../../core/backend';
+import { MockBackend } from '../../core/mock-backend';
 import { Avatar } from './avatar';
 
 @Component({ imports: [Avatar], template: `<sp-avatar name="Acme Installer" [src]="src()" />` })
@@ -13,6 +15,24 @@ function make() {
   const el = f.nativeElement as HTMLElement;
   return { f, el };
 }
+
+@Component({ imports: [Avatar], template: `<sp-avatar name="Acme Installer" watch="w-1" />` })
+class WatchHost {}
+
+describe('Avatar lookup state', () => {
+  it('is pending until the engine has answered, then an image or the monogram', async () => {
+    const backend = new MockBackend();
+    TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: backend }] });
+    const f = TestBed.createComponent(WatchHost);
+    f.detectChanges();
+    const el = (f.nativeElement as HTMLElement).querySelector('sp-avatar')!;
+    expect(el.getAttribute('data-state')).toBe('pending');
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(['image', 'monogram']).toContain(el.getAttribute('data-state'));
+    });
+  });
+});
 
 describe('Avatar image', () => {
   it('shows the monogram while the engine has no image', () => {

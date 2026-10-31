@@ -14,14 +14,30 @@ async function open(page: Page, theme = 'dark', width = 1280): Promise<void> {
 const small = (page: Page) => page.locator('[data-testid="table-small"]');
 const names = (page: Page) => small(page).locator('[role=row][data-index] [role=gridcell]:first-child');
 
+/** Axe over the table, the chart and the forms, once their animations have ended (the kit's `axeViolations`). */
+const dataViolations = (page: Page) => axeViolations(page, { include: ['section[data-testid="table"]', 'section[data-testid="chart"]', 'section[data-testid="forms"]'] });
+
 for (const theme of THEMES) {
   test(`axe finds no violations in the table, chart and forms (${theme})`, async ({ page }) => {
     await open(page, theme);
     await page.locator('section[data-testid="chart"] canvas').first().waitFor();
     // Colours are read at rest: the field hints fade in over 300 ms (Material's subscript animation), and axe can read them half way.
-    expect(await axeViolations(page, { include: ['section[data-testid="table"]', 'section[data-testid="chart"]', 'section[data-testid="forms"]'] })).toEqual([]);
+    expect(await dataViolations(page)).toEqual([]);
   });
 }
+
+test('axe reads the form hints after their fade-in, not during it', async ({ page }) => {
+  await open(page);
+  // Material fades a field's hint in (its subscript animation: opacity 0 to 1, 300 ms); a slow machine reaches axe while it
+  // runs, and axe then reads the half-transparent text as low contrast. Play that fade again, slower so that axe always starts
+  // inside it (a check that waits for it costs the 1.5 s), then check.
+  const restarted = await page.locator('section[data-testid="forms"] .mat-mdc-form-field-hint-wrapper').evaluateAll((wrappers) => {
+    for (const w of wrappers) w.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1500 });
+    return wrappers.length;
+  });
+  expect(restarted).toBeGreaterThan(0);
+  expect(await dataViolations(page)).toEqual([]);
+});
 
 test('table: sorting cycles ascending, descending, none and sets aria-sort', async ({ page }) => {
   await open(page);

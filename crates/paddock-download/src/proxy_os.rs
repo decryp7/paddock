@@ -21,8 +21,11 @@ pub(crate) fn system_rules() -> ProxyRules {
     }
     #[cfg(windows)]
     {
+        let root = std::env::var("SystemRoot").ok();
+        let reg = windows_tool_path("reg.exe", root.as_deref());
+        let netsh = windows_tool_path("netsh.exe", root.as_deref());
         let ie = run(
-            "reg",
+            &reg,
             &[
                 "query",
                 r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings",
@@ -31,7 +34,7 @@ pub(crate) fn system_rules() -> ProxyRules {
         .map(|t| parse_windows_registry(&t))
         .unwrap_or_default();
         if ie.is_empty() {
-            run("netsh", &["winhttp", "show", "proxy"])
+            run(&netsh, &["winhttp", "show", "proxy"])
                 .map(|t| parse_winhttp(&t))
                 .unwrap_or_default()
         } else {
@@ -157,22 +160,40 @@ pub(crate) fn parse_windows_registry(text: &str) -> ProxyRules {
     )
 }
 
-/// `netsh winhttp show proxy` (machine-wide; English output): `Proxy Server(s) :` and `Bypass List :`.
+/// `netsh winhttp show proxy` (machine-wide). The labels are translated with the display language, so the values are read by
+/// position: the first `label : value` line after the heading is the proxy server list, the second the bypass list. "Direct
+/// access" has no such line. A first value that is not a proxy address means no proxy, never a wrong one.
 pub(crate) fn parse_winhttp(text: &str) -> ProxyRules {
-    let field = |label: &str| {
-        text.lines().find_map(|l| {
-            let (k, v) = l.split_once(" :")?;
-            k.trim()
-                .eq_ignore_ascii_case(label)
-                .then(|| v.trim().to_string())
-        })
+    // French writes a space before every colon, so the heading itself ("Paramètres … actuels :") is a `label :` line with no
+    // value: empty values are skipped before the first two are taken.
+    let mut values = text
+        .lines()
+        .filter_map(|l| l.split_once(" :").map(|(_, v)| v.trim().to_string()))
+        .filter(|v| !v.is_empty());
+    let Some(servers) = values.next().filter(|s| looks_like_servers(s)) else {
+        return ProxyRules::none();
     };
-    match field("Proxy Server(s)") {
-        Some(s) if !s.is_empty() => {
-            windows_servers(&s, field("Bypass List").as_deref().unwrap_or_default())
-        }
-        _ => ProxyRules::none(),
-    }
+    windows_servers(&servers, values.next().as_deref().unwrap_or_default())
+}
+
+/// Is this a proxy server list (`host:port`, `http=h:p;https=h:p`) rather than a sentence?
+fn looks_like_servers(text: &str) -> bool {
+    text.split(';')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .any(|part| {
+            let addr = part.split_once('=').map_or(part, |(_, a)| a);
+            !addr.contains(' ') && ProxyServer::parse(addr).is_ok()
+        })
+}
+
+/// The path of a Windows tool in the system folder (`%SystemRoot%\System32`), so a lookalike in the current folder or on the
+/// search path is never started.
+pub(crate) fn windows_tool_path(tool: &str, system_root: Option<&str>) -> String {
+    format!(
+        r"{}\System32\{tool}",
+        system_root.unwrap_or(r"C:\Windows").trim_end_matches('\\')
+    )
 }
 
 fn windows_servers(servers: &str, bypass: &str) -> ProxyRules {
@@ -295,6 +316,49 @@ HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settin
                 "Current WinHTTP proxy settings:\n\n    Direct access (no proxy server).\n"
             )
             .is_empty()
+        );
+    }
+
+    /// The labels of `netsh` are translated (German, French, Japanese ...): the first value after the heading is the proxy
+    /// server and the second the bypass list, whatever the labels say.
+    #[test]
+    fn winhttp_output_in_another_language_is_read_by_position() {
+        let de = "Aktuelle WinHTTP-Proxyeinstellungen:\n\n    Proxyserver     :  wh.corp:8080\n    Ausnahmeliste   :  *.corp;<local>\n";
+        let r = parse_winhttp(de);
+        assert_eq!(r.for_url("https://x.example").unwrap().host(), "wh.corp");
+        assert!(r.for_url("https://a.corp").is_none());
+        assert!(
+            parse_winhttp(
+                "Aktuelle WinHTTP-Proxyeinstellungen:\n\n    Direkter Zugriff (kein Proxyserver).\n"
+            )
+            .is_empty()
+        );
+        // A value that is not an address (an unexpected layout) is no proxy rather than a wrong one.
+        assert!(
+            parse_winhttp("Heading:\n    Something :  not an address with spaces\n").is_empty()
+        );
+    }
+
+    /// French puts a space before each colon: the heading is a `label :` line without a value, and must not count as the first one.
+    #[test]
+    fn winhttp_output_in_french_is_read_by_position() {
+        let fr = "Paramètres de proxy WinHTTP actuels :\n\n    Serveur(s) proxy :  wh.corp:8080\n    Liste de contournement :  *.corp;<local>\n";
+        let r = parse_winhttp(fr);
+        assert_eq!(r.for_url("https://x.example").unwrap().host(), "wh.corp");
+        assert!(r.for_url("https://a.corp").is_none());
+        let direct =
+            "Paramètres de proxy WinHTTP actuels :\n\n    Accès direct (aucun serveur proxy).\n";
+        assert!(parse_winhttp(direct).is_empty());
+    }
+
+    /// The tools are started from the system folder, never found through the search path or the current folder.
+    #[test]
+    fn windows_tools_are_started_from_the_system_folder() {
+        let p = windows_tool_path("netsh.exe", Some(r"D:\Win"));
+        assert_eq!(p, r"D:\Win\System32\netsh.exe");
+        assert_eq!(
+            windows_tool_path("reg.exe", None),
+            r"C:\Windows\System32\reg.exe"
         );
     }
 }

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from '@decryp7/paddock-e2e';
 
 test.describe('avatars, e-mail settings and the upgrade command', () => {
   test('watch rows, the feed and the detail hero show the engine pictures, and the wizard shows a monogram tile for each preset', async ({ page }) => {
@@ -14,15 +14,15 @@ test.describe('avatars, e-mail settings and the upgrade command', () => {
     await expect(page.locator('.grid sp-avatar').first()).toHaveText('NJ');
   });
 
-  test('the e-mail form saves the server, takes a password, and sends a test message', async ({ page }) => {
-    await page.goto('/#/settings');
+  test('the e-mail form saves the server, takes a password, and sends a test message', async ({ app, page }) => {
+    await app.settings.open({ page: 'sp.general' });
     const mail = page.locator('sp-mail-settings');
     await expect(mail.getByRole('button', { name: 'Send test e-mail' })).toBeDisabled();
     await mail.getByLabel('Server').fill('smtp.example.org');
     await mail.getByLabel('From').fill('spotter@example.org');
     await mail.getByLabel('User name').fill('robot');
     await mail.getByLabel('Password').fill('not-a-real-password');
-    await mail.getByRole('button', { name: 'TLS', exact: true }).click();
+    await mail.getByRole('radio', { name: 'TLS', exact: true }).click();
     await expect(mail.getByLabel('Port')).toHaveValue('465');
     await mail.getByRole('button', { name: 'Save' }).click();
     await expect(mail.getByRole('status')).toHaveText('Mail settings saved.');

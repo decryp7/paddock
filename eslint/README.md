@@ -19,15 +19,22 @@ as Debrief's two accessibility rules), `storeFlagsAllowedIn` (regex of the file 
 | Rule | Rule no. | What |
 |---|---|---|
 | `paddock/onpush-explicit` | 27 | `changeDetection: ChangeDetectionStrategy.OnPush` is written out; `Eager`/`Default` needs a comment |
+| `paddock/no-control-or-meta` | e2e | no `ControlOrMeta` in e2e code: press `Mod` with `pressMod` (the page's platform, not the test machine's) |
 | `paddock/no-zone` | 27, 38 | no `zone.js`, no `provideZoneChangeDetection`, no `fakeAsync`/`tick`/`waitForAsync` |
 | `paddock/effect-state` | 28 | an effect that writes state has an `// effect-state: <reason>` comment above it |
 | `paddock/signal-read-before-await` | 29 | `this.<signal>()` after the first `await` (class fields from `signal`, `computed`, `input`, ...); `// after-await:` marks a race guard |
 | `paddock/store-rules` | 30, 31, 32 | no `loading`/`error` flags in `withState`; `signalStore` in `*.store.ts`, `protectedState` on; `providedIn: 'root'` needs `// app-wide:`; at most two injected stores |
 | `no-restricted-imports` (preset) | 31 | `patchState` only in `*.store.ts`, shared store features and specs |
 | `paddock/no-raw-style-values` | design guide | no hard-coded colours, font families or sizes in component `styles` and `*-styles.ts` |
+| `paddock/e2e-axe-through-kit` | ER-12 | browser specs (`e2e/`) run axe through `axeViolations` of `@decryp7/paddock-e2e`, which waits for animations; an `axe.ts` helper may import `@axe-core/playwright` |
 | `paddock/template-no-ng-class` | 33 | `[class.x]` instead of `[ngClass]` |
 | `paddock/template-no-inner-html` | security | no `[innerHTML]` / `[outerHTML]` binding |
 | angular-eslint (preset) | 33 | `prefer-inject`, `prefer-signals`, `prefer-signal-model`, `template/prefer-control-flow`, `template/prefer-class-binding` |
+
+`paddock/e2e-axe-through-kit` reaches only the files a project lints: `ui` (`eslint projects e2e`) and Debrief (`e2e/**/*.ts` in
+its `lintFilePatterns`). Dyno, Pitcrew, Pitwall and Spotter lint `src/**` only, so their browser specs are not checked until
+`e2e/**/*.ts` joins their patterns. An app with its own flat config (Debrief) adds the axe check alone: `...e2eAxe()` from `@decryp7/paddock-eslint` is the
+preset's block for `e2e/` files, its `axe.ts` helper exempt.
 
 Not lintable (kept as review rules or other checks): 34 (window bootstrap shape), 35 (lazy panels: conformance C29 measures the
 initial chunk), 36 (prefer `resource`), 38 (each lifecycle effect has a failing test), 39 (shared code in Paddock). The

@@ -672,3 +672,21 @@ async fn too_many_watches_are_refused() {
     }
     assert!(matches!(last, Err(EngineError::Invalid(_))));
 }
+
+#[test]
+fn the_watches_that_need_a_browser_are_counted_without_reading_each_watch() {
+    let f = fixture();
+    assert_eq!(f.engine.watches_needing_renderer(), 0);
+    let a = f.engine.save_watch(page_spec(), &none()).unwrap();
+    let mut other = page_spec();
+    other.name = "Other".into();
+    f.engine.save_watch(other, &none()).unwrap();
+    f.engine.save_watch(spec("http://127.0.0.1:1/feed"), &none()).unwrap();
+    assert_eq!(f.engine.watches_needing_renderer(), 2, "a plain feed does not need one");
+    f.engine.set_paused(&a.id, true).unwrap();
+    assert_eq!(
+        f.engine.watches_needing_renderer(),
+        1,
+        "a paused watch is not checked, so it does not need one"
+    );
+}

@@ -54,7 +54,7 @@ struct FileOut<'a> {
 /// tries the backup, then the defaults.
 pub fn parse(text: &str) -> Result<Loaded, String> {
     if text.len() > MAX_CONFIG_BYTES {
-        return Err(format!("The configuration is larger than {} MiB.", MAX_CONFIG_BYTES >> 20));
+        return Err(format!("The configuration is larger than {} MB.", MAX_CONFIG_BYTES >> 20));
     }
     let table: toml::Table = toml::from_str(text).map_err(|e| format!("The configuration is not valid TOML: {}", e.message()))?;
     let mut warnings = Vec::new();

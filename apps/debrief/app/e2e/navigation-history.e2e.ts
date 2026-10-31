@@ -2,6 +2,7 @@ import { expect, Page, test } from '@playwright/test';
 import { gridTotal, initialTotal, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // Back and forward through where the user has been (Alt+Left / Alt+Right, the mouse's back and forward buttons) and
 // undo of a zoom (Ctrl/Cmd+Z). The inspector slides out over the right edge on a selection; the grid stays usable.
@@ -113,10 +114,10 @@ test.describe('navigation history', () => {
     const zoomed = await rangeOf(page);
     await expect(gridTotal(page)).not.toHaveText(all);
 
-    await page.keyboard.press('ControlOrMeta+z');
+    await pressMod(page, 'Mod+z');
     await expect.poll(() => rangeOf(page)).toBe(full);
     await expect(gridTotal(page)).toHaveText(all);
-    await page.keyboard.press('ControlOrMeta+Shift+z');
+    await pressMod(page, 'Mod+Shift+z');
     await expect.poll(() => rangeOf(page)).toBe(zoomed);
     await expectNoSeriousViolations(page, testInfo, 'navigation-zoomed', 'debrief-filter-bar');
   });

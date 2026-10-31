@@ -12,6 +12,8 @@ publish = false
 [dependencies]
 spotter-core.workspace = true
 reqwest.workspace = true
+paddock-download.workspace = true
+paddock-jobs.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]

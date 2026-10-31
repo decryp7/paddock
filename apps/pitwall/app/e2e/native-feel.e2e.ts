@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openApp } from './app';
+import { pageModKey } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // The app should feel like a desktop app (ADR 0012): no browser menu on chrome, no reload or page zoom keys, no
 // navigating on a dropped file. The guard only prevents the browser's default; Pitwall's own handlers still run.
@@ -72,8 +73,8 @@ test.describe('native feel', () => {
     await watch(page, ['keydown']);
     await page.locator('h1').first().click();
     await page.keyboard.press('F5');
-    // The platform modifier follows the user agent: Cmd on macOS, Ctrl elsewhere.
-    const mod = (await page.evaluate(() => /Mac OS X|Macintosh/.test(navigator.userAgent))) ? 'Meta' : 'Control';
+    // The platform modifier follows the page, as the app's own guard does (Cmd on a Mac user agent, Ctrl elsewhere).
+    const mod = await pageModKey(page);
     await page.keyboard.press(`${mod}+r`);
     await page.keyboard.press(`${mod}+p`);
     await page.keyboard.press(`${mod}+Equal`);

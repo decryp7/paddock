@@ -4,7 +4,6 @@ import type { DiscoveredFeed, ImportFormat, ImportResult, LatestBy, Preset, Prod
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { blankDraft } from '../../core/draft';
-import { JobsStore } from '../../state/jobs.store';
 import { SettingsStore } from '../../state/settings.store';
 import { idle, pending, settle, type Loadable } from '../../state/loadable';
 import { draftFor, missingFields, patchProduct, suggestName, toggleTracked } from './draft-utils';
@@ -89,30 +88,17 @@ export const EditorStore = signalStore(
   withMethods((store) => {
     const backend = inject(BACKEND);
     const settings = inject(SettingsStore);
-    const jobs = inject(JobsStore);
     let timer: ReturnType<typeof setTimeout> | undefined;
     let run = 0;
     let scheduleTimer: ReturnType<typeof setTimeout> | undefined;
     let scheduleRun = 0;
 
-    /** The wizard's test that is running, so a newer one (or leaving) can stop it instead of leaving it to run on. */
-    let runningTest: string | null = null;
-
     const runPreview = async (): Promise<void> => {
       const mine = ++run;
-      if (runningTest !== null) void jobs.cancel(runningTest);
       patchState(store, { preview: pending(store.preview()) });
-      const next = await settle(store.preview(), () =>
-        jobs.run('testSource', 'Testing the source', (jobId) => {
-          runningTest = jobId;
-          return backend.testSource(store.draft(), store.secrets(), jobId);
-        }),
-      );
-      // A run that was superseded (and so cancelled) must not show its "Cancelled." as the result.
-      if (mine === run) {
-        runningTest = null;
-        patchState(store, { preview: next });
-      }
+      // A newer test stops this one in the engine (one wizard, one test); its "Cancelled." must not show as the result.
+      const next = await settle(store.preview(), () => backend.testSource(store.draft(), store.secrets()));
+      if (mine === run) patchState(store, { preview: next });
     };
 
     const runSchedulePreview = async (): Promise<void> => {
@@ -167,6 +153,7 @@ export const EditorStore = signalStore(
       },
       setStep(step: EditorStep): void {
         patchState(store, { step });
+        if (step === 'review' && !store.draft().name.trim()) update((d) => ({ ...d, name: suggestName(store.kind(), d.source.values) }));
         if ((step === 'notify' || step === 'review') && store.schedulePreview().value === null && !store.schedulePreview().loading) void runSchedulePreview();
         schedule();
         if (step === 'configure' || step === 'versions') {
@@ -175,9 +162,7 @@ export const EditorStore = signalStore(
       },
       next(): void {
         const i = store.stepIndex();
-        const to = STEPS[Math.min(i + 1, STEPS.length - 1)]?.id ?? 'review';
-        this.setStep(to);
-        if (to === 'review' && !store.draft().name.trim()) update((d) => ({ ...d, name: suggestName(store.kind(), d.source.values) }));
+        this.setStep(STEPS[Math.min(i + 1, STEPS.length - 1)]?.id ?? 'review');
       },
       back(): void {
         this.setStep(STEPS[Math.max(store.stepIndex() - 1, 0)]?.id ?? 'source');

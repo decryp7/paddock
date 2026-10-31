@@ -262,7 +262,7 @@ that decide restarts, failures or quarantine, and their neighbours; section 8's 
 | Pitwall `pitwall-loopback` `connect_timeout` (3 s); `pitwall-server` engine start (300 s), `serving` timeouts; `live::OPEN_TIMEOUT` | inference service and engines | L | engines judged on their run state |
 | Pitwall `quit::EXIT_STALL_LIMIT`; `service_repair` waits | quit, repair | S; C | |
 | Pitwall `updates::REPO_TIMEOUT`; `pitwall-cli` `DEFAULT_TIMEOUT`, `LONG_TIMEOUT` | model hosts; the CLI | X; C | |
-| Spotter `spotter-render` `START_LIMIT` (20 s); `CLOSE_GRACE` | renderer | L; S | |
+| Spotter `spotter-render` `START_LIMIT` (20 s, gone: the start is judged by the shared start judge); `CLOSE_GRACE` (5 s, now only for ending a failed start) | renderer | L; S | the quit after `Browser.close` is judged on CPU and exit by the same judge (`CLOSE_PATIENCE`); `CLOSE_CAP` (20 s) is its class S real-clock bound |
 | Spotter `spotter-engine` `CHANNEL_TIMEOUT`, mail `STEP_TIMEOUT`, `TOTAL_TIMEOUT`; `spotter-sources` `REQUEST_TIMEOUT`, `LIST_TIMEOUT`; app `notifier::COMMAND_TIMEOUT` (300 s) | channels, sources, the user's command | X; C | |
 
 ### 8. The check over every instance

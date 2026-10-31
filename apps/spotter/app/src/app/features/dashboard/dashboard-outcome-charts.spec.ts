@@ -21,7 +21,7 @@ async function make(patch: (d: Dashboard) => Dashboard) {
   TestBed.inject(ClockService).set(NOW);
   TestBed.inject(WatchesStore).start();
   const f = TestBed.createComponent(DashboardPage);
-  await settle(f, 6);
+  await settle(f);
   return { f, charts };
 }
 const q = (f: { nativeElement: HTMLElement }, sel: string) => f.nativeElement.querySelector<HTMLElement>(sel);

@@ -1,4 +1,4 @@
-import { agoShort, bucketLabel, formatShortDateTime, mebibytes, formatBytes, formatDate, formatDateTime, formatDuration, formatInterval, lastSegment, relativeTime, shortHash, spanText } from './format';
+import { breakablePath, agoShort, bucketLabel, formatShortDateTime, formatDate, formatDateTime, formatDuration, formatInterval, lastSegment, relativeTime, shortHash, spanText } from './format';
 
 const MIN = 60_000;
 const H = 60 * MIN;
@@ -33,11 +33,6 @@ describe('format', () => {
     expect(formatDuration(2400)).toBe('2.4 s');
     expect(formatDuration(3 * MIN)).toBe('3 min');
     expect(formatInterval(6 * 3600)).toBe('every 6 h');
-    expect(formatBytes(null)).toBe('—');
-    expect(formatBytes(512)).toBe('512 B');
-    expect(formatBytes(1536)).toBe('1.5 KiB');
-    expect(formatBytes(150 * 1024 * 1024)).toBe('150 MiB');
-    expect(formatBytes(5 * 1024 ** 4 * 2000)).toContain('TiB');
   });
 
   it('formats dates without depending on the time zone', () => {
@@ -63,8 +58,6 @@ describe('short formats', () => {
   it('writes unknown values as a dash', () => {
     expect(formatShortDateTime(null, NOW)).toBe('—');
     expect(formatShortDateTime(undefined, NOW)).toBe('—');
-    expect(mebibytes(null)).toBe('—');
-    expect(mebibytes(undefined)).toBe('—');
     expect(agoShort(null, NOW)).toBe('—');
     expect(agoShort(undefined, NOW)).toBe('—');
   });
@@ -78,18 +71,22 @@ describe('short formats', () => {
     expect(formatShortDateTime(old, NOW)).not.toMatch(/8:15|08:15/);
   });
 
-  it('scales mebibytes to keep three significant digits', () => {
-    expect(mebibytes(0)).toBe('0.00');
-    expect(mebibytes(1048576 * 25.5)).toBe('25.5');
-    expect(mebibytes(1048576 * 5.25)).toBe('5.25');
-    expect(mebibytes(1048576 * 250)).toBe('250');
-  });
-
   it('writes a compact ago', () => {
     expect(agoShort(NOW - 10_000, NOW)).toBe('now');
     expect(agoShort(NOW + 10_000, NOW)).toBe('now');
     expect(agoShort(NOW - 20 * MIN, NOW)).toBe('20 min');
     expect(agoShort(NOW - 3 * H, NOW)).toBe('3 h');
     expect(agoShort(NOW - 2 * D, NOW)).toBe('2 days');
+  });
+
+  it('lets a location wrap at its separators and nowhere else', () => {
+    const Z = '\u200b';
+    expect(breakablePath('/Volumes/Builds/acme-installer')).toBe(`/${Z}Volumes/${Z}Builds/${Z}acme-installer`);
+    expect(breakablePath('C:\\Shares\\Builds')).toBe(`C:\\${Z}Shares\\${Z}Builds`);
+    expect(breakablePath('https://x.example/a/b?c=1#d')).toBe(`https://${Z}x.example/${Z}a/${Z}b${Z}?c=1${Z}#d`);
+    // Names stay whole, and nothing is added where nothing can break.
+    expect(breakablePath('acme-installer-3.10.0')).toBe('acme-installer-3.10.0');
+    expect(breakablePath('').length).toBe(0);
+    expect(breakablePath(`${'/'}`)).toBe('/');
   });
 });

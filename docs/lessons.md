@@ -1053,3 +1053,152 @@ date. **Rule (55, ADR 0034):** every mechanism that exists more than once is lis
 the canonical implementation and every copy in the same change (a freeze does not stop it) or a copy is waived with a reason;
 each copy has an owner and a tag by which it is deleted, and that tag is refused while the copy exists. Before fixing a bug in
 any service, IPC, driver or UI helper, look it up in the register first.
+## 2026-10-30: an interrupted socket read is not a closed connection (paddock-chromium, spotter-render, Debrief's driver)
+
+Three copies of the DevTools reader treated only `WouldBlock` and `TimedOut` as "idle, read again". Linux ends a socket read that
+has a timeout (`SO_RCVTIMEO`) with `EINTR` after a stop and continue or a handled signal (signal(7)), so a stalled CI container
+made every page report closed. Debrief's copy was fixed first; this fixed the other two.
+**Rule:** an I/O loop on a socket with a timeout treats `Interrupted` like `WouldBlock` and `TimedOut` (`is_transient`), for reads,
+sends and flushes; EOF and reset errors still end the connection. tungstenite's `read` flushes only pongs and close frames, so
+each loop turn also calls `flush`, and the write buffer has a bound. A test that stops and continues a child process guards it
+so a failing parent still ends the child's own children (a process group of its own is not reached by a signal to the group).
+**Open (ER-21):** the same reader exists three times. A shared `is_transient` and a conformance check for `WouldBlock | TimedOut`
+without `Interrupted` belong to the driver consolidation ADR, not to this fix.
+## 2026-10-30: live-browser tests opened Chrome on the user's desktop (Debrief, Spotter, paddock-chromium)
+
+The Mac CI runner runs in the user's GUI session and set `CHROMIUM_TEST_PATH`, so every macOS rust-test job of Debrief
+opened Chrome for Testing windows on the user's desktop: chromium-driver's `real_browser` tests and the renderer's
+scripted-page and challenge-page tests (Debrief's driver has no headless mode, by design: a challenge page needs a person,
+`the_browser_opens_on_screen_with_no_offscreen_or_headless_arguments`). The challenge test also timed out on that runner
+(runs 7141 and 7146); it also fails about one run in ten in the Linux container, so the desktop was not its only cause
+(a separate bug-fix task). Spotter's `off_screen_headful_mode_and_redirects` did the same on the Mac and Windows legs (a
+window at -32000,-32000 still has a Dock or taskbar entry and takes the focus), and the headless tests of Spotter and
+paddock-chromium still started Chrome in the user's session, where nobody had shown that a headless Chrome never shows
+in the Dock or takes the focus. Debrief's real-app smoke (`tauri-smoke`) opened the real app on the Mac runner and on the
+Windows runner, a developer PC. **Rule (rule 7):** a test starts a real browser or opens the real app only in a
+throwaway Linux CI container: under `xvfb-run` with `PADDOCK_LIVE_BROWSER=1` (Debrief's `rust tests`, the `crates`
+coverage job, app-gates' `display` wrap). The gate is shared, `paddock_testkit::live_browser`, and structural: every
+driver's test-browser finder (`paddock_chromium`, `chromium_driver`, `spotter_render` `discover::find_for_tests`) asks it
+with the window mode the test launches, so no test gets a browser around it; elsewhere the test prints where it runs, and
+a job set up wrongly (the variable without a display for a window, or the browser required on Linux without the
+variable) fails instead of skipping. C55 is the backstop: no read of the test browser outside `src/discover.rs`, and no
+test that launches a window after asking the finder for none. Mac and Windows lose this coverage on purpose; the
+WebView2 and macOS real-app smoke and the macOS start-up budgets run in the local test VMs before a release.
+
+A second review found the gate still had holes, each now closed in the structure rather than by a check alone: the
+finders were gated but a test could find a browser another way (`chromium_driver::find()`, `discover::find`, Spotter's
+renderer without `with_browser` falling through to `find_installed`, a downloaded runtime, a hard-coded path) and launch
+it, so in test builds each driver's launch now asks `paddock_testkit::live_browser::check_launch` before it starts any
+program: never an installed browser, and no real program (anything but a script, which is what the fakes are) outside a
+throwaway session. C55 had pre-filtered files on the finder's names (a file without them was never read) and ran only
+when conformance/ changed; it now reads every Rust file, flags the product's browser search, a renderer without its
+browser, a browser or app started by name and an installed browser's path in test code, and runs in the crates job, every
+app leg and Debrief's lint job. Two more jobs put windows on the host desktops (the WebKit e2e on the Mac runner, the
+nightly real-window probe on macOS and Windows): both now run in the Linux container, and a CI test fails any host job
+that runs Playwright, the real-window probe, the real-app smoke or a real-browser test binary. The macOS and Windows
+coverage moved to the local test VMs: `PADDOCK_LIVE_BROWSER=vm` is honoured only where the VM marker is
+(`kern.hv_vmm_present` on macOS, the administrator-only value `HKLM\SOFTWARE\Paddock` `TestVM` on Windows), and each
+release records "VM smoke: <date> <version> pass". Rule 7 now says so. A third review found the last holes: the drivers'
+self-tests (Spotter's renderer status self-tests the installed browser) started programs ungated, a fake was recognised by
+its `#!` line although Chrome's and Edge's Linux launchers are scripts too, and Debrief's `open_url` opened the default
+browser from tests. The self-tests ask the gate, fakes carry `# paddock-fake-browser`, installed paths compare
+canonically, `open_url` is a no-op in tests, and C55 names self-tests, the status and default-browser openers in test
+code. The pattern behind all three rounds: a gate on one entry point is a check, not a structure; put it at every place
+that starts a program, and recognise the allowed case positively. A fourth review found two more of the same kind: a bare
+program name (`Browser::chromium("google-chrome")`) was no file, so the gate let it pass while `Command` found it on PATH
+(the gate now resolves it the same way), and Spotter's app depended on the renderer without its `testing` feature, so the
+app's own tests compiled the gate out (C55 now checks every dependent's [dev-dependencies]).
+
+Considered and rejected: a test-only headless or off-screen launch option for Debrief's live tests, to keep them on the
+Mac. Headless tests a mode the product never runs (the challenge test is about the window coming to the front), the option
+would be a product code path that must never be used, and an off-screen headful window still shows in the Dock and takes
+the focus (Spotter's case). Also rejected: keeping the headless tests on the hosts, since even a headless Chrome is a
+process of the user's session.
+
+## E2E keys and the platform follow the page, never the test machine (2026-10-30)
+WebKit on a Linux runner emulates `devices['Desktop Safari']`: `navigator.platform` says Linux but the user agent says
+Macintosh, so the app binds `Mod` to Cmd and shows ⌘ in menus, while Playwright's `ControlOrMeta` presses Ctrl and
+`process.platform` is `linux`. Moving the WebKit job into the Linux container showed it as seven failures (a perspective
+shortcut, the settings shortcut, two menu-key texts) after CI run 7134 had shown the first instance; the same kind came
+back (ER-21). A second race came with it: until the app context loads the shell offers every page, so a link count taken
+right after `frame.open()` was stale on a slow machine. **Rule:** e2e code presses `Mod` with `pressMod` and reads the
+platform with `pageModKey` / `isMac` (platform and user agent, as the app does), never `ControlOrMeta` or `process.platform`;
+the lint rule `paddock/no-control-or-meta` (Debrief: `no-restricted-syntax`) bans the first; and a test counts page links
+only after the app context has loaded.
+the focus (Spotter's case). The Mac keeps the fake-browser tests of the whole life cycle; the live ones run once, on Linux.
+
+## 2026-10-30: a stall counted as the browser's silence; EINTR counted as a closed connection (Debrief)
+
+Debrief's two live renderer tests failed together, 1 run in 10 in the paddock-ci container on the Mac, both at about
+12.7 s with `Timeout`: each was waiting for the browser's reply to `Page.enable` (the start page, `Chromium::start_page`)
+when the whole container stalled (the Mac's load was at 240 to 280, OrbStack's VM got no CPU for seconds). Chrome stopped
+with the test, so it could not answer, but the driver's 10 s command bound was read off the wall clock and expired during
+the stall. Freezing the container for 12 s with `docker pause` right after both `Page.enable`s were sent reproduces it
+exactly (both tests, same moment, same error); no CPU load is needed. A fake-browser test failing in the same run fits:
+every wall-clock bound in the VM expired at once. The same freeze at another moment showed a second bug: Linux ends a
+socket read that has a timeout (`SO_RCVTIMEO`) with EINTR after a stop and continue, or after any handled signal
+(signal(7)), and the DevTools reader (and the fake browser) took EINTR for the end of the connection, so every page said
+"closed". In-process `cargo test` runs of chromium-driver in the amd64 container (Rosetta) lost 4 to 6 fake-browser
+connections per run that way. **Fix:** chromium-driver's waits do not count a stall (`clock::Budget`): work between
+waits (a DevTools call, however slow) counts in full; a wait counts as its time unless it ended more than 2 s late, then
+as what it asked for; a wall-clock ceiling of three times the bound ends it whatever the stalls, and each forgiven stall
+is logged. EINTR is a transient read or write error like WouldBlock (`cdp::is_transient`). Also fixed on the way:
+`Page::challenge` turned a script that timed out into "no challenge" and `settle` turned a failed `load_finished` into
+"loaded", so a hung page counted as solved; Timeout and Closed are errors now, while a script that fails because the
+page moved on (the user solved the check) only means "look again". A page held by a JavaScript dialog answers no
+script: the driver sees `Page.javascriptDialogOpening` and fails the call at once with the dialog's message.
+
+The review of the first fix found its own wall-clock trap: the budget judged "wait plus the work after it" as one wait,
+so a `Target.getTargets` answering in 2.5 s looked like a stall and counted as 0.1 s, stretching the 5 s start-page wait
+to minutes. The budget is now told where each wait starts and ends (`next_wait_at`, `waited_at`, `poll`), and the
+start-page loop is tested on an injected clock. `Instant` already leaves out a sleeping computer on macOS and Linux; what
+this fixes is a paused or starved process.
+
+**Lesson:** a timeout that waits for another process must not count time in which neither could run, and must count
+everything else, slow work included: measure the wait itself, not the gap between two looks at the clock. Test a timing
+bug by freezing the processes (`docker pause`, SIGSTOP) on an injected clock, never by adding CPU load. Treat EINTR as
+"try again" in every socket loop with a read timeout. **Follow-up:** the same EINTR and wall-clock patterns are in
+Spotter's `spotter-render` and the shared `paddock-chromium`: the three Chromium drivers have diverged and need
+consolidating onto `paddock-chromium` (plan X14), and `Budget` and `is_transient` belong there.
+
+## 2026-10-30: a test app built the plugins binary inside the test (Debrief)
+
+`browser::renderer::tests::fake::a_research_nobody_touched_closes_its_browser_when_it_ends` hit nextest's 300 s limit
+in two parallel `cargo nextest run -p debrief-app` container runs, and two fake-browser tests took 146 to 166 s in another
+`-p debrief-app` run, though each passes alone in 2 s. Neither the fake browser nor any wait of the test was the cause:
+`test_support::test_app` ran `cargo build -p debrief-plugins` when the plugins binary was missing (a `-p debrief-app`
+build does not make it; CI's `--workspace` build does), and the test waited for that build. Every test-app test process
+started the same build and waited on cargo's build-folder lock. Reproduced deterministically with a `CARGO` that never
+returns: the test waits as long as the build does. The test apps now never build anything: a missing binary is reported
+once with the command that builds it, and the tests that need plugins fail with that reason. **Lesson:** a test never
+starts a build or any other unbounded external work; it uses what the build made, or fails at once and says what to
+build. The second instance, the real store-worker test in `health::commands::tests` (it built `debrief-store-worker`
+when missing), hit the same 300 s limit while this was checked and is fixed the same way.
+
+
+## 2026-10-30: a start stuck before its window left nothing in the log; a cold VM's GPU looks like a hang (Spotter)
+
+Spotter 1.0's first VM update test (2026-10-29) stopped at its first launch: no window and an empty log. The cause was
+ADR 0029's deadlock, found only by sampling a debug build. The page watchdog could not have seen it: it watches pages,
+and a start blocked in a plugin's set-up has none yet, so no part of the app said where the start was. The shell now has
+a start guard (`paddock_startup::tauri::start_guard`): from the shell plugin's set-up to `RunEvent::Ready`, its own
+thread logs the phase (the shell plugin's set-up, starting the event loop, opening the tray, opening the main window)
+after 20 ticks and every 60 after that (ADR 0031: ticks, not time), as warnings, and only logs (ER-19). Tauri runs the
+app's `setup` only once the native event loop has started, so the gap between the last plugin's set-up and the tray is
+a phase of its own. Not covered: Tauri's build and the set-ups of the plugins registered before the shell (single
+instance and the other OS plugins). Follow-up: start the guard before `tauri::Builder` in each app's `run()` and hand it
+to the shell, so the whole start is covered. Re-run on the fixed build in a fresh Tart VM
+(2026-10-30), the start opened its window, but the first start after boot took 76 s and its page went blank: WebKit's
+GPU process took 48 s to launch, was killed as unresponsive again and again, and WebKit terminated every web content
+process. Later starts in the same VM took about 1 s. **Lesson:** a start logs where it is from a thread that the start cannot
+block, from as early as it can (and says which part it does not cover); and a VM check runs after the guest has settled (one WebKit app started
+once), with the guest's `log show` for WebKit's process lines kept as evidence, before calling a blank window a bug.
+
+## A fixed browser-start deadline failed a slow runner, not a stuck browser (2026-10-30, Spotter)
+`spotter-render::real_browser a_download_address_is_reported_as_a_download` failed in main's CI run 7194 with "the browser
+did not answer in time (the browser start)": Spotter's driver waited a fixed 20 s for the `DevToolsActivePort` file. It
+was not a shared port or profile (port 0, a unique profile folder per start); nextest runs each test in its own process,
+beside every other binary of the job, so a start on a loaded runner can simply take longer. Reproduced in a Linux
+container with a wrapper that delays the real browser by 24 s (fails at 20 s before, passes after). **Rule (ADR 0031):** a
+start is judged on run state by the shared `paddock_proc::StartWatch`, never on a fixed time; the driver gives it a probe
+(liveness with exit code and stderr tail, the port file, the tree's CPU time) and only the render's cap ends a slow one.

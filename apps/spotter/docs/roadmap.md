@@ -54,6 +54,10 @@ functions. `npm audit --omit=dev --audit-level=high` reports 0 vulnerabilities; 
 `TZ=Pacific/Auckland`.
 
 Left:
+- Open (ER-22, after 1.0.0): move the Copy menu on selected text onto the shared `PdCopyMenu` / `<pd-copy-menu />` of
+  `@decryp7/paddock-ui` and delete `shared/ui/copy-menu.ts`. It needs the `$localize` runtime first (`@angular/localize`
+  and the `@angular/localize/init` polyfill, as Dyno has): the shared menu's label is `$localize`d. Until then Spotter's copy
+  carries the WebKit fixes by hand (press keeps the focus, selection given back on close; `e2e/copy-menu.spec.ts`).
 - Done: the detail hero's upgrade line has a Copy command button when the release carries `upgradeCommand`.
 
 - Check schedules (ADR 0005): the wizard's Schedule section has Every / At times / Cron (`sp-schedule-editor`) with the engine's live preview; done: the watches table shows the schedule text next to Next and `wizard-schedule-*.png` shows the cron mode.

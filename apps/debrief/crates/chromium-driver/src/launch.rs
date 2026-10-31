@@ -2,6 +2,7 @@
 //! supervised process. The real user agent and the automation banner are kept on purpose: no stealth.
 
 use crate::cdp::Connection;
+use crate::clock::{poll, Clock, SystemClock};
 use crate::discover::{Browser, Flavor};
 use crate::page::Page;
 use crate::process::Supervised;
@@ -235,6 +236,10 @@ impl Chromium {
         reason = "the browser, a GUI program: this crate cannot use Debrief's process helper"
     )]
     fn launch_with(exe: &Browser, opts: &LaunchOptions, sandbox: Sandbox) -> Result<Chromium> {
+        // Test builds: no installed browser, and no real one outside a throwaway session (rule 7), however it was found.
+        // This driver always opens a window.
+        #[cfg(any(test, feature = "test-support"))]
+        crate::discover::check_test_launch(&exe.path, paddock_testkit::live_browser::BrowserWindow::Shown).map_err(Error::Launch)?;
         let (dir, throwaway) = match &opts.profile {
             Profile::Throwaway => (unique_dir(), true),
             Profile::Persistent(p) => (p.clone(), false),
@@ -330,16 +335,18 @@ impl Chromium {
     /// one beside it: the window then has exactly one tab, and any further page is one the user opened. Waits up to
     /// [`START_PAGE_WAIT`] for it to appear; a browser that shows none by then gets a new page.
     pub fn start_page(&self) -> Result<Page> {
-        let end = Instant::now() + START_PAGE_WAIT;
-        loop {
-            if let Some(target) = self.first_page_target()? {
-                return Page::adopt(self.conn.clone(), target);
+        self.start_page_from(&SystemClock, START_PAGE_WAIT, || self.first_page_target())
+    }
+
+    /// [`Chromium::start_page`] with its clock, its wait and its look for the start page given (tests). The looks count
+    /// in full against `wait`, however slow; only a stalled sleep between them does not ([`poll`]).
+    fn start_page_from(&self, clock: &dyn Clock, wait: Duration, look: impl FnMut() -> Result<Option<String>>) -> Result<Page> {
+        match poll(clock, wait, Duration::from_millis(50), look)? {
+            Some(target) => Page::adopt(self.conn.clone(), target),
+            None => {
+                log::warn!("The browser showed no start page within {wait:?}; a new one is opened");
+                self.new_page()
             }
-            if Instant::now() >= end {
-                log::warn!("The browser showed no start page within {START_PAGE_WAIT:?}; a new one is opened");
-                return self.new_page();
-            }
-            std::thread::sleep(Duration::from_millis(50));
         }
     }
 
@@ -425,24 +432,23 @@ fn cleanup(dir: &Path, throwaway: bool) {
     }
 }
 
-/// Waits for the `DevToolsActivePort` file Chrome writes into the profile and connects to the browser endpoint.
+/// Waits for the `DevToolsActivePort` file Chrome writes into the profile and connects to the browser endpoint (the
+/// bound counts only time this process ran: [`Budget`]).
 fn connect(dir: &Path, process: &mut Supervised) -> Result<Connection> {
-    let end = Instant::now() + Duration::from_secs(20);
-    loop {
+    let port_file = poll(&SystemClock, Duration::from_secs(20), Duration::from_millis(50), || {
         if let Ok(s) = std::fs::read_to_string(dir.join("DevToolsActivePort")) {
             let mut l = s.lines();
             if let (Some(port), Some(path)) = (l.next().and_then(|p| p.trim().parse::<u16>().ok()), l.next()) {
-                return Connection::connect(port, path.trim());
+                return Ok(Some((port, path.trim().to_string())));
             }
         }
         if !process.is_running() {
             return Err(Error::Launch("the browser exited right after it started".into()));
         }
-        if Instant::now() > end {
-            return Err(Error::Timeout("the browser start"));
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
+        Ok(None)
+    })?;
+    let (port, path) = port_file.ok_or(Error::Timeout("the browser start"))?;
+    Connection::connect(port, &path)
 }
 
 #[cfg(test)]
@@ -691,6 +697,27 @@ mod tests {
         assert_eq!(b.page_count().unwrap(), 1);
     }
 
+    /// Regression (review): the start-page wait took each slow look (a `Target.getTargets` answering in 2.5 s) for a
+    /// stall and counted it as 0.1 s, so the wait stretched to its wall-clock ceiling. On an injected clock, two looks
+    /// of 2.5 s spend a 5 s wait: the next step is a new page, not a third look.
+    #[cfg(unix)]
+    #[test]
+    fn slow_looks_for_the_start_page_spend_its_wait() {
+        let (_d, fake, b) = launch_fake(crate::fake::Mode::Obey, 0);
+        let clock = crate::clock::tests::FakeClock::new(None);
+        let mut looks = 0;
+        let p = b
+            .start_page_from(&clock, Duration::from_secs(5), || {
+                looks += 1;
+                clock.advance(Duration::from_millis(2500));
+                Ok(None)
+            })
+            .unwrap();
+        assert_eq!(looks, 2, "two slow looks spend the wait");
+        assert!(fake.calls().iter().any(|c| c == "Target.createTarget"), "a new page instead");
+        assert!(p.exists().unwrap());
+    }
+
     #[cfg(unix)]
     fn wait_gone(b: &mut Chromium, p: &Page) -> Gone {
         let end = Instant::now() + Duration::from_secs(5);
@@ -736,6 +763,129 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(5), "no wait for the load timeout");
     }
 
+    /// Regression: `challenge()` turned a script that timed out into "no challenge", so a hung page counted as one
+    /// the user had solved and the work went on with it.
+    #[cfg(unix)]
+    #[test]
+    fn a_page_that_does_not_answer_scripts_is_a_timeout_not_a_page_without_a_challenge() {
+        let (_d, fake, b) = launch_fake(crate::fake::Mode::Obey, 1);
+        let p = b.new_page().unwrap();
+        fake.act(crate::fake::UserAction::HangScripts).unwrap();
+        // Both at once: each waits out one command timeout.
+        let (challenge, loaded) = std::thread::scope(|s| {
+            let c = s.spawn(|| p.challenge());
+            let l = s.spawn(|| p.load_finished());
+            (c.join().unwrap(), l.join().unwrap())
+        });
+        assert!(matches!(challenge, Err(Error::Timeout(_))), "{challenge:?}");
+        assert!(matches!(loaded, Err(Error::Timeout(_))), "{loaded:?}");
+    }
+
+    /// Waits for `cond`, looking every few milliseconds (bounded: a test that never sees it fails with `what`).
+    #[cfg(target_os = "linux")]
+    fn wait_for(what: &str, mut cond: impl FnMut() -> bool) {
+        let end = Instant::now() + Duration::from_secs(20);
+        while !cond() {
+            assert!(Instant::now() < end, "{what}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// A child process that is continued, killed and reaped when the test ends however it ends: no stopped or leftover
+    /// process stays behind.
+    #[cfg(target_os = "linux")]
+    struct ChildGuard(std::process::Child);
+
+    #[cfg(target_os = "linux")]
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            // Only a child not reaped yet still owns its pid (rule 53, ADR 0033): once `wait` reaped it, the pid may be
+            // another process's, so nothing is sent.
+            if let Ok(None) = self.0.try_wait() {
+                // SAFETY: our own child, checked unreaped just above; nothing else reaps it, so the pid is still its.
+                unsafe {
+                    libc::kill(self.0.id() as libc::pid_t, libc::SIGCONT);
+                }
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+    }
+
+    /// Regression (a paused CI container): Linux ends a socket read that has a timeout with EINTR when the process is
+    /// stopped and continued (signal(7)), and the connection took that for its end, so every page said "closed".
+    /// The test runs itself again as a child process (so no other test is stopped), stops and continues the child a
+    /// few times while it holds a connection, then lets it check the connection. They talk through files in a
+    /// temporary folder: `ready` (the child's connection is up) and `go` (the stops are over).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_stopped_and_continued_process_keeps_its_browser_connection() {
+        const CHILD: &str = "CHROMIUM_DRIVER_STOP_CHILD";
+        if let Some(dir) = std::env::var_os(CHILD).map(std::path::PathBuf::from) {
+            let (_d, _fake, mut b) = launch_fake(crate::fake::Mode::Obey, 1);
+            let p = b.new_page().unwrap();
+            std::fs::write(dir.join("ready"), "").unwrap();
+            wait_for("the parent said go", || dir.join("go").exists());
+            assert_eq!(b.gone(&p), None, "the connection outlived the stops");
+            assert!(p.exists().unwrap());
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut child = ChildGuard(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "launch::tests::a_stopped_and_continued_process_keeps_its_browser_connection",
+                    "--exact",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, dir.path())
+                .stdin(std::process::Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        wait_for("the child is ready", || {
+            assert!(child.0.try_wait().unwrap().is_none(), "the child ended before it was ready");
+            dir.path().join("ready").exists()
+        });
+        let pid = child.0.id() as libc::pid_t;
+        // The child's state in /proc: `T` once the stop took effect.
+        let stopped = || {
+            std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|s| s.rsplit_once(") ").map(|(_, rest)| rest.starts_with('T')))
+                .unwrap_or(false)
+        };
+        for _ in 0..5 {
+            // SAFETY: signals to our own child, which is not reaped yet.
+            assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
+            wait_for("the child stopped", stopped);
+            assert_eq!(unsafe { libc::kill(pid, libc::SIGCONT) }, 0);
+        }
+        std::fs::write(dir.path().join("go"), "").unwrap();
+        assert!(child.0.wait().unwrap().success(), "the child's checks failed (its output is above)");
+    }
+
+    /// A page held by a JavaScript dialog answers no script: the call fails at once with the dialog's message instead
+    /// of timing out.
+    #[cfg(unix)]
+    #[test]
+    fn a_page_showing_a_dialog_fails_scripts_at_once_with_its_message() {
+        let (_d, fake, b) = launch_fake(crate::fake::Mode::Obey, 1);
+        let p = b.new_page().unwrap();
+        fake.act(crate::fake::UserAction::OpenDialog).unwrap();
+        let started = Instant::now();
+        // The fake applies the action before it answers, so this script is held by the dialog.
+        let r = p.evaluate("1");
+        assert!(matches!(&r, Err(Error::Dialog(m)) if m == "Leave site?"), "{r:?}");
+        assert!(started.elapsed() < Duration::from_secs(5), "no wait for the command timeout");
+        assert!(r.unwrap_err().to_string().contains("shows a dialog"));
+        // The dialog goes away without the browser saying so: the next script is answered, not refused.
+        fake.act(crate::fake::UserAction::CloseDialogUnreported).unwrap();
+        assert!(p.evaluate("1").is_ok(), "a missed close does not hold the page");
+        assert!(p.evaluate("1").is_ok());
+    }
+
     #[cfg(unix)]
     #[test]
     fn quitting_the_browser_is_seen_as_exited() {
@@ -759,6 +909,22 @@ mod tests {
         assert_eq!(wait_gone(&mut b, &p), Gone::Disconnected);
         assert!(matches!(p.evaluate("1"), Err(Error::Closed)));
         b.kill();
+    }
+
+    /// Regression (review P1-1): a test that found a browser around the test-browser finder (`find()`, a hard-coded path)
+    /// launched it. In test builds the launch itself refuses an installed browser.
+    #[test]
+    fn a_test_build_never_launches_an_installed_browser() {
+        let env = |k: &str| std::env::var(k).ok();
+        // conformance: no-launch — the gate under test refuses each candidate before anything starts
+        for exe in crate::discover::candidates(crate::discover::Os::CURRENT, &env) {
+            let e = Chromium::launch(&exe, &LaunchOptions::default()).err().unwrap();
+            assert!(
+                matches!(&e, Error::Launch(m) if m.contains("installed")),
+                "{}: {e}",
+                exe.path.display()
+            );
+        }
     }
 
     #[test]

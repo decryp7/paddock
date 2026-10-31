@@ -1,13 +1,12 @@
 import { TestBed } from '@angular/core/testing';
+import { provideShellTesting, shellPorts } from '@decryp7/paddock-ui/shell/testing';
 import { BACKEND } from '../core/backend';
 import { flush, makeMock } from '../../testing/test-helpers';
-import { JobsStore } from './jobs.store';
-import { ToastStore } from './toast.store';
 import { WatchesStore } from './watches.store';
 
 function setup(options: Parameters<typeof makeMock>[0] = {}, backend = makeMock(options)) {
-  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: backend }] });
-  return { backend, store: TestBed.inject(WatchesStore), toasts: TestBed.inject(ToastStore) };
+  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: backend }, ...provideShellTesting()] });
+  return { backend, store: TestBed.inject(WatchesStore), notices: () => shellPorts().notices };
 }
 
 describe('WatchesStore', () => {
@@ -87,8 +86,8 @@ describe('WatchesStore', () => {
     expect(store.visible().map((w) => w.id)).toContain(store.watches()[0]!.id);
   });
 
-  it('turns successful actions into toasts and failures into error toasts', async () => {
-    const { backend, store, toasts } = setup();
+  it('turns successful actions into messages and failures into error messages', async () => {
+    const { backend, store, notices } = setup();
     await store.load();
     expect(await store.checkNow(null)).toBe(true);
     expect(await store.checkNow('w-1')).toBe(true);
@@ -99,106 +98,97 @@ describe('WatchesStore', () => {
     expect(await store.setInstalled('w-1', null)).toBe(true);
     const latest = (await backend.getWatch('w-1')).history[0]!.version;
     expect(await store.openRelease('w-1', latest)).toBe(true);
-    expect(toasts.toasts().map((t) => t.title)).toEqual(['Watch resumed', 'Marked as seen', 'Recorded 1.0.0 as installed', 'Installed version cleared']);
+    expect(shellPorts().messages()).toEqual([
+      'Checking every watch',
+      'Check finished',
+      'Watch paused',
+      'Watch resumed',
+      'Marked as seen',
+      'Recorded 1.0.0 as installed',
+      'Installed version cleared',
+    ]);
     expect(await store.remove('nope')).toBe(false);
-    const last = toasts.toasts().at(-1)!;
-    expect(last).toMatchObject({ tone: 'danger', title: 'That did not work', body: 'That watch no longer exists.' });
+    expect(notices().at(-1)).toMatchObject({ level: 'error', message: 'That did not work. That watch no longer exists.' });
     expect(await store.remove('w-1')).toBe(true);
     expect(backend.calls).toContain('deleteWatch');
   });
 
-  it('marks all unseen watches as seen with one toast', async () => {
-    const { store, toasts } = setup();
+  it('marks all unseen watches as seen with one message', async () => {
+    const { store } = setup();
     store.start();
     await flush();
     const n = store.unseen().length;
     await store.acknowledgeAll();
     expect(store.unseen()).toHaveLength(0);
-    expect(toasts.toasts().at(-1)?.title).toBe(`Marked ${n} watches as seen`);
+    expect(shellPorts().messages()).toEqual([`Marked ${n} watches as seen`]);
   });
 
-  it('says "Marked as seen" for a single watch and stays quiet when one fails', async () => {
-    const { backend, store, toasts } = setup();
+  it('says "Marked as seen" for a single watch and reports one error when one fails', async () => {
+    const { backend, store, notices } = setup();
     store.start();
     await flush();
     for (const w of store.unseen().slice(1)) await backend.acknowledge(w.id, null);
     expect(store.unseen()).toHaveLength(1);
     await store.acknowledgeAll();
-    expect(toasts.toasts().at(-1)?.title).toBe('Marked as seen');
+    expect(shellPorts().messages().at(-1)).toBe('Marked as seen');
     vi.spyOn(backend, 'acknowledge').mockRejectedValue(new Error('x'));
     await backend.resetAcknowledgement('w-1');
-    const before = toasts.toasts().length;
+    const before = notices().length;
     await store.acknowledgeAll();
-    expect(toasts.toasts().length).toBe(before + 1);
-    expect(toasts.toasts().at(-1)?.tone).toBe('danger');
+    expect(notices().length).toBe(before + 1);
+    expect(notices().at(-1)?.level).toBe('error');
   });
 
   it('reports downloads and their failures', async () => {
-    const { backend, store, toasts } = setup();
+    const { backend, store, notices } = setup();
     const v = (await backend.getWatch('w-1')).history[0]!;
     await store.download('w-1', v.version);
-    expect(toasts.toasts().at(-1)).toMatchObject({ title: 'Download finished' });
-    expect(toasts.toasts().at(-1)?.body).toContain(v.name);
+    expect(notices().at(-1)?.level).toBe('success');
+    expect(notices().at(-1)?.message).toMatch(/^Download finished\. .*/);
+    expect(notices().at(-1)?.message).toContain(v.name);
     await store.download('w-1', 'gone');
-    expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'danger', title: 'Download failed', body: 'That release is gone.' });
+    expect(notices().at(-1)).toMatchObject({ level: 'error', message: 'Download failed. That release is gone.' });
   });
 
-  it('a download that is cancelled is an info message and keeps the part, not a failure', async () => {
-    const { backend, store, toasts } = setup({ jobStepMs: 20 });
-    const v = (await backend.getWatch('w-1')).history[0]!;
-    const jobs = TestBed.inject(JobsStore);
-    const run = store.download('w-1', v.version);
-    await new Promise((r) => setTimeout(r, 50));
-    expect(jobs.jobs()[0]).toMatchObject({ kind: 'download' });
-    expect(jobs.jobs()[0]?.title).toContain(v.version);
-    await jobs.cancel(jobs.jobs()[0]!.id);
-    await run;
-    expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'info', title: 'Download cancelled' });
-    expect(toasts.toasts().some((t) => t.title === 'Download failed')).toBe(false);
+  it('a download the engine cancelled is an info message and keeps the part, not a failure', async () => {
+    const { backend, store, notices } = setup();
+    vi.spyOn(backend, 'downloadRelease').mockRejectedValue({ code: 'cancelled', message: 'Cancelled.', problems: [] });
+    await store.download('w-1', '1.0');
+    expect(notices().at(-1)).toMatchObject({ level: 'info' });
+    expect(notices().at(-1)?.message).toMatch(/^Download cancelled\. /);
+    expect(notices().some((n) => n.level === 'error')).toBe(false);
   });
 
   it('a long download is never given up on: it ends when the engine says so', async () => {
-    const { backend, store, toasts } = setup();
-    const v = (await backend.getWatch('w-1')).history[0]!;
+    const { backend, store, notices } = setup();
     let finish: (path: string) => void = () => undefined;
     vi.spyOn(backend, 'downloadRelease').mockReturnValue(new Promise<string>((r) => (finish = r)));
-    const run = store.download('w-1', v.version);
-    await new Promise((r) => setTimeout(r, 30));
-    expect(TestBed.inject(JobsStore).jobs()).toHaveLength(1);
-    expect(toasts.toasts().some((t) => t.tone === 'danger')).toBe(false);
+    const run = store.download('w-1', '1.0');
+    await flush(30);
+    expect(notices(), 'nothing is reported while it runs').toEqual([]);
     finish('/d/file.zip');
     await run;
-    expect(toasts.toasts().at(-1)).toMatchObject({ title: 'Download finished', body: '/d/file.zip' });
-    expect(TestBed.inject(JobsStore).jobs()).toHaveLength(0);
+    expect(notices().at(-1)).toMatchObject({ level: 'success', message: 'Download finished. /d/file.zip' });
   });
 
-  it('checking every watch starts a job whose n of m and cancel are in the jobs store', async () => {
-    const { backend, store, toasts } = setup({ jobStepMs: 15 });
+  it('checking every watch asks the backend for one check of all and reports it', async () => {
+    const { backend, store } = setup();
     await store.load();
-    const jobs = TestBed.inject(JobsStore);
+    const spy = vi.spyOn(backend, 'checkNow');
     expect(await store.checkNow(null)).toBe(true);
-    expect(toasts.toasts().at(-1)?.title).toBe('Checking every watch');
-    expect(jobs.jobs()[0]).toMatchObject({ kind: 'checkAll', title: 'Checking every watch' });
-    await new Promise((r) => setTimeout(r, 50));
-    expect(jobs.jobs()[0]?.progress?.total).toBe(store.watches().filter((w) => !w.paused).length);
-    await jobs.cancel(jobs.jobs()[0]!.id);
-    await new Promise((r) => setTimeout(r, 60));
-    expect(toasts.toasts().at(-1)?.title).toBe('Check cancelled');
-    void backend;
+    expect(spy).toHaveBeenCalledWith(null);
+    expect(shellPorts().messages()).toEqual(['Checking every watch']);
   });
 
-  it('a single check that is cancelled says so, and one that fails is an error', async () => {
-    const { backend, store, toasts } = setup({ jobStepMs: 100 });
+  it('a check the engine cancelled says so, and one that fails is an error', async () => {
+    const { backend, store, notices } = setup();
     await store.load();
-    const jobs = TestBed.inject(JobsStore);
-    const run = store.checkNow('w-1');
-    await new Promise((r) => setTimeout(r, 30));
-    expect(jobs.jobs()[0]).toMatchObject({ kind: 'check', title: expect.stringMatching(/^Checking .+/) });
-    await jobs.cancel(jobs.jobs()[0]!.id);
-    expect(await run).toBe(false);
-    expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'info', title: 'Check cancelled' });
-    vi.spyOn(backend, 'checkNow').mockRejectedValue({ code: 'unavailable', message: 'down', problems: [] });
+    const spy = vi.spyOn(backend, 'checkNow').mockRejectedValueOnce({ code: 'cancelled', message: 'Cancelled.', problems: [] });
     expect(await store.checkNow('w-1')).toBe(false);
-    expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'danger', body: 'down' });
+    expect(spy).toHaveBeenCalledWith('w-1');
+    expect(notices().at(-1)).toMatchObject({ level: 'info', message: 'Check cancelled' });
+    spy.mockRejectedValue({ code: 'unavailable', message: 'down', problems: [] });
+    expect(await store.checkNow('w-1')).toBe(false);
+    expect(notices().at(-1)).toMatchObject({ level: 'error', message: 'That did not work. down' });
   });
 });

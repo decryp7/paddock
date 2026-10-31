@@ -333,3 +333,27 @@ fn the_cap_is_checked_once_more_when_the_browser_connects() {
     o.memory_cap = None;
     assert!(over_cap_at_start(&o, Some(11)).is_none(), "no cap");
 }
+
+// ---- the launch-time gate of test builds (rule 7) ----
+
+/// Regression (review P1-1): a test that found a browser around the test-browser finder (`discover::find`, an installed
+/// candidate, a hard-coded path) launched it. In test builds the launch itself refuses an installed browser.
+#[test]
+fn a_test_build_never_launches_an_installed_browser() {
+    let base = tempfile::tempdir().unwrap();
+    let env = |k: &str| std::env::var(k).ok();
+    // conformance: no-launch — the gate under test refuses each candidate before anything starts
+    for exe in crate::discover::candidates(crate::discover::this_os(), &env) {
+        let e = Chromium::launch(&exe, &opts(base.path())).err().unwrap();
+        assert!(
+            matches!(&e, Error::Launch(m) if m.contains("installed")),
+            "{}: {e}",
+            exe.path.display()
+        );
+    }
+    assert_eq!(
+        std::fs::read_dir(base.path()).unwrap().count(),
+        0,
+        "refused before any profile"
+    );
+}

@@ -77,6 +77,12 @@ impl RuntimeKind for ChromeForTesting {
     }
 
     fn self_test(&self, executable: &Path, version: &str) -> std::result::Result<String, String> {
+        // Test builds: a self-test starts the browser too (headless), so it asks the same gate as a launch (rule 7).
+        #[cfg(any(test, feature = "test-support"))]
+        crate::discover::check_test_launch(
+            executable,
+            paddock_testkit::live_browser::BrowserWindow::Headless,
+        )?;
         if self.os == OsKind::Windows {
             return windows_self_test(executable, version);
         }
@@ -379,7 +385,7 @@ mod tests {
         let mut z = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let exec = zip::write::SimpleFileOptions::default().unix_permissions(0o755);
         z.start_file(exe, exec).unwrap();
-        z.write_all(b"#!/bin/sh\necho 'Google Chrome for Testing 1.2.3'\n")
+        z.write_all(b"#!/bin/sh\n# paddock-fake-browser\necho 'Google Chrome for Testing 1.2.3'\n")
             .unwrap();
         let bytes = z.finish().unwrap().into_inner();
         let mut h = paddock_jobs::HashingWriter::new(std::io::sink());
@@ -458,7 +464,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("9.9.manifest"), "<assembly/>").unwrap();
         let exe = d.path().join("chrome.exe");
-        std::fs::write(&exe, "#!/bin/sh\ncase \"$*\" in *--dump-dom*about:blank*) echo '<html><head></head><body></body></html>';; *) exit 3;; esac\n").unwrap();
+        std::fs::write(&exe, "#!/bin/sh\n# paddock-fake-browser\ncase \"$*\" in *--dump-dom*about:blank*) echo '<html><head></head><body></body></html>';; *) exit 3;; esac\n").unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
         let k = ChromeForTesting::new(OsKind::Windows);
         assert_eq!(
@@ -473,13 +479,33 @@ mod tests {
         );
     }
 
+    /// Regression (review): the self-test (a headless `--dump-dom` on Windows) started whatever it was given; in test
+    /// builds it asks the launch gate first, so an installed browser is never started, on any OS's path.
+    #[test]
+    fn the_self_test_never_starts_an_installed_browser_in_a_test_build() {
+        let env = |k: &str| std::env::var(k).ok();
+        // conformance: no-launch — the gate under test refuses each candidate before anything starts
+        for b in crate::discover::candidates(crate::discover::this_os(), &env) {
+            for os in [OsKind::Windows, OsKind::Macos, OsKind::Linux] {
+                let e = ChromeForTesting::new(os)
+                    .self_test(&b.path, "1.2.3")
+                    .unwrap_err();
+                assert!(e.contains("installed"), "{}: {e}", b.path.display());
+            }
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_self_test_runs_the_program() {
         use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().unwrap();
         let exe = d.path().join("chrome");
-        std::fs::write(&exe, "#!/bin/sh\necho \"Chromium 9.9 $1\"\n").unwrap();
+        std::fs::write(
+            &exe,
+            "#!/bin/sh\n# paddock-fake-browser\necho \"Chromium 9.9 $1\"\n",
+        )
+        .unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
         let k = ChromeForTesting::new(OsKind::Linux);
         assert_eq!(

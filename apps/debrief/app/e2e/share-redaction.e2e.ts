@@ -1,9 +1,10 @@
 import { expect, Page, test } from '@playwright/test';
 import { openAppWith } from './tools-support';
 import { expectNoSeriousViolations } from './axe';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 async function runCommand(page: Page, title: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill(title);
   await page.getByRole('option', { name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) }).first().click();
@@ -29,9 +30,9 @@ test('the redacted view masks the grid until it is turned off', async ({ page },
   await expect(row).toContainText('0.0.0.0');
 
   // The keyboard shortcut toggles it too, and is listed in the cheat sheet.
-  await page.keyboard.press('ControlOrMeta+Shift+x');
+  await pressMod(page, 'Mod+Shift+x');
   await expect(banner).toBeVisible();
-  await page.keyboard.press('ControlOrMeta+Shift+x');
+  await pressMod(page, 'Mod+Shift+x');
   await expect(banner).toHaveCount(0);
   await page.keyboard.press('F1');
   const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
@@ -57,7 +58,7 @@ test('redaction settings preview the profile rules live', async ({ page }, testI
 
 test('exports can be redacted with a preview of what is masked', async ({ page }) => {
   await openAppWith(page, '');
-  await page.keyboard.press('ControlOrMeta+Shift+e');
+  await pressMod(page, 'Mod+Shift+e');
   const dialog = page.getByRole('dialog', { name: 'Export events' });
   await dialog.getByLabel("Redact with the profile's rules").check();
   await expect(dialog.locator('debrief-redaction-summary')).toContainText('events change');

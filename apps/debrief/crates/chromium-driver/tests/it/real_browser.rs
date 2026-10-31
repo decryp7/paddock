@@ -1,21 +1,12 @@
-//! Launches a real Chromium-based browser when one is installed (skipped otherwise) against a local server that
-//! serves a page rendered by script.
+//! Launches the pinned test browser against a local server that serves a page rendered by script. The browser opens a
+//! window, so these tests run only on Linux under a virtual display (`discover::test_browser`); elsewhere they say why.
 
-use chromium_driver::{find_for_tests as find, Chromium, LaunchOptions};
+use chromium_driver::discover::test_browser;
+use chromium_driver::{Chromium, LaunchOptions};
 use serde_json::json;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::time::Duration;
-
-/// The pinned test browser, or `None` (the test then skips). With `DEBRIEF_REQUIRE_TEST_BROWSER` set (CI) a missing
-/// browser fails the test instead: a silent skip would hide a broken browser install (Paddock rule T02).
-fn browser_or_skip() -> Option<chromium_driver::BrowserExe> {
-    let found = find();
-    if found.is_none() && std::env::var_os("DEBRIEF_REQUIRE_TEST_BROWSER").is_some_and(|v| !v.is_empty() && v != "0") {
-        panic!("DEBRIEF_REQUIRE_TEST_BROWSER is set but no pinned test browser was found: install the pin with conformance/ci/install-test-browser.mjs --rust-source app/src-tauri/src/browser/runtime.rs and set CHROMIUM_TEST_PATH");
-    }
-    found
-}
 
 const PAGE: &str = "<!doctype html><html><head><title>Rendered</title></head><body><ul id=r></ul>\
 <script>setTimeout(()=>{for(let i=1;i<=3;i++){const l=document.createElement('li');l.textContent='item '+i;r.appendChild(l);}},150)</script></body></html>";
@@ -40,10 +31,7 @@ fn serve() -> u16 {
 
 #[test]
 fn renders_a_scripted_page_and_leaves_nothing_behind() {
-    let Some(exe) = browser_or_skip() else {
-        eprintln!("skipped: set CHROMIUM_TEST_PATH to a pinned test Chromium (installed browsers are never launched by tests)");
-        return;
-    };
+    let Some(exe) = test_browser() else { return };
     let port = serve();
     let opts = LaunchOptions {
         accent: Some(0x2a7de1),
@@ -106,7 +94,7 @@ fn renders_a_scripted_page_and_leaves_nothing_behind() {
 
 #[test]
 fn dropping_the_browser_ends_the_process() {
-    let Some(exe) = browser_or_skip() else { return };
+    let Some(exe) = test_browser() else { return };
     let b = Chromium::launch(&exe, &LaunchOptions::default()).expect("launch");
     let pid = b.pid().unwrap();
     drop(b);
