@@ -18,7 +18,8 @@
 //!    *folder* named exactly `incremental` below the root (case-sensitive, at any depth, not the root itself, not a file or
 //!    symlink of that name, not looked into once matched).
 //! 4. Measured again, size `>=` the cap prints `prune: still <size>; removing <folder>` and removes the whole folder.
-//! 5. Only `<folder>` is touched. A failed removal is reported and does not stop the run (the script said `|| true`).
+//! 5. Only `<folder>` is touched. A failed removal of an incremental cache is reported and does not stop the run (the script
+//!    said `|| true`); the plain form then exits 1, as the script's failing final `rm -rf` would have (the CI form still exits 0).
 //!
 //! **`cap` in the CI form** (`prune-ci-build-folder.sh`, selected by `--ci-home`): an empty folder prints
 //! `prune: no build folder was set in this job; nothing to prune`. Anything that is not a folder, is a symlink, or whose
@@ -56,6 +57,16 @@
 //! - `worktrees` looks for `<repo>/target` in `--repo` (default: the current folder), whereas Debrief's copy used its own
 //!   `apps/debrief`: run it with `--repo apps/debrief --app debrief` to reproduce that one. A candidate that cannot be
 //!   scanned is reported in `errors` and the listing goes on, as the `.ps1` did.
+//!
+//! - The CI form has no Linux default slot `s1` (the script assumed it on Linux) and no `~/.paddock-ci` default: `--ci-home` and
+//!   `--slot` are explicit, and a missing `--slot` prints `no slot given` (exit 0) instead of the generic notice.
+//! - A root that is a mount point, or inside the home's Pictures, Music, Movies, Library or .ssh, is refused too.
+//! - Work is done on the resolved root in both forms (the plain form still prints the path it was given), and the root's
+//!   identity at check time must be the scanned one before anything is removed.
+//! - `worktrees` lists hidden folders of `<repo>/target` as well (the `.ps1` listed them only under the home, with `-Force`).
+//!
+//! Open follow-ups: file identity on Windows (the comparison falls back to case-insensitive names; no dependency was added for
+//! file handles), and a Cargo-build-folder marker check before a whole-folder removal (see below).
 //!
 //! Whole-folder removal does not demand that the folder looks like a Cargo build folder (CACHEDIR.TAG): the recorded golden
 //! cases remove a plain fixture folder, as the real script does.
@@ -95,6 +106,8 @@ pub enum PruneError {
     ContainsHome(String),
     /// The root is inside one of the user's document folders (ER-14).
     UserFolder(String),
+    /// The root is a mount point (its device differs from its parent's): a whole volume is never a build folder.
+    MountPoint(String),
     /// The folder tree is bigger than a scan accepts.
     TooLarge(&'static str),
     /// A file system call failed.
@@ -118,7 +131,11 @@ impl fmt::Display for PruneError {
             PruneError::DotDot(s) => write!(f, "'{s}' holds a '..' component"),
             PruneError::TooShallow(s) => write!(f, "'{s}' is the top of a disk or directly below it"),
             PruneError::ContainsHome(s) => write!(f, "'{s}' is the home folder or holds it"),
-            PruneError::UserFolder(s) => write!(f, "'{s}' is inside the user's Documents, Desktop or Downloads"),
+            PruneError::UserFolder(s) => write!(
+                f,
+                "'{s}' is inside one of the user's own folders (Documents, Desktop, Downloads, Pictures, Music, Movies, Library, .ssh)"
+            ),
+            PruneError::MountPoint(s) => write!(f, "'{s}' is a mount point (a whole volume)"),
             PruneError::TooLarge(what) => write!(f, "the folder is too large to scan: {what}"),
             PruneError::Io(s) => f.write_str(s),
         }
@@ -314,6 +331,9 @@ pub fn still_message(folder: &str, size: u64) -> String {
     format!("prune: still {size}; removing {folder}")
 }
 
+/// The CI form's notice when no `--slot` was given (the script defaulted to `s1` on Linux; this tool does not).
+pub const NO_SLOT_MESSAGE: &str = "prune: no slot given (pass --slot sN); nothing to prune";
+
 /// The CI form's notice for an empty cap.
 pub const NO_CAP_MESSAGE: &str = "prune: no cap given; nothing to prune";
 
@@ -504,6 +524,7 @@ mod tests {
             PruneError::TooShallow("/".into()),
             PruneError::ContainsHome("/h".into()),
             PruneError::UserFolder("/h/Documents".into()),
+            PruneError::MountPoint("/Volumes/x".into()),
             PruneError::TooLarge("too many folders"),
             PruneError::Io("boom".into()),
         ];

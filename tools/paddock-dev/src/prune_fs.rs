@@ -1,6 +1,12 @@
 //! The thin edge of `dev host prune`: reads a folder into the pure plan's [`DirNode`] snapshot and removes what the plan
 //! names. Nothing here decides anything ([`crate::prune`] does); everything is bounded and no symlink is ever followed.
 //!
+//! # Windows
+//!
+//! File identity is only available on unix. On Windows the guard compares names case-insensitively and a folder is
+//! re-checked by kind only; a handle-based identity (and mount-point detection) is an open follow-up that needs a platform
+//! dependency.
+//!
 //! # Reusable names
 //!
 //! A path can name something else by the time it is removed (a folder replaced by a symlink between the scan and the
@@ -10,7 +16,6 @@
 //! can only be used by someone who already owns the folder.
 
 use crate::prune::{DirNode, FileId, MAX_DEPTH, MAX_DIRS, MAX_ENTRIES, PruneError, RelPath};
-use crate::prune_worktrees::Candidate;
 use std::collections::HashSet;
 use std::fs::{self, Metadata};
 use std::path::{Path, PathBuf};
@@ -29,8 +34,11 @@ pub enum Kind {
 }
 
 /// What `path` is, without following a symlink.
+///
+/// Trailing separators and `.` components are dropped first: `symlink_metadata("link/")` would follow the link.
 pub fn kind(path: &Path) -> Kind {
-    match fs::symlink_metadata(path) {
+    let path: PathBuf = path.components().collect();
+    match fs::symlink_metadata(&path) {
         Err(_) => Kind::Missing,
         Ok(m) if m.file_type().is_symlink() => Kind::Symlink,
         Ok(m) if m.is_dir() => Kind::Dir,
@@ -155,6 +163,40 @@ pub fn scan(root: &Path) -> Result<Scan, PruneError> {
     })
 }
 
+/// The identity of the folder at `path` (without following a symlink), where the platform has one.
+pub fn dir_id(path: &Path) -> Option<FileId> {
+    fs::symlink_metadata(path).ok().and_then(|m| identity(&m))
+}
+
+/// Whether `path` is a mount point: its device differs from its parent's (unix; elsewhere never, a follow-up).
+#[cfg(unix)]
+pub fn is_mount_point(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let (Some(parent), Ok(me)) = (path.parent(), fs::symlink_metadata(path)) else {
+        return false;
+    };
+    fs::symlink_metadata(parent).is_ok_and(|p| p.dev() != me.dev())
+}
+
+/// Whether `path` is a mount point: not detected off unix.
+#[cfg(not(unix))]
+pub fn is_mount_point(_: &Path) -> bool {
+    false
+}
+
+/// A folder found by [`list_dirs`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listed {
+    /// The folder.
+    pub path: PathBuf,
+    /// Its name.
+    pub name: String,
+    /// Summed file lengths (0 for a symlink).
+    pub bytes: u64,
+    /// It is a symlink to a folder.
+    pub symlink: bool,
+}
+
 /// Whether two paths are the same folder: by device and inode where the platform has them (so a symlinked part or a case
 /// variant on a case-insensitive volume still compares equal), else by [`crate::prune_root::same_path_ci`].
 pub fn same_file(a: &Path, b: &Path) -> bool {
@@ -169,7 +211,7 @@ pub fn same_file(a: &Path, b: &Path) -> bool {
 /// The folders directly in `parent` whose names `wanted` accepts, sorted by name, with their sizes, and the reasons some could
 /// not be listed (the others are still listed, as the `.ps1` did). A symlink is listed (with `symlink` set and no size) when it
 /// points to a folder; a missing `parent` lists nothing.
-pub fn list_dirs(parent: &Path, wanted: &dyn Fn(&str) -> bool) -> (Vec<Candidate>, Vec<String>) {
+pub fn list_dirs(parent: &Path, wanted: &dyn Fn(&str) -> bool) -> (Vec<Listed>, Vec<String>) {
     let Ok(entries) = fs::read_dir(parent) else {
         return (Vec::new(), Vec::new());
     };
@@ -182,7 +224,7 @@ pub fn list_dirs(parent: &Path, wanted: &dyn Fn(&str) -> bool) -> (Vec<Candidate
         let path = entry.path();
         let candidate = match kind(&path) {
             Kind::Dir => match scan(&path) {
-                Ok(s) => Candidate {
+                Ok(s) => Listed {
                     bytes: crate::prune::measure(&s.tree, &Default::default()).apparent,
                     path,
                     name,
@@ -193,7 +235,7 @@ pub fn list_dirs(parent: &Path, wanted: &dyn Fn(&str) -> bool) -> (Vec<Candidate
                     continue;
                 }
             },
-            Kind::Symlink if fs::metadata(&path).is_ok_and(|m| m.is_dir()) => Candidate {
+            Kind::Symlink if fs::metadata(&path).is_ok_and(|m| m.is_dir()) => Listed {
                 path,
                 name,
                 bytes: 0,
@@ -411,6 +453,29 @@ mod tests {
             assert_eq!(errs.len(), 1);
             assert!(errs[0].contains("app-target-deep"));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_trailing_separator_does_not_make_a_symlink_a_folder() {
+        let t = tempfile::tempdir().unwrap();
+        fs::create_dir(t.path().join("real")).unwrap();
+        std::os::unix::fs::symlink("real", t.path().join("l")).unwrap();
+        assert_eq!(kind(&t.path().join("l")), Kind::Symlink);
+        let mut with_slash = t.path().join("l").into_os_string();
+        with_slash.push("/");
+        assert_eq!(kind(Path::new(&with_slash)), Kind::Symlink);
+        assert_eq!(kind(&t.path().join("real")), Kind::Dir);
+    }
+
+    #[test]
+    fn a_folder_has_an_identity_and_is_not_a_mount_point() {
+        let t = tempfile::tempdir().unwrap();
+        let inner = t.path().join("inner");
+        fs::create_dir(&inner).unwrap();
+        assert_eq!(dir_id(&inner).is_some(), cfg!(unix));
+        assert!(!is_mount_point(&inner));
+        assert!(dir_id(&t.path().join("nope")).is_none());
     }
 
     #[test]

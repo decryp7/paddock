@@ -6,7 +6,7 @@ use crate::prune::PruneError;
 use std::path::{Component, Path};
 
 /// The folders of the home that hold the user's own files.
-pub const USER_FOLDERS: [&str; 3] = ["Documents", "Desktop", "Downloads"];
+pub const USER_FOLDERS: [&str; 8] = ["Documents", "Desktop", "Downloads", "Pictures", "Music", "Movies", "Library", ".ssh"];
 
 /// Component-wise, ASCII case-insensitive equality: the fallback comparison where file identity is not available (a missing
 /// folder, Windows) and what the pure tests use. Windows and macOS file systems ignore case, so it errs towards "same".

@@ -102,7 +102,11 @@ fn error(e: PruneError) -> CliError {
         PruneError::BadCap(_) | PruneError::BadApp(_) | PruneError::BadKeep(_) | PruneError::NotAbsolute(_) | PruneError::DotDot(_) => {
             CliError::usage(format!("{e}."))
         }
-        PruneError::TooShallow(_) | PruneError::ContainsHome(_) | PruneError::UserFolder(_) | PruneError::NoHome(_) => {
+        PruneError::TooShallow(_)
+        | PruneError::ContainsHome(_)
+        | PruneError::UserFolder(_)
+        | PruneError::MountPoint(_)
+        | PruneError::NoHome(_) => {
             CliError::refused(format!("{e}.")).with_hint("Give a build folder of your own, never a home or system folder.")
         }
         PruneError::TooLarge(_) | PruneError::Io(_) => CliError::failure(format!("{e}.")),
@@ -173,6 +177,10 @@ pub fn cap(a: &CapArgs) -> Result<Report, CliError> {
     let run = resolve_home(a.home.as_deref())
         .and_then(|h| cap_run(a, max, unit, &h))
         .map_err(error)?;
+    if !run.errors.is_empty() {
+        let n = run.errors.len();
+        return Err(CliError::failure(format!("{n} removal(s) failed: {}.", run.errors.join("; "))).with_hint("Close what uses the folder and run it again."));
+    }
     Ok(cap_report(a, Some(max), unit, run))
 }
 
@@ -190,6 +198,9 @@ fn ci_cap(a: &CapArgs, unit: Unit) -> Report {
         let line = format!("prune: the cap must be a whole number, got '{}'", a.max_gb);
         return cap_report(a, None, unit, CapRun::none("none", Some(line)));
     };
+    if a.slot.is_none() {
+        return cap_report(a, Some(max), unit, CapRun::none("none", Some(prune::NO_SLOT_MESSAGE.into())));
+    }
     let run = match resolve_home(a.home.as_deref()).and_then(|h| cap_run(a, max, unit, &h)) {
         Ok(run) => run,
         Err(e @ (PruneError::Io(_) | PruneError::TooLarge(_))) => CapRun::none("failed", Some(format!("prune: {e}; leaving it alone"))),
@@ -204,20 +215,25 @@ fn cap_run(a: &CapArgs, max: u64, unit: Unit, home: &Path) -> Result<CapRun, Pru
     let slot = a.slot.as_deref();
     let left_alone = || Ok(CapRun::none("left-alone", Some(prune::not_owned_message(&shown, slot))));
     check_root(&a.root, home, &prune_fs::same_file)?;
+    // `kind` drops trailing separators, so `--root <link>/` is seen as the link and never followed.
     if prune_fs::kind(&a.root) != Kind::Dir {
         return if ci { left_alone() } else { Ok(CapRun::none("absent", None)) };
     }
     let root = std::fs::canonicalize(&a.root).map_err(|e| PruneError::Io(format!("{shown}: {e}")))?;
     check_root(&root, home, &prune_fs::same_file)?;
+    if prune_fs::is_mount_point(&root) {
+        return Err(PruneError::MountPoint(root.display().to_string()));
+    }
+    let root_id = prune_fs::dir_id(&root);
     if let Some(ci_home) = &a.ci_home {
         match std::fs::canonicalize(ci_home) {
             Ok(h) if owns(&h, &root, slot) => {}
             _ => return left_alone(),
         }
     }
-    // The CI form works on the resolved path, as the script did; the plain form on the path it was given.
-    let work: &Path = if ci { &root } else { &a.root };
-    let display = work.display().to_string();
+    // Both forms work on the resolved path; the plain form prints the path it was given, as the script did.
+    let work: &Path = &root;
+    let display = if ci { work.display().to_string() } else { shown.clone() };
     let mut run = CapRun::none("none", None);
     let mut gone: BTreeSet<RelPath> = BTreeSet::new();
     let bundle = prune::bundle_path();
@@ -236,6 +252,9 @@ fn cap_run(a: &CapArgs, max: u64, unit: Unit, home: &Path) -> Result<CapRun, Pru
         }
     }
     let scan = prune_fs::scan(work)?;
+    if scan.tree.id != root_id {
+        return Err(PruneError::Io(format!("{shown} changed while it was checked; left alone")));
+    }
     run.unreadable = scan.unreadable;
     let plan = prune::plan_cap(&scan.tree, &gone, max, unit);
     run.size_before = Some(plan.size_before);
@@ -243,7 +262,7 @@ fn cap_run(a: &CapArgs, max: u64, unit: Unit, home: &Path) -> Result<CapRun, Pru
     if plan.over {
         run.action = "incremental";
         run.lines.push(prune::over_message(&display, plan.size_before, max));
-        let left = remove_incremental(work, &scan.tree, &plan, a.dry_run, &mut run, (max, unit))?;
+        let left = remove_incremental(work, &scan.tree, &plan, a.dry_run, &mut run, (max, unit, root_id))?;
         let (size_after, id) = (left.size, left.id);
         run.size_after = Some(size_after);
         if left.remove_folder {
@@ -273,7 +292,7 @@ fn remove_incremental(
     plan: &CapPlan,
     dry: bool,
     run: &mut CapRun,
-    (max, unit): (u64, Unit),
+    (max, unit, root_id): (u64, Unit, Option<FileId>),
 ) -> Result<Removal, PruneError> {
     for rel in &plan.incremental {
         if dry {
@@ -292,6 +311,9 @@ fn remove_incremental(
         });
     }
     let again = prune_fs::scan(work)?;
+    if again.tree.id != root_id {
+        return Err(PruneError::Io(format!("{} changed while it was pruned; left alone", work.display())));
+    }
     let size = prune::plan_cap(&again.tree, &BTreeSet::new(), max, unit).size_before;
     Ok(Removal {
         size,
@@ -322,9 +344,18 @@ pub fn worktrees(a: &WorktreeArgs) -> Result<Report, CliError> {
         None => std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder is unknown: {e}.")))?,
     };
     let app = a.app.clone();
-    let (mut candidates, mut errors): (Vec<Candidate>, Vec<String>) = prune_fs::list_dirs(&home, &|n| wt::home_candidate(&app, n));
+    let (listed, mut errors) = prune_fs::list_dirs(&home, &|n| wt::home_candidate(&app, n));
     let (more, more_errors) = prune_fs::list_dirs(&repo.join("target"), &wt::target_candidate);
-    candidates.extend(more);
+    let candidates: Vec<Candidate> = listed
+        .into_iter()
+        .chain(more)
+        .map(|l| Candidate {
+            path: l.path,
+            name: l.name,
+            bytes: l.bytes,
+            symlink: l.symlink,
+        })
+        .collect();
     errors.extend(more_errors);
     let rows = wt::plan_rows(&a.app, &a.keep, a.remove, a.dry_run, &candidates);
     for row in rows.iter().filter(|r| r.action == Action::Removing) {

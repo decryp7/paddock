@@ -270,7 +270,7 @@ fn roots_in_the_users_home_documents_are_refused_and_nothing_is_touched() {
             home.to_str().unwrap(),
         ]);
         assert_eq!(code, 4, "{refused}: {err}");
-        assert!(err.contains("Documents, Desktop or Downloads"), "{err}");
+        assert!(err.contains("Documents, Desktop, Downloads"), "{err}");
         assert!(folder.join("keep.txt").exists(), "{refused} is untouched");
     }
     for (root_arg, why) in [
@@ -290,9 +290,32 @@ fn roots_in_the_users_home_documents_are_refused_and_nothing_is_touched() {
         ]);
         assert_eq!(code, 4, "{why}");
     }
-    let (code, _, err) = dev(&["host", "prune", "cap", "--root", "relative/dir", "--max-gb", "1"]);
+    let (code, _, err) = dev(&[
+        "host",
+        "prune",
+        "cap",
+        "--root",
+        "relative/dir",
+        "--max-gb",
+        "1",
+        "--dry-run",
+        "--home",
+        home.to_str().unwrap(),
+    ]);
     assert_eq!(code, 2, "{err}");
-    let (code, out, _) = dev(&["--json", "host", "prune", "cap", "--root", "/", "--max-gb", "1"]);
+    let (code, out, _) = dev(&[
+        "--json",
+        "host",
+        "prune",
+        "cap",
+        "--root",
+        "/",
+        "--max-gb",
+        "1",
+        "--dry-run",
+        "--home",
+        home.to_str().unwrap(),
+    ]);
     assert_eq!(code, 4);
     assert_eq!(serde_json::from_str::<Value>(out.trim()).unwrap()["kind"], "refused");
 }
@@ -653,4 +676,110 @@ fn the_ci_form_turns_every_problem_into_a_notice_with_exit_zero() {
         assert_eq!(code, 0, "{root_arg:?} {cap:?}: {err}");
         assert!(out.contains("prune:"), "{out}");
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_root_given_with_a_trailing_slash_is_not_followed_through_a_symlink() {
+    let (_t, root) = canonical_tmp();
+    let real = root.join("real/build");
+    build(&real);
+    link("real/build", &root.join("l"));
+    let arg = format!("{}/", root.join("l").display());
+    let v = json(&["host", "prune", "cap", "--unit", "kb", "--root", &arg, "--max-gb", "0", "--home", &scratch_home(&root)]);
+    assert_eq!(v["action"], "absent");
+    assert!(real.join("keep.txt").exists(), "the link's target is untouched");
+}
+
+#[test]
+fn in_the_ci_form_a_bad_cap_is_noticed_before_the_bundles_go() {
+    let (_t, root) = canonical_tmp();
+    let ci = root.join("ci");
+    let folder = ci.join("target-app-s1");
+    build(&folder);
+    let (code, out, err) = dev(&[
+        "host",
+        "prune",
+        "cap",
+        "--unit",
+        "kb",
+        "--root",
+        folder.to_str().unwrap(),
+        "--max-gb",
+        "x",
+        "--drop-bundles",
+        "--ci-home",
+        ci.to_str().unwrap(),
+        "--slot",
+        "s1",
+        "--home",
+        &scratch_home(&root),
+    ]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("the cap must be a whole number"), "{out}");
+    assert!(folder.join("dist/bundle/i").exists(), "nothing was removed");
+}
+
+#[test]
+fn the_ci_form_without_a_slot_says_so_and_removes_nothing() {
+    let (_t, root) = canonical_tmp();
+    let ci = root.join("ci");
+    let folder = ci.join("target-app-s1");
+    build(&folder);
+    let (code, out, _) = dev(&[
+        "host",
+        "prune",
+        "cap",
+        "--root",
+        folder.to_str().unwrap(),
+        "--max-gb",
+        "0",
+        "--ci-home",
+        ci.to_str().unwrap(),
+        "--home",
+        &scratch_home(&root),
+    ]);
+    assert_eq!(code, 0);
+    assert!(out.contains("no slot given"), "{out}");
+    assert!(folder.join("keep.txt").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn the_plain_form_fails_when_a_removal_fails_and_the_ci_form_does_not() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_t, root) = canonical_tmp();
+    let ci = root.join("ci");
+    let folder = ci.join("target-app-s1");
+    build(&folder);
+    let home = scratch_home(&root);
+    let locked = folder.join("debug");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+    if fs::File::create(locked.join("probe")).is_ok() {
+        // Running with rights that ignore permissions (root): this failure cannot be made.
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    let f = folder.to_str().unwrap();
+    let plain = dev(&["host", "prune", "cap", "--unit", "kb", "--root", f, "--max-gb", "300", "--home", &home]);
+    let ci_form = dev(&[
+        "host",
+        "prune",
+        "cap",
+        "--unit",
+        "kb",
+        "--root",
+        f,
+        "--max-gb",
+        "300",
+        "--home",
+        &home,
+        "--ci-home",
+        ci.to_str().unwrap(),
+        "--slot",
+        "s1",
+    ]);
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(plain.0, 1, "{}", plain.2);
+    assert_eq!(ci_form.0, 0, "{}", ci_form.2);
 }
