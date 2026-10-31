@@ -8,4 +8,4 @@ One line per page. Read this first, then the page. Rules, ADRs and registers sta
 - [Test isolation](test-isolation.md): the shared-page timer leak, the test-kit guard, rules 49 and 57/58 status. Verified 2026-10-31.
 - [Process starts](process-starts.md): the start judge, ADR 0031, C51, ADR 0033, taken check numbers. Verified 2026-10-31.
 - [Open decisions](open-decisions.md): what the log still shows as undecided or unfinished. Verified 2026-10-31.
-- [Eval](eval.md): the ten questions and expected answers for the pilot's before/after test. Verified 2026-10-31.
+- [Eval](eval.md): the ten questions and expected answers for an optional before/after measure. Verified 2026-10-31.

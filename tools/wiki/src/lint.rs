@@ -323,7 +323,10 @@ pub fn lint(req: &Request<'_>) -> Result<Outcome, LintError> {
                 out.errors.push(at(
                     f,
                     0,
-                    format!("copies rule text ({COPY_WORDS}+ words shared with {}): \"{hit}...\"; link the rule instead", src.name),
+                    format!(
+                        "copies rule text ({COPY_WORDS}+ words shared with {}): \"{hit}...\"; link the rule instead",
+                        src.name
+                    ),
                 ));
             }
         }

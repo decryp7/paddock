@@ -1,7 +1,9 @@
-# Paddock wiki (pilot)
+# Paddock wiki
 
 A small, sourced summary of how things work **today**, so an agent can read a page instead of re-deriving the state from
-the lessons, the ADRs and the hand-off logs. It is a two-week pilot (started 2026-10-31) of the LLM Wiki pattern; the
+the lessons, the ADRs and the hand-off logs. It started on 2026-10-31 as a two-week pilot of the LLM Wiki pattern; the user
+concluded the pilot and made it official the same day (ER-30 and `skills/wiki` on engineering-rules `docs/er-30-wiki`, Paddock rule 59 on `docs/rule-wiki`).
+The tooling is to become one Rust `wiki` CLI (branch `tools/wiki`); this schema and `scripts/wiki-lint.mjs` hold until it has parity. The
 design and the evaluation plan are in the research note `research-llm-wiki-2026-10-31.md` (hand-off folder, outside this
 repository), and the pattern's primary source is Karpathy's
 [LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) (read as data, adapted, not adopted as
@@ -41,8 +43,8 @@ Summary in three to five lines.
 ## See also
 ```
 
-- `verified: YYYY-MM-DD`: the day someone last checked every claim of the page against its sources. A page not verified
-  within 30 days is flagged by the lint, never deleted.
+- `verified: YYYY-MM-DD`: the day someone last checked every claim of the page against its sources. An old date draws a lint
+  warning (30 days by default); the writer re-verifies the page, nobody deletes it.
 - `sources:` lists what the page rests on. Every bullet also carries its own source.
 - Dates come from the clock (`date +%F`), never typed from memory. Facts that are only on a branch say so ("on branch X at
   commit Y, not on main"), so the page does not claim more than main has.
@@ -60,7 +62,7 @@ Summary in three to five lines.
 - **Query**: read `index.md`, then the pages it points to, and answer with the sources of the page. If the answer was
   missing or wrong, leave a wiki note for the next ingest.
 - **Lint**: `node scripts/wiki-lint.mjs` (links resolve and their anchors exist; no clock-time citation of the steward log; every page is in the index; no orphan; every
-  page has `verified:` and `sources:`; every bullet names a source; pages older than 30 days are flagged; no run of 8 or more
+  page has `verified:` and `sources:`; every bullet names a source; pages with an old `verified:` date draw a warning; no run of 8 or more
   words is shared with any rules source: `docs/rules.md`, `origin/main`, the open rule branches and engineering-rules
   `RULES.md`, given with `--rules`). A second, reading pass by a reviewer checks pages against the rules and ADRs they
   cite, a few pages at a time.
@@ -73,4 +75,4 @@ of merge conflicts and the pages under one editor.
 
 ## Pages
 
-See [index.md](index.md); the evaluation for the pilot is [eval.md](eval.md).
+See [index.md](index.md); the optional evaluation is [eval.md](eval.md).

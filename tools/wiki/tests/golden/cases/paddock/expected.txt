@@ -1,9 +1,9 @@
 exit 1
 exit-strict 1
-error cases/paddock/docs/wiki/README.md:15: broken link: ../adr/README.md does not exist
-error cases/paddock/docs/wiki/README.md:15: broken link: ../known-copies.toml does not exist
-error cases/paddock/docs/wiki/README.md:16: broken link: ../../conformance/README.md does not exist
-error cases/paddock/docs/wiki/README.md:18: broken link: ../lessons.md does not exist
+error cases/paddock/docs/wiki/README.md:17: broken link: ../adr/README.md does not exist
+error cases/paddock/docs/wiki/README.md:17: broken link: ../known-copies.toml does not exist
+error cases/paddock/docs/wiki/README.md:18: broken link: ../../conformance/README.md does not exist
+error cases/paddock/docs/wiki/README.md:20: broken link: ../lessons.md does not exist
 error cases/paddock/docs/wiki/ci-and-runners.md:13: broken link: ../../.gitea/workflows/ci.yml does not exist
 error cases/paddock/docs/wiki/ci-and-runners.md:14: broken link: ../../.gitea/workflows/ci.yml does not exist
 error cases/paddock/docs/wiki/ci-and-runners.md:16: broken link: ../../.gitea/workflows/ci.yml does not exist
@@ -13,16 +13,16 @@ error cases/paddock/docs/wiki/ci-and-runners.md:23: broken link: ../../.gitea/ac
 error cases/paddock/docs/wiki/ci-and-runners.md:23: broken link: ../adr/0025-ci-job-isolation.md does not exist
 error cases/paddock/docs/wiki/ci-and-runners.md:37: broken link: ../../.gitea/workflows/ci.yml does not exist
 error cases/paddock/docs/wiki/ci-and-runners.md:38: broken link: ../../AGENTS.md does not exist
-error cases/paddock/docs/wiki/ci-and-runners.md:42: broken link: ../lessons.md does not exist
-error cases/paddock/docs/wiki/ci-and-runners.md:55: broken link: ../lessons.md does not exist
-error cases/paddock/docs/wiki/ci-and-runners.md:58: broken link: ../lessons.md does not exist
-error cases/paddock/docs/wiki/eval.md:29: broken link: ../../conformance/README.md does not exist
-error cases/paddock/docs/wiki/eval.md:33: broken link: ../../apps/dyno/docs/releasing.md does not exist
-error cases/paddock/docs/wiki/eval.md:41: broken link: ../adr/0031-patience-not-wall-clocks.md does not exist
-error cases/paddock/docs/wiki/eval.md:41: broken link: ../lessons.md does not exist
-error cases/paddock/docs/wiki/eval.md:49: broken link: ../../apps/dyno/docs/releasing.md does not exist
-error cases/paddock/docs/wiki/eval.md:53: broken link: ../lessons.md does not exist
-error cases/paddock/docs/wiki/eval.md:57: broken link: ../../scripts/vm-smoke/README.md does not exist
+error cases/paddock/docs/wiki/ci-and-runners.md:41: broken link: ../lessons.md does not exist
+error cases/paddock/docs/wiki/ci-and-runners.md:54: broken link: ../lessons.md does not exist
+error cases/paddock/docs/wiki/ci-and-runners.md:57: broken link: ../lessons.md does not exist
+error cases/paddock/docs/wiki/eval.md:30: broken link: ../../conformance/README.md does not exist
+error cases/paddock/docs/wiki/eval.md:34: broken link: ../../apps/dyno/docs/releasing.md does not exist
+error cases/paddock/docs/wiki/eval.md:42: broken link: ../adr/0031-patience-not-wall-clocks.md does not exist
+error cases/paddock/docs/wiki/eval.md:42: broken link: ../lessons.md does not exist
+error cases/paddock/docs/wiki/eval.md:50: broken link: ../../apps/dyno/docs/releasing.md does not exist
+error cases/paddock/docs/wiki/eval.md:54: broken link: ../lessons.md does not exist
+error cases/paddock/docs/wiki/eval.md:58: broken link: ../../scripts/vm-smoke/README.md does not exist
 error cases/paddock/docs/wiki/logging-and-diagnostics.md:11: broken link: ../../crates/paddock-log/src/lib.rs does not exist
 error cases/paddock/docs/wiki/logging-and-diagnostics.md:13: broken link: ../../crates/paddock-diag/src/lib.rs does not exist
 error cases/paddock/docs/wiki/logging-and-diagnostics.md:27: broken link: ../adr/README.md does not exist

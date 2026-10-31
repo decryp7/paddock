@@ -1,11 +1,12 @@
 ---
-title: Pilot evaluation
+title: Wiki evaluation
 verified: 2026-10-31
 sources: [handoff/research-llm-wiki-2026-10-31.md, handoff/merge-steward.md, docs/lessons.md]
 ---
-Ten questions that agents re-derived recently, with the expected answers and where each answer comes from. At the end of the pilot
-a fresh agent answers all ten twice, once with only the repository and once with the wiki; a reviewer scores each answer for
-correctness, sources, tokens and time. Pass and kill criteria are in the research note (section 4). The expected answers were
+Ten questions that agents re-derived recently, with the expected answers and where each answer comes from. The user made the wiki
+official on 2026-10-31 (`merge-steward.md:719`), so this is an optional measure, not a gate: a fresh agent can answer all ten twice, once with
+only the repository and once with the wiki, and a reviewer scores each answer for correctness, sources, tokens and time. The original pass and
+kill criteria are in the research note (section 4). The expected answers were
 written from the sources on 2026-10-31 and must be re-verified before the test starts, because several state facts change daily.
 
 ## How to score
@@ -21,7 +22,7 @@ Sources: [ci-and-runners](ci-and-runners.md); src: `merge-steward.md:3, 118, 644
 
 ### 2. Why did UI specs time out at 5000 ms in the s23b runs?
 Expected: a spec spied on `setTimeout` under fake timers and left a dead fake clock; the specs of a bundle share a page (`isolate: false`), so later files hung.
-Fix: the shared test-kit timer guard (head `d459854a6`, `onTestFinished`, in review) and a spec that uses `getTimerCount`; not on main.
+Fix: the shared test-kit timer guard (`onTestFinished` head `d459854a6`, only on `fix/panel-snapshot-spec-cost`, in review) and a spec that uses `getTimerCount`; not on main.
 Sources: [test-isolation](test-isolation.md); src: `merge-steward.md:673, 683, 685`.
 
 ### 3. Which conformance check number is free?
@@ -29,7 +30,7 @@ Expected: C66. On main: C50, C51, C53, C54, C56, C57. Claimed: C49 provider-gran
 Sources: [process-starts](process-starts.md); [conformance README](../../conformance/README.md); src: `merge-steward.md:150, 155, 566, 600, 641, 712`.
 
 ### 4. What blocks the Dyno 1.0 tag?
-Expected: main merged into `steward/s28-dyno-1.0` together with the replacement of the macOS socket sweep the user required (`fix/ipc-poll-waits` `c028d3f39`, `dyno/macos-socket-list` `5defc8fcc`, being merged), then ci.yml and a gated `dyno-release` run with installers; the open screenshot findings (disk activity series, tray default); VM checks on those installers (retarget checklist, `--gui`, WebContent); the user's GUI look; then the tag on the same commit.
+Expected: main merged into `steward/s28-dyno-1.0` together with the replacement of the macOS socket sweep the user required (`fix/ipc-poll-waits` `c028d3f39`, `dyno/macos-socket-list` `5defc8fcc`, being merged; s28 not yet pushed with them), then ci.yml and a gated `dyno-release` run with installers; the open screenshot findings (disk activity series, tray default); VM checks on those installers (retarget checklist, `--gui`, WebContent); the user's GUI look; then the tag on the same commit.
 Sources: [releasing](releasing.md); [Dyno releasing, Before tagging](../../apps/dyno/docs/releasing.md#before-tagging); src: `merge-steward.md:294, 429, 473, 478, 689`.
 
 ### 5. How does the heavy-step lock work?

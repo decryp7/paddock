@@ -21,7 +21,7 @@ does not restate them. Steward-log citations are `merge-steward.md:<line>` in `/
 - Two more Mac runners (`d7-mac-mini-2`, `-3`) were registered on 2026-10-28 and parked; they were never enabled and are not in the
   admin list. Source: src: `runners-2026-10-28.md` (Mac mini section); src: reviewer's check of the admin runner list.
 - Job isolation is in main as [the job-isolation action](../../.gitea/actions/job-isolation/action.yml); [ADR 0025](../adr/0025-ci-job-isolation.md) reads Proposed on
-  main but is Accepted on `origin/pitcrew/1.1-i1` at `707300972`. Source: src: `git show origin/pitcrew/1.1-i1:docs/adr/0025-ci-job-isolation.md`; src: `merge-steward.md:93`.
+  main but is Accepted on `origin/pitcrew/1.1-i1` at `707300972`. Source: src: `git show origin/pitcrew/1.1-i1:docs/adr/0025-ci-job-isolation.md`; src: `merge-steward.md:93, 413` (Proposed on main).
 - The Mac is the bottleneck: macOS jobs of a batch queue because the single Mac runner is busy (`merge-steward.md:524`) and the
   installer dispatches wait until the Mac queue clears (`merge-steward.md:658`). Source: src: `merge-steward.md:524, 658`.
 - Load on the Mac came from agent and host work, not from CI: a test binary spinning for 70 minutes (`merge-steward.md:547`) and a
@@ -38,8 +38,7 @@ does not restate them. Steward-log citations are `merge-steward.md:<line>` in `/
   The family doc says sccache gives almost nothing across worktrees. Source: [AGENTS.md](../../AGENTS.md) (Build folders).
 - Linux jobs leave `CARGO_BUILD_JOBS` unset, so each job starts one rustc per core; an A/B of 16, 8 and 4 jobs per job is
   planned and not run. Source: src: `linux-ci-share-ab.md` (branch `ci/build-parallelism`, head `eb2acadcc`).
-- CI machines stay on the stable OS channel (ER-26). A preview Windows update (KB5127653) altered the TCP listener state the CI PC
-  reported, and CI failed for a day: [lesson, dwState 0](../lessons.md#2026-10-30-newer-windows-11-builds-list-a-listener-with-dwstate-0-the-table-says-it-listens-dyno). The policy that keeps optional updates off the CI PC was prepared; its application is not recorded. Source: src: `windows-runner-update-policy.md` (header).
+- The OS update channel of CI machines is ER-26 (engineering-rules). The incident behind it: [lesson, dwState 0](../lessons.md#2026-10-30-newer-windows-11-builds-list-a-listener-with-dwstate-0-the-table-says-it-listens-dyno). The policy that keeps optional updates off the CI PC was prepared; its application is not recorded. Source: src: `windows-runner-update-policy.md` (header).
 
 ## Machine load and the heavy-step lock (agents on the Mac)
 - Agents gate heavy steps on a 1-minute load below 30; the load rule is [Throughput, rule 41](../rules.md#throughput-user-2026-10-24). Source: src: `merge-steward.md:533` (gate stated in the entry).
@@ -60,7 +59,7 @@ does not restate them. Steward-log citations are `merge-steward.md:<line>` in `/
 - Dyno `a_job_runs_at_the_gentle_level` EBADF: a retry (`c5c240c61`) is on main (`merge-steward.md:679`); the root cause is the macOS socket
   sweep (`merge-steward.md:429`), fixed by `fix/ipc-poll-waits` at `c028d3f39` (`merge-steward.md:473`), being merged into the Dyno batch. Source: src: `merge-steward.md:429, 473, 679`.
 - Runs that died in seconds with an empty log or missing step scripts were re-dispatched and treated as infrastructure: 6664 and 6665
-  (2026-10-28, `merge-steward.md:10`), 6988 (`merge-steward.md:78`), 7010 (`merge-steward.md:88`). Source: src: `merge-steward.md:10, 78, 88`.
+  (2026-10-28, `merge-steward.md:10`), 6988 (`merge-steward.md:78`), 7010 (`merge-steward.md:88`); of those two only the plan job failed, and the runs lasted 11 and 13 minutes. Source: src: `merge-steward.md:10, 78, 88`; src: reviewer's check of the run durations, 2026-10-31.
 
 ## See also
 [releasing](releasing.md), [test-isolation](test-isolation.md), [open-decisions](open-decisions.md).
