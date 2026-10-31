@@ -120,7 +120,7 @@ export class MockPopover {
             : empty('Mute notifications overnight', 'No quiet hours are set.', { type: 'openSettings' }, 'Set quiet hours');
         case 'failures':
           return failing.length === 0
-            ? empty('Know when a watch breaks', 'No watch is failing.', { type: 'openWatches' }, 'Open watches')
+            ? empty('No failures', 'Every watch is fine.', { type: 'openWatches' }, 'Open watches')
             : ready({ kind: 'failures', rows: failing.slice(0, 3).map((w) => ({ id: w.id, name: w.name, kind: 'failed', message: 'The check failed.', failures: w.failures })), more: Math.max(0, failing.length - 3) });
         case 'notifications':
           return ready({ kind: 'notifications', mode: !settings.notifications ? { kind: 'off' } : paused ? { kind: 'paused', untilMs: settings.notificationsPausedUntilMs ?? now } : { kind: 'on' } });
