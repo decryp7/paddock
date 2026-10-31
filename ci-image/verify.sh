@@ -49,6 +49,8 @@ if tool node node --version && [ -n "${EXPECT_NODE_MAJOR:-}" ]; then
   if [ "$major" != "$EXPECT_NODE_MAJOR" ]; then bad "node is $OUT, .nvmrc wants major $EXPECT_NODE_MAJOR"; fi
 fi
 tool npm npm --version
+# The update feed's test (scripts/vm-smoke/update-feed.test.mjs) makes its throwaway certificates with openssl.
+tool openssl openssl version
 
 # shellcheck prints its version on the second line ("version: 0.11.0").
 if command -v shellcheck >/dev/null 2>&1; then

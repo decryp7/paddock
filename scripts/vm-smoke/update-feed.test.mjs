@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -26,12 +25,6 @@ before(() => {
 });
 after(() => rmSync(assets, { recursive: true, force: true }));
 
-const freePort = () => new Promise((res, rej) => {
-  const s = createServer();
-  s.once('error', rej);
-  s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => res(port)); });
-});
-
 // What the guest does while the runner waits in a synchronous call (`vm-win.sh job` through spawnSync): fetch the manifest over
 // HTTPS. Prints the status; the hang deadline only ends a fetch that never gets an answer.
 const FETCH = `
@@ -42,9 +35,10 @@ https.get(url, { ca: require('node:fs').readFileSync(ca) }, (r) => { console.log
 `;
 
 test('the feed answers while the runner is blocked in a synchronous call (Windows: vm-win.sh job runs through spawnSync)', async () => {
-  const port = await freePort();
-  const feed = await startFeed({ assets, host: '127.0.0.1', port });
+  const feed = await startFeed({ assets, host: '127.0.0.1', port: 0 });
+  const { port } = feed;
   try {
+    assert.ok(port > 0, `the bound port: ${port}`);
     await feed.setCase('ok');
     await feed.clearFeedLog();
     const r = spawnSync(process.execPath, ['-e', FETCH, `https://127.0.0.1:${port}/ok/latest.json`, join(assets, 'ca', 'ca.pem')], {
@@ -60,8 +54,8 @@ test('the feed answers while the runner is blocked in a synchronous call (Window
 });
 
 test('the case down resets the connection, and the log is cleared on request', async () => {
-  const port = await freePort();
-  const feed = await startFeed({ assets, host: '127.0.0.1', port });
+  const feed = await startFeed({ assets, host: '127.0.0.1', port: 0 });
+  const { port } = feed;
   try {
     await feed.setCase('down');
     const r = spawnSync(process.execPath, ['-e', FETCH, `https://127.0.0.1:${port}/ok/latest.json`, join(assets, 'ca', 'ca.pem')], {
@@ -77,11 +71,17 @@ test('the case down resets the connection, and the log is cleared on request', a
 });
 
 test('a port in use is an error, not a feed that never answers', async () => {
-  const port = await freePort();
-  const first = await startFeed({ assets, host: '127.0.0.1', port });
+  const first = await startFeed({ assets, host: '127.0.0.1', port: 0 });
   try {
-    await assert.rejects(startFeed({ assets, host: '127.0.0.1', port }), /EADDRINUSE/);
+    await assert.rejects(startFeed({ assets, host: '127.0.0.1', port: first.port }), /EADDRINUSE/);
   } finally {
     await first.close();
   }
+});
+
+test('a call after close is refused, not thrown at the runner', async () => {
+  const feed = await startFeed({ assets, host: '127.0.0.1', port: 0 });
+  await feed.close();
+  await assert.rejects(feed.setCase('ok'), /the feed process has ended/);
+  await feed.close();
 });
