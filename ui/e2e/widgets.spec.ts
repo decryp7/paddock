@@ -1,5 +1,4 @@
-import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, test, type Page } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -30,15 +29,13 @@ const height = (page: Page, kind: string, state: string) => cell(page, kind, sta
 for (const theme of THEMES) {
   test(`Widgets: axe finds no violations (${theme})`, async ({ page }) => {
     await open(page, theme);
-    const results = await new AxeBuilder({ page }).include('[data-testid="widgets"]').withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
-    expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+    expect(await axeViolations(page, { include: ['[data-testid="widgets"]'] })).toEqual([]);
   });
 
   test(`Widgets: axe finds no violations in high contrast with the popup stopped (${theme})`, async ({ page }) => {
     await open(page, theme, 'more');
     await page.getByTestId('wgt-stop').click();
-    const results = await new AxeBuilder({ page }).include('[data-testid="widgets"]').withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
-    expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+    expect(await axeViolations(page, { include: ['[data-testid="widgets"]'] })).toEqual([]);
     // The frame is outlined in the strong border colour there.
     const outline = await cell(page, 'cpu', 'ready').locator('section.pd-w').evaluate((e) => {
       const s = getComputedStyle(e);
@@ -224,8 +221,7 @@ test('Widgets: a scrolling popup with nothing focusable in it is still a named, 
   await expect(region).toHaveAttribute('tabindex', '0');
   await expect(region).toHaveAttribute('role', 'region');
   await expect(region).toHaveAttribute('aria-label', 'Dyno content');
-  const results = await new AxeBuilder({ page }).include('[data-testid="wgt-popup"]').withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
-  expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+  expect(await axeViolations(page, { include: ['[data-testid="wgt-popup"]'] })).toEqual([]);
   // A popup that fits is not a focus stop.
   await page.getByTestId('wgt-empty').click();
   await expect(region).not.toHaveAttribute('tabindex', /.*/);
