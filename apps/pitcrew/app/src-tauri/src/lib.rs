@@ -230,6 +230,8 @@ pub fn run() {
     });
     let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
     let builder = tauri::Builder::default()
+        // First: a second launch shows the running app's window instead of starting another app.
+        .plugin(tauri_plugin_single_instance::init(paddock_window::tauri::second_instance))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())

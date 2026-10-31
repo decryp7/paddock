@@ -32,6 +32,7 @@ paddock-startup = { path = "../../../../crates/paddock-startup", features = ["ta
 paddock-updater = { path = "../../../../crates/paddock-updater", features = ["tauri"] }
 paddock-window = { path = "../../../../crates/paddock-window", features = ["tauri", "tray", "wry"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
 pitcrew-core.workspace = true
 notify-channels = { path = "../../crates/notify-channels" }
 serde.workspace = true
