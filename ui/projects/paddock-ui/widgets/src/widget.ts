@@ -15,16 +15,11 @@ export interface PdWidgetContext<V> {
  * The app's template for one widget kind: `<ng-template pdWidget="cpuMemory" let-value>...</ng-template>` or
  * `*pdWidget="'cpuMemory'; let value"`. The same template draws the ready widget and its loading twin (the value is `null`
  * and its parts marked `pdSkeleton` turn into blocks), so the loading height is the ready height.
- *
- * `calm: true` marks a kind whose empty state means "all good" (no active alarms): the frame draws it as one button row
- * (success icon, text, chevron) that emits the empty state's `next` action.
  */
 @Directive({ selector: 'ng-template[pdWidget]', exportAs: 'pdWidget' })
 export class PdWidget<V = unknown> {
   /** The kind's wire name (`KindInfo.kind`). */
   readonly pdWidget = input.required<string>();
-  /** The kind's empty state means "all good". */
-  readonly pdWidgetCalm = input(false);
   /**
    * A type witness, never read: bind a typed value (`[pdWidgetOf]="cpuValue"`, a property declared `cpuValue: CpuValue | null = null`)
    * and the template's `let-v` is typed `CpuValue | null`, so no cast is needed.
