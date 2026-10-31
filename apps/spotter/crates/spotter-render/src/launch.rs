@@ -435,6 +435,10 @@ impl<F: FnMut(paddock_proc::ProcessId) -> Option<Duration>> paddock_proc::StartP
         }
     }
 
+    fn pid(&self) -> Option<paddock_proc::ProcessId> {
+        self.id
+    }
+
     fn ready(&mut self) -> bool {
         !self.process.is_running()
     }
@@ -516,6 +520,10 @@ impl<F: FnMut(paddock_proc::ProcessId) -> Option<Duration>> paddock_proc::StartP
             status: self.process.wait().and_then(|s| s.code()),
             stderr_tail: paddock_proc::tail_of(&self.dir.join(STDERR_FILE), STDERR_TAIL).map(|t| stderr_tail(t.as_bytes())),
         })
+    }
+
+    fn pid(&self) -> Option<paddock_proc::ProcessId> {
+        self.id
     }
 
     fn ready(&mut self) -> bool {
@@ -758,6 +766,61 @@ mod tests {
         );
         process.kill();
         r
+    }
+
+    /// A browser stopped by the OS or App Tamer at start-up is paused, not stuck: it is not ended, and the wait goes on until it
+    /// is resumed (the caller's cap still bounds it). Idle takes 1200 ticks (60 s at 50 ms); the resume comes at tick 1500.
+    #[cfg(unix)]
+    #[test]
+    #[expect(clippy::disallowed_methods, reason = "a fake browser script and kill(1): std Command")]
+    fn a_browser_stopped_at_start_is_paused_not_ended() {
+        struct ResumeAt {
+            ticks: u32,
+            pid: u32,
+        }
+        impl paddock_proc::Pace for &mut ResumeAt {
+            fn wait(&mut self, _tick: Duration) -> bool {
+                std::thread::sleep(Duration::from_millis(1));
+                self.ticks += 1;
+                if self.ticks == 1500 {
+                    std::process::Command::new("kill")
+                        .args(["-CONT", &self.pid.to_string()])
+                        .status()
+                        .unwrap();
+                }
+                self.ticks < TICK_GUARD
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.args(["-c", "kill -STOP $$; exec sleep 300"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::fs::File::create(dir.path().join(STDERR_FILE)).unwrap());
+        let mut process = Supervised::spawn(cmd).unwrap();
+        let mut pace = ResumeAt {
+            ticks: 0,
+            pid: process.process().unwrap().pid(),
+        };
+        let e = connect(
+            dir.path(),
+            &mut process,
+            paddock_proc::Patience::default(),
+            &AtomicU8::new(NONE),
+            Duration::from_secs(7),
+            |_| Some(Duration::from_secs(1)),
+            &mut pace,
+        )
+        .err()
+        .unwrap();
+        process.kill();
+        // Judged stuck only after the resume, never while it was stopped.
+        assert!(
+            pace.ticks > 1500,
+            "given up on after {} ticks, while the browser was still stopped",
+            pace.ticks
+        );
+        assert!(!e.to_string().is_empty());
     }
 
     /// A browser that takes longer to quit than the old fixed 5 s grace, but works while it does, is waited for, not killed.
