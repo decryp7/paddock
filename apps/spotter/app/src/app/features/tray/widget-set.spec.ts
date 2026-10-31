@@ -137,6 +137,8 @@ describe('Spotter widget set', () => {
     const { frames, f } = await make();
     const row = frames()[2]!.querySelector('button.row')!;
     expect(row.querySelector('.meta')?.hasAttribute('title'), 'a Material tooltip, not a title attribute').toBe(false);
+    expect(row.getAttribute('aria-label'), 'the keyboard and screen reader get the whole message').toContain('The share is offline.');
+    expect(f.debugElement.queryAll(By.css('button.row')).some((d) => d.injector.get(MatTooltip, null) !== null), 'the tooltip is on the focusable row').toBe(true);
     expect(f.debugElement.queryAll(By.directive(MatTooltip)).map((d) => (d.injector.get(MatTooltip) as MatTooltip).message)).toContain('Unreachable: The share is offline.');
     expect(row.querySelector('.chev')).toBeNull();
   });

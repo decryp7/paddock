@@ -4,7 +4,7 @@ import { MockBackend, type MockScenario } from './mock-backend';
 import { TauriBackend } from './tauri-backend';
 import { BrowserEngines } from '../shell/engines';
 
-const SCENARIOS: MockScenario[] = ['demo', 'empty', 'broken', 'products', 'worst'];
+const SCENARIOS: MockScenario[] = ['demo', 'empty', 'broken', 'products', 'unchecked', 'worst'];
 
 let browser: SpotterBackend | null = null;
 

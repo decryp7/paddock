@@ -198,6 +198,118 @@
         "kind": "unknown"
       }
     },
+    "unchecked": {
+      "byKind": {
+        "failures": {
+          "calm": false,
+          "detail": "2 not checked yet.",
+          "next": {
+            "action": {
+              "type": "checkAll"
+            },
+            "label": "Check all now"
+          },
+          "state": "empty",
+          "title": "No failures so far"
+        },
+        "nextCheck": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "alsoDue": 1,
+            "atMs": 1800002400000,
+            "due": false,
+            "id": "w-1",
+            "kind": "nextCheck",
+            "name": "Orbit API image"
+          }
+        },
+        "notifications": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "notifications",
+            "mode": {
+              "kind": "on"
+            }
+          }
+        },
+        "quietHours": {
+          "calm": false,
+          "detail": "No quiet hours are set.",
+          "next": {
+            "action": {
+              "type": "openSettings"
+            },
+            "label": "Set quiet hours"
+          },
+          "state": "empty",
+          "title": "Mute notifications overnight"
+        },
+        "recentChanges": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "recentChanges",
+            "more": 1,
+            "rows": [
+              {
+                "firstSeenMs": 1799996400000,
+                "id": "w-1",
+                "name": "Orbit API image",
+                "unseen": false,
+                "version": "2.2.0"
+              }
+            ],
+            "unseen": 0
+          }
+        },
+        "watchedSites": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "watchedSites",
+            "more": 0,
+            "rows": [
+              {
+                "id": "w-3",
+                "name": "Lumen CLI",
+                "state": "pending",
+                "version": null
+              },
+              {
+                "id": "w-4",
+                "name": "Fjord UI kit",
+                "state": "pending",
+                "version": null
+              },
+              {
+                "id": "w-1",
+                "name": "Orbit API image",
+                "state": "ok",
+                "version": "2.2.0"
+              },
+              {
+                "id": "w-2",
+                "name": "tinyparse",
+                "state": "ok",
+                "version": "2.1.0"
+              }
+            ],
+            "total": 4
+          }
+        }
+      },
+      "noticeWithoutNotificationsWidget": null,
+      "status": {
+        "count": 2,
+        "kind": "unchecked"
+      }
+    },
     "worst": {
       "byKind": {
         "failures": {

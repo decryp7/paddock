@@ -10,7 +10,7 @@ import fixtures from './popover-fixtures.json';
  * (`popover-fixtures.json`, written by `spotter-engine`'s `widgets` tests and checked on every run), so the mock cannot drift
  * from the engine. Only the layout edits the chooser sends are handled here, as the engine's `paddock-widgets` would.
  */
-export type PopoverScenario = 'demo' | 'empty' | 'worst';
+export type PopoverScenario = 'demo' | 'empty' | 'unchecked' | 'worst';
 interface Fixture {
   readonly nowMs: number;
   readonly view: PopoverView;
