@@ -529,6 +529,40 @@ does the time go? Every block below gives the date, build, machine, load, corpus
   adds about 9.
 - "Warm" means the corpus was read once just before (`cat > /dev/null`, 9.4 s for 7.2 GB from cold).
 
+Blocks from 2026-10-31 on are newest first, above the 2026-10-29 baseline.
+
+### 2026-10-31, ordering without the second sort (plan SR4, branch `debrief/1.2-wp3`)
+
+- **Commit:** base 3310fa25b (window ordered by the key, then `ORDER BY pos`) → change: the SR4 commit (the ids sorted
+  once in a subquery, numbered by `row_number() OVER ()`, `pos::insert_sql`).
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; shared with other agents.
+- **Load:** 1-minute load at the start of each run 4.8 to 9.5 (each run waited for < 10); the 5-minute load was 9 to 15.
+- **Build:** the DuckDB 2.0.0 CLI (`v2.0.0 d54cbbe3df`, the version the store links), 4 threads like the store, the
+  store's import memory (768 MB, `IMPORT_MEMORY_LIMIT`, which `Inner::reorder` gives the ordering), spilling to a
+  temporary folder.
+- **Corpus:** the catalog of a `large10` store (`gen_large.py` scale 1.0, invented; 56,152,132 events, 443 segments,
+  2.81 GB) imported by `import_ready` with the base commit; each run works on a fresh copy of its `data.duckdb`.
+- **Command:** `/Volumes/d7sst7/dev-targets/wp3-bench/pos.sh <store> 1 "A B C"` (`CHECK=1` adds the key-order check
+  at 8 GB); A is the shipped statement, B the window without the second sort, C the change.
+- **Runs:** one round of A, B and C, and one more of C with the check; rounds 2 and 3 were stopped by a pause for
+  machine load (pending). Single runs, so differences under about 20% would be noise; this one is about 4x.
+- **Numbers:**
+
+  | Measure | A, base | B, window only | C, change | Budget | Verdict |
+  |---|---|---|---|---|---|
+  | Ordering, 56M events | 57.0 s | 49.9 s | 11.9 s; 17.7 s | at least 30% faster than A | pass (69 to 79% less) |
+  | Rows with `pos <> rowid` | 0 | 0 | 0 | 0 | pass |
+  | Positions out of key order (`lag` check) | not run (the check ran out of 768 MB) | not run | 0 | 0 | pass |
+
+- **Memory measure:** none taken; DuckDB was held to 768 MB in every variant (the check alone ran at 8 GB).
+- **Notes:** dropping only the second sort (B) saves about 12%; the window sort over one 56M-row partition is the
+  cost, and one ordinary sort followed by a streaming row number avoids it. DuckDB documents that a window with an
+  empty `OVER` clause keeps the order of its input (<https://duckdb.org/docs/2.0/sql/dialect/order_preservation.html>);
+  the unit test `the_ordering_stores_positions_in_time_order_and_in_position_order` checks both orders on 1.5M
+  shuffled rows at 4 threads and 64 MB (it fails when the subquery's order is wrong). In the same base import the
+  store logged `import: pos 40.7 s` (load 9.9 to 13 during the run, the import itself 154.9 s); the in-import time
+  with the change is pending, like rounds 2 and 3. Raw output: `/Volumes/d7sst7/dev-targets/wp3-bench/pos-runs.txt`.
+
 ### Baseline
 
 | Run | Load at start | Import | Events/s | Index ready | Catalogue ready | Peak RSS (import / after) |
