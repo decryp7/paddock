@@ -4,10 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
-### `@decryp7/paddock-ui/widgets`: the add list ends on half a row, and Presets keeps its distance
-- The "Add a widget" list scrolls inside a box of five whole rows and half of the sixth (`max-height: calc(5.5 * 3.3rem)`), so the cut row says
-  that the list scrolls; it was a fixed `22rem` that could cut a row mid-text. The "Presets" label under the add list has the same top
-  margin as the other labels (the list sits in a wrapper, so the sibling rule did not reach it).
+### `@decryp7/paddock-ui/widgets`: the add list shows every row; `shell/settings` and `shell/about` wording
+- The "Add a widget" list no longer scrolls inside a box of its own (the box cut a row through its description and its bottom fade was easy to miss):
+  it is as tall as its rows and the page scrolls. The `pd-wc-addlist--long` modifier, the fade and the list's `tabindex` are gone. The "Presets"
+  label under the list has the same top margin as the other labels.
+- Settings: the line under a section that hides one advanced setting says "Show it" (it said "Show them" for one).
+- About: the releases row is a link that reads "See all releases" instead of the raw address (the address is still the link's target).
 - `docs/design-guide.md`: principle 3 and the Buttons line say what the family's controls measure now: `--pd-button-height` is 32 px
   Comfortable, 28 px Standard (default), 24 px Compact.
 

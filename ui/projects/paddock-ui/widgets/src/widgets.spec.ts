@@ -757,27 +757,13 @@ describe('pd-widget-chooser', () => {
     expect(getComputedStyle(text).textWrap).toMatch(/balance|pretty/);
   });
 
-  it('shows a bottom fade on the add list only while there is more to scroll', async () => {
+  it('shows every row of the add list whole: no box of its own that clips a row or scrolls', async () => {
     const f = await setup();
     const list = q(f, '.pd-wc-addlist')!;
-    expect(list.tabIndex).toBe(0);
-    // The test DOM has no layout: the box is stubbed (100 px tall holding 300 px of rows).
-    let top = 0;
-    let content = 300;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, get: () => 100 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => content });
-    Object.defineProperty(list, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => (top = v) });
-    list.dispatchEvent(new Event('scroll'));
-    await settle(f);
-    expect(q(f, '.pd-wc-fade')).not.toBeNull();
-    top = 200;
-    list.dispatchEvent(new Event('scroll'));
-    await settle(f);
-    expect(q(f, '.pd-wc-fade')).toBeNull();
-    top = 0;
-    content = 100;
-    list.dispatchEvent(new Event('scroll'));
-    await settle(f);
+    expect(list.tabIndex).toBe(-1);
+    const style = getComputedStyle(list);
+    expect(style.maxHeight).toBe('none');
+    expect(style.overflowY).not.toMatch(/auto|scroll/);
     expect(q(f, '.pd-wc-fade')).toBeNull();
   });
 

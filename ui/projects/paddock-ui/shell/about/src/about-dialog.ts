@@ -33,7 +33,7 @@ import { ABOUT_STYLES } from './styles';
             <dd>{{ a.updatesAvailable ? t.updatesItself : t.updatesUnavailable }}</dd>
             @if (a.releasesPage) {
               <dt>{{ t.releases }}</dt>
-              <dd><a class="pd-link" [href]="a.releasesPage" target="_blank" rel="noopener noreferrer" data-testid="about-releases" (click)="openReleases($event, a.releasesPage)">{{ a.releasesPage }}</a></dd>
+              <dd><a class="pd-link" [href]="a.releasesPage" target="_blank" rel="noopener noreferrer" data-testid="about-releases" (click)="openReleases($event, a.releasesPage)">{{ t.releasesLink }}</a></dd>
             }
           </dl>
           @if (openFailed(); as reason) {
@@ -85,6 +85,7 @@ export class PdAboutDialog {
     updatesItself: $localize`:@@pd.about.updates.itself:Updates itself`,
     updatesUnavailable: $localize`:@@pd.about.updates.unavailable:Updates are not available in this build`,
     releases: $localize`:@@pd.about.releases:Releases`,
+    releasesLink: $localize`:@@pd.about.releases.link:See all releases`,
     legal: $localize`:@@pd.about.legal:Licences and notices`,
     legalFailed: $localize`:@@pd.about.legal.failed:The text could not be loaded.`,
     infoFailed: $localize`:@@pd.about.failed:The app did not say what it is.`,

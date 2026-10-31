@@ -2,7 +2,6 @@ import { CdkDrag, CdkDragHandle, CdkDragPlaceholder, CdkDropList, type CdkDragDr
 import { LiveAnnouncer } from '@angular/cdk/a11y';
 import { NgTemplateOutlet } from '@angular/common';
 import {
-  afterEveryRender,
   afterNextRender,
   ChangeDetectionStrategy,
   Component,
@@ -17,7 +16,6 @@ import {
   output,
   signal,
   untracked,
-  viewChild,
   viewChildren,
   ViewEncapsulation,
 } from '@angular/core';
@@ -129,7 +127,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
           <p class="pd-wc-limit" role="status"><pd-status-glyph status="info" [size]="16" />The {{ noun() }} holds {{ surface().maxPlacements }} widgets. Remove one to add another.</p>
         }
         <div class="pd-wc-addbox">
-        <ul #addList class="pd-wc-list pd-wc-addlist" [class.pd-wc-addlist--long]="kinds().length > 8" role="list" tabindex="0" [attr.aria-label]="'Widgets you can add to the ' + noun()" (scroll)="updateFade()">
+        <ul class="pd-wc-list pd-wc-addlist" role="list" [attr.aria-label]="'Widgets you can add to the ' + noun()">
           @for (k of kinds(); track k.kind) {
             @let count = countOf(k);
             <li class="pd-wc-item pd-wc-add" [class.pd-wc-added]="count >= k.maxInstances">
@@ -145,9 +143,6 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
             </li>
           }
         </ul>
-        @if (moreBelow()) {
-          <div class="pd-wc-fade" aria-hidden="true"></div>
-        }
         </div>
         @if (hasPresets()) {
           <div class="pd-wc-label">
@@ -234,12 +229,6 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     :root[data-motion='reduce'] .cdk-drag-animating, :root[data-motion='reduce'] .pd-wc-list .pd-wc-item { transition: none !important; }
     .pd-wc-toggle { height: var(--pd-control-height); flex: none; }
     .pd-wc-addbox { position: relative; }
-    /* Only a long list scrolls inside the page; eight kinds or fewer show whole, so there is no nested scroll to find. */
-    /* Whole rows and half of the next one, so the cut row says that the list scrolls (a row is about 3.3rem). */
-    .pd-wc-addlist--long { max-height: calc(5.5 * 3.3rem); overflow-y: auto; }
-    .pd-wc-addlist:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
-    /* The cue that more rows wait below: a fade into the row colour, shown only while the list can still scroll down. */
-    .pd-wc-fade { position: absolute; inset: auto 1px 1px 1px; height: var(--pd-space-6); border-radius: 0 0 var(--pd-radius-card) var(--pd-radius-card); background: linear-gradient(to bottom, transparent, var(--pd-surface-1)); pointer-events: none; }
     .pd-wc-hint-text { text-wrap: balance; }
     .pd-wc-hint { display: flex; align-items: center; gap: 6px; margin: var(--pd-space-2) 0 20px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-wc-limit { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0 0 var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-info-tint); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
@@ -317,16 +306,6 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   protected readonly mac = inject(KEY_PLATFORM) === 'mac';
   protected readonly alt = this.mac ? '\u2325' : 'Alt+';
   protected readonly confirming = signal<string | null>(null);
-  private readonly addList = viewChild<ElementRef<HTMLElement>>('addList');
-  /** The add list has rows below the visible part (the bottom fade). */
-  protected readonly moreBelow = signal(false);
-
-  /** Re-reads whether the add list can still scroll down; called on scroll and after every render (the content or the box may have changed). */
-  protected updateFade(): void {
-    const el = this.addList()?.nativeElement;
-    this.moreBelow.set(!!el && el.scrollHeight - el.scrollTop - el.clientHeight > 1);
-  }
-
   constructor() {
     effect(() => {
       const placements = this.placements();
@@ -366,7 +345,6 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
         this.lastError = e;
       });
     });
-    afterEveryRender(() => this.updateFade());
     inject(DestroyRef).onDestroy(() => this.toast?.dismiss());
   }
 

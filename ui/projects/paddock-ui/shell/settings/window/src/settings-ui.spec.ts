@@ -117,6 +117,8 @@ describe('pd-settings-window', () => {
     // The advanced list is behind "Show advanced".
     expect(field(el, 'ignore')).toBeNull();
     expect(el.textContent).toContain('1 advanced setting is hidden.');
+    // One hidden setting is "it", not "them".
+    expect($<HTMLButtonElement>(el, 'pd-settings-section .pd-link').textContent?.trim()).toBe('Show it');
     $<HTMLButtonElement>(el, 'pd-settings-section .pd-link').click();
     await settle();
     await bed.fixture.whenStable();

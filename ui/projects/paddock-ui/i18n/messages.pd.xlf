@@ -32,6 +32,9 @@
       <trans-unit id="pd.about.releases" datatype="html">
         <source>Releases</source>
       </trans-unit>
+      <trans-unit id="pd.about.releases.link" datatype="html">
+        <source>See all releases</source>
+      </trans-unit>
       <trans-unit id="pd.about.retry" datatype="html">
         <source>Retry</source>
       </trans-unit>
@@ -1858,6 +1861,9 @@
       </trans-unit>
       <trans-unit id="pd.settings.section.reset" datatype="html">
         <source>Reset section</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.section.show-it" datatype="html">
+        <source>Show it</source>
       </trans-unit>
       <trans-unit id="pd.settings.section.show-them" datatype="html">
         <source>Show them</source>

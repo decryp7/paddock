@@ -46,7 +46,7 @@ export const SETTINGS_PAGE = new InjectionToken<SettingsPageDef>('PADDOCK_SETTIN
       @if (hiddenAdvanced(); as n) {
         <p class="pd-hidden" data-testid="settings-hidden-advanced">
           {{ hiddenText(n) }}
-          <button type="button" class="pd-link" (click)="store.setShowAdvanced(true)">{{ t.showThem }}</button>
+          <button type="button" class="pd-link" (click)="store.setShowAdvanced(true)">{{ n === 1 ? t.showIt : t.showThem }}</button>
         </p>
       }
       @if (!s.fields.length) {
@@ -76,6 +76,7 @@ export class PdSettingsSection {
   protected readonly t = {
     resetSection: $localize`:@@pd.settings.section.reset:Reset section`,
     showThem: $localize`:@@pd.settings.section.show-them:Show them`,
+    showIt: $localize`:@@pd.settings.section.show-it:Show it`,
     empty: $localize`:@@pd.settings.section.empty:This section has no settings.`,
     unavailable: $localize`:@@pd.settings.section.unavailable:These settings are not available in this app.`,
   };

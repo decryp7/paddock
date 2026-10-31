@@ -402,6 +402,8 @@ describe('the dialogs', () => {
     const link = el.querySelector<HTMLAnchorElement>('[data-testid="about-releases"]')!;
     expect(link.tagName).toBe('A');
     expect(link.getAttribute('href')).toBe('https://updates.example/releases');
+    // The link reads as words, not as the raw address.
+    expect(text(link)).toBe('See all releases');
     expect(link.rel).toContain('noopener');
     // A webview window opens no links itself: the click asks the engine to open the page in the system browser.
     const opened: string[] = [];
