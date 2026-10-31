@@ -9,7 +9,8 @@
 //! at its own path either. The window that remains is the few microseconds between that look and the removal, and it
 //! can only be used by someone who already owns the folder.
 
-use crate::prune::{Candidate, DirNode, FileId, MAX_DEPTH, MAX_DIRS, MAX_ENTRIES, PruneError, RelPath};
+use crate::prune::{DirNode, FileId, MAX_DEPTH, MAX_DIRS, MAX_ENTRIES, PruneError, RelPath};
+use crate::prune_worktrees::Candidate;
 use std::collections::HashSet;
 use std::fs::{self, Metadata};
 use std::path::{Path, PathBuf};
@@ -154,13 +155,25 @@ pub fn scan(root: &Path) -> Result<Scan, PruneError> {
     })
 }
 
-/// The folders directly in `parent` whose names `wanted` accepts, sorted by name, with their sizes. A symlink is listed
-/// (with `symlink` set and no size) when it points to a folder; a missing `parent` lists nothing.
-pub fn list_dirs(parent: &Path, wanted: &dyn Fn(&str) -> bool) -> Result<Vec<Candidate>, PruneError> {
+/// Whether two paths are the same folder: by device and inode where the platform has them (so a symlinked part or a case
+/// variant on a case-insensitive volume still compares equal), else by [`crate::prune_root::same_path_ci`].
+pub fn same_file(a: &Path, b: &Path) -> bool {
+    if let (Ok(x), Ok(y)) = (fs::metadata(a), fs::metadata(b))
+        && let (Some(i), Some(j)) = (identity(&x), identity(&y))
+    {
+        return i == j;
+    }
+    crate::prune_root::same_path_ci(a, b)
+}
+
+/// The folders directly in `parent` whose names `wanted` accepts, sorted by name, with their sizes, and the reasons some could
+/// not be listed (the others are still listed, as the `.ps1` did). A symlink is listed (with `symlink` set and no size) when it
+/// points to a folder; a missing `parent` lists nothing.
+pub fn list_dirs(parent: &Path, wanted: &dyn Fn(&str) -> bool) -> (Vec<Candidate>, Vec<String>) {
     let Ok(entries) = fs::read_dir(parent) else {
-        return Ok(Vec::new());
+        return (Vec::new(), Vec::new());
     };
-    let mut found = Vec::new();
+    let (mut found, mut errors) = (Vec::new(), Vec::new());
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         if !wanted(&name) {
@@ -168,11 +181,17 @@ pub fn list_dirs(parent: &Path, wanted: &dyn Fn(&str) -> bool) -> Result<Vec<Can
         }
         let path = entry.path();
         let candidate = match kind(&path) {
-            Kind::Dir => Candidate {
-                bytes: crate::prune::measure(&scan(&path)?.tree, &Default::default()).apparent,
-                path,
-                name,
-                symlink: false,
+            Kind::Dir => match scan(&path) {
+                Ok(s) => Candidate {
+                    bytes: crate::prune::measure(&s.tree, &Default::default()).apparent,
+                    path,
+                    name,
+                    symlink: false,
+                },
+                Err(e) => {
+                    errors.push(format!("{}: {e}", path.display()));
+                    continue;
+                }
             },
             Kind::Symlink if fs::metadata(&path).is_ok_and(|m| m.is_dir()) => Candidate {
                 path,
@@ -185,7 +204,7 @@ pub fn list_dirs(parent: &Path, wanted: &dyn Fn(&str) -> bool) -> Result<Vec<Can
         found.push(candidate);
     }
     found.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(found)
+    (found, errors)
 }
 
 fn io(path: &Path, e: std::io::Error) -> String {
@@ -306,7 +325,8 @@ mod tests {
         put(t.path(), ".app-target-a/x", 20);
         put(t.path(), "other/x", 30);
         put(t.path(), ".app-target-file", 1);
-        let l = list_dirs(t.path(), &|n| n.starts_with(".app-target")).unwrap();
+        let (l, errs) = list_dirs(t.path(), &|n| n.starts_with(".app-target"));
+        assert!(errs.is_empty());
         assert_eq!(
             l.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
             [".app-target-a", ".app-target-b"]
@@ -316,12 +336,81 @@ mod tests {
         {
             std::os::unix::fs::symlink(t.path().join("other"), t.path().join(".app-target-link")).unwrap();
             std::os::unix::fs::symlink(t.path().join("nowhere"), t.path().join(".app-target-dead")).unwrap();
-            let l = list_dirs(t.path(), &|n| n.starts_with(".app-target")).unwrap();
+            let (l, errs) = list_dirs(t.path(), &|n| n.starts_with(".app-target"));
+            assert!(errs.is_empty());
             let link = l.iter().find(|c| c.name == ".app-target-link").unwrap();
             assert!(link.symlink && link.bytes == 0);
             assert!(l.iter().all(|c| c.name != ".app-target-dead"), "a dangling link is not a folder");
         }
-        assert!(list_dirs(&t.path().join("none"), &|_| true).unwrap().is_empty());
+        assert!(list_dirs(&t.path().join("none"), &|_| true).0.is_empty());
+    }
+
+    #[test]
+    fn a_sparse_file_counts_by_its_length_not_its_blocks() {
+        let t = tempfile::tempdir().unwrap();
+        let f = fs::File::create(t.path().join("sparse")).unwrap();
+        f.set_len(64 * 1024 * 1024).unwrap();
+        let tree = scan(t.path()).unwrap().tree;
+        let size = measure(&tree, &BTreeSet::new());
+        assert!(size.apparent >= 64 * 1024 * 1024);
+        assert_eq!(
+            size.units(Unit::Kb),
+            size.apparent.div_ceil(1024).max(size.allocated.div_ceil(1024)),
+            "the larger figure wins"
+        );
+        assert!(
+            size.units(Unit::Kb) >= 64 * 1024,
+            "a file system that allocates late must not hide the data"
+        );
+    }
+
+    #[test]
+    fn the_cap_boundary_is_at_or_over_on_a_real_folder() {
+        use crate::prune::plan_cap;
+        let t = tempfile::tempdir().unwrap();
+        put(t.path(), "debug/incremental/a", 200 * 1024);
+        put(t.path(), "debug/x", 100 * 1024);
+        let tree = scan(t.path()).unwrap().tree;
+        let size = measure(&tree, &BTreeSet::new()).units(Unit::Kb);
+        let at = plan_cap(&tree, &BTreeSet::new(), size, Unit::Kb);
+        assert!(at.over && at.incremental.len() == 1, "equal to the cap is over");
+        let below = plan_cap(&tree, &BTreeSet::new(), size + 1, Unit::Kb);
+        assert!(!below.over && below.incremental.is_empty(), "one under the cap is fine");
+        assert!(plan_cap(&tree, &BTreeSet::new(), size - 1, Unit::Kb).over);
+    }
+
+    #[test]
+    fn same_file_sees_through_a_symlinked_part() {
+        let t = tempfile::tempdir().unwrap();
+        let real = fs::canonicalize(t.path()).unwrap();
+        fs::create_dir_all(real.join("a/b")).unwrap();
+        assert!(same_file(&real.join("a/b"), &real.join("a/./b")));
+        assert!(!same_file(&real.join("a"), &real.join("a/b")));
+        assert!(
+            same_file(&real.join("nope/x"), &real.join("NOPE/x")),
+            "a missing path falls back to the case-insensitive name"
+        );
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("a", real.join("l")).unwrap();
+            assert!(same_file(&real.join("l/b"), &real.join("a/b")));
+        }
+    }
+
+    #[test]
+    fn a_candidate_that_cannot_be_scanned_is_reported_and_the_listing_goes_on() {
+        let t = tempfile::tempdir().unwrap();
+        put(t.path(), ".app-target-ok/x", 10);
+        let mut deep = t.path().join(".app-target-deep");
+        for _ in 0..MAX_DEPTH + 1 {
+            deep.push("d");
+        }
+        if fs::create_dir_all(&deep).is_ok() {
+            let (l, errs) = list_dirs(t.path(), &|n| n.starts_with(".app-target"));
+            assert_eq!(l.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), [".app-target-ok"]);
+            assert_eq!(errs.len(), 1);
+            assert!(errs[0].contains("app-target-deep"));
+        }
     }
 
     #[test]

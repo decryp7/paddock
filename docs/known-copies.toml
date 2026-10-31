@@ -919,3 +919,43 @@ status = "built"
   owner = "sighter"
   delete_by = "sighter-v1.0.0"
   note = "Byte-identical to the canonical."
+
+# =====================================================================================================================
+# Host tools (ADR 0022 R5)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "build-folder-prune"
+title = "Keeping a CI build folder under a cap, and removing finished worktrees' build folders (ADR 0022 R5 `dev host prune`)"
+canonical = "paddock-dev"
+paths = ["tools/paddock-dev/src/prune.rs", "tools/paddock-dev/src/prune_cmd.rs", "tools/paddock-dev/src/prune_fs.rs", "tools/paddock-dev/src/prune_root.rs", "tools/paddock-dev/src/prune_worktrees.rs"]
+status = "built"
+adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
+
+  [[mechanism.copy]]
+  paths = ["tools/prune-build-folders.sh", "tools/prune-ci-build-folder.sh"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "`dev host prune cap` reproduces both (recorded cases in tools/paddock-dev/tests/golden-prune). The prune-build-folder action and tools/test/prune-and-cleanup.test.mjs switch in the same change that deletes them; the coordinator decides when, after the app tags."
+
+  [[mechanism.copy]]
+  paths = ["tools/prune-build-folders.ps1", "apps/debrief/scripts/clean-build-dirs.ps1"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "`dev host prune worktrees --app <app> [--repo apps/debrief]` reproduces both; the Debrief script is the same listing with the app fixed. No golden was recorded from them (no PowerShell on the Mac)."
+
+[[mechanism]]
+id = "ci-slot-ownership"
+title = "Whether a folder is `target-<name>-<slot>` of this job's slot directly in the CI home (`job-isolation.sh owns`)"
+canonical = "paddock-dev"
+paths = ["tools/paddock-dev/src/slots.rs"]
+symbols = ["item:owns", "item:valid_slot"]
+status = "built"
+adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
+
+  [[mechanism.copy]]
+  paths = ["conformance/ci/job-isolation.sh"]
+  symbols = ["text:cmd_owns", "text:slot()"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "The shell `owns` and `slot` validation stay until the CI kit moves to `dev` (ADR 0022 R2/R5). `owns` is kept for the other kept-folder kinds; the Rust copy knows only `target`."

@@ -76,7 +76,7 @@ fn tree(dir: &Path, prefix: &str, out: &mut Vec<String>) {
 }
 
 fn mask(text: &str, root: &Path) -> String {
-    let t = text.replace(root.to_str().unwrap(), "<ROOT>");
+    let t = text.replace(root.to_str().unwrap(), "<ROOT>").replace('\\', "/");
     let t = regex::Regex::new(r" is \d+ \(cap")
         .unwrap()
         .replace_all(&t, " is <N> (cap")
@@ -85,12 +85,12 @@ fn mask(text: &str, root: &Path) -> String {
 }
 
 #[test]
-fn every_recorded_case_of_the_four_scripts_is_reproduced() {
+fn the_recorded_cases_of_the_shell_scripts_are_reproduced() {
     let expected = read_json("expected.json");
     let cases = read_json("cases.json");
     for c in cases.as_array().unwrap() {
         let name = c["name"].as_str().unwrap();
-        if !cfg!(unix) && name.contains("symlink") {
+        if !cfg!(unix) && (name.contains("symlink") || name.contains("root")) {
             continue;
         }
         let (_t, root) = canonical_tmp();
@@ -102,9 +102,12 @@ fn every_recorded_case_of_the_four_scripts_is_reproduced() {
         fs::write(root.join("outside/canary"), "x").unwrap();
         let folder = match c["folder"].as_str().unwrap() {
             "" => String::new(),
+            "//" => "/".to_string(),
+            f if f.starts_with('/') => format!("{}{f}", root.display()),
             f => root.join(f).to_str().unwrap().to_string(),
         };
         let userhome = root.join("userhome");
+        fs::create_dir(&userhome).unwrap();
         let mut args: Vec<String> = [
             "host",
             "prune",
@@ -151,6 +154,13 @@ fn every_recorded_case_of_the_four_scripts_is_reproduced() {
     }
 }
 
+/// An existing, empty home folder in the scratch root (the guard fails closed without one).
+fn scratch_home(root: &Path) -> String {
+    let h = root.join("scratch-home");
+    fs::create_dir_all(&h).unwrap();
+    h.to_str().unwrap().to_string()
+}
+
 fn json(args: &[&str]) -> Value {
     let mut all = vec!["--json"];
     all.extend_from_slice(args);
@@ -165,6 +175,7 @@ fn a_dry_run_reports_the_real_run_and_removes_nothing() {
         let (_t, root) = canonical_tmp();
         let folder = root.join("home/target-app-s1");
         build(&folder);
+        scratch_home(&root);
         let mut before = Vec::new();
         tree(&root, "", &mut before);
         let f = folder.to_str().unwrap();
@@ -180,7 +191,7 @@ fn a_dry_run_reports_the_real_run_and_removes_nothing() {
             cap,
             "--dry-run",
             "--home",
-            "/nowhere/home",
+            &scratch_home(&root),
         ]);
         let mut after = Vec::new();
         tree(&root, "", &mut after);
@@ -203,7 +214,7 @@ fn a_dry_run_reports_the_real_run_and_removes_nothing() {
             "--max-gb",
             cap,
             "--home",
-            "/nowhere/home",
+            &scratch_home(&root),
         ]);
         assert_eq!(real["action"], dry["action"]);
         assert_eq!(real["removed"], dry["removed"], "the dry run names what the real run removed");
@@ -229,7 +240,7 @@ fn under_the_cap_the_json_says_nothing_to_do() {
         "--max-gb",
         "100000",
         "--home",
-        "/nowhere/home",
+        &scratch_home(&root),
     ]);
     assert_eq!(
         (v["ok"].clone(), v["action"].clone(), v["removed"].clone()),
@@ -341,7 +352,7 @@ fn a_symlinked_dist_is_never_followed_by_drop_bundles() {
         "--slot",
         "s1",
         "--home",
-        "/nowhere/home",
+        &scratch_home(&root),
         "--drop-bundles",
     ]);
     assert!(root.join("elsewhere/bundle/canary").exists());
@@ -367,7 +378,7 @@ fn a_symlinked_incremental_is_not_followed_out_of_the_root() {
         "--max-gb",
         "0",
         "--home",
-        "/nowhere/home",
+        &scratch_home(&root),
     ]);
     assert_eq!(v["folderRemoved"], true, "a zero cap removes the folder");
     assert!(!folder.exists());
@@ -459,12 +470,14 @@ fn worktrees_list_keep_and_remove_the_right_folders() {
 
 #[test]
 fn worktrees_refuse_bad_input() {
+    let (_t, root) = canonical_tmp();
+    let (h, r) = (scratch_home(&root), root.to_str().unwrap().to_string());
     for args in [
         &["--app", "Bad"][..],
         &["--app", "app", "--keep", "a*"],
         &["--app", "app", "--keep", ""],
     ] {
-        let mut all = vec!["host", "prune", "worktrees"];
+        let mut all = vec!["host", "prune", "worktrees", "--home", &h, "--repo", &r];
         all.extend_from_slice(args);
         assert_eq!(dev(&all).0, 2, "{args:?}");
     }
@@ -472,7 +485,172 @@ fn worktrees_refuse_bad_input() {
 
 #[test]
 fn a_bad_cap_is_a_usage_error() {
-    let (code, out, err) = dev(&["host", "prune", "cap", "--root", "/a/b", "--max-gb", "many"]);
+    let (_t, root) = canonical_tmp();
+    let (code, out, err) = dev(&[
+        "host",
+        "prune",
+        "cap",
+        "--root",
+        root.to_str().unwrap(),
+        "--max-gb",
+        "many",
+        "--home",
+        &scratch_home(&root),
+    ]);
     assert_eq!((code, out.as_str()), (2, ""));
     assert!(err.contains("whole number"), "{err}");
+}
+
+fn dev_without_home(args: &[&str]) -> (i32, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        .args(args)
+        .env_remove("HOME")
+        .env_remove("USERPROFILE")
+        .output()
+        .unwrap();
+    (out.status.code().unwrap(), String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+#[test]
+fn without_a_usable_home_the_guard_fails_closed() {
+    let (_t, root) = canonical_tmp();
+    let folder = root.join("w/build");
+    build(&folder);
+    let f = folder.to_str().unwrap();
+    assert_eq!(dev_without_home(&["host", "prune", "cap", "--root", f, "--max-gb", "0"]).0, 4);
+    let missing = root.join("no-such-home");
+    let (code, _, err) = dev(&[
+        "host",
+        "prune",
+        "cap",
+        "--root",
+        f,
+        "--max-gb",
+        "0",
+        "--home",
+        missing.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 4, "{err}");
+    assert_eq!(dev_without_home(&["host", "prune", "worktrees", "--app", "app"]).0, 4);
+    assert!(folder.join("keep.txt").exists(), "nothing was removed");
+    // The CI form never fails: the same situation is a notice and exit 0.
+    let ci = root.join("ci");
+    let owned = ci.join("target-app-s1");
+    build(&owned);
+    let (code, out) = dev_without_home(&[
+        "host",
+        "prune",
+        "cap",
+        "--root",
+        owned.to_str().unwrap(),
+        "--max-gb",
+        "0",
+        "--ci-home",
+        ci.to_str().unwrap(),
+        "--slot",
+        "s1",
+    ]);
+    assert_eq!(code, 0);
+    assert!(out.contains("leaving it alone"), "{out}");
+    assert!(owned.join("keep.txt").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn the_home_is_compared_by_identity_not_by_spelling() {
+    let (_t, root) = canonical_tmp();
+    let real_home = root.join("realhome");
+    fs::create_dir_all(real_home.join("Documents/proj")).unwrap();
+    fs::write(real_home.join("Documents/proj/keep.txt"), "x").unwrap();
+    // HOME is given through a symlink, the root through the real path.
+    link("realhome", &root.join("h"));
+    let (code, _, err) = dev(&[
+        "host",
+        "prune",
+        "cap",
+        "--root",
+        real_home.join("Documents/proj").to_str().unwrap(),
+        "--max-gb",
+        "0",
+        "--home",
+        root.join("h").to_str().unwrap(),
+    ]);
+    assert_eq!(code, 4, "{err}");
+    // The root is given through the symlink, HOME through the real path.
+    let (code, _, _) = dev(&[
+        "host",
+        "prune",
+        "cap",
+        "--root",
+        root.join("h/Documents/proj").to_str().unwrap(),
+        "--max-gb",
+        "0",
+        "--home",
+        real_home.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 4);
+    // The home itself, through the symlink.
+    let (code, _, _) = dev(&[
+        "host",
+        "prune",
+        "cap",
+        "--root",
+        root.join("h").to_str().unwrap(),
+        "--max-gb",
+        "0",
+        "--home",
+        real_home.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 4);
+    // A case variant of Documents is the same folder on a case-insensitive volume.
+    fs::write(root.join("Probe"), "x").unwrap();
+    if root.join("pROBE").exists() {
+        let (code, _, _) = dev(&[
+            "host",
+            "prune",
+            "cap",
+            "--root",
+            real_home.join("DOCUMENTS/proj").to_str().unwrap(),
+            "--max-gb",
+            "0",
+            "--home",
+            real_home.to_str().unwrap(),
+        ]);
+        assert_eq!(code, 4, "case variant of Documents");
+    }
+    assert!(real_home.join("Documents/proj/keep.txt").exists());
+}
+
+#[test]
+fn the_ci_form_turns_every_problem_into_a_notice_with_exit_zero() {
+    let (_t, root) = canonical_tmp();
+    let home = scratch_home(&root);
+    let ci = root.join("ci");
+    fs::create_dir_all(&ci).unwrap();
+    for (root_arg, cap) in [
+        ("", "1"),
+        ("/", "1"),
+        ("relative", "1"),
+        (ci.to_str().unwrap(), ""),
+        (ci.to_str().unwrap(), "x"),
+        (home.as_str(), "1"),
+    ] {
+        let (code, out, err) = dev(&[
+            "host",
+            "prune",
+            "cap",
+            "--root",
+            root_arg,
+            "--max-gb",
+            cap,
+            "--ci-home",
+            ci.to_str().unwrap(),
+            "--slot",
+            "s1",
+            "--home",
+            &home,
+        ]);
+        assert_eq!(code, 0, "{root_arg:?} {cap:?}: {err}");
+        assert!(out.contains("prune:"), "{out}");
+    }
 }

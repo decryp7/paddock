@@ -3,8 +3,11 @@
 //!
 //! `--dry-run` runs every step except the removals, on the real folders, and prints what the real run would do.
 
-use crate::prune::{self, Action, Candidate, CapPlan, DirNode, FileId, PruneError, RelPath, Unit};
+use crate::prune::{self, CapPlan, DirNode, FileId, PruneError, RelPath, Unit};
 use crate::prune_fs::{self, Kind};
+use crate::prune_root::check_root;
+use crate::prune_worktrees::{self as wt, Action, Candidate};
+use crate::slots::owns;
 use clap::{Args, Subcommand};
 use paddock_cli::{CliError, Report};
 use serde_json::{Value, json};
@@ -85,12 +88,21 @@ fn user_home() -> Option<PathBuf> {
         .filter(|p| !p.as_os_str().is_empty())
 }
 
+/// The home folder, resolved: `--home`, else HOME / USERPROFILE. No usable home is an error (the guard fails closed).
+fn resolve_home(arg: Option<&Path>) -> Result<PathBuf, PruneError> {
+    let home = arg
+        .map(Path::to_path_buf)
+        .or_else(user_home)
+        .ok_or_else(|| PruneError::NoHome("HOME and USERPROFILE are not set".into()))?;
+    std::fs::canonicalize(&home).map_err(|e| PruneError::NoHome(format!("{}: {e}", home.display())))
+}
+
 fn error(e: PruneError) -> CliError {
     match e {
         PruneError::BadCap(_) | PruneError::BadApp(_) | PruneError::BadKeep(_) | PruneError::NotAbsolute(_) | PruneError::DotDot(_) => {
             CliError::usage(format!("{e}."))
         }
-        PruneError::TooShallow(_) | PruneError::ContainsHome(_) | PruneError::UserFolder(_) => {
+        PruneError::TooShallow(_) | PruneError::ContainsHome(_) | PruneError::UserFolder(_) | PruneError::NoHome(_) => {
             CliError::refused(format!("{e}.")).with_hint("Give a build folder of your own, never a home or system folder.")
         }
         PruneError::TooLarge(_) | PruneError::Io(_) => CliError::failure(format!("{e}.")),
@@ -153,30 +165,53 @@ fn cap_report(a: &CapArgs, max: Option<u64>, unit: Unit, run: CapRun) -> Report 
 
 /// `host prune cap`.
 pub fn cap(a: &CapArgs) -> Result<Report, CliError> {
-    let max = prune::parse_cap(&a.max_gb).map_err(error)?;
     let unit = if a.unit == "kb" { Unit::Kb } else { Unit::Gb };
-    let home = a.home.clone().or_else(user_home);
-    let run = cap_run(a, max, unit, home.as_deref()).map_err(error)?;
+    if a.ci_home.is_some() {
+        return Ok(ci_cap(a, unit));
+    }
+    let max = prune::parse_cap(&a.max_gb).map_err(error)?;
+    let run = resolve_home(a.home.as_deref())
+        .and_then(|h| cap_run(a, max, unit, &h))
+        .map_err(error)?;
     Ok(cap_report(a, Some(max), unit, run))
 }
 
-fn cap_run(a: &CapArgs, max: u64, unit: Unit, home: Option<&Path>) -> Result<CapRun, PruneError> {
+/// The CI form never fails: whatever is wrong becomes a notice and nothing is removed (exit 0, as the script).
+fn ci_cap(a: &CapArgs, unit: Unit) -> Report {
+    let shown = a.root.display().to_string();
+    let slot = a.slot.as_deref();
+    if a.root.as_os_str().is_empty() {
+        return cap_report(a, None, unit, CapRun::none("none", Some(prune::NO_FOLDER_MESSAGE.into())));
+    }
+    if a.max_gb.is_empty() {
+        return cap_report(a, None, unit, CapRun::none("none", Some(prune::NO_CAP_MESSAGE.into())));
+    }
+    let Ok(max) = prune::parse_cap(&a.max_gb) else {
+        let line = format!("prune: the cap must be a whole number, got '{}'", a.max_gb);
+        return cap_report(a, None, unit, CapRun::none("none", Some(line)));
+    };
+    let run = match resolve_home(a.home.as_deref()).and_then(|h| cap_run(a, max, unit, &h)) {
+        Ok(run) => run,
+        Err(e @ (PruneError::Io(_) | PruneError::TooLarge(_))) => CapRun::none("failed", Some(format!("prune: {e}; leaving it alone"))),
+        Err(_) => CapRun::none("left-alone", Some(prune::not_owned_message(&shown, slot))),
+    };
+    cap_report(a, Some(max), unit, run)
+}
+
+fn cap_run(a: &CapArgs, max: u64, unit: Unit, home: &Path) -> Result<CapRun, PruneError> {
     let shown = a.root.display().to_string();
     let ci = a.ci_home.is_some();
-    if ci && a.root.as_os_str().is_empty() {
-        return Ok(CapRun::none("none", Some(prune::NO_FOLDER_MESSAGE.to_string())));
-    }
     let slot = a.slot.as_deref();
     let left_alone = || Ok(CapRun::none("left-alone", Some(prune::not_owned_message(&shown, slot))));
-    prune::check_root(&a.root, home)?;
+    check_root(&a.root, home, &prune_fs::same_file)?;
     if prune_fs::kind(&a.root) != Kind::Dir {
         return if ci { left_alone() } else { Ok(CapRun::none("absent", None)) };
     }
     let root = std::fs::canonicalize(&a.root).map_err(|e| PruneError::Io(format!("{shown}: {e}")))?;
-    prune::check_root(&root, home)?;
+    check_root(&root, home, &prune_fs::same_file)?;
     if let Some(ci_home) = &a.ci_home {
         match std::fs::canonicalize(ci_home) {
-            Ok(h) if prune::owns(&h, &root, slot) => {}
+            Ok(h) if owns(&h, &root, slot) => {}
             _ => return left_alone(),
         }
     }
@@ -277,32 +312,30 @@ fn remove_folder_itself(work: &Path, id: Option<FileId>, errors: &mut Vec<String
 
 /// `host prune worktrees`.
 pub fn worktrees(a: &WorktreeArgs) -> Result<Report, CliError> {
-    if !prune::valid_app(&a.app) {
+    if !wt::valid_app(&a.app) {
         return Err(error(PruneError::BadApp(a.app.clone())));
     }
-    prune::check_keep(&a.keep).map_err(error)?;
-    let home = a.home.clone().or_else(user_home);
+    wt::check_keep(&a.keep).map_err(error)?;
+    let home = resolve_home(a.home.as_deref()).map_err(error)?;
     let repo = match &a.repo {
         Some(r) => r.clone(),
         None => std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder is unknown: {e}.")))?,
     };
-    let mut candidates: Vec<Candidate> = Vec::new();
-    if let Some(h) = &home {
-        let app = a.app.clone();
-        candidates.extend(prune_fs::list_dirs(h, &|n| prune::home_candidate(&app, n)).map_err(error)?);
-    }
-    candidates.extend(prune_fs::list_dirs(&repo.join("target"), &prune::target_candidate).map_err(error)?);
-    let rows = prune::plan_rows(&a.app, &a.keep, a.remove, a.dry_run, &candidates);
-    let mut errors = Vec::new();
+    let app = a.app.clone();
+    let (mut candidates, mut errors): (Vec<Candidate>, Vec<String>) = prune_fs::list_dirs(&home, &|n| wt::home_candidate(&app, n));
+    let (more, more_errors) = prune_fs::list_dirs(&repo.join("target"), &wt::target_candidate);
+    candidates.extend(more);
+    errors.extend(more_errors);
+    let rows = wt::plan_rows(&a.app, &a.keep, a.remove, a.dry_run, &candidates);
     for row in rows.iter().filter(|r| r.action == Action::Removing) {
-        if let Some(why) = refuse_candidate(&row.path, home.as_deref()) {
+        if let Some(why) = refuse_candidate(&row.path, &home) {
             errors.push(why);
         } else if let Err(e) = prune_fs::remove_rel(&row.path, &Vec::new(), None) {
             errors.push(e);
         }
     }
-    let mut lines: Vec<String> = rows.iter().map(prune::format_row).collect();
-    lines.extend(errors.iter().map(|e| format!("could not remove {e}")));
+    let mut lines: Vec<String> = rows.iter().map(wt::format_row).collect();
+    lines.extend(errors.iter().map(|e| format!("could not remove or list {e}")));
     let data: Vec<Value> = rows
         .iter()
         .map(|r| json!({"path": r.path.display().to_string(), "bytes": r.bytes, "action": r.action.word()}))
@@ -314,13 +347,11 @@ pub fn worktrees(a: &WorktreeArgs) -> Result<Report, CliError> {
 }
 
 /// A candidate is removed only when its resolved path passes the same root checks as `cap`'s.
-fn refuse_candidate(path: &Path, home: Option<&Path>) -> Option<String> {
-    let real = match std::fs::canonicalize(path) {
-        Ok(r) => r,
-        Err(e) => return Some(format!("{}: {e}", path.display())),
-    };
-    match prune::check_root(&real, home) {
-        Ok(()) => None,
+fn refuse_candidate(path: &Path, home: &Path) -> Option<String> {
+    match std::fs::canonicalize(path) {
         Err(e) => Some(format!("{}: {e}", path.display())),
+        Ok(real) => check_root(&real, home, &prune_fs::same_file)
+            .err()
+            .map(|e| format!("{}: {e}", path.display())),
     }
 }

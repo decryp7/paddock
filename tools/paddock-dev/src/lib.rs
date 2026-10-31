@@ -18,6 +18,8 @@ pub mod plan;
 pub mod prune;
 mod prune_cmd;
 pub mod prune_fs;
+pub mod prune_root;
+pub mod prune_worktrees;
 pub mod slots;
 
 pub use cli::run;
