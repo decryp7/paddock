@@ -6,8 +6,7 @@
   "dataDir": "~/Library/Application Support/Dyno",
   "logs": [
     ["~/Library/Logs/Dyno/dyno.*.log", "~/Library/Application Support/Dyno/logs/app.log"],
-    ["~/Library/Logs/Dyno/dyno-agent.*.log"],
-    "~/Library/Logs/Dyno/agent.log"
+    ["~/Library/Logs/Dyno/dyno-agent.*.log"]
   ],
   "quit": {
     "appleScriptName": "Dyno"
