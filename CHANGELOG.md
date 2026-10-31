@@ -10,6 +10,8 @@ Conventional Commits; one semver tag for the whole repo.
   `pdSkeleton` parts), the `*pdWidget` and `*pdWidgetOption` template directives and `pd-widget-chooser` (CDK drag-drop, Alt/Option
   Up, Down, Home and End keyboard reorder announced through `LiveAnnouncer`, a Material row menu, Half / Full toggles, "Added", the
   limit and the undo snack bar driven by `canUndo`). It draws the generated types of `paddock-widgets` and emits `Edit` values.
+- The chooser shows presets when the surface has any (apply, save as, delete, with the undo toast on apply); `pdWidgetOf` types a kind
+  template's value. `pd-tray-popover`'s content becomes a named, focusable region (`tabindex="0"`, `role=region`) while it scrolls.
 - `pd:` glyphs `grip`, `arrow-up`, `arrow-down`, `to-top` and `to-bottom`. Gallery page "Widgets" with a Playwright spec (sizes,
   loading height, focus order, keyboard reorder, the menu clear of the focus ring, axe in both themes and high contrast). Design guide
   section 8 gains "Widget area and frame" and "Chooser"; "Tray popups" and "Skeletons" are amended.

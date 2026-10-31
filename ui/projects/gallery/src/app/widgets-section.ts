@@ -16,6 +16,7 @@ import {
   type KindInfo,
   type LayoutView,
   type Placement,
+  type Preset,
   type Progress,
   type SurfaceValues,
   type WidgetState,
@@ -52,7 +53,7 @@ const kind = (k: string, title: string, summary: string, icon: string, spans: nu
   refresh,
 });
 const CATALOGUE: CatalogueInfo<string, string> = {
-  surface: { id: 'popup', noun: 'popup', columns: 2, maxPlacements: 6, minPlacements: 1, maxUserPresets: 0 },
+  surface: { id: 'popup', noun: 'popup', columns: 2, maxPlacements: 6, minPlacements: 1, maxUserPresets: 3 },
   kinds: [
     kind('alarms', 'Active alarms', 'Most severe first, up to 2', 'pd:bell', [2], 1, 'onChange'),
     kind('disk', 'Disk space', 'Free space per volume', 'pd:folder', [2], 3, { every: { secs: 60 } }),
@@ -97,10 +98,11 @@ const STOPPED_VALUES: SurfaceValues<Val, Act> = {
   placements: DEFAULTS.map((p) => ({ id: p.id, state: ready(p.widget.kind, NOW - 4 * MIN) })),
 };
 
-const view = (placements: Placement<Sample>[], canUndo: boolean): LayoutView<string, Sample, string> => ({
-  layout: { version: 1, placements, presets: [] },
+const MINIMAL: Preset<Sample> = { id: 'minimal', name: 'Minimal', builtin: true, placements: [place('alarms', 'alarms'), place('cpu', 'cpu')] };
+const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset<Sample>[] = []): LayoutView<string, Sample, string> => ({
+  layout: { version: 1, placements, presets },
   catalogue: CATALOGUE,
-  builtinPresets: [],
+  builtinPresets: [MINIMAL],
   notes: [],
   canUndo,
   editable: true,
@@ -121,8 +123,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean): LayoutView<str
       <p>One frame per widget: loading is the ready template with its parts as skeleton blocks, so the height never changes. A busy source is working or stale, never an error.</p>
 
       <!-- The kind templates: one set serves the sheet, the popup and the chooser's preview. -->
-      <ng-template pdWidget="alarms" [pdWidgetCalm]="true" let-v let-busy="loading">
-        @let x = val(v);
+      <ng-template pdWidget="alarms" [pdWidgetCalm]="true" [pdWidgetOf]="witness" let-x let-busy="loading">
         <div class="wg-rows">
           @for (r of x?.alarms ?? [{ sev: 'Warning', text: 'xxxxxxxxxxxxxxx', when: 'xxxxxx' }, { sev: 'Info', text: 'xxxxxxxxxxxxxxx', when: 'xxxxxx' }]; track $index) {
             <!-- A row that opens a page is one real button; its loading twin is a plain row of the same size. -->
@@ -142,8 +143,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean): LayoutView<str
           }
         </div>
       </ng-template>
-      <ng-template pdWidget="disk" let-v>
-        @let x = val(v);
+      <ng-template pdWidget="disk" [pdWidgetOf]="witness" let-x>
         @for (d of x?.vols ?? [{ name: 'xxxxxxxxxx', free: 'xxxxxxxxxxxxxxxxxxxx', pct: 50 }, { name: 'xxxxxxxx', free: 'xxxxxxxxxxxxxxxxxxxx', pct: 50 }, { name: 'xxxxxxxxxxxx', free: 'xxxxxxxxxxxxxxxxxxxx', pct: 50 }]; track $index) {
           <div class="wg-vol">
             <span class="wg-name" pdSkeleton>{{ d.name }}@if (d.low) { <span class="wg-badge wg-badge--warn">Low</span> }</span>
@@ -152,27 +152,23 @@ const view = (placements: Placement<Sample>[], canUndo: boolean): LayoutView<str
           </div>
         }
       </ng-template>
-      <ng-template pdWidget="cpu" let-v>
-        @let x = val(v);
+      <ng-template pdWidget="cpu" [pdWidgetOf]="witness" let-x>
         <div class="wg-split">
           <div class="wg-metric"><span class="wg-k" pdSkeleton>CPU</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.cpu ?? '00' }}<small>%</small></span><span class="wg-spark" pdSkeleton></span></div>
           <span class="wg-div"></span>
           <div class="wg-metric"><span class="wg-k" pdSkeleton>{{ x?.cpu?.memText ?? 'Memory xxxxxxxxxxx' }}</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.mem ?? '00' }}<small>%</small></span><span class="wg-spark" pdSkeleton></span></div>
         </div>
       </ng-template>
-      <ng-template pdWidget="net" let-v>
-        @let x = val(v);
+      <ng-template pdWidget="net" [pdWidgetOf]="witness" let-x>
         <span class="wg-hero" pdSkeleton>{{ x?.net?.down ?? '0.0' }}<small>MB/s</small></span>
         <span class="wg-line" pdSkeleton>{{ x?.net?.up ?? '000 KB/s' }}</span>
         <span class="wg-spark" pdSkeleton></span>
       </ng-template>
-      <ng-template pdWidget="backup" let-v>
-        @let x = val(v);
+      <ng-template pdWidget="backup" [pdWidgetOf]="witness" let-x>
         <span class="wg-line wg-strong" pdSkeleton>{{ x?.line?.title ?? 'xxxxxxxx' }}</span>
         <span class="wg-line wg-muted" pdSkeleton>{{ x?.line?.detail ?? 'xxxxxxxxxxxxx' }}</span>
       </ng-template>
-      <ng-template pdWidget="apps" let-v>
-        @let x = val(v);
+      <ng-template pdWidget="apps" [pdWidgetOf]="witness" let-x>
         @for (r of x?.rows ?? [{ name: 'xxxxxxxxxxxxxxxxxx', a: 'xxxx', b: 'xxxxxx' }, { name: 'xxxxxxxxxxxxxxxxxx', a: 'xxxx', b: 'xxxxxx' }, { name: 'xxxxxxxxxxxxxxxxxx', a: 'xxxx', b: 'xxxxxx' }]; track $index) {
           <div class="wg-row"><span class="wg-grow wg-trunc" pdSkeleton>{{ r.name }}</span><span class="wg-num" pdSkeleton>{{ r.a }}</span><span class="wg-num wg-muted" pdSkeleton>{{ r.b }}</span></div>
         }
@@ -277,6 +273,8 @@ const view = (placements: Placement<Sample>[], canUndo: boolean): LayoutView<str
   `,
 })
 export class GalWidgets {
+  /** The type witness of the kind templates: `let-x` is a `Val | null` with no cast. */
+  protected readonly witness: Val | null = null;
   protected readonly catalogue = CATALOGUE;
   protected readonly sheet = SHEET;
   protected readonly columns = COLUMNS;
@@ -306,9 +304,6 @@ export class GalWidgets {
   protected volumeOf(p: Placement<unknown>): string {
     return (p.widget as Sample).volume ?? 'all';
   }
-  protected val(v: unknown): Val | null {
-    return v as Val | null;
-  }
   protected kindInfo(k: string): KindInfo<string> {
     return CATALOGUE.kinds.find((i) => i.kind === k) as KindInfo<string>;
   }
@@ -326,6 +321,8 @@ export class GalWidgets {
   /** The stand-in engine (a mock: the real one is `paddock-widgets`). */
   protected applyEdit(edit: Edit<Sample>): void {
     const now = this.chosen().layout.placements;
+    const presets = this.chosen().layout.presets;
+    let nextPresets = presets;
     let next = [...now];
     let undoable = false;
     if (edit === 'undo') {
@@ -335,6 +332,17 @@ export class GalWidgets {
       this.previous = now;
       next = [...DEFAULTS];
       undoable = true;
+    } else if ('applyPreset' in edit) {
+      const found = [MINIMAL, ...presets].find((p) => p.id === edit.applyPreset.id);
+      this.previous = now;
+      next = (found?.placements ?? now).map((p) => ({ ...p }));
+      undoable = true;
+    } else if ('savePreset' in edit) {
+      undoable = this.chosen().canUndo;
+      nextPresets = [...presets, { id: `user-${++this.count}`, name: edit.savePreset.name, builtin: false, placements: now }];
+    } else if ('deletePreset' in edit) {
+      undoable = this.chosen().canUndo;
+      nextPresets = presets.filter((p) => p.id !== edit.deletePreset.id);
     } else if ('add' in edit) {
       const span = edit.add.span ?? this.kindInfo(edit.add.widget.kind).spans[0] ?? 2;
       next.push({ id: `${edit.add.widget.kind}-${++this.count}`, span, widget: edit.add.widget });
@@ -355,6 +363,6 @@ export class GalWidgets {
       next = now.map((p) => (p.id === edit.replace.id ? { ...p, widget: edit.replace.widget } : p));
       this.previous = null;
     }
-    this.chosen.set(view(next, undoable));
+    this.chosen.set(view(next, undoable, nextPresets));
   }
 }

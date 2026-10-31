@@ -25,6 +25,11 @@ export class PdWidget<V = unknown> {
   readonly pdWidget = input.required<string>();
   /** The kind's empty state means "all good". */
   readonly pdWidgetCalm = input(false);
+  /**
+   * A type witness, never read: bind a typed value (`[pdWidgetOf]="cpuValue"`, a property declared `cpuValue: CpuValue | null = null`)
+   * and the template's `let-v` is typed `CpuValue | null`, so no cast is needed.
+   */
+  readonly pdWidgetOf = input<V | null>(null);
   readonly template = inject<TemplateRef<PdWidgetContext<V>>>(TemplateRef);
 
   static ngTemplateContextGuard<V>(_directive: PdWidget<V>, _context: unknown): _context is PdWidgetContext<V> {
