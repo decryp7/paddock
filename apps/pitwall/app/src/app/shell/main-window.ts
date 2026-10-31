@@ -8,7 +8,7 @@ import { provideContributions, provideShellContext, provideShellVersionCheck } f
 import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
 import { tauriDialogIo } from '@decryp7/paddock-ui/shell/dialogs';
 import { provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
-import { NOTIFICATION_SOURCES } from '@decryp7/paddock-ui/shell/notify';
+import { NOTIFICATION_SOURCES, OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
 import { provideShellSettings, SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { MockStartupBackend, reportBootstrapFailure, TauriStartupBackend, windowReady } from '@decryp7/paddock-ui/shell/startup';
 import { LANGUAGE_CONFIG, LocalStorageLanguageStorage } from '@decryp7/paddock-ui/shell/i18n';
@@ -16,6 +16,7 @@ import { BACKEND } from '../core/backend';
 import { createBackend } from '../core/backend-factory';
 import { LiveStore } from '../core/live.store';
 import { Toasts } from '../core/toasts';
+import { settingsPageOf } from '../core/navigation';
 import { WINDOW_CONTROL } from '../core/window-control';
 import { PITWALL_APP_QUIT, QuitFlow } from '../features/quit/quit-flow';
 import { ServiceConsentPrompt } from '../features/service/service-consent';
@@ -56,7 +57,18 @@ export function startMainWindow(): void {
   const destroy = inject(DestroyRef);
   destroy.onDestroy(inject(QuitFlow).watch());
   const router = inject(Router);
-  destroy.onDestroy(inject(WINDOW_CONTROL).onNavigate((route) => goWhenRouted(router, route, destroy)));
+  const openSettings = inject(OPEN_SETTINGS);
+  destroy.onDestroy(inject(WINDOW_CONTROL).onNavigate((route) => goToRoute(router, openSettings, route, destroy)));
+}
+
+/**
+ * What a route the tray asks for means: a `/settings...` route opens the Settings window at that page (or points the open one
+ * there), any other goes to its screen.
+ */
+export function goToRoute(router: Router, openSettings: (page: string) => void | Promise<void>, route: string, destroy?: DestroyRef): void {
+  const page = settingsPageOf(route);
+  if (page) void openSettings(page);
+  else goWhenRouted(router, route, destroy);
 }
 
 /**

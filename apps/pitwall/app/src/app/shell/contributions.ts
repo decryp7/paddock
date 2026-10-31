@@ -40,6 +40,14 @@ export const SETTINGS_PAGES = [
     order: 10,
     load: () => import('../features/settings/settings-page').then((m) => m.SettingsPage),
   }),
+  // Which widgets the tray popup shows (family ADR 0035); "Customize widgets…" in the popup opens Settings here.
+  defineSettingsPage({
+    id: 'pw.tray',
+    group: 'application',
+    title: msg('pw.settings.tray', 'Tray popup'),
+    order: 20,
+    load: () => import('../features/settings/tray-widgets-page').then((m) => m.TrayWidgetsPage),
+  }),
 ] as const;
 
 /** "New app" (a modal form). Answers the app's name. */

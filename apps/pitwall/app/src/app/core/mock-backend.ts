@@ -60,6 +60,9 @@ import type {
 } from './api.types';
 import { BROWSER_VERSION } from '../shell/engines';
 import type { PitwallBackend, Unsubscribe } from './backend';
+import type { LoadingRows, PopoverHeader } from './generated/widgets';
+import { LOADING_SHAPE, MockPopover, type PopoverScenario } from './mock/mock-popover';
+import type { PopoverEdit, PopoverPush, PopoverValues, PopoverView } from './widgets.types';
 import {
   demoReplyWords,
   wordsThatFit,
@@ -110,6 +113,8 @@ const JOB_TITLES: Partial<Record<keyof PitwallBackend, string>> = {
 const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
   'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk',
+  // The popup's widgets are the app's own too (its layout is kept by the app; the values say "server not running" themselves).
+  'popoverView', 'popoverValues', 'popoverHeader', 'popoverShape', 'editPopover',
 ]);
 
 export interface MockOptions {
@@ -148,6 +153,8 @@ export interface MockOptions {
   noLeftovers?: boolean;
   /** The app asked to quit with "Ask each time" set (the question dialog opens). */
   quitAsk?: boolean;
+  /** What the tray popup's widgets show: the engine's recorded output for a scenario (default: `demo`, or `empty` / `down` with those flags). */
+  popover?: PopoverScenario;
 }
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -165,6 +172,9 @@ export class MockBackend implements PitwallBackend {
   private readonly autoTick: boolean;
   private readonly failing: ReadonlySet<string>;
   private serverDown = false;
+  private readonly popover_ = new MockPopover();
+  private readonly popoverScenario: PopoverScenario;
+  private readonly popoverListeners = new Set<(push: PopoverPush) => void>();
   private readonly rnd: () => number;
   private readonly streamDelay: number;
 
@@ -206,6 +216,7 @@ export class MockBackend implements PitwallBackend {
     this.failing = new Set(options.failing ?? []);
     this.rnd = prng(options.seed ?? 42);
     this.streamDelay = options.streamDelayMs ?? 0;
+    this.popoverScenario = options.popover ?? (options.serverDown ? 'down' : options.empty ? 'empty' : 'demo');
     if (options.modelUpdates) this.updateNotices_ = demoUpdateNotices(this.now());
     if (options.quitAsk) this.quitAskPending = true;
     if (options.installing) {
@@ -547,10 +558,53 @@ export class MockBackend implements PitwallBackend {
     };
   }
 
+  // ---- The tray popup's widgets (the engine's recorded output; see mock/mock-popover.ts) ---------------------------------------
+
+  /** The scenario in force: the chosen one, as `paused` once serving is paused in the demo. */
+  private scenario(): PopoverScenario {
+    return this.popoverScenario === 'demo' && this.server.serving === 'paused' ? 'paused' : this.popoverScenario;
+  }
+
+  private pushPopover(): void {
+    if (!this.popoverListeners.size) return;
+    const push: PopoverPush = { view: this.popover_.view(), values: this.popover_.values(this.scenario(), this.now()), header: this.popover_.header(this.scenario()) };
+    for (const l of [...this.popoverListeners]) l(clone(push));
+  }
+
+  popoverView(): Promise<PopoverView> {
+    return this.reply('popoverView', () => this.popover_.view());
+  }
+
+  popoverValues(): Promise<PopoverValues> {
+    return this.reply('popoverValues', () => this.popover_.values(this.scenario(), this.now()));
+  }
+
+  popoverHeader(): Promise<PopoverHeader> {
+    return this.reply('popoverHeader', () => this.popover_.header(this.scenario()));
+  }
+
+  popoverShape(): Promise<LoadingRows[]> {
+    return this.reply('popoverShape', () => LOADING_SHAPE);
+  }
+
+  editPopover(edit: PopoverEdit): Promise<PopoverView> {
+    return this.reply('editPopover', () => {
+      const view = this.popover_.edit(edit);
+      queueMicrotask(() => this.pushPopover());
+      return view;
+    });
+  }
+
+  onPopover(handler: (push: PopoverPush) => void): Unsubscribe {
+    this.popoverListeners.add(handler);
+    return () => this.popoverListeners.delete(handler);
+  }
+
   setServing(paused: boolean): Promise<void> {
     return this.reply('setServing', () => {
       this.server.serving = paused ? 'paused' : 'serving';
       this.emit({ kind: 'server', server: clone(this.server) });
+      queueMicrotask(() => this.pushPopover());
       this.pushEvent({ kind: 'servingChanged', severity: 'info', message: paused ? 'Serving paused: new requests wait until you resume' : 'Serving resumed', modelId: null, appId: null, reason: null });
     });
   }

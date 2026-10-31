@@ -9,6 +9,10 @@ export interface WindowControl {
   onNavigate(handler: (route: string) => void): () => void;
   /** In the tray popover: makes the popover window as tall as its content (logical px). */
   fitTray(height: number): Promise<void>;
+  /** In the tray popover: puts the popover away (Escape, a click outside). */
+  closeTray(): Promise<void>;
+  /** In the tray popover: quits Pitwall by the app's own flow (the "When you quit" setting, or the question). */
+  quit(): Promise<void>;
 }
 
 /** The storage key of the route the tray left for the main window. */
@@ -100,6 +104,14 @@ export class TauriWindowControl implements WindowControl {
     await this.port.invoke('plugin:paddock-shell|tray_fit_height', { height });
   }
 
+  async closeTray(): Promise<void> {
+    await this.port.invoke('plugin:paddock-shell|tray_close');
+  }
+
+  async quit(): Promise<void> {
+    await this.port.invoke('quit_from_tray');
+  }
+
   onNavigate(handler: (route: string) => void): () => void {
     let stopped = false;
     let unlisten: (() => void) | null = null;
@@ -177,6 +189,16 @@ export class BrowserWindowControl implements WindowControl {
 
   /** The tab is as large as the browser makes it. */
   async fitTray(): Promise<void> {
+    return undefined;
+  }
+
+  /** The tab stays. */
+  async closeTray(): Promise<void> {
+    return undefined;
+  }
+
+  /** There is no app to quit in a tab. */
+  async quit(): Promise<void> {
     return undefined;
   }
 }

@@ -45,6 +45,8 @@ import type {
   UpdateNotice,
   UpdateSchedule,
 } from './api.types';
+import type { LoadingRows, PopoverHeader } from './generated/widgets';
+import type { PopoverEdit, PopoverPush, PopoverValues, PopoverView } from './widgets.types';
 
 /** Stops a subscription or a running stream. */
 export type Unsubscribe = () => void;
@@ -65,6 +67,20 @@ export interface PitwallBackend {
   subscribe(listener: (update: LiveUpdate) => void): Unsubscribe;
   setServing(paused: boolean): Promise<void>;
   releaseMemory(): Promise<number>;
+
+  // The tray popup's widgets (family ADR 0035): the layout, the values and the header are the app's, computed in Rust.
+  /** The popup's layout and catalogue as the chooser draws them. */
+  popoverView(): Promise<PopoverView>;
+  /** What the popup's widgets show now. */
+  popoverValues(): Promise<PopoverValues>;
+  /** The status pill and which footer items work now. */
+  popoverHeader(): Promise<PopoverHeader>;
+  /** How many rows each widget draws, so a loading twin has the height of a ready widget. */
+  popoverShape(): Promise<LoadingRows[]>;
+  /** One edit of the layout; the answer is the new layout. */
+  editPopover(edit: PopoverEdit): Promise<PopoverView>;
+  /** Pushed after any change of the layout, the values or the header (no polling). */
+  onPopover(handler: (push: PopoverPush) => void): Unsubscribe;
   /** Entries, size, hits and clean-up time of the response and embeddings caches (ADR 0019). */
   cacheInfo(): Promise<CacheInfo>;
   /** Empties caches; resolves to the number of entries removed. */

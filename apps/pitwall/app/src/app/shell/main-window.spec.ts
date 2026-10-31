@@ -5,6 +5,7 @@ import { LiveStore } from '../core/live.store';
 import { MockBackend } from '../core/mock-backend';
 import { WINDOW_CONTROL } from '../core/window-control';
 import { dialogsAnswering } from '../../testing/render';
+import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
 import { startMainWindow } from './main-window';
 
 const flush = async () => {
@@ -17,17 +18,28 @@ const flush = async () => {
 describe('the main window’s start', () => {
   function setup(backend: MockBackend) {
     let navigate: (route: string) => void = () => undefined;
+    const settingsPages: string[] = [];
     const dialogs = dialogsAnswering(() => undefined);
     TestBed.configureTestingModule({
       providers: [
         { provide: BACKEND, useValue: backend },
         provideRouter([]),
         dialogs,
-        { provide: WINDOW_CONTROL, useValue: { openMain: () => Promise.resolve(), onNavigate: (h: (r: string) => void) => ((navigate = h), () => undefined), fitTray: () => Promise.resolve() } },
+        { provide: OPEN_SETTINGS, useValue: (page: string) => void settingsPages.push(page) },
+        {
+          provide: WINDOW_CONTROL,
+          useValue: {
+            openMain: () => Promise.resolve(),
+            onNavigate: (h: (r: string) => void) => ((navigate = h), () => undefined),
+            fitTray: () => Promise.resolve(),
+            closeTray: () => Promise.resolve(),
+            quit: () => Promise.resolve(),
+          },
+        },
       ],
     });
     TestBed.runInInjectionContext(startMainWindow);
-    return { opened: dialogs.opened, navigate: (r: string) => navigate(r) };
+    return { opened: dialogs.opened, settingsPages, navigate: (r: string) => navigate(r) };
   }
 
   it('loads the live picture in the background and asks nothing when nothing is pending', async () => {
@@ -50,6 +62,20 @@ describe('the main window’s start', () => {
     const go = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
     navigate('/models');
     expect(go).toHaveBeenCalledWith('/models');
+  });
+
+  it('opens the Settings window at the page a /settings route stands for, and does not navigate', async () => {
+    const { navigate, settingsPages } = setup(new MockBackend());
+    const router = TestBed.inject(Router);
+    vi.spyOn(router, 'navigated', 'get').mockReturnValue(true);
+    const go = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
+    navigate('/settings/tray-popup');
+    navigate('/settings');
+    expect(settingsPages).toEqual(['pw.tray', 'pw.general']);
+    expect(go).not.toHaveBeenCalled();
+    navigate('/settings/unknown');
+    expect(settingsPages.length).toBe(2);
+    expect(go).toHaveBeenCalledWith('/settings/unknown');
   });
 
   it('a route taken while the window starts waits for its first navigation, so the start does not undo it', async () => {

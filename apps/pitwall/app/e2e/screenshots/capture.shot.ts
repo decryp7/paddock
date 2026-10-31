@@ -315,24 +315,22 @@ for (const theme of ['dark', 'light'] as const) {
   }
 
   if (!ONLY || ONLY.includes('tray')) {
-    // The tray popover window (`#/tray`, 360 logical px wide, fitted to its content) as the tray opens it, with both banners (a pairing and model
-    // updates) and the loaded models summarised under them.
+    // The tray popover window (`#/tray`, 360 logical px wide, fitted to its content) as the tray opens it: the default widgets in
+    // the demo state (family ADR 0035).
     test(`tray ${theme}`, async ({ page }) => {
-      await page.setViewportSize({ width: 360, height: 520 });
-      await open(page, '/tray', theme, 'mock-updates');
-      await expect(page.getByText(/model updates are available/)).toBeVisible();
-      await expect(page.locator('pw-hot-models .more')).toContainText('more loaded');
-      const tray = page.locator('.tray');
-      await expect(tray).toBeVisible();
+      await page.setViewportSize({ width: 372, height: 1000 });
+      await open(page, '/tray', theme, 'mock-popup=demo');
+      const tray = page.locator('pd-tray-popover');
+      await expect(tray.locator('section.pd-w').first()).toBeVisible();
+      await expect(tray.locator('[aria-busy="true"]')).toHaveCount(0);
       await page.clock.runFor(1500);
-      await page.waitForTimeout(400);
+      await page.evaluate(async () => document.fonts.ready);
       // The window is fitted to the content, as the shell does: the shot is the popover with no empty space.
       const box = await tray.boundingBox();
       expect(box?.width).toBe(360);
       expect(box?.height).toBeLessThanOrEqual(520);
-      expect(await tray.evaluate((e) => e.scrollHeight <= e.clientHeight)).toBe(true);
-      await page.setViewportSize({ width: 360, height: Math.ceil(box?.height ?? 520) });
-      await page.waitForTimeout(200);
+      await page.mouse.move(2, 2);
+      await page.waitForTimeout(400);
       await tray.screenshot({ path: `${OUT}/tray-${theme}.png` });
     });
   }

@@ -109,6 +109,16 @@ describe('TauriWindowControl', () => {
     await expect(new BrowserWindowControl().fitTray()).resolves.toBeUndefined();
   });
 
+  it('puts the popover away and quits through the app\'s own commands; a tab has neither', async () => {
+    const { port, calls } = fakePort();
+    const control = new TauriWindowControl(port, new PendingRoute(memoryStorage));
+    await control.closeTray();
+    await control.quit();
+    expect(calls).toEqual(['invoke plugin:paddock-shell|tray_close', 'invoke quit_from_tray']);
+    await expect(new BrowserWindowControl().closeTray()).resolves.toBeUndefined();
+    await expect(new BrowserWindowControl().quit()).resolves.toBeUndefined();
+  });
+
   it('opens on the dashboard by default', async () => {
     const storage = memoryStorage();
     const { port } = fakePort();

@@ -1,7 +1,7 @@
 import type { AppPermissions, JobEvent, LiveUpdate, PlaygroundEvent, PlaygroundRequest, PresetDraft, Settings } from './api.types';
 import type { PitwallBackend } from './backend';
 import { JOB_METHODS } from './backend';
-import { LIVE_EVENT, TauriBackend, type TauriBridge } from './tauri-backend';
+import { LIVE_EVENT, POPOVER_EVENT, TauriBackend, type TauriBridge } from './tauri-backend';
 
 interface Call {
   cmd: string;
@@ -55,6 +55,11 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['events', (b) => b.events(50), 'events', { limit: 50 }],
   ['setServing', (b) => b.setServing(true), 'set_serving', { paused: true }],
   ['releaseMemory', (b) => b.releaseMemory(), 'release_memory', undefined],
+  ['popoverView', (b) => b.popoverView(), 'popover_view', undefined],
+  ['popoverValues', (b) => b.popoverValues(), 'popover_values', undefined],
+  ['popoverHeader', (b) => b.popoverHeader(), 'popover_header', undefined],
+  ['popoverShape', (b) => b.popoverShape(), 'popover_shape', undefined],
+  ['editPopover', (b) => b.editPopover('resetToDefaults'), 'edit_popover', { edit: 'resetToDefaults' }],
   ['cacheInfo', (b) => b.cacheInfo(), 'cache_info', undefined],
   ['clearCache', (b) => b.clearCache({ kind: 'app', appId: 'debrief' }), 'clear_cache', { scope: { kind: 'app', appId: 'debrief' } }],
   ['applyPreset', (b) => b.applyPreset('lowMemory'), 'apply_preset', { preset: 'lowMemory' }],
@@ -142,7 +147,7 @@ describe('TauriBackend', () => {
 
   it('covers every request/response method of the backend interface', () => {
     const methods = Object.getOwnPropertyNames(TauriBackend.prototype).filter((m) => m !== 'constructor' && m !== 'run' && m !== 'job');
-    const pinned = new Set([...TABLE.map((r) => r[0]), ...JOBS.map((r) => r[0]), 'subscribe', 'onQuitAsk', 'chat', 'jobEvents']);
+    const pinned = new Set([...TABLE.map((r) => r[0]), ...JOBS.map((r) => r[0]), 'subscribe', 'onPopover', 'onQuitAsk', 'chat', 'jobEvents']);
     expect(methods.filter((m) => !pinned.has(m))).toEqual([]);
   });
 
@@ -165,6 +170,28 @@ describe('TauriBackend', () => {
     listeners[0]!(update);
     expect(got.length).toBe(1);
     expect(unlistened).toEqual([LIVE_EVENT]);
+  });
+
+  it('listens for the popup\'s pushes on their own event and stops on unsubscribe, also before listening resolved', async () => {
+    const { bridge, listeners, unlistened } = fakeBridge();
+    const got: unknown[] = [];
+    const stop = new TauriBackend(bridge).onPopover((p) => got.push(p));
+    await Promise.resolve();
+    listeners[0]!({ header: 1 });
+    expect(got).toEqual([{ header: 1 }]);
+    stop();
+    listeners[0]!({ header: 2 });
+    expect(got.length).toBe(1);
+    expect(unlistened).toEqual(['pitwall://popover']);
+    expect(POPOVER_EVENT).toBe('pitwall://popover');
+    const early = fakeBridge();
+    new TauriBackend(early.bridge).onPopover(() => undefined)();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(early.unlistened).toEqual([POPOVER_EVENT]);
+    const failing = new TauriBackend({ ...fakeBridge().bridge, listen: () => Promise.reject(new Error('no ipc')) }).onPopover(() => undefined);
+    await Promise.resolve();
+    expect(() => failing()).not.toThrow();
   });
 
   it('listens for the quit question and stops listening on unsubscribe', async () => {

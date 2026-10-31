@@ -1,317 +1,239 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterNextRender, computed, inject } from '@angular/core';
-import { MatIconModule } from '@angular/material/icon';
-import { LiveStore } from '../../core/live.store';
-import { WINDOW_CONTROL } from '../../core/window-control';
-import { bytes, percent, rate } from '../../shared/format';
-import { loadTone, pressureLook, servingLabel } from '../../shared/labels';
-import { injectNow } from '../../shared/now';
-import { observeHeight } from '../../shared/observe-height';
-import { HotModels } from '../dashboard/hot-models';
-import { UpdatesStore } from '../updates/updates.store';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterNextRender, computed, inject, signal } from '@angular/core';
 import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatIcon } from '@angular/material/icon';
+import { MatMenu, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
 import { MatTooltip } from '@angular/material/tooltip';
+import { SuTrayPopover, type SuTrayPlatform } from '@decryp7/paddock-ui';
+import { PdWidgetArea } from '@decryp7/paddock-ui/widgets';
+import { BACKEND } from '../../core/backend';
+import { toCommandError } from '../../core/command-error';
+import type { WidgetActionId } from '../../core/generated/widgets';
+import { SETTINGS_GENERAL_ROUTE, SETTINGS_TRAY_POPUP_ROUTE } from '../../core/navigation';
+import { WINDOW_CONTROL } from '../../core/window-control';
+import { observeHeight } from '../../shared/observe-height';
+import { StatusPill } from './status-pill';
+import { TrayWidgetsStore } from './tray-widgets.store';
+import { WidgetSet } from './widget-set';
+
+/** The platform the popover is drawn for (the shell fits the window; the frame's corners and shadow follow the OS). */
+function platformOf(userAgent: string): SuTrayPlatform {
+  return /Windows/i.test(userAgent) ? 'windows' : /Linux|X11/i.test(userAgent) && !/Mac/i.test(userAgent) ? 'linux' : 'macos';
+}
 
 /**
- * The tray / menu-bar popover (360 px wide, frameless, the window fitted to its content): memory, hot models with
- * countdowns, throughput and the key actions.
+ * The tray / menu-bar popup (family ADR 0035): the person's widgets on the shared widget area, in the shared popover. The
+ * layout and every value are the app's (computed in Rust, `pitwall_core::widgets`); this page draws them and sends the action a
+ * button names to the command that does it.
  */
 @Component({
   selector: 'pw-tray-popover',
-  imports: [MatTooltip, MatIconButton, MatButton, MatIconModule, HotModels],
+  imports: [MatButton, MatIconButton, MatIcon, MatMenu, MatMenuItem, MatMenuTrigger, MatTooltip, SuTrayPopover, PdWidgetArea, WidgetSet, StatusPill],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="tray">
-      <header>
-        <img class="logo" src="brand/pitwall-macos.svg" alt="" width="24" height="24" />
+    <pd-tray-popover label="Pitwall" [platform]="platform" (dismissed)="close()">
+      <div slot="header" class="head">
+        <img src="brand/pitwall-macos.svg" alt="" width="16" height="16" />
         <h1>Pitwall</h1>
-        <div class="title">
-          @if (live.server(); as s) {
-            <span class="state" [attr.data-state]="s.serving"><span class="dot" aria-hidden="true"></span>{{ servingLabel(s.serving) }} on :{{ s.port }}</span>
-          } @else if (live.error()) {
-            <span class="state" data-state="down"><span class="dot" aria-hidden="true"></span>Server unreachable</span>
-          } @else {
-            <span class="state"><span class="dot" aria-hidden="true"></span>Connecting…</span>
-          }
+        <pw-status-pill [status]="widgets.header()?.status ?? null" />
+      </div>
+      <pw-widget-set #set (run)="perform($event)" />
+      @if (actionError(); as message) {
+        <p class="error" role="alert"><mat-icon svgIcon="pw:alert" aria-hidden="true" />{{ message }}</p>
+      }
+      @if (widgets.view(); as view) {
+        <pd-widget-area
+          [placements]="view.layout.placements"
+          [catalogue]="view.catalogue"
+          [values]="widgets.values()"
+          [templates]="set.widgets()"
+          [meta]="set.meta"
+          (action)="perform($event)"
+          (customize)="customize()"
+        />
+      } @else if (widgets.error(); as err) {
+        <div class="state" role="alert">
+          <mat-icon svgIcon="pw:alert" aria-hidden="true" />
+          <strong>Couldn't read the popup</strong>
+          <span class="muted">{{ err.message }}</span>
+          <button matButton="outlined" type="button" (click)="widgets.load()">Retry</button>
         </div>
-        <button type="button" matIconButton aria-label="Open Pitwall" matTooltip="Open Pitwall" (click)="open('/')"><mat-icon svgIcon="pw:open" aria-hidden="true" /></button>
-      </header>
-
-      @if (live.pairings().length; as n) {
-        <button type="button" class="pairing" (click)="open('/')">
-          <mat-icon svgIcon="pw:apps" aria-hidden="true" />
-          <span>{{ n === 1 ? 'An app wants to pair' : n + ' apps want to pair' }}. <b>Review</b></span>
+      } @else {
+        <div class="state" role="status" aria-busy="true">
+          <span class="sk" aria-hidden="true"></span>
+          <span class="sk" aria-hidden="true"></span>
+          <span class="sr">Loading the popup</span>
+        </div>
+      }
+      <div slot="footer" class="foot">
+        <span class="spacer"></span>
+        <button matButton="filled" type="button" (click)="open('/')"><mat-icon svgIcon="pw:arrow-right" aria-hidden="true" />Open Pitwall</button>
+        <button matIconButton type="button" aria-label="More actions" matTooltip="More actions" matTooltipPosition="left" [matMenuTriggerFor]="more">
+          <mat-icon svgIcon="pw:more" aria-hidden="true" />
         </button>
-      }
-
-      @if (updates.count(); as u) {
-        <button type="button" class="pairing" (click)="open('/models')">
-          <mat-icon svgIcon="pw:download" aria-hidden="true" />
-          <span>{{ u === 1 ? 'A model update is available' : u + ' model updates are available' }}. <b>Review</b></span>
-        </button>
-      }
-
-      @if (live.error() && !live.overview()) {
-        <p class="down" role="alert">The Pitwall server is not responding. <button type="button" matButton="outlined" (click)="live.load()">Retry</button></p>
-      }
-
-      @if (live.memory(); as m) {
-        <section class="mem" aria-label="Memory">
-          <div class="row">
-            <span class="k">RAM</span>
-            <span class="v num">{{ size(m.ramTotal - m.ramAvailable) }} <span class="faint">/ {{ size(m.ramTotal, 0) }}</span></span>
-            @if (pressure(); as p) {
-              @if (p.tone !== 'ok') {
-                <span class="status" [attr.data-tone]="p.tone">{{ p.label }}</span>
-              }
-            }
-          </div>
-          <div class="meter" [attr.data-tone]="tone(ramPct())"><span [style.width.%]="ramPct()"></span></div>
-          @if (vram(); as g) {
-            <div class="row">
-              <span class="k">VRAM</span>
-              <span class="v num">{{ size(g.used) }} <span class="faint">/ {{ size(g.total, 0) }}</span></span>
-              <span class="faint small">{{ g.util === null ? '' : g.util + '% busy' }}</span>
-            </div>
-            <div class="meter" [attr.data-tone]="tone(g.pct)"><span [style.width.%]="g.pct"></span></div>
+        <mat-menu #more="matMenu" yPosition="above" xPosition="before">
+          <button mat-menu-item type="button" (click)="customize()"><mat-icon svgIcon="pw:sliders" aria-hidden="true" />Customize widgets…</button>
+          @if (serving(); as s) {
+            <button mat-menu-item type="button" (click)="setServing(s === 'pause')">
+              <mat-icon [svgIcon]="s === 'pause' ? 'pw:pause' : 'pw:play'" aria-hidden="true" />{{ s === 'pause' ? 'Pause serving' : 'Resume serving' }}
+            </button>
           }
-        </section>
-      }
-
-      <section class="stats" aria-label="Throughput">
-        <div><b class="num">{{ tps() }}</b> <span>tok/s</span></div>
-        <div><b class="num">{{ live.queue()?.running?.length ?? 0 }}</b> <span>running</span></div>
-        <div><b class="num">{{ live.queue()?.waiting?.length ?? 0 }}</b> <span>waiting</span></div>
-      </section>
-
-      <section class="models" aria-label="Loaded models">
-        <h2>Loaded models</h2>
-        <pw-hot-models [now]="now()" [compact]="true" [limit]="modelLimit()" />
-      </section>
-
-      <footer>
-        @if (live.paused()) {
-          <button type="button" matButton="outlined" [disabled]="live.isBusy()('serving')" (click)="live.setServing(false)">Resume serving</button>
-        } @else {
-          <button type="button" matButton="outlined" [disabled]="live.isBusy()('serving') || !live.overview()" (click)="live.setServing(true)">Pause serving</button>
-        }
-        <button type="button" matButton="outlined" [disabled]="live.isBusy()('release') || !live.overview()" (click)="live.releaseMemory()">Release memory</button>
-        <button type="button" matButton="filled" class="wide" (click)="open('/')">Open Pitwall</button>
-      </footer>
-    </div>
+          <button mat-menu-item type="button" [disabled]="!widgets.header()?.canReleaseMemory" (click)="releaseMemory()"><mat-icon svgIcon="pw:release" aria-hidden="true" />Release memory</button>
+          <button mat-menu-item type="button" (click)="open(settingsRoute)"><mat-icon svgIcon="pw:settings" aria-hidden="true" />Settings…</button>
+          <hr class="sep" />
+          <button mat-menu-item type="button" (click)="quit()"><mat-icon svgIcon="pw:power" aria-hidden="true" />Quit Pitwall</button>
+        </mat-menu>
+      </div>
+    </pd-tray-popover>
   `,
   styles: `
     :host {
       display: block;
-      min-height: 100vh;
-      background: var(--pd-bg);
     }
-    /* As tall as its content: the window is fitted to it (no empty card, no gap under the buttons). */
-    .tray {
-      display: flex;
-      flex-direction: column;
-      gap: var(--pd-space-2);
-      padding: var(--pd-space-3) var(--pd-space-4);
-      background: var(--pd-bg);
-    }
-    .pairing {
-      display: flex;
-      flex: none;
-      align-items: center;
-      gap: var(--pd-space-2);
-      min-height: 32px;
-      padding: 6px var(--pd-space-3);
-      font: inherit;
-      font-size: var(--pd-text-label);
-      color: var(--pd-text);
-      text-align: left;
-      background: var(--pd-accent-tint);
-      border: 1px solid color-mix(in srgb, var(--pd-accent) 35%, transparent);
-      border-radius: var(--pd-radius-control);
-      mat-icon {
-        color: var(--pd-accent);
-      }
-    }
-    .down {
+    .head {
       display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: var(--pd-space-2);
-      padding: var(--pd-space-2) var(--pd-space-3);
-      font-size: var(--pd-text-label);
-      background: var(--pd-danger-tint);
-      border-radius: var(--pd-radius-control);
-    }
-    header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .logo {
-      width: 24px;
-      height: 24px;
-      flex: none;
+      width: 100%;
     }
     h1 {
-      font-size: var(--pd-text-subtitle);
+      margin: 0;
+      font-size: var(--pd-text-body);
+      font-weight: var(--pd-weight-semibold);
     }
-    .title {
-      flex: 1;
-      display: flex;
-      justify-content: flex-start;
-      min-width: 0;
-    }
-    /* The state is one pill with an 8 px dot, like the window's sidebar. */
     .state {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      height: 22px;
-      padding: 0 8px;
-      font-size: var(--pd-text-label);
-      font-weight: var(--pd-weight-medium);
-      color: var(--pd-text-muted);
-      background: var(--pd-pressed);
-      border-radius: var(--pd-radius-pill);
-      white-space: nowrap;
-      .dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--pd-text-subtle);
-      }
-      &[data-state='serving'] .dot {
-        background: var(--pd-success);
-      }
-      &[data-state='paused'] .dot,
-      &[data-state='stopped'] .dot {
-        background: var(--pd-warning);
-      }
-      &[data-state='down'] .dot {
-        background: var(--pd-danger);
-      }
-    }
-    .mem,
-    .stats,
-    .models {
-      flex: none;
-      padding: var(--pd-space-3);
-      background: var(--pd-surface-1);
-      border: 1px solid var(--pd-hairline);
-      border-radius: var(--pd-radius-card);
-    }
-    .mem {
       display: grid;
-      gap: var(--pd-space-1);
-      .row {
-        display: flex;
-        align-items: center;
-        gap: var(--pd-space-2);
-      }
-      .k {
-        width: 40px;
-        font-size: var(--pd-text-label);
-        color: var(--pd-text-muted);
-      }
-      .v {
-        flex: 1;
-        font-weight: var(--pd-weight-medium);
-      }
-      .small {
-        font-size: var(--pd-text-label);
-      }
-      .meter + .row {
-        margin-top: var(--pd-space-1);
-      }
-    }
-    /* One line: each figure with its unit beside it, so the loaded models keep the room. */
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      padding: var(--pd-space-2) var(--pd-space-3);
-      > div {
-        display: flex;
-        align-items: baseline;
-        justify-content: center;
-        gap: var(--pd-space-1);
-        white-space: nowrap;
-      }
-      b {
-        font-size: var(--pd-text-body-lg);
-        font-weight: var(--pd-weight-semibold);
-        font-variant-numeric: tabular-nums;
-        line-height: 1.4;
-      }
-      span {
-        font-size: var(--pd-text-label);
-        color: var(--pd-text-muted);
-      }
-    }
-    .models {
-      padding-top: var(--pd-space-2);
-      h2 {
-        margin-bottom: var(--pd-space-1);
-        font-size: var(--pd-text-label);
-        font-weight: var(--pd-weight-medium);
-        color: var(--pd-text-muted);
-      }
-    }
-    footer {
-      flex: none;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
+      justify-items: start;
       gap: var(--pd-space-2);
-      /* Two actions side by side in a 360 px popover, each on one line: words only (no icon), so both fit with room to spare. */
-      button {
-        min-width: 0;
-        white-space: nowrap;
-        --mat-button-outlined-horizontal-padding: var(--pd-space-2);
-        --mat-button-outlined-container-height: 32px;
+      padding: var(--pd-space-3);
+      border-radius: var(--pd-radius-card);
+      background: var(--pd-surface-2);
+    }
+    .state mat-icon {
+      width: 16px;
+      height: 16px;
+      color: var(--pd-danger);
+    }
+    .muted {
+      color: var(--pd-text-muted);
+      font-size: var(--pd-text-label);
+    }
+    .sk {
+      display: block;
+      width: 100%;
+      height: 56px;
+      border-radius: var(--pd-radius-card);
+      background: var(--pd-skeleton);
+    }
+    .sr {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+    .error {
+      display: flex;
+      align-items: center;
+      gap: var(--pd-space-2);
+      margin: 0 0 var(--pd-space-2);
+      padding: var(--pd-space-2) var(--pd-space-3);
+      border-radius: var(--pd-radius-card);
+      background: var(--pd-danger-tint);
+      font-size: var(--pd-text-label);
+    }
+    .error mat-icon {
+      width: 14px;
+      height: 14px;
+      color: var(--pd-danger);
+    }
+    .foot {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      gap: var(--pd-space-2);
+    }
+    .spacer {
+      flex: 1;
+    }
+    .sep {
+      border: 0;
+      border-top: 1px solid var(--pd-hairline);
+      margin: 4px 0;
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .sk {
+        animation: sk-pulse 1.2s ease-in-out infinite;
       }
-      .wide {
-        grid-column: 1 / -1;
-        --mat-button-filled-container-height: 32px;
+    }
+    @keyframes sk-pulse {
+      50% {
+        opacity: 0.6;
       }
     }
   `,
 })
 export class TrayPopover {
-  protected readonly live = inject(LiveStore);
-  protected readonly updates = inject(UpdatesStore);
+  protected readonly widgets = inject(TrayWidgetsStore);
+  private readonly backend = inject(BACKEND);
   private readonly windows = inject(WINDOW_CONTROL);
-  protected readonly servingLabel = servingLabel;
-  protected readonly now = injectNow();
-  protected readonly size = bytes;
-
-  protected readonly pressure = computed(() => {
-    const m = this.live.memory();
-    return m ? pressureLook(m.pressure) : null;
+  protected readonly settingsRoute = SETTINGS_GENERAL_ROUTE;
+  protected readonly platform = platformOf(navigator.userAgent);
+  /** What the last button press that failed said; cleared by the next press. */
+  protected readonly actionError = signal<string | null>(null);
+  /** What the footer's Pause or Resume item does now; none while the server cannot be reached (the engine decides). */
+  protected readonly serving = computed(() => {
+    const t = this.widgets.header()?.serving;
+    return t === 'pause' || t === 'resume' ? t : null;
   });
-  protected readonly tone = loadTone;
-  protected readonly ramPct = computed(() => {
-    const m = this.live.memory();
-    return m ? percent(m.ramTotal - m.ramAvailable, m.ramTotal) : 0;
-  });
-  protected readonly vram = computed(() => {
-    const g = this.live.memory()?.gpus[0];
-    if (!g || !g.vramTotal || g.vramUsed === null) return null;
-    return { used: g.vramUsed, total: g.vramTotal, pct: percent(g.vramUsed, g.vramTotal), util: g.utilisation };
-  });
-  /** Three loaded models fit without a banner, one fewer under each banner; the rest is summarised so no row is cut off. */
-  protected readonly modelLimit = computed(() => Math.max(1, 3 - (this.live.pairings().length > 0 ? 1 : 0) - (this.updates.count() > 0 ? 1 : 0)));
-  protected readonly tps = computed(() => (this.live.paused() ? '0.0' : rate(this.live.throughput()?.genTps ?? 0)));
 
   constructor() {
-    void this.updates.ensureLoaded();
-    // The popover is as tall as its content: the shell fits the window to the height the page reports.
-    const host = inject<ElementRef<HTMLElement>>(ElementRef);
+    this.widgets.start();
+    // The popover is as tall as its content: the shell fits the window to the height the page reports (and clamps it).
+    const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     const destroy = inject(DestroyRef);
     afterNextRender(() => {
-      const tray = host.nativeElement.querySelector('.tray');
-      if (tray) destroy.onDestroy(observeHeight(tray, (h) => void this.windows.fitTray(h).catch(() => undefined)));
+      const popup = host.querySelector('pd-tray-popover');
+      if (popup) destroy.onDestroy(observeHeight(popup, (h) => void this.windows.fitTray(h).catch(() => undefined)));
     });
   }
 
+  protected close(): void {
+    void this.windows.closeTray().catch(() => undefined);
+  }
+
   protected open(route: string): void {
-    void this.windows.openMain(route);
+    this.attempt(this.windows.openMain(route));
+  }
+
+  /** "Customize widgets…": the Settings window, at the popup's page (the main window opens it, or points the open one there). */
+  protected customize(): void {
+    this.open(SETTINGS_TRAY_POPUP_ROUTE);
+  }
+
+  protected setServing(pause: boolean): void {
+    this.attempt(this.backend.setServing(pause));
+  }
+
+  protected releaseMemory(): void {
+    this.attempt(this.backend.releaseMemory());
+  }
+
+  protected quit(): void {
+    this.attempt(this.windows.quit());
+  }
+
+  /** Runs what a widget asked for through the command that does it; the app decides the rest. */
+  protected perform(action: WidgetActionId): void {
+    switch (action.type) {
+      case 'openPage':
+        return this.open(`/${action.page}`);
+      case 'cancelDownload':
+        return this.attempt(this.backend.cancelDownload(action.id));
+    }
+  }
+
+  private attempt(work: Promise<unknown>): void {
+    this.actionError.set(null);
+    work.catch((e: unknown) => this.actionError.set(toCommandError(e).message));
   }
 }

@@ -1,0 +1,877 @@
+{
+  "nowMs": 1800000000000,
+  "scenarios": {
+    "connecting": {
+      "byKind": {
+        "activity": {
+          "calm": false,
+          "detail": "Connecting to the server.",
+          "next": null,
+          "state": "empty",
+          "title": "See what the server is doing"
+        },
+        "downloads": {
+          "calm": false,
+          "detail": "Connecting to the server.",
+          "next": null,
+          "state": "empty",
+          "title": "See downloads as they run"
+        },
+        "loadedModels": {
+          "calm": false,
+          "detail": "Connecting to the server.",
+          "next": null,
+          "state": "empty",
+          "title": "See what is in memory"
+        },
+        "memory": {
+          "calm": false,
+          "detail": "Connecting to the server.",
+          "next": null,
+          "state": "empty",
+          "title": "See memory in use"
+        },
+        "recentErrors": {
+          "calm": false,
+          "detail": "Connecting to the server.",
+          "next": null,
+          "state": "empty",
+          "title": "See what failed"
+        },
+        "server": {
+          "calm": false,
+          "detail": "Connecting to the server.",
+          "next": null,
+          "state": "empty",
+          "title": "See whether the server is serving"
+        },
+        "updates": {
+          "calm": false,
+          "detail": "Connecting to the server.",
+          "next": null,
+          "state": "empty",
+          "title": "Know when models have updates"
+        }
+      },
+      "header": {
+        "canReleaseMemory": false,
+        "serving": "off",
+        "status": {
+          "kind": "unknown"
+        }
+      },
+      "notice": null
+    },
+    "demo": {
+      "byKind": {
+        "activity": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "activity",
+            "running": 1,
+            "tokensPerSec": 38,
+            "waiting": 0
+          }
+        },
+        "downloads": {
+          "cancel": {
+            "action": {
+              "id": "d1",
+              "type": "cancelDownload"
+            },
+            "label": "Cancel download"
+          },
+          "last": null,
+          "phase": "Downloading · 12 MB/s",
+          "progress": {
+            "fraction": {
+              "done": 900,
+              "total": 2000,
+              "unit": "MB"
+            }
+          },
+          "state": "working",
+          "title": "Downloading Llama 3.2 3B Q4_K_M"
+        },
+        "loadedModels": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "bytes": 8589934592,
+            "kind": "loadedModels",
+            "more": 0,
+            "rows": [
+              {
+                "active": 1,
+                "bytes": 5368709120,
+                "id": "qwen3-8b",
+                "name": "Qwen3 8B Q4_K_M",
+                "pinned": false,
+                "state": "busy"
+              },
+              {
+                "active": 0,
+                "bytes": 3221225472,
+                "id": "gemma3-4b",
+                "name": "Gemma 3 4B Q5_K_M",
+                "pinned": false,
+                "state": "ready"
+              }
+            ],
+            "total": 2
+          }
+        },
+        "memory": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "memory",
+            "percent": 59,
+            "pressure": "normal",
+            "tone": "neutral",
+            "total": 34359738368,
+            "used": 20401094656,
+            "vram": {
+              "busyPercent": 38,
+              "percent": 58,
+              "tone": "neutral",
+              "total": 12884901888,
+              "used": 7516192768
+            }
+          }
+        },
+        "recentErrors": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "recentErrors",
+            "more": 0,
+            "rows": [
+              {
+                "atMs": 1799999280000,
+                "id": "e1",
+                "message": "A chat request to Qwen3 8B failed: the context was full."
+              }
+            ]
+          }
+        },
+        "server": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "engine": {
+              "kind": "ready"
+            },
+            "kind": "server",
+            "port": 11435,
+            "state": "serving"
+          }
+        },
+        "updates": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "count": 2,
+            "kind": "updates",
+            "summary": "A better quantisation of Qwen3 8B is available."
+          }
+        }
+      },
+      "header": {
+        "canReleaseMemory": true,
+        "serving": "pause",
+        "status": {
+          "kind": "serving",
+          "port": 11435
+        }
+      },
+      "notice": null
+    },
+    "down": {
+      "byKind": {
+        "activity": {
+          "asOf": 1800000000000,
+          "staleSince": 1800000000000,
+          "state": "ready",
+          "value": {
+            "kind": "activity",
+            "running": 1,
+            "tokensPerSec": 0,
+            "waiting": 0
+          }
+        },
+        "downloads": {
+          "cancel": {
+            "action": {
+              "id": "d1",
+              "type": "cancelDownload"
+            },
+            "label": "Cancel download"
+          },
+          "last": null,
+          "phase": "Downloading · 12 MB/s",
+          "progress": {
+            "fraction": {
+              "done": 900,
+              "total": 2000,
+              "unit": "MB"
+            }
+          },
+          "state": "working",
+          "title": "Downloading Llama 3.2 3B Q4_K_M"
+        },
+        "loadedModels": {
+          "asOf": 1800000000000,
+          "staleSince": 1800000000000,
+          "state": "ready",
+          "value": {
+            "bytes": 8589934592,
+            "kind": "loadedModels",
+            "more": 0,
+            "rows": [
+              {
+                "active": 1,
+                "bytes": 5368709120,
+                "id": "qwen3-8b",
+                "name": "Qwen3 8B Q4_K_M",
+                "pinned": false,
+                "state": "busy"
+              },
+              {
+                "active": 0,
+                "bytes": 3221225472,
+                "id": "gemma3-4b",
+                "name": "Gemma 3 4B Q5_K_M",
+                "pinned": false,
+                "state": "ready"
+              }
+            ],
+            "total": 2
+          }
+        },
+        "memory": {
+          "asOf": 1800000000000,
+          "staleSince": 1800000000000,
+          "state": "ready",
+          "value": {
+            "kind": "memory",
+            "percent": 59,
+            "pressure": "normal",
+            "tone": "neutral",
+            "total": 34359738368,
+            "used": 20401094656,
+            "vram": {
+              "busyPercent": 38,
+              "percent": 58,
+              "tone": "neutral",
+              "total": 12884901888,
+              "used": 7516192768
+            }
+          }
+        },
+        "recentErrors": {
+          "asOf": 1800000000000,
+          "staleSince": 1800000000000,
+          "state": "ready",
+          "value": {
+            "kind": "recentErrors",
+            "more": 0,
+            "rows": [
+              {
+                "atMs": 1799999280000,
+                "id": "e1",
+                "message": "A chat request to Qwen3 8B failed: the context was full."
+              }
+            ]
+          }
+        },
+        "server": {
+          "asOf": 1800000000000,
+          "staleSince": 1800000000000,
+          "state": "ready",
+          "value": {
+            "engine": {
+              "kind": "ready"
+            },
+            "kind": "server",
+            "port": 11435,
+            "state": "unreachable"
+          }
+        },
+        "updates": {
+          "asOf": 1800000000000,
+          "staleSince": 1800000000000,
+          "state": "ready",
+          "value": {
+            "count": 2,
+            "kind": "updates",
+            "summary": "A better quantisation of Qwen3 8B is available."
+          }
+        }
+      },
+      "header": {
+        "canReleaseMemory": false,
+        "serving": "off",
+        "status": {
+          "kind": "unreachable"
+        }
+      },
+      "notice": {
+        "action": {
+          "action": {
+            "page": "dashboard",
+            "type": "openPage"
+          },
+          "label": "Open Pitwall"
+        },
+        "detail": "Showing the last readings. Pitwall keeps trying.",
+        "title": "The server is not responding",
+        "tone": "danger"
+      }
+    },
+    "empty": {
+      "byKind": {
+        "activity": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "activity",
+            "running": 0,
+            "tokensPerSec": 0,
+            "waiting": 0
+          }
+        },
+        "downloads": {
+          "calm": true,
+          "detail": "Nothing to wait for",
+          "next": {
+            "action": {
+              "page": "models",
+              "type": "openPage"
+            },
+            "label": "Open Models"
+          },
+          "state": "empty",
+          "title": "No downloads running"
+        },
+        "loadedModels": {
+          "calm": false,
+          "detail": "No model is loaded.",
+          "next": {
+            "action": {
+              "page": "models",
+              "type": "openPage"
+            },
+            "label": "Open Models"
+          },
+          "state": "empty",
+          "title": "See what is in memory"
+        },
+        "memory": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "memory",
+            "percent": 25,
+            "pressure": "normal",
+            "tone": "neutral",
+            "total": 17179869184,
+            "used": 4294967296,
+            "vram": null
+          }
+        },
+        "recentErrors": {
+          "calm": true,
+          "detail": "In the last day",
+          "next": {
+            "action": {
+              "page": "requests",
+              "type": "openPage"
+            },
+            "label": "Open Requests"
+          },
+          "state": "empty",
+          "title": "No errors"
+        },
+        "server": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "engine": {
+              "kind": "ready"
+            },
+            "kind": "server",
+            "port": 11435,
+            "state": "serving"
+          }
+        },
+        "updates": {
+          "calm": true,
+          "detail": "Checked 2 h ago",
+          "next": {
+            "action": {
+              "page": "models",
+              "type": "openPage"
+            },
+            "label": "Open Models"
+          },
+          "state": "empty",
+          "title": "Models are up to date"
+        }
+      },
+      "header": {
+        "canReleaseMemory": false,
+        "serving": "pause",
+        "status": {
+          "kind": "serving",
+          "port": 11435
+        }
+      },
+      "notice": null
+    },
+    "paused": {
+      "byKind": {
+        "activity": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "activity",
+            "running": 1,
+            "tokensPerSec": 0,
+            "waiting": 0
+          }
+        },
+        "downloads": {
+          "cancel": {
+            "action": {
+              "id": "d1",
+              "type": "cancelDownload"
+            },
+            "label": "Cancel download"
+          },
+          "last": null,
+          "phase": "Downloading · 12 MB/s",
+          "progress": {
+            "fraction": {
+              "done": 900,
+              "total": 2000,
+              "unit": "MB"
+            }
+          },
+          "state": "working",
+          "title": "Downloading Llama 3.2 3B Q4_K_M"
+        },
+        "loadedModels": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "bytes": 8589934592,
+            "kind": "loadedModels",
+            "more": 0,
+            "rows": [
+              {
+                "active": 1,
+                "bytes": 5368709120,
+                "id": "qwen3-8b",
+                "name": "Qwen3 8B Q4_K_M",
+                "pinned": false,
+                "state": "busy"
+              },
+              {
+                "active": 0,
+                "bytes": 3221225472,
+                "id": "gemma3-4b",
+                "name": "Gemma 3 4B Q5_K_M",
+                "pinned": false,
+                "state": "ready"
+              }
+            ],
+            "total": 2
+          }
+        },
+        "memory": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "memory",
+            "percent": 59,
+            "pressure": "normal",
+            "tone": "neutral",
+            "total": 34359738368,
+            "used": 20401094656,
+            "vram": {
+              "busyPercent": 38,
+              "percent": 58,
+              "tone": "neutral",
+              "total": 12884901888,
+              "used": 7516192768
+            }
+          }
+        },
+        "recentErrors": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "recentErrors",
+            "more": 0,
+            "rows": [
+              {
+                "atMs": 1799999280000,
+                "id": "e1",
+                "message": "A chat request to Qwen3 8B failed: the context was full."
+              }
+            ]
+          }
+        },
+        "server": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "engine": {
+              "kind": "ready"
+            },
+            "kind": "server",
+            "port": 11435,
+            "state": "paused"
+          }
+        },
+        "updates": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "count": 2,
+            "kind": "updates",
+            "summary": "A better quantisation of Qwen3 8B is available."
+          }
+        }
+      },
+      "header": {
+        "canReleaseMemory": true,
+        "serving": "resume",
+        "status": {
+          "kind": "paused"
+        }
+      },
+      "notice": null
+    },
+    "worst": {
+      "byKind": {
+        "activity": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "activity",
+            "running": 3,
+            "tokensPerSec": 0,
+            "waiting": 12
+          }
+        },
+        "downloads": {
+          "cancel": {
+            "action": {
+              "id": "d1",
+              "type": "cancelDownload"
+            },
+            "label": "Cancel download"
+          },
+          "last": null,
+          "phase": "Downloading · 25 MB/s",
+          "progress": {
+            "fraction": {
+              "done": 9000,
+              "total": 18000,
+              "unit": "MB"
+            }
+          },
+          "state": "working",
+          "title": "Downloading Qwen3 Coder 30B A3B Instruct Q4_K_M"
+        },
+        "loadedModels": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "bytes": 36507222016,
+            "kind": "loadedModels",
+            "more": 3,
+            "rows": [
+              {
+                "active": 2,
+                "bytes": 13958643712,
+                "id": "a",
+                "name": "Qwen3 Coder 30B A3B Instruct Q4_K_M",
+                "pinned": false,
+                "state": "busy"
+              },
+              {
+                "active": 0,
+                "bytes": 9663676416,
+                "id": "b",
+                "name": "Gemma 3 27B Instruct QAT",
+                "pinned": false,
+                "state": "ready"
+              }
+            ],
+            "total": 5
+          }
+        },
+        "memory": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "memory",
+            "percent": 97,
+            "pressure": "critical",
+            "tone": "bad",
+            "total": 17179869184,
+            "used": 16642998272,
+            "vram": {
+              "busyPercent": 97,
+              "percent": 99,
+              "tone": "bad",
+              "total": 8589934592,
+              "used": 8485076992
+            }
+          }
+        },
+        "recentErrors": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "kind": "recentErrors",
+            "more": 1,
+            "rows": [
+              {
+                "atMs": 1799999940000,
+                "id": "e1",
+                "message": "The engine for Qwen3 Coder 30B crashed three times and was given up on."
+              },
+              {
+                "atMs": 1799999280000,
+                "id": "e2",
+                "message": "A chat request from Debrief failed: the model did not fit in memory."
+              }
+            ]
+          }
+        },
+        "server": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "engine": {
+              "count": 1,
+              "kind": "failed"
+            },
+            "kind": "server",
+            "port": 11435,
+            "state": "paused"
+          }
+        },
+        "updates": {
+          "asOf": 1800000000000,
+          "staleSince": null,
+          "state": "ready",
+          "value": {
+            "count": 12,
+            "kind": "updates",
+            "summary": "A newer revision of Qwen3 Coder 30B A3B Instruct is available."
+          }
+        }
+      },
+      "header": {
+        "canReleaseMemory": true,
+        "serving": "resume",
+        "status": {
+          "count": 1,
+          "kind": "problems"
+        }
+      },
+      "notice": {
+        "action": {
+          "action": {
+            "page": "dashboard",
+            "type": "openPage"
+          },
+          "label": "Review"
+        },
+        "detail": "Review in Pitwall.",
+        "title": "2 apps want to pair",
+        "tone": "info"
+      }
+    }
+  },
+  "shape": [
+    {
+      "kind": "server",
+      "rows": 0
+    },
+    {
+      "kind": "activity",
+      "rows": 0
+    },
+    {
+      "kind": "memory",
+      "rows": 0
+    },
+    {
+      "kind": "loadedModels",
+      "rows": 2
+    },
+    {
+      "kind": "downloads",
+      "rows": 2
+    },
+    {
+      "kind": "updates",
+      "rows": 0
+    },
+    {
+      "kind": "recentErrors",
+      "rows": 2
+    }
+  ],
+  "view": {
+    "builtinPresets": [],
+    "canUndo": false,
+    "catalogue": {
+      "kinds": [
+        {
+          "icon": "pw:server",
+          "kind": "server",
+          "maxInstances": 1,
+          "refresh": "live",
+          "spans": [
+            1,
+            2
+          ],
+          "summary": "Whether the server is serving, and its engines are healthy",
+          "title": "Server"
+        },
+        {
+          "icon": "pw:bolt",
+          "kind": "activity",
+          "maxInstances": 1,
+          "refresh": "live",
+          "spans": [
+            1,
+            2
+          ],
+          "summary": "Chats running now, the queue and tokens per second",
+          "title": "Activity"
+        },
+        {
+          "icon": "pw:memory",
+          "kind": "memory",
+          "maxInstances": 1,
+          "refresh": "live",
+          "spans": [
+            2
+          ],
+          "summary": "RAM and video memory in use, and the pressure",
+          "title": "Memory"
+        },
+        {
+          "icon": "pw:models",
+          "kind": "loadedModels",
+          "maxInstances": 1,
+          "refresh": "live",
+          "spans": [
+            2
+          ],
+          "summary": "The models in memory and what each one holds",
+          "title": "Loaded models"
+        },
+        {
+          "icon": "pw:download",
+          "kind": "downloads",
+          "maxInstances": 1,
+          "refresh": "live",
+          "spans": [
+            2
+          ],
+          "summary": "Model and engine downloads in progress",
+          "title": "Downloads"
+        },
+        {
+          "icon": "pw:sparkles",
+          "kind": "updates",
+          "maxInstances": 1,
+          "refresh": "onChange",
+          "spans": [
+            1,
+            2
+          ],
+          "summary": "Newer versions of the models you downloaded",
+          "title": "Updates"
+        },
+        {
+          "icon": "pw:alert",
+          "kind": "recentErrors",
+          "maxInstances": 1,
+          "refresh": "onChange",
+          "spans": [
+            2
+          ],
+          "summary": "What failed in the last day",
+          "title": "Recent errors"
+        }
+      ],
+      "surface": {
+        "columns": 2,
+        "id": "popover",
+        "maxPlacements": 7,
+        "maxUserPresets": 0,
+        "minPlacements": 0,
+        "noun": "popup"
+      }
+    },
+    "editable": true,
+    "layout": {
+      "placements": [
+        {
+          "id": "server",
+          "span": 1,
+          "widget": "server"
+        },
+        {
+          "id": "activity",
+          "span": 1,
+          "widget": "activity"
+        },
+        {
+          "id": "memory",
+          "span": 2,
+          "widget": "memory"
+        },
+        {
+          "id": "loaded-models",
+          "span": 2,
+          "widget": "loadedModels"
+        }
+      ],
+      "presets": [],
+      "version": 1
+    },
+    "notes": []
+  }
+}

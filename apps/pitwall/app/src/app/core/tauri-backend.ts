@@ -46,12 +46,16 @@ import type {
   UpdateNotice,
   UpdateSchedule,
 } from './api.types';
+import type { LoadingRows, PopoverHeader } from './generated/widgets';
+import type { PopoverEdit, PopoverPush, PopoverValues, PopoverView } from './widgets.types';
 import type { PitwallBackend, Unsubscribe } from './backend';
 import { parseJobEvent } from './job-wire';
 import { toCommandError } from './command-error';
 
 /** The Tauri event the app forwards every live update on. */
 export const LIVE_EVENT = 'pitwall://live';
+/** The Tauri event the app pushes the popup's layout, values and header on after any change. */
+export const POPOVER_EVENT = 'pitwall://popover';
 
 /** The Tauri primitives the backend uses, injectable so a spec can pin every command name and argument shape. */
 export interface TauriBridge {
@@ -117,6 +121,40 @@ export class TauriBackend implements PitwallBackend {
   }
   releaseMemory(): Promise<number> {
     return this.run('release_memory');
+  }
+  popoverView(): Promise<PopoverView> {
+    return this.run('popover_view');
+  }
+  popoverValues(): Promise<PopoverValues> {
+    return this.run('popover_values');
+  }
+  popoverHeader(): Promise<PopoverHeader> {
+    return this.run('popover_header');
+  }
+  popoverShape(): Promise<LoadingRows[]> {
+    return this.run('popover_shape');
+  }
+  editPopover(edit: PopoverEdit): Promise<PopoverView> {
+    return this.run('edit_popover', { edit });
+  }
+  onPopover(handler: (push: PopoverPush) => void): Unsubscribe {
+    let stopped = false;
+    let unlisten: (() => void) | null = null;
+    this.bridge
+      .listen<PopoverPush>(POPOVER_EVENT, (push) => {
+        if (!stopped) handler(push);
+      })
+      .then(
+        (u) => {
+          if (stopped) u();
+          else unlisten = u;
+        },
+        () => undefined,
+      );
+    return () => {
+      stopped = true;
+      unlisten?.();
+    };
   }
   cacheInfo(): Promise<CacheInfo> {
     return this.run('cache_info');
