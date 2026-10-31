@@ -88,6 +88,8 @@ pub struct StartWait {
     vanished: u32,
     first_runs: Option<u32>,
     noted: bool,
+    /// The job's process on the last look that had one.
+    pid: Option<u32>,
 }
 
 impl Default for StartWait {
@@ -111,6 +113,7 @@ impl StartWait {
             vanished: 0,
             first_runs: None,
             noted: false,
+            pid: None,
         }
     }
 
@@ -152,6 +155,14 @@ impl StartWait {
                     "the service keeps exiting and being restarted instead of staying up (observed: {seen})"
                 ));
             }
+        }
+        // The OS started the job again as another process: what the judge counted belongs to the one that is gone. The run
+        // count and the poll count are the whole start's and stay.
+        if let Some(pid) = f.pid {
+            if self.pid.is_some_and(|old| old != pid) {
+                self.judge = StartJudge::new(patience(self.tick), "the background service");
+            }
+            self.pid = Some(pid);
         }
         // A job the OS has not started yet (or between restarts) is `Paused`: it spends no patience.
         let liveness = if running {
@@ -291,6 +302,50 @@ mod tests {
     }
 
     #[test]
+    fn a_new_process_of_the_job_starts_the_judge_afresh_but_keeps_the_crash_count() {
+        let with_pid = |pid: u32| {
+            let mut o = running(5);
+            o.facts.pid = Some(pid);
+            o
+        };
+        // 15 idle polls of one process, 15 of the process launchd restarted it as: each is under the idle patience.
+        let mut w = StartWait::new();
+        for pid in [7, 8] {
+            for i in 0..15 {
+                let v = w.observe(&with_pid(pid));
+                assert!(
+                    !matches!(v, StartVerdict::Failed(_)),
+                    "pid {pid} poll {i}: {v:?}"
+                );
+            }
+        }
+        // The same process for 30 polls is stuck.
+        let mut w = StartWait::new();
+        let stuck = (0..30).any(|_| matches!(w.observe(&with_pid(7)), StartVerdict::Failed(_)));
+        assert!(stuck);
+        // A look without a pid (the job between runs) does not count as a new process.
+        let mut w = StartWait::new();
+        let mut failed = false;
+        for i in 0..30 {
+            let mut o = with_pid(7);
+            if i % 2 == 1 {
+                o.facts.pid = None;
+            }
+            failed |= matches!(w.observe(&o), StartVerdict::Failed(_));
+        }
+        assert!(failed, "a missing pid is not a restart");
+        // The run count survives the restart: the crash loop is still seen.
+        let mut w = StartWait::new();
+        w.observe(&pending());
+        w.observe(&with_pid(7));
+        let mut o = pending();
+        o.facts.runs = Some(1 + CRASH_RUNS);
+        o.facts.last_exit = Some(3);
+        o.facts.pid = Some(9);
+        assert!(matches!(w.observe(&o), StartVerdict::Failed(_)));
+    }
+
+    #[test]
     fn a_pending_job_says_it_is_still_working_once_after_the_note_threshold() {
         let mut w = StartWait::new();
         let mut notes = Vec::new();
@@ -363,10 +418,9 @@ mod tests {
         let mut why = None;
         for polls in 1..=START_CEILING_POLLS {
             if let StartVerdict::Failed(m) = w.observe(&blind) {
-                assert!(
-                    polls < START_CEILING_POLLS,
-                    "the judge ends it, not the backstop"
-                );
+                // An unreadable CPU time is blind from the first poll (300 s of 3 s polls); a time that was only not
+                // read this poll would be forgiven for its first two.
+                assert_eq!(polls, 100, "the judge ends it, not the backstop");
                 why = Some(m);
                 break;
             }
