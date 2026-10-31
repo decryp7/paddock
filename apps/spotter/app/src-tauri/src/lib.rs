@@ -113,6 +113,12 @@ paddock_commands::command_table! {
     Query [WINDOW] => commands::get_settings,
     /// Saves the settings.
     Mutation [WINDOW] => commands::save_settings,
+    /// The tray popup's widget layout (the popup and the Settings page draw it).
+    Query [WINDOW | TRAY] => commands::popover_view,
+    /// Changes the tray popup's widget layout, one edit at a time.
+    Mutation [WINDOW] => commands::edit_popover,
+    /// What the tray popup's widgets show now.
+    Query [WINDOW | TRAY] => commands::popover_values,
     /// Pauses notifications.
     Mutation [MAIN | DIALOG] => commands::pause_notifications,
     /// Whether Spotter starts at log-in.

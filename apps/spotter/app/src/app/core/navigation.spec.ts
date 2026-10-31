@@ -1,10 +1,10 @@
-import { isShownRoute, listenForRoutes } from './navigation';
+import { isShownRoute, listenForRoutes, SETTINGS_ROUTE } from './navigation';
 import { MockBackend } from './mock-backend';
 
 describe('routes the tray asks the main window for', () => {
-  it('accepts the dashboard, the watches and one watch, and nothing else', () => {
-    for (const ok of ['/', '/watches', '/watches/new', '/watches/w-3', '/watches/w-3/edit']) expect(isShownRoute(ok), ok).toBe(true);
-    for (const bad of ['/settings', '//evil', '/watches/../x', 'https://x.example', '/watches/a b', `/watches/${'a'.repeat(300)}`]) expect(isShownRoute(bad), bad).toBe(false);
+  it('accepts the dashboard, the watches, one watch and Settings, and nothing else', () => {
+    for (const ok of ['/', '/watches', '/watches/new', '/watches/w-3', '/watches/w-3/edit', SETTINGS_ROUTE]) expect(isShownRoute(ok), ok).toBe(true);
+    for (const bad of ['/settings/x', '/settingsx', '//evil', '/watches/../x', 'https://x.example', '/watches/a b', `/watches/${'a'.repeat(300)}`]) expect(isShownRoute(bad), bad).toBe(false);
   });
 
   it('shows a route the tray sends while the window is open, and ignores an unknown one', async () => {
@@ -12,7 +12,7 @@ describe('routes the tray asks the main window for', () => {
     const shown: string[] = [];
     const stop = await listenForRoutes(backend, (r) => shown.push(r));
     backend.navigate('/watches/w-3');
-    backend.navigate('/settings');
+    backend.navigate('/elsewhere');
     expect(shown).toEqual(['/watches/w-3']);
     stop();
     backend.navigate('/watches');

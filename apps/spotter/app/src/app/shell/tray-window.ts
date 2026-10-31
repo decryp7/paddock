@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
+import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 import { BACKEND } from '../core/backend';
 import { createBackend } from '../core/backend-factory';
 import { TrayPage } from '../features/tray/tray-page';
@@ -20,5 +21,5 @@ class TrayRoot {}
  */
 export function bootTrayWindow(): Promise<unknown> {
   document.documentElement.classList.add('pd-tray');
-  return bootstrapApplication(TrayRoot, { providers: [provideIcons(), provideSpotterAppearance(), { provide: BACKEND, useFactory: createBackend }] });
+  return bootstrapApplication(TrayRoot, { providers: [provideIcons(), providePaddockMaterial(), provideSpotterAppearance(), { provide: BACKEND, useFactory: createBackend }] });
 }
