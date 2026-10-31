@@ -241,7 +241,7 @@ import { CHANNELS_STYLES } from './styles';
                     <span>{{ t.otherAdd }}</span>
                     <input #otherInput type="text" autocomplete="off" spellcheck="false" data-testid="channel-event-other-input" [value]="otherText()" (input)="otherText.set($any($event.target).value)" (keydown.enter)="$event.preventDefault(); addOther()" />
                   </label>
-                  <button matButton="outlined" type="button" data-testid="channel-event-other-add" [disabled]="otherText().trim() === ''" (click)="addOther()">{{ t.otherAddButton }}</button>
+                  <button matButton="outlined" type="button" data-testid="channel-event-other-add" [disabled]="!hasOtherNames()" (click)="addOther()">{{ t.otherAddButton }}</button>
                 </div>
               </fieldset>
             </fieldset>
@@ -334,6 +334,8 @@ export class PdChannelsPage {
   /** Names the channel has that the app did not declare: kept, shown as removable chips. */
   protected readonly otherEvents = computed(() => unknownEvents(this.selected(), this.declared));
   protected readonly otherText = signal('');
+  /** Whether the add field holds at least one name (just commas or spaces is not one). */
+  protected readonly hasOtherNames = computed(() => tokens(this.otherText()).length > 0);
   /** The draft being edited, or null when no editor is open. */
   protected readonly draft = computed(() => (this.open() ? this.model() : null));
   private readonly open = signal(false);

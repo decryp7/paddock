@@ -6,7 +6,7 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### `paddock-channels`, `paddock-net` and the channels page: a home-network switch and a grouped event picker (additive)
 - `ChannelConfig.allow_lan: bool` (wire `allowLan`, serde default false, so files and engines from before it load unchanged), for
-  for a webhook, an ntfy server and an e-mail channel's SMTP host. With it on, validation accepts a private address (`paddock_net::host_may_be_lan`: an IP literal that `classify` calls `Lan`, or a
+  a webhook, an ntfy server and an e-mail channel's SMTP host. With it on, validation accepts a private address (`paddock_net::host_may_be_lan`: an IP literal that `classify` calls `Lan`, or a
   single-label / `.local` / `.lan` / `.home.arpa` / `.internal` / `.localdomain` name) and plain `http://` to it; with it off,
   such an address is refused (https too) and plain http stays for this computer only. Link-local (169.254/16, fe80::/10) stays
   unreachable: `paddock-net` classifies it `Never`. `PostRequest` has a new `lan` field; `EgressPoster` sends a `lan` channel

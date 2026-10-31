@@ -136,17 +136,7 @@ mod real {
                 .header(ContentType::TEXT_PLAIN)
                 .body(mail.body.clone())
                 .map_err(failed)?;
-            let tls = match mail.security {
-                Security::None => Tls::None,
-                s => {
-                    let params = TlsParameters::new(host.to_string()).map_err(unusable_name)?;
-                    if s == Security::Implicit {
-                        Tls::Wrapper(params)
-                    } else {
-                        Tls::Required(params)
-                    }
-                }
-            };
+            let tls = tls_mode(mail.security, host)?;
             let addrs = self.allowed(mail, host)?;
             let mut last = SendError::Connect(host.to_string());
             for addr in addrs {
@@ -171,6 +161,22 @@ mod real {
                 }
             }
             Err(last)
+        }
+    }
+
+    /// How the connection is secured. The certificate is verified against `host`, the name the user entered, never against the
+    /// address the connection is made to.
+    fn tls_mode(security: Security, host: &str) -> Result<Tls, SendError> {
+        match security {
+            Security::None => Ok(Tls::None),
+            s => {
+                let params = TlsParameters::new(host.to_string()).map_err(unusable_name)?;
+                Ok(if s == Security::Implicit {
+                    Tls::Wrapper(params)
+                } else {
+                    Tls::Required(params)
+                })
+            }
         }
     }
 
@@ -228,6 +234,36 @@ mod real {
             assert!(
                 matches!(unusable_name(()), SendError::Invalid(t) if t.contains("mail server"))
             );
+        }
+
+        #[test]
+        fn the_certificate_is_checked_against_the_host_name_in_both_tls_modes() {
+            // Checked on the parameters themselves: a platform verifier trusts no test certificate, and a checked-in one would
+            // expire. The connection goes to an address (see `send`); this is the name the certificate must match.
+            assert!(matches!(
+                tls_mode(Security::None, "mail.test"),
+                Ok(Tls::None)
+            ));
+            let domain = |t: Result<Tls, SendError>| match t {
+                Ok(Tls::Required(p) | Tls::Wrapper(p)) => p.domain().to_string(),
+                other => panic!("{other:?}"),
+            };
+            assert_eq!(
+                domain(tls_mode(Security::StartTls, "mail.test")),
+                "mail.test"
+            );
+            assert_eq!(
+                domain(tls_mode(Security::Implicit, "mail.test")),
+                "mail.test"
+            );
+            assert!(matches!(
+                tls_mode(Security::Implicit, "mail.test"),
+                Ok(Tls::Wrapper(_))
+            ));
+            assert!(matches!(
+                tls_mode(Security::StartTls, "mail.test"),
+                Ok(Tls::Required(_))
+            ));
         }
 
         #[test]

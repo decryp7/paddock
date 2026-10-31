@@ -996,7 +996,10 @@ let test = d.test_with(&draft, Some(&typed_password), "Spotter", &cancel);   // 
 - E-mail obeys the same policy: `LettreSender::new(egress)` asks `Egress::check_host` first (Offline mode refuses with nothing
   resolved or connected; the host must be public, or private only for an `allow_lan` channel within the policy's reach; every
   address is checked), then connects to the checked address, not to the name again (lettre takes an address string, and the
-  `TlsParameters` keep the host name for the certificate), so a name cannot rebind. A failed connect tries the next checked address.
+  `TlsParameters` keep the host name for the certificate), so a name cannot rebind. A failed connect tries the next checked address. A relay on this computer (`localhost`, 127.x) is judged by the same reach, so an
+  app that wants one builds its egress with `channel_policy(Reach::Loopback)`; with `Reach::Lan` or `Reach::Public` such a server
+  is refused at send time with a message that names the host (validation accepts `localhost`, as it does for webhooks, because
+  the policy is the app's and validation does not know it).
 - Retries: transient failures only (no connection, timeout, HTTP 408/425/429/5xx, a 4xx mail reply), at most 3 attempts by default
   (`RetryPolicy`, 5 at most), waits from `paddock_jobs::time::Backoff` (2 s doubling to 30 s), a server's `Retry-After` honoured up
   to that cap, every wait cancellable and on the injected `Clock` (tests use `FakeClock`). A bad configuration, a missing secret,
