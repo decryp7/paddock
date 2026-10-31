@@ -185,3 +185,35 @@ test('Widgets: Half and Full change a width and the volume select is the app con
   await page.getByRole('option', { name: 'Projects' }).click();
   await expect(chooser(page).getByRole('combobox', { name: /Volumes shown by disk/ })).toContainText('Projects');
 });
+
+test('Widgets: a scrolling popup with nothing focusable in it is still a named, focusable region (axe)', async ({ page }) => {
+  await open(page, 'dark');
+  await page.getByTestId('wgt-load').click();
+  const popup = page.getByTestId('wgt-popup');
+  await expect(popup.locator('section.pd-w[aria-busy=true]')).toHaveCount(5);
+  expect(await popup.locator('.pd-content button, .pd-content a, .pd-content input').count()).toBe(0);
+  const region = popup.locator('.pd-content');
+  await expect(region).toHaveAttribute('tabindex', '0');
+  await expect(region).toHaveAttribute('role', 'region');
+  await expect(region).toHaveAttribute('aria-label', 'Dyno content');
+  const results = await new AxeBuilder({ page }).include('[data-testid="wgt-popup"]').withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
+  expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+  // A popup that fits is not a focus stop.
+  await page.getByTestId('wgt-empty').click();
+  await expect(region).not.toHaveAttribute('tabindex', /.*/);
+});
+
+test('Widgets: presets are applied, saved and deleted, with Undo for an apply', async ({ page }) => {
+  await open(page, 'dark');
+  const c = chooser(page);
+  await c.getByRole('button', { name: 'Apply the Minimal preset' }).click();
+  await expect.poll(() => shownTitles(page)).toEqual(['Active alarms', 'CPU and memory']);
+  await page.locator('.mat-mdc-snack-bar-container').getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(() => shownTitles(page)).toHaveLength(5);
+  await c.getByLabel('Preset name').fill('Work');
+  await c.getByRole('button', { name: 'Save as preset' }).click();
+  await expect(c.getByRole('button', { name: 'Delete the Work preset' })).toBeVisible();
+  await expect(c.getByLabel('Preset name')).toHaveValue('');
+  await c.getByRole('button', { name: 'Delete the Work preset' }).click();
+  await expect(c.getByRole('button', { name: 'Delete the Work preset' })).toHaveCount(0);
+});
