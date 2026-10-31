@@ -55,9 +55,9 @@ impl PhaseLog {
 }
 
 /// More phase changes than this within [`FLAP_WINDOW`] is a flapping link: its lines are replaced by one summary per window.
-pub const FLAP_LIMIT: usize = 20;
+pub const FLAP_LIMIT: usize = 8;
 /// The window a flapping link is judged over.
-pub const FLAP_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+pub const FLAP_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// What the link tells the log about its phase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -386,19 +386,21 @@ mod tests {
         assert_eq!(debug_variant_name(&Req::Settings), "Settings");
     }
 
-    /// ADR D3: a link that flaps (connects and drops every second) must not write a line per change for ever.
+    /// ADR 0036 D3: a link that flaps (connects and drops every second) must not write a line per change for ever; more than 8 phase
+    /// changes in 10 s is flapping.
     #[test]
     fn a_flapping_link_is_summarised_once_per_window_instead_of_a_line_per_change() {
+        assert_eq!((FLAP_LIMIT, FLAP_WINDOW), (8, Duration::from_secs(10)), "ADR 0036: 8 changes per 10 s");
         let t0 = Instant::now();
         let mut log = GuardedPhaseLog::new(t0);
         let mut lines = Vec::new();
-        for k in 0..60u64 {
+        for k in 0..20u64 {
             let phase = if k % 2 == 0 {
                 Phase::Looking { seq: k }
             } else {
                 Phase::WaitingForService
             };
-            lines.extend(log.observe(&snap(phase), t0 + Duration::from_millis(500 * k)));
+            lines.extend(log.observe(&snap(phase), t0 + Duration::from_millis(400 * k)));
         }
         let changes = lines.iter().filter(|l| matches!(l, PhaseLine::Change(_))).count();
         let summaries = lines.iter().filter(|l| matches!(l, PhaseLine::Flapping { .. })).count();
