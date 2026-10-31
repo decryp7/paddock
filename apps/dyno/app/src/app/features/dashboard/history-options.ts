@@ -186,6 +186,19 @@ export function consumersOption(consumers: readonly Consumer[], t: ThemeTokens):
   };
 }
 
+/**
+ * Even steps for a byte axis from 0: a step of 1, 2, 2.5 or 5 (times a power of ten) of the largest binary unit the maximum reaches,
+ * so the ticks read 0, 100, 200, 300 GB and not 93.1, 186, 279, 373. `formatBytes` counts in 1024s.
+ */
+export function byteAxis(maxBytes: number): { max: number; interval: number } {
+  const top = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : 1;
+  const unit = 1024 ** Math.min(4, Math.max(0, Math.floor(Math.log(top) / Math.log(1024))));
+  const raw = top / unit / 4;
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const step = ([1, 2, 2.5, 5, 10].find((m) => m * pow >= raw) ?? 10) * pow * unit;
+  return { max: Math.ceil(top / step) * step, interval: step };
+}
+
 /** The line a disk's free space follows, then (when the engine forecasts it) a dashed line to the day it would be full. */
 export function diskTrendOption(trend: DiskTrend, t: ThemeTokens): EChartsCoreOption {
   const last = trend.points[trend.points.length - 1];
@@ -193,6 +206,7 @@ export function diskTrendOption(trend: DiskTrend, t: ThemeTokens): EChartsCoreOp
   const projection =
     last && typeof trend.forecast === 'object' ? [[last.at, last.free], [last.at + trend.forecast.fullInDays * day, 0]] : [];
   const color = t.chart[2]!;
+  const axis = byteAxis(Math.max(0, ...trend.points.map((p) => p.free)));
   return {
     animationDuration: 250,
     textStyle: { fontFamily: FONT },
@@ -209,10 +223,12 @@ export function diskTrendOption(trend: DiskTrend, t: ThemeTokens): EChartsCoreOp
         return p ? `${formatDate(p.axisValue)}<br/>${p.seriesName}: <b>${formatBytes(p.value[1])}</b> free` : '';
       },
     },
-    xAxis: { type: 'time', axisLine: { lineStyle: { color: t.border } }, axisTick: { show: false }, axisLabel: { ...axisText(t), hideOverlap: true, formatter: '{d} {MMM}' }, splitLine: { show: false } },
+    xAxis: { type: 'time', splitNumber: 5, minInterval: 7 * day, axisLine: { lineStyle: { color: t.border } }, axisTick: { show: false }, axisLabel: { ...axisText(t), hideOverlap: true, formatter: '{d} {MMM}' }, splitLine: { show: false } },
     yAxis: {
       type: 'value',
       min: 0,
+      max: axis.max,
+      interval: axis.interval,
       axisLabel: { ...axisText(t), formatter: (v: number) => formatBytes(v) },
       splitLine: { lineStyle: { color: t.chartGrid } },
     },

@@ -66,7 +66,10 @@ function point(at: number, now: number): HistoryPoint {
 /** Network changes, alerts and boots inside `[from, to]`. */
 function events(from: number, to: number, now: number): TimelineEvent[] {
   const out: TimelineEvent[] = [];
+  // The alerts of `demoAlerts` that fall in the day (the Recent events list shows them), and a network change.
   const fixed: TimelineEvent[] = [
+    { at: now - 52 * MIN, kind: 'alert', label: 'VirtualBox service keeps restarting' },
+    { at: now - 9 * HOUR, kind: 'network', label: 'Network changed: joined the Wi-Fi "Home"' },
     { at: now - 27 * HOUR, kind: 'alert', label: 'Memory pressure high' },
     { at: now - 52 * HOUR, kind: 'alert', label: 'Drive C: below 25% free' },
     { at: now - 4 * DAY, kind: 'alert', label: 'CPU reached 98 °C' },

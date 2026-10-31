@@ -88,8 +88,21 @@ impl IssueCentre {
     /// the moment a scheduled read can slip in (tests start one there).
     #[doc(hidden)]
     pub fn scan_with(&self, shared: &Shared, job: Option<&JobContext>, between: &dyn Fn()) -> Result<bool, JobError> {
+        self.scan_hooked(shared, job, between, &|| {})
+    }
+
+    /// [`scan_with`](Self::scan_with) and `after_read`, run once the sources have been read and before anything is stored: the
+    /// moment a read has its results but a store does not yet (tests hold the read there).
+    #[doc(hidden)]
+    pub fn scan_hooked(
+        &self,
+        shared: &Shared,
+        job: Option<&JobContext>,
+        between: &dyn Fn(),
+        after_read: &dyn Fn(),
+    ) -> Result<bool, JobError> {
         let mut first = true;
-        let since = loop {
+        let (since, running) = loop {
             // A read is already running: wait for it (a job) or leave it (the schedule).
             if let Some(j) = job {
                 if lock(&self.state).scanning {
@@ -123,22 +136,27 @@ impl IssueCentre {
                 return Ok(false);
             }
             st.scanning = true;
+            // The guard is made in the same critical section that sets the flag, so there is no moment in which the flag is up and
+            // nothing will bring it down. It only holds references; it takes the lock when it is dropped, after `st` is gone.
+            let running = RunningRead {
+                state: &self.state,
+                ended: &self.ended,
+            };
             let t = now();
-            break st.last_scan.map_or(t.minus(FIRST_DAYS * DAY), |l| l.minus(OVERLAP_MS));
+            break (st.last_scan.map_or(t.minus(FIRST_DAYS * DAY), |l| l.minus(OVERLAP_MS)), running);
         };
         let until = now();
-        // The read stays "running" until its results are stored: the flag comes down (and the waiters are woken) only then, and on
-        // every way out, a cancel and a panic included. A waiter that left earlier answered from a store that did not have them yet.
-        let running = RunningRead {
-            state: &self.state,
-            ended: &self.ended,
-        };
+        // The read stays "running" until its results are stored: the flag comes down (and the waiters are woken) only when `running`
+        // is dropped, and on every way out, a cancel and a panic included. A waiter that left earlier answered from a store that did not
+        // have them yet.
         let (statuses, found) = self.read_all(job, since, until)?;
+        after_read();
         let found = collapse_across_sources(found);
         record(shared, &found, until);
         let mut st = lock(&self.state);
         st.statuses = statuses;
         st.last_scan = Some(until);
+        // `st` first: dropping `running` takes this same lock to bring the flag down, and the lock is not re-entrant.
         drop(st);
         drop(running);
         Ok(true)

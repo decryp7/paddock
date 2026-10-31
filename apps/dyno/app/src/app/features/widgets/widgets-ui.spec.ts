@@ -37,6 +37,21 @@ describe('dy-widget', () => {
     expect(hero.getAttribute('data-tone')).toBe('ok');
   });
 
+  it('says why a graph has no reading instead of drawing a history for it', () => {
+    env();
+    const f = TestBed.createComponent(WidgetView);
+    f.componentRef.setInput('placement', place('graph', 'diskActivity'));
+    f.componentRef.setInput('metricReading', { value: null, text: '—', unit: '', percent: null, tone: 'ok', reason: "The disk's busy time is not reported here." });
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('dy-sparkline')).toBeNull();
+    expect(el.querySelector('.note')?.textContent).toContain('not reported here');
+    f.componentRef.setInput('metricReading', { value: 40, text: '40', unit: '%', percent: 40, tone: 'ok', reason: null });
+    f.detectChanges();
+    expect(el.querySelector('dy-sparkline')).not.toBeNull();
+    expect(el.querySelector('.note')).toBeNull();
+  });
+
   it('draws every kind from live data without errors', () => {
     env();
     for (const [kind, metric] of [['bigNumber', 'cpuTotal'], ['graph', 'networkDown'], ['bars', 'memory'], ['ring', 'memory'], ['heatmap', 'cpuPerCore'], ['topProcesses', 'memory'], ['issues', 'cpuTotal'], ['health', 'cpuTotal'], ['bigNumber', 'fan'], ['graph', 'fan'], ['cpu', 'cpuTotal'], ['diagnosis', 'cpuTotal'], ['events', 'cpuTotal'], ['history', 'cpuTotal'], ['consumers', 'cpuTotal'], ['diskTrend', 'diskFree']] as const) {

@@ -26,11 +26,13 @@ struct Gate {
     open: Mutex<bool>,
     cv: Condvar,
     waiting: Mutex<u32>,
+    /// Signalled when a caller arrives, so a test parks instead of spinning.
+    arrived: Condvar,
 }
 
 impl Gate {
     fn pass(&self) {
-        *self.waiting.lock().unwrap() += 1;
+        self.arrive();
         let mut open = self.open.lock().unwrap();
         while !*open {
             open = self.cv.wait(open).unwrap();
@@ -45,12 +47,14 @@ impl Gate {
     /// Tells a waiting test that a caller got this far, without holding the caller.
     fn arrive(&self) {
         *self.waiting.lock().unwrap() += 1;
+        self.arrived.notify_all();
     }
 
     /// Returns when `n` callers have reached the gate.
     fn wait_for_callers(&self, n: u32) {
-        while *self.waiting.lock().unwrap() < n {
-            std::thread::yield_now();
+        let mut waiting = self.waiting.lock().unwrap();
+        while *waiting < n {
+            waiting = self.arrived.wait(waiting).unwrap();
         }
     }
 }
@@ -516,49 +520,30 @@ fn a_rescan_waits_for_the_scheduled_read_instead_of_answering_with_the_old_state
     );
 }
 
-/// The read that ends releases its waiters only after its results are stored: a rescan that waited for it answers with them. The
-/// store is held here, so the scheduled read finishes reading its sources and then waits to store; a second caller must still find
-/// the read running. Before the fix the flag came down (and the waiters were woken) before the store, so a second caller started a
-/// read of its own, and a waiting rescan could answer with an empty store.
+/// A read that has its results but has not stored them is still running: a second caller finds it running and leaves at once, and a
+/// rescan that waits for it answers with what it stored. The read is held between its sources and the store (`scan_hooked`), so the
+/// moment is exact. Before the fix the flag came down (and the waiters were woken) before the store, so the second caller started a
+/// read of its own and a waiting rescan could answer from an empty store.
 #[test]
 fn a_running_read_stays_running_until_its_results_are_stored() {
-    let gate = Arc::new(Gate::default());
-    let h = Harness::start(slow_issues(&gate));
+    let sources = Arc::new(Gate::default());
+    sources.open();
+    let h = Harness::start(slow_issues(&sources));
     let shared = h.shared();
-    let store_held = shared.core.lock().unwrap();
-    gate.open();
+    let held = Arc::new(Gate::default());
     let scheduled = {
-        let s = shared.clone();
-        std::thread::spawn(move || s.issues.scan(&s, None))
+        let (s, held) = (shared.clone(), held.clone());
+        std::thread::spawn(move || s.issues.scan_hooked(&s, None, &|| {}, &|| held.pass()))
     };
-    // Both sources have been entered: the scheduled read is at its last source or past it, and storing needs the held store.
-    gate.wait_for_callers(2);
-    let (tx, rx) = std::sync::mpsc::channel();
-    let second = {
-        let s = shared.clone();
-        std::thread::spawn(move || {
-            let r = s.issues.scan(&s, None);
-            let _ = tx.send(r.is_ok_and(|stored| stored));
-        })
-    };
-    // Either the second caller sees the read still running and leaves at once, or it starts a read of its own and reaches a source
-    // (a third caller at the gate). Exactly one of the two happens, so this waits on no clock.
-    let started_own_read = loop {
-        if let Ok(own) = rx.try_recv() {
-            break own;
-        }
-        if *gate.waiting.lock().unwrap() >= 3 {
-            break true;
-        }
-        std::thread::yield_now();
-    };
-    drop(store_held);
+    // The scheduled read has read both sources and waits before storing them.
+    held.wait_for_callers(1);
+    assert!(shared.issues.never_scanned(), "nothing is stored yet");
     assert!(
-        !started_own_read,
-        "the first read had not stored its results yet, so it was still running: a second caller must not start another read"
+        !shared.issues.scan(&shared, None).unwrap(),
+        "the read has not stored its results, so it is still running: a second caller leaves it alone"
     );
+    held.open();
     assert!(scheduled.join().unwrap().unwrap());
-    second.join().unwrap();
     assert!(!shared.issues.never_scanned());
 }
 

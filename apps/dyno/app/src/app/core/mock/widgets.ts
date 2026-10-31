@@ -433,9 +433,41 @@ export function mockWidgetChoices(): WidgetChoices {
   };
 }
 
-/** A reading of `query` from the mock's numbers (a plausible imitation: only CPU and memory have values). */
-export function mockMetricReading(query: ReadingQuery, system: { cpu: number; memory: number; battery?: number | string; gpu?: number | string }): MetricReading {
-  const raw = query.metric === 'cpuTotal' ? system.cpu : query.metric === 'memory' ? system.memory : query.metric === 'battery' ? system.battery : query.metric === 'gpuLoad' ? system.gpu : undefined;
+/** The numbers of the mock's live sample that its metric readings imitate. */
+export interface MockSystem {
+  cpu: number;
+  memory: number;
+  battery?: number | string;
+  gpu?: number | string;
+  /** The disk's busy percentage, or why it is not reported. */
+  diskBusy?: number | string;
+  /** The first volume's free share, in percent. */
+  diskFree?: number;
+  rxBps?: number;
+  txBps?: number;
+}
+
+/** A rate the way the engine words it (`rate_reading`): one decimal above a kilobyte, a unit that fits. */
+function rateReading(bps: number, query: ReadingQuery): MetricReading {
+  const v = Number.isFinite(bps) ? Math.max(0, bps) : 0;
+  const [text, unit] = v >= 1e9 ? [(v / 1e9).toFixed(1), 'GB/s'] : v >= 1e6 ? [(v / 1e6).toFixed(1), 'MB/s'] : v >= 1e3 ? [(v / 1e3).toFixed(1), 'KB/s'] : [v.toFixed(0), 'B/s'];
+  const { warning, critical } = query.thresholds;
+  const tone = critical !== null && v >= critical ? 'bad' : warning !== null && v >= warning ? 'warn' : 'ok';
+  return { value: v, text, unit, percent: null, tone, reason: null };
+}
+
+/** A reading of `query` from the mock's numbers (a plausible imitation of the engine's `read_metric`; a metric the mock has no number for says so). */
+export function mockMetricReading(query: ReadingQuery, system: MockSystem): MetricReading {
+  if (query.metric === 'networkDown' && system.rxBps !== undefined) return rateReading(system.rxBps, query);
+  if (query.metric === 'networkUp' && system.txBps !== undefined) return rateReading(system.txBps, query);
+  const raw =
+    query.metric === 'cpuTotal' ? system.cpu
+    : query.metric === 'memory' ? system.memory
+    : query.metric === 'battery' ? system.battery
+    : query.metric === 'gpuLoad' ? system.gpu
+    : query.metric === 'diskActivity' ? system.diskBusy
+    : query.metric === 'diskFree' ? system.diskFree
+    : undefined;
   if (typeof raw === 'string') return { value: null, text: '—', unit: '', percent: null, tone: 'ok', reason: raw };
   const value = raw ?? null;
   if (value === null) return { value: null, text: '—', unit: '', percent: null, tone: 'ok', reason: 'The mock has no live reading for this metric.' };

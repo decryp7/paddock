@@ -108,11 +108,15 @@ describe('OS differences', () => {
     const d = await make({ os: 'macos' }).whySlow();
     expect(JSON.stringify(d)).not.toMatch(/Drive C:|\.exe/);
   });
-  it('history disk trends use the OS mount points off Windows', async () => {
+  it('history disk trends name only the disks the machine has off Windows', async () => {
     const h = await make({ os: 'macos' }).history('week', null);
-    expect(h.diskTrends[0]!.disk).toBe('/');
+    expect(h.diskTrends.map((t) => t.disk)).toEqual(['Macintosh HD']);
     const w = await make({ os: 'windows' }).history('week', null);
-    expect(w.diskTrends[0]!.disk).not.toBe('/');
+    expect(w.diskTrends.map((t) => t.disk)).toEqual(['C:', 'D:']);
+  });
+  it('the day of history holds the alerts and the network change the dashboard lists', async () => {
+    const h = await make({ os: 'macos' }).history('day', null);
+    expect(h.events.map((e) => e.kind)).toEqual(expect.arrayContaining(['alert', 'network']));
   });
   it('a desktop has no battery, temperatures or fans', () => {
     const s = make({ machine: 'desktop' }).liveUpdate('summary').system;

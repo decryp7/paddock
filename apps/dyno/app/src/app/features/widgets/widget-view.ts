@@ -75,10 +75,12 @@ const ICON: Record<DashboardKind, IconName> = {
       }
       @case ('graph') {
         <div class="hero" [attr.data-tone]="reading().tone"><b><dy-animated-number [value]="reading().text" /></b><small>{{ reading().unit }}</small></div>
-        @if (series(); as s) {
+        @if (reading().reason; as why) {
+          <p class="note">{{ why }}</p>
+        } @else if (series(); as s) {
           <dy-sparkline [values]="s.values" [values2]="s.values2" [max]="percent() ? 100 : null" [zoom]="zoomed() && percent()" [fill]="widget().options.fill" [color]="accent()" color2="var(--text-3)" [label]="title() + ' over the last minute'" style="--spark-h: 48px" />
         } @else {
-          <p class="note">{{ reading().reason ?? 'No live history is kept for this metric.' }}</p>
+          <p class="note">No live history is kept for this metric.</p>
         }
       }
       @case ('bars') {

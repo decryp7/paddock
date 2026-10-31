@@ -1,4 +1,4 @@
-import { MockWidgets, mockWidgetOptionsFromUrl } from './widgets';
+import { MockWidgets, mockMetricReading, mockWidgetOptionsFromUrl } from './widgets';
 
 /** A `Storage` in memory (the unit tests never touch the real one). */
 function memory(): Storage {
@@ -105,5 +105,22 @@ describe('MockWidgets popup values', () => {
   it('reads the switches from the URL and ignores nonsense', () => {
     expect(mockWidgetOptionsFromUrl('?popup=diskSpace:error,network:bogus,nope:empty&agent=stopped')).toEqual({ popup: { diskSpace: 'error' }, agentStopped: true });
     expect(mockWidgetOptionsFromUrl('')).toEqual({ popup: {}, agentStopped: false });
+  });
+});
+
+describe('mockMetricReading', () => {
+  const query = (metric: string) => ({ metric, thresholds: { warning: null, critical: null } }) as unknown as Parameters<typeof mockMetricReading>[0];
+  const system = { cpu: 20, memory: 50, diskBusy: 35, diskFree: 40, rxBps: 2_500_000, txBps: 800 };
+
+  it('reads disk and network like the engine: a percentage, a rate with a fitting unit', () => {
+    expect(mockMetricReading(query('diskActivity'), system)).toMatchObject({ text: '35', unit: '%', percent: 35, reason: null });
+    expect(mockMetricReading(query('diskFree'), system)).toMatchObject({ text: '40', unit: '%', reason: null });
+    expect(mockMetricReading(query('networkDown'), system)).toMatchObject({ text: '2.5', unit: 'MB/s', percent: null, reason: null });
+    expect(mockMetricReading(query('networkUp'), system)).toMatchObject({ text: '800', unit: 'B/s' });
+  });
+
+  it('says why when the disk reports no busy time', () => {
+    const r = mockMetricReading(query('diskActivity'), { ...system, diskBusy: 'Not reported here.' });
+    expect(r).toMatchObject({ value: null, reason: 'Not reported here.' });
   });
 });

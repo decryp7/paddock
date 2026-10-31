@@ -77,9 +77,11 @@ import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
           <dy-async [loaded]="!!history.history()" [error]="history.error()" [empty]="noCores()" emptyTitle="No per-core history yet" emptyText="The agent records every core's load; the heatmap fills in as time passes." what="per-core history" [rows]="0" (retry)="history.load()">
             <div skeleton class="skeleton chart-skeleton"></div>
             <dy-chart [options]="option()" label="Heatmap of each core's load over time" [style.--chart-h]="chartHeight() + 'px'" />
-            <p class="legend">Dashed lines mark events:
-              @for (e of eventKinds(); track e) {<span class="ev">{{ e }}</span>}
-            </p>
+            @if (eventKinds().length) {
+              <p class="legend">Dashed lines mark events:
+                @for (e of eventKinds(); track e) {<span class="ev">{{ e }}</span>}
+              </p>
+            }
           </dy-async>
         </section>
       </div>

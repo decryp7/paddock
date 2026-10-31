@@ -660,8 +660,10 @@ export class MockBackend implements DynoBackend {
     return this.reply('history', () => {
       const h = mockHistory(range, end, this.now(), this.profile.cores, this.kinds);
       if (this.profile.os !== 'windows') {
+        // Only the disks this machine has, under their names (the shared demo data has two Windows drives).
         const disks = this.profile.disks(0);
-        h.diskTrends.forEach((t, i) => (t.disk = disks[i]?.mount ?? t.disk));
+        h.diskTrends = h.diskTrends.slice(0, Math.max(1, disks.length));
+        h.diskTrends.forEach((t, i) => (t.disk = i === 0 ? this.profile.primaryDisk : (disks[i]?.name ?? t.disk)));
       }
       return h;
     });
@@ -1204,7 +1206,13 @@ export class MockBackend implements DynoBackend {
       const memory = sys.memory.total > 0 ? (sys.memory.used / sys.memory.total) * 100 : 0;
       const battery = 'available' in sys.battery ? sys.battery.available.charge : sys.battery.unavailable;
       const gpu = 'available' in sys.gpu ? sys.gpu.available.utilization : sys.gpu.unavailable;
-      return queries.map((q) => mockMetricReading(q, { cpu: sys.cpu.total, memory, battery, gpu }));
+      const diskBusy = 'available' in sys.diskIo.busy ? sys.diskIo.busy.available : sys.diskIo.busy.unavailable;
+      const disk = sys.disks[0];
+      const rxBps = sys.network.reduce((n, i) => n + i.rxBps, 0);
+      const txBps = sys.network.reduce((n, i) => n + i.txBps, 0);
+      return queries.map((q) =>
+        mockMetricReading(q, { cpu: sys.cpu.total, memory, battery, gpu, diskBusy, diskFree: disk && disk.total > 0 ? (disk.free / disk.total) * 100 : undefined, rxBps, txBps }),
+      );
     });
   }
 
