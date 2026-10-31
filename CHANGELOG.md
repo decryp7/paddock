@@ -64,6 +64,66 @@ Conventional Commits; one semver tag for the whole repo.
   `StallCause::Idle` (stuck) and was killed or offered a Retry that killed it.
 - New `StallCause::Paused` (not stuck, `StallAction::Wait`): "{what} is paused by macOS or another app; it goes on when it is
   resumed." The judge says it once per pause; no tick counts and nothing resets while paused.
+
+### `@decryp7/paddock-ui/widgets`: widget area, frame and chooser (ADR 0035, WP-B)
+- New entry point: `pd-widget-area` (a layout's widgets on the surface grid, with the surface notice and the empty layout),
+  `pd-widget-frame` (loading, ready, empty, calm empty, error, working and stale, the loading twin made of the app's own template with
+  `pdSkeleton` parts), the `*pdWidget` and `*pdWidgetOption` template directives and `pd-widget-chooser` (CDK drag-drop, Alt/Option
+  Up, Down, Home and End keyboard reorder announced through `LiveAnnouncer`, a Material row menu, Half / Full toggles, "Added", the
+  limit and the undo snack bar driven by `canUndo`). It draws the generated types of `paddock-widgets` and emits `Edit` values.
+- The chooser shows presets when the surface has any (apply, save as, delete, with the undo toast on apply); `pdWidgetOf` types a kind
+  template's value. `pd-tray-popover`'s content becomes a named, focusable region (`tabindex="0"`, `role=region`) while it scrolls.
+- Review fixes: the undo toast opens once per edit the engine confirms (never for a view that merely arrives with `canUndo`); deleting a
+  preset asks first and moves focus on; kind icons are 14 / 16 px; the tray popover shows a fade and a thin scrollbar while it scrolls; menu
+  keys follow the platform (Option glyphs on a Mac, Alt elsewhere); moves are announced when the engine's view shows them; `error` input
+  for a refused edit; span is clamped to the columns; the one preview breakpoint is 880 px (the ADR's); `pd:check-circle`.
+- `pd:` glyphs `grip`, `arrow-up`, `arrow-down`, `to-top` and `to-bottom`. Gallery page "Widgets" with a Playwright spec (sizes,
+  loading height, focus order, keyboard reorder, the menu clear of the focus ring, axe in both themes and high contrast). Design guide
+  section 8 gains "Widget area and frame" and "Chooser"; "Tray popups" and "Skeletons" are amended.
+### Tokens: `--pd-meter-neutral`, `--pd-skeleton-raised`, `--pd-skeleton-raised-shine`
+- `--pd-meter-neutral` (dark #7c8593, light #6b7381) is a meter's neutral fill (disk space, quotas): 3:1 or more on surface-1, -2 and
+  -3 and against its track (`--pd-chart-grid` over surface-2 and -3). `--pd-chart-neutral-bar` stays for charts; on a surface-2 widget it measured 2.8:1 in dark (ADR 0035).
+- `--pd-skeleton-raised` and `--pd-skeleton-raised-shine` are the skeleton pair for content on a surface-2 fill, where
+  `--pd-skeleton` (the surface-2 colour) vanishes. `npm run test:tokens` checks both.
+### `paddock-widgets` and `@decryp7/paddock-ui/widgets`: the engine decides which empty state is calm (ADR 0035)
+- `WidgetState::Empty` gets `calm: bool` (serde default `false`; generated TypeScript `calm: boolean`): `true` means "all good" and is
+  drawn as one calm row with a success check, `false` means "nothing here yet" and is drawn with the info icon and the next step.
+- Breaking, before v1: `pdWidgetCalm` on `*pdWidget` and `[calm]` on `pd-widget-frame` are removed; the frame reads `calm` from the empty
+  state. Apps drop `[pdWidgetCalm]` and set `calm` in the engine.
+
+### `@decryp7/paddock-ui/widgets`: chooser polish
+- The keyboard hint wraps balanced (no lone last word). The "Add a widget" list scrolls inside a box (`max-height: 22rem`, focusable so the
+  keyboard scrolls it) and shows a bottom fade (tokens only) only while more rows wait below. The row icons stay 16 px, as in Dyno's chooser.
+
+### `paddock-widgets` and `@decryp7/paddock-ui/widgets`: indeterminate progress
+- `Progress::Unknown` (wire value `"unknown"`, TypeScript `"unknown"`): work whose size and finished count the engine does not know. The
+  working frame draws the title, the phase and an indeterminate bar with no count text (quiet under reduced motion like the other bars).
+  Code that matched `Progress` exhaustively gets a new arm; `progressText` returns an empty string for it.
+
+### `paddock-widgets`: new crate for widget layouts (ADR 0035, WP-A)
+- A pure crate for layouts of widgets on a surface (popover, dashboard, menu bar): the app's closed `Catalogue`, `Layout`
+  and `Placement`, limits on every read and edit, lenient versioned `read` and `Stored` (a layout that cannot be read gives the defaults and one note and is kept and written back unchanged until the first
+  edit, a newer one for good; a bad entry is dropped alone with a count), `Edit` and `apply` with one level
+  of undo, `LayoutView` for the chooser and the `WidgetState` envelope. Wire types are generated into
+  `ui/projects/paddock-ui/widgets/generated/widgets.ts`. Dyno's own copies of this model go in WP-C.
+### `paddock-diag`: the settings file in a report can be named
+- `builtin::Settings::file(name)` and `tauri::Setup::settings_file(name)` report that file of the config folder (masked, listed
+  under its own name) instead of `settings.json`; the shell demo passes `shell-settings.json`, so a report never shows an app's
+  own `settings.json` (another format) as the shell's. The default stays `settings.json`.
+
+### `paddock-shell`: the shell keeps its settings in its own file
+- `logging::install` and the shell's settings service read and write `shell-settings.json` in the app's config folder
+  (`logging::SHELL_SETTINGS_FILE`, `shell_settings_path`), not `settings.json`. An app that keeps its own `settings.json` in
+  that folder in another format (Dyno's agent) lost it on every start: the settings service took the flat file for a damaged
+  one and moved it aside as `settings.json.corrupt`. The log installer also reads the file the service writes now (the service
+  used Tauri's `app_config_dir`, the installer the app's folder: the saved log level was never found). The default settings
+  file moved with it; no migration (no app is released on the shell's settings yet, and the apps outside the shell never
+  used this path).
+
+### `paddock-service`: a pending or running launchd job is never stale; shared launchctl helpers
+- `JobReport::stale()` no longer counts "has a launch constraint and is not running": every healthy `SMAppService` job has `has LWCR`, so a pending job at login read as refused and the repair killed the healthy agent (Dyno B4; Pitwall 1.1 had the same logic). Stale now means found, not running, and spawn failed, exit 78 or "needs LWCR update". New `JobReport::needs_repair(answers)` (stale and the service does not answer) is the one decision for every app, and `JobReport::describe()` the observed state in words for logs and messages. Also affects `Job::Refused` in the launchd backend (a running job is never refused).
+- New `parse::launchctl_output` (stdout of a successful `launchctl` call through the `System` port, bounded and read while it runs; output past the cap comes back truncated) and new public module `launchctl` with `job_report` (`None` = launchd could not be asked, distinct from "does not know the job") and `bootout` (exit 3, 113 or "No such process" is success), moved out of the launchd backend. Pitwall uses them and drops its copies; Dyno and Pitcrew adopt them on their own branches.
+
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.

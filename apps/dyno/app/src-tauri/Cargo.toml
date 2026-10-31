@@ -25,6 +25,10 @@ dyno-ipc.workspace = true
 # Only for `Dirs`, `Discovery` and `service::Service` (the agent's per-user service registration); the app never links to
 # the sensors by calling them (ADR 0002: the agent measures, the app is a client).
 dyno-agent.workspace = true
+# The OS time zone for "Readings paused at 14:28" in the popup's agent notice (the agent already links it).
+dyno-platform.workspace = true
+# Widget layouts (family ADR 0035): the popup's layout and values, the menu bar items.
+paddock-widgets = { path = "../../../../crates/paddock-widgets" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -40,6 +44,8 @@ paddock-health = { path = "../../../../crates/paddock-health", features = ["taur
 paddock-jobs = { path = "../../../../crates/paddock-jobs", features = ["tauri"] }
 # The start judge, stall report and discovery-hint helpers (ADR 0031, rule 53).
 paddock-proc = { path = "../../../../crates/paddock-proc" }
+# The shared launchd readers and the repair decision (a pending or running job is never stale).
+paddock-service = { path = "../../../../crates/paddock-service" }
 paddock-settings = { path = "../../../../crates/paddock-settings", features = ["tauri"] }
 paddock-startup = { path = "../../../../crates/paddock-startup", features = ["tauri"] }
 paddock-updater = { path = "../../../../crates/paddock-updater", features = ["tauri", "install"] }

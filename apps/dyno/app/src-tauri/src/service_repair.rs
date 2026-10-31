@@ -67,65 +67,10 @@ pub fn service_supervises(status: RegistrationStatus, launchd_disabled: Option<b
     status == RegistrationStatus::Enabled && !disabled_in_login_items(status, launchd_disabled) && job.found
 }
 
-/// Reads `label`'s entry in the output of `launchctl print-disabled gui/<uid>`: `"label" => disabled` (older systems
-/// print `true`/`false`). `None` when the label is not listed.
-pub fn parse_print_disabled(output: &str, label: &str) -> Option<bool> {
-    let quoted = format!("\"{label}\"");
-    output.lines().find_map(|line| {
-        let rest = line.trim().strip_prefix(&quoted)?.trim_start().strip_prefix("=>")?;
-        match rest.trim() {
-            "disabled" | "true" => Some(true),
-            "enabled" | "false" => Some(false),
-            _ => None,
-        }
-    })
-}
-
-/// What `launchctl print gui/<uid>/<label>` says about the job.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct JobReport {
-    /// launchd knows the job at all (an empty report means it dropped it).
-    pub found: bool,
-    /// `state = running`.
-    pub running: bool,
-    /// `job state = spawn failed`.
-    pub spawn_failed: bool,
-    /// `last exit code = 78` (EX_CONFIG): launchd refused the program's code identity.
-    pub exit_config: bool,
-    /// `needs LWCR update`.
-    pub needs_lwcr_update: bool,
-    /// `has LWCR`: a launch constraint from the registered build is stored.
-    pub has_lwcr: bool,
-}
-
-/// Reads the report of `launchctl print` for the launch agent.
-pub fn parse_job(launchctl_print: &str) -> JobReport {
-    let mut job = JobReport::default();
-    for line in launchctl_print.lines().map(str::trim) {
-        if line.starts_with("state = ") {
-            job.found = true;
-            job.running = line == "state = running";
-        } else if line == "job state = spawn failed" {
-            job.spawn_failed = true;
-        } else if line.starts_with("last exit code = 78") {
-            job.exit_config = true;
-        } else if line.starts_with("properties = ") {
-            job.needs_lwcr_update = line.contains("needs LWCR update");
-            job.has_lwcr = line.contains("has LWCR");
-        }
-    }
-    job
-}
-
-impl JobReport {
-    /// Whether launchd holds a registration it can no longer start. macOS keeps the launch constraint of the build that
-    /// was registered; every ad-hoc signed build has another cdhash, so after an update launchd refuses the new binary
-    /// (spawn failed, exit 78 EX_CONFIG, has LWCR, "needs LWCR update" when it says so) until the job is replaced.
-    /// A job that holds a constraint and is not running counts too: the caller only asks when the agent is unreachable.
-    pub fn stale(&self) -> bool {
-        self.found && (self.spawn_failed || self.exit_config || self.needs_lwcr_update || (self.has_lwcr && !self.running))
-    }
-}
+// The parsers of `launchctl` output, the "is this job refused" decision and the bounded `launchctl` reader live in the
+// shared crate (one implementation for every app: it skips the nested coalition blocks macOS 26 prints, never calls a
+// pending or running job stale, and reads a long listing while the tool runs).
+pub use paddock_service::parse::{launchctl_output, parse_job, parse_print_disabled, JobReport};
 
 /// Why a repair runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,7 +121,7 @@ pub fn plan(o: &Observed) -> Plan {
     if o.requested {
         return Plan::Repair(RepairReason::Requested);
     }
-    if o.job.stale() && !o.answers {
+    if o.job.needs_repair(o.answers) {
         return Plan::Repair(RepairReason::Stale);
     }
     if o.registered_version != Some(o.current_version) {
@@ -208,8 +153,8 @@ pub trait RepairOps {
     fn bootout(&mut self) -> Result<(), String>;
     /// Whether launchd no longer knows the job.
     fn job_gone(&mut self) -> bool;
-    /// Whether launchd now reports the registration as stale ([`JobReport::stale`]).
-    fn registration_stale(&mut self) -> bool;
+    /// What launchd now reports about the job ([`JobReport::stale`] says whether it is refused).
+    fn job(&mut self) -> JobReport;
     /// Whether the service answers.
     fn service_answers(&mut self) -> bool;
     /// Waits (tests do not).
@@ -233,6 +178,7 @@ pub enum RepairOutcome {
 /// then the service gets at most [`START_WAIT`] to answer. `say` gets each step in words, for the log and the UI.
 pub fn run_repair(ops: &mut dyn RepairOps, say: &mut dyn FnMut(&str)) -> RepairOutcome {
     say("re-registering the service");
+    let mut last = JobReport::default();
     for cycle in 0..=MAX_CYCLES {
         if cycle > 0 {
             say(&format!(
@@ -265,7 +211,8 @@ pub fn run_repair(ops: &mut dyn RepairOps, say: &mut dyn FnMut(&str)) -> RepairO
             Err(RegisterError::Other(e)) => say(&format!("register failed: {e}")),
         }
         ops.pause(SETTLE);
-        if ops.registration_stale() {
+        last = ops.job();
+        if last.stale() {
             continue;
         }
         say("launchd accepts the registration; waiting for the service to start");
@@ -289,8 +236,9 @@ pub fn run_repair(ops: &mut dyn RepairOps, say: &mut dyn FnMut(&str)) -> RepairO
         return RepairOutcome::Failed(why);
     }
     let why = format!(
-        "launchd still refuses the service (needs LWCR update) after {} full re-registrations. {NEXT_STEPS}",
-        MAX_CYCLES + 1
+        "launchd still reports a refused registration after {} full re-registrations (observed: {}). {NEXT_STEPS}",
+        MAX_CYCLES + 1,
+        last.describe()
     );
     say(&why);
     RepairOutcome::Failed(why)
@@ -348,7 +296,6 @@ pub fn record_registered_version(file: &Path, version: &str) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dyno_agent::service::LABEL;
 
     #[test]
     fn the_disabled_mapping() {
@@ -383,36 +330,22 @@ mod tests {
         assert!(!service_supervises(Enabled, None, JobReport::default()));
     }
 
-    #[test]
-    fn the_disabled_list_is_parsed() {
-        let out = format!("disabled services = {{\n\t\"com.apple.x\" => enabled\n\t\"{LABEL}\" => disabled\n}}\n");
-        assert_eq!(parse_print_disabled(&out, LABEL), Some(true));
-        assert_eq!(parse_print_disabled(&out.replace("=> disabled", "=> enabled"), LABEL), Some(false));
-        assert_eq!(parse_print_disabled(&out.replace("=> disabled", "=> true"), LABEL), Some(true));
-        assert_eq!(parse_print_disabled(&out.replace("=> disabled", "=> false"), LABEL), Some(false));
-        assert_eq!(parse_print_disabled(&out.replace("=> disabled", "=> maybe"), LABEL), None);
-        assert_eq!(parse_print_disabled("", LABEL), None);
-        assert_eq!(parse_print_disabled(&format!("\"{LABEL}\" disabled"), LABEL), None);
-    }
-
     /// The real `launchctl print gui/501/net.decryptology.dyno.agent` of a Mac after an update (trimmed).
     const SPAWN_FAILED: &str = "gui/501/net.decryptology.dyno.agent = {\n\tactive count = 0\n\tpath = (submitted by smd.362)\n\ttype = Submitted\n\tmanaged_by = com.apple.xpc.ServiceManagement\n\tstate = spawn scheduled\n\n\tprogram identifier = Contents/MacOS/dyno-agent (mode: 2)\n\tparent bundle identifier = net.decryptology.dyno\n\tparent bundle version = 0.1.0\n\truns = 534\n\tlast exit code = 78: EX_CONFIG\n\n\tjob state = spawn failed\n\tsanitizer flags = 0x0\n\n\tproperties = partial import | keepalive | runatload | resolve program | has LWCR\n}\n";
     const HEALTHY: &str = "gui/501/net.decryptology.dyno.agent = {\n\tstate = running\n\tpid = 88412\n\truns = 1\n\tlast exit code = (never exited)\n\tjob state = running\n\tproperties = keepalive | runatload | has LWCR\n}\n";
 
+    /// The real, untrimmed `launchctl print` of a healthy job (macOS 26.6.2 VM, 2026-10-31): nested `resource coalition`
+    /// and `jetsam coalition` blocks carry their own `state = active` lines after the job's `state = running`.
+    const REAL_RUNNING: &str = include_str!("../tests/fixtures/launchctl-print-running.txt");
+
     #[test]
-    fn a_registration_launchd_cannot_start_is_stale() {
-        let job = parse_job(SPAWN_FAILED);
-        assert!(job.found && !job.running && job.spawn_failed && job.exit_config && job.has_lwcr && !job.needs_lwcr_update);
-        assert!(job.stale());
-        // Each sign alone is enough.
-        assert!(parse_job("\tstate = spawn scheduled\n\tlast exit code = 78: EX_CONFIG\n").stale());
-        assert!(parse_job("\tstate = spawn scheduled\n\tjob state = spawn failed\n").stale());
-        assert!(parse_job("\tstate = spawn scheduled\n\tproperties = keepalive | has LWCR\n").stale());
-        assert!(parse_job("\tstate = waiting\n\tproperties = keepalive | needs LWCR update\n").stale());
-        let healthy = parse_job(HEALTHY);
-        assert!(healthy.found && healthy.running && healthy.has_lwcr && !healthy.stale());
-        // Gone from launchd.
-        assert!(!parse_job("").found && !parse_job("").stale());
+    fn a_running_job_is_never_replaced_because_the_app_has_not_connected_yet() {
+        let mut o = observed(parse_job(REAL_RUNNING));
+        o.answers = false;
+        assert_eq!(plan(&o), Plan::Nothing);
+        // Even when it holds a refusal sign from an earlier run, a running job is left alone.
+        o.job.exit_config = true;
+        assert_eq!(plan(&o), Plan::Nothing);
     }
 
     fn observed<'a>(job: JobReport) -> Observed<'a> {
@@ -480,6 +413,8 @@ mod tests {
     struct Fake {
         calls: Vec<String>,
         stale_for: u32,
+        /// What the job reports while it is stale.
+        stale_job: JobReport,
         answers_after: Option<u32>,
         asked: u32,
         pause_total: Duration,
@@ -494,6 +429,12 @@ mod tests {
             Self {
                 calls: Vec::new(),
                 stale_for,
+                stale_job: JobReport {
+                    found: true,
+                    spawn_failed: true,
+                    has_lwcr: true,
+                    ..JobReport::default()
+                },
                 answers_after,
                 asked: 0,
                 pause_total: Duration::ZERO,
@@ -533,13 +474,17 @@ mod tests {
                 true
             }
         }
-        fn registration_stale(&mut self) -> bool {
+        fn job(&mut self) -> JobReport {
             self.calls.push("stale?".into());
             if self.stale_for > 0 {
                 self.stale_for -= 1;
-                true
+                self.stale_job
             } else {
-                false
+                JobReport {
+                    found: true,
+                    running: true,
+                    ..JobReport::default()
+                }
             }
         }
         fn service_answers(&mut self) -> bool {
@@ -614,10 +559,39 @@ mod tests {
         let RepairOutcome::Failed(why) = outcome else {
             panic!("{outcome:?}")
         };
-        assert!(why.contains("needs LWCR update") && why.contains("4 full"), "{why}");
+        assert!(
+            why.contains("4 full") && why.contains("observed: not running, spawn failed"),
+            "{why}"
+        );
+        assert!(
+            !why.contains("needs LWCR update"),
+            "the reason is what launchd said, not a made-up one: {why}"
+        );
         assert_eq!(f.calls.iter().filter(|c| *c == "unregister").count(), MAX_CYCLES as usize + 1);
         assert_eq!(f.calls.iter().filter(|c| *c == "register").count(), MAX_CYCLES as usize + 1);
         assert!(said.iter().any(|m| m.contains("unregister did not succeed")));
+    }
+
+    #[test]
+    fn the_failure_message_names_the_lwcr_update_only_when_launchd_said_so() {
+        let mut f = Fake::new(u32::MAX, Some(0));
+        f.stale_job = JobReport {
+            found: true,
+            needs_lwcr_update: true,
+            ..JobReport::default()
+        };
+        let RepairOutcome::Failed(why) = run(&mut f).0 else { panic!() };
+        assert!(why.contains("needs LWCR update"), "{why}");
+        assert_eq!(JobReport::default().describe(), "launchd does not know the job");
+        assert!(JobReport {
+            found: true,
+            running: true,
+            exit_config: true,
+            has_lwcr: true,
+            ..JobReport::default()
+        }
+        .describe()
+        .contains("running, exit code 78 (EX_CONFIG), has a launch constraint"));
     }
 
     #[test]

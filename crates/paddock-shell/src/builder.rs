@@ -72,6 +72,14 @@ type MenuQuit<R> = dyn Fn(&AppHandle<R>) + Send + Sync;
 type TraySetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Tray<R> + Send>;
 type HealthAdjust<R> = Box<dyn FnOnce(&AppHandle<R>, HealthSetup<R>) -> HealthSetup<R> + Send>;
 
+/// The settings stored at `path`, in memory when the app's folders are unknown.
+fn settings_at(path: Option<std::path::PathBuf>) -> Settings {
+    match path {
+        Some(path) => Settings::open(path),
+        None => Settings::in_memory(),
+    }
+}
+
 /// The shell plugin with its parts (ADR 0012 §2: `paddock_shell::Builder::new(identity)...build()`).
 pub struct Builder<R: Runtime> {
     identity: AppIdentity,
@@ -172,7 +180,7 @@ impl<R: Runtime> Builder<R> {
         self
     }
 
-    /// The settings (default: `settings.json` in the app's config folder).
+    /// The settings (default: `shell-settings.json` in the app's config folder, never the app's own `settings.json`).
     pub fn settings(mut self, f: impl FnOnce(&AppHandle<R>) -> Settings + Send + 'static) -> Self {
         self.settings = Some(Box::new(f));
         self
@@ -555,10 +563,7 @@ impl<R: Runtime> Builder<R> {
         let settings = match self.settings {
             Some(f) => f(app),
             None if self.in_memory => Settings::in_memory(),
-            None => match app.path().app_config_dir() {
-                Ok(dir) => Settings::open(dir.join(paddock_settings::FILE_NAME)),
-                Err(_) => Settings::in_memory(),
-            },
+            None => settings_at(crate::logging::shell_settings_path_for(&self.identity)),
         };
         let settings = paddock_settings::tauri::manage(app, settings);
         settings

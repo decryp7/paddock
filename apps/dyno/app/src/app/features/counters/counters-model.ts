@@ -1,5 +1,6 @@
 import type { EChartsCoreOption } from 'echarts/core';
-import type { CounterHistory, CounterReading, CounterUnit, Widget } from '../../core/api.types';
+import type { DashboardWidget } from '../../core/generated/widgets';
+import type { CounterHistory, CounterReading, CounterUnit } from '../../core/api.types';
 import { formatBytes, formatClock, formatPercent, formatRate } from '../../shared/format';
 import type { ThemeTokens } from '../../shared/tokens';
 import { EVENT_STYLE } from '../dashboard/history-options';
@@ -99,7 +100,7 @@ export function withoutPath(list: readonly string[], path: string): string[] {
 }
 
 /** The paths of the counters that dashboard widgets show. */
-export function widgetCounterPaths(widgets: readonly Widget[]): string[] {
+export function widgetCounterPaths(widgets: readonly DashboardWidget[]): string[] {
   const out: string[] = [];
   for (const w of widgets) {
     const m = w.metric;

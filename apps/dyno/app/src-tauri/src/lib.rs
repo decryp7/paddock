@@ -6,6 +6,7 @@
 //! nothing itself.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod actions;
 pub mod commands;
 pub mod dialogs;
 pub mod dto;
@@ -14,6 +15,7 @@ pub mod link;
 pub mod logging;
 pub mod login;
 pub mod login_item;
+pub mod popover;
 pub mod service_repair;
 pub mod shell;
 pub mod supervise;
@@ -58,6 +60,25 @@ paddock_commands::command_table! {
     Mutation [MAIN] => commands::save_inventory_report,
     /// "Choose folder..." for the file finder: the OS folder dialog.
     Mutation [MAIN] => commands::pick_folder,
+    /// One surface's widget layout, with its catalogue, built-in presets and notes (family ADR 0035). The tray popup reads its
+    /// own layout to draw its widgets.
+    Query [MAIN | TRAY | DIALOG] => commands::widget_layout,
+    /// Edits one surface's widget layout in the agent; answers the new layout, or why it was refused.
+    Mutation [MAIN | DIALOG] => commands::edit_widget_layout,
+    /// The tray popup's values now, for the popup that has just opened (the live ones arrive as `dyno://popover-values`); the Settings window's preview reads it too.
+    Query [MAIN | TRAY | DIALOG] => commands::popover_values,
+    /// A button of a widget: open a page, retry, start the backup check, restart the agent.
+    Mutation [MAIN | TRAY] => commands::run_widget_action,
+    /// The popup's values as known now, without opening it: the Settings preview.
+    Query [MAIN | DIALOG] => commands::popover_snapshot,
+    /// The popup's values for the Settings preview with the slow widgets asked of the agent; never marks the popup visible.
+    Query [MAIN | DIALOG] => commands::popover_preview,
+    /// Readings (value, text, scale and tone) of metrics from the newest live update: the dashboard and the previews.
+    Query [MAIN | DIALOG] => commands::metric_readings,
+    /// The kinds the choosers can add, each with a default widget and the metrics the engine accepts for it.
+    Query [MAIN | DIALOG] => commands::widget_choices,
+    /// The page or Settings section a widget asked the main window to open (once).
+    Mutation [MAIN] => commands::take_navigation,
 }
 
 /// Where the app runs: installed (the user's folders, real ticks) or in a test (nothing outside `dir`, no native menu
@@ -258,18 +279,19 @@ fn agent_setup<R: Runtime>(
 }
 
 /// macOS: `SMAppService.mainApp` starts the app at login without `--hidden`; macOS says it was a login start in the
-/// open-application Apple Event instead ([`login::launched_as_login_item`]), which is readable only while that event is
+/// open-application Apple Event instead ([`login::open_event`]), which is readable only while that event is
 /// being handled, i.e. inside `applicationDidFinishLaunching`. Plugin setups run earlier (in `Builder::build`), so the
 /// decision is made in the run loop's `Ready` event, which tao emits from `applicationDidFinishLaunching` right after the
 /// App's setup. The shell was told to start in the tray (`launch.hidden`); unless the flag or the login event asked for
 /// that, the main window is opened here (the tray exists by then). A missed detection shows the window, never hides one.
 #[cfg(target_os = "macos")]
 fn on_ready(app: &tauri::AppHandle, asked_hidden: bool) {
-    let hidden = login_item::hidden_at_start(asked_hidden, login::launched_as_login_item());
-    logging::info(&format!(
-        "started {}",
-        if hidden { "hidden (flag or login item)" } else { "with a window" }
-    ));
+    let by = login_item::hidden_by(asked_hidden, login::open_event());
+    let hidden = by.is_some();
+    logging::info(&match by {
+        Some(why) => format!("started hidden ({})", why.describe()),
+        None => "started with a window".to_string(),
+    });
     if !hidden && app.get_webview_window(paddock_commands::labels::MAIN_LABEL).is_none() {
         if let Err(e) = paddock_window::tauri::create_main(app) {
             log::error!(Error = e.message.as_str(); "The main window could not be opened");
@@ -302,7 +324,7 @@ pub fn run() {
         tauri_plugin_autostart::MacosLauncher::LaunchAgent,
         Some(vec![paddock_window::launch::HIDDEN_FLAG]),
     ));
-    let items = shell::initial_items(&dyno_core::settings::Settings::default().tray_items);
+    let items = shell::initial_items(&dyno_core::settings::Settings::default().menu_bar.layout().placements);
     let builder = app(builder, shell, launch, tray::DynoTray::new(items)).invoke_handler(invoke_handler());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]

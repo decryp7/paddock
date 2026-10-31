@@ -347,3 +347,177 @@ fn quit_from_the_menu_bar_works_after_the_last_window_closed_to_the_tray() {
     menu_chosen(app.handle(), "pd.app.quit");
     assert!(windows.quitting(), "Quit began the quit");
 }
+
+// ---- the popup's wiring: visibility, navigation, readings ----
+
+mod widget_wiring {
+    use super::*;
+    use dyno_app_lib::link::Sink;
+    use dyno_app_lib::shell::{NoPixels, ShellOf};
+    use dyno_core::protocol::{LiveUpdate, Overhead};
+    use dyno_core::time::Timestamp;
+    use dyno_core::widgets::popover_values::{Navigate, Page};
+    use dyno_core::widgets::{Metric, ReadingQuery, Thresholds};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::channel;
+    use std::sync::Arc;
+    use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
+    use tauri::{Listener, WebviewUrl, WebviewWindowBuilder};
+
+    fn app() -> tauri::App<MockRuntime> {
+        mock_builder().build(mock_context(noop_assets())).unwrap()
+    }
+
+    fn shell(app: &tauri::App<MockRuntime>) -> Arc<ShellOf<MockRuntime>> {
+        ShellOf::new(app.handle().clone(), Hub::default(), Arc::new(NoPixels))
+    }
+
+    fn update(cpu: f32) -> LiveUpdate {
+        let mut system = dyno_platform::fake::quiet_sample(Timestamp(1_000));
+        system.cpu.total = cpu;
+        LiveUpdate {
+            system,
+            pressure: dyno_core::metrics::MemoryPressure::Normal,
+            top_cpu: vec![],
+            top_memory: vec![],
+            overhead: Overhead::default(),
+            processes: None,
+            groups: None,
+            other_users: None,
+        }
+    }
+
+    /// The popup's values reach the webview only while the popup is visible.
+    #[test]
+    fn values_are_emitted_only_while_the_popup_is_visible() {
+        let app = app();
+        let shell = shell(&app);
+        let visible = Arc::new(AtomicBool::new(false));
+        let gate = visible.clone();
+        shell.set_popover_gate(Arc::new(move || gate.load(Ordering::SeqCst)));
+        let (tx, rx) = channel::<String>();
+        app.listen("dyno://popover-values", move |e| {
+            let _ = tx.send(e.payload().to_string());
+        });
+        shell.live(update(11.0));
+        visible.store(true, Ordering::SeqCst);
+        shell.live(update(77.0));
+        // Events arrive in order: the first one is the visible tick's, so the hidden tick sent nothing.
+        let first = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("a values event while visible");
+        assert!(first.contains(r#""cpuPercent":77.0"#), "{first}");
+        visible.store(false, Ordering::SeqCst);
+        shell.live(update(12.0));
+        visible.store(true, Ordering::SeqCst);
+        shell.live(update(88.0));
+        let next = rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        assert!(
+            next.contains(r#""cpuPercent":88.0"#),
+            "the hidden tick between sent nothing: {next}"
+        );
+    }
+
+    /// An open popup counts as visible at once and gets what is known; it does not wait for the next tick.
+    #[test]
+    fn opening_the_popup_returns_the_values_known_now() {
+        let app = app();
+        let shell = shell(&app);
+        shell.live(update(42.0));
+        let v = shell.popover_opened();
+        assert!(v.notice.is_none());
+        assert!(v.placements.iter().any(|p| p.id.as_str() == "cpu-memory"), "{v:?}");
+    }
+
+    /// Opening counts as visible even when the shell's own gate says no; a preview's snapshot does not.
+    #[test]
+    fn opening_marks_the_popup_visible_at_once_and_a_snapshot_does_not() {
+        let app = app();
+        let shell = shell(&app);
+        shell.set_popover_gate(Arc::new(|| false));
+        shell.live(update(5.0));
+        let _ = shell.popover_snapshot();
+        assert!(!shell.popover_wants_values(), "a preview never opens the popup");
+        let _ = shell.popover_opened();
+        assert!(shell.popover_wants_values());
+    }
+
+    /// The commands' bodies: a snapshot and a preview never mark the popup visible (only the popup's own first paint does).
+    #[test]
+    fn the_snapshot_and_preview_commands_never_open_the_popup() {
+        let app = app();
+        let shell = shell(&app);
+        shell.live(update(5.0));
+        shell.set_popover_gate(Arc::new(|| false));
+        dyno_app_lib::commands::snapshot_value(&shell).unwrap();
+        assert!(!shell.popover_wants_values(), "snapshot_value opened the popup");
+        let v = dyno_app_lib::commands::preview_value(&shell).unwrap();
+        assert!(!shell.popover_wants_values(), "preview_value opened the popup");
+        assert!(
+            v["placements"]
+                .as_array()
+                .is_some_and(|p| p.iter().any(|x| x["id"] == "cpu-memory")),
+            "{v}"
+        );
+    }
+
+    /// With no link to ask, the wish to ask is kept (the on-change kinds stay due), not used up.
+    #[test]
+    fn asking_with_no_link_keeps_the_wish() {
+        let app = app();
+        let shell = shell(&app);
+        shell.live(update(5.0));
+        let _ = shell.popover_opened();
+        assert!(shell.popover_refresh_wanted(), "the ask found no link and must stay due");
+    }
+
+    /// A navigation waits for the main window, once, and the event goes to the main window only.
+    #[test]
+    fn a_navigation_is_kept_for_the_main_window_and_goes_to_it_alone() {
+        let app = app();
+        let main = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default()).build().unwrap();
+        let tray = WebviewWindowBuilder::new(&app, "tray", WebviewUrl::default()).build().unwrap();
+        let (main_tx, main_rx) = channel::<String>();
+        let (tray_tx, tray_rx) = channel::<String>();
+        main.listen("dyno://navigate", move |e| {
+            let _ = main_tx.send(e.payload().to_string());
+        });
+        tray.listen("dyno://navigate", move |e| {
+            let _ = tray_tx.send(e.payload().to_string());
+        });
+        let shell = shell(&app);
+        shell.navigate(Navigate::Page(Page::Alarms));
+        assert_eq!(
+            main_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap(),
+            r#"{"page":"alarms"}"#
+        );
+        assert!(tray_rx.try_recv().is_err(), "the tray window is not told");
+        // A window that was still being created misses the event and asks for it as it starts, once.
+        assert_eq!(shell.take_navigation(), Some(Navigate::Page(Page::Alarms)));
+        assert_eq!(shell.take_navigation(), None);
+    }
+
+    /// The dashboard's and the previews' readings come from the newest live update, with tones from their thresholds.
+    #[test]
+    fn readings_follow_the_newest_live_update() {
+        let app = app();
+        let shell = shell(&app);
+        let q = vec![ReadingQuery {
+            metric: Metric::CpuTotal,
+            thresholds: Thresholds {
+                warning: Some(70.0),
+                critical: Some(90.0),
+            },
+        }];
+        assert_eq!(
+            shell.metric_readings(&q)[0].reason.as_deref(),
+            Some("Waiting for the first reading.")
+        );
+        shell.live(update(95.0));
+        let r = &shell.metric_readings(&q)[0];
+        assert_eq!(r.value, Some(95.0));
+        assert_eq!(r.tone, dyno_core::widgets::dashboard::ValueTone::Bad);
+        shell.live(update(10.0));
+        assert_eq!(shell.metric_readings(&q)[0].value, Some(10.0));
+    }
+}

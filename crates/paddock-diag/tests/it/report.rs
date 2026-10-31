@@ -646,3 +646,26 @@ fn a_settings_file_that_cannot_be_inspected_is_a_note() {
         c.notes()
     );
 }
+
+/// An app that names the shell's own file gets that file in the report, masked, and its own `settings.json` (another
+/// format, written by another owner) is not read as the shell's.
+#[test]
+fn a_named_settings_file_is_reported_and_the_default_one_is_left_alone() {
+    let root = tempfile::tempdir().unwrap();
+    let d = dirs(root.path());
+    std::fs::create_dir_all(d.config()).unwrap();
+    let foreign = br#"{ "version": 1, "launchAtLogin": true }"#;
+    std::fs::write(d.config().join("settings.json"), foreign).unwrap();
+    std::fs::write(
+        d.config().join("shell-settings.json"),
+        json!({"version":1,"sections":{"x":{"apiKey":"sk-secret-value"}}}).to_string(),
+    )
+    .unwrap();
+    let sections: Vec<std::sync::Arc<dyn paddock_diag::Section>> =
+        vec![std::sync::Arc::new(builtin::Settings::file("shell-settings.json"))];
+    let c = Collected::collect(&app_info(), &d, &sections, &redactor(), now());
+    let names: Vec<_> = c.files().iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["shell-settings.json"]);
+    assert!(!format!("{:?}", c.files()).contains("sk-secret-value"));
+    assert_eq!(std::fs::read(d.config().join("settings.json")).unwrap(), foreign);
+}

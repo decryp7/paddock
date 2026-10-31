@@ -1,0 +1,473 @@
+<!doctype html>
+<!--
+  Mock-up for family ADR 0035 (widget layouts are shared) and Dyno roadmap WP-38: the tray popup built from widgets, every
+  widget's loading, empty, error and working or stale state, the agent-stopped notice, and the chooser in Dyno's Settings
+  window. Tokens only (tokens.generated.css is compiled from ui/projects/paddock-ui/scss by render.mjs); no colour literal
+  except the desktop backdrop and the menu bar, which are not product UI. ?theme=light|dark. Each <figure id="f-..."> is
+  shot on its own. Every widget is built by one function per kind (W below), so the popup, the preview and the states
+  sheet show the same markup; a loading widget is its ready twin with the parts marked .sk turned into skeleton blocks, so
+  its height is the ready height by construction.
+-->
+<html lang="en" data-accent="dyno">
+<head>
+<meta charset="utf-8" />
+<title>Tray widgets mock-up</title>
+<link rel="stylesheet" href="tokens.generated.css" />
+<script>
+  document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') === 'light' ? 'light' : 'dark';
+</script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--pd-bg); color: var(--pd-text); font: var(--pd-text-body) / var(--pd-lh-body) var(--pd-font-sans); -webkit-font-smoothing: antialiased; }
+  figure { margin: 0 0 40px; display: inline-block; vertical-align: top; }
+  button { font: inherit; color: inherit; }
+  .num { font-variant-numeric: tabular-nums; }
+  svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  svg.i * { vector-effect: non-scaling-stroke; }
+  svg.i.s14 { width: 14px; height: 14px; }
+  svg.i .dot { fill: currentColor; stroke: none; }
+  .spacer { flex: 1; }
+  .muted { color: var(--pd-text-muted); }
+  .subtle { color: var(--pd-text-subtle); }
+  .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+  /* ---------- desktop backdrop and menu bar (not product UI) ---------- */
+  .desk { width: 440px; padding: 0 0 24px; background: linear-gradient(180deg, #2b3039, #353b46); position: relative; }
+  [data-theme=light] .desk { background: linear-gradient(180deg, #c3cad5, #d6dbe3); }
+  .menubar { height: 24px; white-space: nowrap; display: flex; align-items: center; gap: 14px; padding: 0 12px; font-size: 13px; color: #eceef1; background: rgb(20 22 26 / 0.72); }
+  [data-theme=light] .menubar { color: #14171c; background: rgb(246 247 249 / 0.78); }
+  .menubar b { font-weight: 600; }
+  .menubar .extra { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; height: 20px; border-radius: 4px; background: rgb(255 255 255 / 0.16); }
+  [data-theme=light] .menubar .extra { background: rgb(15 20 30 / 0.1); }
+  .desk .pop { margin: 10px auto 0; }
+
+  /* ---------- the popover (pd-tray-popover, unchanged) ---------- */
+  .pop { width: var(--pd-tray-width); max-height: var(--pd-tray-max-height); display: flex; flex-direction: column; background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: 12px; box-shadow: var(--pd-shadow-2); overflow: hidden; }
+  .pop-head { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); }
+  .pop-head strong { font-weight: var(--pd-weight-semibold); }
+  .grade { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-pill); background: var(--pd-success-tint); color: var(--pd-success); font-size: var(--pd-text-label); }
+  .grade b { font-weight: var(--pd-weight-semibold); }
+  .agent { display: inline-flex; align-items: center; gap: 6px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+  .agent i { width: 7px; height: 7px; border-radius: 50%; background: var(--pd-success); }
+  .agent.stopped i { background: var(--pd-danger); }
+  .pop-body { flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0 var(--pd-space-4) var(--pd-space-3); }
+  .pop-foot { flex: none; }
+  /* The content scrolls past 520 px (pd-tray-popover): an overlay scroll thumb and a fade show there is more. */
+  .pop-body.scrolls { position: relative; }
+  .pop-body.scrolls::before { content: ''; position: absolute; z-index: 1; right: 4px; top: 2px; width: 5px; height: 52%; border-radius: 3px; background: var(--pd-border-strong); }
+  .pop-body.scrolls::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: linear-gradient(to bottom, transparent, var(--pd-surface-3)); }
+  .pop-head { flex: none; }
+  .pop-foot { display: flex; align-items: center; gap: var(--pd-space-1); padding: var(--pd-space-2) var(--pd-space-4); border-top: 1px solid var(--pd-hairline); }
+
+  /* ---------- pd-widget-area and pd-widget-frame ---------- */
+  .area { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pd-space-2); }
+  /* One token step (surface-2 inside surface-3), no border inside the bordered popover; 8 / 12 padding. */
+  .w { grid-column: span 2; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-card); background: var(--pd-surface-2); }
+  .w.span1 { grid-column: span 1; }
+  /* High contrast (the OS setting): the frame gets the strong border as an outline. */
+  :root[data-contrast=more] .w { box-shadow: inset 0 0 0 1px var(--pd-border-strong); }
+  .w-head { display: flex; align-items: center; gap: 6px; height: 16px; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); white-space: nowrap; }
+  .w-head .meta { margin-left: auto; font-weight: var(--pd-weight-regular); color: var(--pd-text-subtle); overflow: hidden; text-overflow: ellipsis; }
+  .w-head .meta.stale { color: var(--pd-text-muted); display: inline-flex; align-items: center; gap: 4px; }
+  .hero { font-size: 20px; line-height: 24px; font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; white-space: nowrap; justify-self: start; }
+  .hero small { font-size: var(--pd-text-body); font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); margin-left: 2px; }
+  .line { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); justify-self: start; }
+
+  .rows { display: grid; margin: 0 calc(-1 * var(--pd-space-2)); }
+  .row { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 28px; padding: 2px var(--pd-space-2); border-radius: var(--pd-radius-control); font-size: var(--pd-text-body); background: none; border: 0; text-align: left; width: 100%; }
+  .row .when { color: var(--pd-text-subtle); font-size: var(--pd-text-label); white-space: nowrap; }
+  .row .chev { color: var(--pd-text-muted); }
+  .row.hover { background: var(--pd-hover); }
+
+  .badge { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px 0 5px; border-radius: var(--pd-radius-pill); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); flex: none; }
+  .badge svg.i { width: 14px; height: 14px; }
+  .badge.sm { height: 18px; }
+  .b-warn { background: var(--pd-warning-tint); color: var(--pd-warning); }
+  .b-bad { background: var(--pd-danger-tint); color: var(--pd-danger); }
+  .b-info { background: var(--pd-info-tint); color: var(--pd-info); }
+  .b-ok { background: var(--pd-success-tint); color: var(--pd-success); }
+
+  .vol { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px var(--pd-space-2); align-items: center; padding: 3px 0; }
+  .vol .name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .vol .free { font-size: var(--pd-text-label); color: var(--pd-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--pd-chart-grid); overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 2px; background: var(--pd-meter-neutral); }
+  .bar.warn i { background: var(--pd-warning); }
+
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr); gap: var(--pd-space-3); }
+  .split > .div { background: var(--pd-border-strong); opacity: .5; }
+  .metric { display: grid; gap: 2px; min-width: 0; }
+  .metric .k { font-size: var(--pd-text-label); color: var(--pd-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .spark { display: block; width: 100%; height: 24px; margin-top: 4px; }
+
+  /* loading: the ready twin, its .sk parts drawn as skeleton blocks (static: the shimmer is frozen for the shot) */
+  .w.loading .sk { color: transparent !important; background: linear-gradient(90deg, var(--pd-skeleton-raised) 0 35%, var(--pd-skeleton-raised-shine) 50%, var(--pd-skeleton-raised) 65% 100%); background-size: 300% 100%; background-position: 60% 0; border-radius: 4px; border-color: transparent !important; box-shadow: none !important; }
+  .w.loading .sk * { visibility: hidden; }
+  .w.loading .bar.sk { height: 4px; }
+  .w.loading .w-head .meta, .w.loading .chev { visibility: hidden; }
+
+  /* empty, error, working */
+  .st { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 2px var(--pd-space-2); align-items: start; padding: 2px 0; }
+  .st > svg.i { margin-top: 2px; color: var(--pd-text-muted); }
+  .st .t { font-weight: var(--pd-weight-semibold); }
+  .st .d { grid-column: 2; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
+  .st .act { grid-column: 2; justify-self: start; margin: 4px 0 0 -8px; }
+  .st.err > svg.i { color: var(--pd-danger); }
+  .prog { grid-column: 2; height: 4px; border-radius: 2px; background: var(--pd-chart-grid); overflow: hidden; margin-top: 4px; }
+  .prog i { display: block; height: 100%; background: var(--pd-accent); border-radius: 2px; }
+  .calm { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 28px; margin: 0 calc(-1 * var(--pd-space-2)); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); background: none; border: 0; width: calc(100% + 2 * var(--pd-space-2)); text-align: left; }
+  .calm .ok { color: var(--pd-success); }
+
+  /* the surface notice (replaces the first row while active) */
+  .notice { grid-column: span 2; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 2px var(--pd-space-2); align-items: center; padding: var(--pd-space-2) var(--pd-space-2) var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-card); background: var(--pd-danger-tint); }
+  .notice > svg.i { color: var(--pd-danger); align-self: start; margin-top: 2px; }
+  .notice .t { font-weight: var(--pd-weight-semibold); color: var(--pd-text); }
+  .notice .d { grid-column: 2; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
+  .notice .btn { grid-row: 1 / span 2; grid-column: 3; }
+
+  /* ---------- buttons (matButton through the family bridge) ---------- */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid transparent; font: var(--pd-weight-medium) var(--pd-text-body) / 1 var(--pd-font-sans); color: var(--pd-text); background: none; white-space: nowrap; }
+  .btn.filled { background: var(--pd-accent-fill); color: var(--pd-on-accent); padding: 0 var(--pd-space-4); }
+  .btn.outlined { background: var(--pd-surface-2); border-color: var(--pd-border-strong); }
+  .notice .btn.outlined { background: var(--pd-surface-3); }
+  .btn.text { color: var(--pd-accent); padding: 0 var(--pd-space-2); height: 24px; }
+  .btn.sm { height: var(--pd-control-height); padding: 0 10px; }
+  /* Disabled: Material's 38 % text and a hairline (exempt from contrast, WCAG 1.4.3). */
+  .btn[disabled] { color: color-mix(in srgb, var(--pd-text) 38%, transparent); }
+  .btn.outlined[disabled] { background: none; border-color: var(--pd-hairline); }
+  .added-label { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+  .added-label svg.i { color: var(--pd-success); }
+  .ibtn { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: var(--pd-radius-control); color: var(--pd-text-muted); border: 0; background: none; }
+  .ibtn.sm { width: 28px; height: 28px; }
+  .ibtn.open { background: var(--pd-pressed); color: var(--pd-text); }
+  .focus { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
+
+  /* ---------- menus (mat-menu) ---------- */
+  .menu { position: absolute; width: 208px; padding: 4px; background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-popover); box-shadow: var(--pd-shadow-2); z-index: 5; font-size: var(--pd-text-body); }
+  .menu div { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: var(--pd-radius-control); white-space: nowrap; }
+  .menu div svg.i { color: var(--pd-text-muted); }
+  .menu div.hi { background: var(--pd-hover); }
+  .menu div.danger, .menu div.danger svg.i { color: var(--pd-danger); }
+  .menu hr { border: 0; border-top: 1px solid var(--pd-hairline); margin: 4px 0; }
+  .menu kbd { margin-left: auto; }
+  kbd { white-space: nowrap; font: var(--pd-weight-medium) 11px/16px var(--pd-font-sans); padding: 0 4px; border-radius: 4px; border: 1px solid var(--pd-border-strong); background: var(--pd-surface-2); color: var(--pd-text-muted); }
+
+  /* ---------- states sheet ---------- */
+  .sheet { padding: 24px; background: var(--pd-surface-3); display: grid; grid-template-columns: 140px repeat(4, 326px); gap: 16px 20px; align-items: start; }
+  .sheet .colh { font-size: var(--pd-text-label); font-weight: var(--pd-weight-semibold); color: var(--pd-text-muted); padding-bottom: 2px; border-bottom: 1px solid var(--pd-hairline); }
+  .sheet .kind { padding-top: 8px; }
+  .sheet .kind b { display: block; font-weight: var(--pd-weight-semibold); }
+  .sheet .kind span { font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+  .sheet .cell { min-width: 0; display: grid; }
+  .sheet .cell.half { width: 159px; }
+  .sheet .na { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); padding-top: 8px; }
+  .sheet h2 { grid-column: 1 / -1; margin: 0; font-size: var(--pd-text-title); line-height: var(--pd-lh-title); font-weight: var(--pd-weight-semibold); }
+  .sheet .lede { grid-column: 1 / -1; margin: -12px 0 4px; color: var(--pd-text-muted); max-width: 900px; }
+
+  /* ---------- Settings window and the chooser ---------- */
+  .win { width: 1112px; background: var(--pd-bg); border-radius: 10px; overflow: hidden; border: 1px solid var(--pd-hairline); position: relative; }
+  .win-title { height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-1); font-weight: var(--pd-weight-semibold); }
+  .lights { display: inline-flex; gap: 8px; margin-right: 54px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; background: var(--pd-border-strong); }
+  .win-main { display: grid; grid-template-columns: 184px minmax(0, 1fr); }
+  .nav { padding: 12px 8px; border-right: 1px solid var(--pd-hairline); background: var(--pd-surface-1); display: grid; align-content: start; gap: 2px; }
+  .nav a { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: var(--pd-radius-control); color: var(--pd-text); text-decoration: none; }
+  .nav a svg.i { color: var(--pd-text-muted); }
+  .nav a.sel { background: var(--pd-accent-tint); font-weight: var(--pd-weight-semibold); box-shadow: inset 2px 0 0 var(--pd-accent); }
+  .nav a.sel svg.i { color: var(--pd-accent); }
+  .page { padding: 20px 24px 24px; display: grid; gap: 16px; align-content: start; }
+  .page-title h1 { margin: 0; font-size: var(--pd-text-title); line-height: var(--pd-lh-title); font-weight: var(--pd-weight-semibold); }
+  .page-title p { margin: 2px 0 0; color: var(--pd-text-muted); }
+  .card { background: var(--pd-surface-1); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); padding: var(--pd-card-padding); }
+  .card > header h2 { margin: 0; font-size: var(--pd-text-subtitle); line-height: var(--pd-lh-subtitle); font-weight: var(--pd-weight-semibold); }
+  .card > header p { margin: 2px 0 0; color: var(--pd-text-muted); }
+  .ch { display: grid; grid-template-columns: minmax(440px, 1fr) 360px; gap: 24px; margin-top: 16px; align-items: start; }
+  .ch-label { display: flex; align-items: baseline; justify-content: space-between; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); margin: 0 0 6px; }
+  .ch-label .count { font-weight: var(--pd-weight-regular); color: var(--pd-text-subtle); }
+  .list { border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); overflow: hidden; position: relative; }
+  .item { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 48px; padding: 6px 8px 6px 4px; background: var(--pd-surface-1); }
+  .item + .item { border-top: 1px solid var(--pd-hairline); }
+  .item .grip { display: inline-grid; place-items: center; width: 24px; height: 32px; border-radius: var(--pd-radius-control); color: var(--pd-text-subtle); }
+  .item .kicon { color: var(--pd-text-muted); }
+  .item .txt { display: grid; min-width: 0; flex: 1; }
+  .item .txt b { font-weight: var(--pd-weight-medium); white-space: nowrap; }
+  .item .txt span { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
+  .item.add { padding-left: 12px; }
+  .item.added .txt b, .item.added .kicon { color: var(--pd-text-muted); }
+  .item.dragging { position: absolute; left: 12px; right: -12px; z-index: 2; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); box-shadow: var(--pd-shadow-2); }
+  /* CDK drop placeholder: the full row, dashed accent outline on the accent tint. */
+  .item.placeholder { background: var(--pd-accent-tint); outline: 1px dashed var(--pd-accent); outline-offset: -4px; }
+  .item.placeholder > * { visibility: hidden; }
+  .select { display: inline-flex; align-items: center; gap: 6px; height: var(--pd-control-height); padding: 0 6px 0 10px; border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-input); background: var(--pd-surface-1); white-space: nowrap; }
+  .select svg.i { color: var(--pd-text-muted); }
+  .toggle { display: inline-flex; height: var(--pd-control-height); border: 1px solid var(--pd-border-strong); border-radius: var(--pd-radius-control); overflow: hidden; font-size: var(--pd-text-label); flex: none; }
+  .toggle span { display: inline-grid; place-items: center; padding: 0 10px; }
+  .toggle span + span { border-left: 1px solid var(--pd-border-strong); }
+  .toggle span.on { background: var(--pd-accent-tint); font-weight: var(--pd-weight-semibold); box-shadow: inset 0 0 0 1px var(--pd-accent); }
+  .hint { display: flex; align-items: center; gap: 6px; margin: 8px 0 20px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+  .annot { margin: 6px 0 0; padding-left: 10px; border-left: 2px dashed var(--pd-border-strong); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-subtle); font-style: normal; }
+  .limit { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 8px 12px; border-radius: var(--pd-radius-control); background: var(--pd-info-tint); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
+  .limit svg.i { color: var(--pd-info); }
+  .ch-foot { display: flex; align-items: center; margin: 12px 0 0 -8px; }
+  .preview-label { font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); margin: 0 0 6px; }
+  .snack { position: absolute; right: 16px; bottom: 16px; width: 360px; display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 16px; background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-popover); box-shadow: var(--pd-shadow-2); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Dyno's icon set (app/src/app/shared/icons.ts) and paddock-ui's generic glyphs; 24 px grid, 1.5 px stroke. -->
+    <symbol id="cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/><rect x="9.5" y="9.5" width="5" height="5" rx=".5"/><path d="M9 2.5V6M15 2.5V6M9 18v3.5M15 18v3.5M2.5 9H6M2.5 15H6M18 9h3.5M18 15h3.5"/></symbol>
+    <symbol id="memory" viewBox="0 0 24 24"><rect x="2.5" y="7" width="19" height="9" rx="1.5"/><path d="M6 10v3M10 10v3M14 10v3M18 10v3M5 16v2.5M19 16v2.5M9 16v2.5M15 16v2.5"/></symbol>
+    <symbol id="disk" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="12" cy="11" r="4"/><circle class="dot" cx="12" cy="11" r=".9"/><circle class="dot" cx="7" cy="17" r=".9"/></symbol>
+    <symbol id="network" viewBox="0 0 24 24"><path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M2 9a14.5 14.5 0 0 1 20 0"/><circle class="dot" cx="12" cy="19.2" r=".9"/></symbol>
+    <symbol id="bell" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></symbol>
+    <symbol id="shield-check" viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z"/><path d="m8.8 12 2.2 2.2 4.2-4.4"/></symbol>
+    <symbol id="issue" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M9.2 9.2a2 2 0 1 1 2.8 1.8c-.6.3-1 .8-1 1.5"/><circle class="dot" cx="11" cy="15" r=".9"/></symbol>
+    <symbol id="pin" viewBox="0 0 24 24"><path d="M9 4h6l-.8 5.5 3 3.2H6.8l3-3.2z"/><path d="M12 12.7V20"/></symbol>
+    <symbol id="processes" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 13h8M8 16.5h5"/></symbol>
+    <symbol id="alert" viewBox="0 0 24 24"><path d="M10.3 4.2 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4.5"/><circle class="dot" cx="12" cy="17.2" r=".9"/></symbol>
+    <symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle class="dot" cx="12" cy="7.8" r=".9"/></symbol>
+    <symbol id="error" viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM9 9l6 6M15 9l-6 6"/></symbol>
+    <symbol id="check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8.2 12.3 2.6 2.6 5-5.4"/></symbol>
+    <symbol id="check" viewBox="0 0 24 24"><path d="m4.5 12.5 5 5 10-11"/></symbol>
+    <symbol id="chevron-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="more" viewBox="0 0 24 24"><circle class="dot" cx="5.5" cy="12" r="1.25"/><circle class="dot" cx="12" cy="12" r="1.25"/><circle class="dot" cx="18.5" cy="12" r="1.25"/></symbol>
+    <symbol id="grip" viewBox="0 0 24 24"><circle class="dot" cx="9" cy="6.5" r="1.25"/><circle class="dot" cx="15" cy="6.5" r="1.25"/><circle class="dot" cx="9" cy="12" r="1.25"/><circle class="dot" cx="15" cy="12" r="1.25"/><circle class="dot" cx="9" cy="17.5" r="1.25"/><circle class="dot" cx="15" cy="17.5" r="1.25"/></symbol>
+    <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66L20 8.5M20 4v4.5h-4.5"/></symbol>
+    <symbol id="power" viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></symbol>
+    <symbol id="arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></symbol>
+    <symbol id="tune" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+    <symbol id="trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12.5h10L18 7M9 7V4.5h6V7"/></symbol>
+    <symbol id="keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M7 14.5h10"/><circle class="dot" cx="6.5" cy="10" r=".9"/><circle class="dot" cx="10" cy="10" r=".9"/><circle class="dot" cx="13.5" cy="10" r=".9"/><circle class="dot" cx="17" cy="10" r=".9"/></symbol>
+    <symbol id="dashboard" viewBox="0 0 24 24"><path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4-5"/><circle class="dot" cx="12" cy="15" r="1.4"/><path d="M4 19h16"/></symbol>
+    <symbol id="settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="monitor" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8.5 21h7M12 17v4"/></symbol>
+    <symbol id="plug" viewBox="0 0 24 24"><path d="M9 2.5V7M15 2.5V7M6.5 7h11v3.5a5.5 5.5 0 0 1-11 0zM12 16v5.5"/></symbol>
+    <symbol id="to-top" viewBox="0 0 24 24"><path d="M5 4.5h14M12 20V9M6.5 14.5 12 9l5.5 5.5"/></symbol>
+    <symbol id="to-bottom" viewBox="0 0 24 24"><path d="M5 19.5h14M12 4v11M6.5 9.5 12 15l5.5-5.5"/></symbol>
+    <symbol id="spark-mini" viewBox="0 0 24 24"><path d="M2.5 15l4-4 3.5 3 4.5-7 3.5 4.5 3.5-2.5"/></symbol>
+  </defs>
+</svg>
+
+<!-- 1. The popup with the default widgets -->
+<figure id="f-popover"><div class="desk" data-popover="defaults"></div></figure>
+<!-- 2. The other kinds, with the footer menu open from the keyboard -->
+<figure id="f-popover-more"><div class="desk" data-popover="more"></div></figure>
+<!-- 3. The agent stopped: one notice for the surface, the widgets keep their last values, marked -->
+<figure id="f-popover-agent"><div class="desk" data-popover="agent"></div></figure>
+<!-- 4. Loading, empty, error, and working or stale, per kind -->
+<figure id="f-states"><div class="sheet" id="sheet"></div></figure>
+<!-- 5. The chooser in Settings, with the live preview at the popup's real width -->
+<figure id="f-chooser"><div class="win" id="chooser"></div></figure>
+<!-- 6. The chooser at its limit: added kinds, another volume, the width toggle -->
+<figure id="f-chooser-limit"><div class="win" id="chooser-limit" style="width: 928px"></div></figure>
+<!-- 7. Dragging (drop placeholder), the row menu from the keyboard, and Undo -->
+<figure id="f-chooser-actions"><div class="win" id="chooser-actions" style="width: 928px"></div></figure>
+
+<script>
+  // ---------------------------------------------------------------- helpers
+  function series(seed, n, base, amp, wobble = 0.35) {
+    let x = seed, out = [];
+    for (let i = 0; i < n; i++) { x = (x * 9301 + 49297) % 233280; const r = x / 233280; base += (r - 0.5) * amp * wobble; out.push(Math.max(2, Math.min(98, base + Math.sin(i / 3 + seed) * amp * 0.25))); }
+    return out;
+  }
+  function spark(values, color, { fill = true, dash = false, w = 132, h = 24 } = {}) {
+    const step = w / (values.length - 1);
+    const pts = values.map((v, i) => [i * step, h - 1 - (v / 100) * (h - 2)]);
+    const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('');
+    const area = fill ? `<path d="${d}L${w} ${h}L0 ${h}Z" fill="${color}" fill-opacity="0.13"/>` : '';
+    const last = pts[pts.length - 1];
+    return `${area}<path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" ${dash ? 'stroke-dasharray="3 2"' : ''}/>` + (fill ? `<circle cx="${last[0] - 2}" cy="${last[1]}" r="2" fill="${color}"/>` : '');
+  }
+  const svgSpark = (inner, label) => `<svg class="spark sk" viewBox="0 0 132 24" preserveAspectRatio="none" role="img" aria-label="${label}">${inner}</svg>`;
+  const icon = (id, cls = '') => `<svg class="i ${cls}" aria-hidden="true"><use href="#${id}"/></svg>`;
+
+  // ---------------------------------------------------------------- the catalogue (what the engine sends as KindInfo)
+  const CAT = {
+    alarms: { icon: 'bell', title: 'Active alarms', summary: 'Most severe first, up to 2', spans: [2] },
+    disk: { icon: 'disk', title: 'Disk space', summary: 'Free space per volume', spans: [2], max: 4 },
+    cpumem: { icon: 'cpu', title: 'CPU and memory', summary: 'Load and use now, with the last minute', spans: [2] },
+    net: { icon: 'network', title: 'Network', summary: 'Download and upload now', spans: [1, 2] },
+    backup: { icon: 'shield-check', title: 'Backup', summary: 'When the last backup finished', spans: [1, 2] },
+    issue: { icon: 'issue', title: 'Last issue', summary: 'The newest problem Dyno found', spans: [2] },
+    counters: { icon: 'pin', title: 'Pinned counters', summary: 'The first 4 counters you pinned', spans: [2] },
+    apps: { icon: 'processes', title: 'Top apps', summary: 'The five busiest apps by CPU', spans: [2] },
+  };
+  const head = (k, meta = '', stale = false) => `<div class="w-head">${icon(CAT[k].icon, 's14')}<span>${CAT[k].title}</span>${meta ? `<span class="meta num${stale ? ' stale' : ''}">${stale ? icon('clock', 's14') : ''}${meta}</span>` : ''}</div>`;
+  const frame = (k, body, { half = false, meta = '', stale = false, cls = '' } = {}) => `<section class="w${half ? ' span1' : ''} ${cls}" aria-label="${CAT[k].title}">${head(k, meta, stale)}${body}</section>`;
+
+  // ---------------------------------------------------------------- ready widgets (one function per kind; .sk = skeleton part)
+  const W = {
+    alarms: (o = {}) => frame('alarms', `<div class="rows">
+        <button class="row"><span class="badge b-warn sk">${icon('alert')}Warning</span><span class="truncate spacer sk">Memory pressure is high</span><span class="when num sk">4 min ago</span></button>
+        <button class="row${o.hover ? ' hover' : ''}"><span class="badge b-info sk">${icon('info')}Info</span><span class="truncate spacer sk">New login item: Docker Desktop</span><span class="when num sk">1 h ago</span>${o.hover ? icon('chevron-right', 's14 chev') : ''}</button>
+      </div>`, { meta: o.meta ?? '2 active', stale: o.stale, cls: o.cls }),
+    disk: (o = {}) => frame('disk', `<div>
+        <div class="vol"><span class="name"><span class="truncate sk">Macintosh HD</span></span><span class="free sk">182 GB free of 994 GB</span><span class="bar sk"><i style="width:82%"></i></span></div>
+        <div class="vol"><span class="name"><span class="truncate sk">Projects</span><span class="badge b-warn sm sk">${icon('alert')}Low</span></span><span class="free sk">19 GB free of 500 GB</span><span class="bar warn sk"><i style="width:96%"></i></span></div>
+        <div class="vol"><span class="name"><span class="truncate sk">Time Machine</span></span><span class="free sk">1.21 TB free of 4 TB</span><span class="bar sk"><i style="width:70%"></i></span></div>
+      </div>`, { meta: o.meta ?? '3 volumes', stale: o.stale, cls: o.cls }),
+    cpumem: (o = {}) => frame('cpumem', `<div class="split">
+        <div class="metric"><span class="k sk">CPU</span><span class="hero sk">76<small>%</small></span>${svgSpark(spark(series(3, 40, 70, 30), o.stale ? 'var(--pd-text-subtle)' : 'var(--pd-accent)'), 'CPU, last minute')}</div>
+        <span class="div"></span>
+        <div class="metric"><span class="k sk">Memory 16.3 of 32 GB</span><span class="hero sk">51<small>%</small></span>${svgSpark(spark(series(11, 40, 50, 12, 0.15), o.stale ? 'var(--pd-text-subtle)' : 'var(--pd-chart-1)'), 'Memory, last minute')}</div>
+      </div>`, { meta: o.meta ?? 'last minute', stale: o.stale, cls: o.cls }),
+    net: (o = {}) => frame('net', `
+        <span class="hero sk"><span class="subtle" style="font-weight:400" aria-label="down">↓</span> 2.4<small>MB/s</small></span>
+        <span class="line muted num sk"><span aria-label="up">↑</span> 310 KB/s</span>
+        ${svgSpark(spark(series(5, 30, 40, 50), 'var(--pd-text-muted)') + spark(series(9, 30, 12, 14), 'var(--pd-text-subtle)', { fill: false, dash: true }), 'Network, last minute')}`, { half: true, meta: o.meta, stale: o.stale, cls: o.cls }),
+    backup: (o = {}) => frame('backup', `
+        <span class="badge b-ok sk" style="justify-self:start">${icon('check')}OK</span>
+        <span class="sk" style="justify-self:start">Last backup <b class="num" style="font-weight:600">2 h ago</b></span>
+        <span class="line subtle sk">Time Machine</span>`, { half: true, meta: o.meta, stale: o.stale, cls: o.cls }),
+    issue: (o = {}) => frame('issue', `<div class="rows"><button class="row"><span class="badge b-bad sk">${icon('error')}Error</span><span class="truncate spacer sk">Disk write errors on disk4</span><span class="when num sk">Yesterday</span>${icon('chevron-right', 's14 chev')}</button></div>`, { meta: o.meta ?? 'last 7 days', stale: o.stale, cls: o.cls }),
+    counters: (o = {}) => frame('counters', `<div class="rows">
+        <div class="row"><span class="truncate spacer sk">GPU memory in use</span><span class="num sk">3.2 GB</span></div>
+        <div class="row"><span class="truncate spacer sk">Compressed memory</span><span class="num sk">1.14 GB</span></div>
+        <div class="row"><span class="truncate spacer sk">Context switches per second</span><span class="num sk">${o.unavailable ? '<span class="subtle">Unavailable</span>' : '18,420'}</span></div>
+      </div>`, { meta: o.meta ?? '3 pinned', stale: o.stale, cls: o.cls }),
+    apps: (o = {}) => frame('apps', `<div class="rows">
+        <div class="row"><span class="truncate spacer sk">Rust build (cargo)</span><span class="num sk" style="width:44px;text-align:right">42%</span><span class="num subtle sk" style="width:60px;text-align:right">3.15 GB</span></div>
+        <div class="row"><span class="truncate spacer sk">Google Chrome</span><span class="num sk" style="width:44px;text-align:right">6.8%</span><span class="num subtle sk" style="width:60px;text-align:right">4.3 GB</span></div>
+        <div class="row"><span class="truncate spacer sk">WindowServer</span><span class="num sk" style="width:44px;text-align:right">4.1%</span><span class="num subtle sk" style="width:60px;text-align:right">305 MB</span></div>
+      </div>`, { meta: o.meta ?? 'by CPU', stale: o.stale, cls: o.cls }),
+  };
+  const loading = (k) => W[k]({ cls: 'loading', meta: ' ' }).replace('aria-label=', 'aria-busy="true" aria-label=');
+
+  // ---------------------------------------------------------------- copy: one wording, as in ADR 0035 §5's table
+  const COPY = {
+    alarmsCalm: { title: 'No active alarms', when: 'checked 2 min ago' },
+    alarmsError: { title: "Couldn't read alarms", cause: "The alarm store didn't answer.", next: 'Retry' },
+    diskEmpty: { title: "See Time Machine's space when it's connected", detail: "The disk isn't connected now.", next: 'Choose another volume' },
+    diskError: { title: "Couldn't read volumes", cause: "The volume list didn't answer.", next: 'Retry' },
+    netEmpty: { title: 'See traffic when online', detail: 'Offline now.', next: 'Open network' },
+    backupEmpty: { title: 'Know when backups ran', detail: 'No backup set up.', next: 'Set up checks' },
+    backupError: { title: "Couldn't check", cause: 'tmutil failed.', next: 'Retry' },
+    backupWorking: { title: 'Checking', phase: 'Time Machine', progress: '2\u00a0of\u00a03', pct: 66 },
+    issueCalm: { title: 'No issues in the last 7 days', when: 'Open issues', name: 'No issues in the last 7 days. Open issues' },
+    issueError: { title: "Couldn't read issues", cause: 'The issue index is unavailable.', next: 'Retry' },
+    issueWorking: { title: 'Reading system logs', phase: 'Indexing', progress: '12,400 events so far' },
+    countersEmpty: { title: 'Watch your own counters here', detail: 'Pin counters in Dyno; the first 4 show here.', next: 'Pin counters' },
+    countersError: { title: "Couldn't read counters", cause: 'None of the 3 pinned counters answered.', next: 'Retry' },
+    noWidgets: { title: 'Choose what the popup shows', detail: 'Alarms, disk space, live load and more.', next: 'Choose widgets' },
+    agent: { title: 'Agent stopped', detail: 'Readings paused at 14:28.', next: 'Restart agent' },
+  };
+  const calm = () => `<button class="calm" aria-label="${COPY.alarmsCalm.title}, ${COPY.alarmsCalm.when}. Open alarms">${icon('check-circle', 'ok')}<span class="spacer">${COPY.alarmsCalm.title} <span class="subtle" style="font-size:12px">· ${COPY.alarmsCalm.when}</span></span>${icon('chevron-right', 's14 chev')}</button>`;
+  const calmRow = (c) => `<button class="calm" aria-label="${c.name}">${icon('check-circle', 'ok')}<span class="spacer">${c.title} <span class="subtle" style="font-size:12px">· ${c.when}</span></span>${icon('chevron-right', 's14 chev')}</button>`;
+  const empty = (ic, c) => `<div class="st">${icon(ic)}<span class="t">${c.title}</span><span class="d">${c.detail}</span>${c.next ? `<button class="btn text act">${c.next}</button>` : ''}</div>`;
+  const err = (c) => `<div class="st err">${icon('error')}<span class="t">${c.title}</span><span class="d">${c.cause}</span><button class="btn text act">${c.next === 'Retry' ? icon('refresh', 's14') : ''}${c.next}</button></div>`;
+  const working = (c) => `<div class="st" aria-busy="true">${icon('refresh')}<span class="t">${c.title}</span><span class="d">${c.phase} · <span class="num">${c.progress}</span></span><span class="prog">${c.pct ? `<i style="width:${c.pct}%"></i>` : '<i style="width:28%;margin-left:30%"></i>'}</span></div>`;
+
+  // ---------------------------------------------------------------- popovers
+  const POP = {
+    defaults: { cpu: '76%', body: () => W.alarms() + W.disk() + W.cpumem() },
+    more: { cpu: '76%', body: () => W.net() + W.backup() + W.issue() + W.counters(), menu: true },
+    agent: { cpu: '—', stopped: true, scrolls: true, body: () => `<div class="notice" role="alert">${icon('error')}<span class="t">${COPY.agent.title}</span><span class="d">${COPY.agent.detail}</span><button class="btn outlined sm">${COPY.agent.next}</button></div>` + W.alarms({ meta: 'Updated 2 min ago', stale: true }) + W.disk({ meta: 'Updated 2 min ago', stale: true }) + W.cpumem({ meta: 'Paused at 14:28', stale: true }) },
+  };
+  document.querySelectorAll('[data-popover]').forEach((d) => {
+    const p = POP[d.dataset.popover];
+    d.innerHTML = `<div class="menubar"><b>Dyno</b><span>File</span><span>View</span><span>Window</span><span>Help</span><span class="spacer"></span><span class="extra">${icon('spark-mini', 's14')}<span class="num">${p.cpu}</span></span><span class="num">Sat 31 Oct 14:30</span></div>
+      <div class="pop" role="dialog" aria-label="Dyno">
+        <div class="pop-head"><img src="dyno-16.svg" width="16" height="16" alt="" /><strong>Dyno</strong><span class="spacer"></span>${p.stopped ? '' : '<span class="grade"><b class="num">80</b> Good</span>'}<span class="agent${p.stopped ? ' stopped' : ''}"><i></i>${p.stopped ? 'Agent stopped' : 'Monitoring'}</span></div>
+        <div class="pop-body${p.scrolls ? ' scrolls' : ''}"><div class="area">${p.body()}</div></div>
+        <div class="pop-foot"><span class="spacer"></span><button class="btn filled">${icon('arrow-right')}Open Dyno</button><button class="ibtn${p.menu ? ' focus open' : ''}" aria-label="More" aria-haspopup="menu">${icon('more')}</button></div>
+      </div>
+      ${p.menu ? `<div class="menu" role="menu" style="right: 46px; bottom: 82px">
+        <div class="hi" role="menuitem">${icon('tune')}Customize widgets…</div>
+        <div role="menuitem">${icon('settings')}Settings…<kbd>⌘ ,</kbd></div>
+        <hr />
+        <div role="menuitem">${icon('power')}Quit Dyno<kbd>⌘ Q</kbd></div></div>` : ''}`;
+  });
+
+  // ---------------------------------------------------------------- states sheet
+  const sheet = document.getElementById('sheet');
+  sheet.innerHTML = `<h2>Popup widgets: loading, empty, error, working or stale</h2>
+    <p class="lede">The head (icon and title) comes from the catalogue and shows at once. Loading is the ready widget with its parts as skeleton blocks, so its height is the ready height. A busy source is working or stale, never an error. When the agent stops, one notice covers the popup (see the agent figure); no widget repeats it.</p>
+    <div></div><div class="colh">Loading</div><div class="colh">Empty</div><div class="colh">Error</div><div class="colh">Working or stale</div>`;
+  const NA = (t) => `<div class="na">${t}</div>`;
+  const ROWS = [
+    ['alarms', 'span 2 · max 1', loading('alarms'), frame('alarms', calm()), frame('alarms', err(COPY.alarmsError)), W.alarms({ meta: 'Updated 4 min ago', stale: true })],
+    ['disk', 'span 2 · max 4', loading('disk'), frame('disk', empty('plug', COPY.diskEmpty), { meta: 'Time Machine' }), frame('disk', err(COPY.diskError)), W.disk({ meta: 'Updated 3 min ago', stale: true })],
+    ['cpumem', 'span 2 · max 1', loading('cpumem'), NA('No empty state: once the agent runs there is always a reading; before it, loading.'), NA('No error of its own: a stopped agent is the popup’s notice.'), W.cpumem({ meta: 'Paused at 14:28', stale: true })],
+    ['net', 'span 1 or 2 · max 1', loading('net'), frame('net', empty('info', COPY.netEmpty), { half: true }), NA('No error of its own (agent: the notice).'), W.net({ meta: '14:28', stale: true })],
+    ['backup', 'span 1 or 2 · max 1', loading('backup'), frame('backup', empty('clock', COPY.backupEmpty), { half: true }), frame('backup', err(COPY.backupError), { half: true }), frame('backup', working(COPY.backupWorking), { half: true })],
+    ['issue', 'span 2 · max 1', loading('issue'), frame('issue', calmRow(COPY.issueCalm)), frame('issue', err(COPY.issueError)), frame('issue', working(COPY.issueWorking))],
+    ['counters', 'span 2 · max 1', loading('counters'), frame('counters', empty('info', COPY.countersEmpty)), frame('counters', err(COPY.countersError)), W.counters({ unavailable: true })],
+    ['apps', 'span 2 · max 1', loading('apps'), NA('No empty state: there is always a busiest app.'), NA('No error of its own (agent: the notice).'), W.apps({ meta: 'Paused at 14:28', stale: true })],
+  ];
+  for (const [k, rule, ...cells] of ROWS) {
+    const half = CAT[k].spans[0] === 1;
+    sheet.insertAdjacentHTML('beforeend', `<div class="kind"><b>${CAT[k].title}</b><span>${rule}</span></div>` + cells.map((c) => `<div class="cell${half && !c.startsWith('<div class="na') ? ' half' : ''}">${c}</div>`).join(''));
+  }
+  sheet.insertAdjacentHTML('beforeend', `<div class="kind"><b>No widgets</b><span>the whole area</span></div><div class="cell"><div class="w">${empty('tune', COPY.noWidgets)}</div></div><div></div><div></div><div></div>`);
+
+  // ---------------------------------------------------------------- the chooser
+  const nav = `<nav class="nav" aria-label="Settings">
+      <a>${icon('settings')}General</a><a>${icon('dashboard')}Dashboard</a><a class="sel" aria-current="page">${icon('monitor')}Menu bar</a>
+      <a>${icon('bell')}Alarms</a><a>${icon('pin')}Counters</a><a>${icon('shield-check')}Backup</a><a>${icon('clock')}History</a></nav>`;
+  const shownRow = (k, n, of, { control = '', focus = false, cls = '', menuOpen = false } = {}) => `<div class="item ${cls}" role="listitem">
+      <span class="grip${focus ? ' focus' : ''}" role="button" tabindex="0" aria-label="Reorder ${CAT[k].title}, position ${n} of ${of}" aria-describedby="hint">${icon('grip')}</span>
+      ${icon(CAT[k].icon, 'kicon')}<span class="txt"><b>${CAT[k].title}</b><span class="truncate">${CAT[k].summary}</span></span>
+      ${control}<button class="ibtn sm${menuOpen ? ' focus open' : ''}" aria-label="More for ${CAT[k].title}" aria-haspopup="menu">${icon('more')}</button></div>`;
+  const addRow = (k, { added = false, disabled = false, label = 'Add' } = {}) => `<div class="item add${added ? ' added' : ''}" role="listitem">${icon(CAT[k].icon, 'kicon')}<span class="txt"><b>${CAT[k].title}</b><span class="truncate">${CAT[k].summary}</span></span>${added ? `<span class="added-label">${icon('check')}Added</span>` : `<button class="btn outlined sm"${disabled ? ' disabled' : ''}>${icon('plus')}${label}</button>`}</div>`;
+  const volSelect = `<span class="select" role="combobox" aria-label="Volumes">All volumes${icon('chevron-down', 's14')}</span>`;
+  const width = `<span class="toggle" role="group" aria-label="Width"><span class="on">Half</span><span>Full</span></span>`;
+  const hint = `<p class="hint" id="hint">${icon('keyboard', 's14')}Drag to reorder, or focus a handle and press <kbd>⌥ ↑</kbd> or <kbd>⌥ ↓</kbd></p>`;
+  const title = (t) => `<div class="win-title"><span class="lights"><i></i><i></i><i></i></span>${t}</div>`;
+  const cardHead = `<header><h2>Popup widgets</h2><p>Choose what the popup shows, and in what order. Changes apply at once.</p></header>`;
+
+  document.getElementById('chooser').innerHTML = title('Settings') + `<div class="win-main">${nav}
+    <main class="page"><div class="page-title"><h1>Menu bar</h1><p>What Dyno shows in the menu bar and in the popup that opens from it.</p></div>
+      <section class="card">${cardHead}
+        <div class="ch"><div>
+          <p class="ch-label"><span>Shown in the popup</span><span class="count num">4 of 8</span></p>
+          <div class="list" role="list" aria-label="Shown in the popup">${shownRow('alarms', 1, 4)}${shownRow('disk', 2, 4, { control: volSelect, focus: true })}${shownRow('cpumem', 3, 4)}${shownRow('net', 4, 4, { control: width })}</div>
+          ${hint}
+          <p class="ch-label"><span>Add a widget</span></p>
+          <div class="list" role="list" aria-label="Add a widget">${addRow('disk', { label: 'Add volume' })}${addRow('backup')}${addRow('issue')}${addRow('counters')}${addRow('apps')}</div>
+          <div class="ch-foot"><button class="btn text">Reset to defaults</button></div>
+        </div>
+        <div><p class="preview-label">Preview</p>
+          <div class="pop" aria-label="Preview of the popup"><div class="pop-head"><img src="dyno-16.svg" width="16" height="16" alt="" /><strong>Dyno</strong><span class="spacer"></span><span class="grade"><b class="num">80</b> Good</span><span class="agent"><i></i>Monitoring</span></div>
+            <div class="pop-body scrolls"><div class="area">${W.alarms() + W.disk() + W.cpumem() + W.net()}</div></div></div>
+        </div></div>
+      </section></main></div>`;
+
+  document.getElementById('chooser-limit').innerHTML = title('Settings') + `<div class="page"><section class="card">${cardHead}
+      <div style="margin-top:16px">
+        <p class="ch-label"><span>Shown in the popup</span><span class="count num">8 of 8</span></p>
+        <div class="list" role="list">${shownRow('alarms', 1, 8)}${shownRow('disk', 2, 8, { control: volSelect })}${shownRow('net', 3, 8, { control: `<span class="toggle" role="group" aria-label="Width"><span>Half</span><span class="on">Full</span></span>` })}</div>
+        <p class="annot">Mock-up only: the list continues with 5 more rows (Disk space 2, CPU and memory, Backup, Last issue, Pinned counters).</p>
+        <p class="ch-label" style="margin-top:20px"><span>Add a widget</span></p>
+        <p class="limit" role="status">${icon('info', 's14')}The popup holds 8 widgets. Remove one to add another.</p>
+        <div class="list" role="list">${addRow('alarms', { added: true })}${addRow('disk', { disabled: true, label: 'Add volume' })}${addRow('cpumem', { added: true })}${addRow('net', { added: true })}${addRow('backup', { added: true })}${addRow('issue', { added: true })}${addRow('counters', { added: true })}${addRow('apps', { disabled: true })}</div>
+      </div></section></div>`;
+
+  const cap = (t) => `<p class="ch-label" style="margin:0 0 6px"><span>${t}</span></p>`;
+  document.getElementById('chooser-actions').innerHTML = title('Settings') + `<div class="page" style="min-height: 820px"><section class="card">${cardHead}
+      <div style="margin-top:16px; position:relative">
+        ${cap('Dragging Disk space: the drop placeholder is the full row')}
+        <div class="list" role="list">${shownRow('alarms', 1, 4)}<div class="item placeholder" aria-hidden="true">${icon('grip')}<span class="txt"><b>x</b><span>x</span></span></div>${shownRow('cpumem', 3, 4)}${shownRow('net', 4, 4, { control: width })}</div>
+        <div class="item dragging" style="top: 112px; left: 40px; right: -28px">${'<span class="grip" style="cursor:grabbing">' + icon('grip') + '</span>'}${icon('disk', 'kicon')}<span class="txt"><b>Disk space</b><span class="truncate">Free space per volume</span></span>${volSelect}<button class="ibtn sm">${icon('more')}</button></div>
+      </div>
+      <div style="margin-top:24px; position:relative">
+        ${cap('The row menu, opened from the keyboard')}
+        <div class="list" role="list">${shownRow('alarms', 1, 4)}${shownRow('disk', 2, 4, { control: volSelect })}${shownRow('cpumem', 3, 4, { menuOpen: true })}${shownRow('net', 4, 4, { control: width })}</div>
+        <div class="menu" role="menu" style="right: 6px; top: 176px; width: 236px">
+          <div class="hi" role="menuitem">${icon('arrow-up')}Move up<kbd>⌥ ↑</kbd></div>
+          <div role="menuitem">${icon('arrow-down')}Move down<kbd>⌥ ↓</kbd></div>
+          <div role="menuitem">${icon('to-top')}Move to top<kbd>⌥ Home</kbd></div>
+          <div role="menuitem">${icon('to-bottom')}Move to bottom<kbd>⌥ End</kbd></div>
+          <hr /><div class="danger" role="menuitem">${icon('trash')}Remove</div></div>
+      </div></section></div>
+    <div class="snack" role="status"><span class="spacer">Backup removed from the popup.</span><button class="btn text" style="height:28px">Undo</button></div>`;
+</script>
+</body>
+</html>

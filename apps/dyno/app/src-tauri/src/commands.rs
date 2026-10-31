@@ -22,6 +22,10 @@ pub fn parse_request(value: Value) -> Result<Request, CommandError> {
         Request::SaveInventoryReport { .. } | Request::SaveDiagnostics { .. } | Request::SaveReport { .. } | Request::SaveIssues { .. } => {
             Err(CommandError::bad("Use the Export or Save button: it asks where to save the file."))
         }
+        // The widget layouts have their own commands (typed arguments, the popup's values are the app's own).
+        Request::WidgetLayout { .. } | Request::EditWidgetLayout { .. } | Request::PopoverValues { .. } => {
+            Err(CommandError::bad("Use the widget commands for layouts and the popup's values."))
+        }
         r => Ok(r),
     }
 }
@@ -40,6 +44,136 @@ pub fn handle(link: &AgentLink, shell: &Shell, window: &str, request: Request) -
             .settings_changed(s, link)
             .map_err(|m| CommandError::new(crate::dto::ErrorCode::AccessDenied, m))?;
     }
+    reply
+        .into_json()
+        .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
+}
+
+/// One surface's widget layout (the chooser, the dashboard): the agent's view of it.
+#[tauri::command]
+pub async fn widget_layout(link: State<'_, Arc<AgentLink>>, surface: dyno_core::widgets::DynoSurface) -> Result<Value, CommandError> {
+    let link = link.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || to_json(link.call(Request::WidgetLayout { surface })?))
+        .await
+        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
+/// An edit of one surface's widget layout. The agent validates the whole result and saves it; a refused edit answers why.
+#[tauri::command]
+pub async fn edit_widget_layout(link: State<'_, Arc<AgentLink>>, edit: dyno_core::widgets::SurfaceEdit) -> Result<Value, CommandError> {
+    let link = link.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || to_json(link.call(Request::EditWidgetLayout { edit })?))
+        .await
+        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
+/// The tray popup has opened and asks for its first paint: it counts as visible from now and its slow widgets are asked for
+/// at once; later values are pushed (`dyno://popover-values`) while it stays visible.
+#[tauri::command]
+pub async fn popover_values(shell: State<'_, Arc<Shell>>) -> Result<Value, CommandError> {
+    let shell = shell.inner().clone();
+    serde_json::to_value(shell.popover_opened()).map_err(|e| CommandError::internal(format!("The popup values could not be read: {e}")))
+}
+
+/// The popup's values as known now (the body of `popover_snapshot`): no visibility change, no ask, no broadcast.
+pub fn snapshot_value<R: tauri::Runtime>(shell: &crate::shell::ShellOf<R>) -> Result<Value, CommandError> {
+    serde_json::to_value(shell.popover_snapshot()).map_err(|e| CommandError::internal(format!("The popup values could not be read: {e}")))
+}
+
+/// The Settings preview's values (the body of `popover_preview`): the slow widgets are asked of the agent, the popup is
+/// not marked visible. Blocking.
+pub fn preview_value<R: tauri::Runtime>(shell: &crate::shell::ShellOf<R>) -> Result<Value, CommandError> {
+    serde_json::to_value(shell.popover_preview()).map_err(|e| CommandError::internal(format!("The popup values could not be read: {e}")))
+}
+
+/// The popup's values as known now, for a view that does not open the popup.
+#[tauri::command]
+pub async fn popover_snapshot(shell: State<'_, Arc<Shell>>) -> Result<Value, CommandError> {
+    snapshot_value(shell.inner())
+}
+
+/// The popup's values for the Settings preview, with the slow widgets asked of the agent now. It does not mark the popup
+/// visible (only `popover_values`, the popup's own first paint, does).
+#[tauri::command]
+pub async fn popover_preview(shell: State<'_, Arc<Shell>>) -> Result<Value, CommandError> {
+    let shell = shell.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || preview_value(&shell))
+        .await
+        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
+/// Readings of metrics from the newest live update, with the tone of each against its thresholds: the dashboard's widgets
+/// and the previews of the menu-bar and popup choosers. The answer is in the order of the queries.
+#[tauri::command]
+pub async fn metric_readings(shell: State<'_, Arc<Shell>>, queries: Vec<dyno_core::widgets::ReadingQuery>) -> Result<Value, CommandError> {
+    serde_json::to_value(shell.metric_readings(&queries))
+        .map_err(|e| CommandError::internal(format!("The readings could not be read: {e}")))
+}
+
+/// For each kind the chooser can add: a ready default widget and the metrics the engine accepts for it.
+#[tauri::command]
+pub async fn widget_choices() -> Result<Value, CommandError> {
+    serde_json::to_value(dyno_core::widgets::widget_choices())
+        .map_err(|e| CommandError::internal(format!("The choices could not be read: {e}")))
+}
+
+/// The page or Settings section a widget asked the main window to open, once: a window that was still being created when
+/// the button was pressed asks for it as it starts.
+#[tauri::command]
+pub async fn take_navigation(shell: State<'_, Arc<Shell>>) -> Result<Value, CommandError> {
+    serde_json::to_value(shell.take_navigation()).map_err(|e| CommandError::internal(format!("The navigation could not be read: {e}")))
+}
+
+/// The app's real ports for a widget's button.
+struct LivePorts {
+    app: AppHandle,
+    link: Arc<AgentLink>,
+    shell: Arc<Shell>,
+}
+
+impl crate::actions::ActionPorts for LivePorts {
+    fn navigate(&self, to: dyno_core::widgets::popover_values::Navigate) -> Result<(), CommandError> {
+        // The main window is shown (or created) first; the request waits in the shell until the window takes it.
+        self.shell.navigate(to);
+        paddock_window::tauri::reopen(&self.app);
+        Ok(())
+    }
+    fn refresh(&self) {
+        self.shell.popover_changed();
+    }
+    fn start_backup_check(&self) -> Result<(), CommandError> {
+        self.link
+            .call(Request::StartJob {
+                spec: dyno_core::jobs::JobSpec::RefreshBackup,
+            })
+            .map(|_| ())
+    }
+    fn restart_agent(&self) {
+        self.link.retry();
+    }
+}
+
+/// A widget's button. The action is the closed `WidgetActionId`; what it does is `WidgetActionId::effect`, run through
+/// [`crate::actions::run`].
+#[tauri::command]
+pub async fn run_widget_action(
+    app: AppHandle,
+    link: State<'_, Arc<AgentLink>>,
+    shell: State<'_, Arc<Shell>>,
+    action: dyno_core::widgets::popover_values::WidgetActionId,
+) -> Result<Value, CommandError> {
+    let ports = LivePorts {
+        app,
+        link: link.inner().clone(),
+        shell: shell.inner().clone(),
+    };
+    tauri::async_runtime::spawn_blocking(move || crate::actions::run(action.effect(), &ports))
+        .await
+        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))??;
+    Ok(Value::Null)
+}
+
+fn to_json(reply: Reply) -> Result<Value, CommandError> {
     reply
         .into_json()
         .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))

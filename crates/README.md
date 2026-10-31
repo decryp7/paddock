@@ -131,6 +131,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-net` | outbound HTTP policy: one `Egress` door with https only (plain http to this computer), reach limits (public / LAN / loopback) checked on every address and redirect hop and on the addresses the socket connects to, link-local/metadata never reachable, body and redirect caps, host allow-list, offline switch, per-host gap, conditional requests; `Wire`/`Lookup` ports, `Egress::check_host`/`check_host_with` (the door for connections that are not HTTP; `PublicAccess::Deny` leaves this computer and private networks only), a slim build (`default-features = false`: address classes, `Lookup`, `check_host`, no ureq or rustls), `UreqWire` on paddock-download's TLS and proxy set-up with connection reuse, fakes, `paddock_download::Transport` adapter (plan X16) | yes (Pitwall, Spotter, Pitcrew, Debrief, channels); built |
 | `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
+| `paddock-widgets` | widget layouts (ADR 0035): a closed catalogue per app and surface, placements with limits, versioned lenient reading (`Stored`), edits as pure commands with one level of undo, the ready/empty/error state envelope; generated TypeScript | yes (Dyno first; Pitwall, Spotter later); built |
 | `paddock-panels` | pop-out panel windows, drag ghost, UI-state forwarding (X50 W3) | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
 | `paddock-chromium` | the one Chromium driver: discovery (tests only `CHROMIUM_TEST_PATH`), one command-line builder with the start page last, `Sandbox::decide`, supervised launch with a time limit on an injected clock and a memory cap, DevTools client, pages, readiness and challenge rules, AI cue, the pinned Chrome for Testing runtime, a fake browser for tests (plan X14) | yes (Debrief, Spotter; Sighter later); built |
@@ -594,6 +595,28 @@ builder.setup(move |app| {
   icon or single-instance lock reaches the desktop (rule 7). The untestable glue (the tray icon's create/update, window
   effects, the run and close events Tauri does not let tests build) is `src/tauri/native.rs`, outside coverage. `tests/native_menu.rs` has no harness, so the native menu
   is built on the main thread (macOS builds menus there only); the builder is made, never built.
+## `paddock-widgets` (family ADR 0035)
+
+Widget layouts, shared: everything about a layout that is not what a widget shows. Pure: no I/O, no Tauri, no `tauri`
+feature (the commands stay in the app, which owns where settings live).
+
+- `Catalogue` (an app's closed `Widget` enum, `Surface` limits and `noun`, `KindSpec` per kind, `defaults()`, `presets()`),
+  `check_catalogue` (the app's one test of it), `assign_ids`.
+- `Layout`, `Placement`, `Preset`, `PlacementId`, `PresetId` (1 to 64 of `a-z0-9-`, parsed once); the app names its
+  surfaces (`Catalogue::SurfaceId`) and its action enum (`WidgetAction<A>`).
+- `read::<C>(&Value)` never fails: a layout that cannot be read (damaged, oversized, newer) gives the defaults and one `Note` and is kept unchanged
+  (`Read::unread`, written back as the same JSON value); a newer one is refused for edits (`Stored::edit` gives
+  `NewerLayout`), a damaged or oversized one is replaced by the first edit; each invalid, unknown,
+  duplicate or surplus entry is dropped on its own with a count (at most twice the limit is looked at). `Stored<C>` is
+  the same as a `#[serde(default)]` settings field.
+- `Edit` (add, remove, move, resize, replace, apply/save/delete preset, reset, undo) and `apply::<C>(&layout, edit)`,
+  a pure `Layout -> Result<Layout, WidgetError>`; remove, apply preset and reset keep one undo level.
+- `info`, `view` -> `LayoutView` for the chooser; `WidgetState` (ready, working, empty, error), `PlacementState`,
+  `SurfaceValues` for values. The `ts` feature derives `TS` for apps' own catalogue types.
+- Generated TypeScript: `ui/projects/paddock-ui/widgets/generated/widgets.ts`
+  (`PADDOCK_WRITE_TS=1 cargo test -p paddock-widgets --lib generated`).
+- Tests: a three-kind test catalogue in `tests/it`, a proptest over arbitrary JSON and edit runs, the stale-file check.
+
 ## `paddock-menu` (plan S13)
 
 One menu model for the native menu bar and the in-app menus (ADR 0012 §3, ported from Debrief's `menu.rs`, ADR 0008).

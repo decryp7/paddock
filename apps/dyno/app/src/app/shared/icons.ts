@@ -1,6 +1,7 @@
 import { inject, provideAppInitializer } from '@angular/core';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
+import { WIDGET_ICONS } from './widget-icons';
 
 /** A 24 px line icon: 1.75 px strokes in `currentColor`, round caps and joins. */
 const line = (body: string) =>
@@ -19,6 +20,7 @@ export const ICONS = {
   health: line('<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/><path d="M7.5 12h2.5l1.2-2.2 1.8 4.2 1.2-2h2.3"/>'),
   reports: line('<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'),
   settings: line('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+  sliders: line('<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>'),
   sidebar: line('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>'),
 
   // Metrics.
@@ -105,5 +107,7 @@ export function provideIcons() {
       // Our own constant markup, never data from the engine or the network.
       registry.addSvgIconLiteralInNamespace('dy', name, sanitizer.bypassSecurityTrustHtml(svg));
     }
+    // The widget catalogues' icon names (`KindInfo.icon`) are bare, so they live in the default namespace.
+    for (const [name, svg] of Object.entries(WIDGET_ICONS)) registry.addSvgIconLiteral(name, sanitizer.bypassSecurityTrustHtml(svg));
   });
 }

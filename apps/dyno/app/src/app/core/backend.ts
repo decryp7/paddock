@@ -71,6 +71,8 @@ import type {
   StartupFilter,
   StartupOverview,
 } from './api.types';
+import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
+import type { PopoverSurfaceValues } from './widget-types';
 
 /** Stops a subscription. */
 export type Unsubscribe = () => void;
@@ -242,6 +244,32 @@ export interface DynoBackend {
   startJob(spec: JobSpec): Promise<number>;
   /** What a done job produced; `notFound` when the job is not done or too old to be kept. */
   jobResult(id: number): Promise<JobOutput>;
+
+  // Widget layouts (family ADR 0035): the engine owns the layouts, their limits, edits and undo; the UI draws and sends edits.
+  /** One surface's layout with its catalogue, built-in presets, notes, `canUndo` and `editable`. */
+  widgetLayout(surface: DynoSurface): Promise<SurfaceView>;
+  /** Applies one edit; answers the new view, or rejects with the reason it was refused (the message says what to change). */
+  editWidgetLayout(edit: SurfaceEdit): Promise<SurfaceView>;
+  /** The popup's values now (the first paint; later ones are pushed). */
+  popoverValues(): Promise<PopoverSurfaceValues>;
+  /** The popup's values as they are now, for the Settings preview: asking changes nothing about the popover's visibility or its pushes. */
+  popoverSnapshot(): Promise<PopoverSurfaceValues>;
+  /** The values for the Settings preview, with the slow widgets asked of the agent now. It never marks the popover visible. */
+  popoverPreview(): Promise<PopoverSurfaceValues>;
+  /** A widget's button: open a page, retry, start the backup check, restart the agent, open Settings. */
+  runWidgetAction(action: WidgetActionId): Promise<void>;
+  /** The popup's values, pushed while the popover is visible (`dyno://popover-values`). */
+  onPopoverValues(listener: (v: PopoverSurfaceValues) => void): Unsubscribe;
+  /** A surface's layout changed in the agent, from any window (`dyno://widget-layout`). */
+  onWidgetLayout(listener: (surface: DynoSurface) => void): Unsubscribe;
+  /** The main window is asked to open a page or a Settings section (`dyno://navigate`). */
+  onNavigate(listener: (to: Navigate) => void): Unsubscribe;
+  /** The page or Settings section a widget asked for, once: a main window that was still being created misses the event. */
+  takeNavigation(): Promise<Navigate | null>;
+  /** Readings (value, text, scale and tone against each query's thresholds) from the newest live update, in the queries' order. */
+  metricReadings(queries: ReadingQuery[]): Promise<MetricReading[]>;
+  /** For each kind a chooser can add: a ready default widget and the metrics the engine accepts for it. */
+  widgetChoices(): Promise<WidgetChoices>;
 
   // The tray popover window (the shell places and fits it).
   /** Shows and focuses the main window (and hides the tray popover). */

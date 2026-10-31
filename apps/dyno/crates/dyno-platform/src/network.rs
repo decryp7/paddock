@@ -100,7 +100,8 @@ impl NetworkSockets for OsSockets {
     }
 }
 
-/// The parents of `pids` (the holders of shared sockets: usually none, so usually nothing is read).
+/// The parents of `pids` (the holders of shared sockets: usually none, so usually nothing is read). A holder whose parent cannot
+/// be read yet is listed on its own until the next listing.
 #[cfg(not(windows))]
 fn parents_of(pids: impl Iterator<Item = u32>) -> std::collections::HashMap<u32, u32> {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
@@ -278,11 +279,23 @@ mod tests {
             // deadline is a hang guard).
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        let rows = OsSockets.sockets().unwrap();
-        let listening: Vec<&SocketRow> = rows
-            .iter()
-            .filter(|r| r.proto == Proto::Tcp && r.state == SocketState::Listen && r.local_port == port)
-            .collect();
+        // The parents of the holders are read from the process table at the moment of the listing; under load that read can miss
+        // a process that has only just started, and the child then counts as an owner for that one listing. Wait on the folded
+        // answer (a hang guard bounds it); a fold that never happens still fails with what was listed.
+        let listed = || {
+            OsSockets
+                .sockets()
+                .unwrap()
+                .into_iter()
+                .filter(|r| r.proto == Proto::Tcp && r.state == SocketState::Listen && r.local_port == port)
+                .collect::<Vec<SocketRow>>()
+        };
+        let mut listening = listed();
+        while listening.len() != 1 && std::time::Instant::now() < end {
+            // Paced: each listing runs lsof-like OS calls, so look again a few milliseconds later, not in a spin.
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            listening = listed();
+        }
         assert_eq!(listening.len(), 1, "{listening:?}");
         assert_eq!(listening[0].pid, Some(me), "the parent owns it, not child {kid}");
     }

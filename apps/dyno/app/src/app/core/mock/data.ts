@@ -1,4 +1,3 @@
-import { defaultTrayItems, layoutFromPreset } from './widget-presets';
 import type {
   ActivityEntry,
   Alert,
@@ -181,15 +180,12 @@ export function demoSettings(): Settings {
     launchAtLogin: true,
     sampling: { intervalMs: 1000, processIntervalMs: 2000 },
     retention: { rawHours: 24, minuteDays: 14, quarterHourDays: 90, hourDays: 730 },
-    tray: { metrics: ['cpu', 'memory', 'disk'], style: 'graph' },
     alerts: { enabled: true, lowDiskPercent: 10, overheatCelsius: 95, longHighCpuMinutes: 10 },
     // What the engine's DiskSettings::default() gives (crates/dyno-core/src/disk/settings.rs).
     disk: { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64 },
     jobs: { workers: 'auto' },
     webApi: { enabled: false, port: 7878, lan: false },
-    dashboard: layoutFromPreset('overview'),
     ipLookup: { ipTemplate: 'https://ipinfo.io/{ip}', asnTemplate: '' },
-    trayItems: defaultTrayItems(),
     alarms: { quiet: { enabled: false, startMinute: 22 * 60, endMinute: 7 * 60, criticalBypass: true }, chatterTransitions: 6, chatterWindowMinutes: 30, maxAlarms: 500, keepClearedDays: 14 },
     flightRecorder: true,
     customAlerts: [{ id: 'gpu-load', name: 'GPU load', metric: 'gpuLoad', op: 'above', limit: 90, forSecs: 120, severity: 'warning', enabled: true }],

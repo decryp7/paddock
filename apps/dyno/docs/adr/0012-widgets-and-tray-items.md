@@ -1,6 +1,6 @@
 # 12. Widgets and tray items: the dashboard and the menu-bar items are data, not code
 
-- Status: accepted (2026-10-22); implementation in progress
+- Status: accepted (2026-10-22); **superseded in part by family ADR [0035](../../../../docs/adr/0035-widget-layouts-are-shared.md) (2026-10-31)**: the layout model (the catalogue, limits, edits, presets, undo, reading and saving), the `tray` and `trayItems` settings and their TypeScript copy moved into the shared `paddock-widgets` crate and `@decryp7/paddock-ui/widgets`; the three surfaces (dashboard, menu-bar items, tray popup) are Dyno catalogues in `dyno_core::widgets`. What stays here: widgets and tray items are data, not code, and the reasons for the dashboard's grid look and the per-OS tray rendering
 - Related: ADR 0009 (native feel), 0011 (design system), `app/src/app/features/dashboard`, `app/src/app/features/tray`,
   `dyno_core::tray`, `dyno_core::settings`
 

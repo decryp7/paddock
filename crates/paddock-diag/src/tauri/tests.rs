@@ -685,3 +685,23 @@ fn requests_with_missing_or_mistyped_arguments_are_refused_before_they_run() {
         "nothing was collected for a refused request"
     );
 }
+
+#[test]
+fn naming_the_settings_file_replaces_only_the_settings_section() {
+    let root = tempfile::tempdir().unwrap();
+    let id = paddock_env::AppId::new("demo", "Demo").unwrap();
+    let dirs = paddock_env::AppDirs::resolve(
+        &id,
+        paddock_env::Os::current(),
+        &paddock_env::MapVars::new().with(&id.home_var(), root.path()),
+        None,
+        true,
+    )
+    .unwrap();
+    let plain = Setup::new(AppInfo::new("demo", "Demo", "1", ""), dirs.clone());
+    let before: Vec<String> = plain.sections.iter().map(|s| s.id().to_string()).collect();
+    let named = plain.settings_file("shell-settings.json");
+    let after: Vec<String> = named.sections.iter().map(|s| s.id().to_string()).collect();
+    assert_eq!(before, after, "same sections in the same order");
+    assert!(after.iter().any(|i| i == "settings"));
+}

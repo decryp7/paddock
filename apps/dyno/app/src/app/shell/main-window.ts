@@ -21,6 +21,7 @@ import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS } from './contributions';
 import { aboutBackend, jobsBackend, notifyBackends, settingsBackend, updatesBackend } from './engines';
 import { DynoIcon } from './icon';
 import { tauriBridge, tauriIpc } from './ipc';
+import { provideWidgetNavigation } from './navigate';
 import { SettingsStore } from '../state/settings.store';
 import type { DynoContext } from './context';
 
@@ -60,6 +61,7 @@ export function bootMainWindow(): Promise<unknown> {
       ...(ipc ? [provideShellVersionCheck(ipc.invoke)] : []),
       provideContributions(ABOUT_CONTRIBUTIONS),
       provideShellAbout({ about: aboutBackend, updates: updatesBackend, main: true, ready: windowReady }),
+      provideWidgetNavigation(),
       provideContributions(SETTINGS_CONTRIBUTIONS),
       provideShellSettings({ backend: settingsBackend, appearance: { gate: windowReady } }),
       ...menuModeProviders(!!ipc, window.location.search),

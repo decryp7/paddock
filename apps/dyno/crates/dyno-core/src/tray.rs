@@ -4,7 +4,30 @@
 //! metric's recent values as a filled area. Colours follow the suite icon family: Dyno's hue, the first metric at full
 //! ink and the others at 60 %, the high-load orange when pegged; the track adapts to a light or dark taskbar. The tooltip carries the numbers, so the icon never stands alone.
 
-use crate::settings::{TrayMetric, TrayStyle};
+/// A metric an icon can draw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IconMetric {
+    /// CPU.
+    Cpu,
+    /// Memory.
+    Memory,
+    /// Disk activity.
+    Disk,
+    /// Network activity.
+    Network,
+    /// GPU.
+    Gpu,
+}
+
+/// How an icon draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IconStyle {
+    /// Vertical bars, one per metric.
+    #[default]
+    Bars,
+    /// A small line graph of the first metric.
+    Graph,
+}
 
 /// An RGBA colour.
 pub type Rgba = [u8; 4];
@@ -93,13 +116,13 @@ fn track(dark_taskbar: bool) -> Rgba {
 }
 
 /// Draws the icon. `values` are the metrics with their current value (0–100); `graph` the first metric's recent
-/// values, oldest first, for [`TrayStyle::Graph`]. `size` is clamped to 16–64.
-pub fn render(values: &[(TrayMetric, f32)], graph: &[f32], style: TrayStyle, size: u32, dark_taskbar: bool) -> Icon {
+/// values, oldest first, for [`IconStyle::Graph`]. `size` is clamped to 16–64.
+pub fn render(values: &[(IconMetric, f32)], graph: &[f32], style: IconStyle, size: u32, dark_taskbar: bool) -> Icon {
     let size = size.clamp(16, 64);
     let mut icon = Icon::new(size);
     let pad = size / 16;
     match style {
-        TrayStyle::Bars => {
+        IconStyle::Bars => {
             let n = values.len().clamp(1, 3) as u32;
             let gap = (size / 10).max(1);
             let width = (size - 2 * pad - gap * (n - 1)) / n;
@@ -113,7 +136,7 @@ pub fn render(values: &[(TrayMetric, f32)], graph: &[f32], style: TrayStyle, siz
                 icon.rect(x0, bottom - h, x0 + width, bottom, colour(i, *v, dark_taskbar));
             }
         }
-        TrayStyle::Graph => {
+        IconStyle::Graph => {
             let (top, bottom) = (pad, size - pad);
             icon.rect(pad, top, size - pad, bottom, track(dark_taskbar));
             let cols = size - 2 * pad;
@@ -130,16 +153,16 @@ pub fn render(values: &[(TrayMetric, f32)], graph: &[f32], style: TrayStyle, siz
 }
 
 /// The tooltip next to the icon, e.g. "Dyno — CPU 23% · Memory 61%".
-pub fn tooltip(values: &[(TrayMetric, f32)]) -> String {
+pub fn tooltip(values: &[(IconMetric, f32)]) -> String {
     let parts: Vec<String> = values
         .iter()
         .map(|(m, v)| {
             let name = match m {
-                TrayMetric::Cpu => "CPU",
-                TrayMetric::Memory => "Memory",
-                TrayMetric::Disk => "Disk",
-                TrayMetric::Network => "Network",
-                TrayMetric::Gpu => "GPU",
+                IconMetric::Cpu => "CPU",
+                IconMetric::Memory => "Memory",
+                IconMetric::Disk => "Disk",
+                IconMetric::Network => "Network",
+                IconMetric::Gpu => "GPU",
             };
             format!("{name} {v:.0}%")
         })
@@ -296,9 +319,9 @@ mod tests {
     #[test]
     fn bars_fill_from_the_bottom() {
         let icon = render(
-            &[(TrayMetric::Cpu, 100.0), (TrayMetric::Memory, 0.0)],
+            &[(IconMetric::Cpu, 100.0), (IconMetric::Memory, 0.0)],
             &[],
-            TrayStyle::Bars,
+            IconStyle::Bars,
             32,
             true,
         );
@@ -307,27 +330,27 @@ mod tests {
         assert_eq!(icon.pixel(4, 3), HIGH, "pegged: the high-load colour");
         assert_eq!(icon.pixel(24, 29), track(true), "empty bar shows its track");
         assert_eq!(icon.pixel(0, 0)[3], 0, "padding is transparent");
-        let half = render(&[(TrayMetric::Disk, 50.0)], &[], TrayStyle::Bars, 32, false);
+        let half = render(&[(IconMetric::Disk, 50.0)], &[], IconStyle::Bars, 32, false);
         assert_eq!(half.pixel(16, 29), HUE_ON_LIGHT);
         assert_eq!(half.pixel(16, 4), track(false));
-        let tiny = render(&[(TrayMetric::Gpu, 1.0)], &[], TrayStyle::Bars, 16, false);
+        let tiny = render(&[(IconMetric::Gpu, 1.0)], &[], IconStyle::Bars, 16, false);
         assert_eq!(tiny.pixel(8, 14), HUE_ON_LIGHT, "a little load still shows");
-        let none = render(&[], &[], TrayStyle::Bars, 8, false);
+        let none = render(&[], &[], IconStyle::Bars, 8, false);
         assert_eq!(none.size, 16);
     }
 
     #[test]
     fn graphs_scroll_left() {
         let history: Vec<f32> = (0..100).map(|i| if i == 99 { 100.0 } else { 0.0 }).collect();
-        let icon = render(&[(TrayMetric::Network, 0.0)], &history, TrayStyle::Graph, 32, true);
+        let icon = render(&[(IconMetric::Network, 0.0)], &history, IconStyle::Graph, 32, true);
         assert_eq!(icon.pixel(29, 5), HIGH, "the newest value is at the right edge");
         assert_eq!(icon.pixel(10, 29), track(true));
-        let short = render(&[], &[100.0], TrayStyle::Graph, 32, true);
+        let short = render(&[], &[100.0], IconStyle::Graph, 32, true);
         assert_eq!(short.pixel(29, 20), HIGH);
         let two = render(
-            &[(TrayMetric::Cpu, 50.0), (TrayMetric::Memory, 50.0)],
+            &[(IconMetric::Cpu, 50.0), (IconMetric::Memory, 50.0)],
             &[],
-            TrayStyle::Bars,
+            IconStyle::Bars,
             32,
             true,
         );
@@ -341,11 +364,11 @@ mod tests {
         assert_eq!(tooltip(&[]), "Dyno");
         assert_eq!(
             tooltip(&[
-                (TrayMetric::Cpu, 23.4),
-                (TrayMetric::Memory, 61.0),
-                (TrayMetric::Disk, 1.0),
-                (TrayMetric::Network, 2.0),
-                (TrayMetric::Gpu, 3.0)
+                (IconMetric::Cpu, 23.4),
+                (IconMetric::Memory, 61.0),
+                (IconMetric::Disk, 1.0),
+                (IconMetric::Network, 2.0),
+                (IconMetric::Gpu, 3.0)
             ]),
             "Dyno — CPU 23% · Memory 61% · Disk 1% · Network 2% · GPU 3%"
         );

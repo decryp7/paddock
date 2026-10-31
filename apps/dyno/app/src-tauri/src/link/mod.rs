@@ -81,6 +81,8 @@ pub trait Sink: Send + Sync {
     fn disk_volumes(&self, _volumes: Vec<dyno_core::disk::volume::Volume>) {}
     /// A job's status changed (the newest of each job; a final state always arrives). The shell relays it as `paddock://jobs`.
     fn job(&self, _status: paddock_jobs::wire::WireSnapshot) {}
+    /// A surface's widget layout was edited (by any window).
+    fn widget_layout_changed(&self, _surface: dyno_core::widgets::DynoSurface) {}
     /// The connection state changed.
     fn agent(&self, status: AgentStatus);
     /// A wait for the agent is taking long (`Some`, with its cause), or is over (`None`). The chip shows it with Retry.

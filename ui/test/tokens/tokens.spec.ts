@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { contrast, deltaE, deltaE2000, parseColor, simulate, type Cvd, type Rgba } from './color';
 import { ACCENTS, readRules, resolve, type Contrast, type Scheme, type Vars } from './css';
@@ -99,6 +100,19 @@ describe.each(MODES)('contrast, %s, %s contrast', (scheme, mode) => {
 
   it('the chart neutral bar colour is 3:1 against surface-1', () => {
     expect(ratio(v, '--pd-chart-neutral-bar', '--pd-surface-1')).toBeGreaterThanOrEqual(3);
+  });
+
+  it('the meter neutral fill is 3:1 on every surface a meter sits on (ADR 0035)', () => {
+    for (const s of ['--pd-surface-1', '--pd-surface-2', '--pd-surface-3']) expect(contrast(col(v, '--pd-meter-neutral'), col(v, s))).toBeGreaterThanOrEqual(3);
+  });
+
+  it('the meter neutral fill is 3:1 against its track (the chart grid over surface-2 and surface-3)', () => {
+    for (const s of ['--pd-surface-2', '--pd-surface-3']) expect(contrast(col(v, '--pd-meter-neutral'), on(v, '--pd-chart-grid', s))).toBeGreaterThanOrEqual(3);
+  });
+
+  it('the raised skeleton shows on a surface-2 fill and its shine is a step apart (ADR 0035)', () => {
+    expect(contrast(col(v, '--pd-skeleton-raised'), col(v, '--pd-surface-2'))).toBeGreaterThanOrEqual(1.2);
+    expect(contrast(col(v, '--pd-skeleton-raised'), col(v, '--pd-skeleton-raised-shine'))).toBeGreaterThan(1.05);
   });
 
   it('surfaces are told apart: each step differs from the next', () => {
@@ -266,6 +280,10 @@ describe.each(SCHEMES)('high contrast, %s', (scheme) => {
     expect(col(v, '--pd-scrim').a).toBeGreaterThan(col(standard, '--pd-scrim').a);
   });
 
+  it('the strong border is a 3:1 boundary on the fills a widget frame sits on (the frame outline, ADR 0035)', () => {
+    for (const surface of ['--pd-surface-2', '--pd-surface-3']) expect(contrast(on(v, '--pd-border-strong', surface), col(v, surface)), surface).toBeGreaterThanOrEqual(3);
+  });
+
   it('applies by the OS preference too, unless the app turned it off', () => {
     const os = rules.get('@media (prefers-contrast: more) | :root:not([data-contrast=off])');
     expect(os?.['--pd-hairline']).toBe(rules.get(':root[data-contrast=more]')?.['--pd-hairline']);
@@ -312,5 +330,22 @@ describe('density and structure', () => {
 
   it('hit targets are at least 24 px', () => {
     expect(rules.get(':root')?.['--pd-hit-min']).toBe('24px');
+  });
+});
+
+describe('widget frame (ADR 0035)', () => {
+  const src = (f: string): string => readFileSync(new URL(`../../projects/paddock-ui/widgets/src/${f}`, import.meta.url), 'utf8');
+
+  it('is outlined with the strong border colour in high contrast, by the OS preference and by the app setting', () => {
+    for (const f of ['frame.ts', 'area.ts']) {
+      const text = src(f);
+      expect(text, f).toMatch(/@media \(prefers-contrast: more\) \{ :root:not\(\[data-contrast='off'\]\)[^}]*outline: 1px solid var\(--pd-border-strong\)/);
+      expect(text, f).toMatch(/:root\[data-contrast='more'\][^}]*outline: 1px solid var\(--pd-border-strong\)/);
+    }
+  });
+
+  it('keeps one geometry at every density: no row-height or card-padding token, the popup is 8 / 12 px by design', () => {
+    for (const f of ['frame.ts', 'area.ts']) expect(src(f), f).not.toMatch(/--pd-(row-height|card-padding)/);
+    expect(src('frame.ts')).toContain('padding: var(--pd-space-2) var(--pd-space-3)');
   });
 });

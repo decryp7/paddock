@@ -21,6 +21,7 @@ import { InPageDialogBackend, type InPageDialog } from './in-page';
 import { resolveSize } from './kind';
 import { ModalGate } from './modal-gate';
 import { contentInjector, errorText, mountContent } from './mount';
+import { followDialogInputs } from './retarget';
 import { DialogPresenter, type DialogContent } from './types';
 
 /**
@@ -129,6 +130,7 @@ export class InPageDialogView implements AfterViewInit {
       if (part.injector !== this.environment) this.destroyRef.onDestroy(() => part.injector.destroy());
       const injector = contentInjector(part.injector, entry.ref, entry.inputs);
       const ref = mountContent(host, part.component, injector, part.injector, entry.inputs);
+      this.destroyRef.onDestroy(followDialogInputs(entry.def.id, ref));
       entry.content = ref.instance as DialogContent;
       entry.injector = injector;
       this.contentView.set(ref.changeDetectorRef);

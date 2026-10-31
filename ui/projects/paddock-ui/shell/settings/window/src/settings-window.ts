@@ -15,6 +15,7 @@ import {
   input,
   resource,
   signal,
+  type Signal,
   type Type,
 } from '@angular/core';
 import { loadPart, type SettingsPageDef } from '@decryp7/paddock-ui/shell';
@@ -30,6 +31,15 @@ export const SETTINGS_WINDOW_PAGES = new InjectionToken<readonly SettingsPageDef
 
 /** Restarts the app (keeping its session) so restart-only settings take effect; without it the bar has no button. */
 export const SETTINGS_RESTART = new InjectionToken<() => void | Promise<void>>('PADDOCK_SETTINGS_RESTART');
+
+/** A part of a Settings page to scroll to: the element id, and when it was asked (so asking again scrolls again). */
+export interface SettingsAnchor {
+  readonly id: string;
+  readonly at: number;
+}
+
+/** What a Settings page reads to scroll to a part of itself: the window's `anchor` input. */
+export const SETTINGS_ANCHOR = new InjectionToken<Signal<SettingsAnchor | null>>('PADDOCK_SETTINGS_ANCHOR');
 
 /** A search hit: the fields of one section, or a page that matched by its title. */
 interface Hit {
@@ -218,6 +228,8 @@ export class PdSettingsWindow implements DialogContent {
 
   /** Open at this page (a page or section id); the dialog's input. */
   readonly page = input<string | null>(null);
+  /** A part of the page to bring into view (and when it was asked: asking again for the same one scrolls again); the dialog's input, also set when the open window is opened again. */
+  readonly anchor = input<SettingsAnchor | null>(null);
 
   /** "Discard changes / Keep editing" is showing. */
   protected readonly asking = signal(false);
@@ -279,7 +291,7 @@ export class PdSettingsWindow implements DialogContent {
       return {
         component: part.component as Type<unknown>,
         environment: part.injector,
-        injector: Injector.create({ providers: [{ provide: SETTINGS_PAGE, useValue: page }], parent: this.injector }),
+        injector: Injector.create({ providers: [{ provide: SETTINGS_PAGE, useValue: page }, { provide: SETTINGS_ANCHOR, useValue: this.anchor }], parent: this.injector }),
       };
     },
   });

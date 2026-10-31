@@ -2,14 +2,14 @@
 //! from the live updates (`dyno_core::tray` draws; this picks the numbers). The shell hands the pixels to the OS at most
 //! twice a second and only for items whose picture changed.
 //!
-//! The items come from `settings.tray_items` ([`items_from_settings`]); `DYNO_TRAY_ITEMS` (see [`parse_items`]) overrides
+//! The items come from the menu bar layout the agent keeps ([`items_from_settings`]); `DYNO_TRAY_ITEMS` (see [`parse_items`]) overrides
 //! them for development and measurements. A small always-visible Windows mini-bar window is a documented stub (off by
 //! default; not built yet).
 
 use dyno_core::protocol::LiveUpdate;
-use dyno_core::settings::{TrayMetric, TrayStyle};
-use dyno_core::tray::{self, Icon};
-use dyno_core::widgets::{Metric, TrayItemStyle, TrayItems as TrayItemSettings};
+use dyno_core::tray::{self, Icon, IconMetric, IconStyle};
+use dyno_core::widgets::{read_metric, MenuBarItem, Metric, Thresholds};
+use paddock_widgets::Placement;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
@@ -88,23 +88,24 @@ impl ItemSpec {
     }
 }
 
-/// The items for the user's settings.
-pub fn items_from_settings(s: &TrayItemSettings) -> Vec<ItemSpec> {
-    s.items
+/// The items for the menu bar layout (the agent's, `settings.menu_bar`).
+pub fn items_from_settings(placements: &[Placement<MenuBarItem>]) -> Vec<ItemSpec> {
+    placements
         .iter()
-        .map(|i| {
-            let (glyph, label, unit) = match &i.style {
-                TrayItemStyle::LineGraph => (Glyph::Graph, String::new(), String::new()),
-                TrayItemStyle::VerticalBars if i.metric == Metric::CpuPerCore => (Glyph::CoreBars, String::new(), String::new()),
-                TrayItemStyle::VerticalBars => (Glyph::Bars, String::new(), String::new()),
-                TrayItemStyle::HorizontalMeter => (Glyph::Meter, String::new(), String::new()),
-                TrayItemStyle::Ring => (Glyph::Ring, String::new(), String::new()),
-                TrayItemStyle::Number { unit, label } => (Glyph::Number, label.clone(), unit.clone()),
-                TrayItemStyle::GraphAndNumber => (Glyph::GraphNumber, String::new(), String::new()),
+        .map(|p| {
+            let metric = p.widget.metric().clone();
+            let (glyph, label, unit) = match &p.widget {
+                MenuBarItem::LineGraph { .. } => (Glyph::Graph, String::new(), String::new()),
+                MenuBarItem::VerticalBars { .. } if metric == Metric::CpuPerCore => (Glyph::CoreBars, String::new(), String::new()),
+                MenuBarItem::VerticalBars { .. } => (Glyph::Bars, String::new(), String::new()),
+                MenuBarItem::HorizontalMeter { .. } => (Glyph::Meter, String::new(), String::new()),
+                MenuBarItem::Ring { .. } => (Glyph::Ring, String::new(), String::new()),
+                MenuBarItem::Number { unit, label, .. } => (Glyph::Number, label.clone(), unit.clone()),
+                MenuBarItem::GraphAndNumber { .. } => (Glyph::GraphNumber, String::new(), String::new()),
             };
             ItemSpec {
-                id: i.id.clone(),
-                metric: i.metric.clone(),
+                id: p.id.to_string(),
+                metric,
                 glyph,
                 label,
                 unit,
@@ -196,14 +197,6 @@ pub fn metric_name(m: &Metric) -> String {
     }
 }
 
-fn percent(v: f32) -> Measured {
-    let v = v.clamp(0.0, 100.0);
-    Measured {
-        scale: v,
-        text: format!("{v:.0}%"),
-    }
-}
-
 impl TrayItems {
     /// Items drawn at `size` pixels.
     pub fn new(specs: Vec<ItemSpec>, size: u32) -> TrayItems {
@@ -231,47 +224,32 @@ impl TrayItems {
         true
     }
 
-    /// The reading of `m` in `u`; `None` when the PC cannot measure it.
+    /// The reading of `m` in `u` on the 0 to 100 drawing scale; `None` when the PC cannot measure it. The number comes from
+    /// the engine's one reader ([`read_metric`]); only the scale of the rates (against the busiest second seen) and of the
+    /// words and degrees is the icon's own.
     fn measure(&self, u: &LiveUpdate, m: &Metric) -> Option<Measured> {
-        let s = &u.system;
-        let rate = |bps: f64| Measured {
-            scale: ((bps / self.net_peak) * 100.0).clamp(0.0, 100.0) as f32,
-            text: format!("{:.1} MB/s", bps / 1_000_000.0),
-        };
-        match m {
-            Metric::CpuTotal | Metric::CpuPerCore => Some(percent(s.cpu.total)),
-            Metric::Memory => Some(percent(s.memory_percent())),
-            Metric::MemoryPressure => {
-                let (scale, text) = match u.pressure {
-                    dyno_core::metrics::MemoryPressure::Normal => (20.0, "normal"),
-                    dyno_core::metrics::MemoryPressure::Elevated => (60.0, "elevated"),
-                    dyno_core::metrics::MemoryPressure::Critical => (95.0, "critical"),
-                };
-                Some(Measured { scale, text: text.into() })
-            }
-            Metric::Swap => (s.memory.swap_total > 0).then(|| percent(s.memory.swap_used as f32 / s.memory.swap_total as f32 * 100.0)),
-            Metric::DiskActivity => s.disk_io.busy.value().map(|v| percent(*v)),
-            Metric::DiskFree => s
-                .disks
-                .first()
-                .filter(|d| d.total > 0)
-                .map(|d| percent(d.free as f32 / d.total as f32 * 100.0)),
-            Metric::NetworkUp => Some(rate(s.network_totals().1)),
-            Metric::NetworkDown => Some(rate(s.network_totals().0)),
-            Metric::GpuLoad => s.gpu.value().map(|g| percent(g.utilization)),
-            Metric::Temperature => s.hottest().map(|t| Measured {
-                scale: t.celsius.clamp(0.0, 100.0),
-                text: format!("{:.0} °C", t.celsius),
-            }),
-            Metric::Battery => s.battery.value().map(|b| percent(b.charge)),
-            Metric::Process(name) => Some(percent(
-                u.top_cpu
-                    .iter()
-                    .find(|g| g.name.eq_ignore_ascii_case(name))
-                    .map_or(0.0, |g| g.cpu_read()),
-            )),
-            Metric::Fan | Metric::PerfCounter(_) => None,
+        // A fan speed and a counter have no scale to draw.
+        if matches!(m, Metric::Fan | Metric::PerfCounter(_)) {
+            return None;
         }
+        let r = read_metric(m, u, &Thresholds::default());
+        let value = r.value?;
+        let scale = match (r.percent, m) {
+            (Some(p), _) => p,
+            (None, Metric::NetworkUp | Metric::NetworkDown) => ((value / self.net_peak) * 100.0).clamp(0.0, 100.0) as f32,
+            (None, Metric::MemoryPressure) => match u.pressure {
+                dyno_core::metrics::MemoryPressure::Normal => 20.0,
+                dyno_core::metrics::MemoryPressure::Elevated => 60.0,
+                dyno_core::metrics::MemoryPressure::Critical => 95.0,
+            },
+            (None, _) => (value as f32).clamp(0.0, 100.0),
+        };
+        let text = match r.unit.as_str() {
+            "" => r.text,
+            "%" => format!("{}%", r.text),
+            unit => format!("{} {unit}", r.text),
+        };
+        Some(Measured { scale, text })
     }
 
     /// The pictures that changed since the last call, as `(item id, frame)`.
@@ -319,8 +297,8 @@ impl TrayItems {
         let graph: Vec<f32> = history.iter().copied().collect();
         let v = m.scale;
         let icon = match spec.glyph {
-            Glyph::Bars => tray::render(&[(TrayMetric::Cpu, v)], &[], TrayStyle::Bars, size, dark),
-            Glyph::Graph => tray::render(&[(TrayMetric::Cpu, v)], &graph, TrayStyle::Graph, size, dark),
+            Glyph::Bars => tray::render(&[(IconMetric::Cpu, v)], &[], IconStyle::Bars, size, dark),
+            Glyph::Graph => tray::render(&[(IconMetric::Cpu, v)], &graph, IconStyle::Graph, size, dark),
             Glyph::Meter => tray::render_meter(v, size, dark),
             Glyph::Ring => tray::render_ring(v, size, dark),
             Glyph::Number => tray::render_number(v, size, dark),
@@ -346,8 +324,9 @@ mod tests {
     use dyno_core::metrics::{NetworkSample, Reading};
     use dyno_core::protocol::{LiveUpdate, Overhead};
     use dyno_core::time::Timestamp;
-    use dyno_core::widgets::TrayItem;
+    use dyno_core::widgets::MenuBarCatalogue;
     use dyno_platform::fake::quiet_sample;
+    use paddock_widgets::{assign_ids, Catalogue};
 
     fn update(cpu: f32) -> LiveUpdate {
         let mut system = quiet_sample(Timestamp(0));
@@ -373,14 +352,6 @@ mod tests {
         ItemSpec::new(id, metric, glyph)
     }
 
-    fn setting(id: &str, metric: Metric, style: TrayItemStyle) -> TrayItem {
-        TrayItem {
-            id: id.into(),
-            metric,
-            style,
-        }
-    }
-
     #[test]
     fn the_throttle_lets_one_event_through_per_interval() {
         let mut t = Throttle::new(Duration::from_millis(500));
@@ -392,27 +363,31 @@ mod tests {
 
     #[test]
     fn the_settings_model_maps_to_items() {
-        let default = items_from_settings(&TrayItemSettings::default());
+        let default = items_from_settings(&MenuBarCatalogue::defaults());
         assert_eq!(default.len(), 2);
         assert_eq!((default[0].glyph, &default[0].metric), (Glyph::Bars, &Metric::CpuTotal));
-        let s = TrayItemSettings {
-            version: 1,
-            items: vec![
-                setting("a", Metric::CpuPerCore, TrayItemStyle::VerticalBars),
-                setting(
-                    "b",
-                    Metric::Temperature,
-                    TrayItemStyle::Number {
-                        unit: "C".into(),
-                        label: "Hot".into(),
-                    },
-                ),
-                setting("c", Metric::Memory, TrayItemStyle::GraphAndNumber),
-                setting("d", Metric::Swap, TrayItemStyle::LineGraph),
-                setting("e", Metric::Battery, TrayItemStyle::HorizontalMeter),
-                setting("f", Metric::GpuLoad, TrayItemStyle::Ring),
-            ],
-        };
+        assert_eq!(default[0].id, "vertical-bars");
+        assert_eq!(default[1].id, "vertical-bars-2");
+        let s = assign_ids([
+            (
+                1,
+                MenuBarItem::VerticalBars {
+                    metric: Metric::CpuPerCore,
+                },
+            ),
+            (
+                1,
+                MenuBarItem::Number {
+                    metric: Metric::Temperature,
+                    unit: "C".into(),
+                    label: "Hot".into(),
+                },
+            ),
+            (1, MenuBarItem::GraphAndNumber { metric: Metric::Memory }),
+            (1, MenuBarItem::LineGraph { metric: Metric::Swap }),
+            (1, MenuBarItem::HorizontalMeter { metric: Metric::Battery }),
+            (1, MenuBarItem::Ring { metric: Metric::GpuLoad }),
+        ]);
         let items = items_from_settings(&s);
         let got: Vec<Glyph> = items.iter().map(|i| i.glyph).collect();
         assert_eq!(
@@ -517,7 +492,7 @@ mod tests {
         assert_eq!(f[0].1.tooltip, "Dyno — CPU 100%");
         assert_eq!(f[1].1.tooltip, "Dyno — Download 5.0 MB/s");
         assert!(f[2].1.tooltip.contains("Upload 1.0 MB/s"));
-        assert!(f[3].1.tooltip.contains("normal"));
+        assert!(f[3].1.tooltip.contains("Normal"));
         assert!(f[4].1.tooltip.contains("Swap 0%"), "{}", f[4].1.tooltip);
     }
 

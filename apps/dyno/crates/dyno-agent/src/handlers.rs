@@ -130,7 +130,13 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::SaveSettings { settings } => {
             settings.check_extras().map_err(bad)?;
             let mut core = lock(&shared.core);
-            core.settings = (*settings).normalised();
+            // The layouts change only through `EditWidgetLayout`: a window's copy of the settings, taken before an edit,
+            // must never put an old layout back.
+            let mut incoming = (*settings).normalised();
+            incoming.dashboard = core.settings.dashboard.clone();
+            incoming.menu_bar = core.settings.menu_bar.clone();
+            incoming.popover = core.settings.popover.clone();
+            core.settings = incoming;
             let alarm_config = core.settings.alarms;
             core.alarms.set_config(alarm_config);
             shared.disk.set_limits(core.settings.disk.limits());
@@ -175,7 +181,10 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::CounterObjects => shared.counters.objects().map(|o| Reply::CounterObjects(Box::new(o))),
         Request::CounterObject { name } => shared.counters.object(&name).map(|o| Reply::CounterObject(Box::new(o))),
         Request::CounterSearch { query, limit } => shared.counters.search(&query, limit).map(Reply::CounterHits),
-        Request::CounterValues { paths } => shared.counters.values(&paths, now()).map(Reply::CounterValues),
+        Request::CounterValues { paths } => shared
+            .counters
+            .values(&paths, now())
+            .map(|readings| Reply::CounterValues(toned_by_dashboard(readings, &lock(&shared.core).settings))),
         Request::CounterHistory { paths, minutes } => shared
             .counters
             .history(&paths, minutes, now(), |from, to| {
@@ -317,9 +326,29 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         | Request::SaveInventoryReport { .. }
         | Request::Maintenance
         | Request::Backup) => crate::extras::handle(shared, r),
+        Request::WidgetLayout { surface } => Ok(Reply::WidgetLayout(Box::new(dyno_core::widgets::layout_view(
+            &lock(&shared.core).settings,
+            surface,
+        )))),
+        Request::EditWidgetLayout { edit } => edit_widget_layout(shared, edit),
+        Request::PopoverValues { placements } => {
+            crate::popover::values(shared, &placements).map(|v| Reply::PopoverValues(dyno_core::widgets::JsonOnLink(v)))
+        }
         Request::WeeklyReport { weeks_ago } => weekly_report(shared, weeks_ago).map(|r| Reply::Report(Box::new(r))),
         Request::SaveReport { path, format, weeks_ago } => save_report(shared, &path, format, weeks_ago).map(Reply::ReportSaved),
     }
+}
+
+/// Applies a layout edit, saves the settings and tells every app which surface changed. A refused edit changes nothing and
+/// answers why.
+fn edit_widget_layout(shared: &Arc<Shared>, edit: dyno_core::widgets::SurfaceEdit) -> Answer {
+    let surface = edit.surface();
+    let mut core = lock(&shared.core);
+    let view = dyno_core::widgets::edit_layout(&mut core.settings, edit).map_err(|e| bad(e.to_string()))?;
+    core.save_settings(&shared.dirs);
+    drop(core);
+    shared.broadcast(&Message::WidgetLayoutChanged(surface));
+    Ok(Reply::WidgetLayout(Box::new(view)))
 }
 
 fn known_alarm(shared: &Shared, id: u64) -> Result<(), AgentError> {
@@ -616,4 +645,53 @@ fn plugins(shared: &Shared) -> Vec<PluginInfo> {
             contributes: p.contributes.iter().map(|c| c.as_str().to_string()).collect(),
         })
         .collect()
+}
+
+/// Counter readings toned with the thresholds of the dashboard widget that shows each one (not the popup's or the menu bar's).
+fn toned_by_dashboard(
+    readings: Vec<dyno_core::counters::CounterReading>,
+    settings: &dyno_core::settings::Settings,
+) -> Vec<dyno_core::counters::CounterReading> {
+    dyno_core::widgets::with_dashboard_thresholds(readings, &settings.dashboard.layout().placements)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dyno_core::counters::{CounterReading, CounterUnit};
+    use dyno_core::metrics::Reading;
+    use dyno_core::settings::Settings;
+    use dyno_core::widgets::dashboard::{Thresholds, ValueTone};
+    use dyno_core::widgets::{DashboardKind, DashboardWidget, Metric};
+    use paddock_widgets::Edit;
+
+    const PATH: &str = r"\Processor(_Total)\% Processor Time";
+
+    fn reading() -> CounterReading {
+        CounterReading::new(PATH.into(), CounterUnit::Percent, Reading::Available(60.0))
+    }
+
+    /// The `CounterValues` reply tones a counter with the dashboard widget's own thresholds: the handler reads the dashboard layout
+    /// of the settings (wiring), and a counter no dashboard widget shows keeps its default tone.
+    #[test]
+    fn counter_values_are_toned_by_the_dashboard_widget_that_shows_them() {
+        let mut settings = Settings::default();
+        let mut w = DashboardWidget::new(DashboardKind::Graph, Metric::PerfCounter(PATH.into()));
+        w.thresholds = Thresholds {
+            warning: Some(50.0),
+            critical: Some(80.0),
+        };
+        settings
+            .dashboard
+            .edit(Edit::Add {
+                widget: w,
+                span: None,
+                at: None,
+            })
+            .unwrap();
+        let toned = toned_by_dashboard(vec![reading()], &Settings::default());
+        assert_eq!(toned[0].tone, ValueTone::Ok, "no widget shows it: the default thresholds");
+        let toned = toned_by_dashboard(vec![reading()], &settings);
+        assert_eq!(toned[0].tone, ValueTone::Warn, "the widget's thresholds");
+    }
 }

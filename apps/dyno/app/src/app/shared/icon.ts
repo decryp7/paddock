@@ -18,7 +18,8 @@ import type { IconName } from './icons';
   template: `<mat-icon [svgIcon]="svg()" />`,
   styles: `
     :host { display: inline-flex; flex: none; width: var(--icon-size, 18px); height: var(--icon-size, 18px); line-height: 0; }
-    mat-icon { width: 100%; height: 100%; font-size: 0; }
+    /* Outranks a host's own icon rules (a menu item gives .mat-icon 24 px and a margin): the icon is always the size of its box. */
+    :host mat-icon { width: 100%; height: 100%; margin: 0; font-size: 0; }
   `,
 })
 export class Icon {

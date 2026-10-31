@@ -21,7 +21,10 @@ use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any incompatible change.
-pub const PROTOCOL_VERSION: u32 = 2;
+///
+/// 3: `Settings` lost `tray` and `tray_items` and holds the dashboard, menu bar and popup layouts as `paddock-widgets`
+/// layouts (family ADR 0035); `WidgetLayout`, `EditWidgetLayout`, `PopoverValues` and `WidgetLayoutChanged` are new.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// How much a live subscriber wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -437,6 +440,26 @@ pub enum Request {
         /// The rule's id.
         id: String,
     },
+    /// One surface's layout, with its catalogue, built-in presets, notes and whether it can be edited (ADR 0035).
+    /// Answers [`Reply::WidgetLayout`].
+    WidgetLayout {
+        /// Which surface.
+        surface: crate::widgets::DynoSurface,
+    },
+    /// Edits one surface's layout; the agent validates the whole result, saves it and answers the new view
+    /// ([`Reply::WidgetLayout`]) or the reason it was refused (`BadRequest`, the message says what to change). Pushes
+    /// [`Message::WidgetLayoutChanged`] to every app.
+    EditWidgetLayout {
+        /// The edit; its variant names the surface.
+        edit: crate::widgets::SurfaceEdit,
+    },
+    /// The popup's values for the widgets that are not live (alarms, disk space, backup, last issue, pinned counters),
+    /// from state the agent already keeps. Placements that are not in the popup layout, or are live, are left out.
+    /// Answers [`Reply::PopoverValues`].
+    PopoverValues {
+        /// Which placements.
+        placements: Vec<paddock_widgets::PlacementId>,
+    },
 }
 
 /// Dyno's own cost.
@@ -721,6 +744,12 @@ pub enum Reply {
     JobCancelled(bool),
     /// What a done job produced.
     JobOutput(Box<crate::jobs::JobOutput>),
+
+    // ---- widget layouts ----
+    /// One surface's layout view.
+    WidgetLayout(Box<crate::widgets::SurfaceView>),
+    /// The popup's values for the asked placements.
+    PopoverValues(crate::widgets::JsonOnLink<Vec<crate::widgets::popover_values::PopoverState>>),
 }
 
 /// The inventory report that was written.
@@ -799,6 +828,8 @@ impl Reply {
             Reply::Jobs(x) => v(x.into_iter().map(paddock_jobs::JobSnapshot::from).collect::<Vec<_>>()),
             Reply::JobCancelled(x) => v(x),
             Reply::JobOutput(x) => v(x),
+            Reply::WidgetLayout(x) => v(x),
+            Reply::PopoverValues(x) => v(x),
         }
     }
 }
@@ -882,6 +913,8 @@ pub enum Message {
     DiskVolumes(Vec<crate::disk::volume::Volume>),
     /// Agent → app: a job's status changed (the newest of each job wins; a final state is never dropped). Appended.
     Job(Box<paddock_jobs::wire::WireSnapshot>),
+    /// Agent -> app: a surface's layout changed (an edit from any window). Appended.
+    WidgetLayoutChanged(crate::widgets::DynoSurface),
 }
 
 #[cfg(test)]
@@ -1087,6 +1120,15 @@ mod tests {
             Request::RetryDiskScan { scan: 1 },
             Request::DiskReveal { scan: 1, node: 2 },
             Request::OpenFullDiskAccessSettings,
+            Request::WidgetLayout {
+                surface: crate::widgets::DynoSurface::MenuBar,
+            },
+            Request::EditWidgetLayout {
+                edit: crate::widgets::SurfaceEdit::Popover(paddock_widgets::Edit::ResetToDefaults),
+            },
+            Request::PopoverValues {
+                placements: vec![paddock_widgets::PlacementId::new("disk-space").unwrap()],
+            },
             Request::DiskRings {
                 scan: 1,
                 node: Some(2),
@@ -1103,6 +1145,18 @@ mod tests {
         assert_eq!(round(&push), push);
         let volumes = Message::DiskVolumes(vec![]);
         assert_eq!(round(&volumes), volumes);
+        let changed = Message::WidgetLayoutChanged(crate::widgets::DynoSurface::Popover);
+        assert_eq!(round(&changed), changed);
+        for reply in [
+            Reply::WidgetLayout(Box::new(crate::widgets::layout_view(
+                &Settings::default(),
+                crate::widgets::DynoSurface::Popover,
+            ))),
+            Reply::PopoverValues(crate::widgets::JsonOnLink(vec![])),
+        ] {
+            let m = Message::Reply(Box::new(Ok(reply)));
+            assert_eq!(round(&m), m);
+        }
     }
 
     #[test]

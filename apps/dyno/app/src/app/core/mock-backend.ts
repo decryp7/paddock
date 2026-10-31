@@ -1,6 +1,9 @@
 import { osTerms } from '../shared/os-terms';
 import type { SuJobPhase, SuJobSnapshot, SuJobState } from '@decryp7/paddock-ui';
 import type { Measured } from './api.types';
+import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
+import { MockWidgets, mockMetricReading, mockWidgetChoices, mockWidgetOptionsFromUrl, type MockWidgetsOptions } from './mock/widgets';
+import type { PopoverSurfaceValues } from './widget-types';
 import { readValue } from './measured';
 import type {
   Alarm,
@@ -134,6 +137,10 @@ export interface MockOptions {
   backup?: MockBackupVariant;
   /** Where the mock pushes the status of the jobs it runs (the shell's in-memory jobs backend); jobs run without one too. */
   jobs?: MockJobSink;
+  /** Keep the widget layouts in `localStorage` (the browser build; unit tests keep them in memory). */
+  widgetStorage?: boolean;
+  /** The popup's states and agent (`?popup=…&agent=stopped`). */
+  widgets?: Pick<MockWidgetsOptions, 'popup' | 'agentStopped'>;
   /** How many steps each job the mock starts takes before it ends (default 1: it ends at once; `?jobsteps=6` keeps it running for screenshots). */
   jobSteps?: number;
 }
@@ -156,12 +163,23 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     ...(cpu ? { cpu } : {}),
     latencyMs: latency !== null && Number.isFinite(Number(latency)) ? Number(latency) : 150,
     fail: new Set(fail ? fail.split(',') : []),
+    widgetStorage: true,
+    widgets: mockWidgetOptionsFromUrl(search),
     ...(q.get('backup') === 'none' ? { backup: 'none' as const } : {}),
     ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
   };
 }
 
 const copy = <T>(v: T): T => structuredClone(v);
+
+/** `localStorage` when the browser build asked for it and it can be used. */
+function browserStorage(wanted: boolean | undefined): Storage | null {
+  try {
+    return wanted && typeof localStorage !== 'undefined' ? localStorage : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Makes the window chrome follow the mock's OS in the browser build (the Tauri shell sets these before boot). */
 export function applyMockPlatform(search: string, root: HTMLElement): void {
@@ -204,6 +222,8 @@ export class MockBackend implements DynoBackend {
   private readonly activityListeners = new Set<(a: ActivityEntry) => void>();
   private readonly agentListeners = new Set<(s: AgentStatus) => void>();
   private readonly alarmListeners = new Set<(c: AlarmChange) => void>();
+  /** The widget layouts and the popup's values (family ADR 0035), kept in the browser's storage so a reload keeps them. */
+  readonly widgets: MockWidgets;
   private readonly disk: MockDiskMap;
   private unusualItems: UnusualItem[] = seedUnusual();
   private unusualForgotten = false;
@@ -236,6 +256,7 @@ export class MockBackend implements DynoBackend {
     this.jobStepMs = this.latencyMs === 0 ? 0 : 400;
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
+    this.widgets = new MockWidgets({ storage: browserStorage(options.widgetStorage), now: this.now, ...(options.widgets ?? {}) });
     // A scan reports a few times: one timer per step (zero delay with no latency, so a test sees the first status before the rest).
     const latency = this.latencyMs;
     this.disk = new MockDiskMap(this.now, (fn, step) => setTimeout(fn, latency === 0 ? 0 : Math.max(300, latency * 2) * step), err);
@@ -1113,6 +1134,82 @@ export class MockBackend implements DynoBackend {
 
   plugins(): Promise<PluginInfo[]> {
     return this.reply('plugins', () => demoPlugins());
+  }
+
+  // ----------------------------------------------------------------------------------------- widget layouts
+
+  widgetLayout(surface: DynoSurface): Promise<SurfaceView> {
+    return this.reply('widgetLayout', () => this.widgets.view(surface));
+  }
+
+  editWidgetLayout(edit: SurfaceEdit): Promise<SurfaceView> {
+    return this.reply('editWidgetLayout', () => this.widgets.edit(edit));
+  }
+
+  popoverValues(): Promise<PopoverSurfaceValues> {
+    return this.reply('popoverValues', () => this.widgets.values());
+  }
+
+  popoverPreview(): Promise<PopoverSurfaceValues> {
+    return this.reply('popoverPreview', () => this.widgets.values());
+  }
+
+  popoverSnapshot(): Promise<PopoverSurfaceValues> {
+    return this.reply('popoverSnapshot', () => this.widgets.values());
+  }
+
+  runWidgetAction(action: WidgetActionId): Promise<void> {
+    this.widgetActions.push(action);
+    return this.reply('runWidgetAction', () => undefined);
+  }
+
+  /** The widget buttons pressed so far, for tests. */
+  readonly widgetActions: WidgetActionId[] = [];
+
+  onPopoverValues(listener: (v: PopoverSurfaceValues) => void): Unsubscribe {
+    return this.widgets.onValues(listener);
+  }
+
+  onWidgetLayout(listener: (surface: DynoSurface) => void): Unsubscribe {
+    return this.widgets.onLayout(listener);
+  }
+
+  private pendingNavigation: Navigate | null = null;
+  private readonly navigateListeners = new Set<(to: Navigate) => void>();
+
+  onNavigate(listener: (to: Navigate) => void): Unsubscribe {
+    this.navigateListeners.add(listener);
+    return () => this.navigateListeners.delete(listener);
+  }
+
+  /** Asks the main window to open a page or a Settings section, as a popup widget's button does (tests). */
+  navigate(to: Navigate): void {
+    this.pendingNavigation = to;
+    for (const l of this.navigateListeners) l(to);
+  }
+
+  /** Hands the waiting navigation over, once. */
+  takeNavigation(): Promise<Navigate | null> {
+    return this.reply('takeNavigation', () => {
+      const to = this.pendingNavigation;
+      this.pendingNavigation = null;
+      return to;
+    });
+  }
+
+  // The mock imitates the contract with plausible data; the real readings, tones and choices come from the engine.
+  metricReadings(queries: ReadingQuery[]): Promise<MetricReading[]> {
+    return this.reply('metricReadings', () => {
+      const sys = this.liveUpdate('summary').system;
+      const memory = sys.memory.total > 0 ? (sys.memory.used / sys.memory.total) * 100 : 0;
+      const battery = 'available' in sys.battery ? sys.battery.available.charge : sys.battery.unavailable;
+      const gpu = 'available' in sys.gpu ? sys.gpu.available.utilization : sys.gpu.unavailable;
+      return queries.map((q) => mockMetricReading(q, { cpu: sys.cpu.total, memory, battery, gpu }));
+    });
+  }
+
+  widgetChoices(): Promise<WidgetChoices> {
+    return this.reply('widgetChoices', () => mockWidgetChoices());
   }
 
   showMainWindow(): Promise<void> {

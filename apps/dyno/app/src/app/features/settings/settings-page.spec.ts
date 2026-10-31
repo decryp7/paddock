@@ -4,6 +4,8 @@ import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { Notifier } from '../../shared/notifier';
 import { SettingsStore } from '../../state/settings.store';
+import { signal } from '@angular/core';
+import { SETTINGS_ANCHOR, type SettingsAnchor } from '@decryp7/paddock-ui/shell/settings/window';
 import { SettingsPage } from './settings-page';
 
 const NOW = 1_700_000_000_000;
@@ -39,7 +41,7 @@ describe('SettingsPage', () => {
     const { el, saveButton, store } = await make();
     expect(el.querySelector('h2.pd-title')?.textContent).toBe('Dyno');
     // Appearance, Updates and About are the shell's pages of the Settings window, not Dyno's.
-    for (const name of ['Start-up', 'Measuring', 'Menu bar items', 'Alerts', 'Plugins']) expect(el.querySelector(`section[aria-label="${name}"]`)).not.toBeNull();
+    for (const name of ['Start-up', 'Measuring', 'Menu bar', 'Alerts', 'Plugins']) expect(el.querySelector(`section[aria-label="${name}"]`)).not.toBeNull();
     expect(saveButton()).toBeUndefined();
     expect(store.settings()).not.toBeNull();
   });
@@ -76,16 +78,36 @@ describe('SettingsPage', () => {
     expect(spy).not.toHaveBeenCalled();
     expect(toggle(el, 'Alerts').getAttribute('aria-checked')).toBe(String(store.settings()!.alerts.enabled));
   });
-  it('menu bar items: adding one makes the page dirty and Save stores trayItems', async () => {
-    const { f, el, saveButton, mock } = await make();
-    expect(el.querySelectorAll('section[aria-label="Menu bar items"] li')).toHaveLength(2);
-    [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Add item'))!.click();
-    f.detectChanges();
-    expect(el.querySelectorAll('section[aria-label="Menu bar items"] li')).toHaveLength(3);
-    const spy = vi.spyOn(mock, 'saveSettings');
-    saveButton()!.click();
+  it('has the menu bar items and the popup widgets as choosers over the engine layouts, and Save never carries them', async () => {
+    const { f, el, mock } = await make();
+    const card = el.querySelector('section[aria-label="Menu bar"]')!;
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(card.querySelectorAll('pd-widget-chooser')).toHaveLength(2);
+    });
+    expect(card.querySelector('#popup-widgets')).not.toBeNull();
+    expect(card.querySelectorAll('dy-menu-bar-items .pd-wc-list')[0]!.querySelectorAll('li')).toHaveLength(2);
+    expect(Object.keys(await mock.settings())).not.toContain('trayItems');
+  });
+  it('scrolls to the section the Settings window was asked for, and again when it is asked again', async () => {
+    Element.prototype.scrollIntoView = () => undefined;
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const anchor = signal<SettingsAnchor | null>({ id: 'popup-widgets', at: 1 });
+    const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
+    TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }, { provide: SETTINGS_ANCHOR, useValue: anchor }] });
+    const f = TestBed.createComponent(SettingsPage);
     await settle(f);
-    expect(spy.mock.calls[0]![0].trayItems!.items).toHaveLength(3);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(scroll).toHaveBeenCalled();
+    });
+    expect(scroll.mock.contexts.at(-1)).toBe((f.nativeElement as HTMLElement).querySelector('#popup-widgets'));
+    const times = scroll.mock.calls.length;
+    anchor.set({ id: 'popup-widgets', at: 2 });
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(scroll.mock.calls.length).toBeGreaterThan(times);
+    });
   });
   it('a rejected save keeps the draft and the bar and toasts the engine message', async () => {
     const { f, mock, el, saveButton } = await make();

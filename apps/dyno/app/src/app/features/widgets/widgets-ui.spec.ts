@@ -1,16 +1,19 @@
 import { provideRouter } from '@angular/router';
-import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
-import { METRICS, TRAY_STYLES, newWidget } from './widget-model';
-import { DashboardLayoutStore } from '../../state/dashboard-layout.store';
+import type { DashboardWidget, Placement } from '../../core/generated/widgets';
+import { WidgetLayouts } from '../../state/widget-layouts';
 import { CountersStore } from '../../state/counters.store';
 import { LiveStore } from '../../state/live.store';
-import { SettingsStore } from '../../state/settings.store';
-import { TrayItemsEditor } from '../settings/tray-items-editor';
 import { AnimatedNumber } from './animated-number';
 import { WidgetBoard } from './widget-board';
 import { WidgetView } from './widget-view';
+
+/** A dashboard placement of `kind` showing `metric`. */
+function place(kind: DashboardWidget['kind'], metric: DashboardWidget['metric'], span = 3): Placement<DashboardWidget> {
+  return { id: `${kind}-1`, span, widget: { kind, metric, options: { rangeSecs: 300, showLabel: true, fill: true, accent: null }, thresholds: { warning: null, critical: null } } };
+}
 
 function env() {
   const mock = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000 });
@@ -20,25 +23,29 @@ function env() {
 }
 
 describe('dy-widget', () => {
+  it('colours a big number by the engine tone only, with the number still printed', () => {
+    env();
+    const f = TestBed.createComponent(WidgetView);
+    f.componentRef.setInput('placement', place('bigNumber', 'cpuTotal'));
+    f.componentRef.setInput('metricReading', { value: 95, text: '95', unit: '%', percent: 95, tone: 'bad', reason: null });
+    f.detectChanges();
+    const hero = (f.nativeElement as HTMLElement).querySelector('.hero')!;
+    expect(hero.getAttribute('data-tone')).toBe('bad');
+    expect(hero.textContent).toContain('95');
+    f.componentRef.setInput('metricReading', { value: 5, text: '5', unit: '%', percent: 5, tone: 'ok', reason: null });
+    f.detectChanges();
+    expect(hero.getAttribute('data-tone')).toBe('ok');
+  });
+
   it('draws every kind from live data without errors', () => {
     env();
     for (const [kind, metric] of [['bigNumber', 'cpuTotal'], ['graph', 'networkDown'], ['bars', 'memory'], ['ring', 'memory'], ['heatmap', 'cpuPerCore'], ['topProcesses', 'memory'], ['issues', 'cpuTotal'], ['health', 'cpuTotal'], ['bigNumber', 'fan'], ['graph', 'fan'], ['cpu', 'cpuTotal'], ['diagnosis', 'cpuTotal'], ['events', 'cpuTotal'], ['history', 'cpuTotal'], ['consumers', 'cpuTotal'], ['diskTrend', 'diskFree']] as const) {
       const f = TestBed.createComponent(WidgetView);
-      f.componentRef.setInput('widget', newWidget(kind, metric, []));
+      f.componentRef.setInput('placement', place(kind, metric));
       f.detectChanges();
       expect((f.nativeElement as HTMLElement).getAttribute('data-kind')).toBe(kind);
       expect((f.nativeElement as HTMLElement).textContent!.length).toBeGreaterThan(0);
     }
-  });
-
-  it('colours a big number only when a threshold is crossed, with the number still printed', () => {
-    env();
-    const f = TestBed.createComponent(WidgetView);
-    f.componentRef.setInput('widget', { ...newWidget('bigNumber', 'cpuTotal', []), thresholds: { warning: 1, critical: 99 } });
-    f.detectChanges();
-    const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('.hero')!.getAttribute('data-tone')).toBe('warn');
-    expect(el.querySelector('.hero')!.textContent).toMatch(/\d/);
   });
 });
 
@@ -48,7 +55,7 @@ describe('dy-widget with a performance counter', () => {
     const counters = TestBed.inject(CountersStore);
     const path = '\\System\\Load Average (1 minute)';
     const f = TestBed.createComponent(WidgetView);
-    f.componentRef.setInput('widget', newWidget('graph', { perfCounter: path }, []));
+    f.componentRef.setInput('placement', place('graph', { perfCounter: path }));
     f.detectChanges();
     expect((f.nativeElement as HTMLElement).textContent).toContain('Waiting for the first reading');
     counters.track([path]);
@@ -61,7 +68,7 @@ describe('dy-widget with a performance counter', () => {
     expect(el.querySelector('dy-sparkline')).not.toBeNull();
 
     const gone = TestBed.createComponent(WidgetView);
-    gone.componentRef.setInput('widget', newWidget('bigNumber', { perfCounter: '\\Nothing\\here' }, []));
+    gone.componentRef.setInput('placement', place('bigNumber', { perfCounter: '\\Nothing\\here' }));
     counters.track(['\\Nothing\\here']);
     await counters.tick();
     gone.detectChanges();
@@ -70,7 +77,11 @@ describe('dy-widget with a performance counter', () => {
 });
 
 describe('AnimatedNumber', () => {
-  it('sets text at once for non-numbers and the first value, and glides to the next', async () => {
+  // The glide runs on animation frames and the clock: both are faked, so the test advances time instead of waiting for it.
+  beforeEach(() => vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] }));
+  afterEach(() => vi.useRealTimers());
+
+  it('sets text at once for non-numbers and the first value, and glides to the next', () => {
     const f = TestBed.createComponent(AnimatedNumber);
     f.componentRef.setInput('value', '10');
     f.detectChanges();
@@ -82,120 +93,40 @@ describe('AnimatedNumber', () => {
     f.detectChanges();
     f.componentRef.setInput('value', '30.5');
     f.detectChanges();
-    await vi.waitFor(() => {
-      f.detectChanges();
-      expect(f.nativeElement.textContent).toBe('30.5');
-    }, { timeout: 5_000 }); // the glide is about 300 ms; many times that on a loaded machine
+    vi.advanceTimersByTime(150);
+    f.detectChanges();
+    const mid = Number(f.nativeElement.textContent);
+    expect(mid).toBeGreaterThan(20);
+    expect(mid).toBeLessThan(30.5);
+    vi.advanceTimersByTime(400);
+    f.detectChanges();
     expect(f.nativeElement.textContent).toBe('30.5');
   });
 });
 
 describe('dy-widget-board', () => {
-  it('shows the widgets, enters edit mode, adds from the gallery and removes', async () => {
+  it('draws the engine layout, opens the shared chooser and applies an edit through the engine', async () => {
     env();
-    await TestBed.inject(SettingsStore).load();
     const f = TestBed.createComponent(WidgetBoard);
-    f.detectChanges();
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelectorAll('dy-widget')).toHaveLength(15);
-    [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Edit dashboard'))!.click();
-    f.detectChanges();
-    expect(el.querySelectorAll('.edit').length).toBe(15);
-    [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Add widget'))!.click();
-    f.detectChanges();
-    expect(el.querySelectorAll('.gtile')).toHaveLength(14);
-    (el.querySelectorAll('.gtile')[2] as HTMLButtonElement).click();
-    f.detectChanges();
-    expect(el.querySelectorAll('dy-widget')).toHaveLength(16);
-    (el.querySelector('button[aria-label="Remove widget"]') as HTMLButtonElement).click();
-    f.detectChanges();
-    expect(el.querySelectorAll('dy-widget')).toHaveLength(15);
-    (el.querySelectorAll('pd-segmented-control button')[2] as HTMLButtonElement).click();
-    f.detectChanges();
-    expect(TestBed.inject(DashboardLayoutStore).dirty()).toBe(true);
-    [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Cancel')!.click();
-    f.detectChanges();
-    expect(el.querySelector('.edit')).toBeNull();
-  });
-});
-
-describe('dy-widget-board presets', () => {
-  it('has no layout switch, resets to the default and saves the layout as a named preset', async () => {
-    env();
-    await TestBed.inject(SettingsStore).load();
-    const f = TestBed.createComponent(WidgetBoard);
-    f.detectChanges();
-    const el = f.nativeElement as HTMLElement;
-    const click = (text: string) => [...el.querySelectorAll('button')].find((b) => b.textContent?.includes(text))!.click();
-    click('Edit dashboard');
-    f.detectChanges();
-    (el.querySelector('button[aria-label="Remove widget"]') as HTMLButtonElement).click();
-    f.detectChanges();
-    expect(el.querySelectorAll('dy-widget')).toHaveLength(14);
-    click('Reset to default');
-    f.detectChanges();
-    expect(el.querySelectorAll('dy-widget')).toHaveLength(15);
-    (el.querySelector('button[aria-label="Remove widget"]') as HTMLButtonElement).click();
-    f.detectChanges();
-    click('Save as preset');
-    f.detectChanges();
-    const input = el.querySelector<HTMLInputElement>('input[aria-label="Preset name"]')!;
-    expect(el.querySelector('button[matButton="filled"]')).not.toBeNull();
-    input.value = 'Lean';
-    input.dispatchEvent(new Event('input'));
-    f.detectChanges();
-    click('Save preset');
-    await f.whenStable();
-    f.detectChanges();
-    const presets = TestBed.inject(DashboardLayoutStore).presets();
-    expect(presets.find((p) => p.name === 'Lean')?.widgets).toHaveLength(14);
-    expect(el.querySelector('.edit')).toBeNull();
-  });
-});
-
-const styleLabel = (id: string) => TRAY_STYLES.find((s) => s.id === id)!.label;
-
-/** Opens the `index`-th Material select matching `selector` and picks the option with this text. */
-function choose(f: ComponentFixture<unknown>, el: HTMLElement, selector: string, index: number, text: string): void {
-  (el.querySelectorAll(selector)[index]!.querySelector('.mat-mdc-select-trigger') as HTMLElement).click();
-  f.detectChanges();
-  ([...document.querySelectorAll<HTMLElement>('mat-option')].find((o) => o.textContent?.trim() === text)!).click();
-  f.detectChanges();
-}
-
-describe('dy-tray-items-editor', () => {
-  it('adds, changes style and metric, reorders and removes items, up to four', () => {
-    env();
-    const f = TestBed.createComponent(TrayItemsEditor);
-    let items = [{ id: 'cpu', metric: 'cpuTotal' as const, style: 'verticalBars' as const }];
-    f.componentRef.setInput('items', items);
-    f.componentInstance.itemsChange.subscribe((v) => {
-      items = v as typeof items;
-      f.componentRef.setInput('items', items);
+    await vi.waitFor(() => {
       f.detectChanges();
+      expect(el.querySelectorAll('dy-widget')).toHaveLength(15);
     });
+    [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Customize dashboard'))!.click();
     f.detectChanges();
-    const el = f.nativeElement as HTMLElement;
-    const add = () => [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Add item'))!.click();
-    add();
-    add();
-    expect(items).toHaveLength(3);
-    choose(f, el, 'mat-select[aria-label^="Style"]', 0, styleLabel('number'));
-    expect(items[0]!.style).toEqual({ number: { unit: '', label: '' } });
-    expect(el.querySelectorAll('input[aria-label="Unit"]')).toHaveLength(1);
-    choose(f, el, 'mat-select[aria-label^="Metric"]', 1, METRICS.find((m) => m.metric === 'memory')!.label);
-    expect(items[1]!.metric).toBe('memory');
-    (el.querySelectorAll('button[aria-label="Move down"]')[0] as HTMLButtonElement).click();
-    expect(items[1]!.metric).toBe('cpuTotal');
-    add();
-    add();
-    expect(items).toHaveLength(4);
-    expect(el.textContent).toContain('up to 4 items');
-    (el.querySelector('button[aria-label="Remove item"]') as HTMLButtonElement).click();
-    expect(items).toHaveLength(3);
-    for (const style of ['lineGraph', 'graphAndNumber', 'horizontalMeter', 'ring']) {
-      choose(f, el, 'mat-select[aria-label^="Style"]', 0, styleLabel(style));
-      expect(el.querySelector('.preview')!.textContent).toBeDefined();
-    }
+    expect(el.querySelector('pd-widget-chooser')).not.toBeNull();
+    const layouts = TestBed.inject(WidgetLayouts);
+    expect(await layouts.edit('dashboard', { remove: { id: 'health' } })).toBeNull();
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(el.querySelectorAll('dy-widget')).toHaveLength(14);
+    });
+    expect(layouts.dashboard()!.canUndo).toBe(true);
+    expect(await layouts.edit('dashboard', 'undo')).toBeNull();
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(el.querySelectorAll('dy-widget')).toHaveLength(15);
+    });
   });
 });

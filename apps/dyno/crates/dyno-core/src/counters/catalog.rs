@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// What a counter's value measures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum CounterUnit {
     /// 0 to 100.

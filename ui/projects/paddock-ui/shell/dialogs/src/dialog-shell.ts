@@ -17,6 +17,7 @@ import { DeniedCommands } from './denied';
 import { DialogFrame, type FrameState } from './dialog-frame';
 import { DIALOG_IO, type DialogMeasure } from './io';
 import { contentInjector, errorText, isRecord, mountContent } from './mount';
+import { followDialogInputs } from './retarget';
 import { encodeOutcome } from './outcome';
 import { DIALOG_ROUTE } from './route';
 import { DIALOG_LOOKUP, type DialogContent, type DialogRef } from './types';
@@ -138,6 +139,7 @@ export class DialogShell implements AfterViewInit {
       const injector = contentInjector(part.injector, this.ref, input);
       const ref = mountContent(host, part.component, injector, part.injector, input);
       this.contentView.set(ref.changeDetectorRef);
+      this.destroyRef.onDestroy(followDialogInputs(def.id, ref));
       this.content.set(ref.instance as DialogContent);
       this.contentInjector_ = injector;
       this.state.set('ready');

@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../core/backend';
 import { MockBackend } from '../core/mock-backend';
 import { MAX_PINNED, MAX_SETS } from '../features/counters/counters-model';
-import { MAX_WIDGETS } from '../features/widgets/widget-model';
+import { WidgetLayouts } from './widget-layouts';
 import { Notifier } from '../shared/notifier';
 import { COUNTERS_POLL_MS, CountersStore } from './counters.store';
 import { SettingsStore } from './settings.store';
@@ -178,18 +178,20 @@ describe('CountersStore', () => {
     expect(await store.saveSet('set 1')).toBe(true);
   });
 
-  it('adds a counter to the dashboard as a graph widget, within the widget limit', async () => {
-    const { store, settings, notifier } = await setup();
-    const before = settings.settings()!.dashboard!.widgets.length;
+  it('adds a counter to the dashboard as a graph widget through the engine, which says why when the dashboard is full', async () => {
+    const { store, notifier } = await setup();
+    const layouts = TestBed.inject(WidgetLayouts);
+    await layouts.use('dashboard');
+    const before = layouts.dashboard()!.layout.placements.length;
     expect(await store.addToDashboard(QUEUE)).toBe(true);
-    const added = settings.settings()!.dashboard!.widgets.at(-1)!;
-    expect(added.kind).toBe('graph');
-    expect(added.metric).toEqual({ perfCounter: QUEUE });
-    expect(settings.settings()!.dashboard!.widgets).toHaveLength(before + 1);
-    const full = settings.settings()!;
-    await settings.save({ ...full, dashboard: { ...full.dashboard!, widgets: Array.from({ length: MAX_WIDGETS }, (_, i) => ({ ...added, id: `w${i}` })) } }, null);
+    const added = layouts.dashboard()!.layout.placements.at(-1)!;
+    expect(added.widget.kind).toBe('graph');
+    expect(added.widget.metric).toEqual({ perfCounter: QUEUE });
+    expect(layouts.dashboard()!.layout.placements).toHaveLength(before + 1);
+    const max = layouts.dashboard()!.catalogue.surface.maxPlacements;
+    for (let i = before + 1; i < max; i++) expect(await store.addToDashboard(QUEUE)).toBe(true);
     expect(await store.addToDashboard(QUEUE)).toBe(false);
-    expect(notifier.recent().at(-1)!.text).toMatch(/up to 32/);
+    expect(notifier.recent().at(-1)!.text).toMatch(/At most 32/);
   });
 
   it('does nothing to settings that are not loaded', async () => {
@@ -197,6 +199,5 @@ describe('CountersStore', () => {
     TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }] });
     const store = TestBed.inject(CountersStore);
     expect(await store.togglePin(CPU)).toBe(false);
-    expect(await store.addToDashboard(CPU)).toBe(false);
   });
 });

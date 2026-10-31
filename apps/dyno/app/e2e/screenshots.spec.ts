@@ -126,9 +126,8 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
     name: 'widgets-edit',
     path: '/#/',
     ready: async (page) => {
-      await page.getByRole('button', { name: 'Edit dashboard' }).click();
-      await page.getByRole('button', { name: 'Add widget' }).click();
-      await expect(page.getByRole('region', { name: 'Widget gallery' })).toBeVisible();
+      await page.getByRole('button', { name: 'Customize dashboard' }).click();
+      await expect(page.getByRole('region', { name: 'Customize the dashboard' })).toBeVisible();
       await page.clock.runFor(2_000);
     },
   },

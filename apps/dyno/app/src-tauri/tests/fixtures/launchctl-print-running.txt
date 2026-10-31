@@ -1,0 +1,93 @@
+gui/501/net.decryptology.dyno.agent = {
+	active count = 1
+	path = (submitted by smd.87)
+	type = Submitted
+	managed_by = com.apple.xpc.ServiceManagement
+	state = running
+
+	program identifier = Contents/MacOS/dyno-agent (mode: 2)
+	parent bundle identifier = net.decryptology.dyno
+	parent bundle version = 1.0.0
+	BTM uuid = D8703C2B-803D-4D48-AD6B-E7FD0468EAA3
+	arguments = {
+		dyno-agent
+		run
+	}
+
+	inherited environment = {
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.ngfxNXrpJB/Listeners
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		XPC_SERVICE_NAME => net.decryptology.dyno.agent
+	}
+
+	domain = gui/501 [100004]
+	asid = 100004
+	minimum runtime = 10
+	exit timeout = 5
+	runs = 2
+	pid = 978
+	immediate reason = inefficient
+	forks = 3
+	execs = 1
+	initialized = 1
+	trampolined = 1
+	started suspended = 0
+	proxy started suspended = 0
+	checked allocations = 0 (queried = 1)
+	checked allocations reason = no host
+	checked allocations flags = 0x0
+	last exit code = 3
+
+	resource coalition = {
+		ID = 891
+		type = resource
+		state = active
+		active count = 1
+		name = net.decryptology.dyno.agent
+	}
+
+	jetsam coalition = {
+		ID = 892
+		type = jetsam
+		state = active
+		active count = 1
+		name = net.decryptology.dyno.agent
+	}
+
+	spawn type = daemon (3)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	submitted job. ignore execute allowed
+	jetsam thread limit = 32
+	cpumon = default
+	job state = running
+
+	properties = partial import | keepalive | runatload | resolve program | has LWCR | tle system
+}
+454 /Applications/Dyno.app/Contents/MacOS/dyno-app
+978 dyno-agent run
+
+                 Name: Dyno
+       Developer Name: (null)
+          Disposition: [enabled, allowed, not notified] (0x3)
+           Identifier: 2.net.decryptology.dyno
+    Bundle Identifier: net.decryptology.dyno
+                 Name: dyno-agent
+       Developer Name: (null)
+          Disposition: [enabled, allowed, notified] (0xb)
+           Identifier: 8.net.decryptology.dyno.agent
+    Parent Identifier: 2.net.decryptology.dyno
+                 Name: LgitProbeHandler
+       Developer Name: (null)
+          Disposition: [enabled, allowed, notified] (0xb)
+           Identifier: 2.test.probe.lgit.handler
+    Bundle Identifier: test.probe.lgit.handler

@@ -68,6 +68,20 @@ impl Harness {
     }
 }
 
+/// Waits for the data folder's lock to be free again. A test that forks (the child that has not exec'd yet) holds a copy of
+/// every open lock file until it execs, so a lock can outlive its agent for a moment; the wait is on that condition, with a
+/// hang guard only a lost lock reaches.
+fn wait_until_free(dirs: &Dirs) {
+    let began = std::time::Instant::now();
+    while dyno_agent::instance::is_held(dirs) {
+        assert!(
+            began.elapsed() < Duration::from_secs(60),
+            "the data folder's lock was never released"
+        );
+        std::thread::yield_now();
+    }
+}
+
 impl Drop for Harness {
     fn drop(&mut self) {
         if let Some(r) = self.running.take() {
@@ -417,6 +431,7 @@ fn alarms_survive_an_agent_restart() {
     .unwrap();
     drop(peer);
     h.running.take().unwrap().stop();
+    wait_until_free(&h.dirs);
     let fake = Fake::new();
     let running = Running::start(h.dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
     h.running = Some(running);
@@ -1093,5 +1108,168 @@ fn a_child_forked_before_it_execs_keeps_the_folder_locked_until_it_does_and_the_
         libc::close(ready[0]);
         libc::close(ready[1]);
         libc::close(release[0]);
+    }
+}
+
+// ---- widget layouts (family ADR 0035) ----
+
+mod widget_layouts {
+    use super::*;
+    use dyno_core::widgets::popover_values::PopoverState;
+    use dyno_core::widgets::{DynoSurface, PopoverWidget, SurfaceEdit, SurfaceView};
+    use paddock_widgets::{Edit, PlacementId, WidgetState};
+
+    fn id(s: &str) -> PlacementId {
+        PlacementId::new(s).unwrap()
+    }
+
+    fn popover_ids(view: &SurfaceView) -> Vec<String> {
+        let SurfaceView::Popover(v) = view else { panic!("a popover view") };
+        v.layout.placements.iter().map(|p| p.id.to_string()).collect()
+    }
+
+    fn view(peer: &Peer<Message>, surface: DynoSurface) -> SurfaceView {
+        let Reply::WidgetLayout(v) = ask(peer, Request::WidgetLayout { surface }).unwrap() else {
+            panic!("a layout")
+        };
+        *v
+    }
+
+    /// A second app connection that reports the surfaces whose layout changed.
+    fn watcher(h: &Harness) -> (Peer<Message>, Receiver<DynoSurface>) {
+        let d = dyno_agent::discovery::Discovery::read(&h.dirs.discovery()).unwrap();
+        let conn = Client::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+        let (tx, rx) = channel();
+        let peer = Peer::start(
+            conn,
+            PeerOptions::new().on_push(move |m| {
+                if let Message::WidgetLayoutChanged(s) = m {
+                    let _ = tx.send(s);
+                }
+            }),
+        )
+        .unwrap();
+        (peer, rx)
+    }
+
+    #[test]
+    fn the_defaults_come_with_their_catalogue() {
+        let h = Harness::start();
+        let peer = h.client();
+        assert_eq!(
+            popover_ids(&view(&peer, DynoSurface::Popover)),
+            ["active-alarms", "disk-space", "cpu-memory"]
+        );
+        let SurfaceView::MenuBar(m) = view(&peer, DynoSurface::MenuBar) else {
+            panic!()
+        };
+        assert_eq!(m.layout.placements.len(), 2);
+        assert!(m.editable && !m.can_undo);
+        let SurfaceView::Dashboard(d) = view(&peer, DynoSurface::Dashboard) else {
+            panic!()
+        };
+        assert_eq!(d.builtin_presets.len(), 4);
+    }
+
+    #[test]
+    fn an_edit_is_saved_pushed_to_every_app_and_survives_a_restart() {
+        let mut h = Harness::start();
+        let (_watching, changed) = watcher(&h);
+        let peer = h.client();
+        let edit = SurfaceEdit::Popover(Edit::Remove { id: id("cpu-memory") });
+        let Reply::WidgetLayout(after) = ask(&peer, Request::EditWidgetLayout { edit }).unwrap() else {
+            panic!("a layout")
+        };
+        assert_eq!(popover_ids(&after), ["active-alarms", "disk-space"]);
+        let SurfaceView::Popover(v) = *after else { panic!() };
+        assert!(v.can_undo);
+        assert_eq!(changed.recv_timeout(Duration::from_secs(10)).unwrap(), DynoSurface::Popover);
+        assert!(std::fs::read_to_string(h.dirs.settings()).unwrap().contains("\"popover\""));
+        // The agent starts again over the same folder: the layout is still the edited one.
+        h.running.take().unwrap().stop();
+        wait_until_free(&h.dirs);
+        let again = Running::start(h.dirs.clone(), h.fake.platform(), Box::new(h.fake.clone()), Box::new(|_| Ok(()))).unwrap();
+        let peer = connect(&h.dirs).unwrap().0;
+        assert_eq!(popover_ids(&view(&peer, DynoSurface::Popover)), ["active-alarms", "disk-space"]);
+        again.stop();
+    }
+
+    #[test]
+    fn a_refused_edit_says_why_and_changes_and_pushes_nothing() {
+        let h = Harness::start();
+        let (_watching, changed) = watcher(&h);
+        let peer = h.client();
+        let edit = SurfaceEdit::Popover(Edit::Add {
+            widget: PopoverWidget::CpuMemory,
+            span: None,
+            at: None,
+        });
+        let e = ask(&peer, Request::EditWidgetLayout { edit }).unwrap_err();
+        assert!(!e.is_empty() && !e.contains("internal"), "{e}");
+        assert_eq!(popover_ids(&view(&peer, DynoSurface::Popover)).len(), 3);
+        // Events arrive in order: the first one after a refused edit and a good one is the good one's.
+        ask(
+            &peer,
+            Request::EditWidgetLayout {
+                edit: SurfaceEdit::MenuBar(Edit::ResetToDefaults),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            changed.recv_timeout(Duration::from_secs(10)).unwrap(),
+            DynoSurface::MenuBar,
+            "no change event for the refused edit"
+        );
+    }
+
+    #[test]
+    fn saving_settings_from_a_window_never_puts_an_old_layout_back() {
+        let h = Harness::start();
+        let peer = h.client();
+        let Reply::Settings(old) = ask(&peer, Request::Settings).unwrap() else {
+            panic!("settings")
+        };
+        ask(
+            &peer,
+            Request::EditWidgetLayout {
+                edit: SurfaceEdit::MenuBar(Edit::ResetToDefaults),
+            },
+        )
+        .unwrap();
+        ask(
+            &peer,
+            Request::EditWidgetLayout {
+                edit: SurfaceEdit::Popover(Edit::Remove { id: id("disk-space") }),
+            },
+        )
+        .unwrap();
+        // A window that read the settings before the edit saves them with another change.
+        let mut stale = old.clone();
+        stale.launch_at_login = true;
+        ask(&peer, Request::SaveSettings { settings: stale }).unwrap();
+        let Reply::Settings(now) = ask(&peer, Request::Settings).unwrap() else {
+            panic!("settings")
+        };
+        assert!(now.launch_at_login);
+        assert_eq!(now.popover.layout().placements.len(), 2, "the edit of the popup stays");
+    }
+
+    #[test]
+    fn popover_values_answer_only_the_slow_kinds_the_layout_has() {
+        let h = Harness::start();
+        let peer = h.client();
+        let ask_for = |ids: &[&str]| -> Vec<PopoverState> {
+            let placements = ids.iter().map(|s| id(s)).collect();
+            let Reply::PopoverValues(v) = ask(&peer, Request::PopoverValues { placements }).unwrap() else {
+                panic!("values")
+            };
+            v.0
+        };
+        let all = ask_for(&["active-alarms", "disk-space", "cpu-memory", "not-there"]);
+        let ids: Vec<String> = all.iter().map(|p| p.id.to_string()).collect();
+        assert_eq!(ids, ["active-alarms", "disk-space"], "live and unknown placements are left out");
+        // Nothing is wrong and nothing is raised: the calm empty of alarms, and no volume reported by the fake.
+        assert!(all.iter().all(|p| matches!(p.state, WidgetState::Empty { .. })), "{all:?}");
+        assert!(ask_for(&[]).is_empty());
     }
 }

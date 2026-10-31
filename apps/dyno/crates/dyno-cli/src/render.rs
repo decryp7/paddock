@@ -401,21 +401,9 @@ mod tests {
         assert!(t.contains("\\Disk\\Reads") && t.contains("sda"));
         assert!(hits_text(&[]).contains("No counter"));
         let vals = values_text(&[
-            CounterReading {
-                path: "\\M\\F".into(),
-                unit: CounterUnit::Bytes,
-                value: Reading::Available(1234.5),
-            },
-            CounterReading {
-                path: "\\M\\G".into(),
-                unit: CounterUnit::Percent,
-                value: Reading::Unavailable("gone".into()),
-            },
-            CounterReading {
-                path: "\\M\\H".into(),
-                unit: CounterUnit::Count,
-                value: Reading::Available(0.5),
-            },
+            CounterReading::new("\\M\\F".into(), CounterUnit::Bytes, Reading::Available(1234.5)),
+            CounterReading::new("\\M\\G".into(), CounterUnit::Percent, Reading::Unavailable("gone".into())),
+            CounterReading::new("\\M\\H".into(), CounterUnit::Count, Reading::Available(0.5)),
         ]);
         assert!(vals.contains("\\M\\F  1234 B"));
         assert!(vals.contains("not available: gone"));

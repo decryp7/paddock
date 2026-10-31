@@ -1,3 +1,4 @@
+import { instanceKey } from './kind';
 import { ChangeDetectionStrategy, Component, computed, ErrorHandler, inject, Injectable, input, provideZonelessChangeDetection, signal, viewChild, type TemplateRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { defineDialog, DIALOG_EVENTS, dialogCommandLedger, msg, provideContributions, resetDialogCommands, SHELL_PORTS, type DialogDef } from '@decryp7/paddock-ui/shell';
@@ -449,6 +450,35 @@ describe('dialogs in the page (browser build)', () => {
     before.remove();
   });
 
+  it('points an open modeless dialog at new inputs when it is opened again, and returns the same ref', async () => {
+    const { service, root, settle } = await setup();
+    const first = service.open(MODELESS, { inputs: { who: 'Ada', n: 1 } });
+    await settle();
+    expect(root.querySelector('[data-testid=who]')!.textContent).toBe('Ada 1');
+    const again = service.open(MODELESS, { inputs: { who: 'Grace', n: 1 } });
+    await settle();
+    expect(again).toBe(first);
+    expect(root.querySelectorAll('[data-dialog="t.form"]')).toHaveLength(1);
+    expect(root.querySelector('[data-testid=who]')!.textContent).toBe('Grace 1');
+    // Opened again with no inputs it only comes forward: what it shows stays.
+    service.open(MODELESS);
+    await settle();
+    expect(root.querySelector('[data-testid=who]')!.textContent).toBe('Grace 1');
+    first.dismiss();
+  });
+
+  it('does not cross-talk between instances of an instanced dialog when one is opened again', async () => {
+    const { service, root, settle } = await setup();
+    service.open(INSTANCED, { inputs: { who: 'Ada' } });
+    service.open(INSTANCED, { inputs: { who: 'Grace' } });
+    await settle();
+    const names = () => [...root.querySelectorAll('[data-testid=who]')].map((e) => e.textContent?.trim()).sort();
+    expect(names()).toEqual(['Ada', 'Grace']);
+    service.open(INSTANCED, { inputs: { who: 'Ada' } });
+    await settle();
+    expect(names()).toEqual(['Ada', 'Grace']);
+  });
+
   it('stays hidden until it is ready, and shows Loading with its Cancel at the show deadline', async () => {
     const never = d('t.slow', { load: () => new Promise(() => undefined) });
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideContributions({ dialogs: [never] }), provideDialogs()] });
@@ -640,6 +670,34 @@ describe('dialogs as windows', () => {
     io.closed('d-main-1', 't.viewer', { dx: 1, dy: 2, width: 800, height: 600 });
     expect(await ref.closed).toEqual({ kind: 'answered', value: { ok: true } });
     expect(loadDialogBounds()['t.viewer']).toEqual({ dx: 1, dy: 2, width: 800, height: 600 });
+  });
+
+  it('points a window another window opened at the new inputs', async () => {
+    const { io, service } = setup();
+    await io.open({ dialogId: 't.viewer', title: 'x', input: {}, theme: 'light' });
+    const heard: unknown[] = [];
+    const probe = new BroadcastChannel('paddock-dialog-inputs');
+    probe.onmessage = (e: MessageEvent<unknown>) => heard.push(e.data);
+    service.open(VIEWER, { inputs: { page: 'popup-widgets' } });
+    await vi.waitFor(() => expect(heard).toEqual([expect.objectContaining({ dialogId: 't.viewer', inputs: { page: 'popup-widgets' } })]));
+    probe.close();
+  });
+
+  it('does not point an instanced dialog\'s existing window at new inputs (its instances are told apart by their inputs)', async () => {
+    const { io, service } = setup();
+    // The window for exactly these inputs is open already (another window opened it), so Rust answers `existing`.
+    await io.open({ dialogId: 't.inst', instance: instanceKey({ who: 'Ada' }), title: 'x', input: { who: 'Ada' }, theme: 'light' });
+    const heard: unknown[] = [];
+    const probe = new BroadcastChannel('paddock-dialog-inputs');
+    probe.onmessage = (e: MessageEvent<unknown>) => heard.push(e.data);
+    service.open(INSTANCED, { inputs: { who: 'Ada' } });
+    // A message sent now would have arrived by the time a later one does: send one on purpose and wait for it.
+    const marker = new BroadcastChannel('paddock-dialog-inputs');
+    marker.postMessage({ from: 'marker', dialogId: 'marker', inputs: {} });
+    await vi.waitFor(() => expect(heard).toHaveLength(1));
+    expect(heard[0]).toMatchObject({ dialogId: 'marker' });
+    probe.close();
+    marker.close();
   });
 
   it('blocks the window while a modal window is open, focuses an open one and forwards a dismissal as a request', async () => {

@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
+import type { PopoverSurfaceValues } from './widget-types';
 import type {
   ActivityEntry,
   AgentStatus,
@@ -96,6 +98,9 @@ export const EVENTS = {
   alarm: 'dyno://alarm',
   diskScan: 'dyno://disk-scan',
   diskVolumes: 'dyno://disk-volumes',
+  popoverValues: 'dyno://popover-values',
+  widgetLayout: 'dyno://widget-layout',
+  navigate: 'dyno://navigate',
 } as const;
 
 /** One Tauri event shared by every UI listener: a single `listen`, fanned out, stopped with the last listener. */
@@ -139,6 +144,9 @@ export class TauriBackend implements DynoBackend {
   private readonly alarmChannel: EventChannel<AlarmChange>;
   private readonly diskScanChannel: EventChannel<DiskScanStatus>;
   private readonly diskVolumesChannel: EventChannel<Volume[]>;
+  private readonly popoverChannel: EventChannel<PopoverSurfaceValues>;
+  private readonly layoutChannel: EventChannel<DynoSurface>;
+  private readonly navigateChannel: EventChannel<Navigate>;
   /** How many live listeners want the full process list; the agent sends it only while one does. */
   private processListeners = 0;
   private liveListeners = 0;
@@ -155,6 +163,9 @@ export class TauriBackend implements DynoBackend {
     this.alarmChannel = new EventChannel(listenFn, EVENTS.alarm);
     this.diskScanChannel = new EventChannel(listenFn, EVENTS.diskScan);
     this.diskVolumesChannel = new EventChannel(listenFn, EVENTS.diskVolumes);
+    this.popoverChannel = new EventChannel(listenFn, EVENTS.popoverValues);
+    this.layoutChannel = new EventChannel(listenFn, EVENTS.widgetLayout);
+    this.navigateChannel = new EventChannel(listenFn, EVENTS.navigate);
   }
 
   // ------------------------------------------------------------------------------------------------ live data
@@ -504,6 +515,56 @@ export class TauriBackend implements DynoBackend {
 
   plugins(): Promise<PluginInfo[]> {
     return this.request('plugins');
+  }
+
+  // -------------------------------------------------------------------------------------------------- widget layouts
+
+  widgetLayout(surface: DynoSurface): Promise<SurfaceView> {
+    return this.command<SurfaceView>('widget_layout', { surface });
+  }
+
+  editWidgetLayout(edit: SurfaceEdit): Promise<SurfaceView> {
+    return this.command<SurfaceView>('edit_widget_layout', { edit });
+  }
+
+  popoverValues(): Promise<PopoverSurfaceValues> {
+    return this.command<PopoverSurfaceValues>('popover_values');
+  }
+
+  popoverPreview(): Promise<PopoverSurfaceValues> {
+    return this.command<PopoverSurfaceValues>('popover_preview');
+  }
+
+  popoverSnapshot(): Promise<PopoverSurfaceValues> {
+    return this.command<PopoverSurfaceValues>('popover_snapshot');
+  }
+
+  runWidgetAction(action: WidgetActionId): Promise<void> {
+    return this.command<void>('run_widget_action', { action });
+  }
+
+  onPopoverValues(listener: (v: PopoverSurfaceValues) => void): Unsubscribe {
+    return this.popoverChannel.add(listener);
+  }
+
+  onWidgetLayout(listener: (surface: DynoSurface) => void): Unsubscribe {
+    return this.layoutChannel.add(listener);
+  }
+
+  onNavigate(listener: (to: Navigate) => void): Unsubscribe {
+    return this.navigateChannel.add(listener);
+  }
+
+  takeNavigation(): Promise<Navigate | null> {
+    return this.command<Navigate | null>('take_navigation');
+  }
+
+  metricReadings(queries: ReadingQuery[]): Promise<MetricReading[]> {
+    return this.command<MetricReading[]>('metric_readings', { queries });
+  }
+
+  widgetChoices(): Promise<WidgetChoices> {
+    return this.command<WidgetChoices>('widget_choices');
   }
 
   // ----------------------------------------------------------------------------------------------------- tray

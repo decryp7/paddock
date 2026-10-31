@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { CounterHistory, CounterReading, Widget } from '../../core/api.types';
+import type { DashboardWidget } from '../../core/generated/widgets';
+import type { CounterHistory, CounterReading } from '../../core/api.types';
 import { LIGHT } from '../../shared/tokens';
 import { counterChartOption, counterText, counterTitle, formatCounter, pathParts, readingNumber, readingReason, widgetCounterPaths, withPath, withoutPath } from './counters-model';
 
-const W = (metric: Widget['metric']): Widget => ({ id: 'x', kind: 'graph', metric, size: 's', options: { rangeSecs: 300, showLabel: true, fill: true, accent: null }, thresholds: { warning: null, critical: null } });
+const W = (metric: DashboardWidget['metric']): DashboardWidget => ({ kind: 'graph', metric, options: { rangeSecs: 300, showLabel: true, fill: true, accent: null }, thresholds: { warning: null, critical: null } });
 
 describe('counter paths', () => {
   it('splits for display', () => {
@@ -33,8 +34,8 @@ describe('values', () => {
   });
 
   it('reads readings', () => {
-    const ok: CounterReading = { path: 'a', unit: 'count', value: { available: 4 } };
-    const gone: CounterReading = { path: 'a', unit: 'count', value: { unavailable: 'gone' } };
+    const ok: CounterReading = { path: 'a', unit: 'count', percent: null, tone: 'ok', value: { available: 4 } };
+    const gone: CounterReading = { path: 'a', unit: 'count', percent: null, tone: 'ok', value: { unavailable: 'gone' } };
     expect([readingNumber(ok), readingReason(ok)]).toEqual([4, null]);
     expect([readingNumber(gone), readingReason(gone)]).toEqual([null, 'gone']);
     expect([readingNumber(undefined), readingReason(undefined)]).toEqual([null, null]);
