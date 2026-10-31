@@ -26,6 +26,8 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 const CASES: u32 = 256;
+/// Cases of the properties that share one workspace per thread (cheap: about 2 ms a case).
+const WORKSPACE_CASES: u32 = 2048;
 const HANG_LIMIT: Duration = Duration::from_secs(15);
 
 /// Runs `f` on a helper thread and fails if it panics or takes longer than [`HANG_LIMIT`].
@@ -968,6 +970,8 @@ fn gen_query() -> impl Strategy<Value = Query> {
                 ("@message", "contains", "a"),
             ]),
         ),
+        // About one case in ten keeps the range as generated, so a reversed one is still tried.
+        prop::bool::weighted(0.1),
         prop::sample::select(vec![
             "",
             "Cpu > 10",
@@ -976,10 +980,18 @@ fn gen_query() -> impl Strategy<Value = Query> {
             "not exists(nope)",
         ]),
     )
-        .prop_map(|(from, to, levels, text, filter, ql)| Query {
-            // A range that runs forwards: a reversed one matches nothing.
-            from: from.zip(to).map(|(a, b)| a.min(b)).or(from),
-            to: from.zip(to).map(|(a, b)| a.max(b)).or(to),
+        .prop_map(|(from, to, levels, text, filter, keep_order, ql)| Query {
+            // Mostly a range that runs forwards (a reversed one matches nothing).
+            from: if keep_order {
+                from
+            } else {
+                from.zip(to).map(|(a, b)| a.min(b)).or(from)
+            },
+            to: if keep_order {
+                to
+            } else {
+                from.zip(to).map(|(a, b)| a.max(b)).or(to)
+            },
             levels: levels.into_iter().map(|i| Level::ALL[i]).collect(),
             text: text.to_string(),
             filters: filter
@@ -1024,12 +1036,32 @@ fn a_case_workspace_shows_only_the_files_of_its_own_case() {
     with_case_workspace(|ws| {
         ws.open(std::slice::from_ref(&first.0)).unwrap();
         assert_eq!(ws.records().len(), 3);
+        // Warm the caches, so a clear() that leaves them behind would show.
+        let q = Query::default();
+        assert_eq!(ws.matching(&q).unwrap().len(), 3);
+        let page = ws
+            .page(&PageRequest {
+                query: q.clone(),
+                offset: 0,
+                limit: 50,
+                descending: false,
+                anchor: None,
+            })
+            .unwrap();
+        assert_eq!(page.total, 3);
+        ws.timeline(&TimelineRequest {
+            query: q,
+            buckets: 10,
+            always_show_lifecycle: true,
+        })
+        .unwrap();
     });
     with_case_workspace(|ws| {
         assert!(ws.records().is_empty() && ws.sources().is_empty(), "cleared before the case starts");
         ws.open(std::slice::from_ref(&second.0)).unwrap();
         assert_eq!(ws.records().len(), 1);
         assert_eq!(ws.records()[0].message, "second only");
+        assert_eq!(ws.records()[0].id, 0, "ids restart in a cleared workspace");
         assert_eq!(ws.sources().len(), 1);
         assert_eq!(ws.matching(&Query::default()).unwrap().len(), 1);
         let page = ws
@@ -1054,7 +1086,7 @@ fn a_case_workspace_shows_only_the_files_of_its_own_case() {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(CASES))]
+    #![proptest_config(ProptestConfig::with_cases(WORKSPACE_CASES))]
 
     #[test]
     fn paging_partitions_results(recs in prop::collection::vec(gen_rec(), 1..40), q in gen_query(), size in 1usize..15, desc in any::<bool>()) {
