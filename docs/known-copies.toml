@@ -252,7 +252,7 @@ adr = "0030"
   paths = ["apps/spotter/crates/spotter-render/src/**"]
   owner = "spotter"
   delete_by = "spotter-v1.1.0"
-  note = "Has --disable-field-trial-config, not the NetworkServiceSandbox switch the canonical has. Still a fixed 20 s start (launch.rs START_LIMIT), not the shared start judge: left for the consolidation (fix/chromium-start-judge fixed Debrief's copy only). Consolidation ADR right after the Spotter tag."
+  note = "Has --disable-field-trial-config, not the NetworkServiceSandbox switch the canonical has. The fixed 20 s START_LIMIT start is fixed with StartWatch on spotter/run-state 3a83731eb and lands with the Spotter 1.0 batch (waived in fix/chromium-start-judge). Consolidation ADR right after the Spotter tag."
 
   [[mechanism.copy]]
   paths = ["apps/debrief/crates/chromium-driver/src/**"]

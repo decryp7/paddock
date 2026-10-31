@@ -87,3 +87,9 @@ slow-timeout = { period = "30s", terminate-after = 6 }
 [[profile.ci.overrides]]
 filter = "package(debrief-store-duck) & binary(it) & (test(/^differential::answers_like_the_workspace_/) | test(/^analysis::analyses_match_the_workspace_/) | test(/^large_folder::/))"
 slow-timeout = { period = "30s", terminate-after = 6 }
+
+# waiver: a real browser's start is judged on its run state (ADR 0031): a working start on a loaded runner is waited for, and
+# only a stuck one fails, after up to 120 s of CPU without becoming ready (the spin patience); 90 s would stop the test first.
+[[profile.ci.overrides]]
+filter = "package(chromium-driver) & binary(it) & test(/^real_browser::/)"
+slow-timeout = { period = "30s", terminate-after = 6 }

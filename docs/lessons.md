@@ -1060,6 +1060,8 @@ with `launch: Timeout("the browser start")` after 20 s: two Chrome for Testing c
 suites, did not write `DevToolsActivePort` within the fixed 20 s of `launch.rs`'s `connect`. ADR 0031's start judge had
 already replaced the same limit in `paddock-chromium` (the canonical), but the fix never reached the copy (rule 55), and C51
 did not flag it because it looks for fixed waits only inside functions named `start*`, `spawn*`, `launch*` or `boot*`.
-**Rule:** a start's readiness wait is judged by `paddock_proc::StartWatch` wherever it lives, whatever the helper is called;
-when a fix lands in a canonical implementation, check `docs/known-copies.toml` and fix or waive each copy in the same change.
-Real-browser tests take turns in a nextest `real-browser` group (max-threads 1) in every workspace that runs them.
+**Rule 55 and ADR 0031 applied:** a start's readiness wait is judged by `paddock_proc::StartWatch` wherever it lives,
+whatever the helper is called; a fix in a canonical implementation goes to every copy in `docs/known-copies.toml` in the
+same change, or the copy is waived with a `Copies-waived:` trailer (a register note is not a waiver). Real-browser tests take
+turns in a nextest `real-browser` group (max-threads 1) in every workspace that runs them, with a CI budget waiver longer
+than the spin patience.
