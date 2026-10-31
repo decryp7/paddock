@@ -78,8 +78,8 @@ const FAILURE: Record<FailureKind, string> = {
     </ng-template>
 
     <ng-template pdWidget="nextCheck" [pdWidgetOf]="next" let-v>
-      <button type="button" class="block" [disabled]="!v" [attr.aria-label]="v ? 'Next check: ' + v.name + ' in ' + (v.atMs | untilShort) + ', open' : null" (click)="v && run.emit({ type: 'openWatch', id: v.id })">
-        <span class="big" pdSkeleton>In {{ v ? (v.atMs | untilShort) : '12 min' }}</span>
+      <button type="button" class="block" [disabled]="!v" [attr.aria-label]="v ? 'Next check: ' + v.name + (v.due ? ' is due now' : ' in ' + (v.atMs | untilShort)) + ', open' : null" (click)="v && run.emit({ type: 'openWatch', id: v.id })">
+        <span class="big" pdSkeleton>{{ v?.due ? 'Due now' : 'In ' + (v ? (v.atMs | untilShort) : '12 min') }}</span>
         <span class="meta truncate" pdSkeleton>{{ v?.name ?? 'Watch name' }}@if (v && v.alsoDue > 0) { · +{{ v.alsoDue }} more }</span>
         <mat-icon class="chev" svgIcon="sp:chevron-right" aria-hidden="true" />
       </button>
@@ -101,8 +101,7 @@ const FAILURE: Record<FailureKind, string> = {
             <button type="button" class="row" [disabled]="!r" [attr.aria-label]="r ? r.name + ', ' + failure(r.kind) + ', open' : null" (click)="r && run.emit({ type: 'openWatch', id: r.id })">
               <mat-icon class="ic st-attention" svgIcon="sp:alert" aria-hidden="true" pdSkeleton />
               <span class="name truncate" pdSkeleton>{{ r?.name ?? 'Watch name' }}</span>
-              <span class="meta truncate" pdSkeleton>{{ r ? failure(r.kind) + ': ' + r.message : 'Check failed: the place did not answer' }}</span>
-              <mat-icon class="chev" svgIcon="sp:chevron-right" aria-hidden="true" />
+              <span class="meta truncate" [attr.title]="r ? failure(r.kind) + ': ' + r.message : null" pdSkeleton>{{ r ? failure(r.kind) + ': ' + r.message : 'Check failed: the place did not answer' }}</span>
             </button>
             <button type="button" class="retry" [disabled]="!r" [attr.aria-label]="r ? 'Retry check of ' + r.name : null" (click)="r && run.emit({ type: 'retryCheck', id: r.id })" pdSkeleton>
               <mat-icon class="ic-inline" svgIcon="sp:refresh" aria-hidden="true" />Retry

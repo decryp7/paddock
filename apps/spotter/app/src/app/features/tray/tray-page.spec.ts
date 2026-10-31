@@ -14,16 +14,16 @@ async function make(backend = makeMock()) {
 describe('TrayPage', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('draws the engine layout on the shared widget area, in layout order, with the unseen count in the header', async () => {
+  it('draws the engine layout on the shared widget area, in layout order, with the overall status in the header', async () => {
     const { f, frames, backend } = await make();
     const layout = (await backend.popoverView()).catalogue.kinds;
     expect(frames()).toHaveLength(DEFAULT_KINDS.length);
     expect(text(frames()[0]!)).toContain(layout.find((k) => k.kind === 'recentChanges')!.title);
-    expect(text(f.nativeElement.querySelector('.pill'))).toMatch(/^\d+ new$/);
+    expect(text(f.nativeElement.querySelector('.pill')), 'the pill is the overall status; what is new is the widget head').toMatch(/^\d+ failing$/);
     expect(backend.calls).toEqual(expect.arrayContaining(['listWatches', 'popoverView', 'popoverValues']));
   });
 
-  it('has no pill when nothing is unseen, and draws the empty states that start a watch', async () => {
+  it('has no pill when there is nothing to say, and draws the empty states that start a watch', async () => {
     const { f, frames } = await make(makeMock({ scenario: 'empty' }));
     expect(f.nativeElement.querySelector('.pill')).toBeNull();
     expect(text(frames()[0]!)).toContain('See new releases here');

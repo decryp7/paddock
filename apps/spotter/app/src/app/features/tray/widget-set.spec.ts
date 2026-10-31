@@ -35,7 +35,7 @@ const FULL = values([
     more: 2,
   }),
   ready({ kind: 'failures', rows: [{ id: 'w1', name: 'Nightly build', kind: 'unreachable', message: 'The share is offline.', failures: 3 }], more: 0 }),
-  ready({ kind: 'nextCheck', id: 'w2', name: 'Tool', atMs: NOW + 12 * 60_000, alsoDue: 1 }),
+  ready({ kind: 'nextCheck', id: 'w2', name: 'Tool', atMs: NOW + 12 * 60_000, alsoDue: 1, due: false }),
   ready({ kind: 'notifications', mode: { kind: 'paused', untilMs: NOW + 3_600_000 } }),
 ]);
 
@@ -116,6 +116,26 @@ describe('Spotter widget set', () => {
     expect(next).toContain('Tool');
     expect(next).toContain('+1 more');
     expect(frames()[3]!.querySelector('button.block')?.getAttribute('aria-label')).toMatch(/^Next check: Tool in .+, open$/);
+  });
+
+  it('says "Due now" for a check that is due or overdue, never "In now", also in the label', async () => {
+    for (const atMs of [NOW, NOW - 90_000]) {
+      const due = values(FULL.placements.map((p, i) => (i === 3 ? ready({ kind: 'nextCheck', id: 'w2', name: 'Tool', atMs, alsoDue: 0, due: true }) : p.state)));
+      const { frames } = await make(due);
+      expect(text(frames()[3]!)).toContain('Due now');
+      expect(text(frames()[3]!)).not.toMatch(/\bIn (now|\d)/);
+      expect(frames()[3]!.querySelector('button.block')?.getAttribute('aria-label')).toBe('Next check: Tool is due now, open');
+      TestBed.resetTestingModule();
+    }
+    const { frames } = await make();
+    expect(text(frames()[3]!)).toMatch(/In \d+ min/);
+  });
+
+  it('puts the failing watch\'s whole message in a tooltip and draws no chevron on a failure row', async () => {
+    const { frames } = await make();
+    const row = frames()[2]!.querySelector('button.row')!;
+    expect(row.querySelector('.meta')?.getAttribute('title')).toBe('Unreachable: The share is offline.');
+    expect(row.querySelector('.chev')).toBeNull();
   });
 
   it('words the notifications as on, paused until a time, or off with a way to Settings', async () => {

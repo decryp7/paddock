@@ -228,13 +228,8 @@
             "kind": "nextCheck",
             "name": "Internal mirror"
           },
-          "phase": "Checking watches",
-          "progress": {
-            "count": {
-              "done": 1,
-              "unit": "watch"
-            }
-          },
+          "phase": "Checking 1 watch",
+          "progress": "unknown",
           "state": "working",
           "title": "Checking now"
         },

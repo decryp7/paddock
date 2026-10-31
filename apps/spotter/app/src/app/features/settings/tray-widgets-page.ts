@@ -6,6 +6,7 @@ import type { PopoverEdit, PopoverView } from '../../core/widgets.types';
 import { Panel } from '../../shared/ui/panel';
 import { TrayWidgetsStore } from '../../state/tray-widgets.store';
 import type { Loadable } from '../../state/loadable';
+import { StatusPill } from '../tray/status-pill';
 import { WidgetSet } from '../tray/widget-set';
 
 /**
@@ -15,7 +16,7 @@ import { WidgetSet } from '../tray/widget-set';
  */
 @Component({
   selector: 'sp-tray-widgets-page',
-  imports: [PdWidgetChooser, PdWidgetArea, SuTrayPopover, Panel, WidgetSet],
+  imports: [PdWidgetChooser, PdWidgetArea, SuTrayPopover, Panel, WidgetSet, StatusPill],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page narrow">
@@ -32,7 +33,7 @@ import { WidgetSet } from '../tray/widget-set';
             <div slot="preview">
               <sp-widget-set #set />
               <pd-tray-popover label="Preview of the popup" platform="macos" inert>
-                <div slot="header" class="head"><strong>Spotter</strong></div>
+                <div slot="header" class="head"><img src="brand/spotter-16.svg" alt="" width="16" height="16" /><strong>Spotter</strong><sp-status-pill [status]="store.status()" /></div>
                 <pd-widget-area [placements]="view.layout.placements" [catalogue]="view.catalogue" [values]="store.values()" [templates]="set.widgets()" [meta]="set.meta" />
               </pd-tray-popover>
             </div>
@@ -54,6 +55,10 @@ import { WidgetSet } from '../tray/widget-set';
       padding: var(--pd-space-2) var(--pd-space-3);
       border-radius: var(--pd-radius-card);
       background: var(--pd-danger-tint);
+    }
+    /* Title above its help, also in the wide layout. */
+    .page-head {
+      display: block;
     }
     .head {
       display: flex;
