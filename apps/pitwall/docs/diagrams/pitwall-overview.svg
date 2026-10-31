@@ -119,6 +119,6 @@
 <text x="632" y="1052" class="m">Pure core</text>
 <rect x="733" y="1040" width="28" height="16" rx="4" class="n pl exts"/>
 <text x="769" y="1052" class="m">Planned (tagged)</text>
-<text x="1280" y="1052" class="foot">Pitwall · updated 2026-10-23</text>
+<text x="1280" y="1052" class="foot">Pitwall · updated 2026-10-31</text>
 <text x="48" y="1112" class="desc">The window and CLI reach the server only on 127.0.0.1: management calls with the admin key, standard APIs with an app key.</text>
 </svg>

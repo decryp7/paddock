@@ -82,7 +82,7 @@ panel('c4-3-core-state', {
     ['bench', 1, 2, 'benchmarks · redact', 'results · content redaction', 'Stored benchmark results that feed fast selection; redaction of request content before it is kept.'],
     ['mgmt', 2, 1, 'mgmt · discovery', 'wire contract', 'DTOs the UI, the shell and the CLI share (api.types.ts); discovery.json.'],
   ],
-  links: [['priv', 'B', 'cfg', 'T', 'Hosts', { rev: true }], ['keys', 'R', 'usage', 'L', 'Budgets'], ['usage', 'B', 'mgmt', 'T', 'UsageSeries'], ['cfg', 'R', 'met', 'L', 'Retention'], ['mgmt', 'L', 'met', 'R', 'Shapes', { rev: true }], ['met', 'B', 'bench', 'T', 'Speeds']],
+  links: [['keys', 'R', 'usage', 'L', 'Budgets'], ['usage', 'B', 'mgmt', 'T', 'UsageSeries'], ['cfg', 'R', 'met', 'L', 'Retention'], ['mgmt', 'L', 'met', 'R', 'Shapes', { rev: true }], ['met', 'B', 'bench', 'T', 'Speeds']],
 });
 
 const SUBS = 'C4 · Level 3 — Components of pitwall-server';

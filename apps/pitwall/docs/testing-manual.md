@@ -215,7 +215,7 @@ Record the platform, build versions and each result in the release notes' verifi
 | # | Steps | Expected |
 |---|-------|----------|
 | 29 | With Pitwall running run `pitwall status`, `pitwall ps`, `pitwall models`, each also with `--json`. | Tables for people, the server's JSON with `--json`; no key appears in any output. |
-| 30 | `pitwall pull unsloth/Qwen3.5-2B-GGUF/Qwen3.5-2B-Q4_K_M.gguf`; interrupt it with Ctrl-C and run it again. | Progress on stderr naming `huggingface.co`; the second run resumes; the Models page shows the same download. With offline mode on: exit code 4 and the offline message. |
+| 30 | `pitwall pull unsloth/Qwen3.5-2B-GGUF/Qwen3.5-2B-Q4_K_M.gguf`; interrupt it with Ctrl-C and run it again. | Progress on stderr naming `huggingface.co`; the second run resumes; the Models page shows the same download. With the network disconnected: exit code 4 and a message naming `huggingface.co` (not "server not running"). |
 | 31 | `pitwall load <model>`, `pitwall ps`, `pitwall unload <model>`; load a model larger than the free memory. | Loaded, listed, released; the oversized load exits with 4 and says to unload another model. |
 | 32 | `pitwall keys create cli-test --new`, then `export PITWALL_API_KEY=...; pitwall chat <model> "Say hi"`. | The key is printed once on stdout; the answer streams to stdout. `pitwall keys` shows only the id and prefix. |
 | 33 | `pitwall keys revoke cli-test <key-id>`, then chat again. | The chat fails with exit 1 and a message about the key. |
