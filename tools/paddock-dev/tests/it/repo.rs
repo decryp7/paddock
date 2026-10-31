@@ -13,23 +13,24 @@ pub fn repo_root() -> PathBuf {
 /// Why `root` is not a git working tree of its own (no `.git` there or above, or a repository above that is not `root`), or
 /// `None` when it is. `ceiling` stops git's upward search above that folder (for a test that must not see the real repository).
 pub fn repo_problem(root: &Path, ceiling: Option<&Path>) -> Option<String> {
-    let mut cmd = Command::new("git");
-    cmd.args(["rev-parse", "--show-toplevel"]).current_dir(root);
+    let mut cmd = paddock_proc::command("git");
+    cmd.args(["rev-parse", "--show-toplevel"]).current_dir(root).env("LC_ALL", "C");
+    cmd.env_remove("GIT_DIR").env_remove("GIT_WORK_TREE");
     if let Some(c) = ceiling {
         cmd.env("GIT_CEILING_DIRECTORIES", c);
     }
     let fix = "Run these tests in a git checkout or worktree, not in an exported copy: git worktree add <folder> origin/main";
-    let out = match cmd.output() {
+    let out = match paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(std::time::Duration::from_secs(10))) {
         Ok(out) => out,
         Err(e) => return Some(format!("{} is not usable: git cannot be run ({e}). {fix}", root.display())),
     };
-    if !out.status.success() {
+    if !out.success() {
         return Some(format!(
             "{} is not inside a git repository (no .git folder found). {fix}",
             root.display()
         ));
     }
-    let top = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+    let top = PathBuf::from(out.stdout_text().trim());
     match (top.canonicalize(), root.canonicalize()) {
         (Ok(top), Ok(here)) if top == here => None,
         _ => Some(format!(
@@ -65,7 +66,13 @@ fn a_folder_without_a_repository_fails_at_once_and_names_the_fix() {
 #[test]
 fn a_folder_inside_another_repository_is_refused_and_a_repository_root_is_accepted() {
     let dir = tempfile::tempdir().unwrap();
-    let init = Command::new("git").args(["init", "-q"]).current_dir(dir.path()).status().unwrap();
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(dir.path())
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .status()
+        .unwrap();
     assert!(init.success());
     assert_eq!(repo_problem(dir.path(), dir.path().parent()), None);
     let inner = dir.path().join("copy/tools/paddock-dev");

@@ -218,6 +218,10 @@ impl Exec for Real {
         };
         let mut cmd = proc_command(program);
         cmd.args(args).current_dir(cwd);
+        if program == "git" {
+            // Untranslated messages: callers and tests match on text.
+            cmd.env("LC_ALL", "C");
+        }
         let out = match stdin {
             None => {
                 let out = run_bounded(cmd, Limits::new(TIMEOUT)).map_err(|e| fail(e.to_string()))?;

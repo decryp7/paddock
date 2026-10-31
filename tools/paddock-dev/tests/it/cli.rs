@@ -142,10 +142,10 @@ fn graph_affected_outside_a_paddock_repository_fails_at_once_and_names_the_next_
     // No repository at all, then a repository that is not Paddock's (a copy inside an unrelated one).
     let (code, err) = run();
     assert_eq!(code, 1);
-    assert!(err.contains("not a git repository"), "{err}");
+    assert!(err.contains("--root"), "{err}");
     let init = Command::new("git").args(["init", "-q"]).current_dir(d.path()).status().unwrap();
     assert!(init.success());
     let (code, err) = run();
     assert_eq!(code, 1);
-    assert!(err.contains("not a Paddock one") && err.contains("--root"), "{err}");
+    assert!(err.contains("no crates/Cargo.toml") && err.contains("--root"), "{err}");
 }
