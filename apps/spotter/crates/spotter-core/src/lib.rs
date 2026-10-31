@@ -41,3 +41,4 @@ pub mod upgrade;
 pub mod user_regex;
 pub mod version;
 pub mod watch;
+pub mod widgets;

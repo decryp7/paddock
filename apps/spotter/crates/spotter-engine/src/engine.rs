@@ -27,6 +27,7 @@ use spotter_core::state::{WatchState, WatchStatus};
 use spotter_core::time::Timestamp;
 use spotter_core::version::Version;
 use spotter_core::watch::{Settings, Watch, WatchId, WatchSpec};
+use spotter_core::widgets::{PopoverStatus, PopoverValues, PopoverView, PopoverWidget};
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -106,6 +107,9 @@ pub(crate) struct Inner {
     pub(crate) checker: Checker,
     pub(crate) pack: Pack,
     pub(crate) doc: Mutex<ConfigDoc>,
+    /// Held across a read-modify-write of the settings (`save_settings`, `edit_popover`): the two write different parts of the
+    /// same document, and without it one could save the other's stale copy.
+    pub(crate) settings_write: Mutex<()>,
     pub(crate) states: Mutex<BTreeMap<WatchId, WatchState>>,
     pub(crate) checking: Mutex<HashSet<WatchId>>,
     pub(crate) warnings: Mutex<Vec<String>>,
@@ -187,6 +191,7 @@ impl Engine {
             inner: Arc::new(Inner {
                 migrated: loaded.migrated,
                 doc: Mutex::new(loaded.doc),
+                settings_write: Mutex::new(()),
                 states: Mutex::new(states),
                 checking: Mutex::new(HashSet::new()),
                 warnings: Mutex::new(warnings),
@@ -855,8 +860,14 @@ impl Engine {
             smtp.host = smtp.host.trim().to_string();
             smtp.from = smtp.from.trim().to_string();
         }
-        let had_mail = lock(&self.inner.doc).settings.smtp.is_some();
-        lock(&self.inner.doc).settings = settings.clone();
+        let _writing = lock(&self.inner.settings_write);
+        // One look at the stored settings: the mail flag and the popup's layout (changed only by `edit_popover`; the settings
+        // page's copy never carries it) come from the same moment as the write.
+        let mut doc = lock(&self.inner.doc);
+        let had_mail = doc.settings.smtp.is_some();
+        settings.popover = doc.settings.popover.clone();
+        doc.settings = settings.clone();
+        drop(doc);
         self.save_config()?;
         if had_mail && settings.smtp.is_none() {
             // Switching mail off forgets its password too; a store that refuses leaves nothing the app can read.
@@ -868,6 +879,66 @@ impl Engine {
         }
         self.emit(Change::Settings);
         Ok(settings)
+    }
+
+    /// The tray popup's layout as the chooser draws it (family ADR 0035).
+    pub fn popover_view(&self) -> PopoverView {
+        paddock_widgets::view(&lock(&self.inner.doc).settings.popover)
+    }
+
+    /// How many rows each popup widget draws, loading or ready (the one source of the row limits): the UI's loading twins
+    /// draw the same rows as the ready widgets, so a popup does not change height when its values arrive.
+    pub fn popover_shape(&self) -> Vec<spotter_core::widgets::LoadingRows> {
+        spotter_core::widgets::loading_shape()
+    }
+
+    /// Applies one edit to the tray popup's layout and saves it; the layout is unchanged when the edit is refused or the
+    /// file cannot be written. Returns the new view.
+    pub fn edit_popover(&self, edit: paddock_widgets::Edit<PopoverWidget>) -> Result<PopoverView> {
+        let _writing = lock(&self.inner.settings_write);
+        let before = lock(&self.inner.doc).settings.popover.clone();
+        lock(&self.inner.doc)
+            .settings
+            .popover
+            .edit(edit)
+            .map_err(|e| EngineError::BadRequest(e.to_string()))?;
+        if let Err(e) = self.save_config() {
+            lock(&self.inner.doc).settings.popover = before;
+            return Err(e);
+        }
+        self.emit(Change::Settings);
+        Ok(self.popover_view())
+    }
+
+    /// What the tray popup's widgets show now (computed from the watches the engine holds; nothing is fetched).
+    pub fn popover_values(&self) -> PopoverValues {
+        let now = self.now();
+        let (_, local) = local_parts(now, self.inner.svc.clock.utc_offset_minutes());
+        let settings = self.settings();
+        let watches = self.list_watches();
+        crate::widgets::popover_values(
+            settings.popover.layout(),
+            &crate::widgets::Inputs {
+                watches: &watches,
+                settings: &settings,
+                now_ms: now.0,
+                local,
+            },
+        )
+    }
+
+    /// How the watches are doing overall, for the popup's header pill ("2 failing", "All good").
+    pub fn popover_status(&self) -> PopoverStatus {
+        let now = self.now();
+        let (_, local) = local_parts(now, self.inner.svc.clock.utc_offset_minutes());
+        let settings = self.settings();
+        let watches = self.list_watches();
+        crate::widgets::popover_status(&crate::widgets::Inputs {
+            watches: &watches,
+            settings: &settings,
+            now_ms: now.0,
+            local,
+        })
     }
 
     /// Pauses notifications for `minutes` (`None` resumes).

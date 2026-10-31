@@ -26,6 +26,8 @@ import type {
   WatchDraft,
   WatchSummary,
 } from './api.types';
+import type { PopoverEdit, PopoverValues, PopoverView } from './widgets.types';
+import type { LoadingRows, PopoverStatus } from './generated/widgets';
 
 /**
  * Everything the UI asks the backend. Components never call Tauri directly: they get this through DI — the real
@@ -123,12 +125,26 @@ export interface SpotterBackend {
   /** Sends a test message through the saved mail settings; rejects with what to check. */
   sendTestEmail(to: string): Promise<void>;
 
+  // The tray popup's widgets (family ADR 0035): the engine owns the layout and the values; the UI draws them.
+  /** The popup's layout as the chooser draws it. */
+  popoverView(): Promise<PopoverView>;
+  /** One edit of the popup's layout (the engine validates it and keeps one level of undo). */
+  editPopover(edit: PopoverEdit): Promise<PopoverView>;
+  /** What the popup's widgets show now. */
+  popoverValues(): Promise<PopoverValues>;
+  /** How the watches are doing overall: the popup's header pill. */
+  popoverStatus(): Promise<PopoverStatus>;
+  /** How many rows each widget draws, loading or ready (the engine's row limits): loading twins are as tall as ready widgets. */
+  popoverShape(): Promise<LoadingRows[]>;
+
   /** Subscribes to pushed state; returns the unsubscribe function. */
   onState(handler: (push: StatePush) => void): Promise<() => void>;
 
   // Tray popup (added by the UI; the popup is the window that loads `#/tray`)
   /** Shows and focuses the main window, then asks it to show `route` (`/watches/<id>`; null keeps the current page). */
   showMainWindow(route: string | null): Promise<void>;
+  /** Quits Spotter (the tray's menu item, from the popup's more menu). */
+  quitApp(): Promise<void>;
   /** Hides the tray popup. */
   hideTray(): Promise<void>;
   /** Fits the tray popup's window to its content: `height` in CSS pixels as the page measured it (the shell clamps it). */

@@ -7,7 +7,9 @@ use crate::dto::*;
 use crate::jobs::{self, Kind, Operation};
 use crate::state::Shared;
 use crate::{applog, lifecycle, tray};
+use paddock_widgets::Edit;
 use spotter_core::limits::MAX_WATCHES;
+use spotter_core::widgets::{PopoverValues, PopoverView, PopoverWidget};
 use std::path::PathBuf;
 use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
@@ -365,6 +367,36 @@ pub async fn save_settings(state: State<'_, Shared>, settings: SettingsDto) -> O
         text_ok("downloads folder", f)?;
     }
     Ok((&state.engine.save_settings(settings.into_settings())?).into())
+}
+
+/// `popover_view`: the tray popup's layout as the chooser draws it.
+#[tauri::command]
+pub async fn popover_view(state: State<'_, Shared>) -> Out<PopoverView> {
+    Ok(state.engine.popover_view())
+}
+
+/// `popover_status`: how the watches are doing overall (the popup's header pill).
+#[tauri::command]
+pub async fn popover_status(state: State<'_, Shared>) -> Out<spotter_core::widgets::PopoverStatus> {
+    Ok(state.engine.popover_status())
+}
+
+/// `popover_shape`: the rows each popup widget draws, so loading twins have the height of ready widgets.
+#[tauri::command]
+pub async fn popover_shape(state: State<'_, Shared>) -> Out<Vec<spotter_core::widgets::LoadingRows>> {
+    Ok(state.engine.popover_shape())
+}
+
+/// `edit_popover`: one edit of the tray popup's layout (the engine validates it and keeps one level of undo).
+#[tauri::command]
+pub async fn edit_popover(state: State<'_, Shared>, edit: Edit<PopoverWidget>) -> Out<PopoverView> {
+    Ok(state.engine.edit_popover(edit)?)
+}
+
+/// `popover_values`: what the tray popup's widgets show now.
+#[tauri::command]
+pub async fn popover_values(state: State<'_, Shared>) -> Out<PopoverValues> {
+    Ok(state.engine.popover_values())
 }
 
 /// `pause_notifications`.

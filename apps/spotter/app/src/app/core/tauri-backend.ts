@@ -28,6 +28,8 @@ import type {
   WatchSummary,
 } from './api.types';
 import type { ReleaseTarget, SpotterBackend } from './backend';
+import type { PopoverEdit, PopoverValues, PopoverView } from './widgets.types';
+import type { LoadingRows, PopoverStatus } from './generated/widgets';
 import { toCommandError } from './command-error';
 import type { Platform } from './window-chrome';
 
@@ -179,6 +181,21 @@ export class TauriBackend implements SpotterBackend {
   sendTestEmail(to: string): Promise<void> {
     return this.run('send_test_email', { to });
   }
+  popoverView(): Promise<PopoverView> {
+    return this.run('popover_view');
+  }
+  editPopover(edit: PopoverEdit): Promise<PopoverView> {
+    return this.run('edit_popover', { edit });
+  }
+  popoverValues(): Promise<PopoverValues> {
+    return this.run('popover_values');
+  }
+  popoverStatus(): Promise<PopoverStatus> {
+    return this.run('popover_status');
+  }
+  popoverShape(): Promise<LoadingRows[]> {
+    return this.run('popover_shape');
+  }
   showMainWindow(route: string | null): Promise<void> {
     return this.run('show_main_window', { route });
   }
@@ -188,6 +205,9 @@ export class TauriBackend implements SpotterBackend {
   // The popover is the shell's window: closing and fitting it are the shell's commands.
   hideTray(): Promise<void> {
     return this.run('plugin:paddock-shell|tray_close');
+  }
+  quitApp(): Promise<void> {
+    return this.run('plugin:paddock-shell|app_quit');
   }
   fitTray(height: number): Promise<void> {
     return this.run('plugin:paddock-shell|tray_fit_height', { height });

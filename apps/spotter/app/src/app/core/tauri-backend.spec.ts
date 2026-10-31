@@ -56,14 +56,20 @@ describe('TauriBackend', () => {
     await backend.testPattern('custom', '(?<major>\\d+)', true, 'v1');
     await backend.versionSchemes();
     await backend.previewSchedule({ mode: 'cron', expr: '0 9 * * *', zone: null }, 'github');
+    await backend.popoverView();
+    await backend.editPopover('undo');
+    await backend.popoverValues();
+    await backend.quitApp();
     expect(calls.map((c) => c[0])).toEqual([
       'app_info', 'list_watches', 'get_watch', 'source_kinds', 'test_source', 'save_watch', 'delete_watch', 'set_paused', 'check_now',
       'acknowledge', 'reset_acknowledgement', 'set_installed', 'open_release', 'download_release', 'dashboard', 'events', 'get_settings',
       'save_settings', 'pause_notifications', 'get_autostart', 'set_autostart', 'open', 'choose_folder', 'choose_program', 'presets',
       'discover_feeds', 'renderer_status', 'install_renderer', 'import_list', 'show_main_window', 'pending_route',
       'plugin:paddock-shell|tray_close', 'acknowledge_product', 'open_release', 'download_release', 'suggest_pattern',
-      'test_pattern', 'version_schemes', 'preview_schedule',
+      'test_pattern', 'version_schemes', 'preview_schedule', 'popover_view', 'edit_popover', 'popover_values',
+      'plugin:paddock-shell|app_quit',
     ]);
+    expect(calls[40]?.[1]).toEqual({ edit: 'undo' });
     expect(calls[32]?.[1]).toEqual({ id: 'w1', product: 'PRO' });
     expect(calls[33]?.[1]).toEqual({ id: 'w1', version: '1.0', product: 'PRO', artifact: 'a.iso' });
     expect(calls[8]?.[1]).toEqual({ id: null });

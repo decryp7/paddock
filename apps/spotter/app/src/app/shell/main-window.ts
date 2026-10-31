@@ -23,7 +23,8 @@ import { WatchesStore } from '../state/watches.store';
 import { SettingsStore } from '../state/settings.store';
 import type { SpotterContext } from './context';
 import { Router, Routes } from '@angular/router';
-import { listenForRoutes } from '../core/navigation';
+import { listenForRoutes, settingsPageOf } from '../core/navigation';
+import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
 
 /** The detail routes of the Watches page, matched before the pages. */
 export const DETAIL_ROUTES: Routes = [
@@ -73,7 +74,13 @@ export function bootMainWindow(): Promise<unknown> {
         void inject(SettingsStore).loadSettings();
         // A tray click, an OS toast click and the tray menu ask this window to show a page (`spotter://navigate`).
         const router = inject(Router);
-        void listenForRoutes(inject(BACKEND), (route) => void router.navigateByUrl(route));
+        const openSettings = inject(OPEN_SETTINGS);
+        // `/settings[/page]` is the Settings window (a dialog) at that page, not a page of the app: the tray asks for it.
+        void listenForRoutes(inject(BACKEND), (route) => {
+          const page = settingsPageOf(route);
+          if (page !== null) openSettings(page);
+          else void router.navigateByUrl(route);
+        });
       }),
       // The shell's frame already provides the native feel (browser keys, context menu, the Copy menu).
       provideShellPages({

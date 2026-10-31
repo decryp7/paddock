@@ -1,70 +1,78 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterNextRender, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterNextRender, computed, inject, signal } from '@angular/core';
+import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatIcon } from '@angular/material/icon';
+import { MatTooltip } from '@angular/material/tooltip';
+import { MatMenu, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
 import { SuTrayPopover, type SuTrayPlatform } from '@decryp7/paddock-ui';
+import { PdWidgetArea } from '@decryp7/paddock-ui/widgets';
 import { BACKEND } from '../../core/backend';
+import { toCommandError } from '../../core/command-error';
+import type { WidgetActionId } from '../../core/generated/widgets';
 import { platformFromUserAgent } from '../../core/tauri-backend';
+import { SETTINGS_GENERAL_ROUTE, SETTINGS_TRAY_POPUP_ROUTE } from '../../core/navigation';
+import { StatusPill } from './status-pill';
 import { observeHeight } from '../../shared/observe-height';
-import { AgoShortPipe } from '../../shared/ui/ago.pipe';
-import { Avatar } from '../../shared/ui/avatar';
-import { Version } from '../../shared/ui/version';
+import { TrayWidgetsStore } from '../../state/tray-widgets.store';
 import { WatchesStore } from '../../state/watches.store';
+import { WidgetSet } from './widget-set';
 
-/** The tray popup: unseen releases at a glance. Frameless and transparent; the shell draws the OS material behind. */
+/**
+ * The tray popup (family ADR 0035, Spotter's catalogue in `spotter-core`'s `widgets`): the person's widgets on the shared
+ * widget area, in the shared popover. Frameless and transparent; the shell draws the OS material behind. The layout and every
+ * value are the engine's; this page draws them and sends the action a button names to the command that does it.
+ */
 @Component({
   selector: 'sp-tray-page',
-  imports: [MatIcon, SuTrayPopover, AgoShortPipe, Avatar, Version],
+  imports: [MatButton, MatIconButton, MatIcon, MatMenu, MatMenuItem, MatMenuTrigger, MatTooltip, SuTrayPopover, PdWidgetArea, WidgetSet, StatusPill],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pd-tray-popover label="Spotter" [platform]="platform" (dismissed)="close()">
       <div slot="header" class="head">
         <img src="brand/spotter-16.svg" alt="" width="16" height="16" />
         <strong>Spotter</strong>
-        @if (unseen().length) {
-          <span class="pill" role="status">{{ store.unseen().length }} new</span>
-        }
+        <sp-status-pill [status]="widgets.status()" />
       </div>
-      @if (store.error(); as err) {
-        <p class="error" role="alert">{{ err.message }} <button type="button" class="btn sm" (click)="store.load()">Retry</button></p>
-      } @else if (!store.loaded()) {
-        <p class="muted" role="status">Loading…</p>
-      } @else if (unseen().length) {
-        <ul class="list">
-          @for (w of unseen(); track w.id) {
-            <li>
-              <button type="button" class="item" (click)="open(w.id)" [attr.aria-label]="w.name + ' ' + w.latest?.version + ', open'">
-                <sp-avatar [name]="w.name" [watch]="w.id" [size]="32" />
-                <span class="main">
-                  <span class="name truncate">{{ w.name }}</span>
-                  <span class="meta truncate">
-                    @if (w.newerThanInstalled && w.installed && w.latest) {
-                      <sp-ver [value]="w.installed" /> → <sp-ver [value]="w.latest.version" />
-                    } @else if (w.latest) {
-                      <sp-ver [value]="w.latest.version" />
-                    }
-                    · {{ w.latest?.firstSeenMs | agoShort }}
-                  </span>
-                </span>
-              </button>
-              <button type="button" class="btn ghost icon sm check" (click)="store.acknowledge(w.id, null)" [attr.aria-label]="'Mark ' + w.name + ' as seen'" title="Mark as seen"><mat-icon svgIcon="sp:check" aria-hidden="true" /></button>
-            </li>
-          }
-        </ul>
-        @if (hidden() > 0) {
-          <p class="more muted">+{{ hidden() }} more in Spotter</p>
-        }
+      <sp-widget-set #set (run)="perform($event)" />
+      @if (actionError(); as message) {
+        <p class="error" role="alert"><mat-icon svgIcon="sp:alert" aria-hidden="true" />{{ message }}</p>
+      }
+      @if (widgets.view(); as view) {
+        <pd-widget-area
+          [placements]="view.layout.placements"
+          [catalogue]="view.catalogue"
+          [values]="widgets.values()"
+          [templates]="set.widgets()"
+          [meta]="set.meta"
+          (action)="perform($event)"
+          (customize)="customize()"
+        />
+      } @else if (widgets.error(); as err) {
+        <div class="state" role="alert">
+          <mat-icon svgIcon="sp:alert" aria-hidden="true" />
+          <strong>Couldn't read the popup</strong>
+          <span class="muted">{{ err.message }}</span>
+          <button matButton="outlined" type="button" (click)="widgets.load()">Retry</button>
+        </div>
       } @else {
-        <div class="empty">
-          <mat-icon svgIcon="sp:check-all" aria-hidden="true" />
-          <strong>All caught up</strong>
-          <span class="muted">You have seen every release.</span>
+        <div class="state" role="status" aria-busy="true">
+          <span class="sk" aria-hidden="true"></span>
+          <span class="sk" aria-hidden="true"></span>
+          <span class="sr">Loading the popup</span>
         </div>
       }
       <div slot="footer" class="foot">
-        @if (unseen().length > 1) {
-          <button type="button" class="btn ghost sm" (click)="store.acknowledgeAll()">Mark all seen</button>
-        }
         <span class="spacer"></span>
-        <button type="button" class="btn primary sm" (click)="openMain()">Open Spotter</button>
+        <button matButton="filled" type="button" (click)="openMain()"><mat-icon svgIcon="sp:arrow-right" aria-hidden="true" />Open Spotter</button>
+        <button matIconButton type="button" aria-label="More actions" matTooltip="More actions" matTooltipPosition="left" [matMenuTriggerFor]="more">
+          <mat-icon svgIcon="sp:more" aria-hidden="true" />
+        </button>
+        <mat-menu #more="matMenu" yPosition="above" xPosition="before">
+          <button mat-menu-item type="button" (click)="customize()"><mat-icon svgIcon="sp:sliders" aria-hidden="true" />Customize widgets…</button>
+          <button mat-menu-item type="button" [disabled]="unseen() === 0" (click)="watches.acknowledgeAll()"><mat-icon svgIcon="sp:check-all" aria-hidden="true" />Mark all as seen</button>
+          <button mat-menu-item type="button" (click)="perform({ type: 'openSettings' })"><mat-icon svgIcon="sp:settings" aria-hidden="true" />Settings…</button>
+          <hr class="sep" />
+          <button mat-menu-item type="button" (click)="quit()"><mat-icon svgIcon="sp:power" aria-hidden="true" />Quit Spotter</button>
+        </mat-menu>
       </div>
     </pd-tray-popover>
   `,
@@ -72,83 +80,56 @@ import { WatchesStore } from '../../state/watches.store';
     :host {
       display: block;
     }
-    .more {
-      margin: 0;
-      padding: var(--pd-space-2) var(--pd-space-4);
-      font-size: var(--pd-text-caption);
-    }
     .head {
       display: flex;
       align-items: center;
       gap: var(--pd-space-2);
       width: 100%;
     }
-    .pill {
-      margin-left: auto;
-      padding: 1px var(--pd-space-2);
-      border-radius: var(--pd-radius-pill);
-      background: var(--pd-surface-3);
-      color: var(--pd-text-muted);
-      font-size: var(--pd-text-caption);
-      font-weight: var(--pd-weight-semibold);
-    }
-    .empty {
+    .state {
       display: grid;
-      justify-items: center;
-      gap: var(--pd-space-1);
-      padding: var(--pd-space-6) var(--pd-space-4);
-      text-align: center;
-    }
-    .empty mat-icon {
-      width: 32px;
-      height: 32px;
-      color: var(--pd-text-subtle);
-    }
-    li:not(:hover):not(:focus-within) .check {
-      opacity: 0;
-    }
-    .list {
-      display: grid;
-      margin: 0;
-      padding: 0;
-      list-style: none;
-    }
-    li {
-      display: flex;
-      align-items: center;
-      gap: var(--pd-space-1);
-    }
-    .item {
-      display: flex;
-      flex: 1;
-      align-items: center;
+      justify-items: start;
       gap: var(--pd-space-2);
-      min-width: 0;
-      padding: var(--pd-space-2);
-      border: 0;
-      border-radius: var(--pd-radius-control);
-      background: transparent;
-      color: var(--pd-text);
-      font: inherit;
-      text-align: left;
+      padding: var(--pd-space-3);
+      border-radius: var(--pd-radius-card);
+      background: var(--pd-surface-2);
     }
-    .item:hover {
-      background: var(--pd-hover);
+    .state mat-icon {
+      width: 16px;
+      height: 16px;
+      color: var(--pd-danger);
     }
-    .main {
-      display: grid;
-      flex: 1;
-      min-width: 0;
-    }
-    .name {
-      font-weight: var(--pd-weight-medium);
-    }
-    .meta,
     .muted {
       color: var(--pd-text-muted);
-      font-size: var(--pd-text-caption);
+      font-size: var(--pd-text-label);
+    }
+    .sk {
+      display: block;
+      width: 100%;
+      height: 56px;
+      border-radius: var(--pd-radius-card);
+      background: var(--pd-skeleton);
+    }
+    .sr {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
     }
     .error {
+      display: flex;
+      align-items: center;
+      gap: var(--pd-space-2);
+      margin: 0 0 var(--pd-space-2);
+      padding: var(--pd-space-2) var(--pd-space-3);
+      border-radius: var(--pd-radius-card);
+      background: var(--pd-danger-tint);
+      font-size: var(--pd-text-label);
+    }
+    .error mat-icon {
+      width: 14px;
+      height: 14px;
       color: var(--pd-danger);
     }
     .foot {
@@ -160,21 +141,38 @@ import { WatchesStore } from '../../state/watches.store';
     .spacer {
       flex: 1;
     }
+    .sep {
+      border: 0;
+      border-top: 1px solid var(--pd-hairline);
+      margin: 4px 0;
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .sk {
+        animation: sk-pulse 1.2s ease-in-out infinite;
+      }
+    }
+    @keyframes sk-pulse {
+      50% {
+        opacity: 0.6;
+      }
+    }
   `,
 })
 export class TrayPage {
-  protected readonly store = inject(WatchesStore);
+  protected readonly watches = inject(WatchesStore);
+  protected readonly widgets = inject(TrayWidgetsStore);
   private readonly backend = inject(BACKEND);
-  protected readonly unseen = computed(() => this.store.unseen().slice(0, 5));
-  /** New releases beyond the rows shown. */
-  protected readonly hidden = computed(() => Math.max(0, this.store.unseen().length - this.unseen().length));
+  protected readonly unseen = computed(() => this.watches.unseen().length);
+  /** What the last button press that failed said; cleared by the next press. */
+  protected readonly actionError = signal<string | null>(null);
   protected readonly platform: SuTrayPlatform = (() => {
     const p = platformFromUserAgent(navigator.userAgent);
     return p === 'windows' ? 'windows' : p === 'linux' ? 'linux' : 'macos';
   })();
 
   constructor() {
-    this.store.start();
+    this.watches.start();
+    this.widgets.start();
     // The window is as tall as the popup's content (no empty gap under a short list); the shell clamps the height.
     const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     const destroy = inject(DestroyRef);
@@ -188,11 +186,48 @@ export class TrayPage {
     void this.backend.hideTray().catch(() => undefined);
   }
 
-  protected open(id: string): void {
-    void this.backend.showMainWindow(`/watches/${id}`).then(() => this.close(), () => undefined);
+  protected openMain(): void {
+    this.perform({ type: 'openSpotter' });
   }
 
-  protected openMain(): void {
-    void this.backend.showMainWindow(null).then(() => this.close(), () => undefined);
+  /** "Customize widgets…": Settings (the chooser is its page, ADR 0035 section 5). */
+  protected customize(): void {
+    this.show(SETTINGS_TRAY_POPUP_ROUTE);
+  }
+
+  protected quit(): void {
+    this.attempt(this.backend.quitApp());
+  }
+
+  /** Runs what a widget asked for through the command that does it; the engine decides the rest. */
+  protected perform(action: WidgetActionId): void {
+    switch (action.type) {
+      case 'openSpotter':
+        return this.show(null);
+      case 'openWatch':
+        return this.show(`/watches/${action.id}`);
+      case 'openWatches':
+        return this.show('/watches');
+      case 'addWatch':
+        return this.show('/watches/new');
+      case 'openSettings':
+        return this.show(SETTINGS_GENERAL_ROUTE);
+      case 'retryCheck':
+        return this.attempt(this.backend.checkNow(action.id));
+      case 'checkAll':
+        return this.attempt(this.backend.checkNow(null));
+      case 'resumeNotifications':
+        return this.attempt(this.backend.pauseNotifications(null));
+    }
+  }
+
+  /** Shows a page of the main window, then puts the popup away. */
+  private show(route: string | null): void {
+    this.attempt(this.backend.showMainWindow(route).then(() => this.close()));
+  }
+
+  private attempt(work: Promise<unknown>): void {
+    this.actionError.set(null);
+    work.catch((e: unknown) => this.actionError.set(toCommandError(e).message));
   }
 }
