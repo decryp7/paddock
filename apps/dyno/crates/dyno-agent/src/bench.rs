@@ -154,7 +154,7 @@ impl BenchCentre {
 
     fn save(&self, h: &BenchHistory) {
         if let Err(e) = files::save(&self.inner.file, h) {
-            eprintln!("dyno-agent: could not save the benchmark history: {e}");
+            log::error!("dyno-agent: could not save the benchmark history: {e}");
         }
     }
 

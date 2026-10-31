@@ -357,7 +357,7 @@ fn store_if_due<T: serde::Serialize>(store: &Store, kind: &str, device: &str, t:
         .is_none_or(|last| t.since(last) >= STORE_EVERY_MS);
     if due {
         if let Err(e) = store.put_hardware_reading(kind, device, t, doc) {
-            eprintln!("dyno-agent: could not store a hardware reading: {e}");
+            log::error!("dyno-agent: could not store a hardware reading: {e}");
         }
     }
 }
@@ -394,7 +394,7 @@ pub fn run_background(shared: &Arc<Shared>) {
             }
         }));
         if guarded.is_err() {
-            eprintln!("dyno-agent: a hardware background cycle panicked; continuing");
+            log::error!("dyno-agent: a hardware background cycle panicked; continuing");
         }
     }
 }

@@ -51,7 +51,7 @@ impl Sampler {
             let iv = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.tick(shared))) {
                 Ok(iv) => iv,
                 Err(_) => {
-                    eprintln!("dyno-agent: a sampling tick panicked; continuing");
+                    log::error!("dyno-agent: a sampling tick panicked; continuing");
                     Intervals {
                         system_ms: 2_000,
                         process_ms: 10_000,
@@ -177,7 +177,7 @@ impl Sampler {
         }
         let groups_for_history: &[AppGroup] = if fresh { &core.latest.groups } else { &[] };
         if let Err(e) = core.writer.record(&mut core.store, sample, groups_for_history) {
-            eprintln!("dyno-agent: history write failed: {e}");
+            log::error!("dyno-agent: history write failed: {e}");
         }
         if t.millis() % 900_000 < 5_000 {
             let _ = core.writer.record_disks(&core.store, sample);

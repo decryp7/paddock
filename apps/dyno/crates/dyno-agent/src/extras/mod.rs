@@ -207,7 +207,7 @@ pub fn record_changes(shared: &Shared) {
     }
     if !found.is_empty() {
         if let Err(e) = store.put_changes(&found, t) {
-            eprintln!("dyno-agent: could not store changes: {e}");
+            log::error!("dyno-agent: could not store changes: {e}");
         }
     }
 }

@@ -46,29 +46,35 @@ pub fn bind(shared: &Shared) -> std::io::Result<(Host, Discovery)> {
 
 /// Accepts connections until the agent stops. Each connection gets a [`Peer`] whose handler answers requests.
 pub fn serve(shared: &Arc<Shared>, mut host: Host) {
-    let mut peers: Vec<(u64, Arc<Peer<Message>>)> = Vec::new();
+    let mut peers: Vec<(u64, Arc<Peer<Message>>, std::time::Instant)> = Vec::new();
     while !shared.stopped() {
         // A closed connection loses its subscription; dropping the sender ends its push thread.
-        let gone: Vec<u64> = peers.iter().filter(|(_, p)| p.is_closed()).map(|(id, _)| *id).collect();
+        let gone: Vec<u64> = peers.iter().filter(|(_, p, _)| p.is_closed()).map(|(id, _, _)| *id).collect();
         if !gone.is_empty() {
-            peers.retain(|(id, _)| !gone.contains(id));
+            for (id, _, since) in peers.iter().filter(|(id, _, _)| gone.contains(id)) {
+                log::info!(ConnectionId = *id, ConnectedMs = u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX); "Client disconnected");
+            }
+            peers.retain(|(id, _, _)| !gone.contains(id));
             lock(&shared.subs).retain(|s| !gone.contains(&s.id));
             shared.wake_sampler();
         }
         match host.accept(Duration::from_millis(400)) {
             Ok(conn) => match connect(shared, conn) {
-                Ok(entry) => peers.push(entry),
-                Err(e) => eprintln!("dyno-agent: could not start a connection: {e}"),
+                Ok((id, peer)) => {
+                    log::info!(ConnectionId = id, SinceStartMs = crate::logging::elapsed_ms(); "Client connected");
+                    peers.push((id, peer, std::time::Instant::now()));
+                }
+                Err(e) => log::error!("dyno-agent: could not start a connection: {e}"),
             },
             Err(IpcError::Timeout(_)) => {}
             Err(e) => {
                 // A client with the wrong token or version: refused, logged without content.
-                eprintln!("dyno-agent: refused a connection: {e}");
+                log::error!("dyno-agent: refused a connection: {e}");
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
     }
-    for (_, p) in &peers {
+    for (_, p, _) in &peers {
         p.close();
     }
     Discovery::remove_if_mine(&shared.dirs.discovery());

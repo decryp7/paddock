@@ -188,7 +188,7 @@ fn record(shared: &Shared, found: &[Issue], at: Timestamp) {
     let added = match core.store.put_issues(found) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("dyno-agent: could not store issues: {e}");
+            log::error!("dyno-agent: could not store issues: {e}");
             Vec::new()
         }
     };

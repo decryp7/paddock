@@ -218,6 +218,7 @@ fn run_exit_code(out: Result<(), StartError>) -> i32 {
         }
         Err(StartError::Failed(e)) => {
             eprintln!("dyno-agent: {e}");
+            log::error!(Error = e.as_str(); "Agent could not start");
             1
         }
     }
@@ -225,18 +226,35 @@ fn run_exit_code(out: Result<(), StartError>) -> i32 {
 
 fn run() -> Result<(), StartError> {
     let dirs = Dirs::current();
+    // First: the agent's own dated log (and its panic hook), so every step below is in a file even under launchd.
+    let _log = crate::logging::install(&dirs);
+    log::info!(
+        ParentPid = crate::logging::parent_pid(),
+        Arch = crate::logging::arch(),
+        OsVersion = crate::logging::os_version().as_str(),
+        Version = env!("CARGO_PKG_VERSION");
+        "Agent starting"
+    );
     install_signal_handlers();
     spawn_signal_watch();
     let (platform, details) = platforms();
     // Takes the data folder's agent lock first: a second agent exits here, before it opens or writes anything.
     let running = Running::start_os(dirs, platform, details, reveal())?;
     eprintln!("dyno-agent {} running (pid {})", env!("CARGO_PKG_VERSION"), running.discovery.pid);
+    log::info!(ElapsedMs = crate::logging::elapsed_ms(), Pid = running.discovery.pid; "Agent running");
     RUNNING.store(true, Ordering::SeqCst);
     while !running.stopped() && !SIGNALLED.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(200));
     }
+    let reason = if SIGNALLED.load(Ordering::SeqCst) {
+        "signal"
+    } else {
+        "a client asked it to shut down"
+    };
+    log::info!(Reason = reason; "Agent stopping");
     running.stop();
     STOPPED.store(true, Ordering::SeqCst);
+    log::info!(ElapsedMs = crate::logging::elapsed_ms(); "Agent stopped");
     Ok(())
 }
 

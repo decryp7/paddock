@@ -43,7 +43,7 @@ impl AlarmCentre {
                 store.put_alarm(&c.alarm)
             };
             if let Err(e) = r.and_then(|()| store.put_alarm_event(c)) {
-                eprintln!("dyno-agent: could not store an alarm change: {e}");
+                log::error!("dyno-agent: could not store an alarm change: {e}");
             }
         }
     }
@@ -55,7 +55,7 @@ impl AlarmCentre {
         Self::persist(store, &changes);
         if is_mute {
             if let Err(e) = store.set_muted_rules(&self.engine.muted_rules()) {
-                eprintln!("dyno-agent: could not store the muted rules: {e}");
+                log::error!("dyno-agent: could not store the muted rules: {e}");
             }
         }
         changes

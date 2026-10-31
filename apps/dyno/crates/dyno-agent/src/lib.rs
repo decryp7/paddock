@@ -21,6 +21,7 @@ pub mod instance;
 pub mod inventory;
 pub mod issues;
 pub mod jobs;
+pub mod logging;
 pub mod netwatch;
 pub mod network;
 pub mod paths;
@@ -128,15 +129,19 @@ impl Running {
     ) -> Result<Running, StartError> {
         let mut unguarded = None;
         let instance = match lock {
-            Ok(lock) => Some(lock),
+            Ok(lock) => {
+                log::info!(ElapsedMs = logging::elapsed_ms(); "Agent lock taken");
+                Some(lock)
+            }
             Err(e @ instance::LockError::Held { .. }) => {
                 let err = StartError::AlreadyRunning(e);
+                log::warn!(ExitCode = cli::EXIT_ALREADY_RUNNING, ElapsedMs = logging::elapsed_ms(); "Agent refused: another agent holds the data folder");
                 instance::note(&dirs, &format!("dyno-agent: {err}"));
                 return Err(err);
             }
             // A folder that cannot hold a lock file cannot hold the history either (it is kept in memory); go on.
             Err(e) => {
-                eprintln!("dyno-agent: {e}");
+                log::warn!("dyno-agent: {e}");
                 instance::note(
                     &dirs,
                     &format!("dyno-agent: {e}; starting without the guard against a second agent"),
@@ -146,6 +151,7 @@ impl Running {
             }
         };
         let (shared, sensors, processes) = Shared::build_with(dirs, platform, details, reveal, disk_ports)?;
+        log::info!(ElapsedMs = logging::elapsed_ms(); "Agent store open");
         if let Some(why) = unguarded {
             agent::lock(&shared.core).log(
                 agent::now(),
@@ -155,6 +161,8 @@ impl Running {
             );
         }
         let (host, discovery) = server::bind(&shared).map_err(|e| format!("Dyno could not open its private endpoint: {e}"))?;
+        // `bind` wrote `agent.json` (the discovery file the app connects by): this line is when the agent became findable.
+        log::info!(ElapsedMs = logging::elapsed_ms(), DiscoveryWritten = true; "Agent endpoint bound");
         let mut threads = Vec::new();
         let s = shared.clone();
         threads.push(
