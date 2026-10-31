@@ -7,7 +7,7 @@ import { dialogWindowUrl } from '../../../../../ui/projects/paddock-e2e/src/inde
  * default popup in its calm, empty and worst states, the chooser narrow, and the chooser wide with the live preview. Only on
  * request: `SHOTS_OUT=<folder> npx playwright test -c e2e/screenshots/playwright.config.ts widgets`.
  */
-const OUT = process.env['SHOTS_OUT'] ?? '/Volumes/d7sst7/dev-targets/review/pitwall-widgets-r2/new';
+const OUT = process.env['SHOTS_OUT'] ?? '/Volumes/d7sst7/dev-targets/review/pitwall-widgets-r3/new';
 const NOW = new Date('2026-10-22T14:30:00').getTime();
 
 async function prepare(page: Page, theme: 'dark' | 'light') {
@@ -69,7 +69,8 @@ for (const theme of ['light', 'dark'] as const) {
       await page.evaluate(async () => document.fonts.ready);
       await page.mouse.move(2, 2);
       await page.waitForTimeout(600);
-      await page.screenshot({ path: `${OUT}/tray-chooser-${theme}.png` });
+      // The page's own box (title, the chooser and its preview), not the empty window below it.
+      await page.locator('.page').first().screenshot({ path: `${OUT}/tray-chooser-${theme}.png` });
     });
 
     // Wide enough for the live preview beside the list (the chooser draws it from an 880 px container, so about 1300 px of window).

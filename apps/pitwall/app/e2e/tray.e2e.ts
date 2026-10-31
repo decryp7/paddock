@@ -31,21 +31,34 @@ test.describe('the tray popup', () => {
     });
   }
 
-  test('nothing wraps badly or is clipped in the worst state: every widget fits its frame', async ({ page }) => {
-    const popup = await openTray(page, 'worst');
-    const clipped = await popup.locator('section.pd-w').evaluateAll((sections) =>
-      sections.flatMap((s) => {
-        const frame = s.getBoundingClientRect();
-        return Array.from(s.querySelectorAll('*'))
-          .filter((e) => {
+  // Text must stay inside its widget in every state, also with another font: the letter-spacing widening makes every text about
+  // 6 % wider, as a wider system font would (Windows), so a fit that is only a pixel or two away fails here too. A text that
+  // is truncated on purpose (ellipsis) is allowed to be scrolled; any other text must not overflow its box or the frame's padding.
+  for (const scenario of ['demo', 'empty', 'worst', 'down'] as const) {
+    test(`no text runs out of its widget, with a wider font too: ${scenario}`, async ({ page }) => {
+      const popup = await openTray(page, scenario);
+      await page.addStyleTag({ content: '* { letter-spacing: 0.06em !important; }' });
+      await page.evaluate(async () => document.fonts.ready);
+      const bad = await popup.locator('section.pd-w').evaluateAll((sections) =>
+        sections.flatMap((s) => {
+          const frame = s.getBoundingClientRect();
+          const pad = parseFloat(getComputedStyle(s).paddingRight) || 0;
+          const title = s.querySelector('.pd-w-title')?.textContent;
+          return Array.from(s.querySelectorAll('*')).flatMap((e) => {
             const r = e.getBoundingClientRect();
-            return r.width > 0 && (r.right > frame.right + 1 || r.left < frame.left - 1);
-          })
-          .map((e) => `${s.querySelector('.pd-w-title')?.textContent}: ${e.className || e.tagName}`);
-      }),
-    );
-    expect(clipped).toEqual([]);
-  });
+            const cs = getComputedStyle(e);
+            const out: string[] = [];
+            // A row's hover box reaches past the padding on purpose; its texts are checked below.
+            const hoverBox = /(^|\s)(row|rows)(\s|$)/.test(String(e.className)) || e.tagName === 'LI';
+            if (!hoverBox && r.width > 0 && r.right > frame.right - pad + 1) out.push('past the frame padding');
+            if (!hoverBox && cs.textOverflow !== 'ellipsis' && cs.display !== 'contents' && e.scrollWidth > e.clientWidth + 1 && e.clientWidth > 0) out.push('scrolls sideways');
+            return out.map((w) => `${title}: ${e.className || e.tagName} ${w}`);
+          });
+        }),
+      );
+      expect(bad).toEqual([]);
+    });
+  }
 
   // The loading twin is the ready widget: same rows (the engine's shape), so the popup does not jump when the values arrive.
   test('each widget is as tall while loading as when ready (the engine says how many rows)', async ({ page }) => {

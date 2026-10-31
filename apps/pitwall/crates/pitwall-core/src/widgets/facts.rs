@@ -107,6 +107,9 @@ impl Facts {
         self.engine_setup = o.engine_setup.clone();
         self.issues = o.issues.clone();
         self.pairings = count(o.pairings.len());
+        // A new connection: what the app reads after it (downloads, events) is unknown again until read again.
+        self.downloads_read = false;
+        self.events_read = false;
         self.changed_ms = now_ms;
     }
 

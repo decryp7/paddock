@@ -142,7 +142,7 @@ export class PdWidgetFrame<V = unknown, A = unknown> {
   readonly template = input<TemplateRef<PdWidgetContext<V>> | null>(null);
   /** Columns spanned in the area's grid. */
   readonly span = input(2);
-  /** A live kind says "Paused at 14:28" when stale; the others say "Updated 4 min ago". */
+  /** A live kind says "As of 14:28" when stale; the others say "Updated 4 min ago". */
   readonly live = input(false);
   /**
    * The clock (ms since the epoch) for "Updated 4 min ago". Nothing here ticks: the text is computed when `state` or `now` changes, so an

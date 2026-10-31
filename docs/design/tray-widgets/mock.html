@@ -369,7 +369,7 @@
   const POP = {
     defaults: { cpu: '76%', body: () => W.alarms() + W.disk() + W.cpumem() },
     more: { cpu: '76%', body: () => W.net() + W.backup() + W.issue() + W.counters(), menu: true },
-    agent: { cpu: '—', stopped: true, scrolls: true, body: () => `<div class="notice" role="alert">${icon('error')}<span class="t">${COPY.agent.title}</span><span class="d">${COPY.agent.detail}</span><button class="btn outlined sm">${COPY.agent.next}</button></div>` + W.alarms({ meta: 'Updated 2 min ago', stale: true }) + W.disk({ meta: 'Updated 2 min ago', stale: true }) + W.cpumem({ meta: 'Paused at 14:28', stale: true }) },
+    agent: { cpu: '—', stopped: true, scrolls: true, body: () => `<div class="notice" role="alert">${icon('error')}<span class="t">${COPY.agent.title}</span><span class="d">${COPY.agent.detail}</span><button class="btn outlined sm">${COPY.agent.next}</button></div>` + W.alarms({ meta: 'Updated 2 min ago', stale: true }) + W.disk({ meta: 'Updated 2 min ago', stale: true }) + W.cpumem({ meta: 'As of 14:28', stale: true }) },
   };
   document.querySelectorAll('[data-popover]').forEach((d) => {
     const p = POP[d.dataset.popover];
@@ -395,12 +395,12 @@
   const ROWS = [
     ['alarms', 'span 2 · max 1', loading('alarms'), frame('alarms', calm()), frame('alarms', err(COPY.alarmsError)), W.alarms({ meta: 'Updated 4 min ago', stale: true })],
     ['disk', 'span 2 · max 4', loading('disk'), frame('disk', empty('plug', COPY.diskEmpty), { meta: 'Time Machine' }), frame('disk', err(COPY.diskError)), W.disk({ meta: 'Updated 3 min ago', stale: true })],
-    ['cpumem', 'span 2 · max 1', loading('cpumem'), NA('No empty state: once the agent runs there is always a reading; before it, loading.'), NA('No error of its own: a stopped agent is the popup’s notice.'), W.cpumem({ meta: 'Paused at 14:28', stale: true })],
+    ['cpumem', 'span 2 · max 1', loading('cpumem'), NA('No empty state: once the agent runs there is always a reading; before it, loading.'), NA('No error of its own: a stopped agent is the popup’s notice.'), W.cpumem({ meta: 'As of 14:28', stale: true })],
     ['net', 'span 1 or 2 · max 1', loading('net'), frame('net', empty('info', COPY.netEmpty), { half: true }), NA('No error of its own (agent: the notice).'), W.net({ meta: '14:28', stale: true })],
     ['backup', 'span 1 or 2 · max 1', loading('backup'), frame('backup', empty('clock', COPY.backupEmpty), { half: true }), frame('backup', err(COPY.backupError), { half: true }), frame('backup', working(COPY.backupWorking), { half: true })],
     ['issue', 'span 2 · max 1', loading('issue'), frame('issue', calmRow(COPY.issueCalm)), frame('issue', err(COPY.issueError)), frame('issue', working(COPY.issueWorking))],
     ['counters', 'span 2 · max 1', loading('counters'), frame('counters', empty('info', COPY.countersEmpty)), frame('counters', err(COPY.countersError)), W.counters({ unavailable: true })],
-    ['apps', 'span 2 · max 1', loading('apps'), NA('No empty state: there is always a busiest app.'), NA('No error of its own (agent: the notice).'), W.apps({ meta: 'Paused at 14:28', stale: true })],
+    ['apps', 'span 2 · max 1', loading('apps'), NA('No empty state: there is always a busiest app.'), NA('No error of its own (agent: the notice).'), W.apps({ meta: 'As of 14:28', stale: true })],
   ];
   for (const [k, rule, ...cells] of ROWS) {
     const half = CAT[k].spans[0] === 1;

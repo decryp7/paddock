@@ -458,6 +458,18 @@ fn a_share_of_nothing_is_zero_and_a_missing_reading_is_said() {
     assert_eq!((title.as_str(), detail.as_str(), next, calm), ("See memory in use", "No reading yet.", None, false));
 }
 
+#[test]
+fn a_new_connection_makes_downloads_and_errors_unread_again() {
+    let mut f = connected("serving", vec![]);
+    f.set_downloads(&[], NOW);
+    f.seed_events(&[], NOW);
+    assert!(empty_of(state(PopoverWidget::Downloads, &f, NOW)).3 && empty_of(state(PopoverWidget::RecentErrors, &f, NOW)).3);
+    f.set_disconnected(NOW + 1);
+    f.seed(&overview("serving", vec![], calm_memory()), NOW + 2);
+    assert!(!empty_of(state(PopoverWidget::Downloads, &f, NOW)).3, "unread again, not 'all good'");
+    assert!(!empty_of(state(PopoverWidget::RecentErrors, &f, NOW)).3);
+}
+
 // ---- before the first snapshot ----
 
 #[test]

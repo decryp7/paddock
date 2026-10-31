@@ -51,7 +51,7 @@ const PRESSURE: Record<MemoryLevel, string | null> = { normal: null, elevated: '
   template: `
     <ng-template pdWidget="server" [pdWidgetOf]="serverValue" let-v>
       <div class="block">
-        <span class="big" pdSkeleton>
+        <span class="big" [matTooltip]="v ? server(v.state).word : ''" pdSkeleton>
           <mat-icon class="ic-inline" [svgIcon]="v ? server(v.state).icon : 'pw:success'" [class]="'ic-inline ' + (v ? 'st-' + v.state : '')" aria-hidden="true" />{{ v ? server(v.state).word : 'Serving' }}
         </span>
         <span class="meta" pdSkeleton>
@@ -71,14 +71,14 @@ const PRESSURE: Record<MemoryLevel, string | null> = { normal: null, elevated: '
       <div class="meters">
         <div class="mrow">
           <span class="k" pdSkeleton>RAM</span>
-          <span class="v" pdSkeleton>{{ v ? size(v.used) + ' of ' + size(v.total, 0) : '9.4 GB of 32 GB' }}@if (v && fill(v.tone); as w) { <span class="fill" [attr.data-tone]="v.tone">· {{ w }}</span> }</span>
+          <span class="v" pdSkeleton>{{ v ? size(v.used) + ' of ' + size(v.total, 0) : '9.4 GB of 32 GB' }}@if (v && fill(v.tone); as w) {&nbsp;<span class="fill" [attr.data-tone]="v.tone">· {{ w }}</span>}</span>
           <span class="meter" [attr.data-tone]="v?.tone ?? 'neutral'" pdSkeleton><span [style.width.%]="v?.percent ?? 30"></span></span>
         </div>
         <div class="mrow">
           <span class="k" pdSkeleton>VRAM</span>
           @let g = v?.vram;
           @if (!v || g) {
-            <span class="v" pdSkeleton>{{ g ? size(g.used) + ' of ' + size(g.total, 0) : '7.0 GB of 12 GB' }}@if (g && fill(g.tone); as w) { <span class="fill" [attr.data-tone]="g.tone">· {{ w }}</span> }</span>
+            <span class="v" pdSkeleton>{{ g ? size(g.used) + ' of ' + size(g.total, 0) : '7.0 GB of 12 GB' }}@if (g && fill(g.tone); as w) {&nbsp;<span class="fill" [attr.data-tone]="g.tone">· {{ w }}</span>}</span>
             <span class="meter" [attr.data-tone]="g?.tone ?? 'neutral'" pdSkeleton><span [style.width.%]="g?.percent ?? 50"></span></span>
           } @else {
             <span class="v muted">No separate video memory</span>
@@ -251,7 +251,12 @@ const PRESSURE: Record<MemoryLevel, string | null> = { normal: null, elevated: '
       grid-column: 1;
       min-width: 0;
     }
+    /* The word never leaves its widget: at half width a long one ("Not responding") is cut with an ellipsis and has a tooltip. */
     .big {
+      display: block;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
       font-size: var(--pd-text-title);
       font-weight: var(--pd-weight-semibold);
       white-space: nowrap;
