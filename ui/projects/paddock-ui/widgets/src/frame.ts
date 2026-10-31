@@ -3,7 +3,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, Injector, input, 
 import { MatIcon } from '@angular/material/icon';
 import { MatProgressBar } from '@angular/material/progress-bar';
 import { MatButton } from '@angular/material/button';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import type { Progress, WidgetState } from '../generated/widgets';
 import { relativeAgo } from './time';
 import { PD_WIDGET_LOADING, type PdWidgetContext } from './widget';
@@ -29,7 +29,7 @@ interface Meta {
   selector: 'pd-widget-frame',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  imports: [NgTemplateOutlet, MatIcon, MatProgressBar, MatButton, PdGlyph],
+  imports: [NgTemplateOutlet, MatIcon, MatProgressBar, MatButton, PdGlyph, PdStatusGlyph],
   host: { class: 'pd-widget-frame', '[style.grid-column]': '"span " + span()' },
   template: `
     <section class="pd-w" [class.pd-w--loading]="loading()" [attr.aria-labelledby]="titleId" [attr.aria-busy]="loading() ? 'true' : null">
@@ -50,13 +50,13 @@ interface Meta {
       @if (s?.state === 'empty') {
         @if (calm() && s.next) {
           <button type="button" class="pd-w-calm" [attr.aria-label]="s.title + ', ' + s.detail + '. ' + s.next.label" (click)="action.emit(s.next.action)">
-            <pd-glyph class="pd-w-ok" name="check" [size]="16" />
+            <pd-status-glyph class="pd-w-ok" status="success" [size]="16" />
             <span class="pd-w-calm-text"><span>{{ s.title }}</span><span class="pd-w-subtle">&nbsp;· {{ s.detail }}</span></span>
             <pd-glyph class="pd-w-chev" name="chevron-right" [size]="14" />
           </button>
         } @else {
           <div class="pd-w-st">
-            <pd-glyph name="info" [size]="16" />
+            <pd-status-glyph status="info" [size]="16" />
             <span class="pd-w-t">{{ s.title }}</span>
             <span class="pd-w-d">{{ s.detail }}</span>
             @if (s.next; as n) {
@@ -66,7 +66,7 @@ interface Meta {
         }
       } @else if (s?.state === 'error') {
         <div class="pd-w-st pd-w-st--error">
-          <pd-glyph class="pd-w-bad" name="error" [size]="16" />
+          <pd-status-glyph class="pd-w-bad" status="error" [size]="16" />
           <span class="pd-w-t">{{ s.title }}</span>
           @if (s.cause) {
             <span class="pd-w-d">{{ s.cause }}</span>
@@ -108,7 +108,7 @@ interface Meta {
     @media (prefers-reduced-motion: reduce) { :root:not([data-motion='full']) .pd-w .pd-sk { animation: none; background: var(--pd-skeleton-raised); } }
     :root[data-motion='reduce'] .pd-w .pd-sk { animation: none; background: var(--pd-skeleton-raised); }
     .pd-w-st { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 2px var(--pd-space-2); align-items: start; padding: 2px 0; }
-    .pd-w-st > pd-glyph { margin-top: 2px; color: var(--pd-text-muted); }
+    .pd-w-st > pd-glyph, .pd-w-st > pd-status-glyph { margin-top: 2px; color: var(--pd-text-muted); }
     .pd-w-st .pd-w-bad { color: var(--pd-danger); }
     .pd-w-t { font-weight: var(--pd-weight-semibold); }
     .pd-w-d { grid-column: 2; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
