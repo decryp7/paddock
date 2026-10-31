@@ -46,6 +46,7 @@ component styles under Tauri's CSP; `inlineCritical` stays `false`, see [macos.m
 ### Screenshots and browser tests
 
 ```sh
+(cd .. && npm run build -w ui && npm run build:e2e -w ui)   # once, and after a change in ui/: the e2e helpers come from ui/dist
 cd app
 npx playwright test                                   # flows against `ng serve` with the mock backend (port 4310; PW_PORT overrides)
 SCREENSHOTS=1 npx playwright test --project=screenshots   # rewrites ../docs/screenshots/<theme>/ (every screen, 1440x900 at 2x, dark and light)

@@ -15,8 +15,11 @@ export function stopProcessData(data: StopProcessData): ConfirmData {
   if (data.isRunner) {
     return {
       title: 'Stop the runner process?',
-      body: `This ends the runner process ${data.name} (pid ${data.pid}); Pitcrew will restart it.${data.jobRunning ? ' The job that is running now will fail.' : ''}`,
-      details: ['It is asked to stop first and ended after the stop timeout if it does not.'],
+      body: `This ends the runner process ${data.name} (pid ${data.pid}); Pitcrew will restart it.`,
+      details: [
+        ...(data.jobRunning ? ['The job that is running now will fail.'] : []),
+        'It is asked to stop first and ended after the stop timeout if it does not.',
+      ],
       confirm: 'End the runner process',
       danger: true,
     };

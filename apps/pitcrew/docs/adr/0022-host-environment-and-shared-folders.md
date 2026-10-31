@@ -539,7 +539,7 @@ envFile`), `Shown` (`Plain(String) | Masked`), `VolumeId`, `EnvFinding { entry, 
 App ↔ UI: Tauri commands `environment_get`, `environment_preview`, `environment_save`, `environment_effective`,
 `environment_secret_set`, `environment_secret_clear`, `environment_measure`, `environment_clean_preview`,
 `environment_clean`, `environment_check`; `api.types.ts` mirrored by `dto.rs` in the same commit, the mock backend, and
-each dialog's command list in `dialog-contracts.json`.
+each dialog's command list in the dialog table (`dialogs.rs`, ADR 0026; the UI reads the generated `app/generated/dialog-contracts.ts`).
 
 ## Consequences
 
@@ -571,7 +571,7 @@ each dialog's command list in `dialog-contracts.json`.
 ## Work packages
 
 Starts after `pitcrew/shell-1.1` is merged. Estimates are agent days (about 27 in total). The shared integration points
-(`protocol.rs`, `lib.rs` files, `api.types.ts`, `dto.rs`, `pitcrew.contributions.ts`, `dialog-contracts.json`) belong to
+(`protocol.rs`, `lib.rs` files, `api.types.ts`, `dto.rs`, `pitcrew.contributions.ts`, `dialogs.rs`, the generated `dialog-contracts.ts`) belong to
 the integrating agent; other packages add declared lines only. UI files follow the flat `*-panel.ts` convention of
 `features/runners/`.
 
@@ -585,7 +585,7 @@ the integrating agent; other packages add declared lines only. UI files follow t
 | WP-6 | Shared crates: `paddock-net`'s `Egress::probe_connect` (reach, Offline, audit) and `paddock-jobs`' per-thread setup hook for `par_walk` (used for impersonation on Windows), each tested in its crate; Pitcrew's `CheckEndpoint` on the probe | `crates/paddock-net/src/probe.rs`, `crates/paddock-jobs/src/walk.rs`, `pitcrew-service/src/reach.rs` | implementer | 1.5 d |
 | WP-7 | Actions cache projection: `cache.external_server` across runners through `runner_config`, the multi-runner config-diff dialog | `pitcrew-core/src/runner_config.rs` (multi-runner preview), `app/src/app/features/runners/config/config-diff-dialog.ts` | implementer | 2 d |
 | WP-8 | Windows: `env_block::merge`, interactive runners get the composition, writability with the runner user's token, Credential Manager backend, the `CallerIdentity` adapter (client token, elevation, owner SID) and **all Windows authorisation tests**, the elevated install step that records the owner SID (console user under over-the-shoulder UAC), impersonated Measure/Clean through the `par_walk` hook | `pitcrew-core/src/env_block.rs`, `pitcrew-service/src/platform/{win_session,win_auth}.rs`, `pitcrew-service/src/platform/windows.rs` (install: owner SID), `app/src-tauri/src/service_install.rs` (shows the owner) | implementer (Windows CI) | 2.5 d |
-| WP-9 | UI: page and panels, store, Add/Edit and Clean dialogs, runner tab, every state of section 9, `msg()` keys, and the **Settings UI for `[defaults.storage_io]`** (walkers and removers, Auto or a number, in the Defaults section; rule 44) | `app/src/app/features/environment/{environment-page,shared-folders-panel,variables-panel,path-panel,cache-server-panel,env-edit-dialog,clean-dialog}.ts` (+ `.html`, `.scss`, `.spec.ts`), `environment.store.ts`; `app/src/app/features/runners/{environment-panel,runner-environment.store}.ts`; `app/src/app/features/settings/defaults-section.ts` (storage I/O fields); declared lines in `runner-detail-page.ts` (tab list) and `runner-detail-page.html` (the Environment `@case`), `pitcrew.contributions.ts`, `dialog-contracts.json` | designer pass + implementer | 5.5 d |
+| WP-9 | UI: page and panels, store, Add/Edit and Clean dialogs, runner tab, every state of section 9, `msg()` keys, and the **Settings UI for `[defaults.storage_io]`** (walkers and removers, Auto or a number, in the Defaults section; rule 44) | `app/src/app/features/environment/{environment-page,shared-folders-panel,variables-panel,path-panel,cache-server-panel,env-edit-dialog,clean-dialog}.ts` (+ `.html`, `.scss`, `.spec.ts`), `environment.store.ts`; `app/src/app/features/runners/{environment-panel,runner-environment.store}.ts`; `app/src/app/features/settings/defaults-section.ts` (storage I/O fields); declared lines in `runner-detail-page.ts` (tab list) and `runner-detail-page.html` (the Environment `@case`), `pitcrew.contributions.ts`, `dialogs.rs` (and the regenerated `dialog-contracts.ts`) | designer pass + implementer | 5.5 d |
 | WP-10 | Docs and images: features, user guide, roadmap (Phase 3 item closed, the Windows correction), architecture, ADR 0016's text, CHANGELOG, screenshots with an independent review (rule 22) | `docs/{features,user-guide,roadmap,architecture}.md`, `docs/adr/0016-*.md`, `CHANGELOG.md`, `docs/screenshots/**` | implementer + reviewer | 1 d |
 
 Order: WP-1 → WP-2 → (WP-3, WP-4, WP-6, WP-8 in parallel) → WP-5, WP-7 → WP-9 → WP-10.

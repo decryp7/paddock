@@ -208,7 +208,8 @@ test.describe('native feel (ADR 0008)', () => {
     await page.keyboard.down('Control');
     await page.mouse.wheel(0, -200);
     await page.keyboard.up('Control');
-    await page.waitForTimeout(300);
+    // Two frames: every handler the keys and the wheel could have triggered has run (no fixed wait).
+    await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
     expect(await page.evaluate(() => (window as unknown as { __alive?: boolean }).__alive)).toBe(true);
     expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
   });

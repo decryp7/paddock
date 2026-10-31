@@ -13,8 +13,10 @@ describe('stopping a process (the words on the shared pd.confirm)', () => {
     const d = stopProcessData({ name: 'gitea-runner.exe', pid: 9, isRunner: true, jobRunning: true });
     expect(d).toMatchObject({ title: 'Stop the runner process?', confirm: 'End the runner process', danger: true });
     expect(d.body).toContain('Pitcrew will restart it');
-    expect(d.body).toContain('The job that is running now will fail.');
-    expect(stopProcessData({ name: 'g', pid: 9, isRunner: true, jobRunning: false }).body).not.toContain('will fail');
+    // It stands out: the first details entry, not buried in the body.
+    expect(d.details?.[0]).toBe('The job that is running now will fail.');
+    expect(d.body).not.toContain('will fail');
+    expect(stopProcessData({ name: 'g', pid: 9, isRunner: true, jobRunning: false }).details?.join(' ')).not.toContain('will fail');
   });
 
   it('opens pd.confirm with the heading, message and details; only a confirmed choice is true', async () => {

@@ -10,7 +10,8 @@ from Conventional Commits by git-cliff (`cliff.toml`).
 - Pitcrew runs on the Paddock app shell: one frame, notifications and service health with Repair, jobs with progress and
   Cancel for long work, dialogs as their own windows, and Settings, About, Updates and What's New from the shell.
 - Cleaning a disk, registering a runner, pruning the container engine and trimming the Actions cache run as jobs that show
-  their progress and can be cancelled; the window no longer gives up on them after a fixed time.
+  their progress; the window no longer gives up on them after a fixed time. (Cancelling a registration comes with the
+  cancellation work before 1.1.0.)
 - Updates and release notes come from the Paddock releases (`pitcrew-latest`, the `pitcrew-v` tags). A copy installed before
   this version is reinstalled once by hand.
 - Dialog buttons follow the platform: Cancel then the main action on the right on macOS and Linux, the main action first on
