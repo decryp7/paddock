@@ -295,6 +295,14 @@ changes here, every app's copy is updated in the same change.
     Windows) and the tail of stderr; no secrets or user data in CI or tool logs; each job writes a short summary of what ran, what was skipped and why.
     *Why:* Paddock runs on users' machines where we cannot attach a debugger; Dyno's 30 s login connect could not be
     diagnosed from its logs (2026-10-31); a CI or tool step that fails with only an exit code costs a re-run to diagnose.
+59. **The wiki is the current-state summary (ER-30).** `docs/wiki/` summarises how things work today and links the source
+    of every claim and a `verified:` date; it links rules and ADRs and never restates them, and where it disagrees with
+    one the wiki is wrong. Only the coordinator or merge steward writes it, from the `Wiki notes:` line that ends every
+    agent report, and re-verifies the touched pages on each ingest; a new or changed page lands after an independent
+    fact-check of its claims. `node scripts/wiki-lint.mjs` runs on every wiki change (links, index, orphans, sources,
+    age, no rule text, compared with the rules on main and on open rule branches).
+    *Why:* agents re-derived the same context every session; the wiki's own first fact-check found a missed release
+    blocker and four wrong facts (docs/wiki pilot, 2026-10-31).
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
