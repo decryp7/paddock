@@ -282,6 +282,10 @@ describe.each(SCHEMES)('high contrast, %s', (scheme) => {
     expect(col(v, '--pd-scrim').a).toBeGreaterThan(col(standard, '--pd-scrim').a);
   });
 
+  it('the strong border is a 3:1 boundary on the fills a widget frame sits on (the frame outline, ADR 0035)', () => {
+    for (const surface of ['--pd-surface-2', '--pd-surface-3']) expect(contrast(on(v, '--pd-border-strong', surface), col(v, surface)), surface).toBeGreaterThanOrEqual(3);
+  });
+
   it('applies by the OS preference too, unless the app turned it off', () => {
     const os = rules.get('@media (prefers-contrast: more) | :root:not([data-contrast=off])');
     expect(os?.['--pd-hairline']).toBe(rules.get(':root[data-contrast=more]')?.['--pd-hairline']);
@@ -356,5 +360,19 @@ describe.each(MODES.flatMap(([s, c]) => ACCENTS.map((a) => [s, c, a] as const)))
     const k = Number(m![2]) / 100;
     const hover: Rgba = { r: f.r * k, g: f.g * k, b: f.b * k, a: 1 };
     expect(contrast(col(v, '--pd-on-accent'), hover)).toBeGreaterThanOrEqual(4.5);
+describe('widget frame (ADR 0035)', () => {
+  const src = (f: string): string => readFileSync(new URL(`../../projects/paddock-ui/widgets/src/${f}`, import.meta.url), 'utf8');
+
+  it('is outlined with the strong border colour in high contrast, by the OS preference and by the app setting', () => {
+    for (const f of ['frame.ts', 'area.ts']) {
+      const text = src(f);
+      expect(text, f).toMatch(/@media \(prefers-contrast: more\) \{ :root:not\(\[data-contrast='off'\]\)[^}]*outline: 1px solid var\(--pd-border-strong\)/);
+      expect(text, f).toMatch(/:root\[data-contrast='more'\][^}]*outline: 1px solid var\(--pd-border-strong\)/);
+    }
+  });
+
+  it('keeps one geometry at every density: no row-height or card-padding token, the popup is 8 / 12 px by design', () => {
+    for (const f of ['frame.ts', 'area.ts']) expect(src(f), f).not.toMatch(/--pd-(row-height|card-padding)/);
+    expect(src('frame.ts')).toContain('padding: var(--pd-space-2) var(--pd-space-3)');
   });
 });

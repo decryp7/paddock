@@ -65,6 +65,8 @@ export interface PdWidgetOptionContext<W> {
 @Directive({ selector: 'ng-template[pdWidgetOption]' })
 export class PdWidgetOption<W = unknown> {
   readonly pdWidgetOption = input.required<string>();
+  /** A type witness, never read: bind a `W | null` (`[pdWidgetOptionOf]="sample"`) and the template's `let-p` is a `Placement<W>`, with no cast. */
+  readonly pdWidgetOptionOf = input<W | null>(null);
   readonly template = inject<TemplateRef<PdWidgetOptionContext<W>>>(TemplateRef);
 
   static ngTemplateContextGuard<W>(_directive: PdWidgetOption<W>, _context: unknown): _context is PdWidgetOptionContext<W> {

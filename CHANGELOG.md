@@ -24,6 +24,10 @@ Conventional Commits; one semver tag for the whole repo.
   limit and the undo snack bar driven by `canUndo`). It draws the generated types of `paddock-widgets` and emits `Edit` values.
 - The chooser shows presets when the surface has any (apply, save as, delete, with the undo toast on apply); `pdWidgetOf` types a kind
   template's value. `pd-tray-popover`'s content becomes a named, focusable region (`tabindex="0"`, `role=region`) while it scrolls.
+- Review fixes: the undo toast opens once per edit the engine confirms (never for a view that merely arrives with `canUndo`); deleting a
+  preset asks first and moves focus on; kind icons are 14 / 16 px; the tray popover shows a fade and a thin scrollbar while it scrolls; menu
+  keys follow the platform (Option glyphs on a Mac, Alt elsewhere); moves are announced when the engine's view shows them; `error` input
+  for a refused edit; span is clamped to the columns; the one preview breakpoint is 880 px (the ADR's); `pd:check-circle`.
 - `pd:` glyphs `grip`, `arrow-up`, `arrow-down`, `to-top` and `to-bottom`. Gallery page "Widgets" with a Playwright spec (sizes,
   loading height, focus order, keyboard reorder, the menu clear of the focus ring, axe in both themes and high contrast). Design guide
   section 8 gains "Widget area and frame" and "Chooser"; "Tray popups" and "Skeletons" are amended.
