@@ -394,10 +394,11 @@ adr = "0012"
 
   [[mechanism.copy]]
   paths = ["apps/pitcrew/app/src-tauri/src/tray.rs"]
-  symbols = ["item:build_menu", "item:create", "item:update"]
+  symbols = ["item:tray", "item:native"]
+  kind = "wiring"
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
-  note = "Builds the tray by hand with TrayIconBuilder; Pitcrew 1.1 builds it through paddock-window and drops these items."
+  note = "Builds the tray through paddock-window's Tray and NativeTray; what is left is Pitcrew's menu content and these two hook-ups."
 
   [[mechanism.copy]]
   paths = ["apps/spotter/app/src-tauri/src/tray.rs"]
@@ -557,12 +558,6 @@ adr = "0012"
   owner = "spotter"
   delete_by = "spotter-v1.0.0"
   note = "Spotter 1.0 deletes it."
-
-  [[mechanism.copy]]
-  paths = ["apps/pitcrew/app/src-tauri/src/updater.rs"]
-  owner = "pitcrew"
-  delete_by = "pitcrew-v1.1.0"
-  note = "Pitcrew 1.1 deletes it."
 
 [[mechanism]]
 id = "model-download"
