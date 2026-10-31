@@ -2,53 +2,57 @@
 
 export type PlacementId = string;
 
-export type WidgetError = "badId" | { "duplicateId": string } | { "unknownPlacement": string } | { "tooMany": { 
+export type PresetId = string;
+
+export type Counted = "placements" | "userPresets" | "presetPlacements";
+
+export type WidgetError = { "unknownPlacement": string } | { "unknownPreset": string } | { "duplicateId": string } | { "tooMany": { 
 /**
- * What there are too many of ("widgets", "saved layouts", "widgets in a saved layout").
+ * What there are too many of.
  */
-what: string, 
+counted: Counted, 
 /**
  * The limit.
  */
 max: number, } } | { "kindLimit": { 
 /**
- * The kind's title.
- */
-kind: string, 
-/**
  * Its `max_instances`.
  */
 max: number, } } | { "spanNotAllowed": { 
 /**
- * The kind's title.
- */
-kind: string, 
-/**
  * The allowed spans.
  */
-spans: Array<number>, } } | { "invalid": string } | { "notAPreset": string } | "builtinPreset" | "nothingToUndo";
-
-export type NoteCode = { "code": "damaged" } | { "code": "newer" } | { "code": "tooLarge" } | { "code": "dropped", 
+allowed: Array<number>, } } | { "tooFew": { 
 /**
- * How many entries were dropped.
+ * The surface's `min_placements`.
  */
-count: number, };
+min: number, } } | { "invalid": string } | "builtinPreset" | "nothingToUndo" | "newerLayout";
+
+export type NoteCode = "damaged" | "tooLarge" | { "newer": { 
+/**
+ * The stored version.
+ */
+version: number, } } | { "dropped": { 
+/**
+ * How many.
+ */
+count: number, } };
 
 export type Note = { 
 /**
+ * Machine-readable reason.
+ */
+code: NoteCode, 
+/**
  * The sentence to show.
  */
-message: string, } & ({ "code": "damaged" } | { "code": "newer" } | { "code": "tooLarge" } | { "code": "dropped", 
-/**
- * How many entries were dropped.
- */
-count: number, });
+message: string, };
 
-export type Refresh = { "type": "live" } | { "type": "every", 
+export type Refresh = "live" | { "every": { 
 /**
  * The period.
  */
-secs: number, } | { "type": "onChange" };
+secs: number, } } | "onChange";
 
 export type Placement<W> = { 
 /**
@@ -56,7 +60,7 @@ export type Placement<W> = {
  */
 id: PlacementId, 
 /**
- * Columns of the surface's grid; one the kind allows.
+ * Columns it spans; one of its kind's spans.
  */
 span: number, 
 /**
@@ -68,13 +72,13 @@ export type Preset<W> = {
 /**
  * Unique among the built-in and saved presets of a surface.
  */
-id: PlacementId, 
+id: PresetId, 
 /**
  * The name to show, 1 to 64 characters.
  */
 name: string, 
 /**
- * The catalogue's own preset: never stored, cannot be deleted.
+ * The app's own: rebuilt on every read, cannot be edited or deleted.
  */
 builtin: boolean, 
 /**
@@ -92,27 +96,27 @@ version: number,
  */
 placements: Array<Placement<W>>, 
 /**
- * The person's own presets.
+ * The person's own presets only.
  */
 presets: Array<Preset<W>>, };
 
-export type Edit<W> = { "type": "add", 
+export type Edit<W> = { "add": { 
 /**
  * The widget.
  */
 widget: W, 
 /**
- * Its span.
+ * Its span; the kind's first by default.
  */
-span?: number | null, 
+span: number | null, 
 /**
  * Its position (clamped into range).
  */
-at?: number | null, } | { "type": "remove", 
+at: number | null, } } | { "remove": { 
 /**
  * The placement.
  */
-id: PlacementId, } | { "type": "move", 
+id: PlacementId, } } | { "move": { 
 /**
  * The placement.
  */
@@ -120,7 +124,7 @@ id: PlacementId,
 /**
  * The new position.
  */
-to: number, } | { "type": "resize", 
+to: number, } } | { "resize": { 
 /**
  * The placement.
  */
@@ -128,7 +132,7 @@ id: PlacementId,
 /**
  * The new span.
  */
-span: number, } | { "type": "replace", 
+span: number, } } | { "replace": { 
 /**
  * The placement.
  */
@@ -136,25 +140,25 @@ id: PlacementId,
 /**
  * The new widget, of the same kind.
  */
-widget: W, } | { "type": "applyPreset", 
+widget: W, } } | { "applyPreset": { 
 /**
  * The preset.
  */
-id: PlacementId, } | { "type": "savePreset", 
+id: PresetId, } } | { "savePreset": { 
 /**
  * The name, 1 to 64 characters.
  */
-name: string, } | { "type": "deletePreset", 
+name: string, } } | { "deletePreset": { 
 /**
  * The preset.
  */
-id: PlacementId, } | { "type": "resetToDefaults" } | { "type": "undo" };
+id: PresetId, } } | "resetToDefaults" | "undo";
 
-export type SurfaceInfo = { 
+export type SurfaceInfo<S> = { 
 /**
- * The surface's name.
+ * The app's surface.
  */
-id: string, 
+id: S, 
 /**
  * Columns of the grid.
  */
@@ -170,11 +174,7 @@ minPlacements: number,
 /**
  * Most saved presets.
  */
-maxUserPresets: number, 
-/**
- * Most placements in a preset.
- */
-maxPresetPlacements: number, };
+maxUserPresets: number, };
 
 export type KindInfo<K> = { 
 /**
@@ -206,17 +206,17 @@ maxInstances: number,
  */
 refresh: Refresh, };
 
-export type CatalogueInfo<K> = { 
+export type CatalogueInfo<S, K> = { 
 /**
  * The surface.
  */
-surface: SurfaceInfo, 
+surface: SurfaceInfo<S>, 
 /**
  * The kinds, in chooser order.
  */
 kinds: Array<KindInfo<K>>, };
 
-export type LayoutView<W, K> = { 
+export type LayoutView<S, W, K> = { 
 /**
  * The layout.
  */
@@ -224,7 +224,7 @@ layout: Layout<W>,
 /**
  * The catalogue.
  */
-catalogue: CatalogueInfo<K>, 
+catalogue: CatalogueInfo<S, K>, 
 /**
  * The catalogue's own presets (the person's are in the layout).
  */
@@ -234,68 +234,28 @@ builtinPresets: Array<Preset<W>>,
  */
 notes: Array<Note>, 
 /**
- * Whether an undo is available.
+ * True right after an undoable edit.
  */
-canUndo: boolean, };
+canUndo: boolean, 
+/**
+ * False while a newer version's layout is kept (`NoteCode::Newer`): the chooser is read-only.
+ */
+editable: boolean, };
 
-export type WidgetAction = { 
+export type WidgetAction<A> = { action: A, 
 /**
- * The app-defined action id.
- */
-id: string, 
-/**
- * The button text: verb plus object.
+ * Verb plus object, sentence case: "Pin counters", "Retry".
  */
 label: string, };
 
-export type WidgetState<V> = { "state": "ready", 
-/**
- * The app's value.
- */
-value: V, 
-/**
- * When the value was read, in milliseconds since the Unix epoch.
- */
-asOf: number | null, 
-/**
- * The value is older than its refresh allows.
- */
-stale: boolean, } | { "state": "empty", 
-/**
- * What there is none of.
- */
-title: string, 
-/**
- * One line of detail.
- */
-detail: string, 
-/**
- * The next step.
- */
-action: WidgetAction | null, } | { "state": "error", 
-/**
- * What failed, in plain words.
- */
-title: string, 
-/**
- * Why, when known.
- */
-cause: string | null, 
-/**
- * Whether Retry is offered.
- */
-retry: boolean, 
-/**
- * Another next step.
- */
-action: WidgetAction | null, };
+export type Progress = { "count": { done: number, unit: string, } } | { "fraction": { done: number, total: number, unit: string, } };
 
-export type PlacementState<V> = { 
-/**
- * The placement.
- */
-id: PlacementId, 
-/**
- * Its state.
- */
-state: WidgetState<V>, };
+export type WidgetState<V, A> = { "state": "ready", value: V, asOf: number, staleSince: number | null, } | { "state": "working", title: string, phase: string, progress: Progress, last: V | null, cancel: WidgetAction<A> | null, } | { "state": "empty", title: string, detail: string, next: WidgetAction<A> | null, } | { "state": "error", title: string, cause: string | null, next: WidgetAction<A> | null, };
+
+export type PlacementState<V, A> = { id: PlacementId, state: WidgetState<V, A>, };
+
+export type Tone = "info" | "warning" | "danger";
+
+export type SurfaceNotice<A> = { tone: Tone, title: string, detail: string, action: WidgetAction<A> | null, };
+
+export type SurfaceValues<V, A> = { notice: SurfaceNotice<A> | null, placements: Array<PlacementState<V, A>>, };

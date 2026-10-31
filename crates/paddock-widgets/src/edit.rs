@@ -1,36 +1,27 @@
 //! Edits as commands: each is a pure function from a layout to a validated layout.
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::catalogue::{Catalogue, Widget, spec_of};
 use crate::check;
-use crate::error::WidgetError;
-use crate::id::{PlacementId, slug, unique_id};
-use crate::layout::{Layout, Placement, Preset, derive_id};
+use crate::error::{Counted, WidgetError};
+use crate::id::{PlacementId, PresetId};
+use crate::layout::{Layout, Placement, Preset, derive_id, derive_preset_id};
 use crate::read::{MAX_NAME, clean_name};
 use crate::view::builtin_presets;
 
-/// One change to a layout.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "type"
-)]
+ts! {
+/// A change to a layout. Each is applied by the engine and validated as a whole.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Edit<W> {
-    /// Adds a widget; its id is derived from the kind ("disk-space-2"). The span defaults to the kind's first, the
-    /// position to the end.
+    /// Adds a widget (its id derived from its kind and unique, e.g. `disk-space-2`) at `at`, or at the end.
     Add {
         /// The widget.
         widget: W,
-        /// Its span.
-        #[serde(default)]
-        #[ts(optional = nullable)]
+        /// Its span; the kind's first by default.
         span: Option<u8>,
         /// Its position (clamped into range).
-        #[serde(default)]
-        #[ts(optional = nullable)]
         at: Option<u16>,
     },
     /// Removes a placement (undoable).
@@ -38,7 +29,7 @@ pub enum Edit<W> {
         /// The placement.
         id: PlacementId,
     },
-    /// Moves a placement to a position (clamped into range).
+    /// Moves a placement to index `to` (clamped to the list).
     Move {
         /// The placement.
         id: PlacementId,
@@ -52,32 +43,33 @@ pub enum Edit<W> {
         /// The new span.
         span: u8,
     },
-    /// Changes a widget's options; the kind stays.
+    /// Changes a placement's options; the kind stays.
     Replace {
         /// The placement.
         id: PlacementId,
         /// The new widget, of the same kind.
         widget: W,
     },
-    /// Replaces the placements with a built-in or saved preset's (undoable).
+    /// Replaces the placements with a preset's (undoable).
     ApplyPreset {
         /// The preset.
-        id: PlacementId,
+        id: PresetId,
     },
-    /// Saves the placements as a new preset of the person's.
+    /// Saves the placements as a new user preset.
     SavePreset {
         /// The name, 1 to 64 characters.
         name: String,
     },
-    /// Deletes a saved preset.
+    /// Deletes a user preset.
     DeletePreset {
         /// The preset.
-        id: PlacementId,
+        id: PresetId,
     },
-    /// Replaces the placements with the catalogue's defaults (undoable).
+    /// Back to the catalogue's defaults (undoable).
     ResetToDefaults,
-    /// Restores the placements before the last remove, preset or reset.
+    /// Restores the placements before the last undoable edit.
     Undo,
+}
 }
 
 fn position(layout: &[Placement<impl Widget>], id: &PlacementId) -> Result<usize, WidgetError> {
@@ -112,7 +104,7 @@ pub fn apply<C: Catalogue>(
                 span: span.unwrap_or(spec.spans[0]),
                 widget,
             };
-            check::check_one::<C>(&layout.placements, &placement, max)?;
+            check::check_one::<C>(&layout.placements, &placement, max, Counted::Placements)?;
             let index = at.map_or(next.placements.len(), |a| {
                 usize::from(a).min(next.placements.len())
             });
@@ -122,10 +114,9 @@ pub fn apply<C: Catalogue>(
         Edit::Remove { id } => {
             let index = position(&layout.placements, &id)?;
             if layout.placements.len() <= s.min_placements as usize {
-                return Err(WidgetError::Invalid(format!(
-                    "Keep at least {} widget(s) in this layout.",
-                    s.min_placements
-                )));
+                return Err(WidgetError::TooFew {
+                    min: s.min_placements,
+                });
             }
             next.placements.remove(index);
             next.previous = Some(layout.placements.clone());
@@ -160,8 +151,8 @@ pub fn apply<C: Catalogue>(
                 .into_iter()
                 .chain(layout.presets.iter().cloned())
                 .find(|p| p.id == id)
-                .ok_or_else(|| WidgetError::NotAPreset(id.to_string()))?;
-            check::check_all::<C>(&found.placements, max)?;
+                .ok_or_else(|| WidgetError::UnknownPreset(id.to_string()))?;
+            check::check_all::<C>(&found.placements, max, Counted::Placements)?;
             next.placements = found.placements;
             next.previous = Some(layout.placements.clone());
         }
@@ -169,23 +160,23 @@ pub fn apply<C: Catalogue>(
             let name = clean_name(&name);
             if name.is_empty() {
                 return Err(WidgetError::Invalid(format!(
-                    "Give the layout a name of 1 to {MAX_NAME} characters."
+                    "Give the preset a name of 1 to {MAX_NAME} characters."
                 )));
             }
             if layout.presets.len() >= s.max_user_presets as usize {
                 return Err(WidgetError::TooMany {
-                    what: "saved layouts".into(),
+                    counted: Counted::UserPresets,
                     max: s.max_user_presets.into(),
                 });
             }
             if layout.placements.len() > s.max_preset_placements as usize {
                 return Err(WidgetError::TooMany {
-                    what: "widgets in a saved layout".into(),
+                    counted: Counted::PresetPlacements,
                     max: s.max_preset_placements,
                 });
             }
             let builtin = builtin_presets::<C>();
-            let id = unique_id(&slug(&name, "layout"), |c| {
+            let id = derive_preset_id(&name, |c| {
                 builtin
                     .iter()
                     .chain(&layout.presets)
@@ -206,7 +197,7 @@ pub fn apply<C: Catalogue>(
                 .presets
                 .iter()
                 .position(|p| p.id == id)
-                .ok_or_else(|| WidgetError::NotAPreset(id.to_string()))?;
+                .ok_or_else(|| WidgetError::UnknownPreset(id.to_string()))?;
             next.presets.remove(index);
         }
         Edit::ResetToDefaults => {
@@ -227,5 +218,5 @@ fn check_edited<C: Catalogue>(
 ) -> Result<(), WidgetError> {
     let mut others = placements.to_vec();
     let edited = others.remove(index);
-    check::check_one::<C>(&others, &edited, usize::MAX)
+    check::check_one::<C>(&others, &edited, usize::MAX, Counted::Placements)
 }

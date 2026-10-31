@@ -1,54 +1,55 @@
 //! Placements, presets and the stored layout.
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::catalogue::{Catalogue, Widget};
 use crate::check;
-use crate::error::WidgetError;
-use crate::id::{PlacementId, slug, unique_id};
+use crate::error::{Counted, WidgetError};
+use crate::id::{PlacementId, PresetId, slug, unique_id};
 
-/// One widget on a surface: an id, a span (columns of the grid) and the app's widget value.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+ts! {
+/// One widget on a surface.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Placement<W> {
     /// Unique within its layout.
     pub id: PlacementId,
-    /// Columns of the surface's grid; one the kind allows.
+    /// Columns it spans; one of its kind's spans.
     pub span: u8,
     /// The widget and its options.
     pub widget: W,
 }
 
-/// A named set of placements the person can switch to.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+/// A named layout the person can switch to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preset<W> {
     /// Unique among the built-in and saved presets of a surface.
-    pub id: PlacementId,
+    pub id: PresetId,
     /// The name to show, 1 to 64 characters.
     pub name: String,
-    /// The catalogue's own preset: never stored, cannot be deleted.
-    #[serde(default)]
+    /// The app's own: rebuilt on every read, cannot be edited or deleted.
     pub builtin: bool,
     /// Its placements.
     pub placements: Vec<Placement<W>>,
 }
 
-/// The stored layout. Built-in presets are not stored (they come from the catalogue on every read).
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
+/// The stored layout of one surface. Built-in presets are not stored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", bound(serialize = "W: Serialize", deserialize = "W: Deserialize<'de>"))]
 pub struct Layout<W> {
     /// The surface's `schema_version` when written.
     pub version: u32,
     /// The placements, in order.
     pub placements: Vec<Placement<W>>,
-    /// The person's own presets.
+    /// The person's own presets only.
     pub presets: Vec<Preset<W>>,
-    /// One level of undo, in memory until the next edit that changes the placements.
+    /// One level of undo: the placements before the last remove, preset or reset. In memory only; a placement edit
+    /// clears it.
     #[serde(skip)]
-    #[ts(skip)]
-    pub(crate) previous: Option<Vec<Placement<W>>>,
+    #[cfg_attr(any(test, feature = "ts"), ts(skip))]
+    pub previous: Option<Vec<Placement<W>>>,
+}
 }
 
 impl<W: Widget> Layout<W> {
@@ -67,8 +68,12 @@ impl<W: Widget> Layout<W> {
 
     /// The catalogue's defaults (invalid defaults are dropped; [`crate::check_catalogue`] reports them).
     pub fn defaults<C: Catalogue<Widget = W>>() -> Layout<W> {
-        let placements =
-            check::keep_valid::<C>(C::defaults(), C::SURFACE.max_placements as usize, &mut 0);
+        let placements = check::keep_valid::<C>(
+            C::defaults(),
+            C::SURFACE.max_placements as usize,
+            Counted::Placements,
+            &mut 0,
+        );
         Layout::new::<C>(placements, Vec::new())
     }
 
@@ -80,27 +85,36 @@ impl<W: Widget> Layout<W> {
     /// Checks the whole layout against the catalogue and the surface's limits; the first problem is returned.
     pub fn validate<C: Catalogue<Widget = W>>(&self) -> Result<(), WidgetError> {
         let s = &C::SURFACE;
-        check::check_all::<C>(&self.placements, s.max_placements as usize)?;
+        check::check_all::<C>(
+            &self.placements,
+            s.max_placements as usize,
+            Counted::Placements,
+        )?;
         if self.placements.len() < s.min_placements as usize {
-            return Err(WidgetError::Invalid(format!(
-                "Keep at least {} widget(s) in this layout.",
-                s.min_placements
-            )));
+            return Err(WidgetError::TooFew {
+                min: s.min_placements,
+            });
         }
         if self.presets.len() > s.max_user_presets as usize {
             return Err(WidgetError::TooMany {
-                what: "saved layouts".into(),
+                counted: Counted::UserPresets,
                 max: s.max_user_presets.into(),
             });
         }
-        let builtin = crate::view::builtin_presets::<C>();
-        let mut seen: Vec<&PlacementId> = builtin.iter().map(|p| &p.id).collect();
+        let mut seen: Vec<PresetId> = crate::view::builtin_presets::<C>()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
         for p in &self.presets {
-            if seen.contains(&&p.id) {
+            if seen.contains(&p.id) {
                 return Err(WidgetError::DuplicateId(p.id.to_string()));
             }
-            seen.push(&p.id);
-            check::check_all::<C>(&p.placements, s.max_preset_placements as usize)?;
+            seen.push(p.id.clone());
+            check::check_all::<C>(
+                &p.placements,
+                s.max_preset_placements as usize,
+                Counted::PresetPlacements,
+            )?;
         }
         Ok(())
     }
@@ -123,7 +137,12 @@ pub(crate) fn derive_id<W: Widget>(existing: &[Placement<W>], widget: &W) -> Pla
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))
         .unwrap_or_default();
-    unique_id(&slug(&name, "widget"), |c| {
+    PlacementId(unique_id(&slug(&name, "widget"), |c| {
         existing.iter().any(|p| p.id.as_str() == c)
-    })
+    }))
+}
+
+/// A free preset id for `name` among `taken`.
+pub(crate) fn derive_preset_id(name: &str, taken: impl Fn(&str) -> bool) -> PresetId {
+    PresetId(unique_id(&slug(name, "layout"), taken))
 }

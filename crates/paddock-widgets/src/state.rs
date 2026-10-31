@@ -1,67 +1,91 @@
 //! The widget state envelope every surface renders the same way.
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::id::PlacementId;
 
-/// An action a state offers ("Pin counters"); the id is the app's, the label is shown on the button.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+ts! {
+/// A next step the app offers (its own closed action enum `A`, e.g. "open the alarms page", "retry the backup check").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WidgetAction {
-    /// The app-defined action id.
-    pub id: String,
-    /// The button text: verb plus object.
+pub struct WidgetAction<A> {
+    pub action: A,
+    /// Verb plus object, sentence case: "Pin counters", "Retry".
     pub label: String,
 }
 
-/// One widget's value as the engine reports it. `V` is the app's value type. Loading is not on the wire: it is the UI's
-/// state before the first value arrives.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "state"
-)]
-pub enum WidgetState<V> {
-    /// A value, with when it was read and whether it is out of date.
-    Ready {
-        /// The app's value.
-        value: V,
-        /// When the value was read, in milliseconds since the Unix epoch.
-        #[ts(type = "number | null")]
-        as_of: Option<i64>,
-        /// The value is older than its refresh allows.
-        stale: bool,
+/// How far a job behind a widget has come (ER-18: a growing count when the total is unknown, never a static 0).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum Progress {
+    Count {
+        #[cfg_attr(any(test, feature = "ts"), ts(type = "number"))]
+        done: u64,
+        unit: String,
     },
-    /// Nothing to show: what, and a next step.
-    Empty {
-        /// What there is none of.
-        title: String,
-        /// One line of detail.
-        detail: String,
-        /// The next step.
-        action: Option<WidgetAction>,
-    },
-    /// The value could not be read.
-    Error {
-        /// What failed, in plain words.
-        title: String,
-        /// Why, when known.
-        cause: Option<String>,
-        /// Whether Retry is offered.
-        retry: bool,
-        /// Another next step.
-        action: Option<WidgetAction>,
+    Fraction {
+        #[cfg_attr(any(test, feature = "ts"), ts(type = "number"))]
+        done: u64,
+        #[cfg_attr(any(test, feature = "ts"), ts(type = "number"))]
+        total: u64,
+        unit: String,
     },
 }
 
-/// The state of one placement.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+/// One widget's value as the engine reports it. Loading is not on the wire: it is the UI's state before the first value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "state")]
+pub enum WidgetState<V, A> {
+    /// A value, read at `as_of` (ms since the epoch); `stale_since` is set when the source has not refreshed it in time
+    /// (the UI says "Updated 4 min ago" and dims nothing else).
+    Ready {
+        value: V,
+        #[cfg_attr(any(test, feature = "ts"), ts(type = "number"))]
+        as_of: i64,
+        #[cfg_attr(any(test, feature = "ts"), ts(type = "number | null"))]
+        stale_since: Option<i64>,
+    },
+    /// Work is running for this widget (a check, a job): phase-labelled progress, never timed out by the UI (ER-19);
+    /// `last` is the previous value, still shown under the progress when there is one.
+    Working { title: String, phase: String, progress: Progress, last: Option<V>, cancel: Option<WidgetAction<A>> },
+    /// Nothing to show; `title` starts with what the person gains, `next` is the next step.
+    Empty { title: String, detail: String, next: Option<WidgetAction<A>> },
+    /// The source failed. A busy source is `Working` or a stale `Ready`, never an error.
+    Error { title: String, cause: Option<String>, next: Option<WidgetAction<A>> },
+}
+
+/// A widget's state, by placement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PlacementState<V> {
-    /// The placement.
+pub struct PlacementState<V, A> {
     pub id: PlacementId,
-    /// Its state.
-    pub state: WidgetState<V>,
+    pub state: WidgetState<V, A>,
+}
+
+/// How serious a surface notice is (always drawn with its icon and word).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Tone {
+    Info,
+    Warning,
+    Danger,
+}
+
+/// One message for the whole surface instead of one per widget (e.g. Dyno's "Agent stopped" with Restart agent).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SurfaceNotice<A> {
+    pub tone: Tone,
+    pub title: String,
+    pub detail: String,
+    pub action: Option<WidgetAction<A>>,
+}
+
+/// All values of a surface at once.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SurfaceValues<V, A> {
+    pub notice: Option<SurfaceNotice<A>>,
+    pub placements: Vec<PlacementState<V, A>>,
+}
 }

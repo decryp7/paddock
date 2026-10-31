@@ -1,11 +1,12 @@
 //! Serde round trips of the wire types, and ids from the catalogue.
 
 use paddock_widgets::{
-    Edit, Layout, PlacementState, Read, WidgetAction, WidgetState, apply, assign_ids, read,
+    Edit, Layout, PlacementState, Progress, Read, SurfaceNotice, SurfaceValues, Tone, WidgetAction,
+    WidgetState, apply, assign_ids, read,
 };
 use serde_json::json;
 
-use crate::catalogue::{Gadget, Gadgets, defaults, disk, id, ids};
+use crate::catalogue::{Gadget, Gadgets, defaults, disk, id, ids, pid};
 
 #[test]
 fn a_layout_survives_serialise_and_read() {
@@ -29,7 +30,9 @@ fn a_layout_survives_serialise_and_read() {
     let Read {
         layout: back,
         notes,
+        unread,
     } = read::<Gadgets>(&value);
+    assert!(unread.is_none());
     assert!(notes.is_empty());
     assert_eq!(back, layout);
 }
@@ -68,9 +71,9 @@ fn every_edit_round_trips() {
             id: id("a"),
             widget: disk("x"),
         },
-        Edit::ApplyPreset { id: id("a") },
+        Edit::ApplyPreset { id: pid("a") },
         Edit::SavePreset { name: "n".into() },
-        Edit::DeletePreset { id: id("a") },
+        Edit::DeletePreset { id: pid("a") },
         Edit::ResetToDefaults,
         Edit::Undo,
     ];
@@ -86,7 +89,7 @@ fn every_edit_round_trips() {
 #[test]
 fn an_edit_may_leave_out_its_optional_fields() {
     let edit: Edit<Gadget> =
-        serde_json::from_value(json!({ "type": "add", "widget": { "kind": "clock" } }))
+        serde_json::from_value(json!({ "add": { "widget": { "kind": "clock" } } }))
             .expect("deserialises");
     assert_eq!(
         edit,
@@ -97,53 +100,122 @@ fn an_edit_may_leave_out_its_optional_fields() {
         }
     );
     let named: Edit<Gadget> =
-        serde_json::from_value(json!({ "type": "resetToDefaults" })).expect("deserialises");
+        serde_json::from_value(json!("resetToDefaults")).expect("deserialises");
     assert_eq!(named, Edit::ResetToDefaults);
+    let preset: Edit<Gadget> =
+        serde_json::from_value(json!({ "applyPreset": { "id": "compact" } }))
+            .expect("deserialises");
+    assert_eq!(preset, Edit::ApplyPreset { id: pid("compact") });
+    assert!(
+        serde_json::from_value::<Edit<Gadget>>(json!({ "applyPreset": { "id": "No" } })).is_err()
+    );
 }
 
 #[test]
 fn widget_states_have_the_agreed_shape() {
-    let ready = WidgetState::Ready {
-        value: 5u8,
-        as_of: Some(1_700_000_000_000),
-        stale: false,
+    type State = WidgetState<u8, String>;
+    let action = || WidgetAction {
+        action: "open".to_string(),
+        label: "Open alarms".into(),
+    };
+    let ready: State = WidgetState::Ready {
+        value: 5,
+        as_of: 1_700_000_000_000,
+        stale_since: None,
     };
     assert_eq!(
         serde_json::to_value(&ready).expect("serialises"),
-        json!({ "state": "ready", "value": 5, "asOf": 1_700_000_000_000i64, "stale": false })
+        json!({ "state": "ready", "value": 5, "asOf": 1_700_000_000_000i64, "staleSince": null })
     );
-    let empty: WidgetState<u8> = WidgetState::Empty {
-        title: "No alarms".into(),
-        detail: "All clear".into(),
-        action: Some(WidgetAction {
-            id: "open".into(),
-            label: "Open alarms".into(),
-        }),
-    };
-    let error: WidgetState<u8> = WidgetState::Error {
-        title: "Couldn't read".into(),
-        cause: None,
-        retry: true,
-        action: None,
-    };
-    for state in [ready, empty, error] {
-        let back: WidgetState<u8> =
-            serde_json::from_value(serde_json::to_value(&state).expect("serialises"))
-                .expect("deserialises");
+    let states: Vec<State> = vec![
+        ready,
+        WidgetState::Ready {
+            value: 5,
+            as_of: 1,
+            stale_since: Some(2),
+        },
+        WidgetState::Working {
+            title: "Checking backups".into(),
+            phase: "Reading volumes".into(),
+            progress: Progress::Count {
+                done: 3,
+                unit: "volumes".into(),
+            },
+            last: Some(4),
+            cancel: Some(action()),
+        },
+        WidgetState::Working {
+            title: "t".into(),
+            phase: "p".into(),
+            progress: Progress::Fraction {
+                done: 1,
+                total: 4,
+                unit: "files".into(),
+            },
+            last: None,
+            cancel: None,
+        },
+        WidgetState::Empty {
+            title: "No alarms".into(),
+            detail: "All clear".into(),
+            next: Some(action()),
+        },
+        WidgetState::Error {
+            title: "Couldn't read".into(),
+            cause: None,
+            next: None,
+        },
+    ];
+    for state in states {
+        let back: State = serde_json::from_value(serde_json::to_value(&state).expect("serialises"))
+            .expect("deserialises");
         assert_eq!(back, state);
     }
-    let placed = PlacementState {
+    let placed: PlacementState<u8, String> = PlacementState {
         id: id("clock"),
         state: WidgetState::Ready {
-            value: 1u8,
-            as_of: None,
-            stale: true,
+            value: 1,
+            as_of: 0,
+            stale_since: Some(1),
         },
     };
-    let back: PlacementState<u8> =
+    let back: PlacementState<u8, String> =
         serde_json::from_value(serde_json::to_value(&placed).expect("serialises"))
             .expect("deserialises");
     assert_eq!(back, placed);
+}
+
+#[test]
+fn surface_values_carry_a_notice_and_the_placements() {
+    let values: SurfaceValues<u8, String> = SurfaceValues {
+        notice: Some(SurfaceNotice {
+            tone: Tone::Danger,
+            title: "Agent stopped".into(),
+            detail: "Values are not updating.".into(),
+            action: Some(WidgetAction {
+                action: "restart".into(),
+                label: "Restart agent".into(),
+            }),
+        }),
+        placements: vec![PlacementState {
+            id: id("clock"),
+            state: WidgetState::Empty {
+                title: "t".into(),
+                detail: "d".into(),
+                next: None,
+            },
+        }],
+    };
+    let value = serde_json::to_value(&values).expect("serialises");
+    assert_eq!(value["notice"]["tone"], "danger");
+    assert_eq!(value["placements"][0]["state"]["state"], "empty");
+    let back: SurfaceValues<u8, String> = serde_json::from_value(value).expect("deserialises");
+    assert_eq!(back, values);
+    for tone in [Tone::Info, Tone::Warning] {
+        let back: Tone = serde_json::from_value(serde_json::to_value(tone).expect("serialises"))
+            .expect("deserialises");
+        assert_eq!(back, tone);
+    }
 }
 
 #[test]

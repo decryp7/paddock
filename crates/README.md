@@ -602,13 +602,16 @@ feature (the commands stay in the app, which owns where settings live).
 
 - `Catalogue` (an app's closed `Widget` enum, `Surface` limits, `KindSpec` per kind, `defaults()`, `presets()`),
   `check_catalogue` (the app's one test of it), `assign_ids`.
-- `Layout`, `Placement`, `Preset`, `PlacementId` (1 to 64 of `a-z0-9-`, parsed once).
-- `read::<C>(&Value)` never fails: damaged, newer or oversized gives the defaults and one `Note`; each invalid, unknown,
+- `Layout`, `Placement`, `Preset`, `PlacementId`, `PresetId` (1 to 64 of `a-z0-9-`, parsed once); the app names its
+  surfaces (`Catalogue::SurfaceId`) and its action enum (`WidgetAction<A>`).
+- `read::<C>(&Value)` never fails: damaged or oversized gives the defaults and one `Note`, a newer version's layout is shown as the defaults but kept
+  unchanged (`Read::unread`) and refused for edits (`Stored::edit` gives `NewerLayout`); each invalid, unknown,
   duplicate or surplus entry is dropped on its own with a count (at most twice the limit is looked at). `Stored<C>` is
   the same as a `#[serde(default)]` settings field.
 - `Edit` (add, remove, move, resize, replace, apply/save/delete preset, reset, undo) and `apply::<C>(&layout, edit)`,
   a pure `Layout -> Result<Layout, WidgetError>`; remove, apply preset and reset keep one undo level.
-- `catalogue_info`, `view` -> `LayoutView` for the chooser; `WidgetState`, `PlacementState`, `WidgetAction` for values.
+- `info`, `view` -> `LayoutView` for the chooser; `WidgetState` (ready, working, empty, error), `PlacementState`,
+  `SurfaceValues` for values. The `ts` feature derives `TS` for apps' own catalogue types.
 - Generated TypeScript: `ui/projects/paddock-ui/widgets/generated/widgets.ts`
   (`PADDOCK_WRITE_TS=1 cargo test -p paddock-widgets --lib generated`).
 - Tests: a three-kind test catalogue in `tests/it`, a proptest over arbitrary JSON and edit runs, the stale-file check.

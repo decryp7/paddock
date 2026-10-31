@@ -1,59 +1,113 @@
 //! The typed errors of an edit and the notes a read leaves behind.
 
-use serde::Serialize;
-use ts_rs::TS;
+use serde::{Deserialize, Serialize};
 
-use crate::id::MAX_ID;
-
-/// Why an edit or a layout is not valid. The message says what happened and what to do (design guide §10).
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, TS)]
+ts! {
+/// What a limit counts (typed, so the UI and the messages never parse text).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub enum Counted {
+    /// Placements on the surface.
+    Placements,
+    /// The person's saved presets.
+    UserPresets,
+    /// Placements in one saved preset.
+    PresetPlacements,
+}
+
+/// What was wrong with a stored layout (shown once).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum NoteCode {
+    /// Not a layout at all (not an object, wrong shape): the defaults are in use.
+    Damaged,
+    /// Larger than the surface's `max_bytes`: the defaults are in use.
+    TooLarge,
+    /// Saved by a newer version: shown as the defaults, kept unchanged and not saved over (edits are refused).
+    Newer {
+        /// The stored version.
+        version: u32,
+    },
+    /// Entries that were invalid, unknown or over a limit, each dropped on its own.
+    Dropped {
+        /// How many.
+        count: u32,
+    },
+}
+
+/// A note with its message for the person.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Note {
+    /// Machine-readable reason.
+    pub code: NoteCode,
+    /// The sentence to show.
+    pub message: String,
+}
+
+/// Why an edit was refused (the message says what to do).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum WidgetError {
-    /// A placement id is empty, too long or has characters other than `a-z`, `0-9` and `-`.
-    #[error("Use 1 to {MAX_ID} characters of a-z, 0-9 and hyphens for an id.")]
-    BadId,
-    /// Two placements or presets share an id.
+    /// No placement has this id.
+    #[error("No widget has the id \"{0}\".")]
+    UnknownPlacement(String),
+    /// No saved or built-in preset has this id.
+    #[error("No preset has the id \"{0}\".")]
+    UnknownPreset(String),
+    /// Two items share an id.
     #[error("Two items share the id \"{0}\"; ids must be unique.")]
     DuplicateId(String),
-    /// No placement has this id.
-    #[error("There is no widget \"{0}\" in this layout; reload the layout and try again.")]
-    UnknownPlacement(String),
     /// A count limit of the surface is reached.
-    #[error("At most {max} {what} fit; remove one first.")]
+    #[error("At most {max} {} fit; remove one first.", counted.noun())]
     TooMany {
-        /// What there are too many of ("widgets", "saved layouts", "widgets in a saved layout").
-        what: String,
+        /// What there are too many of.
+        counted: Counted,
         /// The limit.
         max: u16,
     },
     /// A kind is placed as often as its catalogue entry allows.
-    #[error("At most {max} of \"{kind}\" fit; remove one first.")]
+    #[error("At most {max} of this widget fit; remove one first.")]
     KindLimit {
-        /// The kind's title.
-        kind: String,
         /// Its `max_instances`.
         max: u8,
     },
     /// The span is not one the kind allows.
-    #[error("\"{kind}\" can be {} column(s) wide; choose one of those.", join_spans(.spans))]
+    #[error("This widget can be {} columns wide.", join_spans(.allowed))]
     SpanNotAllowed {
-        /// The kind's title.
-        kind: String,
         /// The allowed spans.
-        spans: Vec<u8>,
+        allowed: Vec<u8>,
+    },
+    /// Fewer placements than the surface needs.
+    #[error("At least {min} widgets are needed here.")]
+    TooFew {
+        /// The surface's `min_placements`.
+        min: u16,
     },
     /// The widget's own options (or the edit) are not valid; the text says what to change.
     #[error("{0}")]
     Invalid(String),
-    /// No saved or built-in layout has this id.
-    #[error("There is no layout \"{0}\"; choose another.")]
-    NotAPreset(String),
-    /// A built-in layout cannot be deleted.
-    #[error("Built-in layouts can't be deleted; save your own layout instead.")]
+    /// A built-in preset cannot be deleted.
+    #[error("Built-in presets cannot be changed or deleted.")]
     BuiltinPreset,
     /// There is no edit to undo.
     #[error("There is nothing to undo.")]
     NothingToUndo,
+    /// The stored layout is a newer version's and is kept unchanged.
+    #[error("This layout was saved by a newer version of the app and is kept unchanged; update the app to edit it.")]
+    NewerLayout,
+}
+}
+
+impl Counted {
+    /// The words for the count in a message.
+    pub fn noun(self) -> &'static str {
+        match self {
+            Counted::Placements => "widgets",
+            Counted::UserPresets => "saved presets",
+            Counted::PresetPlacements => "widgets in a saved preset",
+        }
+    }
 }
 
 fn join_spans(spans: &[u8]) -> String {
@@ -62,36 +116,4 @@ fn join_spans(spans: &[u8]) -> String {
         .map(u8::to_string)
         .collect::<Vec<_>>()
         .join(" or ")
-}
-
-/// What was wrong when a layout was read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "code"
-)]
-pub enum NoteCode {
-    /// The stored layout is damaged; the defaults are used.
-    Damaged,
-    /// The layout was saved by a newer version; the defaults are used.
-    Newer,
-    /// The stored layout is larger than the surface allows; the defaults are used.
-    TooLarge,
-    /// Invalid, unknown or surplus entries were dropped, each on its own.
-    Dropped {
-        /// How many entries were dropped.
-        count: u32,
-    },
-}
-
-/// One thing to tell the person once after reading a layout.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-pub struct Note {
-    /// Machine-readable reason.
-    #[serde(flatten)]
-    #[ts(flatten)]
-    pub code: NoteCode,
-    /// The sentence to show.
-    pub message: String,
 }

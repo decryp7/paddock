@@ -1,19 +1,20 @@
 //! What the chooser needs to draw and limit itself: the catalogue as data, with the layout.
 
-use serde::Serialize;
-use ts_rs::TS;
+use serde::{Deserialize, Serialize};
 
 use crate::catalogue::{Catalogue, Refresh, Widget};
 use crate::check;
-use crate::error::Note;
+use crate::error::{Counted, Note};
 use crate::layout::{Layout, Preset};
+use crate::read::Stored;
 
-/// A surface's grid and limits as the UI sees them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+ts! {
+/// The surface as the chooser needs it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SurfaceInfo {
-    /// The surface's name.
-    pub id: String,
+pub struct SurfaceInfo<S> {
+    /// The app's surface.
+    pub id: S,
     /// Columns of the grid.
     pub columns: u8,
     /// Most placements.
@@ -22,12 +23,10 @@ pub struct SurfaceInfo {
     pub min_placements: u16,
     /// Most saved presets.
     pub max_user_presets: u8,
-    /// Most placements in a preset.
-    pub max_preset_placements: u16,
 }
 
-/// One catalogue entry as the UI sees it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+/// One kind as the chooser needs it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KindInfo<K> {
     /// The kind.
@@ -46,43 +45,45 @@ pub struct KindInfo<K> {
     pub refresh: Refresh,
 }
 
-/// The catalogue as data.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+/// The catalogue of one surface.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CatalogueInfo<K> {
+pub struct CatalogueInfo<S, K> {
     /// The surface.
-    pub surface: SurfaceInfo,
+    pub surface: SurfaceInfo<S>,
     /// The kinds, in chooser order.
     pub kinds: Vec<KindInfo<K>>,
 }
 
-/// A layout with everything the chooser needs: no limit, title or preset is hard-coded in the UI.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+/// Everything the chooser draws: the layout, its catalogue, the notes and whether Undo is offered.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LayoutView<W, K> {
+pub struct LayoutView<S, W, K> {
     /// The layout.
     pub layout: Layout<W>,
     /// The catalogue.
-    pub catalogue: CatalogueInfo<K>,
+    pub catalogue: CatalogueInfo<S, K>,
     /// The catalogue's own presets (the person's are in the layout).
     pub builtin_presets: Vec<Preset<W>>,
     /// What was wrong when the layout was read, to show once.
     pub notes: Vec<Note>,
-    /// Whether an undo is available.
+    /// True right after an undoable edit.
     pub can_undo: bool,
+    /// False while a newer version's layout is kept (`NoteCode::Newer`): the chooser is read-only.
+    pub editable: bool,
+}
 }
 
 /// The catalogue as data.
-pub fn catalogue_info<C: Catalogue>() -> CatalogueInfo<<C::Widget as Widget>::Kind> {
+pub fn info<C: Catalogue>() -> CatalogueInfo<C::SurfaceId, <C::Widget as Widget>::Kind> {
     let s = &C::SURFACE;
     CatalogueInfo {
         surface: SurfaceInfo {
-            id: s.id.into(),
+            id: C::SURFACE_ID,
             columns: s.columns,
             max_placements: s.max_placements,
             min_placements: s.min_placements,
             max_user_presets: s.max_user_presets,
-            max_preset_placements: s.max_preset_placements,
         },
         kinds: C::kinds()
             .iter()
@@ -108,6 +109,7 @@ pub fn builtin_presets<C: Catalogue>() -> Vec<Preset<C::Widget>> {
             p.placements = check::keep_valid::<C>(
                 p.placements,
                 C::SURFACE.max_preset_placements as usize,
+                Counted::PresetPlacements,
                 &mut 0,
             );
             p
@@ -115,16 +117,16 @@ pub fn builtin_presets<C: Catalogue>() -> Vec<Preset<C::Widget>> {
         .collect()
 }
 
-/// A layout with its catalogue and notes, for the chooser.
+/// A stored layout with its catalogue, built-in presets and notes, for the chooser.
 pub fn view<C: Catalogue>(
-    layout: Layout<C::Widget>,
-    notes: Vec<Note>,
-) -> LayoutView<C::Widget, <C::Widget as Widget>::Kind> {
+    stored: &Stored<C>,
+) -> LayoutView<C::SurfaceId, C::Widget, <C::Widget as Widget>::Kind> {
     LayoutView {
-        can_undo: layout.can_undo(),
-        layout,
-        catalogue: catalogue_info::<C>(),
+        can_undo: stored.read.layout.can_undo(),
+        layout: stored.read.layout.clone(),
+        catalogue: info::<C>(),
         builtin_presets: builtin_presets::<C>(),
-        notes,
+        notes: stored.read.notes.clone(),
+        editable: stored.editable(),
     }
 }

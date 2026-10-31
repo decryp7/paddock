@@ -2,14 +2,13 @@
 //! surface with small limits.
 
 use paddock_widgets::{
-    Catalogue, KindSpec, Layout, Placement, PlacementId, Preset, Refresh, Surface, Widget,
-    assign_ids,
+    Catalogue, KindSpec, Layout, Placement, PlacementId, Preset, PresetId, Refresh, Surface,
+    Widget, assign_ids,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use ts_rs::TS;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -27,7 +26,7 @@ pub enum Gadget {
     Hidden,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GadgetKind {
     Clock,
@@ -70,6 +69,12 @@ impl Widget for Gadget {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TestSurface {
+    Popover,
+}
+
 pub static KINDS: [KindSpec<GadgetKind>; 3] = [
     KindSpec {
         kind: GadgetKind::Clock,
@@ -106,10 +111,11 @@ pub struct Cat<const MIN: u16, const PRESETS: u8>;
 pub type Gadgets = Cat<0, 2>;
 
 impl<const MIN: u16, const PRESETS: u8> Catalogue for Cat<MIN, PRESETS> {
+    type SurfaceId = TestSurface;
     type Widget = Gadget;
 
+    const SURFACE_ID: TestSurface = TestSurface::Popover;
     const SURFACE: Surface = Surface {
-        id: "popover",
         schema_version: 2,
         columns: 2,
         max_placements: 4,
@@ -133,7 +139,7 @@ impl<const MIN: u16, const PRESETS: u8> Catalogue for Cat<MIN, PRESETS> {
 
     fn presets() -> Vec<Preset<Gadget>> {
         vec![Preset {
-            id: id("compact"),
+            id: pid("compact"),
             name: "Compact".into(),
             builtin: false,
             placements: assign_ids([(2, Gadget::Clock)]),
@@ -149,6 +155,10 @@ pub fn disk(volume: &str) -> Gadget {
 
 pub fn id(text: &str) -> PlacementId {
     PlacementId::new(text).expect("a valid id")
+}
+
+pub fn pid(text: &str) -> PresetId {
+    PresetId::new(text).expect("a valid id")
 }
 
 pub fn defaults() -> Layout<Gadget> {

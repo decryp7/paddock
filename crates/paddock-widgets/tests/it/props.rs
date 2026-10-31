@@ -1,6 +1,6 @@
 //! Any JSON gives a valid layout and no panic; any run of edits keeps the layout valid.
 
-use paddock_widgets::{Edit, PlacementId, apply, read};
+use paddock_widgets::{Edit, PlacementId, PresetId, apply, read};
 use proptest::prelude::*;
 use serde_json::{Value, json};
 
@@ -81,9 +81,15 @@ fn arbitrary_edit() -> impl Strategy<Value = Edit<Gadget>> {
         (pid.clone(), 0u16..8).prop_map(|(id, to)| Edit::Move { id, to }),
         (pid.clone(), 0u8..4).prop_map(|(id, span)| Edit::Resize { id, span }),
         (pid.clone(), widget).prop_map(|(id, widget)| Edit::Replace { id, widget }),
-        pid.clone().prop_map(|id| Edit::ApplyPreset { id }),
+        prop_oneof![Just("compact"), Just("mine"), Just("clock")].prop_map(|s| Edit::ApplyPreset {
+            id: PresetId::new(s).expect("a valid id")
+        }),
         ".{0,80}".prop_map(|name| Edit::SavePreset { name }),
-        pid.prop_map(|id| Edit::DeletePreset { id }),
+        prop_oneof![Just("compact"), Just("mine"), Just("clock")].prop_map(|s| {
+            Edit::DeletePreset {
+                id: PresetId::new(s).expect("a valid id"),
+            }
+        }),
         Just(Edit::ResetToDefaults),
         Just(Edit::Undo),
     ]

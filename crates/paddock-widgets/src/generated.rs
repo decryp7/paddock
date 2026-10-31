@@ -19,7 +19,9 @@ fn types() -> String {
         "// Generated from the Rust wire types of paddock-widgets (ts-rs). Do not edit: {REGENERATE}.\n\n"
     );
     let decls = [
-        "export type PlacementId = string;".to_string(),
+        crate::PlacementId::decl(),
+        crate::PresetId::decl(),
+        crate::Counted::decl(),
         crate::WidgetError::decl(),
         crate::NoteCode::decl(),
         crate::Note::decl(),
@@ -28,23 +30,21 @@ fn types() -> String {
         crate::Preset::<Dummy>::decl(),
         crate::Layout::<Dummy>::decl(),
         crate::Edit::<Dummy>::decl(),
-        crate::SurfaceInfo::decl(),
+        crate::SurfaceInfo::<Dummy>::decl(),
         crate::KindInfo::<Dummy>::decl(),
-        crate::CatalogueInfo::<Dummy>::decl(),
-        crate::LayoutView::<Dummy, Dummy>::decl(),
-        crate::WidgetAction::decl(),
-        crate::WidgetState::<Dummy>::decl(),
-        crate::PlacementState::<Dummy>::decl(),
+        crate::CatalogueInfo::<Dummy, Dummy>::decl(),
+        crate::LayoutView::<Dummy, Dummy, Dummy>::decl(),
+        crate::WidgetAction::<Dummy>::decl(),
+        crate::Progress::decl(),
+        crate::WidgetState::<Dummy, Dummy>::decl(),
+        crate::PlacementState::<Dummy, Dummy>::decl(),
+        crate::Tone::decl(),
+        crate::SurfaceNotice::<Dummy>::decl(),
+        crate::SurfaceValues::<Dummy, Dummy>::decl(),
     ];
     let body: String = decls
         .into_iter()
-        .map(|d| {
-            if d.starts_with("export ") {
-                format!("{d}\n\n")
-            } else {
-                format!("export {d}\n\n")
-            }
-        })
+        .map(|d| format!("export {d}\n\n"))
         .collect();
     format!("{header}{}", body.trim_end().to_string() + "\n")
 }

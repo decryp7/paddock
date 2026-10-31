@@ -1,14 +1,14 @@
 //! What the chooser gets: the catalogue as data, with the layout.
 
-use paddock_widgets::{Edit, Refresh, apply, catalogue_info, view};
+use paddock_widgets::{Edit, Refresh, Stored, apply, info, view};
 use serde_json::json;
 
-use crate::catalogue::{GadgetKind, Gadgets, defaults, id};
+use crate::catalogue::{GadgetKind, Gadgets, TestSurface, defaults, id};
 
 #[test]
 fn the_catalogue_is_data() {
-    let info = catalogue_info::<Gadgets>();
-    assert_eq!(info.surface.id, "popover");
+    let info = info::<Gadgets>();
+    assert_eq!(info.surface.id, TestSurface::Popover);
     assert_eq!(
         (
             info.surface.columns,
@@ -17,13 +17,7 @@ fn the_catalogue_is_data() {
         ),
         (2, 4, 0)
     );
-    assert_eq!(
-        (
-            info.surface.max_user_presets,
-            info.surface.max_preset_placements
-        ),
-        (2, 3)
-    );
+    assert_eq!(info.surface.max_user_presets, 2);
     let titles: Vec<&str> = info.kinds.iter().map(|k| k.title.as_str()).collect();
     assert_eq!(titles, ["Clock", "Disk space", "Active alarms"]);
     assert_eq!(info.kinds[0].kind, GadgetKind::Clock);
@@ -37,18 +31,18 @@ fn the_catalogue_is_data() {
 fn the_view_carries_the_layout_presets_notes_and_undo() {
     let removed =
         apply::<Gadgets>(&defaults(), Edit::Remove { id: id("clock") }).expect("the edit applies");
-    let v = view::<Gadgets>(removed, vec![]);
+    let v = view(&Stored::<Gadgets>::new(removed));
     assert!(v.can_undo);
+    assert!(v.editable);
     assert_eq!(v.builtin_presets.len(), 1);
     assert!(v.builtin_presets[0].builtin);
-    let fresh = view::<Gadgets>(defaults(), vec![]);
+    let fresh = view(&Stored::<Gadgets>::default());
     assert!(!fresh.can_undo);
     let value = serde_json::to_value(&fresh).expect("serialises");
+    assert_eq!(value["catalogue"]["surface"]["id"], "popover");
     assert_eq!(value["catalogue"]["kinds"][1]["maxInstances"], 2);
-    assert_eq!(
-        value["catalogue"]["kinds"][2]["refresh"],
-        json!({ "type": "onChange" })
-    );
+    assert_eq!(value["catalogue"]["kinds"][2]["refresh"], json!("onChange"));
     assert_eq!(value["canUndo"], false);
+    assert_eq!(value["editable"], true);
     assert_eq!(value["builtinPresets"][0]["id"], "compact");
 }

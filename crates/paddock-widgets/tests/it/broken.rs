@@ -5,10 +5,9 @@ use paddock_widgets::{
     check_catalogue,
 };
 
-use crate::catalogue::{Gadget, GadgetKind, Gadgets, KINDS, disk, id};
+use crate::catalogue::{Gadget, GadgetKind, Gadgets, KINDS, TestSurface, disk, pid};
 
 const SURFACE: Surface = Surface {
-    id: "popover",
     schema_version: 1,
     columns: 2,
     max_placements: 4,
@@ -39,7 +38,9 @@ macro_rules! broken {
     ($name:ident, $kinds:expr, $defaults:expr, $presets:expr, $min:expr) => {
         struct $name;
         impl Catalogue for $name {
+            type SurfaceId = TestSurface;
             type Widget = Gadget;
+            const SURFACE_ID: TestSurface = TestSurface::Popover;
             const SURFACE: Surface = Surface {
                 min_placements: $min,
                 ..SURFACE
@@ -87,7 +88,7 @@ broken!(
     &CLOCK,
     Vec::new(),
     vec![Preset {
-        id: id("two"),
+        id: pid("two"),
         name: "Two".into(),
         builtin: false,
         placements: two_clocks()
@@ -136,15 +137,14 @@ mod minimal {
     };
     use serde::{Deserialize, Serialize};
     use serde_json::json;
-    use ts_rs::TS;
 
-    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
     #[serde(tag = "kind", rename_all = "camelCase")]
     enum Lamp {
         Lamp,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]
     enum LampKind {
         Lamp,
@@ -173,9 +173,10 @@ mod minimal {
     struct Lamps;
 
     impl Catalogue for Lamps {
+        type SurfaceId = u8;
         type Widget = Lamp;
+        const SURFACE_ID: u8 = 7;
         const SURFACE: Surface = Surface {
-            id: "menuBar",
             schema_version: 1,
             columns: 1,
             max_placements: 2,

@@ -1,11 +1,11 @@
 //! Reading: every kind of bad input falls back or drops on its own, with one note.
 
-use paddock_widgets::{NoteCode, Read, read};
+use paddock_widgets::{Catalogue, NoteCode, Read, read};
 use serde_json::{Value, json};
 
 use crate::catalogue::{Cat, Gadget, Gadgets, defaults, disk, doc, ids, stored};
 
-fn go(value: &Value) -> Read<Gadget> {
+fn go(value: &Value) -> Read<Gadgets> {
     read::<Gadgets>(value)
 }
 
@@ -21,14 +21,14 @@ fn volume(id: &str) -> Value {
     stored(id, 2, json!({ "kind": "diskSpace", "volume": "all" }))
 }
 
-fn dropped(read: &Read<Gadget>) -> Option<u32> {
+fn dropped<C: Catalogue>(read: &Read<C>) -> Option<u32> {
     read.notes.iter().find_map(|n| match n.code {
         NoteCode::Dropped { count } => Some(count),
         _ => None,
     })
 }
 
-fn fell_back(read: &Read<Gadget>, code: NoteCode) {
+fn fell_back(read: &Read<Gadgets>, code: NoteCode) {
     assert_eq!(read.layout.placements, defaults().placements);
     assert!(read.layout.presets.is_empty());
     assert_eq!(read.notes.len(), 1, "one note: {:?}", read.notes);
@@ -83,14 +83,16 @@ fn damaged_input_gives_the_defaults_and_one_note() {
 }
 
 #[test]
-fn a_newer_version_gives_the_defaults_and_one_note() {
-    let r = go(&json!({ "version": 3, "placements": [clock("clock")] }));
-    fell_back(&r, NoteCode::Newer);
+fn a_newer_version_gives_the_defaults_keeps_the_value_and_one_note() {
+    let newer = json!({ "version": 3, "placements": [clock("clock")] });
+    let r = go(&newer);
+    fell_back(&r, NoteCode::Newer { version: 3 });
     assert!(r.notes[0].message.contains("newer version (3)"));
-    fell_back(
-        &go(&json!({ "version": 99999999999u64, "placements": 5 })),
-        NoteCode::Newer,
-    );
+    assert_eq!(r.unread, Some(newer));
+    let huge = json!({ "version": 99999999999u64, "placements": 5 });
+    let r = go(&huge);
+    fell_back(&r, NoteCode::Newer { version: u32::MAX });
+    assert_eq!(r.unread, Some(huge));
 }
 
 #[test]

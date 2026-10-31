@@ -1,8 +1,8 @@
 //! Every edit: success and each error, and each limit at and past its bound.
 
-use paddock_widgets::{Edit, Layout, WidgetError, apply};
+use paddock_widgets::{Counted, Edit, Layout, WidgetError, apply};
 
-use crate::catalogue::{Cat, Gadget, Gadgets, defaults, disk, id, ids};
+use crate::catalogue::{Cat, Gadget, Gadgets, defaults, disk, id, ids, pid};
 
 fn run(layout: &Layout<Gadget>, edit: Edit<Gadget>) -> Layout<Gadget> {
     apply::<Gadgets>(layout, edit).expect("the edit applies")
@@ -77,10 +77,7 @@ fn a_second_instance_gets_a_numbered_id_and_a_third_is_refused() {
     let smaller = run(&two, Edit::Remove { id: id("alarms") });
     assert_eq!(
         fail(&smaller, add(disk("third"))),
-        WidgetError::KindLimit {
-            kind: "Disk space".into(),
-            max: 2
-        }
+        WidgetError::KindLimit { max: 2 }
     );
 }
 
@@ -106,8 +103,7 @@ fn add_takes_a_span_the_kind_allows() {
             }
         ),
         WidgetError::SpanNotAllowed {
-            kind: "Clock".into(),
-            spans: vec![1, 2]
+            allowed: vec![1, 2]
         }
     );
 }
@@ -139,8 +135,8 @@ fn the_surface_limit_is_checked_at_and_past_the_bound() {
     assert_eq!(
         fail(&four, add(Gadget::Clock)),
         WidgetError::TooMany {
-            what: "widgets".into(),
-            max: 4
+            counted: Counted::Placements,
+            max: 4,
         }
     );
     let three = run(
@@ -156,10 +152,7 @@ fn the_surface_limit_is_checked_at_and_past_the_bound() {
 fn a_kind_at_its_limit_is_refused() {
     assert_eq!(
         fail(&defaults(), add(Gadget::Clock)),
-        WidgetError::KindLimit {
-            kind: "Clock".into(),
-            max: 1
-        }
+        WidgetError::KindLimit { max: 1 }
     );
 }
 
@@ -194,10 +187,7 @@ fn remove_cannot_go_below_the_fewest() {
     .unwrap();
     assert_eq!(one.placements.len(), 1);
     let error = apply::<Strict>(&one, Edit::Remove { id: id("alarms") }).unwrap_err();
-    assert_eq!(
-        error,
-        WidgetError::Invalid("Keep at least 1 widget(s) in this layout.".into())
-    );
+    assert_eq!(error, WidgetError::TooFew { min: 1 });
 }
 
 #[test]
@@ -257,8 +247,7 @@ fn resize_and_its_errors() {
             }
         ),
         WidgetError::SpanNotAllowed {
-            kind: "Clock".into(),
-            spans: vec![1, 2]
+            allowed: vec![1, 2]
         }
     );
     assert_eq!(
@@ -311,7 +300,7 @@ fn replace_changes_options_not_the_kind() {
 
 #[test]
 fn apply_a_builtin_preset_and_a_saved_one() {
-    let compact = run(&defaults(), Edit::ApplyPreset { id: id("compact") });
+    let compact = run(&defaults(), Edit::ApplyPreset { id: pid("compact") });
     assert_eq!(ids(&compact), ["clock"]);
     assert_eq!(compact.placements[0].span, 2);
     let saved = run(
@@ -321,25 +310,22 @@ fn apply_a_builtin_preset_and_a_saved_one() {
         },
     );
     let emptied = run(&saved, Edit::Remove { id: id("clock") });
-    let again = run(&emptied, Edit::ApplyPreset { id: id("mine") });
+    let again = run(&emptied, Edit::ApplyPreset { id: pid("mine") });
     assert_eq!(again.placements, defaults().placements);
 }
 
 #[test]
 fn apply_refuses_an_unknown_preset_and_an_invalid_saved_one() {
     assert_eq!(
-        fail(&defaults(), Edit::ApplyPreset { id: id("nope") }),
-        WidgetError::NotAPreset("nope".into())
+        fail(&defaults(), Edit::ApplyPreset { id: pid("nope") }),
+        WidgetError::UnknownPreset("nope".into())
     );
     let mut bad = run(&defaults(), Edit::SavePreset { name: "Bad".into() });
     bad.presets[0].placements =
         paddock_widgets::assign_ids([(1, Gadget::Clock), (1, Gadget::Clock)]);
     assert_eq!(
-        fail(&bad, Edit::ApplyPreset { id: id("bad") }),
-        WidgetError::KindLimit {
-            kind: "Clock".into(),
-            max: 1
-        }
+        fail(&bad, Edit::ApplyPreset { id: pid("bad") }),
+        WidgetError::KindLimit { max: 1 }
     );
 }
 
@@ -382,7 +368,7 @@ fn save_a_preset_with_a_cleaned_name_and_a_unique_id() {
 
 #[test]
 fn save_a_preset_refusals() {
-    let msg = WidgetError::Invalid("Give the layout a name of 1 to 64 characters.".into());
+    let msg = WidgetError::Invalid("Give the preset a name of 1 to 64 characters.".into());
     assert_eq!(
         fail(
             &defaults(),
@@ -399,16 +385,16 @@ fn save_a_preset_refusals() {
     assert_eq!(
         fail(&two, Edit::SavePreset { name: "c".into() }),
         WidgetError::TooMany {
-            what: "saved layouts".into(),
-            max: 2
+            counted: Counted::UserPresets,
+            max: 2,
         }
     );
     let four = run(&defaults(), add(disk("b")));
     assert_eq!(
         fail(&four, Edit::SavePreset { name: "big".into() }),
         WidgetError::TooMany {
-            what: "widgets in a saved layout".into(),
-            max: 3
+            counted: Counted::PresetPlacements,
+            max: 3,
         }
     );
 }
@@ -422,17 +408,17 @@ fn delete_a_preset_and_its_errors() {
         },
     );
     assert!(
-        run(&saved, Edit::DeletePreset { id: id("mine") })
+        run(&saved, Edit::DeletePreset { id: pid("mine") })
             .presets
             .is_empty()
     );
     assert_eq!(
-        fail(&saved, Edit::DeletePreset { id: id("compact") }),
+        fail(&saved, Edit::DeletePreset { id: pid("compact") }),
         WidgetError::BuiltinPreset
     );
     assert_eq!(
-        fail(&saved, Edit::DeletePreset { id: id("nope") }),
-        WidgetError::NotAPreset("nope".into())
+        fail(&saved, Edit::DeletePreset { id: pid("nope") }),
+        WidgetError::UnknownPreset("nope".into())
     );
 }
 
@@ -458,7 +444,7 @@ fn validate_names_the_first_problem() {
     let mut too_many = defaults();
     too_many.presets = (0..3)
         .map(|i| paddock_widgets::Preset {
-            id: id(&format!("p{i}")),
+            id: pid(&format!("p{i}")),
             name: "p".into(),
             builtin: false,
             placements: vec![],
@@ -467,13 +453,13 @@ fn validate_names_the_first_problem() {
     assert_eq!(
         too_many.validate::<Gadgets>(),
         Err(WidgetError::TooMany {
-            what: "saved layouts".into(),
-            max: 2
+            counted: Counted::UserPresets,
+            max: 2,
         })
     );
     let mut clash = defaults();
     clash.presets = vec![paddock_widgets::Preset {
-        id: id("compact"),
+        id: pid("compact"),
         name: "c".into(),
         builtin: false,
         placements: vec![],
@@ -484,7 +470,7 @@ fn validate_names_the_first_problem() {
     );
     let mut twin = defaults();
     let p = paddock_widgets::Preset {
-        id: id("p"),
+        id: pid("p"),
         name: "p".into(),
         builtin: false,
         placements: vec![],
@@ -496,7 +482,7 @@ fn validate_names_the_first_problem() {
     );
     let mut big = defaults();
     big.presets = vec![paddock_widgets::Preset {
-        id: id("p"),
+        id: pid("p"),
         name: "p".into(),
         builtin: false,
         placements: run(&defaults(), add(disk("b"))).placements,
@@ -504,11 +490,21 @@ fn validate_names_the_first_problem() {
     assert_eq!(
         big.validate::<Gadgets>(),
         Err(WidgetError::TooMany {
-            what: "widgets".into(),
-            max: 3
+            counted: Counted::PresetPlacements,
+            max: 3,
         })
     );
     type Strict = Cat<1, 2>;
     let none = Layout::new::<Strict>(vec![], vec![]);
     assert!(none.validate::<Strict>().is_err());
+}
+
+#[test]
+fn validate_checks_the_placements_too() {
+    let mut twin = defaults();
+    twin.placements.push(twin.placements[0].clone());
+    assert_eq!(
+        twin.validate::<Gadgets>(),
+        Err(WidgetError::DuplicateId("clock".into()))
+    );
 }

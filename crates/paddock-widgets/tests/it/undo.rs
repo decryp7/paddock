@@ -2,7 +2,7 @@
 
 use paddock_widgets::{Edit, Layout, WidgetError, apply};
 
-use crate::catalogue::{Gadget, Gadgets, defaults, disk, id, ids};
+use crate::catalogue::{Gadget, Gadgets, defaults, disk, id, ids, pid};
 
 fn run(layout: &Layout<Gadget>, edit: Edit<Gadget>) -> Layout<Gadget> {
     apply::<Gadgets>(layout, edit).expect("the edit applies")
@@ -26,7 +26,7 @@ fn undo_after_remove() {
 
 #[test]
 fn undo_after_a_preset() {
-    let applied = run(&defaults(), Edit::ApplyPreset { id: id("compact") });
+    let applied = run(&defaults(), Edit::ApplyPreset { id: pid("compact") });
     assert!(applied.can_undo());
     assert_eq!(run(&applied, Edit::Undo).placements, defaults().placements);
 }
@@ -87,7 +87,7 @@ fn presets_edits_keep_the_level() {
         },
     );
     assert!(saved.can_undo());
-    let deleted = run(&saved, Edit::DeletePreset { id: id("mine") });
+    let deleted = run(&saved, Edit::DeletePreset { id: pid("mine") });
     assert!(deleted.can_undo());
     assert_eq!(
         ids(&run(&deleted, Edit::Undo)),

@@ -3,54 +3,50 @@
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use serde::Serialize;
 use serde::de::DeserializeOwned;
-use ts_rs::TS;
+use serde::{Deserialize, Serialize};
 
+use crate::error::Counted;
 use crate::layout::{Placement, Preset};
 
-/// The surface a catalogue fills: its grid and its limits (ADR 0035 §1 and §6).
+/// The grid and limits of the surface a catalogue fills (ADR 0035 §6). Its identity is the app's `SurfaceId`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Surface {
-    /// The surface's name on the wire: "popover", "dashboard", "menuBar".
-    pub id: &'static str,
-    /// Bumped by the app on a breaking change of its widget type; a layout of a higher version is not read.
+    /// Bumped by the app on a breaking change of its widget type; a newer stored layout is kept unread (ADR 0035 §1).
     pub schema_version: u32,
-    /// Columns of the surface's grid (popover 2, dashboard 12, menu bar 1).
+    /// Columns of the grid: popup 2, dashboard 12, menu bar 1.
     pub columns: u8,
     /// Most placements.
     pub max_placements: u16,
-    /// Fewest placements (0: an empty layout is allowed and designed).
+    /// Fewest placements; 0 allows an empty surface, which the UI designs.
     pub min_placements: u16,
-    /// Most placements saved by the user as presets (0: the surface has none).
+    /// Most user presets (0: the surface has none).
     pub max_user_presets: u8,
-    /// Most placements in one preset.
+    /// Most placements in one user preset.
     pub max_preset_placements: u16,
-    /// The largest serialised layout read.
+    /// Largest serialised layout read, in bytes.
     pub max_bytes: usize,
 }
 
-/// How a kind gets fresh values (drives the engine's refresh and the stale flag; never a UI timer).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "type"
-)]
+ts! {
+/// How a kind gets fresh values; drives the engine's refresh and its stale marking, never a UI timer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Refresh {
-    /// With the live tick.
+    /// Every live tick (the app's sampler).
     Live,
-    /// Every `secs` seconds.
+    /// Every `secs` seconds, from the engine's cache.
     Every {
         /// The period.
         secs: u16,
     },
-    /// When the underlying state changes.
+    /// When the source reports a change.
     OnChange,
+}
 }
 
 /// One catalogue entry, as data.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KindSpec<K: 'static> {
     /// The kind.
     pub kind: K,
@@ -69,9 +65,9 @@ pub struct KindSpec<K: 'static> {
 }
 
 /// The app's widget value: a closed enum whose variants carry the widget's options.
-pub trait Widget: Clone + Debug + PartialEq + Serialize + DeserializeOwned + TS {
+pub trait Widget: Clone + Debug + PartialEq + Serialize + DeserializeOwned + 'static {
     /// The widget's kind, a fieldless enum serialised as a string.
-    type Kind: Copy + Eq + Hash + Debug + Serialize + DeserializeOwned + TS + 'static;
+    type Kind: Copy + Eq + Hash + Debug + Serialize + DeserializeOwned + 'static;
 
     /// The widget's kind.
     fn kind(&self) -> Self::Kind;
@@ -87,10 +83,16 @@ pub trait Widget: Clone + Debug + PartialEq + Serialize + DeserializeOwned + TS 
 
 /// An app's catalogue for one surface.
 pub trait Catalogue: 'static {
+    /// The app's surfaces (Dyno: dashboard, menu bar, popover), one enum per app.
+    type SurfaceId: Copy + Eq + Hash + Debug + Serialize + DeserializeOwned + 'static;
+
     /// The widget type.
     type Widget: Widget;
 
-    /// The surface's grid and limits.
+    /// This catalogue's surface.
+    const SURFACE_ID: Self::SurfaceId;
+
+    /// Its grid and limits.
     const SURFACE: Surface;
 
     /// Every kind, in the order the chooser lists them.
@@ -144,7 +146,12 @@ pub fn check_catalogue<C: Catalogue>() -> Result<(), String> {
         }
     }
     let defaults = C::defaults();
-    let kept = crate::check::keep_valid::<C>(defaults.clone(), s.max_placements as usize, &mut 0);
+    let kept = crate::check::keep_valid::<C>(
+        defaults.clone(),
+        s.max_placements as usize,
+        Counted::Placements,
+        &mut 0,
+    );
     if kept != defaults || defaults.len() < s.min_placements as usize {
         return Err("the defaults are not a valid layout".into());
     }
@@ -152,6 +159,7 @@ pub fn check_catalogue<C: Catalogue>() -> Result<(), String> {
         let kept = crate::check::keep_valid::<C>(
             p.placements.clone(),
             s.max_preset_placements as usize,
+            Counted::PresetPlacements,
             &mut 0,
         );
         if kept != p.placements {

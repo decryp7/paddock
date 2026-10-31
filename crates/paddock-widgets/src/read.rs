@@ -1,53 +1,82 @@
 //! Versioned, lenient reading: a stored layout never fails its settings file.
 
-use std::marker::PhantomData;
-
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
-use crate::catalogue::{Catalogue, Widget};
+use crate::catalogue::Catalogue;
 use crate::check;
-use crate::error::{Note, NoteCode};
-use crate::id::PlacementId;
+use crate::error::{Counted, Note, NoteCode, WidgetError};
+use crate::id::PresetId;
 use crate::layout::{Layout, Placement, Preset};
-use crate::view::{self, LayoutView};
+use crate::view;
 
 /// The longest preset name, in characters.
 pub const MAX_NAME: usize = 64;
 
-/// What reading found: the layout to use and what was wrong (shown once).
-#[derive(Debug, Clone, PartialEq)]
-pub struct Read<W> {
-    /// The layout to use: always valid.
-    pub layout: Layout<W>,
+/// What reading a stored layout found.
+pub struct Read<C: Catalogue> {
+    /// The layout to use.
+    pub layout: Layout<C::Widget>,
     /// What was wrong, if anything: one note for a fallback, one for dropped entries.
     pub notes: Vec<Note>,
+    /// A newer version's value, kept as read and written back unchanged (`NoteCode::Newer`).
+    pub unread: Option<Value>,
 }
 
-fn fallback<C: Catalogue>(code: NoteCode, what: &str) -> Read<C::Widget> {
+impl<C: Catalogue> Clone for Read<C> {
+    fn clone(&self) -> Self {
+        Read {
+            layout: self.layout.clone(),
+            notes: self.notes.clone(),
+            unread: self.unread.clone(),
+        }
+    }
+}
+
+impl<C: Catalogue> std::fmt::Debug for Read<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Read")
+            .field("layout", &self.layout)
+            .field("notes", &self.notes)
+            .field("unread", &self.unread)
+            .finish()
+    }
+}
+
+impl<C: Catalogue> PartialEq for Read<C> {
+    fn eq(&self, other: &Self) -> bool {
+        self.layout == other.layout && self.notes == other.notes && self.unread == other.unread
+    }
+}
+
+fn fallback<C: Catalogue>(code: NoteCode, what: &str) -> Read<C> {
     Read {
         layout: Layout::defaults::<C>(),
         notes: vec![Note {
             code,
-            message: format!("The {} layout {what}; using the defaults.", C::SURFACE.id),
+            message: format!("The saved widget layout {what}; using the defaults."),
         }],
+        unread: None,
     }
 }
 
 /// Reads a stored layout. Never fails and never panics:
 ///
 /// - missing (`null`) gives the defaults and no note;
-/// - damaged (not an object, no version, no placements), newer than the surface's version or larger than its
-///   `max_bytes` gives the defaults and one note;
+/// - damaged (not an object, no version, no placements) or larger than the surface's `max_bytes` gives the defaults and
+///   one note;
+/// - newer than the surface's version gives the defaults, one note and the value in [`Read::unread`], which [`Stored`]
+///   writes back unchanged and refuses to edit over;
 /// - each invalid, unknown, duplicate or surplus placement or preset is dropped on its own, with one note counting them
 ///   (at most twice the limit is looked at; the rest is dropped unread);
 /// - a layout whose entries were all dropped, or that falls under `min_placements`, takes the defaults' placements.
-pub fn read<C: Catalogue>(value: &Value) -> Read<C::Widget> {
+pub fn read<C: Catalogue>(value: &Value) -> Read<C> {
     let s = &C::SURFACE;
     if value.is_null() {
         return Read {
             layout: Layout::defaults::<C>(),
             notes: Vec::new(),
+            unread: None,
         };
     }
     let Some(object) = value.as_object() else {
@@ -61,16 +90,25 @@ pub fn read<C: Catalogue>(value: &Value) -> Read<C::Widget> {
         _ => return fallback::<C>(NoteCode::Damaged, "is damaged"),
     };
     if version > u64::from(s.schema_version) {
-        return fallback::<C>(
-            NoteCode::Newer,
-            &format!("was saved by a newer version ({version})"),
+        let mut kept = fallback::<C>(
+            NoteCode::Newer {
+                version: u32::try_from(version).unwrap_or(u32::MAX),
+            },
+            &format!("was saved by a newer version ({version}) and is kept unchanged"),
         );
+        kept.unread = Some(value.clone());
+        return kept;
     }
     let Some(entries) = object.get("placements").and_then(Value::as_array) else {
         return fallback::<C>(NoteCode::Damaged, "is damaged");
     };
     let mut dropped = 0u32;
-    let mut placements = read_placements::<C>(entries, s.max_placements as usize, &mut dropped);
+    let mut placements = read_placements::<C>(
+        entries,
+        s.max_placements as usize,
+        Counted::Placements,
+        &mut dropped,
+    );
     if placements.len() < s.min_placements as usize
         || (placements.is_empty() && !entries.is_empty())
     {
@@ -89,20 +127,24 @@ pub fn read<C: Catalogue>(value: &Value) -> Read<C::Widget> {
         vec![Note {
             code: NoteCode::Dropped { count: dropped },
             message: format!(
-                "{dropped} item(s) in the {} layout were not valid and were removed.",
-                s.id
+                "{dropped} item(s) in the saved widget layout were not valid and were removed."
             ),
         }]
     } else {
         Vec::new()
     };
-    Read { layout, notes }
+    Read {
+        layout,
+        notes,
+        unread: None,
+    }
 }
 
 /// Looks at no more than twice `max` entries; each that does not parse or is not valid is dropped and counted.
 fn read_placements<C: Catalogue>(
     entries: &[Value],
     max: usize,
+    counted: Counted,
     dropped: &mut u32,
 ) -> Vec<Placement<C::Widget>> {
     let scan = max.saturating_mul(2);
@@ -115,12 +157,12 @@ fn read_placements<C: Catalogue>(
             Err(_) => *dropped = dropped.saturating_add(1),
         }
     }
-    check::keep_valid::<C>(parsed, max, dropped)
+    check::keep_valid::<C>(parsed, max, counted, dropped)
 }
 
 #[derive(Deserialize)]
 struct PresetShell {
-    id: PlacementId,
+    id: PresetId,
     name: String,
     #[serde(default)]
     builtin: bool,
@@ -151,8 +193,12 @@ fn read_presets<C: Catalogue>(list: &[Value], dropped: &mut u32) -> Vec<Preset<C
             *dropped = dropped.saturating_add(1);
             continue;
         }
-        let placements =
-            read_placements::<C>(&shell.placements, s.max_preset_placements as usize, dropped);
+        let placements = read_placements::<C>(
+            &shell.placements,
+            s.max_preset_placements as usize,
+            Counted::PresetPlacements,
+            dropped,
+        );
         out.push(Preset {
             id: shell.id,
             name,
@@ -174,43 +220,56 @@ pub(crate) fn clean_name(name: &str) -> String {
         .to_string()
 }
 
-/// A settings field that never fails its file: `#[serde(default)] popover: Stored<PopoverCatalogue>`.
+/// A settings field holding one surface's layout that never fails its settings file:
+/// `#[serde(default)] popover: Stored<PopoverCatalogue>`.
 ///
-/// Deserialising goes through [`read`]; serialising writes the layout only. The notes of the last read stay until taken.
+/// Deserialising goes through [`read`]; serialising writes the layout, or, for a newer version's layout, that value
+/// unchanged ([`Read::unread`]). The notes of the last read stay until taken.
 pub struct Stored<C: Catalogue> {
-    layout: Layout<C::Widget>,
-    notes: Vec<Note>,
-    catalogue: PhantomData<fn() -> C>,
+    /// What the last read found.
+    pub read: Read<C>,
 }
 
 impl<C: Catalogue> Stored<C> {
     /// A stored field holding `layout`, with no notes (after an edit).
     pub fn new(layout: Layout<C::Widget>) -> Stored<C> {
         Stored {
-            layout,
-            notes: Vec::new(),
-            catalogue: PhantomData,
+            read: Read {
+                layout,
+                notes: Vec::new(),
+                unread: None,
+            },
         }
     }
 
     /// The layout.
     pub fn layout(&self) -> &Layout<C::Widget> {
-        &self.layout
+        &self.read.layout
     }
 
     /// The notes of the read, until [`Stored::take_notes`].
     pub fn notes(&self) -> &[Note] {
-        &self.notes
+        &self.read.notes
     }
 
     /// The notes of the read, once: later calls return none.
     pub fn take_notes(&mut self) -> Vec<Note> {
-        std::mem::take(&mut self.notes)
+        std::mem::take(&mut self.read.notes)
     }
 
-    /// The layout, its catalogue and the notes, for the chooser.
-    pub fn view(&self) -> LayoutView<C::Widget, <C::Widget as Widget>::Kind> {
-        view::view::<C>(self.layout.clone(), self.notes.clone())
+    /// Whether the layout can be edited: false while a newer version's layout is kept.
+    pub fn editable(&self) -> bool {
+        self.read.unread.is_none()
+    }
+
+    /// Applies `edit` and keeps the result; [`WidgetError::NewerLayout`] while a newer version's layout is kept, so it
+    /// is never saved over.
+    pub fn edit(&mut self, edit: crate::Edit<C::Widget>) -> Result<(), WidgetError> {
+        if !self.editable() {
+            return Err(WidgetError::NewerLayout);
+        }
+        self.read.layout = crate::apply::<C>(&self.read.layout, edit)?;
+        Ok(())
     }
 }
 
@@ -223,42 +282,37 @@ impl<C: Catalogue> Default for Stored<C> {
 impl<C: Catalogue> Clone for Stored<C> {
     fn clone(&self) -> Self {
         Stored {
-            layout: self.layout.clone(),
-            notes: self.notes.clone(),
-            catalogue: PhantomData,
+            read: self.read.clone(),
         }
     }
 }
 
 impl<C: Catalogue> std::fmt::Debug for Stored<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Stored")
-            .field("layout", &self.layout)
-            .field("notes", &self.notes)
-            .finish()
+        f.debug_struct("Stored").field("read", &self.read).finish()
     }
 }
 
 impl<C: Catalogue> PartialEq for Stored<C> {
     fn eq(&self, other: &Self) -> bool {
-        self.layout == other.layout && self.notes == other.notes
+        self.read == other.read
     }
 }
 
 impl<C: Catalogue> Serialize for Stored<C> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.layout.serialize(serializer)
+        match &self.read.unread {
+            Some(kept) => kept.serialize(serializer),
+            None => self.read.layout.serialize(serializer),
+        }
     }
 }
 
 impl<'de, C: Catalogue> Deserialize<'de> for Stored<C> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = Value::deserialize(deserializer)?;
-        let Read { layout, notes } = read::<C>(&value);
         Ok(Stored {
-            layout,
-            notes,
-            catalogue: PhantomData,
+            read: read::<C>(&value),
         })
     }
 }
