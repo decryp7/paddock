@@ -69,16 +69,21 @@ export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48 } = 
       d.line([xa, ly], [xb, ly], { dash: reply, arrow: reply ? 'open' : 'block' });
       y = ly + 16;
     },
-    self(p, label) {
+    /** A message to itself: the loop and its text go right, or left on the last lifeline so the page keeps its width. */
+    self(p, label, maxw) {
+      const slack = maxw === undefined ? 8 : 24; // a text given its own width gets room so the browser never re-wraps it
+      maxw ??= pw + gap - 44;
       const x = px(idx[p]);
-      const room = pw + gap - 44;
-      const lines = wrap(label, 12, room);
+      const left = idx[p] === parts.length - 1 && parts.length > 1;
+      const lines = wrap(label, 12, maxw);
       const lh = lines.length * 16;
       const h = Math.max(28, lh + 4);
-      d.line([x, y], [x, y + h], { via: [[x + 24, y], [x + 24, y + h]] });
-      const sw = Math.max(...lines.map((l) => tw(l, 12))) + 8;
-      d.text(d.id(), [x + 32, y + (h - lh) / 2, sw, lh], lines.join(' '), {});
-      gaps.push([x + 28, x + 36 + sw, y + (h - lh) / 2 - 4, y + (h + lh) / 2 + 6]);
+      const sw = Math.max(...lines.map((l) => tw(l, 12))) + slack;
+      const s = left ? -1 : 1;
+      d.line([x, y], [x, y + h], { via: [[x + s * 24, y], [x + s * 24, y + h]] });
+      const tx = left ? x - 32 - sw : x + 32;
+      d.text(d.id(), [tx, y + (h - lh) / 2, sw, lh], lines.join(' '), {});
+      gaps.push([tx - 4, tx + sw + 4, y + (h - lh) / 2 - 4, y + (h + lh) / 2 + 6]);
       y += h + 16;
     },
     note(p, text, w = 280) {

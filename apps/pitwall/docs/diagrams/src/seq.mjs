@@ -3,6 +3,7 @@ import { ld, tw } from '../../../../../diagrams/tools/lib.mjs';
 
 /**
  * parts: [id, name, tech, role]; script items: ['m', a, b, text, reply?] ['s', p, text] ['o', kind, cond] ['e', cond] ['c'] ['n', p, text, w?]
+ * ['b', p] starts and ['x', p] ends an activation that no call or reply bounds (the caller of the whole sequence).
  * Activation bars: a call that gets a reply from the callee draws a bar on the callee between the two.
  */
 function seq(file, { title, desc, parts, script, pw = 152, gap }) {
@@ -12,7 +13,7 @@ function seq(file, { title, desc, parts, script, pw = 152, gap }) {
   const s = sequence(d, parts.map(([id, name, tech, role]) => ({ id, name, tech, role })), { pw, gap });
   const idx = Object.fromEntries(parts.map((p, i) => [p[0], i]));
   const px = (id) => 48 + idx[id] * (pw + gap) + pw / 2;
-  const stack = {}; const bars = [];
+  const stack = {}; const bars = []; const held = {};
   for (const [k, ...a] of script) {
     if (k === 'm') {
       const span = Math.abs(idx[a[0]] - idx[a[1]]) * (pw + gap) - 24;
@@ -24,7 +25,9 @@ function seq(file, { title, desc, parts, script, pw = 152, gap }) {
         const st = stack[a[0]];
         if (st?.length) bars.push([a[0], st.length - 1, st.pop(), s.y - 10]);
       }
-    } else if (k === 's') s.self(a[0], a[1]);
+    } else if (k === 's') s.self(a[0], a[1], a[2]);
+    else if (k === 'b') held[a[0]] = s.y;
+    else if (k === 'x') bars.push([a[0], 0, held[a[0]], s.y - 10]);
     else if (k === 'o') s.open(a[0], a[1]);
     else if (k === 'e') s.else(a[0]);
     else if (k === 'c') s.close();
@@ -49,7 +52,7 @@ seq('uml-seq-chat-admit', {
     ['s', 'ht', 'Gate: Host is loopback, Origin allowed'],
     ['m', 'ht', 'au', '`authenticate(credential, …)`'], ['m', 'au', 'ht', '`Principal`', 1],
     ['s', 'ht', 'Parse once into the neutral `ChatRequest`'],
-    ['m', 'ht', 'ap', '`start_chat(who, meta, request)`'],
+    ['m', 'ht', 'ap', '`start_chat(who, meta, request)`'], ['b', 'ap'],
     ['m', 'ap', 'sv', '`resolve(model, vision, tools)`'],
     ['s', 'sv', 'A model name wins; else a preset alias; else `auto:…`; else default'],
     ['m', 'sv', 'co', '`presets::resolve`'],
@@ -68,7 +71,7 @@ seq('uml-seq-chat-admit', {
     ['m', 'sv', 'ap', 'Ok, or the gate error', 1],
     ['m', 'ap', 'sv', '`acquire(app, model, priority, kind, app_cap)`'],
     ['s', 'sv', 'Wait: global, per-model (its slots) and per-app caps, aging'],
-    ['m', 'sv', 'ap', '`Permit`', 1],
+    ['m', 'sv', 'ap', '`Permit`', 1], ['x', 'ap'],
     ['n', 'ap', 'Continues in “Chat request: load and answer”. A closed connection cancels the job and frees the slot. Gate errors: engine_build_too_old (503), capability_unsupported (400), engine_pin_unavailable (503); a stale alias is preset_target_unavailable (404).', 400],
   ],
 });
@@ -77,6 +80,7 @@ seq('uml-seq-chat-serve', {
   title: 'Chat request — load and answer', desc: 'Part 2 of 2. If the model is not in memory it is loaded first, with its slots; the answer streams back in the client’s own format and the usage is recorded (ADR 0003, 0006, 0013, 0016, 0019).',
   parts: [['cl', 'Client app', 'external', 'external'], ['ap', 'AppState', 'start_chat', 'accent'], ['sv', 'Serving', 'hot models', 'process'], ['co', 'pitwall-core', 'fit, memory', 'core'], ['lc', 'LlamaCpp', 'Engine adapter', 'process'], ['ls', 'llama-server', 'child process', 'process'], ['us', 'Usage', 'usage.json', 'core']],
   script: [
+    ['b', 'ap'],
     ['m', 'ap', 'sv', '`ensure_for(resolved)`'],
     ['o', 'alt', '[the model is not in memory: cold start]'],
     ['m', 'sv', 'co', '`need_tokens(size, n)`'],
@@ -99,7 +103,7 @@ seq('uml-seq-chat-serve', {
     ['m', 'sv', 'ap', 'Events', 1],
     ['m', 'ap', 'cl', 'Tokens in the client’s format', 1],
     ['m', 'ap', 'us', '`record(UsageEvent)`'],
-    ['s', 'us', 'Hourly and daily buckets per app; saved every 30 s'],
+    ['s', 'us', 'Hourly and daily buckets per app; saved every 30 s'], ['x', 'ap'],
     ['n', 'ap', 'The reply carries X-Pitwall-Model, -Alias (when a preset was asked for), -Engine, -Chosen-By and -Cold-Start-Ms; the permit is released and last_used is set.', 400],
   ],
 });
@@ -111,7 +115,7 @@ seq('uml-seq-chat-cache', {
     ['m', 'cl', 'ap', '`POST /v1/chat/completions`'],
     ['s', 'ap', 'Gate, alias, limits and capability check as in “admit and queue”'],
     ['m', 'ap', 'co', '`cache::key(model, request)`'],
-    ['s', 'co', 'Eligible: temperature 0 or a seed, no tools, app or preset opted in, no Cache-Control: no-cache'],
+    ['s', 'co', 'Eligible: temperature 0 or a seed, no tools, app or preset opted in, no Cache-Control: no-cache', 190],
     ['m', 'co', 'ap', '`Key`, or bypass', 1],
     ['o', 'alt', '[hit: stored and not expired]'],
     ['m', 'ap', 'ca', '`get(key, now)`'],

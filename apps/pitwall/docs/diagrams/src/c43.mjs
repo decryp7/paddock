@@ -74,7 +74,7 @@ panel('c4-3-core-state', {
   title: 'pitwall-core — security and state', kind: SUB, group: 'Security and state [ADR 0001, 0007, 0013]', cols: 3, rows: 3,
   desc: 'What may leave the machine, what a key may do, and the versioned records the server keeps. Reading damaged files falls back to defaults.',
   nodes: [
-    ['priv', 0, 0, 'privacy', 'ADR 0001', 'DownloadUrl allow-list, Host and Origin rules.'],
+    ['priv', 0, 0, 'privacy', 'ADR 0001', 'DownloadUrl allow-list, Host and Origin rules (used by the server’s egress and gate).'],
     ['keys', 1, 0, 'keys · limits', 'ADR 0007, 0013', 'pw_ keys, SHA-256, constant-time match, pairing codes, permissions; AppLimits with check_budget, check_memory, statuses.'],
     ['usage', 2, 0, 'usage', 'usage.json', 'Counters per app in hourly (7 days) and daily (90 days) buckets; series for 24 h, 7 d and 30 d; budget_use.'],
     ['cfg', 0, 1, 'config', 'settings.toml', 'Versioned Settings: memory, default and per-model slots, update-check schedule; damage tolerance, backup.'],
