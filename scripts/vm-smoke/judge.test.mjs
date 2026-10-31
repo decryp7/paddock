@@ -179,3 +179,21 @@ test('every app config lists an app process, only known keys, and helpers whose 
   }
   assert.ok(seen.includes('dyno'), `configs found: ${seen}`);
 });
+
+test('a process the helper itself forked (same program, its own pid as parent) is not a second helper', () => {
+  // Measured in the VM (2026-10-31, step 8): launchd's agent 666 forks a child that still shows the agent's command line until it
+  // execs; the judge counted it as a second agent whose parent (666) is "not allowed".
+  const p = ps([
+    [458, 1, '01:03', APP],
+    [666, 1, '00:24', 'dyno-agent run'],
+    [739, 666, '00:01', 'dyno-agent run'],
+    [740, 666, '00:01', `${AGENT} run`],
+  ]);
+  assert.deepEqual(instancesOf(p, config.processes[1], BUNDLE).map((x) => x.pid), [666]);
+  const v = judgeSnapshot(p, config, BUNDLE, { running: true, loginService: true });
+  assert.ok(v.checks.every((c) => c.ok), JSON.stringify(v.checks));
+  assert.deepEqual(peakCounts([p], config, BUNDLE)['dyno-agent'], 1);
+  // Two real agents (neither is the other's child) are still two.
+  const two = ps([[458, 1, '01:03', APP], [666, 1, '00:24', 'dyno-agent run'], [700, 458, '00:10', `${AGENT} run`]]);
+  assert.deepEqual(instancesOf(two, config.processes[1], BUNDLE).map((x) => x.pid), [666, 700]);
+});
