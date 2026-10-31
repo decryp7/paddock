@@ -19,7 +19,8 @@
 //!    symlink of that name, not looked into once matched).
 //! 4. Measured again, size `>=` the cap prints `prune: still <size>; removing <folder>` and removes the whole folder.
 //! 5. Only `<folder>` is touched. A failed removal of an incremental cache is reported and does not stop the run (the script
-//!    said `|| true`); the plain form then exits 1, as the script's failing final `rm -rf` would have (the CI form still exits 0).
+//!    said `|| true`); the run goes on and the plain form still exits 0. Only a failed removal of the whole folder (the script's final `rm -rf`)
+//!    makes the plain form exit 1 (after printing its report); the CI form always exits 0.
 //!
 //! **`cap` in the CI form** (`prune-ci-build-folder.sh`, selected by `--ci-home`): an empty folder prints
 //! `prune: no build folder was set in this job; nothing to prune`. Anything that is not a folder, is a symlink, or whose
@@ -52,14 +53,18 @@
 //! - The home folder comes from `--home`, else `HOME` / `USERPROFILE`, is resolved, and the command fails closed (refused,
 //!   exit 4) when none exists. The root guard compares by file identity where the platform has one (see [`crate::prune_root`]).
 //!   The scripts had no such guard; `PADDOCK_CI_HOME` and `PADDOCK_CI_SLOT` are not read: pass `--ci-home` and `--slot`.
-//! - A root that does not exist is still checked and refused when it would be inside the user's Documents, Desktop or
-//!   Downloads; the scripts did nothing silently for any missing folder.
+//! - A root that does not exist is still checked and refused when it would be inside one of the user's own folders
+//!   (Documents, Desktop, Downloads, Pictures, Music, Movies, Library, .ssh); the scripts did nothing silently for any missing folder.
+//! - `worktrees` removal re-resolves each candidate and applies the root guard and the mount-point check, but has no scan
+//!   identity to compare (sizes are scanned separately).
 //! - `worktrees` looks for `<repo>/target` in `--repo` (default: the current folder), whereas Debrief's copy used its own
 //!   `apps/debrief`: run it with `--repo apps/debrief --app debrief` to reproduce that one. A candidate that cannot be
 //!   scanned is reported in `errors` and the listing goes on, as the `.ps1` did.
 //!
 //! - The CI form has no Linux default slot `s1` (the script assumed it on Linux) and no `~/.paddock-ci` default: `--ci-home` and
 //!   `--slot` are explicit, and a missing `--slot` prints `no slot given` (exit 0) instead of the generic notice.
+//! - A trailing separator (`--root <link>/`) does not make a symlink a folder: it is seen as the link and left alone.
+//!   (`test -d "link/"` in the script followed it.)
 //! - A root that is a mount point, or inside the home's Pictures, Music, Movies, Library or .ssh, is refused too.
 //! - Work is done on the resolved root in both forms (the plain form still prints the path it was given), and the root's
 //!   identity at check time must be the scanned one before anything is removed.
@@ -321,6 +326,15 @@ pub fn plan_cap(tree: &DirNode, skip: &BTreeSet<RelPath>, max: u64, unit: Unit) 
     }
 }
 
+/// The folder must still be the one that was checked or scanned (`when` says which step is running).
+pub fn check_unchanged(expected: Option<FileId>, actual: Option<FileId>, folder: &str, when: &str) -> Result<(), PruneError> {
+    if expected == actual {
+        Ok(())
+    } else {
+        Err(PruneError::Io(format!("{folder} changed while it was {when}; left alone")))
+    }
+}
+
 /// The notice before the incremental caches go.
 pub fn over_message(folder: &str, size: u64, max: u64) -> String {
     format!("prune: {folder} is {size} (cap {max}); removing incremental caches")
@@ -497,6 +511,21 @@ mod tests {
         );
         let p = plan_cap(&dir("r", 0, 0, vec![]), &BTreeSet::new(), 0, Unit::Kb);
         assert!(p.remove_folder, "a zero cap removes everything");
+    }
+
+    #[test]
+    fn a_changed_folder_is_refused_in_both_steps() {
+        assert_eq!(check_unchanged(Some((1, 2)), Some((1, 2)), "/b", "checked"), Ok(()));
+        assert_eq!(check_unchanged(None, None, "/b", "checked"), Ok(()));
+        for (a, b) in [(Some((1, 2)), Some((1, 3))), (Some((1, 2)), None), (None, Some((1, 2)))] {
+            for when in ["checked", "pruned"] {
+                let e = check_unchanged(a, b, "/b", when).unwrap_err().to_string();
+                assert!(
+                    e.contains(&format!("changed while it was {when}")) && e.contains("left alone"),
+                    "{e}"
+                );
+            }
+        }
     }
 
     #[test]

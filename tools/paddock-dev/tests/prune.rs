@@ -756,44 +756,89 @@ fn the_ci_form_without_a_slot_says_so_and_removes_nothing() {
     assert!(folder.join("keep.txt").exists());
 }
 
+/// Makes a folder read-only and gives it back (0o755) when dropped, whatever happens in between.
+#[cfg(unix)]
+struct ReadOnly(PathBuf);
+
+#[cfg(unix)]
+impl ReadOnly {
+    /// `None` when the process can still write there (rights that ignore permissions): the failure cannot be made.
+    fn new(dir: &Path) -> Option<ReadOnly> {
+        use std::os::unix::fs::PermissionsExt;
+        let guard = ReadOnly(dir.to_path_buf());
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o555)).unwrap();
+        let writable = fs::File::create(dir.join("probe")).is_ok();
+        if writable { None } else { Some(guard) }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ReadOnly {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::remove_file(self.0.join("probe"));
+        let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+    }
+}
+
+#[cfg(unix)]
+fn cap_args<'a>(folder: &'a str, cap: &'a str, home: &'a str, ci: Option<&'a str>) -> Vec<&'a str> {
+    let mut v = vec![
+        "host", "prune", "cap", "--unit", "kb", "--root", folder, "--max-gb", cap, "--home", home,
+    ];
+    if let Some(c) = ci {
+        v.extend(["--ci-home", c, "--slot", "s1"]);
+    }
+    v
+}
+
 #[cfg(unix)]
 #[test]
-fn the_plain_form_fails_when_a_removal_fails_and_the_ci_form_does_not() {
-    use std::os::unix::fs::PermissionsExt;
+fn a_failed_incremental_removal_is_reported_but_does_not_fail_the_run() {
     let (_t, root) = canonical_tmp();
     let ci = root.join("ci");
     let folder = ci.join("target-app-s1");
     build(&folder);
     let home = scratch_home(&root);
-    let locked = folder.join("debug");
-    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
-    if fs::File::create(locked.join("probe")).is_ok() {
-        // Running with rights that ignore permissions (root): this failure cannot be made.
-        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    let Some(_guard) = ReadOnly::new(&folder.join("debug")) else {
         return;
-    }
+    };
     let f = folder.to_str().unwrap();
-    let plain = dev(&[
-        "host", "prune", "cap", "--unit", "kb", "--root", f, "--max-gb", "300", "--home", &home,
-    ]);
-    let ci_form = dev(&[
-        "host",
-        "prune",
-        "cap",
-        "--unit",
-        "kb",
-        "--root",
-        f,
-        "--max-gb",
-        "300",
-        "--home",
-        &home,
-        "--ci-home",
-        ci.to_str().unwrap(),
-        "--slot",
-        "s1",
-    ]);
-    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
-    assert_eq!(plain.0, 1, "{}", plain.2);
-    assert_eq!(ci_form.0, 0, "{}", ci_form.2);
+    // The fixture is about 740 KiB; the caches that can go (release/*) bring it under 700, so the folder stays.
+    let (code, out, err) = dev(&{
+        let mut a = cap_args(f, "700", &home, None);
+        a.insert(0, "--json");
+        a
+    });
+    assert_eq!(code, 0, "{err}{out}");
+    let v: Value = serde_json::from_str(out.trim()).unwrap();
+    assert!(!v["errors"].as_array().unwrap().is_empty(), "{out}");
+    assert_eq!(v["folderRemovalFailed"], false);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_whole_folder_removal_fails_the_plain_form_after_printing_its_report() {
+    let (_t, root) = canonical_tmp();
+    let ci = root.join("ci");
+    let folder = ci.join("target-app-s1");
+    build(&folder);
+    let home = scratch_home(&root);
+    let Some(_guard) = ReadOnly::new(&ci) else { return };
+    let f = folder.to_str().unwrap();
+    let (code, out, _) = dev(&{
+        let mut a = cap_args(f, "0", &home, None);
+        a.insert(0, "--json");
+        a
+    });
+    assert_eq!(code, 1);
+    let v: Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(
+        v["folderRemovalFailed"], true,
+        "the report is printed before the failure exit: {out}"
+    );
+    assert!(!v["errors"].as_array().unwrap().is_empty());
+    let (code, out, err) = dev(&cap_args(f, "0", &home, Some(ci.to_str().unwrap())));
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("could not remove"), "{out}");
 }

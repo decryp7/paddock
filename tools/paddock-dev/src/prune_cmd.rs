@@ -5,11 +5,11 @@
 
 use crate::prune::{self, CapPlan, DirNode, FileId, PruneError, RelPath, Unit};
 use crate::prune_fs::{self, Kind};
-use crate::prune_root::check_root;
+use crate::prune_root::{check_not_mount_point, check_root};
 use crate::prune_worktrees::{self as wt, Action, Candidate};
 use crate::slots::owns;
 use clap::{Args, Subcommand};
-use paddock_cli::{CliError, Report};
+use paddock_cli::{CliError, Exit, Report};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -125,6 +125,7 @@ struct CapRun {
     size_after: Option<u64>,
     removed: Vec<String>,
     folder_removed: bool,
+    folder_failed: bool,
     errors: Vec<String>,
     unreadable: u64,
 }
@@ -138,6 +139,7 @@ impl CapRun {
             size_after: None,
             removed: Vec::new(),
             folder_removed: false,
+            folder_failed: false,
             errors: Vec::new(),
             unreadable: 0,
         }
@@ -160,6 +162,7 @@ fn cap_report(a: &CapArgs, max: Option<u64>, unit: Unit, run: CapRun) -> Report 
             "sizeAfter": run.size_after,
             "removed": run.removed,
             "folderRemoved": run.folder_removed,
+            "folderRemovalFailed": run.folder_failed,
             "errors": run.errors,
             "unreadable": run.unreadable,
         }),
@@ -177,12 +180,11 @@ pub fn cap(a: &CapArgs) -> Result<Report, CliError> {
     let run = resolve_home(a.home.as_deref())
         .and_then(|h| cap_run(a, max, unit, &h))
         .map_err(error)?;
-    if !run.errors.is_empty() {
-        let n = run.errors.len();
-        return Err(CliError::failure(format!("{n} removal(s) failed: {}.", run.errors.join("; ")))
-            .with_hint("Close what uses the folder and run it again."));
-    }
-    Ok(cap_report(a, Some(max), unit, run))
+    // Only a failed removal of the whole folder fails the plain form, as the script's final `rm -rf` did; the report
+    // (removed, errors, sizes) is still printed first.
+    let failed = run.folder_failed;
+    let report = cap_report(a, Some(max), unit, run);
+    Ok(if failed { report.with_exit(Exit::Failure) } else { report })
 }
 
 /// The CI form never fails: whatever is wrong becomes a notice and nothing is removed (exit 0, as the script).
@@ -222,9 +224,7 @@ fn cap_run(a: &CapArgs, max: u64, unit: Unit, home: &Path) -> Result<CapRun, Pru
     }
     let root = std::fs::canonicalize(&a.root).map_err(|e| PruneError::Io(format!("{shown}: {e}")))?;
     check_root(&root, home, &prune_fs::same_file)?;
-    if prune_fs::is_mount_point(&root) {
-        return Err(PruneError::MountPoint(root.display().to_string()));
-    }
+    check_not_mount_point(&root, &prune_fs::is_mount_point)?;
     let root_id = prune_fs::dir_id(&root);
     if let Some(ci_home) = &a.ci_home {
         match std::fs::canonicalize(ci_home) {
@@ -238,6 +238,7 @@ fn cap_run(a: &CapArgs, max: u64, unit: Unit, home: &Path) -> Result<CapRun, Pru
     let mut run = CapRun::none("none", None);
     let mut gone: BTreeSet<RelPath> = BTreeSet::new();
     let bundle = prune::bundle_path();
+    prune::check_unchanged(root_id, prune_fs::dir_id(work), &shown, "checked")?;
     if a.drop_bundles {
         let target = work.join("dist").join("bundle");
         let real_dir = prune_fs::kind(&work.join("dist")) == Kind::Dir && prune_fs::kind(&target) == Kind::Dir;
@@ -253,9 +254,7 @@ fn cap_run(a: &CapArgs, max: u64, unit: Unit, home: &Path) -> Result<CapRun, Pru
         }
     }
     let scan = prune_fs::scan(work)?;
-    if scan.tree.id != root_id {
-        return Err(PruneError::Io(format!("{shown} changed while it was checked; left alone")));
-    }
+    prune::check_unchanged(root_id, scan.tree.id, &shown, "checked")?;
     run.unreadable = scan.unreadable;
     let plan = prune::plan_cap(&scan.tree, &gone, max, unit);
     run.size_before = Some(plan.size_before);
@@ -273,6 +272,7 @@ fn cap_run(a: &CapArgs, max: u64, unit: Unit, home: &Path) -> Result<CapRun, Pru
                 run.folder_removed = true;
             } else {
                 run.folder_removed = remove_folder_itself(work, id, &mut run.errors);
+                run.folder_failed = !run.folder_removed;
             }
         }
     }
@@ -312,12 +312,7 @@ fn remove_incremental(
         });
     }
     let again = prune_fs::scan(work)?;
-    if again.tree.id != root_id {
-        return Err(PruneError::Io(format!(
-            "{} changed while it was pruned; left alone",
-            work.display()
-        )));
-    }
+    prune::check_unchanged(root_id, again.tree.id, &work.display().to_string(), "pruned")?;
     let size = prune::plan_cap(&again.tree, &BTreeSet::new(), max, unit).size_before;
     Ok(Removal {
         size,
@@ -386,6 +381,7 @@ fn refuse_candidate(path: &Path, home: &Path) -> Option<String> {
     match std::fs::canonicalize(path) {
         Err(e) => Some(format!("{}: {e}", path.display())),
         Ok(real) => check_root(&real, home, &prune_fs::same_file)
+            .and_then(|()| check_not_mount_point(&real, &prune_fs::is_mount_point))
             .err()
             .map(|e| format!("{}: {e}", path.display())),
     }

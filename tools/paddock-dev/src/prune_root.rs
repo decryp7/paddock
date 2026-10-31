@@ -30,11 +30,20 @@ pub fn same_path_ci(a: &Path, b: &Path) -> bool {
     }
 }
 
+/// Refuses a root that is a mount point; `is_mount` says whether a path is one.
+pub fn check_not_mount_point(root: &Path, is_mount: &dyn Fn(&Path) -> bool) -> Result<(), PruneError> {
+    if is_mount(root) {
+        Err(PruneError::MountPoint(root.display().to_string()))
+    } else {
+        Ok(())
+    }
+}
+
 /// Refuses the roots a prune must never touch. `root` is absolute (resolved where it exists), `home` is the resolved home
 /// folder, and `same` says whether two paths are the same folder.
 ///
 /// Refused: a relative or empty root, a `..`, the top of a disk or one level below it, the home folder or a folder holding it,
-/// and anything inside the home's `Documents`, `Desktop` or `Downloads`. The CI home (`~/.paddock-ci`) and
+/// and anything inside the home's [`USER_FOLDERS`] (Documents, Desktop, Downloads, Pictures, Music, Movies, Library, .ssh). The CI home (`~/.paddock-ci`) and
 /// `~/.<app>-target-*` are inside the home on purpose and are allowed.
 pub fn check_root(root: &Path, home: &Path, same: &dyn Fn(&Path, &Path) -> bool) -> Result<(), PruneError> {
     let shown = root.display().to_string();
@@ -93,6 +102,30 @@ mod tests {
             check_root(Path::new("/a/b/c"), Path::new("/a/b/c/d"), &same_path_ci),
             Err(PruneError::ContainsHome(_))
         ));
+    }
+
+    #[test]
+    fn every_one_of_the_users_own_folders_is_protected_in_any_case() {
+        let home = Path::new("/Users/me");
+        for name in USER_FOLDERS.iter().copied().chain([".SSH", "PICTURES", "library"]) {
+            let root = format!("/Users/me/{name}/proj");
+            assert!(
+                matches!(check_root(Path::new(&root), home, &same_path_ci), Err(PruneError::UserFolder(_))),
+                "{root}"
+            );
+        }
+        assert_eq!(USER_FOLDERS.len(), 8);
+        assert_eq!(check_root(Path::new("/Users/me/.sshx/proj"), home, &same_path_ci), Ok(()));
+    }
+
+    #[test]
+    fn a_mount_point_is_refused() {
+        let root = Path::new("/Volumes/x");
+        assert!(matches!(
+            check_not_mount_point(root, &|p| p == root),
+            Err(PruneError::MountPoint(_))
+        ));
+        assert_eq!(check_not_mount_point(root, &|_| false), Ok(()));
     }
 
     #[test]
