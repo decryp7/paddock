@@ -79,7 +79,7 @@ interface Meta {
         <div class="pd-w-st">
           <pd-glyph name="refresh" [size]="16" />
           <span class="pd-w-t">{{ s.title }}</span>
-          <span class="pd-w-d">{{ s.phase }} · {{ progressText(s.progress, locale) }}</span>
+          <span class="pd-w-d">{{ s.phase ? s.phase + ' · ' : '' }}{{ progressText(s.progress, locale) }}</span>
           <mat-progress-bar class="pd-w-prog" [mode]="percent(s.progress) === null ? 'indeterminate' : 'determinate'" [value]="percent(s.progress) ?? 0" [attr.aria-label]="s.title" />
           @if (s.cancel; as c) {
             <button matButton="text" type="button" class="pd-w-act" (click)="action.emit(c.action)">{{ c.label }}</button>
