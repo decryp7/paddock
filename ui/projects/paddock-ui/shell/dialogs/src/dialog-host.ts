@@ -61,6 +61,7 @@ import { DialogPresenter, type DialogContent } from './types';
         [state]="state()"
         [failure]="failure()"
         [content]="content()"
+        [contentView]="contentView()"
         [declaredWidth]="width()"
         [ownsRole]="false"
         [headingId]="headingId()"
@@ -93,6 +94,7 @@ export class InPageDialogView implements AfterViewInit {
   protected readonly state = signal<FrameState>('loading');
   protected readonly failure = signal<string | null>(null);
   protected readonly content = signal<DialogContent | null>(null);
+  protected readonly contentView = signal<{ detectChanges(): void } | null>(null);
   /** Shown once the frame is ready or the show deadline passed (ADR 0026 §4.3). */
   protected readonly shown = signal(false);
   protected readonly titleId = computed(() => `pd-dialog-title-${this.entry().n}`);
@@ -129,6 +131,7 @@ export class InPageDialogView implements AfterViewInit {
       const ref = mountContent(host, part.component, injector, part.injector, entry.inputs);
       entry.content = ref.instance as DialogContent;
       entry.injector = injector;
+      this.contentView.set(ref.changeDetectorRef);
       this.content.set(entry.content);
       this.state.set('ready');
     } catch (e) {

@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `DialogFrame`: `contentView`, so a dialog's header, footer and body never show different steps (`@decryp7/paddock-ui/shell/dialogs`)
+- New optional input `contentView` on `DialogFrame` (the mounted content's change detector; `DialogShell` and `DialogHost` set it). `render()` now checks the content together with the frame. Before, a `run` action that changed the content's state (a wizard's Continue) refreshed the header slot and the footer at once while the body, which sits in the host's view, followed on the next tick: for one frame the stepper and the buttons showed the new step over the old, taller body (Pitcrew's register window overflowed its body by 165 px).
+
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.

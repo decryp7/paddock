@@ -1,5 +1,5 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, computed, DestroyRef, ElementRef, inject, input, output, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, computed, DestroyRef, ElementRef, ErrorHandler, inject, input, output, signal, viewChild } from '@angular/core';
 import type { DialogKind, DialogModality } from '@decryp7/paddock-ui/shell';
 import { DialogActionError, dialogKeyAction, dialogPlatform, layoutActions, type ActionLayout, type DialogAction, type DialogPlatform, type PlacedAction } from './actions';
 import { DIALOG_MIN } from './kind';
@@ -219,6 +219,11 @@ export class DialogFrame {
   /** The mounted content (its declared actions, status, header and minimum body height). */
   readonly content = input<DialogContent | null>(null);
   readonly platform = input<DialogPlatform>(dialogPlatform());
+  /**
+   * The mounted content's change detector. `render()` checks it with the frame, so the header, the footer and the body
+   * always show the same state (the content sits in the host's view, which the frame's own check does not reach).
+   */
+  readonly contentView = input<{ detectChanges(): void } | null>(null);
   /** The contract's width, logical px: what the frame is measured at. */
   readonly declaredWidth = input(0);
   /**
@@ -237,6 +242,7 @@ export class DialogFrame {
   readonly refit = output<DialogMeasure>();
 
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly errorHandler = inject(ErrorHandler);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly destroyRef = inject(DestroyRef);
   private readonly bodyEl = viewChild.required<ElementRef<HTMLElement>>('body');
@@ -394,7 +400,14 @@ export class DialogFrame {
 
   /** Renders the frame now: a hidden window may never run a frame, so nothing here waits for one (the 1.1-0 spike). */
   render(): void {
-    if (!this.destroyed) this.cdr.detectChanges();
+    if (this.destroyed) return;
+    try {
+      this.contentView()?.detectChanges();
+    } catch (e) {
+      // A content that breaks while it renders must not leave the header and the footer a step behind.
+      this.errorHandler.handleError(e);
+    }
+    this.cdr.detectChanges();
   }
 
   /** Gives the first focus: a form's first field (one the content marks `data-autofocus` first), else the action the layout names. */

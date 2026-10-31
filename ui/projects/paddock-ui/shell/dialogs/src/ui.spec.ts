@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, Injectable, input, provideZonelessChangeDetection, signal, viewChild, type TemplateRef } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, ErrorHandler, inject, Injectable, input, provideZonelessChangeDetection, signal, viewChild, type TemplateRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { defineDialog, DIALOG_EVENTS, dialogCommandLedger, msg, provideContributions, resetDialogCommands, SHELL_PORTS, type DialogDef } from '@decryp7/paddock-ui/shell';
 import { fakeDialogContract, FakeDialogIo, renderFramed } from '@decryp7/paddock-ui/shell/testing';
@@ -72,6 +72,42 @@ class Headed implements DialogContent {
   readonly dialogMinBodyHeight = 120;
 }
 
+/** A multi-step content: the stepper (header slot), the footer actions and the body all show the one `step` signal. */
+@Component({
+  selector: 'pd-test-stepped',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `<ng-template #head><span data-testid="stepper">{{ step() }}</span></ng-template><p data-testid="body-step">{{ step() }}</p>`,
+})
+class Stepped implements DialogContent {
+  protected readonly step = signal(1);
+  private readonly head = viewChild.required<TemplateRef<unknown>>('head');
+  readonly dialogHeader = computed(() => this.head());
+  readonly dialogActions = computed<readonly DialogAction[]>(() => [
+    { kind: 'dismiss', id: 'cancel', label: 'Cancel' },
+    { kind: 'run', id: `next-${this.step()}`, label: `Continue ${this.step()}`, role: 'primary', run: () => this.step.update((s) => s + 1) },
+  ]);
+}
+
+/** Like `Stepped`, but its body template throws once the step passes 1 (a content that breaks while it renders). */
+@Component({
+  selector: 'pd-test-stepped-throws',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `<ng-template #head><span data-testid="stepper">{{ step() }}</span></ng-template><p data-testid="body-step">{{ check() }}</p>`,
+})
+class SteppedThrows implements DialogContent {
+  protected readonly step = signal(1);
+  private readonly head = viewChild.required<TemplateRef<unknown>>('head');
+  readonly dialogHeader = computed(() => this.head());
+  readonly dialogActions = computed<readonly DialogAction[]>(() => [
+    { kind: 'dismiss', id: 'cancel', label: 'Cancel' },
+    { kind: 'run', id: `next-${this.step()}`, label: `Continue ${this.step()}`, role: 'primary', run: () => this.step.update((s) => s + 1) },
+  ]);
+  protected check(): number {
+    if (this.step() > 1) throw new Error('body broke');
+    return this.step();
+  }
+}
+
 type Spec = Partial<Pick<DialogDef, 'kind' | 'modality' | 'instanced' | 'requiredChoice' | 'result' | 'load' | 'providers'>>;
 const d = (id: string, { kind = 'decision', modality, instanced, requiredChoice, ...ui }: Spec = {}): DialogDef =>
   defineDialog(fakeDialogContract({ id, kind, modality, instanced, requiredChoice }), { title: msg(id, `Title ${id}`), load: () => Promise.resolve(Content), ...ui }) as DialogDef;
@@ -84,7 +120,9 @@ const CHOICE = d('t.choice', { requiredChoice: true });
 const INSTANCED = d('t.inst', { kind: 'viewer', instanced: true });
 const BROKEN = d('t.broken', { load: () => Promise.resolve(Throws) });
 const FAILING = d('t.failing', { kind: 'form', modality: 'modeless', load: () => Promise.reject(new Error('chunk missing')) });
-const ALL = [DECISION, MODELESS, VIEWER, TOOL, CHOICE, INSTANCED, BROKEN, FAILING];
+const STEPPED = d('t.stepped', { kind: 'form', modality: 'modeless', load: () => Promise.resolve(Stepped) });
+const THROWS = d('t.stepped-throws', { kind: 'form', modality: 'modeless', load: () => Promise.resolve(SteppedThrows) });
+const ALL = [THROWS, STEPPED, DECISION, MODELESS, VIEWER, TOOL, CHOICE, INSTANCED, BROKEN, FAILING];
 
 const tick = async (n = 3) => {
   for (let i = 0; i < n; i++) {
@@ -367,6 +405,25 @@ describe('dialogs in the page (browser build)', () => {
     };
     return { fixture, service, root, settle, gate: TestBed.inject(ModalGate) };
   }
+
+  it('shows the step in the header, the footer and the body in the same pass, never a frame apart', async () => {
+    const { service, root, settle } = await setup();
+    service.open(STEPPED);
+    await settle();
+    const seen = () => {
+      const foot = root.querySelector('[data-testid^=dialog-action-next-]')!.getAttribute('data-testid')!.replace('dialog-action-next-', '');
+      return [root.querySelector('[data-testid=stepper]')!.textContent, foot, root.querySelector('[data-testid=body-step]')!.textContent];
+    };
+    expect(seen()).toEqual(['1', '1', '1']);
+    root.querySelector<HTMLElement>('[data-testid^=dialog-action-next-]')!.click();
+    for (let i = 0; i < 6; i++) {
+      await Promise.resolve();
+      const [head, foot, body] = seen();
+      expect({ head, foot, body }, `microtask ${i}`).toEqual({ head: body, foot: body, body });
+    }
+    await settle();
+    expect(seen()).toEqual(['2', '2', '2']);
+  });
 
   it('opens a modal over a backdrop with its inputs, answers, blocks the window meanwhile and gives the focus back', async () => {
     const { service, root, settle, gate } = await setup();
@@ -753,6 +810,37 @@ describe('a dialog window', () => {
     root.querySelector<HTMLElement>('[data-testid=dialog-action-ok]')!.click();
     await settle();
     expect(io.closedWith).toEqual([{ answered: true, value: 'yes' }]);
+  });
+
+  it('shows the step in the header, the footer and the body in the same change-detection pass, never a frame apart', async () => {
+    const { root, settle } = boot(STEPPED);
+    await settle();
+    const seen = () => {
+      const foot = root.querySelector('[data-testid^=dialog-action-next-]')!.getAttribute('data-testid')!.replace('dialog-action-next-', '');
+      return [root.querySelector('[data-testid=stepper]')!.textContent, foot, root.querySelector('[data-testid=body-step]')!.textContent];
+    };
+    expect(seen()).toEqual(['1', '1', '1']);
+    root.querySelector<HTMLElement>('[data-testid^=dialog-action-next-]')!.click();
+    // After every microtask until the next macrotask: the footer's render runs here, before the scheduled tick.
+    for (let i = 0; i < 6; i++) {
+      await Promise.resolve();
+      const [head, foot, body] = seen();
+      expect({ head, foot, body }, `microtask ${i}`).toEqual({ head: body, foot: body, body });
+    }
+    await settle();
+    expect(seen()).toEqual(['2', '2', '2']);
+  });
+
+  it('reports a content that throws while it renders to the ErrorHandler and still refreshes the header and the footer', async () => {
+    const errors: unknown[] = [];
+    TestBed.configureTestingModule({ providers: [{ provide: ErrorHandler, useValue: { handleError: (e: unknown) => errors.push(e) } }] });
+    const { root, settle } = boot(THROWS);
+    await settle();
+    root.querySelector<HTMLElement>('[data-testid^=dialog-action-next-]')!.click();
+    for (let i = 0; i < 3; i++) await Promise.resolve();
+    expect(errors.map((e) => (e as Error).message)).toContain('body broke');
+    expect(root.querySelector('[data-testid=stepper]')!.textContent).toBe('2');
+    expect(root.querySelector('[data-testid=dialog-action-next-2]')).not.toBeNull();
   });
 
   it('lays the frame out at the contract width while it measures, and reads again when a font loads meanwhile', async () => {
