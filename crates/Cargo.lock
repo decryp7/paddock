@@ -3985,6 +3985,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-widgets"
+version = "0.1.0"
+dependencies = [
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "ts-rs",
+]
+
+[[package]]
 name = "paddock-window"
 version = "0.2.0"
 dependencies = [

@@ -1,0 +1,26 @@
+[package]
+name = "paddock-widgets"
+version = "0.1.0"
+description = "Widget layouts for the Paddock apps (ADR 0035): placements on a surface's grid, a closed catalogue per app, limits, lenient versioned reading, edits with one level of undo, and the widget state envelope."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[package.metadata.paddock]
+# ADR 0035 WP-A removes this marker when the crate is complete.
+scaffold = true
+
+[features]
+# TypeScript for apps that generate their own catalogue types against these (ADR 0035 §3).
+ts = ["dep:ts-rs"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+ts-rs = { version = "11.1", optional = true }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+ts-rs = "11.1"
