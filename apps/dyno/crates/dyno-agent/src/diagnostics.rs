@@ -19,8 +19,8 @@ fn json<T: Serialize>(v: &T) -> String {
 
 /// Most of one log file a bundle holds (its recent part).
 pub const LOG_BYTES_PER_FILE: usize = 256 * 1024;
-/// Most log files a bundle holds (the newest of the app and the agent).
-const MAX_LOG_FILES: usize = 4;
+/// Most log files a bundle holds (the newest of each process).
+const MAX_LOG_FILES_PER_PROCESS: usize = 2;
 
 /// The newest dated logs of Dyno's processes in `dir` (`dyno.<day>.log` for the app, `dyno-agent.<day>.log` for the agent):
 /// `(path in the bundle, recent text)`, each cut to [`LOG_BYTES_PER_FILE`] at a line start. Read from disk, so they are there with
@@ -37,9 +37,15 @@ pub fn recent_logs(dir: &Path) -> Vec<(String, String)> {
         .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
         .collect();
     files.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    let (mut app_seen, mut agent_seen) = (0, 0);
     files
         .into_iter()
-        .take(MAX_LOG_FILES)
+        .filter(|(_, path)| {
+            let agent = path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("dyno-agent."));
+            let seen = if agent { &mut agent_seen } else { &mut app_seen };
+            *seen += 1;
+            *seen <= MAX_LOG_FILES_PER_PROCESS
+        })
         .filter_map(|(_, path)| {
             let mut file = std::fs::File::open(&path).ok()?;
             let len = file.metadata().ok()?.len();
@@ -77,7 +83,7 @@ pub fn local_identity(host_name: Option<String>) -> Redactor {
 
 /// Collects the bundle (redacted and bounded). Slow only the first time (the inventory is read then).
 pub fn collect(shared: &Shared) -> Result<DiagnosticsBundle, String> {
-    collect_with_logs(shared, &crate::logging::log_dir(&shared.dirs))
+    collect_with_logs(shared, &shared.dirs.log_folder())
 }
 
 /// [`collect`] with the folder the recent logs are read from named (the tests name a temporary one).
@@ -144,19 +150,20 @@ pub fn collect_with_logs(shared: &Shared, log_dir: &Path) -> Result<DiagnosticsB
     }
     add("activity.json", "What Dyno recorded recently", json(&activity))?;
     add("alerts.json", "Recent alerts", json(&alerts))?;
-    for (path, text) in recent_logs(log_dir) {
-        add(
-            &path,
-            "The recent part of a log; file contents are never logged, user names and addresses are replaced",
-            text,
-        )?;
-    }
     if let Some(r) = recorder {
         add(
             "recorder/last-10-minutes.json",
             "The last ten minutes at one-second resolution",
             json(&r),
         )?;
+    }
+    // Last and best effort: a log that does not fit the bundle's total is left out, it never fails the save.
+    for (path, text) in recent_logs(log_dir) {
+        let _ = add(
+            &path,
+            "The recent part of a log; file contents are never logged, user names and addresses are replaced",
+            text,
+        );
     }
     Ok(b.build())
 }
@@ -297,6 +304,29 @@ mod tests {
         assert!(
             recent_logs(&dir.path().join("missing")).is_empty(),
             "no log folder: nothing, not an error"
+        );
+    }
+
+    /// A few days of app logs must not push the agent's last log out of the bundle: the newest files are taken per process.
+    #[test]
+    fn the_newest_logs_are_taken_per_process_not_across_both() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = std::time::SystemTime::now();
+        let put = |name: &str, age_s: u64| {
+            let f = std::fs::File::create(dir.path().join(name)).unwrap();
+            std::io::Write::write_all(&mut &f, b"x\n").unwrap();
+            f.set_modified(base - std::time::Duration::from_secs(age_s)).unwrap();
+        };
+        for (i, day) in ["01", "02", "03", "04", "05"].iter().enumerate() {
+            put(&format!("dyno.2026-10-{day}.log"), 10 + i as u64);
+        }
+        put("dyno-agent.2026-09-01.log", 100_000);
+        let names: Vec<String> = recent_logs(dir.path()).into_iter().map(|(n, _)| n).collect();
+        assert!(names.contains(&"logs/dyno-agent.2026-09-01.log".to_string()), "{names:?}");
+        assert_eq!(
+            names.iter().filter(|n| n.starts_with("logs/dyno.")).count(),
+            MAX_LOG_FILES_PER_PROCESS,
+            "{names:?}"
         );
     }
 
