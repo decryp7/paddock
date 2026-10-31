@@ -36,7 +36,7 @@ import { WidgetView } from './widget-view';
           @if (choices.ready()) {
             <pd-widget-chooser [view]="v" [widgetFor]="widgetFor" (edit)="edit($event)">
               @for (kind of kinds(); track kind) {
-                <ng-template [pdWidgetOption]="kind" let-p>
+                <ng-template [pdWidgetOption]="kind" [pdWidgetOptionOf]="sample" let-p>
                   <pd-select [options]="metricOptions(kind)" [value]="metricOf(p)" [ariaLabel]="'Metric of ' + p.id" (valueChange)="setMetric(p, $event)" />
                 </ng-template>
               }
@@ -71,6 +71,8 @@ export class WidgetBoard {
   private readonly counters = inject(CountersStore);
   protected readonly view = this.layouts.dashboard;
   protected readonly editing = signal(false);
+  /** The type witness of the option templates (`pdWidgetOptionOf`). */
+  protected readonly sample: DashboardWidget | null = null;
   protected readonly choices = inject(WidgetChoicesStore);
   protected readonly widgetFor = (kind: DashboardKind): DashboardWidget => this.choices.dashboardDefault(kind);
   /** The kinds whose widgets have a metric to choose: those that accept more than one. */
@@ -104,8 +106,8 @@ export class WidgetBoard {
     return this.choices.dashboardMetrics(kind).map((m) => ({ value: m.title, label: m.title }));
   }
 
-  protected metricOf(placement: Placement<unknown>): string {
-    return this.choices.title((placement as Placement<DashboardWidget>).widget.metric);
+  protected metricOf(p: Placement<DashboardWidget>): string {
+    return this.choices.title((p).widget.metric);
   }
 
   protected async edit(e: Edit<DashboardWidget>): Promise<void> {
@@ -113,8 +115,7 @@ export class WidgetBoard {
     if (failed) this.notifier.error(failed);
   }
 
-  protected setMetric(placement: Placement<unknown>, title: string): void {
-    const p = placement as Placement<DashboardWidget>;
+  protected setMetric(p: Placement<DashboardWidget>, title: string): void {
     const metric: Metric | undefined = this.choices.dashboardMetrics(p.widget.kind).find((m) => m.title === title)?.metric;
     if (metric) void this.edit({ replace: { id: p.id, widget: { ...p.widget, metric } } });
   }

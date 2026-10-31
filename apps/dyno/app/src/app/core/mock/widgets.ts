@@ -428,8 +428,10 @@ export function mockWidgetChoices(): WidgetChoices {
 }
 
 /** A reading of `query` from the mock's numbers (a plausible imitation: only CPU and memory have values). */
-export function mockMetricReading(query: ReadingQuery, system: { cpu: number; memory: number }): MetricReading {
-  const value = query.metric === 'cpuTotal' ? system.cpu : query.metric === 'memory' ? system.memory : null;
+export function mockMetricReading(query: ReadingQuery, system: { cpu: number; memory: number; battery?: number | string; gpu?: number | string }): MetricReading {
+  const raw = query.metric === 'cpuTotal' ? system.cpu : query.metric === 'memory' ? system.memory : query.metric === 'battery' ? system.battery : query.metric === 'gpuLoad' ? system.gpu : undefined;
+  if (typeof raw === 'string') return { value: null, text: '—', unit: '', percent: null, tone: 'ok', reason: raw };
+  const value = raw ?? null;
   if (value === null) return { value: null, text: '—', unit: '', percent: null, tone: 'ok', reason: 'The mock has no live reading for this metric.' };
   const { warning, critical } = query.thresholds;
   const tone = critical !== null && value >= critical ? 'bad' : warning !== null && value >= warning ? 'warn' : 'ok';

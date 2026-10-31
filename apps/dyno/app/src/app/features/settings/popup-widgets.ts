@@ -27,7 +27,7 @@ const volumeOf = (key: string): VolumeChoice => (key.startsWith('mount:') ? { mo
     @if (view(); as v) {
       @if (choices.ready()) {
       <pd-widget-chooser [view]="v" [widgetFor]="widgetFor" [again]="again" [preview]="true" (edit)="edit($event)">
-        <ng-template pdWidgetOption="diskSpace" let-p>
+        <ng-template pdWidgetOption="diskSpace" [pdWidgetOptionOf]="sample" let-p>
           <pd-select [options]="volumeOptions()" [value]="volumeOf(p)" [ariaLabel]="'Volume of ' + p.id" (valueChange)="setVolume(p, $event)" />
         </ng-template>
         <div slot="preview" class="preview" role="group" aria-label="Preview of the popup" inert>
@@ -62,6 +62,8 @@ export class PopupWidgets implements OnInit {
     return p === 'browser' ? 'macos' : p;
   })();
   protected readonly view = this.layouts.popover;
+  /** The type witness of the option templates (`pdWidgetOptionOf`). */
+  protected readonly sample: PopoverWidget | null = null;
   protected readonly choices = inject(WidgetChoicesStore);
   protected readonly widgetFor = (kind: PopoverKind): PopoverWidget => this.choices.popoverDefault(kind);
   protected readonly again = { diskSpace: 'Add volume' };
@@ -84,8 +86,7 @@ export class PopupWidgets implements OnInit {
       .catch(() => undefined);
   }
 
-  protected volumeOf(placement: Placement<unknown>): string {
-    const p = placement as Placement<PopoverWidget>;
+  protected volumeOf(p: Placement<PopoverWidget>): string {
     const w = p.widget;
     return typeof w === 'object' && 'diskSpace' in w ? volumeKey(w.diskSpace.volume) : 'all';
   }
@@ -96,8 +97,7 @@ export class PopupWidgets implements OnInit {
     else void this.values.refresh();
   }
 
-  protected setVolume(placement: Placement<unknown>, key: string): void {
-    const p = placement as Placement<PopoverWidget>;
+  protected setVolume(p: Placement<PopoverWidget>, key: string): void {
     void this.edit({ replace: { id: p.id, widget: { diskSpace: { volume: volumeOf(key) } } } });
   }
 }

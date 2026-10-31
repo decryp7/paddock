@@ -1194,7 +1194,9 @@ export class MockBackend implements DynoBackend {
     return this.reply('metricReadings', () => {
       const sys = this.liveUpdate('summary').system;
       const memory = sys.memory.total > 0 ? (sys.memory.used / sys.memory.total) * 100 : 0;
-      return queries.map((q) => mockMetricReading(q, { cpu: sys.cpu.total, memory }));
+      const battery = 'available' in sys.battery ? sys.battery.available.charge : sys.battery.unavailable;
+      const gpu = 'available' in sys.gpu ? sys.gpu.available.utilization : sys.gpu.unavailable;
+      return queries.map((q) => mockMetricReading(q, { cpu: sys.cpu.total, memory, battery, gpu }));
     });
   }
 
