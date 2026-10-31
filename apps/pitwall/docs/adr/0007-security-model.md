@@ -46,7 +46,7 @@ data folder (mode 0600 on Unix; the per-user folder on Windows) and read by the 
 re-checked, max 6) and only to the allow-listed hosts: `huggingface.co`, `hf.co`, `cdn-lfs.huggingface.co`, `cdn-lfs.hf.co`,
 `cdn-lfs-us-1.hf.co`, `cdn-lfs-eu-1.hf.co`, `cas-bridge.xethub.hf.co`, `transfer.xethub.hf.co`, `github.com`,
 `objects.githubusercontent.com`, `release-assets.githubusercontent.com`, plus subdomains (whole labels) of `cdn.hf.co` and
-`xethub.hf.co`. Offline mode stops all of it. Child processes get a scrubbed environment (ADR 0004). The request
+`xethub.hf.co`. Child processes get a scrubbed environment (ADR 0004). The request
 records hold metadata only (the last 500, in memory). Generated text is recorded only when `privacy.keepRequestContent` is on
 (off by default, at most 64 KiB per request, in memory); the `request_content` management call does not return content yet.
 

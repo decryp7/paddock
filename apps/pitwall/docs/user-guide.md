@@ -4,7 +4,7 @@ How to install Pitwall's engine, get a model, connect your apps and keep memory 
 [features](features.md); for platform specifics see [macOS](macos.md), [Linux](linux.md) and [Windows](windows.md).
 
 Pitwall is **local only**: nothing you ask and nothing a model answers leaves your computer. The only network traffic is a
-download you start (engines from GitHub, models from Hugging Face), and offline mode turns that off too
+download you start (engines from GitHub, models from Hugging Face)
 ([ADR 0001](adr/0001-local-only.md)).
 
 ## Contents
@@ -23,7 +23,6 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
 - [Caching](#caching)
 - [Model update notices](#model-update-notices)
 - [Memory presets and idle release](#memory-presets-and-idle-release)
-- [Offline mode](#offline-mode)
 - [Packs: add an engine or a model list](#packs-add-an-engine-or-a-model-list)
 - [Where Pitwall keeps its files](#where-pitwall-keeps-its-files)
 - [Troubleshooting](#troubleshooting)
@@ -43,7 +42,7 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
    ```
 
    ```json
-   {"ok":true,"name":"pitwall","version":"1.0.4","apiVersion":1,"serving":"serving","offline":false,"loadedModels":0}
+   {"ok":true,"name":"pitwall","version":"1.0.4","apiVersion":1,"serving":"serving","loadedModels":0}
    ```
 
    The port is 11435 (next to Ollama's 11434). If another program uses it, Pitwall says "Pitwall cannot listen on ... Is
@@ -60,7 +59,7 @@ An engine is the program that runs a model. Pitwall has one, **llama.cpp**, whic
 1. **You do not have to install it.** The first time Pitwall starts, and whenever no build is installed, it downloads the
    build suggested for this computer in the background: **Metal** on a Mac, **CUDA 13** or **CUDA 12** with an NVIDIA card,
    **Vulkan** for other GPUs, **CPU** if nothing else works. The Dashboard and the **llama.cpp** page show the progress.
-   Models you load or download meanwhile wait ("Installing llama.cpp...") and go on when it is ready. Offline, or without a
+   Models you load or download meanwhile wait ("Installing llama.cpp...") and go on when it is ready. Without a
    network, the page says why and offers **Retry**.
 2. The download comes from GitHub (the host is shown); Pitwall checks its SHA-256 against the value pinned in the catalog,
    unpacks only the files it expects, and runs a **self-test** (`--version`, `--list-devices`). The page then shows the tag
@@ -306,7 +305,7 @@ Streaming is the Ollama default (`stream` omitted means newline-delimited JSON).
 `pitwall` is a small program for terminals and scripts. It is a client of the local server like any other: it calls
 Pitwall's management API and the standard OpenAI endpoint on `127.0.0.1` and nothing else, and it can only open a
 connection to this machine (it uses the same loopback-only client as the server's engine code). It adds no server
-surface and sends nothing off-machine; downloads are done by the server, which shows the host and honours offline mode.
+surface and sends nothing off-machine; downloads are done by the server, which shows the host.
 
 ```sh
 pitwall status                        # version, serving or paused, memory, loaded models, queue, speed
@@ -352,7 +351,7 @@ it with `--timeout <seconds>`.
 | 1 | An error (not found, wrong key, a failed download, an unexpected answer); the message says what to fix |
 | 2 | The command line is wrong (unknown command or option, missing argument, no prompt) |
 | 3 | The server is not running (or not on that port); start Pitwall or pass `--port` |
-| 4 | The server refused: not enough memory to load, offline mode, busy, a limit reached, or the model is not loaded |
+| 4 | The server refused: not enough memory to load, busy, a limit reached, or the model is not loaded |
 
 ## Choosing a model by capability, priority and provenance
 
@@ -507,7 +506,7 @@ only tell you. It is **off until you turn it on**: Settings > **Model updates** 
 
 - **What is sent.** Only the repository ids (like `owner/name`) of models you already downloaded, to `huggingface.co`, in the
   address of the same file-list request Discover makes. No prompts, usage, file contents or identifiers. A check asks about at most
-  40 repositories. **Offline mode** (Settings > Network) stops it completely; Check now then says so.
+  40 repositories.
 - **What it finds.** *Newer revision*: the file you have changed on Hugging Face (compared by the SHA-256 recorded when you
   downloaded it; for older downloads, by size). *Better quantisation*: the same model in the next higher-quality quantisation
   (up to Q8_0) that fits this machine with room to spare. *Imatrix build*: the same quantisation as an importance-matrix build.
@@ -554,13 +553,6 @@ app menu does this whatever the setting says. The background service stays regis
 Two parts of the policy are decided in the core but not acted on yet: yielding to a full-screen foreground app and releasing
 only the context before the weights. Operating-system memory-pressure signals are not read yet either; the
 available-memory threshold is what works today.
-
-## Offline mode
-
-Settings > Network > **Offline mode** disables every download (engines, models, searching Hugging Face). Everything already
-installed keeps working, because serving never needed the network. A blocked action says: "Pitwall is in offline mode:
-downloads are off. Turn offline mode off in Settings > Network to download." Use it on a machine that must not talk to the
-internet, or to be sure nothing downloads in the background (nothing does without your click).
 
 ## Packs: add a model list
 
@@ -649,7 +641,6 @@ The messages below are what Pitwall actually says.
 | 429 "rate limit: at most N requests per minute for this app" / "has used its N tokens for today" | The app's limits; change them in Apps & keys. |
 | 501 "speech-to-text is not available yet: the whisper.cpp engine is planned." | `/v1/audio/transcriptions` is not built. |
 | 413 | The request is larger than the limit (32 MiB by default). Settings > Server. |
-| Download: "Pitwall is in offline mode ..." | Turn offline mode off. |
 | Download: "the file may be gated; accept its licence on huggingface.co first" | A 401 or 403 from Hugging Face. |
 | Download: "the download failed: ... Check the connection and retry; the part already downloaded is kept." | Retry; it resumes. |
 | Download: "Pitwall only downloads from Hugging Face and GitHub over HTTPS; ... is not allowed" | A pack or redirect named another host. |

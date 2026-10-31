@@ -74,7 +74,7 @@ panel('c4-3-core-state', {
   title: 'pitwall-core — security and state', kind: SUB, group: 'Security and state [ADR 0001, 0007, 0013]', cols: 3, rows: 3,
   desc: 'What may leave the machine, what a key may do, and the versioned records the server keeps. Reading damaged files falls back to defaults.',
   nodes: [
-    ['priv', 0, 0, 'privacy', 'ADR 0001', 'DownloadUrl allow-list, the offline check, Host and Origin rules.'],
+    ['priv', 0, 0, 'privacy', 'ADR 0001', 'DownloadUrl allow-list, Host and Origin rules.'],
     ['keys', 1, 0, 'keys · limits', 'ADR 0007, 0013', 'pw_ keys, SHA-256, constant-time match, pairing codes, permissions; AppLimits with check_budget, check_memory, statuses.'],
     ['usage', 2, 0, 'usage', 'usage.json', 'Counters per app in hourly (7 days) and daily (90 days) buckets; series for 24 h, 7 d and 30 d; budget_use.'],
     ['cfg', 0, 1, 'config', 'settings.toml', 'Versioned Settings: memory, default and per-model slots, update-check schedule; damage tolerance, backup.'],
@@ -82,7 +82,7 @@ panel('c4-3-core-state', {
     ['bench', 1, 2, 'benchmarks · redact', 'results · content redaction', 'Stored benchmark results that feed fast selection; redaction of request content before it is kept.'],
     ['mgmt', 2, 1, 'mgmt · discovery', 'wire contract', 'DTOs the UI, the shell and the CLI share (api.types.ts); discovery.json.'],
   ],
-  links: [['priv', 'B', 'cfg', 'T', 'Offline, hosts', { rev: true }], ['keys', 'R', 'usage', 'L', 'Budgets'], ['usage', 'B', 'mgmt', 'T', 'UsageSeries'], ['cfg', 'R', 'met', 'L', 'Retention'], ['mgmt', 'L', 'met', 'R', 'Shapes', { rev: true }], ['met', 'B', 'bench', 'T', 'Speeds']],
+  links: [['priv', 'B', 'cfg', 'T', 'Hosts', { rev: true }], ['keys', 'R', 'usage', 'L', 'Budgets'], ['usage', 'B', 'mgmt', 'T', 'UsageSeries'], ['cfg', 'R', 'met', 'L', 'Retention'], ['mgmt', 'L', 'met', 'R', 'Shapes', { rev: true }], ['met', 'B', 'bench', 'T', 'Speeds']],
 });
 
 const SUBS = 'C4 · Level 3 — Components of pitwall-server';
@@ -107,7 +107,7 @@ panel('c4-3-server-edges', {
   desc: 'Outbound HTTP exists only in egress, and child processes are started only through process. The update check is opt-in and read-only.',
   nodes: [
     ['lib', 0, 0, 'library', 'models', 'Scans GGUF files, Hugging Face search, repo file lists with fit and max slots, resumable verified downloads that write <file>.origin.json, delete.', { role: 'accent' }],
-    ['eg', 1, 0, 'egress', 'the only HTTP client', 'Allow-listed HTTPS, redirects re-checked, resume, SHA-256, offline switch.', { role: 'accent' }],
+    ['eg', 1, 0, 'egress', 'the only HTTP client', 'Allow-listed HTTPS, redirects re-checked, resume, SHA-256.', { role: 'accent' }],
     ['eng', 2, 0, 'engines', 'Engine trait · LlamaCpp', 'The only engine: install with self-test, remove, start on the pinned or automatic build; also the CapabilityGate.', { role: 'accent' }],
     ['pins', 3, 0, 'engine_pins', 'pin, rollback, capabilities', 'state, set_global, set_model, rollback, capabilities; saves engine-pins.json; reports appliesOnNextLoad.', { role: 'accent' }],
     ['sys', 0, 1, 'system · paths', 'probes and files', 'RAM, GPU, disk, engine memory; Dirs for the data folder, atomic writes with backup.', { role: 'accent' }],

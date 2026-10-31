@@ -136,7 +136,7 @@ seq('uml-seq-engine-install', {
   parts: [['wi', 'Pitwall window', 'Angular UI', 'ui'], ['mg', 'mgmt', 'install_build', 'process'], ['lc', 'LlamaCpp', 'install()', 'accent'], ['eg', 'Egress', 'only HTTP client', 'process'], ['gh', 'GitHub releases', 'external', 'external'], ['en', 'Data folder', 'engines/, partial/', 'process'], ['nw', 'New llama-server', 'build under test', 'process']],
   script: [
     ['m', 'wi', 'mg', '`install_build(buildId)`'],
-    ['s', 'mg', 'Offline mode refuses; the install runs in the background and the Download is shown at once'],
+    ['s', 'mg', 'The install runs in the background and the Download is shown at once'],
     ['m', 'mg', 'lc', '`install(id, …)`'],
     ['m', 'lc', 'en', 'Create `engines/<id>.new`'],
     ['m', 'lc', 'eg', '`download(url, sha256)`'], ['m', 'eg', 'gh', '`GET` (resumes a partial file)'], ['m', 'gh', 'eg', 'Bytes', 1],
@@ -230,7 +230,7 @@ seq('uml-seq-update-check', {
   parts: [['tk', 'Schedule', 'first look 60 s, then 5 min', 'process'], ['ap', 'AppState', 'run_update_check', 'accent'], ['up', 'Updates', 'check()', 'process'], ['hs', 'HfSource', 'RepoSource', 'process'], ['eg', 'Egress', 'only HTTP client', 'process'], ['hf', 'Hugging Face', 'external', 'external'], ['wi', 'Pitwall window', 'Angular UI', 'ui']],
   script: [
     ['m', 'tk', 'ap', '`scheduled_update_tick()`'],
-    ['o', 'opt', '[opt-in is on, the schedule is due, offline mode is off]'],
+    ['o', 'opt', '[opt-in is on, the schedule is due]'],
     ['m', 'ap', 'up', '`check(source, Request)`'],
     ['s', 'up', 'One run at a time; at most 40 repositories'],
     ['o', 'loop', '[each repository, 30 s limit]'],
@@ -246,7 +246,7 @@ seq('uml-seq-update-check', {
     ['c'],
     ['o', 'opt', '[the user chooses Get it]'],
     ['m', 'wi', 'ap', '`download_model(repo, file, …)`'],
-    ['n', 'up', 'The normal download flow, after the user confirms the host and size. Dismiss hides one offer; Remind me snoozes it 1 to 90 days. Offline mode makes zero requests.', 400],
+    ['n', 'up', 'The normal download flow, after the user confirms the host and size. Dismiss hides one offer; Remind me snoozes it 1 to 90 days.', 400],
     ['c'],
   ],
 });
@@ -292,7 +292,7 @@ seq('uml-seq-cli', {
     ['c'],
     ['o', 'alt', '[nothing listens on the port]'],
     ['m', 'cl', 'ow', 'How to start Pitwall; exit code 3', 1],
-    ['e', '[memory, offline mode, busy or a limit refuses]'],
+    ['e', '[memory, busy or a limit refuses]'],
     ['m', 'cl', 'ow', 'What to change; exit code 4', 1],
     ['c'],
     ['n', 'cl', 'Exit codes: 0 ok, 1 error, 2 usage, 3 not running, 4 refused. The CLI never starts a model host of its own; keys are never command-line arguments.', 380],

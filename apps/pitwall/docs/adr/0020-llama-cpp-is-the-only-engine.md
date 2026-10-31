@@ -26,7 +26,7 @@ on every platform with CPU, Vulkan, CUDA and Metal builds. Several engines were 
   while it sets itself up.
 - **llama.cpp installs itself.** On start, and whenever a model needs a build and none is installed, Pitwall downloads
   the build suggested for the machine (checksum and self-test as in ADR 0004). Model loads and model downloads wait for it
-  (downloads stay queued), the Dashboard and the llama.cpp page show the progress, and offline mode or a network error
+  (downloads stay queued), the Dashboard and the llama.cpp page show the progress, and a network error
   ends in a message with Retry. The user can still install, pick or pin another build (ADR 0018).
 - **The Engines page is the llama.cpp page**: the builds catalog (the suggested build first), installed builds, pins,
   self-test results and processes.

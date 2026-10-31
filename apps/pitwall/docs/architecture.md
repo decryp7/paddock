@@ -37,7 +37,7 @@ plugin system ([ADR 0010](adr/0010-no-plugin-system.md)); the model list extends
 ![Pitwall at a glance](diagrams/pitwall-overview.svg)
 
 What leaves the machine: only downloads the user asked for (engine releases from GitHub, models from Hugging Face),
-over HTTPS, from an allow-list of hosts, with every redirect hop checked again. Offline mode turns even that off.
+over HTTPS, from an allow-list of hosts, with every redirect hop checked again.
 Prompts and answers never leave the process tree on `127.0.0.1`.
 
 ## The pieces
@@ -80,7 +80,7 @@ Rules the core keeps: no `unwrap`/`expect` on user data, `unsafe` denied, `missi
 | `engine_setup.rs` | Installing a build as a tracked download, and installing the suggested one by itself when none is installed (ADR 0020) |
 | `leftovers.rs` | Files older versions left behind (the llamafile folder), listed and removed only on request |
 | `library.rs` | Scanning `models/`, the Hugging Face search and file lists, resumable downloads, GGUF verification, deletion |
-| `egress.rs` | The single outbound HTTP client: HTTPS only, no proxy, allow-listed hosts including every redirect, offline switch, resume, SHA-256 check |
+| `egress.rs` | The single outbound HTTP client: HTTPS only, no proxy, allow-listed hosts including every redirect, resume, SHA-256 check |
 | `auth.rs` | Apps, keys, the admin key, pairing; `apps.json` written atomically with a backup |
 | `process.rs` | The only place child processes are started: scrubbed environment, no console window, killed on drop |
 | `paths.rs`, `system.rs` | Data folders and atomic writes; hardware and memory probes (RAM, GPUs, disk, process RSS) |
@@ -124,7 +124,7 @@ server only through a `ServerClient` trait (loopback HTTP to the management API 
 | `credentials.rs` | The app's copy of the admin key in the OS credential store (Windows Credential Manager, macOS Keychain, Secret Service), falling back to `admin.key` when the store is unavailable |
 | `service_install.rs` | Registering the server with the OS: `SMAppService` and the launch agent inside the bundle on macOS, the NSIS installer's service on Windows, a systemd user unit written by `pitwall-server install` on Linux. Elevation and approval are always the OS's own |
 | `lib.rs`, `tray.rs`, `tray_model.rs` | Pitwall on the Paddock shell (`paddock-shell`, ADR 0029): the shell opens the tray and the main window after every plugin is set up, owns the window lifecycle (closing destroys the window, tray Open and Dock reopen rebuild it, only Quit exits, no tray means closing quits), the exit and its watchdog, and guards Pitwall's commands (`COMMANDS`); `tray.rs` draws Pitwall's tray model on the shell's tray |
-| `offline.rs`, `update_hooks.rs` | Pitwall on the shell's updater (`paddock-updater`: About, Updates, What's new): what the client learns about Offline mode, which blocks every update check and download and fails closed; the service hooks that repair the macOS registration after a version change. Inert in builds without the signing key |
+| `update_hooks.rs` | Pitwall on the shell's updater (`paddock-updater`: About, Updates, What's new): the service hooks that repair the macOS registration after a version change. Inert in builds without the signing key |
 | (shell) | [ADR 0012](adr/0012-native-feel.md): the shell's window layer applies the native feel (no browser zoom, extensions or, in release builds, WebView2 browser keys); the UI guard does the rest |
 
 Closing or quitting the app never stops the server. The shell has been type-checked and unit-tested; running it on
@@ -229,8 +229,7 @@ per-model concurrency is the model's slot count (the count it was loaded with wh
 `pitwall_core::updates` holds the rules (provenance sidecar, newer revision, better quantisation, imatrix build) and
 `pitwall_core::update_state` the schedule, the notices and the dismissals; both are pure. `pitwall_server::updates` carries a
 check out: it scans the library (off the async threads), asks a `RepoSource` (`HfSource` over `egress`; the tests use a fake) for
-each repository's file list and commit, at most 40 per check, and stores the result in `model-updates.json`. Offline mode answers
-before the scan; nothing in the checker can start a download. A background loop looks at the schedule every five minutes, a minute
+each repository's file list and commit, at most 40 per check, and stores the result in `model-updates.json`. Nothing in the checker can start a download. A background loop looks at the schedule every five minutes, a minute
 after start; the setting `models.updateCheck` is off until the user enables it.
 
 ### Engine install and update

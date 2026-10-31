@@ -20,8 +20,7 @@ This is the user's explicit requirement and overrides every other consideration 
   is ever sent anywhere.
 - **The only outbound traffic** is downloading engines and models **the user asked for**, from the hosts in
   `pitwall_core::privacy::DOWNLOAD_HOSTS`, over HTTPS, shown in the UI with their host, plus, only once the user turned it
-  on, the check-only model update queries (repository ids of models already downloaded, ADR 0017). **Offline mode** turns
-  even that off.
+  on, the check-only model update queries (repository ids of models already downloaded, ADR 0017). There is no Offline mode (removed in 1.1).
 - **The request path has no HTTP client.** Only `pitwall_server::egress` may build one (clippy's
   `disallowed-methods` enforces it; `egress.rs` is the single allowed place). Engines are reached only through
   `pitwall_server::loopback`, whose address type cannot hold anything but 127.0.0.1. The test
@@ -114,7 +113,7 @@ Pitwall runs native engines on untrusted model files and answers requests from o
 
 - **Contain failures.** One engine's crash, one bad model file or one slow request never takes down the
   server or another model. The app can crash or close without stopping the server.
-- **Degrade, don't fail.** No engine installed, no GPU, offline mode, a locked file, a gated model or a full disk
+- **Degrade, don't fail.** No engine installed, no GPU, no network, a locked file, a gated model or a full disk
   produce a clear message and a next step instead of an exception. A request that does not fit in memory is queued or
   answered with the typed `insufficient_memory` error — never pushed into swap.
 - **Never unload a busy model.** Memory release (idle, pressure, yield) never touches a model serving a request

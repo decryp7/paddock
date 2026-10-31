@@ -103,7 +103,7 @@ Co-Authored-By or AI attribution lines.
 | Layer | Where | What it covers |
 | --- | --- | --- |
 | Core unit and property tests | `crates/pitwall-core/src/**` (`#[cfg(test)]`) | Every pure decision; API shapes pinned against the official SDKs; "never panics" properties for parsers |
-| Server end-to-end | `crates/pitwall-server/tests/e2e.rs` | The real router and pipeline over a fake engine: keys, provenance, streaming in all three families, permissions and limits, Host/Origin refusal, pairing, engine failures, pause and release, offline mode, embeddings, an engine pack driving a real child process |
+| Server end-to-end | `crates/pitwall-server/tests/e2e.rs` | The real router and pipeline over a fake engine: keys, provenance, streaming in all three families, permissions and limits, Host/Origin refusal, pairing, engine failures, pause and release, the removed offline key, embeddings, an engine pack driving a real child process |
 | Privacy | `crates/pitwall-server/tests/privacy.rs` | No outbound client outside egress; handlers cannot reach the network; scrubbed engine environment |
 | UI unit and component | `app/src/**/*.spec.ts` (Vitest and TestBed) | Stores, services, pure utilities, components |
 | UI end-to-end | `app/e2e` (Playwright) | Flows against the mock backend |

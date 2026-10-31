@@ -74,7 +74,7 @@ reinstall from the releases page and replace the secrets. Because the key is sha
 
 - **Opt-in.** Pitwall never checks on its own unless the user turns it on; a manual check always works.
 - **One endpoint.** A check is one HTTPS GET of the release's `latest.json`. It carries no identifier or usage data.
-  (Like the engine and model downloads, this is the only kind of traffic Pitwall makes, and offline mode stops it;
+  (Like the engine and model downloads, this is the only kind of traffic Pitwall makes;
   see [ADR 0001](adr/0001-local-only.md). The update host has to be on the download allow-list before this ships.)
 - **Signatures are mandatory.** Every update is verified with the public key built into the app before it is installed.
 - **The server follows the app.** After an update the service restarts itself when its own binary changed, but only

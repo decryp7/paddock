@@ -202,7 +202,7 @@ Source: [uml-seq-model-download.drawio](diagrams/uml-seq-model-download.drawio)
 
 ### Model update notices
 
-A scheduled check, only when offline mode allows it, compares installed models with Hugging Face and raises a notice.
+A scheduled check, once the user turned it on, compares installed models with Hugging Face and raises a notice.
 It never downloads by itself.
 
 ![Model update check sequence](diagrams/svg/uml-seq-update-check.svg)
