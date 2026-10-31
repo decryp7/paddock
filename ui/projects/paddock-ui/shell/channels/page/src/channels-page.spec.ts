@@ -1,5 +1,5 @@
 import { answered, DISMISSED } from '@decryp7/paddock-ui/shell';
-import { provideZonelessChangeDetection } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
   CHANNELS_REMOVE_DIALOG_ID,
@@ -13,6 +13,7 @@ import {
   type MemoryChannelsOptions,
 } from '@decryp7/paddock-ui/shell/channels';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
+import { SettingsStore } from '@decryp7/paddock-ui/shell/settings';
 import { PdChannelsPage } from './channels-page';
 
 const WEBHOOK: ChannelConfig = {
@@ -49,9 +50,9 @@ async function settle(rounds = 12): Promise<void> {
 }
 
 const DECLARED: readonly ChannelEventDecl[] = [
-  { name: 'diskLow', group: 'Storage', description: 'A drive is nearly full.' },
-  { name: 'jobFailed', group: 'Jobs', description: 'A background job ended with an error.' },
-  { name: 'jobDone', group: 'Jobs', description: 'A background job finished.' },
+  { name: 'diskLow', label: 'Disk low', group: 'Storage', description: 'A drive is nearly full.' },
+  { name: 'jobFailed', label: 'Job failed', group: 'Jobs', description: 'A background job ended with an error.' },
+  { name: 'jobDone', label: 'Job done', group: 'Jobs', description: 'A background job finished.' },
 ];
 
 const text = (el: Element): string => (el.textContent ?? '').replace(/\s+/g, ' ').trim();
@@ -94,11 +95,11 @@ function held(options: MemoryChannelsOptions = {}) {
 }
 
 describe('the Notification channels page', () => {
-  async function open(options: MemoryChannelsOptions = {}, events: readonly ChannelEventDecl[] = []) {
+  async function open(options: MemoryChannelsOptions = {}, events: readonly ChannelEventDecl[] = [], advanced?: boolean) {
     const h = held({ channels: [WEBHOOK, NTFY], secrets: ['slack'], ...options });
     const dialogs = new FakeDialogs(h.memory);
     TestBed.configureTestingModule({
-      providers: [provideZonelessChangeDetection(), provideShellChannels({ backend: () => h.memory }), ...(events.length ? [{ provide: CHANNEL_EVENTS, useValue: events }] : []), { provide: DialogService, useValue: dialogs }],
+      providers: [provideZonelessChangeDetection(), provideShellChannels({ backend: () => h.memory }), ...(events.length ? [{ provide: CHANNEL_EVENTS, useValue: events }] : []), ...(advanced === undefined ? [] : [{ provide: SettingsStore, useValue: { showAdvanced: signal(advanced) } }]), { provide: DialogService, useValue: dialogs }],
     });
     const fixture = TestBed.createComponent(PdChannelsPage);
     const el = fixture.nativeElement as HTMLElement;
@@ -189,7 +190,7 @@ describe('the Notification channels page', () => {
     }
     expect(p.el.querySelector('section')?.getAttribute('aria-labelledby')).toBe('pd-ch-title');
     expect(p.el.querySelector('table caption')).not.toBeNull();
-    expect(p.el.querySelector('pd-path-text')?.getAttribute('class')).toContain('pd-ch__muted');
+    expect(p.q('channel-endpoint-slack')?.getAttribute('class')).toContain('pd-ch__muted');
   });
 
   it('shows the empty state with the one Add channel button', async () => {
@@ -489,9 +490,9 @@ describe('the Notification channels page', () => {
     await p.click(p.rowButton('phone', 'channel-edit'));
     const box = p.q('channel-allow-lan')!;
     expect(text(box)).toBe('This channel is on my home network (allow a private address)');
-    expect(box.querySelector('input')!.getAttribute('aria-describedby')).toBe('pd-ch-h-lan');
+    expect(box.querySelector('button[role="switch"]')!.getAttribute('aria-describedby')).toBe('pd-ch-h-lan');
     expect(text(p.el.querySelector('#pd-ch-h-lan')!)).toContain('Turn this on only for a web address, ntfy server or mail server in your own home or office network');
-    expect(box.querySelector('input')!.checked).toBe(false);
+    expect(box.querySelector('button[role="switch"]')!.getAttribute('aria-checked')).toBe('false');
     await p.type('channel-server', 'http://ntfy.lan');
     await p.click('channel-allow-lan');
     await p.click('channel-save');
@@ -531,56 +532,44 @@ describe('the Notification channels page', () => {
     expect(saved?.allowLan).toBe(true);
   });
 
+  it('shows the host in the Name column with the whole address as tooltip and accessible name', async () => {
+    const p = await open();
+    const slack = p.q('channel-endpoint-slack')!;
+    expect(text(slack)).toBe('hooks.example.com');
+    expect(text(p.row('slack'))).toContain('https://hooks.example.com/services/abc');
+    expect(p.q('channel-endpoint-phone')!.textContent).toBe('ntfy.sh/my_topic');
+    expect(text(p.q('channel-endpoint-slack')!.parentElement!.querySelector('.pd-sr')!)).toBe('https://hooks.example.com/services/abc');
+    expect(slack.getAttribute('aria-hidden')).toBe('true');
+  });
+
   describe('with declared events', () => {
-    it('lists them as checkboxes under group headings with their descriptions', async () => {
-      const p = await open({}, DECLARED);
-      await p.click(p.rowButton('slack', 'channel-edit'));
-      expect(p.q('channel-events')).toBeNull();
-      const groups = [...p.el.querySelectorAll('fieldset')].map((g) => text(g.querySelector('legend')!));
-      expect(groups).toEqual(['Events', 'Storage', 'Jobs', 'Other events']);
-      const disk = p.q('channel-event-diskLow')!;
-      expect(text(disk)).toBe('diskLow');
-      expect(disk.querySelector('input')!.type).toBe('checkbox');
-      expect(disk.querySelector('input')!.checked).toBe(true);
-      expect(p.q('channel-event-jobDone')!.querySelector('input')!.checked).toBe(false);
-      expect(p.q('channel-event-jobDone')!.querySelector('input')!.getAttribute('aria-describedby')).toBe('pd-ch-ev-1-1');
-      expect(text(p.el.querySelector('#pd-ch-ev-1-1')!)).toBe('A background job finished.');
+    it('shows the labels, not the ids, in the table and keeps the id for an event it does not know', async () => {
+      const odd: ChannelConfig = { ...WEBHOOK, events: ['diskLow', 'jobFailed', 'zzz'] };
+      const two: ChannelConfig = { ...WEBHOOK, id: 'two', name: 'Two', events: ['jobDone', 'mystery'] };
+      const p = await open({ channels: [odd, two] }, DECLARED);
+      expect(text(p.row('slack'))).toContain('Disk low, Job failed and 1 more');
+      expect(text(p.row('slack'))).not.toContain('diskLow');
+      expect(text(p.row('two'))).toContain('Job done, mystery');
     });
 
-    it('toggling checkboxes changes the channel’s event names and saving keeps them', async () => {
-      const p = await open({}, DECLARED);
+    it('keeps "Other events" behind Show advanced', async () => {
+      const p = await open({}, DECLARED, false);
       await p.click(p.rowButton('phone', 'channel-edit'));
-      await p.click('channel-event-jobDone');
-      await p.click('channel-event-diskLow');
-      await p.click('channel-event-jobFailed');
-      await p.click('channel-event-jobFailed');
-      await p.click('channel-save');
-      const saved = (await p.memory.get()).settings.channels.find((c) => c.id === 'phone');
-      expect(saved?.events).toEqual(['jobDone', 'diskLow']);
+      expect(p.q('channel-events-other')).toBeNull();
+      expect(p.q('channel-events-picker')).not.toBeNull();
     });
 
-    it('keeps names the app did not declare as removable chips and never drops them', async () => {
-      const odd: ChannelConfig = { ...NTFY, id: 'odd', name: 'Odd', events: ['diskLow', 'oldEvent', 'legacyEvent'] };
-      const p = await open({ channels: [odd] }, DECLARED);
+    it('still shows "Other events" behind Show advanced when the channel has names the app did not declare', async () => {
+      const odd: ChannelConfig = { ...WEBHOOK, id: 'odd', name: 'Odd', events: ['oldEvent'] };
+      const p = await open({ channels: [odd] }, DECLARED, false);
       await p.click(p.rowButton('odd', 'channel-edit'));
-      const other = p.q('channel-events-other')!;
-      expect([...other.querySelectorAll('li')].map((li) => text(li))).toEqual(['oldEvent', 'legacyEvent']);
-      // Saving without touching them keeps them.
-      await p.click('channel-event-jobDone');
-      await p.click('channel-save');
-      expect((await p.memory.get()).settings.channels[0]!.events).toEqual(['diskLow', 'oldEvent', 'legacyEvent', 'jobDone']);
-      // Removing one is explicit, and the remove button has a name.
-      await p.click(p.rowButton('odd', 'channel-edit'));
-      expect(p.q('channel-event-remove-oldEvent')!.getAttribute('aria-label')).toBe('Remove event oldEvent');
-      await p.click('channel-event-remove-oldEvent');
-      // Focus moves to the chip that took its place, not to the page.
-      expect(document.activeElement).toBe(p.q('channel-event-remove-legacyEvent'));
-      await p.click('channel-event-remove-legacyEvent');
-      expect(document.activeElement).toBe(p.q('channel-event-other-input'));
-      await p.type('channel-event-other-input', 'legacyEvent');
-      await p.click('channel-event-other-add');
-      await p.click('channel-save');
-      expect((await p.memory.get()).settings.channels[0]!.events).toEqual(['diskLow', 'jobDone', 'legacyEvent']);
+      expect(p.q('channel-events-other')).not.toBeNull();
+    });
+
+    it('shows "Other events" when Show advanced is on', async () => {
+      const p = await open({}, DECLARED, true);
+      await p.click(p.rowButton('slack', 'channel-edit'));
+      expect(p.q('channel-events-other')).not.toBeNull();
     });
 
     it('adds nothing, and keeps Add disabled, while the field holds no names', async () => {

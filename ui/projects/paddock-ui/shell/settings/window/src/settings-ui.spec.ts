@@ -87,6 +87,16 @@ describe('pd-settings-window', () => {
     expect(css).not.toMatch(/\.pd-content[^{]*\{[^}]*padding-inline-end/);
   });
 
+  it('says nothing about saving as you go on a page that has its own Save button', async () => {
+    const explicit = defineSettingsPage({ id: 'sd.explicit', group: 'application', title: msg('sd.explicit', 'Explicit save'), order: 200, autosaves: false, load: () => Promise.resolve(PdSettingsSectionPage) });
+    const bed = await open({ pages: [...SPEC_PAGES, explicit], page: 'sd.explicit' });
+    expect($(bed.el, '.pd-item[aria-current="page"]').dataset['page']).toBe('sd.explicit');
+    expect(bed.fixture.componentInstance.dialogStatus()).toBeNull();
+    // A page that does not declare it autosaves.
+    await go(bed, 'pd.appearance');
+    expect(bed.fixture.componentInstance.dialogStatus()).toBe('Changes are saved as you make them.');
+  });
+
   it('renders every field kind from the engine’s schema', async () => {
     const bed = await open({ page: 'sd.general' });
     const { el } = bed;

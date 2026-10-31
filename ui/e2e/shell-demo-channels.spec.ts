@@ -51,7 +51,7 @@ test.describe('notification channels (plan X17)', () => {
     await page.getByTestId('channel-save').click();
     const row = page.getByTestId('channel-row-Build-Hook');
     await expect(row).toContainText('Build Hook');
-    await expect(row).toContainText('diskLow, jobFailed');
+    await expect(row).toContainText('Disk low, Job failed');
     await expect(row.getByText('On', { exact: true })).toBeVisible();
     expect(await axeViolations(page)).toEqual([]);
 
@@ -152,15 +152,19 @@ test.describe('notification channels (plan X17)', () => {
     const picker = page.getByTestId('channel-events-picker');
     await expect(picker.getByRole('group', { name: 'Storage' })).toBeVisible();
     await expect(picker.getByRole('group', { name: 'Jobs' })).toBeVisible();
+    await expect(page.getByText('Changes are saved as you make them.')).toHaveCount(0);
+    await expect(page.getByTestId('channel-endpoint-slack')).toHaveText('hooks.example.com');
+    await expect(page.getByTestId('channel-row-slack')).toContainText('https://hooks.example.com/services/T0000');
     await expect(page.getByTestId('channel-event-diskLow').getByRole('checkbox')).toBeChecked();
+    await expect(page.getByTestId('channel-event-diskLow')).toHaveText('Disk low');
     await expect(page.getByTestId('channel-event-jobDone').getByRole('checkbox')).not.toBeChecked();
     await expect(page.getByTestId('channel-events-other').getByRole('listitem')).toHaveText(['oldAlarm']);
     await page.getByTestId('channel-event-jobDone').getByRole('checkbox').check();
-    await expect(page.getByTestId('channel-allow-lan').getByRole('checkbox')).not.toBeChecked();
+    await expect(page.getByTestId('channel-allow-lan').getByRole('switch')).not.toBeChecked();
     expect(await axeViolations(page)).toEqual([]);
     await page.getByTestId('channel-save').click();
     await expect(page.getByTestId('channel-editor')).toHaveCount(0);
-    await expect(page.getByTestId('channel-row-slack')).toContainText('diskLow, jobFailed and 2 more');
+    await expect(page.getByTestId('channel-row-slack')).toContainText('Disk low, Job failed and 2 more');
   });
 
   test('an app with no declared events keeps the free-text field', async ({ app, page }) => {
@@ -178,12 +182,12 @@ test.describe('notification channels (plan X17)', () => {
     await page.getByTestId('channel-url').fill('http://192.168.1.20:8080/hook');
     await page.getByTestId('channel-save').click();
     await expect(page.getByTestId('channel-save-error')).toContainText('home network');
-    await page.getByTestId('channel-allow-lan').getByRole('checkbox').check();
+    await page.getByTestId('channel-allow-lan').getByRole('switch').click();
     await page.getByTestId('channel-save').click();
     await expect(page.getByTestId('channel-editor')).toHaveCount(0);
     await expect(page.getByTestId('channel-row-NAS')).toContainText('192.168.1.20');
     await page.getByRole('button', { name: 'Edit NAS' }).click();
-    await expect(page.getByTestId('channel-allow-lan').getByRole('checkbox')).toBeChecked();
+    await expect(page.getByTestId('channel-allow-lan').getByRole('switch')).toBeChecked();
     await page.locator('#pd-ch-type').click();
     await page.getByRole('option', { name: 'Email' }).click();
     await expect(page.getByTestId('channel-allow-lan')).toHaveCount(1);

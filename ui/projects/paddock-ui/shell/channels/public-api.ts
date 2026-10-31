@@ -28,7 +28,7 @@ export { ChannelsBackend, TauriChannelsBackend, type ChannelsIpc, type Unlisten 
 export { MemoryChannelsBackend, settingsProblem, type MemoryChannelsOptions, type TestOutcome } from './src/memory';
 export { parseChannel, parseChannelsView, parseChannelsEvent, parseTestStarted, asChannelsError, channelsMessage } from './src/wire';
 export { ChannelsStore, type ChannelsStoreType, type TestState, type TestProgress, type SaveStatus } from './src/channels.store';
-export { CHANNEL_EVENTS, groupEvents, unknownEvents, toggleEvent, type ChannelEventDecl, type ChannelEventGroup } from './src/events';
+export { CHANNEL_EVENTS, eventLabel, groupEvents, unknownEvents, toggleEvent, type ChannelEventDecl, type ChannelEventGroup } from './src/events';
 export {
   EMPTY_DRAFT,
   channelNeedsSecret,

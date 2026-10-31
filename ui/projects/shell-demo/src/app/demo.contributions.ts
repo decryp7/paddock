@@ -96,10 +96,10 @@ export const PACKS_PAGE = definePacksSettingsPage({
 
 /** The events the demo app sends: grouped checkboxes on the channels page (a channel's other names stay under "Other events"). */
 const DEMO_CHANNEL_EVENTS: readonly ChannelEventDecl[] = [
-  { name: 'diskLow', group: 'Storage', description: 'A drive is nearly full.' },
-  { name: 'serviceDown', group: 'Service', description: 'The background service stopped unexpectedly.' },
-  { name: 'jobFailed', group: 'Jobs', description: 'A background job ended with an error.' },
-  { name: 'jobDone', group: 'Jobs', description: 'A background job finished.' },
+  { name: 'diskLow', label: 'Disk low', group: 'Storage', description: 'A drive is nearly full.' },
+  { name: 'serviceDown', label: 'Service stopped', group: 'Service', description: 'The background service stopped unexpectedly.' },
+  { name: 'jobFailed', label: 'Job failed', group: 'Jobs', description: 'A background job ended with an error.' },
+  { name: 'jobDone', label: 'Job finished', group: 'Jobs', description: 'A background job finished.' },
 ];
 
 /** Settings > Notification channels (plan X17): a table of channels with an inline editor; its providers load with the page. */

@@ -591,10 +591,10 @@ describe('the home-network switch', () => {
 
 describe('declared events', () => {
   const E = [
-    { name: 'a', group: 'One', description: 'A.' },
-    { name: 'b', group: 'Two', description: 'B.' },
-    { name: 'c', group: 'One', description: 'C.' },
-    { name: 'a', group: 'Two', description: 'repeat' },
+    { name: 'a', label: 'Event a', group: 'One', description: 'A.' },
+    { name: 'b', label: 'Event b', group: 'Two', description: 'B.' },
+    { name: 'c', label: 'Event c', group: 'One', description: 'C.' },
+    { name: 'a', label: 'Event a', group: 'Two', description: 'repeat' },
   ];
 
   it('are grouped in order of first appearance, a repeated name once', () => {

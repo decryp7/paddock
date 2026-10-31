@@ -28,7 +28,7 @@ export interface ChannelsSettingsPageOptions {
   /** The page's component: `() => import('@decryp7/paddock-ui/shell/channels/page').then((m) => m.PdChannelsPage)`. */
   readonly load: NonNullable<SettingsPageDef['load']>;
   /**
-   * The events this app sends, with a group and a description each. The page then shows grouped checkboxes; names a channel
+   * The events this app sends, with a label, a group and a description each. The page then shows grouped checkboxes; names a channel
    * already has that are not listed stay under "Other events". Leave it out to keep the free-text field only.
    */
   readonly events?: readonly ChannelEventDecl[];
@@ -42,6 +42,8 @@ export function defineChannelsSettingsPage(options: ChannelsSettingsPageOptions)
     group: 'application',
     title: msg('pd.settings.channels', 'Notification channels'),
     order: 85,
+    // The page has its own Save button for the channel being edited: the Settings footer must not claim changes are live.
+    autosaves: false,
     providers: events.length === 0 ? options.providers : async () => [...(await options.providers()), { provide: CHANNEL_EVENTS, useValue: events }],
     load: options.load,
   });

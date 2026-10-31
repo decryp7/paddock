@@ -7,6 +7,8 @@ import { InjectionToken } from '@angular/core';
 export interface ChannelEventDecl {
   /** The name stored in the channel's event list, for example `diskLow`. */
   readonly name: string;
+  /** What the person reads, in sentence case ("Disk low"); the name is only shown for an event the app did not declare. */
+  readonly label: string;
   /** The heading it is listed under, for example `Storage`. Events with the same group are listed together. */
   readonly group: string;
   /** One sentence that says when it happens; shown as help text under the checkbox. */
@@ -48,4 +50,9 @@ export function unknownEvents(selected: readonly string[], declared: readonly Ch
 export function toggleEvent(selected: readonly string[], name: string, on: boolean): string[] {
   const rest = selected.filter((n) => n !== name);
   return on ? [...rest, name] : rest;
+}
+
+/** The label to show for event `name`: the declared one, else the name itself. */
+export function eventLabel(name: string, declared: readonly ChannelEventDecl[]): string {
+  return declared.find((e) => e.name === name)?.label ?? name;
 }

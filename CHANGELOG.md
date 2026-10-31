@@ -4,6 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Channels page and Settings footer: labels, host display, family look, switch, `autosaves`
+- `ChannelEventDecl.label` is required (sentence case); the picker and the table's Events column show it, the id only for an event the app did not declare.
+- The Name column shows the host (`hooks.example.com`, `ntfy.sh/topic`) with the whole address as tooltip and accessible name; Events is wider.
+- The page sits in a card with the family's control height and shape; the home-network control is a switch with its help text aligned; "Other events" is behind Show advanced (names a channel already has stay visible).
+- `SettingsPageDef.autosaves` (default true). A page with its own Save button declares `false` and the Settings footer then omits "Changes are saved as you make them."; the channels page does.
 ### `paddock-channels`, `paddock-net` and the channels page: a home-network switch and a grouped event picker (additive)
 - `ChannelConfig.allow_lan: bool` (wire `allowLan`, serde default false, so files and engines from before it load unchanged), for
   a webhook, an ntfy server and an e-mail channel's SMTP host. With it on, validation accepts a private address (`paddock_net::host_may_be_lan`: an IP literal that `classify` calls `Lan`, or a

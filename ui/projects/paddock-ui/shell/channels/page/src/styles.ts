@@ -1,6 +1,12 @@
 /** The look of the Notification channels page (theme tokens only; no raw colours). Layout follows the container, not the window (rule 18). */
 export const CHANNELS_STYLES = `
   :host { display: flex; flex-direction: column; gap: var(--pd-space-4); color: var(--pd-text); line-height: 1.5; min-width: 0; container-type: inline-size; }
+  /* The family's density and shape for the Material parts, so the page looks the same where an app's global theme is thin. */
+  :host { --mat-button-filled-container-shape: var(--pd-radius-control); --mat-button-outlined-container-shape: var(--pd-radius-control); --mat-button-text-container-shape: var(--pd-radius-control);
+    --mat-button-filled-container-height: var(--pd-control-height); --mat-button-outlined-container-height: var(--pd-control-height); --mat-button-text-container-height: var(--pd-control-height);
+    --mat-form-field-container-height: var(--pd-control-height); --mat-form-field-container-vertical-padding: 0px; }
+  .pd-ch__card { display: flex; flex-direction: column; gap: var(--pd-space-4); padding: var(--pd-space-4); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: var(--pd-surface-1); min-width: 0; }
+  .pd-ch__endpoint { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--pd-text-label); }
   h2, h3 { margin: 0; font-size: var(--pd-text-subtitle); font-weight: var(--pd-weight-semibold); }
   p { margin: 0; overflow-wrap: anywhere; }
   .pd-ch__muted { color: var(--pd-text-muted); }
@@ -14,8 +20,8 @@ export const CHANNELS_STYLES = `
   .pd-ch__name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .pd-ch__name strong { font-weight: var(--pd-weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pd-ch__col-type { width: 6rem; }
-  .pd-ch__col-events { width: 30%; }
-  .pd-ch__col-state { width: 10rem; }
+  .pd-ch__col-events { width: 36%; }
+  .pd-ch__col-state { width: 8rem; }
   .pd-ch__col-actions { width: 7.5rem; }
   .pd-ch__states { display: flex; flex-wrap: wrap; gap: var(--pd-space-1); }
   .pd-ch__actions { --mat-icon-button-state-layer-size: 32px; --mat-icon-button-icon-size: 16px; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 2px; opacity: 0; }
@@ -43,12 +49,15 @@ export const CHANNELS_STYLES = `
   .pd-ch__check { font-weight: var(--pd-weight-medium); }
   mat-checkbox.pd-ch__check { margin-inline-start: calc((var(--pd-control-height) - 18px) / -2); }
   .pd-ch__lan { display: flex; flex-direction: column; gap: var(--pd-space-1); }
+  /* The help text starts where the switch's label does: the track (52px) and the gap before the label. */
+  .pd-ch__hint--under-switch { margin-inline-start: calc(52px + var(--pd-space-3)); }
+  .pd-ch__grid > mat-slide-toggle { align-self: center; }
   .pd-ch__events-picker { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; }
-  .pd-ch__legend { font-weight: var(--pd-weight-medium); }
+  .pd-ch__legend { font-weight: var(--pd-weight-medium); padding: 0; margin: 0 0 var(--pd-space-1); }
   .pd-ch__group { margin: 0; padding: var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); display: flex; flex-direction: column; gap: var(--pd-space-1); min-width: 0; }
   .pd-ch__group legend { padding: 0 var(--pd-space-1); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
   .pd-ch__event { display: flex; flex-direction: column; }
-  .pd-ch__event-help { margin-inline-start: calc(var(--pd-control-height) - 4px); }
+  .pd-ch__event-help { margin-inline-start: calc(var(--pd-control-height) - 2px); margin-top: calc(var(--pd-space-1) * -1); }
   .pd-ch__chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--pd-space-1); }
   .pd-ch__chip { display: inline-flex; align-items: center; gap: var(--pd-space-1); padding: 2px var(--pd-space-1) 2px var(--pd-space-2); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); font-size: var(--pd-text-label); }
   .pd-ch__chip-x { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: inherit; cursor: pointer; }

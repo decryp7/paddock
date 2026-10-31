@@ -5,7 +5,7 @@ import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatCheckbox } from '@angular/material/checkbox';
 import { MatSlideToggle } from '@angular/material/slide-toggle';
 import { MatTooltip } from '@angular/material/tooltip';
-import { PdPathText, SuEmptyState, SuErrorState, SuSkeleton, SuStatusPill } from '@decryp7/paddock-ui';
+import { SuEmptyState, SuErrorState, SuSkeleton, SuStatusPill } from '@decryp7/paddock-ui';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import {
@@ -19,6 +19,7 @@ import {
   draftFromChannel,
   draftHints,
   draftToChannel,
+  eventLabel,
   groupEvents,
   secretKind,
   toggleEvent,
@@ -33,6 +34,7 @@ import {
   type TransportType,
 } from '@decryp7/paddock-ui/shell/channels';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
+import { SettingsStore } from '@decryp7/paddock-ui/shell/settings';
 import { CHANNELS_STYLES } from './styles';
 
 /**
@@ -45,8 +47,9 @@ import { CHANNELS_STYLES } from './styles';
 @Component({
   selector: 'pd-channels-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormField, MatButton, MatCheckbox, MatIconButton, MatSlideToggle, MatTooltip, NgTemplateOutlet, PdGlyph, PdPathText, PdSelect, SuEmptyState, SuErrorState, SuSkeleton, SuStatusPill],
+  imports: [FormField, MatButton, MatCheckbox, MatIconButton, MatSlideToggle, MatTooltip, NgTemplateOutlet, PdGlyph, PdSelect, SuEmptyState, SuErrorState, SuSkeleton, SuStatusPill],
   template: `
+    <div class="pd-ch__card">
     <section class="pd-ch__head" aria-labelledby="pd-ch-title" data-testid="channels-page">
       <div>
         <h2 id="pd-ch-title">{{ t.title }}</h2>
@@ -83,7 +86,8 @@ import { CHANNELS_STYLES } from './styles';
                 <th scope="row" class="pd-ch__namecell">
                   <span class="pd-ch__name">
                     <strong [matTooltip]="c.name">{{ c.name }}</strong>
-                    <pd-path-text class="pd-ch__muted" [value]="endpoint(c)" [plain]="true" />
+                    <span class="pd-ch__muted pd-ch__endpoint" aria-hidden="true" [matTooltip]="endpoint(c)" [attr.data-testid]="'channel-endpoint-' + c.id">{{ endpointShort(c) }}</span>
+                    <span class="pd-sr">{{ endpoint(c) }}</span>
                     @if (store.tests()[c.id]; as test) {
                       <ng-container [ngTemplateOutlet]="result" [ngTemplateOutletContext]="{ $implicit: test, id: c.id }" />
                     }
@@ -91,7 +95,7 @@ import { CHANNELS_STYLES } from './styles';
                 </th>
                 <td class="pd-ch__type">{{ typeLabel(c.transport.type) }}</td>
                 <td class="pd-ch__events">
-                  <span [matTooltip]="c.events.join(', ')">{{ eventsSummary(c) }}</span>
+                  <span [matTooltip]="eventNames(c).join(', ')">{{ eventsSummary(c) }}</span>
                   <span class="pd-ch__muted"> · {{ severityLabel(c.minSeverity) }}</span>
                 </td>
                 <td>
@@ -123,6 +127,8 @@ import { CHANNELS_STYLES } from './styles';
         <pd-skeleton shape="block" height="36" />
       </div>
     }
+
+    </div>
 
     @if (draft(); as d) {
       <form class="pd-ch__editor" aria-labelledby="pd-ch-editor-title" data-testid="channel-editor" (submit)="$event.preventDefault(); save()" (keydown.escape)="$event.stopPropagation(); cancel()">
@@ -218,12 +224,13 @@ import { CHANNELS_STYLES } from './styles';
                   <legend>{{ g.group }}</legend>
                   @for (e of g.events; track e.name; let ei = $index) {
                     <div class="pd-ch__event">
-                      <mat-checkbox [checked]="isOn(e.name)" (change)="setEvent(e.name, $event.checked)" [aria-describedby]="'pd-ch-ev-' + gi + '-' + ei" [attr.data-testid]="'channel-event-' + e.name">{{ e.name }}</mat-checkbox>
+                      <mat-checkbox [checked]="isOn(e.name)" (change)="setEvent(e.name, $event.checked)" [aria-describedby]="'pd-ch-ev-' + gi + '-' + ei" [attr.data-testid]="'channel-event-' + e.name">{{ e.label }}</mat-checkbox>
                       <span class="pd-ch__hint pd-ch__event-help" [id]="'pd-ch-ev-' + gi + '-' + ei">{{ e.description }}</span>
                     </div>
                   }
                 </fieldset>
               }
+              @if (showOther()) {
               <fieldset class="pd-ch__group" data-testid="channel-events-other">
                 <legend>{{ t.otherEvents }}</legend>
                 @if (otherEvents().length > 0) {
@@ -244,6 +251,7 @@ import { CHANNELS_STYLES } from './styles';
                   <button matButton="outlined" type="button" data-testid="channel-event-other-add" [disabled]="!hasOtherNames()" (click)="addOther()">{{ t.otherAddButton }}</button>
                 </div>
               </fieldset>
+              }
             </fieldset>
           } @else {
             <label class="pd-ch__field pd-ch__field--wide">
@@ -262,8 +270,8 @@ import { CHANNELS_STYLES } from './styles';
             <mat-checkbox class="pd-ch__check pd-ch__field--wide" [formField]="f.auth" data-testid="channel-auth">{{ t.fAuth }}</mat-checkbox>
           }
           <div class="pd-ch__lan pd-ch__field--wide" data-testid="channel-lan-field">
-            <mat-checkbox class="pd-ch__check" [formField]="f.allowLan" aria-describedby="pd-ch-h-lan" data-testid="channel-allow-lan">{{ t.fLan }}</mat-checkbox>
-            <span id="pd-ch-h-lan" class="pd-ch__hint">{{ t.lanHint }}</span>
+            <mat-slide-toggle class="pd-ch__check" [formField]="f.allowLan" aria-describedby="pd-ch-h-lan" data-testid="channel-allow-lan">{{ t.fLan }}</mat-slide-toggle>
+            <span id="pd-ch-h-lan" class="pd-ch__hint pd-ch__hint--under-switch">{{ t.lanHint }}</span>
           </div>
           @if (draftNeedsSecret()) {
             <div class="pd-ch__secret" data-testid="channel-secret" role="group" [attr.aria-label]="secretWord(d.type)">
@@ -334,6 +342,9 @@ export class PdChannelsPage {
   /** Names the channel has that the app did not declare: kept, shown as removable chips. */
   protected readonly otherEvents = computed(() => unknownEvents(this.selected(), this.declared));
   protected readonly otherText = signal('');
+  private readonly settings = inject(SettingsStore, { optional: true });
+  /** "Other events" (names the app did not declare, and typing one) sits behind the Settings window's Show advanced; names a channel already has are always shown. */
+  protected readonly showOther = computed(() => this.otherEvents().length > 0 || (this.settings?.showAdvanced() ?? true));
   /** Whether the add field holds at least one name (just commas or spaces is not one). */
   protected readonly hasOtherNames = computed(() => tokens(this.otherText()).length > 0);
   /** The draft being edited, or null when no editor is open. */
@@ -449,7 +460,25 @@ export class PdChannelsPage {
 
   protected eventsSummary(c: ChannelConfig): string {
     if (c.events.length === 0) return $localize`:@@pd.channels.no-events:No events chosen`;
-    return c.events.length <= 2 ? c.events.join(', ') : $localize`:@@pd.channels.events-more:${c.events.slice(0, 2).join(', ')}:first: and ${c.events.length - 2}:more: more`;
+    const names = this.eventNames(c);
+    return names.length <= 2 ? names.join(', ') : $localize`:@@pd.channels.events-more:${names.slice(0, 2).join(', ')}:first: and ${names.length - 2}:more: more`;
+  }
+
+  /** The channel's events as people read them: the declared label, else the name. */
+  protected eventNames(c: ChannelConfig): string[] {
+    return c.events.map((n) => eventLabel(n, this.declared));
+  }
+
+  /** What the Name column shows under the name: the host (never a middle-cut address); the full address is the tooltip and the accessible name. */
+  protected endpointShort(c: ChannelConfig): string {
+    const t = c.transport;
+    if (t.type === 'email') return `${t.host}:${t.port}`;
+    try {
+      const host = new URL(t.type === 'webhook' ? t.url : t.server).host;
+      return t.type === 'ntfy' ? `${host}/${t.topic}` : host;
+    } catch {
+      return this.endpoint(c);
+    }
   }
 
   protected endpoint(c: ChannelConfig): string {
