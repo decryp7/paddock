@@ -105,9 +105,9 @@ as a proxy for per-OS branches.
 | draw.io CLI wrappers (sh) | 6 | 159 | 0 | 6 | 5 | `dev diagrams export` |
 | npm lifecycle, i18n, UI coverage glue | 6 | 485 | 0 | 3 | 5 | `dev` commands called from `package.json` |
 | UI source lints (`lint-effects`, `lint-styles`) | 2 | 243 | 0 | 0 | 6 | **stay JS**: rules in the ESLint preset |
-| TypeScript type-checker analysis | 2 | 633 | 0 | 8 | 6 | **stays TS** until the dialog command contract is generated from Rust, then deleted |
-| Playwright screenshot and visual-QA suites | 5 | 720 | 0 | 6 | – | **stay TS** |
-| Bootstrap shell (`ci-image/*.sh`, `tools/bootstrap.sh`, `scripts/setup-dev.sh`, two app bootstraps) | 7 | 485 | 0 | 90 | 3 | **stays shell**, merged into one bootstrap per OS |
+| TypeScript type-checker analysis | 2 | 633 | 0 | 8 | 6 | **stays TS** (superseded, G.10 decision 9) until the dialog command contract is generated from Rust, then deleted |
+| Playwright screenshot and visual-QA suites | 5 | 720 | 0 | 6 | – | **stay TS** (superseded, G.10 decision 9) |
+| Bootstrap shell (`ci-image/*.sh`, `tools/bootstrap.sh`, `scripts/setup-dev.sh`, two app bootstraps) | 7 | 485 | 0 | 90 | 3 | **stays shell** (superseded, G.10 decision 9), merged into one bootstrap per OS |
 | One-off migrations | 3 | 491 | 2 | 16 | 1 | deleted |
 
 Duplicates the tool collapses (verified by reading): three libduckdb fetchers beside Debrief's Rust `xtask libduckdb`;
@@ -157,7 +157,7 @@ phase 5 (generators and glue) and phase 6 (the alternatives for the lossy catego
   then never touches `crates/Cargo.lock`, which the planner treats as an input of every crate. The libraries stay in
   `crates/` (published, 99% coverage, hakari) and are path dependencies of the tool. The planner gets a `paddock-dev`
   project with its own three-OS leg (fmt, clippy, xwin clippy, nextest).
-- **`./dev` at the repository root, and `dev.cmd` beside it** (part of the bootstrap that stays shell). `./dev` is about
+- **`./dev` at the repository root, and `dev.cmd` beside it** (part of the bootstrap that stays shell (superseded, G.10 decision 9): these two launchers are exception (c), G.2). `./dev` is about
   40 lines of POSIX shell. `dev.cmd` is a two-line delegate that runs `./dev` with Git for Windows' `bash.exe`, which every
   Windows machine of ours has (CI steps already run in Git Bash). "Works from any subfolder" means **root discovery
   only**: the wrapper finds the root with `git rev-parse --show-toplevel` and runs the tool there. The tool gets the
@@ -285,7 +285,7 @@ secrets.
 
 The YAML step stays a Git Bash one-liner (`./dev ci setup …`). The junction, path conversion, extraction and hashing
 happen in Rust (`std::os::windows`, the `junction` crate, `paddock-archive`, `sha2`), not in `cygpath`, `cmd //c mklink`
-or PowerShell. The host bootstrap (Rust, Git, Visual Studio build tools, Node for the UI) stays shell, merged into one
+or PowerShell. The host bootstrap (Rust, Git, Visual Studio build tools, Node for the UI) stays shell (superseded, G.10 decision 9), merged into one
 `tools/bootstrap.{sh,ps1}` per OS in phase 3.
 
 ### 3.5 Speed
@@ -411,7 +411,7 @@ times the JS it replaces after duplicates collapse, shell about 2 times; tests a
 | | R12 | `dev icons` (resvg, PNG, `.icns`, `.ico`, previews and sheets with `paddock-chromium`, install and `--check`); `cargo deny` on resvg's licence | 4.5 | 4,098 + 161 | 4,500 + 1,200 tests |
 | | R13 | `dev images` (posters: templates and `paddock-chromium` screenshots) | 2 | 1,278 | 600 + 300 tests |
 | | R14 | npm glue: `build-info`, `whats-new`, i18n locales, `tauri-before-build`, `ui-coverage-guard` as `./dev` commands | 1 | 485 + about 300 | 500 + 400 tests |
-| **6 Lossy categories** | R15 | UI lints into the ESLint preset (moved, not deleted); dialog command contract generated from Rust, then the TS analysis deleted | 2.5 | 633 (243 moved) | 400 + 300 tests |
+| **6 Lossy categories** | R15 | UI lints into the ESLint preset (moved, not deleted (superseded, G.10 decision 9)); dialog command contract generated from Rust, then the TS analysis deleted (superseded, G.10 decision 9) | 2.5 | 633 (243 moved) | 400 + 300 tests |
 | | R16 | clean-up: allow-list down to its final form, docs, a lesson in `docs/lessons.md` | 0.5 | about 200 | 200 |
 | | | **Total** | **about 45, plus about 1.5 for the six checkpoints** | **about 23,900 source and inline shell + about 7,400 test lines** | **about 20,700 Rust + 5,000 data + 14,400 test lines** |
 
@@ -463,7 +463,7 @@ checkpoint can only reorder or pause later work, never undo the decision for all
 
 **Line deltas:** about 23,900 lines of JS, shell, PowerShell, Python and inline shell go (measured), and 243 lint lines
 move into the ESLint preset. About 20,700 Rust lines and 5,000 lines of diagram data come in (estimated). About 1,100
-duplicated lines collapse. Left outside Rust: 1,353 TS lines (the Playwright suites, and the TS analysis until R15
+duplicated lines collapse. Left outside Rust: 1,353 TS lines (the Playwright suites, and the TS analysis until R15 (superseded, G.10 decision 9)
 removes it), 243 lines of ESLint rules, about 570 lines of bootstrap shell, and YAML.
 
 ## Consequences
@@ -492,7 +492,7 @@ The user took these decisions on 2026-10-28:
    the control; when both counts are below 5, pass means no more commits than the baseline. Phases continue during the
    checkpoint window.
 4. **A joint rules-model note with Pacenotes comes before the rules crate** (R8a); the user approves it.
-5. **The dialog command contract is generated from Rust** (R15), so the TypeScript analysis is deleted rather than kept.
+5. **The dialog command contract is generated from Rust** (R15), so the TypeScript analysis is deleted rather than kept (superseded, G.10 decision 9: the check is ported to Rust as row 71, R19).
 
 ## Amendment (2026-10-28): job-isolation slots in R0
 
@@ -533,7 +533,7 @@ is the first.
 
 ## Amendment (2026-10-31, Proposed amendment): generic tools, extensibility and tool logging
 
-- Status: **Proposed amendment**, not yet accepted: the user took its decisions on 2026-10-31 and 2026-11-01 (G.10, nine in all); acceptance
+- Status: **Proposed amendment**, not yet accepted: the user took its decisions on 2026-10-31 and 2026-11-01 (G.10, ten in all); acceptance
   waits for the re-review of the 2026-11-01 change (compiled Rust only) and the re-check of the earlier review's fixes. The rest of this ADR stands; where this section differs, it describes
   the change being proposed.
 - Asked by the user on 2026-10-31: "start moving all to rust tooling", "consider which ones are generic and which are
@@ -580,12 +580,12 @@ binaries, Paddock-specific commands stay in `./dev`, and both stand on one share
 | **Generic** | Useful to any project, or to any project that follows the engineering rules; reads no Paddock path, app id or file format (inputs come from flags or the project's config) | `devkit`, or a standalone tool (G.3) |
 | **Paddock** | Knows Paddock's layout, apps, `paddock.ci.json`, the release kit, Tauri bundle layout of the family, or the family's style | `./dev` (`tools/paddock-dev`), as §3.1 says |
 | **Split** | A generic engine plus Paddock-specific configuration or rules | engine in a generic tool or a `crates/` library; Paddock's part as a **data pack** (G.4) or as `./dev` code registered on the engine |
-| **X (exception)** | Only (a) test code that a test framework requires in its own language (Playwright, visual-QA and Vitest specs), (b) a config file another tool reads (ESLint config, `angular.json`, `tsconfig`, CI and hook YAML), or (c) the minimal bootstrap that must run before Rust exists | stays, as small as possible; nothing else is an exception |
+| **X (exception)** | Only (a) code that a third-party framework loads in its own language (test specs, test reporters, lint-rule plugins: Playwright, visual-QA and Vitest specs, the Playwright reporter, ESLint rule plugins), (b) a config file another tool reads (ESLint config, `angular.json`, `tsconfig`, CI and hook YAML), or (c) the minimal bootstrap that must run before Rust exists | stays, as small as possible; nothing else is an exception |
 
-Counts (Appendix G, 96 rows covering the non-Rust tooling files listed there, with the exclusions its header names; copies of
-one mechanism are one row): **Generic 23, Paddock 52, Split 16, X (exception) 5**. Since 2026-11-01 (G.10, decision 9) all tooling is compiled
-Rust: the 21 rows first classed Keep were re-classified, 16 to Paddock (three of them deletions), one to Generic and four
-stay as exceptions (the other exception, row 95, is new). The generic rows
+Counts (Appendix G, 97 rows covering the non-Rust tooling files listed there, with the exclusions its header names; copies of
+one mechanism are one row): **Generic 23, Paddock 52, Split 16, X (exception) 6**. Since 2026-11-01 (G.10, decision 9) all tooling is compiled
+Rust: the 21 rows first classed Keep were re-classified, 16 to Paddock (four of them deletions), one to Generic and four
+stay as exceptions (rows 95 and 97, two more, are new splits). The generic rows
 hold about 4,800 lines (copies included), the split rows about 6,800 (row 24 lost 413 lines to row 25, rows 87 and 88 added 173); row 85
 (generated-diagram sources, Paddock) alone is 5,220 lines; the rest is Paddock or an exception.
 
@@ -808,14 +808,14 @@ The R-packages keep their numbers. New generic packages are **G0 to G12**. "Stat
 | R12 | `dev icons` | Paddock | – | 4.5 |
 | R13 | `dev images` | Paddock | – | 2 |
 | R14 | npm glue | Paddock | – | 1 |
-| R15 | lossy categories (unchanged), plus the TS dialog analysis, now ported (row 71, in R19) | Paddock | – | 2.5 |
+| R15 | generate the dialog command contract from Rust with ts-rs (reduced 2026-11-01 from 2.5: the UI lints and the analysis check are in R19, so they are not counted twice) | Paddock | – | 1.5 |
 | R16 | clean-up, plus deleting engineering-rules' replaced scripts and templates after the overlap | – | – | 1 |
 | G13 to G26, R17, R18 | **Adopted 2026-10-31 by reference** from [the features research note](../research/2026-10-dev-tooling-features.md) (its table of work packages, 23.0 agent-days; the note's priorities and dependencies stand): hooks through `heavy` (G13), `ci triage` (G14), worktree hooks (G15), `doctor` (G16), dispatch guard (G17), secret scan with betterleaks v1 (G18), tool version range (G19), flake ledger (G20), stall dump (G21), worktree finish (G22), MCP mode (G23), timing trends (G24), per-agent ledger (G25), gate stamps (G26), `./dev check --pre-push` (R17), release bump (R18) | mixed | – | 23.0 |
 | R19 | UI-side tooling in Rust (rows 71, 72, 75, 94): dialog-command analysis (the contract generated from Rust with ts-rs and checked by `oxc` source analysis in `./dev check`; no type checker is needed once generated), the UI source lints as `./dev check` rules, Sass (`grass`) and `tsc`/stamp glue as `./dev ui build`, the shipped i18n CLI as `./dev i18n` (the npm bin entries are removed; no backward compatibility before v1) | Paddock | – | 10 |
 | R20 | setup and image tooling (rows 76, 77, 95): `./dev setup` per OS replaces the bootstrap scripts, `devkit image verify`, and the minimal rustup shim (exception c) with its test | Paddock | – | 3 |
 | R21 | Debrief `xtask`s (rows 86, 89, 90, 92): sample log generator, font subsetting, AI eval cases, research harnesses and figure generator | Paddock | – | 8 |
-| R22 | rows 78, 79, 83, 96: linker measurements as `./dev perf link-time`, the spike as a Rust example, the latest.json fixture as a golden, `./dev serve-prod` | Paddock | – | 2.25 |
-| R23 | deletions (rows 80 to 82) and the design-sheet renderer (row 93, with R11) | Paddock | – | 0.5 |
+| R22 | rows 78, 83, 96: linker measurements as `./dev perf link-time`, the latest.json fixture as a golden, `./dev serve-prod` | Paddock | – | 1.75 |
+| R23 | deletions (rows 79 to 82) and the design-sheet renderer (row 93, with R11) | Paddock | – | 0.5 |
 | WP-A1 | job-level last green (from [the Nx note](../research/2026-10-nx-vs-scripts.md) §4, 1.5 to 2 days), **pulled forward** by the user on 2026-10-31: phase 0, before wave 1 | Paddock | – | 1.5 to 2 |
 
 ### G.7 Waves and ordering
@@ -837,13 +837,13 @@ change or on the final run before merge (rule 50). Every local build or test run
 | 1b | G3 to G11 | 9 | per command: the old script's stdout, stderr's `::error::` lines and exit code on fixture inputs, as goldens (`paddock_testkit::golden`); `run` on fixtures that exit with 0xC0000409 (Windows), SIGSEGV (Unix); timings on recorded API replies; commit-lint on the existing 77-line test's messages; bisect and polluter on scripted fake test commands | each PR deletes the script and its test, switches YAML, `package.json`, lefthook and docs, removes the copy from `docs/known-copies.toml`, and shrinks §3.7's baseline |
 | 2 | R0b, R1, R10, R2 + G12, R3, R4, R5, R6, R7, R8a, R8, R11, R12, R13, R14, R15, R16 (this order; the release-path packages above never inside a release window) | 44 (was 38: the earlier sum was wrong, it is 39.5, and the inventory re-estimates add 0.5 for R3 and 4 for R11) | as §3.6 (goldens, shadow week for plan, release, `latest.json`, rules; release dry runs per app); for split engines also a generic fixture repo that is **not** Paddock-shaped | as §3.7; R16 also removes the engineering-rules scripts after their overlap |
 
-Wave 3 (added 2026-11-01): R19 to R23, 23.75 agent-days (about 24), in parallel with wave 2 where the release guard allows; none is on the release path, but R19's `./dev i18n` and `./dev ui build` change what app builds run, so they land outside release windows. Parity tests: the old script's output as goldens (i18n, Sass output, lints on fixtures), the dialog analysis on the existing fixtures plus the generated contract, the sample generator by seed-based property tests (invented data need not match byte for byte); retirement: each PR deletes the script and its test.
+Wave 3 (added 2026-11-01): R19 to R23, 23.25 agent-days (about 23), in parallel with wave 2 where the release guard allows; none is on the release path, but R19's `./dev i18n` and `./dev ui build` change what app builds run, so they land outside release windows. Parity tests: the old script's output as goldens (i18n, Sass output, lints on fixtures), the dialog analysis on the existing fixtures plus the generated contract, the sample generator by seed-based property tests (invented data need not match byte for byte); retirement: each PR deletes the script and its test.
 
 Total about **58 agent-days** (wave 0: 1, wave 1a: 4, wave 1b: 9, wave 2: 44; against §7's 45 plus 1.5): about 4 more for
 the runtime, contract and logging (G1, G2), about 3 more to split engines from Paddock packs; R0 (3.5) is done. The
-adopted features G13 to G26, R17 and R18 add 23.0, and WP-A1 1.5 to 2, so the programme was about 82 agent-days; the compiled-only decision adds wave 3's 24, so the whole programme is
-about **106 agent-days**.
-**With at most two tooling agents (the cap above) that is at least 53 working days each, so at least 11 calendar weeks**
+adopted features G13 to G26, R17 and R18 add 23.0, and WP-A1 1.5 to 2, so the programme was about 82 agent-days; the compiled-only decision adds wave 3's 23 and R15 shrinks by 1 (its lints and analysis are in R19), so the whole programme is
+about **104 agent-days**.
+**With at most two tooling agents (the cap above) that is at least 52 working days each, so at least 11 calendar weeks**
 (5 working days a week, no idle time), before any release window blocks a release-path package. The "now" features of the
 research note (G13 to G19 and R17: about 9.5 days) go into waves 1a and 1b inside this cap.
 
@@ -904,6 +904,9 @@ Decided (user, 2026-11-01): "ignore cargo script. move completely to rust compil
    first classed Keep moved to Rust targets (Appendix G; packages R19 to R23, wave 3 in G.7). The earlier words in
    §2 ("TS only for the Playwright suites and the TS analysis") and §4 ("stays TS", "stays until generated from Rust", "become
    rules in `eslint/`", "shell, one script per OS") are superseded by this decision where they differ.
+
+10. **Paddock's custom ESLint rules stay JavaScript** (user, 2026-11-01): ESLint loads plugins only in JS, and the Angular
+    template rules need Angular's own parser. They are exception (a), row 97; ESLint's config stays exception (b).
 
 Defaults that stand (coordinator, 2026-10-31): the name `devkit`; `wiki` on `paddock-cli`'s exit codes (findings exit 5);
 the project config file `devkit.toml`; a one-release overlap before engineering-rules' scripts are deleted.
@@ -983,7 +986,7 @@ Paddock, S split, X exception (G.2: only a, b or c).
 | 59 | `apps/dyno/scripts/check-bundle.sh` | sh | 77 | Dyno bundle layout | Rel | R2 | P | `./dev release` |
 | 60 | `tools/verify-installed.sh`, `apps/{pitcrew,pitwall}/scripts/{linux,macos}-verify.sh` | sh | 117+62+56+57+106 | check an installed app and its service | Dev, Rel | R5 | P | `./dev host verify-installed` + per-app config |
 | 61 | `scripts/shell-demo/*` | sh | 287 | shell-demo service and desktop smokes | Rel | R5 | P | `./dev host` + vm engine |
-| 62 | `scripts/dialog-commands.mjs`, `apps/debrief/app/scripts/check-dialog-commands.mjs` | js | 79+152 | dialog command contract checks | CI | R15 | P | `./dev check` |
+| 62 | `scripts/dialog-commands.mjs`, `apps/debrief/app/scripts/check-dialog-commands.mjs` | js | 79+152 | dialog command contract checks | CI | R19 | P | `./dev check` (with row 71; R15 only generates the contract) |
 | 63 | `apps/debrief/app/scripts/build-info.mjs`, `whats-new.mjs`, `i18n/*` | js | 55+81+284 | npm glue | Dev, CI | R14 | P | `./dev` from `package.json` |
 | 64 | `apps/pitwall/scripts/tauri-before-build.mjs` | js | 14 | `beforeBuildCommand` | Dev, Rel | R14 | P | `./dev` |
 | 65 | `icons/tools/*` | js | 4,259 | icon pipeline | Dev | R12 | P | `./dev icons` |
@@ -993,19 +996,19 @@ Paddock, S split, X exception (G.2: only a, b or c).
 | 69 | `tools/test/helpers.mjs` | js | 101 | tests of `tools/*.sh` | CI | R5 | P | goes with the scripts |
 | 70 | `apps/debrief/scripts/perf/*` | py, sh | 343 | Debrief import benchmark harness | Dev | – | P | Debrief `xtask` (beside `gen-samples`) |
 | 71 | `apps/debrief/app/scripts/dialog-commands-analysis.mjs` | ts-js | 481 | TS type-checker analysis | CI | R19 | P | `./dev check dialog-commands`: the contract is generated from Rust (ts-rs), so the check reads source with `oxc` and needs no type checker (4 days) |
-| 72 | `apps/debrief/app/scripts/lint-effects.mjs`, `lint-styles.mjs` | js | 91+152 | UI source lints | CI | R19 | P | `./dev check` rules over `oxc` (1.5 days); the ESLint preset keeps only the standard rules |
+| 72 | `apps/debrief/app/scripts/lint-effects.mjs`, `lint-styles.mjs` | js | 91+152 | UI source lints | CI | R19 | P | `./dev check` rules over `oxc` (1.5 days); the custom ESLint rules do not move (row 97) |
 | 73 | `apps/debrief/app/scripts/screenshots/*`, `visual-qa/*` | ts | 732 | Playwright screenshots, visual QA | Dev | – | X | exception (a): Playwright specs are product tests that need Playwright's TypeScript API and WebKit |
-| 74 | `eslint/`, app `eslint.config.js`, `playwright.config.ts` files | js, ts | about 1,200 | Node/Angular toolchain config | CI | – | X | exception (b): config read by ESLint and Playwright (`angular.json` and `tsconfig` likewise) |
-| 75 | `ui/scripts/build-css.mjs`, `build-e2e.mjs`, `stamp-dist.mjs` | js | 45 | Sass and tsc build glue of the UI packages | CI, Dev | R19 | P | `./dev ui build` (Sass with `grass`, runs `tsc`, stamps `dist`; 1.5 days) |
+| 74 | `eslint/` presets, app `eslint.config.js`, `playwright.config.ts` files (not `eslint/src/rules/*.cjs`, row 97) | js, ts | about 640 | Node/Angular toolchain config | CI | – | X | exception (b): config read by ESLint and Playwright (`angular.json` and `tsconfig` likewise) |
+| 75 | `ui/scripts/build-css.mjs`, `build-e2e.mjs`, `stamp-dist.mjs` | js | 45 | Sass and tsc build glue of the UI packages | CI, Dev | R19 | P | `./dev ui build` (Sass with `grass`, runs `tsc`, stamps `dist`; 1.5 days). Fallback if `grass` output differs: the dart-sass standalone binary (compiled), driven by `./dev ui build` |
 | 76 | `tools/bootstrap.sh`, `scripts/setup-dev.sh`, `apps/{pitcrew,pitwall}/scripts/{linux,macos}-bootstrap.sh` | sh | 112+64+63+56+61 | machine bootstrap | Dev | R20 | P | `./dev setup` per OS (installs the tools after the Rust shim of row 95 has put `rustup` and `./dev` in place; 2 days) |
 | 77 | `ci-image/verify.sh` | sh | 94 | verify the CI image's contents | CI | R20 | G | `devkit image verify` (0.5 day) |
 | 78 | `scripts/perf/link-time/*` | sh, py | 107 | recorded linker measurements (rule 48 evidence) | Dev | R22 | P | `./dev perf link-time` (1 day); the recorded results stay as data |
-| 79 | `spikes/dialog-hidden/*` | js | 164 | spike | – | R22 | P | a Rust example in the shell crate (0.5 day), or deleted if its note already records the finding |
+| 79 | `spikes/dialog-hidden/*` | js | 164 | spike (runs in the webview) | – | R23 | P | delete (ADR 0026 records the finding) |
 | 80 | `apps/debrief/scripts/rename-to-debrief.mjs` | js | 336 | one-off rename | – | R23 | P | delete |
 | 81 | `apps/pitcrew/scripts/windows-retire-legacy-runner.ps1` | ps1 | 142 | one-off runner retirement | – | R23 | P | delete |
 | 82 | `conformance/bin/*.mjs` | js | 12 | entry points | CI | R8 | P | delete with the engine |
 | 83 | `conformance/fixtures/pitwall-latest-json.mjs` | js | 118 | fixture | CI | R22 | P | a JSON golden written by the Rust test (0.25 day) |
-| 84 | er `templates/ci/*.yml`, `templates/lefthook.yml` | yaml | – | templates that call 1, 4 | Ag | – | X | exception (b): YAML read by the CI runner and lefthook; they name the binaries (G.3) |
+| 84 | er `templates/ci/*.yml`, `templates/lefthook.yml` | yaml | – | templates that call 1, 4 | Ag | – | X | exception (b): YAML read by the CI runner and lefthook; the condition is that every `run:` line in them is a one-line call of a binary (G.3), with no script logic in YAML |
 | 85 | `apps/*/docs/diagrams/src/*.mjs` and `*.sh` (58 files in debrief 13, dyno 11, pacenotes 1, pitcrew 10, pitwall 10, sighter 5, spotter 8; seven apps) | js, sh | 5,220 | per-app diagram generators (C4, sequence, state, class, deploy, use case) and their export scripts | Dev | R11 | P | `./dev diagrams`; the draw.io export is generic (row 36) |
 | 86 | `apps/debrief/samples/generate.py`, `samples/live/append.py` | py | 2,207+115 | invented sample logs for Debrief | Dev | R21 | P | Debrief `xtask gen-samples` (4 days; seeded, property tests instead of byte parity) |
 | 87 | `apps/debrief/app/e2e-tauri/scripts/fetch-msedgedriver.mjs` | js | 116 | pinned msedgedriver download for the Windows Tauri e2e | CI | R3 | S | `devkit fetch` + catalogue pack |
@@ -1016,13 +1019,14 @@ Paddock, S split, X exception (G.2: only a, b or c).
 | 92 | `apps/debrief/docs/research/*/harness/bench.sh`, `adr_eval.py`, `synonyms.py`, `img/src/duckdb-write-paths.py` | sh, py | 123+100+102+189 | research harnesses and figure generator | Dev | R21 | P | Debrief `xtask research` examples (2 days); the evidence stays with its note |
 | 93 | `apps/pitcrew/docs/design/render.mjs` | js | 47 | render the design sheets | Dev | R23 | P | `./dev diagrams render` with R11 (0.25 day) |
 | 94 | `ui/projects/paddock-ui/bin/*.mjs` (`i18n-build`, `i18n-messages`, `paddock-i18n`) | js | 168+406+170 | the package's i18n CLI, shipped in the npm package | Dev, CI | R19 | P | `./dev i18n` (3 days); the npm `bin` entries are removed (no backward compatibility before v1, rule 40's one mechanism) |
-| 95 | `rustup` installer shims, one per OS (`sh`, `ps1`, at most 30 lines each) and `ci-image/fetch-verified.sh` | sh, ps1 | about 95 | install `rustup`, the pinned toolchain and `./dev` on a fresh machine or in the CI image, before any Rust tool exists | Dev, CI | R20 | X | exception (c): must run before Rust exists; kept as small as possible (download, verify checksum, run `rustup`, build `./dev`), everything else is `./dev setup` (row 76); 0.5 day with a test per OS |
+| 95 | `rustup` installer shims, one per OS (`sh`, `ps1`, at most 30 lines each), the `./dev` (about 40 lines) and `dev.cmd` launchers, and `ci-image/fetch-verified.sh` | sh, ps1 | about 95 | install `rustup`, the stable toolchain (no pin, §3.3, Decisions 1) and `./dev` on a fresh machine or in the CI image, before any Rust tool exists | Dev, CI | R20 | X | exception (c): must run before Rust exists (the `./dev` and `dev.cmd` launchers are the entry that builds and runs the binary); kept as small as possible (download, verify checksum, run `rustup`, build `./dev`), everything else is `./dev setup` (row 76); 0.5 day with a test per OS |
 | 96 | `apps/debrief/app/e2e/serve-prod.mjs` | js | 59 | serve the production build for the end-to-end run | CI | R22 | P | `./dev serve-prod` (0.5 day) |
+| 97 | `eslint/src/rules/*.cjs` | js | 562 | Paddock's custom ESLint rules (including the Angular template rules) | CI | – | X | exception (a), user decision 10 (2026-11-01): ESLint loads plugins only in JS, and the template rules need Angular's own parser |
 
 
 Summary: G 23 (rows 1–22 and 77), P 52 (rows 25, 38–72, 75, 76, 78–83, 85, 86, 89, 90, 92, 93, 94 and 96), S 16 (rows 23, 24, 26–37, 87 and 88),
-X (exception) 5 (rows 73, 74, 84, 91 and 95); 96 rows. The 21 rows first classed K moved: 16 to P (three are deletions: rows 80 to 82),
-1 to G (row 77), 4 stay as X; rows 95 and 96 are new splits of rows 76, 77 and 91. Line totals by class (copies included): about 4,800 G; about 6,800 S; row 85 alone 5,220. Each
+X (exception) 6 (rows 73, 74, 84, 91, 95 and 97); 97 rows. The 21 rows first classed K moved: 16 to P (four are deletions: rows 79 to 82),
+1 to G (row 77), 4 stay as X; rows 95, 96 and 97 are new splits of rows 76, 77, 91 and 74. Line totals by class (copies included): about 4,800 G; about 6,800 S; row 85 alone 5,220. Each
 script's tests (`*.test.mjs`, `*.test.sh`, `tools/test/*`) go with it.
 
 ## Sources
