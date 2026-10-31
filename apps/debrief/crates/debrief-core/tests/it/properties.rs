@@ -990,6 +990,40 @@ fn gen_query() -> impl Strategy<Value = Query> {
         })
 }
 
+/// A workspace whose parser library is the generic parser and the two JSON-lines parsers (CLEF, and JSON for events
+/// without @t). `Workspace::new` compiles the whole built-in library (about 70 ms per workspace), and the properties that
+/// build one workspace per case (256 cases) took 150-180 s on the loaded macOS runner, over the nextest budget (CI 7267).
+/// Paging and timeline totals only need these files read as CLEF lines.
+fn lean_workspace() -> Workspace {
+    let json_parsers: Vec<_> = ["generic", "serilog-clef", "serilog-json"]
+        .iter()
+        .map(|id| {
+            debrief_core::parser::builtin::find(id)
+                .expect("the JSON parsers are built in")
+                .clone()
+        })
+        .collect();
+    Workspace::with_parsers(
+        Profile::default_profile(),
+        debrief_core::PluginRegistry::new(),
+        &debrief_core::parser::ParserSetup::of(&json_parsers),
+    )
+    .unwrap()
+}
+
+#[test]
+fn the_lean_workspace_reads_a_clef_file_like_the_full_one() {
+    let dir = TempDir::new();
+    std::fs::write(dir.0.join("a.clef"), "{\"@t\":\"2026-10-01T00:00:00Z\",\"@mt\":\"hi\",\"Cpu\":7}\n").unwrap();
+    let mut lean = lean_workspace();
+    let mut full = Workspace::new(Profile::default_profile()).unwrap();
+    lean.open(std::slice::from_ref(&dir.0)).unwrap();
+    full.open(std::slice::from_ref(&dir.0)).unwrap();
+    assert_eq!(lean.records().len(), 1);
+    assert_eq!(lean.records().len(), full.records().len());
+    assert_eq!(lean.records()[0].ts, full.records()[0].ts);
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(CASES))]
 
@@ -997,7 +1031,7 @@ proptest! {
     fn paging_partitions_results(recs in prop::collection::vec(gen_rec(), 1..40), q in gen_query(), size in 1usize..15, desc in any::<bool>()) {
         let dir = TempDir::new();
         std::fs::write(dir.0.join("a.clef"), clef_text(&recs)).unwrap();
-        let mut ws = Workspace::new(Profile::default_profile()).unwrap();
+        let mut ws = lean_workspace();
         ws.open(std::slice::from_ref(&dir.0)).unwrap();
         prop_assert_eq!(ws.records().len(), recs.len());
 
@@ -1032,7 +1066,7 @@ proptest! {
     fn timeline_histogram_counts_matching_timestamped_records(recs in prop::collection::vec(gen_rec(), 1..40), q in gen_query(), buckets in 10usize..300) {
         let dir = TempDir::new();
         std::fs::write(dir.0.join("a.clef"), clef_text(&recs)).unwrap();
-        let mut ws = Workspace::new(Profile::default_profile()).unwrap();
+        let mut ws = lean_workspace();
         ws.open(std::slice::from_ref(&dir.0)).unwrap();
         let matching = ws.matching(&q).unwrap();
         let with_ts = matching.iter().filter(|id| ws.records()[**id as usize].ts.is_some()).count();
