@@ -870,6 +870,20 @@ test("Spotter's real-browser tests use the image's Chrome for Testing on Linux: 
   assert.match(read(join(PADDOCK, 'apps', 'spotter', '.config', 'nextest.toml')), /filter = "package\(spotter-render\) & binary\(real_browser\)"\ntest-group = "real-browser"/, 'real browsers take turns under nextest too');
 });
 
+test('the real-browser tests of the crates and of Debrief take turns under nextest (one Chrome cold start at a time)', () => {
+  for (const [file, pkg] of [
+    [join(PADDOCK, 'crates', '.config', 'nextest.toml'), 'paddock-chromium'],
+    [join(PADDOCK, 'apps', 'debrief', '.config', 'nextest.toml'), 'chromium-driver'],
+  ]) {
+    const text = read(file);
+    assert.match(text, /^real-browser = \{ max-threads = 1 \}$/m, `${file}: the real-browser group runs one at a time`);
+    assert.ok(
+      text.includes(`filter = 'package(${pkg}) & binary(it) & test(/^real_browser::/)'\ntest-group = 'real-browser'`),
+      `${file}: ${pkg}'s real_browser tests are in the group`,
+    );
+  }
+});
+
 test("a kit app's end-to-end legs and failure report: ci.yml forwards the shard, the webkit input and uploads the report from the stable workspace", () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   assert.match(ci, /e2e-checks: \$\{\{ matrix\.e2e_checks \}\}\n\s+e2e-shard: \$\{\{ matrix\.e2e_shard \}\}/);

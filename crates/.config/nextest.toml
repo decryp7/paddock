@@ -4,6 +4,16 @@
 # Each crate's integration tests are one binary, `it` (tests/it/main.rs, one module per former tests/<name>.rs): a
 # former binary is a test-name prefix, `cargo nextest run -p paddock-jobs -E 'test(/^pool::/)'`.
 
+# paddock-chromium's real-browser tests (tests/it/real_browser.rs) take turns: Chrome for Testing cold starts side by side
+# starve each other on a loaded runner (Debrief's copy of the driver failed so in CI 7213 and 7250). The start itself is
+# judged on the browser's run state (ADR 0031); the group keeps them from competing with each other.
+[test-groups]
+real-browser = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(paddock-chromium) & binary(it) & test(/^real_browser::/)'
+test-group = 'real-browser'
+
 [profile.default]
 # One test per core but one (rules.md 13), so a full run leaves the machine usable.
 test-threads = -1
@@ -28,3 +38,9 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 [profile.ci.junit]
 # Written to <target>/nextest/ci/junit.xml.
 path = "junit.xml"
+
+# waiver: a real browser's start is judged on its run state (ADR 0031): a working start on a loaded runner is waited for, and
+# only a stuck one fails, after up to 120 s of CPU without becoming ready (the spin patience); 60 s would stop the test first.
+[[profile.ci.overrides]]
+filter = "package(paddock-chromium) & binary(it) & test(/^real_browser::/)"
+slow-timeout = { period = "30s", terminate-after = 6 }

@@ -985,6 +985,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "log",
+ "paddock-proc",
  "serde",
  "serde_json",
  "sha2 0.11.1",
