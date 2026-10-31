@@ -52,7 +52,7 @@ const kind = (k: string, title: string, summary: string, icon: string, spans: nu
   refresh,
 });
 const CATALOGUE: CatalogueInfo<string, string> = {
-  surface: { id: 'popup', columns: 2, maxPlacements: 6, minPlacements: 1, maxUserPresets: 0 },
+  surface: { id: 'popup', noun: 'popup', columns: 2, maxPlacements: 6, minPlacements: 1, maxUserPresets: 0 },
   kinds: [
     kind('alarms', 'Active alarms', 'Most severe first, up to 2', 'pd:bell', [2], 1, 'onChange'),
     kind('disk', 'Disk space', 'Free space per volume', 'pd:folder', [2], 3, { every: { secs: 60 } }),

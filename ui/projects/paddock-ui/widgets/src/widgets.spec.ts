@@ -28,7 +28,7 @@ const kind = (k: string, title: string, spans: number[], maxInstances = 1, icon 
   refresh,
 });
 const CATALOGUE: CatalogueInfo<string, string> = {
-  surface: { id: 'popup', columns: 2, maxPlacements: 4, minPlacements: 1, maxUserPresets: 0 },
+  surface: { id: 'popup', noun: 'popup', columns: 2, maxPlacements: 4, minPlacements: 1, maxUserPresets: 0 },
   kinds: [kind('cpu', 'CPU and memory', [2]), kind('alarms', 'Active alarms', [2], 1, 'pd:bell', 'onChange'), kind('disk', 'Disk space', [2], 2, 'pd:folder', { every: { secs: 60 } }), kind('net', 'Network', [1, 2])],
 };
 const place = (id: string, k: W['kind'], span = 2): Placement<W> => ({ id, span, widget: { kind: k } });
@@ -606,9 +606,9 @@ describe('pd-widget-chooser', () => {
 
   it('says "Add another" when the app gives no label', async () => {
     setupIcons();
-    @Component({ changeDetection: ChangeDetectionStrategy.OnPush, imports: [PdWidgetChooser], template: `<pd-widget-chooser [view]="v" [widgetFor]="wf" noun="dashboard" />` })
+    @Component({ changeDetection: ChangeDetectionStrategy.OnPush, imports: [PdWidgetChooser], template: `<pd-widget-chooser [view]="v" [widgetFor]="wf" />` })
     class Plain {
-      v = view({}, [PLACEMENTS[1]!]);
+      v = view({}, [PLACEMENTS[1]!], { ...CATALOGUE, surface: { ...CATALOGUE.surface, noun: 'dashboard' } });
       wf = (k: string): W => ({ kind: k as W['kind'] });
     }
     const f = TestBed.createComponent(Plain);
