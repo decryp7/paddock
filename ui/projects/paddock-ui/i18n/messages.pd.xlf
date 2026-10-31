@@ -197,6 +197,9 @@
       <trans-unit id="pd.channels.events-more" datatype="html">
         <source><x id="first"/> and <x id="more"/> more</source>
       </trans-unit>
+      <trans-unit id="pd.channels.events-pick-hint" datatype="html">
+        <source>Choose the events this channel hears of.</source>
+      </trans-unit>
       <trans-unit id="pd.channels.f-auth" datatype="html">
         <source>This channel needs a token</source>
       </trans-unit>
@@ -211,6 +214,9 @@
       </trans-unit>
       <trans-unit id="pd.channels.f-host" datatype="html">
         <source>Mail server</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-lan" datatype="html">
+        <source>This channel is on my home network (allow a private address)</source>
       </trans-unit>
       <trans-unit id="pd.channels.f-name" datatype="html">
         <source>Name</source>
@@ -266,6 +272,9 @@
       <trans-unit id="pd.channels.hint.url" datatype="html">
         <source>Enter the web address to post to, starting with https://.</source>
       </trans-unit>
+      <trans-unit id="pd.channels.lan-hint" datatype="html">
+        <source>Turn this on only for a web address, ntfy server or mail server in your own home or office network, such as a NAS. Other channels still cannot reach private addresses, and Offline mode still stops this one.</source>
+      </trans-unit>
       <trans-unit id="pd.channels.lede" datatype="html">
         <source>Where the app tells you about things that need attention, even when its window is closed: a web address it posts to, an ntfy topic, or an email.</source>
       </trans-unit>
@@ -290,6 +299,15 @@
       <trans-unit id="pd.channels.no-token" datatype="html">
         <source>No token</source>
       </trans-unit>
+      <trans-unit id="pd.channels.other-add" datatype="html">
+        <source>Add another event name</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.other-add-button" datatype="html">
+        <source>Add event</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.other-events" datatype="html">
+        <source>Other events</source>
+      </trans-unit>
       <trans-unit id="pd.channels.password" datatype="html">
         <source>Password</source>
       </trans-unit>
@@ -307,6 +325,9 @@
       </trans-unit>
       <trans-unit id="pd.channels.remove-close" datatype="html">
         <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-event" datatype="html">
+        <source>Remove event <x id="name"/></source>
       </trans-unit>
       <trans-unit id="pd.channels.remove-invalid" datatype="html">
         <source>This window was opened without a channel to remove. Close it and choose Remove on a channel in the list.</source>

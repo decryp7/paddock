@@ -1053,3 +1053,20 @@ date. **Rule (55, ADR 0034):** every mechanism that exists more than once is lis
 the canonical implementation and every copy in the same change (a freeze does not stop it) or a copy is waived with a reason;
 each copy has an owner and a tag by which it is deleted, and that tag is refused while the copy exists. Before fixing a bug in
 any service, IPC, driver or UI helper, look it up in the register first.
+
+## The fixed start wait hid in a helper named `connect` (2026-10-31, Debrief chromium-driver)
+Debrief's `chromium-driver` real-browser tests failed three times on the loaded Mac runner (CI 7213, 7250 and the run after)
+with `launch: Timeout("the browser start")` after 20 s: two Chrome for Testing cold starts side by side, beside the heavy
+suites, did not write `DevToolsActivePort` within the fixed 20 s of `launch.rs`'s `connect`. ADR 0031's start judge had
+already replaced the same limit in `paddock-chromium` (the canonical), but the fix never reached the copy (rule 55), and C51
+did not flag it because it looks for fixed waits only inside functions named `start*`, `spawn*`, `launch*` or `boot*`.
+**Rule 55 and ADR 0031 applied:** a start's readiness wait is judged by `paddock_proc::StartWatch` wherever it lives,
+whatever the helper is called; a fix in a canonical implementation goes to every copy in `docs/known-copies.toml` in the
+same change, or the copy is waived with a `Copies-waived:` trailer (a register note is not a waiver). Real-browser tests take
+turns in a nextest `real-browser` group (max-threads 1) in every workspace that runs them, with a CI budget waiver longer
+than the spin patience.
+**Endpoint folders leak a third way (CI 7278):** a test process that ends normally while a plugin still starts leaves
+`debrief-plugin-<hex>` behind, because the exit clean-up of the test helpers removed their own folders but not the live
+endpoints. Each fix so far armed one more path (lifeline exit, SIGTERM, now normal exit); the class ends when
+`debrief_ipc` registers its own `atexit` removal when the first endpoint is made, so every binary has it, not only those
+that arm the helpers.

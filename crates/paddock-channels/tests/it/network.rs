@@ -498,6 +498,7 @@ fn the_sender_has_a_debug_form_that_shows_nothing_of_the_policy() {
 #[test]
 fn a_refused_connection_to_a_checked_address_is_a_connect_failure() {
     let port = {
+        // conformance: freed-port — refusal is the case under test; if the port were taken, the send would not be refused and the assert fails
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         l.local_addr().unwrap().port()
     };
