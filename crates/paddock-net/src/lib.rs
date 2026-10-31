@@ -31,7 +31,8 @@ pub use error::NetError;
 pub use fake::{FakeWire, Reply, Seen, StaticLookup};
 pub use policy::{HostPattern, MAX_PATTERNS, MAX_REDIRECTS, Policy};
 pub use reach::{
-    Class, LanAccess, PublicAccess, Reach, Refusal, classify, host_is_loopback, host_may_be_lan, vet,
+    Class, LanAccess, PublicAccess, Reach, Refusal, classify, host_is_loopback, host_may_be_lan,
+    vet,
 };
 pub use request::{Method, Request, Response};
 #[cfg(feature = "http")]
