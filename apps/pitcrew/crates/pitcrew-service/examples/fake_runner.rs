@@ -19,7 +19,8 @@
 //!   `fake.txt` declares those instead (a runner whose registration disagrees with the file).
 //! - `--version` prints `gitea-runner version v<version>`, where the version is the text after `FAKEVER:` at the end
 //!   of the executable file (tests append it to their copy), else 5.2.0.
-//! - Writes `PATH` and `CI_FLAG` from its environment to `env.txt` next to the configuration file.
+//! - Writes `PATH` and `CI_FLAG` from its environment to `env.txt` next to the configuration file, whole (written aside,
+//!   then renamed); `env_gate=1` holds it part way (`env.held`) until the test creates `env.go`.
 //! - Ctrl+Break / SIGTERM: logs the shutdown line and exits 0 (waiting for a running job first, a held one until it is
 //!   released).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods, missing_docs)]
@@ -114,6 +115,51 @@ fn exec_done(pid: &str) -> bool {
     comm.is_empty() || !(comm == "sh" || comm.ends_with("/sh"))
 }
 
+/// With `env_gate=1`: says it is part way through writing `env.txt` (`env.held`) and goes on once the test lets it
+/// (`env.go`), so a test can look at the file in the middle of the write.
+fn gate(dir: &std::path::Path) {
+    std::fs::write(dir.join("env.held"), "").unwrap();
+    // A fake helper process waiting on a file the test creates; bounded so a broken test never leaves it running.
+    for _ in 0..6000 {
+        if dir.join("env.go").exists() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Writes the environment dump to `env.txt` whole: written beside it, then renamed, so a test that sees the file never
+/// reads it empty or half written (it polls for the file to exist).
+fn publish_env(dir: &std::path::Path, dump: &str, held: bool) {
+    let part = dir.join("env.txt.part");
+    std::fs::write(&part, dump).expect("the fake runner writes env.txt.part");
+    if held {
+        gate(dir);
+    }
+    let dest = dir.join("env.txt");
+    // On Windows a rename over a file a test has open for reading fails with a sharing violation (PermissionDenied)
+    // until the reader closes it (a restarted runner rewriting the dump). Nothing signals that close, so this test-only
+    // fake tries a few times with a short, capped back-off (the reader holds a file of a few bytes for microseconds),
+    // then fails loudly.
+    let mut backoff = Duration::from_micros(100);
+    for attempt in 1..=RENAME_ATTEMPTS {
+        match std::fs::rename(&part, &dest) {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && attempt < RENAME_ATTEMPTS => {
+                std::thread::yield_now();
+                std::thread::sleep(backoff);
+                backoff = (backoff * 2).min(MAX_RENAME_BACKOFF);
+            }
+            Err(e) => panic!("the fake runner could not publish {} after {attempt} attempts: {e}", dest.display()),
+        }
+    }
+}
+
+/// How often a refused rename of `env.txt` is tried (at most about 0.2 s in all with the capped back-off).
+const RENAME_ATTEMPTS: u32 = 50;
+/// The longest pause between two tries of the rename.
+const MAX_RENAME_BACKOFF: Duration = Duration::from_millis(4);
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let config = args.iter().position(|a| a == "--config").and_then(|i| args.get(i + 1)).cloned();
@@ -157,7 +203,7 @@ fn main() {
             .iter()
             .map(|k| format!("{k}={}\n", std::env::var(k).unwrap_or_default()))
             .collect();
-        let _ = std::fs::write(dir.join("env.txt"), dump);
+        publish_env(dir, &dump, s.get("env_gate").is_some_and(|v| v == "1"));
         let _ = std::fs::remove_file(dir.join("job.started"));
     }
     let mode = s.get("mode").cloned().unwrap_or_else(|| "ok".into());

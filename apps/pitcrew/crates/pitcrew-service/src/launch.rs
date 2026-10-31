@@ -9,7 +9,7 @@
 
 use crate::process::quiet_command;
 #[cfg(windows)]
-use crate::process::run_with_timeout;
+use crate::process::{run_detached, run_with_timeout};
 use pitcrew_core::logline::MAX_LINE_LEN;
 use std::io::Read;
 use std::path::PathBuf;
@@ -281,16 +281,21 @@ pub fn graceful_stop(pid: u32, session: Option<u32>) -> Result<(), String> {
         };
         let args = vec!["ctrl-break".to_string(), pid.to_string()];
         match session {
-            Some(s) => crate::platform::win_session::run_in_session(s, &exe, &args, Duration::from_secs(15)),
+            Some(s) => std::thread::Builder::new()
+                .name("stop-in-session".into())
+                .spawn(move || {
+                    // Not waited for (B1); the stop timeout ends a runner whose helper failed.
+                    let _ = crate::platform::win_session::run_in_session(s, &exe, &args, Duration::from_secs(15));
+                })
+                .map(|_| ())
+                .map_err(|e| format!("the stop request could not start: {e}")),
             None => {
+                // B1: the helper takes a moment (it attaches to the runner's console); the supervisor thread that asks
+                // for the stop must not wait for it. A helper that fails is not reported: the stop timeout ends the
+                // runner anyway, and the supervisor says so.
                 let mut cmd = quiet_command(&exe);
                 cmd.args(&args);
-                let out = run_with_timeout(cmd, Duration::from_secs(15)).map_err(|e| e.to_string())?;
-                if out.success {
-                    Ok(())
-                } else {
-                    Err(format!("the stop request failed: {}", out.stderr.trim()))
-                }
+                run_detached(cmd, Duration::from_secs(15), |_| {}).map_err(|e| format!("the stop request could not start: {e}"))
             }
         }
     }

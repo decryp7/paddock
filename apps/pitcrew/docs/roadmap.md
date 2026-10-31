@@ -51,6 +51,9 @@ nothing planned is in the code yet. The remaining engineering follow-ups are at 
   ADR 0022's WP-8.
 - **LaunchDaemon mode** for headless Macs and a **systemd system unit** for headless Linux hosts whose jobs need no GUI.
 - **One SCM service per runner** under a virtual account on Windows, as an option next to session mode.
+- **Auto-scaling:** a pool of pre-registered runners per label set, started and drained from the Actions queue and the
+  host's load, memory and disk, between a minimum and a maximum; ephemeral runners later. *(Planned; [ADR 0021](adr/0021-auto-scale.md)
+  proposed.)*
 
 ## Phase 4: distribution *(planned)*
 

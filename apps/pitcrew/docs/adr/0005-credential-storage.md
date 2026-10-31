@@ -1,6 +1,8 @@
 # 5. Secrets: the OS credential store, owned by the app
 
 - Status: accepted (2026-10-22)
+- Amended by [ADR 0021](0021-auto-scale.md) (proposed, decided by the owner 2026-10-28): the service keeps its own
+  read-only `read:user` token for the Actions queue.
 - Amended by [ADR 0022](0022-host-environment-and-shared-folders.md) (accepted 2026-10-29): environment secrets are stored and read by the service, not the app.
 - Related: ADR 0001; code: `app/src-tauri/src/credentials.rs`, `pitcrew_core::protocol::Secret`
 
