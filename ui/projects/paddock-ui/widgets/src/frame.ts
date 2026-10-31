@@ -79,7 +79,10 @@ interface Meta {
         <div class="pd-w-st">
           <pd-glyph name="refresh" [size]="16" />
           <span class="pd-w-t">{{ s.title }}</span>
-          <span class="pd-w-d">{{ s.phase ? s.phase + ' · ' : '' }}{{ progressText(s.progress, locale) }}</span>
+          @let detail = detailOf(s.phase, s.progress, locale);
+          @if (detail) {
+            <span class="pd-w-d">{{ detail }}</span>
+          }
           <mat-progress-bar class="pd-w-prog" [mode]="percent(s.progress) === null ? 'indeterminate' : 'determinate'" [value]="percent(s.progress) ?? 0" [attr.aria-label]="s.title" />
           @if (s.cancel; as c) {
             <button matButton="text" type="button" class="pd-w-act" (click)="action.emit(c.action)">{{ c.label }}</button>
@@ -174,20 +177,26 @@ export class PdWidgetFrame<V = unknown, A = unknown> {
   });
 
   protected readonly locale = inject(LOCALE_ID);
-  protected progressText = progressText;
+  protected detailOf = detailOf;
   protected percent = percent;
 }
 
-/** The share of a fraction (0 to 100), or null for a count (an indeterminate bar). */
+/** The share of a fraction (0 to 100), or null for a count or unknown progress (an indeterminate bar). */
 function percent(p: Progress): number | null {
-  return 'fraction' in p ? (p.fraction.total > 0 ? Math.min(100, (p.fraction.done / p.fraction.total) * 100) : 0) : null;
+  return p !== 'unknown' && 'fraction' in p ? (p.fraction.total > 0 ? Math.min(100, (p.fraction.done / p.fraction.total) * 100) : 0) : null;
 }
 
 /** The working state's progress as words: a growing count when the total is unknown ("12,400 events so far"), else "2 of 3". */
 export function progressText(p: Progress, locale: string): string {
+  if (p === 'unknown') return '';
   const n = new Intl.NumberFormat(locale);
   if ('count' in p) return `${n.format(p.count.done)} ${p.count.unit} so far`.replace('  ', ' ').trim();
   return `${n.format(p.fraction.done)} of ${n.format(p.fraction.total)} ${p.fraction.unit}`.trim();
+}
+
+/** The working line under the title: the phase and the progress words, joined; empty when there is neither. */
+function detailOf(phase: string, p: Progress, locale: string): string {
+  return [phase, progressText(p, locale)].filter((x) => x !== '').join(' · ');
 }
 
 function clock(ms: number): string {
