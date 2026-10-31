@@ -18,6 +18,13 @@ pub struct JobReport {
     pub needs_lwcr_update: bool,
     /// `has LWCR`: a launch constraint from the registered build is stored.
     pub has_lwcr: bool,
+    /// `pid = N`: the job's process while it runs (`None`: no such line).
+    pub pid: Option<u32>,
+    /// `runs = N`: how often launchd has started the job (`None`: no such line).
+    pub runs: Option<u32>,
+    /// `last exit code = N`, also the words after it (`78: EX_CONFIG`) and a negative signal number. `None` while it never
+    /// exited (`(never exited)`) or when the line is missing.
+    pub last_exit: Option<i32>,
 }
 
 /// Reads the report of `launchctl print` (catalogue R03). Only the job's own keys count: nested blocks (`arguments`,
@@ -44,14 +51,28 @@ pub fn parse_job(launchctl_print: &str) -> JobReport {
             job.running = line == "state = running";
         } else if line == "job state = spawn failed" {
             job.spawn_failed = true;
-        } else if line.starts_with("last exit code = 78") {
-            job.exit_config = true;
+        } else if let Some(code) = line.strip_prefix("last exit code = ") {
+            job.exit_config |= code.starts_with("78");
+            job.last_exit = leading_int(code);
+        } else if let Some(n) = line.strip_prefix("pid = ") {
+            job.pid = n.trim().parse().ok();
+        } else if let Some(n) = line.strip_prefix("runs = ") {
+            job.runs = n.trim().parse().ok();
         } else if line.starts_with("properties = ") {
             job.needs_lwcr_update = line.contains("needs LWCR update");
             job.has_lwcr = line.contains("has LWCR");
         }
     }
     job
+}
+
+/// The integer a text starts with (`78: EX_CONFIG` is 78, `-9` is -9), `None` when it starts with something else.
+fn leading_int(text: &str) -> Option<i32> {
+    let end = text
+        .char_indices()
+        .find(|&(i, c)| !(c.is_ascii_digit() || (i == 0 && c == '-')))
+        .map_or(text.len(), |(i, _)| i);
+    text[..end].parse().ok()
 }
 
 impl JobReport {
@@ -506,6 +527,41 @@ mod tests {
     fn an_unknown_job_is_not_stale_whatever_a_stray_line_says() {
         assert!(!parse_job("\tjob state = spawn failed\n").stale());
         assert!(!parse_job("\tlast exit code = 78\n").stale());
+    }
+
+    #[test]
+    fn the_pid_runs_and_last_exit_come_from_the_jobs_own_lines_only() {
+        let job = parse_job(REAL_RUNNING);
+        assert_eq!(
+            (job.pid, job.runs, job.last_exit),
+            (Some(978), Some(2), Some(3)),
+            "{job:?}"
+        );
+        // A job that never exited or has no pid yet: unknown, not zero.
+        let job = parse_job(HEALTHY.replace("pid = 88412\n", "").as_str());
+        assert_eq!((job.pid, job.runs, job.last_exit), (None, Some(1), None));
+        assert_eq!(parse_job(RUNNING_MACOS_26).pid, Some(880));
+        // The exit code with its words, a signal (negative) and rubbish.
+        let last = |text: &str| parse_job(text).last_exit;
+        assert_eq!(last("\tlast exit code = 78: EX_CONFIG\n"), Some(78));
+        assert_eq!(last("\tlast exit code = -9\n"), Some(-9));
+        assert_eq!(last("\tlast exit code = (never exited)\n"), None);
+        assert_eq!(parse_job("\tpid = x\n\truns = \n").pid, None);
+        assert_eq!(parse_job("").runs, None);
+        // A nested block's pid, runs and exit code never count, whichever way round.
+        let nested = "x = {\n\tthing = {\n\t\tpid = 5\n\t\truns = 9\n\t\tlast exit code = 1\n\t}\n\tstate = waiting\n}\n";
+        let job = parse_job(nested);
+        assert_eq!(
+            (job.pid, job.runs, job.last_exit),
+            (None, None, None),
+            "{job:?}"
+        );
+        let own_after = "x = {\n\tthing = {\n\t\tpid = 5\n\t}\n\tpid = 7\n\truns = 2\n\tlast exit code = 4\n}\n";
+        let job = parse_job(own_after);
+        assert_eq!(
+            (job.pid, job.runs, job.last_exit),
+            (Some(7), Some(2), Some(4))
+        );
     }
 
     #[test]
