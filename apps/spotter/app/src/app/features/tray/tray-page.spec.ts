@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { DEFAULT_KINDS } from '../../core/mock/mock-popover';
 import { TrayPage } from './tray-page';
 import { appProviders, byText, flush, makeMock, settle, text } from '../../../testing/test-helpers';
 
@@ -16,7 +17,7 @@ describe('TrayPage', () => {
   it('draws the engine layout on the shared widget area, in layout order, with the unseen count in the header', async () => {
     const { f, frames, backend } = await make();
     const layout = (await backend.popoverView()).catalogue.kinds;
-    expect(frames()).toHaveLength(5);
+    expect(frames()).toHaveLength(DEFAULT_KINDS.length);
     expect(text(frames()[0]!)).toContain(layout.find((k) => k.kind === 'recentChanges')!.title);
     expect(text(f.nativeElement.querySelector('.pill'))).toMatch(/^\d+ new$/);
     expect(backend.calls).toEqual(expect.arrayContaining(['listWatches', 'popoverView', 'popoverValues']));
@@ -26,8 +27,8 @@ describe('TrayPage', () => {
     const { f, frames } = await make(makeMock({ scenario: 'empty' }));
     expect(f.nativeElement.querySelector('.pill')).toBeNull();
     expect(text(frames()[0]!)).toContain('See new releases here');
-    expect(text(frames()[1]!)).toContain('See your watches here');
-    expect(byText(frames()[1]!, 'button', 'Add a watch')).not.toBeNull();
+    expect(byText(frames()[0]!, 'button', 'Check all now')).not.toBeNull();
+    expect(text(frames()[DEFAULT_KINDS.indexOf('failures')]!)).toContain('No failures');
   });
 
   it('shows a loading state with a status for assistive technology before the layout arrives', async () => {

@@ -120,10 +120,8 @@ impl Catalogue for PopoverCatalogue {
     fn defaults() -> Vec<Placement<PopoverWidget>> {
         assign_ids([
             (2, PopoverWidget::RecentChanges),
-            (2, PopoverWidget::WatchedSites),
             (2, PopoverWidget::Failures),
-            (1, PopoverWidget::NextCheck),
-            (1, PopoverWidget::Notifications),
+            (2, PopoverWidget::NextCheck),
         ])
     }
 }
@@ -139,17 +137,11 @@ mod tests {
     }
 
     #[test]
-    fn the_defaults_lead_with_what_changed_and_what_is_wrong() {
+    fn the_defaults_answer_is_everything_fine_and_what_is_next_and_fit_the_popup() {
         let kinds: Vec<PopoverKind> = PopoverCatalogue::defaults().iter().map(|p| p.widget.kind()).collect();
         assert_eq!(
             kinds,
-            [
-                PopoverWidget::RecentChanges,
-                PopoverWidget::WatchedSites,
-                PopoverWidget::Failures,
-                PopoverWidget::NextCheck,
-                PopoverWidget::Notifications
-            ]
+            [PopoverWidget::RecentChanges, PopoverWidget::Failures, PopoverWidget::NextCheck]
         );
     }
 
@@ -185,6 +177,14 @@ mod tests {
             at: None,
         })
         .unwrap();
+        for widget in [PopoverWidget::WatchedSites, PopoverWidget::Notifications] {
+            s.edit(Edit::Add {
+                widget,
+                span: None,
+                at: None,
+            })
+            .unwrap();
+        }
         assert_eq!(s.layout().placements.len(), 6);
     }
 

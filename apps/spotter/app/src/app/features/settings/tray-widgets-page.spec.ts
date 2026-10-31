@@ -1,6 +1,7 @@
 import { By } from '@angular/platform-browser';
 import { TestBed } from '@angular/core/testing';
 import { PdWidgetChooser } from '@decryp7/paddock-ui/widgets';
+import { DEFAULT_KINDS } from '../../core/mock/mock-popover';
 import { TrayWidgetsPage } from './tray-widgets-page';
 import { appProviders, byText, makeMock, settle, text } from '../../../testing/test-helpers';
 
@@ -22,7 +23,7 @@ describe('Tray popup settings page', () => {
     expect(text(el.querySelector('h1'))).toBe('Tray popup');
     expect(el.querySelectorAll('.pd-wc-item').length).toBeGreaterThanOrEqual(5);
     const preview = el.querySelector('pd-tray-popover[aria-label="Preview of the popup"]');
-    expect(preview?.querySelectorAll('pd-widget-frame')).toHaveLength(5);
+    expect(preview?.querySelectorAll('pd-widget-frame')).toHaveLength(DEFAULT_KINDS.length);
   });
 
   it('sends an edit from the chooser to the engine and redraws from its answer, the preview with it', async () => {
@@ -33,7 +34,7 @@ describe('Tray popup settings page', () => {
     expect(backend.calls).toContain('editPopover');
     const el = f.nativeElement as HTMLElement;
     expect(el.querySelector('pd-tray-popover pd-widget-frame')).not.toBeNull();
-    expect(el.querySelectorAll('pd-tray-popover pd-widget-frame')).toHaveLength(4);
+    expect(el.querySelectorAll('pd-tray-popover pd-widget-frame')).toHaveLength(DEFAULT_KINDS.length - 1);
     expect(text(el)).not.toContain('Watches that could not be checked, with Retry Remove');
   });
 
@@ -44,7 +45,7 @@ describe('Tray popup settings page', () => {
     chooser.edit.emit({ add: { widget: 'quietHours', span: null, at: null } } as never);
     await settle(f);
     expect(spy).toHaveBeenCalledWith({ add: { widget: 'quietHours', span: null, at: null } });
-    expect(f.nativeElement.querySelectorAll('pd-tray-popover pd-widget-frame')).toHaveLength(6);
+    expect(f.nativeElement.querySelectorAll('pd-tray-popover pd-widget-frame')).toHaveLength(DEFAULT_KINDS.length + 1);
   });
 
   it('says why the engine refused an edit and keeps the layout', async () => {
@@ -53,7 +54,7 @@ describe('Tray popup settings page', () => {
     chooser.edit.emit({ add: { widget: 'failures', span: null, at: null } } as never);
     await settle(f);
     expect(text(f.nativeElement.querySelector('.problem[role=alert]'))).toContain('already shown');
-    expect(f.nativeElement.querySelectorAll('pd-tray-popover pd-widget-frame')).toHaveLength(5);
+    expect(f.nativeElement.querySelectorAll('pd-tray-popover pd-widget-frame')).toHaveLength(DEFAULT_KINDS.length);
   });
 
   it('shows a loading panel, then the failure with Retry when the engine does not answer', async () => {
