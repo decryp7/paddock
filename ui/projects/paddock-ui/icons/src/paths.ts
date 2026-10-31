@@ -17,6 +17,8 @@ export const PD_ICON_PATHS = {
   minus: 'M5 12h14',
   close: 'M6 6l12 12M18 6 6 18',
   check: 'M5 12.5l4.5 4.5L19 7.5',
+  // A circled check: "all good" (the calm empty row of a widget); the status check is the bare tick.
+  'check-circle': 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM8.2 12.3l2.6 2.6 5-5.4',
   more: '',
   download: 'M12 4v11M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15',
   edit: 'M4.5 19.5l.9-4.2L16.6 4.1a2.1 2.1 0 0 1 3 3L8.4 18.3zM14.5 6.2l3.3 3.3',
@@ -57,6 +59,12 @@ export const PD_ICON_PATHS = {
   keyboard: 'M2.5 6.5h19v11h-19zM7.5 14h9',
   columns: 'M4 5h16v14H4zM9.3 5v14M14.7 5v14',
   sort: 'M8 9l4-4 4 4M8 15l4 4 4-4',
+  'arrow-up': 'M12 19V5M6 11l6-6 6 6',
+  'arrow-down': 'M12 5v14M6 13l6 6 6-6',
+  'to-top': 'M5 4.5h14M12 20V9M6.5 14.5 12 9l5.5 5.5',
+  'to-bottom': 'M5 19.5h14M12 4v11M6.5 9.5 12 15l5.5-5.5',
+  // A drag handle (ADR 0035): six filled dots, no lines.
+  grip: '',
   activity: 'M2.5 12h4l3-7.5 4 15 3-7.5h5',
   // Workbench (plan X50, review 1): the assistant, its history, a window kept on top, a panel docked back.
   chat: 'M4.5 5.5h15v10h-8l-4.5 3.5v-3.5h-2.5z',
@@ -82,6 +90,14 @@ export const PD_ICON_DOTS: Readonly<Partial<Record<PdIconName, readonly PdIconDo
     [5, 12, 1.5],
     [12, 12, 1.5],
     [19, 12, 1.5],
+  ],
+  grip: [
+    [9, 6.5, 1.25],
+    [15, 6.5, 1.25],
+    [9, 12, 1.25],
+    [15, 12, 1.25],
+    [9, 17.5, 1.25],
+    [15, 17.5, 1.25],
   ],
   alert: [[12, 15.75, 0.9]],
   info: [[12, 7.5, 1]],

@@ -34,6 +34,7 @@ import { PdSelect } from '@decryp7/paddock-ui/select';
 import { GalData } from './data-sections';
 import { GalMaterial } from './material-section';
 import { GalView } from './view-section';
+import { GalWidgets } from './widgets-section';
 
 echarts.use([LineChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, MarkLineComponent, CanvasRenderer]);
 
@@ -49,7 +50,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
 @Component({
   selector: 'gal-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdStatusGlyph, SuCard, SuStatusPill, SuMetric, SuSparkline, SuEmptyState, SuErrorState, SuSkeleton, SuJob, SuSegmentedControl, SuTrayPopover, PdGlyph, PdPathText, PdSelect, GalData, GalView, GalMaterial],
+  imports: [PdStatusGlyph, SuCard, SuStatusPill, SuMetric, SuSparkline, SuEmptyState, SuErrorState, SuSkeleton, SuJob, SuSegmentedControl, SuTrayPopover, PdGlyph, PdPathText, PdSelect, GalData, GalView, GalWidgets, GalMaterial],
   template: `
     <main class="gal-page">
       <header class="gal-bar">
@@ -316,6 +317,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
 
       <gal-data />
       <gal-view />
+      <gal-widgets />
       @defer (on viewport) {
         <gal-material />
       } @placeholder {

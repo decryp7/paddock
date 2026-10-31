@@ -1,6 +1,6 @@
 # 35. Widget layouts are shared: `paddock-widgets` and the `paddock-ui` widget area and chooser
 
-- Status: Proposed (2026-10-31), revised after independent review round 1. Needed by Dyno 1.0, with everything in it: the
+- Status: Accepted (2026-10-31, after independent review rounds 1-2; the user asked for this in Dyno 1.0). Needed by Dyno 1.0, with everything in it: the
   popup widgets, the dashboard and the menu-bar items editor (user, 2026-10-31: "In Dyno 1.0, delay the tag"; no copies
   left). Dyno's tag waits for work packages WP-A to WP-D.
 - Date: 2026-10-31
@@ -185,8 +185,9 @@ WP-A (`feat/paddock-widgets`) made decisions this ADR left open; these are bindi
     confirmed.
 12. Nothing is lost silently: **any** value that could not be read cleanly (damaged, too large or newer) is kept unread
     and written back unchanged. A newer one stays until the app is updated (edits refused). A damaged or too-large one
-    stays until the person's first edit of that surface, which replaces it; its note says so ("The popup layout could not
-    be read; Dyno shows the defaults and keeps the old layout until you change this one."). The size is bounded by the
+    stays until the person's first edit of that surface, which replaces it; its note says so in neutral words built from the
+    surface noun, never an app name ("The popup layout could not be read. The defaults are shown, and the old layout is
+    kept until you change this one."). The size is bounded by the
     settings file's own limit.
 
 ### 3. The TypeScript contract is generated (ADR 0026 §3)
@@ -208,20 +209,25 @@ CDK (rule 47):
 - **`<pd-widget-area>`**: a layout's widgets in order on the surface's grid (popup: 2 equal columns of 159 px, gap 8 px,
   the popover's 16 px inset). Inputs: `placements`, `catalogue`, `values` (`SurfaceValues`; a placement without a state
   is loading). The app supplies one template per kind with `*pdWidget="'cpuMemory'; let value"`. A `notice` is drawn once,
-  in place of the first row (design guide §8), with its action button; widgets below keep their last values, marked
-  stale. An empty layout shows "Choose what the popup shows" with "Choose widgets" (emits `customize`).
+  above the widgets, with its action button; the widgets keep their last values, marked stale, and the content scrolls
+  past 520 px as usual. An empty layout shows "Choose what the popup shows" with "Choose widgets" (emits `customize`).
 - **`<pd-widget-frame>`**: no border inside the bordered popover; one token step instead (`--pd-surface-2` on
-  `--pd-surface-3`), radius 10, padding 8 / 12. The head: 14 px icon, 12/500 muted title, an optional right-aligned meta
-  ("3 volumes"; stale: a clock icon and "Updated 4 min ago"). The body, by state:
+  `--pd-surface-3`), radius 10, padding 8 / 12. In high-contrast mode (`data-contrast="more"`, the OS setting) the
+  frame gets a 1 px `--pd-border-strong` outline, checked by WP-B's token test. The head: 14 px icon, 12/500 muted title, an optional right-aligned meta
+  ("3 volumes"; stale: a clock icon and the one stale wording, relative "Updated 4 min ago", or "Paused at 14:28" for a
+  live kind whose source stopped; in a half-width frame the meta shortens to the clock and the time, with the full
+  wording in its tooltip and accessible name). The body, by state:
   - *Loading*: the ready template rendered with no value and its parts marked `pdSkeleton` drawn as
     `--pd-skeleton-raised` blocks with the `--pd-skeleton-raised-shine` shimmer (off in reduced motion), so the loading
     height **is** the ready height; a WP-B test asserts equal heights for every kind of the sample catalogue.
   - *Ready*: the app's template.
   - *Working*: a 16 px refresh icon, the title, "phase · progress" (a growing count when the total is unknown), a 4 px
     progress bar (indeterminate for a count), the last value under it when there is one; no timeout (ER-19).
-  - *Empty*: 16 px muted icon, 13/600 title starting with the benefit, one muted line, the next step as a text button.
-    Exception: a calm empty that means "all good" (Dyno: no active alarms) is one real `button` row: success icon,
-    neutral text, relative time, chevron, accessible name "No active alarms, checked 2 min ago. Open alarms".
+  - *Empty*: 16 px muted icon that never repeats the head's icon (`info`, or one with its own meaning such as `plug`
+    for a disconnected disk), 13/600 title starting with the benefit, one muted line, the next step as a text button.
+    Exception: a calm empty that means "all good" (Dyno: no active alarms, no issues) is one real `button` row: success
+    icon, neutral text, relative time or range, chevron, accessible name such as "No active alarms, checked 2 min ago.
+    Open alarms".
   - *Error*: danger icon, the title in plain words, the cause muted, the next step (Retry with its icon) as a text
     button; never raw exception text as the title.
   A frame or row that opens a page is one real `button` with a chevron.
@@ -240,21 +246,22 @@ CDK (rule 47):
     "8 of 8", an info line says "The popup holds 8 widgets. Remove one to add another." and every Add is disabled.
   - **Reset to defaults** (text button). Remove, preset and reset show a Material snack bar with Undo through the family
     toast area while `can_undo` is true; it is dismissed when `can_undo` turns false.
-  - **Preview** beside the lists at widths of 840 px and more (container query): the real `pd-tray-popover` at 360 px
+  - **Preview** beside the lists when the section is 880 px wide (the family form width; container query): the real `pd-tray-popover` at 360 px
     with the same `pd-widget-area` and the same values as the popup, scrolling past 520 px like the popup.
   - When `editable` is false (a newer layout), the lists are read-only and the note explains why.
 - **Gallery**: a "Widgets" page with the frame in every state, the area with a notice, the chooser with a sample
   catalogue, both themes, all densities; its Playwright spec checks sizes, focus order, keyboard reorder and axe.
 
 **Tokens** (in `_tokens.scss`, measured by `npm run test:tokens`, both added in this branch):
-`--pd-meter-neutral` (dark #747d8b, light #767f8d; 3:1 or more on surface-1, -2 and -3: 4.0 and 3.6 on surface-2) for a
-meter's neutral fill (`--pd-chart-neutral-bar` measured 2.8:1 on the widget fill in dark, and stays as it is for charts);
+`--pd-meter-neutral` (dark #7c8593, light #6b7381; 3:1 or more on surface-1, -2 and -3 and against its track, the chart
+grid over surface-2 and -3: lowest 3.19 dark, 3.47 light) for a meter's neutral fill (`--pd-chart-neutral-bar` measured 2.8:1 on the widget fill in dark, and stays as it is for charts);
 `--pd-skeleton-raised` and `--pd-skeleton-raised-shine` (dark #2c3037 / #363b44, light #dadde2 / #e6e8ec), because
 `--pd-skeleton` is the surface-2 colour and vanishes on a widget.
 
 **Design guide amendment** (WP-B, in the same change): §8 gains "Widget area and frame" (the grid, the fill step, the
 padding, the head, the five states and the notice, from §4 above) and "Chooser"; "Tray popups" changes to: header (icon,
-name, one status pill), the widget area (the user's layout; a needs-attention notice replaces the first row), the footer
+name, one status pill), the widget area (the user's layout; a needs-attention notice above the widgets, which keep their stale values and
+scroll), the footer
 with one primary "Open <App>" and one ⋯ icon button whose `mat-menu` holds "Customize widgets…", "Settings…" and
 "Quit <App>"; "Skeletons" names the raised pair; §4 lists `--pd-meter-neutral` and the skeleton pair.
 
@@ -274,7 +281,8 @@ talks to the agent; the app's Rust side relays.
   pinned counters) come from the agent's live push it already subscribes to; slow kinds from `PopoverValues`, asked on
   open and on the agent's change events. It emits `dyno://popover-values` to the popup **only while the popover is
   visible** (paddock-window reports it). When the agent connection is lost it synthesises the surface notice "Agent
-  stopped · Readings paused at 14:28" with Restart agent, and marks every placement's last value `stale_since`. Restart
+  stopped · Readings paused at 14:28" with Restart agent, and marks every placement's last value `stale_since` (the
+  frame says "Paused at 14:28" for live kinds and "Updated 2 min ago" for the others). Restart
   agent goes to the app's own supervisor, never through the agent.
 - **Value builders are one pure module** (`dyno-core/src/widgets/popover_values.rs`): `fn state(kind, inputs) ->
   WidgetState<…>` for every kind, used by the app (live kinds) and the agent (slow kinds); severity, thresholds
@@ -289,9 +297,9 @@ talks to the agent; the app's Rust side relays.
 | `activeAlarms` | Active alarms | 2 | 1 | alarm store, most severe then newest, **2 rows** and "+N more" | on change | calm row: "No active alarms · checked 2 min ago" (opens Alarms) | "Couldn't read alarms" / "The alarm store didn't answer." / Retry | stale: "Updated 4 min ago" |
 | `diskSpace { volume: all \| system \| mount(id) }` | Disk space | 2 | 4 | the agent's volume list (cached; never a fresh `statfs` on open), 3 volumes and "+N more" | every 60 s | "See Time Machine's space when it's connected" / "The disk isn't connected now." / Choose another volume | "Couldn't read volumes" / "The volume list didn't answer." / Retry | stale; a network volume that doesn't answer shows "Not answering" in its row |
 | `cpuMemory` | CPU and memory | 2 | 1 | live push (load, used of total, last minute) | live | none (no sample yet is loading) | none (agent: the notice) | "Paused at 14:28" |
-| `network` | Network | 1, 2 | 1 | live push (down and up, last minute) | live | "See traffic when online" / "Not connected now." / Open network | none (agent: the notice) | "Paused" |
+| `network` | Network | 1, 2 | 1 | live push (down and up, last minute) | live | "See traffic when online" / "Offline now." / Open network | none (agent: the notice) | "Paused at 14:28" |
 | `backupHealth` | Backup | 1, 2 | 1 | the backup check's last report (never runs `tmutil` or `wbadmin` on open) | on change | "Know when backups ran" / "No backup set up." / Set up checks | "Couldn't check" / "tmutil failed." / Retry (starts the check job) | working: "Checking · Time Machine · 2 of 3" |
-| `lastIssue` | Last issue | 2 | 1 | the newest issue of the last 7 days | on change | "Problems Dyno finds show here" / "None in the last 7 days." / Open issues | "Couldn't read issues" / "The issue index is unavailable." / Retry | working: "Reading system logs · Indexing · 12,400 events so far" |
+| `lastIssue` | Last issue | 2 | 1 | the newest issue of the last 7 days | on change | calm row: "No issues in the last 7 days" (opens Issues) | "Couldn't read issues" / "The issue index is unavailable." / Retry | working: "Reading system logs · Indexing · 12,400 events so far" |
 | `pinnedCounters` | Pinned counters | 2 | 1 | the pinned counters' latest readings, 4 rows | live | "Watch your own counters here" / "Pin counters in Dyno; the first 4 show here." / Pin counters | "Couldn't read counters" / "None of the 3 pinned counters answered." / Retry (one row: "Unavailable") | stale |
 | `topApps` | Top apps | 2 | 1 | live push, top CPU, 3 rows | live | none | none (agent: the notice) | "Paused at 14:28" |
 
@@ -362,7 +370,9 @@ and preset names 64 characters, a layout 128 KiB, at most `2 × max_placements` 
 ## Work packages
 
 Order: WP-A lands a type-only commit first (the skeleton on this branch), so WP-B and WP-C1 build against real types;
-then WP-A's behaviour, WP-B and WP-C1 in parallel; WP-C2 when WP-B's components exist; WP-D last. Shared integration
+then WP-A's behaviour, WP-B and WP-C1 in parallel; WP-C2 when WP-B's components exist; WP-D last. WP-C1 and WP-C2 land
+on main as **one merge** (the protocol, settings and UI change together, and neither half works alone), and rule 54's
+installer build (Dyno's release workflow with bundles) runs on that combined landing, not on either half. Shared integration
 points (`crates/Cargo.toml` member line, `ui/projects/paddock-ui` exports and CHANGELOG, `docs/known-copies.toml`) are one
 declared line each, or the integrator's.
 
@@ -393,7 +403,8 @@ declared line each, or the integrator's.
   retry emit the app's action, the empty layout; the chooser emits the right `Edit` for drag, ⌥↑/⌥↓/⌥Home/⌥End and menu
   items, announces moves, disables Add at limits, shows "Added", shows and dismisses the undo toast from `can_undo`, is
   read-only when not `editable`. Gallery Playwright (Chromium): sizes, focus order, menu never over the focus ring, axe in
-  both themes. Components at 100%; `npm run test:tokens` green.
+  both themes. A token test checks that the high-contrast frame outline is `--pd-border-strong` and differs
+  from surface-3 in `more` contrast, and an e2e shot of the gallery in `data-contrast="more"` shows it. Components at 100%; `npm run test:tokens` green.
 - **Gates:** `cd ui && npm run lint && npm test && npm run build && npx playwright test --project=gallery`.
 
 ### WP-C1: Dyno engine, protocol and agent (implementer, Sonnet)
@@ -420,8 +431,9 @@ declared line each, or the integrator's.
   `apps/dyno/docs/adr/0012-*.md` (status: superseded in part by family ADR 0035), Dyno's CHANGELOG.
 - **Build:** the popup (§5), the chooser section, the menu-bar items editor and the dashboard edit mode on the shared
   edits; delete `widget-model.ts`'s catalogue, limits, edits and severity logic and their duplicate specs.
-- **Gates:** `cd apps/dyno/app && npm run lint && npm test`, then rule 54: Dyno's release workflow with bundles before
-  landing.
+- **Build (menus):** the footer menu shows ⌘, and ⌘Q (Ctrl+, and Ctrl+Q on Windows and Linux) only if the popover
+  window binds those keys; otherwise no shortcut is shown.
+- **Gates:** `cd apps/dyno/app && npm run lint && npm test`.
 
 ### WP-D: end-to-end, screenshots and the real-app smoke (implementer, Sonnet)
 
