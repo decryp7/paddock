@@ -946,6 +946,8 @@ pub(crate) mod test_support {
 
     /// The exit handler: every folder of the test helpers still there (the process is going, so none is in use).
     extern "C" fn remove_process_scratch_at_exit() {
+        // Endpoint folders of plugins still starting (a thread nobody joins holds the listener): no destructor runs for them.
+        debrief_ipc::endpoint::remove_live();
         remove_process_scratch();
         let left = std::mem::take(&mut *crate::sync::lock(&OWNED));
         remove_all(left);
@@ -1060,6 +1062,39 @@ pub(crate) mod test_support {
         assert_eq!(status.code(), Some(STOPPED_EXIT), "{status:?}");
         let left: Vec<_> = owned.iter().filter(|p| p.exists()).collect();
         assert!(left.is_empty(), "left behind: {left:?}");
+    }
+
+    /// The probe of [`a_test_process_that_ends_while_a_plugin_starts_leaves_no_endpoint_folder`]: arms the exit clean-up, makes
+    /// a plugin endpoint and never drops it, as a detached thread still waiting for a plugin to connect does at exit.
+    #[test]
+    #[cfg(unix)]
+    fn a_test_process_that_ends_while_a_plugin_starts_leaves_no_endpoint_folder_in_a_lone_process() {
+        if std::env::var_os("DEBRIEF_TEMP_EXIT_PROBE").is_none() {
+            return;
+        }
+        let _armed = TempDir::new("exit-probe");
+        let endpoint = debrief_ipc::endpoint::PrivateEndpoint::create_named(debrief_ipc::endpoint::prefix::PLUGIN).unwrap();
+        println!("ENDPOINT {}", endpoint.dir().unwrap().display());
+        std::mem::forget(endpoint);
+    }
+
+    /// Regression (CI 7278, macOS temp-leak check: `debrief-plugin-*`): a test process that ended normally while a plugin was
+    /// still starting (its listener held by a thread nobody joins) left the endpoint folder behind; the exit clean-up
+    /// removed the test helpers' folders only, not the live endpoints.
+    #[test]
+    #[cfg(unix)]
+    fn a_test_process_that_ends_while_a_plugin_starts_leaves_no_endpoint_folder() {
+        let name = "test_support::a_test_process_that_ends_while_a_plugin_starts_leaves_no_endpoint_folder_in_a_lone_process";
+        let out = debrief_core::process::quiet_command(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--test-threads=1", "--nocapture"])
+            .env("DEBRIEF_TEMP_EXIT_PROBE", "1")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        let text = String::from_utf8_lossy(&out.stdout);
+        let dir = text.split_once("ENDPOINT ").map(|(_, d)| PathBuf::from(d.lines().next().unwrap().trim()));
+        let dir = dir.expect("the probe printed its endpoint folder");
+        assert!(!dir.exists(), "left behind: {dir:?}");
     }
 
     /// Regression (CI 7096): five `ai::tests` ran past nextest's 90 s on a loaded Mac runner while taking 2-4 s alone. Their
