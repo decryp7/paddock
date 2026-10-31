@@ -57,6 +57,10 @@ for (const theme of THEMES) {
     await page.getByTestId('wgt-stop').click();
     await page.getByTestId('wgt-popup').screenshot({ path: join(SHOTS as string, `widgets-popup-${theme}.png`) });
     await chooser(page).screenshot({ path: join(SHOTS as string, `widgets-chooser-${theme}.png`) });
+    await chooser(page).getByLabel('Preset name').fill('Work');
+    await chooser(page).getByRole('button', { name: 'Save as preset' }).click();
+    await expect(chooser(page).getByRole('button', { name: 'Delete the Work preset' })).toBeVisible();
+    await chooser(page).screenshot({ path: join(SHOTS as string, `widgets-chooser-presets-${theme}.png`) });
     await chooser(page).locator('.pd-wc-more').nth(2).click();
     await chooser(page).screenshot({ path: join(SHOTS as string, `widgets-chooser-menu-${theme}.png`) });
     await page.keyboard.press('Escape');
