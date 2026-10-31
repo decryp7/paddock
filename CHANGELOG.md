@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui/material`: `PD_FAMILY_CONTROLS`, one place for the family's Material density and shape (ER-21)
+- A host app's own Material theme could make shared surfaces draw 56px fields with large type, pill buttons and tall segmented controls
+  (Pitcrew's Appearance page and notification centre). The family's geometry and type for buttons, form fields, selects and button
+  toggles is now one constant, put on the host of the Settings window (so every shared settings page), the notification centre,
+  `pd-select` and `su-segmented-control`; custom properties on a host beat any `:root` theme. No per-page copies. A spec keeps it equal to
+  `scss/_material.scss`, and a shell-demo e2e injects a hostile host theme and checks field, button and segmented-control heights.
 ### `DialogFrame`: `contentView`, so a dialog's header, footer and body never show different steps (`@decryp7/paddock-ui/shell/dialogs`)
 - New optional input `contentView` on `DialogFrame` (the mounted content's change detector; `DialogShell` and `DialogHost` set it). `render()` now checks the content together with the frame. Before, a `run` action that changed the content's state (a wizard's Continue) refreshed the header slot and the footer at once while the body, which sits in the host's view, followed on the next tick: for one frame the stepper and the buttons showed the new step over the old, taller body (Pitcrew's register window overflowed its body by 165 px).
 

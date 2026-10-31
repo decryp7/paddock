@@ -18,6 +18,7 @@ import {
   type Type,
 } from '@angular/core';
 import { loadPart, type SettingsPageDef } from '@decryp7/paddock-ui/shell';
+import { PD_FAMILY_CONTROLS } from '@decryp7/paddock-ui/material';
 import { DIALOG_REF, type DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import { fieldText, matchesQuery, settingsNav, type SettingsNavItem, SettingsStore } from '@decryp7/paddock-ui/shell/settings';
 import { PdSettingsSection, PdSettingsSectionPage, SETTINGS_PAGE } from './settings-section';
@@ -152,7 +153,7 @@ interface LoadedPage {
       </section>
     </div>
   `,
-  styles: `
+  styles: PD_FAMILY_CONTROLS + `
     :host { display: flex; flex-direction: column; gap: var(--pd-space-2); height: 100%; min-height: 0; container-type: inline-size; }
     .pd-top { display: flex; align-items: center; gap: var(--pd-space-3); flex-wrap: wrap; }
     .pd-search { flex: 1 1 12rem; min-width: 0; min-height: var(--pd-button-height); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
