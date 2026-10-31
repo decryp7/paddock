@@ -78,13 +78,13 @@ const VALUES: Record<string, Val> = {
 };
 
 const ready = (k: string, staleSince: number | null = null): WidgetState<Val, Act> => ({ state: 'ready', value: VALUES[k] as Val, asOf: NOW, staleSince });
-const empty = (title: string, detail: string, next: string | null): WidgetState<Val, Act> => ({ state: 'empty', title, detail, next: next ? { action: 'open', label: next } : null });
+const empty = (title: string, detail: string, next: string | null, calm = false): WidgetState<Val, Act> => ({ state: 'empty', title, detail, next: next ? { action: 'open', label: next } : null, calm });
 const error = (title: string, cause: string): WidgetState<Val, Act> => ({ state: 'error', title, cause, next: { action: 'retry', label: 'Retry' } });
 const working = (title: string, phase: string, progress: Progress): WidgetState<Val, Act> => ({ state: 'working', title, phase, progress, last: null, cancel: null });
 
 /** One row of the states sheet: a kind and its states (null is loading). */
 const SHEET: readonly { kind: string; states: readonly (readonly [string, WidgetState<Val, Act> | null])[] }[] = [
-  { kind: 'alarms', states: [['loading', null], ['ready', ready('alarms')], ['empty', empty('No active alarms', 'checked 2 min ago', 'Open alarms')], ['error', error("Couldn't read alarms", "The alarm store didn't answer.")], ['stale', ready('alarms', NOW - 4 * MIN)]] },
+  { kind: 'alarms', states: [['loading', null], ['ready', ready('alarms')], ['empty', empty('No active alarms', 'checked 2 min ago', 'Open alarms', true)], ['error', error("Couldn't read alarms", "The alarm store didn't answer.")], ['stale', ready('alarms', NOW - 4 * MIN)]] },
   { kind: 'disk', states: [['loading', null], ['ready', ready('disk')], ['empty', empty("See Time Machine's space when it's connected", "The disk isn't connected now.", 'Choose another volume')], ['error', error("Couldn't read volumes", "The volume list didn't answer.")], ['stale', ready('disk', NOW - 3 * MIN)]] },
   { kind: 'cpu', states: [['loading', null], ['ready', ready('cpu')], ['stale', ready('cpu', NOW - 4 * MIN)]] },
   { kind: 'net', states: [['loading', null], ['ready', ready('net')], ['empty', empty('See traffic when online', 'Offline now.', 'Open network')], ['stale', ready('net', NOW - 4 * MIN)]] },
@@ -125,7 +125,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
       <p>One frame per widget: loading is the ready template with its parts as skeleton blocks, so the height never changes. A busy source is working or stale, never an error.</p>
 
       <!-- The kind templates: one set serves the sheet, the popup and the chooser's preview. -->
-      <ng-template pdWidget="alarms" [pdWidgetCalm]="true" [pdWidgetOf]="witness" let-x let-busy="loading">
+      <ng-template pdWidget="alarms" [pdWidgetOf]="witness" let-x let-busy="loading">
         <div class="wg-rows">
           @for (r of x?.alarms ?? [{ sev: 'Warning', text: 'xxxxxxxxxxxxxxx', when: 'xxxxxx' }, { sev: 'Info', text: 'xxxxxxxxxxxxxxx', when: 'xxxxxx' }]; track $index) {
             <!-- A row that opens a page is one real button; its loading twin is a plain row of the same size. -->
@@ -193,7 +193,6 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
                   [span]="info.spans[0] ?? 2"
                   [state]="st.state"
                   [template]="templateOf(row.kind)"
-                  [calm]="row.kind === 'alarms'"
                   [live]="info.refresh === 'live'"
                   [now]="now"
                   [metaText]="row.kind === 'disk' ? '3 volumes' : null"
