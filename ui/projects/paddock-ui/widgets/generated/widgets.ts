@@ -288,7 +288,7 @@ total: number,
 /**
  * What is counted.
  */
-unit: string, } };
+unit: string, } } | "unknown";
 
 export type WidgetState<V, A> = { "state": "ready", 
 /**

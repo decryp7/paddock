@@ -38,6 +38,9 @@ pub enum Progress {
         /// What is counted.
         unit: String,
     },
+    /// Work whose size and finished count the engine does not know: an indeterminate bar with no count text.
+    /// On the wire it is the bare string `"unknown"`.
+    Unknown,
 }
 
 /// One widget's value as the engine reports it. Loading is not on the wire: it is the UI's state before the first value.
