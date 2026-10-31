@@ -238,7 +238,7 @@ import { CHANNELS_STYLES } from './styles';
                     @for (name of otherEvents(); track name; let i = $index) {
                       <li class="pd-ch__chip">
                         <span>{{ name }}</span>
-                        <button type="button" class="pd-ch__chip-x" [attr.aria-label]="t.removeEvent(name)" [attr.data-testid]="'channel-event-remove-' + name" (click)="removeOther(name, i)"><pd-glyph name="close" [size]="12" /></button>
+                        <button type="button" class="pd-ch__chip-x" [attr.aria-label]="t.removeEvent(name)" [attr.data-testid]="'channel-event-remove-' + name" (click)="removeOther(name, i)"><pd-glyph name="close" [size]="14" /></button>
                       </li>
                     }
                   </ul>
