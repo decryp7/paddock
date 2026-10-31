@@ -670,6 +670,38 @@ describe('pd-widget-chooser', () => {
     expect(TestBed.inject(MatSnackBar)._openedSnackBarRef).toBeNull();
   });
 
+  it('opens no toast for a refused edit even though the old view still says canUndo', async () => {
+    const f = await setup();
+    qa(f, '.pd-wc-more')[3]!.click();
+    await settle(f);
+    menuItems()[4]!.click();
+    await settle(f);
+    f.componentInstance.err.set('At most 4 widgets fit in the popup; remove one first.');
+    await settle(f);
+    f.componentInstance.v.set(view({ canUndo: true }));
+    await settle(f);
+    expect(document.querySelector('.mat-mdc-snack-bar-container')).toBeNull();
+  });
+
+  it('says the only widget cannot move, and cancels the delete confirm with Escape', async () => {
+    const f = await setup();
+    f.componentInstance.v.set(view({}, [PLACEMENTS[0]!]));
+    await settle(f);
+    const say = vi.spyOn(TestBed.inject(LiveAnnouncer), 'announce');
+    key(grip(f, 0), 'ArrowDown');
+    expect(say).toHaveBeenLastCalledWith('Active alarms is the only widget.');
+    key(grip(f, 0), 'ArrowUp');
+    expect(say).toHaveBeenLastCalledWith('Active alarms is the only widget.');
+    f.componentInstance.v.set(withPresets(2, [preset('mine', 'Work', false, 1)], []));
+    await settle(f);
+    (q(f, '[data-preset-delete="mine"]') as HTMLElement).click();
+    await settle(f);
+    q(f, '[data-preset-confirm="mine"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle(f);
+    expect(q(f, '.pd-wc-ask')).toBeNull();
+    expect(document.activeElement).toBe(q(f, '[data-preset-delete="mine"]'));
+  });
+
   it('writes the Option glyph and name on a Mac', async () => {
     TestBed.overrideProvider(KEY_PLATFORM, { useValue: 'mac' });
     const f = await setup();
