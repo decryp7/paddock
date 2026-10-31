@@ -2,7 +2,7 @@
 
 use crate::error::NetError;
 use crate::policy::Policy;
-use crate::reach::{self, LanAccess, Reach, Refusal};
+use crate::reach::{self, LanAccess, PublicAccess, Reach, Refusal};
 use crate::request::{Method, Request, Response, header_of};
 use crate::wire::{Lookup, Wire, WireRequest};
 use paddock_download::{Get, Header, Headers, TransportError, TransportErrorKind};
@@ -288,6 +288,20 @@ impl Egress {
         port: u16,
         lan: LanAccess,
     ) -> Result<Vec<IpAddr>, NetError> {
+        self.check_host_with(host, port, lan, PublicAccess::Policy)
+    }
+
+    /// [`Egress::check_host`] with a limit on public addresses too: with [`PublicAccess::Deny`] a name that resolves to any
+    /// public address is refused (`Refusal::TooFar(Class::Public)`), so only this computer and private networks remain, as
+    /// far as the policy's reach and `lan` allow. For protocols that are not encrypted. `PublicAccess::Policy` is exactly
+    /// `check_host`.
+    pub fn check_host_with(
+        &self,
+        host: &str,
+        port: u16,
+        lan: LanAccess,
+        public: PublicAccess,
+    ) -> Result<Vec<IpAddr>, NetError> {
         if self.is_offline() {
             return Err(NetError::Offline);
         }
@@ -313,6 +327,13 @@ impl Egress {
                 .any(|a| reach::classify(*a) == reach::Class::Lan)
         {
             return Err(refuse(Refusal::TooFar(reach::Class::Lan)));
+        }
+        if public == PublicAccess::Deny
+            && addrs
+                .iter()
+                .any(|a| reach::classify(*a) == reach::Class::Public)
+        {
+            return Err(refuse(Refusal::TooFar(reach::Class::Public)));
         }
         Ok(addrs)
     }

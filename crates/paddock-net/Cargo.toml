@@ -15,7 +15,9 @@ http = ["dep:ureq", "dep:rustls", "paddock-download/http"]
 
 [dependencies]
 paddock-jobs = { workspace = true }
-paddock-download = { workspace = true }
+# Without its own `http` feature: the address classes, `Lookup` and `Egress::check_host` do not need ureq or rustls; the real
+# wire (`http`, on by default here) turns `paddock-download/http` on.
+paddock-download = { path = "../paddock-download", version = "0.2.0", registry = "decryp7", default-features = false }
 url = "2"
 ureq = { version = "3.1", default-features = false, features = ["rustls-no-provider", "platform-verifier"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"], optional = true }

@@ -29,6 +29,17 @@ pub enum LanAccess {
     PlainHttp,
 }
 
+/// Whether a connection may go to a public address, on top of the policy's [`Reach`] (which always allows them). For
+/// protocols that are not encrypted (VNC): "this computer and private networks only". Used by [`Egress::check_host_with`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub enum PublicAccess {
+    /// Public addresses are reachable (the policy's default).
+    #[default]
+    Policy,
+    /// Never a public address: this computer and private networks only.
+    Deny,
+}
+
 /// What an address is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Class {
@@ -181,6 +192,7 @@ impl fmt::Display for Refusal {
             Refusal::NoAddress => "the name has no address",
             Refusal::Never => "the name points at a link-local, unspecified or multicast address",
             Refusal::TooFar(Class::Loopback) => "the name points at this computer",
+            Refusal::TooFar(Class::Public) => "the name points at a public address",
             Refusal::TooFar(_) => "the name points at a private network",
         })
     }
