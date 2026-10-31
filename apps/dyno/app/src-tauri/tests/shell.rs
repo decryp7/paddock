@@ -520,6 +520,7 @@ mod widget_wiring {
         shell.live(update(10.0));
         assert_eq!(shell.metric_readings(&q)[0].value, Some(10.0));
     }
+}
 
 /// Report a problem resolves the real folders (the app's own, and the machine's), which a test never does (ER-14): the test place
 /// composes the shell without it. Pinned on the composed builder, not on a helper, so a changed guard in `shell` is seen.

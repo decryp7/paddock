@@ -364,24 +364,6 @@ pub fn describe_connect(purpose: super::machine::Purpose, handshake_ms: u64) -> 
     }
 }
 
-/// Whether a look must ask the login service. A discovery file beside a held lock is decided on without it (the machine
-/// connects to that agent, or asks it to exit): the service is asked again right after the connection, for the hand-over.
-/// Everything else is decided on what the service says (wait for its agent, or start one).
-fn service_needed(hint: Option<&HintSeen>, lock: Option<LockSeen>) -> bool {
-    !(hint.is_some() && lock == Some(LockSeen::Held))
-}
-
-/// The service's answer for a look that needs it. The probe can take tens of seconds at login (`SMAppService.status` is an xpc
-/// round trip to smd), so a look that does not need it never waits for it.
-fn ask_service(
-    probe: Option<&ServiceProbe>,
-    hint: Option<&HintSeen>,
-    lock: Option<LockSeen>,
-    deciding: bool,
-) -> Option<super::ServiceState> {
-    probe.filter(|_| !deciding || service_needed(hint, lock)).map(|p| p())
-}
-
 /// Connects to the agent a discovery file names and starts the peer that fans its pushes out to the sink.
 pub fn connect(d: &Discovery, sink: &Arc<dyn Sink>) -> Result<Arc<Peer<Message>>, String> {
     let token = d.token().ok_or("The discovery file is damaged.")?;

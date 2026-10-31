@@ -390,7 +390,11 @@ mod tests {
     /// changes in 10 s is flapping.
     #[test]
     fn a_flapping_link_is_summarised_once_per_window_instead_of_a_line_per_change() {
-        assert_eq!((FLAP_LIMIT, FLAP_WINDOW), (8, Duration::from_secs(10)), "ADR 0036: 8 changes per 10 s");
+        assert_eq!(
+            (FLAP_LIMIT, FLAP_WINDOW),
+            (8, Duration::from_secs(10)),
+            "ADR 0036: 8 changes per 10 s"
+        );
         let t0 = Instant::now();
         let mut log = GuardedPhaseLog::new(t0);
         let mut lines = Vec::new();
