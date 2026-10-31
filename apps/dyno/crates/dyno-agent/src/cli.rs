@@ -226,6 +226,7 @@ fn run_exit_code(out: Result<(), StartError>) -> i32 {
 
 fn run() -> Result<(), StartError> {
     let dirs = Dirs::current();
+    let dirs = dirs.clone().with_log_folder(crate::logging::log_dir(&dirs));
     // First: the agent's own dated log (and its panic hook), so every step below is in a file even under launchd.
     let _log = crate::logging::install(&dirs);
     log::info!(
