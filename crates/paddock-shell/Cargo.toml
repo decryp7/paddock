@@ -30,7 +30,7 @@ paddock-commands = { workspace = true, features = ["tauri"] }
 paddock-dialogs = { workspace = true, features = ["tauri"] }
 paddock-diag = { workspace = true, features = ["tauri"] }
 paddock-files = { workspace = true, features = ["tauri"] }
-paddock-download = { workspace = true, features = ["tauri"] }
+paddock-download = { workspace = true, features = ["tauri", "http"] }
 paddock-health = { workspace = true, features = ["tauri"] }
 paddock-jobs = { workspace = true, features = ["tauri"] }
 paddock-env = { workspace = true }

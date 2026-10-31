@@ -89,7 +89,9 @@ paddock-chromium = { path = "paddock-chromium", version = "0.1.0", registry = "d
 paddock-commands = { path = "paddock-commands", version = "0.2.0", registry = "decryp7" }
 paddock-dialogs = { path = "paddock-dialogs", version = "0.2.0", registry = "decryp7" }
 paddock-diag = { path = "paddock-diag", version = "0.1.0", registry = "decryp7" }
-paddock-download = { path = "paddock-download", version = "0.2.0", registry = "decryp7" }
+# No default features: only the members that run a download over the real network enable `http` (ureq and rustls) themselves,
+# so `paddock-net` with `default-features = false` and the crates that only classify addresses do not compile a TLS stack.
+paddock-download = { path = "paddock-download", version = "0.2.0", registry = "decryp7", default-features = false }
 paddock-env = { path = "paddock-env", version = "0.1.0", registry = "decryp7" }
 paddock-guard = { path = "paddock-guard", version = "0.1.0", registry = "decryp7" }
 paddock-files = { path = "paddock-files", version = "0.1.0", registry = "decryp7" }
