@@ -97,6 +97,11 @@ impl Popovers {
         self
     }
 
+    /// Whether the popover of `item` (`None`: the icon's) has a spec: without one a tray click has nothing to open.
+    pub fn has(&self, item: Option<&str>) -> bool {
+        label_for(item).is_some_and(|label| self.specs.contains_key(&label))
+    }
+
     /// Whether popover `label` is open.
     pub fn is_open(&self, label: &str) -> bool {
         lock(&self.open).contains_key(label)

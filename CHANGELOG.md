@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-window`: `Popovers::has`
+- `Popovers::has(item)` says whether the popover of a tray item (`None`: the icon's) has a spec. An app's start test uses it to check that a tray click has
+  something to open (Dyno's tray did nothing in 1.0 until its popover was registered; a browser-only e2e cannot see that).
+
 ### `@decryp7/paddock-ui/widgets`: the add list shows every row; `shell/settings` and `shell/about` wording
 - The "Add a widget" list no longer scrolls inside a box of its own (the box cut a row through its description and its bottom fade was easy to miss):
   it is as tall as its rows and the page scrolls. The `pd-wc-addlist--long` modifier, the fade and the list's `tabindex` are gone. The "Presets"
