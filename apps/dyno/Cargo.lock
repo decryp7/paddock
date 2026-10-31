@@ -3428,6 +3428,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tauri",
+ "url",
 ]
 
 [[package]]
