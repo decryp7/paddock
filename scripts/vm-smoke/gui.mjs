@@ -6,6 +6,7 @@
 import { Check } from './checks.mjs';
 import { describeTree, instancesOf, parseLaunchctlPrint, parsePs } from './judge.mjs';
 import { appWindows, btmItem, judgeLoginItems, judgeLoginStart, parseBtmDump, parseLoginItems, parseQuarantine, parseWindows } from './gui-judge.mjs';
+import { makeSteps } from './steplog.mjs';
 
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 /** Background rows the GUI test image has of its own (cirruslabs' guest agent; its limit.maxfiles daemon shows as "launchctl"). */
@@ -447,18 +448,18 @@ export class GuiCheck {
 /** The --gui sequence. Stops early when a step that the rest depends on fails. */
 export async function runGui(check, { manual = [] } = {}) {
   const steps = [];
-  const push = (s) => { steps.push(s); check.log(`${s.status.toUpperCase()}  ${s.title}: ${s.summary}`); return s; };
+  const { step } = makeSteps(steps, (l) => check.log(l));
   for (const fn of ['preconditions', 'download', 'installByDrag', 'gatekeeperFirstLaunch']) {
-    if (push(await check[fn]()).status === 'fail') { steps.push(check.screenshots()); return { steps, version: check.version }; }
+    if ((await step(fn, () => check[fn]())).status === 'fail') { steps.push(check.screenshots()); return { steps, version: check.version }; }
   }
-  push(await check.launchAtLoginOn());
-  push(await check.approvalPath());
-  push(await check.rebootLogin());
-  push(await check.rebootRestore());
-  push(await check.finderDoubleClick());
-  push(await check.launchAtLoginOff());
-  push(await check.core.quit('Quit at the end'));
-  push(await check.core.logs());
+  await step('launchAtLoginOn', () => check.launchAtLoginOn());
+  await step('approvalPath', () => check.approvalPath());
+  await step('rebootLogin', () => check.rebootLogin());
+  await step('rebootRestore', () => check.rebootRestore());
+  await step('finderDoubleClick', () => check.finderDoubleClick());
+  await step('launchAtLoginOff', () => check.launchAtLoginOff());
+  await step('Quit at the end', () => check.core.quit('Quit at the end'));
+  await step('logs', () => check.core.logs());
   steps.push(check.screenshots());
   for (const m of manual) steps.push({ title: m.title, status: 'manual', summary: m.summary });
   return { steps, version: check.version };

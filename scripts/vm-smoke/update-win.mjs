@@ -7,7 +7,7 @@
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startFeed } from './update-feed.mjs';
 import { CASES } from './update-judge.mjs';
@@ -20,12 +20,23 @@ export function parseChecks(out) {
   return out.split('\n').map((l) => /^CHECK (ok|FAIL) (.*)$/.exec(l.trim())).filter(Boolean).map((m) => ({ ok: m[1] === 'ok', detail: m[2] }));
 }
 
+/**
+ * ER-14: only the dedicated test VM may be driven. vm-win.sh hard-codes the VM name; this refuses a script whose `name=` is not
+ * paddock-win11-test, and a PADDOCK_WIN_VM_DIR that points anywhere else (the personal Windows VM must never be targeted).
+ */
+export function assertTestVm(scriptText, env = process.env) {
+  if (!/^name=paddock-win11-test\s*$/m.test(String(scriptText))) throw new Error('refusing --vm-win: the script does not target the test VM paddock-win11-test (ER-14)');
+  const dir = env.PADDOCK_WIN_VM_DIR;
+  if (dir && basename(dir.replace(/\/+$/, '')) !== 'paddock-win11-test') throw new Error(`refusing PADDOCK_WIN_VM_DIR=${dir}: not the paddock-win11-test folder (ER-14)`);
+}
+
 function main(argv) {
   const o = {};
   for (let i = 0; i < argv.length; i += 2) o[argv[i].replace(/^--/, '')] = argv[i + 1];
   if (!o.assets || !o['vm-win']) throw new Error('usage: update-win.mjs --assets <dir> --vm-win <vm-win.sh> [--out <dir>]');
   const assets = resolve(o.assets);
   const vmwin = resolve(o['vm-win']);
+  assertTestVm(readFileSync(vmwin, 'utf8'));
   const plan = JSON.parse(readFileSync(join(assets, 'plan.json'), 'utf8'));
   const out = resolve(o.out ?? join(assets, '..', 'results'));
   mkdirSync(out, { recursive: true });

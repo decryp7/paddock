@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { connect } from 'node:net';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { startFeed } from './update-feed.mjs';
@@ -84,4 +85,22 @@ test('a call after close is refused, not thrown at the runner', async () => {
   await feed.close();
   await assert.rejects(feed.setCase('ok'), /the feed process has ended/);
   await feed.close();
+});
+
+test('the feed listens on the given address only, not on every interface', async () => {
+  const feed = await startFeed({ assets, host: '127.0.0.1', port: 0 });
+  try {
+    assert.equal(feed.address, '127.0.0.1');
+    assert.ok(feed.port > 0);
+    // Another loopback address must not reach it (a wildcard bind would answer on every local address).
+    const err = await new Promise((resolve) => {
+      const sock = connect({ host: '127.0.0.2', port: feed.port, timeout: 1500 });
+      sock.once('connect', () => { sock.destroy(); resolve(null); });
+      sock.once('timeout', () => { sock.destroy(); resolve('timeout'); });
+      sock.once('error', (e) => resolve(e.code));
+    });
+    assert.notEqual(err, null, 'a connection to 127.0.0.2 reached a feed bound to 127.0.0.1');
+  } finally {
+    await feed.close();
+  }
 });
