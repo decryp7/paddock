@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -25,7 +25,9 @@ pub struct Control {
     cancel: AtomicBool,
     bytes: AtomicU64,
     samples: AtomicU64,
-    done: AtomicBool,
+    /// Set (and announced on `ended`) once the capture's body returned: waiters wake on the event, never on a poll.
+    done: Mutex<bool>,
+    ended: Condvar,
 }
 
 impl Control {
@@ -53,6 +55,29 @@ impl Control {
 
     pub fn set_samples(&self, n: u64) {
         self.samples.store(n, Ordering::Release);
+    }
+
+    /// Whether the capture's body has returned.
+    fn is_done(&self) -> bool {
+        *lock(&self.done)
+    }
+
+    fn finish(&self) {
+        *lock(&self.done) = true;
+        self.ended.notify_all();
+    }
+
+    /// Waits until the body returned, at most `wait` (`None`: as long as it takes); whether it did.
+    fn wait_done(&self, wait: Option<Duration>) -> bool {
+        let done = lock(&self.done);
+        let done = match wait {
+            Some(wait) => self
+                .ended
+                .wait_timeout_while(done, wait, |d| !*d)
+                .map_or_else(|p| p.into_inner().0, |(g, _)| g),
+            None => self.ended.wait_while(done, |d| !*d).unwrap_or_else(|p| p.into_inner()),
+        };
+        *done
     }
 }
 
@@ -136,7 +161,7 @@ impl Captures {
             .spawn(move || {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(c.clone())))
                     .unwrap_or_else(|_| Err(NativeError::Failed("the capture failed unexpectedly (a bug in Debrief)".into())));
-                c.done.store(true, Ordering::Release);
+                c.finish();
                 r
             })?;
         let status = CaptureStatus {
@@ -179,8 +204,7 @@ impl Captures {
     pub fn reap(&self) {
         let mut entries = lock(&self.entries);
         for e in entries.values_mut() {
-            let finished = e.ctl.done.load(Ordering::Acquire);
-            if !finished {
+            if !e.ctl.is_done() {
                 continue;
             }
             if let Some(t) = e.thread.take() {
@@ -244,11 +268,17 @@ impl Captures {
         } else {
             ctl.request_stop();
         }
-        let until = Instant::now() + wait;
-        while !ctl.done.load(Ordering::Acquire) && Instant::now() < until {
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        ctl.wait_done(Some(wait));
         self.get(id).ok_or_else(|| NativeError::Unsupported(format!("no capture \"{id}\"")))
+    }
+
+    /// Waits, however long it takes, until capture `id`'s body returned (tests: a condition, not a guessed delay).
+    #[cfg(test)]
+    fn join(&self, id: &str) {
+        let ctl = key(id).and_then(|k| lock(&self.entries).get(&k).map(|e| e.ctl.clone()));
+        if let Some(ctl) = ctl {
+            ctl.wait_done(None);
+        }
     }
 
     /// Stops every capture (the process is shutting down).
@@ -319,14 +349,18 @@ mod tests {
         }
     }
 
+    /// Every wait below is on a condition (the body said so, or its thread ended), never a guessed delay: a busy machine
+    /// (CI 7096, load 119) once left the panicking capture unfinished after a 100 ms sleep.
     #[test]
     fn captures_stop_cancel_fail_and_are_listed_newest_first() {
         let c = Captures::default();
+        let (counted, has_counted) = std::sync::mpsc::channel();
         let s = c
-            .spawn("s", 7, "busy.exe", "sampling", |ctl| {
+            .spawn("s", 7, "busy.exe", "sampling", move |ctl| {
+                ctl.set_bytes(5);
+                ctl.set_samples(3);
+                let _ = counted.send(());
                 while !ctl.stopping() {
-                    ctl.set_bytes(5);
-                    ctl.set_samples(3);
                     std::thread::sleep(Duration::from_millis(5));
                 }
                 if ctl.cancelled() {
@@ -337,9 +371,13 @@ mod tests {
             .unwrap();
         assert_eq!(s.state, CaptureState::Recording);
         assert!(c.is_running(&s.id));
-        std::thread::sleep(Duration::from_millis(30));
+        has_counted.recv().unwrap();
         let live = c.get(&s.id).unwrap();
-        assert_eq!((live.bytes, live.samples), (5, 3));
+        assert_eq!((live.state, live.bytes, live.samples), (CaptureState::Recording, 5, 3));
+        // Without a wait, stop returns at once: finishing, or already done.
+        let stopping = c.stop(&s.id, Duration::ZERO).unwrap().state;
+        assert!(matches!(stopping, CaptureState::Stopping | CaptureState::Done), "{stopping:?}");
+        c.join(&s.id);
         let done = c.stop(&s.id, Duration::from_secs(5)).unwrap();
         assert_eq!(done.state, CaptureState::Done);
         assert_eq!(done.path.as_deref(), Some("a.nettrace"));
@@ -353,13 +391,16 @@ mod tests {
                 Err(NativeError::Cancelled)
             })
             .unwrap();
-        assert_eq!(c.cancel(&x.id, Duration::from_secs(5)).unwrap().state, CaptureState::Cancelled);
+        c.cancel(&x.id, Duration::ZERO).unwrap();
+        c.join(&x.id);
+        assert_eq!(c.get(&x.id).unwrap().state, CaptureState::Cancelled);
 
         let d = c
             .spawn("e", 9, "svc.exe", "etw", |_| Err(NativeError::Denied("needs administrator".into())))
             .unwrap();
         let p = c.spawn("e", 9, "svc.exe", "etw", |_| panic!("boom")).unwrap();
-        std::thread::sleep(Duration::from_millis(100));
+        c.join(&d.id);
+        c.join(&p.id);
         let denied = c.get(&d.id).unwrap();
         assert_eq!(denied.state, CaptureState::Failed);
         assert!(denied.needs_elevation);
@@ -376,19 +417,24 @@ mod tests {
     fn running_captures_are_bounded_and_files_are_named_safely() {
         let c = Captures::default();
         let block = Arc::new(AtomicBool::new(false));
+        let mut ids = Vec::new();
         for _ in 0..MAX_RUNNING {
             let b = block.clone();
-            c.spawn("s", 1, "a", "sampling", move |_| {
-                while !b.load(Ordering::Relaxed) {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Ok(finished("x"))
-            })
-            .unwrap();
+            let s = c
+                .spawn("s", 1, "a", "sampling", move |_| {
+                    while !b.load(Ordering::Relaxed) {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Ok(finished("x"))
+                })
+                .unwrap();
+            ids.push(s.id);
         }
         assert!(c.spawn("s", 1, "a", "sampling", |_| Ok(finished("x"))).is_err());
         block.store(true, Ordering::Relaxed);
-        std::thread::sleep(Duration::from_millis(100));
+        for id in &ids {
+            c.join(id);
+        }
         c.reap();
         assert!(c.spawn("s", 1, "a", "sampling", |_| Ok(finished("x"))).is_ok());
         let f = capture_file(std::path::Path::new("d"), "my app/..\\x.exe", 42);

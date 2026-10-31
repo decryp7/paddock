@@ -180,6 +180,25 @@ impl Page {
         Ok(p)
     }
 
+    /// The process id of the browser's network service (`SystemInfo.getProcessInfo`, an experimental DevTools domain):
+    /// `Ok(None)` when the browser names none, an error when it could not be asked. The network service carries every
+    /// request of every page; when it crashes or restarts, Chrome cancels the loads it was carrying with
+    /// `net::ERR_ABORTED` (see [`Page::navigate`]).
+    pub fn network_service_pid(&self) -> Result<Option<u32>> {
+        self.network_service_within(CALL)
+    }
+
+    fn network_service_within(&self, bound: Duration) -> Result<Option<u32>> {
+        let bound = bound.min(CALL);
+        if bound.is_zero() {
+            return Err(Error::Timeout("the browser's process list"));
+        }
+        let r = self
+            .conn
+            .call(None, "SystemInfo.getProcessInfo", json!({}), bound)?;
+        Ok(network_service_in(&r))
+    }
+
     /// Tracks DOM changes in every document this page loads from now on, so [`Snapshot::quiet_ms`] and
     /// [`Page::wait_ready`] see when the page stopped changing. This adds a small script to the page; an app that must
     /// never touch page content does not call it.
@@ -266,26 +285,47 @@ impl Page {
 
     /// Loads `url` and waits for the load event (or `timeout`). On a new tab it first waits (within the same `timeout`)
     /// until the tab's own first navigation has settled, so that one cannot cancel this load.
+    ///
+    /// An abort the driver cannot explain (`net::ERR_ABORTED`, not a download, not replaced by another navigation) says
+    /// what it ruled out: what the browser reported about the tab, and whether the network service restarted while it
+    /// carried the load (ADR 0030).
     pub fn navigate(&self, url: &str, timeout: Duration) -> Result<()> {
         let start = Instant::now();
         self.settle_initial(timeout)?;
-        let timeout = timeout.saturating_sub(start.elapsed());
+        let left = || timeout.saturating_sub(start.elapsed());
+        // Looked up right before this load, never cached: a cached process would blame a restart while the page sat
+        // idle on this load (ADR 0030). A failed lookup is unknown.
+        let network = self.network_service_within(left()).ok().flatten();
         let since = self.conn.mark();
         let r = self.call("Page.navigate", json!({"url": url}))?;
-        if let Some(e) = r.get("errorText").and_then(Value::as_str) {
-            // Chrome cancels this navigation in the same step that starts the one replacing it, and sends that start
-            // just after this reply. Any later reply comes after it, so one more (browser-side) call is the barrier.
-            let _ = self.call("Page.getNavigationHistory", json!({}));
-            let newer = self
-                .conn
-                .wait_event(since, Duration::ZERO, |ev| {
-                    replaced_by(ev, &self.session, &r).is_some()
-                })
-                .and_then(|ev| replaced_by(&ev, &self.session, &r));
-            let trace = trace(&self.conn.events_since(self.born), since, &self.session);
-            return Err(not_loaded(e, &r, newer.as_deref(), &trace));
+        let Some(e) = r.get("errorText").and_then(Value::as_str) else {
+            return self.wait_load(since, left());
+        };
+        // Chrome cancels this navigation in the same step that starts the one replacing it, and sends that start just
+        // after this reply. Any later reply comes after it, so one more (browser-side) call is the barrier.
+        let _ = self.call("Page.getNavigationHistory", json!({}));
+        let newer = self
+            .conn
+            .wait_event(since, Duration::ZERO, |ev| {
+                replaced_by(ev, &self.session, &r).is_some()
+            })
+            .and_then(|ev| replaced_by(&ev, &self.session, &r));
+        let events = self.conn.events_since(self.born);
+        let mut trace = trace(&events, since, &self.session);
+        let unexplained = e == "net::ERR_ABORTED"
+            && newer.is_none()
+            && r.get("isDownload").and_then(Value::as_bool) != Some(true);
+        if unexplained {
+            let after = self.network_service_within(left());
+            if let Some(note) = network_note(
+                network,
+                after,
+                document_answered(&events, since, &self.session),
+            ) {
+                trace.push_str(&format!("; {note}"));
+            }
         }
-        self.wait_load(since, timeout)
+        Err(not_loaded(e, &r, newer.as_deref(), &trace))
     }
 
     /// Goes back one entry in the page's history and waits for it to load (a slow load is not an error).
@@ -470,6 +510,53 @@ text: document.body ? document.body.innerText.slice(0, {TEXT_EXCERPT}) : ''}})"
         self.call("Network.setBlockedURLs", json!({"urls": urls}))
             .map(|_| ())
     }
+}
+
+/// Whether the network service lost the load: it had a process before, a lookup after answered with another process
+/// or none (it is being started again), and the document got no answer (an answered one, a 204 or a download, was
+/// carried to its end). A failed lookup or no process before is unknown, never a loss.
+fn lost_by_the_browser(before: Option<u32>, after: &Result<Option<u32>>, answered: bool) -> bool {
+    !answered && before.is_some() && matches!(after, Ok(now) if *now != before)
+}
+
+/// What an unexplained abort says about the network service (`None` when the document was answered: then the service
+/// did its part).
+fn network_note(before: Option<u32>, after: Result<Option<u32>>, answered: bool) -> Option<String> {
+    if answered {
+        return None;
+    }
+    let pid = |p: Option<u32>| p.map_or_else(|| "none".to_string(), |p| p.to_string());
+    Some(match (before, &after) {
+        _ if lost_by_the_browser(before, &after, answered) => format!(
+            "network service restarted (process {} then {})",
+            pid(before),
+            pid(after.as_ref().ok().copied().flatten())
+        ),
+        (Some(b), Ok(Some(a))) if *a == b => format!("network service unchanged (process {b})"),
+        _ => "network service unknown (the browser did not say)".to_string(),
+    })
+}
+
+/// Whether the tab's document request got an answer (`Network.responseReceived`) after the event mark `since`.
+fn document_answered(events: &[(u64, Event)], since: u64, session: &str) -> bool {
+    events.iter().any(|(seq, e)| {
+        *seq > since
+            && e.session.as_deref() == Some(session)
+            && e.method == "Network.responseReceived"
+            && e.params.get("type").and_then(Value::as_str) == Some("Document")
+    })
+}
+
+/// The network service's process id in a `SystemInfo.getProcessInfo` reply.
+fn network_service_in(reply: &Value) -> Option<u32> {
+    reply
+        .get("processInfo")?
+        .as_array()?
+        .iter()
+        .find(|p| p.get("type").and_then(Value::as_str) == Some("network.mojom.NetworkService"))?
+        .get("id")?
+        .as_u64()
+        .and_then(|id| u32::try_from(id).ok())
 }
 
 /// An event that ends the page with this session and target.
@@ -761,6 +848,70 @@ mod tests {
             plain.ends_with("the page did not load: net::ERR_NAME_NOT_RESOLVED"),
             "{plain}"
         );
+    }
+
+    #[test]
+    fn the_network_service_is_found_in_the_process_list() {
+        let reply = json!({"processInfo": [
+            {"type": "browser", "id": 10, "cpuTime": 0.5},
+            {"type": "network.mojom.NetworkService", "id": 12, "cpuTime": 0.1},
+        ]});
+        assert_eq!(network_service_in(&reply), Some(12));
+        assert_eq!(
+            network_service_in(&json!({"processInfo": [{"type": "GPU", "id": 3}]})),
+            None
+        );
+        assert_eq!(network_service_in(&json!({})), None);
+    }
+
+    /// Every unexplained abort says what happened to the network service. A restart needs a process before, a lookup
+    /// that answered, another process (or none) after, and no answer to the document: a failed lookup is unknown, never
+    /// a restart, and a document that was answered (a 204) was carried to its end.
+    #[test]
+    fn an_abort_names_what_happened_to_the_network_service() {
+        let failed = || Err(Error::Timeout("the process list"));
+        assert_eq!(
+            network_note(Some(12), Ok(Some(13)), false).as_deref(),
+            Some("network service restarted (process 12 then 13)")
+        );
+        assert_eq!(
+            network_note(Some(12), Ok(None), false).as_deref(),
+            Some("network service restarted (process 12 then none)")
+        );
+        assert_eq!(
+            network_note(Some(12), Ok(Some(12)), false).as_deref(),
+            Some("network service unchanged (process 12)")
+        );
+        let unknown = Some("network service unknown (the browser did not say)");
+        assert_eq!(network_note(Some(12), failed(), false).as_deref(), unknown);
+        assert_eq!(network_note(None, Ok(Some(13)), false).as_deref(), unknown);
+        assert_eq!(network_note(Some(12), Ok(Some(13)), true), None);
+        assert!(lost_by_the_browser(Some(12), &Ok(Some(13)), false));
+        assert!(!lost_by_the_browser(Some(12), &failed(), false));
+        assert!(!lost_by_the_browser(Some(12), &Ok(Some(13)), true));
+        assert!(!lost_by_the_browser(None, &Ok(Some(13)), false));
+    }
+
+    #[test]
+    fn a_document_answer_is_found_after_the_navigation_only() {
+        let answer = |session, kind| {
+            ev(
+                "Network.responseReceived",
+                Some(session),
+                json!({"type": kind, "response": {"status": 204}}),
+            )
+        };
+        let events = vec![
+            (1, answer("S", "Document")),
+            (5, answer("S", "Image")),
+            (6, answer("T", "Document")),
+        ];
+        assert!(
+            !document_answered(&events, 2, "S"),
+            "before the navigation, another kind, another tab"
+        );
+        let events = vec![(3, answer("S", "Document"))];
+        assert!(document_answered(&events, 2, "S"));
     }
 
     fn ev(method: &str, session: Option<&str>, params: Value) -> Event {

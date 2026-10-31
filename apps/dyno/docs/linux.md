@@ -23,7 +23,7 @@ sudo apt install ./Dyno_<version>_amd64.deb      # or run the AppImage
 
 Open Dyno; in **Settings** turn on **Launch at login**: Dyno installs a systemd **user** unit
 (`~/.config/systemd/user/dyno-agent.service`: `Restart=always`, `RestartSec=5`, `Nice=10`, `CPUWeight=20`,
-`IOSchedulingClass=idle`, `MemoryHigh=256M`) and enables it with `systemctl --user enable --now`. No root is needed. To keep the
+`IOSchedulingClass=best-effort`, `IOSchedulingPriority=7`, `MemoryHigh=256M`) and enables it with `systemctl --user enable --now`. No root is needed. To keep the
 agent measuring when nobody is logged in, run `loginctl enable-linger $USER` once; that is your decision, Dyno never runs it.
 
 Without systemd (or when the unit is not installed) the app starts the agent itself and it stops with your session.

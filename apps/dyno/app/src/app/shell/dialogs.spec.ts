@@ -12,7 +12,7 @@ import { dialogJobsProviders } from './dialog-window';
 const ALL = DIALOGS as readonly DialogDef[];
 
 const INPUTS = {
-  'pd.confirm': { heading: 'Delete “GPU limit”?', message: 'The rule stops raising alarms.', confirm: { label: 'Delete rule', destructive: true } },
+  'pd.confirm': { heading: 'Delete “GPU load”?', message: 'The rule stops raising alarms.', confirm: { label: 'Delete rule', destructive: true } },
   'dy.alert-rule': { rule: null, takenIds: [] },
   'dy.web-search': { text: 'Slack crashed', subject: 'Slack' },
   'dy.file-hash': { source: { path: '/Applications/Slack.app/Contents/MacOS/Slack' }, name: 'Slack' },

@@ -158,6 +158,16 @@ describe('dy-disk-map-page', () => {
     expect(text(el, '.crumb.current')).toBe('Macintosh HD');
   });
 
+  it('counts the rows it shows: the list heading and the table toolbar agree with their rows, folded small items included', async () => {
+    const { f, el } = await scanned();
+    const listed = el.querySelectorAll('.rows .item').length;
+    expect(text(el, '#in-folder')).toBe(`In this folder (${listed})`);
+    btn(el, 'Table')!.click();
+    await settle(f);
+    const shown = el.querySelectorAll('tbody tr.mat-mdc-row').length + el.querySelectorAll('tfoot tr:not(.foot-off)').length;
+    expect(text(el, '.table-tools .small')).toBe(`${shown} of ${shown} rows`);
+  });
+
   it('switches to the table, which carries every column, sorts and filters it, and keeps the centre', async () => {
     const { f, el } = await scanned();
     [...el.querySelectorAll<HTMLButtonElement>('.rows .name.link')].find((b) => b.textContent?.includes('Users'))!.click();
@@ -477,6 +487,11 @@ describe('dy-disk-map-page', () => {
 
   it('adds the files that have no row of their own as the last row of the table, so the rows add up', async () => {
     const r = await scanned();
+    // The mock's root has no loose files; the user's folder has some.
+    for (const name of ['Users', 'alex']) {
+      [...r.el.querySelectorAll<HTMLButtonElement>('.rows .name.link')].find((b) => b.textContent?.includes(name))!.click();
+      await settle(r.f);
+    }
     const loose = r.store.level()!.loose;
     expect(loose.bytes).toBeGreaterThan(0);
     btn(r.el, 'Table')!.click();

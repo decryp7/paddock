@@ -50,7 +50,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
 
       @if (store.otherUsers(); as o) {
         <p class="note" data-testid="other-users-note">
-          <dy-icon name="info" /> “Other users” is one row for the {{ num(o.count) }} processes of other accounts on this PC. It adds up only the values Dyno can read.
+          <dy-icon name="info" /> “Other users” is one row for the {{ num(o.count) }} processes of other accounts on this computer. It adds up only the values Dyno can read.
         </p>
       }
 

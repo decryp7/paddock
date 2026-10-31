@@ -63,6 +63,8 @@ enum SlotCommand {
     Release(slots::ReleaseArgs),
     /// Show which slots are held.
     Status(slots::StatusArgs),
+    /// Run a command only while a slot is idle, holding its lock until the command ends (skips a busy slot).
+    IdleRun(slots::IdleRunArgs),
     /// The detached holder that `acquire` starts. Not for people.
     #[command(hide = true)]
     Hold(slots::HoldArgs),
@@ -131,6 +133,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             SlotCommand::Acquire(a) => slots::acquire(&a),
             SlotCommand::Release(a) => slots::release(&a),
             SlotCommand::Status(a) => slots::status(&a),
+            SlotCommand::IdleRun(a) => slots::idle_run(&a),
             SlotCommand::Hold(a) => slots::hold(&a),
         },
         Command::Fetch { command } => fetch::command(command),

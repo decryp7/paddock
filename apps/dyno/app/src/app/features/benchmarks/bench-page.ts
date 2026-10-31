@@ -1,3 +1,5 @@
+import { PlatformService } from '../../core/platform';
+import { osTerms } from '../../shared/os-terms';
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { BenchKind, BenchMetric, BenchRun, BenchStatus, MetricDelta } from '../../core/api.types';
@@ -31,7 +33,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
       <header class="page-head">
         <div class="titles">
           <h1>Benchmarks</h1>
-          <p>Measure the CPU, memory and disk on request, and compare before and after a change. Nothing runs until you click, and it all stays on this PC.</p>
+          <p>Measure the CPU, memory and disk on request, and compare before and after a change. Nothing runs until you click, and it all stays on this computer.</p>
         </div>
       </header>
 
@@ -55,7 +57,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                   </li>
                 }
               </ol>
-              <p class="note">Keep the PC otherwise idle while this runs; any other work lowers the numbers.</p>
+              <p class="note">Keep the computer otherwise idle while this runs; any other work lowers the numbers.</p>
             } @else {
               <div class="kinds" role="group" aria-label="What to measure">
                 @for (k of kinds; track k.kind) {
@@ -74,7 +76,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
               <div class="pair">
                 <div class="field grow">
                   <label for="bench-change">Before and after a change</label>
-                  <mat-form-field><input id="bench-change" matInput type="text" maxlength="80" placeholder="What you are about to change, e.g. Power mode: High performance" [value]="change()" (input)="change.set($any($event.target).value)" /></mat-form-field>
+                  <mat-form-field><input id="bench-change" matInput type="text" maxlength="80" [placeholder]="'What you are about to change, e.g. ' + terms.powerExample" [value]="change()" (input)="change.set($any($event.target).value)" /></mat-form-field>
                 </div>
                 <ol class="stepper" aria-label="Before and after steps">
                   <li><button type="button" [matButton]="!!change().trim() && !hasBefore() ? 'filled' : 'outlined'" [disabled]="store.busy() || chosen().size === 0 || !change().trim()" (click)="run('before')">1 · Measure before</button></li>
@@ -144,7 +146,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
               } @else {
                 <div class="tablewrap">
                   <pd-table [toolbar]="false" label="Before and after" [rows]="c.deltas" [columns]="deltaColumns" [rowKey]="deltaKey" [filterable]="false" [maxHeight]="420">
-                    <ng-template pdCell="label" let-d>{{ d.label }} <span class="faint">({{ title(d.kind) }})</span></ng-template>
+                    <ng-template pdCell="label" let-d>{{ d.label }}{{ ' ' }}<span class="faint">({{ title(d.kind) }})</span></ng-template>
                     <ng-template pdCell="before" let-d><span class="num">{{ metric(d.before) }} <small>{{ d.unit }}</small></span></ng-template>
                     <ng-template pdCell="after" let-d><span class="num">{{ metric(d.after) }} <small>{{ d.unit }}</small></span></ng-template>
                     <ng-template pdCell="verdict" let-d><span class="badge" [attr.data-tone]="tone(d)">{{ word(d) }}</span></ng-template>
@@ -231,6 +233,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
   `,
 })
 export class BenchPage implements OnInit, OnDestroy {
+  protected readonly terms = osTerms(inject(PlatformService).platform);
   protected readonly store = inject(BenchStore);
   protected readonly kinds = KINDS;
   protected readonly chosen = signal<ReadonlySet<BenchKind>>(new Set<BenchKind>(['cpu', 'memory', 'disk']));

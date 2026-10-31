@@ -241,3 +241,44 @@ fn a_reload_of_untouched_folders_keeps_every_id() {
     reload(&s);
     assert_eq!(ids(&s), before);
 }
+
+/// A zip that names one path twice: both entries are imported (the second as `app (2).log`) and the report lists the
+/// rename among its notices (the user's decision of 2026-10-29).
+#[test]
+fn a_repeated_path_in_a_zip_is_imported_twice_and_the_report_lists_the_rename() {
+    let logs = TempDir::new("dup-zip-logs");
+    let dir = TempDir::new("dup-zip-store");
+    // zip's writer refuses a repeated name: write two names of one length, then rename the second in its headers.
+    let mut z = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for (name, file) in [("web/app.log", 1), ("web/q-x.log", 2)] {
+        z.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        z.write_all((0..2 + file).map(|n| line(file, n)).collect::<String>().as_bytes())
+            .unwrap();
+    }
+    let mut bytes = z.finish().unwrap().into_inner();
+    let at: Vec<usize> = bytes
+        .windows(11)
+        .enumerate()
+        .filter(|(_, w)| w == b"web/q-x.log")
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(at.len(), 2);
+    for i in at {
+        bytes[i..i + 11].copy_from_slice(b"web/app.log");
+    }
+    std::fs::write(logs.0.join("dup.zip"), bytes).unwrap();
+    let store = store(&dir, 2);
+    let report = store.open(std::slice::from_ref(&logs.0)).unwrap().wait().unwrap();
+    let mut names: Vec<String> = report.sources.iter().map(|s| s.name.clone()).collect();
+    names.sort();
+    assert_eq!(names, ["dup.zip/web/app (2).log", "dup.zip/web/app.log"], "{report:?}");
+    assert_eq!(report.events, 3 + 4);
+    assert!(
+        report
+            .notices
+            .iter()
+            .any(|n| n.contains("dup.zip/web/app (2).log") && n.contains("web/app.log")),
+        "{:?}",
+        report.notices
+    );
+}

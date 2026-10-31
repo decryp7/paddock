@@ -106,10 +106,11 @@ Dyno is on Paddock's shared CI kit (WP-C4): its gates are legs of `.gitea/workfl
 | `app dyno (windows-latest)`, `(macos-latest)` | host runners | clippy (also on Windows: `windowsClippy`), nextest, doc tests for the OS adapters; tests act only on dummies they spawn; a kept build folder, host clean-up of this job's test programs |
 | `e2e-1`, `e2e-2` | Linux container | Playwright against the mock, Chromium, two shards, one worker each |
 | `e2e-webkit` | Linux container | Playwright, WebKit: main, tags, the nightly and a manual run with `webkit` |
-| `bundle` (`dyno-release.yml`) | Windows, macOS, Linux | on a push to main, `dyno-v*` tags, nightly and manual runs: `tauri build` (NSIS, `.dmg`, `.deb` + AppImage), the run-path check (`scripts/check-bundle.sh`; on macOS the agent also measures once from the built app), the seal check and the start of every sidecar (`macos-verify`), artifacts |
+| `bundle` (`dyno-release.yml`) | Windows, macOS, Linux | on `dyno-v*` tags, manual runs and the nightly (`nightly.yml`); not on a push to main: `tauri build` (NSIS, `.dmg`, `.deb` + AppImage), the run-path check (`scripts/check-bundle.sh`; on macOS the agent also measures once from the built app), the seal check and the start of every sidecar (`macos-verify`), artifacts |
 | `release` | Linux container | on `dyno-v*` tags: release notes (git-cliff), `latest.json`, the Gitea release |
 
-Host runners keep a persistent build folder outside the workspace (`.paddock-ci/target-dyno-app`), which the shared
+Host runners keep a persistent build folder outside the workspace (the job slot's kept folder `target-dyno-app-s<n>` in the
+CI home, Paddock ADR 0025), which the shared
 `prune-build-folder` action (`tools/prune-build-folders.sh`, 20 GB) caps at the end of each host job, so nothing piles up. CI could not be run when the workflow was written; see roadmap G15.
 
 ## Architecture documents and diagrams

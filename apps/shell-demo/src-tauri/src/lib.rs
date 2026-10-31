@@ -264,7 +264,7 @@ pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Build
                 APP_ID,
                 APP_NAME,
                 VERSION,
-                option_env!("SHELL_DEMO_COMMIT").unwrap_or(""),
+                option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""),
             ),
             dirs(report_dir.as_deref())?,
         );

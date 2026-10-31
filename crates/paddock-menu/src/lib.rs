@@ -47,7 +47,7 @@ pub use model::{
     NativeMenuEntry, NativeMenuModel, NativeTopMenu, QUIT_COMMAND, TopMenu, parse, valid_id,
 };
 pub use native::{NativeNode, Predefined, Update, diff, item_ids, native_spec, outline};
-pub use route::{Focus, applies, route};
+pub use route::{Focus, applies, route, runs_without_window};
 
 #[cfg(feature = "tauri")]
 pub mod tauri;

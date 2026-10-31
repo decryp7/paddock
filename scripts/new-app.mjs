@@ -407,9 +407,30 @@ export function tsconfigJson(uiTsconfig) {
   return { compileOnSave: false, compilerOptions, angularCompilerOptions: uiTsconfig.angularCompilerOptions };
 }
 
+/** The cargo table that links the C runtime statically on Windows (ADR 0032), as the root `.cargo/config.toml` has it. */
+const CRT_TABLE = `[target.'cfg(all(windows, target_env = "msvc"))']`;
+
+/**
+ * The new app's `.cargo/config.toml`: the static C runtime table of this repository's root configuration, with the comment
+ * above it. The app's `tauri.conf.json` turns Tauri's partial `staticVCRuntime` off (copied from the demo), so without
+ * this table its sidecars and its app would import VCRUNTIME140.dll. Throws when the root configuration lost the table.
+ */
+export function cargoConfig(rootConfig) {
+  const lines = rootConfig.split('\n');
+  const at = lines.indexOf(CRT_TABLE);
+  if (at < 0) throw new Error(`.cargo/config.toml has no ${CRT_TABLE} table (ADR 0032)`);
+  let start = at;
+  while (start > 0 && lines[start - 1].startsWith('#')) start--;
+  let end = at + 1;
+  while (end < lines.length && lines[end].trim() !== '' && !lines[end].startsWith('[')) end++;
+  const header = '# Cargo settings for this app (from the Paddock repository\'s root .cargo/config.toml).\n\n';
+  return `${header}${lines.slice(start, end).join('\n')}\n`;
+}
+
 /**
  * The repo root of a new app from Paddock's templates (plan X27, X43): the baseline config files, an AGENTS.md made of the
- * shared doc blocks, docs/suite-lessons.md, docs/releasing.md and the README skeleton. The generator's own tsconfig and the
+ * shared doc blocks, docs/suite-lessons.md, docs/releasing.md, the README skeleton and `.cargo/config.toml` (the static C
+ * runtime on Windows, ADR 0032). The generator's own tsconfig and the
  * Cargo profiles (the app has no root Cargo.toml yet) are not taken from the template.
  */
 export function writeRepoRoot(dest, { id, name }) {
@@ -431,6 +452,7 @@ export function writeRepoRoot(dest, { id, name }) {
     put(file, text);
   }
   put('README.md', fill(readFileSync(join(root, 'docs', 'blocks', 'readme-skeleton.md'), 'utf8'), config));
+  put('.cargo/config.toml', cargoConfig(readFileSync(join(root, '.cargo', 'config.toml'), 'utf8')));
 }
 
 /** The new app's changelog: one release, started from the demo. */

@@ -1,0 +1,14 @@
+name: job-tmpdir
+description: "The job's own temp folder (the runner's $RUNNER_TEMP) as TMPDIR (TMP and TEMP on Windows) and PADDOCK_JOB_TEMP, and on Unix a short private socket folder as PADDOCK_SOCKET_BASE (conformance/ci/job-tmpdir.sh, the one implementation; job-isolation's acquire runs the same on the host runners). `setup` first, `remove` as the last step with `if: always()`. For a job without job-isolation, such as a Linux container job that checks for temp leaks."
+inputs:
+  mode:
+    description: "setup or remove."
+    default: setup
+runs:
+  using: composite
+  steps:
+    - name: The job's own temp and socket folders
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+      run: bash "${{ github.action_path }}/../../../conformance/ci/job-tmpdir.sh" "$MODE"

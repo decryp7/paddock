@@ -89,7 +89,7 @@ mod tests {
     use dyno_platform::fake::quiet_sample as sample;
 
     fn change(sev: Severity, key: &str) -> AlarmChange {
-        AlarmEngine::default()
+        AlarmEngine::new(dyno_core::alarms::AlarmConfig::default(), dyno_core::time::FixedZone::shared(0))
             .apply(AlarmEvent::Raise {
                 rule: "r".into(),
                 key: key.into(),

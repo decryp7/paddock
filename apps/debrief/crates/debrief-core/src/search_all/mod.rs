@@ -73,7 +73,8 @@ impl<T: Query + Analysis + ?Sized> SearchSource for T {
 
 /// When a search must stop: its deadline, and whether a newer search replaced it.
 pub struct Control<'a> {
-    deadline: Instant,
+    /// `None`: no time limit (tests, where wall clock would make the result depend on load).
+    deadline: Option<Instant>,
     cancelled: &'a (dyn Fn() -> bool + Sync),
 }
 
@@ -81,9 +82,16 @@ impl<'a> Control<'a> {
     /// A search that may run for `budget` from now and stops once `cancelled` says so.
     pub fn new(budget: Duration, cancelled: &'a (dyn Fn() -> bool + Sync)) -> Control<'a> {
         Control {
-            deadline: Instant::now() + budget,
+            deadline: Some(Instant::now() + budget),
             cancelled,
         }
+    }
+
+    /// A search with no time limit that stops once `cancelled` says so (tests: wall clock would make the answer depend
+    /// on the machine's load).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn unbounded(cancelled: &'a (dyn Fn() -> bool + Sync)) -> Control<'a> {
+        Control { deadline: None, cancelled }
     }
 
     pub fn cancelled(&self) -> bool {
@@ -91,7 +99,7 @@ impl<'a> Control<'a> {
     }
 
     pub fn timed_out(&self) -> bool {
-        Instant::now() >= self.deadline
+        self.deadline.is_some_and(|d| Instant::now() >= d)
     }
 }
 

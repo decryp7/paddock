@@ -13,9 +13,12 @@
 //! Pure functions of a [`Hardware`] description, so they are unit-testable; [`Hardware::detect`] reads the machine.
 //!
 //! Background priority ([`lower_priority`]), where the OS allows it: macOS puts the thread in the QoS class
-//! `BACKGROUND` (`pthread_set_qos_class_self_np`; efficiency cores, throttled IO); Linux raises the thread's nice
-//! value to 10 (`setpriority` on the thread id); Windows sets `THREAD_PRIORITY_BELOW_NORMAL`. Where the call fails the
-//! thread simply keeps its priority.
+//! `UTILITY` (`pthread_set_qos_class_self_np`); Linux raises the thread's nice value to 10 (`setpriority` on the thread
+//! id); Windows sets `THREAD_PRIORITY_BELOW_NORMAL`. Where the call fails the thread simply keeps its priority.
+//!
+//! Lowered, never starved: callers wait for these threads (a report for its analyses, an import for the index's write
+//! lock), so a busy machine may slow them but must not stop them. macOS's `BACKGROUND` class would: it keeps the thread
+//! on the efficiency cores and behind every other thread, and a `debrief report` waited minutes for it on a loaded Mac.
 
 /// What limits a kind of work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,7 +116,7 @@ pub fn lower_priority() -> bool {
 mod imp {
     pub fn lower_priority() -> bool {
         // SAFETY: a plain libc call that affects only the calling thread.
-        unsafe { libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_BACKGROUND, 0) == 0 }
+        unsafe { libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0) == 0 }
     }
 }
 
@@ -212,5 +215,30 @@ mod tests {
         if cfg!(any(target_os = "macos", target_os = "linux", windows)) {
             assert!(accepted);
         }
+    }
+
+    /// Callers wait for the lowered pools (an analysis for a report, an import for the index's write lock), so a busy
+    /// machine may slow that work but must never starve it. macOS's `BACKGROUND` class keeps a thread on the efficiency
+    /// cores and behind every other thread, which stalled `debrief report` past the test timeout on the shared CI Mac
+    /// (debrief.yml run 7150); `UTILITY` stays behind the user's work like nice 10 on Linux.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn lowered_work_yields_to_the_user_but_is_never_starved_on_macos() {
+        let class = std::thread::spawn(|| {
+            assert!(lower_priority());
+            let mut class = libc::qos_class_t::QOS_CLASS_UNSPECIFIED;
+            let mut relative = 0;
+            // SAFETY: reads the calling thread's own QoS class into two locals.
+            let rc = unsafe { libc::pthread_get_qos_class_np(libc::pthread_self(), &mut class, &mut relative) };
+            assert_eq!(rc, 0);
+            class
+        })
+        .join()
+        .unwrap();
+        assert_eq!(
+            class as u32,
+            libc::qos_class_t::QOS_CLASS_UTILITY as u32,
+            "lowered threads must not be in the starvable BACKGROUND class"
+        );
     }
 }

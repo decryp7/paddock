@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Windows host runners: a finished node_modules per package-lock.json, kept in %USERPROFILE%\.debrief-ci, linked into the
-# checkout as a directory junction, so `npm ci` runs only when the lockfile changed (unpacking ~900 packages into a fresh
+# Windows host runners: a finished node_modules per package-lock.json, kept in the job slot's kept folder node-modules
+# (Paddock's job isolation, conformance/ci/job-isolation.sh: one per slot, so the clean-up of older lockfiles' copies below
+# never removes a copy a concurrent job is linked to), linked into the checkout as a directory junction, so `npm ci` runs only when the lockfile changed (unpacking ~900 packages into a fresh
 # node_modules took 7-14 min per job even with the npm cache on disk).
 #
 #   bash apps/debrief/scripts/ci/windows-node-modules.sh link     (from the repo root: the monorepo's one lock, ADR 0014 §1)
@@ -10,7 +11,7 @@
 # junction is ever removed (rmdir on a junction removes the link, never the target's files).
 set -euo pipefail
 action=${1:?usage: windows-node-modules.sh link|unlink}
-base="${DEBRIEF_CI_HOME:-$USERPROFILE/.debrief-ci}"
+isolation="$(dirname "$0")/../../../../conformance/ci/job-isolation.sh"
 
 unlink_junction() {
   [ -e node_modules ] || [ -L node_modules ] || return 0
@@ -28,11 +29,12 @@ case "$action" in
   unlink) unlink_junction ;;
   link)
     unlink_junction
+    base="$(bash "$isolation" path node-modules debrief)"
     key=$(sha256sum package-lock.json | cut -c1-16)
     # <hash>/node_modules, not node_modules-<hash>: Node resolves packages from the junction's real path, so it must still
     # contain a folder named node_modules (else e.g. @tauri-apps/cli cannot find its native binary).
-    cached="$base/node-cache/$key/node_modules"
-    mkdir -p "$base/node-cache/$key"
+    cached="$base/$key/node_modules"
+    mkdir -p "$base/$key"
     if [ ! -f "$cached/.complete" ]; then
       # An incomplete copy (a killed job) goes. The smoke and installer jobs can install the same new lockfile at once:
       # each renames its finished copy into place in one step, and the one that comes second keeps the first one's.
@@ -44,9 +46,8 @@ case "$action" in
       mv -T "$mine" "$cached" 2>/dev/null || rm -rf "$mine"
     fi
     powershell.exe -NoProfile -Command "New-Item -ItemType Junction -Path '$(cygpath -w "$PWD/node_modules")' -Target '$(cygpath -w "$cached")' | Out-Null"
-    # Older lockfiles' copies go (and the first layout's node_modules-<hash> folders).
-    for old in "$base"/node-cache/*; do [ "$old" = "$base/node-cache/$key" ] || rm -rf "$old"; done
-    rm -rf "$base"/node_modules-*
+    # Older lockfiles' copies of this slot go.
+    for old in "$base"/*; do [ "$old" = "$base/$key" ] || rm -rf "$old"; done
     ;;
   *) echo "usage: windows-node-modules.sh link|unlink" >&2; exit 2 ;;
 esac

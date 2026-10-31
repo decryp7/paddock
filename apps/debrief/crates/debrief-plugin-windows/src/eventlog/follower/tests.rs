@@ -553,10 +553,14 @@ fn a_crashing_adapter_is_contained() {
 }
 
 #[test]
-fn the_queue_length_never_reports_a_negative_dip_as_huge() {
-    // The writer may subtract before the sending reader adds (the race once reported 18446744073709551615).
-    assert_eq!(super::queued_now(-3), 0);
-    assert_eq!((super::queued_now(0), super::queued_now(4)), (0, 4));
+fn slots_stay_within_zero_and_the_capacity() {
+    let slots = Slots::new(2);
+    assert!(slots.try_take() && slots.try_take());
+    assert!(!slots.try_take());
+    assert_eq!(slots.used(), 2);
+    slots.give_back(5);
+    assert_eq!(slots.used(), 0);
+    assert!(slots.try_take());
 }
 
 #[test]
@@ -587,6 +591,62 @@ fn a_full_queue_slows_readers_without_losing_events() {
     assert!(f.status().events_per_second >= 0.0);
     f.stop().unwrap();
     assert_eq!(sink.ids("System"), (1..=200).collect::<Vec<_>>());
+}
+
+/// Regression (debrief.yml run 7175): the status reported 5 queued with a capacity of 4. The writer had taken a
+/// batch and not yet counted it out when a reader refilled the freed slots. Here the writer stalls right after
+/// its first take until a reader finds the queue full, so that interleaving happens on every run.
+#[test]
+fn the_queued_count_never_exceeds_the_capacity_while_the_writer_holds_a_batch() {
+    use std::sync::mpsc::channel;
+    let log = FakeLog::with(&[("System", 50)]);
+    let sink = Arc::new(MemSink::default());
+    let mut lim = limits();
+    lim.queue = 4;
+    lim.batch = 3;
+    let (full_tx, full_rx) = channel::<()>();
+    let full_tx = Mutex::new(full_tx);
+    let full_rx = Mutex::new(full_rx);
+    let first_take = AtomicBool::new(true);
+    let holding = Arc::new(AtomicBool::new(false));
+    let held = holding.clone();
+    let max_seen = Arc::new(Mutex::new(0usize));
+    let seen = max_seen.clone();
+    let probe = Probe::new(move |point| match point {
+        HandOver::Taken => {
+            if first_take.swap(false, Ordering::SeqCst) {
+                held.store(true, Ordering::SeqCst);
+                // Hold the taken batch until a reader has refilled the queue and found it full.
+                full_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("a reader finds the queue full while the writer holds a batch");
+            }
+        }
+        HandOver::Full { queued } => {
+            let mut m = seen.lock().unwrap();
+            *m = (*m).max(queued);
+            if holding.load(Ordering::SeqCst) {
+                let _ = full_tx.lock().unwrap().send(());
+            }
+        }
+    });
+    let f = Follower::start_probed(
+        Arc::new(log.clone()),
+        config(json!({ "channels": ["System"], "backfill": "24h" })),
+        sink.clone(),
+        None,
+        lim,
+        Box::new(|| {}),
+        probe,
+    )
+    .unwrap();
+    wait_until("every event", || sink.ids("System").len() == 50);
+    f.stop().unwrap();
+    let max = *max_seen.lock().unwrap();
+    assert!((1..=4).contains(&max), "a full queue reported {max} queued with a capacity of 4");
+    assert_eq!(sink.ids("System"), (1..=50).collect::<Vec<_>>());
 }
 
 #[test]

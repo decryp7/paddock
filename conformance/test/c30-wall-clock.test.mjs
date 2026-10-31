@@ -51,6 +51,33 @@ test('mask keeps newlines and blanks comments and strings', () => {
 
 const sleepy = (body) => `use std::{sync::*, thread, time::Duration};\n#[test]\nfn it() {\n${body}\n}\n`;
 
+test('C30 through the runner: an assertion over a product grace period is an error (ER-21); a hang guard or grace-free waiver is not', async () => {
+  const f = await findingsOf('C30', makeApp({ 'crates/a/tests/close.rs': wrap('    assert!(b.close(), "ends by itself");') }));
+  assert.equal(f.length, 1);
+  assert.equal(f[0].severity, 'error');
+  assert.match(f[0].message, /within its grace/);
+  const g = await findingsOf('C30', makeApp({ 'crates/a/tests/g.rs': wrap('    assert!(b.close_gracefully(Duration::from_secs(5)));') }));
+  assert.equal(g[0].severity, 'error');
+  const guarded = wrap('    // conformance: hang-guard — only stops a browser that never exits\n    assert!(b.close_gracefully(Duration::from_secs(40)));');
+  assert.deepEqual(await findingsOf('C30', makeApp({ 'crates/a/tests/h.rs': guarded })), []);
+  const ended = wrap('    // conformance: grace-free — it ended already\n    assert!(b.close(), "a second close");');
+  assert.deepEqual(await findingsOf('C30', makeApp({ 'crates/a/tests/e.rs': ended })), []);
+});
+
+test('C30 hang guards at or above the CI test budget (60 s) are flagged: CI kills the test before the guard reports', async () => {
+  const long = wrap('    // conformance: hang-guard — only stops a browser that never exits\n    assert!(b.close_gracefully(Duration::from_secs(120)));');
+  const f = await findingsOf('C30', makeApp({ 'crates/a/tests/l.rs': long }));
+  assert.equal(f.length, 1);
+  assert.equal(f[0].severity, 'warn');
+  assert.match(f[0].message, /60 s/);
+  const clock = wrap('    let t = Instant::now();\n    // conformance: hang-guard — a broken fake must fail the test\n    assert!(t.elapsed() < Duration::from_secs(60));');
+  assert.match((await findingsOf('C30', makeApp({ 'crates/a/tests/c.rs': clock })))[0]?.message ?? '', /60 s/);
+  const ok = wrap('    // conformance: hang-guard — only stops a browser that never exits\n    assert!(b.close_gracefully(Duration::from_secs(40)));');
+  assert.deepEqual(await findingsOf('C30', makeApp({ 'crates/a/tests/ok.rs': ok })), []);
+  const err = await findingsOf('C30', makeApp({ 'crates/a/tests/e.rs': wrap('    assert!(b.close());') }));
+  assert.match(err[0].fix, /from_secs\(40\)/);
+});
+
 test('C30 sleeps: a thread::sleep in a test that uses threads is flagged; alone, or waived, it is not', () => {
   assert.equal(threadSleeps(sleepy('    let h = thread::spawn(|| work());\n    thread::sleep(Duration::from_millis(50));\n    h.join().unwrap();')).length, 1);
   assert.equal(threadSleeps(sleepy('    let flag = Arc::new(AtomicBool::new(false));\n    std::thread::sleep(Duration::from_millis(5));')).length, 1);
@@ -98,8 +125,8 @@ test('C30 through the runner: a sleep waiver needs a reason', async () => {
 test('C30 grace: assert! over close() or close_gracefully() is flagged, waivers and other calls are not', () => {
   assert.equal(graceAsserts(wrap('    assert!(b.close(), "ends by itself");')).length, 1);
   assert.equal(graceAsserts(wrap('    assert!(b.close_gracefully(Duration::from_secs(5)));'))[0].waiver, null);
-  const [g] = graceAsserts(wrap('    // conformance: hang-guard — only stops a browser that never exits\n    assert!(b.close_gracefully(Duration::from_secs(120)));'));
-  assert.deepEqual([g.waiver, g.limitMs], ['hang-guard', 120_000]);
+  const [g] = graceAsserts(wrap('    // conformance: hang-guard — only stops a browser that never exits\n    assert!(b.close_gracefully(Duration::from_secs(40)));'));
+  assert.deepEqual([g.waiver, g.limitMs], ['hang-guard', 40_000]);
   assert.equal(graceAsserts(wrap('    // conformance: grace-free — it ended already\n    assert!(b.close(), "a second close");'))[0].waiver, 'grace-free');
   // A hang-guard comment does not waive a bare close() (its grace is fixed), and a grace-free one needs a reason.
   assert.equal(graceAsserts(wrap('    // conformance: hang-guard\n    assert!(b.close());'))[0].waiver, null);
@@ -123,7 +150,7 @@ test('C30 grace: a guarded close_gracefully of under 10 s is too tight', async (
   const f = await findingsOf('C30', makeApp({ 'crates/a/tests/t.rs': tight }));
   assert.equal(f.length, 1);
   assert.match(f[0].message, /too tight/);
-  const ok = wrap('    // conformance: hang-guard\n    assert!(b.close_gracefully(Duration::from_secs(120)));');
+  const ok = wrap('    // conformance: hang-guard\n    assert!(b.close_gracefully(Duration::from_secs(40)));');
   assert.deepEqual(await findingsOf('C30', makeApp({ 'crates/a/tests/t.rs': ok })), []);
 });
 

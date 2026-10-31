@@ -19,7 +19,7 @@ exclude = ["crates/dyno-helper"]
 [workspace.package]
 edition = "2021"
 license = "MIT OR Apache-2.0"
-rust-version = "1.88"
+rust-version = "1.89"
 repository = "https://dev.decryptology.net/decryp7/dyno"
 version = "1.0.0"
 
@@ -46,6 +46,11 @@ opt-level = 2
 
 [profile.dev]
 debug = "line-tables-only"
+
+# The app crate holds the supervisor's model check (every interleaving up to a bound, ADR 0025): optimised a little, it runs in
+# seconds instead of minutes in a test build. Its dependencies are optimised above.
+[profile.dev.package.dyno-app]
+opt-level = 1
 
 # Shipped builds (`cargo build --profile dist`, `tauri build -- --profile dist`).
 [profile.dist]

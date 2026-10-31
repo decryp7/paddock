@@ -20,7 +20,7 @@ export function mockKindResult(kind: BenchKind, scale: number, gpu: boolean, cor
       return {
         kind,
         millis: 2300,
-        status: { state: 'done', metrics: [m('mem-copy', 'Copy bandwidth', 58.4 * scale, 'GB/s'), m('mem-latency', 'Random access latency', 92 / scale, 'ns', false)] },
+        status: { state: 'done', metrics: [m('mem-copy', 'Copy bandwidth', 118 * scale, 'GB/s'), m('mem-latency', 'Random access latency', 96 / scale, 'ns', false)] },
       };
     case 'disk':
       return {
@@ -29,15 +29,15 @@ export function mockKindResult(kind: BenchKind, scale: number, gpu: boolean, cor
         status: {
           state: 'done',
           metrics: [
-            m('disk-seq-write', 'Sequential write (flushed)', 2410 * scale, 'MB/s'),
-            m('disk-seq-read', 'Sequential read (may be cached)', 6120 * scale, 'MB/s'),
-            m('disk-rand-read', 'Random 4 KiB reads (may be cached)', 148_000 * scale, 'IOPS'),
+            m('disk-seq-write', 'Sequential write (flushed)', 3400 * scale, 'MB/s'),
+            m('disk-seq-read', 'Sequential read (may be cached)', 5100 * scale, 'MB/s'),
+            m('disk-rand-read', 'Random 4 KiB reads (may be cached)', 190_000 * scale, 'IOPS'),
           ],
         },
       };
     case 'gpu':
       return gpu
-        ? { kind, millis: 0, status: { state: 'done', metrics: [m('gpu-compute', 'Compute', 3100 * scale, 'GFLOPS')] } }
+        ? { kind, millis: 0, status: { state: 'done', metrics: [m('gpu-compute', 'Compute', 9200 * scale, 'GFLOPS')] } }
         : { kind, millis: 0, status: { state: 'unavailable', reason: 'GPU compute tests need a graphics API that this build does not include, so none is run.' } };
   }
 }

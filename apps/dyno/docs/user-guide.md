@@ -152,6 +152,11 @@ that gives the readings Dyno cannot get today, and starting as administrator at 
 
 ## Troubleshooting
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/diagnostics-dark.png">
+  <img alt="The diagnostics bundle preview" src="screenshots/diagnostics-light.png">
+</picture>
+
 | Symptom | What to do |
 | --- | --- |
 | The window shows an error with **Retry** | The agent did not answer in 15 s. Retry; if it persists run `dyno-agent status`, then `dyno-agent run` in a terminal to see why |

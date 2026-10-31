@@ -1150,6 +1150,7 @@ dependencies = [
  "dyno-plugin-host",
  "libc",
  "paddock-jobs",
+ "paddock-proc",
  "plist",
  "rusqlite",
  "serde",
@@ -1178,6 +1179,8 @@ dependencies = [
  "paddock-download",
  "paddock-health",
  "paddock-jobs",
+ "paddock-menu",
+ "paddock-proc",
  "paddock-settings",
  "paddock-shell",
  "paddock-startup",
@@ -1255,6 +1258,7 @@ version = "1.0.0"
 dependencies = [
  "dns-lookup",
  "dyno-core",
+ "jiff",
  "libc",
  "netstat2",
  "paddock-proc",
@@ -3641,8 +3645,10 @@ name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "log",
  "paddock-workspace-hack",
  "sysinfo",
+ "thiserror 2.0.21",
  "windows-sys 0.61.2",
 ]
 

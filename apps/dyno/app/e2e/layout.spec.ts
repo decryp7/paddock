@@ -12,7 +12,7 @@ import { EXTRAS_TABS } from '../src/app/features/extras/extras-model';
 // Every screen of the sidebar (so a new one is measured without editing this list), and the cpu screen the sidebar does not list.
 const PAGES = [...new Set([...NAV.map((n) => n.path.replace(/^\//, '')), 'cpu'])];
 const WIDTHS = [900, 1024, 1280];
-const ROWS = 'tr, [role="row"], .row, .item, li.win';
+const ROWS = 'tr, [role="row"], .row, .item, li.win, th, [role="columnheader"]';
 
 async function clipped(page: Page): Promise<string[]> {
   return page.evaluate((selector) => {
@@ -35,6 +35,12 @@ const EXTRAS = EXTRAS_TABS.map((t) => t.id);
 const STATES: State[] = [
   ...PAGES.map((p): State => ({ name: p || 'dashboard', path: p })),
   ...EXTRAS.map((t): State => ({ name: `extras ${t}`, path: `extras?tab=${t}` })),
+  { name: 'disk map table', path: 'disk-map', setup: async (page) => {
+      await page.getByRole('button', { name: 'Scan Macintosh HD' }).click();
+      await page.getByRole('radio', { name: 'Table' }).click();
+      await expect(page.getByRole('table', { name: /Contents of Macintosh HD/ })).toBeVisible();
+    },
+  },
   { name: 'alarms rules', path: 'alarms', setup: (page) => page.getByRole('tab', { name: 'Rules' }).click() },
   { name: 'alarms detail open', path: 'alarms', setup: async (page) => {
       await page.getByRole('grid', { name: 'Open alarms' }).getByRole('row').nth(1).click();

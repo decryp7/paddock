@@ -14,6 +14,9 @@ use dyno_platform::Platform;
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
+mod common;
+use common::{full_disk_sample, wait_for_alarm};
+
 struct Harness {
     running: Option<Running>,
     fake: Fake,
@@ -268,38 +271,6 @@ fn the_inventory_is_read_once_and_cached() {
         panic!("inventory")
     };
     assert_eq!(*a, *b);
-}
-
-fn full_disk_sample() -> dyno_core::metrics::SystemSample {
-    let mut s = dyno_platform::fake::quiet_sample(Timestamp(0));
-    s.disks = vec![dyno_core::metrics::DiskSample {
-        id: "c".into(),
-        name: "C:".into(),
-        mount: "C:".into(),
-        total: 100 << 30,
-        free: 2 << 30,
-        removable: false,
-    }];
-    s
-}
-
-fn wait_for_alarm(peer: &Peer<Message>) -> dyno_core::alarms::Alarm {
-    for _ in 0..100 {
-        let Reply::Alarms(list) = ask(
-            peer,
-            Request::Alarms {
-                filter: Default::default(),
-            },
-        )
-        .unwrap() else {
-            panic!("alarms")
-        };
-        if let Some(a) = list.into_iter().next() {
-            return a;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    panic!("no alarm was raised");
 }
 
 #[test]
@@ -600,9 +571,15 @@ fn the_counters_browser_lists_searches_reads_and_charts_this_machines_counters()
     let h = Harness::start();
     let peer = h.client();
     let ask_slow = |r| ask_within(&peer, r, Duration::from_secs(30));
-    let Reply::CounterObjects(objects) = ask_slow(Request::CounterObjects).unwrap() else {
-        panic!("objects")
-    };
+    // Listing every counter can take longer than the agent waits on a busy machine (Windows CI run 7166); it then says to
+    // try again, and the retry joins the listing still running. Asked again as the message says (a bounded hang guard).
+    let objects = (0..5)
+        .find_map(|_| match ask_slow(Request::CounterObjects) {
+            Ok(Reply::CounterObjects(o)) => Some(o),
+            Err(e) if e.contains("took too long") => None,
+            other => panic!("objects: {other:?}"),
+        })
+        .expect("the counters were listed");
     assert!(objects.objects.iter().any(|o| o.name == "Memory" && o.counters > 0));
     let Reply::CounterObject(memory) = ask_slow(Request::CounterObject { name: "Memory".into() }).unwrap() else {
         panic!("object")
@@ -836,8 +813,10 @@ fn baselines_learn_silently_then_judge_and_alarm_only_when_asked() {
     assert!(o.items.is_empty());
     // Four weeks of quiet history, first seen long ago.
     let now = dyno_agent::agent::now();
+    let held = h.fake.hold_samples();
+    assert!(held.wait_parked(Duration::from_secs(20)), "the sampler reached the hold");
     {
-        let core = dyno_agent::agent::lock(&s.core);
+        let mut core = dyno_agent::agent::lock(&s.core);
         core.store.set_meta("firstSeen", &now.minus(30 * DAY).millis().to_string()).unwrap();
         for q in 0..(28 * 96) {
             let p = HistoryPoint {
@@ -848,17 +827,32 @@ fn baselines_learn_silently_then_judge_and_alarm_only_when_asked() {
             };
             core.store.put_point(Tier::QuarterHour, &p).unwrap();
         }
+        // The judged values are the agent's recent samples, and whether its sampler has run yet depends on the machine (on
+        // the busy Windows runner it had not, CI runs 7166 and 7168): start from none, so the test never depends on it.
+        core.recent.clear();
     }
     h.fake.push_sample(dyno_platform::fake::quiet_sample(Timestamp(0)));
     let Reply::Baselines(o) = ask(&peer, Request::Baselines).unwrap() else {
         panic!("baselines")
     };
     assert!(matches!(o.learning, Learning::Ready { .. }), "{:?}", o.learning);
-    let cpu = o
-        .items
-        .iter()
-        .find(|i| i.subject == "System" && i.label == "CPU")
-        .expect("a CPU item");
+    assert!(o.items.is_empty(), "nothing is judged before a sample: {:?}", o.items);
+    // Sampling goes on: the CPU is judged once the agent has sampled it (waited for, whenever its sampler runs; the loop
+    // is a hang guard).
+    drop(held);
+    s.wake_sampler();
+    let mut judged = None;
+    for _ in 0..100 {
+        let Reply::Baselines(o) = ask(&peer, Request::Baselines).unwrap() else {
+            panic!("baselines")
+        };
+        judged = o.items.into_iter().find(|i| i.subject == "System" && i.label == "CPU");
+        if judged.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let cpu = judged.expect("a CPU item");
     assert_eq!(cpu.judgement.state, State::Usual, "{cpu:?}");
     assert!(cpu.judgement.phrase.starts_with("Usual for"), "{}", cpu.judgement.phrase);
 
@@ -899,4 +893,205 @@ fn baselines_learn_silently_then_judge_and_alarm_only_when_asked() {
         dyno_agent::baselines::evaluate_alarms(&s);
     }
     assert!(alarm_rules(&peer).contains(&"baseline:cpu".to_string()), "{:?}", alarm_rules(&peer));
+}
+
+/// Rule 52 (coordinator review, 2026-10-30): the sampler fills the live view, so it runs as live work (normal priority on
+/// Windows, never stalled behind busy normal threads).
+#[test]
+fn the_sampler_runs_as_live_work() {
+    let h = Harness::start();
+    let mut role = None;
+    // Waits for the sampler's first sample (a hang guard bounds the loop).
+    for _ in 0..200 {
+        role = h.fake.with(|s| s.sample_role);
+        if role.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(role, Some(dyno_platform::priority::ThreadRole::Live));
+}
+
+// ------------------------------------------------------------------------------------------------- one agent per folder
+// A second agent on the same data folder refuses to start, says why, and leaves the first one's discovery file and
+// history alone (a Dyno 1.0 test VM ran two agents on one `dyno.db` after a slow first start).
+
+fn start_on(dirs: &Dirs) -> Result<Running, String> {
+    let fake = Fake::new();
+    fake.add_process(process(100, "busy", 60.0));
+    Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).map_err(|e| e.to_string())
+}
+
+/// Starts an agent on `dirs` once the lock is free: a refusal for "already running" is waited out (the holder is gone, a forked
+/// child may still carry a copy of the lock's descriptor until it execs); any other failure is the test's.
+fn start_when_the_folder_is_free(dirs: &Dirs) -> Running {
+    let end = std::time::Instant::now() + Duration::from_secs(40); // hang guard of the harness only
+    loop {
+        match start_on(dirs) {
+            Ok(running) => return running,
+            Err(e) if e.contains("already running") && std::time::Instant::now() < end => std::thread::yield_now(),
+            Err(e) => panic!("the folder never became free: {e}"),
+        }
+    }
+}
+
+#[test]
+fn a_second_agent_on_the_same_data_folder_refuses_to_start_and_says_so() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    let first = start_on(&dirs).unwrap();
+    let before = dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap();
+
+    let second = start_on(&dirs);
+    let message = match second {
+        Ok(r) => {
+            r.stop();
+            panic!("a second agent started on the same data folder");
+        }
+        Err(e) => e,
+    };
+    assert!(message.contains("already running"), "{message}");
+    assert!(
+        message.contains("another computer"),
+        "a shared network home can hold it from elsewhere: {message}"
+    );
+    // The agent's log file says it too (the app starts the agent with stderr discarded; a service's stderr is elsewhere).
+    let log = std::fs::read_to_string(dirs.logs().join("agent.log")).unwrap_or_default();
+    assert!(log.contains("already running"), "agent.log: {log:?}");
+    assert_eq!(
+        dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap(),
+        before,
+        "the refused agent left the first one's discovery file alone"
+    );
+
+    // Once the first one is gone, the folder is free again (the lock ends with its holder). "Gone" is the moment the OS lets
+    // the lock go, not the moment `stop` returns: a program the agent just started (the hardware readers run `pmset` and the like
+    // on a background thread) holds a copy of every descriptor open at its fork, the lock's included, until it execs, and on a
+    // loaded macOS runner that exec can take a while. So the third start waits on the lock being free, as the lock's own test does.
+    first.stop();
+    let third = start_when_the_folder_is_free(&dirs);
+    assert_ne!(
+        dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap().endpoint,
+        before.endpoint
+    );
+    third.stop();
+}
+
+#[test]
+fn a_folder_that_cannot_lock_still_runs_the_agent_but_says_so_in_the_log_and_the_activity() {
+    use dyno_agent::instance::LockError;
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    let fake = Fake::new();
+    fake.add_process(process(100, "busy", 60.0));
+    let unsupported = LockError::Io {
+        path: dirs.instance_lock(),
+        source: std::io::Error::new(std::io::ErrorKind::Unsupported, "file locking is not supported here"),
+    };
+    let running = Running::start_with_lock(
+        dirs.clone(),
+        fake.platform(),
+        Box::new(fake.clone()),
+        Box::new(|_| Ok(())),
+        dyno_agent::disk::DiskPorts::none(),
+        Err(unsupported),
+    )
+    .unwrap();
+    let log = std::fs::read_to_string(dirs.logs().join("agent.log")).unwrap_or_default();
+    assert!(log.contains("not supported"), "agent.log: {log:?}");
+    let (peer, _) = connect(&dirs).unwrap();
+    let Reply::Activities(entries) = ask(&peer, Request::Activity { limit: 50 }).unwrap() else {
+        panic!("not activities")
+    };
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.title.contains("second agent") && e.detail.contains("not supported")),
+        "{entries:?}"
+    );
+    running.stop();
+}
+
+#[test]
+fn agents_on_different_data_folders_run_side_by_side() {
+    let tmp = tempfile::tempdir().unwrap();
+    let a = start_on(&Dirs::at(tmp.path().join("a"))).unwrap();
+    let b = start_on(&Dirs::at(tmp.path().join("b"))).unwrap();
+    a.stop();
+    b.stop();
+}
+
+/// A child between its fork and its exec holds a copy of every descriptor open at the fork, the lock's included (it is closed
+/// at the exec, `O_CLOEXEC`). The agent starts programs on background threads (the hardware readers), so the OS can keep the data
+/// folder locked for a while after the agent that held it is gone; a loaded macOS runner showed it (the third start of
+/// `a_second_agent…` was refused). This holds a child in that state on purpose, without a clock: it blocks on a pipe the test
+/// closes.
+#[cfg(unix)]
+#[test]
+#[expect(
+    unsafe_code,
+    reason = "pipe(2), read(2) and write(2) in the child between fork and exec, async-signal-safe calls only"
+)]
+#[expect(clippy::disallowed_methods, reason = "the test starts a trivial program to hold a forked child")]
+fn a_child_forked_before_it_execs_keeps_the_folder_locked_until_it_does_and_the_next_start_waits() {
+    use std::os::unix::process::CommandExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    let first = start_on(&dirs).unwrap();
+
+    let mut ready = [0i32; 2];
+    let mut release = [0i32; 2];
+    // SAFETY: two fresh pipes; the descriptors are closed below.
+    unsafe {
+        assert_eq!(libc::pipe(ready.as_mut_ptr()), 0);
+        assert_eq!(libc::pipe(release.as_mut_ptr()), 0);
+    }
+    let (ready_w, release_r, release_w) = (ready[1], release[0], release[1]);
+    let forker = std::thread::spawn(move || {
+        let mut cmd = std::process::Command::new("true");
+        // SAFETY: only `write` and `read` run in the child before the exec.
+        unsafe {
+            cmd.pre_exec(move || {
+                let byte = 1u8;
+                libc::write(ready_w, std::ptr::addr_of!(byte).cast(), 1);
+                // (its own copy of the write end would keep the read from ever ending)
+                libc::close(release_w);
+                let mut b = 0u8;
+                libc::read(release_r, std::ptr::addr_of_mut!(b).cast(), 1);
+                Ok(())
+            });
+        }
+        cmd.status().unwrap();
+    });
+    // The child has forked (it says so) and now waits, holding the descriptors it was born with.
+    let mut b = 0u8;
+    // SAFETY: reads one byte from our own pipe.
+    assert_eq!(unsafe { libc::read(ready[0], std::ptr::addr_of_mut!(b).cast(), 1) }, 1);
+
+    first.stop();
+    assert!(
+        dyno_agent::instance::is_held(&dirs),
+        "the stopped agent's lock should still be held by the forked child's copy of the descriptor"
+    );
+    match start_on(&dirs) {
+        Ok(r) => {
+            r.stop();
+            panic!("an agent started while a forked child still carried the lock");
+        }
+        Err(refused) => assert!(refused.contains("already running"), "{refused}"),
+    }
+
+    // The child execs (the read ends), its copy closes, the lock is free: the waiting start succeeds.
+    // SAFETY: closes our write end of the release pipe, which unblocks the child's read.
+    unsafe {
+        libc::close(release[1]);
+    }
+    forker.join().unwrap();
+    start_when_the_folder_is_free(&dirs).stop();
+    // SAFETY: closes the remaining ends.
+    unsafe {
+        libc::close(ready[0]);
+        libc::close(ready[1]);
+        libc::close(release[0]);
+    }
 }

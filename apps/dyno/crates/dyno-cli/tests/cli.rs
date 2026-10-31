@@ -108,7 +108,12 @@ fn status_top_why_slow_alarms_and_snapshot_print_text_and_stable_json() {
 #[test]
 fn counters_list_search_and_get_work_against_this_machines_counters() {
     let h = Harness::start();
-    let (code, text, err) = h.dyno("counters list");
+    // Listing every counter can take longer than the agent waits on a busy machine (Windows CI run 7166); it then says to
+    // try again, and the retry joins the listing still running. Run again as the message says (a bounded hang guard).
+    let (code, text, err) = (0..5)
+        .map(|_| h.dyno("counters list"))
+        .find(|(code, _, err)| *code == 0 || !err.contains("took too long"))
+        .expect("the counters were listed");
     assert_eq!(code, 0, "{err}");
     assert!(text.contains("Memory"));
     let (code, text, _) = h.dyno("counters list Memory");

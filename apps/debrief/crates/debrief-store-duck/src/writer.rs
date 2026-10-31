@@ -16,7 +16,7 @@
 
 use crate::lock;
 use crate::schema::events_view;
-use crate::segments::{Segment, SegmentWriter, SEGMENTS_DIR, SEGMENT_ROWS};
+use crate::segments::{Segment, SegmentWriter, SEGMENTS_DIR, SEGMENT_AGE, SEGMENT_ROWS};
 use anyhow::{Context, Result};
 use debrief_core::batch::{EventBatch, EventId, EventSchema, PendingBatch, SourceId};
 use debrief_core::ingest::{Fingerprint, NewSource, SharedSink, SourceReport};
@@ -214,6 +214,8 @@ pub struct SegmentSink {
     pending: Mutex<(Vec<Segment>, Option<Instant>)>,
     /// [`LIST_EVERY`] (tests change it).
     list_every: Duration,
+    /// [`SEGMENT_AGE`](crate::segments::SEGMENT_AGE) (tests change it: a wall-clock age makes row counts depend on load).
+    segment_age: Duration,
     generation: Arc<AtomicU64>,
     /// Distinguishes the files of rewritten segments.
     file_generation: u64,
@@ -262,6 +264,7 @@ impl SegmentSink {
             sources: Mutex::new(HashMap::new()),
             pending: Mutex::new((Vec::new(), None)),
             list_every: LIST_EVERY,
+            segment_age: SEGMENT_AGE,
             generation,
             file_generation,
             observe,
@@ -437,7 +440,7 @@ impl SharedSink for SegmentSink {
             return Ok(());
         }
         let mut slot = lock(self.slot());
-        if slot.as_ref().is_some_and(|w| w.remaining() < n || w.is_old()) {
+        if slot.as_ref().is_some_and(|w| w.remaining() < n || w.is_old(self.segment_age)) {
             if let Some(w) = slot.take() {
                 self.register(w)?;
             }
@@ -651,10 +654,34 @@ mod tests {
     }
 
     #[test]
+    fn a_segment_open_for_the_age_is_closed_early_and_only_then() {
+        let files = |dir: &Path| std::fs::read_dir(dir.join(SEGMENTS_DIR)).unwrap().count();
+        let src = NewSource {
+            path: "a".into(),
+            name: "a".into(),
+        };
+        for (age, expected) in [(Duration::MAX, 1), (Duration::ZERO, 3)] {
+            let (dir, c) = store();
+            let mut w = sink(&c, &dir, None);
+            w.list_every = Duration::from_secs(3600);
+            w.segment_age = age;
+            let a = w.begin_source(&src, None).unwrap();
+            for _ in 0..3 {
+                w.write(batch(a, 10)).unwrap();
+            }
+            assert_eq!(files(&dir), expected, "age {age:?}");
+            drop(w);
+            drop(c);
+            std::fs::remove_dir_all(dir).ok();
+        }
+    }
+
+    #[test]
     fn closed_segments_wait_for_the_next_listing() {
         let (dir, c) = store();
         let mut w = sink(&c, &dir, None);
         w.list_every = Duration::from_secs(3600);
+        w.segment_age = Duration::MAX;
         let src = NewSource {
             path: "a".into(),
             name: "a".into(),
@@ -680,6 +707,7 @@ mod tests {
         // A writer dropped with a closed segment that was never listed deletes it.
         let mut w = sink(&c, &dir, None);
         w.list_every = Duration::from_secs(3600);
+        w.segment_age = Duration::MAX;
         let b = w.begin_source(&src, None).unwrap();
         for _ in 0..2 * full + 1 {
             w.write(batch(b, per)).unwrap();

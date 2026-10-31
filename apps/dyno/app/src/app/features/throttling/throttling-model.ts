@@ -6,7 +6,8 @@ export type DotTone = 'ok' | 'warn' | 'muted';
 export const CAUSE_LABEL: Record<ThrottleCause, string> = {
   thermal: 'Heat',
   power: 'Power limit',
-  batterySaver: 'Battery saver',
+  // The OS's own name for the mode (Low Power Mode, Battery saver) is in the engine's verdict; the table says what kind of cause it is.
+  batterySaver: 'Power saving mode',
   unexplained: 'Unexplained',
 };
 

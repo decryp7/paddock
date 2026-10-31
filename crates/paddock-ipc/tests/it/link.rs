@@ -59,6 +59,42 @@ fn the_discovery_file_is_private_and_removed_by_its_owner_only() {
     );
 }
 
+/// ADR 0033: a discovery file's pid may have been handed on. A live process that started after the file was written is not
+/// the companion that wrote it, so the file is stale and nothing is ended; the companion itself, which started before it
+/// wrote the file, is live.
+#[test]
+fn a_file_whose_pid_was_handed_on_is_stale() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("agent.json");
+    let me = paddock_proc::ProcessId::of(std::process::id()).unwrap();
+    let started_ms = i64::try_from(me.started().as_micros() / 1000).unwrap();
+    // Written "before" this process started: the pid now belongs to this test, not to the writer.
+    let old = Discovery {
+        started_ms: started_ms - 60_000,
+        ..sample(std::process::id())
+    };
+    old.write(&path).unwrap();
+    assert!(!discovery::is_running(&old));
+    assert_eq!(
+        discovery::read(&path, discovery::is_running),
+        Found::Stale(old)
+    );
+    // Written after this process started, by this process: live.
+    let ours = Discovery {
+        started_ms: started_ms + 10,
+        ..sample(std::process::id())
+    };
+    ours.write(&path).unwrap();
+    assert_eq!(
+        discovery::read(&path, discovery::is_running),
+        Found::Live(ours.clone())
+    );
+    assert!(
+        (ClientConfig::new(&path, "1", "x").is_alive)(&ours),
+        "the default check is the identity check"
+    );
+}
+
 #[test]
 fn damaged_huge_dead_or_shared_files_are_not_used() {
     let dir = tempfile::tempdir().unwrap();

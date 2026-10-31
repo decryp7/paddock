@@ -84,7 +84,7 @@ export function mockThrottling(os: MockOs, now: number, scenario?: HardwareScena
       headline: 'Slowed down by heat: 44% slower',
       explanation:
         'The CPU is giving up about 44% of its speed because the system reports a heat limit. Free the vents, move the machine off soft surfaces, and check for a fan that has stopped or is clogged with dust.',
-      evidence: [ev('Load', '96%'), ev('Clock', '1780 MHz of 3200 MHz'), ev('Temperature', '99 °C'), ev('Limit set by the system', '55% of full speed')],
+      evidence: [ev('Load', '96%'), ev('Clock', '1780 MHz of 4500 MHz'), ev('Temperature', '99 °C'), ev('Limit set by the system', '55% of full speed')],
     };
     return { at: now, reading, current, episodes: past, minutes30d: total([...past, current]), inputs: inputs(os, sc) };
   }
@@ -111,7 +111,7 @@ export function mockThrottling(os: MockOs, now: number, scenario?: HardwareScena
       confidence: 'high',
       headline: 'Running at full speed',
       explanation: 'The CPU is busy and its clock is where it should be.',
-      evidence: [ev('Load', '78%'), ev('Clock', '3180 MHz of 3200 MHz'), ev('Temperature', '71 °C')],
+      evidence: [ev('Load', '78%'), ev('Clock', '4400 MHz of 4500 MHz'), ev('Temperature', '71 °C')],
     },
     current: null,
     episodes: past,
@@ -198,19 +198,19 @@ export function mockBaselines(now: number, scenario?: HardwareScenario): Baselin
         'cpu',
         'CPU',
         '71%',
-        judgement({ higher: 'strong' }, 'Higher than usual for Tuesday mornings', 'CPU is 71% now; it is usually about 14% (9% to 22%) on Tuesday mornings, from 5 similar hours.', '14%'),
+        judgement({ higher: 'strong' }, 'Higher than usual for Thursday afternoons', 'CPU is 71% now; it is usually about 14% (9% to 22%) on Thursday afternoons, from 5 similar hours.', '14%'),
       ),
       item(
         'rustc',
         'appCpu',
         'CPU',
         '41%',
-        judgement({ higher: 'notable' }, 'Higher than usual for Tuesday mornings', 'CPU is 41% now; it is usually about 6% (2% to 12%) on Tuesday mornings, from 5 similar hours.', '6%', 'medium'),
+        judgement({ higher: 'notable' }, 'Higher than usual for Thursday afternoons', 'CPU is 41% now; it is usually about 6% (2% to 12%) on Thursday afternoons, from 5 similar hours.', '6%', 'medium'),
       ),
-      item('System', 'memory', 'Memory', '58%', judgement('usual', 'Usual for Tuesday mornings', 'Memory is 58% now; it is usually about 55% (49% to 61%) on Tuesday mornings, from 5 similar hours.', '55%')),
-      item('System', 'diskWrite', 'Disk writes', '4.1 MB/s', judgement('usual', 'Usual for Tuesday mornings', 'Disk writes is 4.1 MB/s now; it is usually about 3.4 MB/s (1.9 MB/s to 6.8 MB/s) on Tuesday mornings, from 5 similar hours.', '3.4 MB/s')),
-      item('System', 'temperature', 'Temperature', '74 °C', judgement({ higher: 'notable' }, 'Higher than usual for Tuesday mornings', 'Temperature is 74 °C now; it is usually about 58 °C (54 °C to 63 °C) on Tuesday mornings, from 5 similar hours.', '58 °C', 'medium')),
-      item('Google Chrome', 'appMemory', 'Memory', '4.3 GB', judgement('usual', 'Usual for weekday mornings', 'Memory is 4.3 GB now; it is usually about 4.1 GB (3.6 GB to 4.8 GB) on weekday mornings, from 24 similar hours.', '4.1 GB', 'medium')),
+      item('System', 'memory', 'Memory', '58%', judgement('usual', 'Usual for Thursday afternoons', 'Memory is 58% now; it is usually about 55% (49% to 61%) on Thursday afternoons, from 5 similar hours.', '55%')),
+      item('System', 'diskWrite', 'Disk writes', '4.1 MB/s', judgement('usual', 'Usual for Thursday afternoons', 'Disk writes is 4.1 MB/s now; it is usually about 3.4 MB/s (1.9 MB/s to 6.8 MB/s) on Thursday afternoons, from 5 similar hours.', '3.4 MB/s')),
+      item('System', 'temperature', 'Temperature', '74 °C', judgement({ higher: 'notable' }, 'Higher than usual for Thursday afternoons', 'Temperature is 74 °C now; it is usually about 58 °C (54 °C to 63 °C) on Thursday afternoons, from 5 similar hours.', '58 °C', 'medium')),
+      item('Google Chrome', 'appMemory', 'Memory', '4.3 GB', judgement('usual', 'Usual for weekday afternoons', 'Memory is 4.3 GB now; it is usually about 4.1 GB (3.6 GB to 4.8 GB) on weekday afternoons, from 24 similar hours.', '4.1 GB', 'medium')),
     ],
   };
 }

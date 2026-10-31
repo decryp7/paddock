@@ -2,4 +2,5 @@
 //! Each module is a former `tests/<name>.rs`; run one with `cargo test --test it <name>::`.
 
 mod never_panics;
+mod orphan;
 mod self_test;

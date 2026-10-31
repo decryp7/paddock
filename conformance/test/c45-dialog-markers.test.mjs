@@ -13,6 +13,11 @@ test('hiddenConstructorCalls finds production calls and ignores comments, string
   assert.deepEqual(hiddenConstructorCalls(`fn a() { DialogCallable::__command ("x"); }\n`).map((c) => c.name), ['__command']);
 });
 
+test('hiddenConstructorCalls: a leading #[cfg(test)] use hides nothing below it; code after a test module still counts', () => {
+  assert.equal(hiddenConstructorCalls(`#[cfg(test)]\nuse x::y;\n${prod}`).length, 2);
+  assert.equal(hiddenConstructorCalls(`#[cfg(test)]\nmod tests { fn t() { if a { b(); } } }\n${prod}`).length, 2);
+});
+
 test('C45 bad: a production call outside paddock-commands', async () => {
   const f = await findingsOf('C45', makeApp({ 'crates/paddock-dialogs/src/table.rs': prod, 'apps/x/src-tauri/src/dialogs.rs': prod }));
   assert.equal(f.length, 4);

@@ -1,0 +1,14 @@
+name: build-jobs
+description: "CARGO_BUILD_JOBS for the job: the smaller of the host's cores and RAM divided by the jobs the host runs at once (runner.envs PADDOCK_CI_JOBS_PER_HOST, PADDOCK_CI_RESERVED_CORES, PADDOCK_CI_RESERVED_RAM_MB, else the runner class's known layout; Linux keeps cargo's default until its share is measured), or the runner's PADDOCK_CI_BUILD_JOBS (conformance/ci/build-jobs.sh, the one implementation). An early step of a job (after Git bash on Windows, before job-isolation, which builds paddock-dev); setup-rust runs it too when no earlier step set CARGO_BUILD_JOBS."
+inputs:
+  split:
+    description: "How many builds the job runs at once (cargo mutants --jobs N): each gets 1/split of the share."
+    default: "1"
+runs:
+  using: composite
+  steps:
+    - name: Build jobs for this runner
+      shell: bash
+      env:
+        SPLIT: ${{ inputs.split }}
+      run: bash "${{ github.action_path }}/../../../conformance/ci/build-jobs.sh" "$SPLIT"

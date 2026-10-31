@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { tabKey, walkStep } from './keyboard.ts';
+import { modKey, tabKey, walkStep } from './keyboard.ts';
 
 test('a walk goes on while every stop is new', () => {
   assert.equal(walkStep([], 'a'), 'continue');
@@ -32,4 +32,18 @@ test('WebKit on macOS reaches buttons and links only with Option held (full keyb
   assert.equal(tabKey('webkit', 'linux'), 'Tab');
   assert.equal(tabKey('webkit', 'win32', true), 'Shift+Tab');
   assert.equal(tabKey('firefox', 'darwin'), 'Tab');
+});
+
+// Regression (CI run 7134, Dyno's WebKit leg on Linux): `devices['Desktop Safari']` reports a Mac, so the app binds `Mod` to
+// Cmd, while Playwright's `ControlOrMeta` follows the machine the tests run on and pressed Ctrl. The key follows the page.
+test('Mod is the key the page binds it to: Cmd for a Mac or iOS navigator, Ctrl for any other', () => {
+  const safari = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15';
+  const chrome = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
+  assert.equal(modKey({ platform: 'Linux x86_64', userAgent: safari }), 'Meta');
+  assert.equal(modKey({ platform: 'MacIntel', userAgent: '' }), 'Meta');
+  assert.equal(modKey({ platform: 'iPad', userAgent: '' }), 'Meta');
+  assert.equal(modKey({ platform: 'MacIntel', userAgent: chrome }), 'Meta');
+  assert.equal(modKey({ platform: 'Win32', userAgent: chrome }), 'Control');
+  assert.equal(modKey({ platform: 'Linux x86_64', userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15' }), 'Control');
+  assert.equal(modKey({}), 'Control');
 });

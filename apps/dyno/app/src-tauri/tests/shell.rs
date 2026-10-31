@@ -234,7 +234,15 @@ fn the_start_opens_the_tray_and_the_main_window() {
             tray: true
         })
     );
-    assert!(dir.path().join("data").is_dir(), "the agent link started, in the test's folder");
+    // The link thread creates its folder after the start returns; wait on that, with a hang guard only a lost thread reaches.
+    let began = std::time::Instant::now();
+    while !dir.path().join("data").is_dir() {
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(30),
+            "the agent link never started, in the test's folder"
+        );
+        std::thread::yield_now();
+    }
 }
 
 /// Started at log-in (`--hidden`) with a tray: Dyno stays in the tray without a window.
@@ -265,4 +273,77 @@ fn composed(dir: &std::path::Path, launch: paddock_window::launch::LaunchArgs) -
         std::sync::Arc::new(dyno_app_lib::shell::NoPixels),
     );
     dyno_app_lib::app(tauri::test::mock_builder(), shell, launch, paddock_window::tauri::HeadlessTray)
+}
+
+/// Nothing is drawn: the menu bar of the test is a bar that shows nothing (macOS builds native menus on the main thread
+/// only).
+struct NoBar;
+
+impl paddock_menu::tauri::NativeBar<tauri::test::MockRuntime> for NoBar {
+    fn build(&self, _: &tauri::AppHandle<tauri::test::MockRuntime>, _: &[paddock_menu::NativeNode]) -> tauri::Result<()> {
+        Ok(())
+    }
+    fn set_states(&self, _: &tauri::AppHandle<tauri::test::MockRuntime>, _: &[paddock_menu::model::Item]) -> tauri::Result<bool> {
+        Ok(true)
+    }
+}
+
+/// The model Dyno's main window sends (its app menu: Settings and Quit with Mod+Q; `QUIT_CONTRIBUTIONS`).
+fn dyno_menu_model() -> paddock_menu::model::AppMenu {
+    let item = |id: &str, label: &str, key: Option<&str>| serde_json::json!({ "kind": "item", "id": id, "label": label, "keybinding": key, "checked": null, "enabled": true });
+    let wire = serde_json::json!({ "menus": [{ "id": "app", "label": "Dyno", "items": [
+        item("pd.settings.open", "Settings\u{2026}", Some("Mod+,")),
+        item("pd.app.quit", "Quit", Some("Mod+Q")),
+    ] }] });
+    paddock_menu::model::parse(serde_json::from_value(wire).unwrap()).unwrap()
+}
+
+/// Quit in the menu bar (Cmd+Q) with Dyno's last window closed to the tray: the window is gone, the tray keeps the app
+/// running, and Quit still begins the quit (the exit's teardown, Dyno's agent among it) instead of being dropped.
+#[test]
+fn quit_from_the_menu_bar_works_after_the_last_window_closed_to_the_tray() {
+    use paddock_menu::tauri::{menu_chosen, NativeMenu};
+    use tauri::test::{mock_builder, mock_context, noop_assets};
+    use tauri::{Manager, WindowEvent};
+    let dir = tempfile::tempdir().unwrap();
+    let shell = shell(
+        Place::Test {
+            dir: dir.path().to_path_buf(),
+        },
+        &Hub::default(),
+        std::sync::Arc::new(dyno_app_lib::shell::NoPixels),
+    )
+    .setup(|app| {
+        app.manage(NativeMenu::<tauri::test::MockRuntime>::with_bar("Dyno", true, NoBar));
+        Ok(())
+    });
+    let builder = dyno_app_lib::app(
+        mock_builder(),
+        shell,
+        paddock_window::launch::LaunchArgs::default(),
+        paddock_window::tauri::HeadlessTray,
+    );
+    let mut app = builder.build(mock_context(noop_assets())).unwrap();
+    // One iteration runs Tauri's set-up, which opens the tray and the main window.
+    #[allow(deprecated)]
+    app.run_iteration(|_, _| {});
+    let menu = app.state::<NativeMenu<tauri::test::MockRuntime>>();
+    let model = dyno_menu_model();
+    let quit = paddock_menu::native_spec(&model, "Dyno");
+    assert!(
+        paddock_menu::native::outline(&quit).contains("Quit <pd.app.quit>  CmdOrCtrl+Q"),
+        "the app menu has Quit with Cmd+Q"
+    );
+    menu.apply(app.handle(), &model).unwrap();
+    let windows = app.state::<paddock_window::tauri::Windows<tauri::test::MockRuntime>>();
+    let main = app.get_webview_window("main").expect("the start opened the main window");
+    let window = main.as_ref().window();
+    paddock_menu::tauri::on_window_event(&window, &WindowEvent::Focused(true));
+    assert_eq!(menu.target().as_deref(), Some("main"));
+    // Closed to the tray: the window is destroyed, the app keeps running.
+    paddock_menu::tauri::on_window_event(&window, &WindowEvent::Destroyed);
+    assert_eq!(menu.target(), None, "no window is the menu bar's target");
+    assert!(!windows.quitting());
+    menu_chosen(app.handle(), "pd.app.quit");
+    assert!(windows.quitting(), "Quit began the quit");
 }

@@ -8,6 +8,8 @@ repository.workspace = true
 publish = ["decryp7"]
 
 [dependencies]
+log = "0.4"
+thiserror = "2"
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
@@ -16,7 +18,7 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 # The kill-on-close job object of every supervised child (plan X54) and the private working set (rule 26).
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
 
 [dev-dependencies]
 # The never-panics test of the parsers (conformance check C36).

@@ -17,9 +17,11 @@ choice on Windows (a service) is the wrong one for Dyno.
      `Contents/Library/LaunchAgents/net.decryptology.dyno.agent.plist`, and the shell registers it with
      `SMAppService` (macOS 13+; approval in System Settings > Login Items when the OS asks). The plist runs
      `dyno-agent run` at login (`RunAtLoad`, `KeepAlive`, `ThrottleInterval` 10 s, `LimitLoadToSessionType Aqua`,
-     `ProcessType Background`). The bundle is ad-hoc signed (`signingIdentity "-"`) because `SMAppService` and launch
-     agents refuse a linker-signed bundle (-67056). After an app update launchd may keep the old code requirement and
-     refuse the new binary ("needs LWCR update", spawn failed, exit 78); registering over the live job changes nothing.
+     `ProcessType Standard`; amended 2026-10-30: launchd runs a `Background` job as a DARWIN_BG process with every
+     thread clamped to the `BACKGROUND` QoS band, and the agent answers every request of the app). The bundle is ad-hoc
+     signed (`signingIdentity "-"`) because `SMAppService` and launch agents refuse a linker-signed bundle (-67056).
+     After an app update launchd may keep the old code requirement and refuse the new binary ("needs LWCR update",
+     spawn failed, exit 78); registering over the live job changes nothing.
      The shell therefore replaces the registration (unregister, `launchctl bootout`, wait until the job is gone,
      register, bounded retries) once per version change (the version is recorded in `service-registered-version` in
      the data folder) and whenever `launchctl print` reports it stale while the agent is silent
@@ -27,8 +29,9 @@ choice on Windows (a service) is the wrong one for Dyno.
      service install` writes `~/Library/LaunchAgents/net.decryptology.dyno.agent.plist` and runs `launchctl bootout`,
      waits (bounded) until launchd dropped the job, then `bootstrap`, logging to `~/Library/Logs/Dyno/agent.log`.
    - **Linux: a systemd user unit.** `~/.config/systemd/user/dyno-agent.service`, `Restart=always`, `RestartSec=5`,
-     `Nice=10`, `CPUWeight=20`, `IOSchedulingClass=idle`, `MemoryHigh=256M`, `WantedBy=default.target`, enabled with
-     `systemctl --user enable --now`. Without systemd the app starts the agent itself (ADR 0002).
+     `Nice=10`, `CPUWeight=20`, `IOSchedulingClass=best-effort` with `IOSchedulingPriority=7` (never the idle class,
+     rule 52: the agent reads the folders of a scan the person watches), `MemoryHigh=256M`, `WantedBy=default.target`,
+     enabled with `systemctl --user enable --now`. Without systemd the app starts the agent itself (ADR 0002).
    - **Windows: a per-user `Run` entry, not a service.** `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value
      `Dyno`, data `"<exe>" run`.
 2. **Why not a Windows service (SCM).** Services run in session 0, isolated from the desktop since Vista. From there the
@@ -64,6 +67,51 @@ choice on Windows (a service) is the wrong one for Dyno.
 10. **Where files live.** `%LOCALAPPDATA%\Dyno`, `~/Library/Application Support/Dyno`, `$XDG_DATA_HOME/dyno`
     (`~/.local/share/dyno`); process-control state under `%LOCALAPPDATA%\Dyno`, `~/Library/Application Support/Dyno`,
     `$XDG_STATE_HOME/dyno`. `DYNO_DATA_DIR` overrides the data folder (tests use it, so none touches a real profile).
+11. **One agent, and who runs it (amended 2026-10-30).** The agent holds an OS lock on `agent.lock` in its data folder;
+    a second one exits at once with code 3. While launchd (`KeepAlive`) or systemd (`Restart=always`) supervises the
+    agent, the app starts none of its own and waits for the service's. Turning Launch at login on while the app's own
+    agent runs hands over: the app asks its agent to exit and ends that process (only the one it started, rule 53), and
+    the service's agent, refused until then, takes over at its next restart (launchd's `ThrottleInterval` 10 s,
+    systemd's `RestartSec` 5 s). Turning it off: the app asks the former service's agent to exit over its connection
+    (never a kill) and starts its own. A Windows `Run` entry starts the agent only at the next logon, so it supervises
+    nothing now and the app keeps its own agent (which Quit then leaves running, as before).
+    Waits are judged by run state (ADR 0031), and none ends on a clock, but each long one says why and offers Retry:
+    after about 5 s "still starting" (the agent this app started has not written its discovery file: Retry ends that
+    process through its handle and starts again), "waiting for the login service" (Retry starts the app's own agent) and
+    "another agent holds the data folder" (Retry runs the connection steps again). A service that supervises on paper
+    but runs nothing (macOS: SMAppService enabled, not switched off in Login Items, and the job loaded in launchd;
+    Linux: `systemctl --user is-active`, `active` or `activating`) is told by the lock: when no process held it across
+    four rechecks in a row (about 20 s, longer than launchd's 10 s throttle), the app starts its own agent and says so,
+    and does not hand it over again until the service shows it works. A discovery file counts as ready only if it was
+    written after the wait began or its agent answers; a refusal or a missing lock is written to `logs/agent.log` too.
+    Follow-ups, not yet done: kickstart the service after a hand-over instead of waiting for its throttle; probe
+    `RequiresApproval` again so an approval given later is noticed; slow the `is_held` probe in the waits (it takes and
+    releases the lock at every look); the `/tmp/Dyno` fallback folder for an unwritable data folder. For 1.0.1: keep the service fallback visible after
+    Running (an activity entry or a chip note); name the OS's own login-items place on Linux in that note; on Quit while
+    the fallback is on and the service supervises, end the app's own agent so the service's takes over.
+
+12. **Amendment 2026-10-31: the single route on macOS.** One Settings switch now means one main-app registration plus the
+    existing agent service, and nothing is written under `~/Library/LaunchAgents`.
+    - The app registers itself with `SMAppService.mainApp` (one "Dyno" row in Login Items); `tauri-plugin-autostart`
+      is kept for Linux and Windows only (`login_item::route_for`). The old route wrote `~/Library/LaunchAgents/Dyno.plist`
+      (label `Dyno`, a second row "dyno-app, Item from unidentified developer") with the path recorded at setup. On start
+      the app deletes that file only when it has exactly the plugin's shape (`login_item::is_legacy_plugin_plist`: label
+      `Dyno`, the program `<folder>/Dyno.app/Contents/MacOS/dyno-app`, optionally `--hidden`, `RunAtLoad`, nothing else; never a link or another file). Because that file existed only when the switch was on, removing it also registers the new
+      main-app entry once (`login::migrate_legacy_login`), so the switch never says on with nothing registered.
+    - Both registrations are refused (turning on only) when the executable is translocated (`/AppTranslocation/`) or under
+      `/Volumes/`: the path would not exist after the next login. The message says to move Dyno to Applications.
+    - A login start has no `--hidden` any more. The open-application Apple Event carries `keyAELaunchedAsLogInItem`
+      (`'lgit'`; Apple's `AERegistry.h`, read 2026-10-31: "If present in a kAEOpenApplication event, application was
+      launched as a login item and probably shouldn't open up untitled documents"), as a parameter or as the value of
+      `keyAEPropData`; it is read through `NSAppleEventManager.currentAppleEvent`
+      in the run loop's `Ready` event (a plugin's setup runs earlier, in `Builder::build`, where the event is still nil; the
+      App's setup and `Ready` run inside `applicationDidFinishLaunching`). The shell starts in the tray; the main window
+      is opened in `Ready` unless `--hidden` or the login event asked for the tray. The log line `started hidden (flag or
+      login item)` or `started with a window` records the decision. Whether `SMAppService.mainApp` launches carry
+      `'lgit'` is verified only by the VM run. A missed detection shows the window; it never hides one.
+    - `dyno-agent service install|uninstall|status|ensure` refuses on macOS when run as `*.app/Contents/MacOS/*` (same launchd label as the
+      `SMAppService` agent: `uninstall` would boot out the real agent, `status` would report "not installed").
+      Outside a bundle (development) it works as before.
 
 ## Consequences
 

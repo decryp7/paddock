@@ -175,12 +175,12 @@ describe('dy-extras-page', () => {
     expect(header('Sent').getAttribute('aria-sort')).toBe('ascending');
     sortBy('Sent');
     await settle(f);
-    expect(names()[0]).toBe('Dropbox');
+    expect(names()[0]).toBe('zoom.us');
     expect(header('Sent').getAttribute('aria-sort')).toBe('descending');
     sortBy('App');
     await settle(f);
     expect(header('App').getAttribute('aria-sort')).toBe('ascending');
-    expect(names()[0]).toBe('Docker Desktop');
+    expect(names()[0]).toBe('Google Chrome');
     const real = mockUsage();
     returns(mock, { appUsage: { ...real, networkUnavailable: 'Needs nettop.', energyUnavailable: 'No energy data.' } });
     await store.reload('apps');
@@ -213,13 +213,13 @@ describe('dy-extras-page', () => {
   it('Inventory: searches, exports through a menu, shows where it was saved and its states', async () => {
     const { f, el, mock, store } = render('inventory');
     await settle(f);
-    expect(rowsOf(el, 'Installed software').length).toBeGreaterThanOrEqual(41);
+    expect(rowsOf(el, 'Installed software').length).toBeGreaterThanOrEqual(40);
     const search = el.querySelector<HTMLInputElement>('input[type="search"]')!;
     search.value = 'apple';
     search.dispatchEvent(new Event('input'));
     await settle(f);
     expect(rowsOf(el, 'Installed software').length).toBeGreaterThan(5);
-    expect(el.textContent).toMatch(/\d+ of 41 programs/);
+    expect(el.textContent).toMatch(/\d+ of 40 programs/);
     search.value = 'zzzz';
     search.dispatchEvent(new Event('input'));
     await settle(f);
@@ -323,7 +323,7 @@ describe('dy-extras-page', () => {
     }
     const card = el.querySelector('pd-job')!;
     expect(card.textContent).toContain('Finding files');
-    expect(card.textContent).toContain('/Users/sam/Projects');
+    expect(card.textContent).toContain('/Users/alex/Projects');
     expect(card.textContent).toMatch(/Listing files/);
     expect(el.querySelector('.skeleton-wrap')).toBeNull();
     expect(btn(el, 'Choose another folder')?.disabled ?? true).toBe(true);

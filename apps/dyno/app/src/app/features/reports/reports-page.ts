@@ -13,7 +13,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 
 /**
  * Reports: Dyno's weekly summary built by the engine from its own history (health trend, busiest apps, disk forecast, issues
- * and what changed), one week at a time, exportable as Markdown or a web page. Made on this PC and saved only where you choose.
+ * and what changed), one week at a time, exportable as Markdown or a web page. Made on this computer and saved only where you choose.
  */
 @Component({
   selector: 'dy-reports-page',
@@ -24,14 +24,14 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
       <header class="page-head">
         <div class="titles">
           <h1>Reports</h1>
-          <p>A weekly summary from Dyno's own history. Made on this PC, saved only where you choose.</p>
+          <p>A weekly summary from Dyno's own history. Made on this computer, saved only where you choose.</p>
         </div>
         <pd-select class="week" [options]="weekChoices()" [value]="weekValue()" ariaLabel="Week" (valueChange)="pick($event)" />
         <button type="button" matButton="outlined" [disabled]="!canExport()" (click)="store.export('markdown')">
-          <dy-icon name="file" /> {{ store.exporting() === 'markdown' ? 'Saving…' : 'Export Markdown...' }}
+          <dy-icon name="file" /> {{ store.exporting() === 'markdown' ? 'Saving…' : 'Export Markdown…' }}
         </button>
         <button type="button" matButton="outlined" [disabled]="!canExport()" (click)="store.export('html')">
-          <dy-icon name="file" /> {{ store.exporting() === 'html' ? 'Saving…' : 'Export web page...' }}
+          <dy-icon name="file" /> {{ store.exporting() === 'html' ? 'Saving…' : 'Export web page…' }}
         </button>
       </header>
 

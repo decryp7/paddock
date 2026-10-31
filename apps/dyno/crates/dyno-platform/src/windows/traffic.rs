@@ -55,7 +55,8 @@ fn connection_bytes(row: &MIB_TCPROW_OWNER_PID) -> Result<Option<(u64, u64)>, u3
 
 impl ProcessTraffic for WinTraffic {
     fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
-        let table = tcp(u32::from(AF_INET.0)).ok_or_else(|| PlatformError::Failed("Windows would not list the TCP connections.".into()))?;
+        let table =
+            tcp(u32::from(AF_INET.0)).map_err(|e| PlatformError::Failed(crate::parse::win_tcp::table_error("TCP connections", e)))?;
         let mut conns = Vec::new();
         for row in rows::<MIB_TCPROW_OWNER_PID>(&table)
             .iter()

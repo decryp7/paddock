@@ -40,9 +40,13 @@ pub fn collect(shared: &Shared) -> Result<DiagnosticsBundle, String> {
         env!("CARGO_PKG_VERSION"),
         &inventory.os,
     );
-    let (settings, alarms, stats, events, activity, alerts, recorder) = {
+    let (zone, settings, alarms, stats, events, activity, alerts, recorder) = {
         let core = lock(&shared.core);
         (
+            serde_json::json!({
+                "zone": core.zone.describe(),
+                "offsetNow": dyno_core::time::offset_label(t, core.zone.as_ref()),
+            }),
             core.settings.clone(),
             core.alarms.list(
                 &dyno_core::alarms::AlarmFilter {
@@ -77,6 +81,7 @@ pub fn collect(shared: &Shared) -> Result<DiagnosticsBundle, String> {
         json(&inventory),
     )?;
     add("settings.json", "Dyno's settings", json(&settings))?;
+    add("system/time-zone.json", "The time zone local days are counted in", json(&zone))?;
     add("alarms/open.json", "Alarms", json(&alarms))?;
     add("alarms/stats.json", "Alarm statistics", json(&stats))?;
     add("alarms/history.json", "Recent alarm changes", json(&events))?;

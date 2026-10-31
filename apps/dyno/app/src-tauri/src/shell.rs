@@ -5,7 +5,7 @@ use crate::dto::AgentStatus;
 use crate::health::Hub;
 use crate::link::{AgentLink, Sink};
 use crate::logging;
-use crate::login::{self, AppAutostart};
+use crate::login;
 use crate::tray_model::{items_from_settings, parse_items, Throttle, TrayItems};
 use dyno_core::activity::ActivityEntry;
 use dyno_core::alerts::Alert;
@@ -175,8 +175,12 @@ impl<R: Runtime> ShellOf<R> {
             Some(p) if p == wanted => Ok(()),
             Some(_) => {
                 let mut service = login::platform_service();
-                let result = login::apply_launch_at_login(wanted, service.as_mut(), &mut AppAutostart(self.app.clone()));
+                let mut autostart = login::platform_autostart(&self.app);
+                let result = login::apply_launch_at_login(wanted, login::current_location(), service.as_mut(), autostart.as_mut());
+                // What was just applied is recorded first (it decides what a quit does), then the agent is handed over to
+                // the service just registered, or taken back from the one just removed.
                 link.set_service_installed(service.installed());
+                link.refresh_service();
                 if result.is_ok() {
                     *self.launch_at_login.lock().unwrap_or_else(|e| e.into_inner()) = Some(wanted);
                     logging::info(&format!("start at login is now {}", if wanted { "on" } else { "off" }));
@@ -284,6 +288,10 @@ impl<R: Runtime> Sink for ShellOf<R> {
         self.emit(events::AGENT, status);
     }
 
+    fn stalled(&self, stall: Option<crate::link::Stall>) {
+        self.hub.report_stall(stall);
+    }
+
     fn connected(&self, link: &Arc<AgentLink>) {
         // Read what the shell itself needs: the tray's metrics and style, and whether launching at login is on.
         match link.call(Request::Settings) {
@@ -293,11 +301,5 @@ impl<R: Runtime> Sink for ShellOf<R> {
             Ok(_) => {}
             Err(e) => logging::info(&format!("could not read the settings: {}", e.message)),
         }
-        // Is a service keeping the agent alive? (decides what Quit does). Off this thread: the OS may be slow.
-        let link = link.clone();
-        std::thread::spawn(move || {
-            let mut service = login::platform_service();
-            link.set_service_installed(service.installed());
-        });
     }
 }

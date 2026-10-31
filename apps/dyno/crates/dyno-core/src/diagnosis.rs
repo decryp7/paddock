@@ -1,4 +1,4 @@
-//! "Why is my PC slow right now?": names the cause in plain words, with the evidence, from the last minute of
+//! "Why is my computer slow right now?": names the cause in plain words, with the evidence, from the last minute of
 //! samples and the current apps.
 //!
 //! Each detector scores its cause 0–1; causes under [`MIN_CONFIDENCE`] are dropped. With none left the answer is
@@ -243,7 +243,7 @@ pub fn diagnose(input: &Input<'_>) -> Diagnosis {
         let mem = avg(input.samples, |s| s.memory_percent());
         causes.push(Cause {
             kind: CauseKind::NothingWrong,
-            title: "Nothing is slowing your PC down right now".into(),
+            title: "Nothing is slowing your computer down right now".into(),
             explanation: "CPU, memory and disk all have room to spare. If something felt slow, it may have been brief: \
                           the history charts show the last hour, and Dyno keeps watching."
                 .into(),
@@ -331,7 +331,7 @@ fn cpu_causes(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &mu
             vec![],
         ),
     };
-    hints.push(Hint::open("Open the task manager", HintLink::TaskManager));
+    hints.push(Hint::open("Open Processes", HintLink::TaskManager));
     out.push(Cause {
         kind,
         title,
@@ -370,11 +370,11 @@ fn memory_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
     if let Some(top) = input.groups.iter().max_by_key(|g| g.memory_read()) {
         evidence.push(Evidence::new(format!("Biggest: {}", top.name), bytes(top.memory_read())));
     }
-    hints.push(Hint::open("Open the task manager", HintLink::TaskManager));
+    hints.push(Hint::open("Open Processes", HintLink::TaskManager));
     out.push(Cause {
         kind: CauseKind::MemoryPressure,
         title: if level == MemoryPressure::Critical {
-            "Your PC is out of memory".into()
+            "Your computer is out of memory".into()
         } else {
             "Memory is running low".into()
         },
@@ -421,7 +421,7 @@ fn disk_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
             .into(),
         confidence,
         evidence,
-        hints: vec![Hint::open("Open the task manager", HintLink::TaskManager)],
+        hints: vec![Hint::open("Open Processes", HintLink::TaskManager)],
         involved: involved(input.groups, |g| g.disk_read() as f32, |v| format!("{}/s", bytes(v as u64))),
     });
 }
@@ -537,7 +537,7 @@ mod tests {
         let d = Case::new().run();
         assert_eq!(d.causes.len(), 1);
         assert_eq!(d.causes[0].kind, CauseKind::NothingWrong);
-        assert_eq!(d.headline, "Nothing is slowing your PC down right now");
+        assert_eq!(d.headline, "Nothing is slowing your computer down right now");
         let empty = Case {
             samples: vec![],
             procs: vec![],
@@ -623,7 +623,7 @@ mod tests {
         });
         let d = c.run();
         assert_eq!(d.causes[0].kind, CauseKind::MemoryPressure);
-        assert_eq!(d.causes[0].title, "Your PC is out of memory");
+        assert_eq!(d.causes[0].title, "Your computer is out of memory");
         assert!(d.causes[0].evidence.iter().any(|e| e.label == "Swap / page file in use"));
         assert_eq!(d.causes[0].hints[0].link, Some(HintLink::TaskManager));
         let mut c = Case::new();

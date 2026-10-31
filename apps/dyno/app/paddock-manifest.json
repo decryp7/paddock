@@ -42,6 +42,10 @@
       "title": "pd.about.open"
     },
     {
+      "id": "pd.app.quit",
+      "title": "pd.app.quit"
+    },
+    {
       "id": "pd.settings.open",
       "title": "pd.settings.open"
     },
@@ -60,6 +64,12 @@
       "key": "Mod+,",
       "accelerator": "CmdOrCtrl+,",
       "scope": "window"
+    },
+    {
+      "command": "pd.app.quit",
+      "key": "Mod+Q",
+      "accelerator": "CmdOrCtrl+Q",
+      "scope": "window"
     }
   ],
   "menus": [
@@ -69,6 +79,13 @@
       "group": "settings",
       "order": 100,
       "accelerator": "CmdOrCtrl+,"
+    },
+    {
+      "menu": "app",
+      "command": "pd.app.quit",
+      "group": "quit",
+      "order": 1000,
+      "accelerator": "CmdOrCtrl+Q"
     },
     {
       "menu": "help",
@@ -287,6 +304,7 @@
     "dy.web-search.title": "Search the web",
     "pd.about.open": "About",
     "pd.about.title": "About",
+    "pd.app.quit": "Quit",
     "pd.category.app": "Application",
     "pd.category.help": "Help",
     "pd.confirm.title": "Confirm",

@@ -107,6 +107,11 @@ another database number. sccache's keys include the compiler and target, so one 
   MSVC's `link.exe` (`.cargo/config.toml` at the repo root: `[target.x86_64-pc-windows-msvc] linker = "rust-lld.exe"`),
   locally, in CI and in the release builds alike; it still needs Visual Studio's build tools for the MSVC and Windows SDK
   libraries. On x86_64 Linux rustc links with its bundled lld by default (Rust 1.90 and later); macOS uses Apple's `ld`.
+- **Static C runtime on Windows.** The same file sets `-C target-feature=+crt-static` for every `*-pc-windows-msvc`
+  target (ADR 0032), so no binary needs the VC++ redistributable (`VCRUNTIME140.dll`). Setting `RUSTFLAGS` or
+  `CARGO_ENCODED_RUSTFLAGS` replaces every configured flag, this one included: add `-C target-feature=+crt-static` to
+  it when you set it for a Windows build. `node conformance/release/windows-crt-imports.mjs <exe-or-folder>` checks a
+  build; cargo-xwin cross-builds pick the setting up as well.
 
 ## Tests
 

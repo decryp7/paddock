@@ -3,7 +3,7 @@
 // (The scripts themselves are tested in ci-scripts.test.mjs, tools/test and the release tests.)
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, lstatSync, statSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -159,9 +159,11 @@ test('setup-rust declares the sccache backend inputs: local disk by default, Red
 
 test('the sccache step uses the local disk: the runner home on a host, /sccache in a container, a cache that never fails a build', () => {
   const host = runSccacheStep({});
-  assert.match(host, /^SCCACHE_DIR=.*\/\.paddock-ci\/sccache$/m);
-  assert.match(host, /^SCCACHE_CACHE_SIZE=20G$/m);
+  assert.match(host, /^SCCACHE_DIR=.*\/\.paddock-ci\/sccache-s1$/m, 'the slot\'s own cache: one sccache server per local cache');
+  assert.match(host, /^SCCACHE_CACHE_SIZE=10G$/m, 'the host budget (40 GB) divided between the 4 slots');
+  assert.match(runSccacheStep({ PADDOCK_CI_SLOT: 's2', PADDOCK_CI_SLOTS: '3', PADDOCK_CI_SCCACHE_GB: '60' }), /^SCCACHE_DIR=.*\/sccache-s2$\n(?:.*\n)*?^SCCACHE_CACHE_SIZE=20G$/m);
   assert.match(host, /^SCCACHE_SERVER_PORT=4227$/m);
+  assert.match(runSccacheStep({ PADDOCK_CI_SLOT: 's2' }), /^SCCACHE_SERVER_PORT=4228$/m, "a concurrent job's slot has a server of its own");
   assert.match(host, /^SCCACHE_IGNORE_SERVER_IO_ERROR=1$/m);
   assert.match(host, /^CARGO_INCREMENTAL=0$/m);
   assert.doesNotMatch(host, /REDIS/);
@@ -172,6 +174,7 @@ test('the sccache step uses the local disk: the runner home on a host, /sccache 
   const mount = mkdtempSync(join(tmpdir(), 'paddock-mount-'));
   const mounted = runSccacheStep({ RUNNER_OS: 'Linux', RUNNER_TEMP: nomount, PADDOCK_SCCACHE_MOUNT: mount });
   assert.match(mounted, new RegExp(`^SCCACHE_DIR=${mount.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'), 'a writable mount is used');
+  assert.match(mounted, /^SCCACHE_CACHE_SIZE=20G$/m);
   const redis = runSccacheStep({ BACKEND: 'auto', REDIS_ENDPOINT: 'redis://h:6379', REDIS_DB: '' });
   assert.match(redis, /^SCCACHE_REDIS_ENDPOINT=redis:\/\/h:6379$/m);
   assert.match(redis, /^SCCACHE_REDIS_DB=5$/m);
@@ -325,11 +328,11 @@ function runSccacheStep(env, shim = 'true') {
   mkdirSync(join(dir, 'bin'));
   writeFileSync(join(dir, 'bin', 'sccache'), `#!/bin/sh\n[ "$1" = --version ] && echo sccache 0.19.0\n${shim}\nexit 0\n`);
   chmodSync(join(dir, 'bin', 'sccache'), 0o755);
-  writeFileSync(join(dir, 'step.sh'), body);
+  writeFileSync(join(dir, 'step.sh'), body.replaceAll('${{ github.action_path }}', action));
   const ghEnv = join(dir, 'github-env');
   writeFileSync(ghEnv, '');
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(dir, 'step.sh')], {
-    env: { PATH: `${join(dir, 'bin')}:/usr/bin:/bin`, HOME: dir, RUNNER_OS: 'macOS', GITHUB_ENV: ghEnv, BACKEND: 'auto', REDIS_ENDPOINT: '', REDIS_DB: '', ACTION_DIR: action, ...env },
+    env: { PATH: `${join(dir, 'bin')}:/usr/bin:/bin`, HOME: dir, RUNNER_OS: 'macOS', PADDOCK_CI_SLOT: 's1', GITHUB_ENV: ghEnv, BACKEND: 'auto', REDIS_ENDPOINT: '', REDIS_DB: '', ACTION_DIR: action, ...env },
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr + r.stdout);
@@ -479,9 +482,9 @@ function runStableWorkspace(os, root, over = {}) {
   const text = read(join(ACTIONS, 'stable-workspace', 'action.yml'));
   const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   const script = join(root, 'step.sh');
-  writeFileSync(script, body);
+  writeFileSync(script, body.replaceAll('${{ github.action_path }}', join(ACTIONS, 'stable-workspace')));
   return spawnSync('bash', ['-e', '-o', 'pipefail', script], {
-    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_WORKSPACE: join(root, 'work', 'abc', 'hostexecutor'), GITHUB_ENV: join(root, 'github-env'), NAME: 'decryp7/paddock-crate', ...over },
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, PADDOCK_CI_SLOT: 's1', GITHUB_WORKSPACE: join(root, 'work', 'abc', 'hostexecutor'), GITHUB_ENV: join(root, 'github-env'), NAME: 'decryp7/paddock-crate', ...over },
     encoding: 'utf8',
     cwd: join(root, 'work', 'abc', 'hostexecutor'),
   });
@@ -500,7 +503,7 @@ test('stable-workspace gives every run of a host job the same physical checkout 
   const r = runStableWorkspace('macOS', root);
   assert.equal(r.status, 0, r.stderr);
   const link = join(root, 'work', 'abc', 'hostexecutor');
-  const stable = join(root, 'home', '.paddock-ci', 'src', 'decryp7_paddock-crate');
+  const stable = join(root, 'home', '.paddock-ci', 'src', 'decryp7_paddock-crate-s1');
   assert.ok(lstatSync(link).isSymbolicLink());
   assert.equal(realpathSync(link), stable, 'the old path resolves to the stable folder (what cargo and rustc see as their working folder)');
   assert.equal(readFileSync(join(link, 'Cargo.toml'), 'utf8'), 'x');
@@ -513,6 +516,13 @@ test('stable-workspace gives every run of a host job the same physical checkout 
   assert.equal(again.status, 0, again.stderr);
   assert.equal(realpathSync(join(root, 'work', 'def', 'hostexecutor')), stable, 'same physical path as the job before');
   assert.equal(readFileSync(join(stable, 'Cargo.toml'), 'utf8'), 'y');
+  // A concurrent job of the same name holds another slot: its own stable folder, never this one.
+  mkdirSync(join(root, 'work', 'ghi', 'hostexecutor'), { recursive: true });
+  writeFileSync(join(root, 'work', 'ghi', 'hostexecutor', 'Cargo.toml'), 'z');
+  const other = runStableWorkspace('macOS', root, { GITHUB_WORKSPACE: join(root, 'work', 'ghi', 'hostexecutor'), PADDOCK_CI_SLOT: 's2' });
+  assert.equal(other.status, 0, other.stderr);
+  assert.equal(realpathSync(join(root, 'work', 'ghi', 'hostexecutor')), join(root, 'home', '.paddock-ci', 'src', 'decryp7_paddock-crate-s2'));
+  assert.equal(readFileSync(join(stable, 'Cargo.toml'), 'utf8'), 'y', 'the first slot\'s checkout is untouched');
 });
 
 test('stable-workspace keeps a clone at the stable path at the checkout\'s commit where the work folder cannot move (Windows)', () => {
@@ -531,7 +541,7 @@ test('stable-workspace keeps a clone at the stable path at the checkout\'s commi
   mkdirSync(bin);
   writeFileSync(join(bin, 'mv'), '#!/bin/sh\necho "Device or resource busy" >&2\nexit 1\n', { mode: 0o755 });
   const run = () => runStableWorkspace('macOS', root, { PATH: `${bin}:/usr/bin:/bin` });
-  const stable = join(root, 'home', '.paddock-ci', 'src', 'decryp7_paddock-crate');
+  const stable = join(root, 'home', '.paddock-ci', 'src', 'decryp7_paddock-crate-s1');
   const r = run();
   assert.equal(r.status, 0, r.stderr);
   assert.ok(!lstatSync(ws).isSymbolicLink(), 'the checkout stays where it was');
@@ -552,11 +562,15 @@ test('stable-workspace leaves Linux containers alone and never fails a job it ca
   const root = stableFixture();
   assert.equal(runStableWorkspace('Linux', root).status, 0);
   assert.ok(!lstatSync(join(root, 'work', 'abc', 'hostexecutor')).isSymbolicLink());
-  // The stable root cannot be created (a file is in the way): warn and build in place.
-  writeFileSync(join(root, 'blocked'), '');
+  // The stable root cannot be created (a file is in the way), or the job holds no slot: warn and build in place.
+  mkdirSync(join(root, 'blocked'));
+  writeFileSync(join(root, 'blocked', 'src'), '');
   const r = runStableWorkspace('macOS', root, { PADDOCK_CI_HOME: join(root, 'blocked') });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /::warning::stable-workspace: could not move/);
+  assert.match(r.stdout, /::warning::stable-workspace: /);
+  const noSlot = runStableWorkspace('macOS', root, { PADDOCK_CI_SLOT: '' });
+  assert.equal(noSlot.status, 0, noSlot.stderr);
+  assert.match(noSlot.stdout, /::warning::stable-workspace: no kept folder of this job's slot/);
   assert.ok(!existsSync(join(root, 'github-env')) || !/PADDOCK_WORKSPACE/.test(readFileSync(join(root, 'github-env'), 'utf8')), 'later steps build in the work folder');
   assert.ok(!lstatSync(join(root, 'work', 'abc', 'hostexecutor')).isSymbolicLink(), 'the checkout stays where it was');
   assert.equal(readFileSync(join(root, 'work', 'abc', 'hostexecutor', 'Cargo.toml'), 'utf8'), 'x');
@@ -575,14 +589,12 @@ test('CI moves the checkout to a stable path on the host runners only, after Git
   }
 });
 
-test('the test browser of a host job lives in a kept folder of the runner user, outside the checkout that stable-workspace moves', () => {
+test('the test browser of a host job lives in a kept folder of its job slot, outside the checkout that stable-workspace moves', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const dirs = [...ci.matchAll(/PADDOCK_TEST_BROWSER_DIR=(\S+)/g)].map((m) => m[1]);
-  assert.equal(dirs.length, 3, 'one per host OS in the crate job, and the app leg\'s own (per app, under $HOME)');
-  for (const d of dirs) {
-    assert.doesNotMatch(d, /GITHUB_WORKSPACE|\.\./, `${d}: a path relative to the checkout dies when the checkout moves`);
-    assert.match(d, /\.paddock-ci[\\/]test-browser/, d);
-  }
+  assert.equal(dirs.length, 2, 'the crate job\'s and the app leg\'s own (per app)');
+  for (const d of dirs) assert.equal(d, '$dir"', 'the folder job-isolation.sh gives');
+  assert.equal([...ci.matchAll(/dir="\$\(bash conformance\/ci\/job-isolation\.sh path browser (paddock|"\$APP")\)"/g)].length, 2, 'the kept folder `browser` of the job slot');
   assert.ok(ci.indexOf('PADDOCK_TEST_BROWSER_DIR') < ci.indexOf('uses: ./.gitea/actions/install-test-browser'), 'the folder is chosen before the browser is installed');
 });
 
@@ -618,6 +630,12 @@ test('the nextest ci profile fails a test over its time budget, and every longer
   }
 });
 
+test('the shared UI Playwright config never retries a test (rule 5: a flaky test is fixed, not retried)', () => {
+  const text = read(join(PADDOCK, 'ui', 'playwright.config.ts'));
+  const retries = [...text.matchAll(/^\s*retries:\s*(.+?),?$/gm)].map((m) => m[1]);
+  assert.deepEqual(retries, ['0'], 'every retries setting is 0, also on CI');
+});
+
 test('paddock-dev has the same nextest ci profile as the crates, and its longer budgets are waivers with a reason', () => {
   const text = read(join(PADDOCK, 'tools', 'paddock-dev', '.config', 'nextest.toml'));
   const ci = text.slice(text.indexOf('[profile.ci]\n') + '[profile.ci]\n'.length);
@@ -649,9 +667,9 @@ function runHostTools(os, { kept = null, onPath = null } = {}) {
   writeFileSync(join(bin, 'curl'), '#!/bin/sh\necho "curl was called" >&2\nexit 7\n', { mode: 0o755 });
   if (kept) shim(join(root, 'home', '.paddock-ci', 'tools', 'cargo-nextest', version), kept === 'pin' ? version : kept);
   if (onPath) shim(bin, onPath === 'pin' ? version : onPath);
-  writeFileSync(join(root, 'step.sh'), body);
+  writeFileSync(join(root, 'step.sh'), body.replaceAll('${{ github.action_path }}', join(ACTIONS, 'host-tools')));
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(root, 'step.sh')], {
-    env: { PATH: `${bin}:/usr/bin:/bin`, HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_PATH: join(root, 'github-path') },
+    env: { PATH: `${bin}:/usr/bin:/bin`, HOME: join(root, 'home'), RUNNER_OS: os, PADDOCK_CI_SLOT: 's1', GITHUB_PATH: join(root, 'github-path') },
     encoding: 'utf8',
   });
   return { ...r, root, version };
@@ -684,14 +702,14 @@ const KIT_APPS = ['pitcrew', 'spotter', 'pitwall', 'dyno'];
 const ciContract = (app) => JSON.parse(read(join(PADDOCK, 'apps', app, 'paddock.ci.json')));
 
 /** Runs conformance/ci/build-folder.sh for `os` on a scratch Cargo workspace; returns what it wrote. */
-function runBuildFolder(os, { include = true, name = 'spotter-rust' } = {}) {
+function runBuildFolder(os, { include = true, name = 'spotter-rust', slot = 's1' } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-build-folder-')));
   const ws = join(root, 'ws');
   mkdirSync(join(ws, '.cargo'), { recursive: true });
   writeFileSync(join(ws, '.cargo', 'config.toml'), include ? 'include = [{ path = "ci.toml", optional = true }]\n' : '[alias]\n');
   writeFileSync(join(ws, '.cargo', 'ci.toml'), '# left by an earlier job\n');
   const r = spawnSync('bash', [join(PADDOCK, 'conformance', 'ci', 'build-folder.sh'), ws, name], {
-    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_ENV: join(root, 'github-env') },
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, PADDOCK_CI_SLOT: slot, GITHUB_ENV: join(root, 'github-env') },
     encoding: 'utf8',
   });
   const env = existsSync(join(root, 'github-env')) ? readFileSync(join(root, 'github-env'), 'utf8') : '';
@@ -702,7 +720,7 @@ function runBuildFolder(os, { include = true, name = 'spotter-rust' } = {}) {
 test('build-folder keeps a host job\'s build folder outside the checkout as cargo configuration, and target/ in a container', () => {
   const mac = runBuildFolder('macOS');
   assert.equal(mac.status, 0, mac.stderr + mac.stdout);
-  const kept = join(mac.root, 'home', '.paddock-ci', 'target-spotter-rust');
+  const kept = join(mac.root, 'home', '.paddock-ci', 'target-spotter-rust-s1');
   assert.equal(mac.ci.split('\n').slice(1).join('\n'), `[build]\ntarget-dir = '${kept}'\n`, 'cargo reads the folder from the included ci.toml');
   assert.match(mac.env, new RegExp(`^PADDOCK_BUILD_FOLDER=${kept}$`, 'm'));
   assert.ok(existsSync(kept), 'the kept folder exists');
@@ -715,6 +733,11 @@ test('build-folder keeps a host job\'s build folder outside the checkout as carg
   assert.match(missing.stdout, /must include the job's build folder/);
   const bad = runBuildFolder('macOS', { name: 'a b' });
   assert.notEqual(bad.status, 0);
+  const second = runBuildFolder('macOS', { slot: 's2' });
+  assert.match(second.env, /^PADDOCK_BUILD_FOLDER=.*\/\.paddock-ci\/target-spotter-rust-s2$/m, 'a concurrent job of the same name builds in its own slot');
+  const noSlot = runBuildFolder('macOS', { slot: '' });
+  assert.notEqual(noSlot.status, 0, 'a host job without a slot could share a folder: it fails');
+  assert.match(noSlot.stderr, /holds no slot/);
 });
 
 test('every app workspace has a nextest ci profile that stops a slow test, and every longer budget is a waiver with a reason', () => {
@@ -802,8 +825,10 @@ test('a kit app lists the OS legs its old workflow had, keeps its build folder o
       assert.equal(existsSync(join(PADDOCK, 'apps', app, copy)), false, `${app}: ${copy} is the kit's (rule 42/43)`);
     }
     const wf = read(join(WORKFLOWS, `${app}-release.yml`));
-    // A release never publishes past skipped gates on a tag: skipped is fine only when there is no tag to publish.
-    assert.match(wf, /if: \$\{\{ !cancelled\(\) && needs\.plan\.outputs\.run == 'true' && \(needs\.gates\.result == 'success' \|\| \(needs\.gates\.result == 'skipped' && !startsWith\(github\.ref, 'refs\/tags\/'\)\)\) \}\}/, `${app}: the release job needs green gates on a tag`);
+    // A release never publishes past red or skipped gates on a tag; the installers of a push or a dispatch wait on nothing that can be skipped
+    // (Gitea 28.2 skips a job whose need was skipped, whatever its `if`).
+    assert.match(wf, new RegExp(`\\n  release:\\n(?:.*\\n)*?    needs: \\[plan, gates\\]\\n    if: \\$\\{\\{ needs\\.plan\\.outputs\\.run == 'true' && startsWith\\(github\\.ref, 'refs/tags/${app}-v'\\) && needs\\.gates\\.result == 'success' \\}\\}`), `${app}: the release job needs green gates on a tag`);
+    assert.match(wf, /\n  installers:\n(?:.*\n)*?    needs: \[plan\]\n    if: \$\{\{ needs\.plan\.outputs\.run == 'true' && !startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/, `${app}: the installers wait only on the plan`);
     assert.match(wf, new RegExp(`gates:\\n(?:.*\\n)*?\\s+if: .*startsWith\\(github\\.ref, 'refs/tags/${app}-v'\\)`), `${app}: a tag always runs the gates`);
     assert.match(wf, /cancel-in-progress: true/, `${app}: a newer push supersedes (a tag has its own ref)`);
     // Every sidecar the bundle carries (bundle.externalBin) is started from the built macOS app.
@@ -839,9 +864,9 @@ test("Spotter's real-browser tests use the image's Chrome for Testing on Linux: 
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   assert.match(ci, /echo "\$\{PREFIX\}_TEST_BROWSER=\$CHROMIUM_TEST_PATH"/, 'the tests launch the pinned build');
   assert.match(ci, /echo "\$\{PREFIX\}_REQUIRE_TEST_BROWSER=1"/, 'a missing browser fails the run');
-  assert.match(ci, /test-browser-\$APP/, 'a kept host folder of the app\'s own (two jobs may run on a host at once)');
+  assert.match(ci, /job-isolation\.sh path browser "\$APP"/, 'a kept host folder of the app and the job slot (two jobs may run on a host at once)');
   assert.match(read(join(ACTIONS, 'app-gates', 'action.yml')), /xvfb-run --auto-servernum .* dbus-run-session --\)/, 'the tests run under a virtual display');
-  assert.match(contract.processPatterns.join('\n'), /test-browser-spotter/, 'host cleanup ends browsers started from the app\'s own test-browser folder');
+  assert.match(contract.processPatterns.join('\n'), /test-browser-spotter-\{slot\}/, 'host cleanup ends browsers started from the test-browser folder of the app and this job\'s slot');
   assert.match(read(join(PADDOCK, 'apps', 'spotter', '.config', 'nextest.toml')), /filter = "package\(spotter-render\) & binary\(real_browser\)"\ntest-group = "real-browser"/, 'real browsers take turns under nextest too');
 });
 
@@ -871,9 +896,9 @@ function runNodeCaches(os, env = {}) {
   const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   mkdirSync(join(root, 'ws', 'ui', '.angular', 'cache'), { recursive: true });
   writeFileSync(join(root, 'ws', 'ui', '.angular', 'cache', 'stale'), '');
-  writeFileSync(join(root, 'step.sh'), body);
+  writeFileSync(join(root, 'step.sh'), body.replaceAll('${{ github.action_path }}', join(ACTIONS, 'node-caches')));
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(root, 'step.sh')], {
-    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_WORKSPACE: join(root, 'ws'), GITHUB_ENV: join(root, 'github-env'), ANGULAR_DIR: 'ui', NAME: 'e2e-1', PADDOCK_CI_MOUNT: join(root, 'no-mount'), ...env },
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, PADDOCK_CI_SLOT: 's1', GITHUB_WORKSPACE: join(root, 'ws'), GITHUB_ENV: join(root, 'github-env'), ANGULAR_DIR: 'ui', NAME: 'e2e-1', PADDOCK_CI_MOUNT: join(root, 'no-mount'), ...env },
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr + r.stdout);
@@ -884,8 +909,8 @@ function runNodeCaches(os, env = {}) {
 test('node-caches keeps the npm and Angular caches on the host or the container mount, never failing a job', () => {
   const host = runNodeCaches('macOS');
   const kept = join(host.root, 'home', '.paddock-ci');
-  assert.match(host.written, new RegExp(`^npm_config_cache=${kept}/npm$`, 'm'));
-  assert.equal(realpathSync(join(host.root, 'ws', 'ui', '.angular', 'cache')), join(kept, 'angular', 'e2e-1'), 'one Angular cache per job and shard');
+  assert.match(host.written, new RegExp(`^npm_config_cache=${kept}/npm-s1$`, 'm'));
+  assert.equal(realpathSync(join(host.root, 'ws', 'ui', '.angular', 'cache')), join(kept, 'angular', 'e2e-1-s1'), 'one Angular cache per job, shard and job slot');
   const mount = join(host.root, 'mount');
   mkdirSync(mount);
   const linux = runNodeCaches('Linux', { PADDOCK_CI_MOUNT: mount });
@@ -988,6 +1013,25 @@ test('Debrief\'s nextest ci profile stops a hung test, and every longer budget i
   }
 });
 
+
+// Debrief's shell tests each start the plugins binary and its plugin processes; fourteen at once loaded the Mac runner to
+// 116 and pushed five ai::tests past 90 s (CI 7096). They run in a bounded group, chosen by the whole binary so a new test
+// joins it without a list to keep (rule 51, ER-20).
+test('Debrief\'s shell tests, which start plugin processes, run in a group of at most six, chosen by their binary', () => {
+  const text = read(join(PADDOCK, 'apps', 'debrief', '.config', 'nextest.toml'));
+  const group = text.match(/^app-plugin-processes = \{ max-threads = (\d+) \}$/m);
+  assert.ok(group, 'the app-plugin-processes test group exists');
+  assert.ok(Number(group[1]) >= 1 && Number(group[1]) <= 6, `at most six at a time (is ${group[1]})`);
+  const overrides = text.split(/^\[\[profile\.\w+\.overrides\]\]$/m).slice(1);
+  const mine = overrides.filter((o) => /^test-group = 'app-plugin-processes'$/m.test(o));
+  assert.equal(mine.length, 1, 'one override puts tests in the group');
+  assert.match(mine[0], /^filter = 'package\(debrief-app\) & kind\(lib\)'$/m, 'the whole lib binary, not a list of names');
+  for (const o of overrides) {
+    if (/^test-group = /m.test(o) && !/app-plugin-processes/.test(o)) {
+      assert.doesNotMatch(o, /package\(debrief-app\)/, 'no other group takes the shell tests');
+    }
+  }
+});
 
 test('ci.yml runs the icon tests and `install.mjs --check` in an icons job that the plan feeds', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
@@ -1094,4 +1138,598 @@ test("app-gates runs every command list through run-commands.sh, which names the
   assert.equal(good.status, 0, good.stdout);
   assert.match(good.stdout, /4361/, 'shell expansion works as in the old bash -c');
   assert.equal(run('cd nowhere').status, 1);
+});
+
+// ---- A job's own temp folder (ER-14, 2026-10-29) ----
+// The Mac runner's Debrief job scanned the runner user's shared temp folder, which the agents' local test runs on the same
+// Mac use too: a local run that died made a CI job fail with leaks it did not cause, and the CI tests wrote there too.
+
+/**
+ * Runs conformance/ci/job-tmpdir.sh (the one implementation: the job-tmpdir action and job-isolation's acquire and release
+ * call it) in a fake runner folder. The socket base goes under a scratch folder (PADDOCK_SOCKET_ROOT), never the real /tmp.
+ */
+function runJobTmpdir(mode, { os = 'macOS', root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-job-tmpdir-'))), extra = {} } = {}) {
+  mkdirSync(join(root, 'runner-temp'), { recursive: true });
+  mkdirSync(join(root, 'sockets'), { recursive: true });
+  const envFile = join(root, 'github-env');
+  if (!existsSync(envFile)) writeFileSync(envFile, '');
+  const r = spawnSync('bash', [join(PADDOCK, 'conformance', 'ci', 'job-tmpdir.sh'), mode], {
+    env: { PATH: '/usr/bin:/bin', RUNNER_OS: os, RUNNER_TEMP: join(root, 'runner-temp'), GITHUB_ENV: envFile, PADDOCK_SOCKET_ROOT: join(root, 'sockets'), ...extra },
+    encoding: 'utf8',
+  });
+  const exported = Object.fromEntries(read(envFile).split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+  return { ...r, root, exported };
+}
+
+test('job-tmpdir: the job\'s temp folder is the runner\'s per-job folder, and its sockets get a short private folder of their own', () => {
+  const first = runJobTmpdir('setup');
+  assert.equal(first.status, 0, first.stderr + first.stdout);
+  const temp = join(first.root, 'runner-temp');
+  assert.equal(first.exported.PADDOCK_JOB_TEMP, temp, 'one name and one path: the runner deletes the folder after the job');
+  assert.equal(first.exported.TMPDIR, temp, 'what Rust, Node and the tests use for temp folders');
+  assert.equal(first.exported.TMP, undefined, 'TMP and TEMP only on Windows');
+  // Socket paths are limited to about 100 bytes; the runner's folder is long, so a short base per job, never shared /tmp.
+  const base = first.exported.PADDOCK_SOCKET_BASE;
+  assert.match(base ?? '', new RegExp(`^${join(first.root, 'sockets').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/pd-[A-Za-z0-9]{8}$`), 'mktemp -d, a name nobody else holds');
+  assert.equal(statSync(base).mode & 0o777, 0o700, 'private from the moment it exists');
+  assert.equal(read(join(base, '.owner')), `${temp}\n`, 'names the job folder it belongs to');
+  // A second setup in the job (acquire after the action, or twice) keeps the same folder.
+  const again = runJobTmpdir('setup', { root: first.root, extra: { PADDOCK_SOCKET_BASE: base } });
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(read(join(first.root, 'github-env')).split('\n').filter((l) => l.startsWith('PADDOCK_SOCKET_BASE=')).at(-1), `PADDOCK_SOCKET_BASE=${base}`);
+  writeFileSync(join(base, 'left'), '');
+  assert.equal(runJobTmpdir('remove', { root: first.root, extra: { PADDOCK_SOCKET_BASE: base } }).status, 0);
+  assert.ok(!existsSync(base), 'the socket folder goes at the end of the job (the runner removes its own folder)');
+  assert.equal(runJobTmpdir('remove', { root: first.root, extra: { PADDOCK_SOCKET_BASE: base } }).status, 0, 'already gone: nothing to do');
+  const win = runJobTmpdir('setup', { os: 'Windows' });
+  assert.equal(win.exported.TMP, win.exported.PADDOCK_JOB_TEMP, 'Windows reads TMP and TEMP');
+  assert.equal(win.exported.TEMP, win.exported.PADDOCK_JOB_TEMP);
+  assert.equal(win.exported.PADDOCK_SOCKET_BASE, undefined, 'named pipes on Windows: no socket folder');
+  assert.notEqual(runJobTmpdir('other').status, 0, 'an unknown mode fails');
+  assert.match(read(join(ACTIONS, 'job-tmpdir', 'action.yml')), /bash "\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\.\/conformance\/ci\/job-tmpdir\.sh" "\$MODE"/, 'the action runs the script');
+  const iso = read(join(PADDOCK, 'conformance', 'ci', 'job-isolation.sh'));
+  assert.match(iso, /bash "\$here\/job-tmpdir\.sh" setup/, 'acquire sets the folders through the same script');
+  assert.match(iso, /bash "\$here\/job-tmpdir\.sh" sweep/, 'acquire sweeps the folders of killed jobs');
+  assert.match(iso, /bash "\$here\/job-tmpdir\.sh" remove/, 'release removes them through it');
+});
+
+test('job-tmpdir: a socket folder that is a link, has another name or is outside the root is never used or removed (another user\'s folder fails the same check, -O, which a test cannot fake without root)', () => {
+  const f = runJobTmpdir('setup');
+  const sockets = join(f.root, 'sockets');
+  const elsewhere = join(f.root, 'elsewhere');
+  mkdirSync(elsewhere);
+  writeFileSync(join(elsewhere, 'keep'), '');
+  symlinkSync(elsewhere, join(sockets, 'pd-linkedxx'));
+  mkdirSync(join(sockets, 'other-name'));
+  for (const bad of [join(sockets, 'pd-linkedxx'), elsewhere, join(sockets, 'other-name'), join(sockets, 'pd-missing', 'x')]) {
+    const setup = runJobTmpdir('setup', { root: f.root, extra: { PADDOCK_SOCKET_BASE: bad } });
+    const remove = runJobTmpdir('remove', { root: f.root, extra: { PADDOCK_SOCKET_BASE: bad } });
+    if (existsSync(bad)) {
+      assert.notEqual(setup.status, 0, `setup refuses ${bad}`);
+      assert.notEqual(remove.status, 0, `remove refuses ${bad}`);
+    }
+  }
+  assert.ok(existsSync(join(elsewhere, 'keep')), 'nothing behind the link was removed');
+  assert.ok(existsSync(join(sockets, 'other-name')));
+});
+
+test('job-tmpdir: sweep removes the socket folders of jobs whose folder is gone, and only those', () => {
+  const live = runJobTmpdir('setup');
+  const sockets = join(live.root, 'sockets');
+  const liveBase = live.exported.PADDOCK_SOCKET_BASE;
+  const dead = join(sockets, 'pd-deadjob1');
+  mkdirSync(dead, { mode: 0o700 });
+  writeFileSync(join(dead, '.owner'), `${join(live.root, 'work', 'gone', 'tmp')}\n`);
+  const noOwner = join(sockets, 'pd-noowner');
+  mkdirSync(noOwner, { mode: 0o700 });
+  const r = runJobTmpdir('sweep', { root: live.root });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!existsSync(dead), 'its job folder is gone: removed');
+  assert.ok(existsSync(liveBase), 'a running job\'s folder stays');
+  assert.ok(existsSync(noOwner), 'no .owner: not ours to judge, kept');
+});
+
+/** The jobs of every workflow with the OS they run on: 'container' (a Linux container), 'host' (macOS or Windows) or 'none'. */
+function jobsWithHost() {
+  const out = [];
+  for (const file of readdirSync(WORKFLOWS).filter((f) => f.endsWith('.yml'))) {
+    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+      const runsOn = /^ {4}runs-on: (.+)$/m.exec(job.text)?.[1] ?? '';
+      const kind = !runsOn ? 'none' : /macos|windows|matrix\.os|inputs\./.test(runsOn) ? 'host' : 'container';
+      out.push({ file, job, kind, where: `${file}:${job.id}` });
+    }
+  }
+  return out;
+}
+const setsJobTemp = (text) => /- uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-isolation\n(?!\s+if: always\(\)\n\s+with:\n\s+mode: release)/.test(text) || /- uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-tmpdir\n(?!\s+if: always\(\)\n\s+with:\n\s+mode: remove)/.test(text);
+
+test('every job that runs check-temp-leaks gets its temp and socket folders first, checks only them (shared /tmp only in a container), and removes them last', () => {
+  let checked = 0;
+  for (const { job, kind, where } of jobsWithHost()) {
+    if (!job.text.includes('check-temp-leaks.mjs')) continue; // the script itself, not its own tests (check-temp-leaks.test.mjs)
+    checked += 1;
+    const first = job.text.indexOf('check-temp-leaks.mjs');
+    const setup = Math.max(job.text.search(/- uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-isolation\n(?!\s+if: always)/), job.text.search(/- uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-tmpdir\n(?!\s+if: always)/));
+    assert.ok(setsJobTemp(job.text) && setup >= 0 && setup < first, `${where}: job-isolation (a host) or job-tmpdir before its first check-temp-leaks`);
+    for (const [, args] of job.text.matchAll(/check-temp-leaks\.mjs([^\n]*)/g)) {
+      assert.match(args, /--dir "\$PADDOCK_JOB_TEMP" --socket-dir "\$PADDOCK_SOCKET_BASE"/, `${where}: check-temp-leaks${args} scans the job's own folders`);
+      if (kind === 'host') assert.doesNotMatch(args, /--shared/, `${where}: on a host /tmp is shared with local runs: no --shared`);
+    }
+    const end = Math.max(job.text.search(/- uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-isolation\n\s+if: always\(\)\n\s+with:\n\s+mode: release/), job.text.search(/- uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-tmpdir\n\s+if: always\(\)\n\s+with:\n\s+mode: remove/));
+    assert.ok(end > job.text.lastIndexOf('check-temp-leaks.mjs'), `${where}: removes the folders after its last check, if: always()`);
+  }
+  assert.ok(checked >= 3, `found the jobs (${checked})`);
+});
+
+test('every job on a macOS or Windows host gets the job temp folder (job-isolation acquire or job-tmpdir), and only job-tmpdir.sh sets TMPDIR', () => {
+  // Exempt, with the reason: a job that checks nothing out and writes no file.
+  const exempt = new Map([['debrief-runner-check.yml:host', 'prints the host tools\' versions; no checkout, no files']]);
+  for (const { job, kind, where } of jobsWithHost()) {
+    if (kind !== 'host' || exempt.has(where)) continue;
+    assert.ok(setsJobTemp(job.text), `${where}: runs on a host without its own TMPDIR (the runner user's temp folder is local runs' too)`);
+  }
+  for (const where of exempt.keys()) assert.ok(jobsWithHost().some((j) => j.where === where && !j.job.text.includes('actions/checkout')), `${where}: still exempt (no checkout)`);
+  // One owner (ER-22): no workflow, action or CI script writes TMPDIR, TMP or TEMP itself. The check also refuses a local
+  // `TMP=` assignment and an `echo TEMP=` line, which cannot be told from a writer by text: rename the variable or reword the
+  // line, never weaken the rule (a step's `TMP=` also changes TMP for its child processes on Windows).
+  const listed = spawnSync('git', ['ls-files', '.gitea', 'conformance/ci', 'apps/*/scripts/ci'], { cwd: PADDOCK, encoding: 'utf8' });
+  assert.equal(listed.status, 0, listed.stderr);
+  const files = listed.stdout.split('\n').filter((f) => f && !/\.test\.mjs$|\.md$/.test(f));
+  assert.ok(files.length > 10, `the files to check were listed (${files.length})`);
+  const found = files.filter((f) => f !== 'conformance/ci/job-tmpdir.sh').flatMap((f) => tempWriterLines(read(join(PADDOCK, f))).map((l) => `${f}: ${l.trim()}`));
+  assert.deepEqual(found, [], 'only conformance/ci/job-tmpdir.sh sets the temp folder variables');
+});
+
+/**
+ * The lines of a file that set TMPDIR, TMP or TEMP for later steps or child processes (comment lines ignored): in a file that
+ * mentions GITHUB_ENV every `[echo|printf] [quote]VAR=` line (a heredoc body included), an export, a YAML env key, a line
+ * that appends VAR= to GITHUB_ENV, and the PowerShell forms ($env:VAR = ..., Add-Content/Out-File to $env:GITHUB_ENV).
+ */
+function tempWriterLines(text) {
+  const env = /GITHUB_ENV/.test(text);
+  return text.split('\n').filter((l) => !l.trimStart().startsWith('#')).filter((l) =>
+    (env && /^\s*(echo|printf)?\s*['"]?(TMPDIR|TMP|TEMP)=/.test(l)) ||
+    /\$env:(TMPDIR|TMP|TEMP)\s*=/i.test(l) ||
+    (/\b(Add-Content|Out-File)\b/i.test(l) && /\$env:GITHUB_ENV/i.test(l) && /(TMPDIR|TMP|TEMP)=/.test(l)) ||
+    /\bexport\s+(TMPDIR|TMP|TEMP)=/.test(l) ||
+    /^\s+(TMPDIR|TMP|TEMP):\s/.test(l) ||
+    /\b(TMPDIR|TMP|TEMP)=[^\n]*>>\s*"?(\$\{?GITHUB_ENV|%GITHUB_ENV%)/.test(l));
+}
+
+test('the single-writer check catches every way a step can set the temp folder, and nothing else', () => {
+  const caught = [
+    ['echo', 'run: |\n  echo "TMPDIR=$t" >> "$GITHUB_ENV"'],
+    ['echo in a block', 'run: |\n  {\n    echo "TMP=$t"\n  } >> "$GITHUB_ENV"'],
+    ['printf', "printf 'TEMP=%s\\n' \"$t\" >> \"$GITHUB_ENV\""],
+    ['cmd', 'echo TMP=C:\\t>>"%GITHUB_ENV%"'],
+    ['heredoc', 'cat >> "$GITHUB_ENV" <<EOF\nTMPDIR=/x\nEOF'],
+    ['export', 'export TMPDIR=/x'],
+    ['YAML env key', 'env:\n  TMPDIR: /x'],
+    ['PowerShell assignment', '$env:TEMP = "C:\\t"'],
+    ['PowerShell Add-Content', 'Add-Content -Path $env:GITHUB_ENV -Value "TMP=C:\\t"'],
+    ['PowerShell Out-File', '"TEMP=C:\\t" | Out-File -Append -FilePath $env:GITHUB_ENV'],
+  ];
+  for (const [what, text] of caught) assert.ok(tempWriterLines(text).length > 0, `${what}: ${text}`);
+  for (const [what, text] of [
+    ['a local variable', 'tmp=$(mktemp -d)\necho "PATH=x" >> "$GITHUB_ENV"'],
+    ['a comment', '# echo "TMPDIR=x" >> "$GITHUB_ENV"'],
+    ['reading it', 'echo "temp folder: $TMPDIR"\n>> "$GITHUB_ENV"'],
+    ['another variable', 'echo "MY_TMPDIR_HINT=x" >> "$GITHUB_ENV"'],
+  ]) assert.deepEqual(tempWriterLines(text), [], what);
+});
+
+/** Every file that may run on a host runner and so must ask ci-home.sh for the CI home: all workflows, all shared actions, the shared
+ * and the apps' CI scripts. */
+function ciFiles() {
+  const listed = spawnSync('git', ['ls-files', '.gitea/workflows/*.yml', '.gitea/actions/*/action.yml', 'conformance/ci/*.sh', 'apps/*/scripts/ci/*'], { cwd: PADDOCK, encoding: 'utf8' });
+  assert.equal(listed.status, 0, listed.stderr);
+  return listed.stdout.split('\n').filter((f) => f && !f.endsWith('.test.mjs') && f !== 'conformance/ci/ci-home.sh');
+}
+
+/** Script lines (not comments or descriptions) that spell out the default cache root. Exceptions are explicit: the Windows
+ * %USERPROFILE% lines (cmd cannot run the bash script) and the demos' own CARGO_TARGET_DIR lines. */
+function hardCodedCacheRoot() {
+  const exempt = (f, l) => /%USERPROFILE%/.test(l) || (/^\.gitea\/workflows\/(shell|workbench)-demo-release\.yml$/.test(f) && /CARGO_TARGET_DIR=/.test(l));
+  const found = [];
+  for (const f of ciFiles()) {
+    for (const l of read(join(PADDOCK, f)).split('\n')) {
+      if (/^\s*(#|description:)/.test(l) || exempt(f, l)) continue;
+      if (/\$HOME\/\.paddock-ci|\$\{HOME\}\/\.paddock-ci|PADDOCK_CI_HOME:-|~\/\.paddock-ci/.test(l)) found.push(`${f}: ${l.trim()}`);
+    }
+  }
+  return found;
+}
+
+test('ci-home.sh is always assigned first: no workflow or action line takes it inside another command (bash -e would not stop)', () => {
+  const found = [];
+  for (const f of ciFiles()) {
+    for (const l of read(join(PADDOCK, f)).split('\n')) {
+      if (/^\s*#/.test(l)) continue;
+      if (/\$\([^)]*ci-home\.sh/.test(l) && !/^\s*[A-Za-z_]\w*="\$\(bash [^#]*ci-home\.sh"?\)"\s*(#.*)?$/.test(l)) found.push(`${f}: ${l.trim()}`);
+    }
+  }
+  assert.deepEqual(found, [], 'assign first (home="$(bash .../ci-home.sh)"), then use $home');
+});
+
+test('ci-home: PADDOCK_CI_HOME relocates the CI home, a missing relocated home stops the job, and nothing hard-codes the default', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-ci-home-')));
+  const run = (env) => spawnSync('bash', [join(PADDOCK, 'conformance', 'ci', 'ci-home.sh')], { env: { PATH: '/usr/bin:/bin', ...env }, encoding: 'utf8' });
+  const def = run({ HOME: join(root, 'home') });
+  assert.equal(def.status, 0, def.stderr);
+  assert.equal(def.stdout.trim(), join(root, 'home', '.paddock-ci'));
+  assert.ok(existsSync(join(root, 'home', '.paddock-ci')), 'the default home is created on first use');
+  const disk = join(root, 'disk');
+  const gone = run({ HOME: join(root, 'home'), PADDOCK_CI_HOME: disk });
+  assert.notEqual(gone.status, 0, 'an unmounted relocated home must stop the job');
+  assert.match(gone.stderr, /PADDOCK_CI_HOME .* does not exist: is its disk mounted/);
+  assert.equal(gone.stdout, '', 'nothing is printed for a later step to use');
+  assert.ok(!existsSync(disk), 'the relocated home is not recreated');
+  mkdirSync(disk);
+  const there0 = run({ HOME: join(root, 'home'), PADDOCK_CI_HOME: disk + '/' });
+  assert.equal(there0.stdout.trim(), disk, 'a trailing slash is normalised');
+  const rel = run({ HOME: join(root, 'home'), PADDOCK_CI_HOME: 'disk' });
+  assert.notEqual(rel.status, 0, 'a relative PADDOCK_CI_HOME is refused');
+  assert.match(rel.stderr, /not an absolute path/);
+  assert.equal(rel.stdout, '');
+  symlinkSync(disk, join(root, 'link'));
+  assert.equal(run({ HOME: join(root, 'home'), PADDOCK_CI_HOME: join(root, 'link') }).stdout.trim(), disk, 'a link is resolved');
+  const there = run({ HOME: join(root, 'home'), PADDOCK_CI_HOME: disk });
+  assert.equal(there.stdout.trim(), disk);
+  // build-folder follows it (and fails the same way).
+  const ws = join(root, 'ws');
+  mkdirSync(join(ws, '.cargo'), { recursive: true });
+  writeFileSync(join(ws, '.cargo', 'config.toml'), 'include = [{ path = "ci.toml", optional = true }]\n');
+  const bf = (home) => spawnSync('bash', [join(PADDOCK, 'conformance', 'ci', 'build-folder.sh'), ws, 'x-app'], {
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: 'macOS', GITHUB_ENV: join(root, 'env'), PADDOCK_CI_HOME: home, PADDOCK_CI_SLOT: 's1' }, encoding: 'utf8' });
+  assert.equal(bf(disk).status, 0);
+  assert.ok(existsSync(join(disk, 'target-x-app-s1')), 'the job slot\'s build folder in the relocated home');
+  assert.notEqual(bf(join(root, 'unmounted')).status, 0);
+  assert.ok(!existsSync(join(root, 'unmounted')));
+  assert.deepEqual(hardCodedCacheRoot(), [], 'one implementation: ask conformance/ci/ci-home.sh');
+});
+
+// ---- macOS' bash 3.2 (`shell: bash` on the Mac host runner is /bin/bash 3.2.57) ----
+
+/**
+ * The lines of a shell script that bash 3.2 cannot parse: an apostrophe inside `${VAR:?...}`, `:-`, `:+` or `:=` within
+ * double quotes (3.2 takes it as the start of a quoted word), and a `case` with unparenthesised patterns inside `$(...)`
+ * (3.2 takes the pattern's `)` as the end of the command substitution; write the patterns as `(a)`). Comments are ignored.
+ */
+function bash32Traps(text) {
+  const lines = text.split('\n');
+  const found = [];
+  const code = (l) => l.replace(/(^|\s)#.*$/, '');
+  // An apostrophe in the word of ${VAR:-word} (any of :? :- :+ := and their colon-less forms) inside double quotes, outside
+  // a $(...) within the word, where it is fine.
+  const apostropheInWord = (l) => {
+    let quoted = false;
+    for (let k = 0; k < l.length; k += 1) {
+      if (l[k] === '\\') {
+        k += 1;
+        continue;
+      }
+      if (l[k] === '"') quoted = !quoted;
+      if (!quoted || l[k] !== '$' || l[k + 1] !== '{') continue;
+      const m = /^\$\{([A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-]):?[-?+=]/.exec(l.slice(k));
+      if (!m) continue;
+      let depth = 0;
+      for (let j = k + m[0].length; j < l.length; j += 1) {
+        if (l[j] === '$' && l[j + 1] === '(') {
+          depth += 1;
+          j += 1;
+        } else if (depth > 0 && l[j] === ')') depth -= 1;
+        else if (depth === 0 && l[j] === '}') break;
+        else if (depth === 0 && l[j] === "'") return true;
+      }
+    }
+    return false;
+  };
+  lines.forEach((l, i) => {
+    if (apostropheInWord(code(l))) found.push(`${i + 1}: ${l.trim()}`);
+  });
+  // Inside an open $( ... ), a case whose pattern lines do not start with "(".
+  let depth = 0;
+  let inCase = false;
+  lines.forEach((raw, i) => {
+    const l = code(raw);
+    if (inCase && !/^\s*esac\b/.test(l)) {
+      // A pattern line's ")" is not a closing parenthesis: no counting on it.
+      if (/^\s*[^\s(][^)]*\)(\s|$)/.test(l)) found.push(`${i + 1}: ${raw.trim()}`);
+      if (/^\s*\(?[^)]*\)(\s|$)/.test(l)) return;
+    }
+    if (inCase && /^\s*esac\b/.test(l)) inCase = false;
+    for (let k = 0; k < l.length; k += 1) {
+      if (l[k] === '$' && l[k + 1] === '(') {
+        depth += 1;
+        k += 1;
+      } else if (depth > 0 && l[k] === '(') depth += 1;
+      else if (depth > 0 && l[k] === ')') depth -= 1;
+    }
+    if (depth > 0 && /\bcase\b.*\bin\s*$/.test(l)) inCase = true;
+  });
+  return found;
+}
+
+test('the bash 3.2 check finds both traps and passes their safe forms', () => {
+  for (const [what, text] of [
+    [':? with an apostrophe', 'x="${A:?the runner\'s folder}"'],
+    [':- with an apostrophe', 'echo "${A:-it\'s}"'],
+    [':+ with an apostrophe', 'echo "${A:+it\'s set}"'],
+    [':= with an apostrophe', 'echo "${A:=it\'s}"'],
+    ['a positional parameter', 'echo "${1:-it\'s}"'],
+    ['without the colon', 'echo "${A-it\'s}"'],
+    ['case in $(...)', 'x=$(case "$1" in\n  a) echo A ;;\n  *) echo B ;;\nesac)'],
+  ]) assert.ok(bash32Traps(text).length > 0, what);
+  for (const [what, text] of [
+    ['no apostrophe', 'x="${A:?the folder of the runner}"'],
+    ['outside double quotes', "x=${A:-'it'}"],
+    ['quotes inside a $(...) in the word', 'app="${1:-$(find "$b" -name \'*.app\' | head -1)}"'],
+    ['$(...) inside a case branch', 'case "$1" in\n  a) y="$(echo B)" ;;\nesac'],
+    ['parenthesised patterns in $(...)', 'x=$(case "$1" in\n  (a) echo A ;;\n  (*) echo B ;;\nesac)'],
+    ['a comment', "# echo \"${A:-it's}\""],
+  ]) assert.deepEqual(bash32Traps(text), [], what);
+});
+
+/** The tracked *.sh files a workflow or action runs (named in any of their texts by file name: over-selecting is safe). */
+function scriptsRunByCi() {
+  const listed = spawnSync('git', ['ls-files', '*.sh', '.gitea'], { cwd: PADDOCK, encoding: 'utf8' });
+  assert.equal(listed.status, 0, listed.stderr);
+  const files = listed.stdout.split('\n').filter(Boolean);
+  const ci = files.filter((f) => /^\.gitea\/(workflows\/[^/]+\.ya?ml|actions\/[^/]+\/action\.ya?ml)$/.test(f)).map((f) => read(join(PADDOCK, f))).join('\n');
+  return files.filter((f) => f.endsWith('.sh') && new RegExp(`(^|[/\\s"'$])${posixBase(f).replace(/[.]/g, '\\.')}(?![A-Za-z0-9_.-])`).test(ci));
+}
+const posixBase = (f) => f.split('/').pop();
+
+/** The bash run blocks a macOS host runs: every bash step of a shared action, and every bash step of a job that can run on macOS. */
+function macRunBlocks() {
+  const out = [];
+  const bashSteps = (where, text) => {
+    for (const st of parseSteps(text)) {
+      if (!st.run || /^\s*shell:\s*(cmd|pwsh|powershell)\b/m.test(st.text)) continue;
+      out.push({ where: `${where} step ${st.name ?? st.line}`, run: st.run.replace(/\$\{\{[^}]*\}\}/g, 'X') });
+    }
+  };
+  for (const a of readdirSync(ACTIONS)) {
+    const file = join(ACTIONS, a, 'action.yml');
+    if (existsSync(file)) bashSteps(`.gitea/actions/${a}`, read(file));
+  }
+  for (const { file, job } of jobsWithHost()) {
+    const runsOn = /^ {4}runs-on: (.+)$/m.exec(job.text)?.[1] ?? '';
+    if (/macos|matrix\.os|inputs\./.test(runsOn) && (!/matrix\.os/.test(runsOn) || /macos/.test(job.text))) bashSteps(`${file}:${job.id}`, job.text);
+  }
+  return out;
+}
+
+test('the CI scripts and macOS run blocks parse under macOS\' bash 3.2: neither trap, and /bin/bash -n -O extglob where it exists', () => {
+  const files = scriptsRunByCi();
+  for (const must of ['conformance/ci/job-isolation.sh', 'conformance/ci/job-tmpdir.sh', 'conformance/release/macos-verify-bundle.sh', 'scripts/demo/verify-macos.sh']) {
+    assert.ok(files.includes(must), `${must} is found as run by CI`);
+  }
+  const blocks = macRunBlocks();
+  assert.ok(blocks.length > 20, `found the macOS run blocks (${blocks.length})`);
+  const traps = [
+    ...files.flatMap((f) => bash32Traps(read(join(PADDOCK, f))).map((t) => `${f}:${t}`)),
+    ...blocks.flatMap((b) => bash32Traps(b.run).map((t) => `${b.where}:${t}`)),
+  ];
+  assert.deepEqual(traps, [], 'bash 3.2 cannot parse these lines');
+  if (!existsSync('/bin/bash')) return;
+  // extglob always on: job-isolation.sh turns it on before the code that needs it, and -n does not run shopt.
+  const parse = (text) => spawnSync('/bin/bash', ['-n', '-O', 'extglob'], { input: text, encoding: 'utf8' });
+  for (const f of files) {
+    const r = parse(read(join(PADDOCK, f)));
+    assert.equal(r.status, 0, `${f}: ${r.stderr}`);
+  }
+  for (const b of blocks) {
+    const r = parse(b.run);
+    assert.equal(r.status, 0, `${b.where}: ${r.stderr}`);
+  }
+});
+
+test('every release workflow whose app imports @decryp7/paddock-ui builds the shared UI (prepare) before the app build', () => {
+  const callers = readdirSync(WORKFLOWS).filter((f) => f !== 'app-release.yml' && /-release\.yml$/.test(f) && read(join(WORKFLOWS, f)).includes('./.gitea/workflows/app-release.yml'));
+  assert.ok(callers.includes('dyno-release.yml'), 'the callers of app-release.yml are found');
+  const importsShared = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory() ? importsShared(p) : /\.ts$/.test(e.name) && read(p).includes('@decryp7/paddock-ui')) return true;
+    }
+    return false;
+  };
+  for (const f of callers) {
+    const text = read(join(WORKFLOWS, f));
+    const appDir = /^\s*app-dir:\s*(apps\/\S+)/m.exec(text)?.[1];
+    assert.ok(appDir, `${f} names its app-dir`);
+    if (!importsShared(join(PADDOCK, appDir, 'src'))) continue;
+    const prepare = /^\s*prepare:\s*(.+)$/m.exec(text)?.[1] ?? '';
+    assert.match(prepare, /build -w ui/, `${f}: ${appDir} imports @decryp7/paddock-ui, which resolves from ui/dist, so the bundle job needs prepare: npm run build -w ui`);
+  }
+});
+
+// Build parallelism (docs/benchmarks.md, 2026-10-30): the agents' local cap of two rustc (ER-24) once leaked into CI scripts, and
+// the Mac and Windows legs each spelled their own number. CI sets CARGO_BUILD_JOBS in one place, conformance/ci/build-jobs.sh:
+// the runner's share of its host's cores and memory.
+const buildJobs = (env, args = []) =>
+  spawnSync('bash', [join(PADDOCK, 'conformance/ci/build-jobs.sh'), ...args], {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, ...env },
+  });
+const jobsOf = (r) => /^CARGO_BUILD_JOBS=(\d+)$/m.exec(r.stdout)?.[1];
+// The hosts of 2026-10-30 (the RAM a host reports is a little under its nominal size).
+const MAC = { RUNNER_OS: 'macOS', PADDOCK_CI_CORES: '14', PADDOCK_CI_RAM_MB: '65536' };
+const WINDOWS = { RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '8', PADDOCK_CI_RAM_MB: '16316' };
+const LINUX = { RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '32', PADDOCK_CI_RAM_MB: '131072' };
+
+test('build-jobs gives each runner class its share of the host, never the agents\' cap of two', () => {
+  // The Mac runs one job and keeps 10 of its 14 cores for the agents that share it (5 x 2, ER-24).
+  assert.equal(jobsOf(buildJobs(MAC)), '4');
+  assert.equal(jobsOf(buildJobs({ ...MAC, PADDOCK_CI_RESERVED_CORES: '1' })), '13');
+  // Windows, which runs two jobs at once, gets its share once the runner says so.
+  assert.equal(jobsOf(buildJobs({ ...WINDOWS, PADDOCK_CI_JOBS_PER_HOST: '2' })), '4');
+  // A runner's own settings win: the jobs its host runs at once, or an exact number.
+  assert.equal(jobsOf(buildJobs({ ...LINUX, PADDOCK_CI_JOBS_PER_HOST: '4' })), '8');
+  assert.equal(jobsOf(buildJobs({ ...LINUX, PADDOCK_CI_BUILD_JOBS: '12' })), '12');
+  assert.equal(jobsOf(buildJobs({ ...WINDOWS, PADDOCK_CI_CORES: '2', PADDOCK_CI_JOBS_PER_HOST: '4' })), '1', 'never below one');
+});
+
+test('build-jobs leaves Linux and Windows on cargo\'s default until their share is measured, and names the cores in the log', () => {
+  for (const [host, cores] of [[LINUX, 32], [WINDOWS, 8]]) {
+    const r = buildJobs(host);
+    assert.equal(r.status, 0);
+    assert.equal(jobsOf(r), undefined, host.RUNNER_OS);
+    assert.match(r.stderr, new RegExp(`${cores} cores`));
+    assert.match(r.stderr, /stays unset/);
+  }
+});
+
+test('build-jobs caps the share by memory: (RAM - kept) / (jobs per host x MB per rustc)', () => {
+  const W2 = { ...WINDOWS, PADDOCK_CI_CORES: '16', PADDOCK_CI_RAM_MB: '32600', PADDOCK_CI_JOBS_PER_HOST: '2' };
+  assert.equal(jobsOf(buildJobs(W2)), '8');
+  assert.equal(jobsOf(buildJobs({ ...W2, PADDOCK_CI_RAM_MB: '16384' })), '4'); // (16384 - 2048) / (2 x 1536)
+  assert.equal(jobsOf(buildJobs({ ...W2, PADDOCK_CI_RUSTC_MB: '4096' })), '3'); // (32600 - 2048) / (2 x 4096)
+  assert.equal(jobsOf(buildJobs({ ...MAC, PADDOCK_CI_RESERVED_CORES: '0', PADDOCK_CI_RESERVED_RAM_MB: '49152' })), '10');
+  // Without a RAM figure the cores decide.
+  const probeless = buildJobs({ ...W2, PADDOCK_CI_RAM_MB: 'x' });
+  assert.equal(jobsOf(probeless), '8');
+  assert.match(probeless.stderr, /no memory ceiling/);
+});
+
+test('build-jobs splits the share between the builds a job runs at once (cargo mutants --jobs N)', () => {
+  assert.equal(jobsOf(buildJobs(LINUX, ['2'])), '16');
+  assert.equal(jobsOf(buildJobs(MAC, ['2'])), '2');
+  assert.equal(jobsOf(buildJobs({ ...LINUX, PADDOCK_CI_BUILD_JOBS: '12' }, ['3'])), '4');
+  assert.equal(jobsOf(buildJobs(MAC, ['8'])), '1');
+  assert.notEqual(buildJobs(MAC, ['0']).status, 0);
+});
+
+test('build-jobs rejects nonsense and leading zeros (bash would read 010 as 8 and fail on 08), and warns when no core is left', () => {
+  for (const env of [
+    { PADDOCK_CI_BUILD_JOBS: '0' },
+    { PADDOCK_CI_JOBS_PER_HOST: 'two' },
+    { PADDOCK_CI_RESERVED_CORES: '-1' },
+    { PADDOCK_CI_RESERVED_CORES: '010' },
+    { PADDOCK_CI_RESERVED_CORES: '08' },
+    { PADDOCK_CI_RESERVED_RAM_MB: '01' },
+    { PADDOCK_CI_RUSTC_MB: '0' },
+  ]) {
+    const r = buildJobs({ ...MAC, ...env });
+    assert.notEqual(r.status, 0, JSON.stringify(env));
+    assert.match(r.stdout, /::error::PADDOCK_CI_(BUILD_JOBS|JOBS_PER_HOST|RESERVED_CORES|RESERVED_RAM_MB|RUSTC_MB) must be a whole number/);
+  }
+  assert.equal(jobsOf(buildJobs({ ...MAC, PADDOCK_CI_RESERVED_CORES: '0' })), '14');
+  const all = buildJobs({ ...MAC, PADDOCK_CI_CORES: '8' });
+  assert.equal(jobsOf(all), '1');
+  assert.match(all.stdout, /::warning::PADDOCK_CI_RESERVED_CORES \(10\) keeps all of this host's 8 cores/);
+  // Without a count of cores the variable stays unset (cargo's own default), and the step stays green.
+  const unknown = buildJobs({ ...MAC, PADDOCK_CI_CORES: 'many' });
+  assert.equal(unknown.status, 0);
+  assert.equal(jobsOf(unknown), undefined);
+});
+
+test('build-jobs logs on stderr, prints only the assignment, appends it to GITHUB_ENV, and probes this machine', () => {
+  const r = buildJobs(MAC);
+  assert.equal(r.stdout, 'CARGO_BUILD_JOBS=4\n');
+  assert.match(r.stderr, /^build-jobs: this host: 14 cores, 65536 MB of RAM/m);
+  const dir = mkdtempSync(join(tmpdir(), 'build-jobs-'));
+  const envFile = join(dir, 'env');
+  writeFileSync(envFile, '');
+  assert.equal(buildJobs({ ...MAC, GITHUB_ENV: envFile }).status, 0);
+  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\n');
+  rmSync(dir, { recursive: true, force: true });
+  // The real probes count something on this machine.
+  const real = buildJobs({ RUNNER_OS: 'macOS', PADDOCK_CI_RESERVED_CORES: '0' });
+  assert.match(real.stderr, /this host: [1-9]\d* cores, [1-9]\d* MB of RAM/);
+  assert.match(real.stdout, /^CARGO_BUILD_JOBS=[1-9]\d*$/m);
+});
+
+const workflowFiles = () => readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x));
+const uncommented = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+
+test('CI never pins the build jobs: only build-jobs sets CARGO_BUILD_JOBS, and no cargo command passes a fixed -j', () => {
+  const files = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(join(PADDOCK, dir), { withFileTypes: true })) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory()) walk(p);
+      else if (/\.(ya?ml|sh|mjs)$/.test(e.name)) files.push(p);
+    }
+  };
+  walk('.gitea');
+  walk('conformance/ci');
+  // The repo scripts the workflows run.
+  for (const f of workflowFiles()) {
+    for (const m of read(join(WORKFLOWS, f)).matchAll(/\b(scripts\/[\w./-]+\.(?:sh|mjs))\b/g)) if (existsSync(join(PADDOCK, m[1]))) files.push(m[1]);
+  }
+  const offenders = [];
+  for (const f of [...new Set(files)]) {
+    if (f === 'conformance/ci/build-jobs.sh') continue;
+    read(join(PADDOCK, f)).split('\n').forEach((line, i) => {
+      const code = line.replace(/^\s*(#|\/\/|rem\b).*$/i, '');
+      // A number (or a number as the fallback) for CARGO_BUILD_JOBS, in bash, cmd or YAML.
+      if (/CARGO_BUILD_JOBS["']?\s*(=|:)\s*["']?\d|CARGO_BUILD_JOBS:-\d/.test(code)) offenders.push(`${f}:${i + 1}: ${line.trim()}`);
+      // A fixed -j/--jobs on a cargo build or test. `cargo mutants --jobs N` is the number of mutants built at once; each
+      // build runs CARGO_BUILD_JOBS rustc, so the job runs N x that: the next test checks build-jobs splits the share by N.
+      if (/\bcargo\b(?!\s+mutants)[^\n]*\s(-j\s*|--jobs[ =])\d/.test(code)) offenders.push(`${f}:${i + 1}: ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(offenders, [], 'set build jobs with the build-jobs action (conformance/ci/build-jobs.sh) only');
+});
+
+test('a job that builds several mutants at once splits its build jobs between them first', () => {
+  let seen = 0;
+  for (const file of workflowFiles()) {
+    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+      const t = uncommented(job.text);
+      const m = /cargo mutants[^\n]*--jobs\s+"?(\$\w+|\d+)"?/.exec(t);
+      if (!m) continue;
+      seen++;
+      const before = t.slice(0, m.index);
+      const split = /uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/build-jobs\n(?:\s+if: [^\n]+\n)?\s+with:\n\s+split: ("?)([^\n"]+)\1\n[^]*$/.exec(before);
+      assert.ok(split, `${file} ${job.id}: build-jobs with split before cargo mutants --jobs`);
+      const want = /^\d+$/.test(m[1]) ? m[1] : '${{ inputs.jobs }}';
+      if (m[1] === '$JOBS') assert.match(t, /JOBS: \$\{\{ inputs\.jobs \}\}/, `${file} ${job.id}: JOBS is the jobs input`);
+      assert.equal(split[2], want, `${file} ${job.id}: the split is the --jobs number`);
+    }
+  }
+  assert.ok(seen >= 2, 'the mutants workflows are found');
+});
+
+test('every job that runs cargo sets its build jobs (build-jobs or setup-rust); a host job before it takes a slot', () => {
+  const builds = /\bcargo\s+(build|test|nextest|clippy|check|llvm-cov|mutants|fuzz|install|rustc|run|bench|doc|tauri)\b|\btauri build\b|actions\/(app-gates|tauri-bundle)\b|\bcargo\s+"\$\{[^}]+\}"\s+(clippy|test)\b/;
+  const missing = [];
+  for (const file of workflowFiles()) {
+    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+      const t = uncommented(job.text);
+      // A caller of a reusable workflow: the called workflow's jobs are checked themselves.
+      if (/^\s{4}uses: \.\//m.test(t)) continue;
+      // At least one of them unconditional (no `if:` of its own), so a skipped step never leaves the job without its jobs.
+      const unconditional = /- uses: \.\/(?:\.?paddock\/)?\.gitea\/actions\/(build-jobs|setup-rust)[^\n]*\n(?!\s+if:)/;
+      if (builds.test(t) && !unconditional.test(t)) missing.push(`${file} ${job.id}`);
+      const iso = t.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-isolation\s*\n/);
+      if (iso < 0 || !/runs-on:[^\n]*(macos|windows|\$\{\{)/.test(t)) continue;
+      const bj = t.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/build-jobs\b/);
+      assert.ok(bj >= 0 && bj < iso, `${file} ${job.id}: build-jobs before job-isolation (which builds paddock-dev with cargo)`);
+    }
+  }
+  assert.deepEqual(missing, [], 'these jobs run cargo without build-jobs or setup-rust');
+  const setup = read(join(ACTIONS, 'setup-rust', 'action.yml'));
+  assert.match(setup, /if \[ -z "\$\{CARGO_BUILD_JOBS:-\}" \]; then bash "\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\.\/conformance\/ci\/build-jobs\.sh"/);
+});
+
+test('every workflow step that runs the ui Playwright config provides every port variable that config requires on CI', () => {
+  const config = read(join(PADDOCK, 'ui', 'playwright.config.ts'));
+  const required = [...config.matchAll(/e2ePort\('([A-Z_]+)'/g)].map((m) => m[1]);
+  assert.ok(required.length >= 3, 'ui/playwright.config.ts names its port variables with e2ePort');
+  let checked = 0;
+  for (const f of readdirSync(WORKFLOWS).filter((n) => n.endsWith('.yml'))) {
+    const text = read(join(WORKFLOWS, f));
+    const uiShard = /^\s*working-directory: ui\s*$/m;
+    for (const step of text.split(/\n\s*- (?=name:|uses:|run:)/)) {
+      if (!/playwright test/.test(step) || !uiShard.test(step)) continue;
+      checked++;
+      for (const name of required) {
+        assert.match(step, new RegExp(`\\b${name}\\b`), `${f}: a step runs the ui Playwright config without setting ${name} (e2ePort refuses a default on CI)`);
+      }
+    }
+  }
+  assert.ok(checked >= 2, 'the check found the release workflows\' ui Playwright steps');
 });

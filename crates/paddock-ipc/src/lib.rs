@@ -12,6 +12,9 @@
 //!
 //! Wire rules: bodies are postcard, so wire types never use `untagged`, `flatten`, internal tags or `skip_serializing_if`;
 //! adding a variant at the end of an enum is a minor protocol change ([`ProtocolVersion`]).
+//!
+//! The reference for the wire (framing, encoding, handshake, versioning, streams, limits) is `docs/ipc-wire.md` in the
+//! repository.
 
 pub mod child;
 pub mod endpoint;

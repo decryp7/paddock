@@ -81,6 +81,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # CARGO_BUILD_JOBS: this runner's share of the host (conformance/ci/build-jobs.sh; Linux keeps cargo's default).
+      - uses: ./.gitea/actions/build-jobs
+
       - uses: dtolnay/rust-toolchain@stable
 
       # Restore and save separately, with the run id in the saved key: a fixed key can never be updated once it
@@ -147,6 +150,9 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+
+      # CARGO_BUILD_JOBS: this runner's share of the host (conformance/ci/build-jobs.sh; Linux keeps cargo's default).
+      - uses: ./.gitea/actions/build-jobs
 
       - uses: dtolnay/rust-toolchain@stable
 

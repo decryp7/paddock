@@ -3,9 +3,12 @@
 //! processes cannot be resolved without elevation on macOS and Linux: those sockets come back with no pid and the page
 //! says so; Dyno never asks for root for this.
 
-use dyno_core::network::{Proto, SocketRow, SocketState};
+use dyno_core::network::SocketRow;
+#[cfg(not(windows))]
+use dyno_core::network::{Proto, SocketState};
 use dyno_core::network_traffic::TrafficCounter;
 use dyno_core::ports::{NetworkSockets, PlatformError, ProcessTraffic, ReverseDns};
+#[cfg(not(windows))]
 use netstat2::{get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState};
 use std::net::IpAddr;
 use std::time::Duration;
@@ -14,6 +17,7 @@ use std::time::Duration;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct OsSockets;
 
+#[cfg(not(windows))]
 fn state(s: TcpState) -> SocketState {
     match s {
         TcpState::Listen => SocketState::Listen,
@@ -30,40 +34,85 @@ fn state(s: TcpState) -> SocketState {
 }
 
 impl NetworkSockets for OsSockets {
+    /// Windows: Dyno's own reader of the IP Helper tables, which knows a listener by the table it is in (netstat2 reads
+    /// only the table of all endpoints and takes a listener whose `dwState` is 0, as newer Windows 11 builds report it,
+    /// for an unknown state).
+    #[cfg(windows)]
+    fn sockets(&self) -> Result<Vec<SocketRow>, PlatformError> {
+        crate::windows::net::sockets().map_err(PlatformError::Failed)
+    }
+
+    #[cfg(not(windows))]
     fn sockets(&self) -> Result<Vec<SocketRow>, PlatformError> {
         let infos = get_sockets_info(
             AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6,
             ProtocolFlags::TCP | ProtocolFlags::UDP,
         )
         .map_err(|e| PlatformError::Failed(format!("The OS would not list the open sockets ({e}).")))?;
-        Ok(infos
-            .into_iter()
-            .map(|i| {
-                let pid = i.associated_pids.first().copied();
-                match i.protocol_socket_info {
-                    ProtocolSocketInfo::Tcp(t) => {
-                        let st = state(t.state);
-                        SocketRow {
-                            proto: Proto::Tcp,
-                            local: t.local_addr,
-                            local_port: t.local_port,
-                            remote: (st != SocketState::Listen).then_some((t.remote_addr, t.remote_port)),
-                            state: st,
-                            pid,
-                        }
+        // One socket can come back once per holder (macOS) or once with all its holders (Linux); a child holds its
+        // parent's sockets between fork and exec and keeps one it inherited. Rows are merged per socket and listed once
+        // per owner, never once per holder or for whichever holder the OS listed first. Rows with the same tuple
+        // (protocol, local address and port, peer, state) and no visible pid (another user's sockets without elevation)
+        // collapse into one row: the OS gives nothing that would tell them apart.
+        let mut holders: Vec<(SocketRow, Vec<u32>)> = Vec::new();
+        let mut seen: std::collections::HashMap<SocketRow, usize> = std::collections::HashMap::new();
+        for i in infos {
+            let row = match i.protocol_socket_info {
+                ProtocolSocketInfo::Tcp(t) => {
+                    let st = state(t.state);
+                    SocketRow {
+                        proto: Proto::Tcp,
+                        local: t.local_addr,
+                        local_port: t.local_port,
+                        remote: (st != SocketState::Listen).then_some((t.remote_addr, t.remote_port)),
+                        state: st,
+                        pid: None,
                     }
-                    ProtocolSocketInfo::Udp(u) => SocketRow {
-                        proto: Proto::Udp,
-                        local: u.local_addr,
-                        local_port: u.local_port,
-                        remote: None,
-                        state: SocketState::Listen,
-                        pid,
-                    },
                 }
+                ProtocolSocketInfo::Udp(u) => SocketRow {
+                    proto: Proto::Udp,
+                    local: u.local_addr,
+                    local_port: u.local_port,
+                    remote: None,
+                    state: SocketState::Listen,
+                    pid: None,
+                },
+            };
+            match seen.get(&row) {
+                Some(&at) => holders[at].1.extend(i.associated_pids),
+                None => {
+                    seen.insert(row.clone(), holders.len());
+                    holders.push((row, i.associated_pids));
+                }
+            }
+        }
+        let parents = parents_of(holders.iter().filter(|(_, p)| p.len() > 1).flat_map(|(_, p)| p.iter().copied()));
+        Ok(holders
+            .into_iter()
+            .flat_map(|(row, pids)| {
+                let owners: Vec<Option<u32>> = match crate::parse::socket_owner::owners(&pids, |p| parents.get(&p).copied()) {
+                    o if o.is_empty() => vec![None],
+                    o => o.into_iter().map(Some).collect(),
+                };
+                owners.into_iter().map(move |pid| SocketRow { pid, ..row.clone() })
             })
             .collect())
     }
+}
+
+/// The parents of `pids` (the holders of shared sockets: usually none, so usually nothing is read).
+#[cfg(not(windows))]
+fn parents_of(pids: impl Iterator<Item = u32>) -> std::collections::HashMap<u32, u32> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let pids: Vec<Pid> = pids.map(Pid::from_u32).collect();
+    if pids.is_empty() {
+        return std::collections::HashMap::new();
+    }
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), false, ProcessRefreshKind::nothing());
+    pids.iter()
+        .filter_map(|p| Some((p.as_u32(), sys.process(*p)?.parent()?.as_u32())))
+        .collect()
 }
 
 /// Reverse DNS through the OS resolver (`getnameinfo`): the user's resolver, search domains and hosts file apply.
@@ -123,6 +172,7 @@ impl ProcessTraffic for OsTraffic {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dyno_core::network::{Proto, SocketState};
     use std::net::{TcpListener, TcpStream, UdpSocket};
 
     #[test]
@@ -136,11 +186,14 @@ mod tests {
         let udp = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp.local_addr().unwrap().port();
 
+        // A listener is listed as listening on every OS and Windows build (on Windows by the table it is in: newer
+        // builds report its `dwState` as 0, CI job 22533).
+        let is_listener = |r: &SocketRow| r.proto == Proto::Tcp && r.state == SocketState::Listen && r.local_port == port;
         let rows = OsSockets.sockets().unwrap();
-        let listening = rows
-            .iter()
-            .find(|r| r.proto == Proto::Tcp && r.state == SocketState::Listen && r.local_port == port)
-            .expect("the test's own listener is listed");
+        let listening = rows.iter().find(|r| is_listener(r)).unwrap_or_else(|| {
+            let mine: Vec<&SocketRow> = rows.iter().filter(|r| r.local_port == port).collect();
+            panic!("the test's own listener is listed: its port has {mine:?}")
+        });
         assert_eq!(listening.pid, Some(me), "its owner is this process");
         assert!(listening.local.is_loopback() && listening.remote.is_none());
         let connected = rows
@@ -154,6 +207,7 @@ mod tests {
             .any(|r| r.proto == Proto::Udp && r.local_port == udp_port && r.pid == Some(me)));
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn every_state_maps_to_something() {
         for s in [
@@ -173,6 +227,64 @@ mod tests {
         ] {
             let _ = state(s);
         }
+    }
+
+    /// Review P2 (2026-10-30): a listener a child holds too (here inherited on purpose and kept across exec, as a child
+    /// briefly holds every socket between fork and exec) is still listed as this process's, not the child's.
+    #[cfg(unix)]
+    #[test]
+    #[allow(unsafe_code)]
+    fn a_listener_a_child_inherited_is_still_listed_as_its_parents() {
+        use std::os::fd::AsRawFd;
+        /// Ends the child however the test ends.
+        struct Child(std::process::Child);
+        impl Drop for Child {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let me = std::process::id();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // SAFETY: `dup` of an open descriptor; the copy has no close-on-exec flag, so the child keeps it after exec.
+        let inherited = unsafe { libc::dup(listener.as_raw_fd()) };
+        assert!(inherited >= 0);
+        let child = Child(
+            crate::process::command("/bin/sleep")
+                .arg("60")
+                .stdin(std::process::Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        // SAFETY: our own copy, closed once; the child has its own.
+        unsafe { libc::close(inherited) };
+        let kid = child.0.id();
+        // The child holds the socket once it runs: wait for the OS to list both holders (a hang guard bounds it).
+        // macOS lists the socket once per holder, Linux once with every holder: either way both must be there.
+        let both = || {
+            let holders: Vec<u32> = get_sockets_info(AddressFamilyFlags::IPV4, ProtocolFlags::TCP)
+                .unwrap()
+                .into_iter()
+                .filter(|i| matches!(&i.protocol_socket_info, ProtocolSocketInfo::Tcp(t) if t.local_port == port && t.state == TcpState::Listen))
+                .flat_map(|i| i.associated_pids)
+                .collect();
+            holders.contains(&me) && holders.contains(&kid)
+        };
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !both() {
+            assert!(std::time::Instant::now() < end, "the OS never listed the child as a holder");
+            // Waits on the condition above; the pause only keeps each poll of the machine's sockets from spinning (the
+            // deadline is a hang guard).
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let rows = OsSockets.sockets().unwrap();
+        let listening: Vec<&SocketRow> = rows
+            .iter()
+            .filter(|r| r.proto == Proto::Tcp && r.state == SocketState::Listen && r.local_port == port)
+            .collect();
+        assert_eq!(listening.len(), 1, "{listening:?}");
+        assert_eq!(listening[0].pid, Some(me), "the parent owns it, not child {kid}");
     }
 
     #[test]

@@ -125,6 +125,12 @@
       <trans-unit id="pd.activity.undone" datatype="html">
         <source>Undone</source>
       </trans-unit>
+      <trans-unit id="pd.app.exit" datatype="html">
+        <source>Exit</source>
+      </trans-unit>
+      <trans-unit id="pd.app.quit" datatype="html">
+        <source>Quit</source>
+      </trans-unit>
       <trans-unit id="pd.category.app" datatype="html">
         <source>Application</source>
       </trans-unit>
@@ -806,6 +812,9 @@
       <trans-unit id="pd.health.state.incompatible" datatype="html">
         <source>incompatible</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.keeps-failing" datatype="html">
+        <source>keeps failing to start</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.limited" datatype="html">
         <source>limited</source>
       </trans-unit>
@@ -827,6 +836,9 @@
       <trans-unit id="pd.health.state.not-running" datatype="html">
         <source>not running</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.other-holds" datatype="html">
+        <source>held by another agent</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.paused" datatype="html">
         <source>paused</source>
       </trans-unit>
@@ -845,11 +857,20 @@
       <trans-unit id="pd.health.state.repairing" datatype="html">
         <source>repairing</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.still-starting" datatype="html">
+        <source>still starting</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.stopped" datatype="html">
         <source>stopped</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.system-silent" datatype="html">
+        <source>system not answering</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.unavailable" datatype="html">
         <source>not available</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.waiting-service" datatype="html">
+        <source>waiting for the login service</source>
       </trans-unit>
       <trans-unit id="pd.health.status" datatype="html">
         <source>Services</source>

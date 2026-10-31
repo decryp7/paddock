@@ -3,9 +3,9 @@
 // macros expand to; they are `#[doc(hidden)]` public because a macro has to reach them, so only the compiler stops an
 // ordinary call. Flagged, in any Rust file outside `crates/paddock-commands` (their home): a `__command(` or `__prefix(`
 // call in production code. Not flagged: comments, doc comments and doctests (blanked by the mask), strings, integration
-// tests (`tests/`, `tests.rs`), benches, and everything from the first `#[cfg(test)]` of a file on (a test module closes
-// the file by convention).
+// tests (`tests/`, `tests.rs`), benches, and every `#[cfg(test)]` item (a module or a single `use`; code after it still counts).
 import { error } from '../finding.mjs';
+import { withoutTestItems } from '../util/rust-test-items.mjs';
 import { maskRust } from './C39-freed-port.mjs';
 
 const CALL = /\b__(?:command|prefix)\s*\(/g;
@@ -15,8 +15,7 @@ const TEST_FILE = /(^|\/)(?:tests?|benches)(?:\.rs$|\/)/;
 /** The calls to the hidden constructors in the production part of a Rust source: [{ line, name }]. */
 export function hiddenConstructorCalls(source) {
   const clean = maskRust(source);
-  const cut = clean.search(/#\[\s*cfg\s*\(\s*test\s*\)\s*\]/);
-  const production = cut < 0 ? clean : clean.slice(0, cut);
+  const production = withoutTestItems(clean);
   return [...production.matchAll(CALL)].map((m) => ({
     line: production.slice(0, m.index).split('\n').length,
     name: m[0].replace(/\s*\($/, ''),

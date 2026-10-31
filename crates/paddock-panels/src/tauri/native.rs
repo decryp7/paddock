@@ -3,21 +3,32 @@
 //! frameless window and the tracker thread's loop. Never logic: each function hands over to tested code or makes one
 //! platform call. This file is left out of the coverage job (`crates/README.md`) and reviewed by hand.
 
+// On the mock runtime (other crates' tests) the OS pointer is never the default, so it is unused there.
+#![cfg_attr(all(feature = "mock-runtime", not(test)), allow(dead_code))]
 use super::ghost::step;
 use super::{Builder, TARGET};
 use ::tauri::{AppHandle, Manager, Runtime, Window};
 use std::time::Instant;
 
+/// A test never reads the user's mouse (rule 7): the one that tries fails here, at the read.
+/// A panic on a background thread (the ghost tracker) does not fail the test; only reads on the test's thread do.
+fn refuse_in_tests() {
+    #[cfg(test)]
+    panic!("a test read the user's mouse button; give its Panels a Pointer");
+}
+
 /// Whether the primary (usually left) mouse button is held down anywhere on screen; `None` when the platform cannot tell
 /// (then the host falls back to docking when the pointer rests on a guide).
 #[cfg(target_os = "macos")]
 pub(crate) fn primary_button_down() -> Option<bool> {
+    refuse_in_tests();
     // Bit 0 is the primary button, already mapped for left-handed setups by the system.
     Some(objc2_app_kit::NSEvent::pressedMouseButtons() & 1 == 1)
 }
 
 #[cfg(windows)]
 pub(crate) fn primary_button_down() -> Option<bool> {
+    refuse_in_tests();
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON};
     use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_SWAPBUTTON};
     // GetAsyncKeyState reports physical buttons: with swapped buttons the primary one is the right button.
@@ -34,7 +45,18 @@ pub(crate) fn primary_button_down() -> Option<bool> {
 
 #[cfg(not(any(target_os = "macos", windows)))]
 pub(crate) fn primary_button_down() -> Option<bool> {
+    refuse_in_tests();
     None
+}
+
+/// The OS's mouse button, the default [`super::Pointer`] (`NSEvent` on macOS, `GetAsyncKeyState` on Windows; elsewhere
+/// it cannot tell).
+pub(super) struct OsPointer;
+
+impl super::Pointer for OsPointer {
+    fn primary_button_down(&self) -> Option<bool> {
+        primary_button_down()
+    }
 }
 
 /// Shows the ghost without activating it (it must never take the focus from the window being dragged from).
@@ -76,7 +98,11 @@ pub(super) fn frameless<R: Runtime>(b: Builder<'_, R>) -> Builder<'_, R> {
 }
 
 /// Follows the cursor while session `id` lasts, on a thread of its own at about 60 Hz.
-pub(super) fn spawn_tracker<R: Runtime>(app: AppHandle<R>, id: u64) -> std::io::Result<()> {
+pub(super) fn spawn_tracker<R: Runtime>(
+    app: AppHandle<R>,
+    id: u64,
+    pointer: std::sync::Arc<dyn super::Pointer>,
+) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("paddock-drag-ghost".into())
         .spawn(move || {
@@ -84,7 +110,7 @@ pub(super) fn spawn_tracker<R: Runtime>(app: AppHandle<R>, id: u64) -> std::io::
             let mut up = 0u32;
             loop {
                 std::thread::sleep(crate::ghost::TICK);
-                up = if primary_button_down() == Some(false) {
+                up = if pointer.primary_button_down() == Some(false) {
                     up + 1
                 } else {
                     0

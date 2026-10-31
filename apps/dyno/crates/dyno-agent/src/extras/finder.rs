@@ -52,7 +52,8 @@ pub fn resolve_root(folder: &str) -> Result<PathBuf, String> {
 /// [`resolve_root`] that gives up after `limit`: a dead share can hold the look at it for as long as the server is gone.
 fn resolve_within(folder: &str, limit: Duration) -> Result<PathBuf, String> {
     let folder = folder.to_string();
-    crate::disk::volumes::within(limit, move || resolve_root(&folder)).unwrap_or_else(|| {
+    // The start of the search waits for it within a deadline: live work; the walk is bulk (rule 52).
+    crate::disk::volumes::within(limit, dyno_platform::priority::ThreadRole::Live, move || resolve_root(&folder)).unwrap_or_else(|| {
         Err("That folder did not answer in time. Check that the drive or share is reachable, or choose another folder.".into())
     })
 }
@@ -119,6 +120,7 @@ fn abandonable<T: Send + 'static>(
     let thread = {
         let (ctx, tx, held) = (ctx.clone(), tx.clone(), held.clone());
         std::thread::Builder::new().name("dyno-finder".into()).spawn(move || {
+            lowered("search");
             let result = work(&ctx);
             // Over: whatever was counted for it comes off, and nothing may be counted afterwards.
             *held.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
@@ -140,6 +142,14 @@ fn abandonable<T: Send + 'static>(
             Err(JobError::Cancelled(ctx.cancel_token().reason().unwrap_or(CancelReason::User)))
         }
     }
+}
+
+/// Lowers the thread a part of the search runs on, gently and once (rule 52): the search's own thread and the workers of the
+/// shared walk and map, which start their threads themselves and do not pass on the class of the thread that asked.
+fn lowered(_part: &'static str) {
+    dyno_platform::priority::lower_current_thread_once();
+    #[cfg(all(test, target_os = "macos"))]
+    tests::saw(_part, dyno_platform::priority::current_qos_class());
 }
 
 /// What the walk found.
@@ -177,6 +187,7 @@ fn walk(ctx: &JobContext, root: &Path, min_bytes: u64, limits: Limits, workers: 
         ..WalkOptions::default()
     }
     .with_filter(move |e| {
+        lowered("walk");
         if s.fetch_add(1, Ordering::Relaxed) >= max_files {
             many.store(true, Ordering::Relaxed);
             return Decision::SkipSubtree;
@@ -266,6 +277,7 @@ fn find_duplicates(
     let candidates: Vec<usize> = groups.iter().flatten().copied().collect();
     ctx.phase(Phase::items("heads", "Comparing the start of files", candidates.len() as u64));
     let heads = par_map_ordered(candidates, workers, ctx.cancel_token(), ctx, |i| {
+        lowered("heads");
         head_digest(ctx, Path::new(&files[i].path)).map(|h| (i, h))
     })?;
     let head_of: std::collections::HashMap<usize, [u8; 32]> = heads.into_iter().filter_map(|(i, h)| h.map(|h| (i, h))).collect();
@@ -298,6 +310,7 @@ fn find_duplicates(
     let total: u64 = to_read.iter().map(|i| files[*i].bytes).sum();
     ctx.phase(Phase::bytes("contents", "Comparing contents", Some(total)));
     let digests = par_map_ordered(to_read, workers, ctx.cancel_token(), &(), |i| {
+        lowered("contents");
         full_digest(ctx, Path::new(&files[i].path)).map(|h| (i, h))
     })?;
     Ok((digests.into_iter().filter_map(|(i, h)| h.map(|h| (i, h))).collect(), cut))
@@ -392,6 +405,29 @@ mod tests {
 
     fn find(root: &Path, mode: FinderMode) -> Result<FinderResult, JobError> {
         Run::new().job(|ctx| run(ctx, &query(root, mode), "s", Limits::default(), w(4), lg()))
+    }
+
+    /// The QoS class each part of a search ran at, per thread (every finder test adds to it).
+    #[cfg(target_os = "macos")]
+    static SEEN: Mutex<Vec<(&'static str, u32)>> = Mutex::new(Vec::new());
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn saw(part: &'static str, class: u32) {
+        SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((part, class));
+    }
+
+    /// The person started the search and watches it, so every thread of it (its own, the walk's and the comparison's workers)
+    /// is lowered gently, never starved (rule 52): `UTILITY` on macOS.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn every_thread_of_a_search_runs_at_the_gentle_level() {
+        let (_t, root) = fixture();
+        assert_eq!(find(&root, FinderMode::Both).unwrap().duplicates.len(), 1);
+        let seen = SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        for part in ["search", "walk", "heads", "contents"] {
+            assert!(seen.iter().any(|(p, _)| *p == part), "{part} never ran: {seen:?}");
+        }
+        assert!(seen.iter().all(|(_, c)| *c == dyno_platform::priority::UTILITY), "{seen:?}");
     }
 
     #[test]
@@ -551,26 +587,35 @@ mod tests {
 
     #[test]
     fn cancel_stops_a_parallel_walk_long_before_it_would_have_finished() {
+        // A walker looks at the cancel every `CANCEL_CHECK_ITEMS` entries of a folder (counting them first) and starts no
+        // folder after it, so a cancel at the first count leaves at most two such batches per worker counted. The fixture
+        // is sized from that bound, not larger: creating files is slow on Windows (16 000 took 30 to 60 s on the CI runner
+        // and ran into the test timeout, CI run 7166).
+        use paddock_jobs::CANCEL_CHECK_ITEMS;
+        const WORKERS: usize = 2;
+        const DIRS: usize = 8;
+        const PER_DIR: usize = CANCEL_CHECK_ITEMS + CANCEL_CHECK_ITEMS / 4;
+        let bound = (WORKERS * 2 * CANCEL_CHECK_ITEMS) as u64;
+        let total = (DIRS * PER_DIR) as u64;
+        assert!(bound < total / 2, "the fixture is big enough to tell a stop from a finish");
         let t = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(t.path()).unwrap().join("many");
-        const PER_DIR: usize = 2_000;
-        for d in 0..8 {
+        for d in 0..DIRS {
             std::fs::create_dir_all(root.join(format!("d{d}"))).unwrap();
             for i in 0..PER_DIR {
                 std::fs::write(root.join(format!("d{d}")).join(format!("f{i}")), b"x").unwrap();
             }
         }
         let job = Run::new().cancel_when("walk", 100);
-        let out = job.job(|ctx| run(ctx, &query(&root, FinderMode::Both), "s", Limits::default(), w(4), lg()));
+        let out = job.job(|ctx| run(ctx, &query(&root, FinderMode::Both), "s", Limits::default(), w(WORKERS), lg()));
         assert!(matches!(out, Err(JobError::Cancelled(_))));
         let seen = job.phases()[0].counts.last().copied().unwrap();
         assert!(
-            seen < (8 * PER_DIR / 2) as u64,
-            "looked at {seen} of {} entries after the cancel",
-            8 * PER_DIR
+            seen <= bound,
+            "looked at {seen} of {total} entries after the cancel (at most {bound})"
         );
         assert!(matches!(job.end_state(), JobState::Cancelled { .. }));
-        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 8, "nothing was changed");
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), DIRS, "nothing was changed");
     }
 
     #[test]
@@ -710,20 +755,41 @@ mod tests {
         );
     }
 
-    #[test]
-    fn cancel_stops_comparing_within_a_chunk_and_leaves_the_files_alone() {
+    fn three_equal_files() -> (tempfile::TempDir, PathBuf, Vec<PathBuf>) {
         let t = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(t.path()).unwrap().join("dups");
         let paths: Vec<_> = (0..3).map(|i| write(&root, &format!("same{i}.bin"), 9, 6 * MB)).collect();
-        let job = Run::new().cancel_when("contents", 64 * 1024);
+        (t, root, paths)
+    }
+
+    /// One reader thread reports (and so cancels, on its own thread) before its next chunk: it stops at that chunk boundary. The
+    /// cancel is not racing other readers, so the count is exact.
+    #[test]
+    fn cancel_stops_a_reader_at_its_next_chunk_boundary_and_leaves_the_files_alone() {
+        let (_t, root, paths) = three_equal_files();
+        let job = Run::new().cancel_when("contents", 1);
+        let out = job.job(|ctx| run(ctx, &query(&root, FinderMode::Duplicates), "s", Limits::default(), w(1), lg()));
+        assert!(matches!(out, Err(JobError::Cancelled(_))), "{out:?}");
+        let read = job.phases().last().unwrap().counts.last().copied().unwrap();
+        assert_eq!(
+            read,
+            paddock_jobs::CHUNK as u64,
+            "the reader read past the chunk it was cancelled in"
+        );
+        assert!(paths.iter().all(|p| p.exists()));
+        assert!(matches!(job.end_state(), JobState::Cancelled { .. }));
+    }
+
+    /// Cancelled before the four readers start (the phase's first event), none of them reads a byte: each checks the token before
+    /// its first chunk. Nothing here depends on how fast a thread sees the cancel.
+    #[test]
+    fn cancel_before_the_readers_start_reads_nothing_on_any_thread() {
+        let (_t, root, paths) = three_equal_files();
+        let job = Run::new().cancel_when("contents", 0);
         let out = job.job(|ctx| run(ctx, &query(&root, FinderMode::Duplicates), "s", Limits::default(), w(4), lg()));
         assert!(matches!(out, Err(JobError::Cancelled(_))), "{out:?}");
         let read = job.phases().last().unwrap().counts.last().copied().unwrap();
-        // Each thread reads at most one more chunk before it sees the cancel.
-        assert!(
-            read <= 64 * 1024 + 4 * paddock_jobs::CHUNK as u64,
-            "read {read} bytes after the cancel"
-        );
+        assert_eq!(read, 0, "a reader read after the cancel");
         assert!(paths.iter().all(|p| p.exists()));
         assert!(matches!(job.end_state(), JobState::Cancelled { .. }));
     }

@@ -67,7 +67,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
                 <mat-form-field class="num-in"><input matInput type="number" min="1" max="30" aria-label="Days of 1-minute roll-ups" [ngModel]="d.retention.minuteDays" (ngModelChange)="setRetention({ minuteDays: +$event })" /><span matTextSuffix>days</span></mat-form-field>
               </div>
               <div class="row">
-                <div class="lbl"><strong>Keep 15-minute roll-ups</strong><small>The longest view of how your PC behaves.</small></div>
+                <div class="lbl"><strong>Keep 15-minute roll-ups</strong><small>The longest view of how your computer behaves.</small></div>
                 <mat-form-field class="num-in"><input matInput type="number" min="7" max="400" aria-label="Days of 15-minute roll-ups" [ngModel]="d.retention.quarterHourDays" (ngModelChange)="setRetention({ quarterHourDays: +$event })" /><span matTextSuffix>days</span></mat-form-field>
               </div>
               <div class="row">
@@ -170,7 +170,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 
             <section class="card" aria-label="Hardware and baselines">
               <h2>Hardware and baselines</h2>
-              <p class="sub">Dyno learns what is normal for this PC at each time of the week, and watches the CPU speed, disks and battery. These only raise alarms when you allow it.</p>
+              <p class="sub">Dyno learns what is normal for this computer at each time of the week, and watches the CPU speed, disks and battery. These only raise alarms when you allow it.</p>
               <div class="row">
                 <div class="lbl"><strong>Learn what is normal</strong><small>Shows on the dashboard what is unusual for this time of the week. Nothing is highlighted while Dyno is still learning.</small></div>
                 <mat-slide-toggle [checked]="baselines().enabled" aria-label="Learn what is normal" (change)="setBaselines({ enabled: $event.checked })" />
@@ -195,9 +195,9 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 
             <section class="card" aria-label="New programs">
               <h2>New programs</h2>
-              <p class="sub">Dyno notes which programs run on this PC and lists new ones on the Issues page, with the reasons some may be worth a look. It only watches: it never ends or removes a program, and it says "unusual because", never "malware".</p>
+              <p class="sub">Dyno notes which programs run on this computer and lists new ones on the Issues page, with the reasons some may be worth a look. It only watches: it never ends or removes a program, and it says "unusual because", never "malware".</p>
               <div class="row">
-                <div class="lbl"><strong>Watch for new programs</strong><small>Keeps a list of the programs it has seen, on this PC only.</small></div>
+                <div class="lbl"><strong>Watch for new programs</strong><small>Keeps a list of the programs it has seen, on this computer only.</small></div>
                 <mat-slide-toggle [checked]="unusual().enabled" aria-label="Watch for new programs" (change)="setUnusual({ enabled: $event.checked })" />
               </div>
               <div class="row" [class.off]="!unusual().enabled">
@@ -259,6 +259,8 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     .card > h2 { margin-bottom: var(--sp-2); }
     .row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
     .row.off { opacity: 0.55; }
+    /* The whole name of every lookup site, not cut with an ellipsis. */
+    .site { min-width: min(22rem, 100%); }
     .ipt { display: flex; gap: var(--sp-2); flex: 1 1 380px; max-width: 560px; }
     .row.top { align-items: flex-start; }
     .ipt:has(textarea) { flex-direction: column; gap: var(--sp-1); }

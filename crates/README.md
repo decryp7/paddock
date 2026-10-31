@@ -1054,7 +1054,8 @@ components. Depends on `paddock-ipc` (for `Json`, the arguments of an action) an
 The family's one IPC between an app and its own processes (workers, plugins, agents, services), from Debrief's
 `debrief-ipc` (frames, peer with credits and cancel, launcher, child loop) and Dyno's `dyno-ipc` (sync threads, token,
 endpoint, pushes), with Pitcrew's service pipe access list. Synchronous and thread-based, no async runtime; HTTP on loopback
-stays only for Pitwall's public API (D5).
+stays only for Pitwall's public API (D5). The wire, byte by byte (framing, postcard encoding, handshake, versioning, streams,
+limits): [docs/ipc-wire.md](../docs/ipc-wire.md).
 
 ```rust
 // A child that connects back (a worker or plugin).
