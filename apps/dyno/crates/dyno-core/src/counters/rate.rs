@@ -72,7 +72,7 @@ impl RateTracker {
                 kind: CounterKind::Cumulative,
             }) => (unit.per_second(), self.rate(&path, value, at)),
         };
-        CounterReading { path, unit, value }
+        CounterReading::new(path, unit, value)
     }
 
     fn rate(&mut self, path: &str, value: f64, at: Timestamp) -> Reading<f64> {

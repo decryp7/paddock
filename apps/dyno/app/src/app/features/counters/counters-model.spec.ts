@@ -34,8 +34,8 @@ describe('values', () => {
   });
 
   it('reads readings', () => {
-    const ok: CounterReading = { path: 'a', unit: 'count', value: { available: 4 } };
-    const gone: CounterReading = { path: 'a', unit: 'count', value: { unavailable: 'gone' } };
+    const ok: CounterReading = { path: 'a', unit: 'count', percent: null, tone: 'ok', value: { available: 4 } };
+    const gone: CounterReading = { path: 'a', unit: 'count', percent: null, tone: 'ok', value: { unavailable: 'gone' } };
     expect([readingNumber(ok), readingReason(ok)]).toEqual([4, null]);
     expect([readingNumber(gone), readingReason(gone)]).toEqual([null, 'gone']);
     expect([readingNumber(undefined), readingReason(undefined)]).toEqual([null, null]);

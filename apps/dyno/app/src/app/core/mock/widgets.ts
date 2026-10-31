@@ -347,7 +347,7 @@ export class MockWidgets {
       placements.push({ id: p.id, state: this.stateOf(p, kind, state, at) });
     }
     const notice = this.agentStopped
-      ? { tone: 'warning' as const, title: 'Agent stopped', detail: `Readings paused at ${clockOf(stoppedAt)}`, action: { action: 'restartAgent' as const, label: 'Restart agent' } }
+      ? { tone: 'danger' as const, title: 'Agent stopped', detail: `Readings paused at ${clockOf(stoppedAt)}`, action: { action: 'restartAgent' as const, label: 'Restart agent' } }
       : null;
     if (this.agentStopped) {
       for (const p of placements) if (p.state.state === 'ready') p.state = { ...p.state, staleSince: stoppedAt };
@@ -381,7 +381,7 @@ export class MockWidgets {
       case 'backupHealth':
         if (state === 'empty') return empty('Know when backups ran', 'No backup set up.', 'Set up checks', 'setUpBackupChecks');
         if (state === 'error') return error("Couldn't check", 'tmutil failed.');
-        if (state === 'working') return { state: 'working', title: 'Backup', phase: 'Checking · Time Machine', progress: { count: { done: 2, unit: 'tools' } }, last: null, cancel: null };
+        if (state === 'working') return { state: 'working', title: 'Checking backup', phase: 'Time Machine', progress: { count: { done: 2, unit: 'items' } }, last: null, cancel: null };
         return ready({ backupHealth: { name: 'Time Machine', state: 'healthy', lastBackup: at - 2 * 3_600_000, summary: 'Time Machine finished a backup.', tools: 1 } }, stale);
       case 'lastIssue':
         if (state === 'empty') return empty('No issues in the last 7 days', 'Dyno reads the system logs for crashes and hangs.', 'Open issues', { openPage: 'issues' });

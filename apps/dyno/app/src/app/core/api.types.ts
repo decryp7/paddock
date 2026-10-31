@@ -1335,6 +1335,10 @@ export interface CounterReading {
   path: string;
   unit: CounterUnit;
   value: Reading<number>;
+  /** 0 to 100 (clamped) for a percent counter with a value, else null: the engine's. */
+  percent: number | null;
+  /** Against the engine's counter thresholds; `ok` for anything but a percent counter. */
+  tone: 'ok' | 'warn' | 'bad';
 }
 
 export interface CounterPoint {

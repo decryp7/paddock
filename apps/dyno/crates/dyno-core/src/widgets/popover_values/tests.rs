@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::grouping::AppGroup;
+use crate::metrics as dyno_core_reading;
 use crate::metrics::fixtures::sample;
 use crate::process::Measured;
 use crate::time::{FixedZone, HOUR, MINUTE};
@@ -411,7 +412,7 @@ fn a_running_check_shows_the_jobs_own_progress_and_keeps_the_last_value() {
     else {
         panic!("{s:?}")
     };
-    assert_eq!(phase, "Checking · Time Machine");
+    assert_eq!(phase, "Time Machine");
     assert_eq!(
         progress,
         Progress::Count {
@@ -552,7 +553,7 @@ fn reading_the_logs_is_working_with_a_count_of_events_so_far() {
         progress,
         Progress::Count {
             done: 12_400,
-            unit: "events so far".into()
+            unit: "events".into()
         }
     );
     assert!(last.is_some());
@@ -563,7 +564,8 @@ fn reading_the_logs_is_working_with_a_count_of_events_so_far() {
 // ---- pinned counters ----
 
 fn reading(path: &str, value: serde_json::Value) -> CounterReading {
-    serde_json::from_value(json!({"path": path, "unit": "percent", "value": value})).unwrap()
+    let value: dyno_core_reading::Reading<f64> = serde_json::from_value(value).unwrap();
+    CounterReading::new(path.into(), crate::counters::CounterUnit::Percent, value)
 }
 
 #[test]
@@ -682,7 +684,7 @@ fn the_agent_stopped_notice_names_the_time_of_the_last_reading_and_offers_a_rest
     let zone = FixedZone(2 * 60);
     let at = Timestamp(NOW.0 - NOW.0 % crate::time::DAY + 12 * HOUR + 28 * MINUTE);
     let n = agent_stopped(Some(at), &zone);
-    assert_eq!(n.tone, Tone::Warning);
+    assert_eq!(n.tone, Tone::Danger);
     assert_eq!(n.title, "Agent stopped");
     assert_eq!(n.detail, "Readings paused at 14:28");
     assert_eq!(n.action.unwrap().action, WidgetActionId::RestartAgent);

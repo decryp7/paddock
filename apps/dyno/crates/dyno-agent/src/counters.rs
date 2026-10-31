@@ -323,22 +323,22 @@ impl CounterCentre {
             .map(|p| {
                 let path = p.to_string();
                 match rings.get(&path) {
-                    Some(s) => CounterReading {
-                        value: match s.ring.since(now.minus(LATEST_WITHIN)).last() {
+                    Some(s) => CounterReading::new(
+                        path,
+                        s.unit,
+                        match s.ring.since(now.minus(LATEST_WITHIN)).last() {
                             Some(point) => {
                                 newest = newest.max(Some(point.at));
                                 Reading::Available(point.value)
                             }
                             None => Reading::Unavailable("No recent reading.".into()),
                         },
-                        unit: s.unit,
+                    ),
+                    None => CounterReading::new(
                         path,
-                    },
-                    None => CounterReading {
-                        unit: CounterUnit::guess(p.counter()),
-                        value: Reading::Unavailable("No reading yet.".into()),
-                        path,
-                    },
+                        CounterUnit::guess(p.counter()),
+                        Reading::Unavailable("No reading yet.".into()),
+                    ),
                 }
             })
             .collect();

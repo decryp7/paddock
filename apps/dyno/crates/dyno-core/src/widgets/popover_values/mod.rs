@@ -767,8 +767,9 @@ fn backup(inputs: &Inputs<'_>) -> Option<State> {
             // Real progress only: the running job's own phase and count (ER-18). Without one the last value stays, or the
             // widget is still loading; no count is made up.
             Some(j) => Some(WidgetState::Working {
-                title: "Backup".into(),
-                phase: format!("Checking · {}", j.phase),
+                // Short: the half-width frame shows "title" then "phase · count" in two lines at most.
+                title: "Checking backup".into(),
+                phase: j.phase,
                 progress: Progress::Count {
                     done: j.done,
                     unit: j.unit,
@@ -836,7 +837,7 @@ fn last_issue(id: &PlacementId, inputs: &Inputs<'_>) -> Option<State> {
             phase: "Reading system logs · Indexing".into(),
             progress: Progress::Count {
                 done,
-                unit: "events so far".into(),
+                unit: "events".into(),
             },
             last,
             cancel: None,
@@ -869,23 +870,14 @@ fn counters(id: &PlacementId, inputs: &Inputs<'_>) -> Option<State> {
         .readings
         .iter()
         .take(COUNTER_ROWS)
-        .map(|r| {
-            let value = r.value.value().copied().filter(|v| v.is_finite());
-            let percent = (r.unit == CounterUnit::Percent)
-                .then(|| value.map(|v| v.clamp(0.0, 100.0) as f32))
-                .flatten();
-            CounterRow {
-                percent,
-                tone: if percent.is_some() {
-                    COUNTER_THRESHOLDS.tone(value)
-                } else {
-                    ValueTone::Ok
-                },
-                path: r.path.clone(),
-                name: r.path.rsplit('\\').next().filter(|s| !s.is_empty()).unwrap_or(&r.path).to_string(),
-                value,
-                unit: r.unit,
-            }
+        .map(|r| CounterRow {
+            // The percent and the tone are the reading's own (worked out once, in `CounterReading::new`).
+            percent: r.percent,
+            tone: r.tone,
+            path: r.path.clone(),
+            name: r.path.rsplit('\\').next().filter(|s| !s.is_empty()).unwrap_or(&r.path).to_string(),
+            value: r.value.value().copied().filter(|v| v.is_finite()),
+            unit: r.unit,
         })
         .collect();
     if !rows.is_empty() && rows.iter().all(|r| r.value.is_none()) {
@@ -927,7 +919,7 @@ pub fn agent_stopped(paused_at: Option<Timestamp>, zone: &dyn crate::time::Local
         None => "No readings yet".to_string(),
     };
     SurfaceNotice {
-        tone: Tone::Warning,
+        tone: Tone::Danger,
         title: "Agent stopped".into(),
         detail,
         action: action(WidgetActionId::RestartAgent, "Restart agent"),

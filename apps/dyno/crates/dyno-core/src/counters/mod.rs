@@ -47,4 +47,59 @@ pub struct CounterReading {
     pub unit: CounterUnit,
     /// The value, or why there is none (the counter disappeared, needs a second reading, the OS refused...).
     pub value: Reading<f64>,
+    /// 0 to 100 (clamped) for a percent counter that has a value, else none. The engine decides; the UI draws it.
+    pub percent: Option<f32>,
+    /// Against `COUNTER_THRESHOLDS` for a percent counter, `ok` otherwise.
+    pub tone: crate::widgets::dashboard::ValueTone,
+}
+
+impl CounterReading {
+    /// A reading with its percent and tone worked out.
+    pub fn new(path: String, unit: CounterUnit, value: Reading<f64>) -> CounterReading {
+        let number = value.value().copied().filter(|v| v.is_finite());
+        let percent = if unit == CounterUnit::Percent {
+            number.map(|v| v.clamp(0.0, 100.0) as f32)
+        } else {
+            None
+        };
+        let tone = match percent {
+            Some(p) => crate::widgets::popover_values::COUNTER_THRESHOLDS.tone(Some(f64::from(p))),
+            None => crate::widgets::dashboard::ValueTone::Ok,
+        };
+        CounterReading {
+            path,
+            unit,
+            value,
+            percent,
+            tone,
+        }
+    }
+}
+
+#[cfg(test)]
+mod reading_tests {
+    use super::*;
+    use crate::widgets::dashboard::ValueTone;
+
+    fn read(unit: CounterUnit, v: f64) -> CounterReading {
+        CounterReading::new("\\A\\B".into(), unit, Reading::Available(v))
+    }
+
+    #[test]
+    fn a_percent_counter_is_clamped_and_toned_by_the_engine() {
+        let r = read(CounterUnit::Percent, 120.0);
+        assert_eq!((r.percent, r.tone), (Some(100.0), ValueTone::Bad));
+        assert_eq!(read(CounterUnit::Percent, -5.0).percent, Some(0.0));
+        assert_eq!(read(CounterUnit::Percent, 80.0).tone, ValueTone::Warn);
+        assert_eq!(read(CounterUnit::Percent, 10.0).tone, ValueTone::Ok);
+    }
+
+    #[test]
+    fn other_units_and_missing_values_have_no_percent_and_an_ok_tone() {
+        let b = read(CounterUnit::Bytes, 9e12);
+        assert_eq!((b.percent, b.tone), (None, ValueTone::Ok));
+        let gone = CounterReading::new("\\A\\B".into(), CounterUnit::Percent, Reading::Unavailable("x".into()));
+        assert_eq!((gone.percent, gone.tone), (None, ValueTone::Ok));
+        assert_eq!(read(CounterUnit::Percent, f64::NAN).percent, None);
+    }
 }

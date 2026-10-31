@@ -172,8 +172,12 @@ export class MockCounters {
   values(paths: string[], now: number): CounterReading[] {
     return paths.map((path) => {
       const f = find(this.objectList, path);
-      if (!f) return { path, unit: 'number', value: { unavailable: `${path} is not available on this computer (it may have been removed or renamed).` } };
-      return { path, unit: f.info.unit, value: { available: counterValue(path, f.info.unit, now) } };
+      if (!f) return { path, unit: 'number', percent: null, tone: 'ok', value: { unavailable: `${path} is not available on this computer (it may have been removed or renamed).` } };
+      const value = counterValue(path, f.info.unit, now);
+      // The engine's rule (dyno-core `CounterReading::new`): a percent counter is clamped to 0-100 and toned at 75 and 90.
+      const percent = f.info.unit === 'percent' ? Math.min(100, Math.max(0, value)) : null;
+      const tone = percent === null ? 'ok' : percent >= 90 ? 'bad' : percent >= 75 ? 'warn' : 'ok';
+      return { path, unit: f.info.unit, percent, tone, value: { available: value } };
     });
   }
 
