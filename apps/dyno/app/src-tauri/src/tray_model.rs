@@ -2,14 +2,14 @@
 //! from the live updates (`dyno_core::tray` draws; this picks the numbers). The shell hands the pixels to the OS at most
 //! twice a second and only for items whose picture changed.
 //!
-//! The items come from `settings.tray_items` ([`items_from_settings`]); `DYNO_TRAY_ITEMS` (see [`parse_items`]) overrides
+//! The items come from the menu bar layout the agent keeps ([`items_from_settings`]); `DYNO_TRAY_ITEMS` (see [`parse_items`]) overrides
 //! them for development and measurements. A small always-visible Windows mini-bar window is a documented stub (off by
 //! default; not built yet).
 
 use dyno_core::protocol::LiveUpdate;
-use dyno_core::settings::{TrayMetric, TrayStyle};
-use dyno_core::tray::{self, Icon};
-use dyno_core::widgets::{Metric, TrayItemStyle, TrayItems as TrayItemSettings};
+use dyno_core::tray::{self, Icon, IconMetric, IconStyle};
+use dyno_core::widgets::{MenuBarItem, Metric};
+use paddock_widgets::Placement;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
@@ -88,23 +88,24 @@ impl ItemSpec {
     }
 }
 
-/// The items for the user's settings.
-pub fn items_from_settings(s: &TrayItemSettings) -> Vec<ItemSpec> {
-    s.items
+/// The items for the menu bar layout (the agent's, `settings.menu_bar`).
+pub fn items_from_settings(placements: &[Placement<MenuBarItem>]) -> Vec<ItemSpec> {
+    placements
         .iter()
-        .map(|i| {
-            let (glyph, label, unit) = match &i.style {
-                TrayItemStyle::LineGraph => (Glyph::Graph, String::new(), String::new()),
-                TrayItemStyle::VerticalBars if i.metric == Metric::CpuPerCore => (Glyph::CoreBars, String::new(), String::new()),
-                TrayItemStyle::VerticalBars => (Glyph::Bars, String::new(), String::new()),
-                TrayItemStyle::HorizontalMeter => (Glyph::Meter, String::new(), String::new()),
-                TrayItemStyle::Ring => (Glyph::Ring, String::new(), String::new()),
-                TrayItemStyle::Number { unit, label } => (Glyph::Number, label.clone(), unit.clone()),
-                TrayItemStyle::GraphAndNumber => (Glyph::GraphNumber, String::new(), String::new()),
+        .map(|p| {
+            let metric = p.widget.metric().clone();
+            let (glyph, label, unit) = match &p.widget {
+                MenuBarItem::LineGraph { .. } => (Glyph::Graph, String::new(), String::new()),
+                MenuBarItem::VerticalBars { .. } if metric == Metric::CpuPerCore => (Glyph::CoreBars, String::new(), String::new()),
+                MenuBarItem::VerticalBars { .. } => (Glyph::Bars, String::new(), String::new()),
+                MenuBarItem::HorizontalMeter { .. } => (Glyph::Meter, String::new(), String::new()),
+                MenuBarItem::Ring { .. } => (Glyph::Ring, String::new(), String::new()),
+                MenuBarItem::Number { unit, label, .. } => (Glyph::Number, label.clone(), unit.clone()),
+                MenuBarItem::GraphAndNumber { .. } => (Glyph::GraphNumber, String::new(), String::new()),
             };
             ItemSpec {
-                id: i.id.clone(),
-                metric: i.metric.clone(),
+                id: p.id.to_string(),
+                metric,
                 glyph,
                 label,
                 unit,
@@ -319,8 +320,8 @@ impl TrayItems {
         let graph: Vec<f32> = history.iter().copied().collect();
         let v = m.scale;
         let icon = match spec.glyph {
-            Glyph::Bars => tray::render(&[(TrayMetric::Cpu, v)], &[], TrayStyle::Bars, size, dark),
-            Glyph::Graph => tray::render(&[(TrayMetric::Cpu, v)], &graph, TrayStyle::Graph, size, dark),
+            Glyph::Bars => tray::render(&[(IconMetric::Cpu, v)], &[], IconStyle::Bars, size, dark),
+            Glyph::Graph => tray::render(&[(IconMetric::Cpu, v)], &graph, IconStyle::Graph, size, dark),
             Glyph::Meter => tray::render_meter(v, size, dark),
             Glyph::Ring => tray::render_ring(v, size, dark),
             Glyph::Number => tray::render_number(v, size, dark),
@@ -346,8 +347,9 @@ mod tests {
     use dyno_core::metrics::{NetworkSample, Reading};
     use dyno_core::protocol::{LiveUpdate, Overhead};
     use dyno_core::time::Timestamp;
-    use dyno_core::widgets::TrayItem;
+    use dyno_core::widgets::MenuBarCatalogue;
     use dyno_platform::fake::quiet_sample;
+    use paddock_widgets::{assign_ids, Catalogue};
 
     fn update(cpu: f32) -> LiveUpdate {
         let mut system = quiet_sample(Timestamp(0));
@@ -373,14 +375,6 @@ mod tests {
         ItemSpec::new(id, metric, glyph)
     }
 
-    fn setting(id: &str, metric: Metric, style: TrayItemStyle) -> TrayItem {
-        TrayItem {
-            id: id.into(),
-            metric,
-            style,
-        }
-    }
-
     #[test]
     fn the_throttle_lets_one_event_through_per_interval() {
         let mut t = Throttle::new(Duration::from_millis(500));
@@ -392,27 +386,31 @@ mod tests {
 
     #[test]
     fn the_settings_model_maps_to_items() {
-        let default = items_from_settings(&TrayItemSettings::default());
+        let default = items_from_settings(&MenuBarCatalogue::defaults());
         assert_eq!(default.len(), 2);
         assert_eq!((default[0].glyph, &default[0].metric), (Glyph::Bars, &Metric::CpuTotal));
-        let s = TrayItemSettings {
-            version: 1,
-            items: vec![
-                setting("a", Metric::CpuPerCore, TrayItemStyle::VerticalBars),
-                setting(
-                    "b",
-                    Metric::Temperature,
-                    TrayItemStyle::Number {
-                        unit: "C".into(),
-                        label: "Hot".into(),
-                    },
-                ),
-                setting("c", Metric::Memory, TrayItemStyle::GraphAndNumber),
-                setting("d", Metric::Swap, TrayItemStyle::LineGraph),
-                setting("e", Metric::Battery, TrayItemStyle::HorizontalMeter),
-                setting("f", Metric::GpuLoad, TrayItemStyle::Ring),
-            ],
-        };
+        assert_eq!(default[0].id, "vertical-bars");
+        assert_eq!(default[1].id, "vertical-bars-2");
+        let s = assign_ids([
+            (
+                1,
+                MenuBarItem::VerticalBars {
+                    metric: Metric::CpuPerCore,
+                },
+            ),
+            (
+                1,
+                MenuBarItem::Number {
+                    metric: Metric::Temperature,
+                    unit: "C".into(),
+                    label: "Hot".into(),
+                },
+            ),
+            (1, MenuBarItem::GraphAndNumber { metric: Metric::Memory }),
+            (1, MenuBarItem::LineGraph { metric: Metric::Swap }),
+            (1, MenuBarItem::HorizontalMeter { metric: Metric::Battery }),
+            (1, MenuBarItem::Ring { metric: Metric::GpuLoad }),
+        ]);
         let items = items_from_settings(&s);
         let got: Vec<Glyph> = items.iter().map(|i| i.glyph).collect();
         assert_eq!(

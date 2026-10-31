@@ -24,6 +24,7 @@ pub mod jobs;
 pub mod netwatch;
 pub mod network;
 pub mod paths;
+pub mod popover;
 pub mod recorder;
 pub mod rollup;
 pub mod sampler;

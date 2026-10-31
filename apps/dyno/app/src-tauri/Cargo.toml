@@ -25,6 +25,10 @@ dyno-ipc.workspace = true
 # Only for `Dirs`, `Discovery` and `service::Service` (the agent's per-user service registration); the app never links to
 # the sensors by calling them (ADR 0002: the agent measures, the app is a client).
 dyno-agent.workspace = true
+# The OS time zone for "Readings paused at 14:28" in the popup's agent notice (the agent already links it).
+dyno-platform.workspace = true
+# Widget layouts (family ADR 0035): the popup's layout and values, the menu bar items.
+paddock-widgets = { path = "../../../../crates/paddock-widgets" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

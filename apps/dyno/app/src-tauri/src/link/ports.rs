@@ -275,6 +275,7 @@ pub fn connect(d: &Discovery, sink: &Arc<dyn Sink>) -> Result<Arc<Peer<Message>>
         Message::DiskScan(s) => sink.disk_scan(*s),
         Message::Job(j) => sink.job(*j),
         Message::DiskVolumes(v) => sink.disk_volumes(v),
+        Message::WidgetLayoutChanged(surface) => sink.widget_layout_changed(surface),
         _ => {}
     });
     Peer::start(conn, opts).map(Arc::new).map_err(|e| e.to_string())

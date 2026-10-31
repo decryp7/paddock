@@ -93,6 +93,11 @@ pub fn peek(x: &ExtrasCentre) -> BackupReport {
     snapshot(x)
 }
 
+/// The last report as it is, without starting a check (the popup's backup widget reads it on open).
+pub fn last_report(shared: &Shared) -> BackupReport {
+    snapshot(&shared.extras)
+}
+
 fn snapshot(x: &ExtrasCentre) -> BackupReport {
     let slot = lock(&x.backup);
     BackupReport {

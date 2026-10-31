@@ -22,6 +22,10 @@ pub fn parse_request(value: Value) -> Result<Request, CommandError> {
         Request::SaveInventoryReport { .. } | Request::SaveDiagnostics { .. } | Request::SaveReport { .. } | Request::SaveIssues { .. } => {
             Err(CommandError::bad("Use the Export or Save button: it asks where to save the file."))
         }
+        // The widget layouts have their own commands (typed arguments, the popup's values are the app's own).
+        Request::WidgetLayout { .. } | Request::EditWidgetLayout { .. } | Request::PopoverValues { .. } => {
+            Err(CommandError::bad("Use the widget commands for layouts and the popup's values."))
+        }
         r => Ok(r),
     }
 }
@@ -40,6 +44,70 @@ pub fn handle(link: &AgentLink, shell: &Shell, window: &str, request: Request) -
             .settings_changed(s, link)
             .map_err(|m| CommandError::new(crate::dto::ErrorCode::AccessDenied, m))?;
     }
+    reply
+        .into_json()
+        .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
+}
+
+/// One surface's widget layout (the chooser, the dashboard): the agent's view of it.
+#[tauri::command]
+pub async fn widget_layout(link: State<'_, Arc<AgentLink>>, surface: dyno_core::widgets::DynoSurface) -> Result<Value, CommandError> {
+    let link = link.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || to_json(link.call(Request::WidgetLayout { surface })?))
+        .await
+        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
+/// An edit of one surface's widget layout. The agent validates the whole result and saves it; a refused edit answers why.
+#[tauri::command]
+pub async fn edit_widget_layout(link: State<'_, Arc<AgentLink>>, edit: dyno_core::widgets::SurfaceEdit) -> Result<Value, CommandError> {
+    let link = link.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || to_json(link.call(Request::EditWidgetLayout { edit })?))
+        .await
+        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
+/// The tray popup's values now: the first paint of a popup that has just opened (later ones are pushed).
+#[tauri::command]
+pub async fn popover_values(shell: State<'_, Arc<Shell>>) -> Result<Value, CommandError> {
+    serde_json::to_value(shell.popover_snapshot()).map_err(|e| CommandError::internal(format!("The popup values could not be read: {e}")))
+}
+
+/// A widget's button. The action is the closed `WidgetActionId`; what it does is `WidgetActionId::effect`.
+#[tauri::command]
+pub async fn run_widget_action(
+    app: AppHandle,
+    link: State<'_, Arc<AgentLink>>,
+    shell: State<'_, Arc<Shell>>,
+    action: dyno_core::widgets::popover_values::WidgetActionId,
+) -> Result<Value, CommandError> {
+    use dyno_core::widgets::popover_values::Effect;
+    use tauri::Emitter;
+    let (link, shell) = (link.inner().clone(), shell.inner().clone());
+    match action.effect() {
+        Effect::Navigate(to) => {
+            paddock_window::tauri::reopen(&app);
+            app.emit(crate::shell::events::NAVIGATE, to)
+                .map_err(|e| CommandError::internal(format!("Dyno could not open that page: {e}")))?;
+        }
+        Effect::Refresh => shell.popover_changed(),
+        // Restart goes to the app's own supervisor, never through the agent that may be the thing that is stuck.
+        Effect::RestartAgent => link.retry(),
+        Effect::StartBackupCheck => {
+            tauri::async_runtime::spawn_blocking(move || {
+                link.call(Request::StartJob {
+                    spec: dyno_core::jobs::JobSpec::RefreshBackup,
+                })
+                .map(|_| ())
+            })
+            .await
+            .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))??;
+        }
+    }
+    Ok(Value::Null)
+}
+
+fn to_json(reply: Reply) -> Result<Value, CommandError> {
     reply
         .into_json()
         .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))

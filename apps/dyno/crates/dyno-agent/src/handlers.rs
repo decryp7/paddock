@@ -130,7 +130,13 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::SaveSettings { settings } => {
             settings.check_extras().map_err(bad)?;
             let mut core = lock(&shared.core);
-            core.settings = (*settings).normalised();
+            // The layouts change only through `EditWidgetLayout`: a window's copy of the settings, taken before an edit,
+            // must never put an old layout back.
+            let mut incoming = (*settings).normalised();
+            incoming.dashboard = core.settings.dashboard.clone();
+            incoming.menu_bar = core.settings.menu_bar.clone();
+            incoming.popover = core.settings.popover.clone();
+            core.settings = incoming;
             let alarm_config = core.settings.alarms;
             core.alarms.set_config(alarm_config);
             shared.disk.set_limits(core.settings.disk.limits());
@@ -317,9 +323,27 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         | Request::SaveInventoryReport { .. }
         | Request::Maintenance
         | Request::Backup) => crate::extras::handle(shared, r),
+        Request::WidgetLayout { surface } => Ok(Reply::WidgetLayout(Box::new(dyno_core::widgets::layout_view(
+            &lock(&shared.core).settings,
+            surface,
+        )))),
+        Request::EditWidgetLayout { edit } => edit_widget_layout(shared, edit),
+        Request::PopoverValues { placements } => crate::popover::values(shared, &placements).map(|v| Reply::PopoverValues(dyno_core::widgets::JsonOnLink(v))),
         Request::WeeklyReport { weeks_ago } => weekly_report(shared, weeks_ago).map(|r| Reply::Report(Box::new(r))),
         Request::SaveReport { path, format, weeks_ago } => save_report(shared, &path, format, weeks_ago).map(Reply::ReportSaved),
     }
+}
+
+/// Applies a layout edit, saves the settings and tells every app which surface changed. A refused edit changes nothing and
+/// answers why.
+fn edit_widget_layout(shared: &Arc<Shared>, edit: dyno_core::widgets::SurfaceEdit) -> Answer {
+    let surface = edit.surface();
+    let mut core = lock(&shared.core);
+    let view = dyno_core::widgets::edit_layout(&mut core.settings, edit).map_err(|e| bad(e.to_string()))?;
+    core.save_settings(&shared.dirs);
+    drop(core);
+    shared.broadcast(&Message::WidgetLayoutChanged(surface));
+    Ok(Reply::WidgetLayout(Box::new(view)))
 }
 
 fn known_alarm(shared: &Shared, id: u64) -> Result<(), AgentError> {

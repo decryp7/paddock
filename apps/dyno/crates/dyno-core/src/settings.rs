@@ -2,39 +2,14 @@
 
 use crate::alerts::AlertSettings;
 use crate::history::Retention;
+use crate::widgets::{DashboardCatalogue, MenuBarCatalogue, PopoverCatalogue};
+use paddock_widgets::Stored;
 use serde::{Deserialize, Serialize};
 
 /// The settings schema version.
 pub const SCHEMA_VERSION: u32 = 1;
 /// The largest settings file Dyno reads.
 pub const MAX_SETTINGS_BYTES: usize = 256 * 1024;
-
-/// A metric the tray icon can show.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum TrayMetric {
-    /// CPU.
-    Cpu,
-    /// Memory.
-    Memory,
-    /// Disk activity.
-    Disk,
-    /// Network activity.
-    Network,
-    /// GPU.
-    Gpu,
-}
-
-/// How the tray icon draws.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum TrayStyle {
-    /// Vertical bars, one per metric.
-    #[default]
-    Bars,
-    /// A small line graph of the first metric.
-    Graph,
-}
 
 /// Sampling intervals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,25 +26,6 @@ impl Default for Sampling {
         Sampling {
             interval_ms: 1_000,
             process_interval_ms: 2_000,
-        }
-    }
-}
-
-/// Tray icon.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct Tray {
-    /// Which metrics (1–3).
-    pub metrics: Vec<TrayMetric>,
-    /// Style.
-    pub style: TrayStyle,
-}
-
-impl Default for Tray {
-    fn default() -> Self {
-        Tray {
-            metrics: vec![TrayMetric::Cpu, TrayMetric::Memory],
-            style: TrayStyle::Bars,
         }
     }
 }
@@ -108,16 +64,19 @@ pub struct Settings {
     pub sampling: Sampling,
     /// History retention.
     pub retention: Retention,
-    /// Tray icon.
-    pub tray: Tray,
     /// Alerts.
     pub alerts: AlertSettings,
     /// Local web API.
     pub web_api: WebApi,
-    /// The dashboard's widgets and presets.
-    pub dashboard: crate::widgets::DashboardLayout,
-    /// The tray / menu-bar items.
-    pub tray_items: crate::widgets::TrayItems,
+    /// The dashboard's widgets and presets. Edited only through `EditWidgetLayout` (a saved `Settings` never replaces it).
+    #[serde(with = "crate::widgets::stored_wire")]
+    pub dashboard: Stored<DashboardCatalogue>,
+    /// The menu-bar / tray items. Edited only through `EditWidgetLayout`.
+    #[serde(with = "crate::widgets::stored_wire")]
+    pub menu_bar: Stored<MenuBarCatalogue>,
+    /// The tray popup's widgets. Edited only through `EditWidgetLayout`.
+    #[serde(with = "crate::widgets::stored_wire")]
+    pub popover: Stored<PopoverCatalogue>,
     /// Alarm behaviour (quiet hours, chatter detection, retention).
     pub alarms: crate::alarms::AlarmConfig,
     /// Keep the last ten minutes at one-second resolution for captures (backs off when Dyno's CPU budget is at risk).
@@ -174,11 +133,11 @@ impl Default for Settings {
             launch_at_login: false,
             sampling: Sampling::default(),
             retention: Retention::default(),
-            tray: Tray::default(),
             alerts: AlertSettings::default(),
             web_api: WebApi::default(),
             dashboard: Default::default(),
-            tray_items: Default::default(),
+            menu_bar: Default::default(),
+            popover: Default::default(),
             alarms: Default::default(),
             flight_recorder: true,
             ip_lookup: Default::default(),
@@ -208,16 +167,9 @@ impl Settings {
             .clamp(1_000, 30_000)
             .max(self.sampling.interval_ms);
         self.retention = self.retention.clamped();
-        self.tray.metrics.dedup();
-        self.tray.metrics.truncate(3);
-        if self.tray.metrics.is_empty() {
-            self.tray.metrics = Tray::default().metrics;
-        }
         self.alerts = self.alerts.clamped();
         self.baselines = self.baselines.clamped();
         self.web_api.port = self.web_api.port.max(1024);
-        self.dashboard = self.dashboard.normalised();
-        self.tray_items = self.tray_items.normalised();
         self.alarms = self.alarms.clamped();
         self.ip_lookup = self.ip_lookup.normalised();
         self.custom_alerts = crate::alarms::custom::normalise_rules(self.custom_alerts);
@@ -302,41 +254,56 @@ mod tests {
             interval_ms: 1,
             process_interval_ms: 999_999,
         };
-        s.tray.metrics = vec![
-            TrayMetric::Cpu,
-            TrayMetric::Cpu,
-            TrayMetric::Disk,
-            TrayMetric::Gpu,
-            TrayMetric::Network,
-        ];
         s.web_api.port = 80;
         let n = s.normalised();
         assert_eq!((n.sampling.interval_ms, n.sampling.process_interval_ms), (500, 30_000));
-        assert_eq!(n.tray.metrics, vec![TrayMetric::Cpu, TrayMetric::Disk, TrayMetric::Gpu]);
         assert_eq!(n.web_api.port, 1024);
-        let mut e = Settings::default();
-        e.tray.metrics.clear();
-        assert_eq!(e.normalised().tray.metrics, Tray::default().metrics);
         let j = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(j["webApi"]["port"], 47_800);
     }
 
     #[test]
-    fn dashboard_and_tray_items_are_normalised_and_optional() {
-        // Old files without the new keys still load with the defaults.
+    fn the_three_layouts_are_optional_and_default() {
         let (s, w) = parse(r#"{"launchAtLogin":true}"#);
         assert!(w.is_none());
-        assert_eq!(s.dashboard, crate::widgets::DashboardLayout::default());
-        assert_eq!(s.tray_items, crate::widgets::TrayItems::default());
-        let mut s = Settings::default();
-        s.dashboard.widgets.clear();
-        s.tray_items.items.clear();
-        let n = s.normalised();
-        assert!(!n.dashboard.widgets.is_empty());
-        assert_eq!(n.tray_items.items.len(), 2);
+        assert_eq!(s.dashboard, Stored::default());
+        assert_eq!(s.menu_bar, Stored::default());
+        assert_eq!(s.popover, Stored::default());
+        assert!(s.dashboard.notes().is_empty() && s.menu_bar.notes().is_empty() && s.popover.notes().is_empty());
         let j = serde_json::to_value(Settings::default()).unwrap();
         assert!(j["dashboard"]["presets"].is_array());
-        assert_eq!(j["trayItems"]["items"][0]["metric"], "cpuTotal");
+        assert_eq!(j["menuBar"]["placements"][0]["widget"]["verticalBars"]["metric"], "cpuTotal");
+        assert_eq!(j["popover"]["placements"][0]["widget"], "activeAlarms");
+    }
+
+    #[test]
+    fn the_old_tray_keys_and_the_old_dashboard_shape_are_not_read() {
+        // Dyno 1.0 is unreleased: `tray` and `trayItems` are dropped outright; an old-shape dashboard gives the defaults with
+        // a note and is kept (written back unchanged) until the person edits the dashboard.
+        let old = r#"{"tray":{"metrics":["cpu"],"style":"bars"},"trayItems":{"version":1,"items":[]},
+            "dashboard":{"version":1,"widgets":[{"id":"cpu","kind":"graph","metric":"cpuTotal"}],"presets":[]}}"#;
+        let (s, w) = parse(old);
+        assert!(w.is_none());
+        assert_eq!(s.menu_bar, Stored::default());
+        assert_eq!(s.dashboard.layout(), Stored::<DashboardCatalogue>::default().layout());
+        assert_eq!(s.dashboard.notes().len(), 1);
+        let back = serde_json::to_value(&s).unwrap();
+        assert!(back.get("tray").is_none() && back.get("trayItems").is_none());
+        assert_eq!(back["dashboard"]["widgets"][0]["id"], "cpu");
+    }
+
+    #[test]
+    fn settings_survive_postcard_with_their_layouts() {
+        let mut s = Settings::default();
+        s.popover
+            .edit(paddock_widgets::Edit::Remove {
+                id: paddock_widgets::PlacementId::new("cpu-memory").unwrap(),
+            })
+            .unwrap();
+        let back: Settings = postcard::from_bytes(&postcard::to_stdvec(&s).unwrap()).unwrap();
+        assert_eq!(back.popover.layout().placements, s.popover.layout().placements);
+        assert_eq!(back.dashboard.layout().placements, s.dashboard.layout().placements);
+        assert_eq!(back.menu_bar.layout().placements, s.menu_bar.layout().placements);
     }
 
     #[test]

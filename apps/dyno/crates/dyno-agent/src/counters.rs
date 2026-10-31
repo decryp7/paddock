@@ -6,6 +6,7 @@ use dyno_core::counters::{
     search, CounterCatalog, CounterHistory, CounterHit, CounterObject, CounterObjectList, CounterPath, CounterReading, CounterRing,
     CounterSeries, CounterUnit, RateTracker, RawCounter, MAX_HITS, MAX_READ,
 };
+use dyno_core::metrics::Reading;
 use dyno_core::ports::{CounterSource, PlatformError};
 use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_core::time::{Timestamp, MINUTE};
@@ -24,6 +25,8 @@ const READ_DEADLINE: Duration = Duration::from_secs(5);
 const MAX_IN_FLIGHT: usize = 2;
 /// Counters whose history is kept (the least recently used go first).
 const MAX_RINGS: usize = 48;
+/// How old the newest reading of a pinned counter may be to still count as one (ms).
+const LATEST_WITHIN: i64 = 10 * MINUTE;
 /// The longest history window, in minutes.
 pub const MAX_MINUTES: u32 = 60;
 /// How often pinned counters are read in the background (ADR 0002, own overhead): slow, because a minute of history
@@ -307,6 +310,34 @@ impl CounterCentre {
             self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
             false
         }
+    }
+
+    /// The newest kept reading of each of `paths` (those that parse), without asking the OS: the popup's pinned counters
+    /// read this on open and on every tick. A counter with no reading yet says so.
+    pub fn latest(&self, paths: &[String], now: Timestamp) -> Vec<CounterReading> {
+        let rings = lock(&self.inner.rings);
+        paths
+            .iter()
+            .filter_map(|p| p.parse::<CounterPath>().ok())
+            .map(|p| {
+                let path = p.to_string();
+                match rings.get(&path) {
+                    Some(s) => CounterReading {
+                        value: match s.ring.since(now.minus(LATEST_WITHIN)).last() {
+                            Some(point) => Reading::Available(point.value),
+                            None => Reading::Unavailable("No recent reading.".into()),
+                        },
+                        unit: s.unit,
+                        path,
+                    },
+                    None => CounterReading {
+                        unit: CounterUnit::guess(p.counter()),
+                        value: Reading::Unavailable("No reading yet.".into()),
+                        path,
+                    },
+                }
+            })
+            .collect()
     }
 
     /// The readings kept over the last `minutes` (1 to [`MAX_MINUTES`]) for each path; `events` are the app's own

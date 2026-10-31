@@ -14,6 +14,7 @@ pub mod link;
 pub mod logging;
 pub mod login;
 pub mod login_item;
+pub mod popover;
 pub mod service_repair;
 pub mod shell;
 pub mod supervise;
@@ -58,6 +59,14 @@ paddock_commands::command_table! {
     Mutation [MAIN] => commands::save_inventory_report,
     /// "Choose folder..." for the file finder: the OS folder dialog.
     Mutation [MAIN] => commands::pick_folder,
+    /// One surface's widget layout, with its catalogue, built-in presets and notes (family ADR 0035).
+    Query [MAIN | DIALOG] => commands::widget_layout,
+    /// Edits one surface's widget layout in the agent; answers the new layout, or why it was refused.
+    Mutation [MAIN | DIALOG] => commands::edit_widget_layout,
+    /// The tray popup's values now, for the popup that has just opened (the live ones arrive as `dyno://popover-values`).
+    Query [MAIN | TRAY] => commands::popover_values,
+    /// A button of a widget: open a page, retry, start the backup check, restart the agent.
+    Mutation [MAIN | TRAY] => commands::run_widget_action,
 }
 
 /// Where the app runs: installed (the user's folders, real ticks) or in a test (nothing outside `dir`, no native menu
@@ -303,7 +312,7 @@ pub fn run() {
         tauri_plugin_autostart::MacosLauncher::LaunchAgent,
         Some(vec![paddock_window::launch::HIDDEN_FLAG]),
     ));
-    let items = shell::initial_items(&dyno_core::settings::Settings::default().tray_items);
+    let items = shell::initial_items(&dyno_core::settings::Settings::default().menu_bar.layout().placements);
     let builder = app(builder, shell, launch, tray::DynoTray::new(items)).invoke_handler(invoke_handler());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]

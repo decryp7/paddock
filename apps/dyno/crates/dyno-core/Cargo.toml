@@ -14,9 +14,19 @@ serde_json.workspace = true
 thiserror.workspace = true
 # The family's job model: a job's status travels between the agent and the app in its postcard-safe wire form.
 paddock-jobs = { path = "../../../../crates/paddock-jobs" }
+# Widget layouts (family ADR 0035): the closed catalogues of the popup, the dashboard and the menu bar live here.
+paddock-widgets = { path = "../../../../crates/paddock-widgets", features = ["ts"] }
+# TypeScript for the catalogue types (generated into the UI's core/generated/widgets.ts).
+ts-rs = { version = "11.1", optional = true }
+
+[features]
+ts = ["dep:ts-rs"]
 
 [dev-dependencies]
 postcard.workspace = true
+ts-rs = "11.1"
+# `testing::sync_generated`, the stale-file check of the generated TypeScript.
+paddock-commands = { path = "../../../../crates/paddock-commands" }
 proptest = "1"
 
 [lints]

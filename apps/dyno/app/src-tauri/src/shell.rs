@@ -6,13 +6,18 @@ use crate::health::Hub;
 use crate::link::{AgentLink, Sink};
 use crate::logging;
 use crate::login;
+use crate::popover::PopoverModel;
 use crate::tray_model::{items_from_settings, parse_items, Throttle, TrayItems};
 use dyno_core::activity::ActivityEntry;
 use dyno_core::alerts::Alert;
 use dyno_core::protocol::{LiveUpdate, Reply, Request};
 use dyno_core::settings::Settings;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use dyno_core::time::Timestamp;
+use dyno_core::widgets::popover_values::PopoverState;
+use dyno_core::widgets::{DynoSurface, MenuBarItem, SurfaceView};
+use paddock_widgets::Placement;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
 
@@ -32,6 +37,23 @@ pub mod events {
     pub const DISK_SCAN: &str = "dyno://disk-scan";
     /// `Vec<Volume>`.
     pub const DISK_VOLUMES: &str = "dyno://disk-volumes";
+    /// `SurfaceValues`: the tray popup's widget values, sent only while the popup is visible.
+    pub const POPOVER_VALUES: &str = "dyno://popover-values";
+    /// `DynoSurface`: a layout was edited; windows read it again.
+    pub const WIDGET_LAYOUT: &str = "dyno://widget-layout";
+    /// `Navigate`: a widget's button asks the main window to open a page or a Settings section.
+    pub const NAVIGATE: &str = "dyno://navigate";
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Wall-clock milliseconds since the epoch (the edge of the app: pure code gets the time as an argument).
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
 /// The icons are redrawn at most this often (and only when their picture changed).
@@ -60,11 +82,12 @@ pub fn alarm_notice(alarm: &dyno_core::alarms::Alarm) -> paddock_health::notify:
     notice
 }
 
-/// The tray items: the user's settings, or the comma-separated `DYNO_TRAY_ITEMS` (development and measurements).
-pub fn initial_items(items: &dyno_core::widgets::TrayItems) -> Vec<crate::tray_model::ItemSpec> {
+/// The tray items: the menu bar layout the agent keeps, or the comma-separated `DYNO_TRAY_ITEMS` (development and
+/// measurements).
+pub fn initial_items(placements: &[Placement<MenuBarItem>]) -> Vec<crate::tray_model::ItemSpec> {
     let from_env = std::env::var("DYNO_TRAY_ITEMS").map(|t| parse_items(&t)).unwrap_or_default();
     if from_env.is_empty() {
-        items_from_settings(items)
+        items_from_settings(placements)
     } else {
         from_env
     }
@@ -125,22 +148,37 @@ pub struct ShellOf<R: Runtime> {
     notifications: std::sync::atomic::AtomicBool,
     /// The service health of the agent link (the status bar chip).
     hub: Hub<R>,
+    /// The tray popup's values (family ADR 0035 §5).
+    popover: Mutex<PopoverModel>,
+    /// The connection, for the requests the shell itself makes (layouts, popup values).
+    link: Mutex<Option<Arc<AgentLink>>>,
+    /// A `PopoverValues` request is out (one at a time).
+    asking: AtomicBool,
+    /// This shell, for the threads that answer later.
+    me: Weak<ShellOf<R>>,
 }
 
 impl<R: Runtime> ShellOf<R> {
     /// The shell for `app`; `hub` reports the agent link to the shell's service health; `pixels` draws the tray.
     pub fn new(app: AppHandle<R>, hub: Hub<R>, pixels: Arc<dyn TrayPixels<R>>) -> Arc<ShellOf<R>> {
         let size = if cfg!(target_os = "macos") { 44 } else { 32 };
-        Arc::new(ShellOf {
+        Arc::new_cyclic(|me| ShellOf {
             app,
             pixels,
-            tray: Mutex::new(TrayItems::new(initial_items(&Settings::default().tray_items), size)),
+            tray: Mutex::new(TrayItems::new(
+                initial_items(&Settings::default().menu_bar.layout().placements),
+                size,
+            )),
             throttle: Mutex::new(Throttle::new(TRAY_INTERVAL)),
             updates: AtomicU64::new(0),
             launch_at_login: Mutex::new(None),
             status: Mutex::new(None),
             notifications: std::sync::atomic::AtomicBool::new(true),
             hub,
+            popover: Mutex::new(PopoverModel::default()),
+            link: Mutex::new(None),
+            asking: AtomicBool::new(false),
+            me: me.clone(),
         })
     }
 
@@ -163,7 +201,8 @@ impl<R: Runtime> ShellOf<R> {
     /// `launchAtLogin` registers or removes the login items. The first sight only records the value: Dyno never
     /// registers itself unasked.
     pub fn settings_changed(&self, settings: &Settings, link: &AgentLink) -> Result<(), String> {
-        self.set_items(initial_items(&settings.tray_items));
+        self.set_items(initial_items(&settings.menu_bar.layout().placements));
+        lock(&self.popover).set_layout(settings.popover.layout().placements.clone());
         self.notifications.store(settings.notifications, Ordering::Relaxed);
         let previous = *self.launch_at_login.lock().unwrap_or_else(|e| e.into_inner());
         let wanted = settings.launch_at_login;
@@ -202,6 +241,108 @@ impl<R: Runtime> ShellOf<R> {
         }
     }
 
+    /// The popup was shown or hidden (read from the shell's popover state on each live tick).
+    fn popover_visible(&self) -> bool {
+        self.app
+            .try_state::<paddock_window::tauri::Popovers>()
+            .is_some_and(|p| p.is_open(paddock_window::popover::label_for(None).unwrap_or_default().as_str()))
+    }
+
+    /// The popup's values now, for the popup that has just opened and asks for its first paint.
+    pub fn popover_snapshot(&self) -> dyno_core::widgets::popover_values::PopoverSurfaceValues {
+        lock(&self.popover).values(Timestamp(now_millis()), &dyno_platform::zone::SystemZone)
+    }
+
+    /// Something the popup's slow widgets show may have changed: they are asked for again on the next tick.
+    pub fn popover_changed(&self) {
+        lock(&self.popover).force_refresh();
+    }
+
+    /// Sends the popup its values, only while it is visible.
+    fn emit_popover(&self, now: Timestamp) {
+        let values = lock(&self.popover).emission(now, &dyno_platform::zone::SystemZone);
+        if let Some(values) = values {
+            self.emit(events::POPOVER_VALUES, values);
+        }
+    }
+
+    /// The live tick of the popup: remember the sample, notice a show or hide, ask the agent for the slow kinds that are due
+    /// and send the values.
+    fn popover_tick(&self, update: &LiveUpdate) {
+        let now = update.system.at;
+        let visible = self.popover_visible();
+        let due = {
+            let mut m = lock(&self.popover);
+            m.on_live(update);
+            m.set_visible(visible);
+            m.due(now)
+        };
+        if !due.is_empty() {
+            self.ask_slow(due);
+        }
+        self.emit_popover(now);
+    }
+
+    /// Asks the agent for the slow kinds on a thread of its own (a request must never block the link's reader), then
+    /// applies and sends the answer. One request at a time: when one is out, the next tick asks again.
+    fn ask_slow(&self, ids: Vec<paddock_widgets::PlacementId>) {
+        let Some(link) = lock(&self.link).clone() else { return };
+        let Some(me) = self.me.upgrade() else { return };
+        if self.asking.swap(true, Ordering::SeqCst) {
+            lock(&self.popover).force_refresh();
+            return;
+        }
+        let spawned = std::thread::Builder::new().name("dyno-popover".into()).spawn(move || {
+            let answer = link.call(Request::PopoverValues { placements: ids });
+            me.asking.store(false, Ordering::SeqCst);
+            match answer {
+                Ok(Reply::PopoverValues(values)) => me.popover_answered(values.0),
+                Ok(_) => {}
+                Err(e) => {
+                    logging::info(&format!("could not read the popup values: {}", e.message));
+                    lock(&me.popover).force_refresh();
+                }
+            }
+        });
+        if spawned.is_err() {
+            self.asking.store(false, Ordering::SeqCst);
+        }
+    }
+
+    fn popover_answered(&self, values: Vec<PopoverState>) {
+        lock(&self.popover).on_slow(values);
+        self.emit_popover(Timestamp(now_millis()));
+    }
+
+    /// A surface's layout changed in the agent (an edit from any window): the app reads what it draws itself (the menu bar
+    /// items, the popup's layout) and tells the windows to read the rest.
+    fn layout_changed(&self, surface: DynoSurface) {
+        self.emit(events::WIDGET_LAYOUT, surface);
+        if surface == DynoSurface::Dashboard {
+            return;
+        }
+        let Some(link) = lock(&self.link).clone() else { return };
+        let Some(me) = self.me.upgrade() else { return };
+        let _ = std::thread::Builder::new()
+            .name("dyno-layout".into())
+            .spawn(move || match link.call(Request::WidgetLayout { surface }) {
+                Ok(Reply::WidgetLayout(view)) => me.layout_read(*view),
+                Ok(_) => {}
+                Err(e) => logging::info(&format!("could not read the {surface:?} layout: {}", e.message)),
+            });
+    }
+
+    fn layout_read(&self, view: SurfaceView) {
+        match view {
+            SurfaceView::MenuBar(v) => self.set_items(initial_items(&v.layout.placements)),
+            SurfaceView::Popover(v) => {
+                lock(&self.popover).set_layout(v.layout.placements);
+                self.emit_popover(Timestamp(now_millis()));
+            }
+            SurfaceView::Dashboard(_) => {}
+        }
+    }
+
     fn emit<S: serde::Serialize + Clone>(&self, event: &str, payload: S) {
         if let Err(e) = self.app.emit(event, payload) {
             logging::info(&format!("could not emit {event}: {e}"));
@@ -231,6 +372,7 @@ impl<R: Runtime> Sink for ShellOf<R> {
                 self.pixels.paint(&self.app, &id, &frame);
             }
         }
+        self.popover_tick(&update);
         // With no window open nothing listens: skip serialising a (large) update for nobody.
         if !self.app.webview_windows().is_empty() {
             self.emit(events::LIVE, update);
@@ -258,6 +400,7 @@ impl<R: Runtime> Sink for ShellOf<R> {
                 }
             }
         }
+        self.popover_changed();
         self.emit(events::ALARM, change);
     }
 
@@ -266,11 +409,13 @@ impl<R: Runtime> Sink for ShellOf<R> {
     }
 
     fn job(&self, status: paddock_jobs::wire::WireSnapshot) {
+        self.popover_changed();
         // The shell's job event: its Jobs view, status item and notices read `paddock://jobs`.
         self.emit(paddock_jobs::EVENT_NAME, paddock_jobs::JobSnapshot::from(status));
     }
 
     fn disk_volumes(&self, volumes: Vec<dyno_core::disk::volume::Volume>) {
+        self.popover_changed();
         self.emit(events::DISK_VOLUMES, volumes);
     }
 
@@ -282,8 +427,12 @@ impl<R: Runtime> Sink for ShellOf<R> {
         ));
         *self.status.lock().unwrap_or_else(|e| e.into_inner()) = Some(status.clone());
         self.hub.report(&status);
-        if !matches!(status.state, crate::dto::AgentState::Running) {
+        if matches!(status.state, crate::dto::AgentState::Running) {
+            lock(&self.popover).agent_back();
+        } else {
             self.pixels.show_disconnected(&self.app);
+            lock(&self.popover).agent_lost(Timestamp(now_millis()));
+            self.emit_popover(Timestamp(now_millis()));
         }
         self.emit(events::AGENT, status);
     }
@@ -292,7 +441,12 @@ impl<R: Runtime> Sink for ShellOf<R> {
         self.hub.report_stall(stall);
     }
 
+    fn widget_layout_changed(&self, surface: DynoSurface) {
+        self.layout_changed(surface);
+    }
+
     fn connected(&self, link: &Arc<AgentLink>) {
+        *lock(&self.link) = Some(link.clone());
         // Read what the shell itself needs: the tray's metrics and style, and whether launching at login is on.
         match link.call(Request::Settings) {
             Ok(Reply::Settings(s)) => {
