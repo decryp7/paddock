@@ -308,14 +308,14 @@ changes here, every app's copy is updated in the same change.
     `scripts/find-polluter.mjs` finds the file that leaked state, `scripts/bisect-flaky.sh` the commit that introduced a
     flake. (General form: ER-29.)
     *Why:* a leaked fake timer in one spec hung unrelated specs for days; only a fixed order hid it.
-59. **The wiki is the current-state summary (ER-30).** `docs/wiki/` summarises how things work today and links the source
-    of every claim and a `verified:` date; it links rules and ADRs and never restates them, and where it disagrees with
+59. **The wiki is the current-state summary (ER-30).** `docs/wiki/` summarises how things work today; it cites the source of
+    every claim and carries a `verified:` date, links rules and ADRs and never restates them, and where it disagrees with
     one the wiki is wrong. Only the coordinator or merge steward writes it, from the `Wiki notes:` line that ends every
     agent report, and re-verifies the touched pages on each ingest; a new or changed page lands after an independent
-    fact-check of its claims. `node scripts/wiki-lint.mjs` runs on every wiki change (links, index, orphans, sources,
-    age, no rule text, compared with the rules on main and on open rule branches).
+    fact-check of its claims. The writer runs the wiki lint with the rules on main, each open rule branch and the ER text
+    before every wiki commit; CI runs it once the Rust `wiki` CLI lands.
     *Why:* agents re-derived the same context every session; the wiki's own first fact-check found a missed release
-    blocker and four wrong facts (docs/wiki pilot, 2026-10-31).
+    blocker and four wrong facts ([lesson](lessons.md#the-wiki-pilots-first-fact-check-found-a-missed-release-blocker-2026-10-31-family)).
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:

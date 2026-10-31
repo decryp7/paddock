@@ -1073,3 +1073,12 @@ cost, really a leaked fake timer) and Dyno's flaky jobs test (first called a fla
 built on a guessed flow is not done: establish the real flow from the logs first (reproduce, read the phases, follow the
 code); if the logs cannot show it, add the logging first.
 Class: missing-logs, guessed-cause, leaked-test-state
+
+## The wiki pilot's first fact-check found a missed release blocker (2026-10-31, family)
+The first pages of the wiki pilot were written by one agent from its own reading. An independent fact-check before they landed
+found a release blocker the writer had missed and four wrong facts, among them log entries cited by a typed clock time (the
+log's times were labels, some duplicated) and rule text restated as paraphrase. **Rule (59, ER-30):** fact-check every claim of
+a new or changed page independently, cite log entries by file and line with dates from the clock, link rules instead of
+restating them, age facts out with `verified:` and re-verify the touched pages on each ingest, and compare the lint against the
+rules on main, on open rule branches and the ER text.
+Class: unverified-claims, restated-rules
