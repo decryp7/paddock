@@ -1,0 +1,172 @@
+//! `Stored`: a settings field that never fails its file.
+
+use paddock_widgets::{Edit, NoteCode, Stored, WidgetError, apply, view};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+
+use crate::catalogue::{Gadgets, defaults, doc, id, ids, stored};
+
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
+struct Settings {
+    #[serde(default)]
+    theme: String,
+    #[serde(default)]
+    popover: Stored<Gadgets>,
+}
+
+#[test]
+fn a_missing_field_is_the_defaults() {
+    let s: Settings = serde_json::from_value(json!({ "theme": "dark" })).expect("settings load");
+    assert_eq!(s.popover.layout(), &defaults());
+    assert!(s.popover.notes().is_empty());
+    assert_eq!(
+        s,
+        Settings {
+            theme: "dark".into(),
+            ..Settings::default()
+        }
+    );
+}
+
+#[test]
+fn a_damaged_field_never_fails_the_file() {
+    for value in [
+        json!(5),
+        json!("x"),
+        json!([1]),
+        json!({ "version": 9, "placements": [] }),
+    ] {
+        let s: Settings = serde_json::from_value(json!({ "theme": "dark", "popover": value }))
+            .expect("settings load");
+        assert_eq!(s.theme, "dark");
+        assert_eq!(s.popover.layout().placements, defaults().placements);
+        assert_eq!(s.popover.notes().len(), 1);
+    }
+}
+
+#[test]
+fn it_reads_from_text_and_writes_only_the_layout() {
+    let text = json!({ "popover": doc(json!([stored("clock", 1, json!({ "kind": "clock" }))])) })
+        .to_string();
+    let s: Settings = serde_json::from_str(&text).expect("settings load");
+    assert_eq!(ids(s.popover.layout()), ["clock"]);
+    let out = serde_json::to_value(&s).expect("settings save");
+    assert_eq!(out["popover"]["version"], 2);
+    assert!(out["popover"].get("notes").is_none());
+    assert!(out["popover"].get("previous").is_none());
+    let back: Settings = serde_json::from_value(out).expect("settings load again");
+    assert_eq!(back.popover.layout(), s.popover.layout());
+}
+
+#[test]
+fn notes_are_shown_once() {
+    let mut s: Stored<Gadgets> = serde_json::from_value(json!(3)).expect("loads");
+    assert_eq!(s.notes().len(), 1);
+    let shown = view(&s);
+    assert_eq!(shown.notes.len(), 1);
+    assert_eq!(shown.notes[0].code, NoteCode::Damaged);
+    let taken = s.take_notes();
+    assert_eq!(taken.len(), 1);
+    assert!(s.take_notes().is_empty());
+    assert!(view(&s).notes.is_empty());
+}
+
+#[test]
+fn an_edited_layout_is_stored_without_notes() {
+    let edited =
+        apply::<Gadgets>(&defaults(), Edit::Remove { id: id("clock") }).expect("the edit applies");
+    let s = Stored::<Gadgets>::new(edited.clone()).expect("a valid layout");
+    assert!(s.notes().is_empty());
+    assert!(view(&s).can_undo);
+    assert_eq!(s.layout(), &edited);
+    let copy = s.clone();
+    assert_eq!(copy, s);
+    assert!(format!("{copy:?}").contains("Stored"));
+}
+
+#[test]
+fn a_newer_layout_is_kept_unchanged_and_never_edited_over() {
+    let newer = json!({ "version": 3, "placements": [{ "id": "x", "span": 9, "widget": { "kind": "future" } }], "extra": true });
+    let mut s: Stored<Gadgets> = serde_json::from_value(newer.clone()).expect("loads");
+    assert!(!s.editable());
+    assert_eq!(s.notes()[0].code, NoteCode::Newer { version: 3 });
+    assert_eq!(s.layout().placements, defaults().placements);
+    assert!(!view(&s).editable);
+    assert_eq!(
+        s.edit(Edit::Remove { id: id("clock") }),
+        Err(WidgetError::NewerLayout)
+    );
+    assert_eq!(s.layout(), &defaults());
+    // Saving the field writes the newer version's value back byte for byte, not the defaults.
+    assert_eq!(serde_json::to_value(&s).expect("saves"), newer);
+    s.take_notes();
+    assert_eq!(serde_json::to_value(&s).expect("saves"), newer);
+}
+
+#[test]
+fn edit_keeps_the_result_and_reports_the_error() {
+    let mut s = Stored::<Gadgets>::default();
+    assert_eq!(
+        s.edit(Edit::Remove { id: id("nope") }),
+        Err(WidgetError::UnknownPlacement("nope".into()))
+    );
+    assert_eq!(s.layout(), &defaults());
+    s.edit(Edit::Remove { id: id("clock") })
+        .expect("the edit applies");
+    assert_eq!(ids(s.layout()), ["disk-space", "alarms"]);
+    assert!(s.editable());
+}
+
+#[test]
+fn a_damaged_layout_is_kept_until_the_first_edit_replaces_it() {
+    let damaged = json!({ "version": 2, "placements": "none" });
+    let mut s: Stored<Gadgets> = serde_json::from_value(damaged.clone()).expect("loads");
+    assert!(s.editable());
+    assert!(view(&s).editable);
+    assert_eq!(s.notes()[0].code, NoteCode::Damaged);
+    assert_eq!(serde_json::to_value(&s).expect("saves"), damaged);
+    // A refused edit changes nothing.
+    assert_eq!(
+        s.edit(Edit::Remove { id: id("nope") }).map(|_| ()),
+        Err(WidgetError::UnknownPlacement("nope".into()))
+    );
+    assert_eq!(serde_json::to_value(&s).expect("saves"), damaged);
+    assert_eq!(s.notes().len(), 1);
+    // The first edit that applies replaces it, and the note is gone.
+    let shown = s
+        .edit(Edit::Remove { id: id("clock") })
+        .expect("the edit applies");
+    assert_eq!(ids(&shown.layout), ["disk-space", "alarms"]);
+    assert!(shown.can_undo && shown.editable && shown.notes.is_empty());
+    assert!(s.notes().is_empty());
+    let saved = serde_json::to_value(&s).expect("saves");
+    assert_eq!(saved["placements"].as_array().map(Vec::len), Some(2));
+}
+
+#[test]
+fn an_oversized_layout_is_kept_the_same_way() {
+    let big = json!({ "version": 2, "placements": [], "pad": "x".repeat(5000) });
+    let mut s: Stored<Gadgets> = serde_json::from_value(big.clone()).expect("loads");
+    assert_eq!(s.notes()[0].code, NoteCode::TooLarge);
+    assert_eq!(serde_json::to_value(&s).expect("saves"), big);
+    s.edit(Edit::ResetToDefaults).expect("the edit applies");
+    assert_eq!(serde_json::to_value(&s).expect("saves")["version"], 2);
+}
+
+#[test]
+fn a_newer_layout_that_is_also_large_is_still_a_newer_one() {
+    let newer = json!({ "version": 9, "placements": [], "pad": "x".repeat(5000) });
+    let s: Stored<Gadgets> = serde_json::from_value(newer).expect("loads");
+    assert!(!s.editable());
+    assert_eq!(s.notes()[0].code, NoteCode::Newer { version: 9 });
+}
+
+#[test]
+fn a_stored_field_refuses_a_layout_that_breaks_a_limit() {
+    let mut layout = defaults();
+    layout.placements.push(layout.placements[0].clone());
+    assert_eq!(
+        Stored::<Gadgets>::new(layout).map(|_| ()),
+        Err(WidgetError::DuplicateId("clock".into()))
+    );
+}

@@ -7,10 +7,6 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
-[package.metadata.paddock]
-# ADR 0035 WP-A removes this marker when the crate is complete.
-scaffold = true
-
 [features]
 # TypeScript for apps that generate their own catalogue types against these (ADR 0035 §3).
 ts = ["dep:ts-rs"]
@@ -24,3 +20,6 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 ts-rs = "11.1"
+# `testing::sync_generated`, the stale-file check of the generated TypeScript.
+paddock-commands = { workspace = true }
+proptest = "1"

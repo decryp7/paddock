@@ -3992,7 +3992,9 @@ dependencies = [
 name = "paddock-widgets"
 version = "0.1.0"
 dependencies = [
+ "paddock-commands",
  "paddock-workspace-hack",
+ "proptest",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
