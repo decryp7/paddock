@@ -644,7 +644,12 @@ test('paddock-dev has the same nextest ci profile as the crates, and its longer 
   assert.match(own, /^retries = 0$/m, 'a flaky test is fixed, not retried');
   assert.match(text, /\[profile\.ci\.junit\]/);
   const lines = text.split('\n');
-  for (const at of lines.flatMap((l, i) => (l.trim() === '[[profile.ci.overrides]]' ? [i] : []))) {
+  // Only an override that sets a longer `slow-timeout` is a waiver; one that just shows output needs no reason.
+  const setsTimeout = (at) => {
+    const end = lines.findIndex((l, i) => i > at && l.startsWith('['));
+    return lines.slice(at, end < 0 ? undefined : end).some((l) => l.startsWith('slow-timeout'));
+  };
+  for (const at of lines.flatMap((l, i) => (l.trim() === '[[profile.ci.overrides]]' && setsTimeout(i) ? [i] : []))) {
     let j = at - 1;
     while (j >= 0 && lines[j].startsWith('#') && !lines[j].startsWith('# waiver:')) j -= 1;
     assert.ok(j >= 0 && /^# waiver: \S/.test(lines[j]), `the override at line ${at + 1} has no "# waiver:" reason`);
