@@ -7,5 +7,5 @@
 export { SettingsDrafts, type SectionForm, type SectionValues } from './src/settings-drafts';
 export { PdSettingField } from './src/setting-field';
 export { PdSettingsSection, PdSettingsSectionPage, SETTINGS_PAGE } from './src/settings-section';
-export { PdSettingsWindow, SETTINGS_WINDOW_PAGES, SETTINGS_RESTART } from './src/settings-window';
+export { PdSettingsWindow, SETTINGS_WINDOW_PAGES, SETTINGS_RESTART, SETTINGS_ANCHOR, type SettingsAnchor } from './src/settings-window';
 export { settingsWindowProviders, type SettingsWindowOptions } from './src/provide-settings';

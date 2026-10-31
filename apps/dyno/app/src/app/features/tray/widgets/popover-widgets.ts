@@ -75,7 +75,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
           <dy-sparkline [values]="c?.cpuMinute ?? []" [max]="100" color="var(--accent)" label="CPU over the last minute" style="--spark-h: 28px" />
         </div>
         <div class="dy-pw-half dy-pw-half--next" [attr.data-tone]="c?.memoryTone ?? 'ok'">
-          <span class="dy-pw-muted" pdSkeleton [attr.aria-label]="'Memory ' + memText(c)">{{ memText(c) }}</span>
+          <span class="dy-pw-muted" pdSkeleton>Memory {{ memText(c) }}</span>
           <span class="dy-pw-big" pdSkeleton>{{ big(c?.memoryPercent ?? 0) }}<small>%</small></span>
           <span class="dy-pw-meter dy-pw-tall" role="img" [attr.aria-label]="'Memory in use ' + big(c?.memoryPercent ?? 0) + '%'" pdSkeleton><i [style.width.%]="c?.memoryPercent ?? 0"></i></span>
         </div>
@@ -134,7 +134,10 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
   styles: `
     .dy-pw-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
     .dy-pw-row, .dy-pw-plain, .dy-pw-more { all: unset; box-sizing: border-box; cursor: pointer; border-radius: var(--pd-radius-control); }
-    .dy-pw-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 24px; }
+    .dy-pw-row { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; max-width: 100%; min-height: 24px; color: var(--pd-text); font: inherit; }
+    .dy-pw-list > li { min-width: 0; }
+    .dy-pw-chev { flex: none; color: var(--pd-text-muted); }
+    .dy-pw-flag[data-tone='warn'] { background: var(--pd-warning-tint); } .dy-pw-flag[data-tone='bad'] { background: var(--pd-danger-tint); }
     .dy-pw-plain { display: grid; gap: 4px; width: 100%; }
     .dy-pw-row:focus-visible, .dy-pw-plain:focus-visible, .dy-pw-more:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
     .dy-pw-more { display: block; margin-top: 4px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }

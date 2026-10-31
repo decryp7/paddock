@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, Injector, OnInit, afterNextRender, computed, effect, inject, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, Injector, OnInit, afterNextRender, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
@@ -9,7 +9,8 @@ import { Notifier } from '../../shared/notifier';
 import { MatSlideToggle } from '@angular/material/slide-toggle';
 import { SettingsStore } from '../../state/settings.store';
 import { LOOKUP_PRESETS, presetIdFor, templateProblem } from './ip-lookup-presets';
-import { takeSettingsAnchor } from './settings-anchor';
+import { SETTINGS_ANCHOR } from '@decryp7/paddock-ui/shell/settings/window';
+import { scrollToSection } from './scroll-to-section';
 import { MenuBarItems } from './menu-bar-items';
 import { PopupWidgets } from './popup-widgets';
 import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
@@ -349,23 +350,18 @@ export class SettingsPage implements OnInit {
   });
 
   private readonly injector = inject(Injector);
-  /** The section "Customize widgets…" asked for; shown once the page has its content. */
-  private anchor: string | null = takeSettingsAnchor();
+  /** The part of this page the Settings window was asked to show (the window's `anchor` input), when it is one. */
+  private readonly anchor = inject(SETTINGS_ANCHOR, { optional: true });
+  private stopScrolling: (() => void) | null = null;
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => this.stopScrolling?.());
+    // Once the page has its content, and again whenever the window is asked again, scroll to the asked section.
     effect(() => {
-      if (this.draft() === null || this.anchor === null) return;
-      const id = this.anchor;
-      this.anchor = null;
-      afterNextRender(
-        () => {
-          const el = document.getElementById(id);
-          el?.setAttribute('tabindex', '-1');
-          if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'start' });
-          el?.focus({ preventScroll: true });
-        },
-        { injector: this.injector },
-      );
+      const wanted = this.anchor?.();
+      if (!wanted || this.draft() === null) return;
+      this.stopScrolling?.();
+      afterNextRender(() => (this.stopScrolling = scrollToSection(wanted.id)), { injector: this.injector });
     });
     // A fresh copy whenever the saved settings change (first load, after saving).
     effect(() => {

@@ -219,23 +219,38 @@ test.describe('screenshots for the independent review', () => {
       const p4 = await open('', 560);
       await p4.getByRole('button', { name: 'More actions' }).click();
       await snap(p4, 'popup-menu');
-      await page.setViewportSize({ width: 1100, height: 2400 });
+      await page.setViewportSize({ width: 1100, height: 900 });
       const chooser = await openChooser(page);
       for (const [name, count] of [['Network', 4], ['Backup', 5], ['Last issue', 6], ['Pinned counters', 7]] as const) {
         await chooser.getByRole('button', { name: `Add ${name}` }).click();
         await expect(shown(chooser)).toHaveCount(count);
       }
-      // The whole Popup widgets section, from its heading: list, handles, volume select, Half/Full, counter, hint and the preview.
-      await page.getByRole('heading', { name: 'Popup widgets' }).scrollIntoViewIfNeeded();
-      const head = await page.getByRole('heading', { name: 'Popup widgets' }).boundingBox();
-      const body = await chooser.boundingBox();
+      // The Settings dialog's scroll content in sections, from the Popup widgets heading: the shown list with its handles, volume
+      // select and Half / Full; the Add list and Reset; the live preview. The dialog is the picture, so nothing of the page behind it shows.
+      const dialog = page.locator('pd-in-page-dialog');
+      const content = page.getByTestId('settings-content');
+      await page.getByRole('heading', { name: 'Popup widgets' }).evaluate((h) => h.scrollIntoView({ block: 'start' }));
       await page.evaluate(() => document.fonts.ready);
-      await page.screenshot({ path: join(SHOTS!, `chooser-${theme}.png`), clip: { x: head!.x - 16, y: head!.y - 8, width: Math.min(1100 - head!.x, body!.width + 32), height: body!.y + body!.height - head!.y + 24 } });
+      for (const part of [1, 2, 3]) {
+        await dialog.screenshot({ path: join(SHOTS!, `chooser-${part}-${theme}.png`) });
+        await content.evaluate((el) => el.scrollBy({ top: el.clientHeight * 0.8 }));
+        await expect.poll(() => content.evaluate((el) => Math.round(el.scrollTop))).toBeGreaterThan(0);
+      }
+      await content.evaluate((el) => (el.scrollTop = 0));
+      await page.getByRole('heading', { name: 'Popup widgets' }).evaluate((h) => h.scrollIntoView({ block: 'start' }));
       await chooser.getByRole('button', { name: /^More actions for Network/ }).click();
-      await page.screenshot({ path: join(SHOTS!, `chooser-menu-${theme}.png`), clip: { x: head!.x - 16, y: head!.y - 8, width: Math.min(1100 - head!.x, body!.width + 32), height: body!.y + body!.height - head!.y + 24 } });
+      await dialog.screenshot({ path: join(SHOTS!, `chooser-menu-${theme}.png`) });
       await page.keyboard.press('Escape');
       const p2 = await open('&popup=activeAlarms:empty,diskSpace:error,cpuMemory:stale,network:empty,backupHealth:working,lastIssue:error,pinnedCounters:ready', 1500);
       await snap(p2, 'popup-states', p2.locator('pd-tray-popover'));
+      // The ready designs of the other kinds: the first three are removed, Top apps added.
+      for (const title of ['Active alarms', 'Disk space', 'CPU and memory']) {
+        await chooser.getByRole('button', { name: new RegExp(`^More actions for ${title}`) }).click();
+        await page.getByRole('menuitem', { name: 'Remove' }).click();
+        await expect(chooser.getByRole('button', { name: new RegExp(`^More actions for ${title}`) })).toHaveCount(0);
+      }
+      await chooser.getByRole('button', { name: 'Add Top apps' }).click();
+      await expect(shown(chooser)).toHaveCount(5);
       const p5 = await open('', 1500);
       await snap(p5, 'popup-more', p5.locator('pd-tray-popover'));
     });

@@ -51,6 +51,7 @@ export {
   rememberDialogBounds,
   type BoundsStorage,
 } from './src/bounds';
+export { sendDialogInputs, followDialogInputs } from './src/retarget';
 export { ModalGate } from './src/modal-gate';
 export { DeniedCommands, isDenial } from './src/denied';
 export {

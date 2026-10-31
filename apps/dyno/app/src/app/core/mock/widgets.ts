@@ -374,7 +374,7 @@ export class MockWidgets {
         return ready({ diskSpace: { rows: [{ id: '/', name: 'Macintosh HD', usedPercent: 82, freeBytes: 182 * GB, totalBytes: 994 * GB, tone: 'ok', reachable: true }, { id: '/Volumes/Projects', name: 'Projects', usedPercent: 96, freeBytes: 19 * GB, totalBytes: 500 * GB, tone: 'bad', reachable: true }, { id: '/Volumes/Time Machine', name: 'Time Machine', usedPercent: 70, freeBytes: 1210 * GB, totalBytes: 4000 * GB, tone: 'ok', reachable: true }], more: 1 } }, stale);
       }
       case 'cpuMemory':
-        return ready({ cpuMemory: { cpuPercent: 76, cpuTone: 'warn', memoryUsed: 16.3e9, memoryTotal: 32e9, memoryPercent: 51, memoryTone: 'ok', cpuMinute: wave(70, 12) } }, stale);
+        return ready({ cpuMemory: { cpuPercent: 76, cpuTone: 'warn', memoryUsed: 16.3 * 1024 ** 3, memoryTotal: 32 * 1024 ** 3, memoryPercent: 51, memoryTone: 'ok', cpuMinute: wave(70, 12) } }, stale);
       case 'network':
         if (state === 'empty') return empty('See traffic when online', 'Offline now.', 'Open network', { openPage: 'network' });
         return ready({ network: { rxBps: 2.4e6, txBps: 310e3, rxMinute: wave(2e6, 5e5), txMinute: wave(3e5, 5e4) } }, stale);
