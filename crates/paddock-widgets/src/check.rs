@@ -30,11 +30,13 @@ pub(crate) fn check_one<C: Catalogue>(
         return Err(WidgetError::TooMany {
             counted,
             max: u16::try_from(max).unwrap_or(u16::MAX),
+            noun: C::SURFACE.noun.into(),
         });
     }
     if existing.iter().filter(|o| o.widget.kind() == kind).count() >= spec.max_instances as usize {
         return Err(WidgetError::KindLimit {
             max: spec.max_instances,
+            noun: C::SURFACE.noun.into(),
         });
     }
     Ok(())

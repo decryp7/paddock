@@ -17,6 +17,8 @@
 //! Wire types derive `ts_rs::TS` under the `ts` feature (and in tests); the generated file is
 //! `ui/projects/paddock-ui/widgets/generated/widgets.ts`.
 
+#![warn(missing_docs)]
+
 /// Items that are wire types: they derive `ts_rs::TS` in tests and with the `ts` feature.
 macro_rules! ts {
     ($($item:item)*) => { $( #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))] $item )* };
@@ -43,4 +45,6 @@ pub use read::{MAX_NAME, Read, Stored, read};
 pub use state::{
     PlacementState, Progress, SurfaceNotice, SurfaceValues, Tone, WidgetAction, WidgetState,
 };
-pub use view::{CatalogueInfo, KindInfo, LayoutView, SurfaceInfo, builtin_presets, info, view};
+pub use view::{
+    CatalogueInfo, KindInfo, LayoutView, SurfaceInfo, ViewOf, builtin_presets, info, view,
+};

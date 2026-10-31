@@ -227,7 +227,7 @@ fn ids_from_the_kinds_are_unique() {
         (2, disk("c")),
     ]);
     assert_eq!(
-        ids(&Layout::new::<Gadgets>(placed, vec![])),
+        ids(&Layout::new(2, placed, vec![])),
         ["disk-space", "disk-space-2", "clock", "disk-space-3"]
     );
 }

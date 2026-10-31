@@ -174,6 +174,8 @@
   --pd-diverging-mid: #22262c;
   --pd-diverging-pos: var(--pd-chart-2);
   --pd-chart-neutral-bar: #5e6775;
+  /* A meter's neutral fill (disk space, quotas): 3:1 on surface-1, -2 and -3, where a widget sits (ADR 0035). */
+  --pd-meter-neutral: #747d8b;
   --pd-chart-grid: rgb(255 255 255 / 0.08);
 
   --pd-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
@@ -181,6 +183,9 @@
   --pd-shadow-3: 0 16px 48px rgb(0 0 0 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.04);
   --pd-skeleton: #1b1e23;
   --pd-skeleton-shine: #262a31;
+  /* A skeleton on a surface-2 fill (a widget inside a popover, ADR 0035), where --pd-skeleton would vanish. */
+  --pd-skeleton-raised: #2c3037;
+  --pd-skeleton-raised-shine: #363b44;
 }
 
 @mixin light {
@@ -226,6 +231,7 @@
   --pd-diverging-mid: #f0f2f5;
   --pd-diverging-pos: var(--pd-chart-2);
   --pd-chart-neutral-bar: #868f9d;
+  --pd-meter-neutral: #767f8d;
   --pd-chart-grid: rgb(15 20 30 / 0.1);
 
   --pd-shadow-1: 0 1px 2px rgb(15 20 30 / 0.06), 0 1px 1px rgb(15 20 30 / 0.04);
@@ -233,6 +239,8 @@
   --pd-shadow-3: 0 16px 48px rgb(15 20 30 / 0.2), 0 1px 2px rgb(15 20 30 / 0.06);
   --pd-skeleton: #e8ebef;
   --pd-skeleton-shine: #f6f7f9;
+  --pd-skeleton-raised: #dadde2;
+  --pd-skeleton-raised-shine: #e6e8ec;
 }
 
 // High contrast (design guide §4 "Contrast targets"; macOS Increase Contrast, Windows contrast themes): hairlines become

@@ -8,6 +8,7 @@ use paddock_widgets::{
 use crate::catalogue::{Gadget, GadgetKind, Gadgets, KINDS, TestSurface, disk, pid};
 
 const SURFACE: Surface = Surface {
+    noun: "popup",
     schema_version: 1,
     columns: 2,
     max_placements: 4,
@@ -42,6 +43,7 @@ macro_rules! broken {
             type Widget = Gadget;
             const SURFACE_ID: TestSurface = TestSurface::Popover;
             const SURFACE: Surface = Surface {
+                noun: "popup",
                 min_placements: $min,
                 ..SURFACE
             };
@@ -73,6 +75,100 @@ static CLOCK: [KindSpec<GadgetKind>; 1] = [spec(GadgetKind::Clock, "Clock", &[1]
 fn two_clocks() -> Vec<Placement<Gadget>> {
     assign_ids([(1, Gadget::Clock), (1, Gadget::Clock)])
 }
+
+struct NoNoun;
+impl Catalogue for NoNoun {
+    type SurfaceId = TestSurface;
+    type Widget = Gadget;
+    const SURFACE_ID: TestSurface = TestSurface::Popover;
+    const SURFACE: Surface = Surface {
+        noun: "",
+        ..SURFACE
+    };
+    fn kinds() -> &'static [KindSpec<GadgetKind>] {
+        &CLOCK
+    }
+    fn defaults() -> Vec<Placement<Gadget>> {
+        Vec::new()
+    }
+}
+
+macro_rules! surfaced {
+    ($name:ident, $surface:expr, $presets:expr) => {
+        struct $name;
+        impl Catalogue for $name {
+            type SurfaceId = TestSurface;
+            type Widget = Gadget;
+            const SURFACE_ID: TestSurface = TestSurface::Popover;
+            const SURFACE: Surface = $surface;
+            fn kinds() -> &'static [KindSpec<GadgetKind>] {
+                &CLOCK
+            }
+            fn defaults() -> Vec<Placement<Gadget>> {
+                Vec::new()
+            }
+            fn presets() -> Vec<Preset<Gadget>> {
+                $presets
+            }
+        }
+    };
+}
+
+fn preset(id: &str, name: &str, placements: Vec<Placement<Gadget>>) -> Preset<Gadget> {
+    Preset {
+        id: pid(id),
+        name: name.into(),
+        builtin: false,
+        placements,
+    }
+}
+
+surfaced!(
+    ZeroVersion,
+    Surface {
+        schema_version: 0,
+        ..SURFACE
+    },
+    Vec::new()
+);
+surfaced!(
+    ZeroColumns,
+    Surface {
+        columns: 0,
+        ..SURFACE
+    },
+    Vec::new()
+);
+surfaced!(
+    ZeroBytes,
+    Surface {
+        max_bytes: 0,
+        ..SURFACE
+    },
+    Vec::new()
+);
+surfaced!(
+    MinOverMax,
+    Surface {
+        min_placements: 5,
+        ..SURFACE
+    },
+    Vec::new()
+);
+surfaced!(
+    TwinPresets,
+    SURFACE,
+    vec![preset("a", "A", vec![]), preset("a", "B", vec![])]
+);
+surfaced!(NamelessPreset, SURFACE, vec![preset("a", " ", vec![])]);
+surfaced!(
+    ShortPreset,
+    Surface {
+        min_placements: 1,
+        ..SURFACE
+    },
+    vec![preset("a", "A", vec![])]
+);
 
 broken!(NoKinds, &NO_KINDS, Vec::new(), Vec::new(), 0);
 broken!(Twice, &TWICE, Vec::new(), Vec::new(), 0);
@@ -109,6 +205,14 @@ fn the_test_catalogue_is_valid() {
 
 #[test]
 fn each_problem_is_named() {
+    assert_eq!(message::<NoNoun>(), "the surface needs a noun");
+    assert!(message::<ZeroVersion>().contains("starts at 1"));
+    assert!(message::<ZeroColumns>().contains("columns"));
+    assert!(message::<ZeroBytes>().contains("size limit"));
+    assert!(message::<MinOverMax>().contains("fewest placements"));
+    assert!(message::<TwinPresets>().contains("listed twice"));
+    assert!(message::<NamelessPreset>().contains("needs a name"));
+    assert!(message::<ShortPreset>().contains("not a valid layout"));
     assert_eq!(message::<NoKinds>(), "the catalogue has no kinds");
     assert!(message::<Twice>().contains("listed twice"));
     assert!(message::<NoTitle>().contains("needs a title"));
@@ -119,6 +223,21 @@ fn each_problem_is_named() {
     assert!(message::<BadDefaults>().contains("defaults"));
     assert!(message::<TooFewDefaults>().contains("defaults"));
     assert!(message::<BadPreset>().contains("preset two"));
+}
+
+#[test]
+fn a_kind_without_spans_cannot_be_added() {
+    let layout = paddock_widgets::Layout::defaults::<NoSpans>();
+    let error = paddock_widgets::apply::<NoSpans>(
+        &layout,
+        paddock_widgets::Edit::Add {
+            widget: Gadget::Clock,
+            span: None,
+            at: None,
+        },
+    )
+    .expect_err("refused");
+    assert!(matches!(error, paddock_widgets::WidgetError::Invalid(m) if m.contains("no width")));
 }
 
 #[test]
@@ -177,6 +296,7 @@ mod minimal {
         type Widget = Lamp;
         const SURFACE_ID: u8 = 7;
         const SURFACE: Surface = Surface {
+            noun: "menu bar",
             schema_version: 1,
             columns: 1,
             max_placements: 2,

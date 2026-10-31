@@ -12,6 +12,8 @@ use crate::layout::{Placement, Preset};
 /// The grid and limits of the surface a catalogue fills (ADR 0035 §6). Its identity is the app's `SurfaceId`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Surface {
+    /// What the surface is called in messages: "popup", "dashboard", "menu bar".
+    pub noun: &'static str,
     /// Bumped by the app on a breaking change of its widget type; a newer stored layout is kept unread (ADR 0035 §1).
     pub schema_version: u32,
     /// Columns of the grid: popup 2, dashboard 12, menu bar 1.
@@ -119,6 +121,18 @@ pub(crate) fn spec_of<C: Catalogue>(
 /// show only as missing widgets.
 pub fn check_catalogue<C: Catalogue>() -> Result<(), String> {
     let s = &C::SURFACE;
+    if s.noun.is_empty() {
+        return Err("the surface needs a noun".into());
+    }
+    if s.schema_version == 0 {
+        return Err("the schema version starts at 1".into());
+    }
+    if s.columns == 0 || s.max_bytes == 0 {
+        return Err("the surface needs columns and a size limit".into());
+    }
+    if s.min_placements > s.max_placements {
+        return Err("the fewest placements is above the most".into());
+    }
     if C::kinds().is_empty() {
         return Err("the catalogue has no kinds".into());
     }
@@ -155,14 +169,21 @@ pub fn check_catalogue<C: Catalogue>() -> Result<(), String> {
     if kept != defaults || defaults.len() < s.min_placements as usize {
         return Err("the defaults are not a valid layout".into());
     }
-    for p in C::presets() {
+    let presets = C::presets();
+    for (i, p) in presets.iter().enumerate() {
+        if presets[..i].iter().any(|o| o.id == p.id) {
+            return Err(format!("preset {} is listed twice", p.id));
+        }
+        if p.name.trim().is_empty() {
+            return Err(format!("preset {} needs a name", p.id));
+        }
         let kept = crate::check::keep_valid::<C>(
             p.placements.clone(),
             s.max_preset_placements as usize,
             Counted::PresetPlacements,
             &mut 0,
         );
-        if kept != p.placements {
+        if kept != p.placements || p.placements.len() < s.min_placements as usize {
             return Err(format!("preset {} is not a valid layout", p.id));
         }
     }
