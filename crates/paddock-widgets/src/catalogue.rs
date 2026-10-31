@@ -133,6 +133,9 @@ pub fn check_catalogue<C: Catalogue>() -> Result<(), String> {
     if s.min_placements > s.max_placements {
         return Err("the fewest placements is above the most".into());
     }
+    if s.max_preset_placements > s.max_placements {
+        return Err("max_preset_placements is above max_placements".into());
+    }
     if C::kinds().is_empty() {
         return Err("the catalogue has no kinds".into());
     }
