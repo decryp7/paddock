@@ -338,6 +338,9 @@
       <trans-unit id="pd.channels.save-failed-title" datatype="html">
         <source>The channel was not saved.</source>
       </trans-unit>
+      <trans-unit id="pd.channels.save-to-apply" datatype="html">
+        <source>The channel is applied when you save it.</source>
+      </trans-unit>
       <trans-unit id="pd.channels.secret-missing" datatype="html">
         <source>No secret yet</source>
       </trans-unit>
@@ -1787,6 +1790,9 @@
       <trans-unit id="pd.settings.no-match" datatype="html">
         <source>No settings match “<x id="query"/>”.</source>
       </trans-unit>
+      <trans-unit id="pd.settings.not-saved.close" datatype="html">
+        <source>Close anyway</source>
+      </trans-unit>
       <trans-unit id="pd.settings.notifications" datatype="html">
         <source>Notifications</source>
       </trans-unit>
@@ -1823,6 +1829,9 @@
       <trans-unit id="pd.settings.saved-live" datatype="html">
         <source>Changes are saved as you make them.</source>
       </trans-unit>
+      <trans-unit id="pd.settings.saving" datatype="html">
+        <source>Saving <x id="setting"/>…</source>
+      </trans-unit>
       <trans-unit id="pd.settings.search" datatype="html">
         <source>Search settings</source>
       </trans-unit>
@@ -1852,6 +1861,12 @@
       </trans-unit>
       <trans-unit id="pd.settings.show-advanced" datatype="html">
         <source>Show advanced</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.still-saving" datatype="html">
+        <source>Still saving <x id="setting"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.still-saving.keep" datatype="html">
+        <source>Keep waiting</source>
       </trans-unit>
       <trans-unit id="pd.settings.storage" datatype="html">
         <source>Storage</source>

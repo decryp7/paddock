@@ -46,9 +46,9 @@ pub use record::{Record, RecordStore};
 pub use signature::UpdateKey;
 pub use state::{Event, UpdateInfo, UpdatePhase};
 pub use updater::{
-    CHECK_PHASE, CancelOutcome, Channel, ChannelInfo, ExitAction, Installer, PreferenceStore,
-    Preferences, SIGNATURE_PHASE, STATUS_EVENT, ServiceHooks, ServicesOutcome, Ticket,
-    UpdateStatus, Updater, UpdaterConfig,
+    CHECK_PHASE, CancelOutcome, Channel, ChannelInfo, ExitAction, Installer, OfflineMode,
+    OfflineState, PreferenceStore, Preferences, SIGNATURE_PHASE, STATUS_EVENT, ServiceHooks,
+    ServicesOutcome, Ticket, UpdateStatus, Updater, UpdaterConfig,
 };
 
 paddock_commands::command_table! {

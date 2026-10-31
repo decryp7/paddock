@@ -17,7 +17,8 @@ const GiB = 1024 ** 3;
 
 function fakeWindows() {
   const openMain = vi.fn().mockResolvedValue(undefined);
-  const windows: WindowControl = { openMain, onNavigate: () => () => undefined };
+  const fitTray = vi.fn().mockResolvedValue(undefined);
+  const windows: WindowControl = { openMain, onNavigate: () => () => undefined, fitTray };
   return { windows, openMain };
 }
 
@@ -52,6 +53,18 @@ describe('TrayPopover', () => {
     expect(el.querySelectorAll('pw-hot-models li.row').length).toBe(2);
     expect(el.querySelector('pw-hot-models .more')!.textContent).toContain('+1 more loaded');
     expect(el.querySelector('pw-hot-models .actions')).toBeNull();
+  });
+
+  it('under two banners shows one loaded model and summarises the rest, so no row is cut off', async () => {
+    const { el } = await mount({ backend: new MockBackend({ modelUpdates: true }) });
+    expect(el.querySelectorAll('.pairing').length).toBe(2);
+    expect(el.querySelectorAll('pw-hot-models li.row').length).toBe(1);
+    expect(el.querySelector('pw-hot-models .more')!.textContent).toContain('+2 more loaded');
+    // The footer's actions are words on one line (no icon squeezing them).
+    for (const b of Array.from(el.querySelectorAll('footer button'))) {
+      expect(b.querySelector('mat-icon')).toBeNull();
+      expect(getComputedStyle(b).whiteSpace).toBe('nowrap');
+    }
   });
 
   it('shows the connecting state before the first load', async () => {
@@ -96,8 +109,8 @@ describe('TrayPopover', () => {
     expect(text(el.querySelector('.state')!)).toMatch(/^Pausedon:\d+$/);
     expect(text(el.querySelector('.stats div')!)).toBe('0.0tok/s');
     // Open Pitwall is the only filled button, paused or not; Resume sits beside Release as an equal secondary.
-    expect(Array.from(el.querySelectorAll('button.primary')).map((b) => b.textContent!.trim())).toEqual(['Open Pitwall']);
-    expect(btn('Resume').classList.contains('primary')).toBe(false);
+    expect(Array.from(el.querySelectorAll('button.mat-mdc-unelevated-button')).map((b) => b.textContent!.trim())).toEqual(['Open Pitwall']);
+    expect(btn('Resume').classList.contains('mat-mdc-unelevated-button')).toBe(false);
     expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent!.includes('Pause serving'))).toBe(false);
     btn('Resume').click();
     await settle(fixture);

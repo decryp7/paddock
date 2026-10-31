@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
-import type { AppUpdateStatus, CommandError, ServiceInstall, UpdateInfo } from '../../core/api.types';
+import type { CommandError, ServiceInstall } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Toasts } from '../../core/toasts';
@@ -10,14 +10,11 @@ interface ServiceState {
   service: ServiceInstall | null;
   /** Whether Pitwall starts at log-in; null while unknown. */
   autostart: boolean | null;
-  updateStatus: AppUpdateStatus | null;
-  /** The update the last check found. */
-  update: UpdateInfo | null;
-  /** A check ran and found nothing newer. */
-  upToDate: boolean;
-  /** Actions in flight: `install`, `uninstall`, `autostart`, `check`, `apply`. */
+  /** Actions in flight: `install`, `uninstall`, `repair`, `decline`, `loginItems`, `autostart`. */
   busy: Record<string, true>;
   error: CommandError | null;
+  /** The user said "Not now" this run: the question stays away until Pitwall starts again, whatever a later read says. */
+  consentDeferred: boolean;
 }
 
 /** How often the state is read again while the repair works. */
@@ -27,18 +24,18 @@ export const REPAIR_POLL_MS = 3000;
 export const DOWN_POLL_MS = 5000;
 export const MAX_DOWN_CHECKS = 24;
 
-const initial: ServiceState = { service: null, autostart: null, updateStatus: null, update: null, upToDate: false, busy: {}, error: null };
+const initial: ServiceState = { service: null, autostart: null, busy: {}, error: null, consentDeferred: false };
 
 /**
- * The server as an OS service, start at log-in and app updates. Everything here is optional for the app to work, so
+ * The server as an OS service and start at log-in (app updates are the shell's updater). Everything here is optional for the app to work, so
  * nothing blocks on it: `refresh` starts in the background and a failure only leaves the cards saying so.
  */
 export const ServiceStore = signalStore(
   { providedIn: 'root' },
   withState(initial),
-  withComputed(({ service, busy }) => ({
-    /** Show the first-run "run Pitwall's service?" question. */
-    askConsent: computed(() => service()?.askConsent === true),
+  withComputed(({ service, busy, consentDeferred }) => ({
+    /** Show the first-run "run Pitwall's service?" question (not again this run after "Not now"). */
+    askConsent: computed(() => service()?.askConsent === true && !consentDeferred()),
     /** The Repair button works (macOS, not switched off in Login Items, the server is not up). */
     canRepair: computed(() => {
       const s = service();
@@ -65,7 +62,8 @@ export const ServiceStore = signalStore(
         return await run();
       } catch (e) {
         const error = toCommandError(e);
-        patchState(store, { error });
+        // A cancel the user asked for is an outcome, not a failure: no stored error.
+        if (error.code !== 'cancelled') patchState(store, { error });
         toasts.error(error);
         return null;
       } finally {
@@ -73,16 +71,15 @@ export const ServiceStore = signalStore(
       }
     }
 
-    /** Reads the service, start-at-log-in and update state; each part on its own so one failure hides nothing else. */
+    /** Reads the service and start-at-log-in state; each part on its own so one failure hides nothing else. */
     async function refresh(): Promise<void> {
       if (poll !== null) clearTimeout(poll);
       poll = null;
       const before = store.service()?.repair?.state ?? null;
-      const [service, autostart, updateStatus] = await Promise.allSettled([backend.serviceState(), backend.autostart(), backend.appUpdateStatus()]);
+      const [service, autostart] = await Promise.allSettled([backend.serviceState(), backend.autostart()]);
       patchState(store, {
         service: service.status === 'fulfilled' ? service.value : store.service(),
         autostart: autostart.status === 'fulfilled' ? autostart.value : store.autostart(),
-        updateStatus: updateStatus.status === 'fulfilled' ? updateStatus.value : store.updateStatus(),
         error: service.status === 'rejected' ? toCommandError(service.reason) : null,
       });
       const repair = store.service()?.repair ?? null;
@@ -142,26 +139,14 @@ export const ServiceStore = signalStore(
         if (done && s) patchState(store, { service: { ...s, askConsent: false } });
       },
 
-      /** Hides the question for now without remembering an answer (asked again next time). */
+      /** Hides the question for this run without remembering an answer (asked again the next time Pitwall starts). */
       later(): void {
-        const s = store.service();
-        if (s) patchState(store, { service: { ...s, askConsent: false } });
+        patchState(store, { consentDeferred: true });
       },
 
       async setAutostart(enabled: boolean): Promise<void> {
         const now = await act('autostart', () => backend.setAutostart(enabled));
         if (now !== null) patchState(store, { autostart: now });
-      },
-
-      async checkUpdate(): Promise<void> {
-        const found = await act('check', async () => ({ info: await backend.checkAppUpdate() }));
-        if (found) patchState(store, { update: found.info, upToDate: found.info === null });
-      },
-
-      /** Installs the update the check found; the app restarts when it works. */
-      async applyUpdate(): Promise<void> {
-        if (!store.update()) return;
-        await act('apply', () => backend.installAppUpdate());
       },
     };
   }),

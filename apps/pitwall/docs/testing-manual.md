@@ -121,8 +121,73 @@ Needs a build with caching (ADR 0019) and a small real model. Use `temperature: 
 | 39 | Kill the server process. | The OS restarts it within about 10 seconds (Windows: recovery actions at 10 s, 60 s, 5 min; systemd `RestartSec=10`; launchd KeepAlive). The window reconnects. |
 | 40 | Log out and in (Linux: with `loginctl enable-linger $USER` the server also runs with nobody logged in). | The server is running again without opening the app. |
 | 41 | Close the window; use the tray/menu-bar icon > Open. Repeat three times; on macOS also use the Dock icon. | The window reopens with content every time (never blank). Quit from the tray exits the app; the server keeps running. Linux with no tray: closing the window quits the app only. |
+| 41a | Close the main window (⌘W / Ctrl+W, so it is destroyed). Open the tray popover and press **Open Pitwall**; close the window again, start a model download that offers an update (or use a build with a pending pairing) and press the popover's **Review**. | Each time the main window is rebuilt and comes to the front, on the Dashboard for Open Pitwall and a pairing's Review, on Models for a model update's Review; the popover closes. With the window already open (behind another app) the same buttons bring it forward and switch its screen. |
 | 42 | Install a newer build over the old one while the server is idle (and once while a request streams). | The server restarts itself onto the new program only when idle; the streaming request finishes first; `version` in `/x/v1/health` changes; models reload on demand. |
 | 43 | Uninstall the service. | The server stops; the data folder, models and keys stay. |
+
+## Update
+
+Local only: these run on the maintainer's machines and VMs and never in CI (no VM, no real service and no signing key in
+CI). Machines: a **Tart macOS** VM, a **Win11 ARM** VM in Fusion and an **OrbStack Linux** machine (Ubuntu with systemd and a
+desktop session for the AppImage). Take a snapshot of every VM before the first step and restore it between sections.
+Use a throwaway data folder only where a step says so; never real confidential content in prompts or fixtures.
+
+**Setup for the updater tests (sections B to D).** Never use the family key. Make a test key pair
+(`npx tauri signer generate -w $TMP/test-updater.key`, scratch folder, not in a repo). Build two installers of one commit
+with a build-time override: 1.1.0-rc (the "old" one) and a test 1.1.1 (bump the version only in the working copy), both with
+`createUpdaterArtifacts` and the test public key (`TAURI_UPDATER_PUBKEY` and `tauri build --config` as in
+[releasing](releasing.md)), the endpoint pointed at the VM-local feed (`--config` override of `plugins.updater.endpoints`,
+for example `http://10.0.2.2:8099/latest.json`, a build for tests only and never published). Write `latest.json` with
+`node conformance/release/latest-json.mjs` from the 1.1.1 installers and their `.sig` files, and serve the folder with
+`python3 -m http.server 8099` on the host. The committed config keeps `pubkey` empty; do not commit the overrides.
+
+### A. By hand: 1.0.3 to 1.1.0 (service kept, re-registered once)
+
+Pitwall 1.0.x updates do not look at the new feed, so this is the path every existing user takes.
+
+| # | Platform | Steps | Expected |
+|---|----------|-------|----------|
+| U1 | All | Install the published 1.0.3 build, pair an app, load a model, note `GET /x/v1/health` (`version` 1.0.3) and the models and keys listed. Leave the service installed. | Baseline recorded. |
+| U2 | macOS | Install 1.1.0 over it (drag to Applications, replace). Open the app. | The app opens; on the first start it repairs the service registration once (Settings > Background service shows "Repaired" or running); Login Items lists Pitwall; no second repair on the next start. |
+| U3 | Windows | Run the 1.1.0 `...-setup.exe` over 1.0.3 (no uninstall first). | The installer stops the `Pitwall` service, replaces the files, registers and starts the service again; `sc.exe query Pitwall` shows RUNNING. |
+| U4 | Linux | Install the 1.1.0 `.deb` over 1.0.3 (`sudo apt install ./pitwall_1.1.0_amd64.deb`); separately replace an AppImage. | `systemctl --user status pitwall.service` is active with the new binary path; the AppImage case points the unit at the stable copy. |
+| U5 | All | `GET /x/v1/health`; list models, keys and apps; send one chat request. | `version` is 1.1.0; models, keys, apps and settings are the same as in U1; the request is answered. |
+| U6 | All | Restart the OS and log in. | The service is running without opening the app, still registered exactly once (no duplicate login item, service or unit). |
+
+### B. Updater install: 1.1.0-rc to a test 1.1.1
+
+| # | Platform | Steps | Expected |
+|---|----------|-------|----------|
+| U7 | All | Install the 1.1.0-rc test build (signed with the test key, feed on the host). Help > Check for updates… (the Updates window). | "1.1.1 is available" with the release notes; the check made one GET of `latest.json` and nothing else (watch the host's server log). |
+| U8 | All | Choose Install, then **Cancel** while the download runs; repeat and cancel at the very start; then watch the "Installing" phase. | The download stops, the state returns to "1.1.1 is available", nothing is half-installed, the app and the server still run 1.1.0-rc; Install works again afterwards. During "Installing" Cancel is unavailable (disabled, with the reason), because an install cannot be undone half-way. |
+| U9 | All | Install, with a streaming request running through the server. | The download and the install finish; the app restarts. The server does not restart until it is idle: the stream completes first, then the server restarts once onto the new binary (no restart while requests, queued jobs or downloads are active). |
+| U10 | All | Afterwards `GET /x/v1/health`, then Help > Check for updates…. | `version` is 1.1.1; "You have the latest version"; models, keys and settings unchanged. |
+| U11 | All | Serve a `latest.json` whose `.sig` was made with a different key (or edit one byte of the installer). | The install is refused with a signature message; the old version keeps running. |
+| U12 | All | Stop the host feed, then check for updates. | A clear "could not check" message and a next step; no crash, no retry loop. |
+
+### C. Windows specifics
+
+| # | Steps | Expected |
+|---|-------|----------|
+| U13 | While the service runs, start the updater install (U9). Watch `sc.exe query Pitwall` during the install. | The NSIS pre-install hook stops the service (`pitwall-server.exe uninstall`), the files are replaced without a "file in use" error, the post-install hook registers and starts the service again, and the server runs in the logged-on user's session. |
+| U14 | Run the installer silently (`/S`) over a running install. | Same result; no dialog; a failed registration is silent but visible in Settings > Service. |
+
+### D. Offline mode
+
+| # | Steps | Expected |
+|---|-------|----------|
+| U15 | Turn on offline mode (Settings > Network), turn on automatic update checks, restart the app, and choose Help > Check for updates…. Watch the host feed's log and the VM's network (`tcpdump` on the VM or the feed's access log). | No request reaches the feed or any other host; the check reports that offline mode is on. Turning offline mode off allows the check again. |
+| U15b | Offline mode on, then stop the Pitwall server (quit the service), and choose Help > Check for updates…. Watch the feed log. | No request reaches the feed. With the server down the app cannot ask it whether offline is on, so it refuses unless it knows from a last-known value that offline is off; it says why. |
+
+### E. Uninstall leaves nothing behind
+
+| # | Platform | Steps | Expected |
+|---|----------|-------|----------|
+| U16 | macOS | Quit Pitwall, Settings > Background service > Remove service, move the app to the Trash. Check `launchctl print gui/$(id -u)/net.decryptology.pitwall.service`, Login Items, `ps aux \| grep pitwall`. | No launch agent, no Login Item, no process. The data folder (`~/Library/Application Support/Pitwall`) stays only if the user keeps it; deleting it by hand leaves nothing under `~/Library` (check `Caches`, `Preferences`, `Logs`, `Saved Application State` for `pitwall`). |
+| U17 | Windows | Uninstall from Settings > Apps. Check `sc.exe query Pitwall`, `Get-Process pitwall*`, Task Scheduler, the Run keys and `%ProgramFiles%\Pitwall`. | The service is removed, the processes are gone, no scheduled task or Run entry, the install folder is gone. `%APPDATA%\Pitwall` stays (models, keys) until deleted by hand. |
+| U18 | Linux | Remove the `.deb` (`sudo apt remove pitwall`) and delete the AppImage. Check `systemctl --user status pitwall.service`, `~/.config/systemd/user`, `~/.config/autostart`, `ps`. | No unit, no autostart entry, no process; only the data folder remains. |
+
+Record the platform, build versions and each result in the release notes' verification status ([releasing](releasing.md)).
 
 ## UI
 
@@ -133,7 +198,9 @@ Needs a build with caching (ADR 0019) and a small real model. Use `temperature: 
 | 46 | Run a chat in the Playground, cancel it midway. | Generation stops; the job leaves the queue. |
 | 47 | Benchmarks > Run on the test model, then quit and start Pitwall again. | A tokens-per-second figure appears and is still listed after the restart (`benchmarks.json` in the data folder). |
 | 47a | Settings > Privacy > Keep request content on, make a request that contains a fake key (`pw_` followed by 30 letters), open it in Requests. | The prompt and the answer show; the key is shown as `[redacted]`; turning the setting off keeps no new content; restarting Pitwall empties the list. |
-| 47b | Settings > Updates > Check for updates (a build with an updater key only). | Nothing is contacted until you press the button; with an update, Install and restart. A build without a key says "Not configured". |
+| 47aa | Settings > Pitwall: switch **Offline mode** and press ⌘W (Ctrl+W) within 500 ms. Open Settings again (⌘, / Ctrl+,). Repeat with **Requests at once**: type a new number without pressing Enter or Tab, then ⌘W within 500 ms. Repeat both once more and quit the app (tray > Quit) instead of ⌘W, then start it and open Settings. | The switch and the number show the new values each time; `GET /x/v1/health` (or the Dashboard) agrees. After a quit the next Settings window sends the edit it found unsent (it is never older than ten minutes). |
+| 47ab | Make Settings refuse one change: stop the server (`launchctl kill`/`sc.exe stop`/`systemctl --user stop`, before the OS restarts it) and change **Port**. Start the server again, change **When you quit Pitwall**, then press ⌘W (Ctrl+W). | The banner says "Port could not be saved: <the server's reason>" with **Undo port change** and Retry. Once the server is back the quit choice saves while the port stays refused (not sent again until Retry or a new edit). ⌘W does not close at once: the window says "Port was not saved: <reason>" with Close anyway and Keep editing. |
+| 47b | Help > Check for updates… (the Updates window) (a build with an updater key only). | Nothing is contacted until you press the button; with an update, Install and restart. A build without a key says "Not configured". |
 | 47c | Make a few requests with an app's key, then Apps & keys > that app > Usage over time. Switch 24h, 7d, 30d and Tokens, Requests, Peak memory. | Totals match the requests made; the chart has one bar per period; peak memory equals the size of the model that served them (Models shows its memory); the Dashboard's Usage by app chart shows the same app, and its legend link opens the app. |
 | 47d | Set Requests per day to 3 for the app and make 4 requests; then set Memory share to 1 percent and make another. | The 4th answers 429 "this app has made its 3 requests for today ..."; the Limits list shows "Limit reached"; at 80 % (the 3rd of 4, or 2.4) a "Close to the limit" warning and one event appear; the memory share answers 403 naming the model's MiB and the share. Raising the limits lets requests through again. |
 | 47e | Quit Pitwall, damage `usage.json` (write `{ not json`), start it. | It starts; the app's usage comes back from `usage.json.bak` (at most 30 s older); with both damaged the charts start empty. |

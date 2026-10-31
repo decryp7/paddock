@@ -6,7 +6,7 @@ import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { Toasts } from '../../core/toasts';
 import { registerIcons } from '../../shared/icons';
-import { Confirm } from '../../shared/ui/confirm';
+import { dialogsAnswering } from '../../../testing/render';
 import { EnginesPage } from './engines-page';
 import { EnginesStore } from './engines.store';
 
@@ -61,12 +61,12 @@ describe('Engine pins in the store', () => {
 
 describe('Engine pins on the Engines page', () => {
   async function render(backend: PitwallBackend = new MockBackend(), confirm = true) {
-    const ask = vi.fn(() => Promise.resolve(confirm));
+    const dialogs = dialogsAnswering(confirm);
     TestBed.configureTestingModule({
       imports: [EnginesPage],
       providers: [
         { provide: BACKEND, useValue: backend },
-        { provide: Confirm, useValue: { ask } },
+        dialogs,
       ],
     });
     registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
@@ -82,7 +82,7 @@ describe('Engine pins on the Engines page', () => {
     };
     const el = fixture.nativeElement as HTMLElement;
     const btn = (label: string) => el.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
-    return { el, settle, btn, ask };
+    return { el, settle, btn, opened: dialogs.opened };
   }
 
   it('offers a pin button per build, with the unpinned ones saying Pin', async () => {
@@ -139,11 +139,11 @@ describe('Engine pins on the Engines page', () => {
   });
 
   it('names the roll back target and what pinning it means before doing it', async () => {
-    const { el, settle, ask } = await render();
+    const { el, settle, opened } = await render();
     const rollback = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Roll back to Vulkan b11669'))!;
     rollback.click();
     await settle();
-    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ title: 'Roll back to Vulkan b11669?', message: expect.stringContaining('pinned for all models') }));
+    expect(opened.at(-1)).toMatchObject({ id: 'pd.confirm', inputs: { heading: 'Roll back to Vulkan b11669?', message: expect.stringContaining('pinned for all models'), confirm: { label: 'Roll back' } } });
     expect(el.querySelector('.pinned-note')?.textContent).toContain('Vulkan b11669');
   });
 

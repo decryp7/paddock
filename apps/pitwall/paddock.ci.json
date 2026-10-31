@@ -3,6 +3,12 @@
   "cargo": ".",
   "os": ["ubuntu-latest", "windows-latest", "macos-latest"],
   "angularDir": "app",
+  "notices": {
+    "name": "Pitwall",
+    "manifests": ["app/src-tauri/Cargo.toml", "crates/pitwall-server/Cargo.toml"],
+    "npm": "app",
+    "out": ["app/src-tauri/resources"]
+  },
   "lastPackages": ["pitwall-app"],
   "windowsClippy": true,
   "processPatterns": ["{build}[/\\\\]debug[/\\\\]pitwall-server(\\.exe)? .*--fake-engine"],
@@ -18,6 +24,7 @@
     "TZ=Pacific/Auckland cargo nextest run -p pitwall-core -p pitwall-server --profile ci"
   ],
   "ui": [
+    "npm run build -w ui",
     "cd apps/pitwall/app",
     "npm audit --omit=dev --audit-level=high",
     "npm run lint",
@@ -27,12 +34,16 @@
     "node ../scripts/ci/ui-coverage-guard.mjs --min 80 --dir coverage"
   ],
   "e2e": [
+    "npm run build -w ui",
+    "npm run build:e2e -w ui",
     "cd apps/pitwall/app",
     "PW_E2E_PORT=$((4390 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=$E2E_SHARD"
   ],
   "e2eShards": 2,
   "e2eArtifacts": "apps/pitwall/app/.angular/playwright-results",
   "e2eWebkit": [
+    "npm run build -w ui",
+    "npm run build:e2e -w ui",
     "cd apps/pitwall/app",
     "PW_E2E_PORT=4393 npx playwright test --project=webkit --workers=1"
   ]

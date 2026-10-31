@@ -10,9 +10,11 @@ interface DashboardState {
   histories: Partial<Record<HistoryRange, History>>;
   loading: boolean;
   error: CommandError | null;
+  /** Display names of the library's models by id, for the charts' legends (a model need not be loaded to have served). */
+  modelNames: Record<string, string>;
 }
 
-const initial: DashboardState = { range: '1h', histories: {}, loading: false, error: null };
+const initial: DashboardState = { range: '1h', histories: {}, loading: false, error: null, modelNames: {} };
 
 /** The 1 h chart continues with the live tail (points pushed after the history was fetched), within the hour. */
 export function withTail(history: History, tail: HistoryPoint[]): HistoryPoint[] {
@@ -50,11 +52,21 @@ export const DashboardStore = signalStore(
     /** Selects a range and fetches its history (a cached range shows at once and refreshes in place). */
     async select(range: HistoryRange): Promise<void> {
       patchState(store, { range, loading: true, error: null });
+      if (Object.keys(store.modelNames()).length === 0) void this.loadNames();
       try {
         const h = await backend.history(range);
         patchState(store, (s) => ({ histories: { ...s.histories, [range]: h }, loading: s.range === range ? false : s.loading }));
       } catch (e) {
         if (store.range() === range) patchState(store, { loading: false, error: toCommandError(e) });
+      }
+    },
+    /** The library's display names; without them a legend falls back to the shortened id, so a failure only costs the names. */
+    async loadNames(): Promise<void> {
+      try {
+        const library = await backend.localModels();
+        patchState(store, { modelNames: Object.fromEntries(library.map((m) => [m.id, m.name])) });
+      } catch {
+        // The legend keeps the shortened ids; the history charts are unaffected.
       }
     },
   })),

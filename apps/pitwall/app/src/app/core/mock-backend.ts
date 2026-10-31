@@ -1,3 +1,4 @@
+import { buildDownloadName } from '../shared/build-download';
 import type {
   AppDetail,
   ModelPreset,
@@ -9,7 +10,6 @@ import type {
   CacheClearScope,
   CacheInfo,
   AppPermissions,
-  AppUpdateStatus,
   BenchmarkResult,
   BuildCapabilities,
   CommandError,
@@ -32,6 +32,7 @@ import type {
   HfModel,
   HfRepo,
   Job,
+  JobEvent,
   LiveUpdate,
   LoadedModel,
   LocalModel,
@@ -42,6 +43,7 @@ import type {
   PitwallEvent,
   PlaygroundEvent,
   PlaygroundRequest,
+  Platform,
   Preset,
   QueueSnapshot,
   RequestContent,
@@ -50,13 +52,13 @@ import type {
   UpdateCheckResult,
   UpdateCheckSettings,
   UpdateCheckStatus,
-  UpdateInfo,
   UpdateNotice,
   UpdateSchedule,
   ServerInfo,
   Settings,
   Throughput,
 } from './api.types';
+import { BROWSER_VERSION } from '../shell/engines';
 import type { PitwallBackend, Unsubscribe } from './backend';
 import {
   demoReplyWords,
@@ -94,10 +96,20 @@ import {
 const DEFAULT_SLOTS = 2;
 const DEFAULT_CONTEXT = 8192;
 
+/** What each job method is called while it runs (the real titles come from the app, `app_commands.rs`). */
+const JOB_TITLES: Partial<Record<keyof PitwallBackend, string>> = {
+  loadModel: 'Loading the model',
+  runBenchmark: 'Running the benchmark',
+  checkUpdatesNow: 'Checking for model updates',
+  installService: 'Installing the service',
+  uninstallService: 'Removing the service',
+  repairService: 'Repairing the service',
+};
+
 /** The calls the desktop app answers itself, without the server (they keep working when the server is down). */
 const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
-  'autostart', 'setAutostart', 'appUpdateStatus', 'checkAppUpdate', 'installAppUpdate', 'quitApp', 'takeQuitAsk',
+  'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk',
 ]);
 
 export interface MockOptions {
@@ -114,6 +126,8 @@ export interface MockOptions {
   seed?: number;
   /** The server is not registered with the OS yet and the user has not been asked (first-run question). */
   askConsent?: boolean;
+  /** The OS the service is registered with (its wording in Settings and the first-run question); default macOS. */
+  platform?: Platform;
   /** macOS: the background item is switched off in Login Items (notice with an "Open Login Items" button). */
   loginItemOff?: boolean;
   /** The server is down: every call except the app's own (service, log-in, updates) fails with `serverUnavailable`. */
@@ -122,8 +136,6 @@ export interface MockOptions {
   startFailed?: boolean;
   /** macOS: a repair of a refused registration is under way (notice with its progress). */
   repairing?: boolean;
-  /** A newer release is available and the build can update itself. */
-  updateAvailable?: boolean;
   /** A model's engine crashed repeatedly and was given up on (dashboard issue with Retry). */
   crashed?: boolean;
   /** Model update notices are already on offer (otherwise "Check now" finds them). */
@@ -181,7 +193,6 @@ export class MockBackend implements PitwallBackend {
   private autostart_ = false;
   private issues_: EngineIssue[] = [];
   private engineSetup_: EngineSetup = { state: 'idle', error: null, download: null };
-  private readonly updateAvailable: boolean;
   private updateCheck_: UpdateCheckSettings = { enabled: false, schedule: 'weekly' };
   private updateNotices_: UpdateNotice[] = [];
   private updateHidden_ = new Set<string>();
@@ -195,11 +206,12 @@ export class MockBackend implements PitwallBackend {
     this.failing = new Set(options.failing ?? []);
     this.rnd = prng(options.seed ?? 42);
     this.streamDelay = options.streamDelayMs ?? 0;
-    this.updateAvailable = options.updateAvailable ?? false;
     if (options.modelUpdates) this.updateNotices_ = demoUpdateNotices(this.now());
     if (options.quitAsk) this.quitAskPending = true;
     if (options.installing) {
-      const download: Download = { id: 'eng-0', kind: 'engine', name: 'llama.cpp CUDA 13 (b11669)', host: 'github.com', bytesDone: 212 * MiB, bytesTotal: 388 * MiB, speedBps: 24 * MiB, state: 'downloading', error: null, startedAt: this.now() - 9_000 };
+      // The catalog's suggested build (cuda-13 at its pinned release, its download size, named as the server names it): the first
+      // start installs exactly that.
+      const download: Download = { id: 'eng-0', kind: 'engine', name: 'llama.cpp CUDA 13 (NVIDIA) (b11702)', host: 'github.com', bytesDone: 212 * MiB, bytesTotal: 398 * MiB, speedBps: 24 * MiB, state: 'downloading', error: null, startedAt: this.now() - 9_000 };
       this.engineSetup_ = { state: 'installing', error: null, download };
     }
     if (options.crashed) {
@@ -208,7 +220,7 @@ export class MockBackend implements PitwallBackend {
       ];
     }
     this.service = {
-      platform: 'macos',
+      platform: options.platform ?? 'macos',
       installed: !options.askConsent,
       running: !(options.serverDown || options.startFailed),
       canInstall: true,
@@ -224,7 +236,8 @@ export class MockBackend implements PitwallBackend {
     const empty = options.empty ?? false;
     this.settings_ = demoSettings();
     this.server = {
-      version: '1.0.3',
+      // The browser build's one version (the shell's About and Updates read the same constant), never a second literal.
+      version: BROWSER_VERSION,
       apiVersion: 1,
       pid: 7412,
       port: this.settings_.server.port,
@@ -393,7 +406,79 @@ export class MockBackend implements PitwallBackend {
     }
   }
 
-  private async reply<T>(method: keyof PitwallBackend, value: () => T): Promise<T> {
+  // ---- Jobs (the real backend runs these as background jobs, ADR 0024) -------------------------------------------
+
+  /** Tests: jobs wait until cancelled (or stopped waiting) instead of finishing. */
+  holdJobs = false;
+  /** Tests: Cancel is refused, as for a step that cannot be interrupted; the job then offers "Stop waiting". */
+  refuseCancel = false;
+  private jobSeq = 0;
+  private readonly jobListeners = new Set<(event: JobEvent) => void>();
+  private readonly held = new Map<number, { end: (stoppedWaiting: boolean) => void; canStop: () => boolean }>();
+
+  jobEvents(listener: (event: JobEvent) => void): Unsubscribe {
+    this.jobListeners.add(listener);
+    return () => void this.jobListeners.delete(listener);
+  }
+
+  jobCancel(jobId: number): Promise<boolean> {
+    const job = this.held.get(jobId);
+    if (!job) return Promise.resolve(false);
+    if (this.refuseCancel) {
+      this.emitJob({ kind: 'progress', jobId, phase: 'Cancel did not take effect', done: 1, total: null, unit: 'items', canStopWaiting: true, elapsedSecs: 1, cancellable: true, notCancellableReason: null });
+      return Promise.resolve(true);
+    }
+    job.end(false);
+    return Promise.resolve(true);
+  }
+
+  jobStopWaiting(jobId: number): Promise<boolean> {
+    const job = this.held.get(jobId);
+    if (!job?.canStop()) return Promise.resolve(false);
+    job.end(true);
+    return Promise.resolve(true);
+  }
+
+  private emitJob(event: JobEvent): void {
+    for (const l of [...this.jobListeners]) l(event);
+  }
+
+  private async asJob<T>(method: keyof PitwallBackend, run: () => Promise<T>): Promise<T> {
+    const jobId = ++this.jobSeq;
+    this.emitJob({ kind: 'started', jobId, title: JOB_TITLES[method] ?? 'Working' });
+    this.emitJob({ kind: 'progress', jobId, phase: 'Working on it', done: 1, total: null, unit: 'items', canStopWaiting: false, elapsedSecs: 1, cancellable: true, notCancellableReason: null });
+    try {
+      if (this.holdJobs) {
+        let stopped = false;
+        await new Promise<void>((resolve) => {
+          this.held.set(jobId, {
+            end: (stoppedWaiting) => {
+              stopped = stoppedWaiting;
+              resolve();
+            },
+            canStop: () => this.refuseCancel,
+          });
+        });
+        this.held.delete(jobId);
+        this.emitJob({ kind: 'cancelled', jobId, stoppedWaiting: stopped });
+        const error: CommandError = { code: 'cancelled', message: stopped ? 'Stopped waiting. The server may still be working on it.' : 'Cancelled.' };
+        throw error;
+      }
+      const value = await run();
+      this.emitJob({ kind: 'done', jobId, result: value ?? null });
+      return value;
+    } catch (e) {
+      if ((e as CommandError).code !== 'cancelled') this.emitJob({ kind: 'failed', jobId, error: e as CommandError });
+      throw e;
+    }
+  }
+
+  private reply<T>(method: keyof PitwallBackend, value: () => T): Promise<T> {
+    const run = () => this.replyNow(method, value);
+    return method in JOB_TITLES ? this.asJob(method, run) : run();
+  }
+
+  private async replyNow<T>(method: keyof PitwallBackend, value: () => T): Promise<T> {
     if (this.latency) await new Promise((r) => setTimeout(r, this.latency));
     if (this.failing.has(method) || (this.serverDown && !APP_METHODS.has(method))) {
       const error: CommandError = { code: 'serverUnavailable', message: 'The Pitwall server is not responding. It may still be starting.' };
@@ -716,7 +801,7 @@ export class MockBackend implements PitwallBackend {
       if (this.server.offline) this.fail('offline', 'Offline mode is on: Pitwall downloads nothing.');
       const engine = this.engineOfBuild(buildId) ?? this.fail('notFound', `No build ${buildId} in the catalog.`);
       const cat = engine.catalog.find((c) => c.id === buildId)!;
-      const d: Download = { id: `eng-${this.nextId++}-${cat.id}`, kind: 'engine', name: `${engine.name} ${cat.label} ${cat.tag}`, host: 'github.com', bytesDone: 0, bytesTotal: cat.downloadBytes, speedBps: 0, state: 'queued', error: null, startedAt: this.now() };
+      const d: Download = { id: `eng-${this.nextId++}-${cat.id}`, kind: 'engine', name: buildDownloadName(engine.name, cat), host: 'github.com', bytesDone: 0, bytesTotal: cat.downloadBytes, speedBps: 0, state: 'queued', error: null, startedAt: this.now() };
       this.downloads_.unshift(d);
       this.emit({ kind: 'download', download: clone(d) });
       return d;
@@ -1193,26 +1278,6 @@ export class MockBackend implements PitwallBackend {
     });
   }
 
-  appUpdateStatus(): Promise<AppUpdateStatus> {
-    return this.reply('appUpdateStatus', () =>
-      this.updateAvailable
-        ? { available: true, reason: null, currentVersion: this.server.version }
-        : { available: false, reason: 'Updates are not configured for this build (no updater key).', currentVersion: this.server.version },
-    );
-  }
-
-  checkAppUpdate(): Promise<UpdateInfo | null> {
-    return this.reply('checkAppUpdate', () => {
-      if (!this.updateAvailable) this.fail('notAvailable', 'Updates are not available in this build.');
-      return { version: '0.2.0', notes: 'Faster model loading and a new dashboard tile.' };
-    });
-  }
-
-  installAppUpdate(): Promise<void> {
-    return this.reply('installAppUpdate', () => {
-      if (!this.updateAvailable) this.fail('notAvailable', 'Updates are not available in this build.');
-    });
-  }
 
   serviceState(): Promise<ServiceInstall> {
     return this.reply('serviceState', () => this.service);
@@ -1296,10 +1361,18 @@ export class MockBackend implements PitwallBackend {
     return () => this.quitAskHandlers.delete(handler);
   }
 
-  /** Demo and test hook: the user chose Quit while the setting is "ask" (`windowOpen`: the window is there to answer). */
+  /**
+   * Demo and test hook: the user chose Quit while the setting is "ask" (`windowOpen`: the window is there to answer). As
+   * the app does, the request is left pending first and the event only tells the window to take it.
+   */
   askQuit(windowOpen = true): void {
+    this.quitAskPending = true;
     if (windowOpen) this.quitAskHandlers.forEach((h) => h());
-    else this.quitAskPending = true;
+  }
+
+  /** Test hook: a stale `quit-ask` event with nothing pending (it must not bring the question up). */
+  emitStaleQuitAsk(): void {
+    this.quitAskHandlers.forEach((h) => h());
   }
 
   autostart(): Promise<boolean> {

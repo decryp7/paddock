@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { Panel } from '../../shared/ui/panel';
 import { consentDetail } from './service-consent';
 import { ServiceStore } from './service.store';
+import { MatButton } from '@angular/material/button';
 
 /**
  * The background service card (Settings). It belongs to the desktop app, not to the server: it renders and works while
@@ -11,7 +12,7 @@ import { ServiceStore } from './service.store';
  */
 @Component({
   selector: 'pw-service-panel',
-  imports: [Panel],
+  imports: [MatButton, Panel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel id="set-service" heading="Background service" icon="server" sub="So apps can use Pitwall without this window">
@@ -24,17 +25,17 @@ import { ServiceStore } from './service.store';
           <span class="status" data-testid="service-pill" [attr.data-tone]="tone(sv)">{{ pill(sv) }}</span>
         </div>
         <div class="row">
-          <div class="lbl"><span class="name">{{ sv.installed ? 'Remove the service' : 'Run in the background' }}</span><p class="hint">{{ serviceHint(sv.platform) }}</p></div>
+          <div class="lbl"><span class="name">{{ sv.installed ? 'Remove the service' : 'Run in the background' }}</span><p class="hint" data-testid="service-action-hint">{{ sv.installed ? removeHint(sv.platform) : serviceHint(sv.platform) }}</p></div>
           @if (sv.installed) {
-            <button type="button" class="btn" [disabled]="service.isBusy()('uninstall')" (click)="service.uninstall()">{{ service.isBusy()('uninstall') ? 'Removing…' : 'Remove service' }}</button>
+            <button type="button" matButton="outlined" [disabled]="service.isBusy()('uninstall')" (click)="service.uninstall()">{{ service.isBusy()('uninstall') ? 'Removing…' : 'Remove service' }}</button>
           } @else if (!sv.disabledInLoginItems) {
-            <button type="button" class="btn primary" [disabled]="!sv.canInstall || service.isBusy()('install')" (click)="service.install()">{{ service.isBusy()('install') ? 'Installing…' : 'Install service' }}</button>
+            <button type="button" matButton="filled" [disabled]="!sv.canInstall || service.isBusy()('install')" (click)="service.install()">{{ service.isBusy()('install') ? 'Installing…' : 'Install service' }}</button>
           }
         </div>
         @if (service.canRepair()) {
           <div class="row" data-testid="service-repair-action">
             <div class="lbl"><span class="name">Repair the service</span><p class="hint">Removes the registration, waits until macOS has dropped it and registers the service again. It takes up to a minute.</p></div>
-            <button type="button" class="btn primary" data-testid="repair-service" [disabled]="service.isBusy()('repair')" (click)="service.repair()">{{ service.isBusy()('repair') ? 'Repairing…' : 'Repair service' }}</button>
+            <button type="button" matButton="filled" data-testid="repair-service" [disabled]="service.isBusy()('repair')" (click)="service.repair()">{{ service.isBusy()('repair') ? 'Repairing…' : 'Repair service' }}</button>
           </div>
         }
         @if (sv.repair; as r) {
@@ -45,7 +46,7 @@ import { ServiceStore } from './service.store';
         @if (sv.disabledInLoginItems) {
           <div class="row" data-testid="service-login-items-row">
             <div class="lbl"><span class="name">Switched off in Login Items</span><p class="hint">Switch Pitwall on in System Settings > General > Login Items. Pitwall never does it for you.</p></div>
-            <button type="button" class="btn primary" [disabled]="service.isBusy()('loginItems')" (click)="service.openLoginItems()">Open Login Items</button>
+            <button type="button" matButton="outlined" [disabled]="service.isBusy()('loginItems')" (click)="service.openLoginItems()">Open Login Items</button>
           </div>
         }
       } @else {
@@ -59,36 +60,43 @@ import { ServiceStore } from './service.store';
       min-width: 0;
     }
     pw-panel {
-      scroll-margin-top: var(--sp-6);
+      scroll-margin-top: var(--pd-space-3);
     }
     .row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sp-6);
+      gap: var(--pd-space-6);
       min-height: 52px;
-      padding: var(--sp-3) 0;
-      border-top: 1px solid var(--border-soft);
+      padding: var(--pd-space-3) 0;
+      border-top: 1px solid var(--pd-hairline);
       &:first-of-type {
         border-top: none;
         padding-top: 0;
       }
     }
+    /* An action keeps its label on one line; the text beside it wraps instead. */
+    .row button {
+      flex: none;
+      min-width: 128px;
+      white-space: nowrap;
+    }
     .lbl {
+      flex: 1 1 auto;
       min-width: 0;
       .name {
         display: block;
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
       .hint {
         margin-top: 2px;
-        font-size: var(--fs-sm);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-muted);
         max-width: 480px;
       }
     }
     .pad {
-      padding: var(--sp-3) 0;
+      padding: var(--pd-space-3) 0;
     }
   `,
 })
@@ -101,6 +109,12 @@ export class ServicePanel {
 
   protected serviceHint(platform: string): string {
     return consentDetail(platform);
+  }
+
+  /** What removing does, in the platform's words: the server stops running in the background; models and settings stay. */
+  protected removeHint(platform: string): string {
+    const what = platform === 'windows' ? 'Windows service' : platform === 'macos' ? 'login item' : 'systemd user service';
+    return `Removes the ${what}: Pitwall's server stops running in the background, and apps can reach it only while Pitwall is open. Your models and settings stay.`;
   }
 
   protected pill(sv: { installed: boolean; running: boolean; disabledInLoginItems: boolean; startFailed: boolean; notInLoginItems: boolean }): string {

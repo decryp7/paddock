@@ -1,8 +1,8 @@
 # Pitwall roadmap
 
 An honest account of what works, what is partly there and what is only planned. Status words: **works** (implemented
-and covered by tests), **verified** (also run for real on a machine), **partial**, **planned**. Pitwall is
-unreleased; there are no installers yet and nothing is promised for a date.
+and covered by tests), **verified** (also run for real on a machine), **partial**, **planned**. Pitwall 1.0.x is
+released; 1.1 is the current line. Nothing is promised for a date beyond the release in progress.
 
 ## Verified on a real machine
 
@@ -53,10 +53,12 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 - Tauri shell: tray and window lifecycle, admin key in the OS credential store, service install per OS (Windows
   service, macOS launch agent via `SMAppService`, Linux systemd user service), start at login, restart after update.
   **Implemented and unit-tested**; not yet exercised on real Windows and Linux machines.
-- Installers: Windows NSIS, macOS `.dmg`, Linux `.deb` and AppImage; unsigned until the signing secrets are set
+- Installers: Windows NSIS, macOS `.dmg`, Linux `.deb` and AppImage, built by `pitwall-release.yml` from a `pitwall-v*`
+  tag; the macOS app is ad-hoc sealed and not notarised, the Windows installer is not code-signed
   ([releasing.md](releasing.md)).
-- Updater with signed `latest.json`: **planned**, needs the secrets.
-- CI on Linux, the Windows runner and the macOS host: `build.yml` (checks, installers and the gated release job) exists.
+- Updater with signed `latest.json` (the family key, the `pitwall-latest` feed): **works** in 1.1; the VM test plan is in
+  the [testing manual](testing-manual.md#update). 1.0.x copies do not look at that feed and are reinstalled once by hand.
+- CI on Linux, the Windows runner and the macOS host: Pitwall's legs of the monorepo `ci.yml` and `pitwall-release.yml`.
 
 ## Phase 3: the rest of the product brief *(planned)*
 
@@ -98,6 +100,52 @@ Pacenotes: toolsets `orient`, `code`, `review`, `diagrams`, `requirements` and `
 - Property tests ("never panics") and fuzz targets for every parser; mutation testing to measure test strength.
 - Below-normal process priority for engines is applied on Windows only; decide the macOS and Linux equivalent.
 - Pin updates for llama.cpp as reviewed changes that pass the end-to-end test.
+
+## 1.1: jobs in the UI (ADR 0024)
+
+- **Done (WP-3).** The UI runs model loads, benchmarks, the model update check, service install, uninstall and Repair and the
+  app update as jobs (`start_*` commands over a channel; `TauriBackend.job`): no UI timeout (`JOB_METHODS` bypass
+  `withTimeout`, ER-19), phase-labelled progress with a growing count, Cancel in every phase, "Stop waiting" while
+  `canStopWaiting` and a "Still working" note after a quiet spell (`JobsService`, `pw-jobs-panel`). A cancelled job rejects
+  with the `cancelled` code, which toasts as information, not as an error.
+- **Deleted.** The old blocking commands (`load_model`, `run_benchmark`, `check_updates_now`, `install_service`,
+  `uninstall_service`, `repair_service`, `install_app_update`, `request_repair`) are gone from the Tauri commands; the
+  server's own methods of the same names are only reached through the jobs. Wire contract: `core/testdata/job-events.json`
+  is checked by a Rust test (every `JobEvent` variant serialises to it) and by `jobs.spec.ts` (every entry parses).
+- **Note.** "Still working" rarely shows: a running job reports every second, so it appears only when the app stops hearing from
+  the job (a stuck step), which is what it is for.
+- **Left for 1.1.** `checkAppUpdate` and `appUpdateStatus` are quick calls and keep a 30 s timeout.
+
+## 1.1: on the shared shell (WP-2, plan `docs/plans/1.1-wp2.md`)
+
+- **Quit gate (code review 2026-10-30): met.** Pitwall uses the shared Quit (`APP_QUIT`, `Builder::menu_quit_without_window` with
+  `quit::request_from_menu`) and `quit_from_the_menu_with_no_window_open_still_quits_or_asks` (`app/src-tauri/tests/shell.rs`) is
+  un-ignored and passes.
+
+- **Done (WP-2.1).** The UI uses paddock-ui's `--pd-*` tokens and Material theme (`data-accent="pitwall"`); Pitwall's own
+  scale is gone; the chart colours are derived from the shared tokens (`scripts/ci/tokens.test.mjs`).
+- **Done (WP-2.2).** No layout problem at 900, 1024 and 1280 px in Chromium and WebKit (`e2e/layout.baseline.json` is
+  empty): tables fit their panel, the detail panel lies over a list too narrow for both, forms and toolbars step down.
+- **Done (WP-2.4, Rust).** The app crate runs on `paddock-shell`: the shell opens the tray and the main window (ADR 0029),
+  owns the windows, the exit and its watchdog, and guards Pitwall's commands; start tests on the mock runtime. The main
+  window is opaque (user, 2026-10-30).
+- **Done (WP-2.3).** Every control is Material or paddock-ui (rule 47; `scripts/ci/controls.test.mjs` fails on a native or
+  retired one); one filled primary per region (`e2e/primary.e2e.ts`); the axe baseline is empty.
+- **Done (WP-2.7, first half).** `THIRD_PARTY_NOTICES.md` for the app, the server and the UI, checked in CI; About shows it
+  once the shell's updater is registered.
+- **Done (tables).** Every table is Angular Material's `mat-table` with a sticky header; a column constant across three or
+  more rows is hidden and its value said once; the request log stays a virtual grid.
+- **Done (updater, shared part).** `paddock-updater` gains an Offline mode predicate that fails closed (on this branch until
+  shared code unfreezes); Pitwall moves to the shared updater with WP-2.5.
+- **Done (WP-2.5, WP-2.6, WP-2.7, WP-2.9).** The UI runs on the shell: one bundle, three kinds of window; the pages frame;
+  the Settings window; About, Updates and What's new from the shared updater with Offline mode failing closed; the macOS
+  menu's Quit items through Pitwall's quit flow; Pitwall's four dialogs and every confirmation (`pd.confirm`) as OS
+  windows that fit their content.
+- **WP-2.8.** Screenshots recaptured (`docs/screenshots`); the independent review (ER-23) is still to come.
+- **Left.** Mod+Q while no window is open (the shell's native menu runs commands in a window); the Settings window's
+  footer says "saved as you make them" for a page that saves with its own bar (a paddock-ui gap); the tray popover
+  (`#/tray`) is not opened by the native tray yet; the C4 UI diagrams show the 1.0 sidebar; `.changelog()` for What's new
+  once `CHANGELOG.md` lands with the 1.1.0 bump.
 
 ## Next (hand-off, 2026-10-22)
 

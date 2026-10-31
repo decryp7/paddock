@@ -139,6 +139,19 @@ impl Client {
         headers: &[(&str, &str)],
         timeout: Duration,
     ) -> Result<Response, LoopbackError> {
+        self.send_inner(method, path, body, headers, Some(timeout)).await
+    }
+
+    /// `timeout: None` waits for the head for as long as the connection lives (a long operation); a server that goes away
+    /// closes the connection, which fails the request.
+    async fn send_inner(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Vec<u8>>,
+        headers: &[(&str, &str)],
+        timeout: Option<Duration>,
+    ) -> Result<Response, LoopbackError> {
         if headers
             .iter()
             .any(|(k, v)| !header_ok(k) || !header_ok(v) || k.contains(':') || k.contains(' '))
@@ -183,10 +196,13 @@ impl Client {
         let req = req
             .body(Full::new(Bytes::from(body.unwrap_or_default())))
             .map_err(|e| LoopbackError::Http(e.to_string()))?;
-        let resp = tokio::time::timeout(timeout, sender.send_request(req))
-            .await
-            .map_err(|_| LoopbackError::Timeout(timeout))?
-            .map_err(|e| LoopbackError::Http(e.to_string()))?;
+        let resp = match timeout {
+            Some(t) => tokio::time::timeout(t, sender.send_request(req))
+                .await
+                .map_err(|_| LoopbackError::Timeout(t))?,
+            None => sender.send_request(req).await,
+        }
+        .map_err(|e| LoopbackError::Http(e.to_string()))?;
         let status = resp.status().as_u16();
         let content_type = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(str::to_string);
         let headers = resp
@@ -202,6 +218,16 @@ impl Client {
         })
     }
 
+    /// [`Client::json`] without a deadline, for a call that runs as long as the work needs (the app's jobs). It ends when
+    /// the server answers or the connection closes.
+    pub async fn json_no_deadline(&self, method: &str, path: &str, body: Option<&Value>) -> Result<(u16, Value), LoopbackError> {
+        let bytes = body.map(|b| serde_json::to_vec(b).unwrap_or_default());
+        let r = self.send_inner(method, path, bytes, &[], None).await?;
+        let status = r.status;
+        let raw = r.bytes(MAX_JSON_BYTES).await?;
+        Ok((status, parse_json_body(&raw)?))
+    }
+
     /// Sends JSON (or nothing) and reads a JSON answer (an empty body is `null`).
     pub async fn json(&self, method: &str, path: &str, body: Option<&Value>, timeout: Duration) -> Result<(u16, Value), LoopbackError> {
         let bytes = body.map(|b| serde_json::to_vec(b).unwrap_or_default());
@@ -213,12 +239,15 @@ impl Client {
         })
         .await
         .map_err(|_| LoopbackError::Timeout(timeout))??;
-        let v = if resp.1.is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_slice(&resp.1).map_err(|e| LoopbackError::Body(e.to_string()))?
-        };
-        Ok((resp.0, v))
+        Ok((resp.0, parse_json_body(&resp.1)?))
+    }
+}
+
+fn parse_json_body(raw: &[u8]) -> Result<Value, LoopbackError> {
+    if raw.is_empty() {
+        Ok(Value::Null)
+    } else {
+        serde_json::from_slice(raw).map_err(|e| LoopbackError::Body(e.to_string()))
     }
 }
 
@@ -257,6 +286,44 @@ mod tests {
         assert!(seen.contains("authorization: Bearer secret"));
         assert!(seen.contains("host: 127.0.0.1:"));
         assert!(seen.contains("{\"a\":1}"));
+    }
+
+    #[tokio::test]
+    async fn a_call_without_a_deadline_waits_for_the_answer_and_ends_when_the_server_goes_away() {
+        // A server that reads the request, waits for the test's go and then answers.
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = LoopbackPort::new(l.local_addr().unwrap().port()).unwrap();
+        let (go, goes) = tokio::sync::oneshot::channel::<()>();
+        let (got, got_it) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            let (mut s, _) = l.accept().await.unwrap();
+            let mut buf = vec![0u8; 8192];
+            let _ = s.read(&mut buf).await.unwrap();
+            got.send(()).unwrap();
+            goes.await.unwrap();
+            s.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 11\r\n\r\n{\"ok\":true}")
+                .await
+                .unwrap();
+            s.shutdown().await.unwrap();
+            // Then one that accepts, reads and dies without answering.
+            let (mut s, _) = l.accept().await.unwrap();
+            let _ = s.read(&mut buf).await.unwrap();
+            drop(s);
+        });
+        let c = Client::new(port, None);
+        let call = tokio::spawn({
+            let c = c.clone();
+            async move { c.json_no_deadline("POST", "/slow", None).await }
+        });
+        got_it.await.unwrap();
+        assert!(!call.is_finished(), "still waiting: no deadline");
+        go.send(()).unwrap();
+        let (status, v) = call.await.unwrap().unwrap();
+        assert_eq!((status, v["ok"].as_bool()), (200, Some(true)));
+        // The server dies mid-call: the call fails by itself (no poll is needed to notice).
+        let e = c.json_no_deadline("POST", "/dies", None).await.unwrap_err();
+        assert!(matches!(e, LoopbackError::Http(_)), "{e:?}");
+        server.await.unwrap();
     }
 
     #[tokio::test]
@@ -310,16 +377,15 @@ mod tests {
             evil.send("GET", "/", None, Duration::from_secs(1)).await,
             Err(LoopbackError::Invalid(_))
         ));
-        // A free port: nothing listens.
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let free = LoopbackPort::new(l.local_addr().unwrap().port()).unwrap();
-        drop(l);
-        let e = Client::new(free, None)
+        // A port held for the whole test that closes every connection without an answer (never a freed port: another
+        // test's server could take it). A broken exchange is `Http`; `Connect` (nothing listens) is mapped by its users' tests.
+        let held = paddock_testkit::net::HeldPort::hang_up();
+        let e = Client::new(LoopbackPort::new(held.port()).unwrap(), None)
             .send("GET", "/", None, Duration::from_secs(1))
             .await
             .err()
             .unwrap();
-        assert!(matches!(e, LoopbackError::Connect(..)), "{e}");
+        assert!(matches!(e, LoopbackError::Http(..)), "{e}");
         // A server that accepts but never answers: timeout.
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = LoopbackPort::new(l.local_addr().unwrap().port()).unwrap();
@@ -332,5 +398,30 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(e, LoopbackError::Timeout(_)), "{e}");
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod refused_tests {
+    use super::*;
+
+    /// A loopback port that is bound and held but not listening: connecting is refused (Linux only: Windows reports the refusal after about 2 s of SYN retries, close to the 3 s connect timeout, and macOS drops the
+    /// attempt instead, so these tests do not run there). The socket keeps the port taken for as long as it is alive.
+    fn refused_port() -> (socket2::Socket, u16) {
+        let s = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
+        s.bind(&std::net::SocketAddr::from(([127, 0, 0, 1], 0)).into()).unwrap();
+        let port = s.local_addr().unwrap().as_socket().unwrap().port();
+        (s, port)
+    }
+
+    #[tokio::test]
+    async fn a_port_nothing_listens_on_is_a_connect_error() {
+        let (_held, port) = refused_port();
+        let e = Client::new(LoopbackPort::new(port).unwrap(), None)
+            .send("GET", "/", None, Duration::from_secs(1))
+            .await
+            .err()
+            .unwrap();
+        assert!(matches!(e, LoopbackError::Connect(p, _) if p == port), "{e}");
     }
 }

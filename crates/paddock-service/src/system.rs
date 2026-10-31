@@ -154,6 +154,18 @@ mod tests {
         ));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_helper_that_prints_more_than_a_pipe_holds_is_read_while_it_runs() {
+        // 300 kB: more than the 64 KiB a pipe buffers. Read only after the exit, the helper would block and time out.
+        let mut s = RealSystem::new().with_timeout(Duration::from_secs(20));
+        let o = s
+            .run("/bin/sh", &["-c", "head -c 300000 /dev/zero | tr '\\0' a"])
+            .unwrap();
+        // It finished (no timeout) and the output is kept up to the cap.
+        assert_eq!((o.code, o.stdout.len()), (Some(0), MAX_HELPER_OUTPUT));
+    }
+
     #[test]
     fn files_are_written_atomically_read_back_and_removed() {
         let d = tempfile::tempdir().unwrap();

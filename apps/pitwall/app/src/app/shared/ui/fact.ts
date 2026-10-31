@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
+import { MatIconButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { Toasts } from '../../core/toasts';
@@ -9,7 +10,7 @@ import { Toasts } from '../../core/toasts';
  */
 @Component({
   selector: 'pw-fact',
-  imports: [MatIconModule, MatTooltipModule],
+  imports: [MatIconModule, MatTooltipModule, MatIconButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <span class="label">{{ label() }}</span>
@@ -17,7 +18,7 @@ import { Toasts } from '../../core/toasts';
       <ng-content>{{ value() }}</ng-content>
     </span>
     @if (copy() && value()) {
-      <button type="button" class="btn ghost icon sm" [attr.aria-label]="'Copy ' + label().toLowerCase()" matTooltip="Copy" (click)="copyValue()">
+      <button type="button" matIconButton class="copy" [attr.aria-label]="'Copy ' + label().toLowerCase()" matTooltip="Copy" (click)="copyValue()">
         <mat-icon svgIcon="pw:copy" aria-hidden="true" />
       </button>
     }
@@ -25,22 +26,26 @@ import { Toasts } from '../../core/toasts';
   styles: `
     :host {
       display: grid;
-      grid-template-columns: 104px minmax(0, 1fr) auto;
+      /* Wide enough for the longest label ("Completion tokens") on one line. */
+      grid-template-columns: 120px minmax(0, 1fr) auto;
       align-items: center;
-      column-gap: var(--sp-2);
+      column-gap: var(--pd-space-2);
       min-height: 26px;
-      font-size: var(--fs-base);
+      font-size: var(--pd-text-body);
     }
     .label {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .value {
       min-width: 0;
       overflow-wrap: anywhere;
     }
     .mono {
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
     }
   `,
 })

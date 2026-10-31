@@ -67,65 +67,20 @@ pub fn disabled_in_login_items(status: RegistrationStatus, launchd_disabled: Opt
     }
 }
 
-/// Reads `label`'s entry in the output of `launchctl print-disabled gui/<uid>`: `"label" => disabled` (older systems
-/// print `true`/`false`). `None` when the label is not listed.
-pub fn parse_print_disabled(output: &str, label: &str) -> Option<bool> {
-    let quoted = format!("\"{label}\"");
-    output.lines().find_map(|line| {
-        let rest = line.trim().strip_prefix(&quoted)?.trim_start().strip_prefix("=>")?;
-        match rest.trim() {
-            "disabled" | "true" => Some(true),
-            "enabled" | "false" => Some(false),
-            _ => None,
-        }
-    })
-}
-
-/// What `launchctl print gui/<uid>/<label>` says about the job.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct JobReport {
-    /// launchd knows the job at all (an empty report means it dropped it).
-    pub found: bool,
-    /// `state = running`.
-    pub running: bool,
-    /// `job state = spawn failed`.
-    pub spawn_failed: bool,
-    /// `last exit code = 78` (EX_CONFIG): launchd refused the program's code identity.
-    pub exit_config: bool,
-    /// `needs LWCR update`.
-    pub needs_lwcr_update: bool,
-    /// `has LWCR`: a launch constraint from the registered build is stored.
-    pub has_lwcr: bool,
-}
-
-/// Reads the report of `launchctl print` for the launch agent.
-pub fn parse_job(launchctl_print: &str) -> JobReport {
-    let mut job = JobReport::default();
-    for line in launchctl_print.lines().map(str::trim) {
-        if line.starts_with("state = ") {
-            job.found = true;
-            job.running = line == "state = running";
-        } else if line == "job state = spawn failed" {
-            job.spawn_failed = true;
-        } else if line.starts_with("last exit code = 78") {
-            job.exit_config = true;
-        } else if line.starts_with("properties = ") {
-            job.needs_lwcr_update = line.contains("needs LWCR update");
-            job.has_lwcr = line.contains("has LWCR");
-        }
-    }
-    job
-}
-
-impl JobReport {
-    /// Whether launchd holds a registration it can no longer start. macOS keeps the launch constraint of the build that
-    /// was registered; every ad-hoc signed build has another cdhash, so after an update launchd refuses the new binary
-    /// (spawn failed, exit 78 EX_CONFIG, has LWCR, "needs LWCR update" when it says so) until the job is replaced.
-    /// A job that holds a constraint and is not running counts too: the caller only asks when the server is unreachable.
-    pub fn stale(&self) -> bool {
-        self.found && (self.spawn_failed || self.exit_config || self.needs_lwcr_update || (self.has_lwcr && !self.running))
+/// What to say when macOS reports the launch agent as `NotFound`. Before the first registration that is simply how
+/// `SMAppService` answers for a service that was never set up, wherever the app is, so it says "not set up yet"; only after
+/// a registration did once work does a missing agent mean the app was moved out of its bundle's place.
+pub fn not_found_message(registered_before: bool) -> &'static str {
+    if registered_before {
+        "run Pitwall from /Applications (the launch agent is part of the app bundle)"
+    } else {
+        "The background service is not set up yet."
     }
 }
+
+// The parsers of `launchctl` output and the "is this job refused" decision live in the shared crate (one implementation:
+// it skips the nested coalition blocks macOS 26 prints and never calls a pending or running job stale).
+pub use paddock_service::parse::{launchctl_output, parse_job, parse_print_disabled, JobReport};
 
 /// Why a repair runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,7 +131,7 @@ pub fn plan(o: &Observed) -> Plan {
     if o.requested {
         return Plan::Repair(RepairReason::Requested);
     }
-    if o.job.stale() && !o.answers {
+    if o.job.needs_repair(o.answers) {
         return Plan::Repair(RepairReason::Stale);
     }
     if o.registered_version != Some(o.current_version) {
@@ -214,6 +169,49 @@ pub trait RepairOps {
     fn service_answers(&mut self) -> bool;
     /// Waits (tests do not).
     fn pause(&mut self, how_long: Duration);
+    /// The user pressed Cancel. Checked between steps and while waiting; never in the middle of one.
+    fn cancelled(&mut self) -> bool {
+        false
+    }
+    /// The repair entered `phase`.
+    fn phase(&mut self, phase: RepairPhase) {
+        let _ = phase;
+    }
+}
+
+/// The stages of a repair, for the job that shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepairPhase {
+    /// Removing the old registration.
+    Removing,
+    /// Waiting until launchd has dropped the old job.
+    WaitingForLaunchd,
+    /// Registering the service again.
+    Registering,
+    /// Waiting for the registered service to answer.
+    Starting,
+}
+
+impl RepairPhase {
+    /// A stable id for the job's phase.
+    pub const fn id(self) -> &'static str {
+        match self {
+            RepairPhase::Removing => "remove",
+            RepairPhase::WaitingForLaunchd => "wait-launchd",
+            RepairPhase::Registering => "register",
+            RepairPhase::Starting => "start",
+        }
+    }
+
+    /// The words to show.
+    pub const fn label(self) -> &'static str {
+        match self {
+            RepairPhase::Removing => "Removing the old registration...",
+            RepairPhase::WaitingForLaunchd => "Waiting for macOS to drop the old registration...",
+            RepairPhase::Registering => "Registering the service with macOS...",
+            RepairPhase::Starting => "Waiting for the service to start...",
+        }
+    }
 }
 
 /// How a repair ended.
@@ -225,6 +223,8 @@ pub enum RepairOutcome {
     NeedsApproval,
     /// It did not come back; the text says why and what to do.
     Failed(String),
+    /// The user cancelled. The service is registered again or untouched, never left removed.
+    Cancelled,
 }
 
 /// Replaces the registration: unregister, `launchctl bootout`, wait until launchd has dropped the job, register. Launchd
@@ -234,12 +234,17 @@ pub enum RepairOutcome {
 pub fn run_repair(ops: &mut dyn RepairOps, say: &mut dyn FnMut(&str)) -> RepairOutcome {
     say("re-registering the service");
     for cycle in 0..=MAX_CYCLES {
+        if ops.cancelled() {
+            say("cancelled before the next step; nothing more was changed");
+            return RepairOutcome::Cancelled;
+        }
         if cycle > 0 {
             say(&format!(
                 "launchd still reports a stale registration; retry {cycle} of {MAX_CYCLES}"
             ));
         }
         say("removing the old registration");
+        ops.phase(RepairPhase::Removing);
         if let Err(e) = ops.unregister() {
             say(&format!("unregister did not succeed (continuing): {e}"));
         }
@@ -247,7 +252,15 @@ pub fn run_repair(ops: &mut dyn RepairOps, say: &mut dyn FnMut(&str)) -> RepairO
             say(&format!("bootout did not succeed (continuing): {e}"));
         }
         let mut waited = Duration::ZERO;
+        ops.phase(RepairPhase::WaitingForLaunchd);
+        let mut cancelled = false;
         while !ops.job_gone() {
+            if ops.cancelled() {
+                // Registering again first: a cancel never leaves the service removed.
+                say("cancelled; registering the service again before stopping");
+                cancelled = true;
+                break;
+            }
             if waited >= GONE_WAIT {
                 say("launchd still holds the old job; registering anyway");
                 break;
@@ -255,8 +268,12 @@ pub fn run_repair(ops: &mut dyn RepairOps, say: &mut dyn FnMut(&str)) -> RepairO
             ops.pause(GONE_POLL);
             waited += GONE_POLL;
         }
-        ops.pause(Duration::from_secs(2 * u64::from(cycle)));
-        match ops.register() {
+        if !cancelled {
+            ops.pause(Duration::from_secs(2 * u64::from(cycle)));
+        }
+        ops.phase(RepairPhase::Registering);
+        let registered = ops.register();
+        match &registered {
             Ok(()) => say("registered"),
             Err(RegisterError::NeedsApproval) => {
                 say("macOS needs approval in Login Items; stopping");
@@ -264,13 +281,33 @@ pub fn run_repair(ops: &mut dyn RepairOps, say: &mut dyn FnMut(&str)) -> RepairO
             }
             Err(RegisterError::Other(e)) => say(&format!("register failed: {e}")),
         }
+        if cancelled {
+            // A cancel is only clean when the service is registered again and launchd accepts it.
+            if let Err(RegisterError::Other(e)) = registered {
+                let why = format!("Cancelled, but registering the service again failed: {e}. {NEXT_STEPS}");
+                say(&why);
+                return RepairOutcome::Failed(why);
+            }
+            ops.pause(SETTLE);
+            if ops.registration_stale() {
+                let why = format!("Cancelled, but launchd still reports a stale registration. {NEXT_STEPS}");
+                say(&why);
+                return RepairOutcome::Failed(why);
+            }
+            return RepairOutcome::Cancelled;
+        }
         ops.pause(SETTLE);
         if ops.registration_stale() {
             continue;
         }
         say("launchd accepts the registration; waiting for the service to start");
         let mut waited = Duration::ZERO;
+        ops.phase(RepairPhase::Starting);
         loop {
+            if ops.cancelled() {
+                say("cancelled; the service stays registered");
+                return RepairOutcome::Cancelled;
+            }
             if ops.service_answers() {
                 say("the service answers again");
                 return RepairOutcome::Recovered;
@@ -370,6 +407,8 @@ impl RepairTracker {
                 now,
             ),
             RepairOutcome::Failed(why) => self.set(RepairState::Failed, why, now),
+            // The job shows the cancel; nothing is left on the Settings notice.
+            RepairOutcome::Cancelled => *self.inner.lock().unwrap_or_else(PoisonError::into_inner) = None,
         }
     }
 
@@ -398,7 +437,15 @@ pub static REPAIR: RepairTracker = RepairTracker::new();
 mod tests {
     use super::*;
 
-    const LABEL: &str = "net.decryptology.pitwall.service";
+    #[test]
+    fn a_service_that_was_never_registered_is_not_set_up_yet_and_never_blamed_on_the_apps_place() {
+        let first = not_found_message(false);
+        assert!(first.contains("not set up yet") && !first.contains("/Applications"), "{first}");
+        assert!(
+            not_found_message(true).contains("/Applications"),
+            "after a registration worked, a missing agent is a moved app"
+        );
+    }
 
     #[test]
     fn the_disabled_mapping() {
@@ -414,36 +461,57 @@ mod tests {
         assert!(!disabled_in_login_items(NotFound, Some(true)));
     }
 
-    #[test]
-    fn the_disabled_list_is_parsed() {
-        let out = format!("disabled services = {{\n\t\"com.apple.x\" => enabled\n\t\"{LABEL}\" => disabled\n}}\n");
-        assert_eq!(parse_print_disabled(&out, LABEL), Some(true));
-        assert_eq!(parse_print_disabled(&out.replace("=> disabled", "=> enabled"), LABEL), Some(false));
-        assert_eq!(parse_print_disabled(&out.replace("=> disabled", "=> true"), LABEL), Some(true));
-        assert_eq!(parse_print_disabled(&out.replace("=> disabled", "=> false"), LABEL), Some(false));
-        assert_eq!(parse_print_disabled(&out.replace("=> disabled", "=> maybe"), LABEL), None);
-        assert_eq!(parse_print_disabled("", LABEL), None);
-        assert_eq!(parse_print_disabled(&format!("\"{LABEL}\" disabled"), LABEL), None);
-    }
-
     /// The real `launchctl print gui/501/net.decryptology.pitwall.service` of a Mac after an update (trimmed).
     const SPAWN_FAILED: &str = "gui/501/net.decryptology.pitwall.service = {\n\tactive count = 0\n\tpath = (submitted by smd.362)\n\ttype = Submitted\n\tmanaged_by = com.apple.xpc.ServiceManagement\n\tstate = spawn scheduled\n\n\tprogram identifier = Contents/MacOS/pitwall-server (mode: 2)\n\tparent bundle identifier = net.decryptology.pitwall\n\tparent bundle version = 1.0.2\n\truns = 534\n\tlast exit code = 78: EX_CONFIG\n\n\tjob state = spawn failed\n\tsanitizer flags = 0x0\n\n\tproperties = partial import | keepalive | runatload | resolve program | has LWCR\n}\n";
     const HEALTHY: &str = "gui/501/net.decryptology.pitwall.service = {\n\tstate = running\n\tpid = 88412\n\truns = 1\n\tlast exit code = (never exited)\n\tjob state = running\n\tproperties = keepalive | runatload | has LWCR\n}\n";
 
+    /// An invented `launchctl print` of Pitwall's service on macOS 26 (not a real user's output): the job's own `state` is
+    /// followed by nested coalition blocks that carry a `state = active` of their own. The refused job: spawn failed,
+    /// exit 78, a launch constraint.
+    const SPAWN_FAILED_MACOS_26: &str = "gui/501/net.decryptology.pitwall.service = {\n\tactive count = 0\n\tpath = (submitted by smd.101)\n\ttype = Submitted\n\tmanaged_by = com.apple.xpc.ServiceManagement\n\tstate = spawn scheduled\n\n\tprogram identifier = Contents/MacOS/pitwall-server (mode: 2)\n\tparent bundle identifier = net.decryptology.pitwall\n\tparent bundle version = 1.0.4\n\truns = 12\n\tlast exit code = 78: EX_CONFIG\n\n\tresource coalition = {\n\t\tID = 700\n\t\ttype = resource\n\t\tstate = active\n\t\tactive count = 0\n\t}\n\n\tjetsam coalition = {\n\t\tID = 701\n\t\ttype = jetsam\n\t\tstate = active\n\t\tactive count = 0\n\t}\n\n\tjob state = spawn failed\n\n\tproperties = partial import | keepalive | runatload | resolve program | has LWCR | tle system\n}\n";
+    /// The same agent running well on macOS 26: the coalitions' `state = active` must not hide `job state = running`.
+    const RUNNING_MACOS_26: &str = "gui/501/net.decryptology.pitwall.service = {\n\tactive count = 1\n\tpath = (submitted by smd.101)\n\ttype = Submitted\n\tmanaged_by = com.apple.xpc.ServiceManagement\n\tstate = running\n\n\tprogram identifier = Contents/MacOS/pitwall-server (mode: 2)\n\tpid = 2210\n\tlast exit code = (never exited)\n\n\tresource coalition = {\n\t\tID = 702\n\t\ttype = resource\n\t\tstate = active\n\t\tactive count = 1\n\t}\n\n\tjetsam coalition = {\n\t\tID = 703\n\t\ttype = jetsam\n\t\tstate = active\n\t\tactive count = 1\n\t}\n\n\tjob state = running\n\n\tproperties = partial import | keepalive | runatload | resolve program | has LWCR | tle system\n}\n";
+
     #[test]
-    fn a_registration_launchd_cannot_start_is_stale() {
-        let job = parse_job(SPAWN_FAILED);
-        assert!(job.found && !job.running && job.spawn_failed && job.exit_config && job.has_lwcr && !job.needs_lwcr_update);
-        assert!(job.stale());
-        // Each sign alone is enough.
-        assert!(parse_job("\tstate = spawn scheduled\n\tlast exit code = 78: EX_CONFIG\n").stale());
-        assert!(parse_job("\tstate = spawn scheduled\n\tjob state = spawn failed\n").stale());
-        assert!(parse_job("\tstate = spawn scheduled\n\tproperties = keepalive | has LWCR\n").stale());
-        assert!(parse_job("\tstate = waiting\n\tproperties = keepalive | needs LWCR update\n").stale());
-        let healthy = parse_job(HEALTHY);
-        assert!(healthy.found && healthy.running && healthy.has_lwcr && !healthy.stale());
-        // Gone from launchd.
-        assert!(!parse_job("").found && !parse_job("").stale());
+    fn a_pending_or_running_job_at_login_is_not_repaired_while_the_app_has_no_answer_yet() {
+        // Regression (Dyno B4, same logic): a job with a launch constraint that is pending or running read as stale, and
+        // the repair killed the healthy agent at every login.
+        let mut pending = JobReport {
+            found: true,
+            has_lwcr: true,
+            ..JobReport::default()
+        };
+        assert_eq!(plan(&observed(pending)), Plan::Nothing);
+        pending.running = true;
+        assert_eq!(plan(&observed(pending)), Plan::Nothing);
+        // Even with a refusal sign left from an earlier run, a running job is left alone.
+        pending.exit_config = true;
+        assert_eq!(plan(&observed(pending)), Plan::Nothing);
+        assert_eq!(plan(&observed(parse_job(RUNNING_MACOS_26))), Plan::Nothing);
+    }
+
+    #[test]
+    fn macos_26_launchctl_output_goes_through_pitwalls_repair_decision() {
+        let refused = parse_job(SPAWN_FAILED_MACOS_26);
+        assert!(
+            refused.found && refused.stale(),
+            "the refused job is recognised despite the nested blocks: {refused:?}"
+        );
+        let running = parse_job(RUNNING_MACOS_26);
+        assert!(running.found && running.running && !running.stale(), "{running:?}");
+        // Pitwall's decision: a refused job whose server does not answer is repaired...
+        let mut o = observed(refused);
+        o.status = RegistrationStatus::NotRegistered;
+        assert_eq!(plan(&o), Plan::Repair(RepairReason::Stale));
+        // ...a healthy one is left alone, and so is the refused one while the server still answers.
+        assert_eq!(plan(&observed(running)), Plan::Nothing);
+        let mut o = observed(refused);
+        o.answers = true;
+        assert_eq!(plan(&o), Plan::Nothing);
+        // What the user switched off in Login Items is never repaired, whatever launchd reports.
+        let mut o = observed(refused);
+        o.status = RegistrationStatus::RequiresApproval;
+        assert_eq!(plan(&o), Plan::Nothing);
     }
 
     fn observed<'a>(job: JobReport) -> Observed<'a> {
@@ -518,6 +586,9 @@ mod tests {
         unregister_fails: bool,
         /// How many `job_gone` questions say no.
         job_lingers_for: u32,
+        /// Cancel is pressed once this many calls were made (`None`: never).
+        cancel_after_calls: Option<usize>,
+        phases: Vec<RepairPhase>,
     }
 
     impl Fake {
@@ -531,6 +602,8 @@ mod tests {
                 register_results: Vec::new(),
                 unregister_fails: false,
                 job_lingers_for: 0,
+                cancel_after_calls: None,
+                phases: Vec::new(),
             }
         }
     }
@@ -580,6 +653,103 @@ mod tests {
         fn pause(&mut self, how_long: Duration) {
             self.pause_total += how_long;
         }
+        fn cancelled(&mut self) -> bool {
+            self.cancel_after_calls.is_some_and(|n| self.calls.len() >= n)
+        }
+        fn phase(&mut self, phase: RepairPhase) {
+            self.phases.push(phase);
+        }
+    }
+
+    #[test]
+    fn the_repair_reports_its_phases_in_order() {
+        let mut f = Fake::new(0, Some(0));
+        f.job_lingers_for = 1;
+        assert_eq!(run(&mut f).0, RepairOutcome::Recovered);
+        assert_eq!(
+            f.phases,
+            [
+                RepairPhase::Removing,
+                RepairPhase::WaitingForLaunchd,
+                RepairPhase::Registering,
+                RepairPhase::Starting
+            ]
+        );
+        for p in [
+            RepairPhase::Removing,
+            RepairPhase::WaitingForLaunchd,
+            RepairPhase::Registering,
+            RepairPhase::Starting,
+        ] {
+            assert!(!p.id().is_empty() && p.label().ends_with("..."), "{p:?}");
+        }
+    }
+
+    #[test]
+    fn a_cancel_before_anything_was_removed_changes_nothing() {
+        let mut f = Fake::new(0, Some(0));
+        f.cancel_after_calls = Some(0);
+        assert_eq!(run(&mut f).0, RepairOutcome::Cancelled);
+        assert!(f.calls.is_empty(), "{:?}", f.calls);
+    }
+
+    #[test]
+    fn a_cancel_while_waiting_for_launchd_still_registers_so_the_service_is_not_left_removed() {
+        let mut f = Fake::new(0, Some(0));
+        f.job_lingers_for = u32::MAX;
+        // Pressed once the old registration was removed (unregister, bootout).
+        f.cancel_after_calls = Some(2);
+        let (outcome, said) = run(&mut f);
+        assert_eq!(outcome, RepairOutcome::Cancelled);
+        assert_eq!(f.calls, ["unregister", "bootout", "register", "stale?"]);
+        assert!(f.pause_total < GONE_WAIT, "it did not wait the full time");
+        assert!(said.iter().any(|m| m.contains("cancel")));
+    }
+
+    #[test]
+    fn a_cancel_whose_restoring_registration_fails_is_a_failure_that_keeps_the_notice() {
+        let mut f = Fake::new(0, Some(0));
+        f.job_lingers_for = u32::MAX;
+        f.cancel_after_calls = Some(2);
+        f.register_results = vec![Err(RegisterError::Other("busy".into()))];
+        let RepairOutcome::Failed(why) = run(&mut f).0 else {
+            panic!("a service left removed is not a clean cancel")
+        };
+        assert!(
+            why.starts_with("Cancelled, but registering the service again failed: busy"),
+            "{why}"
+        );
+        assert!(why.contains("Login Items"), "{why}");
+        // A registration launchd still reports as stale is not a clean cancel either.
+        let mut f = Fake::new(1, Some(0));
+        f.job_lingers_for = u32::MAX;
+        f.cancel_after_calls = Some(2);
+        let RepairOutcome::Failed(why) = run(&mut f).0 else {
+            panic!("stale after the cancel")
+        };
+        assert!(why.contains("Cancelled") && why.contains("stale"), "{why}");
+        let t = RepairTracker::new();
+        t.finish(&RepairOutcome::Failed(why), Instant::now());
+        assert!(t.current(Instant::now()).is_some(), "the notice stays");
+    }
+
+    #[test]
+    fn a_cancel_while_the_service_starts_stops_the_wait_and_keeps_the_registration() {
+        let mut f = Fake::new(0, None);
+        f.cancel_after_calls = Some(4);
+        assert_eq!(run(&mut f).0, RepairOutcome::Cancelled);
+        assert_eq!(f.calls, ["unregister", "bootout", "register", "stale?"]);
+        assert!(f.pause_total < START_WAIT, "{:?}", f.pause_total);
+    }
+
+    #[test]
+    fn a_cancelled_repair_clears_the_notice() {
+        let t = RepairTracker::new();
+        let t0 = Instant::now();
+        t.begin(t0);
+        t.finish(&RepairOutcome::Cancelled, t0);
+        assert_eq!(t.current(t0), None);
+        assert!(t.start(t0), "a cancelled repair can be started again");
     }
 
     fn run(f: &mut Fake) -> (RepairOutcome, Vec<String>) {

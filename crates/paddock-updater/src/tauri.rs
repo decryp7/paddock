@@ -131,6 +131,7 @@ pub struct UpdatesBuilder {
     legal: Vec<(String, String, Cow<'static, str>)>,
     build: (Option<String>, Option<String>),
     hooks: Option<Arc<dyn ServiceHooks>>,
+    offline: Option<crate::OfflineMode>,
     installer: Option<Arc<dyn Installer>>,
     installer_kind: Option<String>,
     max_download_bytes: Option<u64>,
@@ -153,6 +154,7 @@ impl UpdatesBuilder {
             legal: Vec::new(),
             build: (None, None),
             hooks: None,
+            offline: None,
             installer: None,
             installer_kind: None,
             max_download_bytes: None,
@@ -207,6 +209,16 @@ impl UpdatesBuilder {
 
     pub fn service_hooks(mut self, hooks: Arc<dyn ServiceHooks>) -> Self {
         self.hooks = Some(hooks);
+        self
+    }
+
+    /// The app's Offline mode (local first): unless `state` says it is off, About's Updates and the background check never
+    /// reach the update server (see [`Updater::with_offline_mode`]; answer `Unknown` while the app does not know).
+    pub fn offline_mode(
+        mut self,
+        state: impl Fn() -> crate::OfflineState + Send + Sync + 'static,
+    ) -> Self {
+        self.offline = Some(Arc::new(state));
         self
     }
 
@@ -349,6 +361,9 @@ pub fn install<R: Runtime>(
     }
     if let Some(h) = b.hooks {
         updater = updater.with_service_hooks(h);
+    }
+    if let Some(o) = b.offline {
+        updater = updater.with_offline_mode(o);
     }
     let available = updater.available();
     let mut about = About::new(&b.app_name, &version, records)

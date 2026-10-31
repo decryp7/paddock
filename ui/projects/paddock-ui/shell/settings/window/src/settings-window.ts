@@ -22,6 +22,8 @@ import { DIALOG_REF, type DialogContent } from '@decryp7/paddock-ui/shell/dialog
 import { fieldText, matchesQuery, settingsNav, type SettingsNavItem, SettingsStore } from '@decryp7/paddock-ui/shell/settings';
 import { PdSettingsSection, PdSettingsSectionPage, SETTINGS_PAGE } from './settings-section';
 import { SettingsDrafts } from './settings-drafts';
+import { SettingsStatus } from './settings-status';
+import { SettingsCloseGuards, STILL_SAVING_AFTER_MS } from './settings-close';
 
 /** The settings pages a Settings window lists (the app's `settingsPages` contributions plus the shell's). */
 export const SETTINGS_WINDOW_PAGES = new InjectionToken<readonly SettingsPageDef[]>('PADDOCK_SETTINGS_WINDOW_PAGES', {
@@ -87,6 +89,20 @@ interface LoadedPage {
         <span id="pd-settings-unsaved">{{ unsavedText() }}</span>
         <button matButton="outlined" type="button" (click)="discardAndClose()">{{ t.discard }}</button>
         <button matButton="filled" type="button" (click)="keepEditing()">{{ t.keepEditing }}</button>
+      </div>
+    }
+    @if (pageWarning(); as w) {
+      <div class="pd-banner pd-warn" role="alertdialog" aria-labelledby="pd-settings-not-saved" data-testid="settings-not-saved">
+        <span id="pd-settings-not-saved">{{ w }}</span>
+        <button matButton="outlined" type="button" (click)="closeAnyway()">{{ t.closeAnyway }}</button>
+        <button matButton="filled" type="button" (click)="keepEditing()">{{ t.keepEditing }}</button>
+      </div>
+    }
+    @if (stillSaving(); as label) {
+      <div class="pd-banner pd-warn" role="alertdialog" aria-labelledby="pd-settings-still-saving" data-testid="settings-still-saving">
+        <span id="pd-settings-still-saving">{{ stillSavingText(label) }}</span>
+        <button matButton="outlined" type="button" (click)="closeAnyway()">{{ t.closeAnyway }}</button>
+        <button matButton="filled" type="button" (click)="keepWaiting()">{{ t.keepWaiting }}</button>
       </div>
     }
     @if (store.actionError(); as e) {
@@ -196,6 +212,8 @@ export class PdSettingsWindow implements DialogContent {
     restartNow: $localize`:@@pd.settings.restart-now:Restart now`,
     discard: $localize`:@@pd.settings.unsaved.discard:Discard changes`,
     keepEditing: $localize`:@@pd.settings.unsaved.keep:Keep editing`,
+    closeAnyway: $localize`:@@pd.settings.not-saved.close:Close anyway`,
+    keepWaiting: $localize`:@@pd.settings.still-saving.keep:Keep waiting`,
     dismiss: $localize`:@@pd.settings.dismiss:Dismiss`,
     pages: $localize`:@@pd.settings.pages:Settings pages`,
     unsaved: $localize`:@@pd.settings.unsaved:Unsaved changes`,
@@ -209,6 +227,8 @@ export class PdSettingsWindow implements DialogContent {
   };
   protected readonly store = inject(SettingsStore);
   private readonly drafts = inject(SettingsDrafts);
+  private readonly pageStatus = inject(SettingsStatus, { optional: true });
+  private readonly closeGuards = inject(SettingsCloseGuards, { optional: true });
   private readonly pages = inject(SETTINGS_WINDOW_PAGES);
   private readonly environment = inject(EnvironmentInjector);
   private readonly injector = inject(Injector);
@@ -221,6 +241,24 @@ export class PdSettingsWindow implements DialogContent {
 
   /** "Discard changes / Keep editing" is showing. */
   protected readonly asking = signal(false);
+  /** A page's "this edit was not saved, and why" with "Close anyway / Keep editing" (`settingsPageCloseGuard`). */
+  protected readonly pageWarning = signal<string | null>(null);
+  /** The user chose "Close anyway": the pages are not asked again for this close (a save they wait for goes on). */
+  private closingAnyway = false;
+  /** A page is finishing a save (the setting's label): the window closes when it settles. */
+  private readonly waitingFor = signal<string | null>(null);
+  /** The wait now showing: a save that settles after "Close anyway" ended its wait no longer closes anything. */
+  private wait: object | null = null;
+  private stillSavingTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The wait went on for `STILL_SAVING_AFTER_MS`: "Still saving <label>." with "Close anyway / Keep waiting". */
+  protected readonly stillSaving = signal<string | null>(null);
+  protected stillSavingText(label: string): string {
+    return $localize`:@@pd.settings.still-saving:Still saving ${label}:setting:.`;
+  }
+  private readonly savingText = computed(() => {
+    const label = this.waitingFor();
+    return label === null ? null : $localize`:@@pd.settings.saving:Saving ${label}:setting:…`;
+  });
 
   // Every page is listed: a Settings window boots with its own small provider set and no app context (rule 34), so a
   // page's `when` is not evaluated here; a page that depends on a condition says so in its own content.
@@ -287,7 +325,10 @@ export class PdSettingsWindow implements DialogContent {
   private pageEnvironment: EnvironmentInjector | null = null;
 
   constructor() {
-    inject(DestroyRef).onDestroy(() => this.replaceEnvironment(null));
+    inject(DestroyRef).onDestroy(() => {
+      this.endWait();
+      this.replaceEnvironment(null);
+    });
   }
 
   /** A page's own providers live in an injector of their own; the previous page's goes when the next one loads. */
@@ -321,13 +362,75 @@ export class PdSettingsWindow implements DialogContent {
 
   /** Unsaved edits keep the window open, by any route that closes it, and ask first. */
   dialogCanClose(): boolean {
-    if (!this.unsaved().length) return true;
-    this.asking.set(true);
-    return false;
+    if (this.unsaved().length) {
+      this.asking.set(true);
+      return false;
+    }
+    if (this.closingAnyway) return true;
+    if (this.wait) return false;
+    const verdict = this.closeGuards?.check() ?? { kind: 'close' };
+    if (verdict.kind === 'wait') {
+      // A page still saves a typed value: the window stays until it is saved, then asks again (the save may be refused).
+      const wait = {};
+      this.wait = wait;
+      this.waitingFor.set(verdict.label);
+      this.armStillSaving();
+      const settled = (): void => {
+        if (this.wait !== wait) return;
+        this.endWait();
+        this.close();
+      };
+      void verdict.done.then(settled, settled);
+      return false;
+    }
+    if (verdict.kind === 'warn') {
+      this.pageWarning.set(verdict.message);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * After `STILL_SAVING_AFTER_MS` of waiting the user may close anyway: a close is never held without bound. Armed with no
+   * timer pending (a new wait, or "Keep waiting" after the last one fired); `endWait` stops it.
+   */
+  private armStillSaving(): void {
+    // One timer at a time: a double click on "Keep waiting" arms it once.
+    if (this.stillSavingTimer !== null) return;
+    this.stillSavingTimer = setTimeout(() => {
+      this.stillSavingTimer = null;
+      this.stillSaving.set(this.waitingFor());
+    }, STILL_SAVING_AFTER_MS);
+  }
+
+  private endWait(): void {
+    if (this.stillSavingTimer !== null) clearTimeout(this.stillSavingTimer);
+    this.stillSavingTimer = null;
+    this.wait = null;
+    this.waitingFor.set(null);
+    this.stillSaving.set(null);
   }
 
   protected keepEditing(): void {
     this.asking.set(false);
+    this.pageWarning.set(null);
+  }
+
+  /**
+   * The window stays and waits on; it offers the choice again if the save is still on its way after the same delay. Only the
+   * "Still saving" banner calls it, which shows only while a wait is on.
+   */
+  protected keepWaiting(): void {
+    this.stillSaving.set(null);
+    this.armStillSaving();
+  }
+
+  /** Closes now, without asking the pages again. A save still on its way goes on: only the window stops waiting for it. */
+  protected closeAnyway(): void {
+    this.pageWarning.set(null);
+    this.endWait();
+    this.closingAnyway = true;
+    this.close();
   }
 
   protected discardAndClose(): void {
@@ -340,6 +443,10 @@ export class PdSettingsWindow implements DialogContent {
     this.ref?.dismiss();
   }
 
-  /** The footer's status line: the last change's notice, else how saving works (the frame draws it beside Close; ADR 0026 §2). */
-  readonly dialogStatus = computed(() => this.store.notice() ?? this.t.savedLive);
+  /**
+   * The footer's status line (the frame draws it beside Close; ADR 0026 §2): "Saving <setting>…" while a close waits for a
+   * page's save, else the last change's notice, else what the shown page says about saving (`settingsPageStatus`), else how
+   * saving works here.
+   */
+  readonly dialogStatus = computed(() => this.savingText() ?? this.store.notice() ?? this.pageStatus?.text() ?? this.t.savedLive);
 }

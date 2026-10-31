@@ -6,6 +6,9 @@ disallowed-methods = [
     { path = "reqwest::Client::builder", reason = "outbound HTTP is egress::Egress only (ADR 0001)" },
     { path = "reqwest::get", reason = "outbound HTTP is egress::Egress only (ADR 0001)" },
     { path = "std::process::Command::new", reason = "use pitwall_server::process::command: no console window on Windows, always bounded" },
+    { path = "tokio::process::Command::new", allow-invalid = true, reason = "use pitwall_server::process::command: no console window on Windows, always bounded" },
+    { path = "std::env::temp_dir", reason = "tests use a scratch folder from the test kit and production code uses paddock-env: nothing is left in the shared temp folder" },
+
     # ADR 0033: nothing is ended by a bare pid. A pid may name another process by the time it is signalled; end it through
     # paddock-proc with a ProcessId, or through a handle or job this process owns. A justified site carries
     # #[expect(clippy::disallowed_methods, reason = "...")].

@@ -1,19 +1,21 @@
-import { CdkConnectedOverlay, CdkOverlayOrigin } from '@angular/cdk/overlay';
-import { PwSelect, type SelectOption } from '../../shared/ui/select';
 import { ScrollingModule } from '@angular/cdk/scrolling';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { MatIconButton } from '@angular/material/button';
+import { MatFormField, MatPrefix } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInput } from '@angular/material/input';
+import { MatMenu, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
+import { SuEmptyState, SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { RequestRecord } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { Toasts } from '../../core/toasts';
 import { clock, int } from '../../shared/format';
 import { AppAvatar } from '../../shared/ui/app-avatar';
-import { ContextMenuService, type ContextMenuItem } from '../../shared/ui/context-menu';
-import { EmptyState } from '../../shared/ui/empty-state';
 import { Panel } from '../../shared/ui/panel';
-import { RowMenu } from '../../shared/ui/row-menu';
-import { isMenuKey, moveRowFocus } from '../../shared/ui/row-nav';
+import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
+import { moveRowFocus } from '../../shared/ui/row-nav';
 import { shortModel } from '../dashboard/dashboard';
 import { API_LABEL, CHOSEN_LABEL, secondsCell, statusText, tokensCell } from './request-labels';
 import { RequestDetail } from './request-detail';
@@ -22,10 +24,9 @@ import { REQUEST_LIMIT, RequestsStore, type StatusFilter } from './requests.stor
 /** Row height of the virtual table (px); fixed so the viewport can compute what to render. */
 export const ROW_HEIGHT = 40;
 
-/** Milliseconds as a compact table cell (`—` when absent). */
+/** Milliseconds as a bare cell of a column headed in ms (`212`, `1,460`): one unit per column, never a second one in a cell. */
 export function msCell(ms: number | null): string {
-  if (ms === null) return '—';
-  return ms >= 10_000 ? `${(ms / 1000).toFixed(0)} s` : ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)}`;
+  return ms === null ? '—' : int(ms);
 }
 
 /** A column of the log: always shown, or one the user adds from the column menu (the detail panel has them all). */
@@ -40,10 +41,10 @@ export interface Column {
 }
 
 export const COLUMNS: readonly Column[] = [
-  { id: 'time', label: 'Time', header: 'Time', width: '76px' },
-  { id: 'app', label: 'App', header: 'App', width: 'minmax(120px, 160px)' },
-  { id: 'model', label: 'Model', header: 'Model', width: 'minmax(120px, 1fr)' },
-  { id: 'endpoint', label: 'Endpoint', header: 'Endpoint', width: 'minmax(150px, 1.2fr)' },
+  { id: 'time', label: 'Time', header: 'Time', width: '68px' },
+  { id: 'app', label: 'App', header: 'App', width: 'minmax(88px, 1fr)' },
+  { id: 'model', label: 'Model', header: 'Model', width: 'minmax(88px, 1fr)' },
+  { id: 'endpoint', label: 'Endpoint', header: 'Endpoint', width: 'minmax(120px, 1.2fr)' },
   { id: 'api', label: 'API', header: 'API', width: '84px', optional: true },
   { id: 'chosen', label: 'Chosen by', header: 'Chosen by', width: '96px', optional: true },
   { id: 'queued', label: 'Queued', header: 'Queued ms', width: '84px', right: true, optional: true },
@@ -51,18 +52,28 @@ export const COLUMNS: readonly Column[] = [
   { id: 'cold', label: 'Cold start', header: 'Cold start s', width: '92px', right: true, optional: true },
   { id: 'total', label: 'Total', header: 'Total s', width: '68px', right: true },
   { id: 'tokens', label: 'Tokens', header: 'Tokens in / out', width: '110px', right: true },
-  { id: 'status', label: 'Status', header: 'Status', width: '148px' },
+  { id: 'status', label: 'Status', header: 'Status', width: '132px' },
 ];
 
 /** What a narrow list (the details are open, or the window is small) drops: the panel shows these. */
 export const NARROW_HIDDEN: ReadonlySet<Column['id']> = new Set(['endpoint', 'tokens', 'api', 'chosen', 'queued', 'cold']);
 
-/** The columns shown, the grid template that lays them out (the action column is always last) and the narrow one. */
-export function layout(extra: ReadonlySet<Column['id']>): { cols: Column[]; template: string; narrow: string; tiny: string } {
+/** What a compact list (a 900 px window) also drops: the total time, which the detail panel shows. */
+export const COMPACT_HIDDEN: ReadonlySet<Column['id']> = new Set([...NARROW_HIDDEN, 'total']);
+
+/** The columns shown and the grid templates that lay them out as the list narrows (the action column is always last):
+ * every column, narrow (≤ 900 px), compact (≤ 680 px) and tiny (≤ 560 px). */
+export function layout(extra: ReadonlySet<Column['id']>): { cols: Column[]; template: string; narrow: string; compact: string; tiny: string } {
   const cols = COLUMNS.filter((c) => !c.optional || extra.has(c.id));
   const grid = (list: readonly Column[]) => [...list.map((c) => c.width), '32px'].join(' ');
   const tiny = cols.filter((c) => TINY_SHOWN.has(c.id)).map((c) => (c.id === 'app' ? 'minmax(100px, 1fr)' : c.width));
-  return { cols, template: grid(cols), narrow: grid(cols.filter((c) => !NARROW_HIDDEN.has(c.id))), tiny: [...tiny, '32px'].join(' ') };
+  return {
+    cols,
+    template: grid(cols),
+    narrow: grid(cols.filter((c) => !NARROW_HIDDEN.has(c.id))),
+    compact: grid(cols.filter((c) => !COMPACT_HIDDEN.has(c.id))),
+    tiny: [...tiny, '32px'].join(' '),
+  };
 }
 
 /** The few columns left when the list is squeezed beside the details: when, who, and the one that matters, an error. */
@@ -71,7 +82,7 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
 /** The request log: every recent request on one line; the facts that are the same on every row live in the detail panel. */
 @Component({
   selector: 'pw-requests-page',
-  imports: [ScrollingModule, CdkConnectedOverlay, CdkOverlayOrigin, MatIconModule, MatTooltipModule, Panel, EmptyState, RequestDetail, AppAvatar, RowMenu, PwSelect],
+  imports: [ScrollingModule, MatIconButton, MatFormField, MatPrefix, MatInput, MatMenu, MatMenuItem, MatMenuTrigger, MatIconModule, MatTooltipModule, Panel, SuEmptyState, SuSegmentedControl, RequestDetail, AppAvatar, ItemsMenu, MoreButton, RowMenu, PdSelect],
   providers: [RequestsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -82,53 +93,33 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
           <p class="sub">What your apps asked for. Prompts and responses stay hidden unless you open them.</p>
         </div>
         <div class="actions">
-          <button type="button" class="btn ghost icon" aria-label="Refresh" matTooltip="Refresh" [disabled]="store.loading()" (click)="store.load()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" /></button>
+          <button type="button" matIconButton aria-label="Refresh" matTooltip="Refresh" [disabled]="store.loading()" (click)="store.load()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" /></button>
         </div>
       </header>
 
       <div class="filters" role="search" aria-label="Filter requests">
-        <div class="search">
-          <mat-icon svgIcon="pw:search" aria-hidden="true" />
-          <label class="sr-only" for="pw-req-search">Search endpoint or model</label>
-          <input id="pw-req-search" class="input" type="search" placeholder="Search endpoint or model" autocomplete="off" [value]="store.filter().text" (input)="store.setFilter({ text: $any($event.target).value })" />
-        </div>
-        <pw-select class="select" inputId="pw-req-app" label="App" [options]="appSelectOptions()" [value]="store.filter().app" (changed)="store.setFilter({ app: $event })" />
-        <div class="seg" role="radiogroup" aria-label="Status">
-          @for (s of statuses; track s.value) {
-            <button type="button" role="radio" [attr.aria-checked]="store.filter().status === s.value" (click)="store.setFilter({ status: s.value })">
-              {{ s.label }}
-              @if (s.value === 'errors' && store.errorCount()) {
-                <span class="count num">{{ store.errorCount() }}</span>
-              }
+        <mat-form-field class="search">
+          <mat-icon matPrefix svgIcon="pw:search" aria-hidden="true" />
+          <input matInput id="pw-req-search" type="search" placeholder="Search endpoint or model" aria-label="Search endpoint or model" autocomplete="off" [value]="store.filter().text" (input)="store.setFilter({ text: $any($event.target).value })" />
+        </mat-form-field>
+        <pd-select class="app-filter" inputId="pw-req-app" ariaLabel="App" [options]="appSelectOptions()" [value]="store.filter().app" (valueChange)="store.setFilter({ app: $event })" />
+        <pd-segmented-control label="Status" [options]="statusSegs()" [value]="store.filter().status" (valueChange)="setStatus($event)" />
+        <span class="shown faint num" aria-live="polite">{{ shownText() }}</span>
+        <button type="button" matIconButton class="cols" aria-label="Columns" matTooltip="Columns" [matMenuTriggerFor]="colsMenu">
+          <mat-icon svgIcon="pw:sliders" aria-hidden="true" />
+        </button>
+        <mat-menu #colsMenu="matMenu" aria-label="Columns" class="pw-cols-menu">
+          @for (c of optionalColumns; track c.id) {
+            <button type="button" mat-menu-item role="menuitemcheckbox" class="opt" [attr.aria-checked]="extra().has(c.id)" (click)="$event.stopPropagation(); toggleColumn(c.id)">
+              <mat-icon svgIcon="pw:check" aria-hidden="true" [class.off]="!extra().has(c.id)" />{{ c.label }}
             </button>
           }
-        </div>
-        <span class="shown faint num" aria-live="polite">{{ shownText() }}</span>
-        <button
-          type="button"
-          class="btn ghost sm"
-          cdkOverlayOrigin
-          #colsOrigin="cdkOverlayOrigin"
-          aria-haspopup="menu"
-          [attr.aria-expanded]="colsOpen()"
-          (click)="colsOpen.set(!colsOpen())"
-        >
-          <mat-icon svgIcon="pw:sliders" aria-hidden="true" />Columns
-        </button>
-        <ng-template cdkConnectedOverlay [cdkConnectedOverlayOrigin]="colsOrigin" [cdkConnectedOverlayOpen]="colsOpen()" (overlayOutsideClick)="colsOpen.set(false)" (detach)="colsOpen.set(false)">
-          <div class="pop" role="menu" tabindex="-1" aria-label="Columns" (keydown.escape)="colsOpen.set(false)">
-            @for (c of optionalColumns; track c.id) {
-              <button type="button" role="menuitemcheckbox" class="opt" [attr.aria-checked]="extra().has(c.id)" (click)="toggleColumn(c.id)">
-                <mat-icon svgIcon="pw:check" aria-hidden="true" />{{ c.label }}
-              </button>
-            }
-          </div>
-        </ng-template>
+        </mat-menu>
       </div>
 
       <div class="with-panel fill body">
         <pw-panel class="table-panel" [flush]="true" [loading]="store.loading()" [ready]="store.loaded()" [error]="store.error()" [skeletonLines]="10" (retry)="store.load()">
-          <div class="tbl" role="table" aria-label="Requests" [attr.aria-rowcount]="store.visible().length + 1" [style.--cols]="grid().template" [style.--cols-narrow]="grid().narrow" [style.--cols-tiny]="grid().tiny">
+          <div class="tbl" role="table" aria-label="Requests" [attr.aria-rowcount]="store.visible().length + 1" [style.--cols]="grid().template" [style.--cols-narrow]="grid().narrow" [style.--cols-compact]="grid().compact" [style.--cols-tiny]="grid().tiny">
             <div class="sheet">
               <div class="row head" role="row">
                 @for (c of grid().cols; track c.id) {
@@ -137,9 +128,9 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
                 <span role="columnheader"><span class="sr-only">Actions</span></span>
               </div>
               @if (store.visible().length === 0) {
-                <pw-empty-state icon="requests" [heading]="store.records().length ? 'No request matches' : 'No requests yet'" [text]="store.records().length ? 'Change the filter to see more.' : 'Requests from your apps appear here.'" />
+                <pd-empty-state [heading]="store.records().length ? 'No request matches' : 'No requests yet'" [description]="store.records().length ? 'Change the filter to see more.' : 'Requests from your apps appear here.'"><mat-icon slot="icon" svgIcon="pw:requests" aria-hidden="true" /></pd-empty-state>
               } @else {
-                <cdk-virtual-scroll-viewport class="vp" [itemSize]="rowHeight" minBufferPx="400" maxBufferPx="800" role="rowgroup">
+                <cdk-virtual-scroll-viewport class="vp fit" [itemSize]="rowHeight" minBufferPx="400" maxBufferPx="800" role="rowgroup">
                   <div
                     *cdkVirtualFor="let r of store.visible(); trackBy: trackId"
                     class="row"
@@ -151,7 +142,9 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
                     [attr.aria-selected]="r.id === store.selectedId()"
                     (click)="onRowClick(r, $event)"
                     (keydown)="onRowKey(r, $event)"
-                    (contextmenu)="onRowMenu(r, $event)"
+                    pwRowMenu
+                    [matContextMenuTriggerFor]="rowMenu.menu()"
+                    [matContextMenuTriggerData]="{ items: menuItems(r) }"
                   >
                     @for (c of grid().cols; track c.id) {
                       @switch (c.id) {
@@ -199,7 +192,7 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
                         }
                       }
                     }
-                    <span role="cell" class="act"><pw-row-menu [items]="menuItems(r)" [label]="'More actions for the request to ' + r.endpoint" /></span>
+                    <span role="cell" class="act"><pw-more-button [menu]="rowMenu.menu()" [items]="menuItems(r)" [label]="'More actions for the request to ' + r.endpoint" /></span>
                   </div>
                 </cdk-virtual-scroll-viewport>
               }
@@ -212,115 +205,66 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
         }
       </div>
     </div>
+    <pw-items-menu #rowMenu label="Request actions" />
   `,
   styles: `
     :host {
       display: block;
       height: 100%;
     }
+    /* The log fills the window between the title bar and the status bar (the frame's page outlet sizes to its content, so
+       100% would be the content's own height): the rows scroll inside the list, the page itself does not. */
     .page {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-3);
-      height: 100%;
-      padding-bottom: var(--sp-6);
+      gap: var(--pd-space-3);
+      height: calc(100dvh - var(--pd-titlebar-height, 40px) - var(--pd-statusbar-height, 24px) - 2px);
+      padding-bottom: var(--pd-space-6);
     }
     .page-head {
-      margin-bottom: var(--sp-2);
+      margin-bottom: var(--pd-space-2);
     }
     .filters {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       min-height: 44px;
     }
+    /* One toolbar row at every supported width: the search gives way first, then the count. */
     .search {
-      position: relative;
-      width: 280px;
-      mat-icon {
-        position: absolute;
-        left: 9px;
-        top: 50%;
-        width: 14px;
-        height: 14px;
-        transform: translateY(-50%);
-        color: var(--text-3);
-        pointer-events: none;
-      }
-      .input {
-        width: 100%;
-        padding-left: 30px;
-      }
+      flex: 0 1 280px;
+      min-width: 160px;
     }
-    .select {
-      min-width: 140px;
-    }
-    .seg {
-      display: inline-flex;
-      padding: 2px;
-      background: var(--bg-active);
-      border-radius: var(--r-md);
-      button {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        height: 26px;
-        padding: 0 var(--sp-3);
-        font: inherit;
-        font-size: var(--fs-sm);
-        font-weight: var(--fw-medium);
-        color: var(--text-2);
-        background: none;
-        border: none;
-        border-radius: var(--r-sm);
-        cursor: default;
-        &[aria-checked='true'] {
-          color: var(--text);
-          background: var(--bg-card);
-          box-shadow: var(--shadow-1);
-        }
-      }
+    .app-filter {
+      flex: 0 1 160px;
+      min-width: 120px;
     }
     .shown {
       margin-left: auto;
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
       white-space: nowrap;
     }
-    .pop {
-      display: flex;
-      flex-direction: column;
-      min-width: 168px;
-      padding: var(--sp-1);
-      background: var(--bg-raised);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      box-shadow: var(--shadow-pop);
+    /* A toolbar too narrow for everything drops the count first (the list shows the rows anyway). */
+    .filters {
+      container: req-filters / inline-size;
     }
-    .opt {
-      display: flex;
-      align-items: center;
-      gap: var(--sp-2);
-      height: 28px;
-      padding: 0 8px;
-      font: inherit;
-      text-align: left;
-      color: var(--text);
-      background: none;
-      border: none;
-      border-radius: var(--r-sm);
-      cursor: default;
-      mat-icon {
-        width: 14px;
-        height: 14px;
-        visibility: hidden;
-        color: var(--accent);
+    @container req-filters (max-width: 700px) {
+      .shown {
+        display: none;
       }
-      &[aria-checked='true'] mat-icon {
-        visibility: visible;
+      .filters > .cols {
+        margin-left: auto;
       }
-      &:hover {
-        background: var(--bg-hover);
-      }
+    }
+    .filters > .cols {
+      flex: none;
+    }
+    /* The Columns menu: a check marks each column that is on. */
+    .opt mat-icon {
+      color: var(--pd-accent);
+    }
+    .opt mat-icon.off {
+      visibility: hidden;
     }
     .body {
       flex: 1;
@@ -339,11 +283,52 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       display: flex;
       flex-direction: column;
     }
-    @container (min-width: 901px) {
-      .sheet {
-        min-width: 980px;
+    .sheet {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: var(--cols);
+      align-items: center;
+      gap: var(--pd-space-2);
+      height: 40px;
+      padding: 0 var(--pd-space-3) 0 var(--pd-space-4);
+      font-size: var(--pd-text-label);
+      border-bottom: 1px solid var(--pd-hairline);
+      white-space: nowrap;
+      cursor: default;
+      outline: none;
+      > span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      &:hover {
+        background: var(--pd-hover);
+      }
+      &:focus-visible {
+        box-shadow: inset 0 0 0 2px var(--pd-accent-ring);
+      }
+      &.sel {
+        background: var(--pd-accent-tint);
+        box-shadow: inset 2px 0 0 var(--pd-accent);
       }
     }
+    .row.head {
+      height: 34px;
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-medium);
+      color: var(--pd-text-subtle);
+      border-bottom: 1px solid var(--pd-hairline);
+      &:hover {
+        background: none;
+      }
+    }
+    /* The narrower templates come after .row: at equal specificity the later rule wins, and the cells a template drops must
+       not slide into the tracks of the columns after them. */
     @container (max-width: 900px) {
       .row {
         grid-template-columns: var(--cols-narrow);
@@ -357,6 +342,14 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
         display: none;
       }
     }
+    @container (max-width: 680px) {
+      .row {
+        grid-template-columns: var(--cols-compact);
+      }
+      .c-total {
+        display: none;
+      }
+    }
     @container (max-width: 560px) {
       .row {
         grid-template-columns: var(--cols-tiny);
@@ -367,50 +360,6 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
         display: none;
       }
     }
-    .sheet {
-      display: flex;
-      flex-direction: column;
-      flex: 1;
-      min-height: 0;
-    }
-    .row {
-      display: grid;
-      grid-template-columns: var(--cols);
-      align-items: center;
-      gap: var(--sp-2);
-      height: 40px;
-      padding: 0 var(--sp-3) 0 var(--sp-4);
-      font-size: var(--fs-sm);
-      border-bottom: 1px solid var(--border-soft);
-      white-space: nowrap;
-      cursor: default;
-      outline: none;
-      > span {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      &:hover {
-        background: var(--bg-hover);
-      }
-      &:focus-visible {
-        box-shadow: inset 0 0 0 2px var(--accent-ring);
-      }
-      &.sel {
-        background: var(--accent-soft);
-        box-shadow: inset 2px 0 0 var(--accent);
-      }
-    }
-    .row.head {
-      height: 34px;
-      font-size: var(--fs-xs);
-      font-weight: var(--fw-medium);
-      color: var(--text-3);
-      border-bottom: 1px solid var(--border);
-      &:hover {
-        background: none;
-      }
-    }
     /* The Time column stays when the window is too narrow for the table and it scrolls sideways. */
     .sticky {
       position: sticky;
@@ -418,17 +367,19 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       z-index: 1;
       background: inherit;
     }
+    /* The sticky cell is opaque (rows scroll under it sideways) and paints exactly what the row paints: the row's tint
+       layered over the card, so a selected or hovered row shows no box around its time. */
     .row:not(.head) .sticky {
-      background: var(--bg-card);
-    }
-    .row.sel .sticky {
-      background: color-mix(in srgb, var(--bg-card) 90%, var(--accent));
+      background: var(--pd-surface-1);
     }
     .row:hover .sticky {
-      background: color-mix(in srgb, var(--bg-card) 95%, var(--text));
+      background: linear-gradient(var(--pd-hover), var(--pd-hover)), var(--pd-surface-1);
+    }
+    .row.sel .sticky {
+      background: linear-gradient(var(--pd-accent-tint), var(--pd-accent-tint)), var(--pd-surface-1);
     }
     .head .sticky {
-      background: var(--bg-card);
+      background: var(--pd-surface-1);
     }
     .r {
       text-align: right;
@@ -437,43 +388,47 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       display: inline-flex;
       align-items: center;
       gap: 3px;
-      font-size: var(--fs-sm);
-      color: var(--text-3);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-subtle);
       mat-icon {
         width: 12px;
         height: 12px;
       }
     }
     .c-status {
-      padding-left: var(--sp-3);
+      padding-left: var(--pd-space-3);
     }
     .t {
-      color: var(--text-2);
+      color: var(--pd-text-muted);
     }
     .app {
       display: inline-flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       .nm {
         overflow: hidden;
         text-overflow: ellipsis;
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
     }
     .ep {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
+    /* Whole rows only: a scroll stops on a row boundary, so the first row starts right under the header. */
     .vp {
       flex: 1;
       min-height: 0;
+      scroll-snap-type: y mandatory;
+    }
+    .vp .row {
+      scroll-snap-align: start;
     }
   `,
 })
 export class RequestsPage implements OnInit {
   protected readonly store = inject(RequestsStore);
   private readonly live = inject(LiveStore);
-  private readonly menu = inject(ContextMenuService);
   private readonly toasts = inject(Toasts);
   protected readonly limit = REQUEST_LIMIT;
   protected readonly rowHeight = ROW_HEIGHT;
@@ -494,7 +449,6 @@ export class RequestsPage implements OnInit {
 
   /** The optional columns the user turned on (none by default: they repeat on nearly every row). */
   protected readonly extra = signal<ReadonlySet<Column['id']>>(new Set());
-  protected readonly colsOpen = signal(false);
   protected readonly grid = computed(() => layout(this.extra()));
   protected readonly shownText = computed(() => {
     const shown = this.store.visible().length;
@@ -509,13 +463,23 @@ export class RequestsPage implements OnInit {
     return ids.map((id) => ({ id, name: this.appName(id) })).sort((a, b) => a.name.localeCompare(b.name));
   });
 
-  protected readonly appSelectOptions = computed<SelectOption[]>(() => [
+  protected readonly appSelectOptions = computed<PdSelectOption[]>(() => [
     { value: 'all', label: 'All apps' },
     ...this.appOptions().map((a) => ({ value: a.id, label: a.name })),
   ]);
 
   ngOnInit(): void {
     void this.store.load();
+  }
+
+  /** The status filter as segments; Errors carries its count when there are any. */
+  protected readonly statusSegs = computed<SuSegment[]>(() =>
+    this.statuses.map((s) => ({ value: s.value, label: s.label, ...(s.value === 'errors' && this.store.errorCount() ? { count: this.store.errorCount() } : {}) })),
+  );
+
+  protected setStatus(value: string): void {
+    const s = this.statuses.find((x) => x.value === value);
+    if (s) this.store.setFilter({ status: s.value });
   }
 
   protected toggleColumn(id: Column['id']): void {
@@ -547,7 +511,7 @@ export class RequestsPage implements OnInit {
   }
 
   /** One list for the row's "..." button, its right-click menu and Shift+F10. */
-  protected menuItems(r: RequestRecord): ContextMenuItem[] {
+  protected menuItems(r: RequestRecord): MenuItem[] {
     return [
       { label: 'Details', run: () => this.store.select(r.id) },
       { label: 'Copy request id', run: () => this.copy(r.id, 'Request id') },
@@ -577,17 +541,9 @@ export class RequestsPage implements OnInit {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       this.store.select(r.id);
-    } else if (isMenuKey(e)) {
-      e.preventDefault();
-      const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      this.menu.open(box.left + 80, box.bottom - 8, this.menuItems(r));
     } else {
       moveRowFocus(e);
     }
   }
 
-  protected onRowMenu(r: RequestRecord, e: MouseEvent): void {
-    e.preventDefault();
-    this.menu.open(e.clientX, e.clientY, this.menuItems(r));
-  }
 }

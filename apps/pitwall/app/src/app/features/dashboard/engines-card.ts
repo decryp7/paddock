@@ -38,9 +38,9 @@ import { availabilityLook, type Look } from '../../shared/labels';
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       padding: 8px 0;
-      border-top: 1px solid var(--border-soft);
+      border-top: 1px solid var(--pd-hairline);
       &:first-child {
         border-top: none;
         padding-top: 2px;
@@ -52,13 +52,13 @@ import { availabilityLook, type Look } from '../../shared/labels';
       min-width: 0;
     }
     .name {
-      font-weight: var(--fw-medium);
+      font-weight: var(--pd-weight-medium);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .off .name {
-      color: var(--text-2);
+      color: var(--pd-text-muted);
     }
     /* The reason an engine is off may take two lines; the tooltip has all of it. */
     .sub {
@@ -66,8 +66,8 @@ import { availabilityLook, type Look } from '../../shared/labels';
       -webkit-box-orient: vertical;
       -webkit-line-clamp: 2;
       overflow: hidden;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .status {
       flex: none;

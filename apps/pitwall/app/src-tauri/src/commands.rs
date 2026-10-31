@@ -28,11 +28,10 @@ pub const MAX_CHAT_MESSAGES: usize = 512;
 /// See [`MAX_CHAT_MESSAGES`].
 pub const MAX_CHAT_BYTES: usize = 8 * 1024 * 1024;
 
-/// How long a method may take before the app answers for the server. Short for reads; long for work the server does
-/// itself (loading a big model, a benchmark); the UI shows an inline error with Retry when one fires.
+/// How long a method may take before the app answers for the server. Short for reads; longer for single calls of the server's own work
+/// (long operations are jobs and have no deadline, ADR 0024); the UI shows an inline error with Retry when one fires.
 pub fn timeout_for(method: &str) -> Duration {
     Duration::from_secs(match method {
-        "load_model" | "run_benchmark" => 600,
         "stop_serving" => 30,
         "delete_model" | "install_build" | "remove_build" | "select_build" | "rollback_build" => 120,
         "search_models" | "repo_files" | "download_model" | "release_memory" | "unload_model" => 60,
@@ -142,7 +141,7 @@ impl Validate for PlaygroundRequest {
 pub async fn forward(client: &dyn ServerClient, method: &str, args: Value) -> Result<Value, CommandError> {
     let timeout = timeout_for(method);
     // The transport has its own timeout; this one also covers a client that never returns.
-    match tokio::time::timeout(timeout + Duration::from_secs(2), client.call(method, args, timeout)).await {
+    match tokio::time::timeout(timeout + Duration::from_secs(2), client.call(method, args, Some(timeout))).await {
         Ok(r) => r,
         Err(_) => Err(crate::server_client::timed_out(timeout)),
     }
@@ -177,9 +176,6 @@ rpc!(
 rpc!(
     /// The model updates on offer (newer revisions, better quantisations), not dismissed.
     update_notices => "update_notices");
-rpc!(
-    /// Asks Hugging Face now (repository ids of downloaded models only; refused in offline mode).
-    check_updates_now => "check_updates_now");
 rpc!(
     /// Turns the scheduled update check on or off and sets how often it runs.
     set_update_check => "set_update_check", enabled: bool = "enabled", schedule: UpdateSchedule = "schedule");
@@ -243,9 +239,6 @@ rpc!(
 rpc!(
     /// Deletes a model from disk.
     delete_model => "delete_model", id: String = "id");
-rpc!(
-    /// Loads a model now.
-    load_model => "load_model", id: String = "id");
 rpc!(
     /// Unloads a model.
     unload_model => "unload_model", id: String = "id");
@@ -336,9 +329,6 @@ rpc!(
 rpc!(
     /// Past benchmark results.
     benchmarks => "benchmarks");
-rpc!(
-    /// Runs a benchmark.
-    run_benchmark => "run_benchmark", model_id: String = "modelId");
 rpc!(
     /// The settings.
     settings => "settings");
@@ -543,7 +533,11 @@ mod tests {
     #[test]
     fn every_method_has_a_timeout_and_slow_ones_get_more() {
         assert_eq!(timeout_for("overview"), Duration::from_secs(15));
-        assert!(timeout_for("load_model") >= Duration::from_secs(300));
+        assert_eq!(
+            timeout_for("load_model"),
+            Duration::from_secs(15),
+            "long work is a job and has no entry here"
+        );
         assert!(timeout_for("search_models") > timeout_for("overview"));
         assert!(timeout_for("anything_else") > Duration::ZERO);
     }
@@ -569,7 +563,12 @@ mod tests {
     async fn forward_gives_up_when_a_client_never_answers() {
         struct Never;
         impl ServerClient for Never {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Duration) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(
+                &'a self,
+                _: &'a str,
+                _: Value,
+                _: Option<Duration>,
+            ) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(std::future::pending())
             }
             fn open_stream<'a>(
@@ -661,7 +660,12 @@ mod tests {
         }
         struct Client;
         impl ServerClient for Client {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Duration) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(
+                &'a self,
+                _: &'a str,
+                _: Value,
+                _: Option<Duration>,
+            ) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(async { Ok(Value::Null) })
             }
             fn open_stream<'a>(
@@ -696,7 +700,12 @@ mod tests {
         }
         struct Client;
         impl ServerClient for Client {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Duration) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(
+                &'a self,
+                _: &'a str,
+                _: Value,
+                _: Option<Duration>,
+            ) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(async { Ok(Value::Null) })
             }
             fn open_stream<'a>(
@@ -734,7 +743,12 @@ mod tests {
         }
         struct Client(Arc<AtomicBool>);
         impl ServerClient for Client {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Duration) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(
+                &'a self,
+                _: &'a str,
+                _: Value,
+                _: Option<Duration>,
+            ) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(async { Ok(Value::Null) })
             }
             fn open_stream<'a>(

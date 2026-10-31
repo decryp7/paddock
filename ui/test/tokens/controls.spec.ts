@@ -58,10 +58,14 @@ describe('control styles and the Material bridge (plan X37)', () => {
     for (const part of ['sys-primary', 'sys-surface', 'sys-outline', 'tooltip-container-color', 'slide-toggle-selected-track-color', 'checkbox-selected-icon-color', 'radio-selected-icon-color', 'form-field-outlined-outline-color', 'select-panel-background-color', 'autocomplete-background-color', 'menu-container-color', 'tab-active-indicator-color', 'datepicker-calendar-container-background-color', 'progress-bar-active-indicator-color', 'dialog-container-color']) {
       expect(props, part).toContain(`--mat-${part}`);
     }
-    // Every value is a token reference, a sized token expression or a keyword: nothing hard-coded.
+    // Every value is a token reference, a sized token expression or a keyword: nothing hard-coded. A sum of tokens is allowed
+    // (a labelled field: the control height plus twice a space step).
     for (const m of material.matchAll(/(--mat-[\w-]+)\s*:\s*([^;]+);/g)) {
-      expect(m[2], m[1]).toMatch(/^(var\(--pd-[\w-]+\)|calc\(var\(--pd-[\w-]+\) \/ [\d.]+\)|calc\(var\(--pd-focus-width\) \+ 1px\)|none|transparent|currentcolor|block|0px|0)$/);
+      expect(m[2], m[1]).toMatch(
+        /^(var\(--pd-[\w-]+\)|calc\(var\(--pd-[\w-]+\) \/ [\d.]+\)|calc\(var\(--pd-[\w-]+\) \+ \d \* var\(--pd-space-\d\)\)|calc\(var\(--pd-focus-width\) \+ 1px\)|none|transparent|currentcolor|block|0px|0)$/,
+      );
     }
+    expect(/--mat-form-field-container-height:\s*([^;]+);/.exec(material)?.[1]).toBe('calc(var(--pd-control-height) + 2 * var(--pd-space-2))');
   });
 
   it('the bridge alone (no mat.theme) sets the hover, focus and pressed state-layer opacities, or Material draws an opaque disc', () => {

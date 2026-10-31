@@ -4,6 +4,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Pitwall",
         "width": 1200,
         "height": 780,
@@ -11,9 +12,7 @@
         "minHeight": 560,
         "resizable": true,
         "zoomHotkeysEnabled": false,
-        "dragDropEnabled": false,
-        "transparent": true,
-        "windowEffects": { "effects": ["mica"] }
+        "dragDropEnabled": false
       }
     ]
   },

@@ -802,6 +802,16 @@ crate, so every shared crate's line (the start's error among them) was lost: eve
 (`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
 not by guessing at the VM.
 
+**2026-10-30, Pitwall 1.1 on the shell.** Three things the move found. (1) The shared updater had no Offline switch: an app
+with a fail-closed Offline mode (Pitwall) would have let About's Updates and the daily check reach the network, and Dyno's
+and Spotter's update checks have no Offline switch at all. Local first means every network path takes the app's Offline
+predicate and fails closed when the app does not know (`UpdatesBuilder::offline_mode`); a shared crate that opens a
+connection without one is a bug. (2) An app's command may share a name with a shell command (`job_cancel`,
+`open_login_items`): the plugin prefix keeps them apart at run time, but the generated names and the guard do not; the
+shell's `Builder::problems` reports it, so every app's tests call it. (3) Hiding a "constant" column across two rows hid a
+key's dates and a preset's defaults that no other place showed: a column is constant only across three or more rows (UI
+review 2 rule 5), and a row's own facts (its dates, its settings) are never hidden.
+
 ## A work-stealing test picked its victim by position (2026-10-29, paddock-download)
 `a_slow_range_is_split_so_neither_the_tail_nor_the_hash_waits_on_it` made the range at offset 0 slow and expected it to be
 split. On a loaded Windows runner (CI 7110) its worker was descheduled before sending the request, and the other workers

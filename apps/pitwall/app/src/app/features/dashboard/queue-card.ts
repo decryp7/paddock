@@ -5,13 +5,15 @@ import type { Job, Priority } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { compact, duration } from '../../shared/format';
 import { PRIORITY_LABEL } from '../../shared/labels';
+import { MatIconButton } from '@angular/material/button';
+import { MatProgressBar } from '@angular/material/progress-bar';
 
 const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
 
 /** Queue depth by priority and the running and waiting jobs, each cancellable. */
 @Component({
   selector: 'pw-queue-card',
-  imports: [MatIconModule, MatTooltipModule],
+  imports: [MatProgressBar, MatIconButton, MatIconModule, MatTooltipModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (live.queue(); as q) {
@@ -26,7 +28,7 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
       <ul class="jobs" aria-label="Jobs">
         @for (j of jobs().slice(0, max()); track j.id) {
           <li>
-            <span class="job-dot" [attr.data-state]="j.state" [attr.aria-label]="j.state === 'running' ? 'Running' : 'Waiting'"></span>
+            <span class="job-dot" role="img" [attr.data-state]="j.state" [attr.aria-label]="j.state === 'running' ? 'Running' : 'Waiting'"></span>
             <div class="main">
               <div class="line1">
                 <span class="app">{{ appName(j.appId) }}</span>
@@ -44,12 +46,10 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
                 }
               </div>
               @if (j.progress !== null && j.state === 'running') {
-                <div class="meter prog" role="progressbar" [attr.aria-valuenow]="pct(j)" aria-valuemin="0" aria-valuemax="100" [attr.aria-label]="'Progress of ' + appName(j.appId) + ' ' + j.kind">
-                  <span [style.width.%]="pct(j)"></span>
-                </div>
+                <mat-progress-bar class="prog" mode="determinate" [value]="pct(j)" [attr.aria-label]="'Progress of ' + appName(j.appId) + ' ' + j.kind" />
               }
             </div>
-            <button type="button" class="btn ghost icon sm cancel" [attr.aria-label]="'Cancel ' + appName(j.appId) + ' ' + j.kind" matTooltip="Cancel request" [disabled]="live.isBusy()('job:' + j.id)" (click)="live.cancelJob(j.id)">
+            <button type="button" matIconButton class="cancel" [attr.aria-label]="'Cancel ' + appName(j.appId) + ' ' + j.kind" matTooltip="Cancel request" [disabled]="live.isBusy()('job:' + j.id)" (click)="live.cancelJob(j.id)">
               <mat-icon svgIcon="pw:close" aria-hidden="true" />
             </button>
           </li>
@@ -68,19 +68,19 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
     .depth {
       display: flex;
       flex-wrap: wrap;
-      gap: 0 var(--sp-2);
-      margin: 0 0 var(--sp-2);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      gap: 0 var(--pd-space-2);
+      margin: 0 0 var(--pd-space-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       span + span::before {
         content: '·';
-        margin-right: var(--sp-2);
+        margin-right: var(--pd-space-2);
       }
     }
     .none {
-      padding: var(--sp-3) 0;
-      color: var(--text-3);
-      font-size: var(--fs-sm);
+      padding: var(--pd-space-3) 0;
+      color: var(--pd-text-subtle);
+      font-size: var(--pd-text-label);
     }
     .jobs {
       list-style: none;
@@ -90,9 +90,9 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
         display: grid;
         grid-template-columns: auto minmax(0, 1fr) auto;
         align-items: center;
-        gap: var(--sp-3);
+        gap: var(--pd-space-3);
         padding: 8px 0;
-        border-top: 1px solid var(--border-soft);
+        border-top: 1px solid var(--pd-hairline);
         &:first-child {
           border-top: none;
         }
@@ -101,7 +101,7 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
     /* Cancel is a quiet icon that appears with the pointer or keyboard focus, not a row of text buttons. */
     .cancel {
       opacity: 0;
-      transition: opacity var(--dur-fast) var(--ease);
+      transition: opacity var(--pd-duration-micro) var(--pd-ease-move);
     }
     li:hover .cancel,
     li:focus-within .cancel,
@@ -117,42 +117,43 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
       width: 7px;
       height: 7px;
       border-radius: 50%;
-      border: 1.5px solid var(--text-3);
+      border: 1.5px solid var(--pd-text-subtle);
       &[data-state='running'] {
-        border-color: var(--accent);
-        background: var(--accent);
-        box-shadow: 0 0 0 3px var(--accent-soft);
+        border-color: var(--pd-accent);
+        background: var(--pd-accent);
+        box-shadow: 0 0 0 3px var(--pd-accent-tint);
       }
     }
     .line1 {
       display: flex;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       align-items: baseline;
       .app {
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
       .kind {
-        font-size: var(--fs-xs);
-        color: var(--text-3);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-subtle);
       }
     }
     .line2 {
       display: flex;
-      gap: var(--sp-2);
-      font-size: var(--fs-xs);
-      color: var(--text-3);
+      gap: var(--pd-space-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-subtle);
       span + span::before {
         content: '·';
-        margin-right: var(--sp-2);
+        margin-right: var(--pd-space-2);
       }
     }
     .more {
-      padding-top: var(--sp-2);
-      font-size: var(--fs-xs);
-      color: var(--text-3);
+      padding-top: var(--pd-space-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-subtle);
     }
     .prog {
-      height: 3px;
+      --mat-progress-bar-active-indicator-height: 3px;
+      --mat-progress-bar-track-height: 3px;
       margin-top: 5px;
     }
   `,

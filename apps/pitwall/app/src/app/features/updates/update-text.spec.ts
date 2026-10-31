@@ -19,7 +19,7 @@ const status = (p: Partial<UpdateCheckStatus> = {}): UpdateCheckStatus => ({
 
 describe('checkSummary', () => {
   it('says when it last ran and when it runs next', () => {
-    expect(checkSummary(status({ lastCheckedAt: NOW - 3 * HOUR, lastAttemptAt: NOW - 3 * HOUR, nextCheckAt: NOW + 6 * 24 * HOUR }), NOW)).toBe('Last checked 3 h ago. The next check runs in 6 d.');
+    expect(checkSummary(status({ lastCheckedAt: NOW - 3 * HOUR, lastAttemptAt: NOW - 3 * HOUR, nextCheckAt: NOW + 6 * 24 * HOUR }), NOW)).toBe('Last checked 3 h ago. The next check runs in 6 days.');
   });
 
   it('says it was never checked, and that the first check runs soon once on', () => {

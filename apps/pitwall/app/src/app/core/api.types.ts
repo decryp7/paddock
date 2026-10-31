@@ -20,6 +20,7 @@ export type ErrorCode =
   | 'busy'
   | 'notAvailable'
   | 'notImplemented'
+  | 'cancelled'
   | 'internal';
 
 export interface CommandError {
@@ -906,18 +907,6 @@ export type CacheClearScope =
   | { kind: 'app'; appId: string }
   | { kind: 'model'; modelId: string };
 
-export interface AppUpdateStatus {
-  available: boolean;
-  reason: string | null;
-  currentVersion: string;
-}
-
-/** An update found by a check (`UpdateInfo` in `app/src-tauri/src/updater.rs`). */
-export interface UpdateInfo {
-  version: string;
-  notes: string | null;
-}
-
 export type Platform = 'windows' | 'macos' | 'linux';
 
 /** The server's registration with the OS (`ServiceInstall` in `app/src-tauri/src/service_install.rs`). */
@@ -1034,3 +1023,29 @@ export interface UpdateCheckStatus {
   host: string;
   maxRepos: number;
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Jobs (ADR 0024): long operations the app runs in the background; mirrors `app/src-tauri/src/jobs.rs` (`JobEvent`).
+
+/** What a job's `done` and `total` count. */
+export type JobUnit = 'items' | 'bytes';
+
+/** One event of a job, as the app pushes it on the channel of the command that started the job. */
+export type JobEvent =
+  | { kind: 'started'; jobId: number; title: string }
+  | {
+      kind: 'progress';
+      jobId: number;
+      phase: string;
+      done: number;
+      total: number | null;
+      unit: JobUnit;
+      /** Cancel did not take effect: the UI may also offer "Stop waiting". */
+      canStopWaiting: boolean;
+      elapsedSecs: number;
+      cancellable: boolean;
+      notCancellableReason: string | null;
+    }
+  | { kind: 'done'; jobId: number; result: unknown }
+  | { kind: 'failed'; jobId: number; error: CommandError }
+  | { kind: 'cancelled'; jobId: number; stoppedWaiting: boolean };

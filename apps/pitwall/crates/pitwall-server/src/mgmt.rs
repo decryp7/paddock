@@ -67,6 +67,35 @@ fn arg<T: DeserializeOwned>(a: &Value, name: &str) -> R<T> {
         .map_err(|e| err(mgmt::ErrorCode::BadRequest, format!("argument \"{name}\": {e}")))
 }
 
+/// Runs `work` as an operation the caller can cancel with `cancel_op`, named by the optional `opId` argument. `None`
+/// when it was cancelled (the work is dropped); without an `opId` it runs to the end as before.
+async fn cancellable<T>(st: &AppState, a: &Value, work: impl std::future::Future<Output = R<T>>) -> R<Option<T>> {
+    let Some(op) = arg::<Option<String>>(a, "opId")? else {
+        return work.await.map(Some);
+    };
+    struct Forget<'a>(&'a AppState, String);
+    impl Drop for Forget<'_> {
+        fn drop(&mut self) {
+            lock(&self.0.ops).end(&self.1);
+        }
+    }
+    let notify = lock(&st.ops).begin(&op, now_ms());
+    let _forget = Forget(st, op);
+    tokio::select! {
+        r = work => r.map(Some),
+        () = notify.notified() => Ok(None),
+    }
+}
+
+/// After a load was cancelled: the half-started engine went with the dropped load. A model this very call finished loading
+/// in the same instant is unloaded, so a cancelled load never leaves behind a model it started; one that another request or
+/// job loaded (or is using: `unload` refuses a busy model) is left alone.
+pub fn undo_cancelled_load(st: &AppState, id: &ModelId, loaded_here: bool) {
+    if loaded_here {
+        st.serving.unload(id, pitwall_core::memory::ReleaseReason::Manual);
+    }
+}
+
 fn model(a: &Value, name: &str) -> R<ModelId> {
     let s: String = arg(a, name)?;
     ModelId::parse(&s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e.to_string()))
@@ -244,16 +273,36 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "load_model" => {
             let id = model(a, "id")?;
             st.serving.retry(&id);
-            st.serving.ensure(&id).await.map_err(|e| {
-                err(
-                    if e.kind == ErrorKind::InsufficientMemory {
-                        mgmt::ErrorCode::InsufficientMemory
-                    } else {
-                        mgmt::ErrorCode::NotAvailable
-                    },
-                    e.message,
-                )
-            })?;
+            // Set only when this call's own `ensure` started the engine.
+            let loaded_here = std::sync::atomic::AtomicBool::new(false);
+            let load = async {
+                st.serving
+                    .ensure(&id)
+                    .await
+                    .map(|(_busy, cold)| loaded_here.store(cold.is_some(), std::sync::atomic::Ordering::SeqCst))
+                    .map_err(|e| {
+                        err(
+                            if e.kind == ErrorKind::InsufficientMemory {
+                                mgmt::ErrorCode::InsufficientMemory
+                            } else {
+                                mgmt::ErrorCode::NotAvailable
+                            },
+                            e.message,
+                        )
+                    })
+            };
+            match cancellable(st, a, load).await? {
+                Some(()) => ok(()),
+                None => {
+                    undo_cancelled_load(st, &id, loaded_here.load(std::sync::atomic::Ordering::SeqCst));
+                    ok(json!({ "cancelled": true }))
+                }
+            }
+        }
+        "cancel_op" => {
+            let op: String = arg(a, "opId")?;
+            // A cancel can arrive before its operation does: a short-lived permit stops it as it starts (see `Ops`).
+            lock(&st.ops).cancel(&op, now_ms());
             ok(())
         }
         "unload_model" => {
@@ -492,11 +541,22 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "benchmarks" => ok(lock(&st.benchmarks).clone()),
         "run_benchmark" => {
             let id = model(a, "modelId")?;
-            run_benchmark(st, id).await
+            // Dropping the run cancels its generation; nothing is recorded, so the stored results stay as they were.
+            match cancellable(st, a, run_benchmark(st, id)).await? {
+                Some(result) => Ok(result),
+                None => ok(json!({ "cancelled": true })),
+            }
         }
         "update_check_status" => ok(st.update_status()),
         "update_notices" => ok(st.update_notices()),
-        "check_updates_now" => ok(st.run_update_check().await.result),
+        "check_updates_now" => {
+            // Up to 40 repositories are asked one after another: a job on the app side, so it can be cancelled by `opId`.
+            // Dropping the check releases its guard and writes nothing (the state is saved when it finishes).
+            match cancellable(st, a, async { Ok(st.run_update_check().await.result) }).await? {
+                Some(result) => ok(result),
+                None => ok(json!({ "cancelled": true })),
+            }
+        }
         "set_update_check" => {
             let enabled: bool = arg(a, "enabled")?;
             let schedule: mgmt::UpdateSchedule = arg(a, "schedule")?;
@@ -547,7 +607,12 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "save_settings" => {
             let ui: UiSettings = arg(a, "settings")?;
             let s = st.cfg().with_ui(ui).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?;
-            ok(st.save_settings(s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?.ui())
+            let saved = st.save_settings(s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?.ui();
+            // Every window (the app's Offline gate among them) hears the new server state at once, not at the next read.
+            st.push(&LiveUpdate::Server {
+                server: overview(st).server,
+            });
+            ok(saved)
         }
         _ => Err(err(mgmt::ErrorCode::NotImplemented, format!("unknown call \"{method}\""))),
     }

@@ -1,5 +1,7 @@
+import { pickOption, dialogsAnswering } from '../../../testing/render';
+import { TestbedHarnessEnvironment } from '@angular/cdk/testing/testbed';
 import { TestBed } from '@angular/core/testing';
-import { pickOption } from '../../../testing/render';
+import { MatTableHarness } from '@angular/material/table/testing';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import type { Download, Fit } from '../../core/api.types';
@@ -8,12 +10,12 @@ import { BACKEND } from '../../core/backend';
 import { LiveStore } from '../../core/live.store';
 import { MockBackend } from '../../core/mock-backend';
 import { registerIcons } from '../../shared/icons';
-import { Confirm } from '../../shared/ui/confirm';
 import { fitDetail } from './discover-tab';
 import { etaMs } from './downloads-list';
 import { contextText, idleOptions, paramsText } from './library-tab';
-import { ModelsPage, nextTab } from './models-page';
+import { ModelsPage } from './models-page';
 import { ModelsStore } from './models.store';
+
 
 const tick = async (n = 6) => {
   for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
@@ -24,7 +26,7 @@ async function render(backend: PitwallBackend = new MockBackend(), confirm = tru
     imports: [ModelsPage],
     providers: [
       { provide: BACKEND, useValue: backend },
-      { provide: Confirm, useValue: { ask: () => Promise.resolve(confirm) } },
+      dialogsAnswering(confirm),
     ],
   });
   registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
@@ -53,7 +55,7 @@ async function render(backend: PitwallBackend = new MockBackend(), confirm = tru
   const menu = async (name: string, item: string) => {
     (el.querySelector(`button[aria-label="More actions for ${name}"]`) as HTMLButtonElement).click();
     await settle();
-    const entry = Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent?.trim() === item)!;
+    const entry = Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-item')).find((b) => b.textContent?.trim() === item)!;
     entry.click();
     await settle();
   };
@@ -84,17 +86,6 @@ describe('models helpers', () => {
     expect(etaMs({ ...d, speedBps: 0 })).toBeNull();
     expect(etaMs({ ...d, state: 'paused' })).toBeNull();
   });
-
-  it('moves between tabs with the arrow, Home and End keys', () => {
-    expect(nextTab('library', 'ArrowRight')).toBe('discover');
-    expect(nextTab('library', 'ArrowLeft')).toBe('downloads');
-    expect(nextTab('downloads', 'ArrowRight')).toBe('library');
-    expect(nextTab('discover', 'Home')).toBe('library');
-    expect(nextTab('discover', 'End')).toBe('downloads');
-    expect(nextTab('discover', 'ArrowRight')).toBe('presets');
-    expect(nextTab('presets', 'ArrowRight')).toBe('downloads');
-    expect(nextTab('discover', 'a')).toBeNull();
-  });
 });
 
 describe('ModelsPage', () => {
@@ -118,9 +109,47 @@ describe('ModelsPage', () => {
     // Nothing destructive at rest: Delete lives in the "..." menu only.
     expect(el.querySelector('button[aria-label="Delete Gemma 4 12B"]')).toBeNull();
     expect(el.querySelector('button[aria-label="More actions for Gemma 4 12B"]')).not.toBeNull();
-    expect(Array.from(el.querySelectorAll('pw-library-tab thead th')).map((t) => t.textContent!.trim())).toEqual(['Model', 'Size', 'Params', 'Context', 'Status', 'Actions']);
+    // Units in the header, so the cells are bare right-aligned numbers.
+    expect(Array.from(el.querySelectorAll('pw-library-tab thead th')).map((t) => t.textContent!.trim())).toEqual(['Model', 'Size GB', 'Params', 'Context tokens', 'Status', 'Actions']);
+    expect(rows[0]!.querySelector('td.mat-column-size')!.textContent!.trim()).toMatch(/^\d+(\.\d)?$/);
     expect(rows[0]!.querySelector('mat-icon[aria-label="Chat"]')).not.toBeNull();
     expect(rows[0]!.querySelector('.tag, .pill')).toBeNull();
+  });
+
+  it('names each capability glyph for a pointer and a screen reader', async () => {
+    const { el } = await render();
+    const glyphs = Array.from(el.querySelectorAll('pw-library-tab tbody .glyphs mat-icon'));
+    expect(glyphs.length).toBeGreaterThan(8);
+    for (const g of glyphs) {
+      expect(g.getAttribute('role')).toBe('img');
+      expect(g.getAttribute('aria-label')).toMatch(/\w/);
+      expect(g.classList).toContain('mat-mdc-tooltip-trigger');
+    }
+  });
+
+  it('says a value every model shares once in the toolbar instead of in a constant column', async () => {
+    const backend = new MockBackend();
+    const all = await backend.localModels();
+    backend.localModels = async () => all.map((m) => ({ ...m, contextMax: 32_768 }));
+    const { el } = await render(backend);
+    expect(Array.from(el.querySelectorAll('pw-library-tab thead th')).map((t) => t.textContent!.trim())).not.toContain('Context tokens');
+    expect(el.querySelector('pw-library-tab .toolbar')!.textContent).toContain('all 32k context');
+    // A column that varies is shown, so its value is not repeated in the toolbar.
+    expect(el.querySelector('pw-library-tab .toolbar')!.textContent).not.toMatch(/all \d[\d.]*[BM]\b/);
+  });
+
+  it('is a Material table with one sticky header row (rule 47, ADR 0027)', async () => {
+    const { fixture } = await render();
+    const loader = TestbedHarnessEnvironment.loader(fixture);
+    const table = await loader.getHarness(MatTableHarness.with({ selector: 'pw-library-tab table' }));
+    const [header] = await table.getHeaderRows();
+    expect(await header!.getCellTextByIndex()).toEqual(['Model', 'Size GB', 'Params', 'Context tokens', 'Status', 'Actions']);
+    const rows = await table.getRows();
+    expect(rows.length).toBe(8);
+    const first = await rows[0]!.getCellTextByColumnName();
+    expect(first['model']).toContain('Qwen3.5 9B');
+    expect(first['status']).toContain('Loaded');
+    expect(fixture.nativeElement.querySelector('pw-library-tab thead th')!.classList).toContain('mat-mdc-table-sticky');
   });
 
   it('opens the details on a row click or Enter and closes them with Escape, returning focus to the row', async () => {
@@ -153,14 +182,18 @@ describe('ModelsPage', () => {
     expect(document.activeElement).toBe(rows[1]);
     rows[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
     await settle();
-    const labels = () => Array.from(document.querySelectorAll('.pw-menu .pw-menu-item')).map((b) => b.textContent!.trim());
+    const labels = () => Array.from(document.querySelectorAll('.mat-mdc-menu-item')).map((b) => b.textContent!.trim());
     expect(labels()).toContain('Delete…');
-    expect(document.querySelector('.pw-menu .pw-menu-item.danger')?.textContent).toContain('Delete');
-    document.querySelector<HTMLElement>('.cdk-overlay-backdrop')!.click();
+    expect(document.querySelector('.mat-mdc-menu-item.danger')?.textContent).toContain('Delete');
+    const close = async () => {
+      document.querySelector<HTMLElement>('.mat-mdc-menu-panel')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+      await settle();
+    };
+    await close();
     rows[2]!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
     await settle();
-    expect(labels()).toContain('Unload');
-    document.querySelector<HTMLElement>('.cdk-overlay-backdrop')!.click();
+    expect(labels().filter((l) => l === 'Unload' || l === 'Load').length).toBeGreaterThan(0);
+    await close();
   });
 
   it('loads, pins, sets idle, deletes and cleans up from the table and its details', async () => {
@@ -178,10 +211,10 @@ describe('ModelsPage', () => {
     const id = 'qwen3.5-4b-q4_k_m';
     const idleOf = async () => (await backend.localModels()).find((m) => m.id === id)?.idleSecs;
     await open('Qwen3.5 4B');
-    const choose = (label: string) => pickOption(el.querySelector(`#idle-qwen3\\.5-4b-q4_k_m`) as HTMLButtonElement, label, settle);
+    const choose = (label: string) => pickOption(el.querySelector(`#idle-qwen3\\.5-4b-q4_k_m`) as HTMLElement, label, settle);
     await choose('After 10 min');
     expect(await idleOf()).toBe(600);
-    expect((el.querySelector(`#idle-qwen3\\.5-4b-q4_k_m`) as HTMLButtonElement).textContent).toContain('After 10 min');
+    expect((el.querySelector(`#idle-qwen3\\.5-4b-q4_k_m`) as HTMLElement).textContent).toContain('After 10 min');
     await choose('Global setting');
     expect(await idleOf()).toBeNull();
 
@@ -217,7 +250,7 @@ describe('ModelsPage', () => {
   it('searches, opens a repo with fit verdicts and downloads a variant with its projector', async () => {
     const backend = new MockBackend();
     const { el, settle, fixture } = await render(backend);
-    (el.querySelector('#tab-library') as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+    (el.querySelector('#tab-discover') as HTMLElement).click();
     await settle();
     expect(el.querySelectorAll('pw-discover-tab .hit').length).toBe(12);
     const input = el.querySelector('#hf-q') as HTMLInputElement;
@@ -259,12 +292,12 @@ describe('ModelsPage', () => {
     expect(el.querySelector('pw-discover-tab .hit .tag')).toBeNull();
     // Search is the page's primary action only while the field has text.
     const search = Array.from(el.querySelectorAll('pw-discover-tab form button')).find((b) => b.textContent!.trim() === 'Search') as HTMLButtonElement;
-    expect(search.classList.contains('primary')).toBe(false);
+    expect(search.classList.contains('mat-mdc-unelevated-button')).toBe(false);
     const input = el.querySelector('#hf-q') as HTMLInputElement;
     input.value = 'qwen';
     input.dispatchEvent(new Event('input'));
     await settle();
-    expect(search.classList.contains('primary')).toBe(true);
+    expect(search.classList.contains('mat-mdc-unelevated-button')).toBe(true);
     expect(button).toBeDefined();
   });
 

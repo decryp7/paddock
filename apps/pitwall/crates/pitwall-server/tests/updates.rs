@@ -277,3 +277,42 @@ async fn deleting_a_model_removes_its_record() {
     h.st.library.delete(&id).unwrap();
     assert!(!side.exists() && !file.exists());
 }
+
+/// A Hugging Face that never answers: a check against it runs until it is cancelled.
+struct SilentHf(AtomicUsize);
+
+impl RepoSource for SilentHf {
+    fn snapshot<'a>(&'a self, _: &'a RepoId) -> BoxFuture<'a, Result<RepoSnapshot, DownloadError>> {
+        Box::pin(async move {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            std::future::pending().await
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_check_can_be_cancelled_by_its_op_id_and_leaves_the_checker_free() {
+    let h = Arc::new(harness_in(tempfile::tempdir().unwrap(), false).await);
+    let silent = Arc::new(SilentHf(AtomicUsize::new(0)));
+    h.st.set_update_source(silent.clone());
+    let h2 = h.clone();
+    let check = tokio::spawn(async move { h2.rpc("check_updates_now", json!({ "opId": "check-1" })).await });
+    // The check is asking Hugging Face (and the status says it runs) before the cancel is sent.
+    while silent.0.load(Ordering::SeqCst) == 0 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(h.rpc("update_check_status", json!({})).await.json()["running"], true);
+    assert_eq!(h.rpc("cancel_op", json!({ "opId": "check-1" })).await.status, 200);
+    let r = tokio::time::timeout(std::time::Duration::from_secs(60), check)
+        .await
+        .expect("the check ends")
+        .unwrap();
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(r.json(), json!({ "cancelled": true }));
+    assert_eq!(
+        h.rpc("update_check_status", json!({})).await.json()["running"],
+        false,
+        "a cancelled check releases the guard"
+    );
+    assert!(h.st.ops.lock().unwrap().is_empty());
+}

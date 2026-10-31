@@ -1,12 +1,14 @@
 import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
+import { MatIconButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatProgressBar } from '@angular/material/progress-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { Download } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { ago, bytes, duration, percent } from '../../shared/format';
 import { downloadActive, downloadLook } from '../../shared/labels';
-import { EmptyState } from '../../shared/ui/empty-state';
 import { ModelsStore } from './models.store';
+import { SuEmptyState } from '@decryp7/paddock-ui';
 
 /** Time left at the current speed, or null when it can't be estimated. */
 export function etaMs(d: Download): number | null {
@@ -17,11 +19,11 @@ export function etaMs(d: Download): number | null {
 /** Model and engine downloads with live progress (pushed), speed, time left, cancel and the resumable state. */
 @Component({
   selector: 'pw-downloads-list',
-  imports: [MatIconModule, MatTooltipModule, EmptyState],
+  imports: [MatIconButton, MatProgressBar, MatIconModule, MatTooltipModule, SuEmptyState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (live.downloads().length === 0) {
-      <pw-empty-state icon="download" heading="No downloads" text="Downloads from Discover and engine installs show their progress here." />
+      <pd-empty-state heading="No downloads" description="Downloads from Discover and engine installs show their progress here."><mat-icon slot="icon" svgIcon="pw:download" aria-hidden="true" /></pd-empty-state>
     }
     <ul aria-label="Downloads">
       @for (d of live.downloads(); track d.id) {
@@ -35,9 +37,7 @@ export function etaMs(d: Download): number | null {
               }
             </div>
             @if (d.state !== 'done' && d.state !== 'cancelled') {
-              <div class="meter" [attr.data-tone]="d.state === 'failed' ? 'bad' : d.state === 'paused' ? 'warn' : null" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="pct(d)" [attr.aria-label]="'Progress of ' + d.name">
-                <span [style.width.%]="pct(d)"></span>
-              </div>
+              <mat-progress-bar mode="determinate" [value]="pct(d)" [attr.data-tone]="d.state === 'failed' ? 'bad' : d.state === 'paused' ? 'warn' : null" [attr.aria-label]="'Progress of ' + d.name" />
             }
             <div class="meta num">
               <span>{{ size(d.bytesDone) }} of {{ size(d.bytesTotal) }}</span>
@@ -55,7 +55,7 @@ export function etaMs(d: Download): number | null {
             }
           </div>
           @if (downloadActive(d.state) || d.state === 'paused') {
-            <button type="button" class="btn ghost icon sm cancel" [disabled]="store.isBusy()('cancel:' + d.id)" [attr.aria-label]="'Cancel ' + d.name" [matTooltip]="d.state === 'paused' ? 'Discard the partial file' : 'Stop the download'" (click)="store.cancelDownload(d.id)">
+            <button type="button" matIconButton class="cancel" [disabled]="store.isBusy()('cancel:' + d.id)" [attr.aria-label]="'Cancel ' + d.name" [matTooltip]="d.state === 'paused' ? 'Discard the partial file' : 'Stop the download'" (click)="store.cancelDownload(d.id)">
               <mat-icon svgIcon="pw:close" aria-hidden="true" />
             </button>
           }
@@ -73,9 +73,9 @@ export function etaMs(d: Download): number | null {
       display: grid;
       grid-template-columns: auto minmax(0, 1fr) auto;
       align-items: center;
-      gap: var(--sp-3);
-      padding: var(--sp-3) 0;
-      border-top: 1px solid var(--border-soft);
+      gap: var(--pd-space-3);
+      padding: var(--pd-space-3) 0;
+      border-top: 1px solid var(--pd-hairline);
       &:first-child {
         border-top: none;
         padding-top: 0;
@@ -95,19 +95,26 @@ export function etaMs(d: Download): number | null {
         opacity: 1;
       }
     }
+    /* A failed or paused download keeps its bar in the status colour (with the word beside the name). */
+    mat-progress-bar[data-tone='bad'] {
+      --mat-progress-bar-active-indicator-color: var(--pd-danger);
+    }
+    mat-progress-bar[data-tone='warn'] {
+      --mat-progress-bar-active-indicator-color: var(--pd-warning);
+    }
     .ic {
       display: grid;
       place-items: center;
       width: 32px;
       height: 32px;
-      border-radius: var(--r-md);
-      background: var(--bg-hover);
-      color: var(--text-2);
+      border-radius: var(--pd-radius-control);
+      background: var(--pd-hover);
+      color: var(--pd-text-muted);
       align-self: start;
     }
     li[data-state='downloading'] .ic {
-      background: var(--accent-soft);
-      color: var(--accent);
+      background: var(--pd-accent-tint);
+      color: var(--pd-accent);
     }
     .main {
       display: grid;
@@ -118,11 +125,11 @@ export function etaMs(d: Download): number | null {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .name {
-      font-size: var(--fs-sm);
-      font-weight: var(--fw-medium);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-medium);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -130,19 +137,19 @@ export function etaMs(d: Download): number | null {
     .meta {
       display: flex;
       flex-wrap: wrap;
-      gap: var(--sp-2);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      gap: var(--pd-space-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       span + span::before {
         content: '·';
-        margin-right: var(--sp-2);
+        margin-right: var(--pd-space-2);
       }
     }
     .err {
-      font-size: var(--fs-sm);
-      color: var(--bad);
+      font-size: var(--pd-text-label);
+      color: var(--pd-danger);
       &.warn {
-        color: var(--warn);
+        color: var(--pd-warning);
       }
     }
   `,

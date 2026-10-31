@@ -1,9 +1,10 @@
-import { mockOptionsFrom } from '../app.config';
+import { mockOptionsFrom } from './backend-factory';
 import type { LiveUpdate, PlaygroundEvent } from './api.types';
 import { isTauri } from './backend';
 import { toCommandError } from './command-error';
 import { MockBackend } from './mock-backend';
-import { demoLimitStatuses, demoFit, demoHistory, demoRepo, demoRequests, demoSearch, presetMemory, prng, GiB } from './mock-data';
+import { BROWSER_VERSION } from '../shell/engines';
+import { demoEngines, demoLimitStatuses, demoFit, demoHistory, demoRepo, demoRequests, demoSearch, presetMemory, prng, GiB } from './mock-data';
 
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
@@ -54,7 +55,6 @@ describe('MockBackend', () => {
     expect((await mock.requests(10)).length).toBe(10);
     expect((await mock.benchmarks()).length).toBeGreaterThan(0);
     expect((await mock.settings()).memory.preset).toBe('balanced');
-    expect((await mock.appUpdateStatus()).available).toBe(false);
     expect((await mock.diskUsage()).unused).toContain('qwen3.5-2b-q8_0');
   });
 
@@ -313,7 +313,7 @@ describe('MockBackend', () => {
     const r = await mock.runBenchmark('qwen3.5-4b-q4_k_m');
     expect(r.genTps).toBeGreaterThan(0);
     await expect(mock.runBenchmark('nope')).rejects.toMatchObject({ code: 'notFound' });
-    expect((await mock.applyPreset('performance')).memory.maxHotModels).toBe(4);
+    expect((await mock.applyPreset('performance')).memory.maxHotModels).toBe(6);
     expect((await mock.applyPreset('custom')).memory.preset).toBe('custom');
     await mock.cancelJob('job-42');
     await expect(mock.cancelJob('job-42')).rejects.toMatchObject({ code: 'notFound' });
@@ -562,5 +562,19 @@ describe('MockBackend model updates', () => {
     await mock.unloadModel('qwen3.5-4b-q4_k_m');
     await mock.deleteModel('qwen3.5-4b-q4_k_m');
     expect((await mock.updateNotices()).map((n) => n.modelId)).toEqual(['qwen3.5-9b-q4_k_m']);
+  });
+});
+
+describe('MockBackend first start', () => {
+  it('installs the build the catalog suggests, at its release and download size', async () => {
+    const mock = new MockBackend({ installing: true });
+    const download = (await mock.overview()).engineSetup.download!;
+    const suggested = demoEngines(Date.now())[0]!.catalog.find((c) => c.suggested)!;
+    expect(download.name).toContain(suggested.tag);
+    expect(download.bytesTotal).toBe(suggested.downloadBytes);
+  });
+
+  it('reports the browser build version as the server version (one source, never a literal)', async () => {
+    expect((await new MockBackend().overview()).server.version).toBe(BROWSER_VERSION);
   });
 });
