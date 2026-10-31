@@ -274,7 +274,10 @@ pub(crate) fn contain_before_exec(
     // (the limits, the landlock ruleset's descriptor, the BPF program and the status pipe). The ruleset's mutex is
     // never contended: only this hook takes it, so no lock held at fork time can block it.
     unsafe {
-        #[expect(clippy::disallowed_methods, reason = "the sandbox must be applied between fork and exec; there is no later point")]
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the sandbox must be applied between fork and exec; there is no later point"
+        )]
         cmd.pre_exec(move || {
             platform::set_limit(libc::RLIMIT_CPU, cpu).map_err(std::io::Error::other)?;
             if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
