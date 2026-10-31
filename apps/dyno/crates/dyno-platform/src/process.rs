@@ -141,12 +141,7 @@ impl TreeGuard {
 /// progress grows while the tool works). The child is killed after `timeout` and at once when `control` is cancelled; the call
 /// then returns [`PlatformError::Failed`] ("stopped") and the caller, who knows it cancelled, drops the result. A non-zero exit
 /// is an error carrying the start of the error output. Only [`MAX_TOOL_OUTPUT`] bytes of stdout are read.
-pub fn run_streaming(
-    cmd: Command,
-    timeout: Duration,
-    control: &dyn ReadControl,
-    on_line: impl FnMut(&str),
-) -> Result<(), PlatformError> {
+pub fn run_streaming(cmd: Command, timeout: Duration, control: &dyn ReadControl, on_line: impl FnMut(&str)) -> Result<(), PlatformError> {
     stream(cmd, false, timeout, control, on_line)
 }
 
