@@ -193,6 +193,17 @@ test.describe('notification channels (plan X17)', () => {
     await expect(page.getByTestId('channel-allow-lan')).toHaveCount(1);
   });
 
+  test('focusing a row shows the whole address on one line without changing the row height', async ({ app, page }) => {
+    await app.settings.open({ page: 'pd.channels' }, '');
+    const row = page.getByTestId('channel-row-slack');
+    const before = (await row.boundingBox())!.height;
+    await page.getByRole('button', { name: 'Edit Team Slack' }).focus();
+    await expect(row.locator('.pd-ch__full')).toBeVisible();
+    await expect(row.locator('.pd-ch__full')).toContainText('https://hooks.example.com/services/');
+    await expect(page.getByTestId('channel-endpoint-slack')).toBeHidden();
+    expect((await row.boundingBox())!.height).toBe(before);
+  });
+
   test('works by keyboard alone: Tab to Edit, Escape cancels, Enter saves', async ({ app, page }) => {
     await app.settings.open({ page: 'pd.channels' }, '');
     const edit = page.getByRole('button', { name: 'Edit Phone' });

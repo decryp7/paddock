@@ -583,6 +583,16 @@ describe('the Notification channels page', () => {
       expect(saved?.events).toEqual(['jobDone', 'diskLow']);
     });
 
+    it('after removing the last of several chips, focus goes to the new last chip', async () => {
+      const odd: ChannelConfig = { ...NTFY, id: 'odd', name: 'Odd', events: ['aOld', 'bOld', 'cOld'] };
+      const p = await open({ channels: [odd] }, DECLARED, false);
+      await p.click(p.rowButton('odd', 'channel-edit'));
+      await p.click('channel-event-remove-cOld');
+      expect(document.activeElement).toBe(p.q('channel-event-remove-bOld'));
+      await p.click('channel-event-remove-aOld');
+      expect(document.activeElement).toBe(p.q('channel-event-remove-bOld'));
+    });
+
     it('keeps names the app did not declare as removable chips and never drops them', async () => {
       const odd: ChannelConfig = { ...NTFY, id: 'odd', name: 'Odd', events: ['diskLow', 'oldEvent', 'legacyEvent'] };
       const p = await open({ channels: [odd] }, DECLARED, false);

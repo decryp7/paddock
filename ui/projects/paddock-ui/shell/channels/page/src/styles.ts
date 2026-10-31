@@ -54,7 +54,7 @@ export const CHANNELS_STYLES = `
   .pd-ch__hint--under-switch { margin-inline-start: var(--pd-ch-switch-indent); }
   /* On hover or keyboard focus within the row the host gives way to the whole address (the tooltip alone is not keyboard-reachable). */
   tr:hover .pd-ch__endpoint, tr:focus-within .pd-ch__endpoint { display: none; }
-  tr:hover .pd-ch__full.pd-sr, tr:focus-within .pd-ch__full.pd-sr { position: static; width: auto; height: auto; overflow: visible; clip-path: none; white-space: normal; overflow-wrap: anywhere; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
+  tr:hover .pd-ch__full.pd-sr, tr:focus-within .pd-ch__full.pd-sr { position: static; display: block; width: auto; height: auto; overflow: hidden; clip-path: none; white-space: nowrap; text-overflow: ellipsis; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
   .pd-ch__grid > mat-slide-toggle { align-self: center; }
   .pd-ch__events-picker { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; }
   .pd-ch__legend { font-weight: var(--pd-weight-medium); padding: 0; margin: 0 0 var(--pd-space-1); }
