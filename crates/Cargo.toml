@@ -55,6 +55,7 @@ members = [
     "paddock-updater",
     "paddock-view",
     "paddock-watch",
+    "paddock-widgets",
     "paddock-window",
     "paddock-workbench",
     "paddock-workspace-hack",
@@ -127,6 +128,7 @@ paddock-testplan = { path = "paddock-testplan", version = "0.1.0", registry = "d
 paddock-updater = { path = "paddock-updater", version = "0.2.0", registry = "decryp7" }
 paddock-view = { path = "paddock-view", version = "0.1.0", registry = "decryp7" }
 paddock-watch = { path = "paddock-watch", version = "0.1.0", registry = "decryp7" }
+paddock-widgets = { path = "paddock-widgets", version = "0.1.0", registry = "decryp7" }
 paddock-window = { path = "paddock-window", version = "0.2.0", registry = "decryp7" }
 paddock-workbench = { path = "paddock-workbench", version = "0.1.0", registry = "decryp7" }
 
