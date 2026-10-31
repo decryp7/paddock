@@ -2,7 +2,7 @@
 # model runtime, no capture API, no UI (docs/adr/0001-object-detector.md is still in review).
 [workspace]
 resolver = "3"
-members = ["crates/sighter-core", "crates/sighter-bench"]
+members = ["crates/sighter-core", "crates/sighter-bench", "crates/sighter-target"]
 
 [workspace.package]
 edition = "2024"

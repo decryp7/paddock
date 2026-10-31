@@ -1,0 +1,25 @@
+[package]
+name = "sighter-target"
+version = "0.0.0"
+description = "Sighter's targets: its own RFB/VNC client (no GPL libvnc) behind the core's Target, FrameSource and InputDriver ports."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+sighter-core = { path = "../sighter-core" }
+thiserror = "2"
+flate2 = "1"
+des = { version = "0.8", features = ["zeroize"] }
+zeroize = "1"
+# Address classes and the name-resolution port (rule 42); the real HTTP wire is not needed here.
+paddock-net = { path = "../../../../crates/paddock-net", default-features = false }
+
+[dev-dependencies]
+paddock-jobs = { path = "../../../../crates/paddock-jobs" }
+proptest = "1"
+
+[lints]
+workspace = true

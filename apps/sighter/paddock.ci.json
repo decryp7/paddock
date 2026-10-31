@@ -14,6 +14,6 @@
   ],
   "rustChecks": [
     "cd apps/sighter",
-    "cargo llvm-cov nextest -p sighter-core --profile ci --summary-only --fail-under-lines 99"
+    "cargo llvm-cov nextest -p sighter-core -p sighter-target --profile ci --summary-only --fail-under-lines 99"
   ]
 }
