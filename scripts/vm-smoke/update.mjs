@@ -4,6 +4,7 @@
 // poll on state with a guard. Verdicts come from update-judge.mjs. The assets are made by spotter-update-assets.sh (TEST keys only).
 import { appWindows } from './gui-judge.mjs';
 import { CASES, plistVersion, staticTexts, updateState } from './update-judge.mjs';
+import { makeSteps } from './steplog.mjs';
 
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 const CA_IN_GUEST = '/Volumes/My Shared Files/stage/ca.pem';
@@ -116,7 +117,7 @@ export class UpdateTest {
   async runAll(push) {
     for (const id of ['down', 'badsig', 'wrongkey', 'ok']) {
       const cs = CASES.find((x) => x.id === id);
-      const s = push(await this.runCase(cs));
+      const s = await push(cs.id, () => this.runCase(cs));
       if (s.status === 'fail' && id !== 'ok') this.c.log(`case ${id} failed; continuing with the others`);
     }
   }
@@ -125,17 +126,17 @@ export class UpdateTest {
 /** The update-test sequence: install the OLD build the way a user does (download, drag, Gatekeeper), then the cases. */
 export async function runUpdateTest(check, feed, plan, ut = new UpdateTest(check, feed, plan)) {
   const steps = [];
-  const push = (s) => { steps.push(s); check.log(`${s.status.toUpperCase()}  ${s.title}: ${s.summary}`); return s; };
+  const { step } = makeSteps(steps, (l) => check.log(l));
   for (const fn of ['preconditions', 'download', 'installByDrag', 'gatekeeperFirstLaunch']) {
-    if (push(await check[fn]()).status === 'fail') { steps.push(check.screenshots()); return { steps, version: check.version }; }
+    if ((await step(fn, () => check[fn]())).status === 'fail') { steps.push(check.screenshots()); return { steps, version: check.version }; }
   }
   const v = await ut.installedVersion();
-  push(check.step('Installed build is the OLD test build', [{ ok: v === plan.old, detail: `Info.plist says ${v || 'nothing'} (wanted ${plan.old})` }], { passSummary: `${plan.old} installed, quarantined, opened through Gatekeeper` }));
+  await step('installed version', () => check.step('Installed build is the OLD test build', [{ ok: v === plan.old, detail: `Info.plist says ${v || 'nothing'} (wanted ${plan.old})` }], { passSummary: `${plan.old} installed, quarantined, opened through Gatekeeper` }));
   if (steps.at(-1).status === 'fail') { steps.push(check.screenshots()); return { steps, version: check.version }; }
-  push(await ut.trustCa());
-  await ut.runAll(push);
-  push(await check.core.quit('Quit at the end'));
-  push(await check.core.logs());
+  await step('trustCa', () => ut.trustCa());
+  await ut.runAll(step);
+  await step('Quit at the end', () => check.core.quit('Quit at the end'));
+  await step('logs', () => check.core.logs());
   steps.push(check.screenshots());
   return { steps, version: check.version };
 }

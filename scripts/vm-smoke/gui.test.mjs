@@ -136,6 +136,7 @@ function fakeGui({ bug = null } = {}) {
     // A running app is restored by loginwindow (it shows its window, as Dyno does today); otherwise the login item starts it.
     reboot: async () => {
       const wasRunning = !!st.app;
+      if (bug === 'rotated') st.log = ''; // the same file starts over (rotation): shorter than the size taken before the reboot
       if (bug === 'day-rolls') { st.oldLog = st.log; st.log = ''; st.rolled = true; } // midnight passes during the reboot: a new dated log
       st.app = null; st.agents = []; st.window = false; st.settingsWin = false; st.sectionOpen = false;
       if (wasRunning) startApp();
@@ -276,6 +277,12 @@ test('a log file that rolls over to a new day during the reboot is picked again,
   // Dyno's paddock-log writes one dated file per day; a reboot across midnight starts a new file. The size taken before the reboot was
   // that of the old file, so reading the picked-before file would show nothing of the login start.
   const r = await run('day-rolls');
+  const s = r.by['Reboot as a login item (app quit first): hidden, one agent'];
+  assert.equal(s.status, 'pass', JSON.stringify(s));
+});
+
+test('a log that rotated in place over the reboot is read from its start, not from the old offset', async () => {
+  const r = await run('rotated');
   const s = r.by['Reboot as a login item (app quit first): hidden, one agent'];
   assert.equal(s.status, 'pass', JSON.stringify(s));
 });

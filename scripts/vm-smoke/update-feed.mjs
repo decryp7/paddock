@@ -22,7 +22,7 @@ const CLOSE_DEADLINE_MS = 3000;
  * Starts the feed process and resolves once it listens; rejects with the listen error (a port in use, say).
  * @param {{ assets: string, host: string, port: number }} o  assets: the folder with feed/ and ca/ (spotter-update-assets*.sh); port 0
  *   lets the system pick one, which `port` then names
- * @returns {Promise<{ port: number, setCase(id: string): Promise<void>, feedLog(): Promise<string[]>, clearFeedLog(): Promise<void>, close(): Promise<void> }>}
+ * @returns {Promise<{ port: number, address: string, setCase(id: string): Promise<void>, feedLog(): Promise<string[]>, clearFeedLog(): Promise<void>, close(): Promise<void> }>}
  */
 export function startFeed({ assets, host, port }) {
   const child = fork(SELF, ['--serve'], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
@@ -72,7 +72,7 @@ export function startFeed({ assets, host, port }) {
     },
   };
   return ask('listen', { assets, host, port }).then(
-    (bound) => Object.assign(feed, { port: bound }),
+    (bound) => Object.assign(feed, { port: bound.port, address: bound.address }),
     async (e) => { child.kill(); await exited; throw e; },
   );
 }
@@ -94,7 +94,7 @@ function serve() {
         createReadStream(join(root, route.file)).on('error', () => res.destroy()).pipe(res);
       });
       server.once('error', reject);
-      server.listen(port, host, () => resolve(server.address().port));
+      server.listen(port, host, () => resolve(server.address()));
     }),
     setCase: (id) => { current = id; },
     log: () => log,

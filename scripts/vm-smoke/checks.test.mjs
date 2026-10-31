@@ -14,7 +14,7 @@ const B = '/Applications/Dyno.app';
 
 /** A small fake guest: a process table, an agent.json, and the few commands the check issues. `bug` picks a seeded fault. */
 function fakeGuest({ bug = null } = {}) {
-  let clock = 0, pid = 100, procs = [], agentJson = null, loginOn = false;
+  let clock = 0, pid = 100, procs = [], agentJson = null, loginOn = false, gatekeeperOn = false;
   const spawn = (name, ppid, args = '') => { const p = { pid: ++pid, ppid, born: clock, command: `${B}/Contents/MacOS/${name}${args}` }; procs.push(p); return p; };
   const startApp = () => {
     if (procs.some((p) => p.command.includes('dyno-app'))) { // single instance
@@ -62,7 +62,8 @@ function fakeGuest({ bug = null } = {}) {
     if (cmd.includes("'service' 'install'")) { loginOn = true; const a = procs.find((p) => p.command.includes('dyno-agent')); if (a) a.ppid = 1; return ok('installed and started'); }
     if (cmd.includes("'service' 'uninstall'")) { loginOn = false; const app = procs.find((p) => p.command.includes('dyno-app')); const a = procs.find((p) => p.command.includes('dyno-agent')); if (a && app) a.ppid = app.pid; return ok('removed'); }
     if (cmd.startsWith('launchctl print')) return bug === 'no-launchd' ? { code: 113, stdout: 'Could not find service', stderr: '' } : ok('\tstate = running\n\tpid = 7\n');
-    if (cmd.startsWith('spctl --status')) return ok('assessments enabled\n');
+    if (cmd === 'sudo spctl --global-enable') gatekeeperOn = true;
+    if (cmd.startsWith('spctl --status')) return ok(gatekeeperOn ? 'assessments enabled\n' : 'assessments disabled\n'); // the pinned image ships with it off
     if (cmd.startsWith('defaults read')) return ok('1.0.0\n');
     if (cmd.includes('vmsmoke-blackhole.pl >')) return ok('4242\n');
     if (cmd.startsWith('cat /tmp/vmsmoke-blackhole.log')) return ok(bug === 'contacted' ? 'listening 2\ncontact 127.0.0.1\ncontact ::1\n' : 'listening 2\n');
@@ -90,7 +91,9 @@ test('a healthy app passes every step and lists the manual ones apart', async ()
   assert.equal(byTitle(r, /Gatekeeper/).status, 'manual');
   assert.equal(r.version, '1.0.0');
   assert.match(byTitle(r, /Install/).checks[0].detail, /Gatekeeper enabled in the guest before the install.*assessments enabled/);
-  assert.ok(r.calls.indexOf('sudo spctl --global-enable') < r.calls.findIndex((c) => c.startsWith('hdiutil attach')), 'Gatekeeper is switched on before the install');
+  const enableAt = r.calls.indexOf('sudo spctl --global-enable');
+  assert.ok(enableAt >= 0, 'Gatekeeper is switched on at all');
+  assert.ok(enableAt < r.calls.findIndex((c) => c.startsWith('hdiutil attach')), 'Gatekeeper is switched on before the install');
 });
 
 test('a second agent that arrives ten seconds after the first fails the cold start with both pids', async () => {

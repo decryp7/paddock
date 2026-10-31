@@ -2,6 +2,7 @@
 // guard for a truly stuck step; the verdicts come from judge.mjs. The guest is a throw-away clone: the only processes the check ends
 // are the app's own leftovers, and only after re-checking their identity in the same guest command (rule 53).
 import { describeTree, instancesOf, judgeDistinct, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs } from './judge.mjs';
+import { makeSteps } from './steplog.mjs';
 
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
@@ -306,21 +307,21 @@ export class Check {
 /** The full sequence. Returns the steps; the caller renders and decides the exit code. */
 export async function runAll(check, { stagedDmg, manual }) {
   const steps = [];
-  const push = (s) => { steps.push(s); check.log(`${s.status.toUpperCase()}  ${s.title}: ${s.summary}`); return s; };
-  const install = push(await check.install(stagedDmg));
+  const { step } = makeSteps(steps, (l) => check.log(l));
+  const install = await step('install', () => check.install(stagedDmg));
   if (install.status === 'fail') return { steps, version: check.version };
-  push(await check.startAndJudge({ title: 'Cold start (disk cache dropped)', pre: async () => { await check.g.exec('sudo purge'); } }));
-  push(await check.secondLaunch());
-  push(await check.quit('Quit with a window open'));
-  push(await check.startAndJudge({ title: 'Start without a window (--hidden)', hidden: true }));
-  push(await check.quit('Quit with no window'));
-  push(await check.startAndJudge({ title: 'Relaunch after Quit' }));
-  push(await check.quit('Quit after the relaunch'));
-  push(await check.loginHandover());
-  push(await check.quit('Quit after the Launch at login switches'));
-  push(await check.updateCheckDoesNotHangStart());
-  push(await check.quit('Quit after the black-holed start'));
-  push(await check.logs());
+  await step('Cold start (disk cache dropped)', () => check.startAndJudge({ title: 'Cold start (disk cache dropped)', pre: async () => { await check.g.exec('sudo purge'); } }));
+  await step('secondLaunch', () => check.secondLaunch());
+  await step('Quit with a window open', () => check.quit('Quit with a window open'));
+  await step('Start without a window (--hidden)', () => check.startAndJudge({ title: 'Start without a window (--hidden)', hidden: true }));
+  await step('Quit with no window', () => check.quit('Quit with no window'));
+  await step('Relaunch after Quit', () => check.startAndJudge({ title: 'Relaunch after Quit' }));
+  await step('Quit after the relaunch', () => check.quit('Quit after the relaunch'));
+  await step('loginHandover', () => check.loginHandover());
+  await step('Quit after the Launch at login switches', () => check.quit('Quit after the Launch at login switches'));
+  await step('updateCheckDoesNotHangStart', () => check.updateCheckDoesNotHangStart());
+  await step('Quit after the black-holed start', () => check.quit('Quit after the black-holed start'));
+  await step('logs', () => check.logs());
   for (const m of manual) steps.push({ title: m.title, status: 'manual', summary: m.summary });
   return { steps, version: check.version };
 }
