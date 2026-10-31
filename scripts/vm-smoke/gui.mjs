@@ -265,8 +265,12 @@ export class GuiCheck {
     const off = await this.setLoginItemsSwitch(sw, false);
     checks.push({ ok: off.ok, detail: `switched off in Login Items (as a user who refused it once, ${off.presses} press(es)): BTM ${(await this.btm())?.disposition ?? 'no record'}` });
     await this.closeSettings();
-    const again = (await this.setLaunchAtLogin(false)) && (await this.setLaunchAtLogin(true));
-    checks.push({ ok: again, detail: again ? 'Launch at login switched off and on again in the app' : 'the app\'s switch did not go off and on again' });
+    // Off, then on again once the app is ready again (its helper back and answering): this step tests the approval path, not a
+    // switch flipped while the helper restarts (that case is a product question of its own).
+    const offAgain = await this.setLaunchAtLogin(false);
+    const ready = await this.until(() => this.core.isReady(), this.config.readyTimeoutSec * 1000);
+    const again = offAgain && (await this.setLaunchAtLogin(true));
+    checks.push({ ok: again, detail: again ? `Launch at login switched off, the app ready again after ${(ready.tookMs / 1000).toFixed(0)} s, then on again in the app` : 'the app\'s switch did not go off and on again' });
     const opened = await this.until(() => this.has('System Settings', sw, 'AXCheckBox'), this.guard());
     const said = (await this.ax(['tree', this.gui.windowOwner, '40'])).stdout.match(new RegExp(l.needsApprovalText))?.[0];
     await this.shot('needs-approval');
@@ -396,7 +400,8 @@ export class GuiCheck {
   async launchAtLoginOff() {
     const title = 'Launch at login off';
     const l = this.gui.launchAtLogin;
-    if (!l || !this.loginOn) return this.step(title, [], { skip: 'Launch at login is not on' });
+    // Runs whenever the app has the setting: after a failed approval the app's switch can still be on (BTM: disallowed).
+    if (!l) return this.step(title, [], { skip: 'the app has no Launch at login setting' });
     const appSpec = this.config.processes.find((s) => s.role === 'app');
     if (!instancesOf(await this.core.snapshot(), appSpec, this.bundle).length) await this.core.start();
     const off = await this.setLaunchAtLogin(false);
