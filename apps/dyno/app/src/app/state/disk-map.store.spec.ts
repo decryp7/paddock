@@ -282,6 +282,40 @@ describe('DiskMapStore', () => {
     expect(store.startError()?.message).toBe('Nothing to read again.');
   });
 
+  it('keeps a pushed status that is newer than the reply to read again or to scan (events and replies travel apart)', async () => {
+    const { store, mock } = setup();
+    await store.loadVolumes();
+    await store.scan({ volume: { id: '/' } });
+    await advance();
+    const done = store.status()!;
+    // The pass of the retry ends, and its last status is pushed, before the reply to the retry arrives.
+    const reply = { ...done, seq: done.seq + 1, state: 'running' as const };
+    vi.spyOn(mock, 'retryDiskScan').mockImplementationOnce(async () => {
+      store.receive({ ...done, seq: done.seq + 2 });
+      return reply;
+    });
+    expect(await store.readAgain()).toBe(true);
+    expect(store.outcome()).toBe('done');
+    expect(store.status()!.seq).toBe(done.seq + 2);
+    expect(store.kept().find((k) => k.scan === done.scan)!.seq).toBe(done.seq + 2);
+
+    // The same for a start: a small folder can be read before the reply to the start arrives.
+    const fresh = { ...done, scan: done.scan + 1, seq: 1, state: 'running' as const };
+    vi.spyOn(mock, 'startDiskScan').mockImplementationOnce(async () => {
+      store.receive({ ...fresh, seq: 3, state: 'done' });
+      return fresh;
+    });
+    expect(await store.scan({ volume: { id: '/' } })).toBe(true);
+    expect(store.status()!.scan).toBe(fresh.scan);
+    expect(store.outcome()).toBe('done');
+
+    // An agent that started again numbers its scans from 1: a status kept from before the request is not newer than the reply.
+    const restarted = { ...done, seq: 1, state: 'running' as const };
+    vi.spyOn(mock, 'startDiskScan').mockResolvedValueOnce(restarted);
+    expect(await store.scan({ volume: { id: '/' } })).toBe(true);
+    expect(store.status()).toEqual(restarted);
+  });
+
   it('coalesces the reads a running scan asks for: one in flight and one waiting, however many statuses arrive', async () => {
     const { store, mock } = setup();
     await store.loadVolumes();
