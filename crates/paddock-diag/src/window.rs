@@ -209,6 +209,21 @@ mod tests {
             "agent start\nagent bound\n",
         )
         .unwrap();
+        // The agent's log is the OLDER file, so the chatty app's group comes first. Only the smallest-first rule then lets the small
+        // log keep all its bytes and hand the rest of its share to the app (without it the app would stop at half the window).
+        for (name, secs) in [
+            ("dyno-agent.2026-10-31.log", 1_000),
+            ("dyno.2026-10-31.log", 2_000),
+        ] {
+            File::options()
+                .write(true)
+                .open(dir.path().join(name))
+                .unwrap()
+                .set_modified(
+                    std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs),
+                )
+                .unwrap();
+        }
         let got = log_window(dir.path(), "dyno", 4_000);
         let by_name = |n: &str| {
             got.iter()

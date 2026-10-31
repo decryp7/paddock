@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-shell`: `Builder::diagnostics_installed`
+- `Builder::diagnostics_installed()` says whether Report a problem was set up, so an app's composition test can assert that a test place does not (Dyno).
+
 ### `paddock-diag`: the log window is shared between the app's processes and is 4 MB
 - `window::log_window` gives each process (`<id>.<day>.log`, `<id>-<process>.<day>.log`) an equal share of the window, newest files first within it; what a small process does not use goes to the larger ones. A chatty app log can no longer push a background process's log out of the report (Dyno's agent). `LOG_WINDOW` is 4 MB (was 2 MB); at most `MAX_LOG_FILES` files per process.
 
