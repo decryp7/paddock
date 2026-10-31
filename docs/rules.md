@@ -280,6 +280,16 @@ changes here, every app's copy is updated in the same change.
     replaced its healthy agent at every login (Dyno 1.0 blocker B4). The Windows network-sandbox fix of the browser driver
     sat in the one copy no app used, and the EBADF fix had to be made in two IPC endpoints.
 
+## Diagnostics (user, 2026-11-01)
+56. **Logs explain every failure.** Every bug fix, and every feature that starts, connects, runs a job or can fail, leaves
+    the logs able to show the cause from a Report-a-problem bundle alone: each phase with a timestamp and duration, the
+    outcome of each spawn, connect or job (success too, not only failure), correlation ids for jobs and requests, and every
+    error with its cause chain and the next step shown to the user. A fix for a bug the logs could not explain adds the
+    missing log lines in the same change, with a test that asserts the line where practical. No user content in logs by
+    default.
+    *Why:* Paddock runs on users' machines where we cannot attach a debugger; Dyno's 30 s login connect could not be
+    diagnosed from its logs (2026-11-01).
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:
