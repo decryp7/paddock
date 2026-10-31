@@ -91,6 +91,8 @@ pub enum WidgetActionId {
     RestartAgent,
     /// Open Settings at Menu bar > Popup widgets.
     CustomizeWidgets,
+    /// Open Settings.
+    OpenSettings,
 }
 
 /// Where in Settings a widget's button leads.
@@ -100,6 +102,8 @@ pub enum WidgetActionId {
 pub enum SettingsSection {
     /// Menu bar > Popup widgets.
     PopupWidgets,
+    /// The top of Dyno's page.
+    General,
 }
 
 /// What the main window is asked to open (`dyno://navigate`).
@@ -134,6 +138,7 @@ impl WidgetActionId {
             WidgetActionId::ChooseVolume | WidgetActionId::CustomizeWidgets => {
                 Effect::Navigate(Navigate::Settings(SettingsSection::PopupWidgets))
             }
+            WidgetActionId::OpenSettings => Effect::Navigate(Navigate::Settings(SettingsSection::General)),
             WidgetActionId::PinCounters => Effect::Navigate(Navigate::Page(Page::Counters)),
             WidgetActionId::SetUpBackupChecks => Effect::Navigate(Navigate::Page(Page::Backups)),
             WidgetActionId::Retry(_) => Effect::Refresh,

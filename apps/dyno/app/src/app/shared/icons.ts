@@ -1,6 +1,7 @@
 import { inject, provideAppInitializer } from '@angular/core';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
+import { WIDGET_ICONS } from './widget-icons';
 
 /** A 24 px line icon: 1.75 px strokes in `currentColor`, round caps and joins. */
 const line = (body: string) =>
@@ -105,5 +106,7 @@ export function provideIcons() {
       // Our own constant markup, never data from the engine or the network.
       registry.addSvgIconLiteralInNamespace('dy', name, sanitizer.bypassSecurityTrustHtml(svg));
     }
+    // The widget catalogues' icon names (`KindInfo.icon`) are bare, so they live in the default namespace.
+    for (const [name, svg] of Object.entries(WIDGET_ICONS)) registry.addSvgIconLiteral(name, sanitizer.bypassSecurityTrustHtml(svg));
   });
 }

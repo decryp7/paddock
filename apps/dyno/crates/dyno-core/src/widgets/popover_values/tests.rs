@@ -621,6 +621,10 @@ fn every_action_has_one_effect() {
     let settings = nav(super::Navigate::Settings(SettingsSection::PopupWidgets));
     assert_eq!(WidgetActionId::ChooseVolume.effect(), settings);
     assert_eq!(WidgetActionId::CustomizeWidgets.effect(), settings);
+    assert_eq!(
+        WidgetActionId::OpenSettings.effect(),
+        nav(super::Navigate::Settings(SettingsSection::General))
+    );
     assert_eq!(WidgetActionId::Retry(id("x")).effect(), Refresh);
     assert_eq!(WidgetActionId::StartBackupCheck.effect(), StartBackupCheck);
     assert_eq!(WidgetActionId::RestartAgent.effect(), RestartAgent);

@@ -71,6 +71,8 @@ import type {
   StartupFilter,
   StartupOverview,
 } from './api.types';
+import type { DynoSurface, Navigate, SurfaceEdit, SurfaceView, WidgetActionId } from './generated/widgets';
+import type { PopoverSurfaceValues } from './widget-types';
 
 /** Stops a subscription. */
 export type Unsubscribe = () => void;
@@ -242,6 +244,22 @@ export interface DynoBackend {
   startJob(spec: JobSpec): Promise<number>;
   /** What a done job produced; `notFound` when the job is not done or too old to be kept. */
   jobResult(id: number): Promise<JobOutput>;
+
+  // Widget layouts (family ADR 0035): the engine owns the layouts, their limits, edits and undo; the UI draws and sends edits.
+  /** One surface's layout with its catalogue, built-in presets, notes, `canUndo` and `editable`. */
+  widgetLayout(surface: DynoSurface): Promise<SurfaceView>;
+  /** Applies one edit; answers the new view, or rejects with the reason it was refused (the message says what to change). */
+  editWidgetLayout(edit: SurfaceEdit): Promise<SurfaceView>;
+  /** The popup's values now (the first paint; later ones are pushed). */
+  popoverValues(): Promise<PopoverSurfaceValues>;
+  /** A widget's button: open a page, retry, start the backup check, restart the agent, open Settings. */
+  runWidgetAction(action: WidgetActionId): Promise<void>;
+  /** The popup's values, pushed while the popover is visible (`dyno://popover-values`). */
+  onPopoverValues(listener: (v: PopoverSurfaceValues) => void): Unsubscribe;
+  /** A surface's layout changed in the agent, from any window (`dyno://widget-layout`). */
+  onWidgetLayout(listener: (surface: DynoSurface) => void): Unsubscribe;
+  /** The main window is asked to open a page or a Settings section (`dyno://navigate`). */
+  onNavigate(listener: (to: Navigate) => void): Unsubscribe;
 
   // The tray popover window (the shell places and fits it).
   /** Shows and focuses the main window (and hides the tray popover). */

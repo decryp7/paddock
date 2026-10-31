@@ -59,12 +59,13 @@ paddock_commands::command_table! {
     Mutation [MAIN] => commands::save_inventory_report,
     /// "Choose folder..." for the file finder: the OS folder dialog.
     Mutation [MAIN] => commands::pick_folder,
-    /// One surface's widget layout, with its catalogue, built-in presets and notes (family ADR 0035).
-    Query [MAIN | DIALOG] => commands::widget_layout,
+    /// One surface's widget layout, with its catalogue, built-in presets and notes (family ADR 0035). The tray popup reads its
+    /// own layout to draw its widgets.
+    Query [MAIN | TRAY | DIALOG] => commands::widget_layout,
     /// Edits one surface's widget layout in the agent; answers the new layout, or why it was refused.
     Mutation [MAIN | DIALOG] => commands::edit_widget_layout,
-    /// The tray popup's values now, for the popup that has just opened (the live ones arrive as `dyno://popover-values`).
-    Query [MAIN | TRAY] => commands::popover_values,
+    /// The tray popup's values now, for the popup that has just opened (the live ones arrive as `dyno://popover-values`); the Settings window's preview reads it too.
+    Query [MAIN | TRAY | DIALOG] => commands::popover_values,
     /// A button of a widget: open a page, retry, start the backup check, restart the agent.
     Mutation [MAIN | TRAY] => commands::run_widget_action,
 }
