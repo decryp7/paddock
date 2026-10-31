@@ -26,6 +26,7 @@ slow-timeout = { period = "30s", terminate-after = 10 }
 [profile.ci]
 fail-fast = false
 retries = 0
+flaky-result = "fail"
 failure-output = "immediate-final"
 # A CI job has its runner to itself.
 test-threads = "num-cpus"
