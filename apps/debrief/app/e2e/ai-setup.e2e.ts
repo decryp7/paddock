@@ -1,11 +1,12 @@
 import { expect, Page, test } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // The AI setup wizard and Settings → AI against the scripted AI mock (src/app/core/mock/mock-ai-backend.ts).
 
 async function runCommand(page: Page, text: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill(text);
   await expect(page.locator('debrief-command-palette').getByRole('option').first()).toContainText(text);
@@ -48,7 +49,7 @@ test('the assistant pane shows "Setting up — 1.2 of 5.6 GB" while the backgrou
 
 test('Settings → AI offers set-up', async ({ page }) => {
   await openAppWith(page, '');
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   const settings = page.getByRole('dialog', { name: 'Settings' });
   await settings.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: /AI assistant/ }).click();
   await expect(settings.getByTestId('ai-settings-status')).toContainText('Vulkan');
@@ -58,14 +59,14 @@ test('Settings → AI offers set-up', async ({ page }) => {
 
 test('AI is hidden when it is unavailable', async ({ page }) => {
   await openAppWith(page, '?mockAi=off');
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill('Set up AI assistant');
   await expect(page.locator('debrief-command-palette').getByRole('option', { name: /Set up AI assistant/ })).toHaveCount(0);
   await input.fill('AI:');
   await expect(page.locator('debrief-command-palette').getByRole('option', { name: /^AI:/ })).toHaveCount(0);
   await page.keyboard.press('Escape');
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   const settings = page.getByRole('dialog', { name: 'Settings' });
   await settings.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: /AI assistant/ }).click();
   await expect(settings.getByTestId('ai-settings-unavailable')).toContainText('not available');

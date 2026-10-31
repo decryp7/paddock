@@ -256,6 +256,136 @@ describe('pd-copy-menu', () => {
     await vi.waitFor(() => expect(menu.state()).toBeNull());
   });
 
+  it('stays open through the release of the right click that opened it (WebKit: contextmenu comes on the press)', async () => {
+    const f = TestBed.createComponent(PdCopyMenuHost);
+    const menu = TestBed.inject(PdCopyMenu);
+    f.detectChanges();
+    const press = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 60 });
+    document.body.dispatchEvent(press);
+    menu.open(40, 60, 'selected', press);
+    await vi.waitFor(() => expect(panel()).not.toBeNull());
+    // The button comes up after the menu is drawn: its auxclick lands outside the menu.
+    document.body.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 2 }));
+    await f.whenStable();
+    expect(menu.state()).not.toBeNull();
+    expect(panel()).not.toBeNull();
+    // A later click elsewhere still closes it.
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(menu.state()).toBeNull());
+  });
+
+  it('gives back the selection it opened on when it closes, as a native menu keeps it (WebKit drops it on focus)', async () => {
+    const f = TestBed.createComponent(PdCopyMenuHost);
+    const menu = TestBed.inject(PdCopyMenu);
+    f.detectChanges();
+    const p = document.createElement('p');
+    p.textContent = 'keep me selected';
+    const other = document.createElement('p');
+    other.textContent = 'something else';
+    document.body.append(p, other);
+    const select = (el: Element) => {
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(r);
+    };
+    try {
+      select(p);
+      menu.open(1, 2, 'keep me selected');
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      getSelection()!.removeAllRanges(); // what WebKit does when the menu takes the focus
+      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+      await vi.waitFor(() => expect(menu.state()).toBeNull());
+      await vi.waitFor(() => expect(getSelection()!.toString()).toBe('keep me selected'));
+
+      // A selection the user made while it was open is theirs: it stays.
+      menu.open(1, 2, 'keep me selected');
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      select(other);
+      menu.close();
+      await vi.waitFor(() => expect(panel()).toBeNull());
+      await f.whenStable();
+      expect(getSelection()!.toString()).toBe('something else');
+    } finally {
+      getSelection()!.removeAllRanges();
+      p.remove();
+      other.remove();
+    }
+  });
+
+  it('leaves the selection to a press elsewhere, and never takes the caret from a text field the user clicked into', async () => {
+    const f = TestBed.createComponent(PdCopyMenuHost);
+    const menu = TestBed.inject(PdCopyMenu);
+    f.detectChanges();
+    const p = document.createElement('p');
+    p.textContent = 'keep me selected';
+    const input = document.createElement('input');
+    document.body.append(p, input);
+    const r = document.createRange();
+    r.selectNodeContents(p);
+    try {
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true })); // no menu open: not a dismissal
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(r);
+      menu.open(1, 2, 'keep me selected');
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      getSelection()!.removeAllRanges(); // WebKit, as the menu took the focus
+      // The user clicks into a field: the press is outside the menu, and the CDK closes it on the click.
+      input.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      input.focus();
+      input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await vi.waitFor(() => expect(menu.state()).toBeNull());
+      await f.whenStable();
+      expect(document.activeElement).toBe(input);
+      expect(getSelection()!.toString()).toBe('');
+
+      // Closed by the app while a field has the focus: the field keeps its caret too.
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(r);
+      menu.open(1, 2, 'keep me selected');
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      input.focus();
+      getSelection()!.collapse(input, 0);
+      menu.close();
+      await vi.waitFor(() => expect(panel()).toBeNull());
+      await f.whenStable();
+      expect(document.activeElement).toBe(input);
+      expect(getSelection()!.toString()).toBe('');
+    } finally {
+      getSelection()!.removeAllRanges();
+      p.remove();
+      input.remove();
+    }
+  });
+
+  it('a press elsewhere that did not close the menu does not stop a later Escape from giving the selection back', async () => {
+    const f = TestBed.createComponent(PdCopyMenuHost);
+    const menu = TestBed.inject(PdCopyMenu);
+    f.detectChanges();
+    const p = document.createElement('p');
+    p.textContent = 'keep me selected';
+    document.body.append(p);
+    const r = document.createRange();
+    r.selectNodeContents(p);
+    try {
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(r);
+      menu.open(1, 2, 'keep me selected');
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      // A press and release elsewhere with no click (a drag that ended off its start): the CDK keeps the menu open.
+      document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+      expect(menu.state()).not.toBeNull();
+      getSelection()!.removeAllRanges(); // WebKit, as the menu took the focus
+      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+      await vi.waitFor(() => expect(menu.state()).toBeNull());
+      await vi.waitFor(() => expect(getSelection()!.toString()).toBe('keep me selected'));
+    } finally {
+      getSelection()!.removeAllRanges();
+      p.remove();
+    }
+  });
+
   it('closes when the service closes it, and a failing clipboard only closes the menu', async () => {
     stubClipboard(() => Promise.reject(new Error('denied')));
     const f = TestBed.createComponent(PdCopyMenuHost);

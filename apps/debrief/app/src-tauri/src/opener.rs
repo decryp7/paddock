@@ -211,7 +211,11 @@ pub(crate) fn installed_vscode() -> Option<PathBuf> {
 
 /// Opens a web address in the user's browser (the callers check the address first), as an `io` error
 /// that says so when it fails.
+/// In tests nothing is opened (rule 7: a test never starts the user's default browser), like [`start`].
 pub(crate) fn open_url(url: &str) -> crate::CmdResult<()> {
+    if cfg!(test) {
+        return Ok(());
+    }
     open::that_detached(url).map_err(|e| crate::CmdError::new(crate::ErrorCode::Io, format!("cannot open your browser: {e}")))
 }
 
@@ -384,6 +388,14 @@ mod tests {
         assert_eq!(linux, Some(PathBuf::from("/snap/bin/code")));
         assert_eq!(find_vscode(Os::Linux, &env(&[("PATH", "/usr/bin")]), &|_| false), None);
         assert!(installed_vscode().is_none_or(|p| p.is_absolute()));
+    }
+
+    /// Regression (review): `open_url` handed the address to the default browser in tests too (the commands that open a
+    /// help or search page call it); it now opens nothing in a test build, like `start`.
+    #[test]
+    fn open_url_opens_nothing_in_tests() {
+        // conformance: no-launch — a test build returns before the opener; this asserts exactly that
+        assert!(open_url("http://127.0.0.1:9/never-opened").is_ok());
     }
 
     #[test]

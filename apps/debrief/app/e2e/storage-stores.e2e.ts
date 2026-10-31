@@ -1,5 +1,6 @@
 import { expect, Page, test } from '@playwright/test';
 import { APP_LOAD_TIMEOUT, openApp } from './app';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // Settings > Storage > Project stores against the browser build's mock storage backend
 // (src/app/settings/storage/mock-storage-backend.ts): five folders, two of them orphaned.
@@ -7,7 +8,7 @@ import { APP_LOAD_TIMEOUT, openApp } from './app';
 const settingsDialog = (page: Page) => page.getByRole('dialog', { name: 'Settings' });
 
 async function openStorage(page: Page) {
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   await expect(settingsDialog(page)).toBeVisible();
   await settingsDialog(page).getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Disk usage' }).click();
   await expect(settingsDialog(page).getByRole('table', { name: 'Project stores' })).toBeVisible({ timeout: APP_LOAD_TIMEOUT });

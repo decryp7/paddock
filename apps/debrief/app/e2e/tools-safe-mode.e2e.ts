@@ -2,6 +2,7 @@ import { expect, Page, test } from '@playwright/test';
 import { openAppWith, openView, runCommand } from './tools-support';
 import { chooseMenu } from './menu-support';
 import { nextRender } from './app';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 /** The titles of the views offered (View ▸ Other windows… lists every one). */
 async function viewMenu(page: Page): Promise<string[]> {
@@ -16,7 +17,7 @@ async function viewMenu(page: Page): Promise<string[]> {
 
 /** Whether the command palette lists a command. */
 async function paletteOffers(page: Page, title: string): Promise<boolean> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   await page.getByRole('combobox', { name: 'Type a command' }).fill(title);
   // The list renders the query on the next frame: reading it earlier sees the unfiltered list, whose rows
   // are then removed while being read (or, for a negative check, passes without having filtered).

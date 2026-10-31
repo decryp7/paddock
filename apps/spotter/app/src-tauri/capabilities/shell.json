@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "shell-main",
+  "description": "The main window: the shell's main set and Tauri's events, plus dragging the window by its title bar and sidebar header (data-tauri-drag-region; the macOS window has an overlay title bar) and double-click to zoom. Spotter's own commands are app commands (no plugin commands are granted to the webview), narrowed per window class by the guard.",
+  "windows": ["main", "w-*"],
+  "permissions": ["core:event:default", "core:window:allow-start-dragging", "core:window:allow-internal-toggle-maximize", "paddock-shell:main"]
+}

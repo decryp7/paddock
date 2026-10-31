@@ -1314,26 +1314,38 @@ pub(crate) mod test_support {
     /// The clock of the test app's jobs and notification centre.
     pub struct TestClock(pub std::sync::Arc<jobs::ManualClock>);
 
-    /// Builds the bundled plugins binary once when it is not next to the test executable (`cargo test -p debrief-app`
-    /// builds only this crate; `cargo nextest run --workspace` in CI builds every binary), so the tests that need
-    /// the plugins run instead of failing on their absence. `DEBRIEF_PLUGINS` names one built elsewhere.
-    fn ensure_plugins_binary() {
-        static BUILT: std::sync::Once = std::sync::Once::new();
-        BUILT.call_once(|| {
-            if std::env::var_os("DEBRIEF_PLUGINS").is_some() || debrief_plugin_host::builtins::default_binary().exists() {
+    /// Says once when the bundled plugins binary is not next to the test executable (`cargo test -p debrief-app` builds
+    /// only this crate; `cargo nextest run --workspace` in CI builds every binary). `DEBRIEF_PLUGINS` names one built
+    /// elsewhere. The test apps then have no plugins, and the tests that need them fail with that reason.
+    fn report_missing_plugins_binary() {
+        static TOLD: std::sync::Once = std::sync::Once::new();
+        TOLD.call_once(|| {
+            if std::env::var_os("DEBRIEF_PLUGINS").is_some() {
                 return;
             }
             let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-            let mut args = vec!["build", "-p", "debrief-plugins"];
-            if !cfg!(debug_assertions) {
-                args.push("--release");
-            }
-            #[allow(clippy::disallowed_methods)]
-            let built = std::process::Command::new(cargo).args(&args).current_dir(env!("CARGO_MANIFEST_DIR")).status();
-            if !built.is_ok_and(|s| s.success()) {
-                eprintln!("could not build the plugins binary (`cargo build -p debrief-plugins`): the tests that need plugins will fail; build it first");
+            if let Err(m) = plugins_binary_at(&debrief_plugin_host::builtins::default_binary(), &cargo) {
+                eprintln!("{m}");
             }
         });
+    }
+
+    /// Whether the plugins binary is at `path`; when it is not, what to do. Nothing is built: a test that started
+    /// `cargo build -p debrief-plugins` (as this helper once did) waited minutes for it, and every other test process
+    /// with it on cargo's build-folder lock (a fake-browser test hit nextest's 300 s limit). `cargo` names the command
+    /// in the message.
+    pub(crate) fn plugins_binary_at(path: &std::path::Path, cargo: &std::ffi::OsStr) -> Result<(), String> {
+        if path.exists() {
+            return Ok(());
+        }
+        Err(format!(
+            "the plugins binary is missing ({}): the tests that need plugins will fail; build it first with `{} build -p \
+             debrief-plugins`, or run the whole workspace (`cargo nextest run --workspace`)",
+            path.display(),
+            std::path::Path::new(cargo)
+                .file_name()
+                .map_or("cargo".into(), |n| n.to_string_lossy())
+        ))
     }
 
     /// Stops the plugin processes of the apps a test thread built when that thread ends (even when the test panics).
@@ -1375,7 +1387,7 @@ pub(crate) mod test_support {
         let plugins = std::sync::Arc::new(if safe_mode {
             debrief_plugin_host::Builtins::none()
         } else {
-            ensure_plugins_binary();
+            report_missing_plugins_binary();
             debrief_plugin_host::Builtins::load_with(&debrief_plugin_host::builtins::default_binary(), |spec| {
                 spec.connect_window = debrief_ipc::process::UNTIL_CONNECTED;
             })
@@ -1467,6 +1479,31 @@ pub(crate) mod test_support {
                 .build()
                 .unwrap()
         })
+    }
+}
+
+#[cfg(all(test, unix))]
+mod plugins_binary_tests {
+    /// Regression (a fake-browser test hit nextest's 300 s limit in `cargo nextest run -p debrief-app` runs, and two
+    /// test-app tests took 146-166 s): a test app started `cargo build -p debrief-plugins` when the plugins binary was
+    /// missing, an unbounded build inside a test, which every other test process waited for on cargo's build-folder
+    /// lock. A missing binary is reported (with the command that builds it); nothing is built or waited for.
+    #[test]
+    fn a_missing_plugins_binary_is_reported_and_nothing_is_built() {
+        let d = tempfile::tempdir().unwrap();
+        let ran = d.path().join("cargo-ran");
+        // A `cargo` that only notes it ran (a real build here took minutes).
+        let cargo = d.path().join("cargo");
+        std::fs::write(&cargo, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+        std::fs::set_permissions(&cargo, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let missing = d.path().join("debrief-plugins");
+        let r = crate::test_support::plugins_binary_at(&missing, cargo.as_os_str());
+        assert!(!ran.exists(), "a test started a build");
+        let m = r.expect_err("a missing binary is reported");
+        assert!(m.contains("cargo build -p debrief-plugins"), "{m}");
+        // A binary that is there is fine.
+        std::fs::write(&missing, "").unwrap();
+        assert_eq!(crate::test_support::plugins_binary_at(&missing, cargo.as_os_str()), Ok(()));
     }
 }
 

@@ -25,8 +25,18 @@ pub const CANCELLED: &str = "Cancelled.";
 pub const MIN_INTERVAL: Duration = Duration::from_millis(100);
 
 /// A flag the user (or a timeout) raises to stop an operation; clones share it.
-#[derive(Debug, Clone, Default)]
-pub struct Cancel(Arc<AtomicBool>);
+#[derive(Clone, Default)]
+pub struct Cancel {
+    flag: Arc<AtomicBool>,
+    /// Another owner of the stop: the app's job registry, which the user's Cancel reaches.
+    source: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+}
+
+impl std::fmt::Debug for Cancel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cancel").field("cancelled", &self.is_cancelled()).finish()
+    }
+}
 
 impl Cancel {
     /// A fresh, not yet cancelled flag.
@@ -34,14 +44,23 @@ impl Cancel {
         Cancel::default()
     }
 
+    /// A flag that is also raised when `source` says so: the stop of a job another owner (the app shell's job
+    /// registry) cancels. `source` is read on every poll, so it must be cheap.
+    pub fn linked(source: impl Fn() -> bool + Send + Sync + 'static) -> Cancel {
+        Cancel {
+            flag: Arc::default(),
+            source: Some(Arc::new(source)),
+        }
+    }
+
     /// Asks the operation to stop.
     pub fn cancel(&self) {
-        self.0.store(true, Ordering::Relaxed);
+        self.flag.store(true, Ordering::Relaxed);
     }
 
     /// Whether a stop was asked for.
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
+        self.flag.load(Ordering::Relaxed) || self.source.as_ref().is_some_and(|s| s())
     }
 }
 
@@ -67,6 +86,8 @@ pub enum Phase {
     Settling,
     /// Checking watches: `done` of `total`.
     Checking,
+    /// The browser for a page was stopped by the OS or another app while it started; Spotter waits (ADR 0031).
+    BrowserPaused,
 }
 
 impl Phase {
@@ -82,6 +103,7 @@ impl Phase {
             Phase::Finding => "Finding files",
             Phase::Settling => "Waiting for files to settle",
             Phase::Checking => "Checking",
+            Phase::BrowserPaused => "The browser is paused by macOS or another app; Spotter waits",
         }
     }
 }
@@ -120,6 +142,8 @@ struct Gate {
     phase: Option<Phase>,
     /// The highest `done` shown in `phase`.
     done: u64,
+    /// The last report of a phase other than [`Phase::BrowserPaused`], to go back to when the pause ends.
+    before_pause: Option<(Phase, Unit, u64, Option<u64>)>,
 }
 
 /// The handle an operation reports to and polls: progress sink plus cancel flag. Clones share both.
@@ -195,6 +219,20 @@ impl Job {
         self.emit(phase, unit, done, total, true);
     }
 
+    /// Ends a [`Phase::BrowserPaused`] report: the phase the operation was in before goes out again (or `Checking`, counting up,
+    /// when there was none), so a "paused" line never outlives the pause (ER-18). Does nothing when the job is not paused.
+    pub fn resume_after_pause(&self) {
+        let back = {
+            let gate = self.gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if gate.phase != Some(Phase::BrowserPaused) {
+                return;
+            }
+            gate.before_pause
+        };
+        let (phase, unit, done, total) = back.unwrap_or((Phase::Checking, Unit::Count, 0, None));
+        self.emit(phase, unit, done, total, true);
+    }
+
     /// The sink is called with the gate held, so the order it sees is the order the gate accepted (a sink must not
     /// report to the same job).
     fn emit(&self, phase: Phase, unit: Unit, done: u64, total: Option<u64>, force: bool) {
@@ -214,6 +252,9 @@ impl Job {
         let due = gate.last.is_none_or(|t| now.duration_since(t) >= self.interval);
         if !(force || fresh || due) {
             return;
+        }
+        if phase != Phase::BrowserPaused {
+            gate.before_pause = Some((phase, unit, done, total));
         }
         gate.phase = Some(phase);
         gate.last = Some(now);
@@ -238,6 +279,20 @@ mod tests {
         let sink = seen.clone();
         let job = Job::new(cancel.clone(), move |p| sink.lock().unwrap().push(p.clone())).with_interval(interval);
         (job, cancel, seen)
+    }
+
+    #[test]
+    fn a_linked_cancel_follows_its_source_and_its_own_flag() {
+        let raised = Arc::new(AtomicBool::new(false));
+        let source = raised.clone();
+        let c = Cancel::linked(move || source.load(Ordering::Relaxed));
+        let d = c.clone();
+        assert!(!d.is_cancelled());
+        raised.store(true, Ordering::Relaxed);
+        assert!(c.is_cancelled() && d.is_cancelled(), "the registry's cancel reaches every clone");
+        let own = Cancel::linked(|| false);
+        own.cancel();
+        assert!(own.is_cancelled(), "the flag still works on its own");
     }
 
     #[test]
@@ -371,6 +426,34 @@ mod tests {
     }
 
     #[test]
+    fn a_pause_is_ended_by_going_back_to_the_phase_before_it() {
+        let (job, _c, seen) = collecting(Duration::ZERO);
+        job.report(Phase::Checking, Unit::Count, 2, Some(5));
+        job.resume_after_pause(); // not paused: nothing goes out
+        job.report_done(Phase::BrowserPaused, Unit::Count, 0, None);
+        job.resume_after_pause();
+        job.resume_after_pause(); // already back: nothing more
+        let phases: Vec<_> = seen.lock().unwrap().iter().map(|p| (p.phase, p.done, p.total)).collect();
+        assert_eq!(
+            phases,
+            [
+                (Phase::Checking, 2, Some(5)),
+                (Phase::BrowserPaused, 0, None),
+                (Phase::Checking, 2, Some(5))
+            ]
+        );
+    }
+
+    #[test]
+    fn a_pause_with_no_earlier_phase_ends_in_checking() {
+        let (job, _c, seen) = collecting(Duration::ZERO);
+        job.report_done(Phase::BrowserPaused, Unit::Count, 0, None);
+        job.resume_after_pause();
+        let last = seen.lock().unwrap().last().unwrap().phase;
+        assert_eq!(last, Phase::Checking);
+    }
+
+    #[test]
     fn every_phase_has_a_label() {
         for p in [
             Phase::FetchingChecksum,
@@ -382,6 +465,7 @@ mod tests {
             Phase::Finding,
             Phase::Settling,
             Phase::Checking,
+            Phase::BrowserPaused,
         ] {
             assert!(!p.label().is_empty());
         }

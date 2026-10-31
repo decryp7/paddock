@@ -256,6 +256,9 @@ the CI job's packages, and the x86 CI image only to confirm.
   the child-process tests serialised in their own group. `--profile ci` (CI) never retries a test (a flaky test is fixed,
   not retried) and writes `target/nextest/ci/junit.xml`. nextest skips doc tests: `cargo test --workspace --doc`. On a
   shared machine cap it: `cargo nextest run -j 6`.
+- **The app's tests use the built plugins binary:** `cargo nextest run --workspace` builds it; before a
+  `cargo nextest run -p debrief-app`, run `cargo build -p debrief-plugins` once. Without it the test apps have no plugins
+  (they say so once) and the tests that need plugins fail; a test never builds it itself.
 - **One integration-test binary per crate:** `tests/it/main.rs` declares a module per file (`tests/it/<name>.rs`),
   shared helpers live in `tests/it/common/` (or `support/`). Linking a binary per file cost more than the tests took. A new
   test file is a new `mod` line in `main.rs`, never a new `tests/<name>.rs`. Run one file's tests with
@@ -356,7 +359,8 @@ Gitea Actions workflows live in [`.gitea/workflows/`](../.gitea/workflows/):
      check (pull requests), the Angular build with `npm audit`, the i18n extraction check, `ng lint`,
      unit tests with coverage, the Playwright end-to-end tests, and a check that the generated
      third-party notices are up to date.
-  2. *real-app smoke* (Windows and Linux): builds the debug app and runs the `tauri-driver` tests.
+  2. *real-app smoke* (Linux, in the CI container under Xvfb): builds the debug app and runs the `tauri-driver` tests. The
+     Windows and macOS smoke runs in the local test VMs before a release (testing-manual.md), never on a host runner (rule 7).
   3. *bundle* (matrix), only for `v*` tags, the nightly run and manual runs (not for pushes or pull
      requests, so an installer breakage shows up within 24 hours): `.deb`/`.rpm` on `ubuntu-latest`,
      the NSIS `-setup.exe` on `windows-latest` and `.dmg` on `macos-latest`, uploaded as run artifacts.

@@ -88,6 +88,7 @@ export const FRAME_STYLES = `
     .pd-frame-spacer { flex: 1 1 auto; }
     .pd-frame-btn { display: inline-flex; align-items: center; gap: var(--pd-space-2, 8px); min-height: var(--pd-button-height, 28px); padding: 0 var(--pd-space-3, 12px); border-radius: var(--pd-radius-control, 6px); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium, 500); white-space: nowrap; cursor: pointer; }
     .pd-frame-btn--filled { background: var(--pd-accent-fill); border-color: var(--pd-accent-fill); color: var(--pd-on-accent); }
+    .pd-frame-btn--filled:hover:not(:disabled) { background: var(--pd-accent-fill-hover); border-color: var(--pd-accent-fill-hover); }
     .pd-frame-btn--danger { background: var(--pd-danger-fill); border-color: var(--pd-danger-fill); color: var(--pd-on-danger); }
     .pd-frame-btn:disabled { opacity: 0.55; cursor: default; }
     /* The pressed button keeps its full colour while it works; the others dim. */

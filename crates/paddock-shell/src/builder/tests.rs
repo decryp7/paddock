@@ -30,6 +30,7 @@ fn identity() -> AppIdentity {
 
 fn shell() -> Builder<MockRuntime> {
     Builder::new(identity())
+        .start_guard(None)
         .in_memory()
         .native_menu(false)
         .windows(|_| Windows::builder(WindowConfig::new("Shell Demo")).build())
@@ -96,6 +97,7 @@ fn quit_from_the_menu_bar_works_when_the_last_window_was_destroyed() {
     let exits = Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen = exits.clone();
     let app = app(Builder::new(identity())
+        .start_guard(None)
         .in_memory()
         .native_menu(false)
         .windows(move |_| {
@@ -168,7 +170,10 @@ fn tray_ids_and_menu_bar_ids_do_not_overlap() {
 
 #[test]
 fn a_click_without_a_window_quits_or_brings_the_main_window_back() {
-    let plain = app(Builder::new(identity()).in_memory().native_menu(false));
+    let plain = app(Builder::new(identity())
+        .start_guard(None)
+        .in_memory()
+        .native_menu(false));
     assert!(plain.try_state::<Windows<MockRuntime>>().is_none());
     let exited = std::cell::Cell::new(0);
     menu_without_window_using(plain.handle(), "pd.app.quit", None, |_| {
@@ -194,6 +199,7 @@ fn a_click_without_a_window_quits_or_brings_the_main_window_back() {
 #[test]
 fn a_menu_click_without_a_window_layer_reaches_the_policy() {
     let app = app(Builder::new(identity())
+        .start_guard(None)
         .in_memory()
         .native_menu(false)
         .setup(|app| {
@@ -228,6 +234,7 @@ fn a_menu_item_without_a_window_reopens_the_main_window() {
 #[test]
 fn window_events_without_the_window_layer_still_reach_the_other_parts() {
     let app = app(Builder::new(identity())
+        .start_guard(None)
         .in_memory()
         .native_menu(false)
         .setup(|app| {
@@ -276,7 +283,10 @@ fn a_clean_exit_ends_the_run_by_removing_the_running_marker() {
 
 #[test]
 fn run_events_without_the_window_layer_or_the_parts_are_harmless() {
-    let app = app(Builder::new(identity()).in_memory().native_menu(false));
+    let app = app(Builder::new(identity())
+        .start_guard(None)
+        .in_memory()
+        .native_menu(false));
     assert!(app.try_state::<Windows<MockRuntime>>().is_none());
     on_run_event(app.handle(), &RunEvent::Ready);
     on_run_event(app.handle(), &RunEvent::Exit);
@@ -435,6 +445,7 @@ fn a_start_that_cannot_open_its_window_exits_with_code_1() {
     let exits = Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen = exits.clone();
     let app = app(Builder::new(identity())
+        .start_guard(None)
         .in_memory()
         .native_menu(false)
         .windows(move |_| {

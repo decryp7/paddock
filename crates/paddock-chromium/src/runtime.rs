@@ -15,12 +15,13 @@ use paddock_jobs::JobContext;
 use paddock_proc::{Limits, Outcome};
 use paddock_runtime::{Catalogue, OsKind, RuntimeKind, RuntimeStore};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The runtime's name: its store folder.
 pub const NAME: &str = "chromium";
-/// How long `--version` may take.
-const SELF_TEST_LIMIT: Duration = Duration::from_secs(30);
+/// The most a self-test may take (a product limit, 3 minutes): a first start of a freshly unpacked browser is scanned by the OS
+/// (Gatekeeper, XProtect, Defender) in other processes and can be slow; past the limit its tree is ended and the failure says so.
+const SELF_TEST_LIMIT: Duration = Duration::from_secs(180);
 const CATALOGUE: &str = include_str!("chromium.toml");
 
 /// The pinned builds shipped with this crate.
@@ -77,13 +78,25 @@ impl RuntimeKind for ChromeForTesting {
     }
 
     fn self_test(&self, executable: &Path, version: &str) -> std::result::Result<String, String> {
+        // Test builds: a self-test starts the browser too (headless), so it asks the same gate as a launch (rule 7).
+        #[cfg(any(test, feature = "test-support"))]
+        crate::discover::check_test_launch(
+            executable,
+            paddock_testkit::live_browser::BrowserWindow::Headless,
+        )?;
         if self.os == OsKind::Windows {
             return windows_self_test(executable, version);
         }
         let mut cmd = paddock_proc::command(executable);
         cmd.arg("--version");
-        let out = paddock_proc::run_bounded(cmd, Limits::new(SELF_TEST_LIMIT).max_output(4096))
-            .map_err(|e| e.to_string())?;
+        let started = Instant::now();
+        let out = paddock_proc::run_bounded(cmd, Limits::new(SELF_TEST_LIMIT).max_output(4096));
+        log_self_test(
+            executable,
+            out.as_ref().map(|o| &o.outcome),
+            started.elapsed(),
+        );
+        let out = out.map_err(|e| e.to_string())?;
         check_version(
             out.outcome == Outcome::TimedOut,
             out.success(),
@@ -114,8 +127,14 @@ fn windows_self_test(executable: &Path, version: &str) -> std::result::Result<St
     ])
     .arg(format!("--user-data-dir={}", profile.display()))
     .arg(crate::launch::START_PAGE);
+    let started = Instant::now();
     let out = paddock_proc::run_bounded(cmd, Limits::new(SELF_TEST_LIMIT).max_output(64 * 1024));
     let _ = std::fs::remove_dir_all(&profile);
+    log_self_test(
+        executable,
+        out.as_ref().map(|o| &o.outcome),
+        started.elapsed(),
+    );
     let out = out.map_err(|e| e.to_string())?;
     check_dump(
         out.outcome == Outcome::TimedOut,
@@ -123,6 +142,43 @@ fn windows_self_test(executable: &Path, version: &str) -> std::result::Result<St
         &out.stdout_text(),
         version,
     )
+}
+
+/// What a self-test that ran out of time tells the person: the limit and a next step.
+fn timed_out_message() -> String {
+    format!(
+        "it did not answer its self-test within {} s; try again, or check that antivirus is not blocking it",
+        SELF_TEST_LIMIT.as_secs()
+    )
+}
+
+/// The line the log keeps of a self-test (rule 56): the program's file name only (never its folder), how it ended, its exit code
+/// and the time it took.
+fn self_test_line(executable: &Path, outcome: Result<&Outcome, ()>, elapsed: Duration) -> String {
+    let name = executable
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("browser");
+    let (how, code) = match outcome {
+        Ok(Outcome::Exited(s)) => ("exited", s.code()),
+        Ok(Outcome::TimedOut) => ("timed out", None),
+        Ok(_) => ("ended by the output cap", None),
+        Err(()) => ("did not start", None),
+    };
+    format!(
+        "browser self-test of {name}: {how}, exit code {}, {} ms",
+        code.map_or_else(|| "none".to_string(), |c| c.to_string()),
+        elapsed.as_millis()
+    )
+}
+
+fn log_self_test(
+    executable: &Path,
+    outcome: Result<&Outcome, &paddock_proc::RunError>,
+    elapsed: Duration,
+) {
+    let line = self_test_line(executable, outcome.map_err(|_| ()), elapsed);
+    log::info!("{line}");
 }
 
 /// The verdict on a headless page dump.
@@ -133,7 +189,7 @@ fn check_dump(
     version: &str,
 ) -> std::result::Result<String, String> {
     match () {
-        _ if timed_out => Err("it did not answer in time".into()),
+        _ if timed_out => Err(timed_out_message()),
         _ if !success => Err("it ended with an error".into()),
         _ if !stdout.contains("<html") => Err("it did not show a page".into()),
         _ => Ok(format!("Chrome for Testing {version}")),
@@ -149,7 +205,7 @@ fn check_version(
 ) -> std::result::Result<String, String> {
     let line = stdout.trim().to_string();
     match () {
-        _ if timed_out => Err("it did not answer in time".into()),
+        _ if timed_out => Err(timed_out_message()),
         _ if !success => Err(format!(
             "it ended with an error{}",
             if line.is_empty() {
@@ -309,7 +365,7 @@ mod tests {
         assert!(
             check_version(true, false, "", v)
                 .unwrap_err()
-                .contains("in time")
+                .contains("within 180 s")
         );
     }
 
@@ -379,7 +435,7 @@ mod tests {
         let mut z = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let exec = zip::write::SimpleFileOptions::default().unix_permissions(0o755);
         z.start_file(exe, exec).unwrap();
-        z.write_all(b"#!/bin/sh\necho 'Google Chrome for Testing 1.2.3'\n")
+        z.write_all(b"#!/bin/sh\n# paddock-fake-browser\necho 'Google Chrome for Testing 1.2.3'\n")
             .unwrap();
         let bytes = z.finish().unwrap().into_inner();
         let mut h = paddock_jobs::HashingWriter::new(std::io::sink());
@@ -433,7 +489,7 @@ mod tests {
         assert!(
             check_dump(true, false, "", v)
                 .unwrap_err()
-                .contains("in time")
+                .contains("within 180 s")
         );
         assert!(
             check_dump(false, false, "", v)
@@ -458,7 +514,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("9.9.manifest"), "<assembly/>").unwrap();
         let exe = d.path().join("chrome.exe");
-        std::fs::write(&exe, "#!/bin/sh\ncase \"$*\" in *--dump-dom*about:blank*) echo '<html><head></head><body></body></html>';; *) exit 3;; esac\n").unwrap();
+        std::fs::write(&exe, "#!/bin/sh\n# paddock-fake-browser\ncase \"$*\" in *--dump-dom*about:blank*) echo '<html><head></head><body></body></html>';; *) exit 3;; esac\n").unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
         let k = ChromeForTesting::new(OsKind::Windows);
         assert_eq!(
@@ -473,13 +529,33 @@ mod tests {
         );
     }
 
+    /// Regression (review): the self-test (a headless `--dump-dom` on Windows) started whatever it was given; in test
+    /// builds it asks the launch gate first, so an installed browser is never started, on any OS's path.
+    #[test]
+    fn the_self_test_never_starts_an_installed_browser_in_a_test_build() {
+        let env = |k: &str| std::env::var(k).ok();
+        // conformance: no-launch — the gate under test refuses each candidate before anything starts
+        for b in crate::discover::candidates(crate::discover::this_os(), &env) {
+            for os in [OsKind::Windows, OsKind::Macos, OsKind::Linux] {
+                let e = ChromeForTesting::new(os)
+                    .self_test(&b.path, "1.2.3")
+                    .unwrap_err();
+                assert!(e.contains("installed"), "{}: {e}", b.path.display());
+            }
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_self_test_runs_the_program() {
         use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().unwrap();
         let exe = d.path().join("chrome");
-        std::fs::write(&exe, "#!/bin/sh\necho \"Chromium 9.9 $1\"\n").unwrap();
+        std::fs::write(
+            &exe,
+            "#!/bin/sh\n# paddock-fake-browser\necho \"Chromium 9.9 $1\"\n",
+        )
+        .unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
         let k = ChromeForTesting::new(OsKind::Linux);
         assert_eq!(
@@ -487,5 +563,43 @@ mod tests {
             Ok("Chromium 9.9 --version".into())
         );
         assert!(k.self_test(&d.path().join("missing"), "9.9").is_err());
+    }
+
+    /// A self-test that ran out of time says the limit and what to do next, not just "in time".
+    #[test]
+    fn a_timed_out_self_test_names_the_limit_and_a_next_step() {
+        let e = check_version(true, false, "", "1.2.3").unwrap_err();
+        assert!(
+            e.contains("self-test within 180 s")
+                && e.contains("try again")
+                && e.contains("antivirus"),
+            "{e}"
+        );
+        assert_eq!(SELF_TEST_LIMIT, Duration::from_secs(180));
+    }
+
+    /// Rule 56: what the log keeps of a self-test is the file name, how it ended, the exit code and the time, never a folder.
+    #[cfg(unix)]
+    #[test]
+    fn the_log_line_of_a_self_test_has_the_name_outcome_code_and_time_only() {
+        use std::os::unix::process::ExitStatusExt;
+        let exe = Path::new("/home/someone/private/chrome");
+        let took = Duration::from_millis(1234);
+        let exited = Outcome::Exited(std::process::ExitStatus::from_raw(3 << 8));
+        let l = self_test_line(exe, Ok(&exited), took);
+        assert_eq!(
+            l,
+            "browser self-test of chrome: exited, exit code 3, 1234 ms"
+        );
+        assert_eq!(
+            self_test_line(exe, Ok(&Outcome::TimedOut), took),
+            "browser self-test of chrome: timed out, exit code none, 1234 ms"
+        );
+        assert!(self_test_line(exe, Ok(&Outcome::OutputCap), took).contains("output cap"));
+        assert!(self_test_line(exe, Err(()), took).contains("did not start"));
+        assert!(!l.contains("someone"));
+        let gone = paddock_proc::RunError::NotFound("x".into());
+        log_self_test(exe, Err(&gone), took);
+        log_self_test(exe, Ok(&exited), took);
     }
 }

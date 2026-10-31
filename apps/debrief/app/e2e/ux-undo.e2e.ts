@@ -2,13 +2,14 @@ import { expect, Page, test } from '@playwright/test';
 import { gridTotal, initialTotal, openApp, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openMenu } from './menu-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 async function openEditMenu(page: Page) {
   return openMenu(page, 'Edit');
 }
 
 async function runCommand(page: Page, title: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill(title);
   await expect(page.locator('debrief-command-palette').getByRole('option').first()).toContainText(title);
@@ -29,10 +30,10 @@ test.describe('undo and redo', () => {
     await expect(gridTotal(page)).toHaveText(String(errors));
 
     // Keyboard (focus is on the chip, not in a text field).
-    await page.keyboard.press('ControlOrMeta+z');
+    await pressMod(page, 'Mod+z');
     await expect(err).toHaveAttribute('aria-pressed', 'false');
     await expect(gridTotal(page)).toHaveText(all);
-    await page.keyboard.press('ControlOrMeta+Shift+z');
+    await pressMod(page, 'Mod+Shift+z');
     await expect(err).toHaveAttribute('aria-pressed', 'true');
     await expect(gridTotal(page)).toHaveText(String(errors));
 
@@ -55,7 +56,7 @@ test.describe('undo and redo', () => {
     await search.pressSequentially('timed out', { delay: 20 });
     await expect(gridTotal(page)).not.toHaveText(all);
     await page.getByRole('toolbar', { name: 'Levels' }).getByRole('button', { name: /^ERR/ }).focus();
-    await page.keyboard.press('ControlOrMeta+z');
+    await pressMod(page, 'Mod+z');
     await expect(search).toHaveValue('');
     await expect(gridTotal(page)).toHaveText(all);
   });
@@ -74,10 +75,10 @@ test.describe('undo and redo', () => {
     await expect(menu).toHaveCount(0);
 
     // The rule list is reloaded from the engine's profile after each save, so it shows the engine's state.
-    await page.keyboard.press('ControlOrMeta+z');
+    await pressMod(page, 'Mod+z');
     await expect(row.getByRole('checkbox', { name: /^Disable/ })).toBeVisible();
     await expect(page.getByRole('status').filter({ hasText: 'Undone: marker rule edit' })).toBeVisible();
-    await page.keyboard.press('ControlOrMeta+Shift+z');
+    await pressMod(page, 'Mod+Shift+z');
     await expect(row.getByRole('checkbox', { name: /^Enable/ })).toBeVisible();
   });
 });

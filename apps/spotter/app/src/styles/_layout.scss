@@ -2,6 +2,8 @@
 
 .page {
   display: grid;
+  /* `minmax(0, …)`, not the implicit auto track: wide content must not stretch the page beyond its pane (rule 18). */
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: var(--pd-space-6);
   max-width: var(--pd-content-max);
@@ -36,6 +38,7 @@
 
 .section {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--pd-space-3);
 
   > h2,
@@ -104,7 +107,7 @@
   --sp-titlebar-inset: 28px;
 }
 
-@media (max-width: 880px) {
+@container pd-page (max-width: 880px) {
   .page {
     padding: var(--pd-space-4);
   }
@@ -113,5 +116,6 @@
 /* Panels hold several blocks; they keep the page's rhythm between them. */
 .page sp-panel {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--pd-space-6);
 }

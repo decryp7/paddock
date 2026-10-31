@@ -3,9 +3,8 @@ import { patchState, signalStore, withComputed, withMethods, withState } from '@
 import type { CommandError, WatchSummary } from '../core/api.types';
 import { BACKEND, type ReleaseTarget } from '../core/backend';
 import { isCancelled, toCommandError } from '../core/command-error';
-import { JobsStore } from './jobs.store';
 import { needsAttention } from '../shared/labels';
-import { ToastStore } from './toast.store';
+import { Notifier } from './notifier';
 
 export type WatchFilter = 'all' | 'new' | 'attention' | 'paused';
 export type WatchSort = 'name' | 'latest' | 'checked';
@@ -48,8 +47,7 @@ export const WatchesStore = signalStore(
   })),
   withMethods((store) => {
     const backend = inject(BACKEND);
-    const toast = inject(ToastStore);
-    const jobs = inject(JobsStore);
+    const toast = inject(Notifier);
     let started = false;
 
     /** Runs a mutation; its failure becomes a toast and the list is refreshed from the backend either way. */
@@ -94,15 +92,15 @@ export const WatchesStore = signalStore(
         const name = id === null ? null : (store.watches().find((w) => w.id === id)?.name ?? 'the watch');
         try {
           if (name === null) {
-            await jobs.start('checkAll', 'Checking every watch', (jobId) => backend.checkNow(null, jobId));
+            await backend.checkNow(null);
             toast.success('Checking every watch');
           } else {
-            await jobs.run('check', `Checking ${name}`, (jobId) => backend.checkNow(id, jobId));
+            await backend.checkNow(id);
             toast.success('Check finished');
           }
           return true;
         } catch (e) {
-          if (isCancelled(e)) toast.show({ tone: 'info', icon: 'info', title: 'Check cancelled', body: null });
+          if (isCancelled(e)) toast.info('Check cancelled');
           else toast.error('That did not work', toCommandError(e).message);
           return false;
         }
@@ -119,14 +117,12 @@ export const WatchesStore = signalStore(
       acknowledgeProduct: (id: string, product: string) => act(() => backend.acknowledgeProduct(id, product), 'Marked as seen'),
       openRelease: (id: string, version: string, target?: ReleaseTarget) => act(() => backend.openRelease(id, version, target), null),
       async download(id: string, version: string, target?: ReleaseTarget): Promise<void> {
-        const watch = store.watches().find((w) => w.id === id);
-        const title = `Downloading ${watch?.name ?? 'the release'} ${version}`;
         try {
-          const path = await jobs.run('download', title, (jobId) => backend.downloadRelease(id, version, jobId, target));
+          const path = await backend.downloadRelease(id, version, target);
           toast.success('Download finished', path);
         } catch (e) {
           // Cancelling is the user's own choice, not a failure; the part stays and the next download resumes it.
-          if (isCancelled(e)) toast.show({ tone: 'info', icon: 'info', title: 'Download cancelled', body: 'The part already downloaded is kept; downloading again resumes it.' });
+          if (isCancelled(e)) toast.info('Download cancelled', 'The part already downloaded is kept; downloading again resumes it.');
           else toast.error('Download failed', toCommandError(e).message);
         }
       },

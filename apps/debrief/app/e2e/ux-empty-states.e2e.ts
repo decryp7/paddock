@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { gridTotal, initialTotal, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 test('an empty grid says why and offers the next step', async ({ page }, testInfo) => {
   await openApp(page);
@@ -18,7 +19,7 @@ test('an empty grid says why and offers the next step', async ({ page }, testInf
 test('an empty analysis view suggests what to do', async ({ page }) => {
   await openApp(page);
   await page.getByTestId('query-field').fill('zzz-no-such-text-zzz');
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   await page.getByRole('combobox', { name: 'Type a command' }).fill('Show exceptions');
   await page.keyboard.press('Enter');
   const view = page.locator('debrief-exceptions-view');

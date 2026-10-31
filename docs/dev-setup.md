@@ -129,6 +129,40 @@ another database number. sccache's keys include the compiler and target, so one 
   `paddock.conformance.json` names it with the reason it needs its own binary, and every workspace member needs a CI test
   step and the workspace-hack dependency.
 
+## Test VMs and real browsers
+
+Tests never start a real browser or the real app on a desktop someone uses (rule 7). Where they may:
+
+- **Linux CI containers:** the jobs run them under `xvfb-run` with `PADDOCK_LIVE_BROWSER=1` (Debrief's `rust tests`, the
+  `crates` coverage job, app-gates' `display` wrap). On a Linux desktop, `PADDOCK_LIVE_BROWSER=1` would open real
+  windows on it: set it only under `xvfb-run` or in a VM.
+- **Local test VMs, never in CI:** `PADDOCK_LIVE_BROWSER=vm`, honoured only in a VM (`paddock_testkit::live_browser`;
+  anywhere else it fails the test instead of starting anything). A macOS VM (Tart) is recognised by
+  `kern.hv_vmm_present = 1`. A Windows test VM by the machine-wide registry value `HKLM\SOFTWARE\Paddock` `TestVM` = 1,
+  which only an administrator can write; the VM's set-up writes it once, and it never goes on a desktop someone uses:
+
+  ```powershell
+  reg add HKLM\SOFTWARE\Paddock /v TestVM /t REG_DWORD /d 1 /f   # elevated, in the test VM only
+  ```
+
+Outside those places a real-browser test prints where it runs and returns. In test builds each driver's launch and
+self-test also refuse an installed browser (paths compared canonically), and any real program outside those places,
+however a test found it: only a test's fakes pass, which carry the line `# paddock-fake-browser`
+(`paddock_testkit::live_browser::fake_script`); a `#!` line alone proves nothing, since Chrome's and Edge's Linux
+launchers are scripts too. Conformance C55 is the backstop. The macOS and Windows real-browser runs, in the VMs, before a release that touches the browser code:
+
+```sh
+# shared crates (paddock-chromium), Spotter, Debrief: from each Cargo workspace, in the VM
+PADDOCK_LIVE_BROWSER=vm PADDOCK_REQUIRE_TEST_BROWSER=1 cargo nextest run -p paddock-chromium --all-features -E 'binary(it) & test(/^real_browser::/)'
+PADDOCK_LIVE_BROWSER=vm SPOTTER_REQUIRE_TEST_BROWSER=1 cargo nextest run -p spotter-render -E 'binary(real_browser)'
+PADDOCK_LIVE_BROWSER=vm DEBRIEF_REQUIRE_TEST_BROWSER=1 cargo nextest run -p chromium-driver -p debrief-app \
+  -E '(binary(it) & test(/^real_browser::/)) | test(/browser::renderer::tests::(reads_a_scripted|a_challenge_page)/)'
+```
+
+`CHROMIUM_TEST_PATH` (and Spotter's `SPOTTER_TEST_BROWSER`) name the pinned Chrome for Testing inside the VM
+(`node conformance/ci/install-test-browser.mjs`). The real-window probe of `paddock-dialogs`
+(`PADDOCK_REAL_WINDOWS=1 ... --test show_probe`) and Debrief's real-app smoke run there too (apps/debrief/docs/testing-manual.md).
+
 ## Parallel work (people and agents)
 
 - One git worktree per task (`git worktree add -b <branch> ~/.<app>-wt-<task> origin/<base>`); the main checkout stays on

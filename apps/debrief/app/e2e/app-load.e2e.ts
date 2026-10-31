@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { openApp } from './app';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 test.describe('app load', () => {
   test.beforeEach(async ({ page }) => openApp(page));
@@ -30,7 +31,7 @@ test.describe('app load', () => {
     // The one search field is part of the filter bar, above the dock, and no Query panel exists.
     await expect(page.getByRole('tab', { name: 'Query' })).toHaveCount(0);
     await page.getByRole('grid', { name: 'Events' }).focus();
-    await page.keyboard.press('ControlOrMeta+/');
+    await pressMod(page, 'Mod+/');
     await expect(page.getByTestId('query-field')).toBeFocused();
     const field = (await page.locator('debrief-query-field').boundingBox())!;
     expect(field.y + field.height).toBeLessThanOrEqual(timeline.y + 2);

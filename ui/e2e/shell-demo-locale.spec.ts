@@ -1,4 +1,4 @@
-import { axeViolations, expect, test, type Locator, type Page } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, pressMod, test, type Locator, type Page } from '@decryp7/paddock-e2e';
 
 // The shell demo in the generated pseudo-locale (plan S15, ADR 0012 §6): accented, longer, bracketed (⟦…⟧) text. A smoke
 // test of runtime translation loading and the guard against unmarked English in every part the shell draws: the menu
@@ -179,7 +179,7 @@ test.describe('pseudo-locale (plan S15)', () => {
   });
 
   test('no unmarked English in the Settings window (the engine’s field labels and descriptions are data)', async ({ page }) => {
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Comma' : 'Control+Comma');
+    await pressMod(page, 'Mod+Comma');
     const win = page.locator('pd-settings-window');
     await expect(win).toBeVisible();
     await expect(win.getByTestId('settings-search')).toHaveAttribute('placeholder', PSEUDO);

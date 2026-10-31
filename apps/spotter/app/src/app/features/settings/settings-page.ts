@@ -1,23 +1,21 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
 import { MatIcon } from '@angular/material/icon';
-import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
-import type { Settings, Theme } from '../../core/api.types';
+import { MatProgressBar } from '@angular/material/progress-bar';
+import { MatSlideToggle } from '@angular/material/slide-toggle';
+import { jobView } from '@decryp7/paddock-ui';
+import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
+import type { Settings } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
 import { formatDateTime, spanText } from '../../shared/format';
 import { Panel } from '../../shared/ui/panel';
 import { MailSettings } from './mail-settings';
 import { SettingsStore } from '../../state/settings.store';
 
-const THEMES: SuSegment[] = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-];
-
-/** Settings: appearance, notifications, checks, downloads, the page renderer, updates and data. */
+/** Spotter's settings page (a page of the shell's Settings window): startup, notifications, checks, downloads, the page renderer, mail and data. The shell adds Appearance and Updates. */
 @Component({
   selector: 'sp-settings-page',
-  imports: [MatIcon, SuSegmentedControl, Panel, MailSettings],
+  imports: [MatIcon, MatSlideToggle, MatButtonToggleGroup, MatButtonToggle, MatProgressBar, Panel, MailSettings],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './settings-page.html',
   styleUrl: './settings-page.scss',
@@ -25,7 +23,8 @@ const THEMES: SuSegment[] = [
 export class SettingsPage {
   protected readonly store = inject(SettingsStore);
   private readonly clock = inject(ClockService);
-  protected readonly themes = THEMES;
+  /** The window's jobs (the Settings window provides them; a host without them just shows no progress). */
+  private readonly jobs = inject(JobsStore, { optional: true });
   protected readonly intervals = [
     { secs: 900, label: '15 minutes' },
     { secs: 3600, label: '1 hour' },
@@ -33,10 +32,31 @@ export class SettingsPage {
     { secs: 24 * 3600, label: 'Daily' },
   ];
 
+  /**
+   * Launch at login: asks the app, then shows what it answered. The switch has already flipped when it asks; a refusal leaves the
+   * store's value unchanged, so the switch is put back by hand (a bound `checked` that did not change would not redraw it).
+   */
+  protected async setAutostart(toggle: MatSlideToggle, enabled: boolean): Promise<void> {
+    await this.store.setAutostart(enabled);
+    toggle.checked = this.store.autostart() === true;
+  }
+
   protected readonly s = computed(() => this.store.settings().value);
   protected readonly pausedFor = computed(() => {
     const until = this.s()?.notificationsPausedUntilMs ?? null;
     return until !== null && until > this.clock.now() ? spanText(until - this.clock.now()) : null;
+  });
+  /** Which pause button is lit: On, or the nearest of the two pauses to what is left. */
+  protected readonly pauseValue = computed(() => {
+    const until = this.s()?.notificationsPausedUntilMs ?? null;
+    if (until === null || until <= this.clock.now()) return 'on';
+    return until - this.clock.now() <= 3_600_000 ? '1h' : '1d';
+  });
+  /** The browser install while it runs: its phase and count in words, from the shell's job (the engine owns it). */
+  private readonly installJob = computed(() => this.jobs?.active().find((j) => j.kind === 'sp.install-renderer') ?? null);
+  protected readonly install = computed(() => {
+    const j = this.installJob();
+    return j ? jobView(j) : null;
   });
   protected readonly rendererTone = computed(() => {
     const k = this.store.renderer().value?.kind;
@@ -47,7 +67,7 @@ export class SettingsPage {
       case 'chromium-installed':
         return 'Chromium found';
       case 'chromium-downloaded':
-        return 'Chromium downloaded';
+        return 'Chromium installed by Spotter';
       case 'os-webview':
         return 'OS web view (limited)';
       default:
@@ -64,16 +84,22 @@ export class SettingsPage {
     void this.store.change(patch);
   }
 
-  protected setTheme(v: string): void {
-    this.set({ theme: v as Theme });
-  }
-
-  protected checked(e: Event): boolean {
-    return (e.target as HTMLInputElement).checked;
-  }
-
   protected value(e: Event): string {
     return (e.target as HTMLInputElement | HTMLSelectElement).value;
+  }
+
+  /** Material does not report a click on the option that is already selected: for a pause it restarts it (the full time again). */
+  protected onPauseClick(value: 'on' | '1h' | '1d'): void {
+    if (value !== 'on' && value === this.pauseValue()) this.onPause(value);
+  }
+
+  protected onPause(value: 'on' | '1h' | '1d'): void {
+    void this.store.pauseNotifications(value === 'on' ? null : value === '1h' ? 60 : 24 * 60);
+  }
+
+  protected cancelInstall(): void {
+    const j = this.installJob();
+    if (j) void this.jobs?.cancel(j.id);
   }
 
   protected setQuiet(on: boolean): void {

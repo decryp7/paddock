@@ -1,24 +1,24 @@
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { shellPorts } from '@decryp7/paddock-ui/shell/testing';
 import { Router } from '@angular/router';
 import { WatchDetailPage } from './watch-detail-page';
-import { Confirm } from '../../shared/ui/confirm-dialog';
-import { ToastStore } from '../../state/toast.store';
+import { Confirm } from '../../shared/ui/confirm';
 import { WatchesStore } from '../../state/watches.store';
 import type { WatchSummary } from '../../core/api.types';
-import { appProviders, byText, flush, makeMock, settle, text } from '../../../testing/test-helpers';
+import { appProviders, byText, flush, makeMock, routeStub, settle, text } from '../../../testing/test-helpers';
 
 @Component({ template: '' })
 class Stub {}
 const routes = [{ path: 'watches', component: Stub }];
 
 async function make(id = 'w-1', backend = makeMock()) {
-  TestBed.configureTestingModule({ providers: appProviders(backend, routes) });
+  const route = routeStub({ id });
+  TestBed.configureTestingModule({ providers: [...appProviders(backend, routes), route.provider] });
   TestBed.inject(WatchesStore).start();
   const f = TestBed.createComponent(WatchDetailPage);
-  f.componentRef.setInput('id', id);
   await settle(f);
-  return { f, backend };
+  return { f, backend, route };
 }
 type F = Awaited<ReturnType<typeof make>>['f'];
 const click = async (f: F, el: Element | null) => {
@@ -64,8 +64,8 @@ describe('WatchDetailPage', () => {
     expect(releaseRows(f)).toHaveLength(36);
     expect(text(q(f, '#hist-h'))).toBe('Releases');
     expect(text(q(f, 'section[aria-labelledby=hist-h] .help'))).toBe('36 found');
-    expect(byText(f.nativeElement, 'th', 'Size (MiB)')).not.toBeNull();
-    expect(text(releaseRows(f)[0]!.querySelector('td.num'))).toMatch(/^\d+(\.\d+)?$/);
+    expect(byText(f.nativeElement, 'th', 'Size')).not.toBeNull();
+    expect(text(releaseRows(f)[0]!.querySelector('td.num'))).toMatch(/^\d+(\.\d+)? (KB|MB|GB)$/);
     expect(releaseRows(f).filter((r) => r.querySelector('.installed'))).toHaveLength(1);
     const settings = text(q(f, 'dl.kv'));
     expect(settings).toContain('ChecksEvery 6 hours');
@@ -156,7 +156,7 @@ describe('WatchDetailPage', () => {
     expect(copy.getAttribute('title')).toMatch(/^npm install tinyparse@/);
     await click(f, copy);
     expect(writeText).toHaveBeenCalledWith(copy.getAttribute('title'));
-    expect(TestBed.inject(ToastStore).toasts().map((t) => t.title)).toContain('Upgrade command copied');
+    expect(shellPorts().messages()).toContain('Upgrade command copied');
     TestBed.resetTestingModule();
     const other = await make('w-1');
     expect(q(other.f, '.upgrade button[aria-label^="Copy the upgrade command"]')).toBeNull();
@@ -172,7 +172,7 @@ describe('WatchDetailPage', () => {
     writeText.mockClear();
     await pick(f, 'More actions', 'Copy address');
     expect(writeText).toHaveBeenCalledWith(address);
-    expect(TestBed.inject(ToastStore).toasts().map((t) => t.title)).toContain('Address copied');
+    expect(shellPorts().messages()).toContain('Address copied');
   });
 
   it('opens the release side panel on click, shows its details and files, and Esc closes it and returns focus', async () => {
@@ -246,14 +246,16 @@ describe('WatchDetailPage', () => {
     expect(writeText).toHaveBeenCalledWith((await backend.getWatch('w-1')).history[withSha]!.sha256);
   });
 
-  it('shortens a long location in the middle but keeps the full text in the title', async () => {
+  it('shows a long location whole, wrapping at its separators, with the full text in the title', async () => {
     const { f, backend } = await make();
     releaseRows(f)[0]!.click();
     await settle(f);
     const loc = (await backend.getWatch('w-1')).history[0]!.location;
     const code = q(f, '.copyable .code');
     expect(code.getAttribute('title')).toBe(loc);
-    expect(text(code).length).toBeLessThanOrEqual(38);
+    // Never cut in the middle: the same text, only with places a line may break.
+    expect(text(code).replaceAll('\u200b', '')).toBe(loc);
+    expect(text(code)).toContain('\u200b');
   });
 
   it('runs the per-release actions: open, download, and the menu entries', async () => {
@@ -275,7 +277,7 @@ describe('WatchDetailPage', () => {
     expect(backend.calls).toEqual(expect.arrayContaining(['openRelease', 'downloadRelease', 'acknowledge', 'setInstalled']));
     expect((await backend.getWatch('w-1')).summary.acknowledged).toBe(version.version);
     expect((await backend.getWatch('w-1')).summary.installed).toBe(version.version);
-    expect(TestBed.inject(ToastStore).toasts().map((t) => t.title)).toEqual(expect.arrayContaining(['Download finished', 'Link copied']));
+    expect(shellPorts().messages().map((m) => m.split('. ')[0])).toEqual(expect.arrayContaining(['Download finished', 'Link copied']));
     expect(releaseRows(f)[0]!.querySelector('.installed')).not.toBeNull();
   });
 
@@ -340,7 +342,7 @@ describe('WatchDetailPage', () => {
     const ask = vi.spyOn(confirm, 'ask').mockResolvedValueOnce(false);
     await pick(f, 'More actions', 'Delete watch');
     await flush();
-    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete "Acme Installer"?', danger: true, confirmLabel: 'Delete watch' }));
+    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ heading: 'Delete "Acme Installer"?', confirm: { label: 'Delete watch', destructive: true } }));
     expect(backend.calls).not.toContain('deleteWatch');
     ask.mockResolvedValueOnce(true);
     await pick(f, 'More actions', 'Delete watch');
@@ -356,17 +358,17 @@ describe('WatchDetailPage', () => {
     await pick(f, 'More actions', 'Delete watch');
     await flush(5);
     expect(TestBed.inject(Router).url).not.toBe('/watches');
-    expect(TestBed.inject(ToastStore).toasts().at(-1)).toMatchObject({ tone: 'danger', body: 'locked' });
+    expect(shellPorts().notices.at(-1)).toMatchObject({ level: 'error', message: 'That did not work. locked' });
   });
 
   it('follows pushed changes (reloads) and a different id', async () => {
-    const { f, backend } = await make();
+    const { f, backend, route } = await make();
     const before = backend.calls.filter((c) => c === 'getWatch').length;
     await backend.setPaused('w-1', true);
     await settle(f);
     expect(backend.calls.filter((c) => c === 'getWatch').length).toBeGreaterThan(before);
     expect(q(f, 'button[aria-label="Resume"]')).not.toBeNull();
-    f.componentRef.setInput('id', 'w-2');
+    route.set({ id: 'w-2' });
     await settle(f);
     expect(text(q(f, 'h1'))).toBe('Lumen CLI');
   });

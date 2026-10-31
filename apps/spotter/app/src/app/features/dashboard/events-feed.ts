@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
 import { SuEmptyState } from '@decryp7/paddock-ui';
-import { formatBytes } from '../../shared/format';
+import { formatBytes } from '@decryp7/paddock-ui/format';
 import { eventView } from '../../shared/labels';
 import { AgoShortPipe } from '../../shared/ui/ago.pipe';
 import { Panel } from '../../shared/ui/panel';

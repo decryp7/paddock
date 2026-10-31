@@ -26,9 +26,10 @@ function phase(v: unknown): SuJobPhase | null | undefined {
  */
 export function parseJobSnapshot(v: unknown): SuJobSnapshot | null {
   if (!isObj(v)) return null;
-  const { id, kind, title, subject, seq, elapsedMs, etaMs, cancellable, notCancellableReason, state } = v;
+  const { id, kind, title, subject, seq, elapsedMs, etaMs, cancellable, notCancellableReason, quietOnSuccess, state } = v;
   if (!isCount(id) || typeof kind !== 'string' || typeof title !== 'string' || !optText(subject) || !isCount(seq)) return null;
   if (!isCount(elapsedMs) || !optCount(etaMs) || typeof cancellable !== 'boolean' || !optText(notCancellableReason)) return null;
+  if (quietOnSuccess !== undefined && typeof quietOnSuccess !== 'boolean') return null;
   const base = {
     id,
     kind,
@@ -39,6 +40,7 @@ export function parseJobSnapshot(v: unknown): SuJobSnapshot | null {
     etaMs: etaMs ?? null,
     cancellable,
     notCancellableReason: notCancellableReason ?? null,
+    ...(quietOnSuccess === true ? { quietOnSuccess } : {}),
   };
   switch (state) {
     case 'queued':

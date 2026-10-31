@@ -201,7 +201,7 @@ test('the CI home follows PADDOCK_CI_HOME (ci-home.sh), and a missing relocated 
   const a = h.job('a'.repeat(16), { PADDOCK_CI_HOME: disk });
   assert.equal(a.exec(['acquire']).status, 0);
   assert.ok(existsSync(join(disk, 'slots', 's1.owner')), 'the slots live in the relocated home');
-  assert.equal(a.later(['path', 'browser', 'spotter']).stdout.trim(), join(disk, 'test-browser-spotter-s1'));
+  assert.equal(a.later(['path', 'target', 'spotter']).stdout.trim(), join(disk, 'target-spotter-s1'));
   const gone = h.job('b'.repeat(16), { PADDOCK_CI_HOME: join(h.root, 'unmounted') }).exec(['acquire']);
   assert.notEqual(gone.status, 0);
   assert.ok(!existsSync(join(h.root, 'unmounted')));
@@ -228,13 +228,13 @@ test('{slot} in a process pattern ends it, right after a kept folder\'s name, an
   const h = host();
   const a = h.job('a'.repeat(16));
   a.exec(['acquire']);
-  const p = a.later(['pattern', '[/\\\\]test-browser-spotter-{slot}']);
+  const p = a.later(['pattern', '[/\\\\]target-spotter-{slot}']);
   assert.equal(p.status, 0, p.stderr);
   const re = new RegExp(p.stdout.trim());
-  for (const line of ['/ci/test-browser-spotter-s1/chrome --headless', 'C:\\ci\\test-browser-spotter-s1\\chrome.exe', '/ci/test-browser-spotter-s1']) assert.match(line, re);
-  for (const line of ['/ci/test-browser-spotter-s12/chrome', '/ci/test-browser-spotter-s2/chrome', '/ci/test-browser-spotter/chrome']) assert.doesNotMatch(line, re);
+  for (const line of ['/ci/target-spotter-s1/chrome --headless', 'C:\\ci\\target-spotter-s1\\chrome.exe', '/ci/target-spotter-s1']) assert.match(line, re);
+  for (const line of ['/ci/target-spotter-s12/chrome', '/ci/target-spotter-s2/chrome', '/ci/target-spotter/chrome']) assert.doesNotMatch(line, re);
   assert.match(a.later(['pattern', '[/\\\\]src[/\\\\]paddock-crate-macOS-{slot}']).stdout, /src\[\/\\\\\]paddock-crate-macOS-s1/);
-  for (const bad of ['chrome-{slot}', '{tmp}/x-{slot}', '[/\\\\]test-browser-spotter-{slot}[/\\\\]', '[/\\\\]target-x-{slot}-{slot}', 'xtarget-x-{slot}']) {
+  for (const bad of ['chrome-{slot}', '{tmp}/x-{slot}', '[/\\\\]target-spotter-{slot}[/\\\\]', '[/\\\\]target-x-{slot}-{slot}', 'xtarget-x-{slot}']) {
     assert.notEqual(a.later(['pattern', bad]).status, 0, `${bad} is not anchored on a kept folder of the slot`);
   }
 });
@@ -270,11 +270,11 @@ test('disk: the first s1 job takes over a kept folder of the old layout; idle sl
   assert.equal(d.exec(['acquire']).status, 0);
   assert.ok(existsSync(secondFolder), 's2 is held by a running job: its folders stay');
   // Folders of an idle slot above the limit (its job died without releasing): swept at the next acquire.
-  mkdirSync(join(h.ci, 'test-browser-y-s7'), { recursive: true });
-  mkdirSync(join(h.ci, 'test-browser-y-s1x'), { recursive: true });
+  mkdirSync(join(h.ci, 'target-y-s7'), { recursive: true });
+  mkdirSync(join(h.ci, 'target-y-s1x'), { recursive: true });
   h.job('e'.repeat(16), keep2).exec(['acquire']);
-  assert.ok(!existsSync(join(h.ci, 'test-browser-y-s7')));
-  assert.ok(existsSync(join(h.ci, 'test-browser-y-s1x')), 'only exact slot folders');
+  assert.ok(!existsSync(join(h.ci, 'target-y-s7')));
+  assert.ok(existsSync(join(h.ci, 'target-y-s1x')), 'only exact slot folders');
   assert.ok(existsSync(join(h.ci, 'target-x-app-s1')) && existsSync(secondFolder));
   // sweep-slot outside idle-run (no lock held) refuses to delete anything.
   const bare = a.later(['sweep-slot', 'all']);
@@ -410,7 +410,9 @@ test('every job that may run on a host and uses a kept folder takes a slot first
       assert.match(last, /uses: \.\/(\.paddock\/)?\.gitea\/actions\/job-isolation\n\s+if: always\(\)\n\s+with:\n\s+mode: release/, `${f} ${job.id}: the last step releases the slot, always`);
     }
   }
-  assert.ok(checked >= 9, `found the host jobs (${checked})`);
+  // 8 host jobs use a kept folder since the real-browser tests moved to the Linux container (rule 7: the hosts' test-browser
+  // folders and the Debrief host smoke are gone). The floor only guards against the scan silently finding none.
+  assert.ok(checked >= 8, `found the host jobs (${checked})`);
 });
 
 /** Every file that runs on a host runner: the workflows, the shared actions, the CI scripts of the kit, tools and apps. */

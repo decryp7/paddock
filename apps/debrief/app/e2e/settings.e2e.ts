@@ -1,6 +1,7 @@
 import { expect, Page, test } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // The Settings screen runs against the browser build's mock settings backend
 // (src/app/settings/mock-settings-backend.ts), which mimics the engine's schema and messages.
@@ -19,7 +20,7 @@ const settingsDialog = (page: Page) => page.getByRole('dialog', { name: 'Setting
 const sectionNav = (page: Page) => settingsDialog(page).getByRole('navigation', { name: 'Settings sections' });
 
 async function openWithShortcut(page: Page) {
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   await expect(settingsDialog(page)).toBeVisible();
 }
 

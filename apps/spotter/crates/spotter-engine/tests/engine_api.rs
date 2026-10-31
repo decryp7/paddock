@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use spotter_core::action::Action;
+use spotter_core::job::{Cancel, Job, Phase, Unit};
 use spotter_core::notify::{ChannelKind, DigestMode, NotificationChannel};
 use spotter_core::render::{PageRenderer, RenderError, RenderedPage};
 use spotter_core::source::{BoxFuture, SourceConfig};
@@ -372,6 +373,31 @@ impl PageRenderer for FakeRenderer {
     }
 }
 
+/// A renderer that, like the Chromium one, tells the job it asked for that the browser is paused, then that it runs again.
+struct PausingRenderer;
+impl PageRenderer for PausingRenderer {
+    fn render<'a>(&'a self, url: &'a str, _: Option<&'a str>, _: Duration) -> BoxFuture<'a, Result<RenderedPage, RenderError>> {
+        let url = url.to_string();
+        Box::pin(async move {
+            Ok(RenderedPage {
+                html: "<span class=\"v\">1.0.0</span>".into(),
+                final_url: url,
+            })
+        })
+    }
+    fn render_job<'a>(
+        &'a self,
+        url: &'a str,
+        wait_selector: Option<&'a str>,
+        timeout: Duration,
+        job: &'a Job,
+    ) -> BoxFuture<'a, Result<RenderedPage, RenderError>> {
+        job.report_done(Phase::BrowserPaused, Unit::Count, 0, None);
+        job.resume_after_pause();
+        self.render(url, wait_selector, timeout)
+    }
+}
+
 fn page_spec() -> WatchSpec {
     let mut s = spec("x");
     s.source = SourceConfig::new(
@@ -407,6 +433,24 @@ async fn rendered_pages_need_a_browser_and_report_challenges() {
     let f = fixture_with(Some(Arc::new(FakeRenderer(Ok(html.into())))));
     let saved = f.engine.save_watch(page_spec(), &none()).unwrap();
     f.engine.check_one(&saved.id).await.unwrap();
+    assert_eq!(f.engine.get_watch(&saved.id).unwrap().history.len(), 1);
+}
+
+#[tokio::test]
+async fn the_pipeline_hands_its_job_to_the_renderer_and_the_pause_reaches_it_and_ends() {
+    let f = fixture_with(Some(Arc::new(PausingRenderer)));
+    let saved = f.engine.save_watch(page_spec(), &none()).unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let sink = seen.clone();
+    let job = Job::new(Cancel::new(), move |p| sink.lock().unwrap().push(p.phase));
+    job.report(Phase::Checking, Unit::Count, 0, Some(1));
+    f.engine.check_one_job(&saved.id, &job).await.unwrap();
+    let phases = seen.lock().unwrap().clone();
+    let at = phases
+        .iter()
+        .position(|p| *p == Phase::BrowserPaused)
+        .expect("the pause reached the job");
+    assert_eq!(phases[at + 1], Phase::Checking, "and ended: {phases:?}");
     assert_eq!(f.engine.get_watch(&saved.id).unwrap().history.len(), 1);
 }
 
@@ -671,4 +715,22 @@ async fn too_many_watches_are_refused() {
         }
     }
     assert!(matches!(last, Err(EngineError::Invalid(_))));
+}
+
+#[test]
+fn the_watches_that_need_a_browser_are_counted_without_reading_each_watch() {
+    let f = fixture();
+    assert_eq!(f.engine.watches_needing_renderer(), 0);
+    let a = f.engine.save_watch(page_spec(), &none()).unwrap();
+    let mut other = page_spec();
+    other.name = "Other".into();
+    f.engine.save_watch(other, &none()).unwrap();
+    f.engine.save_watch(spec("http://127.0.0.1:1/feed"), &none()).unwrap();
+    assert_eq!(f.engine.watches_needing_renderer(), 2, "a plain feed does not need one");
+    f.engine.set_paused(&a.id, true).unwrap();
+    assert_eq!(
+        f.engine.watches_needing_renderer(),
+        1,
+        "a paused watch is not checked, so it does not need one"
+    );
 }

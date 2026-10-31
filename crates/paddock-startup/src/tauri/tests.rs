@@ -17,6 +17,10 @@ type App = ::tauri::App<MockRuntime>;
 /// Every log record of this crate, as (level, window, message).
 static LOGGED: Mutex<Vec<(log::Level, String, String)>> = Mutex::new(Vec::new());
 
+/// Every record of the start guard's own target, as (logging thread's name, level, message): each guard thread has its
+/// own name and each test runs on its own thread, so a test reads only its own guard's lines under any test runner.
+static GUARD_LOGGED: Mutex<Vec<(String, log::Level, String)>> = Mutex::new(Vec::new());
+
 struct Capture;
 
 impl log::Log for Capture {
@@ -26,6 +30,13 @@ impl log::Log for Capture {
     fn log(&self, record: &log::Record<'_>) {
         if !record.target().starts_with("paddock_startup") {
             return;
+        }
+        if record.target() == "paddock_startup::tauri::start_guard" {
+            let thread = std::thread::current()
+                .name()
+                .unwrap_or_default()
+                .to_string();
+            lock(&GUARD_LOGGED).push((thread, record.level(), record.args().to_string()));
         }
         let window = record
             .key_values()
@@ -708,4 +719,117 @@ fn a_window_can_ask_for_the_whole_app_to_restart_and_is_told_when_it_cannot() {
         invoke(&w, "app_relaunch", json!({})).unwrap_err()["code"],
         "relaunchUnavailable"
     );
+}
+
+/// Waits until `cond` holds; the deadline is a hang guard, never a measure.
+fn eventually(cond: impl Fn() -> bool) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        if cond() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    false
+}
+
+/// The start guard's lines logged by `guard` (its thread) or by this test's own thread (`ready`'s closing line).
+fn guard_lines(guard: &std::thread::Thread) -> Vec<(log::Level, String)> {
+    let own = std::thread::current()
+        .name()
+        .unwrap_or_default()
+        .to_string();
+    let guard = guard.name().unwrap_or_default().to_string();
+    lock(&GUARD_LOGGED)
+        .iter()
+        .filter(|(t, _, _)| *t == guard || *t == own)
+        .map(|(_, l, m)| (*l, m.clone()))
+        .collect()
+}
+
+fn guard_logged(guard: &std::thread::Thread, level: log::Level, text: &str) -> bool {
+    guard_lines(guard)
+        .iter()
+        .any(|(l, m)| *l == level && m.contains(text))
+}
+
+fn fast_guard() -> crate::StartTiming {
+    crate::StartTiming {
+        first_report: 5,
+        repeat: 5,
+        tick: Duration::from_millis(5),
+    }
+}
+
+/// The start guard logs a start stuck in its phase, repeats it while it stays stuck, says when it went on, and its thread
+/// ends at ready; a second `begin` does nothing.
+#[test]
+fn the_start_guard_logs_a_stuck_start_by_phase_until_it_is_ready() {
+    capture();
+    let app = mock_builder().build(mock_context(noop_assets())).unwrap();
+    let thread =
+        start_guard::begin(app.handle(), fast_guard()).expect("the guard's thread started");
+    assert!(
+        start_guard::begin(app.handle(), fast_guard()).is_none(),
+        "once per app"
+    );
+    start_guard::phase(app.handle(), crate::StartPhase::MainWindow);
+    assert_eq!(
+        start_guard::current(app.handle()),
+        Some(crate::StartPhase::MainWindow)
+    );
+    let guard = thread.thread().clone();
+    assert!(eventually(|| guard_logged(
+        &guard,
+        log::Level::Warn,
+        "it is in opening the main window (still waiting)"
+    )));
+    assert!(eventually(|| guard_logged(
+        &guard,
+        log::Level::Warn,
+        "The app has still not finished starting after"
+    )));
+    start_guard::ready(app.handle());
+    assert!(guard_logged(
+        &guard,
+        log::Level::Warn,
+        "The app finished starting after"
+    ));
+    thread.join().expect("the guard's thread ended at ready");
+    start_guard::ready(app.handle());
+    assert!(
+        !guard_lines(&guard)
+            .iter()
+            .any(|(l, _)| *l == log::Level::Error),
+        "a slow start is never an error"
+    );
+}
+
+/// Without `begin`, the phase and ready calls do nothing; a start on time ends the guard's thread and the guard logs
+/// nothing at all.
+#[test]
+fn the_start_guard_is_optional_and_silent_for_a_start_on_time() {
+    capture();
+    let app = mock_builder().build(mock_context(noop_assets())).unwrap();
+    start_guard::phase(app.handle(), crate::StartPhase::Tray);
+    start_guard::ready(app.handle());
+    assert_eq!(start_guard::current(app.handle()), None);
+
+    let timing = crate::StartTiming {
+        first_report: 1_000_000,
+        ..fast_guard()
+    };
+    let app = mock_builder().build(mock_context(noop_assets())).unwrap();
+    let thread = start_guard::begin(app.handle(), timing).expect("the guard's thread started");
+    let guard = thread.thread().clone();
+    assert!(
+        guard
+            .name()
+            .is_some_and(|n| n.starts_with("paddock-start-guard-")),
+        "each guard's thread has its own name"
+    );
+    start_guard::phase(app.handle(), crate::StartPhase::Tray);
+    start_guard::ready(app.handle());
+    thread.join().expect("ended at ready without a report");
+    assert_eq!(guard_lines(&guard), [], "the start guard logged nothing");
 }

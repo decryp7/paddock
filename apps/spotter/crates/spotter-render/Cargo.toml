@@ -10,6 +10,7 @@ authors = ["decryp7"]
 publish = false
 
 [dependencies]
+log = "0.4"
 spotter-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -18,12 +19,22 @@ sha2.workspace = true
 toml.workspace = true
 paddock-proc = { path = "../../../../crates/paddock-proc" }
 tokio.workspace = true
-reqwest.workspace = true
+paddock-download.workspace = true
+paddock-jobs.workspace = true
 tungstenite.workspace = true
 zip.workspace = true
+# `testing`: the test-browser finder asks the shared real-browser gate (`paddock_testkit::live_browser`).
+paddock-testkit = { path = "../../../../crates/paddock-testkit", optional = true }
+
+[features]
+# The test-only discovery (the pinned test browser, its flags): tests of this crate and of the apps that drive it.
+testing = ["dep:paddock-testkit"]
 
 [dev-dependencies]
 tempfile.workspace = true
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
+# The integration tests use the test-only discovery (`testing`).
+spotter-render = { path = ".", features = ["testing"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
 
 [lints]

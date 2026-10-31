@@ -1,11 +1,12 @@
-import { Component } from '@angular/core';
+import { ApplicationRef, Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { TestbedHarnessEnvironment } from '@angular/cdk/testing/testbed';
+import { MatStepperHarness } from '@angular/material/stepper/testing';
+import { shellPorts } from '@decryp7/paddock-ui/shell/testing';
 import { Router } from '@angular/router';
 import { EditorPage } from './editor-page';
-import { SCHEDULE_DEBOUNCE_MS } from './editor.store';
-import { ToastStore } from '../../state/toast.store';
 import { SettingsStore } from '../../state/settings.store';
-import { appProviders, byText, flush, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
+import { appProviders, byText, flush, makeMock, routeStub, settle, text, type as typeInto } from '../../../testing/test-helpers';
 
 @Component({ template: '' })
 class Stub {}
@@ -18,12 +19,26 @@ const routes = [
 const pressed = (f: F) =>
   Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('sp-schedule-editor [aria-pressed="true"]')).map((b) => text(b));
 
+/** The stepper, through its harness (rule 38). */
+const steps = async (f: F) => (await TestbedHarnessEnvironment.loader(f).getHarness(MatStepperHarness)).getSteps();
+const selected = async (f: F) => Promise.all((await steps(f)).map((s) => s.isSelected()));
+const labels = async (f: F) => Promise.all((await steps(f)).map((s) => s.getLabel()));
+/** Clicks a step's header, as a person (or the keyboard) would. */
+const openStep = async (f: F, i: number) => {
+  await (await steps(f))[i]!.select();
+  await settle(f);
+};
+/** Waits for Angular to render what the last change asked for (focus is moved after render). */
+const rendered = async (f: F) => {
+  await f.whenStable();
+  TestBed.inject(ApplicationRef).tick();
+};
+
 type F = Awaited<ReturnType<typeof make>>['f'];
 
 async function make(id?: string, backend = makeMock()) {
-  TestBed.configureTestingModule({ providers: appProviders(backend, routes) });
+  TestBed.configureTestingModule({ providers: [...appProviders(backend, routes), routeStub(id ? { id } : {}).provider] });
   const f = TestBed.createComponent(EditorPage);
-  if (id) f.componentRef.setInput('id', id);
   await settle(f);
   return { f, backend, router: TestBed.inject(Router) };
 }
@@ -57,14 +72,36 @@ const goNext = async (f: F, times = 1) => {
 describe('EditorPage: adding a watch', () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it('moves focus to the new step heading on every step change', async () => {
+    const { f } = await make();
+    await startGithub(f);
+    await rendered(f);
+    expect(document.activeElement).toBe(q(f, '#cfg-h'));
+    await goNext(f);
+    await rendered(f);
+    expect(document.activeElement).toBe(q(f, '#ver-h'));
+    await click(f, button(f, 'Back'));
+    await rendered(f);
+    expect(document.activeElement).toBe(q(f, '#cfg-h'));
+  });
+
+  it('gives the source step a heading and the stepper an accessible name', async () => {
+    const { f } = await make();
+    expect(text(q(f, '#src-h'))).toBe('Choose a source');
+    expect(q(f, 'mat-stepper').getAttribute('aria-label')).toBe('Watch setup steps');
+  });
+
   it('starts on the source step with presets, no Next button and later steps disabled', async () => {
     const { f } = await make();
     expect(text(q(f, 'h1'))).toBe('Add a watch');
     expect(card(f, 'Node.js')).toBeDefined();
     expect(button(f, 'Next')).toBeNull();
-    const steps = Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('ol.steps button'));
-    expect(steps.map((s) => s.disabled)).toEqual([false, true, true, true, true]);
-    expect(steps[0]!.getAttribute('aria-current')).toBe('step');
+    expect(q(f, 'mat-stepper')).not.toBeNull();
+    expect(await selected(f)).toEqual([true, false, false, false, false]);
+    expect(await labels(f)).toEqual(['Source', 'Configure', 'Versions', 'Notify', 'Review']);
+    // Linear: no later step can be opened before a source is chosen.
+    await openStep(f, 2);
+    expect(q(f, 'sp-source-step')).not.toBeNull();
   });
 
   it('picks a preset, keeping the user default interval, and lands on the configure step', async () => {
@@ -132,21 +169,22 @@ describe('EditorPage: adding a watch', () => {
     expect(pressed(f)).toEqual(['Every…', 'Minutes']);
     await fill(f, 'sp-schedule-editor input[aria-label="Interval"]', '0', 'change'); // below one: ignored
     expect((q(f, 'sp-schedule-editor input[aria-label="Interval"]') as HTMLInputElement).value).toBe('45');
-    await new Promise((r) => setTimeout(r, SCHEDULE_DEBOUNCE_MS + 50));
-    await settle(f);
-    expect(text(q(f, 'sp-schedule-editor .preview'))).toContain('Next check');
     await click(f, button(f, 'Newer than installed'));
 
     // Review
     await goNext(f);
     expect((q(f, '#name') as HTMLInputElement).value).toBe('tool');
     expect(text(q(f, 'dl'))).toContain('GitHub: owner/tool');
-    expect(text(q(f, 'dl'))).toContain('Every 45 minutes');
+    // The schedule reaches the draft after its debounce: wait for what the review shows, not for a time to pass.
+    await vi.waitFor(async () => {
+      await settle(f);
+      expect(text(q(f, 'dl'))).toContain('Every 45 minutes');
+    });
     expect(button(f, 'Next')).toBeNull();
     await click(f, button(f, 'Add watch'));
     await flush(5);
     expect(router.url).toBe('/watches/w-100');
-    expect(TestBed.inject(ToastStore).toasts().at(-1)).toMatchObject({ title: 'Watch added', body: 'tool' });
+    expect(shellPorts().notices.at(-1)).toMatchObject({ level: 'success', message: 'Watch added. tool' });
     const saved = (await backend.getWatch('w-100')).spec;
     expect(saved).toMatchObject({ includePrereleases: true, nameFilter: '*-setup.exe', schedule: { mode: 'every', secs: 2700 }, notify: { mode: 'newer-than-installed' } });
     expect(saved.filter).toEqual({ prefix: '1.', soakHours: 0 });
@@ -158,24 +196,73 @@ describe('EditorPage: adding a watch', () => {
     await goNext(f);
     await click(f, button(f, 'Custom pattern'));
     expect(button(f, 'Next').disabled).toBe(true);
+    // The stepper is linear: the incomplete step also keeps the later headers shut.
+    await openStep(f, 3);
+    expect(q(f, '#ver-h')).not.toBeNull();
     await fill(f, '#pattern', '^v(?P<major>\\d+)');
     expect(button(f, 'Next').disabled).toBe(false);
+    await goNext(f);
+    expect(q(f, '#sch-h')).not.toBeNull();
+  });
+
+  it('shuts the later headers again when a required field is cleared after reaching Review', async () => {
+    const { f } = await make();
+    await startGithub(f);
+    await goNext(f, 3);
+    expect(q(f, '#rev-h')).not.toBeNull();
+    await openStep(f, 1);
+    await fill(f, '#f-repo', '');
+    expect(button(f, 'Next').disabled).toBe(true);
+    const all = await steps(f);
+    // Linear mode: with Configure incomplete, none of the steps after it is complete, so Review does not open.
+    await openStep(f, 4);
+    expect(await selected(f)).toEqual([false, true, false, false, false]);
+    expect(await Promise.all(all.map((s) => s.isCompleted()))).toEqual([true, false, false, false, false]);
+  });
+
+  it('reviews the source, versions and notifications in words', async () => {
+    const { f } = await make();
+    await startGithub(f);
+    await goNext(f, 3);
+    const review = text(q(f, 'dl.kv'));
+    expect(review).toContain('GitHub: owner/tool');
+    expect(review).toContain('Semantic version');
+    expect(review).toContain('Every new release');
+    expect(review).not.toMatch(/semver|every-new/);
+  });
+
+  it('gives each test panel its own heading id', async () => {
+    const { f } = await make();
+    await startGithub(f);
+    await goNext(f);
+    const ids = Array.from((f.nativeElement as HTMLElement).querySelectorAll('sp-preview-panel h2')).map((h) => h.id);
+    expect(ids.length).toBe(2);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('keeps every later step shut while a required field is missing', async () => {
+    const { f } = await make();
+    await click(f, byText(f.nativeElement, '.ways button', 'Source kinds'));
+    await click(f, card(f, 'GitHub'));
+    await openStep(f, 2);
+    expect(q(f, '#cfg-h')).not.toBeNull();
+    expect(await selected(f)).toEqual([false, true, false, false, false]);
   });
 
   it('lets the user go back and revisit visited steps only', async () => {
     const { f } = await make();
     await startGithub(f);
     await goNext(f, 2);
-    const steps = () => Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('ol.steps button'));
-    expect(steps().map((s) => s.disabled)).toEqual([false, false, false, false, true]);
-    await click(f, steps()[1]!);
+    expect(await selected(f)).toEqual([false, false, false, true, false]);
+    await openStep(f, 1);
     expect(q(f, '#cfg-h')).not.toBeNull();
     await click(f, button(f, 'Back'));
     expect(q(f, 'sp-source-step')).not.toBeNull();
     expect(button(f, 'Back')).toBeNull();
-    f.componentInstance['go']('review', 4); // not reachable
-    await settle(f);
-    expect(q(f, '#rev-h')).toBeNull();
+    // Linear: the configure step is complete, so the steps after it open one by one; the review step needs the ones before it.
+    await openStep(f, 4);
+    expect(q(f, '#rev-h')).not.toBeNull();
+    expect((q(f, '#name') as HTMLInputElement).value).toBe('tool');
   });
 
   it('manages notification channels, quiet hours and actions', async () => {
@@ -272,16 +359,16 @@ describe('EditorPage: editing a watch', () => {
     expect(text(q(f, '#cfg-h'))).toBe('GitHub');
     expect((q(f, '#f-repo') as HTMLInputElement).value).toBe('lumen-labs/lumen');
     expect(button(f, 'Back')).toBeNull();
-    const first = (f.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('ol.steps button')!;
-    await click(f, first);
-    expect(q(f, '#cfg-h')).not.toBeNull();
+    // Editing has no Source step: four steps, starting at Configure, and the source is named read-only in the page head.
+    expect(await labels(f)).toEqual(['Configure', 'Versions', 'Notify', 'Review']);
+    expect(text(q(f, '.source-line'))).toBe('GitHub: lumen-labs/lumen');
     await fill(f, '#f-repo', 'lumen-labs/lumen2');
     await goNext(f, 3);
     expect((q(f, '#name') as HTMLInputElement).value).toBe('Lumen CLI');
     await click(f, button(f, 'Save changes'));
     await flush(5);
     expect(router.url).toBe('/watches/w-2');
-    expect(TestBed.inject(ToastStore).toasts().at(-1)?.title).toBe('Watch saved');
+    expect(shellPorts().messages().at(-1)).toMatch(/^Watch saved/);
     expect((await backend.getWatch('w-2')).spec.source.values['repo']).toBe('lumen-labs/lumen2');
   });
 
@@ -355,7 +442,7 @@ describe('EditorPage: finding a feed and importing a list', () => {
     await flush(5);
     expect((await backend.listWatches()).map((w) => w.name)).toEqual(expect.arrayContaining(['alpha', 'beta']));
     expect(router.url).toBe('/watches');
-    expect(TestBed.inject(ToastStore).toasts().at(-1)?.title).toBe('Added 2 watches');
+    expect(shellPorts().messages().at(-1)).toMatch(/^Added 2 watches/);
   });
 
   it('stays on the page and lists what could not be added', async () => {
@@ -368,9 +455,9 @@ describe('EditorPage: finding a feed and importing a list', () => {
     await click(f, button(f, 'Read the list'));
     expect(text(q(f, '.surface p'))).toContain('1 watch ready to add');
     await click(f, button(f, 'Add 1 watch'));
-    const last = TestBed.inject(ToastStore).toasts().at(-1)!;
-    expect(last.title).toBe('1 could not be added');
-    expect(last.body).toContain('Acme Installer');
+    const last = shellPorts().messages().at(-1)!;
+    expect(last).toMatch(/^1 could not be added\. /);
+    expect(last).toContain('Acme Installer');
     expect(router.url).not.toBe('/watches');
   });
 

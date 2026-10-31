@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { contrast, deltaE, deltaE2000, parseColor, simulate, type Cvd, type Rgba } from './color';
 import { ACCENTS, readRules, resolve, type Contrast, type Scheme, type Vars } from './css';
@@ -347,5 +349,33 @@ describe('widget frame (ADR 0035)', () => {
   it('keeps one geometry at every density: no row-height or card-padding token, the popup is 8 / 12 px by design', () => {
     for (const f of ['frame.ts', 'area.ts']) expect(src(f), f).not.toMatch(/--pd-(row-height|card-padding)/);
     expect(src('frame.ts')).toContain('padding: var(--pd-space-2) var(--pd-space-3)');
+  });
+});
+
+describe.each(MODES.flatMap(([s, c]) => ACCENTS.map((a) => [s, c, a] as const)))('dialog frame filled button, %s, %s contrast, %s', (scheme, mode, accent) => {
+  const v = resolve(rules, scheme, accent, mode);
+  const frame = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'projects', 'paddock-ui', 'shell', 'dialogs', 'src', 'dialog-frame.ts'), 'utf8');
+  const decl = (selector: string): Record<string, string> => {
+    const m = frame.match(new RegExp(`${selector.replace(/[.[\]()]/g, '\\$&')}\\s*\\{([^}]*)\\}`));
+    if (!m) throw new Error(`${selector} is not in the dialog frame`);
+    return Object.fromEntries([...m[1]!.matchAll(/([\w-]+):\s*var\((--[\w-]+)/g)].map((x) => [x[1]!, x[2]!]));
+  };
+
+  it('the filled button is the accent fill with its own ink (not the accent text colour), 4.5:1 at rest', () => {
+    const d = decl('.pd-frame-btn--filled');
+    expect(d['background']).toBe('--pd-accent-fill');
+    expect(contrast(col(v, d['color']!), col(v, d['background']!))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('and 4.5:1 under the pointer', () => {
+    const d = decl('.pd-frame-btn--filled:hover:not(:disabled)');
+    expect(d['background']).toBe('--pd-accent-fill-hover');
+    // `color-mix(in srgb, <fill> N%, #000)`: the fill scaled towards black.
+    const m = v['--pd-accent-fill-hover']!.match(/^color-mix\(in srgb, (.+) (\d+)%, #000\)$/);
+    expect(m, 'the hover fill is the fill mixed with black').not.toBeNull();
+    const f = parseColor(m![1]!);
+    const k = Number(m![2]) / 100;
+    const hover: Rgba = { r: f.r * k, g: f.g * k, b: f.b * k, a: 1 };
+    expect(contrast(col(v, '--pd-on-accent'), hover)).toBeGreaterThanOrEqual(4.5);
   });
 });

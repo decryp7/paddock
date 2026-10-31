@@ -11,6 +11,9 @@ import { isMain } from '../src/util/is-main.mjs';
 export function tagVersion(tag, prefix = '') {
   const m = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}v(\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?)$`).exec(tag);
   if (!m) throw new Error(`the tag ${tag} is not ${prefix}vX.Y.Z`);
+  // `-test.N` builds are made for the VM update tests with a throw-away key and may read a feed from the build (Spotter's
+  // SPOTTER_TEST_UPDATE_FEED): they are never released.
+  if (/-test\./.test(m[1])) throw new Error(`the tag ${tag} names a test build (-test.N), which is never released`);
   return m[1];
 }
 

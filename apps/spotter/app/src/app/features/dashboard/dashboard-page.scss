@@ -1,6 +1,6 @@
 .strip {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0;
   border: 1px solid var(--pd-hairline);
   border-radius: var(--pd-radius-card);
@@ -44,6 +44,7 @@
   a {
     display: flex;
     align-items: center;
+    min-width: 0;
     gap: var(--pd-space-3);
     padding: var(--pd-space-2) var(--pd-space-4);
     color: var(--pd-text);
@@ -58,6 +59,7 @@
   }
   .why {
     flex: 1;
+    min-width: 0;
     color: var(--pd-text-muted);
     font-size: var(--pd-text-caption);
   }
@@ -93,8 +95,9 @@
   font-size: var(--pd-text-caption);
   text-align: right;
 }
-@media (max-width: 880px) {
+/* The shell's page pane is the container (`pd-page`), not the window. */
+@container pd-page (max-width: 720px) {
   .strip {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
