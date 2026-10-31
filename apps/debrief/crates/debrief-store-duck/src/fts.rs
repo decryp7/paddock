@@ -541,6 +541,9 @@ pub struct FtsShared {
     pub failure: Mutex<Option<String>>,
     /// The store's flag of a running bulk import (`Inner::bulk_import`; not a live refresh).
     bulk_import: Arc<AtomicBool>,
+    /// Tests: the next writes through [`FtsService`] fail after their operations are queued.
+    #[cfg(test)]
+    pub(crate) fail_writes: AtomicBool,
 }
 
 /// The indexing thread of a store; stopped and joined on drop.
@@ -578,6 +581,8 @@ impl FtsService {
             pending: AtomicU64::new(0),
             failure: Mutex::new(None),
             bulk_import,
+            #[cfg(test)]
+            fail_writes: AtomicBool::new(false),
         });
         crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
@@ -606,8 +611,14 @@ impl FtsService {
             Some(w) => w,
             None => slot.insert(fts.writer()?),
         };
-        f(w)?;
-        fts.commit(w, self.epoch)
+        let done = f(w).and_then(|()| {
+            #[cfg(test)]
+            if self.shared.fail_writes.load(Ordering::SeqCst) {
+                anyhow::bail!("an injected index write failure");
+            }
+            Ok(())
+        });
+        done.and_then(|()| fts.commit(w, self.epoch))
     }
 
     /// Deletes a source's documents (it was removed).
@@ -869,6 +880,7 @@ mod tests {
             pending: AtomicU64::new(1),
             failure: Mutex::new(None),
             bulk_import: Arc::new(AtomicBool::new(false)),
+            fail_writes: AtomicBool::new(false),
         };
         let write_lock = Mutex::new(());
         let held = write_lock.lock().unwrap();
@@ -937,5 +949,163 @@ mod tests {
         let w = fts.writer().expect("10 threads of 16 MB");
         drop(w);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A store with two small invented logs, indexed, with its indexing thread stopped, so a test decides every write.
+    struct Indexed {
+        dir: std::path::PathBuf,
+        store: crate::DuckStore,
+    }
+
+    impl Drop for Indexed {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    impl Indexed {
+        fn new(tag: &str) -> Indexed {
+            use debrief_core::ports::Ingest;
+            let dir = std::env::temp_dir().join(format!("debrief-fts-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let logs = dir.join("logs");
+            std::fs::create_dir_all(&logs).unwrap();
+            std::fs::write(
+                logs.join("a.log"),
+                "2026-10-14 10:00:00 INFO alpha a1\n2026-10-14 10:00:10 INFO alpha a2\n",
+            )
+            .unwrap();
+            std::fs::write(
+                logs.join("b.log"),
+                "2026-10-14 10:00:05 INFO alpha b1\n2026-10-14 10:00:15 INFO alpha b2\n",
+            )
+            .unwrap();
+            let store = crate::DuckStore::create(
+                &dir.join("store"),
+                debrief_core::Profile::default_profile(),
+                debrief_core::PluginRegistry::new(),
+            )
+            .unwrap();
+            store.open(&[logs]).unwrap().wait().unwrap();
+            assert!(store.wait_for_index(Duration::from_secs(60)).unwrap().ready);
+            let f = store.inner.fts.as_ref().unwrap();
+            f.shared.stop.store(true, Ordering::SeqCst);
+            f.wake();
+            let handle = f.handle.as_ref().unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            while !handle.is_finished() {
+                assert!(std::time::Instant::now() < deadline, "the indexing thread did not stop");
+                std::thread::yield_now();
+            }
+            Indexed { dir, store }
+        }
+
+        fn fts(&self) -> &FtsService {
+            self.store.inner.fts.as_ref().unwrap()
+        }
+
+        fn source(&self, file: &str) -> u32 {
+            use debrief_core::ports::Query;
+            self.store
+                .summary()
+                .unwrap()
+                .sources
+                .iter()
+                .find(|s| s.path.ends_with(file))
+                .unwrap()
+                .id
+        }
+
+        fn hits(&self) -> Vec<EventId> {
+            use debrief_core::ports::{Search, SearchRequest};
+            let r = self
+                .store
+                .search(&SearchRequest {
+                    text: "alpha".into(),
+                    limit: 0,
+                })
+                .unwrap();
+            assert_eq!(r.total as usize, r.ids.len());
+            r.ids
+        }
+
+        fn ids_of(&self, source: u32) -> Vec<EventId> {
+            let conn = self.store.inner.conn().unwrap();
+            let mut stmt = conn.prepare("SELECT id FROM events WHERE source = ? ORDER BY id").unwrap();
+            stmt.query_map(params![source], |r| r.get::<_, u64>(0))
+                .unwrap()
+                .map(|r| EventId(r.unwrap()))
+                .collect()
+        }
+    }
+
+    /// A write that fails after its operations were queued is rolled back: the next commit does not carry them.
+    #[test]
+    fn a_failed_index_write_is_rolled_back_not_committed_with_the_next_one() {
+        let t = Indexed::new("rollback");
+        assert_eq!(t.hits().len(), 4);
+        t.fts().shared.fail_writes.store(true, Ordering::SeqCst);
+        assert!(t.fts().delete_source(t.source("a.log")).is_err());
+        t.fts().shared.fail_writes.store(false, Ordering::SeqCst);
+        t.fts().delete_source(u32::MAX).unwrap();
+        assert_eq!(t.hits().len(), 4, "the failed delete was not committed later");
+    }
+
+    /// A clock offset whose index delete fails keeps the moved events' documents (old times) and marks the new files
+    /// indexed, so every event is found once, also after the next commit.
+    #[test]
+    fn a_clock_offset_whose_index_delete_fails_keeps_one_hit_per_event() {
+        use debrief_core::ports::Skew;
+        use debrief_core::skew::{OffsetSpec, SetOffsetRequest};
+        let t = Indexed::new("skew-fail");
+        t.fts().shared.fail_writes.store(true, Ordering::SeqCst);
+        t.store
+            .set_source_offset(&SetOffsetRequest {
+                spec: OffsetSpec::Manual {
+                    source: t.source("b.log"),
+                    offset_ms: 20_000,
+                },
+            })
+            .unwrap();
+        t.fts().shared.fail_writes.store(false, Ordering::SeqCst);
+        let conn = t.store.inner.conn().unwrap();
+        let indexed: bool = conn.query_row("SELECT bool_and(indexed) FROM segments", [], |r| r.get(0)).unwrap();
+        assert!(indexed, "the new files keep the old documents instead of being indexed twice");
+        t.fts().delete_source(u32::MAX).unwrap();
+        let mut hits = t.hits();
+        hits.sort();
+        hits.dedup();
+        assert_eq!(hits.len(), 4, "every event once");
+    }
+
+    /// The skew rewrite deletes the moved blocks' documents also for a segment that is not marked indexed (its
+    /// documents may already be committed), so indexing it again cannot add them twice.
+    #[test]
+    fn a_clock_offset_deletes_the_old_documents_of_an_unindexed_segment_too() {
+        use debrief_core::ports::Skew;
+        use debrief_core::skew::{OffsetSpec, SetOffsetRequest};
+        let t = Indexed::new("skew-unindexed");
+        let b = t.source("b.log");
+        let moved = t.ids_of(b);
+        assert!(moved.iter().all(|id| t.hits().contains(id)));
+        t.store
+            .inner
+            .conn()
+            .unwrap()
+            .execute_batch("UPDATE segments SET indexed = FALSE")
+            .unwrap();
+        t.store
+            .set_source_offset(&SetOffsetRequest {
+                spec: OffsetSpec::Manual {
+                    source: b,
+                    offset_ms: 20_000,
+                },
+            })
+            .unwrap();
+        let hits = t.hits();
+        assert!(
+            moved.iter().all(|id| !hits.contains(id)),
+            "old documents of the moved events: {hits:?}"
+        );
     }
 }
