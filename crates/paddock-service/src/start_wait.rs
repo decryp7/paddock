@@ -374,6 +374,17 @@ mod tests {
         o.facts.last_exit = Some(3);
         o.facts.pid = Some(9);
         assert!(matches!(w.observe(&o), StartVerdict::Failed(_)));
+        // The restart itself (pid 9, runs 2) keeps the first look's run count, so a later look three runs on is a loop.
+        let mut w = StartWait::new();
+        w.observe(&pending());
+        w.observe(&with_pid(7));
+        let mut restarted = with_pid(9);
+        restarted.facts.runs = Some(2);
+        assert!(!matches!(w.observe(&restarted), StartVerdict::Failed(_)));
+        let mut o = pending();
+        o.facts.runs = Some(1 + CRASH_RUNS);
+        o.facts.last_exit = Some(3);
+        assert!(matches!(w.observe(&o), StartVerdict::Failed(_)));
     }
 
     #[test]
@@ -417,7 +428,10 @@ mod tests {
             for i in 0..150 {
                 match w.observe(&with_state(running(5), state)) {
                     StartVerdict::Failed(m) => panic!("{state:?} poll {i}: {m}"),
-                    StartVerdict::StillWorking(_) => notes += 1,
+                    StartVerdict::StillWorking(m) => {
+                        assert!(!m.contains("paused by the system"), "{state:?}: {m}");
+                        notes += 1;
+                    }
                     _ => {}
                 }
             }
