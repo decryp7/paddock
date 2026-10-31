@@ -1070,3 +1070,15 @@ than the spin patience.
 endpoints. Each fix so far armed one more path (lifeline exit, SIGTERM, now normal exit); the class ends when
 `debrief_ipc` registers its own `atexit` removal when the first endpoint is made, so every binary has it, not only those
 that arm the helpers.
+
+## A build script that tauri-build follows must not leave placeholders where cargo puts programs (2026-11-01, shared fix)
+
+tauri-build 2.7.4 copies every `bundle.externalBin` file to `target/<profile>/<name>`, replacing the program of that name that cargo
+linked. The apps' build scripts write empty placeholders (`binaries/<name>-<triple>`) so tauri-build accepts the list for tests and
+`cargo check`, so whenever the build script ran after cargo placed the sidecar, the program in the build folder was 0 bytes (Dyno's
+signing test saw `dyno-da39a3ee...`, the SHA-1 of nothing, in one of two runs of the same commit). Pitwall and Pitcrew had the same
+build script and the same bug: with `pitwall-server` / `pitcrew-service` built first, `cargo test -p <app>-app` left them empty (the new
+`tests/sidecar_placeholders.rs` failed before the fix). **Lesson:** this is a mechanism, so it lives once, in `paddock-build`
+(`sidecars` module: hide `externalBin` from tauri-build while a sidecar is a placeholder, delete empty copies of older builds), and an
+app's `build.rs` is `paddock_build::Build::new().sidecars([..]).run()`. A third app with sidecars gets it by calling that, never by
+copying Dyno's or Pitwall's lines. Dyno's local copy is replaced by the helper after its 1.0 tag.

@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-build`: no empty sidecar copied over a built program (`Build::apply` returns `Applied`; new `sidecars` module)
+- While any `bundle.externalBin` sidecar is an empty placeholder, `Build::run` sets `TAURI_CONFIG` so tauri-build sees no `externalBin`
+  (it copied the placeholder over the `target/<profile>/<name>` that cargo had just linked, leaving a 0-byte program), removes the empty
+  copies older builds left, and reruns when a sidecar file changes. The pure parts are `paddock_build::sidecars::{is_placeholder,
+  any_placeholder, hide_external_bin, profile_dir, copy_paths, stale_copies, remove_files}`; `Build::apply` now returns
+  `Applied { plan, tauri_config, removed }` instead of `Plan`, and `Plan` has `copies`. Pitwall and Pitcrew build through
+  `paddock_build::Build` (their `build.rs` is one call and their `windows-app-manifest.xml` copies are gone). Dyno switches after its 1.0 tag.
+
 ### `DialogFrame`: `contentView`, so a dialog's header, footer and body never show different steps (`@decryp7/paddock-ui/shell/dialogs`)
 - New optional input `contentView` on `DialogFrame` (the mounted content's change detector; `DialogShell` and `DialogHost` set it). `render()` now checks the content together with the frame. Before, a `run` action that changed the content's state (a wizard's Continue) refreshed the header slot and the footer at once while the body, which sits in the host's view, followed on the next tick: for one frame the stepper and the buttons showed the new step over the old, taller body (Pitcrew's register window overflowed its body by 165 px).
 
