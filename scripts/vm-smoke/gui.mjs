@@ -182,8 +182,28 @@ export class GuiCheck {
     return (await this.until(() => this.has(a[1], a[2], role), this.guard())).ok && this.press(a[1], a[2], role);
   }
 
-  /** Switches the app's own Launch at login setting through its UI, the way the config describes (open, switch, save). */
-  async setLaunchAtLogin(on) {
+  /** How many lines of the app's first log match `regex` (0 when the log is absent). */
+  async appLogCount(regex) {
+    const log = (this.config.logs ?? [])[0];
+    if (!log) return 0;
+    const r = await this.g.exec(`grep -c -E ${sq(regex)} ${sq(await this.core.path(log))} 2>/dev/null`);
+    return Number.parseInt(r.stdout.trim(), 10) || 0;
+  }
+
+  /**
+   * Switches the app's own Launch at login setting through its UI, the way the config describes (open, switch, save). With
+   * `verifyLog` it also requires the app to have SAVED it: the config's `savedLog.on/off` line must be new in the app's log.
+   * A switch that shows the new position proves nothing: a save that failed (the helper restarting) leaves it there too.
+   */
+  async setLaunchAtLogin(on, { verifyLog = false } = {}) {
+    const saved = verifyLog ? this.gui.launchAtLogin.savedLog?.[on ? 'on' : 'off'] : null;
+    const before = saved ? await this.appLogCount(saved) : 0;
+    const shown = await this.setLaunchAtLoginSwitch(on);
+    if (!saved || !shown) return shown;
+    return (await this.until(async () => (await this.appLogCount(saved)) > before, this.guard())).ok;
+  }
+
+  async setLaunchAtLoginSwitch(on) {
     const l = this.gui.launchAtLogin;
     if (!(await this.has(...l.switch))) {
       for (const a of l.open) if (!(await this.act(a))) return false;
@@ -265,10 +285,12 @@ export class GuiCheck {
     const off = await this.setLoginItemsSwitch(sw, false);
     checks.push({ ok: off.ok, detail: `switched off in Login Items (as a user who refused it once, ${off.presses} press(es)): BTM ${(await this.btm())?.disposition ?? 'no record'}` });
     await this.closeSettings();
-    // Off, then on again once the app is ready again (its helper back and answering): this step tests the approval path, not a
-    // switch flipped while the helper restarts (that case is a product question of its own).
-    const offAgain = await this.setLaunchAtLogin(false);
+    // Off, then on again, both only once the app is ready (its helper back and answering): this step tests the approval path, not
+    // a switch flipped while the helper restarts. A refusal in Login Items stops the service's helper and the app starts its own,
+    // which takes seconds; a save made before that fails ("The Dyno agent is not running") and leaves the switch showing a value
+    // nothing stored. So: ready first, and the off is judged by the app's own "saved" log line, not by the switch.
     const ready = await this.until(() => this.core.isReady(), this.config.readyTimeoutSec * 1000);
+    const offAgain = await this.setLaunchAtLogin(false, { verifyLog: true });
     const again = offAgain && (await this.setLaunchAtLogin(true));
     checks.push({ ok: again, detail: again ? `Launch at login switched off, the app ready again after ${(ready.tookMs / 1000).toFixed(0)} s, then on again in the app` : 'the app\'s switch did not go off and on again' });
     const opened = await this.until(() => this.has('System Settings', sw, 'AXCheckBox'), this.guard());
