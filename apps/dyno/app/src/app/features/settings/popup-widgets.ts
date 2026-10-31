@@ -8,6 +8,10 @@ import type { Edit, Placement, PopoverKind, PopoverWidget, VolumeChoice } from '
 import { PlatformService } from '../../core/platform';
 import { Notifier } from '../../shared/notifier';
 import { PopoverValues } from '../../state/popover-values';
+import { GRADE_LABEL, GRADE_TONE } from '../../shared/labels';
+import { HealthStore } from '../../state/health.store';
+import { optionLabel } from '../widgets/option-label';
+import { popoverMeta } from '../tray/widgets/popover-meta';
 import { WidgetChoicesStore } from '../../state/widget-choices';
 import { WidgetLayouts } from '../../state/widget-layouts';
 import { DynoPopoverWidgets } from '../tray/widgets/popover-widgets';
@@ -28,12 +32,19 @@ const volumeOf = (key: string): VolumeChoice => (key.startsWith('mount:') ? { mo
       @if (choices.ready()) {
       <pd-widget-chooser [view]="v" [widgetFor]="widgetFor" [again]="again" [preview]="true" (edit)="edit($event)">
         <ng-template pdWidgetOption="diskSpace" [pdWidgetOptionOf]="sample" let-p>
-          <pd-select [options]="volumeOptions()" [value]="volumeOf(p)" [ariaLabel]="'Volume of ' + p.id" (valueChange)="setVolume(p, $event)" />
+          <pd-select [options]="volumeOptions()" [value]="volumeOf(p)" [ariaLabel]="label(p)" (valueChange)="setVolume(p, $event)" />
         </ng-template>
         <div slot="preview" class="preview" role="group" aria-label="Preview of the popup" inert>
           <pd-tray-popover label="Dyno popup preview" [platform]="platform">
-            <div slot="header" class="head"><strong>Dyno</strong></div>
-            <pd-widget-area [placements]="v.layout.placements" [catalogue]="v.catalogue" [values]="values.values()" [templates]="tpl()?.templates() ?? []" />
+            <div slot="header" class="head">
+              <img src="brand/dyno-16.svg" alt="" width="16" height="16" />
+              <strong>Dyno</strong>
+              <span class="spacer"></span>
+              @if (health.report(); as r) {
+                <span class="grade-pill" [attr.data-tone]="gradeTone()"><strong class="num">{{ score(r.score) }}</strong> {{ grade() }}</span>
+              }
+            </div>
+            <pd-widget-area [placements]="v.layout.placements" [catalogue]="v.catalogue" [values]="values.values()" [templates]="tpl()?.templates() ?? []" [meta]="meta" />
             <div slot="footer" class="foot"><span class="spacer"></span><button type="button" matButton="filled" tabindex="-1">Open Dyno</button></div>
           </pd-tray-popover>
         </div>
@@ -47,7 +58,10 @@ const volumeOf = (key: string): VolumeChoice => (key.startsWith('mount:') ? { mo
   styles: `
     :host { display: block; }
     .preview { max-width: 100%; }
-    .head { display: flex; align-items: center; gap: var(--sp-2); }
+    .head { display: flex; align-items: center; gap: var(--sp-2); flex: 1; }
+    .grade-pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 var(--sp-2); border-radius: var(--r-pill); font-size: var(--fs-xs); background: var(--ok-soft); color: var(--ok); }
+    .grade-pill[data-tone='warn'] { background: var(--warn-soft); color: var(--warn); }
+    .grade-pill[data-tone='bad'] { background: var(--bad-soft); color: var(--bad); }
     .foot { display: flex; flex: 1; } .spacer { flex: 1; }
     .faint { color: var(--text-3); }
   `,
@@ -65,6 +79,11 @@ export class PopupWidgets implements OnInit {
   /** The type witness of the option templates (`pdWidgetOptionOf`). */
   protected readonly sample: PopoverWidget | null = null;
   protected readonly choices = inject(WidgetChoicesStore);
+  protected readonly meta = popoverMeta;
+  protected readonly health = inject(HealthStore);
+  protected readonly score = (v: number) => Math.round(v).toString();
+  protected readonly grade = computed(() => (this.health.report() ? GRADE_LABEL[this.health.report()!.grade] : ''));
+  protected readonly gradeTone = computed(() => (this.health.report() ? GRADE_TONE[this.health.report()!.grade] : 'accent'));
   protected readonly widgetFor = (kind: PopoverKind): PopoverWidget => this.choices.popoverDefault(kind);
   protected readonly again = { diskSpace: 'Add volume' };
   protected readonly tpl = viewChild(DynoPopoverWidgets);
@@ -77,6 +96,7 @@ export class PopupWidgets implements OnInit {
   }
 
   ngOnInit(): void {
+    void this.health.loadReport();
     void this.layouts.use('popover');
     void this.choices.load();
     void this.values.start();
@@ -84,6 +104,10 @@ export class PopupWidgets implements OnInit {
       .diskVolumes()
       .then((list) => this.volumes.set(list.map((v) => ({ value: `mount:${v.mount}`, label: v.name }))))
       .catch(() => undefined);
+  }
+
+  protected label(p: Placement<PopoverWidget>): string {
+    return optionLabel('Volume', this.view(), p);
   }
 
   protected volumeOf(p: Placement<PopoverWidget>): string {

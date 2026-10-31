@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, Injector, OnInit, afterNextRender, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
@@ -9,6 +9,7 @@ import { Notifier } from '../../shared/notifier';
 import { MatSlideToggle } from '@angular/material/slide-toggle';
 import { SettingsStore } from '../../state/settings.store';
 import { LOOKUP_PRESETS, presetIdFor, templateProblem } from './ip-lookup-presets';
+import { takeSettingsAnchor } from './settings-anchor';
 import { MenuBarItems } from './menu-bar-items';
 import { PopupWidgets } from './popup-widgets';
 import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
@@ -347,7 +348,25 @@ export class SettingsPage implements OnInit {
     return d !== null && s !== null && JSON.stringify(d) !== JSON.stringify(s);
   });
 
+  private readonly injector = inject(Injector);
+  /** The section "Customize widgets…" asked for; shown once the page has its content. */
+  private anchor: string | null = takeSettingsAnchor();
+
   constructor() {
+    effect(() => {
+      if (this.draft() === null || this.anchor === null) return;
+      const id = this.anchor;
+      this.anchor = null;
+      afterNextRender(
+        () => {
+          const el = document.getElementById(id);
+          el?.setAttribute('tabindex', '-1');
+          el?.scrollIntoView({ block: 'start' });
+          el?.focus({ preventScroll: true });
+        },
+        { injector: this.injector },
+      );
+    });
     // A fresh copy whenever the saved settings change (first load, after saving).
     effect(() => {
       const s = this.store.settings();

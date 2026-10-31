@@ -12,6 +12,7 @@ import { PlatformService } from '../../core/platform';
 import { PopoverValues } from '../../state/popover-values';
 import { WidgetLayouts } from '../../state/widget-layouts';
 import { DynoPopoverWidgets } from './widgets/popover-widgets';
+import { popoverMeta } from './widgets/popover-meta';
 import { shortcutLabel } from './popover-shortcuts';
 import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
@@ -32,14 +33,18 @@ import { MatButton, MatIconButton } from '@angular/material/button';
         <img src="brand/dyno-16.svg" alt="" width="16" height="16" />
         <strong>Dyno</strong>
         <span class="spacer"></span>
+        @if (stopped()) {
+          <span class="agent" data-state="failed" role="status"><span class="pulse"></span>Agent stopped</span>
+        } @else {
         @if (health.report(); as r) {
           <span class="grade-pill" [attr.data-tone]="tone()" [matTooltip]="'Health score ' + score(r.score) + ' of 100'"><strong class="num">{{ score(r.score) }}</strong> {{ grade() }}</span>
         }
         <span class="agent" [attr.data-state]="live.agent().state" role="status"><span class="pulse"></span>{{ agentText() }}</span>
+        }
       </div>
       <main class="tray" #body>
         @if (layout.popover(); as view) {
-          <pd-widget-area [placements]="view.layout.placements" [catalogue]="view.catalogue" [values]="values.values()" [templates]="templates().templates()" (action)="run($event)" (customize)="run('customizeWidgets')" />
+          <pd-widget-area [placements]="view.layout.placements" [catalogue]="view.catalogue" [values]="values.values()" [templates]="templates().templates()" [meta]="meta" (action)="run($event)" (customize)="run('customizeWidgets')" />
         }
         <dy-popover-widgets (action)="run($event)" />
       </main>
@@ -48,7 +53,7 @@ import { MatButton, MatIconButton } from '@angular/material/button';
         <button type="button" matButton="filled" (click)="openMain()"><dy-icon name="arrow-right" /> Open Dyno</button>
         <button type="button" matIconButton [matMenuTriggerFor]="more" aria-label="More actions" matTooltip="More actions" matTooltipPosition="left"><dy-icon name="more" /></button>
         <mat-menu #more="matMenu" yPosition="above" xPosition="before">
-          <button mat-menu-item type="button" (click)="run('customizeWidgets')"><dy-icon name="settings" />Customize widgets…</button>
+          <button mat-menu-item type="button" (click)="run('customizeWidgets')"><dy-icon name="sliders" />Customize widgets…</button>
           <button mat-menu-item type="button" (click)="run('openSettings')"><dy-icon name="settings" />Settings…@if (settingsKey; as k) {<kbd aria-hidden="true">{{ k }}</kbd>}</button>
           <hr class="sep" />
           <button mat-menu-item type="button" (click)="quit()"><dy-icon name="power" />Quit Dyno@if (quitKey; as k) {<kbd aria-hidden="true">{{ k }}</kbd>}</button>
@@ -70,7 +75,8 @@ import { MatButton, MatIconButton } from '@angular/material/button';
     .grade-pill[data-tone='warn'] { background: var(--warn-soft); color: var(--warn); }
     .grade-pill[data-tone='bad'] { background: var(--bad-soft); color: var(--bad); }
     /* The shared menu icon size: 16 px. */
-    .mat-mdc-menu-item dy-icon { --icon-size: 16px; }
+    .mat-mdc-menu-item dy-icon { width: 16px; height: 16px; --icon-size: 16px; margin: 0; }
+    .mat-mdc-menu-item dy-icon mat-icon { width: 100%; height: 100%; margin: 0; }
     .sep { border: 0; border-top: 1px solid var(--pd-hairline); margin: 4px 0; }
     kbd { margin-left: auto; padding: 0 4px; border: 1px solid var(--pd-border-strong); border-radius: 4px; font: inherit; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .foot { display: flex; align-items: center; gap: var(--sp-1); flex: 1; }
@@ -90,6 +96,9 @@ export class Tray implements OnInit {
   protected readonly platform: SuTrayPlatform = this.platformService.platform === 'browser' ? 'macos' : this.platformService.platform;
   protected readonly settingsKey = shortcutLabel(this.platform, 'settings');
   protected readonly quitKey = shortcutLabel(this.platform, 'quit');
+  protected readonly meta = popoverMeta;
+  /** The agent is away: the header says so, with no health score and no "Monitoring". */
+  protected readonly stopped = computed(() => this.live.agent().state === 'failed' || this.values.values()?.notice?.action?.action === 'restartAgent');
   protected readonly score = (v: number) => Math.round(v).toString();
   protected readonly grade = computed(() => (this.health.report() ? GRADE_LABEL[this.health.report()!.grade] : ''));
   protected readonly tone = computed(() => (this.health.report() ? GRADE_TONE[this.health.report()!.grade] : 'accent'));

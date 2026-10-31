@@ -26,7 +26,7 @@ describe('dy-popup-widgets', () => {
       f.detectChanges();
       expect(rows(el)).toEqual(['Active alarms', 'Disk space', 'CPU and memory']);
     });
-    expect(el.querySelector('mat-select[aria-label="Volume of disk-space"]')).not.toBeNull();
+    expect(el.querySelector('mat-select[aria-label="Volume of Disk space, position 2 of 3"]')).not.toBeNull();
     expect(el.querySelector('[aria-label="Preview of the popup"] pd-tray-popover pd-widget-area')).not.toBeNull();
   });
 

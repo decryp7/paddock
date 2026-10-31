@@ -12,6 +12,7 @@ import { MetricReadings } from '../../state/metric-readings';
 import { WidgetChoicesStore } from '../../state/widget-choices';
 import { WidgetLayouts } from '../../state/widget-layouts';
 import { widgetCounterPaths } from '../counters/counters-model';
+import { optionLabel } from './option-label';
 import { WidgetView } from './widget-view';
 
 /**
@@ -37,7 +38,7 @@ import { WidgetView } from './widget-view';
             <pd-widget-chooser [view]="v" [widgetFor]="widgetFor" (edit)="edit($event)">
               @for (kind of kinds(); track kind) {
                 <ng-template [pdWidgetOption]="kind" [pdWidgetOptionOf]="sample" let-p>
-                  <pd-select [options]="metricOptions(kind)" [value]="metricOf(p)" [ariaLabel]="'Metric of ' + p.id" (valueChange)="setMetric(p, $event)" />
+                  <pd-select [options]="metricOptions(kind)" [value]="metricOf(p)" [ariaLabel]="label(p)" (valueChange)="setMetric(p, $event)" />
                 </ng-template>
               }
             </pd-widget-chooser>
@@ -46,9 +47,9 @@ import { WidgetView } from './widget-view';
       }
 
       <div class="grid">
-        @for (p of v.layout.placements; track p.id; let i = $index) {
+        @for (p of v.layout.placements; track p.id) {
           <div class="cell" [style.grid-column]="'span ' + p.span" [attr.data-id]="p.id">
-            <dy-widget [placement]="p" [metricReading]="readings()[i] ?? null" />
+            <dy-widget [placement]="p" [metricReading]="readings().get(p.id) ?? null" />
           </div>
         }
       </div>
@@ -79,7 +80,7 @@ export class WidgetBoard {
   protected readonly kinds = computed(() => (this.choices.choices()?.dashboard ?? []).filter((k) => k.metrics.length > 1).map((k) => k.kind));
   /** One request per live tick for every widget on the board; the engine answers value, text, scale and tone. */
   protected readonly readings = inject(MetricReadings).follow(() =>
-    (this.view()?.layout.placements ?? []).map((p) => ({ metric: p.widget.metric, thresholds: p.widget.thresholds })),
+    (this.view()?.layout.placements ?? []).map((p) => ({ key: p.id, query: { metric: p.widget.metric, thresholds: p.widget.thresholds } })),
   );
 
   constructor() {
@@ -100,6 +101,10 @@ export class WidgetBoard {
         release = null;
       }
     });
+  }
+
+  protected label(p: Placement<DashboardWidget>): string {
+    return optionLabel('Metric', this.view(), p);
   }
 
   protected metricOptions(kind: DashboardKind): PdSelectOption[] {

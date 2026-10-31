@@ -133,6 +133,24 @@ test.describe('popup widgets', () => {
     await expect(page.locator('pd-widget-frame').filter({ hasText: 'CPU and memory' })).toContainText(/Updated|Paused/);
   });
 
+  test('the footer menu icons are 16 px and sit on their text', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 640 });
+    await page.goto(POPUP());
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const items = page.getByRole('menuitem');
+    await expect(items).toHaveCount(3);
+    for (let i = 0; i < 3; i++) {
+      const item = items.nth(i);
+      const icon = await item.locator('mat-icon').first().boundingBox();
+      const text = await item.locator('.mdc-list-item__primary-text').boundingBox();
+      expect(icon, 'icon').toBeTruthy();
+      expect(Math.round(icon!.width)).toBe(16);
+      expect(Math.round(icon!.height)).toBe(16);
+      // The icon's centre is on the text's centre line (within a pixel).
+      expect(Math.abs(icon!.y + icon!.height / 2 - (text!.y + text!.height / 2))).toBeLessThanOrEqual(1.5);
+    }
+  });
+
   test('axe: the popup and the chooser, dark and light', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 900 });
     await page.goto(POPUP('&popup=activeAlarms:ready'));
@@ -175,6 +193,7 @@ test.describe('dashboard and menu-bar editors', () => {
 
 test.describe('screenshots for the independent review', () => {
   test.skip(!SHOTS, 'set WIDGET_SHOTS=<folder> to write the review screenshots');
+  test.use({ deviceScaleFactor: 2 });
   for (const theme of ['light', 'dark'] as const) {
     test(`popup, states and chooser, ${theme}`, async ({ page, context }) => {
       mkdirSync(SHOTS!, { recursive: true });
@@ -200,11 +219,18 @@ test.describe('screenshots for the independent review', () => {
       const p4 = await open('', 560);
       await p4.getByRole('button', { name: 'More actions' }).click();
       await snap(p4, 'popup-menu');
-      await page.setViewportSize({ width: 1100, height: 1000 });
+      await page.setViewportSize({ width: 1100, height: 2400 });
       const chooser = await openChooser(page);
       await chooser.getByRole('button', { name: 'Add Network' }).click();
       await expect(shown(chooser)).toHaveCount(4);
-      await snap(page, 'chooser', page.locator('pd-in-page-dialog'));
+      // The whole Popup widgets section, from its heading: list, handles, volume select, Half/Full, counter, hint and the preview.
+      await page.getByRole('heading', { name: 'Popup widgets' }).scrollIntoViewIfNeeded();
+      const head = await page.getByRole('heading', { name: 'Popup widgets' }).boundingBox();
+      const body = await chooser.boundingBox();
+      await page.evaluate(() => document.fonts.ready);
+      await page.screenshot({ path: join(SHOTS!, `chooser-${theme}.png`), clip: { x: head!.x - 16, y: head!.y - 8, width: Math.min(1100 - head!.x, body!.width + 32), height: body!.y + body!.height - head!.y + 24 } });
+      await chooser.getByRole('button', { name: 'More actions for Network' }).click();
+      await page.screenshot({ path: join(SHOTS!, `chooser-menu-${theme}.png`), clip: { x: head!.x - 16, y: head!.y - 8, width: Math.min(1100 - head!.x, body!.width + 32), height: body!.y + body!.height - head!.y + 24 } });
     });
   }
 });

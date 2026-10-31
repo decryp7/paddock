@@ -1,6 +1,12 @@
 import { DestroyRef, Injectable, effect, inject, signal, untracked, type Signal } from '@angular/core';
 import { BACKEND } from '../core/backend';
 import type { MetricReading, ReadingQuery } from '../core/generated/widgets';
+
+/** One thing to read, named by the caller (a widget's placement id), so an answer never lands on another widget when the list changes. */
+export interface NamedQuery {
+  readonly key: string;
+  readonly query: ReadingQuery;
+}
 import { LiveStore } from './live.store';
 
 /**
@@ -15,20 +21,20 @@ export class MetricReadings {
   private readonly destroy = inject(DestroyRef);
 
   /**
-   * Follows `queries`: the answers, in the order of the queries (empty before the first one). Call in an injection context;
-   * it stops with the caller.
+   * Follows `queries`: the answers by key (empty before the first one). Each answer is matched to the key it was asked for, from
+   * the list as it was when the request was made. Call in an injection context; it stops with the caller.
    */
-  follow(queries: () => readonly ReadingQuery[]): Signal<readonly MetricReading[]> {
-    const out = signal<readonly MetricReading[]>([]);
+  follow(queries: () => readonly NamedQuery[]): Signal<ReadonlyMap<string, MetricReading>> {
+    const out = signal<ReadonlyMap<string, MetricReading>>(new Map());
     let busy = false;
     let stopped = false;
     this.destroy.onDestroy(() => (stopped = true));
-    const ask = async (list: readonly ReadingQuery[]): Promise<void> => {
+    const ask = async (list: readonly NamedQuery[]): Promise<void> => {
       if (busy) return;
       busy = true;
       try {
-        const answer = list.length === 0 ? [] : await this.backend.metricReadings([...list]);
-        if (!stopped) out.set(answer);
+        const answer = list.length === 0 ? [] : await this.backend.metricReadings(list.map((q) => q.query));
+        if (!stopped) out.set(new Map(list.flatMap((q, i) => (answer[i] ? [[q.key, answer[i]] as const] : []))));
       } catch {
         // The cards keep their last readings.
       } finally {

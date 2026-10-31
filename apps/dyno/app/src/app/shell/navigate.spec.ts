@@ -9,8 +9,8 @@ describe('destination', () => {
     expect(destination({ page: 'backups' })).toEqual({ route: '/backup' });
   });
   it('opens Dyno\'s page of Settings for a settings section', () => {
-    expect(destination({ settings: 'popupWidgets' })).toEqual({ settings: SETTINGS_PAGE_ID });
-    expect(destination({ settings: 'general' })).toEqual({ settings: SETTINGS_PAGE_ID });
+    expect(destination({ settings: 'popupWidgets' })).toEqual({ settings: SETTINGS_PAGE_ID, anchor: 'popup-widgets' });
+    expect(destination({ settings: 'general' })).toEqual({ settings: SETTINGS_PAGE_ID, anchor: null });
   });
 });
 
@@ -19,7 +19,7 @@ describe('followNavigation', () => {
     const mock = new MockBackend({ latencyMs: 0 });
     const routes: string[] = [];
     const pages: string[] = [];
-    const stop = followNavigation(mock, { route: (u) => routes.push(u), settings: (p) => pages.push(p) });
+    const stop = followNavigation(mock, { route: (u) => routes.push(u), settings: (p, a) => pages.push(`${p}#${a}`) });
     return { mock, routes, pages, stop };
   };
 
@@ -37,7 +37,7 @@ describe('followNavigation', () => {
     mock.navigate({ page: 'disk' });
     await vi.waitFor(() => expect(routes).toEqual(['/disk-map']));
     mock.navigate({ settings: 'popupWidgets' });
-    await vi.waitFor(() => expect(pages).toEqual([SETTINGS_PAGE_ID]));
+    await vi.waitFor(() => expect(pages).toEqual([`${SETTINGS_PAGE_ID}#popup-widgets`]));
   });
 
   it('does nothing when nothing is waiting, and stops when told to', async () => {

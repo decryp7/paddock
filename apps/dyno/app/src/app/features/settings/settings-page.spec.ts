@@ -4,6 +4,7 @@ import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { Notifier } from '../../shared/notifier';
 import { SettingsStore } from '../../state/settings.store';
+import { rememberSettingsAnchor, takeSettingsAnchor } from './settings-anchor';
 import { SettingsPage } from './settings-page';
 
 const NOW = 1_700_000_000_000;
@@ -86,6 +87,17 @@ describe('SettingsPage', () => {
     expect(card.querySelector('#popup-widgets')).not.toBeNull();
     expect(card.querySelectorAll('dy-menu-bar-items .pd-wc-list')[0]!.querySelectorAll('li')).toHaveLength(2);
     expect(Object.keys(await mock.settings())).not.toContain('trayItems');
+  });
+  it('opens at the section a widget button asked for, once', async () => {
+    rememberSettingsAnchor('popup-widgets');
+    const { f, el } = await make();
+    const target = el.querySelector<HTMLElement>('#popup-widgets')!;
+    const spy = vi.spyOn(target, 'scrollIntoView');
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(document.activeElement === target || spy.mock.calls.length > 0 || target.getAttribute('tabindex') === '-1').toBe(true);
+    });
+    expect(takeSettingsAnchor()).toBeNull();
   });
   it('a rejected save keeps the draft and the bar and toasts the engine message', async () => {
     const { f, mock, el, saveButton } = await make();

@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, ViewEncapsulation, input, output, viewChildren } from '@angular/core';
 import { PdSkeleton, PdWidget, relativeAgo } from '@decryp7/paddock-ui/widgets';
-import { PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
+import { PdGlyph, PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
 import type { AlarmRow, AppRow, BackupValue, CounterRow, IssueValue, Level, Page, PopoverValue, VolumeRow, WidgetActionId } from '../../../core/generated/widgets';
 import { formatBytes, formatPercent, formatRate, splitValue } from '../../../shared/format';
 import { Sparkline } from '../../../shared/sparkline';
@@ -28,7 +28,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
   selector: 'dy-popover-widgets',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  imports: [PdWidget, PdSkeleton, PdStatusGlyph, Sparkline],
+  imports: [PdWidget, PdSkeleton, PdGlyph, PdStatusGlyph, Sparkline],
   template: `
     <ng-template pdWidget="activeAlarms" [pdWidgetOf]="witness" [pdWidgetCalm]="true" let-value>
       @let a = alarms(value);
@@ -39,6 +39,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
               <span class="dy-pw-lvl" [attr.data-level]="r.level" pdSkeleton><pd-status-glyph [status]="status(r.level)" [size]="14" />{{ word(r.level) }}</span>
               <span class="dy-pw-grow" pdSkeleton>{{ r.title }}</span>
               <span class="dy-pw-muted" pdSkeleton>{{ ago(r.since) }}</span>
+              <pd-glyph class="dy-pw-chev" name="chevron-right" [size]="14" />
             </button>
           </li>
         }
@@ -54,7 +55,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
         @for (v of d?.rows ?? skVolumes; track v.id) {
           <li class="dy-pw-vol" [attr.data-tone]="v.tone">
             <span class="dy-pw-vname"><span class="dy-pw-grow" pdSkeleton>{{ v.name }}</span>
-              @if (v.tone !== 'ok') { <span class="dy-pw-flag"><pd-status-glyph [status]="v.tone === 'bad' ? 'error' : 'warning'" [size]="14" />{{ v.tone === 'bad' ? 'Full' : 'Low' }}</span> }
+              @if (v.tone !== 'ok') { <span class="dy-pw-flag" [attr.data-tone]="v.tone"><pd-status-glyph [status]="v.tone === 'bad' ? 'error' : 'warning'" [size]="14" />{{ v.tone === 'bad' ? 'Full' : 'Low' }}</span> }
               <span class="dy-pw-muted" pdSkeleton>{{ !v.reachable ? 'Not answering' : v.freeBytes === null ? 'Unavailable' : free(v) }}</span></span>
             <span class="dy-pw-meter" role="img" [attr.aria-label]="v.usedPercent === null ? 'Used space unavailable' : pct(v.usedPercent) + ' used'" pdSkeleton><i [style.width.%]="v.usedPercent ?? 0"></i></span>
           </li>
@@ -73,8 +74,8 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
           <span class="dy-pw-big" pdSkeleton>{{ big(c?.cpuPercent ?? 0) }}<small>%</small></span>
           <dy-sparkline [values]="c?.cpuMinute ?? []" [max]="100" color="var(--accent)" label="CPU over the last minute" style="--spark-h: 28px" />
         </div>
-        <div class="dy-pw-half" [attr.data-tone]="c?.memoryTone ?? 'ok'">
-          <span class="dy-pw-muted" pdSkeleton>Memory {{ bytes(c?.memoryUsed ?? 0) }} of {{ bytes(c?.memoryTotal ?? 0) }}</span>
+        <div class="dy-pw-half dy-pw-half--next" [attr.data-tone]="c?.memoryTone ?? 'ok'">
+          <span class="dy-pw-muted" pdSkeleton [attr.aria-label]="'Memory ' + memText(c)">{{ memText(c) }}</span>
           <span class="dy-pw-big" pdSkeleton>{{ big(c?.memoryPercent ?? 0) }}<small>%</small></span>
           <span class="dy-pw-meter dy-pw-tall" role="img" [attr.aria-label]="'Memory in use ' + big(c?.memoryPercent ?? 0) + '%'" pdSkeleton><i [style.width.%]="c?.memoryPercent ?? 0"></i></span>
         </div>
@@ -94,7 +95,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       @let b = backup(value) ?? skBackup;
       <button type="button" class="dy-pw-plain" (click)="open('backups')">
         <span class="dy-pw-flag" [attr.data-state]="b.state" pdSkeleton><pd-status-glyph [status]="b.state === 'healthy' ? 'success' : 'warning'" [size]="14" />{{ b.state === 'healthy' ? 'OK' : b.state === 'stale' ? 'Out of date' : 'No backup yet' }}</span>
-        <span class="dy-pw-strong" pdSkeleton>{{ b.summary || 'Last backup 2 h ago' }}</span>
+        <span class="dy-pw-strong" pdSkeleton>{{ backupLine(backup(value)) }}</span>
         <span class="dy-pw-muted" pdSkeleton>{{ b.name }}</span>
       </button>
     </ng-template>
@@ -105,6 +106,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
         <span class="dy-pw-lvl" [attr.data-level]="i.level" pdSkeleton><pd-status-glyph [status]="status(i.level)" [size]="14" />{{ word(i.level) }}</span>
         <span class="dy-pw-grow" pdSkeleton>{{ i.title }}</span>
         <span class="dy-pw-muted" pdSkeleton>{{ ago(i.at) }}</span>
+        <pd-glyph class="dy-pw-chev" name="chevron-right" [size]="14" />
       </button>
     </ng-template>
 
@@ -146,8 +148,10 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
     .dy-pw-meter i { display: block; height: 100%; background: var(--pd-meter-neutral); }
     .dy-pw-vol[data-tone='warn'] .dy-pw-meter i { background: var(--pd-warning); } .dy-pw-vol[data-tone='bad'] .dy-pw-meter i { background: var(--pd-danger); }
     .dy-pw-half > .dy-pw-muted { overflow: hidden; text-overflow: ellipsis; }
-    .dy-pw-tall { height: 28px; align-self: end; }
+    .dy-pw-tall { height: 4px; align-self: end; margin-bottom: 12px; }
+    .dy-pw-half--next { border-inline-start: 1px solid var(--pd-hairline); padding-inline-start: 12px; }
     .dy-pw-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .dy-pw-half > .dy-pw-muted { white-space: nowrap; }
     .dy-pw-half { display: grid; gap: 2px; min-width: 0; }
     .dy-pw-big { font-size: 22px; font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; line-height: 1.2; }
     .dy-pw-big small { font-size: var(--pd-text-label); font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); margin-left: 2px; }
@@ -178,6 +182,17 @@ export class DynoPopoverWidgets {
   }
   protected word(l: Level): string {
     return LEVEL_WORD[l];
+  }
+  /** "16.3 of 32 GB": the used amount without its unit when the total has the same one. */
+  protected memText(c: { memoryUsed: number; memoryTotal: number } | null): string {
+    if (!c) return '16.3 of 32 GB';
+    const [used, total] = [formatBytes(c.memoryUsed), formatBytes(c.memoryTotal)];
+    const unit = total.split(' ')[1];
+    return unit !== undefined && used.endsWith(` ${unit}`) ? `${used.slice(0, -unit.length - 1)} of ${total}` : `${used} of ${total}`;
+  }
+  protected backupLine(b: BackupValue | null): string {
+    if (b === null) return 'Last backup 2 h ago';
+    return b.lastBackup !== null ? `Last backup ${this.ago(b.lastBackup)}` : b.summary;
   }
   protected ago(ms: number): string {
     return relativeAgo(this.now() ?? Date.now(), ms);

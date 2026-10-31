@@ -130,6 +130,12 @@ interface Stored {
   presets: Preset<W>[];
 }
 
+/** HH:MM in the viewer's zone, the way the widget frame says "Paused at 14:28" (one time across the notice and every widget). */
+function clockOf(ms: number): string {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 const STORE_KEY = 'dyno-mock-widgets';
 
 /** Options of the mock's widgets. */
@@ -341,7 +347,7 @@ export class MockWidgets {
       placements.push({ id: p.id, state: this.stateOf(p, kind, state, at) });
     }
     const notice = this.agentStopped
-      ? { tone: 'warning' as const, title: 'Agent stopped', detail: 'Readings paused at 14:28.', action: { action: 'restartAgent' as const, label: 'Restart agent' } }
+      ? { tone: 'warning' as const, title: 'Agent stopped', detail: `Readings paused at ${clockOf(stoppedAt)}`, action: { action: 'restartAgent' as const, label: 'Restart agent' } }
       : null;
     if (this.agentStopped) {
       for (const p of placements) if (p.state.state === 'ready') p.state = { ...p.state, staleSince: stoppedAt };
@@ -352,13 +358,13 @@ export class MockWidgets {
   private stateOf(p: Placement<PopoverWidget>, kind: PopoverKind, state: MockWidgetState, at: number): WidgetState<PopoverValue, WidgetActionId> {
     const retry: WidgetActionId = { retry: p.id };
     const ready = (value: PopoverValue, stale = false): WidgetState<PopoverValue, WidgetActionId> => ({ state: 'ready', value, asOf: stale ? at - 4 * 60_000 : at, staleSince: stale ? at - 4 * 60_000 : null });
-    const empty = (title: string, detail: string, label: string | null, action: WidgetActionId): WidgetState<PopoverValue, WidgetActionId> => ({ state: 'empty', title, detail, next: label ? { action, label } : null });
+    const empty = (title: string, detail: string, label: string, action: WidgetActionId): WidgetState<PopoverValue, WidgetActionId> => ({ state: 'empty', title, detail, next: { action, label } });
     const error = (title: string, cause: string): WidgetState<PopoverValue, WidgetActionId> => ({ state: 'error', title, cause, next: { action: retry, label: 'Retry' } });
     const wave = (base: number, amp: number) => Array.from({ length: 60 }, (_, i) => Math.round((base + Math.sin(i / 5) * amp) * 10) / 10);
     const stale = state === 'stale';
     switch (kind) {
       case 'activeAlarms':
-        if (state === 'empty') return empty('No active alarms', 'Checked 2 min ago.', null, { openPage: 'alarms' });
+        if (state === 'empty') return empty('No active alarms', 'Nothing needs your attention.', 'Open alarms', { openPage: 'alarms' });
         if (state === 'error') return error("Couldn't read alarms", "The alarm store didn't answer.");
         return ready({ activeAlarms: { rows: [{ id: 1, title: 'Memory pressure is high', level: 'warning', since: at - 4 * 60_000, acknowledged: false }, { id: 2, title: 'New login item: Docker Desktop', level: 'info', since: at - 3_600_000, acknowledged: false }], more: 3 } }, stale);
       case 'diskSpace': {
@@ -370,17 +376,16 @@ export class MockWidgets {
       case 'cpuMemory':
         return ready({ cpuMemory: { cpuPercent: 76, cpuTone: 'warn', memoryUsed: 16.3e9, memoryTotal: 32e9, memoryPercent: 51, memoryTone: 'ok', cpuMinute: wave(70, 12) } }, stale);
       case 'network':
-        if (state === 'empty') return empty('See traffic when online', 'Offline now.', 'Open network', { openPage: 'network' });
         return ready({ network: { rxBps: 2.4e6, txBps: 310e3, rxMinute: wave(2e6, 5e5), txMinute: wave(3e5, 5e4) } }, stale);
       case 'backupHealth':
         if (state === 'empty') return empty('Know when backups ran', 'No backup set up.', 'Set up checks', 'setUpBackupChecks');
         if (state === 'error') return error("Couldn't check", 'tmutil failed.');
-        if (state === 'working') return { state: 'working', title: 'Checking', phase: 'Time Machine', progress: { fraction: { done: 2, total: 3, unit: 'tools' } }, last: null, cancel: null };
-        return ready({ backupHealth: { name: 'Time Machine', state: 'healthy', lastBackup: at - 2 * 3_600_000, summary: 'Last backup 2 h ago.', tools: 1 } }, stale);
+        if (state === 'working') return { state: 'working', title: 'Backup', phase: 'Checking · Time Machine', progress: { count: { done: 2, unit: 'tools' } }, last: null, cancel: null };
+        return ready({ backupHealth: { name: 'Time Machine', state: 'healthy', lastBackup: at - 2 * 3_600_000, summary: 'Time Machine finished a backup.', tools: 1 } }, stale);
       case 'lastIssue':
-        if (state === 'empty') return empty('No issues in the last 7 days', 'Open issues.', null, { openPage: 'issues' });
+        if (state === 'empty') return empty('No issues in the last 7 days', 'Dyno reads the system logs for crashes and hangs.', 'Open issues', { openPage: 'issues' });
         if (state === 'error') return error("Couldn't read issues", 'The issue index is unavailable.');
-        if (state === 'working') return { state: 'working', title: 'Reading system logs', phase: 'Indexing', progress: { count: { done: 12400, unit: 'events' } }, last: null, cancel: null };
+        if (state === 'working') return { state: 'working', title: 'Last issue', phase: 'Reading system logs · Indexing', progress: { count: { done: 12400, unit: 'events' } }, last: null, cancel: null };
         return ready({ lastIssue: { title: 'Disk write errors on disk4', app: 'disk4', kind: 'Disk error', level: 'critical', at: at - 86_400_000 } }, stale);
       case 'pinnedCounters':
         if (state === 'empty') return empty('Watch your own counters here', 'Pin counters in Dyno; the first 4 show here.', 'Pin counters', 'pinCounters');

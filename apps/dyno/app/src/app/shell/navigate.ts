@@ -2,7 +2,8 @@ import { inject, provideAppInitializer } from '@angular/core';
 import { Router } from '@angular/router';
 import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
 import { BACKEND, type DynoBackend } from '../core/backend';
-import type { Navigate, Page } from '../core/generated/widgets';
+import type { Navigate, Page, SettingsSection } from '../core/generated/widgets';
+import { rememberSettingsAnchor } from '../features/settings/settings-anchor';
 
 /** The main window's route for each page a widget can open (`dyno://navigate`). */
 export const PAGE_ROUTE: Readonly<Record<Page, string>> = {
@@ -19,15 +20,21 @@ export const PAGE_ROUTE: Readonly<Record<Page, string>> = {
 /** Dyno's page of the Settings window (`SETTINGS_PAGES`). */
 export const SETTINGS_PAGE_ID = 'dy.general';
 
-/** Where `to` leads: a route of the main window, or the Settings window at Dyno's page. */
-export function destination(to: Navigate): { route: string } | { settings: string } {
-  return 'page' in to ? { route: PAGE_ROUTE[to.page] } : { settings: SETTINGS_PAGE_ID };
+/** The part of Dyno's Settings page each section starts at (null: the top). */
+export const SETTINGS_ANCHOR: Readonly<Record<SettingsSection, string | null>> = {
+  general: null,
+  popupWidgets: 'popup-widgets',
+};
+
+/** Where `to` leads: a route of the main window, or the Settings window at Dyno's page, scrolled to a section. */
+export function destination(to: Navigate): { route: string } | { settings: string; anchor: string | null } {
+  return 'page' in to ? { route: PAGE_ROUTE[to.page] } : { settings: SETTINGS_PAGE_ID, anchor: SETTINGS_ANCHOR[to.settings] };
 }
 
 /** What the main window does with a destination. */
 export interface NavigationPort {
   readonly route: (url: string) => void;
-  readonly settings: ((page: string) => void) | null;
+  readonly settings: ((page: string, anchor: string | null) => void) | null;
 }
 
 /**
@@ -41,7 +48,7 @@ export function followNavigation(backend: Pick<DynoBackend, 'onNavigate' | 'take
     if (to === null) return;
     const d = destination(to);
     if ('route' in d) port.route(d.route);
-    else port.settings?.(d.settings);
+    else port.settings?.(d.settings, d.anchor);
   };
   const stop = backend.onNavigate(() => void take());
   void take();
@@ -53,6 +60,6 @@ export function provideWidgetNavigation() {
   return provideAppInitializer(() => {
     const router = inject(Router);
     const openSettings = inject(OPEN_SETTINGS, { optional: true });
-    followNavigation(inject(BACKEND), { route: (url) => void router.navigateByUrl(url), settings: openSettings });
+    followNavigation(inject(BACKEND), { route: (url) => void router.navigateByUrl(url), settings: openSettings ? (page, anchor) => (rememberSettingsAnchor(anchor), openSettings(page)) : null });
   });
 }
