@@ -1,4 +1,4 @@
-//! The kernel's socket lists through `sysctlbyname("net.inet.{tcp,udp}.pcblist_n")` (ADR 0026): one call per protocol,
+//! The kernel's socket lists through `sysctlbyname("net.inet.{tcp,udp}.pcblist_n")` (Dyno ADR 0026): one call per protocol,
 //! no per-process and no per-descriptor access, so nothing is held on another program's sockets. Parsing is in
 //! [`crate::parse::mac_pcblist`].
 
@@ -64,17 +64,21 @@ fn read(proto: Proto, buf: &mut Vec<u8>) -> Result<PcbList, PcbError> {
     mac_pcblist::parse(&buf[..n], proto)
 }
 
-/// Both lists, merged into one (counts added).
-fn merged() -> Result<PcbList, PlatformError> {
-    let mut buf = BUF.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+/// What a failed parse of one protocol's list means for the page.
+fn failure(e: PcbError) -> PlatformError {
+    match e {
+        PcbError::UnknownLayout(_) => {
+            PlatformError::Unsupported("This version of macOS changed the format of its socket list, so Dyno cannot read it here.".into())
+        }
+        PcbError::Malformed(m) => PlatformError::Failed(m),
+    }
+}
+
+/// The two protocols' parsed lists as one (counts added). Each is judged on its own first: a protocol whose layout
+/// drifted fails the whole read, so its missing rows are never taken for a machine that has none.
+fn merge(tcp: Result<PcbList, PcbError>, udp: Result<PcbList, PcbError>) -> Result<PcbList, PlatformError> {
     let mut all = PcbList::default();
-    for proto in [Proto::Tcp, Proto::Udp] {
-        let l = read(proto, &mut buf).map_err(|e| match e {
-            PcbError::UnknownLayout(_) => PlatformError::Unsupported(
-                "This version of macOS changed the format of its socket list, so Dyno cannot read it here.".into(),
-            ),
-            PcbError::Malformed(m) => PlatformError::Failed(m),
-        })?;
+    for l in [tcp.map_err(failure)?, udp.map_err(failure)?] {
         all.sockets.extend(l.sockets);
         all.skipped += l.skipped;
         all.unreadable += l.unreadable;
@@ -83,7 +87,15 @@ fn merged() -> Result<PcbList, PlatformError> {
     Ok(all)
 }
 
-/// The merged lists, refused when the kernel cut the view down to this process's own sockets (ADR 0026). Unit tests
+/// Both lists, merged into one.
+fn merged() -> Result<PcbList, PlatformError> {
+    let mut buf = BUF.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let tcp = read(Proto::Tcp, &mut buf);
+    let udp = read(Proto::Udp, &mut buf);
+    merge(tcp, udp)
+}
+
+/// The merged lists, refused when the kernel cut the view down to this process's own sockets (Dyno ADR 0026). Unit tests
 /// run as linker-signed binaries whose identifier has no dot, so they always get that cut-down view: there the check
 /// is off and the tests look at their own sockets, which are always in it; `a_cut_down_view_is_refused_with_the_fix`
 /// covers the check itself.
@@ -176,6 +188,20 @@ mod tests {
     }
 
     #[test]
+    fn one_protocol_whose_layout_drifted_fails_the_whole_read_not_just_its_rows() {
+        let ok = PcbList {
+            announced: 3,
+            ..PcbList::default()
+        };
+        let drifted = || Err(PcbError::UnknownLayout("x".into()));
+        for (tcp, udp) in [(drifted(), Ok(ok.clone())), (Ok(ok.clone()), drifted())] {
+            assert!(matches!(merge(tcp, udp), Err(PlatformError::Unsupported(_))));
+        }
+        let both = merge(Ok(ok.clone()), Ok(ok)).unwrap();
+        assert_eq!(both.announced, 6);
+    }
+
+    #[test]
     fn a_cut_down_view_is_refused_with_the_fix() {
         let cut = PcbList {
             announced: 50,
@@ -229,7 +255,7 @@ mod tests {
     }
 
     fn from_netstat(proto: &str) -> Vec<Key> {
-        // `netstat` started from a test process printed nothing on macOS 27.2 (ADR 0026), so the caller captures it from a
+        // `netstat` started from a test process printed nothing on macOS 27.2 (Dyno ADR 0026), so the caller captures it from a
         // shell just before: `netstat -anv -p tcp > $DIR/tcp.txt`, likewise udp, and sets PCB_NETSTAT_DIR.
         let dir = std::env::var("PCB_NETSTAT_DIR").expect("PCB_NETSTAT_DIR holds tcp.txt and udp.txt captured with netstat -anv");
         let text = std::fs::read_to_string(format!("{dir}/{proto}.txt")).unwrap();

@@ -1,4 +1,4 @@
-//! macOS process details: nice value and background class, open files, sockets and mapped libraries from `libproc` and the kernel socket lists (never `lsof`, ADR 0026),
+//! macOS process details: nice value and background class, open files, sockets and mapped libraries from `libproc` and the kernel socket lists (never `lsof`, Dyno ADR 0026),
 //! and the code signature from `codesign`. Everything runs with a timeout; failures become unavailable fields.
 
 use crate::parse::mac_tools::parse_codesign;
@@ -50,7 +50,7 @@ impl DetailsProbe for MacDetails {
             None => SignatureInfo::Unknown("The program file is not known".into()),
         };
         // Never `lsof`: it asks the kernel about every socket and pipe descriptor of the process, which can mark another
-        // program's socket `SS_DRAINING` (ADR 0026). Files and libraries come from `libproc` (descriptors listed from the
+        // program's socket `SS_DRAINING` (Dyno ADR 0026). Files and libraries come from `libproc` (descriptors listed from the
         // table, only file descriptors asked about), connections from the kernel's socket lists.
         let fds = super::libproc::fds(pid);
         if fds.is_empty() {

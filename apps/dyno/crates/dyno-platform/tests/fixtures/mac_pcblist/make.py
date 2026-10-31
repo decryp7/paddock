@@ -6,7 +6,9 @@ the record kinds and lengths. Every other byte is zeroed, then the fields the pa
 machine is kept (ER-14).
 Run: python3 -I make.py  (needs a binary the kernel shows all sockets to; /usr/bin/python3 is one).
 """
-import ctypes, struct, socket
+import ctypes, os, struct, socket
+
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 libc = ctypes.CDLL(None)
 
@@ -43,7 +45,7 @@ def v6(a):
     return socket.inet_pton(socket.AF_INET6, a)
 
 
-def make(tmpl, vflag, laddr, lport, faddr, fport, pid, epid, state=None, proto=6, zero_socket=False):
+def make(tmpl, vflag, laddr, lport, faddr, fport, pid, epid, state=None, proto=6, zero_socket=False, family=None):
     g = [bytearray(r) for r in tmpl]
     for r in g:
         r[8:] = bytes(len(r) - 8)
@@ -55,7 +57,9 @@ def make(tmpl, vflag, laddr, lport, faddr, fport, pid, epid, state=None, proto=6
     inp[64:80] = laddr
     struct.pack_into("<q", inp, 28, 1000)  # inp_gencnt, below the header's generation
     if not zero_socket:
-        struct.pack_into("<ii", so, 36, proto, 30 if vflag & 2 else 2)  # xso_protocol, xso_family
+        # xso_protocol, xso_family. The family is NOT derived from the parser's rule: measured on macOS 27.2, a dual-stack
+        # socket (family 30) can carry a v4-mapped peer (vflag IPv4), and some real sockets have family 0.
+        struct.pack_into("<ii", so, 36, proto, family if family is not None else (30 if vflag & 2 else 2))
         struct.pack_into("<ii", so, 68, pid, epid)
     if state is not None:
         struct.pack_into("<i", g[-1], 36, state)
@@ -84,12 +88,16 @@ tcp = [
     make(tcp_t, 1, v4("192.0.2.10"), 49154, v4("198.51.100.9"), 80, 4247, 4247, state=5),  # CLOSE_WAIT
     make(tcp_t, 1, v4("192.0.2.10"), 49155, v4("198.51.100.9"), 81, 4248, 4248, state=9),  # FIN_WAIT_2
 ]
+tcp += [
+    make(tcp_t, 1, v4("192.0.2.10"), 49156, v4("198.51.100.20"), 443, 4260, 0, state=4, family=30),  # v4-mapped peer on a v6 socket
+    make(tcp_t, 1, v4("192.0.2.10"), 49157, v4("198.51.100.21"), 443, 4261, 0, state=4, family=0),  # family not set
+]
 tcp[2].insert(2, unknown_record())  # a record of a kind this reader does not know, between known ones
 udp = [
     make(udp_t, 1, Z4, 5353, Z4, 0, 4250, 4250, proto=17),
     make(udp_t, 2, Z6, 5353, Z6, 0, 4251, 4251, proto=17),
     make(udp_t, 1, v4("192.0.2.10"), 50000, v4("198.51.100.9"), 53, 4252, 4252, proto=17),
 ]
-open("tcp.bin", "wb").write(build(tcp, len(tcp)))
-open("udp.bin", "wb").write(build(udp, len(udp)))
+open(os.path.join(HERE, "tcp.bin"), "wb").write(build(tcp, len(tcp)))
+open(os.path.join(HERE, "udp.bin"), "wb").write(build(udp, len(udp)))
 print("tcp", len(tcp), "udp", len(udp))

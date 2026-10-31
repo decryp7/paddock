@@ -38,8 +38,15 @@ sweep, system-wide in the second case. Both move to `libproc` (`macos/libproc.rs
 safe: `vfs_vnops.c` has `.fo_drain = fo_no_drain`, where `soo_drain` (sockets), `pipe_drain` and `kqueue_drain` are the
 descriptor types that act on a drain [S]. The details page's connections come from the kernel list filtered by owner
 (`so_e_pid`/`so_last_pid`), its mapped libraries from the process's memory regions (`PROC_PIDREGIONPATHINFO`), and the
-lockers of a file from the vnode paths of every process's file descriptors (bounded by 15 s as before). I did not
-measure the drain on pipes or kqueues; vnodes-only avoids the question.
+lockers of a file from the identity (device and inode, so a hard link is the same file) of every process's vnode
+descriptors, bounded by the number of descriptors looked at, not by a clock (ADR 0031, ER-19). I did not measure the drain
+on pipes or kqueues; vnodes-only avoids the question.
+
+Why the vnode query is safe even when the descriptor changed between the listing and the question [S, review]: in
+`kern_descrip.c`, `fp_get_ftype` checks the descriptor's type under `proc_fdlock` *before* it takes the I/O reference
+(`os_ref_retain_locked` on `fp_iocount`), and returns `ENOTSUP` for another type without taking one. A number reused by a
+socket in the meantime therefore costs nothing; at worst a query for a vnode briefly delays the target's `close()` (the
+lock is held for a moment) and causes no error.
 
 ### What the kernel sends [M, S]
 
@@ -71,10 +78,18 @@ measure the drain on pipes or kqueues; vnodes-only avoids the question.
 
 ### Measured against `netstat -anv` [M]
 
-With a binary the kernel shows the whole list to (next section), the parser's TCP rows (244) and UDP rows (46) matched
-`netstat -anv -p tcp` / `-p udp` captured at the same moment on (protocol, local port, remote port, state, pid): 0 rows
-only on our side, 0 only in netstat, IPv4 and IPv6, listeners, TIME_WAIT, CLOSE_WAIT, FIN_WAIT, UDP bound and connected.
-Reproduce: the ignored test `macos::pcblist::tests::the_list_agrees_with_netstat_anv`.
+With a copy of the test binary re-signed with a dotted identifier (`codesign --force -s - -i net.decryptology.dyno.spike`,
+next section) and `netstat -anv -p tcp` / `-p udp` captured from a shell just before, the parser read 174 TCP and 44 UDP
+sockets, skipped none, and differed from netstat on (protocol, local port, remote port, state, pid) by 1 TCP row on
+each side (a connection that opened or closed between the two captures) and 0 UDP rows. IPv4, IPv6, v4-mapped peers on
+dual-stack sockets, sockets with an unset family, listeners, TIME_WAIT, CLOSE_WAIT, FIN_WAIT, UDP bound and connected.
+Reproduce: the ignored test `macos::pcblist::tests::the_list_agrees_with_netstat_anv` (its own failure bar: under 5 %
+differing). **Correction (review P1-1):** the first version of the parser required `xso_family` to agree with
+`inp_vflag` and dropped 35 of 247 real sockets (27 dual-stack AF_INET6 sockets with an IPv4 flag, 11 with family 0); the
+comparison had not been re-run after that check was added, and the fixtures were generated from the same rule, so they
+could not catch it. The family is now only checked to be one that exists (0, AF_INET, AF_INET6), the address family is
+read from `inp_vflag` as `netstat` does, and the fixtures carry both shapes written out by hand, not derived from the
+parser's rule.
 
 ### Owner: `so_e_pid` when set, else `so_last_pid` [S, M]
 
@@ -121,7 +136,9 @@ Consequences:
    quiet host a gap under 16 never fired. The rule is: `announced > sent` AND no socket in the list belongs to a process
    other than Dyno's own pid (`PcbList::restricted(own_pid)`, the pid passed in so the parser stays pure). A host whose
    only live sockets are Dyno's own cannot be told from a cut-down view and is reported as cut down (the safe side).
-   Development builds, `cargo run` binaries and unit tests (identifier without a dot) land here by design; unit tests
+   The opposite error is accepted and documented: a cut-down view that contains a socket whose `so_last_pid` is a child of
+   Dyno (an inherited socket another process used last) is not recognised and is shown as if whole. Development builds,
+   `cargo run` binaries and unit tests (identifier without a dot) land here by design; unit tests
    look at their own sockets, which are always in the list.
 4. The detection works from the list itself, so a change in the rule on another macOS version degrades to the same
    visible message instead of to wrong data.
@@ -145,10 +162,13 @@ Consequences:
 - The parser (`parse::mac_pcblist::parse`) is pure and compiled on every OS. It reads only through checked slices; a list
   over 64 MiB is refused unread; at most 262,144 sockets are kept; every record must lie inside the buffer; a record
   shorter than the bytes read from it is `UnknownLayout`, a record that runs past the end or has a length under 8 is
-  `Malformed`; the socket record's `xso_family` must agree with the control block's address flags (a cross-check of two
-  records, review P2: layout drift shows as unreadable groups, not as wrong addresses); when the kernel announced sockets
-  and not one could be read because records were missing or contradicted each other, the answer is `UnknownLayout`, not an
-  empty list (review P1-5; tested with the statistics, socket and tcpcb records removed from the fixtures); records of kinds it does not know are skipped by their own length (so a longer struct from a newer macOS
+  `Malformed`; the socket record's `xso_family` must be one that exists (0, AF_INET or AF_INET6; not required to agree with
+  the control block's flags, which real sockets do not always do); a record may not run into the 24-byte trailer; when
+  groups were sent and most of them could not be read because records were missing or held impossible values, the answer
+  is `UnknownLayout`, not an empty list. That judgement is made on the groups actually seen, never on `xig_count`, which
+  counts dead control blocks (a fixture with the socket records removed and 40 announced still raises it), and it is made
+  per protocol before the two lists are merged, so one protocol that drifted fails the whole read instead of silently losing
+  its rows (review P1-2, P1-5); records of kinds it does not know are skipped by their own length (so a longer struct from a newer macOS
   still parses, and a new record kind does not stop it); sockets whose generation is newer than the header's (freed
   while copying) are left out as `netstat` does. A test truncates the fixtures at every length and changes every byte to
   four values: no panic.
@@ -184,7 +204,8 @@ stall, the interval is the lever (ER-20); a retry is not.
 - The Network page on macOS is exact for TCP and UDP and no longer able to harm other programs; the Dyno 1.0 tag waits
   for this to land.
 - A new release gate: the built bundle's `dyno-agent` and `dyno` carry a dotted code-signing identifier, and a
-  bundle-level smoke test (the packaged agent lists a socket another process owns) runs on the Mac runner before the tag.
+  check of the installed app (its Network page lists a socket another program owns) is the manual line in
+  `docs/releasing.md` before the tag; CI cannot run the installed LaunchAgent.
 - Risk: private struct layout and the visibility rule can change in a macOS update; both degrade to the explained
   message. The offsets are pinned by fixtures and by the ignored comparison test, run by hand on each new macOS.
 - `lsof` leaves the macOS adapters entirely; the Linux adapters keep it (it reads `/proc` there, no descriptor of a

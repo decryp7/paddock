@@ -1,5 +1,5 @@
 //! The machine's sockets with their owning process: Windows reads the IP Helper tables, macOS the kernel's socket lists
-//! (`pcblist_n`, ADR 0026: no descriptor of another program is touched), Linux `netstat2` (`/proc/net` with the
+//! (`pcblist_n`, Dyno ADR 0026: no descriptor of another program is touched), Linux `netstat2` (`/proc/net` with the
 //! inode-to-pid map). Read-only. Another user's processes cannot be resolved without elevation on Linux: those sockets
 //! come back with no pid and the page says so; Dyno never asks for root for this.
 
@@ -42,7 +42,7 @@ impl NetworkSockets for OsSockets {
         crate::windows::net::sockets().map_err(PlatformError::Failed)
     }
 
-    /// macOS: the kernel's socket lists, never a sweep over other programs' descriptors (ADR 0026).
+    /// macOS: the kernel's socket lists, never a sweep over other programs' descriptors (Dyno ADR 0026).
     #[cfg(target_os = "macos")]
     fn sockets(&self) -> Result<Vec<SocketRow>, PlatformError> {
         crate::macos::pcblist::sockets()

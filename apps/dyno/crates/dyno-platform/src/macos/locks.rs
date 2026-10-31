@@ -1,39 +1,43 @@
 //! "What is locking this file?" through `libproc` (macOS has no Restart Manager). Never `lsof -- <path>`: it asks the
 //! kernel about every socket and pipe descriptor of every process (`dproc.c` `process_socket`), which can mark another
-//! program's socket `SS_DRAINING` (ADR 0026). Here every process's descriptors are only listed from the table and
+//! program's socket `SS_DRAINING` (Dyno ADR 0026). Here every process's descriptors are only listed from the table and
 //! information is asked only for file (vnode) descriptors, whose file operations cannot drain (`fo_no_drain`).
 
 use crate::unix_proc::started_of;
 use dyno_core::ports::{FileLocks, PlatformError};
 use dyno_core::process::{Locker, ProcessRef};
 use std::path::Path;
-use std::time::{Duration, Instant};
 
-/// The longest one question may take on a loaded machine.
-const LIMIT: Duration = Duration::from_secs(15);
+/// Most descriptors looked at in one question (bounded by work, not by a clock: ADR 0031, ER-19). A machine has some
+/// tens of thousands of open files; this is far above that.
+const MAX_LOOKED_AT: usize = 4 << 20;
 
 /// `libproc`-backed file locks.
 pub struct LsofLocks;
 
 impl FileLocks for LsofLocks {
     fn lockers(&mut self, path: &Path) -> Result<Vec<Locker>, PlatformError> {
-        let path = path
-            .canonicalize()
+        use std::os::unix::fs::MetadataExt;
+        let meta = path
+            .metadata()
             .map_err(|_| PlatformError::NotFound(format!("{} does not exist.", path.display())))?;
-        let want = path.to_string_lossy().into_owned();
+        // The file itself, not its name: a hard link or a renamed path is the same file (device and inode).
+        let want = (meta.dev() as u32, meta.ino());
         let me = std::process::id();
-        let end = Instant::now() + LIMIT;
+        let mut looked_at = 0usize;
         let mut out = Vec::new();
         for pid in super::libproc::pids().into_iter().filter(|p| *p != me) {
-            if Instant::now() > end {
-                return Err(PlatformError::Timeout(
-                    "Looking for the programs that hold the file took too long.".into(),
-                ));
+            let mut holds = false;
+            for (fd, _) in super::libproc::fds(pid).into_iter().filter(|(_, t)| super::libproc::is_vnode(*t)) {
+                looked_at += 1;
+                if looked_at > MAX_LOOKED_AT {
+                    return Err(PlatformError::Failed("There are too many open files to look through.".into()));
+                }
+                if super::libproc::vnode_info(pid, fd).is_some_and(|v| (v.dev, v.ino) == want) {
+                    holds = true;
+                    break;
+                }
             }
-            let holds = super::libproc::fds(pid)
-                .into_iter()
-                .filter(|(_, t)| super::libproc::is_vnode(*t))
-                .any(|(fd, _)| super::libproc::vnode_path(pid, fd).is_some_and(|p| p == want));
             if !holds {
                 continue;
             }
@@ -67,20 +71,6 @@ mod tests {
         }
     }
 
-    /// A loaded machine can run into the 15 s limit: only that (a `Timeout`) is asked again, a few times; any other
-    /// error fails at once, and when the retries run out the last timeout is the failure message.
-    fn lockers_retrying(path: &Path) -> Vec<Locker> {
-        let mut last = None;
-        for _ in 0..4 {
-            match LsofLocks.lockers(path) {
-                Ok(found) => return found,
-                Err(e @ PlatformError::Timeout(_)) => last = Some(e),
-                Err(e) => panic!("lockers for {}: {e:?}", path.display()),
-            }
-        }
-        panic!("lockers for {} timed out 4 times, last: {last:?}", path.display());
-    }
-
     #[test]
     fn finds_a_dummy_that_holds_a_temp_file_and_nobody_for_a_free_one() {
         let dir = tempfile::tempdir().unwrap();
@@ -99,15 +89,20 @@ mod tests {
         let mut ready = String::new();
         BufReader::new(dummy.0.stdout.take().unwrap()).read_line(&mut ready).unwrap();
         assert_eq!(ready.trim(), "ready");
-        let found = lockers_retrying(&held);
+        let found = LsofLocks.lockers(&held).unwrap();
         // The name is whatever the process is called at that moment (the shell announces "ready" just before it execs `tail`).
         assert!(
             found.iter().any(|l| l.process.pid == dummy.0.id() && !l.name.is_empty()),
             "{found:?}"
         );
+        // The same file under another name (a hard link) has the same lockers: the match is by device and inode.
+        let link = dir.path().join("link.txt");
+        std::fs::hard_link(&held, &link).unwrap();
+        let by_link = LsofLocks.lockers(&link).unwrap();
+        assert!(by_link.iter().any(|l| l.process.pid == dummy.0.id()), "{by_link:?}");
         let free = dir.path().join("free.txt");
         std::fs::write(&free, b"y").unwrap();
-        assert!(lockers_retrying(&free).is_empty());
+        assert!(LsofLocks.lockers(&free).unwrap().is_empty());
         assert!(matches!(
             LsofLocks.lockers(&dir.path().join("missing")),
             Err(PlatformError::NotFound(_))

@@ -1,6 +1,6 @@
 //! macOS `sysctl net.inet.tcp.pcblist_n` / `net.inet.udp.pcblist_n`: the kernel's list of protocol control blocks,
 //! one `xinpcb_n`, `xsocket_n`, two `xsockbuf_n`, one `xsockstat_n` (and, for TCP, one `xtcpcb_n`) per socket. It is what
-//! `netstat -anv` prints (`process:pid` is `xsocket_n.so_last_pid`). ADR 0026.
+//! `netstat -anv` prints (`process:pid` is `xsocket_n.so_last_pid`). Dyno ADR 0026.
 //!
 //! The structs are `#ifdef PRIVATE` in XNU (`bsd/netinet/in_pcb.h`, `bsd/sys/socketvar.h`, `bsd/netinet/tcp_var.h`), not
 //! in the public SDK and not stable API. So this parser trusts only what the kernel states itself: every record starts
@@ -86,7 +86,7 @@ pub struct PcbList {
     pub sockets: Vec<PcbSocket>,
     /// Groups left out for any reason: freed while the kernel copied them out, another protocol, or unreadable.
     pub skipped: usize,
-    /// Of those, groups whose records were missing or contradicted each other (a kind or field this reader does not
+    /// Of those, groups whose records were missing or held values that cannot be (a kind or field this reader does not
     /// find where it expects it): evidence that the layout changed.
     pub unreadable: usize,
     /// How many sockets the kernel announced in the header (`xig_count`). It counts dead control blocks too, so it
@@ -96,9 +96,11 @@ pub struct PcbList {
 
 impl PcbList {
     /// True when this looks like the cut-down list macOS 27.2 sends a process whose code-signing identifier has no dot
-    /// (ADR 0026): fewer sockets sent than announced AND none of them belongs to a process other than `own_pid`. The
+    /// (Dyno ADR 0026): fewer sockets sent than announced AND none of them belongs to a process other than `own_pid`. The
     /// announced count alone proves nothing, so the owners decide; a host whose only sockets are our own is reported as
     /// restricted too, which is the safe side (the page says so instead of showing a list that may be missing sockets).
+    /// The opposite error is possible and accepted: a cut-down view that contains a socket whose `so_last_pid` is a
+    /// child of Dyno (an inherited socket another process last used) is not recognised, and is then shown as if whole.
     pub fn restricted(&self, own_pid: u32) -> bool {
         let others = self
             .sockets
@@ -196,10 +198,10 @@ fn build(g: &Group<'_>, proto: Proto, gen_limit: u64) -> Result<PcbSocket, Left>
         if protocol != wanted {
             return Err(Left::Fine);
         }
-        // The socket's family and the control block's address flags must agree (a cross-check of the two records).
-        let v6 = vflag & INP_IPV6 != 0;
-        let agree = if v6 { family == AF_INET6 } else { family == AF_INET };
-        if !agree {
+        // Only a sanity check on the socket record: the address family is read from `inp_vflag` like `netstat` does. The
+        // two do not always agree on a real machine (measured on 27.2: a dual-stack socket, family 30, with a v4-mapped
+        // peer, vflag IPv4; and sockets with family 0), so agreement is not required, only a family that exists.
+        if !matches!(family, 0 | AF_INET | AF_INET6) {
             return Err(Left::Unreadable);
         }
     }
@@ -279,7 +281,12 @@ pub fn parse(bytes: &[u8], proto: Proto) -> Result<PcbList, PcbError> {
                 "A socket record at byte {at} says it is {len} bytes long."
             )));
         }
-        let Some(rec) = at.checked_add(len).and_then(|end| bytes.get(at..end)) else {
+        // A record may not run into the trailer: it ends at or before the last 24 bytes.
+        let Some(rec) = at
+            .checked_add(len)
+            .filter(|end| *end <= bytes.len() - XINPGEN_LEN)
+            .and_then(|end| bytes.get(at..end))
+        else {
             return Err(PcbError::Malformed(format!(
                 "A socket record at byte {at} runs past the end of the list."
             )));
@@ -311,10 +318,13 @@ pub fn parse(bytes: &[u8], proto: Proto) -> Result<PcbList, PcbError> {
         };
     }
     close(&mut group, proto, gen_limit, &mut out);
-    // Nothing readable although the kernel announced sockets and many groups were unreadable: the layout is not ours.
-    if out.sockets.is_empty() && out.announced > 0 && out.unreadable > 0 && out.unreadable * 2 >= out.announced {
+    // Nothing readable although groups were sent and most of them were unreadable: the layout is not ours. Judged
+    // against the groups actually seen, never against `xig_count`, which includes dead control blocks (245 announced,
+    // 45 sent) and so could never trip.
+    let seen = out.sockets.len() + out.skipped;
+    if out.sockets.is_empty() && out.unreadable > 0 && out.unreadable * 2 >= seen {
         return Err(PcbError::UnknownLayout(format!(
-            "None of the {} sockets the kernel listed could be read: its record layout is not the one this reader knows.",
+            "None of the {} socket groups the kernel sent could be read: its record layout is not the one this reader knows.",
             out.unreadable
         )));
     }
@@ -352,7 +362,7 @@ mod tests {
     #[test]
     fn tcp_fixture_gives_every_state_address_family_and_owner() {
         let l = parse(TCP, Proto::Tcp).unwrap();
-        assert_eq!((l.sockets.len(), l.skipped, l.announced), (7, 0, 7));
+        assert_eq!((l.sockets.len(), l.skipped, l.announced), (9, 0, 9));
         let r: Vec<&SocketRow> = l.sockets.iter().map(|s| &s.row).collect();
         assert_eq!(
             r[0],
@@ -381,6 +391,10 @@ mod tests {
         );
         assert_eq!(r[5].state, SocketState::CloseWait);
         assert_eq!(r[6].state, SocketState::FinWait);
+        // Real shapes the first family cross-check wrongly dropped (35 of 247 sockets on 27.2): a v4-mapped peer on a
+        // dual-stack socket, and a socket whose family is unset.
+        assert_eq!((r[7].local, r[7].pid), (ip("192.0.2.10"), Some(4260)));
+        assert_eq!((r[8].remote, r[8].pid), (Some((ip("198.51.100.21"), 443)), Some(4261)));
     }
 
     #[test]
@@ -443,7 +457,7 @@ mod tests {
         let mut b = TCP.to_vec();
         b[8..16].copy_from_slice(&3u64.to_le_bytes());
         let l = parse(&b, Proto::Tcp).unwrap();
-        assert_eq!((l.sockets.len(), l.skipped, l.unreadable), (0, 7, 0));
+        assert_eq!((l.sockets.len(), l.skipped, l.unreadable), (0, 9, 0));
     }
 
     #[test]
@@ -462,6 +476,10 @@ mod tests {
         // No socket records: the same.
         let b = without_kind(TCP, XSO_SOCKET);
         assert!(matches!(parse(&b, Proto::Tcp), Err(PcbError::UnknownLayout(_))));
+        // The same with many dead control blocks announced (announced 40, 9 groups sent): the alarm judges the groups seen.
+        let mut many = without_kind(TCP, XSO_SOCKET);
+        many[4..8].copy_from_slice(&40u32.to_le_bytes());
+        assert!(matches!(parse(&many, Proto::Tcp), Err(PcbError::UnknownLayout(_))));
         // UDP without its statistics records still parses (they are not read), and without sockets it does not.
         assert_eq!(parse(&without_kind(UDP, 0x8), Proto::Udp).unwrap().sockets.len(), 3);
         assert!(matches!(
@@ -471,14 +489,21 @@ mod tests {
     }
 
     #[test]
-    fn a_socket_whose_family_contradicts_its_address_flags_is_unreadable() {
+    fn a_socket_with_a_family_that_does_not_exist_is_unreadable_but_30_on_an_ipv4_group_is_not() {
         let mut b = TCP.to_vec();
-        // First group's xsocket_n starts after its 104-byte xinpcb_n: set xso_family (offset 40) to 30 on an IPv4 socket.
+        // First group's xsocket_n starts after its 104-byte xinpcb_n (an IPv4 group).
         let so = XINPGEN_LEN + 104;
         assert_eq!(u32::from_le_bytes(b[so + 4..so + 8].try_into().unwrap()), XSO_SOCKET);
         b[so + SO_FAMILY..so + SO_FAMILY + 4].copy_from_slice(&30i32.to_le_bytes());
         let l = parse(&b, Proto::Tcp).unwrap();
-        assert_eq!((l.sockets.len(), l.unreadable), (6, 1));
+        assert_eq!(
+            (l.sockets.len(), l.unreadable),
+            (9, 0),
+            "a v4-mapped socket on a dual-stack family is real"
+        );
+        b[so + SO_FAMILY..so + SO_FAMILY + 4].copy_from_slice(&99i32.to_le_bytes());
+        let l = parse(&b, Proto::Tcp).unwrap();
+        assert_eq!((l.sockets.len(), l.unreadable), (8, 1));
     }
 
     #[test]
@@ -496,6 +521,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_record_that_runs_into_the_trailer_is_malformed() {
+        let mut b = TCP.to_vec();
+        // The last record's length is stretched by 8 bytes: it would end inside the 24-byte trailer.
+        let last = b.len() - XINPGEN_LEN - 208;
+        assert_eq!(u32::from_le_bytes(b[last + 4..last + 8].try_into().unwrap()), XSO_TCPCB);
+        b[last..last + 4].copy_from_slice(&212u32.to_le_bytes());
+        assert!(matches!(parse(&b, Proto::Tcp), Err(PcbError::Malformed(_))));
     }
 
     #[test]

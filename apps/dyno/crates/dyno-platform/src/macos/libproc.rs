@@ -1,16 +1,26 @@
 //! Open files and mapped libraries of a process through `libproc`, **without taking a reference on a socket, pipe or
-//! kqueue descriptor** (ADR 0026). `lsof` fetches information for every descriptor it meets, sockets and pipes
+//! kqueue descriptor** (Dyno ADR 0026). `lsof` fetches information for every descriptor it meets, sockets and pipes
 //! included (`dproc.c` `process_socket` / `process_pipe`), which can mark another program's socket `SS_DRAINING`.
 //! Here the descriptors are only *listed* (`PROC_PIDLISTFDS` reads the table and holds nothing), and information is
 //! asked only for vnode (file) descriptors, whose file operations have no drain (`vfs_vnops.c`: `.fo_drain =
 //! fo_no_drain`; sockets, pipes and kqueues have `soo_drain`, `pipe_drain`, `kqueue_drain`).
+//!
+//! Why asking about a descriptor that is not a vnode any more is also harmless (XNU `kern_descrip.c`): the listing and the
+//! question are two steps, and the number can be reused by a socket in between. `fp_get_ftype` checks the descriptor's
+//! type under `proc_fdlock` *before* it takes the I/O reference (`os_ref_retain_locked` on `fp_iocount`), and returns
+//! `ENOTSUP` for another type without taking one. So a query meant for a vnode can briefly delay the target's `close()`
+//! (it holds the lock for a moment), but never takes a reference on a socket and so never causes a drain or an error.
 
 use std::ffi::c_void;
 
-const PROC_PIDLISTFDS: libc::c_int = 1;
+use libc::{PROC_PIDLISTFDS, PROX_FDTYPE_VNODE};
+
 const PROC_PIDREGIONPATHINFO: libc::c_int = 8;
 const PROC_PIDFDVNODEPATHINFO: libc::c_int = 2;
-const PROX_FDTYPE_VNODE: u32 = 1;
+/// In `vnode_fdinfowithpath`: a 24-byte `proc_fileinfo`, then `vinfo_stat` whose `vst_dev` (u32) is at 0 and `vst_ino`
+/// (u64) at 8.
+const VNODE_DEV: usize = 24;
+const VNODE_INO: usize = 32;
 const PATH_BYTES: usize = 1024;
 /// `sizeof(struct proc_regionwithpathinfo)`: 96 bytes of `proc_regioninfo`, then a `vnode_info_path` (152 + 1024).
 const REGION_INFO_BYTES: usize = 96;
@@ -80,17 +90,36 @@ pub fn name(pid: u32) -> Option<String> {
 
 /// Whether a descriptor type from [`fds`] is a file (vnode).
 pub fn is_vnode(fd_type: u32) -> bool {
-    fd_type == PROX_FDTYPE_VNODE
+    i64::from(fd_type) == i64::from(PROX_FDTYPE_VNODE)
 }
 
-/// The path of a vnode descriptor. Only for descriptors [`fds`] reported as vnodes; `None` when it closed meanwhile.
-pub fn vnode_path(pid: u32, fd: i32) -> Option<String> {
+/// What a vnode descriptor is open on: its path (as the kernel reports it) and its identity (device and inode).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VnodeInfo {
+    /// The path.
+    pub path: String,
+    /// `vst_dev`.
+    pub dev: u32,
+    /// `vst_ino`.
+    pub ino: u64,
+}
+
+/// The file a vnode descriptor is open on. Only for descriptors [`fds`] reported as vnodes; `None` when it closed meanwhile.
+pub fn vnode_info(pid: u32, fd: i32) -> Option<VnodeInfo> {
     let pid = libc::pid_t::try_from(pid).ok()?;
     let mut buf = vec![0u8; 2048];
     // SAFETY: `buf` is 2048 writable bytes, larger than `struct vnode_fdinfowithpath` (1200); the call returns the bytes written.
     let got = unsafe { libc::proc_pidfdinfo(pid, fd, PROC_PIDFDVNODEPATHINFO, buf.as_mut_ptr().cast::<c_void>(), 2048) };
     let got = usize::try_from(got).ok().filter(|g| *g > PATH_BYTES)?;
-    path_at_end(&buf[..got])
+    let path = path_at_end(&buf[..got])?;
+    let dev = u32::from_le_bytes(buf.get(VNODE_DEV..VNODE_DEV + 4)?.try_into().ok()?);
+    let ino = u64::from_le_bytes(buf.get(VNODE_INO..VNODE_INO + 8)?.try_into().ok()?);
+    Some(VnodeInfo { path, dev, ino })
+}
+
+/// The path of a vnode descriptor (see [`vnode_info`]).
+pub fn vnode_path(pid: u32, fd: i32) -> Option<String> {
+    vnode_info(pid, fd).map(|v| v.path)
 }
 
 /// The path is the last field of both `vnode_fdinfowithpath` and `proc_regionwithpathinfo`: its last 1024 bytes.
@@ -149,6 +178,19 @@ mod tests {
             .filter_map(|(fd, _)| vnode_path(me, fd))
             .any(|p| p == canonical);
         assert!(found, "the open file is listed by path");
+        // Its identity is the one the file system reports, also through a hard link.
+        let link = dir.path().join("link.txt");
+        std::fs::hard_link(&path, &link).unwrap();
+        let meta = std::fs::metadata(&link).unwrap();
+        // (With two names for one file the kernel may report either as the path: why lockers match on identity.)
+        use std::os::unix::fs::MetadataExt;
+        let want = (meta.dev() as u32, meta.ino());
+        let held = fds(me)
+            .into_iter()
+            .filter(|(_, t)| is_vnode(*t))
+            .filter_map(|(fd, _)| vnode_info(me, fd))
+            .find(|v| (v.dev, v.ino) == want);
+        assert!(held.is_some(), "the descriptor is found by device and inode");
         assert!(pids().contains(&me));
         let exe = std::env::current_exe()
             .unwrap()

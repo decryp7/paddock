@@ -1,5 +1,5 @@
 //! The agent's code-signing identifier must contain a dot, also after Tauri re-signs it with `codesign --force -s -`
-//! (ADR 0026): on macOS 27.2 the kernel shows a process the whole socket list only then. Fails when the Info.plist
+//! (Dyno ADR 0026): on macOS 27.2 the kernel shows a process the whole socket list only then. Fails when the Info.plist
 //! embedded by `build.rs` is lost.
 #![cfg(target_os = "macos")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
