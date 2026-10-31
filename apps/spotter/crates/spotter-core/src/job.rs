@@ -86,6 +86,8 @@ pub enum Phase {
     Settling,
     /// Checking watches: `done` of `total`.
     Checking,
+    /// The browser for a page was stopped by the OS or another app while it started; Spotter waits (ADR 0031).
+    BrowserPaused,
 }
 
 impl Phase {
@@ -101,6 +103,7 @@ impl Phase {
             Phase::Finding => "Finding files",
             Phase::Settling => "Waiting for files to settle",
             Phase::Checking => "Checking",
+            Phase::BrowserPaused => "The browser is paused by macOS or another app; Spotter waits",
         }
     }
 }
@@ -415,6 +418,7 @@ mod tests {
             Phase::Finding,
             Phase::Settling,
             Phase::Checking,
+            Phase::BrowserPaused,
         ] {
             assert!(!p.label().is_empty());
         }

@@ -147,7 +147,7 @@ impl Checker {
                     ));
                 };
                 let rendered = renderer
-                    .render(&url, wait_selector.as_deref(), self.render_timeout)
+                    .render_job(&url, wait_selector.as_deref(), self.render_timeout, job)
                     .await
                     .map_err(render_error)?;
                 (rendered.html.into_bytes(), (Validators::default(), parser))

@@ -70,6 +70,7 @@ fn slug(phase: Phase) -> &'static str {
         Phase::Finding => "find",
         Phase::Settling => "settle",
         Phase::Checking => "check",
+        Phase::BrowserPaused => "paused",
     }
 }
 
