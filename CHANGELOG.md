@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-diag`: the log window is shared between the app's processes and is 4 MB
+- `window::log_window` gives each process (`<id>.<day>.log`, `<id>-<process>.<day>.log`) an equal share of the window, newest files first within it; what a small process does not use goes to the larger ones. A chatty app log can no longer push a background process's log out of the report (Dyno's agent). `LOG_WINDOW` is 4 MB (was 2 MB); at most `MAX_LOG_FILES` files per process.
+
 ### `paddock-diag`: the settings file in a report can be named
 - `builtin::Settings::file(name)` and `tauri::Setup::settings_file(name)` report that file of the config folder (masked, listed
   under its own name) instead of `settings.json`; the shell demo passes `shell-settings.json`, so a report never shows an app's
