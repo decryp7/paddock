@@ -18,4 +18,7 @@ disallowed-methods = [
     { path = "nix::sys::signal::killpg", allow-invalid = true, reason = "signals a process group by a bare pid: use paddock_proc::kill_tree with a ProcessId (ADR 0033)" },
     { path = "sysinfo::Process::kill", allow-invalid = true, reason = "ends a process found by pid: use paddock_proc::end with a ProcessId (ADR 0033)" },
     { path = "sysinfo::Process::kill_with", allow-invalid = true, reason = "ends a process found by pid: use paddock_proc::end / ask with a ProcessId (ADR 0033)" },
+    # A pre_exec hook forces fork+exec instead of posix_spawn (a fork copies the process's descriptors until it execs; the
+    # justified sites carry #[expect(clippy::disallowed_methods, reason = "...")]): act on the held child after the spawn.
+    { path = "std::os::unix::process::CommandExt::pre_exec", allow-invalid = true, reason = "forces fork+exec: act on the held child after the spawn instead (lessons, 2026-10-31)" },
 ]

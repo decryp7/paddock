@@ -53,18 +53,18 @@ pub fn clean_env(cmd: &mut Command, keep: &[&str]) {
     }
 }
 
-/// Starts the child at lower priority so the app stays responsive: below-normal on Windows (this sets the whole creation
-/// flags, still without a console window), `setpriority` before exec elsewhere. Not `nice(1)`: running through it drops
-/// `DYLD_*` variables on macOS.
+/// Marks the command to start at lower priority so the app stays responsive: below-normal on Windows (this sets the whole
+/// creation flags, still without a console window). On Unix nothing is set on the command: the priority is lowered right
+/// after the spawn through the held child ([`Supervised::lower_priority`], [`Limits::lowered`]), because a `pre_exec` hook
+/// forces fork+exec, and a fork carries copies of the process's descriptors (locks, pipes) until it execs. Not `nice(1)`:
+/// running through it drops `DYLD_*` variables on macOS.
 pub fn lower_priority(cmd: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
     }
-    #[cfg(unix)]
-    crate::sys::lower_priority_before_exec(cmd);
-    #[cfg(not(any(windows, unix)))]
+    #[cfg(not(windows))]
     let _ = cmd;
 }
 
@@ -142,20 +142,5 @@ mod tests {
             seen.iter().any(|l| l.starts_with("PATH=")),
             "an allow-listed variable is kept"
         );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn lower_priority_raises_the_niceness_of_the_child() {
-        use crate::testchild::{Mode, child};
-        let mut c = child(Mode::PrintNice);
-        lower_priority(&mut c);
-        let out =
-            crate::run_bounded(c, crate::Limits::new(std::time::Duration::from_secs(60))).unwrap();
-        let nice: i32 = crate::testchild::lines(&out.stdout_text())[0]
-            .trim()
-            .parse()
-            .unwrap();
-        assert!(nice >= 10, "niceness {nice}");
     }
 }

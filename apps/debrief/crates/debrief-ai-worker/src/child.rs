@@ -368,6 +368,7 @@ impl ServerChild {
             // SAFETY: only async-signal-safe calls between fork and exec. The worker starts llama-server
             // from one long-lived thread, so the "parent thread exits" case of PDEATHSIG does not apply.
             unsafe {
+                #[expect(clippy::disallowed_methods, reason = "PDEATHSIG is set by the child itself before exec; it cannot be set from the parent")]
                 cmd.pre_exec(|| {
                     libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL as libc::c_ulong);
                     Ok(())

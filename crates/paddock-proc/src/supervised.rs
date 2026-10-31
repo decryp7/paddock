@@ -284,6 +284,15 @@ impl Supervised {
         })
     }
 
+    /// Lowers the child's priority (Unix; Windows lowered it at the start, see [`crate::lower_priority`]). Done through the
+    /// held child right after the spawn, so no fork window is needed. Only a child that has not ended is touched (an ended one
+    /// may be reaped and its pid reused, rule 53). False when it is gone or the OS refused.
+    pub fn lower_priority(&mut self) -> bool {
+        self.child
+            .as_mut()
+            .is_some_and(|c| matches!(c.try_wait(), Ok(None)) && crate::sys::lower_child(c))
+    }
+
     /// Whether the child runs in a kill-on-close job object (Windows; always false elsewhere, where the process group
     /// plays that part).
     pub fn in_job(&self) -> bool {
@@ -837,5 +846,48 @@ mod tests {
         assert_eq!(s.stopped_over_memory(), None, "{:?}", heard.lock().unwrap());
         assert!(s.is_running());
         assert!(s.memory_peak() < cap_bytes, "peak {}", s.memory_peak());
+    }
+
+    /// The child is lowered from the parent after the spawn (rule 52: bulk work lowered), read back from the OS.
+    #[cfg(unix)]
+    #[test]
+    fn lower_priority_lowers_the_started_child_and_not_a_gone_one() {
+        let mut s = Supervised::spawn(child(Mode::Sleep)).unwrap();
+        let pid = s.id().unwrap();
+        // SAFETY: getpriority takes two integers; the child is unreaped, so the pid is its own.
+        let nice = |pid: u32| unsafe { libc::getpriority(libc::PRIO_PROCESS, pid as libc::id_t) };
+        let own = crate::sys::own_niceness();
+        assert_eq!(nice(pid), own, "starts at the parent's priority");
+        assert!(s.lower_priority());
+        // A parent already below the target (a niced test run) keeps its level.
+        assert_eq!(nice(pid), own.max(crate::sys::LOWERED_NICE));
+        s.kill();
+        assert!(!s.lower_priority(), "nothing left to lower");
+    }
+
+    /// A child that ended is not touched: its pid may be reused once it is reaped (rule 53).
+    #[cfg(unix)]
+    #[test]
+    fn an_ended_child_is_not_lowered() {
+        let mut s = Supervised::spawn(child(Mode::Exit3)).unwrap();
+        while s.is_running() {
+            std::thread::yield_now();
+        }
+        assert!(!s.lower_priority());
+    }
+
+    /// A child already below the target keeps its level and counts as lowered; one above is lowered to it.
+    #[cfg(unix)]
+    #[test]
+    fn a_child_is_lowered_to_the_level_and_never_raised() {
+        // SAFETY: getpriority/setpriority take plain integers; the pid is a child we hold unreaped.
+        let nice = |pid: u32| unsafe { libc::getpriority(libc::PRIO_PROCESS, pid as libc::id_t) };
+        let mut s = Supervised::spawn(child(Mode::Sleep)).unwrap();
+        let pid = s.id().unwrap();
+        // The child starts at our level; make it lower than the target first.
+        unsafe { libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, 15) };
+        assert!(s.lower_priority(), "already below the target");
+        assert_eq!(nice(pid), 15, "never raised");
+        s.kill();
     }
 }
