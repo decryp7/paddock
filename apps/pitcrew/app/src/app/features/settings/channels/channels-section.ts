@@ -3,7 +3,7 @@ import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { MatSlideToggle } from '@angular/material/slide-toggle';
 import type { ChannelConfig, ChannelTransport } from '../../../core/api.types';
 import { notificationKindLabel } from '../../../shared/labels';
-import { confirmAction } from '../../../shared/ui/confirm-dialog';
+import { confirmAction } from '../../../shared/confirm';
 import { EmptyState } from '../../../shared/ui/empty-state';
 import { LoadState } from '../../../shared/ui/load-state';
 import {

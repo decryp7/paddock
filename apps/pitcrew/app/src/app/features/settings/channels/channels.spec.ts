@@ -195,7 +195,7 @@ describe('ChannelsSection', () => {
     // Dismissed: the channel stays.
     btn(el, 'Delete channel').click();
     await settle(f);
-    expect(TestBed.inject(NoticeLog).dialogs.at(-1)?.id).toBe('pc.confirm');
+    expect(TestBed.inject(NoticeLog).dialogs.at(-1)?.id).toBe('pd.confirm');
     expect((await mock.channels()).channels).toHaveLength(1);
     TestBed.inject(NoticeLog).answerNext(true);
     btn(el, 'Delete channel').click();

@@ -375,7 +375,7 @@ test.describe('native feel (ADR 0008)', () => {
     await expect(sleep.getByTestId('fate')).toContainText('stops in 1 h 0');
 
     await sleep.getByRole('button', { name: /^Stop sleep.exe now/ }).click();
-    const dialog = page.getByRole('dialog', { name: 'Stop process' });
+    const dialog = page.getByRole('alertdialog', { name: /^Stop / });
     await expect(dialog).toContainText('asked to stop first');
     await dialog.getByRole('button', { name: 'Stop now' }).click();
     await expect(page.locator('tr', { hasText: 'sleep.exe' })).toHaveCount(0);
@@ -388,7 +388,7 @@ test.describe('native feel (ADR 0008)', () => {
     await expect(runner.getByRole('button', { name: /^Stop / })).toHaveCount(0);
     await runner.getByRole('button', { name: /More actions for/ }).click();
     await page.getByRole('menuitem', { name: 'Stop the runner process…' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Stop process' });
+    const dialog = page.getByRole('alertdialog', { name: /^Stop / });
     await expect(dialog).toContainText('Pitcrew will restart it');
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toBeHidden();

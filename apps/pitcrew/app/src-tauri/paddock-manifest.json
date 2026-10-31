@@ -118,15 +118,6 @@
       "height": null,
       "commands": []
     },
-    "pc.confirm": {
-      "kind": "decision",
-      "modality": "modal",
-      "instanced": false,
-      "requiredChoice": false,
-      "width": 400,
-      "height": null,
-      "commands": []
-    },
     "pc.register": {
       "kind": "form",
       "modality": "modal",
@@ -144,15 +135,6 @@
         "runner_status"
       ]
     },
-    "pc.stop-process": {
-      "kind": "decision",
-      "modality": "modal",
-      "instanced": false,
-      "requiredChoice": false,
-      "width": 400,
-      "height": null,
-      "commands": []
-    },
     "pd.about": {
       "kind": "viewer",
       "modality": "modeless",
@@ -165,6 +147,15 @@
         "about_legal",
         "files_open_url"
       ]
+    },
+    "pd.confirm": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": true,
+      "requiredChoice": false,
+      "width": 400,
+      "height": null,
+      "commands": []
     },
     "pd.settings": {
       "kind": "tool",
@@ -243,9 +234,7 @@
     "pc.category.runners": "Runners",
     "pc.diagnostics": "Export diagnostics",
     "pc.dialog.config-diff": "Review configuration changes",
-    "pc.dialog.confirm": "Please confirm",
     "pc.dialog.register": "Register a runner",
-    "pc.dialog.stop-process": "Stop process",
     "pc.health.service": "the Pitcrew service",
     "pc.page.activity": "Activity",
     "pc.page.dashboard": "Dashboard",
@@ -266,6 +255,7 @@
     "pd.about.title": "About",
     "pd.category.app": "Application",
     "pd.category.help": "Help",
+    "pd.confirm.title": "Confirm",
     "pd.settings.appearance": "Appearance",
     "pd.settings.open": "Settings…",
     "pd.settings.title": "Settings",

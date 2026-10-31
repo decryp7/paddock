@@ -1,4 +1,4 @@
-//! Pitcrew's own dialog contracts (ADR 0026 §3): the confirmation and the stop-process question, the configuration diff, the
+//! Pitcrew's own dialog contracts (ADR 0026 §3): the configuration diff (confirmations are the shared `pd.confirm`), the
 //! registration wizard and the Settings window (the shell's window as the app's dialog, because its pages are the app's
 //! choice). About, What's new and Updates are the updater's table. The UI's `defineDialog` reads this table from the
 //! generated `src/app/generated/dialog-contracts.ts`.
@@ -9,10 +9,6 @@ use paddock_shell::dialog_commands as shell;
 paddock_dialogs::dialogs! {
     /// Pitcrew's dialogs, and the commands every one of its dialog windows may call (the start-up handshake).
     pub static DIALOGS, base &[shell::startup::window_pong, shell::startup::window_ready];
-    // "Please confirm" something that cannot be undone; the caller passes the words (a decision).
-    "pc.confirm" => Decision { width: Some(Narrow) },
-    // Stopping one process of a runner's tree.
-    "pc.stop-process" => Decision { width: Some(Narrow) },
     // What saving a runner's configuration would change; the window is fitted to its content.
     "pc.config-diff" => Form(Modal) { width: Some(Wide) },
     // The registration wizard: registers the runner (a job) and follows it.

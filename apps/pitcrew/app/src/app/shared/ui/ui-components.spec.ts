@@ -1,10 +1,8 @@
-import { answered, DISMISSED } from '@decryp7/paddock-ui/shell';
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import type { CommandError, UpdatePhase } from '../../core/api.types';
 import { appProviders, makeMock, settle, text } from '../../../testing/test-helpers';
 import { BrandLogo } from './brand-logo';
-import { ConfirmDialog, confirmAction } from './confirm-dialog';
 import { EmptyState } from './empty-state';
 import { LoadState } from './load-state';
 import { ServiceStore } from '../../state/service.store';
@@ -268,43 +266,5 @@ describe('UpdateProgress', () => {
     const el = mount({ phase: 'idle' });
     expect(el.querySelector('.faint')).toBeNull();
     expect(Array.from(el.querySelectorAll('li')).some((li) => li.classList.contains('current'))).toBe(false);
-  });
-});
-
-describe('confirmation dialog', () => {
-  beforeEach(() => configure());
-
-  function mount(danger: boolean) {
-    const f = TestBed.createComponent(ConfirmDialog);
-    f.componentRef.setInput('title', 'Remove x?');
-    f.componentRef.setInput('body', 'It goes away.');
-    f.componentRef.setInput('confirm', 'Remove it');
-    f.componentRef.setInput('danger', danger);
-    f.detectChanges();
-    return { el: f.nativeElement as HTMLElement, c: f.componentInstance };
-  }
-  const signal = new AbortController().signal;
-
-  it('declares the question, the body and a destructive answer for a dangerous confirmation', async () => {
-    const { el, c } = mount(true);
-    expect(c.dialogHeading()).toBe('Remove x?');
-    expect(text(el)).toContain('It goes away.');
-    const confirm = c.dialogActions().find((a) => a.id === 'confirm')!;
-    expect(confirm).toMatchObject({ kind: 'answer', label: 'Remove it', role: 'destructive' });
-    expect(confirm.kind === 'answer' && (await confirm.answer(signal))).toBe(true);
-  });
-
-  it('declares Cancel as the dismissal and a primary answer when not dangerous', () => {
-    const { c } = mount(false);
-    expect(c.dialogActions().find((a) => a.id === 'confirm')).toMatchObject({ role: 'primary' });
-    expect(c.dialogActions().find((a) => a.id === 'cancel')?.kind).toBe('dismiss');
-  });
-
-  it('opens as a window of its own; only a confirmed choice is true', async () => {
-    const openDialog = vi.fn().mockResolvedValueOnce(answered(true)).mockResolvedValueOnce(DISMISSED);
-    const data = { title: 'Remove x?', body: 'b', confirm: 'Remove it' };
-    expect(await confirmAction({ openDialog }, data)).toBe(true);
-    expect(openDialog).toHaveBeenCalledWith('pc.confirm', data);
-    expect(await confirmAction({ openDialog }, data)).toBe(false);
   });
 });

@@ -117,7 +117,7 @@ describe('UpdatesPage', () => {
     const log = TestBed.inject(NoticeLog);
     byText(el, 'button.primary', 'Update all')!.click();
     await settle(f, 2);
-    expect(log.dialogs.at(-1)?.id).toBe('pc.confirm');
+    expect(log.dialogs.at(-1)?.id).toBe('pd.confirm');
     for (const name of n) expect(JSON.stringify(log.dialogs.at(-1)?.inputs)).toContain(name);
     expect(act).not.toHaveBeenCalled();
 

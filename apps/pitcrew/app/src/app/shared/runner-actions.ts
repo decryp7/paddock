@@ -5,7 +5,7 @@ import { MatIcon } from '@angular/material/icon';
 import { Router } from '@angular/router';
 import type { RunnerSnapshot } from '../core/api.types';
 import { StatusStore, type RunnerCommand } from '../state/status.store';
-import { confirmAction } from './ui/confirm-dialog';
+import { confirmAction } from './confirm';
 
 /**
  * A runner's actions menu (CDK menu: arrow keys, Escape, typeahead). The service decides what an action does (e.g. a

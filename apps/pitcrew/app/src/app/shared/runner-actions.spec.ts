@@ -94,7 +94,7 @@ describe('RunnerActions', () => {
     log.answerNext(true);
     m.item('Remove…')!.click();
     await flush(20);
-    expect(log.dialogs.at(-1)).toMatchObject({ id: 'pc.confirm', inputs: { title: 'Remove legacy-ci?', confirm: 'Remove runner' } });
+    expect(log.dialogs.at(-1)).toMatchObject({ id: 'pd.confirm', inputs: { heading: 'Remove legacy-ci?', confirm: { label: 'Remove runner' } } });
     expect(TestBed.inject(StatusStore).runners().map((r) => r.name)).not.toContain('legacy-ci');
     expect(nav).toHaveBeenCalledWith(['/runners']);
   });

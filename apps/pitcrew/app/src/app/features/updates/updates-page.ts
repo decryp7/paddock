@@ -9,7 +9,7 @@ import { ClockService } from '../../core/clock.service';
 import { formatCount, formatDateTime, formatRelative, plural } from '../../shared/format';
 import { outcomeLook, updateModeLabel } from '../../shared/labels';
 import { UpdatePolicyEditor } from '../../shared/policy/update-policy-editor';
-import { confirmAction } from '../../shared/ui/confirm-dialog';
+import { confirmAction } from '../../shared/confirm';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { LoadState } from '../../shared/ui/load-state';
 import { UpdateProgress } from '../../shared/ui/update-progress';

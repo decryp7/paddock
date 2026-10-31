@@ -11,6 +11,7 @@ import {
   type,
   type ContributionBatch,
 } from '@decryp7/paddock-ui/shell';
+import { defineConfirmDialog } from '@decryp7/paddock-ui/shell/confirm';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import type { Routes } from '@angular/router';
 import { PAGE_DATA } from '@decryp7/paddock-ui/shell/pages';
@@ -23,20 +24,9 @@ import type { PitcrewContext } from './pitcrew-context';
 /** The service's id in Rust (`health::SERVICE`). */
 export const SERVICE_ID = 'pc.service';
 
-// TODO(ADR 0026 §7, Pitcrew row): `pc.confirm` (shared/ui/confirm-dialog.ts, six callers) and `pc.stop-process` become `pd.confirm`
-// of the shared dialog API (the callers pass the same inputs); delete both definitions and their components then.
-/** A confirmation of something that cannot be undone: modal, fitted to its content. */
-export const CONFIRM_DIALOG = defineDialog(DIALOG_CONTRACTS['pc.confirm'], {
-  title: msg('pc.dialog.confirm', 'Please confirm'),
-  result: type<boolean>(),
-  load: () => import('../shared/ui/confirm-dialog').then((m) => m.ConfirmDialog),
-});
-
-/** Stopping one process of a runner's tree. */
-export const STOP_PROCESS_DIALOG = defineDialog(DIALOG_CONTRACTS['pc.stop-process'], {
-  title: msg('pc.dialog.stop-process', 'Stop process'),
-  result: type<boolean>(),
-  load: () => import('../features/runners/stop-process-dialog').then((m) => m.StopProcessDialog),
+/** The shared confirmation (ADR 0026 §5): `confirmAction` and `confirmStopProcess` map onto it. */
+export const CONFIRM_DIALOG = defineConfirmDialog({
+  load: () => import('@decryp7/paddock-ui/shell/confirm/dialog').then((m) => m.PdConfirmDialog),
 });
 
 // TODO(ADR 0026 §7, Pitcrew row): the configuration diff becomes a wide decision of the shared dialog API.
@@ -114,7 +104,7 @@ export const PITCREW_SETTINGS_PAGES = [
 export const ABOUT_DIALOGS = defineAboutDialogs({ providers: () => import('./about.providers').then((m) => m.ABOUT_PROVIDERS) });
 
 /** Every dialog window of Pitcrew. */
-export const PITCREW_DIALOGS = [CONFIRM_DIALOG, STOP_PROCESS_DIALOG, CONFIG_DIFF_DIALOG, REGISTER_DIALOG, SETTINGS_DIALOG, ...ABOUT_DIALOGS] as const;
+export const PITCREW_DIALOGS = [CONFIRM_DIALOG, CONFIG_DIFF_DIALOG, REGISTER_DIALOG, SETTINGS_DIALOG, ...ABOUT_DIALOGS] as const;
 
 /** About's commands, Help menu items and notice kind (its dialogs are among `PITCREW_DIALOGS`). */
 export const ABOUT_CONTRIBUTIONS = aboutContributions([]);

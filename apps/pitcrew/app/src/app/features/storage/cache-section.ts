@@ -5,7 +5,7 @@ import { MatIcon } from '@angular/material/icon';
 import { ClockService } from '../../core/clock.service';
 import type { CacheReason } from '../../core/api.types';
 import { formatBytes, formatCount, formatRelative, plural, share } from '../../shared/format';
-import { confirmAction } from '../../shared/ui/confirm-dialog';
+import { confirmAction } from '../../shared/confirm';
 import { LoadState } from '../../shared/ui/load-state';
 import { StatusStore } from '../../state/status.store';
 import { CacheStore } from './cache.store';

@@ -3,7 +3,7 @@ import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { MatIcon } from '@angular/material/icon';
 import { ClockService } from '../../core/clock.service';
 import { formatDuration } from '../../shared/format';
-import { confirmAction } from '../../shared/ui/confirm-dialog';
+import { confirmAction } from '../../shared/confirm';
 import { ServiceNotices } from '../../shared/ui/service-notices';
 import { LoadState } from '../../shared/ui/load-state';
 import { ServiceStore } from '../../state/service.store';

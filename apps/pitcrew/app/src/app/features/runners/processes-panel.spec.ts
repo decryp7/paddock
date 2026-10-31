@@ -28,7 +28,7 @@ describe('ProcessesPanel', () => {
   const row = (el: HTMLElement, name: string) => Array.from(el.querySelectorAll('tbody tr')).find((r) => text(r.querySelector('.name-line')).startsWith(name)) as HTMLElement;
   const log = () => TestBed.inject(NoticeLog);
   /** What the confirmation window was last opened with (its words are tested with the dialog itself). */
-  const asked = () => log().dialogs.at(-1)?.inputs as { name: string; pid: number; isRunner: boolean; jobRunning: boolean };
+  const asked = () => log().dialogs.at(-1)?.inputs as { heading: string; message: string; details?: string[]; confirm: { label: string; destructive?: boolean } };
 
   it('summarises the processes, the cleanup state and whether a job runs', async () => {
     const { el } = await mount();
@@ -81,8 +81,8 @@ describe('ProcessesPanel', () => {
     const { f, el } = await mount();
     (row(el, 'sleep.exe').querySelector('button[aria-label^="Stop sleep.exe"]') as HTMLElement).click();
     await settle(f, 2);
-    expect(log().dialogs.at(-1)?.id).toBe('pc.stop-process');
-    expect(asked()).toMatchObject({ name: 'sleep.exe', isRunner: false });
+    expect(log().dialogs.at(-1)?.id).toBe('pd.confirm');
+    expect(asked()).toMatchObject({ heading: 'Stop sleep.exe?', confirm: { label: 'Stop now', destructive: true } });
     // Dismissed: the row stays.
     expect(row(el, 'sleep.exe')).toBeDefined();
     log().answerNext(true);
@@ -100,7 +100,7 @@ describe('ProcessesPanel', () => {
     log().answerNext(true);
     (document.querySelector('[cdkMenuItem]') as HTMLElement).click();
     await settle(f, 6);
-    expect(asked().isRunner).toBe(true);
+    expect(asked().heading).toBe('Stop the runner process?');
     expect(spy.mock.calls[0]![3]).toBe(true);
   });
 
@@ -110,7 +110,7 @@ describe('ProcessesPanel', () => {
     await settle(f, 2);
     (document.querySelector('[cdkMenuItem]') as HTMLElement).click();
     await settle(f, 2);
-    expect(asked()).toMatchObject({ isRunner: true, jobRunning: true });
+    expect(asked().message).toContain('The job that is running now will fail.');
   });
 
   it('shows the engine’s text when a stop is refused', async () => {

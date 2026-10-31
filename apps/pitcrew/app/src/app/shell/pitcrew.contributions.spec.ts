@@ -84,7 +84,7 @@ describe('Pitcrew dialogs', () => {
   it('are decisions and forms that block, plus the shell’s tool and viewers', () => {
     expect([...new Set(DIALOGS.map((d) => d.kind))].sort()).toEqual(['decision', 'form', 'tool', 'viewer']);
     expect(DIALOGS.find((d) => d.id === 'pc.register')).toMatchObject({ kind: 'form', modality: 'modal' });
-    expect(DIALOGS.find((d) => d.id === 'pc.confirm')).toMatchObject({ kind: 'decision', modality: 'modal' });
+    expect(DIALOGS.find((d) => d.id === 'pd.confirm')).toMatchObject({ kind: 'decision', modality: 'modal' });
   });
 
   for (const def of DIALOGS) {
@@ -95,8 +95,7 @@ describe('Pitcrew dialogs', () => {
         baseCommands: DIALOG_BASE_COMMANDS,
         answers: { window_ready: { recovered: null, ui: null } },
         inputs: {
-          'pc.confirm': { title: 'Remove build-pc?', body: 'It stops and is forgotten.', confirm: 'Remove', danger: true },
-          'pc.stop-process': { name: 'java.exe', pid: 4242, isRunner: false, jobRunning: false },
+          'pd.confirm': { heading: 'Remove build-pc?', message: 'It stops and is forgotten.', confirm: { label: 'Remove', destructive: true } },
           'pc.config-diff': { preview: { diff: { added: 1, removed: 0, hunks: [], truncated: false }, changedKeys: [], issues: [], restartNeeded: false }, maxBackups: 5 },
         },
       });

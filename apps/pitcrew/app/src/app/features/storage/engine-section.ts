@@ -5,7 +5,7 @@ import { MatIcon } from '@angular/material/icon';
 import type { EngineUse, PruneKind } from '../../core/api.types';
 import { formatBytes, formatCount, plural, share } from '../../shared/format';
 import { Notify } from '../../state/notify';
-import { confirmAction } from '../../shared/ui/confirm-dialog';
+import { confirmAction } from '../../shared/confirm';
 import { LoadState } from '../../shared/ui/load-state';
 import { EngineStore, PRUNE_KINDS } from './engine.store';
 import { ENGINE_NAMES, PRUNE_LABELS, countOf, errorSentence, middleEllipsis } from './storage-labels';

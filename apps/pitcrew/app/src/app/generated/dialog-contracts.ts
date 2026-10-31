@@ -2,28 +2,6 @@
 
 /** Every dialog's contract as Rust declares it: `defineDialog(DIALOG_CONTRACTS['<id>'], { title, result, load })`. */
 export const DIALOG_CONTRACTS = {
-  'pc.confirm': {
-    id: 'pc.confirm',
-    kind: 'decision',
-    modality: 'modal',
-    width: 400,
-    widthStep: 'narrow',
-    height: null,
-    instanced: false,
-    requiredChoice: false,
-    commands: [],
-  },
-  'pc.stop-process': {
-    id: 'pc.stop-process',
-    kind: 'decision',
-    modality: 'modal',
-    width: 400,
-    widthStep: 'narrow',
-    height: null,
-    instanced: false,
-    requiredChoice: false,
-    commands: [],
-  },
   'pc.config-diff': {
     id: 'pc.config-diff',
     kind: 'form',

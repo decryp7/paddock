@@ -137,7 +137,7 @@ describe('StoragePage', () => {
       const prune = vi.spyOn(mock, 'pruneEngine');
       await click(f, btn(el, 'preview'));
       await click(f, btn(el, 'prune'));
-      expect(log().dialogs.at(-1)?.id).toBe('pc.confirm');
+      expect(log().dialogs.at(-1)?.id).toBe('pd.confirm');
       expect(asked()).toContain('cannot be undone');
       expect(prune).not.toHaveBeenCalled();
       expect(el.querySelector('[data-testid="engine-result"]')).toBeNull();

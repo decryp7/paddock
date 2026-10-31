@@ -11,7 +11,7 @@ import { LoadState } from '../../shared/ui/load-state';
 import { SettingsStore } from '../../state/settings.store';
 import { Notify } from '../../state/notify';
 import { ProcessesStore } from './processes.store';
-import { confirmStopProcess } from './stop-process-dialog';
+import { confirmStopProcess } from './stop-process-confirm';
 
 /** One table row: an entry with the words and numbers the table shows. */
 export interface ProcessRow {

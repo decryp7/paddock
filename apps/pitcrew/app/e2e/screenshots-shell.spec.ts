@@ -107,8 +107,8 @@ for (const theme of ['dark', 'light'] as const) {
       ['updates', 'pd.updates', { width: 560, height: 480 }, {}],
       ['about', 'pd.about', { width: 680, height: 560 }, {}],
       ['whats-new', 'pd.whats-new', { width: 680, height: 560 }, {}],
-      ['confirm', 'pc.confirm', { width: 440, height: 200 }, { title: 'Delete the runner folder', body: 'The folder of "build-win" and everything in it is deleted. This cannot be undone.', confirm: 'Delete folder', danger: true }],
-      ['stop-process', 'pc.stop-process', { width: 460, height: 260 }, { name: 'node.exe', pid: 4312, isRunner: false, jobRunning: true }],
+      ['confirm', 'pd.confirm', { width: 440, height: 200 }, { heading: 'Delete the runner folder', message: 'The folder of "build-win" and everything in it is deleted. This cannot be undone.', confirm: { label: 'Delete folder', destructive: true } }],
+      ['stop-process', 'pd.confirm', { width: 460, height: 260 }, { heading: 'Stop node.exe?', message: 'node.exe (pid 4312) is asked to stop first, and ended after the stop timeout if it ignores the request.', details: ['Only processes the runner started can be stopped. Work the process has not saved is lost.'], confirm: { label: 'Stop now', destructive: true } }],
     ];
     for (const [name, id, size, input] of windows) {
       test(`${name} window`, async ({ page, app }) => {
