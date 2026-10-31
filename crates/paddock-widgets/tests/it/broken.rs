@@ -94,7 +94,7 @@ impl Catalogue for NoNoun {
 }
 
 macro_rules! surfaced {
-    ($name:ident, $surface:expr, $presets:expr) => {
+    ($name:ident, $surface:expr, $defaults:expr, $presets:expr) => {
         struct $name;
         impl Catalogue for $name {
             type SurfaceId = TestSurface;
@@ -105,13 +105,17 @@ macro_rules! surfaced {
                 &CLOCK
             }
             fn defaults() -> Vec<Placement<Gadget>> {
-                Vec::new()
+                $defaults
             }
             fn presets() -> Vec<Preset<Gadget>> {
                 $presets
             }
         }
     };
+}
+
+fn one_clock() -> Vec<Placement<Gadget>> {
+    assign_ids([(1, Gadget::Clock)])
 }
 
 fn preset(id: &str, name: &str, placements: Vec<Placement<Gadget>>) -> Preset<Gadget> {
@@ -129,6 +133,7 @@ surfaced!(
         schema_version: 0,
         ..SURFACE
     },
+    Vec::new(),
     Vec::new()
 );
 surfaced!(
@@ -137,6 +142,7 @@ surfaced!(
         columns: 0,
         ..SURFACE
     },
+    Vec::new(),
     Vec::new()
 );
 surfaced!(
@@ -145,6 +151,7 @@ surfaced!(
         max_bytes: 0,
         ..SURFACE
     },
+    Vec::new(),
     Vec::new()
 );
 surfaced!(
@@ -153,21 +160,50 @@ surfaced!(
         min_placements: 5,
         ..SURFACE
     },
+    Vec::new(),
     Vec::new()
 );
 surfaced!(
     TwinPresets,
     SURFACE,
+    Vec::new(),
     vec![preset("a", "A", vec![]), preset("a", "B", vec![])]
 );
-surfaced!(NamelessPreset, SURFACE, vec![preset("a", " ", vec![])]);
+surfaced!(
+    NamelessPreset,
+    SURFACE,
+    Vec::new(),
+    vec![preset("a", " ", vec![])]
+);
 surfaced!(
     ShortPreset,
     Surface {
         min_placements: 1,
         ..SURFACE
     },
+    one_clock(),
     vec![preset("a", "A", vec![])]
+);
+
+surfaced!(
+    PresetsOverTheSurface,
+    Surface {
+        max_preset_placements: 5,
+        ..SURFACE
+    },
+    Vec::new(),
+    Vec::new()
+);
+surfaced!(
+    EqualBounds,
+    Surface {
+        min_placements: 1,
+        max_placements: 1,
+        max_preset_placements: 1,
+        ..SURFACE
+    },
+    one_clock(),
+    Vec::new()
 );
 
 broken!(NoKinds, &NO_KINDS, Vec::new(), Vec::new(), 0);
@@ -204,6 +240,11 @@ fn the_test_catalogue_is_valid() {
 }
 
 #[test]
+fn the_fewest_may_equal_the_most() {
+    assert_eq!(check_catalogue::<EqualBounds>(), Ok(()));
+}
+
+#[test]
 fn each_problem_is_named() {
     assert_eq!(message::<NoNoun>(), "the surface needs a noun");
     assert!(message::<ZeroVersion>().contains("starts at 1"));
@@ -212,7 +253,8 @@ fn each_problem_is_named() {
     assert!(message::<MinOverMax>().contains("fewest placements"));
     assert!(message::<TwinPresets>().contains("listed twice"));
     assert!(message::<NamelessPreset>().contains("needs a name"));
-    assert!(message::<ShortPreset>().contains("not a valid layout"));
+    assert_eq!(message::<ShortPreset>(), "preset a is not a valid layout");
+    assert!(message::<PresetsOverTheSurface>().contains("max_preset_placements"));
     assert_eq!(message::<NoKinds>(), "the catalogue has no kinds");
     assert!(message::<Twice>().contains("listed twice"));
     assert!(message::<NoTitle>().contains("needs a title"));
