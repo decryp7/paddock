@@ -79,7 +79,8 @@ fn position(layout: &[Placement<impl Widget>], id: &PlacementId) -> Result<usize
         .ok_or_else(|| WidgetError::UnknownPlacement(id.to_string()))
 }
 
-/// Applies `edit`: the new layout, or why not. The input is untouched.
+/// Applies `edit`: the new layout, or why not. The input is untouched, and the result is checked as a whole
+/// ([`Layout::validate`]) after every edit, so no edit leaves a layout that breaks a limit.
 ///
 /// Undo: an edit that changes the placements keeps the old ones as the single undo level when it is destructive
 /// (`Remove`, `ApplyPreset`, `ResetToDefaults`) and clears the level otherwise; `SavePreset` and `DeletePreset` leave
@@ -99,9 +100,14 @@ pub fn apply<C: Catalogue>(
                     "This widget is not available here.".into(),
                 ));
             };
+            let Some(span) = span.or_else(|| spec.spans.first().copied()) else {
+                return Err(WidgetError::Invalid(
+                    "This widget has no width to be placed with.".into(),
+                ));
+            };
             let placement = Placement {
                 id: derive_id(&layout.placements, &widget),
-                span: span.unwrap_or(spec.spans[0]),
+                span,
                 widget,
             };
             check::check_one::<C>(&layout.placements, &placement, max, Counted::Placements)?;
@@ -211,6 +217,7 @@ pub fn apply<C: Catalogue>(
             next.placements = next.previous.take().ok_or(WidgetError::NothingToUndo)?;
         }
     }
+    next.validate::<C>()?;
     Ok(next)
 }
 

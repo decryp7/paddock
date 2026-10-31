@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 330c6e47a3fcb81ddbbecb43c9bb8a7446d7682f99a96ebab7bc4831fea5c456 # shrinks to document = Object {"placements": Array [], "presets": Array [Object {"id": String("mine"), "name": String("mine"), "placements": Array []}], "version": Number(2)}, edits = [ApplyPreset { id: PresetId("mine") }]
