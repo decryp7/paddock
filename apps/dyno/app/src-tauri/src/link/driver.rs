@@ -55,7 +55,7 @@ pub struct Executor {
     /// What the last told look showed, so a repeat is not told again.
     look_gate: Arc<Mutex<super::steps::ChangeGate>>,
     /// The last reason a connect attempt failed, so a repeat is not told again.
-    connect_gate: Arc<Mutex<super::steps::ChangeGate>>,
+    connect_attempts: Arc<Mutex<super::steps::ConnectAttempts>>,
 }
 
 impl Executor {
@@ -126,7 +126,7 @@ impl Executor {
             held,
             seen: Arc::new(Mutex::new(None)),
             look_gate: Arc::new(Mutex::new(super::steps::ChangeGate::default())),
-            connect_gate: Arc::new(Mutex::new(super::steps::ChangeGate::default())),
+            connect_attempts: Arc::new(Mutex::new(super::steps::ConnectAttempts::new(std::time::Instant::now()))),
         })
     }
 
@@ -194,12 +194,13 @@ impl Executor {
                     self.peer_ids.clone(),
                     self.seen.clone(),
                 );
-                let gate = self.connect_gate.clone();
+                let attempts = self.connect_attempts.clone();
                 spawn("dyno-connect", move || {
-                    // A failure is told when its reason changes, not on every attempt (a wait retries on every look).
+                    // A failure is told when its reason changes, not on every attempt (a wait retries on every look); the line
+                    // carries which attempt it was and how long since the link began.
                     let failed = |why: &str| {
-                        if lock(&gate).changed(why) {
-                            logging::info(&format!("connect attempt failed: {why}"));
+                        if let Some(f) = lock(&attempts).failed(why, std::time::Instant::now()) {
+                            log::info!(Reason = f.reason.as_str(), Attempt = f.attempt, SinceBeginMs = f.since_begin_ms; "Connect attempt failed");
                         }
                     };
                     // The file of the look this connect is for; if that look was replaced, the file is read again (the agent may
@@ -227,11 +228,15 @@ impl Executor {
                     let handshake = std::time::Instant::now();
                     match ports::connect(&d, &link.sink) {
                         Ok(peer) => {
-                            lock(&gate).changed("connected");
-                            logging::info(&ports::describe_connect(
-                                purpose,
-                                u64::try_from(handshake.elapsed().as_millis()).unwrap_or(u64::MAX),
-                            ));
+                            let done = lock(&attempts).succeeded(std::time::Instant::now());
+                            log::info!(
+                                Attempts = done.attempts,
+                                SinceBeginMs = done.since_begin_ms,
+                                AgentRun = paddock_log::fingerprint(&d.endpoint),
+                                AgentPid = d.pid;
+                                "{}",
+                                ports::describe_connect(purpose, u64::try_from(handshake.elapsed().as_millis()).unwrap_or(u64::MAX))
+                            );
                             let id = ids.fetch_add(1, Ordering::SeqCst) + 1;
                             lock(&peers).insert(id, peer.clone());
                             let watcher = (events.clone(), peer.clone());
@@ -257,9 +262,7 @@ impl Executor {
                             });
                         }
                         Err(why) => {
-                            if lock(&gate).changed(&why) {
-                                logging::info(&format!("agent.json names an agent that did not answer: {why}"));
-                            }
+                            failed(&why);
                             let _ = events.send(Event::ConnectFailed { seq, why });
                         }
                     }

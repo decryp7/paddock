@@ -54,6 +54,151 @@ impl PhaseLog {
     }
 }
 
+/// More phase changes than this within [`FLAP_WINDOW`] is a flapping link: its lines are replaced by one summary per window.
+pub const FLAP_LIMIT: usize = 20;
+/// The window a flapping link is judged over.
+pub const FLAP_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// What the link tells the log about its phase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhaseLine {
+    /// One change of phase.
+    Change(PhaseChange),
+    /// The phase changed more than [`FLAP_LIMIT`] times in [`FLAP_WINDOW`]: this many changes so far, no more lines until the next window.
+    Flapping {
+        /// Changes in the window so far.
+        changes: usize,
+    },
+}
+
+/// [`PhaseLog`] with a guard against a link that flaps (a look that keeps connecting and dropping would write a line per change,
+/// for ever): the first [`FLAP_LIMIT`] changes of a window are told, then one summary, then nothing until the window has passed.
+#[derive(Debug)]
+pub struct GuardedPhaseLog {
+    log: PhaseLog,
+    recent: std::collections::VecDeque<Instant>,
+    summarised: Option<Instant>,
+}
+
+impl GuardedPhaseLog {
+    /// A log that starts in `Idle` at `now`.
+    pub fn new(now: Instant) -> GuardedPhaseLog {
+        GuardedPhaseLog {
+            log: PhaseLog::new(now),
+            recent: std::collections::VecDeque::new(),
+            summarised: None,
+        }
+    }
+
+    /// The line `snapshot` calls for, if any.
+    pub fn observe(&mut self, snapshot: &Snapshot, now: Instant) -> Option<PhaseLine> {
+        let change = self.log.observe(snapshot, now)?;
+        while self.recent.front().is_some_and(|t| now.saturating_duration_since(*t) > FLAP_WINDOW) {
+            self.recent.pop_front();
+        }
+        self.recent.push_back(now);
+        if self.recent.len() <= FLAP_LIMIT {
+            self.summarised = None;
+            return Some(PhaseLine::Change(change));
+        }
+        match self.summarised {
+            Some(at) if now.saturating_duration_since(at) < FLAP_WINDOW => None,
+            _ => {
+                self.summarised = Some(now);
+                Some(PhaseLine::Flapping {
+                    changes: self.recent.len(),
+                })
+            }
+        }
+    }
+}
+
+/// Connect attempts of one wait: how many failed in a row, since when, and which reasons were told. The failure line is told when the
+/// reason changes (with the attempt number and the time since the link began), the success line carries the attempts it took.
+#[derive(Debug)]
+pub struct ConnectAttempts {
+    begun: Instant,
+    failures: u32,
+    last_reason: Option<String>,
+}
+
+/// A failed connect attempt to tell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectFailure {
+    /// Why it failed (a fixed sentence or an error kind).
+    pub reason: String,
+    /// Which attempt of this wait it was.
+    pub attempt: u32,
+    /// How long since the link began.
+    pub since_begin_ms: u64,
+}
+
+/// A successful connect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConnectSuccess {
+    /// How many attempts it took, this one included.
+    pub attempts: u32,
+    /// How long since the link began.
+    pub since_begin_ms: u64,
+}
+
+impl ConnectAttempts {
+    /// A counter for a link that began at `begun`.
+    pub fn new(begun: Instant) -> ConnectAttempts {
+        ConnectAttempts {
+            begun,
+            failures: 0,
+            last_reason: None,
+        }
+    }
+
+    /// An attempt failed for `reason`: `Some` when the reason differs from the last one told (the count goes on either way).
+    pub fn failed(&mut self, reason: &str, now: Instant) -> Option<ConnectFailure> {
+        self.failures += 1;
+        if self.last_reason.as_deref() == Some(reason) {
+            return None;
+        }
+        self.last_reason = Some(reason.to_string());
+        Some(ConnectFailure {
+            reason: reason.to_string(),
+            attempt: self.failures,
+            since_begin_ms: ms(now.saturating_duration_since(self.begun)),
+        })
+    }
+
+    /// An attempt succeeded: the attempts it took, and the counter starts again.
+    pub fn succeeded(&mut self, now: Instant) -> ConnectSuccess {
+        let done = ConnectSuccess {
+            attempts: self.failures + 1,
+            since_begin_ms: ms(now.saturating_duration_since(self.begun)),
+        };
+        self.failures = 0;
+        self.last_reason = None;
+        done
+    }
+}
+
+/// A [`ChangeGate`] per key (per request name): two polls that alternate, each failing the same way, are two states, not a flap.
+#[derive(Debug, Default)]
+pub struct KeyedGate(std::collections::HashMap<String, String>);
+
+impl KeyedGate {
+    /// Whether `state` differs from the last one that passed for `key`; remembers it when it does.
+    pub fn changed(&mut self, key: &str, state: &str) -> bool {
+        if self.0.get(key).map(String::as_str) == Some(state) {
+            false
+        } else {
+            self.0.insert(key.to_string(), state.to_string());
+            true
+        }
+    }
+
+    /// `key` worked: its next failure is a change again.
+    pub fn reset(&mut self, key: &str) {
+        self.0.remove(key);
+    }
+}
+
 fn ms(d: std::time::Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
 }
@@ -239,5 +384,75 @@ mod tests {
             "SaveSettings"
         );
         assert_eq!(debug_variant_name(&Req::Settings), "Settings");
+    }
+
+    /// ADR D3: a link that flaps (connects and drops every second) must not write a line per change for ever.
+    #[test]
+    fn a_flapping_link_is_summarised_once_per_window_instead_of_a_line_per_change() {
+        let t0 = Instant::now();
+        let mut log = GuardedPhaseLog::new(t0);
+        let mut lines = Vec::new();
+        for k in 0..60u64 {
+            let phase = if k % 2 == 0 {
+                Phase::Looking { seq: k }
+            } else {
+                Phase::WaitingForService
+            };
+            lines.extend(log.observe(&snap(phase), t0 + Duration::from_millis(500 * k)));
+        }
+        let changes = lines.iter().filter(|l| matches!(l, PhaseLine::Change(_))).count();
+        let summaries = lines.iter().filter(|l| matches!(l, PhaseLine::Flapping { .. })).count();
+        assert_eq!((changes, summaries), (FLAP_LIMIT, 1), "{lines:?}");
+        // After the window has passed another summary is allowed, and a calm link tells its changes again.
+        let later = t0 + Duration::from_secs(200);
+        assert!(matches!(
+            log.observe(&snap(Phase::Looking { seq: 1000 }), later),
+            Some(PhaseLine::Change(_))
+        ));
+    }
+
+    #[test]
+    fn connect_attempts_tell_a_new_reason_with_its_attempt_number_and_a_success_with_the_attempts_it_took() {
+        let t0 = Instant::now();
+        let mut c = ConnectAttempts::new(t0);
+        let f = c.failed("there is no discovery file", t0 + Duration::from_millis(100)).unwrap();
+        assert_eq!((f.attempt, f.since_begin_ms), (1, 100));
+        assert_eq!(
+            c.failed("there is no discovery file", t0 + Duration::from_millis(200)),
+            None,
+            "the same reason is not told again"
+        );
+        let f = c.failed("the agent did not answer", t0 + Duration::from_millis(300)).unwrap();
+        assert_eq!(f.attempt, 3, "the count goes on while the reason is not told");
+        let ok = c.succeeded(t0 + Duration::from_millis(400));
+        assert_eq!((ok.attempts, ok.since_begin_ms), (4, 400));
+        assert_eq!(
+            c.failed("there is no discovery file", t0 + Duration::from_millis(500))
+                .unwrap()
+                .attempt,
+            1,
+            "a new wait counts from one"
+        );
+    }
+
+    /// The 15 s throttling poll and the 60 s baselines poll fail the same way and alternate: one gate for both would pass every line.
+    #[test]
+    fn alternating_polls_that_fail_the_same_way_are_told_once_each() {
+        let mut g = KeyedGate::default();
+        let mut told = 0;
+        for _ in 0..100 {
+            for poll in ["Throttling", "Baselines"] {
+                if g.changed(poll, "AgentUnavailable") {
+                    told += 1;
+                }
+            }
+        }
+        assert_eq!(told, 2);
+        g.reset("Throttling");
+        assert!(
+            g.changed("Throttling", "AgentUnavailable"),
+            "after a success a failure is news again"
+        );
+        assert!(!g.changed("Baselines", "AgentUnavailable"));
     }
 }

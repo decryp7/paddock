@@ -224,7 +224,7 @@ pub struct AgentLink {
     /// Serialises the syncs of the subscription.
     syncing: Mutex<()>,
     /// The last failed request's name and code, so a repeat is not told again.
-    fail_gate: Mutex<steps::ChangeGate>,
+    fail_gate: Mutex<steps::KeyedGate>,
     probe: Mutex<Option<ServiceProbe>>,
     events: Sender<Event>,
     inbox: Mutex<Option<Receiver<Event>>>,
@@ -267,7 +267,7 @@ impl AgentLink {
             votes: Mutex::new(DetailVotes::default()),
             sent: Mutex::new(None),
             syncing: Mutex::new(()),
-            fail_gate: Mutex::new(steps::ChangeGate::default()),
+            fail_gate: Mutex::new(steps::KeyedGate::default()),
             probe: Mutex::new(None),
             events,
             inbox: Mutex::new(Some(inbox)),
@@ -284,7 +284,7 @@ impl AgentLink {
             .take()
             .ok_or_else(|| std::io::Error::other("the link is already running"))?;
         let mut executor = driver::Executor::new(self.clone(), self.events.clone())?;
-        let mut phases = steps::PhaseLog::new(std::time::Instant::now());
+        let mut phases = steps::GuardedPhaseLog::new(std::time::Instant::now());
         let owner = run_owner(
             "dyno-link",
             Supervisor::with_tuning(self.tuning),
@@ -292,10 +292,14 @@ impl AgentLink {
             self.transitions.clone(),
             move |command| executor.execute(command),
             // One line per change of phase, none per tick: the story of a slow connect (which phase, for how long).
-            move |snapshot| {
-                if let Some(c) = phases.observe(snapshot, std::time::Instant::now()) {
+            move |snapshot| match phases.observe(snapshot, std::time::Instant::now()) {
+                Some(steps::PhaseLine::Change(c)) => {
                     log::info!(From = c.from, To = c.to, InPhaseMs = c.in_phase_ms, SinceBeginMs = c.since_begin_ms; "Agent link phase");
                 }
+                Some(steps::PhaseLine::Flapping { changes }) => {
+                    log::warn!(Changes = changes, WindowSeconds = steps::FLAP_WINDOW.as_secs(); "Agent link phase is flapping; its changes are not told one by one");
+                }
+                None => {}
             },
         )?;
         let _ = self.events.send(Event::Begin);
@@ -368,28 +372,39 @@ impl AgentLink {
         );
         let name = steps::debug_variant_name(&request);
         let Some(peer) = self.peer_or_wait() else {
-            return Err(self.failed(&name, CommandError::unavailable()));
+            return Err(self.failed(&name, CommandError::unavailable(), None));
         };
         let timeout = timeout_for(&request);
+        let mut chain = None;
         let result = match peer.call(Message::Request(Box::new(request)), timeout) {
             Ok(Message::Reply(r)) => (*r).map_err(CommandError::from),
             Ok(_) => Err(CommandError::internal("The agent sent something unexpected.")),
             Err(IpcError::Timeout(_)) => Err(CommandError::new(ErrorCode::Timeout, "The agent did not answer in time.")),
             Err(IpcError::Closed) => Err(CommandError::unavailable()),
-            Err(e) => Err(CommandError::new(ErrorCode::Internal, format!("The agent link failed: {e}"))),
+            Err(e) => {
+                chain = Some(e.to_string());
+                Err(CommandError::new(ErrorCode::Internal, format!("The agent link failed: {e}")))
+            }
         };
         if result.is_ok() {
-            lock(&self.fail_gate).reset();
+            lock(&self.fail_gate).reset(&name);
         }
-        result.map_err(|e| self.failed(&name, e))
+        result.map_err(|e| self.failed(&name, e, chain))
     }
 
     /// Tells the log that a request failed (its variant name and the error's code and words, never the request's fields), once
     /// per change of name and code: a window polling an agent that is down writes one line, not one per poll.
-    fn failed(&self, request: &str, error: CommandError) -> CommandError {
-        let key = format!("{request} {:?}", error.code);
-        if lock(&self.fail_gate).changed(&key) {
-            log::warn!(Request = request, Code = format!("{:?}", error.code).as_str(), Shown = error.message.as_str(); "Agent request failed");
+    fn failed(&self, request: &str, error: CommandError, chain: Option<String>) -> CommandError {
+        // Keyed by the request's name: polls that alternate (the 15 s throttling poll, the 60 s baselines poll) each tell their own.
+        let code = format!("{:?}", error.code);
+        if lock(&self.fail_gate).changed(request, &code) {
+            log::warn!(
+                Request = request,
+                ErrorCode = code.as_str(),
+                ErrorChain = chain.as_deref().unwrap_or(""),
+                Shown = error.message.as_str();
+                "Agent request failed"
+            );
         }
         error
     }

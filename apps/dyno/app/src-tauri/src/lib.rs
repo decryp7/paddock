@@ -7,7 +7,6 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod commands;
-pub mod diagnostics;
 pub mod dialogs;
 pub mod dto;
 pub mod first_data;
@@ -84,7 +83,6 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn she
         Place::Installed => dyno_agent::paths::Dirs::current(),
         Place::Test { dir } => dyno_agent::paths::Dirs::at(dir.join("data")),
     };
-    let dirs_for_diag = dirs.logs();
     let mut builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))
         .app_commands(&COMMANDS)
         .dialogs(&[&dialogs::DIALOGS])
@@ -107,9 +105,8 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn she
     // Report a problem with the logs of both processes, working with the agent down (the shell registers the Logging settings
     // section on the log handle, so a support case can raise the level to Debug).
     // Installed only: a test never resolves the real folders (ER-14).
-    if installed {
-        let agent_logs = dirs_for_diag;
-        builder = builder.diagnostics(move |_app| diagnostics_setup(agent_logs.clone()));
+    if diagnostics_wanted(&place) {
+        builder = builder.diagnostics(|_app| diagnostics_setup());
     }
     builder = builder.windows(move |app| windows(app, test_dir.is_none()));
     match place {
@@ -118,15 +115,18 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn she
     }
 }
 
-/// Report a problem's setup: paddock-diag's built-in sections (system facts, the shell's settings, the crash marker, the dated logs
-/// of both processes) and Dyno's agent files; the log handle when the installed app has one.
-fn diagnostics_setup(agent_logs: std::path::PathBuf) -> Result<paddock_diag::tauri::Setup, Box<dyn std::error::Error + Send + Sync>> {
+/// Whether Report a problem is set up: only for the installed app. A test place never resolves the real folders (ER-14).
+fn diagnostics_wanted(place: &Place) -> bool {
+    matches!(place, Place::Installed)
+}
+
+/// Report a problem's setup: paddock-diag's built-in sections (system facts, the shell's settings, the crash markers, the dated logs
+/// of both processes, which work with the agent down because they are read from disk); the log handle when the installed app has one.
+fn diagnostics_setup() -> Result<paddock_diag::tauri::Setup, Box<dyn std::error::Error + Send + Sync>> {
     let id = paddock_env::AppId::new(APP_ID, APP_NAME)?;
     let dirs = paddock_env::AppDirs::for_app(&id)?;
     let info = paddock_diag::AppInfo::new(APP_ID, APP_NAME, VERSION, option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""));
-    let mut setup = paddock_diag::tauri::Setup::new(info, dirs)
-        .settings_file(paddock_shell::logging::SHELL_SETTINGS_FILE)
-        .section(Arc::new(diagnostics::AgentFiles::new(agent_logs)));
+    let mut setup = paddock_diag::tauri::Setup::new(info, dirs).settings_file(paddock_shell::logging::SHELL_SETTINGS_FILE);
     if let Some(handle) = logging::handle() {
         setup = setup.log(handle);
     }
@@ -359,6 +359,20 @@ pub fn run() {
             eprintln!("Dyno could not start: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod diagnostics_tests {
+    use super::*;
+
+    #[test]
+    fn report_a_problem_is_set_up_for_the_installed_app_only() {
+        assert!(diagnostics_wanted(&Place::Installed));
+        let test = Place::Test {
+            dir: std::path::PathBuf::from("/nonexistent/dyno-test"),
+        };
+        assert!(!diagnostics_wanted(&test), "a test place never resolves the real folders (ER-14)");
     }
 }
 

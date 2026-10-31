@@ -244,16 +244,27 @@ impl World {
 
     fn execute(&mut self, c: Command) {
         match c {
-            Command::Look { seq, service, lock, .. } => {
+            Command::Look {
+                seq,
+                service,
+                lock,
+                deciding,
+                ..
+            } => {
                 if self.looks.len() >= 2 {
                     self.looks.remove(0);
                 }
+                let hint = self.hint();
+                let lock = lock.then_some(if self.lock_held() { LockSeen::Held } else { LockSeen::Free });
+                // As `ports::look` does: a decision look with a file beside a held lock is answered without the login service
+                // (the machine connects to that agent; the service is asked right after the connection).
+                let needs_service = !(deciding && hint.is_some() && lock == Some(LockSeen::Held));
                 let look = Look {
                     seq,
                     now_ms: self.clock,
-                    hint: self.hint(),
-                    lock: lock.then_some(if self.lock_held() { LockSeen::Held } else { LockSeen::Free }),
-                    service: service.then_some(ServiceState {
+                    hint,
+                    lock,
+                    service: (service && needs_service).then_some(ServiceState {
                         installed: self.installed,
                         supervises: self.supervises,
                     }),

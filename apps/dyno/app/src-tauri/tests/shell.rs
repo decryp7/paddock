@@ -347,3 +347,18 @@ fn quit_from_the_menu_bar_works_after_the_last_window_closed_to_the_tray() {
     menu_chosen(app.handle(), "pd.app.quit");
     assert!(windows.quitting(), "Quit began the quit");
 }
+
+/// Report a problem resolves the real folders (the app's own, and the machine's), which a test never does (ER-14): the test place
+/// composes the shell without it. Pinned on the composed builder, not on a helper, so a changed guard in `shell` is seen.
+#[test]
+fn a_test_place_composes_the_shell_without_report_a_problem() {
+    let dir = tempfile::tempdir().unwrap();
+    let test_shell = shell::<tauri::test::MockRuntime>(
+        Place::Test {
+            dir: dir.path().to_path_buf(),
+        },
+        &Hub::default(),
+        std::sync::Arc::new(dyno_app_lib::shell::NoPixels),
+    );
+    assert!(!test_shell.diagnostics_installed(), "a test place must not set up Report a problem");
+}

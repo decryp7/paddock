@@ -531,6 +531,8 @@ pub struct Supervisor {
     ever_connected: bool,
     looks: u64,
     changed_seq: Option<Seq>,
+    /// A look has carried the login service's state at least once (the decision look skips the service when an agent is there).
+    service_known: bool,
     changes_answered: u64,
     tuning: Tuning,
     #[cfg(test)]
@@ -565,6 +567,7 @@ impl Supervisor {
             ever_connected: false,
             looks: 0,
             changed_seq: None,
+            service_known: false,
             changes_answered: 0,
             tuning: Tuning::default(),
             #[cfg(test)]
@@ -891,6 +894,12 @@ impl Supervisor {
             self.changes_answered += 1;
         }
         let was_supervised = self.service.supervises;
+        // Answers a `ServiceChanged` (the person changed Start at login) while the service's state was still unknown: the change is the
+        // evidence that stands in for the earlier answer there is none of.
+        let change_without_baseline = self.changed_seq == Some(look.seq) && !self.service_known;
+        if look.service.is_some() {
+            self.service_known = true;
+        }
         if let Some(s) = look.service {
             self.service = s;
             if !s.supervises {
@@ -924,7 +933,7 @@ impl Supervisor {
             }
             Phase::WaitingForHolder => self.decide(look, true, out),
             Phase::Replacing { .. } | Phase::TakingBack { .. } => self.retiring_look(look, out),
-            Phase::Connected { peer, owner } => self.service_look(was_supervised, peer, owner, out),
+            Phase::Connected { peer, owner } => self.service_look(was_supervised || change_without_baseline, peer, owner, out),
             _ => {}
         }
     }

@@ -1124,3 +1124,43 @@ fn a_request_uses_the_connection_that_was_just_published_even_before_the_state_t
     assert!(r.link.call(Request::Settings).is_ok(), "a published connection is used at once");
     r.launcher.finish(Duration::ZERO);
 }
+
+/// Login-start diagnosis (2026-10-31): `SMAppService.status` took about 30 s at login, so the look that starts an attempt does not
+/// ask the login service when an agent is already there to connect to (its discovery file beside a held lock). This pins the
+/// whole path: the machine marks the look as a decision look, the driver passes that on, and the probe is not called while that
+/// look runs. A driver that forwards `deciding: false` (the mutant) calls the probe during the first look.
+#[test]
+fn the_first_look_does_not_ask_the_login_service_when_an_agent_is_there_to_connect_to() {
+    let r = rig(false);
+    // An agent of this build is "there": its lock is held and its discovery file is written (its endpoint answers nobody).
+    let _held = dyno_agent::instance::InstanceLock::acquire(&r.link.dirs).expect("the test takes the agent lock");
+    Discovery {
+        endpoint: "no-such-endpoint".into(),
+        token: "00".into(),
+        pid: std::process::id(),
+        started: 0,
+        version: env!("CARGO_PKG_VERSION").into(),
+        protocol: dyno_core::protocol::PROTOCOL_VERSION,
+    }
+    .write(&r.link.dirs.discovery())
+    .unwrap();
+    // The probe records how many looks had been answered when it was first called: 0 means during the first look.
+    let first_call_after_looks = Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX));
+    let (seen, link) = (first_call_after_looks.clone(), r.link.clone());
+    r.link.set_service_probe(Arc::new(move || {
+        let looks = link.transitions().current().looks;
+        let _ = seen.compare_exchange(u64::MAX, looks, Ordering::SeqCst, Ordering::SeqCst);
+        ServiceState::default()
+    }));
+    let handle = r.link.spawn().unwrap();
+    // Let the link look a few times (the first look decides to connect, the connect fails, the waits that follow look again).
+    wait_state(&r.link, "three looks answered", |s| s.looks >= 3);
+    let at = first_call_after_looks.load(Ordering::SeqCst);
+    assert!(
+        at != 0,
+        "the service was asked during the first (decision) look, which must not wait for it"
+    );
+    r.link.quit();
+    handle.join().unwrap();
+    r.launcher.finish(Duration::ZERO);
+}
