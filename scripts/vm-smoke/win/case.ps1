@@ -58,7 +58,12 @@ if ($CaseId -eq 'down') {
   "TEXTS " + ((All-Texts | select -Unique | select -First 14) -join ' | ')
   exit $script:fail
 }
-$s = Wait-State @('available') 120
+# A window left from the previous case shows its old failure: while it does, ask again (a press can land before the window is ready).
+$s = 'unknown'; $lastPress = [datetime]::MinValue
+$r = Wait-Until { $script:s = Update-State $New; if ($script:s -eq 'available') { return $true }
+  if ($script:s -eq 'failed' -and ((Get-Date) - $lastPress).TotalSeconds -gt 8) { $script:lastPress = Get-Date; [void](Press-Any '^(Check (now|again)|Try again)') }
+  $false } 150
+if (-not $r) { $s = "timeout($s)" }
 Save-Shot "C:\paddock-test\$CaseId-available.png"
 Check ($s -eq 'available') "window: $s (wanted `"Version $New is available`")"
 if ($s -ne 'available') { foreach ($w in (Updates-Windows)) { "TREE window '$($w.Current.Name)' class=$($w.Current.ClassName)"; Show-Tree $w 16 | ? { $_ -match "'.+'" } | select -First 45 | % { "TREE $_" } }; "TEXTS " + ((All-Texts | select -Unique | select -First 14) -join ' | '); exit 1 }
