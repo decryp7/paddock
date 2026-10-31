@@ -415,11 +415,25 @@ status = "planned"
 adr = "0035"
 
   [[mechanism.copy]]
+  paths = ["apps/dyno/app/src/app/features/tray/tray.ts"]
+  symbols = ["text:Open Dyno"]
+  owner = "dyno"
+  delete_by = "dyno-v1.1.0"
+  note = "Waiver until 2026-12-31: consolidate into pd-tray-popover after the Dyno and Spotter 1.0 tags (moving it now would churn Dyno mid-review)."
+
+  [[mechanism.copy]]
+  paths = ["apps/spotter/app/src/app/features/tray/tray-page.ts"]
+  symbols = ["text:Open Spotter"]
+  owner = "spotter"
+  delete_by = "spotter-v1.1.0"
+  note = "Waiver until 2026-12-31: consolidate into pd-tray-popover after the Dyno and Spotter 1.0 tags; matches Dyno's approved footer and menu."
+
+  [[mechanism.copy]]
   paths = ["apps/pitwall/app/src/app/features/tray/tray-popover.ts"]
   symbols = ["text:Open Pitwall"]
   owner = "pitwall"
   delete_by = "pitwall-v1.2.0"
-  note = "Waiver until 2026-12-31: consolidate into pd-tray-popover after the Dyno and Spotter 1.0 tags; matches Dyno's approved footer and menu (Dyno and Spotter register their copies in their own branches)."
+  note = "Waiver until 2026-12-31: consolidate into pd-tray-popover with the Dyno and Spotter copies; matches Dyno's approved footer and menu. The first two copies are identical to the spotter/tray-widgets branch's block, so the three registrations merge into this one mechanism."
 
 [[mechanism]]
 id = "tray-popover"
