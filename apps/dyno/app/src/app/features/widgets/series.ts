@@ -9,7 +9,8 @@ export function seriesFor(metric: Metric, s: Series): { values: number[]; values
     case 'memory':
       return { values: s.memory, values2: null };
     case 'diskActivity':
-      return { values: s.diskRead, values2: s.diskWrite };
+      // The reading is the disk's busy time in percent, so the line is the same quantity (not the bytes a second read and written).
+      return { values: s.diskBusy, values2: null };
     case 'networkDown':
       return { values: s.netRx, values2: null };
     case 'networkUp':

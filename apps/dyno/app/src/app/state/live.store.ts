@@ -12,6 +12,8 @@ export interface Series {
   memory: number[];
   diskRead: number[];
   diskWrite: number[];
+  /** The disk's busy time in percent as the engine reports it (empty history: the agent keeps no busy history). */
+  diskBusy: number[];
   netRx: number[];
   netTx: number[];
   gpu: number[];
@@ -23,7 +25,7 @@ interface LiveState {
   agent: AgentStatus;
 }
 
-const emptySeries = (): Series => ({ cpu: [], memory: [], diskRead: [], diskWrite: [], netRx: [], netTx: [], gpu: [] });
+const emptySeries = (): Series => ({ cpu: [], memory: [], diskRead: [], diskWrite: [], diskBusy: [], netRx: [], netTx: [], gpu: [] });
 
 /** Appends `value` to a copy of `list`, keeping the last {@link SPARK_CAPACITY}. */
 export function push(list: readonly number[], value: number): number[] {
@@ -41,6 +43,7 @@ export function appendSeries(s: Series, u: LiveUpdate): Series {
     memory: push(s.memory, sys.memory.total > 0 ? (sys.memory.used / sys.memory.total) * 100 : 0),
     diskRead: push(s.diskRead, sys.diskIo.readBps),
     diskWrite: push(s.diskWrite, sys.diskIo.writeBps),
+    diskBusy: 'available' in sys.diskIo.busy ? push(s.diskBusy, sys.diskIo.busy.available) : s.diskBusy,
     netRx: push(s.netRx, sys.network.reduce((a, n) => a + n.rxBps, 0)),
     netTx: push(s.netTx, sys.network.reduce((a, n) => a + n.txBps, 0)),
     gpu: push(s.gpu, gpu),
@@ -55,6 +58,7 @@ export function seriesFromHistory(points: readonly HistoryPoint[]): Series {
     memory: last.map((p) => p.memory),
     diskRead: last.map((p) => p.diskReadBps),
     diskWrite: last.map((p) => p.diskWriteBps),
+    diskBusy: [],
     netRx: last.map((p) => p.netRxBps),
     netTx: last.map((p) => p.netTxBps),
     gpu: last.map((p) => p.gpu ?? 0),

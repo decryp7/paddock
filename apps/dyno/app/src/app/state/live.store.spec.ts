@@ -5,7 +5,7 @@ import type { LiveUpdate } from '../core/api.types';
 import { LiveStore, SPARK_CAPACITY, appendSeries, push, seriesFromHistory } from './live.store';
 
 const NOW = 1_700_000_000_000;
-const empty = () => ({ cpu: [], memory: [], diskRead: [], diskWrite: [], netRx: [], netTx: [], gpu: [] });
+const empty = () => ({ cpu: [], memory: [], diskRead: [], diskWrite: [], diskBusy: [], netRx: [], netTx: [], gpu: [] });
 
 function setup() {
   const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
