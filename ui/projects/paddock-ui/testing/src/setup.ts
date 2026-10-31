@@ -2,8 +2,10 @@
 interface HookGlobals {
   beforeEach?: (fn: () => void) => void;
   afterEach?: (fn: () => void) => void;
+  /** Runs after the test's `afterEach` hooks (Angular's TestBed clean-up among them); a throw there fails the test only. */
+  onTestFinished?: (fn: () => void) => void;
   /** Vitest's `vi` (a global when `globals` is on, as the Angular builder sets it). */
-  vi?: { useRealTimers(): unknown; restoreAllMocks(): unknown; unstubAllGlobals(): unknown };
+  vi?: { useRealTimers(): unknown; restoreAllMocks(): unknown; unstubAllGlobals(): unknown; isMockFunction(fn: unknown): boolean };
 }
 
 /** What `installTestKit` can be told. */
@@ -40,18 +42,20 @@ function realTimers(win: Record<string | symbol, unknown>): ReadonlyMap<string, 
 }
 
 /**
- * Puts back every timer global that is not the real one and returns their names. A `vi.spyOn(globalThis, 'setTimeout')`
- * made under fake timers keeps the fake as its original, and Vitest (5.0) restores it again at every `vi.restoreAllMocks()`,
- * even after the spec's own `mockRestore()`: once the fake clock is uninstalled, that writes back a fake bound to a clock
- * that is gone. Its timers never fire, and every later spec in the worker that waits on a real timer hangs until the test
- * timeout (CI runs 7257, 7274 and 7276).
+ * Puts back every timer global that is not the real one and returns the names of those that were not a spy. A
+ * `vi.spyOn(globalThis, 'setTimeout')` made under fake timers keeps the fake as its original, and Vitest (5.0) restores it
+ * again at every `vi.restoreAllMocks()`, even after the spec's own `mockRestore()`: once the fake clock is uninstalled,
+ * that writes back a fake bound to a clock that is gone. Its timers never fire, and every later spec in the worker that
+ * waits on a real timer hangs until the test timeout (CI runs 7257, 7274 and 7276). A spy left behind (one made on the
+ * real timer before `vi.useFakeTimers()`, which the uninstalled clock writes back) still calls the real timer: it is put
+ * back without blame.
  */
-function putBackTimers(win: Record<string | symbol, unknown>, real: ReadonlyMap<string, unknown>): string[] {
+function putBackTimers(win: Record<string | symbol, unknown>, real: ReadonlyMap<string, unknown>, isSpy: (fn: unknown) => boolean): string[] {
   const replaced: string[] = [];
   for (const [name, fn] of real) {
     if (win[name] !== fn) {
+      if (!isSpy(win[name])) replaced.push(name);
       win[name] = fn;
-      replaced.push(name);
     }
   }
   return replaced;
@@ -125,6 +129,7 @@ export function installTestKit(options: TestKitOptions = {}): void {
   const keys = options.dropWindowKeys ?? ['__TAURI_INTERNALS__'];
   const hooks = globalThis as unknown as HookGlobals;
   const real = realTimers(win);
+  const isSpy = (fn: unknown) => hooks.vi?.isMockFunction(fn) ?? false;
   const drop = (): string[] => {
     for (const key of keys) delete win[key];
     // Spies first, then the clock: a spy on a faked timer restored after the clock is gone would write the dead fake back.
@@ -134,18 +139,27 @@ export function installTestKit(options: TestKitOptions = {}): void {
     if (typeof document !== 'undefined') document.body?.replaceChildren();
     clearStorage('localStorage');
     clearStorage('sessionStorage');
-    return putBackTimers(win, real);
+    return putBackTimers(win, real, isSpy);
   };
-  hooks.beforeEach?.(() => void drop());
-  hooks.afterEach?.(() => {
-    const replaced = drop();
-    if (replaced.length) {
+  // What this test left replaced, found by the kit's afterEach and reported once every afterEach has run: a throw inside
+  // the hook chain would skip the hooks after it (Angular's TestBed clean-up), and the next TestBed test would fail too.
+  let left: string[] = [];
+  hooks.beforeEach?.(() => {
+    drop();
+    left = [];
+    hooks.onTestFinished?.(() => {
+      if (!left.length) return;
+      const names = left.join(', ');
+      left = [];
       throw new Error(
-        `This test left ${replaced.join(', ')} replaced after its clean-up (the kit put the real one back). Do not ` +
-          `vi.spyOn a timer while fake timers are on: Vitest restores the spied-on fake at every restoreAllMocks, even after ` +
+        `This test left ${names} replaced after its clean-up (the kit put the real one back). Do not vi.spyOn a ` +
+          `timer while fake timers are on: Vitest restores the spied-on fake at every restoreAllMocks, even after ` +
           `mockRestore, and once the clock is gone its timers never fire, so later specs in this worker hang. Count timers ` +
-          `with vi.getTimerCount() instead.`,
+          `with vi.getTimerCount() instead, or spy before vi.useFakeTimers().`,
       );
-    }
+    });
+  });
+  hooks.afterEach?.(() => {
+    left = drop();
   });
 }
