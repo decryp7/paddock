@@ -78,22 +78,9 @@ pub fn not_found_message(registered_before: bool) -> &'static str {
     }
 }
 
-/// Reads `label`'s entry in the output of `launchctl print-disabled gui/<uid>`: `"label" => disabled` (older systems
-/// print `true`/`false`). `None` when the label is not listed.
-pub fn parse_print_disabled(output: &str, label: &str) -> Option<bool> {
-    let quoted = format!("\"{label}\"");
-    output.lines().find_map(|line| {
-        let rest = line.trim().strip_prefix(&quoted)?.trim_start().strip_prefix("=>")?;
-        match rest.trim() {
-            "disabled" | "true" => Some(true),
-            "enabled" | "false" => Some(false),
-            _ => None,
-        }
-    })
-}
-
-// The one parser of `launchctl print` lives in the shared crate (it skips the nested coalition blocks macOS 26 prints).
-pub use paddock_service::parse::{parse_job, JobReport};
+// The parsers of `launchctl` output and the "is this job refused" decision live in the shared crate (one implementation:
+// it skips the nested coalition blocks macOS 26 prints and never calls a pending or running job stale).
+pub use paddock_service::parse::{launchctl_output, parse_job, parse_print_disabled, JobReport};
 
 /// Why a repair runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,7 +131,7 @@ pub fn plan(o: &Observed) -> Plan {
     if o.requested {
         return Plan::Repair(RepairReason::Requested);
     }
-    if o.job.stale() && !o.answers {
+    if o.job.needs_repair(o.answers) {
         return Plan::Repair(RepairReason::Stale);
     }
     if o.registered_version != Some(o.current_version) {
@@ -450,8 +437,6 @@ pub static REPAIR: RepairTracker = RepairTracker::new();
 mod tests {
     use super::*;
 
-    const LABEL: &str = "net.decryptology.pitwall.service";
-
     #[test]
     fn a_service_that_was_never_registered_is_not_set_up_yet_and_never_blamed_on_the_apps_place() {
         let first = not_found_message(false);
@@ -476,18 +461,6 @@ mod tests {
         assert!(!disabled_in_login_items(NotFound, Some(true)));
     }
 
-    #[test]
-    fn the_disabled_list_is_parsed() {
-        let out = format!("disabled services = {{\n\t\"com.apple.x\" => enabled\n\t\"{LABEL}\" => disabled\n}}\n");
-        assert_eq!(parse_print_disabled(&out, LABEL), Some(true));
-        assert_eq!(parse_print_disabled(&out.replace("=> disabled", "=> enabled"), LABEL), Some(false));
-        assert_eq!(parse_print_disabled(&out.replace("=> disabled", "=> true"), LABEL), Some(true));
-        assert_eq!(parse_print_disabled(&out.replace("=> disabled", "=> false"), LABEL), Some(false));
-        assert_eq!(parse_print_disabled(&out.replace("=> disabled", "=> maybe"), LABEL), None);
-        assert_eq!(parse_print_disabled("", LABEL), None);
-        assert_eq!(parse_print_disabled(&format!("\"{LABEL}\" disabled"), LABEL), None);
-    }
-
     /// The real `launchctl print gui/501/net.decryptology.pitwall.service` of a Mac after an update (trimmed).
     const SPAWN_FAILED: &str = "gui/501/net.decryptology.pitwall.service = {\n\tactive count = 0\n\tpath = (submitted by smd.362)\n\ttype = Submitted\n\tmanaged_by = com.apple.xpc.ServiceManagement\n\tstate = spawn scheduled\n\n\tprogram identifier = Contents/MacOS/pitwall-server (mode: 2)\n\tparent bundle identifier = net.decryptology.pitwall\n\tparent bundle version = 1.0.2\n\truns = 534\n\tlast exit code = 78: EX_CONFIG\n\n\tjob state = spawn failed\n\tsanitizer flags = 0x0\n\n\tproperties = partial import | keepalive | runatload | resolve program | has LWCR\n}\n";
     const HEALTHY: &str = "gui/501/net.decryptology.pitwall.service = {\n\tstate = running\n\tpid = 88412\n\truns = 1\n\tlast exit code = (never exited)\n\tjob state = running\n\tproperties = keepalive | runatload | has LWCR\n}\n";
@@ -498,6 +471,24 @@ mod tests {
     const SPAWN_FAILED_MACOS_26: &str = "gui/501/net.decryptology.pitwall.service = {\n\tactive count = 0\n\tpath = (submitted by smd.101)\n\ttype = Submitted\n\tmanaged_by = com.apple.xpc.ServiceManagement\n\tstate = spawn scheduled\n\n\tprogram identifier = Contents/MacOS/pitwall-server (mode: 2)\n\tparent bundle identifier = net.decryptology.pitwall\n\tparent bundle version = 1.0.4\n\truns = 12\n\tlast exit code = 78: EX_CONFIG\n\n\tresource coalition = {\n\t\tID = 700\n\t\ttype = resource\n\t\tstate = active\n\t\tactive count = 0\n\t}\n\n\tjetsam coalition = {\n\t\tID = 701\n\t\ttype = jetsam\n\t\tstate = active\n\t\tactive count = 0\n\t}\n\n\tjob state = spawn failed\n\n\tproperties = partial import | keepalive | runatload | resolve program | has LWCR | tle system\n}\n";
     /// The same agent running well on macOS 26: the coalitions' `state = active` must not hide `job state = running`.
     const RUNNING_MACOS_26: &str = "gui/501/net.decryptology.pitwall.service = {\n\tactive count = 1\n\tpath = (submitted by smd.101)\n\ttype = Submitted\n\tmanaged_by = com.apple.xpc.ServiceManagement\n\tstate = running\n\n\tprogram identifier = Contents/MacOS/pitwall-server (mode: 2)\n\tpid = 2210\n\tlast exit code = (never exited)\n\n\tresource coalition = {\n\t\tID = 702\n\t\ttype = resource\n\t\tstate = active\n\t\tactive count = 1\n\t}\n\n\tjetsam coalition = {\n\t\tID = 703\n\t\ttype = jetsam\n\t\tstate = active\n\t\tactive count = 1\n\t}\n\n\tjob state = running\n\n\tproperties = partial import | keepalive | runatload | resolve program | has LWCR | tle system\n}\n";
+
+    #[test]
+    fn a_pending_or_running_job_at_login_is_not_repaired_while_the_app_has_no_answer_yet() {
+        // Regression (Dyno B4, same logic): a job with a launch constraint that is pending or running read as stale, and
+        // the repair killed the healthy agent at every login.
+        let mut pending = JobReport {
+            found: true,
+            has_lwcr: true,
+            ..JobReport::default()
+        };
+        assert_eq!(plan(&observed(pending)), Plan::Nothing);
+        pending.running = true;
+        assert_eq!(plan(&observed(pending)), Plan::Nothing);
+        // Even with a refusal sign left from an earlier run, a running job is left alone.
+        pending.exit_config = true;
+        assert_eq!(plan(&observed(pending)), Plan::Nothing);
+        assert_eq!(plan(&observed(parse_job(RUNNING_MACOS_26))), Plan::Nothing);
+    }
 
     #[test]
     fn macos_26_launchctl_output_goes_through_pitwalls_repair_decision() {

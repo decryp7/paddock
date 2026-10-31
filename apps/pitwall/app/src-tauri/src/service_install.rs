@@ -236,11 +236,13 @@ mod imp {
     use super::*;
     use crate::app_state::{self, AppState};
     use crate::service_repair::{
-        disabled_in_login_items, not_found_message, parse_job, parse_print_disabled, plan, run_repair, JobReport, Observed, Plan,
+        disabled_in_login_items, launchctl_output, not_found_message, parse_print_disabled, plan, run_repair, JobReport, Observed, Plan,
         RegisterError, RegistrationStatus, RepairOps, RepairOutcome, RepairPhase, REPAIR,
     };
     use objc2_foundation::NSString;
     use objc2_service_management::{SMAppService, SMAppServiceStatus};
+    use paddock_service::launchctl::{bootout as launchd_bootout, job_report as launchd_job_report};
+    use paddock_service::RealSystem;
     use std::time::{Duration, Instant};
 
     const PLIST: &str = "net.decryptology.pitwall.service.plist";
@@ -276,11 +278,13 @@ mod imp {
             RegistrationStatus::NotFound => (false, Some(not_found_message(registered_version().is_some()).to_string())),
             RegistrationStatus::NotRegistered => (false, None),
         };
-        let job = job_report();
+        let job = job_report().unwrap_or_default();
         let message = message.or_else(|| {
             job.stale().then(|| {
-                "launchd refused to start the service (error 78, bad configuration): the app was updated and macOS still holds the previous version's signature. Repair replaces it."
-                    .to_string()
+                format!(
+                    "launchd refused to start the service (error 78, bad configuration): the app was updated and macOS still holds the previous version's signature. Repair replaces it. (launchd reports: {}.)",
+                    job.describe()
+                )
             })
         });
         OsState {
@@ -344,12 +348,10 @@ mod imp {
         })
     }
 
-    /// launchd's report of the job (nothing found when it cannot be read).
-    fn job_report() -> JobReport {
-        target()
-            .and_then(|t| launchctl(&["print", &t]))
-            .map(|r| parse_job(&r))
-            .unwrap_or_default()
+    /// launchd's report of the job: `None` when it could not be asked (a timeout, a permission error), which is not
+    /// the same as launchd not knowing the job.
+    fn job_report() -> Option<JobReport> {
+        launchd_job_report(&mut RealSystem::new(), &target()?)
     }
 
     fn registered_version() -> Option<String> {
@@ -372,7 +374,7 @@ mod imp {
             status: registration_status(),
             launchd_disabled: launchd_disabled(),
             answers,
-            job: job_report(),
+            job: job_report().unwrap_or_default(),
             registered_version: registered,
             current_version: env!("CARGO_PKG_VERSION"),
             requested,
@@ -458,15 +460,14 @@ mod imp {
         }
         fn bootout(&mut self) -> Result<(), String> {
             let t = target().ok_or("the user's launchd domain is unknown")?;
-            launchctl(&["bootout", &t])
-                .map(|_| ())
-                .ok_or_else(|| "launchctl bootout could not be run".to_string())
+            // The shared bootout: a job launchd has already dropped (exit 3 or 113) is success, not a failure to log.
+            launchd_bootout(&mut RealSystem::new(), &t)
         }
         fn job_gone(&mut self) -> bool {
-            !job_report().found
+            job_report().is_some_and(|job| !job.found)
         }
         fn registration_stale(&mut self) -> bool {
-            job_report().stale()
+            job_report().unwrap_or_default().stale()
         }
         fn service_answers(&mut self) -> bool {
             (self.answers)()
@@ -499,33 +500,10 @@ mod imp {
         parse_print_disabled(&report, LABEL)
     }
 
-    /// `launchctl <args>`, bounded to a few seconds; `None` when it cannot be run or read.
+    /// `launchctl <args>` through the shared bounded reader (output read while it runs, the tree ended at the timeout);
+    /// `None` when it cannot be run, times out or fails.
     fn launchctl(args: &[&str]) -> Option<String> {
-        use std::process::{Command, Stdio};
-        // macOS only: no console window to hide, and the wait below is bounded.
-        #[allow(clippy::disallowed_methods)]
-        let mut child = Command::new("/bin/launchctl")
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return None;
-                }
-            }
-        }
-        let mut out = String::new();
-        std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
-        Some(out)
+        launchctl_output(&mut RealSystem::new(), args)
     }
 }
 

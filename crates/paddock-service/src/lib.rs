@@ -58,6 +58,7 @@
 pub mod backend;
 pub mod control;
 mod error;
+pub mod launchctl;
 pub mod login;
 pub mod manager;
 pub mod native;
