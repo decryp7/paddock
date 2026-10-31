@@ -24,7 +24,7 @@ import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-
 import { MatIcon } from '@angular/material/icon';
 import { MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
 import { MatSnackBar, type MatSnackBarRef, type TextOnlySnackBar } from '@angular/material/snack-bar';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import type { Edit, KindInfo, LayoutView, Placement } from '../generated/widgets';
 import { defaultKindOf, PdWidgetOption } from './widget';
 
@@ -52,13 +52,13 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
   selector: 'pd-widget-chooser',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  imports: [CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder, NgTemplateOutlet, MatButton, MatIconButton, MatIcon, MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger, MatButtonToggleGroup, MatButtonToggle, PdGlyph],
+  imports: [CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder, NgTemplateOutlet, MatButton, MatIconButton, MatIcon, MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger, MatButtonToggleGroup, MatButtonToggle, PdGlyph, PdStatusGlyph],
   host: { class: 'pd-widget-chooser' },
   template: `
     <div class="pd-wc" [class.pd-wc--preview]="preview()">
       <div class="pd-wc-main">
         @for (note of view().notes; track $index) {
-          <p class="pd-wc-limit pd-wc-note" role="status"><pd-glyph name="info" [size]="16" />{{ note.message }}</p>
+          <p class="pd-wc-limit pd-wc-note" role="status"><pd-status-glyph status="info" [size]="16" />{{ note.message }}</p>
         }
         <div class="pd-wc-label">
           <span [id]="ids + '-shown'">Shown in the {{ noun() }}</span>
@@ -118,7 +118,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
 
         <div class="pd-wc-label"><span>Add a widget</span></div>
         @if (atLimit()) {
-          <p class="pd-wc-limit" role="status"><pd-glyph name="info" [size]="16" />The {{ noun() }} holds {{ surface().maxPlacements }} widgets. Remove one to add another.</p>
+          <p class="pd-wc-limit" role="status"><pd-status-glyph status="info" [size]="16" />The {{ noun() }} holds {{ surface().maxPlacements }} widgets. Remove one to add another.</p>
         }
         <ul class="pd-wc-list" role="list" [attr.aria-label]="'Widgets you can add to the ' + noun()">
           @for (k of kinds(); track k.kind) {
@@ -127,7 +127,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
               <mat-icon class="pd-wc-kicon" [svgIcon]="k.icon" />
               <span class="pd-wc-txt"><b>{{ k.title }}</b><span>{{ k.summary }}</span></span>
               @if (count >= k.maxInstances) {
-                <span class="pd-wc-addedlabel"><pd-glyph name="check" [size]="16" />Added</span>
+                <span class="pd-wc-addedlabel"><pd-status-glyph status="success" [size]="16" />Added</span>
               } @else if (editable()) {
                 <button matButton="outlined" type="button" [disabled]="atLimit()" [attr.aria-label]="addLabel(k, count) + ' ' + k.title" (click)="add(k)">
                   <pd-glyph name="plus" [size]="16" />{{ addLabel(k, count) }}
@@ -169,7 +169,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-grip[aria-disabled='true'] { cursor: default; opacity: 0.5; }
     .pd-wc-more { flex: none; }
     .pd-wc-addedlabel { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
-    .pd-wc-addedlabel pd-glyph { color: var(--pd-success); }
+    .pd-wc-addedlabel pd-status-glyph { color: var(--pd-success); }
     .pd-wc-placeholder { background: var(--pd-accent-tint); outline: 1px dashed var(--pd-accent); outline-offset: -4px; min-height: 48px; }
     .cdk-drag-preview.pd-wc-item { border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); box-shadow: var(--pd-shadow-2); }
     .cdk-drag-animating { transition: transform var(--pd-duration) var(--pd-ease-enter); }
@@ -179,7 +179,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-toggle { height: var(--pd-control-height); flex: none; }
     .pd-wc-hint { display: flex; align-items: center; gap: 6px; margin: 8px 0 20px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-wc-limit { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 8px 12px; border-radius: var(--pd-radius-control); background: var(--pd-info-tint); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
-    .pd-wc-limit pd-glyph { color: var(--pd-info); }
+    .pd-wc-limit pd-status-glyph { color: var(--pd-info); }
     .pd-wc-foot { margin: 12px 0 0 -8px; }
     .pd-wc-plabel { font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); margin: 0 0 6px; }
     /* The menu keeps clear of its button's focus ring (2 px ring, 2 px offset), whether it opens below or above. */
@@ -203,8 +203,6 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   readonly widgetFor = input.required<(kind: K) => W>();
   /** The kind (wire name) of a widget value; see `defaultKindOf`. */
   readonly kindOf = input<(widget: W) => string>(defaultKindOf);
-  /** What the surface is called in the texts ("popup", "dashboard", "menu bar"). */
-  readonly noun = input('popup');
   /** The Add label of a kind that can be placed again, by kind ("Add volume"); the default is "Add another". */
   readonly again = input<Readonly<Record<string, string>>>({});
   /** Show the preview column (project the preview with `slot="preview"`). */
@@ -217,6 +215,8 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   protected readonly ids = `pd-wc-${nextId++}`;
   protected readonly placements = computed(() => this.view().layout.placements);
   protected readonly surface = computed(() => this.view().catalogue.surface);
+  /** What the surface is called in the texts, from the catalogue ("popup"). */
+  protected readonly noun = computed(() => this.surface().noun);
   protected readonly kinds = computed(() => this.view().catalogue.kinds);
   protected readonly editable = computed(() => this.view().editable);
   protected readonly atLimit = computed(() => this.placements().length >= this.surface().maxPlacements);

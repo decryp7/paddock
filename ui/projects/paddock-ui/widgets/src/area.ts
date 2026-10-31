@@ -1,11 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, contentChildren, input, output, ViewEncapsulation } from '@angular/core';
 import { MatButton } from '@angular/material/button';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdGlyph, PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
 import type { CatalogueInfo, KindInfo, Placement, PlacementId, PlacementState, SurfaceNotice, SurfaceValues, Tone, WidgetState } from '../generated/widgets';
 import { PdWidgetFrame } from './frame';
 import { defaultKindOf, PdWidget } from './widget';
 
-const TONE_ICON: Record<Tone, string> = { info: 'info', warning: 'alert', danger: 'error' };
+const TONE_STATUS: Record<Tone, PdStatus> = { info: 'info', warning: 'warning', danger: 'error' };
 
 /**
  * A layout's widgets in order on the surface's grid (the popup: two equal columns, 8 px gap; the columns come from the
@@ -17,12 +17,12 @@ const TONE_ICON: Record<Tone, string> = { info: 'info', warning: 'alert', danger
   selector: 'pd-widget-area',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  imports: [PdWidgetFrame, MatButton, PdGlyph],
+  imports: [PdWidgetFrame, MatButton, PdGlyph, PdStatusGlyph],
   host: { class: 'pd-widget-area' },
   template: `
     @if (values()?.notice; as n) {
       <div class="pd-wa-notice" [class]="'pd-wa-notice pd-wa-notice--' + n.tone" [attr.role]="n.tone === 'info' ? 'status' : 'alert'">
-        <pd-glyph [name]="toneIcon(n)" [size]="16" />
+        <pd-status-glyph [status]="toneStatus(n)" [size]="16" />
         <span class="pd-wa-nt">{{ n.title }}</span>
         <span class="pd-wa-nd">{{ n.detail }}</span>
         @if (n.action; as a) {
@@ -62,9 +62,9 @@ const TONE_ICON: Record<Tone, string> = { info: 'info', warning: 'alert', danger
     .pd-wa-notice { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 2px var(--pd-space-2); align-items: center; padding: var(--pd-space-2) var(--pd-space-2) var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-card); background: var(--pd-info-tint); }
     .pd-wa-notice--warning { background: var(--pd-warning-tint); }
     .pd-wa-notice--danger { background: var(--pd-danger-tint); }
-    .pd-wa-notice > pd-glyph { align-self: start; margin-top: 2px; color: var(--pd-info); }
-    .pd-wa-notice--warning > pd-glyph { color: var(--pd-warning); }
-    .pd-wa-notice--danger > pd-glyph { color: var(--pd-danger); }
+    .pd-wa-notice > pd-status-glyph { align-self: start; margin-top: 2px; color: var(--pd-info); }
+    .pd-wa-notice--warning > pd-status-glyph { color: var(--pd-warning); }
+    .pd-wa-notice--danger > pd-status-glyph { color: var(--pd-danger); }
     .pd-wa-nt { font-weight: var(--pd-weight-semibold); }
     .pd-wa-nd { grid-column: 2; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
     .pd-wa-na { grid-row: 1 / span 2; grid-column: 3; }
@@ -86,8 +86,6 @@ export class PdWidgetArea<W = unknown, V = unknown, A = unknown, K extends strin
   readonly values = input<SurfaceValues<V, A> | null>(null);
   /** The kind (wire name) of a widget value; the default reads a string, a `kind` field or the single key of a tagged object. */
   readonly kindOf = input<(widget: W) => string>(defaultKindOf);
-  /** What the surface is called in the empty text ("popup", "dashboard", "menu bar"). */
-  readonly noun = input('popup');
   /** The clock for "Updated 4 min ago" (ms since the epoch); null reads the system clock. */
   readonly now = input<number | null>(null);
   /** Right-aligned head text of a fresh placement ("3 volumes"). */
@@ -101,6 +99,7 @@ export class PdWidgetArea<W = unknown, V = unknown, A = unknown, K extends strin
   /** "Choose widgets" on an empty layout. */
   readonly customize = output<void>();
 
+  protected readonly noun = computed(() => this.catalogue().surface.noun);
   protected readonly columns = computed(() => Math.max(1, this.catalogue().surface.columns));
   protected readonly rows = computed(() => {
     const byKind = new Map([...this.templates(), ...this.widgets()].map((w) => [w.pdWidget(), w] as const));
@@ -114,7 +113,7 @@ export class PdWidgetArea<W = unknown, V = unknown, A = unknown, K extends strin
     });
   });
 
-  protected toneIcon(n: SurfaceNotice<A>): string {
-    return TONE_ICON[n.tone];
+  protected toneStatus(n: SurfaceNotice<A>): PdStatus {
+    return TONE_STATUS[n.tone];
   }
 }
