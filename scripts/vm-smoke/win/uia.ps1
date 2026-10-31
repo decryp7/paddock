@@ -29,7 +29,11 @@ function Get-Texts($Element) {
 # Finds a descendant by Name regex and control type name (Button, MenuItem, ...); $null if absent.
 function Find-Element($Element, [string]$NameRegex, [string]$Type = 'Button') {
   $all = $Element.FindAll($script:Scope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-  foreach ($e in $all) { if ($e.Current.Name -match $NameRegex -and $e.Current.ControlType.ProgrammaticName -eq "ControlType.$Type") { return $e } }
+  foreach ($e in $all) {
+    if ($e.Current.Name -notmatch $NameRegex) { continue }
+    if ($Type -eq 'Any') { $p = $null; if ($e.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$p)) { return $e } }
+    elseif ($e.Current.ControlType.ProgrammaticName -eq "ControlType.$Type") { return $e }
+  }
   return $null
 }
 
@@ -58,4 +62,11 @@ function Save-Shot([string]$Path) {
   $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
   [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
   $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+}
+
+# Closes a window through its WindowPattern (the Updates window keeps its last result while it is open).
+function Close-Window($W) {
+  $p = $null
+  if ($W.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern, [ref]$p)) { $p.Close(); return $true }
+  return $false
 }

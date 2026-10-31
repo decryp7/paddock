@@ -73,7 +73,7 @@ function main(argv) {
           checks.push({ ok: log_.some((l) => /latest\.json/.test(l)), detail: 'the feed saw the manifest request' });
           checks.push({ ok: log_.some((l) => /\.exe /.test(l)) === cs.tarballRequested, detail: `the feed ${cs.tarballRequested ? 'served' : 'did not serve'} the installer (${log_.length} request(s))` });
         }
-        push(cs.title, checks, res.out.split('\n').filter((l) => /^(TEXTS|NOTE)/.test(l)).join('\n'));
+        push(cs.title, checks, res.out.split('\n').filter((l) => !/^CHECK /.test(l) && l.trim()).slice(-25).join('\n').slice(0, 3000));
         for (const f of ['result', 'available', 'after-download', 'relaunched']) {
           vm(['get', 'paddock-test', `C:/paddock-test/${id}-${f}.png`, join(scratch, `${id}-${f}.png`)]);
         }
