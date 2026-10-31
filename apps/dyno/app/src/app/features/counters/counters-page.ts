@@ -40,7 +40,7 @@ import { MatMenuModule } from '@angular/material/menu';
       </header>
 
       <div class="bar" role="group" aria-label="Counters toolbar">
-        <dy-search-field label="Search counters" placeholder="Search counters, for example disk queue" [value]="store.query()" (valueChange)="onSearch($event)" />
+        <dy-search-field label="Search counters" placeholder="Search counters, e.g. disk queue" [value]="store.query()" (valueChange)="onSearch($event)" />
         <span class="spacer"></span>
         <button type="button" matButton="outlined" [matMenuTriggerFor]="setsMenu"><dy-icon name="layers" /> Sets @if (store.sets().length) { <span class="count num">{{ store.sets().length }}</span> }</button>
         <pd-segmented-control label="Range" [options]="rangeSegs" [value]="store.minutes() + ''" (valueChange)="store.setMinutes(+$event)" />

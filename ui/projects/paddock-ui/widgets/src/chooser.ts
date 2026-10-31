@@ -235,7 +235,8 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-toggle { height: var(--pd-control-height); flex: none; }
     .pd-wc-addbox { position: relative; }
     /* Only a long list scrolls inside the page; eight kinds or fewer show whole, so there is no nested scroll to find. */
-    .pd-wc-addlist--long { max-height: 22rem; overflow-y: auto; }
+    /* Whole rows and half of the next one, so the cut row says that the list scrolls (a row is about 3.3rem). */
+    .pd-wc-addlist--long { max-height: calc(5.5 * 3.3rem); overflow-y: auto; }
     .pd-wc-addlist:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
     /* The cue that more rows wait below: a fade into the row colour, shown only while the list can still scroll down. */
     .pd-wc-fade { position: absolute; inset: auto 1px 1px 1px; height: var(--pd-space-6); border-radius: 0 0 var(--pd-radius-card) var(--pd-radius-card); background: linear-gradient(to bottom, transparent, var(--pd-surface-1)); pointer-events: none; }
@@ -243,7 +244,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-hint { display: flex; align-items: center; gap: 6px; margin: var(--pd-space-2) 0 20px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-wc-limit { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0 0 var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-info-tint); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
     .pd-wc-limit pd-status-glyph { color: var(--pd-info); }
-    .pd-wc-list + .pd-wc-label, .pd-wc-hint + .pd-wc-label { margin-top: var(--pd-space-6); }
+    .pd-wc-list + .pd-wc-label, .pd-wc-hint + .pd-wc-label, .pd-wc-addbox + .pd-wc-label { margin-top: var(--pd-space-6); }
     .pd-wc-save mat-form-field { --mat-form-field-container-height: var(--pd-control-height); --mat-form-field-container-vertical-padding: var(--pd-space-1); --mat-form-field-container-text-size: var(--pd-text-body); --mat-form-field-outlined-label-text-populated-size: var(--pd-text-label); --mat-form-field-outlined-label-text-size: var(--pd-text-label); }
     .pd-wc-save input { font-size: var(--pd-text-body); }
     .pd-wc-save button { height: var(--pd-control-height); }

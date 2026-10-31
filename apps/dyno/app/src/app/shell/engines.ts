@@ -7,6 +7,7 @@ import {
   type AboutBackend,
   type UpdatesBackend,
 } from '@decryp7/paddock-ui/shell/about';
+import { mockOptionsFromUrl } from '../core/mock-backend';
 import { MemoryJobsBackend, TauriJobsBackend, type JobsBackend, type JobsIpc } from '@decryp7/paddock-ui/shell/jobs';
 import { MemoryNotificationCentre, MemoryServiceHealth, TauriNotificationsBackend, TauriServiceHealthBackend } from '@decryp7/paddock-ui/shell/notify';
 import { MemorySettingsBackend, SETTINGS_OVERVIEW_FIXTURE, TauriSettingsBackend, type SettingsBackend } from '@decryp7/paddock-ui/shell/settings';
@@ -41,12 +42,14 @@ export const BROWSER_VERSION = '1.0.0';
 export function aboutBackend(): AboutBackend {
   const ipc = tauriIpc();
   if (ipc) return new TauriAboutBackend(ipc);
+  const mockOs = mockOptionsFromUrl(typeof window === 'undefined' ? '' : window.location.search).os ?? 'macos';
   about ??= new MemoryAboutBackend(
     {
       appName: 'Dyno',
       version: BROWSER_VERSION,
-      os: 'browser',
-      arch: 'web',
+      // The mock machine's own system (`?mock=windows|macos|linux`), as the engine reports it, not the browser it runs in.
+      os: mockOs,
+      arch: mockOs === 'macos' ? 'aarch64' : 'x86_64',
       commit: null,
       built: null,
       homepage: null,

@@ -25,7 +25,7 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
       <pd-widget-chooser [view]="v" [widgetFor]="widgetFor" (edit)="edit($event)">
         @for (kind of kinds(); track kind) {
           <ng-template [pdWidgetOption]="kind" [pdWidgetOptionOf]="sample" let-p>
-            <pd-select [options]="metricOptions()" [value]="metricName(p)" [ariaLabel]="label('Metric', p)" (valueChange)="setMetric(p, $event)" />
+            <pd-select [class.narrow]="kind === 'number'" [options]="metricOptions()" [value]="metricName(p)" [ariaLabel]="label('Metric', p)" (valueChange)="setMetric(p, $event)" />
             @if (kind === 'number') {
               <mat-form-field class="short"><mat-label>Label</mat-label><input matInput maxlength="16" [attr.aria-label]="label('Label', p)" [value]="field(p, 'label')" (change)="commit(p, 'label', $event)" /></mat-form-field>
               <mat-form-field class="short"><mat-label>Unit</mat-label><input matInput maxlength="8" [attr.aria-label]="label('Unit', p)" [value]="field(p, 'unit')" (change)="commit(p, 'unit', $event)" /></mat-form-field>
@@ -40,7 +40,9 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
   `,
   styles: `
     :host { display: block; }
-    .short { width: 7rem; flex: none; }
+    .short { width: 5rem; flex: none; }
+    /* A number row also holds its label and unit: the metric picker gives way so the description keeps its width. */
+    .narrow { width: 9.5rem; flex: none; }
     .faint { color: var(--text-3); }
   `,
 })
@@ -73,11 +75,24 @@ export class MenuBarItems implements OnInit {
     if (failed) this.notifier.error(failed);
   }
 
+  /** Edits of a row go one after the other, each made on the row as the engine has it after the one before. */
+  private queue: Promise<void> = Promise.resolve();
+
+  private editRow(id: string, change: (now: Placement<MenuBarItem>) => MenuBarItem | null): void {
+    this.queue = this.queue.then(async () => {
+      const now = this.view()?.layout.placements.find((x) => x.id === id);
+      const widget = now ? change(now) : null;
+      if (now && widget) await this.edit({ replace: { id, widget } });
+    });
+  }
+
   protected setMetric(p: Placement<MenuBarItem>, title: string): void {
     const metric = this.choices.menuBarMetrics().find((m) => m.title === title)?.metric;
     if (!metric) return;
-    const [kind, body] = Object.entries(p.widget)[0]!;
-    void this.edit({ replace: { id: p.id, widget: { [kind]: { ...body, metric } } as MenuBarItem } });
+    this.editRow(p.id, (now) => {
+      const [kind, body] = Object.entries(now.widget)[0]!;
+      return { [kind]: { ...body, metric } } as MenuBarItem;
+    });
   }
 
   protected label(what: string, p: Placement<MenuBarItem>): string {
@@ -90,7 +105,6 @@ export class MenuBarItems implements OnInit {
   }
 
   protected setNumber(p: Placement<MenuBarItem>, key: 'label' | 'unit', value: string): void {
-    if (typeof p.widget !== 'object' || !('number' in p.widget)) return;
-    void this.edit({ replace: { id: p.id, widget: { number: { ...p.widget.number, [key]: value } } } });
+    this.editRow(p.id, (now) => (typeof now.widget === 'object' && 'number' in now.widget ? { number: { ...now.widget.number, [key]: value } } : null));
   }
 }

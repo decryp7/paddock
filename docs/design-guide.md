@@ -19,8 +19,9 @@ product-reference points come from established knowledge (marked "[k]" in Source
    (status or accent fill) appears only when something needs attention. A screen with nothing wrong has at most one
    saturated element: the primary action.
 3. **Three density levels** (user setting, orthogonal to theme): Comfortable (row 36 px), Standard (row 32 px, default),
-   Compact (row 24 px, Debrief grids/Pitcrew logs). Controls never go below 24 px high; hit targets 24 px minimum
-   (WCAG 2.2 SC 2.5.8), 32 px for primary buttons.
+   Compact (row 24 px, Debrief grids/Pitcrew logs). Controls (buttons, fields, selects, the dialog footer) follow the
+   density through `--pd-button-height`: 32 px Comfortable, 28 px Standard (default), 24 px Compact. Controls never go
+   below 24 px high; hit targets 24 px minimum (WCAG 2.2 SC 2.5.8). A primary button is as high as the other controls.
 4. **Data-ink first** (Tufte): remove chart chrome that carries no information (box borders, heavy grids, 3D, legends
    that repeat a title). Direct-label rather than legend where possible.
 5. **Every state is designed**: loading (skeleton), empty (what + next step button), error (what failed, why, Retry),
@@ -264,7 +265,7 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
 - **Toolbars**: 44 px, ghost buttons by default (no border until hover), one primary (filled accent) at the far right,
   groups separated by a 1 px divider, segmented controls for 2-4 mutually exclusive options (time range).
 - **Buttons**: primary (accent fill), secondary (surface-2 + border-strong), ghost, danger (danger fill only in
-  confirmation dialogs). Height 28 (compact) / 32. Max one primary per view region.
+  confirmation dialogs). Height is `--pd-button-height`: 28 in Standard, 32 Comfortable, 24 Compact. Max one primary per view region.
 - **Popovers/menus**: surface-3, radius 10, shadow-2, 4 px padding, items 28 px radius 6, shortcut right-aligned
   muted, CDK menu for focus management, 120 ms fade+4 px translate.
 - **Tray popups**: 360 px wide; header (icon, name, one status pill), the widget area (the user's layout of widgets, below),

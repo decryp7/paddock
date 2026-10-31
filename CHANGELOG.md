@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui/widgets`: the add list ends on half a row, and Presets keeps its distance
+- The "Add a widget" list scrolls inside a box of five whole rows and half of the sixth (`max-height: calc(5.5 * 3.3rem)`), so the cut row says
+  that the list scrolls; it was a fixed `22rem` that could cut a row mid-text. The "Presets" label under the add list has the same top
+  margin as the other labels (the list sits in a wrapper, so the sibling rule did not reach it).
+- `docs/design-guide.md`: principle 3 and the Buttons line say what the family's controls measure now: `--pd-button-height` is 32 px
+  Comfortable, 28 px Standard (default), 24 px Compact.
+
 ### `DialogFrame`: `contentView`, so a dialog's header, footer and body never show different steps (`@decryp7/paddock-ui/shell/dialogs`)
 - New optional input `contentView` on `DialogFrame` (the mounted content's change detector; `DialogShell` and `DialogHost` set it). `render()` now checks the content together with the frame. Before, a `run` action that changed the content's state (a wizard's Continue) refreshed the header slot and the footer at once while the body, which sits in the host's view, followed on the next tick: for one frame the stepper and the buttons showed the new step over the old, taller body (Pitcrew's register window overflowed its body by 165 px).
 

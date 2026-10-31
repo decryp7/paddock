@@ -3,6 +3,7 @@ import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { WidgetChoicesStore } from '../../state/widget-choices';
+import { WidgetLayouts } from '../../state/widget-layouts';
 import { MenuBarItems } from './menu-bar-items';
 import { PopupWidgets } from './popup-widgets';
 
@@ -84,6 +85,27 @@ describe('dy-menu-bar-items', () => {
       expect(rows(el)).toHaveLength(3);
     });
     expect(el.querySelector('input[maxlength="8"]')).not.toBeNull();
+  });
+
+  it('an edit made from a row that is one edit behind keeps the first edit (metric, then unit)', async () => {
+    const { f, el } = setup(MenuBarItems);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(2);
+    });
+    el.querySelector<HTMLButtonElement>('button[aria-label="Add another Number"], button[aria-label="Add Number"]')!.click();
+    const layouts = TestBed.inject(WidgetLayouts);
+    await vi.waitFor(() => expect(layouts.menuBar()?.layout.placements).toHaveLength(3));
+    const behind = layouts.menuBar()!.layout.placements[2]!;
+    const page = f.componentInstance as unknown as { setMetric(p: typeof behind, title: string): void; setNumber(p: typeof behind, key: 'unit', value: string): void };
+    // The row the person edits is the one drawn before the first edit arrived: both edits are made from it.
+    page.setMetric(behind, 'Temperature');
+    page.setNumber(behind, 'unit', '°C');
+    await vi.waitFor(() => {
+      const now = layouts.menuBar()!.layout.placements[2]!.widget as { number: { metric: unknown; unit: string } };
+      expect(now.number.unit).toBe('°C');
+      expect(now.number.metric).toBe('temperature');
+    });
   });
 
   it('takes the default item and the metrics from the engine choices', async () => {

@@ -267,6 +267,8 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     .stack { display: grid; gap: var(--sp-4); }
     .card { padding: var(--sp-4) var(--sp-5); }
     .card > h2 { margin-bottom: var(--sp-2); }
+    /* The second chooser starts after a divider, not against the first one's Reset to defaults. */
+    #popup-widgets { margin-top: var(--sp-5); padding-top: var(--sp-4); border-top: 1px solid var(--border-subtle); }
     .row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
     .row.off { opacity: 0.55; }
     /* The whole name of every lookup site, not cut with an ellipsis. */

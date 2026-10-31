@@ -27,6 +27,7 @@ import type {
   WidgetState,
 } from '../generated/widgets';
 import type { PopoverSurfaceValues } from '../widget-types';
+import { wobble } from './noise';
 
 /**
  * The mock's widget layouts and popup values (family ADR 0035). It mimics the engine's contract with plausible data so the
@@ -360,7 +361,8 @@ export class MockWidgets {
     const ready = (value: PopoverValue, stale = false): WidgetState<PopoverValue, WidgetActionId> => ({ state: 'ready', value, asOf: stale ? at - 4 * 60_000 : at, staleSince: stale ? at - 4 * 60_000 : null });
     const empty = (title: string, detail: string, label: string, action: WidgetActionId, calm = false): WidgetState<PopoverValue, WidgetActionId> => ({ state: 'empty', title, detail, next: { action, label }, calm });
     const error = (title: string, cause: string): WidgetState<PopoverValue, WidgetActionId> => ({ state: 'error', title, cause, next: { action: retry, label: 'Retry' } });
-    const wave = (base: number, amp: number) => Array.from({ length: 60 }, (_, i) => Math.round((base + Math.sin(i / 5) * amp) * 10) / 10);
+    // A minute of readings that wander like real ones (seeded noise, not a sine wave).
+    const wave = (base: number, amp: number, seed = 1) => Array.from({ length: 60 }, (_, i) => Math.round((base + wobble(i, seed, 9) * amp) * 10) / 10);
     const stale = state === 'stale';
     switch (kind) {
       case 'activeAlarms':
@@ -377,7 +379,7 @@ export class MockWidgets {
         return ready({ cpuMemory: { cpuPercent: 76, cpuTone: 'warn', memoryUsed: 16.3 * 1024 ** 3, memoryTotal: 32 * 1024 ** 3, memoryPercent: 51, memoryTone: 'ok', cpuMinute: wave(70, 12) } }, stale);
       case 'network':
         if (state === 'empty') return empty('See traffic when online', 'Offline now.', 'Open network', { openPage: 'network' });
-        return ready({ network: { rxBps: 2.4e6, txBps: 310e3, rxMinute: wave(2e6, 5e5), txMinute: wave(3e5, 5e4) } }, stale);
+        return ready({ network: { rxBps: 2.4e6, txBps: 310e3, rxMinute: wave(2e6, 5e5, 2), txMinute: wave(3e5, 5e4, 3) } }, stale);
       case 'backupHealth':
         if (state === 'empty') return empty('Know when backups ran', 'No backup set up.', 'Set up checks', 'setUpBackupChecks');
         if (state === 'error') return error("Couldn't check", 'tmutil failed.');

@@ -82,7 +82,7 @@ for (const scheme of ['dark', 'light'] as const) {
     }
 
     // The Settings window, Dyno's page of it, as tall as ends between two cards (the page scrolls inside the window); the second picture has the menu bar items edited.
-    for (const [name, height] of [['settings', 874], ['settings-menu-bar', 962]] as const) {
+    for (const [name, height] of [['settings', 874], ['settings-menu-bar', 1480]] as const) {
       test(`${name} (${scheme})`, async ({ page }) => {
         mkdirSync(OUT, { recursive: true });
         await page.clock.install({ time: FROZEN });
@@ -102,7 +102,13 @@ for (const scheme of ['dark', 'light'] as const) {
           await section.getByRole('button', { name: 'Add Number' }).click();
           await expect(section.locator('ul.pd-wc-list').first().getByRole('listitem')).toHaveCount(4);
           await choose('Metric of number', 'Temperature');
-          await section.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+          await expect(section.getByRole('combobox', { name: /Metric of number/i })).toContainText('Temperature');
+          // A temperature is in degrees: the unit a person would type for it.
+          const unit = section.getByRole('textbox', { name: /Unit/ }).first();
+          await unit.fill('°C');
+          await unit.press('Enter');
+          // From the top of the section: its title, its description, the items and then the popup chooser with its live preview.
+          await win.in.getByRole('region', { name: 'Menu bar' }).evaluate((el) => el.scrollIntoView({ block: 'start' }));
         }
         await win.frame.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
         await page.mouse.move(2, 2);

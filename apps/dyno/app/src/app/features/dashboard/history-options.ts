@@ -207,6 +207,11 @@ export function diskTrendOption(trend: DiskTrend, t: ThemeTokens): EChartsCoreOp
     last && typeof trend.forecast === 'object' ? [[last.at, last.free], [last.at + trend.forecast.fullInDays * day, 0]] : [];
   const color = t.chart[2]!;
   const axis = byteAxis(Math.max(0, ...trend.points.map((p) => p.free)));
+  // Evenly spaced date ticks (whole days, about five across the line and its forecast) instead of the month and day boundaries the
+  // automatic ticks mix.
+  const first = trend.points[0]?.at ?? 0;
+  const end = projection.length ? projection[1]![0]! : (last?.at ?? first);
+  const tick = Math.max(day, Math.round((end - first) / 5 / day) * day);
   return {
     animationDuration: 250,
     textStyle: { fontFamily: FONT },
@@ -223,7 +228,7 @@ export function diskTrendOption(trend: DiskTrend, t: ThemeTokens): EChartsCoreOp
         return p ? `${formatDate(p.axisValue)}<br/>${p.seriesName}: <b>${formatBytes(p.value[1])}</b> free` : '';
       },
     },
-    xAxis: { type: 'time', splitNumber: 5, minInterval: 7 * day, axisLine: { lineStyle: { color: t.border } }, axisTick: { show: false }, axisLabel: { ...axisText(t), hideOverlap: true, formatter: '{d} {MMM}' }, splitLine: { show: false } },
+    xAxis: { type: 'time', interval: tick, axisLine: { lineStyle: { color: t.border } }, axisTick: { show: false }, axisLabel: { ...axisText(t), hideOverlap: true, formatter: '{d} {MMM}' }, splitLine: { show: false } },
     yAxis: {
       type: 'value',
       min: 0,

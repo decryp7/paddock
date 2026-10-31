@@ -18,7 +18,7 @@ import { Icon } from './icon';
     </mat-form-field>
   `,
   styles: `
-    :host { display: block; flex: 1 1 180px; min-width: 150px; max-width: 280px; }
+    :host { display: block; flex: 1 1 180px; min-width: 190px; max-width: 280px; }
     mat-form-field { width: 100%; }
     dy-icon { --icon-size: 15px; color: var(--text-3); margin-inline: var(--sp-3) var(--sp-1); }
   `,

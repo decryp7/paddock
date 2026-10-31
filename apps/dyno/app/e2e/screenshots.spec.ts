@@ -61,6 +61,18 @@ async function prepare(page: Page, theme: 'dark' | 'light', mock = 'macos'): Pro
   void mock;
 }
 
+/**
+ * Lands the page's clock on one fixed time and holds it there: the mock's live values are a function of the clock, and a running clock
+ * moves them by the real time the page took to load, so the light and the dark run would show different numbers.
+ */
+async function freezeClock(page: Page): Promise<void> {
+  const target = FROZEN + 300_000;
+  const now = await page.evaluate(() => Date.now());
+  if (now < target) await page.clock.runFor(target - now);
+  await page.clock.pauseAt(target + 1_000);
+  await page.clock.runFor(200);
+}
+
 const SCREENS: { name: string; path: string; mock?: string; query?: string; latency?: number; maxContent?: number; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } }[] = [
   {
     name: 'dashboard',
@@ -292,7 +304,8 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
   {
     name: 'tray',
     path: '/#/tray',
-    size: { width: 440, height: 660 },
+    // Tall enough for the whole default popup: the real popup scrolls when the screen is short, but the picture shows every card.
+    size: { width: 440, height: 820 },
     ready: async (page) => void (await expect(page.getByRole('button', { name: /Open Dyno/ })).toBeVisible()),
   },
 ];
@@ -308,6 +321,7 @@ for (const theme of ['dark', 'light'] as const) {
       await expect(page.locator('pd-shell-frame, dy-tray').first()).toBeVisible();
       await page.clock.runFor(45_000);
       await screen.ready(page);
+      await freezeClock(page);
       if (screen.name !== 'tray') {
         await fitToContent(page, screen.maxContent);
         await macWindowButtons(page);
@@ -317,7 +331,8 @@ for (const theme of ['dark', 'light'] as const) {
         // tray window's root is `html.pd-tray`; the shot fails if the backdrop did not apply (a renamed root would leave it plain).
         const wall = theme === 'dark' ? 'linear-gradient(160deg, #262a33 0%, #3b414d 100%)' : 'linear-gradient(160deg, #c3c7cf 0%, #e1e3e8 100%)';
         await page.addStyleTag({
-          content: `html.pd-tray { background: ${wall} !important; }
+          // The real popup stops at --pd-tray-max-height (520 px) and scrolls; the picture lifts that so every card of the default layout is whole.
+          content: `html.pd-tray { background: ${wall} !important; --pd-tray-max-height: 780px; }
             html.pd-tray body { padding: 34px 40px 0 !important; }
             #mac-menubar { position: fixed; inset: 0 0 auto 0; height: 24px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font: 13px -apple-system, 'Helvetica Neue', Arial, sans-serif; color: ${theme === 'dark' ? '#f2f2f5' : '#1d1d1f'}; background: rgb(${theme === 'dark' ? '20 20 24 / 55%' : '255 255 255 / 55%'}); backdrop-filter: blur(20px); z-index: 0; }
             #mac-menubar span { margin-right: 14px; } #mac-menubar b { margin-right: 14px; } #mac-menubar .right { display: flex; align-items: center; } #mac-menubar .right span { margin: 0 0 0 14px; }`,

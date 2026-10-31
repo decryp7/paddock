@@ -160,7 +160,8 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
     .dy-pw-half--next { border-inline-start: 1px solid var(--pd-hairline); padding-inline-start: 12px; }
     .dy-pw-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .dy-pw-half > .dy-pw-muted { white-space: nowrap; }
-    .dy-pw-half { display: grid; gap: 2px; min-width: 0; }
+    /* The rows keep their own height when a neighbour half is taller (a sparkline beside a meter), so the big numbers share a baseline. */
+    .dy-pw-half { display: grid; align-content: start; gap: 2px; min-width: 0; }
     .dy-pw-big { font-size: 22px; font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; line-height: 1.2; }
     .dy-pw-big small { font-size: var(--pd-text-label); font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); margin-left: 2px; }
     .dy-pw-val { display: inline-flex; align-items: center; gap: 4px; }
