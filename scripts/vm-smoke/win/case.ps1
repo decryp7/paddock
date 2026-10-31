@@ -5,6 +5,7 @@ $script:fail = 0
 function Check([bool]$ok, [string]$detail) { if ($ok) { "CHECK ok $detail" } else { $script:fail++; "CHECK FAIL $detail" } }
 $exe = "$env:LOCALAPPDATA\Spotter\spotter-app.exe"
 function Installed-Version { (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' | ? DisplayName -eq 'Spotter' | select -First 1).DisplayVersion }
+function Updates-Windows { @(Get-AppWindows 'spotter-app' | ? { (Get-Texts $_) -contains 'Check for updates automatically' }) }
 function Main-Window { Get-AppWindows 'spotter-app' | ? { $_.Current.Name -eq 'Spotter' } | select -First 1 }
 function All-Texts { $t = @(); foreach ($w in (Get-AppWindows 'spotter-app')) { $t += Get-Texts $w }; $t }
 function Update-State([string]$new) {
@@ -24,7 +25,7 @@ function Wait-State([string[]]$want, [int]$secs = 180) {
   if ($r) { $r } else { "timeout($script:last)" }
 }
 function Press-Any([string]$re) {
-  $ok = Wait-Until { foreach ($w in (Get-AppWindows 'spotter-app')) { $b = Find-Element $w $re 'Button'; if ($b) { Invoke-Element $b | Out-Null; return $true } } } 60
+  $ok = Wait-Until { foreach ($w in (Get-AppWindows 'spotter-app')) { $b = Find-Element $w $re 'Any'; if ($b) { Invoke-Element $b | Out-Null; return $true } } } 60
   [bool]$ok
 }
 $before = Installed-Version
@@ -38,7 +39,7 @@ if (-not $pidBefore) {
 $main = Wait-Until { $w = Main-Window; if ($w -and (Find-Element $w '^Help$' 'MenuItem')) { $w } } 90
 Check ([bool]$main) 'the main window is up with its Application menu'
 if (-not $main) { Save-Shot "C:\paddock-test\$CaseId-nowindow.png"; exit 1 }
-# Help > Check for updates…
+# Help > Check for updates
 $help = Find-Element $main '^Help$' 'MenuItem'; Invoke-Element $help | Out-Null
 $item = Wait-Until { Find-Element (Main-Window) '^Check for updates' 'MenuItem' } 20
 if (-not $item) { $item = Wait-Until { foreach ($w in (Get-AppWindows 'spotter-app')) { $e = Find-Element $w '^Check for updates' 'MenuItem'; if ($e) { $e } } } 10 }
@@ -47,7 +48,6 @@ if (-not $item) { Save-Shot "C:\paddock-test\$CaseId-nomenu.png"; exit 1 }
 Invoke-Element $item | Out-Null
 $opened = Wait-Until { (All-Texts) -match 'Not checked yet|Checking for updates|You have|is available|did not finish' } 30
 Check ([bool]$opened) 'the Updates window shows'
-# A window left open by the previous case shows its last result: ask again (Check now / Check again / Try again).
 [void](Press-Any '^(Check (now|again)|Try again)')
 if ($CaseId -eq 'down') {
   $s = Wait-State @('failed', 'upToDate', 'available') 60
@@ -61,7 +61,7 @@ if ($CaseId -eq 'down') {
 $s = Wait-State @('available') 120
 Save-Shot "C:\paddock-test\$CaseId-available.png"
 Check ($s -eq 'available') "window: $s (wanted `"Version $New is available`")"
-if ($s -ne 'available') { "TEXTS " + ((All-Texts | select -Unique | select -First 14) -join ' | '); exit 1 }
+if ($s -ne 'available') { foreach ($w in (Get-AppWindows 'spotter-app')) { "TREE window '$($w.Current.Name)'"; Show-Tree $w 14 | ? { $_ -match "'.+'" } | select -First 40 | % { "TREE $_" } }; "TEXTS " + ((All-Texts | select -Unique | select -First 14) -join ' | '); exit 1 }
 Check (Press-Any '^Download') 'pressed Download'
 if ($CaseId -eq 'ok') {
   $s = Wait-State @('ready') 240
