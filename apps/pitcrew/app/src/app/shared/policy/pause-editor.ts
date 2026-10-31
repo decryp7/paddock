@@ -9,12 +9,11 @@ const MODES: { key: PauseMode; label: string; hint: string }[] = [
   { key: 'when-idle', label: 'Only when the machine is idle', hint: 'Runners wait while someone is using this machine.' },
 ];
 
-/** Why a pause policy cannot be saved, or null. Pure; the engine validates again. */
+/** Why a pause policy cannot be saved, or null. Pure; the engine validates again. A window with no days is every day, as in the engine. */
 export function pauseProblem(p: PausePolicy): string | null {
   if (p.mode === 'schedule') {
     if (p.windows.length === 0) return 'Add at least one window, or choose Never.';
     if (p.windows.length > MAX_PAUSE_WINDOWS) return 'At most 14 windows are allowed.';
-    if (p.windows.some((w) => w.days.length === 0)) return 'Every window needs at least one day.';
   }
   if (p.mode === 'when-idle') {
     if (!Number.isInteger(p.busy_percent) || p.busy_percent < 5 || p.busy_percent > 100) return 'The busy level must be between 5 and 100 percent.';

@@ -83,7 +83,7 @@ describe('pauseProblem', () => {
   it('checks the active mode only', () => {
     expect(pauseProblem(pause())).toBeNull();
     expect(pauseProblem(pause({ mode: 'schedule', windows: [] }))).toContain('at least one window');
-    expect(pauseProblem(pause({ mode: 'schedule', windows: [{ days: [], start: '01:00', end: '02:00' }] }))).toContain('one day');
+    expect(pauseProblem(pause({ mode: 'schedule', windows: [{ days: [], start: '01:00', end: '02:00' }] }))).toBeNull(); // no day is every day
     expect(pauseProblem(pause({ mode: 'schedule', windows: Array(15).fill({ days: ['mon'], start: '01:00', end: '02:00' }) }))).toContain('14');
     expect(pauseProblem(pause({ mode: 'when-idle', busy_percent: 4 }))).toContain('5 and 100');
     expect(pauseProblem(pause({ mode: 'when-idle', quiet_minutes: 241 }))).toContain('1 and 240');
@@ -124,13 +124,12 @@ describe('PauseEditor', () => {
     await settle(f);
     expect(el.querySelector('[data-testid="pause-zone"]')).toBeNull();
     const days = () => Array.from(el.querySelectorAll<HTMLButtonElement>('pd-day-picker button'));
-    days()[0]!.click(); // mon off: the window has no day, which Pitcrew's policy does not allow
-    await settle(f);
-    expect(save(el).disabled).toBe(true);
-    expect(el.querySelector('p.tone-danger[role="alert"]')?.textContent).toContain('at least one day');
-    days()[5]!.click(); // sat on
+    days()[0]!.click(); // mon off: no day means every day, which the engine accepts
     await settle(f);
     expect(save(el).disabled).toBe(false);
+    expect(el.querySelector('p.tone-danger[role="alert"]')).toBeNull();
+    days()[5]!.click(); // sat on
+    await settle(f);
     save(el).click();
     expect(saved).toEqual([pause({ mode: 'schedule', windows: [{ days: ['sat'], start: '22:00', end: '06:00' }] })]);
   });
@@ -161,12 +160,13 @@ describe('PauseEditor', () => {
     expect(save(el).disabled).toBe(false);
     save(el).click();
     expect(saved[0]!.windows[1]).toEqual({ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '22:00', end: '06:00' });
-    // Unticking every day is the user's choice: it is not filled again, and Save is blocked by pauseProblem.
+    // Unticking every day is the user's choice (no day is every day, as in the engine): not filled again, and it saves.
     for (const b of picked()) b.click();
     await settle(f);
     expect(picked()).toHaveLength(0);
-    expect(save(el).disabled).toBe(true);
-    expect(el.querySelector('p.tone-danger[role="alert"]')?.textContent).toContain('at least one day');
+    expect(save(el).disabled).toBe(false);
+    save(el).click();
+    expect(saved[1]!.windows[1]!.days).toEqual([]);
   });
 
   it('discards edits and honours read-only', async () => {
