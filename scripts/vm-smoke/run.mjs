@@ -32,7 +32,7 @@ const GITEA = process.env.PADDOCK_GITEA ?? 'https://dev.decryptology.net';
 const REPO_PATH = 'decryp7/paddock';
 const SHARE = '/Volumes/My Shared Files/stage';
 const MANUAL_GUI_NOTE = 'Automated in the GUI mode: run the same command with --gui (README, "GUI mode").';
-const MANUAL = [
+export const MANUAL = [
   { title: 'Gatekeeper first launch (--gui)', summary: `Gatekeeper is enabled in the guest before the install, but this headless run installs without the quarantine flag, so its prompt is not exercised here. ${MANUAL_GUI_NOTE}` },
   { title: 'Login Items approval, login start, Finder double-click (--gui)', summary: `Not exercised headless. ${MANUAL_GUI_NOTE}` },
 ];

@@ -231,3 +231,14 @@ test('logPath finds the newest dated log of the candidates, the first candidate 
   assert.equal(none, '/Users/admin/Library/Logs/Dyno/dyno.*.log', 'nothing exists yet: the first candidate, so a stat of it reads 0');
   assert.equal(await mk({ 'printf %s "$HOME"': '/Users/admin' }).logPath('~/plain.log'), '/Users/admin/plain.log', 'a plain string still works');
 });
+
+test("Dyno's settle window covers one full respawn cycle (20 s) and says why", () => {
+  assert.equal(dynoConfig.settleSec, 20);
+  assert.match(dynoConfig.settleWhy, /20 s/);
+});
+
+test('the headless manual rows say Gatekeeper is enabled in the guest and point at the GUI mode', () => {
+  const g = MANUAL.find((m) => /Gatekeeper/.test(m.title));
+  assert.match(g.summary, /enabled in the guest/);
+  assert.match(g.summary, /--gui/);
+});
