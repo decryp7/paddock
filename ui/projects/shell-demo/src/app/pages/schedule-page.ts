@@ -17,7 +17,8 @@ import { DEMO_NOW, mockPause, mockSchedule } from './schedule-mock';
       </section>
       <section aria-labelledby="sd-pause">
         <h2 id="sd-pause">Pause windows</h2>
-        <pd-pause-editor [(value)]="pause" [problems]="pauseProblems()" />
+        <label class="context"><input type="checkbox" data-testid="pause-show-zone" [checked]="showZone()" (change)="showZone.set(!showZone())" /> Show the time zone</label>
+        <pd-pause-editor [(value)]="pause" [problems]="pauseProblems()" [showZone]="showZone()" />
       </section>
     </sd-page>
   `,
@@ -27,6 +28,7 @@ export class SchedulePage {
   protected readonly now = new Date(DEMO_NOW).toISOString();
   protected readonly schedule = signal<Schedule>({ mode: 'every', secs: 3600 });
   protected readonly pause = signal<PauseWindows>({ windows: [{ days: [], start: '22:00', end: '06:00' }], zone: null });
+  protected readonly showZone = signal(true);
   protected readonly answer = computed(() => mockSchedule(this.schedule()));
   protected readonly pauseProblems = computed(() => mockPause(this.pause()));
 }

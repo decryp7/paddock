@@ -364,4 +364,20 @@ describe('pd-pause-editor', () => {
     await settle(t.f);
     expect(t.value().zone).toBe('Europe/Berlin');
   });
+
+  it('shows the zone field by default; showZone=false hides it and keeps the zone value the host passed', async () => {
+    const t = pause({ windows: [{ days: [], start: '22:00', end: '06:00' }], zone: 'Europe/Berlin' });
+    await settle(t.f);
+    expect(t.el.querySelector('[data-testid=pause-zone]')).not.toBeNull();
+    t.f.componentRef.setInput('showZone', false);
+    await settle(t.f);
+    expect(t.el.querySelector('[data-testid=pause-zone]')).toBeNull();
+    t.q('.pd-add').click();
+    await settle(t.f);
+    expect(t.value().windows).toHaveLength(2);
+    expect(t.value().zone).toBe('Europe/Berlin');
+    t.f.componentRef.setInput('showZone', true);
+    await settle(t.f);
+    expect((t.q('[data-testid=pause-zone] input') as HTMLInputElement).value).toBe('Europe/Berlin');
+  });
 });

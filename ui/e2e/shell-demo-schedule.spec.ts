@@ -96,6 +96,14 @@ test.describe('schedule editors (plan X33)', () => {
     await expect(page.getByText('No windows: nothing is paused.')).toBeVisible();
   });
 
+  test('the pause editor shows its time zone field, and showZone=false hides it', async ({ app, page }) => {
+    await app.frame.open('#/schedule');
+    await expect(page.getByTestId('pause-zone')).toBeVisible();
+    await page.getByTestId('pause-show-zone').uncheck();
+    await expect(page.getByTestId('pause-zone')).toHaveCount(0);
+    await expect(page.getByTestId('pause-window-0')).toBeVisible();
+  });
+
   test('every icon button is at least 14 px and 24 px to hit', async ({ app, page }) => {
     await app.frame.open('#/schedule');
     await page.getByRole('radio', { name: 'At times' }).click();

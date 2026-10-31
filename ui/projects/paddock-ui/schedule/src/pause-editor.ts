@@ -52,9 +52,11 @@ import { dateToTime, TIME_PROVIDERS, TimeProblems, timeOptions, timeToDate } fro
       }
     </ul>
     <button type="button" matButton="outlined" class="pd-add" [disabled]="disabled() || value().windows.length >= max" (click)="add()"><pd-glyph name="plus" [size]="14" />{{ addText }}</button>
-    <pd-field class="pd-zone" data-testid="pause-zone" [label]="zoneLabel">
-      <input pdFieldControl type="text" spellcheck="false" autocomplete="off" [placeholder]="zonePlaceholder" [value]="value().zone ?? ''" [disabled]="disabled()" (change)="setZone($event)" />
-    </pd-field>
+    @if (showZone()) {
+      <pd-field class="pd-zone" data-testid="pause-zone" [label]="zoneLabel">
+        <input pdFieldControl type="text" spellcheck="false" autocomplete="off" [placeholder]="zonePlaceholder" [value]="value().zone ?? ''" [disabled]="disabled()" (change)="setZone($event)" />
+      </pd-field>
+    }
     @for (p of problems(); track $index) {
       <p class="pd-problem" role="alert"><pd-status-glyph status="error" [size]="14" />{{ p }}</p>
     }
@@ -77,6 +79,11 @@ export class PdPauseEditor {
   /** The engine's problems with `value`. */
   readonly problems = input<readonly string[]>([]);
   readonly disabled = input(false);
+  /**
+   * Shows the "Time zone" field (the default). Hosts whose windows are always in the computer's local time pass `false`: the
+   * field is not drawn and `value().zone` is never changed by the editor, so it stays whatever the host passed in.
+   */
+  readonly showZone = input(true);
 
   private readonly adapter = inject<DateAdapter<Date>>(DateAdapter);
   private readonly formats = inject(MAT_DATE_FORMATS);

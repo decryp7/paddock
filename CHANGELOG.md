@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `pd-pause-editor`: `showZone`
+- New input `showZone` (default `true`, today's behaviour). With `false` the "Time zone" field is not drawn and the editor never
+  changes `value().zone`: it stays whatever the host passed in (adds, edits and removes keep it). For hosts whose windows are always
+  in the computer's local time, such as Pitcrew's pause policy. The shell demo's Schedules page has a checkbox for it.
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.
