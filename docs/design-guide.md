@@ -80,6 +80,8 @@ the same screenshot matrix). Hexes are starting values.
 | hairline | rgba(255,255,255,.08) | rgba(15,20,30,.10) |
 | border-strong (dividers, secondary buttons) | rgba(255,255,255,.16) | rgba(15,20,30,.22) |
 | border-control (inputs, checkable controls; new, 3:1) | #838B98 | #6B7380 |
+| meter-neutral (a meter's neutral fill: disk space, quotas; 3:1 on surface-1, -2, -3 and on the bar track) | #7C8593 | #6B7381 |
+| skeleton-raised / shine (a skeleton on a surface-2 fill, where `--pd-skeleton` vanishes) | #2C3037 / #363B44 | #DADDE2 / #E6E8EC |
 | text | #ECEEF1 | #14171C |
 | text-muted | #A0A7B2 (7.4:1 on surface-1) | #4F5764 (6.5:1 on surface-2, 7.3:1 on white) |
 | text-subtle (non-essential only) | #8B93A0 (4.9:1 on surface-3) | #5F6775 (5.2:1 on bg) |
@@ -265,9 +267,38 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   confirmation dialogs). Height 28 (compact) / 32. Max one primary per view region.
 - **Popovers/menus**: surface-3, radius 10, shadow-2, 4 px padding, items 28 px radius 6, shortcut right-aligned
   muted, CDK menu for focus management, 120 ms fade+4 px translate.
-- **Tray popups**: 360 px wide; header (icon, name, one status pill), hero tiles 2x2 (value 20/600, sparkline 24 px),
-  one list (max 5 rows), footer (one primary "Open <App>", one icon-button for pause). Needs-attention banner replaces
-  the first row when active. 12 px minimum text.
+- **Tray popups**: 360 px wide; header (icon, name, one status pill), the widget area (the user's layout of widgets, below),
+  and a footer with one primary "Open <App>" and one "⋯" icon button whose `mat-menu` holds "Customize widgets…",
+  "Settings…" and "Quit <App>". A needs-attention notice (the agent stopped, say) is drawn once above the widgets, which keep
+  their last values marked stale; the content scrolls past 520 px. 12 px minimum text.
+- **Widget area and frame** (`@decryp7/paddock-ui/widgets`, ADR 0035): the area is a grid of the surface's columns (the popup:
+  2 equal columns of 159 px, 8 px gap, the popover's 16 px inset); a widget spans 1 (half) or 2 (full). A frame has no border
+  inside the bordered popover, one token step instead (`--pd-surface-2` on `--pd-surface-3`), radius 10, padding 8 / 12. In high
+  contrast it is outlined in `--pd-border-strong`. The head is a 14 px icon, a 12/500 muted title and an optional right-aligned
+  meta ("3 volumes"); a stale reading shows a clock and "Updated 4 min ago" ("Paused at 14:28" only for a live kind; at half
+  width the clock and the short time, with the full wording in the tooltip and the accessible name). The body, by state:
+  - **Loading**: the ready template with no value; its parts marked `pdSkeleton` are `--pd-skeleton-raised` blocks with the
+    `--pd-skeleton-raised-shine` shimmer (static in reduced motion), so the loading height is the ready height.
+  - **Empty**: a 16 px muted `info` icon (never the head's icon again), a 13/600 title that starts with what the person gains, one
+    muted line and the next step as a text button. A calm empty that means "all good" (no active alarms) is one real `button` row:
+    success icon, text, chevron, named "No active alarms, checked 2 min ago. Open alarms".
+  - **Error**: a danger icon, the title in plain words, the cause muted, Retry as a text button; never raw exception text.
+  - **Working**: a refresh icon, the title, "phase · progress" (a growing count when the total is unknown), a 4 px bar
+    (indeterminate for a count), the last value under it; no timeout.
+  - **Stale**: ready, with the clock meta above. A busy source is working or stale, never an error, and an error is never a
+    problem of the whole surface (that is the notice).
+  A frame or row that opens a page is one real `button` with a chevron; widgets are sections labelled by their titles, in layout
+  order.
+- **Chooser** (`pd-widget-chooser`, in the app's Settings): two lists, "Shown in the popup" (n of max) and "Add a widget".
+  Each shown row has a drag handle (a 24 × 32 button that is also the keyboard control: Alt or Option with Up, Down, Home and End
+  moves the row, focus stays on it and the live region says "Disk space moved to position 1 of 4"), the kind's icon, title and
+  summary, its option (a `mat-select` for a volume), Half / Full `mat-button-toggle`s for a kind with two spans and a "⋯" `mat-menu`
+  (Move up, down, to top, to bottom with their keys, then Remove). The drop placeholder is the full row (accent tint, dashed accent
+  outline); the menu keeps clear of the button's focus ring. Add: "Add" (outlined), the app's "Add volume" for a kind that can be
+  placed again, "Added" (check and muted text, not a button) at its count; at the limit the counter says "8 of 8", an info line says
+  "The popup holds 8 widgets. Remove one to add another." and every Add is disabled. Reset to defaults is a text button; remove and
+  reset show the undo snack bar through the toast area while the engine says `can_undo`. At 840 px and more the real popup is
+  previewed beside the lists, with the same area and values. A newer layout is read-only, and a note says why.
 - **Dialogs**: modal for decisions only; title 18, one sentence, primary on the right, cancel left of it; destructive
   dialog names the thing and the consequence ("Delete 3 runners and their folders"); Esc closes, focus returns to the
   trigger. Prefer inline panels or popovers over dialogs.
@@ -283,7 +314,9 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   `aria-hidden-focus` can flag that window, so tests wait for the live region before running axe.
 - **Badges**: 20 px high, 12/500, pill, tint bg + status colour text + 12 px icon + word. Counts in nav: neutral
   surface-3 pill; use status tint only if the count means a problem. Never more than 2 badges in one table cell.
-- **Skeletons**: 1.6 s shimmer on surface-2 (static in reduced motion), same geometry as content.
+- **Skeletons**: 1.6 s shimmer on surface-2 (static in reduced motion), same geometry as content. On a surface-2 fill (a widget in
+  a popover) the raised pair `--pd-skeleton-raised` and `--pd-skeleton-raised-shine` is used, because `--pd-skeleton` is the surface-2
+  colour itself.
 - **Empty states**: 32 px muted icon, 15/600 title (what is missing), one muted sentence (why / what happens next), one
   button (the next step). **Error states**: icon in danger, what failed in plain words, likely cause, Retry + secondary
   ("Open logs"). Never raw exception text as the headline.
