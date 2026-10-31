@@ -1,6 +1,6 @@
 # 25. CI job isolation: any number of jobs per host, job-scoped state in the runner's job folder, kept folders per slot
 
-- Status: Proposed (2026-10-28; independent review 2026-10-28: "not yet", two P1s and the P2s below; all addressed on
+- Status: Proposed (2026-10-28; amended in draft 2026-10-31 for Pitcrew 1.1; independent review 2026-10-28: "not yet", two P1s and the P2s below; all addressed on
   `ci/job-isolation`, see "Verified" and "Still open" at the end)
 - Date: 2026-10-28
 - Related: rule 2 (own worktrees, build folders and ports), rule 7 (tests never touch the machine), rule 40 (recurring bugs
@@ -158,6 +158,60 @@ Two kinds of per-host state, one mechanism, declared lists:
 - Each host builds `paddock-dev` once per input hash (a release build, about a minute, into the shared `tools` folder)
   the first time a job acquires a slot; until the prebuilt download (ADR 0022, R0b) exists.
 - The CI home follows `PADDOCK_CI_HOME` (ci-home.sh, the one implementation); `job-isolation.sh` calls it.
+
+## Amendment 2026-10-31 (draft for review): slot spaces, Pitcrew's session and headless runners, and the open items
+
+Written for Pitcrew 1.1 (ADR 0021 §1 and §1a, ADR 0023). Status of this amendment: **Proposed**; the ADR as a whole stays
+Proposed until an independent review accepts both. Nothing above changes for a host with one account.
+
+**A. A slot space is one CI home.** The slot lock lives in `<ci-home>/slots/`, so the unit of isolation is the CI home, and
+a CI home is per account unless `PADDOCK_CI_HOME` says otherwise. Two jobs collide only inside one slot space. Definitions:
+
+- *Session runners* (Pitcrew session mode) run as the logged-in user: one space, `~/.paddock-ci`.
+- *Headless runners* (ADR 0023: LaunchDaemon, systemd system unit, per-runner Windows service) run as the service account or
+  a per-runner virtual account. Their home differs from the user's, and on Windows from each other (`NT SERVICE\<name>` has
+  its own profile), so by default each headless runner is **its own space with one slot**: no collision, no sharing, cold
+  caches. To share warm caches, the owner sets one explicit `PADDOCK_CI_HOME` for those runners, a folder all their accounts may
+  write (`/Users/Shared/paddock-ci`, `/var/lib/paddock-ci`, `%ProgramData%\paddock-ci`), created by Pitcrew with that
+  access when the pool is configured. Runners sharing that folder are one space.
+- Session and headless runners are separate spaces unless the owner points both at one folder. Pitcrew does not do it for
+  them: the account that writes the folder differs, and a permission mix-up costs more than a cold cache.
+
+**B. What Pitcrew declares and checks (ADR 0021 §1).** A pool declares `ci_isolation = "slots"` **per space**. For each space
+Pitcrew writes `PADDOCK_CI_SLOTS` = `PADDOCK_CI_KEEP_SLOTS` = the number of runners of the pool in that space (default cap 4, as
+`PADDOCK_CI_SLOTS` above) into every runner's `runner.envs`; a space with one runner needs no slots. Pitcrew's config check
+rejects: two runners of one space with different `PADDOCK_CI_HOME`; a pool whose runners share an account but name different
+homes; `PADDOCK_CI_HOME` on a session slot that differs from the user's default when other session slots keep the default.
+Each check offers a Fix through ADR 0011's editor. Pitcrew cannot see the kit, so `ci_isolation` stays a declared precondition.
+
+**C. Session loss.** A session runner stops when its session ends (Pitcrew drains it between jobs, ADR 0021 §4). A job that
+dies with the session leaves the holder with it: the holder is a child of the job's step, the kernel releases the lock, and the
+next acquirer sweeps by `with_idle`. No change to the lock. A *headless* runner is unaffected by logon state.
+
+**D. Closing the "Still open" items.**
+1. *Concurrency with two or three runners on one host.* Becomes an acceptance test: `tools/paddock-dev` integration tests
+   already run eight parallel acquires with real processes; add one that uses three real `act`-style job folders under a fake
+   runner (Pitcrew's `fake_runner` example) on the three OS, run on the CI hosts at the end. The real first runs stay a rollout
+   step, watched with `job-isolation.sh status`.
+2. *Windows `runner.timeout`.* The holder's age limit (3 h + 30 min) assumes the runner's job timeout is at most 3 h. Pitcrew
+   reads `runner.timeout` from every runner's `config.yaml` (it does, ADR 0011) and reports a pool runner whose timeout is
+   longer than `RUNNER_JOB_TIMEOUT_SECS` as an error with a Fix (set it back, or the owner raises the constant in the same
+   change, as this ADR requires). This makes the unverified Windows value irrelevant: Pitcrew checks the file on every host.
+3. *Linux stays one job per host until containers take slots.* **Conflict to resolve in review:** ADR 0021 records that d-gtr9 runs
+   one runner with `runner.capacity: 4` (container jobs), the decided Linux maximum, while §8 above says one job per Linux host
+   is the rule because every container shares the `/sccache` mount and sccache's local cache takes one server. Either (a) the
+   four concurrent jobs already race on sccache and the cache needs per-container slots now, or (b) they work today because
+   sccache is per-container and §8 is too strict. The measurement decides: run four concurrent Linux jobs, read the sccache
+   server logs and stats of each, record the result here. If (a), slots on the mount are the same Rust lock with the mount's
+   `slots/` folder, a per-slot `/sccache/s<n>` (cap = budget divided), and acquire/release stop being no-ops in a container;
+   package I1b.
+4. *Disk budgets per space.* `PADDOCK_CI_SCCACHE_GB` and `PADDOCK_CI_MIN_FREE_GB` apply per space; on a host with two spaces
+   the owner sets them so the sum fits (Pitcrew's pool page shows the sum and warns above the volume's free space, ER-24).
+
+**E. Implementation (package I1, after the review accepts this).** (1) `paddock-slots`: nothing new for A; add the explicit
+`PADDOCK_CI_HOME` permission note to the crate docs. (2) `conformance/ci/job-isolation.sh`: `status` prints the space (the home)
+and its holders. (3) Pitcrew (ADR 0021 WP-5): the three config checks of B and the timeout check of D2, tests first with
+fake `config.yaml` text. (4) The concurrency test of D1. (5) Linux per D3 only if the measurement says (a).
 
 ## Rollout
 
