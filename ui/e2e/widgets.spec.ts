@@ -284,3 +284,39 @@ test('Widgets: deleting a preset asks first and puts focus on the next preset', 
   await c.getByRole('button', { name: 'Delete the Work preset' }).click();
   await expect(c.getByRole('button', { name: 'Apply the Minimal preset' })).toBeFocused();
 });
+
+test('Widgets: the popup footer menu opens inside the popover, not past its edge', async ({ page }) => {
+  await open(page, 'dark');
+  const popup = page.getByTestId('wgt-popup').locator('pd-tray-popover');
+  await page.getByTestId('wgt-popup').getByRole('button', { name: 'More actions' }).click();
+  const menu = page.locator('.mat-mdc-menu-panel[role=menu]').last();
+  await expect(menu).toBeVisible();
+  await animationsDone(page);
+  const p = (await popup.boundingBox())!;
+  const m = (await menu.boundingBox())!;
+  expect(m.x).toBeGreaterThanOrEqual(p.x);
+  expect(m.x + m.width).toBeLessThanOrEqual(p.x + p.width);
+  expect(m.y).toBeGreaterThanOrEqual(p.y);
+  expect(m.y + m.height).toBeLessThanOrEqual(p.y + p.height);
+});
+
+test('Widgets: Escape cancels the preset delete confirm', async ({ page }) => {
+  await open(page, 'dark');
+  const c = chooser(page);
+  await c.getByLabel('Preset name').fill('Work');
+  await c.getByRole('button', { name: 'Save as preset' }).click();
+  await c.getByRole('button', { name: 'Delete the Work preset' }).click();
+  await expect(c.getByText('Delete this preset?')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(c.getByText('Delete this preset?')).toHaveCount(0);
+  await expect(c.getByRole('button', { name: 'Delete the Work preset' })).toBeFocused();
+});
+
+test('Widgets: the preset name field has 13 px text and the height of its Save button', async ({ page }) => {
+  await open(page, 'dark');
+  const c = chooser(page);
+  const field = await c.locator('.pd-wc-save .mat-mdc-text-field-wrapper').boundingBox();
+  const button = await c.getByRole('button', { name: 'Save as preset' }).boundingBox();
+  expect(Math.round(field!.height)).toBe(Math.round(button!.height));
+  expect(await c.locator('.pd-wc-save input').evaluate((e) => getComputedStyle(e).fontSize)).toBe('13px');
+});
