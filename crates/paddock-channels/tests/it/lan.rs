@@ -174,12 +174,14 @@ fn a_dispatched_message_carries_the_switch_to_the_poster() {
     );
     r.dispatcher
         .dispatch(&message("diskLow", Severity::Error), &CancelToken::new());
-    let seen: Vec<(String, bool)> = r
+    // Channels deliver on their own threads: the order the poster saw them in is not the settings order.
+    let mut seen: Vec<(String, bool)> = r
         .poster
         .requests()
         .into_iter()
         .map(|q| (q.url, q.lan))
         .collect();
+    seen.sort();
     assert_eq!(
         seen,
         [
@@ -197,4 +199,40 @@ fn offline_mode_blocks_a_home_network_channel_too() {
     let err = post(&e, "http://192.168.1.20/hook", true).unwrap_err();
     assert!(err.message.contains("offline"), "{err}");
     assert_eq!(wire.sends(), 0);
+}
+
+#[test]
+fn an_address_is_judged_as_the_network_layer_reads_it() {
+    // Octal, hex and short spellings of a private address are the private address, so they need the switch too.
+    for url in [
+        "https://0300.0250.1.20/x",
+        "https://0xc0a80114/x",
+        "https://3232235796/x",
+        "http://192.168.1/x",
+    ] {
+        let off = valid(hook(url, false)).unwrap_err();
+        assert!(
+            off.contains("private network") || off.contains("home network"),
+            "{url}: {off}"
+        );
+        assert_eq!(valid(hook(url, true)), Ok(()), "{url}");
+    }
+    assert!(
+        valid(hook("https://", true))
+            .unwrap_err()
+            .contains("valid host")
+    );
+    assert!(valid(hook("https://a b/x", true)).is_err());
+    assert!(
+        valid(hook("https://user:pw@nas.local/x", true))
+            .unwrap_err()
+            .contains("login")
+    );
+}
+
+#[test]
+fn the_switch_is_for_webhook_and_ntfy_only() {
+    let mut c = email("m", None);
+    c.allow_lan = true;
+    assert!(valid(c).unwrap_err().contains("webhook and ntfy"));
 }
