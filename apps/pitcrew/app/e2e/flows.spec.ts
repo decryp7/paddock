@@ -188,7 +188,15 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
       await expect(page.locator('pc-machine-tiles pd-sparkline').first()).toBeVisible();
       // The tiles' own labels carry the formatted values; an image role on the chart would read raw numbers as well.
       await expect(page.locator('pc-machine-tiles pd-sparkline svg[role="img"]')).toHaveCount(0);
-      await expect.poll(() => axeViolations(page), { timeout: 10_000 }).toEqual([]);
+      // The events list is loaded (it is a scroll region, which axe judges by its content), then axe looks; the last findings
+      // are attached to the report when it never settles at none.
+      await expect(page.locator('pc-events-feed')).toBeVisible();
+      let last: string[] = [];
+      try {
+        await expect.poll(async () => (last = await axeViolations(page)), { timeout: 10_000 }).toEqual([]);
+      } finally {
+        if (last.length > 0) await test.info().attach(`axe-${colorScheme}`, { body: last.join('\n'), contentType: 'text/plain' });
+      }
     }
   });
 });
