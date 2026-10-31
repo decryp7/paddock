@@ -13,6 +13,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 - **Browser on Windows:** the page browser Debrief downloads (Chrome for Testing) no longer starts its network service twice, which could make the first page it opened fail to load
 - **Event Log follower:** the status no longer shows more queued events than the queue holds while the writer is busy
+- **Process monitor:** every monitoring run (the debrief-monitor command and the agent's monitor action) now ends its log with "Monitoring stopped after … ms", the reason (stopped, or the error) and how many samples and stats events it wrote, so a short or empty monitor log says why
 
 ## 1.1.1 (2026-10-24)
 
