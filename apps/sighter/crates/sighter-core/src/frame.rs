@@ -77,6 +77,7 @@ impl Frame {
                 actual: pixels.len(),
             });
         }
+        let pixels = pixels.into_iter().map(|p| p & 0x00ff_ffff).collect();
         Ok(Frame { width, height, pixels })
     }
 
@@ -144,6 +145,7 @@ mod tests {
     #[test]
     fn pixels_are_row_major_and_masked() {
         let f = Frame::new(2, 2, vec![1, 2, 3, 4]).unwrap();
+        assert_eq!(Frame::new(1, 1, vec![0xff12_3456]).unwrap().get(0, 0), Some(0x0012_3456));
         assert_eq!(
             (f.get(0, 0), f.get(1, 0), f.get(0, 1), f.get(1, 1)),
             (Some(1), Some(2), Some(3), Some(4))

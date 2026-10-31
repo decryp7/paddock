@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use crate::chain::Chain;
 use crate::detect::Detection;
@@ -39,8 +40,8 @@ pub enum TargetError {
     #[error("the target is not reachable: {0}")]
     Lost(String),
     /// The target did not answer in time.
-    #[error("the target did not answer within {0} ms")]
-    Timeout(u64),
+    #[error("the target did not answer within {} ms", .0.as_millis())]
+    Timeout(Duration),
     /// The server sent something that breaks the protocol.
     #[error("the target sent invalid data: {0}")]
     Protocol(String),
@@ -218,6 +219,13 @@ pub enum VlmError {
     Failed(String),
 }
 
+impl VlmError {
+    /// A missing or failing VLM is an infrastructure error, never a product failure.
+    pub fn outcome(&self) -> Outcome {
+        Outcome::Error
+    }
+}
+
 /// The optional vision-language model (Pitwall). Only a bounded request the user started; never used for bulk work.
 pub trait Vlm {
     /// Grounds a description in the frame; `Err(NeedsLocalAi)` when Pitwall is not running.
@@ -233,6 +241,13 @@ pub enum StoreError {
     /// The medium failed (disk full, locked, unreadable).
     #[error("the store failed: {0}")]
     Failed(String),
+}
+
+impl StoreError {
+    /// A store fault is an infrastructure error, never a product failure.
+    pub fn outcome(&self) -> Outcome {
+        Outcome::Error
+    }
 }
 
 /// Where frames, labels and run results live. Whatever reaches a store has already been redacted; a store never sees a
@@ -337,14 +352,16 @@ mod tests {
     fn infrastructure_faults_are_errors_never_failures() {
         for e in [
             TargetError::Lost("x".into()),
-            TargetError::Timeout(5),
+            TargetError::Timeout(Duration::from_millis(5)),
             TargetError::Protocol("p".into()),
         ] {
             assert_eq!(e.outcome(), Outcome::Error, "{e}");
         }
-        assert!(TargetError::Timeout(250).to_string().contains("250 ms"));
+        assert!(TargetError::Timeout(Duration::from_millis(250)).to_string().contains("250 ms"));
         assert_eq!(ModelError::NoModel("detector".into()).outcome(), Outcome::Error);
         assert_eq!(ModelError::Failed("oom".into()).outcome(), Outcome::Error);
+        assert_eq!(VlmError::NeedsLocalAi.outcome(), Outcome::Error);
+        assert_eq!(StoreError::Missing("k".into()).outcome(), Outcome::Error);
         let mut t = fake(1);
         assert!(t.grab().is_ok());
         assert!(matches!(t.grab(), Err(TargetError::Lost(_))));

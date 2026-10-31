@@ -5,14 +5,16 @@
 
 use std::cmp::Ordering;
 
-use crate::detect::Provenance;
+use crate::detect::{Candidate, Provenance};
 use crate::geometry::{Logical, Rect};
-use crate::score::{CalibratedScore, Layer, Probability};
+use crate::score::{CalibratedScore, Calibrator, Layer, Probability, RawScore, ScoreError};
 
 /// The built-in accept threshold. The one place the default lives; everything else reads [`Thresholds::default`].
 pub const DEFAULT_TAU: f64 = 0.8;
 /// The built-in margin. The one place the default lives.
 pub const DEFAULT_MARGIN: f64 = 0.2;
+/// Float slack for comparing a lead with the margin: 1.0 - 0.8 is 0.19999999999999996, which must still meet 0.2.
+const MARGIN_EPSILON: f64 = 1e-9;
 /// The built-in overlap (IoU) at which two hits count as the same place.
 pub const DEFAULT_SAME_PLACE_IOU: f64 = 0.5;
 /// The most hits one decision looks at; the rest are dropped, weakest first, never a panic; fusion is quadratic in this.
@@ -131,6 +133,19 @@ pub struct LayerHit {
     pub score: CalibratedScore,
     /// Whether a hint narrowed the search to it (kept through fusion, for the trace and the "hint-sourced" mark).
     pub provenance: Provenance,
+}
+
+impl LayerHit {
+    /// A hit from a detector candidate: the detector's score is the raw score of [`Layer::Detector`], calibrated by
+    /// `calibrator` (which must be the detector's), and the hint provenance is kept.
+    pub fn from_candidate(c: &Candidate, calibrator: &Calibrator) -> Result<LayerHit, ScoreError> {
+        let raw = RawScore::new(Layer::Detector, c.detection.score.get())?;
+        Ok(LayerHit {
+            rect: c.detection.rect,
+            score: calibrator.calibrate(raw)?,
+            provenance: c.provenance,
+        })
+    }
 }
 
 /// Hits of several layers that agree on one place, combined. Built only by [`fuse`].
@@ -266,7 +281,7 @@ pub fn decide(hits: &[LayerHit], t: &Thresholds) -> Resolution {
         };
     }
     match fused.get(1) {
-        Some(second) if top.probability.get() - second.probability.get() < t.margin() => {
+        Some(second) if top.probability.get() - second.probability.get() + MARGIN_EPSILON < t.margin() => {
             Resolution::Ambiguous(fused.into_iter().take(2).collect())
         }
         _ => Resolution::Found(Located(top.clone())),
@@ -329,6 +344,44 @@ mod tests {
             decide(&[hit(Layer::Ocr, 0.0, 0.0, 0.74), hit(Layer::Ocr, 200.0, 0.0, 0.5)], &t),
             Resolution::Ambiguous(_)
         ));
+    }
+
+    #[test]
+    fn the_margin_edge_is_inclusive_at_the_defaults_despite_float_rounding() {
+        // 1.0 - 0.8 is 0.19999999999999996 in f64, which is below the 0.2 margin by rounding alone.
+        let t = Thresholds::default();
+        for (top, second) in [(1.0, 0.8), (0.95, 0.75), (0.9, 0.7)] {
+            let r = decide(&[hit(Layer::Ocr, 0.0, 0.0, top), hit(Layer::Ocr, 200.0, 0.0, second)], &t);
+            assert!(matches!(r, Resolution::Found(_)), "{top}/{second}: {r:?}");
+        }
+        // A real shortfall still counts as ambiguous.
+        let r = decide(&[hit(Layer::Ocr, 0.0, 0.0, 0.95), hit(Layer::Ocr, 200.0, 0.0, 0.76)], &t);
+        assert!(matches!(r, Resolution::Ambiguous(_)), "{r:?}");
+    }
+
+    #[test]
+    fn a_detector_candidate_becomes_a_hit_through_the_detector_calibrator() {
+        use crate::detect::{Candidate, ClassId, Detection, Score};
+        let c = Candidate {
+            detection: Detection {
+                rect: Rect::new(1.0, 2.0, 30.0, 10.0).unwrap(),
+                class: ClassId(3),
+                score: Score::new(0.9).unwrap(),
+                tile: 0,
+            },
+            provenance: Provenance::HintSourced(1),
+        };
+        let cal = Calibrator::conservative(Layer::Detector);
+        let h = LayerHit::from_candidate(&c, &cal).unwrap();
+        assert_eq!(
+            (h.rect, h.provenance, h.score.layer()),
+            (c.detection.rect, Provenance::HintSourced(1), Layer::Detector)
+        );
+        assert_eq!(h.score.raw().value(), 0.9);
+        assert_eq!(h.score.probability().get(), 0.6);
+        // A calibrator of another layer is refused, not applied.
+        let wrong = Calibrator::conservative(Layer::Ocr);
+        assert!(LayerHit::from_candidate(&c, &wrong).is_err());
     }
 
     #[test]
