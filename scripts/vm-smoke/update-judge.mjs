@@ -35,9 +35,9 @@ export function staticTexts(treeDump) {
 export function feedRoute(url, current) {
   const path = decodeURIComponent(new URL(url, 'https://feed.invalid').pathname);
   if (path === '/ok/latest.json') return { file: `${current}/latest.json`, type: 'application/json' };
-  const m = /^\/([a-z]+)\/(Spotter_aarch64\.app\.tar\.gz(?:\.sig)?)$/.exec(path);
-  if (!m || m[1] !== current) return null;
-  return { file: `${m[1]}/${m[2]}`, type: m[2].endsWith('.sig') ? 'text/plain' : 'application/gzip' };
+  const m = /^\/([a-z]+)\/(Spotter_[A-Za-z0-9._-]+\.(?:app\.tar\.gz|exe)(?:\.sig)?)$/.exec(path);
+  if (!m || m[1] !== current || m[2].includes('..')) return null;
+  return { file: `${m[1]}/${m[2]}`, type: m[2].endsWith('.sig') ? 'text/plain' : 'application/octet-stream' };
 }
 
 /** The version in an Info.plist read by `defaults read`: the app's version, or '' for anything else. */
