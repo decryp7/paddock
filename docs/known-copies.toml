@@ -414,13 +414,6 @@ paths = ["crates/paddock-window/src/popover.rs", "crates/paddock-window/src/taur
 status = "built"
 adr = "0012"
 
-  [[mechanism.copy]]
-  paths = ["apps/spotter/app/src-tauri/src/tray.rs"]
-  symbols = ["item:popup_position", "item:fitted_height", "item:fitted_top", "item:toggle_popup", "item:fit_popup"]
-  owner = "spotter"
-  delete_by = "spotter-v1.0.0"
-  note = "Spotter 1.0 drops these items for paddock-window's popover (itself ported from Dyno's popover)."
-
 [[mechanism]]
 id = "window-feel"
 title = "Native feel of a desktop window on the Rust side (webview defaults, context menu, zoom)"

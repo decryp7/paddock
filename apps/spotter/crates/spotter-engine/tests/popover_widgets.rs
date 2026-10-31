@@ -103,7 +103,10 @@ fn the_settings_pages_save_never_changes_the_layout() {
     from_the_page.notifications = false;
     let saved = engine.save_settings(from_the_page).unwrap();
     assert!(!saved.notifications);
-    assert!(!kinds(&engine).contains(&PopoverWidget::Failures), "the page's stale copy of the layout was ignored");
+    assert!(
+        !kinds(&engine).contains(&PopoverWidget::Failures),
+        "the page's stale copy of the layout was ignored"
+    );
 }
 
 #[test]

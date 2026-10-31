@@ -394,7 +394,7 @@ element, mood.
 - **Spotter** (teal): watchful, quiet; signature = a "pulse" row per watched item (last checked, changed dot) and a
   change-diff view; mostly lists and timelines, so lowest chart density, highest typographic quality. Direction: a
   feed-style home (Today: what changed), grouped by watcher; change items show a before/after diff chip, severity
-  (breaking / notable / info) via status colours; tray popup lists 5 latest changes with "Mark all seen"; empty state
+  (breaking / notable / info) via status colours; tray popup is the widget area (default: recent changes, watched sites, failures with Retry, next check, notifications; "Mark all as seen" is in its more menu); empty state
   "Nothing changed since 09:12. Next check in 14 min".
 
 ## 13. Polish checklist (apply per screen, in both schemes, at 1280x800 and 1920x1080)
