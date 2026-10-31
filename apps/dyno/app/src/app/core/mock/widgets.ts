@@ -381,7 +381,7 @@ export class MockWidgets {
       case 'backupHealth':
         if (state === 'empty') return empty('Know when backups ran', 'No backup set up.', 'Set up checks', 'setUpBackupChecks');
         if (state === 'error') return error("Couldn't check", 'tmutil failed.');
-        if (state === 'working') return { state: 'working', title: 'Checking Time Machine', phase: '', progress: { count: { done: 2, unit: 'items' } }, last: null, cancel: null };
+        if (state === 'working') return { state: 'working', title: 'Checking backup', phase: '', progress: { count: { done: 2, unit: 'items' } }, last: null, cancel: null };
         return ready({ backupHealth: { name: 'Time Machine', state: 'healthy', lastBackup: at - 2 * 3_600_000, summary: 'Time Machine finished a backup.', tools: 1 } }, stale);
       case 'lastIssue':
         if (state === 'empty') return empty('No issues in the last 7 days', 'Dyno reads the system logs for crashes and hangs.', 'Open issues', { openPage: 'issues' });
