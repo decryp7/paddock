@@ -73,6 +73,8 @@ paddock_commands::command_table! {
     Mutation [MAIN | DIALOG] => tauri::updates_install_on_quit,
     /// Quits, installs the verified update and starts the new version.
     Mutation [MAIN | DIALOG] => tauri::updates_restart,
+    /// Opens the build's releases page in the system browser (no argument).
+    Mutation [MAIN | DIALOG] => tauri::updates_open_releases,
     /// Automatic checks and the release channel.
     Mutation [MAIN | DIALOG] => tauri::updates_set_preferences,
     /// The running version, build facts and the legal documents' titles.
@@ -89,6 +91,7 @@ paddock_dialogs::dialogs! {
     /// About, What's new and Updates (ADR 0026 §3).
     pub static DIALOGS;
     // The releases link opens in the system browser through the files adapter (a webview window opens no links itself).
+    // TODO(least privilege): About's link still names the address; a no-argument `about_open_releases` would narrow it.
     "pd.about" => Viewer { commands: &[dialog_callable::about_info, dialog_callable::about_legal, paddock_files::dialog_callable::files_open_url] },
     "pd.whats-new" => Viewer { commands: &[dialog_callable::about_whats_new] },
     "pd.updates" => Form(Modeless) { commands: &[
@@ -99,8 +102,8 @@ paddock_dialogs::dialogs! {
         dialog_callable::updates_install_on_quit,
         dialog_callable::updates_restart,
         dialog_callable::updates_set_preferences,
-        // A build that cannot install points to the releases page, which opens in the system browser.
-        paddock_files::dialog_callable::files_open_url,
+        // A build that cannot install points to the releases page: opened by the engine, no address from the window.
+        dialog_callable::updates_open_releases,
     ] },
 }
 

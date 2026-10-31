@@ -915,13 +915,14 @@ fn without_an_installer_nothing_is_downloaded_or_installed_and_the_status_says_s
     assert!(matches!(r.phase(), UpdatePhase::Available { .. }));
     assert!(r.downloads().is_empty());
     assert_eq!(r.server.hits(PACKAGE_URL), 0);
-    // The install steps are refused at the request too.
+    // The install steps out of turn answer Busy first, as a download does (nothing is ready to install).
     for refused in [
         r.updater.prepare_restart().map(|_| ()),
         r.updater.install_on_quit(true).map(|_| ()),
     ] {
         assert!(
-            matches!(refused, Err(UpdateError::InstallFailed { ref detail }) if detail.contains("no installer"))
+            matches!(refused, Err(UpdateError::Busy { .. })),
+            "{refused:?}"
         );
     }
     assert_eq!(r.updater.install_at_exit(), ExitAction::Nothing);

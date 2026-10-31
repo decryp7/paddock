@@ -5,7 +5,7 @@ import { PdSelect } from '@decryp7/paddock-ui/select';
 import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
 import type { SuJobPhase } from '@decryp7/paddock-ui';
 import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
-import { AboutBackend } from './backend';
+import { UpdatesBackend } from './backend';
 import { UpdatesStore } from './updates.store';
 import { ABOUT_STYLES } from './styles';
 import { formatBytes } from './format';
@@ -67,7 +67,9 @@ import { formatBytes } from './format';
         <pre class="pd-text" tabindex="0" [attr.aria-label]="t.notes">{{ notes }}</pre>
       }
       @if (openFailed(); as why) {
-        <p class="pd-muted" role="alert" data-testid="updates-open-failed">{{ why }}</p>
+        <div class="pd-problem" role="alert" data-testid="updates-open-failed">
+          <p class="pd-message">{{ why }}</p>
+        </div>
       }
       @if (store.error(); as e) {
         <div class="pd-problem" role="alert" data-testid="updates-error">
@@ -134,7 +136,7 @@ export class PdUpdatesDialog implements DialogContent {
     asking: $localize`:@@pd.updates.asking:Asking the updater…`,
   };
   protected readonly store = inject(UpdatesStore);
-  private readonly about = inject(AboutBackend);
+  private readonly backend = inject(UpdatesBackend);
   /** Why the releases page did not open, in the engine's words; null when it did. */
   protected readonly openFailed = signal<string | null>(null);
   /** The window's jobs, when it has them: the download's phases. */
@@ -151,7 +153,7 @@ export class PdUpdatesDialog implements DialogContent {
     if (!s) return [];
     const run = (id: string, label: string, role: 'primary' | 'secondary', go: () => unknown): DialogAction => ({ kind: 'run', id, label, role, run: () => void go() });
     // A build that cannot install (no key, or declared `no_install`) points to the releases page: that is the primary action.
-    const releases = s.releasesPage ? run('releases', this.t.openReleases, 'primary', () => this.openReleases(s.releasesPage as string)) : null;
+    const releases = s.releasesPage ? run('releases', this.t.openReleases, 'primary', () => this.openReleases()) : null;
     const viaReleases = (...rest: DialogAction[]): readonly DialogAction[] => (releases ? [releases, ...rest] : rest.map((a) => ({ ...a, role: 'primary' as const })));
     switch (s.phase.kind) {
       case 'unavailable':
@@ -178,11 +180,11 @@ export class PdUpdatesDialog implements DialogContent {
     }
   });
 
-  /** A webview window opens no links itself: the engine opens the page in the system browser (`files_open_url`). */
-  private async openReleases(url: string): Promise<void> {
+  /** A webview window opens no links itself: the engine opens the page in the system browser (`updates_open_releases`: the engine knows the address). */
+  private async openReleases(): Promise<void> {
     this.openFailed.set(null);
     try {
-      await this.about.openUrl(url);
+      await this.backend.openReleases();
     } catch (e) {
       this.openFailed.set(e instanceof Error ? e.message : String(e));
     }

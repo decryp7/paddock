@@ -76,6 +76,7 @@ fn the_table_has_the_updater_and_about_commands() {
             "updates_cancel",
             "updates_install_on_quit",
             "updates_restart",
+            "updates_open_releases",
             "updates_set_preferences",
             "about_info",
             "about_legal",

@@ -53,6 +53,8 @@ export abstract class UpdatesBackend {
   /** Quits, installs and starts the new version. */
   abstract restart(): Promise<UpdateStatus>;
   abstract setPreferences(preferences: Preferences): Promise<UpdateStatus>;
+  /** Opens the build's releases page in the system browser; the engine knows the address, the window names none (`updates_open_releases`). */
+  abstract openReleases(): Promise<void>;
   /** Every status the engine sends (`paddock://updates`) until the returned function is called. */
   abstract listen(handler: (status: UpdateStatus) => void): Promise<Unlisten>;
 }
@@ -114,6 +116,9 @@ export class TauriUpdatesBackend extends UpdatesBackend {
   }
   installOnQuit(enabled: boolean): Promise<UpdateStatus> {
     return this.call('updates_install_on_quit', { enabled });
+  }
+  async openReleases(): Promise<void> {
+    await this.ipc.invoke<unknown>('updates_open_releases');
   }
   restart(): Promise<UpdateStatus> {
     return this.call('updates_restart');
@@ -299,10 +304,10 @@ export class MemoryUpdatesBackend extends UpdatesBackend {
 
   download(): Promise<UpdateStatus> {
     const phase = this.current.phase;
-    // The engine refuses to download what it could never install.
-    if (!this.current.canInstall && phase.kind !== 'unavailable') return this.refuse(ERRORS.installFailed);
     const retry = phase.kind === 'failed' && phase.info !== null && phase.error.kind !== 'signatureInvalid';
     if (phase.kind !== 'available' && !retry) return this.refuse({ ...ERRORS.busy, message: 'There is no update to download.' });
+    // As the engine: out of turn first, then "this build could never install it".
+    if (!this.current.canInstall) return this.refuse(ERRORS.installFailed);
     this.generation++;
     const info = this.info();
     const status = this.set({ kind: 'downloading', info, job: ++this.job });
@@ -323,17 +328,30 @@ export class MemoryUpdatesBackend extends UpdatesBackend {
 
   installOnQuit(enabled: boolean): Promise<UpdateStatus> {
     const phase = this.current.phase;
-    if (enabled && !this.current.canInstall) return this.refuse(ERRORS.installFailed);
     if (phase.kind !== 'ready') return this.refuse({ ...ERRORS.busy, message: 'No verified update is ready to install.' });
+    if (enabled && !this.current.canInstall) return this.refuse(ERRORS.installFailed);
     return Promise.resolve(this.set({ ...phase, installOnQuit: enabled }));
   }
 
   restart(): Promise<UpdateStatus> {
     const phase = this.current.phase;
-    if (!this.current.canInstall) return this.refuse(ERRORS.installFailed);
     if (phase.kind !== 'ready') return this.refuse({ ...ERRORS.busy, message: 'No verified update is ready to install.' });
+    if (!this.current.canInstall) return this.refuse(ERRORS.installFailed);
     // The app would quit here; the browser build stays on "installing".
     return Promise.resolve(this.set({ kind: 'installing', info: phase.info }));
+  }
+
+  /** The addresses asked to open, in order (the releases page). */
+  readonly openedUrls: string[] = [];
+  /** Opens them, when set (a browser build passes `window.open`); tests leave it unset and read `openedUrls`. */
+  opener: ((url: string) => void) | null = null;
+
+  openReleases(): Promise<void> {
+    const url = this.current.releasesPage;
+    if (!url) return Promise.reject({ kind: 'invalid', message: 'This build has no releases page.', nextStep: 'Look for new versions where you got the app.', detail: null } satisfies UpdateErrorDto);
+    this.openedUrls.push(url);
+    this.opener?.(url);
+    return Promise.resolve();
   }
 
   setPreferences(preferences: Preferences): Promise<UpdateStatus> {

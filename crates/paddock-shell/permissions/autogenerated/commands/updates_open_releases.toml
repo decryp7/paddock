@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-updates-open-releases"
+description = "Enables the updates_open_releases command without any pre-configured scope."
+commands.allow = ["updates_open_releases"]
+
+[[permission]]
+identifier = "deny-updates-open-releases"
+description = "Denies the updates_open_releases command without any pre-configured scope."
+commands.deny = ["updates_open_releases"]

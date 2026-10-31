@@ -15,6 +15,12 @@ Conventional Commits; one semver tag for the whole repo.
 - The engine refuses `Updater::begin_download` (and so `updates_download`) in a build without an installer, with `InstallFailed`
   ("this build has no installer", next step: the releases page), after the out-of-turn and not-available answers: nothing is
   downloaded that could never be installed.
+- New command `updates_open_releases` (no argument): the engine opens the build's own releases page through the app's `Files`
+  service. The `pd.updates` dialog contract no longer lists `files_open_url` (least privilege: a window cannot name an address).
+  `pd.about` still has `files_open_url` for its releases link (a no-argument `about_open_releases` would narrow it; left for later).
+  `UpdatesBackend.openReleases()` is the new port method.
+- `install_on_quit(true)` and `prepare_restart()` answer Busy first when out of turn, like `begin_download`; the in-memory UI
+  backend follows the same order.
 - Updates dialog: a build that cannot install (no key, or `no_install`) offers "Open releases page" (`UpdateStatus.releasesPage`,
   through `files_open_url`, now in the `pd.updates` contract) as its primary action, with "Check again" secondary.
 - `UpdateStatus` has `can_install` (TypeScript `canInstall`); `Updater::can_install()`. `Updater::install_on_quit(true)` and

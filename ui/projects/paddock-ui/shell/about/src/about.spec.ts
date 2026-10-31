@@ -160,6 +160,8 @@ describe('the wire', () => {
     ]) {
       expect(await run()).toBe(status);
     }
+    await updates.openReleases();
+    expect(calls.at(-1)).toEqual(['updates_open_releases', undefined]);
     const seen: UpdateStatus[] = [];
     await updates.listen((s) => seen.push(s));
     handler?.(status);
@@ -541,7 +543,7 @@ describe('the dialogs', () => {
     expect(text(el)).toContain('Not checked yet.');
   });
 
-  it('Updates shows a refused signature with its next step, and nothing to press without a key', async () => {
+  it('Updates shows a refused signature with its next step, and only Open releases page without a key', async () => {
     bed('bad-signature');
     const fixture = createFramed(PdUpdatesDialog);
     await settle();
@@ -571,7 +573,7 @@ describe('the dialogs', () => {
   });
 
   it('Updates of a build that cannot install offers the releases page first, then Check again, and no download, restart or install on quit', async () => {
-    const { updates, about } = bed('release', [], false, false);
+    const { updates } = bed('release', [], false, false);
     const fixture = createFramed(PdUpdatesDialog);
     await settle();
     await fixture.whenStable();
@@ -587,16 +589,18 @@ describe('the dialogs', () => {
     expect(button(el, 'Check again').dataset['role']).toBe('secondary');
     button(el, 'Open releases page').click();
     await settle();
-    expect(about.openedUrls).toEqual(['https://updates.example/releases']);
-    // The engine refuses the install steps and the download too.
+    expect(updates.openedUrls).toEqual(['https://updates.example/releases']);
+    // The engine refuses the download; the install steps are out of turn (busy) first, as in the engine.
     await expect(updates.download()).rejects.toMatchObject({ kind: 'installFailed' });
-    await expect(updates.restart()).rejects.toMatchObject({ kind: 'installFailed' });
-    await expect(updates.installOnQuit(true)).rejects.toMatchObject({ kind: 'installFailed' });
+    const idle = new MemoryUpdatesBackend({ currentVersion: '1.0.0', server: 'release', canInstall: false });
+    await expect(idle.download()).rejects.toMatchObject({ kind: 'busy' });
+    await expect(updates.restart()).rejects.toMatchObject({ kind: 'busy' });
+    await expect(updates.installOnQuit(true)).rejects.toMatchObject({ kind: 'busy' });
   });
 
   it('Updates says so when the releases page did not open', async () => {
-    const { about } = bed('release', [], false, false);
-    about.openUrl = () => Promise.reject(new Error('No browser.'));
+    const { updates } = bed('release', [], false, false);
+    updates.openReleases = () => Promise.reject(new Error('No browser.'));
     const fixture = createFramed(PdUpdatesDialog);
     await settle();
     await fixture.whenStable();
@@ -608,10 +612,11 @@ describe('the dialogs', () => {
     await settle();
     await fixture.whenStable();
     expect(el.querySelector('[data-testid="updates-open-failed"]')?.textContent).toContain('No browser.');
+    expect(el.querySelector('[data-testid="updates-open-failed"]')?.classList.contains('pd-problem')).toBe(true);
   });
 
-  it('Updates in a build without a key offers Open releases page as its one action', async () => {
-    const { about } = bed('unavailable');
+  it('Updates in a build without a key offers only Open releases page', async () => {
+    const { updates } = bed('unavailable');
     const fixture = createFramed(PdUpdatesDialog);
     await settle();
     await fixture.whenStable();
@@ -620,7 +625,7 @@ describe('the dialogs', () => {
     expect(button(el, 'Open releases page').dataset['role']).toBe('primary');
     button(el, 'Open releases page').click();
     await settle();
-    expect(about.openedUrls).toEqual(['https://updates.example/releases']);
+    expect(updates.openedUrls).toEqual(['https://updates.example/releases']);
   });
 
   describe('against a status the engine could send', () => {
@@ -720,6 +725,9 @@ describe('the dialogs', () => {
       expect(names).toContain('Open releases page');
       expect(names).not.toContain('Try again');
       expect(names).toContain('Check again');
+      const el = f.nativeElement as HTMLElement;
+      expect(button(el, 'Open releases page').dataset['role']).toBe('primary');
+      expect(button(el, 'Check again').dataset['role']).toBe('secondary');
     });
   });
 

@@ -453,6 +453,7 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync 
         updates_cancel,
         updates_install_on_quit,
         updates_restart,
+        updates_open_releases,
         updates_set_preferences,
         about_info,
         about_legal,
@@ -522,6 +523,37 @@ pub async fn updates_restart<R: Runtime>(
         .prepare_restart()
         .map_err(UpdateErrorDto::from)
         .inspect(|_| native::quit(&app))
+}
+
+/// Opens `page`; the error is the files service's message (its error type is large, so it does not travel).
+fn open_page(files: &paddock_files::Files, page: &str) -> Result<(), String> {
+    files.open_url(page).map_err(|e| e.message)
+}
+
+/// Opens the build's own releases page in the system browser. It takes no address: a window cannot name one (least
+/// privilege; the Updates dialog needs no general `files_open_url`).
+#[::tauri::command]
+pub async fn updates_open_releases<R: Runtime>(
+    app: AppHandle<R>,
+    updates: Managed<'_>,
+) -> Result<(), UpdateErrorDto> {
+    let invalid = |detail: &str| UpdateError::Invalid {
+        detail: detail.into(),
+    };
+    let page = updates
+        .updater
+        .status()
+        .releases_page
+        .ok_or_else(|| invalid("This build has no releases page."))?;
+    let files = app
+        .try_state::<Arc<paddock_files::Files>>()
+        .map(|f| f.inner().clone())
+        .ok_or_else(|| invalid("The app cannot open web addresses."))?;
+    ::tauri::async_runtime::spawn_blocking(move || open_page(&files, &page))
+        .await
+        .map_err(|e| invalid(&e.to_string()))?
+        .map_err(|detail| UpdateError::Invalid { detail })
+        .map_err(UpdateErrorDto::from)
 }
 
 /// Sets automatic checks and the channel (an unknown channel is refused).

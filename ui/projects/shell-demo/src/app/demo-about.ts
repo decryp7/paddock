@@ -99,6 +99,8 @@ export function demoUpdatesBackend(): UpdatesBackend {
     ],
     schedule: (step) => (hold && downloading ? held.push(step) : queueMicrotask(step)),
   });
+  // The browser build has no engine to ask: the releases page opens in a new tab.
+  memory.opener = (url) => void window.open(url, '_blank', 'noopener,noreferrer');
   if (jobs) {
     void memory.listen((status) => {
       downloading = status.phase.kind === 'downloading';

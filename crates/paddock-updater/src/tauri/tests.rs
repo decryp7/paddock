@@ -670,15 +670,17 @@ fn a_build_that_declared_no_install_downloads_and_installs_nothing() {
     invoke(&w, "updates_check", json!({})).unwrap();
     let available = wait_for(&rx, "available");
     assert_eq!(available["canInstall"], false);
+    let e = invoke(&w, "updates_download", json!({})).unwrap_err();
+    assert_eq!(e["kind"], "installFailed");
+    assert!(e["nextStep"].as_str().unwrap().contains("releases page"));
+    // Nothing is ready to install, so the install steps are out of turn (busy) before they are impossible.
     for (command, args) in [
-        ("updates_download", json!({})),
         ("updates_restart", json!({})),
         ("updates_install_on_quit", json!({ "enabled": true })),
     ] {
-        let e = invoke(&w, command, args).unwrap_err();
-        assert_eq!(e["kind"], "installFailed", "{command}");
-        assert!(
-            e["nextStep"].as_str().unwrap().contains("releases page"),
+        assert_eq!(
+            invoke(&w, command, args).unwrap_err()["kind"],
+            "busy",
             "{command}"
         );
     }
@@ -686,4 +688,82 @@ fn a_build_that_declared_no_install_downloads_and_installs_nothing() {
         invoke(&w, "updates_status", json!({})).unwrap()["phase"]["kind"],
         "available"
     );
+}
+
+/// Records what would be started instead of starting it.
+#[derive(Default)]
+struct Recorded(Mutex<Vec<String>>);
+
+impl paddock_files::open::Launcher for Recorded {
+    fn start(&self, invocation: &paddock_files::open::Invocation) -> std::io::Result<()> {
+        let all = std::iter::once(invocation.program.clone())
+            .chain(invocation.args.iter().cloned())
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        self.0.lock().unwrap().push(all.join(" "));
+        Ok(())
+    }
+}
+
+#[test]
+fn the_dialog_opens_the_builders_releases_page_and_nothing_a_window_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let launched = Arc::new(Recorded::default());
+    let files = paddock_files::Files::new(paddock_files::Recents::open(None, &[]))
+        .launcher(launched.clone());
+    let app = app(None);
+    app.manage(Arc::new(files));
+    install(app.handle(), builder(dir.path())).unwrap();
+    let w = window(&app, "d-main-1");
+    // The window sends no address; one it adds is not read.
+    invoke(
+        &w,
+        "updates_open_releases",
+        json!({ "url": "https://evil.example/" }),
+    )
+    .unwrap();
+    let seen = launched.0.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert!(seen[0].contains("https://example.net/releases"), "{seen:?}");
+    assert!(!seen[0].contains("evil"));
+}
+
+#[test]
+fn opening_the_releases_page_says_why_when_it_cannot() {
+    let dir = tempfile::tempdir().unwrap();
+    // No releases page in the build.
+    let app = app(None);
+    app.manage(Arc::new(
+        paddock_files::Files::new(paddock_files::Recents::open(None, &[]))
+            .launcher(Arc::new(Recorded::default())),
+    ));
+    let mut b = builder(dir.path());
+    b.releases_page = None;
+    install(app.handle(), b).unwrap();
+    let e = invoke(
+        &window(&app, "d-main-1"),
+        "updates_open_releases",
+        json!({}),
+    )
+    .unwrap_err();
+    assert_eq!(e["kind"], "invalid");
+    assert!(e["message"].as_str().unwrap().contains("releases page"));
+    // No files service in the app.
+    let app = app_without_files();
+    let e = invoke(
+        &window(&app, "d-main-1"),
+        "updates_open_releases",
+        json!({}),
+    )
+    .unwrap_err();
+    assert_eq!(e["kind"], "invalid");
+    assert!(e["message"].as_str().unwrap().contains("cannot open"));
+}
+
+fn app_without_files() -> App {
+    let app = app(None);
+    let dir = tempfile::tempdir().unwrap();
+    install(app.handle(), builder(dir.path())).unwrap();
+    std::mem::forget(dir);
+    app
 }
