@@ -661,11 +661,15 @@ fn a_named_settings_file_is_reported_and_the_default_one_is_left_alone() {
         json!({"version":1,"sections":{"x":{"apiKey":"sk-secret-value"}}}).to_string(),
     )
     .unwrap();
-    let sections: Vec<std::sync::Arc<dyn paddock_diag::Section>> =
-        vec![std::sync::Arc::new(builtin::Settings::file("shell-settings.json"))];
+    let sections: Vec<std::sync::Arc<dyn paddock_diag::Section>> = vec![std::sync::Arc::new(
+        builtin::Settings::file("shell-settings.json"),
+    )];
     let c = Collected::collect(&app_info(), &d, &sections, &redactor(), now());
     let names: Vec<_> = c.files().iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, ["shell-settings.json"]);
     assert!(!format!("{:?}", c.files()).contains("sk-secret-value"));
-    assert_eq!(std::fs::read(d.config().join("settings.json")).unwrap(), foreign);
+    assert_eq!(
+        std::fs::read(d.config().join("settings.json")).unwrap(),
+        foreign
+    );
 }

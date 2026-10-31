@@ -227,7 +227,11 @@ mod tests {
     }
 
     fn event(login_item: bool, restore: bool, sender_is_loginwindow: bool) -> OpenEvent {
-        OpenEvent { login_item, restore, sender_is_loginwindow }
+        OpenEvent {
+            login_item,
+            restore,
+            sender_is_loginwindow,
+        }
     }
 
     #[test]

@@ -490,5 +490,8 @@ fn the_default_settings_live_in_the_given_file_or_in_memory() {
     let file = dir.path().join(crate::logging::SHELL_SETTINGS_FILE);
     let _ = settings_at(Some(file.clone()));
     let _ = settings_at(None);
-    assert!(!dir.path().join(paddock_settings::FILE_NAME).exists(), "the app's own settings.json is never created");
+    assert!(
+        !dir.path().join(paddock_settings::FILE_NAME).exists(),
+        "the app's own settings.json is never created"
+    );
 }

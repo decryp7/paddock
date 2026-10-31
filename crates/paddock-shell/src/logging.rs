@@ -63,9 +63,15 @@ mod tests {
         let id = AppIdentity::new("demo", "Shell Demo", "1.0.0");
         // Only paths are computed; nothing is opened or created.
         if let Some(path) = shell_settings_path_for(&id) {
-            assert_eq!(path.file_name().and_then(|n| n.to_str()), Some(SHELL_SETTINGS_FILE));
+            assert_eq!(
+                path.file_name().and_then(|n| n.to_str()),
+                Some(SHELL_SETTINGS_FILE)
+            );
         }
         let bad = AppIdentity::new("", "", "1.0.0");
-        assert!(shell_settings_path_for(&bad).is_none(), "an invalid identity has no folders");
+        assert!(
+            shell_settings_path_for(&bad).is_none(),
+            "an invalid identity has no folders"
+        );
     }
 }

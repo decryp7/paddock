@@ -237,7 +237,9 @@ fn a_disconnected_volume_is_an_empty_that_says_what_the_person_gains_and_offers_
         i.volumes = Source::Ready(&v)
     })
     .unwrap();
-    let S::Empty { title, detail, next, calm } = s else { panic!("{s:?}") };
+    let S::Empty { title, detail, next, calm } = s else {
+        panic!("{s:?}")
+    };
     assert!(!calm, "a disk that is not connected is not good news");
     assert_eq!(title, "See Time Machine's space when it's connected");
     assert_eq!(detail, "The disk isn't connected now.");
@@ -532,7 +534,9 @@ fn no_issue_in_a_week_is_an_empty_that_opens_issues() {
         })
     })
     .unwrap();
-    let S::Empty { title, detail, next, calm } = s else { panic!("{s:?}") };
+    let S::Empty { title, detail, next, calm } = s else {
+        panic!("{s:?}")
+    };
     assert!(calm, "no issues means all good: a calm row");
     assert_eq!(title, "No issues in the last 7 days");
     assert!(!detail.is_empty());
@@ -746,7 +750,9 @@ fn no_network_is_the_offline_empty_with_open_network() {
     let mut l = live();
     l.system.network.clear();
     let s = run(&PopoverWidget::Network, |i| i.live = Source::Ready(&l)).unwrap();
-    let S::Empty { title, detail, next, calm } = s else { panic!("{s:?}") };
+    let S::Empty { title, detail, next, calm } = s else {
+        panic!("{s:?}")
+    };
     assert!(!calm);
     assert_eq!((title.as_str(), detail.as_str()), ("See traffic when online", "Offline now."));
     assert_eq!(next.unwrap().action, WidgetActionId::OpenPage(Page::Network));
