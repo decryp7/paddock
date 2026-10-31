@@ -97,6 +97,12 @@ pub fn is_held(dirs: &Dirs) -> bool {
     paddock_proc::is_held(&dirs.instance_lock())
 }
 
+/// [`is_held`] at one check, without the re-check's wait: for the app's supervisor, which judges the lock over its own looks
+/// at its own pace (`paddock_proc::is_held_now`).
+pub fn is_held_now(dirs: &Dirs) -> bool {
+    paddock_proc::is_held_now(&dirs.instance_lock())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,6 +114,7 @@ mod tests {
         assert!(!is_held(&dirs));
         let first = InstanceLock::acquire(&dirs).unwrap();
         assert!(is_held(&dirs));
+        assert!(is_held_now(&dirs));
         let err = InstanceLock::acquire(&dirs).unwrap_err();
         assert!(matches!(err, LockError::Held { .. }), "{err}");
         assert!(err.to_string().contains("already running"));

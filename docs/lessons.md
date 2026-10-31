@@ -444,6 +444,10 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   crates and the app preset (it forces fork+exec; priority is lowered on the held child after the spawn), and a test that
   forks on purpose lives in a test binary of its own: in a shared one its child copied its neighbours' locks and was a
   trigger of the random EBADF above (one failure in 20 loaded runs remained after moving it; that cause is still open).
+  The judgement belongs to one layer only: a supervisor that already judges the lock over its own paced looks (Dyno's
+  link) probes it with `is_held_now`, one check and no wait. Probing with the re-checking `is_held` put a hidden 400 ms
+  wall-clock wait into every look, so the link's looks no longer followed its pace (CI 7257: a counted wait of 50 looks took
+  20-43 s, and a slow first look showed "the system is not answering" before the holder was known).
 - A Node script's "am I the main module" check must compare real paths: Node gives `import.meta.url` the resolved path
   and leaves `process.argv[1]` as given, so through a symlink (a CI work folder linked to a stable one, `node_modules`)
   `import.meta.url === pathToFileURL(process.argv[1]).href` is false and the script exits 0 doing nothing (the Chrome for

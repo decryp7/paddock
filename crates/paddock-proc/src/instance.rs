@@ -140,6 +140,19 @@ pub fn is_held(path: &Path) -> bool {
     matches!(InstanceLock::claim(path), Ok(Claim::Held))
 }
 
+/// Whether some process holds the lock on `path` at this one check: no re-check and no wait, so it answers at once. For a
+/// caller that judges the lock over its own repeated looks at its own pace (a supervisor), where a hidden wait would slow
+/// every look and a held lock that is only a spawn's copy is seen free on the next look anyway. A free lock is taken and
+/// dropped at once, as in [`is_held`]; anything that is not a clear "held" is `false`.
+pub fn is_held_now(path: &Path) -> bool {
+    held_at_one_check(path, File::try_lock)
+}
+
+/// [`is_held_now`] with the locking call given.
+fn held_at_one_check(path: &Path, mut lock: impl FnMut(&File) -> Result<(), TryLockError>) -> bool {
+    matches!(InstanceLock::claim_once(path, &mut lock), Ok(Claim::Held))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,6 +212,37 @@ mod tests {
         let got = InstanceLock::claim_paced(&path, held_times(usize::MAX), &mut pace);
         assert!(matches!(got, Ok(Claim::Held)));
         assert_eq!(pace.waited, HELD_CHECKS as usize - 1);
+    }
+
+    /// Regression (CI run 7257): Dyno's supervisor probed the lock with [`is_held`] on every look, so a held lock cost each
+    /// look the re-check's wait (about 400 ms) and the supervisor's looks stopped following its pace. The one-check probe
+    /// asks the lock once and never waits.
+    #[test]
+    fn the_one_check_probe_asks_the_lock_once_and_never_waits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("a.lock");
+        let mut calls = 0;
+        let mut answer = held_times(usize::MAX);
+        assert!(held_at_one_check(&path, |f: &File| {
+            calls += 1;
+            answer(f)
+        }));
+        assert_eq!(calls, 1, "a held lock was checked again");
+        let mut calls = 0;
+        assert!(!held_at_one_check(&path, |_: &File| {
+            calls += 1;
+            Ok(())
+        }));
+        assert_eq!(calls, 1);
+        assert!(
+            !held_at_one_check(&path, |_: &File| Err(TryLockError::Error(
+                std::io::Error::from(std::io::ErrorKind::Unsupported)
+            ))),
+            "unsupported is not a holder"
+        );
+        let held = InstanceLock::claim(&path).unwrap();
+        assert!(is_held_now(&path), "a real holder is held at one check");
+        drop(held);
     }
 
     #[test]
