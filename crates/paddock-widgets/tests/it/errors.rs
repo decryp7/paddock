@@ -3,8 +3,12 @@
 use paddock_widgets::{BadId, Counted, Note, NoteCode, PlacementId, PresetId, WidgetError};
 use serde_json::json;
 
+fn noun(s: &str) -> String {
+    s.to_string()
+}
+
 #[test]
-fn every_message_says_what_to_do() {
+fn every_message_says_what_to_do_and_names_the_surface() {
     let cases = [
         (
             WidgetError::UnknownPlacement("a".into()),
@@ -22,26 +26,63 @@ fn every_message_says_what_to_do() {
             WidgetError::TooMany {
                 counted: Counted::Placements,
                 max: 8,
+                noun: noun("popup"),
             },
-            "At most 8 widgets fit; remove one first.",
+            "At most 8 widgets fit in the popup; remove one first.",
+        ),
+        (
+            WidgetError::TooMany {
+                counted: Counted::Placements,
+                max: 1,
+                noun: noun("menu bar"),
+            },
+            "At most 1 widget fits in the menu bar; remove one first.",
         ),
         (
             WidgetError::TooMany {
                 counted: Counted::UserPresets,
                 max: 2,
+                noun: noun("dashboard"),
             },
-            "At most 2 saved presets fit; remove one first.",
+            "At most 2 saved presets fit in the dashboard; remove one first.",
+        ),
+        (
+            WidgetError::TooMany {
+                counted: Counted::UserPresets,
+                max: 1,
+                noun: noun("dashboard"),
+            },
+            "At most 1 saved preset fits in the dashboard; remove one first.",
         ),
         (
             WidgetError::TooMany {
                 counted: Counted::PresetPlacements,
                 max: 3,
+                noun: noun("dashboard"),
             },
-            "At most 3 widgets in a saved preset fit; remove one first.",
+            "At most 3 widgets in a saved preset fit in the dashboard; remove one first.",
         ),
         (
-            WidgetError::KindLimit { max: 1 },
-            "At most 1 of this widget fit; remove one first.",
+            WidgetError::TooMany {
+                counted: Counted::PresetPlacements,
+                max: 1,
+                noun: noun("dashboard"),
+            },
+            "At most 1 widget in a saved preset fits in the dashboard; remove one first.",
+        ),
+        (
+            WidgetError::KindLimit {
+                max: 1,
+                noun: noun("popup"),
+            },
+            "At most 1 of this widget fits in the popup; remove one first.",
+        ),
+        (
+            WidgetError::KindLimit {
+                max: 2,
+                noun: noun("popup"),
+            },
+            "At most 2 of this widget fit in the popup; remove one first.",
         ),
         (
             WidgetError::SpanNotAllowed {
@@ -50,8 +91,18 @@ fn every_message_says_what_to_do() {
             "This widget can be 1 or 2 columns wide.",
         ),
         (
-            WidgetError::TooFew { min: 1 },
-            "At least 1 widgets are needed here.",
+            WidgetError::TooFew {
+                min: 1,
+                noun: noun("menu bar"),
+            },
+            "At least 1 widget is needed in the menu bar.",
+        ),
+        (
+            WidgetError::TooFew {
+                min: 2,
+                noun: noun("popup"),
+            },
+            "At least 2 widgets are needed in the popup.",
         ),
         (
             WidgetError::Invalid("Choose a volume.".into()),
@@ -69,6 +120,10 @@ fn every_message_says_what_to_do() {
     ];
     for (error, message) in cases {
         assert_eq!(error.to_string(), message);
+        let back: WidgetError =
+            serde_json::from_value(serde_json::to_value(&error).expect("serialises"))
+                .expect("deserialises");
+        assert_eq!(back, error);
     }
 }
 
@@ -81,10 +136,11 @@ fn errors_and_notes_have_a_wire_shape() {
     assert_eq!(
         serde_json::to_value(WidgetError::TooMany {
             counted: Counted::UserPresets,
-            max: 8
+            max: 8,
+            noun: noun("popup")
         })
         .expect("serialises"),
-        json!({ "tooMany": { "counted": "userPresets", "max": 8 } })
+        json!({ "tooMany": { "counted": "userPresets", "max": 8, "noun": "popup" } })
     );
     let note = Note {
         code: NoteCode::Dropped { count: 2 },

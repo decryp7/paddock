@@ -48,24 +48,28 @@ pub struct Layout<W> {
     /// clears it.
     #[serde(skip)]
     #[cfg_attr(any(test, feature = "ts"), ts(skip))]
-    pub previous: Option<Vec<Placement<W>>>,
+    pub(crate) previous: Option<Vec<Placement<W>>>,
 }
 }
 
-impl<W: Widget> Layout<W> {
-    /// A layout of this surface's version with no undo level. Not checked: [`Layout::validate`] does that.
-    pub fn new<C: Catalogue<Widget = W>>(
-        placements: Vec<Placement<W>>,
-        presets: Vec<Preset<W>>,
-    ) -> Layout<W> {
+impl<W> Layout<W> {
+    /// A layout with nothing to undo. Not checked: [`Layout::validate`] does that.
+    pub fn new(version: u32, placements: Vec<Placement<W>>, presets: Vec<Preset<W>>) -> Self {
         Layout {
-            version: C::SURFACE.schema_version,
+            version,
             placements,
             presets,
             previous: None,
         }
     }
 
+    /// Whether an undoable edit was the last one (remove, apply preset, reset).
+    pub fn can_undo(&self) -> bool {
+        self.previous.is_some()
+    }
+}
+
+impl<W: Widget> Layout<W> {
     /// The catalogue's defaults (invalid defaults are dropped; [`crate::check_catalogue`] reports them).
     pub fn defaults<C: Catalogue<Widget = W>>() -> Layout<W> {
         let placements = check::keep_valid::<C>(
@@ -74,12 +78,7 @@ impl<W: Widget> Layout<W> {
             Counted::Placements,
             &mut 0,
         );
-        Layout::new::<C>(placements, Vec::new())
-    }
-
-    /// Whether [`crate::Edit::Undo`] has something to restore.
-    pub fn can_undo(&self) -> bool {
-        self.previous.is_some()
+        Layout::new(C::SURFACE.schema_version, placements, Vec::new())
     }
 
     /// Checks the whole layout against the catalogue and the surface's limits; the first problem is returned.
@@ -93,12 +92,14 @@ impl<W: Widget> Layout<W> {
         if self.placements.len() < s.min_placements as usize {
             return Err(WidgetError::TooFew {
                 min: s.min_placements,
+                noun: s.noun.into(),
             });
         }
         if self.presets.len() > s.max_user_presets as usize {
             return Err(WidgetError::TooMany {
                 counted: Counted::UserPresets,
                 max: s.max_user_presets.into(),
+                noun: s.noun.into(),
             });
         }
         let mut seen: Vec<PresetId> = crate::view::builtin_presets::<C>()
@@ -115,6 +116,12 @@ impl<W: Widget> Layout<W> {
                 s.max_preset_placements as usize,
                 Counted::PresetPlacements,
             )?;
+            if p.placements.len() < s.min_placements as usize {
+                return Err(WidgetError::TooFew {
+                    min: s.min_placements,
+                    noun: s.noun.into(),
+                });
+            }
         }
         Ok(())
     }

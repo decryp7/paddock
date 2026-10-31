@@ -9,6 +9,7 @@ use crate::catalogue::{GadgetKind, Gadgets, TestSurface, defaults, id};
 fn the_catalogue_is_data() {
     let info = info::<Gadgets>();
     assert_eq!(info.surface.id, TestSurface::Popover);
+    assert_eq!(info.surface.noun, "popup");
     assert_eq!(
         (
             info.surface.columns,
@@ -31,7 +32,7 @@ fn the_catalogue_is_data() {
 fn the_view_carries_the_layout_presets_notes_and_undo() {
     let removed =
         apply::<Gadgets>(&defaults(), Edit::Remove { id: id("clock") }).expect("the edit applies");
-    let v = view(&Stored::<Gadgets>::new(removed));
+    let v = view(&Stored::<Gadgets>::new(removed).expect("a valid layout"));
     assert!(v.can_undo);
     assert!(v.editable);
     assert_eq!(v.builtin_presets.len(), 1);
