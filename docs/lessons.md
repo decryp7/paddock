@@ -1054,7 +1054,7 @@ the canonical implementation and every copy in the same change (a freeze does no
 each copy has an owner and a tag by which it is deleted, and that tag is refused while the copy exists. Before fixing a bug in
 any service, IPC, driver or UI helper, look it up in the register first.
 
-## Dyno's 30 s login connect could not be explained from the logs (2026-11-01, Dyno)
+## Dyno's 30 s login connect could not be explained from the logs (2026-10-31, Dyno)
 At login Dyno took about 30 s to connect to its agent, and neither the app log nor the agent log said why. Only failed
 connects were logged: no phase durations, no discovery or lock results, no agent start timestamps, no success lines to
 compare with. The cause had to be guessed from outside. **Rule (56):** logs are part of the fix. Every bug fix and every

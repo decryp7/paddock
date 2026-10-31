@@ -280,7 +280,7 @@ changes here, every app's copy is updated in the same change.
     replaced its healthy agent at every login (Dyno 1.0 blocker B4). The Windows network-sandbox fix of the browser driver
     sat in the one copy no app used, and the EBADF fix had to be made in two IPC endpoints.
 
-## Diagnostics (user, 2026-11-01)
+## Diagnostics (user, 2026-10-31)
 56. **Logs explain every failure.** Every bug fix, and every feature that starts, connects, runs a job or can fail, leaves
     the logs able to show the cause from a Report-a-problem bundle alone: each phase with a timestamp and duration, the
     outcome of each spawn, connect or job (success too, not only failure), correlation ids for jobs and requests, and every
@@ -291,10 +291,10 @@ changes here, every app's copy is updated in the same change.
     again, and only then fix. A fix based on a guessed flow is not done.
     The same holds for CI workflows, release pipelines, dev tools and test harnesses: every failing step or script prints
     one `::error::` line with the cause and the next step, not just an exit code; long steps log their phases with
-    durations; a tool that wraps another program logs the exact command, its exit code (and NTSTATUS on Windows) and the
-    tail of stderr; each job writes a short summary of what ran, what was skipped and why.
+    durations; a tool that wraps another program logs the exact command with secrets masked, its exit code (and NTSTATUS on
+    Windows) and the tail of stderr; no secrets or user data in CI or tool logs; each job writes a short summary of what ran, what was skipped and why.
     *Why:* Paddock runs on users' machines where we cannot attach a debugger; Dyno's 30 s login connect could not be
-    diagnosed from its logs (2026-11-01).
+    diagnosed from its logs (2026-10-31); a CI or tool step that fails with only an exit code costs a re-run to diagnose.
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
