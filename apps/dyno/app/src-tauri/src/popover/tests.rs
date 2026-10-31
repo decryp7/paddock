@@ -153,7 +153,7 @@ fn losing_the_agent_gives_one_notice_and_stale_values_and_restart_is_offered() {
     m.agent_lost(at.plus(30 * SECOND));
     m.agent_lost(at.plus(31 * SECOND));
     let v = m.values(at.plus(40 * SECOND), &zone());
-    let notice = v.notice.expect("one notice");
+    let notice = v.notice.clone().expect("one notice");
     assert_eq!(notice.title, "Agent stopped");
     assert_eq!(notice.detail, "Readings paused at 22:28");
     assert_eq!(notice.action.unwrap().action, WidgetActionId::RestartAgent);

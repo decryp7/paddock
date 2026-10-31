@@ -14,11 +14,19 @@ counted: Counted,
 /**
  * The limit.
  */
-max: number, } } | { "kindLimit": { 
+max: number, 
+/**
+ * The surface's noun ("popup").
+ */
+noun: string, } } | { "kindLimit": { 
 /**
  * Its `max_instances`.
  */
-max: number, } } | { "spanNotAllowed": { 
+max: number, 
+/**
+ * The surface's noun.
+ */
+noun: string, } } | { "spanNotAllowed": { 
 /**
  * The allowed spans.
  */
@@ -26,7 +34,11 @@ allowed: Array<number>, } } | { "tooFew": {
 /**
  * The surface's `min_placements`.
  */
-min: number, } } | { "invalid": string } | "builtinPreset" | "nothingToUndo" | "newerLayout";
+min: number, 
+/**
+ * The surface's noun.
+ */
+noun: string, } } | { "invalid": string } | "builtinPreset" | "nothingToUndo" | "newerLayout";
 
 export type NoteCode = "damaged" | "tooLarge" | { "newer": { 
 /**
@@ -160,6 +172,10 @@ export type SurfaceInfo<S> = {
  */
 id: S, 
 /**
+ * What the surface is called in messages ("popup").
+ */
+noun: string, 
+/**
  * Columns of the grid.
  */
 columns: number, 
@@ -242,23 +258,135 @@ canUndo: boolean,
  */
 editable: boolean, };
 
-export type WidgetAction<A> = { action: A, 
+export type WidgetAction<A> = { 
+/**
+ * The app's action.
+ */
+action: A, 
 /**
  * Verb plus object, sentence case: "Pin counters", "Retry".
  */
 label: string, };
 
-export type Progress = { "count": { done: number, unit: string, } } | { "fraction": { done: number, total: number, unit: string, } };
+export type Progress = { "count": { 
+/**
+ * Items finished so far.
+ */
+done: number, 
+/**
+ * What is counted: "volumes", "files".
+ */
+unit: string, } } | { "fraction": { 
+/**
+ * Items finished so far.
+ */
+done: number, 
+/**
+ * All items.
+ */
+total: number, 
+/**
+ * What is counted.
+ */
+unit: string, } };
 
-export type WidgetState<V, A> = { "state": "ready", value: V, asOf: number, staleSince: number | null, } | { "state": "working", title: string, phase: string, progress: Progress, last: V | null, cancel: WidgetAction<A> | null, } | { "state": "empty", title: string, detail: string, next: WidgetAction<A> | null, } | { "state": "error", title: string, cause: string | null, next: WidgetAction<A> | null, };
+export type WidgetState<V, A> = { "state": "ready", 
+/**
+ * The app's value.
+ */
+value: V, 
+/**
+ * When the value was read, in milliseconds since the Unix epoch.
+ */
+asOf: number, 
+/**
+ * Since when the value has been out of date, in milliseconds since the Unix epoch.
+ */
+staleSince: number | null, } | { "state": "working", 
+/**
+ * What is running.
+ */
+title: string, 
+/**
+ * The current phase.
+ */
+phase: string, 
+/**
+ * How far it has come.
+ */
+progress: Progress, 
+/**
+ * The previous value, still shown.
+ */
+last: V | null, 
+/**
+ * How to cancel it, when it can be cancelled.
+ */
+cancel: WidgetAction<A> | null, } | { "state": "empty", 
+/**
+ * What there is none of.
+ */
+title: string, 
+/**
+ * One line of detail.
+ */
+detail: string, 
+/**
+ * The next step.
+ */
+next: WidgetAction<A> | null, } | { "state": "error", 
+/**
+ * What failed, in plain words.
+ */
+title: string, 
+/**
+ * Why, when known.
+ */
+cause: string | null, 
+/**
+ * The next step, such as Retry.
+ */
+next: WidgetAction<A> | null, };
 
-export type PlacementState<V, A> = { id: PlacementId, state: WidgetState<V, A>, };
+export type PlacementState<V, A> = { 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * Its state.
+ */
+state: WidgetState<V, A>, };
 
 export type Tone = "info" | "warning" | "danger";
 
-export type SurfaceNotice<A> = { tone: Tone, title: string, detail: string, action: WidgetAction<A> | null, };
+export type SurfaceNotice<A> = { 
+/**
+ * How serious it is.
+ */
+tone: Tone, 
+/**
+ * What happened, in plain words.
+ */
+title: string, 
+/**
+ * One line of detail.
+ */
+detail: string, 
+/**
+ * The next step.
+ */
+action: WidgetAction<A> | null, };
 
-export type SurfaceValues<V, A> = { notice: SurfaceNotice<A> | null, placements: Array<PlacementState<V, A>>, };
+export type SurfaceValues<V, A> = { 
+/**
+ * A message for the whole surface.
+ */
+notice: SurfaceNotice<A> | null, 
+/**
+ * Each placement's state.
+ */
+placements: Array<PlacementState<V, A>>, };
 
 export type DynoSurface = "popover" | "dashboard" | "menuBar";
 
@@ -363,6 +491,10 @@ export type ValueTone = "ok" | "warn" | "bad";
 export type CounterUnit = "percent" | "bytes" | "bytesPerSec" | "perSec" | "count" | "milliseconds" | "seconds" | "number";
 
 export type Page = "overview" | "alarms" | "disk" | "network" | "issues" | "backups" | "counters" | "processes";
+
+export type SettingsSection = "popupWidgets";
+
+export type Navigate = { "page": Page } | { "settings": SettingsSection };
 
 export type WidgetActionId = { "openPage": Page } | { "retry": PlacementId } | "chooseVolume" | "pinCounters" | "setUpBackupChecks" | "startBackupCheck" | "restartAgent" | "customizeWidgets";
 

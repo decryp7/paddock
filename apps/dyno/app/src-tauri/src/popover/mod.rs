@@ -15,7 +15,7 @@ use dyno_core::widgets::popover_values::{
     agent_stopped, is_live_push, mark_stale, state, surface_values, Inputs, Minute, PopoverState, PopoverSurfaceValues, Source,
 };
 use dyno_core::widgets::{PopoverCatalogue, PopoverWidget};
-use paddock_widgets::{Catalogue, Placement, PlacementId, Refresh};
+use paddock_widgets::{Catalogue, Placement, PlacementId, Refresh, Widget};
 use std::collections::HashMap;
 
 /// A kind that refreshes live is asked of the agent at most this often (seconds): it is read from the agent's caches, but
@@ -168,7 +168,7 @@ impl PopoverModel {
         let due: Vec<PlacementId> = self
             .placements
             .iter()
-            .filter(|p| !is_live_push(dyno_core::widgets::Widget::kind(&p.widget)))
+            .filter(|p| !is_live_push(p.widget.kind()))
             .filter(|p| force || self.is_due(p, now))
             .map(|p| p.id.clone())
             .collect();
@@ -180,7 +180,7 @@ impl PopoverModel {
 
     fn is_due(&self, p: &Placement<PopoverWidget>, now: Timestamp) -> bool {
         let Some(asked) = self.asked_at.get(&p.id) else { return true };
-        let kind = dyno_core::widgets::Widget::kind(&p.widget);
+        let kind = p.widget.kind();
         let period = match PopoverCatalogue::kinds().iter().find(|k| k.kind == kind).map(|k| k.refresh) {
             Some(Refresh::Every { secs }) => i64::from(secs),
             Some(Refresh::Live) => LIVE_SLOW_SECS,
@@ -200,7 +200,7 @@ impl PopoverModel {
         self.placements
             .iter()
             .filter_map(|p| {
-                if is_live_push(dyno_core::widgets::Widget::kind(&p.widget)) {
+                if is_live_push(p.widget.kind()) {
                     state(&p.widget, &p.id, &inputs).map(|s| PopoverState {
                         id: p.id.clone(),
                         state: s,

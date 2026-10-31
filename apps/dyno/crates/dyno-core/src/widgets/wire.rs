@@ -132,12 +132,22 @@ mod tests {
         use crate::widgets::popover_values::{PopoverState, PopoverValue};
         let states: Vec<PopoverState> = vec![paddock_widgets::PlacementState {
             id: PlacementId::new("top-apps").unwrap(),
-            state: paddock_widgets::WidgetState::Ready { value: PopoverValue::TopApps { rows: vec![] }, as_of: 7, stale_since: None },
+            state: paddock_widgets::WidgetState::Ready {
+                value: PopoverValue::TopApps { rows: vec![] },
+                as_of: 7,
+                stale_since: None,
+            },
         }];
         let wrapped = JsonOnLink(states.clone());
-        assert_eq!(postcard::from_bytes::<JsonOnLink<Vec<PopoverState>>>(&postcard::to_stdvec(&wrapped).unwrap()).unwrap(), wrapped);
+        assert_eq!(
+            postcard::from_bytes::<JsonOnLink<Vec<PopoverState>>>(&postcard::to_stdvec(&wrapped).unwrap()).unwrap(),
+            wrapped
+        );
         assert_eq!(serde_json::to_value(&wrapped).unwrap(), serde_json::to_value(&states).unwrap());
-        assert!(postcard::to_stdvec(&states).is_ok() && postcard::from_bytes::<Vec<PopoverState>>(&postcard::to_stdvec(&states).unwrap()).is_err());
+        assert!(
+            postcard::to_stdvec(&states).is_ok()
+                && postcard::from_bytes::<Vec<PopoverState>>(&postcard::to_stdvec(&states).unwrap()).is_err()
+        );
     }
 
     #[test]

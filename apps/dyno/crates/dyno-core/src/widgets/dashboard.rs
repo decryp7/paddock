@@ -402,6 +402,7 @@ impl Catalogue for DashboardCatalogue {
     type Widget = DashboardWidget;
     const SURFACE_ID: DynoSurface = DynoSurface::Dashboard;
     const SURFACE: Surface = Surface {
+        noun: "dashboard",
         schema_version: 1,
         columns: 12,
         max_placements: 32,
@@ -551,7 +552,8 @@ mod tests {
 
     #[test]
     fn the_dashboard_holds_thirty_two_widgets() {
-        let layout: Layout<DashboardWidget> = Layout::new::<DashboardCatalogue>(
+        let layout: Layout<DashboardWidget> = Layout::new(
+            1,
             assign_ids((0..32).map(|_| (MEDIUM, DashboardWidget::new(DashboardKind::Graph, Metric::Memory)))),
             Vec::new(),
         );

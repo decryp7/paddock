@@ -152,6 +152,7 @@ impl Catalogue for MenuBarCatalogue {
     type Widget = MenuBarItem;
     const SURFACE_ID: DynoSurface = DynoSurface::MenuBar;
     const SURFACE: Surface = Surface {
+        noun: "menu bar",
         schema_version: 1,
         columns: 1,
         max_placements: 4,

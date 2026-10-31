@@ -328,7 +328,9 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             surface,
         )))),
         Request::EditWidgetLayout { edit } => edit_widget_layout(shared, edit),
-        Request::PopoverValues { placements } => crate::popover::values(shared, &placements).map(|v| Reply::PopoverValues(dyno_core::widgets::JsonOnLink(v))),
+        Request::PopoverValues { placements } => {
+            crate::popover::values(shared, &placements).map(|v| Reply::PopoverValues(dyno_core::widgets::JsonOnLink(v)))
+        }
         Request::WeeklyReport { weeks_ago } => weekly_report(shared, weeks_ago).map(|r| Reply::Report(Box::new(r))),
         Request::SaveReport { path, format, weeks_ago } => save_report(shared, &path, format, weeks_ago).map(Reply::ReportSaved),
     }

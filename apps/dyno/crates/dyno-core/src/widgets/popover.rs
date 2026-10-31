@@ -187,6 +187,7 @@ impl Catalogue for PopoverCatalogue {
     type Widget = PopoverWidget;
     const SURFACE_ID: DynoSurface = DynoSurface::Popover;
     const SURFACE: Surface = Surface {
+        noun: "popup",
         schema_version: 1,
         columns: 2,
         max_placements: 8,
