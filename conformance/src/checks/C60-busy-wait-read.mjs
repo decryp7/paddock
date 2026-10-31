@@ -1,60 +1,96 @@
-// C60: `read -t N` is not a sleep (rule 40, ER-21). When its input is /dev/zero or /dev/null, or a pipe from a command that
-// ends at once (`: |`, `true |`, `echo |`, `yes |`, `cat /dev/zero |`), `read` returns immediately (data at once, or EOF), so a
-// loop that "waits" with it spins a CPU core. Seen as `read -t 20 < /dev/zero` in an agent script and `read -t 1 _ </dev/null`
-// in a test helper's embedded shell. Flagged, in tracked shell scripts (*.sh, *.bash, *.zsh), workflow and other YAML
-// (`run:` blocks), and string literals in Rust, TypeScript and JavaScript files that build shell commands:
-// - `read ... -t <n> ...` (n above 0; `-t 0` is a poll for input, not a wait) with `< /dev/zero`, `< /dev/null` or `0< ...`;
-// - the same `read` at the end of a pipe from `:`, `true`, `false`, `echo`, `printf`, `yes` or `cat /dev/zero|null`.
-// The conformance package's own tests (conformance/test/) hold the bad examples and are not scanned.
-// Limits (documented, not checked): a `read -t` on an inherited stdin, a file, a here-string or a variable-built redirect is
-// not flagged (a real fifo or a terminal prompt is fine), a `read` split over lines with `\` continuation is not joined, and
-// comment lines (`#`, `//`, `*`) are skipped. The fix: `sleep N`, or `perl -e 'select(undef,undef,undef,N)'` where sleep
-// is unavailable. A justified case carries `// conformance: busy-wait-read — <reason>` (or `#`) on the line or the line above.
+// C60: `read -t N` is not a sleep (rule 40, ER-21). When its input is /dev/zero or /dev/null, a here-string or heredoc, a
+// closed stdin (`<&-`), a trivial process substitution (`< <(:)`), or a pipe from a command that ends at once (`:`, `true`,
+// `echo`, `printf`, `yes`, `cat /dev/zero`), `read` returns immediately (data at once, or EOF), so a loop that "waits" with it
+// spins a CPU core. Seen as `read -t 20 < /dev/zero` in an agent script and `read -t 1 _ </dev/null` in a test helper's
+// embedded shell. Checked in every file the walk sees (tracked or not): shell scripts (*.sh, *.bash, *.zsh, and files without
+// an extension that start with a `#!` line naming a shell, such as the root `dev`), YAML (workflow `run:` blocks), and the
+// string literals of Rust, TypeScript and JavaScript files and package.json that build shell commands. Flagged:
+// - `read` with a timeout option `-t <n>` anywhere among its options (`-s -n 1 -t 20`, `-p "x" -t 5`, `-d "" -t 5`, `-rt 2`,
+//   `-t5`, `-t 0.5`), n above 0 (`-t 0` is a poll for input, not a wait); a variable timeout (`-t "$T"`, `-t ${DELAY:-5}`)
+//   counts as a wait;
+// - when that command's stdin is one of the sources above, with or without a space before the `<`; `2</dev/null` is not stdin.
+// Simple commands are split at `;`, `&&`, `||`, a single `&`, a single `|` and `)` (in Rust/TS/JS strings also at a literal
+// `\n`), so a later command's redirect is not charged to the read; shell lines are cut at ` #`.
+// Limits (documented, not checked): a `read -t` on an inherited stdin, a file, a fifo or a variable-built redirect is not
+// flagged (a real fifo or a terminal prompt is fine); a `read` split over lines with `\` continuation is not joined; a pipe
+// whose source is on an earlier line is not seen; a source other than the listed trivial ones is not judged; comment lines
+// are skipped (`#` in shell and YAML; `//`, `/*`, `*` in code). The fix: `sleep N`, or `perl -e 'select(undef,undef,undef,N)'`
+// where sleep is unavailable. A justified case carries `# conformance: busy-wait-read — <reason>` (shell, YAML) or
+// `// conformance: busy-wait-read — <reason>` (Rust, TS, JS) on the line or the line above. The conformance package's own
+// tests (conformance/test/) hold the bad examples and are not scanned.
 import { error } from '../finding.mjs';
 
 const WAIVER = /conformance:\s*busy-wait-read\s*[—–-]+\s*(\S.{2,})/;
 const BARE_WAIVER = /conformance:\s*busy-wait-read/;
-const FILES = /\.(?:sh|bash|zsh|ya?ml|rs|[cm]?[jt]s|tsx?)$/;
-const COMMENT = /^\s*(?:#|\/\/|\*|\/\*)/;
-/** `read` with a positive `-t` timeout among its options (`-t 1`, `-t1`, `-rt 2`, `-t 0.5`). */
-const READ_T = /(?:^|[\s;&|(`"'{])read\s+(?:-[A-Za-z]*\s+)*?-[A-Za-z]*t\s*(\d+(?:\.\d+)?)(?=[\s"'`;)|&]|$)/;
-const DEAD_INPUT = /(?:^|\s)\d?<\s*["']?\/dev\/(?:zero|null)\b/;
-const DEAD_SOURCE = /(?:^|[\s;&(`"'{])(?:(?::|true|false|yes|echo|printf)(?:\s[^|;&]*)?|cat\s+\/dev\/(?:zero|null))\s*\|\s*$/;
+const SHELL_EXT = /\.(?:sh|bash|zsh|ya?ml)$/;
+const CODE_EXT = /\.(?:[cm]?[jt]s|tsx?|rs)$|(?:^|\/)package\.json$/;
+const SHEBANG = /^#!.*\b(?:ba|z|da|k|a)?sh\b/;
+/** `read` with a timeout among its options: group 1 a literal number, group 2 a variable. */
+const READ_T = /(?:^|[\s(`"'{])read\s+(?:\S+\s+)*?-[A-Za-z]*t\s*(?:(\d+(?:\.\d+)?)|(["']?\$(?:\{[^}\s]*\}|\w+)["']?))(?=[\s"'`;)|&<]|$)/;
+const STDIN = '(?:^|[^\\d<>&]|(?<=\\S)\\d)0?'; // not an fd redirect such as 2<, but a digit ending a word (-t5) is fine
+/** A stdin that returns at once: /dev/zero|null, a here-string or heredoc, a closed stdin, a trivial process substitution. */
+const DEAD_INPUT = new RegExp(
+  `${STDIN}<(?![<&(])\\s*["']?\\/dev\\/(?:zero|null)\\b|${STDIN}<<|${STDIN}<&-|${STDIN}<\\s*<\\(\\s*(?::|true|false|echo|printf)(?=[\\s)]|$)`,
+);
+/** A command that ends at once, as the left side of a pipe. */
+const DEAD_SOURCE = /^\s*(?:do\s+|then\s+|\{\s*|\(\s*)?(?:(?::|true|false|yes|echo|printf)(?=\s|$)|cat\s+\/dev\/(?:zero|null)\b)/;
 
-/** The busy-wait reads in one line of text: [{ col }]. Shell lines are split into simple commands first. */
-export function busyReadsInLine(line) {
+/** `line` split into simple commands: [{ text, pipe }] where `pipe` is the text of the command piped into this one, if any. */
+export function commands(line, code) {
   const out = [];
-  // A literal `\n` inside a Rust/JS string ends a command like a newline does.
-  const parts = line.split(/\\n|;|&&|\|\||\)|`/);
-  let offset = 0;
-  for (const part of parts) {
-    const m = READ_T.exec(part);
-    if (m && Number(m[1]) > 0) {
-      const rest = part.slice(m.index + m[0].length);
-      const before = line.slice(0, offset + m.index);
-      const afterPipe = /\|\s*$/.test(part.slice(0, m.index + 1)) || /\|\s*$/.test(before.replace(/\s+$/, '') + ' ');
-      if (DEAD_INPUT.test(rest)) out.push({ col: offset + m.index });
-      else if (afterPipe && DEAD_SOURCE.test(before + ' ')) out.push({ col: offset + m.index });
-    }
-    offset += part.length + 1;
+  let cur = '';
+  let prev = null;
+  let viaPipe = false;
+  const cut = (pipe) => {
+    out.push({ text: cur, pipe: viaPipe ? prev : null });
+    prev = cur;
+    cur = '';
+    viaPipe = pipe;
+  };
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    const n = line[i + 1];
+    if (code && c === '\\' && n === 'n') { cut(false); i++; }
+    else if (c === '|' && n === '|') { cut(false); i++; }
+    else if (c === '&' && n === '&') { cut(false); i++; }
+    else if (c === '|') cut(true);
+    else if (c === ';' || c === ')' || c === '`') cut(false);
+    else if (c === '&' && !'<>'.includes(line[i - 1] ?? ' ') && n !== '>') cut(false);
+    else cur += c;
   }
+  cut(false);
   return out;
 }
 
-/** The busy-wait reads in a source: [{ line, waived: false | 'no-reason' | 'reason' }]. */
-export function busyReads(text) {
+/** The busy-wait reads in a source: [{ line, waived: false | 'no-reason' | 'reason' }]. `kind` is 'shell' (default) or 'code'. */
+export function busyReads(text, kind = 'shell') {
+  const code = kind === 'code';
+  const comment = code ? /^\s*(?:\/\/|\/\*|\*(?:\s|\/|$))/ : /^\s*#/;
   const lines = text.split('\n');
   const out = [];
-  lines.forEach((l, i) => {
-    if (COMMENT.test(l) || !/\bread\b/.test(l)) return;
-    // `a | read -t 1` : the pipe source is on the same line, before the read.
-    const hits = busyReadsInLine(l);
-    if (hits.length === 0) return;
-    const here = `${l}\n${lines[i - 1] ?? ''}`;
+  lines.forEach((raw, i) => {
+    if (comment.test(raw) || !/\bread\b/.test(raw)) return;
+    const l = code ? raw : raw.replace(/\s#.*$/, '');
+    const hit = commands(l, code).some((c) => {
+      const m = READ_T.exec(c.text);
+      if (!m || (m[1] !== undefined && Number(m[1]) === 0)) return false;
+      return DEAD_INPUT.test(c.text) || (c.pipe !== null && DEAD_SOURCE.test(c.pipe));
+    });
+    if (!hit) return;
+    const here = `${raw}\n${lines[i - 1] ?? ''}`;
     const waived = WAIVER.test(here) ? 'reason' : BARE_WAIVER.test(here) ? 'no-reason' : false;
     out.push({ line: i + 1, waived });
   });
   return out;
+}
+
+/** 'shell', 'code' or null for a file path and its text. */
+export function kindOf(file, text) {
+  if (SHELL_EXT.test(file)) return 'shell';
+  if (CODE_EXT.test(file)) return 'code';
+  const base = file.slice(file.lastIndexOf('/') + 1);
+  if (!base.includes('.') && SHEBANG.test(text.slice(0, text.indexOf('\n') < 0 ? 200 : text.indexOf('\n')))) return 'shell';
+  return null;
 }
 
 export default {
@@ -63,12 +99,15 @@ export default {
   rule: 40,
   run(ctx) {
     const out = [];
-    const fix = 'Use `sleep N` (or `perl -e \'select(undef,undef,undef,N)\'` where sleep is unavailable): `read -t N` on /dev/null, /dev/zero or an ended pipe returns at once and the loop spins a core. A justified case carries `// conformance: busy-wait-read — <reason>`.';
+    const fix =
+      'Use `sleep N` (or `perl -e \'select(undef,undef,undef,N)\'` where sleep is unavailable): `read -t N` on /dev/null, /dev/zero, a here-string or an ended pipe returns at once and the loop spins a core. A justified case carries `# conformance: busy-wait-read — <reason>` (shell, YAML) or `// conformance: busy-wait-read — <reason>` (Rust, TS, JS).';
     for (const f of ctx.files()) {
-      if (!FILES.test(f) || f.startsWith('conformance/test/')) continue; // the checks' own fixtures are the bad examples
+      if (f.startsWith('conformance/test/')) continue; // the checks' own fixtures are the bad examples
       const text = ctx.read(f);
-      if (!text || !/\bread\b/.test(text) || !/-\w*t\s*\d/.test(text)) continue;
-      for (const p of busyReads(text)) {
+      if (!text || !/\bread\b[^\n]*-\w*t/.test(text)) continue;
+      const kind = kindOf(f, text);
+      if (!kind) continue;
+      for (const p of busyReads(text, kind)) {
         if (p.waived === 'reason') continue;
         if (p.waived === 'no-reason') out.push(error('C60', 40, f, p.line, 'the busy-wait-read waiver gives no reason', 'Write `conformance: busy-wait-read — <why the read may return at once>`.'));
         else out.push(error('C60', 40, f, p.line, '`read -t` on an input that is at EOF or always readable returns at once, so it is not a sleep and the loop spins a core', fix));
