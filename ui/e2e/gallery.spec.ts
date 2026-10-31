@@ -59,7 +59,7 @@ test('a native select in a pd-field draws Material\'s arrow, and a field with no
 
 test('interactive card activates with Enter and Space', async ({ page }) => {
   await open(page, 'dark', 'debrief');
-  const card = page.getByRole('button', { name: 'Network' });
+  const card = page.getByTestId('card').getByRole('button', { name: 'Network' });
   await card.focus();
   await page.keyboard.press('Enter');
   await page.keyboard.press('Space');
@@ -108,7 +108,7 @@ test.describe('UI basics review fixes (regressions)', () => {
       }
       return out;
     }, DOTS);
-    expect(Object.keys(result).sort()).toEqual(['alert', 'info', 'keyboard', 'more']);
+    expect(Object.keys(result).sort()).toEqual(['alert', 'grip', 'info', 'keyboard', 'more']);
     for (const [name, alphas] of Object.entries(result)) for (const a of alphas) expect(a, `${name} dot centre is ink`).toBeGreaterThan(250);
   });
 
