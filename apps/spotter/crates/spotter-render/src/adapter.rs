@@ -129,10 +129,20 @@ fn blocking_render(
 /// What happens when the browser is stopped by the OS while it starts: the log says so and the asking operation reports the
 /// paused phase, so the person sees "waiting" instead of a stalled bar (ER-18).
 fn pause_note(job: Option<Job>) -> launch::PauseNote {
-    launch::PauseNote(std::sync::Arc::new(move |m| {
-        log::info!("{m}");
+    launch::PauseNote(std::sync::Arc::new(move |event| {
+        log::info!(
+            "{}",
+            if event == launch::PauseEvent::Paused {
+                launch::PAUSED_TEXT
+            } else {
+                "The browser runs again"
+            }
+        );
         if let Some(job) = &job {
-            job.report_done(Phase::BrowserPaused, Unit::Count, 0, None);
+            match event {
+                launch::PauseEvent::Paused => job.report_done(Phase::BrowserPaused, Unit::Count, 0, None),
+                launch::PauseEvent::Resumed => job.resume_after_pause(),
+            }
         }
     }))
 }
@@ -189,15 +199,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_paused_browser_is_reported_to_the_job_as_the_paused_phase() {
+    fn a_paused_browser_is_reported_to_the_job_and_the_report_ends_with_the_pause() {
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = seen.clone();
         let job = Job::new(spotter_core::job::Cancel::new(), move |p| {
             sink.lock().unwrap().push((p.phase, p.label))
         });
-        (pause_note(Some(job)).0)(launch::PAUSED_TEXT);
-        assert_eq!(*seen.lock().unwrap(), [(Phase::BrowserPaused, launch::PAUSED_TEXT)]);
-        (pause_note(None).0)(launch::PAUSED_TEXT); // no job: only logged, never panics
+        job.report(Phase::Checking, Unit::Count, 1, Some(3));
+        let note = pause_note(Some(job));
+        (note.0)(launch::PauseEvent::Paused);
+        (note.0)(launch::PauseEvent::Resumed);
+        let phases: Vec<_> = seen.lock().unwrap().iter().map(|p| p.0).collect();
+        assert_eq!(phases, [Phase::Checking, Phase::BrowserPaused, Phase::Checking]);
+        (pause_note(None).0)(launch::PauseEvent::Paused); // no job: only logged, never panics
     }
 
     #[test]

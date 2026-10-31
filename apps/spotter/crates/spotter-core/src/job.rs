@@ -142,6 +142,8 @@ struct Gate {
     phase: Option<Phase>,
     /// The highest `done` shown in `phase`.
     done: u64,
+    /// The last report of a phase other than [`Phase::BrowserPaused`], to go back to when the pause ends.
+    before_pause: Option<(Phase, Unit, u64, Option<u64>)>,
 }
 
 /// The handle an operation reports to and polls: progress sink plus cancel flag. Clones share both.
@@ -217,6 +219,20 @@ impl Job {
         self.emit(phase, unit, done, total, true);
     }
 
+    /// Ends a [`Phase::BrowserPaused`] report: the phase the operation was in before goes out again (or `Checking`, counting up,
+    /// when there was none), so a "paused" line never outlives the pause (ER-18). Does nothing when the job is not paused.
+    pub fn resume_after_pause(&self) {
+        let back = {
+            let gate = self.gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if gate.phase != Some(Phase::BrowserPaused) {
+                return;
+            }
+            gate.before_pause
+        };
+        let (phase, unit, done, total) = back.unwrap_or((Phase::Checking, Unit::Count, 0, None));
+        self.emit(phase, unit, done, total, true);
+    }
+
     /// The sink is called with the gate held, so the order it sees is the order the gate accepted (a sink must not
     /// report to the same job).
     fn emit(&self, phase: Phase, unit: Unit, done: u64, total: Option<u64>, force: bool) {
@@ -236,6 +252,9 @@ impl Job {
         let due = gate.last.is_none_or(|t| now.duration_since(t) >= self.interval);
         if !(force || fresh || due) {
             return;
+        }
+        if phase != Phase::BrowserPaused {
+            gate.before_pause = Some((phase, unit, done, total));
         }
         gate.phase = Some(phase);
         gate.last = Some(now);
@@ -404,6 +423,34 @@ mod tests {
         assert!(seen.lock().unwrap().is_empty());
         cancel.cancel();
         assert!(quiet.is_cancelled());
+    }
+
+    #[test]
+    fn a_pause_is_ended_by_going_back_to_the_phase_before_it() {
+        let (job, _c, seen) = collecting(Duration::ZERO);
+        job.report(Phase::Checking, Unit::Count, 2, Some(5));
+        job.resume_after_pause(); // not paused: nothing goes out
+        job.report_done(Phase::BrowserPaused, Unit::Count, 0, None);
+        job.resume_after_pause();
+        job.resume_after_pause(); // already back: nothing more
+        let phases: Vec<_> = seen.lock().unwrap().iter().map(|p| (p.phase, p.done, p.total)).collect();
+        assert_eq!(
+            phases,
+            [
+                (Phase::Checking, 2, Some(5)),
+                (Phase::BrowserPaused, 0, None),
+                (Phase::Checking, 2, Some(5))
+            ]
+        );
+    }
+
+    #[test]
+    fn a_pause_with_no_earlier_phase_ends_in_checking() {
+        let (job, _c, seen) = collecting(Duration::ZERO);
+        job.report_done(Phase::BrowserPaused, Unit::Count, 0, None);
+        job.resume_after_pause();
+        let last = seen.lock().unwrap().last().unwrap().phase;
+        assert_eq!(last, Phase::Checking);
     }
 
     #[test]

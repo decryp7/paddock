@@ -25,7 +25,16 @@ pub enum Mode {
 /// Told, in plain words, that the browser was stopped by macOS or another app while it started and is being waited for
 /// (ADR 0031: a stopped process is paused, not stuck, and the person is told).
 #[derive(Clone)]
-pub struct PauseNote(pub Arc<dyn Fn(&str) + Send + Sync>);
+pub struct PauseNote(pub Arc<dyn Fn(PauseEvent) + Send + Sync>);
+
+/// A change in whether the OS has the starting browser stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PauseEvent {
+    /// Stopped; carries [`PAUSED_TEXT`].
+    Paused,
+    /// Running again (or the start ended): the "paused" line is over.
+    Resumed,
+}
 
 impl std::fmt::Debug for PauseNote {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -600,7 +609,7 @@ fn connect(
     max_lifetime: Duration,
     cpu: impl FnMut(paddock_proc::ProcessId) -> Option<Duration>,
     pace: impl paddock_proc::Pace,
-    on_paused: &mut dyn FnMut(&str),
+    on_paused: &mut dyn FnMut(PauseEvent),
 ) -> Result<Connection> {
     use paddock_proc::{StartState, StartWatch, Watched};
     let id = process.process();
@@ -621,16 +630,20 @@ fn connect(
             Watched::State(StartState::Stalled(r)) if !r.cause.is_stuck() => {
                 if r.cause == paddock_proc::StallCause::Paused {
                     if !told {
-                        on_paused(PAUSED_TEXT);
+                        on_paused(PauseEvent::Paused);
                     }
                     told = true;
-                } else {
+                } else if told {
+                    on_paused(PauseEvent::Resumed);
                     told = false;
                 }
             }
             seen => break seen,
         }
     };
+    if told {
+        on_paused(PauseEvent::Resumed);
+    }
     let probe = watch.into_probe();
     match seen {
         Watched::Cancelled => Err(Error::Closed),
@@ -836,7 +849,7 @@ mod tests {
             .stdout(std::process::Stdio::null())
             .stderr(std::fs::File::create(dir.path().join(STDERR_FILE)).unwrap());
         let mut process = Supervised::spawn(cmd).unwrap();
-        let mut told: Vec<String> = Vec::new();
+        let mut told: Vec<PauseEvent> = Vec::new();
         let mut pace = ResumeAt {
             ticks: 0,
             pid: process.process().unwrap().pid(),
@@ -849,7 +862,7 @@ mod tests {
             Duration::from_secs(7),
             |_| Some(Duration::from_secs(1)),
             &mut pace,
-            &mut |m| told.push(m.to_string()),
+            &mut |e| told.push(e),
         )
         .err()
         .unwrap();
@@ -861,7 +874,11 @@ mod tests {
             pace.ticks
         );
         assert!(!e.to_string().is_empty());
-        assert_eq!(told, [PAUSED_TEXT], "the person is told once that the browser is paused");
+        assert_eq!(
+            told,
+            [PauseEvent::Paused, PauseEvent::Resumed],
+            "the person is told once that the browser is paused, and once that it is not"
+        );
     }
 
     /// A browser that takes longer to quit than the old fixed 5 s grace, but works while it does, is waited for, not killed.
