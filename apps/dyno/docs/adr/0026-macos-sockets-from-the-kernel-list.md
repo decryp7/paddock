@@ -1,7 +1,8 @@
 # 0026. macOS sockets come from the kernel's socket list, never from a sweep over other programs' descriptors
 
-- Status: Proposed (2026-10-31; the user decided the Dyno 1.0 tag waits for this). Independently reviewed 2026-10-31:
-  the choice stands, five P1 findings and the P2s are taken into the text below (marked "review").
+- Status: Accepted (2026-10-31, after independent review rounds 1 and 2 with no open P1; the user decided the Dyno 1.0 tag
+  waits for this). Round 1: the choice stood, five P1 findings and the P2s are taken into the text below (marked "review").
+  Round 2: the family-check correction and the layout alarm were found and fixed; the live comparison then had 0 skipped.
 - Date: 2026-10-31
 - Related: ADR 0015 (network page), ADR 0021 (monitoring only: Dyno must not change the machine, and a read that can
   break another app's connection is a change), ER-14, ER-20 / rule 51 (threads or cheaper), rule 53 (reusable OS names),
@@ -84,8 +85,9 @@ sockets, skipped none, and differed from netstat on (protocol, local port, remot
 each side (a connection that opened or closed between the two captures) and 0 UDP rows. IPv4, IPv6, v4-mapped peers on
 dual-stack sockets, sockets with an unset family, listeners, TIME_WAIT, CLOSE_WAIT, FIN_WAIT, UDP bound and connected.
 Reproduce: the ignored test `macos::pcblist::tests::the_list_agrees_with_netstat_anv` (its own failure bar: under 5 %
-differing). **Correction (review P1-1):** the first version of the parser required `xso_family` to agree with
-`inp_vflag` and dropped 35 of 247 real sockets (27 dual-stack AF_INET6 sockets with an IPv4 flag, 11 with family 0); the
+differing). It compares the pid netstat prints (`so_last_pid`) with the socket's last user (`via_pid` for a delegated
+socket), so delegated sockets, whose owner here is `so_e_pid`, do not count as differences. **Correction (review P1-1):** the first version of the parser required `xso_family` to agree with
+`inp_vflag` and dropped 38 real sockets (27 dual-stack AF_INET6 sockets with an IPv4 flag, 11 with family 0); the
 comparison had not been re-run after that check was added, and the fixtures were generated from the same rule, so they
 could not catch it. The family is now only checked to be one that exists (0, AF_INET, AF_INET6), the address family is
 read from `inp_vflag` as `netstat` does, and the fixtures carry both shapes written out by hand, not derived from the

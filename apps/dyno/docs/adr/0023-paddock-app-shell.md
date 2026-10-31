@@ -26,7 +26,7 @@ provides every one of these parts once.
   results of actions land in the notification host and centre; an action is the notice's button (type `dy.notice-action`, the
   caller names the label).
   `dy.alarm` is the notification kind Rust posts alarms with.
-- **Dialogs are OS windows with declared actions** (ADR 0026). Contracts are Rust's (`src-tauri/src/dialogs.rs`, generated to
+- **Dialogs are OS windows with declared actions** (Paddock ADR 0026). Contracts are Rust's (`src-tauri/src/dialogs.rs`, generated to
   `generated/dialog-contracts.ts`): `dy.alert-rule` (modal form; stores the rule through the engine's own `upsertAlertRule`/`deleteAlertRule` requests, never by
   reading and writing all settings from the dialog window, and answers `true`),
   `dy.lockers` (read-only tool), `dy.web-search` (modal form), `dy.file-hash` (viewer: Copy, Close, Open VirusTotal; an unreadable

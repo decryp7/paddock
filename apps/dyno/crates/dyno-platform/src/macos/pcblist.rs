@@ -313,7 +313,8 @@ mod tests {
                     s.row.local_port,
                     s.row.remote.map_or(0, |r| r.1),
                     st,
-                    s.row.pid.unwrap_or(0),
+                    // netstat prints `so_last_pid`; for a delegated socket that is `via_pid`, our owner is `so_e_pid`.
+                    s.via_pid.or(s.row.pid).unwrap_or(0),
                 )
             })
             .collect()

@@ -100,6 +100,10 @@ mod tests {
         std::fs::hard_link(&held, &link).unwrap();
         let by_link = LsofLocks.lockers(&link).unwrap();
         assert!(by_link.iter().any(|l| l.process.pid == dummy.0.id()), "{by_link:?}");
+        // And asking by the original name still works once the link exists (the kernel may now report either name as the
+        // path, so a match on the path string would miss it).
+        let again = LsofLocks.lockers(&held).unwrap();
+        assert!(again.iter().any(|l| l.process.pid == dummy.0.id()), "{again:?}");
         let free = dir.path().join("free.txt");
         std::fs::write(&free, b"y").unwrap();
         assert!(LsofLocks.lockers(&free).unwrap().is_empty());
