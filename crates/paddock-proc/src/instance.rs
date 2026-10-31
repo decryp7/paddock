@@ -132,18 +132,26 @@ fn judge(answer: Result<(), TryLockError>) -> std::io::Result<Verdict> {
     }
 }
 
-/// Whether some process holds the lock on `path` (held on every one of [`HELD_CHECKS`] checks, so a held lock costs
-/// about `(HELD_CHECKS - 1) * HELD_TICK`). A free lock is taken and dropped at once to find out, so an instance starting at
-/// that very instant may be refused (it exits; the caller finds one on its next pass). Anything that is not a clear "held"
-/// (unsupported, an error) is `false`.
-pub fn is_held(path: &Path) -> bool {
+/// Whether some process holds the lock on `path`, settled: held on every one of [`HELD_CHECKS`] checks, so a held lock
+/// costs about `(HELD_CHECKS - 1) * HELD_TICK` of waiting on the thread. A free lock is taken and dropped at once to find
+/// out, so an instance starting at that very instant may be refused (it exits; the caller finds one on its next pass).
+/// Anything that is not a clear "held" (unsupported, an error) is `false`.
+///
+/// Which check to use: for a one-shot decision on a reading (act now or not), use [`InstanceLock::claim`] or this settled
+/// check. Never call it inside a loop that looks again at its own pace: the wait slows every look (CI run 7257); that loop
+/// uses [`is_held_now`].
+pub fn is_held_settled(path: &Path) -> bool {
     matches!(InstanceLock::claim(path), Ok(Claim::Held))
 }
 
-/// Whether some process holds the lock on `path` at this one check: no re-check and no wait, so it answers at once. For a
-/// caller that judges the lock over its own repeated looks at its own pace (a supervisor), where a hidden wait would slow
-/// every look and a held lock that is only a spawn's copy is seen free on the next look anyway. A free lock is taken and
-/// dropped at once, as in [`is_held`]; anything that is not a clear "held" is `false`.
+/// Whether some process holds the lock on `path` at this one check: no re-check and no wait, so it answers at once. A held
+/// reading may be only a spawning child's copy of the descriptor (see [`HELD_CHECKS`]), so a free lock can read held for a
+/// moment. A free lock is taken and dropped at once, as in [`is_held_settled`]; anything that is not a clear "held" is
+/// `false`.
+///
+/// Which check to use: only where a held reading leads to waiting and looking again (a supervisor judging the lock over
+/// its own repeated looks at its own pace), so a false "held" only delays; never where a held reading leads to a one-shot
+/// action. For a one-shot decision use [`InstanceLock::claim`] or [`is_held_settled`].
 pub fn is_held_now(path: &Path) -> bool {
     held_at_one_check(path, File::try_lock)
 }
@@ -214,7 +222,7 @@ mod tests {
         assert_eq!(pace.waited, HELD_CHECKS as usize - 1);
     }
 
-    /// Regression (CI run 7257): Dyno's supervisor probed the lock with [`is_held`] on every look, so a held lock cost each
+    /// Regression (CI run 7257): Dyno's supervisor probed the lock with the settled check on every look, so a held lock cost each
     /// look the re-check's wait (about 400 ms) and the supervisor's looks stopped following its pace. The one-check probe
     /// asks the lock once and never waits.
     #[test]
@@ -308,7 +316,7 @@ mod tests {
     fn one_holder_per_file_and_the_lock_ends_with_its_holder() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("data").join("a.lock");
-        until(|| !is_held(&path));
+        until(|| !is_held_now(&path));
         let held = std::cell::RefCell::new(None);
         until(|| {
             *held.borrow_mut() = match InstanceLock::claim(&path) {
@@ -318,12 +326,12 @@ mod tests {
             held.borrow().is_some()
         });
         let first = held.take();
-        assert!(is_held(&path));
+        assert!(is_held_settled(&path));
         assert!(matches!(InstanceLock::claim(&path).unwrap(), Claim::Held));
         let other = tmp.path().join("b.lock");
         until(|| matches!(InstanceLock::claim(&other), Ok(Claim::Acquired(_))));
         drop(first);
-        until(|| !is_held(&path));
+        until(|| !is_held_now(&path));
         until(|| matches!(InstanceLock::claim(&path), Ok(Claim::Acquired(_))));
     }
 
@@ -386,7 +394,10 @@ mod tests {
         std::fs::write(&file, b"x").unwrap();
         let err = InstanceLock::claim(&file.join("a.lock")).unwrap_err();
         assert!(err.to_string().contains("a.lock"), "{err}");
-        assert!(!is_held(&file.join("a.lock")), "an error is not a holder");
+        assert!(
+            !is_held_settled(&file.join("a.lock")),
+            "an error is not a holder"
+        );
         // A folder where the lock file should be cannot be opened as one.
         let folder = tmp.path().join("folder.lock");
         std::fs::create_dir(&folder).unwrap();

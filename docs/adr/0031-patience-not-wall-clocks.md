@@ -456,7 +456,12 @@ each other (Dyno `link.rs`, Spotter `StartJudge`, `paddock-chromium`'s fixed 20 
 - `StallReport { cause, action, message }`: `StallCause` Slow, Spinning, Idle, Hung, WaitingForSupervisor, HeldByOther;
   `StallAction` Wait, Retry, ShowLog. Apps map it to their health chip and Retry.
 - `InstanceLock::claim(path)` gives `Claim::Acquired | Held | Unsupported` from an OS lock (`File::try_lock`: `flock`,
-  `LockFileEx`); `is_held(path)`. The lock is the authority.
+  `LockFileEx`). A lock seen held is checked `HELD_CHECKS` times `HELD_TICK` apart before `claim` reports `Held` (a
+  spawning child's copy of the descriptor clears; a real holder stays). Two probes: `is_held_settled(path)` does the same
+  re-check (it waits about 400 ms on a held lock) and is for a one-shot decision; `is_held_now(path)` checks once and never
+  waits, and is only for a loop where a held reading leads to waiting and looking again at the caller's own pace (a
+  supervisor), so a false "held" only delays. Never put the settled probe in such a loop (CI run 7257). The lock is the
+  authority.
 - `hint`: a discovery file is only a hint (rule 53). `Hint` (pid, start), `written_since`, `names_live` (new, or
   answers), `remove_if_same`, `remove_if_mine`, `write_private_atomic`, `read_bounded`.
 - `tree_cpu_time_from(source, root)`, `ProcessSource::cpu_micros(pid)`: the CPU time of a tree by identity, one pid at

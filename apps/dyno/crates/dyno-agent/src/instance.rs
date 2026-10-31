@@ -91,14 +91,11 @@ pub fn note(dirs: &Dirs, line: &str) {
     }
 }
 
-/// Whether an agent holds the lock for `dirs` right now. A free lock is taken and dropped at once to find out, so an agent
-/// starting at that very instant may be refused (it exits; the caller starts or finds one on its next pass).
-pub fn is_held(dirs: &Dirs) -> bool {
-    paddock_proc::is_held(&dirs.instance_lock())
-}
-
-/// [`is_held`] at one check, without the re-check's wait: for the app's supervisor, which judges the lock over its own looks
-/// at its own pace (`paddock_proc::is_held_now`).
+/// Whether an agent holds the lock for `dirs` at this one check, without waiting (`paddock_proc::is_held_now`). Only for a
+/// caller where a held reading leads to waiting and looking again (the app's supervisor, which judges the lock over its own
+/// looks at its own pace), so a false "held" (a spawning child's copy of the descriptor) only delays; never for a one-shot
+/// action, which uses [`InstanceLock::acquire`] or `paddock_proc::is_held_settled`. There is deliberately no waiting
+/// variant here: a re-checking probe in the supervisor's look slowed every look about 400 ms (CI run 7257).
 pub fn is_held_now(dirs: &Dirs) -> bool {
     paddock_proc::is_held_now(&dirs.instance_lock())
 }
@@ -111,9 +108,9 @@ mod tests {
     fn one_holder_per_folder_and_the_lock_ends_with_its_holder() {
         let tmp = tempfile::tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
-        assert!(!is_held(&dirs));
+        assert!(!paddock_proc::is_held_settled(&dirs.instance_lock()));
         let first = InstanceLock::acquire(&dirs).unwrap();
-        assert!(is_held(&dirs));
+        assert!(paddock_proc::is_held_settled(&dirs.instance_lock()));
         assert!(is_held_now(&dirs));
         let err = InstanceLock::acquire(&dirs).unwrap_err();
         assert!(matches!(err, LockError::Held { .. }), "{err}");
@@ -121,7 +118,7 @@ mod tests {
         let other = Dirs::at(tmp.path().join("other"));
         drop(InstanceLock::acquire(&other).unwrap());
         drop(first);
-        assert!(!is_held(&dirs));
+        assert!(!paddock_proc::is_held_settled(&dirs.instance_lock()));
         drop(InstanceLock::acquire(&dirs).unwrap());
     }
 

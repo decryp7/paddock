@@ -4,9 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
-### `paddock-proc`: the instance lock re-checks a held lock; `is_held_now` for supervisors
-- `InstanceLock::claim` and `is_held` report a lock held only after `HELD_CHECKS` (5) consecutive checks `HELD_TICK` (100 ms) apart, so a lock that only a spawning child's copy of the descriptor holds is not taken for a holder (macOS, any spawn); a held lock now costs about 400 ms to report.
-- New `is_held_now(path)`: one check, never waits, for a caller that judges the lock over its own repeated looks at its own pace. Dyno's link uses it in every look (`dyno_agent::instance::is_held_now`); with `is_held` there, every look waited 400 ms on a held lock and the link's counted waits stretched twentyfold (CI 7257).
+### `paddock-proc`: the instance lock re-checks a held lock; `is_held` becomes `is_held_settled`, new `is_held_now`
+- `InstanceLock::claim` reports a lock held only after `HELD_CHECKS` (5) consecutive checks `HELD_TICK` (100 ms) apart, so a lock that only a spawning child's copy of the descriptor holds is not taken for a holder (macOS, any spawn); a held lock now costs about 400 ms to report.
+- Breaking: `is_held(path)` is renamed `is_held_settled(path)` (the same re-check and wait), for a one-shot decision. New `is_held_now(path)`: one check, never waits, only for a loop where a held reading leads to waiting and looking again at the caller's own pace (a supervisor); a false "held" there only delays. Dyno's link uses it in every look; with the waiting probe there, every look waited 400 ms on a held lock and the link's counted waits stretched twentyfold (CI 7257). `dyno_agent::instance::is_held` is removed (only `is_held_now` remains), so the link cannot pick the waiting probe.
 
 ### `paddock-service`: a pending or running launchd job is never stale; shared launchctl helpers
 - `JobReport::stale()` no longer counts "has a launch constraint and is not running": every healthy `SMAppService` job has `has LWCR`, so a pending job at login read as refused and the repair killed the healthy agent (Dyno B4; Pitwall 1.1 had the same logic). Stale now means found, not running, and spawn failed, exit 78 or "needs LWCR update". New `JobReport::needs_repair(answers)` (stale and the service does not answer) is the one decision for every app, and `JobReport::describe()` the observed state in words for logs and messages. Also affects `Job::Refused` in the launchd backend (a running job is never refused).

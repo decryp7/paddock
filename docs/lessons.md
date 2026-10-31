@@ -447,7 +447,12 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   The judgement belongs to one layer only: a supervisor that already judges the lock over its own paced looks (Dyno's
   link) probes it with `is_held_now`, one check and no wait. Probing with the re-checking `is_held` put a hidden 400 ms
   wall-clock wait into every look, so the link's looks no longer followed its pace (CI 7257: a counted wait of 50 looks took
-  20-43 s, and a slow first look showed "the system is not answering" before the holder was known).
+  20-43 s, and a slow first look showed "the system is not answering" before the holder was known). No test caught the
+  wrong choice (the link's tests only got slower), so the wrong choice is made impossible to write: Dyno has no waiting
+  probe at all (`dyno_agent::instance::is_held` is gone, only `is_held_now`), and the shared one is named for its wait
+  (`is_held_settled`). Rule: `is_held_now` only where a held reading leads to waiting and looking again; a one-shot
+  decision uses `claim` or `is_held_settled`. When a fix is "pick the right one of two calls", make the wrong one fail to
+  compile or carry its cost in its name; a test that only gets slower proves nothing.
 - A Node script's "am I the main module" check must compare real paths: Node gives `import.meta.url` the resolved path
   and leaves `process.argv[1]` as given, so through a symlink (a CI work folder linked to a stable one, `node_modules`)
   `import.meta.url === pathToFileURL(process.argv[1]).href` is false and the script exits 0 doing nothing (the Chrome for

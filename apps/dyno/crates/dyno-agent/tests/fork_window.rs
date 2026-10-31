@@ -64,7 +64,7 @@ fn a_child_forked_before_it_execs_keeps_the_folder_locked_until_it_does_and_the_
 
     first.stop();
     assert!(
-        dyno_agent::instance::is_held(&dirs),
+        paddock_proc::is_held_settled(&dirs.instance_lock()),
         "the stopped agent's lock should still be held by the forked child's copy of the descriptor"
     );
     match start_on(&dirs) {
