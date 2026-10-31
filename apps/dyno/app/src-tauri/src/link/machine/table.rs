@@ -413,6 +413,39 @@ fn a_supervising_service_is_waited_for_and_the_app_starts_nothing() {
     assert_eq!(*s.phase(), Phase::WaitingForService);
 }
 
+/// The VM's login (2026-10-31): launchd starts the agent before the app, the agent writes `agent.json` a few seconds
+/// later (older than the app's wait, so not "fresh"), and the lock is held throughout. The app must connect on the first
+/// look that sees the file, within `LOCK_EVERY` ticks, long before the wait's note or the fallback.
+#[test]
+fn the_app_connects_to_the_services_agent_as_soon_as_its_file_appears_while_the_lock_is_held() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(SUPERVISING),
+        lock: Some(LockSeen::Held),
+        ..l
+    });
+    assert_eq!(*s.phase(), Phase::WaitingForService);
+    // Held lock, no file yet: it keeps waiting and starts nothing.
+    let cmds = run_ticks(&mut s, 20, |seq, service| Look {
+        lock: Some(LockSeen::Held),
+        service: service.then_some(SUPERVISING),
+        ..look(seq)
+    });
+    assert_eq!(launches(&cmds), 0);
+    assert_eq!(*s.phase(), Phase::WaitingForService);
+    // The file appears (written before the wait began, so not fresh): connected to within one lock probe.
+    let cmds = run_ticks(&mut s, LOCK_EVERY, |seq, service| Look {
+        hint: Some(hint(9, 1, true)),
+        lock: Some(LockSeen::Held),
+        service: service.then_some(SUPERVISING),
+        ..look(seq)
+    });
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::Connect { purpose: Purpose::Use, .. })),
+        "{cmds:?}"
+    );
+    assert_eq!(launches(&cmds), 0);
+}
+
 #[test]
 fn a_wait_for_the_service_shows_its_cause_then_retry_starts_the_apps_own() {
     let (mut s, _) = first(|l| Look {

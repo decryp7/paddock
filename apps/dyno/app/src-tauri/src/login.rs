@@ -2,7 +2,7 @@
 //! keeps measuring while the window is closed" (ADR 0010). Two registrations back it:
 //!
 //! - the app itself: `SMAppService.mainApp` on macOS (one row in Login Items, nothing under `~/Library/LaunchAgents`;
-//!   started at login, it hides in the tray because macOS says so, [`mac::launched_as_login_item`]) and
+//!   started at login, it hides in the tray because macOS says so, [`mac::open_event`]) and
 //!   `tauri-plugin-autostart` with `--hidden` on Linux and Windows ([`crate::login_item::route_for`]);
 //! - the agent as a per-user service: `SMAppService` on macOS (the plist inside the bundle), a systemd user unit on
 //!   Linux and the per-user `Run` entry on Windows (`dyno_agent::service`).
@@ -148,7 +148,7 @@ impl AgentService for CliService {
 // ---------------------------------------------------------------------------------------------------------- macOS
 
 #[cfg(target_os = "macos")]
-pub use mac::{launched_as_login_item, migrate_legacy_login_at_start, MainAppLogin, SmService};
+pub use mac::{open_event, migrate_legacy_login_at_start, MainAppLogin, SmService};
 
 #[cfg(target_os = "macos")]
 mod mac {
@@ -162,10 +162,11 @@ mod mac {
         keep_registered, parse_job, parse_print_disabled, plan, record_registered_version, registered_version, service_supervises,
         JobReport, Observed, RegisterError, RegistrationStatus, RepairOps, REGISTERED_VERSION_FILE,
     };
+    use crate::login_item::OpenEvent;
     use dyno_agent::service::LABEL;
     use objc2_foundation::NSString;
     use objc2_service_management::{SMAppService, SMAppServiceStatus};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     const PLIST: &str = "net.decryptology.dyno.agent.plist";
 
@@ -214,42 +215,81 @@ mod mac {
         }
     }
 
-    /// Whether macOS started this process as a login item: the open-application Apple Event carries
-    /// `keyAELaunchedAsLogInItem` (`'lgit'`) - Apple's `AERegistry.h` (Xcode SDK, read 2026-10-31): "If present in a
-    /// kAEOpenApplication event, application was launched as a login item and probably shouldn't open up untitled
-    /// documents". It is either a parameter of the event or the value of its `keyAEPropData` (`'prdt'`), so both are
-    /// read. Only valid while the event is being handled: call it from `applicationDidFinishLaunching`, which is where
-    /// Tauri runs its setup (`RuntimeRunEvent::Ready`). Any miss means "not a login start": the window shows.
-    pub fn launched_as_login_item() -> bool {
+    /// What the open-application Apple Event says about this start: `keyAELaunchedAsLogInItem` (`'lgit'`) - Apple's
+    /// `AERegistry.h` (Xcode SDK, read 2026-10-31): "application was launched as a login item and probably shouldn't open
+    /// up untitled documents" - as a parameter of the event or the value of its `keyAEPropData` (`'prdt'`); and
+    /// `keyAERestoreAppState` (`'rsto'`) with the value yes (`AppleEvents.h`), which loginwindow sends when it reopens
+    /// the apps that were running at logout ("Reopen windows"), together with whether the sender (`keySenderPIDAttr`,
+    /// `'spid'`) is the login window, judged by the sender pid's executable path read right here (rule 53: not a pid
+    /// remembered from earlier). Only valid while the event is being handled: call it from `applicationDidFinishLaunching`,
+    /// which is where Tauri runs its setup (`RuntimeRunEvent::Ready`). Any miss gives the default (all false): the window shows.
+    pub fn open_event() -> OpenEvent {
         use objc2::runtime::AnyObject;
         use objc2::{class, msg_send};
         const OAPP: u32 = u32::from_be_bytes(*b"oapp");
         const PROP_DATA: u32 = u32::from_be_bytes(*b"prdt");
         const LOGIN_ITEM: u32 = u32::from_be_bytes(*b"lgit");
+        const RESTORE: u32 = u32::from_be_bytes(*b"rsto");
+        const YES: u32 = u32::from_be_bytes(*b"yes ");
+        const SENDER_PID: u32 = u32::from_be_bytes(*b"spid");
         // SAFETY: plain message sends on Foundation objects; the types of the replies match the documented
-        // NSAppleEventManager / NSAppleEventDescriptor signatures (FourCharCode is u32).
+        // NSAppleEventManager / NSAppleEventDescriptor signatures (FourCharCode is u32, a pid is int32).
         unsafe {
             let manager: Option<objc2::rc::Retained<AnyObject>> = msg_send![class!(NSAppleEventManager), sharedAppleEventManager];
-            let Some(manager) = manager else { return false };
+            let Some(manager) = manager else { return OpenEvent::default() };
             let event: Option<objc2::rc::Retained<AnyObject>> = msg_send![&*manager, currentAppleEvent];
-            let Some(event) = event else { return false };
+            let Some(event) = event else { return OpenEvent::default() };
             let id: u32 = msg_send![&*event, eventID];
             if id != OAPP {
-                return false;
+                return OpenEvent::default();
             }
             let direct: Option<objc2::rc::Retained<AnyObject>> = msg_send![&*event, paramDescriptorForKeyword: LOGIN_ITEM];
-            if direct.is_some() {
-                return true;
-            }
             let props: Option<objc2::rc::Retained<AnyObject>> = msg_send![&*event, paramDescriptorForKeyword: PROP_DATA];
-            match props {
+            let by_props = match props {
                 Some(p) => {
                     let code: u32 = msg_send![&*p, enumCodeValue];
                     code == LOGIN_ITEM
                 }
                 None => false,
-            }
+            };
+            let restore: Option<objc2::rc::Retained<AnyObject>> = msg_send![&*event, paramDescriptorForKeyword: RESTORE];
+            let restore = match restore {
+                Some(r) => {
+                    let code: u32 = msg_send![&*r, enumCodeValue];
+                    code == YES
+                }
+                None => false,
+            };
+            let sender_is_loginwindow = restore && {
+                let sender: Option<objc2::rc::Retained<AnyObject>> = msg_send![&*event, attributeDescriptorForKeyword: SENDER_PID];
+                match sender {
+                    Some(d) => {
+                        let pid: i32 = msg_send![&*d, int32Value];
+                        pid_path(pid).is_some_and(|p| crate::login_item::is_loginwindow(&p))
+                    }
+                    None => false,
+                }
+            };
+            OpenEvent { login_item: direct.is_some() || by_props, restore, sender_is_loginwindow }
         }
+    }
+
+    /// The executable path of process `pid` now (`proc_pidpath`), `None` when it is gone or unreadable.
+    fn pid_path(pid: i32) -> Option<String> {
+        unsafe extern "C" {
+            fn proc_pidpath(pid: i32, buffer: *mut std::ffi::c_void, size: u32) -> i32;
+        }
+        if pid <= 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; 4096];
+        // SAFETY: `buf` is valid for `size` bytes; the call writes at most that many and returns the length written.
+        let n = unsafe { proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+        if n <= 0 {
+            return None;
+        }
+        buf.truncate(n as usize);
+        String::from_utf8(buf).ok()
     }
 
     fn service() -> objc2::rc::Retained<SMAppService> {
@@ -339,31 +379,7 @@ mod mac {
 
     /// `launchctl <args>`, bounded to a few seconds; `None` when it cannot be run or read.
     fn launchctl(args: &[&str]) -> Option<String> {
-        use std::process::{Command, Stdio};
-        // macOS only: no console window to hide, and the wait below is bounded.
-        #[allow(clippy::disallowed_methods)]
-        let mut child = Command::new("/bin/launchctl")
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return None;
-                }
-            }
-        }
-        let mut out = String::new();
-        std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
-        Some(out)
+        crate::service_repair::run_bounded("/bin/launchctl", args, Duration::from_secs(5))
     }
 
     /// [`RepairOps`] over `SMAppService` and `launchctl`.
@@ -387,8 +403,8 @@ mod mac {
         fn job_gone(&mut self) -> bool {
             !job_report().found
         }
-        fn registration_stale(&mut self) -> bool {
-            job_report().stale()
+        fn job(&mut self) -> JobReport {
+            job_report()
         }
         fn service_answers(&mut self) -> bool {
             // The app may have started an agent of its own meanwhile; launchd running the job counts too.

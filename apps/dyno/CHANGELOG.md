@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- macOS: a restart with Dyno running ("Reopen windows when logging back in") starts Dyno hidden in the tray, whatever Start at login says; loginwindow's restore request (`rsto`, sender checked by its executable path) counts like a login-item start (`lgit`). The log says which signal decided (`flag`, `login item`, `restored at login`).
+- macOS: a healthy agent that launchd runs is no longer thrown away at login. The reader of `launchctl print` took the nested `state = active` lines of the coalitions for the job's state, so a running job looked stopped, and "has a launch constraint" alone counted as refused; the repair then killed the agent four times and printed "needs LWCR update" without launchd having said so. Only spawn failed, exit 78 and "needs LWCR update" mark a refused job, a running job is never replaced because the app has not connected yet, and the failure message prints the state launchd reported. `launchctl` output is read while it runs (a listing over 64 KiB blocked it until the 5-second timeout on every look).
+- The agent's `settings.json` is no longer moved aside as `settings.json.corrupt` at every app start (the shell used the same file name; see the shared changelog), so Start at login and the other settings survive a restart.
 - macOS: turning on Launch at login adds Dyno's own two entries to Login Items, the app and its agent (the app registers itself with `SMAppService.mainApp`; no extra "dyno-app, unidentified developer" row, nothing under `~/Library/LaunchAgents`), it is refused with a message when Dyno runs from the disk image or a quarantined download, and a login start still opens in the tray. `dyno-agent service` refuses inside the app on macOS. The "First launch" notes describe the macOS 26 steps.
 
 ### Added

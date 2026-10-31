@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-shell`: the shell keeps its settings in its own file
+- `logging::install` and the shell's settings service read and write `shell-settings.json` in the app's config folder
+  (`logging::SHELL_SETTINGS_FILE`, `shell_settings_path`), not `settings.json`. An app that keeps its own `settings.json` in
+  that folder in another format (Dyno's agent) lost it on every start: the settings service took the flat file for a damaged
+  one and moved it aside as `settings.json.corrupt`. The log installer also reads the file the service writes now (the service
+  used Tauri's `app_config_dir`, the installer the app's folder: the saved log level was never found). The default settings
+  file moved with it; no migration (no app is released on the shell's settings yet, and the apps outside the shell never
+  used this path).
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.
