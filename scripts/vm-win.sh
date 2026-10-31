@@ -5,6 +5,9 @@
 #   scripts/vm-win.sh start [--no-wait]       start headless and wait until SSH answers
 #   scripts/vm-win.sh stop                    shut Windows down (over SSH), power off if it does not stop in time
 #   scripts/vm-win.sh ssh [--admin] [cmd...]  SSH as paddock-test (or paddock-admin); a shell without a command
+#   scripts/vm-win.sh put|get <user> <src> <dst>   scp a file to / from the guest (user paddock-test or paddock-admin; dst/src guest path)
+#   scripts/vm-win.sh gui-setup               one-time: auto-logon of paddock-test + the in-session job runner, snapshot gui-baseline
+#   scripts/vm-win.sh job <file.ps1> [secs]   run a script ON the desktop of paddock-test (UI Automation works), print its output; exit = its code
 #   scripts/vm-win.sh snapshot <name>         take a snapshot
 #   scripts/vm-win.sh revert [name]           revert to a snapshot (default clean-baseline); the VM is then off
 #   scripts/vm-win.sh status | ip             running or stopped / the guest's address
@@ -29,7 +32,7 @@ install_deadline=${PADDOCK_VM_INSTALL_DEADLINE:-7200}
 baseline=clean-baseline
 
 die() { echo "vm-win: $*" >&2; exit 1; }
-usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; }
 
 guard() {
   case "$dir/" in "$HOME"/*) die "PADDOCK_WIN_VM_DIR must not be under \$HOME (ER-14): $dir" ;; esac
@@ -79,6 +82,12 @@ ssh_to() { # user, then ssh arguments
     -o UserKnownHostsFile="$dir/keys/known_hosts" -o StrictHostKeyChecking=accept-new "$user@$host" "$@"
 }
 
+scp_via() { # user, then scp arguments with @ placeholders for user@host
+  local user=$1; shift
+  local host; host=$(ip)
+  scp -q -i "$dir/keys/$user" -o IdentitiesOnly=yes -o BatchMode=yes -o UserKnownHostsFile="$dir/keys/known_hosts" -o StrictHostKeyChecking=accept-new "${@//@HOST@/$user@$host}"
+}
+
 wait_ssh() {
   local end=$((SECONDS + ssh_deadline))
   until (ssh_to paddock-test 'exit 0') >/dev/null 2>&1; do # subshell: no lease yet is not fatal
@@ -119,6 +128,54 @@ case $cmd in
     user=paddock-test
     [ "${1:-}" = "--admin" ] && { user=paddock-admin; shift; }
     ssh_to "$user" "$@"
+    ;;
+  put)
+    guard
+    [ $# -eq 3 ] || die "usage: vm-win.sh put <user> <local file> <guest path>"
+    scp_via "$1" "$2" "@HOST@:$3"
+    ;;
+  get)
+    guard
+    [ $# -eq 3 ] || die "usage: vm-win.sh get <user> <guest path> <local file>"
+    scp_via "$1" "@HOST@:$2" "$3"
+    ;;
+  gui-setup)
+    guard
+    here=$(cd "$(dirname "$0")" && pwd)
+    running || { load_ok; vmrun start nogui; }
+    wait_ssh
+    pw=$(sed -n 's/^paddock-test=//p' "$dir/keys/setup-passwords")
+    [ -n "$pw" ] || die "no paddock-test password in $dir/keys/setup-passwords"
+    scp_via paddock-admin "$here/vm-win/logon-runner.ps1" "@HOST@:C:/paddock-test/logon-runner.ps1"
+    scp_via paddock-admin "$here/vm-win/gui-setup.ps1" "@HOST@:C:/paddock-test/gui-setup.ps1"
+    ssh_to paddock-admin "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\gui-setup.ps1 -TestPassword '$pw' -RunnerSource C:\\paddock-test\\logon-runner.ps1"
+    ssh_to paddock-admin 'Remove-Item C:\paddock-test\gui-setup.ps1 -Force; shutdown /s /t 0' >/dev/null 2>&1 || true
+    wait_off 180 "shutting down" || vmrun stop hard
+    has_snapshot gui-baseline && vmrun deleteSnapshot gui-baseline
+    vmrun snapshot gui-baseline
+    echo "snapshot gui-baseline taken (clean-baseline + auto-logon + job runner); use: vm-win.sh revert gui-baseline"
+    ;;
+  job)
+    guard
+    [ -f "${1:-}" ] || die "usage: vm-win.sh job <file.ps1> [timeout secs]"
+    limit=${2:-300}
+    id="job-$(date +%s)-$$"
+    # The runner starts at the console logon of paddock-test; wait for it (a heartbeat file newer than 10 s).
+    end=$((SECONDS + 300))
+    until ssh_to paddock-test '$f=Get-Item C:\paddock-test\runner.alive -ErrorAction SilentlyContinue; if ($f -and ((Get-Date)-$f.LastWriteTime).TotalSeconds -lt 10) { exit 0 } else { exit 1 }' >/dev/null 2>&1; do
+      [ $SECONDS -lt $end ] || die "the in-session runner is not alive (is this the gui-baseline snapshot? vm-win.sh gui-setup)"
+      sleep 3
+    done
+    scp_via paddock-test "$1" "@HOST@:C:/paddock-test/jobs/$id.ps1"
+    end=$((SECONDS + limit))
+    until ssh_to paddock-test "if (Test-Path C:\\paddock-test\\jobs\\$id.done) { exit 0 } else { exit 1 }" >/dev/null 2>&1; do
+      [ $SECONDS -lt $end ] || die "job $id did not finish within ${limit}s"
+      sleep 2
+    done
+    ssh_to paddock-test "Get-Content C:\\paddock-test\\jobs\\$id.out" 2>/dev/null | grep -v -e 'post-quantum' -e 'store now' -e 'openssh.com/pq' || true
+    code=$(ssh_to paddock-test "(Get-Content C:\\paddock-test\\jobs\\$id.done).Trim()" 2>/dev/null | tail -n 1 | tr -d '\r')
+    ssh_to paddock-test "Remove-Item C:\\paddock-test\\jobs\\$id.* -Force" >/dev/null 2>&1 || true
+    exit "${code:-1}"
     ;;
   snapshot)
     guard
