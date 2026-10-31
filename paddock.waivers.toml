@@ -103,12 +103,6 @@ expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
-path = "apps/debrief/crates/chromium-driver/src/launch.rs"
-reason = "ADR 0033 WP-5: the watchdog killpg()s a pid captured at launch, also after is_running() reaped the browser; move to paddock-chromium"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
 path = "apps/debrief/crates/chromium-driver/src/process.rs"
 reason = "ADR 0033 WP-5: killpg and taskkill /T after try_wait may have reaped the leader, and a signal-0 liveness probe; replace with paddock_proc::Supervised"
 expires = "2026-12-31"

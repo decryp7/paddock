@@ -401,13 +401,6 @@ adr = "0012"
   delete_by = "pitcrew-v1.1.0"
   note = "Builds the tray by hand with TrayIconBuilder; Pitcrew 1.1 builds it through paddock-window and drops these items."
 
-  [[mechanism.copy]]
-  paths = ["apps/spotter/app/src-tauri/src/tray.rs"]
-  symbols = ["item:build_menu", "item:create"]
-  owner = "spotter"
-  delete_by = "spotter-v1.0.0"
-  note = "Builds the tray by hand with TrayIconBuilder; Spotter 1.0 builds it through paddock-window and drops these items. Its menu model (MenuEntry, menu_model) is Spotter's own content."
-
 [[mechanism]]
 id = "tray-popover"
 title = "The popover window opened from the tray icon: position, height, toggle"

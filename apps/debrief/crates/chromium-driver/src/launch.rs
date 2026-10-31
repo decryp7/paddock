@@ -805,7 +805,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().unwrap();
         let exe = d.path().join("dies.sh");
-        std::fs::write(&exe, "#!/bin/sh\nexit 3\n").unwrap();
+        std::fs::write(&exe, paddock_testkit::live_browser::fake_script("exit 3")).unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
         let browser = Browser {
             flavor: crate::Flavor::Chromium,
@@ -884,7 +884,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().unwrap();
         let exe = d.path().join("never-ready.sh");
-        std::fs::write(&exe, "#!/bin/sh\nexec sleep 3600\n").unwrap();
+        std::fs::write(&exe, paddock_testkit::live_browser::fake_script("exec sleep 3600")).unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
         let browser = Browser {
             flavor: crate::Flavor::Chromium,
