@@ -49,7 +49,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
  * - Add a widget: every kind with its summary: "Add", the app's `again` label for a kind that can be placed again, and
  *   "Added" (not a button) for a kind at its count. At the surface limit every Add is disabled and the counter says "8 of 8".
  * - A Material snack bar with Undo shows while `canUndo` is true. A newer layout (`editable` false) is read-only.
- * - Preview: with `preview` true, content with `slot="preview"` shows beside the lists at 840 px and more.
+ * - Preview: with `preview` true, content with `slot="preview"` shows beside the lists at 880 px and more.
  */
 @Component({
   selector: 'pd-widget-chooser',
@@ -196,8 +196,8 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
   styles: `
     .pd-widget-chooser { display: block; container-type: inline-size; }
     .pd-wc { display: grid; gap: var(--pd-space-6); align-items: start; }
-    /* The one preview breakpoint: the lists need 456 px beside the 360 px popup and the gap. */
-    @container (min-width: 840px) { .pd-wc--preview { grid-template-columns: minmax(0, 1fr) 360px; } }
+    /* The one preview breakpoint: the lists get 496 px beside the 360 px popup and the gap. */
+    @container (min-width: 880px) { .pd-wc--preview { grid-template-columns: minmax(0, 1fr) 360px; } }
     .pd-wc-label { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 6px; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
     .pd-wc-count { font-weight: var(--pd-weight-regular); color: var(--pd-text-subtle); }
     .pd-wc-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); overflow: hidden; position: relative; }
@@ -227,6 +227,9 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-hint { display: flex; align-items: center; gap: 6px; margin: var(--pd-space-2) 0 20px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-wc-limit { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0 0 var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-info-tint); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
     .pd-wc-limit pd-status-glyph { color: var(--pd-info); }
+    .pd-wc-list + .pd-wc-label, .pd-wc-hint + .pd-wc-label { margin-top: var(--pd-space-6); }
+    .pd-wc-save mat-form-field { --mat-form-field-container-height: var(--pd-control-height); --mat-form-field-container-vertical-padding: var(--pd-space-1); --mat-form-field-outlined-label-text-populated-size: var(--pd-text-label); }
+    .pd-wc-foot button { --mat-button-text-label-text-color: var(--pd-accent); }
     .pd-wc-save { display: flex; align-items: flex-start; gap: var(--pd-space-2); margin: var(--pd-space-2) 0; }
     .pd-wc-save mat-form-field { flex: 1; min-width: 0; }
     .pd-wc-error { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0 0 var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); font-size: var(--pd-text-label); }
