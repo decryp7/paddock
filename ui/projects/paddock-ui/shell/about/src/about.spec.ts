@@ -428,13 +428,15 @@ describe('the dialogs', () => {
     await fixture.whenStable();
     expect(about.openedUrls).toEqual(['https://updates.example/releases']);
     expect(el.querySelector('[data-testid="about-open-failed"]')).toBeNull();
-    vi.spyOn(about, 'openUrl').mockRejectedValue(new Error('only http, https and mailto addresses open'));
+    vi.spyOn(about, 'openUrl').mockRejectedValue({ code: 'invalid', message: 'only http, https and mailto addresses open', retryable: false, hint: 'Check the address.' });
     el.querySelector<HTMLAnchorElement>('[data-testid="about-releases"]')!.click();
     await fixture.whenStable();
     const failed = el.querySelector('[data-testid="about-open-failed"]');
     expect(failed?.getAttribute('role')).toBe('alert');
     expect(text(failed as HTMLElement)).toContain('The releases page could not be opened');
     expect(text(failed as HTMLElement)).toContain('only http, https and mailto addresses open');
+    expect(text(failed as HTMLElement)).toContain('Check the address.');
+    expect(text(failed as HTMLElement)).not.toContain('[object Object]');
   });
 
   it('says the operating system and architecture in words', () => {
@@ -600,7 +602,7 @@ describe('the dialogs', () => {
 
   it('Updates says so when the releases page did not open', async () => {
     const { updates } = bed('release', [], false, false);
-    updates.openReleases = () => Promise.reject(new Error('No browser.'));
+    updates.openReleases = () => Promise.reject({ kind: 'invalid', message: 'No browser.', nextStep: 'Open the releases page by hand.', detail: null });
     const fixture = createFramed(PdUpdatesDialog);
     await settle();
     await fixture.whenStable();
@@ -612,6 +614,8 @@ describe('the dialogs', () => {
     await settle();
     await fixture.whenStable();
     expect(el.querySelector('[data-testid="updates-open-failed"]')?.textContent).toContain('No browser.');
+    expect(el.querySelector('[data-testid="updates-open-failed"]')?.textContent).toContain('Open the releases page by hand.');
+    expect(el.querySelector('[data-testid="updates-open-failed"]')?.textContent).not.toContain('[object Object]');
     expect(el.querySelector('[data-testid="updates-open-failed"]')?.classList.contains('pd-problem')).toBe(true);
   });
 

@@ -914,3 +914,66 @@ fn get_manifest(
 fn remove(p: &Path) {
     let _ = std::fs::remove_file(p);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct NoNetwork;
+
+    impl paddock_download::Transport for NoNetwork {
+        fn get(
+            &self,
+            _: &Get<'_>,
+        ) -> Result<paddock_download::Response, paddock_download::TransportError> {
+            unreachable!("nothing is fetched")
+        }
+    }
+
+    /// A ready update in a build without an installer cannot happen through the public steps (a download is refused first),
+    /// so the install guards are defence in depth: forced here to prove they hold.
+    #[test]
+    fn a_ready_update_without_an_installer_is_refused_by_every_install_step() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = UpdateKey::parse(
+            &std::fs::read_to_string(
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/key.pub"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let config = UpdaterConfig::new(
+            "1.0.0",
+            Some(key),
+            vec![Channel::new(
+                "stable",
+                "Stable",
+                "https://updates.test/latest.json",
+            )],
+            dir.path().join("downloads"),
+        );
+        let u = Updater::new(
+            config,
+            Arc::new(Downloader::new(Arc::new(NoNetwork))),
+            Arc::new(RecordStore::new(None)),
+            Box::new(|_| {}),
+        );
+        u.lock().phase = UpdatePhase::Ready {
+            info: UpdateInfo {
+                version: "9.9.9".into(),
+                current_version: "1.0.0".into(),
+                notes: String::new(),
+                pub_date: None,
+                size: None,
+            },
+            install_on_quit: false,
+        };
+        let refused = |r: Result<UpdateStatus, UpdateError>| matches!(r, Err(UpdateError::InstallFailed { detail }) if detail.contains("no installer"));
+        assert!(refused(u.prepare_restart()));
+        assert!(refused(u.install_on_quit(true)));
+        assert!(
+            matches!(u.status().phase, UpdatePhase::Ready { .. }),
+            "nothing moved"
+        );
+    }
+}

@@ -57,6 +57,10 @@ export function asUpdateError(e: unknown): UpdateErrorDto | null {
 export function toUpdateError(e: unknown): UpdateErrorDto {
   const known = asUpdateError(e);
   if (known) return known;
+  // The files adapter's `CommandError` ({ code, message, hint? }) is not an Error either.
+  if (isObject(e) && typeof e['message'] === 'string' && e['message']) {
+    return { kind: 'unreachable', message: e['message'], nextStep: typeof e['hint'] === 'string' && e['hint'] ? e['hint'] : 'Try again.', detail: null };
+  }
   const message = e instanceof Error ? e.message : typeof e === 'string' && e ? e : 'The updater did not answer.';
   return { kind: 'unreachable', message, nextStep: 'Try again.', detail: null };
 }

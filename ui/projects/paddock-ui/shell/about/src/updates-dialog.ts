@@ -7,6 +7,8 @@ import type { SuJobPhase } from '@decryp7/paddock-ui';
 import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import { UpdatesBackend } from './backend';
 import { UpdatesStore } from './updates.store';
+import { toUpdateError } from './wire';
+import type { UpdateErrorDto } from '../generated/about';
 import { ABOUT_STYLES } from './styles';
 import { formatBytes } from './format';
 
@@ -68,7 +70,8 @@ import { formatBytes } from './format';
       }
       @if (openFailed(); as why) {
         <div class="pd-problem" role="alert" data-testid="updates-open-failed">
-          <p class="pd-message">{{ why }}</p>
+          <p class="pd-message">{{ why.message }}</p>
+          <p>{{ why.nextStep }}</p>
         </div>
       }
       @if (store.error(); as e) {
@@ -138,7 +141,7 @@ export class PdUpdatesDialog implements DialogContent {
   protected readonly store = inject(UpdatesStore);
   private readonly backend = inject(UpdatesBackend);
   /** Why the releases page did not open, in the engine's words; null when it did. */
-  protected readonly openFailed = signal<string | null>(null);
+  protected readonly openFailed = signal<UpdateErrorDto | null>(null);
   /** The window's jobs, when it has them: the download's phases. */
   private readonly jobs = inject(JobsStore, { optional: true });
 
@@ -186,7 +189,7 @@ export class PdUpdatesDialog implements DialogContent {
     try {
       await this.backend.openReleases();
     } catch (e) {
-      this.openFailed.set(e instanceof Error ? e.message : String(e));
+      this.openFailed.set(toUpdateError(e));
     }
   }
 

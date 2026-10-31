@@ -22,7 +22,7 @@ Conventional Commits; one semver tag for the whole repo.
 - `install_on_quit(true)` and `prepare_restart()` answer Busy first when out of turn, like `begin_download`; the in-memory UI
   backend follows the same order.
 - Updates dialog: a build that cannot install (no key, or `no_install`) offers "Open releases page" (`UpdateStatus.releasesPage`,
-  through `files_open_url`, now in the `pd.updates` contract) as its primary action, with "Check again" secondary.
+  through `updates_open_releases`, which replaces `files_open_url` in the `pd.updates` contract) as its primary action, with "Check again" secondary.
 - `UpdateStatus` has `can_install` (TypeScript `canInstall`); `Updater::can_install()`. `Updater::install_on_quit(true)` and
   `prepare_restart()` refuse without an installer at the request. Shell demo declares `no_install()`.
 ### `@decryp7/paddock-ui` (`shell/about`): the Updates dialog follows `canInstall`
