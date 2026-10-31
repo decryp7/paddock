@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterNextRender, computed, inject, signal } from '@angular/core';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatIcon } from '@angular/material/icon';
+import { MatTooltip } from '@angular/material/tooltip';
 import { MatMenu, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
 import { SuTrayPopover, type SuTrayPlatform } from '@decryp7/paddock-ui';
 import { PdWidgetArea } from '@decryp7/paddock-ui/widgets';
@@ -8,6 +9,7 @@ import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import type { WidgetActionId } from '../../core/generated/widgets';
 import { platformFromUserAgent } from '../../core/tauri-backend';
+import { SETTINGS_GENERAL_ROUTE, SETTINGS_TRAY_POPUP_ROUTE } from '../../core/navigation';
 import { observeHeight } from '../../shared/observe-height';
 import { TrayWidgetsStore } from '../../state/tray-widgets.store';
 import { WatchesStore } from '../../state/watches.store';
@@ -20,7 +22,7 @@ import { WidgetSet } from './widget-set';
  */
 @Component({
   selector: 'sp-tray-page',
-  imports: [MatButton, MatIconButton, MatIcon, MatMenu, MatMenuItem, MatMenuTrigger, SuTrayPopover, PdWidgetArea, WidgetSet],
+  imports: [MatButton, MatIconButton, MatIcon, MatMenu, MatMenuItem, MatMenuTrigger, MatTooltip, SuTrayPopover, PdWidgetArea, WidgetSet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pd-tray-popover label="Spotter" [platform]="platform" (dismissed)="close()">
@@ -59,16 +61,17 @@ import { WidgetSet } from './widget-set';
         </div>
       }
       <div slot="footer" class="foot">
-        <button matButton="filled" type="button" (click)="openMain()">Open Spotter</button>
         <span class="spacer"></span>
-        <button matIconButton type="button" aria-label="More actions" [matMenuTriggerFor]="more" yPosition="above">
+        <button matButton="filled" type="button" (click)="openMain()"><mat-icon svgIcon="sp:arrow-right" aria-hidden="true" /> Open Spotter</button>
+        <button matIconButton type="button" aria-label="More actions" matTooltip="More actions" matTooltipPosition="left" [matMenuTriggerFor]="more">
           <mat-icon svgIcon="sp:more" aria-hidden="true" />
         </button>
-        <mat-menu #more="matMenu" yPosition="above">
-          <button mat-menu-item type="button" (click)="customize()"><mat-icon svgIcon="sp:settings" aria-hidden="true" />Customize widgets…</button>
+        <mat-menu #more="matMenu" yPosition="above" xPosition="before">
+          <button mat-menu-item type="button" (click)="customize()"><mat-icon svgIcon="sp:sliders" aria-hidden="true" />Customize widgets…</button>
           <button mat-menu-item type="button" [disabled]="unseen() === 0" (click)="watches.acknowledgeAll()"><mat-icon svgIcon="sp:check-all" aria-hidden="true" />Mark all as seen</button>
           <button mat-menu-item type="button" (click)="perform({ type: 'openSettings' })"><mat-icon svgIcon="sp:settings" aria-hidden="true" />Settings…</button>
-          <button mat-menu-item type="button" (click)="quit()"><mat-icon svgIcon="sp:x" aria-hidden="true" />Quit Spotter</button>
+          <hr class="sep" />
+          <button mat-menu-item type="button" (click)="quit()"><mat-icon svgIcon="sp:power" aria-hidden="true" />Quit Spotter</button>
         </mat-menu>
       </div>
     </pd-tray-popover>
@@ -154,6 +157,11 @@ import { WidgetSet } from './widget-set';
     .spacer {
       flex: 1;
     }
+    .sep {
+      border: 0;
+      border-top: 1px solid var(--pd-hairline);
+      margin: 4px 0;
+    }
     @media (prefers-reduced-motion: no-preference) {
       .sk {
         animation: sk-pulse 1.2s ease-in-out infinite;
@@ -200,7 +208,7 @@ export class TrayPage {
 
   /** "Customize widgets…": Settings (the chooser is its page, ADR 0035 section 5). */
   protected customize(): void {
-    this.perform({ type: 'openSettings' });
+    this.show(SETTINGS_TRAY_POPUP_ROUTE);
   }
 
   protected quit(): void {
@@ -219,7 +227,7 @@ export class TrayPage {
       case 'addWatch':
         return this.show('/watches/new');
       case 'openSettings':
-        return this.show('/settings');
+        return this.show(SETTINGS_GENERAL_ROUTE);
       case 'retryCheck':
         return this.attempt(this.backend.checkNow(action.id));
       case 'checkAll':

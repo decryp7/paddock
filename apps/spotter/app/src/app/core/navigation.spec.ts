@@ -1,9 +1,9 @@
-import { isShownRoute, listenForRoutes, SETTINGS_ROUTE } from './navigation';
+import { isShownRoute, listenForRoutes, SETTINGS_GENERAL_ROUTE, SETTINGS_ROUTE, SETTINGS_TRAY_POPUP_ROUTE, settingsPageOf } from './navigation';
 import { MockBackend } from './mock-backend';
 
 describe('routes the tray asks the main window for', () => {
   it('accepts the dashboard, the watches, one watch and Settings, and nothing else', () => {
-    for (const ok of ['/', '/watches', '/watches/new', '/watches/w-3', '/watches/w-3/edit', SETTINGS_ROUTE]) expect(isShownRoute(ok), ok).toBe(true);
+    for (const ok of ['/', '/watches', '/watches/new', '/watches/w-3', '/watches/w-3/edit', SETTINGS_ROUTE, SETTINGS_GENERAL_ROUTE, SETTINGS_TRAY_POPUP_ROUTE]) expect(isShownRoute(ok), ok).toBe(true);
     for (const bad of ['/settings/x', '/settingsx', '//evil', '/watches/../x', 'https://x.example', '/watches/a b', `/watches/${'a'.repeat(300)}`]) expect(isShownRoute(bad), bad).toBe(false);
   });
 
@@ -25,5 +25,16 @@ describe('routes the tray asks the main window for', () => {
     const shown: string[] = [];
     await listenForRoutes(backend, (r) => shown.push(r));
     expect(shown).toEqual(['/watches/w-7']);
+  });
+});
+
+describe('settingsPageOf', () => {
+  it('names the Settings page a settings route opens, and nothing for other routes or other pages', () => {
+    expect(settingsPageOf(SETTINGS_ROUTE)).toBe('');
+    expect(settingsPageOf(SETTINGS_GENERAL_ROUTE)).toBe('sp.general');
+    expect(settingsPageOf(SETTINGS_TRAY_POPUP_ROUTE)).toBe('sp.tray-popup');
+    expect(settingsPageOf('/watches')).toBeNull();
+    expect(settingsPageOf('/settings/other')).toBeNull();
+    expect(isShownRoute('/settings/other')).toBe(false);
   });
 });

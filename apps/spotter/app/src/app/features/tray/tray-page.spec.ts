@@ -117,6 +117,7 @@ describe('TrayPage', () => {
     await settle(f);
     const items = Array.from(document.querySelectorAll<HTMLElement>('.mat-mdc-menu-panel button[mat-menu-item]'));
     expect(items.map((i) => text(i))).toEqual(['Customize widgets…', 'Mark all as seen', 'Settings…', 'Quit Spotter']);
+    expect(document.querySelector('.mat-mdc-menu-panel hr.sep')).not.toBeNull();
     items[1]!.click();
     await settle(f);
     expect(backend.calls).toContain('acknowledge');
@@ -127,10 +128,12 @@ describe('TrayPage', () => {
     expect(backend.calls).toContain('quitApp');
   });
 
-  it('opens Settings for Customize widgets', async () => {
+  it('opens Settings at the tray popup page for Customize widgets, and at Spotter\'s page for the settings a widget names', async () => {
     const { f, backend } = await make();
+    const shown = vi.spyOn(backend, 'showMainWindow');
     f.componentInstance['customize']();
+    (f.componentInstance as unknown as { perform(a: object): void }).perform({ type: 'openSettings' });
     await flush(5);
-    expect(backend.calls).toContain('showMainWindow');
+    expect(shown.mock.calls).toEqual([['/settings/tray-popup'], ['/settings/general']]);
   });
 });

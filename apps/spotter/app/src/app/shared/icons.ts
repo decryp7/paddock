@@ -30,6 +30,8 @@ export const ICONS: Record<string, string> = {
   // Actions
   plus: outline(p('M12 5v14M5 12h14')),
   x: outline(p('M6 6l12 12M18 6 6 18')),
+  power: outline(p('M12 3v8') + p('M6.3 6.8a8 8 0 1 0 11.4 0')),
+  sliders: outline(p('M4 7h9M17 7h3M4 17h3M11 17h9') + c(15, 7, 2) + c(9, 17, 2)),
   check: outline(p('m5 12.5 4.5 4.5L19 7.5')),
   'check-all': outline(p('m3 12.5 4 4L15 8M11 16.5l1 1L21 8')),
   refresh: outline(p('M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5')),
