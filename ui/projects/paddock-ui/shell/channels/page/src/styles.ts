@@ -42,6 +42,19 @@ export const CHANNELS_STYLES = `
   .pd-ch__hint--bad { color: var(--pd-danger-text, var(--pd-text)); }
   .pd-ch__check { font-weight: var(--pd-weight-medium); }
   mat-checkbox.pd-ch__check { margin-inline-start: calc((var(--pd-control-height) - 18px) / -2); }
+  .pd-ch__lan { display: flex; flex-direction: column; gap: var(--pd-space-1); }
+  .pd-ch__events-picker { display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; }
+  .pd-ch__legend { font-weight: var(--pd-weight-medium); }
+  .pd-ch__group { margin: 0; padding: var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); display: flex; flex-direction: column; gap: var(--pd-space-1); min-width: 0; }
+  .pd-ch__group legend { padding: 0 var(--pd-space-1); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
+  .pd-ch__event { display: flex; flex-direction: column; }
+  .pd-ch__event-help { margin-inline-start: calc(var(--pd-control-height) - 4px); }
+  .pd-ch__chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--pd-space-1); }
+  .pd-ch__chip { display: inline-flex; align-items: center; gap: var(--pd-space-1); padding: 2px var(--pd-space-1) 2px var(--pd-space-2); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); font-size: var(--pd-text-label); }
+  .pd-ch__chip-x { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: inherit; cursor: pointer; }
+  .pd-ch__chip-x:hover { background: var(--pd-hover); }
+  .pd-ch__other-add { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--pd-space-2); }
+  .pd-ch__other-add .pd-ch__field { flex: 1 1 12rem; }
   .pd-ch__secret { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2) var(--pd-space-3); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); grid-column: 1 / -1; }
   .pd-ch__foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); }
   .pd-ch__foot .pd-ch__spacer { flex: 1 1 0; }

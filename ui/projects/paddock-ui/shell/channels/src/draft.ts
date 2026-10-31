@@ -14,6 +14,8 @@ export interface ChannelDraft {
   /** Event names, separated by commas, spaces or new lines. */
   events: string;
   minSeverity: MinSeverity;
+  /** The channel's server is on the user's home network (a private address is allowed). */
+  allowLan: boolean;
   /** The channel needs a token (webhook, ntfy). Email uses `username` instead. */
   auth: boolean;
   url: string;
@@ -38,6 +40,7 @@ export const EMPTY_DRAFT: ChannelDraft = {
   type: 'webhook',
   events: '',
   minSeverity: 'warning',
+  allowLan: false,
   auth: false,
   url: '',
   server: 'https://ntfy.sh',
@@ -68,7 +71,7 @@ export function tokens(text: string): string[] {
 
 /** A draft that edits `c`. */
 export function draftFromChannel(c: ChannelConfig): ChannelDraft {
-  const d: ChannelDraft = { ...EMPTY_DRAFT, id: c.id, name: c.name, enabled: c.enabled, type: c.transport.type, events: c.events.join(', '), minSeverity: c.minSeverity };
+  const d: ChannelDraft = { ...EMPTY_DRAFT, id: c.id, name: c.name, enabled: c.enabled, type: c.transport.type, events: c.events.join(', '), minSeverity: c.minSeverity, allowLan: c.allowLan };
   const t = c.transport;
   switch (t.type) {
     case 'webhook':
@@ -114,6 +117,7 @@ export function draftToChannel(d: ChannelDraft, taken: readonly string[]): Chann
     enabled: d.enabled,
     events: tokens(d.events),
     minSeverity: d.minSeverity,
+    allowLan: d.allowLan,
     transport: transportOf(d),
   };
 }

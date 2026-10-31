@@ -19,7 +19,8 @@ test.describe('notification channels (plan X17)', () => {
 
     await page.getByTestId('channel-name').fill('Build Hook');
     await page.getByTestId('channel-url').fill('https://hooks.example.com/services/abc');
-    await page.getByTestId('channel-events').fill('diskLow, jobFailed');
+    await page.getByTestId('channel-event-diskLow').getByRole('checkbox').check();
+    await page.getByTestId('channel-event-jobFailed').getByRole('checkbox').check();
     await page.getByTestId('channel-auth').getByRole('checkbox').check();
     await expect(page.getByTestId('channel-secret-state')).toHaveText('No secret yet');
 
@@ -143,6 +144,23 @@ test.describe('notification channels (plan X17)', () => {
     await expect(page.getByTestId('channel-row-slack')).toBeVisible();
     await page.getByTestId('channel-cancel').click();
     await expectNoHorizontalScroll(page);
+  });
+
+  test('the demo declares events: grouped checkboxes, unknown names kept as chips, a home-network switch', async ({ app, page }) => {
+    await app.settings.open({ page: 'pd.channels' }, '?channels=many');
+    await page.getByRole('button', { name: 'Edit Team Slack' }).click();
+    const picker = page.getByTestId('channel-events-picker');
+    await expect(picker.getByRole('group', { name: 'Storage' })).toBeVisible();
+    await expect(picker.getByRole('group', { name: 'Jobs' })).toBeVisible();
+    await expect(page.getByTestId('channel-event-diskLow').getByRole('checkbox')).toBeChecked();
+    await expect(page.getByTestId('channel-event-jobDone').getByRole('checkbox')).not.toBeChecked();
+    await expect(page.getByTestId('channel-events-other').getByRole('listitem')).toHaveText(['oldAlarm']);
+    await page.getByTestId('channel-event-jobDone').getByRole('checkbox').check();
+    await expect(page.getByTestId('channel-allow-lan').getByRole('checkbox')).not.toBeChecked();
+    expect(await axeViolations(page)).toEqual([]);
+    await page.getByTestId('channel-save').click();
+    await expect(page.getByTestId('channel-editor')).toHaveCount(0);
+    await expect(page.getByTestId('channel-row-slack')).toContainText('diskLow, jobFailed and 2 more');
   });
 
   test('works by keyboard alone: Tab to Edit, Escape cancels, Enter saves', async ({ app, page }) => {
