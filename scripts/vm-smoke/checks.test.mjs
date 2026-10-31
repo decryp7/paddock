@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
-import { checkoutGaps, guiImageName, MACOS_IMAGE, parseArgs } from './run.mjs';
+import { checkoutGaps, guiImageName, hostRun, MACOS_IMAGE, parseArgs } from './run.mjs';
 
 const dynoConfig = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'apps', 'dyno', 'vm-smoke.json'), 'utf8'));
 // Dyno's own config has no scripted Launch-at-login toggle (SMAppService is called by the app itself); the handover logic is tested with one.
@@ -209,4 +209,11 @@ test('checkoutGaps names what a sparse checkout lacks for ./dev, and nothing for
 test('guiImageName names the GUI image after the pinned base digest, and refuses an unpinned reference', () => {
   assert.equal(guiImageName(MACOS_IMAGE), 'vmgui-base-tahoe-4aaa751f');
   assert.throws(() => guiImageName('ghcr.io/cirruslabs/macos-tahoe-base:latest'), /not a pinned/);
+});
+
+test('hostRun survives a child that exits without reading its stdin (EPIPE is not a crash)', async () => {
+  for (let i = 0; i < 20; i++) {
+    const r = await hostRun('true', [], { input: 'x'.repeat(1 << 20) });
+    assert.equal(r.code, 0);
+  }
 });
