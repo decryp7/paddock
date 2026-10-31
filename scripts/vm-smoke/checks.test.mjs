@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
-import { checkoutGaps, guiImageName, hostRun, MACOS_IMAGE, parseArgs } from './run.mjs';
+import { checkoutGaps, guiImageName, hostRun, MACOS_IMAGE, MANUAL, parseArgs } from './run.mjs';
 
 const dynoConfig = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'apps', 'dyno', 'vm-smoke.json'), 'utf8'));
 // Dyno's own config has no scripted Launch-at-login toggle (SMAppService is called by the app itself); the handover logic is tested with one.
