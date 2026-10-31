@@ -113,7 +113,7 @@ interface Meta {
     .pd-w-t { font-weight: var(--pd-weight-semibold); }
     .pd-w-d { grid-column: 2; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
     .pd-w-act, .pd-w-st .pd-w-prog { grid-column: 2; }
-    .pd-w-act { justify-self: start; margin: var(--pd-space-1) 0 0 calc(-1 * var(--pd-space-2)); padding-inline: var(--pd-space-2); --mat-button-text-label-text-color: var(--pd-accent); color: var(--pd-accent); }
+    .pd-w-act { justify-self: start; margin: var(--pd-space-1) 0 0 calc(-1 * var(--pd-space-2)); --mat-button-text-horizontal-padding: var(--pd-space-2); padding-inline: var(--pd-space-2); --mat-button-text-label-text-color: var(--pd-accent); color: var(--pd-accent); }
     .pd-w-prog { height: 4px; margin-top: var(--pd-space-1); border-radius: 2px; }
     .pd-w-calm { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 28px; width: calc(100% + 2 * var(--pd-space-2)); margin: 0 calc(-1 * var(--pd-space-2)); padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-control); background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
     .pd-w-calm:hover { background: var(--pd-hover); }
