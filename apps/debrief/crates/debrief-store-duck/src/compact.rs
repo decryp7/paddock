@@ -4,9 +4,17 @@
 //! a reader sees either the old or the new files. Old files a reader still has open (Windows refuses to
 //! delete them) go to `trash` and are deleted later.
 //!
-//! Only segments in the full-text index are compacted (ADR 0062 section 3): an unindexed segment waits for a later
-//! compaction, after it is indexed, so the index's "delete a block's documents, then add them" stays exact whatever
-//! compaction did meanwhile. The merged segment is indexed, as its parts were.
+//! Only indexed segments whose id blocks are known are compacted (ADR 0062 section 3):
+//! - an unindexed segment waits for a later compaction, after it is indexed. With ADR 0062 WP-4 the indexer deletes
+//!   a block's documents before it adds them again; merging only indexed segments keeps that exact whatever
+//!   compaction did meanwhile. The merged segment is indexed, as its parts were.
+//! - a segment without `segment_blocks` rows (an overlapping range from before the table, left for WP-4's scan) is
+//!   not merged: the merged file would hold only its other members' blocks, and the blocks are what later deletes go
+//!   by.
+//!
+//! A store whose full-text index cannot be opened indexes nothing, so it is never compacted. That is deliberate (user
+//! decision, 2026-10-31): it is a repair case, and a separate package (ADR 0062 follow-up WP-R) tells the user and
+//! offers Rebuild search index; there is no exemption here.
 
 use crate::schema::{canonical_columns, parquet_from, READY};
 use crate::segments::{Segment, SegmentWriter, SEGMENTS_DIR, SEGMENT_ROWS};
@@ -40,6 +48,8 @@ struct Listed {
     live: u64,
     /// In the full-text index (only indexed segments are compacted).
     indexed: bool,
+    /// Its id blocks are in `segment_blocks` (only such segments are compacted).
+    blocked: bool,
 }
 
 /// Rows of each segment that belong to ready sources.
@@ -147,10 +157,13 @@ pub(crate) fn compact(conn: &Connection, dir: &Path, schema: &Arc<EventSchema>) 
     compact_with(conn, dir, schema, false)
 }
 
-/// The catalog's view of what the next compaction rewrites (by `live` as last counted): indexed segments with rows of
-/// removed sources, and the small indexed ones once there are more than [`MAX_SMALL_SEGMENTS`].
+/// What compaction may take (see the module docs), as SQL over `segments`.
+const COMPACTABLE: &str = "indexed AND file IN (SELECT file FROM segment_blocks)";
+
+/// The catalog's view of what the next compaction rewrites (by `live` as last counted): compactable segments with rows
+/// of removed sources, and the small compactable ones once there are more than [`MAX_SMALL_SEGMENTS`].
 pub(crate) fn pending(conn: &Connection) -> Result<std::collections::HashSet<String>> {
-    let mut stmt = conn.prepare("SELECT file, rows, live FROM segments WHERE indexed")?;
+    let mut stmt = conn.prepare(&format!("SELECT file, rows, live FROM segments WHERE {COMPACTABLE}"))?;
     let listed = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u64>(1)?, r.get::<_, u64>(2)?)))?
         .collect::<duckdb::Result<Vec<_>>>()?;
@@ -168,7 +181,9 @@ pub(crate) fn compact_with(conn: &Connection, dir: &Path, schema: &Arc<EventSche
     empty_trash(conn)?;
     let live = live_rows(conn, dir)?;
     let listed: Vec<Listed> = {
-        let mut stmt = conn.prepare("SELECT file, first_id, end_id, rows, indexed FROM segments ORDER BY first_id")?;
+        let mut stmt = conn.prepare(
+            "SELECT file, first_id, end_id, rows, indexed, file IN (SELECT file FROM segment_blocks) FROM segments ORDER BY first_id",
+        )?;
         let rows = stmt.query_map([], |r| {
             Ok(Listed {
                 file: r.get(0)?,
@@ -177,6 +192,7 @@ pub(crate) fn compact_with(conn: &Connection, dir: &Path, schema: &Arc<EventSche
                 rows: r.get(3)?,
                 live: 0,
                 indexed: r.get(4)?,
+                blocked: r.get(5)?,
             })
         })?;
         rows.map(|r| {
@@ -193,8 +209,8 @@ pub(crate) fn compact_with(conn: &Connection, dir: &Path, schema: &Arc<EventSche
     // Rows of removed or aborted sources: rewritten, so the catalog and histograms stay exact.
     let garbage = |l: &Listed| l.live < l.rows;
     let small = |l: &Listed| l.rows < SEGMENT_ROWS / 2;
-    // Unindexed segments wait (see the module docs).
-    let indexed: Vec<&Listed> = listed.iter().filter(|l| l.indexed).collect();
+    // Unindexed segments and segments without known blocks wait (see the module docs).
+    let indexed: Vec<&Listed> = listed.iter().filter(|l| l.indexed && l.blocked).collect();
     // Every import leaves up to one partial segment per parse thread: small segments are merged only once
     // there are many of them.
     let smalls = indexed.iter().filter(|l| small(l)).count();
