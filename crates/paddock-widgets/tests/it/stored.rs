@@ -75,7 +75,7 @@ fn notes_are_shown_once() {
 fn an_edited_layout_is_stored_without_notes() {
     let edited =
         apply::<Gadgets>(&defaults(), Edit::Remove { id: id("clock") }).expect("the edit applies");
-    let s = Stored::<Gadgets>::new(edited.clone());
+    let s = Stored::<Gadgets>::new(edited.clone()).expect("a valid layout");
     assert!(s.notes().is_empty());
     assert!(view(&s).can_undo);
     assert_eq!(s.layout(), &edited);
@@ -159,4 +159,14 @@ fn a_newer_layout_that_is_also_large_is_still_a_newer_one() {
     let s: Stored<Gadgets> = serde_json::from_value(newer).expect("loads");
     assert!(!s.editable());
     assert_eq!(s.notes()[0].code, NoteCode::Newer { version: 9 });
+}
+
+#[test]
+fn a_stored_field_refuses_a_layout_that_breaks_a_limit() {
+    let mut layout = defaults();
+    layout.placements.push(layout.placements[0].clone());
+    assert_eq!(
+        Stored::<Gadgets>::new(layout).map(|_| ()),
+        Err(WidgetError::DuplicateId("clock".into()))
+    );
 }

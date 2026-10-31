@@ -124,6 +124,15 @@ pub fn check_catalogue<C: Catalogue>() -> Result<(), String> {
     if s.noun.is_empty() {
         return Err("the surface needs a noun".into());
     }
+    if s.schema_version == 0 {
+        return Err("the schema version starts at 1".into());
+    }
+    if s.columns == 0 || s.max_bytes == 0 {
+        return Err("the surface needs columns and a size limit".into());
+    }
+    if s.min_placements > s.max_placements {
+        return Err("the fewest placements is above the most".into());
+    }
     if C::kinds().is_empty() {
         return Err("the catalogue has no kinds".into());
     }
@@ -160,14 +169,21 @@ pub fn check_catalogue<C: Catalogue>() -> Result<(), String> {
     if kept != defaults || defaults.len() < s.min_placements as usize {
         return Err("the defaults are not a valid layout".into());
     }
-    for p in C::presets() {
+    let presets = C::presets();
+    for (i, p) in presets.iter().enumerate() {
+        if presets[..i].iter().any(|o| o.id == p.id) {
+            return Err(format!("preset {} is listed twice", p.id));
+        }
+        if p.name.trim().is_empty() {
+            return Err(format!("preset {} needs a name", p.id));
+        }
         let kept = crate::check::keep_valid::<C>(
             p.placements.clone(),
             s.max_preset_placements as usize,
             Counted::PresetPlacements,
             &mut 0,
         );
-        if kept != p.placements {
+        if kept != p.placements || p.placements.len() < s.min_placements as usize {
             return Err(format!("preset {} is not a valid layout", p.id));
         }
     }
