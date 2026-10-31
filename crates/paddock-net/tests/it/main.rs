@@ -4,5 +4,6 @@
 mod policy;
 #[cfg(feature = "http")]
 mod real;
+mod slim;
 #[cfg(feature = "http")]
 mod support;

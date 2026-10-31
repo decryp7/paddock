@@ -6,6 +6,7 @@ use crate::discover::{Browser, Flavor};
 use crate::page::Page;
 use crate::process::Supervised;
 use crate::{Error, Result};
+use paddock_proc::{ExitInfo, Liveness, Pace, Patience, ProcessId, StallReport, StartProbe, StartState, StartWatch, Watched};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -41,8 +42,11 @@ pub struct LaunchOptions {
     pub profile: Profile,
     /// Window frame colour as `0xRRGGBB` (best effort; see [`theme_preferences`]).
     pub accent: Option<u32>,
-    /// The browser is ended after this long, whatever it does.
+    /// The browser is ended after this long, whatever it does; also the last-resort cap of its start.
     pub max_lifetime: Duration,
+    /// How the start is judged (ADR 0031): a start that is slow but alive is waited for; only a browser that exits,
+    /// spins without becoming ready or does nothing at all fails it. Elapsed time alone never does.
+    pub patience: Patience,
     /// Where its window opens; the browser's own choice when `None`.
     pub window: Option<WindowBounds>,
     /// A limit for the browser's disk cache (for a kept profile, so it does not grow without bound).
@@ -55,6 +59,7 @@ impl Default for LaunchOptions {
             profile: Profile::Throwaway,
             accent: None,
             max_lifetime: Duration::from_secs(30 * 60),
+            patience: Patience::default(),
             window: None,
             disk_cache_bytes: None,
         }
@@ -208,7 +213,6 @@ pub struct Chromium {
     dir: PathBuf,
     throwaway: bool,
     alive: Arc<AtomicBool>,
-    deadline: Instant,
     pub exe: Browser,
 }
 
@@ -258,43 +262,28 @@ impl Chromium {
                 return Err(Error::Launch(e.to_string()));
             }
         };
-        match connect(&dir, &mut process) {
-            Ok(conn) => {
-                let alive = Arc::new(AtomicBool::new(true));
-                let c = Chromium {
-                    conn: Arc::new(conn),
-                    process,
-                    dir,
-                    throwaway,
-                    alive: alive.clone(),
-                    deadline: Instant::now() + opts.max_lifetime,
-                    exe: exe.clone(),
-                };
-                c.watchdog(opts.max_lifetime);
-                Ok(c)
-            }
+        // The lifetime watchdog runs from the spawn, so it is also the last-resort cap of a start that never ends.
+        let alive = Arc::new(AtomicBool::new(true));
+        let timed_out = Arc::new(AtomicBool::new(false));
+        // The browser's identity, taken right after the spawn: the watchdog and the CPU readings go by it (ADR 0033).
+        let id = process.id().and_then(ProcessId::of);
+        watchdog(alive.clone(), timed_out.clone(), id, opts.max_lifetime);
+        match connect(&dir, &mut process, id, opts, &timed_out) {
+            Ok(conn) => Ok(Chromium {
+                conn: Arc::new(conn),
+                process,
+                dir,
+                throwaway,
+                alive,
+                exe: exe.clone(),
+            }),
             Err(e) => {
+                alive.store(false, Ordering::Release);
                 process.kill();
                 cleanup(&dir, throwaway);
                 Err(e)
             }
         }
-    }
-
-    /// A watchdog that ends the browser when its time is up, even if nobody calls it.
-    fn watchdog(&self, max: Duration) {
-        let (alive, pid) = (self.alive.clone(), self.process.id());
-        let end = self.deadline;
-        let _ = std::thread::Builder::new().name("chromium-watchdog".into()).spawn(move || {
-            while alive.load(Ordering::Acquire) {
-                if Instant::now() >= end {
-                    log::warn!("The browser reached its time limit ({max:?}) and is ended");
-                    kill_pid(pid);
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(250));
-            }
-        });
     }
 
     pub fn pid(&self) -> Option<u32> {
@@ -396,21 +385,25 @@ impl Drop for Chromium {
     }
 }
 
-#[cfg_attr(
-    unix,
-    expect(
-        clippy::disallowed_methods,
-        reason = "ADR 0033 WP-5: the watchdog killpg()s a pid captured at launch; move to paddock-chromium"
-    )
-)]
-fn kill_pid(pid: Option<u32>) {
-    #[cfg(unix)]
-    if let Some(p) = pid {
-        // SAFETY: the pid is our own child's group leader; a reused pid is guarded by the alive flag.
-        unsafe { libc::killpg(p as libc::pid_t, libc::SIGKILL) };
-    }
-    #[cfg(not(unix))]
-    let _ = pid;
+/// A watchdog that ends the browser's tree by identity ([`paddock_proc::kill_tree`], ADR 0033) when `max` has passed
+/// since its spawn, even if nobody calls it; it sets `timed_out` first, so a start it ended says why.
+fn watchdog(alive: Arc<AtomicBool>, timed_out: Arc<AtomicBool>, id: Option<ProcessId>, max: Duration) {
+    // cap: the browser's recorded lifetime (LaunchOptions::max_lifetime), the last resort that also bounds a start
+    let end = Instant::now() + max;
+    let _ = std::thread::Builder::new().name("chromium-watchdog".into()).spawn(move || {
+        while alive.load(Ordering::Acquire) {
+            if Instant::now() >= end {
+                log::warn!("The browser reached its time limit ({max:?}) and is ended");
+                timed_out.store(true, Ordering::Release);
+                if let Some(id) = id {
+                    paddock_proc::kill_tree(id);
+                }
+                return;
+            }
+            // pace: how often the watchdog looks; it bounds nothing
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    });
 }
 
 fn cleanup(dir: &Path, throwaway: bool) {
@@ -425,23 +418,150 @@ fn cleanup(dir: &Path, throwaway: bool) {
     }
 }
 
-/// Waits for the `DevToolsActivePort` file Chrome writes into the profile and connects to the browser endpoint.
-fn connect(dir: &Path, process: &mut Supervised) -> Result<Connection> {
-    let end = Instant::now() + Duration::from_secs(20);
-    loop {
-        if let Ok(s) = std::fs::read_to_string(dir.join("DevToolsActivePort")) {
-            let mut l = s.lines();
-            if let (Some(port), Some(path)) = (l.next().and_then(|p| p.trim().parse::<u16>().ok()), l.next()) {
-                return Connection::connect(port, path.trim());
+/// What the start judge looks at: the browser process, its `DevToolsActivePort` file and the endpoint it names.
+struct BrowserProbe<'a> {
+    dir: &'a Path,
+    process: &'a mut Supervised,
+    /// The browser's identity, taken right after the spawn, for its tree's CPU time (ADR 0033).
+    id: Option<ProcessId>,
+    conn: Option<Connection>,
+    /// The last refused or half-made handshake (the file can appear a moment before the endpoint takes connections).
+    refused: Option<Error>,
+    /// How many handshakes were refused.
+    refusals: u32,
+    /// A failure that is not worth trying again.
+    failed: Option<Error>,
+}
+
+impl StartProbe for BrowserProbe<'_> {
+    fn liveness(&mut self) -> Liveness {
+        if self.process.is_running() {
+            Liveness::Running
+        } else {
+            // The browser's output goes nowhere (a GUI program), so there is no tail to show.
+            Liveness::Exited(ExitInfo {
+                status: None,
+                stderr_tail: None,
+            })
+        }
+    }
+
+    fn ready(&mut self) -> bool {
+        if self.conn.is_some() || self.failed.is_some() {
+            return true;
+        }
+        let Ok(s) = std::fs::read_to_string(self.dir.join("DevToolsActivePort")) else {
+            return false;
+        };
+        let mut l = s.lines();
+        let (Some(port), Some(path)) = (l.next().and_then(|p| p.trim().parse::<u16>().ok()), l.next()) else {
+            return false;
+        };
+        match Connection::connect(port, path.trim()) {
+            Ok(c) => {
+                self.conn = Some(c);
+                true
+            }
+            Err(e @ Error::Connection(_)) => {
+                if self.refusals == 0 {
+                    log::debug!("The browser's DevTools endpoint refused the first handshake ({e}); trying again");
+                }
+                self.refusals = self.refusals.saturating_add(1);
+                self.refused = Some(e);
+                false
+            }
+            Err(e) => {
+                self.failed = Some(e);
+                true
             }
         }
-        if !process.is_running() {
-            return Err(Error::Launch("the browser exited right after it started".into()));
+    }
+
+    fn cpu_time(&mut self) -> Option<Duration> {
+        paddock_proc::tree_cpu_time(self.id?)
+    }
+}
+
+/// Waits one tick of the start watch on the real clock.
+struct Ticks;
+
+impl Pace for Ticks {
+    fn wait(&mut self, tick: Duration) -> bool {
+        // pace: the poll interval of the start watch (Patience::tick); it bounds nothing
+        std::thread::sleep(tick);
+        true
+    }
+}
+
+/// Why a judged start did not become ready.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StartFailure {
+    /// The process ended before its handshake.
+    Exited(ExitInfo),
+    /// The judge called it stuck: spinning without becoming ready, idle, or unobservable past the hang guard.
+    Stuck(StallReport),
+    /// The pace was cancelled.
+    Cancelled,
+}
+
+/// Drives the shared start judge (ADR 0031) over `probe` until the browser is ready, has exited or is stuck. A note
+/// ("still starting") is not a reason to give up; only a stuck browser is. Returns the probe for what it holds (the
+/// connection made at the handshake).
+fn judge_start<P: StartProbe, C: Pace>(patience: Patience, probe: P, pace: C) -> (std::result::Result<(), StartFailure>, P) {
+    let mut watch = StartWatch::new(patience, "the browser", probe, pace);
+    let outcome = loop {
+        match watch.wait() {
+            Watched::State(StartState::Ready) => break Ok(()),
+            Watched::State(StartState::Exited(info)) => break Err(StartFailure::Exited(info)),
+            Watched::State(StartState::Stalled(r)) if r.cause.is_stuck() => break Err(StartFailure::Stuck(r)),
+            Watched::State(StartState::Stalled(_) | StartState::Starting) => {}
+            Watched::Cancelled => break Err(StartFailure::Cancelled),
         }
-        if Instant::now() > end {
-            return Err(Error::Timeout("the browser start"));
-        }
-        std::thread::sleep(Duration::from_millis(50));
+    };
+    (outcome, watch.into_probe())
+}
+
+/// Waits for the `DevToolsActivePort` file Chrome writes into the profile and connects to the browser endpoint, judged on
+/// the browser's run state (ADR 0031) rather than on a fixed time: a start that is slow because the machine is busy is
+/// waited for; one that exits fails at once; one that is stuck fails after the patience. The lifetime watchdog
+/// (`opts.max_lifetime`) is the last-resort cap, and a start it ended says so.
+fn connect(
+    dir: &Path,
+    process: &mut Supervised,
+    id: Option<ProcessId>,
+    opts: &LaunchOptions,
+    timed_out: &AtomicBool,
+) -> Result<Connection> {
+    let probe = BrowserProbe {
+        dir,
+        process,
+        id,
+        conn: None,
+        refused: None,
+        refusals: 0,
+        failed: None,
+    };
+    let (outcome, probe) = judge_start(opts.patience, probe, Ticks);
+    match outcome {
+        Ok(()) => match (probe.conn, probe.failed) {
+            (Some(conn), _) => Ok(conn),
+            (None, Some(e)) => Err(e),
+            (None, None) => Err(Error::Closed),
+        },
+        Err(StartFailure::Exited(_)) if timed_out.load(Ordering::Acquire) => Err(Error::Launch(format!(
+            "the browser did not start within {} s (its time limit)",
+            opts.max_lifetime.as_secs()
+        ))),
+        Err(StartFailure::Exited(_)) => Err(Error::Launch("the browser exited right after it started".into())),
+        // The last refused handshake says more than the stall did.
+        Err(StartFailure::Stuck(report)) => Err(match probe.refused {
+            Some(Error::Connection(m)) => Error::Connection(format!(
+                "{m} (the browser's endpoint refused {} handshakes; {})",
+                probe.refusals, report.message
+            )),
+            _ => Error::Launch(report.message),
+        }),
+        Err(StartFailure::Cancelled) => Err(Error::Closed),
     }
 }
 
@@ -551,6 +671,250 @@ mod tests {
         assert_eq!(v["x"], 2);
         assert_eq!(v["browser"]["theme"]["user_color2"], 0xFF336699u32 as i32);
         assert_eq!(v["browser"]["theme"]["user_color"], v["browser"]["theme"]["user_color2"]);
+    }
+
+    /// A browser start played tick by tick: it runs (using a little CPU each tick) for `ready_after` ticks and then
+    /// answers its handshake, or exits after `exit_after` ticks; `cpu_step` is the CPU it uses per tick (0: idle).
+    struct ScriptedStart {
+        tick: u32,
+        ready_after: Option<u32>,
+        exit_after: Option<u32>,
+        cpu_step: Duration,
+    }
+
+    impl StartProbe for ScriptedStart {
+        fn liveness(&mut self) -> Liveness {
+            match self.exit_after {
+                Some(n) if self.tick >= n => Liveness::Exited(ExitInfo {
+                    status: Some(1),
+                    stderr_tail: None,
+                }),
+                _ => Liveness::Running,
+            }
+        }
+
+        fn ready(&mut self) -> bool {
+            self.ready_after.is_some_and(|n| self.tick >= n)
+        }
+
+        fn cpu_time(&mut self) -> Option<Duration> {
+            Some(self.cpu_step * self.tick)
+        }
+    }
+
+    /// The injected clock: every wait advances the probe's time by one tick at once (no real time passes) and counts it.
+    struct FakeClock<'a> {
+        probe_tick: &'a std::cell::Cell<u32>,
+        waited: Duration,
+    }
+
+    impl Pace for &mut FakeClock<'_> {
+        fn wait(&mut self, tick: Duration) -> bool {
+            self.probe_tick.set(self.probe_tick.get() + 1);
+            self.waited += tick;
+            true
+        }
+    }
+
+    /// Runs [`judge_start`] over a scripted start on the fake clock; answers the outcome and the time the browser was
+    /// given (in the clock's time, not the wall's).
+    fn judge(ready_after: Option<u32>, exit_after: Option<u32>, cpu_step: Duration) -> (std::result::Result<(), StartFailure>, Duration) {
+        // The probe reads its time from a cell the clock advances, so the two stay in step.
+        struct Shared<'a> {
+            script: ScriptedStart,
+            time: &'a std::cell::Cell<u32>,
+        }
+        impl StartProbe for Shared<'_> {
+            fn liveness(&mut self) -> Liveness {
+                self.script.tick = self.time.get();
+                self.script.liveness()
+            }
+            fn ready(&mut self) -> bool {
+                self.script.tick = self.time.get();
+                self.script.ready()
+            }
+            fn cpu_time(&mut self) -> Option<Duration> {
+                self.script.tick = self.time.get();
+                self.script.cpu_time()
+            }
+        }
+        let time = std::cell::Cell::new(0);
+        let mut clock = FakeClock {
+            probe_tick: &time,
+            waited: Duration::ZERO,
+        };
+        let probe = Shared {
+            script: ScriptedStart {
+                tick: 0,
+                ready_after,
+                exit_after,
+                cpu_step,
+            },
+            time: &time,
+        };
+        let (outcome, _) = judge_start(Patience::default(), probe, &mut clock);
+        (outcome, clock.waited)
+    }
+
+    /// The flake of CI runs 7213, 7250 and the one after: on a loaded runner a real browser took longer than a fixed
+    /// 20 s to write its `DevToolsActivePort` and the launch failed with `Timeout("the browser start")` while the
+    /// browser was working. A start that keeps using CPU is waited for however long it takes (ADR 0031).
+    #[test]
+    fn a_slow_start_that_makes_progress_is_not_failed() {
+        let tick = Patience::default().tick;
+        // 45 s on the clock (three times the old limit's worth of margin), using CPU all along, then ready.
+        let ticks = u32::try_from(Duration::from_secs(45).as_millis() / tick.as_millis()).unwrap();
+        let (outcome, waited) = judge(Some(ticks), None, Duration::from_millis(5));
+        assert_eq!(outcome, Ok(()), "a working start is not failed after {waited:?}");
+        assert!(waited >= Duration::from_secs(45), "{waited:?}");
+    }
+
+    #[test]
+    fn a_start_that_dies_fails_at_once() {
+        let (outcome, waited) = judge(None, Some(3), Duration::from_millis(5));
+        assert!(matches!(outcome, Err(StartFailure::Exited(_))), "{outcome:?}");
+        assert!(waited <= Patience::default().tick * 3, "no waiting after the exit: {waited:?}");
+    }
+
+    #[test]
+    fn a_start_that_does_nothing_is_stuck_after_the_idle_patience_not_a_fixed_limit() {
+        let p = Patience::default();
+        let (outcome, waited) = judge(None, None, Duration::ZERO);
+        match outcome {
+            Err(StartFailure::Stuck(r)) => assert!(matches!(r.cause, paddock_proc::StallCause::Idle(_)), "{r:?}"),
+            other => panic!("expected an idle stall, got {other:?}"),
+        }
+        assert!(waited >= p.idle, "{waited:?}");
+        assert!(
+            waited < p.idle + p.tick * (p.cpu_every * 2),
+            "bounded by the idle patience: {waited:?}"
+        );
+    }
+
+    /// The real launch path, with a "browser" that exits at once: it fails fast and says so.
+    #[cfg(unix)]
+    #[test]
+    fn a_browser_that_exits_at_launch_fails_fast_with_a_launch_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let exe = d.path().join("dies.sh");
+        std::fs::write(&exe, "#!/bin/sh\nexit 3\n").unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let browser = Browser {
+            flavor: crate::Flavor::Chromium,
+            path: exe,
+        };
+        let e = Chromium::launch(&browser, &LaunchOptions::default())
+            .err()
+            .expect("a dead browser fails");
+        assert!(matches!(&e, Error::Launch(m) if m.contains("exited")), "{e:?}");
+    }
+
+    /// A process that stays alive doing nothing: a browser that never answers.
+    #[cfg(unix)]
+    #[allow(clippy::disallowed_methods, reason = "the test starts its own `sleep` child")]
+    fn idle_child() -> Supervised {
+        let mut cmd = std::process::Command::new("sleep");
+        cmd.arg("3600");
+        Supervised::spawn(cmd).unwrap()
+    }
+
+    #[cfg(unix)]
+    fn probe<'a>(dir: &'a Path, process: &'a mut Supervised) -> BrowserProbe<'a> {
+        let id = process.id().and_then(ProcessId::of);
+        BrowserProbe {
+            dir,
+            process,
+            id,
+            conn: None,
+            refused: None,
+            refusals: 0,
+            failed: None,
+        }
+    }
+
+    /// A `DevToolsActivePort` that names a port nobody listens on is a refused handshake: not ready, tried again, and named
+    /// (with the count) when the start is given up as stuck.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_endpoint_is_retried_and_named_when_the_start_is_given_up() {
+        let d = tempfile::tempdir().unwrap();
+        // conformance: freed-port — refusal is the case under test; if the port were taken, the endpoint would answer and the assert fails
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        std::fs::write(d.path().join("DevToolsActivePort"), format!("{closed}\n/devtools/browser/x\n")).unwrap();
+        let mut process = idle_child();
+        {
+            let mut p = probe(d.path(), &mut process);
+            assert!(!p.ready(), "a refused handshake is not ready");
+            assert!(matches!(p.refused, Some(Error::Connection(_))), "{:?}", p.refused);
+            assert!(p.failed.is_none(), "a refusal is tried again, not a failure");
+            assert_eq!(p.refusals, 1);
+        }
+        let id = process.id().and_then(ProcessId::of);
+        let opts = LaunchOptions {
+            patience: Patience {
+                idle: Duration::from_millis(300),
+                tick: Duration::from_millis(10),
+                cpu_every: 2,
+                ..Patience::default()
+            },
+            ..LaunchOptions::default()
+        };
+        let e = connect(d.path(), &mut process, id, &opts, &AtomicBool::new(false))
+            .err()
+            .expect("an endpoint that keeps refusing is given up");
+        assert!(
+            matches!(&e, Error::Connection(m) if m.contains("refused") && !m.contains("refused 0 ")),
+            "the refused handshake is named: {e:?}"
+        );
+        process.kill();
+    }
+
+    /// The lifetime watchdog runs from the spawn, so it also ends a start that never becomes ready, and the error says so.
+    #[cfg(unix)]
+    #[test]
+    fn a_start_that_outlasts_the_lifetime_is_ended_and_names_the_time_limit() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let exe = d.path().join("never-ready.sh");
+        std::fs::write(&exe, "#!/bin/sh\nexec sleep 3600\n").unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let browser = Browser {
+            flavor: crate::Flavor::Chromium,
+            path: exe,
+        };
+        let opts = LaunchOptions {
+            max_lifetime: Duration::from_millis(300),
+            ..LaunchOptions::default()
+        };
+        let e = Chromium::launch(&browser, &opts).err().expect("the watchdog ends the start");
+        assert!(matches!(&e, Error::Launch(m) if m.contains("time limit")), "{e:?}");
+    }
+
+    /// The probe reads the CPU time of the browser's tree by its identity, and it grows while the browser works.
+    #[cfg(unix)]
+    #[test]
+    #[allow(clippy::disallowed_methods, reason = "the test starts its own busy `sh` child")]
+    fn the_probe_reads_a_working_browser_s_cpu_time_and_it_grows() {
+        let d = tempfile::tempdir().unwrap();
+        let mut cmd = std::process::Command::new("sh");
+        cmd.args(["-c", "while :; do :; done"]);
+        let mut process = Supervised::spawn(cmd).unwrap();
+        {
+            let mut p = probe(d.path(), &mut process);
+            let first = p.cpu_time().expect("the OS reads the tree's CPU time");
+            // conformance: hang-guard — waits on the condition; only a child that never runs reaches it
+            let end = Instant::now() + Duration::from_secs(30);
+            loop {
+                let now = p.cpu_time().expect("the OS reads the tree's CPU time");
+                if now > first {
+                    break;
+                }
+                assert!(Instant::now() < end, "the CPU time of a busy child did not grow");
+                std::thread::yield_now();
+            }
+        }
+        process.kill();
     }
 
     /// Not a test: the fake browser process re-runs this binary on this function (see [`crate::fake`]).

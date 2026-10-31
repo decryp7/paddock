@@ -44,6 +44,8 @@ export interface MemoryChannelsOptions {
 }
 
 const LOCAL = /^(localhost|127(\.\d{1,3}){3}|\[?::1\]?|.+\.localhost)$/i;
+// A private address or a name spelled like a home-network host (the engine's `host_may_be_lan`): single label, .local, .lan, .home.arpa, .internal, .localdomain.
+const HOME = /^(10(\.\d{1,3}){3}|192\.168(\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])(\.\d{1,3}){2}|\[?f[cd][0-9a-f:]*\]?|[^.:]+|.+\.(local|lan|home\.arpa|internal|localdomain))$/i;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function hostOf(url: string): string | null {
@@ -54,11 +56,17 @@ function hostOf(url: string): string | null {
   }
 }
 
-function urlProblem(label: string, url: string): string | null {
+function urlProblem(label: string, url: string, allowLan: boolean): string | null {
   const host = hostOf(url);
   const scheme = /^(https?):\/\//i.exec(url)?.[1]?.toLowerCase();
   if (!host || !scheme) return `${label} is not a web address.`;
-  if (scheme === 'http' && !LOCAL.test(host)) return `${label} must start with https:// (http:// is only allowed for this computer).`;
+  const home = HOME.test(host) && !LOCAL.test(host);
+  if (scheme === 'http' && !LOCAL.test(host)) {
+    if (!allowLan) return `${label} must start with https:// (http:// is only allowed for this computer, or for your home network when you turn on "This channel is on my home network").`;
+    if (!home) return `${label} must start with https:// (http:// is only allowed for this computer or an address on your home network).`;
+  } else if (home && !allowLan) {
+    return `${label} is a private network address; turn on "This channel is on my home network" to use it.`;
+  }
   return null;
 }
 
@@ -71,16 +79,17 @@ function channelProblem(c: ChannelConfig): string | null {
   const t = c.transport;
   switch (t.type) {
     case 'webhook': {
-      const p = urlProblem('The address', t.url);
+      const p = urlProblem('The address', t.url, c.allowLan);
       return p ? `${name}: ${p}` : null;
     }
     case 'ntfy': {
-      const p = urlProblem('The server', t.server);
+      const p = urlProblem('The server', t.server, c.allowLan);
       if (p) return `${name}: ${p}`;
       return NTFY_TOPIC_PATTERN.test(t.topic) ? null : `${name}: the topic may only use letters, digits, hyphens and underscores (1 to 64).`;
     }
     case 'email':
       if (!t.host.trim()) return `${name}: the mail server is missing.`;
+      if (!c.allowLan && HOME.test(t.host.trim()) && !LOCAL.test(t.host.trim())) return `${name}: the mail server is a private network address; turn on "This channel is on my home network" to use it.`;
       if (!Number.isInteger(t.port) || t.port < 1 || t.port > 65535) return `${name}: the port must be between 1 and 65535.`;
       if (!EMAIL.test(t.from)) return `${name}: the sender is not an email address.`;
       if (t.to.length === 0) return `${name}: add at least one recipient.`;

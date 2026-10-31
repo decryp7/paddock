@@ -341,5 +341,5 @@ export class PdSettingsWindow implements DialogContent {
   }
 
   /** The footer's status line: the last change's notice, else how saving works (the frame draws it beside Close; ADR 0026 §2). */
-  readonly dialogStatus = computed(() => this.store.notice() ?? this.t.savedLive);
+  readonly dialogStatus = computed(() => this.store.notice() ?? (!this.searching() && this.current()?.page?.autosaves === false ? null : this.t.savedLive));
 }

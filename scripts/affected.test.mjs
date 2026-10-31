@@ -551,7 +551,7 @@ describe('matrix legs', () => {
     const [leg] = matrix(run('apps/shell-demo/src-tauri/src/lib.rs'), graph);
     assert.equal(leg.app, 'shell-demo');
     assert.equal(leg.cargo, 'apps/shell-demo/src-tauri');
-    assert.equal(leg.nextest_config, 'crates/.config/nextest.toml');
+    assert.equal(leg.nextest_config, 'crates/.config/nextest-demos.toml');
     assert.match(leg.prepare, /npm run shell-demo:build -w ui/);
     assert.match(leg.checks, /demo-release\.mjs shell-demo version/);
     assert.deepEqual([leg.rust, leg.ui, leg.filter], [true, false, '']);
@@ -695,6 +695,26 @@ describe('contracts', () => {
       if (app.cargo) assert.ok(existsSync(join(ROOT, app.dir, app.cargo, 'Cargo.toml')), `${d.name}: cargo folder ${app.cargo} has no Cargo.toml`);
       if (app.nextestConfig) assert.ok(existsSync(join(ROOT, app.nextestConfig)), `${d.name}: ${app.nextestConfig} is missing`);
       for (const k of ['prepare', 'checks', 'ui']) assert.ok(Array.isArray(app[k] ?? []), `${d.name}: ${k} is a list of commands`);
+    }
+  });
+
+  // Regression (CI 7277): the demos ran the crates' nextest config, whose override names paddock-chromium, a package the demo
+  // workspaces do not have; nextest refuses a filter that matches no package, so both demo legs failed before running a test.
+  test("a leg's nextest config names only packages of that leg's Cargo workspace, in CI's leg and in the app's release workflow", () => {
+    for (const d of readdirSync(join(ROOT, 'apps'), { withFileTypes: true }).filter((e) => e.isDirectory())) {
+      const app = graph.apps.get(d.name);
+      if (!app?.nextestConfig || !app.cargo || !tracked.some((f) => f.startsWith(`apps/${d.name}/`))) continue;
+      const lock = readFileSync(join(ROOT, app.dir, app.cargo, 'Cargo.lock'), 'utf8');
+      const members = new Set([...lock.matchAll(/^name = "([^"]+)"$/gm)].map((m) => m[1]));
+      const config = readFileSync(join(ROOT, app.nextestConfig), 'utf8');
+      for (const [, name] of config.matchAll(/package\(([^)]+)\)/g)) {
+        assert.ok(members.has(name), `${d.name}: ${app.nextestConfig} names package ${name}, which its Cargo workspace does not have`);
+      }
+      const release = join(ROOT, '.gitea', 'workflows', `${d.name}-release.yml`);
+      if (existsSync(release)) {
+        const used = [...readFileSync(release, 'utf8').matchAll(/--config-file (\S+nextest[^\s]*\.toml)/g)].map((m) => m[1].replace(/^(\.\.\/)+/, ''));
+        for (const file of used) assert.equal(file, app.nextestConfig, `${d.name}-release.yml runs a different nextest config than its CI leg`);
+      }
     }
   });
 

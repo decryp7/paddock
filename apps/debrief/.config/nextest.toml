@@ -18,6 +18,10 @@ child-processes = { max-threads = 1 }
 # the rest of the workspace fills the other threads. The filter is the whole binary, so a new test there joins the group
 # without a list to update (conformance/test/ci-actions.test.mjs checks it).
 app-plugin-processes = { max-threads = 6 }
+# chromium-driver's real-browser tests (tests/it/real_browser.rs) take turns: two Chrome for Testing cold starts side by side,
+# beside the heavy suites, starved each other on the loaded Mac runner (CI 7213, 7250 and the run after). The start itself is
+# judged on the browser's run state (ADR 0031); the group keeps them from competing with each other.
+real-browser = { max-threads = 1 }
 
 [profile.default]
 # One test per core but one (Paddock rule 13), so a full run leaves the machine usable.
@@ -40,6 +44,10 @@ filter = '''
 '''
 test-group = 'child-processes'
 retries = 2
+
+[[profile.default.overrides]]
+filter = 'package(chromium-driver) & binary(it) & test(/^real_browser::/)'
+test-group = 'real-browser'
 
 [[profile.default.overrides]]
 filter = 'package(debrief-app) & kind(lib)'
@@ -68,14 +76,14 @@ path = "junit.xml"
 filter = 'all()'
 retries = 0
 
-# waiver: the query-language properties generate whole workspaces per case (95-99 s on the Linux runner, 115 s on the Mac
-# host in CI 6381); fewer cases would weaken them.
-[[profile.ci.overrides]]
-filter = "package(debrief-core) & binary(it) & test(/^properties::/)"
-slow-timeout = { period = "30s", terminate-after = 6 }
-
 # waiver: the DuckDB store answers every query and analysis of the sample workspaces like the reference engine, one profile
 # per test (47-81 s in CI 6381), and the large-folder import measures progress over a generated folder of many files (89 s).
 [[profile.ci.overrides]]
 filter = "package(debrief-store-duck) & binary(it) & (test(/^differential::answers_like_the_workspace_/) | test(/^analysis::analyses_match_the_workspace_/) | test(/^large_folder::/))"
+slow-timeout = { period = "30s", terminate-after = 6 }
+
+# waiver: a real browser's start is judged on its run state (ADR 0031): a working start on a loaded runner is waited for, and
+# only a stuck one fails, after up to 120 s of CPU without becoming ready (the spin patience); 90 s would stop the test first.
+[[profile.ci.overrides]]
+filter = "package(chromium-driver) & binary(it) & test(/^real_browser::/)"
 slow-timeout = { period = "30s", terminate-after = 6 }

@@ -1,4 +1,5 @@
 import { defineDialog, defineSettingsPage, msg, type, type ContributionBatch, type DialogDef, type ProvidersLoader, type SettingsPageDef } from '@decryp7/paddock-ui/shell';
+import { CHANNEL_EVENTS, type ChannelEventDecl } from './events';
 import type { ChannelsCommand } from '../generated/channels-commands';
 import { DIALOG_CONTRACTS } from '../generated/dialog-contracts';
 
@@ -26,16 +27,24 @@ export interface ChannelsSettingsPageOptions {
   readonly providers: ProvidersLoader;
   /** The page's component: `() => import('@decryp7/paddock-ui/shell/channels/page').then((m) => m.PdChannelsPage)`. */
   readonly load: NonNullable<SettingsPageDef['load']>;
+  /**
+   * The events this app sends, with a label, a group and a description each. The page then shows grouped checkboxes; names a channel
+   * already has that are not listed stay under "Other events". Leave it out to keep the free-text field only.
+   */
+  readonly events?: readonly ChannelEventDecl[];
 }
 
 /** The Notification channels page of the Settings window. */
 export function defineChannelsSettingsPage(options: ChannelsSettingsPageOptions): SettingsPageDef {
+  const events = options.events ?? [];
   return defineSettingsPage({
     id: CHANNELS_SETTINGS_PAGE,
     group: 'application',
     title: msg('pd.settings.channels', 'Notification channels'),
     order: 85,
-    providers: options.providers,
+    // The page has its own Save button for the channel being edited: the Settings footer must not claim changes are live.
+    autosaves: false,
+    providers: events.length === 0 ? options.providers : async () => [...(await options.providers()), { provide: CHANNEL_EVENTS, useValue: events }],
     load: options.load,
   });
 }

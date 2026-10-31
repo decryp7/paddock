@@ -7,6 +7,63 @@ Conventional Commits; one semver tag for the whole repo.
 ### `DialogFrame`: `contentView`, so a dialog's header, footer and body never show different steps (`@decryp7/paddock-ui/shell/dialogs`)
 - New optional input `contentView` on `DialogFrame` (the mounted content's change detector; `DialogShell` and `DialogHost` set it). `render()` now checks the content together with the frame. Before, a `run` action that changed the content's state (a wizard's Continue) refreshed the header slot and the footer at once while the body, which sits in the host's view, followed on the next tick: for one frame the stepper and the buttons showed the new step over the old, taller body (Pitcrew's register window overflowed its body by 165 px).
 
+### Channels page and Settings footer: labels, host display, family look, switch, `autosaves`
+- `ChannelEventDecl.label` is required (sentence case); the picker and the table's Events column show it, the id only for an event the app did not declare.
+- The Name column shows the host (`hooks.example.com`, `ntfy.sh/topic`) with the whole address as tooltip and accessible name; Events is wider.
+- The page sits in a card with the family's control height and shape; the home-network control is a switch with its help text aligned; "Other events" is behind Show advanced (names a channel already has stay visible).
+- `SettingsPageDef.autosaves` (default true). A page with its own Save button declares `false` and the Settings footer then omits "Changes are saved as you make them."; the channels page does.
+### `paddock-net`: a public-address limit for `check_host`, and no TLS stack without the `http` feature (additive)
+- `PublicAccess::{Policy, Deny}` and `Egress::check_host_with(host, port, lan, public)`: with `Deny` a name that resolves to any
+  public address is refused (`Refusal::TooFar(Class::Public)`, "the name points at a public address"), so a connection that is
+  not encrypted (Sighter's VNC client) reaches this computer and private networks only. `check_host` is `check_host_with(..,
+  PublicAccess::Policy)`: no change for existing callers.
+- The workspace entry for `paddock-download` has no default features; `paddock-net`'s own `http` feature (on by default) enables
+  `paddock-download/http`, and `paddock-updater` (feature `tauri`) and `paddock-shell` enable it themselves, so they build as
+  before. An app that takes `paddock-net` with `default-features = false` for the address classes, `Lookup` and `check_host`
+  compiles neither ureq nor rustls; `paddock-net/tests/it/slim.rs` checks the graph. Apps with their own path dependency on
+  `paddock-download` are unchanged.
+
+### `paddock-channels`, `paddock-net` and the channels page: a home-network switch and a grouped event picker (additive)
+- `ChannelConfig.allow_lan: bool` (wire `allowLan`, serde default false, so files and engines from before it load unchanged), for
+  a webhook, an ntfy server and an e-mail channel's SMTP host. With it on, validation accepts a private address (`paddock_net::host_may_be_lan`: an IP literal that `classify` calls `Lan`, or a
+  single-label / `.local` / `.lan` / `.home.arpa` / `.internal` / `.localdomain` name) and plain `http://` to it; with it off,
+  such an address is refused (https too) and plain http stays for this computer only. Link-local (169.254/16, fe80::/10) stays
+  unreachable: `paddock-net` classifies it `Never`. `PostRequest` has a new `lan` field; `EgressPoster` sends a `lan` channel
+  with `Request::plain_http_on_lan()` and any other with `Request::without_lan()`, so one egress built with
+  `channel_policy(Reach::Lan)` serves both and only the switched channels reach private networks. Offline mode still blocks
+  every channel.
+- `paddock-net`: `Request::without_lan()`, `Request::plain_http_on_lan()` (opt-in per request; a policy without `Reach::Lan`
+  ignores the second), `host_may_be_lan`, and `Seen::reach` on `FakeWire`. Both are one `LanAccess` value (`Policy`, `Deny`,
+  `PlainHttp`) on `Request::lan` and `WireRequest::lan`, which `UreqWire`'s connect-time guard applies to the very addresses it
+  connects to (`PlainHttp` needs every address private, so a name that also answers with a public address, or answers
+  differently the second time, is refused). `classify` now reads NAT64 (`64:ff9b::/96`, `64:ff9b:1::/48`), IPv4-compatible
+  (`::a.b.c.d`) and 6to4 (`2002::/16`) addresses by the IPv4 inside, and calls site-local `fec0::/10` never reachable. Settings
+  validation parses addresses with the `url` crate, as the network layer does. Existing requests behave as before.
+- E-mail now goes through the outbound policy (it ignored Offline mode and reach before). **Breaking, before v1:**
+  `LettreSender` is no longer a unit struct: `LettreSender::new(egress)` takes the app's `Egress` (the one built with
+  `channel_policy(..)`), and `MailRequest` has a `lan` field. Before connecting, `LettreSender` calls the new
+  `Egress::check_host(host, port, lan)`: Offline refuses with nothing resolved or connected, the allow-list applies, every resolved
+  address is checked against the reach (a private SMTP server needs `allow_lan`; link-local and metadata never), and the socket is
+  opened to the checked address (the TLS name stays the host), so a name cannot rebind. Offline and policy refusals are
+  `SendError::Invalid` (not retried). Validation also refuses a private SMTP host without the switch, and the page shows the
+  switch for e-mail again.
+- `@decryp7/paddock-ui/shell/channels`: `ChannelConfig.allowLan` (generated; `parseChannel` reads a missing value as false), the
+  draft's `allowLan`, and on the page a checkbox "This channel is on my home network (allow a private address)" with helper text.
+- `defineChannelsSettingsPage({ events })` takes the app's `ChannelEventDecl[]` (`name`, `group`, `description`; also the
+  `CHANNEL_EVENTS` token, `groupEvents`, `unknownEvents`, `toggleEvent`). The page then lists grouped checkboxes (a fieldset
+  per group, the description as help text); names a channel has that are not declared show under "Other events" as removable
+  chips and are never dropped, and a name can still be typed there. An app that declares no events keeps the free-text field
+  exactly as before. The shell demo declares events and shows both.
+### `paddock-proc`: a stopped process is waited for, not called idle (ADR 0031)
+- New `RunState { Running, Stopped, Exited, Unknown }` and `run_state(ProcessId) -> RunState`, identity-checked (a pid handed on is
+  `Exited`): macOS reads `pbi_status == SSTOP` from the `proc_pidinfo` call that also gives the CPU time, Linux `/proc/<pid>/stat`
+  field 3 (`T`, `t`), Windows says `Unknown`. `CpuSample` has a new `stopped: Option<bool>` from the same call.
+- `StartProbe` has default methods `pid() -> Option<ProcessId>` (None) and `run_state()`; a probe that names its process now gets
+  `Liveness::Paused` from `StartWatch` while it is stopped (SIGSTOP, App Tamer). New `liveness_of(id, exited)` for users of
+  `StartJudge` that build their own readings. Before, nothing produced `Paused`: a stopped child showed no CPU, became
+  `StallCause::Idle` (stuck) and was killed or offered a Retry that killed it.
+- New `StallCause::Paused` (not stuck, `StallAction::Wait`): "{what} is paused by macOS or another app; it goes on when it is
+  resumed." The judge says it once per pause; no tick counts and nothing resets while paused.
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.

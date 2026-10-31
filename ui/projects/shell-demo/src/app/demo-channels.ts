@@ -7,8 +7,9 @@ const SLACK: ChannelConfig = {
   id: 'slack',
   name: 'Team Slack',
   enabled: true,
-  events: ['diskLow', 'jobFailed', 'serviceDown'],
+  events: ['diskLow', 'jobFailed', 'oldAlarm'],
   minSeverity: 'warning',
+  allowLan: false,
   transport: { type: 'webhook', url: 'https://hooks.example.com/services/T0000/B0000/a-rather-long-secret-looking-path-segment-0123456789', auth: true },
 };
 const PHONE: ChannelConfig = {
@@ -17,6 +18,7 @@ const PHONE: ChannelConfig = {
   enabled: true,
   events: ['diskLow'],
   minSeverity: 'error',
+  allowLan: false,
   transport: { type: 'ntfy', server: 'https://ntfy.sh', topic: 'demo_alerts', auth: false },
 };
 const MAIL: ChannelConfig = {
@@ -25,6 +27,7 @@ const MAIL: ChannelConfig = {
   enabled: false,
   events: [],
   minSeverity: 'info',
+  allowLan: false,
   transport: { type: 'email', host: 'smtp.example.com', port: 587, security: 'startTls', username: 'ops', from: 'demo@example.com', to: ['ops@example.com'] },
 };
 

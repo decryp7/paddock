@@ -128,7 +128,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-siblings` | hand-off between the family's apps: the apps and what each accepts (`docs/ecosystem.md`), a typed `Handoff` (open, import files, show an item), discovery of an installed sibling per OS, starting it detached with paths or a deep link, plain "not installed" and "needs update" answers, the receiving side's parsers (plan X45; from Pitcrew's `debrief_link.rs` and `handoff.rs`) | yes (Pitcrew, Dyno, Debrief, Spotter); built |
 | `paddock-names` | identifier search (rule 20): word segmentation, name normalisation (`Path` and `Text` styles), grouping of spellings, ranked and explained matching of parts, joins, separators, case, plurals, filler words, word order and typos, clarifying question on a true tie (plan X18; from Debrief `names/` and Dyno's counter search) | yes (Debrief, Dyno; Pitwall, Spotter, Pacenotes later); built |
 | `paddock-channels` | outbound notification channels: webhook, ntfy and e-mail (STARTTLS, TLS, none), secrets from `paddock-secrets` (scope `channel:<id>`), bounded payloads, retries with the family's back-off on an injected clock, test send before and after saving; ports `HttpPoster`/`MailSender` with real adapters and in-process fakes (plan X17) | yes (Pitcrew, Spotter; Dyno, Debrief later); built |
-| `paddock-net` | outbound HTTP policy: one `Egress` door with https only (plain http to this computer), reach limits (public / LAN / loopback) checked on every address and redirect hop and on the addresses the socket connects to, link-local/metadata never reachable, body and redirect caps, host allow-list, offline switch, per-host gap, conditional requests; `Wire`/`Lookup` ports, `UreqWire` on paddock-download's TLS and proxy set-up with connection reuse, fakes, `paddock_download::Transport` adapter (plan X16) | yes (Pitwall, Spotter, Pitcrew, Debrief, channels); built |
+| `paddock-net` | outbound HTTP policy: one `Egress` door with https only (plain http to this computer), reach limits (public / LAN / loopback) checked on every address and redirect hop and on the addresses the socket connects to, link-local/metadata never reachable, body and redirect caps, host allow-list, offline switch, per-host gap, conditional requests; `Wire`/`Lookup` ports, `Egress::check_host`/`check_host_with` (the door for connections that are not HTTP; `PublicAccess::Deny` leaves this computer and private networks only), a slim build (`default-features = false`: address classes, `Lookup`, `check_host`, no ureq or rustls), `UreqWire` on paddock-download's TLS and proxy set-up with connection reuse, fakes, `paddock_download::Transport` adapter (plan X16) | yes (Pitwall, Spotter, Pitcrew, Debrief, channels); built |
 | `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
 | `paddock-panels` | pop-out panel windows, drag ghost, UI-state forwarding (X50 W3) | yes |
@@ -970,7 +970,7 @@ use paddock_net::{Egress, Reach};
 
 let egress = app_egress;                                 // paddock-net Egress built with channel_policy(Reach::Lan)
 settings.validate()?;                                    // on Save: the message says what to fix; at most 8 channels
-let d = Dispatcher::new(settings, secrets, Arc::new(EgressPoster::new(egress)), Arc::new(LettreSender), Arc::new(SystemClock));
+let d = Dispatcher::new(settings, secrets, Arc::new(EgressPoster::new(egress.clone())), Arc::new(LettreSender::new(egress)), Arc::new(SystemClock));
 let msg = Message::new("diskLow", Severity::Error, "Disk low", "C: has 2 GB left", "runner-1");
 let deliveries = d.dispatch(&msg, &cancel);              // blocks: run it in a job; one Delivery per channel, in order
 let test = d.test_with(&draft, Some(&typed_password), "Spotter", &cancel);   // "Send test" before Save; d.test(id, ..) after
@@ -988,6 +988,18 @@ let test = d.test_with(&draft, Some(&typed_password), "Spotter", &cancel);   // 
   `@decryp7/paddock-ui/shell/channels`.
 - Network: `EgressPoster` over `paddock-net` (https only, plain http to this computer with `Reach::Loopback`, offline mode,
   connection reuse, no redirects, the answer's body never read).
+- Home network (`ChannelConfig::allow_lan`, wire `allowLan`, default false): validation accepts a private address, and plain http
+  to one, only with the switch, for a webhook URL, an ntfy server and an SMTP host alike. `EgressPoster` marks each HTTP request
+  (`Request::plain_http_on_lan()` or `Request::without_lan()`), so one egress built with `channel_policy(Reach::Lan)` lets only
+  switched channels reach private networks. Plain http needs every address the name resolves to to be private, checked before the
+  hop and again on the connect-time addresses.
+- E-mail obeys the same policy: `LettreSender::new(egress)` asks `Egress::check_host` first (Offline mode refuses with nothing
+  resolved or connected; the host must be public, or private only for an `allow_lan` channel within the policy's reach; every
+  address is checked), then connects to the checked address, not to the name again (lettre takes an address string, and the
+  `TlsParameters` keep the host name for the certificate), so a name cannot rebind. A failed connect tries the next checked address. A relay on this computer (`localhost`, 127.x) is judged by the same reach, so an
+  app that wants one builds its egress with `channel_policy(Reach::Loopback)`; with `Reach::Lan` or `Reach::Public` such a server
+  is refused at send time with a message that names the host (validation accepts `localhost`, as it does for webhooks, because
+  the policy is the app's and validation does not know it).
 - Retries: transient failures only (no connection, timeout, HTTP 408/425/429/5xx, a 4xx mail reply), at most 3 attempts by default
   (`RetryPolicy`, 5 at most), waits from `paddock_jobs::time::Backoff` (2 s doubling to 30 s), a server's `Retry-After` honoured up
   to that cap, every wait cancellable and on the injected `Clock` (tests use `FakeClock`). A bad configuration, a missing secret,
@@ -1240,6 +1252,14 @@ let transport = egress.download_transport();                               // th
   `stream` returns the unread body for downloads (no whole-request limit; `body_timeout` between chunks).
 - Politeness: `min_gap` between two requests to one host on the injected clock, cancellable. `Retry-After` is read with
   `Response::retry_after`; retrying is the caller's (`paddock-channels`, the downloader).
+- Connections that are not HTTP (SMTP, VNC) use the same door: `egress.check_host(host, port, LanAccess)` or
+  `check_host_with(host, port, LanAccess, PublicAccess)`. Offline first, then the allow-list, then every resolved address
+  against the reach; `PublicAccess::Deny` also refuses a name with any public address (for protocols that are not encrypted:
+  this computer and private networks only). Connect to the **returned** addresses, never to the name again.
+- Slim build: `paddock-net = { ..., default-features = false }` has the address classes, `Lookup`, `StaticLookup` and
+  `check_host` but no `UreqWire`, `ureq` or `rustls` (`paddock-download` is taken without its `http` feature; the workspace
+  entry has no default features, so a member that runs real downloads enables `http` itself, as `paddock-updater` and
+  `paddock-shell` do). `tests/it/slim.rs` checks the graph with `cargo tree`.
 - Tests use `FakeWire` (scripted, records, counts sockets) and `StaticLookup`; the real wire is tested against a loopback server.
 - Name checks resolve through the system resolver before each hop; behind a proxy that resolves names itself (internal-only
   names), pass a `Lookup` that answers from the proxy's policy instead.
