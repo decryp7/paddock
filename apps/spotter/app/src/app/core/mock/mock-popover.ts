@@ -16,13 +16,17 @@ const KINDS: KindInfo<PopoverWidget>[] = [
   { kind: 'notifications', title: 'Notifications', summary: 'Whether notifications are on, paused or off', icon: 'sp:bell', spans: [1, 2], maxInstances: 1, refresh: 'onChange' },
 ];
 const MAX = 6;
-const DEFAULTS: [number, PopoverWidget][] = [
+/** Rows Recent changes and Failures list (the engine's `CHANGE_ROWS` and `FAILURE_ROWS`): one change and two failures keep the default popup within the family's 520 px. */
+const CHANGE_ROWS = 1;
+const FAILURE_ROWS = 2;
+/** The popup a fresh install shows (the Rust defaults, `PopoverCatalogue::defaults`): is everything fine, and what is next. */
+export const DEFAULTS: [number, PopoverWidget][] = [
   [2, 'recentChanges'],
-  [2, 'watchedSites'],
   [2, 'failures'],
-  [1, 'nextCheck'],
-  [1, 'notifications'],
+  [2, 'nextCheck'],
 ];
+/** The kinds of [`DEFAULTS`], in order: specs read the default popup from here, never a hand-written list. */
+export const DEFAULT_KINDS: PopoverWidget[] = DEFAULTS.map(([, kind]) => kind);
 
 function refused(message: string): CommandError {
   return { code: 'badRequest', message, problems: [] };
@@ -31,7 +35,12 @@ function refused(message: string): CommandError {
 const place = (widget: PopoverWidget, span: number): Placement<PopoverWidget> => ({ id: widget.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`), span, widget });
 
 export class MockPopover {
-  private placements: Placement<PopoverWidget>[] = DEFAULTS.map(([span, w]) => place(w, span));
+  /** `shown`: the kinds to start with (a spec that needs particular widgets names them); the default is the fresh-install popup. */
+  constructor(shown: readonly PopoverWidget[] = DEFAULT_KINDS) {
+    this.placements = shown.map((kind) => place(kind, DEFAULTS.find(([, k]) => k === kind)?.[0] ?? KINDS.find((i) => i.kind === kind)?.spans[0] ?? 2));
+  }
+
+  private placements: Placement<PopoverWidget>[];
   private previous: Placement<PopoverWidget>[] | null = null;
 
   view(): PopoverView {
@@ -109,7 +118,7 @@ export class MockPopover {
         case 'recentChanges':
           return found.length === 0
             ? empty('See new releases here', 'Nothing found yet.', { type: 'checkAll' }, 'Check all now')
-            : ready({ kind: 'recentChanges', rows: found.slice(0, 3).map((w) => ({ id: w.id, name: w.name, version: w.latest?.version ?? '', firstSeenMs: w.latest?.firstSeenMs ?? 0, unseen: w.unseen })), more: Math.max(0, found.length - 3) });
+            : ready({ kind: 'recentChanges', rows: found.slice(0, CHANGE_ROWS).map((w) => ({ id: w.id, name: w.name, version: w.latest?.version ?? '', firstSeenMs: w.latest?.firstSeenMs ?? 0, unseen: w.unseen })), more: Math.max(0, found.length - CHANGE_ROWS) });
         case 'nextCheck':
           return next
             ? ready({ kind: 'nextCheck', id: next.id, name: next.name, atMs: next.nextCheckMs ?? now, alsoDue: 0 })
@@ -121,7 +130,7 @@ export class MockPopover {
         case 'failures':
           return failing.length === 0
             ? empty('No failures', 'Every watch is fine.', { type: 'openWatches' }, 'Open watches')
-            : ready({ kind: 'failures', rows: failing.slice(0, 3).map((w) => ({ id: w.id, name: w.name, kind: 'failed', message: 'The check failed.', failures: w.failures })), more: Math.max(0, failing.length - 3) });
+            : ready({ kind: 'failures', rows: failing.slice(0, FAILURE_ROWS).map((w) => ({ id: w.id, name: w.name, kind: 'failed', message: 'The check failed.', failures: w.failures })), more: Math.max(0, failing.length - FAILURE_ROWS) });
         case 'notifications':
           return ready({ kind: 'notifications', mode: !settings.notifications ? { kind: 'off' } : paused ? { kind: 'paused', untilMs: settings.notificationsPausedUntilMs ?? now } : { kind: 'on' } });
       }

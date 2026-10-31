@@ -18,9 +18,9 @@ use spotter_core::widgets::{
 /// Rows Watched sites lists.
 pub const SITE_ROWS: usize = 4;
 /// Rows Recent changes lists.
-pub const CHANGE_ROWS: usize = 3;
+pub const CHANGE_ROWS: usize = 1;
 /// Rows Failures lists.
-pub const FAILURE_ROWS: usize = 3;
+pub const FAILURE_ROWS: usize = 2;
 /// Watches due within this long after the next one are counted with it (milliseconds).
 const SAME_TIME_MS: i64 = 60_000;
 
@@ -477,9 +477,11 @@ mod tests {
         let PopoverValue::RecentChanges { rows, more } = with(&ws, &s, |i| value_of(state(PopoverWidget::RecentChanges, i))) else {
             panic!("recent changes")
         };
-        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["w4", "w3", "w2"]);
-        assert_eq!(more, 1, "w0 has no release, so four are found and one is not listed");
-        assert!(rows[0].unseen && !rows[1].unseen);
+        // w0 has no release, so four are found; the newest first, the first CHANGE_ROWS listed, the rest counted.
+        let newest_first = ["w4", "w3", "w2", "w1"];
+        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), newest_first[..CHANGE_ROWS]);
+        assert_eq!(more as usize, newest_first.len() - CHANGE_ROWS);
+        assert!(rows[0].unseen);
     }
 
     #[test]
@@ -596,13 +598,14 @@ mod tests {
         let PopoverValue::Failures { rows, more } = with(&ws, &s, |i| value_of(state(PopoverWidget::Failures, i))) else {
             panic!("failures")
         };
-        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["w1", "w3", "w0"]);
+        // Worst first: the failing, unpaused watches are w1 (7), w3 (3), w0 (2) and w2 (1); the list shows the first FAILURE_ROWS.
+        let worst_first = ["w1", "w3", "w0", "w2"];
+        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), worst_first[..FAILURE_ROWS]);
         assert_eq!(
             (more, rows[0].kind, rows[0].message.as_str()),
-            (1, FailureKind::NeedsYou, "Log in.")
+            ((worst_first.len() - FAILURE_ROWS) as u32, FailureKind::NeedsYou, "Log in.")
         );
         assert_eq!(rows[1].kind, FailureKind::AuthNeeded);
-        assert_eq!(rows[2].kind, FailureKind::Unreachable);
     }
 
     #[test]
@@ -636,16 +639,23 @@ mod tests {
     fn the_surface_says_paused_once_unless_the_notifications_widget_does() {
         let mut s = settings();
         s.notifications_paused_until = Some(NOW + 20 * 60_000);
-        let default = Stored::<PopoverCatalogue>::default();
-        let mut layout = default.layout().clone();
-        layout.placements.retain(|p| p.widget != PopoverWidget::Notifications);
+        // The fresh-install popup has no Notifications widget; a layout that has one is built by adding it.
+        let layout = Stored::<PopoverCatalogue>::default().layout().clone();
+        let mut shown = Stored::<PopoverCatalogue>::default();
+        shown
+            .edit(paddock_widgets::Edit::Add {
+                widget: PopoverWidget::Notifications,
+                span: None,
+                at: None,
+            })
+            .unwrap();
         let n = with(&[], &s, |i| popover_values(&layout, i)).notice.unwrap();
         assert_eq!(
             (n.tone, n.title.as_str(), n.detail.as_str()),
             (Tone::Info, "Notifications are paused", "Paused for 20 more minutes.")
         );
         assert_eq!(n.action.unwrap().action, WidgetActionId::ResumeNotifications);
-        assert!(with(&[], &s, |i| popover_values(default.layout(), i)).notice.is_none());
+        assert!(with(&[], &s, |i| popover_values(shown.layout(), i)).notice.is_none());
         s.notifications_paused_until = None;
         assert!(with(&[], &s, |i| popover_values(&layout, i)).notice.is_none());
     }

@@ -1,13 +1,13 @@
 import type { Settings } from '../api.types';
 import { makeMock, NOW } from '../../../testing/test-helpers';
-import { MockPopover } from './mock-popover';
+import { DEFAULT_KINDS, MockPopover } from './mock-popover';
 
 const kinds = (p: MockPopover) => p.view().layout.placements.map((x) => x.widget);
 
 describe('MockPopover (the mock of the engine layout, for browser development and tests)', () => {
   it('starts with the defaults and reports them with their catalogue', () => {
     const p = new MockPopover();
-    expect(kinds(p)).toEqual(['recentChanges', 'watchedSites', 'failures', 'nextCheck', 'notifications']);
+    expect(kinds(p)).toEqual(DEFAULT_KINDS);
     expect(p.view().catalogue.kinds).toHaveLength(6);
     expect(p.view().canUndo).toBe(false);
   });
@@ -56,8 +56,9 @@ describe('MockPopover (the mock of the engine layout, for browser development an
     const settings = await makeMock().getSettings();
     const p = new MockPopover();
     const values = p.values(watches, settings, NOW);
-    expect(values.placements).toHaveLength(5);
+    expect(values.placements).toHaveLength(DEFAULT_KINDS.length);
     expect(values.notice).toBeNull();
+    p.edit({ add: { widget: 'notifications', span: null, at: null } });
     const none = p.values([], { ...settings, notificationsPausedUntilMs: NOW + 1000 }, NOW);
     expect(none.placements.every((x) => x.state.state === 'empty' || x.state.state === 'ready')).toBe(true);
     expect(none.notice).toBeNull();
@@ -68,6 +69,7 @@ describe('MockPopover (the mock of the engine layout, for browser development an
   it('words every kind of notification state and quiet hours', () => {
     const p = new MockPopover();
     p.edit({ add: { widget: 'quietHours', span: null, at: null } });
+    p.edit({ add: { widget: 'notifications', span: null, at: null } });
     const base = { notifications: true, notificationsPausedUntilMs: null, quietHours: { start: '22:00', end: '07:00' } } as Settings;
     const states = (settings: Settings) => p.values([], settings, NOW).placements.map((x) => x.state);
     expect(states(base).some((s) => s.state === 'ready' && s.value.kind === 'quietHours')).toBe(true);

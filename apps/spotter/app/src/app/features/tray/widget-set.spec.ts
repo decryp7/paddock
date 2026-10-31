@@ -4,12 +4,15 @@ import { PdWidgetArea } from '@decryp7/paddock-ui/widgets';
 import type { PopoverValue, WidgetActionId } from '../../core/generated/widgets';
 import type { PopoverState, PopoverValues, PopoverView } from '../../core/widgets.types';
 import { MockPopover } from '../../core/mock/mock-popover';
+import type { PopoverWidget } from '../../core/generated/widgets';
 import { appProviders, makeMock, NOW, settle, text } from '../../../testing/test-helpers';
 import { ClockService } from '../../core/clock.service';
 import { WidgetSet } from './widget-set';
 
 const ready = (value: PopoverValue): PopoverState => ({ state: 'ready', value, asOf: NOW, staleSince: null });
-const view: PopoverView = new MockPopover().view();
+/** A popup showing every kind this spec draws, in this order, whatever the defaults of a fresh install are. */
+const SHOWN: PopoverWidget[] = ['recentChanges', 'watchedSites', 'failures', 'nextCheck', 'notifications'];
+const view: PopoverView = new MockPopover(SHOWN).view();
 const ids = view.layout.placements.map((p) => p.id);
 
 /** One state per placement, in layout order: recentChanges, watchedSites, failures, nextCheck, notifications. */
@@ -65,7 +68,7 @@ describe('Spotter widget set', () => {
 
   it('draws every placed kind in the shared frame, in layout order', async () => {
     const { frames } = await make();
-    expect(frames().map((x) => text(x.querySelector('.pd-w-title, h3, [id^=pd-widget]')).split(' ')[0])).toHaveLength(5);
+    expect(frames().map((x) => text(x.querySelector('.pd-w-title, h3, [id^=pd-widget]')).split(' ')[0])).toHaveLength(SHOWN.length);
     expect(frames().map((x) => text(x))).toEqual([
       expect.stringContaining('Recent changes'),
       expect.stringContaining('Watched sites'),
@@ -128,7 +131,7 @@ describe('Spotter widget set', () => {
   });
 
   it('shows quiet hours with whether they are in force', async () => {
-    const mock = new MockPopover();
+    const mock = new MockPopover(SHOWN);
     mock.edit({ add: { widget: 'quietHours', span: null, at: 0 } });
     const rest = FULL.placements.map((p) => p.state);
     const quiet = (active: boolean): PopoverValues => ({
@@ -147,7 +150,7 @@ describe('Spotter widget set', () => {
 
   it('draws the loading twin of every kind when there are no values yet (same markup, skeleton parts, busy)', async () => {
     const { frames } = await make(null);
-    expect(frames()).toHaveLength(5);
+    expect(frames()).toHaveLength(SHOWN.length);
     for (const frame of frames()) {
       expect(frame.querySelector('.pd-w--loading, [aria-busy="true"]')).not.toBeNull();
       expect(frame.querySelectorAll('.pd-sk').length).toBeGreaterThan(0);
