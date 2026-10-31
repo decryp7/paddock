@@ -1053,3 +1053,19 @@ date. **Rule (55, ADR 0034):** every mechanism that exists more than once is lis
 the canonical implementation and every copy in the same change (a freeze does not stop it) or a copy is waived with a reason;
 each copy has an owner and a tag by which it is deleted, and that tag is refused while the copy exists. Before fixing a bug in
 any service, IPC, driver or UI helper, look it up in the register first.
+
+## A spy on a faked timer outlived the clock and froze every later spec in the worker (2026-10-31, paddock-ui)
+`panel-snapshot.spec.ts` timed out at 5000 ms in CI runs 7257, 7274 and 7276 (with the notify reference app in 7276),
+though the whole spec takes 0.4 s alone and a snapshot 1 to 4 ms. Measured inside full `ng test paddock-ui` runs, the page
+CSS was not the cause (one style sheet, 46 to 118 characters, at every file start; every phase under 0.5 ms). The cause
+was a dead `setTimeout`: a new spec on that branch (`settings-close.spec.ts`) made `vi.spyOn(globalThis, 'setTimeout')`
+under `vi.useFakeTimers()`, its own `afterEach` then called `vi.useRealTimers()`, and the kit's `restoreAllMocks()` put
+back what the spy had wrapped: the fake, bound to a clock that was gone. Vitest 5.0 keeps a spy's restore in its registry
+after `mockRestore()`, so this happens even when the spec restores its spy itself. Specs share one window per worker
+(`isolate: false`), so every later spec in that worker that waited on a real timer (the snapshot's 5 ms "too slow" case,
+the notify reference app's two repair tests in run 7276) hung until the test timeout; with one worker, 16 tests in 8 files
+failed. Which spec failed depended only on which files the scheduler put after it. **Rule:** the test kit
+(`installTestKit`) restores spies before switching to real timers, records the real timer globals at the first install in
+a worker, and after every test puts back any it finds replaced and fails that test by name. Never `vi.spyOn` a timer while
+fake timers are on; count timers with `vi.getTimerCount()`. Measure inside the failing run before fixing the suspected
+cost: the leading hypothesis (CSS piling up) was wrong.

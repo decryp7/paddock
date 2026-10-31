@@ -12,6 +12,51 @@ export interface TestKitOptions {
   readonly dropWindowKeys?: readonly string[];
 }
 
+/** The timer globals Vitest's fake timers replace and a spec may spy on. */
+const TIMER_GLOBALS = [
+  'setTimeout',
+  'clearTimeout',
+  'setInterval',
+  'clearInterval',
+  'setImmediate',
+  'clearImmediate',
+  'requestAnimationFrame',
+  'cancelAnimationFrame',
+  'requestIdleCallback',
+  'cancelIdleCallback',
+] as const;
+
+/** Where the real timer globals are kept: on the shared window, so the first install in a worker records them once. */
+const REAL_TIMERS = Symbol.for('@decryp7/paddock-ui/testing:real-timers');
+
+/** The real timer globals, recorded by the first install in this worker (before any test could fake or spy on them). */
+function realTimers(win: Record<string | symbol, unknown>): ReadonlyMap<string, unknown> {
+  const known = win[REAL_TIMERS] as Map<string, unknown> | undefined;
+  if (known) return known;
+  const real = new Map<string, unknown>();
+  for (const name of TIMER_GLOBALS) if (typeof win[name] === 'function') real.set(name, win[name]);
+  win[REAL_TIMERS] = real;
+  return real;
+}
+
+/**
+ * Puts back every timer global that is not the real one and returns their names. A `vi.spyOn(globalThis, 'setTimeout')`
+ * made under fake timers keeps the fake as its original, and Vitest (5.0) restores it again at every `vi.restoreAllMocks()`,
+ * even after the spec's own `mockRestore()`: once the fake clock is uninstalled, that writes back a fake bound to a clock
+ * that is gone. Its timers never fire, and every later spec in the worker that waits on a real timer hangs until the test
+ * timeout (CI runs 7257, 7274 and 7276).
+ */
+function putBackTimers(win: Record<string | symbol, unknown>, real: ReadonlyMap<string, unknown>): string[] {
+  const replaced: string[] = [];
+  for (const [name, fn] of real) {
+    if (win[name] !== fn) {
+      win[name] = fn;
+      replaced.push(name);
+    }
+  }
+  return replaced;
+}
+
 /** Clears the browser storages; a storage that cannot be reached (an opaque origin) has nothing to clear. */
 function clearStorage(name: 'localStorage' | 'sessionStorage'): void {
   try {
@@ -45,8 +90,9 @@ class PointerEventPolyfill extends MouseEvent {
  * `matchMedia`, `ResizeObserver`, pointer capture and `PointerEvent`, `scrollIntoView`, and a clean window between tests. The
  * Angular builder runs Vitest with `isolate: false`, so spec files share one window per worker and whatever a test leaves
  * behind (often because it failed before its own clean-up) reaches the next file, which then fails only in full runs. Before
- * and after every test the kit therefore puts back real timers, restores every `vi.spyOn`, undoes every `vi.stubGlobal`,
- * empties the page and both storages, and deletes the window keys (a spec that stands in for Tauri sets
+ * and after every test the kit therefore restores every `vi.spyOn`, puts back real timers, undoes every `vi.stubGlobal`,
+ * empties the page and both storages, checks that every timer global is the real one recorded by the worker's first install
+ * (putting it back, and failing the test that left it replaced), and deletes the window keys (a spec that stands in for Tauri sets
  * `window.__TAURI_INTERNALS__`, which would make the next spec believe it runs inside Tauri). Only what is missing is added.
  * Safe to call twice.
  */
@@ -78,15 +124,28 @@ export function installTestKit(options: TestKitOptions = {}): void {
   }
   const keys = options.dropWindowKeys ?? ['__TAURI_INTERNALS__'];
   const hooks = globalThis as unknown as HookGlobals;
-  const drop = () => {
+  const real = realTimers(win);
+  const drop = (): string[] => {
     for (const key of keys) delete win[key];
-    hooks.vi?.useRealTimers();
+    // Spies first, then the clock: a spy on a faked timer restored after the clock is gone would write the dead fake back.
     hooks.vi?.restoreAllMocks();
+    hooks.vi?.useRealTimers();
     hooks.vi?.unstubAllGlobals();
     if (typeof document !== 'undefined') document.body?.replaceChildren();
     clearStorage('localStorage');
     clearStorage('sessionStorage');
+    return putBackTimers(win, real);
   };
-  hooks.beforeEach?.(drop);
-  hooks.afterEach?.(drop);
+  hooks.beforeEach?.(() => void drop());
+  hooks.afterEach?.(() => {
+    const replaced = drop();
+    if (replaced.length) {
+      throw new Error(
+        `This test left ${replaced.join(', ')} replaced after its clean-up (the kit put the real one back). Do not ` +
+          `vi.spyOn a timer while fake timers are on: Vitest restores the spied-on fake at every restoreAllMocks, even after ` +
+          `mockRestore, and once the clock is gone its timers never fire, so later specs in this worker hang. Count timers ` +
+          `with vi.getTimerCount() instead.`,
+      );
+    }
+  });
 }

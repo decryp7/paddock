@@ -68,6 +68,17 @@ describe('panel snapshots', () => {
       throw new DOMException('tainted', 'SecurityError');
     };
     expect(await snapshotPanel(el, { width: 560, height: 420 }, tainted)).toBeNull();
+    // So is one that throws before it returns a promise.
+    const throwsAtOnce: Rasterize = () => {
+      throw new DOMException('tainted', 'SecurityError');
+    };
+    expect(await snapshotPanel(el, { width: 560, height: 420 }, throwsAtOnce)).toBeNull();
+    // And a panel that fails while being measured or copied (the catch around the whole pipeline).
+    const broken = panel('<p>x</p>');
+    broken.getBoundingClientRect = () => {
+      throw new Error('detached');
+    };
+    expect(await snapshotPanel(broken, { width: 560, height: 420 }, ok)).toBeNull();
     // Nothing to draw: no snapshot, and no work.
     expect(await snapshotPanel(null, { width: 560, height: 420 }, ok)).toBeNull();
     expect(await snapshotPanel(panel('', 0, 0), { width: 560, height: 420 }, ok)).toBeNull();
@@ -86,6 +97,10 @@ describe('panel snapshots', () => {
     expect(await rasterizeFitting('u', box, 0.5, async () => null)).toBeNull();
     expect(await rasterizeFitting('u', box, 0.5, async () => 'data:image/svg+xml,x')).toBeNull();
     expect(await rasterizeFitting('u', box, 0.5, async () => Promise.reject(new Error('x')))).toBeNull();
+    const throwsAtOnce: Rasterize = () => {
+      throw new Error('x');
+    };
+    expect(await rasterizeFitting('u', box, 0.5, throwsAtOnce)).toBeNull();
     // Too slow: given up (a rasterizer that never answers; the timer is the only clock involved).
     expect(await rasterizeFitting('u', box, 0.5, () => new Promise(() => undefined), 5)).toBeNull();
   });

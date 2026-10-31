@@ -4,6 +4,15 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `installTestKit`: timer globals are put back after every test, and the test that replaced one fails (`@decryp7/paddock-ui/testing`)
+- The kit now restores spies before switching back to real timers, records the real timer globals (`setTimeout`,
+  `setInterval`, `requestAnimationFrame` and their kin) at the first install in a worker, and after every test puts back any
+  it finds replaced and fails that test with the names. A `vi.spyOn(globalThis, 'setTimeout')` made under fake timers left
+  a fake bound to an uninstalled clock behind (Vitest restores a spy again at every `restoreAllMocks`, even after
+  `mockRestore`), and every later spec in the worker that waited on a real timer hung until the 5 s timeout (CI runs 7257,
+  7274 and 7276). Call `manualFrames()` in a test or `beforeEach`, not at collection time.
+- `rasterizeFitting` (`workbench/panels`) turns a rasterizer that throws before returning its promise into no snapshot.
+
 ### `DialogFrame`: `contentView`, so a dialog's header, footer and body never show different steps (`@decryp7/paddock-ui/shell/dialogs`)
 - New optional input `contentView` on `DialogFrame` (the mounted content's change detector; `DialogShell` and `DialogHost` set it). `render()` now checks the content together with the frame. Before, a `run` action that changed the content's state (a wizard's Continue) refreshed the header slot and the footer at once while the body, which sits in the host's view, followed on the next tick: for one frame the stepper and the buttons showed the new step over the old, taller body (Pitcrew's register window overflowed its body by 165 px).
 
