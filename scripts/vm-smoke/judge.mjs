@@ -45,11 +45,15 @@ function executableOf(command, bundleDir) {
 export function instancesOf(procs, spec, bundleDir) {
   const exe = `${bundleDir}/Contents/MacOS/${spec.name}`;
   const re = spec.argsPattern ? new RegExp(spec.argsPattern) : null;
-  return procs.filter((p) => {
+  const matching = procs.filter((p) => {
     const e = executableOf(p.command, bundleDir);
     if (e !== exe && e !== spec.name) return false;
     return !re || re.test(p.command.slice(e.length));
   });
+  // A process the program forked itself (same program, its pid as parent) still shows the parent's command line until it execs
+  // (measured on macOS 26.6.2: a helper's transient fork): not a second instance of the process.
+  const pids = new Set(matching.map((p) => p.pid));
+  return matching.filter((p) => !pids.has(p.ppid));
 }
 
 /** Names of the config's processes that run from the bundle in this snapshot, with their pids: the compact evidence line. */
