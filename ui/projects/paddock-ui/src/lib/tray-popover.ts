@@ -27,9 +27,12 @@ export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
       [attr.tabindex]="scrolls() ? 0 : null"
       [attr.role]="scrolls() ? 'region' : null"
       [attr.aria-label]="scrolls() ? label() + ' content' : null"
+      (scroll)="measure()"
     >
       <ng-content />
     </div>
+    <!-- A fade over the foot of the content while there is more below (the mock's scroll cue); it ends at the bottom. -->
+    <div class="pd-fade" aria-hidden="true" [class.pd-fade--on]="scrolls() && !atEnd()"></div>
     <footer class="pd-footer"><ng-content select="[slot=footer]" /></footer>
   `,
   styles: `
@@ -53,6 +56,10 @@ export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
     /* The OS material (vibrancy, Acrylic) shows through; the solid colour is the designed fallback. */
     :host(.pd-tray--translucent) { background: color-mix(in srgb, var(--pd-surface-3) 72%, transparent); }
     .pd-header { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); }
+    .pd-content { scrollbar-width: thin; scrollbar-color: var(--pd-border-strong) transparent; }
+    .pd-fade { flex: none; position: relative; height: 0; pointer-events: none; }
+    .pd-fade::before { content: ''; position: absolute; inset-inline: 0; bottom: 0; height: var(--pd-space-6); background: linear-gradient(to bottom, transparent, var(--pd-surface-3)); opacity: 0; }
+    .pd-fade--on::before { opacity: 1; }
     .pd-content:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: -2px; }
     .pd-header:empty, .pd-footer:empty { display: none; }
     .pd-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 var(--pd-space-4) var(--pd-space-3); }
@@ -65,6 +72,8 @@ export class SuTrayPopover {
   private readonly content = viewChild.required<ElementRef<HTMLElement>>('content');
   /** True while the content scrolls (past 520 px): the region is then focusable and named, so a keyboard can scroll it (WCAG 2.1.1). */
   protected readonly scrolls = signal(false);
+  /** True when scrolled to the end (the fade goes). */
+  protected readonly atEnd = signal(true);
 
   /** Accessible name, e.g. "Dyno". */
   readonly label = input.required<string>();
@@ -73,11 +82,17 @@ export class SuTrayPopover {
   readonly translucent = input<boolean>(false);
   readonly dismissed = output<void>();
 
+  protected measure(): void {
+    const el = this.content().nativeElement;
+    this.scrolls.set(el.scrollHeight > el.clientHeight + 1);
+    this.atEnd.set(el.scrollTop + el.clientHeight >= el.scrollHeight - 1);
+  }
+
   constructor() {
     const destroy = inject(DestroyRef);
     afterNextRender(() => {
       const el = this.content().nativeElement;
-      const check = (): void => this.scrolls.set(el.scrollHeight > el.clientHeight + 1);
+      const check = (): void => this.measure();
       const resize = new ResizeObserver(check);
       resize.observe(el);
       const mutation = new MutationObserver(check);

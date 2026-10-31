@@ -6,6 +6,7 @@ import { MatIconRegistry } from '@angular/material/icon';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { DomSanitizer, By } from '@angular/platform-browser';
 import { registerPaddockIcons } from '@decryp7/paddock-ui/icons';
+import { KEY_PLATFORM } from '@decryp7/paddock-ui/shell/menu';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CatalogueInfo, Edit, KindInfo, LayoutView, Placement, Preset, Progress, SurfaceValues, WidgetState } from '../generated/widgets';
 import { PdWidgetArea } from './area';
@@ -140,9 +141,9 @@ describe('helpers', () => {
   });
 
   it('writes progress as a growing count or a fraction', () => {
-    expect(progressText({ count: { done: 12400, unit: 'events' } })).toBe('12,400 events so far');
-    expect(progressText({ count: { done: 3, unit: '' } })).toBe('3 so far');
-    expect(progressText({ fraction: { done: 2, total: 3, unit: '' } })).toBe('2 of 3');
+    expect(progressText({ count: { done: 12400, unit: 'events' } }, 'en')).toBe('12,400 events so far');
+    expect(progressText({ count: { done: 3, unit: '' } }, 'en')).toBe('3 so far');
+    expect(progressText({ fraction: { done: 2, total: 3, unit: '' } }, 'en')).toBe('2 of 3');
   });
 
   it('has context guards that accept any context', () => {
@@ -329,6 +330,14 @@ describe('pd-widget-area', () => {
     expect(qa(f, 'section')).toHaveLength(4);
   });
 
+  it('clamps a span wider than the surface to its columns', async () => {
+    const f = await setup();
+    f.componentInstance.placements.set([place('w', 'cpu', 5), place('z', 'net', 0)]);
+    await settle(f);
+    expect(frame(f, 0).style.gridColumn).toContain('span 2');
+    expect(frame(f, 1).style.gridColumn).toContain('span 1');
+  });
+
   it('draws each ready value through its kind template and marks stale readings', async () => {
     const f = await setup();
     f.componentInstance.vals.set(values(['disk', ready('182 GB', 9 * 60_000)], ['cpu', ready('76 %')], ['alarms', ready('none')]));
@@ -435,7 +444,7 @@ describe('pd-widget-area', () => {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdWidgetChooser, PdWidgetOption],
   template: `
-    <pd-widget-chooser [view]="v()" [widgetFor]="widgetFor" [again]="{ disk: 'Add volume' }" [preview]="preview()" (edit)="edits.push($event)">
+    <pd-widget-chooser [view]="v()" [error]="err()" [widgetFor]="widgetFor" [again]="{ disk: 'Add volume' }" [preview]="preview()" (edit)="edits.push($event)">
       <ng-template pdWidgetOption="disk" let-p><span class="opt">volume of {{ p.id }}</span></ng-template>
       <div slot="preview" class="pv">preview</div>
     </pd-widget-chooser>
@@ -444,6 +453,7 @@ describe('pd-widget-area', () => {
 class ChooserHost {
   readonly v = signal(view());
   readonly preview = signal(false);
+  readonly err = signal<string | null>(null);
   readonly widgetFor = (k: string): W => ({ kind: k as W['kind'] });
   edits: Edit<W>[] = [];
 }
@@ -501,10 +511,12 @@ describe('pd-widget-chooser', () => {
     grip(f, 1).focus();
     expect(key(grip(f, 1), 'ArrowUp').defaultPrevented).toBe(true);
     expect(f.componentInstance.edits.pop()).toEqual({ move: { id: 'disk', to: 0 } });
-    expect(say).toHaveBeenLastCalledWith('Disk space moved to position 1 of 4');
+    // nothing is announced until the engine's answer shows the move
+    expect(say).not.toHaveBeenCalled();
     // the app feeds the reordered view back
     f.componentInstance.v.set(view({}, [PLACEMENTS[1]!, PLACEMENTS[0]!, PLACEMENTS[2]!, PLACEMENTS[3]!]));
     await settle(f);
+    expect(say).toHaveBeenLastCalledWith('Disk space moved to position 1 of 4');
     expect(document.activeElement).toBe(grip(f, 0));
     expect(grip(f, 0).getAttribute('aria-label')).toBe('Reorder Disk space, position 1 of 4');
     key(grip(f, 0), 'ArrowDown');
@@ -549,7 +561,7 @@ describe('pd-widget-chooser', () => {
     const f = await setup();
     qa(f, '.pd-wc-more')[1]!.click();
     await settle(f);
-    expect(menuItems().map((m) => m.textContent!.trim())).toEqual(['Move up⌥↑', 'Move down⌥↓', 'Move to top⌥Home', 'Move to bottom⌥End', 'Remove']);
+    expect(menuItems().map((m) => m.textContent!.trim())).toEqual(['Move upAlt+↑', 'Move downAlt+↓', 'Move to topAlt+Home', 'Move to bottomAlt+End', 'Remove']);
     expect(menuItems()[0]!.getAttribute('aria-keyshortcuts')).toBe('Alt+ArrowUp');
     menuItems()[0]!.click();
     await settle(f);
@@ -658,6 +670,53 @@ describe('pd-widget-chooser', () => {
     expect(TestBed.inject(MatSnackBar)._openedSnackBarRef).toBeNull();
   });
 
+  it('writes the Option glyph and name on a Mac', async () => {
+    TestBed.overrideProvider(KEY_PLATFORM, { useValue: 'mac' });
+    const f = await setup();
+    expect(q(f, '.pd-wc-hint')!.textContent).toContain('hold Option with');
+    qa(f, '.pd-wc-more')[1]!.click();
+    await settle(f);
+    expect(menuItems()[0]!.textContent!.trim()).toBe('Move up⌥↑');
+  });
+
+  it('does not open an undo toast for a view that arrives with canUndo already true (reopened Settings, a refetch)', async () => {
+    const f = await setup();
+    f.componentInstance.v.set(view({ canUndo: true }));
+    await settle(f);
+    expect(document.querySelector('.mat-mdc-snack-bar-container')).toBeNull();
+    f.componentInstance.v.set(view({ canUndo: true }, PLACEMENTS.slice(0, 3)));
+    await settle(f);
+    expect(document.querySelector('.mat-mdc-snack-bar-container')).toBeNull();
+  });
+
+  it('opens the toast once per edit and not again when the same state is fetched again', async () => {
+    const f = await setup();
+    qa(f, '.pd-wc-more')[3]!.click();
+    await settle(f);
+    menuItems()[4]!.click();
+    await settle(f);
+    f.componentInstance.v.set(view({ canUndo: true }, PLACEMENTS.slice(0, 3)));
+    await settle(f);
+    const open = vi.spyOn(TestBed.inject(MatSnackBar), 'open');
+    f.componentInstance.v.set(view({ canUndo: true }, PLACEMENTS.slice(0, 3)));
+    await settle(f);
+    expect(open).not.toHaveBeenCalled();
+    expect(document.querySelectorAll('.mat-mdc-snack-bar-container')).toHaveLength(1);
+  });
+
+  it('never opens a toast with no text, and drops a waiting edit the engine says cannot be undone', async () => {
+    const f = await setup();
+    qa(f, '.pd-wc-more')[3]!.click();
+    await settle(f);
+    menuItems()[4]!.click();
+    await settle(f);
+    f.componentInstance.v.set(view({ canUndo: false }, PLACEMENTS.slice(0, 3)));
+    await settle(f);
+    f.componentInstance.v.set(view({ canUndo: true }, PLACEMENTS.slice(0, 3)));
+    await settle(f);
+    expect(document.querySelector('.mat-mdc-snack-bar-container')).toBeNull();
+  });
+
   it('announces a reset in the toast and closes it when the chooser is destroyed', async () => {
     const f = await setup();
     [...qa(f, 'button')].find((b) => b.textContent!.trim() === 'Reset to defaults')!.click();
@@ -717,7 +776,44 @@ describe('pd-widget-chooser', () => {
     await settle(f);
     expect(document.querySelector('.mat-mdc-snack-bar-container')!.textContent).toContain('The popup now uses the Minimal preset.');
     (items[1]!.querySelector('button[aria-label="Delete the Work preset"]') as HTMLElement).click();
+    await settle(f);
+    expect(f.componentInstance.edits).toEqual([]);
+    expect(document.activeElement).toBe(q(f, '[data-preset-confirm="mine"]'));
+    expect(q(f, '.pd-wc-ask')!.textContent).toBe('Delete this preset?');
+    // Cancel goes back to the row, focus on its delete button
+    [...qa(f, 'button')].find((b) => b.textContent!.trim() === 'Cancel')!.click();
+    await settle(f);
+    expect(q(f, '.pd-wc-ask')).toBeNull();
+    expect(document.activeElement).toBe(q(f, '[data-preset-delete="mine"]'));
+    (q(f, '[data-preset-delete="mine"]') as HTMLElement).click();
+    await settle(f);
+    q(f, '[data-preset-confirm="mine"]')!.click();
     expect(f.componentInstance.edits.pop()).toEqual({ deletePreset: { id: 'mine' } });
+    // the engine's answer arrives: focus goes to the previous preset's Apply
+    f.componentInstance.v.set(withPresets(2, [], [preset('min', 'Minimal', true, 2)]));
+    await settle(f);
+    expect(document.activeElement).toBe(q(f, '[data-preset-apply="min"]'));
+  });
+
+  it('puts focus in the name field when the last preset is deleted', async () => {
+    const f = await setup();
+    f.componentInstance.v.set(withPresets(2, [preset('mine', 'Work', false, 1)], []));
+    await settle(f);
+    (q(f, '[data-preset-delete="mine"]') as HTMLElement).click();
+    await settle(f);
+    q(f, '[data-preset-confirm="mine"]')!.click();
+    f.componentInstance.v.set(withPresets(2, [], []));
+    await settle(f);
+    expect(document.activeElement).toBe(nameInput(f));
+  });
+
+  it('shows the engine message for a refused edit', async () => {
+    const f = await setup();
+    expect(q(f, '.pd-wc-error')).toBeNull();
+    f.componentInstance.err.set('At most 4 widgets fit in the popup; remove one first.');
+    await settle(f);
+    expect(q(f, '.pd-wc-error')!.getAttribute('role')).toBe('alert');
+    expect(q(f, '.pd-wc-error')!.textContent).toContain('At most 4 widgets fit');
   });
 
   it('saves the layout under a trimmed name, clears the field, ignores an empty name and says when the limit is reached', async () => {
