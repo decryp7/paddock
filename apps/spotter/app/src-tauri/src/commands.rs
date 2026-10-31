@@ -382,6 +382,12 @@ pub async fn get_autostart<R: Runtime>(app: AppHandle<R>) -> Out<bool> {
 /// `set_autostart`: returns the state afterwards.
 #[tauri::command]
 pub async fn set_autostart<R: Runtime>(app: AppHandle<R>, enabled: bool) -> Out<bool> {
+    if enabled {
+        // Registered from a disk image or a translocated copy, the entry would point at a path that is gone at the next login.
+        if let Ok(exe) = std::env::current_exe() {
+            crate::login_item::refuse_unstable_location(&exe).map_err(CommandError::unavailable)?;
+        }
+    }
     let a = app.autolaunch();
     if enabled { a.enable() } else { a.disable() }
         .map_err(|e| CommandError::internal(format!("Start at login could not be changed: {e}")))?;

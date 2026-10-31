@@ -13,6 +13,7 @@ pub mod dto;
 pub mod health;
 pub mod jobs;
 pub mod lifecycle;
+pub mod login_item;
 pub mod notifier;
 pub mod state;
 pub mod toast;
