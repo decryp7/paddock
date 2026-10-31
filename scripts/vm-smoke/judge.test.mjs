@@ -197,3 +197,15 @@ test('a process the helper itself forked (same program, its own pid as parent) i
   const two = ps([[458, 1, '01:03', APP], [666, 1, '00:24', 'dyno-agent run'], [700, 458, '00:10', `${AGENT} run`]]);
   assert.deepEqual(instancesOf(two, config.processes[1], BUNDLE).map((x) => x.pid), [666, 700]);
 });
+
+test('a fork of the helper is shown in the evidence, and one that never execs fails the snapshot instead of being dropped silently', () => {
+  // A helper's transient fork shows the parent's command line until it execs: not a second helper, but not invisible either.
+  const young = ps([[458, 1, '01:03', APP], [666, 1, '00:24', 'dyno-agent run'], [739, 666, '00:01', 'dyno-agent run']]);
+  assert.deepEqual(instancesOf(young, config.processes[1], BUNDLE).map((x) => x.pid), [666]);
+  assert.ok(describeTree(young, config, BUNDLE).some((l) => /dyno-agent pid 739 .*forked by pid 666/.test(l)), describeTree(young, config, BUNDLE).join('\n'));
+  assert.ok(judgeSnapshot(young, config, BUNDLE, { running: true, loginService: true }).ok);
+  // Still the same command line a minute later: it never exec'd (a stuck fork, a second agent in disguise).
+  const stuck = ps([[458, 1, '01:03', APP], [666, 1, '01:24', 'dyno-agent run'], [739, 666, '01:00', 'dyno-agent run']]);
+  const v = judgeSnapshot(stuck, config, BUNDLE, { running: true, loginService: true });
+  assert.ok(!v.ok && v.checks.some((c) => !c.ok && /never exec/.test(c.detail) && /739/.test(c.detail)), JSON.stringify(v.checks));
+});

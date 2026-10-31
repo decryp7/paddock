@@ -323,9 +323,12 @@ export class GuiCheck {
       return instancesOf(procs, appSpec, this.bundle).length > 0 && (!helper || instancesOf(procs, helper, this.bundle).length > 0);
     }, 3 * this.guard());
     const w = await this.core.observe({ running: true, loginService: this.loginOn });
-    // A log that rotated over the reboot is read whole: the offset only skips what was written before it.
-    const now = Number((await this.g.exec(`stat -f %z ${sq(log)} 2>/dev/null || echo 0`)).stdout.trim()) || 0;
-    const since = (await this.g.exec(`tail -c +${now >= size ? size + 1 : 1} ${sq(log)} 2>/dev/null`)).stdout;
+    // The dated log is picked again: a reboot across midnight starts a new day's file, which is read whole (its offset 0). A log that
+    // rotated over the reboot is read whole too: the offset only skips what was written before it.
+    const after = await this.core.logPath(this.gui.loginStart.log);
+    const now = Number((await this.g.exec(`stat -f %z ${sq(after)} 2>/dev/null || echo 0`)).stdout.trim()) || 0;
+    const from = after === log && now >= size ? size + 1 : 1;
+    const since = (await this.g.exec(`tail -c +${from} ${sq(after)} 2>/dev/null`)).stdout;
     return { up, w, since, windows: await this.windows(), procs: w.snaps.at(-1) };
   }
 
