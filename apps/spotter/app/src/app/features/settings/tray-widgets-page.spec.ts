@@ -24,6 +24,7 @@ describe('Tray popup settings page', () => {
     expect(el.querySelectorAll('.pd-wc-item').length).toBeGreaterThanOrEqual(5);
     const preview = el.querySelector('pd-tray-popover[aria-label="Preview of the popup"]');
     expect(preview?.querySelectorAll('pd-widget-frame')).toHaveLength(DEFAULT_KINDS.length);
+    expect(preview?.hasAttribute('inert'), 'the preview is not interactive').toBe(true);
   });
 
   it('sends an edit from the chooser to the engine and redraws from its answer, the preview with it', async () => {

@@ -98,6 +98,45 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
     },
 ];
 
+/// Rows Watched sites lists.
+pub const SITE_ROWS: usize = 4;
+/// Rows Recent changes lists.
+pub const CHANGE_ROWS: usize = 1;
+/// Rows Failures lists.
+pub const FAILURE_ROWS: usize = 2;
+
+/// How many rows a widget draws when it has values: what its loading twin draws too, so loading and ready are the same
+/// height. The one source of the row limits (the engine truncates to these; the UI reads them from the engine).
+pub const fn rows_of(kind: PopoverWidget) -> usize {
+    match kind {
+        PopoverWidget::WatchedSites => SITE_ROWS,
+        PopoverWidget::RecentChanges => CHANGE_ROWS,
+        PopoverWidget::Failures => FAILURE_ROWS,
+        PopoverWidget::NextCheck | PopoverWidget::QuietHours | PopoverWidget::Notifications => 0,
+    }
+}
+
+/// The rows of one widget kind in its loading twin (see [`rows_of`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadingRows {
+    /// The widget kind.
+    pub kind: PopoverWidget,
+    /// How many placeholder rows its loading twin draws.
+    pub rows: u32,
+}
+
+/// The loading shape of every kind, in catalogue order.
+pub fn loading_shape() -> Vec<LoadingRows> {
+    PopoverCatalogue::kinds()
+        .iter()
+        .map(|k| LoadingRows {
+            kind: k.kind,
+            rows: u32::try_from(rows_of(k.kind)).unwrap_or(u32::MAX),
+        })
+        .collect()
+}
+
 impl Catalogue for PopoverCatalogue {
     type SurfaceId = SpotterSurface;
     type Widget = PopoverWidget;
@@ -130,6 +169,21 @@ impl Catalogue for PopoverCatalogue {
 mod tests {
     use super::*;
     use paddock_widgets::{check_catalogue, read, Edit, Stored};
+
+    #[test]
+    fn the_loading_shape_has_every_kind_with_the_literal_row_limits() {
+        let shape: Vec<(PopoverWidget, u32)> = loading_shape().iter().map(|l| (l.kind, l.rows)).collect();
+        assert_eq!(shape.len(), 6);
+        let rows = |k| shape.iter().find(|(w, _)| *w == k).unwrap().1;
+        assert_eq!(
+            [rows(PopoverWidget::WatchedSites), rows(PopoverWidget::RecentChanges), rows(PopoverWidget::Failures)],
+            [4, 1, 2]
+        );
+        assert_eq!(
+            [rows(PopoverWidget::NextCheck), rows(PopoverWidget::QuietHours), rows(PopoverWidget::Notifications)],
+            [0, 0, 0]
+        );
+    }
 
     #[test]
     fn the_catalogue_is_consistent() {

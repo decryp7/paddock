@@ -120,6 +120,8 @@ pub enum PopoverValue {
         rows: Vec<ChangeRow>,
         /// Releases not listed.
         more: u32,
+        /// Watches with a release nobody has seen yet (the widget's head says "3 new").
+        unseen: u32,
     },
     /// The next scheduled check.
     NextCheck {

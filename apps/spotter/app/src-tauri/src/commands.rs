@@ -375,6 +375,12 @@ pub async fn popover_view(state: State<'_, Shared>) -> Out<PopoverView> {
     Ok(state.engine.popover_view())
 }
 
+/// `popover_shape`: the rows each popup widget draws, so loading twins have the height of ready widgets.
+#[tauri::command]
+pub async fn popover_shape(state: State<'_, Shared>) -> Out<Vec<spotter_core::widgets::LoadingRows>> {
+    Ok(state.engine.popover_shape())
+}
+
 /// `edit_popover`: one edit of the tray popup's layout (the engine validates it and keeps one level of undo).
 #[tauri::command]
 pub async fn edit_popover(state: State<'_, Shared>, edit: Edit<PopoverWidget>) -> Out<PopoverView> {
