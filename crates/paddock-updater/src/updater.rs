@@ -430,9 +430,15 @@ impl Updater {
         self.begin(Event::Check)
     }
 
-    /// Starts downloading the update found: the caller registers a job and runs [`run_download`](Self::run_download).
+    /// Starts downloading the update found (refused with `InstallFailed` in a build without an [`Installer`]): the caller registers a job and runs [`run_download`](Self::run_download).
     /// `None` as the ticket: nothing to run (the update is over the size limit, which the status now says).
     pub fn begin_download(&self) -> Result<(UpdateStatus, Option<Ticket>), UpdateError> {
+        if self.installer.is_none() {
+            // Out of turn is "busy" (or "not available") before it is "cannot install": nothing is downloaded that this
+            // build could never install.
+            self.lock().phase.next(Event::Download)?;
+            return Err(no_installer());
+        }
         let size = self.lock().found.as_ref().and_then(|f| f.platform.size);
         let (status, ticket) = self.begin(Event::Download)?;
         if size.is_some_and(|s| s > self.config.max_download_bytes) {
@@ -681,10 +687,8 @@ impl Updater {
 
     /// Installs the verified update when the app quits (or not).
     pub fn install_on_quit(&self, enabled: bool) -> Result<UpdateStatus, UpdateError> {
-        if enabled && self.installer.is_none() {
-            // A request out of turn is "busy" before it is "cannot install".
-            self.lock().phase.next(Event::InstallOnQuit(true))?;
-            return Err(no_installer());
+        if enabled {
+            self.require_installer()?;
         }
         self.apply(Event::InstallOnQuit(enabled), |inner| {
             inner.on_exit = if enabled {

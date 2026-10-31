@@ -339,6 +339,7 @@ fn cancel_preferences_and_restart_go_through_the_commands() {
     let app = app(None);
     let dir = tempfile::tempdir().unwrap();
     let b = builder(dir.path())
+        .installer(Arc::new(FakeInstaller::default()))
         .channel("stable", "Stable", MANIFEST)
         .channel("beta", "Beta", MANIFEST)
         .public_key(Some(&fixture("key.pub")));
@@ -354,15 +355,8 @@ fn cancel_preferences_and_restart_go_through_the_commands() {
         invoke(&w, "updates_cancel", json!({})).unwrap()["phase"]["kind"],
         "available"
     );
-    // A build that declared `no_install` says so, and Restart and Install-on-quit are refused with a next step.
     invoke(&w, "updates_download", json!({})).unwrap();
-    let ready = wait_for(&rx, "ready");
-    assert_eq!(ready["canInstall"], false);
-    let e = invoke(&w, "updates_restart", json!({})).unwrap_err();
-    assert_eq!(e["kind"], "installFailed");
-    assert!(e["nextStep"].as_str().unwrap().contains("releases page"));
-    let e = invoke(&w, "updates_install_on_quit", json!({ "enabled": true })).unwrap_err();
-    assert_eq!(e["kind"], "installFailed");
+    wait_for(&rx, "ready");
     let prefs = |channel: &str| json!({ "preferences": { "autoCheck": true, "channel": channel } });
     assert_eq!(
         invoke(&w, "updates_set_preferences", prefs("beta")).unwrap_err()["kind"],
@@ -521,6 +515,7 @@ fn an_update_over_the_limit_or_a_closed_pool_ends_the_step_at_once() {
     let app = app(None);
     let dir = tempfile::tempdir().unwrap();
     let b = builder(dir.path())
+        .installer(Arc::new(FakeInstaller::default()))
         .channel("stable", "Stable", MANIFEST)
         .public_key(Some(&fixture("key.pub")))
         .max_download_bytes(1000);
@@ -660,4 +655,35 @@ fn a_builder_that_does_not_say_how_it_installs_is_refused_with_or_without_a_key(
         let updates = install(app.handle(), b).unwrap();
         assert_eq!(updates.updater.status().can_install, can, "{n}");
     }
+}
+
+#[test]
+fn a_build_that_declared_no_install_downloads_and_installs_nothing() {
+    let app = app(None);
+    let dir = tempfile::tempdir().unwrap();
+    let b = builder(dir.path())
+        .channel("stable", "Stable", MANIFEST)
+        .public_key(Some(&fixture("key.pub")));
+    install(app.handle(), b).unwrap();
+    let rx = statuses(&app);
+    let w = window(&app, "main");
+    invoke(&w, "updates_check", json!({})).unwrap();
+    let available = wait_for(&rx, "available");
+    assert_eq!(available["canInstall"], false);
+    for (command, args) in [
+        ("updates_download", json!({})),
+        ("updates_restart", json!({})),
+        ("updates_install_on_quit", json!({ "enabled": true })),
+    ] {
+        let e = invoke(&w, command, args).unwrap_err();
+        assert_eq!(e["kind"], "installFailed", "{command}");
+        assert!(
+            e["nextStep"].as_str().unwrap().contains("releases page"),
+            "{command}"
+        );
+    }
+    assert_eq!(
+        invoke(&w, "updates_status", json!({})).unwrap()["phase"]["kind"],
+        "available"
+    );
 }

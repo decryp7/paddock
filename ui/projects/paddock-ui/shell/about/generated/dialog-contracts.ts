@@ -33,7 +33,7 @@ export const DIALOG_CONTRACTS = {
     height: null,
     instanced: false,
     requiredChoice: false,
-    commands: ['updates_cancel', 'updates_check', 'updates_download', 'updates_install_on_quit', 'updates_restart', 'updates_set_preferences', 'updates_status'],
+    commands: ['files_open_url', 'updates_cancel', 'updates_check', 'updates_download', 'updates_install_on_quit', 'updates_restart', 'updates_set_preferences', 'updates_status'],
   },
 } as const;
 

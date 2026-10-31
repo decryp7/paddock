@@ -2513,6 +2513,9 @@
       <trans-unit id="pd.updates.open" datatype="html">
         <source>Check for updates…</source>
       </trans-unit>
+      <trans-unit id="pd.updates.open-releases" datatype="html">
+        <source>Open releases page</source>
+      </trans-unit>
       <trans-unit id="pd.updates.progress" datatype="html">
         <source><x id="phase"/>: <x id="done"/></source>
       </trans-unit>

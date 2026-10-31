@@ -299,6 +299,8 @@ export class MemoryUpdatesBackend extends UpdatesBackend {
 
   download(): Promise<UpdateStatus> {
     const phase = this.current.phase;
+    // The engine refuses to download what it could never install.
+    if (!this.current.canInstall && phase.kind !== 'unavailable') return this.refuse(ERRORS.installFailed);
     const retry = phase.kind === 'failed' && phase.info !== null && phase.error.kind !== 'signatureInvalid';
     if (phase.kind !== 'available' && !retry) return this.refuse({ ...ERRORS.busy, message: 'There is no update to download.' });
     this.generation++;

@@ -99,6 +99,8 @@ paddock_dialogs::dialogs! {
         dialog_callable::updates_install_on_quit,
         dialog_callable::updates_restart,
         dialog_callable::updates_set_preferences,
+        // A build that cannot install points to the releases page, which opens in the system browser.
+        paddock_files::dialog_callable::files_open_url,
     ] },
 }
 

@@ -12,6 +12,11 @@ Conventional Commits; one semver tag for the whole repo.
   (`InstallError::InstallerUndeclared`), at the app's start, with or without a key, so the app's own start test fails.
   `no_install()` is for a build that only notifies (the unsigned shell demo). Conformance check C59 is the static half: a file of an
   app's `src-tauri/` that calls `UpdatesBuilder::new(` also calls `.installer(` or `.no_install()`.
+- The engine refuses `Updater::begin_download` (and so `updates_download`) in a build without an installer, with `InstallFailed`
+  ("this build has no installer", next step: the releases page), after the out-of-turn and not-available answers: nothing is
+  downloaded that could never be installed.
+- Updates dialog: a build that cannot install (no key, or `no_install`) offers "Open releases page" (`UpdateStatus.releasesPage`,
+  through `files_open_url`, now in the `pd.updates` contract) as its primary action, with "Check again" secondary.
 - `UpdateStatus` has `can_install` (TypeScript `canInstall`); `Updater::can_install()`. `Updater::install_on_quit(true)` and
   `prepare_restart()` refuse without an installer at the request. Shell demo declares `no_install()`.
 ### `@decryp7/paddock-ui` (`shell/about`): the Updates dialog follows `canInstall`

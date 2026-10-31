@@ -838,6 +838,7 @@
     "pd.updates.notice.available": "⟦Ṽééŕšîîööñ {$version} îîš ááṽááîļááƀļéé (ýööû ĥááṽéé {$current}).⟧",
     "pd.updates.notification.available": "⟦ÛÛþðááţéé áṽááîîļááƀļé⟧",
     "pd.updates.open": "⟦Çĥééçķ ƒööŕ ûûþðáţééš…⟧",
+    "pd.updates.open-releases": "⟦ÖÖþééñ ŕééļéáášééš þááĝé⟧",
     "pd.updates.progress": "⟦{$phase}: {$done}⟧",
     "pd.updates.progress-in-jobs": "⟦Ţĥéé þŕööĝŕééšš îš îîñ Ĵööƀš.⟧",
     "pd.updates.progress.of": "⟦{$phase}: {$done} ööƒ {$total}⟧",

@@ -1,4 +1,4 @@
-// C59: an app that wires the shared updater says how it installs (ER-21; ADR 0034 §1 spirit: one mechanism, one check).
+// C59: an app that wires the shared updater says how it installs (rule 40 / ER-21: a recurring bug class gets a mechanism and a check).
 // Pitcrew 1.1 built its `UpdatesBuilder` with a public key and no `.installer(...)`: the update downloaded, then "Restart to
 // update" failed with "this build has no installer" and "Install when the app quits" recorded a failed install the user met
 // at the next start. A second app had the same wiring trap. The builder now refuses (at the app's start, with or without a
@@ -6,6 +6,10 @@
 // is the static half: it does not depend on the CI's key or on a start test running. In the production Rust of an app's
 // `src-tauri/` (as C56), a file that calls `UpdatesBuilder::new(` must also call `.installer(` or `.no_install(`.
 // Not looked at: comments, strings, `tests/`, benches and every `#[cfg(test)]` item.
+// It matches WHOLE FILES, not builders. Known limits: a file with two builders passes when either one declares; a builder
+// made in one file and finished in another (a helper module, a function that takes an `UpdatesBuilder`) is judged in the file
+// that calls `UpdatesBuilder::new(` only; a macro that expands to the call or to `.installer(` is not seen; `use ... as`
+// renames of the type are not followed. The runtime refusal (`InstallError::InstallerUndeclared`) is the net under these.
 import { error } from '../finding.mjs';
 import { withoutTestItems } from '../util/rust-test-items.mjs';
 import { maskRust } from './C39-freed-port.mjs';
@@ -31,7 +35,7 @@ export function updaterInstallerProblems(source) {
 export default {
   id: 'C59',
   title: 'Every app that wires the shared updater says how it installs',
-  rule: 43,
+  rule: 40,
   run(ctx) {
     const out = [];
     for (const f of ctx.files()) {
@@ -40,7 +44,7 @@ export default {
       if (!text || !text.includes('UpdatesBuilder')) continue;
       for (const p of updaterInstallerProblems(text)) {
         out.push(
-          error('C59', 43, f, p.line, p.message, 'Add `.installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(app.clone(), key)))` (feature `install`), or `.no_install()` for a build that only notifies.'),
+          error('C59', 40, f, p.line, p.message, 'Add `.installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(app.clone(), key)))` (feature `install`), or `.no_install()` for a build that only notifies.'),
         );
       }
     }
