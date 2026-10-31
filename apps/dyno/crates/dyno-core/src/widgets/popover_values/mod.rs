@@ -19,9 +19,9 @@ use paddock_widgets::{PlacementId, PlacementState, Progress, SurfaceNotice, Surf
 use serde::{Deserialize, Serialize};
 
 /// Alarm rows shown before "+N more".
-pub const ALARM_ROWS: usize = 2;
+pub const ALARM_ROWS: usize = 1;
 /// Volume rows shown by one disk space widget before "+N more".
-pub const VOLUME_ROWS: usize = 3;
+pub const VOLUME_ROWS: usize = 2;
 /// Pinned counters shown.
 pub const COUNTER_ROWS: usize = 4;
 /// Busiest apps shown.

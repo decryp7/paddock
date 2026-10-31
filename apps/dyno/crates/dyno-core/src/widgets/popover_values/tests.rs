@@ -107,7 +107,7 @@ fn a_source_that_has_not_answered_leaves_the_widget_loading() {
 // ---- active alarms ----
 
 #[test]
-fn alarms_are_the_most_severe_then_newest_two_rows_and_a_count() {
+fn alarms_are_the_most_severe_then_newest_one_row_and_a_count() {
     let list = vec![
         alarm(1, "warning", "active", 5 * MINUTE),
         alarm(2, "critical", "acknowledged", 30 * MINUTE),
@@ -120,9 +120,9 @@ fn alarms_are_the_most_severe_then_newest_two_rows_and_a_count() {
         panic!()
     };
     let ids: Vec<u64> = rows.iter().map(|r| r.id).collect();
-    assert_eq!(ids, [2, 3]);
-    assert_eq!(more, 2);
-    assert!(rows[0].acknowledged && !rows[1].acknowledged);
+    assert_eq!(ids, [2]);
+    assert_eq!(more, 3);
+    assert!(rows[0].acknowledged);
     assert_eq!(rows[0].level, Level::Critical);
 }
 
@@ -165,18 +165,18 @@ fn volumes() -> Vec<Volume> {
 }
 
 #[test]
-fn all_volumes_show_the_system_one_first_three_rows_and_a_count_with_tones() {
+fn all_volumes_show_the_system_one_first_two_rows_and_a_count_with_tones() {
     let v = volumes();
     let PopoverValue::DiskSpace { rows, more } = value(run(&PopoverWidget::disk(VolumeChoice::All), |i| i.volumes = Source::Ready(&v)))
     else {
         panic!()
     };
     let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(names, ["Macintosh HD", "Data", "Odd"]);
-    assert_eq!(more, 2);
+    assert_eq!(names, ["Macintosh HD", "Data"]);
+    assert_eq!(more, 3);
     assert_eq!(rows[0].used_percent, Some(60.0));
     assert_eq!(rows[0].tone, ValueTone::Ok);
-    assert_eq!(rows[2].used_percent, None);
+    assert_eq!(rows[1].used_percent, Some(25.0));
 }
 
 #[test]

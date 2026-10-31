@@ -368,12 +368,12 @@ export class MockWidgets {
       case 'activeAlarms':
         if (state === 'empty') return empty('No active alarms', 'All clear.', 'Open alarms', { openPage: 'alarms' }, true);
         if (state === 'error') return error("Couldn't read alarms", "The alarm store didn't answer.");
-        return ready({ activeAlarms: { rows: [{ id: 1, title: 'Memory pressure is high', level: 'warning', since: at - 4 * 60_000, acknowledged: false }, { id: 2, title: 'New login item: Docker Desktop', level: 'info', since: at - 3_600_000, acknowledged: false }], more: 3 } }, stale);
+        return ready({ activeAlarms: { rows: [{ id: 1, title: 'Memory pressure is high', level: 'warning', since: at - 4 * 60_000, acknowledged: false }], more: 4 } }, stale);
       case 'diskSpace': {
         if (state === 'empty') return empty("See Time Machine's space when it's connected", "The disk isn't connected now.", 'Choose another volume', 'chooseVolume');
         if (state === 'error') return error("Couldn't read volumes", "The volume list didn't answer.");
         const GB = 1e9;
-        return ready({ diskSpace: { rows: [{ id: '/', name: 'Macintosh HD', usedPercent: 82, freeBytes: 182 * GB, totalBytes: 994 * GB, tone: 'ok', reachable: true }, { id: '/Volumes/Projects', name: 'Projects', usedPercent: 96, freeBytes: 19 * GB, totalBytes: 500 * GB, tone: 'bad', reachable: true }, { id: '/Volumes/Time Machine', name: 'Time Machine', usedPercent: 70, freeBytes: 1210 * GB, totalBytes: 4000 * GB, tone: 'ok', reachable: true }], more: 1 } }, stale);
+        return ready({ diskSpace: { rows: [{ id: '/', name: 'Macintosh HD', usedPercent: 82, freeBytes: 182 * GB, totalBytes: 994 * GB, tone: 'ok', reachable: true }, { id: '/Volumes/Projects', name: 'Projects', usedPercent: 96, freeBytes: 19 * GB, totalBytes: 500 * GB, tone: 'bad', reachable: true }], more: 2 } }, stale);
       }
       case 'cpuMemory':
         return ready({ cpuMemory: { cpuPercent: 76, cpuTone: 'warn', memoryUsed: 16.3 * 1024 ** 3, memoryTotal: 32 * 1024 ** 3, memoryPercent: 51, memoryTone: 'ok', cpuMinute: wave(70, 12) } }, stale);
