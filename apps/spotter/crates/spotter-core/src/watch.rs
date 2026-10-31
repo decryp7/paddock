@@ -3,6 +3,8 @@
 use crate::action::Action;
 use crate::filter::VersionFilter;
 use crate::limits::{MAX_ACTIONS, MAX_NAME_CHARS};
+use crate::widgets::PopoverCatalogue;
+use paddock_widgets::Stored;
 use crate::notify::{DigestMode, NotificationChannel, NotificationPolicy, SmtpSettings, MAX_CHANNELS};
 use crate::pattern::{NamePattern, PatternSyntax};
 use crate::release::ReleaseFilter;
@@ -214,7 +216,7 @@ fn yes() -> bool {
 }
 
 /// App-wide settings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     /// Notifications at all.
     #[serde(default = "yes")]
@@ -240,6 +242,11 @@ pub struct Settings {
     /// The mail server for e-mail channels (the password is in the credential store).
     #[serde(default)]
     pub smtp: Option<SmtpSettings>,
+    /// The widgets of the tray popup, in order (family ADR 0035). Read leniently: a damaged or newer layout never fails the
+    /// settings and is kept until the person changes it. Changed only through the engine's `edit_popover`, never by the
+    /// settings page's save.
+    #[serde(default)]
+    pub popover: Stored<PopoverCatalogue>,
 }
 
 impl Default for Settings {
@@ -253,6 +260,7 @@ impl Default for Settings {
             quiet_hours: None,
             allow_os_webview: false,
             smtp: None,
+            popover: Stored::default(),
         }
     }
 }
