@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- macOS: the Network page, a program's connections and open files, and "what is locking this file" no longer ask the kernel about other programs' sockets, pipes and kqueues one descriptor at a time (`proc_pidfdinfo`, `lsof`), which could rarely make macOS fail another app's waiting reads and writes on a socket with EBADF. Sockets now come from the kernel's own TCP and UDP lists (the owner is the process the socket works for), files and libraries from `libproc` file descriptors only (ADR 0026). The agent and the `dyno` command carry a dotted code-signing identifier (`net.decryptology.dyno.agent`, `.cli`) from an embedded Info.plist, which macOS 27 needs to show the whole list; without it the Network page says why instead of listing only Dyno's own sockets.
 - macOS: turning on Launch at login adds Dyno's own two entries to Login Items, the app and its agent (the app registers itself with `SMAppService.mainApp`; no extra "dyno-app, unidentified developer" row, nothing under `~/Library/LaunchAgents`), it is refused with a message when Dyno runs from the disk image or a quarantined download, and a login start still opens in the tray. `dyno-agent service` refuses inside the app on macOS. The "First launch" notes describe the macOS 26 steps.
 
 ### Added

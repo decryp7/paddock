@@ -156,6 +156,26 @@ mod tests {
     use std::net::{TcpListener, TcpStream, UdpSocket};
 
     #[test]
+    fn a_processs_connections_are_its_sockets_in_the_shape_the_details_page_shows() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mine = connections_of(std::process::id()).unwrap();
+        let c = mine
+            .iter()
+            .find(|c| c.local == format!("127.0.0.1:{port}"))
+            .expect("the listener is among the connections");
+        assert_eq!((c.protocol.as_str(), c.remote.as_str(), c.state.as_str()), ("TCP", "", "LISTEN"));
+        assert!(connections_of(0x7fff_fff0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn endpoints_read_like_lsofs_wildcards_ipv6_in_brackets() {
+        assert_eq!(endpoint("0.0.0.0".parse().unwrap(), 80), "*:80");
+        assert_eq!(endpoint("::1".parse().unwrap(), 80), "[::1]:80");
+        assert_eq!(endpoint("192.0.2.1".parse().unwrap(), 0), "192.0.2.1:*");
+    }
+
+    #[test]
     fn a_cut_down_view_is_refused_with_the_fix() {
         let cut = PcbList {
             announced: 50,

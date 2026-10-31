@@ -1050,3 +1050,19 @@ and prove the check by making each historical bug a mutant it must catch (Dyno A
 wrong and a review caught: releasing the child before it is gone (a second agent while the first still runs), and an event
 without the generation it is about (an old child's exit taken for the new one's).
 
+
+## Asking the kernel about another program's descriptors can break that program (2026-10-31, Dyno)
+
+Dyno's macOS socket list called `proc_pidfdinfo` on every socket of every process (`netstat2`, and `lsof -p` / `lsof --` for
+the details page and "what locks this file"). Each call holds an I/O reference on the other program's descriptor; if that
+program, or a child it spawned that still holds a copy of the descriptor until its exec, closes it meanwhile, XNU drains
+the descriptor and marks the shared socket `SS_DRAINING` for good, and every later waiting read or write on it fails with
+EBADF (12 in 100 loaded runs with the sweep, 0 in 100 without). A monitor must not change the thing it watches, and a read
+that takes a reference on a descriptor is a change. **Rule:** read other programs' sockets from the kernel's own lists
+(`sysctl net.inet.{tcp,udp}.pcblist_n`: nothing is held), and ask about another process's descriptors only for files, whose
+file operations have no drain (`fo_no_drain`; sockets, pipes and kqueues do). Never `lsof` on macOS (Dyno ADR 0026). Three
+things found on the way: (1) the kernel hands the whole list only to some processes (macOS 27.2: a code-signing identifier
+with a dot), so a list is checked against its own announced count and owners, and a cut-down list is an error with the fix,
+never an empty page; (2) Tauri re-signs sidecars and resets a file's identifier, so the identifier comes from an embedded
+Info.plist and the built bundle is checked; (3) the header count includes dead entries, so it can only be used together
+with something else (here: no socket of another process in the list).

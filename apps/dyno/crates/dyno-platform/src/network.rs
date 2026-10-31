@@ -1,14 +1,14 @@
-//! The machine's sockets with their owning process, through `netstat2` (Windows `GetExtendedTcpTable` /
-//! `GetExtendedUdpTable`, macOS libproc, Linux `/proc/net` with the inode-to-pid map). Read-only. Another user's
-//! processes cannot be resolved without elevation on macOS and Linux: those sockets come back with no pid and the page
-//! says so; Dyno never asks for root for this.
+//! The machine's sockets with their owning process: Windows reads the IP Helper tables, macOS the kernel's socket lists
+//! (`pcblist_n`, ADR 0026: no descriptor of another program is touched), Linux `netstat2` (`/proc/net` with the
+//! inode-to-pid map). Read-only. Another user's processes cannot be resolved without elevation on Linux: those sockets
+//! come back with no pid and the page says so; Dyno never asks for root for this.
 
 use dyno_core::network::SocketRow;
-#[cfg(not(windows))]
+#[cfg(all(unix, not(target_os = "macos")))]
 use dyno_core::network::{Proto, SocketState};
 use dyno_core::network_traffic::TrafficCounter;
 use dyno_core::ports::{NetworkSockets, PlatformError, ProcessTraffic, ReverseDns};
-#[cfg(not(windows))]
+#[cfg(all(unix, not(target_os = "macos")))]
 use netstat2::{get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState};
 use std::net::IpAddr;
 use std::time::Duration;
@@ -17,7 +17,7 @@ use std::time::Duration;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct OsSockets;
 
-#[cfg(not(windows))]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn state(s: TcpState) -> SocketState {
     match s {
         TcpState::Listen => SocketState::Listen,
@@ -42,7 +42,13 @@ impl NetworkSockets for OsSockets {
         crate::windows::net::sockets().map_err(PlatformError::Failed)
     }
 
-    #[cfg(not(windows))]
+    /// macOS: the kernel's socket lists, never a sweep over other programs' descriptors (ADR 0026).
+    #[cfg(target_os = "macos")]
+    fn sockets(&self) -> Result<Vec<SocketRow>, PlatformError> {
+        crate::macos::pcblist::sockets()
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
     fn sockets(&self) -> Result<Vec<SocketRow>, PlatformError> {
         let infos = get_sockets_info(
             AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6,
@@ -101,7 +107,7 @@ impl NetworkSockets for OsSockets {
 }
 
 /// The parents of `pids` (the holders of shared sockets: usually none, so usually nothing is read).
-#[cfg(not(windows))]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn parents_of(pids: impl Iterator<Item = u32>) -> std::collections::HashMap<u32, u32> {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
     let pids: Vec<Pid> = pids.map(Pid::from_u32).collect();
@@ -207,7 +213,7 @@ mod tests {
             .any(|r| r.proto == Proto::Udp && r.local_port == udp_port && r.pid == Some(me)));
     }
 
-    #[cfg(not(windows))]
+    #[cfg(all(unix, not(target_os = "macos")))]
     #[test]
     fn every_state_maps_to_something() {
         for s in [
@@ -230,8 +236,9 @@ mod tests {
     }
 
     /// Review P2 (2026-10-30): a listener a child holds too (here inherited on purpose and kept across exec, as a child
-    /// briefly holds every socket between fork and exec) is still listed as this process's, not the child's.
-    #[cfg(unix)]
+    /// briefly holds every socket between fork and exec) is still listed as this process's, not the child's. The kernel
+    /// list names the last user of a socket (the parent, which made it), so macOS needs no holder bookkeeping.
+    #[cfg(all(unix, not(target_os = "macos")))]
     #[test]
     #[allow(unsafe_code)]
     fn a_listener_a_child_inherited_is_still_listed_as_its_parents() {

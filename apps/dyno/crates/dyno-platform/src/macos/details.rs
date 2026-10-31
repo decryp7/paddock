@@ -1,7 +1,6 @@
-//! macOS process details: nice value and background class, open files, sockets and mapped libraries from `lsof -p`,
+//! macOS process details: nice value and background class, open files, sockets and mapped libraries from `libproc` and the kernel socket lists (never `lsof`, ADR 0026),
 //! and the code signature from `codesign`. Everything runs with a timeout; failures become unavailable fields.
 
-use crate::parse::lsof::parse_fields;
 use crate::parse::mac_tools::parse_codesign;
 use crate::processes::DetailsProbe;
 use crate::unix_proc::get_nice;
@@ -50,36 +49,34 @@ impl DetailsProbe for MacDetails {
             Some(e) => signature(e),
             None => SignatureInfo::Unknown("The program file is not known".into()),
         };
-        let mut cmd = crate::process::command("/usr/sbin/lsof");
-        cmd.args(["-F", "pcftnPT", "-p", &pid.to_string()]);
-        match crate::process::run_with_timeout(cmd, TOOL_TIMEOUT) {
-            Ok(out) => {
-                let files = parse_fields(&String::from_utf8_lossy(&out.stdout));
-                if files.is_empty() {
-                    let why = "macOS lists open files and connections only for your own processes".to_string();
-                    details.open_files = ListOrReason::Unavailable(why.clone());
-                    details.connections = ListOrReason::Unavailable(why.clone());
-                    details.modules = ListOrReason::Unavailable(why);
-                    return;
-                }
-                details.handles = Some(u32::try_from(files.len()).unwrap_or(u32::MAX));
-                details.open_files = ListOrReason::capped(files.iter().filter(|f| f.is_path()).map(|f| f.name.clone()).collect());
-                details.connections = ListOrReason::capped(files.iter().filter(|f| f.is_socket()).map(|f| f.connection()).collect());
-                details.modules = ListOrReason::capped(
-                    files
-                        .iter()
-                        .filter(|f| f.fd == "txt" && f.name.contains(".dylib"))
-                        .map(|f| f.name.clone())
-                        .collect(),
-                );
-            }
-            Err(e) => {
-                let why = format!("Could not run lsof: {e}");
-                details.open_files = ListOrReason::Unavailable(why.clone());
-                details.connections = ListOrReason::Unavailable(why.clone());
-                details.modules = ListOrReason::Unavailable(why);
-            }
+        // Never `lsof`: it asks the kernel about every socket and pipe descriptor of the process, which can mark another
+        // program's socket `SS_DRAINING` (ADR 0026). Files and libraries come from `libproc` (descriptors listed from the
+        // table, only file descriptors asked about), connections from the kernel's socket lists.
+        let fds = super::libproc::fds(pid);
+        if fds.is_empty() {
+            let why = "macOS lists open files and connections only for your own processes".to_string();
+            details.open_files = ListOrReason::Unavailable(why.clone());
+            details.connections = ListOrReason::Unavailable(why.clone());
+            details.modules = ListOrReason::Unavailable(why);
+            return;
         }
+        details.handles = Some(u32::try_from(fds.len()).unwrap_or(u32::MAX));
+        details.open_files = ListOrReason::capped(
+            fds.iter()
+                .filter(|(_, t)| super::libproc::is_vnode(*t))
+                .filter_map(|(fd, _)| super::libproc::vnode_path(pid, *fd))
+                .collect(),
+        );
+        details.connections = match super::pcblist::connections_of(pid) {
+            Ok(c) => ListOrReason::capped(c),
+            Err(e) => ListOrReason::Unavailable(e.to_string()),
+        };
+        details.modules = ListOrReason::capped(
+            super::libproc::mapped_files(pid)
+                .into_iter()
+                .filter(|p| p.contains(".dylib"))
+                .collect(),
+        );
     }
 }
 

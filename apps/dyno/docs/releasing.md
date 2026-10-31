@@ -31,7 +31,9 @@ offered to users: updaters read `latest.json` of the *latest* release. The `rele
   profile). On macOS the bundle also carries `Contents/Library/LaunchAgents/net.decryptology.dyno.agent.plist`.
 
 `scripts/check-bundle.sh` runs after the Linux and macOS bundles (`bundle-check` in `dyno-release.yml`): every executable's run paths must be relative or system
-folders (never a build directory), the macOS seal must verify, and `dyno-agent` must be present. Dyno 1.0 ships without its privileged helper: the `dyno-helper` crate stays in the workspace for 1.1 but is not built into or bundled with any installer, and no installer is expected to contain it.
+folders (never a build directory), the macOS seal must verify, and `dyno-agent` must be present. **Installed-app check on macOS 27.x (ADR 0026), before the tag:** install the built `.dmg`, let the LaunchAgent start the agent, open the Network page and confirm it lists a socket owned by a program other than Dyno (and no "only its own sockets" message). `check-bundle.sh` proves the sidecars' code-signing identifiers (`net.decryptology.dyno.*`); only this proves the installed agent is shown the whole kernel list, which depends on how it was launched, and a shell run does not count.
+
+Dyno 1.0 ships without its privileged helper: the `dyno-helper` crate stays in the workspace for 1.1 but is not built into or bundled with any installer, and no installer is expected to contain it.
 
 ## How Dyno's updates work
 
