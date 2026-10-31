@@ -20,7 +20,8 @@ const MOVE_TO_APPLICATIONS: &str =
 
 /// Refuses a registration for an executable that will not exist after the next login: Gatekeeper path randomisation
 /// (`/AppTranslocation/`), or a copy on a read-only volume under `/Volumes/` (a mounted disk image). A writable volume (a second
-/// internal disk, an external SSD, `/Volumes/Macintosh HD`) is allowed.
+/// internal disk, an external SSD, `/Volumes/Macintosh HD`) is allowed. A writable (UDRW) disk image therefore also passes: an
+/// accepted trade-off, since only a read-only image is what a user normally opens an installer from.
 pub fn refuse_unstable_location(exe: &Path, volume: Volume) -> Result<(), String> {
     let path = exe.to_string_lossy();
     if path.contains("/AppTranslocation/") || (path.starts_with("/Volumes/") && volume == Volume::ReadOnly) {
@@ -103,5 +104,13 @@ mod tests {
         }
         // Only /Volumes/ paths are judged by the volume: a read-only /usr is not a disk image.
         assert_eq!(refused("/usr/bin/spotter-app", Volume::ReadOnly), None);
+    }
+
+    /// The statvfs adapter on macOS: `/usr/bin` is on the read-only system volume, the temp folder is writable.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_adapter_reads_the_volumes_read_only_flag() {
+        assert_eq!(volume_of(Path::new("/usr/bin")), Volume::ReadOnly);
+        assert_eq!(volume_of(&std::env::temp_dir()), Volume::Writable);
     }
 }

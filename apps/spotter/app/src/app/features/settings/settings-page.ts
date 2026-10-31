@@ -37,9 +37,12 @@ export class SettingsPage {
    * store's value unchanged, so the switch is put back by hand (a bound `checked` that did not change would not redraw it).
    */
   protected async setAutostart(toggle: MatSlideToggle, enabled: boolean): Promise<void> {
+    const ticket = ++this.autostartClicks;
     await this.store.setAutostart(enabled);
-    toggle.checked = this.store.autostart() === true;
+    // Only the latest click may set the switch: an older call finishing late must not put back an older value.
+    if (ticket === this.autostartClicks) toggle.checked = this.store.autostart() === true;
   }
+  private autostartClicks = 0;
 
   protected readonly s = computed(() => this.store.settings().value);
   protected readonly pausedFor = computed(() => {
