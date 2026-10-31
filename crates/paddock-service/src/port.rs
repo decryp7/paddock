@@ -166,6 +166,42 @@ pub enum ElevatedEnd {
     NoProcess,
     /// It still ran when the backstop ceiling came; it was not stopped.
     StillRunning(Duration),
+    /// The wait itself failed (Windows error code): nothing is known about the program.
+    WaitFailed(u32),
+}
+
+/// What one slice of waiting for an elevated program saw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Slice {
+    /// The program exited with this code.
+    Exited(u32),
+    /// It still runs.
+    Running,
+    /// The wait itself failed (Windows error code).
+    Failed(u32),
+}
+
+/// Waits for an elevated program in slices of `slice`, up to `ceiling`: `wait(slice)` waits one slice and says what it saw,
+/// `working(waited)` is called after each slice in which the program still ran (the log's "still working"). A failed wait
+/// ends at once with its error, never spun on. The adapter supplies the OS calls; this is the logic.
+pub fn wait_in_slices(
+    ceiling: Duration,
+    slice: Duration,
+    wait: &mut dyn FnMut(Duration) -> Slice,
+    working: &mut dyn FnMut(Duration),
+) -> ElevatedEnd {
+    let slice = slice.min(ceiling).max(Duration::from_millis(1));
+    let mut waited = Duration::ZERO;
+    loop {
+        let seen = wait(slice);
+        waited += slice;
+        match seen {
+            Slice::Exited(code) => return ElevatedEnd::Exited(code),
+            Slice::Failed(code) => return ElevatedEnd::WaitFailed(code),
+            Slice::Running if waited >= ceiling => return ElevatedEnd::StillRunning(waited),
+            Slice::Running => working(waited),
+        }
+    }
 }
 
 /// What an elevated run's end means for the caller: the exit code, or, for a program still running at the ceiling, an
@@ -174,6 +210,10 @@ pub fn elevated_result(program: &Path, end: ElevatedEnd) -> Result<i32, Register
     match end {
         ElevatedEnd::Exited(code) => Ok(i32::try_from(code).unwrap_or(1)),
         ElevatedEnd::NoProcess => Ok(0),
+        ElevatedEnd::WaitFailed(code) => Err(RegisterError::Other(format!(
+            "waiting for {} failed (Windows error {code}); it may still be running. Check the service in the Services window, then press Repair again if it did not finish",
+            program.display()
+        ))),
         ElevatedEnd::StillRunning(waited) => Err(RegisterError::Other(format!(
             "{} was still running after {} minutes and has not been stopped; it may still finish. Check the service in the Services window, then press Repair again if it did not",
             program.display(),
@@ -229,15 +269,82 @@ mod tests {
         assert_eq!(elevated_result(p, ElevatedEnd::Exited(5)), Ok(5));
         assert_eq!(elevated_result(p, ElevatedEnd::Exited(u32::MAX)), Ok(1));
         assert_eq!(elevated_result(p, ElevatedEnd::NoProcess), Ok(0));
-        let Err(RegisterError::Other(why)) =
-            elevated_result(p, ElevatedEnd::StillRunning(Duration::from_secs(900)))
-        else {
-            panic!()
-        };
+        let why = elevated_result(p, ElevatedEnd::StillRunning(Duration::from_secs(900)))
+            .unwrap_err()
+            .to_string();
         assert!(
             why.contains("still running after 15 minutes")
                 && why.contains("not been stopped")
                 && !why.contains("failed"),
+            "{why}"
+        );
+    }
+
+    #[test]
+    fn the_wait_in_slices_ends_on_exit_failure_or_the_ceiling_and_never_spins_on_a_failure() {
+        let run = |seen: Vec<Slice>| {
+            let mut seen = seen.into_iter();
+            let mut waits = 0u32;
+            let mut notes = Vec::new();
+            let end = wait_in_slices(
+                Duration::from_secs(90),
+                Duration::from_secs(30),
+                &mut |s| {
+                    waits += 1;
+                    assert_eq!(s, Duration::from_secs(30));
+                    seen.next().unwrap_or(Slice::Running)
+                },
+                &mut |w| notes.push(w.as_secs()),
+            );
+            (end, waits, notes)
+        };
+        assert_eq!(
+            run(vec![Slice::Exited(0)]),
+            (ElevatedEnd::Exited(0), 1, vec![])
+        );
+        assert_eq!(
+            run(vec![Slice::Running, Slice::Exited(3)]),
+            (ElevatedEnd::Exited(3), 2, vec![30])
+        );
+        // A failed wait (WAIT_FAILED) ends the loop at once with its error code.
+        assert_eq!(
+            run(vec![Slice::Running, Slice::Failed(6)]),
+            (ElevatedEnd::WaitFailed(6), 2, vec![30])
+        );
+        // Running to the ceiling: three slices, still working said after the first two.
+        assert_eq!(
+            run(vec![]),
+            (
+                ElevatedEnd::StillRunning(Duration::from_secs(90)),
+                3,
+                vec![30, 60]
+            )
+        );
+        // A ceiling shorter than a slice is one short slice.
+        let mut waited = Vec::new();
+        let mut notes = Vec::new();
+        let end = wait_in_slices(
+            Duration::from_secs(5),
+            Duration::from_secs(30),
+            &mut |s| {
+                waited.push(s);
+                Slice::Running
+            },
+            &mut |w| notes.push(w),
+        );
+        assert_eq!(
+            (end, waited),
+            (
+                ElevatedEnd::StillRunning(Duration::from_secs(5)),
+                vec![Duration::from_secs(5)]
+            )
+        );
+        assert!(notes.is_empty());
+        let why = elevated_result(Path::new("C:\\s.exe"), ElevatedEnd::WaitFailed(6))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            why.contains("Windows error 6") && why.contains("Repair again"),
             "{why}"
         );
     }
@@ -266,7 +373,14 @@ mod tests {
             }
             fn pause(&mut self, _: Duration) {}
         }
-        assert_eq!(Bare.cpu_time(std::process::id()), None);
+        // Every stub method is called once, so the stub costs no uncovered lines.
+        let mut b = Bare;
+        let p = Path::new("x");
+        assert_eq!(b.run("x", &[]), Ok(Output::default()));
+        assert!(b.spawn(p, &[]).is_ok() && b.read(p).is_ok() && b.write(p, "").is_ok());
+        assert!(b.remove(p).is_ok() && !b.is_program(p));
+        b.pause(Duration::ZERO);
+        assert_eq!(b.cpu_time(std::process::id()), None);
     }
 
     #[test]

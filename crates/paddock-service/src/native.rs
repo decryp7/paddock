@@ -203,10 +203,10 @@ pub use win::RunAsElevator;
 
 #[cfg(windows)]
 mod win {
-    use crate::port::{ElevatedEnd, Elevator, RegisterError, elevated_result};
+    use crate::port::{Elevator, RegisterError, Slice, elevated_result, wait_in_slices};
     use std::path::Path;
     use std::time::Duration;
-    use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows::Win32::Foundation::{CloseHandle, GetLastError, WAIT_OBJECT_0, WAIT_TIMEOUT};
     use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
     use windows::Win32::UI::Shell::{
         SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
@@ -256,26 +256,32 @@ mod win {
             if info.hProcess.is_invalid() {
                 return Ok(0);
             }
-            // Waits in slices so a long run is said to be still working (ER-19); only the ceiling ends the wait, and a
-            // program still running then is reported as such, not as failed.
-            let slice = ELEVATED_SLICE.min(ceiling).max(Duration::from_millis(1));
-            let mut waited = Duration::ZERO;
-            let end = loop {
-                let ms = u32::try_from(slice.as_millis()).unwrap_or(u32::MAX);
-                // SAFETY: a valid process handle we own, closed once after the loop.
-                let state = unsafe { WaitForSingleObject(info.hProcess, ms) };
-                waited += slice;
-                if state == WAIT_OBJECT_0 {
-                    let mut code = 1u32;
-                    // SAFETY: as above.
-                    let _ = unsafe { GetExitCodeProcess(info.hProcess, &mut code) };
-                    break ElevatedEnd::Exited(code);
-                }
-                if waited >= ceiling {
-                    break ElevatedEnd::StillRunning(waited);
-                }
-                log::info!(program = program.display().to_string(), waited_s = waited.as_secs(); "the elevated step is still working");
-            };
+            // Waits in slices so a long run is said to be still working (ER-19); only the ceiling or a failed wait ends it,
+            // and a program still running then is reported as such, not as failed.
+            let end = wait_in_slices(
+                ceiling,
+                ELEVATED_SLICE,
+                &mut |slice| {
+                    let ms = u32::try_from(slice.as_millis()).unwrap_or(u32::MAX);
+                    // SAFETY: a valid process handle we own, closed once after the loop.
+                    let state = unsafe { WaitForSingleObject(info.hProcess, ms) };
+                    if state == WAIT_OBJECT_0 {
+                        let mut code = 1u32;
+                        // SAFETY: as above.
+                        let _ = unsafe { GetExitCodeProcess(info.hProcess, &mut code) };
+                        Slice::Exited(code)
+                    } else if state == WAIT_TIMEOUT {
+                        Slice::Running
+                    } else {
+                        // WAIT_FAILED (or an abandoned/unknown result): the wait itself broke; never spin on it.
+                        // SAFETY: reads the calling thread's last error.
+                        Slice::Failed(unsafe { GetLastError() }.0)
+                    }
+                },
+                &mut |waited| {
+                    log::info!(program = program.display().to_string(), waited_s = waited.as_secs(); "the elevated step is still working");
+                },
+            );
             // SAFETY: the handle is ours and not used again.
             let _ = unsafe { CloseHandle(info.hProcess) };
             elevated_result(program, end)
