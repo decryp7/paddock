@@ -80,6 +80,24 @@ describe('pd-tray-popover scroll region', () => {
     expect(content(f).hasAttribute('tabindex')).toBe(false);
   });
 
+  it('draws a fade over the foot while there is more below, and not at the end', async () => {
+    const f = await setup();
+    const fade = () => f.nativeElement.querySelector('.pd-fade') as HTMLElement;
+    expect(fade().classList.contains('pd-fade--on')).toBe(false);
+    scrollHeight = 700;
+    clientHeight = 520;
+    observers[0]!.callback();
+    await f.whenStable();
+    TestBed.tick();
+    expect(fade().classList.contains('pd-fade--on')).toBe(true);
+    const el = content(f);
+    Object.defineProperty(el, 'scrollTop', { configurable: true, value: 180 });
+    el.dispatchEvent(new Event('scroll'));
+    await f.whenStable();
+    TestBed.tick();
+    expect(fade().classList.contains('pd-fade--on')).toBe(false);
+  });
+
   it('stops observing when destroyed and still dismisses with Escape', async () => {
     const f = await setup();
     f.nativeElement.querySelector('pd-tray-popover').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
