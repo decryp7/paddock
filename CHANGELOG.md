@@ -4,6 +4,15 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui/widgets`: widget area, frame and chooser (ADR 0035, WP-B)
+- New entry point: `pd-widget-area` (a layout's widgets on the surface grid, with the surface notice and the empty layout),
+  `pd-widget-frame` (loading, ready, empty, calm empty, error, working and stale, the loading twin made of the app's own template with
+  `pdSkeleton` parts), the `*pdWidget` and `*pdWidgetOption` template directives and `pd-widget-chooser` (CDK drag-drop, Alt/Option
+  Up, Down, Home and End keyboard reorder announced through `LiveAnnouncer`, a Material row menu, Half / Full toggles, "Added", the
+  limit and the undo snack bar driven by `canUndo`). It draws the generated types of `paddock-widgets` and emits `Edit` values.
+- `pd:` glyphs `grip`, `arrow-up`, `arrow-down`, `to-top` and `to-bottom`. Gallery page "Widgets" with a Playwright spec (sizes,
+  loading height, focus order, keyboard reorder, the menu clear of the focus ring, axe in both themes and high contrast). Design guide
+  section 8 gains "Widget area and frame" and "Chooser"; "Tray popups" and "Skeletons" are amended.
 ### Tokens: `--pd-meter-neutral`, `--pd-skeleton-raised`, `--pd-skeleton-raised-shine`
 - `--pd-meter-neutral` (dark #7c8593, light #6b7381) is a meter's neutral fill (disk space, quotas): 3:1 or more on surface-1, -2 and
   -3 and against its track (`--pd-chart-grid` over surface-2 and -3). `--pd-chart-neutral-bar` stays for charts; on a surface-2 widget it measured 2.8:1 in dark (ADR 0035).

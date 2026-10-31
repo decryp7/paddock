@@ -51,7 +51,7 @@ interface Meta {
         @if (calm() && s.next) {
           <button type="button" class="pd-w-calm" [attr.aria-label]="s.title + ', ' + s.detail + '. ' + s.next.label" (click)="action.emit(s.next.action)">
             <pd-glyph class="pd-w-ok" name="check" [size]="16" />
-            <span class="pd-w-calm-text"><span>{{ s.title }}</span> <span class="pd-w-subtle">· {{ s.detail }}</span></span>
+            <span class="pd-w-calm-text"><span>{{ s.title }}</span><span class="pd-w-subtle">&nbsp;· {{ s.detail }}</span></span>
             <pd-glyph class="pd-w-chev" name="chevron-right" [size]="14" />
           </button>
         } @else {
@@ -99,7 +99,7 @@ interface Meta {
     .pd-w-head { display: flex; align-items: center; gap: 6px; height: 16px; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); white-space: nowrap; }
     .pd-w-icon { width: 14px; height: 14px; flex: none; }
     .pd-w-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-    .pd-w-meta { margin-left: auto; font-weight: var(--pd-weight-regular); color: var(--pd-text-subtle); overflow: hidden; text-overflow: ellipsis; }
+    .pd-w-meta { flex: none; margin-left: auto; font-weight: var(--pd-weight-regular); color: var(--pd-text-subtle); overflow: hidden; text-overflow: ellipsis; }
     .pd-w-meta--stale { display: inline-flex; align-items: center; gap: 4px; color: var(--pd-text-muted); }
     .pd-w-subtle { color: var(--pd-text-subtle); }
     .pd-w .pd-sk { color: transparent !important; border-radius: var(--pd-radius-tag); background: linear-gradient(90deg, var(--pd-skeleton-raised) 0 35%, var(--pd-skeleton-raised-shine) 50%, var(--pd-skeleton-raised) 65% 100%); background-size: 300% 100%; animation: pd-w-shimmer 1.6s linear infinite; }
@@ -113,7 +113,7 @@ interface Meta {
     .pd-w-t { font-weight: var(--pd-weight-semibold); }
     .pd-w-d { grid-column: 2; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
     .pd-w-act, .pd-w-st .pd-w-prog { grid-column: 2; }
-    .pd-w-act { justify-self: start; margin: 4px 0 0 -8px; }
+    .pd-w-act { justify-self: start; margin: 4px 0 0 -8px; --mat-button-text-label-text-color: var(--pd-accent); color: var(--pd-accent); }
     .pd-w-prog { height: 4px; margin-top: 4px; border-radius: 2px; }
     .pd-w-calm { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 28px; width: calc(100% + 2 * var(--pd-space-2)); margin: 0 calc(-1 * var(--pd-space-2)); padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-control); background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
     .pd-w-calm:hover { background: var(--pd-hover); }

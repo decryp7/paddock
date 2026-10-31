@@ -90,7 +90,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
                   <ng-container *ngTemplateOutlet="opt.template; context: { $implicit: p }" />
                 }
                 @if (info && info.spans.length > 1) {
-                  <mat-button-toggle-group class="pd-wc-toggle" [value]="p.span" [attr.aria-label]="titleOf(p) + ' width'" (change)="resize(p, $event.value)">
+                  <mat-button-toggle-group class="pd-wc-toggle" [hideSingleSelectionIndicator]="true" [value]="p.span" [attr.aria-label]="titleOf(p) + ' width'" (change)="resize(p, $event.value)">
                     @for (s of info.spans; track s) {
                       <mat-button-toggle [value]="s">{{ spanLabel(s) }}</mat-button-toggle>
                     }
@@ -182,8 +182,11 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-limit pd-glyph { color: var(--pd-info); }
     .pd-wc-foot { margin: 12px 0 0 -8px; }
     .pd-wc-plabel { font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); margin: 0 0 6px; }
-    .pd-wc-menu .mat-mdc-menu-item { gap: 8px; }
-    .pd-wc-menu .mat-mdc-menu-item .mdc-list-item__primary-text { display: flex; align-items: center; gap: 8px; width: 100%; }
+    /* The menu keeps clear of its button's focus ring (2 px ring, 2 px offset), whether it opens below or above. */
+    .pd-wc-menu.mat-menu-below { margin-top: 6px; }
+    .pd-wc-menu.mat-menu-above { margin-bottom: 6px; }
+    .pd-wc-menu { min-width: 208px; }
+    .pd-wc-menu .mat-mdc-menu-item .mat-mdc-menu-item-text { display: flex; align-items: center; gap: 8px; flex: 1; }
     .pd-wc-menu kbd { margin-left: auto; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); line-height: 16px; padding: 0 4px; border-radius: 4px; border: 1px solid var(--pd-border-strong); background: var(--pd-surface-2); color: var(--pd-text-muted); white-space: nowrap; }
     .pd-wc-menu .pd-wc-remove, .pd-wc-menu .pd-wc-remove pd-glyph { color: var(--pd-danger); }
     .pd-wc-sep { border: 0; border-top: 1px solid var(--pd-hairline); margin: 4px 0; }
