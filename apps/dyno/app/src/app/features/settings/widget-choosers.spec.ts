@@ -2,7 +2,8 @@ import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
-import { MenuBarItems, newMenuBarItem } from './menu-bar-items';
+import { WidgetChoicesStore } from '../../state/widget-choices';
+import { MenuBarItems } from './menu-bar-items';
 import { PopupWidgets, newPopoverWidget } from './popup-widgets';
 
 const NOW = 1_700_000_000_000;
@@ -82,8 +83,14 @@ describe('dy-menu-bar-items', () => {
     expect(el.querySelector('input[maxlength="8"]')).not.toBeNull();
   });
 
-  it('builds a default item for a kind', () => {
-    expect(newMenuBarItem('ring')).toEqual({ ring: { metric: 'cpuTotal' } });
-    expect(newMenuBarItem('number')).toEqual({ number: { metric: 'cpuTotal', unit: '%', label: 'CPU' } });
+  it('takes the default item and the metrics from the engine choices', async () => {
+    const { f, el } = setup(MenuBarItems);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(2);
+    });
+    const choices = TestBed.inject(WidgetChoicesStore);
+    expect(choices.menuBarDefault('ring')).toEqual({ ring: { metric: 'cpuTotal' } });
+    expect(choices.menuBarMetrics().map((m) => m.title)).toContain('Network down');
   });
 });

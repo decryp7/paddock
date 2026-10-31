@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { PdWidgetChooser, PdWidgetOption } from '@decryp7/paddock-ui/widgets';
@@ -8,10 +8,10 @@ import { Notifier } from '../../shared/notifier';
 import { CountersStore } from '../../state/counters.store';
 import { DiagnosisStore } from '../../state/diagnosis.store';
 import { HealthStore } from '../../state/health.store';
+import { MetricReadings } from '../../state/metric-readings';
+import { WidgetChoicesStore } from '../../state/widget-choices';
 import { WidgetLayouts } from '../../state/widget-layouts';
 import { widgetCounterPaths } from '../counters/counters-model';
-import { METRIC_CHOICES } from './metric-reading';
-import { newDashboardWidget } from './new-widget';
 import { WidgetView } from './widget-view';
 
 /**
@@ -33,20 +33,22 @@ import { WidgetView } from './widget-view';
 
       @if (editing()) {
         <section class="card chooser" aria-label="Customize the dashboard">
-          <pd-widget-chooser [view]="v" [widgetFor]="widgetFor" (edit)="edit($event)">
-            @for (kind of metricKinds; track kind) {
-              <ng-template [pdWidgetOption]="kind" let-p>
-                <pd-select [options]="metricOptions" [value]="metricOf(p)" [ariaLabel]="'Metric of ' + p.id" (valueChange)="setMetric(p, $event)" />
-              </ng-template>
-            }
-          </pd-widget-chooser>
+          @if (choices.ready()) {
+            <pd-widget-chooser [view]="v" [widgetFor]="widgetFor" (edit)="edit($event)">
+              @for (kind of kinds(); track kind) {
+                <ng-template [pdWidgetOption]="kind" let-p>
+                  <pd-select [options]="metricOptions(kind)" [value]="metricOf(p)" [ariaLabel]="'Metric of ' + p.id" (valueChange)="setMetric(p, $event)" />
+                </ng-template>
+              }
+            </pd-widget-chooser>
+          }
         </section>
       }
 
       <div class="grid">
-        @for (p of v.layout.placements; track p.id) {
+        @for (p of v.layout.placements; track p.id; let i = $index) {
           <div class="cell" [style.grid-column]="'span ' + p.span" [attr.data-id]="p.id">
-            <dy-widget [placement]="p" />
+            <dy-widget [placement]="p" [metricReading]="readings()[i] ?? null" />
           </div>
         }
       </div>
@@ -69,12 +71,18 @@ export class WidgetBoard {
   private readonly counters = inject(CountersStore);
   protected readonly view = this.layouts.dashboard;
   protected readonly editing = signal(false);
-  protected readonly widgetFor = newDashboardWidget;
-  protected readonly metricKinds = ['graph', 'bigNumber', 'bars', 'ring', 'topProcesses'] as const satisfies readonly DashboardKind[];
-  protected readonly metricOptions: PdSelectOption[] = METRIC_CHOICES.map((m) => ({ value: m.label, label: m.label }));
+  protected readonly choices = inject(WidgetChoicesStore);
+  protected readonly widgetFor = (kind: DashboardKind): DashboardWidget => this.choices.dashboardDefault(kind);
+  /** The kinds whose widgets have a metric to choose: those that accept more than one. */
+  protected readonly kinds = computed(() => (this.choices.choices()?.dashboard ?? []).filter((k) => k.metrics.length > 1).map((k) => k.kind));
+  /** One request per live tick for every widget on the board; the engine answers value, text, scale and tone. */
+  protected readonly readings = inject(MetricReadings).follow(() =>
+    (this.view()?.layout.placements ?? []).map((p) => ({ metric: p.widget.metric, thresholds: p.widget.thresholds })),
+  );
 
   constructor() {
     void this.layouts.use('dashboard');
+    void this.choices.load();
     // The cards below read these; load them once when the board opens.
     inject(HealthStore).loadReport().catch(() => undefined);
     void inject(DiagnosisStore).loadAnomalies();
@@ -92,10 +100,12 @@ export class WidgetBoard {
     });
   }
 
+  protected metricOptions(kind: DashboardKind): PdSelectOption[] {
+    return this.choices.dashboardMetrics(kind).map((m) => ({ value: m.title, label: m.title }));
+  }
+
   protected metricOf(placement: Placement<unknown>): string {
-    const p = placement as Placement<DashboardWidget>;
-    const m = p.widget.metric;
-    return METRIC_CHOICES.find((c) => c.metric === m)?.label ?? '';
+    return this.choices.title((placement as Placement<DashboardWidget>).widget.metric);
   }
 
   protected async edit(e: Edit<DashboardWidget>): Promise<void> {
@@ -103,9 +113,9 @@ export class WidgetBoard {
     if (failed) this.notifier.error(failed);
   }
 
-  protected setMetric(placement: Placement<unknown>, label: string): void {
+  protected setMetric(placement: Placement<unknown>, title: string): void {
     const p = placement as Placement<DashboardWidget>;
-    const metric: Metric | undefined = METRIC_CHOICES.find((m) => m.label === label)?.metric;
+    const metric: Metric | undefined = this.choices.dashboardMetrics(p.widget.kind).find((m) => m.title === title)?.metric;
     if (metric) void this.edit({ replace: { id: p.id, widget: { ...p.widget, metric } } });
   }
 }

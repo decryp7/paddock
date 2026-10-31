@@ -1,7 +1,7 @@
 import { inject, provideAppInitializer } from '@angular/core';
 import { Router } from '@angular/router';
 import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
-import { BACKEND } from '../core/backend';
+import { BACKEND, type DynoBackend } from '../core/backend';
 import type { Navigate, Page } from '../core/generated/widgets';
 
 /** The main window's route for each page a widget can open (`dyno://navigate`). */
@@ -24,20 +24,35 @@ export function destination(to: Navigate): { route: string } | { settings: strin
   return 'page' in to ? { route: PAGE_ROUTE[to.page] } : { settings: SETTINGS_PAGE_ID };
 }
 
+/** What the main window does with a destination. */
+export interface NavigationPort {
+  readonly route: (url: string) => void;
+  readonly settings: ((page: string) => void) | null;
+}
+
+/**
+ * Follows what a popup widget asked for: the event only says "something is waiting", and `takeNavigation` hands it over once
+ * (a window that was still being created when the button was pressed asks for it as it starts, so none is lost or run twice).
+ * Returns what stops following.
+ */
+export function followNavigation(backend: Pick<DynoBackend, 'onNavigate' | 'takeNavigation'>, port: NavigationPort): () => void {
+  const take = async (): Promise<void> => {
+    const to = await backend.takeNavigation().catch(() => null);
+    if (to === null) return;
+    const d = destination(to);
+    if ('route' in d) port.route(d.route);
+    else port.settings?.(d.settings);
+  };
+  const stop = backend.onNavigate(() => void take());
+  void take();
+  return stop;
+}
+
 /** The main window follows `dyno://navigate`: a popup widget's button opens a page or Settings. */
 export function provideWidgetNavigation() {
   return provideAppInitializer(() => {
     const router = inject(Router);
     const openSettings = inject(OPEN_SETTINGS, { optional: true });
-    const backend = inject(BACKEND);
-    const follow = (to: Navigate): void => {
-      const d = destination(to);
-      if ('route' in d) void router.navigateByUrl(d.route);
-      else openSettings?.(d.settings);
-    };
-    // The event reaches a window that exists; one that was still being created when the button was pressed asks for what is
-    // waiting. Either way the shell hands it over once.
-    backend.onNavigate(() => void backend.takeNavigation().then((to) => to && follow(to)));
-    void backend.takeNavigation().then((to) => to && follow(to));
+    followNavigation(inject(BACKEND), { route: (url) => void router.navigateByUrl(url), settings: openSettings });
   });
 }

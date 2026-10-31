@@ -9,6 +9,9 @@ import type {
   Layout,
   MenuBarItem,
   MenuBarKind,
+  MetricReading,
+  ReadingQuery,
+  WidgetChoices,
   Metric,
   Placement,
   PlacementState,
@@ -387,4 +390,47 @@ export class MockWidgets {
         return ready({ topApps: { rows: [{ name: 'Rust build (cargo)', cpuPercent: 42 }, { name: 'Google Chrome', cpuPercent: 6.8 }, { name: 'WindowServer', cpuPercent: 4.1 }] } }, stale);
     }
   }
+}
+
+const METRIC_TITLES: [Metric, string][] = [
+  ['cpuTotal', 'CPU'], ['cpuPerCore', 'CPU per core'], ['memory', 'Memory'], ['memoryPressure', 'Memory pressure'], ['swap', 'Swap'],
+  ['diskActivity', 'Disk activity'], ['diskFree', 'Disk free'], ['networkDown', 'Network down'], ['networkUp', 'Network up'],
+  ['gpuLoad', 'GPU'], ['temperature', 'Temperature'], ['fan', 'Fan'], ['battery', 'Battery'],
+];
+const PERCENT: Metric[] = ['cpuTotal', 'memory', 'swap', 'diskFree', 'gpuLoad', 'battery'];
+
+/** Which metrics a dashboard kind accepts (a plausible imitation of the engine's rule). */
+function accepted(kind: DashboardKind): Metric[] {
+  if (kind === 'heatmap') return ['cpuPerCore'];
+  if (kind === 'ring') return PERCENT;
+  if (kind === 'topProcesses') return ['cpuTotal', 'memory', 'diskActivity', 'networkUp', 'networkDown', 'gpuLoad'];
+  if (['health', 'issues', 'cpu', 'diagnosis', 'events', 'history', 'consumers', 'diskTrend'].includes(kind)) return ['cpuTotal'];
+  return METRIC_TITLES.map(([m]) => m);
+}
+
+/** What the choosers offer (the engine's `widget_choices`, imitated). */
+export function mockWidgetChoices(): WidgetChoices {
+  const title = (m: Metric) => METRIC_TITLES.find(([x]) => x === m)?.[1] ?? String(m);
+  const choice = (metric: Metric) => ({ metric, title: title(metric) });
+  return {
+    dashboard: DASHBOARD_KINDS.map((k) => {
+      const metrics = accepted(k.kind as DashboardKind).map(choice);
+      return { kind: k.kind as DashboardKind, default: dw(k.kind as DashboardKind, metrics[0]!.metric), metrics };
+    }),
+    menuBar: MENU_KINDS.map((k) => {
+      const metric: Metric = 'cpuTotal';
+      const kind = k.kind as MenuBarKind;
+      return { kind, default: (kind === 'number' ? { number: { metric, unit: '%', label: '' } } : { [kind]: { metric } }) as MenuBarItem };
+    }),
+    menuBarMetrics: METRIC_TITLES.map(([m]) => choice(m)),
+  };
+}
+
+/** A reading of `query` from the mock's numbers (a plausible imitation: only CPU and memory have values). */
+export function mockMetricReading(query: ReadingQuery, system: { cpu: number; memory: number }): MetricReading {
+  const value = query.metric === 'cpuTotal' ? system.cpu : query.metric === 'memory' ? system.memory : null;
+  if (value === null) return { value: null, text: '—', unit: '', percent: null, tone: 'ok', reason: 'The mock has no live reading for this metric.' };
+  const { warning, critical } = query.thresholds;
+  const tone = critical !== null && value >= critical ? 'bad' : warning !== null && value >= warning ? 'warn' : 'ok';
+  return { value, text: value.toFixed(0), unit: '%', percent: value, tone, reason: null };
 }

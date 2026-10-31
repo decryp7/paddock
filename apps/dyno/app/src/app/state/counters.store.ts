@@ -4,7 +4,7 @@ import type { CommandError, CounterHistory, CounterHit, CounterObject, CounterOb
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { MAX_PINNED, MAX_SETS, MAX_SET_NAME, MAX_WATCHED, readingNumber, withPath, withoutPath } from '../features/counters/counters-model';
-import { newDashboardWidget } from '../features/widgets/new-widget';
+import { WidgetChoicesStore } from './widget-choices';
 import { WidgetLayouts } from './widget-layouts';
 import { Notifier } from '../shared/notifier';
 import { SettingsStore } from './settings.store';
@@ -73,7 +73,7 @@ export const CountersStore = signalStore(
     /** The paths read on the next tick: charted ones first, then the dashboard's. */
     wanted: computed(() => [...new Set([...s.watching(), ...s.tracked()])].slice(0, MAX_WATCHED)),
   })),
-  withMethods((store, backend = inject(BACKEND), settings = inject(SettingsStore), notifier = inject(Notifier), layouts = inject(WidgetLayouts), destroyRef = inject(DestroyRef, { optional: true })) => {
+  withMethods((store, backend = inject(BACKEND), settings = inject(SettingsStore), notifier = inject(Notifier), layouts = inject(WidgetLayouts), choices = inject(WidgetChoicesStore), destroyRef = inject(DestroyRef, { optional: true })) => {
     let users = 0;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let running = false;
@@ -232,7 +232,9 @@ export const CountersStore = signalStore(
       },
       /** Adds a counter to the dashboard as a graph widget; the engine applies its limits and says why when it refuses. */
       async addToDashboard(path: string): Promise<boolean> {
-        const failed = await layouts.edit('dashboard', { add: { widget: { ...newDashboardWidget('graph'), metric: { perfCounter: path } }, span: null, at: null } });
+        await choices.load();
+        if (!choices.ready()) return false;
+        const failed = await layouts.edit('dashboard', { add: { widget: { ...choices.dashboardDefault('graph'), metric: { perfCounter: path } }, span: null, at: null } });
         if (failed) notifier.error(failed);
         else notifier.show('Added to the dashboard');
         return failed === null;

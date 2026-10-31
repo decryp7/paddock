@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatFormField, MatLabel } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
@@ -7,13 +7,7 @@ import { PdWidgetChooser, PdWidgetOption } from '@decryp7/paddock-ui/widgets';
 import type { Edit, MenuBarItem, MenuBarKind, Metric, Placement } from '../../core/generated/widgets';
 import { Notifier } from '../../shared/notifier';
 import { WidgetLayouts } from '../../state/widget-layouts';
-import { METRIC_CHOICES } from '../widgets/metric-reading';
-
-/** A new menu-bar item of `kind` (CPU); the engine validates it. */
-export function newMenuBarItem(kind: MenuBarKind): MenuBarItem {
-  const metric: Metric = 'cpuTotal';
-  return kind === 'number' ? { number: { metric, unit: '%', label: 'CPU' } } : ({ [kind]: { metric } } as MenuBarItem);
-}
+import { WidgetChoicesStore } from '../../state/widget-choices';
 
 const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
 
@@ -27,10 +21,11 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
   imports: [FormsModule, MatFormField, MatLabel, MatInput, PdSelect, PdWidgetChooser, PdWidgetOption],
   template: `
     @if (view(); as v) {
+      @if (choices.ready()) {
       <pd-widget-chooser [view]="v" [widgetFor]="widgetFor" (edit)="edit($event)">
-        @for (kind of kinds; track kind) {
+        @for (kind of kinds(); track kind) {
           <ng-template [pdWidgetOption]="kind" let-p>
-            <pd-select [options]="metricOptions" [value]="metricName(p)" [ariaLabel]="'Metric of ' + p.id" (valueChange)="setMetric(p, $event)" />
+            <pd-select [options]="metricOptions()" [value]="metricName(p)" [ariaLabel]="'Metric of ' + p.id" (valueChange)="setMetric(p, $event)" />
             @if (kind === 'number') {
               <mat-form-field class="short"><mat-label>Label</mat-label><input matInput maxlength="16" [ngModel]="field(p, 'label')" (ngModelChange)="setNumber(p, 'label', $event)" /></mat-form-field>
               <mat-form-field class="short"><mat-label>Unit</mat-label><input matInput maxlength="8" [ngModel]="field(p, 'unit')" (ngModelChange)="setNumber(p, 'unit', $event)" /></mat-form-field>
@@ -38,6 +33,7 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
           </ng-template>
         }
       </pd-widget-chooser>
+      }
     } @else {
       <p class="faint" role="status">Reading the menu bar items…</p>
     }
@@ -52,18 +48,19 @@ export class MenuBarItems implements OnInit {
   private readonly layouts = inject(WidgetLayouts);
   private readonly notifier = inject(Notifier);
   protected readonly view = this.layouts.menuBar;
-  protected readonly widgetFor = newMenuBarItem;
-  protected readonly kinds: readonly MenuBarKind[] = ['lineGraph', 'verticalBars', 'horizontalMeter', 'ring', 'number', 'graphAndNumber'];
-  protected readonly metricOptions: PdSelectOption[] = METRIC_CHOICES.map((m) => ({ value: m.label, label: m.label }));
+  protected readonly choices = inject(WidgetChoicesStore);
+  protected readonly widgetFor = (kind: MenuBarKind): MenuBarItem => this.choices.menuBarDefault(kind);
+  protected readonly kinds = computed(() => this.view()?.catalogue.kinds.map((k) => k.kind) ?? []);
+  protected readonly metricOptions = computed<PdSelectOption[]>(() => this.choices.menuBarMetrics().map((m) => ({ value: m.title, label: m.title })));
 
   ngOnInit(): void {
     void this.layouts.use('menuBar');
+    void this.choices.load();
   }
 
   protected metricName(placement: Placement<unknown>): string {
     const p = placement as Placement<MenuBarItem>;
-    const m = metricOf(p.widget);
-    return METRIC_CHOICES.find((c) => c.metric === m)?.label ?? '';
+    return this.choices.title(metricOf(p.widget));
   }
 
   protected field(placement: Placement<unknown>, key: 'label' | 'unit'): string {
@@ -76,9 +73,9 @@ export class MenuBarItems implements OnInit {
     if (failed) this.notifier.error(failed);
   }
 
-  protected setMetric(placement: Placement<unknown>, label: string): void {
+  protected setMetric(placement: Placement<unknown>, title: string): void {
     const p = placement as Placement<MenuBarItem>;
-    const metric = METRIC_CHOICES.find((m) => m.label === label)?.metric;
+    const metric = this.choices.menuBarMetrics().find((m) => m.title === title)?.metric;
     if (!metric) return;
     const [kind, body] = Object.entries(p.widget)[0]!;
     void this.edit({ replace: { id: p.id, widget: { [kind]: { ...body, metric } } as MenuBarItem } });

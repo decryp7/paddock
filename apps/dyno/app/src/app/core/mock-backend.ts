@@ -2,7 +2,7 @@ import { osTerms } from '../shared/os-terms';
 import type { SuJobPhase, SuJobSnapshot, SuJobState } from '@decryp7/paddock-ui';
 import type { Measured } from './api.types';
 import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
-import { MockWidgets, mockWidgetOptionsFromUrl, type MockWidgetsOptions } from './mock/widgets';
+import { MockWidgets, mockMetricReading, mockWidgetChoices, mockWidgetOptionsFromUrl, type MockWidgetsOptions } from './mock/widgets';
 import type { PopoverSurfaceValues } from './widget-types';
 import { readValue } from './measured';
 import type {
@@ -1166,23 +1166,40 @@ export class MockBackend implements DynoBackend {
     return this.widgets.onLayout(listener);
   }
 
-  onNavigate(_listener: (to: Navigate) => void): Unsubscribe {
-    return () => undefined;
+  private pendingNavigation: Navigate | null = null;
+  private readonly navigateListeners = new Set<(to: Navigate) => void>();
+
+  onNavigate(listener: (to: Navigate) => void): Unsubscribe {
+    this.navigateListeners.add(listener);
+    return () => this.navigateListeners.delete(listener);
   }
 
+  /** Asks the main window to open a page or a Settings section, as a popup widget's button does (tests). */
+  navigate(to: Navigate): void {
+    this.pendingNavigation = to;
+    for (const l of this.navigateListeners) l(to);
+  }
+
+  /** Hands the waiting navigation over, once. */
   takeNavigation(): Promise<Navigate | null> {
-    return this.reply('takeNavigation', () => null);
+    return this.reply('takeNavigation', () => {
+      const to = this.pendingNavigation;
+      this.pendingNavigation = null;
+      return to;
+    });
   }
 
   // The mock imitates the contract with plausible data; the real readings, tones and choices come from the engine.
   metricReadings(queries: ReadingQuery[]): Promise<MetricReading[]> {
-    return this.reply('metricReadings', () =>
-      queries.map(() => ({ value: null, text: '—', unit: '', percent: null, tone: 'ok', reason: 'The mock has no live readings.' })),
-    );
+    return this.reply('metricReadings', () => {
+      const sys = this.liveUpdate('summary').system;
+      const memory = sys.memory.total > 0 ? (sys.memory.used / sys.memory.total) * 100 : 0;
+      return queries.map((q) => mockMetricReading(q, { cpu: sys.cpu.total, memory }));
+    });
   }
 
   widgetChoices(): Promise<WidgetChoices> {
-    return this.reply('widgetChoices', () => ({ dashboard: [], menuBar: [], menuBarMetrics: [] }));
+    return this.reply('widgetChoices', () => mockWidgetChoices());
   }
 
   showMainWindow(): Promise<void> {

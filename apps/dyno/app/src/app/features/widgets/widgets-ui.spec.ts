@@ -3,7 +3,6 @@ import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import type { DashboardWidget, Placement } from '../../core/generated/widgets';
-import { newDashboardWidget } from './new-widget';
 import { WidgetLayouts } from '../../state/widget-layouts';
 import { CountersStore } from '../../state/counters.store';
 import { LiveStore } from '../../state/live.store';
@@ -13,7 +12,7 @@ import { WidgetView } from './widget-view';
 
 /** A dashboard placement of `kind` showing `metric`. */
 function place(kind: DashboardWidget['kind'], metric: DashboardWidget['metric'], span = 3): Placement<DashboardWidget> {
-  return { id: `${kind}-1`, span, widget: { ...newDashboardWidget(kind), metric } };
+  return { id: `${kind}-1`, span, widget: { kind, metric, options: { rangeSecs: 300, showLabel: true, fill: true, accent: null }, thresholds: { warning: null, critical: null } } };
 }
 
 function env() {
@@ -24,6 +23,20 @@ function env() {
 }
 
 describe('dy-widget', () => {
+  it('colours a big number by the engine tone only, with the number still printed', () => {
+    env();
+    const f = TestBed.createComponent(WidgetView);
+    f.componentRef.setInput('placement', place('bigNumber', 'cpuTotal'));
+    f.componentRef.setInput('metricReading', { value: 95, text: '95', unit: '%', percent: 95, tone: 'bad', reason: null });
+    f.detectChanges();
+    const hero = (f.nativeElement as HTMLElement).querySelector('.hero')!;
+    expect(hero.getAttribute('data-tone')).toBe('bad');
+    expect(hero.textContent).toContain('95');
+    f.componentRef.setInput('metricReading', { value: 5, text: '5', unit: '%', percent: 5, tone: 'ok', reason: null });
+    f.detectChanges();
+    expect(hero.getAttribute('data-tone')).toBe('ok');
+  });
+
   it('draws every kind from live data without errors', () => {
     env();
     for (const [kind, metric] of [['bigNumber', 'cpuTotal'], ['graph', 'networkDown'], ['bars', 'memory'], ['ring', 'memory'], ['heatmap', 'cpuPerCore'], ['topProcesses', 'memory'], ['issues', 'cpuTotal'], ['health', 'cpuTotal'], ['bigNumber', 'fan'], ['graph', 'fan'], ['cpu', 'cpuTotal'], ['diagnosis', 'cpuTotal'], ['events', 'cpuTotal'], ['history', 'cpuTotal'], ['consumers', 'cpuTotal'], ['diskTrend', 'diskFree']] as const) {
