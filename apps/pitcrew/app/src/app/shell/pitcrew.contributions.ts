@@ -29,8 +29,10 @@ export const CONFIRM_DIALOG = defineConfirmDialog({
   load: () => import('@decryp7/paddock-ui/shell/confirm/dialog').then((m) => m.PdConfirmDialog),
 });
 
-// TODO(ADR 0026 §7, Pitcrew row): the configuration diff becomes a wide decision of the shared dialog API.
-/** What saving a runner's configuration would change: a modal form with Cancel and Save and apply. */
+/**
+ * What saving a runner's configuration would change: a wide modal form with Cancel and Save and apply. It is a form rather
+ * than a decision (plan PC-D listed a decision): the changes scroll in the body, and a decision's icon and heading do not fit them.
+ */
 export const CONFIG_DIFF_DIALOG = defineDialog(DIALOG_CONTRACTS['pc.config-diff'], {
   // No height: the window is fitted to its content (the changes scroll inside their own region, up to a fixed height).
   title: msg('pc.dialog.config-diff', 'Review configuration changes'),
@@ -46,7 +48,6 @@ export const REGISTER_DIALOG = defineDialog(DIALOG_CONTRACTS['pc.register'], {
   load: () => import('../features/register/register-wizard').then((m) => m.RegisterWizard),
 });
 
-// TODO(ADR 0026 §7): settings, About and Updates become the shared dialogs; the pages above stay Pitcrew's sections.
 /** The Settings window (the shell's) as the app's own dialog; its contract is in `src-tauri/src/dialogs.rs`. */
 export const SETTINGS_DIALOG = defineDialog(DIALOG_CONTRACTS['pd.settings'], {
   title: msg('pd.settings.title', 'Settings'),
