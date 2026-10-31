@@ -505,3 +505,24 @@ fn a_refused_connection_to_a_checked_address_is_a_connect_failure() {
     assert!(matches!(err, SendError::Connect(_)), "{err}");
     assert!(err.retryable());
 }
+
+#[test]
+fn the_next_checked_address_is_tried_after_a_refused_connect() {
+    // The first address of the name has nothing listening (::1, or no IPv6 at all: either way refused at once); the second has
+    // the server.
+    let (port, server) = smtp_server(SmtpScript::OK);
+    let (s, _) = sender_with(
+        channel_policy(Reach::Loopback),
+        StaticLookup::new().with("mail.test", &["::1", "127.0.0.1"]),
+    );
+    let mut m = mail(port, None);
+    m.host = "mail.test".into();
+    assert_eq!(s.send(&m), Ok(()));
+    assert!(
+        server
+            .join()
+            .unwrap()
+            .iter()
+            .any(|l| l.starts_with("MAIL FROM"))
+    );
+}

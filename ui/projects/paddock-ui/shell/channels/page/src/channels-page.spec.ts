@@ -583,6 +583,23 @@ describe('the Notification channels page', () => {
       expect((await p.memory.get()).settings.channels[0]!.events).toEqual(['diskLow', 'jobDone', 'legacyEvent']);
     });
 
+    it('adds nothing, and keeps Add disabled, while the field holds no names', async () => {
+      const p = await open({}, DECLARED);
+      await p.click(p.rowButton('phone', 'channel-edit'));
+      const add = p.q('channel-event-other-add') as HTMLButtonElement;
+      for (const typed of ['', '  ', ' , ;, ']) {
+        await p.type('channel-event-other-input', typed);
+        expect(add.disabled).toBe(true);
+        // Enter takes the early return: no chip appears and the editor stays open.
+        p.q('channel-event-other-input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        await p.flush();
+        expect(p.q('channel-events-other')!.querySelectorAll('li')).toHaveLength(0);
+        expect(p.q('channel-editor')).not.toBeNull();
+      }
+      await p.type('channel-event-other-input', ' , real ');
+      expect(add.disabled).toBe(false);
+    });
+
     it('still takes a free-text name under Other events, and Enter adds it without saving the form', async () => {
       const p = await open({}, DECLARED);
       await p.click(p.rowButton('phone', 'channel-edit'));
