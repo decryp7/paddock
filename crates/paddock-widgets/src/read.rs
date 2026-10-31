@@ -19,7 +19,8 @@ pub struct Read<C: Catalogue> {
     pub layout: Layout<C::Widget>,
     /// What was wrong, if anything: one note for a fallback, one for dropped entries.
     pub notes: Vec<Note>,
-    /// A newer version's value, kept as read and written back unchanged (`NoteCode::Newer`).
+    /// A value that could not be read cleanly (damaged, too large or a newer version's), kept as read and written back
+    /// unchanged. [`Stored::edit`] replaces a damaged or too-large one; a newer one stays and is never edited.
     pub unread: Option<Value>,
 }
 
@@ -47,6 +48,16 @@ impl<C: Catalogue> PartialEq for Read<C> {
     fn eq(&self, other: &Self) -> bool {
         self.layout == other.layout && self.notes == other.notes && self.unread == other.unread
     }
+}
+
+/// "1 widget in the saved popup layout was not valid and was removed." (plural: "3 widgets ... were").
+fn dropped_message(count: u32, noun: &str) -> String {
+    let (widgets, was) = if count == 1 {
+        ("widget", "was")
+    } else {
+        ("widgets", "were")
+    };
+    format!("{count} {widgets} in the saved {noun} layout {was} not valid and {was} removed.")
 }
 
 /// The defaults, one note, and the value kept to be written back unchanged.
@@ -143,9 +154,7 @@ pub fn read<C: Catalogue>(value: &Value) -> Read<C> {
     let notes = if dropped > 0 {
         vec![Note {
             code: NoteCode::Dropped { count: dropped },
-            message: format!(
-                "{dropped} item(s) in the saved widget layout were not valid and were removed."
-            ),
+            message: dropped_message(dropped, s.noun),
         }]
     } else {
         Vec::new()
@@ -216,6 +225,11 @@ fn read_presets<C: Catalogue>(list: &[Value], dropped: &mut u32) -> Vec<Preset<C
             Counted::PresetPlacements,
             dropped,
         );
+        if placements.len() < s.min_placements as usize {
+            // Applying it would leave the surface with too few widgets.
+            *dropped = dropped.saturating_add(1);
+            continue;
+        }
         out.push(Preset {
             id: shell.id,
             name,
@@ -248,8 +262,14 @@ pub struct Stored<C: Catalogue> {
 }
 
 impl<C: Catalogue> Stored<C> {
-    /// A stored field holding `layout`, with no notes (after an edit).
-    pub fn new(layout: Layout<C::Widget>) -> Stored<C> {
+    /// A stored field holding `layout`, with no notes. The layout is checked ([`Layout::validate`]): a layout that
+    /// breaks a limit is refused with the first problem.
+    pub fn new(layout: Layout<C::Widget>) -> Result<Stored<C>, WidgetError> {
+        layout.validate::<C>()?;
+        Ok(Stored::from_valid(layout))
+    }
+
+    fn from_valid(layout: Layout<C::Widget>) -> Stored<C> {
         Stored {
             read: Read {
                 layout,
@@ -298,7 +318,7 @@ impl<C: Catalogue> Stored<C> {
 
 impl<C: Catalogue> Default for Stored<C> {
     fn default() -> Self {
-        Stored::new(Layout::defaults::<C>())
+        Stored::from_valid(Layout::defaults::<C>())
     }
 }
 

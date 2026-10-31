@@ -116,6 +116,12 @@ impl<W: Widget> Layout<W> {
                 s.max_preset_placements as usize,
                 Counted::PresetPlacements,
             )?;
+            if p.placements.len() < s.min_placements as usize {
+                return Err(WidgetError::TooFew {
+                    min: s.min_placements,
+                    noun: s.noun.into(),
+                });
+            }
         }
         Ok(())
     }

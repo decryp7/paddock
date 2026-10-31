@@ -528,3 +528,64 @@ fn validate_checks_the_placements_too() {
         Err(WidgetError::DuplicateId("clock".into()))
     );
 }
+
+#[test]
+fn applying_a_preset_cannot_go_below_the_fewest() {
+    type Needy = Cat<1, 2>;
+    let mut layout = Layout::defaults::<Needy>();
+    layout.presets = vec![paddock_widgets::Preset {
+        id: pid("empty"),
+        name: "empty".into(),
+        builtin: false,
+        placements: vec![],
+    }];
+    let error =
+        apply::<Needy>(&layout, Edit::ApplyPreset { id: pid("empty") }).expect_err("refused");
+    assert_eq!(
+        error,
+        WidgetError::TooFew {
+            min: 1,
+            noun: "popup".into()
+        }
+    );
+}
+
+#[test]
+fn validate_checks_the_saved_presets_against_the_fewest() {
+    type Needy = Cat<1, 2>;
+    let mut layout = Layout::defaults::<Needy>();
+    layout.presets = vec![paddock_widgets::Preset {
+        id: pid("empty"),
+        name: "empty".into(),
+        builtin: false,
+        placements: vec![],
+    }];
+    assert_eq!(
+        layout.validate::<Needy>(),
+        Err(WidgetError::TooFew {
+            min: 1,
+            noun: "popup".into()
+        })
+    );
+}
+
+#[test]
+fn a_bad_span_is_reported_before_a_duplicate_id() {
+    let mut layout = defaults();
+    layout.placements = vec![
+        paddock_widgets::Placement {
+            id: id("a"),
+            span: 1,
+            widget: Gadget::Alarms { rows: 1 },
+        },
+        paddock_widgets::Placement {
+            id: id("a"),
+            span: 3,
+            widget: disk("x"),
+        },
+    ];
+    assert_eq!(
+        layout.validate::<Gadgets>(),
+        Err(WidgetError::SpanNotAllowed { allowed: vec![2] })
+    );
+}

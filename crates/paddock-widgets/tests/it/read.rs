@@ -133,7 +133,10 @@ fn a_bad_entry_is_dropped_on_its_own_with_a_count() {
     assert_eq!(ids(&r.layout), ["clock", "dup"]);
     assert_eq!(dropped(&r), Some(7));
     assert_eq!(r.notes.len(), 1);
-    assert!(r.notes[0].message.starts_with("7 item(s)"));
+    assert_eq!(
+        r.notes[0].message,
+        "7 widgets in the saved popup layout were not valid and were removed."
+    );
 }
 
 #[test]
@@ -297,4 +300,82 @@ fn the_read_layout_is_always_valid() {
         volume("b")
     ])));
     assert_eq!(r.layout.validate::<Gadgets>(), Ok(()));
+}
+
+#[test]
+fn one_dropped_widget_is_singular() {
+    let r = go(&doc(json!([clock("a"), json!(1)])));
+    assert_eq!(
+        r.notes[0].message,
+        "1 widget in the saved popup layout was not valid and was removed."
+    );
+}
+
+#[test]
+fn a_valid_placement_after_the_scanned_entries_is_not_kept() {
+    // The surface holds 4, so 8 entries are looked at: the first, then 7 invalid ones, then a valid one that is unread.
+    let mut entries = vec![clock("first")];
+    entries.extend((0..7).map(|_| json!(1)));
+    entries.push(alarms("late"));
+    let r = go(&doc(Value::Array(entries)));
+    assert_eq!(ids(&r.layout), ["first"]);
+    assert_eq!(dropped(&r), Some(8));
+}
+
+#[test]
+fn a_valid_preset_after_the_scanned_presets_is_not_kept() {
+    // Two saved presets fit, so 4 entries are looked at.
+    let good = |id: &str| json!({ "id": id, "name": id, "placements": [] });
+    let presets = json!([good("first"), 1, 2, 3, good("late")]);
+    let r = go(&json!({ "version": 2, "placements": [clock("clock")], "presets": presets }));
+    let names: Vec<&str> = r.layout.presets.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["first"]);
+    assert_eq!(dropped(&r), Some(4));
+}
+
+#[test]
+fn a_valid_placement_after_the_scanned_preset_entries_is_not_kept() {
+    // A saved preset holds 3, so 6 entries are looked at.
+    let mut entries = vec![clock("first")];
+    entries.extend((0..5).map(|_| json!(1)));
+    entries.push(alarms("late"));
+    let presets = json!([{ "id": "p", "name": "p", "placements": entries }]);
+    let r = go(&json!({ "version": 2, "placements": [clock("clock")], "presets": presets }));
+    let kept: Vec<String> = r.layout.presets[0]
+        .placements
+        .iter()
+        .map(|p| p.id.to_string())
+        .collect();
+    assert_eq!(kept, ["first"]);
+    assert_eq!(dropped(&r), Some(6));
+}
+
+#[test]
+fn the_size_limit_is_inclusive() {
+    let of_len = |len: usize| {
+        let base = json!({ "version": 2, "placements": [], "pad": "" });
+        let pad = len - base.to_string().len();
+        json!({ "version": 2, "placements": [], "pad": "x".repeat(pad) })
+    };
+    let exact = of_len(4096);
+    assert_eq!(exact.to_string().len(), 4096);
+    assert!(go(&exact).notes.is_empty());
+    let over = of_len(4097);
+    assert_eq!(go(&over).notes[0].code, NoteCode::TooLarge);
+}
+
+#[test]
+fn a_saved_preset_that_keeps_too_few_widgets_is_dropped() {
+    let r = read::<Cat<1, 2>>(&json!({
+        "version": 2,
+        "placements": [clock("clock")],
+        "presets": [
+            { "id": "empty", "name": "empty", "placements": [] },
+            { "id": "bad", "name": "bad", "placements": [json!(1)] },
+            { "id": "ok", "name": "ok", "placements": [clock("c")] },
+        ],
+    }));
+    let names: Vec<&str> = r.layout.presets.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["ok"]);
+    assert_eq!(dropped(&r), Some(3));
 }
