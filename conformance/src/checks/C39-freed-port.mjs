@@ -44,8 +44,14 @@ export function maskRust(text) {
       out += ' '.repeat(stop - i);
       i = stop;
     } else if (text.startsWith('/*', i)) {
-      const end = text.indexOf('*/', i + 2);
-      const stop = end < 0 ? text.length : end + 2;
+      // Block comments nest in Rust.
+      let depth = 1;
+      let stop = i + 2;
+      while (stop < text.length && depth > 0) {
+        if (text.startsWith('/*', stop)) (depth++, (stop += 2));
+        else if (text.startsWith('*/', stop)) (depth--, (stop += 2));
+        else stop++;
+      }
       out += blank(text.slice(i, stop));
       i = stop;
     } else if (text[i] === '"') {

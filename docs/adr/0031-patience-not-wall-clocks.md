@@ -479,6 +479,13 @@ spawn* waits only (names with START, SPAWN, LAUNCH or READY, and waits inside `s
 functions), not every `Duration` wait the section lists. It widens to section 8's patterns and turns to failing with the
 waiver-list targets above.
 
+*Amendment 2026-10-31 (C51 widened, still report-only).* C51 also flags a readiness poll by shape in any function (a
+deadline in a loop that checks a child's liveness or reads readiness), the start-like names connect, handshake, wait_for,
+ready and await, and `Timeout("... start ...")` literals. A run limit that kills its child on timeout is still a fixed wait:
+it says so with `// cap: <why>`. The skips (cdp.rs, run/kill/close/stop-style function names, test files and items,
+fake and fixture binaries) are listed in `conformance/README.md` and the check's header. Cause: a fixed 20 s in a browser
+driver's `connect()` failed CI three times and the check missed it.
+
 **Semantics of the shared judge, for adopters.** A stall is reported once per episode (the slow note once ever), so a
 watch that returned a stall waits for the next event when called again. The hang guard also counts ticks in which the
 caller never read the CPU time, so a caller that passes no CPU reading is still bounded. A start that is slow but alive
