@@ -110,7 +110,7 @@ describe('ProcessesPanel', () => {
     await settle(f, 2);
     (document.querySelector('[cdkMenuItem]') as HTMLElement).click();
     await settle(f, 2);
-    expect(asked().message).toContain('The job that is running now will fail.');
+    expect(asked().details?.[0]).toBe('The job that is running now will fail.');
   });
 
   it('shows the engine’s text when a stop is refused', async () => {
