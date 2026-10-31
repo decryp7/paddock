@@ -69,7 +69,7 @@ impl Executor {
                         let result = l.launcher.launch().map(|()| Launch {
                             at_ms,
                             pid: match l.launcher.child() {
-                                Child::Running { pid } => Some(pid),
+                                Child::Running { pid } | Child::Stopped { pid } => Some(pid),
                                 _ => None,
                             },
                         });

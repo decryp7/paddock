@@ -9,7 +9,7 @@ use dyno_agent::discovery::Discovery;
 use dyno_agent::paths::Dirs;
 use dyno_core::protocol::{Message, PROTOCOL_VERSION};
 use dyno_ipc::{Client, Peer, PeerOptions};
-use paddock_proc::{tree_cpu, Cpu, ProcessId};
+use paddock_proc::{liveness_of, tree_cpu, Cpu, Liveness, ProcessId};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -26,6 +26,11 @@ pub enum Child {
     /// The process it started is running. Its pid names it reliably: the launcher holds the process (unreaped), so the
     /// pid cannot have been handed on (rule 53).
     Running {
+        /// The process id.
+        pid: u32,
+    },
+    /// The process it started is there but stopped by the OS or another app (App Tamer): waited for, never ended (ADR 0031).
+    Stopped {
         /// The process id.
         pid: u32,
     },
@@ -73,19 +78,28 @@ impl Slot {
     fn look(&mut self) -> Child {
         if let Some(c) = self.child.as_mut() {
             match c.try_wait() {
-                Ok(None) => return Child::Running { pid: c.id() },
+                Ok(None) => return running_or_stopped(c.id()),
                 Ok(Some(status)) => {
                     self.exited = Some(status.code());
                     self.child = None;
                 }
                 // It cannot be asked: treat it as still running (it is still held; the quit ends it).
-                Err(_) => return Child::Running { pid: c.id() },
+                Err(_) => return running_or_stopped(c.id()),
             }
         }
         match self.exited {
             Some(code) => Child::Exited { code },
             None => Child::None,
         }
+    }
+}
+
+/// A held child that has not exited: stopped when the OS says so ([`liveness_of`]), else running. The launcher holds the process
+/// unreaped, so the pid names it reliably (rule 53) and its identity is taken from the live process.
+fn running_or_stopped(pid: u32) -> Child {
+    match ProcessId::of(pid).map(|id| liveness_of(id, None)) {
+        Some(Liveness::Paused) => Child::Stopped { pid },
+        _ => Child::Running { pid },
     }
 }
 

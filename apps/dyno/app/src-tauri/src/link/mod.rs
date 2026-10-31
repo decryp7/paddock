@@ -103,6 +103,8 @@ pub enum Stall {
     ServiceNotAnswering,
     /// Starting the agent fails again and again.
     AgentKeepsFailing,
+    /// The agent this app started is stopped by the OS or another app (App Tamer): it is waited for, never ended (ADR 0031).
+    AgentPaused,
 }
 
 impl From<StallCause> for Stall {
@@ -111,6 +113,7 @@ impl From<StallCause> for Stall {
         match cause {
             StallCause::WaitingForSupervisor => Stall::WaitingForService,
             StallCause::HeldByOther => Stall::OtherAgentHolds,
+            StallCause::Paused => Stall::AgentPaused,
             _ => Stall::AgentNotAnswering,
         }
     }
