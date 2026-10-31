@@ -2,7 +2,7 @@
 
 use crate::error::NetError;
 use crate::policy::Policy;
-use crate::reach::{self, Reach, Refusal};
+use crate::reach::{self, LanAccess, Reach, Refusal};
 use crate::request::{Method, Request, Response, header_of};
 use crate::wire::{Lookup, Wire, WireRequest};
 use paddock_download::{Get, Header, Headers, TransportError, TransportErrorKind};
@@ -161,6 +161,7 @@ impl Egress {
                 method,
                 url: url.as_str(),
                 reach: limit,
+                lan: request.lan,
                 headers: &headers,
                 body: &body,
                 user_agent: &self.policy.user_agent,
@@ -226,7 +227,7 @@ impl Egress {
             "https" => {}
             "http" if reach::host_is_loopback(&name) && limit >= Reach::Loopback => {}
             "http"
-                if request.plain_http_lan
+                if request.lan == LanAccess::PlainHttp
                     && limit >= Reach::Lan
                     && reach::host_may_be_lan(&name) => {}
             _ => return Err(NetError::Scheme(name)),
@@ -250,15 +251,20 @@ impl Egress {
             }
         };
         let needed = reach::vet(&addrs, limit).map_err(refuse)?;
-        if request.deny_lan
+        if request.lan == LanAccess::Deny
             && addrs
                 .iter()
                 .any(|a| reach::classify(*a) == reach::Class::Lan)
         {
             return Err(refuse(Refusal::TooFar(reach::Class::Lan)));
         }
-        // Plain http only ever goes to a private network: a name spelled like one that points at a public address is refused.
-        if plain_lan && needed < Reach::Lan {
+        // Plain http only ever goes to a private network: every address must be one, so a name spelled like a home host that
+        // also points at a public address (a token would travel in the clear to it) is refused.
+        if plain_lan
+            && !addrs
+                .iter()
+                .all(|a| reach::classify(*a) == reach::Class::Lan)
+        {
             return Err(NetError::Scheme(name));
         }
         Ok(needed)

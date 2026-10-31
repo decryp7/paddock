@@ -24,6 +24,8 @@ fn rig(policy: Policy, wire: FakeWire) -> Rig {
             .with("other.example.net", &["198.51.100.7"])
             .with("nas.home", &["192.168.1.20"])
             .with("nas.local", &["192.168.1.20"])
+            .with("mixed.local", &["93.184.216.34", "192.168.1.20"])
+            .with("pub.local", &["93.184.216.34"])
             .with("rebind.example.org", &["93.184.216.34", "127.0.0.1"])
             .with("meta.example.org", &["169.254.169.254"])
             .with("void.example.org", &[])
@@ -1023,4 +1025,73 @@ fn host_spelling_for_the_home_network() {
     ] {
         assert!(!host_may_be_lan(h), "{h}");
     }
+}
+
+#[test]
+fn plain_http_needs_every_address_private() {
+    let r = rig(Policy::default().reach(Reach::Lan), FakeWire::new());
+    for name in ["mixed.local", "pub.local"] {
+        let url = format!("http://{name}/x");
+        let err = r
+            .egress
+            .send(&Request::get(&url).plain_http_on_lan(), &CancelToken::new());
+        assert!(matches!(err, Err(NetError::Scheme(_))), "{name}: {err:?}");
+    }
+    assert_eq!(r.wire.sends(), 0);
+    // https to the mixed name is the policy's business (the reach allows both).
+    assert!(
+        r.egress
+            .send(&Request::get("https://mixed.local/x"), &CancelToken::new())
+            .is_ok()
+    );
+}
+
+#[test]
+fn the_lan_access_goes_to_the_wire_as_well() {
+    let r = rig(Policy::default().reach(Reach::Loopback), FakeWire::new());
+    r.egress
+        .send(
+            &Request::get("https://api.example.org/x").without_lan(),
+            &CancelToken::new(),
+        )
+        .unwrap();
+    assert!(
+        r.egress
+            .send(
+                &Request::get("https://nas.local/x").without_lan(),
+                &CancelToken::new()
+            )
+            .is_err()
+    );
+    assert_eq!(r.wire.sends(), 1);
+    assert_eq!(Request::get("https://x").lan, LanAccess::Policy);
+    assert_eq!(
+        Request::get("https://x")
+            .without_lan()
+            .plain_http_on_lan()
+            .lan,
+        LanAccess::PlainHttp
+    );
+}
+
+#[test]
+fn tunnelled_ipv6_is_as_far_as_the_ipv4_inside() {
+    let class = |a: &str| classify(a.parse().unwrap());
+    // NAT64 well-known and local-use, IPv4-compatible, 6to4.
+    assert_eq!(class("64:ff9b::c0a8:0114"), Class::Lan);
+    assert_eq!(class("64:ff9b::7f00:1"), Class::Loopback);
+    assert_eq!(class("64:ff9b::a9fe:a9fe"), Class::Never);
+    assert_eq!(class("64:ff9b::5db8:d822"), Class::Public);
+    assert_eq!(class("64:ff9b:1:c0a8:1:1400::"), Class::Lan);
+    assert_eq!(class("64:ff9b:1:5db8:d8:2200::"), Class::Public);
+    assert_eq!(class("::192.168.1.20"), Class::Lan);
+    assert_eq!(class("::8.8.8.8"), Class::Public);
+    assert_eq!(class("::127.0.0.2"), Class::Loopback);
+    assert_eq!(class("::"), Class::Never);
+    assert_eq!(class("::1"), Class::Loopback);
+    assert_eq!(class("2002:c0a8:0114::1"), Class::Lan);
+    assert_eq!(class("2002:a9fe:a9fe::1"), Class::Never);
+    assert_eq!(class("2002:5db8:d822::1"), Class::Public);
+    assert_eq!(class("fec0::1"), Class::Never);
+    assert_eq!(class("2001:db8::1"), Class::Public);
 }

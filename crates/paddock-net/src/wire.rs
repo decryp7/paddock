@@ -1,7 +1,7 @@
 //! The ports to the network and to name resolution.
 
 use crate::error::NetError;
-use crate::reach::Reach;
+use crate::reach::{LanAccess, Reach};
 use crate::request::Method;
 use paddock_download::Header;
 use std::io::Read;
@@ -18,6 +18,8 @@ pub struct WireRequest<'a> {
     /// The farthest this hop may reach (the policy's reach, lowered by where the request started); the wire applies it to the
     /// addresses it connects to.
     pub reach: Reach,
+    /// How private-network addresses are treated; the wire applies it to the addresses it connects to, like `reach`.
+    pub lan: LanAccess,
     /// The headers to send (the wire adds `Host`, framing and `Accept-Encoding: identity`).
     pub headers: &'a [Header],
     /// The body.
