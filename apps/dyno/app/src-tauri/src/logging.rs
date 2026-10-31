@@ -1,98 +1,72 @@
-//! A small rotating log in the data folder (`logs/app.log`, one older generation). It records what the shell does
-//! (connecting, starting the agent, window and tray events), never file contents or process command lines.
+//! Dyno's own lines (connecting, starting the agent, window and tray events) go to the same dated paddock-log file as the shared
+//! crates' lines (`dyno.<day>.log`, installed first in `run`): one CLEF file per process with microsecond stamps, the session
+//! and process ids and the redaction layer, which the Report-a-problem bundle reads. The former `logs/app.log` writer is gone
+//! (rule 55: one implementation). Names, codes and millisecond counts only; never file contents or command lines.
 
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+static HANDLE: std::sync::OnceLock<paddock_log::LogHandle> = std::sync::OnceLock::new();
 
-/// A log file is rotated once it grows past this size.
-pub const MAX_BYTES: u64 = 256 * 1024;
-
-/// The log file and its size.
-pub struct Log {
-    path: PathBuf,
+/// Keeps the installed log's handle for Report a problem (its Logging section and the level).
+pub fn set_handle(handle: paddock_log::LogHandle) {
+    let _ = HANDLE.set(handle);
 }
 
-impl Log {
-    /// A log at `dir/app.log`.
-    pub fn new(dir: &Path) -> Log {
-        Log { path: dir.join("app.log") }
-    }
-
-    fn older(&self) -> PathBuf {
-        self.path.with_extension("log.1")
-    }
-
-    /// Appends a line (rotating first when the file is large). Failures are ignored: logging never breaks the app.
-    pub fn write(&self, line: &str) {
-        if let Some(dir) = self.path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        if std::fs::metadata(&self.path).is_ok_and(|m| needs_rotation(m.len(), MAX_BYTES)) {
-            let _ = std::fs::rename(&self.path, self.older());
-        }
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&self.path) {
-            let _ = writeln!(f, "{line}");
-        }
-    }
+/// The installed log's handle, when there is one.
+pub fn handle() -> Option<paddock_log::LogHandle> {
+    HANDLE.get().cloned()
 }
 
-/// Whether a file of `len` bytes should be rotated before the next line.
-pub fn needs_rotation(len: u64, max: u64) -> bool {
-    len >= max
+static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// Milliseconds since the app began (the first call, made first thing in `run`): the `UptimeMs` of the start lines, so the gap
+/// from process start to the login decision and to each later step reads straight off the log.
+pub fn uptime_ms() -> u64 {
+    u64::try_from(STARTED.get_or_init(std::time::Instant::now).elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
-static LOG: Mutex<Option<Log>> = Mutex::new(None);
-
-/// Starts logging to `dir`.
-pub fn init(dir: &Path) {
-    let mut g = LOG.lock().unwrap_or_else(|e| e.into_inner());
-    *g = Some(Log::new(dir));
-}
-
-/// Logs a line (to standard error too).
+/// Logs a line at info (to standard error too, as before, for a development run).
 pub fn info(message: &str) {
     eprintln!("dyno: {message}");
-    let line = format!("{} {message}", stamp());
-    if let Some(log) = LOG.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-        log.write(&line);
-    }
-}
-
-fn stamp() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format!("[{secs}]")
+    log::info!(target: "dyno", "{message}");
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::{Mutex, OnceLock};
 
-    #[test]
-    fn lines_append_and_a_full_file_rotates_once() {
-        let dir = tempfile::tempdir().unwrap();
-        let log = Log::new(dir.path());
-        log.write("one");
-        log.write("two");
-        assert_eq!(std::fs::read_to_string(dir.path().join("app.log")).unwrap(), "one\ntwo\n");
-        std::fs::write(dir.path().join("app.log"), vec![b'x'; MAX_BYTES as usize]).unwrap();
-        log.write("fresh");
-        assert_eq!(std::fs::read_to_string(dir.path().join("app.log")).unwrap(), "fresh\n");
-        assert_eq!(std::fs::metadata(dir.path().join("app.log.1")).unwrap().len(), MAX_BYTES);
+    struct Capture(Mutex<Vec<String>>);
+
+    impl log::Log for Capture {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            true
+        }
+        fn log(&self, r: &log::Record) {
+            self.0.lock().unwrap().push(format!("{} {}: {}", r.level(), r.target(), r.args()));
+        }
+        fn flush(&self) {}
+    }
+
+    fn capture() -> &'static Capture {
+        static C: OnceLock<&'static Capture> = OnceLock::new();
+        C.get_or_init(|| {
+            let c: &'static Capture = Box::leak(Box::new(Capture(Mutex::new(Vec::new()))));
+            let _ = log::set_logger(c);
+            log::set_max_level(log::LevelFilter::Trace);
+            c
+        })
     }
 
     #[test]
-    fn rotation_threshold() {
-        assert!(!needs_rotation(9, 10));
-        assert!(needs_rotation(10, 10));
+    fn uptime_counts_from_the_first_call_and_never_goes_back() {
+        let a = super::uptime_ms();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        assert!(super::uptime_ms() >= a);
     }
 
-    #[cfg(unix)]
     #[test]
-    fn an_unwritable_folder_is_not_an_error() {
-        Log::new(Path::new("/dev/null/nope")).write("ignored");
+    fn dynos_lines_go_to_the_shared_log_not_to_a_file_of_their_own() {
+        let c = capture();
+        super::info("connected to the agent");
+        let lines = c.0.lock().unwrap();
+        assert!(lines.iter().any(|l| l == "INFO dyno: connected to the agent"), "{lines:?}");
     }
 }

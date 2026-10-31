@@ -52,6 +52,10 @@ pub struct Executor {
     held: Arc<Mutex<Option<Generation>>>,
     /// The discovery file seen by the last look, tagged with that look (what a connect and a removal may act on).
     seen: Arc<Mutex<Option<(Seq, Discovery)>>>,
+    /// What the last told look showed, so a repeat is not told again.
+    look_gate: Arc<Mutex<super::steps::ChangeGate>>,
+    /// The last reason a connect attempt failed, so a repeat is not told again.
+    connect_gate: Arc<Mutex<super::steps::ChangeGate>>,
 }
 
 impl Executor {
@@ -66,6 +70,7 @@ impl Executor {
                 match job {
                     LauncherJob::Launch(child) => {
                         let at_ms = now_ms();
+                        let launching = std::time::Instant::now();
                         let result = l.launcher.launch().map(|()| Launch {
                             at_ms,
                             pid: match l.launcher.child() {
@@ -73,6 +78,11 @@ impl Executor {
                                 _ => None,
                             },
                         });
+                        let launch_ms = u64::try_from(launching.elapsed().as_millis()).unwrap_or(u64::MAX);
+                        match &result {
+                            Ok(launch) => log::info!(Pid = launch.pid.unwrap_or(0), LaunchMs = launch_ms; "Agent launched"),
+                            Err(e) => log::error!(LaunchMs = launch_ms, Error = e.as_str(); "Agent launch failed"),
+                        }
                         if result.is_err() {
                             let mut held = lock(&h);
                             if *held == Some(child) {
@@ -115,6 +125,8 @@ impl Executor {
             peer_ids: Arc::new(AtomicU64::new(0)),
             held,
             seen: Arc::new(Mutex::new(None)),
+            look_gate: Arc::new(Mutex::new(super::steps::ChangeGate::default())),
+            connect_gate: Arc::new(Mutex::new(super::steps::ChangeGate::default())),
         })
     }
 
@@ -126,13 +138,14 @@ impl Executor {
                 service,
                 cpu,
                 lock: probe_lock,
+                deciding,
             } => {
                 let (link, events, held, seen) = (self.link.clone(), self.events.clone(), *lock(&self.held), self.seen.clone());
-                // Read now, on the owner's side: the machine published `Looking` before it issued this look.
-                let deciding = matches!(link.transitions.current().phase, super::machine::Phase::Looking { .. });
+                let gate = self.look_gate.clone();
                 spawn("dyno-look", move || {
+                    let began = std::time::Instant::now();
                     let probe = if service { link.probe() } else { None };
-                    let (look, found) = ports::look(
+                    let (look, found, service_ms) = ports::look(
                         seq,
                         &link.dirs,
                         &link.app_version,
@@ -146,6 +159,21 @@ impl Executor {
                         },
                     );
                     *lock(&seen) = found.map(|d| (seq, d));
+                    let took = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
+                    if let Some(line) = ports::describe_look(&look, deciding, took, service_ms) {
+                        // Told when the state it shows changes (a slow world seen again and again is one line, not one per look).
+                        // The key leaves out every number (ages and durations change on each look, the state does not).
+                        let key: String = line
+                            .split("; took ")
+                            .next()
+                            .unwrap_or(&line)
+                            .chars()
+                            .filter(|c| !c.is_ascii_digit())
+                            .collect();
+                        if lock(&gate).changed(&key) || deciding {
+                            logging::info(&line);
+                        }
+                    }
                     let _ = events.send(Event::Looked(look));
                 });
             }
@@ -166,12 +194,20 @@ impl Executor {
                     self.peer_ids.clone(),
                     self.seen.clone(),
                 );
+                let gate = self.connect_gate.clone();
                 spawn("dyno-connect", move || {
+                    // A failure is told when its reason changes, not on every attempt (a wait retries on every look).
+                    let failed = |why: &str| {
+                        if lock(&gate).changed(why) {
+                            logging::info(&format!("connect attempt failed: {why}"));
+                        }
+                    };
                     // The file of the look this connect is for; if that look was replaced, the file is read again (the agent may
                     // also have written a newer one since). Off the owner thread: it is file I/O.
                     let tagged = lock(&seen).clone().filter(|(s, _)| *s == look).map(|(_, d)| d);
                     let current = Discovery::read(&link.dirs.discovery()).or(tagged);
                     let Some(d) = current else {
+                        failed("there is no discovery file");
                         let _ = events.send(Event::ConnectFailed {
                             seq,
                             why: "There is no discovery file.".into(),
@@ -181,14 +217,21 @@ impl Executor {
                     // A file of another build is never used, and one of this build is never asked to exit: the decision was
                     // taken from a file that may have been replaced.
                     if ports::hint_of(&d, &link.app_version).same_build != (purpose == Purpose::Use) {
+                        failed("the discovery file changed");
                         let _ = events.send(Event::ConnectFailed {
                             seq,
                             why: "The discovery file changed.".into(),
                         });
                         return;
                     }
+                    let handshake = std::time::Instant::now();
                     match ports::connect(&d, &link.sink) {
                         Ok(peer) => {
+                            lock(&gate).changed("connected");
+                            logging::info(&ports::describe_connect(
+                                purpose,
+                                u64::try_from(handshake.elapsed().as_millis()).unwrap_or(u64::MAX),
+                            ));
                             let id = ids.fetch_add(1, Ordering::SeqCst) + 1;
                             lock(&peers).insert(id, peer.clone());
                             let watcher = (events.clone(), peer.clone());
@@ -203,13 +246,20 @@ impl Executor {
                                 peer.close(); // the owner has ended
                                 return;
                             }
+                            let connected_at = std::time::Instant::now();
                             spawn("dyno-peer", move || {
                                 watcher.1.wait_closed(None);
+                                log::info!(
+                                    ConnectedMs = u64::try_from(connected_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+                                    "Agent connection closed"
+                                );
                                 let _ = watcher.0.send(Event::PeerClosed { peer: id });
                             });
                         }
                         Err(why) => {
-                            logging::info(&format!("agent.json names an agent that did not answer: {why}"));
+                            if lock(&gate).changed(&why) {
+                                logging::info(&format!("agent.json names an agent that did not answer: {why}"));
+                            }
                             let _ = events.send(Event::ConnectFailed { seq, why });
                         }
                     }

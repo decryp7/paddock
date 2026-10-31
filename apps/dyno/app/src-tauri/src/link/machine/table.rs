@@ -195,7 +195,8 @@ fn begin_reports_starting_and_looks_once() {
             seq: 1,
             service: true,
             cpu: false,
-            lock: true
+            lock: true,
+            deciding: true
         }
     ));
     assert_eq!(*s.phase(), Phase::Looking { seq: 1 });
@@ -1220,4 +1221,30 @@ fn a_stopped_agent_that_is_gone_when_next_looked_at_is_judged_as_exited() {
         ..look(seq)
     }));
     assert!(matches!(s.phase(), Phase::BackingOff { .. }), "{cmds:?}");
+}
+
+/// Only the look that starts an attempt is a decision look; the looks of a wait, after a connection and after a service change are
+/// not (they always ask the service for what they need).
+#[test]
+fn only_the_look_that_starts_an_attempt_is_a_decision_look() {
+    let is_deciding = |cmds: &[Command]| {
+        cmds.iter().find_map(|c| {
+            if let Command::Look { deciding, .. } = c {
+                Some(*deciding)
+            } else {
+                None
+            }
+        })
+    };
+    assert_eq!(is_deciding(&Supervisor::new().step(Event::Begin)), Some(true));
+    let mut waiting = starting();
+    let cmds = waiting.step(Event::Tick);
+    assert_eq!(
+        is_deciding(&cmds),
+        Some(false),
+        "the look of a wait is not a decision look: {cmds:?}"
+    );
+    let mut connected = connected_own();
+    let cmds = connected.step(Event::ServiceChanged);
+    assert_eq!(is_deciding(&cmds), Some(false), "{cmds:?}");
 }

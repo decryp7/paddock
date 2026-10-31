@@ -223,6 +223,27 @@ pub enum Phase {
     },
 }
 
+impl Phase {
+    /// The variant's name, for the log (a fixed word, never the fields: they hold sequence numbers and connection ids).
+    pub fn name(&self) -> &'static str {
+        match self {
+            Phase::Idle => "Idle",
+            Phase::Looking { .. } => "Looking",
+            Phase::Connecting { .. } => "Connecting",
+            Phase::Starting { .. } => "Starting",
+            Phase::WaitingForService => "WaitingForService",
+            Phase::WaitingForHolder => "WaitingForHolder",
+            Phase::Replacing { .. } => "Replacing",
+            Phase::TakingBack { .. } => "TakingBack",
+            Phase::Ending { .. } => "Ending",
+            Phase::BackingOff { .. } => "BackingOff",
+            Phase::Connected { .. } => "Connected",
+            Phase::Quitting { .. } => "Quitting",
+            Phase::Stopped { .. } => "Stopped",
+        }
+    }
+}
+
 /// What the world or the person tells the machine.
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub enum Event {
@@ -304,6 +325,9 @@ pub enum Command {
         /// Probe the agent lock. Not while the agent this app launched is starting: the probe holds the lock for an instant and
         /// would make that agent's own claim fail (exit 3) when the two meet.
         lock: bool,
+        /// The look that starts an attempt and decides what to do: a discovery file beside a held lock is connected to without
+        /// asking the login service (`SMAppService.status` can take tens of seconds at login).
+        deciding: bool,
     },
     /// Start the agent (never while a child is held); answers [`Event::Launched`].
     Launch {
@@ -665,7 +689,13 @@ impl Supervisor {
     fn issue_look(&mut self, service: bool, cpu: bool, lock: bool, out: &mut Vec<Command>) -> Seq {
         let seq = self.next_seq();
         self.look_out = Some(seq);
-        out.push(Command::Look { seq, service, cpu, lock });
+        out.push(Command::Look {
+            seq,
+            service,
+            cpu,
+            lock,
+            deciding: false,
+        });
         seq
     }
 
@@ -679,6 +709,7 @@ impl Supervisor {
             service: true,
             cpu: false,
             lock: true,
+            deciding: true,
         });
     }
 

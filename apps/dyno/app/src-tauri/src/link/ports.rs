@@ -80,6 +80,11 @@ impl Slot {
             match c.try_wait() {
                 Ok(None) => return running_or_stopped(c.id()),
                 Ok(Some(status)) => {
+                    // Told once (the slot forgets the child below): 3 means another agent holds the data folder.
+                    match status.code() {
+                        Some(code) => log::warn!(ExitCode = code; "The agent this app started exited"),
+                        None => log::warn!(Signal = true; "The agent this app started was ended by a signal"),
+                    }
                     self.exited = Some(status.code());
                     self.child = None;
                 }
@@ -249,7 +254,7 @@ pub fn look(
     launcher: &dyn Launcher,
     held: Option<Generation>,
     ask: Ask<'_>,
-) -> (Look, Option<Discovery>) {
+) -> (Look, Option<Discovery>, Option<u64>) {
     let Ask {
         probe,
         cpu,
@@ -274,16 +279,19 @@ pub fn look(
             LockSeen::Free
         }
     });
+    let asked = std::time::Instant::now();
+    let service = ask_service(probe, hint.as_ref(), lock, deciding);
+    let service_ms = service.map(|_| u64::try_from(asked.elapsed().as_millis()).unwrap_or(u64::MAX));
     let look = Look {
         seq,
         now_ms: now_ms(),
-        service: ask_service(probe, hint.as_ref(), lock, deciding),
+        service,
         hint,
         lock,
         child,
         cpu,
     };
-    (look, found)
+    (look, found, service_ms)
 }
 
 /// Whether a look must ask the login service. A discovery file beside a held lock is decided on without it (the machine
@@ -302,6 +310,58 @@ fn ask_service(
     deciding: bool,
 ) -> Option<super::ServiceState> {
     probe.filter(|_| !deciding || service_needed(hint, lock)).map(|p| p())
+}
+
+/// A routine look (one of a wait's ticks) is told only when it took at least this long: a slow look is a finding, a fast one noise.
+pub const SLOW_LOOK_MS: u64 = 1_000;
+
+/// One look in words for the log, or `None` for a routine fast look. A decision look (the start of an attempt) is always told:
+/// what the service, the discovery file and the lock said and how long it all took (`service_ms`: the login service's own part,
+/// `SMAppService.status` and `launchctl`, the step that took 30 s on a busy login). Fixed words and numbers only.
+pub fn describe_look(look: &Look, deciding: bool, took_ms: u64, service_ms: Option<u64>) -> Option<String> {
+    if !deciding && took_ms < SLOW_LOOK_MS {
+        return None;
+    }
+    let service = match (look.service, service_ms) {
+        (Some(s), Some(ms)) => format!(
+            "service asked, answered in {ms} ms ({}, {})",
+            if s.installed { "installed" } else { "not installed" },
+            if s.supervises { "supervises" } else { "does not supervise" }
+        ),
+        (Some(_), None) => "service asked".to_string(),
+        (None, _) => "service not asked".to_string(),
+    };
+    let file = match &look.hint {
+        None => "no file".to_string(),
+        Some(h) => format!(
+            "file of {}, {} s old",
+            if h.same_build { "this build" } else { "another build" },
+            (look.now_ms - h.started_ms).max(0) / 1_000
+        ),
+    };
+    let lock = match look.lock {
+        Some(LockSeen::Held) => "lock held",
+        Some(LockSeen::Free) => "lock free",
+        None => "lock not probed",
+    };
+    let child = match look.child {
+        None | Some((_, Child::None)) => "child none",
+        Some((_, Child::Running { .. })) => "child running",
+        Some((_, Child::Stopped { .. })) => "child stopped",
+        Some((_, Child::Exited { .. })) => "child exited",
+    };
+    let kind = if deciding { "look" } else { "look (slow)" };
+    Some(format!("{kind}: {service}; {file}; {lock}; {child}; took {took_ms} ms"))
+}
+
+/// A successful connection in words: whom it was for and how long the handshake took.
+pub fn describe_connect(purpose: super::machine::Purpose, handshake_ms: u64) -> String {
+    match purpose {
+        super::machine::Purpose::Use => format!("connected to the agent to use it: handshake {handshake_ms} ms"),
+        super::machine::Purpose::AskToExit => {
+            format!("connected to an agent of another build to ask it to exit: handshake {handshake_ms} ms")
+        }
+    }
 }
 
 /// Connects to the agent a discovery file names and starts the peer that fans its pushes out to the sink.
@@ -376,5 +436,71 @@ mod tests {
         // A look that is not the decision (after a connection, a service change, a wait) always gets the service's answer.
         assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Held), false).is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    fn seen_look(hint: Option<HintSeen>, lock: Option<LockSeen>, service: Option<super::super::ServiceState>) -> Look {
+        Look {
+            seq: 3,
+            now_ms: 10_000,
+            hint,
+            lock,
+            service,
+            child: None,
+            cpu: Cpu::NotRead,
+        }
+    }
+
+    /// Login-start diagnosis (2026-10-31): a bundle must show, per decision look, what the service, the discovery file and the lock
+    /// said and how long it all took, with names and numbers only. Routine looks of a wait stay out of the log unless slow.
+    #[test]
+    fn a_decision_look_is_told_with_the_service_the_file_the_lock_and_the_times() {
+        let service = super::super::ServiceState {
+            installed: true,
+            supervises: true,
+        };
+        let look = seen_look(
+            Some(HintSeen {
+                started_ms: 4_000,
+                ..hint(true)
+            }),
+            Some(LockSeen::Held),
+            Some(service),
+        );
+        let line = describe_look(&look, true, 2_345, Some(1_800)).unwrap();
+        assert_eq!(
+            line,
+            "look: service asked, answered in 1800 ms (installed, supervises); file of this build, 6 s old; lock held; child none; took 2345 ms"
+        );
+        let bare = describe_look(&seen_look(None, Some(LockSeen::Free), None), true, 4, None).unwrap();
+        assert_eq!(bare, "look: service not asked; no file; lock free; child none; took 4 ms");
+        let other = describe_look(&seen_look(Some(hint(false)), None, None), true, 5, None).unwrap();
+        assert!(
+            other.contains("file of another build") && other.contains("lock not probed"),
+            "{other}"
+        );
+    }
+
+    #[test]
+    fn a_routine_look_is_told_only_when_it_was_slow() {
+        let look = seen_look(None, None, None);
+        assert_eq!(describe_look(&look, false, 12, None), None);
+        assert_eq!(describe_look(&look, false, SLOW_LOOK_MS - 1, None), None);
+        let slow = describe_look(&look, false, SLOW_LOOK_MS, Some(SLOW_LOOK_MS)).unwrap();
+        assert!(
+            slow.starts_with("look (slow):") && slow.contains(&format!("took {SLOW_LOOK_MS} ms")),
+            "{slow}"
+        );
+    }
+
+    #[test]
+    fn a_connection_is_told_with_its_purpose_and_how_long_the_handshake_took() {
+        assert_eq!(
+            describe_connect(super::super::machine::Purpose::Use, 37),
+            "connected to the agent to use it: handshake 37 ms"
+        );
+        assert_eq!(
+            describe_connect(super::super::machine::Purpose::AskToExit, 5),
+            "connected to an agent of another build to ask it to exit: handshake 5 ms"
+        );
     }
 }
