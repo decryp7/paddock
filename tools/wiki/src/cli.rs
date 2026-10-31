@@ -161,7 +161,7 @@ pub fn run_with(args: &[String], out: &mut dyn Write, err: &mut dyn Write, ctx: 
                     &format!("wiki {} started", env!("CARGO_PKG_VERSION")),
                     &[
                         ("version", json!(env!("CARGO_PKG_VERSION"))),
-                        ("args", json!(args)),
+                        ("args", json!(loggable_args(&cli, args))),
                         ("os", json!(std::env::consts::OS)),
                         ("arch", json!(std::env::consts::ARCH)),
                         ("ci", json!(ctx.ci)),
@@ -172,7 +172,15 @@ pub fn run_with(args: &[String], out: &mut dyn Write, err: &mut dyn Write, ctx: 
                 let ms = trace.elapsed_ms();
                 match &result {
                     Ok(r) => trace.info(
-                        &format!("summary: {}", r.text.lines().last().unwrap_or("done")),
+                        // Only the lint's summary line is safe to log; the others (`log`) echo the user's text.
+                        &format!(
+                            "summary: {}",
+                            if matches!(cli.command, Command::Lint(_)) {
+                                r.text.lines().last().unwrap_or("done")
+                            } else {
+                                "done"
+                            }
+                        ),
                         &[("exit", json!(r.exit.code())), ("ok", json!(true)), ("ms", json!(ms))],
                     ),
                     Err(e) => trace.event(
@@ -186,8 +194,37 @@ pub fn run_with(args: &[String], out: &mut dyn Write, err: &mut dyn Write, ctx: 
             Err(m) => Err(io_error(m).with_hint("Check the --log-file path and the permissions.")),
         }
     };
+    // A failed run says where its log is (the log file is the evidence, ER-27).
+    let result = match (result, &log_file) {
+        (Err(e), Some(p)) => Err(CliError::new(e.exit, e.message).with_hint(format!("{} The log of this run: {}", e.hint, p.display()))),
+        (other, _) => other,
+    };
     emit_errors(&result, ctx, cli.json, err);
     finish(if cli.json { Format::Json } else { Format::Text }, result, out, err).code()
+}
+
+/// The command line as the log may show it: commands, flags and paths as given, but every free-text value (a log subject, a
+/// page title, summary or source) replaced by its length, since user text does not belong in a log by default.
+fn loggable_args(cli: &Cli, args: &[String]) -> Vec<String> {
+    let free: Vec<&str> = match &cli.command {
+        Command::Log(a) => vec![a.subject.as_str()],
+        Command::New(a) => {
+            let mut v = vec![a.title.as_str()];
+            v.extend(a.summary.as_deref());
+            v.extend(a.sources.iter().map(String::as_str));
+            v
+        }
+        Command::Lint(_) => Vec::new(),
+    };
+    args.iter()
+        .map(|a| {
+            if !a.starts_with("--") && free.contains(&a.as_str()) {
+                format!("<text: {} chars>", a.chars().count())
+            } else {
+                a.clone()
+            }
+        })
+        .collect()
 }
 
 /// The error findings of a lint (standard error: `error file:line: message`, or in CI an annotation), and in CI the failure of

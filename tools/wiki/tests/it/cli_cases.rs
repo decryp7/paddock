@@ -646,3 +646,58 @@ fn a_failing_git_command_logs_the_tail_of_its_standard_error_live() {
     );
     assert!(err.contains(" started") && err.contains("os=") && err.contains("ci=false"), "{err}");
 }
+
+#[test]
+fn the_run_log_masks_free_text_and_a_failed_run_names_its_log_file() {
+    let dir = wiki(&[("log.md", s("# Log\n"))]);
+    let w = p(&dir);
+    let logs = tempfile::tempdir().unwrap();
+    let ctx = ctx_logged(logs.path());
+    let read_logs = || -> String {
+        std::fs::read_dir(logs.path())
+            .unwrap()
+            .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap())
+            .collect()
+    };
+    let (code, _, _) = cli_in(&["log", "fix", "secret subject text", "--wiki", &w], &ctx);
+    assert_eq!(code, 0);
+    let (code, _, _) = cli_in(
+        &[
+            "new",
+            "topic",
+            "--title",
+            "Top Secret Title",
+            "--summary",
+            "hidden summary",
+            "--source",
+            "private source",
+            "--wiki",
+            &w,
+        ],
+        &ctx,
+    );
+    assert_eq!(code, 0);
+    let all = read_logs();
+    for secret in ["secret subject text", "Top Secret Title", "hidden summary", "private source"] {
+        assert!(!all.contains(secret), "`{secret}` reached the log");
+    }
+    assert!(all.contains("<text: 19 chars>"), "the subject's length is logged: {all}");
+    assert!(
+        all.contains("\"log\"") && all.contains("\"--title\"") && all.contains("\"topic\""),
+        "command, flags and slug stay"
+    );
+    // a failed run names the log of that run, in the message and in the CI annotation
+    let (code, _, err) = cli_in(&["lint", "--wiki", &w, "--rules", "nowhere/rules.md"], &ctx);
+    assert_eq!(code, 1);
+    let file = std::fs::read_dir(logs.path())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|f| std::fs::read_to_string(f).unwrap().contains("nowhere/rules.md"))
+        .unwrap();
+    assert!(err.contains(&format!("The log of this run: {}", file.display())), "{err}");
+    assert!(
+        err.lines()
+            .any(|l| l.starts_with("::error::wiki-lint: ") && l.contains("The log of this run: ")),
+        "{err}"
+    );
+}

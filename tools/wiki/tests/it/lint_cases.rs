@@ -145,7 +145,7 @@ fn slugs_follow_the_forge() {
 }
 
 #[test]
-fn the_cli_exits_1_on_errors_and_on_warnings_only_with_strict() {
+fn the_cli_exits_5_on_findings_and_on_warnings_only_with_strict() {
     let stale = wiki(&[("one.md", s(&page("2026-09-01", "[a.md]", "- x [y](two.md)\n")))]);
     let rules = stale.path().join("rules.txt");
     std::fs::write(&rules, RULES).unwrap();
