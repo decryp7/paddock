@@ -177,7 +177,7 @@ impl Stream {
                         },
                         None => None,
                     };
-                    wait(&self.s, libc::POLLIN, left);
+                    wait(&self.s, libc::POLLIN, left)?;
                 }
                 other => return other,
             }
@@ -187,26 +187,52 @@ impl Stream {
     pub(super) fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         loop {
             match self.s.write(buf) {
-                Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => wait(&self.s, libc::POLLOUT, None),
+                Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => wait(&self.s, libc::POLLOUT, None)?,
                 other => return other,
             }
         }
     }
 }
 
-/// Waits until `s` is ready for `events` (or has hung up or failed: the next call reports it), up to `timeout`.
+/// Waits until `s` is ready for `events` (or has hung up or failed), up to `timeout`.
+///
+/// `Ok` means "look again": ready, timed out or interrupted; the caller's next read or write and its deadline check decide.
+/// A descriptor that is not open (POLLNVAL) or has failed or hung up (POLLERR, POLLHUP) is not an error here: the
+/// caller's next read or write reports its own error. A failing `poll` itself (EINVAL, ENOMEM, ...) is returned, else a
+/// caller whose reads and writes keep giving EAGAIN would spin on it.
+fn wait(s: &UnixStream, events: libc::c_short, timeout: Option<Duration>) -> io::Result<()> {
+    wait_with(s, events, timeout, sys_poll)
+}
+
+/// The real `poll(2)` on one descriptor: the number of ready descriptors, or the OS error.
 #[allow(unsafe_code)]
-fn wait(s: &UnixStream, events: libc::c_short, timeout: Option<Duration>) {
+fn sys_poll(p: &mut libc::pollfd, ms: libc::c_int) -> io::Result<libc::c_int> {
+    // SAFETY: one valid pollfd for the duration of the call.
+    let rc = unsafe { libc::poll(p, 1, ms) };
+    if rc < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(rc)
+    }
+}
+
+/// [`wait`] with the poll call passed in (a test injects a failing one).
+fn wait_with(
+    s: &UnixStream,
+    events: libc::c_short,
+    timeout: Option<Duration>,
+    poll: impl FnOnce(&mut libc::pollfd, libc::c_int) -> io::Result<libc::c_int>,
+) -> io::Result<()> {
     let ms = timeout.map_or(-1, |t| libc::c_int::try_from(t.as_millis().max(1)).unwrap_or(libc::c_int::MAX));
     let mut p = libc::pollfd {
         fd: s.as_raw_fd(),
         events,
         revents: 0,
     };
-    // SAFETY: one valid pollfd for the duration of the call.
-    let _ = unsafe { libc::poll(&mut p, 1, ms) };
-    // Ready, timed out, interrupted or failed: the caller's next call or deadline check decides (a failed descriptor
-    // reports its own error from the read or write).
+    match poll(&mut p, ms) {
+        Err(e) if e.kind() != io::ErrorKind::Interrupted => Err(e),
+        _ => Ok(()),
+    }
 }
 
 pub(super) struct Closer(UnixStream);
@@ -311,25 +337,33 @@ mod tests {
         n > 0 && i16::from_ne_bytes([info[192], info[193]]) & 0x4000 != 0
     }
 
-    /// Puts the socket behind `fd` into the state an inspected close leaves it in (2026-10-31, docs/lessons.md): a copy
-    /// of the descriptor is closed while a thread is inside a read on that copy, so XNU drains it and marks the SOCKET
-    /// (shared by every descriptor of it) SS_DRAINING for good. Waits on the condition, bounded.
+    /// Puts the socket behind `s` into the state an inspected close leaves it in (2026-10-31, docs/lessons.md): a copy
+    /// of the descriptor is replaced while a thread is inside a read on that copy, so XNU drains it and marks the SOCKET
+    /// (shared by every descriptor of it) SS_DRAINING for good. Call it while `s` is still blocking (the reader must
+    /// wait inside the socket). The copy's slot is replaced by /dev/null with `dup2`, never closed, so a late reader
+    /// gets end of file and can never read a number another thread has reused. Waits on the condition, bounded.
     #[cfg(target_os = "macos")]
     #[allow(unsafe_code)]
-    fn poison(fd: std::os::fd::RawFd) {
+    fn poison(s: &UnixStream) {
+        let fd = s.as_raw_fd();
         let poisoned = (0..2000).any(|_| {
-            // SAFETY: a copy of an open descriptor, closed exactly once below.
-            let copy = unsafe { libc::dup(fd) };
-            assert!(copy >= 0);
+            // SAFETY: a copy of an open descriptor and a fresh /dev/null, each closed exactly once below.
+            let (copy, null) = unsafe { (libc::dup(fd), libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY)) };
+            assert!(copy >= 0 && null >= 0);
             let reader = std::thread::spawn(move || {
                 let mut b = [0u8; 1];
-                // SAFETY: reads into a valid one-byte buffer; the descriptor may be closed under it (that is the point).
+                // SAFETY: reads into a valid one-byte buffer; the slot is replaced under it (that is the point).
                 unsafe { libc::read(copy, b.as_mut_ptr().cast(), 1) }
             });
             std::thread::yield_now();
-            // SAFETY: our own copy.
-            unsafe { libc::close(copy) };
+            // SAFETY: replaces our own copy's slot atomically, then closes the spare and (once the reader is done) the copy.
+            unsafe {
+                libc::dup2(null, copy);
+                libc::close(null);
+            }
             let _ = reader.join();
+            // SAFETY: our own copy, no thread uses it any more.
+            unsafe { libc::close(copy) };
             draining(fd)
         });
         assert!(poisoned, "could not put the socket into the draining state");
@@ -344,8 +378,8 @@ mod tests {
     #[test]
     fn a_draining_socket_still_waits_for_data_times_out_and_writes() {
         let (a, b) = UnixStream::pair().unwrap();
+        poison(&a);
         let (mut ours, mut theirs) = (Stream::new(a).unwrap(), Stream::new(b).unwrap());
-        poison(ours.s.as_raw_fd());
         // Nothing comes: the read waits until its timeout (a draining socket fails at once with EBADF instead).
         ours.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
         let mut buf = [0u8; 1];
@@ -370,5 +404,61 @@ mod tests {
             sent += ours.write(&big[sent..]).expect("a write on a draining socket waits for room");
         }
         assert_eq!(drain.join().unwrap(), 1 << 20);
+    }
+
+    /// A failing `poll` (EINVAL, ENOMEM) is an error for the caller, not something to spin on; an interrupted one is not.
+    #[test]
+    fn a_failing_poll_is_returned_but_an_interrupted_one_is_not() {
+        let (a, _b) = UnixStream::pair().unwrap();
+        let fail = |_: &mut libc::pollfd, _: libc::c_int| Err(io::Error::from_raw_os_error(libc::EINVAL));
+        let err = wait_with(&a, libc::POLLIN, None, fail).unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::EINVAL));
+        let eintr = |_: &mut libc::pollfd, _: libc::c_int| Err(io::Error::from_raw_os_error(libc::EINTR));
+        wait_with(&a, libc::POLLIN, None, eintr).unwrap();
+        // A poll that reports a bad descriptor through revents (POLLNVAL) is Ok: the next read or write reports the error.
+        let nval = |p: &mut libc::pollfd, _: libc::c_int| {
+            p.revents = libc::POLLNVAL;
+            Ok(1)
+        };
+        wait_with(&a, libc::POLLIN, None, nval).unwrap();
+    }
+
+    /// A closer's shutdown wakes a write that is blocked on a full buffer (the peer never reads) with an error.
+    #[test]
+    fn a_closer_wakes_a_write_blocked_on_a_full_buffer() {
+        let (a, _never_reads) = UnixStream::pair().unwrap();
+        let mut ours = Stream::new(a).unwrap();
+        let closer = ours.closer().unwrap();
+        let (full_tx, full_rx) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            let chunk = [1u8; 4096];
+            let mut signalled = false;
+            loop {
+                // Once a non-blocking write would block, the buffer is full: tell the test, then keep writing (it waits).
+                if !signalled {
+                    match ours.s.write(&chunk) {
+                        Ok(_) => continue,
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                            signalled = true;
+                            let _ = full_tx.send(());
+                        }
+                        Err(e) => return e,
+                    }
+                }
+                if let Err(e) = ours.write(&chunk) {
+                    return e;
+                }
+            }
+        });
+        full_rx.recv().unwrap();
+        closer.close();
+        let err = writer.join().unwrap();
+        assert!(
+            matches!(
+                err.kind(),
+                io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset | io::ErrorKind::NotConnected
+            ),
+            "{err:?}"
+        );
     }
 }
