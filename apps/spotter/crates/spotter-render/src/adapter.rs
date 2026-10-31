@@ -5,6 +5,7 @@ use crate::launch::{self, Chromium, EndedBy, LaunchOptions, Mode};
 use crate::page::Outcome;
 use crate::ready::{Readiness, Rule};
 use crate::Error;
+use spotter_core::job::{Job, Phase, Unit};
 use spotter_core::render::{PageRenderer, RenderError, RenderedPage};
 use spotter_core::source::BoxFuture;
 use std::path::PathBuf;
@@ -125,8 +126,35 @@ fn blocking_render(
     }
 }
 
+/// What happens when the browser is stopped by the OS while it starts: the log says so and the asking operation reports the
+/// paused phase, so the person sees "waiting" instead of a stalled bar (ER-18).
+fn pause_note(job: Option<Job>) -> launch::PauseNote {
+    launch::PauseNote(std::sync::Arc::new(move |event| {
+        log::info!(
+            "{}",
+            if event == launch::PauseEvent::Paused {
+                launch::PAUSED_TEXT
+            } else {
+                "The browser runs again"
+            }
+        );
+        if let Some(job) = &job {
+            match event {
+                launch::PauseEvent::Paused => job.report_done(Phase::BrowserPaused, Unit::Count, 0, None),
+                launch::PauseEvent::Resumed => job.resume_after_pause(),
+            }
+        }
+    }))
+}
+
 impl ChromiumRenderer {
-    async fn render_page(&self, url: &str, wait_selector: Option<&str>, timeout: Duration) -> Result<RenderedPage, RenderError> {
+    async fn render_page(
+        &self,
+        url: &str,
+        wait_selector: Option<&str>,
+        timeout: Duration,
+        job: Option<Job>,
+    ) -> Result<RenderedPage, RenderError> {
         check_url(url)?;
         let Some(exe) = self.resolve() else {
             return Err(RenderError::Unavailable(Error::NotFound.to_string()));
@@ -135,6 +163,7 @@ impl ChromiumRenderer {
         opts.mode = self.mode;
         opts.extra_args = self.extra_args.clone();
         opts.memory_cap = self.memory_cap;
+        opts.on_paused = Some(pause_note(job));
         // The watchdog is the backstop behind the page's own deadline.
         opts.max_lifetime = launch::lifetime_for(timeout);
         let (url, sel) = (url.to_string(), wait_selector.map(str::to_string));
@@ -151,13 +180,39 @@ impl PageRenderer for ChromiumRenderer {
         wait_selector: Option<&'a str>,
         timeout: Duration,
     ) -> BoxFuture<'a, Result<RenderedPage, RenderError>> {
-        Box::pin(self.render_page(url, wait_selector, timeout))
+        Box::pin(self.render_page(url, wait_selector, timeout, None))
+    }
+
+    fn render_job<'a>(
+        &'a self,
+        url: &'a str,
+        wait_selector: Option<&'a str>,
+        timeout: Duration,
+        job: &'a Job,
+    ) -> BoxFuture<'a, Result<RenderedPage, RenderError>> {
+        Box::pin(self.render_page(url, wait_selector, timeout, Some(job.clone())))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_paused_browser_is_reported_to_the_job_and_the_report_ends_with_the_pause() {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let job = Job::new(spotter_core::job::Cancel::new(), move |p| {
+            sink.lock().unwrap().push((p.phase, p.label))
+        });
+        job.report(Phase::Checking, Unit::Count, 1, Some(3));
+        let note = pause_note(Some(job));
+        (note.0)(launch::PauseEvent::Paused);
+        (note.0)(launch::PauseEvent::Resumed);
+        let phases: Vec<_> = seen.lock().unwrap().iter().map(|p| p.0).collect();
+        assert_eq!(phases, [Phase::Checking, Phase::BrowserPaused, Phase::Checking]);
+        (pause_note(None).0)(launch::PauseEvent::Paused); // no job: only logged, never panics
+    }
 
     #[test]
     fn only_web_addresses() {
@@ -171,6 +226,7 @@ mod tests {
     async fn no_browser_is_unavailable_with_a_hint() {
         let d = tempfile::tempdir().unwrap();
         // An explicit executable that is missing still launches (and fails); with none anywhere, Unavailable.
+        // conformance: no-launch — only resolves; it renders only when nothing is found, and in test builds the launch refuses an installed browser
         let r = ChromiumRenderer::new(d.path(), d.path());
         if r.resolve().is_none() {
             let e = r.render("https://a.test/", None, Duration::from_secs(1)).await.unwrap_err();

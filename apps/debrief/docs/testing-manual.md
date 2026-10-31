@@ -246,5 +246,23 @@ too), removed when the run ends; `DEBRIEF_E2E_KEEP_DATA=1` keeps it for inspecti
 and the page HTML to `app/e2e-tauri/.artifacts/`. The single-instance lock is not covered by `DEBRIEF_DATA_DIR`:
 close any running Debrief first.
 
-CI: the `tauri-smoke` job in `.gitea/workflows/debrief.yml (repo root)` runs this on `windows-latest` and `ubuntu-latest`;
-both legs are required, and failure artifacts are uploaded.
+CI: the `tauri-smoke` job in `.gitea/workflows/debrief.yml (repo root)` runs this on Linux only, in the CI container under
+Xvfb, and uploads failure artifacts. The real app opens windows, and the Windows and macOS host runners run in a user's
+session (the Mac runner is the user's own desktop), where a test never opens one (Paddock rule 7). Run these instead in
+the local test VMs (never on a desktop you work on, and never in CI), before every release and after a change to the
+shell, the windows, the WebView2 or WKWebView glue, the sidecars or the bundle layout:
+
+- **Windows (WebView2):** in the Windows test VM, under the agents' own user and folder, the one-time setup above, then
+  `npm run e2e:tauri:build` and `npm run e2e:tauri` from `app/`.
+- **macOS (launch and quit, start-up budgets):** in a throwaway Tart macOS VM, against the debug `.app` built on the host
+  (`npx tauri build --debug --bundles app --config src-tauri/tauri.sidecars.conf.json` in `app/`):
+  `bash scripts/ci/macos-smoke.sh <Debrief.app>` (every sidecar's self-test, then the app stays up and quits within 10 s)
+  and `node scripts/ci/startup-bench.mjs <Debrief.app> --runs 5` (the medians against `scripts/ci/startup-budgets.json`).
+  CI still starts the sidecars of the macOS bundle (`macos-verify-bundle.sh` in the `bundle` job), but no longer the app.
+
+- **Real-browser tests (both VMs):** the driver's and the renderer's live tests, with `CHROMIUM_TEST_PATH` naming the
+  pinned Chrome for Testing in the VM:
+  `PADDOCK_LIVE_BROWSER=vm DEBRIEF_REQUIRE_TEST_BROWSER=1 cargo nextest run -p chromium-driver -p debrief-app -E '(binary(it) & test(/^real_browser::/)) | test(/browser::renderer::tests::(reads_a_scripted|a_challenge_page)/)'`.
+  `vm` is honoured only inside a test VM (docs/dev-setup.md, repo root, "Test VMs and real browsers").
+
+Record each VM run in the release notes of the release it gates: **VM smoke: <date> <version> pass**.

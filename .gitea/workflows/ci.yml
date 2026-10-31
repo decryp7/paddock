@@ -171,13 +171,17 @@ jobs:
           WORKBENCH_DEMO_PORT: ${{ matrix.shard == 1 && '4302' || '4312' }}
         run: npx playwright test --shard=${{ matrix.shard }}/2
 
-  # WebKit is the engine of WKWebView, which the macOS apps render in: the three ui Playwright projects run in it on the Mac host runner
-  # (Playwright's own WebKit build), for pushes to main, v* tags and nightly.yml only. Branch and pull request runs stay Chromium-only (rule 3).
+  # WebKit is the engine of WKWebView, which the macOS apps render in: the three ui Playwright projects run in it (Playwright's
+  # own WebKit build, which the CI image carries), for pushes to main, v* tags and nightly.yml only. Branch and pull request
+  # runs stay Chromium-only (rule 3). In the Linux container, never on the Mac host runner: a test never starts a browser
+  # in a user's session (rule 7), and Debrief runs its WebKit project the same way.
   e2e-webkit:
-    name: reference apps in WebKit (macOS)
+    name: reference apps in WebKit
     needs: [plan]
     if: ${{ needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))) }}
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     defaults:
       run:
         working-directory: ui
@@ -195,18 +199,6 @@ jobs:
       - name: Install
         working-directory: .
         run: npm ci
-
-      # A host runner has no image: the browser is installed once per Playwright version into a kept host folder (outside the
-      # checkout and the runner user's own caches, rule 7) and only when that folder is missing.
-      - name: WebKit
-        run: |
-          PW_VERSION=$(node -p "require('playwright-core/package.json').version")
-          BROWSERS="${RUNNER_TOOL_CACHE:-$HOME/.cache}/paddock-playwright/$PW_VERSION"
-          echo "PLAYWRIGHT_BROWSERS_PATH=$BROWSERS" >> "$GITHUB_ENV"
-          if [ ! -f "$BROWSERS/.installed-webkit" ]; then
-            PLAYWRIGHT_BROWSERS_PATH="$BROWSERS" npx playwright install webkit
-            touch "$BROWSERS/.installed-webkit"
-          fi
 
       - name: Reference app checks in WebKit
         env:
@@ -254,7 +246,7 @@ jobs:
       # waiver (paddock.waivers.toml).
       - name: Paddock itself (applicable checks)
         working-directory: .
-        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C48,C53,C54,C56,C57 --strict C36
+        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C48,C53,C54,C55,C56,C57 --strict C36
 
 
   # The shared CI actions' scripts and the dev and host tools (plan X10, X47): every script runs in a scratch folder with a
@@ -350,6 +342,11 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
       - run: cargo fmt --all --check
 
+      # Conformance C55 over the shared crates (rule 7: tests start a real browser only in a throwaway session), on every
+      # Rust change: the conformance job runs only when conformance/ itself changes.
+      - name: No real browser outside a throwaway session (C55)
+        run: node ../conformance/bin/paddock-conformance.mjs --app paddock --root . --only C55
+
       # cargo-hakari and cargo-machete come with the image (ci-image/).
       # One feature set per dependency (docs/dev-setup.md): the workspace-hack crate is current and every member uses it.
       - name: Workspace hack up to date
@@ -368,10 +365,12 @@ jobs:
       # The gate (scripts/coverage-gate.mjs) leaves out only the `#[tauri::command]` attribute lines: llvm-cov charges every
       # region of the macro's generated wrapper to that line, which no test can all reach.
       # This is also Linux's all-features test run (the crate leg skips its own on Linux): the real-browser tests of
-      # paddock-chromium must find the image's Chrome for Testing instead of skipping.
+      # paddock-chromium must find the image's Chrome for Testing instead of skipping. They run only here
+      # (PADDOCK_LIVE_BROWSER=1: a throwaway container, rule 7); the host legs never start a real browser.
       - name: Coverage (>= 99 % lines)
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
+          PADDOCK_LIVE_BROWSER: "1"
         run: |
           cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-files/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src|paddock-health/src/tauri|paddock-siblings/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-chromium/src/fake\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-plugin-test/src/bin/(fixture|fixture_v1|misbehaving)\.rs$|paddock-plugin-api/src/entry\.rs$|paddock-plugin-test/src/process\.rs$|cargo-paddock-plugin/src/main\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
           node ../scripts/coverage-gate.mjs lcov.info 99
@@ -421,16 +420,6 @@ jobs:
       # folders are the runner's per-job folder, so concurrent jobs on one host never share either.
       - uses: ./.gitea/actions/job-isolation
 
-      # The test browser outside the checkout, which stable-workspace moves: the slot's kept folder (the installer stamps the
-      # pinned version in it).
-      - name: Test browser folder (macOS, Windows)
-        if: runner.os != 'Linux'
-        working-directory: .
-        run: |
-          dir="$(bash conformance/ci/job-isolation.sh path browser paddock)"
-          if command -v cygpath >/dev/null; then dir="$(cygpath -w "$dir")"; fi
-          echo "PADDOCK_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
-
       # Host runners check out into a per-job hashed folder; sccache keys a compile on its folder, so the workspace crates miss
       # on every run. Build from the same physical path every time: PADDOCK_WORKSPACE, the cargo steps' working-directory
       # (macOS: the checkout moved there, the old path a link; Windows, where act keeps the work folder open: a clone there
@@ -472,36 +461,16 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-      # The build chromium.toml pins, on the host runners (the Linux image has it): checked against its SHA-256 and kept in a
-      # folder that outlives the job, so it is downloaded once per pin. Sets CHROMIUM_TEST_PATH.
-      - name: Chrome for Testing (macOS, Windows)
-        if: ${{ !cancelled() && runner.os != 'Linux' }}
-        uses: ./.gitea/actions/install-test-browser
-        with:
-          catalogue: ${{ github.workspace }}/crates/paddock-chromium/src/chromium.toml
-          env-prefix: PADDOCK
-          dir: ${{ env.PADDOCK_TEST_BROWSER_DIR }}
-
       # Every crate's tests with every feature, so the `tauri` adapters are built and tested too (the dialogs and panels on the
-      # mock runtime, paddock-chromium against its fake browser and against Chrome for Testing: CHROMIUM_TEST_PATH, never an
-      # installed browser, rule 7; a missing browser fails instead of skipping). On Linux the coverage job (crates) runs
-      # exactly this run under llvm-cov, so this leg does not run it twice.
+      # mock runtime, paddock-chromium against its fake browser). No real browser on a host: these runners run in a user's
+      # session, so paddock-chromium's real-browser tests run only in the Linux coverage job (crates), and print why here
+      # (rule 7). On Linux the coverage job runs exactly this run under llvm-cov, so this leg does not run it twice.
       - name: Tests (workspace, every feature)
         if: ${{ !cancelled() && runner.os != 'Linux' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
-        env:
-          PADDOCK_REQUIRE_TEST_BROWSER: "1"
-          # Chrome's verbose log of each real-browser test on Windows, kept below when the job fails (ADR 0030: why the
-          # network service went away is only in there).
-          PADDOCK_TEST_BROWSER_LOG: ${{ runner.os == 'Windows' && format('{0}/chrome-logs', runner.temp) || '' }}
-        run: cargo nextest run --workspace --all-features --profile ci
-
-      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
-        if: failure() && runner.os == 'Windows'
-        with:
-          name: chrome-logs-${{ runner.os }}
-          path: ${{ runner.temp }}/chrome-logs
-          if-no-files-found: ignore
+        run: |
+          echo "::notice::paddock-chromium's real-browser tests run in the Linux job 'crates' (coverage), never on this desktop runner (Paddock rule 7)."
+          cargo nextest run --workspace --all-features --profile ci
 
       # The crates whose code changes with an optional feature off (cfg(not(feature)) paths, a default feature that can be
       # turned off) also run without it. Cargo unifies features across the packages of one run, so a crate that another
@@ -620,30 +589,13 @@ jobs:
       - uses: ./.gitea/actions/host-tools
         if: runner.os != 'Linux'
 
-      # An app whose tests drive a real browser (paddock.ci.json `testBrowser`): the pinned Chrome for Testing, never an installed
-      # one (rule 7). The image has it on Linux; on a host it is the app's kept folder of the job slot (test-browser-<app>-<slot>).
-      - name: Test browser folder (macOS, Windows)
-        if: runner.os != 'Linux' && matrix.test_browser_prefix != ''
-        shell: bash
-        env:
-          APP: ${{ matrix.app }}
-        run: |
-          dir="$(bash conformance/ci/job-isolation.sh path browser "$APP")"
-          if command -v cygpath >/dev/null; then dir="$(cygpath -w "$dir")"; fi
-          echo "PADDOCK_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
-
-      - name: Chrome for Testing (macOS, Windows)
-        if: runner.os != 'Linux' && matrix.test_browser_prefix != ''
-        uses: ./.gitea/actions/install-test-browser
-        with:
-          catalogue: ${{ github.workspace }}/${{ matrix.test_browser_catalogue }}
-          env-prefix: ${{ matrix.test_browser_prefix }}
-          dir: ${{ env.PADDOCK_TEST_BROWSER_DIR }}
-
-      # Points the app's tests at that browser; a missing one fails the run instead of skipping the tests. The Linux container
-      # runs as root, where Chrome refuses to start with its sandbox: tests only (`noSandboxOnLinux`).
+      # An app whose tests drive a real browser (paddock.ci.json `testBrowser`): the image's pinned Chrome for Testing, never an
+      # installed one, and only in the Linux container: the host legs run in a user's session, where a test never starts a real
+      # browser (rule 7; app-gates' display wrap sets PADDOCK_LIVE_BROWSER=1 under xvfb-run, and a host leg prints a notice).
+      # A missing browser fails the run instead of skipping the tests. The container runs as root, where Chrome refuses to start
+      # with its sandbox: tests only (`noSandboxOnLinux`).
       - name: The tests' browser
-        if: matrix.test_browser_prefix != ''
+        if: runner.os == 'Linux' && matrix.test_browser_prefix != ''
         shell: bash
         env:
           PREFIX: ${{ matrix.test_browser_prefix }}

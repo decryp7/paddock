@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, type Locator, type Page } from '@playwright/test';
+import { pageModKey } from './keyboard.ts';
 
 /*
  * Page objects for the parts of the Paddock shell (plan S14 and the packages before it), by their accessible names and
@@ -189,9 +190,12 @@ export class ShellMenus {
   async item(menu: string, item: string): Promise<Locator> {
     return (await this.open(menu)).getByRole('menuitem', { name: item });
   }
-  /** Whether the window runs on a Mac (keys read ⌘ there). */
-  isMac(): Promise<boolean> {
-    return this.page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform));
+  /**
+   * Whether the window runs on a Mac (keys read ⌘ there), decided as the app does ({@link pageModKey}: the navigator's platform
+   * and user agent). WebKit on Linux emulates Safari: its platform says Linux while its user agent says Mac.
+   */
+  async isMac(): Promise<boolean> {
+    return (await pageModKey(this.page)) === 'Meta';
   }
 }
 

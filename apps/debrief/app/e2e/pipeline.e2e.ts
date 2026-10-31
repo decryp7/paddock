@@ -1,19 +1,9 @@
-import AxeBuilder from '@axe-core/playwright';
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { openApp } from './app';
-import { WCAG_TAGS } from './axe';
+import { expectNoSeriousViolations } from './axe';
 import { showProfileEditor } from './menu-support';
 
-/** Fails on any serious or critical WCAG 2.2 A/AA violation. */
-async function expectNoSeriousViolations(page: Page, label: string): Promise<void> {
-  const { violations } = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-  const blocking = violations
-    .filter((v) => v.impact === 'serious' || v.impact === 'critical')
-    .map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.slice(0, 6).map((n) => n.target.join(' ')) }));
-  expect(blocking, `axe violations (${label})`).toEqual([]);
-}
-
-test('a drop step added in the pipeline flow removes events and shows its effect', async ({ page }) => {
+test('a drop step added in the pipeline flow removes events and shows its effect', async ({ page }, testInfo) => {
   await openApp(page);
   await showProfileEditor(page);
   await page.getByRole('button', { name: /^Pipeline/ }).first().click();
@@ -27,7 +17,7 @@ test('a drop step added in the pipeline flow removes events and shows its effect
   await card.getByRole('textbox', { name: 'Value', exact: true }).fill('Debug');
   await expect(card.locator('.summary')).toHaveText('Drop events where @level contains Debug');
   await expect(card.locator('.stat')).toHaveText('not run yet');
-  await expectNoSeriousViolations(page, 'pipeline-flow');
+  await expectNoSeriousViolations(page, testInfo, 'pipeline-flow');
 
   await page.getByRole('button', { name: 'Save & apply' }).click();
   await expect(page.getByText('● Unsaved')).toHaveCount(0);

@@ -1,4 +1,4 @@
-import { test, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 /**
  * Documentation screenshots (`SCREENSHOTS=1 npx playwright test --project=screenshots`): 1440x900 at 2x, both themes.
@@ -10,9 +10,41 @@ const NOW = new Date('2026-10-22T12:00:00Z');
 /** The units a frame is cut between. */
 const BLOCKS = 'main header.page-head, main dl.strip, main section, main section > *, main .section-head, main li, main tbody tr, main footer.foot, main .body > *';
 
-async function settle(page: Page, ms = 900): Promise<void> {
-  await page.waitForTimeout(ms);
+/**
+ * Waits for the screen to be what a user sees (no sleep, rule 49). First the page's own ready locators (what shows once its data
+ * has arrived: a skeleton that has not been drawn yet is "not there" too), then no skeleton, every avatar answered, fonts and images
+ * decoded, a frame drawn.
+ */
+async function settle(page: Page, ...ready: string[]): Promise<void> {
+  for (const selector of ready) await expect(page.locator(selector).first()).toBeVisible();
+  await expect(page.locator('pd-skeleton, [aria-busy="true"]')).toHaveCount(0);
+  await expect(page.locator('sp-avatar[data-state="pending"]')).toHaveCount(0);
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await Promise.all([...document.images].map((img) => img.decode().catch(() => undefined)));
+    await new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+  });
 }
+
+/** Makes the window as tall as the page's scrolling area needs, so a whole page is in the frame (nothing cut at the bottom). */
+async function fitHeight(page: Page): Promise<void> {
+  const extra = await page.evaluate(() => {
+    const sc = [...document.querySelectorAll('*')].find((e) => e.scrollHeight > e.clientHeight + 2 && getComputedStyle(e).overflowY !== 'visible');
+    return sc ? sc.scrollHeight - sc.clientHeight : 0;
+  });
+  const vp = page.viewportSize() ?? { width: 1440, height: 900 };
+  if (extra > 0) await page.setViewportSize({ width: vp.width, height: vp.height + extra });
+}
+
+/** What shows once each page has its data. */
+const READY = {
+  dashboard: ['main .strip', 'sp-whats-new li.item', 'sp-chart .host canvas, sp-chart .host svg'],
+  watches: ['main tbody tr'],
+  detail: ['main h1', 'main tbody tr'],
+  empty: ['main .empty'],
+  tray: ['pd-tray-popover button'],
+  wizard: ['main .grid sp-avatar'],
+} as const;
 
 async function open(page: Page, url: string): Promise<void> {
   await page.clock.setFixedTime(NOW);
@@ -105,7 +137,7 @@ async function frames(page: Page, name: string, scheme: string, opts: { blocks?:
       const sc = [...document.querySelectorAll('*')].find((e) => e.scrollHeight > e.clientHeight + 40 && getComputedStyle(e).overflowY !== 'visible');
       if (sc) sc.scrollTop += by;
     }, frame.next);
-    await settle(page, 300);
+    await settle(page);
     n++;
   }
 }
@@ -121,7 +153,7 @@ async function section(page: Page, from: string, to: string, file: string): Prom
     const sc = [...document.querySelectorAll('*')].find((e) => e.scrollHeight > e.clientHeight + 40 && getComputedStyle(e).overflowY !== 'visible');
     if (sc) sc.scrollTop -= 16;
   });
-  await settle(page, 500);
+  await settle(page);
   const keep = await page.locator(to).evaluate((e) => Math.ceil((e.closest('section') ?? e).getBoundingClientRect().bottom + 16));
   const vp = page.viewportSize() ?? { width: 1440, height: 900 };
   await page.screenshot({ path: file, clip: { x: 0, y: 0, width: vp.width, height: Math.min(keep, vp.height) } });
@@ -138,16 +170,17 @@ for (const scheme of ['dark', 'light'] as const) {
     for (const [name, url] of shots) {
       test(`${name} ${scheme}`, async ({ page }) => {
         await open(page, url);
-        await settle(page, 1400);
+        await settle(page, ...(name === 'dashboard' ? READY.dashboard : name === 'watches' ? READY.watches : READY.detail));
         await frames(page, name, scheme);
       });
     }
     // The detail page is a little taller than the window: a taller window shows it whole instead of cutting it in two.
     for (const [name, url] of [['watch-detail', '/#/watches/w-1'], ['watch-detail-upgrade', '/#/watches/w-6']] as const) {
       test(`${name} ${scheme}`, async ({ page }) => {
-        await page.setViewportSize({ width: 1440, height: 1030 });
         await open(page, url);
-        await settle(page, 1400);
+        await settle(page, ...READY.detail);
+        await fitHeight(page);
+        await settle(page, ...READY.detail);
         await trimInnerScrollers(page);
         await page.screenshot({ path: `${OUT}/${name}-${scheme}.png` });
       });
@@ -156,70 +189,53 @@ for (const scheme of ['dark', 'light'] as const) {
     for (const [name, url] of [['dashboard-empty', '/?mock=empty'], ['watches-empty', '/?mock=empty#/watches']] as const) {
       test(`${name} ${scheme}`, async ({ page }) => {
         await open(page, url);
-        await settle(page, 1000);
+        await settle(page, ...READY.empty);
         await page.screenshot({ path: `${OUT}/${name}-${scheme}.png`, clip: { x: 0, y: 0, width: 1440, height: 560 } });
       });
     }
-    test(`settings ${scheme}`, async ({ page }) => {
-      await open(page, '/#/settings');
-      await settle(page, 1400);
-      await frames(page, 'settings', scheme, { blocks: CARDS, max: 4 });
-    });
-    test(`settings e-mail ${scheme}`, async ({ page }) => {
-      await open(page, '/#/settings');
-      await settle(page, 1000);
-      const mail = page.locator('sp-mail-settings');
-      await mail.getByLabel('Server').fill('smtp.example.org');
-      await mail.getByLabel('From').fill('spotter@example.org');
-      await mail.getByLabel('User name').fill('spotter-robot');
-      await mail.getByLabel('Password').fill('example-password');
-      await mail.getByRole('button', { name: 'Save' }).click();
-      await mail.getByLabel('Send a test message to').fill('you@example.org');
-      await mail.getByRole('button', { name: 'Send test e-mail' }).click();
-      await settle(page, 500);
-      await section(page, '#not-h', '#not-h', `${OUT}/settings-email-${scheme}.png`);
-    });
+    // Settings is a dialog window of the shell (not a route): its screenshots return with the shared dialogs (ADR 0026 §7).
     test(`cadence ${scheme}`, async ({ page }) => {
       await open(page, '/');
-      await settle(page, 1400);
+      await settle(page, ...READY.dashboard);
       await section(page, '#cad-h', '#cad-h', `${OUT}/dashboard-cadence-${scheme}.png`);
     });
     test(`release panel ${scheme}`, async ({ page }) => {
       await open(page, '/#/watches/w-2');
-      await settle(page, 1200);
+      await settle(page, ...READY.detail);
       await page.locator('tbody tr').nth(1).click();
-      await settle(page, 400);
+      await settle(page, 'aside[aria-label="Release details"]');
       await trimInnerScrollers(page);
       await page.screenshot({ path: `${OUT}/watch-detail-panel-${scheme}.png` });
     });
     test(`tray ${scheme}`, async ({ page }) => {
       // The shell sizes the popup window to its content; the browser build fits the viewport the same way.
-      await page.setViewportSize({ width: 372, height: 600 });
+      await page.setViewportSize({ width: 372, height: 1000 });
       await page.clock.setFixedTime(NOW);
       await page.goto('/#/tray');
-      await settle(page, 1200);
+      await settle(page, ...READY.tray);
+      await expect(page.locator('pd-tray-popover').getByText(/R\d|\d+\.\d/).first()).toBeVisible();
       const height = await page.locator('pd-tray-popover').evaluate((e) => Math.ceil(e.getBoundingClientRect().height));
       await page.setViewportSize({ width: 372, height: height + 12 });
-      await settle(page, 300);
+      await settle(page);
       await page.screenshot({ path: `${OUT}/tray-${scheme}.png` });
     });
     test(`charts ${scheme}`, async ({ page }) => {
       await open(page, '/');
-      await settle(page, 1400);
+      await settle(page, ...READY.dashboard);
       await section(page, '#chart-h', '#rel-h', `${OUT}/dashboard-charts-${scheme}.png`);
     });
     test(`row menu ${scheme}`, async ({ page }) => {
       await open(page, '/#/watches');
-      await settle(page, 1200);
+      await settle(page, ...READY.watches);
       await page.locator('tbody tr', { hasText: 'Orbit server' }).click({ button: 'right', position: { x: 160, y: 24 } });
-      await settle(page, 400);
+      await settle(page);
       await page.screenshot({ path: `${OUT}/watches-menu-${scheme}.png` });
     });
     test(`feed menu ${scheme}`, async ({ page }) => {
       await open(page, '/');
-      await settle(page, 1200);
+      await settle(page, ...READY.dashboard);
       await page.locator('sp-whats-new li.item').nth(1).click({ button: 'right', position: { x: 220, y: 24 } });
-      await settle(page, 400);
+      await settle(page);
       // Whole rows only: end the picture at the last feed row that fits in the window.
       const keep = await page.evaluate(() => {
         const win = window.innerHeight;
@@ -231,23 +247,27 @@ for (const scheme of ['dark', 'light'] as const) {
     test(`schedule ${scheme}`, async ({ page }) => {
       await open(page, '/#/watches/new');
       await page.getByRole('button', { name: /Node\.js/ }).click();
-      await settle(page, 800);
+      await page.getByRole('table', { name: 'Releases found' }).waitFor();
       await page.getByRole('button', { name: 'Next' }).click();
       await page.getByRole('button', { name: 'Next' }).click();
       await page.getByRole('group', { name: 'How to schedule checks' }).getByRole('button', { name: 'Cron' }).click();
       await page.getByLabel('Cron expression').fill('0 * * * *');
-      await settle(page, 1200);
+      // The preview follows the debounced schedule: it no longer shows the previous one.
+      await expect(page.locator('sp-schedule-editor .preview')).not.toContainText('Every 6 hours');
+      await settle(page, 'sp-schedule-editor .preview');
       await trimInnerScrollers(page);
       await page.screenshot({ path: `${OUT}/wizard-schedule-${scheme}.png` });
     });
     test(`wizard ${scheme}`, async ({ page }) => {
       await open(page, '/#/watches/new');
-      await settle(page, 700);
+      await settle(page, ...READY.wizard);
       await page.screenshot({ path: `${OUT}/wizard-source-${scheme}.png` });
       // The preview lists every release it reports ("12 releases found"): a taller window shows all of them above the footer.
       await page.setViewportSize({ width: 1440, height: 960 });
       await page.getByRole('button', { name: /Node\.js/ }).click();
-      await settle(page, 1600);
+      // The source test has answered: its panel says how many releases it found, and the table lists them.
+      await expect(page.getByText(/\d+ releases? found/)).toBeVisible();
+      await settle(page, 'table[aria-label="Releases found"] tbody tr');
       await trimInnerScrollers(page);
       await hideRowsUnderFooter(page);
       await page.screenshot({ path: `${OUT}/wizard-configure-${scheme}.png` });

@@ -1,6 +1,7 @@
 import { expect, Page, test } from '@playwright/test';
 import { runCommand } from './ai-support';
 import { ensureInspector, openApp } from './app';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // Usability review 2026-10-23 (U1, U2): the events grid is the main artefact, so the default layout, a document opened
 // beside the timeline and a pinned Inspector all leave it many rows, and the timeline plot keeps its width.
@@ -39,7 +40,7 @@ for (const size of SIZES) {
       await page.addInitScript(() => localStorage.clear());
       await openApp(page);
       // The Explorer is beside the dock; at 1024 px a pinned Inspector (320 px) next to the grid (560 px) needs its room (ADR 0056).
-      if (size.width < 1200) await page.keyboard.press('ControlOrMeta+b');
+      if (size.width < 1200) await pressMod(page, 'Mod+b');
       await ensureInspector(page);
       await expect.poll(() => visibleGridRows(page)).toBeGreaterThanOrEqual(size.rows);
     });

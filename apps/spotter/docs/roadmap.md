@@ -14,7 +14,7 @@ coverage (98.6% / 98.2% lines, see Engine); screenshots at 1440x900 @2x in `docs
 
 1. **CI on three OSes (paused 2026-10-23 for Debrief, run 6125 cancelled):** push adbd36d is not yet verified. Run 6115 (2f0c152): all green except Windows `real_browser`.
    Run 0053a21 showed the 3 slow-load tests fixed and 2 left: the watchdog test (its 4 s limit counts from spawn, so a slow start killed the browser
-   before launch returned; test now allows for START_LIMIT) and `challenges_become_needs_you` (a DevTools call timed out because 8 browsers started at once
+   before launch returned; test now allows for the start's time) and `challenges_become_needs_you` (a DevTools call timed out because 8 browsers started at once
    on the runner; the file's tests now take turns via `serial()`). Next: dispatch/push once Debrief has shipped, read logs with /tmp-style
    `actions/runs/<run>/jobs` then `actions/jobs/<id>/logs`. Also added: stale-bundle guards in the bundle job (not yet run in CI).
 2. Avatars: done (ADR 0006). Owner avatars and favicons are fetched from the watched site, checked, cached on disk with expiry and fall back to a bundled mark per source kind, then to the monogram. The UI asks once per identity (`AvatarsStore`; `sp-avatar` takes `watch` or `preset`) in the feed, watches table, dashboard attention list, cadence cards, detail hero, tray and the wizard's preset tiles. Bundled marks exist per source kind, not per preset (brand logos are not licensed for bundling).
@@ -55,6 +55,10 @@ functions. `npm audit --omit=dev --audit-level=high` reports 0 vulnerabilities; 
 `TZ=Pacific/Auckland`.
 
 Left:
+- Open (ER-22, after 1.0.0): move the Copy menu on selected text onto the shared `PdCopyMenu` / `<pd-copy-menu />` of
+  `@decryp7/paddock-ui` and delete `shared/ui/copy-menu.ts`. It needs the `$localize` runtime first (`@angular/localize`
+  and the `@angular/localize/init` polyfill, as Dyno has): the shared menu's label is `$localize`d. Until then Spotter's copy
+  carries the WebKit fixes by hand (press keeps the focus, selection given back on close; `e2e/copy-menu.spec.ts`).
 - Done: the detail hero's upgrade line has a Copy command button when the release carries `upgradeCommand`.
 
 - Check schedules (ADR 0005): the wizard's Schedule section has Every / At times / Cron (`sp-schedule-editor`) with the engine's live preview; done: the watches table shows the schedule text next to Next and `wizard-schedule-*.png` shows the cron mode.

@@ -1,13 +1,13 @@
-//! The driver against a real browser: only the pinned Chrome for Testing named by `CHROMIUM_TEST_PATH` (rule 7), headless
-//! (no window on the desktop), closed with `Browser.close` so no code-sign clone or process is left behind. Without the
-//! variable the tests pass without doing anything (the fake browser covers the driver everywhere else), unless
-//! `PADDOCK_REQUIRE_TEST_BROWSER` is set (Paddock's Linux CI job, whose image has the pinned build): then they fail.
+//! The driver against a real browser: only the pinned Chrome for Testing named by `CHROMIUM_TEST_PATH` (rule 7), headless,
+//! closed with `Browser.close` so no code-sign clone or process is left behind. Only in a throwaway Linux CI session
+//! (`find_for_tests`, `paddock_testkit::live_browser`): elsewhere the tests print why and return (the fake browser covers
+//! the driver everywhere), and where `PADDOCK_REQUIRE_TEST_BROWSER` is set a missing browser fails them.
 
 use paddock_chromium::discover::find_for_tests;
 use paddock_chromium::{Chromium, LaunchOptions, Outcome, Profile, Window};
 use std::time::Duration;
 
-fn options(base: &std::path::Path) -> LaunchOptions {
+fn headless_options(base: &std::path::Path) -> LaunchOptions {
     let mut o = LaunchOptions::new(Profile::Throwaway(base.to_path_buf()));
     o.window = Window::Headless;
     o.extra_args = paddock_chromium::discover::TEST_ISOLATION_FLAGS
@@ -94,16 +94,9 @@ fn answer(
     None
 }
 
+/// The pinned test browser, headless, where a real browser may start (see the module doc).
 fn require_browser() -> Option<paddock_chromium::discover::Browser> {
-    let exe = find_for_tests();
-    if exe.is_none() {
-        let required = std::env::var("PADDOCK_REQUIRE_TEST_BROWSER").is_ok_and(|v| !v.is_empty());
-        assert!(
-            !required,
-            "PADDOCK_REQUIRE_TEST_BROWSER is set but CHROMIUM_TEST_PATH names no Chrome for Testing"
-        );
-    }
-    exe
+    find_for_tests(Window::Headless)
 }
 
 /// A new tab is loaded at once, with no wait of the caller's (the tab's own first `about:blank` navigation may still
@@ -121,7 +114,8 @@ fn a_new_tab_loads_a_page_at_once() {
         }
     });
     let base = tempfile::tempdir().unwrap();
-    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let mut b =
+        Chromium::launch(&exe, &headless_options(base.path())).expect("Chrome for Testing starts");
     for _ in 0..3 {
         let page = b.new_page().unwrap();
         page.navigate(
@@ -166,7 +160,8 @@ fn a_load_the_network_service_lost_names_the_restart() {
         }
     });
     let base = tempfile::tempdir().unwrap();
-    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let mut b =
+        Chromium::launch(&exe, &headless_options(base.path())).expect("Chrome for Testing starts");
     let browser = b.pid().expect("the browser's process");
     let page = b.new_page().unwrap();
     let url = format!("http://127.0.0.1:{port}/lost");
@@ -229,7 +224,8 @@ fn an_answered_abort_never_blames_the_network_service() {
         }
     });
     let base = tempfile::tempdir().unwrap();
-    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let mut b =
+        Chromium::launch(&exe, &headless_options(base.path())).expect("Chrome for Testing starts");
     let page = b.new_page().unwrap();
     let e = page
         .navigate(
@@ -265,7 +261,8 @@ fn every_helper_process_starts_on_the_first_try() {
         }
     });
     let base = tempfile::tempdir().unwrap();
-    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let mut b =
+        Chromium::launch(&exe, &headless_options(base.path())).expect("Chrome for Testing starts");
     let page = b.new_page().unwrap();
     page.navigate(
         &format!("http://127.0.0.1:{port}/"),
@@ -294,15 +291,7 @@ fn every_helper_process_starts_on_the_first_try() {
 
 #[test]
 fn a_real_browser_reads_a_page_and_closes_cleanly() {
-    let Some(exe) = find_for_tests() else {
-        let required = std::env::var("PADDOCK_REQUIRE_TEST_BROWSER").is_ok_and(|v| !v.is_empty());
-        assert!(
-            !required,
-            "PADDOCK_REQUIRE_TEST_BROWSER is set but CHROMIUM_TEST_PATH names no Chrome for Testing"
-        );
-        eprintln!("CHROMIUM_TEST_PATH is not set: skipped");
-        return;
-    };
+    let Some(exe) = require_browser() else { return };
     // The pinned runtime's self-test against the same build: it names its version.
     use paddock_runtime::RuntimeKind;
     let kind =
@@ -313,7 +302,8 @@ fn a_real_browser_reads_a_page_and_closes_cleanly() {
         Err(why) => assert!(why.contains("another version"), "{why}"),
     }
     let base = tempfile::tempdir().unwrap();
-    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let mut b =
+        Chromium::launch(&exe, &headless_options(base.path())).expect("Chrome for Testing starts");
     let pid = b.pid().unwrap();
     let page = b.start_page().unwrap();
     page.track_dom_changes().unwrap();
@@ -411,7 +401,8 @@ fn a_cancelled_load_says_whether_it_was_a_download_or_replaced() {
         }
     });
     let base = tempfile::tempdir().unwrap();
-    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let mut b =
+        Chromium::launch(&exe, &headless_options(base.path())).expect("Chrome for Testing starts");
     let page = b.start_page().unwrap();
     let e = page
         .navigate(
@@ -500,16 +491,10 @@ fn assert_nothing_left(pid: u32, dir: &std::path::Path) {
 /// Together the two cover both outcomes of a close with no timing in either.
 #[test]
 fn a_browser_ended_by_force_leaves_nothing_behind() {
-    let Some(exe) = find_for_tests() else {
-        let required = std::env::var("PADDOCK_REQUIRE_TEST_BROWSER").is_ok_and(|v| !v.is_empty());
-        assert!(
-            !required,
-            "PADDOCK_REQUIRE_TEST_BROWSER is set but CHROMIUM_TEST_PATH names no Chrome for Testing"
-        );
-        return;
-    };
+    let Some(exe) = require_browser() else { return };
     let base = tempfile::tempdir().unwrap();
-    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let mut b =
+        Chromium::launch(&exe, &headless_options(base.path())).expect("Chrome for Testing starts");
     let pid = b.pid().unwrap();
     b.start_page().unwrap();
     let dir = b.profile_dir().to_path_buf();

@@ -15,6 +15,7 @@
 
 pub mod cdp;
 pub mod challenge;
+pub mod clock;
 pub mod cue;
 pub mod discover;
 #[cfg(any(test, feature = "test-support"))]
@@ -30,7 +31,9 @@ pub mod ready;
 pub const FAKE_CHILD_ENV: &str = "DEBRIEF_FAKE_BROWSER";
 
 pub use challenge::{detect as detect_challenge, Challenge};
-pub use discover::{find, find_for_tests, Browser as BrowserExe, Flavor};
+#[cfg(any(test, feature = "test-support"))]
+pub use discover::find_for_tests;
+pub use discover::{find, Browser as BrowserExe, Flavor};
 pub use launch::{Chromium, Gone, LaunchOptions, Profile, WindowBounds};
 pub use page::Page;
 
@@ -49,6 +52,8 @@ pub enum Error {
     Protocol(String),
     #[error("the browser was closed")]
     Closed,
+    #[error("the page shows a dialog (\"{0}\"); answer it in the browser window, or try again")]
+    Dialog(String),
     #[error("{0}")]
     Install(String),
 }

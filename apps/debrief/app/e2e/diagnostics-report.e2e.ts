@@ -1,5 +1,6 @@
 import { expect, Page, test } from '@playwright/test';
 import { openAppWith } from './mock-url';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // Opening a diagnostics zip (mock backend): the engine recognises it, so the Diagnostics report panel shows its
 // processes, steps, breadcrumbs and snapshots. `?mockOpen=` makes the browser build's "Open files" pick that path.
@@ -41,7 +42,7 @@ test('opening a diagnostics zip shows the report with processes, steps, breadcru
 
 test('without a diagnostics zip the panel explains how to open one', async ({ page }) => {
   await openAppWith(page);
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   await page.getByRole('combobox', { name: 'Type a command' }).fill('Diagnostics report');
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('diag-empty')).toContainText('No diagnostics report is open');

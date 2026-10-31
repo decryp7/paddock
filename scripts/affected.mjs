@@ -245,7 +245,7 @@ export function appOfWorkflow(path, appNames) {
  * Files every app's playwright.config.ts imports by relative path (the e2e port and build guard of @decryp7/paddock-e2e): no
  * npm or tsconfig edge says so, so a change to one re-runs the UI half of every app.
  */
-export const E2E_GUARD_INPUTS = /^ui\/projects\/paddock-e2e\/src\/(env|build-guard)\.ts$/;
+export const E2E_GUARD_INPUTS = /^ui\/projects\/paddock-e2e\/src\/(env|build-guard|keyboard)\.ts$/;
 
 /** Editor and VCS metadata: marks nothing. */
 export const META = [/(^|\/)\.gitignore$/, /^\.editorconfig$/, /(^|\/)\.DS_Store$/, /^lefthook\.yml$/];
@@ -733,9 +733,9 @@ export function matrix(plan, { cargo, apps }, { narrow = false, webkit = false }
         notices: linux && app.notices && (rust || ui) ? 'true' : 'false',
         process_patterns: (app.processPatterns ?? []).join('\n'),
         test_browser_prefix: app.testBrowser?.envPrefix ?? '',
-        test_browser_catalogue: app.testBrowser?.catalogue ?? '',
         test_browser_no_sandbox: linux && app.testBrowser?.noSandboxOnLinux ? 'true' : 'false',
-        display: linux && app.display ? 'true' : 'false',
+        // Every leg: the Linux one runs the tests under xvfb-run with PADDOCK_LIVE_BROWSER=1, a host leg says where they run.
+        display: app.display ? 'true' : 'false',
         rust,
         ui: linux && ui,
         filter,

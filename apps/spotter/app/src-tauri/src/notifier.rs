@@ -5,10 +5,10 @@
 //!
 //! E-mail channels are not delivered yet (the engine leaves them to the shell); see `docs/roadmap.md`.
 
+use crate::jobs::Downloads;
 use spotter_core::action::{command_args, Action};
 use spotter_engine::notifier::{ActionRequest, Notification, NotificationKind, Notifier};
 use spotter_engine::Engine;
-use spotter_sources::http::Http;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -38,7 +38,7 @@ struct Inner {
     toast: Arc<dyn OsToast>,
     opener: Arc<dyn OpenLocation>,
     engine: OnceLock<Engine>,
-    http: Http,
+    downloads: Downloads,
     default_folder: PathBuf,
 }
 
@@ -51,13 +51,13 @@ pub struct ShellNotifier {
 impl ShellNotifier {
     /// A notifier. Its engine is attached with [`ShellNotifier::attach`] once the engine exists (the engine needs the
     /// notifier first).
-    pub fn new(toast: Arc<dyn OsToast>, opener: Arc<dyn OpenLocation>, http: Http, default_folder: PathBuf) -> ShellNotifier {
+    pub fn new(toast: Arc<dyn OsToast>, opener: Arc<dyn OpenLocation>, downloads: Downloads, default_folder: PathBuf) -> ShellNotifier {
         ShellNotifier {
             inner: Arc::new(Inner {
                 toast,
                 opener,
                 engine: OnceLock::new(),
-                http,
+                downloads,
                 default_folder,
             }),
         }
@@ -123,7 +123,12 @@ impl ShellNotifier {
         verify: bool,
         downloaded: &mut Option<String>,
     ) -> Result<(), String> {
-        let result = spotter_sources::download::download(&self.inner.http, release, folder, verify).await;
+        let title = format!("Downloading {}", request.watch_name);
+        let result = self
+            .inner
+            .downloads
+            .release(&title, Some(&release.version.text), release, folder, verify)
+            .await;
         if let Some(engine) = self.inner.engine.get() {
             let outcome = result
                 .as_ref()
@@ -174,6 +179,11 @@ pub async fn run_command(program: &str, args: &[String]) -> Result<(), String> {
 pub async fn run_command_for(program: &str, args: &[String], limit: Duration) -> Result<(), String> {
     if !Path::new(program).is_absolute() {
         return Err("The program to run needs its full path.".into());
+    }
+    // Checked up front so a missing program is reported the same everywhere: under amd64 emulation (qemu-user) a failed exec
+    // is not reported back to the parent and the child just ends with status 127.
+    if !Path::new(program).is_file() {
+        return Err("The program could not be started: it was not found.".into());
     }
     let mut cmd = tokio::process::Command::new(program);
     cmd.args(args)
@@ -249,8 +259,25 @@ mod tests {
         }
     }
 
+    fn test_downloads() -> Downloads {
+        let registry = Arc::new(paddock_jobs::JobRegistry::new(Arc::new(NoEvents)));
+        let downloader = Arc::new(
+            paddock_download::Downloader::http(paddock_download::HttpConfig {
+                proxy: paddock_download::ProxyMode::Direct,
+                ..Default::default()
+            })
+            .unwrap(),
+        );
+        Downloads::new(registry, downloader, spotter_sources::http::Http::direct("test").unwrap())
+    }
+
+    struct NoEvents;
+    impl paddock_jobs::EventSink for NoEvents {
+        fn emit(&self, _: &paddock_jobs::JobSnapshot) {}
+    }
+
     fn notifier(opened: Arc<Opened>, toasts: Arc<Toasts>) -> ShellNotifier {
-        ShellNotifier::new(toasts, opened, Http::new("test").unwrap(), PathBuf::from("/nonexistent-default"))
+        ShellNotifier::new(toasts, opened, test_downloads(), PathBuf::from("/nonexistent-default"))
     }
 
     fn request(actions: Vec<Action>, location: &str) -> ActionRequest {
@@ -330,7 +357,8 @@ mod tests {
     async fn a_relative_program_is_refused_and_a_missing_one_fails_cleanly() {
         assert!(run_command("echo", &[]).await.unwrap_err().contains("full path"));
         let missing = if cfg!(windows) { r"C:\nonexistent\x.exe" } else { "/nonexistent/x" };
-        assert!(run_command(missing, &[]).await.unwrap_err().contains("could not be started"));
+        let message = run_command(missing, &[]).await.unwrap_err();
+        assert!(message.contains("could not be started"), "unexpected message: {message}");
     }
 
     #[cfg(unix)]

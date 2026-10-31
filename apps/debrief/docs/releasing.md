@@ -118,6 +118,11 @@ See [scripts/vm-smoke/README.md](../../../scripts/vm-smoke/README.md) for what t
 
 ## Checking a release
 
+- Before the tag: the real-app smoke on Windows (WebView2) and macOS (launch and quit, start-up budgets) and the
+  real-browser tests in the local test VMs ([testing-manual.md](testing-manual.md), "Smoke tests of the real app"):
+  `PADDOCK_LIVE_BROWSER=vm DEBRIEF_REQUIRE_TEST_BROWSER=1 cargo nextest run -p chromium-driver -p debrief-app -E '(binary(it) & test(/^real_browser::/)) | test(/browser::renderer::tests::(reads_a_scripted|a_challenge_page)/)'`.
+  CI runs them on Linux only: the host runners run in a user's session, where a test never opens a browser or the
+  app's windows (Paddock rule 7). Release-notes checklist item: **VM smoke: <date> <version> pass** (macOS and Windows).
 - `latest.json` is attached to the release and lists every platform; `cat` output is in the release job log.
 - An installed older version: Help ▸ Check for updates… shows the new version, notes and size; download,
   then Restart to update.

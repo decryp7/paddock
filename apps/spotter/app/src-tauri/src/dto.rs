@@ -16,7 +16,7 @@ use spotter_core::source::SourceConfig;
 use spotter_core::state::{CheckRecord, WatchStatus};
 use spotter_core::time::QuietHours;
 use spotter_core::tracking::{ProductSetting, ProductsSpec, Tracking};
-use spotter_core::watch::{Settings, Theme, WatchSpec};
+use spotter_core::watch::{Settings, WatchSpec};
 use spotter_engine::avatar::{AvatarSource, AvatarView};
 use spotter_engine::channels::MailStatus;
 use spotter_engine::error::EngineError;
@@ -1175,14 +1175,10 @@ impl From<&EventView> for AppEventDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsDto {
-    /// Colour theme.
-    pub theme: Theme,
     /// Notifications at all.
     pub notifications: bool,
     /// Paused until.
     pub notifications_paused_until_ms: Option<i64>,
-    /// Check for Spotter's updates automatically.
-    pub check_app_updates: bool,
     /// Where downloads go.
     pub downloads_folder: Option<String>,
     /// Interval for new watches.
@@ -1201,10 +1197,8 @@ pub struct SettingsDto {
 impl From<&Settings> for SettingsDto {
     fn from(s: &Settings) -> Self {
         SettingsDto {
-            theme: s.theme,
             notifications: s.notifications,
             notifications_paused_until_ms: s.notifications_paused_until,
-            check_app_updates: s.check_app_updates,
             downloads_folder: s.downloads_folder.clone(),
             default_interval_secs: s.default_interval_secs,
             digest: s.digest,
@@ -1219,10 +1213,8 @@ impl SettingsDto {
     /// The core's settings.
     pub fn into_settings(self) -> Settings {
         Settings {
-            theme: self.theme,
             notifications: self.notifications,
             notifications_paused_until: self.notifications_paused_until_ms,
-            check_app_updates: self.check_app_updates,
             downloads_folder: self.downloads_folder,
             default_interval_secs: self.default_interval_secs,
             digest: self.digest,
@@ -1522,7 +1514,10 @@ mod tests {
         let s = Settings::default();
         let dto = SettingsDto::from(&s);
         let j = serde_json::to_value(&dto).unwrap();
-        assert_eq!(j["theme"], "system");
+        assert!(
+            j.get("theme").is_none() && j.get("checkAppUpdates").is_none(),
+            "appearance and updates are the shell's settings"
+        );
         assert_eq!(j["digest"], "off");
         assert!(j.get("notificationsPausedUntilMs").is_some() && j.get("defaultIntervalSecs").is_some());
         assert_eq!(serde_json::from_value::<SettingsDto>(j).unwrap().into_settings(), s);

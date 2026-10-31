@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { gridTotal, initialTotal, openApp } from './app';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // Search everything (Mod+Shift+F) against the mock backend: the palette lists results by kind with the words marked,
 // and choosing one goes where it points.
@@ -10,7 +11,7 @@ test.describe('search everything', () => {
   test('Mod+Shift+F finds a source and choosing it filters the grid; Escape closes the palette', async ({ page }) => {
     const total = await initialTotal(page);
     await page.locator('debrief-events-grid').first().click();
-    await page.keyboard.press('ControlOrMeta+Shift+F');
+    await pressMod(page, 'Mod+Shift+F');
     const dialog = page.getByRole('dialog', { name: 'Search everything' });
     await expect(dialog).toBeVisible();
     const input = dialog.getByRole('combobox', { name: 'Search everything' });
@@ -26,21 +27,21 @@ test.describe('search everything', () => {
     await expect(gridTotal(page)).not.toHaveText(total);
 
     // Events by words, then Escape: closed without going anywhere.
-    await page.keyboard.press('ControlOrMeta+Shift+F');
+    await pressMod(page, 'Mod+Shift+F');
     await input.fill('payment gateway');
     await expect(dialog.getByTestId('search-group-events').getByRole('option').first()).toBeVisible();
     await expect(dialog.getByTestId('search-group-events').locator('mark').first()).toHaveText(/payment/i);
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
 
-    await page.keyboard.press('ControlOrMeta+Shift+F');
+    await pressMod(page, 'Mod+Shift+F');
     await input.fill('zzqqxx');
     await expect(dialog.getByTestId('search-everything-empty')).toContainText('zzqqxx');
   });
 
   test('offers the name the words refer to and takes it on accept', async ({ page }) => {
     await page.locator('debrief-events-grid').first().click();
-    await page.keyboard.press('ControlOrMeta+Shift+F');
+    await pressMod(page, 'Mod+Shift+F');
     const dialog = page.getByRole('dialog', { name: 'Search everything' });
     const input = dialog.getByRole('combobox', { name: 'Search everything' });
     await input.fill('worker 20261014');

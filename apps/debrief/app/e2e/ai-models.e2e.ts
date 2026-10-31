@@ -1,11 +1,12 @@
 import { expect, Page, test } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 // The AI model manager against the scripted AI mock (one installed, active model by default).
 
 async function openModels(page: Page) {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   await page.getByRole('combobox', { name: 'Type a command' }).fill('AI: Manage models');
   await expect(page.locator('debrief-command-palette').getByRole('option').first()).toContainText('AI: Manage models');
   await page.keyboard.press('Enter');

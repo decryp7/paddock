@@ -260,6 +260,8 @@ adr = "0030"
   delete_by = "debrief-v1.2.0"
   note = "The start is judged by paddock-proc's StartWatch like the canonical's (fix/chromium-start-judge, the real_browser flake of CI 7213/7250); still no NetworkServiceSandbox switch. Adopt the canonical instead of patching further."
 
+  # Follow-up (canonical): move the paddock-chromium self-test (runtime.rs) onto the start judge (ADR 0031) and job cancel.
+
 [[mechanism]]
 id = "instance-lock"
 title = "One process per data folder: an OS lock held for the process's life"

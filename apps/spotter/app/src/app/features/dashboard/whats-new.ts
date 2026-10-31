@@ -7,7 +7,7 @@ import type { WhatsNewItem } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
 import { Clipboard } from '../../shared/clipboard';
 import { groupByDay } from '../../shared/day-groups';
-import { formatBytes } from '../../shared/format';
+import { formatBytes } from '@decryp7/paddock-ui/format';
 import { Avatar } from '../../shared/ui/avatar';
 import { AgoShortPipe } from '../../shared/ui/ago.pipe';
 import { MenuButton, MenuPanel, type MenuEntry } from '../../shared/ui/row-menu';
@@ -76,10 +76,12 @@ import { WatchesStore } from '../../state/watches.store';
     :host,
     .days {
       display: grid;
+      grid-template-columns: minmax(0, 1fr);
       gap: var(--pd-space-4);
     }
     .day {
       display: grid;
+      grid-template-columns: minmax(0, 1fr);
       gap: var(--pd-space-1);
     }
     h3 {

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
-import { formatBytes, formatDuration } from '../../shared/format';
+import { formatBytes } from '@decryp7/paddock-ui/format';
+import { formatDuration } from '../../shared/format';
 import type { ExtractionPreview, NameRow } from '../../core/api.types';
 import { groupClass, groupLabel, segments } from './highlight';
 

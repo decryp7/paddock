@@ -1,5 +1,6 @@
 //! The port for pages that need JavaScript (ADR 0002). The engine calls [`PageRenderer`] for "rendered" web-page
 //! watches; `spotter-render` implements it with a supervised Chromium, tests use a fake.
+use crate::job::Job;
 use crate::source::BoxFuture;
 use std::time::Duration;
 
@@ -45,6 +46,18 @@ pub trait PageRenderer: Send + Sync {
         wait_selector: Option<&'a str>,
         timeout: Duration,
     ) -> BoxFuture<'a, Result<RenderedPage, RenderError>>;
+
+    /// As [`render`](Self::render), reporting to the operation that asked: a renderer that waits for a browser the OS has stopped
+    /// reports [`crate::job::Phase::BrowserPaused`] so the person can tell waiting from hung (ER-18). The default ignores the job.
+    fn render_job<'a>(
+        &'a self,
+        url: &'a str,
+        wait_selector: Option<&'a str>,
+        timeout: Duration,
+        _job: &'a Job,
+    ) -> BoxFuture<'a, Result<RenderedPage, RenderError>> {
+        self.render(url, wait_selector, timeout)
+    }
 }
 
 #[cfg(test)]

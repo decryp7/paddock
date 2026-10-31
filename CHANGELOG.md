@@ -63,6 +63,18 @@ Conventional Commits; one semver tag for the whole repo.
   per group, the description as help text); names a channel has that are not declared show under "Other events" as removable
   chips and are never dropped, and a name can still be typed there. An app that declares no events keeps the free-text field
   exactly as before. The shell demo declares events and shows both.
+### `paddock-startup`, `paddock-shell`: the start guard
+- From the shell plugin's set-up on, a start that has not got to `RunEvent::Ready` is logged from the guard's own thread
+  with the phase it is in (the shell plugin's set-up, starting the event loop, opening the tray, opening the main
+  window): "The app has not finished starting after N s; it is in <phase>" (a warning, with `Ticks` and `Waited` fields)
+  after 20 ticks of 1 s, again every 60 ticks while it stays there, and "The app finished starting after N s" when it
+  does. The wording also fits a `--hidden` start, which opens no window. It counts ticks, not time (ADR 0031), so a paused or starved process is not reported early, and it only
+  logs (ER-19). The page watchdog cannot see this part of the start (no page yet), so Spotter 1.0's first VM run
+  (ADR 0029's deadlock) left nothing in its log. Not covered: Tauri's build and the set-ups of plugins registered before
+  the shell (single instance, autostart, updater). New pure `paddock_startup::{StartGuard, StartPhase, StartTiming,
+  StuckStart}`, the adapter `paddock_startup::tauri::start_guard::{begin, phase, current, ready}`, and
+  `paddock_shell::Builder::start_guard(Option<StartTiming>)` (default on; `None` for tests on the mock runtime, which
+  never reach Ready); Spotter's, Dyno's and the demos' test places pass `None`).
 ### `paddock-proc`: a stopped process is waited for, not called idle (ADR 0031)
 - New `RunState { Running, Stopped, Exited, Unknown }` and `run_state(ProcessId) -> RunState`, identity-checked (a pid handed on is
   `Exited`): macOS reads `pbi_status == SSTOP` from the `proc_pidinfo` call that also gives the CPU time, Linux `/proc/<pid>/stat`
@@ -222,6 +234,30 @@ Conventional Commits; one semver tag for the whole repo.
 - `ShellCore` has a new member `quitApp()`; the UI of a shell app that implements `ShellCore` by hand adds it.
 - Fix: with the last window closed to the tray (destroyed), the menu bar still shows the last model but a click had no target window and was dropped. `paddock-menu` now hands a click on a shown item to a host-side handler when no window is the target (`NativeMenu::on_no_window`, `on_no_window_by_default`, `route::runs_without_window`). The shell installs its policy unless the app set a handler: Quit runs the shell's quit (as the `app_quit` command; `Builder::menu_quit_without_window` replaces it for an app with its own quit path), any other item brings the main window back as a Dock click does (the click itself is not forwarded: the new window is not listening yet).
 
+### Browser specs run axe through the kit
+- `@decryp7/paddock-e2e`: `AxeOptions.extraTags` adds tags to `WCAG_TAGS` (`best-practice`, say). The gallery's specs (gallery, view, sunburst, material) and the shell demo's frame navigation call `axeViolations`, which waits for animations, instead of building `AxeBuilder` themselves.
+- `@decryp7/paddock-eslint`: new `paddock/e2e-axe-through-kit` (on in the preset for `e2e/` files; an `axe.ts` helper is exempt) reports `@axe-core/playwright` imported by a browser spec.
+- `@decryp7/paddock-eslint`: `e2eAxe()` is that block on its own, for an app with its own flat config; Debrief uses it, and its pipeline spec runs axe through its `e2e/axe.ts` helper. The gallery spec waits on the chart's canvas, the fonts and the animations instead of a 600 ms sleep.
+
+### `pd-copy-menu`: stays open in WebKit
+- `PdCopyMenuState` gains `event?: MouseEvent` (the right click that opened the menu).
+- `PdCopyMenu.close(restoreSelection = true)`: closed by Escape, by Copy or by the app, the menu gives back the text selection it opened on, as a native menu keeps it (WebKit drops the selection when focus moves into the menu). A click, auxclick or right click outside the menu closes it with `false`, so the click keeps what it did (only the close that event causes: a press that closed nothing never blocks a later Escape); a focused text field always keeps its caret.
+- New `preserveSelection(doc?)` (`PreservedSelection.restore()`), `isEditableElement(el)` and `deepActiveElement(doc)`: saves a selection that holds text and gives it back unless a text input (the text-entry `type`s only, not a checkbox or button), text area, select or editable content has the focus (looked up through open shadow roots), the user selected something else meanwhile, or the text left the page. Spotter's Copy menu uses it; Debrief, which does not build on `@decryp7/paddock-ui`, keeps a copy with the same guards in its `ContextMenuService`.
+- `PdCopyMenu.open(x, y, text, event?)` takes the right click that asked for it (the native-feel guard passes it), and `<pd-copy-menu />` opens the CDK menu with that event. Where `contextmenu` comes on the button press (macOS and Linux, so WKWebView and WebKitGTK), the release's `auxclick` used to close the menu as soon as it was drawn; the CDK now skips it. `FeelHooks.copyMenu` gets the event as a fourth argument. The reference apps' WebKit specs wait for animations before axe (data), use a page-local clipboard instead of `grantPermissions` (WebKit has no `clipboard-write`) and measure the folded Problems table once the fold is in place.
+### `paddock-chromium`: an interrupted socket read is not a closed connection
+- The DevTools reader (and the fake browser) took `EINTR` (`ErrorKind::Interrupted`) for the end of the connection. Linux ends a socket read that has a timeout with it after a stop and continue or a handled signal (signal(7)), so every page then reported closed. Interrupted now counts as idle like a timeout, for reads and sends (`is_transient`); EOF and reset errors still end the connection.
+
+### Real-browser tests stay off the user's desktop (rule 7)
+- New `paddock_testkit::live_browser`: the one gate of every test that starts a real browser. It starts only on Linux in a job that sets `PADDOCK_LIVE_BROWSER=1` (and, for a browser with a window, under `xvfb-run`), never in a user's session, headless or not; a test that is not run prints where it runs; a job set up wrongly (the variable without a display for a window, or the app's `<APP>_REQUIRE_TEST_BROWSER` on Linux without the variable) fails. `find_test_browser` and `found_or_skip` give the drivers one finder logic; `is_set` reads every switch the same way (trimmed, `0` is off).
+- The test-browser finders ask it and take the window mode: `paddock_chromium::discover::find_for_tests(window)` (behind `test-support`, which now enables `paddock-testkit`), Debrief's `chromium_driver::discover::find_for_tests()` / `test_browser()` (behind `test-support`; the driver always opens a window), Spotter's `spotter_render::discover::find_for_tests(mode)` (its test-only items behind the new `testing` feature). Their `find_for_tests_with` are private.
+- CI: the real-browser tests run only in Linux containers: Debrief's `rust tests` and the `crates` coverage job set `PADDOCK_LIVE_BROWSER=1`, and `app-gates` sets it with its `display` wrap, which every leg now receives (`scripts/affected.mjs`), so a host leg prints a notice. No host job installs Chrome for Testing any more (the crate and app legs, Debrief's macOS job); the leg field `test_browser_catalogue` is gone.
+- Debrief's real-app smoke (`tauri-smoke`) runs on Linux only, under Xvfb; the WebView2 and macOS smoke and the macOS start-up budgets run in the local test VMs before a release (apps/debrief/docs/testing-manual.md).
+- The launch is gated too: in test builds each driver's `Chromium::launch` asks `paddock_testkit::live_browser::check_launch` (new, with `launch_check_with`, `is_real_program` and `Host`) before it starts anything: never a browser the user installed, and no real program (anything but a script, as the fakes are) outside a throwaway session, however the test found it.
+- Test VMs: `PADDOCK_LIVE_BROWSER=vm` starts real browsers in a macOS test VM (`kern.hv_vmm_present`) or a Windows one (the administrator-only registry value `HKLM\SOFTWARE\Paddock` `TestVM` = 1, `WINDOWS_VM_KEY`); anywhere else it fails the test.
+- The drivers' self-tests (`spotter_render::install::self_test`, which `renderer_status()` runs on the installed browser; `paddock_chromium::runtime::ChromeForTesting::self_test`; `chromium_driver::install::self_test`) ask the same gate in test builds. Fakes are identified positively by the line `# paddock-fake-browser` (`FAKE_MARKER`, `fake_script`), not by `#!` (real launchers are scripts too); installed paths compare canonically (`is_installed`). Debrief's `opener::open_url` opens nothing in tests, like `start`. A bare program name (`google-chrome`) is resolved on PATH, as `Command` does, before the gate judges it (`resolve_program`, `check_launch_with`; `check_launch` now takes the installed candidates). Spotter's app enables `spotter-render/testing` in its dev-dependencies, so its own tests keep the gate. The real-window probe of `paddock-dialogs` asks the gate too (the nightly job sets `PADDOCK_LIVE_BROWSER=1`). docs/dev-setup.md, "Test VMs and real browsers", has the commands; Debrief's and Spotter's release docs and the shared releasing block add the VM run and the "VM smoke: <date> <version> pass" release-notes item.
+- Conformance C55 (run on Paddock itself in `ci.yml`, and on every Rust change in the crates job, every app leg and Debrief's lint job): reads every Rust file but a `src/discover.rs`; a read of the test browser around its finder (also through `concat!`), a test that launches a window after asking the finder for none, and in test code the product's browser search (`discover::find`, `find_installed`, `find_downloaded`, `runtime::installed`), a renderer without `.with_browser`, a browser or app started by name, or an installed browser's path are errors; `// conformance: no-launch — <reason>` waives one. It also flags a browser by bare name in test code, and a Cargo.toml whose crate depends on a driver without the driver's test feature in [dev-dependencies].
+- The WebKit e2e of the reference apps (`ci.yml` `e2e-webkit`) and the nightly real-window probe run in the Linux container only; a CI test fails any macOS or Windows job that runs Playwright, the real-window probe, the real-app smoke or a real-browser test binary. Spotter's contract drops `testBrowser.catalogue` and the host clean-up pattern. Rule 7 says where a real browser or app may start.
+
 ### `paddock-jobs`: `WalkOptions::with_modified`
 - `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
 
@@ -265,7 +301,7 @@ Conventional Commits; one semver tag for the whole repo.
 ### `paddock-chromium`: an unexplained abort names the network service
 - `Page::navigate`'s error for an unexplained `net::ERR_ABORTED` (not a download, not replaced) says whether the browser's network service restarted, stayed unchanged or could not be asked. New `Page::network_service_pid` (`Result<Option<u32>>`; `SystemInfo` is an experimental DevTools domain). ADR 0030 (proposed).
 ### Native feel: the Copy menu stays open on macOS
-- `installNativeFeel` opens the Copy menu once every mouse button is up when the browser sent `contextmenu` while one was held (WebKit on macOS: the right button's press, or Ctrl+click). Drawn on the press, the menu was closed at once by the release's own `click` or `auxclick` (a click outside the CDK overlay), so it vanished as the user let go. Measured with Playwright's WebKit and Chromium; the event order of Windows WebView2 (where `contextmenu` follows the release) is not verified.
+- Fixed in `installNativeFeel` and `PdCopyMenu` (see `pd-copy-menu` above): the guard hands the `contextmenu` event to `copyMenu`, and the menu ignores the release of the press that opened it. Drawn on the press (WebKit on macOS: the right button's press, or Ctrl+click), the menu was closed at once by the release's own `click` or `auxclick` (a click outside the CDK overlay). Measured with Playwright's WebKit and Chromium; the event order of Windows WebView2 (where `contextmenu` follows the release) is not verified.
 ### `paddock-panels`: the mouse button comes through a `Pointer` port
 - New `paddock_panels::tauri::Pointer` and `PanelsBuilder::pointer`: the drag session's blur rule, the tracker thread and the `pointer_button_down` command read the primary button from the layer's pointer (the OS by default). Tests inject their own and never read the user's mouse; two `paddock-panels` tests failed when the user held the button during a run.
 
@@ -314,6 +350,42 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### The dialog frame's filled button uses the page primary's colours
 - `.pd-frame-btn--filled` takes `--pd-accent-fill` with `--pd-on-accent`, the same as `.pd-btn--primary` and Material's filled button, so a dialog's primary and a page's primary are one colour in both schemes (`--pd-accent-control` is for toggles and checkmarks).
+
+### The shell owns the start (ADR 0029; shared API, breaking)
+- `paddock-shell`: `Builder::tray(f)`, `Builder::launch(LaunchArgs)` and `Builder::add_to(tauri::Builder)` open the tray
+  and the main window from Tauri's own `setup`, after every plugin is set up (a window built inside a plugin hook
+  deadlocked the main thread: Spotter started with no window). A start that cannot open its window is logged and exits
+  with code 1. `Builder::setup` no longer opens windows. New `paddock_shell::testing::start` (feature `mock-runtime`):
+  the start test every app runs. The shell's plugin hooks are marked; a Dock click with no window and a file opened from
+  Finder open their window after the hook.
+- `paddock-shell`: `logging::install` (and `install_in`): the app's `paddock-log` in its folders with the level from
+  Settings; every app on the shell calls it first in `run`. A shell built with `build()` that has a tray or a launch
+  fails the start ("tray/launch need Builder::add_to"); `testing::start` names a start that panicked.
+- `paddock-commands`: `plugin_hook` (`plugin_hook_scope`, `in_plugin_hook`, `INSIDE_PLUGIN_HOOK`).
+- `paddock-window`: `after_plugin_hook` (window work after the hook, in order), `exit_with`, `HeadlessTray`; windows and
+  the tray popover refuse to be built inside a plugin hook with the new `WindowErrorCode` `insidePluginHook`.
+- `paddock-dialogs`, `paddock-panels`: dialogs, pop-outs and the drag ghost refuse to be built inside a plugin hook, with
+  the new `DialogErrorCode` / `PanelErrorCode` `insidePluginHook`.
+- `paddock-workbench`: its plugin hooks are marked.
+- Spotter, the shell demo and the workbench demo use the new start; conformance C50 checks every app on the shell.
+
+### Material: stepper theme (shared)
+- `material.css`: `mat-stepper` follows the family tokens (`--mat-stepper-*` from `--pd-*`, a 56 px header (24 px circle plus `--pd-space-4` above and below, Material's fixed height dropped), tighter header
+  padding and lines, an outlined circle for steps not reached, no content inset; the geometry applies to horizontal steppers only). Spotter's add/edit watch flow is a linear
+  `mat-stepper` on it and no longer carries its own stepper theme.
+
+### Jobs: quietOnSuccess (shared API)
+- `paddock-jobs`: `JobSnapshot::quiet_on_success` (wire field `quietOnSuccess`, off by default and left out of the wire form while off),
+  set with `JobContext::quiet_on_success()` / `Reporter::set_quiet_on_success()` and carried by every later snapshot, the terminal one
+  included. `@decryp7/paddock-ui/shell/jobs`: `SuJobSnapshot.quietOnSuccess`, read by `parseJobSnapshot`, and the jobs store does not
+  announce the success of such a job (a failure still is). For work that runs again with every edit of a form or on a schedule; the
+  generated `JOB_SNAPSHOT_FIXTURES` carry a quiet job, so both sides test the same wire form. Spotter uses it for the source test and
+  the check of one watch.
+
+### Dialog buttons
+- `@decryp7/paddock-ui/shell/dialogs`: the filled (primary) dialog button uses `--pd-accent-fill` with `--pd-on-accent` and
+  `--pd-accent-fill-hover` (it used the accent text colour, 2.18:1 with white ink in dark mode). `test:tokens` checks both pairs
+  for every accent, scheme and contrast mode.
 
 ### Rust developer and CI tool, phase R0 (ADR 0022)
 - New shared crates `paddock-slots` (numbered job slots over OS file locks, with a holder that always ends: job folder gone,

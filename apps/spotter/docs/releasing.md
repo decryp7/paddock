@@ -16,11 +16,29 @@ not offered to users: updaters read `latest.json` of the *latest* release.
 
 This is about **Spotter's own** updates, not the releases Spotter watches for.
 
+## Before the tag: the test VMs
+
+CI runs Spotter's real-browser tests (`spotter-render`'s `real_browser`) only in the Linux leg, under Xvfb: the macOS and
+Windows runners run in a user's session, where a test never starts a browser (Paddock rule 7). Before every tag, run them
+in the local macOS (Tart) and Windows test VMs, never on a desktop and never in CI (docs/dev-setup.md, "Test VMs and real
+browsers", repo root):
+
+```sh
+PADDOCK_LIVE_BROWSER=vm SPOTTER_REQUIRE_TEST_BROWSER=1 cargo nextest run -p spotter-render -E 'binary(real_browser)'
+```
+
+with `SPOTTER_TEST_BROWSER` naming the pinned Chrome for Testing in the VM (`node apps/spotter/scripts/install-test-browser.mjs`).
+Release-notes checklist item: **VM smoke: <date> <version> pass** (macOS and Windows).
+
 ## How Spotter's updates work
 
 - **Opt-in.** Spotter never checks on its own unless the user turns on automatic update checks (off by default); a
-  manual check always works. (The checking UI is not built yet; the updater plugin is wired and the app reports
-  whether the build can update.)
+  manual check always works. Checking, downloading and installing are the shell's Updates window (Help ▸ Check for
+  updates, and the About dialog): `paddock-updater` finds the update and downloads it through the app's downloader, and
+  its installer, `PluginInstaller` over `tauri-plugin-updater` (registered in `run()`; `paddock-shell/install` is
+  enabled in `app/src-tauri/Cargo.toml`), verifies the signature again and installs the platform's package. A build
+  without an installer would find updates it can never install, so `updater_tests` in `lib.rs` checks the built app
+  has one, and `plugins.updater` in `tauri.conf.json` keeps `installMode: passive` for the Windows installer.
 - **One endpoint.** A check is one HTTPS GET of
   `https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json` (the moving `spotter-latest` release of the Paddock monorepo; copies installed before the move are reinstalled once by hand)
   (`plugins.updater.endpoints` in `tauri.conf.json`). It carries no identifier or usage data.
@@ -30,38 +48,37 @@ This is about **Spotter's own** updates, not the releases Spotter watches for.
 - `latest.json` is written by the shared `conformance/release/latest-json.mjs` from the signed installers (`*.sig` next to
   each); `node --test conformance/test/latest-json.test.mjs` (repo root) tests it.
 
-## One-time set-up: Spotter's own signing key
+## One-time set-up: the family's signing key
 
-Spotter needs its **own** key pair — never reuse another product's updater key.
+Spotter signs its updates with the **Paddock family key** (one key pair for every Paddock app, kept as repository secrets of
+`decryp7/paddock`); it needs no key of its own. If the family key does not exist yet, generate it once on a trusted machine
+with a strong password:
 
-1. Generate a key pair on a trusted machine, with a strong password:
+```sh
+npx tauri signer generate -w ~/.tauri/paddock-updater.key
+```
 
-   ```sh
-   cd app
-   npx tauri signer generate -w ~/.tauri/spotter-updater.key
-   ```
+This writes the encrypted private key `paddock-updater.key` and the public key `paddock-updater.key.pub`.
 
-   This writes the private key `spotter-updater.key` (encrypted with the password) and the public key
-   `spotter-updater.key.pub`.
-
-2. Set three **repository secrets** in Gitea (Settings ▸ Actions ▸ Secrets) of `decryp7/spotter`:
+1. The repository secrets (Settings ▸ Actions ▸ Secrets of `decryp7/paddock`) are the family's:
 
    | Secret | Value |
    | --- | --- |
-   | `TAURI_SIGNING_PRIVATE_KEY` | the contents of `spotter-updater.key` |
-   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
-   | `TAURI_UPDATER_PUBKEY` | the contents of `spotter-updater.key.pub` |
+   | `PADDOCK_TAURI_SIGNING_PRIVATE_KEY` | the contents of the private key file |
+   | `PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
+   | `PADDOCK_TAURI_UPDATER_PUBKEY` | the contents of the public key file |
 
    Also `RELEASE_TOKEN`: a Gitea access token with `write:repository` scope, used to publish the release.
 
-   The bundle jobs then build with `createUpdaterArtifacts` and the public key (passed as `tauri build --config`,
-   and as `TAURI_UPDATER_PUBKEY` for `option_env!` in `app/src-tauri/src/updater.rs`). Without the secrets (forks,
-   pull requests) the installers are built without update support and the release job publishes no `latest.json`.
+   `spotter-release.yml` maps them to the `TAURI_*` names of the shared `app-release.yml`. The bundle jobs then build with
+   `createUpdaterArtifacts` and the public key (passed as `tauri build --config`, and as `TAURI_UPDATER_PUBKEY` for
+   `option_env!` in `app/src-tauri/src/lib.rs`, read by the shell's updater). Without the secrets (forks, pull requests)
+   the installers are built without update support and the release job publishes no `latest.json`.
 
    The committed `tauri.conf.json` keeps `pubkey` empty and does not set `createUpdaterArtifacts`, so local
    `npx tauri build` works without the private key.
 
-3. **Back up the private key and its password** (password manager plus an offline copy). Never commit it, never put
+2. **Back up the private key and its password** (password manager plus an offline copy). Never commit it, never put
    it anywhere the UI is built from.
 
 **If the private key is lost**, no further update can be signed for the key built into installed copies: users
@@ -90,3 +107,60 @@ See [scripts/vm-smoke/README.md](../../../scripts/vm-smoke/README.md) for what t
 ## First launch note
 
 Apple notarization and Windows code signing are deferred until after the releases settle (decision 2026-10-23). Until then the release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
+
+## Before tagging
+
+The branch gates are the affected ones; the tag runs everything (see above). Before a first release, also by hand on one
+machine per OS: install the previous build, publish a newer one to a test feed, and check that Updates finds it **and installs
+it** (the installer is only reached from the real window), then that Spotter starts again on the new version.
+
+## Pre-release update test (local VMs, results)
+
+Manual, local only (never CI, never published): the installed copy must find a newer signed build, download it, verify the
+signature, install it and relaunch (`PluginInstaller`, paddock-updater's `install` feature). Builds run on the host with a
+test updater key made for the run (never the family key); the feed is a small HTTPS server on a host-only address, reached
+through a throw-away test CA that only the VM trusts. The feed URL is the `UPDATE_FEED` constant in `lib.rs`; there is no
+build-time override for release builds. A test build (`X.Y.Z-test.N`, no build metadata) made with `SPOTTER_TEST_UPDATE_FEED=https://<host>:<port>/...` set at compile time reads its feed from it (`update_feed` in `lib.rs`; https with a host only, anything else is ignored; a release or rc build ignores it; signatures are still checked against the key built into the app). Never export the variable in a runner host's profile, and `check-tag` refuses `-test.` tags. The VM update test's build script (`scripts/vm-smoke`, with the VM smoke tooling) sets it.
+
+### 2026-10-29, 29d65b6bd (`spotter/shell-1.0`), builds 1.0.0-test.1 and 1.0.0-test.2
+
+| OS | Result |
+| --- | --- |
+| macOS 26.6.2 (25G83) guest, Tart `macos-tahoe-base`, host macOS 27.2 | **FAIL, blocked at step 2**: the installed test.1 never opens a window |
+| Windows 11 Arm (Fusion, the user's VM) | **NOT RUN**: the VM is encrypted (`vmrun`: "A password is required"), so it cannot be started headless; no agent user or OpenSSH was verifiable |
+
+macOS steps: both builds (aarch64, `--profile dist`, `.app.tar.gz` plus `.sig` with the test key) built; a test.2 signed with
+a second key was built for the negative case; test.1 installed in a fresh VM clone (CA trusted, feed reachable by `curl`
+from the guest, version read from `Info.plist`: 1.0.0-test.1). Launch (`open` and the binary directly, with and without a
+fresh data folder, 3 of 3 runs): the process stays up with a status item but no window is ever created (System Events lists no
+windows), nothing reaches `app.log` or stderr, and `sample` shows the main thread and `paddock-job-1` both blocked in
+`pthread_mutex` waits after start-up (binary stripped, so no symbols). Steps 3 to 7 (Updates, download, verify, install,
+relaunch, Install Chromium progress and Cancel, wrong-key refusal) were therefore not run. Not yet known whether the hang is
+specific to the VM (no GPU, paravirtual Metal) or a lock-order bug; the same build must be started once on a real Mac or
+an unstripped build sampled. Evidence: `/Volumes/d7sst7/dev-targets/handoff/spotter-update-test-2026-10-29/`.
+
+### 2026-10-30, f6b1ab5c5 (`steward/spotter-1.0-batch`), unstripped debug build, start only
+
+| OS | Result |
+| --- | --- |
+| macOS 26.6.2 (25G83) guest, Tart `macos-tahoe-base`, fresh clone, `--no-graphics` | **PASS (start)**: the main window opens and its page reports ready; steps 3 to 7 not run (they need the VM's window) |
+
+The start is no longer deadlocked: the shell opens the tray and the window from Tauri's `setup` (ADR 0029), and the log
+has lines from the first moment (`Native menu bar built`, `Main window built`, `Window main ready`). Warm VM: window built
+about 1 s after the process started, ready 1.5 s later, the Dashboard rendered (screenshot). A second `open` focuses the
+running copy (one process; single instance), a stale `/tmp/net_decryptology_spotter_si.sock` left by a killed copy does
+not stop the next start, and starting the binary directly (as the updater's relaunch does) opens the window too.
+
+The first start in the freshly booted VM took 76 s to its window and its page went blank: WebKit's GPU process took 48 s
+to launch and was then killed as unresponsive repeatedly (`GPUProcessProxy::didBecomeUnresponsive`), and WebKit
+terminated every web content process (`WebProcessPool::terminateAllWebContentProcesses`; Spotter logged "The web content
+process of window main terminated" and reloaded). That is the cold VM's paravirtual GPU, not Spotter: every later start
+in the same VM was normal. Run the VM checks after the first boot has settled (start Safari or Spotter once first).
+
+Since this run the shell also has a start guard: from the shell plugin's set-up on, a start that has not got to
+`RunEvent::Ready` is logged with its phase (the shell plugin's set-up, starting the event loop, opening the tray, opening
+the main window) after 20 ticks of 1 s and every 60 after that, so a hang there no longer leaves the log empty. It does
+not cover what runs before the shell plugin's set-up: Tauri's build and the set-ups of the plugins registered before it
+(single instance, notification, opener, dialog, updater, autostart). A hang there still shows only in `sample`.
+
+The 2026-10-29 hang was the start-up deadlock of ADR 0029 (a window built inside a plugin hook), fixed before the 1.0.0 release and verified on 2026-10-30 (above). The update steps (runbook `spotter-1.0-vm-runbook.md`, section 1 step 5) still have to be run on the CI-built bundles before the tag.

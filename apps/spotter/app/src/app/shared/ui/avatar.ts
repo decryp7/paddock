@@ -9,7 +9,7 @@ import { hueOf, monogram } from '../identity';
 @Component({
   selector: 'sp-avatar',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '[style.--h]': 'hue()', '[style.--s]': "size() + 'px'", '[class.lg]': 'size() >= 44', 'aria-hidden': 'true' },
+  host: { '[style.--h]': 'hue()', '[style.--s]': "size() + 'px'", '[class.lg]': 'size() >= 44', '[attr.data-state]': 'state()', 'aria-hidden': 'true' },
   template: `
     @if (image(); as url) {
       <img [src]="url" alt="" draggable="false" (error)="broken.set(true)" />
@@ -61,6 +61,14 @@ export class Avatar {
   /** The image failed to load: back to the monogram. */
   protected readonly broken = linkedSignal<string | null, boolean>({ source: () => this.src() ?? this.looked(), computation: () => false });
   protected readonly image = computed(() => (this.broken() ? null : (this.src() ?? this.looked())));
+  /** `pending` while the engine's lookup of a watch's or preset's picture is unanswered, then `image` or `monogram`. */
+  protected readonly state = computed<'pending' | 'image' | 'monogram'>(() => {
+    const w = this.watch();
+    const p = this.preset();
+    const ref = w ? { watch: w } : p ? { preset: p } : null;
+    if (this.src() === null && ref && !this.avatars.isSettled(ref)) return 'pending';
+    return this.image() ? 'image' : 'monogram';
+  });
   protected readonly letters = computed(() => monogram(this.name()));
   protected readonly hue = computed(() => hueOf(this.name()));
 

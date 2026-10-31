@@ -84,10 +84,13 @@ pub fn compose(f: Found) -> RendererStatus {
 }
 
 /// Looks the browsers up on this machine (runs `--version` on the one it finds) and composes the status.
-/// `data_dir` is the app data folder where a downloaded Chromium lives. Blocking: call from `spawn_blocking`.
+/// `data_dir` is the app data folder where a downloaded Chromium lives. Blocking: call from `spawn_blocking`; the self-tests
+/// of the browsers found share one deadline of [`crate::launch::SELF_TEST_CAP`], so a wedged browser delays the reply by no
+/// more than that.
 pub fn renderer_status(data_dir: &Path) -> RendererStatus {
+    let deadline = std::time::Instant::now() + crate::launch::SELF_TEST_CAP;
     let version = |b: Browser| {
-        let v = crate::install::self_test(&b.path).ok();
+        let v = crate::install::self_test_until(&b.path, deadline, &spotter_core::job::Cancel::new()).ok();
         (b, v)
     };
     compose(Found {

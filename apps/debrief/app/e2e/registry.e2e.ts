@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu, menuItem, openMenuPath } from './menu-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard';
 
 test.describe('registry viewer plugin', () => {
   test.beforeEach(async ({ page }) => openApp(page));
@@ -49,7 +50,7 @@ test.describe('registry viewer plugin', () => {
     await expect(tab).toHaveAttribute('aria-selected', 'true');
     await tab.focus();
     await page.keyboard.press('Delete');
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     await page.getByRole('combobox', { name: 'Type a command' }).fill('registry viewer');
     await page.keyboard.press('Enter');
     await expect(tab).toHaveAttribute('aria-selected', 'true');

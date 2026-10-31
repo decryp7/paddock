@@ -19,13 +19,18 @@ zip = { workspace = true }
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 # The shared start judge (ADR 0031): the browser's start is judged on its run state, not on a fixed wait.
 paddock-proc = { path = "../../../../crates/paddock-proc" }
+paddock-testkit = { path = "../../../../crates/paddock-testkit", optional = true }
 
 [features]
 # A fake DevTools browser for tests of this crate and of the apps that drive it.
-test-support = []
+# Also the test-browser finder, which asks the shared real-browser gate (`paddock_testkit::live_browser`).
+test-support = ["dep:paddock-testkit"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
+# The integration tests use the test-browser finder (`test-support`).
+chromium-driver = { path = ".", features = ["test-support"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

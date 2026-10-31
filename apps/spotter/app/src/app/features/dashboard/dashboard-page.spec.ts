@@ -1,11 +1,11 @@
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { shellPorts } from '@decryp7/paddock-ui/shell/testing';
 import { Router } from '@angular/router';
 import { DashboardPage } from './dashboard-page';
 import { CHART_LOADER } from '../../shared/charts/chart';
 import { ClockService } from '../../core/clock.service';
 import { SettingsStore } from '../../state/settings.store';
-import { ToastStore } from '../../state/toast.store';
 import { WatchesStore } from '../../state/watches.store';
 import { appProviders, byText, fakeChart, flush, makeMock, NOW, settle, text } from '../../../testing/test-helpers';
 
@@ -80,14 +80,14 @@ describe('DashboardPage', () => {
     await click(f, items[0]!.querySelector('button[aria-label^="Open "]'));
     await click(f, items[0]!.querySelector('button[aria-label^="Download "]'));
     expect(backend.calls).toEqual(expect.arrayContaining(['acknowledge', 'openRelease', 'downloadRelease']));
-    expect(TestBed.inject(ToastStore).toasts().map((t) => t.title)).toEqual(expect.arrayContaining(['Marked as seen', 'Download finished']));
+    expect(shellPorts().messages().map((m) => m.split('. ')[0])).toEqual(expect.arrayContaining(['Marked as seen', 'Download finished']));
   });
 
   it('shows the installed to latest token and sizes', async () => {
     const { f } = await make();
     const all = text(q(f, 'sp-whats-new'));
     expect(qa(f, 'sp-whats-new .token mat-icon').length).toBeGreaterThan(0);
-    expect(all).toMatch(/\d+(\.\d+)? (MiB|GiB)/);
+    expect(all).toMatch(/\d+(\.\d+)? (KB|MB|GB)/);
   });
 
   it('marks everything seen from the section header', async () => {
@@ -230,7 +230,7 @@ describe('DashboardPage', () => {
     const { f } = await make(backend);
     const feed = text(q(f, 'sp-events-feed'));
     expect(feed).toContain('9.1.0');
-    expect(feed).toMatch(/9\.1\.0 \(\d+(\.\d+)? MiB\), checksum verified/);
+    expect(feed).toMatch(/9\.1\.0 \(\d+(\.\d+)? MB\), checksum verified/);
     expect(feed).toContain('Timed out');
     expect(qa(f, 'sp-events-feed a')).toHaveLength(4);
     expect(byText(f.nativeElement, 'button', 'Load more')).toBeNull();

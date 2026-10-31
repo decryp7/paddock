@@ -47,7 +47,7 @@ inputs:
     description: "A nextest filterset for a pull request that reaches only part of the workspace (package(=a) | package(=b)); empty runs every test."
     default: ""
   display:
-    description: "'true' runs the tests on Linux under a virtual display and a session bus (xvfb-run, dbus-run-session): an app whose tests open a real (off-screen) browser window."
+    description: "'true' runs the tests on Linux under a virtual display and a session bus (xvfb-run, dbus-run-session) with PADDOCK_LIVE_BROWSER=1: an app whose tests start a real browser. Those tests run only there; host legs print a notice instead (Paddock rule 7)."
     default: "false"
 runs:
   using: composite
@@ -89,6 +89,16 @@ runs:
         COMMANDS: ${{ inputs.rust-checks }}
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
 
+    # Conformance C55 over the app's Rust (rule 7: tests start a real browser only in a throwaway session): a walk of the
+    # files, a second, on every Rust change, because the conformance job runs only when conformance/ itself changes.
+    - name: No real browser outside a throwaway session (${{ inputs.app }}, C55)
+      if: ${{ !cancelled() && inputs.rust == 'true' && inputs.cargo != '' && runner.os == 'Linux' }}
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+        ROOT: ${{ inputs.cargo }}
+      run: node "${{ github.action_path }}/../../../conformance/bin/paddock-conformance.mjs" --app "$APP" --root "$ROOT" --only C55
+
     # Every step of the Rust half runs even after another failed (clippy and nextest each name what broke), and the steps after a
     # failed check (`checks`, `rust-checks`) still run, so one run reports every failure (`!cancelled()`).
     - name: Rust (${{ inputs.app }}; fmt, clippy, tests on the mock runtime, doc tests, deny)
@@ -118,7 +128,10 @@ runs:
         if [ "$RUNNER_OS" = Linux ]; then step cargo fmt --all --check; fi
         if [ "$RUNNER_OS" != Windows ] || [ "$WINDOWS_CLIPPY" = true ]; then step cargo clippy --workspace ${hostexclude[@]+"${hostexclude[@]}"} --all-targets -- -D warnings; fi
         wrap=()
-        if [ "$DISPLAY_TESTS" = true ] && [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" dbus-run-session --); fi
+        # PADDOCK_LIVE_BROWSER=1: a throwaway container with a virtual display, so a test may start a real browser here; the
+        # real-browser tests run only under it (Linux), and a host leg (a user's session) never starts one (Paddock rule 7).
+        if [ "$DISPLAY_TESTS" = true ] && [ "$RUNNER_OS" = Linux ]; then wrap=(env PADDOCK_LIVE_BROWSER=1 xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" dbus-run-session --); fi
+        if [ "$DISPLAY_TESTS" = true ] && [ "$RUNNER_OS" != Linux ]; then echo "::notice::The real-browser tests run in the Linux leg under Xvfb, never on this desktop runner (Paddock rule 7)."; fi
         step ${wrap[@]+"${wrap[@]}"} cargo nextest run --workspace ${exclude[@]+"${exclude[@]}"} ${config[@]+"${config[@]}"} --profile ci ${filter[@]+"${filter[@]}"}
         if [ "$RUNNER_OS" = Linux ] && [ ${#last[@]} -gt 0 ]; then step ${wrap[@]+"${wrap[@]}"} cargo nextest run ${last[@]+"${last[@]}"} ${config[@]+"${config[@]}"} --profile ci --no-tests=pass ${filter[@]+"${filter[@]}"}; fi
         step cargo test --workspace ${hostexclude[@]+"${hostexclude[@]}"} --doc
