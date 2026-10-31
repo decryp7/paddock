@@ -182,16 +182,43 @@ export class GuiCheck {
     return (await this.until(() => this.has(a[1], a[2], role), this.guard())).ok && this.press(a[1], a[2], role);
   }
 
-  /** Switches the app's own Launch at login setting through its UI, the way the config describes (open, switch, save). */
-  async setLaunchAtLogin(on) {
+  /** How many lines of the app's first log match `regex` (0 when the log is absent). */
+  async appLogCount(regex) {
+    const log = (this.config.logs ?? [])[0];
+    if (!log) return 0;
+    const r = await this.g.exec(`grep -c -E ${sq(regex)} ${sq(await this.core.logPath(log))} 2>/dev/null`);
+    return Number.parseInt(r.stdout.trim(), 10) || 0;
+  }
+
+  /**
+   * Switches the app's own Launch at login setting through its UI, the way the config describes (open, switch, save). With
+   * `verifyLog` it also requires the app to have SAVED it: the config's `savedLog.on/off` line must be new in the app's log.
+   * A switch that shows the new position proves nothing: a save that failed (the helper restarting) leaves it there too.
+   */
+  async setLaunchAtLogin(on, { verifyLog = false } = {}) {
+    const saved = verifyLog ? this.gui.launchAtLogin.savedLog?.[on ? 'on' : 'off'] : null;
+    const before = saved ? await this.appLogCount(saved) : 0;
+    const shown = await this.setLaunchAtLoginSwitch(on);
+    if (!saved || !shown) return shown;
+    return (await this.until(async () => (await this.appLogCount(saved)) > before, this.guard())).ok;
+  }
+
+  async setLaunchAtLoginSwitch(on) {
     const l = this.gui.launchAtLogin;
     if (!(await this.has(...l.switch))) {
       for (const a of l.open) if (!(await this.act(a))) return false;
       if (!(await this.until(() => this.has(...l.switch), this.guard())).ok) return false;
     }
-    if ((await this.value(...l.switch)) !== (on ? '1' : '0')) await this.press(...l.switch);
+    // Judged by the switch's own value; a press while the page re-renders after the last change is lost (measured with an
+    // autosaving Settings page), so it is pressed again, at most three times. A save button, if the app has one, applies it.
+    const want = on ? '1' : '0';
+    for (let k = 0; k < 3; k++) {
+      if ((await this.value(...l.switch)) === want) break;
+      await this.press(...l.switch);
+      if ((await this.until(async () => (await this.value(...l.switch)) === want, 5_000)).ok) break;
+    }
     if (l.save && (await this.has(...l.save))) await this.press(...l.save);
-    return (await this.until(async () => (await this.value(...l.switch)) === (on ? '1' : '0'), this.guard())).ok;
+    return (await this.until(async () => (await this.value(...l.switch)) === want, this.guard())).ok;
   }
 
   async btm() { return btmItem(parseBtmDump((await this.g.exec('sudo sfltool dumpbtm 2>/dev/null', { timeoutMs: 60_000 })).stdout), this.gui.launchAtLogin.label); }
@@ -258,8 +285,14 @@ export class GuiCheck {
     const off = await this.setLoginItemsSwitch(sw, false);
     checks.push({ ok: off.ok, detail: `switched off in Login Items (as a user who refused it once, ${off.presses} press(es)): BTM ${(await this.btm())?.disposition ?? 'no record'}` });
     await this.closeSettings();
-    await this.setLaunchAtLogin(false);
-    await this.setLaunchAtLogin(true);
+    // Off, then on again, both only once the app is ready (its helper back and answering): this step tests the approval path, not
+    // a switch flipped while the helper restarts. A refusal in Login Items stops the service's helper and the app starts its own,
+    // which takes seconds; a save made before that fails ("The Dyno agent is not running") and leaves the switch showing a value
+    // nothing stored. So: ready first, and the off is judged by the app's own "saved" log line, not by the switch.
+    const ready = await this.until(() => this.core.isReady(), this.config.readyTimeoutSec * 1000);
+    const offAgain = await this.setLaunchAtLogin(false, { verifyLog: true });
+    const again = offAgain && (await this.setLaunchAtLogin(true));
+    checks.push({ ok: again, detail: again ? `Launch at login switched off, the app ready again after ${(ready.tookMs / 1000).toFixed(0)} s, then on again in the app` : 'the app\'s switch did not go off and on again' });
     const opened = await this.until(() => this.has('System Settings', sw, 'AXCheckBox'), this.guard());
     const said = (await this.ax(['tree', this.gui.windowOwner, '40'])).stdout.match(new RegExp(l.needsApprovalText))?.[0];
     await this.shot('needs-approval');
@@ -279,7 +312,7 @@ export class GuiCheck {
 
   /** Reboots the guest and returns what the app did at the login: the log since the reboot, windows, the settle window. */
   async rebootAndObserve() {
-    const log = await this.core.path(this.gui.loginStart.log);
+    const log = await this.core.logPath(this.gui.loginStart.log);
     const size = Number((await this.g.exec(`stat -f %z ${sq(log)} 2>/dev/null || echo 0`)).stdout.trim()) || 0;
     if (!(await this.host.reboot())) return null;
     this.core.home = null;
@@ -290,9 +323,12 @@ export class GuiCheck {
       return instancesOf(procs, appSpec, this.bundle).length > 0 && (!helper || instancesOf(procs, helper, this.bundle).length > 0);
     }, 3 * this.guard());
     const w = await this.core.observe({ running: true, loginService: this.loginOn });
-    // A log that rotated over the reboot is read whole: the offset only skips what was written before it.
-    const now = Number((await this.g.exec(`stat -f %z ${sq(log)} 2>/dev/null || echo 0`)).stdout.trim()) || 0;
-    const since = (await this.g.exec(`tail -c +${now >= size ? size + 1 : 1} ${sq(log)} 2>/dev/null`)).stdout;
+    // The dated log is picked again: a reboot across midnight starts a new day's file, which is read whole (its offset 0). A log that
+    // rotated over the reboot is read whole too: the offset only skips what was written before it.
+    const after = await this.core.logPath(this.gui.loginStart.log);
+    const now = Number((await this.g.exec(`stat -f %z ${sq(after)} 2>/dev/null || echo 0`)).stdout.trim()) || 0;
+    const from = after === log && now >= size ? size + 1 : 1;
+    const since = (await this.g.exec(`tail -c +${from} ${sq(after)} 2>/dev/null`)).stdout;
     return { up, w, since, windows: await this.windows(), procs: w.snaps.at(-1) };
   }
 
@@ -389,7 +425,8 @@ export class GuiCheck {
   async launchAtLoginOff() {
     const title = 'Launch at login off';
     const l = this.gui.launchAtLogin;
-    if (!l || !this.loginOn) return this.step(title, [], { skip: 'Launch at login is not on' });
+    // Runs whenever the app has the setting: after a failed approval the app's switch can still be on (BTM: disallowed).
+    if (!l) return this.step(title, [], { skip: 'the app has no Launch at login setting' });
     const appSpec = this.config.processes.find((s) => s.role === 'app');
     if (!instancesOf(await this.core.snapshot(), appSpec, this.bundle).length) await this.core.start();
     const off = await this.setLaunchAtLogin(false);

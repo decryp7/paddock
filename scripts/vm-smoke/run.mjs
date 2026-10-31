@@ -108,7 +108,7 @@ const log = (m) => console.error(`vm-smoke: ${m}`);
 const children = new Set(); // every host child in flight, so a signal can end them (cleanup)
 
 /** Runs a host command with a guard; resolves { code, stdout, stderr }. The child is ours, so it is ended by handle. */
-function hostRun(cmd, args, { timeoutMs = 120_000, input, env, cwd } = {}) {
+export function hostRun(cmd, args, { timeoutMs = 120_000, input, env, cwd } = {}) {
   return new Promise((res) => {
     const child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], env: env ?? process.env, cwd });
     children.add(child);
@@ -118,6 +118,8 @@ function hostRun(cmd, args, { timeoutMs = 120_000, input, env, cwd } = {}) {
     child.stderr.on('data', (d) => { stderr += d; });
     child.on('error', (e) => { stderr += String(e); if (!done) { done = true; clearTimeout(timer); res({ code: 127, stdout, stderr }); } });
     child.on('close', (code, sig) => { children.delete(child); if (!done) { done = true; clearTimeout(timer); res({ code: code ?? (sig ? 143 : 1), stdout, stderr }); } });
+    // A child that exits without reading its stdin (`true`, a fast `./dev` answer) closes the pipe: EPIPE is not an error here.
+    child.stdin.on('error', () => {});
     child.stdin.end(input ?? '');
   });
 }

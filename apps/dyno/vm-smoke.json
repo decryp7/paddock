@@ -5,8 +5,8 @@
   "bundle": "Dyno.app",
   "dataDir": "~/Library/Application Support/Dyno",
   "logs": [
-    "~/Library/Application Support/Dyno/logs/app.log",
-    "~/Library/Logs/Dyno/agent.log"
+    ["~/Library/Logs/Dyno/dyno.*.log", "~/Library/Application Support/Dyno/logs/app.log"],
+    ["~/Library/Logs/Dyno/dyno-agent.*.log"]
   ],
   "quit": {
     "appleScriptName": "Dyno"
@@ -95,14 +95,15 @@
         ]
       },
       "needsApprovalText": "macOS needs your approval[^|]*",
+      "savedLog": { "on": "start at login is now on", "off": "start at login is now off" },
       "helperParentAfterLogin": "launchd"
     },
     "loginStart": {
-      "log": "~/Library/Application Support/Dyno/logs/app.log",
+      "log": ["~/Library/Logs/Dyno/dyno.*.log", "~/Library/Application Support/Dyno/logs/app.log"],
       "hidden": "started hidden",
       "shown": "started with a window",
-      "restore": null,
-      "restoreWhy": "How Dyno should start when loginwindow restores it (the Mac restarted with Dyno running, \"Reopen windows\") is a product decision not taken yet (handoff dyno-login-blockers.md recommends hidden); until then the GUI run reports what happened."
+      "restore": "hidden",
+      "restoreWhy": "Decision 2026-10-31 (user): a \"Reopen windows\" restore at login (loginwindow open event with rsto=yes) starts Dyno hidden in the tray, whatever the Start-at-login setting. Installers built before the fix on dyno/login-blockers fail this step, as expected."
     }
   }
 }

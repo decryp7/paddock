@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
-import { checkoutGaps, guiImageName, MACOS_IMAGE, parseArgs } from './run.mjs';
+import { checkoutGaps, guiImageName, hostRun, MACOS_IMAGE, parseArgs } from './run.mjs';
 
 const dynoConfig = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'apps', 'dyno', 'vm-smoke.json'), 'utf8'));
 // Dyno's own config has no scripted Launch-at-login toggle (SMAppService is called by the app itself); the handover logic is tested with one.
@@ -209,4 +209,25 @@ test('checkoutGaps names what a sparse checkout lacks for ./dev, and nothing for
 test('guiImageName names the GUI image after the pinned base digest, and refuses an unpinned reference', () => {
   assert.equal(guiImageName(MACOS_IMAGE), 'vmgui-base-tahoe-4aaa751f');
   assert.throws(() => guiImageName('ghcr.io/cirruslabs/macos-tahoe-base:latest'), /not a pinned/);
+});
+
+test('hostRun survives a child that exits without reading its stdin (EPIPE is not a crash)', async () => {
+  for (let i = 0; i < 20; i++) {
+    const r = await hostRun('true', [], { input: 'x'.repeat(1 << 20) });
+    assert.equal(r.code, 0);
+  }
+});
+
+test('logPath finds the newest dated log of the candidates, the first candidate that exists, and falls back to the first name', async () => {
+  // Dyno's logs moved from logs/app.log to the dated paddock-log files (~/Library/Logs/Dyno/dyno.<day>.log).
+  const seen = [];
+  const exec = (answers) => async (cmd) => { seen.push(cmd); const hit = Object.entries(answers).find(([k]) => cmd.includes(k)); return { code: 0, stdout: hit ? hit[1] : '', stderr: '' }; };
+  const mk = (answers) => new Check({ exec: exec(answers), now: () => 0, sleep: async () => {} }, { ...config }, { intervalMs: 1 });
+  const dated = await mk({ 'printf %s "$HOME"': '/Users/admin', 'ls -t': '/Users/admin/Library/Logs/Dyno/dyno.2026-10-31.log\n/Users/admin/Library/Logs/Dyno/dyno.2026-10-30.log\n' }).logPath(['~/Library/Logs/Dyno/dyno.*.log', '~/Library/Application Support/Dyno/logs/app.log']);
+  assert.equal(dated, '/Users/admin/Library/Logs/Dyno/dyno.2026-10-31.log');
+  const old = await mk({ 'printf %s "$HOME"': '/Users/admin', 'app.log': '/Users/admin/Library/Application Support/Dyno/logs/app.log\n' }).logPath(['~/Library/Logs/Dyno/dyno.*.log', '~/Library/Application Support/Dyno/logs/app.log']);
+  assert.equal(old, '/Users/admin/Library/Application Support/Dyno/logs/app.log');
+  const none = await mk({ 'printf %s "$HOME"': '/Users/admin' }).logPath(['~/Library/Logs/Dyno/dyno.*.log', '~/x/app.log']);
+  assert.equal(none, '/Users/admin/Library/Logs/Dyno/dyno.*.log', 'nothing exists yet: the first candidate, so a stat of it reads 0');
+  assert.equal(await mk({ 'printf %s "$HOME"': '/Users/admin' }).logPath('~/plain.log'), '/Users/admin/plain.log', 'a plain string still works');
 });

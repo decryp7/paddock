@@ -19,7 +19,7 @@ const words = (s) => [...s.matchAll(/'((?:[^']|'\\'')*)'/g)].map((m) => m[1].rep
  */
 function fakeGui({ bug = null } = {}) {
   const st = { gk: 'assessments enabled', downloaded: false, dmgOpen: false, installed: false, quarantine: null, dialog: null, settings: null, auth: false,
-    app: null, window: false, settingsWin: false, appSwitch: 0, liSwitch: 0, btm: null, job: false, said: '', loginItemsOpen: false, log: '', agents: [], drags: 0, lostPress: bug === 'lost-press' };
+    app: null, window: false, settingsWin: false, rolled: false, oldLog: '', appSwitch: 0, liSwitch: 0, btm: null, job: false, said: '', loginItemsOpen: false, log: '', agents: [], drags: 0, lostPress: bug === 'lost-press' };
   let clock = 0, pid = 400;
   const procs = () => [
     ...(st.app ? [`${st.app.pid} 1 00:10 Fri Oct 30 14:00:00 2026 ${bug === 'translocated' ? '/private/var/folders/x/T/AppTranslocation/1/d/Dyno.app/Contents/MacOS/dyno-app' : `${B}/Contents/MacOS/dyno-app`}`] : []),
@@ -78,8 +78,11 @@ function fakeGui({ bug = null } = {}) {
     else if (app === 'coreautha') { st.auth = false; if (st.pw === 'admin') { st.quarantine = '01c3;6ae4;Safari;U'; startApp(); } }
     else if (app === 'Dyno' && role === 'AXMenuItem') st.settingsWin = true;
     else if (app === 'Dyno' && role === 'AXButton' && m('Dyno')) st.sectionOpen = true;
-    else if (app === 'Dyno' && role === 'AXCheckBox') { st.appSwitch = 1 - st.appSwitch; st.dirty = true; }
-    else if (app === 'Dyno' && m('Save changes')) { st.dirty = false; if (st.appSwitch) register(); else { st.job = false; st.agents = st.agents.map((a) => (a.ppid === 1 && st.app ? { pid: ++pid, ppid: st.app.pid } : a)); } }
+    else if (app === 'Dyno' && role === 'AXCheckBox') {
+      if (bug === 'app-press-lost' && st.appSwitch === 0 && st.btm === 'refused' && !st.appLost) { st.appLost = true; return ok('pressed'); }
+      st.appSwitch = 1 - st.appSwitch; st.dirty = true;
+    }
+    else if (app === 'Dyno' && m('Save changes')) { st.dirty = false; if (!st.appSwitch && bug !== 'off-not-saved') st.log += 'start at login is now off\n'; if (st.appSwitch) register(); else { st.job = false; st.agents = st.agents.map((a) => (a.ppid === 1 && st.app ? { pid: ++pid, ppid: st.app.pid } : a)); } }
     else if (app === 'System Settings' && role === 'AXCheckBox') {
       if (st.lostPress) { st.lostPress = false; return ok('pressed'); }
       st.liSwitch = 1 - st.liSwitch;
@@ -114,8 +117,10 @@ function fakeGui({ bug = null } = {}) {
     if (cmd.startsWith('sudo sfltool')) return ok(st.btm ? ` #1:\n                 Name: dyno-agent\n          Disposition: ${disp()}\n           Identifier: 8.${LABEL}\n` : '');
     if (cmd.startsWith('launchctl print')) return st.job ? ok(`gui/501/${LABEL} = {\n\tstate = ${st.agents.some((a) => a.ppid === 1) ? 'running' : 'spawn scheduled'}\n}`) : ok('Could not find service');
     if (cmd.startsWith('ps -axww')) return ok(procs());
-    if (cmd.startsWith('stat -f %z')) return ok(String(st.log.length));
-    if (cmd.startsWith('tail -c +')) { const n = Number(/tail -c \+(\d+)/.exec(cmd)[1]); return ok(st.log.slice(n - 1)); }
+    if (cmd.startsWith('grep -c -E')) return ok(String((st.log.match(new RegExp(words(cmd)[0], 'g')) ?? []).length));
+    if (cmd.startsWith('ls -t') && cmd.includes('dyno.*.log')) return bug === 'day-rolls' ? ok(st.rolled ? '/Users/admin/Library/Logs/Dyno/dyno.2026-10-31.log\n' : '/Users/admin/Library/Logs/Dyno/dyno.2026-10-30.log\n') : ok('');
+    if (cmd.startsWith('stat -f %z')) return ok(String((cmd.includes('2026-10-30') ? st.oldLog : st.log).length));
+    if (cmd.startsWith('tail -c +')) { const n = Number(/tail -c \+(\d+)/.exec(cmd)[1]); return ok((cmd.includes('2026-10-30') ? st.oldLog : st.log).slice(n - 1)); }
     if (cmd.startsWith('tail -n')) return ok(st.log);
     if (cmd.startsWith('open /Applications')) return ok();
     if (cmd.includes('Finder" to close')) return ok();
@@ -131,6 +136,7 @@ function fakeGui({ bug = null } = {}) {
     // A running app is restored by loginwindow (it shows its window, as Dyno does today); otherwise the login item starts it.
     reboot: async () => {
       const wasRunning = !!st.app;
+      if (bug === 'day-rolls') { st.oldLog = st.log; st.log = ''; st.rolled = true; } // midnight passes during the reboot: a new dated log
       st.app = null; st.agents = []; st.window = false; st.settingsWin = false; st.sectionOpen = false;
       if (wasRunning) startApp();
       else if (st.job) startApp({ login: true });
@@ -249,4 +255,27 @@ test('the restore reboot is reported while its expected behaviour is undecided, 
   const decided = await run(null, { restore: 'hidden' });
   assert.equal(decided.by['Reboot with the app running (restored at login)'].status, 'fail');
   assert.equal((await run(null, { restore: 'window' })).by['Reboot with the app running (restored at login)'].status, 'pass');
+});
+
+test('an in-app switch press lost while the Settings page re-renders is pressed again', async () => {
+  const r = await run('app-press-lost');
+  const s = r.by['Login Items approval (requiresApproval path)'];
+  assert.equal(s.status, 'pass', s.summary);
+});
+
+test('a Launch at login off that the app never saved fails the approval step, whatever the switch shows', async () => {
+  // Regression (Dyno 7245 run): the first off was pressed while the helper restarted after the refusal; the switch showed off,
+  // nothing was saved, the later on changed nothing and Login Items never opened. The step judged the switch only.
+  const r = await run('off-not-saved');
+  const s = r.by['Login Items approval (requiresApproval path)'];
+  assert.equal(s.status, 'fail', s.summary);
+  assert.ok(JSON.stringify(s).includes('did not go off and on again'), JSON.stringify(s));
+});
+
+test('a log file that rolls over to a new day during the reboot is picked again, so the login start is still read', async () => {
+  // Dyno's paddock-log writes one dated file per day; a reboot across midnight starts a new file. The size taken before the reboot was
+  // that of the old file, so reading the picked-before file would show nothing of the login start.
+  const r = await run('day-rolls');
+  const s = r.by['Reboot as a login item (app quit first): hidden, one agent'];
+  assert.equal(s.status, 'pass', JSON.stringify(s));
 });
