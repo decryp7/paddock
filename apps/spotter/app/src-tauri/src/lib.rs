@@ -35,11 +35,42 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/paddock/releases?q=spotter-v";
 /// The feed the updater reads.
 pub const UPDATE_FEED: &str = "https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json";
+/// Whether `version` is a test build: `X.Y.Z-test.N` whose first pre-release identifier is exactly `test` (no build metadata).
+fn is_test_build(version: &str) -> bool {
+    !version.contains('+') && version.split_once('-').is_some_and(|(_, pre)| pre.starts_with("test."))
+}
+
+/// Whether `url` is an https URL with a host (lower-case `https://`, no user information, a port of digits at most).
+fn is_https_url_with_host(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else { return false };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let (host, port) = if let Some(v6) = authority.strip_prefix('[') {
+        match v6.split_once(']') {
+            Some((h, "")) => (h, None),
+            Some((h, p)) => (h, p.strip_prefix(':').or(Some("-"))),
+            None => ("", None),
+        }
+    } else {
+        match authority.split_once(':') {
+            Some((h, p)) => (h, Some(p)),
+            None => (authority, None),
+        }
+    };
+    let v6 = authority.starts_with('[');
+    let host_ok = !host.is_empty()
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-') || (v6 && c == ':'));
+    host_ok && port.is_none_or(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
 /// The feed the updater reads: [`UPDATE_FEED`], except in a `-test.N` build made with `SPOTTER_TEST_UPDATE_FEED` set (the
-/// VM update test, built with a throw-away key; the family key never signs such a build). The override must be https.
+/// VM update test, built with a throw-away key; the family key never signs such a build). The override must be an https URL
+/// with a host; anything else is ignored. It is read at compile time, so a shipped copy cannot be pointed elsewhere, and the
+/// updater still checks every signature against the key built into the app.
 pub fn update_feed(version: &str, test_feed: Option<&'static str>) -> &'static str {
     match test_feed {
-        Some(url) if version.contains("-test.") && url.starts_with("https://") => url,
+        Some(url) if is_test_build(version) && is_https_url_with_host(url) => url,
         _ => UPDATE_FEED,
     }
 }
@@ -418,6 +449,37 @@ mod updater_tests {
             "https only"
         );
         assert_eq!(update_feed("1.0.0-test.1", Some("")), UPDATE_FEED);
+        for bad in [
+            "https://",
+            "https:///latest.json",
+            "garbage",
+            "HTTPS://192.168.64.1/x",
+            "https://u:p@192.168.64.1/x",
+            "https://host:port/x",
+            "https://host:/x",
+        ] {
+            assert_eq!(update_feed("1.0.0-test.1", Some(bad)), UPDATE_FEED, "{bad} is refused");
+        }
+        assert_eq!(
+            update_feed("1.0.0+test.1", other),
+            UPDATE_FEED,
+            "build metadata is not a test build"
+        );
+        assert_eq!(update_feed("1.0.0-test.1+x", other), UPDATE_FEED);
+        assert_eq!(
+            update_feed("1.0.0-rc.1-test.1", other),
+            UPDATE_FEED,
+            "only the first identifier counts"
+        );
+        assert_eq!(update_feed("1.0.0-testing.1", other), UPDATE_FEED);
+        for good in [
+            "https://[fd00::1]:8443/x",
+            "https://[fd00::1]/x",
+            "https://192.168.64.1:8443/ok/latest.json",
+            "https://host.example",
+        ] {
+            assert_eq!(update_feed("1.0.0-test.1", Some(good)), good);
+        }
     }
 
     #[test]

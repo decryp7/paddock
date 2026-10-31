@@ -34,3 +34,8 @@ test('the CLI exits 0 on a match and 1 on a mismatch', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a test build tag (-test.N) is refused: those builds are for the VM update tests and never released', () => {
+  assert.throws(() => tagVersion('spotter-v1.0.0-test.1', 'spotter-'), /test build/);
+  assert.equal(tagVersion('spotter-v1.0.0-rc.1', 'spotter-'), '1.0.0-rc.1');
+});

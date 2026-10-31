@@ -120,7 +120,7 @@ Manual, local only (never CI, never published): the installed copy must find a n
 signature, install it and relaunch (`PluginInstaller`, paddock-updater's `install` feature). Builds run on the host with a
 test updater key made for the run (never the family key); the feed is a small HTTPS server on a host-only address, reached
 through a throw-away test CA that only the VM trusts. The feed URL is the `UPDATE_FEED` constant in `lib.rs`; there is no
-build-time override yet, so the test builds change that one string (and the version) in a scratch worktree, uncommitted.
+build-time override for release builds. A test build (`X.Y.Z-test.N`, no build metadata) made with `SPOTTER_TEST_UPDATE_FEED=https://<host>:<port>/...` set at compile time reads its feed from it (`update_feed` in `lib.rs`; https with a host only, anything else is ignored; a release or rc build ignores it; signatures are still checked against the key built into the app). Never export the variable in a runner host's profile, and `check-tag` refuses `-test.` tags. `scripts/vm-smoke/spotter-update-assets.sh` sets it.
 
 ### 2026-10-29, 29d65b6bd (`spotter/shell-1.0`), builds 1.0.0-test.1 and 1.0.0-test.2
 
