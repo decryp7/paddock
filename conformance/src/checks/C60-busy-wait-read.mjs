@@ -1,4 +1,4 @@
-// C59: `read -t N` is not a sleep (rule 40, ER-21). When its input is /dev/zero or /dev/null, or a pipe from a command that
+// C60: `read -t N` is not a sleep (rule 40, ER-21). When its input is /dev/zero or /dev/null, or a pipe from a command that
 // ends at once (`: |`, `true |`, `echo |`, `yes |`, `cat /dev/zero |`), `read` returns immediately (data at once, or EOF), so a
 // loop that "waits" with it spins a CPU core. Seen as `read -t 20 < /dev/zero` in an agent script and `read -t 1 _ </dev/null`
 // in a test helper's embedded shell. Flagged, in tracked shell scripts (*.sh, *.bash, *.zsh), workflow and other YAML
@@ -58,7 +58,7 @@ export function busyReads(text) {
 }
 
 export default {
-  id: 'C59',
+  id: 'C60',
   title: '`read -t` is not used as a sleep',
   rule: 40,
   run(ctx) {
@@ -70,8 +70,8 @@ export default {
       if (!text || !/\bread\b/.test(text) || !/-\w*t\s*\d/.test(text)) continue;
       for (const p of busyReads(text)) {
         if (p.waived === 'reason') continue;
-        if (p.waived === 'no-reason') out.push(error('C59', 40, f, p.line, 'the busy-wait-read waiver gives no reason', 'Write `conformance: busy-wait-read — <why the read may return at once>`.'));
-        else out.push(error('C59', 40, f, p.line, '`read -t` on an input that is at EOF or always readable returns at once, so it is not a sleep and the loop spins a core', fix));
+        if (p.waived === 'no-reason') out.push(error('C60', 40, f, p.line, 'the busy-wait-read waiver gives no reason', 'Write `conformance: busy-wait-read — <why the read may return at once>`.'));
+        else out.push(error('C60', 40, f, p.line, '`read -t` on an input that is at EOF or always readable returns at once, so it is not a sleep and the loop spins a core', fix));
       }
     }
     return out;
