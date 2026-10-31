@@ -297,7 +297,7 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   outline); the menu keeps clear of the button's focus ring. Add: "Add" (outlined), the app's "Add volume" for a kind that can be
   placed again, "Added" (check and muted text, not a button) at its count; at the limit the counter says "8 of 8", an info line says
   "The popup holds 8 widgets. Remove one to add another." and every Add is disabled. Reset to defaults is a text button; remove and
-  reset show the undo snack bar through the toast area while the engine says `can_undo`. At 840 px and more the real popup is
+  reset show the undo snack bar through the toast area while the engine says `can_undo`. At 880 px and more the real popup is
   previewed beside the lists, with the same area and values. A newer layout is read-only, and a note says why.
 - **Dialogs**: modal for decisions only; title 18, one sentence, primary on the right, cancel left of it; destructive
   dialog names the thing and the consequence ("Delete 3 runners and their folders"); Esc closes, focus returns to the
