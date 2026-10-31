@@ -407,6 +407,21 @@ adr = "0012"
   note = "Builds the tray by hand with TrayIconBuilder; Spotter 1.0 builds it through paddock-window and drops these items. Its menu model (MenuEntry, menu_model) is Spotter's own content."
 
 [[mechanism]]
+id = "tray-popover-footer"
+title = "The tray popup's footer: the right-aligned Open <app> button with its arrow, the more menu (Customize widgets, Settings, a separator, Quit)"
+canonical = "paddock-ui"
+paths = ["ui/projects/paddock-ui/src/lib/tray-popover.ts"]
+status = "planned"
+adr = "0035"
+
+  [[mechanism.copy]]
+  paths = ["apps/pitwall/app/src/app/features/tray/tray-popover.ts"]
+  symbols = ["text:Open Pitwall"]
+  owner = "pitwall"
+  delete_by = "pitwall-v1.2.0"
+  note = "Waiver until 2026-12-31: consolidate into pd-tray-popover after the Dyno and Spotter 1.0 tags; matches Dyno's approved footer and menu (Dyno and Spotter register their copies in their own branches)."
+
+[[mechanism]]
 id = "tray-popover"
 title = "The popover window opened from the tray icon: position, height, toggle"
 canonical = "paddock-window"

@@ -25,3 +25,4 @@ Numbered, with status, context, decision and consequences. ADRs are not renumber
 | [0019](0019-caching.md) | Caching: prompt-prefix reuse, a response cache and an embeddings cache | accepted (number provisional); not built yet |
 | [0020](0020-llama-cpp-is-the-only-engine.md) | llama.cpp is the only engine, and installs itself | accepted; supersedes the engine parts of 0011 and 0004 |
 | [0021](0021-what-quitting-does-about-serving.md) | What quitting Pitwall does about serving | accepted |
+| [0022](0022-tray-popup-widgets.md) | The tray popup shows widgets you choose | accepted |

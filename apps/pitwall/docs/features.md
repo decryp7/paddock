@@ -343,8 +343,15 @@ that measured faster on this machine. Works.
 
 ![The tray popover](screenshots/tray-light.png)
 
-A compact view from the tray or menu bar: serving state, loaded models, memory, queue and live speed, with pause and release
-memory. Closing the window keeps Pitwall in the tray and the server keeps serving. With no tray (some Linux desktops) closing
+A small popup from the tray or menu bar that answers "is my local AI working, and what is it doing". You choose its widgets in
+Settings > Tray popup (or "Customize widgets…" in the popup's ⋯ menu), with a live preview beside the list: **Server** (serving, paused
+or not running, the port, the engines' health), **Activity** (speed, running chats, queue), **Memory** (RAM and video memory, pressure),
+**Loaded models** (what is in memory and what each holds), **Downloads** (progress, with Cancel), **Updates** (model updates on offer)
+and **Recent errors** (the last day). The default is Server, Activity, Memory and Loaded models; it fits the family's
+520 px cap in its worst state. The header has one status pill ("Serving on :11435", "Paused", "1 engine problem", "Not running"); a lost server
+or an app waiting to pair is said once above the widgets. The footer has Open Pitwall and a ⋯ menu (Customize widgets…, Pause or Resume
+serving, Release memory, Settings…, Quit Pitwall). Every value and rule is Rust (`pitwall_core::widgets`); the layout is kept by the app
+(`popup-widgets.json`). Closing the window keeps Pitwall in the tray and the server keeps serving. With no tray (some Linux desktops) closing
 the window quits the app, but the service keeps running. The shell and the popover screen exist; they have only been exercised on macOS-style flows in tests, not on real Windows and Linux desktops.
 
 ## Settings

@@ -46,7 +46,7 @@ runs have not been done yet; see the [roadmap](docs/roadmap.md) for exactly what
 | Settings, including Model updates | ![settings, light](docs/screenshots/settings-light.png) | ![settings, dark](docs/screenshots/settings-dark.png) |
 | First start: llama.cpp installs itself | ![llama.cpp installing, light](docs/screenshots/engines-install-light.png) | ![llama.cpp installing, dark](docs/screenshots/engines-install-dark.png) |
 | When you quit Pitwall (setting and question) | ![quit setting, light](docs/screenshots/settings-quit-light.png) | ![quit question, dark](docs/screenshots/quit-dialog-dark.png) |
-| Tray popover (360x520) | ![Tray, light](docs/screenshots/tray-light.png) | ![Tray, dark](docs/screenshots/tray-dark.png) |
+| Tray popover (360 wide, widgets you choose) | ![Tray, light](docs/screenshots/tray-light.png) | ![Tray, dark](docs/screenshots/tray-dark.png) |
 
 The screenshots come from the browser build with the mock backend (`npm run screenshots` in `app/`; 1440x900 at 2x, long pages taller); they show the
 design, not measurements from a real machine.
