@@ -429,6 +429,19 @@ mod widget_wiring {
         assert!(v.placements.iter().any(|p| p.id.as_str() == "cpu-memory"), "{v:?}");
     }
 
+    /// Opening counts as visible even when the shell's own gate says no; a preview's snapshot does not.
+    #[test]
+    fn opening_marks_the_popup_visible_at_once_and_a_snapshot_does_not() {
+        let app = app();
+        let shell = shell(&app);
+        shell.set_popover_gate(Arc::new(|| false));
+        shell.live(update(5.0));
+        let _ = shell.popover_snapshot();
+        assert!(!shell.popover_wants_values(), "a preview never opens the popup");
+        let _ = shell.popover_opened();
+        assert!(shell.popover_wants_values());
+    }
+
     /// A navigation waits for the main window, once, and the event goes to the main window only.
     #[test]
     fn a_navigation_is_kept_for_the_main_window_and_goes_to_it_alone() {

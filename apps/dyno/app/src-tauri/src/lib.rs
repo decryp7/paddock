@@ -69,6 +69,8 @@ paddock_commands::command_table! {
     Query [MAIN | TRAY | DIALOG] => commands::popover_values,
     /// A button of a widget: open a page, retry, start the backup check, restart the agent.
     Mutation [MAIN | TRAY] => commands::run_widget_action,
+    /// The popup's values as known now, without opening it: the Settings preview.
+    Query [MAIN | DIALOG] => commands::popover_snapshot,
     /// Readings (value, text, scale and tone) of metrics from the newest live update: the dashboard and the previews.
     Query [MAIN | DIALOG] => commands::metric_readings,
     /// The kinds the choosers can add, each with a default widget and the metrics the engine accepts for it.

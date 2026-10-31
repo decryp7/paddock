@@ -41,6 +41,11 @@ pub const MEMORY_THRESHOLDS: Thresholds = Thresholds {
     warning: Some(80.0),
     critical: Some(92.0),
 };
+/// A percent counter turns amber and red here.
+pub const COUNTER_THRESHOLDS: Thresholds = Thresholds {
+    warning: Some(75.0),
+    critical: Some(90.0),
+};
 /// Used space of a volume turns amber and red here (percent).
 pub const DISK_THRESHOLDS: Thresholds = Thresholds {
     warning: Some(85.0),
@@ -233,6 +238,10 @@ pub struct CounterRow {
     pub value: Option<f64>,
     /// What the value measures.
     pub unit: CounterUnit,
+    /// 0 to 100 for a percent counter, else none.
+    pub percent: Option<f32>,
+    /// Against [`COUNTER_THRESHOLDS`] for a percent counter; `ok` otherwise.
+    pub tone: ValueTone,
 }
 
 /// One busy app.
@@ -694,6 +703,13 @@ fn cpu_memory(inputs: &Inputs<'_>) -> Option<State> {
 
 fn network(inputs: &Inputs<'_>) -> Option<State> {
     let Source::Ready(live) = inputs.live.as_ref() else { return None };
+    if live.system.network.is_empty() {
+        return Some(WidgetState::Empty {
+            title: "See traffic when online".into(),
+            detail: "Offline now.".into(),
+            next: action(WidgetActionId::OpenPage(Page::Network), "Open network"),
+        });
+    }
     let (rx_bps, tx_bps) = live.system.network_totals();
     ready(
         PopoverValue::Network {
@@ -853,11 +869,23 @@ fn counters(id: &PlacementId, inputs: &Inputs<'_>) -> Option<State> {
         .readings
         .iter()
         .take(COUNTER_ROWS)
-        .map(|r| CounterRow {
-            path: r.path.clone(),
-            name: r.path.rsplit('\\').next().filter(|s| !s.is_empty()).unwrap_or(&r.path).to_string(),
-            value: r.value.value().copied().filter(|v| v.is_finite()),
-            unit: r.unit,
+        .map(|r| {
+            let value = r.value.value().copied().filter(|v| v.is_finite());
+            let percent = (r.unit == CounterUnit::Percent)
+                .then(|| value.map(|v| v.clamp(0.0, 100.0) as f32))
+                .flatten();
+            CounterRow {
+                percent,
+                tone: if percent.is_some() {
+                    COUNTER_THRESHOLDS.tone(value)
+                } else {
+                    ValueTone::Ok
+                },
+                path: r.path.clone(),
+                name: r.path.rsplit('\\').next().filter(|s| !s.is_empty()).unwrap_or(&r.path).to_string(),
+                value,
+                unit: r.unit,
+            }
         })
         .collect();
     if !rows.is_empty() && rows.iter().all(|r| r.value.is_none()) {

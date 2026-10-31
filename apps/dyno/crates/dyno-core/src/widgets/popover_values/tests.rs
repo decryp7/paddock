@@ -731,3 +731,32 @@ fn every_action_has_one_effect() {
     assert_eq!(WidgetActionId::StartBackupCheck.effect(), StartBackupCheck);
     assert_eq!(WidgetActionId::RestartAgent.effect(), RestartAgent);
 }
+
+#[test]
+fn no_network_is_the_offline_empty_with_open_network() {
+    let mut l = live();
+    l.system.network.clear();
+    let s = run(&PopoverWidget::Network, |i| i.live = Source::Ready(&l)).unwrap();
+    let S::Empty { title, detail, next } = s else { panic!("{s:?}") };
+    assert_eq!((title.as_str(), detail.as_str()), ("See traffic when online", "Offline now."));
+    assert_eq!(next.unwrap().action, WidgetActionId::OpenPage(Page::Network));
+}
+
+#[test]
+fn a_percent_counter_has_a_scale_and_a_tone_from_the_engine() {
+    let rs = vec![
+        reading(r"\A\B", json!({"available": 95.0})),
+        reading(r"\A\C", json!({"available": 10.0})),
+    ];
+    let PopoverValue::PinnedCounters { rows, .. } = value(run(&PopoverWidget::PinnedCounters, |i| {
+        i.counters = Source::Ready(CountersInput {
+            pinned: 2,
+            readings: &rs,
+            read_at: None,
+        })
+    })) else {
+        panic!()
+    };
+    assert_eq!((rows[0].percent, rows[0].tone), (Some(95.0), ValueTone::Bad));
+    assert_eq!((rows[1].percent, rows[1].tone), (Some(10.0), ValueTone::Ok));
+}

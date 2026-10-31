@@ -45,7 +45,8 @@ pub fn values(shared: &Arc<Shared>, asked: &[PlacementId]) -> Result<Vec<Popover
         Source::NotYet
     };
     let volumes = if has(PopoverKind::DiskSpace) {
-        Source::Ready(shared.disk.volumes())
+        // The cached list only: never a listing on the request. Before the first one finishes the widget is loading.
+        shared.disk.cached_volumes().map_or(Source::NotYet, Source::Ready)
     } else {
         Source::NotYet
     };

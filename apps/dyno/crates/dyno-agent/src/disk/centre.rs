@@ -354,6 +354,16 @@ impl DiskCentre {
         }
     }
 
+    /// The volumes as last listed, without asking the system and without starting a listing on the caller's thread: `None`
+    /// before the first listing has finished (one is started in the background). The popup reads this on every ask.
+    pub fn cached_volumes(self: &Arc<Self>) -> Option<Vec<Volume>> {
+        let known = lock(&self.known).clone();
+        if known.is_none() {
+            self.refresh_in_background();
+        }
+        known.map(|k| k.into_iter().map(|l| l.volume).collect())
+    }
+
     /// Asks the system for the volumes on a thread of its own and remembers the answer; does nothing while such a call is
     /// already running. Never blocks the caller (the system can take seconds when a share has gone away).
     pub fn refresh_in_background(self: &Arc<Self>) {

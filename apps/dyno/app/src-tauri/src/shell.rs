@@ -287,6 +287,11 @@ impl<R: Runtime> ShellOf<R> {
         self.popover_snapshot()
     }
 
+    /// Whether the popup's model wants values (it was opened or seen visible). A preview's snapshot never sets this.
+    pub fn popover_wants_values(&self) -> bool {
+        lock(&self.popover).visible()
+    }
+
     /// Reads metrics from the newest live update, for the dashboard and the previews.
     pub fn metric_readings(&self, queries: &[ReadingQuery]) -> Vec<MetricReading> {
         dyno_core::widgets::read_all(queries, lock(&self.last_live).as_ref())
@@ -340,8 +345,11 @@ impl<R: Runtime> ShellOf<R> {
     /// Asks the agent for the slow kinds on a thread of its own (a request must never block the link's reader), then
     /// applies and sends the answer. One request at a time: when one is out, the next tick asks again.
     fn ask_slow(&self, ask: Ask) {
-        let Some(link) = lock(&self.link).clone() else { return };
-        let Some(me) = self.me.upgrade() else { return };
+        let (Some(link), Some(me)) = (lock(&self.link).clone(), self.me.upgrade()) else {
+            // Nobody to ask yet: keep the wish, so the on-change kinds are asked once there is a link.
+            lock(&self.popover).force_refresh();
+            return;
+        };
         if self.asking.swap(true, Ordering::SeqCst) {
             lock(&self.popover).force_refresh();
             return;
@@ -351,7 +359,7 @@ impl<R: Runtime> ShellOf<R> {
             me.asking.store(false, Ordering::SeqCst);
             match answer {
                 Ok(Reply::PopoverValues(values)) => me.popover_answered(ask.generation, values.0),
-                Ok(_) => {}
+                Ok(_) => lock(&me.popover).force_refresh(),
                 Err(e) => {
                     logging::info(&format!("could not read the popup values: {}", e.message));
                     lock(&me.popover).force_refresh();
