@@ -132,7 +132,8 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
     </ng-template>
   `,
   styles: `
-    .dy-pw-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+    /* One track that may shrink: an auto track takes the widest row's nowrap content and pushes the rows past the card. */
+    .dy-pw-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
     .dy-pw-row, .dy-pw-plain, .dy-pw-more { all: unset; box-sizing: border-box; cursor: pointer; border-radius: var(--pd-radius-control); }
     .dy-pw-row { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; max-width: 100%; min-height: 24px; color: var(--pd-text); font: inherit; }
     .dy-pw-list > li { min-width: 0; }

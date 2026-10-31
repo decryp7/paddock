@@ -260,9 +260,20 @@ for (const density of ['compact', 'comfortable'] as const) {
     await page.setViewportSize({ width: 1280, height: 1800 });
     await page.goto(`/?theme=dark&accent=dyno&density=${density}`);
     await page.getByTestId('widgets').waitFor();
+    // Text a few per cent wider than this machine's font (a CI runner's font is): a row with no slack here overflows there.
+    await page.addStyleTag({ content: '*{letter-spacing:0.03em !important}' });
     for (const kind of KINDS) expect(await height(page, kind, 'loading'), kind).toBe(await height(page, kind, 'ready'));
-    const overflow = await page.getByTestId('wgt-popup').locator('pd-widget-frame').evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth + 1).length);
-    expect(overflow).toBe(0);
+    // Each frame that is wider inside than outside, named with its widths and the part that sticks out.
+    const overflow = await page.getByTestId('wgt-popup').locator('pd-widget-frame').evaluateAll((els) =>
+      els
+        .filter((e) => e.scrollWidth > e.clientWidth + 1)
+        .map((e) => {
+          const box = e.getBoundingClientRect();
+          const wide = [...e.querySelectorAll<HTMLElement>('*')].filter((c) => c.getBoundingClientRect().right > box.right + 1).map((c) => `${c.tagName.toLowerCase()}.${c.className}`.slice(0, 80));
+          return `${(e.textContent ?? '').trim().slice(0, 40)}: ${e.scrollWidth} in ${e.clientWidth}; past the edge: ${wide.join(', ')}`;
+        }),
+    );
+    expect(overflow).toEqual([]);
   });
 }
 

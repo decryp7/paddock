@@ -264,7 +264,8 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
     .wg-foot { display: flex; align-items: center; justify-content: flex-end; gap: var(--pd-space-1); width: 100%; }
     .wg-popup { width: 440px; padding: 24px 0; display: flex; justify-content: center; background: var(--pd-surface-1); }
     .wg-chooser { padding: var(--pd-space-4); background: var(--pd-surface-1); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); }
-    .wg-rows { display: grid; gap: 2px; margin: 0 calc(-1 * var(--pd-space-2)); }
+    /* One track that may shrink (minmax(0, 1fr)): an auto track takes the widest row's nowrap content and pushes the rows past the frame. */
+    .wg-rows { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 0 calc(-1 * var(--pd-space-2)); }
     .wg-row { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 28px; padding: 2px var(--pd-space-2); }
     .wg-open { width: 100%; border: 0; border-radius: var(--pd-radius-control); background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
     .wg-open:hover { background: var(--pd-hover); }
