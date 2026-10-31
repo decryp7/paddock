@@ -1,12 +1,15 @@
 //! Command line of the headless monitor:
 //! `debrief-monitor --config monitor.json --out ./monitor-logs [--duration 10m]`.
 
+use crate::source::{ProcessSource, SysinfoSource};
+use crate::tracker::{base_fields, stamp, STATS_TEMPLATE};
 use crate::ProcessMonitor;
 use anyhow::{anyhow, bail, Context, Result};
-use debrief_core::export::ClefFileSink;
+use debrief_core::export::{ClefFileSink, EventSink};
+use debrief_core::model::{Level, Record};
 use debrief_core::plugin::Collector;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 pub const USAGE: &str = "usage: debrief-monitor --config <monitor.json> --out <dir> [--duration <10m|30s|2h|1500ms>]";
@@ -61,18 +64,56 @@ pub fn parse_args(args: &[String]) -> Result<Args> {
     })
 }
 
-/// Runs the monitor until `stop` is set or the optional duration elapses.
+/// Message template of the event that ends every run.
+pub const STOPPED_TEMPLATE: &str = "Monitoring stopped after {ElapsedMs} ms ({StopReason}) with {StatsEvents} stats events";
+
+/// Passes events through to the file and counts the `Process stats` ones, for the event that ends the run.
+struct CountingSink<'a> {
+    inner: &'a dyn EventSink,
+    stats: AtomicUsize,
+}
+
+impl EventSink for CountingSink<'_> {
+    fn write(&self, records: &[Record]) -> Result<()> {
+        let stats = records.iter().filter(|r| r.template.as_deref() == Some(STATS_TEMPLATE)).count();
+        self.stats.fetch_add(stats, Ordering::Relaxed);
+        self.inner.write(records)
+    }
+}
+
+/// The event that ends a run: how long it ran, why it stopped and how many stats samples it wrote, so a short or
+/// empty log says whether the run ended early or the samples never came.
+fn stopped_record(elapsed: Duration, reason: &str, stats: usize) -> Record {
+    let ms = elapsed.as_millis() as u64;
+    let mut r = stamp(Record::new(0), crate::now_ms());
+    r.level = Level::Information;
+    r.message = format!("Monitoring stopped after {ms} ms ({reason}) with {stats} stats events");
+    r.template = Some(STOPPED_TEMPLATE.into());
+    r.fields = base_fields(&SysinfoSource::new().host_name());
+    r.fields.insert("ElapsedMs".into(), ms.into());
+    r.fields.insert("StopReason".into(), reason.into());
+    r.fields.insert("StatsEvents".into(), (stats as u64).into());
+    r
+}
+
+/// Runs the monitor until `stop` is set or the optional duration elapses, then writes the event that ends the run.
 pub fn run(args: &[String], stop: &AtomicBool) -> Result<()> {
     let args = parse_args(args)?;
     let text = std::fs::read_to_string(&args.config).with_context(|| format!("cannot read {}", args.config.display()))?;
     let config: serde_json::Value = serde_json::from_str(&text).with_context(|| format!("{} is not valid JSON", args.config.display()))?;
-    let sink = ClefFileSink::new(&args.out, "process-monitor", ROTATE_BYTES, KEEP_FILES)?;
+    let file = ClefFileSink::new(&args.out, "process-monitor", ROTATE_BYTES, KEEP_FILES)?;
+    let sink = CountingSink {
+        inner: &file,
+        stats: AtomicUsize::new(0),
+    };
     let local_stop = AtomicBool::new(false);
+    let timed_out = AtomicBool::new(false);
+    let start = Instant::now();
     std::thread::scope(|s| {
         s.spawn(|| {
-            let start = Instant::now();
             while !stop.load(Ordering::Relaxed) && !local_stop.load(Ordering::Relaxed) {
                 if args.duration.is_some_and(|d| start.elapsed() >= d) {
+                    timed_out.store(true, Ordering::Relaxed);
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(20));
@@ -82,7 +123,13 @@ pub fn run(args: &[String], stop: &AtomicBool) -> Result<()> {
         let result = ProcessMonitor.run(&config, &sink, &local_stop);
         local_stop.store(true, Ordering::Relaxed);
         result
-    })
+    })?;
+    let reason = if timed_out.load(Ordering::Relaxed) {
+        "duration elapsed"
+    } else {
+        "stop requested"
+    };
+    file.write(&[stopped_record(start.elapsed(), reason, sink.stats.load(Ordering::Relaxed))])
 }
 
 #[cfg(test)]
@@ -145,15 +192,25 @@ mod tests {
             .contains("not valid JSON"));
     }
 
-    #[test]
-    fn run_stops_after_duration_and_writes_events() {
-        let dir = tempfile::tempdir().unwrap();
-        let cfg = dir.path().join("m.json");
+    /// A config that samples this test process every 250 ms.
+    fn own_process_config(dir: &std::path::Path) -> PathBuf {
+        let cfg = dir.join("m.json");
         std::fs::write(
             &cfg,
             format!(r#"{{"targets":[{{"pid":{}}}],"intervalMs":250}}"#, std::process::id()),
         )
         .unwrap();
+        cfg
+    }
+
+    /// `Process stats` needs a second sample (CPU and IO are deltas), one interval after the first. A run that ends
+    /// sooner writes only the start event; CI run 7287 hit this with a fixed 700 ms run on a busy runner, where the first
+    /// sample came too late. So the duration test asserts only that the run stops (how many samples fit depends on the
+    /// scheduler), and the events test waits for the events.
+    #[test]
+    fn run_stops_after_its_duration() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = own_process_config(dir.path());
         let out = dir.path().join("logs");
         let stop = AtomicBool::new(false);
         run(
@@ -163,16 +220,50 @@ mod tests {
                 "--out",
                 out.to_str().unwrap(),
                 "--duration",
-                "700ms",
+                "1ms",
             ]),
             &stop,
         )
         .unwrap();
         let text = std::fs::read_to_string(out.join("process-monitor.clef")).unwrap();
-        assert!(text.contains("Process stats"), "{text}");
+        assert!(text.contains(r#""StopReason":"duration elapsed""#), "{text}");
         // An external stop also ends the run.
         let stop = AtomicBool::new(true);
         run(&v(&["--config", cfg.to_str().unwrap(), "--out", out.to_str().unwrap()]), &stop).unwrap();
+        let text = std::fs::read_to_string(out.join("process-monitor.clef")).unwrap();
+        assert!(text.lines().last().unwrap().contains(r#""StopReason":"stop requested""#), "{text}");
+    }
+
+    /// Runs until the output holds a `Process stats` event, however long the machine takes to get there.
+    #[test]
+    fn run_writes_events_until_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = own_process_config(dir.path());
+        let out = dir.path().join("logs");
+        let file = out.join("process-monitor.clef");
+        let stop = AtomicBool::new(false);
+        let has_stats = || std::fs::read_to_string(&file).is_ok_and(|t| t.contains("Process stats"));
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                // Waits on the condition (the event in the file), not on a clock; stops when `run` returned early.
+                while !stop.load(Ordering::Relaxed) && !has_stats() {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                stop.store(true, Ordering::Relaxed);
+            });
+            let result = run(&v(&["--config", cfg.to_str().unwrap(), "--out", out.to_str().unwrap()]), &stop);
+            stop.store(true, Ordering::Relaxed);
+            result
+        })
+        .unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("Now monitoring") && text.contains("Process stats"), "{text}");
+        let end = text.lines().last().unwrap();
+        assert!(
+            end.contains("Monitoring stopped after") && end.contains(r#""StopReason":"stop requested""#),
+            "{end}"
+        );
+        assert!(!end.contains(r#""StatsEvents":0"#), "{end}");
     }
 
     #[test]
