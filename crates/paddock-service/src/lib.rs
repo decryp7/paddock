@@ -113,7 +113,7 @@ pub use manager::{Manager, Started};
 pub use plan::{Hold, Plan, Reason, Refusal};
 pub use port::{AppService, AppServiceStatus, Elevator, Output, RegisterError, RunError, System};
 pub use repair::{RepairOutcome, Step, Timings};
-pub use spec::{Kind, ProcessType, Restart, ServiceSpec, SpecBuilder};
+pub use spec::{Kind, KillMode, ProcessType, Restart, ServiceSpec, SpecBuilder};
 pub use status::{Condition, HealthReport, LOGIN_SECTION, ServiceStatus};
 pub use system::RealSystem;
 pub use tracker::{RepairNotice, RepairState, RepairTracker};
