@@ -13,7 +13,9 @@ from Conventional Commits by git-cliff (`cliff.toml`).
   their progress and can be cancelled; the window no longer gives up on them after a fixed time.
 - Updates and release notes come from the Paddock releases (`pitcrew-latest`, the `pitcrew-v` tags). A copy installed before
   this version is reinstalled once by hand.
-
+- Dialog buttons follow the platform: Cancel then the main action on the right on macOS and Linux, the main action first on
+  Windows. A confirmation is the shared confirmation window, and a dialog whose action fails stays open with the reason and
+  a Try again button.
 - Runner downloads and updates use the Paddock downloader: parallel ranges, per-host connection caps, back-off when a server
   answers 429 or 503, resume of a stopped download, the checksum computed while writing and compared with the publisher's
   (two sources must agree), a free-space check, and Cancel in every phase. Each download is a job with phases in the Jobs list.
