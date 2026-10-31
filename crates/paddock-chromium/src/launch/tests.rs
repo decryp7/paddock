@@ -354,6 +354,54 @@ fn a_start_that_cannot_be_observed_is_bounded_by_the_hang_guard() {
 }
 
 #[test]
+fn a_browser_stopped_at_start_is_paused_and_waited_for_not_called_idle() {
+    let d = tempfile::tempdir().unwrap();
+    let pid_file = d.path().join("pid");
+    let stopped = script(
+        d.path(),
+        "stopped.sh",
+        &format!("echo $$ > {}\nkill -STOP $$\nsleep 30", pid_file.display()),
+    );
+    let clock = FakeClock::new();
+    let mut o = opts(&d.path().join("p"));
+    // A constant CPU time: only the pause keeps the idle count from ending the start.
+    (o.clock, o.max_lifetime, o.cpu_sampler) = (
+        Arc::new(clock.clone()),
+        Duration::from_secs(30),
+        Some(Arc::new(|_| Some(Duration::from_millis(5))) as CpuSampler),
+    );
+    o.patience = Patience {
+        idle: Duration::from_secs(2),
+        cpu_every: 1,
+        ..o.patience
+    };
+    let e = std::thread::scope(|s| {
+        let h = s.spawn(|| Chromium::launch_with(&stopped, &o, Sandbox::On));
+        assert!(clock.wait_for_waiters(2, Duration::from_secs(20)));
+        // Time does not move until the browser is really stopped (the pid file is written just before).
+        wait_until("the browser to stop", || {
+            std::fs::read_to_string(&pid_file)
+                .ok()
+                .and_then(|t| t.trim().parse::<u32>().ok())
+                .and_then(paddock_proc::ProcessId::of)
+                .is_some_and(|id| paddock_proc::run_state(id) == paddock_proc::RunState::Stopped)
+        });
+        while !h.is_finished() {
+            if clock.waiters() >= 1 {
+                clock.advance(POLL);
+            }
+            std::thread::yield_now();
+        }
+        h.join().unwrap().err().unwrap()
+    });
+    // Only the caller's cap ended it; the idle stall (which would say "has done nothing") never fired.
+    assert!(
+        matches!(&e, Error::Launch(m) if m.contains("did not start within 30 s")),
+        "{e}"
+    );
+}
+
+#[test]
 fn a_start_ended_by_the_callers_cap_says_it_was_the_time_limit() {
     let d = tempfile::tempdir().unwrap();
     let silent = script(d.path(), "silent.sh", "exec sleep 300");

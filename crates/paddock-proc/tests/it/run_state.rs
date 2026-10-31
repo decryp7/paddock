@@ -1,10 +1,10 @@
-//! A stopped child (SIGSTOP: what App Tamer does) is read as stopped and a start watch waits for it instead of calling it
+//! A SIGSTOP-stopped process is read as stopped and a start watch waits for it instead of calling it
 //! idle (ADR 0031). Unix only: the test child is `sleep`, stopped and killed with signals.
 #![cfg(unix)]
 
 use paddock_proc::{
     Liveness, Pace, Patience, ProcessId, RunState, StallCause, StartProbe, StartState, StartWatch,
-    Watched, command, run_state,
+    Watched, command, liveness_of, run_state,
 };
 use std::process::Child;
 use std::time::{Duration, Instant};
@@ -141,4 +141,14 @@ fn the_same_watch_over_a_running_idle_child_does_call_it_idle() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn liveness_of_a_stopped_child_is_paused_and_of_a_running_one_running() {
+    let child = Sleeper::new();
+    let id = child.id();
+    assert_eq!(liveness_of(id, None), Liveness::Running);
+    child.signal(libc::SIGSTOP);
+    until("stopped", || run_state(id) == RunState::Stopped);
+    assert_eq!(liveness_of(id, None), Liveness::Paused);
 }

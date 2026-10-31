@@ -1,4 +1,5 @@
 //! Whether a process is stopped (ADR 0031: a process the OS or an app such as App Tamer has stopped is waiting, not hung).
+//! Windows is `Unknown`: `PROCESS_EXTENDED_BASIC_INFORMATION.IsFrozen` is deferred (ADR 0031 section 4).
 //! Nothing else about the run state is read: the CPU time and the ready handshake say the rest.
 //!
 //! The reading is identity-checked (rule 53, ADR 0033): a pid that was handed on is [`RunState::Exited`], never the new
@@ -16,7 +17,8 @@ pub enum RunState {
     Stopped,
     /// Gone, a zombie, or its pid now belongs to another process.
     Exited,
-    /// The process is there but this OS or this process's rights do not say (Windows, a process of another user).
+    /// The process may be there but this OS or this process's rights do not say (Windows, a process of another user, a
+    /// `/proc` read that failed for a reason other than the process being gone).
     Unknown,
 }
 
@@ -61,6 +63,23 @@ pub(crate) fn from_stat(
         'Z' | 'X' | 'x' => RunState::Exited,
         s if is_stop_letter(s) => RunState::Stopped,
         _ => RunState::Running,
+    }
+}
+
+/// The state from the read of `/proc/<pid>/stat`: only a process that is not there (`NotFound`, or `ESRCH` for one that
+/// vanished mid-read) is `Exited`; any other failure (rights, a busy `/proc`) is `Unknown`, never a guess.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn from_read(
+    id: ProcessId,
+    read: std::io::Result<String>,
+    start: impl FnOnce(u64) -> Option<StartTime>,
+) -> RunState {
+    match read {
+        Ok(stat) => from_stat(id, &stat, start),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound || e.raw_os_error() == Some(3) => {
+            RunState::Exited
+        }
+        Err(_) => RunState::Unknown,
     }
 }
 
@@ -150,6 +169,21 @@ mod tests {
             "start time unreadable"
         );
         assert_eq!(from_stat(me, "garbage", at), RunState::Unknown);
+    }
+
+    #[test]
+    fn only_a_missing_process_is_exited_any_other_read_error_is_unknown() {
+        use std::io::{Error, ErrorKind};
+        let me = id(70);
+        let read = |e: Error| from_read(me, Err(e), at);
+        assert_eq!(read(Error::from(ErrorKind::NotFound)), RunState::Exited);
+        assert_eq!(read(Error::from_raw_os_error(3)), RunState::Exited, "ESRCH");
+        assert_eq!(
+            read(Error::from(ErrorKind::PermissionDenied)),
+            RunState::Unknown
+        );
+        assert_eq!(read(Error::from(ErrorKind::Other)), RunState::Unknown);
+        assert_eq!(from_read(me, Ok(stat('T', 7)), at), RunState::Stopped);
     }
 
     #[test]

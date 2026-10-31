@@ -732,10 +732,8 @@ pub fn cpu_sample(_pid: u32) -> Option<crate::usage::CpuSample> {
 /// process.
 #[cfg(target_os = "linux")]
 pub fn run_state(id: crate::ProcessId) -> crate::RunState {
-    match std::fs::read_to_string(format!("/proc/{}/stat", id.pid())) {
-        Ok(stat) => crate::runstate::from_stat(id, &stat, start_from_ticks),
-        Err(_) => crate::RunState::Exited,
-    }
+    let read = std::fs::read_to_string(format!("/proc/{}/stat", id.pid()));
+    crate::runstate::from_read(id, read, start_from_ticks)
 }
 
 /// The run state of `id` from the CPU sample (macOS: `pbi_status` of the same `proc_pidinfo` call as the CPU time and the

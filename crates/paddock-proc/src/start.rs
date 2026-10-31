@@ -8,7 +8,8 @@
 //! [`Patience::tick`], however late it came, so a host that was paused or starved counts one tick, not the pause
 //! (ADR 0031 section 2). A hung process with timer threads can keep using a little CPU and so keep resetting the idle
 //! count: the judge cannot call that stuck, and the caller's own cap (its recorded product limit) is the real bound. When
-//! the OS gives no CPU reading at all, [`Patience::hang_guard`] bounds the wait, so there is always a bound.
+//! the OS gives no CPU reading at all, [`Patience::hang_guard`] bounds the wait, so there is always a bound, except while
+//! the process is stopped (then nothing counts and the caller's cap bounds the wait).
 //!
 //! [`StartWatch`] is the thin edge: it asks a [`StartProbe`] for the readings, feeds the judge and paces itself through a
 //! [`Pace`] (a clock in production, a fake in tests). It reads the CPU time every [`Patience::cpu_every`] ticks, one pid
@@ -322,6 +323,8 @@ pub struct StartWatch<P, C> {
     pace: C,
     patience: Patience,
     ticks: u32,
+    /// The last run state read said stopped.
+    stopped: bool,
 }
 
 impl<P: StartProbe, C: Pace> StartWatch<P, C> {
@@ -333,6 +336,7 @@ impl<P: StartProbe, C: Pace> StartWatch<P, C> {
             pace,
             patience,
             ticks: 0,
+            stopped: false,
         }
     }
 
@@ -355,11 +359,16 @@ impl<P: StartProbe, C: Pace> StartWatch<P, C> {
     fn read(&mut self) -> Reading {
         let ready = self.probe.ready();
         let mut liveness = self.probe.liveness();
-        if liveness == Liveness::Running && self.probe.run_state() == RunState::Stopped {
+        let every = self.patience.cpu_every.max(1);
+        let on_cadence = self.ticks.is_multiple_of(every);
+        // The run state costs a system call: read on the CPU cadence, and kept between reads.
+        if on_cadence && liveness == Liveness::Running {
+            self.stopped = self.probe.run_state() == RunState::Stopped;
+        }
+        if liveness == Liveness::Running && self.stopped {
             liveness = Liveness::Paused;
         }
-        let every = self.patience.cpu_every.max(1);
-        let cpu = if self.ticks.is_multiple_of(every) {
+        let cpu = if on_cadence {
             self.probe.cpu_time().map_or(Cpu::Unavailable, Cpu::Used)
         } else {
             Cpu::NotRead
@@ -635,7 +644,7 @@ mod tests {
         assert_eq!(j.observe(&r), StartState::Ready);
     }
 
-    struct Stopped(RunState);
+    struct Stopped(RunState, std::cell::Cell<u32>);
     impl StartProbe for Stopped {
         fn liveness(&mut self) -> Liveness {
             Liveness::Running
@@ -647,6 +656,7 @@ mod tests {
             Some(S(1))
         }
         fn run_state(&mut self) -> RunState {
+            self.1.set(self.1.get() + 1);
             self.0
         }
     }
@@ -660,7 +670,12 @@ mod tests {
             (RunState::Unknown, false),
         ] {
             let waits = RefCell::new(Vec::new());
-            let mut w = StartWatch::new(patience(), "x", Stopped(run), Ticks(&waits, 12));
+            let mut w = StartWatch::new(
+                patience(),
+                "x",
+                Stopped(run, Default::default()),
+                Ticks(&waits, 12),
+            );
             let got = w.wait();
             if paused {
                 assert_eq!(cause(&state(got)), Some(StallCause::Paused), "{run:?}");
@@ -671,6 +686,28 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_run_state_is_read_on_the_cpu_cadence_and_kept_between_reads() {
+        let waits = RefCell::new(Vec::new());
+        let p = Patience {
+            cpu_every: 4,
+            ..patience()
+        };
+        let mut w = StartWatch::new(
+            p,
+            "x",
+            Stopped(RunState::Stopped, Default::default()),
+            Ticks(&waits, 9),
+        );
+        let mut stalls = 0;
+        while let Watched::State(StartState::Stalled(r)) = w.wait() {
+            assert_eq!(r.cause, StallCause::Paused);
+            stalls += 1;
+        }
+        assert_eq!(stalls, 1, "paused from the first reading, once");
+        assert_eq!(w.into_probe().1.get(), 3, "ticks 0, 4 and 8 of 9");
     }
 
     #[test]
