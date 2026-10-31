@@ -18,6 +18,8 @@ async function openSettings(page: Page, section?: string) {
 async function choose(page: Page, scope: ReturnType<Page['locator']>, label: string, name = 'Theme') {
   await scope.getByRole('combobox', { name }).click();
   await page.getByRole('option', { name: label, exact: true }).click();
+  // The list closes before the next one opens (a second list opened over a closing one is torn down under the click).
+  await expect(page.getByRole('listbox')).toBeHidden();
 }
 
 test.describe('Pitcrew in the browser (mock backend)', () => {
@@ -149,7 +151,9 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
     // The clipboard of the test browser is a stand-in: what matters is the confirmation, not the system clipboard.
     await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { value: { writeText: async () => undefined }, configurable: true }));
     await page.goto(`${APP}/logs`);
-    // The viewer follows the end of the log and scrolls: hold on to one line by its number.
+    // The viewer follows the end of the log and scrolls: stop following, then hold on to one line by its number.
+    await page.getByRole('button', { name: /^Following/ }).click();
+    await expect(page.getByRole('button', { name: /^Follow$/ })).toBeVisible();
     const seq = (await page.locator('[role=log] .line .seq').last().textContent())!.trim();
     const line = page.locator('[role=log] .line').filter({ has: page.locator('.seq', { hasText: new RegExp(`^\\s*${seq}\\s*$`) }) });
     await line.hover();

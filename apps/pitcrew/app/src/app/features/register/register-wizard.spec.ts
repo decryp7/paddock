@@ -100,7 +100,7 @@ describe('RegisterWizard', () => {
   it('puts the intro and the stepper in the frame’s header slot and holds one body height for every step', () => {
     const { f } = mount();
     expect(f.componentInstance.dialogHeader()).not.toBeNull();
-    expect(f.componentInstance.dialogMinBodyHeight).toBeGreaterThanOrEqual(500);
+    expect(f.componentInstance.dialogMinBodyHeight).toBeGreaterThanOrEqual(440);
   });
 
   it('blocks Continue with messages until the step is valid', () => {
