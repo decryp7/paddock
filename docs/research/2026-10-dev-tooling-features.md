@@ -11,12 +11,12 @@ agent-days for an implementer, marked as estimates.
 
 ## Summary
 
-Add 16 features, ranked below; together about 24 agent-days (estimate). Seven are cheap and prevent incidents that already
+Add 16 features, ranked below; together about 23 agent-days (estimate; the table sums to 23.0). Eight are cheap and prevent incidents that already
 happened, so they belong in the tooling waves now (within ADR 0022 G.7's cap of two tooling agents during a release):
 hooks through `heavy`, a CI triage command that turns a red run into a digest and the exact local re-run, worktree
-creation as a Claude Code `WorktreeCreate` hook, `doctor`, a rule-50 dispatch guard, secret scanning and a pre-push
-affected gate. Adopt no task runner, monorepo tool, remote cache or flaky-test SaaS (rejected list). Decisions for the user
-are at the end.
+creation as a Claude Code `WorktreeCreate` hook, `doctor`, a rule-50 dispatch guard, secret scanning, a pre-push
+affected gate and the tool version range check. Adopt no task runner, monorepo tool, remote cache or flaky-test SaaS
+(rejected list). The three open decisions were taken by the user on 2026-10-31 (see "Decided 2026-10-31" at the end).
 
 ## What the plan already covers (not repeated as candidates)
 
@@ -28,7 +28,7 @@ clean/disk and prune (G10), Gitea release (G11), pinned downloads (R3), notices 
 the content-addressed tool binary cache (§3.3). Changelogs already come from git-cliff (`apps/*/cliff.toml`, verified).
 **Job-level last green** (WP-A1, research note [Nx, Turborepo or our own scripts](2026-10-nx-vs-scripts.md) §4: 25% of
 runner minutes, 37% on main) is planned as phase 0 but **not built**: `scripts/affected.mjs` still takes one run-level
-base (lines 27, 824 to 825, verified). It saves more runner time than any candidate below; pull it forward.
+base (lines 27, 824 to 825, verified). It saves more runner time than any candidate below; the user pulled it forward on 2026-10-31.
 
 ## Findings that shape the list
 
@@ -44,6 +44,15 @@ base (lines 27, 824 to 825, verified). It saves more runner time than any candid
   [runner PR 917](https://gitea.com/gitea/runner/pulls/917), [release report](https://linuxiac.com/gitea-1-27-released-with-actions-improvements-and-45-cve-fixes/),
   secondary). Our server answers `{"version":"28.2.0"}` on `/api/v1/version` (verified); whether our runners are on
   Runner 2.0 is **unverified**.
+- **Verified: Pitwall's pre-push hook `pitwall-scripts` is broken.** Root `lefthook.yml` (line 85) runs
+  `node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/ci/` in `apps/pitwall/`, but
+  neither file exists under `apps/pitwall/scripts/` (`origin/main` at `2d6f1d84e`: only `ci/`, the bootstrap and verify
+  scripts, `sidecar.mjs`, `tauri-before-build.mjs`; the commit-lint and latest-json tests live in `apps/debrief/scripts/`
+  and `conformance/test/`). Run in a clean worktree on Node 24.22: `Could not find 'scripts/commit-lint.test.mjs'`, exit 1;
+  the hook fails every Pitwall push, or is skipped by habit. Even the directory argument fails on Node 24 (`scripts/ci`
+  reported as a failed test), while `node --test scripts/ci/*.test.mjs` passes 9 tests. Fix with feature 7 (the
+  pre-push gate takes its commands from the plan, not from a hand-written list), or at once by listing the real test
+  files; a check that every path a hook names exists belongs in `doctor` (#4).
 - **Verified: no secret scanning exists** (`git grep -i 'gitleaks|trufflehog|secret.?scan'` finds only docs and an MCP key
   module). The release kit handles signing keys and `GITEA_TOKEN`; the user pastes confidential logs (memory note).
 - **Read: nextest already has the flake and hang primitives.** `flaky-result = "fail"` from 0.9.131, with JUnit
@@ -67,7 +76,7 @@ config only.
 
 | # | Feature | Has it (read, 2026-10-31) | Incident or cost here | Days (est.) | Priority | Class |
 |---|---|---|---|---|---|---|
-| 1 | **Hooks through `heavy`, scoped to the change.** Every hook command that compiles runs as `heavy …` with `CARGO_BUILD_JOBS=2`; workspace clippy moves from `pre-commit` to `pre-push` and runs once per affected workspace (from the plan), not once per app in parallel; formatting stays in `pre-commit`. Same in engineering-rules `templates/lefthook.yml`. `doctor` (#4) checks hooks are installed | lefthook `jobs`, `group`, `piped`, `skip`, `only` ([config](https://lefthook.dev/configuration/)) | Finding 1; load 150 to 240 (memory "agent concurrency"), lesson "Many agents waiting on 'load below N' start together", rule 41, ER-24 | 0.5 | now | T (+ P for the plan call) |
+| 1 | **Hooks through `heavy`, scoped to the change.** Every hook command that compiles runs as `heavy …` with `CARGO_BUILD_JOBS=2`; workspace clippy moves from `pre-commit` to `pre-push` and runs once per affected workspace (from the plan), not once per app in parallel; formatting stays in `pre-commit`. engineering-rules `templates/lefthook.yml` (at `791e941`) already runs clippy at `pre-push` through `heavy.sh`; only the per-workspace scoping is new there, and `heavy.sh` becomes `heavy`. `doctor` (#4) checks hooks are installed | lefthook `jobs`, `group`, `piped`, `skip`, `only` ([config](https://lefthook.dev/configuration/)) | Finding 1; load 150 to 240 (memory "agent concurrency"), lesson "Many agents waiting on 'load below N' start together", rule 41, ER-24 | 0.5 | now | T (+ P for the plan call) |
 | 2 | **`devkit ci triage <run>`**: for a red run, one digest of at most 40 lines (failed jobs, their `::error::` lines, decoded exit, stderr tail, failed tests from JUnit) and the **exact local re-run command** per failure (nextest filter expression, `ng test --include`, Playwright `--grep` plus file), ready for `heavy`; `--json` for agents. Optionally downloads the nextest recording artifact for `run -R` | Nx Cloud failure context ([Nx AI](https://nx.dev/docs/features/enhance-ai)); nextest rerun ([rerun](https://nexte.st/docs/features/record-replay-rerun/)); Gitea ignores annotations (finding 2) | ER-10/rule 4 (re-run only failed tests locally), ER-27, the `ci-triage` skill run by hand per failure; CI 6162 incident (memory "fix failed tests first") | 2.5 | now | G (Gitea/GitHub API; test formats by pack) |
 | 3 | **Worktree template as the `WorktreeCreate` hook**: `devkit worktree add` becomes the hook command, so every agent worktree gets the branch, sparse cone, its own `CARGO_TARGET_DIR` outside `~`, its e2e port block, the hooks installed, absolute paths for git-ignored local config, and a manifest the clean-up reads; `WorktreeRemove` runs the finish check (#10) | Claude Code hooks ([hooks](https://code.claude.com/docs/en/hooks)) | ER-2 incidents: two agents in one checkout, a shared target dir overwriting artefacts, `reuseExistingServer` on another worktree's port, relative `.cargo/libduckdb.toml` (lessons 2026-10-23 "More findings", "Stale servers and stale builds") | 1 (on G10) | now | G (template values from `devkit.toml`) |
 | 4 | **`doctor [--json]`**: tool versions against minimums (nextest ≥ 0.9.131 for ER-12, cargo-deny, lefthook, `heavy`, `wiki`), hooks installed, build dir per worktree and not in `~`, sccache reachable, free disk and load with rule 41's thresholds, e2e port free, `ui/dist` stamp current, leftover temp folders and Chrome clones; each failure names the fix command. Checks are a pack, so `./dev doctor` adds Paddock's | `mise doctor --json` ([mise doctor](https://mise.jdx.dev/cli/doctor.html)) | 98k leaked temp folders (55 GB) and 620 Chrome clones (441 GB) found late (lessons 2026-10-23); stale `ui/dist`; disk housekeeping (memory) | 1.5 | now | G engine + P pack |
@@ -84,7 +93,7 @@ config only.
 | 15 | **Per-agent resource ledger**: `heavy` records who held a slot (worktree, agent label), for how long and the peak load; `heavy status --by-agent` and `devkit worktree disk` give the coordinator CPU-minutes, disk and CI dispatches per agent | – | Rule 41/ER-24 is enforced by watching `uptime`; the 2026-10-29 load of 55 to 130 with five Rust agents (memory) | 1.5 | later | G |
 | 16 | **Local gate stamps**: after a green local gate, `devkit run --stamp <inputs>` records the content hash of its inputs per machine; the same gate on the same inputs (another worktree after a merge, a re-run) prints "unchanged since green at …" and skips unless `--force`. Never used in CI | moon input hashing ([cache](https://moonrepo.dev/docs/concepts/cache)); mise task sources ([tasks](https://mise.jdx.dev/tasks/)); Paddock's own `ui/dist/.source-hash` stamp | Coordinator re-runs of affected gates after merges (memory "test once after merges"); ER-8 still runs the full suite once | 2 | later | G |
 
-Total about 23.5 agent-days (estimate); the seven "now" items about 8.75.
+Total 23.0 agent-days (estimate; the 16 rows sum to 23.0); the eight "now" items (1 to 7 and 14) about 9.5.
 
 ## Rejected or not needed
 
@@ -127,10 +136,10 @@ Total about 23.5 agent-days (estimate); the seven "now" items about 8.75.
 | G15 | `WorktreeCreate`/`WorktreeRemove` hook commands and the worktree manifest | G10 | 1 |
 | G16 | `doctor` engine and generic pack; Paddock pack in `./dev doctor` | G1, G2 | 1.5 |
 | G17 | `devkit ci dispatch` and `ci trim` | G9 | 1 |
-| G18 | Secret scan: pinned scanner through `devkit fetch`, hook, CI step, Paddock patterns | R3, decision 1 | 0.75 |
+| G18 | Secret scan: pinned scanner through `devkit fetch`, hook, CI step, Paddock patterns | R3, decided scanner (betterleaks v1) | 0.75 |
 | R17 | `./dev check --pre-push` from the plan | R4 | 1.5 |
 | G19 | Tool version range check and static completions | G2 | 0.75 |
-| G20 | Flake ledger (CI config change, ingest, report) | G14, decision 2 | 2 |
+| G20 | Flake ledger (CI config change, ingest, report) | G14, decided flake policy (one retry, flaky-as-failure; branch `ci/flaky-is-red`) | 2 |
 | G21 | Stall dump in `paddock-proc` and `devkit run` | G3, ADR 0036 WP-3 | 2 |
 | G22 | `devkit worktree finish` | G15 | 1.5 |
 | G23 | `devkit mcp` on `paddock-mcp`, `devkit schema` | G1 | 2 |
@@ -139,15 +148,17 @@ Total about 23.5 agent-days (estimate); the seven "now" items about 8.75.
 | G25 | Per-agent ledger in `heavy` | G0b | 1.5 |
 | G26 | Local gate stamps | G1 | 2 |
 
-## Decisions for the user
+## Decided 2026-10-31
 
-1. **Secret scanner**: betterleaks v1 (recommended: maintained by gitleaks' authors, MIT; gitleaks now gets security
-   patches only), or gitleaks 8 as the fallback, or our own rule pack only. All run offline.
-2. **Flake detection in CI**: switch nextest's `ci` profiles to `retries = 1` with `flaky-result = "fail"` (and Playwright
-   `retries: 1` with `failOnFlakyTests`), as ER-12 permits. Costs one extra run of a failing test; gives every flake a
-   name in JUnit. Today's `retries = 0` is also compliant but blind.
-3. **Workspace clippy leaves `pre-commit`** for `pre-push` (through `heavy`, once per affected workspace). Commits get
-   faster and lighter; a clippy error is found at push instead of at commit.
+The user took the three open decisions on 2026-10-31, all as recommended:
+
+1. **Secret scanner: betterleaks v1** (MIT, maintained by gitleaks' authors; gitleaks now gets security patches only).
+   Offline; pinned through `devkit fetch` (G18).
+2. **Flake detection in CI: one retry with flaky-as-failure.** nextest `ci` profiles get `retries = 1` with
+   `flaky-result = "fail"`, Playwright `retries: 1` with `failOnFlakyTests: true` (ER-12). Branch `ci/flaky-is-red`.
+   Costs one extra run of a failing test; every flake gets a name in JUnit and the run stays red.
+3. **Workspace clippy leaves `pre-commit`** for `pre-push`, through `heavy`, once per affected workspace (G13).
+   Commits get faster and lighter; a clippy error is found at push instead of at commit.
 
 ## Sources (accessed 2026-10-31)
 
