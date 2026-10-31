@@ -23,6 +23,7 @@ fn rig(policy: Policy, wire: FakeWire) -> Rig {
             .with("cdn.example.org", &["93.184.216.35", "2606:2800:220:1::1"])
             .with("other.example.net", &["198.51.100.7"])
             .with("nas.home", &["192.168.1.20"])
+            .with("nas.local", &["192.168.1.20"])
             .with("rebind.example.org", &["93.184.216.34", "127.0.0.1"])
             .with("meta.example.org", &["169.254.169.254"])
             .with("void.example.org", &[])
@@ -938,4 +939,88 @@ fn a_streamed_answer_has_its_own_response_limit_and_an_unread_body() {
     let mut text = String::new();
     std::io::Read::read_to_string(&mut s.body, &mut text).unwrap();
     assert_eq!((s.status, text.as_str(), s.redirects), (200, "streamed", 0));
+}
+
+#[test]
+fn plain_http_on_the_home_network_is_opt_in_and_never_reaches_a_public_address() {
+    let r = rig(Policy::default().reach(Reach::Lan), FakeWire::new());
+    let send = |url: &str, req: fn(Request) -> Request| {
+        r.egress.send(&req(Request::get(url)), &CancelToken::new())
+    };
+    assert!(matches!(
+        send("http://192.168.1.20/x", |q| q),
+        Err(NetError::Scheme(_))
+    ));
+    assert!(send("http://192.168.1.20/x", Request::plain_http_on_lan).is_ok());
+    assert!(send("http://nas.local/x", Request::plain_http_on_lan).is_ok());
+    // A name spelled like a home host that resolves to a public address stays https only.
+    let r2 = rig(Policy::default().reach(Reach::Lan), FakeWire::new());
+    assert!(matches!(
+        r2.egress.send(
+            &Request::get("http://api.example.org/x").plain_http_on_lan(),
+            &CancelToken::new()
+        ),
+        Err(NetError::Scheme(_))
+    ));
+    // Without the reach, the flag alone changes nothing.
+    let public = rig(Policy::default(), FakeWire::new());
+    assert!(matches!(
+        public.egress.send(
+            &Request::get("http://192.168.1.20/x").plain_http_on_lan(),
+            &CancelToken::new()
+        ),
+        Err(NetError::Scheme(_))
+    ));
+    assert_eq!(
+        r.wire.seen().iter().map(|s| s.reach).collect::<Vec<_>>(),
+        [Reach::Lan, Reach::Lan]
+    );
+}
+
+#[test]
+fn without_lan_refuses_private_addresses_under_a_wider_reach() {
+    let r = rig(Policy::default().reach(Reach::Lan), FakeWire::new());
+    let go = |url: &str| {
+        r.egress
+            .send(&Request::get(url).without_lan(), &CancelToken::new())
+    };
+    assert!(go("https://api.example.org/x").is_ok());
+    assert!(matches!(
+        go("https://nas.home/x"),
+        Err(NetError::Refused { .. })
+    ));
+    assert!(matches!(
+        go("https://192.168.1.20/x"),
+        Err(NetError::Refused { .. })
+    ));
+}
+
+#[test]
+fn host_spelling_for_the_home_network() {
+    for h in [
+        "192.168.1.2",
+        "10.1.2.3",
+        "fd00::1",
+        "[fd00::1]",
+        "nas",
+        "nas.local",
+        "Printer.LAN",
+        "x.home.arpa",
+        "a.internal",
+        "nas.local.",
+    ] {
+        assert!(host_may_be_lan(h), "{h}");
+    }
+    for h in [
+        "",
+        "localhost",
+        "127.0.0.1",
+        "8.8.8.8",
+        "169.254.169.254",
+        "example.org",
+        "ntfy.sh",
+        "[2001:db8::1]",
+    ] {
+        assert!(!host_may_be_lan(h), "{h}");
+    }
 }

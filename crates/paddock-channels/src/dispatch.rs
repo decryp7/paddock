@@ -316,7 +316,7 @@ impl Dispatcher {
                 let body = serde_json::to_vec(msg).map_err(|e| SendError::Failed(e.to_string()))?;
                 let mut headers = vec![header("Content-Type", "application/json")?];
                 headers.extend(bearer(secret)?);
-                self.post(url, headers, body)
+                self.post(url, headers, body, cfg.allow_lan)
             }
             Transport::Ntfy { server, topic, .. } => {
                 let url = format!("{}/{}", server.trim_end_matches('/'), topic);
@@ -326,7 +326,7 @@ impl Dispatcher {
                     header("Tags", tags(msg.severity))?,
                 ];
                 headers.extend(bearer(secret)?);
-                self.post(&url, headers, msg.body.clone().into_bytes())
+                self.post(&url, headers, msg.body.clone().into_bytes(), cfg.allow_lan)
             }
             Transport::Email {
                 host,
@@ -358,13 +358,20 @@ impl Dispatcher {
         }
     }
 
-    fn post(&self, url: &str, headers: Vec<Header>, body: Vec<u8>) -> Result<(), SendError> {
+    fn post(
+        &self,
+        url: &str,
+        headers: Vec<Header>,
+        body: Vec<u8>,
+        lan: bool,
+    ) -> Result<(), SendError> {
         let host = host_label(url);
         let request = PostRequest {
             url: url.to_string(),
             headers,
             body,
             timeout: self.policy.timeout,
+            lan,
         };
         let response = self.poster.post(&request).map_err(|e| match e.kind {
             TransportErrorKind::Connect => SendError::Connect(host.clone()),

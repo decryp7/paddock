@@ -10,6 +10,7 @@ use paddock_jobs::CancelToken;
 use paddock_jobs::time::Clock;
 use std::collections::HashMap;
 use std::io::Read;
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -150,7 +151,7 @@ impl Egress {
             if cancel.is_cancelled() {
                 return Err(NetError::Cancelled);
             }
-            let class = self.check(&url, limit)?;
+            let class = self.check(&url, limit, request)?;
             if hop == 0 {
                 // A redirect may never go farther than where the request started.
                 limit = limit.min(class);
@@ -210,7 +211,7 @@ impl Egress {
     }
 
     /// The checks before a hop: scheme, login, allow-list, and the reach of every address. Returns the reach the farthest address needs.
-    fn check(&self, url: &Url, limit: Reach) -> Result<Reach, NetError> {
+    fn check(&self, url: &Url, limit: Reach, request: &Request) -> Result<Reach, NetError> {
         let shown_url = shown(url.as_str());
         let host = url
             .host()
@@ -224,8 +225,13 @@ impl Egress {
         match url.scheme() {
             "https" => {}
             "http" if reach::host_is_loopback(&name) && limit >= Reach::Loopback => {}
+            "http"
+                if request.plain_http_lan
+                    && limit >= Reach::Lan
+                    && reach::host_may_be_lan(&name) => {}
             _ => return Err(NetError::Scheme(name)),
         }
+        let plain_lan = url.scheme() == "http" && !reach::host_is_loopback(&name);
         if !self.policy.host_allowed(&name) {
             return Err(NetError::NotAllowed(name));
         }
@@ -233,18 +239,29 @@ impl Egress {
             host: name.clone(),
             why,
         };
-        match host {
-            Host::Ipv4(ip) => reach::vet(&[ip.into()], limit).map_err(refuse),
-            Host::Ipv6(ip) => reach::vet(&[ip.into()], limit).map_err(refuse),
+        let addrs: Vec<IpAddr> = match host {
+            Host::Ipv4(ip) => vec![ip.into()],
+            Host::Ipv6(ip) => vec![ip.into()],
             Host::Domain(d) => {
                 let port = url.port_or_known_default().unwrap_or(443);
-                let addrs = self
-                    .lookup
+                self.lookup
                     .lookup(d, port)
-                    .map_err(|_| NetError::Connect(name.clone()))?;
-                reach::vet(&addrs, limit).map_err(refuse)
+                    .map_err(|_| NetError::Connect(name.clone()))?
             }
+        };
+        let needed = reach::vet(&addrs, limit).map_err(refuse)?;
+        if request.deny_lan
+            && addrs
+                .iter()
+                .any(|a| reach::classify(*a) == reach::Class::Lan)
+        {
+            return Err(refuse(Refusal::TooFar(reach::Class::Lan)));
         }
+        // Plain http only ever goes to a private network: a name spelled like one that points at a public address is refused.
+        if plain_lan && needed < Reach::Lan {
+            return Err(NetError::Scheme(name));
+        }
+        Ok(needed)
     }
 
     /// Keeps at least `min_gap` between two requests to one host, waiting on the clock (cancellable).

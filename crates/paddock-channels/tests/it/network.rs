@@ -20,6 +20,7 @@ fn request(port: u16) -> PostRequest {
         ],
         body: br#"{"title":"x"}"#.to_vec(),
         timeout: Duration::from_secs(10),
+        lan: false,
     }
 }
 

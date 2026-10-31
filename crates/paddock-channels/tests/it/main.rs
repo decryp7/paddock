@@ -6,5 +6,6 @@ mod common;
 mod config;
 mod control;
 mod dispatch;
+mod lan;
 mod message;
 mod network;

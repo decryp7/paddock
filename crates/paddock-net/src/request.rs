@@ -52,6 +52,10 @@ pub struct Request {
     pub headers: Vec<Header>,
     /// The body of a POST.
     pub body: Vec<u8>,
+    /// Refuse a destination on a private network even when the policy's reach allows it (see [`Request::without_lan`]).
+    pub deny_lan: bool,
+    /// Allow plain `http://` to a private network (see [`Request::plain_http_on_lan`]).
+    pub plain_http_lan: bool,
 }
 
 impl fmt::Debug for Request {
@@ -75,7 +79,25 @@ impl Request {
             url: url.to_string(),
             headers: Vec::new(),
             body: Vec::new(),
+            deny_lan: false,
+            plain_http_lan: false,
         }
+    }
+
+    /// Refuses a destination on a private network even when the policy's reach is [`Reach::Lan`](crate::Reach::Lan) or farther,
+    /// so one egress with a wide reach can still serve requests that must stay public. This computer is not affected.
+    pub fn without_lan(mut self) -> Request {
+        self.deny_lan = true;
+        self.plain_http_lan = false;
+        self
+    }
+
+    /// Allows plain `http://` to a host that is spelled like a private-network host ([`host_may_be_lan`](crate::host_may_be_lan)) and
+    /// whose addresses are all private. Needs a policy reach of [`Reach::Lan`](crate::Reach::Lan) or farther.
+    pub fn plain_http_on_lan(mut self) -> Request {
+        self.plain_http_lan = true;
+        self.deny_lan = false;
+        self
     }
 
     /// A HEAD.

@@ -23,6 +23,9 @@ pub struct PostRequest {
     pub body: Vec<u8>,
     /// The longest the whole exchange may take.
     pub timeout: Duration,
+    /// The channel is on the user's home network (`ChannelConfig::allow_lan`): the address may be a private one, and plain http
+    /// is allowed to it. When false, a private address must be refused.
+    pub lan: bool,
 }
 
 /// The status and the one header the dispatcher uses.
@@ -67,6 +70,12 @@ impl EgressPoster {
 impl HttpPoster for EgressPoster {
     fn post(&self, request: &PostRequest) -> Result<PostResponse, TransportError> {
         let mut req = Request::post(&request.url, request.body.clone());
+        // Only a channel with the switch reaches a private network, though the egress may allow it for all.
+        req = if request.lan {
+            req.plain_http_on_lan()
+        } else {
+            req.without_lan()
+        };
         req.headers = request.headers.clone();
         // The answer's body is never read: a chatty server cannot make a notification expensive.
         let answer = self

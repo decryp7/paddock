@@ -102,6 +102,29 @@ pub fn host_is_loopback(host: &str) -> bool {
         .is_ok_and(|ip| classify(ip) == Class::Loopback)
 }
 
+/// Whether a host is spelled like one on a private network: an IP literal that [`classify`] calls [`Class::Lan`], or a name that
+/// is a single label (`nas`) or ends in `.local`, `.lan`, `.home.arpa`, `.internal` or `.localdomain`. A name cannot be
+/// classified without resolving it, so this is the spelling check for forms and plain-http decisions; [`vet`] still checks the
+/// addresses the name resolves to.
+pub fn host_may_be_lan(host: &str) -> bool {
+    let h = host
+        .trim_matches(['[', ']'])
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if h.is_empty() {
+        return false;
+    }
+    if let Ok(ip) = h.parse::<IpAddr>() {
+        return classify(ip) == Class::Lan;
+    }
+    if !h.contains('.') {
+        return h != "localhost";
+    }
+    [".local", ".lan", ".home.arpa", ".internal", ".localdomain"]
+        .iter()
+        .any(|suffix| h.ends_with(suffix))
+}
+
 /// Why a name's addresses were refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refusal {
