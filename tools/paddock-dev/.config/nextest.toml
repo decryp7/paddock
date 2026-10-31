@@ -5,6 +5,11 @@
 test-threads = -1
 slow-timeout = { period = "30s", terminate-after = 10 }
 
+# The tests that skip without a git checkout print a SKIPPED line; nextest hides the output of passing tests unless asked.
+[[profile.default.overrides]]
+filter = "test(self_hash_prints) | test(graph_affected_prints) | test(live_plan)"
+success-output = "immediate"
+
 [profile.ci]
 fail-fast = false
 retries = 0
@@ -20,6 +25,11 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 [[profile.ci.overrides]]
 filter = "test(/^golden::/)"
 slow-timeout = { period = "60s", terminate-after = 4 }
+
+# The tests that skip without a git checkout print a SKIPPED line; nextest hides the output of passing tests unless asked.
+[[profile.ci.overrides]]
+filter = "test(self_hash_prints) | test(graph_affected_prints) | test(live_plan)"
+success-output = "immediate"
 
 [profile.ci.junit]
 # Written to <target>/nextest/ci/junit.xml.

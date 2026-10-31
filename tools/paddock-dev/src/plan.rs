@@ -488,8 +488,18 @@ pub fn command(req: &Request) -> Result<Report, CliError> {
         Some(r) => r.clone(),
         None => {
             let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
-            let out = crate::input_hash::Exec::run(&crate::input_hash::Real, "git", &["rev-parse", "--show-toplevel"], &cwd, None)?;
-            PathBuf::from(out.trim())
+            let hint = "Run ./dev inside the Paddock repository, or pass --root <folder>.";
+            let out = crate::input_hash::Exec::run(&crate::input_hash::Real, "git", &["rev-parse", "--show-toplevel"], &cwd, None)
+                .map_err(|e| e.with_hint(hint))?;
+            let top = PathBuf::from(out.trim());
+            if !top.join("crates/Cargo.toml").is_file() {
+                return Err(CliError::failure(format!(
+                    "{} has no crates/Cargo.toml, so it is not a Paddock checkout.",
+                    top.display()
+                ))
+                .with_hint(format!("{hint} In a sparse checkout, run: git sparse-checkout add crates")));
+            }
+            top
         }
     };
     let history = GitHistory::new(&root, TIMEOUT);

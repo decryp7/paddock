@@ -4,9 +4,7 @@ use paddock_dev::input_hash::{Real, compute, is_hashed_var};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf()
-}
+use crate::repo::repo_root;
 
 fn git(dir: &Path, args: &[&str]) {
     let st = Command::new("git")
