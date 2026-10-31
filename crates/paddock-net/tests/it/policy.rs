@@ -1095,3 +1095,79 @@ fn tunnelled_ipv6_is_as_far_as_the_ipv4_inside() {
     assert_eq!(class("fec0::1"), Class::Never);
     assert_eq!(class("2001:db8::1"), Class::Public);
 }
+
+#[test]
+fn check_host_is_the_door_for_connections_that_are_not_http() {
+    let r = rig(Policy::default().reach(Reach::Lan), FakeWire::new());
+    let ok = |h: &str, lan| r.egress.check_host(h, 587, lan);
+    assert_eq!(
+        ok("api.example.org", LanAccess::Deny).unwrap(),
+        ["93.184.216.34".parse::<std::net::IpAddr>().unwrap()]
+    );
+    assert!(ok("nas.local", LanAccess::Policy).is_ok());
+    assert!(ok("192.168.1.20", LanAccess::Policy).is_ok());
+    assert!(matches!(
+        ok("nas.local", LanAccess::Deny),
+        Err(NetError::Refused { .. })
+    ));
+    assert!(matches!(
+        ok("192.168.1.20", LanAccess::Deny),
+        Err(NetError::Refused { .. })
+    ));
+    assert!(matches!(
+        ok("meta.example.org", LanAccess::Policy),
+        Err(NetError::Refused { .. })
+    ));
+    assert!(matches!(
+        ok("rebind.example.org", LanAccess::Policy),
+        Err(NetError::Refused { .. })
+    ));
+    assert!(matches!(
+        ok("void.example.org", LanAccess::Policy),
+        Err(NetError::Refused { .. })
+    ));
+    assert!(matches!(
+        ok("unknown.example.org", LanAccess::Policy),
+        Err(NetError::Connect(_))
+    ));
+    assert!(matches!(
+        ok("bad host", LanAccess::Policy),
+        Err(NetError::Invalid(_))
+    ));
+    assert!(ok("[fd00::5]", LanAccess::Policy).is_ok());
+    // The default reach is public only.
+    let public = rig(Policy::default(), FakeWire::new());
+    assert!(
+        public
+            .egress
+            .check_host("api.example.org", 25, LanAccess::Policy)
+            .is_ok()
+    );
+    assert!(matches!(
+        public.egress.check_host("nas.local", 25, LanAccess::Policy),
+        Err(NetError::Refused { .. })
+    ));
+    // The allow-list applies.
+    let listed = rig(
+        Policy::default().allow_hosts(&["other.example.net"]),
+        FakeWire::new(),
+    );
+    assert!(matches!(
+        listed
+            .egress
+            .check_host("api.example.org", 25, LanAccess::Policy),
+        Err(NetError::NotAllowed(_))
+    ));
+}
+
+#[test]
+fn check_host_when_offline_resolves_nothing() {
+    let r = rig(Policy::default(), FakeWire::new());
+    r.egress.set_offline(true);
+    assert!(matches!(
+        r.egress
+            .check_host("api.example.org", 25, LanAccess::Policy),
+        Err(NetError::Offline)
+    ));
+    assert!(r.lookup.asked().is_empty());
+}

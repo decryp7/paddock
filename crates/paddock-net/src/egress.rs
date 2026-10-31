@@ -240,16 +240,7 @@ impl Egress {
             host: name.clone(),
             why,
         };
-        let addrs: Vec<IpAddr> = match host {
-            Host::Ipv4(ip) => vec![ip.into()],
-            Host::Ipv6(ip) => vec![ip.into()],
-            Host::Domain(d) => {
-                let port = url.port_or_known_default().unwrap_or(443);
-                self.lookup
-                    .lookup(d, port)
-                    .map_err(|_| NetError::Connect(name.clone()))?
-            }
-        };
+        let addrs = self.resolve(&name, host, url.port_or_known_default().unwrap_or(443))?;
         let needed = reach::vet(&addrs, limit).map_err(refuse)?;
         if request.lan == LanAccess::Deny
             && addrs
@@ -268,6 +259,62 @@ impl Egress {
             return Err(NetError::Scheme(name));
         }
         Ok(needed)
+    }
+
+    /// The addresses of `host`: the literal itself, or the lookup's answer.
+    fn resolve<S: AsRef<str>>(
+        &self,
+        name: &str,
+        host: Host<S>,
+        port: u16,
+    ) -> Result<Vec<IpAddr>, NetError> {
+        match host {
+            Host::Ipv4(ip) => Ok(vec![ip.into()]),
+            Host::Ipv6(ip) => Ok(vec![ip.into()]),
+            Host::Domain(d) => self
+                .lookup
+                .lookup(d.as_ref(), port)
+                .map_err(|_| NetError::Connect(name.to_string())),
+        }
+    }
+
+    /// The door for a connection that does not go through [`Egress::send`] (SMTP): the same checks as before an HTTP hop, on a
+    /// host name or address and a port. Fails with [`NetError::Offline`] first (nothing is resolved), then the allow-list, then
+    /// resolves the name and checks **every** address against the policy's reach and `lan`. Returns the checked addresses; the
+    /// caller must connect to one of them, not to the name again, so the name cannot answer differently the second time.
+    pub fn check_host(
+        &self,
+        host: &str,
+        port: u16,
+        lan: LanAccess,
+    ) -> Result<Vec<IpAddr>, NetError> {
+        if self.is_offline() {
+            return Err(NetError::Offline);
+        }
+        let name = host.trim().trim_matches(['[', ']']).to_ascii_lowercase();
+        let parsed = Host::parse(&if name.contains(':') {
+            format!("[{name}]")
+        } else {
+            name.clone()
+        })
+        .map_err(|_| NetError::Invalid(format!("{} is not a valid host name.", shown(host))))?;
+        if !self.policy.host_allowed(&name) {
+            return Err(NetError::NotAllowed(name));
+        }
+        let addrs = self.resolve(&name, parsed, port)?;
+        let refuse = |why: Refusal| NetError::Refused {
+            host: name.clone(),
+            why,
+        };
+        reach::vet(&addrs, self.policy.reach).map_err(refuse)?;
+        if lan == LanAccess::Deny
+            && addrs
+                .iter()
+                .any(|a| reach::classify(*a) == reach::Class::Lan)
+        {
+            return Err(refuse(Refusal::TooFar(reach::Class::Lan)));
+        }
+        Ok(addrs)
     }
 
     /// Keeps at least `min_gap` between two requests to one host, waiting on the clock (cancellable).
