@@ -11,9 +11,10 @@
 //!   skipped) on Linux, the physical footprint on macOS, the private working set on Windows (R07, rule 26).
 //! - [`login_path`]: the `PATH` of the user's login shell, for a service started by launchd or systemd.
 //!
-//! - [`StartJudge`], [`StartWatch`]: a start judged on run state, CPU time, progress and a ready handshake, never on a fixed
-//!   wait (ADR 0031); [`StallReport`] says why a wait looks stuck. [`InstanceLock`]: one instance per folder by a held OS
-//!   lock; [`hint`]: a discovery file is only a hint (rule 53).
+//! - [`StartJudge`], [`StartWatch`]: a start judged on whether the process is stopped ([`run_state`]), its CPU time, progress and a
+//!   ready handshake, never on a fixed wait (ADR 0031); a stopped process is waited for and said so
+//!   ([`StallCause::Paused`]); [`StallReport`] says why a wait looks stuck. [`InstanceLock`]: one instance per folder by a
+//!   held OS lock; [`hint`]: a discovery file is only a hint (rule 53).
 //!
 //! - [`self_test`]: the `--self-test` every sidecar answers, started from the built app by CI (rule 23).
 //!
@@ -32,6 +33,7 @@ mod instance;
 mod job;
 mod login;
 mod run;
+mod runstate;
 pub mod self_test;
 mod stall;
 mod start;
@@ -52,10 +54,11 @@ pub use login::{
     probe_script, shell_candidates,
 };
 pub use run::{DEFAULT_MAX_OUTPUT, Limits, Outcome, Output, RunError, run_bounded};
+pub use runstate::{RunState, run_state};
 pub use stall::{StallAction, StallCause, StallReport};
 pub use start::{
     Cpu, ExitInfo, Liveness, Pace, Patience, Reading, StartJudge, StartProbe, StartState,
-    StartWatch, Watched, tail_of, tree_cpu,
+    StartWatch, Watched, liveness_of, tail_of, tree_cpu,
 };
 pub use supervised::{MemoryCap, Registry, Sampler, Supervised, end_all, global_registry};
 pub use tree::{

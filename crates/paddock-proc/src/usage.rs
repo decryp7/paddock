@@ -18,6 +18,8 @@ pub struct CpuSample {
     pub micros: u64,
     /// When the process started, from the same call; `None` when the OS call did not carry it.
     pub started: Option<StartTime>,
+    /// Whether the process is stopped (by a signal, App Tamer), from the same call; `None` when the OS call did not say.
+    pub stopped: Option<bool>,
 }
 
 /// `pid -> row` for real processes only.
@@ -620,6 +622,7 @@ mod tests {
             Some(CpuSample {
                 micros: u64::from(pid) * 10_000,
                 started,
+                stopped: None,
             })
         }
         fn table(&self) -> Table {

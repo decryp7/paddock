@@ -139,7 +139,8 @@ returns.
   `PROCESS_EXTENDED_BASIC_INFORMATION` (`NtQueryInformationProcess`, `ProcessBasicInformation` with the extended size).
   CPU time: `GetProcessTimes`. Runnable against blocked is not available per process: on Windows a child without CPU
   growth counts toward the blocked limit only when the host is not starved itself (its own tick gaps and CPU growth say
-  so), and the limit is set higher. This is the weakest platform, and the ADR says so.
+  so), and the limit is set higher. This is the weakest platform, and the ADR says so. `paddock-proc::run_state` returns `Unknown` there for now: reading `IsFrozen` is deferred.
+- **TODO:** verify which mechanism App Tamer uses to stop an app (a signal, or suspending the Mach task). If it suspends tasks rather than signalling, `pbi_status` may not read `SSTOP`; add the per-thread `TH_STATE_STOPPED` fallback (`thread_info`) then. Until verified, only a SIGSTOP-stopped process is known to be detected.
 - **Cancel of a stopped child:** Cancel never sends `SIGCONT` (the OS or the user paused it on purpose). It closes the
   lifeline and kills after `KILL_GRACE` as today: `SIGKILL` ends a stopped process, while `SIGTERM` would stay pending
   until it is continued. On Windows `TerminateProcess` ends a frozen process.
@@ -449,11 +450,11 @@ each other (Dyno `link.rs`, Spotter `StartJudge`, `paddock-chromium`'s fixed 20 
   Stalled(`StallReport`), Exited(`ExitInfo`). Spin (CPU used without becoming ready), idle (no CPU and no progress) and
   the note after N ticks are counted in observations, never wall seconds: a paused host counts one tick (section 2).
   `Patience` holds the limits. The only time-based bound is `hang_guard`, used when the OS gives no CPU reading at all;
-  so a start is always bounded, also without a process identity. A hung process with timer threads can keep using a
+  so a start is always bounded, also without a process identity, except while the process is stopped (the caller's cap bounds that). A hung process with timer threads can keep using a
   little CPU and reset the idle count: the caller's cap is the bound for that.
 - `StartWatch` (edge): a `StartProbe` (liveness, ready, progress, CPU) and a `Pace` (the clock) drive the judge until
   Ready, Exited, Stalled or Cancelled; after a stall it can be called again.
-- `StallReport { cause, action, message }`: `StallCause` Slow, Spinning, Idle, Hung, WaitingForSupervisor, HeldByOther;
+- `StallReport { cause, action, message }`: `StallCause` Slow, Spinning, Idle, Hung, Paused (stopped by the OS or another app: not stuck, Wait), WaitingForSupervisor, HeldByOther;
   `StallAction` Wait, Retry, ShowLog. Apps map it to their health chip and Retry.
 - `InstanceLock::claim(path)` gives `Claim::Acquired | Held | Unsupported` from an OS lock (`File::try_lock`: `flock`,
   `LockFileEx`); `is_held(path)`. The lock is the authority.
@@ -467,7 +468,7 @@ each other (Dyno `link.rs`, Spotter `StartJudge`, `paddock-chromium`'s fixed 20 
 `Discovery::remove_if_same/mine`, the "still starting" note. Spotter: `StartJudge`/`StartPatience`. `paddock-chromium`:
 `START_LIMIT`/`start_limit` and the port-file wait. Pitwall, Pitcrew, Debrief: their fixed spawn waits, as C51 lists them.
 
-**Parallelism and cost (ER-20).** The judge is arithmetic on one reading per tick. The probe's cheap signals (a liveness
+**Parallelism and cost (ER-20).** The judge is arithmetic on one reading per tick. The stopped-state read (`run_state`: one `proc_pidinfo` or `/proc/<pid>/stat` read) runs on the same `cpu_every` cadence as the CPU time and is kept between reads. The probe's cheap signals (a liveness
 check, a file read) run every tick (50 ms); the CPU time is read every `cpu_every` ticks (1 s) and costs one system call
 per process of the tree, never a table scan (ADR 0024 rule 4): about 0.1% of a core for a browser's tree, against about
 2% for a table scan per beat (Spotter's first version). Nothing runs in parallel: one watcher thread per starting
