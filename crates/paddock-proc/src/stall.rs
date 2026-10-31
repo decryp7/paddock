@@ -14,6 +14,8 @@ pub enum StallCause {
     Idle(Duration),
     /// Nothing about the process can be observed on this OS and the hang guard ran out.
     Hung(Duration),
+    /// The OS or another app (App Tamer, a signal) has stopped the process: not stuck, it goes on when it is resumed.
+    Paused,
     /// A supervisor (the login service, the OS) is meant to start the process and has not.
     WaitingForSupervisor,
     /// Another instance holds the single-instance lock and has not answered.
@@ -83,6 +85,10 @@ impl StallReport {
                     d.as_secs()
                 ),
             ),
+            StallCause::Paused => (
+                StallAction::Wait,
+                format!("{what} is paused by macOS or another app; it goes on when it is resumed."),
+            ),
             StallCause::WaitingForSupervisor => (
                 StallAction::Retry,
                 format!("Waiting for {what}, which your system starts at login."),
@@ -112,6 +118,7 @@ mod tests {
             (StallCause::Spinning(s(120)), StallAction::Retry, true),
             (StallCause::Idle(s(60)), StallAction::Retry, true),
             (StallCause::Hung(s(300)), StallAction::ShowLog, true),
+            (StallCause::Paused, StallAction::Wait, false),
             (StallCause::WaitingForSupervisor, StallAction::Retry, false),
             (StallCause::HeldByOther, StallAction::Retry, false),
         ];
@@ -121,6 +128,10 @@ mod tests {
             assert_eq!(cause.is_stuck(), stuck, "{cause:?}");
             assert!(r.message.contains("agent"), "{}", r.message);
         }
+        assert_eq!(
+            StallReport::new(StallCause::Paused, "the browser").message,
+            "the browser is paused by macOS or another app; it goes on when it is resumed."
+        );
         assert!(
             StallReport::new(StallCause::Spinning(s(120)), "x")
                 .message
