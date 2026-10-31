@@ -6,6 +6,7 @@
 //! nothing itself.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod actions;
 pub mod commands;
 pub mod dialogs;
 pub mod dto;
@@ -68,6 +69,12 @@ paddock_commands::command_table! {
     Query [MAIN | TRAY | DIALOG] => commands::popover_values,
     /// A button of a widget: open a page, retry, start the backup check, restart the agent.
     Mutation [MAIN | TRAY] => commands::run_widget_action,
+    /// Readings (value, text, scale and tone) of metrics from the newest live update: the dashboard and the previews.
+    Query [MAIN | DIALOG] => commands::metric_readings,
+    /// The kinds the choosers can add, each with a default widget and the metrics the engine accepts for it.
+    Query [MAIN | DIALOG] => commands::widget_choices,
+    /// The page or Settings section a widget asked the main window to open (once).
+    Mutation [MAIN] => commands::take_navigation,
 }
 
 /// Where the app runs: installed (the user's folders, real ticks) or in a test (nothing outside `dir`, no native menu

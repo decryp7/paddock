@@ -8,21 +8,25 @@
 //! - [`popover_values`]: the popup's widget values, one pure state function per kind.
 //! - [`metric`]: what a widget measures.
 
+pub mod choices;
 pub mod dashboard;
 pub mod menu_bar;
 pub mod metric;
 pub mod popover;
 pub mod popover_values;
+pub mod reading;
 pub mod stored_wire;
 pub mod wire;
 
 #[cfg(test)]
 mod generated;
 
+pub use choices::{widget_choices, DashboardKindChoices, MenuBarKindChoices, MetricChoice, WidgetChoices};
 pub use dashboard::{DashboardCatalogue, DashboardKind, DashboardWidget, Thresholds, WidgetOptions};
 pub use menu_bar::{MenuBarCatalogue, MenuBarItem, MenuBarKind};
 pub use metric::Metric;
 pub use popover::{PopoverCatalogue, PopoverKind, PopoverWidget, VolumeChoice};
+pub use reading::{read_all, read_metric, MetricReading, ReadingQuery};
 pub use wire::{edit_layout, layout_view, JsonOnLink, SurfaceEdit, SurfaceView};
 
 use serde::{Deserialize, Serialize};

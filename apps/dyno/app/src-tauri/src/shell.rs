@@ -6,15 +6,16 @@ use crate::health::Hub;
 use crate::link::{AgentLink, Sink};
 use crate::logging;
 use crate::login;
-use crate::popover::PopoverModel;
+use crate::popover::{Ask, PopoverModel};
 use crate::tray_model::{items_from_settings, parse_items, Throttle, TrayItems};
 use dyno_core::activity::ActivityEntry;
 use dyno_core::alerts::Alert;
 use dyno_core::protocol::{LiveUpdate, Reply, Request};
 use dyno_core::settings::Settings;
 use dyno_core::time::Timestamp;
-use dyno_core::widgets::popover_values::PopoverState;
+use dyno_core::widgets::popover_values::{Navigate, PopoverState, PopoverSurfaceValues};
 use dyno_core::widgets::{DynoSurface, MenuBarItem, SurfaceView};
+use dyno_core::widgets::{MetricReading, ReadingQuery};
 use paddock_widgets::Placement;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -156,6 +157,13 @@ pub struct ShellOf<R: Runtime> {
     asking: AtomicBool,
     /// This shell, for the threads that answer later.
     me: Weak<ShellOf<R>>,
+    /// The newest live update, whatever the connection (the dashboard's and the previews' readings).
+    last_live: Mutex<Option<LiveUpdate>>,
+    /// A page or Settings section the main window was asked to open and has not taken yet (a window that is still being
+    /// created misses the event, so it asks for this when it starts).
+    navigation: Mutex<Option<Navigate>>,
+    /// Whether the popup is visible, when not read from the shell's popover state (tests).
+    popover_gate: Mutex<Option<Arc<dyn Fn() -> bool + Send + Sync>>>,
 }
 
 impl<R: Runtime> ShellOf<R> {
@@ -179,6 +187,9 @@ impl<R: Runtime> ShellOf<R> {
             link: Mutex::new(None),
             asking: AtomicBool::new(false),
             me: me.clone(),
+            last_live: Mutex::new(None),
+            navigation: Mutex::new(None),
+            popover_gate: Mutex::new(None),
         })
     }
 
@@ -241,16 +252,59 @@ impl<R: Runtime> ShellOf<R> {
         }
     }
 
-    /// The popup was shown or hidden (read from the shell's popover state on each live tick).
+    /// Whether the popup is visible: the shell's popover state, or the gate a test set.
     fn popover_visible(&self) -> bool {
+        if let Some(gate) = lock(&self.popover_gate).as_ref() {
+            return gate();
+        }
         self.app
             .try_state::<paddock_window::tauri::Popovers>()
             .is_some_and(|p| p.is_open(paddock_window::popover::label_for(None).unwrap_or_default().as_str()))
     }
 
-    /// The popup's values now, for the popup that has just opened and asks for its first paint.
-    pub fn popover_snapshot(&self) -> dyno_core::widgets::popover_values::PopoverSurfaceValues {
+    /// Replaces how the shell learns that the popup is visible (a test has no popover window).
+    pub fn set_popover_gate(&self, gate: Arc<dyn Fn() -> bool + Send + Sync>) {
+        *lock(&self.popover_gate) = Some(gate);
+    }
+
+    /// The popup's values now, for a popup that asks for its first paint.
+    pub fn popover_snapshot(&self) -> PopoverSurfaceValues {
         lock(&self.popover).values(Timestamp(now_millis()), &dyno_platform::zone::SystemZone)
+    }
+
+    /// The popup has opened and asks for its first paint: it counts as visible from now (the next tick need not notice
+    /// first), the slow widgets are asked for at once, and the values known now are returned.
+    pub fn popover_opened(&self) -> PopoverSurfaceValues {
+        let now = Timestamp(now_millis());
+        let ask = {
+            let mut m = lock(&self.popover);
+            m.set_visible(true);
+            m.due(now)
+        };
+        if let Some(ask) = ask {
+            self.ask_slow(ask);
+        }
+        self.popover_snapshot()
+    }
+
+    /// Reads metrics from the newest live update, for the dashboard and the previews.
+    pub fn metric_readings(&self, queries: &[ReadingQuery]) -> Vec<MetricReading> {
+        dyno_core::widgets::read_all(queries, lock(&self.last_live).as_ref())
+    }
+
+    /// Asks the main window to open a page or a Settings section. It is kept until the window takes it
+    /// ([`ShellOf::take_navigation`]), because a window that is being created does not see the event; the event goes to the
+    /// main window only.
+    pub fn navigate(&self, to: Navigate) {
+        *lock(&self.navigation) = Some(to);
+        if let Err(e) = self.app.emit_to(paddock_commands::labels::MAIN_LABEL, events::NAVIGATE, to) {
+            logging::info(&format!("could not emit {}: {e}", events::NAVIGATE));
+        }
+    }
+
+    /// The navigation waiting for the main window, once.
+    pub fn take_navigation(&self) -> Option<Navigate> {
+        lock(&self.navigation).take()
     }
 
     /// Something the popup's slow widgets show may have changed: they are asked for again on the next tick.
@@ -271,21 +325,21 @@ impl<R: Runtime> ShellOf<R> {
     fn popover_tick(&self, update: &LiveUpdate) {
         let now = update.system.at;
         let visible = self.popover_visible();
-        let due = {
+        let ask = {
             let mut m = lock(&self.popover);
             m.on_live(update);
             m.set_visible(visible);
             m.due(now)
         };
-        if !due.is_empty() {
-            self.ask_slow(due);
+        if let Some(ask) = ask {
+            self.ask_slow(ask);
         }
         self.emit_popover(now);
     }
 
     /// Asks the agent for the slow kinds on a thread of its own (a request must never block the link's reader), then
     /// applies and sends the answer. One request at a time: when one is out, the next tick asks again.
-    fn ask_slow(&self, ids: Vec<paddock_widgets::PlacementId>) {
+    fn ask_slow(&self, ask: Ask) {
         let Some(link) = lock(&self.link).clone() else { return };
         let Some(me) = self.me.upgrade() else { return };
         if self.asking.swap(true, Ordering::SeqCst) {
@@ -293,10 +347,10 @@ impl<R: Runtime> ShellOf<R> {
             return;
         }
         let spawned = std::thread::Builder::new().name("dyno-popover".into()).spawn(move || {
-            let answer = link.call(Request::PopoverValues { placements: ids });
+            let answer = link.call(Request::PopoverValues { placements: ask.ids });
             me.asking.store(false, Ordering::SeqCst);
             match answer {
-                Ok(Reply::PopoverValues(values)) => me.popover_answered(values.0),
+                Ok(Reply::PopoverValues(values)) => me.popover_answered(ask.generation, values.0),
                 Ok(_) => {}
                 Err(e) => {
                     logging::info(&format!("could not read the popup values: {}", e.message));
@@ -309,9 +363,10 @@ impl<R: Runtime> ShellOf<R> {
         }
     }
 
-    fn popover_answered(&self, values: Vec<PopoverState>) {
-        lock(&self.popover).on_slow(values);
-        self.emit_popover(Timestamp(now_millis()));
+    fn popover_answered(&self, generation: u64, values: Vec<PopoverState>) {
+        if lock(&self.popover).on_slow(generation, values) {
+            self.emit_popover(Timestamp(now_millis()));
+        }
     }
 
     /// A surface's layout changed in the agent (an edit from any window): the app reads what it draws itself (the menu bar
@@ -372,6 +427,7 @@ impl<R: Runtime> Sink for ShellOf<R> {
                 self.pixels.paint(&self.app, &id, &frame);
             }
         }
+        *lock(&self.last_live) = Some(update.clone());
         self.popover_tick(&update);
         // With no window open nothing listens: skip serialising a (large) update for nobody.
         if !self.app.webview_windows().is_empty() {

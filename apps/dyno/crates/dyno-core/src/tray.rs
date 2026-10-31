@@ -4,11 +4,8 @@
 //! metric's recent values as a filled area. Colours follow the suite icon family: Dyno's hue, the first metric at full
 //! ink and the others at 60 %, the high-load orange when pegged; the track adapts to a light or dark taskbar. The tooltip carries the numbers, so the icon never stands alone.
 
-use serde::{Deserialize, Serialize};
-
 /// A metric an icon can draw.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IconMetric {
     /// CPU.
     Cpu,
@@ -23,8 +20,7 @@ pub enum IconMetric {
 }
 
 /// How an icon draws.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IconStyle {
     /// Vertical bars, one per metric.
     #[default]

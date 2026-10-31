@@ -178,6 +178,22 @@ fn all_volumes_show_the_system_one_first_three_rows_and_a_count_with_tones() {
 }
 
 #[test]
+fn the_disk_tone_changes_at_85_and_95_percent_used() {
+    let tone_at = |used: u64| {
+        let v = vec![volume("/", "HD", json!("internal"), Some(100), Some(100 - used), true)];
+        let PopoverValue::DiskSpace { rows, .. } = value(run(&PopoverWidget::disk(VolumeChoice::All), |i| i.volumes = Source::Ready(&v)))
+        else {
+            panic!()
+        };
+        rows[0].tone
+    };
+    assert_eq!(tone_at(84), ValueTone::Ok);
+    assert_eq!(tone_at(85), ValueTone::Warn);
+    assert_eq!(tone_at(94), ValueTone::Warn);
+    assert_eq!(tone_at(95), ValueTone::Bad);
+}
+
+#[test]
 fn a_nearly_full_volume_is_bad_and_an_unanswering_share_says_so() {
     let v = volumes();
     let PopoverValue::DiskSpace { rows, .. } = value(run(&PopoverWidget::disk(VolumeChoice::Mount("/Volumes/Backup".into())), |i| {
@@ -345,7 +361,9 @@ fn backup_shows_the_tool_that_needs_attention_most() {
         true,
         false,
     );
-    let PopoverValue::BackupHealth(b) = value(run(&PopoverWidget::BackupHealth, |i| i.backup = Source::Ready(&r))) else {
+    let PopoverValue::BackupHealth(b) = value(run(&PopoverWidget::BackupHealth, |i| {
+        i.backup = Source::Ready(BackupInput { report: &r, job: None })
+    })) else {
         panic!()
     };
     assert_eq!((b.name.as_str(), b.state, b.tools), ("restic", BackupVerdict::Stale, 2));
@@ -358,7 +376,10 @@ fn no_backup_set_up_is_an_empty_with_the_setup_action() {
         backup_report(json!([]), true, false),
         backup_report(json!([status("Time Machine", "notConfigured", None)]), true, false),
     ] {
-        let s = run(&PopoverWidget::BackupHealth, |i| i.backup = Source::Ready(&r)).unwrap();
+        let s = run(&PopoverWidget::BackupHealth, |i| {
+            i.backup = Source::Ready(BackupInput { report: &r, job: None })
+        })
+        .unwrap();
         let S::Empty { title, next, .. } = s else { panic!("{s:?}") };
         assert_eq!(title, "Know when backups ran");
         assert_eq!(next.unwrap().action, WidgetActionId::SetUpBackupChecks);
@@ -366,9 +387,20 @@ fn no_backup_set_up_is_an_empty_with_the_setup_action() {
 }
 
 #[test]
-fn a_running_check_is_working_with_a_growing_count_and_keeps_the_last_value() {
+fn a_running_check_shows_the_jobs_own_progress_and_keeps_the_last_value() {
     let r = backup_report(json!([status("Time Machine", "healthy", Some(NOW.0))]), true, true);
-    let s = run(&PopoverWidget::BackupHealth, |i| i.backup = Source::Ready(&r)).unwrap();
+    let job = JobProgress {
+        phase: "Time Machine".into(),
+        done: 2,
+        unit: "items".into(),
+    };
+    let s = run(&PopoverWidget::BackupHealth, |i| {
+        i.backup = Source::Ready(BackupInput {
+            report: &r,
+            job: Some(job),
+        })
+    })
+    .unwrap();
     let S::Working {
         phase,
         progress,
@@ -383,17 +415,74 @@ fn a_running_check_is_working_with_a_growing_count_and_keeps_the_last_value() {
     assert_eq!(
         progress,
         Progress::Count {
-            done: 1,
-            unit: "tools read".into()
+            done: 2,
+            unit: "items".into()
         }
     );
     assert!(last.is_some() && cancel.is_none());
 }
 
 #[test]
+fn without_a_job_there_is_no_made_up_progress() {
+    // The report says it is checking, but no job reports a count: the last value stays; with no value yet, it is loading.
+    let r = backup_report(json!([status("Time Machine", "healthy", Some(NOW.0 - HOUR))]), true, true);
+    let s = run(&PopoverWidget::BackupHealth, |i| {
+        i.backup = Source::Ready(BackupInput { report: &r, job: None })
+    })
+    .unwrap();
+    assert!(matches!(s, S::Ready { .. }), "{s:?}");
+    let first = backup_report(json!([]), false, true);
+    assert_eq!(
+        run(&PopoverWidget::BackupHealth, |i| i.backup =
+            Source::Ready(BackupInput { report: &first, job: None })),
+        None
+    );
+}
+
+#[test]
+fn slow_values_carry_the_age_of_their_own_source() {
+    let checked = Timestamp(NOW.0 - 10 * MINUTE);
+    let mut r = backup_report(json!([status("Time Machine", "healthy", Some(NOW.0 - HOUR))]), true, false);
+    r.checked_at = Some(checked);
+    let Some(S::Ready { as_of, .. }) = run(&PopoverWidget::BackupHealth, |i| {
+        i.backup = Source::Ready(BackupInput { report: &r, job: None })
+    }) else {
+        panic!()
+    };
+    assert_eq!(as_of, checked.0);
+    let scanned = Timestamp(NOW.0 - 3 * HOUR);
+    let list = vec![issue(1, HOUR)];
+    let Some(S::Ready { as_of, .. }) = run(&PopoverWidget::LastIssue, |i| {
+        i.issues = Source::Ready(IssuesInput {
+            recent: &list,
+            reading: None,
+            scanned_at: Some(scanned),
+        })
+    }) else {
+        panic!()
+    };
+    assert_eq!(as_of, scanned.0);
+    let rs = vec![reading(r"\A\B", json!({"available": 1.0}))];
+    let read_at = Timestamp(NOW.0 - 2 * MINUTE);
+    let Some(S::Ready { as_of, .. }) = run(&PopoverWidget::PinnedCounters, |i| {
+        i.counters = Source::Ready(CountersInput {
+            pinned: 1,
+            readings: &rs,
+            read_at: Some(read_at),
+        })
+    }) else {
+        panic!()
+    };
+    assert_eq!(as_of, read_at.0);
+}
+
+#[test]
 fn a_check_that_could_not_read_any_tool_is_an_error_that_starts_the_check_again() {
     let r = backup_report(json!([status("Time Machine", "cannotCheck", None)]), true, false);
-    let s = run(&PopoverWidget::BackupHealth, |i| i.backup = Source::Ready(&r)).unwrap();
+    let s = run(&PopoverWidget::BackupHealth, |i| {
+        i.backup = Source::Ready(BackupInput { report: &r, job: None })
+    })
+    .unwrap();
     let S::Error { title, cause, next } = s else { panic!("{s:?}") };
     assert_eq!(title, "Couldn't check");
     assert_eq!(cause.as_deref(), Some("Time Machine cannotCheck"));
@@ -417,6 +506,7 @@ fn the_last_issue_is_the_newest_of_the_last_seven_days() {
         i.issues = Source::Ready(IssuesInput {
             recent: &list,
             reading: None,
+            scanned_at: None,
         })
     })) else {
         panic!()
@@ -433,14 +523,13 @@ fn no_issue_in_a_week_is_an_empty_that_opens_issues() {
         i.issues = Source::Ready(IssuesInput {
             recent: &old,
             reading: None,
+            scanned_at: None,
         })
     })
     .unwrap();
     let S::Empty { title, detail, next } = s else { panic!("{s:?}") };
-    assert_eq!(
-        (title.as_str(), detail.as_str()),
-        ("Problems Dyno finds show here", "None in the last 7 days.")
-    );
+    assert_eq!(title, "No issues in the last 7 days");
+    assert!(!detail.is_empty());
     assert_eq!(next.unwrap().action, WidgetActionId::OpenPage(Page::Issues));
 }
 
@@ -451,6 +540,7 @@ fn reading_the_logs_is_working_with_a_count_of_events_so_far() {
         i.issues = Source::Ready(IssuesInput {
             recent: &list,
             reading: Some(12_400),
+            scanned_at: None,
         })
     })
     .unwrap();
@@ -491,7 +581,11 @@ fn pinned_counters_show_four_rows_with_unavailable_ones_marked() {
         })
         .collect();
     let PopoverValue::PinnedCounters { rows, more } = value(run(&PopoverWidget::PinnedCounters, |i| {
-        i.counters = Source::Ready(CountersInput { pinned: 6, readings: &rs })
+        i.counters = Source::Ready(CountersInput {
+            pinned: 6,
+            readings: &rs,
+            read_at: None,
+        })
     })) else {
         panic!()
     };
@@ -505,7 +599,11 @@ fn pinned_counters_show_four_rows_with_unavailable_ones_marked() {
 #[test]
 fn nothing_pinned_is_an_empty_and_none_answering_is_an_error() {
     let s = run(&PopoverWidget::PinnedCounters, |i| {
-        i.counters = Source::Ready(CountersInput { pinned: 0, readings: &[] })
+        i.counters = Source::Ready(CountersInput {
+            pinned: 0,
+            readings: &[],
+            read_at: None,
+        })
     })
     .unwrap();
     let S::Empty { title, next, .. } = s else { panic!("{s:?}") };
@@ -516,7 +614,11 @@ fn nothing_pinned_is_an_empty_and_none_answering_is_an_error() {
         reading("\\A\\C", json!({"unavailable": "x"})),
     ];
     let s = run(&PopoverWidget::PinnedCounters, |i| {
-        i.counters = Source::Ready(CountersInput { pinned: 3, readings: &rs })
+        i.counters = Source::Ready(CountersInput {
+            pinned: 3,
+            readings: &rs,
+            read_at: None,
+        })
     })
     .unwrap();
     let S::Error { cause, .. } = s else { panic!("{s:?}") };

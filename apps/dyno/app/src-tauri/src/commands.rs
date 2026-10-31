@@ -67,13 +67,67 @@ pub async fn edit_widget_layout(link: State<'_, Arc<AgentLink>>, edit: dyno_core
         .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
 }
 
-/// The tray popup's values now: the first paint of a popup that has just opened (later ones are pushed).
+/// The tray popup has opened and asks for its first paint: it counts as visible from now and its slow widgets are asked for
+/// at once; later values are pushed (`dyno://popover-values`) while it stays visible.
 #[tauri::command]
 pub async fn popover_values(shell: State<'_, Arc<Shell>>) -> Result<Value, CommandError> {
-    serde_json::to_value(shell.popover_snapshot()).map_err(|e| CommandError::internal(format!("The popup values could not be read: {e}")))
+    let shell = shell.inner().clone();
+    serde_json::to_value(shell.popover_opened()).map_err(|e| CommandError::internal(format!("The popup values could not be read: {e}")))
 }
 
-/// A widget's button. The action is the closed `WidgetActionId`; what it does is `WidgetActionId::effect`.
+/// Readings of metrics from the newest live update, with the tone of each against its thresholds: the dashboard's widgets
+/// and the previews of the menu-bar and popup choosers. The answer is in the order of the queries.
+#[tauri::command]
+pub async fn metric_readings(shell: State<'_, Arc<Shell>>, queries: Vec<dyno_core::widgets::ReadingQuery>) -> Result<Value, CommandError> {
+    serde_json::to_value(shell.metric_readings(&queries))
+        .map_err(|e| CommandError::internal(format!("The readings could not be read: {e}")))
+}
+
+/// For each kind the chooser can add: a ready default widget and the metrics the engine accepts for it.
+#[tauri::command]
+pub async fn widget_choices() -> Result<Value, CommandError> {
+    serde_json::to_value(dyno_core::widgets::widget_choices())
+        .map_err(|e| CommandError::internal(format!("The choices could not be read: {e}")))
+}
+
+/// The page or Settings section a widget asked the main window to open, once: a window that was still being created when
+/// the button was pressed asks for it as it starts.
+#[tauri::command]
+pub async fn take_navigation(shell: State<'_, Arc<Shell>>) -> Result<Value, CommandError> {
+    serde_json::to_value(shell.take_navigation()).map_err(|e| CommandError::internal(format!("The navigation could not be read: {e}")))
+}
+
+/// The app's real ports for a widget's button.
+struct LivePorts {
+    app: AppHandle,
+    link: Arc<AgentLink>,
+    shell: Arc<Shell>,
+}
+
+impl crate::actions::ActionPorts for LivePorts {
+    fn navigate(&self, to: dyno_core::widgets::popover_values::Navigate) -> Result<(), CommandError> {
+        // The main window is shown (or created) first; the request waits in the shell until the window takes it.
+        self.shell.navigate(to);
+        paddock_window::tauri::reopen(&self.app);
+        Ok(())
+    }
+    fn refresh(&self) {
+        self.shell.popover_changed();
+    }
+    fn start_backup_check(&self) -> Result<(), CommandError> {
+        self.link
+            .call(Request::StartJob {
+                spec: dyno_core::jobs::JobSpec::RefreshBackup,
+            })
+            .map(|_| ())
+    }
+    fn restart_agent(&self) {
+        self.link.retry();
+    }
+}
+
+/// A widget's button. The action is the closed `WidgetActionId`; what it does is `WidgetActionId::effect`, run through
+/// [`crate::actions::run`].
 #[tauri::command]
 pub async fn run_widget_action(
     app: AppHandle,
@@ -81,29 +135,14 @@ pub async fn run_widget_action(
     shell: State<'_, Arc<Shell>>,
     action: dyno_core::widgets::popover_values::WidgetActionId,
 ) -> Result<Value, CommandError> {
-    use dyno_core::widgets::popover_values::Effect;
-    use tauri::Emitter;
-    let (link, shell) = (link.inner().clone(), shell.inner().clone());
-    match action.effect() {
-        Effect::Navigate(to) => {
-            paddock_window::tauri::reopen(&app);
-            app.emit(crate::shell::events::NAVIGATE, to)
-                .map_err(|e| CommandError::internal(format!("Dyno could not open that page: {e}")))?;
-        }
-        Effect::Refresh => shell.popover_changed(),
-        // Restart goes to the app's own supervisor, never through the agent that may be the thing that is stuck.
-        Effect::RestartAgent => link.retry(),
-        Effect::StartBackupCheck => {
-            tauri::async_runtime::spawn_blocking(move || {
-                link.call(Request::StartJob {
-                    spec: dyno_core::jobs::JobSpec::RefreshBackup,
-                })
-                .map(|_| ())
-            })
-            .await
-            .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))??;
-        }
-    }
+    let ports = LivePorts {
+        app,
+        link: link.inner().clone(),
+        shell: shell.inner().clone(),
+    };
+    tauri::async_runtime::spawn_blocking(move || crate::actions::run(action.effect(), &ports))
+        .await
+        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))??;
     Ok(Value::Null)
 }
 

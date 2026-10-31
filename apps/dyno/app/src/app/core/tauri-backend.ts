@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { DynoSurface, Navigate, SurfaceEdit, SurfaceView, WidgetActionId } from './generated/widgets';
+import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
 import type { PopoverSurfaceValues } from './widget-types';
 import type {
   ActivityEntry,
@@ -545,6 +545,18 @@ export class TauriBackend implements DynoBackend {
 
   onNavigate(listener: (to: Navigate) => void): Unsubscribe {
     return this.navigateChannel.add(listener);
+  }
+
+  takeNavigation(): Promise<Navigate | null> {
+    return this.command<Navigate | null>('take_navigation');
+  }
+
+  metricReadings(queries: ReadingQuery[]): Promise<MetricReading[]> {
+    return this.command<MetricReading[]>('metric_readings', { queries });
+  }
+
+  widgetChoices(): Promise<WidgetChoices> {
+    return this.command<WidgetChoices>('widget_choices');
   }
 
   // ----------------------------------------------------------------------------------------------------- tray

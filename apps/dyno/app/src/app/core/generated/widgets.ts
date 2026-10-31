@@ -700,6 +700,91 @@ more: number, } } | { "topApps": {
  */
 rows: Array<AppRow>, } };
 
+export type MetricChoice = { 
+/**
+ * The metric.
+ */
+metric: Metric, 
+/**
+ * Its name, sentence case.
+ */
+title: string, };
+
+export type DashboardKindChoices = { 
+/**
+ * The kind.
+ */
+kind: DashboardKind, 
+/**
+ * A valid widget of this kind with default options (its metric is the first accepted).
+ */
+default: DashboardWidget, 
+/**
+ * The metrics this kind accepts, in display order.
+ */
+metrics: Array<MetricChoice>, };
+
+export type MenuBarKindChoices = { 
+/**
+ * The kind.
+ */
+kind: MenuBarKind, 
+/**
+ * A valid item of this kind (CPU).
+ */
+default: MenuBarItem, };
+
+export type WidgetChoices = { 
+/**
+ * Dashboard kinds, in the catalogue's order.
+ */
+dashboard: Array<DashboardKindChoices>, 
+/**
+ * Menu-bar kinds, in the catalogue's order.
+ */
+menuBar: Array<MenuBarKindChoices>, 
+/**
+ * Every metric a menu-bar item may show.
+ */
+menuBarMetrics: Array<MetricChoice>, };
+
+export type MetricReading = { 
+/**
+ * The number: a percentage for percent metrics, bytes per second for rates, degrees Celsius, rpm; none when the PC
+ * cannot measure it.
+ */
+value: number | null, 
+/**
+ * The number as shown ("23", "5.0"); "—" when there is none.
+ */
+text: string, 
+/**
+ * The unit as shown ("%", "MB/s", "°C", "rpm"; empty for a word).
+ */
+unit: string, 
+/**
+ * 0 to 100 for bars and rings, none when the metric has no natural scale.
+ */
+percent: number | null, 
+/**
+ * Against the widget's thresholds.
+ */
+tone: ValueTone, 
+/**
+ * Why there is no value.
+ */
+reason: string | null, };
+
+export type ReadingQuery = { 
+/**
+ * What to read.
+ */
+metric: Metric, 
+/**
+ * Its colour thresholds.
+ */
+thresholds: Thresholds, };
+
 export type SurfaceView = { "popover": LayoutView<DynoSurface, PopoverWidget, PopoverKind> } | { "dashboard": LayoutView<DynoSurface, DashboardWidget, DashboardKind> } | { "menuBar": LayoutView<DynoSurface, MenuBarItem, MenuBarKind> };
 
 export type SurfaceEdit = { "popover": Edit<PopoverWidget> } | { "dashboard": Edit<DashboardWidget> } | { "menuBar": Edit<MenuBarItem> };

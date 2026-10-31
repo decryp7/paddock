@@ -72,6 +72,13 @@ fn types() -> String {
         BackupValue::decl(),
         IssueValue::decl(),
         PopoverValue::decl(),
+        // What the choosers offer and what a reading says.
+        MetricChoice::decl(),
+        DashboardKindChoices::decl(),
+        MenuBarKindChoices::decl(),
+        WidgetChoices::decl(),
+        MetricReading::decl(),
+        ReadingQuery::decl(),
         // The wire of the link.
         SurfaceView::decl(),
         SurfaceEdit::decl(),

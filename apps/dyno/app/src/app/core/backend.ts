@@ -71,7 +71,7 @@ import type {
   StartupFilter,
   StartupOverview,
 } from './api.types';
-import type { DynoSurface, Navigate, SurfaceEdit, SurfaceView, WidgetActionId } from './generated/widgets';
+import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
 import type { PopoverSurfaceValues } from './widget-types';
 
 /** Stops a subscription. */
@@ -260,6 +260,12 @@ export interface DynoBackend {
   onWidgetLayout(listener: (surface: DynoSurface) => void): Unsubscribe;
   /** The main window is asked to open a page or a Settings section (`dyno://navigate`). */
   onNavigate(listener: (to: Navigate) => void): Unsubscribe;
+  /** The page or Settings section a widget asked for, once: a main window that was still being created misses the event. */
+  takeNavigation(): Promise<Navigate | null>;
+  /** Readings (value, text, scale and tone against each query's thresholds) from the newest live update, in the queries' order. */
+  metricReadings(queries: ReadingQuery[]): Promise<MetricReading[]>;
+  /** For each kind a chooser can add: a ready default widget and the metrics the engine accepts for it. */
+  widgetChoices(): Promise<WidgetChoices>;
 
   // The tray popover window (the shell places and fits it).
   /** Shows and focuses the main window (and hides the tray popover). */

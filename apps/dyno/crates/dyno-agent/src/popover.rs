@@ -8,7 +8,9 @@ use dyno_core::alarms::AlarmFilter;
 use dyno_core::jobs::JobKind;
 use dyno_core::protocol::AgentError;
 use dyno_core::time::DAY;
-use dyno_core::widgets::popover_values::{is_live_push, state, CountersInput, Inputs, Minute, PopoverState, Source, ISSUE_DAYS};
+use dyno_core::widgets::popover_values::{
+    is_live_push, state, BackupInput, CountersInput, Inputs, IssuesInput, JobProgress, Minute, PopoverState, Source, ISSUE_DAYS,
+};
 use dyno_core::widgets::PopoverKind;
 use paddock_jobs::wire::WireState;
 use paddock_widgets::{PlacementId, Widget};
@@ -47,34 +49,41 @@ pub fn values(shared: &Arc<Shared>, asked: &[PlacementId]) -> Result<Vec<Popover
     } else {
         Source::NotYet
     };
-    let backup = if has(PopoverKind::BackupHealth) {
-        Source::Ready(crate::extras::backup_check::last_report(shared))
-    } else {
-        Source::NotYet
-    };
-    let (issues, reading) = if has(PopoverKind::LastIssue) {
+    let backup_report = has(PopoverKind::BackupHealth).then(|| crate::extras::backup_check::last_report(shared));
+    let backup_job = backup_report
+        .as_ref()
+        .filter(|r| r.checking)
+        .and_then(|_| job_progress(shared, JobKind::RefreshBackup));
+    let (issues, reading, scanned_at) = if has(PopoverKind::LastIssue) {
         let list = lock(&shared.core).store.issues(t.minus(ISSUE_DAYS * DAY), t, ISSUE_LOOK);
-        let reading = reading_logs(shared);
+        let reading = job_progress(shared, JobKind::RescanIssues).map(|j| j.done);
+        let scanned_at = shared.issues.snapshot().1;
         match list {
-            Ok(l) => (Source::Ready(l), reading),
-            Err(e) => (Source::Failed(e.to_string()), reading),
+            Ok(l) => (Source::Ready(l), reading, scanned_at),
+            Err(e) => (Source::Failed(e.to_string()), reading, scanned_at),
         }
     } else {
-        (Source::NotYet, None)
+        (Source::NotYet, None, None)
     };
-    let readings = if has(PopoverKind::PinnedCounters) {
+    let (readings, read_at) = if has(PopoverKind::PinnedCounters) {
         shared.counters.latest(&pinned, t)
     } else {
-        Vec::new()
+        (Vec::new(), None)
     };
 
     let minute = Minute::default();
     let mut inputs = Inputs::empty(t, &minute);
     inputs.alarms = alarms.as_slice();
     inputs.volumes = volumes.as_slice();
-    inputs.backup = backup.as_ref();
+    if let Some(report) = &backup_report {
+        inputs.backup = Source::Ready(BackupInput { report, job: backup_job });
+    }
     inputs.issues = match &issues {
-        Source::Ready(l) => Source::Ready(dyno_core::widgets::popover_values::IssuesInput { recent: l, reading }),
+        Source::Ready(l) => Source::Ready(IssuesInput {
+            recent: l,
+            reading,
+            scanned_at,
+        }),
         Source::Failed(c) => Source::Failed(c.clone()),
         Source::NotYet => Source::NotYet,
     };
@@ -82,6 +91,7 @@ pub fn values(shared: &Arc<Shared>, asked: &[PlacementId]) -> Result<Vec<Popover
         inputs.counters = Source::Ready(CountersInput {
             pinned: pinned.len(),
             readings: &readings,
+            read_at,
         });
     }
     Ok(wanted
@@ -95,15 +105,24 @@ pub fn values(shared: &Arc<Shared>, asked: &[PlacementId]) -> Result<Vec<Popover
         .collect())
 }
 
-/// Events read so far while the issue job runs (0 before its first phase), else none.
-fn reading_logs(shared: &Shared) -> Option<u64> {
+/// The running job of `kind`'s own phase and count; none when no such job runs or it has not started a phase (no count is
+/// invented for a job that reports none, ER-18).
+fn job_progress(shared: &Shared, kind: JobKind) -> Option<JobProgress> {
     shared
         .jobs
         .statuses()
         .into_iter()
-        .find(|s| s.kind == JobKind::RescanIssues.slug() && !s.is_terminal())
-        .map(|s| match s.state {
-            WireState::Running(Some(phase)) => phase.done,
-            _ => 0,
+        .find(|s| s.kind == kind.slug() && !s.is_terminal())
+        .and_then(|s| match s.state {
+            WireState::Running(Some(phase)) => Some(JobProgress {
+                phase: phase.label,
+                done: phase.done,
+                unit: match phase.unit {
+                    paddock_jobs::Unit::Bytes => "bytes",
+                    _ => "items",
+                }
+                .into(),
+            }),
+            _ => None,
         })
 }

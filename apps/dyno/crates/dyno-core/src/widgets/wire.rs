@@ -120,11 +120,21 @@ mod tests {
     #[test]
     fn a_refused_edit_changes_nothing() {
         let mut s = Settings::default();
+        // From an edited layout: a refusal that put the defaults back would change it.
+        edit_layout(
+            &mut s,
+            SurfaceEdit::MenuBar(Edit::Remove {
+                id: PlacementId::new("vertical-bars-2").unwrap(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(s.menu_bar.layout().placements.len(), 1);
         let before = s.clone();
         let id = PlacementId::new("nope").unwrap();
         let e = edit_layout(&mut s, SurfaceEdit::MenuBar(Edit::Remove { id })).unwrap_err();
         assert!(matches!(e, WidgetError::UnknownPlacement(_)));
         assert_eq!(s, before);
+        assert!(s.menu_bar.layout().can_undo(), "the undo level of the earlier edit is kept too");
     }
 
     #[test]

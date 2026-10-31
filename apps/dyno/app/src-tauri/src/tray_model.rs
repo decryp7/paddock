@@ -8,7 +8,7 @@
 
 use dyno_core::protocol::LiveUpdate;
 use dyno_core::tray::{self, Icon, IconMetric, IconStyle};
-use dyno_core::widgets::{MenuBarItem, Metric};
+use dyno_core::widgets::{read_metric, MenuBarItem, Metric, Thresholds};
 use paddock_widgets::Placement;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -197,14 +197,6 @@ pub fn metric_name(m: &Metric) -> String {
     }
 }
 
-fn percent(v: f32) -> Measured {
-    let v = v.clamp(0.0, 100.0);
-    Measured {
-        scale: v,
-        text: format!("{v:.0}%"),
-    }
-}
-
 impl TrayItems {
     /// Items drawn at `size` pixels.
     pub fn new(specs: Vec<ItemSpec>, size: u32) -> TrayItems {
@@ -232,47 +224,32 @@ impl TrayItems {
         true
     }
 
-    /// The reading of `m` in `u`; `None` when the PC cannot measure it.
+    /// The reading of `m` in `u` on the 0 to 100 drawing scale; `None` when the PC cannot measure it. The number comes from
+    /// the engine's one reader ([`read_metric`]); only the scale of the rates (against the busiest second seen) and of the
+    /// words and degrees is the icon's own.
     fn measure(&self, u: &LiveUpdate, m: &Metric) -> Option<Measured> {
-        let s = &u.system;
-        let rate = |bps: f64| Measured {
-            scale: ((bps / self.net_peak) * 100.0).clamp(0.0, 100.0) as f32,
-            text: format!("{:.1} MB/s", bps / 1_000_000.0),
-        };
-        match m {
-            Metric::CpuTotal | Metric::CpuPerCore => Some(percent(s.cpu.total)),
-            Metric::Memory => Some(percent(s.memory_percent())),
-            Metric::MemoryPressure => {
-                let (scale, text) = match u.pressure {
-                    dyno_core::metrics::MemoryPressure::Normal => (20.0, "normal"),
-                    dyno_core::metrics::MemoryPressure::Elevated => (60.0, "elevated"),
-                    dyno_core::metrics::MemoryPressure::Critical => (95.0, "critical"),
-                };
-                Some(Measured { scale, text: text.into() })
-            }
-            Metric::Swap => (s.memory.swap_total > 0).then(|| percent(s.memory.swap_used as f32 / s.memory.swap_total as f32 * 100.0)),
-            Metric::DiskActivity => s.disk_io.busy.value().map(|v| percent(*v)),
-            Metric::DiskFree => s
-                .disks
-                .first()
-                .filter(|d| d.total > 0)
-                .map(|d| percent(d.free as f32 / d.total as f32 * 100.0)),
-            Metric::NetworkUp => Some(rate(s.network_totals().1)),
-            Metric::NetworkDown => Some(rate(s.network_totals().0)),
-            Metric::GpuLoad => s.gpu.value().map(|g| percent(g.utilization)),
-            Metric::Temperature => s.hottest().map(|t| Measured {
-                scale: t.celsius.clamp(0.0, 100.0),
-                text: format!("{:.0} °C", t.celsius),
-            }),
-            Metric::Battery => s.battery.value().map(|b| percent(b.charge)),
-            Metric::Process(name) => Some(percent(
-                u.top_cpu
-                    .iter()
-                    .find(|g| g.name.eq_ignore_ascii_case(name))
-                    .map_or(0.0, |g| g.cpu_read()),
-            )),
-            Metric::Fan | Metric::PerfCounter(_) => None,
+        // A fan speed and a counter have no scale to draw.
+        if matches!(m, Metric::Fan | Metric::PerfCounter(_)) {
+            return None;
         }
+        let r = read_metric(m, u, &Thresholds::default());
+        let value = r.value?;
+        let scale = match (r.percent, m) {
+            (Some(p), _) => p,
+            (None, Metric::NetworkUp | Metric::NetworkDown) => ((value / self.net_peak) * 100.0).clamp(0.0, 100.0) as f32,
+            (None, Metric::MemoryPressure) => match u.pressure {
+                dyno_core::metrics::MemoryPressure::Normal => 20.0,
+                dyno_core::metrics::MemoryPressure::Elevated => 60.0,
+                dyno_core::metrics::MemoryPressure::Critical => 95.0,
+            },
+            (None, _) => (value as f32).clamp(0.0, 100.0),
+        };
+        let text = match r.unit.as_str() {
+            "" => r.text,
+            "%" => format!("{}%", r.text),
+            unit => format!("{} {unit}", r.text),
+        };
+        Some(Measured { scale, text })
     }
 
     /// The pictures that changed since the last call, as `(item id, frame)`.
@@ -515,7 +492,7 @@ mod tests {
         assert_eq!(f[0].1.tooltip, "Dyno — CPU 100%");
         assert_eq!(f[1].1.tooltip, "Dyno — Download 5.0 MB/s");
         assert!(f[2].1.tooltip.contains("Upload 1.0 MB/s"));
-        assert!(f[3].1.tooltip.contains("normal"));
+        assert!(f[3].1.tooltip.contains("Normal"));
         assert!(f[4].1.tooltip.contains("Swap 0%"), "{}", f[4].1.tooltip);
     }
 

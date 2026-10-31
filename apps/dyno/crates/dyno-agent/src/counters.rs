@@ -312,11 +312,12 @@ impl CounterCentre {
         }
     }
 
-    /// The newest kept reading of each of `paths` (those that parse), without asking the OS: the popup's pinned counters
-    /// read this on open and on every tick. A counter with no reading yet says so.
-    pub fn latest(&self, paths: &[String], now: Timestamp) -> Vec<CounterReading> {
+    /// The newest kept reading of each of `paths` (those that parse), without asking the OS, and when the newest was read:
+    /// the popup's pinned counters read this on open and on every tick. A counter with no reading yet says so.
+    pub fn latest(&self, paths: &[String], now: Timestamp) -> (Vec<CounterReading>, Option<Timestamp>) {
         let rings = lock(&self.inner.rings);
-        paths
+        let mut newest: Option<Timestamp> = None;
+        let readings = paths
             .iter()
             .filter_map(|p| p.parse::<CounterPath>().ok())
             .map(|p| {
@@ -324,7 +325,10 @@ impl CounterCentre {
                 match rings.get(&path) {
                     Some(s) => CounterReading {
                         value: match s.ring.since(now.minus(LATEST_WITHIN)).last() {
-                            Some(point) => Reading::Available(point.value),
+                            Some(point) => {
+                                newest = newest.max(Some(point.at));
+                                Reading::Available(point.value)
+                            }
                             None => Reading::Unavailable("No recent reading.".into()),
                         },
                         unit: s.unit,
@@ -337,7 +341,8 @@ impl CounterCentre {
                     },
                 }
             })
-            .collect()
+            .collect();
+        (readings, newest)
     }
 
     /// The readings kept over the last `minutes` (1 to [`MAX_MINUTES`]) for each path; `events` are the app's own

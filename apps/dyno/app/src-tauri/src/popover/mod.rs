@@ -22,13 +22,24 @@ use std::collections::HashMap;
 /// the popup is no reason to ask every second.
 pub const LIVE_SLOW_SECS: i64 = 5;
 
+/// A request for slow values, tagged with the layout it was made for: an answer that comes back after the layout changed is
+/// dropped ([`PopoverModel::on_slow`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ask {
+    /// The layout generation at the time.
+    pub generation: u64,
+    /// The placements to ask for.
+    pub ids: Vec<PlacementId>,
+}
+
 /// Whether the agent connection is up.
 #[derive(Debug, Clone, PartialEq)]
 enum Link {
     Up,
     /// Lost at this time; the values the popup showed then, marked stale.
     Down {
-        since: Timestamp,
+        /// The time of the last reading, none when there never was one.
+        since: Option<Timestamp>,
         frozen: Vec<PopoverState>,
     },
 }
@@ -37,6 +48,7 @@ enum Link {
 #[derive(Debug)]
 pub struct PopoverModel {
     placements: Vec<Placement<PopoverWidget>>,
+    generation: u64,
     minute: Minute,
     live: Option<LiveUpdate>,
     slow: HashMap<PlacementId, PopoverState>,
@@ -57,6 +69,7 @@ impl PopoverModel {
     pub fn new(placements: Vec<Placement<PopoverWidget>>) -> PopoverModel {
         PopoverModel {
             placements,
+            generation: 0,
             minute: Minute::default(),
             live: None,
             slow: HashMap::new(),
@@ -82,6 +95,7 @@ impl PopoverModel {
             }
         }
         self.placements = placements;
+        self.generation += 1;
         self.force = true;
     }
 
@@ -98,13 +112,18 @@ impl PopoverModel {
         }
     }
 
-    /// The agent answered `PopoverValues`.
-    pub fn on_slow(&mut self, answers: Vec<PopoverState>) {
+    /// The agent answered `PopoverValues` for `generation`. An answer for an older layout is dropped (its placements may have
+    /// other widgets now); returns whether it was used.
+    pub fn on_slow(&mut self, generation: u64, answers: Vec<PopoverState>) -> bool {
+        if generation != self.generation {
+            return false;
+        }
         for a in answers {
             if self.placements.iter().any(|p| p.id == a.id) {
                 self.slow.insert(a.id.clone(), a);
             }
         }
+        true
     }
 
     /// Something the slow kinds show may have changed (an alarm, a job, the volumes): ask for all of them at the next tick.
@@ -136,7 +155,7 @@ impl PopoverModel {
         let mut frozen = self.states(now);
         mark_stale(&mut frozen);
         self.link = Link::Down {
-            since: self.last_reading().unwrap_or(now),
+            since: self.last_reading(),
             frozen,
         };
     }
@@ -160,9 +179,9 @@ impl PopoverModel {
 
     /// The slow placements to ask the agent for at `now`, and remembers that they were asked. Nothing while the popup is
     /// hidden or the agent is away (a hidden popup costs nothing, ADR 0035 §8).
-    pub fn due(&mut self, now: Timestamp) -> Vec<PlacementId> {
+    pub fn due(&mut self, now: Timestamp) -> Option<Ask> {
         if !self.visible || !self.agent_up() {
-            return Vec::new();
+            return None;
         }
         let force = std::mem::take(&mut self.force);
         let due: Vec<PlacementId> = self
@@ -175,7 +194,10 @@ impl PopoverModel {
         for id in &due {
             self.asked_at.insert(id.clone(), now);
         }
-        due
+        (!due.is_empty()).then_some(Ask {
+            generation: self.generation,
+            ids: due,
+        })
     }
 
     fn is_due(&self, p: &Placement<PopoverWidget>, now: Timestamp) -> bool {
@@ -216,7 +238,7 @@ impl PopoverModel {
     pub fn values(&self, now: Timestamp, zone: &dyn LocalZone) -> PopoverSurfaceValues {
         match &self.link {
             Link::Up => surface_values(None, self.states(now)),
-            Link::Down { since, frozen } => surface_values(Some(agent_stopped(Some(*since), zone)), frozen.clone()),
+            Link::Down { since, frozen } => surface_values(Some(agent_stopped(*since, zone)), frozen.clone()),
         }
     }
 

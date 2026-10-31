@@ -1,7 +1,7 @@
 import { osTerms } from '../shared/os-terms';
 import type { SuJobPhase, SuJobSnapshot, SuJobState } from '@decryp7/paddock-ui';
 import type { Measured } from './api.types';
-import type { DynoSurface, Navigate, SurfaceEdit, SurfaceView, WidgetActionId } from './generated/widgets';
+import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
 import { MockWidgets, mockWidgetOptionsFromUrl, type MockWidgetsOptions } from './mock/widgets';
 import type { PopoverSurfaceValues } from './widget-types';
 import { readValue } from './measured';
@@ -1168,6 +1168,21 @@ export class MockBackend implements DynoBackend {
 
   onNavigate(_listener: (to: Navigate) => void): Unsubscribe {
     return () => undefined;
+  }
+
+  takeNavigation(): Promise<Navigate | null> {
+    return this.reply('takeNavigation', () => null);
+  }
+
+  // The mock imitates the contract with plausible data; the real readings, tones and choices come from the engine.
+  metricReadings(queries: ReadingQuery[]): Promise<MetricReading[]> {
+    return this.reply('metricReadings', () =>
+      queries.map(() => ({ value: null, text: '—', unit: '', percent: null, tone: 'ok', reason: 'The mock has no live readings.' })),
+    );
+  }
+
+  widgetChoices(): Promise<WidgetChoices> {
+    return this.reply('widgetChoices', () => ({ dashboard: [], menuBar: [], menuBarMetrics: [] }));
   }
 
   showMainWindow(): Promise<void> {

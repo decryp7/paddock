@@ -443,11 +443,31 @@ pub struct Inputs<'a> {
     /// The mounted volumes (cached by the agent).
     pub volumes: Source<&'a [Volume]>,
     /// The backup check's last report.
-    pub backup: Source<&'a BackupReport>,
+    pub backup: Source<BackupInput<'a>>,
     /// The issues of the last [`ISSUE_DAYS`] days, newest first, and how far a reading of the logs has come.
     pub issues: Source<IssuesInput<'a>>,
     /// The pinned counters' latest readings and how many are pinned.
     pub counters: Source<CountersInput<'a>>,
+}
+
+/// The backup report as the backup widget needs it.
+#[derive(Debug, Clone)]
+pub struct BackupInput<'a> {
+    /// The last report.
+    pub report: &'a BackupReport,
+    /// How far the check job has come, while one runs (its own phase and count; nothing is invented when there is none).
+    pub job: Option<JobProgress>,
+}
+
+/// A running job's phase, as its own progress reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobProgress {
+    /// The phase's label ("Time Machine").
+    pub phase: String,
+    /// What has been done so far in this phase.
+    pub done: u64,
+    /// What the count counts ("items").
+    pub unit: String,
 }
 
 /// The issue index as the last-issue widget needs it.
@@ -457,6 +477,8 @@ pub struct IssuesInput<'a> {
     pub recent: &'a [Issue],
     /// Events read so far while the logs are being read (the issue job is running), else none.
     pub reading: Option<u64>,
+    /// When the logs were last read; the value is as old as that.
+    pub scanned_at: Option<Timestamp>,
 }
 
 /// The pinned counters as the widget needs them.
@@ -466,6 +488,8 @@ pub struct CountersInput<'a> {
     pub pinned: usize,
     /// The latest readings of the first pinned ones.
     pub readings: &'a [CounterReading],
+    /// When the newest of them was read.
+    pub read_at: Option<Timestamp>,
 }
 
 impl<'a> Inputs<'a> {
@@ -697,7 +721,7 @@ fn top_apps(inputs: &Inputs<'_>) -> Option<State> {
 }
 
 fn backup(inputs: &Inputs<'_>) -> Option<State> {
-    let report = match inputs.backup.as_ref() {
+    let (report, job) = match inputs.backup.as_ref() {
         Source::NotYet => return None,
         Source::Failed(cause) => {
             return Some(WidgetState::Error {
@@ -706,8 +730,9 @@ fn backup(inputs: &Inputs<'_>) -> Option<State> {
                 next: action(WidgetActionId::StartBackupCheck, "Retry"),
             })
         }
-        Source::Ready(r) => r,
+        Source::Ready(i) => (i.report, i.job.clone()),
     };
+    let as_of = report.checked_at.unwrap_or(inputs.now);
     let configured: Vec<_> = report.statuses.iter().filter(|s| s.state != BackupState::NotConfigured).collect();
     // The verdict of the tool that most needs attention: stale, then no backup yet, then healthy.
     let rank = |s: BackupState| match s {
@@ -722,18 +747,21 @@ fn backup(inputs: &Inputs<'_>) -> Option<State> {
         .max_by_key(|s| rank(s.state));
     let last = worst.map(|w| PopoverValue::BackupHealth(backup_value(w, configured.len())));
     if report.checking {
-        let done = configured.len() as u64;
-        let tool = configured.first().map_or("Backup tools".to_string(), |s| s.name.clone());
-        return Some(WidgetState::Working {
-            title: "Backup".into(),
-            phase: format!("Checking · {tool}"),
-            progress: Progress::Count {
-                done,
-                unit: "tools read".into(),
-            },
-            last,
-            cancel: None,
-        });
+        return match job {
+            // Real progress only: the running job's own phase and count (ER-18). Without one the last value stays, or the
+            // widget is still loading; no count is made up.
+            Some(j) => Some(WidgetState::Working {
+                title: "Backup".into(),
+                phase: format!("Checking · {}", j.phase),
+                progress: Progress::Count {
+                    done: j.done,
+                    unit: j.unit,
+                },
+                last,
+                cancel: None,
+            }),
+            None => last.and_then(|v| ready(v, as_of)),
+        };
     }
     if configured.is_empty() {
         return Some(WidgetState::Empty {
@@ -742,8 +770,8 @@ fn backup(inputs: &Inputs<'_>) -> Option<State> {
             next: action(WidgetActionId::SetUpBackupChecks, "Set up checks"),
         });
     }
-    match worst {
-        Some(w) => ready(PopoverValue::BackupHealth(backup_value(w, configured.len())), inputs.now),
+    match last {
+        Some(v) => ready(v, as_of),
         None => Some(WidgetState::Error {
             title: "Couldn't check".into(),
             cause: configured.first().map(|s| s.summary.clone()),
@@ -799,10 +827,10 @@ fn last_issue(id: &PlacementId, inputs: &Inputs<'_>) -> Option<State> {
         });
     }
     match last {
-        Some(value) => ready(value, inputs.now),
+        Some(value) => ready(value, issues.scanned_at.unwrap_or(inputs.now)),
         None => Some(WidgetState::Empty {
-            title: "Problems Dyno finds show here".into(),
-            detail: "None in the last 7 days.".into(),
+            title: "No issues in the last 7 days".into(),
+            detail: "Dyno reads the system logs for crashes and hangs.".into(),
             next: action(WidgetActionId::OpenPage(Page::Issues), "Open issues"),
         }),
     }
@@ -846,7 +874,7 @@ fn counters(id: &PlacementId, inputs: &Inputs<'_>) -> Option<State> {
             rows,
             more: count(c.pinned.saturating_sub(COUNTER_ROWS)),
         },
-        inputs.now,
+        c.read_at.unwrap_or(inputs.now),
     )
 }
 

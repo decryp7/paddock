@@ -29,10 +29,15 @@ export function provideWidgetNavigation() {
   return provideAppInitializer(() => {
     const router = inject(Router);
     const openSettings = inject(OPEN_SETTINGS, { optional: true });
-    inject(BACKEND).onNavigate((to) => {
+    const backend = inject(BACKEND);
+    const follow = (to: Navigate): void => {
       const d = destination(to);
       if ('route' in d) void router.navigateByUrl(d.route);
       else openSettings?.(d.settings);
-    });
+    };
+    // The event reaches a window that exists; one that was still being created when the button was pressed asks for what is
+    // waiting. Either way the shell hands it over once.
+    backend.onNavigate(() => void backend.takeNavigation().then((to) => to && follow(to)));
+    void backend.takeNavigation().then((to) => to && follow(to));
   });
 }

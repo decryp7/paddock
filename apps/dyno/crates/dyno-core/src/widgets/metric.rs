@@ -59,6 +59,45 @@ impl Metric {
         )
     }
 
+    /// The metrics a picker offers, in display order (the two parameterised ones, a process and a counter, are chosen
+    /// another way).
+    pub const CHOICES: [Metric; 13] = [
+        Metric::CpuTotal,
+        Metric::CpuPerCore,
+        Metric::Memory,
+        Metric::MemoryPressure,
+        Metric::Swap,
+        Metric::DiskActivity,
+        Metric::DiskFree,
+        Metric::NetworkDown,
+        Metric::NetworkUp,
+        Metric::GpuLoad,
+        Metric::Temperature,
+        Metric::Fan,
+        Metric::Battery,
+    ];
+
+    /// The metric's name in sentence case, as a picker and a tooltip say it ("CPU per core", "Process chrome").
+    pub fn title(&self) -> String {
+        match self {
+            Metric::CpuTotal => "CPU".into(),
+            Metric::CpuPerCore => "CPU per core".into(),
+            Metric::Memory => "Memory".into(),
+            Metric::MemoryPressure => "Memory pressure".into(),
+            Metric::Swap => "Swap".into(),
+            Metric::DiskActivity => "Disk activity".into(),
+            Metric::DiskFree => "Disk free".into(),
+            Metric::NetworkDown => "Network down".into(),
+            Metric::NetworkUp => "Network up".into(),
+            Metric::GpuLoad => "GPU".into(),
+            Metric::Temperature => "Temperature".into(),
+            Metric::Fan => "Fan".into(),
+            Metric::Battery => "Battery".into(),
+            Metric::Process(n) => format!("Process {n}"),
+            Metric::PerfCounter(p) => format!("Counter {p}"),
+        }
+    }
+
     /// The metric as a sentence part: "process chrome", "Memory".
     pub fn label(&self) -> String {
         match self {

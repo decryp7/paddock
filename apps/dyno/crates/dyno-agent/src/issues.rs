@@ -176,7 +176,7 @@ impl IssueCentre {
         Ok((statuses, found))
     }
 
-    fn snapshot(&self) -> (Vec<SourceStatus>, Option<Timestamp>) {
+    pub(crate) fn snapshot(&self) -> (Vec<SourceStatus>, Option<Timestamp>) {
         let st = lock(&self.state);
         (st.statuses.clone(), st.last_scan)
     }

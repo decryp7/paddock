@@ -68,6 +68,20 @@ impl Harness {
     }
 }
 
+/// Waits for the data folder's lock to be free again. A test that forks (the child that has not exec'd yet) holds a copy of
+/// every open lock file until it execs, so a lock can outlive its agent for a moment; the wait is on that condition, with a
+/// hang guard only a lost lock reaches.
+fn wait_until_free(dirs: &Dirs) {
+    let began = std::time::Instant::now();
+    while dyno_agent::instance::is_held(dirs) {
+        assert!(
+            began.elapsed() < Duration::from_secs(60),
+            "the data folder's lock was never released"
+        );
+        std::thread::yield_now();
+    }
+}
+
 impl Drop for Harness {
     fn drop(&mut self) {
         if let Some(r) = self.running.take() {
@@ -417,6 +431,7 @@ fn alarms_survive_an_agent_restart() {
     .unwrap();
     drop(peer);
     h.running.take().unwrap().stop();
+    wait_until_free(&h.dirs);
     let fake = Fake::new();
     let running = Running::start(h.dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
     h.running = Some(running);
@@ -1172,6 +1187,7 @@ mod widget_layouts {
         assert!(std::fs::read_to_string(h.dirs.settings()).unwrap().contains("\"popover\""));
         // The agent starts again over the same folder: the layout is still the edited one.
         h.running.take().unwrap().stop();
+        wait_until_free(&h.dirs);
         let again = Running::start(h.dirs.clone(), h.fake.platform(), Box::new(h.fake.clone()), Box::new(|_| Ok(()))).unwrap();
         let peer = connect(&h.dirs).unwrap().0;
         assert_eq!(popover_ids(&view(&peer, DynoSurface::Popover)), ["active-alarms", "disk-space"]);
