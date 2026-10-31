@@ -58,6 +58,7 @@ runs:
       shell: bash
       env:
         COMMANDS: ${{ inputs.prepare }}
+        CI_SUMMARY_TITLE: prepare (${{ inputs.app }})
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
 
     - name: Checks (${{ inputs.app }})
@@ -65,6 +66,7 @@ runs:
       shell: bash
       env:
         COMMANDS: ${{ inputs.checks }}
+        CI_SUMMARY_TITLE: checks (${{ inputs.app }})
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
 
     # Third-party notices (Rust through cargo-about, npm through the root lock) are generated output: the committed file must equal
@@ -87,6 +89,7 @@ runs:
       shell: bash
       env:
         COMMANDS: ${{ inputs.rust-checks }}
+        CI_SUMMARY_TITLE: rust-checks (${{ inputs.app }})
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
 
     # Every step of the Rust half runs even after another failed (clippy and nextest each name what broke), and the steps after a
@@ -97,6 +100,7 @@ runs:
       # The stable checkout path on a host runner (stable-workspace), so sccache sees the same working folder every run.
       working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ inputs.cargo }}
       env:
+        APP: ${{ inputs.app }}
         NEXTEST_CONFIG: ${{ inputs.nextest-config }}
         FILTER: ${{ inputs.filter }}
         DISPLAY_TESTS: ${{ inputs.display }}
@@ -104,8 +108,10 @@ runs:
         WINDOWS_CLIPPY: ${{ inputs.windows-clippy }}
       run: |
         set -uo pipefail
+        . "${{ github.action_path }}/../../../conformance/ci/ci-log.sh"
         status=0
-        step() { echo "::group::$*"; "$@" || { status=1; echo "::error::failed: $*"; }; echo "::endgroup::"; }
+        # Each part is a timed group; a failure is one ::error:: with the command, its exit status and how to reproduce it.
+        step() { ci_step "$*" "$@" || status=1; }
         config=()
         if [ -n "$NEXTEST_CONFIG" ]; then config=(--config-file "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/$NEXTEST_CONFIG"); fi
         filter=()
@@ -115,14 +121,16 @@ runs:
         for pkg in $LAST_PACKAGES; do exclude+=(--exclude "$pkg"); last+=(-p "$pkg"); done
         hostexclude=(); if [ "$RUNNER_OS" != Linux ]; then hostexclude=(${exclude[@]+"${exclude[@]}"}); fi
         # Format, advisories and licences do not depend on the OS; clippy is skipped on Windows like the crates leg unless the app opts in (windowsClippy).
-        if [ "$RUNNER_OS" = Linux ]; then step cargo fmt --all --check; fi
-        if [ "$RUNNER_OS" != Windows ] || [ "$WINDOWS_CLIPPY" = true ]; then step cargo clippy --workspace ${hostexclude[@]+"${hostexclude[@]}"} --all-targets -- -D warnings; fi
+        if [ "$RUNNER_OS" = Linux ]; then step cargo fmt --all --check; else ci_skip "cargo fmt" "format does not depend on the OS: the Linux leg checks it"; fi
+        if [ "$RUNNER_OS" != Windows ] || [ "$WINDOWS_CLIPPY" = true ]; then step cargo clippy --workspace ${hostexclude[@]+"${hostexclude[@]}"} --all-targets -- -D warnings; else ci_skip "cargo clippy" "Windows clippy is off for this app (windowsClippy)"; fi
         wrap=()
         if [ "$DISPLAY_TESTS" = true ] && [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" dbus-run-session --); fi
         step ${wrap[@]+"${wrap[@]}"} cargo nextest run --workspace ${exclude[@]+"${exclude[@]}"} ${config[@]+"${config[@]}"} --profile ci ${filter[@]+"${filter[@]}"}
-        if [ "$RUNNER_OS" = Linux ] && [ ${#last[@]} -gt 0 ]; then step ${wrap[@]+"${wrap[@]}"} cargo nextest run ${last[@]+"${last[@]}"} ${config[@]+"${config[@]}"} --profile ci --no-tests=pass ${filter[@]+"${filter[@]}"}; fi
+        if [ "$RUNNER_OS" = Linux ] && [ ${#last[@]} -gt 0 ]; then step ${wrap[@]+"${wrap[@]}"} cargo nextest run ${last[@]+"${last[@]}"} ${config[@]+"${config[@]}"} --profile ci --no-tests=pass ${filter[@]+"${filter[@]}"}
+        elif [ ${#last[@]} -gt 0 ]; then ci_skip "nextest of $LAST_PACKAGES" "last-packages run on the Linux leg only"; fi
         step cargo test --workspace ${hostexclude[@]+"${hostexclude[@]}"} --doc
-        if [ "$RUNNER_OS" = Linux ]; then step cargo deny --all-features --workspace check; fi
+        if [ "$RUNNER_OS" = Linux ]; then step cargo deny --all-features --workspace check; else ci_skip "cargo deny" "advisories and licences do not depend on the OS: the Linux leg checks them"; fi
+        ci_summary_flush "Rust ($APP, $RUNNER_OS)"
         exit $status
 
     - name: UI (${{ inputs.app }})
@@ -130,6 +138,7 @@ runs:
       shell: bash
       env:
         COMMANDS: ${{ inputs.ui-checks }}
+        CI_SUMMARY_TITLE: ui-checks (${{ inputs.app }})
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
 
     - name: End-to-end tests (${{ inputs.app }} ${{ inputs.e2e-shard }})
@@ -137,6 +146,7 @@ runs:
       shell: bash
       env:
         COMMANDS: ${{ inputs.e2e-checks }}
+        CI_SUMMARY_TITLE: e2e-checks (${{ inputs.app }} ${{ inputs.e2e-shard }})
         E2E_SHARD: ${{ inputs.e2e-shard }}
       run: |
         export E2E_INDEX="${E2E_SHARD%%/*}"
