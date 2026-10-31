@@ -72,7 +72,7 @@ const TONE_STATUS: Record<Tone, PdStatus> = { info: 'info', warning: 'warning', 
     .pd-wa-empty > pd-glyph { margin-top: var(--pd-space-0); color: var(--pd-text-muted); }
     .pd-wa-et { font-weight: var(--pd-weight-semibold); }
     .pd-wa-ed { grid-column: 2; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
-    .pd-wa-ea { grid-column: 2; justify-self: start; margin: var(--pd-space-1) 0 0 calc(-1 * var(--pd-space-2)); padding-inline: var(--pd-space-2); --mat-button-text-label-text-color: var(--pd-accent); color: var(--pd-accent); }
+    .pd-wa-ea { grid-column: 2; justify-self: start; margin: var(--pd-space-1) 0 0 calc(-1 * var(--pd-space-2)); --mat-button-text-horizontal-padding: var(--pd-space-2); padding-inline: var(--pd-space-2); --mat-button-text-label-text-color: var(--pd-accent); color: var(--pd-accent); }
     @media (prefers-contrast: more) { :root:not([data-contrast='off']) .pd-wa-empty, :root:not([data-contrast='off']) .pd-wa-notice { outline: 1px solid var(--pd-border-strong); outline-offset: -1px; } }
     :root[data-contrast='more'] .pd-wa-empty, :root[data-contrast='more'] .pd-wa-notice { outline: 1px solid var(--pd-border-strong); outline-offset: -1px; }
   `,

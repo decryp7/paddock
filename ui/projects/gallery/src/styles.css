@@ -72,3 +72,7 @@
 .gal-tree .mat-nested-tree-node[aria-expanded='true'] > .mat-tree-node .gal-chevron { transform: rotate(90deg); }
 .mat-mdc-cell.gal-num-col, .mat-mdc-header-cell.gal-num-col { text-align: right; font-variant-numeric: tabular-nums; }
 .gal-num-col.mat-sort-header-sorted .mat-sort-header-container, th.gal-num-col .mat-sort-header-container { justify-content: flex-end; }
+
+/* The popup footer menu keeps 6 px clear of its buttons (the focus ring and a gap). */
+.wg-foot-menu.mat-menu-above { margin-bottom: 6px; }
+.wg-foot-menu.mat-menu-below { margin-top: 6px; }

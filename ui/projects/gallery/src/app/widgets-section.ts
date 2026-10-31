@@ -215,7 +215,9 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
       <div class="wg-popup" data-testid="wgt-popup">
         <pd-tray-popover label="Dyno" platform="macos">
           <strong slot="header" class="wg-name-head">Dyno</strong>
-          <pd-status-pill slot="header" class="wg-pill" [status]="stopped() ? 'danger' : 'success'" [label]="stopped() ? 'Agent stopped' : 'All good'" />
+          @if (!loading()) {
+            <pd-status-pill slot="header" class="wg-pill" [status]="stopped() ? 'danger' : 'success'" [label]="stopped() ? 'Agent stopped' : 'All good'" />
+          }
           <pd-widget-area
             [placements]="emptied() ? [] : popupPlacements"
             [catalogue]="catalogue"
@@ -229,7 +231,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
           <div slot="footer" class="wg-foot">
             <button type="button" class="gal-btn gal-btn--primary">Open Dyno</button>
             <button matIconButton type="button" class="wg-more" aria-label="More actions" [matMenuTriggerFor]="footMenu"><pd-glyph name="more" [size]="16" /></button>
-            <mat-menu #footMenu="matMenu" xPosition="before" yPosition="above">
+            <mat-menu #footMenu="matMenu" class="wg-foot-menu" xPosition="before" yPosition="above">
               <button mat-menu-item type="button" (click)="acted.set('customize')">Customize widgets…</button>
               <button mat-menu-item type="button" (click)="acted.set('settings')">Settings…</button>
               <button mat-menu-item type="button" (click)="acted.set('quit')">Quit Dyno</button>
@@ -242,8 +244,8 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
       <p>The edits go to a stand-in for the engine; the chooser draws what comes back. Remove a widget for the Undo toast.</p>
       <div class="wg-chooser" data-testid="wgt-chooser">
         <pd-widget-chooser [view]="chosen()" [widgetFor]="widgetFor" [again]="{ disk: 'Add volume' }" [preview]="true" (edit)="applyEdit($event)">
-          <ng-template pdWidgetOption="disk" let-p>
-            <pd-select [options]="volumes" [value]="volumeOf(p)" [ariaLabel]="'Volumes shown by ' + p.id" (valueChange)="applyEdit({ replace: { id: p.id, widget: { kind: 'disk', volume: $event } } })" />
+          <ng-template pdWidgetOption="disk" [pdWidgetOptionOf]="sample" let-p>
+            <pd-select [options]="volumes" [value]="p.widget.volume ?? 'all'" [ariaLabel]="'Volumes shown by ' + p.id" (valueChange)="applyEdit({ replace: { id: p.id, widget: { kind: 'disk', volume: $event } } })" />
           </ng-template>
           <div slot="preview">
             <pd-widget-area [placements]="chosen().layout.placements" [catalogue]="catalogue" [values]="previewValues()" [templates]="templates()" [now]="now" />
@@ -296,6 +298,8 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
 export class GalWidgets {
   /** The type witness of the kind templates: `let-x` is a `Val | null` with no cast. */
   protected readonly witness: Val | null = null;
+  /** The type witness of the chooser's option templates: `let-p` is a `Placement<Sample>`. */
+  protected readonly sample: Sample | null = null;
   protected readonly cpuSeries = [22, 25, 31, 28, 40, 52, 47, 38, 35, 44, 61, 58, 49, 42, 39, 76];
   protected readonly memSeries = [60, 61, 61, 62, 64, 66, 66, 67, 69, 70, 70, 71, 71, 72, 72, 72];
   protected readonly netSeries = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
@@ -326,9 +330,6 @@ export class GalWidgets {
     registerPaddockIcons(inject(MatIconRegistry), inject(DomSanitizer));
   }
 
-  protected volumeOf(p: Placement<unknown>): string {
-    return (p.widget as Sample).volume ?? 'all';
-  }
   protected kindInfo(k: string): KindInfo<string> {
     return CATALOGUE.kinds.find((i) => i.kind === k) as KindInfo<string>;
   }
