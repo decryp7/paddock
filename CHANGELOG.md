@@ -4,9 +4,24 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui/widgets`: widget area, frame and chooser (ADR 0035, WP-B)
+- New entry point: `pd-widget-area` (a layout's widgets on the surface grid, with the surface notice and the empty layout),
+  `pd-widget-frame` (loading, ready, empty, calm empty, error, working and stale, the loading twin made of the app's own template with
+  `pdSkeleton` parts), the `*pdWidget` and `*pdWidgetOption` template directives and `pd-widget-chooser` (CDK drag-drop, Alt/Option
+  Up, Down, Home and End keyboard reorder announced through `LiveAnnouncer`, a Material row menu, Half / Full toggles, "Added", the
+  limit and the undo snack bar driven by `canUndo`). It draws the generated types of `paddock-widgets` and emits `Edit` values.
+- The chooser shows presets when the surface has any (apply, save as, delete, with the undo toast on apply); `pdWidgetOf` types a kind
+  template's value. `pd-tray-popover`'s content becomes a named, focusable region (`tabindex="0"`, `role=region`) while it scrolls.
+- Review fixes: the undo toast opens once per edit the engine confirms (never for a view that merely arrives with `canUndo`); deleting a
+  preset asks first and moves focus on; kind icons are 14 / 16 px; the tray popover shows a fade and a thin scrollbar while it scrolls; menu
+  keys follow the platform (Option glyphs on a Mac, Alt elsewhere); moves are announced when the engine's view shows them; `error` input
+  for a refused edit; span is clamped to the columns; the one preview breakpoint is 880 px (the ADR's); `pd:check-circle`.
+- `pd:` glyphs `grip`, `arrow-up`, `arrow-down`, `to-top` and `to-bottom`. Gallery page "Widgets" with a Playwright spec (sizes,
+  loading height, focus order, keyboard reorder, the menu clear of the focus ring, axe in both themes and high contrast). Design guide
+  section 8 gains "Widget area and frame" and "Chooser"; "Tray popups" and "Skeletons" are amended.
 ### Tokens: `--pd-meter-neutral`, `--pd-skeleton-raised`, `--pd-skeleton-raised-shine`
-- `--pd-meter-neutral` (dark #747d8b, light #767f8d) is a meter's neutral fill (disk space, quotas): 3:1 or more on surface-1, -2 and
-  -3. `--pd-chart-neutral-bar` stays for charts; on a surface-2 widget it measured 2.8:1 in dark (ADR 0035).
+- `--pd-meter-neutral` (dark #7c8593, light #6b7381) is a meter's neutral fill (disk space, quotas): 3:1 or more on surface-1, -2 and
+  -3 and against its track (`--pd-chart-grid` over surface-2 and -3). `--pd-chart-neutral-bar` stays for charts; on a surface-2 widget it measured 2.8:1 in dark (ADR 0035).
 - `--pd-skeleton-raised` and `--pd-skeleton-raised-shine` are the skeleton pair for content on a surface-2 fill, where
   `--pd-skeleton` (the surface-2 colour) vanishes. `npm run test:tokens` checks both.
 ### `paddock-widgets`: new crate for widget layouts (ADR 0035, WP-A)
