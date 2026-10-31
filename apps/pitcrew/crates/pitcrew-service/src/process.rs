@@ -134,7 +134,10 @@ mod tree {
         // SAFETY: the closure runs between fork and exec and only calls setsid, which is async-signal-safe and touches no
         // memory of the parent.
         unsafe {
-            #[expect(clippy::disallowed_methods, reason = "setsid is the child's own call; it cannot be made from the parent")]
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "setsid is the child's own call; it cannot be made from the parent"
+            )]
             cmd.pre_exec(|| nix::unistd::setsid().map(|_| ()).map_err(std::io::Error::from));
         }
     }
