@@ -21,11 +21,13 @@ import {
 } from '@angular/core';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
+import { MatFormField, MatLabel } from '@angular/material/form-field';
 import { MatIcon } from '@angular/material/icon';
+import { MatInput } from '@angular/material/input';
 import { MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
 import { MatSnackBar, type MatSnackBarRef, type TextOnlySnackBar } from '@angular/material/snack-bar';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
-import type { Edit, KindInfo, LayoutView, Placement } from '../generated/widgets';
+import type { Edit, KindInfo, LayoutView, Placement, Preset } from '../generated/widgets';
 import { defaultKindOf, PdWidgetOption } from './widget';
 
 /** The family's undo toast class (the safe area above the status bar is in `_material.scss`). */
@@ -52,7 +54,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
   selector: 'pd-widget-chooser',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  imports: [CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder, NgTemplateOutlet, MatButton, MatIconButton, MatIcon, MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger, MatButtonToggleGroup, MatButtonToggle, PdGlyph, PdStatusGlyph],
+  imports: [CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder, NgTemplateOutlet, MatButton, MatIconButton, MatIcon, MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger, MatButtonToggleGroup, MatButtonToggle, MatFormField, MatLabel, MatInput, PdGlyph, PdStatusGlyph],
   host: { class: 'pd-widget-chooser' },
   template: `
     <div class="pd-wc" [class.pd-wc--preview]="preview()">
@@ -136,6 +138,39 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
             </li>
           }
         </ul>
+        @if (hasPresets()) {
+          <div class="pd-wc-label">
+            <span [id]="ids + '-presets'">Presets</span>
+            <span class="pd-wc-count">{{ userPresets().length }} of {{ surface().maxUserPresets }} saved</span>
+          </div>
+          @if (presets().length > 0) {
+            <ul class="pd-wc-list" role="list" [attr.aria-labelledby]="ids + '-presets'">
+              @for (pr of presets(); track pr.id) {
+                <li class="pd-wc-item pd-wc-add">
+                  <span class="pd-wc-txt"><b>{{ pr.name }}</b><span>{{ pr.placements.length }} {{ pr.placements.length === 1 ? 'widget' : 'widgets' }}{{ pr.builtin ? ' · Built in' : '' }}</span></span>
+                  @if (editable()) {
+                    <button matButton="outlined" type="button" [attr.aria-label]="'Apply the ' + pr.name + ' preset'" (click)="applyPreset(pr)">Apply</button>
+                    @if (!pr.builtin) {
+                      <button matIconButton type="button" [attr.aria-label]="'Delete the ' + pr.name + ' preset'" (click)="deletePreset(pr)"><pd-glyph name="trash" [size]="16" /></button>
+                    }
+                  }
+                </li>
+              }
+            </ul>
+          }
+          @if (editable() && surface().maxUserPresets > 0) {
+            <div class="pd-wc-save">
+              <mat-form-field appearance="outline" subscriptSizing="dynamic">
+                <mat-label>Preset name</mat-label>
+                <input matInput maxlength="64" autocomplete="off" [value]="presetName()" (input)="presetNameInput($event)" (keydown.enter)="savePreset()" />
+              </mat-form-field>
+              <button matButton="outlined" type="button" [disabled]="!canSave()" (click)="savePreset()">Save as preset</button>
+            </div>
+            @if (userPresets().length >= surface().maxUserPresets) {
+              <p class="pd-wc-limit" role="status"><pd-status-glyph status="info" [size]="16" />You can keep {{ surface().maxUserPresets }} {{ surface().maxUserPresets === 1 ? 'preset' : 'presets' }}. Delete one to save another.</p>
+            }
+          }
+        }
         @if (editable()) {
           <div class="pd-wc-foot"><button matButton="text" type="button" (click)="reset()">Reset to defaults</button></div>
         }
@@ -180,6 +215,8 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-hint { display: flex; align-items: center; gap: 6px; margin: 8px 0 20px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-wc-limit { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 8px 12px; border-radius: var(--pd-radius-control); background: var(--pd-info-tint); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
     .pd-wc-limit pd-status-glyph { color: var(--pd-info); }
+    .pd-wc-save { display: flex; align-items: flex-start; gap: var(--pd-space-2); margin: var(--pd-space-2) 0; }
+    .pd-wc-save mat-form-field { flex: 1; min-width: 0; }
     .pd-wc-foot { margin: 12px 0 0 -8px; }
     .pd-wc-plabel { font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); margin: 0 0 6px; }
     /* The menu keeps clear of its button's focus ring (2 px ring, 2 px offset), whether it opens below or above. */
@@ -220,6 +257,11 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   protected readonly kinds = computed(() => this.view().catalogue.kinds);
   protected readonly editable = computed(() => this.view().editable);
   protected readonly atLimit = computed(() => this.placements().length >= this.surface().maxPlacements);
+  protected readonly userPresets = computed(() => this.view().layout.presets);
+  protected readonly presets = computed(() => [...this.view().builtinPresets, ...this.userPresets()]);
+  protected readonly hasPresets = computed(() => this.surface().maxUserPresets > 0 || this.presets().length > 0);
+  protected readonly presetName = signal('');
+  protected readonly canSave = computed(() => this.presetName().trim() !== '' && this.userPresets().length < this.surface().maxUserPresets);
   private readonly grips = viewChildren<ElementRef<HTMLButtonElement>>('grip');
   private readonly lastLabel = signal<{ text: string; n: number }>({ text: '', n: 0 });
   private pendingFocus: string | null = null;
@@ -278,6 +320,22 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   protected reset(): void {
     this.lastLabel.update((l) => ({ text: `The ${this.noun()} is back to the defaults.`, n: l.n + 1 }));
     this.edit.emit('resetToDefaults');
+  }
+
+  protected presetNameInput(e: Event): void {
+    this.presetName.set((e.target as HTMLInputElement).value);
+  }
+  protected applyPreset(p: Preset<W>): void {
+    this.lastLabel.update((l) => ({ text: `The ${this.noun()} now uses the ${p.name} preset.`, n: l.n + 1 }));
+    this.edit.emit({ applyPreset: { id: p.id } });
+  }
+  protected deletePreset(p: Preset<W>): void {
+    this.edit.emit({ deletePreset: { id: p.id } });
+  }
+  protected savePreset(): void {
+    if (!this.canSave()) return;
+    this.edit.emit({ savePreset: { name: this.presetName().trim() } });
+    this.presetName.set('');
   }
 
   protected dropped(e: CdkDragDrop<unknown>): void {
