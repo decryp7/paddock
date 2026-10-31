@@ -61,7 +61,7 @@ if ($CaseId -eq 'down') {
 $s = Wait-State @('available') 120
 Save-Shot "C:\paddock-test\$CaseId-available.png"
 Check ($s -eq 'available') "window: $s (wanted `"Version $New is available`")"
-if ($s -ne 'available') { foreach ($w in (Get-AppWindows 'spotter-app')) { "TREE window '$($w.Current.Name)'"; Show-Tree $w 14 | ? { $_ -match "'.+'" } | select -First 40 | % { "TREE $_" } }; "TEXTS " + ((All-Texts | select -Unique | select -First 14) -join ' | '); exit 1 }
+if ($s -ne 'available') { foreach ($w in (Updates-Windows)) { "TREE window '$($w.Current.Name)' class=$($w.Current.ClassName)"; Show-Tree $w 16 | ? { $_ -match "'.+'" } | select -First 45 | % { "TREE $_" } }; "TEXTS " + ((All-Texts | select -Unique | select -First 14) -join ' | '); exit 1 }
 Check (Press-Any '^Download') 'pressed Download'
 if ($CaseId -eq 'ok') {
   $s = Wait-State @('ready') 240
