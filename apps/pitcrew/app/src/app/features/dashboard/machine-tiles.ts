@@ -31,7 +31,7 @@ interface Tile {
         </div>
         <div class="value num">{{ t.value }}</div>
         <div class="sub faint">{{ t.sub }}</div>
-        <pd-sparkline class="spark" [style.color]="'var(--' + t.tone + ')'" [label]="t.label" [values]="t.values" [min]="0" [max]="t.max" [area]="true" [height]="34" />
+        <pd-sparkline class="spark" [style.color]="'var(--' + t.tone + ')'" [decorative]="true" [values]="t.values" [min]="0" [max]="t.max" [area]="true" [height]="34" />
       </section>
     }
     <section class="card tile own" aria-label="Pitcrew's own cost">

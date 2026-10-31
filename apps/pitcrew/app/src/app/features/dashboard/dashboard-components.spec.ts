@@ -232,6 +232,11 @@ describe('MachineTiles', () => {
     expect(text(el.querySelector('.own'))).toContain('2.5% CPU');
     expect(text(el.querySelector('.own'))).toContain('24.0 MB memory · up 1h 00m');
     expect(el.querySelectorAll('pd-sparkline')).toHaveLength(3);
+    // The tile's own label carries the formatted numbers, so the chart is hidden from assistive technology.
+    for (const svg of Array.from(el.querySelectorAll('pd-sparkline svg'))) {
+      expect(svg.getAttribute('aria-hidden')).toBe('true');
+      expect(svg.hasAttribute('aria-label')).toBe(false);
+    }
   });
 
   it('adds the whole machine as a muted context line, runners included', () => {

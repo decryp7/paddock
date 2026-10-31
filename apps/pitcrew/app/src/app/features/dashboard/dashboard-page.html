@@ -91,7 +91,7 @@
             <h3>Events</h3>
             <span class="meta">restarts, updates, cleanups</span>
           </header>
-          <div class="card-body feed-body">
+          <div class="card-body feed-body" role="region" aria-label="Events" tabindex="0">
             <pc-load-state what="Events" [hasValue]="activityState().hasValue" [error]="null" [skeleton]="[40, 40, 40, 40]" (retry)="store.retry()">
               <pc-events-feed [items]="feed()" [now]="clock.now()" />
             </pc-load-state>

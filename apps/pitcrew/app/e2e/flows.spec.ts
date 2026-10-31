@@ -180,6 +180,17 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
       await expect.poll(() => axeViolations(page), { timeout: 10_000 }).toEqual([]);
     }
   });
+
+  test('the dashboard has no accessibility violations in either theme, and its charts are not announced', async ({ page }) => {
+    for (const colorScheme of THEMES) {
+      await page.emulateMedia({ colorScheme });
+      await page.goto(`${APP}/`);
+      await expect(page.locator('pc-machine-tiles pd-sparkline').first()).toBeVisible();
+      // The tiles' own labels carry the formatted values; an image role on the chart would read raw numbers as well.
+      await expect(page.locator('pc-machine-tiles pd-sparkline svg[role="img"]')).toHaveCount(0);
+      await expect.poll(() => axeViolations(page), { timeout: 10_000 }).toEqual([]);
+    }
+  });
 });
 
 test.describe('native feel (ADR 0008)', () => {
