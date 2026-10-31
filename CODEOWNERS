@@ -43,4 +43,4 @@ docs/.* @decryp7
 diagrams/.* @decryp7
 
 # Root configs (the coordinator's).
-(\.cargo/.*|\.editorconfig|lefthook\.yml|\.gitattributes|\.gitignore|\.nvmrc|package\.json|package-lock\.json|renovate\.json|CODEOWNERS|AGENTS\.md|README\.md|CHANGELOG\.md|LICENSE-[A-Z]+|paddock\.conformance\.json|paddock\.waivers\.toml) @decryp7
+(\.cargo/.*|\.editorconfig|lefthook\.yml|\.gitattributes|\.gitignore|\.nvmrc|package\.json|package-lock\.json|renovate\.json|CODEOWNERS|AGENTS\.md|README\.md|CHANGELOG\.md|LICENSE-[A-Z]+|paddock\.conformance\.json|paddock\.waivers\.toml|wiki-lint\.json) @decryp7

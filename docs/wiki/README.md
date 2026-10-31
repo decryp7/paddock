@@ -3,7 +3,7 @@
 A small, sourced summary of how things work **today**, so an agent can read a page instead of re-deriving the state from
 the lessons, the ADRs and the hand-off logs. It started on 2026-10-31 as a two-week pilot of the LLM Wiki pattern; the user
 concluded the pilot and made it official the same day (ER-30 and `skills/wiki` on engineering-rules `docs/er-30-wiki`, Paddock rule 59 on `docs/rule-wiki`).
-The tooling is to become one Rust `wiki` CLI (branch `tools/wiki`); this schema and `scripts/wiki-lint.mjs` hold until it has parity. The
+The tooling is one Rust `wiki` CLI, [tools/wiki](../../tools/wiki/README.md), which replaced `scripts/wiki-lint.mjs`. The
 design and the evaluation plan are in the research note `research-llm-wiki-2026-10-31.md` (hand-off folder, outside this
 repository), and the pattern's primary source is Karpathy's
 [LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) (read as data, adapted, not adopted as
