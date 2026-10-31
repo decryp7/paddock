@@ -244,8 +244,10 @@ impl DuckStore {
     }
 
     /// Deletes the documents of the rewritten segments' blocks, which hold the old times; the indexer (kept out by the
-    /// write lock the caller holds) adds them again from the new files. When the delete fails, the new files are marked
-    /// indexed instead: their documents keep the old times (as before ADR 0062) rather than appear twice.
+    /// write lock the caller holds) adds them again from the new files. This covers segments not marked indexed too,
+    /// whose documents may already be committed. When the delete fails (it is rolled back), each new file gets its old
+    /// segment's flag back: indexed ones keep the documents with the old times (as before ADR 0062) rather than appear
+    /// twice.
     fn reindex_moved(&self, conn: &Connection, affected: &[Listed], written: &[Segment], blocks: &HashMap<String, Vec<(u64, u64)>>) {
         let Some(fts) = &self.inner.fts else {
             return;
@@ -253,7 +255,8 @@ impl DuckStore {
         let moved: Vec<(&Listed, &Segment)> = affected
             .iter()
             .zip(written)
-            .filter(|(l, _)| l.indexed && blocks.contains_key(&l.file))
+            // Also unindexed ones: their documents may already be committed.
+            .filter(|(l, _)| blocks.contains_key(&l.file))
             .collect();
         if moved.is_empty() {
             return;
@@ -263,7 +266,7 @@ impl DuckStore {
             Ok(()) => fts.wake(),
             Err(e) => {
                 log::warn!("the moved events' search entries keep their old times: {e:#}");
-                for (_, seg) in moved {
+                for (_, seg) in moved.into_iter().filter(|(l, _)| l.indexed) {
                     if let Err(e) = conn.execute("UPDATE segments SET indexed = TRUE WHERE file = ?", params![seg.file]) {
                         log::warn!("a moved segment could not be marked indexed: {e:#}");
                     }
