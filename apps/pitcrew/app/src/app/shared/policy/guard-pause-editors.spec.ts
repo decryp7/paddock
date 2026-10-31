@@ -169,6 +169,30 @@ describe('PauseEditor', () => {
     expect(saved[1]!.windows[1]!.days).toEqual([]);
   });
 
+  it('edits a window time through the shared editor: 23:30 is saved, an empty time keeps the last good one', async () => {
+    const { f, el, saved } = mount(pause({ mode: 'schedule' }));
+    await settle(f);
+    const type = async (input: HTMLInputElement, text: string) => {
+      input.value = text;
+      input.dispatchEvent(new Event('input'));
+      await settle(f);
+    };
+    const [from, until] = Array.from(el.querySelectorAll<HTMLInputElement>('input[role=combobox]'));
+    await type(from!, '23:30');
+    expect(save(el).disabled).toBe(false);
+    await type(until!, '');
+    save(el).click();
+    expect(saved).toEqual([pause({ mode: 'schedule', windows: [{ days: ['mon'], start: '23:30', end: '06:00' }] })]);
+  });
+
+  it('shows one message for an empty schedule, the editor\'s own', async () => {
+    const { f, el } = mount(pause({ mode: 'schedule', windows: [] }));
+    await settle(f);
+    expect(el.querySelector('p.tone-danger[role="alert"]')?.textContent).toContain('Add at least one window');
+    const shared = el.querySelector<HTMLElement>('.pd-empty');
+    expect(shared === null || getComputedStyle(shared).display === 'none').toBe(true);
+  });
+
   it('discards edits and honours read-only', async () => {
     const { f, el } = mount(pause({ mode: 'schedule' }));
     await settle(f);

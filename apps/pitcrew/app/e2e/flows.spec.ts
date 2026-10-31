@@ -420,6 +420,23 @@ test.describe('native feel (ADR 0008)', () => {
     await expect(page.getByTestId('process-summary')).toBeVisible();
   });
 
+  test('Settings > Defaults: a pause window keeps From and Until together on one line, in the narrow Settings column', async ({ page }) => {
+    await page.goto(`${APP}/`);
+    await openSettings(page, 'Defaults');
+    await page.getByRole('radio', { name: /On a schedule/ }).check({ force: true });
+    const window = page.locator('pc-pause-editor [data-testid="pause-window-0"]');
+    await expect(window).toBeVisible();
+    const from = await window.getByRole('combobox').nth(0).boundingBox();
+    const until = await window.getByRole('combobox').nth(1).boundingBox();
+    expect(from && until && Math.abs(from.y - until.y) < 2).toBe(true);
+    // The same button kind as the other Settings editors' "Add rule": same corner radius and height.
+    const look = (loc: ReturnType<Page['locator']>) => loc.evaluate((e) => ({ r: getComputedStyle(e).borderRadius, h: getComputedStyle(e).height }));
+    expect(await look(page.locator('pc-pause-editor .pd-add'))).toEqual(await look(page.getByRole('button', { name: 'Add rule' }).last()));
+    // One empty-state message, not the shared editor's and the wrapper's.
+    await page.locator('pc-pause-editor button[aria-label="Remove window 1"]').click();
+    await expect(page.locator('pc-pause-editor').getByText(/Add at least one window|No windows/).filter({ visible: true })).toHaveCount(1);
+  });
+
   test('Settings > Defaults edits the leftover process rules', async ({ page }) => {
     await page.goto(`${APP}/`);
     await openSettings(page, 'Defaults');
