@@ -44,6 +44,15 @@ Conventional Commits; one semver tag for the whole repo.
 - Breaking, before v1: `pdWidgetCalm` on `*pdWidget` and `[calm]` on `pd-widget-frame` are removed; the frame reads `calm` from the empty
   state. Apps drop `[pdWidgetCalm]` and set `calm` in the engine.
 
+### `@decryp7/paddock-ui/widgets`: chooser polish
+- The keyboard hint wraps balanced (no lone last word). The "Add a widget" list scrolls inside a box (`max-height: 22rem`, focusable so the
+  keyboard scrolls it) and shows a bottom fade (tokens only) only while more rows wait below. The row icons stay 16 px, as in Dyno's chooser.
+
+### `paddock-widgets` and `@decryp7/paddock-ui/widgets`: indeterminate progress
+- `Progress::Unknown` (wire value `"unknown"`, TypeScript `"unknown"`): work whose size and finished count the engine does not know. The
+  working frame draws the title, the phase and an indeterminate bar with no count text (quiet under reduced motion like the other bars).
+  Code that matched `Progress` exhaustively gets a new arm; `progressText` returns an empty string for it.
+
 ### `paddock-widgets`: new crate for widget layouts (ADR 0035, WP-A)
 - A pure crate for layouts of widgets on a surface (popover, dashboard, menu bar): the app's closed `Catalogue`, `Layout`
   and `Placement`, limits on every read and edit, lenient versioned `read` and `Stored` (a layout that cannot be read gives the defaults and one note and is kept and written back unchanged until the first

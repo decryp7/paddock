@@ -293,6 +293,20 @@ describe('pd-widget-frame', () => {
     expect(q(f, 'mat-progress-bar')!.getAttribute('aria-valuenow')).toBe('0');
   });
 
+  it('draws unknown progress as an indeterminate bar with the phase and no count text', async () => {
+    const f = await setup();
+    expect(progressText('unknown', 'en')).toBe('');
+    f.componentInstance.state.set({ state: 'working', title: 'Checking', phase: 'Time Machine', progress: 'unknown', last: null, cancel: null });
+    await settle(f);
+    expect(q(f, '.pd-w-t')!.textContent).toBe('Checking');
+    expect(q(f, '.pd-w-d')!.textContent!.trim()).toBe('Time Machine');
+    expect(q(f, 'mat-progress-bar')!.getAttribute('mode')).toBe('indeterminate');
+    f.componentInstance.state.set({ state: 'working', title: 'Checking', phase: '', progress: 'unknown', last: null, cancel: null });
+    await settle(f);
+    expect(q(f, '.pd-w-d')).toBeNull();
+    expect(q(f, 'mat-progress-bar')!.getAttribute('mode')).toBe('indeterminate');
+  });
+
   it('shows only the progress when the phase is empty, with no leading separator', async () => {
     const f = await setup();
     f.componentInstance.state.set({ state: 'working', title: 'Checking backup', phase: '', progress: { count: { done: 2, unit: 'items' } }, last: null, cancel: null });
@@ -734,6 +748,37 @@ describe('pd-widget-chooser', () => {
     await settle(f);
     expect(q(f, '.pd-wc-ask')).toBeNull();
     expect(document.activeElement).toBe(q(f, '[data-preset-delete="mine"]'));
+  });
+
+  it('balances the keyboard hint so no word is left alone on the last line', async () => {
+    const f = await setup();
+    const text = q(f, '.pd-wc-hint-text')!;
+    expect(text.textContent).toContain('hold Alt with');
+    expect(getComputedStyle(text).textWrap).toMatch(/balance|pretty/);
+  });
+
+  it('shows a bottom fade on the add list only while there is more to scroll', async () => {
+    const f = await setup();
+    const list = q(f, '.pd-wc-addlist')!;
+    expect(list.tabIndex).toBe(0);
+    // The test DOM has no layout: the box is stubbed (100 px tall holding 300 px of rows).
+    let top = 0;
+    let content = 300;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, get: () => 100 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => content });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => (top = v) });
+    list.dispatchEvent(new Event('scroll'));
+    await settle(f);
+    expect(q(f, '.pd-wc-fade')).not.toBeNull();
+    top = 200;
+    list.dispatchEvent(new Event('scroll'));
+    await settle(f);
+    expect(q(f, '.pd-wc-fade')).toBeNull();
+    top = 0;
+    content = 100;
+    list.dispatchEvent(new Event('scroll'));
+    await settle(f);
+    expect(q(f, '.pd-wc-fade')).toBeNull();
   });
 
   it('writes the Option glyph and name on a Mac', async () => {
