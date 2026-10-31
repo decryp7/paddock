@@ -220,6 +220,9 @@ pub struct Ask<'a> {
     pub cpu: bool,
     /// Probe the agent lock.
     pub lock: bool,
+    /// The look is the machine's decision look (phase `Looking`): a file beside a held lock is connected to without the service
+    /// ([`service_needed`]). Every other look that asks the service (after a connection, a change, a wait) gets its answer.
+    pub deciding: bool,
 }
 
 /// One look at the world for the machine: the discovery file (bounded read), the agent lock, the launcher's child with
@@ -233,7 +236,12 @@ pub fn look(
     held: Option<Generation>,
     ask: Ask<'_>,
 ) -> (Look, Option<Discovery>) {
-    let Ask { probe, cpu, lock } = ask;
+    let Ask {
+        probe,
+        cpu,
+        lock,
+        deciding,
+    } = ask;
     let found = Discovery::read(&dirs.discovery());
     let child = held.map(|g| (g, launcher.child()));
     let cpu = if !cpu {
@@ -244,22 +252,42 @@ pub fn look(
             _ => Cpu::Unavailable,
         }
     };
+    let hint = found.as_ref().map(|d| hint_of(d, app_version));
+    let lock = lock.then(|| {
+        if dyno_agent::instance::is_held(dirs) {
+            LockSeen::Held
+        } else {
+            LockSeen::Free
+        }
+    });
     let look = Look {
         seq,
         now_ms: now_ms(),
-        hint: found.as_ref().map(|d| hint_of(d, app_version)),
-        lock: lock.then(|| {
-            if dyno_agent::instance::is_held(dirs) {
-                LockSeen::Held
-            } else {
-                LockSeen::Free
-            }
-        }),
-        service: probe.map(|p| p()),
+        service: ask_service(probe, hint.as_ref(), lock, deciding),
+        hint,
+        lock,
         child,
         cpu,
     };
     (look, found)
+}
+
+/// Whether a look must ask the login service. A discovery file beside a held lock is decided on without it (the machine
+/// connects to that agent, or asks it to exit): the service is asked again right after the connection, for the hand-over.
+/// Everything else is decided on what the service says (wait for its agent, or start one).
+fn service_needed(hint: Option<&HintSeen>, lock: Option<LockSeen>) -> bool {
+    !(hint.is_some() && lock == Some(LockSeen::Held))
+}
+
+/// The service's answer for a look that needs it. The probe can take tens of seconds at login (`SMAppService.status` is an xpc
+/// round trip to smd), so a look that does not need it never waits for it.
+fn ask_service(
+    probe: Option<&ServiceProbe>,
+    hint: Option<&HintSeen>,
+    lock: Option<LockSeen>,
+    deciding: bool,
+) -> Option<super::ServiceState> {
+    probe.filter(|_| !deciding || service_needed(hint, lock)).map(|p| p())
 }
 
 /// Connects to the agent a discovery file names and starts the peer that fans its pushes out to the sink.
@@ -284,4 +312,55 @@ pub fn connect(d: &Discovery, sink: &Arc<dyn Sink>) -> Result<Arc<Peer<Message>>
 /// keeps the process unreaped, so the pid cannot have been handed on, rule 53); the identity is taken from the live process.
 fn cpu_of(pid: u32) -> Cpu {
     ProcessId::of(pid).map_or(Cpu::Unavailable, tree_cpu)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    fn hint(same_build: bool) -> HintSeen {
+        HintSeen {
+            pid: 9,
+            started_ms: 500,
+            version: "1.0.0".into(),
+            protocol: 1,
+            same_build,
+        }
+    }
+
+    /// The VM's login (2026-10-31): `SMAppService.status` blocked the look for about 30 s (`-[SMAppService status]` in the xpc round
+    /// trip to smd) while the agent launchd had started held the lock and its file was there. A file beside a held lock gets a
+    /// connection (or a request to exit) whatever the service says, so that look does not ask the service.
+    #[test]
+    fn a_file_beside_a_held_lock_is_decided_without_the_service() {
+        assert!(!service_needed(Some(&hint(true)), Some(LockSeen::Held)));
+        assert!(!service_needed(Some(&hint(false)), Some(LockSeen::Held)));
+        // Anything else is decided on what the service says: wait for its agent, or start one.
+        assert!(service_needed(None, Some(LockSeen::Held)));
+        assert!(service_needed(Some(&hint(true)), Some(LockSeen::Free)));
+        assert!(service_needed(Some(&hint(true)), None));
+        assert!(service_needed(None, Some(LockSeen::Free)));
+    }
+
+    #[test]
+    fn the_probe_is_not_called_when_the_look_does_not_need_it() {
+        let calls = Arc::new(AtomicU32::new(0));
+        let c = calls.clone();
+        let probe: ServiceProbe = Arc::new(move || {
+            c.fetch_add(1, Ordering::SeqCst);
+            super::super::ServiceState {
+                installed: true,
+                supervises: true,
+            }
+        });
+        assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Free), true).is_some());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Held), true).is_none());
+        assert!(ask_service(None, None, Some(LockSeen::Free), true).is_none(), "no probe, no answer");
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "the held-lock decision look never called it");
+        // A look that is not the decision (after a connection, a service change, a wait) always gets the service's answer.
+        assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Held), false).is_some());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
 }

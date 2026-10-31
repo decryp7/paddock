@@ -128,6 +128,8 @@ impl Executor {
                 lock: probe_lock,
             } => {
                 let (link, events, held, seen) = (self.link.clone(), self.events.clone(), *lock(&self.held), self.seen.clone());
+                // Read now, on the owner's side: the machine published `Looking` before it issued this look.
+                let deciding = matches!(link.transitions.current().phase, super::machine::Phase::Looking { .. });
                 spawn("dyno-look", move || {
                     let probe = if service { link.probe() } else { None };
                     let (look, found) = ports::look(
@@ -140,6 +142,7 @@ impl Executor {
                             probe: probe.as_ref(),
                             cpu,
                             lock: probe_lock,
+                            deciding,
                         },
                     );
                     *lock(&seen) = found.map(|d| (seq, d));
