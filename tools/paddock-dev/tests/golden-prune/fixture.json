@@ -1,0 +1,19 @@
+{
+  "_comment": "The build folder the prune golden cases run on (sizes in bytes; a file's content is irrelevant, only its length is). A path ending in / is an empty folder; `link` entries are symlinks whose target is relative to the link's folder.",
+  "files": [
+    { "path": "debug/incremental/a", "size": 307200 },
+    { "path": "debug/incremental/sub/b", "size": 102400 },
+    { "path": "debug/incremental.txt", "size": 1024 },
+    { "path": "debug/deps/x", "size": 153600 },
+    { "path": "debug/deps/incremental", "size": 2048 },
+    { "path": "release/incremental/c", "size": 102400 },
+    { "path": "release/deep/er/incremental/d", "size": 10240 },
+    { "path": "dist/bundle/i", "size": 51200 },
+    { "path": "keep.txt", "size": 10240 },
+    { "path": "empty/" }
+  ],
+  "links": [
+    { "path": "debug/link-out", "target": "../../../outside" },
+    { "path": "debug/incremental-link", "target": "../../../outside" }
+  ]
+}
