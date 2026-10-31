@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeChart, FakeECharts } from './fake-chart';
 import { all, at, buttonByText, byText, manualFrames, must, one, press, text, typeInto } from './dom';
 import { installTestKit } from './setup';
@@ -79,6 +79,40 @@ describe('installTestKit', () => {
       expect(sessionStorage.getItem('pd-leftover')).toBeNull();
     });
   });
+
+  // Regression (CI runs 7257, 7274 and 7276): a spy on the faked setTimeout keeps the fake as its original, and Vitest
+  // restores it at every restoreAllMocks, even after mockRestore. Once the clock was uninstalled that wrote back a fake
+  // whose timers never fire, so every later spec in the worker that waited on a real timer (the panel snapshot's "too
+  // slow" case, the notify reference app's repairs) hung until the 5 s test timeout.
+  describe('a spy on a faked timer', () => {
+    const realSetTimeout = globalThis.setTimeout;
+    it('is left behind with the fake clock', () => {
+      vi.useFakeTimers();
+      vi.spyOn(globalThis, 'setTimeout');
+      expect(vi.isFakeTimers()).toBe(true);
+    });
+    it('is gone, and the real setTimeout fires, before the next test starts', async () => {
+      expect(globalThis.setTimeout).toBe(realSetTimeout);
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    });
+  });
+
+  describe('a spy on a faked timer outliving a spec’s own switch to real timers', () => {
+    const realSetTimeout = globalThis.setTimeout;
+    const fake = { left: false };
+    // As in a spec whose afterEach calls vi.useRealTimers(): it runs before the kit's, so the kit finds the spy over a dead clock.
+    afterEach(() => vi.useRealTimers());
+    it.fails('fails the test that left it, even when the spec restored its spy', () => {
+      vi.useFakeTimers();
+      vi.spyOn(globalThis, 'setTimeout').mockRestore();
+      fake.left = true;
+    });
+    it('finds the real setTimeout put back for the next test', async () => {
+      expect(fake.left).toBe(true);
+      expect(globalThis.setTimeout).toBe(realSetTimeout);
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    });
+  });
 });
 
 describe('DOM helpers', () => {
@@ -124,7 +158,9 @@ describe('DOM helpers', () => {
   });
 
   describe('manualFrames', () => {
-    const frames = manualFrames();
+    // Installed per test: the kit puts the real timer globals back before every test.
+    let frames: ReturnType<typeof manualFrames>;
+    beforeEach(() => (frames = manualFrames()));
     afterEach(() => frames.restore());
     it('runs requested frames only when flushed, and forgets cancelled ones', () => {
       const ran: number[] = [];

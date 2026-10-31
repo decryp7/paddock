@@ -49,6 +49,7 @@ import { DIALOG_LOOKUP, type DialogContent, type DialogRef } from './types';
         [state]="state()"
         [failure]="failure()"
         [content]="content()"
+        [contentView]="contentView()"
         [declaredWidth]="def?.width ?? 0"
         (answered)="answer($event.value)"
         (dismissed)="dismiss()"
@@ -88,6 +89,7 @@ export class DialogShell implements AfterViewInit {
   protected readonly state = signal<FrameState>('loading');
   protected readonly failure = signal<string | null>(null);
   protected readonly content = signal<DialogContent | null>(null);
+  protected readonly contentView = signal<{ detectChanges(): void } | null>(null);
   protected readonly denied = inject(DeniedCommands).last;
 
   /** What the content injects as `DIALOG_REF`: answering or dismissing closes this window. */
@@ -135,6 +137,7 @@ export class DialogShell implements AfterViewInit {
       const input = isRecord(start.input) ? start.input : {};
       const injector = contentInjector(part.injector, this.ref, input);
       const ref = mountContent(host, part.component, injector, part.injector, input);
+      this.contentView.set(ref.changeDetectorRef);
       this.content.set(ref.instance as DialogContent);
       this.contentInjector_ = injector;
       this.state.set('ready');
