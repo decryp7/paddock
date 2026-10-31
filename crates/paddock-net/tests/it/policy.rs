@@ -1171,3 +1171,62 @@ fn check_host_when_offline_resolves_nothing() {
     ));
     assert!(r.lookup.asked().is_empty());
 }
+
+#[test]
+fn check_host_with_public_deny_leaves_this_computer_and_private_networks() {
+    use paddock_net::{Class, PublicAccess, Refusal};
+    let r = rig(Policy::default().reach(Reach::Loopback), FakeWire::new());
+    let with = |h: &str, lan, public| r.egress.check_host_with(h, 5900, lan, public);
+    // Policy is exactly check_host.
+    for h in [
+        "api.example.org",
+        "nas.local",
+        "localhost",
+        "meta.example.org",
+        "rebind.example.org",
+    ] {
+        assert_eq!(
+            with(h, LanAccess::Policy, PublicAccess::Policy).map_err(|e| e.to_string()),
+            r.egress
+                .check_host(h, 5900, LanAccess::Policy)
+                .map_err(|e| e.to_string()),
+            "{h}"
+        );
+    }
+    assert_eq!(PublicAccess::default(), PublicAccess::Policy);
+    // Deny keeps loopback and private addresses.
+    assert!(with("localhost", LanAccess::Policy, PublicAccess::Deny).is_ok());
+    assert!(with("nas.local", LanAccess::Policy, PublicAccess::Deny).is_ok());
+    assert!(with("192.168.1.20", LanAccess::Policy, PublicAccess::Deny).is_ok());
+    // ... and refuses a public address, alone or among private ones, and still honours the other limits.
+    for h in [
+        "api.example.org",
+        "cdn.example.org",
+        "mixed.local",
+        "93.184.216.34",
+    ] {
+        let err = with(h, LanAccess::Policy, PublicAccess::Deny).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                NetError::Refused {
+                    why: Refusal::TooFar(Class::Public),
+                    ..
+                }
+            ),
+            "{h}: {err:?}"
+        );
+        assert!(err.to_string().contains("public address"), "{err}");
+    }
+    assert!(with("nas.local", LanAccess::Deny, PublicAccess::Deny).is_err());
+    assert!(with("meta.example.org", LanAccess::Policy, PublicAccess::Deny).is_err());
+    // Offline still comes first and resolves nothing.
+    let off = rig(Policy::default().reach(Reach::Loopback), FakeWire::new());
+    off.egress.set_offline(true);
+    assert!(matches!(
+        off.egress
+            .check_host_with("localhost", 5900, LanAccess::Policy, PublicAccess::Deny),
+        Err(NetError::Offline)
+    ));
+    assert!(off.lookup.asked().is_empty());
+}
