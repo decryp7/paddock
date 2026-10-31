@@ -158,7 +158,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
         <div class="wg-split">
           <div class="wg-metric"><span class="wg-k" pdSkeleton>CPU</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.cpu ?? '00' }}<small>%</small></span><span class="wg-spark" pdSkeleton>@if (x) { <pd-sparkline [values]="cpuSeries" [height]="24" [area]="true" [min]="0" [max]="100" label="CPU, last minute" /> }</span></div>
           <span class="wg-div"></span>
-          <div class="wg-metric"><span class="wg-k" pdSkeleton>{{ x?.cpu?.memText ?? 'Memory xxxxxxxxxxx' }}</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.mem ?? '00' }}<small>%</small></span><span class="wg-spark" pdSkeleton>@if (x) { <pd-sparkline [values]="memSeries" [height]="24" [area]="true" [min]="0" [max]="100" label="Memory, last minute" /> }</span></div>
+          <div class="wg-metric"><span class="wg-k" pdSkeleton>{{ x?.cpu?.memText ?? 'Memory xxxxxxxxxxx' }}</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.mem ?? '00' }}<small>%</small></span><span class="wg-spark wg-spark--mem" pdSkeleton>@if (x) { <pd-sparkline [values]="memSeries" [height]="24" [area]="true" [min]="0" [max]="100" label="Memory, last minute" /> }</span></div>
         </div>
       </ng-template>
       <ng-template pdWidget="net" [pdWidgetOf]="witness" let-x>
@@ -229,7 +229,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
           <div slot="footer" class="wg-foot">
             <button type="button" class="gal-btn gal-btn--primary">Open Dyno</button>
             <button matIconButton type="button" class="wg-more" aria-label="More actions" [matMenuTriggerFor]="footMenu"><pd-glyph name="more" [size]="16" /></button>
-            <mat-menu #footMenu="matMenu">
+            <mat-menu #footMenu="matMenu" xPosition="before" yPosition="above">
               <button mat-menu-item type="button" (click)="acted.set('customize')">Customize widgets…</button>
               <button mat-menu-item type="button" (click)="acted.set('settings')">Settings…</button>
               <button mat-menu-item type="button" (click)="acted.set('quit')">Quit Dyno</button>
@@ -260,8 +260,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
     .wg-cell--half { width: 159px; }
     .wg-name-head { font-weight: var(--pd-weight-semibold); }
     .wg-pill { margin-inline-start: auto; }
-    .wg-foot { display: flex; align-items: center; gap: var(--pd-space-1); width: 100%; }
-    .wg-more { margin-inline-start: auto; }
+    .wg-foot { display: flex; align-items: center; justify-content: flex-end; gap: var(--pd-space-1); width: 100%; }
     .wg-popup { width: 440px; padding: 24px 0; display: flex; justify-content: center; background: var(--pd-surface-1); }
     .wg-chooser { padding: var(--pd-space-4); background: var(--pd-surface-1); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); }
     .wg-rows { display: grid; gap: 2px; margin: 0 calc(-1 * var(--pd-space-2)); }
@@ -288,6 +287,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
     .wg-k { font-size: var(--pd-text-label); color: var(--pd-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .wg-hero { font-size: var(--pd-text-title); line-height: 24px; font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; white-space: nowrap; justify-self: start; }
     .wg-hero small { font-size: var(--pd-text-body); font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); margin-left: 2px; }
+    .wg-spark--mem pd-sparkline { color: var(--pd-info); }
     .wg-spark { display: block; height: 24px; margin-top: 4px; border-bottom: 1px solid var(--pd-chart-grid); }
     .wg-line { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); justify-self: start; }
     .wg-strong { font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); }

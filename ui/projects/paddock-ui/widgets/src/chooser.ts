@@ -157,8 +157,8 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
                     @if (!pr.builtin) {
                       @if (confirming() === pr.id) {
                         <span class="pd-wc-ask">Delete this preset?</span>
-                        <button matButton="outlined" type="button" class="pd-wc-danger" [attr.data-preset-confirm]="pr.id" [attr.aria-label]="'Delete the ' + pr.name + ' preset'" (click)="deletePreset(pr)">Delete</button>
-                        <button matButton="text" type="button" (click)="cancelDelete(pr)">Cancel</button>
+                        <button matButton="outlined" type="button" class="pd-wc-danger" [attr.data-preset-confirm]="pr.id" [attr.aria-label]="'Delete the ' + pr.name + ' preset'" (keydown.escape)="cancelDelete(pr)" (click)="deletePreset(pr)">Delete</button>
+                        <button matButton="text" type="button" (keydown.escape)="cancelDelete(pr)" (click)="cancelDelete(pr)">Cancel</button>
                       } @else {
                         <button matIconButton type="button" [attr.data-preset-delete]="pr.id" [attr.aria-label]="'Delete the ' + pr.name + ' preset'" (click)="askDelete(pr)"><pd-glyph name="trash" [size]="16" /></button>
                       }
@@ -228,7 +228,9 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     .pd-wc-limit { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0 0 var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-info-tint); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
     .pd-wc-limit pd-status-glyph { color: var(--pd-info); }
     .pd-wc-list + .pd-wc-label, .pd-wc-hint + .pd-wc-label { margin-top: var(--pd-space-6); }
-    .pd-wc-save mat-form-field { --mat-form-field-container-height: var(--pd-control-height); --mat-form-field-container-vertical-padding: var(--pd-space-1); --mat-form-field-outlined-label-text-populated-size: var(--pd-text-label); }
+    .pd-wc-save mat-form-field { --mat-form-field-container-height: var(--pd-control-height); --mat-form-field-container-vertical-padding: var(--pd-space-1); --mat-form-field-container-text-size: var(--pd-text-body); --mat-form-field-outlined-label-text-populated-size: var(--pd-text-label); }
+    .pd-wc-save input { font-size: var(--pd-text-body); }
+    .pd-wc-save button { height: var(--pd-control-height); }
     .pd-wc-foot button { --mat-button-text-label-text-color: var(--pd-accent); }
     .pd-wc-save { display: flex; align-items: flex-start; gap: var(--pd-space-2); margin: var(--pd-space-2) 0; }
     .pd-wc-save mat-form-field { flex: 1; min-width: 0; }
@@ -321,6 +323,14 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
           this.pendingUndo = null;
           this.showUndo(text);
         }
+      });
+    });
+    effect(() => {
+      // A refused edit changed nothing: it has no toast to open and no move to announce.
+      if (this.error() === null) return;
+      untracked(() => {
+        this.pendingUndo = null;
+        this.pendingMove = null;
       });
     });
     inject(DestroyRef).onDestroy(() => this.toast?.dismiss());
@@ -423,7 +433,8 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   protected moveBy(p: Placement<W>, i: number, move: Move, n: number, keepFocus = false): void {
     const to = move === 'up' ? i - 1 : move === 'down' ? i + 1 : move === 'top' ? 0 : n - 1;
     if (to < 0 || to >= n || to === i) {
-      void this.announcer.announce(`${this.titleOf(p)} is already ${i === 0 ? 'first' : 'last'}.`);
+      const where = n === 1 ? 'the only widget' : move === 'up' || move === 'top' ? 'already first' : 'already last';
+      void this.announcer.announce(`${this.titleOf(p)} is ${where}.`);
       return;
     }
     this.moveTo(p, to, keepFocus);
