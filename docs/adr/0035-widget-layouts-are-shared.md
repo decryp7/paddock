@@ -214,7 +214,7 @@ CDK (rule 47):
 - **`<pd-widget-frame>`**: no border inside the bordered popover; one token step instead (`--pd-surface-2` on
   `--pd-surface-3`), radius 10, padding 8 / 12. In high-contrast mode (`data-contrast="more"`, the OS setting) the
   frame gets a 1 px `--pd-border-strong` outline, checked by WP-B's token test. The head: 14 px icon, 12/500 muted title, an optional right-aligned meta
-  ("3 volumes"; stale: a clock icon and the one stale wording, relative "Updated 4 min ago", or "Paused at 14:28" for a
+  ("3 volumes"; stale: a clock icon and the one stale wording, relative "Updated 4 min ago", or "As of 14:28" for a
   live kind whose source stopped; in a half-width frame the meta shortens to the clock and the time, with the full
   wording in its tooltip and accessible name). The body, by state:
   - *Loading*: the ready template rendered with no value and its parts marked `pdSkeleton` drawn as
@@ -283,7 +283,7 @@ talks to the agent; the app's Rust side relays.
   open and on the agent's change events. It emits `dyno://popover-values` to the popup **only while the popover is
   visible** (paddock-window reports it). When the agent connection is lost it synthesises the surface notice "Agent
   stopped · Readings paused at 14:28" with Restart agent, and marks every placement's last value `stale_since` (the
-  frame says "Paused at 14:28" for live kinds and "Updated 2 min ago" for the others). Restart
+  frame says "As of 14:28" for live kinds and "Updated 2 min ago" for the others). Restart
   agent goes to the app's own supervisor, never through the agent.
 - **Value builders are one pure module** (`dyno-core/src/widgets/popover_values.rs`): `fn state(kind, inputs) ->
   WidgetState<…>` for every kind, used by the app (live kinds) and the agent (slow kinds); severity, thresholds

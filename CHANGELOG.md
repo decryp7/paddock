@@ -62,6 +62,9 @@ Conventional Commits; one semver tag for the whole repo.
 - The popup's footer matches Dyno's: "Open Pitwall" right-aligned beside a ⋯ menu (Customize widgets…, Pause or Resume serving, Release memory, Settings…, then Quit Pitwall). It replaces the two banners and the three buttons: apps waiting to pair is the popup's notice, model updates are the Updates widget. "Customize widgets…" opens Settings at the new Tray popup page through the shared dialog re-targeting.
 - Adopting from Dyno's widgets line (no change of its own): `sendDialogInputs` / `followDialogInputs` and the Settings window's `anchor` input in `@decryp7/paddock-ui/shell/dialogs` and `.../shell/settings/window`, as in `dyno/widgets-c2`.
 
+### `@decryp7/paddock-ui/widgets`: a stale live widget says "As of 14:30", not "Paused at 14:30"
+- The frame's stale label for a live kind is "As of <time>" (half width: the time alone). "Paused" read like a paused server or service when the whole feed was lost. Apps asserting the old wording update their specs.
+
 ### Pitwall: Offline mode is removed
 - Offline mode is removed; settings saved with it still load. The Settings > Network switch, the "Offline mode" mark on the dashboard and the offline messages are gone, and `pitwall status` no longer prints "(offline mode)". Pitwall's other network behaviour is unchanged: it reaches only Hugging Face and GitHub, only for what you ask for (and the model update check you turn on), and model serving stays local.
 - `pitwall pull`, search and file lists no longer report "server not running" (exit 3) when the network is down: they exit 4 with a message naming the host that could not be reached.

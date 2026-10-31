@@ -31,7 +31,7 @@ choose what it shows (family ADR 0035), and the popup should answer one question
   draw while the server is down. `PopupState` (app) holds the layout and the facts, saves an edit before it takes effect and
   publishes `pitwall://popover` (layout, values, header) only when the snapshot changed.
 - **What the feed does not carry** (downloads, recent events, update notices) is read once after each connect, and the notices again
-  on a model-update event. A failed read leaves the widget saying "not checked yet".
+  on a model-update event. A failed read is logged with its cause and leaves the widget saying "not checked yet" (never "no downloads" or "no errors").
 - **The UI only draws.** Templates per kind (`widget-set.ts`) and the status pill map the engine's enums to words and icons; the
   mock serves the engine's recorded output for the scenarios `demo`, `empty`, `worst`, `down`, `paused` and `connecting`
   (`popover-fixtures.json`, written and checked by the `widgets::build` tests), so it cannot drift.
@@ -51,6 +51,6 @@ per change, not per tick.
 
 - A new widget is a new variant, a `KindSpec`, a builder arm and a template; the chooser, the preview, the limits and the undo come
   from the shared crate and package.
-- The popup no longer has a live feed of its own: it draws what the app pushes (the tray window's backend calls are the five
-  commands and one event listed in `tray-window.ts`).
+- The popup no longer has a live feed of its own: it draws what the app pushes (the tray window's backend calls are the seven
+  commands and one event listed in `tray-window.ts`, plus `quit_from_tray` through the window control: eight commands in all).
 - Pairing and model-update banners are gone as such: a pairing is the popup's notice, updates are the Updates widget.

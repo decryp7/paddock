@@ -22,7 +22,7 @@
           "detail": "Connecting to the server.",
           "next": null,
           "state": "empty",
-          "title": "See what is in memory"
+          "title": "See which models are loaded"
         },
         "memory": {
           "calm": false,
@@ -203,7 +203,7 @@
           "value": {
             "kind": "activity",
             "running": 1,
-            "tokensPerSec": 0,
+            "tokensPerSec": 38,
             "waiting": 0
           }
         },
@@ -297,9 +297,7 @@
           "staleSince": 1800000000000,
           "state": "ready",
           "value": {
-            "engine": {
-              "kind": "ready"
-            },
+            "engine": null,
             "kind": "server",
             "port": 11435,
             "state": "unreachable"
@@ -329,7 +327,7 @@
             "page": "dashboard",
             "type": "openPage"
           },
-          "label": "Open Pitwall"
+          "label": "Repair server"
         },
         "detail": "Showing the last readings. Pitwall keeps trying.",
         "title": "The server is not responding",
@@ -373,7 +371,7 @@
             "label": "Open Models"
           },
           "state": "empty",
-          "title": "See what is in memory"
+          "title": "See which models are loaded"
         },
         "memory": {
           "asOf": 1800000000000,

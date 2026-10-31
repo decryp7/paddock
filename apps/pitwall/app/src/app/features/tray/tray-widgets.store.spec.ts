@@ -85,4 +85,27 @@ describe('the tray widgets store', () => {
     expect(store.header()!.serving).toBe('resume');
     expect(store.error()).toBeNull();
   });
+
+  it('a push that arrives while the first read runs is not overwritten by the older answer', async () => {
+    const backend = new MockBackend();
+    const { store } = setup(backend);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const read = backend.popoverValues.bind(backend);
+    vi.spyOn(backend, 'popoverValues').mockImplementation(async () => {
+      const older = await read();
+      await gate;
+      return older;
+    });
+    store.start();
+    await flush(2);
+    await backend.setServing(true); // pushes the paused header and values while the read waits
+    await flush(2);
+    expect(store.header()!.status).toEqual({ kind: 'paused' });
+    release();
+    await flush();
+    expect(store.header()!.status, 'the older read did not undo the push').toEqual({ kind: 'paused' });
+    expect(store.shape().length).toBe(7);
+    expect(store.view()).not.toBeNull();
+  });
 });

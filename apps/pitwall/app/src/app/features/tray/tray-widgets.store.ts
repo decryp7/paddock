@@ -33,12 +33,17 @@ export const TrayWidgetsStore = signalStore(
   withMethods((store) => {
     const backend = inject(BACKEND);
     let started = false;
+    /** How many pushes arrived: a read that began before a push must not overwrite it with older data. */
+    let pushes = 0;
 
     const load = async (): Promise<void> => {
       patchState(store, { loading: true });
+      const seen = pushes;
       try {
         const [view, values, shape, header] = await Promise.all([backend.popoverView(), backend.popoverValues(), backend.popoverShape(), backend.popoverHeader()]);
-        patchState(store, { view, values, shape, header, error: null, loading: false });
+        // A push that came while the read ran is newer than what the read answered: keep it, take only the shape (which a push lacks).
+        if (pushes !== seen) patchState(store, { shape, error: null, loading: false });
+        else patchState(store, { view, values, shape, header, error: null, loading: false });
       } catch (e) {
         patchState(store, { loading: false, error: toCommandError(e) });
       }
@@ -51,14 +56,19 @@ export const TrayWidgetsStore = signalStore(
         if (started) return;
         started = true;
         void load();
-        backend.onPopover((push) => patchState(store, { view: push.view, values: push.values, header: push.header, error: null }));
+        backend.onPopover((push) => {
+          pushes++;
+          patchState(store, { view: push.view, values: push.values, header: push.header, error: null });
+        });
       },
       /** Sends one edit to the app; the answer is the new layout. Returns whether it was accepted. */
       async edit(edit: PopoverEdit): Promise<boolean> {
         try {
           patchState(store, { view: await backend.editPopover(edit), error: null });
           // The values follow the layout; the push also brings them, this keeps the preview right without waiting for it.
-          patchState(store, { values: await backend.popoverValues() });
+          const seen = pushes;
+          const values = await backend.popoverValues();
+          if (pushes === seen) patchState(store, { values });
           return true;
         } catch (e) {
           patchState(store, { error: toCommandError(e) });

@@ -198,7 +198,7 @@ describe('pd-widget-frame', () => {
     expect(q(f, '.body')!.textContent).toBe('182 GB');
   });
 
-  it('says "Updated 4 min ago" when stale, "Paused at" for a live kind, and the clock with the full wording in the name at half width', async () => {
+  it('says "Updated 4 min ago" when stale, "As of" for a live kind, and the clock with the full wording in the name at half width', async () => {
     const f = await setup();
     const fifty = Date.UTC(2020, 0, 1, 14, 28);
     const fx = f.componentInstance;
@@ -216,11 +216,11 @@ describe('pd-widget-frame', () => {
     fx.state.set(ready('x', fifty));
     await settle(f);
     const text = q(f, '.pd-w-meta--stale')!.getAttribute('aria-label')!;
-    expect(text).toMatch(/^Paused at \d\d:\d\d$/);
-    expect(q(f, '.pd-w-meta--stale')!.textContent!.trim()).toBe(text.replace('Paused at ', ''));
+    expect(text).toMatch(/^As of \d\d:\d\d$/);
+    expect(q(f, '.pd-w-meta--stale')!.textContent!.trim()).toBe(text.replace('As of ', ''));
     fx.span.set(2);
     await settle(f);
-    expect(q(f, '.pd-w-meta--stale')!.textContent).toContain('Paused at');
+    expect(q(f, '.pd-w-meta--stale')!.textContent).toContain('As of');
   });
 
   it('draws an empty state with the benefit, the detail and the next step, which emits the app action', async () => {

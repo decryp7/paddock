@@ -5,6 +5,7 @@ import { PdSkeleton, PdWidget } from '@decryp7/paddock-ui/widgets';
 import type {
   EngineHealth,
   MemoryLevel,
+  MeterTone,
   ModelRowState,
   PopoverValue,
   PopoverWidget,
@@ -23,7 +24,7 @@ const SERVER: Record<ServerState, { icon: string; word: string }> = {
   serving: { icon: 'pw:success', word: 'Serving' },
   paused: { icon: 'pw:pause', word: 'Paused' },
   stopped: { icon: 'pw:stop', word: 'Stopped' },
-  unreachable: { icon: 'pw:error', word: 'Not running' },
+  unreachable: { icon: 'pw:error', word: 'Not responding' },
 };
 
 const MODEL: Record<ModelRowState, { icon: string; word: string }> = {
@@ -70,14 +71,14 @@ const PRESSURE: Record<MemoryLevel, string | null> = { normal: null, elevated: '
       <div class="meters">
         <div class="mrow">
           <span class="k" pdSkeleton>RAM</span>
-          <span class="v" pdSkeleton>{{ v ? size(v.used) + ' of ' + size(v.total, 0) : '9.4 GB of 32 GB' }}</span>
+          <span class="v" pdSkeleton>{{ v ? size(v.used) + ' of ' + size(v.total, 0) : '9.4 GB of 32 GB' }}@if (v && fill(v.tone); as w) { <span class="fill" [attr.data-tone]="v.tone">· {{ w }}</span> }</span>
           <span class="meter" [attr.data-tone]="v?.tone ?? 'neutral'" pdSkeleton><span [style.width.%]="v?.percent ?? 30"></span></span>
         </div>
         <div class="mrow">
           <span class="k" pdSkeleton>VRAM</span>
           @let g = v?.vram;
           @if (!v || g) {
-            <span class="v" pdSkeleton>{{ g ? size(g.used) + ' of ' + size(g.total, 0) : '7.0 GB of 12 GB' }}</span>
+            <span class="v" pdSkeleton>{{ g ? size(g.used) + ' of ' + size(g.total, 0) : '7.0 GB of 12 GB' }}@if (g && fill(g.tone); as w) { <span class="fill" [attr.data-tone]="g.tone">· {{ w }}</span> }</span>
             <span class="meter" [attr.data-tone]="g?.tone ?? 'neutral'" pdSkeleton><span [style.width.%]="g?.percent ?? 50"></span></span>
           } @else {
             <span class="v muted">No separate video memory</span>
@@ -99,6 +100,9 @@ const PRESSURE: Record<MemoryLevel, string | null> = { normal: null, elevated: '
           </li>
         }
       </ul>
+      @if (v && v.more > 0) {
+        <p class="more">+{{ v.more }} more</p>
+      }
     </ng-template>
 
     <ng-template pdWidget="downloads" [pdWidgetOf]="downloadsValue" let-v>
@@ -296,6 +300,14 @@ const PRESSURE: Record<MemoryLevel, string | null> = { normal: null, elevated: '
       font-weight: var(--pd-weight-regular);
       font-size: var(--pd-text-caption);
     }
+    .fill {
+      font-weight: var(--pd-weight-regular);
+      font-size: var(--pd-text-caption);
+      color: var(--pd-text-muted);
+    }
+    .fill[data-tone='bad'] {
+      color: var(--pd-danger);
+    }
     .meter {
       display: block;
       height: 6px;
@@ -338,7 +350,7 @@ export class WidgetSet {
     if (v.kind === 'memory') return PRESSURE[v.pressure];
     if (v.kind === 'loadedModels') return `${this.count(v.total, 'model')} · ${bytes(v.bytes)}`;
     if (v.kind === 'recentErrors') return `${v.rows.length + v.more} in the last day`;
-    if (v.kind === 'downloads') return `${v.rows.length + v.more} not running`;
+    if (v.kind === 'downloads') return `${v.rows.length + v.more} paused or failed`;
     return null;
   };
 
@@ -372,6 +384,11 @@ export class WidgetSet {
     return MODEL[s];
   }
 
+  /** The word that goes with an amber or red meter: a meter never says it by colour alone. */
+  protected fill(tone: MeterTone): string | null {
+    return tone === 'bad' ? 'nearly full' : tone === 'warn' ? 'getting full' : null;
+  }
+
   protected count(n: number, noun: string): string {
     return `${int(n)} ${noun}${n === 1 ? '' : 's'}`;
   }
@@ -382,7 +399,7 @@ export class WidgetSet {
   }
 
   protected engineText(e: EngineHealth | null | undefined): string {
-    if (!e) return 'Engines unknown';
+    if (!e) return 'Engines not reported';
     switch (e.kind) {
       case 'ready':
         return 'Engines ready';

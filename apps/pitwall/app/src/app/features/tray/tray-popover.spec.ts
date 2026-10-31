@@ -83,13 +83,15 @@ describe('the tray popup', () => {
     expect(widget('Memory').textContent).toContain('Memory is critical');
     expect(widget('Loaded models').querySelectorAll('.row').length).toBe(2);
     expect(widget('Loaded models').textContent).toContain('5 models · 34.0 GB');
+    expect(widget('Loaded models').textContent).toContain('+3 more');
+    expect(widget('Memory').textContent, 'a red meter has a word').toContain('nearly full');
     expect(widget('Recent errors').querySelectorAll('.row').length).toBe(2);
     expect(widget('Recent errors').textContent).toContain('3 in the last day');
   });
 
   it('with nothing loaded says what a person gains and offers Open Models; errors and downloads are calm', async () => {
     const { widget, backend } = await mount({}, await withErrors({ popover: 'empty' }));
-    expect(widget('Loaded models').textContent).toContain('See what is in memory');
+    expect(widget('Loaded models').textContent).toContain('See which models are loaded');
     expect(widget('Loaded models').textContent).toContain('No model is loaded.');
     const calm = widget('Recent errors').querySelector('button.pd-w-calm')!;
     expect(calm.getAttribute('aria-label')).toBe('No errors, In the last day. Open Requests');
@@ -98,10 +100,12 @@ describe('the tray popup', () => {
 
   it('with the server down says so once above the widgets and in the pill, and marks the readings stale', async () => {
     const { el, widget } = await mount({ popover: 'down' });
-    expect(pill(el)).toBe('Not running');
+    expect(pill(el)).toBe('Not responding');
     expect(el.textContent).toContain('The server is not responding');
-    expect(widget('Server').textContent).toContain('Not running');
-    expect(widget('Memory').textContent).toMatch(/Paused at|Updated/);
+    expect(widget('Server').textContent).toContain('Not responding');
+    expect(widget('Server').textContent, 'no stale engine health').not.toContain('Engines ready');
+    expect(Array.from(el.querySelectorAll('button')).filter((b) => b.textContent!.includes('Open Pitwall')).length, 'one Open Pitwall button').toBe(1);
+    expect(widget('Memory').textContent).toMatch(/As of|Updated/);
   });
 
   it('shows the paused status and offers Resume serving once serving is paused', async () => {

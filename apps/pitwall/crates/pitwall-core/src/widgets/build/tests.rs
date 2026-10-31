@@ -120,7 +120,7 @@ fn loaded_models_list_the_busy_one_first_then_the_most_recent_and_cap_at_two_row
 fn no_loaded_model_is_an_empty_state_that_opens_models() {
     let f = connected("serving", vec![]);
     let (title, detail, next, calm) = empty_of(state(PopoverWidget::LoadedModels, &f, NOW));
-    assert_eq!((title.as_str(), detail.as_str(), calm), ("See what is in memory", "No model is loaded.", false));
+    assert_eq!((title.as_str(), detail.as_str(), calm), ("See which models are loaded", "No model is loaded.", false));
     assert_eq!(next, Some(WidgetActionId::OpenPage { page: Page::Models }));
 }
 
@@ -225,6 +225,9 @@ fn the_engines_own_install_download_counts_when_the_feed_has_not_listed_it() {
 #[test]
 fn no_running_download_lists_failed_then_paused_ones_or_is_calm() {
     let mut f = connected("serving", vec![]);
+    let (title, detail, _, calm) = empty_of(state(PopoverWidget::Downloads, &f, NOW));
+    assert_eq!((title.as_str(), detail.as_str(), calm), ("See downloads as they run", "Not checked yet.", false), "unread is not calm");
+    f.set_downloads(&[], NOW);
     let (title, _, next, calm) = empty_of(state(PopoverWidget::Downloads, &f, NOW));
     assert_eq!((title.as_str(), calm), ("No downloads running", true));
     assert_eq!(next, Some(WidgetActionId::OpenPage { page: Page::Models }));
@@ -247,6 +250,7 @@ fn no_running_download_lists_failed_then_paused_ones_or_is_calm() {
 #[test]
 fn a_finished_or_cancelled_download_leaves_the_facts() {
     let mut f = connected("serving", vec![]);
+    f.set_downloads(&[], NOW);
     f.apply(&LiveUpdate::Download { download: download("d1", "A", "downloading", MB, 10 * MB, MB) }, NOW);
     assert!(matches!(state(PopoverWidget::Downloads, &f, NOW), WidgetState::Working { .. }));
     f.apply(&LiveUpdate::Download { download: download("d1", "A", "done", 10 * MB, 10 * MB, 0) }, NOW);
@@ -308,8 +312,10 @@ fn recent_errors_cover_exactly_the_last_day_newest_first_and_cap_at_two_rows() {
 }
 
 #[test]
-fn no_error_in_the_last_day_is_calm() {
+fn no_error_in_the_last_day_is_calm_only_once_the_events_were_read() {
     let mut f = connected("serving", vec![]);
+    let (title, detail, _, calm) = empty_of(state(PopoverWidget::RecentErrors, &f, NOW));
+    assert_eq!((title.as_str(), detail.as_str(), calm), ("See what failed", "Not checked yet.", false));
     f.seed_events(&[event(1, "error", NOW - 25 * HOUR, "Old.")], NOW);
     let (title, detail, next, calm) = empty_of(state(PopoverWidget::RecentErrors, &f, NOW));
     assert_eq!((title.as_str(), detail.as_str(), calm), ("No errors", "In the last day", true));
@@ -349,7 +355,7 @@ fn a_lost_feed_keeps_the_last_readings_but_marks_them_stale_from_the_moment_it_f
     match state(PopoverWidget::Server, &f, NOW + 10 * MIN) {
         WidgetState::Ready { value, stale_since, .. } => {
             assert_eq!(stale_since, Some(NOW + 5 * MIN), "the first failure, not the latest retry");
-            assert!(matches!(value, PopoverValue::Server { state: ServerState::Unreachable, port: 11435, .. }));
+            assert!(matches!(value, PopoverValue::Server { state: ServerState::Unreachable, port: 11435, engine: None }), "no stale engine health");
         }
         other => panic!("{other:?}"),
     }
@@ -397,7 +403,7 @@ fn activity_shows_the_queue_and_rounds_the_speed_and_is_zero_while_paused() {
     paused.throughput.gen_tps = 50.0;
     assert_eq!(tps(&paused).2, 0, "a paused server shows no speed");
     f.set_disconnected(NOW);
-    assert_eq!(tps(&f).2, 0, "no speed from a lost feed");
+    assert_eq!(tps(&f), (2, 3, 50), "a lost feed keeps its last readings together; the frame marks them stale");
 }
 
 // ---- the facts take every pushed update ----
@@ -472,7 +478,7 @@ fn before_the_first_snapshot_widgets_say_connecting_and_after_a_failure_not_runn
     f.set_disconnected(NOW);
     let (_, detail, next, _) = empty_of(state(PopoverWidget::Memory, &f, NOW));
     assert_eq!(detail, "The server is not running.");
-    assert_eq!(next, Some(WidgetActionId::OpenPage { page: Page::Dashboard }));
+    assert_eq!(next, None, "the one button is the notice's");
     assert!(matches!(
         value_of(state(PopoverWidget::Server, &f, NOW)),
         PopoverValue::Server { state: ServerState::Unreachable, port: 0, engine: None }
@@ -553,6 +559,8 @@ fn scenario(name: &str) -> Facts {
     match name {
         "empty" => {
             let mut f = connected("serving", vec![]);
+            f.set_downloads(&[], NOW);
+            f.seed_events(&[], NOW);
             f.set_updates(UpdatesFact { count: 0, summary: None, last_checked_ms: Some(NOW - 2 * HOUR) }, NOW);
             f
         }

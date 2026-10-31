@@ -69,15 +69,47 @@ pub struct PopupState {
     inner: Mutex<Inner>,
 }
 
-/// Reads a layout file; anything unusable gives the defaults (the shared crate reads a damaged layout leniently).
+/// One line in the app's log (stderr, as `live.rs` and `tray.rs` write theirs), with its cause; never user content. Every call
+/// site goes through here so the move to `paddock-log` is one change.
+fn note(what: &str, cause: impl std::fmt::Display) {
+    eprintln!("Pitwall: popup: {what}: {cause}");
+}
+
+/// Reads a layout file; anything unusable gives the defaults (the shared crate reads a damaged layout leniently), and says why.
 fn load_layout(dir: &std::path::Path) -> Stored<PopoverCatalogue> {
     let path = dir.join(FILE_NAME);
-    std::fs::metadata(&path)
-        .ok()
-        .filter(|m| m.len() <= MAX_BYTES)
-        .and_then(|_| std::fs::read_to_string(&path).ok())
-        .and_then(|t| serde_json::from_str::<Stored<PopoverCatalogue>>(&t).ok())
-        .unwrap_or_default()
+    let len = match std::fs::metadata(&path) {
+        Ok(m) => m.len(),
+        // No file yet: a fresh install, nothing to say.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Stored::default(),
+        Err(e) => {
+            note("the layout file could not be inspected, the defaults are shown", format!("{}: {e}", path.display()));
+            return Stored::default();
+        }
+    };
+    if len > MAX_BYTES {
+        note("the layout file is over the size limit, the defaults are shown", format!("{len} bytes, at most {MAX_BYTES}"));
+        return Stored::default();
+    }
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) => {
+            note("the layout file could not be read, the defaults are shown", format!("{}: {e}", path.display()));
+            return Stored::default();
+        }
+    };
+    match serde_json::from_str::<Stored<PopoverCatalogue>>(&text) {
+        Ok(stored) => {
+            for n in stored.notes() {
+                note("the layout file was read with a note", &n.message);
+            }
+            stored
+        }
+        Err(e) => {
+            note("the layout file is not JSON, the defaults are shown", e);
+            Stored::default()
+        }
+    }
 }
 
 /// Writes the layout atomically (a temporary file, then a rename).
@@ -147,7 +179,10 @@ impl PopupState {
         let mut next = g.layout.clone();
         next.edit(edit).map_err(|e: WidgetError| EditError::Refused(e.to_string()))?;
         if let Some(dir) = &self.dir {
-            save_layout(dir, &next).map_err(EditError::NotSaved)?;
+            save_layout(dir, &next).map_err(|e| {
+                note("the layout could not be saved, the edit is refused", &e);
+                EditError::NotSaved(e)
+            })?;
         }
         g.layout = next;
         Ok(paddock_widgets::view(&g.layout))
@@ -183,39 +218,54 @@ pub type SharedPopup = Arc<PopupState>;
 pub fn publish<R: Runtime>(app: &AppHandle<R>) {
     let Some(popup) = app.try_state::<SharedPopup>() else { return };
     if let Some(push) = popup.changed(now_ms()) {
-        let _ = app.emit(EVENT, push);
+        if let Err(e) = app.emit(EVENT, push) {
+            note("the popup update could not be sent to the windows", e);
+        }
     }
 }
 
-/// Reads what the live feed does not carry (downloads, recent events, model update notices) and publishes. Failures leave
-/// the facts as they were: the widgets say "not checked yet" rather than guess.
+/// Reads what the live feed does not carry (downloads, recent events, model update notices) and publishes. A failed read is
+/// logged with its cause and leaves its facts unread: the widgets say "not checked yet" rather than claim "nothing".
 pub async fn refresh_extras<R: Runtime>(app: AppHandle<R>, client: SharedClient) {
     let Some(popup) = app.try_state::<SharedPopup>().map(|p| p.inner().clone()) else { return };
-    if let Ok(v) = commands::forward(client.as_ref(), "downloads", serde_json::Value::Null).await {
-        if let Ok(list) = serde_json::from_value::<Vec<Download>>(v) {
-            popup.with_facts(|f| f.set_downloads(&list, now_ms()));
-        }
-    }
-    if let Ok(v) = commands::forward(client.as_ref(), "events", serde_json::json!({ "limit": EVENTS_READ })).await {
-        if let Ok(list) = serde_json::from_value::<Vec<PitwallEvent>>(v) {
-            popup.with_facts(|f| f.seed_events(&list, now_ms()));
-        }
-    }
-    refresh_updates(&popup, client.as_ref()).await;
+    read_extras(&popup, client.as_ref()).await;
     publish(&app);
+}
+
+/// The reads of [`refresh_extras`], without the window.
+pub async fn read_extras(popup: &PopupState, client: &dyn crate::server_client::ServerClient) {
+    if let Some(list) = read::<Vec<Download>>(client, "downloads", serde_json::Value::Null).await {
+        popup.with_facts(|f| f.set_downloads(&list, now_ms()));
+    }
+    if let Some(list) = read::<Vec<PitwallEvent>>(client, "events", serde_json::json!({ "limit": EVENTS_READ })).await {
+        popup.with_facts(|f| f.seed_events(&list, now_ms()));
+    }
+    refresh_updates(popup, client).await;
+}
+
+/// One read: the answer parsed as `T`, or nothing after a log line naming the method and the cause.
+async fn read<T: serde::de::DeserializeOwned>(client: &dyn crate::server_client::ServerClient, method: &str, args: serde_json::Value) -> Option<T> {
+    let value = match commands::forward(client, method, args).await {
+        Ok(v) => v,
+        Err(e) => {
+            note(&format!("reading {method} failed"), format!("{:?}: {}", e.code, e.message));
+            return None;
+        }
+    };
+    match serde_json::from_value::<T>(value) {
+        Ok(t) => Some(t),
+        Err(e) => {
+            note(&format!("the answer to {method} could not be understood"), e);
+            None
+        }
+    }
 }
 
 /// Reads the model update notices and the check's state.
 pub async fn refresh_updates(popup: &PopupState, client: &dyn crate::server_client::ServerClient) {
-    let notices = commands::forward(client, "update_notices", serde_json::Value::Null).await;
-    let status = commands::forward(client, "update_check_status", serde_json::Value::Null).await;
-    let (Ok(notices), Ok(status)) = (notices, status) else { return };
-    let (Ok(notices), Ok(status)) = (
-        serde_json::from_value::<Vec<UpdateNotice>>(notices),
-        serde_json::from_value::<UpdateCheckStatus>(status),
-    ) else {
-        return;
-    };
+    let notices = read::<Vec<UpdateNotice>>(client, "update_notices", serde_json::Value::Null).await;
+    let status = read::<UpdateCheckStatus>(client, "update_check_status", serde_json::Value::Null).await;
+    let (Some(notices), Some(status)) = (notices, status) else { return };
     let fact = UpdatesFact {
         count: u32::try_from(notices.len()).unwrap_or(u32::MAX),
         summary: notices.first().map(|n| n.summary.clone()),
@@ -272,7 +322,9 @@ pub async fn popover_shape(state: tauri::State<'_, SharedPopup>) -> Out<Vec<Load
 pub async fn edit_popover<R: Runtime>(app: AppHandle<R>, state: tauri::State<'_, SharedPopup>, edit: Edit<PopoverWidget>) -> Out<PopoverView> {
     let view = state.edit(edit)?;
     if let Some(push) = state.changed(now_ms()) {
-        let _ = app.emit(EVENT, push);
+        if let Err(e) = app.emit(EVENT, push) {
+            note("the layout change could not be sent to the windows", e);
+        }
     }
     Ok(view)
 }

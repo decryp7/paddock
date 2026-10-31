@@ -53,6 +53,10 @@ pub struct Facts {
     pub(crate) downloads: BTreeMap<String, Download>,
     /// Error events, newest first.
     pub(crate) errors: Vec<ErrorFact>,
+    /// The downloads were read (after a connect): without it "no downloads" is not known.
+    pub(crate) downloads_read: bool,
+    /// The recent events were read: without it "no errors" is not known.
+    pub(crate) events_read: bool,
     pub(crate) pairings: u32,
     pub(crate) updates: Option<UpdatesFact>,
     /// When any fact last changed: the time the widgets were read at.
@@ -141,6 +145,7 @@ impl Facts {
         for d in downloads {
             self.set_download(d.clone());
         }
+        self.downloads_read = true;
         self.changed_ms = now_ms;
     }
 
@@ -158,6 +163,7 @@ impl Facts {
         for e in events {
             self.add_event(e);
         }
+        self.events_read = true;
         self.changed_ms = now_ms;
     }
 

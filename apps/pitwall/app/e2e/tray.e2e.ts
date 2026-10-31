@@ -49,21 +49,33 @@ test.describe('the tray popup', () => {
 
   // The loading twin is the ready widget: same rows (the engine's shape), so the popup does not jump when the values arrive.
   test('each widget is as tall while loading as when ready (the engine says how many rows)', async ({ page }) => {
-    const heights = async (scenario: 'worst' | 'loading') => {
+    const heights = async (scenario: 'demo' | 'loading') => {
       const popup = await openTray(page, scenario);
       await expect(popup.locator('section.pd-w')).toHaveCount(4);
       return popup.locator('section.pd-w').evaluateAll((s) => s.map((e) => [e.querySelector('.pd-w-title')?.textContent?.trim(), Math.round(e.getBoundingClientRect().height)]));
     };
-    const ready = await heights('worst');
+    // Compared with the demo, where Loaded models has no "+N more" line (that line exists only when there is more to say).
+    const ready = await heights('demo');
     const loading = await heights('loading');
-    // Server, Activity, Memory and Loaded models (2 rows) fill their rows in the worst state.
+    // Server, Activity, Memory and Loaded models (2 rows) fill their rows in the demo state.
     expect(loading).toEqual(ready);
+  });
+
+  test('an action that failed adds a row in the worst state and the popup box stays within 520 px', async ({ page }) => {
+    await page.setViewportSize(VIEWPORT);
+    await openApp(page, '/tray', 'mock-fast&mock-static&mock-popup=worst&mock-fail=setServing');
+    const popup = page.locator('pd-tray-popover');
+    await expect(popup.locator('section.pd-w').first()).toBeVisible();
+    await popup.getByRole('button', { name: 'More actions' }).click();
+    await page.getByRole('menuitem', { name: 'Resume serving' }).click();
+    await expect(popup.locator('p.error')).toBeVisible();
+    expect(Math.floor((await popup.boundingBox())!.height)).toBeLessThanOrEqual(520);
   });
 
   test('says the server is down once, above the widgets, and marks the last readings', async ({ page }) => {
     const popup = await openTray(page, 'down');
     await expect(popup.getByText('The server is not responding')).toHaveCount(1);
-    await expect(popup.locator('pw-status-pill')).toContainText('Not running');
+    await expect(popup.locator('pw-status-pill')).toContainText('Not responding');
     await expect(popup.getByRole('region', { name: 'Memory' })).toBeVisible();
   });
 

@@ -158,13 +158,14 @@ fn server(f: &Facts) -> PopoverState {
     let value = PopoverValue::Server {
         state,
         port: known.map_or(0, |s| s.port),
-        engine: known.map(|_| engine_health(f)),
+        // Only a feed that answers says how the engines are; a stale "ready" beside "not running" would be a lie.
+        engine: known.filter(|_| f.connected()).map(|_| engine_health(f)),
     };
     ready(value, f)
 }
 
 fn activity(f: &Facts) -> PopoverState {
-    let tokens_per_sec = if f.serving_off() || !f.connected() {
+    let tokens_per_sec = if f.serving_off() {
         0
     } else {
         let t = f.throughput.gen_tps.round();
@@ -222,7 +223,7 @@ fn memory(f: &Facts) -> PopoverState {
 
 fn loaded_models(f: &Facts) -> PopoverState {
     if f.models.is_empty() {
-        return empty("See what is in memory", "No model is loaded.", open(Page::Models, "Open Models"));
+        return empty("See which models are loaded", "No model is loaded.", open(Page::Models, "Open Models"));
     }
     let mut ordered: Vec<&crate::mgmt::LoadedModel> = f.models.iter().collect();
     // Busy first, then the most recently used; the id keeps equal models in a fixed order.
@@ -341,6 +342,9 @@ fn downloads(f: &Facts) -> PopoverState {
         .collect();
     // Failed ones first, then by name.
     rest.sort_by(|a, b| (a.state != DownloadState::Failed).cmp(&(b.state != DownloadState::Failed)).then(a.name.cmp(&b.name)));
+    if rest.is_empty() && !f.downloads_read {
+        return empty("See downloads as they run", "Not checked yet.", open(Page::Models, "Open Models"));
+    }
     if rest.is_empty() {
         return calm("No downloads running", "Nothing to wait for", open(Page::Models, "Open Models"));
     }
@@ -386,6 +390,9 @@ fn updates(f: &Facts, now_ms: i64) -> PopoverState {
 
 fn recent_errors(f: &Facts, now_ms: i64) -> PopoverState {
     let recent: Vec<_> = f.errors.iter().filter(|e| now_ms - e.at_ms <= ERROR_WINDOW_MS).collect();
+    if recent.is_empty() && !f.events_read {
+        return empty("See what failed", "Not checked yet.", open(Page::Requests, "Open Requests"));
+    }
     if recent.is_empty() {
         return calm("No errors", "In the last day", open(Page::Requests, "Open Requests"));
     }
@@ -414,13 +421,13 @@ fn unknown(kind: PopoverWidget, f: &Facts) -> PopoverState {
         PopoverWidget::Server => "See whether the server is serving",
         PopoverWidget::Activity => "See what the server is doing",
         PopoverWidget::Memory => "See memory in use",
-        PopoverWidget::LoadedModels => "See what is in memory",
+        PopoverWidget::LoadedModels => "See which models are loaded",
         PopoverWidget::Downloads => "See downloads as they run",
         PopoverWidget::Updates => "Know when models have updates",
         PopoverWidget::RecentErrors => "See what failed",
     };
     if f.failed() {
-        empty(title, "The server is not running.", open(Page::Dashboard, "Open Pitwall"))
+        empty(title, "The server is not running.", None)
     } else {
         empty(title, "Connecting to the server.", None)
     }
@@ -454,7 +461,7 @@ fn notice(f: &Facts) -> Option<SurfaceNotice<WidgetActionId>> {
             tone: Tone::Danger,
             title: title.into(),
             detail: detail.into(),
-            action: open(Page::Dashboard, "Open Pitwall"),
+            action: open(Page::Dashboard, "Repair server"),
         });
     }
     if f.pairings > 0 {

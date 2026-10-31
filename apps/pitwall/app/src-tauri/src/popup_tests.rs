@@ -224,4 +224,42 @@ mod reads {
         refresh_updates(&p, &server).await;
         assert!(matches!(updates_state(&p), WidgetState::Empty { calm: false, .. }), "a failed read does not guess");
     }
+
+    fn state_of(p: &PopupState, id: &str) -> PopoverState {
+        p.values(NOW).placements.into_iter().find(|x| x.id.as_str() == id).unwrap().state
+    }
+
+    fn with_downloads_and_errors() -> PopupState {
+        let p = PopupState::load(None);
+        seed(&p, &overview());
+        p.edit(Edit::Add { widget: PopoverWidget::Downloads, span: None, at: None }).unwrap();
+        p.edit(Edit::Add { widget: PopoverWidget::RecentErrors, span: None, at: None }).unwrap();
+        p
+    }
+
+    #[tokio::test]
+    async fn failed_reads_of_downloads_and_events_never_become_a_calm_nothing() {
+        let p = with_downloads_and_errors();
+        let server = FakeServer::new();
+        server.reply("downloads", Reply::Err(crate::server_client::unavailable()));
+        server.reply("events", Reply::Ok(json!("not a list")));
+        read_extras(&p, &server).await;
+        for id in ["downloads", "recent-errors"] {
+            let WidgetState::Empty { calm, detail, .. } = state_of(&p, id) else { panic!("{id} is empty") };
+            assert!(!calm, "{id}: a failed read is not 'all good'");
+            assert_eq!(detail, "Not checked yet.", "{id}");
+        }
+    }
+
+    #[tokio::test]
+    async fn successful_reads_make_nothing_to_report_calm() {
+        let p = with_downloads_and_errors();
+        let server = FakeServer::new();
+        server.reply("downloads", Reply::Ok(json!([])));
+        server.reply("events", Reply::Ok(json!([])));
+        read_extras(&p, &server).await;
+        for id in ["downloads", "recent-errors"] {
+            assert!(matches!(state_of(&p, id), WidgetState::Empty { calm: true, .. }), "{id}");
+        }
+    }
 }

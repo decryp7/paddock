@@ -168,7 +168,7 @@ export class PdWidgetFrame<V = unknown, A = unknown> {
     if (s?.state !== 'ready') return null;
     if (s.staleSince !== null) {
       const ago = relativeAgo(this.now() ?? Date.now(), s.staleSince);
-      const full = this.live() ? `Paused at ${clock(s.staleSince)}` : `Updated ${ago}`;
+      const full = this.live() ? `As of ${clock(s.staleSince)}` : `Updated ${ago}`;
       const short = this.live() ? clock(s.staleSince) : ago.replace(/ ago$/, '');
       return { text: this.span() === 1 ? short : full, full, stale: true };
     }

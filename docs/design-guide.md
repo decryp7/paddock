@@ -276,7 +276,7 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   2 equal columns of 159 px, 8 px gap, the popover's 16 px inset); a widget spans 1 (half) or 2 (full). A frame has no border
   inside the bordered popover, one token step instead (`--pd-surface-2` on `--pd-surface-3`), radius 10, padding 8 / 12. In high
   contrast it is outlined in `--pd-border-strong`. The head is a 14 px icon, a 12/500 muted title and an optional right-aligned
-  meta ("3 volumes"); a stale reading shows a clock and "Updated 4 min ago" ("Paused at 14:28" only for a live kind; at half
+  meta ("3 volumes"); a stale reading shows a clock and "Updated 4 min ago" ("As of 14:28" only for a live kind; at half
   width the clock and the short time, with the full wording in the tooltip and the accessible name). The body, by state:
   - **Loading**: the ready template with no value; its parts marked `pdSkeleton` are `--pd-skeleton-raised` blocks with the
     `--pd-skeleton-raised-shine` shimmer (static in reduced motion), so the loading height is the ready height.

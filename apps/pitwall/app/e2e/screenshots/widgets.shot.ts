@@ -7,7 +7,7 @@ import { dialogWindowUrl } from '../../../../../ui/projects/paddock-e2e/src/inde
  * default popup in its calm, empty and worst states, the chooser narrow, and the chooser wide with the live preview. Only on
  * request: `SHOTS_OUT=<folder> npx playwright test -c e2e/screenshots/playwright.config.ts widgets`.
  */
-const OUT = process.env['SHOTS_OUT'] ?? '/Volumes/d7sst7/dev-targets/review/pitwall-widgets-r1';
+const OUT = process.env['SHOTS_OUT'] ?? '/Volumes/d7sst7/dev-targets/review/pitwall-widgets-r2/new';
 const NOW = new Date('2026-10-22T14:30:00').getTime();
 
 async function prepare(page: Page, theme: 'dark' | 'light') {
@@ -50,12 +50,18 @@ for (const theme of ['light', 'dark'] as const) {
       await popup.getByRole('button', { name: 'More actions' }).click();
       await expect(page.getByRole('menuitem', { name: 'Quit Pitwall' })).toBeVisible();
       await page.waitForTimeout(400);
-      await page.screenshot({ path: `${OUT}/tray-popup-menu-${theme}.png` });
+      // Only the popup and its menu, not the empty page around them.
+      const [a, b] = await Promise.all([popup.boundingBox(), page.locator('.mat-mdc-menu-panel').boundingBox()]);
+      const x = Math.max(0, Math.min(a!.x, b!.x) - 8);
+      const y = Math.max(0, Math.min(a!.y, b!.y) - 8);
+      const right = Math.max(a!.x + a!.width, b!.x + b!.width) + 8;
+      const bottom = Math.max(a!.y + a!.height, b!.y + b!.height) + 8;
+      await page.screenshot({ path: `${OUT}/tray-popup-menu-${theme}.png`, clip: { x, y, width: right - x, height: bottom - y } });
     });
 
     test('chooser in Settings', async ({ page }) => {
       await prepare(page, theme);
-      await page.setViewportSize({ width: 880, height: 700 });
+      await page.setViewportSize({ width: 880, height: 1800 });
       await page.goto(dialogWindowUrl('pd.settings', { page: 'pw.tray' }, { title: 'Settings', query: '?mock-static&mock-fast' }));
       await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
       await expect(page.locator('pd-widget-chooser')).toBeVisible();
@@ -69,7 +75,7 @@ for (const theme of ['light', 'dark'] as const) {
     // Wide enough for the live preview beside the list (the chooser draws it from an 880 px container, so about 1300 px of window).
     test('chooser with the live preview', async ({ page }) => {
       await prepare(page, theme);
-      await page.setViewportSize({ width: 1700, height: 860 });
+      await page.setViewportSize({ width: 1700, height: 1250 });
       await page.goto(dialogWindowUrl('pd.settings', { page: 'pw.tray' }, { title: 'Settings', query: '?mock-static&mock-fast' }));
       await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
       await expect(page.locator('pd-widget-chooser')).toBeVisible();
