@@ -1092,7 +1092,9 @@ pub(crate) mod test_support {
             .unwrap();
         assert!(out.status.success(), "{out:?}");
         let text = String::from_utf8_lossy(&out.stdout);
-        let dir = text.split_once("ENDPOINT ").map(|(_, d)| PathBuf::from(d.lines().next().unwrap().trim()));
+        let dir = text
+            .split_once("ENDPOINT ")
+            .map(|(_, d)| PathBuf::from(d.lines().next().unwrap().trim()));
         let dir = dir.expect("the probe printed its endpoint folder");
         assert!(!dir.exists(), "left behind: {dir:?}");
     }

@@ -1065,3 +1065,8 @@ whatever the helper is called; a fix in a canonical implementation goes to every
 same change, or the copy is waived with a `Copies-waived:` trailer (a register note is not a waiver). Real-browser tests take
 turns in a nextest `real-browser` group (max-threads 1) in every workspace that runs them, with a CI budget waiver longer
 than the spin patience.
+**Endpoint folders leak a third way (CI 7278):** a test process that ends normally while a plugin still starts leaves
+`debrief-plugin-<hex>` behind, because the exit clean-up of the test helpers removed their own folders but not the live
+endpoints. Each fix so far armed one more path (lifeline exit, SIGTERM, now normal exit); the class ends when
+`debrief_ipc` registers its own `atexit` removal when the first endpoint is made, so every binary has it, not only those
+that arm the helpers.

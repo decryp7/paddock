@@ -839,6 +839,7 @@ mod tests {
     #[test]
     fn a_refused_endpoint_is_retried_and_named_when_the_start_is_given_up() {
         let d = tempfile::tempdir().unwrap();
+        // conformance: freed-port — refusal is the case under test; if the port were taken, the endpoint would answer and the assert fails
         let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         std::fs::write(d.path().join("DevToolsActivePort"), format!("{closed}\n/devtools/browser/x\n")).unwrap();
         let mut process = idle_child();
