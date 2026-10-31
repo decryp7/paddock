@@ -15,6 +15,12 @@
 //! - Installing happens when the app exits ([`Updater::install_at_exit`]) through an [`Installer`] (the adapter's is
 //!   `tauri-plugin-updater`, which verifies again), after [`ServiceHooks::before_install`]; at the first start of a new
 //!   version [`Updater::on_start`] runs [`ServiceHooks::on_version_change`] once (re-register, repair).
+//! - Every build says how it installs: `UpdatesBuilder::installer(..)` (the `PluginInstaller` of feature `install`) or
+//!   `UpdatesBuilder::no_install()` for one that only notifies; `tauri::install` refuses a builder with neither
+//!   (`InstallError::InstallerUndeclared`), so an update that is downloaded and can never be installed cannot ship (conformance
+//!   check C59 is the static half). [`UpdateStatus::can_install`] tells the Updates dialog: a build that cannot install offers
+//!   no Download, "Restart to update" or "Install when the app quits", and [`Updater::prepare_restart`] and
+//!   [`Updater::install_on_quit`] refuse at the request.
 //! - [`About`]: the running version, build facts, legal documents served on request, and What's New for the running
 //!   version only ([`notes`]: never another release's notes).
 //!

@@ -1053,3 +1053,12 @@ date. **Rule (55, ADR 0034):** every mechanism that exists more than once is lis
 the canonical implementation and every copy in the same change (a freeze does not stop it) or a copy is waived with a reason;
 each copy has an owner and a tag by which it is deleted, and that tag is refused while the copy exists. Before fixing a bug in
 any service, IPC, driver or UI helper, look it up in the register first.
+
+## Pitcrew 1.1 could download an update it could never install (2026-10-31, family)
+Pitcrew 1.1 built the shared `UpdatesBuilder` with a public key but no `.installer(..)`. The update checked and downloaded; then
+"Restart to update" failed with "this build has no installer", and "Install when the app quits" recorded a failed install the user
+saw at the next start. A second app had the same wiring, and Dyno, Pitwall and Spotter had wired it by hand. The builder allowed
+the state and nothing but a reviewer's memory prevented it. **Rule (ER-21, no new number):** a shared builder makes the wiring
+choice explicit and refuses the unchosen one at the app's start, independent of the CI's secrets (`tauri::install` returns
+`InstallerUndeclared` unless `.installer(..)` or `.no_install()` was called), the status says what the build can do
+(`canInstall`) so the UI offers only that, and a conformance check (C59) covers every app.

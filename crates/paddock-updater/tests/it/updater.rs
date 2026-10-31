@@ -900,17 +900,24 @@ fn services_that_cannot_be_stopped_stop_the_install() {
 }
 
 #[test]
-fn without_an_installer_restart_is_refused_and_install_on_quit_fails_at_exit() {
+fn without_an_installer_no_install_action_can_be_started_and_the_status_says_so() {
     let r = ready_rig(None, None);
-    assert!(matches!(
-        r.updater.prepare_restart(),
-        Err(UpdateError::InstallFailed { .. })
-    ));
-    r.updater.install_on_quit(true).unwrap();
-    assert_eq!(
-        r.updater.install_at_exit(),
-        ExitAction::Failed { relaunch: false }
-    );
+    assert!(!r.updater.can_install() && !r.updater.status().can_install);
+    // Refused at the request, not found out at the next start.
+    for refused in [
+        r.updater.prepare_restart().map(|_| ()),
+        r.updater.install_on_quit(true).map(|_| ()),
+    ] {
+        assert!(
+            matches!(refused, Err(UpdateError::InstallFailed { ref detail }) if detail.contains("no installer"))
+        );
+    }
+    // Switching it off is not an install.
+    assert!(r.updater.install_on_quit(false).is_ok());
+    assert_eq!(r.updater.install_at_exit(), ExitAction::Nothing);
+    assert!(matches!(r.phase(), UpdatePhase::Ready { .. }));
+    let with = ready_rig(Some(Arc::new(FakeInstaller::default())), None);
+    assert!(with.updater.can_install() && with.updater.status().can_install);
     // A verified download deleted meanwhile is reported, not installed.
     let installer = Arc::new(FakeInstaller::default());
     let r = ready_rig(Some(installer.clone()), None);

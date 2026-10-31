@@ -97,6 +97,7 @@ const CHANGELOG: &str = "# Changelog\n\n## Unreleased\n\n### Added\n- later\n\n#
 
 fn builder(dir: &Path) -> UpdatesBuilder {
     UpdatesBuilder::new("Demo")
+        .no_install()
         .dirs(dir.join("config"), dir.join("cache"))
         .downloader(downloader())
         .background(false)
@@ -353,12 +354,15 @@ fn cancel_preferences_and_restart_go_through_the_commands() {
         invoke(&w, "updates_cancel", json!({})).unwrap()["phase"]["kind"],
         "available"
     );
-    // Without an installer Restart is refused with a next step.
+    // A build that declared `no_install` says so, and Restart and Install-on-quit are refused with a next step.
     invoke(&w, "updates_download", json!({})).unwrap();
-    wait_for(&rx, "ready");
+    let ready = wait_for(&rx, "ready");
+    assert_eq!(ready["canInstall"], false);
     let e = invoke(&w, "updates_restart", json!({})).unwrap_err();
     assert_eq!(e["kind"], "installFailed");
     assert!(e["nextStep"].as_str().unwrap().contains("releases page"));
+    let e = invoke(&w, "updates_install_on_quit", json!({ "enabled": true })).unwrap_err();
+    assert_eq!(e["kind"], "installFailed");
     let prefs = |channel: &str| json!({ "preferences": { "autoCheck": true, "channel": channel } });
     assert_eq!(
         invoke(&w, "updates_set_preferences", prefs("beta")).unwrap_err()["kind"],
@@ -427,11 +431,13 @@ fn defaults_come_from_the_app_and_a_bad_legal_id_is_refused() {
     // No downloader given and none managed: a new HTTPS one (nothing is contacted).
     let dir = tempfile::tempdir().unwrap();
     let plain = UpdatesBuilder::new("Demo")
+        .no_install()
         .background(false)
         .dirs(dir.path().join("c"), dir.path().join("d"));
     assert!(install(first.handle(), plain).is_ok());
     let second = app(None);
     let bad = UpdatesBuilder::new("Demo")
+        .no_install()
         .background(false)
         .dirs(dir.path().join("c2"), dir.path().join("d2"))
         .legal("Bad Id", "x", "y");
@@ -449,6 +455,7 @@ fn defaults_come_from_the_app_and_a_bad_legal_id_is_refused() {
     let third = app(None);
     let shared = paddock_download::tauri::manage(third.handle(), Downloader::new(Arc::new(Server)));
     let b = UpdatesBuilder::new("Demo")
+        .no_install()
         .background(true)
         .dirs(dir.path().join("c3"), dir.path().join("d3"));
     let updates = install(third.handle(), b).unwrap();
@@ -580,5 +587,77 @@ impl Installer for FailingInstaller {
         Err(UpdateError::InstallFailed {
             detail: "read-only volume".into(),
         })
+    }
+}
+
+#[test]
+fn a_builder_that_does_not_say_how_it_installs_is_refused_with_or_without_a_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let bare = |n: &str| {
+        UpdatesBuilder::new("Demo")
+            .background(false)
+            .dirs(
+                dir.path().join(format!("c{n}")),
+                dir.path().join(format!("d{n}")),
+            )
+            .downloader(downloader())
+    };
+    for (n, b) in [
+        ("1", bare("1")),
+        (
+            "2",
+            bare("2")
+                .channel("stable", "Stable", MANIFEST)
+                .public_key(Some(&fixture("key.pub"))),
+        ),
+    ] {
+        let app = app(None);
+        assert_eq!(
+            install(app.handle(), b).err(),
+            Some(InstallError::InstallerUndeclared),
+            "{n}"
+        );
+        assert!(
+            app.try_state::<Arc<Updates>>().is_none(),
+            "nothing is managed"
+        );
+    }
+    assert!(
+        InstallError::InstallerUndeclared
+            .to_string()
+            .contains("no_install")
+    );
+    assert!(
+        bare("7")
+            .installer(Arc::new(FakeInstaller::default()))
+            .has_installer()
+    );
+    assert!(!bare("8").no_install().has_installer());
+    // An installer, or the explicit declaration, is enough; the last one said wins.
+    for (n, b, can) in [
+        (
+            "3",
+            bare("3").installer(Arc::new(FakeInstaller::default())),
+            true,
+        ),
+        ("4", bare("4").no_install(), false),
+        (
+            "5",
+            bare("5")
+                .installer(Arc::new(FakeInstaller::default()))
+                .no_install(),
+            false,
+        ),
+        (
+            "6",
+            bare("6")
+                .no_install()
+                .installer(Arc::new(FakeInstaller::default())),
+            true,
+        ),
+    ] {
+        let app = app(None);
+        let updates = install(app.handle(), b).unwrap();
+        assert_eq!(updates.updater.status().can_install, can, "{n}");
     }
 }

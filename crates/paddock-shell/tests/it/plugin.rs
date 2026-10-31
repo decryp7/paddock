@@ -276,6 +276,7 @@ fn updater_app(dir: &Path) -> App<MockRuntime> {
         .native_menu(false)
         .updater(move |_| {
             UpdatesBuilder::new("Shell Demo")
+                .no_install()
                 .channel("stable", "Stable", "https://example.invalid/stable.json")
                 .channel("beta", "Beta", "https://example.invalid/beta.json")
                 .dirs(config, cache)

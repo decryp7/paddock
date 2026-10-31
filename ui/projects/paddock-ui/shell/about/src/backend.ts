@@ -197,11 +197,13 @@ export interface MemoryUpdatesOptions {
   /** The update server's host and releases page the Updates window shows (default: a placeholder host). */
   readonly host?: string;
   readonly releasesPage?: string;
+  /** Whether the build installs what it downloads (default true; false plays a build declared `no_install`). */
+  readonly canInstall?: boolean;
   /** Runs each simulated step of the engine's work (default: the next microtask). */
   readonly schedule?: (step: () => void) => void;
 }
 
-const ERRORS: Readonly<Record<'notAvailable' | 'offline' | 'signatureInvalid' | 'busy', UpdateErrorDto>> = {
+const ERRORS: Readonly<Record<'notAvailable' | 'offline' | 'signatureInvalid' | 'busy' | 'installFailed', UpdateErrorDto>> = {
   notAvailable: {
     kind: 'notAvailable',
     message: 'Updates are not available in this build.',
@@ -216,6 +218,12 @@ const ERRORS: Readonly<Record<'notAvailable' | 'offline' | 'signatureInvalid' | 
     detail: "the update was signed with another key than this app's",
   },
   busy: { kind: 'busy', message: 'Wait for the current step to finish.', nextStep: 'Wait for the current step to finish.', detail: null },
+  installFailed: {
+    kind: 'installFailed',
+    message: 'The update could not be installed.',
+    nextStep: 'Download the new version from the releases page and install it by hand.',
+    detail: 'this build has no installer',
+  },
 };
 
 /**
@@ -244,6 +252,7 @@ export class MemoryUpdatesBackend extends UpdatesBackend {
       channels: [...channels],
       endpointHost: unavailable ? null : (options.host ?? 'updates.example'),
       releasesPage: options.releasesPage ?? 'https://updates.example/releases',
+      canInstall: options.canInstall ?? true,
     };
   }
 
@@ -312,12 +321,14 @@ export class MemoryUpdatesBackend extends UpdatesBackend {
 
   installOnQuit(enabled: boolean): Promise<UpdateStatus> {
     const phase = this.current.phase;
+    if (enabled && !this.current.canInstall) return this.refuse(ERRORS.installFailed);
     if (phase.kind !== 'ready') return this.refuse({ ...ERRORS.busy, message: 'No verified update is ready to install.' });
     return Promise.resolve(this.set({ ...phase, installOnQuit: enabled }));
   }
 
   restart(): Promise<UpdateStatus> {
     const phase = this.current.phase;
+    if (!this.current.canInstall) return this.refuse(ERRORS.installFailed);
     if (phase.kind !== 'ready') return this.refuse({ ...ERRORS.busy, message: 'No verified update is ready to install.' });
     // The app would quit here; the browser build stays on "installing".
     return Promise.resolve(this.set({ kind: 'installing', info: phase.info }));

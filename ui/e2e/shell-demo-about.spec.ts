@@ -114,6 +114,7 @@ const status = (phase: unknown) => ({
   channels: [{ id: 'stable', label: 'Stable' }],
   endpointHost: 'updates.test',
   releasesPage: null,
+  canInstall: true,
 });
 const INFO = { version: '99.0.0', currentVersion: VERSION, notes: 'From the fake server.', pubDate: null, size: 1_000 };
 

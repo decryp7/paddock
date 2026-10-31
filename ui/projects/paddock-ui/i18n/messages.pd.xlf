@@ -2495,6 +2495,9 @@
       <trans-unit id="pd.updates.last-checked" datatype="html">
         <source>Last checked <x id="when"/></source>
       </trans-unit>
+      <trans-unit id="pd.updates.manual" datatype="html">
+        <source>This build does not install updates itself. Download the new version from the releases page.</source>
+      </trans-unit>
       <trans-unit id="pd.updates.no-answer" datatype="html">
         <source>The updater did not answer.</source>
       </trans-unit>

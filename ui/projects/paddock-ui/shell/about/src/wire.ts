@@ -23,7 +23,7 @@ export function parseUpdateStatus(v: unknown): UpdateStatus | null {
   if (!isObject(v) || typeof v['currentVersion'] !== 'string' || !isObject(v['phase'])) return null;
   const kind = v['phase']['kind'];
   if (typeof kind !== 'string' || !PHASES.has(kind as UpdatePhase['kind'])) return null;
-  if (!Array.isArray(v['channels']) || typeof v['channel'] !== 'string' || typeof v['autoCheck'] !== 'boolean') return null;
+  if (!Array.isArray(v['channels']) || typeof v['channel'] !== 'string' || typeof v['autoCheck'] !== 'boolean' || typeof v['canInstall'] !== 'boolean') return null;
   return v as unknown as UpdateStatus;
 }
 

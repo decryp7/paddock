@@ -25,6 +25,14 @@ pub const SIGNATURE_PHASE: &str = "signature";
 pub const CHECK_PHASE: &str = "check";
 /// Longest wait for the release information's body.
 const MANIFEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// Why an install is refused in a build without an [`Installer`].
+const NO_INSTALLER: &str = "this build has no installer";
+fn no_installer() -> UpdateError {
+    UpdateError::InstallFailed {
+        detail: NO_INSTALLER.into(),
+    }
+}
+
 /// How often a blocking request is looked at for a cancel.
 const TICK: Duration = Duration::from_millis(10);
 
@@ -92,6 +100,9 @@ pub struct UpdateStatus {
     /// The host a check contacts (`None` in a build without updates).
     pub endpoint_host: Option<String>,
     pub releases_page: Option<String>,
+    /// Whether this build can install what it downloads (an [`Installer`] is set). The dialog offers Download, "Restart to
+    /// update" and "Install when the app quits" only when it can; a build that only notifies points to the releases page.
+    pub can_install: bool,
 }
 
 /// Installs a verified package. The adapter's is `tauri-plugin-updater` (it verifies the signature again); tests use a fake.
@@ -302,6 +313,11 @@ impl Updater {
         self
     }
 
+    /// Whether this build can install a downloaded update (an [`Installer`] is set).
+    pub fn can_install(&self) -> bool {
+        self.installer.is_some()
+    }
+
     pub fn with_service_hooks(mut self, hooks: Arc<dyn ServiceHooks>) -> Updater {
         self.hooks = Some(hooks);
         self
@@ -356,6 +372,7 @@ impl Updater {
                 .collect(),
             endpoint_host,
             releases_page: self.config.releases_page.clone(),
+            can_install: self.installer.is_some(),
         }
     }
 
@@ -664,6 +681,11 @@ impl Updater {
 
     /// Installs the verified update when the app quits (or not).
     pub fn install_on_quit(&self, enabled: bool) -> Result<UpdateStatus, UpdateError> {
+        if enabled && self.installer.is_none() {
+            // A request out of turn is "busy" before it is "cannot install".
+            self.lock().phase.next(Event::InstallOnQuit(true))?;
+            return Err(no_installer());
+        }
         self.apply(Event::InstallOnQuit(enabled), |inner| {
             inner.on_exit = if enabled {
                 OnExit::Install
@@ -673,13 +695,19 @@ impl Updater {
         })
     }
 
+    /// Refuses an install this build cannot do, at the request and not only at the exit where the user would meet it at the
+    /// next start.
+    fn require_installer(&self) -> Result<(), UpdateError> {
+        if self.installer.is_some() {
+            Ok(())
+        } else {
+            Err(no_installer())
+        }
+    }
+
     /// Marks the verified update for installing with a relaunch; the caller then quits the app (its exit hook installs).
     pub fn prepare_restart(&self) -> Result<UpdateStatus, UpdateError> {
-        if self.installer.is_none() {
-            return Err(UpdateError::InstallFailed {
-                detail: "this build has no installer".into(),
-            });
-        }
+        self.require_installer()?;
         self.apply(Event::Install, |inner| {
             inner.on_exit = OnExit::InstallAndRelaunch
         })
@@ -780,12 +808,7 @@ impl Updater {
         }
         let relaunch = on_exit == OnExit::InstallAndRelaunch;
         let result = (|| {
-            let installer = self
-                .installer
-                .as_ref()
-                .ok_or_else(|| UpdateError::InstallFailed {
-                    detail: "this build has no installer".into(),
-                })?;
+            let installer = self.installer.as_ref().ok_or_else(no_installer)?;
             let (Some(file), Some(manifest)) = (file.filter(|f| f.is_file()), manifest) else {
                 return Err(UpdateError::InstallFailed {
                     detail: "the verified download is no longer there".into(),

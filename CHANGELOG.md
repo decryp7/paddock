@@ -4,6 +4,19 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-updater`: every build says how it installs (breaking: `UpdatesBuilder`, `UpdateStatus`)
+- Pitcrew 1.1 built its `UpdatesBuilder` with a key and no `.installer(..)`: an update downloaded, then "Restart to update"
+  failed with "this build has no installer" and "Install when the app quits" recorded a failed install the user met at the next
+  start. A second app had the same wiring trap, so it is closed as a class (ER-21).
+- `tauri::install` refuses a builder that says neither `UpdatesBuilder::installer(..)` nor the new `UpdatesBuilder::no_install()`
+  (`InstallError::InstallerUndeclared`), at the app's start, with or without a key, so the app's own start test fails.
+  `no_install()` is for a build that only notifies (the unsigned shell demo). Conformance check C59 is the static half: a file of an
+  app's `src-tauri/` that calls `UpdatesBuilder::new(` also calls `.installer(` or `.no_install()`.
+- `UpdateStatus` has `can_install` (TypeScript `canInstall`); `Updater::can_install()`. `Updater::install_on_quit(true)` and
+  `prepare_restart()` refuse without an installer at the request. Shell demo declares `no_install()`.
+### `@decryp7/paddock-ui` (`shell/about`): the Updates dialog follows `canInstall`
+- A build with `canInstall: false` offers no Download, "Restart to update" or "Install when the app quits"; an available update
+  says to download the new version from the releases page. `UpdateStatus.canInstall` is required on the wire.
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.

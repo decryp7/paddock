@@ -832,6 +832,7 @@
     "pd.updates.install-on-quit": "⟦ÎÎñšţááļļ ŵĥééñ ţĥé ááþþ ǫûûîîţš⟧",
     "pd.updates.installing": "⟦ÎÎñšţááļļîîñĝ ṽéŕšîîööñ {$version}…⟧",
     "pd.updates.last-checked": "⟦Ļáášţ çĥééçķééð {$when}⟧",
+    "pd.updates.manual": "⟦Ţĥîîš ƀûûîîļð ðöééš ñööţ îîñšţáļļ ûûþðááţééš îţšééļƒ. Ðööŵñļööáð ţĥéé ñééŵ ṽééŕšîööñ ƒŕööɱ ţĥéé ŕéļééáášééš þáĝéé.⟧",
     "pd.updates.no-answer": "⟦Ţĥéé ûûþðááţéŕ ðîîð ñööţ ááñšŵéŕ.⟧",
     "pd.updates.notes": "⟦Ŕééļééáášé ñööţééš⟧",
     "pd.updates.notice.available": "⟦Ṽééŕšîîööñ {$version} îîš ááṽááîļááƀļéé (ýööû ĥááṽéé {$current}).⟧",

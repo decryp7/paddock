@@ -53,11 +53,11 @@ async function settle(rounds = 6): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
 }
 
-function bed(server: MemoryUpdatesOptions['server'], extra: unknown[] = [], main = false) {
+function bed(server: MemoryUpdatesOptions['server'], extra: unknown[] = [], main = false, canInstall = true) {
   const notices: ShellNotice[] = [];
   const opened: string[] = [];
   const about = new MemoryAboutBackend(INFO, { notices: '# Third-party notices\n\nlong list', mit: 'MIT License' }, NOTES, 'show');
-  const updates = new MemoryUpdatesBackend({ currentVersion: INFO.version, server, release: RELEASE, channels: [{ id: 'stable', label: 'Stable' }, { id: 'beta', label: 'Beta' }] });
+  const updates = new MemoryUpdatesBackend({ currentVersion: INFO.version, server, release: RELEASE, channels: [{ id: 'stable', label: 'Stable' }, { id: 'beta', label: 'Beta' }], canInstall });
   TestBed.configureTestingModule({
     providers: [
       provideZonelessChangeDetection(),
@@ -90,11 +90,12 @@ describe('the wire', () => {
     channels: [],
     endpointHost: null,
     releasesPage: null,
+    canInstall: true,
   };
 
   it('accepts what the engine sends and refuses anything else', () => {
     expect(parseUpdateStatus(status)).toBe(status);
-    for (const bad of [null, [], {}, { ...status, phase: { kind: 'exploded' } }, { ...status, phase: null }, { ...status, channels: 3 }, { ...status, phase: { kind: 1 } }]) {
+    for (const bad of [null, [], {}, { ...status, phase: { kind: 'exploded' } }, { ...status, phase: null }, { ...status, channels: 3 }, { ...status, canInstall: undefined }, { ...status, phase: { kind: 1 } }]) {
       expect(parseUpdateStatus(bad)).toBeNull();
     }
     expect(parseAboutInfo(INFO)).toBe(INFO);
@@ -567,6 +568,25 @@ describe('the dialogs', () => {
     expect(text(o)).toContain('without an update signing key');
     // Nothing to press but the frame's Close.
     expect([...o.querySelectorAll('button')].map((b) => text(b))).toEqual(['Close']);
+  });
+
+  it('Updates of a build that cannot install offers no download, restart or install on quit, and points to the releases page', async () => {
+    const { updates } = bed('release', [], false, false);
+    const fixture = createFramed(PdUpdatesDialog);
+    await settle();
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    button(el, 'Check now').click();
+    await settle();
+    await fixture.whenStable();
+    expect(text(el)).toContain('is available');
+    expect(el.querySelector('[data-testid="updates-manual"]')?.textContent).toContain('releases page');
+    expect([...el.querySelectorAll('button')].map((b) => text(b))).not.toContain('Download');
+    expect(button(el, 'Check again')).toBeTruthy();
+    // The engine refuses the install steps too.
+    await expect(updates.restart()).rejects.toMatchObject({ kind: 'installFailed' });
+    await expect(updates.installOnQuit(true)).rejects.toMatchObject({ kind: 'installFailed' });
+    expect((await updates.installOnQuit(false).catch((e: unknown) => e)) as { kind: string }).toMatchObject({ kind: 'busy' });
   });
 
   it('Updates offers Stop checking while checking and a Retry when the updater does not answer', async () => {

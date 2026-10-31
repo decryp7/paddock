@@ -38,6 +38,9 @@ import { formatBytes } from './format';
           }
           @case ('available') {
             <p>{{ available() }}</p>
+            @if (!store.canInstall()) {
+              <p class="pd-muted" data-testid="updates-manual">{{ t.manual }}</p>
+            }
           }
           @case ('downloading') {
             <p role="status">{{ downloading() }}</p>
@@ -83,7 +86,7 @@ import { formatBytes } from './format';
               <pd-select [options]="channelOptions()" [value]="s.channel" [ariaLabel]="t.channel" (valueChange)="setChannel($event)" />
             </label>
           }
-          @if (s.phase.kind === 'ready') {
+          @if (s.phase.kind === 'ready' && store.canInstall()) {
             <mat-checkbox [checked]="installOnQuit()" (change)="store.installOnQuit($event.checked)">{{ t.installOnQuit }}</mat-checkbox>
           }
         </div>
@@ -112,6 +115,7 @@ export class PdUpdatesDialog implements DialogContent {
     notes: $localize`:@@pd.updates.notes:Release notes`,
     autoCheck: $localize`:@@pd.updates.auto-check:Check for updates automatically`,
     channel: $localize`:@@pd.updates.channel:Channel`,
+    manual: $localize`:@@pd.updates.manual:This build does not install updates itself. Download the new version from the releases page.`,
     installOnQuit: $localize`:@@pd.updates.install-on-quit:Install when the app quits`,
     stopChecking: $localize`:@@pd.updates.stop-checking:Stop checking`,
     stopDownload: $localize`:@@pd.updates.stop-download:Stop download`,
@@ -144,8 +148,11 @@ export class PdUpdatesDialog implements DialogContent {
       case 'downloading':
         return [run('stop', this.t.stopDownload, 'secondary', () => this.store.cancel())];
       case 'ready':
+        // Only a build that can install gets here; one that cannot is not offered the install, whatever the phase.
+        if (!this.store.canInstall()) return [run('discard', this.t.discard, 'secondary', () => this.store.cancel())];
         return [run('discard', this.t.discard, 'secondary', () => this.store.cancel()), run('restart', this.t.restart, 'primary', () => this.store.restart())];
       case 'available':
+        if (!this.store.canInstall()) return [run('check', this.t.checkAgain, 'primary', () => this.store.check())];
         return [run('check', this.t.checkAgain, 'secondary', () => this.store.check()), run('download', this.t.download, 'primary', () => this.store.download())];
       case 'failed':
         return this.store.canDownload() ? [run('download', this.t.tryAgain, 'primary', () => this.store.download())] : [run('check', this.t.checkAgain, 'primary', () => this.store.check())];

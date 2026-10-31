@@ -60,8 +60,11 @@ export const UpdatesStore = signalStore(
         return p?.kind === 'checking' || p?.kind === 'downloading' ? p.job : null;
       }),
       canCheck: computed(() => ['idle', 'upToDate', 'available', 'failed'].includes(phase()?.kind ?? '')),
+      /** Whether this build installs what it downloads; one that only notifies offers no Download, Restart or install on quit. */
+      canInstall: computed(() => status()?.canInstall ?? false),
       canDownload: computed(() => {
         const p = phase();
+        if (!status()?.canInstall) return false;
         return p?.kind === 'available' || (p?.kind === 'failed' && p.info !== null && p.error.kind !== 'signatureInvalid' && p.error.kind !== 'tooLarge');
       }),
     };
