@@ -4,6 +4,24 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-channels`, `paddock-net` and the channels page: a home-network switch and a grouped event picker (additive)
+- `ChannelConfig.allow_lan: bool` (wire `allowLan`, serde default false, so files and engines from before it load unchanged). With it
+  on, validation accepts a private address (`paddock_net::host_may_be_lan`: an IP literal that `classify` calls `Lan`, or a
+  single-label / `.local` / `.lan` / `.home.arpa` / `.internal` / `.localdomain` name) and plain `http://` to it; with it off,
+  such an address is refused (https too) and plain http stays for this computer only. Link-local (169.254/16, fe80::/10) stays
+  unreachable: `paddock-net` classifies it `Never`. `PostRequest` has a new `lan` field; `EgressPoster` sends a `lan` channel
+  with `Request::plain_http_on_lan()` and any other with `Request::without_lan()`, so one egress built with
+  `channel_policy(Reach::Lan)` serves both and only the switched channels reach private networks. Offline mode still blocks
+  every channel.
+- `paddock-net`: `Request::without_lan()`, `Request::plain_http_on_lan()` (opt-in per request; a policy without `Reach::Lan`
+  ignores the second), `host_may_be_lan`, and `Seen::reach` on `FakeWire`. Existing requests behave as before.
+- `@decryp7/paddock-ui/shell/channels`: `ChannelConfig.allowLan` (generated; `parseChannel` reads a missing value as false), the
+  draft's `allowLan`, and on the page a checkbox "This channel is on my home network (allow a private address)" with helper text.
+- `defineChannelsSettingsPage({ events })` takes the app's `ChannelEventDecl[]` (`name`, `group`, `description`; also the
+  `CHANNEL_EVENTS` token, `groupEvents`, `unknownEvents`, `toggleEvent`). The page then lists grouped checkboxes (a fieldset
+  per group, the description as help text); names a channel has that are not declared show under "Other events" as removable
+  chips and are never dropped, and a name can still be typed there. An app that declares no events keeps the free-text field
+  exactly as before. The shell demo declares events and shows both.
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.
