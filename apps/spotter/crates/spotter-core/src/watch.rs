@@ -3,8 +3,6 @@
 use crate::action::Action;
 use crate::filter::VersionFilter;
 use crate::limits::{MAX_ACTIONS, MAX_NAME_CHARS};
-use crate::widgets::PopoverCatalogue;
-use paddock_widgets::Stored;
 use crate::notify::{DigestMode, NotificationChannel, NotificationPolicy, SmtpSettings, MAX_CHANNELS};
 use crate::pattern::{NamePattern, PatternSyntax};
 use crate::release::ReleaseFilter;
@@ -14,6 +12,8 @@ use crate::source::{Source, SourceConfig};
 use crate::time::QuietHours;
 use crate::tracking::Tracking;
 use crate::version::VersionScheme;
+use crate::widgets::PopoverCatalogue;
+use paddock_widgets::Stored;
 use serde::{Deserialize, Serialize};
 
 /// A watch's stable id: 1 to 40 of `a-z`, `0-9`, `-`.

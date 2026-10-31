@@ -14,9 +14,9 @@ pub mod values;
 mod generated;
 
 pub use popover::{PopoverCatalogue, PopoverKind, PopoverWidget};
-pub use values::{PopoverPlacementState, 
-    ChangeRow, FailureKind, FailureRow, NotificationMode, PopoverState, PopoverValue, PopoverValues, SiteRow, SiteState,
-    WidgetActionId,
+pub use values::{
+    ChangeRow, FailureKind, FailureRow, NotificationMode, PopoverPlacementState, PopoverState, PopoverValue, PopoverValues, SiteRow,
+    SiteState, WidgetActionId,
 };
 
 use serde::{Deserialize, Serialize};

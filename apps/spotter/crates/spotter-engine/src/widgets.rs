@@ -93,7 +93,11 @@ fn count(n: usize) -> u32 {
 
 fn watched_sites(i: &Inputs) -> PopoverState {
     if i.watches.is_empty() {
-        return empty("See your watches here", "No watches yet.", act(WidgetActionId::AddWatch, "Add a watch"));
+        return empty(
+            "See your watches here",
+            "No watches yet.",
+            act(WidgetActionId::AddWatch, "Add a watch"),
+        );
     }
     let mut rows: Vec<SiteRow> = i
         .watches
@@ -144,9 +148,17 @@ fn recent_changes(i: &Inputs) -> PopoverState {
         .collect();
     if found.is_empty() {
         return if i.watches.is_empty() {
-            empty("See new releases here", "No watches yet.", act(WidgetActionId::AddWatch, "Add a watch"))
+            empty(
+                "See new releases here",
+                "No watches yet.",
+                act(WidgetActionId::AddWatch, "Add a watch"),
+            )
         } else {
-            empty("See new releases here", "Nothing found yet.", act(WidgetActionId::CheckAll, "Check all now"))
+            empty(
+                "See new releases here",
+                "Nothing found yet.",
+                act(WidgetActionId::CheckAll, "Check all now"),
+            )
         };
     }
     found.sort_by(|a, b| b.first_seen_ms.cmp(&a.first_seen_ms).then_with(|| a.name.cmp(&b.name)));
@@ -194,13 +206,21 @@ fn next_check(i: &Inputs) -> PopoverState {
     }
     match next {
         Some(v) => ready(v, i.now_ms),
-        None if i.watches.is_empty() => empty("See when Spotter looks next", "No watches yet.", act(WidgetActionId::AddWatch, "Add a watch")),
+        None if i.watches.is_empty() => empty(
+            "See when Spotter looks next",
+            "No watches yet.",
+            act(WidgetActionId::AddWatch, "Add a watch"),
+        ),
         None if i.watches.iter().all(|w| w.paused) => empty(
             "See when Spotter looks next",
             "Every watch is paused.",
             act(WidgetActionId::OpenWatches, "Open watches"),
         ),
-        None => empty("See when Spotter looks next", "No check is scheduled yet.", act(WidgetActionId::CheckAll, "Check all now")),
+        None => empty(
+            "See when Spotter looks next",
+            "No check is scheduled yet.",
+            act(WidgetActionId::CheckAll, "Check all now"),
+        ),
     }
 }
 
@@ -238,7 +258,11 @@ fn failures(i: &Inputs) -> PopoverState {
         })
         .collect();
     if rows.is_empty() {
-        return empty("Know when a watch breaks", "No watch is failing.", act(WidgetActionId::OpenWatches, "Open watches"));
+        return empty(
+            "Know when a watch breaks",
+            "No watch is failing.",
+            act(WidgetActionId::OpenWatches, "Open watches"),
+        );
     }
     rows.sort_by(|a, b| b.failures.cmp(&a.failures).then_with(|| a.name.cmp(&b.name)));
     let total = rows.len();
@@ -498,7 +522,10 @@ mod tests {
                 cancel: None,
                 ..
             } => {
-                assert_eq!((phase.as_str(), done, unit.as_str(), id.as_str()), ("Checking watches", 2, "watches", "c"));
+                assert_eq!(
+                    (phase.as_str(), done, unit.as_str(), id.as_str()),
+                    ("Checking watches", 2, "watches", "c")
+                );
             }
             other => panic!("{other:?}"),
         }
@@ -510,9 +537,15 @@ mod tests {
         let mut paused = watch("a");
         paused.paused = true;
         let (_, detail, next) = empty_of(with(&[paused], &s, |i| state(PopoverWidget::NextCheck, i)));
-        assert_eq!((detail.as_str(), next), ("Every watch is paused.", Some(WidgetActionId::OpenWatches)));
+        assert_eq!(
+            (detail.as_str(), next),
+            ("Every watch is paused.", Some(WidgetActionId::OpenWatches))
+        );
         let (_, detail, next) = empty_of(with(&[watch("b")], &s, |i| state(PopoverWidget::NextCheck, i)));
-        assert_eq!((detail.as_str(), next), ("No check is scheduled yet.", Some(WidgetActionId::CheckAll)));
+        assert_eq!(
+            (detail.as_str(), next),
+            ("No check is scheduled yet.", Some(WidgetActionId::CheckAll))
+        );
     }
 
     #[test]
@@ -540,7 +573,10 @@ mod tests {
             now_ms: NOW,
             local: ClockTime::new(23, 30).unwrap(),
         };
-        assert!(matches!(value_of(state(PopoverWidget::QuietHours, &night)), PopoverValue::QuietHours { active: true, .. }));
+        assert!(matches!(
+            value_of(state(PopoverWidget::QuietHours, &night)),
+            PopoverValue::QuietHours { active: true, .. }
+        ));
     }
 
     #[test]
@@ -561,7 +597,10 @@ mod tests {
             panic!("failures")
         };
         assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["w1", "w3", "w0"]);
-        assert_eq!((more, rows[0].kind, rows[0].message.as_str()), (1, FailureKind::NeedsYou, "Log in."));
+        assert_eq!(
+            (more, rows[0].kind, rows[0].message.as_str()),
+            (1, FailureKind::NeedsYou, "Log in.")
+        );
         assert_eq!(rows[1].kind, FailureKind::AuthNeeded);
         assert_eq!(rows[2].kind, FailureKind::Unreachable);
     }
@@ -570,7 +609,10 @@ mod tests {
     fn no_failures_is_a_calm_empty_that_opens_the_watches() {
         let s = settings();
         let (title, _, next) = empty_of(with(&[watch("a")], &s, |i| state(PopoverWidget::Failures, i)));
-        assert_eq!((title.as_str(), next), ("Know when a watch breaks", Some(WidgetActionId::OpenWatches)));
+        assert_eq!(
+            (title.as_str(), next),
+            ("Know when a watch breaks", Some(WidgetActionId::OpenWatches))
+        );
     }
 
     #[test]
@@ -585,7 +627,12 @@ mod tests {
         s.notifications_paused_until = Some(NOW + 1);
         assert_eq!(notification_mode(&s, NOW), NotificationMode::Off);
         let v = value_of(with(&[], &s, |i| state(PopoverWidget::Notifications, i)));
-        assert_eq!(v, PopoverValue::Notifications { mode: NotificationMode::Off });
+        assert_eq!(
+            v,
+            PopoverValue::Notifications {
+                mode: NotificationMode::Off
+            }
+        );
     }
 
     #[test]
@@ -596,7 +643,10 @@ mod tests {
         let mut layout = default.layout().clone();
         layout.placements.retain(|p| p.widget != PopoverWidget::Notifications);
         let n = with(&[], &s, |i| popover_values(&layout, i)).notice.unwrap();
-        assert_eq!((n.tone, n.title.as_str(), n.detail.as_str()), (Tone::Info, "Notifications are paused", "Paused for 20 more minutes."));
+        assert_eq!(
+            (n.tone, n.title.as_str(), n.detail.as_str()),
+            (Tone::Info, "Notifications are paused", "Paused for 20 more minutes.")
+        );
         assert_eq!(n.action.unwrap().action, WidgetActionId::ResumeNotifications);
         assert!(with(&[], &s, |i| popover_values(default.layout(), i)).notice.is_none());
         s.notifications_paused_until = None;
@@ -627,7 +677,14 @@ mod tests {
         let layout_ids: Vec<&str> = stored.layout().placements.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, layout_ids);
         let mut edited = stored.clone();
-        edited.edit(Edit::Remove { id: stored.layout().placements[0].id.clone() }).unwrap();
-        assert_eq!(with(&[], &s, |i| popover_values(edited.layout(), i)).placements.len(), ids.len() - 1);
+        edited
+            .edit(Edit::Remove {
+                id: stored.layout().placements[0].id.clone(),
+            })
+            .unwrap();
+        assert_eq!(
+            with(&[], &s, |i| popover_values(edited.layout(), i)).placements.len(),
+            ids.len() - 1
+        );
     }
 }
