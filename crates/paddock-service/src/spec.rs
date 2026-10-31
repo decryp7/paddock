@@ -219,6 +219,10 @@ impl ServiceSpec {
 }
 
 /// Builds a [`ServiceSpec`]; [`SpecBuilder::build`] checks every part.
+///
+/// There is no option to wait for the network: a system unit already orders after `network-online.target`, and a user
+/// service cannot (that target belongs to the system manager, which a `systemd --user` instance cannot order after), so a
+/// user service retries its own network use.
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct SpecBuilder {
@@ -293,9 +297,6 @@ impl SpecBuilder {
     /// How long the OS waits for the process to exit when stopping it (default 60 s; 1 to 3600): a service that must finish
     /// a running job needs longer. Only systemd (`TimeoutStopSec=`) and a launchd daemon (`ExitTimeOut`) honour it; a launchd
     /// user agent and a Windows service ignore it (the SCM uses its own stop timeout).
-    ///
-    /// A user service cannot order itself after the network (`network-online.target` belongs to the system manager, which a
-    /// `systemd --user` instance cannot order after), so there is no such option: a user service retries its own network use.
     pub fn stop_timeout_secs(mut self, secs: u32) -> Self {
         self.spec.stop_timeout_secs = secs;
         self

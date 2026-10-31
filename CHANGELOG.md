@@ -28,6 +28,8 @@ Conventional Commits; one semver tag for the whole repo.
 - Breaking: `is_held(path)` is renamed `is_held_settled(path)` (the same re-check and wait), for a one-shot decision. New `is_held_now(path)`: one check, never waits, only for a loop where a held reading leads to waiting and looking again at the caller's own pace (a supervisor); a false "held" there only delays. Dyno's link uses it in every look; with the waiting probe there, every look waited 400 ms on a held lock and the link's counted waits stretched twentyfold (CI 7257). `dyno_agent::instance::is_held` is removed (only `is_held_now` remains), so the link cannot pick the waiting probe.
 
 ### `paddock-service`: stop timeout and network wait in the spec
+
+### `paddock-service`: stop timeout in the spec
 - `SpecBuilder::stop_timeout_secs(u32)` / `ServiceSpec::stop_timeout_secs()` (default 60, 1 to 3600, a typed `SpecError` otherwise): the systemd `TimeoutStopSec=` and the `ExitTimeOut` of a launchd daemon (a user agent's plist has none). A service that must finish a running job before it stops (Pitcrew, ADR 0009) sets 300. A launchd user agent and a Windows service ignore the stop timeout. There is no network-wait option: a system unit already orders after `network-online.target`, and a `systemd --user` instance cannot order after that system target, so a user service retries its own network use. Defaults render the same files as before (goldens unchanged). An AppImage's program is already copied to a stable place before a unit points at it (`backend::choose`, `system::stable_copy`), as Pitcrew's own code did; neither refuses it.
 
 ### `paddock-service`: a stopped service process is waited for, not called idle
