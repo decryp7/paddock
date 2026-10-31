@@ -27,7 +27,7 @@ import type {
   WatchSummary,
 } from './api.types';
 import type { PopoverEdit, PopoverValues, PopoverView } from './widgets.types';
-import type { LoadingRows } from './generated/widgets';
+import type { LoadingRows, PopoverStatus } from './generated/widgets';
 
 /**
  * Everything the UI asks the backend. Components never call Tauri directly: they get this through DI — the real
@@ -132,6 +132,8 @@ export interface SpotterBackend {
   editPopover(edit: PopoverEdit): Promise<PopoverView>;
   /** What the popup's widgets show now. */
   popoverValues(): Promise<PopoverValues>;
+  /** How the watches are doing overall: the popup's header pill. */
+  popoverStatus(): Promise<PopoverStatus>;
   /** How many rows each widget draws, loading or ready (the engine's row limits): loading twins are as tall as ready widgets. */
   popoverShape(): Promise<LoadingRows[]>;
 

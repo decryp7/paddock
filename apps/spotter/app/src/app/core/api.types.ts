@@ -1,3 +1,4 @@
+import type { PopoverStatus } from './generated/widgets';
 import type { PopoverValues, PopoverView } from './widgets.types';
 /**
  * The UI ↔ backend wire contract (camelCase JSON). Mirrored by the Rust DTOs in `app/src-tauri/src/dto.rs`;
@@ -546,5 +547,7 @@ export interface StatePush {
   popover: PopoverView;
   /** What the popup's widgets show now (computed by the engine). */
   popoverValues: PopoverValues;
+  /** How the watches are doing overall (the popup's header pill). */
+  popoverStatus: PopoverStatus;
 }
 

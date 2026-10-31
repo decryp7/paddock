@@ -29,7 +29,7 @@ import type {
 } from './api.types';
 import type { ReleaseTarget, SpotterBackend } from './backend';
 import type { PopoverEdit, PopoverValues, PopoverView } from './widgets.types';
-import type { LoadingRows } from './generated/widgets';
+import type { LoadingRows, PopoverStatus } from './generated/widgets';
 import { toCommandError } from './command-error';
 import type { Platform } from './window-chrome';
 
@@ -189,6 +189,9 @@ export class TauriBackend implements SpotterBackend {
   }
   popoverValues(): Promise<PopoverValues> {
     return this.run('popover_values');
+  }
+  popoverStatus(): Promise<PopoverStatus> {
+    return this.run('popover_status');
   }
   popoverShape(): Promise<LoadingRows[]> {
     return this.run('popover_shape');

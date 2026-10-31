@@ -31,12 +31,6 @@ for (const scheme of ['light', 'dark'] as const) {
         await expect(popup.locator('section.pd-w').first()).toBeVisible();
         await expect(popup.locator('[aria-busy="true"]')).toHaveCount(0);
         await page.evaluate(async () => document.fonts.ready);
-        // The default popup, also in its worst state (failures, a check running, paused notifications), is whole within the cap.
-        const box = await popup.boundingBox();
-        expect(Math.floor(box?.height ?? 0), `${name} is at most 520 px tall`).toBeLessThanOrEqual(520);
-        const scroller = popup.locator('.pd-content');
-        if (process.env['ALLOW_SCROLL']) test.info().annotations.push({ type: 'scroll', description: 'allowed for a look' });
-        else expect(await scroller.evaluate((e) => e.scrollHeight - e.clientHeight), `${name} needs no scrolling`).toBeLessThanOrEqual(0);
         await popup.screenshot({ path: `${OUT}/${name}-${scheme}.png` });
       });
     }

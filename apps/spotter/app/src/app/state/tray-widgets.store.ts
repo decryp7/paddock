@@ -1,4 +1,4 @@
-import type { LoadingRows } from '../core/generated/widgets';
+import type { LoadingRows, PopoverStatus } from '../core/generated/widgets';
 import { inject } from '@angular/core';
 import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
 import type { CommandError } from '../core/api.types';
@@ -9,6 +9,8 @@ import type { PopoverEdit, PopoverValues, PopoverView } from '../core/widgets.ty
 interface TrayWidgetsState {
   /** How many rows each kind draws, from the engine: a loading twin is as tall as a ready widget. */
   shape: LoadingRows[];
+  /** How the watches are doing overall (the header pill); null before the first answer. */
+  status: PopoverStatus | null;
   /** The layout the chooser draws; null before the first answer. */
   view: PopoverView | null;
   /** What the widgets show; null before the first answer (every widget is loading). */
@@ -27,7 +29,7 @@ interface TrayWidgetsState {
  */
 export const TrayWidgetsStore = signalStore(
   { providedIn: 'root' },
-  withState<TrayWidgetsState>({ shape: [], view: null, values: null, error: null, loading: false }),
+  withState<TrayWidgetsState>({ shape: [], status: null, view: null, values: null, error: null, loading: false }),
   withMethods((store) => {
     const backend = inject(BACKEND);
     let started = false;
@@ -35,8 +37,8 @@ export const TrayWidgetsStore = signalStore(
     const load = async (): Promise<void> => {
       patchState(store, { loading: true });
       try {
-        const [view, values, shape] = await Promise.all([backend.popoverView(), backend.popoverValues(), backend.popoverShape()]);
-        patchState(store, { view, values, shape, error: null, loading: false });
+        const [view, values, shape, status] = await Promise.all([backend.popoverView(), backend.popoverValues(), backend.popoverShape(), backend.popoverStatus()]);
+        patchState(store, { view, values, shape, status, error: null, loading: false });
       } catch (e) {
         patchState(store, { loading: false, error: toCommandError(e) });
       }
@@ -49,7 +51,7 @@ export const TrayWidgetsStore = signalStore(
         if (started) return;
         started = true;
         void load();
-        backend.onState((push) => patchState(store, { view: push.popover, values: push.popoverValues, error: null })).catch(() => undefined);
+        backend.onState((push) => patchState(store, { view: push.popover, values: push.popoverValues, status: push.popoverStatus, error: null })).catch(() => undefined);
       },
       /** Sends one edit to the engine; the answer is the new layout. Returns whether it was accepted. */
       async edit(edit: PopoverEdit): Promise<boolean> {

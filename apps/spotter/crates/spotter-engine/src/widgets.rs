@@ -239,11 +239,9 @@ fn next_check(i: &Inputs) -> PopoverState {
         // A busy source is Working, never an error (ADR 0035); the next check stays under it.
         return WidgetState::Working {
             title: "Checking now".into(),
-            phase: "Checking watches".into(),
-            progress: Progress::Count {
-                done: running as u64,
-                unit: if running == 1 { "watch".into() } else { "watches".into() },
-            },
+            // The engine knows which watches run, not how many finished this round: an indeterminate bar, never "n so far".
+            phase: format!("Checking {running} {}", if running == 1 { "watch" } else { "watches" }),
+            progress: Progress::Unknown,
             last: next,
             cancel: None,
         };
@@ -611,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn next_check_while_a_check_runs_is_working_with_a_growing_count_and_keeps_the_next_one() {
+    fn next_check_while_a_check_runs_is_working_and_indeterminate_and_keeps_the_next_one() {
         let mut ws = vec![watch("a"), watch("b"), watch("c")];
         ws[0].checking = true;
         ws[1].checking = true;
@@ -620,16 +618,11 @@ mod tests {
         match with(&ws, &s, |i| state(PopoverWidget::NextCheck, i)) {
             WidgetState::Working {
                 phase,
-                progress: Progress::Count { done, unit },
+                progress: Progress::Unknown,
                 last: Some(PopoverValue::NextCheck { id, .. }),
                 cancel: None,
                 ..
-            } => {
-                assert_eq!(
-                    (phase.as_str(), done, unit.as_str(), id.as_str()),
-                    ("Checking watches", 2, "watches", "c")
-                );
-            }
+            } => assert_eq!((phase.as_str(), id.as_str()), ("Checking 2 watches", "c")),
             other => panic!("{other:?}"),
         }
     }

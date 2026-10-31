@@ -63,6 +63,13 @@ describe('MockPopover (the mock of the engine layout, for browser development an
     expect(empty.every((s) => s === 'empty')).toBe(true);
   });
 
+  it('serves the engine\'s overall status for a scenario, so the header pill and the widget heads agree', () => {
+    const p = new MockPopover();
+    expect(p.status('worst')).toEqual({ kind: 'failing', count: 4 });
+    expect(p.status('empty')).toEqual({ kind: 'unknown' });
+    expect(p.status('demo').kind).toBe('failing');
+  });
+
   it('moves the engine\'s times to the mock\'s now', () => {
     const state = (now: number) => new MockPopover(['nextCheck']).values('demo', now).placements[0]!.state;
     const at = (now: number) => (state(now).state === 'ready' ? (state(now) as { value: { atMs: number } }).value.atMs : 0);

@@ -10,6 +10,7 @@ import { toCommandError } from '../../core/command-error';
 import type { WidgetActionId } from '../../core/generated/widgets';
 import { platformFromUserAgent } from '../../core/tauri-backend';
 import { SETTINGS_GENERAL_ROUTE, SETTINGS_TRAY_POPUP_ROUTE } from '../../core/navigation';
+import { StatusPill } from './status-pill';
 import { observeHeight } from '../../shared/observe-height';
 import { TrayWidgetsStore } from '../../state/tray-widgets.store';
 import { WatchesStore } from '../../state/watches.store';
@@ -22,16 +23,14 @@ import { WidgetSet } from './widget-set';
  */
 @Component({
   selector: 'sp-tray-page',
-  imports: [MatButton, MatIconButton, MatIcon, MatMenu, MatMenuItem, MatMenuTrigger, MatTooltip, SuTrayPopover, PdWidgetArea, WidgetSet],
+  imports: [MatButton, MatIconButton, MatIcon, MatMenu, MatMenuItem, MatMenuTrigger, MatTooltip, SuTrayPopover, PdWidgetArea, WidgetSet, StatusPill],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pd-tray-popover label="Spotter" [platform]="platform" (dismissed)="close()">
       <div slot="header" class="head">
         <img src="brand/spotter-16.svg" alt="" width="16" height="16" />
         <strong>Spotter</strong>
-        @if (unseen() > 0) {
-          <span class="pill" role="status"><mat-icon svgIcon="sp:sparkle" aria-hidden="true" />{{ unseen() }} new</span>
-        }
+        <sp-status-pill [status]="widgets.status()" />
       </div>
       <sp-widget-set #set (run)="perform($event)" />
       @if (actionError(); as message) {
@@ -63,7 +62,7 @@ import { WidgetSet } from './widget-set';
       }
       <div slot="footer" class="foot">
         <span class="spacer"></span>
-        <button matButton="filled" type="button" (click)="openMain()"><mat-icon svgIcon="sp:arrow-right" aria-hidden="true" /> Open Spotter</button>
+        <button matButton="filled" type="button" (click)="openMain()"><mat-icon svgIcon="sp:arrow-right" aria-hidden="true" />Open Spotter</button>
         <button matIconButton type="button" aria-label="More actions" matTooltip="More actions" matTooltipPosition="left" [matMenuTriggerFor]="more">
           <mat-icon svgIcon="sp:more" aria-hidden="true" />
         </button>
@@ -86,22 +85,6 @@ import { WidgetSet } from './widget-set';
       align-items: center;
       gap: var(--pd-space-2);
       width: 100%;
-    }
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: var(--pd-space-1);
-      margin-left: auto;
-      padding: 1px var(--pd-space-2);
-      border-radius: var(--pd-radius-pill);
-      background: var(--pd-info-tint);
-      color: var(--pd-info);
-      font-size: var(--pd-text-caption);
-      font-weight: var(--pd-weight-semibold);
-    }
-    .pill mat-icon {
-      width: 12px;
-      height: 12px;
     }
     .state {
       display: grid;

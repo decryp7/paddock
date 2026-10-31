@@ -39,7 +39,7 @@ import { mockDescribe, mockSchedulePreview, mockScheduleProblems } from './mock/
 import { MockJobs } from './mock/mock-jobs';
 import { MockPopover } from './mock/mock-popover';
 import type { PopoverEdit, PopoverValues, PopoverView } from './widgets.types';
-import type { LoadingRows } from './generated/widgets';
+import type { LoadingRows, PopoverStatus } from './generated/widgets';
 import { LOADING_SHAPE, type PopoverScenario } from './mock/mock-popover';
 import { MOCK_SCHEMES, mockExtraction, mockSuggest, mockTest, patternProblem } from './mock/mock-extraction';
 
@@ -264,7 +264,7 @@ export class MockBackend implements SpotterBackend {
 
   /** Test helper: delivers a pushed state to subscribers. */
   push(): void {
-    const p = { watches: this.summaries(), popover: this.popover.view(), popoverValues: this.popover.values(this.popupScenario(), this.now()) };
+    const p = { watches: this.summaries(), popover: this.popover.view(), popoverValues: this.popover.values(this.popupScenario(), this.now()), popoverStatus: this.popover.status(this.popupScenario()) };
     this.stateHandlers.forEach((h) => h(p));
   }
 
@@ -674,6 +674,10 @@ export class MockBackend implements SpotterBackend {
 
   popoverValues(): Promise<PopoverValues> {
     return this.call('popoverValues', () => this.popover.values(this.popupScenario(), this.now()));
+  }
+
+  popoverStatus(): Promise<PopoverStatus> {
+    return this.call('popoverStatus', () => this.popover.status(this.popupScenario()));
   }
 
   popoverShape(): Promise<LoadingRows[]> {

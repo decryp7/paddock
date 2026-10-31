@@ -1,6 +1,6 @@
 import type { KindInfo, Placement } from '@decryp7/paddock-ui/widgets';
 import type { CommandError } from '../api.types';
-import type { LoadingRows, PopoverWidget } from '../generated/widgets';
+import type { LoadingRows, PopoverStatus, PopoverWidget } from '../generated/widgets';
 import type { PopoverEdit, PopoverState, PopoverValues, PopoverView } from '../widgets.types';
 import fixtures from './popover-fixtures.json';
 
@@ -15,7 +15,7 @@ interface Fixture {
   readonly nowMs: number;
   readonly view: PopoverView;
   readonly shape: LoadingRows[];
-  readonly scenarios: Record<PopoverScenario, { readonly byKind: Record<string, PopoverState>; readonly noticeWithoutNotificationsWidget: PopoverValues['notice'] }>;
+  readonly scenarios: Record<PopoverScenario, { readonly byKind: Record<string, PopoverState>; readonly noticeWithoutNotificationsWidget: PopoverValues['notice']; readonly status: PopoverStatus }>;
 }
 const FIXTURE = fixtures as unknown as Fixture;
 const KINDS: KindInfo<PopoverWidget>[] = FIXTURE.view.catalogue.kinds as KindInfo<PopoverWidget>[];
@@ -104,6 +104,11 @@ export class MockPopover {
       throw refused('The mock does not do that edit.');
     }
     return this.view();
+  }
+
+  /** The overall status of a scenario, as the engine decided it. */
+  status(scenario: PopoverScenario): PopoverStatus {
+    return FIXTURE.scenarios[scenario].status;
   }
 
   /** What the widgets show in a named scenario: the engine's output for it, for the placed kinds. */
