@@ -17,6 +17,11 @@ Conventional Commits; one semver tag for the whole repo.
   used Tauri's `app_config_dir`, the installer the app's folder: the saved log level was never found). The default settings
   file moved with it; no migration (no app is released on the shell's settings yet, and the apps outside the shell never
   used this path).
+
+### `paddock-service`: a pending or running launchd job is never stale; shared launchctl helpers
+- `JobReport::stale()` no longer counts "has a launch constraint and is not running": every healthy `SMAppService` job has `has LWCR`, so a pending job at login read as refused and the repair killed the healthy agent (Dyno B4; Pitwall 1.1 had the same logic). Stale now means found, not running, and spawn failed, exit 78 or "needs LWCR update". New `JobReport::needs_repair(answers)` (stale and the service does not answer) is the one decision for every app, and `JobReport::describe()` the observed state in words for logs and messages. Also affects `Job::Refused` in the launchd backend (a running job is never refused).
+- New `parse::launchctl_output` (stdout of a successful `launchctl` call through the `System` port, bounded and read while it runs; output past the cap comes back truncated) and new public module `launchctl` with `job_report` (`None` = launchd could not be asked, distinct from "does not know the job") and `bootout` (exit 3, 113 or "No such process" is success), moved out of the launchd backend. Pitwall uses them and drops its copies; Dyno and Pitcrew adopt them on their own branches.
+
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.
