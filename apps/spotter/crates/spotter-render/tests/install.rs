@@ -119,7 +119,7 @@ async fn installs_a_verified_archive_into_the_data_dir_with_labelled_phases() {
     let data = tmp.path().join("data");
     let (dl, ctx, shell_phases, _registry) = shell();
     let (job, seen) = recording(|_, _| {});
-    let b = install_pinned(&pinned(port, &sha), Os::Linux, &data, &ok_verify, &dl, &ctx, &job)
+    let b = install_pinned(&pinned(port, &sha), Os::Linux, &data, Arc::new(ok_verify), &dl, &ctx, &job)
         .await
         .unwrap();
     assert!(b.path.starts_with(data.join("chromium")) && b.path.is_file(), "{:?}", b.path);
@@ -162,7 +162,7 @@ async fn a_throttled_host_is_waited_out() {
         &pinned(port, &sha),
         Os::Linux,
         &tmp.path().join("data"),
-        &ok_verify,
+        Arc::new(ok_verify),
         &dl,
         &ctx,
         &Job::none(),
@@ -183,7 +183,7 @@ async fn a_wrong_checksum_is_refused_and_nothing_is_installed_or_kept() {
         &pinned(port, &"0".repeat(64)),
         Os::Linux,
         &data,
-        &ok_verify,
+        Arc::new(ok_verify),
         &dl,
         &ctx,
         &Job::none(),
@@ -208,7 +208,7 @@ async fn http_errors_failed_self_tests_and_archives_without_a_browser_install_no
         &pinned(port, &"0".repeat(64)),
         Os::Linux,
         &data,
-        &ok_verify,
+        Arc::new(ok_verify),
         &dl,
         &ctx,
         &Job::none(),
@@ -221,16 +221,24 @@ async fn http_errors_failed_self_tests_and_archives_without_a_browser_install_no
     let port = serve(move |_| Reply::Bytes(bytes.clone())).await;
     let (dl, ctx, _, _registry) = shell();
     let bad = |_: &Path| -> spotter_render::Result<String> { Err(spotter_render::Error::Install("does not run".into())) };
-    let e = install_pinned(&pinned(port, &sha), Os::Linux, &data, &bad, &dl, &ctx, &Job::none())
+    let e = install_pinned(&pinned(port, &sha), Os::Linux, &data, Arc::new(bad), &dl, &ctx, &Job::none())
         .await
         .unwrap_err();
     assert!(e.to_string().contains("does not run"));
     assert!(!data.join("chromium").exists());
 
     let (dl, ctx, _, _registry) = shell();
-    let e = install_pinned(&pinned(port, &sha), Os::Windows, &data, &ok_verify, &dl, &ctx, &Job::none())
-        .await
-        .unwrap_err();
+    let e = install_pinned(
+        &pinned(port, &sha),
+        Os::Windows,
+        &data,
+        Arc::new(ok_verify),
+        &dl,
+        &ctx,
+        &Job::none(),
+    )
+    .await
+    .unwrap_err();
     assert!(e.to_string().contains("does not contain a browser"));
 }
 
@@ -246,7 +254,7 @@ async fn cancel_while_unpacking_and_in_the_self_test_install_nothing() {
             c.cancel();
         }
     });
-    let e = install_pinned(&pinned(port, &sha), Os::Linux, &data, &ok_verify, &dl, &ctx, &job)
+    let e = install_pinned(&pinned(port, &sha), Os::Linux, &data, Arc::new(ok_verify), &dl, &ctx, &job)
         .await
         .unwrap_err();
     assert!(matches!(e, Error::Cancelled), "{e}");
@@ -259,7 +267,7 @@ async fn cancel_while_unpacking_and_in_the_self_test_install_nothing() {
             c.cancel();
         }
     });
-    let e = install_pinned(&pinned(port, &sha), Os::Linux, &data, &ok_verify, &dl, &ctx, &job)
+    let e = install_pinned(&pinned(port, &sha), Os::Linux, &data, Arc::new(ok_verify), &dl, &ctx, &job)
         .await
         .unwrap_err();
     assert!(matches!(e, Error::Cancelled), "{e}");
@@ -281,7 +289,7 @@ async fn cancel_while_the_server_does_not_answer_is_heard_within_a_moment() {
         &pinned(port, &"0".repeat(64)),
         Os::Linux,
         &tmp.path().join("data"),
-        &ok_verify,
+        Arc::new(ok_verify),
         &dl,
         &ctx,
         &Job::none(),

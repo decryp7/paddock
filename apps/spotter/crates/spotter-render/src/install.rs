@@ -351,12 +351,27 @@ fn download_error(e: DownloadError) -> Error {
     }
 }
 
+/// The self-test of an extracted browser, run on a blocking thread.
+pub type Verify = Arc<dyn Fn(&Path) -> Result<String> + Send + Sync>;
+
 /// Downloads the pinned build for this platform from the embedded manifest into `data_dir` and returns the browser.
 /// `downloader` is the app's one (its per-host caps hold across downloads); `ctx` is the shell job the download reports
 /// its phases to; `job` carries the unpacking and the self-test.
 pub async fn install(data_dir: &Path, downloader: &Arc<Downloader>, ctx: &JobContext, job: &Job) -> Result<Browser> {
     let pinned = Manifest::embedded().pinned(&crate::manifest::platform_key())?;
-    install_pinned(&pinned, Os::CURRENT, data_dir, &|exe| self_test_job(exe, job), downloader, ctx, job).await
+    install_pinned(
+        &pinned,
+        Os::CURRENT,
+        data_dir,
+        {
+            let job = job.clone();
+            Arc::new(move |exe: &Path| self_test_job(exe, &job))
+        },
+        downloader,
+        ctx,
+        job,
+    )
+    .await
 }
 
 /// [`install`] for an explicit pinned entry, OS and self-test (tests use a local server and a fake archive). Phases, each
@@ -368,7 +383,7 @@ pub async fn install_pinned(
     pinned: &Pinned,
     os: Os,
     data_dir: &Path,
-    verify: &(dyn Fn(&Path) -> Result<String> + Sync),
+    verify: Verify,
     downloader: &Arc<Downloader>,
     ctx: &JobContext,
     job: &Job,
@@ -398,7 +413,10 @@ pub async fn install_pinned(
         if job.is_cancelled() {
             return Err(Error::Cancelled);
         }
-        verify(&exe.path)?;
+        let (check, path) = (verify.clone(), exe.path.clone());
+        tokio::task::spawn_blocking(move || check(&path))
+            .await
+            .map_err(|e| err(e.to_string()))??;
         job.report_done(Phase::SelfTest, Unit::Count, 1, Some(1));
         if job.is_cancelled() {
             return Err(Error::Cancelled);
@@ -698,9 +716,12 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     static LOG: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
+    #[cfg(unix)]
     struct Capture;
+    #[cfg(unix)]
     impl log::Log for Capture {
         fn enabled(&self, _: &log::Metadata) -> bool {
             true
@@ -711,6 +732,7 @@ mod tests {
         fn flush(&self) {}
     }
 
+    #[cfg(unix)]
     fn capture_logs() {
         let _ = log::set_logger(&Capture);
         log::set_max_level(log::LevelFilter::Info);
