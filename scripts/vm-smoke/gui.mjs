@@ -186,7 +186,7 @@ export class GuiCheck {
   async appLogCount(regex) {
     const log = (this.config.logs ?? [])[0];
     if (!log) return 0;
-    const r = await this.g.exec(`grep -c -E ${sq(regex)} ${sq(await this.core.path(log))} 2>/dev/null`);
+    const r = await this.g.exec(`grep -c -E ${sq(regex)} ${sq(await this.core.logPath(log))} 2>/dev/null`);
     return Number.parseInt(r.stdout.trim(), 10) || 0;
   }
 
@@ -312,7 +312,7 @@ export class GuiCheck {
 
   /** Reboots the guest and returns what the app did at the login: the log since the reboot, windows, the settle window. */
   async rebootAndObserve() {
-    const log = await this.core.path(this.gui.loginStart.log);
+    const log = await this.core.logPath(this.gui.loginStart.log);
     const size = Number((await this.g.exec(`stat -f %z ${sq(log)} 2>/dev/null || echo 0`)).stdout.trim()) || 0;
     if (!(await this.host.reboot())) return null;
     this.core.home = null;

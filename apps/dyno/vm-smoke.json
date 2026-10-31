@@ -5,7 +5,8 @@
   "bundle": "Dyno.app",
   "dataDir": "~/Library/Application Support/Dyno",
   "logs": [
-    "~/Library/Application Support/Dyno/logs/app.log",
+    ["~/Library/Logs/Dyno/dyno.*.log", "~/Library/Application Support/Dyno/logs/app.log"],
+    ["~/Library/Logs/Dyno/dyno-agent.*.log"],
     "~/Library/Logs/Dyno/agent.log"
   ],
   "quit": {
@@ -99,7 +100,7 @@
       "helperParentAfterLogin": "launchd"
     },
     "loginStart": {
-      "log": "~/Library/Application Support/Dyno/logs/app.log",
+      "log": ["~/Library/Logs/Dyno/dyno.*.log", "~/Library/Application Support/Dyno/logs/app.log"],
       "hidden": "started hidden",
       "shown": "started with a window",
       "restore": "hidden",
