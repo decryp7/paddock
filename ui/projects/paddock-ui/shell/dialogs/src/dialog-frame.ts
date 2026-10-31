@@ -219,6 +219,11 @@ export class DialogFrame {
   /** The mounted content (its declared actions, status, header and minimum body height). */
   readonly content = input<DialogContent | null>(null);
   readonly platform = input<DialogPlatform>(dialogPlatform());
+  /**
+   * The mounted content's change detector. `render()` checks it with the frame, so the header, the footer and the body
+   * always show the same state (the content sits in the host's view, which the frame's own check does not reach).
+   */
+  readonly contentView = input<{ detectChanges(): void } | null>(null);
   /** The contract's width, logical px: what the frame is measured at. */
   readonly declaredWidth = input(0);
   /**
@@ -394,7 +399,9 @@ export class DialogFrame {
 
   /** Renders the frame now: a hidden window may never run a frame, so nothing here waits for one (the 1.1-0 spike). */
   render(): void {
-    if (!this.destroyed) this.cdr.detectChanges();
+    if (this.destroyed) return;
+    this.contentView()?.detectChanges();
+    this.cdr.detectChanges();
   }
 
   /** Gives the first focus: a form's first field (one the content marks `data-autofocus` first), else the action the layout names. */
