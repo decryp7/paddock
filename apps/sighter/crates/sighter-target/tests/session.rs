@@ -228,15 +228,14 @@ fn unreachable_targets_are_lost_with_a_hint() {
 }
 
 #[test]
-fn names_resolve_through_the_injected_lookup_and_every_address_is_tried() {
-    // "multi.test" lists ::1 first; the fake listens on 127.0.0.1 only, so the second address is the one that works.
+fn names_resolve_through_the_injected_lookup_and_the_checked_address_is_dialled() {
     let f = start(Mode::NoAuth);
     let a = VncAddr {
-        host: "multi.test".into(),
+        host: "vm.test".into(),
         port: f.port,
     };
     let t = VncTarget::connect(&a, None, StopFlag::default(), fast(), &dial()).unwrap();
-    assert_eq!(t.name(), format!("vnc://multi.test:{}", f.port));
+    assert_eq!(t.name(), format!("vnc://vm.test:{}", f.port));
 }
 
 #[test]

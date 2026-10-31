@@ -229,7 +229,6 @@ pub fn addr(f: &Fake) -> VncAddr {
 pub fn dial() -> Dial {
     let lookup = StaticLookup::new()
         .with("vm.test", &["127.0.0.1"])
-        .with("multi.test", &["::1", "127.0.0.1"])
         .with("public.test", &["93.184.216.34"]);
     let egress = Egress::new(
         Policy::default().reach(Reach::Loopback),

@@ -1,19 +1,19 @@
 //! Where a VNC connection may go. VNC is unencrypted, so reaching a machine is an explicit choice (local first, family
-//! rule 42): this computer is the default, a private network needs [`Scope::Lan`], a public address needs [`Scope::Public`],
-//! and the never-reachable classes (link-local, unspecified, multicast) and Offline mode are refused whatever the scope.
+//! rule 42): this computer is the default, a private network needs [`Scope::Lan`], a public address needs [`Scope::Public`].
+//! The never-reachable classes (link-local, unspecified, multicast) and Offline mode are refused whatever the scope.
 //!
-//! The checks are `paddock-net`'s: [`Egress::check_host`] resolves the name through the egress's own resolver (a fake in
-//! tests, so no test queries DNS), refuses Offline before anything is resolved, and vets **every** address of the name. The
-//! client then connects to those checked addresses, never to the name again, so a name cannot answer differently the second
-//! time.
+//! All the checking is `paddock-net`'s: [`Egress::check_host_with`] refuses Offline before anything is resolved, resolves the
+//! name through the egress's own resolver (a fake in tests, so no test queries DNS) and vets **every** address of the name
+//! against the policy's reach, [`LanAccess`] and [`PublicAccess`]. The client dials only the addresses it returns, never the
+//! name again, so a name cannot answer differently the second time. This module only maps a scope onto those two arguments.
 
-use paddock_net::{Class, Egress, LanAccess, classify};
+use paddock_net::{Egress, LanAccess, PublicAccess};
 use sighter_core::ports::TargetError;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-/// The farthest a connection may reach. Ordered: `Loopback < Lan < Public`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+/// The farthest a connection may reach.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Scope {
     /// This computer only (VMs with a local console port). The default.
     #[default]
@@ -25,12 +25,12 @@ pub enum Scope {
 }
 
 impl Scope {
-    fn allows(self, class: Class) -> bool {
-        match class {
-            Class::Loopback => true,
-            Class::Lan => self >= Scope::Lan,
-            Class::Public => self >= Scope::Public,
-            Class::Never => false,
+    /// The `paddock-net` limits of this scope.
+    fn limits(self) -> (LanAccess, PublicAccess) {
+        match self {
+            Scope::Loopback => (LanAccess::Deny, PublicAccess::Deny),
+            Scope::Lan => (LanAccess::Policy, PublicAccess::Deny),
+            Scope::Public => (LanAccess::Policy, PublicAccess::Policy),
         }
     }
 }
@@ -50,22 +50,11 @@ impl Dial {
 
     /// The checked addresses of `host`, or why the target may not be reached. Nothing is resolved when the app is offline.
     pub fn resolve(&self, host: &str, port: u16) -> Result<Vec<SocketAddr>, TargetError> {
-        let lan = if self.scope >= Scope::Lan {
-            LanAccess::Policy
-        } else {
-            LanAccess::Deny
-        };
+        let (lan, public) = self.scope.limits();
         let addrs = self
             .egress
-            .check_host(host, port, lan)
+            .check_host_with(host, port, lan, public)
             .map_err(|e| TargetError::Lost(e.to_string()))?;
-        // Private addresses never get here without the Lan scope (`LanAccess::Deny` refused them above), so what a narrower
-        // scope still finds is a public address.
-        if addrs.iter().any(|a| !self.scope.allows(classify(*a))) {
-            return Err(TargetError::Lost(format!(
-                "{host} is a public address; VNC is not encrypted, so it is only reached with that network chosen for this target"
-            )));
-        }
         Ok(addrs.into_iter().map(|ip| SocketAddr::new(ip, port)).collect())
     }
 }
@@ -131,6 +120,7 @@ mod tests {
         );
         assert!(r.dial.resolve("vm.test", 5900).is_ok());
         assert!(lost(r.dial.resolve("far.test", 5900)).contains("public address"));
+        assert!(lost(rig(Reach::Loopback, Scope::Loopback).dial.resolve("far.test", 5900)).contains("public address"));
     }
 
     #[test]
@@ -171,11 +161,5 @@ mod tests {
         assert!(r.lookup.asked().is_empty());
         r.egress.set_offline(false);
         assert!(r.dial.resolve("vm.test", 5900).is_ok());
-    }
-
-    #[test]
-    fn scopes_are_ordered_and_gate_the_classes() {
-        assert!(Scope::Loopback < Scope::Lan && Scope::Lan < Scope::Public);
-        assert!(!Scope::Public.allows(Class::Never));
     }
 }
