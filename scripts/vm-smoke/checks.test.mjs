@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
-import { parseArgs } from './run.mjs';
+import { checkoutGaps, guiImageName, hostRun, MACOS_IMAGE, MANUAL, parseArgs } from './run.mjs';
 
 const dynoConfig = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'apps', 'dyno', 'vm-smoke.json'), 'utf8'));
 // Dyno's own config has no scripted Launch-at-login toggle (SMAppService is called by the app itself); the handover logic is tested with one.
@@ -13,7 +14,7 @@ const B = '/Applications/Dyno.app';
 
 /** A small fake guest: a process table, an agent.json, and the few commands the check issues. `bug` picks a seeded fault. */
 function fakeGuest({ bug = null } = {}) {
-  let clock = 0, pid = 100, procs = [], agentJson = null, loginOn = false;
+  let clock = 0, pid = 100, procs = [], agentJson = null, loginOn = false, gatekeeperOn = false;
   const spawn = (name, ppid, args = '') => { const p = { pid: ++pid, ppid, born: clock, command: `${B}/Contents/MacOS/${name}${args}` }; procs.push(p); return p; };
   const startApp = () => {
     if (procs.some((p) => p.command.includes('dyno-app'))) { // single instance
@@ -61,7 +62,8 @@ function fakeGuest({ bug = null } = {}) {
     if (cmd.includes("'service' 'install'")) { loginOn = true; const a = procs.find((p) => p.command.includes('dyno-agent')); if (a) a.ppid = 1; return ok('installed and started'); }
     if (cmd.includes("'service' 'uninstall'")) { loginOn = false; const app = procs.find((p) => p.command.includes('dyno-app')); const a = procs.find((p) => p.command.includes('dyno-agent')); if (a && app) a.ppid = app.pid; return ok('removed'); }
     if (cmd.startsWith('launchctl print')) return bug === 'no-launchd' ? { code: 113, stdout: 'Could not find service', stderr: '' } : ok('\tstate = running\n\tpid = 7\n');
-    if (cmd.startsWith('spctl --status')) return ok('assessments enabled\n');
+    if (cmd === 'sudo spctl --global-enable') gatekeeperOn = true;
+    if (cmd.startsWith('spctl --status')) return ok(gatekeeperOn ? 'assessments enabled\n' : 'assessments disabled\n'); // the pinned image ships with it off
     if (cmd.startsWith('defaults read')) return ok('1.0.0\n');
     if (cmd.includes('vmsmoke-blackhole.pl >')) return ok('4242\n');
     if (cmd.startsWith('cat /tmp/vmsmoke-blackhole.log')) return ok(bug === 'contacted' ? 'listening 2\ncontact 127.0.0.1\ncontact ::1\n' : 'listening 2\n');
@@ -89,7 +91,9 @@ test('a healthy app passes every step and lists the manual ones apart', async ()
   assert.equal(byTitle(r, /Gatekeeper/).status, 'manual');
   assert.equal(r.version, '1.0.0');
   assert.match(byTitle(r, /Install/).checks[0].detail, /Gatekeeper enabled in the guest before the install.*assessments enabled/);
-  assert.ok(r.calls.indexOf('sudo spctl --global-enable') < r.calls.findIndex((c) => c.startsWith('hdiutil attach')), 'Gatekeeper is switched on before the install');
+  const enableAt = r.calls.indexOf('sudo spctl --global-enable');
+  assert.ok(enableAt >= 0, 'Gatekeeper is switched on at all');
+  assert.ok(enableAt < r.calls.findIndex((c) => c.startsWith('hdiutil attach')), 'Gatekeeper is switched on before the install');
 });
 
 test('a second agent that arrives ten seconds after the first fails the cold start with both pids', async () => {
@@ -187,4 +191,57 @@ test('arguments: one app, exactly one installer source, macOS only', () => {
   assert.throws(() => parseArgs(['--app', 'dyno', '--run', '1', '--installer', 'x']), /exactly one/);
   assert.throws(() => parseArgs(['--app', '../x', '--run', '1']), /not an app id/);
   assert.throws(() => parseArgs(['--app', 'dyno', '--run', '1', '--guest', 'windows']), /only macos/);
+});
+
+test('checkoutGaps names what a sparse checkout lacks for ./dev, and nothing for a full one', () => {
+  const root = mkdtempSync(join(tmpdir(), 'vmsmoke-co-'));
+  try {
+    assert.deepEqual(checkoutGaps(root), ['tools/paddock-dev']);
+    mkdirSync(join(root, 'tools', 'paddock-dev'), { recursive: true });
+    writeFileSync(join(root, 'tools', 'paddock-dev', 'inputs.txt'), '# inputs\ntools/paddock-dev\ncrates/Cargo.toml\ncrates/paddock-slots\n\n');
+    assert.deepEqual(checkoutGaps(root), ['crates/Cargo.toml', 'crates/paddock-slots']);
+    mkdirSync(join(root, 'crates', 'paddock-slots'), { recursive: true });
+    writeFileSync(join(root, 'crates', 'Cargo.toml'), '');
+    assert.deepEqual(checkoutGaps(root), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+  assert.deepEqual(checkoutGaps(join(dirname(fileURLToPath(import.meta.url)), '..', '..')), [], 'this worktree is complete');
+});
+
+test('guiImageName names the GUI image after the pinned base digest, and refuses an unpinned reference', () => {
+  assert.equal(guiImageName(MACOS_IMAGE), 'vmgui-base-tahoe-4aaa751f');
+  assert.throws(() => guiImageName('ghcr.io/cirruslabs/macos-tahoe-base:latest'), /not a pinned/);
+});
+
+test('hostRun survives a child that exits without reading its stdin (EPIPE is not a crash)', async () => {
+  for (let i = 0; i < 20; i++) {
+    const r = await hostRun('true', [], { input: 'x'.repeat(1 << 20) });
+    assert.equal(r.code, 0);
+  }
+});
+
+test('logPath finds the newest dated log of the candidates, the first candidate that exists, and falls back to the first name', async () => {
+  // Dyno's logs moved from logs/app.log to the dated paddock-log files (~/Library/Logs/Dyno/dyno.<day>.log).
+  const seen = [];
+  const exec = (answers) => async (cmd) => { seen.push(cmd); const hit = Object.entries(answers).find(([k]) => cmd.includes(k)); return { code: 0, stdout: hit ? hit[1] : '', stderr: '' }; };
+  const mk = (answers) => new Check({ exec: exec(answers), now: () => 0, sleep: async () => {} }, { ...config }, { intervalMs: 1 });
+  const dated = await mk({ 'printf %s "$HOME"': '/Users/admin', 'ls -t': '/Users/admin/Library/Logs/Dyno/dyno.2026-10-31.log\n/Users/admin/Library/Logs/Dyno/dyno.2026-10-30.log\n' }).logPath(['~/Library/Logs/Dyno/dyno.*.log', '~/Library/Application Support/Dyno/logs/app.log']);
+  assert.equal(dated, '/Users/admin/Library/Logs/Dyno/dyno.2026-10-31.log');
+  const old = await mk({ 'printf %s "$HOME"': '/Users/admin', 'app.log': '/Users/admin/Library/Application Support/Dyno/logs/app.log\n' }).logPath(['~/Library/Logs/Dyno/dyno.*.log', '~/Library/Application Support/Dyno/logs/app.log']);
+  assert.equal(old, '/Users/admin/Library/Application Support/Dyno/logs/app.log');
+  const none = await mk({ 'printf %s "$HOME"': '/Users/admin' }).logPath(['~/Library/Logs/Dyno/dyno.*.log', '~/x/app.log']);
+  assert.equal(none, '/Users/admin/Library/Logs/Dyno/dyno.*.log', 'nothing exists yet: the first candidate, so a stat of it reads 0');
+  assert.equal(await mk({ 'printf %s "$HOME"': '/Users/admin' }).logPath('~/plain.log'), '/Users/admin/plain.log', 'a plain string still works');
+});
+
+test("Dyno's settle window covers one full respawn cycle (20 s) and says why", () => {
+  assert.equal(dynoConfig.settleSec, 20);
+  assert.match(dynoConfig.settleWhy, /20 s/);
+});
+
+test('the headless manual rows say Gatekeeper is enabled in the guest and point at the GUI mode', () => {
+  const g = MANUAL.find((m) => /Gatekeeper/.test(m.title));
+  assert.match(g.summary, /enabled in the guest/);
+  assert.match(g.summary, /--gui/);
 });

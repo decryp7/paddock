@@ -20,5 +20,13 @@
       "max": 1
     }
   ],
-  "settleWhy": "Default 20 s: no timer of this app's own start path was derived yet; raise it when the app gets a spawn-retry timer longer than that."
+  "settleWhy": "Default 20 s: no timer of this app's own start path was derived yet; raise it when the app gets a spawn-retry timer longer than that.",
+  "gui": {
+    "$comment": "For scripts/vm-smoke --gui (README, GUI mode). launchAtLogin is null until a first --gui run with this app's CI installer has recorded its Settings AX path and its Login Items rows, and the expected rows are decided (a legacy LaunchAgents plist shows as an 'Item from unidentified developer' row, which Dyno's check treats as a defect): \"Launch at login\" in Settings (settings-page.html), registered through tauri-plugin-autostart.",
+    "windowOwner": "Spotter",
+    "contentRegex": "^Dashboard( \\||$)",
+    "guardSec": 60,
+    "hiddenStart": true,
+    "launchAtLogin": null
+  }
 }

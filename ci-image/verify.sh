@@ -36,8 +36,12 @@ tool cargo-clippy cargo clippy --version
 for t in nextest llvm-cov deny hakari machete; do
   tool "cargo-$t" cargo "$t" --version
 done
-command -v xvfb-run >/dev/null 2>&1 && note "xvfb-run: present" || bad "xvfb-run (xvfb) is missing"
-pkg-config --exists webkit2gtk-4.1 2>/dev/null && note "webkit2gtk-4.1: $(pkg-config --modversion webkit2gtk-4.1)" || bad "webkit2gtk-4.1 (Tauri's Linux libraries) is missing"
+if command -v xvfb-run >/dev/null 2>&1; then note "xvfb-run: present"; else bad "xvfb-run (xvfb) is missing"; fi
+if pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
+  note "webkit2gtk-4.1: $(pkg-config --modversion webkit2gtk-4.1)"
+else
+  bad "webkit2gtk-4.1 (Tauri's Linux libraries) is missing"
+fi
 pkg-config --exists gtk+-3.0 2>/dev/null || bad "gtk+-3.0 (Tauri's Linux libraries) is missing"
 
 if tool sccache sccache --version && [ -n "${EXPECT_SCCACHE:-}" ]; then
@@ -49,8 +53,10 @@ if tool node node --version && [ -n "${EXPECT_NODE_MAJOR:-}" ]; then
   if [ "$major" != "$EXPECT_NODE_MAJOR" ]; then bad "node is $OUT, .nvmrc wants major $EXPECT_NODE_MAJOR"; fi
 fi
 tool npm npm --version
+# The update feed's test (scripts/vm-smoke/update-feed.test.mjs) makes its throwaway certificates with openssl.
+tool openssl openssl version
 
-# shellcheck prints its version on the second line ("version: 0.11.0").
+# The shellcheck binary prints its version on the second line ("version: 0.11.0").
 if command -v shellcheck >/dev/null 2>&1; then
   scv=
   while IFS= read -r l; do case "$l" in "version: "*) scv=${l#version: }; break ;; esac; done < <(shellcheck --version 2>&1)
@@ -62,6 +68,8 @@ fi
 
 pw=${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}
 for b in chromium webkit; do
+  # The browsers' folders are named <browser>-<revision>, plain names that ls lists safely.
+  # shellcheck disable=SC2012
   if ls -d "$pw/$b"-* >/dev/null 2>&1; then note "playwright $b: $(ls -d "$pw/$b"-* | head -1)"; else bad "Playwright $b is missing in $pw"; fi
 done
 [ -z "${EXPECT_PLAYWRIGHT:-}" ] || note "playwright pinned: $EXPECT_PLAYWRIGHT"
@@ -88,6 +96,7 @@ if [ "${#problems[@]}" -gt 0 ]; then
 fi
 
 {
+  # shellcheck source=/dev/null
   echo "paddock-ci image built $(date -u +%Y-%m-%dT%H:%M:%SZ) from $(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-linux}")"
   printf '%s\n' "${lines[@]}"
 } > "$manifest"

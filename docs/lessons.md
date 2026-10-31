@@ -1113,3 +1113,24 @@ its own build folder), `std::fs::copy` truncating (the source itself was 0 bytes
 binary was not relinked). **Lesson:** a build script must never write into the build folder next to cargo's own outputs;
 while the sidecars are placeholders, Dyno hides `externalBin` from tauri-build (a `TAURI_CONFIG` merge patch), and a test
 that copies a built program first checks it is not empty. Pitwall and Pitcrew write the same placeholders.
+
+## A test server in the runner's process is deaf while the runner waits synchronously (2026-10-31, Spotter)
+The Windows update test failed every case: the installed old Spotter reported "timeout: connect" for the test feed, while
+`Test-NetConnection` and `curl.exe` in the guest reached it. The old build was the shell-based Spotter (the
+`release/spotter-1.0` line, 1.0.0-test.1), whose updater fetches through `paddock-download`'s ureq transport. The feed was an HTTPS server in the same Node process as the
+runner, and the runner waited for each guest job with `spawnSync` for up to 15 minutes. With the event loop blocked the
+kernel still accepted the TCP connection, but no TLS handshake came, and ureq counts the handshake against its connect
+timeout. The probes passed because they ran while the runner was not blocked. A probe binary with Spotter's own
+`paddock-download` transport in the same desktop session, and the old build against a feed in its own process, connected
+in milliseconds; a host test that fetches from the feed inside a `spawnSync` call hung until killed. **Rule:** a fake
+server a test drives runs in its own process (or the runner never blocks while the system under test may call it); a
+"connect" timeout over TLS can be a server that accepted but never answered, so check the server's event loop before the
+client's network stack. The feed now runs in a child process (`scripts/vm-smoke/update-feed.mjs`) with a test for this.
+
+## One harness developed on three branches (2026-11-01, vm-smoke)
+The VM smoke harness grew in parallel on `steward/s28c-dyno-1.0` (Dyno's fixes), `spotter/update-smoke` (the update test) and
+`feat/vm-smoke-gui` (the GUI mode and Dyno's judge fixes), with cherry-picked copies of the same fixes on two of them. The
+three were add/add conflicts with no common base, so merging was a hand job and could have dropped fixes. **Recurring class
+(ER-21):** a shared tool developed by several agents at once. Rule: one branch owns a shared harness at a time; others
+rebase onto it before adding to it; a cherry-pick of a fix is replaced by a merge of its branch. Unified in
+`tools/vm-smoke-unified`.
