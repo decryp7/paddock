@@ -533,8 +533,8 @@ is the first.
 
 ## Amendment (2026-10-31, Proposed amendment): generic tools, extensibility and tool logging
 
-- Status: **Proposed amendment**, not yet accepted: the user took its decisions on 2026-10-31 (G.10, eight in all); acceptance
-  waits for the re-check of the independent review's fixes. The rest of this ADR stands; where this section differs, it describes
+- Status: **Proposed amendment**, not yet accepted: the user took its decisions on 2026-10-31 and 2026-11-01 (G.10, nine in all); acceptance
+  waits for the re-review of the 2026-11-01 change (compiled Rust only) and the re-check of the earlier review's fixes. The rest of this ADR stands; where this section differs, it describes
   the change being proposed.
 - Asked by the user on 2026-10-31: "start moving all to rust tooling", "consider which ones are generic and which are
   paddock", "perhaps rust tooling can be plugin based? and extensible?" ("but not sandboxing"), and the tools must log well
@@ -554,7 +554,7 @@ is the first.
 ### G.1 Why a second kind of tool
 
 §3.1 puts every command in `paddock-dev`. That is right for what knows Paddock's layout (apps, `paddock.ci.json`, the
-release kit, the family's checks). It is wrong for about a third of the scripts, which know nothing about Paddock and
+release kit, the family's checks). It is wrong for about a third of the scripts (all of which become compiled Rust, G.10), which know nothing about Paddock and
 already exist **twice or three times**, partly in `engineering-rules` for other projects:
 
 | Mechanism | Copies today |
@@ -580,12 +580,14 @@ binaries, Paddock-specific commands stay in `./dev`, and both stand on one share
 | **Generic** | Useful to any project, or to any project that follows the engineering rules; reads no Paddock path, app id or file format (inputs come from flags or the project's config) | `devkit`, or a standalone tool (G.3) |
 | **Paddock** | Knows Paddock's layout, apps, `paddock.ci.json`, the release kit, Tauri bundle layout of the family, or the family's style | `./dev` (`tools/paddock-dev`), as §3.1 says |
 | **Split** | A generic engine plus Paddock-specific configuration or rules | engine in a generic tool or a `crates/` library; Paddock's part as a **data pack** (G.4) or as `./dev` code registered on the engine |
-| **Keep** | Loses something real in Rust (§4), or is bootstrap, or is YAML glue better left as YAML, or is a one-off to delete | stays, or is deleted |
+| **X (exception)** | Only (a) test code that a test framework requires in its own language (Playwright, visual-QA and Vitest specs), (b) a config file another tool reads (ESLint config, `angular.json`, `tsconfig`, CI and hook YAML), or (c) the minimal bootstrap that must run before Rust exists | stays, as small as possible; nothing else is an exception |
 
-Counts (Appendix G, 94 rows covering the non-Rust tooling files listed there, with the exclusions its header names; copies of
-one mechanism are one row): **Generic 22, Paddock 35, Split 16, Keep 21** (two of them one-offs to delete). The generic rows
+Counts (Appendix G, 96 rows covering the non-Rust tooling files listed there, with the exclusions its header names; copies of
+one mechanism are one row): **Generic 23, Paddock 52, Split 16, X (exception) 5**. Since 2026-11-01 (G.10, decision 9) all tooling is compiled
+Rust: the 21 rows first classed Keep were re-classified, 16 to Paddock (three of them deletions), one to Generic and four
+stay as exceptions (the other exception, row 95, is new). The generic rows
 hold about 4,800 lines (copies included), the split rows about 6,800 (row 24 lost 413 lines to row 25, rows 87 and 88 added 173); row 85
-(generated-diagram sources, Paddock) alone is 5,220 lines; the rest is Paddock or kept.
+(generated-diagram sources, Paddock) alone is 5,220 lines; the rest is Paddock or an exception.
 
 ### G.3 Structure
 
@@ -653,6 +655,12 @@ name only the binary. `templates/wiki/wiki-lint.mjs` and its test go with `scrip
 | (d) Dynamic libraries | **Rejected** | no stable Rust ABI, `unsafe` loading, per-compiler rebuilds |
 | (e) Data packs (TOML) | **Adopt** | projects extend by configuration, not code (memory "avoid hard coding"): rule packs for the rules engine, prefixes for temp-leak checks, per-app vm-smoke and verify-installed config, runtime pin catalogues; `paddock-packs` already parses them with limits |
 
+**External subcommands are compiled binaries only** (user, 2026-11-01, G.10 decision 9): a `devkit-<name>` is an executable
+built from Rust, never a `.rs` file run through `cargo` (`-Zscript`), a shell, Node, Python or PowerShell script, or any
+interpreter. A project adds one as a binary crate (in its repository, or installed from the registry).
+The contract is still argv, environment, JSON and exit codes, so it does not depend on the language, but nothing
+in Paddock or its tools is written in another language (exceptions: G.2's a, b and c).
+
 **Decided: no sandbox** (user, 2026-10-31). Tool plugins are trusted, local code a developer or CI runs, like a
 `Makefile` target. The trust rule is simple: **a plugin comes only from the project's repository or from a registry
 install; nothing is fetched from the network at run time.** A missing plugin is an error that names the install command;
@@ -666,8 +674,8 @@ registry's checksums (installed), so signing adds nothing. What is reused: `padd
 `Report`/`Exit`, and the **compatibility rule** of `paddock_ipc`'s protocol version (same major, plugin minor at most the
 host's) for the contract version. Revisit only if a tool ever needs a long-lived plugin.
 
-**The tool contract, version 1.0** (one page in `tools/devkit/CONTRACT.md`, the single source; a test runs a shell-script
-plugin and a Rust plugin against it):
+**The tool contract, version 1.0** (one page in `tools/devkit/CONTRACT.md`, the single source; a test runs two compiled
+plugins, a binary crate and a fixture binary, against it):
 
 - **Discovery**, in order, first match wins: built-in commands; `[commands]` in the project config; an executable
   `devkit-<name>` on `PATH` (how registry installs land, `~/.cargo/bin`). Built-ins cannot be shadowed. `devkit help`
@@ -687,7 +695,7 @@ plugin and a Rust plugin against it):
   exit code (G.5).
 - **Versions**: a configured plugin declares `contract = "1.0"`; a different major is refused before it runs, with a
   message that says which side to update. A `PATH` plugin checks `DEVKIT_CONTRACT` itself (`paddock-tool` does it for a
-  Rust plugin).
+  plugin written with it).
 - **Standalone tools** (`wiki`, `heavy`, `./dev`) follow the same contract for their own commands, so a caller sees one
   behaviour everywhere.
 
@@ -750,9 +758,9 @@ uses `paddock-log`'s current API and switches in the same change as WP-1.
   otherwise; it is logged as `OperationId` (ADR 0036 §2.1's name) on every line and passed to every plugin and child.
 - **Run summary** at the end of every run on stderr: phases with results and times, failed commands, the log file's path.
   The error message of a failed run always names the log file.
-- **Plugins inherit it through the contract**: a Rust plugin calls `paddock_tool::main` and gets all of the above under the
-  same `OperationId`; a shell plugin gets the variables and is logged by the host as a spawned command (argv, exit decoded,
-  stderr tail), so the minimum holds for any language.
+- **Plugins inherit it through the contract**: a plugin calls `paddock_tool::main` and gets all of the above under the
+  same `OperationId`; a compiled plugin built without it still gets the variables and is logged by the host as a spawned
+  command (argv, exit decoded, stderr tail), so the minimum holds for any binary.
 - **Bash callers in YAML** use `devkit run -- <cmd>` (the exit decoding and stderr tail of `run-native.mjs`) and
   `devkit ci error|skip|summary` (what `ci-log.sh` defines), so `ci-log.sh`, `ci-log.mjs` and `run-native.mjs` are not
   ported a second time.
@@ -761,7 +769,7 @@ uses `paddock-log`'s current API and switches in the same change as WP-1.
 (behind a thin local `run()` until `paddock-tool` lands, then a one-line switch); `wiki` takes `paddock-cli`'s exit codes
 (findings exit 5, not 1) while its callers are few (no backward compatibility before v1); `heavy` logs each slot wait,
 take, reclaim and release as phases with the waited time and logs the command it runs as a spawned command. `heavy` keeps
-`heavy.sh`'s on-disk slot format only for the rollout, so shell and Rust waiters share slots; after the overlap it moves to
+`heavy.sh`'s on-disk slot format only for the rollout, so the old script and the Rust waiters share slots; after the overlap it moves to
 `paddock-slots` (kernel file locks, no stale reclaim), which ER-22 asks for.
 
 ### G.6 Reclassified package list
@@ -800,9 +808,14 @@ The R-packages keep their numbers. New generic packages are **G0 to G12**. "Stat
 | R12 | `dev icons` | Paddock | – | 4.5 |
 | R13 | `dev images` | Paddock | – | 2 |
 | R14 | npm glue | Paddock | – | 1 |
-| R15 | lossy categories (unchanged) | Keep | – | 2.5 |
+| R15 | lossy categories (unchanged), plus the TS dialog analysis, now ported (row 71, in R19) | Paddock | – | 2.5 |
 | R16 | clean-up, plus deleting engineering-rules' replaced scripts and templates after the overlap | – | – | 1 |
 | G13 to G26, R17, R18 | **Adopted 2026-10-31 by reference** from [the features research note](../research/2026-10-dev-tooling-features.md) (its table of work packages, 23.0 agent-days; the note's priorities and dependencies stand): hooks through `heavy` (G13), `ci triage` (G14), worktree hooks (G15), `doctor` (G16), dispatch guard (G17), secret scan with betterleaks v1 (G18), tool version range (G19), flake ledger (G20), stall dump (G21), worktree finish (G22), MCP mode (G23), timing trends (G24), per-agent ledger (G25), gate stamps (G26), `./dev check --pre-push` (R17), release bump (R18) | mixed | – | 23.0 |
+| R19 | UI-side tooling in Rust (rows 71, 72, 75, 94): dialog-command analysis (the contract generated from Rust with ts-rs and checked by `oxc` source analysis in `./dev check`; no type checker is needed once generated), the UI source lints as `./dev check` rules, Sass (`grass`) and `tsc`/stamp glue as `./dev ui build`, the shipped i18n CLI as `./dev i18n` (the npm bin entries are removed; no backward compatibility before v1) | Paddock | – | 10 |
+| R20 | setup and image tooling (rows 76, 77, 95): `./dev setup` per OS replaces the bootstrap scripts, `devkit image verify`, and the minimal rustup shim (exception c) with its test | Paddock | – | 3 |
+| R21 | Debrief `xtask`s (rows 86, 89, 90, 92): sample log generator, font subsetting, AI eval cases, research harnesses and figure generator | Paddock | – | 8 |
+| R22 | rows 78, 79, 83, 96: linker measurements as `./dev perf link-time`, the spike as a Rust example, the latest.json fixture as a golden, `./dev serve-prod` | Paddock | – | 2.25 |
+| R23 | deletions (rows 80 to 82) and the design-sheet renderer (row 93, with R11) | Paddock | – | 0.5 |
 | WP-A1 | job-level last green (from [the Nx note](../research/2026-10-nx-vs-scripts.md) §4, 1.5 to 2 days), **pulled forward** by the user on 2026-10-31: phase 0, before wave 1 | Paddock | – | 1.5 to 2 |
 
 ### G.7 Waves and ordering
@@ -820,14 +833,17 @@ change or on the final run before merge (rule 50). Every local build or test run
 | Wave | Packages | Agent-days | Parity tests (golden against the old script, on all three OS) | Retirement step |
 |---|---|---|---|---|
 | 0 (in progress) | G0a `wiki`, G0b `heavy` | +1 after G1 | `wiki lint --json` equals `wiki-lint.mjs`'s findings on the wiki fixtures and on `docs/wiki`; `heavy` and `heavy.sh` waiters sharing one slot folder, never more than N holders (a stress test with a fake clock), the home guard's refusals as goldens | `scripts/wiki-lint.mjs` (+test) and engineering-rules' two copies; `heavy.sh` after one overlap release, templates and skills name the binary |
-| 1a | G1, G2 | 4 | the contract test (a bash plugin and a Rust plugin: env, one JSON object, exit codes, contract refusal, `OperationId` in both logs); a failure fixture whose log alone names the cause | – |
+| 1a | G1, G2 | 4 | the contract test (two compiled plugins, a binary crate and a fixture binary: env, one JSON object, exit codes, contract refusal, `OperationId` in both logs); a failure fixture whose log alone names the cause | – |
 | 1b | G3 to G11 | 9 | per command: the old script's stdout, stderr's `::error::` lines and exit code on fixture inputs, as goldens (`paddock_testkit::golden`); `run` on fixtures that exit with 0xC0000409 (Windows), SIGSEGV (Unix); timings on recorded API replies; commit-lint on the existing 77-line test's messages; bisect and polluter on scripted fake test commands | each PR deletes the script and its test, switches YAML, `package.json`, lefthook and docs, removes the copy from `docs/known-copies.toml`, and shrinks §3.7's baseline |
 | 2 | R0b, R1, R10, R2 + G12, R3, R4, R5, R6, R7, R8a, R8, R11, R12, R13, R14, R15, R16 (this order; the release-path packages above never inside a release window) | 44 (was 38: the earlier sum was wrong, it is 39.5, and the inventory re-estimates add 0.5 for R3 and 4 for R11) | as §3.6 (goldens, shadow week for plan, release, `latest.json`, rules; release dry runs per app); for split engines also a generic fixture repo that is **not** Paddock-shaped | as §3.7; R16 also removes the engineering-rules scripts after their overlap |
 
+Wave 3 (added 2026-11-01): R19 to R23, 23.75 agent-days (about 24), in parallel with wave 2 where the release guard allows; none is on the release path, but R19's `./dev i18n` and `./dev ui build` change what app builds run, so they land outside release windows. Parity tests: the old script's output as goldens (i18n, Sass output, lints on fixtures), the dialog analysis on the existing fixtures plus the generated contract, the sample generator by seed-based property tests (invented data need not match byte for byte); retirement: each PR deletes the script and its test.
+
 Total about **58 agent-days** (wave 0: 1, wave 1a: 4, wave 1b: 9, wave 2: 44; against §7's 45 plus 1.5): about 4 more for
 the runtime, contract and logging (G1, G2), about 3 more to split engines from Paddock packs; R0 (3.5) is done. The
-adopted features G13 to G26, R17 and R18 add 23.0, and WP-A1 1.5 to 2, so the whole programme is about 82 agent-days.
-**With at most two tooling agents (the cap above) that is at least 41 working days each, so at least 8 calendar weeks**
+adopted features G13 to G26, R17 and R18 add 23.0, and WP-A1 1.5 to 2, so the programme was about 82 agent-days; the compiled-only decision adds wave 3's 24, so the whole programme is
+about **106 agent-days**.
+**With at most two tooling agents (the cap above) that is at least 53 working days each, so at least 11 calendar weeks**
 (5 working days a week, no idle time), before any release window blocks a release-path package. The "now" features of the
 research note (G13 to G19 and R17: about 9.5 days) go into waves 1a and 1b inside this cap.
 
@@ -880,10 +896,19 @@ Decided (user, 2026-10-31), from the features research note
 7. **WP-A1 (job-level last green) is pulled forward** to phase 0.
 8. **The research note's features G13 to G26 and R17 to R18 are adopted by reference** (G.6), with its priorities.
 
+Decided (user, 2026-11-01): "ignore cargo script. move completely to rust compiled".
+
+9. **Compiled Rust only.** All tooling (`devkit`, `wiki`, `heavy`, `./dev` and every subcommand) is a compiled Rust binary.
+   **Cargo single-file scripts (`cargo foo.rs`, `-Zscript`) are rejected**, and no tooling stays in Node, shell, Python or
+   PowerShell. The only exceptions are the three in G.2 (a, b, c), each named in Appendix G with its reason. The 21 rows
+   first classed Keep moved to Rust targets (Appendix G; packages R19 to R23, wave 3 in G.7). The earlier words in
+   §2 ("TS only for the Playwright suites and the TS analysis") and §4 ("stays TS", "stays until generated from Rust", "become
+   rules in `eslint/`", "shell, one script per OS") are superseded by this decision where they differ.
+
 Defaults that stand (coordinator, 2026-10-31): the name `devkit`; `wiki` on `paddock-cli`'s exit codes (findings exit 5);
 the project config file `devkit.toml`; a one-release overlap before engineering-rules' scripts are deleted.
 
-The amendment stays **Proposed** until the independent review's fixes are re-checked; nothing is left for the user to decide.
+The amendment stays **Proposed** until the independent re-review of the 2026-11-01 change and the earlier fixes is done; nothing is left for the user to decide.
 
 ### Appendix G: inventory and classification (2026-10-31)
 
@@ -893,7 +918,7 @@ configs and shipped product code (the `@decryp7/paddock-ui` binaries in `ui/proj
 the shell-demo sidecar stub, 10 lines). A sweep of all 441 such files on `origin/main` (2026-10-31, `git ls-tree` and
 `wc -l`) found the files of rows 85 to 94 missing from the first draft; each other file matches a row or a glob row. Copies of one mechanism
 are one row. Users: CI, Rel (release), Ag (agents), Dev, Hook (lefthook). R: the ADR 0022 package. Class: G generic, P
-Paddock, S split, K keep.
+Paddock, S split, X exception (G.2: only a, b or c).
 
 | # | Path(s) | Lang | Lines | What it does | Users | R | Class | Target |
 |---|---|---|---|---|---|---|---|---|
@@ -967,34 +992,37 @@ Paddock, S split, K keep.
 | 68 | `tools/paddock-dev/tests/golden/generate.mjs` | js | 57 | goldens from `affected.mjs` | Dev | R4 | P | delete with `affected.mjs` |
 | 69 | `tools/test/helpers.mjs` | js | 101 | tests of `tools/*.sh` | CI | R5 | P | goes with the scripts |
 | 70 | `apps/debrief/scripts/perf/*` | py, sh | 343 | Debrief import benchmark harness | Dev | – | P | Debrief `xtask` (beside `gen-samples`) |
-| 71 | `apps/debrief/app/scripts/dialog-commands-analysis.mjs` | ts-js | 481 | TS type-checker analysis | CI | R15 | K | until the contract is generated from Rust (§4) |
-| 72 | `apps/debrief/app/scripts/lint-effects.mjs`, `lint-styles.mjs` | js | 91+152 | UI source lints | CI | R15 | K | ESLint preset (§4) |
-| 73 | `apps/debrief/app/scripts/screenshots/*`, `visual-qa/*` | ts | 732 | Playwright screenshots, visual QA | Dev | – | K | Playwright (§4) |
-| 74 | `eslint/`, app `eslint.config.js`, `playwright.config.ts` files | js, ts | about 1,200 | Node/Angular toolchain config | CI | – | K | stays |
-| 75 | `ui/scripts/build-css.mjs`, `build-e2e.mjs`, `stamp-dist.mjs` | js | 45 | Sass and tsc build glue of the UI packages | CI, Dev | R14 | K | tied to the npm toolchain |
-| 76 | `tools/bootstrap.sh`, `scripts/setup-dev.sh`, `apps/{pitcrew,pitwall}/scripts/{linux,macos}-bootstrap.sh` | sh | 112+64+63+56+61 | machine bootstrap | Dev | R5 | K | one bootstrap per OS (§4) |
-| 77 | `ci-image/verify.sh`, `ci-image/fetch-verified.sh` | sh | 94+35 | CI image build (before Rust tools exist) | CI | – | K | bootstrap |
-| 78 | `scripts/perf/link-time/*` | sh, py | 107 | recorded linker measurements (rule 48 evidence) | Dev | – | K | evidence, not tooling |
-| 79 | `spikes/dialog-hidden/*` | js | 164 | spike | – | – | K | stays with the spike |
-| 80 | `apps/debrief/scripts/rename-to-debrief.mjs` | js | 336 | one-off rename | – | R1 | K | delete |
-| 81 | `apps/pitcrew/scripts/windows-retire-legacy-runner.ps1` | ps1 | 142 | one-off runner retirement | – | R1 | K | delete |
-| 82 | `conformance/bin/*.mjs` | js | 12 | entry points | CI | R8 | K | delete with the engine |
-| 83 | `conformance/fixtures/pitwall-latest-json.mjs` | js | 118 | fixture | CI | R2 | K | becomes a golden |
-| 84 | er `templates/ci/*.yml`, `templates/lefthook.yml` | yaml | – | templates that call 1, 4 | Ag | – | K | name the binaries (G.3) |
+| 71 | `apps/debrief/app/scripts/dialog-commands-analysis.mjs` | ts-js | 481 | TS type-checker analysis | CI | R19 | P | `./dev check dialog-commands`: the contract is generated from Rust (ts-rs), so the check reads source with `oxc` and needs no type checker (4 days) |
+| 72 | `apps/debrief/app/scripts/lint-effects.mjs`, `lint-styles.mjs` | js | 91+152 | UI source lints | CI | R19 | P | `./dev check` rules over `oxc` (1.5 days); the ESLint preset keeps only the standard rules |
+| 73 | `apps/debrief/app/scripts/screenshots/*`, `visual-qa/*` | ts | 732 | Playwright screenshots, visual QA | Dev | – | X | exception (a): Playwright specs are product tests that need Playwright's TypeScript API and WebKit |
+| 74 | `eslint/`, app `eslint.config.js`, `playwright.config.ts` files | js, ts | about 1,200 | Node/Angular toolchain config | CI | – | X | exception (b): config read by ESLint and Playwright (`angular.json` and `tsconfig` likewise) |
+| 75 | `ui/scripts/build-css.mjs`, `build-e2e.mjs`, `stamp-dist.mjs` | js | 45 | Sass and tsc build glue of the UI packages | CI, Dev | R19 | P | `./dev ui build` (Sass with `grass`, runs `tsc`, stamps `dist`; 1.5 days) |
+| 76 | `tools/bootstrap.sh`, `scripts/setup-dev.sh`, `apps/{pitcrew,pitwall}/scripts/{linux,macos}-bootstrap.sh` | sh | 112+64+63+56+61 | machine bootstrap | Dev | R20 | P | `./dev setup` per OS (installs the tools after the Rust shim of row 95 has put `rustup` and `./dev` in place; 2 days) |
+| 77 | `ci-image/verify.sh` | sh | 94 | verify the CI image's contents | CI | R20 | G | `devkit image verify` (0.5 day) |
+| 78 | `scripts/perf/link-time/*` | sh, py | 107 | recorded linker measurements (rule 48 evidence) | Dev | R22 | P | `./dev perf link-time` (1 day); the recorded results stay as data |
+| 79 | `spikes/dialog-hidden/*` | js | 164 | spike | – | R22 | P | a Rust example in the shell crate (0.5 day), or deleted if its note already records the finding |
+| 80 | `apps/debrief/scripts/rename-to-debrief.mjs` | js | 336 | one-off rename | – | R23 | P | delete |
+| 81 | `apps/pitcrew/scripts/windows-retire-legacy-runner.ps1` | ps1 | 142 | one-off runner retirement | – | R23 | P | delete |
+| 82 | `conformance/bin/*.mjs` | js | 12 | entry points | CI | R8 | P | delete with the engine |
+| 83 | `conformance/fixtures/pitwall-latest-json.mjs` | js | 118 | fixture | CI | R22 | P | a JSON golden written by the Rust test (0.25 day) |
+| 84 | er `templates/ci/*.yml`, `templates/lefthook.yml` | yaml | – | templates that call 1, 4 | Ag | – | X | exception (b): YAML read by the CI runner and lefthook; they name the binaries (G.3) |
 | 85 | `apps/*/docs/diagrams/src/*.mjs` and `*.sh` (58 files in debrief 13, dyno 11, pacenotes 1, pitcrew 10, pitwall 10, sighter 5, spotter 8; seven apps) | js, sh | 5,220 | per-app diagram generators (C4, sequence, state, class, deploy, use case) and their export scripts | Dev | R11 | P | `./dev diagrams`; the draw.io export is generic (row 36) |
-| 86 | `apps/debrief/samples/generate.py`, `samples/live/append.py` | py | 2,207+115 | invented sample logs for Debrief | Dev | – | K | stays Python (a data generator, no CI use); moves only with Debrief's `xtask gen-samples` when touched |
+| 86 | `apps/debrief/samples/generate.py`, `samples/live/append.py` | py | 2,207+115 | invented sample logs for Debrief | Dev | R21 | P | Debrief `xtask gen-samples` (4 days; seeded, property tests instead of byte parity) |
 | 87 | `apps/debrief/app/e2e-tauri/scripts/fetch-msedgedriver.mjs` | js | 116 | pinned msedgedriver download for the Windows Tauri e2e | CI | R3 | S | `devkit fetch` + catalogue pack |
 | 88 | `apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh` | sh | 57 | libduckdb download for the store crate | Dev, CI | R3 | S | `devkit fetch` + catalogue pack (beside row 28) |
-| 89 | `apps/debrief/crates/debrief-pdf/fonts/build-fonts.sh` | sh | 49 | subset the PDF fonts (regenerates committed files) | Dev | – | K | stays; run by hand when a font changes |
-| 90 | `apps/debrief/crates/debrief-ai/evals/make_cases.py` | py | 341 | generate the AI eval cases | Dev | – | K | stays Python (eval data generator) |
-| 91 | `apps/debrief/app/e2e/retried-reporter.mjs`, `serve-prod.mjs` | js | 40+59 | Playwright reporter and production-build server | CI | – | K | Playwright toolchain (row 74); the reporter is reviewed with `ci/flaky-is-red` |
-| 92 | `apps/debrief/docs/research/*/harness/bench.sh`, `adr_eval.py`, `synonyms.py`, `img/src/duckdb-write-paths.py` | sh, py | 123+100+102+189 | research harnesses and figure generator | Dev | – | K | evidence stays with its note (as row 78) |
-| 93 | `apps/pitcrew/docs/design/render.mjs` | js | 47 | render the design sheets | Dev | R11 | K | stays with the design doc |
-| 94 | `ui/projects/paddock-ui/bin/*.mjs` (`i18n-build`, `i18n-messages`, `paddock-i18n`) | js | 168+406+170 | the package's shipped i18n CLI | Dev, CI | – | K | product code of `@decryp7/paddock-ui`, not tooling |
+| 89 | `apps/debrief/crates/debrief-pdf/fonts/build-fonts.sh` | sh | 49 | subset the PDF fonts (regenerates committed files) | Dev | R21 | P | Debrief `xtask fonts` (the `subsetter` crate; 1 day) |
+| 90 | `apps/debrief/crates/debrief-ai/evals/make_cases.py` | py | 341 | generate the AI eval cases | Dev | R21 | P | Debrief `xtask eval-cases` (1 day) |
+| 91 | `apps/debrief/app/e2e/retried-reporter.mjs` | js | 40 | Playwright reporter | CI | – | X | exception (a): a Playwright reporter must be JavaScript; reviewed with `ci/flaky-is-red` |
+| 92 | `apps/debrief/docs/research/*/harness/bench.sh`, `adr_eval.py`, `synonyms.py`, `img/src/duckdb-write-paths.py` | sh, py | 123+100+102+189 | research harnesses and figure generator | Dev | R21 | P | Debrief `xtask research` examples (2 days); the evidence stays with its note |
+| 93 | `apps/pitcrew/docs/design/render.mjs` | js | 47 | render the design sheets | Dev | R23 | P | `./dev diagrams render` with R11 (0.25 day) |
+| 94 | `ui/projects/paddock-ui/bin/*.mjs` (`i18n-build`, `i18n-messages`, `paddock-i18n`) | js | 168+406+170 | the package's i18n CLI, shipped in the npm package | Dev, CI | R19 | P | `./dev i18n` (3 days); the npm `bin` entries are removed (no backward compatibility before v1, rule 40's one mechanism) |
+| 95 | `rustup` installer shims, one per OS (`sh`, `ps1`, at most 30 lines each) and `ci-image/fetch-verified.sh` | sh, ps1 | about 95 | install `rustup`, the pinned toolchain and `./dev` on a fresh machine or in the CI image, before any Rust tool exists | Dev, CI | R20 | X | exception (c): must run before Rust exists; kept as small as possible (download, verify checksum, run `rustup`, build `./dev`), everything else is `./dev setup` (row 76); 0.5 day with a test per OS |
+| 96 | `apps/debrief/app/e2e/serve-prod.mjs` | js | 59 | serve the production build for the end-to-end run | CI | R22 | P | `./dev serve-prod` (0.5 day) |
 
 
-Summary: G 22 (rows 1–22), P 35 (rows 25, 38–70 and 85), S 16 (rows 23, 24, 26–37, 87 and 88), K 21 (rows 71–84, 86 and 89–94);
-94 rows. Line totals by class (copies included): about 4,800 G; about 6,800 S; row 85 alone 5,220. Each
+Summary: G 23 (rows 1–22 and 77), P 52 (rows 25, 38–72, 75, 76, 78–83, 85, 86, 89, 90, 92, 93, 94 and 96), S 16 (rows 23, 24, 26–37, 87 and 88),
+X (exception) 5 (rows 73, 74, 84, 91 and 95); 96 rows. The 21 rows first classed K moved: 16 to P (three are deletions: rows 80 to 82),
+1 to G (row 77), 4 stay as X; rows 95 and 96 are new splits of rows 76, 77 and 91. Line totals by class (copies included): about 4,800 G; about 6,800 S; row 85 alone 5,220. Each
 script's tests (`*.test.mjs`, `*.test.sh`, `tools/test/*`) go with it.
 
 ## Sources
