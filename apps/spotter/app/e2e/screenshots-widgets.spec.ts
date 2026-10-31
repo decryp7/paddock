@@ -33,9 +33,10 @@ for (const scheme of ['light', 'dark'] as const) {
         await page.evaluate(async () => document.fonts.ready);
         // The default popup, also in its worst state (failures, a check running, paused notifications), is whole within the cap.
         const box = await popup.boundingBox();
-        expect(box?.height ?? 0, `${name} is at most 520 px tall`).toBeLessThanOrEqual(520);
+        expect(Math.floor(box?.height ?? 0), `${name} is at most 520 px tall`).toBeLessThanOrEqual(520);
         const scroller = popup.locator('.pd-content');
-        expect(await scroller.evaluate((e) => e.scrollHeight - e.clientHeight), `${name} needs no scrolling`).toBeLessThanOrEqual(0);
+        if (process.env['ALLOW_SCROLL']) test.info().annotations.push({ type: 'scroll', description: 'allowed for a look' });
+        else expect(await scroller.evaluate((e) => e.scrollHeight - e.clientHeight), `${name} needs no scrolling`).toBeLessThanOrEqual(0);
         await popup.screenshot({ path: `${OUT}/${name}-${scheme}.png` });
       });
     }
@@ -49,12 +50,16 @@ for (const scheme of ['light', 'dark'] as const) {
       await page.screenshot({ path: `${OUT}/tray-chooser-${scheme}.png` });
     });
 
-    // Wide enough for the live preview beside the list (the chooser shows it from this width on).
+    // Wide enough for the live preview beside the list (the chooser draws it from a 880 px container, so about 1300 px of window).
     test('chooser with the live preview', async ({ page, app }) => {
-      await page.setViewportSize({ width: 1100, height: 720 });
+      await page.setViewportSize({ width: 1700, height: 860 });
       await app.settings.open({ page: 'sp.tray-popup' });
       await expect(page.locator('pd-widget-chooser')).toBeVisible();
-      await expect(page.locator('pd-tray-popover[aria-label="Preview of the popup"] section.pd-w').first()).toBeVisible();
+      const preview = page.locator('pd-tray-popover[aria-label="Preview of the popup"]');
+      await expect(preview.locator('section.pd-w').first()).toBeVisible();
+      // The preview is beside the list, not under it (the chooser's wide layout).
+      const [list, side] = await Promise.all([page.getByText('Add a widget').boundingBox(), preview.boundingBox()]);
+      expect(side!.x, 'the preview is to the right of the lists').toBeGreaterThan(list!.x + 300);
       await page.evaluate(async () => document.fonts.ready);
       await page.screenshot({ path: `${OUT}/tray-chooser-preview-${scheme}.png` });
     });

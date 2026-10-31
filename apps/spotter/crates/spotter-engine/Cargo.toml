@@ -28,6 +28,7 @@ paddock-widgets = { path = "../../../../crates/paddock-widgets" }
 
 [dev-dependencies]
 tempfile.workspace = true
+paddock-commands = { path = "../../../../crates/paddock-commands" }
 
 [lints]
 workspace = true

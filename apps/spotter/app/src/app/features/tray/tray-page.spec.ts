@@ -27,8 +27,10 @@ describe('TrayPage', () => {
     const { f, frames } = await make(makeMock({ scenario: 'empty' }));
     expect(f.nativeElement.querySelector('.pill')).toBeNull();
     expect(text(frames()[0]!)).toContain('See new releases here');
-    expect(byText(frames()[0]!, 'button', 'Check all now')).not.toBeNull();
-    expect(text(frames()[DEFAULT_KINDS.indexOf('failures')]!)).toContain('No failures');
+    expect(byText(frames()[0]!, 'button', 'Add a watch')).not.toBeNull();
+    const failures = text(frames()[DEFAULT_KINDS.indexOf('failures')]!);
+    expect(failures).toContain('See failures here');
+    expect(failures, 'no watches is not an all-good row').not.toContain('No failures');
   });
 
   it('shows a loading state with a status for assistive technology before the layout arrives', async () => {

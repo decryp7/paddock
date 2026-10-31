@@ -1,3 +1,4 @@
+import type { LoadingRows } from '../core/generated/widgets';
 import { inject } from '@angular/core';
 import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
 import type { CommandError } from '../core/api.types';
@@ -6,6 +7,8 @@ import { toCommandError } from '../core/command-error';
 import type { PopoverEdit, PopoverValues, PopoverView } from '../core/widgets.types';
 
 interface TrayWidgetsState {
+  /** How many rows each kind draws, from the engine: a loading twin is as tall as a ready widget. */
+  shape: LoadingRows[];
   /** The layout the chooser draws; null before the first answer. */
   view: PopoverView | null;
   /** What the widgets show; null before the first answer (every widget is loading). */
@@ -24,7 +27,7 @@ interface TrayWidgetsState {
  */
 export const TrayWidgetsStore = signalStore(
   { providedIn: 'root' },
-  withState<TrayWidgetsState>({ view: null, values: null, error: null, loading: false }),
+  withState<TrayWidgetsState>({ shape: [], view: null, values: null, error: null, loading: false }),
   withMethods((store) => {
     const backend = inject(BACKEND);
     let started = false;
@@ -32,8 +35,8 @@ export const TrayWidgetsStore = signalStore(
     const load = async (): Promise<void> => {
       patchState(store, { loading: true });
       try {
-        const [view, values] = await Promise.all([backend.popoverView(), backend.popoverValues()]);
-        patchState(store, { view, values, error: null, loading: false });
+        const [view, values, shape] = await Promise.all([backend.popoverView(), backend.popoverValues(), backend.popoverShape()]);
+        patchState(store, { view, values, shape, error: null, loading: false });
       } catch (e) {
         patchState(store, { loading: false, error: toCommandError(e) });
       }

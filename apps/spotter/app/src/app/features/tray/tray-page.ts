@@ -43,6 +43,7 @@ import { WidgetSet } from './widget-set';
           [catalogue]="view.catalogue"
           [values]="widgets.values()"
           [templates]="set.widgets()"
+          [meta]="set.meta"
           (action)="perform($event)"
           (customize)="customize()"
         />
@@ -93,8 +94,8 @@ import { WidgetSet } from './widget-set';
       margin-left: auto;
       padding: 1px var(--pd-space-2);
       border-radius: var(--pd-radius-pill);
-      background: var(--pd-surface-3);
-      color: var(--pd-text-muted);
+      background: var(--pd-info-tint);
+      color: var(--pd-info);
       font-size: var(--pd-text-caption);
       font-weight: var(--pd-weight-semibold);
     }

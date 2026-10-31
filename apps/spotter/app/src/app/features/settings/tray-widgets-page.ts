@@ -33,7 +33,7 @@ import { WidgetSet } from '../tray/widget-set';
               <sp-widget-set #set />
               <pd-tray-popover label="Preview of the popup" platform="macos" inert>
                 <div slot="header" class="head"><strong>Spotter</strong></div>
-                <pd-widget-area [placements]="view.layout.placements" [catalogue]="view.catalogue" [values]="store.values()" [templates]="set.widgets()" />
+                <pd-widget-area [placements]="view.layout.placements" [catalogue]="view.catalogue" [values]="store.values()" [templates]="set.widgets()" [meta]="set.meta" />
               </pd-tray-popover>
             </div>
           </pd-widget-chooser>
@@ -43,7 +43,7 @@ import { WidgetSet } from '../tray/widget-set';
   `,
   styles: `
     .narrow {
-      max-width: 880px;
+      max-width: 1120px;
     }
     .help {
       margin: 0;

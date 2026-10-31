@@ -10,9 +10,9 @@ use paddock_widgets::{Layout, PlacementState, Progress, SurfaceNotice, SurfaceVa
 use spotter_core::state::WatchStatus;
 use spotter_core::time::ClockTime;
 use spotter_core::watch::Settings;
-use spotter_core::widgets::{CHANGE_ROWS, FAILURE_ROWS, SITE_ROWS, 
+use spotter_core::widgets::{
     ChangeRow, FailureKind, FailureRow, NotificationMode, PopoverState, PopoverValue, PopoverValues, PopoverWidget, SiteRow, SiteState,
-    WidgetActionId,
+    WidgetActionId, CHANGE_ROWS, FAILURE_ROWS, SITE_ROWS,
 };
 
 /// Watches due within this long after the next one are counted with it (milliseconds).
@@ -46,11 +46,34 @@ fn ready(value: PopoverValue, now_ms: i64) -> PopoverState {
     }
 }
 
+/// "Nothing here yet": the widget tells what it will show and offers the step that starts it.
 fn empty(title: &str, detail: &str, next: Option<WidgetAction<WidgetActionId>>) -> PopoverState {
     WidgetState::Empty {
         title: title.into(),
         detail: detail.into(),
         next,
+        calm: false,
+    }
+}
+
+/// "All good": the widget has looked and there is nothing to act on (drawn as one calm row with a check).
+fn calm(title: &str, detail: &str, next: Option<WidgetAction<WidgetActionId>>) -> PopoverState {
+    WidgetState::Empty {
+        title: title.into(),
+        detail: detail.into(),
+        next,
+        calm: true,
+    }
+}
+
+/// "12 min ago": how long ago `then_ms` was (a time of the future reads as just now).
+fn ago(now_ms: i64, then_ms: i64) -> String {
+    let minutes = (now_ms - then_ms).max(0) / 60_000;
+    match minutes {
+        0 => "just now".to_string(),
+        1..=59 => format!("{minutes} min ago"),
+        60..=1439 => format!("{} h ago", minutes / 60),
+        _ => format!("{} d ago", minutes / 1440),
     }
 }
 
@@ -253,11 +276,22 @@ fn failures(i: &Inputs) -> PopoverState {
         })
         .collect();
     if rows.is_empty() {
-        return empty(
-            "No failures",
-            "Every watch is fine.",
-            act(WidgetActionId::OpenWatches, "Open watches"),
-        );
+        // Calm only when watches exist and have been looked at: no watches, or none checked yet, is "nothing here yet".
+        if i.watches.is_empty() {
+            return empty("See failures here", "No watches yet.", act(WidgetActionId::AddWatch, "Add a watch"));
+        }
+        return match i.watches.iter().filter_map(|w| w.last_check_ms).max() {
+            None => empty(
+                "See failures here",
+                "Nothing is checked yet.",
+                act(WidgetActionId::CheckAll, "Check all now"),
+            ),
+            Some(at) => calm(
+                "No failures",
+                &format!("Last checked {}.", ago(i.now_ms, at)),
+                act(WidgetActionId::OpenWatches, "Open watches"),
+            ),
+        };
     }
     rows.sort_by(|a, b| b.failures.cmp(&a.failures).then_with(|| a.name.cmp(&b.name)));
     let total = rows.len();
@@ -413,7 +447,7 @@ mod tests {
 
     fn empty_of(state: PopoverState) -> (String, String, Option<WidgetActionId>) {
         match state {
-            WidgetState::Empty { title, detail, next } => (title, detail, next.map(|n| n.action)),
+            WidgetState::Empty { title, detail, next, .. } => (title, detail, next.map(|n| n.action)),
             other => panic!("not empty: {other:?}"),
         }
     }
@@ -458,11 +492,20 @@ mod tests {
         let mut running = watch("running");
         running.checking = true;
         let s = settings();
-        let PopoverValue::WatchedSites { rows, .. } = with(&[ok, pending, running], &s, |i| value_of(state(PopoverWidget::WatchedSites, i))) else {
+        let PopoverValue::WatchedSites { rows, .. } =
+            with(&[ok, pending, running], &s, |i| value_of(state(PopoverWidget::WatchedSites, i)))
+        else {
             panic!("watched sites")
         };
         let order: Vec<(&str, SiteState)> = rows.iter().map(|r| (r.id.as_str(), r.state)).collect();
-        assert_eq!(order, [("running", SiteState::Checking), ("pending", SiteState::Pending), ("ok", SiteState::Ok)]);
+        assert_eq!(
+            order,
+            [
+                ("running", SiteState::Checking),
+                ("pending", SiteState::Pending),
+                ("ok", SiteState::Ok)
+            ]
+        );
     }
 
     #[test]
@@ -624,17 +667,50 @@ mod tests {
         let PopoverValue::Failures { rows, more } = with(&ws, &s, |i| value_of(state(PopoverWidget::Failures, i))) else {
             panic!("failures")
         };
-        // Worst first: the failing, unpaused watches are w1 (7), w3 (3), w0 (2) and w2 (1); the list shows the first FAILURE_ROWS.
-        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["w1", "w3"]);
-        assert_eq!((more, rows[0].kind, rows[0].message.as_str()), (2, FailureKind::NeedsYou, "Log in."));
-        assert_eq!(rows[1].kind, FailureKind::AuthNeeded);
+        // Worst first: the failing, unpaused watches are w1 (7), w3 (3), w0 (2) and w2 (1); one is listed, three are counted.
+        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["w1"]);
+        assert_eq!(
+            (more, rows[0].kind, rows[0].message.as_str()),
+            (3, FailureKind::NeedsYou, "Log in.")
+        );
     }
 
     #[test]
-    fn no_failures_is_a_calm_empty_that_opens_the_watches() {
+    fn no_failures_is_calm_only_once_watches_were_checked_and_says_when() {
         let s = settings();
-        let (title, _, next) = empty_of(with(&[watch("a")], &s, |i| state(PopoverWidget::Failures, i)));
-        assert_eq!((title.as_str(), next), ("No failures", Some(WidgetActionId::OpenWatches)));
+        let mut a = watch("a");
+        a.last_check_ms = Some(NOW - 12 * 60_000);
+        let calm_of = |state: PopoverState| match state {
+            WidgetState::Empty { title, detail, next, calm } => (title, detail, next.map(|n| n.action), calm),
+            other => panic!("not empty: {other:?}"),
+        };
+        let (title, detail, next, calm) = calm_of(with(&[a], &s, |i| state(PopoverWidget::Failures, i)));
+        assert_eq!(
+            (title.as_str(), detail.as_str(), next, calm),
+            ("No failures", "Last checked 12 min ago.", Some(WidgetActionId::OpenWatches), true)
+        );
+        // No watches: nothing to be fine about, and the step starts one.
+        let (title, detail, next, calm) = calm_of(with(&[], &s, |i| state(PopoverWidget::Failures, i)));
+        assert_eq!(
+            (title.as_str(), detail.as_str(), next, calm),
+            ("See failures here", "No watches yet.", Some(WidgetActionId::AddWatch), false)
+        );
+        // Watches that were never checked: not "fine" yet, and the step checks them.
+        let (_, detail, next, calm) = calm_of(with(&[watch("b")], &s, |i| state(PopoverWidget::Failures, i)));
+        assert_eq!(
+            (detail.as_str(), next, calm),
+            ("Nothing is checked yet.", Some(WidgetActionId::CheckAll), false)
+        );
+    }
+
+    #[test]
+    fn how_long_ago_is_worded_in_minutes_hours_and_days() {
+        assert_eq!(ago(NOW, NOW + 5), "just now");
+        assert_eq!(ago(NOW, NOW - 30_000), "just now");
+        assert_eq!(ago(NOW, NOW - 59 * 60_000), "59 min ago");
+        assert_eq!(ago(NOW, NOW - 60 * 60_000), "1 h ago");
+        assert_eq!(ago(NOW, NOW - 1439 * 60_000), "23 h ago");
+        assert_eq!(ago(NOW, NOW - 1440 * 60_000), "1 d ago");
     }
 
     #[test]
@@ -715,5 +791,152 @@ mod tests {
             with(&[], &s, |i| popover_values(edited.layout(), i)).placements.len(),
             ids.len() - 1
         );
+    }
+
+    // ---- fixtures for the UI's mock ----
+
+    /// Failing watches with the messages the engine really words them with.
+    fn failing(id: &str, name: &str, status: WatchStatus, failures: u32) -> WatchSummary {
+        let mut w = watch(id);
+        w.name = name.into();
+        w.status = status;
+        w.failures = failures;
+        w.latest = Some(release("1.0.0", NOW - 3 * 86_400_000));
+        w.last_check_ms = Some(NOW - 8 * 60_000);
+        w.next_check_ms = Some(NOW + 15 * 60_000);
+        w
+    }
+
+    fn found(id: &str, name: &str, version: &str, ago_ms: i64, unseen: bool) -> WatchSummary {
+        let mut w = watch(id);
+        w.name = name.into();
+        w.latest = Some(release(version, NOW - ago_ms));
+        w.unseen = unseen;
+        w.last_check_ms = Some(NOW - 12 * 60_000);
+        w.next_check_ms = Some(NOW + 40 * 60_000);
+        w
+    }
+
+    /// The named scenarios of the UI's mock (`demo`, `empty`, `worst`): the watches and settings that make them.
+    fn scenario(name: &str) -> (Vec<WatchSummary>, Settings) {
+        let mut s = settings();
+        match name {
+            "empty" => (Vec::new(), s),
+            "demo" => {
+                let mut ws = vec![
+                    found("w-1", "Orbit API image", "2.2.0", 60_000, true),
+                    found("w-2", "tinyparse", "2.1.0", 4 * 3_600_000, true),
+                    found("w-3", "Acme Installer", "R3.10.00T32", 5 * 3_600_000, true),
+                    found("w-4", "Lumen CLI", "3.6.5", 3 * 86_400_000, false),
+                    found("w-5", "Fjord UI kit", "3.1.5", 2 * 86_400_000, true),
+                ];
+                ws.push(failing(
+                    "w-6",
+                    "Orbit server",
+                    WatchStatus::Unreachable(
+                        "gitlab.example did not answer within 20 seconds. It will be tried again in 15 minutes.".into(),
+                    ),
+                    3,
+                ));
+                ws.push(failing(
+                    "w-7",
+                    "Vendor registry",
+                    WatchStatus::AuthNeeded("The registry asked for a token. Add one in the watch settings.".into()),
+                    1,
+                ));
+                let mut paused = found("w-8", "Nightly docs feed", "2026.10.30", 6 * 86_400_000, false);
+                paused.paused = true;
+                ws.push(paused);
+                (ws, s)
+            }
+            "worst" => {
+                // The worst the default popup meets: more failures than rows, a check running, notifications paused.
+                let mut ws = vec![
+                    failing(
+                        "w-1",
+                        "Vendor download page",
+                        WatchStatus::NeedsYou(
+                            "The page asks for a login before it shows the download. Open it, sign in, then check again.".into(),
+                        ),
+                        7,
+                    ),
+                    failing(
+                        "w-2",
+                        "Orbit server",
+                        WatchStatus::Unreachable(
+                            "gitlab.example did not answer within 20 seconds. It will be tried again in 15 minutes.".into(),
+                        ),
+                        3,
+                    ),
+                    failing(
+                        "w-3",
+                        "Vendor registry",
+                        WatchStatus::AuthNeeded("The registry asked for a token. Add one in the watch settings.".into()),
+                        2,
+                    ),
+                    failing(
+                        "w-4",
+                        "Internal mirror",
+                        WatchStatus::Failed("The server answered 502 Bad Gateway.".into()),
+                        1,
+                    ),
+                    found("w-5", "Orbit API image", "2.2.0", 60_000, true),
+                    found("w-6", "tinyparse", "2.1.0", 4 * 3_600_000, true),
+                ];
+                ws[4].checking = true;
+                s.notifications_paused_until = Some(NOW + 95 * 60_000);
+                (ws, s)
+            }
+            other => panic!("no scenario {other}"),
+        }
+    }
+
+    /// The UI's mock serves these files' contents instead of re-deriving the engine's rules in TypeScript: for every scenario the
+    /// state of every widget kind (as if all were placed) and the surface notice of a popup without the Notifications widget.
+    /// `PADDOCK_WRITE_TS=1 cargo test -p spotter-engine --lib widgets::tests::the_mock_fixtures` rewrites it.
+    #[test]
+    fn the_mock_fixtures_are_the_engines_output() {
+        use paddock_commands::testing::{self, WriteMode};
+        let mut all = Stored::<PopoverCatalogue>::default();
+        for widget in [PopoverWidget::WatchedSites, PopoverWidget::QuietHours, PopoverWidget::Notifications] {
+            all.edit(Edit::Add {
+                widget,
+                span: None,
+                at: None,
+            })
+            .unwrap();
+        }
+        let without_notifications = Stored::<PopoverCatalogue>::default();
+        let mut scenarios = serde_json::Map::new();
+        for name in ["demo", "empty", "worst"] {
+            let (ws, s) = scenario(name);
+            let values = with(&ws, &s, |i| popover_values(all.layout(), i));
+            let by_kind: serde_json::Map<String, serde_json::Value> = all
+                .layout()
+                .placements
+                .iter()
+                .zip(&values.placements)
+                .map(|(p, st)| {
+                    (
+                        serde_json::to_value(p.widget).unwrap().as_str().unwrap().to_string(),
+                        serde_json::to_value(&st.state).unwrap(),
+                    )
+                })
+                .collect();
+            let notice = with(&ws, &s, |i| popover_values(without_notifications.layout(), i)).notice;
+            scenarios.insert(
+                name.into(),
+                serde_json::json!({ "byKind": by_kind, "noticeWithoutNotificationsWidget": notice }),
+            );
+        }
+        // The catalogue (kinds, spans, limits), the default layout and the loading shape come from the same code the engine runs.
+        let view: spotter_core::widgets::PopoverView = paddock_widgets::view(&without_notifications);
+        let text = serde_json::to_string_pretty(
+            &serde_json::json!({ "nowMs": NOW, "view": view, "shape": spotter_core::widgets::loading_shape(), "scenarios": scenarios }),
+        )
+        .unwrap()
+            + "\n";
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../app/src/app/core/mock/popover-fixtures.json");
+        testing::sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
     }
 }

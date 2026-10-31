@@ -1,6 +1,5 @@
-import type { Settings } from '../api.types';
-import { makeMock, NOW } from '../../../testing/test-helpers';
-import { DEFAULT_KINDS, MockPopover } from './mock-popover';
+import { NOW } from '../../../testing/test-helpers';
+import { DEFAULT_KINDS, LOADING_SHAPE, MockPopover } from './mock-popover';
 
 const kinds = (p: MockPopover) => p.view().layout.placements.map((x) => x.widget);
 
@@ -51,31 +50,34 @@ describe('MockPopover (the mock of the engine layout, for browser development an
     expect(p.view().canUndo).toBe(true);
   });
 
-  it('draws values from the watches: rows, empty states with a next step, paused notice', async () => {
-    const watches = await makeMock().listWatches();
-    const settings = await makeMock().getSettings();
+  it('serves what the engine produced for a scenario, for the placed kinds, with the paused notice only when no widget says it', () => {
     const p = new MockPopover();
-    const values = p.values(watches, settings, NOW);
-    expect(values.placements).toHaveLength(DEFAULT_KINDS.length);
-    expect(values.notice).toBeNull();
+    const demo = p.values('demo', NOW);
+    expect(demo.placements.map((x) => x.id)).toEqual(p.view().layout.placements.map((x) => x.id));
+    expect(demo.notice).toBeNull();
+    const worst = p.values('worst', NOW);
+    expect(worst.notice?.title).toBe('Notifications are paused');
     p.edit({ add: { widget: 'notifications', span: null, at: null } });
-    const none = p.values([], { ...settings, notificationsPausedUntilMs: NOW + 1000 }, NOW);
-    expect(none.placements.every((x) => x.state.state === 'empty' || x.state.state === 'ready')).toBe(true);
-    expect(none.notice).toBeNull();
-    p.edit({ remove: { id: 'notifications' } });
-    expect(p.values(watches, { ...settings, notificationsPausedUntilMs: NOW + 1000 } as Settings, NOW).notice?.title).toBe('Notifications are paused');
+    expect(p.values('worst', NOW).notice).toBeNull();
+    const empty = new MockPopover().values('empty', NOW).placements.map((x) => x.state.state);
+    expect(empty.every((s) => s === 'empty')).toBe(true);
   });
 
-  it('words every kind of notification state and quiet hours', () => {
-    const p = new MockPopover();
-    p.edit({ add: { widget: 'quietHours', span: null, at: null } });
-    p.edit({ add: { widget: 'notifications', span: null, at: null } });
-    const base = { notifications: true, notificationsPausedUntilMs: null, quietHours: { start: '22:00', end: '07:00' } } as Settings;
-    const states = (settings: Settings) => p.values([], settings, NOW).placements.map((x) => x.state);
-    expect(states(base).some((s) => s.state === 'ready' && s.value.kind === 'quietHours')).toBe(true);
-    const mode = (settings: Settings) => states(settings).flatMap((s) => (s.state === 'ready' && s.value.kind === 'notifications' ? [s.value.mode.kind] : []));
-    expect(mode(base)).toEqual(['on']);
-    expect(mode({ ...base, notifications: false })).toEqual(['off']);
-    expect(mode({ ...base, notificationsPausedUntilMs: NOW + 1 })).toEqual(['paused']);
+  it('moves the engine\'s times to the mock\'s now', () => {
+    const state = (now: number) => new MockPopover(['nextCheck']).values('demo', now).placements[0]!.state;
+    const at = (now: number) => (state(now).state === 'ready' ? (state(now) as { value: { atMs: number } }).value.atMs : 0);
+    expect(at(NOW + 5000) - at(NOW)).toBe(5000);
+  });
+
+  it('reads the catalogue, the defaults and the loading shape from the engine\'s fixtures', () => {
+    expect(DEFAULT_KINDS).toEqual(['recentChanges', 'failures', 'nextCheck']);
+    expect(LOADING_SHAPE.map((l) => [l.kind, l.rows])).toEqual([
+      ['watchedSites', 4],
+      ['recentChanges', 1],
+      ['nextCheck', 0],
+      ['quietHours', 0],
+      ['failures', 1],
+      ['notifications', 0],
+    ]);
   });
 });
