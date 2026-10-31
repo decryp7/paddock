@@ -55,6 +55,7 @@ members = [
     "paddock-updater",
     "paddock-view",
     "paddock-watch",
+    "paddock-widgets",
     "paddock-window",
     "paddock-workbench",
     "paddock-workspace-hack",
