@@ -196,7 +196,8 @@ fn begin_reports_starting_and_looks_once() {
             service: true,
             cpu: false,
             lock: true,
-            deciding: true
+            deciding: true,
+            recheck: false
         }
     ));
     assert_eq!(*s.phase(), Phase::Looking { seq: 1 });
@@ -1284,4 +1285,47 @@ fn a_service_removed_before_its_first_answer_still_takes_the_agent_back_but_a_ba
     }));
     assert!(cmds.iter().all(|c| !matches!(c, Command::AskToExit { .. })), "{cmds:?}");
     assert!(matches!(s.phase(), Phase::Connected { .. }));
+}
+
+/// A look of the wait for the login service's agent that asks the service is a recheck look: the adapter may skip the service when
+/// the lock is held (an agent is there). The decision look and the looks after a connection or a service change are not.
+#[test]
+fn the_service_recheck_of_a_wait_is_marked_so_a_held_lock_can_skip_it() {
+    let recheck = |cmds: &[Command]| {
+        cmds.iter().find_map(|c| {
+            if let Command::Look { recheck, service, .. } = c {
+                Some((*recheck, *service))
+            } else {
+                None
+            }
+        })
+    };
+    let (mut s, _) = first(|l| Look {
+        service: Some(SUPERVISING),
+        ..l
+    });
+    assert_eq!(*s.phase(), Phase::WaitingForService);
+    let mut seen_recheck = false;
+    for _ in 0..200 {
+        let cmds = s.step(Event::Tick);
+        if let Some((is_recheck, asks)) = recheck(&cmds) {
+            assert_eq!(
+                is_recheck, asks,
+                "a wait look that asks the service is a recheck, and only that one: {cmds:?}"
+            );
+            seen_recheck |= is_recheck;
+            let seq = look_seq(&cmds);
+            s.step(Event::Looked(Look {
+                service: asks.then_some(SUPERVISING),
+                lock: Some(LockSeen::Held),
+                ..look(seq)
+            }));
+        }
+    }
+    assert!(seen_recheck, "the wait rechecks the service now and then");
+    assert_eq!(
+        recheck(&s.step(Event::ServiceChanged)),
+        Some((false, true)),
+        "a service change always asks"
+    );
 }

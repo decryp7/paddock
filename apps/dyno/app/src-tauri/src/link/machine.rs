@@ -328,6 +328,9 @@ pub enum Command {
         /// The look that starts an attempt and decides what to do: a discovery file beside a held lock is connected to without
         /// asking the login service (`SMAppService.status` can take tens of seconds at login).
         deciding: bool,
+        /// A recheck of the login service in the wait for its agent: when the lock is held an agent runs, and the service's answer
+        /// only counts rechecks while the lock is free, so the adapter does not wait for the service then.
+        recheck: bool,
     },
     /// Start the agent (never while a child is held); answers [`Event::Launched`].
     Launch {
@@ -689,7 +692,7 @@ impl Supervisor {
         });
     }
 
-    fn issue_look(&mut self, service: bool, cpu: bool, lock: bool, out: &mut Vec<Command>) -> Seq {
+    fn issue_look(&mut self, service: bool, cpu: bool, lock: bool, recheck: bool, out: &mut Vec<Command>) -> Seq {
         let seq = self.next_seq();
         self.look_out = Some(seq);
         out.push(Command::Look {
@@ -698,6 +701,7 @@ impl Supervisor {
             cpu,
             lock,
             deciding: false,
+            recheck,
         });
         seq
     }
@@ -713,6 +717,7 @@ impl Supervisor {
             cpu: false,
             lock: true,
             deciding: true,
+            recheck: false,
         });
     }
 
@@ -835,7 +840,7 @@ impl Supervisor {
                 Phase::WaitingForService | Phase::WaitingForHolder => service || self.wait.ticks.is_multiple_of(self.tuning.lock_every),
                 _ => true,
             };
-            self.issue_look(service, cpu, lock, out);
+            self.issue_look(service, cpu, lock, service && matches!(self.phase, Phase::WaitingForService), out);
         }
         #[cfg(test)]
         if self.mutant == Mutant::LaunchOnFixedWait
@@ -911,11 +916,14 @@ impl Supervisor {
             Phase::Looking { .. } => self.decide(look, true, out),
             Phase::Starting { child } => self.judge_start(child, look, out),
             Phase::WaitingForService => {
+                // An agent holding the lock means the service (or someone) runs one: the count of idle rechecks starts again. This
+                // holds without the service's answer too (a recheck that finds the lock held does not ask the service).
+                if look.lock == Some(LockSeen::Held) {
+                    self.wait.idle_rechecks = 0;
+                }
                 if look.service.is_some() {
                     // The lock tells a service that supervises on paper from one that starts nothing.
-                    if look.lock == Some(LockSeen::Held) {
-                        self.wait.idle_rechecks = 0;
-                    } else if look.lock == Some(LockSeen::Free) && self.service.supervises {
+                    if look.lock == Some(LockSeen::Free) && self.service.supervises {
                         self.wait.idle_rechecks += 1;
                         if self.wait.idle_rechecks >= self.tuning.idle_rechecks {
                             self.fallback = true;
@@ -1136,7 +1144,7 @@ impl Supervisor {
                 self.set_phase(Phase::Connected { peer, owner }, out);
                 out.push(Command::Report(AgentStatus::new(AgentState::Running, None)));
                 // What the service says now decides hand-over and take-back, and what a quit does.
-                self.issue_look(true, false, false, out);
+                self.issue_look(true, false, false, false, out);
             }
             Purpose::AskToExit => {
                 out.push(Command::AskToExit { peer });
@@ -1244,7 +1252,7 @@ impl Supervisor {
             Phase::Replacing { .. } | Phase::TakingBack { .. } => {
                 self.reask = true;
                 if self.look_out.is_none() {
-                    self.issue_look(false, false, true, out);
+                    self.issue_look(false, false, true, false, out);
                 }
             }
             Phase::Looking { .. } | Phase::Connecting { .. } | Phase::BackingOff { .. } => {
@@ -1295,7 +1303,7 @@ impl Machine for Supervisor {
             Event::ServiceChanged => {
                 // A look already out may have been taken before the change: the newest look wins.
                 if !matches!(self.phase, Phase::Idle | Phase::Quitting { .. }) {
-                    self.changed_seq = Some(self.issue_look(true, false, true, &mut out));
+                    self.changed_seq = Some(self.issue_look(true, false, true, false, &mut out));
                 }
             }
             Event::ServiceInstalled(installed) => self.service.installed = installed,
