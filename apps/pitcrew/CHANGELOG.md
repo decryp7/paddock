@@ -20,6 +20,13 @@ from Conventional Commits by git-cliff (`cliff.toml`).
 - Runner downloads and updates use the Paddock downloader: parallel ranges, per-host connection caps, back-off when a server
   answers 429 or 503, resume of a stopped download, the checksum computed while writing and compared with the publisher's
   (two sources must agree), a free-space check, and Cancel in every phase. Each download is a job with phases in the Jobs list.
+- The pause windows editor is the shared one: days as a row of toggles, times from a list or typed, and a window that
+  starts after it ends is marked as running overnight. A new window starts on Monday to Friday, and a window with no days
+  counts as every day, as the engine always did (Save no longer refuses it).
+- The sparklines on the dashboard tiles have the shared look: an end dot, a scale from 0 to the shown maximum, a light fill
+  under the line, and no clamping of values. Screen readers skip them; the tile's own label has the numbers.
+- The Copy menu for selected text is the shared one (a keyboard-navigable menu). Right-clicking only opens it inside the
+  selection, and it opens when the mouse button is released, so the click that ends the right-click no longer closes it.
 
 ### Fixed
 
