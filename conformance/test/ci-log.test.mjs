@@ -227,6 +227,48 @@ test('run-commands.sh lists the commands skipped after a failure in its summary,
   }
 });
 
+test('run-commands.sh keeps set -e inside each command: `false; true` fails, and nothing after the false runs', () => {
+  const s = scratch();
+  try {
+    const run = (commands) => spawnSync('bash', [join(CI, 'run-commands.sh')], { cwd: s.dir, env: { PATH: '/usr/bin:/bin', COMMANDS: commands }, encoding: 'utf8' });
+    const both = run('false; true');
+    assert.notEqual(both.status, 0, both.stdout);
+    assert.match(both.stdout, /::error::command failed \(exit 1/);
+    assert.notEqual(run('false; touch x').status, 0);
+    assert.equal(existsSync(join(s.dir, 'x')), false, 'the touch after the false never ran');
+  } finally {
+    s.done();
+  }
+});
+
+test('CI_MASK masks a value with spaces and & | * before shell quoting, so neither its raw nor its quoted form shows', () => {
+  const s = scratch();
+  try {
+    const secret = 'p a&s|s*w0rd';
+    const quoted = spawnSync('bash', ['-c', 'printf %q "$1"', '_', secret], { encoding: 'utf8' }).stdout;
+    assert.notEqual(quoted, secret, 'the value changes when quoted');
+    const file = join(s.dir, 'summary.md');
+    const r = bash(`ci_step "deploy" sh -c 'exit 4' "$TOKEN" "--key=$TOKEN"; ci_summary_flush t`, { TOKEN: secret, CI_MASK: 'TOKEN', GITHUB_STEP_SUMMARY: file });
+    const shown = r.stdout.split('\n').slice(1).join('\n') + readFileSync(file, 'utf8');
+    for (const form of [secret, quoted, 'a&s', 's\\|s', 'w0rd']) assert.ok(!shown.includes(form), `${form} leaked:\n${shown}`);
+    assert.match(r.stdout, /\+ sh -c exit\\ 4 \*\*\* --key=\*\*\*/);
+  } finally {
+    s.done();
+  }
+});
+
+test('bash 5.2 patsub_replacement changes nothing: pipes stay escaped and masks stay *** (CI\'s container runs bash 5.2)', () => {
+  const src = codeOnly(readFileSync(LIB, 'utf8'));
+  assert.doesNotMatch(src, /\$\{\w+\/\/[^}]*\/\$/, 'no ${v//p/$r} with a variable replacement: use _ci_replace');
+  const r = spawnSync('bash', ['-c', `shopt -s patsub_replacement 2>/dev/null || true; set -u; . "${LIB}"; _ci_cell 'a | b&c'; echo; _ci_scrub 'x k&e\\y z'; echo; echo "$BASH_VERSION"`], {
+    env: { PATH: '/usr/bin:/bin', K: 'k&e\\y', CI_MASK: 'K' },
+    encoding: 'utf8',
+  });
+  const [cell, masked, version] = r.stdout.split('\n').filter((l) => !l.startsWith('::add-mask::'));
+  assert.equal(cell, 'a \\| b&c', `bash ${version}`);
+  assert.equal(masked, 'x *** z', `bash ${version}`);
+});
+
 test('formatError and ciError: one line, cause then next step', () => {
   assert.equal(formatError('a\nb', 'do x'), '::error::a / b. Next step: do x');
   assert.equal(formatError('only'), '::error::only');

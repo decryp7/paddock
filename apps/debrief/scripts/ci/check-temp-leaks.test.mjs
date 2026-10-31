@@ -330,3 +330,16 @@ test('a leak ends with one ::error:: naming the culprit test, paths relative to 
     other.done();
   }
 });
+
+test('many loose lines never crowd out the one strict line in a test: strict and loose hits are capped apart', () => {
+  const s = scratch();
+  try {
+    mkdirSync(join(s.dir, 'src'));
+    const loose = Array.from({ length: 30 }, (_, i) => `// debrief-imports-log mentioned ${i}`);
+    writeFileSync(join(s.dir, 'src', 'a.rs'), [...loose, '#[test]', 'fn writes_imports() {', '    let d = format!("debrief-imports-{}", id);', '}'].join('\n'));
+    const hits = findAllCreators(['debrief-imports-*'], sourceFiles(s.dir), { root: s.dir, maxHits: 1 }).get('debrief-imports-*');
+    assert.deepEqual(hits.map((h) => [h.where, h.strict, h.test]), [[join('src', 'a.rs') + ':33 (in writes_imports)', true, true]]);
+  } finally {
+    s.done();
+  }
+});

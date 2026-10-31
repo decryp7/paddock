@@ -170,9 +170,12 @@ export function findAllCreators(patterns, files, { root = APP_DIR, maxBytes = LI
   const wanted = patterns.map((p) => {
     const stem = stemOf(p);
     const escaped = stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return { p, stem, strict: new RegExp(`${escaped}(?![a-z]|\\{[A-Za-z_])`), hits: [] };
+    return { p, stem, strict: new RegExp(`${escaped}(?![a-z]|\\{[A-Za-z_])`), strictHits: [], looseHits: [] };
   });
+  // Strict and loose hits are kept apart, each up to `keep`, so a name spelled loosely in many places never crowds out the
+  // one strict line that made the folder.
   const keep = maxHits * 20;
+  const full = (w) => w.strictHits.length >= keep && w.looseHits.length >= keep;
   for (const entry of files) {
     const path = typeof entry === 'string' ? entry : entry.path;
     const base = typeof entry === 'string' ? root : entry.root;
@@ -183,20 +186,23 @@ export function findAllCreators(patterns, files, { root = APP_DIR, maxBytes = LI
     } catch {
       continue;
     }
-    const here = wanted.filter((w) => w.hits.length < keep && text.includes(w.stem));
+    const here = wanted.filter((w) => !full(w) && text.includes(w.stem));
     if (here.length === 0) continue;
     const lines = text.split('\n');
     const rel = isAbsolute(path) ? relative(base, path) : path;
     for (let i = 0; i < lines.length; i++) {
       for (const w of here) {
-        if (w.hits.length >= keep || !lines[i].includes(w.stem)) continue;
+        if (!lines[i].includes(w.stem)) continue;
+        const strict = w.strict.test(lines[i]);
+        const list = strict ? w.strictHits : w.looseHits;
+        if (list.length >= keep) continue;
         const name = enclosingTest(lines, i);
-        w.hits.push({ where: `${rel}:${i + 1}${name ? ` (in ${name})` : ''}`, strict: w.strict.test(lines[i]), test: inTest(rel, lines, i) });
+        list.push({ where: `${rel}:${i + 1}${name ? ` (in ${name})` : ''}`, strict, test: inTest(rel, lines, i) });
       }
     }
   }
   const rank = (h) => (h.strict ? 0 : 2) + (h.test ? 0 : 1);
-  return new Map(wanted.map((w) => [w.p, [...w.hits].sort((x, y) => rank(x) - rank(y)).slice(0, maxHits)]));
+  return new Map(wanted.map((w) => [w.p, [...w.strictHits, ...w.looseHits].sort((x, y) => rank(x) - rank(y)).slice(0, maxHits)]));
 }
 
 /** `findAllCreators` for one pattern: its ranked places as `path:line (in test)` strings. */

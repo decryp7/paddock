@@ -24,21 +24,31 @@ for _ci_name in ${CI_MASK-}; do
 done
 unset _ci_name
 
+# `$1` with every literal occurrence of `$2` replaced by `$3`. No ${v//p/r}: bash 5.2's patsub_replacement treats `&` and `\`
+# in a replacement specially (lessons: job-isolation.sh, CI's bash 5.2), and this must give the same text in bash 3.2 and 5.
+_ci_replace() {
+  local text=$1 needle=$2 rep=$3 out=''
+  if [ -z "$needle" ]; then printf '%s' "$text"; return 0; fi
+  while [[ "$text" == *"$needle"* ]]; do
+    out="$out${text%%"$needle"*}$rep"
+    text=${text#*"$needle"}
+  done
+  printf '%s' "$out$text"
+}
+
 # The text with the value of every variable CI_MASK names replaced by ***.
 _ci_scrub() {
-  local text=$1 name value stars='***'
+  local text=$1 name value
   for name in ${CI_MASK-}; do
     value=${!name-}
-    if [ -n "$value" ]; then text=${text//"$value"/$stars}; fi
+    if [ -n "$value" ]; then text=$(_ci_replace "$text" "$value" '***'); fi
   done
   printf '%s' "$text"
 }
 
 # A summary table cell: masked, and `|` escaped so a command with a pipe keeps its columns.
 _ci_cell() {
-  local text bar='\|'
-  text=$(_ci_scrub "$1")
-  printf '%s' "${text//|/$bar}"
+  _ci_replace "$(_ci_scrub "$1")" '|' '\|'
 }
 
 # Milliseconds since the epoch: EPOCHREALTIME in bash 5, whole seconds otherwise (macOS bash 3.2 has no sub-second clock).
@@ -103,10 +113,13 @@ _ci_row() { _CI_ROWS+=("$1"); }
 ci_step() {
   local label=$1
   shift
-  local cmd start code took dir
-  cmd=$(printf '%q ' "$@")
-  cmd=$(_ci_scrub "${cmd% }")
-  dir=$(printf '%q' "$PWD")
+  local cmd start code took dir arg
+  # Masked values go before quoting: printf %q escapes spaces and & | *, and the escaped form would no longer match.
+  local shown=()
+  for arg in "$@"; do shown+=("$(_ci_scrub "$arg")"); done
+  cmd=$(printf '%q ' "${shown[@]}")
+  cmd=$(_ci_replace "${cmd% }" '\*\*\*' '***')
+  dir=$(printf '%q' "$(_ci_scrub "$PWD")")
   echo "::group::$(_ci_scrub "$label")"
   echo "+ $cmd"
   start=$(_ci_now_ms)

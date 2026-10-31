@@ -30,7 +30,10 @@ while IFS= read -r line || [ -n "$line" ]; do
   esac
   echo "::group::$(_ci_scrub "$line")"
   start=$(_ci_now_ms)
-  ( set -e; eval "$line" ) && code=0 || code=$?
+  # Not `( ... ) && code=0 || code=$?`: a subshell in an && / || list runs with -e off, so `false; true` would pass. This
+  # script runs without -e, so a failing subshell does not end it.
+  ( set -e; eval "$line" )
+  code=$?
   took=$(ci_duration $(($(_ci_now_ms) - start)))
   echo "::endgroup::"
   if [ "$code" -ne 0 ]; then
