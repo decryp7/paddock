@@ -18,6 +18,8 @@ async function open(page: Page, theme: string, contrast: 'off' | 'more' = 'off')
   await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => Number.isFinite(a.effect?.getComputedTiming().endTime as number)).map((a) => a.finished.catch(() => undefined))));
 }
 
+/** Waits for every finite animation (the shimmer and the indeterminate bar run forever and are skipped). */
+const animationsDone = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().filter((a) => Number.isFinite(a.effect?.getComputedTiming().endTime as number)).map((a) => a.finished.catch(() => undefined))));
 const widgets = (page: Page) => page.getByTestId('widgets');
 const cell = (page: Page, kind: string, state: string) => page.getByTestId(`wgt-${kind}-${state}`);
 const chooser = (page: Page) => page.getByTestId('wgt-chooser');
@@ -47,22 +49,48 @@ for (const theme of THEMES) {
     expect(outline.color).not.toBe('rgba(0, 0, 0, 0)');
   });
 
-  test(`Widgets: review screenshots (${theme})`, async ({ page }) => {
-    test.skip(!SHOTS, 'set WIDGETS_SHOTS to a folder');
-    mkdirSync(SHOTS as string, { recursive: true });
-    await open(page, theme);
-    await page.getByTestId('wgt-stop').click();
-    await widgets(page).locator('.wg-sheet').screenshot({ path: join(SHOTS as string, `widgets-states-${theme}.png`) });
-    await page.getByTestId('wgt-popup').screenshot({ path: join(SHOTS as string, `widgets-popup-agent-${theme}.png`) });
-    await page.getByTestId('wgt-stop').click();
-    await page.getByTestId('wgt-popup').screenshot({ path: join(SHOTS as string, `widgets-popup-${theme}.png`) });
-    await chooser(page).screenshot({ path: join(SHOTS as string, `widgets-chooser-${theme}.png`) });
-    await chooser(page).locator('.pd-wc-more').nth(2).click();
-    await chooser(page).screenshot({ path: join(SHOTS as string, `widgets-chooser-menu-${theme}.png`) });
-    await page.keyboard.press('Escape');
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.evaluate(() => document.documentElement.setAttribute('data-contrast', 'more'));
-    await widgets(page).locator('.wg-sheet').screenshot({ path: join(SHOTS as string, `widgets-states-contrast-${theme}.png`) });
+  test.describe(`review screenshots (${theme})`, () => {
+    test.use({ deviceScaleFactor: 2 });
+    test(`Widgets: review screenshots (${theme})`, async ({ page }) => {
+      test.skip(!SHOTS, 'set WIDGETS_SHOTS to a folder');
+      const shot = (loc: ReturnType<Page['locator']>, name: string) => loc.screenshot({ path: join(SHOTS as string, `widgets-${name}-${theme}.png`) });
+      mkdirSync(SHOTS as string, { recursive: true });
+      await open(page, theme);
+      await shot(widgets(page).locator('.wg-sheet'), 'states');
+      await page.getByTestId('wgt-stop').click();
+      await shot(page.getByTestId('wgt-popup'), 'popup-agent');
+      await page.getByTestId('wgt-stop').click();
+      await shot(page.getByTestId('wgt-popup'), 'popup');
+      await page.getByTestId('wgt-load').click();
+      await expect(page.getByTestId('wgt-popup').locator('section.pd-w[aria-busy=true]')).toHaveCount(5);
+      await shot(page.getByTestId('wgt-popup'), 'popup-loading');
+      await page.getByTestId('wgt-load').click();
+      await page.getByTestId('wgt-empty').click();
+      await expect(page.getByTestId('wgt-popup').locator('.pd-wa-et')).toBeVisible();
+      await shot(page.getByTestId('wgt-popup'), 'popup-empty');
+      await page.getByTestId('wgt-empty').click();
+      await page.getByTestId('wgt-popup').getByRole('button', { name: 'More actions' }).click();
+      await expect(page.getByRole('menuitem', { name: 'Settings…' })).toBeVisible();
+      await animationsDone(page);
+      await shot(page.getByTestId('wgt-popup'), 'popup-menu');
+      await page.keyboard.press('Escape');
+      await shot(chooser(page), 'chooser');
+      await chooser(page).getByLabel('Preset name').fill('Work');
+      await chooser(page).getByRole('button', { name: 'Save as preset' }).click();
+      await expect(chooser(page).getByRole('button', { name: 'Delete the Work preset' })).toBeVisible();
+      await shot(chooser(page), 'chooser-presets');
+      await chooser(page).locator('.pd-wc-more').nth(2).click();
+      await expect(page.locator('.pd-wc-menu [role=menuitem]').first()).toBeVisible();
+      await animationsDone(page);
+      await shot(chooser(page), 'chooser-menu');
+      await page.keyboard.press('Escape');
+      await chooser(page).getByRole('button', { name: 'Add Top apps' }).click();
+      await expect(chooser(page).locator('.pd-wc-limit').first()).toBeVisible();
+      await shot(chooser(page), 'chooser-limit');
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.evaluate(() => document.documentElement.setAttribute('data-contrast', 'more'));
+      await shot(widgets(page).locator('.wg-sheet'), 'states-contrast');
+    });
   });
 }
 
@@ -215,5 +243,80 @@ test('Widgets: presets are applied, saved and deleted, with Undo for an apply', 
   await expect(c.getByRole('button', { name: 'Delete the Work preset' })).toBeVisible();
   await expect(c.getByLabel('Preset name')).toHaveValue('');
   await c.getByRole('button', { name: 'Delete the Work preset' }).click();
+  await c.getByRole('button', { name: 'Delete the Work preset' }).click();
   await expect(c.getByRole('button', { name: 'Delete the Work preset' })).toHaveCount(0);
+});
+
+test('Widgets: kind icons are 14 px in a frame head and 16 px in a chooser row (Material draws 24 px otherwise)', async ({ page }) => {
+  await open(page, 'dark');
+  const sizes = (sel: string) => page.locator(sel).evaluateAll((els) => els.map((e) => [e.getBoundingClientRect().width, e.getBoundingClientRect().height]));
+  for (const [w, h] of await sizes('[data-testid="wgt-popup"] .pd-w-icon')) expect([w, h]).toEqual([14, 14]);
+  for (const [w, h] of await sizes('[data-testid="wgt-chooser"] .pd-wc-kicon')) expect([w, h]).toEqual([16, 16]);
+  expect((await sizes('[data-testid="wgt-chooser"] .pd-wc-kicon')).length).toBeGreaterThan(5);
+});
+
+for (const density of ['compact', 'comfortable'] as const) {
+  test(`Widgets: loading is as tall as ready, and nothing overflows, at ${density} density`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 1800 });
+    await page.goto(`/?theme=dark&accent=dyno&density=${density}`);
+    await page.getByTestId('widgets').waitFor();
+    for (const kind of KINDS) expect(await height(page, kind, 'loading'), kind).toBe(await height(page, kind, 'ready'));
+    const overflow = await page.getByTestId('wgt-popup').locator('pd-widget-frame').evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth + 1).length);
+    expect(overflow).toBe(0);
+  });
+}
+
+test('Widgets: a scrolling popup shows a fade at its foot until the end', async ({ page }) => {
+  await open(page, 'dark');
+  const popup = page.getByTestId('wgt-popup');
+  await expect(popup.locator('.pd-fade--on')).toHaveCount(1);
+  await popup.locator('.pd-content').evaluate((e) => e.scrollTo(0, e.scrollHeight));
+  await expect(popup.locator('.pd-fade--on')).toHaveCount(0);
+});
+
+test('Widgets: deleting a preset asks first and puts focus on the next preset', async ({ page }) => {
+  await open(page, 'dark');
+  const c = chooser(page);
+  await c.getByLabel('Preset name').fill('Work');
+  await c.getByRole('button', { name: 'Save as preset' }).click();
+  await c.getByRole('button', { name: 'Delete the Work preset' }).click();
+  await expect(c.getByText('Delete this preset?')).toBeVisible();
+  await c.getByRole('button', { name: 'Delete the Work preset' }).click();
+  await expect(c.getByRole('button', { name: 'Apply the Minimal preset' })).toBeFocused();
+});
+
+test('Widgets: the popup footer menu opens inside the popover, not past its edge', async ({ page }) => {
+  await open(page, 'dark');
+  const popup = page.getByTestId('wgt-popup').locator('pd-tray-popover');
+  await page.getByTestId('wgt-popup').getByRole('button', { name: 'More actions' }).click();
+  const menu = page.locator('.mat-mdc-menu-panel[role=menu]').last();
+  await expect(menu).toBeVisible();
+  await animationsDone(page);
+  const p = (await popup.boundingBox())!;
+  const m = (await menu.boundingBox())!;
+  expect(m.x).toBeGreaterThanOrEqual(p.x);
+  expect(m.x + m.width).toBeLessThanOrEqual(p.x + p.width);
+  expect(m.y).toBeGreaterThanOrEqual(p.y);
+  expect(m.y + m.height).toBeLessThanOrEqual(p.y + p.height);
+});
+
+test('Widgets: Escape cancels the preset delete confirm', async ({ page }) => {
+  await open(page, 'dark');
+  const c = chooser(page);
+  await c.getByLabel('Preset name').fill('Work');
+  await c.getByRole('button', { name: 'Save as preset' }).click();
+  await c.getByRole('button', { name: 'Delete the Work preset' }).click();
+  await expect(c.getByText('Delete this preset?')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(c.getByText('Delete this preset?')).toHaveCount(0);
+  await expect(c.getByRole('button', { name: 'Delete the Work preset' })).toBeFocused();
+});
+
+test('Widgets: the preset name field has 13 px text and the height of its Save button', async ({ page }) => {
+  await open(page, 'dark');
+  const c = chooser(page);
+  const field = await c.locator('.pd-wc-save .mat-mdc-text-field-wrapper').boundingBox();
+  const button = await c.getByRole('button', { name: 'Save as preset' }).boundingBox();
+  expect(Math.round(field!.height)).toBe(Math.round(button!.height));
+  expect(await c.locator('.pd-wc-save input').evaluate((e) => getComputedStyle(e).fontSize)).toBe('13px');
 });

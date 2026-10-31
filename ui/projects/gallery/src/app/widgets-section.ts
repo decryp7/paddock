@@ -1,8 +1,10 @@
 import { ChangeDetectionStrategy, Component, inject, signal, viewChildren } from '@angular/core';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
-import { SuTrayPopover } from '@decryp7/paddock-ui';
-import { registerPaddockIcons } from '@decryp7/paddock-ui/icons';
+import { SuSparkline, SuStatusPill, SuTrayPopover } from '@decryp7/paddock-ui';
+import { MatIconButton } from '@angular/material/button';
+import { MatMenu, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
+import { PdGlyph, PdStatusGlyph, registerPaddockIcons } from '@decryp7/paddock-ui/icons';
 import { PdSelect } from '@decryp7/paddock-ui/select';
 import {
   PdSkeleton,
@@ -82,10 +84,10 @@ const working = (title: string, phase: string, progress: Progress): WidgetState<
 
 /** One row of the states sheet: a kind and its states (null is loading). */
 const SHEET: readonly { kind: string; states: readonly (readonly [string, WidgetState<Val, Act> | null])[] }[] = [
-  { kind: 'alarms', states: [['loading', null], ['ready', ready('alarms')], ['empty', empty('No active alarms', 'checked 2 min ago', 'Open alarms')], ['error', error("Couldn't read alarms", 'The alarm store did not answer.')], ['stale', ready('alarms', NOW - 4 * MIN)]] },
-  { kind: 'disk', states: [['loading', null], ['ready', ready('disk')], ['empty', empty("See Time Machine's space when it's connected", "The disk isn't connected now.", 'Choose another volume')], ['error', error("Couldn't read volumes", 'The volume list did not answer.')], ['stale', ready('disk', NOW - 3 * MIN)]] },
+  { kind: 'alarms', states: [['loading', null], ['ready', ready('alarms')], ['empty', empty('No active alarms', 'checked 2 min ago', 'Open alarms')], ['error', error("Couldn't read alarms", "The alarm store didn't answer.")], ['stale', ready('alarms', NOW - 4 * MIN)]] },
+  { kind: 'disk', states: [['loading', null], ['ready', ready('disk')], ['empty', empty("See Time Machine's space when it's connected", "The disk isn't connected now.", 'Choose another volume')], ['error', error("Couldn't read volumes", "The volume list didn't answer.")], ['stale', ready('disk', NOW - 3 * MIN)]] },
   { kind: 'cpu', states: [['loading', null], ['ready', ready('cpu')], ['stale', ready('cpu', NOW - 4 * MIN)]] },
-  { kind: 'net', states: [['loading', null], ['ready', ready('net')], ['empty', empty('See traffic when online', 'Not connected now.', 'Open network')], ['stale', ready('net', NOW - 4 * MIN)]] },
+  { kind: 'net', states: [['loading', null], ['ready', ready('net')], ['empty', empty('See traffic when online', 'Offline now.', 'Open network')], ['stale', ready('net', NOW - 4 * MIN)]] },
   { kind: 'backup', states: [['loading', null], ['ready', ready('backup')], ['empty', empty('Know when backups ran', 'No backup set up.', 'Set up checks')], ['error', error("Couldn't check", 'tmutil failed.')], ['working', working('Checking', 'Time Machine', { fraction: { done: 2, total: 3, unit: '' } })]] },
   { kind: 'apps', states: [['loading', null], ['ready', ready('apps')], ['stale', ready('apps', NOW - 4 * MIN)]] },
 ];
@@ -116,7 +118,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
 @Component({
   selector: 'gal-widgets',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdWidgetArea, PdWidgetFrame, PdWidgetChooser, PdWidget, PdWidgetOption, PdSkeleton, PdSelect, SuTrayPopover],
+  imports: [PdWidgetArea, PdWidgetFrame, PdWidgetChooser, PdWidget, PdWidgetOption, PdSkeleton, PdSelect, SuTrayPopover, SuSparkline, SuStatusPill, MatIconButton, MatMenu, MatMenuItem, MatMenuTrigger, PdGlyph, PdStatusGlyph],
   template: `
     <section class="gal-section" data-testid="widgets" aria-labelledby="h-widgets">
       <h2 id="h-widgets">Widgets</h2>
@@ -135,7 +137,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
               </div>
             } @else {
               <button type="button" class="wg-row wg-open" (click)="acted.set('open')">
-                <span class="wg-badge" [class.wg-badge--info]="r.sev === 'Info'">{{ r.sev }}</span>
+                <span class="wg-badge" [class.wg-badge--info]="r.sev === 'Info'"><pd-status-glyph [status]="r.sev === 'Info' ? 'info' : 'warning'" [size]="14" />{{ r.sev }}</span>
                 <span class="wg-grow wg-trunc">{{ r.text }}</span>
                 <span class="wg-when">{{ r.when }}</span>
               </button>
@@ -146,7 +148,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
       <ng-template pdWidget="disk" [pdWidgetOf]="witness" let-x>
         @for (d of x?.vols ?? [{ name: 'xxxxxxxxxx', free: 'xxxxxxxxxxxxxxxxxxxx', pct: 50 }, { name: 'xxxxxxxx', free: 'xxxxxxxxxxxxxxxxxxxx', pct: 50 }, { name: 'xxxxxxxxxxxx', free: 'xxxxxxxxxxxxxxxxxxxx', pct: 50 }]; track $index) {
           <div class="wg-vol">
-            <span class="wg-name" pdSkeleton>{{ d.name }}@if (d.low) { <span class="wg-badge wg-badge--warn">Low</span> }</span>
+            <span class="wg-name" pdSkeleton>{{ d.name }}@if (d.low) { <span class="wg-badge wg-badge--warn"><pd-status-glyph status="warning" [size]="14" />Low</span> }</span>
             <span class="wg-free" pdSkeleton>{{ d.free }}</span>
             <span class="wg-bar" [class.wg-bar--warn]="d.low" pdSkeleton><i class="wg-fill" [style.width.%]="d.pct"></i></span>
           </div>
@@ -154,24 +156,26 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
       </ng-template>
       <ng-template pdWidget="cpu" [pdWidgetOf]="witness" let-x>
         <div class="wg-split">
-          <div class="wg-metric"><span class="wg-k" pdSkeleton>CPU</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.cpu ?? '00' }}<small>%</small></span><span class="wg-spark" pdSkeleton></span></div>
+          <div class="wg-metric"><span class="wg-k" pdSkeleton>CPU</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.cpu ?? '00' }}<small>%</small></span><span class="wg-spark" pdSkeleton>@if (x) { <pd-sparkline [values]="cpuSeries" [height]="24" [area]="true" [min]="0" [max]="100" label="CPU, last minute" /> }</span></div>
           <span class="wg-div"></span>
-          <div class="wg-metric"><span class="wg-k" pdSkeleton>{{ x?.cpu?.memText ?? 'Memory xxxxxxxxxxx' }}</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.mem ?? '00' }}<small>%</small></span><span class="wg-spark" pdSkeleton></span></div>
+          <div class="wg-metric"><span class="wg-k" pdSkeleton>{{ x?.cpu?.memText ?? 'Memory xxxxxxxxxxx' }}</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.mem ?? '00' }}<small>%</small></span><span class="wg-spark wg-spark--mem" pdSkeleton>@if (x) { <pd-sparkline [values]="memSeries" [height]="24" [area]="true" [min]="0" [max]="100" label="Memory, last minute" /> }</span></div>
         </div>
       </ng-template>
       <ng-template pdWidget="net" [pdWidgetOf]="witness" let-x>
-        <span class="wg-hero" pdSkeleton>{{ x?.net?.down ?? '0.0' }}<small>MB/s</small></span>
-        <span class="wg-line" pdSkeleton>{{ x?.net?.up ?? '000 KB/s' }}</span>
-        <span class="wg-spark" pdSkeleton></span>
+        <span class="wg-hero" pdSkeleton><pd-glyph name="arrow-down" [size]="16" />{{ x?.net?.down ?? '0.0' }}<small>MB/s</small></span>
+        <span class="wg-line" pdSkeleton><pd-glyph name="arrow-up" [size]="14" />{{ x?.net?.up ?? '000 KB/s' }}</span>
+        <span class="wg-spark" pdSkeleton>@if (x) { <pd-sparkline [values]="netSeries" [height]="24" [area]="true" label="Network, last minute" /> }</span>
       </ng-template>
       <ng-template pdWidget="backup" [pdWidgetOf]="witness" let-x>
         <span class="wg-line wg-strong" pdSkeleton>{{ x?.line?.title ?? 'xxxxxxxx' }}</span>
         <span class="wg-line wg-muted" pdSkeleton>{{ x?.line?.detail ?? 'xxxxxxxxxxxxx' }}</span>
       </ng-template>
       <ng-template pdWidget="apps" [pdWidgetOf]="witness" let-x>
+        <div class="wg-rows">
         @for (r of x?.rows ?? [{ name: 'xxxxxxxxxxxxxxxxxx', a: 'xxxx', b: 'xxxxxx' }, { name: 'xxxxxxxxxxxxxxxxxx', a: 'xxxx', b: 'xxxxxx' }, { name: 'xxxxxxxxxxxxxxxxxx', a: 'xxxx', b: 'xxxxxx' }]; track $index) {
           <div class="wg-row"><span class="wg-grow wg-trunc" pdSkeleton>{{ r.name }}</span><span class="wg-num" pdSkeleton>{{ r.a }}</span><span class="wg-num wg-muted" pdSkeleton>{{ r.b }}</span></div>
         }
+        </div>
       </ng-template>
 
       <h3>Every state</h3>
@@ -182,6 +186,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
             @let st = stateOf(row, col);
             @if (st.has) {
               <div class="wg-cell" [class.wg-cell--half]="info.spans[0] === 1" [attr.data-testid]="'wgt-' + row.kind + '-' + col">
+                <span class="wg-cap">{{ info.title }} · {{ col }}</span>
                 <pd-widget-frame
                   [title]="info.title"
                   [icon]="info.icon"
@@ -191,6 +196,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
                   [calm]="row.kind === 'alarms'"
                   [live]="info.refresh === 'live'"
                   [now]="now"
+                  [metaText]="row.kind === 'disk' ? '3 volumes' : null"
                   (action)="acted.set($event)"
                 />
               </div>
@@ -208,17 +214,27 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
       </div>
       <div class="wg-popup" data-testid="wgt-popup">
         <pd-tray-popover label="Dyno" platform="macos">
-          <strong slot="header">Dyno</strong>
+          <strong slot="header" class="wg-name-head">Dyno</strong>
+          <pd-status-pill slot="header" class="wg-pill" [status]="stopped() ? 'danger' : 'success'" [label]="stopped() ? 'Agent stopped' : 'All good'" />
           <pd-widget-area
             [placements]="emptied() ? [] : popupPlacements"
             [catalogue]="catalogue"
             [values]="loading() ? null : stopped() ? stoppedValues : popupValues"
             [templates]="templates()"
             [now]="now"
+            [meta]="meta"
             (action)="acted.set($event)"
             (customize)="acted.set('customize')"
           />
-          <button slot="footer" type="button" class="gal-btn gal-btn--primary">Open Dyno</button>
+          <div slot="footer" class="wg-foot">
+            <button type="button" class="gal-btn gal-btn--primary">Open Dyno</button>
+            <button matIconButton type="button" class="wg-more" aria-label="More actions" [matMenuTriggerFor]="footMenu"><pd-glyph name="more" [size]="16" /></button>
+            <mat-menu #footMenu="matMenu" xPosition="before" yPosition="above">
+              <button mat-menu-item type="button" (click)="acted.set('customize')">Customize widgets…</button>
+              <button mat-menu-item type="button" (click)="acted.set('settings')">Settings…</button>
+              <button mat-menu-item type="button" (click)="acted.set('quit')">Quit Dyno</button>
+            </mat-menu>
+          </div>
         </pd-tray-popover>
       </div>
 
@@ -240,7 +256,11 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
     h3 { margin: var(--pd-space-4) 0 0; font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); }
     .wg-sheet { display: grid; grid-template-columns: repeat(auto-fill, 326px); gap: var(--pd-space-4); padding: var(--pd-space-4); background: var(--pd-surface-3); border-radius: var(--pd-radius-card); }
     .wg-cell { width: 326px; min-width: 0; align-self: start; }
+    .wg-cap { display: block; margin-bottom: var(--pd-space-1); font-size: var(--pd-text-label); color: var(--pd-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .wg-cell--half { width: 159px; }
+    .wg-name-head { font-weight: var(--pd-weight-semibold); }
+    .wg-pill { margin-inline-start: auto; }
+    .wg-foot { display: flex; align-items: center; justify-content: flex-end; gap: var(--pd-space-1); width: 100%; }
     .wg-popup { width: 440px; padding: 24px 0; display: flex; justify-content: center; background: var(--pd-surface-1); }
     .wg-chooser { padding: var(--pd-space-4); background: var(--pd-surface-1); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); }
     .wg-rows { display: grid; gap: 2px; margin: 0 calc(-1 * var(--pd-space-2)); }
@@ -252,7 +272,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
     .wg-trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .wg-when, .wg-muted { color: var(--pd-text-subtle); font-size: var(--pd-text-label); white-space: nowrap; }
     .wg-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .wg-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: var(--pd-radius-pill); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); background: var(--pd-warning-tint); color: var(--pd-warning); }
+    .wg-badge { display: inline-flex; align-items: center; gap: var(--pd-space-1); height: 20px; padding: 0 7px 0 5px; border-radius: var(--pd-radius-pill); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); background: var(--pd-warning-tint); color: var(--pd-warning); }
     .wg-badge--info { background: var(--pd-info-tint); color: var(--pd-info); }
     .wg-badge--warn { margin-left: var(--pd-space-2); }
     .wg-vol { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px var(--pd-space-2); align-items: center; padding: 3px 0; }
@@ -267,6 +287,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
     .wg-k { font-size: var(--pd-text-label); color: var(--pd-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .wg-hero { font-size: var(--pd-text-title); line-height: 24px; font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; white-space: nowrap; justify-self: start; }
     .wg-hero small { font-size: var(--pd-text-body); font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); margin-left: 2px; }
+    .wg-spark--mem pd-sparkline { color: var(--pd-info); }
     .wg-spark { display: block; height: 24px; margin-top: 4px; border-bottom: 1px solid var(--pd-chart-grid); }
     .wg-line { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); justify-self: start; }
     .wg-strong { font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); }
@@ -275,6 +296,10 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
 export class GalWidgets {
   /** The type witness of the kind templates: `let-x` is a `Val | null` with no cast. */
   protected readonly witness: Val | null = null;
+  protected readonly cpuSeries = [22, 25, 31, 28, 40, 52, 47, 38, 35, 44, 61, 58, 49, 42, 39, 76];
+  protected readonly memSeries = [60, 61, 61, 62, 64, 66, 66, 67, 69, 70, 70, 71, 71, 72, 72, 72];
+  protected readonly netSeries = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
+  protected readonly meta = (id: string): string | null => (id === 'disk' ? '3 volumes' : null);
   protected readonly catalogue = CATALOGUE;
   protected readonly sheet = SHEET;
   protected readonly columns = COLUMNS;

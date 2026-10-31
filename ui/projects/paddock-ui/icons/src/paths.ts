@@ -17,6 +17,8 @@ export const PD_ICON_PATHS = {
   minus: 'M5 12h14',
   close: 'M6 6l12 12M18 6 6 18',
   check: 'M5 12.5l4.5 4.5L19 7.5',
+  // A circled check: "all good" (the calm empty row of a widget); the status check is the bare tick.
+  'check-circle': 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM8.2 12.3l2.6 2.6 5-5.4',
   more: '',
   download: 'M12 4v11M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15',
   edit: 'M4.5 19.5l.9-4.2L16.6 4.1a2.1 2.1 0 0 1 3 3L8.4 18.3zM14.5 6.2l3.3 3.3',
