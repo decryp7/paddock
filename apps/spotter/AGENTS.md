@@ -117,6 +117,9 @@ registered as literals (no icon fonts, no runtime URLs). Never run `prettier --w
   gets the missing lines in the same change, with a test where practical; no user content in logs by default. Before fixing,
   establish the real flow from the logs (reproduce, read the phases, follow the code); if the logs cannot show it, add the
   logging first and reproduce again; a fix based on a guessed flow is not done.
+  The same holds for CI, release pipelines, dev tools and test harnesses: a failing step prints one `::error::` line with
+  cause and next step; long steps log phases with durations; wrappers log the exact command, exit code (NTSTATUS on
+  Windows) and stderr tail; each job summarises what ran, was skipped and why.
 - Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.

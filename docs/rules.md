@@ -289,6 +289,10 @@ changes here, every app's copy is updated in the same change.
     default. Before fixing a bug, establish the real flow that led to it: reproduce, then read the sequence of phases in
     the logs, and follow the code for each step. If the logs cannot show that flow, add the logging first, reproduce
     again, and only then fix. A fix based on a guessed flow is not done.
+    The same holds for CI workflows, release pipelines, dev tools and test harnesses: every failing step or script prints
+    one `::error::` line with the cause and the next step, not just an exit code; long steps log their phases with
+    durations; a tool that wraps another program logs the exact command, its exit code (and NTSTATUS on Windows) and the
+    tail of stderr; each job writes a short summary of what ran, what was skipped and why.
     *Why:* Paddock runs on users' machines where we cannot attach a debugger; Dyno's 30 s login connect could not be
     diagnosed from its logs (2026-11-01).
 
