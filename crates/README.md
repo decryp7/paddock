@@ -988,6 +988,12 @@ let test = d.test_with(&draft, Some(&typed_password), "Spotter", &cancel);   // 
   `@decryp7/paddock-ui/shell/channels`.
 - Network: `EgressPoster` over `paddock-net` (https only, plain http to this computer with `Reach::Loopback`, offline mode,
   connection reuse, no redirects, the answer's body never read).
+- Home network (`ChannelConfig::allow_lan`, wire `allowLan`, default false; webhook and ntfy only, `validate` refuses it on
+  e-mail): validation accepts a private address, and plain http to one, only with the switch; `EgressPoster` marks each request
+  (`Request::plain_http_on_lan()` or `Request::without_lan()`), so one egress built with `channel_policy(Reach::Lan)` lets only
+  switched channels reach private networks. Plain http needs every address the name resolves to to be private, checked before the
+  hop and again on the connect-time addresses. **Known gap:** e-mail goes through `MailSender`, not `paddock-net`, so Offline mode
+  and the reach policy do not govern SMTP (follow-up).
 - Retries: transient failures only (no connection, timeout, HTTP 408/425/429/5xx, a 4xx mail reply), at most 3 attempts by default
   (`RetryPolicy`, 5 at most), waits from `paddock_jobs::time::Backoff` (2 s doubling to 30 s), a server's `Retry-After` honoured up
   to that cap, every wait cancellable and on the injected `Clock` (tests use `FakeClock`). A bad configuration, a missing secret,
