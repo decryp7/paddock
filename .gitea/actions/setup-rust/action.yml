@@ -36,36 +36,85 @@ runs:
         TOOLCHAIN: ${{ inputs.toolchain }}
         COMPONENTS: ${{ inputs.components }}
         TARGETS: ${{ inputs.targets }}
+        NATIVE: ${{ github.action_path }}/../../../conformance/ci/run-native.mjs
       run: |
         set -euo pipefail
         command -v rustup >/dev/null || { echo "::error::rustup is not installed on this runner"; exit 1; }
-        # In the Paddock CI image (it writes /etc/paddock-ci-release) the stable toolchain and its components are already
-        # there: skip the network round trip unless this job asks for extra targets or a component the image lacks.
-        if [ -f /etc/paddock-ci-release ] && [ "$TOOLCHAIN" = stable ] && [ -z "$TARGETS" ]; then
-          installed=$(rustup component list --installed 2>/dev/null || true)
-          missing=0
-          for c in $COMPONENTS; do printf '%s\n' "$installed" | grep -q "^$c-" || missing=1; done
-          if [ "$missing" = 0 ]; then
-            echo "Rust toolchain from the Paddock CI image (components: ${COMPONENTS:-none})"
+        # Everything this job asks for is installed: no network sync. `rustup toolchain install` crashed on the Windows host
+        # 0.5 s into "syncing channel updates" (runs 6460 and 7267); a job that does not sync cannot hit that. A channel (stable,
+        # beta, nightly) still syncs when the host's last sync is older than PADDOCK_RUSTUP_SYNC_HOURS (default 24, 0 always),
+        # so host runners follow new releases; an exact version, or the Paddock CI image (/etc/paddock-ci-release), never does.
+        STAMP="${RUSTUP_HOME:-$HOME/.rustup}/paddock-ci-synced-$TOOLCHAIN"
+        HOURS="${PADDOCK_RUSTUP_SYNC_HOURS:-24}"
+        case "$HOURS" in '' | *[!0-9]*) HOURS=24 ;; esac
+        fresh=0
+        IMAGE="${PADDOCK_CI_RELEASE_FILE:-/etc/paddock-ci-release}"  # overridable so the step's test never reads the real file
+        if [ -f "$IMAGE" ] || grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"$TOOLCHAIN"; then fresh=1
+        elif [ "$HOURS" -gt 0 ] && [ -f "$STAMP" ] && [ -n "$(find "$STAMP" -mmin "-$((HOURS * 60))" 2>/dev/null)" ]; then fresh=1; fi
+        missing=""
+        if [ "$fresh" = 1 ]; then
+          # Here-strings, not `printf | grep -q`: under pipefail, grep -q quitting at the first match can SIGPIPE the writer
+          # and fail the pipeline, which read an installed component as missing.
+          toolchains=$(rustup toolchain list 2>/dev/null || true)
+          grep -q "^$TOOLCHAIN-" <<<"$toolchains" || missing="the $TOOLCHAIN toolchain"
+          if [ -z "$missing" ]; then
+            installed=$(rustup component list --installed --toolchain "$TOOLCHAIN" 2>/dev/null || true)
+            # A component is listed as <name>-<host triple>, or as the bare name (rust-src); cargo is always the host's.
+            host=$(sed -n 's/^cargo-//p' <<<"$installed" | sed -n 1p)
+            for c in $COMPONENTS; do grep -Fxq -e "$c" -e "$c-${host:-?}" <<<"$installed" || missing="$missing component $c"; done
+            installed=$(rustup target list --installed --toolchain "$TOOLCHAIN" 2>/dev/null || true)
+            for t in $TARGETS; do grep -Fxq "$t" <<<"$installed" || missing="$missing target $t"; done
+          fi
+          if [ -z "$missing" ]; then
+            echo "Rust $TOOLCHAIN already installed with components '${COMPONENTS:-none}' and targets '${TARGETS:-none}': no sync"
+            rustup default "$TOOLCHAIN"
             rustc --version
             cargo --version
             exit 0
           fi
+          echo "Syncing: missing$missing"
         fi
         args=(--profile minimal)
         for c in $COMPONENTS; do args+=(--component "$c"); done
         for t in $TARGETS; do args+=(--target "$t"); done
-        rc=0
-        rustup toolchain install "$TOOLCHAIN" "${args[@]}" --no-self-update || rc=$?
-        if [ "$rc" != 0 ]; then
-          why="exit $rc"
-          # Git Bash reports 127 for a Windows program that ended with an NTSTATUS crash code, not only for a missing one.
-          if [ "$rc" = 127 ] && [ "$RUNNER_OS" = Windows ]; then
-            why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
+        # Through run-native when Node is there: Git Bash reports any NTSTATUS crash as 127, run-native prints the raw code (hex,
+        # NTSTATUS name) and rustup's last stderr lines. A crash (never an error rustup reports) gets one more try: a stated
+        # mitigation for an intermittent crash whose cause the logged code is to name, not a fix.
+        codes="$(mktemp -d)"
+        how=""
+        for try in 1 2; do
+          rc=0
+          if command -v node >/dev/null 2>&1; then
+            cf="$codes/$try"
+            if [ "$RUNNER_OS" = Windows ] && command -v cygpath >/dev/null 2>&1; then cf="$(cygpath -m "$cf")"; fi  # node.exe reads C:/ paths
+            node "$NATIVE" --code-file "$cf" -- rustup toolchain install "$TOOLCHAIN" "${args[@]}" --no-self-update || rc=$?
+          else
+            rustup toolchain install "$TOOLCHAIN" "${args[@]}" --no-self-update || rc=$?
           fi
+          [ "$rc" = 0 ] && break
+          crash=0
+          if [ -s "$codes/$try" ]; then
+            how="$(head -1 "$codes/$try")"
+            case "$how" in signal* | *NTSTATUS* | *STATUS_*) crash=1 ;; esac
+          else
+            how="exit $rc"
+            # Git Bash reports 127 for a Windows program that ended with an NTSTATUS crash code, not only for a missing one.
+            if [ "$rc" = 127 ] && [ "$RUNNER_OS" = Windows ]; then
+              crash=1
+              how="$how: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
+            fi
+          fi
+          echo "rustup toolchain install, try $try of 2: $how"
+          if [ "$crash" != 1 ] || [ "$try" = 2 ]; then break; fi
+          echo "::warning::rustup crashed ($how); trying once more"
+        done
+        rm -rf "$codes"
+        if [ "$rc" != 0 ]; then
+          case "$how" in exit*) why="$how" ;; *) why="ended with $how" ;; esac
           echo "::error::rustup could not install the $TOOLCHAIN toolchain ($why). Run 'rustup toolchain install $TOOLCHAIN' on the runner to see why."
           exit 1
         fi
+        mkdir -p "$(dirname "$STAMP")" && touch "$STAMP"
         rustup default "$TOOLCHAIN"
         rustc --version
         cargo --version
@@ -85,15 +134,37 @@ runs:
         esac
         DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
         BIN=sccache; [ "$RUNNER_OS" = "Windows" ] && BIN=sccache.exe
-        if [ ! -x "$DEST/$BIN" ]; then
+        # The shared tool cache keeps a copy only while it runs and reports the pin: a copy an older install left half-written,
+        # or any other version, is replaced by a verified download.
+        if [ ! -x "$DEST/$BIN" ] || [ "$("$DEST/$BIN" --version 2>/dev/null | awk '{print $2}')" != "$VERSION" ]; then
+          # A fresh folder of this job's own (mktemp -d, under the job's TMPDIR where job-tmpdir or job-isolation set one): the
+          # archive is downloaded, verified and unpacked where no other job reads or writes; only a verified binary is renamed
+          # into the shared cache.
           dl=$(mktemp -d)
           NAME="sccache-v$VERSION-$T"
-          # A failed download must not fail the job: the build runs without the cache.
-          if ! curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"; then
-            echo "::warning::could not download sccache $VERSION; building without the compile cache."; exit 0
+          URL="https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
+          sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
+          # A mismatch is deleted and fetched once more, with both hashes, the size and the first bytes logged: an error page
+          # from a proxy or a cut-off transfer shows there; a wrong pin or a changed release asset mismatches twice.
+          GOT=""; GOT1=""
+          for try in 1 2; do
+            rm -f "$dl/$NAME.$EXT"
+            # A failed download must not fail the job: the build runs without the cache.
+            if ! curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "$URL"; then
+              rm -rf "$dl"
+              echo "::warning::could not download sccache $VERSION; building without the compile cache."; exit 0
+            fi
+            GOT=$(sha256 "$dl/$NAME.$EXT")
+            [ "$GOT" = "$SUM" ] && break
+            [ -z "$GOT1" ] && GOT1="$GOT"
+            echo "sccache $VERSION download $try of 2 for $T: expected SHA-256 $SUM, got $GOT ($(wc -c < "$dl/$NAME.$EXT" | tr -d ' ') bytes from $URL)"
+            echo "  first bytes: $(head -c 160 "$dl/$NAME.$EXT" | LC_ALL=C tr -c '[:print:]' '.')"
+          done
+          if [ "$GOT" != "$SUM" ]; then
+            rm -rf "$dl"
+            echo "::error::sccache $VERSION checksum mismatch for $T: expected $SUM, got $GOT1 and $GOT on both downloads (a wrong pin or a changed release asset; .gitea/actions/setup-rust)"
+            exit 1
           fi
-          if command -v sha256sum >/dev/null 2>&1; then GOT=$(sha256sum "$dl/$NAME.$EXT" | cut -d' ' -f1); else GOT=$(shasum -a 256 "$dl/$NAME.$EXT" | cut -d' ' -f1); fi
-          [ "$GOT" = "$SUM" ] || { echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"; exit 1; }
           if [ "$EXT" = zip ]; then
             if command -v unzip >/dev/null 2>&1; then unzip -q "$dl/$NAME.$EXT" -d "$dl"; else powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"; fi
           else
@@ -105,6 +176,7 @@ runs:
           chmod +x "$DEST/$BIN.part.$$"
           mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
           rm -rf "$dl"
+          echo "sccache $VERSION installed in $DEST"
         fi
         echo "$DEST" >> "$GITHUB_PATH"
     - name: sccache
