@@ -27,6 +27,7 @@ import { MatInput } from '@angular/material/input';
 import { MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
 import { MatSnackBar, type MatSnackBarRef, type TextOnlySnackBar } from '@angular/material/snack-bar';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
+import { KEY_PLATFORM } from '@decryp7/paddock-ui/shell/menu';
 import type { Edit, KindInfo, LayoutView, Placement, Preset } from '../generated/widgets';
 import { defaultKindOf, PdWidgetOption } from './widget';
 
@@ -48,7 +49,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
  * - Add a widget: every kind with its summary: "Add", the app's `again` label for a kind that can be placed again, and
  *   "Added" (not a button) for a kind at its count. At the surface limit every Add is disabled and the counter says "8 of 8".
  * - A Material snack bar with Undo shows while `canUndo` is true. A newer layout (`editable` false) is read-only.
- * - Preview: with `preview` true, content with `slot="preview"` shows beside the lists at 840 px and more.
+ * - Preview: with `preview` true, content with `slot="preview"` shows beside the lists at 880 px and more.
  */
 @Component({
   selector: 'pd-widget-chooser',
@@ -59,6 +60,9 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
   template: `
     <div class="pd-wc" [class.pd-wc--preview]="preview()">
       <div class="pd-wc-main">
+        @if (error(); as e) {
+          <p class="pd-wc-error" role="alert"><pd-status-glyph status="error" [size]="16" />{{ e }}</p>
+        }
         @for (note of view().notes; track $index) {
           <p class="pd-wc-limit pd-wc-note" role="status"><pd-status-glyph status="info" [size]="16" />{{ note.message }}</p>
         }
@@ -108,15 +112,15 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
         </ul>
         <mat-menu #menu="matMenu" class="pd-wc-menu">
           <ng-template matMenuContent let-p="p" let-i="i" let-n="n">
-            <button mat-menu-item type="button" [disabled]="i === 0" aria-keyshortcuts="Alt+ArrowUp" (click)="moveBy(p, i, 'up', n)"><pd-glyph name="arrow-up" [size]="16" />Move up<kbd aria-hidden="true">⌥↑</kbd></button>
-            <button mat-menu-item type="button" [disabled]="i === n - 1" aria-keyshortcuts="Alt+ArrowDown" (click)="moveBy(p, i, 'down', n)"><pd-glyph name="arrow-down" [size]="16" />Move down<kbd aria-hidden="true">⌥↓</kbd></button>
-            <button mat-menu-item type="button" [disabled]="i === 0" aria-keyshortcuts="Alt+Home" (click)="moveBy(p, i, 'top', n)"><pd-glyph name="to-top" [size]="16" />Move to top<kbd aria-hidden="true">⌥Home</kbd></button>
-            <button mat-menu-item type="button" [disabled]="i === n - 1" aria-keyshortcuts="Alt+End" (click)="moveBy(p, i, 'bottom', n)"><pd-glyph name="to-bottom" [size]="16" />Move to bottom<kbd aria-hidden="true">⌥End</kbd></button>
+            <button mat-menu-item type="button" [disabled]="i === 0" aria-keyshortcuts="Alt+ArrowUp" (click)="moveBy(p, i, 'up', n)"><pd-glyph name="arrow-up" [size]="16" />Move up<kbd aria-hidden="true">{{ alt }}↑</kbd></button>
+            <button mat-menu-item type="button" [disabled]="i === n - 1" aria-keyshortcuts="Alt+ArrowDown" (click)="moveBy(p, i, 'down', n)"><pd-glyph name="arrow-down" [size]="16" />Move down<kbd aria-hidden="true">{{ alt }}↓</kbd></button>
+            <button mat-menu-item type="button" [disabled]="i === 0" aria-keyshortcuts="Alt+Home" (click)="moveBy(p, i, 'top', n)"><pd-glyph name="to-top" [size]="16" />Move to top<kbd aria-hidden="true">{{ alt }}Home</kbd></button>
+            <button mat-menu-item type="button" [disabled]="i === n - 1" aria-keyshortcuts="Alt+End" (click)="moveBy(p, i, 'bottom', n)"><pd-glyph name="to-bottom" [size]="16" />Move to bottom<kbd aria-hidden="true">{{ alt }}End</kbd></button>
             <hr class="pd-wc-sep" />
             <button mat-menu-item type="button" class="pd-wc-remove" [disabled]="placements().length <= surface().minPlacements" (click)="remove(p)"><pd-glyph name="trash" [size]="16" />Remove</button>
           </ng-template>
         </mat-menu>
-        <p class="pd-wc-hint" [id]="ids + '-hint'"><pd-glyph name="keyboard" [size]="16" />Drag a widget, or focus its handle and hold Alt (Option) with the arrow keys, Home or End to move it.</p>
+        <p class="pd-wc-hint" [id]="ids + '-hint'"><pd-glyph name="keyboard" [size]="16" />Drag a widget, or focus its handle and hold {{ mac ? 'Option' : 'Alt' }} with the arrow keys, Home or End to move it.</p>
 
         <div class="pd-wc-label"><span>Add a widget</span></div>
         @if (atLimit()) {
@@ -149,9 +153,15 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
                 <li class="pd-wc-item pd-wc-add">
                   <span class="pd-wc-txt"><b>{{ pr.name }}</b><span>{{ pr.placements.length }} {{ pr.placements.length === 1 ? 'widget' : 'widgets' }}{{ pr.builtin ? ' · Built in' : '' }}</span></span>
                   @if (editable()) {
-                    <button matButton="outlined" type="button" [attr.aria-label]="'Apply the ' + pr.name + ' preset'" (click)="applyPreset(pr)">Apply</button>
+                    <button matButton="outlined" type="button" [attr.data-preset-apply]="pr.id" [attr.aria-label]="'Apply the ' + pr.name + ' preset'" (click)="applyPreset(pr)">Apply</button>
                     @if (!pr.builtin) {
-                      <button matIconButton type="button" [attr.aria-label]="'Delete the ' + pr.name + ' preset'" (click)="deletePreset(pr)"><pd-glyph name="trash" [size]="16" /></button>
+                      @if (confirming() === pr.id) {
+                        <span class="pd-wc-ask">Delete this preset?</span>
+                        <button matButton="outlined" type="button" class="pd-wc-danger" [attr.data-preset-confirm]="pr.id" [attr.aria-label]="'Delete the ' + pr.name + ' preset'" (keydown.escape)="cancelDelete(pr)" (click)="deletePreset(pr)">Delete</button>
+                        <button matButton="text" type="button" (keydown.escape)="cancelDelete(pr)" (click)="cancelDelete(pr)">Cancel</button>
+                      } @else {
+                        <button matIconButton type="button" [attr.data-preset-delete]="pr.id" [attr.aria-label]="'Delete the ' + pr.name + ' preset'" (click)="askDelete(pr)"><pd-glyph name="trash" [size]="16" /></button>
+                      }
                     }
                   }
                 </li>
@@ -162,7 +172,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
             <div class="pd-wc-save">
               <mat-form-field appearance="outline" subscriptSizing="dynamic">
                 <mat-label>Preset name</mat-label>
-                <input matInput maxlength="64" autocomplete="off" [value]="presetName()" (input)="presetNameInput($event)" (keydown.enter)="savePreset()" />
+                <input matInput autocomplete="off" [value]="presetName()" (input)="presetNameInput($event)" (keydown.enter)="savePreset()" />
               </mat-form-field>
               <button matButton="outlined" type="button" [disabled]="!canSave()" (click)="savePreset()">Save as preset</button>
             </div>
@@ -186,21 +196,23 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
   styles: `
     .pd-widget-chooser { display: block; container-type: inline-size; }
     .pd-wc { display: grid; gap: var(--pd-space-6); align-items: start; }
-    @container (min-width: 840px) { .pd-wc--preview { grid-template-columns: minmax(440px, 1fr) 360px; } }
+    /* The one preview breakpoint: the lists get 496 px beside the 360 px popup and the gap. */
+    @container (min-width: 880px) { .pd-wc--preview { grid-template-columns: minmax(0, 1fr) 360px; } }
     .pd-wc-label { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 6px; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
     .pd-wc-count { font-weight: var(--pd-weight-regular); color: var(--pd-text-subtle); }
     .pd-wc-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); overflow: hidden; position: relative; }
-    .pd-wc-item { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 48px; padding: 6px 8px 6px 4px; background: var(--pd-surface-1); }
+    .pd-wc-item { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 48px; padding: 6px var(--pd-space-2) 6px var(--pd-space-1); background: var(--pd-surface-1); }
     .pd-wc-item + .pd-wc-item { border-top: 1px solid var(--pd-hairline); }
-    .pd-wc-add { padding-left: 12px; }
-    .pd-wc-added .pd-wc-txt b, .pd-wc-added .pd-wc-kicon { color: var(--pd-text-muted); }
-    .pd-wc-kicon { color: var(--pd-text-muted); flex: none; }
+    .pd-wc-add { padding-left: var(--pd-space-3); }
+    .pd-wc-added .pd-wc-txt b, .pd-wc-added .pd-wc-kicon.mat-icon { color: var(--pd-text-muted); }
+    /* Material's .mat-icon (24 px) is one class; two win. */
+    .pd-wc-kicon.mat-icon { width: 16px; height: 16px; color: var(--pd-text-muted); flex: none; }
     .pd-wc-txt { display: grid; min-width: 0; flex: 1; }
     .pd-wc-txt b { font-weight: var(--pd-weight-medium); white-space: nowrap; }
     .pd-wc-txt span { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
     .pd-wc-grip { display: inline-grid; place-items: center; width: 24px; height: 32px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: none; color: var(--pd-text-subtle); cursor: grab; flex: none; }
     .pd-wc-grip:hover { background: var(--pd-hover); color: var(--pd-text-muted); }
-    .pd-wc-grip:focus-visible, .pd-wc-calm:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
+    .pd-wc-grip:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
     .pd-wc-grip[aria-disabled='true'] { cursor: default; opacity: 0.5; }
     .pd-wc-more { flex: none; }
     .pd-wc-addedlabel { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
@@ -212,21 +224,30 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     @media (prefers-reduced-motion: reduce) { :root:not([data-motion='full']) .cdk-drag-animating, :root:not([data-motion='full']) .pd-wc-list .pd-wc-item { transition: none !important; } }
     :root[data-motion='reduce'] .cdk-drag-animating, :root[data-motion='reduce'] .pd-wc-list .pd-wc-item { transition: none !important; }
     .pd-wc-toggle { height: var(--pd-control-height); flex: none; }
-    .pd-wc-hint { display: flex; align-items: center; gap: 6px; margin: 8px 0 20px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
-    .pd-wc-limit { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 8px 12px; border-radius: var(--pd-radius-control); background: var(--pd-info-tint); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
+    .pd-wc-hint { display: flex; align-items: center; gap: 6px; margin: var(--pd-space-2) 0 20px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+    .pd-wc-limit { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0 0 var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-info-tint); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
     .pd-wc-limit pd-status-glyph { color: var(--pd-info); }
+    .pd-wc-list + .pd-wc-label, .pd-wc-hint + .pd-wc-label { margin-top: var(--pd-space-6); }
+    .pd-wc-save mat-form-field { --mat-form-field-container-height: var(--pd-control-height); --mat-form-field-container-vertical-padding: var(--pd-space-1); --mat-form-field-container-text-size: var(--pd-text-body); --mat-form-field-outlined-label-text-populated-size: var(--pd-text-label); --mat-form-field-outlined-label-text-size: var(--pd-text-label); }
+    .pd-wc-save input { font-size: var(--pd-text-body); }
+    .pd-wc-save button { height: var(--pd-control-height); }
+    .pd-wc-foot button { --mat-button-text-label-text-color: var(--pd-accent); }
     .pd-wc-save { display: flex; align-items: flex-start; gap: var(--pd-space-2); margin: var(--pd-space-2) 0; }
     .pd-wc-save mat-form-field { flex: 1; min-width: 0; }
-    .pd-wc-foot { margin: 12px 0 0 -8px; }
+    .pd-wc-error { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0 0 var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); font-size: var(--pd-text-label); }
+    .pd-wc-error pd-status-glyph { color: var(--pd-danger); }
+    .pd-wc-ask { font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+    .pd-wc-danger { --mat-button-outlined-label-text-color: var(--pd-danger); color: var(--pd-danger); }
+    .pd-wc-foot { margin: var(--pd-space-3) 0 0 calc(-1 * var(--pd-space-2)); }
     .pd-wc-plabel { font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); margin: 0 0 6px; }
     /* The menu keeps clear of its button's focus ring (2 px ring, 2 px offset), whether it opens below or above. */
     .pd-wc-menu.mat-menu-below { margin-top: 6px; }
     .pd-wc-menu.mat-menu-above { margin-bottom: 6px; }
     .pd-wc-menu { min-width: 208px; }
-    .pd-wc-menu .mat-mdc-menu-item .mat-mdc-menu-item-text { display: flex; align-items: center; gap: 8px; flex: 1; }
-    .pd-wc-menu kbd { margin-left: auto; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); line-height: 16px; padding: 0 4px; border-radius: 4px; border: 1px solid var(--pd-border-strong); background: var(--pd-surface-2); color: var(--pd-text-muted); white-space: nowrap; }
+    .pd-wc-menu .mat-mdc-menu-item .mat-mdc-menu-item-text { display: flex; align-items: center; gap: var(--pd-space-2); flex: 1; }
+    .pd-wc-menu kbd { margin-left: auto; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); line-height: 16px; padding: 0 var(--pd-space-1); border-radius: 4px; border: 1px solid var(--pd-border-strong); background: var(--pd-surface-2); color: var(--pd-text-muted); white-space: nowrap; }
     .pd-wc-menu .pd-wc-remove, .pd-wc-menu .pd-wc-remove pd-glyph { color: var(--pd-danger); }
-    .pd-wc-sep { border: 0; border-top: 1px solid var(--pd-hairline); margin: 4px 0; }
+    .pd-wc-sep { border: 0; border-top: 1px solid var(--pd-hairline); margin: var(--pd-space-1) 0; }
   `,
 })
 export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string> {
@@ -242,6 +263,8 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   readonly kindOf = input<(widget: W) => string>(defaultKindOf);
   /** The Add label of a kind that can be placed again, by kind ("Add volume"); the default is "Add another". */
   readonly again = input<Readonly<Record<string, string>>>({});
+  /** The engine's message for an edit it refused (`WidgetError`'s display text, which the app gets with the error): shown at the top until the app clears it. Clear it (set null) before sending the next edit; a new value arriving after an edit means that edit was refused. */
+  readonly error = input<string | null>(null);
   /** Show the preview column (project the preview with `slot="preview"`). */
   readonly preview = input(false);
   /** The app's per-kind option controls. */
@@ -263,24 +286,75 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   protected readonly presetName = signal('');
   protected readonly canSave = computed(() => this.presetName().trim() !== '' && this.userPresets().length < this.surface().maxUserPresets);
   private readonly grips = viewChildren<ElementRef<HTMLButtonElement>>('grip');
-  private readonly lastLabel = signal<{ text: string; n: number }>({ text: '', n: 0 });
-  private pendingFocus: string | null = null;
+  /** What the undo toast will say once the engine confirms the last undoable edit; null when no such edit is waiting. */
+  private pendingUndo: string | null = null;
+  /** A move waiting for the engine's answer: announced only when the new view shows it. */
+  private pendingMove: { id: string; to: number; text: string } | null = null;
+  private pendingFocus: (() => HTMLElement | null | undefined) | null = null;
+  /** How many edits this chooser has sent (the refusal check compares an `error` arrival with it). */
+  private readonly sent = signal(0);
+  private lastError: string | null = null;
   private toast: MatSnackBarRef<TextOnlySnackBar> | null = null;
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  /** The modifier's name and glyphs on this platform (Option on a Mac, Alt elsewhere). */
+  protected readonly mac = inject(KEY_PLATFORM) === 'mac';
+  protected readonly alt = this.mac ? '\u2325' : 'Alt+';
+  protected readonly confirming = signal<string | null>(null);
 
   constructor() {
     effect(() => {
-      this.placements();
-      const id = untracked(() => this.pendingFocus);
-      if (id === null) return;
-      this.pendingFocus = null;
-      afterNextRender(() => this.grips().find((g) => g.nativeElement.dataset['id'] === id)?.nativeElement.focus(), { injector: this.injector });
+      const placements = this.placements();
+      this.presets();
+      untracked(() => {
+        const move = this.pendingMove;
+        this.pendingMove = null;
+        if (move && placements.findIndex((p) => p.id === move.id) === move.to) void this.announcer.announce(move.text);
+        const focus = this.pendingFocus;
+        this.pendingFocus = null;
+        if (focus) this.focusSoon(focus);
+      });
     });
     effect(() => {
+      // The toast follows the engine: it opens only for an edit this chooser sent and the engine says can be undone, and closes when it cannot.
       const can = this.view().canUndo;
-      const label = this.lastLabel();
-      untracked(() => this.showUndo(can ? label.text : null));
+      untracked(() => {
+        const text = this.pendingUndo;
+        if (!can) {
+          this.pendingUndo = null;
+          this.closeToast();
+        } else if (text !== null) {
+          this.pendingUndo = null;
+          this.showUndo(text);
+        }
+      });
+    });
+    effect(() => {
+      // A refusal is a new `error` value arriving after the last edit sent: that edit changed nothing, so it has no toast and no move
+      // to announce. Edits sent while the same error is still shown are not refused by it (apps clear `error` before each edit).
+      const e = this.error();
+      untracked(() => {
+        if (e !== null && e !== this.lastError && this.sent() > 0) {
+          this.pendingUndo = null;
+          this.pendingMove = null;
+        }
+        this.lastError = e;
+      });
     });
     inject(DestroyRef).onDestroy(() => this.toast?.dismiss());
+  }
+
+  private send(edit: Edit<W>): void {
+    this.sent.update((n) => n + 1);
+    this.edit.emit(edit);
+  }
+  private focusSoon(find: () => HTMLElement | null | undefined): void {
+    afterNextRender(() => find()?.focus(), { injector: this.injector });
+  }
+  private grip(id: string): HTMLElement | undefined {
+    return this.grips().find((g) => g.nativeElement.dataset['id'] === id)?.nativeElement;
+  }
+  private query(selector: string): HTMLElement | null {
+    return this.host.nativeElement.querySelector<HTMLElement>(selector);
   }
 
   protected infoOf(p: Placement<W>): KindInfo<K> | undefined {
@@ -308,33 +382,48 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   }
 
   protected add(k: KindInfo<K>): void {
-    this.edit.emit({ add: { widget: this.widgetFor()(k.kind), span: null, at: null } });
+    this.send({ add: { widget: this.widgetFor()(k.kind), span: null, at: null } });
   }
   protected resize(p: Placement<W>, span: number): void {
-    this.edit.emit({ resize: { id: p.id, span } });
+    this.send({ resize: { id: p.id, span } });
   }
   protected remove(p: Placement<W>): void {
-    this.lastLabel.update((l) => ({ text: `${this.titleOf(p)} removed from the ${this.noun()}.`, n: l.n + 1 }));
-    this.edit.emit({ remove: { id: p.id } });
+    this.pendingUndo = `${this.titleOf(p)} removed from the ${this.noun()}.`;
+    this.send({ remove: { id: p.id } });
   }
   protected reset(): void {
-    this.lastLabel.update((l) => ({ text: `The ${this.noun()} is back to the defaults.`, n: l.n + 1 }));
-    this.edit.emit('resetToDefaults');
+    this.pendingUndo = `The ${this.noun()} is back to the defaults.`;
+    this.send('resetToDefaults');
   }
 
   protected presetNameInput(e: Event): void {
     this.presetName.set((e.target as HTMLInputElement).value);
   }
   protected applyPreset(p: Preset<W>): void {
-    this.lastLabel.update((l) => ({ text: `The ${this.noun()} now uses the ${p.name} preset.`, n: l.n + 1 }));
-    this.edit.emit({ applyPreset: { id: p.id } });
+    this.pendingUndo = `The ${this.noun()} now uses the ${p.name} preset.`;
+    this.send({ applyPreset: { id: p.id } });
   }
+  /** First step of deleting a saved preset: a confirm in the row (a preset has no undo: the engine's undo restores placements only). */
+  protected askDelete(p: Preset<W>): void {
+    this.confirming.set(p.id);
+    this.focusSoon(() => this.query(`[data-preset-confirm="${p.id}"]`));
+  }
+  protected cancelDelete(p: Preset<W>): void {
+    this.confirming.set(null);
+    this.focusSoon(() => this.query(`[data-preset-delete="${p.id}"]`));
+  }
+  /** Deletes the preset; focus moves to the next preset's Apply (the previous one's, or the name field when none is left). */
   protected deletePreset(p: Preset<W>): void {
-    this.edit.emit({ deletePreset: { id: p.id } });
+    const list = this.presets();
+    const at = list.findIndex((x) => x.id === p.id);
+    const near = list[at + 1] ?? list[at - 1];
+    this.confirming.set(null);
+    this.pendingFocus = near ? () => this.query(`[data-preset-apply="${near.id}"]`) : () => this.query('.pd-wc-save input');
+    this.send({ deletePreset: { id: p.id } });
   }
   protected savePreset(): void {
     if (!this.canSave()) return;
-    this.edit.emit({ savePreset: { name: this.presetName().trim() } });
+    this.send({ savePreset: { name: this.presetName().trim() } });
     this.presetName.set('');
   }
 
@@ -355,25 +444,29 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   protected moveBy(p: Placement<W>, i: number, move: Move, n: number, keepFocus = false): void {
     const to = move === 'up' ? i - 1 : move === 'down' ? i + 1 : move === 'top' ? 0 : n - 1;
     if (to < 0 || to >= n || to === i) {
-      void this.announcer.announce(`${this.titleOf(p)} is already ${i === 0 ? 'first' : 'last'}.`);
+      const where = n === 1 ? 'the only widget' : move === 'up' || move === 'top' ? 'already first' : 'already last';
+      void this.announcer.announce(`${this.titleOf(p)} is ${where}.`);
       return;
     }
     this.moveTo(p, to, keepFocus);
   }
 
   private moveTo(p: Placement<W>, to: number, keepFocus: boolean): void {
-    if (keepFocus) this.pendingFocus = p.id;
-    this.edit.emit({ move: { id: p.id, to } });
-    void this.announcer.announce(`${this.titleOf(p)} moved to position ${to + 1} of ${this.placements().length}`);
+    if (keepFocus) this.pendingFocus = () => this.grip(p.id);
+    this.pendingMove = { id: p.id, to, text: `${this.titleOf(p)} moved to position ${to + 1} of ${this.placements().length}` };
+    this.send({ move: { id: p.id, to } });
   }
 
-  /** Shows the undo snack bar for `text`, or closes it when there is none (`canUndo` false). */
-  private showUndo(text: string | null): void {
+  /** Shows the undo snack bar for `text`. */
+  private closeToast(): void {
     this.toast?.dismiss();
     this.toast = null;
-    if (text === null) return;
+  }
+
+  private showUndo(text: string): void {
+    this.closeToast();
     const ref = this.snackBar.open(text, 'Undo', { duration: UNDO_SECONDS * 1000, horizontalPosition: 'end', verticalPosition: 'bottom', panelClass: UNDO_SNACK_CLASS });
     this.toast = ref;
-    ref.onAction().subscribe(() => this.edit.emit('undo'));
+    ref.onAction().subscribe(() => this.send('undo'));
   }
 }
