@@ -26,7 +26,8 @@ const TUNING: Tuning = Tuning {
     lock_every: 2,
 };
 
-/// The most states a search may visit; a search that gets there fails.
+/// The most states a search at the full bound may visit; a search that gets there fails. The CI bound has a much lower one
+/// ([`Bound::max_states`]) so that a runaway search fails in seconds.
 const MAX_STATES: usize = 2_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -627,6 +628,18 @@ enum Bound {
     Full,
 }
 
+impl Bound {
+    /// The most states one scenario's search may visit at this bound. The largest CI scenario visits about 121 000, so the CI
+    /// cap is 500 000: a machine change that makes the search diverge fails in about a minute instead of running fifteen threads
+    /// to 2 000 000 states each (an hour of CPU).
+    fn max_states(self) -> usize {
+        match self {
+            Bound::Ci => 500_000,
+            Bound::Full => MAX_STATES,
+        }
+    }
+}
+
 /// The ticks a scenario gets in the CI bound. Three ticks reach a wait's note (the "cause shown" invariant), so the scenarios
 /// whose waits matter most keep three; the others look twice.
 fn ci_ticks(name: &str) -> u8 {
@@ -656,7 +669,13 @@ fn check_all(mutant: Mutant, budget: Budget, bound: Bound) -> Vec<(&'static str,
             .into_iter()
             .map(|(name, w)| {
                 scope.spawn(move || {
-                    let r = explore(w, MAX_STATES, key_of, |w| w.successors(), |w| w.violation.map(str::to_string));
+                    let r = explore(
+                        w,
+                        bound.max_states(),
+                        key_of,
+                        |w| w.successors(),
+                        |w| w.violation.map(str::to_string),
+                    );
                     (name, r)
                 })
             })
@@ -673,7 +692,8 @@ fn assert_clean(bound: Bound) -> (usize, std::time::Duration) {
     for (name, r) in check_all(Mutant::None, BUDGET, bound) {
         assert!(
             !r.truncated,
-            "{name}: the search reached its bound of {MAX_STATES} states without finishing"
+            "{name}: the search reached its bound of {} states without finishing",
+            bound.max_states()
         );
         if let Some(v) = &r.violation {
             panic!("{name}: {}\n  {}", v.what, v.trace.join("\n  "));
@@ -687,6 +707,33 @@ fn assert_clean(bound: Bound) -> (usize, std::time::Duration) {
 /// The CI bound: every invariant in every interleaving of the scenarios at two or three ticks. It has to stay cheap enough for
 /// every CI leg (nextest's limit is 60 s and a shared runner is slow); the numbers measured on the development Mac are in the
 /// commit that introduced the two bounds.
+/// A test must never spin for an hour: a search that diverges (a machine change that lets looks or waits multiply) has to hit its
+/// state bound within seconds. The largest CI scenario visits about 121 000 states, so the CI cap is a few times that, not the
+/// full bound's 2 000 000 per scenario (fifteen scenarios in parallel threads cost an hour of CPU at that cap, 2026-10-31).
+#[test]
+fn a_diverging_search_hits_the_ci_cap_in_seconds_and_every_real_scenario_stays_well_inside_it() {
+    assert!(Bound::Ci.max_states() <= 600_000, "the CI cap is what bounds a runaway search");
+    assert!(Bound::Ci.max_states() < Bound::Full.max_states());
+    let t = std::time::Instant::now();
+    let r = explore(
+        0u64,
+        Bound::Ci.max_states(),
+        |n| *n,
+        |n| vec![("up".to_string(), n + 1), ("up2".to_string(), n + 2)],
+        |_| None,
+    );
+    assert!(r.truncated && r.states >= Bound::Ci.max_states());
+    assert!(t.elapsed() < std::time::Duration::from_secs(30), "{:?}", t.elapsed());
+    for (name, r) in check_all(Mutant::None, BUDGET, Bound::Ci) {
+        assert!(
+            r.states * 3 <= Bound::Ci.max_states(),
+            "{name}: {} states is too close to the CI cap {}",
+            r.states,
+            Bound::Ci.max_states()
+        );
+    }
+}
+
 #[test]
 fn the_machine_keeps_every_invariant_in_every_interleaving_up_to_the_ci_bound() {
     let (total, took) = assert_clean(Bound::Ci);
@@ -709,7 +756,13 @@ fn caught(mutant: Mutant, scenario_names: &[&str]) -> String {
         .into_iter()
         .filter(|(n, _)| scenario_names.contains(n))
     {
-        let r = explore(w, MAX_STATES, key_of, |w| w.successors(), |w| w.violation.map(str::to_string));
+        let r = explore(
+            w,
+            Bound::Ci.max_states(),
+            key_of,
+            |w| w.successors(),
+            |w| w.violation.map(str::to_string),
+        );
         if let Some(v) = r.violation {
             return format!("{name}: {} (after {} steps, {} states)", v.what, v.trace.len(), r.states);
         }
