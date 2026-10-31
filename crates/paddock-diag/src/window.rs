@@ -6,7 +6,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 /// The default log bytes in a report, over all files.
-pub const LOG_WINDOW: u64 = 2 * 1024 * 1024;
+pub const LOG_WINDOW: u64 = 4 * 1024 * 1024;
 /// Most log files looked at.
 pub const MAX_LOG_FILES: usize = 4;
 
@@ -54,25 +54,59 @@ pub fn log_files(dir: &Path, prefix: &str) -> Vec<PathBuf> {
     found.into_iter().map(|(_, p)| p).collect()
 }
 
-/// A window over the newest log files: `(file name, bytes, cut)` newest first. At most [`MAX_LOG_FILES`] files and `budget`
-/// bytes in all; a file that cannot be read is skipped.
+/// A window over the newest log files: `(file name, bytes, cut)`, each process's files newest first. At most [`MAX_LOG_FILES`]
+/// files per process and `budget` bytes in all, shared between the processes (`<id>.<day>.log` for the app, `<id>-<process>.<day>.log`
+/// for the others): each gets an equal share, and what a small one does not use goes to the larger ones, so a chatty process
+/// cannot push another's log out of the report. A file that cannot be read is skipped.
 pub fn log_window(dir: &Path, prefix: &str, budget: u64) -> Vec<(String, Vec<u8>, bool)> {
-    let mut left = budget;
-    let mut out = Vec::new();
-    for path in log_files(dir, prefix).into_iter().take(MAX_LOG_FILES) {
-        if left == 0 {
-            break;
-        }
-        if let Some((bytes, cut)) = tail_of(&path, left).filter(|(b, _)| !b.is_empty()) {
-            left = left.saturating_sub(bytes.len() as u64);
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            out.push((name, bytes, cut));
+    // The files by process, in the order each process's newest file appears.
+    let mut groups: Vec<(String, Vec<PathBuf>)> = Vec::new();
+    for path in log_files(dir, prefix) {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let process = name.split('.').next().unwrap_or("").to_string();
+        match groups.iter_mut().find(|(p, _)| *p == process) {
+            Some((_, files)) => {
+                if files.len() < MAX_LOG_FILES {
+                    files.push(path);
+                }
+            }
+            None => groups.push((process, vec![path])),
         }
     }
-    out
+    // The smallest processes first, each taking its equal share of what is left (or all it has).
+    let size = |files: &[PathBuf]| {
+        files
+            .iter()
+            .filter_map(|p| p.metadata().ok())
+            .map(|m| m.len())
+            .sum::<u64>()
+    };
+    let mut order: Vec<usize> = (0..groups.len()).collect();
+    order.sort_by_key(|i| size(&groups[*i].1));
+    let mut left = budget;
+    let mut taken: Vec<Vec<(String, Vec<u8>, bool)>> = vec![Vec::new(); groups.len()];
+    for (k, i) in order.iter().enumerate() {
+        let share = left / (groups.len() - k) as u64;
+        let mut room = share;
+        for path in &groups[*i].1 {
+            if room == 0 {
+                break;
+            }
+            if let Some((bytes, cut)) = tail_of(path, room).filter(|(b, _)| !b.is_empty()) {
+                room = room.saturating_sub(bytes.len() as u64);
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                taken[*i].push((name, bytes, cut));
+            }
+        }
+        left -= share - room;
+    }
+    taken.into_iter().flatten().collect()
 }
 
 #[cfg(test)]
@@ -160,6 +194,68 @@ mod tests {
         let (bytes, cut) = tail_of(&p, 1024).unwrap();
         assert!(cut);
         assert_eq!(bytes, b"last-1\nlast-2\n");
+    }
+
+    /// Logging for root cause (Dyno's 30 s login connect): the app writes far more than its background process, and the window
+    /// used to go to the newest files first, so a chatty app log pushed the agent's out of the report. Each process (`<id>`,
+    /// `<id>-agent`, ...) gets an equal share; what a small one does not use goes to the others.
+    #[test]
+    fn each_process_gets_a_share_of_the_window_and_a_chatty_one_cannot_push_another_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let big = "a line of the chatty app log\n".repeat(400); // 11 600 bytes
+        std::fs::write(dir.path().join("dyno.2026-10-31.log"), &big).unwrap();
+        std::fs::write(
+            dir.path().join("dyno-agent.2026-10-31.log"),
+            "agent start\nagent bound\n",
+        )
+        .unwrap();
+        // The agent's log is the OLDER file, so the chatty app's group comes first. Only the smallest-first rule then lets the small
+        // log keep all its bytes and hand the rest of its share to the app (without it the app would stop at half the window).
+        for (name, secs) in [
+            ("dyno-agent.2026-10-31.log", 1_000),
+            ("dyno.2026-10-31.log", 2_000),
+        ] {
+            File::options()
+                .write(true)
+                .open(dir.path().join(name))
+                .unwrap()
+                .set_modified(
+                    std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs),
+                )
+                .unwrap();
+        }
+        let got = log_window(dir.path(), "dyno", 4_000);
+        let by_name = |n: &str| {
+            got.iter()
+                .find(|(name, _, _)| name == n)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{n} missing from {:?}",
+                        got.iter().map(|g| &g.0).collect::<Vec<_>>()
+                    )
+                })
+        };
+        assert_eq!(
+            by_name("dyno-agent.2026-10-31.log").1,
+            b"agent start\nagent bound\n",
+            "the small log is whole"
+        );
+        let app = by_name("dyno.2026-10-31.log");
+        assert!(app.2, "the chatty log is cut");
+        // The share the agent did not use goes to the app: the report is as full as the budget allows.
+        let total: usize = got.iter().map(|g| g.1.len()).sum();
+        assert!(total > 3_900 && total <= 4_000, "{total}");
+        // Two chatty processes split the window in two.
+        std::fs::write(dir.path().join("dyno-agent.2026-10-31.log"), &big).unwrap();
+        let got = log_window(dir.path(), "dyno", 4_000);
+        // Each is cut at a line, so one may keep a few bytes less than its half and the other gets them.
+        let sizes: Vec<usize> = got.iter().map(|g| g.1.len()).collect();
+        assert!(
+            sizes.iter().all(|n| (1_900..=2_100).contains(n))
+                && sizes.iter().sum::<usize>() <= 4_000,
+            "{sizes:?}"
+        );
+        assert_eq!(got.len(), 2);
     }
 
     #[test]

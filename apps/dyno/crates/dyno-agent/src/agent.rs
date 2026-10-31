@@ -190,7 +190,7 @@ impl Core {
     /// Saves settings to disk (best effort: a read-only data folder must not stop the agent).
     pub fn save_settings(&self, dirs: &Dirs) {
         if let Err(e) = files::save(&dirs.settings(), &self.settings) {
-            eprintln!("dyno-agent: could not save settings: {e}");
+            log::error!("dyno-agent: could not save settings: {e}");
         }
     }
 
@@ -205,7 +205,7 @@ impl Core {
             detail,
         };
         if let Err(e) = self.store.put_activity(&entry) {
-            eprintln!("dyno-agent: could not record activity: {e}");
+            log::error!("dyno-agent: could not record activity: {e}");
         }
         entry
     }

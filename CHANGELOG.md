@@ -115,6 +115,13 @@ Conventional Commits; one semver tag for the whole repo.
   edit, a newer one for good; a bad entry is dropped alone with a count), `Edit` and `apply` with one level
   of undo, `LayoutView` for the chooser and the `WidgetState` envelope. Wire types are generated into
   `ui/projects/paddock-ui/widgets/generated/widgets.ts`. Dyno's own copies of this model go in WP-C.
+
+### `paddock-shell`: `Builder::diagnostics_installed`
+- `Builder::diagnostics_installed()` says whether Report a problem was set up, so an app's composition test can assert that a test place does not (Dyno).
+
+### `paddock-diag`: the log window is shared between the app's processes and is 4 MB
+- `window::log_window` gives each process (`<id>.<day>.log`, `<id>-<process>.<day>.log`) an equal share of the window, newest files first within it; what a small process does not use goes to the larger ones. A chatty app log can no longer push a background process's log out of the report (Dyno's agent). `LOG_WINDOW` is 4 MB (was 2 MB); at most `MAX_LOG_FILES` files per process.
+
 ### `paddock-diag`: the settings file in a report can be named
 - `builtin::Settings::file(name)` and `tauri::Setup::settings_file(name)` report that file of the config folder (masked, listed
   under its own name) instead of `settings.json`; the shell demo passes `shell-settings.json`, so a report never shows an app's
@@ -161,6 +168,18 @@ Conventional Commits; one semver tag for the whole repo.
   `ui/projects/paddock-ui/shell/channels/page/src/styles.ts` (lines 4-7 there); this section replaces it.
 
 
+
+
+### `paddock-proc`: a stopped process is waited for, not called idle (ADR 0031)
+- New `RunState { Running, Stopped, Exited, Unknown }` and `run_state(ProcessId) -> RunState`, identity-checked (a pid handed on is
+  `Exited`): macOS reads `pbi_status == SSTOP` from the `proc_pidinfo` call that also gives the CPU time, Linux `/proc/<pid>/stat`
+  field 3 (`T`, `t`), Windows says `Unknown`. `CpuSample` has a new `stopped: Option<bool>` from the same call.
+- `StartProbe` has default methods `pid() -> Option<ProcessId>` (None) and `run_state()`; a probe that names its process now gets
+  `Liveness::Paused` from `StartWatch` while it is stopped (SIGSTOP, App Tamer). New `liveness_of(id, exited)` for users of
+  `StartJudge` that build their own readings. Before, nothing produced `Paused`: a stopped child showed no CPU, became
+  `StallCause::Idle` (stuck) and was killed or offered a Retry that killed it.
+- New `StallCause::Paused` (not stuck, `StallAction::Wait`): "{what} is paused by macOS or another app; it goes on when it is
+  resumed." The judge says it once per pause; no tick counts and nothing resets while paused.
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.

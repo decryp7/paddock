@@ -164,6 +164,8 @@ pub struct ShellOf<R: Runtime> {
     navigation: Mutex<Option<Navigate>>,
     /// Whether the popup is visible, when not read from the shell's popover state (tests).
     popover_gate: Mutex<Option<Arc<dyn Fn() -> bool + Send + Sync>>>,
+    /// Connection to first live update, for the login-start log.
+    first_data: crate::first_data::FirstData,
 }
 
 impl<R: Runtime> ShellOf<R> {
@@ -190,6 +192,7 @@ impl<R: Runtime> ShellOf<R> {
             last_live: Mutex::new(None),
             navigation: Mutex::new(None),
             popover_gate: Mutex::new(None),
+            first_data: crate::first_data::FirstData::default(),
         })
     }
 
@@ -438,6 +441,9 @@ impl<R: Runtime> ShellOf<R> {
 impl<R: Runtime> Sink for ShellOf<R> {
     fn live(&self, update: LiveUpdate) {
         let n = self.updates.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Some(ms) = self.first_data.first_update(Instant::now()) {
+            logging::info(&format!("first data {ms} ms after the connection"));
+        }
         if n == 1 || n.is_multiple_of(LOG_EVERY) {
             logging::info(&format!(
                 "live update #{n}: cpu {:.0}%, memory {:.0}%, {} top apps, {} processes",
@@ -529,6 +535,10 @@ impl<R: Runtime> Sink for ShellOf<R> {
 
     fn widget_layout_changed(&self, surface: DynoSurface) {
         self.layout_changed(surface);
+    }
+
+    fn connection_made(&self) {
+        self.first_data.connected(Instant::now());
     }
 
     fn connected(&self, link: &Arc<AgentLink>) {

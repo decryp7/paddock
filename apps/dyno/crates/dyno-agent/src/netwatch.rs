@@ -50,7 +50,7 @@ impl NetWatchCentre {
                 kind: TimelineEventKind::Network,
                 label: c.label(),
             }) {
-                eprintln!("dyno-agent: could not record a network change: {e}");
+                log::error!("dyno-agent: could not record a network change: {e}");
             }
         }
         changes
@@ -69,7 +69,7 @@ pub fn run(shared: &Shared) {
     wait(FIRST_LOOK_AFTER);
     while !shared.stopped() {
         if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| shared.netwatch.look(shared))).is_err() {
-            eprintln!("dyno-agent: a look at the network failed unexpectedly");
+            log::error!("dyno-agent: a look at the network failed unexpectedly");
         }
         wait(LOOK_EVERY);
     }

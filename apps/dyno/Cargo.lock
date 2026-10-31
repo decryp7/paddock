@@ -1149,7 +1149,10 @@ dependencies = [
  "dyno-platform",
  "dyno-plugin-host",
  "libc",
+ "log",
+ "paddock-env",
  "paddock-jobs",
+ "paddock-log",
  "paddock-proc",
  "paddock-widgets",
  "plist",
@@ -1176,10 +1179,13 @@ dependencies = [
  "objc2-foundation",
  "objc2-service-management",
  "paddock-commands",
+ "paddock-diag",
  "paddock-dialogs",
  "paddock-download",
+ "paddock-env",
  "paddock-health",
  "paddock-jobs",
+ "paddock-log",
  "paddock-menu",
  "paddock-proc",
  "paddock-service",
@@ -3474,6 +3480,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tauri",
+ "tauri-plugin-dialog",
  "zip",
 ]
 
@@ -3527,6 +3534,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tauri",
+ "tauri-plugin-dialog",
 ]
 
 [[package]]
@@ -3762,6 +3770,7 @@ dependencies = [
  "serde_json",
  "sysinfo",
  "tauri",
+ "tauri-plugin-dialog",
 ]
 
 [[package]]

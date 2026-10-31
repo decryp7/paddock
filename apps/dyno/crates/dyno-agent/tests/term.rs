@@ -88,3 +88,113 @@ fn term_sent_while_the_agent_is_starting_still_ends_it() {
         assert!(!dyno_agent::instance::is_held(&dirs), "the agent lock was left held");
     }
 }
+
+/// The agent's own log (login-start diagnosis, 2026-10-31): one dated paddock-log file per process, with a line per step of the start
+/// and a millisecond count, so a slow connect after login can be told from the agent's side (store open, endpoint bound, running)
+/// and from the app's. Names and numbers only. The agent started by launchd has no stderr that anyone reads: this file is it.
+#[test]
+fn the_agents_start_and_stop_are_in_its_own_dated_log_with_millisecond_counts() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = dyno_agent::paths::Dirs::at(tmp.path().join("data"));
+    let child = start(dirs.root());
+    let end = std::time::Instant::now() + HANG_GUARD;
+    while dyno_agent::discovery::Discovery::read(&dirs.discovery()).is_none() {
+        assert!(std::time::Instant::now() < end, "the agent never became ready");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    term(&child);
+    assert_eq!(exits(child).code(), Some(0));
+    let file = std::fs::read_dir(dirs.logs())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("dyno-agent.") && n.ends_with(".log"))
+        })
+        .expect("a dyno-agent.<day>.log in the log folder");
+    let lines: Vec<serde_json::Value> = std::fs::read_to_string(file)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let at = |what: &str| {
+        lines
+            .iter()
+            .position(|l| l["@m"].as_str() == Some(what))
+            .unwrap_or_else(|| panic!("no {what:?} in {lines:#?}"))
+    };
+    let order = [
+        "Agent starting",
+        "Agent lock taken",
+        "Agent store open",
+        "Agent endpoint bound",
+        "Agent running",
+        "Agent stopping",
+        "Agent stopped",
+    ];
+    let places: Vec<usize> = order.iter().map(|w| at(w)).collect();
+    assert!(places.windows(2).all(|w| w[0] < w[1]), "in order: {places:?}");
+    for step in [
+        "Agent lock taken",
+        "Agent store open",
+        "Agent endpoint bound",
+        "Agent running",
+        "Agent stopped",
+    ] {
+        assert!(
+            lines[at(step)]["ElapsedMs"].is_u64(),
+            "{step} carries ElapsedMs: {}",
+            lines[at(step)]
+        );
+    }
+    let starting = &lines[at("Agent starting")];
+    assert!(starting["ParentPid"].is_u64() && starting["Arch"].is_string(), "{starting}");
+    assert_eq!(lines[at("Agent endpoint bound")]["DiscoveryWritten"], serde_json::Value::Bool(true));
+    let text = serde_json::to_string(&lines).unwrap();
+    assert!(
+        !text.contains(tmp.path().to_str().unwrap()),
+        "no path of the test folder in the log: {text}"
+    );
+}
+
+/// A second agent on a held data folder is refused and says so in its own dated log: the exit code 3 the app reads, why, who holds the
+/// folder (its pid, from its discovery file) and what started the refused one. This is the line a bundle needs when "another Dyno agent
+/// holds the data folder" is shown.
+#[test]
+fn a_refused_second_agent_logs_why_who_holds_the_folder_and_exit_code_3() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = dyno_agent::paths::Dirs::at(tmp.path().join("data"));
+    let first = start(dirs.root());
+    let first_pid = first.id();
+    let end = std::time::Instant::now() + HANG_GUARD;
+    while dyno_agent::discovery::Discovery::read(&dirs.discovery()).is_none() {
+        assert!(std::time::Instant::now() < end, "the first agent never became ready");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let second = exits(start(dirs.root()));
+    assert_eq!(second.code(), Some(dyno_agent::cli::EXIT_ALREADY_RUNNING), "{second:?}");
+    term(&first);
+    assert_eq!(exits(first).code(), Some(0));
+    let file = std::fs::read_dir(dirs.logs())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("dyno-agent.") && n.ends_with(".log"))
+        })
+        .expect("a dyno-agent.<day>.log");
+    let lines: Vec<serde_json::Value> = std::fs::read_to_string(file)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let refused = lines
+        .iter()
+        .find(|l| l["@m"].as_str() == Some("Agent refused: another agent holds the data folder"))
+        .unwrap_or_else(|| panic!("no refusal in {lines:#?}"));
+    assert_eq!(refused["ExitCode"], 3);
+    assert_eq!(refused["HolderPid"], u64::from(first_pid));
+    assert!(refused["Reason"].is_string() && refused["ParentName"].is_string(), "{refused}");
+}

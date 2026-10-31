@@ -53,7 +53,7 @@ impl UnusualCentre {
         let baseline = match store.load_baseline() {
             Ok((since, entries, startup)) => Baseline::restore(since, entries, startup),
             Err(e) => {
-                eprintln!("dyno-agent: could not read the program baseline: {e}");
+                log::error!("dyno-agent: could not read the program baseline: {e}");
                 Baseline::default()
             }
         };
@@ -102,7 +102,7 @@ impl UnusualCentre {
         };
         let mut core = lock(&shared.core);
         if let Err(e) = core.store.apply_baseline(&outcome.changes) {
-            eprintln!("dyno-agent: could not store the program baseline: {e}");
+            log::error!("dyno-agent: could not store the program baseline: {e}");
         }
         let overview = lock(&self.state).baseline.overview(t, &settings);
         for key in outcome.newly_unusual.iter().take(MAX_LINES_PER_LOOK) {
@@ -206,7 +206,7 @@ pub fn run(shared: &Shared) {
     while !shared.stopped() {
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| shared.unusual.look(shared)));
         if r.is_err() {
-            eprintln!("dyno-agent: a look at new programs failed unexpectedly");
+            log::error!("dyno-agent: a look at new programs failed unexpectedly");
         }
         wait(LOOK_EVERY);
     }

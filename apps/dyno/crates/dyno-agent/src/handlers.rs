@@ -299,6 +299,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::Health => Ok(Reply::Health(Box::new(health(shared)?))),
         Request::StartupEntries => Ok(Reply::Startup(lock(&shared.ports.startup).list()?)),
         Request::Shutdown => {
+            log::info!("Shutdown requested by a client");
             shared.request_stop();
             Ok(Reply::Ok)
         }

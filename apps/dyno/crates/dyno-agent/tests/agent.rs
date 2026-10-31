@@ -17,6 +17,39 @@ use std::time::Duration;
 mod common;
 use common::{full_disk_sample, wait_for_alarm};
 
+/// Every `log` record of this test binary (its tests run in one process), with its key-values, for the lines that say what the agent
+/// did. The agent installs its file log only in `dyno-agent run`; here the facade is captured instead.
+fn captured() -> Vec<String> {
+    use std::sync::{Mutex, OnceLock};
+    struct Capture(Mutex<Vec<String>>);
+    impl log::Log for Capture {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            true
+        }
+        fn log(&self, r: &log::Record) {
+            struct V(String);
+            impl<'kvs> log::kv::VisitSource<'kvs> for V {
+                fn visit_pair(&mut self, k: log::kv::Key<'kvs>, v: log::kv::Value<'kvs>) -> Result<(), log::kv::Error> {
+                    self.0.push_str(&format!(" {k}={v}"));
+                    Ok(())
+                }
+            }
+            let mut kv = V(String::new());
+            let _ = r.key_values().visit(&mut kv);
+            self.0.lock().unwrap().push(format!("{}{kv}", r.args(), kv = kv.0));
+        }
+        fn flush(&self) {}
+    }
+    static C: OnceLock<&'static Capture> = OnceLock::new();
+    let c = C.get_or_init(|| {
+        let c: &'static Capture = Box::leak(Box::new(Capture(Mutex::new(Vec::new()))));
+        let _ = log::set_logger(c);
+        log::set_max_level(log::LevelFilter::Trace);
+        c
+    });
+    c.0.lock().unwrap().clone()
+}
+
 struct Harness {
     running: Option<Running>,
     fake: Fake,
@@ -983,6 +1016,7 @@ fn start_on(dirs: &Dirs) -> Result<Running, String> {
 
 #[test]
 fn a_second_agent_on_the_same_data_folder_refuses_to_start_and_says_so() {
+    let _ = captured();
     let tmp = tempfile::tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let first = start_on(&dirs).unwrap();
@@ -1001,9 +1035,15 @@ fn a_second_agent_on_the_same_data_folder_refuses_to_start_and_says_so() {
         message.contains("another computer"),
         "a shared network home can hold it from elsewhere: {message}"
     );
-    // The agent's log file says it too (the app starts the agent with stderr discarded; a service's stderr is elsewhere).
-    let log = std::fs::read_to_string(dirs.logs().join("agent.log")).unwrap_or_default();
-    assert!(log.contains("already running"), "agent.log: {log:?}");
+    // The agent's log says it too (the app starts the agent with stderr discarded; a service's stderr is elsewhere): the refusal,
+    // its exit code and why.
+    let records = captured();
+    assert!(
+        records
+            .iter()
+            .any(|r| r.contains("Agent refused: another agent holds the data folder") && r.contains("ExitCode=3") && r.contains("Reason=")),
+        "{records:?}"
+    );
     assert_eq!(
         dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap(),
         before,
@@ -1025,6 +1065,7 @@ fn a_second_agent_on_the_same_data_folder_refuses_to_start_and_says_so() {
 
 #[test]
 fn a_folder_that_cannot_lock_still_runs_the_agent_but_says_so_in_the_log_and_the_activity() {
+    let _ = captured();
     use dyno_agent::instance::LockError;
     let tmp = tempfile::tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
@@ -1043,8 +1084,13 @@ fn a_folder_that_cannot_lock_still_runs_the_agent_but_says_so_in_the_log_and_the
         Err(unsupported),
     )
     .unwrap();
-    let log = std::fs::read_to_string(dirs.logs().join("agent.log")).unwrap_or_default();
-    assert!(log.contains("not supported"), "agent.log: {log:?}");
+    let records = captured();
+    assert!(
+        records
+            .iter()
+            .any(|r| r.contains("not supported") && r.contains("starting without the guard")),
+        "{records:?}"
+    );
     let (peer, _) = connect(&dirs).unwrap();
     let Reply::Activities(entries) = ask(&peer, Request::Activity { limit: 50 }).unwrap() else {
         panic!("not activities")

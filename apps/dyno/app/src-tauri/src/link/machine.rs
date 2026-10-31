@@ -223,6 +223,27 @@ pub enum Phase {
     },
 }
 
+impl Phase {
+    /// The variant's name, for the log (a fixed word, never the fields: they hold sequence numbers and connection ids).
+    pub fn name(&self) -> &'static str {
+        match self {
+            Phase::Idle => "Idle",
+            Phase::Looking { .. } => "Looking",
+            Phase::Connecting { .. } => "Connecting",
+            Phase::Starting { .. } => "Starting",
+            Phase::WaitingForService => "WaitingForService",
+            Phase::WaitingForHolder => "WaitingForHolder",
+            Phase::Replacing { .. } => "Replacing",
+            Phase::TakingBack { .. } => "TakingBack",
+            Phase::Ending { .. } => "Ending",
+            Phase::BackingOff { .. } => "BackingOff",
+            Phase::Connected { .. } => "Connected",
+            Phase::Quitting { .. } => "Quitting",
+            Phase::Stopped { .. } => "Stopped",
+        }
+    }
+}
+
 /// What the world or the person tells the machine.
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub enum Event {
@@ -304,6 +325,9 @@ pub enum Command {
         /// Probe the agent lock. Not while the agent this app launched is starting: the probe holds the lock for an instant and
         /// would make that agent's own claim fail (exit 3) when the two meet.
         lock: bool,
+        /// The look that starts an attempt and decides what to do: a discovery file beside a held lock is connected to without
+        /// asking the login service (`SMAppService.status` can take tens of seconds at login).
+        deciding: bool,
     },
     /// Start the agent (never while a child is held); answers [`Event::Launched`].
     Launch {
@@ -507,6 +531,8 @@ pub struct Supervisor {
     ever_connected: bool,
     looks: u64,
     changed_seq: Option<Seq>,
+    /// A look has carried the login service's state at least once (the decision look skips the service when an agent is there).
+    service_known: bool,
     changes_answered: u64,
     tuning: Tuning,
     #[cfg(test)]
@@ -541,6 +567,7 @@ impl Supervisor {
             ever_connected: false,
             looks: 0,
             changed_seq: None,
+            service_known: false,
             changes_answered: 0,
             tuning: Tuning::default(),
             #[cfg(test)]
@@ -665,7 +692,13 @@ impl Supervisor {
     fn issue_look(&mut self, service: bool, cpu: bool, lock: bool, out: &mut Vec<Command>) -> Seq {
         let seq = self.next_seq();
         self.look_out = Some(seq);
-        out.push(Command::Look { seq, service, cpu, lock });
+        out.push(Command::Look {
+            seq,
+            service,
+            cpu,
+            lock,
+            deciding: false,
+        });
         seq
     }
 
@@ -679,6 +712,7 @@ impl Supervisor {
             service: true,
             cpu: false,
             lock: true,
+            deciding: true,
         });
     }
 
@@ -860,6 +894,12 @@ impl Supervisor {
             self.changes_answered += 1;
         }
         let was_supervised = self.service.supervises;
+        // Answers a `ServiceChanged` (the person changed Start at login) while the service's state was still unknown: the change is the
+        // evidence that stands in for the earlier answer there is none of.
+        let change_without_baseline = self.changed_seq == Some(look.seq) && !self.service_known;
+        if look.service.is_some() {
+            self.service_known = true;
+        }
         if let Some(s) = look.service {
             self.service = s;
             if !s.supervises {
@@ -893,7 +933,7 @@ impl Supervisor {
             }
             Phase::WaitingForHolder => self.decide(look, true, out),
             Phase::Replacing { .. } | Phase::TakingBack { .. } => self.retiring_look(look, out),
-            Phase::Connected { peer, owner } => self.service_look(was_supervised, peer, owner, out),
+            Phase::Connected { peer, owner } => self.service_look(was_supervised || change_without_baseline, peer, owner, out),
             _ => {}
         }
     }

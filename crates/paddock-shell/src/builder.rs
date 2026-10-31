@@ -186,6 +186,11 @@ impl<R: Runtime> Builder<R> {
         self
     }
 
+    /// Whether [`Builder::diagnostics`] was called (an app's test of its composition: a test place must not set it up).
+    pub fn diagnostics_installed(&self) -> bool {
+        self.diagnostics.is_some()
+    }
+
     /// Report a problem and the log's Settings: the app's sections, redaction rules and log handle
     /// (`Ok(paddock_diag::tauri::Setup::new(app_info, dirs).log(handle))`; an error fails the app's start naming this part). The shell registers the `pd.logging` settings section
     /// on the log handle, and the Report a Problem dialog and the webview's log command work from then on. Where the user saves

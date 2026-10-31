@@ -54,6 +54,29 @@ pub struct OpenEvent {
     pub sender_is_loginwindow: bool,
 }
 
+impl OpenEvent {
+    /// The event in words for the start log: which key the OS sent, who sent it, and whether `--hidden` was given. Fixed words only.
+    pub fn describe(&self, flag: bool) -> String {
+        let event = if self.login_item {
+            "login item (lgit)"
+        } else if self.restore {
+            "restore (rsto)"
+        } else {
+            "none"
+        };
+        let sender = if self.login_item || self.restore {
+            if self.sender_is_loginwindow {
+                "loginwindow"
+            } else {
+                "another program"
+            }
+        } else {
+            "unknown"
+        };
+        format!("open event: {event}; sender {sender}; flag {}", if flag { "yes" } else { "no" })
+    }
+}
+
 /// What made a start hidden in the tray.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HiddenBy {
@@ -322,5 +345,27 @@ mod tests {
         let other = tempfile::tempdir().unwrap();
         std::fs::create_dir(other.path().join("Dyno.plist")).unwrap();
         assert_eq!(remove_legacy_plist(other.path()).unwrap(), LegacyPlist::Foreign);
+    }
+
+    #[test]
+    fn the_open_event_is_told_in_words_for_the_start_log() {
+        let ev = |login_item, restore, sender_is_loginwindow| OpenEvent {
+            login_item,
+            restore,
+            sender_is_loginwindow,
+        };
+        assert_eq!(
+            ev(true, false, true).describe(false),
+            "open event: login item (lgit); sender loginwindow; flag no"
+        );
+        assert_eq!(
+            ev(false, true, true).describe(false),
+            "open event: restore (rsto); sender loginwindow; flag no"
+        );
+        assert_eq!(
+            ev(false, true, false).describe(false),
+            "open event: restore (rsto); sender another program; flag no"
+        );
+        assert_eq!(OpenEvent::default().describe(true), "open event: none; sender unknown; flag yes");
     }
 }

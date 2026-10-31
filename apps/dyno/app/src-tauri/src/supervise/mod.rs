@@ -183,6 +183,7 @@ pub fn run_owner<M: Machine>(
     events: Receiver<M::Event>,
     transitions: Transitions<M::Snapshot>,
     mut execute: impl FnMut(M::Command) + Send + 'static,
+    mut on_step: impl FnMut(&M::Snapshot) + Send + 'static,
 ) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new().name(name.into()).spawn(move || {
         let _closing = CloseOnDrop(transitions.clone());
@@ -190,7 +191,9 @@ pub fn run_owner<M: Machine>(
             for command in machine.step(event) {
                 execute(command);
             }
-            transitions.publish(machine.snapshot());
+            let snapshot = machine.snapshot();
+            on_step(&snapshot);
+            transitions.publish(snapshot);
             if machine.finished() {
                 break;
             }
@@ -251,7 +254,7 @@ mod tests {
         let transitions = Transitions::new(0);
         let done = Arc::new(Mutex::new(Vec::new()));
         let seen = done.clone();
-        let handle = run_owner("t", Counter(0), rx, transitions.clone(), move |c| lock(&seen).push(c)).unwrap();
+        let handle = run_owner("t", Counter(0), rx, transitions.clone(), move |c| lock(&seen).push(c), |_| {}).unwrap();
         tx.send(1).unwrap();
         assert_eq!(transitions.wait_until(|s| *s >= 1), 1);
         tx.send(2).unwrap();
@@ -283,7 +286,7 @@ mod tests {
         }
         let (tx, rx) = channel();
         let transitions = Transitions::new(0u8);
-        let handle = run_owner("t", Boom, rx, transitions.clone(), |()| ()).unwrap();
+        let handle = run_owner("t", Boom, rx, transitions.clone(), |()| (), |_| {}).unwrap();
         tx.send(()).unwrap();
         assert_eq!(transitions.wait_until(|s| *s == 9), 0, "the wait ended with the owner");
         assert!(handle.join().is_err());
@@ -293,7 +296,7 @@ mod tests {
     fn the_ticker_sends_one_tick_at_a_time_and_ends_with_the_owner() {
         let (tx, rx) = channel();
         let transitions = Transitions::new(0);
-        let owner = run_owner("t", Counter(0), rx, transitions.clone(), |_| ()).unwrap();
+        let owner = run_owner("t", Counter(0), rx, transitions.clone(), |_| (), |_| {}).unwrap();
         let ticker = spawn_ticker("tick", Duration::from_millis(1), tx, || 1, transitions.clone()).unwrap();
         owner.join().unwrap();
         ticker.join().unwrap();

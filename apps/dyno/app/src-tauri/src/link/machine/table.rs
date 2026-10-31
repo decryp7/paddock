@@ -195,7 +195,8 @@ fn begin_reports_starting_and_looks_once() {
             seq: 1,
             service: true,
             cpu: false,
-            lock: true
+            lock: true,
+            deciding: true
         }
     ));
     assert_eq!(*s.phase(), Phase::Looking { seq: 1 });
@@ -1220,4 +1221,67 @@ fn a_stopped_agent_that_is_gone_when_next_looked_at_is_judged_as_exited() {
         ..look(seq)
     }));
     assert!(matches!(s.phase(), Phase::BackingOff { .. }), "{cmds:?}");
+}
+
+/// Only the look that starts an attempt is a decision look; the looks of a wait, after a connection and after a service change are
+/// not (they always ask the service for what they need).
+#[test]
+fn only_the_look_that_starts_an_attempt_is_a_decision_look() {
+    let is_deciding = |cmds: &[Command]| {
+        cmds.iter().find_map(|c| {
+            if let Command::Look { deciding, .. } = c {
+                Some(*deciding)
+            } else {
+                None
+            }
+        })
+    };
+    assert_eq!(is_deciding(&Supervisor::new().step(Event::Begin)), Some(true));
+    let mut waiting = starting();
+    let cmds = waiting.step(Event::Tick);
+    assert_eq!(
+        is_deciding(&cmds),
+        Some(false),
+        "the look of a wait is not a decision look: {cmds:?}"
+    );
+    let mut connected = connected_own();
+    let cmds = connected.step(Event::ServiceChanged);
+    assert_eq!(is_deciding(&cmds), Some(false), "{cmds:?}");
+}
+
+/// The decision look no longer asks the login service when an agent is there to connect to, so the machine can be connected to an
+/// agent without ever having heard from the service. The service changing right then (the person switched Start at login off) must
+/// still take the service's agent back: the change is the evidence, there is no earlier answer to compare with. (A first answer
+/// that is not a reply to a change is only a baseline: a foreign agent is never taken back for it.)
+#[test]
+fn a_service_removed_before_its_first_answer_still_takes_the_agent_back_but_a_baseline_answer_does_not() {
+    // Connected to the agent of the file, with the post-connect service look out and unanswered: (machine, that look's seq).
+    let connected_without_service = || {
+        let (mut s, cmds) = first(|l| Look {
+            hint: Some(hint(9, 500, true)),
+            lock: Some(LockSeen::Held),
+            service: None,
+            ..l
+        });
+        let c = connect_seq(&cmds);
+        let after = s.step(Event::Connected {
+            seq: c,
+            peer: 8,
+            pid: Some(9),
+        });
+        (s, look_seq(&after))
+    };
+    // The change arrives, and its look says: nothing registered, nothing supervising.
+    let (mut s, _) = connected_without_service();
+    let cmds = service_now(&mut s, NO_SERVICE);
+    assert!(cmds.iter().any(|c| matches!(c, Command::AskToExit { peer: 8 })), "{cmds:?}");
+    assert!(matches!(s.phase(), Phase::TakingBack { .. }));
+    // The post-connect look's first answer, with no change behind it, is a baseline: nothing is taken back.
+    let (mut s, seq) = connected_without_service();
+    let cmds = s.step(Event::Looked(Look {
+        service: Some(NO_SERVICE),
+        ..look(seq)
+    }));
+    assert!(cmds.iter().all(|c| !matches!(c, Command::AskToExit { .. })), "{cmds:?}");
+    assert!(matches!(s.phase(), Phase::Connected { .. }));
 }
