@@ -104,7 +104,8 @@ const DEMO_CHANNEL_EVENTS: readonly ChannelEventDecl[] = [
 
 /** Settings > Notification channels (plan X17): a table of channels with an inline editor; its providers load with the page. */
 export const CHANNELS_PAGE = defineChannelsSettingsPage({
-  events: DEMO_CHANNEL_EVENTS,
+  // `?channels-events=none`: an app that declares no events (the free-text field is the whole control).
+  events: new URLSearchParams(globalThis.location?.search ?? '').get('channels-events') === 'none' ? [] : DEMO_CHANNEL_EVENTS,
   providers: () => import('./channels.providers').then((m) => m.CHANNELS_PROVIDERS),
   load: () => import('@decryp7/paddock-ui/shell/channels/page').then((m) => m.PdChannelsPage),
 });

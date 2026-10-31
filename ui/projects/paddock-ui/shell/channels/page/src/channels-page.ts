@@ -210,16 +210,16 @@ import { CHANNELS_STYLES } from './styles';
           }
 
           @if (eventGroups().length > 0) {
-            <div class="pd-ch__events-picker pd-ch__field--wide" data-testid="channel-events-picker">
-              <span class="pd-ch__legend" id="pd-ch-events-title">{{ t.fEvents }}</span>
+            <fieldset class="pd-ch__events-picker pd-ch__field--wide" data-testid="channel-events-picker" aria-describedby="pd-ch-h-events">
+              <legend class="pd-ch__legend">{{ t.fEvents }}</legend>
               <span class="pd-ch__hint" id="pd-ch-h-events">{{ t.eventsPickHint }}</span>
-              @for (g of eventGroups(); track g.group) {
-                <fieldset class="pd-ch__group" [attr.data-testid]="'channel-event-group-' + g.group" aria-describedby="pd-ch-h-events">
+              @for (g of eventGroups(); track g.group; let gi = $index) {
+                <fieldset class="pd-ch__group" [attr.data-testid]="'channel-event-group-' + g.group">
                   <legend>{{ g.group }}</legend>
-                  @for (e of g.events; track e.name) {
+                  @for (e of g.events; track e.name; let ei = $index) {
                     <div class="pd-ch__event">
-                      <mat-checkbox [checked]="isOn(e.name)" (change)="setEvent(e.name, $event.checked)" [aria-describedby]="'pd-ch-ev-' + e.name" [attr.data-testid]="'channel-event-' + e.name">{{ e.name }}</mat-checkbox>
-                      <span class="pd-ch__hint pd-ch__event-help" [id]="'pd-ch-ev-' + e.name">{{ e.description }}</span>
+                      <mat-checkbox [checked]="isOn(e.name)" (change)="setEvent(e.name, $event.checked)" [aria-describedby]="'pd-ch-ev-' + gi + '-' + ei" [attr.data-testid]="'channel-event-' + e.name">{{ e.name }}</mat-checkbox>
+                      <span class="pd-ch__hint pd-ch__event-help" [id]="'pd-ch-ev-' + gi + '-' + ei">{{ e.description }}</span>
                     </div>
                   }
                 </fieldset>
@@ -227,11 +227,11 @@ import { CHANNELS_STYLES } from './styles';
               <fieldset class="pd-ch__group" data-testid="channel-events-other">
                 <legend>{{ t.otherEvents }}</legend>
                 @if (otherEvents().length > 0) {
-                  <ul class="pd-ch__chips">
-                    @for (name of otherEvents(); track name) {
+                  <ul class="pd-ch__chips" #chips>
+                    @for (name of otherEvents(); track name; let i = $index) {
                       <li class="pd-ch__chip">
                         <span>{{ name }}</span>
-                        <button type="button" class="pd-ch__chip-x" [attr.aria-label]="t.removeEvent(name)" [attr.data-testid]="'channel-event-remove-' + name" (click)="removeOther(name)"><pd-glyph name="close" [size]="12" /></button>
+                        <button type="button" class="pd-ch__chip-x" [attr.aria-label]="t.removeEvent(name)" [attr.data-testid]="'channel-event-remove-' + name" (click)="removeOther(name, i)"><pd-glyph name="close" [size]="12" /></button>
                       </li>
                     }
                   </ul>
@@ -239,12 +239,12 @@ import { CHANNELS_STYLES } from './styles';
                 <div class="pd-ch__other-add">
                   <label class="pd-ch__field">
                     <span>{{ t.otherAdd }}</span>
-                    <input type="text" autocomplete="off" spellcheck="false" data-testid="channel-event-other-input" [value]="otherText()" (input)="otherText.set($any($event.target).value)" (keydown.enter)="$event.preventDefault(); addOther()" />
+                    <input #otherInput type="text" autocomplete="off" spellcheck="false" data-testid="channel-event-other-input" [value]="otherText()" (input)="otherText.set($any($event.target).value)" (keydown.enter)="$event.preventDefault(); addOther()" />
                   </label>
                   <button matButton="outlined" type="button" data-testid="channel-event-other-add" [disabled]="otherText().trim() === ''" (click)="addOther()">{{ t.otherAddButton }}</button>
                 </div>
               </fieldset>
-            </div>
+            </fieldset>
           } @else {
             <label class="pd-ch__field pd-ch__field--wide">
               <span>{{ t.fEvents }}</span>
@@ -261,10 +261,12 @@ import { CHANNELS_STYLES } from './styles';
           @if (d.type !== 'email') {
             <mat-checkbox class="pd-ch__check pd-ch__field--wide" [formField]="f.auth" data-testid="channel-auth">{{ t.fAuth }}</mat-checkbox>
           }
-          <div class="pd-ch__lan pd-ch__field--wide" data-testid="channel-lan-field">
-            <mat-checkbox class="pd-ch__check" [formField]="f.allowLan" aria-describedby="pd-ch-h-lan" data-testid="channel-allow-lan">{{ t.fLan }}</mat-checkbox>
-            <span id="pd-ch-h-lan" class="pd-ch__hint">{{ t.lanHint }}</span>
-          </div>
+          @if (d.type !== 'email') {
+            <div class="pd-ch__lan pd-ch__field--wide" data-testid="channel-lan-field">
+              <mat-checkbox class="pd-ch__check" [formField]="f.allowLan" aria-describedby="pd-ch-h-lan" data-testid="channel-allow-lan">{{ t.fLan }}</mat-checkbox>
+              <span id="pd-ch-h-lan" class="pd-ch__hint">{{ t.lanHint }}</span>
+            </div>
+          }
           @if (draftNeedsSecret()) {
             <div class="pd-ch__secret" data-testid="channel-secret" role="group" [attr.aria-label]="secretWord(d.type)">
               <span data-testid="channel-secret-state">{{ secretStored() ? t.secretStored : t.secretMissing }}</span>
@@ -322,6 +324,8 @@ export class PdChannelsPage {
   protected readonly store = inject(ChannelsStore);
   private readonly dialogs = inject(DialogService);
   private readonly injector = inject(Injector);
+  private readonly chips = viewChild<ElementRef<HTMLElement>>('chips');
+  private readonly otherInput = viewChild<ElementRef<HTMLInputElement>>('otherInput');
   private readonly nameInput = viewChild<ElementRef<HTMLInputElement>>('nameInput');
 
   protected readonly maxRecipients = 10;
@@ -395,7 +399,7 @@ export class PdChannelsPage {
     fSeverity: $localize`:@@pd.channels.f-severity:Minimum severity`,
     fEnabled: $localize`:@@pd.channels.f-enabled:Send notifications on this channel`,
     fLan: $localize`:@@pd.channels.f-lan:This channel is on my home network (allow a private address)`,
-    lanHint: $localize`:@@pd.channels.lan-hint:Turn this on only for a server in your own home or office network, such as a NAS. Other channels still cannot reach private addresses.`,
+    lanHint: $localize`:@@pd.channels.lan-hint:Turn this on only for a web address or ntfy server in your own home or office network, such as a NAS. Other channels still cannot reach private addresses.`,
     eventsPickHint: $localize`:@@pd.channels.events-pick-hint:Choose the events this channel hears of.`,
     otherEvents: $localize`:@@pd.channels.other-events:Other events`,
     otherAdd: $localize`:@@pd.channels.other-add:Add another event name`,
@@ -515,8 +519,16 @@ export class PdChannelsPage {
     this.patch({ events: toggleEvent(this.selected(), name, on).join(', ') });
   }
 
-  protected removeOther(name: string): void {
+  /** Removes a chip and moves focus to the chip that took its place, else to the add field (focus must not fall to the page). */
+  protected removeOther(name: string, index: number): void {
     this.setEvent(name, false);
+    afterNextRender(
+      () => {
+        const buttons = this.chips()?.nativeElement.querySelectorAll<HTMLElement>('.pd-ch__chip-x') ?? [];
+        (buttons[Math.min(index, buttons.length - 1)] ?? this.otherInput()?.nativeElement)?.focus();
+      },
+      { injector: this.injector },
+    );
   }
 
   /** Adds the typed names (separated like the free-text field) to the channel's events. */
@@ -528,7 +540,7 @@ export class PdChannelsPage {
   }
 
   protected setType(type: string): void {
-    this.patch({ type: type as TransportType, auth: false });
+    this.patch({ type: type as TransportType, auth: false, allowLan: false });
   }
 
   protected async save(): Promise<void> {

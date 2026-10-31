@@ -582,6 +582,7 @@ describe('the home-network switch', () => {
     }
     expect(settingsProblem({ channels: [lan(true, 'http://hooks.example.com/x')] })).toMatch(/https/);
     expect(settingsProblem({ channels: [lan(false, 'http://localhost:8080/x')] })).toBeNull();
+    expect(settingsProblem({ channels: [{ ...EMAIL, allowLan: true }] })).toMatch(/webhook and ntfy/);
   });
 });
 
