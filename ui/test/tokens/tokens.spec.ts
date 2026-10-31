@@ -105,6 +105,10 @@ describe.each(MODES)('contrast, %s, %s contrast', (scheme, mode) => {
     for (const s of ['--pd-surface-1', '--pd-surface-2', '--pd-surface-3']) expect(contrast(col(v, '--pd-meter-neutral'), col(v, s))).toBeGreaterThanOrEqual(3);
   });
 
+  it('the meter neutral fill is 3:1 against its track (the chart grid over surface-2 and surface-3)', () => {
+    for (const s of ['--pd-surface-2', '--pd-surface-3']) expect(contrast(col(v, '--pd-meter-neutral'), on(v, '--pd-chart-grid', s))).toBeGreaterThanOrEqual(3);
+  });
+
   it('the raised skeleton shows on a surface-2 fill and its shine is a step apart (ADR 0035)', () => {
     expect(contrast(col(v, '--pd-skeleton-raised'), col(v, '--pd-surface-2'))).toBeGreaterThanOrEqual(1.2);
     expect(contrast(col(v, '--pd-skeleton-raised'), col(v, '--pd-skeleton-raised-shine'))).toBeGreaterThan(1.05);

@@ -65,6 +65,8 @@
   /* One token step (surface-2 inside surface-3), no border inside the bordered popover; 8 / 12 padding. */
   .w { grid-column: span 2; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-card); background: var(--pd-surface-2); }
   .w.span1 { grid-column: span 1; }
+  /* High contrast (the OS setting): the frame gets the strong border as an outline. */
+  :root[data-contrast=more] .w { box-shadow: inset 0 0 0 1px var(--pd-border-strong); }
   .w-head { display: flex; align-items: center; gap: 6px; height: 16px; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); white-space: nowrap; }
   .w-head .meta { margin-left: auto; font-weight: var(--pd-weight-regular); color: var(--pd-text-subtle); overflow: hidden; text-overflow: ellipsis; }
   .w-head .meta.stale { color: var(--pd-text-muted); display: inline-flex; align-items: center; gap: 4px; }
@@ -204,6 +206,7 @@
   .toggle span + span { border-left: 1px solid var(--pd-border-strong); }
   .toggle span.on { background: var(--pd-accent-tint); font-weight: var(--pd-weight-semibold); box-shadow: inset 0 0 0 1px var(--pd-accent); }
   .hint { display: flex; align-items: center; gap: 6px; margin: 8px 0 20px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+  .annot { margin: 6px 0 0; padding-left: 10px; border-left: 2px dashed var(--pd-border-strong); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-subtle); font-style: normal; }
   .limit { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 8px 12px; border-radius: var(--pd-radius-control); background: var(--pd-info-tint); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
   .limit svg.i { color: var(--pd-info); }
   .ch-foot { display: flex; align-items: center; margin: 12px 0 0 -8px; }
@@ -246,6 +249,7 @@
     <symbol id="settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
     <symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
     <symbol id="monitor" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8.5 21h7M12 17v4"/></symbol>
+    <symbol id="plug" viewBox="0 0 24 24"><path d="M9 2.5V7M15 2.5V7M6.5 7h11v3.5a5.5 5.5 0 0 1-11 0zM12 16v5.5"/></symbol>
     <symbol id="to-top" viewBox="0 0 24 24"><path d="M5 4.5h14M12 20V9M6.5 14.5 12 9l5.5 5.5"/></symbol>
     <symbol id="to-bottom" viewBox="0 0 24 24"><path d="M5 19.5h14M12 4v11M6.5 9.5 12 15l5.5-5.5"/></symbol>
     <symbol id="spark-mini" viewBox="0 0 24 24"><path d="M2.5 15l4-4 3.5 3 4.5-7 3.5 4.5 3.5-2.5"/></symbol>
@@ -263,9 +267,9 @@
 <!-- 5. The chooser in Settings, with the live preview at the popup's real width -->
 <figure id="f-chooser"><div class="win" id="chooser"></div></figure>
 <!-- 6. The chooser at its limit: added kinds, another volume, the width toggle -->
-<figure id="f-chooser-limit"><div class="win" id="chooser-limit" style="width: 640px"></div></figure>
+<figure id="f-chooser-limit"><div class="win" id="chooser-limit" style="width: 928px"></div></figure>
 <!-- 7. Dragging (drop placeholder), the row menu from the keyboard, and Undo -->
-<figure id="f-chooser-actions"><div class="win" id="chooser-actions" style="width: 640px"></div></figure>
+<figure id="f-chooser-actions"><div class="win" id="chooser-actions" style="width: 928px"></div></figure>
 
 <script>
   // ---------------------------------------------------------------- helpers
@@ -343,11 +347,11 @@
     alarmsError: { title: "Couldn't read alarms", cause: "The alarm store didn't answer.", next: 'Retry' },
     diskEmpty: { title: "See Time Machine's space when it's connected", detail: "The disk isn't connected now.", next: 'Choose another volume' },
     diskError: { title: "Couldn't read volumes", cause: "The volume list didn't answer.", next: 'Retry' },
-    netEmpty: { title: 'See traffic when online', detail: 'Not connected now.', next: 'Open network' },
+    netEmpty: { title: 'See traffic when online', detail: 'Offline now.', next: 'Open network' },
     backupEmpty: { title: 'Know when backups ran', detail: 'No backup set up.', next: 'Set up checks' },
     backupError: { title: "Couldn't check", cause: 'tmutil failed.', next: 'Retry' },
-    backupWorking: { title: 'Checking', phase: 'Time Machine', progress: '2 of 3', pct: 66 },
-    issueEmpty: { title: 'Problems Dyno finds show here', detail: 'None in the last 7 days.', next: 'Open issues' },
+    backupWorking: { title: 'Checking', phase: 'Time Machine', progress: '2\u00a0of\u00a03', pct: 66 },
+    issueCalm: { title: 'No issues in the last 7 days', when: 'Open issues', name: 'No issues in the last 7 days. Open issues' },
     issueError: { title: "Couldn't read issues", cause: 'The issue index is unavailable.', next: 'Retry' },
     issueWorking: { title: 'Reading system logs', phase: 'Indexing', progress: '12,400 events so far' },
     countersEmpty: { title: 'Watch your own counters here', detail: 'Pin counters in Dyno; the first 4 show here.', next: 'Pin counters' },
@@ -356,6 +360,7 @@
     agent: { title: 'Agent stopped', detail: 'Readings paused at 14:28.', next: 'Restart agent' },
   };
   const calm = () => `<button class="calm" aria-label="${COPY.alarmsCalm.title}, ${COPY.alarmsCalm.when}. Open alarms">${icon('check-circle', 'ok')}<span class="spacer">${COPY.alarmsCalm.title} <span class="subtle" style="font-size:12px">· ${COPY.alarmsCalm.when}</span></span>${icon('chevron-right', 's14 chev')}</button>`;
+  const calmRow = (c) => `<button class="calm" aria-label="${c.name}">${icon('check-circle', 'ok')}<span class="spacer">${c.title} <span class="subtle" style="font-size:12px">· ${c.when}</span></span>${icon('chevron-right', 's14 chev')}</button>`;
   const empty = (ic, c) => `<div class="st">${icon(ic)}<span class="t">${c.title}</span><span class="d">${c.detail}</span>${c.next ? `<button class="btn text act">${c.next}</button>` : ''}</div>`;
   const err = (c) => `<div class="st err">${icon('error')}<span class="t">${c.title}</span><span class="d">${c.cause}</span><button class="btn text act">${c.next === 'Retry' ? icon('refresh', 's14') : ''}${c.next}</button></div>`;
   const working = (c) => `<div class="st" aria-busy="true">${icon('refresh')}<span class="t">${c.title}</span><span class="d">${c.phase} · <span class="num">${c.progress}</span></span><span class="prog">${c.pct ? `<i style="width:${c.pct}%"></i>` : '<i style="width:28%;margin-left:30%"></i>'}</span></div>`;
@@ -364,7 +369,7 @@
   const POP = {
     defaults: { cpu: '76%', body: () => W.alarms() + W.disk() + W.cpumem() },
     more: { cpu: '76%', body: () => W.net() + W.backup() + W.issue() + W.counters(), menu: true },
-    agent: { cpu: '—', stopped: true, scrolls: true, body: () => `<div class="notice" role="alert">${icon('error')}<span class="t">${COPY.agent.title}</span><span class="d">${COPY.agent.detail}</span><button class="btn outlined sm">${COPY.agent.next}</button></div>` + W.alarms({ meta: 'as of 14:28', stale: true }) + W.disk({ meta: 'as of 14:28', stale: true }) + W.cpumem({ meta: 'Paused at 14:28', stale: true }) },
+    agent: { cpu: '—', stopped: true, scrolls: true, body: () => `<div class="notice" role="alert">${icon('error')}<span class="t">${COPY.agent.title}</span><span class="d">${COPY.agent.detail}</span><button class="btn outlined sm">${COPY.agent.next}</button></div>` + W.alarms({ meta: 'Updated 2 min ago', stale: true }) + W.disk({ meta: 'Updated 2 min ago', stale: true }) + W.cpumem({ meta: 'Paused at 14:28', stale: true }) },
   };
   document.querySelectorAll('[data-popover]').forEach((d) => {
     const p = POP[d.dataset.popover];
@@ -389,12 +394,12 @@
   const NA = (t) => `<div class="na">${t}</div>`;
   const ROWS = [
     ['alarms', 'span 2 · max 1', loading('alarms'), frame('alarms', calm()), frame('alarms', err(COPY.alarmsError)), W.alarms({ meta: 'Updated 4 min ago', stale: true })],
-    ['disk', 'span 2 · max 4', loading('disk'), frame('disk', empty('disk', COPY.diskEmpty), { meta: 'Time Machine' }), frame('disk', err(COPY.diskError)), W.disk({ meta: 'Updated 3 min ago', stale: true })],
+    ['disk', 'span 2 · max 4', loading('disk'), frame('disk', empty('plug', COPY.diskEmpty), { meta: 'Time Machine' }), frame('disk', err(COPY.diskError)), W.disk({ meta: 'Updated 3 min ago', stale: true })],
     ['cpumem', 'span 2 · max 1', loading('cpumem'), NA('No empty state: once the agent runs there is always a reading; before it, loading.'), NA('No error of its own: a stopped agent is the popup’s notice.'), W.cpumem({ meta: 'Paused at 14:28', stale: true })],
-    ['net', 'span 1 or 2 · max 1', loading('net'), frame('net', empty('network', COPY.netEmpty), { half: true }), NA('No error of its own (agent: the notice).'), W.net({ meta: 'Paused', stale: true })],
-    ['backup', 'span 1 or 2 · max 1', loading('backup'), frame('backup', empty('shield-check', COPY.backupEmpty), { half: true }), frame('backup', err(COPY.backupError), { half: true }), frame('backup', working(COPY.backupWorking), { half: true })],
-    ['issue', 'span 2 · max 1', loading('issue'), frame('issue', empty('check-circle', COPY.issueEmpty)), frame('issue', err(COPY.issueError)), frame('issue', working(COPY.issueWorking))],
-    ['counters', 'span 2 · max 1', loading('counters'), frame('counters', empty('pin', COPY.countersEmpty)), frame('counters', err(COPY.countersError)), W.counters({ unavailable: true })],
+    ['net', 'span 1 or 2 · max 1', loading('net'), frame('net', empty('info', COPY.netEmpty), { half: true }), NA('No error of its own (agent: the notice).'), W.net({ meta: '14:28', stale: true })],
+    ['backup', 'span 1 or 2 · max 1', loading('backup'), frame('backup', empty('clock', COPY.backupEmpty), { half: true }), frame('backup', err(COPY.backupError), { half: true }), frame('backup', working(COPY.backupWorking), { half: true })],
+    ['issue', 'span 2 · max 1', loading('issue'), frame('issue', calmRow(COPY.issueCalm)), frame('issue', err(COPY.issueError)), frame('issue', working(COPY.issueWorking))],
+    ['counters', 'span 2 · max 1', loading('counters'), frame('counters', empty('info', COPY.countersEmpty)), frame('counters', err(COPY.countersError)), W.counters({ unavailable: true })],
     ['apps', 'span 2 · max 1', loading('apps'), NA('No empty state: there is always a busiest app.'), NA('No error of its own (agent: the notice).'), W.apps({ meta: 'Paused at 14:28', stale: true })],
   ];
   for (const [k, rule, ...cells] of ROWS) {
@@ -438,10 +443,11 @@
   document.getElementById('chooser-limit').innerHTML = title('Settings') + `<div class="page"><section class="card">${cardHead}
       <div style="margin-top:16px">
         <p class="ch-label"><span>Shown in the popup</span><span class="count num">8 of 8</span></p>
-        <div class="list" role="list">${shownRow('alarms', 1, 8)}${shownRow('disk', 2, 8, { control: volSelect })}${shownRow('net', 3, 8, { control: `<span class="toggle" role="group" aria-label="Width"><span>Half</span><span class="on">Full</span></span>` })}<div class="item" style="min-height:28px;justify-content:center;color:var(--pd-text-subtle);font-size:12px">5 more rows (shortened in this mock-up)</div></div>
+        <div class="list" role="list">${shownRow('alarms', 1, 8)}${shownRow('disk', 2, 8, { control: volSelect })}${shownRow('net', 3, 8, { control: `<span class="toggle" role="group" aria-label="Width"><span>Half</span><span class="on">Full</span></span>` })}</div>
+        <p class="annot">Mock-up only: the list continues with 5 more rows (Disk space 2, CPU and memory, Backup, Last issue, Pinned counters).</p>
         <p class="ch-label" style="margin-top:20px"><span>Add a widget</span></p>
         <p class="limit" role="status">${icon('info', 's14')}The popup holds 8 widgets. Remove one to add another.</p>
-        <div class="list" role="list">${addRow('alarms', { added: true })}${addRow('disk', { disabled: true, label: 'Add volume' })}${addRow('cpumem', { added: true })}${addRow('apps', { disabled: true })}</div>
+        <div class="list" role="list">${addRow('alarms', { added: true })}${addRow('disk', { disabled: true, label: 'Add volume' })}${addRow('cpumem', { added: true })}${addRow('net', { added: true })}${addRow('backup', { added: true })}${addRow('issue', { added: true })}${addRow('counters', { added: true })}${addRow('apps', { disabled: true })}</div>
       </div></section></div>`;
 
   const cap = (t) => `<p class="ch-label" style="margin:0 0 6px"><span>${t}</span></p>`;
@@ -449,7 +455,7 @@
       <div style="margin-top:16px; position:relative">
         ${cap('Dragging Disk space: the drop placeholder is the full row')}
         <div class="list" role="list">${shownRow('alarms', 1, 4)}<div class="item placeholder" aria-hidden="true">${icon('grip')}<span class="txt"><b>x</b><span>x</span></span></div>${shownRow('cpumem', 3, 4)}${shownRow('net', 4, 4, { control: width })}</div>
-        <div class="item dragging" style="top: 96px; left: 24px; right: -16px">${'<span class="grip" style="cursor:grabbing">' + icon('grip') + '</span>'}${icon('disk', 'kicon')}<span class="txt"><b>Disk space</b><span class="truncate">Free space per volume</span></span>${volSelect}<button class="ibtn sm">${icon('more')}</button></div>
+        <div class="item dragging" style="top: 112px; left: 40px; right: -28px">${'<span class="grip" style="cursor:grabbing">' + icon('grip') + '</span>'}${icon('disk', 'kicon')}<span class="txt"><b>Disk space</b><span class="truncate">Free space per volume</span></span>${volSelect}<button class="ibtn sm">${icon('more')}</button></div>
       </div>
       <div style="margin-top:24px; position:relative">
         ${cap('The row menu, opened from the keyboard')}
