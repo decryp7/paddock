@@ -25,6 +25,7 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### Settings window: a page can hold the close until its edit is saved
 - New `settingsPageCloseGuard(guard)` and `SettingsCloseGuards` in `@decryp7/paddock-ui/shell/settings/window` (types `SettingsCloseGuard`, `SettingsCloseVerdict`): a settings page that saves by itself, outside the window's own drafts, says what a close should do each time the window is asked to close (Close, Escape, Cmd/Ctrl+W, the OS). `wait` (with the setting's `label`) keeps the window until the page's save settles and then asks again (a typed value saved after a pause is never lost to a quick close); meanwhile the footer says "Saving <setting>…" (new string `pd.settings.saving`), and after `STILL_SAVING_AFTER_MS` (4 s) the window says "Still saving <setting>." with **Close anyway** and **Keep waiting** (new strings `pd.settings.still-saving`, `pd.settings.still-saving.keep`): the save goes on whatever the user chooses, Close anyway closes, and Keep waiting stays and asks again after the same delay, so a close is never held without bound; `warn` shows "<what> was not saved: <why>" with **Close anyway** and **Keep editing** (new string `pd.settings.not-saved.close`); `close` lets it go. A wait comes before a warning, a guard that throws never keeps the window open, and the window's own unsaved-drafts question still comes first. Quit and the app's exit close dialog windows without asking their pages (a `paddock-window` test pins it). `settingsWindowProviders` provides `SettingsCloseGuards`; outside a Settings window the call does nothing. Pitwall's settings page is the first user.
+
 ### `installTestKit`: timer globals are put back after every test, and the test that replaced one fails (`@decryp7/paddock-ui/testing`)
 - The kit now restores spies before switching back to real timers, records the real timer globals (`setTimeout`,
   `setInterval`, `requestAnimationFrame` and their kin) at the first install in a worker, and after every test puts back any
@@ -42,6 +43,7 @@ Conventional Commits; one semver tag for the whole repo.
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.
   WebKit on a Linux runner emulates a Mac (`devices['Desktop Safari']`), so `ControlOrMeta` pressed Ctrl where the app wanted Cmd and no
   shortcut fired (CI run 7134, Dyno's WebKit leg). `WorkbenchPalette.open` and Dyno's e2e use it.
+
 ### `pd-jobs-status`: a visible heading
 - The Jobs popover has a visible heading (the popover's name, "Jobs") above the list, and the popover region is named by it (`aria-labelledby`), so a picture of it says what it is.
 ### `paddock-chromium`: Chromium builds start without their testing field trials
