@@ -6,6 +6,7 @@
 use paddock_commands::WindowClass;
 use paddock_shell::{AppIdentity, Builder, COMMANDS, PLUGIN_NAME, VERSION};
 use paddock_updater::tauri::UpdatesBuilder;
+#[cfg(feature = "mock-runtime")]
 use paddock_window::launch::LaunchArgs;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
