@@ -19,12 +19,12 @@ export interface PdWidgetContext<V> {
  * `calm: true` marks a kind whose empty state means "all good" (no active alarms): the frame draws it as one button row
  * (success icon, text, chevron) that emits the empty state's `next` action.
  */
-@Directive({ selector: 'ng-template[pdWidget]' })
+@Directive({ selector: 'ng-template[pdWidget]', exportAs: 'pdWidget' })
 export class PdWidget<V = unknown> {
   /** The kind's wire name (`KindInfo.kind`). */
-  readonly kind = input.required<string>({ alias: 'pdWidget' });
+  readonly pdWidget = input.required<string>();
   /** The kind's empty state means "all good". */
-  readonly calm = input(false, { alias: 'pdWidgetCalm' });
+  readonly pdWidgetCalm = input(false);
   readonly template = inject<TemplateRef<PdWidgetContext<V>>>(TemplateRef);
 
   static ngTemplateContextGuard<V>(_directive: PdWidget<V>, _context: unknown): _context is PdWidgetContext<V> {
@@ -59,7 +59,7 @@ export interface PdWidgetOptionContext<W> {
  */
 @Directive({ selector: 'ng-template[pdWidgetOption]' })
 export class PdWidgetOption<W = unknown> {
-  readonly kind = input.required<string>({ alias: 'pdWidgetOption' });
+  readonly pdWidgetOption = input.required<string>();
   readonly template = inject<TemplateRef<PdWidgetOptionContext<W>>>(TemplateRef);
 
   static ngTemplateContextGuard<W>(_directive: PdWidgetOption<W>, _context: unknown): _context is PdWidgetOptionContext<W> {
@@ -77,7 +77,7 @@ export function defaultKindOf(widget: unknown): string {
     const kind = (widget as { kind?: unknown }).kind;
     if (typeof kind === 'string') return kind;
     const keys = Object.keys(widget);
-    if (keys.length === 1) return keys[0] ?? '';
+    if (keys.length === 1) return keys[0] as string;
   }
   return '';
 }
