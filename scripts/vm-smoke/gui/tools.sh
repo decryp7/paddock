@@ -12,14 +12,14 @@ mkdir -p "$cache"
 command -v swiftc >/dev/null || { echo "gui/tools.sh: swiftc is needed (xcode-select --install)" >&2; exit 2; }
 command -v python3 >/dev/null || { echo "gui/tools.sh: python3 is needed" >&2; exit 2; }
 
-ax_hash=$(shasum -a 256 "$here/axdrive.swift" | cut -c1-16)
+ax_hash=$(shasum -a 256 <"$here/axdrive.swift" | cut -c1-16)
 ax="$cache/axdrive-$ax_hash"
 if [ ! -x "$ax" ]; then
   nice -n 10 swiftc -O -o "$ax.tmp" "$here/axdrive.swift" >&2
   mv "$ax.tmp" "$ax"
 fi
 
-req_hash=$( { shasum -a 256 "$here/vnc-requirements.txt"; python3 -c 'import sys; print(sys.version_info[:2])'; } | shasum -a 256 | cut -c1-16)
+req_hash=$( { shasum -a 256 <"$here/vnc-requirements.txt"; python3 -c 'import sys; print(sys.version_info[:2])'; } | shasum -a 256 | cut -c1-16)
 venv="$cache/vnc-venv-$req_hash"
 # A venv records its own path, so it is built in place; the stamp marks a finished install (a half one is rebuilt).
 if [ ! -f "$venv/.complete" ]; then
