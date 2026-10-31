@@ -88,7 +88,9 @@ const SAMPLES: &[&[&str]] = &[
 
 #[test]
 fn live_plan_matches_affected_mjs_on_sample_change_sets() {
-    require_repo();
+    if require_repo("golden::live_plan_matches_affected_mjs_on_sample_change_sets").is_none() {
+        return;
+    }
     let mut version = paddock_proc::command("node");
     version.arg("--version");
     let node = paddock_proc::run_bounded(version, paddock_proc::Limits::new(Duration::from_secs(10))).is_ok_and(|o| o.success());

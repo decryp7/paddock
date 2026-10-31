@@ -38,7 +38,9 @@ fn a_wrong_command_line_is_usage_exit_2_and_json_mode_gets_one_error_object() {
 
 #[test]
 fn self_hash_prints_one_object_with_the_hash_and_the_compiler() {
-    crate::repo::require_repo();
+    if crate::repo::require_repo("cli::self_hash").is_none() {
+        return;
+    }
     let (code, out, _) = dev(&["--json", "self", "hash"]);
     assert_eq!(code, 0);
     let v: Value = serde_json::from_str(out.trim()).unwrap();
@@ -53,7 +55,10 @@ fn self_hash_prints_one_object_with_the_hash_and_the_compiler() {
 
 #[test]
 fn graph_affected_prints_the_plan_for_the_repository_it_runs_in_or_is_pointed_at() {
-    let root = crate::repo::require_repo().display().to_string();
+    let Some(root) = crate::repo::require_repo("cli::graph_affected_prints_the_plan") else {
+        return;
+    };
+    let root = root.display().to_string();
     for args in [
         vec![
             "--json",

@@ -41,14 +41,55 @@ pub fn repo_problem(root: &Path, ceiling: Option<&Path>) -> Option<String> {
     }
 }
 
-/// The repository root, or a panic naming the fix when this tree is not a git working tree. Use it first in every test that
-/// needs the repository.
-pub fn require_repo() -> PathBuf {
-    let root = repo_root();
-    if let Some(problem) = repo_problem(&root, None) {
-        panic!("{problem}");
+/// What a test that needs the repository does with this tree.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Need {
+    /// The tree is a usable git checkout: run.
+    Run(PathBuf),
+    /// Not a checkout and nothing demands one: print the reason and return.
+    Skip(String),
+    /// Not a checkout but CI or `PADDOCK_REQUIRE_GIT` demands one: fail with the reason.
+    Fail(String),
+}
+
+/// The pure decision: `problem` from [`repo_problem`], and the values of `CI` and `PADDOCK_REQUIRE_GIT` (any non-empty value
+/// demands a repository; `CI=false` and `CI=0` do not).
+pub fn decide(root: PathBuf, problem: Option<String>, ci: Option<&str>, require_git: Option<&str>) -> Need {
+    let set = |v: Option<&str>| v.is_some_and(|v| !v.is_empty());
+    let ci_on = ci.is_some_and(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"));
+    match problem {
+        None => Need::Run(root),
+        Some(p) if ci_on || set(require_git) => Need::Fail(p),
+        Some(p) => Need::Skip(p),
     }
-    root
+}
+
+/// The repository root when this tree is a git working tree; otherwise prints `SKIPPED: <test> needs a git checkout: <why>` and
+/// returns `None` (the caller returns), or panics when `CI` or `PADDOCK_REQUIRE_GIT` is set, so CI never skips quietly.
+pub fn require_repo(test: &str) -> Option<PathBuf> {
+    let root = repo_root();
+    let problem = repo_problem(&root, None);
+    let (ci, req) = (std::env::var("CI").ok(), std::env::var("PADDOCK_REQUIRE_GIT").ok());
+    match decide(root, problem, ci.as_deref(), req.as_deref()) {
+        Need::Run(root) => Some(root),
+        Need::Skip(why) => {
+            eprintln!("SKIPPED: {test} needs a git checkout: {why}");
+            None
+        }
+        Need::Fail(why) => panic!("{test} needs a git checkout: {why}"),
+    }
+}
+
+#[test]
+fn without_a_repository_the_test_skips_unless_ci_or_require_git_is_set() {
+    let root = || PathBuf::from("x");
+    let why = || Some("no repo".to_string());
+    assert_eq!(decide(root(), None, Some("true"), Some("1")), Need::Run(root()));
+    assert_eq!(decide(root(), why(), None, None), Need::Skip("no repo".into()));
+    assert_eq!(decide(root(), why(), Some(""), Some("")), Need::Skip("no repo".into()));
+    assert_eq!(decide(root(), why(), Some("false"), None), Need::Skip("no repo".into()));
+    assert_eq!(decide(root(), why(), Some("true"), None), Need::Fail("no repo".into()));
+    assert_eq!(decide(root(), why(), None, Some("1")), Need::Fail("no repo".into()));
 }
 
 #[test]
