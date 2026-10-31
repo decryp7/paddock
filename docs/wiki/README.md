@@ -43,8 +43,8 @@ Summary in three to five lines.
 ## See also
 ```
 
-- `verified: YYYY-MM-DD`: the day someone last checked every claim of the page against its sources. A page not verified
-  within 30 days is flagged by the lint, never deleted.
+- `verified: YYYY-MM-DD`: the day someone last checked every claim of the page against its sources. An old date draws a lint
+  warning (30 days by default); the writer re-verifies the page, nobody deletes it.
 - `sources:` lists what the page rests on. Every bullet also carries its own source.
 - Dates come from the clock (`date +%F`), never typed from memory. Facts that are only on a branch say so ("on branch X at
   commit Y, not on main"), so the page does not claim more than main has.
@@ -62,7 +62,7 @@ Summary in three to five lines.
 - **Query**: read `index.md`, then the pages it points to, and answer with the sources of the page. If the answer was
   missing or wrong, leave a wiki note for the next ingest.
 - **Lint**: `node scripts/wiki-lint.mjs` (links resolve and their anchors exist; no clock-time citation of the steward log; every page is in the index; no orphan; every
-  page has `verified:` and `sources:`; every bullet names a source; pages older than 30 days are flagged; no run of 8 or more
+  page has `verified:` and `sources:`; every bullet names a source; pages with an old `verified:` date draw a warning; no run of 8 or more
   words is shared with any rules source: `docs/rules.md`, `origin/main`, the open rule branches and engineering-rules
   `RULES.md`, given with `--rules`). A second, reading pass by a reviewer checks pages against the rules and ADRs they
   cite, a few pages at a time.
