@@ -56,7 +56,7 @@ const values = (...p: [string, WidgetState<V, A>][]): SurfaceValues<V, A> => ({ 
         <div class="big" pdSkeleton>{{ v?.text ?? '00' }}</div>
         <div class="line"><span pdSkeleton>{{ v?.text ?? 'xxxx' }}</span></div>
       </ng-template>
-      <ng-template pdWidget="alarms" [pdWidgetCalm]="true" [pdWidgetOf]="w" let-v><div pdSkeleton>{{ v?.text ?? 'none' }}</div></ng-template>
+      <ng-template pdWidget="alarms" [pdWidgetOf]="w" let-v><div pdSkeleton>{{ v?.text ?? 'none' }}</div></ng-template>
       <ng-template pdWidget="disk" [pdWidgetOf]="w" let-v let-stale="stale" let-loading="loading"><div pdSkeleton [attr.data-stale]="stale" [attr.data-loading]="loading">{{ v?.text ?? 'disk' }}</div></ng-template>
     </pd-widget-area>
   `,
@@ -76,7 +76,7 @@ class AreaHost {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdWidgetFrame, PdWidget],
   template: `
-    <pd-widget-frame title="Disk space" icon="pd:folder" [state]="state()" [template]="dir()?.template ?? null" [span]="span()" [live]="live()" [calm]="calm()" [now]="now" metaText="3 volumes" (action)="actions.push($event)" />
+    <pd-widget-frame title="Disk space" icon="pd:folder" [state]="state()" [template]="dir()?.template ?? null" [span]="span()" [live]="live()" [now]="now" metaText="3 volumes" (action)="actions.push($event)" />
     <ng-template pdWidget="disk" [pdWidgetOf]="w" let-v><p class="body">{{ v?.text ?? 'none' }}</p></ng-template>
   `,
 })
@@ -85,7 +85,6 @@ class FrameHost {
   readonly state = signal<WidgetState<V, A> | null | undefined>(undefined);
   readonly span = signal(2);
   readonly live = signal(false);
-  readonly calm = signal(false);
   readonly now = 10 * 60_000;
   readonly dir = viewChild(PdWidget);
   actions: A[] = [];
@@ -226,27 +225,30 @@ describe('pd-widget-frame', () => {
 
   it('draws an empty state with the benefit, the detail and the next step, which emits the app action', async () => {
     const f = await setup();
-    f.componentInstance.state.set({ state: 'empty', title: 'See disk space', detail: 'No disks.', next: act('open', 'Choose another volume') });
+    f.componentInstance.state.set({ state: 'empty', title: 'See disk space', detail: 'No disks.', next: act('open', 'Choose another volume'), calm: false });
     await settle(f);
     expect(q(f, '.pd-w-t')!.textContent).toBe('See disk space');
     expect(q(f, '.pd-w-d')!.textContent).toBe('No disks.');
     q(f, '.pd-w-act')!.click();
     expect(f.componentInstance.actions).toEqual(['open']);
-    f.componentInstance.state.set({ state: 'empty', title: 'T', detail: 'D', next: null });
+    f.componentInstance.state.set({ state: 'empty', title: 'T', detail: 'D', next: null, calm: false });
     await settle(f);
     expect(q(f, '.pd-w-act')).toBeNull();
   });
 
-  it('draws a calm empty state as one real button named with its text and next step', async () => {
+  it('draws an empty state the engine marks calm as one real button named with its text and next step', async () => {
     const f = await setup();
-    f.componentInstance.calm.set(true);
-    f.componentInstance.state.set({ state: 'empty', title: 'No active alarms', detail: 'checked 2 min ago', next: act('open', 'Open alarms') });
+    f.componentInstance.state.set({ state: 'empty', title: 'No active alarms', detail: 'checked 2 min ago', next: act('open', 'Open alarms'), calm: true });
     await settle(f);
     const b = q(f, 'button.pd-w-calm')!;
     expect(b.getAttribute('aria-label')).toBe('No active alarms, checked 2 min ago. Open alarms');
     b.click();
     expect(f.componentInstance.actions).toEqual(['open']);
-    f.componentInstance.state.set({ state: 'empty', title: 'No alarms', detail: 'none', next: null });
+    f.componentInstance.state.set({ state: 'empty', title: 'No alarms', detail: 'none', next: null, calm: true });
+    await settle(f);
+    expect(q(f, 'button.pd-w-calm')).toBeNull();
+    expect(q(f, '.pd-w-st')).not.toBeNull();
+    f.componentInstance.state.set({ state: 'empty', title: 'No active alarms', detail: 'checked 2 min ago', next: act('open', 'Open alarms'), calm: false });
     await settle(f);
     expect(q(f, 'button.pd-w-calm')).toBeNull();
     expect(q(f, '.pd-w-st')).not.toBeNull();
@@ -443,7 +445,7 @@ describe('pd-widget-area', () => {
 
   it('forwards an empty state action of a calm kind', async () => {
     const f = await setup();
-    f.componentInstance.vals.set(values(['alarms', { state: 'empty', title: 'No active alarms', detail: 'checked now', next: act('open', 'Open alarms') }]));
+    f.componentInstance.vals.set(values(['alarms', { state: 'empty', title: 'No active alarms', detail: 'checked now', next: act('open', 'Open alarms'), calm: true }]));
     await settle(f);
     q(f, 'button.pd-w-calm')!.click();
     expect(f.componentInstance.actions).toEqual(['open']);

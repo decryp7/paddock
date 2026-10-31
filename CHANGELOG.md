@@ -24,6 +24,12 @@ Conventional Commits; one semver tag for the whole repo.
   -3 and against its track (`--pd-chart-grid` over surface-2 and -3). `--pd-chart-neutral-bar` stays for charts; on a surface-2 widget it measured 2.8:1 in dark (ADR 0035).
 - `--pd-skeleton-raised` and `--pd-skeleton-raised-shine` are the skeleton pair for content on a surface-2 fill, where
   `--pd-skeleton` (the surface-2 colour) vanishes. `npm run test:tokens` checks both.
+### `paddock-widgets` and `@decryp7/paddock-ui/widgets`: the engine decides which empty state is calm (ADR 0035)
+- `WidgetState::Empty` gets `calm: bool` (serde default `false`; generated TypeScript `calm: boolean`): `true` means "all good" and is
+  drawn as one calm row with a success check, `false` means "nothing here yet" and is drawn with the info icon and the next step.
+- Breaking, before v1: `pdWidgetCalm` on `*pdWidget` and `[calm]` on `pd-widget-frame` are removed; the frame reads `calm` from the empty
+  state. Apps drop `[pdWidgetCalm]` and set `calm` in the engine.
+
 ### `paddock-widgets`: new crate for widget layouts (ADR 0035, WP-A)
 - A pure crate for layouts of widgets on a surface (popover, dashboard, menu bar): the app's closed `Catalogue`, `Layout`
   and `Placement`, limits on every read and edit, lenient versioned `read` and `Stored` (a layout that cannot be read gives the defaults and one note and is kept and written back unchanged until the first
