@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { COPY_WORDS, lintWiki, linksOf, main, parsePage, slug, windows } from './wiki-lint.mjs';
+import { COPY_WORDS, lintWiki, linksOf, main, parsePage, readRulesSource, slug, windows } from './wiki-lint.mjs';
 
 const roots = [];
 after(() => roots.forEach((r) => rmSync(r, { recursive: true, force: true })));
@@ -33,7 +33,7 @@ function wiki(over = {}) {
 
 const lint = (over, extra = {}) => {
   const { dir, rules } = wiki(over);
-  return lintWiki({ wikiDir: dir, rulesFile: rules, today: '2026-10-31', ...extra });
+  return lintWiki({ wikiDir: dir, rules: [{ name: 'rules.txt', text: readFileSync(rules, 'utf8') }], today: '2026-10-31', ...extra });
 };
 const has = (list, text) => list.some((m) => m.includes(text));
 
@@ -123,16 +123,42 @@ test('slugs follow the forge: lower case, no punctuation, hyphens', () => {
 test('the CLI returns 1 on errors and on warnings only with --strict', () => {
   const { dir, rules } = wiki({ 'one.md': page('2026-09-01') });
   const quiet = { out: () => {}, err: () => {} };
-  const args = ['--wiki', dir, '--rules', rules, '--today', '2026-10-31'];
+  const args = ['--wiki', dir, '--rules', rules, '--er', join(dir, 'none.md'), '--today', '2026-10-31'];
   assert.equal(main(args, quiet), 0);
   assert.equal(main([...args, '--strict'], quiet), 1);
   assert.equal(main([...args, '--max-age', '90', '--strict'], quiet), 0);
   const bad = wiki({ 'index.md': '# Index\n' });
-  assert.equal(main(['--wiki', bad.dir, '--rules', bad.rules, '--today', '2026-10-31'], quiet), 1);
+  assert.equal(main(['--wiki', bad.dir, '--rules', bad.rules, '--er', join(dir, 'none.md'), '--today', '2026-10-31'], quiet), 1);
+  assert.equal(main([...args, '--rules', join(dir, 'unreadable.txt')], quiet), 1);
 });
 
-test('the real docs/wiki passes (stale pages only warn)', () => {
+test('a copy of any one of several rules sources fails, and the message names that source', () => {
+  const { dir } = wiki({ 'one.md': page('2026-10-20', '[a]', '- Branch rule says never wait on a fixed number of event loop turns ever [two](two.md)\n') });
+  const other = { name: 'origin/docs/branch:docs/rules.md', text: 'Specs: never wait on a fixed number of event loop turns ever again.' };
+  const r = lintWiki({ wikiDir: dir, rules: [{ name: 'rules.txt', text: RULES }, other], today: '2026-10-31' });
+  assert.ok(has(r.errors, 'shared with origin/docs/branch:docs/rules.md'));
+  assert.ok(!has(r.errors, 'shared with rules.txt'));
+});
+
+test('a steward-log citation by clock time is an error; by line number it passes', () => {
+  assert.ok(has(lint({ 'one.md': page('2026-10-20', '[a]', '- Claim, src: `merge-steward.md` entry 14:33 [two](two.md)\n') }).errors, 'clock time'));
+  assert.deepEqual(lint({ 'one.md': page('2026-10-20', '[a]', '- Claim, src: `merge-steward.md:560` [two](two.md)\n') }).errors, []);
+  assert.deepEqual(lint({ 'one.md': page('2026-10-20', '[a]', '- The runner starts at 14:33 [two](two.md)\n') }).errors, []);
+});
+
+test('a rules source is a file, or a git ref:path, or unreadable', () => {
+  const { rules } = wiki({});
+  assert.equal(readRulesSource(rules).text, RULES);
+  assert.equal(readRulesSource('no/such/file.md'), null);
+  assert.equal(readRulesSource('no-such-ref-xyz:docs/rules.md', dirname(fileURLToPath(import.meta.url))), null);
+  assert.match(readRulesSource('HEAD:docs/rules.md', dirname(fileURLToPath(import.meta.url))).text, /# Paddock rules/);
+});
+
+test('the real docs/wiki passes against docs/rules.md and the engineering rules (stale pages only warn)', () => {
   const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-  const r = lintWiki({ wikiDir: join(repo, 'docs/wiki'), rulesFile: join(repo, 'docs/rules.md'), today: new Date().toISOString().slice(0, 10) });
+  const rules = [join(repo, 'docs/rules.md'), resolve(repo, '../engineering-rules/RULES.md')].flatMap((f) => {
+    try { return [{ name: f, text: readFileSync(f, 'utf8') }]; } catch { return []; }
+  });
+  const r = lintWiki({ wikiDir: join(repo, 'docs/wiki'), rules, today: new Date().toISOString().slice(0, 10) });
   assert.deepEqual(r.errors, []);
 });

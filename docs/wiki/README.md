@@ -46,6 +46,9 @@ Summary in three to five lines.
 - `sources:` lists what the page rests on. Every bullet also carries its own source.
 - Dates come from the clock (`date +%F`), never typed from memory. Facts that are only on a branch say so ("on branch X at
   commit Y, not on main"), so the page does not claim more than main has.
+- The steward log's times are labels the coordinator typed, some duplicated or dated wrongly. Cite an entry by its line,
+  `merge-steward.md:<line>` (or a quoted keyword), never by time; lines shift when the file is edited, so re-check them at
+  each verification. The lint rejects a clock time next to a steward-log citation.
 - Binding words are not used in a wiki sentence. A page says "rule 54 covers this" and links the rule.
 
 ## Operations
@@ -56,9 +59,10 @@ Summary in three to five lines.
   `node scripts/wiki-lint.mjs`; commit `docs(wiki): ...` as its own commit.
 - **Query**: read `index.md`, then the pages it points to, and answer with the sources of the page. If the answer was
   missing or wrong, leave a wiki note for the next ingest.
-- **Lint**: `node scripts/wiki-lint.mjs` (links resolve and their anchors exist; every page is in the index; no orphan; every
+- **Lint**: `node scripts/wiki-lint.mjs` (links resolve and their anchors exist; no clock-time citation of the steward log; every page is in the index; no orphan; every
   page has `verified:` and `sources:`; every bullet names a source; pages older than 30 days are flagged; no run of 8 or more
-  words is shared with `docs/rules.md`). A second, reading pass by a reviewer checks pages against the rules and ADRs they
+  words is shared with any rules source: `docs/rules.md`, `origin/main`, the open rule branches and engineering-rules
+  `RULES.md`, given with `--rules`). A second, reading pass by a reviewer checks pages against the rules and ADRs they
   cite, a few pages at a time.
 
 ## One writer

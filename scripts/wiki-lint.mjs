@@ -8,12 +8,19 @@
 //   - a page without `verified: YYYY-MM-DD` (a real date, not in the future) or without a non-empty `sources:`
 //   - a bullet that names no source (a Markdown link or `src:`)
 //   - a log.md line that does not follow `## [YYYY-MM-DD] ingest|lint|fix | subject`
-//   - rule text copied: a run of COPY_WORDS or more words that docs/rules.md also contains
+//   - rule text copied: a run of COPY_WORDS or more words that any rules source also contains (see --rules)
+//   - a steward-log citation by clock time: the log's times are coordinator labels, so cite `merge-steward.md:<line>`
 // Warnings (exit 0, or 1 with --strict): a page not verified within --max-age days (default 30).
 //
-// Usage: node scripts/wiki-lint.mjs [--wiki docs/wiki] [--rules docs/rules.md] [--max-age 30] [--today YYYY-MM-DD] [--strict]
+// Rules sources (--rules, repeatable): a file path, or `<git ref>:<path>` read with `git show` (for example
+// `origin/docs/rca-rules:docs/rules.md`, an open rule branch). With no --rules the default is docs/rules.md of the working tree,
+// origin/main:docs/rules.md, and the engineering-rules RULES.md when it sits next to the repository (or is named by --er).
+//
+// Usage: node scripts/wiki-lint.mjs [--wiki docs/wiki] [--rules <file|ref:path>]... [--er <RULES.md>] [--max-age 30]
+//          [--today YYYY-MM-DD] [--strict]
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 /** A copied run of this many words is rule text (the pilot's rule: no sentence of 8 or more words shared with rules.md). */
@@ -101,10 +108,10 @@ const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / DAY_M
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s ?? '') && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString().startsWith(s);
 
 /**
- * Lints a wiki folder. `rulesFile` is the text source of the copied-rule check (may be absent). Returns `{ errors, warnings }`,
- * each a list of `path:line message` strings.
+ * Lints a wiki folder. `rules` is a list of `{ name, text }` sources for the copied-rule check (may be empty). Returns
+ * `{ errors, warnings }`, each a list of `path:line message` strings.
  */
-export function lintWiki({ wikiDir, rulesFile, today, maxAge = MAX_AGE_DAYS }) {
+export function lintWiki({ wikiDir, rules = [], today, maxAge = MAX_AGE_DAYS }) {
   const errors = [];
   const warnings = [];
   const root = resolve(wikiDir);
@@ -175,29 +182,59 @@ export function lintWiki({ wikiDir, rulesFile, today, maxAge = MAX_AGE_DAYS }) {
     if (raw.startsWith('## ') && !LOG_LINE.test(raw)) errors.push(at('log.md', i + 1, 'log line must be `## [YYYY-MM-DD] ingest|lint|fix | subject`'));
   });
 
-  // No rule text: the wiki links to rules and never restates them.
-  if (rulesFile && existsSync(rulesFile)) {
-    const rules = windows(readFileSync(rulesFile, 'utf8'));
-    for (const f of names) {
-      // Over the whole body, so a sentence wrapped across lines is still found.
-      const hit = [...windows(parsePage(text[f]).body)].find((w) => rules.has(w));
-      if (hit) errors.push(at(f, 0, `copies rule text (${COPY_WORDS}+ words shared with ${relative(process.cwd(), rulesFile)}): "${hit}..."; link the rule instead`));
+  // The steward log's clock times are labels the coordinator typed, some duplicated or mis-dated: cite its line number.
+  for (const f of names) {
+    text[f].split('\n').forEach((raw, i) => {
+      if (/merge-steward/.test(raw) && /\b\d{1,2}:\d{2}\b/.test(raw)) errors.push(at(f, i + 1, 'cites the steward log by clock time; cite `merge-steward.md:<line>` instead'));
+    });
+  }
+
+  // No rule text: the wiki links to rules and never restates them (checked against every rules source given).
+  const sources = rules.map((r) => ({ name: r.name, set: windows(r.text) }));
+  for (const f of names) {
+    // Over the whole body, so a sentence wrapped across lines is still found.
+    const mine = windows(parsePage(text[f]).body);
+    for (const src of sources) {
+      const hit = [...mine].find((w) => src.set.has(w));
+      if (hit) errors.push(at(f, 0, `copies rule text (${COPY_WORDS}+ words shared with ${src.name}): "${hit}..."; link the rule instead`));
     }
   }
   return { errors, warnings };
 }
 
+/** One rules source: a file, or `<ref>:<path>` from git. Returns `{ name, text }` or null when it cannot be read. */
+export function readRulesSource(spec, cwd = process.cwd()) {
+  if (existsSync(spec)) return { name: spec, text: readFileSync(spec, 'utf8') };
+  if (!/^[^/][^:]*:[^:]+$/.test(spec)) return null;
+  try {
+    return { name: spec, text: execFileSync('git', ['show', spec], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 26 }) };
+  } catch {
+    return null;
+  }
+}
+
 /** The CLI. Returns the exit code. */
 export function main(argv, { out = console.log, err = console.error } = {}) {
   const opt = (name, fallback) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : fallback);
+  const all = (name) => argv.flatMap((a, i) => (a === name ? [argv[i + 1]] : []));
   const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const wikiDir = resolve(opt('--wiki', join(repo, 'docs/wiki')));
-  const rulesFile = resolve(opt('--rules', join(repo, 'docs/rules.md')));
   const today = opt('--today', new Date().toISOString().slice(0, 10));
-  const { errors, warnings } = lintWiki({ wikiDir, rulesFile, today, maxAge: Number(opt('--max-age', MAX_AGE_DAYS)) });
+  const given = all('--rules');
+  const er = opt('--er', resolve(repo, '../engineering-rules/RULES.md'));
+  const specs = given.length ? given : [join(repo, 'docs/rules.md'), 'origin/main:docs/rules.md'];
+  if (existsSync(er)) specs.push(er);
+  const rules = [];
+  for (const spec of specs) {
+    const src = readRulesSource(spec, repo);
+    if (src) rules.push(src);
+    else if (given.includes(spec)) err(`error cannot read rules source ${spec}`);
+  }
+  if (given.some((g) => !rules.some((r) => r.name === g))) return 1;
+  const { errors, warnings } = lintWiki({ wikiDir, rules, today, maxAge: Number(opt('--max-age', MAX_AGE_DAYS)) });
   for (const w of warnings) out(`warning ${w}`);
   for (const e of errors) err(`error ${e}`);
-  out(`wiki-lint: ${errors.length} error(s), ${warnings.length} warning(s)`);
+  out(`wiki-lint: ${errors.length} error(s), ${warnings.length} warning(s); ${rules.length} rules source(s)`);
   return errors.length > 0 || (argv.includes('--strict') && warnings.length > 0) ? 1 : 0;
 }
 
