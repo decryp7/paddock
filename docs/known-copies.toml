@@ -2,29 +2,35 @@
 # implementation and each copy, with the app that deletes the copy and the tag by which it must be gone.
 #
 # Format (ADR 0034 §1-§2):
-#   [[mechanism]]  id (kebab-case, unique), title, canonical (crate or package), paths (globs over tracked files),
-#                  symbols (optional), status ("built" | "planned": a planned canonical's paths may not exist yet),
-#                  adr (optional: where the canonical home was decided)
-#   [[mechanism.copy]]  paths, symbols (optional), owner (an apps/ folder or "paddock"), delete_by (`<owner>-vX.Y.Z`,
-#                  or `vX.Y.Z` for owner "paddock"), note
+#   [[mechanism]]  id (kebab-case, unique), title, canonical (crate or package), paths (globs over tracked files; a whole
+#                  crate is written `<crate>/src/**`), symbols (optional), status ("built" | "planned": a planned
+#                  canonical's files may not exist yet), adr (optional: where the canonical home was decided)
+#   [[mechanism.copy]]  paths, symbols (optional), kind ("copy", the default, or "wiring": a few lines that hook a plugin
+#                  up by hand; covered by the tag check only), owner (an apps/ folder or "paddock"), delete_by
+#                  (`<owner>-vX.Y.Z`, or `vX.Y.Z` for owner "paddock"), note (facts, not branch names)
 #   symbols: "item:<Name>" (the span of a Rust/TypeScript item named Name) or "text:<literal>" (changed lines that contain
-#            the literal). Without symbols, any change to a matching file touches the member.
+#            the literal). Without symbols, any counted change to a matching file touches the member. Only non-test source
+#            files count (no tests, fixtures, manifests, lockfiles, docs or generated files).
 #
-# Check C58 (ADR 0034 §3, follow-up WP-1): a change that touches one member of a mechanism touches every other member,
-# or waives it with a commit trailer:  Copies-waived: <mechanism-id> <member-path-or-*>: <reason>
-# A tag `<app>-vX.Y.Z` is refused while a copy owned by that app has a delete_by version <= X.Y.Z.
-# Moving a delete_by date is a reviewed change with the reason in the commit body.
+# Check C58 (ADR 0034 §3, follow-up WP-1):
+#   - a change that touches one member of a mechanism touches every other copy and a built canonical, or waives a member
+#     in a commit that touches the mechanism:  Copies-waived: <mechanism-id> <member-path>: <reason>
+#   - an entry leaves the register only with its copy's files, or with:  Copies-removed: <mechanism-id> <path>: <reason>
+#   - a delete_by date moves only with:  Copies-date: <mechanism-id> <path>: <old> -> <new>: <reason>  (rule 55(d))
+#   - a tag `<app>-vX.Y.Z` is refused while a copy owned by that app has a delete_by version <= X.Y.Z.
 #
-# Seeded 2026-10-31 from the family survey (family-redesign-and-sharing-2026-10-31) at origin/main c3404cdc7. Paths are
-# as they are on main; copies already deleted on a release branch leave the register when that branch lands.
-# Not listed on purpose: AGENTS.md paddock:block sections (C23), per-app clippy.toml presets (C13), and domain code that
-# only looks alike (Dyno's socket lister, Pitcrew's and Pitwall's transports, supervisor transitions; rule 42).
+# Seeded 2026-10-31 from the family survey (family-redesign-and-sharing-2026-10-31) and from the shared crates' own
+# "Taken from" / "Ported from" doc comments, at origin/main c3404cdc7. Paths are as they are on main. A release batch that
+# deletes a copy removes its entry in the same batch, before its tag.
+# Not listed on purpose (ADR 0034 §1): documentation (AGENTS.md sections synced from docs/blocks, READMEs), templates/**
+# (the source of new standalone repositories), the per-app clippy.toml presets (C13), and domain code that only looks
+# alike (Dyno's socket lister, Pitcrew's and Pitwall's transports, supervisor transitions; rule 42).
 
 version = 1
 
-# ---------------------------------------------------------------------------------------------------------------------
+# =====================================================================================================================
 # Background service, login items
-# ---------------------------------------------------------------------------------------------------------------------
+# =====================================================================================================================
 
 [[mechanism]]
 id = "launchd-job-report"
@@ -37,19 +43,19 @@ status = "built"
   paths = ["apps/dyno/app/src-tauri/src/service_repair.rs"]
   owner = "dyno"
   delete_by = "dyno-v1.1.0"
-  note = "Ported from Pitwall 2026-10-24. Its parser and stale() caused Dyno 1.0 blocker B4; both fixed in this copy on dyno/login-blockers. The shared stale() still counts has_lwcr && !running (ADR 0034 WP-2)."
+  note = "Ported from Pitwall on 2026-10-24. Its parser and stale() caused Dyno 1.0 blocker B4; Dyno's B4 fix changes both in this copy. The shared stale() still counts has_lwcr && !running (ADR 0034 WP-2)."
 
   [[mechanism.copy]]
   paths = ["apps/pitwall/app/src-tauri/src/service_repair.rs"]
   owner = "pitwall"
   delete_by = "pitwall-v1.2.0"
-  note = "On main: its own parse_job without nested-block skipping (shipped in 1.0.x). Pitwall 1.1 (steward/s23-pitwall-1.1) uses paddock_service::parse; plan() and run_repair() stay a copy until 1.2."
+  note = "Pitwall 1.0.x has its own parse_job without nested-block skipping. Pitwall 1.1 switches to paddock_service::parse; plan() and run_repair() stay a copy until 1.2."
 
   [[mechanism.copy]]
   paths = ["apps/pitcrew/app/src-tauri/src/service_repair.rs"]
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
-  note = "Both B4 defects (nested state lines, has_lwcr && !running), also on pitcrew/1.1-shell. Pitcrew 1.1 adopts paddock-service."
+  note = "Both B4 defects (nested state lines, has_lwcr && !running). Pitcrew 1.1 adopts paddock-service."
 
 [[mechanism]]
 id = "service-registration"
@@ -85,20 +91,22 @@ adr = "0034"
 
   [[mechanism.copy]]
   paths = ["apps/dyno/app/src-tauri/src/login.rs", "apps/dyno/app/src-tauri/src/login_item.rs"]
-  symbols = ["item:apply_launch_at_login", "text:tauri_plugin_autostart", "item:hidden_at_start"]
+  symbols = ["item:apply_launch_at_login", "item:hidden_at_start"]
   owner = "dyno"
   delete_by = "dyno-v1.1.0"
-  note = "dyno/login-blockers adds SMAppService.mainApp and the lgit/rsto start reason here; they move into paddock-service::login (MainAppItem, LaunchReason) after the Dyno tag."
+  note = "Dyno 1.0 adds SMAppService.mainApp and the lgit/rsto start reason here; they move into paddock-service::login (MainAppItem, LaunchReason) after the Dyno tag."
 
   [[mechanism.copy]]
   paths = ["apps/dyno/app/src-tauri/src/lib.rs"]
   symbols = ["text:tauri_plugin_autostart"]
+  kind = "wiring"
   owner = "dyno"
   delete_by = "dyno-v1.1.0"
 
   [[mechanism.copy]]
   paths = ["apps/spotter/app/src-tauri/src/lib.rs", "apps/spotter/app/src-tauri/src/commands.rs"]
   symbols = ["text:tauri_plugin_autostart"]
+  kind = "wiring"
   owner = "spotter"
   delete_by = "spotter-v1.1.0"
   note = "MacosLauncher::LaunchAgent: translocated path and an unidentified Login Items row (Dyno F1/F3), no restore detection (B3)."
@@ -106,18 +114,20 @@ adr = "0034"
   [[mechanism.copy]]
   paths = ["apps/pitwall/app/src-tauri/src/lib.rs", "apps/pitwall/app/src-tauri/src/app_commands.rs"]
   symbols = ["text:tauri_plugin_autostart"]
+  kind = "wiring"
   owner = "pitwall"
   delete_by = "pitwall-v1.2.0"
 
   [[mechanism.copy]]
   paths = ["apps/pitcrew/app/src-tauri/src/lib.rs", "apps/pitcrew/app/src-tauri/src/commands.rs"]
   symbols = ["text:tauri_plugin_autostart"]
+  kind = "wiring"
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
 
-# ---------------------------------------------------------------------------------------------------------------------
+# =====================================================================================================================
 # IPC and the plugin platform (ADR 0001)
-# ---------------------------------------------------------------------------------------------------------------------
+# =====================================================================================================================
 
 [[mechanism]]
 id = "ipc-endpoint"
@@ -131,7 +141,7 @@ adr = "0001"
   paths = ["apps/dyno/crates/dyno-ipc/src/endpoint/**"]
   owner = "dyno"
   delete_by = "dyno-v1.1.0"
-  note = "The macOS SS_DRAINING EBADF fix (poll-based waits) is needed here and in the canonical one in the same change. windows.rs differs in 22 of 245 lines."
+  note = "The macOS SS_DRAINING EBADF fix (poll-based waits) is needed here and in the canonical one. windows.rs differs in 22 of 245 lines."
 
   [[mechanism.copy]]
   paths = ["apps/debrief/crates/debrief-ipc/src/endpoint.rs"]
@@ -154,7 +164,7 @@ adr = "0001"
   note = "ADR 0001: Dyno 1.0 ships on its own copy."
 
   [[mechanism.copy]]
-  paths = ["apps/debrief/crates/debrief-ipc/src/frame.rs", "apps/debrief/crates/debrief-ipc/src/peer.rs", "apps/debrief/crates/debrief-ipc/src/peer/tests.rs", "apps/debrief/crates/debrief-ipc/src/wire.rs"]
+  paths = ["apps/debrief/crates/debrief-ipc/src/frame.rs", "apps/debrief/crates/debrief-ipc/src/peer.rs", "apps/debrief/crates/debrief-ipc/src/wire.rs"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
 
@@ -194,7 +204,7 @@ adr = "0001"
 id = "plugin-sandbox"
 title = "OS containment and lockdown of a plugin process"
 canonical = "paddock-sandbox"
-paths = ["crates/paddock-sandbox/**"]
+paths = ["crates/paddock-sandbox/src/**"]
 status = "planned"
 adr = "0001"
 
@@ -208,42 +218,42 @@ adr = "0001"
 id = "plugin-platform"
 title = "Plugin API, host (supervisor, grants, remote calls), signed packages, test kit and cargo subcommand"
 canonical = "paddock-plugin-api"
-paths = ["crates/paddock-plugin-api/**", "crates/paddock-plugin-host/**", "crates/paddock-plugin-package/**", "crates/paddock-plugin-test/**", "crates/cargo-paddock-plugin/**"]
+paths = ["crates/paddock-plugin-api/src/**", "crates/paddock-plugin-host/src/**", "crates/paddock-plugin-package/src/**", "crates/paddock-plugin-test/src/**", "crates/cargo-paddock-plugin/src/**"]
 status = "built"
 adr = "0001"
 
   [[mechanism.copy]]
-  paths = ["apps/debrief/crates/debrief-plugin-api/**", "apps/debrief/crates/debrief-plugin-host/**", "apps/debrief/crates/debrief-plugin-package/**", "apps/debrief/crates/debrief-plugin-test/**", "apps/debrief/crates/cargo-debrief-plugin/**"]
+  paths = ["apps/debrief/crates/debrief-plugin-api/src/**", "apps/debrief/crates/debrief-plugin-host/src/**", "apps/debrief/crates/debrief-plugin-package/src/**", "apps/debrief/crates/debrief-plugin-test/src/**", "apps/debrief/crates/cargo-debrief-plugin/src/**"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
-  note = "ADR 0001 and 0003: Debrief's mature code is the reference; it moves in PH1-PH4."
+  note = "ADR 0001 and 0003: Debrief's mature code is the reference; it moves in PH1-PH4. debrief-plugin-api/src/settings.rs is listed under settings-schema."
 
   [[mechanism.copy]]
-  paths = ["apps/dyno/crates/dyno-plugin-api/**", "apps/dyno/crates/dyno-plugin-host/**"]
+  paths = ["apps/dyno/crates/dyno-plugin-api/src/**", "apps/dyno/crates/dyno-plugin-host/src/**"]
   owner = "dyno"
   delete_by = "dyno-v1.2.0"
   note = "ADR 0001: deleted when Dyno moves to tier 3. Move this date with tier 3's schedule."
 
-# ---------------------------------------------------------------------------------------------------------------------
+# =====================================================================================================================
 # Processes and the browser
-# ---------------------------------------------------------------------------------------------------------------------
+# =====================================================================================================================
 
 [[mechanism]]
 id = "browser-driver"
 title = "Driving Chromium over CDP: discover, install, launch, pages, challenges, end"
 canonical = "paddock-chromium"
-paths = ["crates/paddock-chromium/**"]
+paths = ["crates/paddock-chromium/src/**"]
 status = "built"
 adr = "0030"
 
   [[mechanism.copy]]
-  paths = ["apps/spotter/crates/spotter-render/**"]
+  paths = ["apps/spotter/crates/spotter-render/src/**"]
   owner = "spotter"
   delete_by = "spotter-v1.1.0"
   note = "Has --disable-field-trial-config, not the NetworkServiceSandbox switch the canonical has. Consolidation ADR right after the Spotter tag."
 
   [[mechanism.copy]]
-  paths = ["apps/debrief/crates/chromium-driver/**"]
+  paths = ["apps/debrief/crates/chromium-driver/src/**"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
   note = "Fixed 20 s start (launch.rs START_PAGE_WAIT); no NetworkServiceSandbox switch. Adopt the canonical instead of patching."
@@ -262,98 +272,86 @@ adr = "0033"
   delete_by = "debrief-v1.2.0"
   note = "A JSON pid file with a check-then-delete takeover; Debrief 1.2 WP12 moves it onto InstanceLock."
 
+# =====================================================================================================================
+# Windows, start-up and the shell (ADR 0012: crates taken from the apps)
+# =====================================================================================================================
+
 [[mechanism]]
-id = "ui-single-instance"
-title = "A second launch focuses the running app and hands over its arguments"
-canonical = "paddock-shell"
-paths = ["crates/paddock-shell/src/builder.rs"]
-symbols = ["text:single_instance"]
-status = "planned"
-adr = "0034"
+id = "launch-plan"
+title = "What a launch asks for, single instance, and where files and links from outside go (openFilesIn)"
+canonical = "paddock-window"
+paths = ["crates/paddock-window/src/launch.rs", "crates/paddock-window/src/tauri/instance.rs"]
+status = "built"
+adr = "0012"
 
   [[mechanism.copy]]
-  paths = ["apps/dyno/app/src-tauri/src/lib.rs"]
-  symbols = ["text:tauri_plugin_single_instance"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
+  paths = ["apps/debrief/app/src-tauri/src/instance.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "The canonical launch.rs was ported from this file (openFilesIn, --new-instance, safe mode, RunEvent::Opened)."
 
   [[mechanism.copy]]
-  paths = ["apps/spotter/app/src-tauri/src/lib.rs"]
+  paths = ["apps/debrief/app/src-tauri/src/lib.rs"]
   symbols = ["text:tauri_plugin_single_instance"]
-  owner = "spotter"
-  delete_by = "spotter-v1.1.0"
+  kind = "wiring"
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
 
   [[mechanism.copy]]
   paths = ["apps/pitwall/app/src-tauri/src/lib.rs"]
   symbols = ["text:tauri_plugin_single_instance"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.2.0"
-
-  [[mechanism.copy]]
-  paths = ["apps/debrief/app/src-tauri/src/instance.rs", "apps/debrief/app/src-tauri/src/lib.rs"]
-  symbols = ["text:tauri_plugin_single_instance"]
-  owner = "debrief"
-  delete_by = "debrief-v1.2.0"
-  note = "Debrief's open-files plan (openFilesIn, --new-instance, safe mode) is domain and stays; only the plugin wiring moves."
-
-# ---------------------------------------------------------------------------------------------------------------------
-# App services
-# ---------------------------------------------------------------------------------------------------------------------
-
-[[mechanism]]
-id = "notification-channels"
-title = "Outbound notification channels: webhook, ntfy, e-mail"
-canonical = "paddock-channels"
-paths = ["crates/paddock-channels/**"]
-status = "built"
-
-  [[mechanism.copy]]
-  paths = ["apps/pitcrew/crates/notify-channels/**"]
-  owner = "pitcrew"
-  delete_by = "pitcrew-v1.1.0"
-  note = "The original the canonical was built from; still a Pitcrew dependency on pitcrew/1.1-shell."
-
-  [[mechanism.copy]]
-  paths = ["apps/spotter/crates/spotter-engine/src/mail.rs"]
-  owner = "spotter"
-  delete_by = "spotter-v1.1.0"
-  note = "Its own lettre on aws-lc-rs."
-
-[[mechanism]]
-id = "updater"
-title = "Checking, downloading and installing updates; the update record"
-canonical = "paddock-updater"
-paths = ["crates/paddock-updater/**"]
-status = "built"
-
-  [[mechanism.copy]]
-  paths = ["apps/debrief/app/src-tauri/src/updater.rs", "apps/debrief/app/src-tauri/src/updater/**"]
-  owner = "debrief"
-  delete_by = "debrief-v1.2.0"
-
-  [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/updater.rs"]
+  kind = "wiring"
   owner = "pitwall"
   delete_by = "pitwall-v1.1.0"
-  note = "Already deleted on steward/s23-pitwall-1.1."
+  note = "Pitwall 1.1 uses paddock_window::tauri::second_instance."
 
   [[mechanism.copy]]
-  paths = ["apps/spotter/app/src-tauri/src/updater.rs"]
+  paths = ["apps/spotter/app/src-tauri/src/lib.rs"]
+  symbols = ["text:tauri_plugin_single_instance"]
+  kind = "wiring"
   owner = "spotter"
   delete_by = "spotter-v1.0.0"
-  note = "Already deleted on steward/s24c-spotter-1.0."
+  note = "Spotter 1.0 uses paddock_window::tauri::second_instance."
+
+[[mechanism]]
+id = "window-manager"
+title = "Opening, listing, revealing and closing windows; what closing the last window does"
+canonical = "paddock-window"
+paths = ["crates/paddock-window/src/tauri/manager.rs", "crates/paddock-window/src/close.rs"]
+status = "built"
+adr = "0012"
 
   [[mechanism.copy]]
-  paths = ["apps/pitcrew/app/src-tauri/src/updater.rs"]
-  owner = "pitcrew"
-  delete_by = "pitcrew-v1.1.0"
-  note = "Already deleted on pitcrew/1.1-shell."
+  paths = ["apps/debrief/app/src-tauri/src/window_manager.rs", "apps/debrief/app/src-tauri/src/windows.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "The canonical manager.rs was ported from these files without Debrief's per-window workspaces; the workspace state in windows.rs stays Debrief's."
+
+  [[mechanism.copy]]
+  paths = ["apps/pitwall/app/src-tauri/src/window.rs"]
+  owner = "pitwall"
+  delete_by = "pitwall-v1.1.0"
+  note = "close.rs was ported from this file. Pitwall 1.1 deletes it."
+
+[[mechanism]]
+id = "run-lifecycle"
+title = "The run lifecycle: running marker, unclean-shutdown detection, restore offer, exit teardown"
+canonical = "paddock-startup"
+paths = ["crates/paddock-startup/src/lifecycle.rs", "crates/paddock-window/src/exit.rs", "crates/paddock-window/src/tauri/lifecycle.rs"]
+status = "built"
+adr = "0012"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/lifecycle.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "The three canonical files were taken from this file; Debrief's plugin enable/disable state stays Debrief's."
 
 [[mechanism]]
 id = "startup-watchdog"
 title = "The start-up contract: window_ready, reload once, ask, ping and pause gaps"
 canonical = "paddock-startup"
-paths = ["crates/paddock-startup/src/watchdog.rs", "crates/paddock-startup/src/watchdog/**"]
+paths = ["crates/paddock-startup/src/watchdog.rs"]
 status = "built"
 adr = "0012"
 
@@ -363,13 +361,241 @@ adr = "0012"
   delete_by = "debrief-v1.2.0"
   note = "The canonical was taken from this file (Debrief ADR 0058)."
 
-# ---------------------------------------------------------------------------------------------------------------------
+[[mechanism]]
+id = "tray"
+title = "The tray or menu-bar icon and its menu model"
+canonical = "paddock-window"
+paths = ["crates/paddock-window/src/tray.rs", "crates/paddock-window/src/tauri/tray.rs"]
+status = "built"
+adr = "0012"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/tray.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+
+  [[mechanism.copy]]
+  paths = ["apps/pitwall/app/src-tauri/src/tray.rs", "apps/pitwall/app/src-tauri/src/tray_model.rs"]
+  owner = "pitwall"
+  delete_by = "pitwall-v1.2.0"
+  note = "The canonical tray.rs was ported from these files; Pitwall 1.1 keeps them. Not compared line by line: Pitwall's own menu items stay Pitwall's."
+
+[[mechanism]]
+id = "window-feel"
+title = "Native feel of a desktop window on the Rust side (webview defaults, context menu, zoom)"
+canonical = "paddock-window"
+paths = ["crates/paddock-window/src/feel.rs"]
+status = "built"
+adr = "0012"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/native_feel.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+
+[[mechanism]]
+id = "command-table"
+title = "The command table and its generated TypeScript"
+canonical = "paddock-commands"
+paths = ["crates/paddock-commands/src/**"]
+status = "built"
+adr = "0012"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/commands.rs", "apps/debrief/app/src-tauri/src/generated_types.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+
+[[mechanism]]
+id = "dialog-windows"
+title = "Dialog contracts, placement and dialog windows"
+canonical = "paddock-dialogs"
+paths = ["crates/paddock-dialogs/src/**"]
+status = "built"
+adr = "0026"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/dialog_contracts.rs", "apps/debrief/app/src-tauri/src/dialog_placement.rs", "apps/debrief/app/src-tauri/src/dialog_windows.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+
+[[mechanism]]
+id = "app-menu"
+title = "One menu model, native on macOS"
+canonical = "paddock-menu"
+paths = ["crates/paddock-menu/src/**"]
+status = "built"
+adr = "0012"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/menu.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+
+[[mechanism]]
+id = "panel-windows"
+title = "Panels popped out into windows and the drag ghost"
+canonical = "paddock-panels"
+paths = ["crates/paddock-panels/src/**"]
+status = "built"
+adr = "0013"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/panel_windows.rs", "apps/debrief/app/src-tauri/src/drag_ghost/**"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+
+[[mechanism]]
+id = "health-registry"
+title = "Health model and registry"
+canonical = "paddock-health"
+paths = ["crates/paddock-health/src/model.rs", "crates/paddock-health/src/registry.rs"]
+status = "built"
+adr = "0010"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/health/model.rs", "apps/debrief/app/src-tauri/src/health/registry.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+
+[[mechanism]]
+id = "notification-centre"
+title = "The notification centre (list, persistence) and quiet hours"
+canonical = "paddock-health"
+paths = ["crates/paddock-health/src/notify/**"]
+status = "built"
+adr = "0010"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/notification_centre/**"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+
+  [[mechanism.copy]]
+  paths = ["apps/spotter/crates/spotter-core/src/time.rs"]
+  symbols = ["item:ClockTime", "item:QuietHours"]
+  owner = "spotter"
+  delete_by = "spotter-v1.1.0"
+  note = "notify/os/time.rs was taken from these two types."
+
+[[mechanism]]
+id = "settings-schema"
+title = "Settings schema, sections and values"
+canonical = "paddock-settings"
+paths = ["crates/paddock-settings/src/schema.rs", "crates/paddock-settings/src/values.rs"]
+status = "built"
+adr = "0012"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/debrief-plugin-api/src/settings.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "paddock-settings was taken from this file."
+
+[[mechanism]]
+id = "updater"
+title = "Checking, downloading and installing updates; the update record; legal texts"
+canonical = "paddock-updater"
+paths = ["crates/paddock-updater/src/**"]
+status = "built"
+adr = "0012"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/updater.rs", "apps/debrief/app/src-tauri/src/updater/**", "apps/debrief/app/src-tauri/src/legal.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+
+  [[mechanism.copy]]
+  paths = ["apps/pitwall/app/src-tauri/src/updater.rs"]
+  owner = "pitwall"
+  delete_by = "pitwall-v1.1.0"
+  note = "Pitwall 1.1 deletes it."
+
+  [[mechanism.copy]]
+  paths = ["apps/spotter/app/src-tauri/src/updater.rs"]
+  owner = "spotter"
+  delete_by = "spotter-v1.0.0"
+  note = "Spotter 1.0 deletes it."
+
+  [[mechanism.copy]]
+  paths = ["apps/pitcrew/app/src-tauri/src/updater.rs"]
+  owner = "pitcrew"
+  delete_by = "pitcrew-v1.1.0"
+  note = "Pitcrew 1.1 deletes it."
+
+[[mechanism]]
+id = "model-download"
+title = "Segmented, resumable downloads with proxy and host policy"
+canonical = "paddock-download"
+paths = ["crates/paddock-download/src/**"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/debrief-ai/src/models/download.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "paddock-download was ported from this downloader."
+
+[[mechanism]]
+id = "prompted-tools"
+title = "The prompted tool protocol, independent of a chat template"
+canonical = "paddock-assistant"
+paths = ["crates/paddock-assistant/src/protocol.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/debrief-ai/src/llm/prompted.rs", "apps/debrief/crates/debrief-ai/src/llm/tool_protocol.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+
+[[mechanism]]
+id = "knowledge-packs"
+title = "Hot-reloaded TOML knowledge packs: loading, limits, user regexes"
+canonical = "paddock-packs"
+paths = ["crates/paddock-packs/src/**"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/pitwall/crates/pitwall-core/src/packs.rs"]
+  owner = "pitwall"
+  delete_by = "pitwall-v1.2.0"
+  note = "paddock-packs was taken from this file and Spotter's pack.rs; neither app uses it yet."
+
+  [[mechanism.copy]]
+  paths = ["apps/spotter/crates/spotter-core/src/pack.rs"]
+  owner = "spotter"
+  delete_by = "spotter-v1.1.0"
+
+# =====================================================================================================================
+# App services
+# =====================================================================================================================
+
+[[mechanism]]
+id = "notification-channels"
+title = "Outbound notification channels: webhook, ntfy, e-mail"
+canonical = "paddock-channels"
+paths = ["crates/paddock-channels/src/**"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/pitcrew/crates/notify-channels/src/**"]
+  owner = "pitcrew"
+  delete_by = "pitcrew-v1.1.0"
+  note = "The original the canonical was built from; still a Pitcrew dependency."
+
+  [[mechanism.copy]]
+  paths = ["apps/spotter/crates/spotter-engine/src/mail.rs"]
+  owner = "spotter"
+  delete_by = "spotter-v1.1.0"
+  note = "Its own lettre on aws-lc-rs."
+
+# =====================================================================================================================
 # UI (@decryp7/paddock-ui)
-# ---------------------------------------------------------------------------------------------------------------------
+# =====================================================================================================================
 
 [[mechanism]]
 id = "native-feel"
-title = "Native feel: text selection, context menu, drag and keyboard defaults of a desktop app"
+title = "Native feel in the page: text selection, context menu, drag and keyboard defaults of a desktop app"
 canonical = "@decryp7/paddock-ui"
 paths = ["ui/projects/paddock-ui/shell/feel/src/native-feel.ts"]
 status = "built"
@@ -383,19 +609,18 @@ status = "built"
   paths = ["apps/pitcrew/app/src/app/core/native-feel.ts"]
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
-  note = "Still imported on pitcrew/1.1-shell."
 
   [[mechanism.copy]]
   paths = ["apps/pitwall/app/src/app/core/native-feel.ts"]
   owner = "pitwall"
   delete_by = "pitwall-v1.1.0"
-  note = "Already deleted on steward/s23-pitwall-1.1."
+  note = "Pitwall 1.1 deletes it."
 
   [[mechanism.copy]]
   paths = ["apps/spotter/app/src/app/core/native-feel.ts"]
   owner = "spotter"
   delete_by = "spotter-v1.0.0"
-  note = "Already deleted on steward/s24c-spotter-1.0."
+  note = "Spotter 1.0 deletes it."
 
 [[mechanism]]
 id = "copy-menu"
@@ -408,13 +633,13 @@ status = "built"
   paths = ["apps/pitcrew/app/src/app/shared/ui/copy-menu.ts"]
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
-  note = "87 lines against the canonical's 88; still imported on pitcrew/1.1-shell. Two copy-menu mechanisms blocked a merge before (SP8)."
+  note = "87 lines against the canonical's 88. Two copy-menu mechanisms blocked a merge before (SP8)."
 
   [[mechanism.copy]]
   paths = ["apps/spotter/app/src/app/shared/ui/copy-menu.ts"]
   owner = "spotter"
   delete_by = "spotter-v1.0.0"
-  note = "Already deleted on steward/s24c-spotter-1.0."
+  note = "Spotter 1.0 deletes it."
 
 [[mechanism]]
 id = "sparkline"
@@ -437,7 +662,7 @@ status = "built"
   paths = ["apps/pitwall/app/src/app/shared/ui/sparkline.ts"]
   owner = "pitwall"
   delete_by = "pitwall-v1.1.0"
-  note = "Already deleted on steward/s23-pitwall-1.1."
+  note = "Pitwall 1.1 deletes it."
 
 [[mechanism]]
 id = "schedule-editors"
@@ -487,9 +712,9 @@ adr = "0013"
   delete_by = "debrief-v1.2.0"
   note = "The approved shared workbench move (docs/plans/2026-10-29-shared-workbench-move.md, Debrief 1.2 Track U)."
 
-# ---------------------------------------------------------------------------------------------------------------------
+# =====================================================================================================================
 # Scripts
-# ---------------------------------------------------------------------------------------------------------------------
+# =====================================================================================================================
 
 [[mechanism]]
 id = "release-publish-script"
@@ -499,13 +724,12 @@ paths = ["conformance/release/publish.mjs"]
 status = "built"
 
   [[mechanism.copy]]
-  paths = ["apps/pacenotes/scripts/release/publish.mjs", "apps/pacenotes/scripts/release/publish.test.mjs"]
+  paths = ["apps/pacenotes/scripts/release/publish.mjs"]
   owner = "pacenotes"
   delete_by = "pacenotes-v1.0.0"
-  note = "Deleted on pacenotes/xml."
 
   [[mechanism.copy]]
-  paths = ["apps/sighter/scripts/release/publish.mjs", "apps/sighter/scripts/release/publish.test.mjs"]
+  paths = ["apps/sighter/scripts/release/publish.mjs"]
   owner = "sighter"
   delete_by = "sighter-v1.0.0"
 
@@ -517,39 +741,42 @@ paths = ["icons/check.mjs"]
 status = "planned"
 
   [[mechanism.copy]]
-  paths = ["apps/debrief/scripts/ci/check-icons.mjs", "apps/debrief/scripts/ci/check-icons.test.mjs"]
+  paths = ["apps/debrief/scripts/ci/check-icons.mjs"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
-  note = "Has drifted from the Pitwall and Spotter copies."
+  note = "Has drifted from the Pitwall and Spotter copies, which are identical."
 
   [[mechanism.copy]]
-  paths = ["apps/pitwall/scripts/ci/check-icons.mjs", "apps/pitwall/scripts/ci/check-icons.test.mjs"]
+  paths = ["apps/pitwall/scripts/ci/check-icons.mjs"]
   owner = "pitwall"
   delete_by = "pitwall-v1.2.0"
 
   [[mechanism.copy]]
-  paths = ["apps/spotter/scripts/ci/check-icons.mjs", "apps/spotter/scripts/ci/check-icons.test.mjs"]
+  paths = ["apps/spotter/scripts/ci/check-icons.mjs"]
   owner = "spotter"
   delete_by = "spotter-v1.1.0"
 
 [[mechanism]]
 id = "diagram-export-script"
 title = "Exporting an app's draw.io diagrams to SVG"
-canonical = "scripts"
-paths = ["scripts/export-diagrams.sh"]
-status = "planned"
+canonical = "diagrams"
+paths = ["diagrams/scripts/export-diagrams.sh"]
+status = "built"
 
   [[mechanism.copy]]
   paths = ["apps/debrief/scripts/export-diagrams.sh"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
+  note = "Byte-identical to the canonical."
 
   [[mechanism.copy]]
   paths = ["apps/pacenotes/scripts/export-diagrams.sh"]
   owner = "pacenotes"
   delete_by = "pacenotes-v1.0.0"
+  note = "Byte-identical to the canonical."
 
   [[mechanism.copy]]
   paths = ["apps/sighter/scripts/export-diagrams.sh"]
   owner = "sighter"
   delete_by = "sighter-v1.0.0"
+  note = "Byte-identical to the canonical."

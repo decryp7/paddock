@@ -208,8 +208,9 @@ Pitwall runs native engines on untrusted model files and answers requests from o
   dispatches `<app>-release.yml` with gates on and the bundle built; passing tests alone is not enough.
 - One implementation per mechanism (rule 55): a mechanism listed in `docs/known-copies.toml` is fixed in its canonical
   implementation and every copy in the same change, each with a failing test first, or a copy is waived with
-  `Copies-waived: <id> <path or *>: <reason>`; a freeze does not stop such a fix; a new copy needs its entry and a
-  delete-by tag (ADR 0034, check C58).
+  `Copies-waived: <id> <path>: <reason>` in a commit that touches it; a freeze does not stop such a fix; a new copy
+  needs its entry and a delete-by tag, an entry leaves only with its files (or `Copies-removed:`), and a date moves only
+  with `Copies-date:` and the coordinator's approval (ADR 0034, check C58).
 - Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.

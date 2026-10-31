@@ -2,11 +2,13 @@
 
 - Status: Proposed (2026-10-31). The direction was accepted by the user on 2026-10-31 (family survey
   `family-redesign-and-sharing-2026-10-31`); this text waits for an independent review. The binding rule is rule 55.
+  Revised 2026-10-31 after review round 1 (false positives, dropped entries, register errors).
 - Date: 2026-10-31
 - Related: rule 40 / ER-21 (recurring bugs mean a missing design rule), rules 39, 42 and 43 / ER-22 (share first, shared
-  behaviour tested once), rule 1 (one release at a time, the shared-code freeze), rule 53 / ADR 0033; ADR 0001 (plugin
-  platform: "Dyno 1.0 ships on its own copy"), ADR 0030 §5 ("one driver"), ADR 0031 (C51); checks C13 and C23 (the two
-  kinds of copy that are already checked).
+  behaviour tested once), rule 1 (one release at a time, the shared-code freeze), rule 50 (CI runs only what a change
+  needs), rule 53 / ADR 0033; ADR 0001 (plugin platform: "Dyno 1.0 ships on its own copy"), ADR 0012 (the app shell, whose
+  crates were "taken from" Debrief, Pitwall, Spotter and Dyno), ADR 0030 §5 ("one driver"), ADR 0031 (C51); check C13
+  (the per-app clippy presets, a kind of copy that is already checked).
 - Evidence (all read in git at `origin/main` `c3404cdc7` and the app release branches, 2026-10-31):
   - **launchd job report, four implementations.** `crates/paddock-service/src/parse.rs:25-54` skips launchd's nested
     blocks; the copies in `apps/{dyno,pitwall,pitcrew}/app/src-tauri/src/service_repair.rs:102-127` do not. Dyno's copy
@@ -20,9 +22,14 @@
     endpoints differ in 22 of 245 lines.
   - **Notification channels, three implementations**: `crates/paddock-channels` (built from the other two, adopted by no
     app), `apps/pitcrew/crates/notify-channels`, `apps/spotter/crates/spotter-engine/src/mail.rs`.
-  - **Adoption.** About 15 shared crates have no direct dependency from any app, even on the release branches
-    (`paddock-chromium`, `paddock-ipc`, `paddock-channels`, the `paddock-plugin-*` family, ...). A fix made in the shared
-    crate therefore reaches no user; a fix made in an app reaches one.
+  - **Shell crates taken from the apps, originals still there.** The doc comments of `paddock-window`, `paddock-startup`,
+    `paddock-commands`, `paddock-dialogs`, `paddock-menu`, `paddock-panels`, `paddock-health`, `paddock-packs` and
+    others name the app files they were "taken from" or "ported from"; most of those files still exist in Debrief,
+    Pitwall and Spotter.
+  - **Adoption.** 37 of the 51 shared crates have no direct dependency from any app at its release head (several reach
+    the apps through `paddock-shell`); among them `paddock-chromium`, `paddock-ipc`, `paddock-channels`, `paddock-packs`
+    and the `paddock-plugin-*` family. A fix made in such a crate reaches no app's own mechanism; a fix made in an app
+    reaches one.
   - The issues research of 2026-10-30 (pattern D, 9 catalogue rows) found the same: "a fix in one copy does not raise
     the others", and proposed this register.
 
@@ -52,89 +59,126 @@ not in it is either the one implementation or a violation of rule 42.
 version = 1
 
 [[mechanism]]
-id = "launchd-job-report"                       # kebab-case, unique, stable (waivers name it)
+id = "launchd-job-report"                       # kebab-case, unique, stable (trailers name it)
 title = "Reading launchd's job report and replacing a stale registration (R03)"
 canonical = "paddock-service"                   # crate or package that is the one implementation
-paths = ["crates/paddock-service/src/parse.rs"] # the canonical files (globs allowed)
-symbols = []                                    # optional narrowing, see "How copies are identified"
-status = "built"                                # "built" | "planned" (planned: canonical paths may not exist yet)
+paths = ["crates/paddock-service/src/parse.rs"] # the canonical files (globs allowed, see §2)
+symbols = []                                    # optional narrowing, see §2
+status = "built"                                # "built" | "planned" (the canonical files may not exist yet)
 adr = "0034"                                    # the ADR or plan that decided the canonical home (optional)
 
   [[mechanism.copy]]
   paths = ["apps/dyno/app/src-tauri/src/service_repair.rs"]
   symbols = ["item:parse_job", "item:JobReport", "item:plan"]
+  kind = "copy"                                 # "copy" (default) | "wiring" (see §3)
   owner = "dyno"                                # the app (or "paddock") whose lead deletes the copy
-  delete_by = "dyno-v1.1.0"                     # the tag that may not be created while the copy exists
-  note = "stale() and the parser fixed in this copy on dyno/login-blockers; the shared stale() still needs it"
+  delete_by = "dyno-v1.1.0"                     # the tag that may not be released while the copy exists
+  note = "what differs, and why the copy still exists"
 ```
 
 Fields:
 
-- `owner`: an app folder name under `apps/` or `paddock`. It names who does the deletion, not who may edit.
-- `delete_by`: an app tag `<app>-vX.Y.Z` (normally the owner's next minor release), or `vX.Y.Z` for the shared packages.
-  Moving a date is a reviewed register change with a reason in the commit body, never a silent edit.
-- `note`: free text; the reason the copy still exists, and what differs.
+- `owner`: a folder name under `apps/`, or `paddock`. It names who does the deletion, not who may edit.
+- `delete_by`: an app tag `<owner>-vX.Y.Z` (normally the owner's next minor release), or `vX.Y.Z` for owner `paddock`.
+- `kind`: `copy` is a second implementation of the mechanism. `wiring` is a few lines that hook a third-party plugin up
+  by hand where the canonical offers the hook (for example `tauri_plugin_single_instance::init(|app, args, _| ...)`
+  instead of `paddock_window::tauri::second_instance`). Wiring is covered by the tag check only.
+- `note`: free text; what differs and why the copy still exists. Notes state facts, not branch names.
 
-Out of scope, because another check already keeps them identical: the `paddock:block` sections of the `AGENTS.md` files
-(C23) and the per-app `clippy.toml` presets (C13). Domain code that only looks alike (Dyno's socket lister, Pitcrew's
-and Pitwall's own transports, supervisor transitions) is not a copy and is not listed (rule 42: domain logic stays in the
-app).
+Out of scope: documentation (the `AGENTS.md` sections synced from `docs/blocks/`, ADR copies, READMEs); `templates/**`,
+which is the deliberate source of new standalone repositories (its `scripts/export-diagrams.sh` is a template, not a
+fifth copy); the per-app `clippy.toml` presets, which C13 governs; and domain code that only looks alike (Dyno's socket
+lister, Pitcrew's and Pitwall's transports, supervisor transitions; rule 42 keeps domain logic in the app).
 
 ### 2. How copies are identified
 
-A **member** of a mechanism is the canonical entry or one copy. A change **touches** a member when one of these is true:
+A **member** of a mechanism is its canonical entry or one of its copies. A change **touches** a member when a counted
+line changes in it:
 
-- a changed file matches one of the member's `paths` and the member has no `symbols`; or
-- the member has `symbols`, and a changed line (added or removed, `git diff -U0`) lies inside one of them:
+- **Counted files.** Only non-test source files count. Under a member's `paths`, these never count: test and fixture
+  folders (`tests/`, `benches/`, `examples/`, `fuzz/`, `fixtures/`, `testing/`, `e2e/`), test files (`tests.rs`,
+  `*_tests.rs`, `*.spec.ts`, `*.test.mjs`, `*.test.ts`), in-file `#[cfg(test)]` modules (blanked the way C51 does),
+  manifests and lockfiles (`Cargo.toml`, `Cargo.lock`, `package.json`, `package-lock.json`, `ng-package.json`), docs
+  (`*.md`) and generated files (`generated/`). So a dependency bump (Renovate) or a test-only change never triggers the
+  check, and bots never need a trailer.
+- **Whole-crate members are written as `<crate>/src/**`** (or the source folder of a UI entry point), never as the crate
+  root. The validity mode rejects `crates/<name>/**` and `apps/<app>/crates/<name>/**`.
+- **Counted lines.** Lines added or removed (`git diff -U0`), ignoring whitespace-only and comment-only changes (compared
+  on masked source).
+- **Symbols** narrow a member to parts of a file:
   - `item:<Name>` (Rust or TypeScript): the span of the item named `Name`, from its `fn`/`struct`/`enum`/`trait`/`impl`/
     `mod`/`const`/`static` (Rust) or `function`/`class`/`interface`/`export const`/`export function` (TypeScript) line to
     its closing brace, found with the brace walker over masked source (comments and strings blanked, as
     `conformance/src/checks/C39-freed-port.mjs`'s `maskRust` does). `impl X` and `impl Trait for X` both count for `X`.
     The span is taken in the old file for removed lines and in the new file for added lines.
-  - `text:<literal>`: any changed line that contains the literal, for wiring that is not an item (for example
-    `text:tauri_plugin_autostart::init`).
-- the change deletes a file of the member, or edits the member's own entry in the register.
+  - `text:<literal>`: any counted line that contains the literal.
+- **Not touches.** Deleting a copy's files together with removing its register entry. Editing the register. Both are
+  checked by §3a and §3b's entry guard instead.
 
 ### 3. The check (C58, follow-up package WP-1)
 
 `paddock-conformance.mjs copies` gets three modes. The implementation is a follow-up package; this is its specification.
 
-**a. Register validity** (runs in every conformance run, `--app paddock`): the file parses; `version = 1`; ids are unique
-and kebab-case; every `owner` is `paddock` or a folder under `apps/`; every `delete_by` matches
-`^(debrief|dyno|pacenotes|pitcrew|pitwall|sighter|spotter|shell-demo|workbench-demo)-v\d+\.\d+\.\d+$` or `^v\d+\.\d+\.\d+$`,
-and an app tag's app equals the `owner`; every path of a copy and of a `built` canonical matches at least one tracked
-file (`git ls-files`); every `item:` symbol is found in at least one of its member's files. A copy whose files are all
-gone must be removed from the register in the same change. Errors name the entry and say what to fix.
+**a. Register validity** (in every conformance run with `--app paddock`, and locally before a register-only change
+lands; see rule 55(e)):
 
-**b. Range check** (`copies --range <base>..HEAD`; CI runs it with `base = $(git merge-base origin/main HEAD)` in the plan
-job, next to commit-lint, and the steward runs it before pushing a batch):
+- the file parses; `version = 1`; ids are unique and kebab-case;
+- every `owner` is `paddock` or a folder under `apps/` (the list is read from the tree, not written in the check);
+- every `delete_by` is `<owner>-vX.Y.Z`, or `vX.Y.Z` for owner `paddock`;
+- `kind` is `copy` or `wiring`; whole-crate globs end in `src/**` (§2);
+- every path of a copy, and of a `built` canonical, matches at least one tracked file (`git ls-files`); every `item:`
+  symbol is found in at least one of its member's files; every `text:` literal occurs in one of them;
+- a copy whose files are all gone must be removed from the register in the same change.
 
-1. Compute the touched members of every mechanism (§2).
-2. For a mechanism with at least one touched member, every other member must be touched too, or waived (below).
-3. Each untouched, unwaived member is an **error**: `C58 launchd-job-report: apps/pitcrew/app/src-tauri/src/service_repair.rs
-   was not changed with crates/paddock-service/src/parse.rs. Make the same fix there (rule 55), or waive it with
-   "Copies-waived: launchd-job-report apps/pitcrew/app/src-tauri/src/service_repair.rs: <why>".`
-4. Whitespace-only and comment-only hunks do not count as touching (masked comparison), so a reformat of one copy does not
-   force edits elsewhere.
+Errors name the entry and say what to fix.
 
-**c. Tag check** (`copies --tag <tag>`; the app release workflow runs it in its tag-check step, and the steward runs it
-before tagging): for the tag's app and version, every copy whose `owner` is that app and whose `delete_by` version is
-lower than or equal to the tag's version is an **error** ("dyno-v1.1.0 may not be created: apps/dyno/crates/dyno-ipc is
-still a copy of paddock-ipc; delete it or move its date in a reviewed change"). A shared-packages tag `vX.Y.Z` checks the
-`paddock` copies the same way.
+**b. Range check** (`copies --range <base>..HEAD`; CI runs it in the plan job with `base = $(git merge-base origin/main
+HEAD)`, next to commit-lint, and the steward runs it before pushing a batch):
 
-**Waiver syntax.** A git trailer in any commit of the range, one per member:
+1. **Entry guard.** Compare the register at `base` and at `HEAD`. A copy entry (mechanism id plus its first path) that
+   exists at `base` and not at `HEAD` is an error unless none of its paths match a tracked file at `HEAD` (the copy was
+   deleted in the range), or a commit in the range carries `Copies-removed: <mechanism-id> <path>: <reason>` (for
+   example a copy that turned out to be domain code). A changed `delete_by` is an error unless a commit carries
+   `Copies-date: <mechanism-id> <path>: <old> -> <new>: <reason>` (rule 55(d) says who approves it).
+2. **Touches.** For every mechanism, compute the touched members (§2), leaving out `wiring` copies.
+3. **Touch alike.** For a mechanism with at least one touched member, every other `copy` member and a `built` canonical
+   must be touched too, by any commit of the range, or waived. A `planned` canonical is never required (its files do not
+   exist); the copies of a planned canonical still move together.
+4. Each untouched, unwaived member is an **error**: `C58 launchd-job-report:
+   apps/pitcrew/app/src-tauri/src/service_repair.rs was not changed with crates/paddock-service/src/parse.rs. Make the same
+   fix there (rule 55), or waive it with "Copies-waived: launchd-job-report apps/pitcrew/app/src-tauri/src/service_repair.rs:
+   <why>".`
+
+**Waivers.** A git trailer, one per member:
 
 ```
-Copies-waived: <mechanism-id> <member-path-or-*>: <reason, at least 10 characters>
+Copies-waived: <mechanism-id> <member-path>: <reason, at least 10 characters>
 ```
 
-`*` waives every other member of that mechanism. Typical reasons: "the copy does not have this code path (Windows-only
-branch)", "the copy is deleted in this same batch by <branch>". The check prints every waiver it used, so the reviewer
-sees it. Trailers are used rather than a file because a waiver belongs to one change, not to the tree.
+- A waiver counts only in a commit that itself touches that mechanism, so a waiver cannot leak to another fix in the same
+  steward batch.
+- `<member-path>` may be `*` (every other member) only when the mechanism has at most two members besides wiring; for a
+  larger mechanism each member is named.
+- The check prints every waiver it used, and the reviewer of the change confirms each one in the review.
+
+Typical reasons: "the copy does not have this code path (Windows-only branch)", "the copy is deleted in this same batch".
+
+**c. Tag check** (`copies --tag <tag>`):
+
+- For the tag's app and version, every `copy` or `wiring` entry whose `owner` is that app and whose `delete_by` version
+  is lower than or equal to the tag's version is an error ("dyno-v1.1.0: apps/dyno/crates/dyno-ipc/src/endpoint/** is
+  still a copy of paddock-ipc; delete it, or move its date (rule 55(d))"). When the mechanism's canonical is `planned`,
+  the message names that as the cause ("the canonical icons/check.mjs is not built yet").
+- A shared-packages tag `vX.Y.Z` checks the `paddock` entries the same way.
+- **The steward runs it before creating the tag;** that is where it is meant to stop a release. The app release workflow
+  runs it again in its tag-check step, where it **fails the release workflow** (the tag already exists by then) and no
+  installer is published.
+- A release branch that deletes copies also removes their entries (mode a requires it), so the batch that becomes a tag
+  carries its own register.
 
 **Not detected.** A brand-new copy that nobody registers. That stays a review finding (rule 42) and the survey at each
-app move. A report-only similarity scan is a possible later step, not part of this ADR.
+app move. The shared crates' own "Taken from" and "Ported from" doc comments are a cheap source for that survey (they
+seeded part of this register). A report-only similarity scan is a possible later step, not part of this ADR.
 
 ### 4. The freeze rule
 
@@ -148,21 +192,21 @@ allowed only with its register entry, a `delete_by` tag and the reason, in the s
 
 ### 5. Seed and dates
 
-`docs/known-copies.toml` is seeded with every copy found by the 2026-10-31 survey (24 mechanisms, 57 copies). The `delete_by` dates
-follow the agreed order (Dyno 1.0, Spotter 1.0, Pitwall 1.1, Pitcrew 1.1, Debrief 1.2, Pacenotes, Sighter) and are
-proposals for the review and the user to confirm:
+`docs/known-copies.toml` is seeded with every copy found by the 2026-10-31 survey and by the shared crates' own "Taken
+from" notes: 38 mechanisms, 75 entries. The `delete_by` dates follow the agreed order (Dyno 1.0, Spotter 1.0,
+Pitwall 1.1, Pitcrew 1.1, Debrief 1.2, Pacenotes, Sighter) and are proposals for the review and the user to confirm:
 
 | Owner | Deleted by | Copies |
 |---|---|---|
-| Pitwall | `pitwall-v1.1.0` | `native-feel.ts`, `sparkline.ts` (already gone on `steward/s23-pitwall-1.1`) |
-| Spotter | `spotter-v1.0.0` | `native-feel.ts`, `copy-menu.ts` (already gone on `steward/s24c-spotter-1.0`) |
-| Pitcrew | `pitcrew-v1.1.0` | `service_repair.rs`, `service_install.rs`, `notify-channels`, its UI copies, login and single-instance wiring |
-| Dyno | `dyno-v1.1.0` | `service_repair.rs`, the login and service parts of `login.rs`/`login_item.rs`, `dyno-ipc` endpoint, frames and peer, `sparkline.ts`, wiring |
+| Spotter | `spotter-v1.0.0` | `native-feel.ts`, `copy-menu.ts`, `updater.rs`, single-instance wiring (all deleted by the Spotter 1.0 batch) |
+| Pitwall | `pitwall-v1.1.0` | `native-feel.ts`, `sparkline.ts`, `updater.rs`, `window.rs`, single-instance wiring (all deleted by the Pitwall 1.1 batch) |
+| Pitcrew | `pitcrew-v1.1.0` | `service_repair.rs`, `service_install.rs`, `notify-channels`, `updater.rs`, its UI copies, login wiring |
+| Dyno | `dyno-v1.1.0` | `service_repair.rs`, the login and service parts of `login.rs`/`login_item.rs`, `dyno-ipc` endpoint, frames, peer and child, `sparkline.ts`, login wiring |
 | Dyno | `dyno-v1.2.0` | `dyno-plugin-api`, `dyno-plugin-host` (Dyno tier 3, ADR 0001) |
-| Spotter | `spotter-v1.1.0` | `spotter-render`, `mail.rs` and its notifier, `schedule-editor.ts`, `clipboard.ts`, wiring |
-| Pitwall | `pitwall-v1.2.0` | the rest of `service_repair.rs`, `service_install.rs`, wiring |
-| Debrief | `debrief-v1.2.0` | `chromium-driver`, `debrief-ipc` parts, the `debrief-plugin-*` platform crates, `debrief-agent` lock, updater, start-up watchdog, `native-feel.ts`, `clipboard.ts`, the dock (shared workbench move), `check-icons.mjs` |
-| Pacenotes, Sighter | `pacenotes-v1.0.0`, `sighter-v1.0.0` | `scripts/release/publish.mjs`, `export-diagrams.sh` |
+| Spotter | `spotter-v1.1.0` | `spotter-render`, `mail.rs`, `pack.rs`, `time.rs`, `schedule-editor.ts`, `clipboard.ts`, `check-icons.mjs`, login wiring |
+| Pitwall | `pitwall-v1.2.0` | the rest of `service_repair.rs`, `service_install.rs`, `packs.rs`, `tray.rs`/`tray_model.rs`, `check-icons.mjs`, login wiring |
+| Debrief | `debrief-v1.2.0` | `chromium-driver`, the `debrief-ipc` parts, the `debrief-plugin-*` platform crates, the agent lock, and the shell move: window manager, launch plan, lifecycle, tray, commands, dialogs, menu, panels, health, notification centre, updater, start-up watchdog, settings schema, model download, prompted tools, UI copies, the dock, scripts |
+| Pacenotes, Sighter | `pacenotes-v1.0.0`, `sighter-v1.0.0` | `scripts/release/publish.mjs`, `scripts/export-diagrams.sh` |
 
 **The Pitwall 1.1 exception.** Pitwall 1.1 already uses the shared `parse_job`, so its copy is only the repair sequence
 (`plan`, `run_repair`). The shared `stale()` fix (B4 defect 2) is a separate change before the Pitwall 1.1 tag. Under this
@@ -173,11 +217,13 @@ ADR it is one change: `crates/paddock-service/src/parse.rs` and the Dyno and Pit
 - A fix to a listed mechanism costs more at once (every copy, each with a test) and less overall: no second root-cause
   hunt for a bug that was already fixed elsewhere (B4, the browser abort rounds).
 - Release tags can be refused for an expired copy. That is intended: it is the only point where "later" becomes a date.
-  Moving a date is cheap but visible.
-- The register shrinks to empty as the apps adopt the shared crates. An empty register plus C58 still guards new copies
-  made during freezes.
-- The check needs a git range. It runs in the plan job (which has the history) and in the steward's pre-push step, not in
-  the per-file conformance runs.
+  Moving a date is cheap but visible and approved.
+- Debrief's entries are the largest group: Debrief 1.2's shell move is where most of them end, so its plan can use the
+  register as its deletion checklist.
+- The register shrinks as the apps adopt the shared crates. An empty register plus C58 still guards new copies made
+  during freezes.
+- The range check needs git history. It runs in the plan job (which has the history) and in the steward's pre-push step,
+  not in the per-file conformance runs.
 
 ## Alternatives considered
 
@@ -189,11 +235,13 @@ ADR it is one change: `crates/paddock-service/src/parse.rs` and the Dyno and Pit
   helper for the survey, not as the gate.
 - **The register in each app's `paddock.ci.json`.** A mechanism spans apps and crates; one family file keeps every member
   of a mechanism in one entry, which is what the check compares.
+- **Count every file under a member's paths.** Simpler, but a lockfile bump or a test-only change would demand edits in
+  every copy and trailers from bots. Rejected for the counted-files rule in §2.
 
 ## Work packages
 
 | WP | What | Size | When |
 |---|---|---|---|
-| WP-1 | C58 in `conformance/src/checks/C58-known-copies.mjs` plus the `copies` subcommand (modes a-c), good and bad fixtures for each mode (a member touched alone, a waiver, a whitespace-only hunk, an expired copy, a stale entry, an unknown owner), wiring: mode a in the `--app paddock` run, mode b in the plan job and the steward's pre-push, mode c in the app release tag step | 2 d | right after the Dyno tag |
+| WP-1 | C58 in `conformance/src/checks/C58-known-copies.mjs` plus the `copies` subcommand (modes a-c). Good and bad fixtures for each rule: a member touched alone; a test-only, manifest-only and whitespace-only change (no error); a waiver in a commit that does not touch the mechanism (ignored); `*` on a mechanism with three members (error); a wiring copy touched alone (no error); a planned canonical (not required; tag message names it); a dropped entry with and without its files and with `Copies-removed`; a moved `delete_by` with and without `Copies-date`; an expired copy at a tag; a stale entry; an unknown owner; a crate-root glob. Wiring: mode a in the `--app paddock` run, mode b in the plan job and the steward's pre-push, mode c in the steward's pre-tag step and the app release tag step | 2.5 d | right after the Dyno tag |
 | WP-2 | `fix/service-stale-shared`: the shared `stale()` and `plan()` fix in `paddock-service` with the Dyno and Pitcrew copies, test first with an untrimmed real `launchctl print` | 0.5 d | before the Pitwall 1.1 tag |
 | WP-3 | Each owner's deletions by its `delete_by` tag, through the app's normal work packages | per app | per tag |
