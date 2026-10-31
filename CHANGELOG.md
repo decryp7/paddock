@@ -445,9 +445,6 @@ Conventional Commits; one semver tag for the whole repo.
 - Jobs: `pd-job` has a `flat` input (a row without border or background) and `pd-jobs-list` a `flat` input, which the status popover
   uses (no card in a card); a phase named like the job's title is not said twice ("Downloading" in the card and the status item).
 
-### Shell toasts keep a page-footer safe area
-- New token `--pd-page-footer-safe` (56 px). `pd-notification-host` now sits above the status bar plus this safe area, so a toast no
-  longer covers a page footer's primary action (a wizard's Next); the status-bar fallback is 24 px like the token.
 
 ### Shared dialog API, round 2 of the reviews (frame)
 
