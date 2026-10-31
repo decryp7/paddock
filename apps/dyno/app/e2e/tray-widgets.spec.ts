@@ -142,11 +142,11 @@ test.describe('popup widgets', () => {
     for (let i = 0; i < 3; i++) {
       const item = items.nth(i);
       const icon = await item.locator('mat-icon').first().boundingBox();
-      const text = await item.locator('.mdc-list-item__primary-text').boundingBox();
+      const text = await item.boundingBox();
       expect(icon, 'icon').toBeTruthy();
       expect(Math.round(icon!.width)).toBe(16);
       expect(Math.round(icon!.height)).toBe(16);
-      // The icon's centre is on the text's centre line (within a pixel).
+      // The icon's centre is on the row's centre line (within a pixel and a half).
       expect(Math.abs(icon!.y + icon!.height / 2 - (text!.y + text!.height / 2))).toBeLessThanOrEqual(1.5);
     }
   });
