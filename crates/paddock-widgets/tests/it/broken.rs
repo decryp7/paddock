@@ -8,6 +8,7 @@ use paddock_widgets::{
 use crate::catalogue::{Gadget, GadgetKind, Gadgets, KINDS, TestSurface, disk, pid};
 
 const SURFACE: Surface = Surface {
+    noun: "popup",
     schema_version: 1,
     columns: 2,
     max_placements: 4,
@@ -42,6 +43,7 @@ macro_rules! broken {
             type Widget = Gadget;
             const SURFACE_ID: TestSurface = TestSurface::Popover;
             const SURFACE: Surface = Surface {
+                noun: "popup",
                 min_placements: $min,
                 ..SURFACE
             };
@@ -72,6 +74,23 @@ static CLOCK: [KindSpec<GadgetKind>; 1] = [spec(GadgetKind::Clock, "Clock", &[1]
 
 fn two_clocks() -> Vec<Placement<Gadget>> {
     assign_ids([(1, Gadget::Clock), (1, Gadget::Clock)])
+}
+
+struct NoNoun;
+impl Catalogue for NoNoun {
+    type SurfaceId = TestSurface;
+    type Widget = Gadget;
+    const SURFACE_ID: TestSurface = TestSurface::Popover;
+    const SURFACE: Surface = Surface {
+        noun: "",
+        ..SURFACE
+    };
+    fn kinds() -> &'static [KindSpec<GadgetKind>] {
+        &CLOCK
+    }
+    fn defaults() -> Vec<Placement<Gadget>> {
+        Vec::new()
+    }
 }
 
 broken!(NoKinds, &NO_KINDS, Vec::new(), Vec::new(), 0);
@@ -109,6 +128,7 @@ fn the_test_catalogue_is_valid() {
 
 #[test]
 fn each_problem_is_named() {
+    assert_eq!(message::<NoNoun>(), "the surface needs a noun");
     assert_eq!(message::<NoKinds>(), "the catalogue has no kinds");
     assert!(message::<Twice>().contains("listed twice"));
     assert!(message::<NoTitle>().contains("needs a title"));
@@ -177,6 +197,7 @@ mod minimal {
         type Widget = Lamp;
         const SURFACE_ID: u8 = 7;
         const SURFACE: Surface = Surface {
+            noun: "menu bar",
             schema_version: 1,
             columns: 1,
             max_placements: 2,

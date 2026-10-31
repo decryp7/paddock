@@ -77,7 +77,10 @@ fn a_second_instance_gets_a_numbered_id_and_a_third_is_refused() {
     let smaller = run(&two, Edit::Remove { id: id("alarms") });
     assert_eq!(
         fail(&smaller, add(disk("third"))),
-        WidgetError::KindLimit { max: 2 }
+        WidgetError::KindLimit {
+            max: 2,
+            noun: "popup".into()
+        }
     );
 }
 
@@ -137,6 +140,7 @@ fn the_surface_limit_is_checked_at_and_past_the_bound() {
         WidgetError::TooMany {
             counted: Counted::Placements,
             max: 4,
+            noun: "popup".into(),
         }
     );
     let three = run(
@@ -152,7 +156,10 @@ fn the_surface_limit_is_checked_at_and_past_the_bound() {
 fn a_kind_at_its_limit_is_refused() {
     assert_eq!(
         fail(&defaults(), add(Gadget::Clock)),
-        WidgetError::KindLimit { max: 1 }
+        WidgetError::KindLimit {
+            max: 1,
+            noun: "popup".into()
+        }
     );
 }
 
@@ -187,7 +194,13 @@ fn remove_cannot_go_below_the_fewest() {
     .unwrap();
     assert_eq!(one.placements.len(), 1);
     let error = apply::<Strict>(&one, Edit::Remove { id: id("alarms") }).unwrap_err();
-    assert_eq!(error, WidgetError::TooFew { min: 1 });
+    assert_eq!(
+        error,
+        WidgetError::TooFew {
+            min: 1,
+            noun: "popup".into()
+        }
+    );
 }
 
 #[test]
@@ -325,7 +338,10 @@ fn apply_refuses_an_unknown_preset_and_an_invalid_saved_one() {
         paddock_widgets::assign_ids([(1, Gadget::Clock), (1, Gadget::Clock)]);
     assert_eq!(
         fail(&bad, Edit::ApplyPreset { id: pid("bad") }),
-        WidgetError::KindLimit { max: 1 }
+        WidgetError::KindLimit {
+            max: 1,
+            noun: "popup".into()
+        }
     );
 }
 
@@ -387,6 +403,7 @@ fn save_a_preset_refusals() {
         WidgetError::TooMany {
             counted: Counted::UserPresets,
             max: 2,
+            noun: "popup".into(),
         }
     );
     let four = run(&defaults(), add(disk("b")));
@@ -395,6 +412,7 @@ fn save_a_preset_refusals() {
         WidgetError::TooMany {
             counted: Counted::PresetPlacements,
             max: 3,
+            noun: "popup".into(),
         }
     );
 }
@@ -455,6 +473,7 @@ fn validate_names_the_first_problem() {
         Err(WidgetError::TooMany {
             counted: Counted::UserPresets,
             max: 2,
+            noun: "popup".into(),
         })
     );
     let mut clash = defaults();
@@ -492,10 +511,11 @@ fn validate_names_the_first_problem() {
         Err(WidgetError::TooMany {
             counted: Counted::PresetPlacements,
             max: 3,
+            noun: "popup".into(),
         })
     );
     type Strict = Cat<1, 2>;
-    let none = Layout::new::<Strict>(vec![], vec![]);
+    let none = Layout::new(1, vec![], vec![]);
     assert!(none.validate::<Strict>().is_err());
 }
 

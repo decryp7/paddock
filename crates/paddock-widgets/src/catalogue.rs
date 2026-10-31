@@ -12,6 +12,8 @@ use crate::layout::{Placement, Preset};
 /// The grid and limits of the surface a catalogue fills (ADR 0035 §6). Its identity is the app's `SurfaceId`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Surface {
+    /// What the surface is called in messages: "popup", "dashboard", "menu bar".
+    pub noun: &'static str,
     /// Bumped by the app on a breaking change of its widget type; a newer stored layout is kept unread (ADR 0035 §1).
     pub schema_version: u32,
     /// Columns of the grid: popup 2, dashboard 12, menu bar 1.
@@ -119,6 +121,9 @@ pub(crate) fn spec_of<C: Catalogue>(
 /// show only as missing widgets.
 pub fn check_catalogue<C: Catalogue>() -> Result<(), String> {
     let s = &C::SURFACE;
+    if s.noun.is_empty() {
+        return Err("the surface needs a noun".into());
+    }
     if C::kinds().is_empty() {
         return Err("the catalogue has no kinds".into());
     }

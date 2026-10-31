@@ -43,4 +43,6 @@ pub use read::{MAX_NAME, Read, Stored, read};
 pub use state::{
     PlacementState, Progress, SurfaceNotice, SurfaceValues, Tone, WidgetAction, WidgetState,
 };
-pub use view::{CatalogueInfo, KindInfo, LayoutView, SurfaceInfo, builtin_presets, info, view};
+pub use view::{
+    CatalogueInfo, KindInfo, LayoutView, SurfaceInfo, ViewOf, builtin_presets, info, view,
+};

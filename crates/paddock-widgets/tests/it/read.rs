@@ -33,11 +33,15 @@ fn fell_back(read: &Read<Gadgets>, code: NoteCode) {
     assert!(read.layout.presets.is_empty());
     assert_eq!(read.notes.len(), 1, "one note: {:?}", read.notes);
     assert_eq!(read.notes[0].code, code);
-    assert!(
-        read.notes[0].message.ends_with("using the defaults."),
-        "{}",
-        read.notes[0].message
-    );
+    let message = &read.notes[0].message;
+    assert!(message.starts_with("The popup layout"), "{message}");
+    assert!(message.contains("the defaults are shown"), "{message}");
+    if !matches!(code, NoteCode::Newer { .. }) {
+        assert!(
+            message.ends_with("the old layout is kept until you change this one."),
+            "{message}"
+        );
+    }
 }
 
 #[test]
@@ -78,7 +82,10 @@ fn damaged_input_gives_the_defaults_and_one_note() {
         json!({ "version": 2, "placements": "none" }),
         json!({ "version": 2, "placements": { "a": 1 } }),
     ] {
-        fell_back(&go(&value), NoteCode::Damaged);
+        let r = go(&value);
+        fell_back(&r, NoteCode::Damaged);
+        // Nothing is lost: the value is kept to be written back unchanged.
+        assert_eq!(r.unread, Some(value));
     }
 }
 
@@ -102,7 +109,9 @@ fn an_oversized_layout_gives_the_defaults_and_one_note() {
         1,
         json!({ "kind": "clock", "pad": "x".repeat(5000) })
     )]));
-    fell_back(&go(&big), NoteCode::TooLarge);
+    let r = go(&big);
+    fell_back(&r, NoteCode::TooLarge);
+    assert_eq!(r.unread, Some(big));
     let just_under = doc(json!([clock("clock")]));
     assert!(go(&just_under).notes.is_empty());
 }

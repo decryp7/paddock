@@ -15,6 +15,8 @@ ts! {
 pub struct SurfaceInfo<S> {
     /// The app's surface.
     pub id: S,
+    /// What the surface is called in messages ("popup").
+    pub noun: String,
     /// Columns of the grid.
     pub columns: u8,
     /// Most placements.
@@ -74,12 +76,20 @@ pub struct LayoutView<S, W, K> {
 }
 }
 
+/// The [`LayoutView`] of a catalogue `C`.
+pub type ViewOf<C> = LayoutView<
+    <C as Catalogue>::SurfaceId,
+    <C as Catalogue>::Widget,
+    <<C as Catalogue>::Widget as Widget>::Kind,
+>;
+
 /// The catalogue as data.
 pub fn info<C: Catalogue>() -> CatalogueInfo<C::SurfaceId, <C::Widget as Widget>::Kind> {
     let s = &C::SURFACE;
     CatalogueInfo {
         surface: SurfaceInfo {
             id: C::SURFACE_ID,
+            noun: s.noun.into(),
             columns: s.columns,
             max_placements: s.max_placements,
             min_placements: s.min_placements,

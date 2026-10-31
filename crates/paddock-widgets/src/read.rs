@@ -8,7 +8,7 @@ use crate::check;
 use crate::error::{Counted, Note, NoteCode, WidgetError};
 use crate::id::PresetId;
 use crate::layout::{Layout, Placement, Preset};
-use crate::view;
+use crate::view::{self, ViewOf};
 
 /// The longest preset name, in characters.
 pub const MAX_NAME: usize = 64;
@@ -49,24 +49,38 @@ impl<C: Catalogue> PartialEq for Read<C> {
     }
 }
 
-fn fallback<C: Catalogue>(code: NoteCode, what: &str) -> Read<C> {
+/// The defaults, one note, and the value kept to be written back unchanged.
+fn unreadable<C: Catalogue>(code: NoteCode, message: String, value: &Value) -> Read<C> {
     Read {
         layout: Layout::defaults::<C>(),
-        notes: vec![Note {
-            code,
-            message: format!("The saved widget layout {what}; using the defaults."),
-        }],
-        unread: None,
+        notes: vec![Note { code, message }],
+        unread: Some(value.clone()),
     }
 }
 
-/// Reads a stored layout. Never fails and never panics:
+fn cannot_read<C: Catalogue>(code: NoteCode, value: &Value) -> Read<C> {
+    let message = format!(
+        "The {} layout could not be read; the defaults are shown and the old layout is kept until you change this one.",
+        C::SURFACE.noun
+    );
+    unreadable::<C>(code, message, value)
+}
+
+/// The stored version of a layout written by a newer version of the app, if `value` is one.
+fn newer_version<C: Catalogue>(value: &Value) -> Option<u64> {
+    value
+        .get("version")
+        .and_then(Value::as_u64)
+        .filter(|v| *v > u64::from(C::SURFACE.schema_version))
+}
+
+/// Reads a stored layout. Never fails and never panics. A value that cannot be read cleanly is never lost: the
+/// defaults are used and the value is kept in [`Read::unread`], which [`Stored`] writes back unchanged.
 ///
 /// - missing (`null`) gives the defaults and no note;
-/// - damaged (not an object, no version, no placements) or larger than the surface's `max_bytes` gives the defaults and
-///   one note;
-/// - newer than the surface's version gives the defaults, one note and the value in [`Read::unread`], which [`Stored`]
-///   writes back unchanged and refuses to edit over;
+/// - a layout of a newer version gives the defaults and one note; [`Stored`] refuses edits (`NewerLayout`);
+/// - damaged (not an object, no version, no placements) or larger than the surface's `max_bytes` gives the defaults
+///   and one note; the first edit through [`Stored::edit`] replaces it;
 /// - each invalid, unknown, duplicate or surplus placement or preset is dropped on its own, with one note counting them
 ///   (at most twice the limit is looked at; the rest is dropped unread);
 /// - a layout whose entries were all dropped, or that falls under `min_placements`, takes the defaults' placements.
@@ -79,28 +93,31 @@ pub fn read<C: Catalogue>(value: &Value) -> Read<C> {
             unread: None,
         };
     }
+    if let Some(version) = newer_version::<C>(value) {
+        let message = format!(
+            "The {} layout was saved by a newer version ({version}) and is kept unchanged; the defaults are shown.",
+            s.noun
+        );
+        let code = NoteCode::Newer {
+            version: u32::try_from(version).unwrap_or(u32::MAX),
+        };
+        return unreadable::<C>(code, message, value);
+    }
     let Some(object) = value.as_object() else {
-        return fallback::<C>(NoteCode::Damaged, "is damaged");
+        return cannot_read::<C>(NoteCode::Damaged, value);
     };
     if value.to_string().len() > s.max_bytes {
-        return fallback::<C>(NoteCode::TooLarge, "is too large");
+        return cannot_read::<C>(NoteCode::TooLarge, value);
     }
-    let version = match object.get("version").and_then(Value::as_u64) {
-        Some(v) if v >= 1 => v,
-        _ => return fallback::<C>(NoteCode::Damaged, "is damaged"),
-    };
-    if version > u64::from(s.schema_version) {
-        let mut kept = fallback::<C>(
-            NoteCode::Newer {
-                version: u32::try_from(version).unwrap_or(u32::MAX),
-            },
-            &format!("was saved by a newer version ({version}) and is kept unchanged"),
-        );
-        kept.unread = Some(value.clone());
-        return kept;
+    if !object
+        .get("version")
+        .and_then(Value::as_u64)
+        .is_some_and(|v| v >= 1)
+    {
+        return cannot_read::<C>(NoteCode::Damaged, value);
     }
     let Some(entries) = object.get("placements").and_then(Value::as_array) else {
-        return fallback::<C>(NoteCode::Damaged, "is damaged");
+        return cannot_read::<C>(NoteCode::Damaged, value);
     };
     let mut dropped = 0u32;
     let mut placements = read_placements::<C>(
@@ -122,7 +139,7 @@ pub fn read<C: Catalogue>(value: &Value) -> Read<C> {
             Vec::new()
         }
     };
-    let layout = Layout::new::<C>(placements, presets);
+    let layout = Layout::new(s.schema_version, placements, presets);
     let notes = if dropped > 0 {
         vec![Note {
             code: NoteCode::Dropped { count: dropped },
@@ -259,17 +276,23 @@ impl<C: Catalogue> Stored<C> {
 
     /// Whether the layout can be edited: false while a newer version's layout is kept.
     pub fn editable(&self) -> bool {
-        self.read.unread.is_none()
+        self.read
+            .unread
+            .as_ref()
+            .is_none_or(|kept| newer_version::<C>(kept).is_none())
     }
 
-    /// Applies `edit` and keeps the result; [`WidgetError::NewerLayout`] while a newer version's layout is kept, so it
-    /// is never saved over.
-    pub fn edit(&mut self, edit: crate::Edit<C::Widget>) -> Result<(), WidgetError> {
+    /// Applies `edit` and keeps the result, returning the new view. [`WidgetError::NewerLayout`] while a newer
+    /// version's layout is kept, so it is never saved over. The first edit that applies replaces a layout that could
+    /// not be read (the old value is no longer written back, and its note is gone).
+    pub fn edit(&mut self, edit: crate::Edit<C::Widget>) -> Result<ViewOf<C>, WidgetError> {
         if !self.editable() {
             return Err(WidgetError::NewerLayout);
         }
         self.read.layout = crate::apply::<C>(&self.read.layout, edit)?;
-        Ok(())
+        self.read.unread = None;
+        self.read.notes.clear();
+        Ok(view::view(self))
     }
 }
 

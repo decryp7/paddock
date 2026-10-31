@@ -14,11 +14,19 @@ counted: Counted,
 /**
  * The limit.
  */
-max: number, } } | { "kindLimit": { 
+max: number, 
+/**
+ * The surface's noun ("popup").
+ */
+noun: string, } } | { "kindLimit": { 
 /**
  * Its `max_instances`.
  */
-max: number, } } | { "spanNotAllowed": { 
+max: number, 
+/**
+ * The surface's noun.
+ */
+noun: string, } } | { "spanNotAllowed": { 
 /**
  * The allowed spans.
  */
@@ -26,7 +34,11 @@ allowed: Array<number>, } } | { "tooFew": {
 /**
  * The surface's `min_placements`.
  */
-min: number, } } | { "invalid": string } | "builtinPreset" | "nothingToUndo" | "newerLayout";
+min: number, 
+/**
+ * The surface's noun.
+ */
+noun: string, } } | { "invalid": string } | "builtinPreset" | "nothingToUndo" | "newerLayout";
 
 export type NoteCode = "damaged" | "tooLarge" | { "newer": { 
 /**
@@ -159,6 +171,10 @@ export type SurfaceInfo<S> = {
  * The app's surface.
  */
 id: S, 
+/**
+ * What the surface is called in messages ("popup").
+ */
+noun: string, 
 /**
  * Columns of the grid.
  */

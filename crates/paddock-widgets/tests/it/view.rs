@@ -9,6 +9,7 @@ use crate::catalogue::{GadgetKind, Gadgets, TestSurface, defaults, id};
 fn the_catalogue_is_data() {
     let info = info::<Gadgets>();
     assert_eq!(info.surface.id, TestSurface::Popover);
+    assert_eq!(info.surface.noun, "popup");
     assert_eq!(
         (
             info.surface.columns,

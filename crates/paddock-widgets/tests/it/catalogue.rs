@@ -116,6 +116,7 @@ impl<const MIN: u16, const PRESETS: u8> Catalogue for Cat<MIN, PRESETS> {
 
     const SURFACE_ID: TestSurface = TestSurface::Popover;
     const SURFACE: Surface = Surface {
+        noun: "popup",
         schema_version: 2,
         columns: 2,
         max_placements: 4,

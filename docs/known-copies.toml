@@ -948,7 +948,7 @@ status = "planned"
 
   [[mechanism.copy]]
   paths = ["apps/dyno/app/src/app/features/widgets/widget-model.ts"]
-  symbols = ["item:MAX_WIDGETS", "item:MAX_TRAY_ITEMS", "item:accepts", "item:newWidget", "item:moveWidget", "item:resizeWidget", "item:removeWidget", "item:applyPreset"]
+  symbols = ["item:MAX_WIDGETS", "item:MAX_TRAY_ITEMS", "item:KIND_LABEL", "item:KIND_HINT", "item:SIZE_COLUMNS", "item:accepts", "item:newWidget", "item:newTrayItem", "item:moveWidget", "item:resizeWidget", "item:removeWidget", "item:applyPreset", "item:presetNames", "item:thresholdTone", "item:readMetric"]
   owner = "dyno"
   delete_by = "dyno-v1.0.0"
-  note = "The same catalogue limits, compatibility rule and edits repeated in TypeScript (found 2026-10-31 for ADR 0035). The chooser sends edits to the engine instead."
+  note = "The catalogue, limits, compatibility rule, edits and severity logic repeated in TypeScript (found 2026-10-31 for ADR 0035). The chooser sends edits to the engine; thresholdTone and readMetric move to the engine (dyno-core widgets/popover_values.rs)."

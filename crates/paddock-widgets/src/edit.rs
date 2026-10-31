@@ -116,6 +116,7 @@ pub fn apply<C: Catalogue>(
             if layout.placements.len() <= s.min_placements as usize {
                 return Err(WidgetError::TooFew {
                     min: s.min_placements,
+                    noun: s.noun.into(),
                 });
             }
             next.placements.remove(index);
@@ -167,12 +168,14 @@ pub fn apply<C: Catalogue>(
                 return Err(WidgetError::TooMany {
                     counted: Counted::UserPresets,
                     max: s.max_user_presets.into(),
+                    noun: s.noun.into(),
                 });
             }
             if layout.placements.len() > s.max_preset_placements as usize {
                 return Err(WidgetError::TooMany {
                     counted: Counted::PresetPlacements,
                     max: s.max_preset_placements,
+                    noun: s.noun.into(),
                 });
             }
             let builtin = builtin_presets::<C>();

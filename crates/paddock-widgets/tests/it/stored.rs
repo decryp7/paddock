@@ -116,3 +116,47 @@ fn edit_keeps_the_result_and_reports_the_error() {
     assert_eq!(ids(s.layout()), ["disk-space", "alarms"]);
     assert!(s.editable());
 }
+
+#[test]
+fn a_damaged_layout_is_kept_until_the_first_edit_replaces_it() {
+    let damaged = json!({ "version": 2, "placements": "none" });
+    let mut s: Stored<Gadgets> = serde_json::from_value(damaged.clone()).expect("loads");
+    assert!(s.editable());
+    assert!(view(&s).editable);
+    assert_eq!(s.notes()[0].code, NoteCode::Damaged);
+    assert_eq!(serde_json::to_value(&s).expect("saves"), damaged);
+    // A refused edit changes nothing.
+    assert_eq!(
+        s.edit(Edit::Remove { id: id("nope") }).map(|_| ()),
+        Err(WidgetError::UnknownPlacement("nope".into()))
+    );
+    assert_eq!(serde_json::to_value(&s).expect("saves"), damaged);
+    assert_eq!(s.notes().len(), 1);
+    // The first edit that applies replaces it, and the note is gone.
+    let shown = s
+        .edit(Edit::Remove { id: id("clock") })
+        .expect("the edit applies");
+    assert_eq!(ids(&shown.layout), ["disk-space", "alarms"]);
+    assert!(shown.can_undo && shown.editable && shown.notes.is_empty());
+    assert!(s.notes().is_empty());
+    let saved = serde_json::to_value(&s).expect("saves");
+    assert_eq!(saved["placements"].as_array().map(Vec::len), Some(2));
+}
+
+#[test]
+fn an_oversized_layout_is_kept_the_same_way() {
+    let big = json!({ "version": 2, "placements": [], "pad": "x".repeat(5000) });
+    let mut s: Stored<Gadgets> = serde_json::from_value(big.clone()).expect("loads");
+    assert_eq!(s.notes()[0].code, NoteCode::TooLarge);
+    assert_eq!(serde_json::to_value(&s).expect("saves"), big);
+    s.edit(Edit::ResetToDefaults).expect("the edit applies");
+    assert_eq!(serde_json::to_value(&s).expect("saves")["version"], 2);
+}
+
+#[test]
+fn a_newer_layout_that_is_also_large_is_still_a_newer_one() {
+    let newer = json!({ "version": 9, "placements": [], "pad": "x".repeat(5000) });
+    let s: Stored<Gadgets> = serde_json::from_value(newer).expect("loads");
+    assert!(!s.editable());
+    assert_eq!(s.notes()[0].code, NoteCode::Newer { version: 9 });
+}

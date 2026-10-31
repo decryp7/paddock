@@ -58,7 +58,7 @@ Status words are honest: **built** (code and tests committed), **in progress** (
 | WP-34 | Startup manager filter: hide OS and signed entries | built: engine-side filter with counts, remembered; "signed" needs a publisher, which macOS launch agents do not report yet |
 | WP-35 | Network change events (Wi-Fi joins, VPN up/down, IP changes) on the timeline | built: `dyno_core::netchange`, per-OS Wi-Fi readers, slow polling; macOS may hide the Wi-Fi name; Windows and Linux readers are fixture-tested only |
 | WP-36 | Taming acceptance rules | dropped ([ADR 0021](adr/0021-monitoring-only.md)) |
-| WP-38 | Customizable tray popup widgets | in 1.0, the tag waits for it (user, 2026-10-31); design: family ADR 0035 |
+| WP-38 | Customizable tray popup widgets | planned for 1.0; the tag waits for it (user, 2026-10-31); design: family ADR 0035 |
 
 ## Still open in v1
 
@@ -432,11 +432,13 @@ or other shared OS services must poll rarely or use change notifications.
 
 - **Scope.** The person chooses which small widgets the tray popup shows, and their order, from a list such as active alarms,
   disk space per volume, CPU and memory now, network now, backup health, last issue and pinned counters. In 1.0 (user, 2026-10-31: "In Dyno 1.0, delay the tag"); design in family ADR [0035](../../../docs/adr/0035-widget-layouts-are-shared.md).
-- **Settings.** The choice persists in settings as a versioned list, with sensible defaults (alarms, disk space, CPU and memory);
-  damaged or unknown entries fall back to the defaults with a note, as WP-21 does.
-- **Data.** Values come from the engine through its existing operations; the UI formats them and adds no domain logic (ER-22 and
-  the Paddock rule on where logic lives).
-- **States.** Every widget has a designed empty, loading and error state, each with a short next step.
+- **Settings.** The choice persists in settings as a versioned list, with sensible defaults (alarms, disk space, CPU and memory).
+  Unknown or invalid entries are dropped one by one with a note; only a damaged layout gives the defaults (with a note, as WP-21
+  does); a layout from a newer version is kept unchanged and not edited.
+- **Data.** Values come from the engine through its existing operations; the UI formats them and adds no domain logic (rule 42 and
+  AGENTS.md "Where logic lives").
+- **States.** Every widget has a designed loading, empty, error and working or stale state, each with a short next step; a stopped
+  agent is one notice for the whole popup.
 - **Accessibility.** The popup is keyboard-operable: a logical focus order follows the widget order, every widget has a label, and
   the chooser's reordering works from the keyboard.
 - **Shared.**
@@ -445,9 +447,10 @@ or other shared OS services must poll rarely or use change notifications.
   - Dyno's widget and tray-item layout model (ADR 0012: `WidgetInstance` and `TrayItem` layouts as versioned settings data, a
     closed catalogue per app, bounded counts, presets with undo) is generalised into a shared crate (concept name
     `paddock-widgets`) plus shared `paddock-ui` widget-area and chooser components. Each app registers its catalogue.
-  - Dyno moves onto it first and deletes its copy (`known-copies.toml`, mechanism `widget-layouts`, delete by `dyno-v1.0.0`).
+  - Dyno moves its popup, its dashboard and its menu-bar items editor onto it in 1.0 and deletes its copies (`known-copies.toml`,
+    mechanism `widget-layouts`, delete by `dyno-v1.0.0`).
 - **Acceptance.** Choose, reorder and persist across restarts; the popup renders within the existing popover limits (size, placement
-  and closing on blur, WP-22); tests cover each widget's empty, loading and error states.
+  and closing on blur, WP-22); tests cover each widget's loading, empty, error and working or stale states.
 
 ## Later (after 1.0)
 <a id="after-v1"></a>
