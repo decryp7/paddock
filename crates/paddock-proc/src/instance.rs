@@ -216,28 +216,34 @@ mod tests {
     /// takes and drops the lock: every claim must succeed, and a real holder stays held (see the tests above).
     #[test]
     fn a_lock_just_released_is_free_while_programs_are_being_spawned() {
-        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        /// Overlap that must have happened before the test may end, on a machine of any speed.
+        const MIN_SPAWNS: usize = 50;
+        const MIN_ROUNDS: usize = 200;
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("a.lock");
-        let done = std::sync::Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let spawned = Arc::new(AtomicUsize::new(0));
         let spawner = {
-            let done = done.clone();
+            let (stop, spawned) = (stop.clone(), spawned.clone());
             std::thread::spawn(move || {
-                for _ in 0..100 {
+                while !stop.load(Ordering::SeqCst) {
                     let _ = crate::command("true").status();
+                    spawned.fetch_add(1, Ordering::SeqCst);
                 }
-                done.store(true, Ordering::SeqCst);
             })
         };
-        // Takes and drops the lock for as long as the spawner works, so the two overlap on any machine.
+        // Takes and drops the lock until both sides did enough, so the two overlap for a minimum number of rounds.
         let mut round = 0;
-        while !done.load(Ordering::SeqCst) {
+        while round < MIN_ROUNDS || spawned.load(Ordering::SeqCst) < MIN_SPAWNS {
             round += 1;
             match InstanceLock::claim(&path).unwrap() {
                 Claim::Acquired(lock) => drop(lock),
                 other => panic!("round {round}: a released lock was reported {other:?}"),
             }
         }
+        stop.store(true, Ordering::SeqCst);
         spawner.join().unwrap();
     }
 
