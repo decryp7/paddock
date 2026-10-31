@@ -5,5 +5,6 @@ mod golden;
 mod hostile;
 mod inputs;
 mod isolation;
+mod repo;
 mod slots;
 mod wrapper;

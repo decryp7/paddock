@@ -489,7 +489,14 @@ pub fn command(req: &Request) -> Result<Report, CliError> {
         None => {
             let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
             let out = crate::input_hash::Exec::run(&crate::input_hash::Real, "git", &["rev-parse", "--show-toplevel"], &cwd, None)?;
-            PathBuf::from(out.trim())
+            let top = PathBuf::from(out.trim());
+            if !top.join("tools/paddock-dev/inputs.txt").is_file() {
+                return Err(
+                    CliError::failure(format!("{} is a git repository but not a Paddock one.", top.display()))
+                        .with_hint("Run ./dev inside the Paddock repository, or pass --root <folder>."),
+                );
+            }
+            top
         }
     };
     let history = GitHistory::new(&root, TIMEOUT);
