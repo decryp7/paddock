@@ -4,6 +4,7 @@ use crate::message::{Message, Severity};
 use paddock_secrets::{Name, Secrets, SecretsError};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use url::Url;
 
 /// Most channels a [`Settings`] value may hold.
 pub const MAX_CHANNELS: usize = 8;
@@ -100,7 +101,8 @@ pub struct ChannelConfig {
     #[serde(default)]
     pub min_severity: Severity,
     /// The channel's server is on the user's home network: validation accepts a private address (and plain http to it), and the
-    /// poster reaches private networks for this channel only. Off by default; files from before this field load as off.
+    /// poster reaches private networks for this channel only. Webhook and ntfy channels only: e-mail does not go through
+    /// `paddock-net`, and validation refuses the switch on it. Off by default; files from before this field load as off.
     #[serde(default)]
     pub allow_lan: bool,
     /// Delivery details.
@@ -152,6 +154,11 @@ impl ChannelConfig {
         }
         for e in &self.events {
             check_text("Event kind", e, 64)?;
+        }
+        if self.allow_lan && matches!(self.transport, Transport::Email { .. }) {
+            return Err(
+                "The home network switch is for webhook and ntfy channels; e-mail is sent by the mail server you name".into(),
+            );
         }
         match &self.transport {
             Transport::Webhook { url, .. } => check_http_url("Webhook URL", url, self.allow_lan),
@@ -282,32 +289,26 @@ fn check_id(id: &str) -> Result<(), String> {
 
 fn check_http_url(what: &str, url: &str, allow_lan: bool) -> Result<(), String> {
     check_text(what, url, MAX_URL)?;
-    let (plain, rest) = match url.strip_prefix("https://") {
-        Some(rest) => (false, rest),
-        None => match url.strip_prefix("http://") {
-            Some(rest) => (true, rest),
-            None => {
-                return Err(format!(
-                    "{what} must start with https:// (http:// is only for this computer)"
-                ));
-            }
-        },
+    let plain = match (url.starts_with("https://"), url.starts_with("http://")) {
+        (true, _) => false,
+        (_, true) => true,
+        _ => {
+            return Err(format!(
+                "{what} must start with https:// (http:// is only for this computer)"
+            ));
+        }
     };
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    if host.is_empty() || host.starts_with(':') || host.contains(char::is_whitespace) {
-        return Err(format!("{what} needs a valid host name"));
-    }
-    if host.contains('@') {
+    // The same parser the network layer uses, so what passes here is the address that is later checked (0300.0250.1.20 is
+    // 192.168.1.20 to both).
+    let parsed = Url::parse(url).map_err(|_| format!("{what} needs a valid host name"))?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(format!(
             "{what} must not contain a login; use the token field"
         ));
     }
-    // A bracketed IPv6 literal keeps its colons; any other host loses its port.
-    let name = if host.starts_with('[') {
-        host.split(']').next().unwrap_or("")
-    } else {
-        host.split(':').next().unwrap_or("")
-    };
+    // An http(s) address always has a host once it parses; an IPv6 literal keeps its brackets, which the checks trim.
+    let name = parsed.host().map(|h| h.to_string()).unwrap_or_default();
+    let name = name.as_str();
     let lan = paddock_net::host_may_be_lan(name);
     if plain && !paddock_net::host_is_loopback(name) {
         if !allow_lan {

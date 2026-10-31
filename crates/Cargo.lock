@@ -3274,6 +3274,7 @@ dependencies = [
  "tauri",
  "tempfile",
  "ts-rs",
+ "url",
 ]
 
 [[package]]
