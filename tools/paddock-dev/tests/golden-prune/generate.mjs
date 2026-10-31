@@ -15,12 +15,14 @@ const repo = join(here, '../../../..');
 const fixture = JSON.parse(readFileSync(join(here, 'fixture.json'), 'utf8'));
 const cases = JSON.parse(readFileSync(join(here, 'cases.json'), 'utf8'));
 
+let noMarker = false;
 function build(folder) {
   mkdirSync(folder, { recursive: true });
   for (const f of fixture.files) {
     if (f.path.endsWith('/')) mkdirSync(join(folder, f.path), { recursive: true });
     else {
       mkdirSync(dirname(join(folder, f.path)), { recursive: true });
+      if (f.marker && noMarker) continue;
       writeFileSync(join(folder, f.path), Buffer.alloc(f.size, 7));
     }
   }
@@ -42,7 +44,12 @@ function tree(dir, prefix = '') {
 const mask = (text, root) => text.split(root).join('<ROOT>').replace(/ is \d+ \(cap/g, ' is <N> (cap').replace(/still \d+;/g, 'still <N>;');
 
 const result = {};
+// INTENTIONAL DEPARTURES (ADR 0022 R5, review): `dev host prune` removes a whole folder only when it has a Cargo marker
+// (CACHEDIR.TAG or .rustc_info.json) at its top level; the real scripts remove any folder. A case with `departure` is
+// therefore not recorded from the scripts: its expected output is written by hand below. The incremental caches go as in the
+// script (the tree is the one the real script leaves when the cap is only just exceeded), and the folder stays.
 for (const c of cases) {
+  noMarker = !!c.noMarker;
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-prune-golden-')));
   try {
     for (const d of ['home/target-app-s1', 'home/target-app-s2', 'home/notes', 'other/build']) build(join(root, d));
@@ -52,6 +59,24 @@ for (const c of cases) {
     // "" is no folder, "//" the top of the disk, a leading "/" is appended to the scratch root as written (it may hold ".."),
     // anything else is a path below the scratch root.
     const folder = c.folder === '' ? '' : c.folder === '//' ? '/' : c.folder.startsWith('/') ? root + c.folder : join(root, c.folder);
+    if (c.departure) {
+      const probe = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-prune-golden-probe-')));
+      try {
+        for (const d of ['home/target-app-s1', 'home/target-app-s2', 'home/notes', 'other/build']) build(join(probe, d));
+        symlinkSync('target-app-s1', join(probe, 'home/linkroot'));
+        mkdirSync(join(probe, 'outside'));
+        writeFileSync(join(probe, 'outside/canary'), 'x');
+        spawnSync('bash', [join(repo, 'tools/prune-build-folders.sh'), join(probe, c.folder), '300'], { env: { PATH: '/usr/bin:/bin', PADDOCK_PRUNE_UNIT: 'kb' }, encoding: 'utf8' });
+        result[c.name] = {
+          exit: c.mode === 'plain' ? 4 : 0,
+          stdout: `prune: <ROOT>/${c.folder} is <N> (cap ${c.cap}); removing incremental caches\nprune: <ROOT>/${c.folder} is not a Cargo build folder (no CACHEDIR.TAG or .rustc_info.json); leaving it alone\nRun it on a Cargo target folder, or remove the folder yourself.\n`,
+          tree: tree(probe),
+        };
+      } finally {
+        rmSync(probe, { recursive: true, force: true });
+      }
+      continue;
+    }
     let r;
     if (c.mode === 'plain') {
       r = spawnSync('bash', [join(repo, 'tools/prune-build-folders.sh'), folder, c.cap], { env: { PATH: '/usr/bin:/bin', PADDOCK_PRUNE_UNIT: 'kb' }, encoding: 'utf8' });

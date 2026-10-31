@@ -113,6 +113,21 @@ fn error(e: PruneError) -> CliError {
     }
 }
 
+/// The one place a folder is removed: the real file system, or a fake in tests that fails on purpose.
+trait Remover {
+    /// Removes the folder at `rel` below `root` (empty `rel`: `root` itself); `id` is its scanned identity.
+    fn remove(&self, root: &Path, rel: &RelPath, id: Option<FileId>) -> Result<(), String>;
+}
+
+/// Removes for real, after the identity checks of [`prune_fs::remove_rel`].
+struct FsRemover;
+
+impl Remover for FsRemover {
+    fn remove(&self, root: &Path, rel: &RelPath, id: Option<FileId>) -> Result<(), String> {
+        prune_fs::remove_rel(root, rel, id)
+    }
+}
+
 fn joined(rel: &[String]) -> String {
     rel.join("/")
 }
@@ -126,6 +141,7 @@ struct CapRun {
     removed: Vec<String>,
     folder_removed: bool,
     folder_failed: bool,
+    not_cargo: bool,
     errors: Vec<String>,
     unreadable: u64,
 }
@@ -140,6 +156,7 @@ impl CapRun {
             removed: Vec::new(),
             folder_removed: false,
             folder_failed: false,
+            not_cargo: false,
             errors: Vec::new(),
             unreadable: 0,
         }
@@ -163,6 +180,7 @@ fn cap_report(a: &CapArgs, max: Option<u64>, unit: Unit, run: CapRun) -> Report 
             "removed": run.removed,
             "folderRemoved": run.folder_removed,
             "folderRemovalFailed": run.folder_failed,
+            "notCargoFolder": run.not_cargo,
             "errors": run.errors,
             "unreadable": run.unreadable,
         }),
@@ -172,23 +190,34 @@ fn cap_report(a: &CapArgs, max: Option<u64>, unit: Unit, run: CapRun) -> Report 
 
 /// `host prune cap`.
 pub fn cap(a: &CapArgs) -> Result<Report, CliError> {
+    cap_with(a, &FsRemover)
+}
+
+fn cap_with(a: &CapArgs, rm: &dyn Remover) -> Result<Report, CliError> {
     let unit = if a.unit == "kb" { Unit::Kb } else { Unit::Gb };
     if a.ci_home.is_some() {
-        return Ok(ci_cap(a, unit));
+        return Ok(ci_cap(a, unit, rm));
     }
     let max = prune::parse_cap(&a.max_gb).map_err(error)?;
     let run = resolve_home(a.home.as_deref())
-        .and_then(|h| cap_run(a, max, unit, &h))
+        .and_then(|h| cap_run(a, max, unit, &h, rm))
         .map_err(error)?;
     // Only a failed removal of the whole folder fails the plain form, as the script's final `rm -rf` did; the report
     // (removed, errors, sizes) is still printed first.
-    let failed = run.folder_failed;
+    // A folder that is not a Cargo build folder is refused (exit 4), also with the report.
+    let exit = if run.folder_failed {
+        Exit::Failure
+    } else if run.not_cargo {
+        Exit::Refused
+    } else {
+        Exit::Ok
+    };
     let report = cap_report(a, Some(max), unit, run);
-    Ok(if failed { report.with_exit(Exit::Failure) } else { report })
+    Ok(report.with_exit(exit))
 }
 
 /// The CI form never fails: whatever is wrong becomes a notice and nothing is removed (exit 0, as the script).
-fn ci_cap(a: &CapArgs, unit: Unit) -> Report {
+fn ci_cap(a: &CapArgs, unit: Unit, rm: &dyn Remover) -> Report {
     let shown = a.root.display().to_string();
     let slot = a.slot.as_deref();
     if a.root.as_os_str().is_empty() {
@@ -204,7 +233,7 @@ fn ci_cap(a: &CapArgs, unit: Unit) -> Report {
     if a.slot.is_none() {
         return cap_report(a, Some(max), unit, CapRun::none("none", Some(prune::NO_SLOT_MESSAGE.into())));
     }
-    let run = match resolve_home(a.home.as_deref()).and_then(|h| cap_run(a, max, unit, &h)) {
+    let run = match resolve_home(a.home.as_deref()).and_then(|h| cap_run(a, max, unit, &h, rm)) {
         Ok(run) => run,
         Err(e @ (PruneError::Io(_) | PruneError::TooLarge(_))) => CapRun::none("failed", Some(format!("prune: {e}; leaving it alone"))),
         Err(_) => CapRun::none("left-alone", Some(prune::not_owned_message(&shown, slot))),
@@ -212,7 +241,7 @@ fn ci_cap(a: &CapArgs, unit: Unit) -> Report {
     cap_report(a, Some(max), unit, run)
 }
 
-fn cap_run(a: &CapArgs, max: u64, unit: Unit, home: &Path) -> Result<CapRun, PruneError> {
+fn cap_run(a: &CapArgs, max: u64, unit: Unit, home: &Path, rm: &dyn Remover) -> Result<CapRun, PruneError> {
     let shown = a.root.display().to_string();
     let ci = a.ci_home.is_some();
     let slot = a.slot.as_deref();
@@ -246,7 +275,7 @@ fn cap_run(a: &CapArgs, max: u64, unit: Unit, home: &Path) -> Result<CapRun, Pru
             if a.dry_run {
                 gone.insert(bundle.clone());
                 run.removed.push(joined(&bundle));
-            } else if let Err(e) = prune_fs::remove_rel(work, &bundle, None) {
+            } else if let Err(e) = rm.remove(work, &bundle, None) {
                 run.errors.push(e);
             } else {
                 run.removed.push(joined(&bundle));
@@ -262,16 +291,23 @@ fn cap_run(a: &CapArgs, max: u64, unit: Unit, home: &Path) -> Result<CapRun, Pru
     if plan.over {
         run.action = "incremental";
         run.lines.push(prune::over_message(&display, plan.size_before, max));
-        let left = remove_incremental(work, &scan.tree, &plan, a.dry_run, &mut run, (max, unit, root_id))?;
+        let left = remove_incremental(work, &scan.tree, &plan, a.dry_run, &mut run, (max, unit, root_id), rm)?;
         let (size_after, id) = (left.size, left.id);
         run.size_after = Some(size_after);
         if left.remove_folder {
+            if !prune_fs::is_cargo_folder(work) {
+                run.action = "not-cargo";
+                run.not_cargo = true;
+                run.lines.push(prune::not_cargo_message(&display));
+                run.lines.push(prune::NOT_CARGO_HINT.to_string());
+                return Ok(run);
+            }
             run.action = "folder";
             run.lines.push(prune::still_message(&display, size_after));
             if a.dry_run {
                 run.folder_removed = true;
             } else {
-                run.folder_removed = remove_folder_itself(work, id, &mut run.errors);
+                run.folder_removed = remove_folder_itself(work, id, &mut run.errors, rm);
                 run.folder_failed = !run.folder_removed;
             }
         }
@@ -294,11 +330,12 @@ fn remove_incremental(
     dry: bool,
     run: &mut CapRun,
     (max, unit, root_id): (u64, Unit, Option<FileId>),
+    rm: &dyn Remover,
 ) -> Result<Removal, PruneError> {
     for rel in &plan.incremental {
         if dry {
             run.removed.push(joined(rel));
-        } else if let Err(e) = prune_fs::remove_rel(work, rel, prune_fs::id_of(tree, rel)) {
+        } else if let Err(e) = rm.remove(work, rel, prune_fs::id_of(tree, rel)) {
             run.errors.push(e);
         } else {
             run.removed.push(joined(rel));
@@ -321,8 +358,8 @@ fn remove_incremental(
     })
 }
 
-fn remove_folder_itself(work: &Path, id: Option<FileId>, errors: &mut Vec<String>) -> bool {
-    match prune_fs::remove_rel(work, &Vec::new(), id) {
+fn remove_folder_itself(work: &Path, id: Option<FileId>, errors: &mut Vec<String>, rm: &dyn Remover) -> bool {
+    match rm.remove(work, &Vec::new(), id) {
         Ok(()) => true,
         Err(e) => {
             errors.push(e);
@@ -353,6 +390,7 @@ pub fn worktrees(a: &WorktreeArgs) -> Result<Report, CliError> {
             name: l.name,
             bytes: l.bytes,
             symlink: l.symlink,
+            cargo: l.cargo,
         })
         .collect();
     errors.extend(more_errors);
@@ -384,5 +422,168 @@ fn refuse_candidate(path: &Path, home: &Path) -> Option<String> {
             .and_then(|()| check_not_mount_point(&real, &prune_fs::is_mount_point))
             .err()
             .map(|e| format!("{}: {e}", path.display())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::fs;
+
+    /// Fails the removals it is told to (an empty `rel` is the folder itself), does the others for real and records every call.
+    struct Fake {
+        fail: Vec<RelPath>,
+        calls: RefCell<Vec<RelPath>>,
+    }
+
+    impl Fake {
+        fn failing(fail: &[&[&str]]) -> Fake {
+            Fake {
+                fail: fail.iter().map(|p| p.iter().map(|s| s.to_string()).collect()).collect(),
+                calls: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl Remover for Fake {
+        fn remove(&self, root: &Path, rel: &RelPath, id: Option<FileId>) -> Result<(), String> {
+            self.calls.borrow_mut().push(rel.clone());
+            if self.fail.contains(rel) {
+                Err(format!("{}: injected failure", joined(rel)))
+            } else {
+                FsRemover.remove(root, rel, id)
+            }
+        }
+    }
+
+    /// `<root>/ci/target-app-s1` with two incremental folders, 700 KiB in all, and a Cargo marker unless `marker` is false.
+    fn build(root: &Path, marker: bool) -> PathBuf {
+        let folder = root.join("ci").join("target-app-s1");
+        for (rel, kib) in [("debug/incremental/a", 400), ("release/incremental/b", 100), ("debug/deps/c", 200)] {
+            let p = folder.join(rel);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, vec![1u8; kib * 1024]).unwrap();
+        }
+        if marker {
+            fs::write(folder.join("CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55").unwrap();
+        }
+        folder
+    }
+
+    fn args(root: &Path, folder: &Path, max: &str, ci: bool) -> CapArgs {
+        let home = root.join("home");
+        fs::create_dir_all(&home).unwrap();
+        CapArgs {
+            root: folder.to_path_buf(),
+            max_gb: max.into(),
+            unit: "kb".into(),
+            ci_home: ci.then(|| root.join("ci")),
+            slot: ci.then(|| "s1".to_string()),
+            drop_bundles: false,
+            dry_run: false,
+            home: Some(home),
+        }
+    }
+
+    fn scratch() -> (tempfile::TempDir, PathBuf) {
+        let t = tempfile::tempdir().unwrap();
+        let p = fs::canonicalize(t.path()).unwrap();
+        (t, p)
+    }
+
+    #[test]
+    fn a_failed_incremental_removal_is_reported_and_the_run_still_succeeds() {
+        let (_t, root) = scratch();
+        let folder = build(&root, true);
+        // 700 KiB; only release/incremental can go, which leaves 600: under the 650 cap, so the folder stays.
+        let fake = Fake::failing(&[&["debug", "incremental"]]);
+        let report = cap_with(&args(&root, &folder, "650", false), &fake).unwrap();
+        assert_eq!(report.exit, Exit::Ok);
+        let v = report.json();
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["errors"].as_array().unwrap().len(), 1);
+        assert_eq!(v["folderRemovalFailed"], false);
+        assert!(report.text.contains("could not remove"), "{}", report.text);
+        assert!(
+            !fake.calls.borrow().contains(&Vec::<String>::new()),
+            "the folder itself was not removed"
+        );
+    }
+
+    #[test]
+    fn a_failed_whole_folder_removal_fails_the_plain_form_and_still_carries_the_report() {
+        let (_t, root) = scratch();
+        let folder = build(&root, true);
+        let fake = Fake::failing(&[&[]]);
+        let report = cap_with(&args(&root, &folder, "0", false), &fake).unwrap();
+        assert_eq!(report.exit, Exit::Failure);
+        let v = report.json();
+        assert_eq!(
+            (v["ok"].clone(), v["exit"].clone(), v["kind"].clone()),
+            (false.into(), 1.into(), "failure".into())
+        );
+        assert_eq!(v["folderRemovalFailed"], true);
+        assert_eq!(v["removed"].as_array().unwrap().len(), 2, "the report names what did go");
+        assert!(
+            report.text.contains("could not remove") && report.text.contains("removing"),
+            "{}",
+            report.text
+        );
+    }
+
+    #[test]
+    fn the_ci_form_exits_zero_when_the_whole_folder_cannot_be_removed() {
+        let (_t, root) = scratch();
+        let folder = build(&root, true);
+        let report = cap_with(&args(&root, &folder, "0", true), &Fake::failing(&[&[]])).unwrap();
+        assert_eq!(report.exit, Exit::Ok);
+        assert!(report.text.contains("could not remove"), "{}", report.text);
+        assert_eq!(report.json()["folderRemovalFailed"], true);
+    }
+
+    #[test]
+    fn a_folder_without_a_cargo_marker_keeps_the_folder_and_removes_the_caches() {
+        let (_t, root) = scratch();
+        let folder = build(&root, false);
+        let fake = Fake::failing(&[]);
+        let plain = cap_with(&args(&root, &folder, "0", false), &fake).unwrap();
+        assert_eq!(plain.exit, Exit::Refused);
+        let v = plain.json();
+        assert_eq!(
+            (v["ok"].clone(), v["action"].clone(), v["notCargoFolder"].clone()),
+            (false.into(), "not-cargo".into(), true.into())
+        );
+        assert!(plain.text.contains("not a Cargo build folder") && plain.text.contains("Run it on a Cargo target folder"));
+        assert!(
+            !fake.calls.borrow().contains(&Vec::<String>::new()),
+            "the folder itself is never removed"
+        );
+        let ci = cap_with(&args(&root, &folder, "0", true), &Fake::failing(&[])).unwrap();
+        assert_eq!(ci.exit, Exit::Ok, "the CI form never fails");
+        assert!(ci.text.contains("not a Cargo build folder"));
+    }
+
+    #[test]
+    fn a_dry_run_without_a_marker_predicts_the_refusal_and_removes_nothing() {
+        let (_t, root) = scratch();
+        let folder = build(&root, false);
+        let mut a = args(&root, &folder, "0", false);
+        a.dry_run = true;
+        let fake = Fake::failing(&[]);
+        let report = cap_with(&a, &fake).unwrap();
+        assert_eq!(report.exit, Exit::Refused);
+        assert!(fake.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn the_marker_may_be_the_rustc_info_file() {
+        let (_t, root) = scratch();
+        let folder = build(&root, false);
+        fs::write(folder.join(".rustc_info.json"), "{}").unwrap();
+        let fake = Fake::failing(&[]);
+        let report = cap_with(&args(&root, &folder, "0", false), &fake).unwrap();
+        assert_eq!(report.exit, Exit::Ok);
+        assert!(fake.calls.borrow().contains(&Vec::<String>::new()));
     }
 }

@@ -73,8 +73,11 @@
 //! Open follow-ups: file identity on Windows (the comparison falls back to case-insensitive names; no dependency was added for
 //! file handles), and a Cargo-build-folder marker check before a whole-folder removal (see below).
 //!
-//! Whole-folder removal does not demand that the folder looks like a Cargo build folder (CACHEDIR.TAG): the recorded golden
-//! cases remove a plain fixture folder, as the real script does.
+//! Whole-folder removal (`cap`, and `worktrees --remove`) demands that the folder looks like a Cargo build folder: a regular
+//! file `CACHEDIR.TAG` or `.rustc_info.json` at its top level. Without one the folder is left alone (`not-cargo`), after the
+//! incremental caches went: the CI form says so and exits 0, the plain form exits 4 with a hint, `worktrees` lists the row as
+//! `not-cargo`. This departs from the scripts for safety (they removed any folder); the golden fixture carries a CACHEDIR.TAG
+//! and two cases record the departure by hand.
 //!
 //! No rule depends on time, so no clock is injected. The `.ps1` listing has no golden recorded from the real script (no
 //! PowerShell here); its rules are ported by reading and pinned by unit and integration tests only.
@@ -348,6 +351,14 @@ pub fn still_message(folder: &str, size: u64) -> String {
 /// The CI form's notice when no `--slot` was given (the script defaulted to `s1` on Linux; this tool does not).
 pub const NO_SLOT_MESSAGE: &str = "prune: no slot given (pass --slot sN); nothing to prune";
 
+/// The notice when the whole folder would go but it is not a Cargo build folder.
+pub fn not_cargo_message(folder: &str) -> String {
+    format!("prune: {folder} is not a Cargo build folder (no CACHEDIR.TAG or .rustc_info.json); leaving it alone")
+}
+
+/// The hint that goes with it in the plain form.
+pub const NOT_CARGO_HINT: &str = "Run it on a Cargo target folder, or remove the folder yourself.";
+
 /// The CI form's notice for an empty cap.
 pub const NO_CAP_MESSAGE: &str = "prune: no cap given; nothing to prune";
 
@@ -526,6 +537,13 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_not_cargo_notice_names_the_markers() {
+        let m = not_cargo_message("/b");
+        assert!(m.starts_with("prune: /b is not a Cargo build folder") && m.contains("CACHEDIR.TAG") && m.ends_with("leaving it alone"));
+        assert!(NOT_CARGO_HINT.contains("Cargo"));
     }
 
     #[test]

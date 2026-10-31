@@ -38,9 +38,17 @@ fn link(target: &str, at: &Path) {
 
 /// The fixture of `fixture.json` in `folder` (symlinks only where the platform makes them without a privilege).
 fn build(folder: &Path) {
+    build_with(folder, true);
+}
+
+/// The same, without the Cargo marker when `marker` is false.
+fn build_with(folder: &Path, marker: bool) {
     let fixture = read_json("fixture.json");
     for f in fixture["files"].as_array().unwrap() {
         let path = f["path"].as_str().unwrap();
+        if f["marker"] == true && !marker {
+            continue;
+        }
         if path.ends_with('/') {
             fs::create_dir_all(folder.join(path)).unwrap();
         } else {
@@ -95,7 +103,7 @@ fn the_recorded_cases_of_the_shell_scripts_are_reproduced() {
         }
         let (_t, root) = canonical_tmp();
         for d in ["home/target-app-s1", "home/target-app-s2", "home/notes", "other/build"] {
-            build(&root.join(d));
+            build_with(&root.join(d), c["noMarker"] != true);
         }
         link("target-app-s1", &root.join("home/linkroot"));
         fs::create_dir(root.join("outside")).unwrap();
@@ -387,6 +395,7 @@ fn a_symlinked_incremental_is_not_followed_out_of_the_root() {
     let (_t, root) = canonical_tmp();
     let folder = root.join("w/build");
     fs::create_dir_all(folder.join("debug")).unwrap();
+    fs::write(folder.join("CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55").unwrap();
     fs::create_dir_all(root.join("outside")).unwrap();
     fs::write(root.join("outside/canary"), vec![1u8; 10_000]).unwrap();
     link("../../../outside", &folder.join("debug/incremental"));
@@ -420,12 +429,21 @@ fn worktrees_list_keep_and_remove_the_right_folders() {
         "repo/target/debug/x",
         "repo/target/agent-6c/x",
         "repo/target/agent-9/x",
+        "repo/target/agent-nomarker/x",
         "repo/target/flycheck0/x",
         "repo/target/doc/x",
     ] {
         let p = root.join(d);
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(p, "data").unwrap();
+    }
+    for marked in [
+        "me/.app-target-6c1",
+        "me/.app-target-old",
+        "repo/target/agent-6c",
+        "repo/target/agent-9",
+    ] {
+        fs::write(root.join(marked).join(".rustc_info.json"), "{}").unwrap();
     }
     let h = home.to_str().unwrap();
     let r = repo.to_str().unwrap();
@@ -436,7 +454,10 @@ fn worktrees_list_keep_and_remove_the_right_folders() {
         .iter()
         .map(|f| f["path"].as_str().unwrap().rsplit(['/', '\\']).next().unwrap().to_string())
         .collect();
-    assert_eq!(names, [".app-target-6c1", ".app-target-old", "agent-6c", "agent-9"]);
+    assert_eq!(
+        names,
+        [".app-target-6c1", ".app-target-old", "agent-6c", "agent-9", "agent-nomarker"]
+    );
     assert!(listed["folders"].as_array().unwrap().iter().all(|f| f["action"] == "found"));
     let dry = json(&[
         "host",
@@ -459,7 +480,7 @@ fn worktrees_list_keep_and_remove_the_right_folders() {
         .iter()
         .map(|f| f["action"].as_str().unwrap())
         .collect();
-    assert_eq!(actions, ["kept", "would-remove", "kept", "would-remove"]);
+    assert_eq!(actions, ["kept", "would-remove", "kept", "would-remove", "not-cargo"]);
     assert!(root.join("me/.app-target-old").exists());
     let done = json(&[
         "host",
@@ -481,6 +502,7 @@ fn worktrees_list_keep_and_remove_the_right_folders() {
         "me/.app-target-6c1",
         "me/.other-target-1",
         "repo/target/agent-6c",
+        "repo/target/agent-nomarker",
         "repo/target/debug",
         "repo/target/flycheck0",
         "repo/target/doc",
@@ -754,91 +776,4 @@ fn the_ci_form_without_a_slot_says_so_and_removes_nothing() {
     assert_eq!(code, 0);
     assert!(out.contains("no slot given"), "{out}");
     assert!(folder.join("keep.txt").exists());
-}
-
-/// Makes a folder read-only and gives it back (0o755) when dropped, whatever happens in between.
-#[cfg(unix)]
-struct ReadOnly(PathBuf);
-
-#[cfg(unix)]
-impl ReadOnly {
-    /// `None` when the process can still write there (rights that ignore permissions): the failure cannot be made.
-    fn new(dir: &Path) -> Option<ReadOnly> {
-        use std::os::unix::fs::PermissionsExt;
-        let guard = ReadOnly(dir.to_path_buf());
-        fs::set_permissions(dir, fs::Permissions::from_mode(0o555)).unwrap();
-        let writable = fs::File::create(dir.join("probe")).is_ok();
-        if writable { None } else { Some(guard) }
-    }
-}
-
-#[cfg(unix)]
-impl Drop for ReadOnly {
-    fn drop(&mut self) {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::remove_file(self.0.join("probe"));
-        let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
-    }
-}
-
-#[cfg(unix)]
-fn cap_args<'a>(folder: &'a str, cap: &'a str, home: &'a str, ci: Option<&'a str>) -> Vec<&'a str> {
-    let mut v = vec![
-        "host", "prune", "cap", "--unit", "kb", "--root", folder, "--max-gb", cap, "--home", home,
-    ];
-    if let Some(c) = ci {
-        v.extend(["--ci-home", c, "--slot", "s1"]);
-    }
-    v
-}
-
-#[cfg(unix)]
-#[test]
-fn a_failed_incremental_removal_is_reported_but_does_not_fail_the_run() {
-    let (_t, root) = canonical_tmp();
-    let ci = root.join("ci");
-    let folder = ci.join("target-app-s1");
-    build(&folder);
-    let home = scratch_home(&root);
-    let Some(_guard) = ReadOnly::new(&folder.join("debug")) else {
-        return;
-    };
-    let f = folder.to_str().unwrap();
-    // The fixture is about 740 KiB; the caches that can go (release/*) bring it under 700, so the folder stays.
-    let (code, out, err) = dev(&{
-        let mut a = cap_args(f, "700", &home, None);
-        a.insert(0, "--json");
-        a
-    });
-    assert_eq!(code, 0, "{err}{out}");
-    let v: Value = serde_json::from_str(out.trim()).unwrap();
-    assert!(!v["errors"].as_array().unwrap().is_empty(), "{out}");
-    assert_eq!(v["folderRemovalFailed"], false);
-}
-
-#[cfg(unix)]
-#[test]
-fn a_failed_whole_folder_removal_fails_the_plain_form_after_printing_its_report() {
-    let (_t, root) = canonical_tmp();
-    let ci = root.join("ci");
-    let folder = ci.join("target-app-s1");
-    build(&folder);
-    let home = scratch_home(&root);
-    let Some(_guard) = ReadOnly::new(&ci) else { return };
-    let f = folder.to_str().unwrap();
-    let (code, out, _) = dev(&{
-        let mut a = cap_args(f, "0", &home, None);
-        a.insert(0, "--json");
-        a
-    });
-    assert_eq!(code, 1);
-    let v: Value = serde_json::from_str(out.trim()).unwrap();
-    assert_eq!(
-        v["folderRemovalFailed"], true,
-        "the report is printed before the failure exit: {out}"
-    );
-    assert!(!v["errors"].as_array().unwrap().is_empty());
-    let (code, out, err) = dev(&cap_args(f, "0", &home, Some(ci.to_str().unwrap())));
-    assert_eq!(code, 0, "{err}");
-    assert!(out.contains("could not remove"), "{out}");
 }

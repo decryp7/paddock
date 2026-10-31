@@ -59,6 +59,8 @@ pub struct Candidate {
     pub bytes: u64,
     /// It is a symlink: listed, never followed or removed.
     pub symlink: bool,
+    /// It has a Cargo marker at its top level; a folder without one is never removed.
+    pub cargo: bool,
 }
 
 /// What happens to a candidate.
@@ -74,6 +76,8 @@ pub enum Action {
     WouldRemove,
     /// A symlink: left alone.
     Skipped,
+    /// Not a Cargo build folder (no CACHEDIR.TAG or .rustc_info.json): left alone.
+    NotCargo,
 }
 
 impl Action {
@@ -85,6 +89,7 @@ impl Action {
             Action::Removing => "removing",
             Action::WouldRemove => "would-remove",
             Action::Skipped => "skipped",
+            Action::NotCargo => "not-cargo",
         }
     }
 }
@@ -111,6 +116,8 @@ pub fn plan_rows(app: &str, keep: &[String], remove: bool, dry_run: bool, candid
                 Action::Found
             } else if is_kept(app, keep, &c.name) {
                 Action::Kept
+            } else if !c.cargo {
+                Action::NotCargo
             } else if dry_run {
                 Action::WouldRemove
             } else {
@@ -201,16 +208,18 @@ mod tests {
     }
 
     fn cands() -> Vec<Candidate> {
-        let c = |name: &str, bytes: u64, symlink: bool| Candidate {
+        let c = |name: &str, bytes: u64, symlink: bool, cargo: bool| Candidate {
             path: PathBuf::from("/h").join(name),
             name: name.into(),
             bytes,
             symlink,
+            cargo,
         };
         vec![
-            c(".d-target-6c", 1 << 30, false),
-            c("agent-9", 3 << 30, false),
-            c("agent-link", 0, true),
+            c(".d-target-6c", 1 << 30, false, true),
+            c("agent-9", 3 << 30, false, true),
+            c("agent-link", 0, true, false),
+            c("agent-plain", 1, false, false),
         ]
     }
 
@@ -223,12 +232,12 @@ mod tests {
                 .map(|r| r.action.word())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(words(false, false), ["found", "found", "skipped"]);
-        assert_eq!(words(true, false), ["kept", "removing", "skipped"]);
-        assert_eq!(words(true, true), ["kept", "would-remove", "skipped"]);
+        assert_eq!(words(false, false), ["found", "found", "skipped", "found"]);
+        assert_eq!(words(true, false), ["kept", "removing", "skipped", "not-cargo"]);
+        assert_eq!(words(true, true), ["kept", "would-remove", "skipped", "not-cargo"]);
         assert_eq!(
             words(false, true),
-            ["found", "found", "skipped"],
+            ["found", "found", "skipped", "found"],
             "dry run without --remove only lists"
         );
     }
