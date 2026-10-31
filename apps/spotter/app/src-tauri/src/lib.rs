@@ -41,28 +41,13 @@ fn is_test_build(version: &str) -> bool {
     !version.contains('+') && version.split_once('-').is_some_and(|(_, pre)| pre.starts_with("test."))
 }
 
-/// Whether `url` is an https URL with a host (lower-case `https://`, no user information, a port of digits at most).
+/// Whether `url` is an https URL for a feed: the scheme is written `https://` in lower case, no user name or password, a host, and a
+/// port the URL parser accepts (at most 65535).
 fn is_https_url_with_host(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("https://") else { return false };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    let (host, port) = if let Some(v6) = authority.strip_prefix('[') {
-        match v6.split_once(']') {
-            Some((h, "")) => (h, None),
-            Some((h, p)) => (h, p.strip_prefix(':').or(Some("-"))),
-            None => ("", None),
-        }
-    } else {
-        match authority.split_once(':') {
-            Some((h, p)) => (h, Some(p)),
-            None => (authority, None),
-        }
-    };
-    let v6 = authority.starts_with('[');
-    let host_ok = !host.is_empty()
-        && host
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-') || (v6 && c == ':'));
-    host_ok && port.is_none_or(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+    // `https:///x` is read by the parser as host `x` (extra slashes are dropped for special schemes): the raw text must name the host.
+    url.strip_prefix("https://").is_some_and(|rest| !rest.starts_with(['/', '\\']))
+        && url::Url::parse(url)
+            .is_ok_and(|u| u.scheme() == "https" && u.username().is_empty() && u.password().is_none() && u.host().is_some())
 }
 
 /// The feed the updater reads: [`UPDATE_FEED`], except in a `-test.N` build made with `SPOTTER_TEST_UPDATE_FEED` set (the
@@ -457,7 +442,10 @@ mod updater_tests {
             "HTTPS://192.168.64.1/x",
             "https://u:p@192.168.64.1/x",
             "https://host:port/x",
-            "https://host:/x",
+            "https://u@host/x",
+            "https://host:65536/x",
+            "https://[::1]x/",
+            "https://[::1/",
         ] {
             assert_eq!(update_feed("1.0.0-test.1", Some(bad)), UPDATE_FEED, "{bad} is refused");
         }

@@ -36,6 +36,6 @@ test('the CLI exits 0 on a match and 1 on a mismatch', () => {
 });
 
 test('a test build tag (-test.N) is refused: those builds are for the VM update tests and never released', () => {
-  assert.throws(() => tagVersion('spotter-v1.0.0-test.1', 'spotter-'), /test build/);
-  assert.equal(tagVersion('spotter-v1.0.0-rc.1', 'spotter-'), '1.0.0-rc.1');
+  for (const v of ['1.0.0-test.1', '1.0.0-test.2', '1.0.0-test.12']) assert.throws(() => tagVersion(`spotter-v${v}`, 'spotter-'), /test build/, v);
+  for (const v of ['1.0.0-rc.1', '1.0.0-latest.1', '1.0.0-attest.1', '1.0.0']) assert.equal(tagVersion(`spotter-v${v}`, 'spotter-'), v);
 });

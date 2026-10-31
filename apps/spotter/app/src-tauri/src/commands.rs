@@ -382,10 +382,19 @@ pub async fn get_autostart<R: Runtime>(app: AppHandle<R>) -> Out<bool> {
 /// `set_autostart`: returns the state afterwards.
 #[tauri::command]
 pub async fn set_autostart<R: Runtime>(app: AppHandle<R>, enabled: bool) -> Out<bool> {
+    set_autostart_from(&app, enabled, crate::login_item::current_location)
+}
+
+/// [`set_autostart`] with the running copy's location passed in (a test passes a translocated one). Registered from a disk image or
+/// a translocated copy, the entry would point at a path that is gone at the next login, so that is refused first.
+pub(crate) fn set_autostart_from<R: Runtime>(
+    app: &AppHandle<R>,
+    enabled: bool,
+    location: impl FnOnce() -> Option<(std::path::PathBuf, crate::login_item::Volume)>,
+) -> Out<bool> {
     if enabled {
-        // Registered from a disk image or a translocated copy, the entry would point at a path that is gone at the next login.
-        if let Ok(exe) = std::env::current_exe() {
-            crate::login_item::refuse_unstable_location(&exe).map_err(CommandError::unavailable)?;
+        if let Some((exe, volume)) = location() {
+            crate::login_item::refuse_unstable_location(&exe, volume).map_err(CommandError::unavailable)?;
         }
     }
     let a = app.autolaunch();
@@ -607,5 +616,24 @@ mod tests {
             }
         }
         assert!(seen >= 30, "found only {seen} commands");
+    }
+}
+
+#[cfg(test)]
+mod autostart_tests {
+    use super::*;
+    use crate::dto::CommandErrorCode;
+    use crate::login_item::Volume;
+    use std::path::PathBuf;
+
+    /// Deleting the guard call must break a test: a translocated copy asking to start at login is refused before the plugin is reached
+    /// (the mock app has no autostart plugin, so reaching it would panic instead of returning `Unavailable`).
+    #[test]
+    fn turning_launch_at_login_on_from_a_translocated_copy_is_refused() {
+        let app = tauri::test::mock_app();
+        let path = PathBuf::from("/private/var/folders/x/T/AppTranslocation/1/d/Spotter.app/Contents/MacOS/spotter-app");
+        let err = set_autostart_from(app.handle(), true, || Some((path, Volume::Writable))).unwrap_err();
+        assert_eq!(err.code, CommandErrorCode::Unavailable);
+        assert!(err.message.contains("Launch at login"), "{}", err.message);
     }
 }

@@ -77,6 +77,17 @@ describe('SettingsPage', () => {
     expect(isOn(f, 'autostart')).toBe(true);
   });
 
+  it('puts the Launch at login switch back off when the app refuses to register', async () => {
+    const backend = makeMock();
+    vi.spyOn(backend, 'setAutostart').mockRejectedValue(new Error('Move Spotter to Applications'));
+    const { f, store } = await make(backend);
+    expect(isOn(f, 'autostart')).toBe(false);
+    sw(f, 'autostart').click();
+    await settle(f);
+    expect(store.autostart()).toBe(false);
+    expect(isOn(f, 'autostart')).toBe(false);
+  });
+
   it('turns quiet hours on with defaults, edits a time, and turns them off', async () => {
     const { f, backend } = await make();
     expect(el(f, 'input[aria-label="Quiet hours start"]')).toBeNull();
