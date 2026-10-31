@@ -2,7 +2,7 @@
 //! file loaded with `launchctl bootstrap` ([`LaunchdFile`], development builds and launch daemons). Both read launchd's
 //! own report (`launchctl print`, `print-disabled`) to see a stale registration (R03) and the user's switch.
 
-use super::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target};
+use super::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, StartFacts, Target};
 use crate::launchctl::{bootout, job_report};
 use crate::parse::{JobReport, parse_print_disabled, plist_program};
 use crate::paths::{LAUNCHCTL, launchd_domain, launchd_target};
@@ -33,6 +33,23 @@ fn disabled(sys: &mut dyn System, domain: &str, label: &str) -> Option<bool> {
 
 fn gone(sys: &mut dyn System, target: &str) -> bool {
     job_report(sys, target).is_some_and(|r| !r.found)
+}
+
+/// What launchd says about a starting job (one `launchctl print`), plus the CPU time of its process while it runs.
+fn start_facts(sys: &mut dyn System, target: &str) -> StartFacts {
+    let Some(report) = job_report(sys, target) else {
+        return StartFacts::unknown();
+    };
+    StartFacts {
+        job: job_of(Some(report)),
+        pid: report.pid,
+        runs: report.runs,
+        last_exit: report.last_exit,
+        cpu: report
+            .pid
+            .filter(|_| report.running)
+            .and_then(|pid| sys.cpu_time(pid)),
+    }
 }
 
 /// The launch agent inside the app bundle (`Contents/Library/LaunchAgents/<label>.plist`, rendered by
@@ -116,6 +133,11 @@ impl Backend for LaunchdBundled {
     fn job_gone(&mut self) -> bool {
         let target = self.target();
         gone(self.sys.as_mut(), &target)
+    }
+
+    fn observe_start(&mut self) -> Option<StartFacts> {
+        let target = self.target();
+        Some(start_facts(self.sys.as_mut(), &target))
     }
 
     fn pause(&mut self, how_long: Duration) {
@@ -285,6 +307,11 @@ impl Backend for LaunchdFile {
     fn job_gone(&mut self) -> bool {
         let target = self.launchd_target();
         gone(self.sys.as_mut(), &target)
+    }
+
+    fn observe_start(&mut self) -> Option<StartFacts> {
+        let target = self.launchd_target();
+        Some(start_facts(self.sys.as_mut(), &target))
     }
 
     fn pause(&mut self, how_long: Duration) {

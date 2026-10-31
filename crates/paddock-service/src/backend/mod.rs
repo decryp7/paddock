@@ -125,6 +125,35 @@ impl Inspection {
     }
 }
 
+/// What a backend sees of a starting job on one poll (see [`Backend::observe_start`]): the facts a
+/// [`StartWatch`](crate::StartWatch) judges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartFacts {
+    /// The job.
+    pub job: Job,
+    /// The job's process while it runs.
+    pub pid: Option<u32>,
+    /// How often the OS has started the job.
+    pub runs: Option<u32>,
+    /// How the job last ended (`None`: never, or not known).
+    pub last_exit: Option<i32>,
+    /// The job process's CPU time so far, when it could be read.
+    pub cpu: Option<Duration>,
+}
+
+impl StartFacts {
+    /// Nothing known: the OS did not say.
+    pub fn unknown() -> StartFacts {
+        StartFacts {
+            job: Job::Unknown,
+            pid: None,
+            runs: None,
+            last_exit: None,
+            cpu: None,
+        }
+    }
+}
+
 /// What a backend allows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Capabilities {
@@ -164,6 +193,12 @@ pub trait Backend: Send {
     /// Opens the OS page where the user allows or switches it; false when there is none.
     fn open_login_items(&mut self) -> bool {
         false
+    }
+    /// One cheap look at a service that is starting, for a [`StartWatch`](crate::StartWatch): the job's state, pid, run
+    /// count, last exit and CPU time. `None` (the default) when the mechanism cannot say more than [`inspect`](Self::inspect)
+    /// does (systemd, Windows): its repair then keeps the fixed wait of [`Timings::start_wait`](crate::Timings).
+    fn observe_start(&mut self) -> Option<StartFacts> {
+        None
     }
     /// The definition this copy registers (plist, unit, `Run` value), when the mechanism has one.
     fn definition(&self) -> Option<String> {

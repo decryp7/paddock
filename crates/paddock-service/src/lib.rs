@@ -71,6 +71,7 @@ pub mod render;
 pub mod repair;
 pub mod scm_host;
 pub mod spec;
+pub mod start_wait;
 pub mod status;
 pub mod supervised;
 pub mod system;
@@ -106,14 +107,17 @@ mod golden;
 #[cfg(test)]
 mod scenarios;
 
-pub use backend::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target};
+pub use backend::{
+    Backend, Capabilities, Inspection, Job, Mechanism, Registration, StartFacts, Target,
+};
 pub use control::{Request, ServiceCommandError, ServiceControl, ServiceErrorCode, ServiceUpdate};
 pub use error::{ServiceError, SpecError};
 pub use manager::{Manager, Started};
 pub use plan::{Hold, Plan, Reason, Refusal};
 pub use port::{AppService, AppServiceStatus, Elevator, Output, RegisterError, RunError, System};
 pub use repair::{RepairOutcome, Step, Timings};
-pub use spec::{Kind, KillMode, ProcessType, Restart, ServiceSpec, SpecBuilder};
+pub use spec::{KillMode, Kind, ProcessType, Restart, ServiceSpec, SpecBuilder};
+pub use start_wait::{StartObservation, StartVerdict, StartWait, StartWatch};
 pub use status::{Condition, HealthReport, LOGIN_SECTION, ServiceStatus};
 pub use system::RealSystem;
 pub use tracker::{RepairNotice, RepairState, RepairTracker};

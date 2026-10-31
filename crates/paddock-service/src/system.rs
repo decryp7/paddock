@@ -101,6 +101,10 @@ impl System for RealSystem {
     fn pause(&mut self, how_long: Duration) {
         std::thread::sleep(how_long);
     }
+
+    fn cpu_time(&mut self, pid: u32) -> Option<Duration> {
+        paddock_proc::ProcessId::of(pid).and_then(paddock_proc::tree_cpu_time)
+    }
 }
 
 /// Copies `exe` to `<data>/bin/<file name>` (atomically, executable) and returns the copy: an AppImage's own files
@@ -164,6 +168,14 @@ mod tests {
             .unwrap();
         // It finished (no timeout) and the output is kept up to the cap.
         assert_eq!((o.code, o.stdout.len()), (Some(0), MAX_HELPER_OUTPUT));
+    }
+
+    #[test]
+    fn the_cpu_time_of_a_process_is_read_by_identity_and_a_missing_one_is_not_known() {
+        let mut sys = RealSystem::new();
+        // Only this test process is looked at (read-only).
+        assert!(sys.cpu_time(std::process::id()).is_some());
+        assert_eq!(sys.cpu_time(u32::MAX), None);
     }
 
     #[test]

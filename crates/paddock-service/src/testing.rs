@@ -41,6 +41,7 @@ struct Inner {
     remove_error: Option<std::io::ErrorKind>,
     read_error: Option<std::io::ErrorKind>,
     spawn_error: Option<String>,
+    cpu_times: BTreeMap<u32, Duration>,
 }
 
 /// A recording [`System`]. Clones share one state, so a test keeps a handle while the backend owns another. Commands
@@ -122,6 +123,12 @@ impl FakeSystem {
     /// Makes every detached start fail.
     pub fn fail_spawns(&self, why: Option<&str>) -> &Self {
         self.lock().spawn_error = why.map(str::to_string);
+        self
+    }
+
+    /// Makes `pid` have used `cpu` of CPU time (what [`System::cpu_time`] answers; other pids are not known).
+    pub fn set_cpu_time(&self, pid: u32, cpu: Duration) -> &Self {
+        self.lock().cpu_times.insert(pid, cpu);
         self
     }
 
@@ -234,6 +241,10 @@ impl System for FakeSystem {
         let mut inner = self.lock();
         inner.calls.push(Call::Pause(how_long));
         inner.now += how_long;
+    }
+
+    fn cpu_time(&mut self, pid: u32) -> Option<Duration> {
+        self.lock().cpu_times.get(&pid).copied()
     }
 }
 

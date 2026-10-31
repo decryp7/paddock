@@ -7,7 +7,8 @@ use crate::backend::{Backend, Inspection, Mechanism};
 use crate::error::ServiceError;
 use crate::plan::{Facts, Hold, Plan, Reason, Refusal, plan};
 use crate::record::{RecordFile, Recorded};
-use crate::repair::{RepairOutcome, Timings, replace};
+use crate::repair::{RepairOutcome, Timings, replace_watched};
+use crate::start_wait::StartWatch;
 use crate::status::{Seen, ServiceStatus, compose};
 use crate::tracker::RepairTracker;
 use std::path::Path;
@@ -46,6 +47,7 @@ pub struct Manager {
     timings: Timings,
     tracker: Arc<RepairTracker>,
     answers: Box<dyn FnMut() -> bool + Send>,
+    start_watch: Option<Box<dyn StartWatch>>,
     clock: fn() -> u64,
 }
 
@@ -70,6 +72,7 @@ impl Manager {
             timings: Timings::default(),
             tracker: Arc::new(RepairTracker::new()),
             answers: Box::new(answers),
+            start_watch: None,
             clock: unix_now,
         }
     }
@@ -78,6 +81,17 @@ impl Manager {
     #[must_use]
     pub fn with_timings(mut self, timings: Timings) -> Self {
         self.timings = timings;
+        self
+    }
+
+    /// Judges the wait for the service after a registration by what the OS shows of the job instead of a fixed time
+    /// ([`Timings::start_wait`]): a slow start is waited for, a job that vanished, restarts in a loop or is stuck fails
+    /// early with what was observed, a refused one goes round another cycle. [`StartWait`](crate::StartWait) is the
+    /// recommended watch. It only applies to a backend that can observe the job ([`Backend::observe_start`]; launchd);
+    /// the others, and a manager without a watch, keep the fixed wait.
+    #[must_use]
+    pub fn with_start_watch(mut self, watch: Box<dyn StartWatch>) -> Self {
+        self.start_watch = Some(watch);
         self
     }
 
@@ -164,11 +178,12 @@ impl Manager {
         log::info!(reason = reason.describe(), mechanism:? = self.backend.mechanism(); "replacing the background service's registration");
         let tracker = self.tracker.clone();
         let answers = &mut self.answers;
-        let outcome = replace(
+        let outcome = replace_watched(
             self.backend.as_mut(),
             &mut || answers(),
             cancel,
             &self.timings,
+            self.start_watch.as_deref_mut(),
             &mut |step| {
                 log::info!(step:% = step; "service repair");
                 tracker.step(&step);
