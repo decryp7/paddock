@@ -58,6 +58,7 @@ Status words are honest: **built** (code and tests committed), **in progress** (
 | WP-34 | Startup manager filter: hide OS and signed entries | built: engine-side filter with counts, remembered; "signed" needs a publisher, which macOS launch agents do not report yet |
 | WP-35 | Network change events (Wi-Fi joins, VPN up/down, IP changes) on the timeline | built: `dyno_core::netchange`, per-OS Wi-Fi readers, slow polling; macOS may hide the Wi-Fi name; Windows and Linux readers are fixture-tested only |
 | WP-36 | Taming acceptance rules | dropped ([ADR 0021](adr/0021-monitoring-only.md)) |
+| WP-38 | Customizable tray popup widgets | planned for 1.1 (user request 2026-10-31) |
 
 ## Still open in v1
 
@@ -426,6 +427,22 @@ or other shared OS services must poll rarely or use change notifications.
   Pitcrew shows Dyno's machine health when both run; Pitwall's Explain this (WP-17). All through ADR 0014's protocol, on the
   user's click or opt-in.
 - **Acceptance.** Each integration declares what it reads; none writes; each degrades to nothing when the other app is absent.
+
+## WP-38 Customizable tray popup widgets
+
+- **Scope.** The person chooses which small widgets the tray popup shows, and their order, from a list such as active alarms,
+  disk space per volume, CPU and memory now, network now, backup health, last issue and pinned counters. Not in 1.0: planned for 1.1.
+- **Settings.** The choice persists in settings as a versioned list, with sensible defaults (alarms, disk space, CPU and memory);
+  damaged or unknown entries fall back to the defaults with a note, as WP-21 does.
+- **Data.** Values come from the engine through its existing operations; the UI formats them and adds no domain logic (ER-22 and
+  the Paddock rule on where logic lives).
+- **States.** Every widget has a designed empty, loading and error state, each with a short next step.
+- **Accessibility.** The popup is keyboard-operable: a logical focus order follows the widget order, every widget has a label, and
+  the chooser lists widgets as an accessible list with move-up and move-down buttons.
+- **Shared.** Built on the shared tray popover in `paddock-window`: the widget host and the chooser are shared, and each app only
+  registers its own widgets. Touches `crates/paddock-window`, `app/src-tauri/src/tray.rs`, `app/src/app/features/tray/**`.
+- **Acceptance.** Choose, reorder and persist across restarts; the popup renders within the existing popover limits (size, placement
+  and closing on blur, WP-22); tests cover each widget's empty, loading and error states.
 
 ## Later (after 1.0)
 <a id="after-v1"></a>

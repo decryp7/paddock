@@ -26,6 +26,7 @@ coverage (98.6% / 98.2% lines, see Engine); screenshots at 1440x900 @2x in `docs
    fault-injecting database or file layer. Added seams: the in-memory database returns an error (not an exit) and takes an injected opener, a size limit
    parameter for downloads, platform parameters for folder error messages, `Gathered::into_candidates`, `feeds_in`.
 6. App icons are guarded in CI (`scripts/ci/check-icons.mjs`, copied from Pitwall): the artwork must fill the canvas.
+7. Tray popup widgets on the shared paddock-window widget host (see Dyno roadmap WP-38); planned, after the app's current release.
 
 ## Renderer
 
