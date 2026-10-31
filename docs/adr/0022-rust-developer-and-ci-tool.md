@@ -4,9 +4,8 @@
   the consolidation WP-C1 to WP-C6, with conformance as a shared Rust rules crate; only the categories shown to lose
   something real stay non-Rust, each with its reason. The five open decisions were taken on 2026-10-28 (Decisions
   taken).
-- Amendment 2026-10-31 (generic tools `devkit`, `wiki`, `heavy`; extensibility; tool logging): **Proposed amendment**,
-  section "Amendment (2026-10-31, Proposed amendment)". Its three decisions were taken by the user on 2026-10-31 (G.10);
-  it stays Proposed until an independent review.
+- Amendment 2026-10-31 (generic tools `devkit`, `wiki`, `heavy`; extensibility; tool logging): **Accepted (2026-11-01, after independent review)**,
+  section "Amendment (2026-10-31, Proposed amendment)". Its decisions were taken by the user on 2026-10-31 and 2026-11-01 (G.10).
 - Date: 2026-10-27
 - Related: rules 3–5 (affected tests, fix locally, failing test first), rule 7 (tests never touch the machine), rule 13
   (bounded parallelism), rule 22 (independent review of images), rule 23 (ad-hoc sealing), rule 40 (recurring bugs mean
@@ -533,9 +532,8 @@ is the first.
 
 ## Amendment (2026-10-31, Proposed amendment): generic tools, extensibility and tool logging
 
-- Status: **Proposed amendment**, not yet accepted: the user took its decisions on 2026-10-31 and 2026-11-01 (G.10, ten in all); acceptance
-  waits for the re-review of the 2026-11-01 change (compiled Rust only) and the re-check of the earlier review's fixes. The rest of this ADR stands; where this section differs, it describes
-  the change being proposed.
+- Status: **Accepted (2026-11-01, after independent review)**. The user took its decisions on 2026-10-31 and 2026-11-01 (G.10, ten in all). The rest of this ADR stands; where this section differs, it describes
+  the change made.
 - Asked by the user on 2026-10-31: "start moving all to rust tooling", "consider which ones are generic and which are
   paddock", "perhaps rust tooling can be plugin based? and extensible?" ("but not sandboxing"), and the tools must log well
   enough for troubleshooting (rule 56, ER-27).
@@ -835,15 +833,15 @@ change or on the final run before merge (rule 50). Every local build or test run
 | 0 (in progress) | G0a `wiki`, G0b `heavy` | +1 after G1 | `wiki lint --json` equals `wiki-lint.mjs`'s findings on the wiki fixtures and on `docs/wiki`; `heavy` and `heavy.sh` waiters sharing one slot folder, never more than N holders (a stress test with a fake clock), the home guard's refusals as goldens | `scripts/wiki-lint.mjs` (+test) and engineering-rules' two copies; `heavy.sh` after one overlap release, templates and skills name the binary |
 | 1a | G1, G2 | 4 | the contract test (two compiled plugins, a binary crate and a fixture binary: env, one JSON object, exit codes, contract refusal, `OperationId` in both logs); a failure fixture whose log alone names the cause | – |
 | 1b | G3 to G11 | 9 | per command: the old script's stdout, stderr's `::error::` lines and exit code on fixture inputs, as goldens (`paddock_testkit::golden`); `run` on fixtures that exit with 0xC0000409 (Windows), SIGSEGV (Unix); timings on recorded API replies; commit-lint on the existing 77-line test's messages; bisect and polluter on scripted fake test commands | each PR deletes the script and its test, switches YAML, `package.json`, lefthook and docs, removes the copy from `docs/known-copies.toml`, and shrinks §3.7's baseline |
-| 2 | R0b, R1, R10, R2 + G12, R3, R4, R5, R6, R7, R8a, R8, R11, R12, R13, R14, R15, R16 (this order; the release-path packages above never inside a release window) | 44 (was 38: the earlier sum was wrong, it is 39.5, and the inventory re-estimates add 0.5 for R3 and 4 for R11) | as §3.6 (goldens, shadow week for plan, release, `latest.json`, rules; release dry runs per app); for split engines also a generic fixture repo that is **not** Paddock-shaped | as §3.7; R16 also removes the engineering-rules scripts after their overlap |
+| 2 | R0b, R1, R10, R2 + G12, R3, R4, R5, R6, R7, R8a, R8, R11, R12, R13, R14, R15, R16 (this order; the release-path packages above never inside a release window) | 43 (was 38: the earlier sum was wrong, it is 39.5, and the inventory re-estimates add 0.5 for R3 and 4 for R11) | as §3.6 (goldens, shadow week for plan, release, `latest.json`, rules; release dry runs per app); for split engines also a generic fixture repo that is **not** Paddock-shaped | as §3.7; R16 also removes the engineering-rules scripts after their overlap |
 
 Wave 3 (added 2026-11-01): R19 to R23, 23.25 agent-days (about 23), in parallel with wave 2 where the release guard allows; none is on the release path, but R19's `./dev i18n` and `./dev ui build` change what app builds run, so they land outside release windows. Parity tests: the old script's output as goldens (i18n, Sass output, lints on fixtures), the dialog analysis on the existing fixtures plus the generated contract, the sample generator by seed-based property tests (invented data need not match byte for byte); retirement: each PR deletes the script and its test.
 
-Total about **58 agent-days** (wave 0: 1, wave 1a: 4, wave 1b: 9, wave 2: 44; against §7's 45 plus 1.5): about 4 more for
+Total about **57 agent-days** (wave 0: 1, wave 1a: 4, wave 1b: 9, wave 2: 43; against §7's 45 plus 1.5): about 4 more for
 the runtime, contract and logging (G1, G2), about 3 more to split engines from Paddock packs; R0 (3.5) is done. The
-adopted features G13 to G26, R17 and R18 add 23.0, and WP-A1 1.5 to 2, so the programme was about 82 agent-days; the compiled-only decision adds wave 3's 23 and R15 shrinks by 1 (its lints and analysis are in R19), so the whole programme is
-about **104 agent-days**.
-**With at most two tooling agents (the cap above) that is at least 52 working days each, so at least 11 calendar weeks**
+adopted features G13 to G26, R17 and R18 add 23.0, and WP-A1 1.5 to 2, so the programme was about 82 agent-days; the compiled-only decision adds wave 3's 23 (R15 shrinks by 1, within rounding, because its lints and analysis are in R19), so the whole programme is
+about **105 agent-days**.
+**With at most two tooling agents (the cap above) that is at least 52.5 working days each, so at least 11 calendar weeks**
 (5 working days a week, no idle time), before any release window blocks a release-path package. The "now" features of the
 research note (G13 to G19 and R17: about 9.5 days) go into waves 1a and 1b inside this cap.
 
@@ -911,7 +909,7 @@ Decided (user, 2026-11-01): "ignore cargo script. move completely to rust compil
 Defaults that stand (coordinator, 2026-10-31): the name `devkit`; `wiki` on `paddock-cli`'s exit codes (findings exit 5);
 the project config file `devkit.toml`; a one-release overlap before engineering-rules' scripts are deleted.
 
-The amendment stays **Proposed** until the independent re-review of the 2026-11-01 change and the earlier fixes is done; nothing is left for the user to decide.
+The amendment was independently reviewed and is **Accepted** (2026-11-01); nothing is left for the user to decide.
 
 ### Appendix G: inventory and classification (2026-10-31)
 
@@ -1019,7 +1017,7 @@ Paddock, S split, X exception (G.2: only a, b or c).
 | 92 | `apps/debrief/docs/research/*/harness/bench.sh`, `adr_eval.py`, `synonyms.py`, `img/src/duckdb-write-paths.py` | sh, py | 123+100+102+189 | research harnesses and figure generator | Dev | R21 | P | Debrief `xtask research` examples (2 days); the evidence stays with its note |
 | 93 | `apps/pitcrew/docs/design/render.mjs` | js | 47 | render the design sheets | Dev | R23 | P | `./dev diagrams render` with R11 (0.25 day) |
 | 94 | `ui/projects/paddock-ui/bin/*.mjs` (`i18n-build`, `i18n-messages`, `paddock-i18n`) | js | 168+406+170 | the package's i18n CLI, shipped in the npm package | Dev, CI | R19 | P | `./dev i18n` (3 days); the npm `bin` entries are removed (no backward compatibility before v1, rule 40's one mechanism) |
-| 95 | `rustup` installer shims, one per OS (`sh`, `ps1`, at most 30 lines each), the `./dev` (about 40 lines) and `dev.cmd` launchers, and `ci-image/fetch-verified.sh` | sh, ps1 | about 95 | install `rustup`, the stable toolchain (no pin, §3.3, Decisions 1) and `./dev` on a fresh machine or in the CI image, before any Rust tool exists | Dev, CI | R20 | X | exception (c): must run before Rust exists (the `./dev` and `dev.cmd` launchers are the entry that builds and runs the binary); kept as small as possible (download, verify checksum, run `rustup`, build `./dev`), everything else is `./dev setup` (row 76); 0.5 day with a test per OS |
+| 95 | `rustup` installer shims, one per OS (`sh`, `ps1`, at most 30 lines each), the `./dev` (about 40 lines) and `dev.cmd` launchers, and `ci-image/fetch-verified.sh` | sh, ps1 | about 140 | install `rustup`, the stable toolchain (no pin, §3.3, Decisions 1) and `./dev` on a fresh machine or in the CI image, before any Rust tool exists | Dev, CI | R20 | X | exception (c): must run before Rust exists (the `./dev` and `dev.cmd` launchers are the entry that builds and runs the binary); kept as small as possible (download, verify checksum, run `rustup`, build `./dev`), everything else is `./dev setup` (row 76); 0.5 day with a test per OS |
 | 96 | `apps/debrief/app/e2e/serve-prod.mjs` | js | 59 | serve the production build for the end-to-end run | CI | R22 | P | `./dev serve-prod` (0.5 day) |
 | 97 | `eslint/src/rules/*.cjs` | js | 562 | Paddock's custom ESLint rules (including the Angular template rules) | CI | – | X | exception (a), user decision 10 (2026-11-01): ESLint loads plugins only in JS, and the template rules need Angular's own parser |
 
