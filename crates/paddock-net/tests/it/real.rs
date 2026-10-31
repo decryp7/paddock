@@ -306,6 +306,7 @@ fn a_bad_url_in_the_wire_is_invalid_not_a_panic() {
         method: Method::Get,
         url: "not a url",
         reach: Reach::Public,
+        lan: LanAccess::Policy,
         headers: &[],
         body: &[],
         user_agent: "x",
@@ -315,4 +316,58 @@ fn a_bad_url_in_the_wire_is_invalid_not_a_panic() {
         body_timeout: None,
     };
     assert!(matches!(wire.send(&req), Err(NetError::Invalid(_))));
+}
+
+fn wire_request(url: &str, reach: Reach, lan: LanAccess) -> WireRequest<'_> {
+    WireRequest {
+        method: Method::Get,
+        url,
+        reach,
+        lan,
+        headers: &[],
+        body: &[],
+        user_agent: "x",
+        connect_timeout: Duration::from_secs(1),
+        timeout: Some(Duration::from_secs(1)),
+        response_timeout: Duration::from_secs(1),
+        body_timeout: None,
+    }
+}
+
+fn connect_refused(wire: &UreqWire, url: &str, reach: Reach, lan: LanAccess) -> bool {
+    matches!(
+        wire.send(&wire_request(url, reach, lan)),
+        Err(NetError::Connect(_))
+    )
+}
+
+#[test]
+fn the_connect_time_guard_holds_plain_http_to_private_addresses_and_no_lan_to_no_lan() {
+    let wire = UreqWire::new(&Policy::default(), ProxyMode::Direct).unwrap();
+    // Refused when the socket would be opened (what a name that answers differently the second time reaches), whatever the
+    // egress checked before; nothing is dialled: a public literal under PlainHttp, a private one under Deny with the widest reach.
+    assert!(connect_refused(
+        &wire,
+        "http://203.0.113.5:9/x",
+        Reach::Lan,
+        LanAccess::PlainHttp
+    ));
+    assert!(connect_refused(
+        &wire,
+        "https://192.168.1.20:9/x",
+        Reach::Loopback,
+        LanAccess::Deny
+    ));
+    assert!(connect_refused(
+        &wire,
+        "http://[64:ff9b::c0a8:114]:9/x",
+        Reach::Loopback,
+        LanAccess::Deny
+    ));
+    // This computer is exempt from both: a loopback server answers plain http under PlainHttp and under Deny.
+    let s = hello();
+    for lan in [LanAccess::PlainHttp, LanAccess::Deny] {
+        let r = wire.send(&wire_request(&s.url("/a"), Reach::Loopback, lan));
+        assert_eq!(r.map(|r| r.status).ok(), Some(200), "{lan:?}");
+    }
 }

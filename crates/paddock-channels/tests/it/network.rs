@@ -6,7 +6,7 @@ use common::*;
 use paddock_channels::*;
 use paddock_download::{Header, ProxyMode, ProxyRules, ProxyServer, TransportErrorKind as K};
 use paddock_jobs::time::SystemClock;
-use paddock_net::{Egress, Reach, SystemLookup, UreqWire};
+use paddock_net::{Egress, Policy, Reach, StaticLookup, SystemLookup, UreqWire};
 use paddock_secrets::Secret;
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,6 +20,7 @@ fn request(port: u16) -> PostRequest {
         ],
         body: br#"{"title":"x"}"#.to_vec(),
         timeout: Duration::from_secs(10),
+        lan: false,
     }
 }
 
@@ -32,6 +33,11 @@ fn egress(mode: ProxyMode) -> Arc<Egress> {
         Arc::new(SystemLookup),
         Arc::new(SystemClock),
     ))
+}
+
+/// The mail sender over the same loopback-reach egress as the poster.
+fn sender() -> LettreSender {
+    LettreSender::new(egress(ProxyMode::Direct))
 }
 
 fn poster() -> EgressPoster {
@@ -152,13 +158,14 @@ fn mail(port: u16, login: Option<&str>) -> MailRequest {
         subject: "Disk low".into(),
         body: "C: has 2 GB left".into(),
         step_timeout: Duration::from_secs(5),
+        lan: false,
     }
 }
 
 #[test]
 fn smtp_authenticates_and_delivers_to_every_recipient() {
     let (port, server) = smtp_server(SmtpScript::OK);
-    assert_eq!(LettreSender.send(&mail(port, Some("pw-value"))), Ok(()));
+    assert_eq!(sender().send(&mail(port, Some("pw-value"))), Ok(()));
     let seen = server.join().unwrap();
     let all = seen.join("\n");
     assert!(seen[0].to_uppercase().starts_with("EHLO"), "{all}");
@@ -180,7 +187,7 @@ fn smtp_authenticates_and_delivers_to_every_recipient() {
 #[test]
 fn smtp_without_a_login_does_not_authenticate() {
     let (port, server) = smtp_server(SmtpScript::OK);
-    assert_eq!(LettreSender.send(&mail(port, None)), Ok(()));
+    assert_eq!(sender().send(&mail(port, None)), Ok(()));
     assert!(
         !server
             .join()
@@ -225,7 +232,7 @@ fn smtp_replies_become_the_right_error() {
     ];
     for (script, check) in cases {
         let (port, server) = smtp_server(script);
-        let e = LettreSender.send(&mail(port, Some("pw"))).unwrap_err();
+        let e = sender().send(&mail(port, Some("pw"))).unwrap_err();
         assert!(check(&e), "{e:?}");
         assert!(!format!("{e:?} {e}").contains("pw-value"));
         let _ = server.join();
@@ -237,7 +244,7 @@ fn smtp_reset_by_the_server_is_a_connect_error() {
     // A held port that resets every connection, not a port read off a dropped listener (ADR 0023).
     let held = paddock_testkit::net::HeldPort::reset();
     let port = held.port();
-    let e = LettreSender.send(&mail(port, None)).unwrap_err();
+    let e = sender().send(&mail(port, None)).unwrap_err();
     assert!(e.retryable() && matches!(e, SendError::Connect(_)), "{e:?}");
 }
 
@@ -248,7 +255,7 @@ fn smtp_security_against_a_server_without_tls_fails_cleanly() {
         let mut m = mail(port, Some("pw"));
         m.security = security;
         m.step_timeout = Duration::from_secs(2);
-        let e = LettreSender.send(&m).unwrap_err();
+        let e = sender().send(&m).unwrap_err();
         assert!(!matches!(e, SendError::Panicked), "{e:?}");
         assert!(!e.to_string().contains("pw"));
         drop(server);
@@ -259,17 +266,17 @@ fn smtp_security_against_a_server_without_tls_fails_cleanly() {
 fn bad_addresses_are_refused_before_connecting() {
     let mut m = mail(1, None);
     m.from = "nobody".into();
-    assert!(matches!(LettreSender.send(&m), Err(SendError::Invalid(t)) if t.contains("sender")));
+    assert!(matches!(sender().send(&m), Err(SendError::Invalid(t)) if t.contains("sender")));
     let mut m = mail(1, None);
     m.to = vec!["a b".into()];
-    assert!(matches!(LettreSender.send(&m), Err(SendError::Invalid(t)) if t.contains("recipient")));
+    assert!(matches!(sender().send(&m), Err(SendError::Invalid(t)) if t.contains("recipient")));
     let mut m = mail(1, None);
     m.to.clear();
-    assert!(matches!(LettreSender.send(&m), Err(SendError::Invalid(t)) if t.contains("recipient")));
+    assert!(matches!(sender().send(&m), Err(SendError::Invalid(t)) if t.contains("recipient")));
     let mut m = mail(1, None);
     m.security = Security::StartTls;
     m.host = "a b".into();
-    assert!(matches!(LettreSender.send(&m), Err(SendError::Invalid(_))));
+    assert!(matches!(sender().send(&m), Err(SendError::Invalid(_))));
 }
 
 #[test]
@@ -299,7 +306,7 @@ fn the_whole_stack_delivers_a_webhook_and_an_email_through_the_real_adapters() {
         },
         secrets,
         std::sync::Arc::new(poster()),
-        std::sync::Arc::new(LettreSender),
+        std::sync::Arc::new(sender()),
         std::sync::Arc::new(paddock_jobs::time::SystemClock),
     );
     let out = d.dispatch(
@@ -330,7 +337,7 @@ fn smtp_edge_cases_are_classified() {
         ehlo: b"250 fake\r\n",
         ..SmtpScript::OK
     });
-    let e = LettreSender.send(&mail(port, Some("pw"))).unwrap_err();
+    let e = sender().send(&mail(port, Some("pw"))).unwrap_err();
     assert!(matches!(e, SendError::Auth(_)), "{e:?}");
     let _ = server.join();
     // A greeting that is not SMTP.
@@ -338,7 +345,7 @@ fn smtp_edge_cases_are_classified() {
         greeting: b"HELLO there\r\n",
         ..SmtpScript::OK
     });
-    let e = LettreSender.send(&mail(port, None)).unwrap_err();
+    let e = sender().send(&mail(port, None)).unwrap_err();
     assert!(
         matches!(e, SendError::Failed(_) | SendError::Connect(_)),
         "{e:?}"
@@ -348,7 +355,7 @@ fn smtp_edge_cases_are_classified() {
     let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let mut m = mail(silent.local_addr().unwrap().port(), None);
     m.step_timeout = Duration::from_millis(300);
-    let e = LettreSender.send(&m).unwrap_err();
+    let e = sender().send(&m).unwrap_err();
     assert!(
         matches!(e, SendError::Timeout(_) | SendError::Connect(_)),
         "{e:?}"
@@ -358,7 +365,7 @@ fn smtp_edge_cases_are_classified() {
     let mut m = mail(1, None);
     m.security = Security::StartTls;
     m.host = "a..b".into();
-    let e = LettreSender.send(&m).unwrap_err();
+    let e = sender().send(&m).unwrap_err();
     assert!(
         matches!(
             e,
@@ -390,4 +397,132 @@ fn the_poster_maps_every_network_failure_to_a_transport_kind() {
         req.url = "https://hooks.example.org/in".into();
         assert_eq!(EgressPoster::new(egress).post(&req).unwrap_err().kind, kind);
     }
+}
+
+fn sender_with(policy: Policy, lookup: StaticLookup) -> (LettreSender, Arc<Egress>) {
+    let e = Arc::new(Egress::new(
+        policy.clone(),
+        Arc::new(UreqWire::new(&policy, ProxyMode::Direct).unwrap()),
+        Arc::new(lookup),
+        Arc::new(SystemClock),
+    ));
+    (LettreSender::new(e.clone()), e)
+}
+
+/// Whether anything connected to `listener` (it is non-blocking).
+fn connected(listener: &std::net::TcpListener) -> bool {
+    listener.set_nonblocking(true).unwrap();
+    listener.accept().is_ok()
+}
+
+#[test]
+fn offline_mode_stops_mail_before_anything_is_resolved_or_connected() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let lookup = StaticLookup::new();
+    let (s, e) = sender_with(channel_policy(Reach::Loopback), lookup);
+    e.set_offline(true);
+    let err = s.send(&mail(port, None)).unwrap_err();
+    assert!(
+        matches!(&err, SendError::Invalid(t) if t.contains("offline")),
+        "{err}"
+    );
+    assert!(!err.retryable());
+    assert!(!connected(&listener));
+}
+
+#[test]
+fn a_mail_server_on_a_private_or_this_computers_address_needs_the_policy_and_the_switch() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    // Public reach: this computer is refused, with or without the switch, and nothing connects.
+    let (public, _) = sender_with(channel_policy(Reach::Public), StaticLookup::new());
+    for lan in [false, true] {
+        let mut m = mail(port, None);
+        m.lan = lan;
+        let err = public.send(&m).unwrap_err();
+        assert!(matches!(err, SendError::Invalid(_)), "{err}");
+    }
+    // A private address is refused for a channel without the switch even under a wide policy.
+    let (wide, _) = sender_with(
+        channel_policy(Reach::Lan),
+        StaticLookup::new().with("mail.example.org", &["192.168.1.20"]),
+    );
+    let mut m = mail(port, None);
+    m.host = "mail.example.org".into();
+    let err = wide.send(&m).unwrap_err();
+    assert!(
+        matches!(&err, SendError::Invalid(t) if t.contains("private network")),
+        "{err}"
+    );
+    // The address in the clear is refused the same way.
+    m.host = "192.168.1.20".into();
+    assert!(matches!(wide.send(&m), Err(SendError::Invalid(_))));
+    assert!(!connected(&listener));
+}
+
+#[test]
+fn mail_connects_to_the_checked_address_not_to_the_name() {
+    // `mail.test` exists only in the injected lookup: the system resolver would not find it, so a delivery proves the socket
+    // went to the address that was checked.
+    let (port, server) = smtp_server(SmtpScript::OK);
+    let (s, _) = sender_with(
+        channel_policy(Reach::Loopback),
+        StaticLookup::new().with("mail.test", &["127.0.0.1"]),
+    );
+    let mut m = mail(port, None);
+    m.host = "mail.test".into();
+    assert_eq!(s.send(&m), Ok(()));
+    assert!(
+        server
+            .join()
+            .unwrap()
+            .iter()
+            .any(|l| l.starts_with("MAIL FROM"))
+    );
+}
+
+#[test]
+fn a_name_with_no_address_is_a_connect_failure() {
+    let (s, _) = sender_with(channel_policy(Reach::Loopback), StaticLookup::new());
+    let mut m = mail(25, None);
+    m.host = "nowhere.example.org".into();
+    assert!(matches!(s.send(&m), Err(SendError::Connect(_))));
+}
+
+#[test]
+fn the_sender_has_a_debug_form_that_shows_nothing_of_the_policy() {
+    assert_eq!(format!("{:?}", sender()), "LettreSender");
+}
+
+#[test]
+fn a_refused_connection_to_a_checked_address_is_a_connect_failure() {
+    let port = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let err = sender().send(&mail(port, None)).unwrap_err();
+    assert!(matches!(err, SendError::Connect(_)), "{err}");
+    assert!(err.retryable());
+}
+
+#[test]
+fn the_next_checked_address_is_tried_after_a_refused_connect() {
+    // The first address of the name has nothing listening (::1, or no IPv6 at all: either way refused at once); the second has
+    // the server.
+    let (port, server) = smtp_server(SmtpScript::OK);
+    let (s, _) = sender_with(
+        channel_policy(Reach::Loopback),
+        StaticLookup::new().with("mail.test", &["::1", "127.0.0.1"]),
+    );
+    let mut m = mail(port, None);
+    m.host = "mail.test".into();
+    assert_eq!(s.send(&m), Ok(()));
+    assert!(
+        server
+            .join()
+            .unwrap()
+            .iter()
+            .any(|l| l.starts_with("MAIL FROM"))
+    );
 }

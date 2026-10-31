@@ -115,6 +115,11 @@ export interface SettingsPageDef<T extends object = object> extends Omit<LazyPar
   readonly icon?: string;
   readonly order: number;
   readonly when?: Live<T, boolean>;
+  /**
+   * Whether a change on this page is saved as it is made (the default). A page with its own Save button declares `false`, and the
+   * Settings footer then does not say "Changes are saved as you make them." while it is open.
+   */
+  readonly autosaves?: boolean;
 }
 
 /** The dialog kinds of ADR 0009. Each fixes what the shell applies (modality, size policy, footer, keys; ADR 0026 §1). */

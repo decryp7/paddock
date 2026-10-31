@@ -55,6 +55,7 @@ pub fn webhook(id: &str, auth: bool) -> ChannelConfig {
         enabled: true,
         events: vec!["diskLow".into()],
         min_severity: Severity::Info,
+        allow_lan: false,
         transport: Transport::Webhook {
             url: "https://hooks.example.org/in?key=abc".into(),
             auth,

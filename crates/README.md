@@ -970,7 +970,7 @@ use paddock_net::{Egress, Reach};
 
 let egress = app_egress;                                 // paddock-net Egress built with channel_policy(Reach::Lan)
 settings.validate()?;                                    // on Save: the message says what to fix; at most 8 channels
-let d = Dispatcher::new(settings, secrets, Arc::new(EgressPoster::new(egress)), Arc::new(LettreSender), Arc::new(SystemClock));
+let d = Dispatcher::new(settings, secrets, Arc::new(EgressPoster::new(egress.clone())), Arc::new(LettreSender::new(egress)), Arc::new(SystemClock));
 let msg = Message::new("diskLow", Severity::Error, "Disk low", "C: has 2 GB left", "runner-1");
 let deliveries = d.dispatch(&msg, &cancel);              // blocks: run it in a job; one Delivery per channel, in order
 let test = d.test_with(&draft, Some(&typed_password), "Spotter", &cancel);   // "Send test" before Save; d.test(id, ..) after
@@ -988,6 +988,18 @@ let test = d.test_with(&draft, Some(&typed_password), "Spotter", &cancel);   // 
   `@decryp7/paddock-ui/shell/channels`.
 - Network: `EgressPoster` over `paddock-net` (https only, plain http to this computer with `Reach::Loopback`, offline mode,
   connection reuse, no redirects, the answer's body never read).
+- Home network (`ChannelConfig::allow_lan`, wire `allowLan`, default false): validation accepts a private address, and plain http
+  to one, only with the switch, for a webhook URL, an ntfy server and an SMTP host alike. `EgressPoster` marks each HTTP request
+  (`Request::plain_http_on_lan()` or `Request::without_lan()`), so one egress built with `channel_policy(Reach::Lan)` lets only
+  switched channels reach private networks. Plain http needs every address the name resolves to to be private, checked before the
+  hop and again on the connect-time addresses.
+- E-mail obeys the same policy: `LettreSender::new(egress)` asks `Egress::check_host` first (Offline mode refuses with nothing
+  resolved or connected; the host must be public, or private only for an `allow_lan` channel within the policy's reach; every
+  address is checked), then connects to the checked address, not to the name again (lettre takes an address string, and the
+  `TlsParameters` keep the host name for the certificate), so a name cannot rebind. A failed connect tries the next checked address. A relay on this computer (`localhost`, 127.x) is judged by the same reach, so an
+  app that wants one builds its egress with `channel_policy(Reach::Loopback)`; with `Reach::Lan` or `Reach::Public` such a server
+  is refused at send time with a message that names the host (validation accepts `localhost`, as it does for webhooks, because
+  the policy is the app's and validation does not know it).
 - Retries: transient failures only (no connection, timeout, HTTP 408/425/429/5xx, a 4xx mail reply), at most 3 attempts by default
   (`RetryPolicy`, 5 at most), waits from `paddock_jobs::time::Backoff` (2 s doubling to 30 s), a server's `Retry-After` honoured up
   to that cap, every wait cancellable and on the injected `Clock` (tests use `FakeClock`). A bad configuration, a missing secret,

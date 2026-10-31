@@ -2,7 +2,7 @@
 
 use crate::error::NetError;
 use crate::policy::Policy;
-use crate::reach::{self, Reach, Refusal};
+use crate::reach::{self, LanAccess, Reach, Refusal};
 use crate::request::{Method, Request, Response, header_of};
 use crate::wire::{Lookup, Wire, WireRequest};
 use paddock_download::{Get, Header, Headers, TransportError, TransportErrorKind};
@@ -10,6 +10,7 @@ use paddock_jobs::CancelToken;
 use paddock_jobs::time::Clock;
 use std::collections::HashMap;
 use std::io::Read;
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -150,7 +151,7 @@ impl Egress {
             if cancel.is_cancelled() {
                 return Err(NetError::Cancelled);
             }
-            let class = self.check(&url, limit)?;
+            let class = self.check(&url, limit, request)?;
             if hop == 0 {
                 // A redirect may never go farther than where the request started.
                 limit = limit.min(class);
@@ -160,6 +161,7 @@ impl Egress {
                 method,
                 url: url.as_str(),
                 reach: limit,
+                lan: request.lan,
                 headers: &headers,
                 body: &body,
                 user_agent: &self.policy.user_agent,
@@ -210,7 +212,7 @@ impl Egress {
     }
 
     /// The checks before a hop: scheme, login, allow-list, and the reach of every address. Returns the reach the farthest address needs.
-    fn check(&self, url: &Url, limit: Reach) -> Result<Reach, NetError> {
+    fn check(&self, url: &Url, limit: Reach, request: &Request) -> Result<Reach, NetError> {
         let shown_url = shown(url.as_str());
         let host = url
             .host()
@@ -224,8 +226,13 @@ impl Egress {
         match url.scheme() {
             "https" => {}
             "http" if reach::host_is_loopback(&name) && limit >= Reach::Loopback => {}
+            "http"
+                if request.lan == LanAccess::PlainHttp
+                    && limit >= Reach::Lan
+                    && reach::host_may_be_lan(&name) => {}
             _ => return Err(NetError::Scheme(name)),
         }
+        let plain_lan = url.scheme() == "http" && !reach::host_is_loopback(&name);
         if !self.policy.host_allowed(&name) {
             return Err(NetError::NotAllowed(name));
         }
@@ -233,18 +240,81 @@ impl Egress {
             host: name.clone(),
             why,
         };
-        match host {
-            Host::Ipv4(ip) => reach::vet(&[ip.into()], limit).map_err(refuse),
-            Host::Ipv6(ip) => reach::vet(&[ip.into()], limit).map_err(refuse),
-            Host::Domain(d) => {
-                let port = url.port_or_known_default().unwrap_or(443);
-                let addrs = self
-                    .lookup
-                    .lookup(d, port)
-                    .map_err(|_| NetError::Connect(name.clone()))?;
-                reach::vet(&addrs, limit).map_err(refuse)
-            }
+        let addrs = self.resolve(&name, host, url.port_or_known_default().unwrap_or(443))?;
+        let needed = reach::vet(&addrs, limit).map_err(refuse)?;
+        if request.lan == LanAccess::Deny
+            && addrs
+                .iter()
+                .any(|a| reach::classify(*a) == reach::Class::Lan)
+        {
+            return Err(refuse(Refusal::TooFar(reach::Class::Lan)));
         }
+        // Plain http only ever goes to a private network: every address must be one, so a name spelled like a home host that
+        // also points at a public address (a token would travel in the clear to it) is refused.
+        if plain_lan
+            && !addrs
+                .iter()
+                .all(|a| reach::classify(*a) == reach::Class::Lan)
+        {
+            return Err(NetError::Scheme(name));
+        }
+        Ok(needed)
+    }
+
+    /// The addresses of `host`: the literal itself, or the lookup's answer.
+    fn resolve<S: AsRef<str>>(
+        &self,
+        name: &str,
+        host: Host<S>,
+        port: u16,
+    ) -> Result<Vec<IpAddr>, NetError> {
+        match host {
+            Host::Ipv4(ip) => Ok(vec![ip.into()]),
+            Host::Ipv6(ip) => Ok(vec![ip.into()]),
+            Host::Domain(d) => self
+                .lookup
+                .lookup(d.as_ref(), port)
+                .map_err(|_| NetError::Connect(name.to_string())),
+        }
+    }
+
+    /// The door for a connection that does not go through [`Egress::send`] (SMTP): the same checks as before an HTTP hop, on a
+    /// host name or address and a port. Fails with [`NetError::Offline`] first (nothing is resolved), then the allow-list, then
+    /// resolves the name and checks **every** address against the policy's reach and `lan`. Returns the checked addresses; the
+    /// caller must connect to one of them, not to the name again, so the name cannot answer differently the second time.
+    pub fn check_host(
+        &self,
+        host: &str,
+        port: u16,
+        lan: LanAccess,
+    ) -> Result<Vec<IpAddr>, NetError> {
+        if self.is_offline() {
+            return Err(NetError::Offline);
+        }
+        let name = host.trim().trim_matches(['[', ']']).to_ascii_lowercase();
+        let parsed = Host::parse(&if name.contains(':') {
+            format!("[{name}]")
+        } else {
+            name.clone()
+        })
+        .map_err(|_| NetError::Invalid(format!("{} is not a valid host name.", shown(host))))?;
+        if !self.policy.host_allowed(&name) {
+            return Err(NetError::NotAllowed(name));
+        }
+        let addrs = self.resolve(&name, parsed, port)?;
+        let refuse = |why: Refusal| NetError::Refused {
+            host: name.clone(),
+            why,
+        };
+        reach::vet(&addrs, self.policy.reach).map_err(refuse)?;
+        if lan == LanAccess::Deny
+            && addrs
+                .iter()
+                .any(|a| reach::classify(*a) == reach::Class::Lan)
+        {
+            return Err(refuse(Refusal::TooFar(reach::Class::Lan)));
+        }
+        Ok(addrs)
     }
 
     /// Keeps at least `min_gap` between two requests to one host, waiting on the clock (cancellable).

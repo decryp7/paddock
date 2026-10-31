@@ -30,7 +30,9 @@ pub use egress::{DownloadTransport, Egress, Streaming};
 pub use error::NetError;
 pub use fake::{FakeWire, Reply, Seen, StaticLookup};
 pub use policy::{HostPattern, MAX_PATTERNS, MAX_REDIRECTS, Policy};
-pub use reach::{Class, Reach, Refusal, classify, host_is_loopback, vet};
+pub use reach::{
+    Class, LanAccess, Reach, Refusal, classify, host_is_loopback, host_may_be_lan, vet,
+};
 pub use request::{Method, Request, Response};
 #[cfg(feature = "http")]
 pub use ureq_wire::UreqWire;

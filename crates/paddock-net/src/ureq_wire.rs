@@ -5,7 +5,7 @@
 
 use crate::error::NetError;
 use crate::policy::Policy;
-use crate::reach::{self, Reach, Refusal};
+use crate::reach::{self, Class, LanAccess, Reach, Refusal};
 use crate::request::Method;
 use crate::wire::{Wire, WireRequest, WireResponse};
 use paddock_download::{HttpConfig, ProxyMode, ProxyRules, ProxyServer, ureq_config};
@@ -18,6 +18,9 @@ use ureq::http::Uri;
 use ureq::unversioned::resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver};
 use ureq::unversioned::transport::{DefaultConnector, NextTimeout};
 
+/// One agent (connection pool) per proxy, reach and private-network treatment.
+type AgentKey = (Option<ProxyServer>, Reach, LanAccess);
+
 /// The real [`Wire`].
 pub struct UreqWire {
     mode: ProxyMode,
@@ -25,7 +28,7 @@ pub struct UreqWire {
     user_agent: String,
     connect_timeout: Duration,
     response_timeout: Duration,
-    agents: Mutex<HashMap<(Option<ProxyServer>, Reach), ureq::Agent>>,
+    agents: Mutex<HashMap<AgentKey, ureq::Agent>>,
 }
 
 impl UreqWire {
@@ -73,14 +76,14 @@ impl UreqWire {
             .len()
     }
 
-    fn agent(&self, url: &str, reach: Reach) -> Result<ureq::Agent, NetError> {
+    fn agent(&self, url: &str, reach: Reach, lan: LanAccess) -> Result<ureq::Agent, NetError> {
         let rules = self
             .rules
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         let proxy = rules.for_url(url).cloned();
-        let key = (proxy.clone(), reach);
+        let key = (proxy.clone(), reach, lan);
         let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(a) = agents.get(&key) {
             return Ok(a.clone());
@@ -98,6 +101,7 @@ impl UreqWire {
         // checked by the egress before the hop.
         let guard = Guard {
             reach: proxy.is_none().then_some(reach),
+            lan,
         };
         let agent = ureq::Agent::with_parts(config, DefaultConnector::default(), guard);
         agents.insert(key, agent.clone());
@@ -109,6 +113,7 @@ impl UreqWire {
 #[derive(Debug)]
 struct Guard {
     reach: Option<Reach>,
+    lan: LanAccess,
 }
 
 impl Resolver for Guard {
@@ -127,6 +132,32 @@ impl Resolver for Guard {
                     why,
                 ))
             })?;
+            let denied = |why: &'static str| {
+                ureq::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    why,
+                ))
+            };
+            let class_of = |a: &IpAddr| reach::classify(*a);
+            match self.lan {
+                LanAccess::Policy => {}
+                LanAccess::Deny if ips.iter().any(|a| class_of(a) == Class::Lan) => {
+                    return Err(denied("the name points at a private network"));
+                }
+                LanAccess::Deny => {}
+                // Plain http goes to private addresses only (this computer excepted): a name that now answers with a public
+                // address too would carry the message, and perhaps a token, in the clear to it.
+                LanAccess::PlainHttp
+                    if uri.scheme_str() == Some("http")
+                        && !uri.host().is_some_and(reach::host_is_loopback)
+                        && !ips.iter().all(|a| class_of(a) == Class::Lan) =>
+                {
+                    return Err(denied(
+                        "plain http is only for addresses on a private network",
+                    ));
+                }
+                LanAccess::PlainHttp => {}
+            }
         }
         Ok(addrs)
     }
@@ -144,7 +175,7 @@ fn with_headers<B>(
 
 impl Wire for UreqWire {
     fn send(&self, r: &WireRequest<'_>) -> Result<WireResponse, NetError> {
-        let agent = self.agent(r.url, r.reach)?;
+        let agent = self.agent(r.url, r.reach, r.lan)?;
         let host = ureq::http::Uri::try_from(r.url)
             .ok()
             .and_then(|u| u.host().map(str::to_string))
