@@ -384,6 +384,7 @@ fn a_program_inside_the_job_folder_cannot_hold_a_slot() {
 }
 
 #[test]
+// A statistical check of the acquire retry (5 attempts, 10 ms apart) under a concurrent status probe, not a proof.
 fn acquire_is_never_refused_because_a_status_probe_looked_at_the_slot() {
     let d = tempfile::tempdir().unwrap();
     let (root, job) = (d.path().join("ci"), d.path().join("job"));
@@ -394,6 +395,7 @@ fn acquire_is_never_refused_because_a_status_probe_looked_at_the_slot() {
     std::thread::scope(|s| {
         s.spawn(|| {
             let locks = FsLocks::new(&root);
+            // 120 s exceeds nextest's ci kill limit on purpose: the guard ends the probe; the deadline is only a last resort.
             let deadline = std::time::Instant::now() + Duration::from_secs(120);
             while !probe.stopped() && std::time::Instant::now() < deadline {
                 let _ = paddock_slots::slot_states(&locks, 1);

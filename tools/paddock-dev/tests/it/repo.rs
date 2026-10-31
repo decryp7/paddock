@@ -25,9 +25,11 @@ pub fn repo_problem(root: &Path, ceiling: Option<&Path>) -> Option<String> {
         Err(e) => return Some(format!("{} is not usable: git cannot be run ({e}). {fix}", root.display())),
     };
     if !out.success() {
+        let said = out.stderr_text();
         return Some(format!(
-            "{} is not inside a git repository (no .git folder found). {fix}",
-            root.display()
+            "{} is not inside a git repository (git said: {}). {fix}",
+            root.display(),
+            said.trim()
         ));
     }
     let top = PathBuf::from(out.stdout_text().trim());
@@ -52,28 +54,43 @@ pub enum Need {
     Fail(String),
 }
 
-/// The pure decision: `problem` from [`repo_problem`], and the values of `CI` and `PADDOCK_REQUIRE_GIT` (any non-empty value
-/// demands a repository; `CI=false` and `CI=0` do not).
-pub fn decide(root: PathBuf, problem: Option<String>, ci: Option<&str>, require_git: Option<&str>) -> Need {
-    let set = |v: Option<&str>| v.is_some_and(|v| !v.is_empty());
-    let ci_on = ci.is_some_and(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"));
+/// Whether a `CI` value means "running in CI": set and not empty, `0` or `false`.
+pub fn ci_on(ci: Option<&str>) -> bool {
+    ci.is_some_and(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
+}
+
+/// Whether a `.git` (folder or file) exists at `root` or any folder above it.
+pub fn git_marker_present(root: &Path) -> bool {
+    root.ancestors().any(|a| a.join(".git").exists())
+}
+
+/// The pure decision. `problem` is from [`repo_problem`]; `git_present` says a `.git` exists at or above the root. Only a tree
+/// with no `.git` at all (an export) can skip; a `.git` that git cannot use (broken worktree, bad ownership, corrupt) or a copy
+/// inside another repository fails with git's own message. `CI` (see [`ci_on`]) or a non-empty `PADDOCK_REQUIRE_GIT` make even
+/// the export fail.
+pub fn decide(root: PathBuf, problem: Option<String>, git_present: bool, ci: Option<&str>, require_git: Option<&str>) -> Need {
+    let required = ci_on(ci) || require_git.is_some_and(|v| !v.is_empty());
     match problem {
         None => Need::Run(root),
-        Some(p) if ci_on || set(require_git) => Need::Fail(p),
+        Some(p) if required || git_present => Need::Fail(p),
         Some(p) => Need::Skip(p),
     }
 }
 
 /// The repository root when this tree is a git working tree; otherwise prints `SKIPPED: <test> needs a git checkout: <why>` and
-/// returns `None` (the caller returns), or panics when `CI` or `PADDOCK_REQUIRE_GIT` is set, so CI never skips quietly.
+/// returns `None` (the caller returns), or panics when the decision is to fail. The line is written straight to stderr, past the
+/// test harness's capture; nextest shows it for these tests through `success-output` overrides in `.config/nextest.toml`.
 pub fn require_repo(test: &str) -> Option<PathBuf> {
+    use std::io::Write;
     let root = repo_root();
     let problem = repo_problem(&root, None);
     let (ci, req) = (std::env::var("CI").ok(), std::env::var("PADDOCK_REQUIRE_GIT").ok());
-    match decide(root, problem, ci.as_deref(), req.as_deref()) {
+    match decide(root.clone(), problem, git_marker_present(&root), ci.as_deref(), req.as_deref()) {
         Need::Run(root) => Some(root),
         Need::Skip(why) => {
-            eprintln!("SKIPPED: {test} needs a git checkout: {why}");
+            let mut err = std::io::stderr();
+            let _ = err.write_all(format!("SKIPPED: {test} needs a git checkout: {why}\n").as_bytes());
+            let _ = err.flush();
             None
         }
         Need::Fail(why) => panic!("{test} needs a git checkout: {why}"),
@@ -84,12 +101,38 @@ pub fn require_repo(test: &str) -> Option<PathBuf> {
 fn without_a_repository_the_test_skips_unless_ci_or_require_git_is_set() {
     let root = || PathBuf::from("x");
     let why = || Some("no repo".to_string());
-    assert_eq!(decide(root(), None, Some("true"), Some("1")), Need::Run(root()));
-    assert_eq!(decide(root(), why(), None, None), Need::Skip("no repo".into()));
-    assert_eq!(decide(root(), why(), Some(""), Some("")), Need::Skip("no repo".into()));
-    assert_eq!(decide(root(), why(), Some("false"), None), Need::Skip("no repo".into()));
-    assert_eq!(decide(root(), why(), Some("true"), None), Need::Fail("no repo".into()));
-    assert_eq!(decide(root(), why(), None, Some("1")), Need::Fail("no repo".into()));
+    assert_eq!(decide(root(), None, true, Some("true"), Some("1")), Need::Run(root()));
+    assert_eq!(decide(root(), why(), false, None, None), Need::Skip("no repo".into()));
+    assert_eq!(decide(root(), why(), false, Some(""), Some("")), Need::Skip("no repo".into()));
+    assert_eq!(decide(root(), why(), false, Some("false"), Some("")), Need::Skip("no repo".into()));
+    assert_eq!(decide(root(), why(), false, Some("0"), None), Need::Skip("no repo".into()));
+    assert_eq!(decide(root(), why(), false, Some("true"), None), Need::Fail("no repo".into()));
+    assert_eq!(decide(root(), why(), false, None, Some("1")), Need::Fail("no repo".into()));
+    // A .git that git cannot use never skips.
+    assert_eq!(decide(root(), why(), true, None, None), Need::Fail("no repo".into()));
+}
+
+#[test]
+fn a_broken_git_file_fails_with_gits_message_and_no_git_at_all_skips() {
+    let dir = tempfile::tempdir().unwrap();
+    let bare = dir.path().join("export");
+    std::fs::create_dir(&bare).unwrap();
+    let problem = repo_problem(&bare, dir.path().parent());
+    assert!(!git_marker_present(&bare));
+    assert!(matches!(
+        decide(bare.clone(), problem, git_marker_present(&bare), None, None),
+        Need::Skip(_)
+    ));
+
+    let broken = dir.path().join("worktree");
+    std::fs::create_dir(&broken).unwrap();
+    std::fs::write(broken.join(".git"), "gitdir: /nonexistent/paddock-dev-test/gitdir\n").unwrap();
+    let problem = repo_problem(&broken, dir.path().parent());
+    assert!(git_marker_present(&broken));
+    match decide(broken.clone(), problem, git_marker_present(&broken), None, None) {
+        Need::Fail(why) => assert!(why.contains("git said: fatal:"), "{why}"),
+        other => panic!("{other:?}"),
+    }
 }
 
 #[test]

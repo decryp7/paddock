@@ -38,7 +38,7 @@ fn a_wrong_command_line_is_usage_exit_2_and_json_mode_gets_one_error_object() {
 
 #[test]
 fn self_hash_prints_one_object_with_the_hash_and_the_compiler() {
-    if crate::repo::require_repo("cli::self_hash").is_none() {
+    if crate::repo::require_repo("cli::self_hash_prints_one_object_with_the_hash_and_the_compiler").is_none() {
         return;
     }
     let (code, out, _) = dev(&["--json", "self", "hash"]);
@@ -55,7 +55,7 @@ fn self_hash_prints_one_object_with_the_hash_and_the_compiler() {
 
 #[test]
 fn graph_affected_prints_the_plan_for_the_repository_it_runs_in_or_is_pointed_at() {
-    let Some(root) = crate::repo::require_repo("cli::graph_affected_prints_the_plan") else {
+    let Some(root) = crate::repo::require_repo("cli::graph_affected_prints_the_plan_for_the_repository_it_runs_in_or_is_pointed_at") else {
         return;
     };
     let root = root.display().to_string();
@@ -117,6 +117,8 @@ fn self_hash_outside_a_repository_or_without_an_input_list_names_the_next_step()
             .args(["self", "hash"])
             .current_dir(dir)
             .env("GIT_CEILING_DIRECTORIES", d.path().parent().unwrap())
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
             .output()
             .unwrap();
         (out.status.code().unwrap(), String::from_utf8_lossy(&out.stderr).into_owned())
@@ -125,7 +127,13 @@ fn self_hash_outside_a_repository_or_without_an_input_list_names_the_next_step()
     assert_eq!(code, 1);
     assert!(err.contains("Paddock repository"), "{err}");
     // A repository that is not Paddock's: no tools/paddock-dev/inputs.txt.
-    let init = Command::new("git").args(["init", "-q"]).current_dir(d.path()).status().unwrap();
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(d.path())
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .status()
+        .unwrap();
     assert!(init.success());
     let (code, err) = run(d.path());
     assert_eq!(code, 1);
@@ -140,6 +148,8 @@ fn graph_affected_outside_a_paddock_repository_fails_at_once_and_names_the_next_
             .args(["graph", "affected", "--all"])
             .current_dir(d.path())
             .env("GIT_CEILING_DIRECTORIES", d.path().parent().unwrap())
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
             .output()
             .unwrap();
         (out.status.code().unwrap(), String::from_utf8_lossy(&out.stderr).into_owned())
@@ -148,7 +158,13 @@ fn graph_affected_outside_a_paddock_repository_fails_at_once_and_names_the_next_
     let (code, err) = run();
     assert_eq!(code, 1);
     assert!(err.contains("--root"), "{err}");
-    let init = Command::new("git").args(["init", "-q"]).current_dir(d.path()).status().unwrap();
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(d.path())
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .status()
+        .unwrap();
     assert!(init.success());
     let (code, err) = run();
     assert_eq!(code, 1);
