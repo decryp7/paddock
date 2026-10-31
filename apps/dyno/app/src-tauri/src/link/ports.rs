@@ -242,6 +242,8 @@ pub struct Ask<'a> {
     /// The look is the machine's decision look (phase `Looking`): a file beside a held lock is connected to without the service
     /// ([`service_needed`]). Every other look that asks the service (after a connection, a change, a wait) gets its answer.
     pub deciding: bool,
+    /// The look is a recheck of the service in the wait for its agent (see `Command::Look::recheck`).
+    pub recheck: bool,
 }
 
 /// One look at the world for the machine: the discovery file (bounded read), the agent lock, the launcher's child with
@@ -260,6 +262,7 @@ pub fn look(
         cpu,
         lock,
         deciding,
+        recheck,
     } = ask;
     let found = Discovery::read(&dirs.discovery());
     let child = held.map(|g| (g, launcher.child()));
@@ -280,7 +283,7 @@ pub fn look(
         }
     });
     let asked = std::time::Instant::now();
-    let service = ask_service(probe, hint.as_ref(), lock, deciding);
+    let service = ask_service(probe, hint.as_ref(), lock, deciding, recheck);
     let service_ms = service.map(|_| u64::try_from(asked.elapsed().as_millis()).unwrap_or(u64::MAX));
     let look = Look {
         seq,
@@ -308,8 +311,21 @@ fn ask_service(
     hint: Option<&HintSeen>,
     lock: Option<LockSeen>,
     deciding: bool,
+    recheck: bool,
 ) -> Option<super::ServiceState> {
-    probe.filter(|_| !deciding || service_needed(hint, lock)).map(|p| p())
+    probe
+        .filter(|_| {
+            if deciding {
+                service_needed(hint, lock)
+            } else if recheck {
+                // An agent holds the lock: the service's answer is not needed to wait for it (it only counts rechecks that find the
+                // lock free), and `SMAppService.status` can take 10 s under load, hiding the agent's file meanwhile.
+                lock != Some(LockSeen::Held)
+            } else {
+                true
+            }
+        })
+        .map(|p| p())
 }
 
 /// A routine look (one of a wait's ticks) is told only when it took at least this long: a slow look is a finding, a fast one noise.
@@ -429,13 +445,41 @@ mod tests {
                 supervises: true,
             }
         });
-        assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Free), true).is_some());
+        assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Free), true, false).is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Held), true).is_none());
-        assert!(ask_service(None, None, Some(LockSeen::Free), true).is_none(), "no probe, no answer");
+        assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Held), true, false).is_none());
+        assert!(
+            ask_service(None, None, Some(LockSeen::Free), true, false).is_none(),
+            "no probe, no answer"
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 1, "the held-lock decision look never called it");
         // A look that is not the decision (after a connection, a service change, a wait) always gets the service's answer.
-        assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Held), false).is_some());
+        assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Held), false, false).is_some());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    /// The restore-at-login start on the loaded VM (2026-10-31): the agent launchd started was up and its file written at 22:18:47, but
+    /// the app's recheck look had begun before and asked the service for 10 s (`SMAppService.status` under load), and the next one asked
+    /// again for 2 s: connected at 22:18:59, 12 s late. A recheck look that finds the lock held does not need the service (the lock says
+    /// an agent runs; the service answer only counts rechecks while the lock is free), so it does not wait for it.
+    #[test]
+    fn a_wait_recheck_that_finds_the_lock_held_does_not_ask_the_service() {
+        let calls = Arc::new(AtomicU32::new(0));
+        let c = calls.clone();
+        let probe: ServiceProbe = Arc::new(move || {
+            c.fetch_add(1, Ordering::SeqCst);
+            super::super::ServiceState {
+                installed: true,
+                supervises: true,
+            }
+        });
+        // Held, with or without the file: not asked.
+        assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Held), false, true).is_none());
+        assert!(ask_service(Some(&probe), None, Some(LockSeen::Held), false, true).is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        // Free (nothing runs: the service may be starting nothing) or not probed: asked, as before.
+        assert!(ask_service(Some(&probe), None, Some(LockSeen::Free), false, true).is_some());
+        assert!(ask_service(Some(&probe), None, None, false, true).is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 

@@ -17,6 +17,51 @@ fn json<T: Serialize>(v: &T) -> String {
     serde_json::to_string_pretty(v).unwrap_or_else(|e| format!("{{\"error\":\"could not serialise: {e}\"}}"))
 }
 
+/// Most of one log file a bundle holds (its recent part).
+pub const LOG_BYTES_PER_FILE: usize = 256 * 1024;
+/// Most log files a bundle holds (the newest of the app and the agent).
+const MAX_LOG_FILES: usize = 4;
+
+/// The newest dated logs of Dyno's processes in `dir` (`dyno.<day>.log` for the app, `dyno-agent.<day>.log` for the agent):
+/// `(path in the bundle, recent text)`, each cut to [`LOG_BYTES_PER_FILE`] at a line start. Read from disk, so they are there with
+/// the app's own process stopped or crashed; nothing is asked of anything. A missing folder gives nothing.
+pub fn recent_logs(dir: &Path) -> Vec<(String, String)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
+        .flatten()
+        .filter(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            (n.starts_with("dyno.") || n.starts_with("dyno-agent.")) && n.ends_with(".log") && e.path().is_file()
+        })
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    files.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    files
+        .into_iter()
+        .take(MAX_LOG_FILES)
+        .filter_map(|(_, path)| {
+            let mut file = std::fs::File::open(&path).ok()?;
+            let len = file.metadata().ok()?.len();
+            let start = len.saturating_sub(LOG_BYTES_PER_FILE as u64);
+            file.seek(SeekFrom::Start(start)).ok()?;
+            let mut bytes = Vec::new();
+            file.take(LOG_BYTES_PER_FILE as u64).read_to_end(&mut bytes).ok()?;
+            if start > 0 {
+                // Began inside a line: drop up to the first newline.
+                match bytes.iter().position(|b| *b == b'\n') {
+                    Some(i) => {
+                        bytes.drain(..=i);
+                    }
+                    None => bytes.clear(),
+                }
+            }
+            let name = path.file_name()?.to_string_lossy().into_owned();
+            (!bytes.is_empty()).then(|| (format!("logs/{name}"), String::from_utf8_lossy(&bytes).into_owned()))
+        })
+        .collect()
+}
+
 /// The user names, home folders and machine names of this machine, for the redactor.
 pub fn local_identity(host_name: Option<String>) -> Redactor {
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
@@ -32,6 +77,11 @@ pub fn local_identity(host_name: Option<String>) -> Redactor {
 
 /// Collects the bundle (redacted and bounded). Slow only the first time (the inventory is read then).
 pub fn collect(shared: &Shared) -> Result<DiagnosticsBundle, String> {
+    collect_with_logs(shared, &crate::logging::log_dir(&shared.dirs))
+}
+
+/// [`collect`] with the folder the recent logs are read from named (the tests name a temporary one).
+pub fn collect_with_logs(shared: &Shared, log_dir: &Path) -> Result<DiagnosticsBundle, String> {
     let inventory = crate::inventory::get(shared);
     let t = now();
     let mut b = BundleBuilder::new(
@@ -94,6 +144,13 @@ pub fn collect(shared: &Shared) -> Result<DiagnosticsBundle, String> {
     }
     add("activity.json", "What Dyno recorded recently", json(&activity))?;
     add("alerts.json", "Recent alerts", json(&alerts))?;
+    for (path, text) in recent_logs(log_dir) {
+        add(
+            &path,
+            "The recent part of a log; file contents are never logged, user names and addresses are replaced",
+            text,
+        )?;
+    }
     if let Some(r) = recorder {
         add(
             "recorder/last-10-minutes.json",
@@ -106,7 +163,7 @@ pub fn collect(shared: &Shared) -> Result<DiagnosticsBundle, String> {
 
 const README: &str = "Dyno diagnostics bundle\n\nThis zip was made on your request and was not sent anywhere. User names, home folders, the machine name, \
 e-mail addresses and IP addresses were replaced with placeholders (<user>, ~, <machine>, <email>, <ip>); manifest.json lists every file and \
-what was removed. Look through the files before you share the bundle.\n";
+what was removed. logs/ holds the recent part of the app's and the agent's own logs. Look through the files before you share the bundle.\n";
 
 fn refuse(message: impl Into<String>) -> AgentError {
     AgentError::new(ErrorCode::BadRequest, message)
@@ -210,6 +267,37 @@ mod tests {
         assert!(write_zip(Path::new("/"), &bundle()).is_err());
         let e = write_zip(dir.path(), &bundle()).unwrap_err();
         assert_eq!(e.code, ErrorCode::BadRequest);
+    }
+
+    /// "Save bundle" on Dyno's Diagnostics page held 12 data files and no log: the logs of both processes are what a bug report is
+    /// read from. The newest dated logs of the app and the agent are included, each cut to its recent part at a line.
+    #[test]
+    fn the_newest_dated_logs_of_both_processes_are_read_cut_at_a_line_and_bounded() {
+        let dir = tempfile::tempdir().unwrap();
+        let line = "{\"@m\":\"Agent running\"}\n";
+        std::fs::write(dir.path().join("dyno.2026-10-31.log"), line.repeat(40_000)).unwrap(); // about 1 MB
+        std::fs::write(dir.path().join("dyno-agent.2026-10-31.log"), format!("first\n{line}")).unwrap();
+        std::fs::write(dir.path().join("other.2026-10-31.log"), "not ours\n").unwrap();
+        std::fs::write(dir.path().join("dyno.notes.txt"), "no\n").unwrap();
+        let logs = recent_logs(dir.path());
+        let names: Vec<&str> = logs.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert!(
+            names.contains(&"logs/dyno.2026-10-31.log") && names.contains(&"logs/dyno-agent.2026-10-31.log"),
+            "{names:?}"
+        );
+        let app = &logs.iter().find(|(n, _)| n == "logs/dyno.2026-10-31.log").unwrap().1;
+        assert!(
+            app.len() <= LOG_BYTES_PER_FILE && app.starts_with("{\"@m\""),
+            "cut to the window at a line: {}",
+            app.len()
+        );
+        let agent = &logs.iter().find(|(n, _)| n.contains("agent")).unwrap().1;
+        assert!(agent.starts_with("first\n"), "a small log is whole");
+        assert!(
+            recent_logs(&dir.path().join("missing")).is_empty(),
+            "no log folder: nothing, not an error"
+        );
     }
 
     #[test]

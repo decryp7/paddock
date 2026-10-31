@@ -332,3 +332,23 @@ fn the_diagnostics_bundle_names_the_zone_in_use() {
         .expect("the time zone file");
     assert!(zone.text.contains("UTC+08:00"), "{}", zone.text);
 }
+
+#[test]
+fn the_diagnostics_bundle_holds_the_recent_logs_of_both_processes() {
+    let h = Harness::start(None);
+    let logs = tempfile::tempdir().unwrap();
+    std::fs::write(logs.path().join("dyno.2026-10-31.log"), "app line\n").unwrap();
+    std::fs::write(logs.path().join("dyno-agent.2026-10-31.log"), "agent line\n").unwrap();
+    let bundle = dyno_agent::diagnostics::collect_with_logs(&h.shared(), logs.path()).unwrap();
+    for (name, text) in [
+        ("logs/dyno.2026-10-31.log", "app line"),
+        ("logs/dyno-agent.2026-10-31.log", "agent line"),
+    ] {
+        let f = bundle
+            .files
+            .iter()
+            .find(|f| f.path == name)
+            .unwrap_or_else(|| panic!("{name} in the bundle"));
+        assert!(f.text.contains(text), "{}", f.text);
+    }
+}
