@@ -103,6 +103,7 @@ test.describe('shared settings and panels keep the family density under a host t
     const toast = page.getByTestId('undo-toast');
     await expect(toast).toBeVisible();
     expect(await token(toast, '--mat-button-text-container-height')).toBe(`${await px(page, 'height', 'var(--pd-button-height)')}px`);
+    expect((await toast.getByRole('button', { name: 'Undo', exact: true }).boundingBox())!.height).toBeLessThanOrEqual((await px(page, 'height', 'var(--pd-button-height)')) + 1);
     await toast.getByRole('button', { name: 'Dismiss' }).click();
   });
 

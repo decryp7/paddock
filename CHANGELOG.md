@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `DialogFrame`: `contentView`, so a dialog's header, footer and body never show different steps (`@decryp7/paddock-ui/shell/dialogs`)
+- New optional input `contentView` on `DialogFrame` (the mounted content's change detector; `DialogShell` and `DialogHost` set it). `render()` now checks the content together with the frame. Before, a `run` action that changed the content's state (a wizard's Continue) refreshed the header slot and the footer at once while the body, which sits in the host's view, followed on the next tick: for one frame the stepper and the buttons showed the new step over the old, taller body (Pitcrew's register window overflowed its body by 165 px).
+
 ### Family Material density and shape: one section of `_material.scss`, on `body` (ER-21)
 - Shared surfaces drew 56px fields with large type, pill buttons and tall segmented controls where the host app's Material theme
   differed from the bridge. Root cause (Material 22.2.4): `mat.theme` emits density tokens only when the scale is not 0, so an app that
@@ -16,6 +19,10 @@ Conventional Commits; one semver tag for the whole repo.
   schedule editors and the toast, with no per-component copy. A spec keeps every such token in that section and nowhere else in the
   file. Moved into the section as well: the outlined label sizes, the focus outline width, the subscript size and font, the icon-button, checkbox, radio
   and chip geometry. (The earlier per-host `PD_FAMILY_CONTROLS` block is gone; nothing needs it.)
+- **This applies only to apps that load `paddock-ui` `css/material.css`.** An app that does not (today Debrief, Pitcrew, Pitwall and
+  Spotter on main) keeps Material's own sizes until it adopts the bridge; C61 lists them. Dyno loads it: its toolbar height now comes
+  from `--pd-button-height` (`styles.scss` no longer sets `--mat-button-*-container-height` on `:root`). A family-section `--mat-*`
+  token set on an app's `:root` or `html` is dead: apps tune the family through `--pd-*`.
 - New conformance check C61 (report-only): every app's `angular.json` loads `paddock-ui` `css/material.css`, and no app has a
   `mat.theme` of its own.
 - When `shared/channels-lan-events` meets this branch, delete the channels-only `:host` density block in

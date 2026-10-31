@@ -110,11 +110,9 @@
   --mat-sys-title-medium-line-height: var(--pd-lh-body-lg);
   --mat-sys-title-large-line-height: var(--pd-lh-subtitle);
 
-
   // The field's own outline is the keyboard ring (the floated label sits on the border, so no ring around it): the family ring colour
-  // at 3 px, because the resting border is already 1 px and SC 2.4.13 wants 2 px of new pixels.
+  // (its 3 px width is in the family controls section below: the resting border is already 1 px and SC 2.4.13 wants 2 px of new pixels).
   --mat-form-field-outlined-focus-outline-color: var(--pd-focus-ring);
-
 
   // State layers: Material draws an opaque ink at these opacities, and without them (the bridge alone, no `mat.theme`) the opacity
   // is undefined and computes to 1: a solid disc. They are the alpha of --pd-hover (hover and keyboard focus) and --pd-pressed, so a
@@ -157,7 +155,6 @@
   --mat-slide-toggle-unselected-icon-color: var(--pd-surface-3);
   --mat-slide-toggle-label-text-color: var(--pd-text);
 
-
   // ---- Checkbox and radio.
   --mat-checkbox-selected-icon-color: var(--pd-accent-control);
   --mat-checkbox-selected-hover-icon-color: var(--pd-accent-control);
@@ -181,10 +178,6 @@
   --mat-radio-label-text-size: var(--pd-text-body);
 
   // ---- Form field and input (outlined, compact).
-
-
-
-
 
   --mat-form-field-input-text-color: var(--pd-text);
   --mat-form-field-input-text-placeholder-color: var(--pd-text-subtle);
@@ -216,7 +209,6 @@
   --mat-select-enabled-arrow-color: var(--pd-text-muted);
   --mat-select-focused-arrow-color: var(--pd-accent);
   --mat-select-invalid-arrow-color: var(--pd-danger);
-
 
   --mat-autocomplete-background-color: var(--pd-surface-3);
   --mat-autocomplete-container-shape: var(--pd-radius-popover);
@@ -339,10 +331,6 @@
   --mat-button-toggle-disabled-selected-state-text-color: var(--pd-text-subtle);
   --mat-button-toggle-divider-color: var(--pd-hairline);
 
-
-
-
-
   // Badge.
   --mat-badge-background-color: var(--pd-accent-fill);
   --mat-badge-text-color: var(--pd-on-accent);
@@ -433,8 +421,6 @@
   --mat-chip-selected-hover-state-layer-color: var(--pd-hover);
   --mat-chip-selected-focus-state-layer-color: var(--pd-hover);
 
-
-
   // Tabs (more).
   --mat-tab-background-color: transparent;
   --mat-tab-foreground-color: var(--pd-text);
@@ -476,7 +462,6 @@
   --mat-form-field-outlined-disabled-outline-color: var(--pd-hairline);
   --mat-form-field-select-option-text-color: var(--pd-text);
 
-
   // ---- matButton, every variant (the user's decision 2026-10-28: matButton everywhere).
   // filled = primary (accent fill), outlined = secondary (surface-2 + strong border), text = ghost, tonal = accent tint,
   // elevated ("protected") = a raised secondary. Tonal and elevated are bridged so they do not fall back to Material's blue, but they
@@ -515,34 +500,6 @@
   --mat-button-protected-pressed-container-elevation-shadow: var(--pd-shadow-1);
   --mat-button-protected-disabled-container-color: var(--pd-pressed);
   --mat-button-protected-disabled-label-text-color: var(--pd-text-subtle);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 }

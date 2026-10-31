@@ -3,6 +3,8 @@
 // gets Material's own sizes (fields 56px tall, large type, pill buttons: Pitcrew's Appearance page), and an app with its own
 // `mat.theme` at another density (Pitwall: -2 on :root) fights the bridge. The shared surfaces carry the family geometry on
 // `body` (`_material.scss`), but an app should still not carry a second theme. Warns for now; the app fixes are routed separately.
+// Reads only `projects.*.architect.build.options.styles` (not configurations, not `@use`d partials). A family-section `--mat-*` token
+// set on an app's `:root` or `html` is dead (the body section wins): apps tune through `--pd-*`.
 import { warn } from '../finding.mjs';
 
 /** Style entries of every build target of an `angular.json`. */

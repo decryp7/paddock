@@ -298,7 +298,7 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
 The family's control geometry and type are one named section of `scss/_material.scss` (`family-controls:begin` to `:end`), on `body`:
 never on `:root` and never copied into a component. A host app's Material theme sits on `html`/`:root` and loses to a descendant's
 custom property, and the cdk overlays inherit from `body`. Add a Material control's size, shape or type token there (a spec fails if
-one is declared elsewhere in the file); colour tokens stay in the `:root` block (ER-21).
+one is declared elsewhere in the file); colour tokens stay in the `:root` block (ER-21). A family-section `--mat-*` token set on an app's `:root` or `html` is dead (the `body` block wins): an app tunes sizes through the `--pd-*` tokens (`--pd-button-height`, `--pd-control-height`), which the section reads.
 - **One theme.** `@decryp7/paddock-ui/css/material.css` is the whole Material look: Material 3 with density -3, every system and
   component token resolved to `--pd-*`, so theme, accent, contrast and density follow our tokens. An app loads it and carries no
   Material theme of its own. The accent comes from `data-accent` on `<html>`; a `data-accent` on a subtree does not reach Material

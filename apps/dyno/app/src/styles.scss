@@ -689,10 +689,8 @@ kbd,
 }
 
 
-/* One control height in a toolbar: buttons as tall as fields and segmented controls. */
+/* One control height in a toolbar: buttons as tall as fields and segmented controls. The family's Material section sits on body and
+   beats any --mat-* token set here, so the height is tuned through the family token it reads. */
 :root {
-  --mat-button-filled-container-height: var(--control-h);
-  --mat-button-outlined-container-height: var(--control-h);
-  --mat-button-text-container-height: var(--control-h);
-  --mat-button-tonal-container-height: var(--control-h);
+  --pd-button-height: var(--control-h);
 }
