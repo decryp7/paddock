@@ -10,10 +10,25 @@ interface ListFs {
   readdirSync(path: string, options: { withFileTypes: true }): { name: string; isDirectory(): boolean }[];
 }
 interface NodeFs extends ListFs {
-  readFileSync(path: string, encoding: 'utf8'): string;
+  promises: { readFile(path: string, encoding: 'utf8'): Promise<string> };
   existsSync(path: string): boolean;
 }
 const nodeFs = (): Promise<NodeFs> => import(/* @vite-ignore */ ['node', 'fs'].join(':')) as Promise<NodeFs>;
+
+/** Sources read at once: SSD I/O wants a few requests in flight (ER-20); more only queues in the kernel. */
+export const READ_CONCURRENCY = 8;
+
+/** Reads every file with at most `limit` reads in flight, results in input order. A cold volume answers many small reads in
+ * parallel far faster than one after another (2.2k files, 24 MB: ~5 s serial from a cold cache). */
+export async function readBounded(files: readonly string[], read: (file: string) => Promise<string>, limit: number): Promise<string[]> {
+  const out = new Array<string>(files.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (let i = next++; i < files.length; i = next++) out[i] = await read(files[i] ?? '');
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, files.length) }, worker));
+  return out;
+}
 
 /** Non-literal `.code(<argument>)` calls: `<path suffix>|<argument text>` to the codes the call can produce. */
 const NON_LITERAL: Readonly<Record<string, readonly string[]>> = {
@@ -77,6 +92,26 @@ describe('health cause codes', () => {
     expect(read).toEqual(['r', 'r/src', 'r/src/sub']);
   });
 
+  it('reads files with a bounded number in flight and keeps the order', async () => {
+    let flying = 0;
+    let peak = 0;
+    const files = Array.from({ length: 20 }, (_, i) => `f${i}`);
+    const out = await readBounded(
+      files,
+      async (f) => {
+        peak = Math.max(peak, ++flying);
+        await Promise.resolve();
+        await Promise.resolve();
+        flying--;
+        return `text ${f}`;
+      },
+      4,
+    );
+    expect(out).toEqual(files.map((f) => `text ${f}`));
+    expect(peak).toBe(4);
+    expect(await readBounded([], async () => 'x', 4)).toEqual([]);
+  });
+
   it('strips only test modules', () => {
     const src = 'a(); #[cfg(test)] mod t { fn x() { b(); } } c();';
     expect(withoutTestModules(src)).toBe('a();  c();');
@@ -88,8 +123,13 @@ describe('health cause codes', () => {
     expect(root, 'the repo root (a folder with crates/Cargo.toml) above the working folder').toBeDefined();
     const emitted = new Map<string, string>();
     const unlisted: string[] = [];
-    for (const file of [...rustSources(fs, `${root}/crates`), ...rustSources(fs, `${root}/apps`)]) {
-      const code = withoutTestModules(fs.readFileSync(file, 'utf8'));
+    const files = [...rustSources(fs, `${root}/crates`), ...rustSources(fs, `${root}/apps`)];
+    const texts = await readBounded(files, (f) => fs.promises.readFile(f, 'utf8'), READ_CONCURRENCY);
+    for (const [at, file] of files.entries()) {
+      const text = texts[at] ?? '';
+      // Most of the ~2k files never call `.code(`: skip the scan for them (same result, far less regex work).
+      if (!text.includes('.code(')) continue;
+      const code = withoutTestModules(text);
       for (const m of code.matchAll(/\.code\("([A-Za-z0-9_.-]+)"\)/g)) emitted.set(m[1] ?? '', file);
       for (const m of code.matchAll(/\.code\(((?:[^()"]|\([^()]*\)|"[^"]*")+)\)/g)) {
         const arg = (m[1] ?? '').trim();
