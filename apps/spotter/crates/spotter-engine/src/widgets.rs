@@ -259,8 +259,8 @@ fn failures(i: &Inputs) -> PopoverState {
         .collect();
     if rows.is_empty() {
         return empty(
-            "Know when a watch breaks",
-            "No watch is failing.",
+            "No failures",
+            "Every watch is fine.",
             act(WidgetActionId::OpenWatches, "Open watches"),
         );
     }
@@ -609,10 +609,7 @@ mod tests {
     fn no_failures_is_a_calm_empty_that_opens_the_watches() {
         let s = settings();
         let (title, _, next) = empty_of(with(&[watch("a")], &s, |i| state(PopoverWidget::Failures, i)));
-        assert_eq!(
-            (title.as_str(), next),
-            ("Know when a watch breaks", Some(WidgetActionId::OpenWatches))
-        );
+        assert_eq!((title.as_str(), next), ("No failures", Some(WidgetActionId::OpenWatches)));
     }
 
     #[test]
