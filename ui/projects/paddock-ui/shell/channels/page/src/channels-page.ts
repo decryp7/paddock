@@ -261,12 +261,10 @@ import { CHANNELS_STYLES } from './styles';
           @if (d.type !== 'email') {
             <mat-checkbox class="pd-ch__check pd-ch__field--wide" [formField]="f.auth" data-testid="channel-auth">{{ t.fAuth }}</mat-checkbox>
           }
-          @if (d.type !== 'email') {
-            <div class="pd-ch__lan pd-ch__field--wide" data-testid="channel-lan-field">
-              <mat-checkbox class="pd-ch__check" [formField]="f.allowLan" aria-describedby="pd-ch-h-lan" data-testid="channel-allow-lan">{{ t.fLan }}</mat-checkbox>
-              <span id="pd-ch-h-lan" class="pd-ch__hint">{{ t.lanHint }}</span>
-            </div>
-          }
+          <div class="pd-ch__lan pd-ch__field--wide" data-testid="channel-lan-field">
+            <mat-checkbox class="pd-ch__check" [formField]="f.allowLan" aria-describedby="pd-ch-h-lan" data-testid="channel-allow-lan">{{ t.fLan }}</mat-checkbox>
+            <span id="pd-ch-h-lan" class="pd-ch__hint">{{ t.lanHint }}</span>
+          </div>
           @if (draftNeedsSecret()) {
             <div class="pd-ch__secret" data-testid="channel-secret" role="group" [attr.aria-label]="secretWord(d.type)">
               <span data-testid="channel-secret-state">{{ secretStored() ? t.secretStored : t.secretMissing }}</span>
@@ -399,7 +397,7 @@ export class PdChannelsPage {
     fSeverity: $localize`:@@pd.channels.f-severity:Minimum severity`,
     fEnabled: $localize`:@@pd.channels.f-enabled:Send notifications on this channel`,
     fLan: $localize`:@@pd.channels.f-lan:This channel is on my home network (allow a private address)`,
-    lanHint: $localize`:@@pd.channels.lan-hint:Turn this on only for a web address or ntfy server in your own home or office network, such as a NAS. Other channels still cannot reach private addresses.`,
+    lanHint: $localize`:@@pd.channels.lan-hint:Turn this on only for a web address, ntfy server or mail server in your own home or office network, such as a NAS. Other channels still cannot reach private addresses, and Offline mode still stops this one.`,
     eventsPickHint: $localize`:@@pd.channels.events-pick-hint:Choose the events this channel hears of.`,
     otherEvents: $localize`:@@pd.channels.other-events:Other events`,
     otherAdd: $localize`:@@pd.channels.other-add:Add another event name`,
@@ -540,7 +538,7 @@ export class PdChannelsPage {
   }
 
   protected setType(type: string): void {
-    this.patch({ type: type as TransportType, auth: false, allowLan: false });
+    this.patch({ type: type as TransportType, auth: false });
   }
 
   protected async save(): Promise<void> {

@@ -171,7 +171,7 @@ test.describe('notification channels (plan X17)', () => {
     expect(await axeViolations(page)).toEqual([]);
   });
 
-  test('a private address needs the home-network switch, and email has none', async ({ app, page }) => {
+  test('a private address needs the home-network switch, also for a mail server', async ({ app, page }) => {
     await app.settings.open({ page: 'pd.channels' }, '?channels=empty');
     await page.getByTestId('channel-add-empty').click();
     await page.getByTestId('channel-name').fill('NAS');
@@ -186,7 +186,7 @@ test.describe('notification channels (plan X17)', () => {
     await expect(page.getByTestId('channel-allow-lan').getByRole('checkbox')).toBeChecked();
     await page.locator('#pd-ch-type').click();
     await page.getByRole('option', { name: 'Email' }).click();
-    await expect(page.getByTestId('channel-allow-lan')).toHaveCount(0);
+    await expect(page.getByTestId('channel-allow-lan')).toHaveCount(1);
   });
 
   test('works by keyboard alone: Tab to Edit, Escape cancels, Enter saves', async ({ app, page }) => {
