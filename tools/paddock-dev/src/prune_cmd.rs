@@ -179,7 +179,8 @@ pub fn cap(a: &CapArgs) -> Result<Report, CliError> {
         .map_err(error)?;
     if !run.errors.is_empty() {
         let n = run.errors.len();
-        return Err(CliError::failure(format!("{n} removal(s) failed: {}.", run.errors.join("; "))).with_hint("Close what uses the folder and run it again."));
+        return Err(CliError::failure(format!("{n} removal(s) failed: {}.", run.errors.join("; ")))
+            .with_hint("Close what uses the folder and run it again."));
     }
     Ok(cap_report(a, Some(max), unit, run))
 }
@@ -312,7 +313,10 @@ fn remove_incremental(
     }
     let again = prune_fs::scan(work)?;
     if again.tree.id != root_id {
-        return Err(PruneError::Io(format!("{} changed while it was pruned; left alone", work.display())));
+        return Err(PruneError::Io(format!(
+            "{} changed while it was pruned; left alone",
+            work.display()
+        )));
     }
     let size = prune::plan_cap(&again.tree, &BTreeSet::new(), max, unit).size_before;
     Ok(Removal {

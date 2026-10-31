@@ -686,7 +686,19 @@ fn a_root_given_with_a_trailing_slash_is_not_followed_through_a_symlink() {
     build(&real);
     link("real/build", &root.join("l"));
     let arg = format!("{}/", root.join("l").display());
-    let v = json(&["host", "prune", "cap", "--unit", "kb", "--root", &arg, "--max-gb", "0", "--home", &scratch_home(&root)]);
+    let v = json(&[
+        "host",
+        "prune",
+        "cap",
+        "--unit",
+        "kb",
+        "--root",
+        &arg,
+        "--max-gb",
+        "0",
+        "--home",
+        &scratch_home(&root),
+    ]);
     assert_eq!(v["action"], "absent");
     assert!(real.join("keep.txt").exists(), "the link's target is untouched");
 }
@@ -761,7 +773,9 @@ fn the_plain_form_fails_when_a_removal_fails_and_the_ci_form_does_not() {
         return;
     }
     let f = folder.to_str().unwrap();
-    let plain = dev(&["host", "prune", "cap", "--unit", "kb", "--root", f, "--max-gb", "300", "--home", &home]);
+    let plain = dev(&[
+        "host", "prune", "cap", "--unit", "kb", "--root", f, "--max-gb", "300", "--home", &home,
+    ]);
     let ci_form = dev(&[
         "host",
         "prune",
