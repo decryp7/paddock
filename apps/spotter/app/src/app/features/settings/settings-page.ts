@@ -32,6 +32,15 @@ export class SettingsPage {
     { secs: 24 * 3600, label: 'Daily' },
   ];
 
+  /**
+   * Launch at login: asks the app, then shows what it answered. The switch has already flipped when it asks; a refusal leaves the
+   * store's value unchanged, so the switch is put back by hand (a bound `checked` that did not change would not redraw it).
+   */
+  protected async setAutostart(toggle: MatSlideToggle, enabled: boolean): Promise<void> {
+    await this.store.setAutostart(enabled);
+    toggle.checked = this.store.autostart() === true;
+  }
+
   protected readonly s = computed(() => this.store.settings().value);
   protected readonly pausedFor = computed(() => {
     const until = this.s()?.notificationsPausedUntilMs ?? null;

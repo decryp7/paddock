@@ -13,6 +13,7 @@ pub mod dto;
 pub mod health;
 pub mod jobs;
 pub mod lifecycle;
+pub mod login_item;
 pub mod notifier;
 pub mod state;
 pub mod toast;
@@ -35,6 +36,30 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/paddock/releases?q=spotter-v";
 /// The feed the updater reads.
 pub const UPDATE_FEED: &str = "https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json";
+/// Whether `version` is a test build: `X.Y.Z-test.N` whose first pre-release identifier is exactly `test` (no build metadata).
+fn is_test_build(version: &str) -> bool {
+    !version.contains('+') && version.split_once('-').is_some_and(|(_, pre)| pre.starts_with("test."))
+}
+
+/// Whether `url` is an https URL for a feed: the scheme is written `https://` in lower case, no user name or password, a host, and a
+/// port the URL parser accepts (at most 65535).
+fn is_https_url_with_host(url: &str) -> bool {
+    // `https:///x` is read by the parser as host `x` (extra slashes are dropped for special schemes): the raw text must name the host.
+    url.strip_prefix("https://").is_some_and(|rest| !rest.starts_with(['/', '\\']))
+        && url::Url::parse(url)
+            .is_ok_and(|u| u.scheme() == "https" && u.username().is_empty() && u.password().is_none() && u.host().is_some())
+}
+
+/// The feed the updater reads: [`UPDATE_FEED`], except in a `-test.N` build made with `SPOTTER_TEST_UPDATE_FEED` set (the
+/// VM update test, built with a throw-away key; the family key never signs such a build). The override must be an https URL
+/// with a host; anything else is ignored. It is read at compile time, so a shipped copy cannot be pointed elsewhere, and the
+/// updater still checks every signature against the key built into the app.
+pub fn update_feed(version: &str, test_feed: Option<&'static str>) -> &'static str {
+    match test_feed {
+        Some(url) if is_test_build(version) && is_https_url_with_host(url) => url,
+        _ => UPDATE_FEED,
+    }
+}
 /// The manifest of the UI's contributions, compared by the tests.
 pub const MANIFEST: &str = include_str!("../../paddock-manifest.json");
 
@@ -287,7 +312,7 @@ fn updater<R: Runtime>(test_dir: Option<std::path::PathBuf>, app: &tauri::AppHan
         .iter()
         .fold(UpdatesBuilder::new(APP_NAME), |b, (id, title, text)| b.legal(id, title, *text));
     let b = b
-        .channel("stable", "Stable", UPDATE_FEED)
+        .channel("stable", "Stable", update_feed(VERSION, option_env!("SPOTTER_TEST_UPDATE_FEED")))
         .public_key(key)
         .installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(
             app.clone(),
@@ -392,6 +417,58 @@ mod updater_tests {
             ["notices", "licence-mit", "licence-apache"],
             "ids are unique and the notices stay listed"
         );
+    }
+
+    /// A release build never reads a feed from its build environment; only a `-test.N` build (the VM update test, made with
+    /// a throw-away key) may, and only over https, so a stray variable cannot point a shipped copy somewhere else.
+    #[test]
+    fn only_a_test_build_may_take_its_feed_from_the_build() {
+        const FEED: &str = "https://192.168.64.1:8089/latest.json";
+        let other = Some(FEED);
+        assert_eq!(update_feed("1.0.0", other), UPDATE_FEED, "a release build ignores the override");
+        assert_eq!(update_feed("1.0.0-rc.1", other), UPDATE_FEED, "so does a release candidate");
+        assert_eq!(update_feed("1.0.0-test.1", other), FEED);
+        assert_eq!(update_feed("1.0.0-test.1", None), UPDATE_FEED);
+        assert_eq!(
+            update_feed("1.0.0-test.1", Some("http://192.168.64.1/latest.json")),
+            UPDATE_FEED,
+            "https only"
+        );
+        assert_eq!(update_feed("1.0.0-test.1", Some("")), UPDATE_FEED);
+        for bad in [
+            "https://",
+            "https:///latest.json",
+            "garbage",
+            "HTTPS://192.168.64.1/x",
+            "https://u:p@192.168.64.1/x",
+            "https://host:port/x",
+            "https://u@host/x",
+            "https://host:65536/x",
+            "https://[::1]x/",
+            "https://[::1/",
+        ] {
+            assert_eq!(update_feed("1.0.0-test.1", Some(bad)), UPDATE_FEED, "{bad} is refused");
+        }
+        assert_eq!(
+            update_feed("1.0.0+test.1", other),
+            UPDATE_FEED,
+            "build metadata is not a test build"
+        );
+        assert_eq!(update_feed("1.0.0-test.1+x", other), UPDATE_FEED);
+        assert_eq!(
+            update_feed("1.0.0-rc.1-test.1", other),
+            UPDATE_FEED,
+            "only the first identifier counts"
+        );
+        assert_eq!(update_feed("1.0.0-testing.1", other), UPDATE_FEED);
+        for good in [
+            "https://[fd00::1]:8443/x",
+            "https://[fd00::1]/x",
+            "https://192.168.64.1:8443/ok/latest.json",
+            "https://host.example",
+        ] {
+            assert_eq!(update_feed("1.0.0-test.1", Some(good)), good);
+        }
     }
 
     #[test]

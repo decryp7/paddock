@@ -56,6 +56,12 @@ tauri-plugin-updater = { version = "2.14", default-features = false, features = 
 # Tokens, passwords and site cookies live in the OS credential store: Windows Credential Manager, macOS Keychain
 # (Secret Service on Linux).
 keyring = "4.2"
+# Parses the test build's update feed URL (src/lib.rs `update_feed`).
+url = "2"
+
+[target.'cfg(unix)'.dependencies]
+# statvfs: whether the running copy sits on a read-only volume (src/login_item.rs); safe, no unsafe block.
+rustix = { version = "1", features = ["fs"] }
 
 [target.'cfg(windows)'.dependencies]
 # The taskbar's light/dark setting, to pick the tray icon variant.

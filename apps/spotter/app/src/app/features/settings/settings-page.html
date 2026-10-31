@@ -12,7 +12,7 @@
         <h2 id="app-h">Startup</h2>
         <div class="row">
           <div><div class="l" id="autostart-l">Launch at login</div><div class="help">Start Spotter in the tray when you sign in.</div></div>
-          <mat-slide-toggle id="autostart" [checked]="store.autostart() === true" [disabled]="store.autostart() === null" (change)="store.setAutostart($event.checked)" aria-labelledby="autostart-l" />
+          <mat-slide-toggle id="autostart" [checked]="store.autostart() === true" [disabled]="store.autostart() === null" (change)="setAutostart($event.source, $event.checked)" aria-labelledby="autostart-l" />
         </div>
       </section>
 
