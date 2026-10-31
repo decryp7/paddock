@@ -919,3 +919,28 @@ status = "built"
   owner = "sighter"
   delete_by = "sighter-v1.0.0"
   note = "Byte-identical to the canonical."
+
+# =====================================================================================================================
+# Dashboard and tray layouts
+# =====================================================================================================================
+
+[[mechanism]]
+id = "widget-layouts"
+title = "Versioned widget and tray-item layouts: the data model, validation, presets with undo, reorder and bounded counts (Dyno ADR 0012)"
+canonical = "paddock-widgets"
+paths = ["crates/paddock-widgets/src/**"]
+status = "planned"
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/crates/dyno-core/src/widgets.rs"]
+  symbols = ["item:WidgetKind", "item:WidgetSize", "item:WidgetOptions", "item:Widget", "item:DashboardLayout", "item:TrayItemStyle", "item:TrayItem", "item:TrayItems"]
+  owner = "dyno"
+  delete_by = "dyno-v1.1.0"
+  note = "Dyno's layout model (ADR 0012, WP-21, WP-38). Moves onto paddock-widgets first; the copy is deleted in the same change."
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/crates/dyno-core/src/settings.rs"]
+  symbols = ["item:TrayMetric", "item:TrayStyle", "item:Tray"]
+  owner = "dyno"
+  delete_by = "dyno-v1.1.0"
+  note = "The settings types for the tray items. The icon renderer in dyno-core/src/tray.rs is not a layout model and is not listed."

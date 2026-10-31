@@ -439,8 +439,13 @@ or other shared OS services must poll rarely or use change notifications.
 - **States.** Every widget has a designed empty, loading and error state, each with a short next step.
 - **Accessibility.** The popup is keyboard-operable: a logical focus order follows the widget order, every widget has a label, and
   the chooser's reordering works from the keyboard.
-- **Shared.** Built on the shared tray popover in `paddock-window`: the widget host and the chooser are shared, and each app only
-  registers its own widgets. Touches `crates/paddock-window`, `app/src-tauri/src/tray.rs`, `app/src/app/features/tray/**`.
+- **Shared.**
+  - The popover host, height fitting and closing already exist in `crates/paddock-window` (`popover.rs`, `tauri/popover.rs`,
+    `tray.rs`) and `ui/projects/paddock-ui/src/lib/tray-popover.ts`; WP-38 uses them and adds nothing to them.
+  - Dyno's widget and tray-item layout model (ADR 0012: `WidgetInstance` and `TrayItem` layouts as versioned settings data, a
+    closed catalogue per app, bounded counts, presets with undo) is generalised into a shared crate (concept name
+    `paddock-widgets`) plus shared `paddock-ui` widget-area and chooser components. Each app registers its catalogue.
+  - Dyno moves onto it first and deletes its copy (`known-copies.toml`, mechanism `widget-layouts`, delete by `dyno-v1.1.0`).
 - **Acceptance.** Choose, reorder and persist across restarts; the popup renders within the existing popover limits (size, placement
   and closing on blur, WP-22); tests cover each widget's empty, loading and error states.
 
