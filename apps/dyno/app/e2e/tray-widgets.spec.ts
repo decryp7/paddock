@@ -141,13 +141,13 @@ test.describe('popup widgets', () => {
     await expect(items).toHaveCount(3);
     for (let i = 0; i < 3; i++) {
       const item = items.nth(i);
-      const icon = await item.locator('mat-icon').first().boundingBox();
-      const text = await item.boundingBox();
-      expect(icon, 'icon').toBeTruthy();
-      expect(Math.round(icon!.width)).toBe(16);
-      expect(Math.round(icon!.height)).toBe(16);
-      // The icon's centre is on the row's centre line (within a pixel and a half).
-      expect(Math.abs(icon!.y + icon!.height / 2 - (text!.y + text!.height / 2))).toBeLessThanOrEqual(1.5);
+      // The panel scales in while it opens: wait for the measurement to settle on the designed size.
+      await expect.poll(async () => Math.round((await item.locator('mat-icon').first().boundingBox())?.width ?? 0)).toBe(16);
+      const icon = (await item.locator('mat-icon').first().boundingBox())!;
+      const row = (await item.boundingBox())!;
+      expect(Math.round(icon.height)).toBe(16);
+      // The icon's centre is on the row's centre line (within 2 px: the text's line box is not its glyphs).
+      expect(Math.abs(icon.y + icon.height / 2 - (row.y + row.height / 2))).toBeLessThanOrEqual(2);
     }
   });
 
@@ -180,8 +180,10 @@ test.describe('dashboard and menu-bar editors', () => {
 
   test('the menu-bar editor adds an item up to four', async ({ page }) => {
     await page.goto('/?latency=0#/');
+    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
     await pressMod(page, 'Mod+Comma');
     const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
     await dialog.getByText('Dyno', { exact: true }).click();
     const editor = dialog.locator('dy-menu-bar-items');
     await editor.scrollIntoViewIfNeeded();

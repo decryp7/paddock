@@ -75,8 +75,7 @@ import { MatButton, MatIconButton } from '@angular/material/button';
     .grade-pill[data-tone='warn'] { background: var(--warn-soft); color: var(--warn); }
     .grade-pill[data-tone='bad'] { background: var(--bad-soft); color: var(--bad); }
     /* The shared menu icon size: 16 px. */
-    .mat-mdc-menu-item dy-icon { width: 16px; height: 16px; --icon-size: 16px; margin: 0; }
-    .mat-mdc-menu-item dy-icon mat-icon { width: 100%; height: 100%; margin: 0; }
+    .mat-mdc-menu-item dy-icon { flex: none; width: 16px; height: 16px; --icon-size: 16px; margin: 0 12px 0 0; vertical-align: middle; }
     .sep { border: 0; border-top: 1px solid var(--pd-hairline); margin: 4px 0; }
     kbd { margin-left: auto; padding: 0 4px; border: 1px solid var(--pd-border-strong); border-radius: 4px; font: inherit; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .foot { display: flex; align-items: center; gap: var(--sp-1); flex: 1; }
