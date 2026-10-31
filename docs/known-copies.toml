@@ -936,7 +936,7 @@ adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
   paths = ["tools/prune-build-folders.sh", "tools/prune-ci-build-folder.sh"]
   owner = "paddock"
   delete_by = "v0.4.0"
-  note = "`dev host prune cap` reproduces both (recorded cases in tools/paddock-dev/tests/golden-prune). The prune-build-folder action and tools/test/prune-and-cleanup.test.mjs switch in the same change that deletes them; the coordinator decides when, after the app tags."
+  note = "`dev host prune cap` reproduces both (recorded cases in tools/paddock-dev/tests/golden-prune; two cases are intentional departures: the Rust command removes a whole folder only with a Cargo marker). The prune-build-folder action and tools/test/prune-and-cleanup.test.mjs switch in the same change that deletes them; the coordinator decides when, after the app tags."
 
 [[mechanism]]
 id = "build-folder-prune-worktrees"
@@ -950,7 +950,7 @@ adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
   paths = ["tools/prune-build-folders.ps1", "apps/debrief/scripts/clean-build-dirs.ps1"]
   owner = "paddock"
   delete_by = "v0.4.0"
-  note = "`dev host prune worktrees --app <app> [--repo apps/debrief]` reproduces both; the Debrief script is the same listing with the app fixed. No golden was recorded from them (no PowerShell on the Mac)."
+  note = "`dev host prune worktrees --app <app> [--repo apps/debrief]` reproduces both (removing only folders with a Cargo marker); the Debrief script is the same listing with the app fixed. No golden was recorded from them (no PowerShell on the Mac)."
 
 [[mechanism]]
 id = "ci-slot-ownership"

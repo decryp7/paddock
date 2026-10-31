@@ -184,6 +184,14 @@ pub fn is_mount_point(_: &Path) -> bool {
     false
 }
 
+/// The files Cargo and rustc leave at the top of a target folder.
+pub const CARGO_MARKERS: [&str; 2] = ["CACHEDIR.TAG", ".rustc_info.json"];
+
+/// Whether `dir` looks like a Cargo target folder: a regular file `CACHEDIR.TAG` or `.rustc_info.json` at its top level.
+pub fn is_cargo_folder(dir: &Path) -> bool {
+    CARGO_MARKERS.iter().any(|m| kind(&dir.join(m)) == Kind::Other)
+}
+
 /// A folder found by [`list_dirs`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Listed {
@@ -195,6 +203,8 @@ pub struct Listed {
     pub bytes: u64,
     /// It is a symlink to a folder.
     pub symlink: bool,
+    /// It has a Cargo marker at its top level ([`is_cargo_folder`]).
+    pub cargo: bool,
 }
 
 /// Whether two paths are the same folder: by device and inode where the platform has them (so a symlinked part or a case
@@ -226,6 +236,7 @@ pub fn list_dirs(parent: &Path, wanted: &dyn Fn(&str) -> bool) -> (Vec<Listed>, 
             Kind::Dir => match scan(&path) {
                 Ok(s) => Listed {
                     bytes: crate::prune::measure(&s.tree, &Default::default()).apparent,
+                    cargo: is_cargo_folder(&path),
                     path,
                     name,
                     symlink: false,
@@ -240,6 +251,7 @@ pub fn list_dirs(parent: &Path, wanted: &dyn Fn(&str) -> bool) -> (Vec<Listed>, 
                 name,
                 bytes: 0,
                 symlink: true,
+                cargo: false,
             },
             _ => continue,
         };
@@ -466,6 +478,22 @@ mod tests {
         with_slash.push("/");
         assert_eq!(kind(Path::new(&with_slash)), Kind::Symlink);
         assert_eq!(kind(&t.path().join("real")), Kind::Dir);
+    }
+
+    #[test]
+    fn a_cargo_folder_has_a_marker_file_at_its_top_level() {
+        let t = tempfile::tempdir().unwrap();
+        assert!(!is_cargo_folder(t.path()));
+        put(t.path(), "deep/CACHEDIR.TAG", 3);
+        assert!(!is_cargo_folder(t.path()), "only the top level counts");
+        fs::create_dir(t.path().join(".rustc_info.json")).unwrap();
+        assert!(!is_cargo_folder(t.path()), "a folder of that name is not a marker");
+        fs::remove_dir(t.path().join(".rustc_info.json")).unwrap();
+        put(t.path(), ".rustc_info.json", 3);
+        assert!(is_cargo_folder(t.path()));
+        let u = tempfile::tempdir().unwrap();
+        put(u.path(), "CACHEDIR.TAG", 3);
+        assert!(is_cargo_folder(u.path()));
     }
 
     #[test]

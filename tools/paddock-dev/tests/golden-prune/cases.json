@@ -133,5 +133,22 @@
     "folder": "/home/target-app-s1",
     "cap": "many",
     "slot": "s1"
+  },
+  {
+    "name": "plain-no-marker-INTENTIONAL-DEPARTURE-leaves-the-folder",
+    "mode": "plain",
+    "folder": "home/target-app-s1",
+    "cap": "100",
+    "noMarker": true,
+    "departure": true
+  },
+  {
+    "name": "ci-no-marker-INTENTIONAL-DEPARTURE-leaves-the-folder",
+    "mode": "ci",
+    "folder": "home/target-app-s1",
+    "cap": "100",
+    "slot": "s1",
+    "noMarker": true,
+    "departure": true
   }
 ]
