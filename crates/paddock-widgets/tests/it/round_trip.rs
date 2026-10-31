@@ -155,6 +155,13 @@ fn widget_states_have_the_agreed_shape() {
             last: None,
             cancel: None,
         },
+        WidgetState::Working {
+            title: "Checking".into(),
+            phase: "Time Machine".into(),
+            progress: Progress::Unknown,
+            last: None,
+            cancel: None,
+        },
         WidgetState::Empty {
             title: "No alarms".into(),
             detail: "All clear".into(),
@@ -248,4 +255,15 @@ fn an_empty_state_is_not_calm_unless_the_engine_says_so() {
     })
     .expect("serialises");
     assert_eq!(calm["calm"], true);
+}
+
+#[test]
+fn unknown_progress_is_a_bare_word_on_the_wire() {
+    assert_eq!(
+        serde_json::to_value(Progress::Unknown).expect("serialises"),
+        "unknown"
+    );
+    let back: Progress =
+        serde_json::from_value(serde_json::json!("unknown")).expect("deserialises");
+    assert_eq!(back, Progress::Unknown);
 }
