@@ -1,6 +1,7 @@
 import type { EChartsCoreOption } from 'echarts/core';
 import type { Consumer, DiskTrend, History, HistoryPoint, TimelineEvent, TimelineEventKind } from '../../core/api.types';
 import { forecastText } from '../../shared/labels';
+import { byteAxis } from '../../shared/axis';
 import { formatBytes, formatClock, formatDate, formatPercent } from '../../shared/format';
 import type { ThemeTokens } from '../../shared/tokens';
 
@@ -184,19 +185,6 @@ export function consumersOption(consumers: readonly Consumer[], t: ThemeTokens):
       },
     ],
   };
-}
-
-/**
- * Even steps for a byte axis from 0: a step of 1, 2, 2.5 or 5 (times a power of ten) of the largest binary unit the maximum reaches,
- * so the ticks read 0, 100, 200, 300 GB and not 93.1, 186, 279, 373. `formatBytes` counts in 1024s.
- */
-export function byteAxis(maxBytes: number): { max: number; interval: number } {
-  const top = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : 1;
-  const unit = 1024 ** Math.min(4, Math.max(0, Math.floor(Math.log(top) / Math.log(1024))));
-  const raw = top / unit / 4;
-  const pow = 10 ** Math.floor(Math.log10(raw));
-  const step = ([1, 2, 2.5, 5, 10].find((m) => m * pow >= raw) ?? 10) * pow * unit;
-  return { max: Math.ceil(top / step) * step, interval: step };
 }
 
 /** The line a disk's free space follows, then (when the engine forecasts it) a dashed line to the day it would be full. */

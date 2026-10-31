@@ -194,7 +194,7 @@ pub fn detect(window: &[ThrottleInput]) -> ThrottleReading {
 
     let mut evidence = vec![Evidence::new("Load", format!("{load:.0}%"))];
     if let (Some(f), Some(e)) = (freq, expected) {
-        evidence.push(Evidence::new("Clock", format!("{f:.0} MHz of {e:.0} MHz")));
+        evidence.push(Evidence::new("Clock", format!("{:.2} GHz of {:.2} GHz", f / 1000.0, e / 1000.0)));
     }
     if let Some(t) = last.temperature_c {
         evidence.push(Evidence::new("Temperature", format!("{t:.0} °C")));

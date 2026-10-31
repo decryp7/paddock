@@ -391,7 +391,7 @@ import {
                 </table>
               </div>
               <div class="table-foot">
-                <span class="muted small">Alt+Up goes up a folder. Right-click a row for more.</span>
+                <span class="muted small">{{ upKey }} goes up a folder. Right-click a row for more.</span>
                 @if (level.nextOffset !== null) {
                   <button type="button" matButton="outlined" (click)="store.loadMore()">Show more rows</button>
                 }
@@ -524,9 +524,9 @@ import {
     table { width: 100%; table-layout: fixed; }
     .mat-column-bytes { width: 76px; }
     .mat-column-items { width: 64px; }
-    .mat-column-newestChange { width: 92px; }
-    /* A header that is longer than its narrow column wraps instead of being cut off ("Newest change" with the sort arrow). */
-    th.mat-column-newestChange, th.mat-column-newestChange ::ng-deep .mat-sort-header-content { white-space: normal; line-height: 1.2; text-align: right; }
+    /* Wide enough for "Newest change" and its sort arrow on one line. */
+    .mat-column-newestChange { width: 132px; }
+    th.mat-column-newestChange, th.mat-column-newestChange ::ng-deep .mat-sort-header-content { white-space: nowrap; text-align: right; }
     .mat-column-share { width: 100px; }
     .mat-column-actions { width: 64px; }
     th, td { white-space: nowrap; }
@@ -561,6 +561,8 @@ export class DiskMapPage implements OnInit {
   protected readonly store = inject(DiskMapStore);
   private readonly notifier = inject(Notifier);
   private readonly platform = inject(PlatformService).platform;
+  /** The shortcut that goes up a folder, as this system writes it. */
+  protected readonly upKey = this.platform === 'macos' ? '\u2325\u2191' : 'Alt+Up';
   private readonly now = injectNow();
 
   protected readonly skeletonRows = [1, 2, 3, 4, 5, 6, 7, 8, 9];

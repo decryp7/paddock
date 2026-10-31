@@ -35,7 +35,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       <ul class="dy-pw-list" aria-label="Active alarms">
         @for (r of a?.rows ?? skAlarms; track r.id) {
           <li>
-            <button type="button" class="dy-pw-row" (click)="open('alarms')">
+            <button type="button" class="dy-pw-row dy-pw-alarm" (click)="open('alarms')">
               <span class="dy-pw-lvl" [attr.data-level]="r.level" pdSkeleton><pd-status-glyph [status]="status(r.level)" [size]="14" />{{ word(r.level) }}</span>
               <span class="dy-pw-grow dy-pw-wrap" pdSkeleton>{{ r.title }}</span>
               <span class="dy-pw-muted" pdSkeleton>{{ ago(r.since) }}</span>
@@ -136,6 +136,12 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
     .dy-pw-row, .dy-pw-plain, .dy-pw-more { all: unset; box-sizing: border-box; cursor: pointer; border-radius: var(--pd-radius-control); }
     .dy-pw-row { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; max-width: 100%; min-height: 24px; color: var(--pd-text); font: inherit; }
     .dy-pw-list > li { min-width: 0; }
+    /* An alarm is two lines: its level and age on the first, its title across the whole width on the second (a title squeezed beside the level wrapped to a column of words). */
+    .dy-pw-alarm { display: grid; grid-template-columns: auto 1fr auto auto; grid-template-areas: 'lvl . ago chev' 'title title title title'; row-gap: 2px; align-items: center; }
+    .dy-pw-alarm > .dy-pw-lvl { grid-area: lvl; justify-self: start; }
+    .dy-pw-alarm > .dy-pw-muted { grid-area: ago; }
+    .dy-pw-alarm > .dy-pw-chev { grid-area: chev; }
+    .dy-pw-alarm > .dy-pw-grow { grid-area: title; }
     /* A title wraps (two lines at most) instead of being cut: the time and chevron keep their place. */
     .dy-pw-grow.dy-pw-wrap { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .dy-pw-chev { flex: none; color: var(--pd-text-muted); }

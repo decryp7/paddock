@@ -87,6 +87,25 @@ describe('dy-menu-bar-items', () => {
     expect(el.querySelector('input[maxlength="8"]')).not.toBeNull();
   });
 
+  it('disables every add button once the menu bar holds its four items', async () => {
+    const { f, el } = setup(MenuBarItems);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(2);
+    });
+    for (const want of [3, 4]) {
+      el.querySelector<HTMLButtonElement>('button[aria-label="Add another Number"], button[aria-label="Add Number"]')!.click();
+      await vi.waitFor(() => {
+        f.detectChanges();
+        expect(rows(el)).toHaveLength(want);
+      });
+    }
+    const adds = [...el.querySelectorAll<HTMLButtonElement>('li.pd-wc-add button')];
+    expect(adds.length).toBeGreaterThan(0);
+    expect(adds.every((b) => b.disabled)).toBe(true);
+    expect(el.querySelector('.pd-wc-limit')?.textContent).toContain('holds 4 widgets');
+  });
+
   it('an edit made from a row that is one edit behind keeps the first edit (metric, then unit)', async () => {
     const { f, el } = setup(MenuBarItems);
     await vi.waitFor(() => {

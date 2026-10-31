@@ -88,18 +88,12 @@ const ICON: Record<DashboardKind, IconName> = {
         <div class="bar-track" [attr.data-tone]="barTone()" role="img" [attr.aria-label]="title() + ' ' + reading().text + ' ' + reading().unit"><span [style.width.%]="reading().percent ?? 0"></span></div>
       }
       @case ('ring') {
-        @if (widget().metric === 'battery') {
-          <div class="hero" [attr.data-tone]="reading().tone"><b><dy-animated-number [value]="reading().text" /></b><small>{{ reading().unit }}</small></div>
-          <div class="bar-track" [attr.data-tone]="barTone()" role="img" [attr.aria-label]="title() + ' ' + reading().text + ' ' + reading().unit"><span [style.width.%]="reading().percent ?? 0"></span></div>
-          <p class="note">{{ reading().reason ?? 'Charge level' }}</p>
-        } @else {
         <div class="ringrow">
           <dy-ring [value]="reading().percent ?? 0" [tone]="ringTone()" [label]="title() + ' ' + reading().text + reading().unit" style="--ring-size: 84px">
             <span class="rn"><dy-animated-number [value]="reading().text" /></span>
           </dy-ring>
           <p class="note">{{ reading().reason ?? title() }}</p>
         </div>
-        }
       }
       @case ('heatmap') {
         <div class="cells" role="img" [attr.aria-label]="'Per-core load: ' + cores().map(pct).join(', ')">

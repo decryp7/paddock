@@ -1,7 +1,7 @@
 import type { History } from '../../core/api.types';
 import { MockBackend } from '../../core/mock-backend';
 import { DARK } from '../../shared/tokens';
-import { coreHeatmapOption, heatCells, nearestIndex } from './cpu-options';
+import { coreHeatmapOption, heatCells, nearestIndex, roundTick } from './cpu-options';
 
 async function history(os: 'macos' | 'windows' = 'macos'): Promise<History> {
   return new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000, os, cpu: os === 'macos' ? 'hybrid' : 'uniform' }).history('hour', null);
@@ -37,5 +37,18 @@ describe('per-core heatmap', () => {
   it('has no cells without per-core history', async () => {
     const h = { ...(await history()), corePoints: [] };
     expect(heatCells(h, []).cells).toEqual([]);
+  });
+});
+
+describe('roundTick', () => {
+  it('keeps round times only, by range', () => {
+    expect(roundTick('hour', '14:30')).toBe(true);
+    expect(roundTick('hour', '14:35')).toBe(false);
+    expect(roundTick('day', '15:00')).toBe(true);
+    expect(roundTick('day', '16:00')).toBe(false);
+    expect(roundTick('day', '15:05')).toBe(false);
+    expect(roundTick('week', '22 Oct 00:00')).toBe(true);
+    expect(roundTick('week', '22 Oct 12:00')).toBe(false);
+    expect(roundTick('month', 'nonsense')).toBe(false);
   });
 });

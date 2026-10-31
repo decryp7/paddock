@@ -7,7 +7,6 @@ import { AsyncState } from '../../shared/async-state';
 import { Chart } from '../../shared/chart';
 import { formatGhz, formatPercent } from '../../shared/format';
 import { Icon } from '../../shared/icon';
-import { EVENT_LABEL } from '../../shared/labels';
 import { HistoryStore } from '../../state/history.store';
 import { LiveStore } from '../../state/live.store';
 import { RANGES } from '../dashboard/history-panels';
@@ -77,11 +76,6 @@ import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
           <dy-async [loaded]="!!history.history()" [error]="history.error()" [empty]="noCores()" emptyTitle="No per-core history yet" emptyText="The agent records every core's load; the heatmap fills in as time passes." what="per-core history" [rows]="0" (retry)="history.load()">
             <div skeleton class="skeleton chart-skeleton"></div>
             <dy-chart [options]="option()" label="Heatmap of each core's load over time" [style.--chart-h]="chartHeight() + 'px'" />
-            @if (eventKinds().length) {
-              <p class="legend">Dashed lines mark events:
-                @for (e of eventKinds(); track e) {<span class="ev">{{ e }}</span>}
-              </p>
-            }
           </dy-async>
         </section>
       </div>
@@ -107,8 +101,6 @@ import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
     .skeletons { display: grid; gap: var(--sp-2); padding: var(--sp-4); } .skeleton { height: 16px; }
     dy-async { padding: 0 var(--sp-4); }
     .chart-skeleton { height: 360px; margin-top: var(--sp-2); }
-    .legend { color: var(--text-3); font-size: var(--fs-xs); display: flex; gap: var(--sp-3); flex-wrap: wrap; padding-top: var(--sp-1); }
-    .ev { padding: 0 var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-pill); }
   `,
 })
 export class CpuDetail implements OnInit {
@@ -136,7 +128,6 @@ export class CpuDetail implements OnInit {
     return h && h.corePoints.length ? coreHeatmapOption(h, c?.coreKinds ?? [], this.theme.tokens()) : null;
   });
   protected readonly chartHeight = computed(() => Math.max(240, 96 + 22 * (this.cpu()?.perCore.length ?? 8)));
-  protected readonly eventKinds = computed(() => [...new Set((this.history.history()?.events ?? []).map((e) => EVENT_LABEL[e.kind]))]);
   protected readonly summary = computed(() => {
     const c = this.cpu();
     return c ? `${pctText(c.total)} overall · ${formatGhz(c.frequencyMhz)} · ${c.perCore.length === 1 ? '1 logical core' : `${c.perCore.length.toString()} logical cores`}` : 'Reading the CPU…';

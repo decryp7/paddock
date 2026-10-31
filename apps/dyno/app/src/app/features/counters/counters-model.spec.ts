@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { DashboardWidget } from '../../core/generated/widgets';
-import type { CounterHistory, CounterReading } from '../../core/api.types';
+import type { CounterHistory, CounterReading, CounterUnit } from '../../core/api.types';
 import { LIGHT } from '../../shared/tokens';
-import { counterChartOption, counterText, counterTitle, formatCounter, pathParts, readingNumber, readingReason, widgetCounterPaths, withPath, withoutPath } from './counters-model';
+import { counterChartOption, counterText, counterTitle, formatCounter, pathParts, peakAxis, readingNumber, readingReason, widgetCounterPaths, withPath, withoutPath } from './counters-model';
 
 const W = (metric: DashboardWidget['metric']): DashboardWidget => ({ kind: 'graph', metric, options: { rangeSecs: 300, showLabel: true, fill: true, accent: null }, thresholds: { warning: null, critical: null } });
 
@@ -92,5 +92,16 @@ describe('the chart', () => {
     const html = tooltip.formatter([{ axisValue: 1000, marker: '*', seriesName: 'c0', seriesType: 'line', value: [1000, 2048], data: { unit: 'bytes' } }]);
     expect(html).toContain('2 KB');
     expect(tooltip.formatter([])).toBe('');
+  });
+});
+
+describe('peakAxis', () => {
+  const series = (unit: CounterUnit, values: number[]) => [{ path: '\\a\\b', unit, points: values.map((value, i) => ({ at: i, value })) }] as unknown as CounterHistory['series'];
+  it('rounds the peak up to even steps in the unit shown', () => {
+    expect(peakAxis(series('count', [3, 87]), 'count')).toEqual({ max: 100, interval: 25 });
+    expect(peakAxis(series('bytes', [373 * 1024 ** 3]), 'bytes')).toEqual({ max: 400 * 1024 ** 3, interval: 100 * 1024 ** 3 });
+  });
+  it('leaves out a series the legend switched off', () => {
+    expect(peakAxis(series('count', [1000]), 'count', new Set(['\\a\\b'])).max).toBeLessThan(10);
   });
 });

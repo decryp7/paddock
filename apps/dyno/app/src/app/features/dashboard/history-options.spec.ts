@@ -1,6 +1,6 @@
 import type { DiskTrend, History, HistoryPoint, TimelineEvent } from '../../core/api.types';
 import { DARK, LIGHT } from '../../shared/tokens';
-import { EVENT_STYLE, byteAxis, consumersOption, diskTrendOption, eventCounts, historyOption, nearestValue } from './history-options';
+import { EVENT_STYLE, consumersOption, diskTrendOption, eventCounts, historyOption, nearestValue } from './history-options';
 
 const pt = (at: number, cpu: number, memory = 50): HistoryPoint => ({
   at, cpu, cpuMin: cpu, cpuMax: cpu, memory, memoryMin: memory, memoryMax: memory, diskReadBps: 0, diskWriteBps: 0, netRxBps: 0, netTxBps: 0, gpu: null, temperature: null,
@@ -145,15 +145,3 @@ describe('diskTrendOption date axis', () => {
   });
 });
 
-describe('byteAxis', () => {
-  const GB = 1024 ** 3;
-  it('steps in round numbers of the unit the axis is read in', () => {
-    expect(byteAxis(373 * GB)).toEqual({ max: 400 * GB, interval: 100 * GB });
-    expect(byteAxis(1204 * GB)).toEqual({ max: 1.5 * 1024 * GB, interval: 0.5 * 1024 * GB });
-    expect(byteAxis(90 * GB)).toEqual({ max: 100 * GB, interval: 25 * GB });
-  });
-  it('survives an empty or odd maximum', () => {
-    expect(byteAxis(0).interval).toBeGreaterThan(0);
-    expect(byteAxis(Number.NaN).interval).toBeGreaterThan(0);
-  });
-});

@@ -147,8 +147,8 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
   {
     name: 'widgets-edit',
     path: '/#/',
-    // The chooser, its list and the first widgets under it.
-    maxContent: 1900,
+    // The chooser with its whole add list and presets, and the first widgets under it.
+    maxContent: 3800,
     ready: async (page) => {
       await page.getByRole('button', { name: 'Customize dashboard' }).click();
       const region = page.getByRole('region', { name: 'Customize the dashboard' });

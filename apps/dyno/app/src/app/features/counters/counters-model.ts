@@ -1,6 +1,7 @@
 import type { EChartsCoreOption } from 'echarts/core';
 import type { DashboardWidget } from '../../core/generated/widgets';
 import type { CounterHistory, CounterReading, CounterUnit } from '../../core/api.types';
+import { byteAxis, niceAxis } from '../../shared/axis';
 import { formatBytes, formatClock, formatPercent, formatRate } from '../../shared/format';
 import type { ThemeTokens } from '../../shared/tokens';
 import { EVENT_STYLE } from '../dashboard/history-options';
@@ -122,6 +123,13 @@ export interface CounterChart {
 
 const axisLabel = (unit: CounterUnit) => (v: number) => (unit === 'percent' ? `${v}%` : counterText(v, unit));
 
+/** Even ticks for the axis of `unit`: the largest value drawn on it, rounded up to a step of 1, 2, 2.5 or 5 (bytes counted in KB, MB or GB). */
+export function peakAxis(series: CounterHistory['series'], unit: CounterUnit, hidden: ReadonlySet<string> = new Set()): { max: number; interval: number } {
+  let peak = 0;
+  for (const s of series) if (s.unit === unit && !hidden.has(s.path)) for (const p of s.points) if (Number.isFinite(p.value)) peak = Math.max(peak, p.value);
+  return unit === 'bytes' || unit === 'bytesPerSec' ? byteAxis(peak) : niceAxis(peak);
+}
+
 /**
  * The counters over time as lines (colour from the CVD-checked palette, never colour alone: the legend names each line),
  * one axis per unit (two at most, left and right), a 0 baseline, and the app's events on a lane under the plot.
@@ -177,7 +185,7 @@ export function counterChartOption(history: CounterHistory, t: ThemeTokens, hidd
         gridIndex: 0,
         position: i === 0 ? 'left' : 'right',
         min: 0,
-        ...(unit === 'percent' ? { max: 100 } : {}),
+        ...(unit === 'percent' ? { max: 100 } : peakAxis(drawn, unit, hidden)),
         axisLabel: { ...text, formatter: axisLabel(unit) },
         splitLine: i === 0 ? { lineStyle: { color: t.chartGrid, type: 'dashed' } } : { show: false },
       })),

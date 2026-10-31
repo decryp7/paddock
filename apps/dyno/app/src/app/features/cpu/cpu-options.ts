@@ -32,6 +32,17 @@ export function nearestIndex(times: readonly number[], at: number): number {
   return best;
 }
 
+/** Whether the time label `label` (`14:30`, or `22 Oct 14:30`) is a round tick for `range`. */
+export function roundTick(range: History['range'], label: string): boolean {
+  const m = /(\d{1,2}):(\d{2})$/.exec(label);
+  if (!m) return false;
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (range === 'hour') return minute % 10 === 0;
+  if (range === 'day') return minute === 0 && hour % 3 === 0;
+  return minute === 0 && hour === 0;
+}
+
 /** The per-core heatmap: one row per core, one column per bucket, colour = average load, with the range's events marked. */
 export function coreHeatmapOption(history: History, kinds: readonly CoreKind[], t: ThemeTokens): EChartsCoreOption {
   const { cells, labels, times } = heatCells(history, kinds);
@@ -57,7 +68,8 @@ export function coreHeatmapOption(history: History, kinds: readonly CoreKind[], 
       splitArea: { show: false },
       axisLine: { lineStyle: { color: t.border } },
       axisTick: { show: false },
-      axisLabel: { color: t.text3, fontFamily: FONT, fontSize: 11, hideOverlap: true },
+      // Round times only: every ten minutes in the hour, every three hours in the day, midnight in the week and the month.
+      axisLabel: { color: t.text3, fontFamily: FONT, fontSize: 11, hideOverlap: true, interval: (_i: number, label: string) => roundTick(history.range, label) },
     },
     yAxis: { type: 'category', data: labels, inverse: true, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: t.text2, fontFamily: FONT, fontSize: 11 } },
     visualMap: {

@@ -37,6 +37,17 @@ describe('dy-widget', () => {
     expect(hero.getAttribute('data-tone')).toBe('ok');
   });
 
+  it('draws a battery ring as a ring, as the chooser says, not as a bar', () => {
+    env();
+    const f = TestBed.createComponent(WidgetView);
+    f.componentRef.setInput('placement', place('ring', 'battery'));
+    f.componentRef.setInput('metricReading', { value: 86, text: '86', unit: '%', percent: 86, tone: 'ok', reason: null });
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('dy-ring')).not.toBeNull();
+    expect(el.querySelector('.bar-track')).toBeNull();
+  });
+
   it('says why a graph has no reading instead of drawing a history for it', () => {
     env();
     const f = TestBed.createComponent(WidgetView);
