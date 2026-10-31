@@ -77,7 +77,11 @@ describe('dy-widget with a performance counter', () => {
 });
 
 describe('AnimatedNumber', () => {
-  it('sets text at once for non-numbers and the first value, and glides to the next', async () => {
+  // The glide runs on animation frames and the clock: both are faked, so the test advances time instead of waiting for it.
+  beforeEach(() => vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] }));
+  afterEach(() => vi.useRealTimers());
+
+  it('sets text at once for non-numbers and the first value, and glides to the next', () => {
     const f = TestBed.createComponent(AnimatedNumber);
     f.componentRef.setInput('value', '10');
     f.detectChanges();
@@ -89,10 +93,13 @@ describe('AnimatedNumber', () => {
     f.detectChanges();
     f.componentRef.setInput('value', '30.5');
     f.detectChanges();
-    await vi.waitFor(() => {
-      f.detectChanges();
-      expect(f.nativeElement.textContent).toBe('30.5');
-    }, { timeout: 5_000 }); // the glide is about 300 ms; many times that on a loaded machine
+    vi.advanceTimersByTime(150);
+    f.detectChanges();
+    const mid = Number(f.nativeElement.textContent);
+    expect(mid).toBeGreaterThan(20);
+    expect(mid).toBeLessThan(30.5);
+    vi.advanceTimersByTime(400);
+    f.detectChanges();
     expect(f.nativeElement.textContent).toBe('30.5');
   });
 });

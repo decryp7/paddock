@@ -403,16 +403,16 @@ fn a_running_check_shows_the_jobs_own_progress_and_keeps_the_last_value() {
     })
     .unwrap();
     let S::Working {
+        title,
         phase,
         progress,
         last,
         cancel,
-        ..
     } = s
     else {
         panic!("{s:?}")
     };
-    assert_eq!(phase, "Time Machine");
+    assert_eq!((title.as_str(), phase.as_str()), ("Checking Time Machine", ""));
     assert_eq!(
         progress,
         Progress::Count {
@@ -761,4 +761,22 @@ fn a_percent_counter_has_a_scale_and_a_tone_from_the_engine() {
     };
     assert_eq!((rows[0].percent, rows[0].tone), (Some(95.0), ValueTone::Bad));
     assert_eq!((rows[1].percent, rows[1].tone), (Some(10.0), ValueTone::Ok));
+}
+
+#[test]
+fn a_running_check_with_no_tool_name_says_checking_backup() {
+    let r = backup_report(json!([status("Time Machine", "healthy", Some(NOW.0))]), true, true);
+    let job = JobProgress {
+        phase: " ".into(),
+        done: 1,
+        unit: "items".into(),
+    };
+    let s = run(&PopoverWidget::BackupHealth, |i| {
+        i.backup = Source::Ready(BackupInput {
+            report: &r,
+            job: Some(job),
+        })
+    })
+    .unwrap();
+    assert!(matches!(&s, S::Working { title, .. } if title == "Checking backup"), "{s:?}");
 }

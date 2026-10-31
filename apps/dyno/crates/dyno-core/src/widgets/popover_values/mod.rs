@@ -767,9 +767,13 @@ fn backup(inputs: &Inputs<'_>) -> Option<State> {
             // Real progress only: the running job's own phase and count (ER-18). Without one the last value stays, or the
             // widget is still loading; no count is made up.
             Some(j) => Some(WidgetState::Working {
-                // Short: the half-width frame shows "title" then "phase · count" in two lines at most.
-                title: "Checking backup".into(),
-                phase: j.phase,
+                // Short: the tool in the title, only the count in the body (the half-width frame fits two lines).
+                title: if j.phase.trim().is_empty() {
+                    "Checking backup".into()
+                } else {
+                    format!("Checking {}", j.phase.trim())
+                },
+                phase: String::new(),
                 progress: Progress::Count {
                     done: j.done,
                     unit: j.unit,
