@@ -361,7 +361,7 @@ export class SettingsPage implements OnInit {
         () => {
           const el = document.getElementById(id);
           el?.setAttribute('tabindex', '-1');
-          el?.scrollIntoView({ block: 'start' });
+          if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'start' });
           el?.focus({ preventScroll: true });
         },
         { injector: this.injector },

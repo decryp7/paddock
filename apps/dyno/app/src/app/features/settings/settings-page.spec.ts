@@ -89,14 +89,15 @@ describe('SettingsPage', () => {
     expect(Object.keys(await mock.settings())).not.toContain('trayItems');
   });
   it('opens at the section a widget button asked for, once', async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
     rememberSettingsAnchor('popup-widgets');
     const { f, el } = await make();
-    const target = el.querySelector<HTMLElement>('#popup-widgets')!;
-    const spy = vi.spyOn(target, 'scrollIntoView');
     await vi.waitFor(() => {
       f.detectChanges();
-      expect(document.activeElement === target || spy.mock.calls.length > 0 || target.getAttribute('tabindex') === '-1').toBe(true);
+      expect(scroll).toHaveBeenCalled();
     });
+    expect(scroll.mock.contexts[0]).toBe(el.querySelector('#popup-widgets'));
     expect(takeSettingsAnchor()).toBeNull();
   });
   it('a rejected save keeps the draft and the bar and toasts the engine message', async () => {

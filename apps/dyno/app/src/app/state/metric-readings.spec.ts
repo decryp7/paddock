@@ -67,7 +67,7 @@ describe('MetricReadings', () => {
     await vi.waitFor(() => expect(out().size).toBe(2));
     list.set([named('second', q('fan')), named('first', q('cpuTotal'))]);
     TestBed.tick();
-    await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(spy.mock.lastCall![0].map((x) => x.metric)).toEqual(['fan', 'cpuTotal']));
     await vi.waitFor(() => expect(out().get('second')!.value).toBeNull());
     expect(out().get('first')!.value).not.toBeNull();
   });
