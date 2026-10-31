@@ -40,3 +40,5 @@ node_modules
 /apps/workbench-demo/src-tauri/target/
 /apps/workbench-demo/dist/
 /vm-smoke-results/
+# The heavy tool's local build folder.
+/tools/heavy/target/
