@@ -57,15 +57,52 @@ pub fn parse_job(launchctl_print: &str) -> JobReport {
 impl JobReport {
     /// Whether launchd holds a registration it can no longer start. macOS keeps the launch constraint of the build that
     /// was registered; every ad-hoc signed build has another cdhash, so after an update launchd refuses the new binary
-    /// (spawn failed, exit 78 EX_CONFIG, "needs LWCR update") until the job is replaced. A job that holds a constraint
-    /// and is not running counts too: the caller only acts on it when the service does not answer.
+    /// (spawn failed, exit 78 EX_CONFIG, "needs LWCR update") until the job is replaced. `has LWCR` alone is not a sign:
+    /// every healthy `SMAppService` job has it, and a pending or restarting job is not refused. A running job is not
+    /// refused whatever an earlier run left in the report.
     pub fn stale(&self) -> bool {
         self.found
-            && (self.spawn_failed
-                || self.exit_config
-                || self.needs_lwcr_update
-                || (self.has_lwcr && !self.running))
+            && !self.running
+            && (self.spawn_failed || self.exit_config || self.needs_lwcr_update)
     }
+
+    /// Whether the registration is to be replaced now: launchd refuses it ([`stale`](Self::stale)) and the service does
+    /// not answer (`answers`). The one decision every app uses; a running or pending job is never replaced because the
+    /// app has not connected yet, which would kill the healthy agent.
+    pub fn needs_repair(&self, answers: bool) -> bool {
+        self.stale() && !answers
+    }
+
+    /// The observed state in words, for the log and the failure message.
+    pub fn describe(&self) -> String {
+        if !self.found {
+            return "launchd does not know the job".into();
+        }
+        let mut parts = vec![if self.running {
+            "running"
+        } else {
+            "not running"
+        }];
+        for (on, what) in [
+            (self.spawn_failed, "spawn failed"),
+            (self.exit_config, "exit code 78 (EX_CONFIG)"),
+            (self.needs_lwcr_update, "needs LWCR update"),
+            (self.has_lwcr, "has a launch constraint"),
+        ] {
+            if on {
+                parts.push(what);
+            }
+        }
+        parts.join(", ")
+    }
+}
+
+/// `launchctl <args>` through `sys` (the real one has a timeout that ends the whole tree and reads the output while the
+/// tool runs, so a long listing such as `print-disabled` never blocks on a full pipe). `None` when it cannot be run,
+/// times out or exits non-zero. Output past the system's cap ([`crate::system::MAX_HELPER_OUTPUT`]) comes back truncated.
+pub fn launchctl_output(sys: &mut dyn crate::port::System, args: &[&str]) -> Option<String> {
+    let out = sys.run(crate::paths::LAUNCHCTL, args).ok()?;
+    out.success().then_some(out.stdout)
 }
 
 /// Reads `label`'s entry in `launchctl print-disabled <domain>`: `"label" => disabled` (older systems print
@@ -292,7 +329,8 @@ mod tests {
         assert!(parse_job("\tstate = spawn scheduled\n\tlast exit code = 78: EX_CONFIG\n").stale());
         assert!(parse_job("\tstate = spawn scheduled\n\tjob state = spawn failed\n").stale());
         assert!(
-            parse_job("\tstate = spawn scheduled\n\tproperties = keepalive | has LWCR\n").stale()
+            !parse_job("\tstate = spawn scheduled\n\tproperties = keepalive | has LWCR\n").stale(),
+            "a constraint alone is not a refusal"
         );
         assert!(
             parse_job("\tstate = waiting\n\tproperties = keepalive | needs LWCR update\n").stale()
@@ -459,5 +497,105 @@ mod tests {
         );
         assert_eq!(sc_config(""), (None, None));
         assert_eq!(sc_exit::EXISTS, 1073);
+    }
+
+    /// A real `launchctl print` of a healthy job (macOS 26.6.2, 2026-10-31): the whole report, label and ids invented.
+    const REAL_RUNNING: &str = include_str!("../tests/fixtures/launchctl-print-running.txt");
+
+    #[test]
+    fn an_unknown_job_is_not_stale_whatever_a_stray_line_says() {
+        assert!(!parse_job("\tjob state = spawn failed\n").stale());
+        assert!(!parse_job("\tlast exit code = 78\n").stale());
+    }
+
+    #[test]
+    fn a_real_running_print_is_not_stale() {
+        let job = parse_job(REAL_RUNNING);
+        assert!(job.found && job.running && job.has_lwcr, "{job:?}");
+        assert!(
+            !job.spawn_failed && !job.exit_config && !job.needs_lwcr_update,
+            "{job:?}"
+        );
+        assert!(!job.stale());
+    }
+
+    #[test]
+    fn a_pending_job_with_a_constraint_is_not_refused_and_not_repaired() {
+        // Regression (Dyno B4): a pending job at login ("spawn scheduled", `has LWCR`) read as stale and its repair
+        // killed the healthy agent.
+        let pending = REAL_RUNNING
+            .replacen("\tstate = running", "\tstate = spawn scheduled", 1)
+            .replace("job state = running", "job state = pending");
+        let job = parse_job(&pending);
+        assert!(
+            job.found && !job.running && job.has_lwcr && !job.stale(),
+            "{job:?}"
+        );
+        assert!(!job.needs_repair(false));
+        let failed = pending.replace("job state = pending", "job state = spawn failed");
+        assert!(parse_job(&failed).stale() && parse_job(&failed).needs_repair(false));
+        // `last exit code = 78` in a nested block is not the job's.
+        let nested = REAL_RUNNING.replace(
+            "\t\tname = net.example.app.agent\n\t}\n\n\tjetsam",
+            "\t\tlast exit code = 78\n\t}\n\n\tjetsam",
+        );
+        assert!(!parse_job(&nested).exit_config);
+    }
+
+    #[test]
+    fn repair_is_only_for_a_refused_job_that_does_not_answer() {
+        let refused = parse_job(SPAWN_FAILED);
+        assert!(refused.needs_repair(false));
+        assert!(
+            !refused.needs_repair(true),
+            "an answering service is left alone"
+        );
+        // A running job is never replaced, even with a refusal sign left from an earlier run.
+        let mut running = parse_job(REAL_RUNNING);
+        running.exit_config = true;
+        running.needs_lwcr_update = true;
+        assert!(!running.stale() && !running.needs_repair(false));
+        assert!(
+            !JobReport::default().needs_repair(false),
+            "an unknown job is not repaired"
+        );
+    }
+
+    #[test]
+    fn the_observed_state_is_described_in_words() {
+        assert_eq!(
+            JobReport::default().describe(),
+            "launchd does not know the job"
+        );
+        assert_eq!(
+            parse_job(REAL_RUNNING).describe(),
+            "running, has a launch constraint"
+        );
+        assert_eq!(
+            parse_job(SPAWN_FAILED).describe(),
+            "not running, spawn failed, exit code 78 (EX_CONFIG), has a launch constraint"
+        );
+        assert_eq!(
+            parse_job("state = waiting\nproperties = needs LWCR update\n").describe(),
+            "not running, needs LWCR update"
+        );
+    }
+
+    #[test]
+    fn launchctl_output_is_the_stdout_of_a_successful_call_only() {
+        use crate::port::{Output, RunError};
+        use crate::testing::FakeSystem;
+        let mut sys = FakeSystem::new();
+        sys.answer("/bin/launchctl print gui/501/x", Output::ok(REAL_RUNNING));
+        sys.answer("/bin/launchctl print gui/501/gone", Output::code(113));
+        sys.on("/bin/launchctl print gui/501/slow", |_, _| {
+            Err(RunError::TimedOut("launchctl".into()))
+        });
+        assert_eq!(
+            launchctl_output(&mut sys, &["print", "gui/501/x"]).as_deref(),
+            Some(REAL_RUNNING)
+        );
+        assert_eq!(launchctl_output(&mut sys, &["print", "gui/501/gone"]), None);
+        assert_eq!(launchctl_output(&mut sys, &["print", "gui/501/slow"]), None);
     }
 }

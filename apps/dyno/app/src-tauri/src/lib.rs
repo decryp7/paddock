@@ -258,18 +258,19 @@ fn agent_setup<R: Runtime>(
 }
 
 /// macOS: `SMAppService.mainApp` starts the app at login without `--hidden`; macOS says it was a login start in the
-/// open-application Apple Event instead ([`login::launched_as_login_item`]), which is readable only while that event is
+/// open-application Apple Event instead ([`login::open_event`]), which is readable only while that event is
 /// being handled, i.e. inside `applicationDidFinishLaunching`. Plugin setups run earlier (in `Builder::build`), so the
 /// decision is made in the run loop's `Ready` event, which tao emits from `applicationDidFinishLaunching` right after the
 /// App's setup. The shell was told to start in the tray (`launch.hidden`); unless the flag or the login event asked for
 /// that, the main window is opened here (the tray exists by then). A missed detection shows the window, never hides one.
 #[cfg(target_os = "macos")]
 fn on_ready(app: &tauri::AppHandle, asked_hidden: bool) {
-    let hidden = login_item::hidden_at_start(asked_hidden, login::launched_as_login_item());
-    logging::info(&format!(
-        "started {}",
-        if hidden { "hidden (flag or login item)" } else { "with a window" }
-    ));
+    let by = login_item::hidden_by(asked_hidden, login::open_event());
+    let hidden = by.is_some();
+    logging::info(&match by {
+        Some(why) => format!("started hidden ({})", why.describe()),
+        None => "started with a window".to_string(),
+    });
     if !hidden && app.get_webview_window(paddock_commands::labels::MAIN_LABEL).is_none() {
         if let Err(e) = paddock_window::tauri::create_main(app) {
             log::error!(Error = e.message.as_str(); "The main window could not be opened");

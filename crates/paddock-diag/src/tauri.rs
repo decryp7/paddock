@@ -66,6 +66,15 @@ impl Setup {
         }
     }
 
+    /// Reports the settings file `name` in the config folder instead of `settings.json` (the shell passes
+    /// `shell-settings.json`).
+    pub fn settings_file(mut self, name: &str) -> Setup {
+        if let Some(slot) = self.sections.iter_mut().find(|s| s.id() == "settings") {
+            *slot = Arc::new(builtin::Settings::file(name));
+        }
+        self
+    }
+
     /// Adds an app section after the built-in ones.
     pub fn section(mut self, section: Arc<dyn Section>) -> Setup {
         self.sections.push(section);

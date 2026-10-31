@@ -483,3 +483,12 @@ fn a_file_opened_from_finder_opens_the_main_window_after_the_hook() {
     );
     wait_for_main(&app);
 }
+
+#[test]
+fn the_default_settings_live_in_the_given_file_or_in_memory() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join(crate::logging::SHELL_SETTINGS_FILE);
+    let _ = settings_at(Some(file.clone()));
+    let _ = settings_at(None);
+    assert!(!dir.path().join(paddock_settings::FILE_NAME).exists(), "the app's own settings.json is never created");
+}

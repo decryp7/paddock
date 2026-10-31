@@ -267,7 +267,8 @@ pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Build
                 option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""),
             ),
             dirs(report_dir.as_deref())?,
-        );
+        )
+        .settings_file(paddock_shell::logging::SHELL_SETTINGS_FILE);
         Ok(match log {
             Some(handle) => setup.log(handle),
             None => setup,

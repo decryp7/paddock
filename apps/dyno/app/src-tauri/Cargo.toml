@@ -40,6 +40,8 @@ paddock-health = { path = "../../../../crates/paddock-health", features = ["taur
 paddock-jobs = { path = "../../../../crates/paddock-jobs", features = ["tauri"] }
 # The start judge, stall report and discovery-hint helpers (ADR 0031, rule 53).
 paddock-proc = { path = "../../../../crates/paddock-proc" }
+# The shared launchd readers and the repair decision (a pending or running job is never stale).
+paddock-service = { path = "../../../../crates/paddock-service" }
 paddock-settings = { path = "../../../../crates/paddock-settings", features = ["tauri"] }
 paddock-startup = { path = "../../../../crates/paddock-startup", features = ["tauri"] }
 paddock-updater = { path = "../../../../crates/paddock-updater", features = ["tauri", "install"] }

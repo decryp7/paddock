@@ -3,28 +3,14 @@
 //! own report (`launchctl print`, `print-disabled`) to see a stale registration (R03) and the user's switch.
 
 use super::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target};
-use crate::parse::{JobReport, parse_job, parse_print_disabled, plist_program};
+use crate::launchctl::{bootout, job_report};
+use crate::parse::{JobReport, parse_print_disabled, plist_program};
 use crate::paths::{LAUNCHCTL, launchd_domain, launchd_target};
 use crate::port::{AppService, AppServiceStatus, RegisterError, System};
 use crate::render::{LaunchdProgram, launchd_plist};
 use crate::spec::ServiceSpec;
 use std::path::PathBuf;
 use std::time::Duration;
-
-/// `launchctl print` of a service launchd does not know exits with this.
-const NOT_FOUND: i32 = 113;
-
-/// launchd's report of the job: `Some(default)` when launchd does not know it, `None` when it could not be asked.
-fn job_report(sys: &mut dyn System, target: &str) -> Option<JobReport> {
-    let out = sys.run(LAUNCHCTL, &["print", target]).ok()?;
-    if out.success() {
-        Some(parse_job(&out.stdout))
-    } else if out.code == Some(NOT_FOUND) || out.stderr.contains("Could not find service") {
-        Some(JobReport::default())
-    } else {
-        None
-    }
-}
 
 fn job_of(report: Option<JobReport>) -> Job {
     match report {
@@ -43,22 +29,6 @@ fn disabled(sys: &mut dyn System, domain: &str, label: &str) -> Option<bool> {
         return None;
     }
     parse_print_disabled(&out.stdout, label)
-}
-
-/// `launchctl bootout <target>`; a job launchd does not know is fine.
-fn bootout(sys: &mut dyn System, target: &str) -> Result<(), String> {
-    match sys.run(LAUNCHCTL, &["bootout", target]) {
-        Ok(o) if o.success() => Ok(()),
-        Ok(o)
-            if o.code == Some(3)
-                || o.code == Some(NOT_FOUND)
-                || o.stderr.contains("No such process") =>
-        {
-            Ok(())
-        }
-        Ok(o) => Err(format!("launchctl bootout: {}", o.reason())),
-        Err(e) => Err(format!("launchctl bootout {e}")),
-    }
 }
 
 fn gone(sys: &mut dyn System, target: &str) -> bool {

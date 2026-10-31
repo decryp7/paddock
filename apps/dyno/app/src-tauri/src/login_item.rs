@@ -43,9 +43,60 @@ pub fn refuse_unstable_location(exe: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether a start is hidden in the tray: the `--hidden` flag, or the OS says the app was launched as a login item.
-pub fn hidden_at_start(flag: bool, launched_as_login_item: bool) -> bool {
-    flag || launched_as_login_item
+/// What the open-application Apple Event said about this start (read by `login.rs`; plain values so the decision is pure).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OpenEvent {
+    /// The event carries `keyAELaunchedAsLogInItem` (`'lgit'`): a Login Items start.
+    pub login_item: bool,
+    /// The event carries `keyAERestoreAppState` (`'rsto'`) with the value yes: a "Reopen windows" relaunch.
+    pub restore: bool,
+    /// The event's sender is `loginwindow`, by the executable path of the sender pid read in the same moment.
+    pub sender_is_loginwindow: bool,
+}
+
+/// What made a start hidden in the tray.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HiddenBy {
+    /// The `--hidden` flag.
+    Flag,
+    /// A Login Items start (`lgit`).
+    LoginItem,
+    /// loginwindow reopened the app after a restart (`rsto=yes` from loginwindow), whatever Start at login says.
+    RestoredAtLogin,
+}
+
+impl HiddenBy {
+    /// The words for the log line.
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::Flag => "flag",
+            Self::LoginItem => "login item",
+            Self::RestoredAtLogin => "restored at login",
+        }
+    }
+}
+
+/// The executable of macOS's login window, the only sender whose restore request counts as a login start.
+pub const LOGINWINDOW_PATH: &str = "/System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow";
+
+/// Whether `path` (a sender pid's executable) is the login window.
+pub fn is_loginwindow(path: &str) -> bool {
+    path == LOGINWINDOW_PATH
+}
+
+/// Why a start is hidden in the tray, if it is: the `--hidden` flag, a Login Items start, or a restore request from
+/// loginwindow (user decision 2026-10-31: a system reopen starts Dyno in the tray whatever Start at login says). A restore
+/// from any other sender (a user's own "Resume") shows the window.
+pub fn hidden_by(flag: bool, event: OpenEvent) -> Option<HiddenBy> {
+    if flag {
+        Some(HiddenBy::Flag)
+    } else if event.login_item {
+        Some(HiddenBy::LoginItem)
+    } else if event.restore && event.sender_is_loginwindow {
+        Some(HiddenBy::RestoredAtLogin)
+    } else {
+        None
+    }
 }
 
 /// Whether `xml` is exactly the file `tauri-plugin-autostart` wrote for Dyno on macOS: label `Dyno`, a `dyno-app` program
@@ -175,11 +226,41 @@ mod tests {
         assert_eq!(route_for("windows"), AppLoginRoute::Plugin);
     }
 
+    fn event(login_item: bool, restore: bool, sender_is_loginwindow: bool) -> OpenEvent {
+        OpenEvent { login_item, restore, sender_is_loginwindow }
+    }
+
     #[test]
-    fn a_start_is_hidden_by_the_flag_or_the_login_item_event() {
-        assert!(hidden_at_start(true, false));
-        assert!(hidden_at_start(false, true));
-        assert!(!hidden_at_start(false, false));
+    fn what_hides_a_start() {
+        let cases = [
+            (true, event(false, false, false), Some(HiddenBy::Flag)),
+            (false, event(true, false, true), Some(HiddenBy::LoginItem)),
+            (false, event(true, false, false), Some(HiddenBy::LoginItem)),
+            (false, event(false, true, true), Some(HiddenBy::RestoredAtLogin)),
+            (false, event(false, true, false), None),
+            (false, event(false, false, true), None),
+            (false, event(false, false, false), None),
+            (true, event(true, true, true), Some(HiddenBy::Flag)),
+            (false, event(true, true, true), Some(HiddenBy::LoginItem)),
+        ];
+        for (flag, ev, want) in cases {
+            assert_eq!(hidden_by(flag, ev), want, "flag {flag}, {ev:?}");
+        }
+    }
+
+    #[test]
+    fn the_signals_are_named_in_the_log() {
+        assert_eq!(HiddenBy::Flag.describe(), "flag");
+        assert_eq!(HiddenBy::LoginItem.describe(), "login item");
+        assert_eq!(HiddenBy::RestoredAtLogin.describe(), "restored at login");
+    }
+
+    #[test]
+    fn only_the_login_window_executable_counts_as_loginwindow() {
+        assert!(is_loginwindow(LOGINWINDOW_PATH));
+        assert!(!is_loginwindow("/Applications/Evil.app/Contents/MacOS/loginwindow"));
+        assert!(!is_loginwindow("/usr/bin/open"));
+        assert!(!is_loginwindow(""));
     }
 
     #[test]
