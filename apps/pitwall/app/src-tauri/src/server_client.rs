@@ -92,6 +92,7 @@ pub fn error_from_response(status: u16, body: &Value) -> CommandError {
         404 => ErrorCode::NotFound,
         400 | 422 => ErrorCode::BadRequest,
         409 => ErrorCode::Conflict,
+        502 => ErrorCode::Upstream,
         503 => ErrorCode::ServerUnavailable,
         _ => ErrorCode::Internal,
     };
@@ -417,6 +418,7 @@ mod tests {
             (404, ErrorCode::NotFound),
             (400, ErrorCode::BadRequest),
             (409, ErrorCode::Conflict),
+            (502, ErrorCode::Upstream),
             (503, ErrorCode::ServerUnavailable),
             (500, ErrorCode::Internal),
         ] {

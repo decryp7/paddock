@@ -10,6 +10,7 @@ const CODES: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
   'insufficientMemory',
   'busy',
   'notAvailable',
+  'upstream',
   'notImplemented',
   'cancelled',
   'internal',

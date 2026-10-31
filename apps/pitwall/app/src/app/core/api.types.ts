@@ -18,6 +18,7 @@ export type ErrorCode =
   | 'insufficientMemory'
   | 'busy'
   | 'notAvailable'
+  | 'upstream'
   | 'notImplemented'
   | 'cancelled'
   | 'internal';

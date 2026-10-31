@@ -70,7 +70,9 @@ impl From<UsageError> for CliError {
 pub fn exit_for(code: ErrorCode) -> Exit {
     match code {
         ErrorCode::ServerUnavailable => Exit::NotRunning,
-        ErrorCode::InsufficientMemory | ErrorCode::Busy | ErrorCode::Conflict | ErrorCode::NotAvailable => Exit::Refused,
+        ErrorCode::InsufficientMemory | ErrorCode::Busy | ErrorCode::Conflict | ErrorCode::NotAvailable | ErrorCode::Upstream => {
+            Exit::Refused
+        }
         ErrorCode::Unauthorized
         | ErrorCode::Forbidden
         | ErrorCode::NotFound
@@ -89,6 +91,7 @@ fn hint(code: ErrorCode) -> &'static str {
         ErrorCode::Forbidden => " Only the admin key may use this command.",
         ErrorCode::InsufficientMemory => " Unload a model (pitwall ps, pitwall unload <model>) or pick a smaller quantisation.",
         ErrorCode::Busy => " Try again in a moment.",
+        ErrorCode::Upstream => " Check the network connection and try again.",
         _ => "",
     }
 }
@@ -137,6 +140,7 @@ mod tests {
             (Busy, Exit::Refused),
             (Conflict, Exit::Refused),
             (NotAvailable, Exit::Refused),
+            (Upstream, Exit::Refused),
             (Unauthorized, Exit::Error),
             (Forbidden, Exit::Error),
             (NotFound, Exit::Error),
@@ -158,6 +162,12 @@ mod tests {
         assert!(e.message.starts_with("needs 9 GB.") && e.message.contains("pitwall unload"));
         let e: CliError = CommandError::new(ErrorCode::NotFound, "no such model").into();
         assert_eq!(e.message, "no such model.");
+        let e: CliError = CommandError::new(ErrorCode::Upstream, "cannot reach huggingface.co").into();
+        assert_eq!(e.exit, Exit::Refused);
+        assert_eq!(
+            e.message,
+            "cannot reach huggingface.co. Check the network connection and try again."
+        );
         for c in [ErrorCode::Forbidden, ErrorCode::Busy] {
             assert!(CliError::from(CommandError::new(c, "x")).message.len() > 3);
         }

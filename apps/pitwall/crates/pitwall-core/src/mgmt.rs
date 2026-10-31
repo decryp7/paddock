@@ -63,6 +63,8 @@ pub enum ErrorCode {
     Busy,
     /// Not available on this machine.
     NotAvailable,
+    /// An outside host (Hugging Face, GitHub) could not be reached, refused, or sent bad data; try again later.
+    Upstream,
     /// Not built yet.
     NotImplemented,
     /// A bug.
@@ -81,6 +83,7 @@ impl ErrorCode {
             ErrorCode::Conflict => 409,
             ErrorCode::InsufficientMemory | ErrorCode::Busy => 503,
             ErrorCode::NotAvailable | ErrorCode::NotImplemented => 501,
+            ErrorCode::Upstream => 502,
             ErrorCode::Internal => 500,
         }
     }
@@ -1451,6 +1454,7 @@ mod tests {
             (ErrorCode::InsufficientMemory, 503),
             (ErrorCode::Busy, 503),
             (ErrorCode::NotAvailable, 501),
+            (ErrorCode::Upstream, 502),
             (ErrorCode::NotImplemented, 501),
             (ErrorCode::Internal, 500),
         ];
