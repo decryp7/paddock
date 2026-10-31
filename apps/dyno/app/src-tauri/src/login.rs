@@ -148,7 +148,7 @@ impl AgentService for CliService {
 // ---------------------------------------------------------------------------------------------------------- macOS
 
 #[cfg(target_os = "macos")]
-pub use mac::{open_event, migrate_legacy_login_at_start, MainAppLogin, SmService};
+pub use mac::{migrate_legacy_login_at_start, open_event, MainAppLogin, SmService};
 
 #[cfg(target_os = "macos")]
 mod mac {
@@ -158,14 +158,15 @@ mod mac {
     #![allow(unsafe_code, unused_unsafe)]
 
     use super::*;
+    use crate::login_item::OpenEvent;
     use crate::service_repair::{
-        keep_registered, parse_job, parse_print_disabled, plan, record_registered_version, registered_version, service_supervises,
+        keep_registered, launchctl_output, parse_print_disabled, plan, record_registered_version, registered_version, service_supervises,
         JobReport, Observed, RegisterError, RegistrationStatus, RepairOps, REGISTERED_VERSION_FILE,
     };
-    use crate::login_item::OpenEvent;
     use dyno_agent::service::LABEL;
     use objc2_foundation::NSString;
     use objc2_service_management::{SMAppService, SMAppServiceStatus};
+    use paddock_service::system::RealSystem;
     use std::time::Duration;
 
     const PLIST: &str = "net.decryptology.dyno.agent.plist";
@@ -270,7 +271,11 @@ mod mac {
                     None => false,
                 }
             };
-            OpenEvent { login_item: direct.is_some() || by_props, restore, sender_is_loginwindow }
+            OpenEvent {
+                login_item: direct.is_some() || by_props,
+                restore,
+                sender_is_loginwindow,
+            }
         }
     }
 
@@ -366,8 +371,7 @@ mod mac {
     /// launchd's report of the job (nothing found when it cannot be read).
     fn job_report() -> JobReport {
         target()
-            .and_then(|t| launchctl(&["print", &t]))
-            .map(|r| parse_job(&r))
+            .and_then(|t| paddock_service::launchctl::job_report(&mut system(), &t))
             .unwrap_or_default()
     }
 
@@ -377,9 +381,14 @@ mod mac {
         parse_print_disabled(&report, LABEL)
     }
 
-    /// `launchctl <args>`, bounded to a few seconds; `None` when it cannot be run or read.
+    /// The shared bounded tool runner: output read while the tool runs, the tree ended at the timeout.
+    fn system() -> RealSystem {
+        RealSystem::new().with_timeout(Duration::from_secs(5))
+    }
+
+    /// `launchctl <args>` through it; `None` when it cannot be run, times out or fails.
     fn launchctl(args: &[&str]) -> Option<String> {
-        crate::service_repair::run_bounded("/bin/launchctl", args, Duration::from_secs(5))
+        launchctl_output(&mut system(), args)
     }
 
     /// [`RepairOps`] over `SMAppService` and `launchctl`.
@@ -396,9 +405,7 @@ mod mac {
         }
         fn bootout(&mut self) -> Result<(), String> {
             let t = target().ok_or("the user's launchd domain is unknown")?;
-            launchctl(&["bootout", &t])
-                .map(|_| ())
-                .ok_or_else(|| "launchctl bootout could not be run".to_string())
+            paddock_service::launchctl::bootout(&mut system(), &t)
         }
         fn job_gone(&mut self) -> bool {
             !job_report().found

@@ -1181,6 +1181,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-menu",
  "paddock-proc",
+ "paddock-service",
  "paddock-settings",
  "paddock-shell",
  "paddock-startup",
