@@ -103,7 +103,6 @@ pub struct ServiceSpec {
     docs_url: Option<String>,
     kill_mode: Option<KillMode>,
     stop_timeout_secs: u32,
-    wait_for_network: bool,
 }
 
 impl ServiceSpec {
@@ -131,7 +130,6 @@ impl ServiceSpec {
                 docs_url: None,
                 kill_mode: None,
                 stop_timeout_secs: 60,
-                wait_for_network: false,
             },
         }
     }
@@ -210,14 +208,9 @@ impl ServiceSpec {
         self.docs_url.as_deref()
     }
     /// How long the OS waits for the process to exit when stopping it, in seconds (systemd `TimeoutStopSec=`, launchd
-    /// `ExitTimeOut` of a daemon; default 60).
+    /// `ExitTimeOut` of a daemon; a launchd user agent and a Windows service ignore it; default 60).
     pub fn stop_timeout_secs(&self) -> u32 {
         self.stop_timeout_secs
-    }
-    /// Whether a user unit starts only after the network is up (systemd `After=`/`Wants=network-online.target`; a system
-    /// unit always does).
-    pub fn wait_for_network(&self) -> bool {
-        self.wait_for_network
     }
     /// What systemd ends when it stops the unit; `None`: systemd's own default, no `KillMode=` line.
     pub fn kill_mode(&self) -> Option<KillMode> {
@@ -298,14 +291,13 @@ impl SpecBuilder {
         self
     }
     /// How long the OS waits for the process to exit when stopping it (default 60 s; 1 to 3600): a service that must finish
-    /// a running job needs longer.
+    /// a running job needs longer. Only systemd (`TimeoutStopSec=`) and a launchd daemon (`ExitTimeOut`) honour it; a launchd
+    /// user agent and a Windows service ignore it (the SCM uses its own stop timeout).
+    ///
+    /// A user service cannot order itself after the network (`network-online.target` belongs to the system manager, which a
+    /// `systemd --user` instance cannot order after), so there is no such option: a user service retries its own network use.
     pub fn stop_timeout_secs(mut self, secs: u32) -> Self {
         self.spec.stop_timeout_secs = secs;
-        self
-    }
-    /// Start a systemd user unit only after the network is up (default: not; a system unit always waits).
-    pub fn wait_for_network(mut self, on: bool) -> Self {
-        self.spec.wait_for_network = on;
         self
     }
     /// What systemd ends when it stops the unit (`KillMode=`; default: not written, systemd's own default applies).

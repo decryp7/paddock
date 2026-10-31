@@ -183,7 +183,7 @@ pub fn systemd_unit(spec: &ServiceSpec, exe: &str, working_dir: Option<&str>) ->
     if let Some(url) = spec.docs_url() {
         let _ = writeln!(o, "Documentation={}", systemd_text(url));
     }
-    if spec.kind() == Kind::SystemService || spec.wait_for_network() {
+    if spec.kind() == Kind::SystemService {
         o.push_str("After=network-online.target\nWants=network-online.target\n");
     }
     o.push_str("\n[Service]\nType=simple\n");
@@ -523,14 +523,11 @@ mod tests {
     }
 
     #[test]
-    fn stop_timeout_and_network_wait_are_rendered_and_default_to_the_old_unit() {
+    fn stop_timeout_is_rendered_and_user_units_never_mention_the_network() {
         let default = ServiceSpec::builder("net.decryptology.dyno.agent", "Dyno", "dyno-agent")
             .build()
             .unwrap();
-        assert_eq!(
-            (default.stop_timeout_secs(), default.wait_for_network()),
-            (60, false)
-        );
+        assert_eq!(default.stop_timeout_secs(), 60);
         let u = systemd_unit(&default, "/p", None);
         assert!(
             u.contains("\nTimeoutStopSec=60\n") && !u.contains("network-online"),
@@ -538,28 +535,24 @@ mod tests {
         );
         let set = ServiceSpec::builder("net.decryptology.dyno.agent", "Dyno", "dyno-agent")
             .stop_timeout_secs(300)
-            .wait_for_network(true)
             .build()
             .unwrap();
         let u = systemd_unit(&set, "/p", None);
-        assert!(u.contains("\nTimeoutStopSec=300\n"), "{u}");
         assert!(
-            u.contains("After=network-online.target\nWants=network-online.target\n"),
+            u.contains("\nTimeoutStopSec=300\n") && !u.contains("network-online"),
             "{u}"
         );
-        assert_eq!(u.matches("network-online.target").count(), 2);
-        // A system unit waits for the network anyway, once.
+        // A system unit waits for the network, once per line.
         let sys = ServiceSpec::builder("net.decryptology.dyno.agent", "Dyno", "dyno-agent")
             .kind(Kind::SystemService)
-            .wait_for_network(true)
             .stop_timeout_secs(120)
             .build()
             .unwrap();
-        assert_eq!(
-            systemd_unit(&sys, "/p", None)
-                .matches("network-online.target")
-                .count(),
-            2
+        let u = systemd_unit(&sys, "/p", None);
+        assert!(
+            u.contains("After=network-online.target\nWants=network-online.target\n")
+                && u.matches("network-online.target").count() == 2,
+            "{u}"
         );
         let p = launchd_plist(&sys, LaunchdProgram::Bundled);
         assert!(
