@@ -8,6 +8,10 @@ Conventional Commits; one semver tag for the whole repo.
 - New input `decorative` (default `false`, today's behaviour: an image named "<label>: latest X, peak Y"). With `true` the chart is
   hidden from assistive technology (`aria-hidden="true"`, no role, no name), for a host that already says the numbers in its own
   text, such as a tile whose label has the formatted values.
+### `pd-pause-editor`: `showEmpty`, `compact`
+- New input `showEmpty` (default `true`): `false` leaves out the "No windows: nothing is paused." text, for a host that says it itself.
+- New input `compact` (default `false`, today's button): `true` draws the Add button small and neutral, through Material's outlined-button
+  tokens (height, shape, padding, label and outline colour), for dense settings columns.
 ### `pd-pause-editor`: times stay together when a window wraps
 - A window's From, Until, overnight note and Remove button are one group (`.pd-times`): in a narrow column they drop below the days together
   instead of Until alone on its own line. No change at wide widths.

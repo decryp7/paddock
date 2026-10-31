@@ -360,6 +360,25 @@ describe('pd-pause-editor', () => {
     expect(t.q('.pd-window > pd-day-picker')).not.toBeNull();
   });
 
+  it('shows the empty text by default; showEmpty=false leaves it out', async () => {
+    const t = pause({ windows: [], zone: null });
+    await settle(t.f);
+    expect(t.q('.pd-empty')).not.toBeNull();
+    t.f.componentRef.setInput('showEmpty', false);
+    await settle(t.f);
+    expect(t.el.querySelector('.pd-empty')).toBeNull();
+    expect(t.el.textContent).not.toContain('No windows');
+  });
+
+  it('draws the Add button as today, or compact (a smaller, neutral button) when asked', async () => {
+    const t = pause({ windows: [], zone: null });
+    await settle(t.f);
+    expect(t.q('.pd-add').classList.contains('pd-add--compact')).toBe(false);
+    t.f.componentRef.setInput('compact', true);
+    await settle(t.f);
+    expect(t.q('.pd-add').classList.contains('pd-add--compact')).toBe(true);
+  });
+
   it('stops at the engine limit, sets the zone and lists the problems', async () => {
     const full = Array.from({ length: 14 }, () => ({ days: [], start: '01:00', end: '02:00' }));
     const t = pause({ windows: full, zone: null }, ['A window needs a start that differs from its end.']);

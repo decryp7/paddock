@@ -25,7 +25,7 @@ import { dateToTime, TIME_PROVIDERS, TimeProblems, timeOptions, timeToDate } fro
   imports: [PdStatusGlyph, PdDayPicker, PdGlyph, PdField, PdFieldControl, MatButton, MatIconButton, MatTimepicker, MatTimepickerInput, PdKeepTimeOnEscape, MatTimepickerToggle, MatTooltip],
   providers: [TIME_PROVIDERS],
   template: `
-    @if (value().windows.length === 0) {
+    @if (showEmpty() && value().windows.length === 0) {
       <p class="pd-empty">{{ emptyText }}</p>
     }
     <ul class="pd-windows">
@@ -53,7 +53,7 @@ import { dateToTime, TIME_PROVIDERS, TimeProblems, timeOptions, timeToDate } fro
         </li>
       }
     </ul>
-    <button type="button" matButton="outlined" class="pd-add" [disabled]="disabled() || value().windows.length >= max" (click)="add()"><pd-glyph name="plus" [size]="14" />{{ addText }}</button>
+    <button type="button" matButton="outlined" class="pd-add" [class.pd-add--compact]="compact()" [disabled]="disabled() || value().windows.length >= max" (click)="add()"><pd-glyph name="plus" [size]="14" />{{ addText }}</button>
     @if (showZone()) {
       <pd-field class="pd-zone" data-testid="pause-zone" [label]="zoneLabel">
         <input pdFieldControl type="text" spellcheck="false" autocomplete="off" [placeholder]="zonePlaceholder" [value]="value().zone ?? ''" [disabled]="disabled()" (change)="setZone($event)" />
@@ -72,6 +72,15 @@ import { dateToTime, TIME_PROVIDERS, TimeProblems, timeOptions, timeToDate } fro
     .pd-window { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); }
     /* From, Until, the note and Remove stay together: when the row is too narrow they drop below the days as one group. */
     .pd-times { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--pd-space-2); }
+    /* The compact Add button: a small, neutral outlined button, set through Material's button tokens. */
+    .pd-add--compact {
+      --mat-button-outlined-container-height: 24px;
+      --mat-button-outlined-container-shape: var(--pd-radius-control);
+      --mat-button-outlined-horizontal-padding: var(--pd-space-2);
+      --mat-button-outlined-label-text-color: var(--pd-text);
+      --mat-button-outlined-outline-color: var(--pd-border-control);
+      font-size: var(--pd-text-label);
+    }
     .pd-add pd-glyph { margin-inline-end: var(--pd-space-1); vertical-align: middle; }
     .pd-note, .pd-empty { margin: 0; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-problem { display: flex; align-items: flex-start; gap: var(--pd-space-1); margin: 0; font-size: var(--pd-text-label); color: var(--pd-danger); }
@@ -88,6 +97,10 @@ export class PdPauseEditor {
    * field is not drawn and `value().zone` is never changed by the editor, so it stays whatever the host passed in.
    */
   readonly showZone = input(true);
+  /** Shows the "No windows: nothing is paused." text when there are none (the default); a host with its own message passes `false`. */
+  readonly showEmpty = input(true);
+  /** Draws the Add button small and neutral (a Material outlined button with smaller tokens) instead of the default accent one. */
+  readonly compact = input(false);
 
   private readonly adapter = inject<DateAdapter<Date>>(DateAdapter);
   private readonly formats = inject(MAT_DATE_FORMATS);
