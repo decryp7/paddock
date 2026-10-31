@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, output, viewChildren } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
+import { MatTooltip } from '@angular/material/tooltip';
 import { PdSkeleton, PdWidget } from '@decryp7/paddock-ui/widgets';
 import { ClockService } from '../../core/clock.service';
 import type { PopoverState } from '../../core/widgets.types';
@@ -37,7 +38,7 @@ const FAILURE: Record<FailureKind, string> = {
  */
 @Component({
   selector: 'sp-widget-set',
-  imports: [MatIcon, PdSkeleton, PdWidget, AgoShortPipe, UntilShortPipe, Version],
+  imports: [MatIcon, MatTooltip, PdSkeleton, PdWidget, AgoShortPipe, UntilShortPipe, Version],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ng-template pdWidget="watchedSites" [pdWidgetOf]="sites" let-v>
@@ -101,7 +102,7 @@ const FAILURE: Record<FailureKind, string> = {
             <button type="button" class="row" [disabled]="!r" [attr.aria-label]="r ? r.name + ', ' + failure(r.kind) + ', open' : null" (click)="r && run.emit({ type: 'openWatch', id: r.id })">
               <mat-icon class="ic st-attention" svgIcon="sp:alert" aria-hidden="true" pdSkeleton />
               <span class="name truncate" pdSkeleton>{{ r?.name ?? 'Watch name' }}</span>
-              <span class="meta truncate" [attr.title]="r ? failure(r.kind) + ': ' + r.message : null" pdSkeleton>{{ r ? failure(r.kind) + ': ' + r.message : 'Check failed: the place did not answer' }}</span>
+              <span class="meta truncate" [matTooltip]="r ? failure(r.kind) + ': ' + r.message : ''" pdSkeleton>{{ r ? failure(r.kind) + ': ' + r.message : 'Check failed: the place did not answer' }}</span>
             </button>
             <button type="button" class="retry" [disabled]="!r" [attr.aria-label]="r ? 'Retry check of ' + r.name : null" (click)="r && run.emit({ type: 'retryCheck', id: r.id })" pdSkeleton>
               <mat-icon class="ic-inline" svgIcon="sp:refresh" aria-hidden="true" />Retry

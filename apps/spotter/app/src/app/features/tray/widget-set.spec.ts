@@ -1,4 +1,6 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+import { MatTooltip } from '@angular/material/tooltip';
+import { By } from '@angular/platform-browser';
 import { TestBed } from '@angular/core/testing';
 import { PdWidgetArea } from '@decryp7/paddock-ui/widgets';
 import type { PopoverValue, WidgetActionId } from '../../core/generated/widgets';
@@ -132,9 +134,10 @@ describe('Spotter widget set', () => {
   });
 
   it('puts the failing watch\'s whole message in a tooltip and draws no chevron on a failure row', async () => {
-    const { frames } = await make();
+    const { frames, f } = await make();
     const row = frames()[2]!.querySelector('button.row')!;
-    expect(row.querySelector('.meta')?.getAttribute('title')).toBe('Unreachable: The share is offline.');
+    expect(row.querySelector('.meta')?.hasAttribute('title'), 'a Material tooltip, not a title attribute').toBe(false);
+    expect(f.debugElement.queryAll(By.directive(MatTooltip)).map((d) => (d.injector.get(MatTooltip) as MatTooltip).message)).toContain('Unreachable: The share is offline.');
     expect(row.querySelector('.chev')).toBeNull();
   });
 
