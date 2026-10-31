@@ -4,6 +4,8 @@
   the consolidation WP-C1 to WP-C6, with conformance as a shared Rust rules crate; only the categories shown to lose
   something real stay non-Rust, each with its reason. The five open decisions were taken on 2026-10-28 (Decisions
   taken).
+- Amendment 2026-10-31 (generic tools `devkit`, `wiki`, `heavy`; extensibility; tool logging): **Proposed amendment**,
+  section "Amendment (2026-10-31, Proposed amendment)".
 - Date: 2026-10-27
 - Related: rules 3–5 (affected tests, fix locally, failing test first), rule 7 (tests never touch the machine), rule 13
   (bounded parallelism), rule 22 (independent review of images), rule 23 (ad-hoc sealing), rule 40 (recurring bugs mean
@@ -527,6 +529,419 @@ is the first.
   Until then the wrapper only builds locally, so the width costs cache hits, not correctness.
 - **Tests.** Test holders are started with a short `--max-hold-secs`, so one left behind by a failing test ends by itself
   (ER-14).
+
+## Amendment (2026-10-31, Proposed amendment): generic tools, extensibility and tool logging
+
+- Status: **Proposed amendment**, not yet accepted. The rest of this ADR stands; where this section differs, it describes
+  the change being proposed.
+- Asked by the user on 2026-10-31: "start moving all to rust tooling", "consider which ones are generic and which are
+  paddock", "perhaps rust tooling can be plugin based? and extensible?" ("but not sandboxing"), and the tools must log well
+  enough for troubleshooting (rule 56, ER-27).
+- Already decided: `wiki` (branch `tools/wiki`) and `heavy` (branch `tools/heavy`, replacing plock and engineering-rules
+  `scripts/heavy.sh`) are standalone, generic Rust tools. `wiki` stays in Paddock `tools/` for now, is published to the
+  `decryp7` registry, and moves to its own repository later.
+- Related: ER-2, ER-4/5, ER-12, ER-14, ER-15, ER-22, ER-24, ER-27; rules 42/43, 55 (ADR 0034, `docs/known-copies.toml`),
+  56, 57, 58; ADR 0001 (plugin platform), ADR 0025 (CI job isolation), ADR 0036 (logging for root cause, on
+  `docs/adr-logging-root-cause`); the crates `paddock-cli`, `paddock-log`, `paddock-proc`, `paddock-packs`,
+  `paddock-slots`, `paddock-testkit`.
+- Evidence: a read of `origin/main` at `233c1339b` and of the branches `ci/diagnostics`, `ci/setup-tools-hardening`,
+  `docs/rca-rules`, `docs/wiki-pilot`, `tools/wiki` (worktree), `tools/dev-*` and of `engineering-rules` at `791e941`.
+  Line counts are `wc -l` of tracked files. The inventory is Appendix G.
+
+### G.1 Why a second kind of tool
+
+§3.1 puts every command in `paddock-dev`. That is right for what knows Paddock's layout (apps, `paddock.ci.json`, the
+release kit, the family's checks). It is wrong for about a third of the scripts, which know nothing about Paddock and
+already exist **twice or three times**, partly in `engineering-rules` for other projects:
+
+| Mechanism | Copies today |
+|---|---|
+| wiki lint | engineering-rules `scripts/wiki-lint.mjs` and `templates/wiki/wiki-lint.mjs` (327 lines each), Paddock `docs/wiki-pilot` `scripts/wiki-lint.mjs` (244) |
+| heavy-step semaphore | engineering-rules `scripts/heavy.sh` (217), plock |
+| commit lint | `conformance/src/commit-lint.mjs` (72), `apps/debrief/scripts/commit-lint.mjs` (67) |
+| CI timings | engineering-rules `scripts/ci-timings.mjs` (155), Paddock `scripts/ci-timings.mjs` (355) |
+| secret whitespace | engineering-rules `scripts/strip-secret-whitespace.sh` (77), `conformance/release/strip-keys.mjs` (52) |
+| Gitea release publish | `conformance/release/publish.mjs` (117), `apps/pacenotes/scripts/release/publish.mjs` and `apps/sighter/...` (93 each) |
+| macOS bundle verify | `conformance/release/macos-verify-bundle.sh` (156), `apps/debrief/scripts/ci/macos-verify-bundle.sh` (85), `scripts/demo/verify-macos.sh` (83) |
+| build-folder pruning | `tools/prune-build-folders.sh` (38) and `.ps1` (57), `tools/prune-ci-build-folder.sh` (22), `apps/debrief/scripts/clean-build-dirs.ps1` (56) |
+| coverage gate | `scripts/coverage-gate.mjs` (49), `apps/pitwall/scripts/ci/ui-coverage-guard.mjs` (47) |
+
+A port into `paddock-dev` would end the Paddock copies but leave the engineering-rules ones (ER-22: "build it shared
+instead of copying"), and other projects could not install it without Paddock's layout. So: **generic tools are their own
+binaries, Paddock-specific commands stay in `./dev`, and both stand on one shared runtime.**
+
+### G.2 Classification rule
+
+| Class | Test | Lands in |
+|---|---|---|
+| **Generic** | Useful to any project, or to any project that follows the engineering rules; reads no Paddock path, app id or file format (inputs come from flags or the project's config) | `devkit`, or a standalone tool (G.3) |
+| **Paddock** | Knows Paddock's layout, apps, `paddock.ci.json`, the release kit, Tauri bundle layout of the family, or the family's style | `./dev` (`tools/paddock-dev`), as §3.1 says |
+| **Split** | A generic engine plus Paddock-specific configuration or rules | engine in a generic tool or a `crates/` library; Paddock's part as a **data pack** (G.4) or as `./dev` code registered on the engine |
+| **Keep** | Loses something real in Rust (§4), or is bootstrap, or is YAML glue better left as YAML, or is a one-off to delete | stays, or is deleted |
+
+Counts (Appendix G, 84 rows covering every non-Rust tooling file; copies of one mechanism are one row): **Generic 22,
+Paddock 34, Split 14, Keep 14** (two of them one-offs to delete). The generic rows hold about 4,800 lines (copies
+included), the split rows about 7,000; the rest is Paddock or kept.
+
+### G.3 Structure
+
+**Generic tools: one multi-command binary `devkit`, plus standalone tools where the user decided so or a tool earns it.**
+
+| | One `devkit` with subcommands (recommended) | A separate binary per tool |
+|---|---|---|
+| Install friction | one `cargo install --registry decryp7 paddock-devkit`; one download in CI | one install per tool; a project needs 10+ installs and 10+ version pins |
+| Versioning | one version, one CHANGELOG, one tag `devkit-v*` | a tag, changelog and release per tool |
+| Shared code | the runtime crate (below) compiled once (about 3 MB, as `paddock-dev`) | linked into each binary; same source |
+| Testing and CI | one workspace, one leg (fmt, clippy, xwin clippy, nextest on 3 OS) | one leg per tool; each pays the cold build |
+| Fit for small commands | most generic commands are 25 to 360 lines of script; a crate each is more boilerplate than code | good for large tools with their own audience |
+| Coupling | a bad release of one command ships with all; mitigated by golden tests per command | none |
+
+Recommended: **`devkit`** (package `paddock-devkit`, binary `devkit`, workspace `tools/devkit/`, own `Cargo.lock`, as
+`tools/wiki/`) for the small generic commands. **`wiki` and `heavy` stay standalone** as decided: both are larger, have their
+own audience (every agent runs `heavy`, wiki users need nothing else) and their own release rhythm. A command graduates to
+its own binary only when it has a different audience or release rhythm, never for size alone. Through external
+subcommands (G.4), `devkit wiki` and `devkit heavy` also work when the tools are installed, so the user meets one name.
+
+**Paddock-specific tools** stay in `./dev` (`tools/paddock-dev`) exactly as §3.1 to §3.3 say. `./dev` uses the generic
+libraries and the runtime; it does not wrap `devkit`. CI calls `devkit <cmd>` directly for a generic step.
+
+**Shared runtime: `paddock-tool`, a small library crate in `crates/`** (rule of three is met: `wiki`, `heavy`, `devkit`
+and `paddock-dev` need it). It adds no new mechanism where one exists (ER-22); it wires:
+
+- `paddock-cli`: exit codes (`Exit`: 0 ok, 1 failure, 2 usage, 3 not running, 4 refused, 5 findings, 130 interrupted),
+  `--json` (one object, errors included), `CliError` with a next step, `Progress`, `Table`;
+- `paddock-log` (ADR 0036): one log per process, CLEF lines, redaction, `event::phase`, the error chain;
+- `paddock-proc`: every spawned command (timeouts, output caps, tree kill), plus the new exit-code decoding of G.5;
+- `paddock-packs`: data packs, parsed once with limits and unknown keys reported;
+- `paddock-env`: the per-tool log folder;
+- external subcommand discovery and the project config (G.4).
+
+**Source location.** Paddock `tools/<tool>/` for now, each its own Cargo workspace and lockfile (ADR 0014's third kind),
+path dependencies on `crates/`. Published to the `decryp7` registry from a tag `<tool>-vX.Y.Z` in CI (ER-15), never from a
+workstation; the crates they use are already published by `publish.yml`. **Later move:** `wiki`, `heavy`, `devkit` and
+`paddock-tool` move to one repository of their own (with the `paddock-cli`, `-log`, `-proc`, `-packs`, `-env` crates
+consumed from the registry) when a second project installs them or the paddock crates reach v1, whichever is first. Until
+then nothing in them may read a Paddock path; a conformance check (G.8) enforces that.
+
+**Naming by concept, not project** (memory "broader naming"): binaries `devkit`, `wiki`, `heavy`; subcommands by what
+they do (`devkit commit-lint`, `devkit run`, `devkit ci timings`, `devkit bisect-flaky`, `devkit macos verify-bundle`).
+Packages keep the registry's `paddock-` prefix (as `paddock-wiki` does) until the move, where the prefix is decided once.
+
+**How engineering-rules calls them.** Templates and skills name the binary and carry one fallback line:
+
+```text
+heavy cargo clippy --workspace -- -D warnings
+# Not installed? cargo install --registry decryp7 paddock-heavy --locked
+# (or from a Paddock checkout: cargo install --path tools/heavy --locked)
+```
+
+The shell and Node scripts in `engineering-rules/scripts/` stay for one overlap release after the Rust tool ships with
+parity tests; then they are deleted and the templates (`lefthook.yml`, `BRIEF.md`, `checklists/*.md`, `skills/*/SKILL.md`)
+name only the binary. `templates/wiki/wiki-lint.mjs` and its test go with `scripts/wiki-lint.mjs`.
+
+### G.4 Extensibility: built-in registry, external subcommands, data packs
+
+| Option | Verdict | Why |
+|---|---|---|
+| (a) External subcommands, git/cargo style: `devkit foo` runs `devkit-foo` | **Adopt** | language-agnostic, no ABI, a project extends without forking; the contract is argv, env, stdout JSON and exit codes, which `paddock-cli` already defines |
+| (b) In-process registry: a `ToolCommand` trait and one list | **Adopt for built-ins** | open/closed for `devkit` and `./dev`: a command is a module plus one line; the runtime gives every command logging, phases, `--json` and exit codes the same way |
+| (c) WASM plugins (wasmtime, extism) | **Dropped** | the user ruled out sandboxing for tool plugins; without it WASM only adds weight and a host API |
+| (d) Dynamic libraries | **Rejected** | no stable Rust ABI, `unsafe` loading, per-compiler rebuilds |
+| (e) Data packs (TOML) | **Adopt** | projects extend by configuration, not code (memory "avoid hard coding"): rule packs for the rules engine, prefixes for temp-leak checks, per-app vm-smoke and verify-installed config, runtime pin catalogues; `paddock-packs` already parses them with limits |
+
+**Decided: no sandbox** (user, 2026-10-31). Tool plugins are trusted, local code a developer or CI runs, like a
+`Makefile` target. The trust rule is simple: **a plugin comes only from the project's repository or from a registry
+install; nothing is fetched from the network at run time.** A missing plugin is an error that names the install command;
+the tool never installs it.
+
+**Reuse ADR 0001's plugin platform?** No, it is overkill here. `paddock-plugin-api/-host/-package` serve long-lived,
+out-of-process app plugins: an IPC protocol, a supervisor with restart and quarantine, permission grants with a sandbox
+mapping, Ed25519-signed `.paddockplugin` archives and a trust store. A tool plugin is a one-shot process whose whole
+protocol is argv, environment, one JSON object and an exit code. Its provenance is git (repository-local) or the cargo
+registry's checksums (installed), so signing adds nothing. What is reused: `paddock-packs` for packs, `paddock-cli`'s
+`Report`/`Exit`, and the **compatibility rule** of `paddock_ipc`'s protocol version (same major, plugin minor at most the
+host's) for the contract version. Revisit only if a tool ever needs a long-lived plugin.
+
+**The tool contract, version 1.0** (one page in `tools/devkit/CONTRACT.md`, the single source; a test runs a shell-script
+plugin and a Rust plugin against it):
+
+- **Discovery**, in order, first match wins: built-in commands; `[commands]` in the project config; an executable
+  `devkit-<name>` on `PATH` (how registry installs land, `~/.cargo/bin`). Built-ins cannot be shadowed. `devkit help`
+  lists all three kinds and where each came from.
+- **Invocation**: `devkit foo <args>` runs the plugin with `<args>` unchanged and these variables set:
+  `DEVKIT_CONTRACT=1.0`, `DEVKIT_RUN_ID` (correlation, G.5), `DEVKIT_LOG_LEVEL`, `DEVKIT_LOG_DIR`, `DEVKIT_JSON=0|1`,
+  `DEVKIT_ROOT` (the project root), `DEVKIT_CONFIG` (the config file, if any), `DEVKIT_MASK` (names of variables whose
+  values must never be printed). `CI` and the runner's variables pass through.
+- **Output**: with `DEVKIT_JSON=1`, standard output is exactly one JSON object in `paddock-cli`'s `Report` shape (`ok`,
+  data; on failure `ok: false`, `error`, `hint`, `exit`); notes and progress go to standard error.
+- **Exit codes**: `paddock-cli`'s `Exit`. A plugin that ends with anything else is reported as a failure with its decoded
+  exit code (G.5).
+- **Versions**: a configured plugin declares `contract = "1.0"`; a different major is refused before it runs, with a
+  message that says which side to update. A `PATH` plugin checks `DEVKIT_CONTRACT` itself (`paddock-tool` does it for a
+  Rust plugin).
+- **Standalone tools** (`wiki`, `heavy`, `./dev`) follow the same contract for their own commands, so a caller sees one
+  behaviour everywhere.
+
+**The project config**, `devkit.toml` at the repository root, found by walking up from the current folder to the git top
+(as `wiki-lint.json` is found today). It is optional; without it every built-in works with flags alone.
+
+```toml
+contract = "1.0"
+
+[commands]                       # project plugins: a path in this repository, or a registry-installed binary
+release-steps = { path = "tools/bin/devkit-release-steps", contract = "1.0" }
+drawio-fmt    = { bin = "drawio-fmt", version = ">=0.3, <0.4", contract = "1.0" }
+
+[packs]                          # data packs per kind: files or folders of *.toml, relative to this file
+rules      = ["conformance/packs"]
+temp-leaks = ["tools/packs/temp-leaks.toml"]
+vm-smoke   = ["apps/*/vm-smoke.toml"]
+```
+
+**How the generic tools stay generic while Paddock ships its part.** A generic tool reads only flags, `devkit.toml` and the
+packs it names. Paddock's knowledge lives in Paddock's repository: its rule packs (for example the data-expressible parts of
+checks such as Pitwall's `privacy-check.sh`, "`reqwest` only in `egress.rs`", or Dyno's `check-wording.mjs` word lists), its
+temp-leak prefixes (`debrief-*`, `imt-*`), its per-app vm-smoke and verify-installed config, its pin catalogues, and its
+code-level checks and release steps registered in `./dev` on the shared engines. A rule kind enters the generic engine only
+when a pack needs it (YAGNI, rule of three); everything else stays code in `./dev`.
+
+### G.5 Logging for troubleshooting (rule 56, ER-27), in the runtime
+
+Every tool and every Rust plugin gets this from `paddock-tool`; it reuses `paddock-log` (ADR 0036) and `paddock-proc`
+rather than a new logger (ER-22). It needs ADR 0036's WP-1 (paddock-log's layering and `event::phase`) and WP-3
+(paddock-proc events); `paddock-tool` lands after them, or uses `paddock-log`'s current API and switches in the same
+change as WP-1.
+
+- **Log file per run of a tool**, CLEF lines, written at **debug** whatever the terminal shows, so a failure can be
+  diagnosed from the file without a re-run. Default folder per tool from `paddock-env` (`<logs dir>/<tool>/`, for example
+  `~/Library/Logs/devkit/` on macOS), `<tool>.<day>.log`, `<tool>-<plugin>.<day>.log` for a plugin, with paddock-log's day
+  budget and kept days. `--log-file <path>` or `DEVKIT_LOG_DIR` overrides; `--verbose` (repeatable) and `--quiet` set the
+  terminal level only.
+- **First line**: tool, version, commit, OS and version, the arguments (masked), the working folder, the project root and
+  config file, the contract version, `CI` or not.
+- **A timed phase per step** (`event::phase`): `Phase started` / `finished` with `ElapsedMs` / `failed` with the error
+  chain; on the terminal one line per phase (`devkit: plan: ok in 1.2 s`), as `ci-log.mjs`'s `phase()` prints today.
+- **Every spawned command** goes through `paddock-proc`: the exact argv and working folder with masked values, the names
+  (not values) of environment variables set for it, the duration, the exit code in decimal and hex, the **NTSTATUS name on
+  Windows** (`0xC0000409` fast-fail, `0xC00000FD` stack overflow, `0xC0000374` heap corruption, ... ; the table moves from
+  `run-native.mjs` into `paddock-proc`), the signal on Unix, and a bounded stderr tail (last 40 lines, scanned).
+- **Masking**: paddock-log's redactor plus the values of every variable named in `DEVKIT_MASK` (generalising
+  `ci-log.sh`'s `CI_MASK`); in CI the tool also asks the runner to mask them (`::add-mask::`).
+- **In CI** (`CI` set): every failure prints **exactly one `::error::` line**, the cause then `Next step:` (from
+  `CliError`'s hint); annotations with file and line for findings; a **run summary** (phases, results, durations, the
+  commands that failed, the log path) to `$GITHUB_STEP_SUMMARY` when set and always to the log; on failure, the last
+  200 lines of the run's log in a collapsed `::group::`, so the job log alone explains the failure.
+- **Correlation**: `DEVKIT_RUN_ID` is reused when set (a plugin, or a CI step that sets it per job) and generated
+  otherwise; it is logged as `OperationId` (ADR 0036 §2.1's name) on every line and passed to every plugin and child.
+- **Run summary** at the end of every run on stderr: phases with results and times, failed commands, the log file's path.
+  The error message of a failed run always names the log file.
+- **Plugins inherit it through the contract**: a Rust plugin calls `paddock_tool::main` and gets all of the above under the
+  same `OperationId`; a shell plugin gets the variables and is logged by the host as a spawned command (argv, exit decoded,
+  stderr tail), so the minimum holds for any language.
+- **Bash callers in YAML** use `devkit run -- <cmd>` (the exit decoding and stderr tail of `run-native.mjs`) and
+  `devkit ci error|skip|summary` (what `ci-log.sh` defines), so `ci-log.sh`, `ci-log.mjs` and `run-native.mjs` are not
+  ported a second time.
+
+**`wiki` and `heavy` adopt it now**, so they need no retrofit: both depend on `paddock-tool` from their first merge
+(behind a thin local `run()` until `paddock-tool` lands, then a one-line switch); `wiki` takes `paddock-cli`'s exit codes
+(findings exit 5, not 1) while its callers are few (no backward compatibility before v1); `heavy` logs each slot wait,
+take, reclaim and release as phases with the waited time and logs the command it runs as a spawned command. `heavy` keeps
+`heavy.sh`'s on-disk slot format only for the rollout, so shell and Rust waiters share slots; after the overlap it moves to
+`paddock-slots` (kernel file locks, no stale reclaim), which ER-22 asks for.
+
+### G.6 Reclassified package list
+
+The R-packages keep their numbers. New generic packages are **G0 to G12**. "Status" is what exists on 2026-10-31.
+
+| WP | Content | Class | Status | Days |
+|---|---|---|---|---|
+| G0a | `wiki` (replaces three wiki-lint copies) | Generic, standalone | in progress (`tools/wiki`) | +0.5 to adopt G1 |
+| G0b | `heavy` (replaces `heavy.sh`, plock) | Generic, standalone | in progress (`tools/heavy`) | +0.5 to adopt G1 |
+| G1 | `paddock-tool` runtime: common flags, log set-up, phases, spawned-command logging, NTSTATUS decoding in `paddock-proc`, CI error/summary/mask, correlation id, `ToolCommand` registry, external subcommand discovery, `devkit.toml`, packs via `paddock-packs`, `CONTRACT.md` and its two-plugin test | Generic | new | 2.5 |
+| G2 | `devkit` skeleton: workspace, own leg in the planner, `help`, tag release to the registry, the "no Paddock path" check (G.8) | Generic | new | 1.5 |
+| G3 | `devkit run` and `devkit ci error|step|skip|summary` (from `ci-log.sh`, `ci-log.mjs`, `run-native.mjs` on their branches) | Generic | branches | 1.5 |
+| G4 | `devkit commit-lint` (two copies; types and forbidden trailers from flags or `devkit.toml`) | Generic | – | 0.75 |
+| G5 | `devkit bisect-flaky`, `devkit find-polluter` (rules 57, 58) | Generic | `docs/rca-rules` | 1 |
+| G6 | `devkit temp-leaks` (prefixes from a pack) and `devkit hermetic -- <cmd>` (C14's dynamic part) | Generic | – | 1 |
+| G7 | `devkit coverage gate` (lcov; Angular's guard is the same gate) | Generic | – | 0.5 |
+| G8 | `devkit secrets strip` (two copies) | Generic | – | 0.5 |
+| G9 | `devkit ci timings` (Gitea and GitHub; Paddock's repo list as config) | Generic | – | 1 |
+| G10 | `devkit worktree add|list|clean|disk` and `devkit prune` (moves the prune command from `tools/dev-host-prune`) | Generic | prune on branch | 1.5 |
+| G11 | `devkit gitea release` (three publish copies) | Generic | – | 1 |
+| G12 | `devkit macos verify-bundle`, `devkit win crt-imports` (with R2) | Generic | – | 1.5 |
+| R0 | skeleton, graph, slots, input hash | Paddock | merged | done |
+| R0b | prebuilt download; **generalised to any `tools/<tool>/`** so `devkit`, `wiki` and `heavy` use the same content-addressed cache in Paddock CI | Paddock | – | 2 |
+| R1 | composite actions' logic; generic parts (stable workspace, sccache stats, cache) as `devkit ci` where they need no Paddock path | Split | – | 2.5 |
+| R10 | app workflows' long `run:` blocks | Paddock | – | 2 |
+| R2 | release kit; G8, G11, G12 taken out | Paddock | – | 3 |
+| R3 | `fetch`: the engine (pinned download from a TOML catalogue, verify, extract) is `devkit fetch`; Paddock's catalogues are packs | Split | partial on `tools/dev-fetch-r3` | 1.5 |
+| R4 | `dev plan`; timings and coverage moved to G7, G9 | Paddock | `graph affected` merged | 2 |
+| R5 | `dev host`: container runner and the vm-smoke engine (Tart, judge) generic in `devkit`, per-app config as packs; verify-installed per-app config; prune moved to G10 | Split | prune on branch; `tools/win-*` VM work on branches | 3 |
+| R6 | notices (generic: cargo-about plus npm lock, allow-list from `deny.toml`) in `devkit`; window weight, startup bench, plugin builds in `./dev` | Split | notices slice on `tools/dev-notices` | 1.5 |
+| R7 | `new-app`, `packages publish` | Paddock | – | 2 |
+| R8a | joint rules-model note (unchanged), plus: which rule kinds are data | – | – | 1 |
+| R8 | `paddock-repo-rules` engine (generic) and `devkit check` over packs; Paddock's code checks in `./dev check`; Appendix G's generic checks into a generic pack shipped with `devkit` | Split | – | 5.5 |
+| R11 | `dev diagrams`; the draw.io export is generic | Split | branch ahead 9 | 1 |
+| R12 | `dev icons` | Paddock | – | 4.5 |
+| R13 | `dev images` | Paddock | – | 2 |
+| R14 | npm glue | Paddock | – | 1 |
+| R15 | lossy categories (unchanged) | Keep | – | 2.5 |
+| R16 | clean-up, plus deleting engineering-rules' replaced scripts and templates after the overlap | – | – | 1 |
+
+### G.7 Waves and ordering
+
+**Release first (rule 1, ER-1).** Tooling uses spare capacity only: at most two tooling agents while a release is in
+flight, none touching a release path (R1, R2, R10, G12) during an app's release window. The macOS host runner is the
+bottleneck: tooling branches run their Linux leg on every push and the macOS and Windows legs only when OS-specific modules
+change or on the final run before merge (rule 50). Every local build or test runs through `heavy` (today `heavy.sh`) with
+`CARGO_BUILD_JOBS=2`.
+
+| Wave | Packages | Agent-days | Parity tests (golden against the old script, on all three OS) | Retirement step |
+|---|---|---|---|---|
+| 0 (in progress) | G0a `wiki`, G0b `heavy` | +1 after G1 | `wiki lint --json` equals `wiki-lint.mjs`'s findings on the wiki fixtures and on `docs/wiki`; `heavy` and `heavy.sh` waiters sharing one slot folder, never more than N holders (a stress test with a fake clock), the home guard's refusals as goldens | `scripts/wiki-lint.mjs` (+test) and engineering-rules' two copies; `heavy.sh` after one overlap release, templates and skills name the binary |
+| 1a | G1, G2 | 4 | the contract test (a bash plugin and a Rust plugin: env, one JSON object, exit codes, contract refusal, `OperationId` in both logs); a failure fixture whose log alone names the cause | – |
+| 1b | G3 to G11 | 9 | per command: the old script's stdout, stderr's `::error::` lines and exit code on fixture inputs, as goldens (`paddock_testkit::golden`); `run` on fixtures that exit with 0xC0000409 (Windows), SIGSEGV (Unix); timings on recorded API replies; commit-lint on the existing 77-line test's messages; bisect and polluter on scripted fake test commands | each PR deletes the script and its test, switches YAML, `package.json`, lefthook and docs, removes the copy from `docs/known-copies.toml`, and shrinks §3.7's baseline |
+| 2 | R0b, R1, R10, R2 + G12, R3, R4, R5, R6, R7, R8a, R8, R11, R12, R13, R14, R15, R16 (this order; R2 and R1 never inside a release window) | 38 | as §3.6 (goldens, shadow week for plan, release, `latest.json`, rules; release dry runs per app); for split engines also a generic fixture repo that is **not** Paddock-shaped | as §3.7; R16 also removes the engineering-rules scripts after their overlap |
+
+Total about **52 agent-days**, against §7's 45 plus 1.5: about 4 more for the runtime, contract and logging (G1, G2), about 3
+more to split engines from Paddock packs; R0 (3.5) is done.
+
+### G.8 Checks that keep it so (rule 40)
+
+- **No Paddock in generic tools.** A conformance check (extending WP-C6, §3.7) fails when a file under `tools/devkit`,
+  `tools/wiki`, `tools/heavy` or `crates/paddock-tool` names `apps/`, `paddock.ci.json`, an app id, `PADDOCK_` variables or
+  a Paddock-only crate; counted waivers as in ADR 0021.
+- **Every tool logs.** ADR 0036's process-log check (C63 there) applies to tools: a `main` that does not start through
+  `paddock_tool::main` (or `paddock_log::Logging::install`) fails.
+- **One contract.** The contract test runs for `devkit`, `wiki`, `heavy` and `./dev`.
+
+### G.9 Risks
+
+| Risk | Mitigation |
+|---|---|
+| `devkit` couples unrelated commands' releases | golden tests per command; a regression is a patch release; a command with its own rhythm graduates (G.3) |
+| A `PATH` plugin shadows or impersonates a command | built-ins cannot be shadowed; `help` shows each command's origin; the trust rule (repository or registry install) is the boundary, the same as any binary on `PATH` |
+| `paddock-tool` waits for ADR 0036 WP-1/WP-3 | G1 starts on paddock-log's current API and switches in WP-1's change; WP-1 is small and shared |
+| Generic tools drift back into Paddock knowledge | G.8's check; a fixture repository that is not Paddock-shaped in each generic tool's tests |
+| Two systems during overlap (engineering-rules scripts and binaries) | one overlap release, then deletion in R16; templates name the binary from the first release |
+| The move to an own repository later costs a history split | tools live in self-contained `tools/<tool>/` folders with their own lockfiles, so `git filter-repo --path` moves them |
+
+### G.10 Decisions
+
+Decided (user, 2026-10-31): `wiki` and `heavy` are standalone generic tools; `wiki` in Paddock `tools/`, published to
+`decryp7`, its own repository later; **no sandbox for tool plugins**: plugins come only from the repository or a registry
+install, never fetched at run time.
+
+For the user:
+
+1. **One generic `devkit` with subcommands (recommended), or a separate small binary per generic tool?** `wiki` and
+   `heavy` stay standalone either way.
+2. **Does conformance become a generic engine** (`paddock-repo-rules` plus data rule kinds, `devkit check` with a generic
+   pack, Paddock's code checks in `./dev check`; recommended, inside the R8a note the user already approves), or stay a
+   Paddock-only rules crate?
+3. **Extensibility: external subcommands plus a built-in registry plus TOML packs (recommended)**, with ADR 0001's plugin
+   platform not reused. Confirm, or ask for less (packs only).
+
+Defaults the coordinator may change without the user: the name `devkit`; `wiki` adopting `paddock-cli`'s exit codes; the
+`devkit.toml` file name; the one-release overlap for engineering-rules scripts.
+
+### Appendix G: inventory and classification (2026-10-31)
+
+Every non-Rust tooling file of Paddock `origin/main` at `233c1339b`, the four named branches and engineering-rules at
+`791e941`, without tests, fixtures, the UI's own Vitest and Playwright specs, and ESLint configs. Copies of one mechanism
+are one row. Users: CI, Rel (release), Ag (agents), Dev, Hook (lefthook). R: the ADR 0022 package. Class: G generic, P
+Paddock, S split, K keep.
+
+| # | Path(s) | Lang | Lines | What it does | Users | R | Class | Target |
+|---|---|---|---|---|---|---|---|---|
+| 1 | er `scripts/heavy.sh` (+ plock) | sh | 217 | machine-wide slot semaphore for heavy steps, home guard | Ag, Dev, Hook | – | G | `heavy` (G0b) |
+| 2 | er `scripts/wiki-lint.mjs`, er `templates/wiki/wiki-lint.mjs`, `docs/wiki-pilot` `scripts/wiki-lint.mjs` | js | 327+327+244 | wiki lint | Ag, CI | – | G | `wiki` (G0a) |
+| 3 | er `scripts/worktree.sh` | sh | 125 | worktree per agent with build dir and port; list, clean, disk | Ag | – | G | `devkit worktree` (G10) |
+| 4 | er `scripts/strip-secret-whitespace.sh`, `conformance/release/strip-keys.mjs` | sh, js | 77+52 | strip whitespace from secrets | Rel, Hook | R2 | G | `devkit secrets strip` (G8) |
+| 5 | er `scripts/ci-timings.mjs`, `scripts/ci-timings.mjs` | js | 155+355 | CI run and job timings from the Actions API | Dev, Ag | R4 | G | `devkit ci timings` (G9) |
+| 6 | `conformance/src/commit-lint.mjs`, `apps/debrief/scripts/commit-lint.mjs` | js | 72+67 | Conventional Commits, no attribution | CI, Hook | R8 | G | `devkit commit-lint` (G4) |
+| 7 | `ci/diagnostics`: `conformance/ci/ci-log.sh`, `ci-log.mjs` | sh, js | 161+77 | `::error::` with next step, timed steps, summary, masking | CI | – | G | G1 runtime, `devkit ci` (G3) |
+| 8 | `ci/setup-tools-hardening`: `conformance/ci/run-native.mjs` | js | 109 | run a native program, decode exit/NTSTATUS, stderr tail | CI | – | G | `devkit run` (G3), `paddock-proc` |
+| 9 | `docs/rca-rules`: `scripts/bisect-flaky.sh` | sh | 45 | `git bisect run` payload for a flaky test | Ag, Dev | – | G | `devkit bisect-flaky` (G5) |
+| 10 | `docs/rca-rules`: `scripts/find-polluter.mjs` | js | 101 | delta-debug the spec file that pollutes a victim | Ag, Dev | – | G | `devkit find-polluter` (G5) |
+| 11 | `apps/debrief/scripts/ci/check-temp-leaks.mjs` | js | 133 | tests left files in the job temp folder | CI | – | G | `devkit temp-leaks` + pack (G6) |
+| 12 | `conformance/src/hermetic.mjs` | js | 94 | run tests with HOME/TMP in scratch, check leftovers (C14) | CI | R8 | G | `devkit hermetic` (G6) |
+| 13 | `scripts/coverage-gate.mjs`, `apps/pitwall/scripts/ci/ui-coverage-guard.mjs` | js | 49+47 | lcov line-coverage gate | CI | R4, R14 | G | `devkit coverage gate` (G7) |
+| 14 | `conformance/release/publish.mjs`, `apps/pacenotes/.../publish.mjs`, `apps/sighter/.../publish.mjs` | js | 117+93+93 | Gitea release and asset upload, idempotent | Rel | R2 | G | `devkit gitea release` (G11) |
+| 15 | `conformance/release/macos-verify-bundle.sh`, `apps/debrief/scripts/ci/macos-verify-bundle.sh`, `scripts/demo/verify-macos.sh` | sh | 156+85+83 | verify `.app` and DMG sealing and signatures | Rel | R2 | G | `devkit macos verify-bundle` (G12) |
+| 16 | `conformance/release/windows-crt-imports.mjs` | js | 305 | PE imports of the VC runtime (ADR 0032) | Rel | – | G | `devkit win crt-imports` (G12) |
+| 17 | `tools/prune-build-folders.sh`, `.ps1`, `tools/prune-ci-build-folder.sh`, `apps/debrief/scripts/clean-build-dirs.ps1` | sh, ps1 | 38+57+22+56 | cap build folders by size | CI, Dev | R5 | G | `devkit prune` (G10) |
+| 18 | `apps/debrief/scripts/ci/check-quarantine.mjs` | js | 45 | quarantine entries carry a valid expiry (ER-12) | CI | R8 | G | generic rule pack |
+| 19 | `apps/debrief/scripts/ci/scan-fixtures.mjs` | js | 124 | fixtures must not look like real logs (ER-14) | CI | R8 | G | generic rule pack |
+| 20 | `ci/setup-tools-hardening`: `conformance/src/checks/C62-pipe-grep.mjs` | js | 140 | no `cmd \| grep -q` under pipefail | CI | R8 | G | generic rule (code) |
+| 21 | `apps/debrief/scripts/macos/dev-signing.sh`, `build-app.sh` | sh | 58+17 | self-signed local signing identity keeps TCC grants | Dev | R2 | G | `devkit macos dev-identity` (wave 2) |
+| 22 | `conformance/src/notices/*`, `scripts/notices.sh` | js, sh | 421+22 | THIRD_PARTY_NOTICES from cargo-about and npm lock | CI, Rel | R6 | G | `devkit notices` (allow-list from `deny.toml`) |
+| 23 | `conformance/src/{cli,runner,report,context,finding,index}.mjs`, `util/*` | js | 844 | conformance engine: checks, waivers, reports | CI | R8 | S | `paddock-repo-rules` engine + `devkit check` |
+| 24 | checks C14, C15, C16, C23, C24, C30, C31, C35, C36, C39, C53, C57 | js | 944 | rules that follow from ER/PRINCIPLES (hermetic, installed browser, hard-coded version, process, reviewed images, wall clocks, ADR numbers, untimed calls, parser hardening, freed port, pid kills, tracked symlinks) | CI | R8 | S | generic pack (data where expressible, else code in the engine) |
+| 25 | checks C03, C04, C06, C07, C08, C13, C28, C29, C32, C33, C34, C37, C43, C45, C48, C50, C51, C54, C56 + `index.mjs` | js | 1,936 | family checks (icons, signing, release, presets, i18n, a11y, sidecars, dialogs, shell start, QoS, env names) | CI | R8 | P | `./dev check` code checks + Paddock pack |
+| 26 | `conformance/src/sync/*` | js | 364 | sync baseline files and doc blocks from templates (C23, C28) | CI, Dev | R8 | S | generic "sync from a template repo" engine (also for engineering-rules' `rules-sync`) + Paddock manifest |
+| 27 | `conformance/ci/install-test-browser.mjs`, `apps/spotter/scripts/install-test-browser.mjs`, `pin-chromium.mjs` | js | 183+55+72 | pinned Chrome for Testing: pin and install | CI | R3 | S | `devkit fetch` + catalogue pack |
+| 28 | `conformance/ci/pin-runtime.mjs`, `runtime-catalogue.mjs`, `apps/debrief/app/scripts/libduckdb.mjs`, `apps/debrief/scripts/ci/libduckdb-env.sh`, `update-ffmpeg-runtimes.py`, `update-llama-runtimes.py` | js, sh, py | 127+118+86+59+147+149 | pinned runtime catalogues and their fetchers | CI, Dev | R3 | S | `devkit fetch` + Paddock catalogues |
+| 29 | `tools/linux-container.sh`, `apps/dyno/scripts/linux-container.sh`, `linux-verify.sh`, `apps/pitwall/scripts/linux-container-verify.sh`, `-inner.sh`, `apps/debrief/scripts/ci/smoke-linux-docker.sh`, `e2e-linux-local.sh` | sh | 76+51+16+28+68+46+45 | run cargo or tests in a native Linux container | Dev, Ag | R5 | S | `devkit container` + per-app pack |
+| 30 | `tools/macos-vm-smoke.sh`, `scripts/vm-smoke/*`, `tools/win-*` branches | sh, js | 186+735 (+branches) | VM smoke: Tart clone, install, judge | Dev, Rel | R5 | S | `devkit vm` engine + per-app JSON/TOML |
+| 31 | `tools/host-cleanup.sh` | sh | 108 | leave nothing behind on a host runner | CI | R1, R5 | S | engine (processes by identity, ADR 0033) + Paddock pattern pack |
+| 32 | `conformance/ci/job-isolation.sh`, `job-tmpdir.sh`, `build-jobs.sh`, `ci-home.sh`, `build-folder.sh` | sh | 445+120+166+28+38 | host-runner job isolation (ADR 0025) | CI | R1 | S | `devkit ci` on `paddock-slots`; Paddock variable names as config |
+| 33 | `conformance/ci/check-index.mjs`, `apps/debrief/scripts/ci/check-index.mjs` | js | 25+71 | no inline style/script in the built index.html (CSP) | CI | R2, R8 | S | rule kind "built HTML" in the generic pack |
+| 34 | `apps/pitwall/scripts/ci/privacy-check.sh` | sh | 22 | `reqwest` only in `egress.rs` | CI | R8 | S | rule kind "only in" + Pitwall pack line |
+| 35 | `apps/dyno/scripts/check-capabilities.mjs`, `check-shipped.mjs`, `check-wording.mjs` | js | 94+82+145 | Tauri capabilities least privilege; 1.0 ships no helper; UI wording | CI | R8 | S | rule kinds + Dyno pack |
+| 36 | `apps/debrief/scripts/export-diagrams.sh`, pacenotes, sighter, `diagrams/scripts/`, `templates/repo/scripts/` | sh | 5×41 | draw.io CLI export | Dev | R11 | S | export in `devkit diagrams export` later; `dev diagrams` now (branch) |
+| 37 | `.gitea/actions/*/action.yml` (27 actions) | yaml + sh | 1,091 | composite CI actions | CI | R1 | S | YAML one-liners calling `devkit ci` or `./dev ci` |
+| 38 | `.gitea/workflows/*` long and OS-branching `run:` blocks | yaml + sh | about 450 | per-app CI steps | CI | R10 | P | `./dev` commands, `paddock.ci.json` |
+| 39 | `scripts/affected.mjs`, `conformance/ci/plan.mjs` | js | 1,067+38 | affected-projects planner, run gate | CI, Ag | R4 | P | `./dev plan` |
+| 40 | `scripts/publish.mjs` | js | 436 | publish crates and npm packages | Rel | R7 | P | `./dev packages publish` |
+| 41 | `scripts/new-app.mjs` | js | 580 | scaffold an app from a demo | Dev | R7 | P | `./dev new-app` |
+| 42 | `scripts/demo-release.mjs`, `scripts/demo/bundle.sh` | js, sh | 197+52 | demo apps' release steps | Rel | R2 | P | `./dev release` |
+| 43 | `conformance/ci/tauri-bundle.sh` | sh | 100 | `tauri build`, copy installers | Rel | R2 | P | `./dev release bundle` |
+| 44 | `conformance/release/latest-json.mjs` | js | 118 | updater `latest.json` | Rel | R2 | P | `./dev release latest-json` |
+| 45 | `conformance/ci/check-tag.mjs` | js | 36 | tag names the app version | Rel | R2 | P | `./dev release` |
+| 46 | `conformance/ci/release-notes.mjs`, `first-release-notes.sh` | js, sh | 45+59 | release notes | Rel | R2 | P | `./dev release notes` |
+| 47 | `conformance/ci/release-verdict.mjs` | js | 62 | what a release run proves (rule 54) | Rel | R2 | P | `./dev release verdict` |
+| 48 | `conformance/ci/build-env.mjs` | js | 33 | build commit and date for About | CI | R14 | P | `./dev build-info` |
+| 49 | `conformance/ci/run-commands.sh` | sh | 24 | run `paddock.ci.json` command lists | CI | R1 | P | `./dev ci run` |
+| 50 | `conformance/src/sidecar/*`, `apps/pitcrew/scripts/sidecar.mjs`, `apps/pitwall/scripts/sidecar.mjs`, `apps/debrief/app/scripts/build-sidecars.mjs` | js | 170+25+26+123 | build Tauri sidecars | Rel, Dev | R2 | P | `./dev release sidecars` |
+| 51 | `conformance/src/window-weight/*`, `apps/debrief/app/scripts/window-weight.mjs` | js | 152+107 | JS per window before first paint | CI | R6 | P | `./dev window-weight` |
+| 52 | `apps/{debrief,pitwall,spotter}/scripts/ci/check-icons.mjs` | js | 3×121 | icon fills the canvas (now C03) | CI | WP-C6 | P | delete (C03 has it) |
+| 53 | `apps/debrief/scripts/ci/check-smoke-dialogs.mjs` | js | 31 | smoke specs never look for a dialog in the page | CI | R8 | P | Debrief pack |
+| 54 | `apps/debrief/scripts/ci/check-workflows.py` | py | 35 | workflow plan gate (local) | Dev | R8 | P | `./dev check` |
+| 55 | `apps/debrief/scripts/ci/startup-bench.mjs` | js | 151 | start-up benchmark | CI | R6 | P | `./dev bench startup` |
+| 56 | `apps/debrief/scripts/ci/macos-smoke.sh` | sh | 102 | built app starts its sidecars and quits | Rel | R2 | P | `./dev release smoke` |
+| 57 | `apps/debrief/scripts/ci/windows-node-modules.sh` | sh | 53 | node_modules kept per slot on Windows | CI | R10 | P | `./dev ci` |
+| 58 | `apps/debrief/scripts/build-plugins.sh` | sh | 43 | build Debrief's plugins binary | Rel | R6 | P | `./dev` |
+| 59 | `apps/dyno/scripts/check-bundle.sh` | sh | 77 | Dyno bundle layout | Rel | R2 | P | `./dev release` |
+| 60 | `tools/verify-installed.sh`, `apps/{pitcrew,pitwall}/scripts/{linux,macos}-verify.sh` | sh | 117+62+56+57+106 | check an installed app and its service | Dev, Rel | R5 | P | `./dev host verify-installed` + per-app config |
+| 61 | `scripts/shell-demo/*` | sh | 287 | shell-demo service and desktop smokes | Rel | R5 | P | `./dev host` + vm engine |
+| 62 | `scripts/dialog-commands.mjs`, `apps/debrief/app/scripts/check-dialog-commands.mjs` | js | 79+152 | dialog command contract checks | CI | R15 | P | `./dev check` |
+| 63 | `apps/debrief/app/scripts/build-info.mjs`, `whats-new.mjs`, `i18n/*` | js | 55+81+284 | npm glue | Dev, CI | R14 | P | `./dev` from `package.json` |
+| 64 | `apps/pitwall/scripts/tauri-before-build.mjs` | js | 14 | `beforeBuildCommand` | Dev, Rel | R14 | P | `./dev` |
+| 65 | `icons/tools/*` | js | 4,259 | icon pipeline | Dev | R12 | P | `./dev icons` |
+| 66 | `diagrams/tools/*` | js | 718 | family diagram generators | Dev | R11 | P | `./dev diagrams` (branch) |
+| 67 | `docs/images/src/*` | js | 1,782 | posters | Dev | R13 | P | `./dev images` |
+| 68 | `tools/paddock-dev/tests/golden/generate.mjs` | js | 57 | goldens from `affected.mjs` | Dev | R4 | P | delete with `affected.mjs` |
+| 69 | `tools/test/helpers.mjs` | js | 101 | tests of `tools/*.sh` | CI | R5 | P | goes with the scripts |
+| 70 | `apps/debrief/scripts/perf/*` | py, sh | 343 | Debrief import benchmark harness | Dev | – | P | Debrief `xtask` (beside `gen-samples`) |
+| 71 | `apps/debrief/app/scripts/dialog-commands-analysis.mjs` | ts-js | 481 | TS type-checker analysis | CI | R15 | K | until the contract is generated from Rust (§4) |
+| 72 | `apps/debrief/app/scripts/lint-effects.mjs`, `lint-styles.mjs` | js | 91+152 | UI source lints | CI | R15 | K | ESLint preset (§4) |
+| 73 | `apps/debrief/app/scripts/screenshots/*`, `visual-qa/*` | ts | 732 | Playwright screenshots, visual QA | Dev | – | K | Playwright (§4) |
+| 74 | `eslint/`, app `eslint.config.js`, `playwright.config.ts` files | js, ts | about 1,200 | Node/Angular toolchain config | CI | – | K | stays |
+| 75 | `ui/scripts/build-css.mjs`, `build-e2e.mjs`, `stamp-dist.mjs` | js | 45 | Sass and tsc build glue of the UI packages | CI, Dev | R14 | K | tied to the npm toolchain |
+| 76 | `tools/bootstrap.sh`, `scripts/setup-dev.sh`, `apps/{pitcrew,pitwall}/scripts/{linux,macos}-bootstrap.sh` | sh | 112+64+63+56+61 | machine bootstrap | Dev | R5 | K | one bootstrap per OS (§4) |
+| 77 | `ci-image/verify.sh`, `ci-image/fetch-verified.sh` | sh | 94+35 | CI image build (before Rust tools exist) | CI | – | K | bootstrap |
+| 78 | `scripts/perf/link-time/*` | sh, py | 107 | recorded linker measurements (rule 48 evidence) | Dev | – | K | evidence, not tooling |
+| 79 | `spikes/dialog-hidden/*` | js | 164 | spike | – | – | K | stays with the spike |
+| 80 | `apps/debrief/scripts/rename-to-debrief.mjs` | js | 336 | one-off rename | – | R1 | K | delete |
+| 81 | `apps/pitcrew/scripts/windows-retire-legacy-runner.ps1` | ps1 | 142 | one-off runner retirement | – | R1 | K | delete |
+| 82 | `conformance/bin/*.mjs` | js | 12 | entry points | CI | R8 | K | delete with the engine |
+| 83 | `conformance/fixtures/pitwall-latest-json.mjs` | js | 118 | fixture | CI | R2 | K | becomes a golden |
+| 84 | er `templates/ci/*.yml`, `templates/lefthook.yml` | yaml | – | templates that call 1, 4 | Ag | – | K | name the binaries (G.3) |
+
+
+Summary: G 22 (rows 1–22), P 34 (rows 25 and 38–70), S 14 (rows 23, 24 and 26–37), K 14 (rows 71–84). Each
+script's tests (`*.test.mjs`, `*.test.sh`, `tools/test/*`) go with it.
 
 ## Sources
 
