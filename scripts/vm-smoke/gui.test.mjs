@@ -78,7 +78,10 @@ function fakeGui({ bug = null } = {}) {
     else if (app === 'coreautha') { st.auth = false; if (st.pw === 'admin') { st.quarantine = '01c3;6ae4;Safari;U'; startApp(); } }
     else if (app === 'Dyno' && role === 'AXMenuItem') st.settingsWin = true;
     else if (app === 'Dyno' && role === 'AXButton' && m('Dyno')) st.sectionOpen = true;
-    else if (app === 'Dyno' && role === 'AXCheckBox') { st.appSwitch = 1 - st.appSwitch; st.dirty = true; }
+    else if (app === 'Dyno' && role === 'AXCheckBox') {
+      if (bug === 'app-press-lost' && st.appSwitch === 0 && st.btm === 'refused' && !st.appLost) { st.appLost = true; return ok('pressed'); }
+      st.appSwitch = 1 - st.appSwitch; st.dirty = true;
+    }
     else if (app === 'Dyno' && m('Save changes')) { st.dirty = false; if (st.appSwitch) register(); else { st.job = false; st.agents = st.agents.map((a) => (a.ppid === 1 && st.app ? { pid: ++pid, ppid: st.app.pid } : a)); } }
     else if (app === 'System Settings' && role === 'AXCheckBox') {
       if (st.lostPress) { st.lostPress = false; return ok('pressed'); }
@@ -249,4 +252,10 @@ test('the restore reboot is reported while its expected behaviour is undecided, 
   const decided = await run(null, { restore: 'hidden' });
   assert.equal(decided.by['Reboot with the app running (restored at login)'].status, 'fail');
   assert.equal((await run(null, { restore: 'window' })).by['Reboot with the app running (restored at login)'].status, 'pass');
+});
+
+test('an in-app switch press lost while the Settings page re-renders is pressed again', async () => {
+  const r = await run('app-press-lost');
+  const s = r.by['Login Items approval (requiresApproval path)'];
+  assert.equal(s.status, 'pass', s.summary);
 });
