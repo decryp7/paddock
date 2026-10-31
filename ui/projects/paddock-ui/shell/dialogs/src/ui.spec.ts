@@ -1,3 +1,4 @@
+import { instanceKey } from './kind';
 import { ChangeDetectionStrategy, Component, computed, inject, Injectable, input, provideZonelessChangeDetection, signal, viewChild, type TemplateRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { defineDialog, DIALOG_EVENTS, dialogCommandLedger, msg, provideContributions, resetDialogCommands, SHELL_PORTS, type DialogDef } from '@decryp7/paddock-ui/shell';
@@ -623,6 +624,23 @@ describe('dialogs as windows', () => {
     service.open(VIEWER, { inputs: { page: 'popup-widgets' } });
     await vi.waitFor(() => expect(heard).toEqual([expect.objectContaining({ dialogId: 't.viewer', inputs: { page: 'popup-widgets' } })]));
     probe.close();
+  });
+
+  it('does not point an instanced dialog\'s existing window at new inputs (its instances are told apart by their inputs)', async () => {
+    const { io, service } = setup();
+    // The window for exactly these inputs is open already (another window opened it), so Rust answers `existing`.
+    await io.open({ dialogId: 't.inst', instance: instanceKey({ who: 'Ada' }), title: 'x', input: { who: 'Ada' }, theme: 'light' });
+    const heard: unknown[] = [];
+    const probe = new BroadcastChannel('paddock-dialog-inputs');
+    probe.onmessage = (e: MessageEvent<unknown>) => heard.push(e.data);
+    service.open(INSTANCED, { inputs: { who: 'Ada' } });
+    // A message sent now would have arrived by the time a later one does: send one on purpose and wait for it.
+    const marker = new BroadcastChannel('paddock-dialog-inputs');
+    marker.postMessage({ from: 'marker', dialogId: 'marker', inputs: {} });
+    await vi.waitFor(() => expect(heard).toHaveLength(1));
+    expect(heard[0]).toMatchObject({ dialogId: 'marker' });
+    probe.close();
+    marker.close();
   });
 
   it('blocks the window while a modal window is open, focuses an open one and forwards a dismissal as a request', async () => {

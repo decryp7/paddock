@@ -129,7 +129,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
           <p class="pd-wc-limit" role="status"><pd-status-glyph status="info" [size]="16" />The {{ noun() }} holds {{ surface().maxPlacements }} widgets. Remove one to add another.</p>
         }
         <div class="pd-wc-addbox">
-        <ul #addList class="pd-wc-list pd-wc-addlist" role="list" tabindex="0" [attr.aria-label]="'Widgets you can add to the ' + noun()" (scroll)="updateFade()">
+        <ul #addList class="pd-wc-list pd-wc-addlist" [class.pd-wc-addlist--long]="kinds().length > 8" role="list" tabindex="0" [attr.aria-label]="'Widgets you can add to the ' + noun()" (scroll)="updateFade()">
           @for (k of kinds(); track k.kind) {
             @let count = countOf(k);
             <li class="pd-wc-item pd-wc-add" [class.pd-wc-added]="count >= k.maxInstances">
@@ -234,7 +234,8 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     :root[data-motion='reduce'] .cdk-drag-animating, :root[data-motion='reduce'] .pd-wc-list .pd-wc-item { transition: none !important; }
     .pd-wc-toggle { height: var(--pd-control-height); flex: none; }
     .pd-wc-addbox { position: relative; }
-    .pd-wc-addlist { max-height: 22rem; overflow-y: auto; }
+    /* Only a long list scrolls inside the page; eight kinds or fewer show whole, so there is no nested scroll to find. */
+    .pd-wc-addlist--long { max-height: 22rem; overflow-y: auto; }
     .pd-wc-addlist:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
     /* The cue that more rows wait below: a fade into the row colour, shown only while the list can still scroll down. */
     .pd-wc-fade { position: absolute; inset: auto 1px 1px 1px; height: var(--pd-space-6); border-radius: 0 0 var(--pd-radius-card) var(--pd-radius-card); background: linear-gradient(to bottom, transparent, var(--pd-surface-1)); pointer-events: none; }

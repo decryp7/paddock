@@ -227,7 +227,7 @@ CDK (rule 47):
     for a disconnected disk), 13/600 title starting with the benefit, one muted line, the next step as a text button.
     Exception: a calm empty that means "all good" (Dyno: no active alarms, no issues) is one real `button` row (the engine
     decides: `WidgetState::Empty { calm: true }`, false by default; an app binds nothing in the UI): success
-    icon, neutral text, relative time or range, chevron, accessible name such as "No active alarms, checked 2 min ago.
+    icon, neutral text, relative time or range, chevron, accessible name such as "No active alarms. All clear.
     Open alarms".
   - *Error*: danger icon, the title in plain words, the cause muted, the next step (Retry with its icon) as a text
     button; never raw exception text as the title.
@@ -295,7 +295,7 @@ talks to the agent; the app's Rust side relays.
 
 | Kind | Title | Spans | Max | Values from | Refresh | Empty | Error | Working or stale |
 |---|---|---|---|---|---|---|---|---|
-| `activeAlarms` | Active alarms | 2 | 1 | alarm store, most severe then newest, **2 rows** and "+N more" | on change | calm row: "No active alarms · checked 2 min ago" (opens Alarms) | "Couldn't read alarms" / "The alarm store didn't answer." / Retry | stale: "Updated 4 min ago" |
+| `activeAlarms` | Active alarms | 2 | 1 | alarm store, most severe then newest, **2 rows** and "+N more" | on change | calm row: "No active alarms · All clear." (opens Alarms) | "Couldn't read alarms" / "The alarm store didn't answer." / Retry | stale: "Updated 4 min ago" |
 | `diskSpace { volume: all \| system \| mount(id) }` | Disk space | 2 | 4 | the agent's volume list (cached; never a fresh `statfs` on open), 3 volumes and "+N more" | every 60 s | "See Time Machine's space when it's connected" / "The disk isn't connected now." / Choose another volume | "Couldn't read volumes" / "The volume list didn't answer." / Retry | stale; a network volume that doesn't answer shows "Not answering" in its row |
 | `cpuMemory` | CPU and memory | 2 | 1 | live push (load, used of total, last minute) | live | none (no sample yet is loading) | none (agent: the notice) | "Paused at 14:28" |
 | `network` | Network | 1, 2 | 1 | live push (down and up, last minute) | live | "See traffic when online" / "Offline now." / Open network | none (agent: the notice) | "Paused at 14:28" |

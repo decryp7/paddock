@@ -137,7 +137,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
     .dy-pw-row { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; max-width: 100%; min-height: 24px; color: var(--pd-text); font: inherit; }
     .dy-pw-list > li { min-width: 0; }
     /* A title wraps (two lines at most) instead of being cut: the time and chevron keep their place. */
-    .dy-pw-wrap { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .dy-pw-grow.dy-pw-wrap { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .dy-pw-chev { flex: none; color: var(--pd-text-muted); }
     .dy-pw-flag[data-tone='warn'] { background: var(--pd-warning-tint); } .dy-pw-flag[data-tone='bad'] { background: var(--pd-danger-tint); }
     .dy-pw-plain { display: grid; gap: 4px; width: 100%; }
