@@ -4,8 +4,8 @@
 
 use crate::common;
 
-use common::{assert_blocks_consistent, pair_of, store_with, TempDir};
-use debrief_core::ports::{Filter, Ingest, PageQuery, Positions, Query, Search, SearchRequest, Skew};
+use common::{assert_blocks_consistent, assert_blocks_consistent_with, pair_of, store_with, TempDir};
+use debrief_core::ports::{Filter, Ingest, Maintain, MaintenanceAction, PageQuery, Positions, Query, Search, SearchRequest, Skew};
 use debrief_core::skew::{OffsetSpec, SetOffsetRequest, SuggestRequest};
 use debrief_core::{PluginRegistry, Profile};
 use debrief_store_duck::DuckStore;
@@ -109,6 +109,109 @@ fn search_hits_follow_an_offset_in_time_order() {
     let after = hits(&store);
     assert_eq!(after.total, 4, "each event once");
     assert_eq!(after.ids, in_time_order(&store), "hits in the new time order");
+}
+
+/// Segments from before `segment_blocks` whose ranges overlap get no blocks when the store opens (left for ADR 0062's
+/// WP-4 scan), and a block of a file no longer listed is dropped. Compaction leaves blockless segments alone, so no
+/// merged file holds only part of its blocks, and an offset afterwards neither loses nor doubles a hit.
+#[test]
+fn overlapping_legacy_segments_are_not_compacted_and_an_offset_keeps_one_hit_each() {
+    let logs = TempDir::new("legacy-blocks-logs");
+    for (i, name) in ["a", "b", "c", "d"].iter().enumerate() {
+        std::fs::write(
+            logs.0.join(format!("{name}.log")),
+            format!("2026-10-14 10:00:0{i} INFO alpha {name}1\n2026-10-14 10:01:0{i} INFO alpha {name}2\n"),
+        )
+        .unwrap();
+    }
+    let dir = TempDir::new("legacy-blocks-store");
+    let store = DuckStore::create_with(
+        &dir.0,
+        Profile::default_profile(),
+        PluginRegistry::new(),
+        debrief_store_duck::StoreOptions {
+            parse_threads: 1,
+            ..debrief_store_duck::StoreOptions::default()
+        },
+    )
+    .unwrap();
+    let wait = |store: &DuckStore| assert!(store.wait_for_index(std::time::Duration::from_secs(60)).unwrap().ready);
+    for name in ["a", "b", "c", "d"] {
+        store.open(&[logs.0.join(format!("{name}.log"))]).unwrap().wait().unwrap();
+        wait(&store);
+    }
+    assert_eq!(store.bench_sql("SELECT 1 FROM segments").unwrap(), 4, "one segment per import");
+    drop(store);
+    // As an older store: the first two segments' ranges overlap (a compacted hull can), they have no blocks yet, and a
+    // block of a file that is gone is left over.
+    {
+        let conn = duckdb::Connection::open(dir.0.join(debrief_store_duck::DB_FILE)).unwrap();
+        let mut stmt = conn.prepare("SELECT file, end_id FROM segments ORDER BY first_id LIMIT 2").unwrap();
+        let first: Vec<(String, u64)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        conn.execute(
+            "UPDATE segments SET end_id = ? WHERE file = ?",
+            duckdb::params![first[1].1, first[0].0],
+        )
+        .unwrap();
+        for (file, _) in &first {
+            conn.execute("DELETE FROM segment_blocks WHERE file = ?", duckdb::params![file])
+                .unwrap();
+        }
+        conn.execute_batch("INSERT INTO segment_blocks VALUES ('seg-gone.parquet', 1, 2)")
+            .unwrap();
+    }
+    let store = DuckStore::open(&dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
+    assert_eq!(
+        store
+            .bench_sql("SELECT 1 FROM segment_blocks WHERE file = 'seg-gone.parquet'")
+            .unwrap(),
+        0,
+        "the block of a file that is gone is dropped"
+    );
+    assert_eq!(
+        store
+            .bench_sql("SELECT 1 FROM segments s WHERE NOT EXISTS (SELECT 1 FROM segment_blocks b WHERE b.file = s.file)")
+            .unwrap(),
+        2,
+        "overlapping ranges wait for the scan"
+    );
+    assert_blocks_consistent_with(&store, &dir.0, true);
+    store.maintain(MaintenanceAction::Compact).unwrap();
+    assert_blocks_consistent_with(&store, &dir.0, true);
+    assert_eq!(
+        store
+            .bench_sql("SELECT 1 FROM segments s WHERE NOT EXISTS (SELECT 1 FROM segment_blocks b WHERE b.file = s.file)")
+            .unwrap(),
+        2,
+        "blockless segments are not compacted"
+    );
+    assert_eq!(
+        store.bench_sql("SELECT 1 FROM segments").unwrap(),
+        3,
+        "the two with blocks were merged"
+    );
+    for name in ["a", "c"] {
+        store
+            .set_source_offset(&manual(source_of(&store, &format!("{name}.log")), 300_000))
+            .unwrap();
+    }
+    wait(&store);
+    assert_blocks_consistent_with(&store, &dir.0, true);
+    let hits = store
+        .search(&SearchRequest {
+            text: "alpha".into(),
+            limit: 0,
+        })
+        .unwrap();
+    assert_eq!(hits.total, 8, "every event once");
+    let mut ids = hits.ids.clone();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), 8);
 }
 
 #[test]
