@@ -693,11 +693,6 @@ status = "built"
   delete_by = "debrief-v1.2.0"
 
   [[mechanism.copy]]
-  paths = ["apps/pitcrew/app/src/app/core/native-feel.ts"]
-  owner = "pitcrew"
-  delete_by = "pitcrew-v1.1.0"
-
-  [[mechanism.copy]]
   paths = ["apps/pitwall/app/src/app/core/native-feel.ts"]
   owner = "pitwall"
   delete_by = "pitwall-v1.1.0"

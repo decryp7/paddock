@@ -13,7 +13,7 @@ import { MockStartupBackend, reportBootstrapFailure, TauriStartupBackend, window
 import { BACKEND, isTauri, type PitcrewBackend } from '../core/backend';
 import { provideDeepLinks } from '../core/deep-link';
 import { MockBackend, type MockScenario } from '../core/mock-backend';
-import { provideNativeFeel } from '../core/native-feel';
+import { provideNativeFeel } from '@decryp7/paddock-ui/shell/feel';
 import { TauriBackend } from '../core/tauri-backend';
 import { provideIcons } from '../shared/icons';
 import { aboutBackend, updatesBackend } from './about';
