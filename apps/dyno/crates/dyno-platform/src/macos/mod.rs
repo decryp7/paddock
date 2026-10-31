@@ -7,6 +7,7 @@ pub mod background;
 pub mod details;
 pub mod facts;
 pub mod locks;
+pub mod pcblist;
 pub mod probe;
 pub mod procinfo;
 pub mod startup;
