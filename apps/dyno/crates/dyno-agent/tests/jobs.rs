@@ -516,6 +516,52 @@ fn a_rescan_waits_for_the_scheduled_read_instead_of_answering_with_the_old_state
     );
 }
 
+/// The read that ends releases its waiters only after its results are stored: a rescan that waited for it answers with them. The
+/// store is held here, so the scheduled read finishes reading its sources and then waits to store; a second caller must still find
+/// the read running. Before the fix the flag came down (and the waiters were woken) before the store, so a second caller started a
+/// read of its own, and a waiting rescan could answer with an empty store.
+#[test]
+fn a_running_read_stays_running_until_its_results_are_stored() {
+    let gate = Arc::new(Gate::default());
+    let h = Harness::start(slow_issues(&gate));
+    let shared = h.shared();
+    let store_held = shared.core.lock().unwrap();
+    gate.open();
+    let scheduled = {
+        let s = shared.clone();
+        std::thread::spawn(move || s.issues.scan(&s, None))
+    };
+    // Both sources have been entered: the scheduled read is at its last source or past it, and storing needs the held store.
+    gate.wait_for_callers(2);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let second = {
+        let s = shared.clone();
+        std::thread::spawn(move || {
+            let r = s.issues.scan(&s, None);
+            let _ = tx.send(r.is_ok_and(|stored| stored));
+        })
+    };
+    // Either the second caller sees the read still running and leaves at once, or it starts a read of its own and reaches a source
+    // (a third caller at the gate). Exactly one of the two happens, so this waits on no clock.
+    let started_own_read = loop {
+        if let Ok(own) = rx.try_recv() {
+            break own;
+        }
+        if *gate.waiting.lock().unwrap() >= 3 {
+            break true;
+        }
+        std::thread::yield_now();
+    };
+    drop(store_held);
+    assert!(
+        !started_own_read,
+        "the first read had not stored its results yet, so it was still running: a second caller must not start another read"
+    );
+    assert!(scheduled.join().unwrap().unwrap());
+    second.join().unwrap();
+    assert!(!shared.issues.never_scanned());
+}
+
 #[test]
 fn a_backup_check_waits_for_the_one_that_is_running_and_cancel_wakes_the_wait() {
     let gate = Arc::new(Gate::default());

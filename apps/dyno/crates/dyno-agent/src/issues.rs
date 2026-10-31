@@ -34,6 +34,19 @@ struct State {
     scanning: bool,
 }
 
+/// The mark of a read in progress: dropping it brings the flag down and wakes the reads that wait for it.
+struct RunningRead<'a> {
+    state: &'a Mutex<State>,
+    ended: &'a Condvar,
+}
+
+impl Drop for RunningRead<'_> {
+    fn drop(&mut self) {
+        lock(self.state).scanning = false;
+        self.ended.notify_all();
+    }
+}
+
 /// The sources, how they were last read, and the schedule.
 pub struct IssueCentre {
     sources: Mutex<Vec<Box<dyn IssueSource>>>,
@@ -114,18 +127,20 @@ impl IssueCentre {
             break st.last_scan.map_or(t.minus(FIRST_DAYS * DAY), |l| l.minus(OVERLAP_MS));
         };
         let until = now();
-        // Whatever happens below (a cancel included), the flag must come down.
-        let read = self.read_all(job, since, until);
-        let mut st = lock(&self.state);
-        st.scanning = false;
-        self.ended.notify_all();
-        let (statuses, found) = read?;
-        drop(st);
+        // The read stays "running" until its results are stored: the flag comes down (and the waiters are woken) only then, and on
+        // every way out, a cancel and a panic included. A waiter that left earlier answered from a store that did not have them yet.
+        let running = RunningRead {
+            state: &self.state,
+            ended: &self.ended,
+        };
+        let (statuses, found) = self.read_all(job, since, until)?;
         let found = collapse_across_sources(found);
         record(shared, &found, until);
         let mut st = lock(&self.state);
         st.statuses = statuses;
         st.last_scan = Some(until);
+        drop(st);
+        drop(running);
         Ok(true)
     }
 
