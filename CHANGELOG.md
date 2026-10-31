@@ -4,7 +4,6 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
-<<<<<<< HEAD
 ### `paddock-startup`, `paddock-shell`: the start guard
 - From the shell plugin's set-up on, a start that has not got to `RunEvent::Ready` is logged from the guard's own thread
   with the phase it is in (the shell plugin's set-up, starting the event loop, opening the tray, opening the main
@@ -17,7 +16,6 @@ Conventional Commits; one semver tag for the whole repo.
   StuckStart}`, the adapter `paddock_startup::tauri::start_guard::{begin, phase, current, ready}`, and
   `paddock_shell::Builder::start_guard(Option<StartTiming>)` (default on; `None` for tests on the mock runtime, which
   never reach Ready); Spotter's, Dyno's and the demos' test places pass `None`).
-=======
 ### Tokens: `--pd-meter-neutral`, `--pd-skeleton-raised`, `--pd-skeleton-raised-shine`
 - `--pd-meter-neutral` (dark #7c8593, light #6b7381) is a meter's neutral fill (disk space, quotas): 3:1 or more on surface-1, -2 and
   -3 and against its track (`--pd-chart-grid` over surface-2 and -3). `--pd-chart-neutral-bar` stays for charts; on a surface-2 widget it measured 2.8:1 in dark (ADR 0035).
@@ -25,7 +23,12 @@ Conventional Commits; one semver tag for the whole repo.
   `--pd-skeleton` (the surface-2 colour) vanishes. `npm run test:tokens` checks both.
 ### `paddock-widgets`: type skeleton (ADR 0035)
 - New crate, scaffold only: the layout, catalogue, edit and widget-state types of ADR 0035 §2; the behaviour comes with WP-A.
->>>>>>> origin/feat/tray-widgets-design
+### `paddock-widgets`: new crate for widget layouts (ADR 0035, WP-A)
+- A pure crate for layouts of widgets on a surface (popover, dashboard, menu bar): the app's closed `Catalogue`, `Layout`
+  and `Placement`, limits on every read and edit, lenient versioned `read` and `Stored` (a layout that cannot be read gives the defaults and one note and is kept and written back unchanged until the first
+  edit, a newer one for good; a bad entry is dropped alone with a count), `Edit` and `apply` with one level
+  of undo, `LayoutView` for the chooser and the `WidgetState` envelope. Wire types are generated into
+  `ui/projects/paddock-ui/widgets/generated/widgets.ts`. Dyno's own copies of this model go in WP-C.
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.
