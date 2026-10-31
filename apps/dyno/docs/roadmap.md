@@ -438,7 +438,7 @@ or other shared OS services must poll rarely or use change notifications.
   the Paddock rule on where logic lives).
 - **States.** Every widget has a designed empty, loading and error state, each with a short next step.
 - **Accessibility.** The popup is keyboard-operable: a logical focus order follows the widget order, every widget has a label, and
-  the chooser lists widgets as an accessible list with move-up and move-down buttons.
+  the chooser's reordering works from the keyboard.
 - **Shared.** Built on the shared tray popover in `paddock-window`: the widget host and the chooser are shared, and each app only
   registers its own widgets. Touches `crates/paddock-window`, `app/src-tauri/src/tray.rs`, `app/src/app/features/tray/**`.
 - **Acceptance.** Choose, reorder and persist across restarts; the popup renders within the existing popover limits (size, placement
