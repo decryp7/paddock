@@ -155,7 +155,7 @@ impl VncTarget {
         dial: &Dial,
     ) -> Result<VncTarget, TargetError> {
         let addrs = dial.resolve(&addr.host, addr.port)?;
-        let stream = connect_any(&addrs, opts.connect_timeout, &stop).map_err(|e| {
+        let stream = connect_any(&addrs, opts.connect_timeout, &stop, TcpStream::connect_timeout).map_err(|e| {
             e.with_hint(&format!(
                 "connecting to {}:{} (is the VM running with VNC enabled on that port?)",
                 addr.host, addr.port
@@ -297,14 +297,20 @@ impl VncTarget {
     }
 }
 
-/// Tries each checked address in turn; the first that connects wins, otherwise the last failure is reported.
-fn connect_any(addrs: &[SocketAddr], timeout: Duration, stop: &StopFlag) -> Result<TcpStream, TargetError> {
+/// Tries each checked address in turn; the first that connects wins, otherwise the last failure is reported. `connector` is
+/// `TcpStream::connect_timeout` in production and a fake in the tests.
+fn connect_any(
+    addrs: &[SocketAddr],
+    timeout: Duration,
+    stop: &StopFlag,
+    mut connector: impl FnMut(&SocketAddr, Duration) -> std::io::Result<TcpStream>,
+) -> Result<TcpStream, TargetError> {
     let mut last = TargetError::Lost("the name has no address".into());
     for a in addrs {
         if stop.is_stopped() {
             return Err(TargetError::Stopped);
         }
-        match TcpStream::connect_timeout(a, timeout) {
+        match connector(a, timeout) {
             Ok(s) => return Ok(s),
             Err(e) => last = RfbError::from(e).into_target(timeout),
         }
@@ -667,20 +673,32 @@ mod tests {
 
     #[test]
     fn connect_any_tries_every_address_and_reports_the_last_failure() {
+        // The test holds this listener; the fake connector never touches the network for the refused address.
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let good = listener.local_addr().unwrap();
-        // A port that was just closed refuses at once.
-        let dead = {
-            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            l.local_addr().unwrap()
-        };
+        let refused: SocketAddr = "192.0.2.1:5900".parse().unwrap();
         let t = Duration::from_secs(20);
         let stop = StopFlag::default();
-        assert!(connect_any(&[dead, good], t, &stop).is_ok(), "the second address works");
-        assert!(matches!(connect_any(&[dead], t, &stop), Err(TargetError::Lost(_))));
-        assert!(matches!(connect_any(&[], t, &stop), Err(TargetError::Lost(m)) if m.contains("no address")));
+        let mut tried = Vec::new();
+        let connector = |tried: &mut Vec<SocketAddr>, a: &SocketAddr, _: Duration| {
+            tried.push(*a);
+            if *a == refused {
+                Err(std::io::Error::from(std::io::ErrorKind::ConnectionRefused))
+            } else {
+                TcpStream::connect(a)
+            }
+        };
+        assert!(connect_any(&[refused, good], t, &stop, |a, d| connector(&mut tried, a, d)).is_ok());
+        assert_eq!(tried, vec![refused, good], "the second address is tried after the first is refused");
+        let err = connect_any(&[refused], t, &stop, |a, d| connector(&mut Vec::new(), a, d)).err();
+        assert!(matches!(err, Some(TargetError::Lost(_))), "{err:?}");
+        let timed_out = connect_any(&[refused], t, &stop, |_, _| Err(std::io::ErrorKind::TimedOut.into())).err();
+        assert_eq!(timed_out, Some(TargetError::Timeout(t)));
+        let none = connect_any(&[], t, &stop, |a, d| connector(&mut Vec::new(), a, d)).err();
+        assert!(matches!(none, Some(TargetError::Lost(m)) if m.contains("no address")));
         stop.stop();
-        assert_eq!(connect_any(&[good], t, &stop).err(), Some(TargetError::Stopped));
+        let stopped = connect_any(&[good], t, &stop, |a, d| connector(&mut Vec::new(), a, d)).err();
+        assert_eq!(stopped, Some(TargetError::Stopped));
     }
 
     #[test]
