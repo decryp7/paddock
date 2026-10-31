@@ -289,7 +289,10 @@ impl Fts {
         let mut prepared = w.prepare_commit()?;
         prepared.set_payload(&payload(epoch));
         prepared.commit()?;
-        self.reader.reload()?;
+        // Committed: a reader that cannot reload now shows the change after a later commit reloads it.
+        if let Err(e) = self.reader.reload() {
+            log::warn!("the full-text index reader could not reload after a commit: {e}");
+        }
         Ok(())
     }
 
@@ -603,7 +606,7 @@ impl FtsService {
         self.shared.wake.1.notify_all();
     }
 
-    /// Runs `f` with the writer and commits.
+    /// Runs `f` with the writer and commits; when either fails, what `f` queued is rolled back.
     fn with_writer(&self, f: impl FnOnce(&mut IndexWriter) -> Result<()>) -> Result<()> {
         let fts = &self.shared.fts;
         let mut slot = crate::lock(&self.shared.writer);
@@ -618,7 +621,14 @@ impl FtsService {
             }
             Ok(())
         });
-        done.and_then(|()| fts.commit(w, self.epoch))
+        let done = done.and_then(|()| fts.commit(w, self.epoch));
+        if done.is_err() {
+            // What was queued must not ride along with the next commit (the indexer's).
+            if let Err(e) = w.rollback() {
+                log::warn!("the full-text index writer could not roll back: {e}");
+            }
+        }
+        done
     }
 
     /// Deletes a source's documents (it was removed).
