@@ -1113,3 +1113,20 @@ its own build folder), `std::fs::copy` truncating (the source itself was 0 bytes
 binary was not relinked). **Lesson:** a build script must never write into the build folder next to cargo's own outputs;
 while the sidecars are placeholders, Dyno hides `externalBin` from tauri-build (a `TAURI_CONFIG` merge patch), and a test
 that copies a built program first checks it is not empty. Pitwall and Pitcrew write the same placeholders.
+
+## What the browser e2e cannot see: three Dyno 1.0 features that passed it and failed in the real app (2026-11-01, ER-21)
+
+The Dyno 1.0 VM tests found three tray/Settings features that were green in the browser build and the Playwright e2e and broken in the installed app:
+(1) a click on the tray icon did nothing: the shell's `toggle_popover` looks up a `Popovers` spec that Dyno never registered (the browser build
+never calls it; unit tests used a `Popovers` they built themselves); (2) Settings' "Popup widgets" and menu-bar editors loaded for ever: the
+`pd.settings` dialog contract did not declare `widget_layout`, `widget_choices` and `popover_preview`, which the shell refuses to a dialog window
+(the mock backend has no command names); (3) "Customize widgets…" did not re-target an open Settings window: the new inputs travelled on a
+`BroadcastChannel`, which the browser e2e shares between its pages and the other webview of the real app did not hear. The pattern: **the browser build
+replaces the part of the app that is the real contract** (Tauri state, command contracts, native events), so a feature can be complete there and
+unwired in the app. Fixes through the class, not the instances: a Rust start test that the app's builder registers the tray popover
+(`the_start_registers_the_tray_popover_a_click_opens`); a spec that runs the Settings widget editors over the real `TauriBackend` with a recording
+`invoke` and checks every command against the generated `pd.settings` contract (`settings-dialog-commands.spec.ts`; a new command used by those pages now fails
+it until the contract names it); and a native window-system event (`paddock://dialog-inputs`) for re-targeting, with a unit test of both ends. What is still
+open: ADR 0026's recorder-based `dev check dialog-commands` (every command a dialog calls against its contract, in every app) does not exist yet, and a
+tray click is only tested up to "a popover is registered", not "a window opens". Before calling a window, tray or dialog feature done, read the log of the
+installed app once (the three above were each one line of the app's own log).
