@@ -245,7 +245,7 @@ run of `dev-tool.yml` (below) publishes for the new compiler within a day.
   workflow is given the publish token (`DEV_TOOL_PUBLISH_TOKEN`).
 - **Using it in CI.**
   - When the hash is not published (a branch that changes the tool), one `dev-build` job per run builds the Linux
-    binary once and uploads it as a run-scoped artifact (v3 artifact actions). The other Linux jobs `need` it and download
+    binary once and uploads it as a run-scoped artifact (the Gitea fork of the v4 artifact actions). The other Linux jobs `need` it and download
     it. When the hash is published, `dev-build` only checks and ends in seconds.
   - Linux container jobs otherwise download the package file for the hash with the job's read token and check its
     `.sha256`.

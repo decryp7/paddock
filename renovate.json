@@ -48,9 +48,9 @@
       "additionalBranchPrefix": "{{packageFileDir}}-"
     },
     {
-      "description": "Gitea Actions only supports v3 of the artifact actions",
-      "matchPackageNames": ["actions/upload-artifact", "actions/download-artifact"],
-      "allowedVersions": "<4"
+      "description": "Gitea 28 needs the Gitea forks of the v4 artifact actions; they have no tags, so bump the digests by hand (docs/research/2026-11-ci-artifacts-v4.md)",
+      "matchPackageNames": ["ChristopherHX/gitea-upload-artifact", "ChristopherHX/gitea-download-artifact"],
+      "enabled": false
     },
     {
       "description": "Node follows .nvmrc, which CI, the paddock-ci image and the host runners must match; bump it by hand",

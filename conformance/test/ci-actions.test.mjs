@@ -136,11 +136,26 @@ test('in a job that moves the checkout (stable-workspace), every upload-artifact
   assert.ok(checked >= 1, 'app-release.yml at least');
 });
 
+// Every workflow and workflow template, not only the app-* ones.
+const allWorkflowFiles = () =>
+  ['workflows', 'workflow-templates'].flatMap((d) =>
+    readdirSync(join(PADDOCK, '.gitea', d)).filter((f) => /\.ya?ml$/.test(f)).map((f) => join(PADDOCK, '.gitea', d, f)));
+
+const ARTIFACT_FORKS = {
+  'ChristopherHX/gitea-upload-artifact': '81f940d004763f986ba3582c007fd842dd5cb0d7',
+  'ChristopherHX/gitea-download-artifact': '75635f32b4c1c41c4b3d64e8f85210112ed4c9c7',
+};
+
 test('the shared actions follow the repo rules: no AI attribution text, Gitea-compatible artifact actions', () => {
-  for (const f of [...names.map((n) => join(ACTIONS, n, 'action.yml')), ...workflows.map((w) => join(WORKFLOWS, w))]) {
+  for (const f of [...names.map((n) => join(ACTIONS, n, 'action.yml')), ...workflows.map((w) => join(WORKFLOWS, w)), ...allWorkflowFiles()]) {
     const text = read(f);
     assert.doesNotMatch(text, /Co-Authored-By|Generated with/i, f);
-    assert.doesNotMatch(text, /actions\/(?:upload|download)-artifact@v4/, `${f}: Gitea supports v3 only`);
+    // Gitea 28 lists only v4 artifacts, and the upstream v4 actions refuse a Gitea server: only the pinned forks work.
+    for (const [, action, ref] of text.matchAll(/uses:\s*(\S*(?:upload|download)-artifact)@(\S+)/g)) {
+      const want = ARTIFACT_FORKS[action];
+      assert.ok(want, `${f}: ${action} is not a Gitea fork of the v4 artifact actions`);
+      assert.equal(ref, want, `${f}: ${action} must be pinned to the fork digest`);
+    }
   }
 });
 
