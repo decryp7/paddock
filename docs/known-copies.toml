@@ -948,3 +948,17 @@ status = "built"
   owner = "sighter"
   delete_by = "sighter-v1.0.0"
   note = "Byte-identical to the canonical."
+
+[[mechanism]]
+id = "sidecar-placeholders"
+title = "A build script that keeps tauri-build from copying an empty sidecar placeholder over the program cargo linked"
+canonical = "paddock-build"
+paths = ["crates/paddock-build/src/sidecars.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/app/src-tauri/build.rs"]
+  symbols = ["text:placeholders"]
+  owner = "dyno"
+  delete_by = "dyno-v1.1.0"
+  note = "Dyno's build.rs keeps its own copy of the mechanism (hides externalBin from tauri-build while a sidecar is a placeholder) so Dyno 1.0 is not changed after review; Dyno 1.1 replaces it with paddock_build::Build::new().sidecars([..]), as Pitwall and Pitcrew do."
