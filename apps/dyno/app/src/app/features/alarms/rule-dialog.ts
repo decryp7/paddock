@@ -76,7 +76,7 @@ const MAX_HOLD_SECS = 3600;
     /* The segments sit 3 px inside the control's border, so the selected one's ring starts below the legend's notch (the legend stays centred
        on the border, like the outline fields' legends). */
     .seg-field pd-segmented-control ::ng-deep .mat-button-toggle,
-    .unit-seg ::ng-deep .mat-button-toggle { margin: 3px; --mat-button-toggle-height: calc(var(--pd-field-height, 28px) - 8px); }
+    .unit-seg ::ng-deep .mat-button-toggle { margin: 3px; --mat-button-toggle-height: calc(var(--mat-form-field-container-height) - 8px); }
     .hold { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; }
     .hold pd-field { flex: 1; min-width: 0; }
     /* The hint is one line that may run on under the unit toggle (the row's width), not a column of wrapped words. */
