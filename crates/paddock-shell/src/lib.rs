@@ -11,7 +11,10 @@
 //!     .dialogs(&[&app::DIALOGS])                           // the app's own dialog table (ADR 0026 §3); the shell's are built in
 //!     .health(vec![ServiceSpec::new("llm", "the model server").repair(restart)])
 //!     .section(paddock_settings::section(models_section(), apply_models))
-//!     .updater(|_app| UpdatesBuilder::new("Pitwall").public_key(option_env!("TAURI_UPDATER_PUBKEY")))
+//!     .updater(|app| {                                      // says how it installs: .installer(..), or .no_install() for a notify-only build
+//!         let key = option_env!("TAURI_UPDATER_PUBKEY");
+//!         UpdatesBuilder::new("Pitwall").public_key(key).installer(Arc::new(PluginInstaller::new(app.clone(), key.unwrap_or_default())))
+//!     })
 //!     .windows(|_app| Windows::builder(WindowConfig::new("Pitwall")).build())
 //!     .setup(|app| { /* the app's own state, after the shell's */ Ok(()) })
 //!     .build();

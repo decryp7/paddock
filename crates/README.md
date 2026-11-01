@@ -65,7 +65,11 @@ let shell = paddock_shell::Builder::new(paddock_shell::AppIdentity::new("pitwall
     .dialogs(&[&dialogs::DIALOGS])                                 // the app's dialog table (ADR 0026 §3); the shell's are built in
     .health(vec![ServiceSpec::new("llm", "the model server").repair(restart_llm)])
     .section(paddock_settings::section(models_section(), apply_models))
-    .updater(|_| UpdatesBuilder::new("Pitwall").public_key(option_env!("TAURI_UPDATER_PUBKEY")).changelog(include_str!("../../CHANGELOG.md")))
+    .updater(|app| {                                                // an updater says how it installs: .installer(..), or .no_install() for a notify-only build
+        let key = option_env!("TAURI_UPDATER_PUBKEY");
+        UpdatesBuilder::new("Pitwall").public_key(key).changelog(include_str!("../../CHANGELOG.md"))
+            .installer(Arc::new(PluginInstaller::new(app.clone(), key.unwrap_or_default())))
+    })
     .windows(|_| Windows::builder(WindowConfig::new("Pitwall")).build())
     .build();
 tauri::Builder::default()
