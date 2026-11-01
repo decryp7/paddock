@@ -123,7 +123,7 @@ test('in a job that moves the checkout (stable-workspace), every upload-artifact
   for (const file of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
     for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
       if (!stable.test(job.text)) continue;
-      for (const step of parseSteps(job.text).filter((st) => /actions\/upload-artifact@/.test(st.uses ?? ''))) {
+      for (const step of parseSteps(job.text).filter((st) => /gitea-upload-artifact@/.test(st.uses ?? ''))) {
         const path = /^\s+path: (.+)$/m.exec(step.text)?.[1] ?? '';
         // A path that is not a build output (a failure report under the app, uploaded `if: failure()`) is judged by its step.
         if (/if: failure\(\)/.test(step.text)) continue;
@@ -136,11 +136,26 @@ test('in a job that moves the checkout (stable-workspace), every upload-artifact
   assert.ok(checked >= 1, 'app-release.yml at least');
 });
 
+// Every workflow and workflow template, not only the app-* ones.
+const allWorkflowFiles = () =>
+  ['workflows', 'workflow-templates'].flatMap((d) =>
+    readdirSync(join(PADDOCK, '.gitea', d)).filter((f) => /\.ya?ml$/.test(f)).map((f) => join(PADDOCK, '.gitea', d, f)));
+
+const ARTIFACT_FORKS = {
+  'ChristopherHX/gitea-upload-artifact': '81f940d004763f986ba3582c007fd842dd5cb0d7',
+  'ChristopherHX/gitea-download-artifact': '75635f32b4c1c41c4b3d64e8f85210112ed4c9c7',
+};
+
 test('the shared actions follow the repo rules: no AI attribution text, Gitea-compatible artifact actions', () => {
-  for (const f of [...names.map((n) => join(ACTIONS, n, 'action.yml')), ...workflows.map((w) => join(WORKFLOWS, w))]) {
+  for (const f of [...names.map((n) => join(ACTIONS, n, 'action.yml')), ...workflows.map((w) => join(WORKFLOWS, w)), ...allWorkflowFiles()]) {
     const text = read(f);
     assert.doesNotMatch(text, /Co-Authored-By|Generated with/i, f);
-    assert.doesNotMatch(text, /actions\/(?:upload|download)-artifact@v4/, `${f}: Gitea supports v3 only`);
+    // Gitea 28 lists only v4 artifacts, and the upstream v4 actions refuse a Gitea server: only the pinned forks work.
+    for (const [, action, ref] of text.matchAll(/uses:\s*(\S*(?:upload|download)-artifact)@(\S+)/g)) {
+      const want = ARTIFACT_FORKS[action];
+      assert.ok(want, `${f}: ${action} is not a Gitea fork of the v4 artifact actions`);
+      assert.equal(ref, want, `${f}: ${action} must be pinned to the fork digest`);
+    }
   }
 });
 
@@ -887,7 +902,7 @@ test('the real-browser tests of the crates and of Debrief take turns under nexte
 test("a kit app's end-to-end legs and failure report: ci.yml forwards the shard, the webkit input and uploads the report from the stable workspace", () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   assert.match(ci, /e2e-checks: \$\{\{ matrix\.e2e_checks \}\}\n\s+e2e-shard: \$\{\{ matrix\.e2e_shard \}\}/);
-  const step = /- uses: actions\/upload-artifact@\S+ # v3\n\s+if: failure\(\) && matrix\.e2e_artifacts != ''\n[\s\S]*?\n\n/.exec(ci)?.[0] ?? '';
+  const step = /- uses: ChristopherHX\/gitea-upload-artifact@\S+ # v4\n\s+if: failure\(\) && matrix\.e2e_artifacts != ''\n[\s\S]*?\n\n/.exec(ci)?.[0] ?? '';
   assert.match(step, /path: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}\/\$\{\{ matrix\.e2e_artifacts \}\}/, 'under the stable workspace');
   assert.match(step, /name: \$\{\{ matrix\.app \}\}-\$\{\{ matrix\.e2e_leg \|\| 'ui' \}\}-results-\$\{\{ strategy\.job-index \}\}/, 'one name per leg');
   assert.match(read(join(ACTIONS, 'app-gates', 'action.yml')), /E2E_INDEX="\$\{E2E_SHARD%%\/\*\}"/);
@@ -1094,7 +1109,7 @@ test('every host job that keeps a build folder caps it at the end, with the shar
   assert.match(ci, /- uses: \.\/\.gitea\/actions\/prune-build-folder\n\s+if: always\(\) && runner\.os != 'Linux'\n\n/, "ci.yml's app job prunes on the hosts, even after a failure");
   assert.ok(ci.indexOf('actions/prune-build-folder') > ci.indexOf('actions/host-cleanup'), 'after the clean-up of the job');
   assert.match(rel, /- uses: \.\/\.paddock\/\.gitea\/actions\/prune-build-folder\n\s+if: always\(\) && runner\.os != 'Linux'\n\s+with:\n\s+drop-bundles: "true"/, "app-release's bundle job prunes on the hosts after the upload");
-  assert.ok(rel.indexOf('actions/prune-build-folder') > rel.indexOf('actions/upload-artifact'), 'only after the installers are uploaded');
+  assert.ok(rel.indexOf('actions/prune-build-folder') > rel.indexOf('gitea-upload-artifact'), 'only after the installers are uploaded');
   const action = read(join(ACTIONS, 'prune-build-folder', 'action.yml'));
   assert.match(action, /dir="\$\{PADDOCK_BUILD_FOLDER:-\}"/, 'only the job\'s own build folder');
   assert.match(action, /prune-ci-build-folder\.sh" "\$dir" "\$MAX_GB"/, 'through the guard that accepts only target-* in the CI home');

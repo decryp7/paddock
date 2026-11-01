@@ -116,7 +116,7 @@ jobs:
       # One artifact per shard: the reproducers of every target that crashed, in artifacts/<target>/.
       - name: Upload crashes
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
           name: crashes-shard-${{ matrix.shard }}
           path: ${{ inputs.fuzz-dir }}/artifacts/

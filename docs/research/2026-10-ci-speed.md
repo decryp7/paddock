@@ -78,7 +78,7 @@ Sources are cited by link and date; where a result did not cover a point I say s
   shard 2 ways and upload a report on failure. Blob merge is a reporting nicety, not a speed-up. The speed levers are
   more shards (the Linux side has capacity if runners are raised), one shared UI build, workers per container, and
   trimming WebKit/prod-CSP to main and nightly (already proposed 2026-10-18).
-- **Gitea Actions limits:** `upload/download-artifact@v3` only on this Gitea (v4 needs newer Gitea/act_runner support:
+- **Gitea Actions limits:** `upload/download-artifact@v3` only on the Gitea of 2026-10 (moved to the v4 forks 2026-11-01, see 2026-11-ci-artifacts-v4.md) (v4 needs newer Gitea/act_runner support:
   see [Forgejo runner issue #144](https://code.forgejo.org/forgejo/runner/issues/144), which cites Gitea PR #28965; I
   could not confirm the version that shipped it, check ours before relying on v4). Cross-repo `uses:` accepts absolute
   URLs and the `self:` prefix; `$/` references local composite actions ([Gitea Actions comparison](https://docs.gitea.com/usage/actions/comparison),

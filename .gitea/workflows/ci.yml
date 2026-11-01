@@ -578,7 +578,7 @@ jobs:
           PADDOCK_TEST_BROWSER_LOG: ${{ runner.os == 'Windows' && format('{0}/chrome-logs', runner.temp) || '' }}
         run: cargo nextest run --workspace --all-features --profile ci
 
-      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+      - uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         if: failure() && runner.os == 'Windows'
         with:
           name: chrome-logs-${{ runner.os }}
@@ -767,8 +767,8 @@ jobs:
           e2e-checks: ${{ matrix.e2e_checks }}
           e2e-shard: ${{ matrix.e2e_shard }}
 
-      # The failure report of the app's browser tests (paddock.ci.json `e2eArtifacts`, a folder from the repo root); Gitea has the v3 artifact actions.
-      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+      # The failure report of the app's browser tests (paddock.ci.json `e2eArtifacts`, a folder from the repo root); Gitea 28 lists only v4 artifacts, so these are the Gitea fork of the v4 actions.
+      - uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         if: failure() && matrix.e2e_artifacts != ''
         with:
           name: ${{ matrix.app }}-${{ matrix.e2e_leg || 'ui' }}-results-${{ strategy.job-index }}

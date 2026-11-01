@@ -166,8 +166,8 @@ The app reads untrusted, possibly huge files and renders their content:
 
 - Prefer well-maintained, permissively licensed dependencies (`deny.toml` lists the allowed
   licences). Commit `Cargo.lock` and the root `package-lock.json`; install with `npm ci` at the repo root.
-- Renovate (the repo root's `renovate.json`) updates dependencies and pins CI actions to commit digests. Gitea Actions
-  needs the v3 artifact actions.
+- Renovate (the repo root's `renovate.json`) updates dependencies and pins CI actions to commit digests. Gitea 28 lists
+  only v4 artifacts, so CI uses the Gitea fork of the v4 actions (docs/research/2026-11-ci-artifacts-v4.md).
 - Use Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`, `chore:`)
   so changelogs can be generated. Releases are `debrief-vX.Y.Z` tags following semver (ADR 0014 §4).
 - Record significant architecture decisions as ADRs in `docs/adr/`.

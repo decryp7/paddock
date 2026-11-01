@@ -4,8 +4,7 @@ A `dyno-v*` tag on `main` runs `.gitea/workflows/dyno-release.yml` (repo root): 
 `windows-latest` host runner, the macOS `.dmg` on the `macos-latest` host runner, and a `.deb` plus AppImage on a Linux
 container), and the `release` job publishes a Gitea release with the installers, release notes (`RELEASE_NOTES.md`, from
 git-cliff, or from the CHANGELOG for the first release) and `latest.json`, the release information Dyno's updater reads. Installers are also built for the nightly run
-of `main` and manual runs (`workflow_dispatch`), and are uploaded as workflow artifacts (the v3 artifact actions, which
-Gitea Actions supports).
+of `main` and manual runs (`workflow_dispatch`), and are uploaded as workflow artifacts (the Gitea fork of the v4 artifact actions; Gitea 28 lists only v4).
 
 See *Cutting the release* below for the tag (`dyno-v1.0.0` for the first release).
 
