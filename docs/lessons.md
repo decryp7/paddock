@@ -1113,3 +1113,20 @@ its own build folder), `std::fs::copy` truncating (the source itself was 0 bytes
 binary was not relinked). **Lesson:** a build script must never write into the build folder next to cargo's own outputs;
 while the sidecars are placeholders, Dyno hides `externalBin` from tauri-build (a `TAURI_CONFIG` merge patch), and a test
 that copies a built program first checks it is not empty. Pitwall and Pitcrew write the same placeholders.
+
+## A warm module made a chart draw before teardown, and dispose threw on jsdom's missing canvas (2026-11-01, Dyno)
+
+Dyno's `widgets-ui.spec.ts` board test failed now and then in full runs on a busy machine with "1 fixture threw errors
+during cleanup": the test body passed, then `dy-chart`'s destroy called ECharts' `dispose()`, which cleared a canvas layer
+whose 2D context was null (jsdom has no canvas) and threw. That needs ECharts to have loaded and painted a frame before the
+fixture is destroyed. Alone, the dynamic `import('./echarts-setup')` is cold and the test ends first; with `isolate: false`
+an earlier spec in the same worker (`chart.spec.ts`) leaves the module warm, so it loads in a turn, and a loaded machine
+stretches the test's `vi.waitFor` polls long enough for a frame. Reproduced every time with one worker and the victim last
+(`chart.spec` then `widgets-ui.spec`: red; `format.spec` then `widgets-ui.spec`, or alone: green). Causes ruled out: leaked
+fake timers (the AnimatedNumber block restores them; the error is a canvas TypeError), a waitFor bound (the assertions had
+passed), an unawaited effect in the store or edit path (the layout and edit counts were right). **Cause in product code:**
+the chart contained a failed draw but not a failed dispose, and drew on a canvas with no 2D context (WebKit gives none when
+canvas memory runs out), where ECharts also throws from its frame loop. The chart now checks for a 2D context before it
+starts ECharts (otherwise it shows "This chart could not be drawn") and logs, instead of throwing, a failed dispose.
+**Lesson:** a component's destroy never throws; specs that render a real third-party renderer depend on module warmth and
+load under `isolate: false`, so the renderer's missing-platform path must be a designed state (rule 49, ER-29).
