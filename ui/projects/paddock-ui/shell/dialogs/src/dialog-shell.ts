@@ -139,7 +139,7 @@ export class DialogShell implements AfterViewInit {
       const injector = contentInjector(part.injector, this.ref, input);
       const ref = mountContent(host, part.component, injector, part.injector, input);
       this.contentView.set(ref.changeDetectorRef);
-      this.destroyRef.onDestroy(followDialogInputs(def.id, ref));
+      this.destroyRef.onDestroy(followDialogInputs(def.id, ref, this.io));
       this.content.set(ref.instance as DialogContent);
       this.contentInjector_ = injector;
       this.state.set('ready');

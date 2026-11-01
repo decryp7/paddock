@@ -23,6 +23,10 @@ pub const SHOWN_EVENT: &str = "paddock://dialog-shown";
 /// To the dialog: the user asked to close it (Cmd/Ctrl+W, a window-manager close); the dialog decides and calls
 /// `dialog_close`. No payload.
 pub const CLOSE_REQUESTED_EVENT: &str = "paddock://dialog-close-requested";
+/// To an open dialog window: another window opened the same dialog again with new inputs (Settings at a section), so the dialog
+/// points itself there. Sent by the opener's page with `emitTo` (a native event: it reaches another webview, which a
+/// `BroadcastChannel` does not reliably do between the webviews of one app). Payload: `{ dialogId, inputs }`.
+pub const INPUTS_EVENT: &str = "paddock://dialog-inputs";
 
 /// More dialog windows per host window than this are refused.
 pub const MAX_OPEN_PER_HOST: usize = 8;
