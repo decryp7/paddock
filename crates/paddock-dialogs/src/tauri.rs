@@ -121,6 +121,15 @@ fn native(op: &str, label: &str) {
     let _ = (op, label);
 }
 
+/// The names of an input's top-level fields, for the log (never their values: they may be user content).
+fn input_keys(input: Option<&Value>) -> String {
+    match input {
+        Some(Value::Object(map)) if !map.is_empty() => map.keys().map(String::as_str).collect::<Vec<_>>().join(","),
+        Some(Value::Object(_)) | Some(Value::Null) | None => "(none)".to_string(),
+        Some(_) => "(not an object)".to_string(),
+    }
+}
+
 fn failed(e: impl std::fmt::Display) -> DialogError {
     DialogError::new(DialogErrorCode::Failed, e.to_string())
 }
@@ -257,6 +266,12 @@ fn open_on<R: Runtime>(
         // A pending dialog is not on screen yet and shows (focused) when it is ready; focusing it now would show it
         // unfitted (a hidden window orders in when it is made key).
         let pending = dialogs.is_pending(&existing);
+        log::info!(
+            target: TARGET,
+            Dialog = request.dialog_id.as_str(), Window = existing.as_str(), Pending = pending,
+            Inputs = input_keys(request.input.as_ref()).as_str();
+            "Dialog window opened again"
+        );
         if !pending && let Some(w) = app.get_webview_window(&existing) {
             let _ = w.unminimize();
             native("focus", &existing);
