@@ -165,11 +165,12 @@ export class MonitorLiveCharts {
 
   constructor() {
     // Load when the panel appears, the scope or window changes, on Retry, and on every data change while following.
-    // After a failure live changes do not reload (no hammering a failing engine): the user retries.
+    // After a failure live changes do not reload (no hammering a failing engine): the user retries. While a new run
+    // opens its output nothing is asked: the first load is scoped to that run.
     let last = '';
     let version = -1;
     effect(() => {
-      if (!this.store.visible()) return;
+      if (!this.store.visible() || !this.store.ready()) return;
       const failed = this.store.error() !== null;
       if (this.store.following() && !failed) version = this.workspace.dataVersion();
       const key = JSON.stringify([this.store.sources(), this.store.windowMin(), this.store.following() ? version : null, this.store.attempt()]);

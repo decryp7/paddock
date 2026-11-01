@@ -37,6 +37,8 @@ export const MonitorChartsStore = signalStore(
       /** Shown while recording and whenever the workspace holds monitor samples. */
       visible: computed(() => monitor.running() || sources().length > 0 || hasMonitorSamples(workspace.summary())),
       sources,
+      /** Nothing is asked while a run opens its output: before its sources are known a query would chart every run. */
+      ready: computed(() => !monitor.opening()),
       /** No chart has a series: nothing sampled in the window yet. */
       empty: computed(() => store.charts().length > 0 && store.charts().every((c) => c.series.length === 0)),
       /** The shared legend: every process seen, in slot order, then "Other" when more processes than slots exist. */

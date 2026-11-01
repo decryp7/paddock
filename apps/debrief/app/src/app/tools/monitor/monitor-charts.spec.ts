@@ -380,6 +380,36 @@ describe('MonitorLiveCharts', () => {
     expect(all(fixture, 'figure.card')).toHaveLength(PROCESS_METRICS);
   });
 
+  it('asks nothing while a new run opens its output, so the first load is that run and its failure stays shown', async () => {
+    // In the app the panel renders while Start still opens the output folder; the source ids are not known yet.
+    const { fixture, backend, monitor, store, workspace } = await setup('fail');
+    let open: () => void = () => undefined;
+    const opened = new Promise<void>((r) => (open = r));
+    const debrief = TestBed.inject(DebriefBackend);
+    const real = debrief.openPaths.bind(debrief);
+    const spy = vi.spyOn(debrief, 'openPaths').mockImplementation(async (paths) => {
+      await opened;
+      return real(paths);
+    });
+    monitor.setTarget(0, { value: 'svc*' });
+    const started = monitor.start();
+    await settle(fixture);
+    expect(monitor.running()).toBe(true);
+    expect(el(fixture, '[data-testid=monitor-live-loading]')).toBeTruthy();
+    expect(backend.requests).toHaveLength(0);
+    open();
+    await started;
+    await settle(fixture);
+    expect(store.sources()).toHaveLength(1);
+    expect(backend.requests.map((r) => r.query.sources)).toEqual(MONITOR_METRICS.map(() => store.sources()));
+    expect(el(fixture, '[data-testid=monitor-live-error]').textContent).toContain('locked by another process');
+    // Later data does not hide the failure behind the user's back either.
+    workspace.applySummary({ ...must(workspace.summary()) });
+    await settle(fixture);
+    expect(el(fixture, '[data-testid=monitor-live-error]')).toBeTruthy();
+    spy.mockRestore();
+  });
+
   it('shows the loading state, a per-chart gap, the Other entry, and keeps the newest load', async () => {
     const { fixture, backend, start, store } = await setup();
     let release: () => void = () => undefined;

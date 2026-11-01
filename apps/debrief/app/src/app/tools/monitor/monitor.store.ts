@@ -14,6 +14,8 @@ interface MonitorState {
   running: boolean;
   /** Folder of the current or last run. */
   dir: string | null;
+  /** A run started and its output folder is being opened: its sources are not in the workspace yet. */
+  opening: boolean;
   busy: string | null;
   error: string | null;
   notice: string | null;
@@ -25,7 +27,7 @@ export const ACCESS_DENIED_FIELD = 'AccessDenied';
 /** State and actions of the process monitor panel. The engine samples; the UI configures and follows. */
 export const MonitorStore = signalStore(
   { providedIn: 'root' },
-  withState<MonitorState>({ draft: DEFAULT_MONITOR_DRAFT, running: false, dir: null, busy: null, error: null, notice: null }),
+  withState<MonitorState>({ draft: DEFAULT_MONITOR_DRAFT, running: false, dir: null, opening: false, busy: null, error: null, notice: null }),
   withComputed((store, workspace = inject(WorkspaceStore), life = inject(LifecycleService), catalog = inject(ToolCatalog)) => ({
     /** The tools plugin serves the monitor now (not inactive, quarantined, disabled or in safe mode). */
     canRun: computed(() => catalog.usable(TOOL_IDS.processMonitor)),
@@ -71,8 +73,12 @@ export const MonitorStore = signalStore(
         run($localize`:@@tools.monitor.busy.starting:Starting…`, async () => {
           const d = store.draft();
           const dir = await backend.monitorStart(toMonitorConfig(d), d.dir.trim() || undefined);
-          patchState(store, { running: true, dir });
-          await workspace.openPaths([dir]);
+          patchState(store, { running: true, dir, opening: true });
+          try {
+            await workspace.openPaths([dir]);
+          } finally {
+            patchState(store, { opening: false });
+          }
           await live.start();
           patchState(store, { notice: $localize`:@@tools.monitor.notice.started:Monitoring started. The results appear in the workspace as they are written.` });
         }),
