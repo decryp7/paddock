@@ -49,7 +49,11 @@ fn a_fresh_state_shows_the_default_popup() {
 fn an_edit_is_saved_and_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let p = PopupState::load(Some(dir.path().to_path_buf()));
-    let view = p.edit(Edit::Remove { id: id_of(&p, PopoverWidget::Memory) }).unwrap();
+    let view = p
+        .edit(Edit::Remove {
+            id: id_of(&p, PopoverWidget::Memory),
+        })
+        .unwrap();
     assert!(view.can_undo);
     assert_eq!(kinds(&p).len(), 3);
     drop(p);
@@ -63,7 +67,13 @@ fn a_refused_edit_changes_nothing_in_memory_or_on_disk() {
     let dir = tempfile::tempdir().unwrap();
     let p = PopupState::load(Some(dir.path().to_path_buf()));
     let before = kinds(&p);
-    let err = p.edit(Edit::Add { widget: PopoverWidget::Memory, span: None, at: None }).unwrap_err();
+    let err = p
+        .edit(Edit::Add {
+            widget: PopoverWidget::Memory,
+            span: None,
+            at: None,
+        })
+        .unwrap_err();
     assert!(matches!(err, EditError::Refused(_)), "{err:?}");
     assert_eq!(kinds(&p), before);
     assert!(!dir.path().join(FILE_NAME).exists());
@@ -78,7 +88,11 @@ fn an_unwritable_folder_refuses_the_edit_and_keeps_the_layout() {
     std::fs::write(&blocker, "x").unwrap();
     let p = PopupState::load(Some(blocker));
     let before = kinds(&p);
-    let err = p.edit(Edit::Remove { id: id_of(&p, PopoverWidget::Memory) }).unwrap_err();
+    let err = p
+        .edit(Edit::Remove {
+            id: id_of(&p, PopoverWidget::Memory),
+        })
+        .unwrap_err();
     assert!(matches!(err, EditError::NotSaved(_)), "{err:?}");
     assert_eq!(kinds(&p), before);
     assert_eq!(CommandError::from(err).code, ErrorCode::Internal);
@@ -109,8 +123,17 @@ fn a_layout_from_a_newer_version_is_kept_and_cannot_be_edited() {
     let p = PopupState::load(Some(dir.path().to_path_buf()));
     assert!(!p.view().editable);
     assert_eq!(kinds(&p).len(), 4, "the defaults are shown");
-    assert!(matches!(p.edit(Edit::Remove { id: id_of(&p, PopoverWidget::Memory) }), Err(EditError::Refused(_))));
-    assert_eq!(std::fs::read_to_string(dir.path().join(FILE_NAME)).unwrap(), newer.to_string(), "the file is untouched");
+    assert!(matches!(
+        p.edit(Edit::Remove {
+            id: id_of(&p, PopoverWidget::Memory)
+        }),
+        Err(EditError::Refused(_))
+    ));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(FILE_NAME)).unwrap(),
+        newer.to_string(),
+        "the file is untouched"
+    );
 }
 
 #[test]
@@ -123,14 +146,23 @@ fn the_values_follow_the_facts_and_the_header_follows_the_server() {
     let memory = p.values(NOW).placements.into_iter().find(|x| x.id.as_str() == "memory").unwrap();
     assert!(matches!(
         memory.state,
-        paddock_widgets::WidgetState::Ready { value: pitwall_core::widgets::PopoverValue::Memory { percent: 60, .. }, .. }
+        paddock_widgets::WidgetState::Ready {
+            value: pitwall_core::widgets::PopoverValue::Memory { percent: 60, .. },
+            ..
+        }
     ));
     p.with_facts(|f| f.set_disconnected(NOW));
     assert_eq!(p.header().status, PopoverStatus::Unreachable);
     let server = p.values(NOW).placements.into_iter().find(|x| x.id.as_str() == "server").unwrap();
     assert!(matches!(
         server.state,
-        paddock_widgets::WidgetState::Ready { value: pitwall_core::widgets::PopoverValue::Server { state: ServerState::Unreachable, .. }, .. }
+        paddock_widgets::WidgetState::Ready {
+            value: pitwall_core::widgets::PopoverValue::Server {
+                state: ServerState::Unreachable,
+                ..
+            },
+            ..
+        }
     ));
 }
 
@@ -142,7 +174,10 @@ fn the_windows_hear_only_what_changed() {
     assert!(p.changed(NOW + 5_000).is_none(), "time passing alone is not news");
     seed(&p, &overview());
     assert!(p.changed(NOW).is_some());
-    p.edit(Edit::Remove { id: id_of(&p, PopoverWidget::Activity) }).unwrap();
+    p.edit(Edit::Remove {
+        id: id_of(&p, PopoverWidget::Activity),
+    })
+    .unwrap();
     assert!(p.changed(NOW).is_some(), "a layout change is news");
     assert!(p.changed(NOW).is_none());
 }
@@ -156,7 +191,9 @@ fn only_a_model_update_event_asks_for_the_notices_again() {
     };
     assert!(touches_updates(&event("modelUpdate")));
     assert!(!touches_updates(&event("requestFailed")));
-    assert!(!touches_updates(&LiveUpdate::Throughput { throughput: Default::default() }));
+    assert!(!touches_updates(&LiveUpdate::Throughput {
+        throughput: Default::default()
+    }));
 }
 
 #[test]
@@ -175,7 +212,12 @@ mod reads {
     use pitwall_core::widgets::PopoverValue;
 
     fn updates_state(p: &PopupState) -> PopoverState {
-        p.values(NOW).placements.into_iter().find(|x| x.id.as_str() == "updates").unwrap().state
+        p.values(NOW)
+            .placements
+            .into_iter()
+            .find(|x| x.id.as_str() == "updates")
+            .unwrap()
+            .state
     }
 
     type PopoverState = paddock_widgets::WidgetState<PopoverValue, pitwall_core::widgets::WidgetActionId>;
@@ -183,7 +225,12 @@ mod reads {
     fn with_updates_widget() -> PopupState {
         let p = PopupState::load(None);
         seed(&p, &overview());
-        p.edit(Edit::Add { widget: PopoverWidget::Updates, span: None, at: None }).unwrap();
+        p.edit(Edit::Add {
+            widget: PopoverWidget::Updates,
+            span: None,
+            at: None,
+        })
+        .unwrap();
         p
     }
 
@@ -204,12 +251,23 @@ mod reads {
         server.reply("update_check_status", Reply::Ok(status(Some(NOW))));
         let p = with_updates_widget();
         refresh_updates(&p, &server).await;
-        let WidgetState::Ready { value, .. } = updates_state(&p) else { panic!("ready") };
-        assert_eq!(value, PopoverValue::Updates { count: 1, summary: Some("A better quantisation of m is available.".into()) });
+        let WidgetState::Ready { value, .. } = updates_state(&p) else {
+            panic!("ready")
+        };
+        assert_eq!(
+            value,
+            PopoverValue::Updates {
+                count: 1,
+                summary: Some("A better quantisation of m is available.".into())
+            }
+        );
 
         server.reply("update_notices", Reply::Ok(json!([])));
         refresh_updates(&p, &server).await;
-        assert!(matches!(updates_state(&p), WidgetState::Empty { calm: true, .. }), "checked, nothing on offer");
+        assert!(
+            matches!(updates_state(&p), WidgetState::Empty { calm: true, .. }),
+            "checked, nothing on offer"
+        );
     }
 
     #[tokio::test]
@@ -222,7 +280,10 @@ mod reads {
         server.reply("update_notices", Reply::Err(crate::server_client::unavailable()));
         server.reply("update_check_status", Reply::Ok(status(None)));
         refresh_updates(&p, &server).await;
-        assert!(matches!(updates_state(&p), WidgetState::Empty { calm: false, .. }), "a failed read does not guess");
+        assert!(
+            matches!(updates_state(&p), WidgetState::Empty { calm: false, .. }),
+            "a failed read does not guess"
+        );
     }
 
     fn state_of(p: &PopupState, id: &str) -> PopoverState {
@@ -232,8 +293,18 @@ mod reads {
     fn with_downloads_and_errors() -> PopupState {
         let p = PopupState::load(None);
         seed(&p, &overview());
-        p.edit(Edit::Add { widget: PopoverWidget::Downloads, span: None, at: None }).unwrap();
-        p.edit(Edit::Add { widget: PopoverWidget::RecentErrors, span: None, at: None }).unwrap();
+        p.edit(Edit::Add {
+            widget: PopoverWidget::Downloads,
+            span: None,
+            at: None,
+        })
+        .unwrap();
+        p.edit(Edit::Add {
+            widget: PopoverWidget::RecentErrors,
+            span: None,
+            at: None,
+        })
+        .unwrap();
         p
     }
 
@@ -245,7 +316,9 @@ mod reads {
         server.reply("events", Reply::Ok(json!("not a list")));
         read_extras(&p, &server).await;
         for id in ["downloads", "recent-errors"] {
-            let WidgetState::Empty { calm, detail, .. } = state_of(&p, id) else { panic!("{id} is empty") };
+            let WidgetState::Empty { calm, detail, .. } = state_of(&p, id) else {
+                panic!("{id} is empty")
+            };
             assert!(!calm, "{id}: a failed read is not 'all good'");
             assert_eq!(detail, "Not checked yet.", "{id}");
         }

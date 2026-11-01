@@ -223,7 +223,11 @@ fn memory(f: &Facts) -> PopoverState {
 
 fn loaded_models(f: &Facts) -> PopoverState {
     if f.models.is_empty() {
-        return empty("See which models are loaded", "No model is loaded.", open(Page::Models, "Open Models"));
+        return empty(
+            "See which models are loaded",
+            "No model is loaded.",
+            open(Page::Models, "Open Models"),
+        );
     }
     let mut ordered: Vec<&crate::mgmt::LoadedModel> = f.models.iter().collect();
     // Busy first, then the most recently used; the id keeps equal models in a fixed order.
@@ -252,7 +256,10 @@ fn loaded_models(f: &Facts) -> PopoverState {
             active: m.active_requests,
         })
         .collect();
-    let bytes = f.models.iter().fold(0u64, |a, m| a.saturating_add(m.ram_bytes).saturating_add(m.vram_bytes));
+    let bytes = f
+        .models
+        .iter()
+        .fold(0u64, |a, m| a.saturating_add(m.ram_bytes).saturating_add(m.vram_bytes));
     ready(
         PopoverValue::LoadedModels {
             total: count(f.models.len()),
@@ -292,7 +299,12 @@ fn phase_of(d: &Download) -> &'static str {
 
 fn downloads(f: &Facts) -> PopoverState {
     let mut running: Vec<&Download> = f.downloads.values().filter(|d| is_running(d)).collect();
-    if let Some(d) = f.engine_setup.download.as_ref().filter(|d| is_running(d) && !f.downloads.contains_key(&d.id)) {
+    if let Some(d) = f
+        .engine_setup
+        .download
+        .as_ref()
+        .filter(|d| is_running(d) && !f.downloads.contains_key(&d.id))
+    {
         running.push(d);
     }
     if !running.is_empty() {
@@ -341,7 +353,11 @@ fn downloads(f: &Facts) -> PopoverState {
         .filter(|d| matches!(d.state, DownloadState::Failed | DownloadState::Paused))
         .collect();
     // Failed ones first, then by name.
-    rest.sort_by(|a, b| (a.state != DownloadState::Failed).cmp(&(b.state != DownloadState::Failed)).then(a.name.cmp(&b.name)));
+    rest.sort_by(|a, b| {
+        (a.state != DownloadState::Failed)
+            .cmp(&(b.state != DownloadState::Failed))
+            .then(a.name.cmp(&b.name))
+    });
     if rest.is_empty() && !f.downloads_read {
         return empty("See downloads as they run", "Not checked yet.", open(Page::Models, "Open Models"));
     }
@@ -381,10 +397,22 @@ fn updates(f: &Facts, now_ms: i64) -> PopoverState {
             f,
         ),
         Some(u) => match u.last_checked_ms {
-            Some(at) => calm("Models are up to date", &format!("Checked {}", ago(now_ms, at)), open(Page::Models, "Open Models")),
-            None => empty("Know when models have updates", "Not checked yet.", open(Page::Models, "Open Models")),
+            Some(at) => calm(
+                "Models are up to date",
+                &format!("Checked {}", ago(now_ms, at)),
+                open(Page::Models, "Open Models"),
+            ),
+            None => empty(
+                "Know when models have updates",
+                "Not checked yet.",
+                open(Page::Models, "Open Models"),
+            ),
         },
-        None => empty("Know when models have updates", "Not checked yet.", open(Page::Models, "Open Models")),
+        None => empty(
+            "Know when models have updates",
+            "Not checked yet.",
+            open(Page::Models, "Open Models"),
+        ),
     }
 }
 

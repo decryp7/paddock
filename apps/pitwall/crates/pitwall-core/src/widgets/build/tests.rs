@@ -120,7 +120,10 @@ fn loaded_models_list_the_busy_one_first_then_the_most_recent_and_cap_at_two_row
 fn no_loaded_model_is_an_empty_state_that_opens_models() {
     let f = connected("serving", vec![]);
     let (title, detail, next, calm) = empty_of(state(PopoverWidget::LoadedModels, &f, NOW));
-    assert_eq!((title.as_str(), detail.as_str(), calm), ("See which models are loaded", "No model is loaded.", false));
+    assert_eq!(
+        (title.as_str(), detail.as_str(), calm),
+        ("See which models are loaded", "No model is loaded.", false)
+    );
     assert_eq!(next, Some(WidgetActionId::OpenPage { page: Page::Models }));
 }
 
@@ -128,12 +131,21 @@ fn no_loaded_model_is_an_empty_state_that_opens_models() {
 fn model_states_map_to_the_rows_word() {
     let states = |a: &str, b: &str| {
         let f = connected("serving", vec![model("a", "A", GB, 0, a, 0, 4), model("b", "B", GB, 0, b, 0, 3)]);
-        let PopoverValue::LoadedModels { rows, .. } = value_of(state(PopoverWidget::LoadedModels, &f, NOW)) else { panic!() };
+        let PopoverValue::LoadedModels { rows, .. } = value_of(state(PopoverWidget::LoadedModels, &f, NOW)) else {
+            panic!()
+        };
         rows.iter().map(|r| r.state).collect::<Vec<_>>()
     };
-    assert_eq!(states("loading", "releasingContext"), [ModelRowState::Loading, ModelRowState::Releasing]);
+    assert_eq!(
+        states("loading", "releasingContext"),
+        [ModelRowState::Loading, ModelRowState::Releasing]
+    );
     assert_eq!(states("unloading", "failed"), [ModelRowState::Releasing, ModelRowState::Failed]);
-    assert_eq!(states("ready", "busy"), [ModelRowState::Busy, ModelRowState::Ready], "the busy one comes first");
+    assert_eq!(
+        states("ready", "busy"),
+        [ModelRowState::Busy, ModelRowState::Ready],
+        "the busy one comes first"
+    );
 }
 
 // ---- memory ----
@@ -141,7 +153,9 @@ fn model_states_map_to_the_rows_word() {
 fn memory_percent(used: u64) -> (u8, MeterTone) {
     let mut f = Facts::new();
     f.seed(&overview("serving", vec![], memory(100, 100 - used, "normal", json!([]))), NOW);
-    let PopoverValue::Memory { percent, tone, .. } = value_of(state(PopoverWidget::Memory, &f, NOW)) else { panic!() };
+    let PopoverValue::Memory { percent, tone, .. } = value_of(state(PopoverWidget::Memory, &f, NOW)) else {
+        panic!()
+    };
     (percent, tone)
 }
 
@@ -162,7 +176,17 @@ fn the_first_gpu_that_reports_video_memory_is_shown_with_its_own_tone() {
     ]);
     let mut f = Facts::new();
     f.seed(&overview("serving", vec![], memory(16 * GB, 8 * GB, "elevated", gpus)), NOW);
-    let PopoverValue::Memory { used, total, percent, pressure, vram, .. } = value_of(state(PopoverWidget::Memory, &f, NOW)) else { panic!() };
+    let PopoverValue::Memory {
+        used,
+        total,
+        percent,
+        pressure,
+        vram,
+        ..
+    } = value_of(state(PopoverWidget::Memory, &f, NOW))
+    else {
+        panic!()
+    };
     assert_eq!((used, total, percent, pressure), (8 * GB, 16 * GB, 50, MemoryLevel::Elevated));
     let vram = vram.expect("the discrete GPU reports its memory");
     assert_eq!((vram.percent, vram.busy_percent, vram.tone), (88, Some(42), MeterTone::Warn));
@@ -171,7 +195,9 @@ fn the_first_gpu_that_reports_video_memory_is_shown_with_its_own_tone() {
 #[test]
 fn no_video_memory_reading_means_no_vram_row() {
     let f = connected("serving", vec![]);
-    let PopoverValue::Memory { vram, .. } = value_of(state(PopoverWidget::Memory, &f, NOW)) else { panic!() };
+    let PopoverValue::Memory { vram, .. } = value_of(state(PopoverWidget::Memory, &f, NOW)) else {
+        panic!()
+    };
     assert_eq!(vram, None);
 }
 
@@ -181,11 +207,30 @@ fn no_video_memory_reading_means_no_vram_row() {
 fn one_running_download_is_working_with_megabytes_speed_and_cancel() {
     let mut f = connected("serving", vec![]);
     f.set_downloads(&[download("d1", "Qwen3 8B", "downloading", 1_200 * MB, 4_800 * MB, 12 * MB)], NOW);
-    let WidgetState::Working { title, phase, progress, cancel, .. } = state(PopoverWidget::Downloads, &f, NOW) else { panic!("working") };
+    let WidgetState::Working {
+        title,
+        phase,
+        progress,
+        cancel,
+        ..
+    } = state(PopoverWidget::Downloads, &f, NOW)
+    else {
+        panic!("working")
+    };
     assert_eq!(title, "Downloading Qwen3 8B");
     assert_eq!(phase, "Downloading · 12 MB/s");
-    assert_eq!(progress, Progress::Fraction { done: 1_200, total: 4_800, unit: "MB".into() });
-    assert_eq!(cancel.map(|c| (c.action, c.label)), Some((WidgetActionId::CancelDownload { id: "d1".into() }, "Cancel download".into())));
+    assert_eq!(
+        progress,
+        Progress::Fraction {
+            done: 1_200,
+            total: 4_800,
+            unit: "MB".into()
+        }
+    );
+    assert_eq!(
+        cancel.map(|c| (c.action, c.label)),
+        Some((WidgetActionId::CancelDownload { id: "d1".into() }, "Cancel download".into()))
+    );
 }
 
 #[test]
@@ -198,9 +243,25 @@ fn two_running_downloads_sum_up_and_have_no_single_cancel() {
         ],
         NOW,
     );
-    let WidgetState::Working { title, phase, progress, cancel, .. } = state(PopoverWidget::Downloads, &f, NOW) else { panic!() };
+    let WidgetState::Working {
+        title,
+        phase,
+        progress,
+        cancel,
+        ..
+    } = state(PopoverWidget::Downloads, &f, NOW)
+    else {
+        panic!()
+    };
     assert_eq!((title.as_str(), phase.as_str()), ("Downloading 2 files", "4 MB/s"));
-    assert_eq!(progress, Progress::Fraction { done: 400, total: 1_000, unit: "MB".into() });
+    assert_eq!(
+        progress,
+        Progress::Fraction {
+            done: 400,
+            total: 1_000,
+            unit: "MB".into()
+        }
+    );
     assert!(cancel.is_none());
 }
 
@@ -208,7 +269,9 @@ fn two_running_downloads_sum_up_and_have_no_single_cancel() {
 fn a_download_of_unknown_size_has_an_indeterminate_bar_and_a_slow_one_says_so() {
     let mut f = connected("serving", vec![]);
     f.set_downloads(&[download("d1", "X", "downloading", 5 * MB, 0, 100)], NOW);
-    let WidgetState::Working { progress, phase, .. } = state(PopoverWidget::Downloads, &f, NOW) else { panic!() };
+    let WidgetState::Working { progress, phase, .. } = state(PopoverWidget::Downloads, &f, NOW) else {
+        panic!()
+    };
     assert_eq!(progress, Progress::Unknown);
     assert_eq!(phase, "Downloading · under 1 MB/s");
 }
@@ -218,15 +281,24 @@ fn the_engines_own_install_download_counts_when_the_feed_has_not_listed_it() {
     let mut f = connected("serving", vec![]);
     f.engine_setup.state = EngineSetupState::Installing;
     f.engine_setup.download = Some(download("e1", "llama.cpp b4000 vulkan", "unpacking", 80 * MB, 80 * MB, 0));
-    let WidgetState::Working { title, phase, .. } = state(PopoverWidget::Downloads, &f, NOW) else { panic!() };
-    assert_eq!((title.as_str(), phase.as_str()), ("Downloading llama.cpp b4000 vulkan", "Unpacking"));
+    let WidgetState::Working { title, phase, .. } = state(PopoverWidget::Downloads, &f, NOW) else {
+        panic!()
+    };
+    assert_eq!(
+        (title.as_str(), phase.as_str()),
+        ("Downloading llama.cpp b4000 vulkan", "Unpacking")
+    );
 }
 
 #[test]
 fn no_running_download_lists_failed_then_paused_ones_or_is_calm() {
     let mut f = connected("serving", vec![]);
     let (title, detail, _, calm) = empty_of(state(PopoverWidget::Downloads, &f, NOW));
-    assert_eq!((title.as_str(), detail.as_str(), calm), ("See downloads as they run", "Not checked yet.", false), "unread is not calm");
+    assert_eq!(
+        (title.as_str(), detail.as_str(), calm),
+        ("See downloads as they run", "Not checked yet.", false),
+        "unread is not calm"
+    );
     f.set_downloads(&[], NOW);
     let (title, _, next, calm) = empty_of(state(PopoverWidget::Downloads, &f, NOW));
     assert_eq!((title.as_str(), calm), ("No downloads running", true));
@@ -241,9 +313,14 @@ fn no_running_download_lists_failed_then_paused_ones_or_is_calm() {
         ],
         NOW,
     );
-    let PopoverValue::Downloads { rows, more } = value_of(state(PopoverWidget::Downloads, &f, NOW)) else { panic!() };
+    let PopoverValue::Downloads { rows, more } = value_of(state(PopoverWidget::Downloads, &f, NOW)) else {
+        panic!()
+    };
     assert_eq!((rows.len(), more), (2, 1));
-    assert_eq!((rows[0].name.as_str(), rows[0].state, rows[0].message.as_deref()), ("C", DownloadRowState::Failed, Some("The disk is full.")));
+    assert_eq!(
+        (rows[0].name.as_str(), rows[0].state, rows[0].message.as_deref()),
+        ("C", DownloadRowState::Failed, Some("The disk is full."))
+    );
     assert_eq!((rows[1].name.as_str(), rows[1].state), ("A", DownloadRowState::Paused));
 }
 
@@ -251,13 +328,39 @@ fn no_running_download_lists_failed_then_paused_ones_or_is_calm() {
 fn a_finished_or_cancelled_download_leaves_the_facts() {
     let mut f = connected("serving", vec![]);
     f.set_downloads(&[], NOW);
-    f.apply(&LiveUpdate::Download { download: download("d1", "A", "downloading", MB, 10 * MB, MB) }, NOW);
+    f.apply(
+        &LiveUpdate::Download {
+            download: download("d1", "A", "downloading", MB, 10 * MB, MB),
+        },
+        NOW,
+    );
     assert!(matches!(state(PopoverWidget::Downloads, &f, NOW), WidgetState::Working { .. }));
-    f.apply(&LiveUpdate::Download { download: download("d1", "A", "done", 10 * MB, 10 * MB, 0) }, NOW);
-    assert!(matches!(state(PopoverWidget::Downloads, &f, NOW), WidgetState::Empty { calm: true, .. }));
-    f.apply(&LiveUpdate::Download { download: download("d2", "B", "downloading", MB, 10 * MB, MB) }, NOW);
-    f.apply(&LiveUpdate::Download { download: download("d2", "B", "cancelled", MB, 10 * MB, 0) }, NOW);
-    assert!(matches!(state(PopoverWidget::Downloads, &f, NOW), WidgetState::Empty { calm: true, .. }));
+    f.apply(
+        &LiveUpdate::Download {
+            download: download("d1", "A", "done", 10 * MB, 10 * MB, 0),
+        },
+        NOW,
+    );
+    assert!(matches!(
+        state(PopoverWidget::Downloads, &f, NOW),
+        WidgetState::Empty { calm: true, .. }
+    ));
+    f.apply(
+        &LiveUpdate::Download {
+            download: download("d2", "B", "downloading", MB, 10 * MB, MB),
+        },
+        NOW,
+    );
+    f.apply(
+        &LiveUpdate::Download {
+            download: download("d2", "B", "cancelled", MB, 10 * MB, 0),
+        },
+        NOW,
+    );
+    assert!(matches!(
+        state(PopoverWidget::Downloads, &f, NOW),
+        WidgetState::Empty { calm: true, .. }
+    ));
 }
 
 // ---- updates ----
@@ -266,17 +369,50 @@ fn a_finished_or_cancelled_download_leaves_the_facts() {
 fn model_updates_are_a_count_or_calm_or_not_checked_yet() {
     let mut f = connected("serving", vec![]);
     let (title, detail, _, calm) = empty_of(state(PopoverWidget::Updates, &f, NOW));
-    assert_eq!((title.as_str(), detail.as_str(), calm), ("Know when models have updates", "Not checked yet.", false));
-    f.set_updates(UpdatesFact { count: 0, summary: None, last_checked_ms: None }, NOW);
-    assert!(!empty_of(state(PopoverWidget::Updates, &f, NOW)).3, "a count of nothing without a check is not 'all good'");
-    f.set_updates(UpdatesFact { count: 0, summary: None, last_checked_ms: Some(NOW - 3 * HOUR) }, NOW);
+    assert_eq!(
+        (title.as_str(), detail.as_str(), calm),
+        ("Know when models have updates", "Not checked yet.", false)
+    );
+    f.set_updates(
+        UpdatesFact {
+            count: 0,
+            summary: None,
+            last_checked_ms: None,
+        },
+        NOW,
+    );
+    assert!(
+        !empty_of(state(PopoverWidget::Updates, &f, NOW)).3,
+        "a count of nothing without a check is not 'all good'"
+    );
+    f.set_updates(
+        UpdatesFact {
+            count: 0,
+            summary: None,
+            last_checked_ms: Some(NOW - 3 * HOUR),
+        },
+        NOW,
+    );
     let (title, detail, next, calm) = empty_of(state(PopoverWidget::Updates, &f, NOW));
-    assert_eq!((title.as_str(), detail.as_str(), calm), ("Models are up to date", "Checked 3 h ago", true));
+    assert_eq!(
+        (title.as_str(), detail.as_str(), calm),
+        ("Models are up to date", "Checked 3 h ago", true)
+    );
     assert_eq!(next, Some(WidgetActionId::OpenPage { page: Page::Models }));
-    f.set_updates(UpdatesFact { count: 2, summary: Some("A better quantisation of Qwen3 is available.".into()), last_checked_ms: Some(NOW) }, NOW);
+    f.set_updates(
+        UpdatesFact {
+            count: 2,
+            summary: Some("A better quantisation of Qwen3 is available.".into()),
+            last_checked_ms: Some(NOW),
+        },
+        NOW,
+    );
     assert_eq!(
         value_of(state(PopoverWidget::Updates, &f, NOW)),
-        PopoverValue::Updates { count: 2, summary: Some("A better quantisation of Qwen3 is available.".into()) }
+        PopoverValue::Updates {
+            count: 2,
+            summary: Some("A better quantisation of Qwen3 is available.".into())
+        }
     );
 }
 
@@ -305,8 +441,13 @@ fn recent_errors_cover_exactly_the_last_day_newest_first_and_cap_at_two_rows() {
         ],
         NOW,
     );
-    let PopoverValue::RecentErrors { rows, more } = value_of(state(PopoverWidget::RecentErrors, &f, NOW)) else { panic!() };
-    assert_eq!(rows.iter().map(|r| r.message.as_str()).collect::<Vec<_>>(), ["Ten minutes.", "Three hours."]);
+    let PopoverValue::RecentErrors { rows, more } = value_of(state(PopoverWidget::RecentErrors, &f, NOW)) else {
+        panic!()
+    };
+    assert_eq!(
+        rows.iter().map(|r| r.message.as_str()).collect::<Vec<_>>(),
+        ["Ten minutes.", "Three hours."]
+    );
     assert_eq!(more, 1, "'Exactly a day.' is the one not listed; 'Too old.' is out of the window");
     assert_eq!(rows[0].id, "e4");
 }
@@ -315,7 +456,10 @@ fn recent_errors_cover_exactly_the_last_day_newest_first_and_cap_at_two_rows() {
 fn no_error_in_the_last_day_is_calm_only_once_the_events_were_read() {
     let mut f = connected("serving", vec![]);
     let (title, detail, _, calm) = empty_of(state(PopoverWidget::RecentErrors, &f, NOW));
-    assert_eq!((title.as_str(), detail.as_str(), calm), ("See what failed", "Not checked yet.", false));
+    assert_eq!(
+        (title.as_str(), detail.as_str(), calm),
+        ("See what failed", "Not checked yet.", false)
+    );
     f.seed_events(&[event(1, "error", NOW - 25 * HOUR, "Old.")], NOW);
     let (title, detail, next, calm) = empty_of(state(PopoverWidget::RecentErrors, &f, NOW));
     assert_eq!((title.as_str(), detail.as_str(), calm), ("No errors", "In the last day", true));
@@ -328,10 +472,20 @@ fn a_pushed_error_event_is_added_once_and_the_log_keeps_the_newest_twenty() {
     let e = event(7, "error", NOW - MIN, "Failed.");
     f.apply(&LiveUpdate::Event { event: e.clone() }, NOW);
     f.apply(&LiveUpdate::Event { event: e }, NOW);
-    f.apply(&LiveUpdate::Event { event: event(8, "info", NOW, "Fine.") }, NOW);
+    f.apply(
+        &LiveUpdate::Event {
+            event: event(8, "info", NOW, "Fine."),
+        },
+        NOW,
+    );
     assert_eq!(f.errors.len(), 1);
     for i in 100..130u64 {
-        f.apply(&LiveUpdate::Event { event: event(i, "error", NOW - 1000 + i as i64, "Again.") }, NOW);
+        f.apply(
+            &LiveUpdate::Event {
+                event: event(i, "error", NOW - 1000 + i as i64, "Again."),
+            },
+            NOW,
+        );
     }
     assert_eq!(f.errors.len(), 20);
     assert_eq!(f.errors[0].id, 129, "newest first");
@@ -342,9 +496,28 @@ fn a_pushed_error_event_is_added_once_and_the_log_keeps_the_newest_twenty() {
 #[test]
 fn the_server_widget_says_serving_paused_stopped_or_unreachable_with_the_port() {
     let st = |serving: &str| value_of(state(PopoverWidget::Server, &connected(serving, vec![]), NOW));
-    assert_eq!(st("serving"), PopoverValue::Server { state: ServerState::Serving, port: 11435, engine: Some(EngineHealth::Ready) });
-    assert!(matches!(st("paused"), PopoverValue::Server { state: ServerState::Paused, .. }));
-    assert!(matches!(st("stopped"), PopoverValue::Server { state: ServerState::Stopped, .. }));
+    assert_eq!(
+        st("serving"),
+        PopoverValue::Server {
+            state: ServerState::Serving,
+            port: 11435,
+            engine: Some(EngineHealth::Ready)
+        }
+    );
+    assert!(matches!(
+        st("paused"),
+        PopoverValue::Server {
+            state: ServerState::Paused,
+            ..
+        }
+    ));
+    assert!(matches!(
+        st("stopped"),
+        PopoverValue::Server {
+            state: ServerState::Stopped,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -355,15 +528,34 @@ fn a_lost_feed_keeps_the_last_readings_but_marks_them_stale_from_the_moment_it_f
     match state(PopoverWidget::Server, &f, NOW + 10 * MIN) {
         WidgetState::Ready { value, stale_since, .. } => {
             assert_eq!(stale_since, Some(NOW + 5 * MIN), "the first failure, not the latest retry");
-            assert!(matches!(value, PopoverValue::Server { state: ServerState::Unreachable, port: 11435, engine: None }), "no stale engine health");
+            assert!(
+                matches!(
+                    value,
+                    PopoverValue::Server {
+                        state: ServerState::Unreachable,
+                        port: 11435,
+                        engine: None
+                    }
+                ),
+                "no stale engine health"
+            );
         }
         other => panic!("{other:?}"),
     }
-    let WidgetState::Ready { stale_since, .. } = state(PopoverWidget::LoadedModels, &f, NOW + 10 * MIN) else { panic!() };
+    let WidgetState::Ready { stale_since, .. } = state(PopoverWidget::LoadedModels, &f, NOW + 10 * MIN) else {
+        panic!()
+    };
     assert_eq!(stale_since, Some(NOW + 5 * MIN));
     // Back: fresh again.
-    f.apply(&LiveUpdate::Throughput { throughput: Default::default() }, NOW + 11 * MIN);
-    let WidgetState::Ready { stale_since, .. } = state(PopoverWidget::LoadedModels, &f, NOW + 11 * MIN) else { panic!() };
+    f.apply(
+        &LiveUpdate::Throughput {
+            throughput: Default::default(),
+        },
+        NOW + 11 * MIN,
+    );
+    let WidgetState::Ready { stale_since, .. } = state(PopoverWidget::LoadedModels, &f, NOW + 11 * MIN) else {
+        panic!()
+    };
     assert_eq!(stale_since, None);
 }
 
@@ -392,7 +584,11 @@ fn activity_shows_the_queue_and_rounds_the_speed_and_is_zero_while_paused() {
     f.waiting = 3;
     f.throughput.gen_tps = 38.5;
     let tps = |f: &Facts| match value_of(state(PopoverWidget::Activity, f, NOW)) {
-        PopoverValue::Activity { running, waiting, tokens_per_sec } => (running, waiting, tokens_per_sec),
+        PopoverValue::Activity {
+            running,
+            waiting,
+            tokens_per_sec,
+        } => (running, waiting, tokens_per_sec),
         _ => panic!(),
     };
     assert_eq!(tps(&f), (2, 3, 39));
@@ -403,7 +599,11 @@ fn activity_shows_the_queue_and_rounds_the_speed_and_is_zero_while_paused() {
     paused.throughput.gen_tps = 50.0;
     assert_eq!(tps(&paused).2, 0, "a paused server shows no speed");
     f.set_disconnected(NOW);
-    assert_eq!(tps(&f), (2, 3, 50), "a lost feed keeps its last readings together; the frame marks them stale");
+    assert_eq!(
+        tps(&f),
+        (2, 3, 50),
+        "a lost feed keeps its last readings together; the frame marks them stale"
+    );
 }
 
 // ---- the facts take every pushed update ----
@@ -414,37 +614,74 @@ fn every_pushed_update_lands_in_the_facts() {
     f.seed(&overview("serving", vec![], calm_memory()), NOW);
     let m: crate::mgmt::LoadedModel = serde_json::from_value(model("a", "A", GB, 0, "ready", 0, 1)).unwrap();
     f.apply(&LiveUpdate::Models { models: vec![m] }, NOW + 1);
-    f.apply(&LiveUpdate::Memory { sample: serde_json::from_value(memory(100, 10, "critical", json!([]))).unwrap() }, NOW + 2);
+    f.apply(
+        &LiveUpdate::Memory {
+            sample: serde_json::from_value(memory(100, 10, "critical", json!([]))).unwrap(),
+        },
+        NOW + 2,
+    );
     let queue: crate::mgmt::QueueSnapshot = serde_json::from_value(json!({
         "running": [{"id": "1", "appId": "debrief", "modelId": "a", "priority": "interactive", "kind": "chat", "state": "running", "submittedAt": 0, "startedAt": 0, "progress": null, "tokens": 0}],
         "waiting": [], "depth": {"interactive": 0, "background": 0, "batch": 0}
     }))
     .unwrap();
     f.apply(&LiveUpdate::Queue { queue }, NOW + 3);
-    f.apply(&LiveUpdate::Issues { issues: vec![issue("failed")] }, NOW + 4);
-    f.apply(&LiveUpdate::EngineSetup { setup: crate::mgmt::EngineSetup { state: EngineSetupState::Failed, error: Some("x".into()), download: None } }, NOW + 5);
+    f.apply(
+        &LiveUpdate::Issues {
+            issues: vec![issue("failed")],
+        },
+        NOW + 4,
+    );
+    f.apply(
+        &LiveUpdate::EngineSetup {
+            setup: crate::mgmt::EngineSetup {
+                state: EngineSetupState::Failed,
+                error: Some("x".into()),
+                download: None,
+            },
+        },
+        NOW + 5,
+    );
     f.apply(&LiveUpdate::Pairing { pairings: vec![] }, NOW + 6);
-    f.apply(&LiveUpdate::Server { server: serde_json::from_value(server("paused")).unwrap() }, NOW + 7);
+    f.apply(
+        &LiveUpdate::Server {
+            server: serde_json::from_value(server("paused")).unwrap(),
+        },
+        NOW + 7,
+    );
     assert_eq!((f.models.len(), f.running, f.waiting, f.issues.len(), f.pairings), (1, 1, 0, 1, 0));
     assert_eq!(f.engine_setup.state, EngineSetupState::Failed);
     assert!(f.serving_off());
     assert_eq!(f.changed_ms, NOW + 7, "the readings are as of the last change");
-    let PopoverValue::Memory { percent, .. } = value_of(state(PopoverWidget::Memory, &f, NOW)) else { panic!() };
+    let PopoverValue::Memory { percent, .. } = value_of(state(PopoverWidget::Memory, &f, NOW)) else {
+        panic!()
+    };
     assert_eq!(percent, 90);
-    let WidgetState::Ready { as_of, .. } = state(PopoverWidget::Activity, &f, NOW) else { panic!() };
+    let WidgetState::Ready { as_of, .. } = state(PopoverWidget::Activity, &f, NOW) else {
+        panic!()
+    };
     assert_eq!(as_of, NOW + 7);
 }
 
 #[test]
 fn a_waiting_or_testing_download_says_what_it_is_doing_and_a_failed_install_means_no_engine() {
     let mut f = connected("serving", vec![]);
-    for (state_word, phase) in [("queued", "Waiting in line"), ("selfTest", "Testing the build"), ("verifying", "Checking the file"), ("unpacking", "Unpacking")] {
+    for (state_word, phase) in [
+        ("queued", "Waiting in line"),
+        ("selfTest", "Testing the build"),
+        ("verifying", "Checking the file"),
+        ("unpacking", "Unpacking"),
+    ] {
         f.set_downloads(&[download("d1", "Engine", state_word, 0, 10 * MB, 0)], NOW);
-        let WidgetState::Working { phase: p, .. } = state(PopoverWidget::Downloads, &f, NOW) else { panic!() };
+        let WidgetState::Working { phase: p, .. } = state(PopoverWidget::Downloads, &f, NOW) else {
+            panic!()
+        };
         assert_eq!(p, phase, "{state_word}");
     }
     f.engine_setup.state = EngineSetupState::Failed;
-    let PopoverValue::Server { engine, .. } = value_of(state(PopoverWidget::Server, &f, NOW)) else { panic!() };
+    let PopoverValue::Server { engine, .. } = value_of(state(PopoverWidget::Server, &f, NOW)) else {
+        panic!()
+    };
     assert_eq!(engine, Some(EngineHealth::Missing));
 }
 
@@ -455,7 +692,10 @@ fn a_share_of_nothing_is_zero_and_a_missing_reading_is_said() {
     let mut f = connected("serving", vec![]);
     f.memory = None;
     let (title, detail, next, calm) = empty_of(state(PopoverWidget::Memory, &f, NOW));
-    assert_eq!((title.as_str(), detail.as_str(), next, calm), ("See memory in use", "No reading yet.", None, false));
+    assert_eq!(
+        (title.as_str(), detail.as_str(), next, calm),
+        ("See memory in use", "No reading yet.", None, false)
+    );
 }
 
 #[test]
@@ -466,7 +706,10 @@ fn a_new_connection_makes_downloads_and_errors_unread_again() {
     assert!(empty_of(state(PopoverWidget::Downloads, &f, NOW)).3 && empty_of(state(PopoverWidget::RecentErrors, &f, NOW)).3);
     f.set_disconnected(NOW + 1);
     f.seed(&overview("serving", vec![], calm_memory()), NOW + 2);
-    assert!(!empty_of(state(PopoverWidget::Downloads, &f, NOW)).3, "unread again, not 'all good'");
+    assert!(
+        !empty_of(state(PopoverWidget::Downloads, &f, NOW)).3,
+        "unread again, not 'all good'"
+    );
     assert!(!empty_of(state(PopoverWidget::RecentErrors, &f, NOW)).3);
 }
 
@@ -481,11 +724,20 @@ fn before_the_first_snapshot_widgets_say_connecting_and_after_a_failure_not_runn
     assert_eq!(popover_header(&f).status, PopoverStatus::Unknown);
     assert!(notice(&f).is_none());
 
-    for kind in [PopoverWidget::Activity, PopoverWidget::LoadedModels, PopoverWidget::Downloads, PopoverWidget::Updates, PopoverWidget::RecentErrors] {
+    for kind in [
+        PopoverWidget::Activity,
+        PopoverWidget::LoadedModels,
+        PopoverWidget::Downloads,
+        PopoverWidget::Updates,
+        PopoverWidget::RecentErrors,
+    ] {
         let (title, detail, _, calm) = empty_of(state(kind, &f, NOW));
         assert!(!title.is_empty() && detail == "Connecting to the server." && !calm, "{kind:?}");
     }
-    assert_eq!(empty_of(state(PopoverWidget::Server, &f, NOW)).0, "See whether the server is serving");
+    assert_eq!(
+        empty_of(state(PopoverWidget::Server, &f, NOW)).0,
+        "See whether the server is serving"
+    );
 
     f.set_disconnected(NOW);
     let (_, detail, next, _) = empty_of(state(PopoverWidget::Memory, &f, NOW));
@@ -493,7 +745,11 @@ fn before_the_first_snapshot_widgets_say_connecting_and_after_a_failure_not_runn
     assert_eq!(next, None, "the one button is the notice's");
     assert!(matches!(
         value_of(state(PopoverWidget::Server, &f, NOW)),
-        PopoverValue::Server { state: ServerState::Unreachable, port: 0, engine: None }
+        PopoverValue::Server {
+            state: ServerState::Unreachable,
+            port: 0,
+            engine: None
+        }
     ));
     assert_eq!(popover_header(&f).status, PopoverStatus::Unreachable);
 }
@@ -573,12 +829,24 @@ fn scenario(name: &str) -> Facts {
             let mut f = connected("serving", vec![]);
             f.set_downloads(&[], NOW);
             f.seed_events(&[], NOW);
-            f.set_updates(UpdatesFact { count: 0, summary: None, last_checked_ms: Some(NOW - 2 * HOUR) }, NOW);
+            f.set_updates(
+                UpdatesFact {
+                    count: 0,
+                    summary: None,
+                    last_checked_ms: Some(NOW - 2 * HOUR),
+                },
+                NOW,
+            );
             f
         }
         "demo" => {
             let mut f = Facts::new();
-            let mem = memory(32 * GB, 13 * GB, "normal", json!([{"name": "Discrete", "vramTotal": 12 * GB, "vramUsed": 7 * GB, "utilisation": 38.0, "unified": false}]));
+            let mem = memory(
+                32 * GB,
+                13 * GB,
+                "normal",
+                json!([{"name": "Discrete", "vramTotal": 12 * GB, "vramUsed": 7 * GB, "utilisation": 38.0, "unified": false}]),
+            );
             f.seed(
                 &overview(
                     "serving",
@@ -593,16 +861,39 @@ fn scenario(name: &str) -> Facts {
             f.running = 1;
             f.waiting = 0;
             f.throughput.gen_tps = 38.4;
-            f.set_downloads(&[download("d1", "Llama 3.2 3B Q4_K_M", "downloading", 900 * MB, 2_000 * MB, 12 * MB)], NOW);
-            f.set_updates(UpdatesFact { count: 2, summary: Some("A better quantisation of Qwen3 8B is available.".into()), last_checked_ms: Some(NOW - 3 * HOUR) }, NOW);
-            f.seed_events(&[event(1, "error", NOW - 12 * MIN, "A chat request to Qwen3 8B failed: the context was full.")], NOW);
+            f.set_downloads(
+                &[download("d1", "Llama 3.2 3B Q4_K_M", "downloading", 900 * MB, 2_000 * MB, 12 * MB)],
+                NOW,
+            );
+            f.set_updates(
+                UpdatesFact {
+                    count: 2,
+                    summary: Some("A better quantisation of Qwen3 8B is available.".into()),
+                    last_checked_ms: Some(NOW - 3 * HOUR),
+                },
+                NOW,
+            );
+            f.seed_events(
+                &[event(
+                    1,
+                    "error",
+                    NOW - 12 * MIN,
+                    "A chat request to Qwen3 8B failed: the context was full.",
+                )],
+                NOW,
+            );
             f
         }
         "worst" => {
             // The worst the default popup meets: a notice, a paused server whose engine keeps failing, memory nearly full with a
             // full GPU, the most models and errors the rows show, a download running.
             let mut f = Facts::new();
-            let mem = memory(16 * GB, GB / 2, "critical", json!([{"name": "Discrete", "vramTotal": 8 * GB, "vramUsed": 8 * GB - 100 * MB, "utilisation": 97.0, "unified": false}]));
+            let mem = memory(
+                16 * GB,
+                GB / 2,
+                "critical",
+                json!([{"name": "Discrete", "vramTotal": 8 * GB, "vramUsed": 8 * GB - 100 * MB, "utilisation": 97.0, "unified": false}]),
+            );
             f.seed(
                 &overview(
                     "paused",
@@ -621,13 +912,45 @@ fn scenario(name: &str) -> Facts {
             f.waiting = 12;
             f.pairings = 2;
             f.issues = vec![issue("failed")];
-            f.set_downloads(&[download("d1", "Qwen3 Coder 30B A3B Instruct Q4_K_M", "downloading", 9_000 * MB, 18_000 * MB, 25 * MB)], NOW);
-            f.set_updates(UpdatesFact { count: 12, summary: Some("A newer revision of Qwen3 Coder 30B A3B Instruct is available.".into()), last_checked_ms: Some(NOW - MIN) }, NOW);
+            f.set_downloads(
+                &[download(
+                    "d1",
+                    "Qwen3 Coder 30B A3B Instruct Q4_K_M",
+                    "downloading",
+                    9_000 * MB,
+                    18_000 * MB,
+                    25 * MB,
+                )],
+                NOW,
+            );
+            f.set_updates(
+                UpdatesFact {
+                    count: 12,
+                    summary: Some("A newer revision of Qwen3 Coder 30B A3B Instruct is available.".into()),
+                    last_checked_ms: Some(NOW - MIN),
+                },
+                NOW,
+            );
             f.seed_events(
                 &[
-                    event(1, "error", NOW - MIN, "The engine for Qwen3 Coder 30B crashed three times and was given up on."),
-                    event(2, "error", NOW - 12 * MIN, "A chat request from Debrief failed: the model did not fit in memory."),
-                    event(3, "error", NOW - 50 * MIN, "A download from huggingface.co failed: the disk is full."),
+                    event(
+                        1,
+                        "error",
+                        NOW - MIN,
+                        "The engine for Qwen3 Coder 30B crashed three times and was given up on.",
+                    ),
+                    event(
+                        2,
+                        "error",
+                        NOW - 12 * MIN,
+                        "A chat request from Debrief failed: the model did not fit in memory.",
+                    ),
+                    event(
+                        3,
+                        "error",
+                        NOW - 50 * MIN,
+                        "A download from huggingface.co failed: the disk is full.",
+                    ),
                 ],
                 NOW,
             );
@@ -659,7 +982,12 @@ fn the_mock_fixtures_are_the_engines_output() {
     use paddock_commands::testing::{self, WriteMode};
     let mut all = Stored::<PopoverCatalogue>::default();
     for widget in [PopoverWidget::Downloads, PopoverWidget::Updates, PopoverWidget::RecentErrors] {
-        all.edit(Edit::Add { widget, span: None, at: None }).unwrap();
+        all.edit(Edit::Add {
+            widget,
+            span: None,
+            at: None,
+        })
+        .unwrap();
     }
     let mut scenarios = serde_json::Map::new();
     for name in ["demo", "empty", "worst", "down", "paused", "connecting"] {
@@ -670,7 +998,12 @@ fn the_mock_fixtures_are_the_engines_output() {
             .placements
             .iter()
             .zip(&values.placements)
-            .map(|(p, st)| (serde_json::to_value(p.widget).unwrap().as_str().unwrap().to_string(), serde_json::to_value(&st.state).unwrap()))
+            .map(|(p, st)| {
+                (
+                    serde_json::to_value(p.widget).unwrap().as_str().unwrap().to_string(),
+                    serde_json::to_value(&st.state).unwrap(),
+                )
+            })
             .collect();
         scenarios.insert(
             name.into(),
@@ -679,7 +1012,11 @@ fn the_mock_fixtures_are_the_engines_output() {
     }
     let defaults = Stored::<PopoverCatalogue>::default();
     let view: crate::widgets::PopoverView = paddock_widgets::view(&defaults);
-    let text = serde_json::to_string_pretty(&json!({ "nowMs": NOW, "view": view, "shape": crate::widgets::loading_shape(), "scenarios": scenarios })).unwrap() + "\n";
+    let text = serde_json::to_string_pretty(
+        &json!({ "nowMs": NOW, "view": view, "shape": crate::widgets::loading_shape(), "scenarios": scenarios }),
+    )
+    .unwrap()
+        + "\n";
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../app/src/app/core/mock/popover-fixtures.json");
     testing::sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
 }

@@ -10,8 +10,8 @@ use paddock_widgets::{Edit, Stored, WidgetError};
 use pitwall_core::mgmt::{CommandError, Download, ErrorCode, LiveUpdate, Overview, PitwallEvent, UpdateCheckStatus};
 use pitwall_core::updates::UpdateNotice;
 use pitwall_core::widgets::{
-    loading_shape, popover_header as header_of, popover_values as values_of, Facts, LoadingRows, PopoverCatalogue, PopoverHeader, PopoverValues,
-    PopoverView, PopoverWidget, UpdatesFact,
+    loading_shape, popover_header as header_of, popover_values as values_of, Facts, LoadingRows, PopoverCatalogue, PopoverHeader,
+    PopoverValues, PopoverView, PopoverWidget, UpdatesFact,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -83,18 +83,27 @@ fn load_layout(dir: &std::path::Path) -> Stored<PopoverCatalogue> {
         // No file yet: a fresh install, nothing to say.
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Stored::default(),
         Err(e) => {
-            note("the layout file could not be inspected, the defaults are shown", format!("{}: {e}", path.display()));
+            note(
+                "the layout file could not be inspected, the defaults are shown",
+                format!("{}: {e}", path.display()),
+            );
             return Stored::default();
         }
     };
     if len > MAX_BYTES {
-        note("the layout file is over the size limit, the defaults are shown", format!("{len} bytes, at most {MAX_BYTES}"));
+        note(
+            "the layout file is over the size limit, the defaults are shown",
+            format!("{len} bytes, at most {MAX_BYTES}"),
+        );
         return Stored::default();
     }
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(e) => {
-            note("the layout file could not be read, the defaults are shown", format!("{}: {e}", path.display()));
+            note(
+                "the layout file could not be read, the defaults are shown",
+                format!("{}: {e}", path.display()),
+            );
             return Stored::default();
         }
     };
@@ -227,7 +236,9 @@ pub fn publish<R: Runtime>(app: &AppHandle<R>) {
 /// Reads what the live feed does not carry (downloads, recent events, model update notices) and publishes. A failed read is
 /// logged with its cause and leaves its facts unread: the widgets say "not checked yet" rather than claim "nothing".
 pub async fn refresh_extras<R: Runtime>(app: AppHandle<R>, client: SharedClient) {
-    let Some(popup) = app.try_state::<SharedPopup>().map(|p| p.inner().clone()) else { return };
+    let Some(popup) = app.try_state::<SharedPopup>().map(|p| p.inner().clone()) else {
+        return;
+    };
     read_extras(&popup, client.as_ref()).await;
     publish(&app);
 }
@@ -244,7 +255,11 @@ pub async fn read_extras(popup: &PopupState, client: &dyn crate::server_client::
 }
 
 /// One read: the answer parsed as `T`, or nothing after a log line naming the method and the cause.
-async fn read<T: serde::de::DeserializeOwned>(client: &dyn crate::server_client::ServerClient, method: &str, args: serde_json::Value) -> Option<T> {
+async fn read<T: serde::de::DeserializeOwned>(
+    client: &dyn crate::server_client::ServerClient,
+    method: &str,
+    args: serde_json::Value,
+) -> Option<T> {
     let value = match commands::forward(client, method, args).await {
         Ok(v) => v,
         Err(e) => {
@@ -319,7 +334,11 @@ pub async fn popover_shape(state: tauri::State<'_, SharedPopup>) -> Out<Vec<Load
 /// `edit_popover`: one edit of the popup's layout (the shared crate validates it and keeps one level of undo). Every window
 /// hears the result.
 #[tauri::command]
-pub async fn edit_popover<R: Runtime>(app: AppHandle<R>, state: tauri::State<'_, SharedPopup>, edit: Edit<PopoverWidget>) -> Out<PopoverView> {
+pub async fn edit_popover<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, SharedPopup>,
+    edit: Edit<PopoverWidget>,
+) -> Out<PopoverView> {
     let view = state.edit(edit)?;
     if let Some(push) = state.changed(now_ms()) {
         if let Err(e) = app.emit(EVENT, push) {

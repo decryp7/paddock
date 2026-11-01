@@ -22,8 +22,9 @@ pub use popover::{
     loading_shape, rows_of, LoadingRows, PopoverCatalogue, PopoverKind, PopoverWidget, DOWNLOAD_ROWS, ERROR_ROWS, MODEL_ROWS,
 };
 pub use values::{
-    DownloadRow, DownloadRowState, EngineHealth, ErrorRow, MemoryLevel, MeterTone, ModelRow, ModelRowState, Page, PopoverPlacementState,
-    PopoverHeader, PopoverState, PopoverStatus, PopoverValue, PopoverValues, ServerState, ServingToggle, VramReading, WidgetActionId,
+    DownloadRow, DownloadRowState, EngineHealth, ErrorRow, MemoryLevel, MeterTone, ModelRow, ModelRowState, Page, PopoverHeader,
+    PopoverPlacementState, PopoverState, PopoverStatus, PopoverValue, PopoverValues, ServerState, ServingToggle, VramReading,
+    WidgetActionId,
 };
 
 use serde::{Deserialize, Serialize};

@@ -3,7 +3,10 @@
 //! data and pure updates: time comes in as an argument, nothing here reads a clock, a file or the network.
 
 use crate::events::Severity;
-use crate::mgmt::{Download, DownloadState, EngineIssue, EngineSetup, EngineStatusTile, LiveUpdate, LoadedModel, MemorySample, Overview, PitwallEvent, ServerInfo, Throughput};
+use crate::mgmt::{
+    Download, DownloadState, EngineIssue, EngineSetup, EngineStatusTile, LiveUpdate, LoadedModel, MemorySample, Overview, PitwallEvent,
+    ServerInfo, Throughput,
+};
 use std::collections::BTreeMap;
 
 /// Error events kept (the newest); Recent errors lists the last day's of them.
