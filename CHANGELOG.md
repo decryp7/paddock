@@ -22,7 +22,7 @@ Conventional Commits; one semver tag for the whole repo.
 - Settings: the line under a section that hides one advanced setting says "Show it" (it said "Show them" for one).
 - About: the releases row is a link that reads "See all releases" instead of the raw address (the address is still the link's target).
 - `docs/design-guide.md`: principle 3 and the Buttons line say what the family's controls measure now: `--pd-button-height` is 32 px
-  Comfortable, 28 px Standard (default), 24 px Compact.
+  Comfortable and Standard (default), 28 px Compact; an unlabelled field is `--pd-control-height` (32 / 28 / 24).
 ### `paddock-proc`: the instance lock re-checks a held lock; `is_held` becomes `is_held_settled`, new `is_held_now`
 - `InstanceLock::claim` reports a lock held only after `HELD_CHECKS` (5) consecutive checks `HELD_TICK` (100 ms) apart, so a lock that only a spawning child's copy of the descriptor holds is not taken for a holder (macOS, any spawn); a held lock now costs about 400 ms to report.
 - Breaking: `is_held(path)` is renamed `is_held_settled(path)` (the same re-check and wait), for a one-shot decision. New `is_held_now(path)`: one check, never waits, only for a loop where a held reading leads to waiting and looking again at the caller's own pace (a supervisor); a false "held" there only delays. Dyno's link uses it in every look; with the waiting probe there, every look waited 400 ms on a held lock and the link's counted waits stretched twentyfold (CI 7257). `dyno_agent::instance::is_held` is removed (only `is_held_now` remains), so the link cannot pick the waiting probe.
