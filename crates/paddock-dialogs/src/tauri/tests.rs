@@ -70,7 +70,7 @@ fn contracts() -> Arc<Contracts> {
 }
 
 /// Every log record of the guard, as (level, message, dialog, command).
-static LOGGED: Mutex<Vec<(log::Level, String, String, String)>> = Mutex::new(Vec::new());
+static LOGGED: Mutex<Vec<(log::Level, String, String, String, String)>> = Mutex::new(Vec::new());
 
 struct Capture;
 
@@ -91,6 +91,7 @@ impl log::Log for Capture {
             record.args().to_string(),
             kv("Dialog"),
             kv("Command"),
+            kv("Inputs"),
         ));
     }
     fn flush(&self) {}
@@ -102,7 +103,7 @@ fn logged_for(dialog: &str) -> Vec<(log::Level, String, String, String)> {
         .unwrap_or_else(|p| p.into_inner())
         .iter()
         .filter(|r| r.2 == dialog)
-        .cloned()
+        .map(|r| (r.0, r.1.clone(), r.2.clone(), r.3.clone()))
         .collect()
 }
 
@@ -219,6 +220,30 @@ fn opening_twice_focuses_the_one_window_and_hands_the_input_to_it_only() {
     window(&app, "p-main-1");
     let from_popout = open(&h, "p-main-1", request("about")).unwrap();
     assert_eq!(state(&app).get(&from_popout.label).unwrap().host, "main");
+}
+
+/// Rule 56: an open of a dialog that is open already (Settings asked again for a section) is logged with the names of the
+/// inputs it came with, never their values. The Dyno 1.0 re-target bug left only "Opening from another app" in the log.
+#[test]
+fn opening_an_open_dialog_again_logs_the_names_of_its_inputs_only() {
+    let app = app();
+    let h = app.handle().clone();
+    open(&h, "main", request("settings")).unwrap();
+    let mut again = request("settings");
+    again.input =
+        Some(json!({ "page": "dy.general", "anchor": { "id": "secret-section", "at": 7 } }));
+    assert!(open(&h, "main", again).unwrap().existing);
+    let mut bare = request("settings");
+    bare.input = None;
+    open(&h, "main", bare).unwrap();
+    let again: Vec<String> = LOGGED
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .filter(|r| r.1 == "Dialog window opened again" && r.2 == "settings")
+        .map(|r| r.4.clone())
+        .collect();
+    assert_eq!(again, ["anchor,page", "(none)"]);
 }
 
 #[test]
