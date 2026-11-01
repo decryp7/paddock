@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- macOS: a look that waits for the login service (`SMAppService.status`, 21 s on a loaded login) reads the discovery file and the lock again every 100 ms and returns as soon as an agent holds the lock, so the app connects when launchd's agent is up instead of when the service answers.
 - The diagnostics bundle reads its logs from the folder `run` named (carried by the agent's folders), so a test harness never copies the machine's real Dyno logs; a log that does not fit is left out instead of failing the save, and the newest logs are taken per process.
 - Report a problem is reachable: Help menu item and a command-palette entry (the UI never imported the shared diagnostics dialog); it shows the app log and the agent log read from disk, so both are there with the agent stopped. The Diagnostics page's saved bundle now holds the newest app and agent logs (`logs/`).
 - macOS: a service recheck in the wait for the agent no longer blocks the look while the folder lock is held (the agent is up): at login under load the rechecks, each waiting on `SMAppService.status`, delayed the connect.

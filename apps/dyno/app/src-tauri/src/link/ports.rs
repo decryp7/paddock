@@ -240,7 +240,7 @@ pub struct Ask<'a> {
     /// Probe the agent lock.
     pub lock: bool,
     /// The look is the machine's decision look (phase `Looking`): a file beside a held lock is connected to without the service
-    /// ([`service_needed`]). Every other look that asks the service (after a connection, a change, a wait) gets its answer.
+    /// ([`service_wanted`]). Every other look that asks the service (after a connection, a change, a wait) gets its answer.
     pub deciding: bool,
     /// The look is a recheck of the service in the wait for its agent (see `Command::Look::recheck`).
     pub recheck: bool,
@@ -264,7 +264,19 @@ pub fn look(
         deciding,
         recheck,
     } = ask;
-    let found = Discovery::read(&dirs.discovery());
+    let read_world = || {
+        let found = Discovery::read(&dirs.discovery());
+        let hint = found.as_ref().map(|d| hint_of(d, app_version));
+        let lock = lock.then(|| {
+            if dyno_agent::instance::is_held(dirs) {
+                LockSeen::Held
+            } else {
+                LockSeen::Free
+            }
+        });
+        World { found, hint, lock }
+    };
+    let first = read_world();
     let child = held.map(|g| (g, launcher.child()));
     let cpu = if !cpu {
         Cpu::NotRead
@@ -274,16 +286,8 @@ pub fn look(
             _ => Cpu::Unavailable,
         }
     };
-    let hint = found.as_ref().map(|d| hint_of(d, app_version));
-    let lock = lock.then(|| {
-        if dyno_agent::instance::is_held(dirs) {
-            LockSeen::Held
-        } else {
-            LockSeen::Free
-        }
-    });
     let asked = std::time::Instant::now();
-    let service = ask_service(probe, hint.as_ref(), lock, deciding, recheck);
+    let (service, World { found, hint, lock }) = ask_watching(probe, first, read_world, deciding, recheck, WATCH_POLL);
     let service_ms = service.map(|_| u64::try_from(asked.elapsed().as_millis()).unwrap_or(u64::MAX));
     let look = Look {
         seq,
@@ -297,35 +301,69 @@ pub fn look(
     (look, found, service_ms)
 }
 
-/// Whether a look must ask the login service. A discovery file beside a held lock is decided on without it (the machine
-/// connects to that agent, or asks it to exit): the service is asked again right after the connection, for the hand-over.
-/// Everything else is decided on what the service says (wait for its agent, or start one).
-fn service_needed(hint: Option<&HintSeen>, lock: Option<LockSeen>) -> bool {
-    !(hint.is_some() && lock == Some(LockSeen::Held))
+/// What a look has read of the world besides the service: the discovery file (and its hint) and the agent lock.
+pub struct World {
+    /// The discovery file, as read.
+    pub found: Option<Discovery>,
+    /// What the file says.
+    pub hint: Option<HintSeen>,
+    /// Whether an agent holds the lock (when probed).
+    pub lock: Option<LockSeen>,
 }
 
-/// The service's answer for a look that needs it. The probe can take tens of seconds at login (`SMAppService.status` is an xpc
-/// round trip to smd), so a look that does not need it never waits for it.
-fn ask_service(
+/// How often a look that waits for the login service reads the discovery file and the lock again.
+const WATCH_POLL: Duration = Duration::from_millis(100);
+
+/// Whether a look must wait for the login service. A discovery file beside a held lock is decided on without it (the machine
+/// connects to that agent, or asks it to exit): the service is asked again right after the connection, for the hand-over. A
+/// recheck in the wait for the agent does not need it while the lock is held (it only counts rechecks that find the lock free).
+/// Everything else is decided on what the service says (wait for its agent, or start one).
+fn service_wanted(world: &World, deciding: bool, recheck: bool) -> bool {
+    if deciding {
+        !(world.hint.is_some() && world.lock == Some(LockSeen::Held))
+    } else if recheck {
+        world.lock != Some(LockSeen::Held)
+    } else {
+        true
+    }
+}
+
+/// The service's answer for a look that needs it, and the world as last read. The probe can take tens of seconds at login
+/// (`SMAppService.status` is an xpc round trip to smd; 21 s on the loaded VM, 2026-11-01, while launchd's agent wrote its file 11 s
+/// into it), so the probe runs on its own thread and the look reads the file and the lock again every `poll`: as soon as the world
+/// says the answer is not needed (an agent holds the lock) the look returns without it, instead of reporting the world it saw
+/// before the wait.
+fn ask_watching(
     probe: Option<&ServiceProbe>,
-    hint: Option<&HintSeen>,
-    lock: Option<LockSeen>,
+    mut world: World,
+    mut reread: impl FnMut() -> World,
     deciding: bool,
     recheck: bool,
-) -> Option<super::ServiceState> {
-    probe
-        .filter(|_| {
-            if deciding {
-                service_needed(hint, lock)
-            } else if recheck {
-                // An agent holds the lock: the service's answer is not needed to wait for it (it only counts rechecks that find the
-                // lock free), and `SMAppService.status` can take 10 s under load, hiding the agent's file meanwhile.
-                lock != Some(LockSeen::Held)
-            } else {
-                true
+    poll: Duration,
+) -> (Option<super::ServiceState>, World) {
+    let Some(probe) = probe.filter(|_| service_wanted(&world, deciding, recheck)) else {
+        return (None, world);
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let ask = probe.clone();
+    let spawned = std::thread::Builder::new().name("dyno-service-ask".into()).spawn(move || {
+        let _ = tx.send(ask());
+    });
+    if spawned.is_err() {
+        return (Some(probe()), world);
+    }
+    loop {
+        match rx.recv_timeout(poll) {
+            Ok(answer) => return (Some(answer), world),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                world = reread();
+                if !service_wanted(&world, deciding, recheck) {
+                    return (None, world);
+                }
             }
-        })
-        .map(|p| p())
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return (None, world),
+        }
+    }
 }
 
 /// A routine look (one of a wait's ticks) is told only when it took at least this long: a slow look is a finding, a fast one noise.
@@ -420,18 +458,105 @@ mod tests {
         }
     }
 
+    fn world(hint: Option<HintSeen>, lock: Option<LockSeen>) -> World {
+        World { found: None, hint, lock }
+    }
+
+    /// The service's answer for a world that does not change while it is asked.
+    fn ask(
+        probe: Option<&ServiceProbe>,
+        hint: Option<&HintSeen>,
+        lock: Option<LockSeen>,
+        deciding: bool,
+        recheck: bool,
+    ) -> Option<super::super::ServiceState> {
+        ask_watching(
+            probe,
+            world(hint.cloned(), lock),
+            || unreachable!("the probe answers at once"),
+            deciding,
+            recheck,
+            Duration::from_secs(30),
+        )
+        .0
+    }
+
+    fn wanted(hint: Option<HintSeen>, lock: Option<LockSeen>) -> bool {
+        service_wanted(&world(hint, lock), true, false)
+    }
+
+    /// The restore start on the VM (2026-11-01 00:07): the decision look read "no file, lock free", then asked the service for 21 s
+    /// while launchd's agent took the lock and wrote its file 11 s in; the look reported the world it saw before the wait and the app
+    /// connected 0.85 s after the answer, 21 s in. A look that waits for the service reads the file and the lock again, and returns as
+    /// soon as they say the answer is not needed.
+    #[test]
+    fn a_look_waiting_for_the_service_returns_when_an_agent_appears() {
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        let blocked = Mutex::new(blocked);
+        let probe: ServiceProbe = Arc::new(move || {
+            let _ = blocked.lock().unwrap().recv(); // the service answers only when the test ends
+            super::super::ServiceState {
+                installed: true,
+                supervises: true,
+            }
+        });
+        let reads = std::cell::Cell::new(0);
+        let (answer, seen) = ask_watching(
+            Some(&probe),
+            world(None, Some(LockSeen::Free)),
+            || {
+                reads.set(reads.get() + 1);
+                // The third read finds the agent: its file and its lock.
+                if reads.get() < 3 {
+                    world(None, Some(LockSeen::Free))
+                } else {
+                    world(Some(hint(true)), Some(LockSeen::Held))
+                }
+            },
+            true,
+            false,
+            Duration::from_millis(1),
+        );
+        assert!(answer.is_none(), "returned without the service's answer");
+        assert_eq!(
+            (seen.hint.is_some(), seen.lock),
+            (true, Some(LockSeen::Held)),
+            "with the world it read last"
+        );
+        assert_eq!(reads.get(), 3);
+        drop(release);
+    }
+
+    /// The answer, when it comes first, is returned with the world read before it.
+    #[test]
+    fn a_look_gets_the_service_answer_when_no_agent_appears() {
+        let probe: ServiceProbe = Arc::new(|| super::super::ServiceState {
+            installed: true,
+            supervises: true,
+        });
+        let (answer, seen) = ask_watching(
+            Some(&probe),
+            world(None, Some(LockSeen::Free)),
+            || world(None, Some(LockSeen::Free)),
+            true,
+            false,
+            Duration::from_secs(30),
+        );
+        assert!(answer.is_some() && seen.hint.is_none());
+    }
+
     /// The VM's login (2026-10-31): `SMAppService.status` blocked the look for about 30 s (`-[SMAppService status]` in the xpc round
     /// trip to smd) while the agent launchd had started held the lock and its file was there. A file beside a held lock gets a
     /// connection (or a request to exit) whatever the service says, so that look does not ask the service.
     #[test]
     fn a_file_beside_a_held_lock_is_decided_without_the_service() {
-        assert!(!service_needed(Some(&hint(true)), Some(LockSeen::Held)));
-        assert!(!service_needed(Some(&hint(false)), Some(LockSeen::Held)));
+        assert!(!wanted(Some(hint(true)), Some(LockSeen::Held)));
+        assert!(!wanted(Some(hint(false)), Some(LockSeen::Held)));
         // Anything else is decided on what the service says: wait for its agent, or start one.
-        assert!(service_needed(None, Some(LockSeen::Held)));
-        assert!(service_needed(Some(&hint(true)), Some(LockSeen::Free)));
-        assert!(service_needed(Some(&hint(true)), None));
-        assert!(service_needed(None, Some(LockSeen::Free)));
+        assert!(wanted(None, Some(LockSeen::Held)));
+        assert!(wanted(Some(hint(true)), Some(LockSeen::Free)));
+        assert!(wanted(Some(hint(true)), None));
+        assert!(wanted(None, Some(LockSeen::Free)));
     }
 
     #[test]
@@ -445,16 +570,13 @@ mod tests {
                 supervises: true,
             }
         });
-        assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Free), true, false).is_some());
+        assert!(ask(Some(&probe), Some(&hint(true)), Some(LockSeen::Free), true, false).is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Held), true, false).is_none());
-        assert!(
-            ask_service(None, None, Some(LockSeen::Free), true, false).is_none(),
-            "no probe, no answer"
-        );
+        assert!(ask(Some(&probe), Some(&hint(true)), Some(LockSeen::Held), true, false).is_none());
+        assert!(ask(None, None, Some(LockSeen::Free), true, false).is_none(), "no probe, no answer");
         assert_eq!(calls.load(Ordering::SeqCst), 1, "the held-lock decision look never called it");
         // A look that is not the decision (after a connection, a service change, a wait) always gets the service's answer.
-        assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Held), false, false).is_some());
+        assert!(ask(Some(&probe), Some(&hint(true)), Some(LockSeen::Held), false, false).is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
@@ -474,12 +596,12 @@ mod tests {
             }
         });
         // Held, with or without the file: not asked.
-        assert!(ask_service(Some(&probe), Some(&hint(true)), Some(LockSeen::Held), false, true).is_none());
-        assert!(ask_service(Some(&probe), None, Some(LockSeen::Held), false, true).is_none());
+        assert!(ask(Some(&probe), Some(&hint(true)), Some(LockSeen::Held), false, true).is_none());
+        assert!(ask(Some(&probe), None, Some(LockSeen::Held), false, true).is_none());
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         // Free (nothing runs: the service may be starting nothing) or not probed: asked, as before.
-        assert!(ask_service(Some(&probe), None, Some(LockSeen::Free), false, true).is_some());
-        assert!(ask_service(Some(&probe), None, None, false, true).is_some());
+        assert!(ask(Some(&probe), None, Some(LockSeen::Free), false, true).is_some());
+        assert!(ask(Some(&probe), None, None, false, true).is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
