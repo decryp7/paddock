@@ -1158,3 +1158,15 @@ time with the same message; pushing a complete running status (no hidden space, 
 The jobs test in `mock-backend.spec.ts` had the plain form of the same thing: a fixed 30 ms wait for chained timers.
 **Lesson:** a test builds the state it pushes from scratch, or after waiting for a known state, never by copying whatever is
 current. `vi.waitFor` also moves faked timers on every poll, so a fake-timer spec cannot use it to hold a moment still.
+
+## Dyno's 30 s login connect could not be explained from the logs (2026-10-31, Dyno)
+At login Dyno took about 30 s to connect to its agent, and neither the app log nor the agent log said why. Only failed
+connects were logged: no phase durations, no discovery or lock results, no agent start timestamps, no success lines to
+compare with. The cause had to be guessed from outside. **Rule (56):** logs are part of the fix. Every bug fix and every
+feature that starts, connects, runs a job or can fail logs each phase with a timestamp and duration, the outcome of each
+spawn, connect and job (success too), correlation ids and every error with its cause chain; a fix for a bug the logs could
+not explain adds the missing lines in the same change, with a test that asserts the line where practical.
+Two diagnoses on the same day were first guessed wrong and corrected only by measuring: the UI timeouts (first blamed on CSS
+cost, really a leaked fake timer) and Dyno's flaky jobs test (first called a flake, really a race in the issue scan). A fix
+built on a guessed flow is not done: establish the real flow from the logs first (reproduce, read the phases, follow the
+code); if the logs cannot show it, add the logging first.
