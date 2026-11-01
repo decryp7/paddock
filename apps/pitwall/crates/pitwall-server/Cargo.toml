@@ -20,6 +20,8 @@ path = "src/main.rs"
 [dependencies]
 pitwall-core.workspace = true
 pitwall-loopback = { path = "../pitwall-loopback" }
+# Process memory as real memory per OS (physical footprint on macOS, PSS on Linux), never the resident size.
+paddock-proc = { path = "../../../../crates/paddock-proc" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
 bytes = "1"
 flate2 = "1"

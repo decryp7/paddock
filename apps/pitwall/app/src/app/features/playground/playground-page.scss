@@ -7,19 +7,20 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding-bottom: var(--sp-6);
+  padding-bottom: var(--pd-space-6);
 }
 
-.btn.on {
-  --btn-bg: var(--accent-soft);
-  --btn-border: color-mix(in srgb, var(--accent) 45%, transparent);
-  color: var(--accent);
+/* Compare is on: an accent tint, never a second filled primary (UI review 2 rule 18). */
+.mat-mdc-outlined-button.on {
+  --mat-button-outlined-label-text-color: var(--pd-accent);
+  --mat-button-outlined-outline-color: color-mix(in srgb, var(--pd-accent) 45%, transparent);
+  background: var(--pd-accent-tint);
 }
 
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 288px;
-  gap: var(--sp-4);
+  gap: var(--pd-space-4);
   flex: 1;
   min-height: 0;
 }
@@ -27,14 +28,14 @@
 .chat {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  gap: var(--pd-space-3);
   min-height: 0;
 }
 
 .panes {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--sp-3);
+  gap: var(--pd-space-3);
   flex: 1;
   min-height: 0;
   &.two {
@@ -46,27 +47,27 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-1), var(--card-highlight);
+  background: var(--pd-surface-1);
+  border: 1px solid var(--pd-hairline);
+  border-radius: var(--pd-radius-card);
+  box-shadow: var(--pd-shadow-1);
   overflow: hidden;
 }
 
 .pane-head {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  border-bottom: 1px solid var(--border-soft);
+  gap: var(--pd-space-2);
+  padding: var(--pd-space-2) var(--pd-space-3);
+  border-bottom: 1px solid var(--pd-hairline);
   .model {
     min-width: 0;
     max-width: 280px;
-    font-weight: var(--fw-medium);
+    font-weight: var(--pd-weight-medium);
   }
   .meta {
     margin-left: auto;
-    font-size: var(--fs-xs);
+    font-size: var(--pd-text-label);
     white-space: nowrap;
   }
 }
@@ -75,10 +76,10 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: var(--sp-4) var(--sp-5);
+  padding: var(--pd-space-4) var(--pd-space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4);
+  gap: var(--pd-space-4);
 }
 
 .empty {
@@ -86,19 +87,19 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--sp-1);
+  gap: var(--pd-space-1);
   width: 100%;
   max-width: 480px;
   text-align: center;
   > mat-icon {
     width: 22px;
     height: 22px;
-    margin-bottom: var(--sp-2);
-    color: var(--accent);
+    margin-bottom: var(--pd-space-2);
+    color: var(--pd-accent);
   }
   .title {
-    font-size: var(--fs-md);
-    font-weight: var(--fw-semibold);
+    font-size: var(--pd-text-body-lg);
+    font-weight: var(--pd-weight-semibold);
   }
 }
 
@@ -106,33 +107,33 @@
 .sugg {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
+  gap: var(--pd-space-2);
   width: min(480px, 100%);
-  margin: var(--sp-4) auto 0;
+  margin: var(--pd-space-4) auto 0;
 }
 
 .chip {
   display: flex;
   align-items: center;
   height: 36px;
-  padding: 0 var(--sp-3);
+  padding: 0 var(--pd-space-3);
   font: inherit;
-  font-size: var(--fs-base);
-  color: var(--text-2);
+  font-size: var(--pd-text-body);
+  color: var(--pd-text-muted);
   text-align: left;
-  background: var(--bg-sunken);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  background: var(--pd-surface-2);
+  border: 1px solid var(--pd-hairline);
+  border-radius: var(--pd-radius-control);
   cursor: default;
   transition:
-    background var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
+    background var(--pd-duration-micro) var(--pd-ease-move),
+    border-color var(--pd-duration-micro) var(--pd-ease-move),
+    color var(--pd-duration-micro) var(--pd-ease-move);
   &:hover,
   &:focus-visible {
-    color: var(--text);
-    background: var(--bg-hover);
-    border-color: var(--accent);
+    color: var(--pd-text);
+    background: var(--pd-hover);
+    border-color: var(--pd-accent);
   }
 }
 
@@ -145,14 +146,14 @@
   &.user {
     align-self: flex-end;
     max-width: 80%;
-    padding: var(--sp-2) var(--sp-3);
-    background: var(--accent-soft);
-    border-radius: var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg);
+    padding: var(--pd-space-2) var(--pd-space-3);
+    background: var(--pd-accent-tint);
+    border-radius: var(--pd-radius-card) var(--pd-radius-card) var(--pd-radius-tag) var(--pd-radius-card);
   }
   &.bot {
     display: grid;
     grid-template-columns: 24px minmax(0, 1fr);
-    gap: var(--sp-3);
+    gap: var(--pd-space-3);
     max-width: 92%;
   }
 }
@@ -162,9 +163,9 @@
   place-items: center;
   width: 24px;
   height: 24px;
-  border-radius: var(--r-md);
-  background: var(--bg-active);
-  color: var(--accent);
+  border-radius: var(--pd-radius-control);
+  background: var(--pd-pressed);
+  color: var(--pd-accent);
   mat-icon {
     width: 13px;
     height: 13px;
@@ -182,7 +183,7 @@
   height: 1.05em;
   margin-left: 2px;
   vertical-align: text-bottom;
-  background: var(--accent);
+  background: var(--pd-accent);
   border-radius: 1px;
   animation: blink 1s steps(2) infinite;
 }
@@ -201,7 +202,7 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--text-3);
+    background: var(--pd-text-subtle);
     animation: bounce 1.2s ease-in-out infinite;
     &:nth-child(2) {
       animation-delay: 0.15s;
@@ -226,46 +227,31 @@
 }
 
 .stats {
-  margin-top: var(--sp-2);
-  font-size: var(--fs-xs);
-  color: var(--text-3);
+  margin-top: var(--pd-space-2);
+  font-size: var(--pd-text-label);
+  color: var(--pd-text-subtle);
 }
 
 .err {
   display: flex;
   align-items: center;
-  gap: var(--sp-1);
-  margin-top: var(--sp-2);
-  font-size: var(--fs-sm);
-  color: var(--bad);
+  gap: var(--pd-space-1);
+  margin-top: var(--pd-space-2);
+  font-size: var(--pd-text-label);
+  color: var(--pd-danger);
 }
 
 .composer {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-3);
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-2);
-  &:focus-within {
-    border-color: var(--accent);
-    box-shadow:
-      0 0 0 3px var(--accent-soft),
-      var(--shadow-2);
+  gap: var(--pd-space-2);
+  .prompt {
+    width: 100%;
   }
   textarea {
     min-height: 48px;
     max-height: 200px;
-    padding: 0;
-    background: transparent;
-    border: none;
-    box-shadow: none;
     resize: none;
-    &:focus {
-      box-shadow: none;
-    }
   }
 }
 
@@ -274,13 +260,13 @@
   align-items: center;
   justify-content: space-between;
   .hint {
-    font-size: var(--fs-xs);
+    font-size: var(--pd-text-label);
   }
   kbd {
     padding: 0 4px;
-    font-size: var(--fs-2xs);
-    border: 1px solid var(--border);
-    border-radius: var(--r-xs);
+    font-size: var(--pd-text-label);
+    border: 1px solid var(--pd-hairline);
+    border-radius: var(--pd-radius-tag);
   }
 }
 
@@ -293,14 +279,16 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-bottom: var(--sp-4);
-  label {
-    font-size: var(--fs-sm);
-    font-weight: var(--fw-medium);
-    color: var(--text-2);
+  width: 100%;
+  margin-bottom: var(--pd-space-4);
+  > label,
+  .field-head label {
+    font-size: var(--pd-text-label);
+    font-weight: var(--pd-weight-medium);
+    color: var(--pd-text-muted);
   }
   textarea {
-    font-size: var(--fs-sm);
+    font-size: var(--pd-text-label);
   }
 }
 
@@ -308,26 +296,29 @@
   display: flex;
   justify-content: space-between;
   output {
-    font-size: var(--fs-sm);
-    font-weight: var(--fw-semibold);
+    font-size: var(--pd-text-label);
+    font-weight: var(--pd-weight-semibold);
   }
 }
 
+/* Material keeps 8 px each side for the thumb at either end: a block slider in its own margins never overflows. */
 .range {
-  width: 100%;
-  accent-color: var(--accent);
+  display: block;
+  width: auto;
+  min-width: 0;
+  margin: 0 8px;
 }
 
 .scale {
   display: flex;
   justify-content: space-between;
-  font-size: var(--fs-2xs);
+  font-size: var(--pd-text-label);
 }
 
 .note {
-  font-size: var(--fs-xs);
+  font-size: var(--pd-text-label);
   b {
-    font-weight: var(--fw-medium);
-    color: var(--text-2);
+    font-weight: var(--pd-weight-medium);
+    color: var(--pd-text-muted);
   }
 }

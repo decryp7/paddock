@@ -449,6 +449,15 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   crates and the app preset (it forces fork+exec; priority is lowered on the held child after the spawn), and a test that
   forks on purpose lives in a test binary of its own: in a shared one its child copied its neighbours' locks and was a
   trigger of the random EBADF above (more copies of descriptors closed under inspection; see the entry on `poll`).
+  The judgement belongs to one layer only: a supervisor that already judges the lock over its own paced looks (Dyno's
+  link) probes it with `is_held_now`, one check and no wait. Probing with the re-checking `is_held` put a hidden 400 ms
+  wall-clock wait into every look, so the link's looks no longer followed its pace (CI 7257: a counted wait of 50 looks took
+  20-43 s, and a slow first look showed "the system is not answering" before the holder was known). No test caught the
+  wrong choice (the link's tests only got slower), so the wrong choice is made impossible to write: Dyno has no waiting
+  probe at all (`dyno_agent::instance::is_held` is gone, only `is_held_now`), and the shared one is named for its wait
+  (`is_held_settled`). Rule: `is_held_now` only where a held reading leads to waiting and looking again; a one-shot
+  decision uses `claim` or `is_held_settled`. When a fix is "pick the right one of two calls", make the wrong one fail to
+  compile or carry its cost in its name; a test that only gets slower proves nothing.
 - A Node script's "am I the main module" check must compare real paths: Node gives `import.meta.url` the resolved path
   and leaves `process.argv[1]` as given, so through a symlink (a CI work folder linked to a stable one, `node_modules`)
   `import.meta.url === pathToFileURL(process.argv[1]).href` is false and the script exits 0 doing nothing (the Chrome for
@@ -815,6 +824,16 @@ crate, so every shared crate's line (the start's error among them) was lost: eve
 (`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
 not by guessing at the VM.
 
+**2026-10-30, Pitwall 1.1 on the shell.** Three things the move found. (1) The shared updater had no Offline switch: an app
+with a fail-closed Offline mode (Pitwall) would have let About's Updates and the daily check reach the network, and Dyno's
+and Spotter's update checks have no Offline switch at all. Local first means every network path takes the app's Offline
+predicate and fails closed when the app does not know (`UpdatesBuilder::offline_mode`); a shared crate that opens a
+connection without one is a bug. (2) An app's command may share a name with a shell command (`job_cancel`,
+`open_login_items`): the plugin prefix keeps them apart at run time, but the generated names and the guard do not; the
+shell's `Builder::problems` reports it, so every app's tests call it. (3) Hiding a "constant" column across two rows hid a
+key's dates and a preset's defaults that no other place showed: a column is constant only across three or more rows (UI
+review 2 rule 5), and a row's own facts (its dates, its settings) are never hidden.
+
 ## A work-stealing test picked its victim by position (2026-10-29, paddock-download)
 `a_slow_range_is_split_so_neither_the_tail_nor_the_hash_waits_on_it` made the range at offset 0 slow and expected it to be
 split. On a loaded Windows runner (CI 7110) its worker was descheduled before sending the request, and the other workers
@@ -1158,3 +1177,21 @@ time with the same message; pushing a complete running status (no hidden space, 
 The jobs test in `mock-backend.spec.ts` had the plain form of the same thing: a fixed 30 ms wait for chained timers.
 **Lesson:** a test builds the state it pushes from scratch, or after waiting for a known state, never by copying whatever is
 current. `vi.waitFor` also moves faked timers on every poll, so a fake-timer spec cannot use it to hold a moment still.
+
+## A spy on a faked timer outlived the clock and froze every later spec in the worker (2026-10-31, paddock-ui)
+`panel-snapshot.spec.ts` timed out at 5000 ms in CI runs 7257, 7274 and 7276 (with the notify reference app in 7276),
+though the whole spec takes 0.4 s alone and a snapshot 1 to 4 ms. Measured inside full `ng test paddock-ui` runs, the page
+CSS was not the cause (one style sheet, 46 to 118 characters, at every file start; every phase under 0.5 ms). The cause
+was a dead `setTimeout`: a new spec on that branch (`settings-close.spec.ts`) made `vi.spyOn(globalThis, 'setTimeout')`
+under `vi.useFakeTimers()`, its own `afterEach` then called `vi.useRealTimers()`, and the kit's `restoreAllMocks()` put
+back what the spy had wrapped: the fake, bound to a clock that was gone. Vitest 5.0 keeps a spy's restore in its registry
+after `mockRestore()`, so this happens even when the spec restores its spy itself. Specs share one window per worker
+(`isolate: false`), so every later spec in that worker that waited on a real timer (the snapshot's 5 ms "too slow" case,
+the notify reference app's two repair tests in run 7276) hung until the test timeout; with one worker, 16 tests in 8 files
+failed. Which spec failed depended only on which files the scheduler put after it. **Kit behaviour (no new rule):** the
+test kit (`installTestKit`) restores spies before switching to real timers, records the real timer globals at the first
+install in a worker, puts back any it finds replaced around every test, and fails the test that left one replaced by
+something other than a spy, after every `afterEach` (a throw inside the hook chain skipped Angular's TestBed clean-up and
+failed the next TestBed test too). Never `vi.spyOn` a timer while fake timers are on; count timers with
+`vi.getTimerCount()`. Measure inside the failing run before fixing the suspected cost: the leading hypothesis (CSS piling
+up) was wrong.

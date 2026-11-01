@@ -1,40 +1,55 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, signal } from '@angular/core';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatChipListbox, MatChipOption } from '@angular/material/chips';
+import { MatFormField, MatPrefix } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInput } from '@angular/material/input';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { Fit, QuantVariant, Recommendation } from '../../core/api.types';
-import { ago, bytes, compact, concurrencyText } from '../../shared/format';
-import { fitLook } from '../../shared/labels';
-import { EmptyState } from '../../shared/ui/empty-state';
+import { ago, bytes, bytesIn, bytesUnit, compact, concurrencyText } from '../../shared/format';
+import { fitLook, sentenceCase } from '../../shared/labels';
 import { Panel } from '../../shared/ui/panel';
 import { contextText } from './library-tab';
 import { ModelsStore } from './models.store';
+import { SuEmptyState } from '@decryp7/paddock-ui';
 
 /** What a fit needs, in one line: `6.1 GB VRAM + 0.9 GB RAM · all layers on the GPU`. */
 export function fitDetail(f: Fit): string {
+  return `${fitMemory(f)} · ${OFFLOAD_TEXT[f.offload]}`;
+}
+
+/** What a file needs in memory: `3.2 GB VRAM + 2.3 GB RAM`. */
+export function fitMemory(f: Fit): string {
   const parts: string[] = [];
   if (f.needVram > 0) parts.push(`${bytes(f.needVram)} VRAM`);
   if (f.needRam > 0) parts.push(`${bytes(f.needRam)} RAM`);
-  const offload = { all: 'all layers on the GPU', partial: 'part of the layers on the GPU', none: 'CPU only' }[f.offload];
-  return `${parts.join(' + ') || 'Nothing'} · ${offload}`;
+  return parts.join(' + ') || 'Nothing';
 }
+
+/** Where the layers run, short enough for a table cell's second line. */
+export const OFFLOAD_SHORT: Record<Fit['offload'], string> = { all: 'All on the GPU', partial: 'Split GPU and CPU', none: 'CPU only' };
+
+/** Where the layers run. */
+export const OFFLOAD_TEXT: Record<Fit['offload'], string> = { all: 'all layers on the GPU', partial: 'part of the layers on the GPU', none: 'CPU only' };
 
 /** Hugging Face search (GGUF) and a repo's quantisation variants, each with a "will this fit?" verdict. */
 @Component({
   selector: 'pw-discover-tab',
-  imports: [MatIconModule, MatTooltipModule, MatSlideToggleModule, Panel, EmptyState],
+  imports: [MatButton, MatIconButton, MatChipListbox, MatChipOption, MatFormField, MatPrefix, MatInput, MatIconModule, MatTooltipModule, MatSlideToggleModule, MatTableModule, Panel, SuEmptyState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel class="recs" heading="Recommended for this machine" icon="sparkles" [sub]="recsSub()" [flush]="true" [loading]="store.packsLoading()" [error]="store.packsError()" [ready]="!!store.packs()" [skeletonLines]="3" (retry)="store.loadPacks()">
-      <div class="chips" role="group" aria-label="Filter recommendations by tag">
-        <button type="button" class="chip" [attr.aria-pressed]="store.packTag() === null" (click)="store.loadPacks(null)">All</button>
+      <mat-chip-listbox class="chips" aria-label="Filter recommendations by tag" hideSingleSelectionIndicator [value]="store.packTag() ?? ''" (change)="store.loadPacks($event.value || null)">
+        <mat-chip-option value="">All</mat-chip-option>
         @for (t of store.packTags(); track t) {
-          <button type="button" class="chip" [attr.aria-pressed]="store.packTag() === t" (click)="store.loadPacks(t)">{{ t }}</button>
+          <mat-chip-option [value]="t">{{ sentence(t) }}</mat-chip-option>
         }
-      </div>
+      </mat-chip-listbox>
       @if (store.packs(); as p) {
         @if (p.recommendations.length === 0) {
-          <pw-empty-state icon="models" heading="Nothing recommended" text="No catalog model with this tag fits this machine. Try another tag." />
+          <pd-empty-state heading="Nothing recommended" description="No catalog model with this tag fits this machine. Try another tag."><mat-icon slot="icon" svgIcon="pw:models" aria-hidden="true" /></pd-empty-state>
         } @else {
           <ul class="rec-list" aria-label="Recommended models">
             @for (r of p.recommendations; track r.id) {
@@ -46,7 +61,7 @@ export function fitDetail(f: Fit): string {
                   @if (isLocal(r)) {
                     <span class="faint in-lib">In library</span>
                   } @else {
-                    <button type="button" class="btn ghost icon sm reveal" [disabled]="store.isBusy()('rec:' + r.id) || r.fit.verdict === 'wontFit'" [attr.aria-label]="'Download ' + r.name" matTooltip="Download" (click)="store.downloadRecommendation(r)">
+                    <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()('rec:' + r.id) || r.fit.verdict === 'wontFit'" [attr.aria-label]="'Download ' + r.name" matTooltip="Download" (click)="store.downloadRecommendation(r)">
                       <mat-icon svgIcon="pw:download" aria-hidden="true" />
                     </button>
                   }
@@ -85,16 +100,17 @@ export function fitDetail(f: Fit): string {
     }
 
     <form class="search" role="search" (submit)="$event.preventDefault(); store.search(q.value)">
-      <mat-icon svgIcon="pw:search" aria-hidden="true" />
-      <label class="sr-only" for="hf-q">Search Hugging Face for GGUF models</label>
-      <input #q id="hf-q" class="input" type="search" placeholder="Search GGUF models on Hugging Face — e.g. qwen3, gemma, llama" [value]="store.query()" autocomplete="off" (input)="typed.set(q.value.trim() !== '')" />
-      <button type="submit" class="btn" [class.primary]="hasText()" [disabled]="store.searching()">Search</button>
+      <mat-form-field class="field">
+        <mat-icon matPrefix svgIcon="pw:search" aria-hidden="true" />
+        <input #q matInput id="hf-q" type="search" aria-label="Search Hugging Face for GGUF models" placeholder="Search GGUF models on Hugging Face — e.g. qwen3, gemma, llama" [value]="store.query()" autocomplete="off" (input)="typed.set(q.value.trim() !== '')" />
+      </mat-form-field>
+      <button type="submit" [matButton]="hasText() ? 'filled' : 'outlined'" [disabled]="store.searching()">Search</button>
     </form>
 
     <div class="cols">
       <pw-panel class="results" heading="Results" icon="globe" [sub]="store.searched() ? store.results().length + ' repos' : ''" [flush]="true" [loading]="store.searching()" [error]="store.searchError()" [ready]="store.searched()" [skeletonLines]="8" (retry)="store.search(store.query())">
         @if (store.results().length === 0) {
-          <pw-empty-state icon="search" heading="No GGUF repos found" text="Try a model family (qwen, llama, gemma) or an author." />
+          <pd-empty-state heading="No GGUF repos found" description="Try a model family (qwen, llama, gemma) or an author."><mat-icon slot="icon" svgIcon="pw:search" aria-hidden="true" /></pd-empty-state>
         }
         <ul class="list" aria-label="Search results">
           @for (r of store.results(); track r.repo) {
@@ -105,7 +121,7 @@ export function fitDetail(f: Fit): string {
                   <span><mat-icon svgIcon="pw:download" aria-hidden="true" />{{ count(r.downloads) }}</span>
                   <span><mat-icon svgIcon="pw:heart" aria-hidden="true" />{{ count(r.likes) }}</span>
                   @if (r.updatedAt) {
-                    <span>updated {{ when(r.updatedAt, now()) }}</span>
+                    <span>Updated {{ when(r.updatedAt, now()) }}</span>
                   }
                 </span>
               </button>
@@ -116,10 +132,10 @@ export function fitDetail(f: Fit): string {
 
       <pw-panel class="repo-panel" [heading]="store.repoName() ?? 'Quantisations'" icon="models" [sub]="repoSub()" [loading]="store.repoLoading()" [error]="store.repoError()" [ready]="!store.repoName() || !!store.repo()" [skeletonLines]="8" (retry)="store.openRepo(store.repoName()!)">
         @if (store.repoName()) {
-          <button panel-actions type="button" class="btn ghost icon sm" aria-label="Close repo" (click)="store.closeRepo()"><mat-icon svgIcon="pw:close" aria-hidden="true" /></button>
+          <button panel-actions type="button" matIconButton aria-label="Close repo" matTooltip="Close repo" (click)="store.closeRepo()"><mat-icon svgIcon="pw:close" aria-hidden="true" /></button>
         }
         @if (!store.repoName()) {
-          <pw-empty-state icon="models" heading="Pick a repo" text="Its quantisations appear here with a verdict on whether each fits this machine's free RAM and VRAM." />
+          <pd-empty-state heading="Pick a repo" description="Its quantisations appear here with a verdict on whether each fits this machine's free RAM and VRAM."><mat-icon slot="icon" svgIcon="pw:models" aria-hidden="true" /></pd-empty-state>
         }
         @if (store.repo(); as repo) {
           @if (repo.gated) {
@@ -131,47 +147,47 @@ export function fitDetail(f: Fit): string {
               <span id="lbl-proj">Include the vision projector <span class="mono">{{ repo.projectors[0]!.file }}</span> ({{ size(repo.projectors[0]!.sizeBytes) }}) for image input</span>
             </div>
           }
-          <table class="table">
-            <thead>
-              <tr>
-                <th scope="col">Quant</th>
-                <th scope="col" class="right">Size</th>
-                <th scope="col">Will it fit?</th>
-                <th scope="col">Needs</th>
-                <th scope="col"><span class="sr-only">Download</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (v of repo.variants; track v.file) {
-                <tr>
-                  <td>
-                    <span class="q mono">{{ v.quant ?? v.file }}</span>
-                    @if (v.parts > 1) {
-                      <span class="faint parts">{{ v.parts }} parts</span>
-                    }
-                  </td>
-                  <td class="right num">{{ size(v.sizeBytes) }}</td>
-                  <td>
-                    <span class="status" [attr.data-tone]="look(v).tone" [matTooltip]="v.fit.message">{{ look(v).label }}</span>
-                    @if (v.fit.verdict !== 'wontFit' && v.fit.verdict !== 'unknown') {
-                      <span class="faint parts">{{ concurrency(v.maxSlots) }}</span>
-                    }
-                  </td>
-                  <td class="needs" [matTooltip]="v.fit.message">{{ detail(v.fit) }}</td>
-                  <td class="act">
-                    @if (v.downloaded) {
-                      <span class="faint in-lib">In library</span>
-                    } @else {
-                      <span class="row-actions">
-                        <button type="button" class="btn ghost icon sm reveal" [disabled]="store.isBusy()('download:' + v.file)" [attr.aria-label]="'Download ' + v.file" matTooltip="Download" (click)="download(v)">
-                          <mat-icon svgIcon="pw:download" aria-hidden="true" />
-                        </button>
-                      </span>
-                    }
-                  </td>
-                </tr>
-              }
-            </tbody>
+          <table mat-table class="quants" [dataSource]="repo.variants" [trackBy]="byFile" [fixedLayout]="true" [attr.aria-label]="'Quantisations of ' + repo.repo">
+            <ng-container matColumnDef="quant">
+              <th mat-header-cell *matHeaderCellDef scope="col">Quant</th>
+              <td mat-cell *matCellDef="let v" [matTooltip]="v.parts > 1 ? (v.quant ?? v.file) + ', ' + v.parts + ' parts' : (v.quant ?? v.file)" matTooltipShowDelay="600">
+                <span class="q ver">{{ v.quant ?? v.file }}</span>
+                @if (v.parts > 1) {
+                  <span class="faint parts">{{ v.parts }} parts</span>
+                }
+              </td>
+            </ng-container>
+            <ng-container matColumnDef="size">
+              <th mat-header-cell *matHeaderCellDef scope="col" class="right">Size {{ sizeUnit() }}</th>
+              <td mat-cell *matCellDef="let v" class="right num">{{ sizeIn(v.sizeBytes, sizeUnit()) }}</td>
+            </ng-container>
+            <ng-container matColumnDef="fit">
+              <th mat-header-cell *matHeaderCellDef scope="col">Will it fit?</th>
+              <td mat-cell *matCellDef="let v">
+                <span class="status" [attr.data-tone]="look(v).tone" [matTooltip]="v.fit.message">{{ look(v).label }}</span>
+              </td>
+            </ng-container>
+            <ng-container matColumnDef="needs">
+              <th mat-header-cell *matHeaderCellDef scope="col">Needs</th>
+              <td mat-cell *matCellDef="let v" class="needs" [matTooltip]="needsText(v)">
+                <span class="line">{{ memory(v.fit) }}</span>
+                <span class="line faint">{{ needsMore(v) }}</span>
+              </td>
+            </ng-container>
+            <ng-container matColumnDef="act">
+              <th mat-header-cell *matHeaderCellDef scope="col" class="act"><span class="sr-only">Download</span></th>
+              <td mat-cell *matCellDef="let v" class="act">
+                @if (v.downloaded) {
+                  <span class="faint in-lib">In library</span>
+                } @else {
+                  <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()('download:' + v.file)" [attr.aria-label]="'Download ' + v.file" matTooltip="Download" (click)="download(v)">
+                    <mat-icon svgIcon="pw:download" aria-hidden="true" />
+                  </button>
+                }
+              </td>
+            </ng-container>
+            <tr mat-header-row *matHeaderRowDef="columns; sticky: true"></tr>
+            <tr mat-row *matRowDef="let v; columns: columns"></tr>
           </table>
         }
       </pw-panel>
@@ -183,85 +199,55 @@ export function fitDetail(f: Fit): string {
         margin: 0;
       }
       .head {
-        font-weight: var(--fw-semibold);
+        font-weight: var(--pd-weight-semibold);
       }
       ul {
-        margin: var(--sp-1) 0 0;
+        margin: var(--pd-space-1) 0 0;
         padding: 0;
         list-style: none;
-        color: var(--text-2);
+        color: var(--pd-text-muted);
       }
       .mono {
-        font-size: var(--fs-sm);
+        font-size: var(--pd-text-label);
       }
     }
     :host {
       display: grid;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .search {
-      position: relative;
       display: flex;
-      gap: var(--sp-2);
-      mat-icon {
-        position: absolute;
-        left: 11px;
-        top: 9px;
-        width: 15px;
-        height: 15px;
-        color: var(--text-3);
-      }
-      .input {
+      align-items: center;
+      gap: var(--pd-space-2);
+      .field {
         flex: 1;
-        height: 34px;
-        padding-left: 34px;
+        min-width: 0;
       }
-      .btn {
-        height: 34px;
+      mat-icon[matPrefix] {
+        margin: 0 var(--pd-space-2) 0 var(--pd-space-3);
+        color: var(--pd-text-subtle);
       }
     }
     .chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: var(--sp-1);
-      padding: 0 var(--sp-4) var(--sp-2);
-    }
-    .chip {
-      height: 24px;
-      padding: 0 var(--sp-3);
-      font: inherit;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
-      background: none;
-      border: 1px solid var(--border-strong);
-      border-radius: var(--r-full);
-      cursor: default;
-      &:hover {
-        color: var(--text);
-        background: var(--bg-hover);
-      }
-      &[aria-pressed='true'] {
-        color: var(--accent);
-        background: var(--accent-soft);
-        border-color: var(--accent);
-      }
+      display: block;
+      padding: 0 var(--pd-space-4) var(--pd-space-2);
     }
     /* A recommendation is one line: name, what it is, the verdict, and a download that appears on hover. */
     .rec-list {
       margin: 0;
-      padding: 0 0 var(--sp-1);
+      padding: 0 0 var(--pd-space-1);
       list-style: none;
     }
     .rec {
       display: grid;
       grid-template-columns: minmax(160px, 1.2fr) minmax(0, 1fr) 80px 96px;
       align-items: center;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       min-height: 40px;
-      padding: 0 var(--sp-4);
-      border-top: 1px solid var(--border-soft);
+      padding: 0 var(--pd-space-4);
+      border-top: 1px solid var(--pd-hairline);
       &:hover {
-        background: var(--bg-hover);
+        background: var(--pd-hover);
       }
     }
     .rec .reveal {
@@ -276,28 +262,34 @@ export function fitDetail(f: Fit): string {
       justify-self: end;
     }
     .in-lib {
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
     }
     .rec-name {
-      font-weight: var(--fw-semibold);
+      font-weight: var(--pd-weight-semibold);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .rec-meta {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .cols {
       display: grid;
       grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       align-items: start;
+    }
+    /* Under 1100 px the quantisations take the full width below the results, so their table keeps every column whole. */
+    @media (max-width: 1100px) {
+      .cols {
+        grid-template-columns: minmax(0, 1fr);
+      }
     }
     .list {
       list-style: none;
-      margin: var(--sp-2) 0 0;
-      padding: 0 var(--sp-2) var(--sp-2);
+      margin: var(--pd-space-2) 0 0;
+      padding: 0 var(--pd-space-2) var(--pd-space-2);
       max-height: 640px;
       overflow: auto;
     }
@@ -306,33 +298,33 @@ export function fitDetail(f: Fit): string {
       flex-direction: column;
       gap: 4px;
       width: 100%;
-      padding: 10px var(--sp-2);
+      padding: 10px var(--pd-space-2);
       font: inherit;
       color: inherit;
       text-align: left;
       background: none;
       border: none;
-      border-radius: var(--r-md);
+      border-radius: var(--pd-radius-control);
       cursor: default;
       &:hover {
-        background: var(--bg-hover);
+        background: var(--pd-hover);
       }
       &.sel {
-        background: var(--accent-soft);
-        box-shadow: inset 2px 0 0 var(--accent);
+        background: var(--pd-accent-tint);
+        box-shadow: inset 2px 0 0 var(--pd-accent);
       }
     }
     .repo {
-      font-weight: var(--fw-medium);
+      font-weight: var(--pd-weight-medium);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .meta {
       display: flex;
-      gap: var(--sp-3);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      gap: var(--pd-space-3);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       span {
         display: inline-flex;
         align-items: center;
@@ -344,46 +336,49 @@ export function fitDetail(f: Fit): string {
       }
     }
     .callout {
-      margin-bottom: var(--sp-3);
+      margin-bottom: var(--pd-space-3);
     }
     .proj {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
-      margin-bottom: var(--sp-3);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      gap: var(--pd-space-2);
+      margin-bottom: var(--pd-space-3);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
-    .table {
-      margin: 0 calc(-1 * var(--sp-4));
-      width: calc(100% + 2 * var(--sp-4));
-      th:first-child,
-      td:first-child {
-        padding-left: var(--sp-4);
-      }
-      th:last-child,
-      td:last-child {
-        padding-right: var(--sp-4);
-      }
+    /* Edge to edge in its panel. */
+    .quants {
+      margin: 0 calc(-1 * var(--pd-space-4));
+      width: calc(100% + 2 * var(--pd-space-4));
     }
-    .q {
-      font-weight: var(--fw-medium);
+    /* The quantisation is a short tag and the verdict a word: what it needs (two lines) has the rest of the row. */
+    .quants {
+      --mat-table-row-item-container-height: 48px;
     }
-    .parts {
-      margin-left: var(--sp-2);
-      font-size: var(--fs-sm);
+    .mat-column-quant {
+      width: 112px;
     }
-    .table td.act {
-      width: 1%;
-      text-align: right;
+    .mat-column-size {
+      width: 80px;
     }
-    .needs {
-      max-width: 340px;
+    .mat-column-fit {
+      width: 104px;
+    }
+    .mat-column-act {
+      width: 88px;
+    }
+    .needs .line {
+      display: block;
       overflow: hidden;
       text-overflow: ellipsis;
-      white-space: nowrap;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+    }
+    .parts {
+      margin-left: var(--pd-space-2);
+      font-size: var(--pd-text-label);
+    }
+    .needs {
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
   `,
 })
@@ -400,6 +395,28 @@ export class DiscoverTab implements OnInit {
   protected readonly detail = fitDetail;
   protected readonly concurrency = concurrencyText;
   protected readonly look = (v: QuantVariant) => fitLook(v.fit.verdict);
+  protected readonly columns = ['quant', 'size', 'fit', 'needs', 'act'];
+  protected readonly byFile = (_: number, v: QuantVariant) => v.file;
+  protected readonly sizeIn = bytesIn;
+  /** The quantisations' Size column unit, in its header. */
+  protected readonly sizeUnit = computed(() => bytesUnit(this.store.repo()?.variants.map((v) => v.sizeBytes) ?? []));
+
+  protected readonly memory = fitMemory;
+  protected readonly sentence = sentenceCase;
+
+  /** The Needs cell's second line: where the layers run and, when it fits, how many requests it serves at once. */
+  protected needsMore(v: QuantVariant): string {
+    const where = OFFLOAD_SHORT[v.fit.offload];
+    const fits = v.fit.verdict !== 'wontFit' && v.fit.verdict !== 'unknown';
+    if (!fits) return where;
+    return `${where} · ${v.maxSlots <= 1 ? 'one request at a time' : `${v.maxSlots} requests at once`}`;
+  }
+
+  /** What a quantisation needs and, when it fits, how many requests it serves at once. */
+  protected needsText(v: QuantVariant): string {
+    const fits = v.fit.verdict !== 'wontFit' && v.fit.verdict !== 'unknown';
+    return fits ? `${fitDetail(v.fit)} · ${concurrencyText(v.maxSlots)}` : fitDetail(v.fit);
+  }
 
   ngOnInit(): void {
     if (!this.store.packs() && !this.store.packsLoading()) void this.store.loadPacks();

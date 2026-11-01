@@ -50,7 +50,7 @@ test.describe('dashboard', () => {
   test('the first paint does not wait for the backend', async ({ page }) => {
     // 120 ms of simulated latency per call (no mock-fast): the shell and headings are there at once.
     await page.goto('/?mock-static#/');
-    await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible({ timeout: 2000 });
+    await expect(page.locator('pd-pages-sidebar')).toBeVisible({ timeout: 2000 });
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible({ timeout: 2000 });
   });
 });

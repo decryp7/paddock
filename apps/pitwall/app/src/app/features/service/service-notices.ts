@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { ServiceStore } from './service.store';
+import { MatButton } from '@angular/material/button';
 
 /**
  * What the user needs to know about the background service on macOS: the automatic repair of a registration launchd
@@ -9,7 +10,7 @@ import { ServiceStore } from './service.store';
  */
 @Component({
   selector: 'pw-service-notices',
-  imports: [MatIconModule],
+  imports: [MatButton, MatIconModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (service.service(); as s) {
@@ -23,14 +24,14 @@ import { ServiceStore } from './service.store';
         <div class="callout" data-tone="warn" role="status" data-testid="service-start-failed">
           <mat-icon svgIcon="pw:alert" aria-hidden="true" />
           <span class="msg">{{ s.startFailed ? 'The background service could not start after the update.' : "Pitwall is not listed in System Settings > General > Login Items, so macOS does not start the service." }} Repair registers it again.</span>
-          <button type="button" class="btn sm primary" data-testid="repair-service" [disabled]="service.isBusy()('repair')" (click)="service.repair()">{{ service.isBusy()('repair') ? 'Repairing…' : 'Repair' }}</button>
+          <button type="button" matButton="filled" data-testid="repair-service" [disabled]="service.isBusy()('repair')" (click)="service.repair()">{{ service.isBusy()('repair') ? 'Repairing…' : 'Repair' }}</button>
         </div>
       }
       @if (s.disabledInLoginItems) {
         <div class="callout" data-tone="warn" role="status" data-testid="service-disabled">
           <mat-icon svgIcon="pw:alert" aria-hidden="true" />
           <span class="msg">Pitwall's background service is turned off in System Settings > General > Login Items. Switch it on there; Pitwall never does it for you.</span>
-          <button type="button" class="btn sm" [disabled]="service.isBusy()('loginItems')" (click)="service.openLoginItems()">Open Login Items</button>
+          <button type="button" matButton="outlined" [disabled]="service.isBusy()('loginItems')" (click)="service.openLoginItems()">Open Login Items</button>
         </div>
       }
     }
@@ -38,7 +39,7 @@ import { ServiceStore } from './service.store';
   styles: `
     :host {
       display: grid;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
     }
     :host:empty {
       display: none;

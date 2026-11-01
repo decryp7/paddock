@@ -9,6 +9,7 @@ import { BACKEND } from '../app/core/backend';
 import { MockBackend } from '../app/core/mock-backend';
 import { CHART_FACTORY, type ChartInstance } from '../app/shared/charts/echart';
 import { registerIcons } from '../app/shared/icons';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 
 /** A chart instance that records what it was given (jsdom has no canvas). */
 export class FakeChart implements ChartInstance {
@@ -62,12 +63,36 @@ export function button(el: HTMLElement, text: string): HTMLButtonElement {
   return b;
 }
 
-/** Opens a `pw-select` from its trigger and clicks the option with this label (the list lives in the overlay). */
-export async function pickOption(trigger: HTMLElement, label: string, settleAfter: () => Promise<void>): Promise<void> {
-  trigger.click();
+/** Opens a `pd-select` (a `mat-select`) from its host and clicks the option with this label (the list lives in the overlay). */
+export async function pickOption(select: HTMLElement, label: string, settleAfter: () => Promise<void>): Promise<void> {
+  select.querySelector<HTMLElement>('.mat-mdc-select-trigger')!.click();
   await settleAfter();
-  const option = Array.from(document.querySelectorAll<HTMLElement>('.pw-select-list .opt')).find((o) => o.textContent!.trim() === label);
-  if (!option) throw new Error(`no option "${label}" in: ${Array.from(document.querySelectorAll('.pw-select-list .opt')).map((o) => o.textContent!.trim()).join(' | ')}`);
+  const options = Array.from(document.querySelectorAll<HTMLElement>('.mat-mdc-option'));
+  const option = options.find((o) => o.textContent!.trim() === label);
+  if (!option) throw new Error(`no option "${label}" in: ${options.map((o) => o.textContent!.trim()).join(' | ')}`);
   option.click();
   await settleAfter();
+}
+
+/** One dialog a component opened through the fake `DialogService`. */
+export interface OpenedDialog {
+  id: string;
+  inputs: Record<string, unknown>;
+  title: string | undefined;
+}
+
+/**
+ * A `DialogService` that answers every dialog at once: `true` answers it with `true` (a confirmation's affirmative), `false`
+ * dismisses it, a function answers with what it returns (`undefined`: dismissed). `opened` records each dialog asked for.
+ */
+export function dialogsAnswering(answer: boolean | ((id: string, inputs: Record<string, unknown>) => unknown)): { provide: typeof DialogService; useValue: Pick<DialogService, 'open'>; opened: OpenedDialog[] } {
+  const opened: OpenedDialog[] = [];
+  const open = (id: string, options: { inputs?: Record<string, unknown>; title?: string } = {}) => {
+    const inputs = options.inputs ?? {};
+    opened.push({ id, inputs, title: options.title });
+    const value = typeof answer === 'function' ? answer(id, inputs) : answer ? true : undefined;
+    const closed = Promise.resolve(value === undefined ? { kind: 'dismissed' as const } : { kind: 'answered' as const, value });
+    return { closed, dismiss: () => undefined };
+  };
+  return { provide: DialogService, useValue: { open } as unknown as Pick<DialogService, 'open'>, opened };
 }

@@ -30,4 +30,17 @@ describe('withTimeout', () => {
     expect(typeof wrapped.subscribe(() => undefined)).toBe('function');
     expect((wrapped as unknown as { name: string }).name).toBe('x');
   });
+
+  it('never times out a job, however long it runs (ER-19)', async () => {
+    vi.useFakeTimers();
+    let finish: () => void = () => undefined;
+    const inner = { loadModel: () => new Promise<void>((r) => (finish = r)) } as unknown as MockBackend;
+    let settled = false;
+    const pending = withTimeout(inner, 1000).loadModel('m').finally(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    expect(settled).toBe(false);
+    finish();
+    await pending;
+    expect(settled).toBe(true);
+  });
 });

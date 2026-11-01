@@ -268,7 +268,8 @@ pub fn look(
         let found = Discovery::read(&dirs.discovery());
         let hint = found.as_ref().map(|d| hint_of(d, app_version));
         let lock = lock.then(|| {
-            if dyno_agent::instance::is_held(dirs) {
+            // One check: the machine judges the lock over its looks, so a look never waits on a re-check (CI run 7257).
+            if dyno_agent::instance::is_held_now(dirs) {
                 LockSeen::Held
             } else {
                 LockSeen::Free

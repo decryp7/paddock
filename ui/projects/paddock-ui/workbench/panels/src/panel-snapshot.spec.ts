@@ -1,4 +1,4 @@
-import { cloneForSnapshot, documentCss, inheritedStyle, Rasterize, snapshotDocument, snapshotPanel, snapshotScale, snapshotSvg, SNAPSHOT_MAX_BYTES, svgUrl } from './panel-snapshot';
+import { cloneForSnapshot, documentCss, inheritedStyle, Rasterize, rasterizeFitting, snapshotDocument, snapshotPanel, snapshotScale, snapshotSvg, SNAPSHOT_MAX_BYTES, svgUrl } from './panel-snapshot';
 
 const PNG = 'data:image/png;base64,iVBORw0KGgo=';
 
@@ -55,34 +55,54 @@ describe('panel snapshots', () => {
     document.documentElement.removeAttribute('data-scheme');
   });
 
-  it('renders through the rasterizer at the fitting scale, halves it once when too large, and never throws', async () => {
+  it('renders the panel through the rasterizer at the fitting scale and never throws', async () => {
     const el = panel('<p>hello</p>', 1120, 840);
-    const scales: number[] = [];
-    const ok: Rasterize = async (url, w, h, s) => {
-      expect(url).toMatch(/^data:image\/svg\+xml/);
-      expect([w, h]).toEqual([1120, 840]);
-      scales.push(s);
-      return PNG;
-    };
+    const calls: Array<[string, number, number, number]> = [];
+    const ok: Rasterize = async (url, w, h, s) => (calls.push([url, w, h, s]), PNG);
     expect(await snapshotPanel(el, { width: 560, height: 420 }, ok)).toBe(PNG);
-    expect(scales).toEqual([0.5]);
-    const big = `data:image/png;base64,${'A'.repeat(SNAPSHOT_MAX_BYTES)}`;
-    const sizes: number[] = [];
-    const tooBig: Rasterize = async (_u, _w, _h, s) => (sizes.push(s), s < 0.5 ? PNG : big);
-    expect(await snapshotPanel(el, { width: 560, height: 420 }, tooBig)).toBe(PNG);
-    expect(sizes).toEqual([0.5, 0.25]);
-    expect(await snapshotPanel(el, { width: 560, height: 420 }, async () => big)).toBeNull();
-    expect(await snapshotPanel(el, { width: 560, height: 420 }, async () => null)).toBeNull();
-    expect(await snapshotPanel(el, { width: 560, height: 420 }, async () => 'data:image/svg+xml,x')).toBeNull();
-    expect(
-      await snapshotPanel(el, { width: 560, height: 420 }, async () => {
-        throw new DOMException('tainted', 'SecurityError');
-      }),
-    ).toBeNull();
-    // Too slow: given up.
-    expect(await snapshotPanel(el, { width: 560, height: 420 }, () => new Promise(() => undefined), 5)).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.[0]).toMatch(/^data:image\/svg\+xml/);
+    expect(calls[0]?.slice(1)).toEqual([1120, 840, 0.5]);
+    // A rasterizer that throws is a missing snapshot, not an error (the one other full pipeline run).
+    const tainted = async (): Promise<string | null> => {
+      throw new DOMException('tainted', 'SecurityError');
+    };
+    expect(await snapshotPanel(el, { width: 560, height: 420 }, tainted)).toBeNull();
+    // So is one that throws before it returns a promise.
+    const throwsAtOnce: Rasterize = () => {
+      throw new DOMException('tainted', 'SecurityError');
+    };
+    expect(await snapshotPanel(el, { width: 560, height: 420 }, throwsAtOnce)).toBeNull();
+    // And a panel that fails while being measured or copied (the catch around the whole pipeline).
+    const broken = panel('<p>x</p>');
+    broken.getBoundingClientRect = () => {
+      throw new Error('detached');
+    };
+    expect(await snapshotPanel(broken, { width: 560, height: 420 }, ok)).toBeNull();
+    // Nothing to draw: no snapshot, and no work.
     expect(await snapshotPanel(null, { width: 560, height: 420 }, ok)).toBeNull();
     expect(await snapshotPanel(panel('', 0, 0), { width: 560, height: 420 }, ok)).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('halves the scale once when the PNG is too large, and gives up on anything unusable', async () => {
+    // Built once, outside the rasterizer: the rules below do not need a snapshot document, only the rasterizer's answers.
+    const big = `data:image/png;base64,${'A'.repeat(SNAPSHOT_MAX_BYTES)}`;
+    const box = { width: 1120, height: 840 };
+    const sizes: number[] = [];
+    const tooBig: Rasterize = async (_u, _w, _h, s) => (sizes.push(s), s < 0.5 ? PNG : big);
+    expect(await rasterizeFitting('u', box, 0.5, tooBig)).toBe(PNG);
+    expect(sizes).toEqual([0.5, 0.25]);
+    expect(await rasterizeFitting('u', box, 0.5, async () => big)).toBeNull();
+    expect(await rasterizeFitting('u', box, 0.5, async () => null)).toBeNull();
+    expect(await rasterizeFitting('u', box, 0.5, async () => 'data:image/svg+xml,x')).toBeNull();
+    expect(await rasterizeFitting('u', box, 0.5, async () => Promise.reject(new Error('x')))).toBeNull();
+    const throwsAtOnce: Rasterize = () => {
+      throw new Error('x');
+    };
+    expect(await rasterizeFitting('u', box, 0.5, throwsAtOnce)).toBeNull();
+    // Too slow: given up (a rasterizer that never answers; the timer is the only clock involved).
+    expect(await rasterizeFitting('u', box, 0.5, () => new Promise(() => undefined), 5)).toBeNull();
   });
 
   it('the default rasterizer gives up quietly where the webview cannot draw', async () => {

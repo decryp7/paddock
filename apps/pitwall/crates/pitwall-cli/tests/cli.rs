@@ -268,11 +268,11 @@ fn exit_codes() {
     assert!(!text(&out.stderr).contains("abc "));
     assert_eq!(pitwall(h.path(), &["--help"]).status.code(), Some(0));
     assert!(text(&pitwall(h.path(), &["--version"]).stdout).starts_with("pitwall "));
-    // nothing listening: a port that was just free
-    let free = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port().to_string();
-    let out = pitwall(h.path(), &["status", "--port", &free]);
-    assert_eq!(out.status.code(), Some(3));
-    assert!(text(&out.stderr).contains("Start the Pitwall app"));
+    // a port that answers nothing (held for the whole test, never freed: the OS cannot hand it to another test's server)
+    let held = paddock_testkit::net::HeldPort::hang_up();
+    let out = pitwall(h.path(), &["status", "--port", &held.port().to_string()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("Is something else using port"), "{}", text(&out.stderr));
     // no admin key anywhere readable: an unusable --key-file
     let out = pitwall(h.path(), &["status", "--port", &port, "--key-file", "/nonexistent/key"]);
     assert_eq!(out.status.code(), Some(1));
@@ -523,11 +523,32 @@ fn a_call_that_never_answers_times_out() {
         let (mut s, _) = l.accept().unwrap();
         let mut b = [0u8; 4096];
         let _ = s.read(&mut b);
-        std::thread::sleep(std::time::Duration::from_millis(2500));
+        // Hold the connection without answering until the client gives up and closes it (no fixed wait).
+        while s.read(&mut b).is_ok_and(|n| n > 0) {}
     });
     let h = home();
     let out = pitwall(h.path(), &["status", "--port", &port, "--timeout", "1"]);
     assert_eq!(out.status.code(), Some(1));
     assert!(text(&out.stderr).contains("did not answer within 1 s"));
     t.join().unwrap();
+}
+
+/// A loopback port that is bound and held but not listening: connecting is refused (Linux only: macOS drops the attempt, and Windows reports
+/// the refusal after about 2 s of SYN retries, close to the client's 3 s connect timeout).
+#[cfg(target_os = "linux")]
+fn refused_port() -> (socket2::Socket, u16) {
+    let s = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
+    s.bind(&std::net::SocketAddr::from(([127, 0, 0, 1], 0)).into()).unwrap();
+    let port = s.local_addr().unwrap().as_socket().unwrap().port();
+    (s, port)
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn nothing_listening_is_exit_3_with_the_next_step() {
+    let (_held, port) = refused_port();
+    let h = home();
+    let out = pitwall(h.path(), &["status", "--port", &port.to_string()]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(text(&out.stderr).contains("Start the Pitwall app"), "{}", text(&out.stderr));
 }

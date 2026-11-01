@@ -1,6 +1,7 @@
 import { answered, DISMISSED } from '@decryp7/paddock-ui/shell';
 import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { SettingsStatus } from '@decryp7/paddock-ui/shell/settings/window';
 import {
   CHANNELS_REMOVE_DIALOG_ID,
   CHANNELS_SECRET_DIALOG_ID,
@@ -99,7 +100,8 @@ describe('the Notification channels page', () => {
     const h = held({ channels: [WEBHOOK, NTFY], secrets: ['slack'], ...options });
     const dialogs = new FakeDialogs(h.memory);
     TestBed.configureTestingModule({
-      providers: [provideZonelessChangeDetection(), provideShellChannels({ backend: () => h.memory }), ...(events.length ? [{ provide: CHANNEL_EVENTS, useValue: events }] : []), ...(advanced === undefined ? [] : [{ provide: SettingsStore, useValue: { showAdvanced: signal(advanced) } }]), { provide: DialogService, useValue: dialogs }],
+      // SettingsStatus: the Settings window's footer line, which the page sets while its editor is open.
+      providers: [provideZonelessChangeDetection(), provideShellChannels({ backend: () => h.memory }), ...(events.length ? [{ provide: CHANNEL_EVENTS, useValue: events }] : []), ...(advanced === undefined ? [] : [{ provide: SettingsStore, useValue: { showAdvanced: signal(advanced) } }]), { provide: DialogService, useValue: dialogs }, SettingsStatus],
     });
     const fixture = TestBed.createComponent(PdChannelsPage);
     const el = fixture.nativeElement as HTMLElement;
@@ -249,6 +251,22 @@ describe('the Notification channels page', () => {
     expect(text(p.row('My-Slack'))).toContain('Renamed');
     expect(p.row('My-Slack').querySelectorAll('pd-status-pill')).toHaveLength(1);
     expect(p.memory.secretOf('My-Slack')).toBe('typed-elsewhere');
+  });
+
+  it('tells the Settings window’s footer that an open editor applies on Save, and lets go when it closes', async () => {
+    const p = await open();
+    const status = TestBed.inject(SettingsStatus);
+    expect(status.text()).toBeNull();
+    await p.click(p.rowButton('slack', 'channel-edit'));
+    expect(p.q('channel-editor')).toBeTruthy();
+    expect(status.text()).toBe('The channel is applied when you save it.');
+    await p.click('channel-cancel');
+    expect(p.q('channel-editor')).toBeNull();
+    expect(status.text()).toBeNull();
+    // The page leaving clears its claim too.
+    await p.click(p.rowButton('slack', 'channel-edit'));
+    p.fixture.destroy();
+    expect(status.text()).toBeNull();
   });
 
   it('shows the engine’s refusal of a save as it is and keeps the editor open', async () => {

@@ -1086,3 +1086,138 @@ fn the_automatic_check_is_due_after_the_start_up_delay_and_a_day() {
     *now.lock().unwrap() += state::AUTO_CHECK_INTERVAL_SECS;
     assert!(u.auto_check_due(), "a day later");
 }
+
+/// Local first: while the app's Offline mode is on, no check or download starts and nothing reaches the update server;
+/// the refusal says why and what to do. When it is switched off, the same request goes through.
+#[test]
+fn offline_mode_refuses_every_check_and_download_before_the_network() {
+    let on = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let flag = on.clone();
+    let r = rig_with(
+        "1.0.0",
+        Some(key()),
+        tempfile::tempdir().unwrap(),
+        move |u| {
+            u.with_offline_mode(Arc::new(move || {
+                if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    OfflineState::On
+                } else {
+                    OfflineState::Off
+                }
+            }))
+        },
+    );
+    r.publish("9.9.9", "update.bin.sig");
+    assert!(r.updater.offline_mode());
+    let refused = r.updater.begin_check().unwrap_err();
+    assert_eq!(refused, UpdateError::OfflineMode);
+    assert_eq!(refused.kind(), UpdateErrorKind::OfflineMode);
+    assert!(
+        refused.next_step().contains("Offline mode"),
+        "{}",
+        refused.next_step()
+    );
+    assert_eq!(r.phase(), UpdatePhase::Idle, "a refusal changes nothing");
+    assert_eq!(r.server.hits(MANIFEST_URL), 0, "the server was not asked");
+    assert!(
+        !r.updater.auto_check_due(),
+        "the automatic check is never due while offline"
+    );
+    on.store(false, std::sync::atomic::Ordering::SeqCst);
+    r.check().unwrap();
+    assert!(matches!(r.phase(), UpdatePhase::Available { .. }));
+    on.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        r.updater.begin_download().unwrap_err(),
+        UpdateError::OfflineMode
+    );
+    assert_eq!(r.server.hits(PACKAGE_URL), 0, "nothing was downloaded");
+    assert!(
+        matches!(r.phase(), UpdatePhase::Available { .. }),
+        "the update stays available for later"
+    );
+}
+
+/// Offline mode switched on after a check or download began (its job not yet run) stops it before the network; a check
+/// stopped so is not counted as a check.
+#[test]
+fn offline_mode_switched_on_mid_way_stops_before_the_network() {
+    let on = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = on.clone();
+    let r = rig_with(
+        "1.0.0",
+        Some(key()),
+        tempfile::tempdir().unwrap(),
+        move |u| {
+            u.with_offline_mode(Arc::new(move || {
+                if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    OfflineState::On
+                } else {
+                    OfflineState::Off
+                }
+            }))
+        },
+    );
+    r.publish("9.9.9", "update.bin.sig");
+    let (_, ticket) = r.updater.begin_check().unwrap();
+    on.store(true, std::sync::atomic::Ordering::SeqCst);
+    let ctx = job(&r.reg);
+    assert!(ctx.run(|c| r.updater.run_check(c, ticket)).is_err());
+    assert_eq!(r.server.hits(MANIFEST_URL), 0);
+    assert!(
+        matches!(r.phase(), UpdatePhase::Failed { error, .. } if error.kind() == UpdateErrorKind::OfflineMode),
+        "{:?}",
+        r.phase()
+    );
+    assert_eq!(
+        r.records.load().last_checked,
+        None,
+        "not counted as a check"
+    );
+
+    on.store(false, std::sync::atomic::Ordering::SeqCst);
+    r.check().unwrap();
+    let (_, ticket) = r.updater.begin_download().unwrap();
+    on.store(true, std::sync::atomic::Ordering::SeqCst);
+    let ctx = job(&r.reg);
+    assert!(
+        ctx.run(|c| r.updater.run_download(c, ticket.unwrap()))
+            .is_err()
+    );
+    assert_eq!(r.server.hits(PACKAGE_URL), 0);
+    assert!(r.downloads().is_empty());
+}
+
+/// Not confirmed off blocks like on (fail closed) but says so with its own kind and words; a predicate that panics
+/// counts as not confirmed. Without a predicate the updater is online.
+#[test]
+fn an_unknown_or_panicking_offline_state_blocks_and_says_it_could_not_be_confirmed() {
+    let r = rig_with("1.0.0", Some(key()), tempfile::tempdir().unwrap(), |u| {
+        u.with_offline_mode(Arc::new(|| OfflineState::Unknown))
+    });
+    r.publish("9.9.9", "update.bin.sig");
+    let refused = r.updater.begin_check().unwrap_err();
+    assert_eq!(refused, UpdateError::OfflineUnknown);
+    assert_eq!(refused.kind(), UpdateErrorKind::OfflineUnknown);
+    assert!(
+        refused.message().contains("could not be confirmed"),
+        "{}",
+        refused.message()
+    );
+    assert!(
+        !refused.message().contains("is on"),
+        "unknown is not said to be on"
+    );
+    assert_eq!(r.server.hits(MANIFEST_URL), 0);
+    assert!(!r.updater.auto_check_due());
+
+    let panics = rig_with("1.0.0", Some(key()), tempfile::tempdir().unwrap(), |u| {
+        u.with_offline_mode(Arc::new(|| panic!("the setting could not be read")))
+    });
+    assert!(panics.updater.offline_mode());
+    assert_eq!(
+        panics.updater.begin_check().unwrap_err(),
+        UpdateError::OfflineUnknown
+    );
+    assert!(!rig().updater.offline_mode());
+}

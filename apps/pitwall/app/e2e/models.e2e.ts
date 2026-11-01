@@ -30,10 +30,10 @@ test.describe('models', () => {
     const panel = page.locator('pw-slots-panel');
     await expect(panel).toContainText('Parallel slots · Qwen3.5 9B');
     await expect(panel.getByRole('radio', { name: /^4 adds ~/ })).toBeVisible();
-    await expect(panel.locator('.fit-table tbody tr')).toHaveCount(4);
+    await expect(panel.locator('table.choices tbody tr')).toHaveCount(4);
     await expect(panel.locator('.sum')).toContainText('requests at once');
     await panel.getByRole('radio', { name: /^8 / }).click();
-    await expect(panel.locator('.fit-table tr.sel')).toContainText('8');
+    await expect(panel.locator('table.choices tr.selected')).toContainText('8');
     await panel.getByRole('button', { name: 'Save 8 slots' }).click();
     await expect(page.getByText(/8 slots saved\. Qwen3.5 9B keeps 2 slots until it loads again/)).toBeVisible();
     await expect(page.getByRole('button', { name: /^Parallel slots for Qwen3.5 9B: 8 slots/ })).toBeVisible();
@@ -62,7 +62,7 @@ test.describe('models', () => {
     await openApp(page, '/models');
     await page.getByRole('tab', { name: /Discover/ }).click();
     await expect(page.getByText('Recommended for this machine')).toBeVisible();
-    await page.getByRole('button', { name: 'code', exact: true }).click();
+    await page.getByRole('option', { name: 'Code', exact: true }).click();
     await expect(page.getByRole('list', { name: 'Recommended models' }).getByRole('listitem')).toHaveCount(2);
     await page.getByRole('button', { name: /^Download Qwen3.6 35B-A3B/ }).click();
     await page.getByRole('tab', { name: /Downloads/ }).click();
@@ -78,19 +78,23 @@ test.describe('models', () => {
 
     await page.getByRole('button', { name: 'New preset' }).first().click();
     await page.getByLabel('Name apps send as the model').fill('dyno-notes');
-    await page.getByLabel('Serves from').fill('auto:chat,small');
+    await page.getByRole('combobox', { name: 'Serves from' }).fill('auto:chat,small');
     await page.getByLabel('Temperature').fill('0.4');
     const preview = page.getByRole('status', { name: 'What this preset resolves to' });
     await expect(preview).toContainText('Would serve');
-    await page.getByLabel('Serves from').fill('no-such-model');
+    await page.getByRole('combobox', { name: 'Serves from' }).fill('no-such-model');
     await expect(preview).toContainText('Cannot be saved');
     await expect(page.getByRole('button', { name: 'Create preset' })).toBeDisabled();
-    await page.getByLabel('Serves from').fill('auto:chat,small');
+    await page.getByRole('combobox', { name: 'Serves from' }).fill('auto:chat,small');
+    // Leave the field (Tab): with the taller outlined fields its suggestions lie over the form's buttons while it has focus.
+    await page.getByRole('combobox', { name: 'Serves from' }).press('Tab');
     await page.getByRole('button', { name: 'Create preset' }).click();
-    await expect(list.getByRole('row', { name: /dyno-notes/ })).toContainText('temperature 0.4');
+    await expect(list.getByRole('row', { name: /dyno-notes/ })).toContainText('Temperature 0.4');
 
     await page.getByRole('button', { name: 'Edit legacy-explain' }).click();
-    await page.getByLabel('Serves from').fill('qwen3.5-9b-q4_k_m');
+    await page.getByRole('combobox', { name: 'Serves from' }).fill('qwen3.5-9b-q4_k_m');
+    // Leave the field as a user does (Tab): its suggestions close instead of lying over the form's buttons.
+    await page.getByRole('combobox', { name: 'Serves from' }).press('Tab');
     await page.getByRole('button', { name: 'Save preset' }).click();
     await expect(list).not.toContainText('Model removed');
 

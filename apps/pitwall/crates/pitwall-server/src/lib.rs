@@ -16,6 +16,7 @@ pub mod http;
 pub mod leftovers;
 pub mod library;
 pub mod mgmt;
+pub mod ops;
 pub mod os_signals;
 pub mod paths;
 pub mod process;

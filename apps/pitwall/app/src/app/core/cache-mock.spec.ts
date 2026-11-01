@@ -19,11 +19,24 @@ describe('mock cache data', () => {
     });
   });
 
-  it('opts one suite app into cached answers and leaves the rest off', () => {
+  it('opts two suite apps into cached answers and leaves the rest off', () => {
     const on = demoApps(now).filter((a) => a.permissions.cacheResponses);
-    expect(on.map((a) => a.id)).toEqual(['debrief']);
-    expect(on[0]!.suite).toBe(true);
-    expect(on[0]!.today.cacheHits).toBeGreaterThan(0);
+    expect(on.map((a) => a.id)).toEqual(['debrief', 'spotter']);
+    expect(on.every((a) => a.suite && a.today.cacheHits > 0)).toBe(true);
+  });
+
+  it('has cache hits only for apps that opted in, so no screen contradicts the switch', () => {
+    for (const a of demoApps(now)) if (!a.permissions.cacheResponses) expect(a.today.cacheHits, a.id).toBe(0);
+  });
+
+  it('answers a cache hit without a queue or a cold start', () => {
+    const hits = demoRequests(now).filter((r) => r.cache === 'hit');
+    expect(hits.length).toBeGreaterThan(0);
+    for (const r of hits) {
+      expect(r.queuedMs).toBe(0);
+      expect(r.coldStartMs).toBeNull();
+      expect(r.totalMs).toBeGreaterThanOrEqual(r.queuedMs);
+    }
   });
 
   it('has hit, miss and bypass outcomes and reused prompt tokens in the request log', () => {

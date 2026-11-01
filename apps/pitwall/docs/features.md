@@ -355,7 +355,13 @@ When you quit Pitwall: keep serving, stop serving, or ask each time.
 
 ![When you quit Pitwall](screenshots/settings-quit-light.png)
 
-![Quit Pitwall? question](screenshots/quit-dialog-light.png)
+![The quit question, "Keep serving after you quit?"](screenshots/quit-dialog-light.png)
+
+Every change is saved by itself a moment after you make it; there is no Save button. A number out of range says what to fix next
+to it and is not saved, and a save the server refuses keeps your change and offers Undo change and Retry. A change still waiting
+is saved when the window closes.
+
+![Background service](screenshots/settings-service-light.png)
 
 - **General**: start at login, theme (system, light, dark), **When you quit Pitwall** (keep serving in the background, stop
   serving, or ask each time; [ADR 0021](adr/0021-what-quitting-does-about-serving.md)). Works.
@@ -380,8 +386,9 @@ falls back to the backup and then the defaults. Works.
   logic (`pitwall-server install`, the launch agent, the Windows service) and the app's install action exist and are unit-tested; they have not been run on real Windows and Linux machines.
 - **Discovery**: a running server writes `discovery.json` (version, API version, pid, port, base URL, start time) and removes it
   on a clean stop. Works.
-- **Updates** use the Tauri updater against a signed `latest.json`; builds without the signing key are unsigned and report that
-  updates are not available. Not configured yet; see [releasing](releasing.md).
+- **Updates** are the shell's (Help > Check for updates…): the signed `latest.json` of the `pitwall-latest` release, checked
+  only when you ask or, if you turn it on, once a day; never while Offline mode is on or has not been confirmed off. Builds
+  without the signing key report that updates are not available; see [releasing](releasing.md).
 
 ## Security and privacy
 

@@ -38,7 +38,8 @@ export function duration(ms: number | null | undefined): string {
   const h = Math.floor(min / 60);
   const rest = min % 60;
   if (h < 48) return rest ? `${h} h ${rest} min` : `${h} h`;
-  return `${Math.round(h / 24)} d`;
+  const days = Math.round(h / 24);
+  return `${days} ${days === 1 ? 'day' : 'days'}`;
 }
 
 /** Seconds as a settings value: `90 s`, `5 min`, `2 h`. */
@@ -57,7 +58,7 @@ export function countdown(at: number, now: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
 }
 
-/** `just now`, `5 min ago`, `3 h ago`, `2 d ago`; future times as `in 5 min`. */
+/** `just now`, `5 min ago`, `3 h ago`, `2 days ago`; future times as `in 5 min`. */
 export function ago(at: number | null | undefined, now: number): string {
   if (at === null || at === undefined) return 'never';
   const diff = now - at;
@@ -121,4 +122,58 @@ export function concurrencyText(maxSlots: number): string {
 /** Tokens as a plain count with separators: `8,192 tokens`. */
 export function tokensText(n: number): string {
   return `${int(n)} ${n === 1 ? 'token' : 'tokens'}`;
+}
+
+/** A unit a table column states once in its header ("Size GB"), so its cells are bare, aligned numbers. */
+export type BytesUnit = 'B' | 'KB' | 'MB' | 'GB' | 'TB';
+
+/** The unit for a column of byte counts: the one its largest value reads best in (at least 1, under 1024). */
+export function bytesUnit(values: readonly (number | null | undefined)[]): BytesUnit {
+  const max = Math.max(0, ...values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v)));
+  let u = 0;
+  for (let v = max; v >= KIB && u < UNITS.length - 1; v /= KIB) u++;
+  return UNITS[u] as BytesUnit;
+}
+
+/**
+ * Bytes as a bare number in a column's unit, one precision per unit so a column never mixes `412` and `38.0`: B, KB and MB
+ * whole (`412`, `38`), GB and TB with `digits` decimals (`12.4`, `0.6`, `150.0`).
+ */
+export function bytesIn(n: number | null | undefined, unit: BytesUnit, digits = 1): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return '—';
+  const v = Math.max(0, n) / KIB ** UNITS.indexOf(unit);
+  return unit === 'GB' || unit === 'TB' ? v.toFixed(digits) : Math.round(v).toLocaleString('en-US');
+}
+
+/** A unit for a column of durations. */
+export type DurationUnit = 'ms' | 's' | 'min' | 'h';
+
+const MS_PER: Record<DurationUnit, number> = { ms: 1, s: 1000, min: 60_000, h: 3_600_000 };
+
+/** The unit for a column of durations in milliseconds: ms under 10 s, s under 10 min, min under 10 h, then h. */
+export function durationUnit(values: readonly (number | null | undefined)[]): DurationUnit {
+  const max = Math.max(0, ...values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v)));
+  if (max < 10_000) return 'ms';
+  if (max < 600_000) return 's';
+  if (max < 36_000_000) return 'min';
+  return 'h';
+}
+
+/** Milliseconds as a bare number in a column's unit: `955`, `2.2`, `48`; ms and min whole, s and h with one decimal under 100. */
+export function durationIn(ms: number | null | undefined, unit: DurationUnit): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return '—';
+  const v = Math.max(0, ms) / MS_PER[unit];
+  if (unit === 'ms' || unit === 'min') return Math.round(v).toLocaleString('en-US');
+  return v < 100 ? v.toFixed(1) : String(Math.round(v));
+}
+
+/**
+ * Whether a column says something: false when every row of three or more holds the same value (UI review 2 rules 5 and
+ * 7: a constant column of a list of records is hidden, its value said once elsewhere). Fewer than three rows always
+ * vary: two equal values are a coincidence, not a constant.
+ */
+export function varies<T>(rows: readonly T[], value: (row: T) => unknown): boolean {
+  if (rows.length < 3) return true;
+  const first = value(rows[0]!);
+  return rows.some((r) => value(r) !== first);
 }

@@ -25,32 +25,32 @@ import { cacheHitRate, cacheHitRateText, tokensSaved } from './usage-format';
     :host {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .tile {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-1);
+      gap: var(--pd-space-1);
       min-width: 0;
-      padding: var(--sp-3) var(--sp-4);
-      background: var(--bg-sunken);
-      border: 1px solid var(--border-soft);
-      border-radius: var(--r-md);
+      padding: var(--pd-space-3) var(--pd-space-4);
+      background: var(--pd-surface-2);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-control);
     }
     .label {
-      font-size: var(--fs-sm);
-      font-weight: var(--fw-medium);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-medium);
+      color: var(--pd-text-muted);
     }
     .value {
-      font-size: var(--fs-2xl);
-      font-weight: var(--fw-semibold);
+      font-size: var(--pd-text-title);
+      font-weight: var(--pd-weight-semibold);
       letter-spacing: -0.02em;
       line-height: 1.1;
     }
     .sub {
       margin: 0;
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
     }
   `,
 })

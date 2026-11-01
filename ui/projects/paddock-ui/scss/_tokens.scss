@@ -102,6 +102,9 @@
   --pd-card-padding: 16px;
   --pd-card-gap: 16px;
   --pd-control-height: 28px;
+  // A labelled outlined field: the control height plus 8 px above and below its text row, the least that keeps the floated label
+  // (it reaches about 7 px into the box) clear of the text. 44 / 48 / 40 px at standard / comfortable / compact (set per density below).
+  --pd-field-height: calc(var(--pd-control-height) + 2 * var(--pd-space-2));
   --pd-button-height: 32px;
   --pd-hit-min: 24px;
   // The resting colour of a row's "..." button: subtle text mixed 75 % into the surface, 3:1 or better (SC 1.4.11); hover, focus and

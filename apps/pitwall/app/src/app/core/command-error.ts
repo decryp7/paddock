@@ -12,6 +12,7 @@ const CODES: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
   'busy',
   'notAvailable',
   'notImplemented',
+  'cancelled',
   'internal',
 ]);
 

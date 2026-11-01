@@ -4,25 +4,25 @@ import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import { Toasts } from '../../core/toasts';
 import { registerIcons } from '../icons';
-import { ContextMenuService } from './context-menu';
 import { DetailPanel } from './detail-panel';
 import { Fact } from './fact';
-import { RowMenu } from './row-menu';
+import { ItemsMenu, MoreButton } from './menu';
 import { fromControl, isMenuKey, moveRowFocus, rowTarget } from './row-nav';
 
 @Component({
-  imports: [DetailPanel, Fact, RowMenu],
+  imports: [DetailPanel, Fact, ItemsMenu, MoreButton],
   template: `
     <button id="opener" type="button">opener</button>
     @if (open()) {
       <pw-detail-panel heading="Qwen3" sub="repo" (closed)="open.set(false)">
-        <pw-row-menu panel-actions [items]="items" label="More for Qwen3" />
+        <pw-more-button panel-actions [menu]="menu.menu()" [items]="items" label="More for Qwen3" />
         <button panel-toolbar type="button">Tool</button>
         <pw-fact label="Repository" value="a/b" [copy]="true" [mono]="true" />
         <pw-fact label="Size" value="5 GB" />
         <button panel-footer type="button">Foot</button>
       </pw-detail-panel>
     }
+    <pw-items-menu #menu label="Model actions" />
   `,
 })
 class Host {
@@ -124,7 +124,7 @@ describe('DetailPanel, Fact and RowMenu', () => {
     fixture.componentInstance.open.set(true);
     fixture.detectChanges();
     const pane = document.createElement('div');
-    pane.className = 'pw-menu';
+    pane.className = 'mat-mdc-menu-panel';
     document.body.append(pane);
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     fixture.detectChanges();
@@ -161,13 +161,15 @@ describe('DetailPanel, Fact and RowMenu', () => {
     const el = fixture.nativeElement as HTMLElement;
     el.querySelector<HTMLButtonElement>('button[aria-label="More for Qwen3"]')!.click();
     fixture.detectChanges();
-    const items = Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item'));
+    await fixture.whenStable();
+    const panel = document.querySelector<HTMLElement>('.mat-mdc-menu-panel')!;
+    expect(panel.getAttribute('aria-label')).toBe('Model actions');
+    const items = Array.from(panel.querySelectorAll<HTMLButtonElement>('[mat-menu-item]'));
     expect(items.map((b) => b.textContent!.trim())).toEqual(['One', 'Delete…']);
     expect(items[1]!.classList.contains('danger')).toBe(true);
-    expect(document.querySelector('.pw-menu hr')).not.toBeNull();
+    expect(panel.querySelector('hr.pw-menu-divider')).not.toBeNull();
     items[1]!.click();
     expect(fixture.componentInstance.ran).toEqual(['del']);
-    TestBed.inject(ContextMenuService).close();
     el.remove();
   });
 });

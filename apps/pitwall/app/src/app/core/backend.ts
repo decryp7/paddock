@@ -4,7 +4,6 @@ import type {
   CacheClearScope,
   CacheInfo,
   AppPermissions,
-  AppUpdateStatus,
   BenchmarkResult,
   BuildCapabilities,
   EnginePinState,
@@ -27,6 +26,7 @@ import type {
   UsageSeries,
   HfModel,
   HfRepo,
+  JobEvent,
   LiveUpdate,
   LocalModel,
   Overview,
@@ -42,7 +42,6 @@ import type {
   Settings,
   UpdateCheckResult,
   UpdateCheckStatus,
-  UpdateInfo,
   UpdateNotice,
   UpdateSchedule,
 } from './api.types';
@@ -71,7 +70,17 @@ export interface PitwallBackend {
   /** Empties caches; resolves to the number of entries removed. */
   clearCache(scope: CacheClearScope): Promise<number>;
   applyPreset(preset: Preset): Promise<Settings>;
+  /** Cancels a queued or running inference request of the server's queue (the dashboard's queue card; string id). Not for background jobs: see {@link jobCancel}. */
   cancelJob(id: string): Promise<void>;
+  /**
+   * Events of every background job (ADR 0024) until the returned function is called. The methods in {@link JOB_METHODS}
+   * run as jobs: they never time out in the UI (ER-19), they report phase and progress here, and Cancel works in every phase.
+   */
+  jobEvents(listener: (event: JobEvent) => void): Unsubscribe;
+  /** Cancels a background job of the app ({@link JOB_METHODS}; numeric id). Not for queue requests: see {@link cancelJob}. False when it is unknown, finished or in a step that cannot be interrupted. */
+  jobCancel(jobId: number): Promise<boolean>;
+  /** Stops waiting for a job whose Cancel did not take effect (the server may still be working); false when not offered. */
+  jobStopWaiting(jobId: number): Promise<boolean>;
 
   // Models
   localModels(): Promise<LocalModel[]>;
@@ -157,11 +166,6 @@ export interface PitwallBackend {
   // Settings
   settings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<Settings>;
-  appUpdateStatus(): Promise<AppUpdateStatus>;
-  /** Looks for a newer release; only when the user asks. Null: this is the latest. */
-  checkAppUpdate(): Promise<UpdateInfo | null>;
-  /** Installs the update the last check found; the app restarts. */
-  installAppUpdate(): Promise<void>;
 
   // The server as an OS service, and start at log-in (app commands, not management calls)
   serviceState(): Promise<ServiceInstall>;
@@ -182,6 +186,16 @@ export interface PitwallBackend {
   autostart(): Promise<boolean>;
   setAutostart(enabled: boolean): Promise<boolean>;
 }
+
+/** The calls that run as background jobs: no timeout, live phase-labelled progress, Cancel (ER-17..19, ADR 0024). */
+export const JOB_METHODS: ReadonlySet<keyof PitwallBackend> = new Set<keyof PitwallBackend>([
+  'loadModel',
+  'runBenchmark',
+  'checkUpdatesNow',
+  'installService',
+  'uninstallService',
+  'repairService',
+]);
 
 export const BACKEND = new InjectionToken<PitwallBackend>('PitwallBackend');
 

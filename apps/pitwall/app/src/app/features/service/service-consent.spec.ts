@@ -1,9 +1,9 @@
-import { Dialog, DialogRef } from '@angular/cdk/dialog';
 import { TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { renderFramed } from '@decryp7/paddock-ui/shell/testing';
+import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
-import { render, settle } from '../../../testing/render';
-import { ServiceConsent, ServiceConsentPrompt, consentDetail } from './service-consent';
+import { dialogsAnswering } from '../../../testing/render';
+import { CONSENT_DIALOG_ID, ServiceConsentDialog, ServiceConsentPrompt, consentDetail, type ConsentAnswer } from './service-consent';
 import { ServiceStore } from './service.store';
 
 describe('consentDetail', () => {
@@ -14,67 +14,89 @@ describe('consentDetail', () => {
   });
 });
 
-describe('ServiceConsent', () => {
-  it('shows the question with the platform wording and three answers', async () => {
-    const close = vi.fn();
-    TestBed.configureTestingModule({ providers: [{ provide: DialogRef, useValue: { close } }] });
-    const { el } = await render(ServiceConsent, new MockBackend({ askConsent: true }));
-    expect(el.querySelector('h2')?.textContent).toContain('background');
-    expect(Array.from(el.querySelectorAll('button')).map((b) => b.textContent?.trim())).toEqual(['No thanks', 'Not now', 'Run in the background']);
-    for (const [i, answer] of ['decline', 'later', 'install'].entries()) {
-      el.querySelectorAll('button')[i]?.click();
-      expect(close).toHaveBeenLastCalledWith(answer);
-    }
+describe('ServiceConsentDialog (pw.service-consent)', () => {
+  const open = (platform = 'macos') => renderFramed(ServiceConsentDialog, { id: CONSENT_DIALOG_ID, kind: 'decision', modality: 'modal', inputs: { platform } });
+  afterEach(() => delete document.documentElement.dataset['platform']);
+
+  it('asks with the platform’s wording, Not now as the way out and Run in the background as the answer', async () => {
+    document.documentElement.dataset['platform'] = 'macos';
+    const d = await open();
+    expect(d.heading()).toBe("Run Pitwall's server in the background?");
+    expect(d.q('consent-detail')!.textContent).toContain('Login Items');
+    expect(d.actions()).toEqual(['not-now', 'install']);
+    expect(document.activeElement).toBe(d.action('install'));
+    await d.press('install');
+    expect(d.outcome()).toEqual({ kind: 'answered', value: { install: true, dontAsk: false } });
+  });
+
+  it('Not now and Escape answer nothing, so the question comes back next time', async () => {
+    const d = await open('windows');
+    expect(d.q('consent-detail')!.textContent).toContain('administrator');
+    await d.press('not-now');
+    expect(d.outcome()).toEqual({ kind: 'dismissed' });
+    TestBed.resetTestingModule();
+    const e = await open();
+    await e.key('Escape');
+    expect(e.outcome()).toEqual({ kind: 'dismissed' });
+  });
+
+  it('with "Don\'t ask again" ticked, Not now (or Escape) answers never ask again', async () => {
+    const d = await open();
+    d.q('consent-never')!.querySelector<HTMLInputElement>('input')!.click();
+    await d.stable();
+    await d.press('not-now');
+    expect(d.outcome()).toEqual({ kind: 'answered', value: { install: false, dontAsk: true } });
+    TestBed.resetTestingModule();
+    const e = await open();
+    e.q('consent-never')!.querySelector<HTMLInputElement>('input')!.click();
+    await e.stable();
+    await e.key('Escape');
+    expect(e.outcome()).toEqual({ kind: 'answered', value: { install: false, dontAsk: true } });
   });
 });
 
 describe('ServiceConsentPrompt', () => {
-  async function setup(answer: string | undefined, options = { askConsent: true }) {
+  async function setup(answer: ConsentAnswer | undefined, options = { askConsent: true }) {
     const backend = new MockBackend(options);
-    const open = vi.fn(() => ({ closed: of(answer) }));
-    TestBed.configureTestingModule({ providers: [{ provide: DialogRef, useValue: { close: vi.fn() } }, { provide: Dialog, useValue: { open } }] });
-    await render(ServiceConsent, backend);
+    const dialogs = dialogsAnswering(() => answer);
+    TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: backend }, dialogs] });
     const store = TestBed.inject(ServiceStore);
     await store.refresh();
-    return { prompt: TestBed.inject(ServiceConsentPrompt), store, open, backend };
+    return { prompt: TestBed.inject(ServiceConsentPrompt), store, opened: dialogs.opened, backend };
   }
 
   it('does not ask when there is no question pending', async () => {
-    const { prompt, open } = await setup('install', { askConsent: false });
+    const { prompt, opened } = await setup({ install: true, dontAsk: false }, { askConsent: false });
     await prompt.ask();
-    expect(open).not.toHaveBeenCalled();
+    expect(opened).toEqual([]);
   });
 
-  it('installs the service on yes', async () => {
-    const { prompt, store } = await setup('install');
+  it('opens its window with the platform and installs the service on yes', async () => {
+    const { prompt, store, opened } = await setup({ install: true, dontAsk: false });
     await prompt.ask();
+    expect(opened[0]).toMatchObject({ id: CONSENT_DIALOG_ID, inputs: { platform: store.service()?.platform } });
     expect(store.service()?.installed).toBe(true);
   });
 
-  it('remembers no', async () => {
-    const { prompt, store, backend } = await setup('decline');
+  it('remembers "Don\'t ask again"', async () => {
+    const { prompt, store, backend } = await setup({ install: false, dontAsk: true });
     const spy = vi.spyOn(backend, 'declineService');
     await prompt.ask();
     expect(spy).toHaveBeenCalled();
     expect(store.askConsent()).toBe(false);
   });
 
-  it('later and a dismissed dialog hide the question without remembering it', async () => {
-    const a = await setup('later');
-    const spy = vi.spyOn(a.backend, 'declineService');
-    await a.prompt.ask();
-    expect(a.store.askConsent()).toBe(false);
+  it('Not now hides the question without remembering it', async () => {
+    const { prompt, store, backend } = await setup(undefined);
+    const spy = vi.spyOn(backend, 'declineService');
+    await prompt.ask();
+    expect(store.askConsent()).toBe(false);
     expect(spy).not.toHaveBeenCalled();
-    TestBed.resetTestingModule();
-    const b = await setup(undefined);
-    await b.prompt.ask();
-    expect(b.store.askConsent()).toBe(false);
   });
 
   it('never opens two questions at once', async () => {
-    const { prompt, open } = await setup('later');
+    const { prompt, opened } = await setup(undefined);
     await Promise.all([prompt.ask(), prompt.ask()]);
-    await settle();
-    expect(open).toHaveBeenCalledTimes(1);
+    expect(opened).toHaveLength(1);
   });
 });

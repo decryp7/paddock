@@ -35,6 +35,7 @@ import {
 } from '@decryp7/paddock-ui/shell/channels';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { SettingsStore } from '@decryp7/paddock-ui/shell/settings';
+import { settingsPageStatus } from '@decryp7/paddock-ui/shell/settings/window';
 import { CHANNELS_STYLES } from './styles';
 
 /**
@@ -358,6 +359,8 @@ export class PdChannelsPage {
   private readonly sessionSecrets = signal<readonly string[]>([]);
   /** The ids being edited is the one the draft has, if saved. */
   protected readonly editingId = computed(() => (this.open() ? this.model().id : null));
+  /** The Settings window's footer while the editor is open: the editor applies with its Save button, not as you type. */
+  private readonly footer = settingsPageStatus(() => (this.open() ? this.t.saveToApply : null));
 
   protected readonly typeOptions: readonly PdSelectOption[] = [
     { value: 'webhook', label: $localize`:@@pd.channels.type.webhook:Webhook` },
@@ -425,6 +428,7 @@ export class PdChannelsPage {
     changeSecret: (type: TransportType) => (type === 'email' ? $localize`:@@pd.channels.change-password:Change password…` : $localize`:@@pd.channels.change-token:Change token…`),
     removeSecret: $localize`:@@pd.channels.remove-secret:Remove secret`,
     save: $localize`:@@pd.channels.save:Save`,
+    saveToApply: $localize`:@@pd.channels.save-to-apply:The channel is applied when you save it.`,
     cancel: $localize`:@@pd.channels.cancel:Cancel`,
     sendTest: $localize`:@@pd.channels.send-test:Send test`,
     saveFailed: $localize`:@@pd.channels.save-failed-title:The channel was not saved.`,

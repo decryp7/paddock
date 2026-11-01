@@ -322,7 +322,12 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   button (the next step). **Error states**: icon in danger, what failed in plain words, likely cause, Retry + secondary
   ("Open logs"). Never raw exception text as the headline.
 - **Forms**: every field is a Material outline field (`mat-form-field appearance="outline"` with `floatLabel="always"`, rule 47
-  and decision D1, 2026-10-28): the label 12/500 sits in the outline's notch and stays there, empty or not; helper 12 muted
+  and decision D1, 2026-10-28): the label 12/500 sits in the outline's notch and stays there, empty or not. A labelled field is
+  `--pd-field-height`, the control height plus 8 px above and below its text row (44 px at the standard density; 40 compact, 48 comfortable), so the
+  label never touches the text and the text keeps 8 px from the outline; a textarea has the same padding and grows; a field
+  without a label (a toolbar filter) is the control height. Do not mix a labelled field with a field without a label, or a
+  labelled field with a 32 px button, in one row unless the row centres its items: use `.pd-field-row` (controls.css; items share
+  one vertical centre), and keep fields with a hint or error line in a top-aligned column instead. Helper 12 muted
   under the field, replaced by the error in danger with its icon; validate on blur. Selects are `mat-select`, times
   `mat-timepicker`, a few exclusive choices `mat-button-toggle-group`. Toggles are for immediate effects, checkboxes for form
   submit; group settings by consequence, not by data model. (UI rule 11, "label above the input", is superseded: the label is in the notch.)
@@ -353,7 +358,8 @@ one is declared elsewhere in the file); colour tokens stay in the `:root` block 
   fields:** the floated label sits on the border, so a ring around the box would cross it; the field's own outline is the ring
   instead, in `--pd-focus-ring` at 3 px (the resting 1 px border is part of it, so 2 px of new pixels change, SC 2.4.13).
 - **Measured:** `npm run test:tokens` checks the contrast of every bridged component in both schemes and all accents; the gallery
-  page "Material controls" and its e2e check the rendered sizes (28 px rows, 4 px panel padding, 12 px floated label).
+  page "Material controls" and its e2e check the rendered sizes (28 px rows, 4 px panel padding, 12 px floated label, labelled
+  fields 44 px with the label clear of the text and 8 px from text to outline).
 
 ## 9. Motion
 

@@ -68,9 +68,9 @@ const MAX_HOLD_SECS = 3600;
     .hint { margin: calc(-1 * var(--sp-2)) 0 0; padding-inline: var(--sp-4); color: var(--text-3); font-size: var(--fs-xs); }
     .hint + .two { margin-top: var(--sp-2); }
     .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
-    /* A segmented control labelled like an outline field: the label sits on its top border, and it is as tall as a field, so a
+    /* A segmented control labelled like an outline field: the label sits on its top border, and it is as tall as a labelled field (the shared form-field height), so a
        row's controls share top and bottom. The label is decoration (the control carries the accessible name). */
-    .seg-field { position: relative; height: var(--pd-field-height, 28px); min-width: 0; --mat-button-toggle-height: calc(var(--pd-field-height, 28px) - 2px); }
+    .seg-field { position: relative; height: var(--mat-form-field-container-height); min-width: 0; --mat-button-toggle-height: calc(var(--mat-form-field-container-height) - 2px); }
     .seg-field pd-segmented-control { display: block; }
     .seg-label { position: absolute; top: -8px; left: var(--sp-3); z-index: 1; padding: 0 var(--sp-1); background: var(--pd-surface-2); color: var(--text-2); font-size: var(--fs-xs); line-height: 1; }
     /* The segments sit 3 px inside the control's border, so the selected one's ring starts below the legend's notch (the legend stays centred
@@ -83,7 +83,7 @@ const MAX_HOLD_SECS = 3600;
     .hold pd-field ::ng-deep .mat-mdc-form-field-subscript-wrapper { overflow: visible; }
     .hold pd-field ::ng-deep .mat-mdc-form-field-hint-wrapper { overflow: visible; }
     .hold pd-field ::ng-deep .pd-field__hint { white-space: nowrap; }
-    .unit-seg { --mat-button-toggle-height: calc(var(--pd-field-height, 28px) - 2px); }
+    .unit-seg { --mat-button-toggle-height: calc(var(--mat-form-field-container-height) - 2px); }
     .tools { display: inline-flex; align-items: center; gap: var(--sp-1); }
     .tools dy-icon { --icon-size: 14px; }
     .unit { color: var(--text-3); font-size: var(--fs-sm); }

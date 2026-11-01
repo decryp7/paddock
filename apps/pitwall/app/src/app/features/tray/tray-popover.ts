@@ -1,17 +1,23 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterNextRender, computed, inject } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { LiveStore } from '../../core/live.store';
 import { WINDOW_CONTROL } from '../../core/window-control';
 import { bytes, percent, rate } from '../../shared/format';
 import { loadTone, pressureLook, servingLabel } from '../../shared/labels';
 import { injectNow } from '../../shared/now';
+import { observeHeight } from '../../shared/observe-height';
 import { HotModels } from '../dashboard/hot-models';
 import { UpdatesStore } from '../updates/updates.store';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatTooltip } from '@angular/material/tooltip';
 
-/** The tray / menu-bar popover (360×520, frameless): memory, hot models with countdowns, throughput and the key actions. */
+/**
+ * The tray / menu-bar popover (360 px wide, frameless, the window fitted to its content): memory, hot models with
+ * countdowns, throughput and the key actions.
+ */
 @Component({
   selector: 'pw-tray-popover',
-  imports: [MatIconModule, HotModels],
+  imports: [MatTooltip, MatIconButton, MatButton, MatIconModule, HotModels],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="tray">
@@ -27,7 +33,7 @@ import { UpdatesStore } from '../updates/updates.store';
             <span class="state"><span class="dot" aria-hidden="true"></span>Connecting…</span>
           }
         </div>
-        <button type="button" class="btn ghost icon sm" aria-label="Open Pitwall" (click)="open('/')"><mat-icon svgIcon="pw:open" aria-hidden="true" /></button>
+        <button type="button" matIconButton aria-label="Open Pitwall" matTooltip="Open Pitwall" (click)="open('/')"><mat-icon svgIcon="pw:open" aria-hidden="true" /></button>
       </header>
 
       @if (live.pairings().length; as n) {
@@ -45,7 +51,7 @@ import { UpdatesStore } from '../updates/updates.store';
       }
 
       @if (live.error() && !live.overview()) {
-        <p class="down" role="alert">The Pitwall server is not responding. <button type="button" class="btn sm" (click)="live.load()">Retry</button></p>
+        <p class="down" role="alert">The Pitwall server is not responding. <button type="button" matButton="outlined" (click)="live.load()">Retry</button></p>
       }
 
       @if (live.memory(); as m) {
@@ -72,9 +78,9 @@ import { UpdatesStore } from '../updates/updates.store';
       }
 
       <section class="stats" aria-label="Throughput">
-        <div><b class="num">{{ tps() }}</b><span>tok/s</span></div>
-        <div><b class="num">{{ live.queue()?.running?.length ?? 0 }}</b><span>running</span></div>
-        <div><b class="num">{{ live.queue()?.waiting?.length ?? 0 }}</b><span>waiting</span></div>
+        <div><b class="num">{{ tps() }}</b> <span>tok/s</span></div>
+        <div><b class="num">{{ live.queue()?.running?.length ?? 0 }}</b> <span>running</span></div>
+        <div><b class="num">{{ live.queue()?.waiting?.length ?? 0 }}</b> <span>waiting</span></div>
       </section>
 
       <section class="models" aria-label="Loaded models">
@@ -84,54 +90,56 @@ import { UpdatesStore } from '../updates/updates.store';
 
       <footer>
         @if (live.paused()) {
-          <button type="button" class="btn" [disabled]="live.isBusy()('serving')" (click)="live.setServing(false)"><mat-icon svgIcon="pw:play" aria-hidden="true" />Resume</button>
+          <button type="button" matButton="outlined" [disabled]="live.isBusy()('serving')" (click)="live.setServing(false)">Resume serving</button>
         } @else {
-          <button type="button" class="btn" [disabled]="live.isBusy()('serving') || !live.overview()" (click)="live.setServing(true)"><mat-icon svgIcon="pw:pause" aria-hidden="true" />Pause serving</button>
+          <button type="button" matButton="outlined" [disabled]="live.isBusy()('serving') || !live.overview()" (click)="live.setServing(true)">Pause serving</button>
         }
-        <button type="button" class="btn" [disabled]="live.isBusy()('release') || !live.overview()" (click)="live.releaseMemory()"><mat-icon svgIcon="pw:release" aria-hidden="true" />Release memory</button>
-        <button type="button" class="btn primary wide" (click)="open('/')">Open Pitwall</button>
+        <button type="button" matButton="outlined" [disabled]="live.isBusy()('release') || !live.overview()" (click)="live.releaseMemory()">Release memory</button>
+        <button type="button" matButton="filled" class="wide" (click)="open('/')">Open Pitwall</button>
       </footer>
     </div>
   `,
   styles: `
     :host {
       display: block;
-      height: 100vh;
+      min-height: 100vh;
+      background: var(--pd-bg);
     }
+    /* As tall as its content: the window is fitted to it (no empty card, no gap under the buttons). */
     .tray {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-2);
-      height: 100%;
-      padding: var(--sp-3) var(--sp-4) var(--sp-4);
-      background: var(--bg-content);
-      overflow: hidden;
+      gap: var(--pd-space-2);
+      padding: var(--pd-space-3) var(--pd-space-4);
+      background: var(--pd-bg);
     }
     .pairing {
       display: flex;
+      flex: none;
       align-items: center;
-      gap: var(--sp-2);
-      padding: var(--sp-2) var(--sp-3);
+      gap: var(--pd-space-2);
+      min-height: 32px;
+      padding: 6px var(--pd-space-3);
       font: inherit;
-      font-size: var(--fs-sm);
-      color: var(--text);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text);
       text-align: left;
-      background: var(--accent-soft);
-      border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-      border-radius: var(--r-md);
+      background: var(--pd-accent-tint);
+      border: 1px solid color-mix(in srgb, var(--pd-accent) 35%, transparent);
+      border-radius: var(--pd-radius-control);
       mat-icon {
-        color: var(--accent);
+        color: var(--pd-accent);
       }
     }
     .down {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sp-2);
-      padding: var(--sp-2) var(--sp-3);
-      font-size: var(--fs-sm);
-      background: var(--bad-soft);
-      border-radius: var(--r-md);
+      gap: var(--pd-space-2);
+      padding: var(--pd-space-2) var(--pd-space-3);
+      font-size: var(--pd-text-label);
+      background: var(--pd-danger-tint);
+      border-radius: var(--pd-radius-control);
     }
     header {
       display: flex;
@@ -144,7 +152,7 @@ import { UpdatesStore } from '../updates/updates.store';
       flex: none;
     }
     h1 {
-      font-size: var(--fs-lg);
+      font-size: var(--pd-text-subtitle);
     }
     .title {
       flex: 1;
@@ -159,100 +167,109 @@ import { UpdatesStore } from '../updates/updates.store';
       gap: 6px;
       height: 22px;
       padding: 0 8px;
-      font-size: var(--fs-xs);
-      font-weight: var(--fw-medium);
-      color: var(--text-2);
-      background: var(--bg-active);
-      border-radius: var(--r-full);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-medium);
+      color: var(--pd-text-muted);
+      background: var(--pd-pressed);
+      border-radius: var(--pd-radius-pill);
       white-space: nowrap;
       .dot {
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: var(--text-3);
+        background: var(--pd-text-subtle);
       }
       &[data-state='serving'] .dot {
-        background: var(--ok);
+        background: var(--pd-success);
       }
       &[data-state='paused'] .dot,
       &[data-state='stopped'] .dot {
-        background: var(--warn);
+        background: var(--pd-warning);
       }
       &[data-state='down'] .dot {
-        background: var(--bad);
+        background: var(--pd-danger);
       }
     }
     .mem,
     .stats,
     .models {
-      padding: var(--sp-3);
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
+      flex: none;
+      padding: var(--pd-space-3);
+      background: var(--pd-surface-1);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-card);
     }
     .mem {
       display: grid;
-      gap: 6px;
+      gap: var(--pd-space-1);
       .row {
         display: flex;
         align-items: center;
-        gap: var(--sp-2);
+        gap: var(--pd-space-2);
       }
       .k {
         width: 40px;
-        font-size: var(--fs-xs);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-muted);
       }
       .v {
         flex: 1;
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
       .small {
-        font-size: var(--fs-xs);
+        font-size: var(--pd-text-label);
       }
-      .meter {
-        margin-bottom: 4px;
+      .meter + .row {
+        margin-top: var(--pd-space-1);
       }
     }
+    /* One line: each figure with its unit beside it, so the loaded models keep the room. */
     .stats {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      padding: var(--sp-2) var(--sp-3);
+      padding: var(--pd-space-2) var(--pd-space-3);
       > div {
         display: flex;
-        flex-direction: column;
-        align-items: center;
+        align-items: baseline;
+        justify-content: center;
+        gap: var(--pd-space-1);
+        white-space: nowrap;
       }
       b {
-        font-size: var(--fs-xl);
-        font-weight: var(--fw-semibold);
+        font-size: var(--pd-text-body-lg);
+        font-weight: var(--pd-weight-semibold);
         font-variant-numeric: tabular-nums;
-        line-height: 1.2;
+        line-height: 1.4;
       }
       span {
-        font-size: var(--fs-xs);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-muted);
       }
     }
     .models {
-      flex: 1;
-      min-height: 0;
-      overflow: auto;
-      padding-top: var(--sp-2);
+      padding-top: var(--pd-space-2);
       h2 {
-        margin-bottom: var(--sp-1);
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-medium);
-        color: var(--text-2);
+        margin-bottom: var(--pd-space-1);
+        font-size: var(--pd-text-label);
+        font-weight: var(--pd-weight-medium);
+        color: var(--pd-text-muted);
       }
     }
     footer {
+      flex: none;
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
+      /* Two actions side by side in a 360 px popover, each on one line: words only (no icon), so both fit with room to spare. */
+      button {
+        min-width: 0;
+        white-space: nowrap;
+        --mat-button-outlined-horizontal-padding: var(--pd-space-2);
+        --mat-button-outlined-container-height: 32px;
+      }
       .wide {
         grid-column: 1 / -1;
-        height: 32px;
+        --mat-button-filled-container-height: 32px;
       }
     }
   `,
@@ -279,12 +296,19 @@ export class TrayPopover {
     if (!g || !g.vramTotal || g.vramUsed === null) return null;
     return { used: g.vramUsed, total: g.vramTotal, pct: percent(g.vramUsed, g.vramTotal), util: g.utilisation };
   });
-  /** Two loaded models fit under a banner, three without one; the rest is summarised so no row is cut off. */
-  protected readonly modelLimit = computed(() => (this.live.pairings().length > 0 || this.updates.count() > 0 ? 2 : 3));
+  /** Three loaded models fit without a banner, one fewer under each banner; the rest is summarised so no row is cut off. */
+  protected readonly modelLimit = computed(() => Math.max(1, 3 - (this.live.pairings().length > 0 ? 1 : 0) - (this.updates.count() > 0 ? 1 : 0)));
   protected readonly tps = computed(() => (this.live.paused() ? '0.0' : rate(this.live.throughput()?.genTps ?? 0)));
 
   constructor() {
     void this.updates.ensureLoaded();
+    // The popover is as tall as its content: the shell fits the window to the height the page reports.
+    const host = inject<ElementRef<HTMLElement>>(ElementRef);
+    const destroy = inject(DestroyRef);
+    afterNextRender(() => {
+      const tray = host.nativeElement.querySelector('.tray');
+      if (tray) destroy.onDestroy(observeHeight(tray, (h) => void this.windows.fitTray(h).catch(() => undefined)));
+    });
   }
 
   protected open(route: string): void {

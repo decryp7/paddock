@@ -6,7 +6,8 @@ import { toCommandError } from '../../core/command-error';
 import { LiveStore } from '../../core/live.store';
 import { Toasts } from '../../core/toasts';
 import { bytes } from '../../shared/format';
-import { Confirm } from '../../shared/ui/confirm';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 
 interface UpdatesState {
   notices: UpdateNotice[];
@@ -48,7 +49,7 @@ export const UpdatesStore = signalStore(
     noticesFor: computed(() => (modelId: string) => notices().filter((n) => n.modelId === modelId)),
     isBusy: computed(() => (key: string) => key in busy()),
   })),
-  withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts), confirm = inject(Confirm)) => {
+  withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts), dialogs = inject(DialogService)) => {
     const setBusy = (key: string, on: boolean) => {
       const next = { ...store.busy() };
       if (on) next[key] = true;
@@ -141,10 +142,10 @@ export const UpdatesStore = signalStore(
         if (store.isBusy()(n.id)) return false;
         const host = store.status()?.host ?? 'huggingface.co';
         const replaces = n.kind === 'newerRevision' ? ' It replaces the copy you have once it finishes and is verified.' : '';
-        const ok = await confirm.ask({
-          title: `Download ${n.file}?`,
+        const ok = await confirm(dialogs, {
+          heading: `Download ${n.file}?`,
           message: `${bytes(n.sizeBytes)} from ${host} (repository ${n.repo}).${replaces} Pitwall downloads nothing until you confirm.`,
-          confirm: 'Download',
+          confirm: { label: 'Download update' },
         });
         if (!ok) return false;
         setBusy(n.id, true);

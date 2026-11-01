@@ -7,11 +7,12 @@ import { Panel } from '../../shared/ui/panel';
 import { EngineCard } from './engine-card';
 import { EngineSetupBanner } from './engine-setup-banner';
 import { EnginesStore } from './engines.store';
+import { MatIconButton } from '@angular/material/button';
 
 /** The llama.cpp page (ADR 0020): builds, catalog, pins, self-test and processes. */
 @Component({
   selector: 'pw-engines-page',
-  imports: [MatIconModule, MatTooltipModule, Panel, EngineCard, EngineSetupBanner],
+  imports: [MatIconButton, MatIconModule, MatTooltipModule, Panel, EngineCard, EngineSetupBanner],
   providers: [EnginesStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -22,7 +23,7 @@ import { EnginesStore } from './engines.store';
           <p class="sub">The engine behind every model: pinned releases, verified and self-tested here.</p>
         </div>
         <div class="actions">
-          <button type="button" class="btn ghost icon" aria-label="Refresh" matTooltip="Refresh" (click)="store.load()" [disabled]="store.loading()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" /></button>
+          <button type="button" matIconButton aria-label="Refresh" matTooltip="Refresh" (click)="store.load()" [disabled]="store.loading()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" /></button>
         </div>
       </header>
 
@@ -46,7 +47,7 @@ import { EnginesStore } from './engines.store';
     .page {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-4);
+      gap: var(--pd-space-4);
     }
   `,
 })

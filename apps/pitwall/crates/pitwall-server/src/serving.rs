@@ -61,6 +61,9 @@ pub trait CapabilityGate: Send + Sync {
     fn blocked(&self, model: &str, caps: &[pitwall_core::select::Capability]) -> Vec<Blocked>;
 }
 
+/// The clock serving reads: milliseconds since the Unix epoch.
+pub type Clock = Arc<dyn Fn() -> u64 + Send + Sync>;
+
 /// One model in memory.
 pub struct HotModel {
     /// Its id.
@@ -80,6 +83,8 @@ pub struct HotModel {
     pub loaded_at: u64,
     active: AtomicUsize,
     last_used: AtomicU64,
+    /// The server's clock (see [`Clock`]).
+    clock: Clock,
     /// The context (KV cache and prompt cache) was cleared while idle; reset by the next request.
     context_released: std::sync::atomic::AtomicBool,
     /// Vision input works.
@@ -119,7 +124,7 @@ impl Drop for SlotGuard {
 
 impl HotModel {
     fn touch(&self) {
-        self.last_used.store(now_ms(), Ordering::SeqCst);
+        self.last_used.store((self.clock)(), Ordering::SeqCst);
     }
     fn as_hot(&self, pinned: bool, idle_override: Option<u64>) -> Hot {
         Hot {
@@ -190,6 +195,8 @@ struct Inner {
     hardware: RwLock<Hardware>,
     /// Live memory for load and release planning (`system::MemoryReader`); the host's unless a test pins a machine.
     memory: RwLock<system::MemoryReader>,
+    /// Milliseconds since the Unix epoch as serving sees them (idle timers, backoff); the system clock unless a test sets one.
+    clock: RwLock<Clock>,
     events: Arc<Mutex<EventLog>>,
     hot: Mutex<HashMap<ModelId, Arc<HotModel>>>,
     loading: Mutex<HashMap<ModelId, Arc<tokio::sync::Mutex<()>>>>,
@@ -268,6 +275,7 @@ impl Serving {
                 settings,
                 hardware: RwLock::new(hardware),
                 memory: RwLock::new(system::host_memory()),
+                clock: RwLock::new(Arc::new(now_ms) as Clock),
                 events,
                 hot: Mutex::new(HashMap::new()),
                 loading: Mutex::new(HashMap::new()),
@@ -309,12 +317,32 @@ impl Serving {
         }
     }
 
+    /// Replaces the clock the idle timers and restart backoff read (tests move time by hand instead of sleeping).
+    pub fn set_clock(&self, clock: Clock) {
+        match self.inner.clock.write() {
+            Ok(mut g) => *g = clock,
+            Err(p) => *p.into_inner() = clock,
+        }
+    }
+
+    fn clock(&self) -> Clock {
+        self.inner
+            .clock
+            .read()
+            .map(|c| c.clone())
+            .unwrap_or_else(|p| p.into_inner().clone())
+    }
+
+    fn now(&self) -> u64 {
+        (self.clock())()
+    }
+
     fn hw(&self) -> Hardware {
         self.inner.hardware.read().map(|h| h.clone()).unwrap_or_default()
     }
 
     fn event(&self, kind: EventKind, sev: Severity, msg: String) {
-        lock(&self.inner.events).push(now_ms(), kind, sev, msg);
+        lock(&self.inner.events).push(self.now(), kind, sev, msg);
     }
 
     /// Apply changed settings (caps, policy).
@@ -620,7 +648,7 @@ impl Serving {
                         kind,
                         app_cap,
                     },
-                    now_ms(),
+                    self.now(),
                 )
                 .map_err(|e| match e {
                     QueueError::Full(_) => api(ErrorKind::Overloaded, e.to_string()),
@@ -635,7 +663,7 @@ impl Serving {
             notified.as_mut().enable();
             {
                 let mut s = lock(&self.inner.sched);
-                let started = s.dispatch(now_ms());
+                let started = s.dispatch(self.now());
                 if started.contains(&id) || s.job(id).is_some_and(|j| j.state == pitwall_core::scheduler::JobState::Running) {
                     if !started.is_empty() {
                         self.inner.wake.notify_waiters();
@@ -811,7 +839,7 @@ impl Serving {
     async fn ensure_as(&self, id: &ModelId, auto_restart: bool, o: &LoadOverrides) -> Result<(Busy, Option<u64>), ApiError> {
         let gate = lock(&self.inner.loading).entry(id.clone()).or_default().clone();
         let _g = gate.lock().await;
-        self.inner.last_activity.store(now_ms(), Ordering::SeqCst);
+        self.inner.last_activity.store(self.now(), Ordering::SeqCst);
         if let Some(h) = lock(&self.inner.hot).get(id).cloned() {
             return Ok((Busy::new(h), None));
         }
@@ -888,7 +916,7 @@ impl Serving {
         };
         let running = started_engine.map_err(|e| {
             self.event(EventKind::EngineFailed, Severity::Error, format!("{id}: {e}"));
-            if lock(&self.inner.supervisor).crashed(id, now_ms(), auto_restart) == Outcome::GaveUp {
+            if lock(&self.inner.supervisor).crashed(id, self.now(), auto_restart) == Outcome::GaveUp {
                 self.event(
                     EventKind::EngineFailed,
                     Severity::Error,
@@ -902,19 +930,20 @@ impl Serving {
             }
         })?;
         let pid = running.child.as_ref().and_then(tokio::process::Child::id).unwrap_or(0);
-        let rss = if pid > 0 { system::rss(pid) } else { 0 };
+        let measured = if pid > 0 { system::memory(pid) } else { 0 };
         let vision = running.props.vision.unwrap_or(f.projector.is_some());
         let h = Arc::new(HotModel {
             id: id.clone(),
-            ram: if rss > 0 { rss.max(need.ram) } else { need.ram },
+            ram: accounted_ram(measured, need.ram),
             vram: need.vram,
             context: running.props.n_ctx.unwrap_or(context),
             context_per_slot: context,
             slots,
             running,
-            loaded_at: now_ms(),
+            loaded_at: self.now(),
             active: AtomicUsize::new(0),
-            last_used: AtomicU64::new(now_ms()),
+            last_used: AtomicU64::new(self.now()),
+            clock: self.clock(),
             context_released: std::sync::atomic::AtomicBool::new(false),
             vision,
             engine: (engine.id(), engine.kind()),
@@ -978,7 +1007,7 @@ impl Serving {
     /// Release the idle models the policy picks, and forget engines whose process died. Called every few seconds.
     pub fn tick(&self) -> Vec<Action> {
         let s = self.settings();
-        let now = now_ms();
+        let now = self.now();
         let dead: Vec<ModelId> = lock(&self.inner.hot)
             .iter()
             .filter(|(_, h)| h.running.child.is_some() && !h.running.client.port().get().eq(&0) && h.running_exited())
@@ -1016,23 +1045,33 @@ impl Serving {
             &s.memory.policy(),
             self.inner.last_activity.load(Ordering::SeqCst),
         );
-        for a in &actions {
-            match a {
+        // What was actually done: a context that was already released (or whose model became busy) is not in the list.
+        let mut taken = Vec::new();
+        for a in actions {
+            match &a {
                 Action::Unload(m, why) => {
                     self.unload(m, *why);
+                    taken.push(a);
                 }
-                Action::ReleaseContext(m, why) => self.release_context(m, *why),
+                Action::ReleaseContext(m, why) => {
+                    if self.release_context(m, *why) {
+                        taken.push(a);
+                    }
+                }
             }
         }
-        actions
+        taken
     }
 
     /// Clears an idle model's context before its weights are released: the engine's slots are erased (KV cache and
     /// cached prompts) in the background. A model that became busy meanwhile is left alone.
-    fn release_context(&self, id: &ModelId, why: ReleaseReason) {
-        let Some(h) = lock(&self.inner.hot).get(id).cloned() else { return };
+    /// `true` when a release was started, `false` when the model is gone, busy or was released already.
+    fn release_context(&self, id: &ModelId, why: ReleaseReason) -> bool {
+        let Some(h) = lock(&self.inner.hot).get(id).cloned() else {
+            return false;
+        };
         if h.active.load(Ordering::SeqCst) > 0 || h.context_released.swap(true, Ordering::SeqCst) {
-            return;
+            return false;
         }
         let slots = h.slots.get();
         let me = self.clone();
@@ -1059,6 +1098,7 @@ impl Serving {
                 format!("Cleared the context of {} ({why:?}); its weights stay loaded.", h.id),
             );
         });
+        true
     }
 
     /// Restarts a crashed model in the background; a failed attempt is another crash (backoff, then the loop guard).
@@ -1099,7 +1139,7 @@ impl Serving {
         let s = self.settings();
         let sys = self.memory_now();
         let policy = s.memory.policy();
-        let now = now_ms();
+        let now = self.now();
         lock(&self.inner.hot)
             .values()
             .map(|h| {
@@ -1322,9 +1362,34 @@ fn port_taken(e: &EngineError) -> bool {
     m.contains("address already in use") || m.contains("address in use") || m.contains("only one usage of each socket address")
 }
 
+/// The RAM a hot model is accounted with: what the engine process really uses (`system::memory`: footprint or PSS, never
+/// the resident size) once it is known, but never below the estimate made before loading, which also covers memory the
+/// engine has not touched yet. `0` measured (unreadable) keeps the estimate.
+fn accounted_ram(measured: u64, estimate: u64) -> u64 {
+    if measured > 0 {
+        measured.max(estimate)
+    } else {
+        estimate
+    }
+}
+
 #[cfg(test)]
 mod port_tests {
     use super::*;
+
+    #[test]
+    fn a_hot_model_is_accounted_by_its_measured_footprint_never_below_the_estimate() {
+        const MB: u64 = 1 << 20;
+        // A fake reader that measures the footprint (not the resident size, which would be 1,965 MB here).
+        let measured = system::memory_with(42, |_| Some(535 * MB));
+        assert_eq!(accounted_ram(measured, 400 * MB), 535 * MB);
+        assert_eq!(accounted_ram(measured, 900 * MB), 900 * MB, "the estimate is the floor");
+        assert_eq!(
+            accounted_ram(system::memory_with(43, |_| None), 400 * MB),
+            400 * MB,
+            "unreadable keeps the estimate"
+        );
+    }
 
     #[test]
     fn a_taken_port_is_recognised_on_every_platform() {

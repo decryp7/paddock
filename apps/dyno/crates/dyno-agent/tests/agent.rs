@@ -112,7 +112,7 @@ impl Harness {
 /// hang guard only a lost lock reaches.
 fn wait_until_free(dirs: &Dirs) {
     let began = std::time::Instant::now();
-    while dyno_agent::instance::is_held(dirs) {
+    while dyno_agent::instance::is_held_now(dirs) {
         assert!(
             began.elapsed() < Duration::from_secs(60),
             "the data folder's lock was never released"
