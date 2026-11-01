@@ -128,7 +128,7 @@ function checkLinks(lines, inFence, file, exists, problems) {
     const ref = /^\s{0,3}\[[^\]]+\]:\s+<?(\S+?)>?(?:\s+.*)?$/.exec(line);
     if (ref) targets.push(ref[1]);
     for (const t of targets) {
-      if (t === '' || /^[a-z][a-z0-9+.-]*:/i.test(t) || t.startsWith('//') || t.startsWith('/') || /[{}$]|<|>/.test(t)) continue;
+      if (t === '' || /^[a-z][a-z0-9+.-]*:/i.test(t) || t.startsWith('//') || t.startsWith('/') || t.startsWith('~') || /[{}$]|<|>/.test(t)) continue;
       const [pathPart, frag] = [t.split('#')[0].split('?')[0], t.includes('#') ? t.slice(t.indexOf('#') + 1) : null];
       if (pathPart === '') {
         if (frag && frag !== '' && !/^(L\d+|top)/.test(frag) && !slugs.has(decodeURIComponent(frag).toLowerCase()))
