@@ -14,22 +14,24 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf()
-}
+use crate::repo::{repo_root, require_repo};
 
-fn oracle(files: &[&str]) -> Value {
-    let out = Command::new("node")
-        .args(["scripts/affected.mjs", "--files", &files.join(","), "--explain"])
-        .current_dir(repo_root())
-        .output()
-        .expect("node is required: the golden test runs scripts/affected.mjs");
-    assert!(
-        out.status.success(),
-        "affected.mjs failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    serde_json::from_slice(&out.stdout).unwrap()
+fn oracle(files: &[&str], deadline: std::time::Instant) -> Value {
+    // Bounded: a hung node fails the test after the limit instead of waiting for nextest to terminate it.
+    let mut cmd = paddock_proc::command("node");
+    cmd.args(["scripts/affected.mjs", "--files", &files.join(","), "--explain"])
+        .current_dir(repo_root());
+    let out = paddock_proc::run_bounded(
+        cmd,
+        paddock_proc::Limits::new(
+            deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .max(Duration::from_secs(1)),
+        ),
+    )
+    .expect("node is required (and must finish in time): the golden test runs scripts/affected.mjs");
+    assert!(out.success(), "affected.mjs failed: {}", out.stderr_text());
+    serde_json::from_str(&out.stdout_text()).unwrap()
 }
 
 fn ours(files: &[&str]) -> Value {
@@ -88,12 +90,29 @@ const SAMPLES: &[&[&str]] = &[
 
 #[test]
 fn live_plan_matches_affected_mjs_on_sample_change_sets() {
-    if !repo_root().join("scripts/affected.mjs").exists() || Command::new("node").arg("--version").output().is_err() {
-        eprintln!("skipped: scripts/affected.mjs or node is not available (the recorded cases still run)");
+    if require_repo("golden::live_plan_matches_affected_mjs_on_sample_change_sets").is_none() {
         return;
     }
+    let mut version = paddock_proc::command("node");
+    version.arg("--version");
+    let node = paddock_proc::run_bounded(version, paddock_proc::Limits::new(Duration::from_secs(10))).is_ok_and(|o| o.success());
+    if !repo_root().join("scripts/affected.mjs").exists() || !node {
+        // In CI a missing oracle is a failure, not a quiet pass.
+        assert!(
+            !crate::repo::ci_on(std::env::var("CI").ok().as_deref()),
+            "node or scripts/affected.mjs is missing and CI is set: install node"
+        );
+        crate::repo::skipped("scripts/affected.mjs or node is not available (the recorded cases still run)");
+        return;
+    }
+    // One budget for all oracle runs.
+    let deadline = std::time::Instant::now() + Duration::from_secs(240);
     for files in SAMPLES {
-        assert_eq!(canonical(ours(files)), canonical(oracle(files)), "different plan for {files:?}");
+        assert_eq!(
+            canonical(ours(files)),
+            canonical(oracle(files, deadline)),
+            "different plan for {files:?}"
+        );
     }
 }
 

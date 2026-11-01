@@ -1,0 +1,154 @@
+[
+  {
+    "name": "plain-under-cap",
+    "mode": "plain",
+    "folder": "home/target-app-s1",
+    "cap": "100000"
+  },
+  {
+    "name": "plain-incremental-only",
+    "mode": "plain",
+    "folder": "home/target-app-s1",
+    "cap": "300"
+  },
+  {
+    "name": "plain-removes-folder",
+    "mode": "plain",
+    "folder": "home/target-app-s1",
+    "cap": "100"
+  },
+  {
+    "name": "plain-missing",
+    "mode": "plain",
+    "folder": "home/nope",
+    "cap": "1"
+  },
+  {
+    "name": "plain-symlink-root",
+    "mode": "plain",
+    "folder": "home/linkroot",
+    "cap": "1"
+  },
+  {
+    "name": "plain-bad-cap",
+    "mode": "plain",
+    "folder": "home/target-app-s1",
+    "cap": "many"
+  },
+  {
+    "name": "ci-owned-drop-bundles",
+    "mode": "ci",
+    "folder": "home/target-app-s1",
+    "cap": "300",
+    "slot": "s1",
+    "dropBundles": true
+  },
+  {
+    "name": "ci-owned-removes-folder",
+    "mode": "ci",
+    "folder": "home/target-app-s1",
+    "cap": "100",
+    "slot": "s1"
+  },
+  {
+    "name": "ci-other-slot",
+    "mode": "ci",
+    "folder": "home/target-app-s2",
+    "cap": "100",
+    "slot": "s1"
+  },
+  {
+    "name": "ci-no-slot",
+    "mode": "ci",
+    "folder": "home/target-app-s1",
+    "cap": "100",
+    "slot": ""
+  },
+  {
+    "name": "ci-outside-home",
+    "mode": "ci",
+    "folder": "other/build",
+    "cap": "100",
+    "slot": "s1"
+  },
+  {
+    "name": "ci-symlink",
+    "mode": "ci",
+    "folder": "home/linkroot",
+    "cap": "100",
+    "slot": "s1"
+  },
+  {
+    "name": "ci-not-target",
+    "mode": "ci",
+    "folder": "home/notes",
+    "cap": "100",
+    "slot": "s1"
+  },
+  {
+    "name": "ci-the-home",
+    "mode": "ci",
+    "folder": "home",
+    "cap": "100",
+    "slot": "s1"
+  },
+  {
+    "name": "ci-empty",
+    "mode": "ci",
+    "folder": "",
+    "cap": "100",
+    "slot": "s1"
+  },
+  {
+    "name": "ci-the-user-home-dot",
+    "mode": "ci",
+    "folder": "/.",
+    "cap": "100",
+    "slot": "s1"
+  },
+  {
+    "name": "ci-filesystem-root",
+    "mode": "ci",
+    "folder": "//",
+    "cap": "100",
+    "slot": "s1"
+  },
+  {
+    "name": "ci-dotted-path-out-of-the-home",
+    "mode": "ci",
+    "folder": "/home/target-app-s1/../../other",
+    "cap": "100",
+    "slot": "s1"
+  },
+  {
+    "name": "ci-empty-cap",
+    "mode": "ci",
+    "folder": "/home/target-app-s1",
+    "cap": "",
+    "slot": "s1"
+  },
+  {
+    "name": "ci-bad-cap",
+    "mode": "ci",
+    "folder": "/home/target-app-s1",
+    "cap": "many",
+    "slot": "s1"
+  },
+  {
+    "name": "plain-no-marker-INTENTIONAL-DEPARTURE-leaves-the-folder",
+    "mode": "plain",
+    "folder": "home/target-app-s1",
+    "cap": "100",
+    "noMarker": true,
+    "departure": true
+  },
+  {
+    "name": "ci-no-marker-INTENTIONAL-DEPARTURE-leaves-the-folder",
+    "mode": "ci",
+    "folder": "home/target-app-s1",
+    "cap": "100",
+    "slot": "s1",
+    "noMarker": true,
+    "departure": true
+  }
+]

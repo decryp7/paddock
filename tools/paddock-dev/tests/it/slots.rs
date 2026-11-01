@@ -384,24 +384,50 @@ fn a_program_inside_the_job_folder_cannot_hold_a_slot() {
 }
 
 #[test]
+// A statistical check of the acquire retry (5 attempts, 10 ms apart) under a concurrent status probe, not a proof.
 fn acquire_is_never_refused_because_a_status_probe_looked_at_the_slot() {
     let d = tempfile::tempdir().unwrap();
     let (root, job) = (d.path().join("ci"), d.path().join("job"));
     std::fs::create_dir(&job).unwrap();
-    let stop = std::sync::atomic::AtomicBool::new(false);
+    // The probe thread ends on any exit of the main loop (also a failed assertion, which unwinds through the guard) and
+    // after a deadline, so the scope can never wait for it forever.
+    let probe = ProbeStop::default();
     std::thread::scope(|s| {
         s.spawn(|| {
             let locks = FsLocks::new(&root);
-            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+            // 120 s exceeds nextest's ci kill limit on purpose: the guard ends the probe; the deadline is only a last resort.
+            let deadline = std::time::Instant::now() + Duration::from_secs(120);
+            while !probe.stopped() && std::time::Instant::now() < deadline {
                 let _ = paddock_slots::slot_states(&locks, 1);
+                // Let the acquirer's processes run on a loaded machine instead of spinning on the lock files.
+                std::thread::yield_now();
             }
         });
+        let _stop_on_exit = StopOnDrop(&probe);
         for _ in 0..8 {
             let (slot, token) = take(&root, &job, "1");
             assert_eq!(release(&root, &slot, &token).0, 0);
         }
-        stop.store(true, std::sync::atomic::Ordering::Relaxed);
     });
+}
+
+/// A stop flag for a helper thread.
+#[derive(Default)]
+struct ProbeStop(std::sync::atomic::AtomicBool);
+
+impl ProbeStop {
+    fn stopped(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// Sets the flag when dropped, on the normal path and when an assertion unwinds.
+struct StopOnDrop<'a>(&'a ProbeStop);
+
+impl Drop for StopOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 #[test]

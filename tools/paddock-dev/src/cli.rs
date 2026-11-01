@@ -1,4 +1,4 @@
-use crate::{input_hash, plan, slots};
+use crate::{input_hash, plan, prune_cmd, slots};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -32,6 +32,20 @@ enum Command {
     Graph {
         #[command(subcommand)]
         command: GraphCommand,
+    },
+    /// This machine's build folders and tools.
+    Host {
+        #[command(subcommand)]
+        command: HostCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum HostCommand {
+    /// Keep build folders within a size cap, or remove those of finished worktrees.
+    Prune {
+        #[command(subcommand)]
+        command: prune_cmd::PruneCommand,
     },
 }
 
@@ -130,6 +144,12 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             SlotCommand::Status(a) => slots::status(&a),
             SlotCommand::IdleRun(a) => slots::idle_run(&a),
             SlotCommand::Hold(a) => slots::hold(&a),
+        },
+        Command::Host {
+            command: HostCommand::Prune { command },
+        } => match command {
+            prune_cmd::PruneCommand::Cap(a) => prune_cmd::cap(&a),
+            prune_cmd::PruneCommand::Worktrees(a) => prune_cmd::worktrees(&a),
         },
         Command::Graph {
             command: GraphCommand::Affected(a),
