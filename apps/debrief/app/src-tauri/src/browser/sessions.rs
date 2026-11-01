@@ -87,8 +87,9 @@ pub struct Session {
     kept: Mutex<Option<KeptHold>>,
 }
 
-/// The kept research profile is in use by `owner`'s browser until this is dropped (then the listeners hear it).
-struct KeptHold(std::sync::Weak<Inner>);
+/// The kept research profile is in use by a window's browser until this is dropped (then the listeners hear it); the
+/// second field is that window's label, for the log.
+struct KeptHold(std::sync::Weak<Inner>, String);
 
 impl Drop for KeptHold {
     fn drop(&mut self) {
@@ -150,19 +151,22 @@ impl Session {
 
     fn kill(&self) {
         crate::sync::lock(&self.chromium).kill();
-        self.release_kept();
+        self.release_kept("killed");
     }
 
     /// Closes the browser (gracefully, then by force) and removes its throwaway profile.
     fn close(&self, grace: Duration) {
         crate::sync::lock(&self.chromium).close_gracefully(grace);
-        self.release_kept();
+        self.release_kept("closed");
     }
 
     /// The browser is ended: the kept research profile is free (the listeners hear it; no lock of ours is held then).
-    fn release_kept(&self) {
+    fn release_kept(&self, how: &str) {
         let hold = crate::sync::lock(&self.kept).take();
-        drop(hold);
+        if let Some(hold) = hold {
+            log::info!("The research profile is free again: the AI browser of {} was {how}", hold.1);
+            drop(hold);
+        }
     }
 
     /// This browser's own close grace: longer on the kept research profile.
@@ -449,7 +453,8 @@ impl Renderers {
     pub fn clear_kept_profile(&self) -> Result<(), String> {
         // Held while clearing: no browser can take the profile meanwhile.
         let user = crate::sync::lock(&self.inner.kept_user);
-        if user.is_some() {
+        if let Some(owner) = user.as_deref() {
+            log::info!("The research profile was not cleared: the AI browser of {owner} uses it");
             return Err(
                 "The research profile is in use by the AI browser. Close its window (or wait for the research to finish), then clear it."
                     .into(),
@@ -484,7 +489,7 @@ impl Renderers {
                 drop(user);
                 *crate::sync::lock(&self.inner.kept_problem) = None;
                 self.inner.profile_changed();
-                let hold = KeptHold(Arc::downgrade(&self.inner));
+                let hold = KeptHold(Arc::downgrade(&self.inner), owner.to_string());
                 (Profile::Persistent(kept.dir), Some(hold), None)
             }
             bad => {
