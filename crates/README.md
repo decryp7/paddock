@@ -1838,7 +1838,9 @@ log-extract logic stays in Pitcrew; only the finding and starting moves).
 `paddock-build` is a build-dependency; the build.rs of an app is one line (`paddock_build::Build::new().sidecars(["x-service"]).run()`, feature
 `tauri-build`). It embeds the one Windows application manifest (Common Controls v6) into every binary of the crate, test binaries
 included, and tells tauri-build to add none of its own; it creates an empty `binaries/<name>-<target>[.exe]` for each sidecar that is not
-built yet (a real file is never overwritten); and it reruns on `TAURI_UPDATER_PUBKEY`. The apps' `windows-app-manifest.xml` copies go.
+built yet (a real file is never overwritten) and, while any is such a placeholder, hides `bundle.externalBin` from tauri-build through
+`TAURI_CONFIG` (it would copy the empty file over the program cargo linked into `target/<profile>`) and deletes the empty copies older
+builds left (`paddock_build::sidecars`, pure and tested without Tauri); and it reruns on `TAURI_UPDATER_PUBKEY`. The apps' `windows-app-manifest.xml` copies go.
 App extras (Debrief's commit id) stay in the app's build.rs before the call. `paddock_proc::self_test::handle(name, version, &checks)` is
 the first call in a sidecar's `main`: with `--self-test` it runs the checks, prints one line each and exits 0 or 1 (rule 23; C34 checks
 that every sidecar has it, and `paddock-sidecar self-test` starts them from the built bundle).

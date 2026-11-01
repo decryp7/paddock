@@ -8,6 +8,8 @@
 //!    `cargo check` and tests. Bundles build the real ones first (`paddock-sidecar`, in `@decryp7/paddock-conformance`);
 //!    elsewhere an empty file stands in, which the app reports as missing when asked to start it. A real file is never
 //!    overwritten.
+//!    While any sidecar is still a placeholder, tauri-build is told there is no `externalBin` (`sidecars`): it would copy
+//!    the empty file over the real program cargo linked into `target/<profile>`. Empty copies from older builds are removed.
 //! 3. **Rerun triggers** (`TAURI_UPDATER_PUBKEY` by default: the updater key is compiled in).
 //!
 //! ```text
@@ -28,6 +30,7 @@ use std::path::{Path, PathBuf};
 
 #[cfg(feature = "tauri-build")]
 mod native;
+pub mod sidecars;
 
 /// The Windows application manifest: Common Controls v6.
 pub const MANIFEST: &str = include_str!("windows-app-manifest.xml");
@@ -115,8 +118,21 @@ pub struct Plan {
     pub directives: Vec<String>,
     /// Whether tauri-build must not add its own Windows manifest (ours is linked instead).
     pub own_manifest: bool,
-    /// The placeholder files to create when missing.
+    /// The sidecar files (`binaries/<name>-<target>`), placeholders when empty.
     pub placeholders: Vec<PathBuf>,
+    /// Where tauri-build copies the sidecars (`target/<profile>/<name>`); empty without `OUT_DIR` and `TARGET`.
+    pub copies: Vec<PathBuf>,
+}
+
+/// What [`Build::apply`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Applied {
+    /// The plan that was applied.
+    pub plan: Plan,
+    /// The new `TAURI_CONFIG`, set while a sidecar is a placeholder so tauri-build copies none of them; `None` otherwise.
+    pub tauri_config: Option<String>,
+    /// The empty copies of older builds that were removed.
+    pub removed: Vec<PathBuf>,
 }
 
 /// The build step's configuration.
@@ -192,37 +208,74 @@ impl Build {
             directives.push(format!("cargo:rerun-if-env-changed={var}"));
         }
         let manifest_dir = Path::new(env.get("CARGO_MANIFEST_DIR").unwrap_or_default());
-        let placeholders = match env.get("TARGET") {
-            Some(target) => self
-                .sidecars
-                .iter()
-                .map(|n| {
-                    manifest_dir
-                        .join(&self.binaries_dir)
-                        .join(sidecar_file(n, target))
-                })
-                .collect(),
-            None => Vec::new(),
+        let (placeholders, copies) = match env.get("TARGET") {
+            Some(target) => {
+                let files: Vec<PathBuf> = self
+                    .sidecars
+                    .iter()
+                    .map(|n| {
+                        manifest_dir
+                            .join(&self.binaries_dir)
+                            .join(sidecar_file(n, target))
+                    })
+                    .collect();
+                // A sidecar that becomes real (or empty) changes what tauri-build must do.
+                directives.extend(
+                    files
+                        .iter()
+                        .map(|f| format!("cargo:rerun-if-changed={}", f.display())),
+                );
+                let ext = if target.contains("windows") {
+                    ".exe"
+                } else {
+                    ""
+                };
+                let copies = match env
+                    .get("OUT_DIR")
+                    .map(Path::new)
+                    .and_then(sidecars::profile_dir)
+                {
+                    Some(profile) => sidecars::copy_paths(&profile, &self.sidecars, ext),
+                    None => Vec::new(),
+                };
+                (files, copies)
+            }
+            None => (Vec::new(), Vec::new()),
         };
         Ok(Plan {
             directives,
             own_manifest,
             placeholders,
+            copies,
         })
     }
 
-    /// Does what [`plan`](Build::plan) says: writes the manifest (when it is linked) and the missing placeholders, and prints
-    /// the directives through `print`.
-    pub fn apply(&self, env: &Env, print: &mut dyn FnMut(&str)) -> Result<Plan, BuildError> {
+    /// Does what [`plan`](Build::plan) says: writes the manifest (when it is linked) and the missing placeholders, removes the
+    /// empty sidecar copies of older builds and prints the directives through `print`. While a sidecar is a placeholder the
+    /// result carries the `TAURI_CONFIG` to set before tauri-build runs.
+    pub fn apply(&self, env: &Env, print: &mut dyn FnMut(&str)) -> Result<Applied, BuildError> {
         let plan = self.plan(env)?;
         if plan.own_manifest {
             write_manifest(Path::new(env.get("OUT_DIR").unwrap_or_default()))?;
         }
         create_placeholders(&plan.placeholders)?;
+        let (tauri_config, removed) = if sidecars::any_placeholder(&plan.placeholders) {
+            let removed = sidecars::remove_files(&sidecars::stale_copies(&plan.copies))?;
+            (
+                Some(sidecars::hide_external_bin(env.get("TAURI_CONFIG"))),
+                removed,
+            )
+        } else {
+            (None, Vec::new())
+        };
         for line in &plan.directives {
             print(line);
         }
-        Ok(plan)
+        Ok(Applied {
+            plan,
+            tauri_config,
+            removed,
+        })
     }
 }
 

@@ -132,10 +132,10 @@ fn apply_writes_the_manifest_and_placeholders_prints_the_directives_and_never_ov
     std::fs::write(&real, b"real binary").unwrap();
     let build = Build::new().sidecars(["svc", "helper"]);
     let mut printed = Vec::new();
-    let plan = build
+    let applied = build
         .apply(&env, &mut |l| printed.push(l.to_string()))
         .unwrap();
-    assert_eq!(printed, plan.directives);
+    assert_eq!(printed, applied.plan.directives);
     assert_eq!(
         std::fs::read_to_string(out.join(MANIFEST_FILE)).unwrap(),
         MANIFEST

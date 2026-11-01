@@ -1131,7 +1131,20 @@ script with the binaries fresh; 0 of 50 with the fix). Causes ruled out: a concu
 its own build folder), `std::fs::copy` truncating (the source itself was 0 bytes), codesign racing the linker (the
 binary was not relinked). **Lesson:** a build script must never write into the build folder next to cargo's own outputs;
 while the sidecars are placeholders, Dyno hides `externalBin` from tauri-build (a `TAURI_CONFIG` merge patch), and a test
-that copies a built program first checks it is not empty. Pitwall and Pitcrew write the same placeholders.
+that copies a built program first checks it is not empty. Pitwall and Pitcrew wrote the same placeholders; the mechanism now lives
+once in `paddock-build` (the next lesson), and Dyno's local copy goes after its 1.0 tag.
+
+## A build script that tauri-build follows must not leave placeholders where cargo puts programs (2026-11-01, shared fix)
+
+tauri-build 2.7.4 copies every `bundle.externalBin` file to `target/<profile>/<name>`, replacing the program of that name that cargo
+linked. The apps' build scripts write empty placeholders (`binaries/<name>-<triple>`) so tauri-build accepts the list for tests and
+`cargo check`, so whenever the build script ran after cargo placed the sidecar, the program in the build folder was 0 bytes (Dyno's
+signing test saw `dyno-da39a3ee...`, the SHA-1 of nothing, in one of two runs of the same commit). Pitwall and Pitcrew had the same
+build script and the same bug: with `pitwall-server` / `pitcrew-service` built first, `cargo test -p <app>-app` left them empty (the new
+`tests/sidecar_placeholders.rs` failed before the fix). **Lesson:** this is a mechanism, so it lives once, in `paddock-build`
+(`sidecars` module: hide `externalBin` from tauri-build while a sidecar is a placeholder, delete empty copies of older builds), and an
+app's `build.rs` is `paddock_build::Build::new().sidecars([..]).run()`. A third app with sidecars gets it by calling that, never by
+copying Dyno's or Pitwall's lines. Dyno's local copy is replaced by the helper after its 1.0 tag.
 
 ## What the browser e2e cannot see: three Dyno 1.0 features that passed it and failed in the real app (2026-11-01, ER-21)
 
