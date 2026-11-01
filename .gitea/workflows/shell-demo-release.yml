@@ -168,6 +168,7 @@ jobs:
           name: paddock-shell-demo-${{ runner.os }}
           path: apps/shell-demo/dist/*
           if-no-files-found: error
+          compression-level: 0
 
       - uses: ./.gitea/actions/job-isolation
         if: always()

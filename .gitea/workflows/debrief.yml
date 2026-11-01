@@ -1035,6 +1035,7 @@ jobs:
           name: debrief-${{ runner.os }}
           path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/dist/*
           if-no-files-found: error
+          compression-level: 0
 
       - name: Unlink the shared node_modules (Windows)
         if: always() && runner.os == 'Windows'
@@ -1068,6 +1069,7 @@ jobs:
       - uses: ChristopherHX/gitea-download-artifact@75635f32b4c1c41c4b3d64e8f85210112ed4c9c7 # v4
         with:
           path: apps/debrief/artifacts
+          pattern: debrief-*
 
       # git-cliff comes with the image.
       - name: Release notes (git-cliff)

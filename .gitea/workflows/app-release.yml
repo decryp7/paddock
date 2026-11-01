@@ -261,6 +261,7 @@ jobs:
           # Where tauri-bundle.sh wrote it: the stable checkout on a host (on Windows the work folder stays a separate clone).
           path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/dist/*
           if-no-files-found: error
+          compression-level: 0
 
       - uses: ./.paddock/.gitea/actions/host-cleanup
         if: always() && runner.os != 'Linux'

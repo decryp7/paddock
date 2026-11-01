@@ -94,63 +94,15 @@ jobs:
             echo "::endgroup::"
           done
           if [ ${#failed[@]} -gt 0 ]; then
-            echo "::error::Crashed: ${failed[*]} (reproducers in the crashes-<target> artifacts)"
+            echo "::error::Crashed: ${failed[*]} (reproducers in the crashes-shard-N artifact)"
             exit 1
           fi
 
-      # One artifact per target, as before; a shard has seven targets.
-      - name: Upload crashes (${{ matrix.targets[0] }})
+      # One artifact per shard: the reproducers of every target that crashed, in artifacts/<target>/.
+      - name: Upload crashes
         if: failure()
         uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
-          name: crashes-${{ matrix.targets[0] }}
-          path: apps/debrief/fuzz/artifacts/${{ matrix.targets[0] }}/
-          if-no-files-found: ignore
-
-      - name: Upload crashes (${{ matrix.targets[1] }})
-        if: failure()
-        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
-        with:
-          name: crashes-${{ matrix.targets[1] }}
-          path: apps/debrief/fuzz/artifacts/${{ matrix.targets[1] }}/
-          if-no-files-found: ignore
-
-      - name: Upload crashes (${{ matrix.targets[2] }})
-        if: failure()
-        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
-        with:
-          name: crashes-${{ matrix.targets[2] }}
-          path: apps/debrief/fuzz/artifacts/${{ matrix.targets[2] }}/
-          if-no-files-found: ignore
-
-      - name: Upload crashes (${{ matrix.targets[3] }})
-        if: failure()
-        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
-        with:
-          name: crashes-${{ matrix.targets[3] }}
-          path: apps/debrief/fuzz/artifacts/${{ matrix.targets[3] }}/
-          if-no-files-found: ignore
-
-      - name: Upload crashes (${{ matrix.targets[4] }})
-        if: failure()
-        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
-        with:
-          name: crashes-${{ matrix.targets[4] }}
-          path: apps/debrief/fuzz/artifacts/${{ matrix.targets[4] }}/
-          if-no-files-found: ignore
-
-      - name: Upload crashes (${{ matrix.targets[5] }})
-        if: failure()
-        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
-        with:
-          name: crashes-${{ matrix.targets[5] }}
-          path: apps/debrief/fuzz/artifacts/${{ matrix.targets[5] }}/
-          if-no-files-found: ignore
-
-      - name: Upload crashes (${{ matrix.targets[6] }})
-        if: failure()
-        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
-        with:
-          name: crashes-${{ matrix.targets[6] }}
-          path: apps/debrief/fuzz/artifacts/${{ matrix.targets[6] }}/
+          name: crashes-shard-${{ matrix.shard }}
+          path: apps/debrief/fuzz/artifacts/
           if-no-files-found: ignore

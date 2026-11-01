@@ -82,7 +82,7 @@ inputs only to the first directory, so `fuzz/corpus/` stays small (seeds copied 
 
 CI (`.gitea/workflows/fuzz.yml`) runs every target for 5 minutes each night (and on demand
 through `workflow_dispatch`, with a configurable duration) and uploads crash inputs as the
-`crashes-<target>` artifact. Five shards build the fuzz workspace once
+`crashes-shard-N` artifact (the reproducers of every target of the shard). Five shards build the fuzz workspace once
 and then fuzz their targets one after another, on the dated nightly in `FUZZ_TOOLCHAIN`
 (use the same one locally, e.g. `cargo +nightly-2026-10-01 fuzz run ...`, to reproduce CI).
 

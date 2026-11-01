@@ -152,6 +152,7 @@ jobs:
           name: paddock-workbench-demo-${{ runner.os }}
           path: apps/workbench-demo/dist/*
           if-no-files-found: error
+          compression-level: 0
 
       - uses: ./.gitea/actions/job-isolation
         if: always()
