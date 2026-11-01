@@ -681,6 +681,8 @@ describe('dialogs as windows', () => {
     service.open(VIEWER, { inputs: { page: 'popup-widgets' } });
     await vi.waitFor(() => expect(heard).toEqual([expect.objectContaining({ dialogId: 't.viewer', inputs: { page: 'popup-widgets' } })]));
     probe.close();
+    // The window is another webview: it is told by the window system's own event too (a BroadcastChannel may not reach it).
+    await vi.waitFor(() => expect(io.inputsSent).toEqual([{ label: 'd-main-1', dialogId: 't.viewer', inputs: { page: 'popup-widgets' } }]));
   });
 
   it('does not point an instanced dialog\'s existing window at new inputs (its instances are told apart by their inputs)', async () => {
@@ -696,6 +698,7 @@ describe('dialogs as windows', () => {
     marker.postMessage({ from: 'marker', dialogId: 'marker', inputs: {} });
     await vi.waitFor(() => expect(heard).toHaveLength(1));
     expect(heard[0]).toMatchObject({ dialogId: 'marker' });
+    expect(io.inputsSent).toEqual([]);
     probe.close();
     marker.close();
   });
