@@ -124,19 +124,55 @@ export function hostRun(cmd, args, { timeoutMs = 120_000, input, env, cwd } = {}
   });
 }
 
-/** Downloads a CI artifact with the Gitea token read from the environment; the token goes to curl on stdin and is never printed. */
-async function downloadArtifact(runId, name, dest) {
-  const token = process.env.GITEA_TOKEN;
+/**
+ * Fetches one URL with the Gitea token in the Authorization header and writes the body to `file`. Logs the URL (the token is a header,
+ * never part of it), the HTTP status and the size (rule 56). Returns `{ status, bytes }`; a non-200 writes nothing.
+ */
+async function fetchTo(url, token, file, note) {
+  const res = await fetch(url, { headers: { Authorization: `token ${token}` }, redirect: 'follow' });
+  if (res.status !== 200) {
+    await res.arrayBuffer().catch(() => undefined);
+    note(`GET ${url} -> HTTP ${res.status}`);
+    return { status: res.status, bytes: 0 };
+  }
+  const body = Buffer.from(await res.arrayBuffer());
+  writeFileSync(file, body);
+  note(`GET ${url} -> HTTP 200, ${body.length} bytes (${res.headers.get('content-type') ?? 'no content type'})`);
+  return { status: 200, bytes: body.length };
+}
+
+/**
+ * Downloads a CI artifact with the Gitea token read from the environment. Gitea 28's REST API lists only v4 artifacts, so the
+ * artifacts of `actions/upload-artifact@v3` are fetched from the web URL `<server>/<owner>/<repo>/actions/runs/<run>/artifacts/<name>`;
+ * on a 404 the REST list is tried for a v4 artifact. `opts` is for tests.
+ */
+export async function downloadArtifact(runId, name, dest, opts = {}) {
+  const token = opts.token ?? process.env.GITEA_TOKEN;
+  const server = opts.server ?? GITEA;
+  const repo = opts.repoPath ?? REPO_PATH;
+  const note = opts.log ?? log;
+  const unzip = opts.unzip ?? ((zip, dir) => hostRun('unzip', ['-q', '-o', zip, '-d', dir]));
   if (!token) throw new Error('GITEA_TOKEN is not set (source ~/.zshenv)');
   if (!/^[A-Za-z0-9_.-]+$/.test(name)) throw new Error(`bad artifact name ${name}`);
-  const url = `${GITEA}/${REPO_PATH}/actions/runs/${runId}/artifacts/${name}`;
+  if (!/^\d+$/.test(String(runId))) throw new Error(`bad run id ${runId}`);
   const zip = join(dest, `${name}.zip`);
-  const r = await hostRun('curl', ['-sS', '-L', '--fail', '-o', zip, '--config', '-'], { timeoutMs: 900_000, input: `header = "Authorization: token ${token}"\nurl = "${url}"\n` });
-  if (r.code !== 0) throw new Error(`downloading ${name} of run ${runId} failed (curl exit ${r.code}): ${r.stderr.replaceAll(token, '***').trim().slice(0, 200)}`);
+  let got = await fetchTo(`${server}/${repo}/actions/runs/${runId}/artifacts/${name}`, token, zip, note);
+  if (got.status === 404) {
+    // A v4 artifact is listed by the REST API and carries its own download URL.
+    const listUrl = `${server}/api/v1/repos/${repo}/actions/runs/${runId}/artifacts`;
+    const listFile = join(dest, 'artifacts.json');
+    const listed = await fetchTo(listUrl, token, listFile, note);
+    const entry = listed.status === 200 ? (JSON.parse(readFileSync(listFile, 'utf8')).artifacts ?? []).find((a) => a.name === name) : null;
+    if (entry?.archive_download_url) got = await fetchTo(entry.archive_download_url, token, zip, note);
+  }
+  if (got.status === 404) {
+    throw new Error(`artifact "${name}" of run ${runId} was not found (HTTP 404 on the web URL and not in the REST list). Next step: open ${server}/${repo}/actions/runs/${runId}, check that the installers job ran and its artifact is named "${name}", and that the run has not expired.`);
+  }
+  if (got.status !== 200) throw new Error(`downloading artifact "${name}" of run ${runId} failed (HTTP ${got.status}). Next step: check GITEA_TOKEN (401/403) or the server (5xx) and run again.`);
   const dir = join(dest, 'unzipped');
   mkdirSync(dir);
-  const u = await hostRun('unzip', ['-q', '-o', zip, '-d', dir]);
-  if (u.code !== 0) throw new Error(`unzip failed: ${u.stderr.trim().slice(0, 200)}`);
+  const u = await unzip(zip, dir);
+  if (u.code !== 0) throw new Error(`unzip of artifact "${name}" (${got.bytes} bytes) failed: ${String(u.stderr).trim().slice(0, 200)}`);
   return dir;
 }
 
