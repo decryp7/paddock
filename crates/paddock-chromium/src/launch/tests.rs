@@ -1073,8 +1073,13 @@ impl Drop for ChildGuard {
             let pid = self.child.id() as i32;
             // SAFETY: a signal to the still-unreaped child of this guard.
             // conformance: pid-kill — the guard's own unreaped child, checked with try_wait just above
-            #[expect(clippy::disallowed_methods, reason = "a signal to the unreaped child this test spawned and holds; its pid cannot have been handed on")]
-            unsafe { libc::kill(pid, libc::SIGCONT) };
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "a signal to the unreaped child this test spawned and holds; its pid cannot have been handed on"
+            )]
+            unsafe {
+                libc::kill(pid, libc::SIGCONT)
+            };
             let _ = std::fs::write(&self.go, "");
             let end = Instant::now() + Duration::from_secs(15);
             // conformance: hang-guard — polls another process's state, which has no event to wait on
@@ -1084,8 +1089,13 @@ impl Drop for ChildGuard {
             if let Ok(None) = self.child.try_wait() {
                 // SAFETY: a signal to the process group this guard's still-unreaped child leads (set at spawn).
                 // conformance: pid-kill — the guard's own unreaped child, checked with try_wait just above
-                #[expect(clippy::disallowed_methods, reason = "a signal to the unreaped child this test spawned and holds; its pid cannot have been handed on")]
-                unsafe { libc::killpg(pid, libc::SIGKILL) };
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "a signal to the unreaped child this test spawned and holds; its pid cannot have been handed on"
+                )]
+                unsafe {
+                    libc::killpg(pid, libc::SIGKILL)
+                };
             }
         }
         let _ = self.child.wait();
@@ -1156,7 +1166,10 @@ fn a_stopped_and_continued_process_keeps_its_browser_connection() {
     };
     // SAFETY: a signal to the child this test spawned and has not waited for (it is reaped only below).
     // conformance: pid-kill — the test's own child, not reaped until the end of this test
-    #[expect(clippy::disallowed_methods, reason = "a signal to the unreaped child this test spawned and holds; its pid cannot have been handed on")]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a signal to the unreaped child this test spawned and holds; its pid cannot have been handed on"
+    )]
     let kill = |sig: i32| assert_eq!(unsafe { libc::kill(pid as i32, sig) }, 0);
     for _ in 0..5 {
         kill(libc::SIGSTOP);
