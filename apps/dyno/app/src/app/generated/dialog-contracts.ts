@@ -11,7 +11,7 @@ export const DIALOG_CONTRACTS = {
     height: 700,
     instanced: false,
     requiredChoice: false,
-    commands: ['dyno', 'settings_*'],
+    commands: ['dyno', 'edit_widget_layout', 'popover_preview', 'popover_snapshot', 'settings_*', 'widget_choices', 'widget_layout'],
   },
   'dy.alert-rule': {
     id: 'dy.alert-rule',
