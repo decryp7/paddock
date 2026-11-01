@@ -63,7 +63,9 @@ section=$(awk -v h="## [$version]" '
 echo "first-release-notes: section lines=$(printf '%s\n' "$section" | wc -l | tr -d ' ') bytes=$(printf '%s\n' "$section" | wc -c | tr -d ' ')" >&2
 if [[ ! $section =~ [^[:space:]] ]]; then
   echo "first-release-notes: the first 3 lines after the heading:" >&2
-  tail -n +"$((${heading_line:-0} + 1))" "$changelog" | head -n 3 | cut -c1-120 | sed 's/^/  | /' >&2
+  # sed, not tail|head: under pipefail a reader that quits early would kill this with 141 before the ::error:: below.
+  n=${heading_line:-0}
+  sed -n "$((n + 1)),$((n + 3))p" "$changelog" | cut -c1-120 | sed 's/^/  | /' >&2
   echo "::error::the '## [$version]' section of $changelog is empty"
   exit 1
 fi

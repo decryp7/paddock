@@ -219,3 +219,17 @@ test('the script logs its awk, file, heading line and section size on stderr, an
   assert.match(bad.stderr + bad.stdout, /is empty/);
   assert.match(bad.stderr, /first 3 lines after the heading:\n  \| \n  \| \[1\.0\.0\]: https/);
 });
+
+// ER-11: a section larger than a pipe buffer (64 KB). `printf "$section" | grep -q` under pipefail lost a SIGPIPE race on it
+// and reported a non-empty section as empty (the first Dyno release); the script now matches without a pipe.
+test('a section larger than 64 KB is not reported empty (no pipe-fed grep -q under pipefail)', () => {
+  const bullets = Array.from({ length: 1500 }, (_, i) => `- Item ${i}: ${'x'.repeat(60)}`).join('\n');
+  const big = `## [1.0.0] - 2026-11-01\n\n${bullets}\n\n## [0.9.0] - x\n- older\n`;
+  assert.ok(big.length > 100 * 1024);
+  for (let i = 0; i < 5; i++) {
+    const dir = repo(big);
+    const r = run(notesStep, dir);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.ok(notes(dir).length > 64 * 1024);
+  }
+});
