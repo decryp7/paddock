@@ -229,7 +229,12 @@
       "height": 700,
       "commands": [
         "dyno",
-        "settings_*"
+        "edit_widget_layout",
+        "popover_preview",
+        "popover_snapshot",
+        "settings_*",
+        "widget_choices",
+        "widget_layout"
       ]
     },
     "pd.updates": {
