@@ -7,9 +7,18 @@ Conventional Commits; one semver tag for the whole repo.
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
   inputs)` (optional: a `DialogIo` without it is unchanged). When a window opens a dialog that is open already (Settings at a section), `WindowDialogBackend`
-  sends the new inputs to that window with `emitTo`; the dialog window's `followDialogInputs(dialogId, ref, io)` applies them. Before, the new inputs travelled
-  only on a `BroadcastChannel`, which the browser e2e (one browser, pages of one context) could use but which did not reach the other webview of the real app:
-  Dyno's "Customize widgets…" brought an open Settings window forward without switching its page or scrolling. The channel stays for dialogs of the same page.
+  sends the new inputs to that window with `emitTo`; the dialog window's `followDialogInputs(dialogId, ref, io)` applies them. The `BroadcastChannel` stays.
+  (Correction, 2026-11-01: the VM logs showed the channel does reach the other webview; the inputs arrived and the Settings window ignored them, see below.)
+
+### `@decryp7/paddock-ui/shell/settings/window` and `shell/dialogs`: a re-targeted Settings window follows the request; `afterWindowActive`
+- `PdSettingsWindow`: a change of its `page` or `anchor` input selects that page, like a click in the navigation, even when the user had chosen another page
+  since. Before, `current` was `selected ?? page`, so after one click the input was never read again (Dyno's "Customize widgets…" with Settings open on
+  Appearance only brought the window forward).
+- New `afterWindowActive(fn, view?)`: runs `fn` two frames after the window has focus (at once plus two frames when it has). For programmatic scrolling in a
+  window that the window system is bringing forward: WKWebView left a freshly mounted, scrolled page blank when the scroll ran before the window became key
+  (Dyno 1.0 VM: 5 of 11 tries; 0 of 45 with the helper).
+- `DialogIo.log` and `TauriBridge.log` (optional): the dialog layer logs a re-target on both sides; `dialog_open` logs "Dialog window opened again" with the
+  names of the inputs (never their values). `DialogSession.focus(inputs?)` asks the window system with the new inputs.
 
 ### `paddock-window`: `Popovers::has`
 - `Popovers::has(item)` says whether the popover of a tray item (`None`: the icon's) has a spec. An app's start test uses it to check that a tray click has

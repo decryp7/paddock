@@ -52,7 +52,7 @@ export class DialogService {
     if (existing?.session.isOpen()) {
       // Opened again with inputs: the open window is pointed at them (Settings at a section), not only focused.
       if (options.inputs && !def.instanced) sendDialogInputs(def.id, inputs);
-      existing.session.focus();
+      existing.session.focus(options.inputs && !def.instanced ? inputs : undefined);
       return existing.ref;
     }
     // Focus goes back to the element that opened the dialog when it is gone (ADR 0026 §2).
