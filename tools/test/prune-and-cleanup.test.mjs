@@ -78,10 +78,10 @@ test('host-cleanup: kills only processes anchored on this job, removes only the 
   write(cwd, { 'dist/x': '1', 'app/dist/y': '2' });
   shim(bin, 'ps');
   const env = { PADDOCK_PKILL: join(bin, 'pkill'), PADDOCK_PS: join(bin, 'ps'), RUNNER_OS: 'macOS', PADDOCK_CI_SLOT: 's2', PADDOCK_JOB_TEMP: tmp, PADDOCK_BUILD_FOLDER: '/ci/target-pitwall-app-s2' };
-  const r = run('host-cleanup.sh', ['--id', 'pitwall', '--process-pattern', '{build}/debug/pitwall-server', '--process-pattern', 'fake[-_]engine', '--process-pattern', '[/\\\\]test-browser-pitwall-{slot}', '--process-pattern', 'chrome-{slot}', '--process-pattern', '{tmp}/x'], { bin, cwd, env });
+  const r = run('host-cleanup.sh', ['--id', 'pitwall', '--process-pattern', '{build}/debug/pitwall-server', '--process-pattern', 'fake[-_]engine', '--process-pattern', '[/\\\\]target-pitwall-{slot}', '--process-pattern', 'chrome-{slot}', '--process-pattern', '{tmp}/x'], { bin, cwd, env });
   assert.equal(r.status, 0, r.out);
   const re = (p) => p.replaceAll('/', '[/\\\\]').replaceAll('.', '\\.');
-  assert.deepEqual(calls(bin).filter((c) => c.startsWith('pkill')), [`pkill -f ${re('/ci/target-pitwall-app-s2')}/debug/pitwall-server`, 'pkill -f [/\\\\]test-browser-pitwall-s2([^0-9]|$)', `pkill -f ${re(tmp)}/x`], 'each pattern scoped to this job');
+  assert.deepEqual(calls(bin).filter((c) => c.startsWith('pkill')), [`pkill -f ${re('/ci/target-pitwall-app-s2')}/debug/pitwall-server`, 'pkill -f [/\\\\]target-pitwall-s2([^0-9]|$)', `pkill -f ${re(tmp)}/x`], 'each pattern scoped to this job');
   assert.match(r.out, /skipped the process pattern 'chrome-\{slot\}'/, '{slot} must follow a kept folder\'s name');
   assert.match(r.out, /skipped the process pattern 'fake\[-_\]engine': it is not anchored/, 'an unscoped pattern could kill another job\'s processes');
   assert.ok(!existsSync(join(tmp, 'pitwall-abc')) && !existsSync(join(tmp, 'pitwall-def')));
