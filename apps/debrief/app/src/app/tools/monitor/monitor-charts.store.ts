@@ -37,8 +37,13 @@ export const MonitorChartsStore = signalStore(
       /** Shown while recording and whenever the workspace holds monitor samples. */
       visible: computed(() => monitor.running() || sources().length > 0 || hasMonitorSamples(workspace.summary())),
       sources,
-      /** Nothing is asked while a run opens its output: before its sources are known a query would chart every run. */
-      ready: computed(() => !monitor.opening()),
+      /** A new run's output is being opened: its sources are not known yet. */
+      opening: monitor.opening,
+      /**
+       * The charts may be asked for. Not while a run opens its output, nor while a run records whose output is not open
+       * (the open failed or was cancelled): without the run's sources a query would chart every run.
+       */
+      ready: computed(() => !monitor.opening() && (!monitor.running() || sources().length > 0)),
       /** No chart has a series: nothing sampled in the window yet. */
       empty: computed(() => store.charts().length > 0 && store.charts().every((c) => c.series.length === 0)),
       /** The shared legend: every process seen, in slot order, then "Other" when more processes than slots exist. */

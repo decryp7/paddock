@@ -7,6 +7,8 @@ import { LiveTail } from '../../workspace/live-tail';
 import { TOOL_IDS } from '../../core/tools.types';
 import { ToolCatalog } from '../tool-catalog.store';
 import { errorMessage } from '../tool-errors';
+import { Logger } from '../../core/logger';
+import { monitorSourceIds } from './monitor-charts-model';
 import { DEFAULT_MONITOR_DRAFT, MonitorDraft, TargetKind, toMonitorConfig, validateMonitor } from './monitor-model';
 
 interface MonitorState {
@@ -37,7 +39,7 @@ export const MonitorStore = signalStore(
     /** Events in the workspace that carry the AccessDenied field: some processes need administrator rights. */
     accessDeniedSeen: computed(() => workspace.summary()?.fields.find((f) => f.name === ACCESS_DENIED_FIELD)?.count ?? 0),
   })),
-  withMethods((store, backend = inject(CollectBackend), live = inject(LiveTail), workspace = inject(WorkspaceStore)) => {
+  withMethods((store, backend = inject(CollectBackend), live = inject(LiveTail), workspace = inject(WorkspaceStore), logger = inject(Logger)) => {
     const run = async (label: string, op: () => Promise<void>): Promise<void> => {
       patchState(store, { busy: label, error: null, notice: null });
       try {
@@ -68,17 +70,32 @@ export const MonitorStore = signalStore(
           patchState(store, { running: status.running, dir: status.dir ?? store.dir() });
         }),
 
-      /** Starts sampling, opens the output folder and follows it live. */
+      /**
+       * Starts sampling, opens the output folder and follows it live. When the output did not open (failed or cancelled:
+       * the workspace reports why), the run goes on but is not followed, and the panel says so.
+       */
       start: () =>
         run($localize`:@@tools.monitor.busy.starting:Starting…`, async () => {
           const d = store.draft();
           const dir = await backend.monitorStart(toMonitorConfig(d), d.dir.trim() || undefined);
           patchState(store, { running: true, dir, opening: true });
+          const began = performance.now();
+          logger.info('ui.monitor', 'Opening the monitor output');
           try {
             await workspace.openPaths([dir]);
           } finally {
             patchState(store, { opening: false });
           }
+          const sources = monitorSourceIds(workspace.summary(), dir).length;
+          const ms = Math.round(performance.now() - began);
+          if (!sources) {
+            logger.warn('ui.monitor', 'The monitor output did not open; the run is not followed', { ElapsedMs: ms });
+            patchState(store, {
+              error: $localize`:@@tools.monitor.error.notOpened:Monitoring started, but its output could not be opened in the workspace, so it is not followed. Open the output folder to see the results.`,
+            });
+            return;
+          }
+          logger.info('ui.monitor', 'Opened the monitor output', { Sources: sources, ElapsedMs: ms });
           await live.start();
           patchState(store, { notice: $localize`:@@tools.monitor.notice.started:Monitoring started. The results appear in the workspace as they are written.` });
         }),

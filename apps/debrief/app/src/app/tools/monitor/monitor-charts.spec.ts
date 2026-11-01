@@ -410,6 +410,50 @@ describe('MonitorLiveCharts', () => {
     spy.mockRestore();
   });
 
+  it("hides the earlier run's charts while the next run opens its output", async () => {
+    const { fixture, monitor, start } = await setup();
+    await start();
+    expect(text(fixture)).toContain('OrderService.exe · 4120');
+    await monitor.stop();
+    let open: () => void = () => undefined;
+    const opened = new Promise<void>((r) => (open = r));
+    const debrief = TestBed.inject(DebriefBackend);
+    const real = debrief.openPaths.bind(debrief);
+    vi.spyOn(debrief, 'openPaths').mockImplementation(async (paths) => {
+      await opened;
+      return real(paths);
+    });
+    const started = monitor.start();
+    await settle(fixture);
+    expect(el(fixture, '[data-testid=monitor-live-loading]').textContent).toContain("Opening the run's output");
+    expect(text(fixture)).not.toContain('OrderService.exe · 4120');
+    open();
+    await started;
+    await settle(fixture);
+    expect(text(fixture)).toContain(`OrderService.exe · ${4120 + MOCK_RUN_PID_STEP}`);
+  });
+
+  for (const [how, failure] of [
+    ['fails', new Error('access denied')],
+    ['is cancelled', { name: 'AbortError', message: 'cancelled' }],
+  ] as const) {
+    it(`asks nothing when a new run's output open ${how}, and says why`, async () => {
+      const { fixture, backend, monitor, store } = await setup();
+      vi.spyOn(TestBed.inject(DebriefBackend), 'openPaths').mockRejectedValue(failure);
+      monitor.setTarget(0, { value: 'svc*' });
+      await monitor.start();
+      await settle(fixture);
+      expect(monitor.running()).toBe(true);
+      expect(monitor.opening()).toBe(false);
+      expect(store.sources()).toEqual([]);
+      expect(store.ready()).toBe(false);
+      expect(backend.requests).toHaveLength(0);
+      expect(el(fixture, '[data-testid=monitor-live-unopened]').textContent).toContain('not open in the workspace');
+      expect(monitor.error()).toContain('could not be opened');
+      expect(monitor.notice()).toBeNull();
+    });
+  }
+
   it('shows the loading state, a per-chart gap, the Other entry, and keeps the newest load', async () => {
     const { fixture, backend, start, store } = await setup();
     let release: () => void = () => undefined;
