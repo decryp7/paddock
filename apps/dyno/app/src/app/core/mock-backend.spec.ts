@@ -542,7 +542,8 @@ describe('mock extras and backup health', () => {
       const b = fresh({ jobs: { emit: (j: SuJobSnapshot) => heard.push(j) } });
       b.jobSteps = 4;
       const id = await b.startJob({ fileHash: { source: { path: '/Applications/Tool.app/tool' } } });
-      await new Promise((r) => setTimeout(r, 30));
+      // The steps are chained timers: wait until the job has ended, not for a fixed time (rule 49 (a)).
+      await vi.waitFor(() => expect(heard.filter((j) => j.id === id).at(-1)?.state).toBe('done'));
       const mine = heard.filter((j) => j.id === id);
       expect(mine.map((j) => j.state)).toEqual(['queued', 'running', 'running', 'running', 'running', 'done']);
       expect(mine.every((j, i) => i === 0 || j.seq > mine[i - 1]!.seq)).toBe(true);
