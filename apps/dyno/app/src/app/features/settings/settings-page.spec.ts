@@ -90,6 +90,7 @@ describe('SettingsPage', () => {
     expect(Object.keys(await mock.settings())).not.toContain('trayItems');
   });
   it('scrolls to the section the Settings window was asked for, and again when it is asked again', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     Element.prototype.scrollIntoView = () => undefined;
     const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
     const anchor = signal<SettingsAnchor | null>({ id: 'popup-widgets', at: 1 });
