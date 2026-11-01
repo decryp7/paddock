@@ -24,7 +24,7 @@ ok_path() {
 
 case "$(uname -s)" in
   Linux)
-    deb=$(find "$bundle/deb" -name '*.deb' 2>/dev/null | head -n 1)
+    debs=$(find "$bundle/deb" -name '*.deb' 2>/dev/null); deb=${debs%%$'\n'*}
     [[ -n "$deb" ]] || { echo "::error::no .deb under $bundle/deb"; exit 1; }
     tree=$(mktemp -d)
     trap 'rm -rf "$tree"' EXIT
@@ -32,7 +32,7 @@ case "$(uname -s)" in
     found_app=0 found_agent=0 found_cli=0
     while IFS= read -r f; do
       case "$(basename "$f")" in dyno-app) found_app=1 ;; dyno) found_cli=1 ;; dyno-agent) found_agent=1 ;; esac
-      file -b "$f" | grep -q '^ELF' || continue
+      grep -q '^ELF' <<<"$(file -b "$f")" || continue
       paths=$(readelf -d "$f" 2>/dev/null | sed -n 's/.*(R\(UN\)\{0,1\}PATH).*\[\(.*\)\]/\2/p')
       echo "run paths of ${f#"$tree"}: ${paths:-none}"
       IFS=: read -ra entries <<< "$paths"
@@ -45,7 +45,7 @@ case "$(uname -s)" in
     (( found_cli )) || err "the .deb has no dyno (command line) executable"
     ;;
   Darwin)
-    app=$(find "$bundle/macos" -maxdepth 1 -name '*.app' 2>/dev/null | head -n 1)
+    apps=$(find "$bundle/macos" -maxdepth 1 -name '*.app' 2>/dev/null); app=${apps%%$'\n'*}
     [[ -n "$app" ]] || { echo "::error::no .app under $bundle/macos"; exit 1; }
     codesign --verify --deep --strict "$app" || err "$app does not verify (broken or missing seal)"
     codesign -dv "$app" 2>&1 | grep -E 'Signature|Identifier|flags' || true
@@ -53,7 +53,7 @@ case "$(uname -s)" in
     while IFS= read -r f; do
       [[ "$(basename "$f")" == dyno-agent ]] && found_agent=1
       [[ "$(basename "$f")" == dyno ]] && found_cli=1
-      file -b "$f" | grep -q 'Mach-O' || continue
+      grep -q 'Mach-O' <<<"$(file -b "$f")" || continue
       paths=$(otool -l "$f" | awk '/cmd LC_RPATH/ { getline; getline; print $2 }')
       echo "run paths of ${f#"$app"/}: $(echo "$paths" | paste -sd: -)"
       while IFS= read -r p; do

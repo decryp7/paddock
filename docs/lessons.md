@@ -1158,3 +1158,14 @@ time with the same message; pushing a complete running status (no hidden space, 
 The jobs test in `mock-backend.spec.ts` had the plain form of the same thing: a fixed 30 ms wait for chained timers.
 **Lesson:** a test builds the state it pushes from scratch, or after waiting for a known state, never by copying whatever is
 current. `vi.waitFor` also moves faked timers on every poll, so a fake-timer spec cannot use it to hold a moment still.
+
+## `| grep -q` and `| head` under pipefail lose a SIGPIPE race (2026-11-01, Dyno first release)
+
+The Dyno 1.0 tag run said "the '## [1.0.0]' section is empty" for a 45-line section: `printf '%s\n' "$section" | grep -q
+'[^[:space:]]'` under `set -o pipefail`. grep exits at its first match, and when the pipe holds less than the section (a
+busy CI host cuts a pipe to one page) the writer gets SIGPIPE and the pipeline reports failure. The first guess, mawk and
+`[^]]`, was wrong (it parsed the same in mawk 20200120, 20240123 and gawk); only the independent review reproduced it, with a
+section over 64 KB. The class had been found twice before (C62, on a side branch only, so main never ran it). **Lesson:** a
+check that fixes a recurring class must reach main before the next release, and cover the sibling (`| head`) too: C62 now
+flags both in every pipefail script and bash step, as an error. Match without a pipe: `grep -q … <<<"$out"`, `sed -n 1,3p`,
+`${out%%$'\n'*}`.

@@ -51,7 +51,7 @@ else
   bad "code signature" "codesign --verify failed; build with signingIdentity \"-\" (docs/macos.md)"
 fi
 if [ -x "$main" ] && command -v otool >/dev/null; then
-  otool -l "$main" | grep -q "LC_RPATH" && ok "rpath present on the app binary" || note "no rpath on the app binary (fine unless native libs are bundled)"
+  grep -q "LC_RPATH" <<<"$(otool -l "$main")" && ok "rpath present on the app binary" || note "no rpath on the app binary (fine unless native libs are bundled)"
 fi
 ver=$(plutil -extract LSMinimumSystemVersion raw "$app/Contents/Info.plist" 2>/dev/null)
 [ -n "$ver" ] && ok "minimum macOS $ver (SMAppService needs 13)" || note "no LSMinimumSystemVersion"

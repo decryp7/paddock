@@ -55,8 +55,10 @@ while IFS= read -r exe; do
     *) echo "::error::sidecar $name has no self-test in scripts/ci/macos-smoke.sh: add one (every sidecar must be started by the smoke)"; exit 1 ;;
   esac
   echo "-- $name ${args[*]}"
-  run_limited 40 "$exe" "${args[@]}" | head -c 4000
-  [ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
+  rc=0
+  out=$(run_limited 40 "$exe" "${args[@]}") || rc=$?
+  printf '%s\n' "${out:0:4000}"
+  [ "$rc" -eq 0 ] || exit 1
 done < <(find "$macos" -maxdepth 1 -type f -perm -u+x | sort)
 [ "$found" -gt 0 ] || { echo "::error::no sidecar executables found in $macos"; exit 1; }
 echo "$found sidecar(s) started"

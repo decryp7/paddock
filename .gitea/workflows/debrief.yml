@@ -704,7 +704,7 @@ jobs:
         if: runner.os == 'macOS'
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
-          app=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
+          apps=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app'); app=${apps%%$'\n'*}
           [ -d "$app" ] || { echo "::error::no debug .app was built"; exit 1; }
           node --test scripts/ci/macos-smoke.test.mjs
           bash scripts/ci/macos-verify-bundle.sh "$app"
@@ -769,7 +769,7 @@ jobs:
         if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os == 'macOS'
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
-          app=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
+          apps=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app'); app=${apps%%$'\n'*}
           node --test scripts/ci/startup-bench.test.mjs
           node scripts/ci/startup-bench.mjs "$app" --runs 5 --out "${RUNNER_TEMP:-/tmp}/startup-timings.json"
 
@@ -981,14 +981,14 @@ jobs:
         run: |
           bundle="$PADDOCK_BUILD_FOLDER/dist/bundle"
           if [ "$RUNNER_OS" = Linux ]; then
-            deb=$(find "$bundle/deb" -name '*.deb' | head -n 1)
+            debs=$(find "$bundle/deb" -name '*.deb'); deb=${debs%%$'\n'*}
             tree=$(mktemp -d)
             dpkg-deb -x "$deb" "$tree"
             bin="$tree/usr/bin/debrief-store-worker"; lib=libduckdb.so; origin='$ORIGIN'
             readelf -d "$bin" | grep -E 'R(UN)?PATH' || true
             paths=$(readelf -d "$bin" | sed -n 's/.*(R\(UN\)\{0,1\}PATH).*\[\(.*\)\]/\2/p')
           else
-            app=$(find "$bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
+            apps=$(find "$bundle/macos" -maxdepth 1 -name '*.app'); app=${apps%%$'\n'*}
             bin="$app/Contents/MacOS/debrief-store-worker"; lib=libduckdb.dylib; origin='@executable_path'
             otool -L "$bin" | grep duckdb
             paths=$(otool -l "$bin" | awk '/cmd LC_RPATH/ { getline; getline; print $2 }' | paste -sd: -)
@@ -1106,7 +1106,7 @@ jobs:
           # http address, which the updater must never be given.
           BASE_URL: https://dev.decryptology.net/${{ github.repository }}/releases/download/${{ github.ref_name }}
         run: |
-          if ! find artifacts -name '*.sig' | grep -q .; then
+          if [ -z "$(find artifacts -name '*.sig')" ]; then
             echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
             exit 0
           fi

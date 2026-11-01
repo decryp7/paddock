@@ -21,7 +21,7 @@ systemctl --user is-system-running >/dev/null 2>&1 || systemctl --user show-envi
   echo "::error::no systemd --user session (is lingering/login set up in the VM?)"; exit 1; }
 
 heartbeat_version() {
-  local f; f=$(find "$HOME/.local/share" -path '*/agent/heartbeat.json' 2>/dev/null | head -n1)
+  local f fs; fs=$(find "$HOME/.local/share" -path '*/agent/heartbeat.json' 2>/dev/null); f=${fs%%$'\n'*}
   [ -n "$f" ] && sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$f" || true
 }
 wait_for_version() {
@@ -38,7 +38,7 @@ wait_for_version() {
 # The app's own view must agree with systemd: "running" (the agent answers), not just an active unit.
 expect_running() {
   local st; st=$("$agent" status)
-  echo "$st" | grep -q '"condition": "running"' || { echo "::error::the app does not see the agent running"; echo "$st"; return 1; }
+  grep -q '"condition": "running"' <<<"$st" || { echo "::error::the app does not see the agent running"; echo "$st"; return 1; }
 }
 cleanup() {
   [ -x "$agent" ] && "$agent" uninstall || true
@@ -62,6 +62,6 @@ echo "build N ($v_old) runs"
 rm -rf "$dest" && cp -R "$new" "$dest"
 "$agent" check
 wait_for_version "$v_new"
-systemctl --user is-active "$unit" | grep -qx active || { echo "::error::the unit is not active"; systemctl --user status "$unit" --no-pager || true; exit 1; }
+grep -qx active <<<"$(systemctl --user is-active "$unit")" || { echo "::error::the unit is not active"; systemctl --user status "$unit" --no-pager || true; exit 1; }
 expect_running
 echo "build N+1 ($v_new) runs after the update; the unit is active"

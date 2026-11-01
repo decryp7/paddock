@@ -41,13 +41,14 @@ version=${tag#"${prefix}v"}
 
 heading=$(grep -m1 -F "## [$version]" "$changelog" || true)
 [ -n "$heading" ] || { echo "::error::$changelog has no '## [$version]' section: write the release notes there before tagging"; exit 1; }
-if printf '%s' "$heading" | grep -qi 'unreleased'; then
+if grep -qi 'unreleased' <<<"$heading"; then
   echo "::error::$changelog still says '$heading': date the section (bump the version, then tag)"
   exit 1
 fi
 
 # Diagnostics on stderr (ER-27): what the section was read with, from which file, so a repeat failure explains itself.
-awk_id=$( (awk -W version 2>/dev/null || awk --version 2>/dev/null) | head -n 1 || true)
+awk_id=$(awk -W version 2>/dev/null || awk --version 2>/dev/null || true)
+awk_id=${awk_id%%$'\n'*}
 bytes=$(wc -c < "$changelog" | tr -d ' ')
 sha=$( (sha256sum "$changelog" 2>/dev/null || shasum -a 256 "$changelog" 2>/dev/null) | cut -d' ' -f1 || true)
 heading_line=$(grep -n -m1 -F "## [$version]" "$changelog" | cut -d: -f1 || true)

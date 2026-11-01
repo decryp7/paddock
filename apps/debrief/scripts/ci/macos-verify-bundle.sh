@@ -25,7 +25,7 @@ load_check() {
   local app="$1" macos="$1/Contents/MacOS" out
   out=$("$macos/debrief-store-worker" --self-test 2>&1) || { echo "$out"; echo "::error::the store worker of $app cannot open a store"; return 1; }
   echo "$out"
-  out=$("$macos/debrief-plugins" --manifests 2>&1) || { echo "$out" | head -5; echo "::error::debrief-plugins of $app does not start"; return 1; }
+  out=$("$macos/debrief-plugins" --manifests 2>&1) || { sed -n 1,5p <<<"$out"; echo "::error::debrief-plugins of $app does not start"; return 1; }
   out=$("$macos/debrief-ai-worker" --list-builds 2>&1) || true
   [ -x "$macos/debrief-ai-worker" ] || { echo "::error::debrief-ai-worker is missing from $app"; return 1; }
 }

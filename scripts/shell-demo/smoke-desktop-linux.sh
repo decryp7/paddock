@@ -50,7 +50,7 @@ stalonetray --log-level info >"$work/tray.log" 2>&1 & pids+=($!)
 dunst >"$work/dunst.log" 2>&1 & pids+=($!)
 until_ok 20 dunstctl count history || fail "the notification server did not start"
 until_ok 20 xdotool search --onlyvisible --class stalonetray || fail "the system tray did not start"
-tray_wid=$(xdotool search --onlyvisible --class stalonetray | head -n1)
+tray_wids=$(xdotool search --onlyvisible --class stalonetray); tray_wid=${tray_wids%%$'\n'*}
 
 # --- the app, started in the background as at login ----------------------------------------------------------------------
 mkdir -p "$(dirname "$dest")"; rm -rf "$dest"; cp -R "$build" "$dest"
@@ -58,7 +58,7 @@ mkdir -p "$(dirname "$dest")"; rm -rf "$dest"; cp -R "$build" "$dest"
 "$app" --hidden >"$work/app.log" 2>&1 & app_pid=$!
 
 # 1. The tray icon: the app's icon window embedded (somewhere) inside the tray's window.
-tray_icon() { xwininfo -tree -id "$tray_wid" | grep -q '"paddock-shell-demo"'; }
+tray_icon() { grep -q '"paddock-shell-demo"' <<<"$(xwininfo -tree -id "$tray_wid")"; }
 until_ok 60 tray_icon || fail "the app's tray icon did not appear in the system tray"
 echo "the tray icon is in the system tray"
 
@@ -67,7 +67,7 @@ systemctl --user stop "$unit"
 notified() { [ "$(( $(dunstctl count displayed) + $(dunstctl count history) ))" -gt 0 ]; }
 until_ok 240 notified || fail "no notification reached the notification server after the agent stopped"
 dunstctl close-all # what is still on screen moves to the history
-from_app() { dunstctl history | grep -q '"data" : "paddock-shell-demo"'; }
+from_app() { grep -q '"data" : "paddock-shell-demo"' <<<"$(dunstctl history)"; }
 until_ok 10 from_app || fail "the notification did not come from the app: $(dunstctl history)"
 echo "a notification from the app reached the notification server: $(dunstctl history | grep -A2 '"summary"' | sed -n 's/.*"data" : "\(.*\)".*/\1/p' | head -n1)"
 
