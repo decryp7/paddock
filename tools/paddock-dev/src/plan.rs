@@ -15,7 +15,17 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(120);
-const PROJECTS: [&str; 9] = ["crates", "ui", "eslint", "conformance", "tools", "icons", "ci-image", "paddock-dev", "heavy"];
+const PROJECTS: [&str; 9] = [
+    "crates",
+    "ui",
+    "eslint",
+    "conformance",
+    "tools",
+    "icons",
+    "ci-image",
+    "paddock-dev",
+    "heavy",
+];
 
 fn re(pattern: &str) -> Regex {
     // The patterns are literals of this file, checked by the tests below.
@@ -624,7 +634,13 @@ mod tests {
     fn heavy_is_its_own_project_reached_by_its_folder_and_the_rust_inputs() {
         let p = plan(&["tools/heavy/src/lib.rs"]);
         assert_eq!(
-            (p["heavy"].clone(), p["tools"].clone(), p["crates"].clone(), p["paddockDev"].clone(), p["all"].clone()),
+            (
+                p["heavy"].clone(),
+                p["tools"].clone(),
+                p["crates"].clone(),
+                p["paddockDev"].clone(),
+                p["all"].clone()
+            ),
             (json!(true), json!(false), json!(false), json!(false), json!(false))
         );
         for f in [".cargo/config.toml", "lint/clippy.toml"] {
@@ -645,7 +661,11 @@ mod tests {
         // the project wiki is linted by tools/wiki on every wiki change (ER-30), as is its settings file
         for f in ["docs/wiki/index.md", "wiki-lint.json"] {
             let p = plan(&[f]);
-            assert_eq!((&p["tools"], &p["docs"], &p["crates"], &p["all"]), (&json!(true), &json!(false), &json!(false), &json!(false)), "{f}");
+            assert_eq!(
+                (&p["tools"], &p["docs"], &p["crates"], &p["all"]),
+                (&json!(true), &json!(false), &json!(false), &json!(false)),
+                "{f}"
+            );
         }
         assert_eq!(plan(&["apps/dyno/CHANGELOG.md"])["apps"], json!(["dyno"]));
         assert_eq!(plan(&["apps/dyno/REVIEWED.md"])["apps"], json!(["dyno"]));
