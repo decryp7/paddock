@@ -763,6 +763,14 @@ uses `paddock-log`'s current API and switches in the same change as WP-1.
   `devkit ci error|skip|summary` (what `ci-log.sh` defines), so `ci-log.sh`, `ci-log.mjs` and `run-native.mjs` are not
   ported a second time.
 
+- **Exit codes of a wrapper** (amendment, 2026-11-01). A tool that runs another program for its caller and passes the child's
+  exit code through (`heavy run`, `devkit run --`) cannot use `paddock-cli`'s 1/2/4 for its own failures: a child that exits 1
+  or 2 (a failed test, a usage error of cargo) would look like the wrapper's own refusal. Its own failures use the sysexits
+  codes instead: **64** usage, **75** the lock or resource could not be taken (temporary failure), **78** refused before
+  anything ran (configuration or guard); **126** and **127** (cannot run, not found) and **128+n** (signal) keep their shell
+  meaning, and every other code is the child's, unchanged. Tools that run no child (`wiki`, `dev`) keep `paddock-cli`'s codes.
+  The failure line and the log say which side failed (`tools/heavy/src/exit.rs` is the reference implementation).
+
 **`wiki` and `heavy` adopt it now**, so they need no retrofit: both depend on `paddock-tool` from their first merge
 (behind a thin local `run()` until `paddock-tool` lands, then a one-line switch); `wiki` takes `paddock-cli`'s exit codes
 (findings exit 5, not 1) while its callers are few (no backward compatibility before v1); `heavy` logs each slot wait,
