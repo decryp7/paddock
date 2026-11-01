@@ -1,20 +1,40 @@
 #!/usr/bin/env node
 // Finds the spec file that leaks state into a failing one (rule 58, ER-29). Dependency-free.
 //
-//   node scripts/find-polluter.mjs --victim <spec> --before <file> [--cwd DIR] -- <test cmd...>
+//   node scripts/find-polluter.mjs --victim <spec> --before <file> [--cwd DIR] [--timeout MS] [--repeat N]
+//                                  [--no-flags] [--file-flag FLAG] -- <test cmd...>
 //
 // A full Vitest run (isolate: false, rule 49) failed on <victim>. <file> lists, one path per line, the spec files that ran
-// before it in the same worker, in that order (take them from the failing run's log; print the seed there with
-// `--sequence.seed`, and pass the same flags in <test cmd>). The script runs the command with the candidates plus the victim
-// appended as arguments, always in the given order, and bisects the candidates (delta debugging, one polluter assumed):
-// victim + first half; if that fails, recurse there, otherwise the second half. About log2(n) + 2 runs.
+// before it in the same worker, in that order (take them from the failing run's log, which also prints the seed). The script
+// runs <test cmd> with the candidates plus the victim, in that order, and bisects the candidates (delta debugging, one
+// polluter assumed): victim + first half; if that fails, recurse there, otherwise the second half. About log2(n) + 2 runs.
+//
+// Vitest does NOT run files in the order given: BaseSequencer runs failed files first and sorts the rest by duration,
+// shuffle reorders each subset, workers split the files, and file arguments are substring filters. So, unless --no-flags,
+// each run appends `--no-file-parallelism --maxWorkers=1 --sequence.shuffle=false`, then the files as ABSOLUTE paths
+// (resolved against --cwd), and sets PADDOCK_TEST_ORDER so the order-keeping sequencer runs exactly that order. The
+// sequencer can only be set in the config (Vitest reads the CLI option as a string), so the project's Vitest config needs
+// the one line from scripts/ordered-sequencer.mjs: `sequence: { ...orderedSequence() }` (empty unless the variable is set).
+// Do not put those flags, a seed or a shuffle in <test cmd>.
+//
+// Under `ng test` (Angular unit-test builder) the flags above are not accepted: point the builder's Vitest config
+// (`runnerConfig`) at a config that has the `orderedSequence()` line and sets `fileParallelism: false` and
+// `maxWorkers: 1`, then run `--no-flags --file-flag --include -- ng test`, which passes each file as `--include <path>`.
+// (Not verified against a real Angular workspace yet; check `ng test --help` of the installed version.)
+//
+// Assumptions: exactly one polluter (else status "combination"); the failure is deterministic for a given order (else use
+// --repeat N: a probe counts as failing if any of N runs fails); the victim and polluter run in one worker and one process
+// (isolate: false); setup files and config are unchanged between runs. --timeout MS kills a run that hangs (a leaked fake
+// timer often hangs rather than fails) and counts it as a failure; the default is 600000.
 //
 // Exit 0: polluter found (printed). Exit 1: no single polluter (does not reproduce, fails alone, or needs two files).
 // Exit 2: usage error. Each run is a child process with no shell; nothing is slept on.
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 
 /**
  * Bisects `candidates` for the one file that makes `fails(files)` true together with the victim.
@@ -53,10 +73,14 @@ export function parseArgs(argv) {
   };
   const victim = opt('victim');
   const before = opt('before');
-  if (!victim || !before || cmd.length === 0) {
-    return { error: 'usage: find-polluter.mjs --victim <spec> --before <list-file> [--cwd DIR] -- <test cmd...>' };
+  const usage = 'usage: find-polluter.mjs --victim <spec> --before <list-file> [--cwd DIR] [--timeout MS] [--repeat N] [--no-flags] [--file-flag FLAG] -- <test cmd...>';
+  if (!victim || !before || cmd.length === 0) return { error: usage };
+  const timeout = Number(opt('timeout') ?? 600000);
+  const repeat = Number(opt('repeat') ?? 1);
+  if (!Number.isInteger(timeout) || timeout <= 0 || !Number.isInteger(repeat) || repeat <= 0) {
+    return { error: `--timeout and --repeat must be positive integers; ${usage}` };
   }
-  return { victim, before, cwd: opt('cwd') ?? process.cwd(), cmd };
+  return { victim, before, cwd: opt('cwd') ?? process.cwd(), timeout, repeat, noFlags: head.includes('--no-flags'), fileFlag: opt('file-flag'), cmd };
 }
 
 function main() {
@@ -76,15 +100,36 @@ function main() {
     return 2;
   }
   const [exe, ...base] = parsed.cmd;
+  // Vitest matches file arguments against real paths, so a symlinked folder (macOS /var -> /private/var) must be resolved.
+  const abs = (p) => {
+    const full = isAbsolute(p) ? p : resolve(parsed.cwd, p);
+    try {
+      return realpathSync(full);
+    } catch {
+      return full;
+    }
+  };
+  const victim = abs(parsed.victim);
+  candidates = candidates.map(abs).filter((c) => c !== victim);
   const fails = (subset) => {
-    const r = spawnSync(exe, [...base, ...subset, parsed.victim], { cwd: parsed.cwd, stdio: 'inherit' });
-    if (r.error) throw r.error;
-    return r.status !== 0;
+    const order = [...subset, victim];
+    const files = parsed.fileFlag ? order.flatMap((f) => [parsed.fileFlag, f]) : order;
+    const flags = parsed.noFlags
+      ? []
+      : ['--no-file-parallelism', '--maxWorkers=1', '--sequence.shuffle=false'];
+    const env = { ...process.env, PADDOCK_TEST_ORDER: order.join('\n') };
+    for (let i = 0; i < parsed.repeat; i += 1) {
+      const r = spawnSync(exe, [...base, ...flags, ...files], { cwd: parsed.cwd, env, stdio: 'inherit', timeout: parsed.timeout });
+      // A command that cannot start is a usage problem, not a failing victim: stop instead of bisecting noise.
+      if (r.error && r.error.code !== 'ETIMEDOUT') throw r.error;
+      if (r.error || r.status !== 0) return true;
+    }
+    return false;
   };
   const result = findPolluter(candidates, fails);
   switch (result.status) {
     case 'found':
-      console.log(`polluter: ${result.polluter} (victim ${parsed.victim}, ${result.runs} runs)`);
+      console.log(`polluter: ${result.polluter} (victim ${victim}, ${result.runs} runs)`);
       return 0;
     case 'no-repro':
       console.error('::error::the victim passes with all candidates before it; next step: use the seed and flags of the failing run');
