@@ -41,3 +41,5 @@ node_modules
 /apps/workbench-demo/dist/
 /vm-smoke-results/
 /engineering-rules/
+# The heavy tool's local build folder.
+/tools/heavy/target/
