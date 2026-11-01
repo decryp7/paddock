@@ -252,7 +252,7 @@ fn updater<R: Runtime>(
                 app.clone(),
                 key.unwrap_or_default(),
             ))),
-        Some(dir) => b.dirs(dir.join("config"), dir.join("cache")).background(false),
+        Some(dir) => b.dirs(dir.join("config"), dir.join("cache")).background(false).no_install(),
     }
 }
 

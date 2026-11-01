@@ -3143,6 +3143,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-build"
+version = "0.1.0"
+dependencies = [
+ "paddock-workspace-hack",
+ "serde_json",
+ "tauri-build",
+]
+
+[[package]]
 name = "paddock-channels"
 version = "0.1.0"
 dependencies = [
@@ -3158,6 +3167,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tauri",
+ "url",
 ]
 
 [[package]]
@@ -3782,6 +3792,7 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "objc2-service-management",
+ "paddock-build",
  "paddock-commands",
  "paddock-dialogs",
  "paddock-jobs",
@@ -3799,7 +3810,6 @@ dependencies = [
  "serde_json",
  "socket2",
  "tauri",
- "tauri-build",
  "tauri-plugin-autostart",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
