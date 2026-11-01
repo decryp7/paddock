@@ -44,12 +44,13 @@ fn text() -> String {
         .join(", ");
     format!(
         "{header}{types}\
-/** The events of the dialog layer: to the opener (`result`, `shown`, `closed`) and to the dialog (`closeRequested`). */
+/** The events of the dialog layer: to the opener (`result`, `shown`, `closed`) and to the dialog (`closeRequested`, `inputs`). */
 export const DIALOG_EVENTS = {{
   result: '{}',
   shown: '{}',
   closed: '{}',
   closeRequested: '{}',
+  inputs: '{}',
 }} as const;
 
 /** The commands every dialog window may call whatever its contract says. */
@@ -59,6 +60,7 @@ export const DIALOG_BASE_COMMANDS = [{base}] as const;
         crate::SHOWN_EVENT,
         crate::CLOSED_EVENT,
         crate::CLOSE_REQUESTED_EVENT,
+        crate::INPUTS_EVENT,
     )
 }
 

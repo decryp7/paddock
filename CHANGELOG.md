@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
+- New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
+  inputs)` (optional: a `DialogIo` without it is unchanged). When a window opens a dialog that is open already (Settings at a section), `WindowDialogBackend`
+  sends the new inputs to that window with `emitTo`; the dialog window's `followDialogInputs(dialogId, ref, io)` applies them. Before, the new inputs travelled
+  only on a `BroadcastChannel`, which the browser e2e (one browser, pages of one context) could use but which did not reach the other webview of the real app:
+  Dyno's "Customize widgets…" brought an open Settings window forward without switching its page or scrolling. The channel stays for dialogs of the same page.
+
 ### `paddock-window`: `Popovers::has`
 - `Popovers::has(item)` says whether the popover of a tray item (`None`: the icon's) has a spec. An app's start test uses it to check that a tray click has
   something to open (Dyno's tray did nothing in 1.0 until its popover was registered; a browser-only e2e cannot see that).
