@@ -1130,3 +1130,31 @@ it until the contract names it); and a native window-system event (`paddock://di
 open: ADR 0026's recorder-based `dev check dialog-commands` (every command a dialog calls against its contract, in every app) does not exist yet, and a
 tray click is only tested up to "a popover is registered", not "a window opens". Before calling a window, tray or dialog feature done, read the log of the
 installed app once (the three above were each one line of the app's own log).
+
+## A warm module made a chart draw before teardown, and dispose threw on jsdom's missing canvas (2026-11-01, Dyno)
+
+Dyno's `widgets-ui.spec.ts` board test failed now and then in full runs on a busy machine with "1 fixture threw errors
+during cleanup": the test body passed, then `dy-chart`'s destroy called ECharts' `dispose()`, which cleared a canvas layer
+whose 2D context was null (jsdom has no canvas) and threw. That needs ECharts to have loaded and painted a frame before the
+fixture is destroyed. Alone, the dynamic `import('./echarts-setup')` is cold and the test ends first; with `isolate: false`
+an earlier spec in the same worker (`chart.spec.ts`) leaves the module warm, so it loads in a turn, and a loaded machine
+stretches the test's `vi.waitFor` polls long enough for a frame. Reproduced every time with one worker and the victim last
+(`chart.spec` then `widgets-ui.spec`: red; `format.spec` then `widgets-ui.spec`, or alone: green). Causes ruled out: leaked
+fake timers (the AnimatedNumber block restores them; the error is a canvas TypeError), a waitFor bound (the assertions had
+passed), an unawaited effect in the store or edit path (the layout and edit counts were right). **Cause in product code:**
+the chart contained a failed draw but not a failed dispose, and drew on a canvas with no 2D context (WebKit gives none when
+canvas memory runs out), where ECharts also throws from its frame loop. The chart now checks for a 2D context before it
+starts ECharts (otherwise it shows "This chart could not be drawn") and logs, instead of throwing, a failed dispose.
+**Lesson:** a component's destroy never throws; specs that render a real third-party renderer depend on module warmth and
+load under `isolate: false`, so the renderer's missing-platform path must be a designed state (rule 49, ER-29).
+
+## A test that copies the current status inherits whichever state the race left (2026-11-01, Dyno)
+
+Dyno's disk-map ghost test failed now and then in full shuffled runs under load (seeds 207 and 221 of 22): the "Not counted
+yet" arc was drawn, but so was "Hidden space". The test pushed `{ ...store.status(), seq: 70, state: 'running' }`, and only a
+finished scan carries `hiddenBytes`, so the copy was of the finished status: the mock's step timers (faked) had already run
+when it was taken. Whether they had depended on timing, not on the code. Letting the scan finish first made it fail every
+time with the same message; pushing a complete running status (no hidden space, no scan time) made it pass in both orders.
+The jobs test in `mock-backend.spec.ts` had the plain form of the same thing: a fixed 30 ms wait for chained timers.
+**Lesson:** a test builds the state it pushes from scratch, or after waiting for a known state, never by copying whatever is
+current. `vi.waitFor` also moves faked timers on every poll, so a fake-timer spec cannot use it to hold a moment still.
