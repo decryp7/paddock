@@ -46,6 +46,13 @@ if printf '%s' "$heading" | grep -qi 'unreleased'; then
   exit 1
 fi
 
+# Diagnostics on stderr (ER-27): what the section was read with, from which file, so a repeat failure explains itself.
+awk_id=$( (awk -W version 2>/dev/null || awk --version 2>/dev/null) | head -n 1 || true)
+bytes=$(wc -c < "$changelog" | tr -d ' ')
+sha=$( (sha256sum "$changelog" 2>/dev/null || shasum -a 256 "$changelog" 2>/dev/null) | cut -d' ' -f1 || true)
+heading_line=$(grep -n -m1 -F "## [$version]" "$changelog" | cut -d: -f1 || true)
+echo "first-release-notes: awk='${awk_id:-unknown}' changelog=$changelog bytes=$bytes sha256=${sha:-unknown} heading_line=${heading_line:-?}" >&2
+
 section=$(awk -v h="## [$version]" '
   index($0, h) == 1 { on = 1; next }
   on && /^## / { exit }
@@ -53,7 +60,10 @@ section=$(awk -v h="## [$version]" '
   on
 ' "$changelog")
 # No pipe into grep -q here: under pipefail a reader that quits early (SIGPIPE) would report a non-empty section as empty.
+echo "first-release-notes: section lines=$(printf '%s\n' "$section" | wc -l | tr -d ' ') bytes=$(printf '%s\n' "$section" | wc -c | tr -d ' ')" >&2
 if [[ ! $section =~ [^[:space:]] ]]; then
+  echo "first-release-notes: the first 3 lines after the heading:" >&2
+  tail -n +"$((${heading_line:-0} + 1))" "$changelog" | head -n 3 | cut -c1-120 | sed 's/^/  | /' >&2
   echo "::error::the '## [$version]' section of $changelog is empty"
   exit 1
 fi

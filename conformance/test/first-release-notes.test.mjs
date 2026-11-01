@@ -210,3 +210,12 @@ test('the CI shell scripts have no awk bracket expression that holds a closing b
   dirs.forEach(walk);
   assert.deepEqual(bad, []);
 });
+
+test('the script logs its awk, file, heading line and section size on stderr, and the first lines of an empty section', () => {
+  const ok = run(notesStep, repo(GOOD));
+  assert.match(ok.stderr, /first-release-notes: awk='.*' changelog=CHANGELOG\.md bytes=\d+ sha256=[0-9a-f]{64} heading_line=3/);
+  assert.match(ok.stderr, /section lines=\d+ bytes=\d+/);
+  const bad = run(notesStep, repo('## [1.0.0] - 2026-11-01\n\n[1.0.0]: https://example.invalid/a\n## [0.9.0] - x\n'));
+  assert.match(bad.stderr + bad.stdout, /is empty/);
+  assert.match(bad.stderr, /first 3 lines after the heading:\n  \| \n  \| \[1\.0\.0\]: https/);
+});
