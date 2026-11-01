@@ -249,6 +249,7 @@ impl World {
                 service,
                 lock,
                 deciding,
+                recheck,
                 ..
             } => {
                 if self.looks.len() >= 2 {
@@ -258,7 +259,8 @@ impl World {
                 let lock = lock.then_some(if self.lock_held() { LockSeen::Held } else { LockSeen::Free });
                 // As `ports::look` does: a decision look with a file beside a held lock is answered without the login service
                 // (the machine connects to that agent; the service is asked right after the connection).
-                let needs_service = !(deciding && hint.is_some() && lock == Some(LockSeen::Held));
+                let needs_service =
+                    !((deciding && hint.is_some() && lock == Some(LockSeen::Held)) || (recheck && lock == Some(LockSeen::Held)));
                 let look = Look {
                     seq,
                     now_ms: self.clock,

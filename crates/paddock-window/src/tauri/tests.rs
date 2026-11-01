@@ -1103,6 +1103,21 @@ fn the_popover_toggles_fits_its_content_and_closes_on_blur_and_escape() {
         crate::WindowErrorCode::NotAllowed
     );
     assert!(!Popovers::default().is_open("tray"));
+    let pops = Popovers::new()
+        .popover(None, PopoverSpec::new("index.html#/tray", "App"))
+        .popover(Some("cpu"), PopoverSpec::new("index.html#/tray/cpu", "CPU"));
+    assert!(
+        pops.has(None) && pops.has(Some("cpu")),
+        "the specs that were set are there"
+    );
+    assert!(
+        !pops.has(Some("gpu")) && !pops.has(Some("BAD")),
+        "an item without a spec has none"
+    );
+    assert!(
+        !Popovers::new().has(None),
+        "a popover that was never set up has none"
+    );
 }
 
 #[test]

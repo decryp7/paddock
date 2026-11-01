@@ -44,6 +44,8 @@ export function tauriBridge(): TauriBridge | null {
     emitTo: async (target, event, payload) => {
       await tauri.invoke('plugin:event|emit_to', { target: { kind: 'AnyLabel', label: target }, event, payload });
     },
+    // Every Dyno window may log (the dialogs' base set names `log_from_webview`).
+    log: (level, message) => ipc.invoke('log_from_webview', { level, message }),
   };
 }
 

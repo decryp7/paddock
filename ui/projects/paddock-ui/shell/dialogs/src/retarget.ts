@@ -1,4 +1,6 @@
 import { reflectComponentType, type ComponentRef } from '@angular/core';
+import { DIALOG_EVENTS } from '@decryp7/paddock-ui/shell';
+import type { DialogIo } from './io';
 
 /** What re-targeting an open dialog carries: its id and the new inputs (plain data). */
 interface Retarget {
@@ -42,12 +44,20 @@ export function sendDialogInputs(dialogId: string, inputs: Readonly<Record<strin
 }
 
 /** Applies later inputs for `dialogId` to `ref` (the inputs its component declares); returns what stops listening. */
-export function followDialogInputs(dialogId: string, ref: ComponentRef<unknown>): () => void {
+export function followDialogInputs(dialogId: string, ref: ComponentRef<unknown>, io?: Pick<DialogIo, 'listen' | 'log'>): () => void {
   const declared = new Set((reflectComponentType(ref.componentType)?.inputs ?? []).map((i) => i.templateName));
-  const apply: Listener = (inputs) => {
-    for (const [name, value] of Object.entries(inputs)) if (declared.has(name)) ref.setInput(name, value);
+  const applyFrom = (route: string, inputs: Readonly<Record<string, unknown>>): void => {
+    const names = Object.keys(inputs);
+    const used = names.filter((n) => declared.has(n));
+    const unknown = names.filter((n) => !declared.has(n));
+    // Rule 56: which route reached this window and what it did (input names only, never their values).
+    const line = `[paddock-dialogs] ${dialogId} re-targeted (${route}): set ${used.join(',') || '(nothing)'}${unknown.length ? `; not inputs of the content: ${unknown.join(',')}` : ''}`;
+    if (io?.log) io.log('info', line);
+    else console.info(line);
+    for (const name of used) ref.setInput(name, inputs[name]);
     ref.changeDetectorRef.detectChanges();
   };
+  const apply: Listener = (inputs) => applyFrom('this page', inputs);
   let set = local.get(dialogId);
   if (!set) local.set(dialogId, (set = new Set()));
   set.add(apply);
@@ -56,10 +66,22 @@ export function followDialogInputs(dialogId: string, ref: ComponentRef<unknown>)
     incoming = new BroadcastChannel(CHANNEL);
     incoming.onmessage = (e: MessageEvent<unknown>) => {
       const m = parse(e.data);
-      if (m && m.from !== PAGE && m.dialogId === dialogId) apply(m.inputs);
+      if (m && m.from !== PAGE && m.dialogId === dialogId) applyFrom('broadcast channel', m.inputs);
     };
   }
+  // The native event of the window system (`paddock://dialog-inputs`): what another webview's page sends with `emitTo`.
+  let off: (() => void) | null = null;
+  let gone = false;
+  io?.listen(DIALOG_EVENTS.inputs, (payload) => {
+    const m = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : null;
+    if (m && m['dialogId'] === dialogId && typeof m['inputs'] === 'object' && m['inputs'] !== null && !Array.isArray(m['inputs'])) applyFrom('native event', m['inputs'] as Record<string, unknown>);
+  }).then(
+    (u) => (gone ? u() : (off = u)),
+    () => undefined,
+  );
   return () => {
+    gone = true;
+    off?.();
     set.delete(apply);
     incoming?.close();
   };

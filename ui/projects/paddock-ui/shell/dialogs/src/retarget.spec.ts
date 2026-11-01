@@ -1,5 +1,7 @@
 import { Component, ChangeDetectionStrategy, input, type ComponentRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { DIALOG_EVENTS } from '@decryp7/paddock-ui/shell';
+import { FakeDialogIo } from '@decryp7/paddock-ui/shell/testing';
 import { followDialogInputs, sendDialogInputs } from './retarget';
 
 @Component({ selector: 'pd-test-target', changeDetection: ChangeDetectionStrategy.OnPush, template: '{{ page() }}' })
@@ -25,6 +27,23 @@ describe('dialog re-targeting', () => {
     expect(t.text()).toBe('a');
     expect(t.sets()).toBe(1);
     stop();
+  });
+
+  it('hears the window system\'s event: another webview\'s page re-targets this dialog with emitTo, which a BroadcastChannel may not carry', async () => {
+    const t = target();
+    const io = new FakeDialogIo();
+    const stop = followDialogInputs('t.native', t.ref, io);
+    await Promise.resolve();
+    io.emit(DIALOG_EVENTS.inputs, { dialogId: 't.other', inputs: { page: 'no' } });
+    expect(t.text()).toBe('');
+    io.emit(DIALOG_EVENTS.inputs, { dialogId: 't.native', inputs: { page: 'yes', nope: 1 } });
+    expect(t.text()).toBe('yes');
+    io.emit(DIALOG_EVENTS.inputs, 'garbage');
+    io.emit(DIALOG_EVENTS.inputs, { dialogId: 't.native', inputs: [1] });
+    expect(t.sets()).toBe(1);
+    stop();
+    io.emit(DIALOG_EVENTS.inputs, { dialogId: 't.native', inputs: { page: 'late' } });
+    expect(t.text()).toBe('yes');
   });
 
   it('applies a message once: a page does not act on its own echo from the channel', async () => {

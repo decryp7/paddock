@@ -400,9 +400,14 @@ describe('dy-disk-map-page', () => {
     const r = render();
     await settle(r.f);
     btn(r.el, 'Scan Macintosh HD')!.click();
-    await settle(r.f);
-    await vi.advanceTimersByTimeAsync(0);
-    r.store.receive({ ...r.store.status()!, seq: 70, state: 'running' });
+    // Whether the mock's scan steps (faked timers) had run before the status below was pushed used to depend on timing; when
+    // they had, the copied status was the finished one and carried its hidden space. Let the scan finish first, so every run
+    // takes the same path, and push a running status that says what a running scan says: no hidden space, no scan time.
+    await vi.waitFor(async () => {
+      await settle(r.f);
+      expect(r.store.status()?.state).toBe('done');
+    });
+    r.store.receive({ ...r.store.status()!, seq: 70, state: 'running', hiddenBytes: null, scannedAt: null });
     // The sunburst draws after the status arrives: wait for the ghost arc, not for a fixed number of ticks.
     await vi.waitFor(async () => {
       await settle(r.f);

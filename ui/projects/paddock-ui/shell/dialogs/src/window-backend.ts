@@ -87,7 +87,12 @@ export class WindowDialogBackend extends DialogPresenter {
         const info = await this.io.open(sent);
         label = info.label;
         // A window another window opened is pointed at the new inputs (it only comes forward otherwise).
-        if (info.existing && Object.keys(request.inputs).length > 0 && !request.def.instanced) sendDialogInputs(request.def.id, request.inputs);
+        if (info.existing && Object.keys(request.inputs).length > 0 && !request.def.instanced) {
+          // This page's own dialogs hear it at once; the window is another webview, so it is told by a native event.
+          sendDialogInputs(request.def.id, request.inputs);
+          this.io.log?.('info', `[paddock-dialogs] re-targeting the open window ${info.label} of ${request.def.id} (opened by another window): ${Object.keys(request.inputs).join(',')}`);
+          await this.io.sendInputs?.(info.label, request.def.id, request.inputs)?.catch((e: unknown) => console.warn(`[paddock-dialogs] the open window of ${request.def.id} could not be re-targeted: ${errorText(e)}`));
+        }
         this.pending.set(info.label, { dialogId: request.def.id, resolve, shown, result: null });
         // An existing window that is on screen already will not announce itself again; a pending one (or a new one) does.
         if ((info.existing && !info.pending) || this.shownEarly.delete(info.label)) shown();
@@ -107,7 +112,14 @@ export class WindowDialogBackend extends DialogPresenter {
       shown: onScreen,
       isOpen: () => open,
       // Opening it again focuses the window Rust has open for it.
-      focus: () => void opened.then(() => (fallback ? fallback.focus() : label ? this.io.open(sent).then(() => undefined, () => undefined) : undefined)),
+      focus: (inputs) =>
+        void opened.then(() => {
+          if (fallback) return fallback.focus();
+          if (!label) return undefined;
+          const again = inputs && Object.keys(inputs).length > 0 && !request.def.instanced ? { ...sent, input: inputs } : sent;
+          this.io.log?.('info', `[paddock-dialogs] focusing the open window ${label} of ${request.def.id} (this window opened it): ${Object.keys(isRecordInput(again.input)).join(',') || '(no inputs)'}`);
+          return this.io.open(again).then(() => undefined, () => undefined);
+        }),
       dismiss: () => void opened.then(() => (fallback ? fallback.dismiss() : label ? this.io.requestClose(label).catch(() => undefined) : undefined)),
     };
   }
@@ -146,4 +158,8 @@ export class WindowDialogBackend extends DialogPresenter {
     );
     return this.listening;
   }
+}
+
+function isRecordInput(v: unknown): Readonly<Record<string, unknown>> {
+  return isRecord(v) ? v : {};
 }

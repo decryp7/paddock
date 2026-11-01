@@ -7,6 +7,7 @@ import { PdCommandPalette, providePagesPalette } from '@decryp7/paddock-ui/workb
 import { PdShellFrame, provideShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { provideContributions, provideShellContext, provideShellVersionCheck } from '@decryp7/paddock-ui/shell';
 import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
+import { provideWebviewLog } from '@decryp7/paddock-ui/shell/diagnostics';
 import { tauriDialogIo } from '@decryp7/paddock-ui/shell/dialogs';
 import { provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
 import { provideShellSettings, SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
@@ -17,7 +18,7 @@ import { createBackend } from '../core/backend-factory';
 import { provideIcons } from '../shared/icons';
 import { provideNotifierActions } from '../shared/notifier';
 import { provideDynoAppearance } from './appearance';
-import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS } from './contributions';
+import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS, DIAGNOSTICS_CONTRIBUTIONS } from './contributions';
 import { aboutBackend, jobsBackend, notifyBackends, settingsBackend, updatesBackend } from './engines';
 import { DynoIcon } from './icon';
 import { tauriBridge, tauriIpc } from './ipc';
@@ -60,6 +61,9 @@ export function bootMainWindow(): Promise<unknown> {
       // The desktop build asks the shell plugin for its version once (ADR 0012 §3): a different one is a plain error.
       ...(ipc ? [provideShellVersionCheck(ipc.invoke)] : []),
       provideContributions(ABOUT_CONTRIBUTIONS),
+      provideContributions(DIAGNOSTICS_CONTRIBUTIONS),
+      // The page's own errors reach the log (the command is part of every window's contract); the browser build has no log.
+      ...(ipc ? [provideWebviewLog({ ipc: () => ({ invoke: (command, args) => ipc.invoke(command, args) }) })] : []),
       provideShellAbout({ about: aboutBackend, updates: updatesBackend, main: true, ready: windowReady }),
       provideWidgetNavigation(),
       provideContributions(SETTINGS_CONTRIBUTIONS),

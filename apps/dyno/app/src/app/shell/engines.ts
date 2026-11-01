@@ -8,6 +8,7 @@ import {
   type UpdatesBackend,
 } from '@decryp7/paddock-ui/shell/about';
 import { mockOptionsFromUrl } from '../core/mock-backend';
+import { MemoryDiagnosticsBackend, TauriDiagnosticsBackend, type DiagnosticsBackend } from '@decryp7/paddock-ui/shell/diagnostics';
 import { MemoryJobsBackend, TauriJobsBackend, type JobsBackend, type JobsIpc } from '@decryp7/paddock-ui/shell/jobs';
 import { MemoryNotificationCentre, MemoryServiceHealth, TauriNotificationsBackend, TauriServiceHealthBackend } from '@decryp7/paddock-ui/shell/notify';
 import { MemorySettingsBackend, SETTINGS_OVERVIEW_FIXTURE, TauriSettingsBackend, type SettingsBackend } from '@decryp7/paddock-ui/shell/settings';
@@ -116,4 +117,26 @@ function healthOf() {
 function centreOf() {
   const ipc = tauriIpc();
   return ipc ? new TauriNotificationsBackend(ipc) : inject(BrowserEngines).centre;
+}
+
+let diagnostics: DiagnosticsBackend | null = null;
+
+/**
+ * Report a problem over Tauri in the app; in the browser one in-memory engine per page, holding the files a real report holds for
+ * Dyno: the system facts, the shell's settings, and the dated logs of BOTH processes (the app's `dyno.<day>.log` and the agent's
+ * `dyno-agent.<day>.log`, which the real engine reads from disk, so they are there with the agent down).
+ */
+export function diagnosticsBackend(): DiagnosticsBackend {
+  const ipc = tauriIpc();
+  if (ipc) return new TauriDiagnosticsBackend(ipc);
+  diagnostics ??= new MemoryDiagnosticsBackend({
+    save: 'save',
+    files: [
+      { name: 'system-info.json', kind: 'system-info', bytes: 412, summary: 'Dyno, your operating system and processor type, no hardware serial numbers' },
+      { name: 'settings.json', kind: 'settings', bytes: 380, summary: 'Your settings; passwords, tokens and keys are replaced by ***' },
+      { name: 'logs/dyno.2026-10-31.log', kind: 'log', bytes: 182_400, summary: '1,204 log lines, the recent part of dyno.2026-10-31.log; file contents are never logged' },
+      { name: 'logs/dyno-agent.2026-10-31.log', kind: 'log', bytes: 36_100, summary: '240 log lines, all of dyno-agent.2026-10-31.log; file contents are never logged' },
+    ],
+  });
+  return diagnostics;
 }

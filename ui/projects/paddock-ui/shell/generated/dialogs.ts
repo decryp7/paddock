@@ -83,12 +83,13 @@ message: string,
  */
 retryable: boolean, };
 
-/** The events of the dialog layer: to the opener (`result`, `shown`, `closed`) and to the dialog (`closeRequested`). */
+/** The events of the dialog layer: to the opener (`result`, `shown`, `closed`) and to the dialog (`closeRequested`, `inputs`). */
 export const DIALOG_EVENTS = {
   result: 'paddock://dialog-result',
   shown: 'paddock://dialog-shown',
   closed: 'paddock://dialog-closed',
   closeRequested: 'paddock://dialog-close-requested',
+  inputs: 'paddock://dialog-inputs',
 } as const;
 
 /** The commands every dialog window may call whatever its contract says. */
