@@ -875,7 +875,7 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(1));
                 self.ticks += 1;
                 if self.ticks == 1500 {
-                    // conformance: pid-kill — the test's own child, sleeping and not yet reaped (this test holds its Child), so its pid cannot have been handed on
+                    // conformance: pid-kill — the test's own child, stopped and not yet reaped (this test holds its Child), so its pid cannot have been handed on
                     std::process::Command::new("kill")
                         .args(["-CONT", &self.pid.to_string()])
                         .status()
