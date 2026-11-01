@@ -63,4 +63,4 @@ export type DialogId = keyof typeof DIALOG_CONTRACTS;
 export type DialogCommandOf<Id extends DialogId> = (typeof DIALOG_CONTRACTS)[Id]['commands'][number];
 
 /** The commands every dialog window of this owner's app may call besides the shell's base set. */
-export const DIALOG_BASE = ['window_pong', 'window_ready'] as const;
+export const DIALOG_BASE = ['window_pong', 'window_ready', 'log_from_webview'] as const;
