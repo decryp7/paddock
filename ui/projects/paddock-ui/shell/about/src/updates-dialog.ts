@@ -1,11 +1,14 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { MatCheckbox, type MatCheckboxChange } from '@angular/material/checkbox';
 import { MatProgressBar } from '@angular/material/progress-bar';
 import { PdSelect } from '@decryp7/paddock-ui/select';
 import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
 import type { SuJobPhase } from '@decryp7/paddock-ui';
 import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
+import { UpdatesBackend } from './backend';
 import { UpdatesStore } from './updates.store';
+import { toUpdateError } from './wire';
+import type { UpdateErrorDto } from '../generated/about';
 import { ABOUT_STYLES } from './styles';
 import { formatBytes } from './format';
 
@@ -38,6 +41,9 @@ import { formatBytes } from './format';
           }
           @case ('available') {
             <p>{{ available() }}</p>
+            @if (!store.canInstall()) {
+              <p class="pd-muted" data-testid="updates-manual">{{ t.manual }}</p>
+            }
           }
           @case ('downloading') {
             <p role="status">{{ downloading() }}</p>
@@ -62,6 +68,12 @@ import { formatBytes } from './format';
       @if (store.info()?.notes; as notes) {
         <pre class="pd-text" tabindex="0" [attr.aria-label]="t.notes">{{ notes }}</pre>
       }
+      @if (openFailed(); as why) {
+        <div class="pd-problem" role="alert" data-testid="updates-open-failed">
+          <p class="pd-message">{{ why.message }}</p>
+          <p>{{ why.nextStep }}</p>
+        </div>
+      }
       @if (store.error(); as e) {
         <div class="pd-problem" role="alert" data-testid="updates-error">
           <p class="pd-message">{{ e.message }}</p>
@@ -83,7 +95,7 @@ import { formatBytes } from './format';
               <pd-select [options]="channelOptions()" [value]="s.channel" [ariaLabel]="t.channel" (valueChange)="setChannel($event)" />
             </label>
           }
-          @if (s.phase.kind === 'ready') {
+          @if (s.phase.kind === 'ready' && store.canInstall()) {
             <mat-checkbox [checked]="installOnQuit()" (change)="store.installOnQuit($event.checked)">{{ t.installOnQuit }}</mat-checkbox>
           }
         </div>
@@ -112,11 +124,13 @@ export class PdUpdatesDialog implements DialogContent {
     notes: $localize`:@@pd.updates.notes:Release notes`,
     autoCheck: $localize`:@@pd.updates.auto-check:Check for updates automatically`,
     channel: $localize`:@@pd.updates.channel:Channel`,
+    manual: $localize`:@@pd.updates.manual:This build does not install updates itself. Download the new version from the releases page.`,
     installOnQuit: $localize`:@@pd.updates.install-on-quit:Install when the app quits`,
     stopChecking: $localize`:@@pd.updates.stop-checking:Stop checking`,
     stopDownload: $localize`:@@pd.updates.stop-download:Stop download`,
     discard: $localize`:@@pd.updates.discard:Discard`,
     restart: $localize`:@@pd.updates.restart:Restart to update`,
+    openReleases: $localize`:@@pd.updates.open-releases:Open releases page`,
     checkAgain: $localize`:@@pd.updates.check-again:Check again`,
     checkNow: $localize`:@@pd.updates.check-now:Check now`,
     download: $localize`:@@pd.updates.download:Download`,
@@ -125,6 +139,9 @@ export class PdUpdatesDialog implements DialogContent {
     asking: $localize`:@@pd.updates.asking:Asking the updater…`,
   };
   protected readonly store = inject(UpdatesStore);
+  private readonly backend = inject(UpdatesBackend);
+  /** Why the releases page did not open, in the engine's words; null when it did. */
+  protected readonly openFailed = signal<UpdateErrorDto | null>(null);
   /** The window's jobs, when it has them: the download's phases. */
   private readonly jobs = inject(JobsStore, { optional: true });
 
@@ -138,16 +155,25 @@ export class PdUpdatesDialog implements DialogContent {
     const s = this.store.status();
     if (!s) return [];
     const run = (id: string, label: string, role: 'primary' | 'secondary', go: () => unknown): DialogAction => ({ kind: 'run', id, label, role, run: () => void go() });
+    // A build that cannot install (no key, or declared `no_install`) points to the releases page: that is the primary action.
+    const releases = s.releasesPage ? run('releases', this.t.openReleases, 'primary', () => this.openReleases()) : null;
+    const viaReleases = (...rest: DialogAction[]): readonly DialogAction[] => (releases ? [releases, ...rest] : rest.map((a) => ({ ...a, role: 'primary' as const })));
     switch (s.phase.kind) {
+      case 'unavailable':
+        return releases ? [releases] : [];
       case 'checking':
         return [run('stop', this.t.stopChecking, 'secondary', () => this.store.cancel())];
       case 'downloading':
         return [run('stop', this.t.stopDownload, 'secondary', () => this.store.cancel())];
       case 'ready':
+        // Only a build that can install gets here; one that cannot is not offered the install, whatever the phase.
+        if (!this.store.canInstall()) return [run('discard', this.t.discard, 'secondary', () => this.store.cancel())];
         return [run('discard', this.t.discard, 'secondary', () => this.store.cancel()), run('restart', this.t.restart, 'primary', () => this.store.restart())];
       case 'available':
+        if (!this.store.canInstall()) return viaReleases(run('check', this.t.checkAgain, 'secondary', () => this.store.check()));
         return [run('check', this.t.checkAgain, 'secondary', () => this.store.check()), run('download', this.t.download, 'primary', () => this.store.download())];
       case 'failed':
+        if (!this.store.canInstall()) return viaReleases(run('check', this.t.checkAgain, 'secondary', () => this.store.check()));
         return this.store.canDownload() ? [run('download', this.t.tryAgain, 'primary', () => this.store.download())] : [run('check', this.t.checkAgain, 'primary', () => this.store.check())];
       case 'idle':
       case 'upToDate':
@@ -156,6 +182,16 @@ export class PdUpdatesDialog implements DialogContent {
         return [];
     }
   });
+
+  /** A webview window opens no links itself: the engine opens the page in the system browser (`updates_open_releases`: the engine knows the address). */
+  private async openReleases(): Promise<void> {
+    this.openFailed.set(null);
+    try {
+      await this.backend.openReleases();
+    } catch (e) {
+      this.openFailed.set(toUpdateError(e));
+    }
+  }
 
   protected current(version: string): string {
     return $localize`:@@pd.updates.current:You have version ${version}:version:.`;

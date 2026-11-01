@@ -132,6 +132,7 @@ pub struct UpdatesBuilder {
     build: (Option<String>, Option<String>),
     hooks: Option<Arc<dyn ServiceHooks>>,
     installer: Option<Arc<dyn Installer>>,
+    no_install: bool,
     installer_kind: Option<String>,
     max_download_bytes: Option<u64>,
     auto_check_delay_secs: Option<u64>,
@@ -154,6 +155,7 @@ impl UpdatesBuilder {
             build: (None, None),
             hooks: None,
             installer: None,
+            no_install: false,
             installer_kind: None,
             max_download_bytes: None,
             auto_check_delay_secs: None,
@@ -210,8 +212,22 @@ impl UpdatesBuilder {
         self
     }
 
+    /// How this build installs a verified update (`PluginInstaller` with the `install` feature). Every app says how it
+    /// installs: [`install`] refuses a builder with neither this nor [`no_install`](Self::no_install), at the app's start
+    /// and with or without a key, so a build that downloads an update it can never install cannot ship (a check, not a
+    /// convention: Pitcrew 1.1 did).
     pub fn installer(mut self, installer: Arc<dyn Installer>) -> Self {
         self.installer = Some(installer);
+        self.no_install = false;
+        self
+    }
+
+    /// Declares that this build does not install updates itself (an app that only tells the user, or an unsigned demo).
+    /// The status then says `canInstall: false`: the Updates dialog offers neither Download, "Restart to update" nor
+    /// "Install when the app quits", and points to the releases page. Replaces an installer set before.
+    pub fn no_install(mut self) -> Self {
+        self.installer = None;
+        self.no_install = true;
         self
     }
 
@@ -264,6 +280,8 @@ pub enum InstallError {
     Legal(String),
     /// No downloader could be made.
     Downloader(String),
+    /// The builder says neither [`UpdatesBuilder::installer`] nor [`UpdatesBuilder::no_install`].
+    InstallerUndeclared,
 }
 
 impl std::fmt::Display for InstallError {
@@ -271,6 +289,9 @@ impl std::fmt::Display for InstallError {
         match self {
             InstallError::Legal(e) => write!(f, "cannot register the legal document: {e}"),
             InstallError::Downloader(e) => write!(f, "cannot create the update downloader: {e}"),
+            InstallError::InstallerUndeclared => f.write_str(
+                "the updater does not say how it installs: call UpdatesBuilder::installer(..) (PluginInstaller), or no_install() for a build that only notifies",
+            ),
         }
     }
 }
@@ -294,6 +315,9 @@ pub fn install<R: Runtime>(
 ) -> Result<Arc<Updates>, InstallError> {
     if let Some(u) = app.try_state::<Arc<Updates>>() {
         return Ok(u.inner().clone());
+    }
+    if b.installer.is_none() && !b.no_install {
+        return Err(InstallError::InstallerUndeclared);
     }
     let (endpoint, config_key) = plugin_config(app);
     let mut channels = b.channels;
@@ -429,6 +453,7 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync 
         updates_cancel,
         updates_install_on_quit,
         updates_restart,
+        updates_open_releases,
         updates_set_preferences,
         about_info,
         about_legal,
@@ -498,6 +523,37 @@ pub async fn updates_restart<R: Runtime>(
         .prepare_restart()
         .map_err(UpdateErrorDto::from)
         .inspect(|_| native::quit(&app))
+}
+
+/// Opens `page`; the error is the files service's message (its error type is large, so it does not travel).
+fn open_page(files: &paddock_files::Files, page: &str) -> Result<(), String> {
+    files.open_url(page).map_err(|e| e.message)
+}
+
+/// Opens the build's own releases page in the system browser. It takes no address: a window cannot name one (least
+/// privilege; the Updates dialog needs no general `files_open_url`).
+#[::tauri::command]
+pub async fn updates_open_releases<R: Runtime>(
+    app: AppHandle<R>,
+    updates: Managed<'_>,
+) -> Result<(), UpdateErrorDto> {
+    let invalid = |detail: &str| UpdateError::Invalid {
+        detail: detail.into(),
+    };
+    let page = updates
+        .updater
+        .status()
+        .releases_page
+        .ok_or_else(|| invalid("This build has no releases page."))?;
+    let files = app
+        .try_state::<Arc<paddock_files::Files>>()
+        .map(|f| f.inner().clone())
+        .ok_or_else(|| invalid("The app cannot open web addresses."))?;
+    ::tauri::async_runtime::spawn_blocking(move || open_page(&files, &page))
+        .await
+        .map_err(|e| invalid(&e.to_string()))?
+        .map_err(|detail| UpdateError::Invalid { detail })
+        .map_err(UpdateErrorDto::from)
 }
 
 /// Sets automatic checks and the channel (an unknown channel is refused).

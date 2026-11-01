@@ -244,6 +244,30 @@ Conventional Commits; one semver tag for the whole repo.
 
 
 
+### `paddock-updater`: every build says how it installs (breaking: `UpdatesBuilder`, `UpdateStatus`)
+- Pitcrew 1.1 built its `UpdatesBuilder` with a key and no `.installer(..)`: an update downloaded, then "Restart to update"
+  failed with "this build has no installer" and "Install when the app quits" recorded a failed install the user met at the next
+  start. A second app had the same wiring trap, so it is closed as a class (ER-21).
+- `tauri::install` refuses a builder that says neither `UpdatesBuilder::installer(..)` nor the new `UpdatesBuilder::no_install()`
+  (`InstallError::InstallerUndeclared`), at the app's start, with or without a key, so the app's own start test fails.
+  `no_install()` is for a build that only notifies (the unsigned shell demo). Conformance check C59 is the static half: a file of an
+  app's `src-tauri/` that calls `UpdatesBuilder::new(` also calls `.installer(` or `.no_install()`.
+- The engine refuses `Updater::begin_download` (and so `updates_download`) in a build without an installer, with `InstallFailed`
+  ("this build has no installer", next step: the releases page), after the out-of-turn and not-available answers: nothing is
+  downloaded that could never be installed.
+- New command `updates_open_releases` (no argument): the engine opens the build's own releases page through the app's `Files`
+  service. The `pd.updates` dialog contract no longer lists `files_open_url` (least privilege: a window cannot name an address).
+  `pd.about` still has `files_open_url` for its releases link (a no-argument `about_open_releases` would narrow it; left for later).
+  `UpdatesBackend.openReleases()` is the new port method.
+- `install_on_quit(true)` and `prepare_restart()` answer Busy first when out of turn, like `begin_download`; the in-memory UI
+  backend follows the same order.
+- Updates dialog: a build that cannot install (no key, or `no_install`) offers "Open releases page" (`UpdateStatus.releasesPage`,
+  through `updates_open_releases`, which replaces `files_open_url` in the `pd.updates` contract) as its primary action, with "Check again" secondary.
+- `UpdateStatus` has `can_install` (TypeScript `canInstall`); `Updater::can_install()`. `Updater::install_on_quit(true)` and
+  `prepare_restart()` refuse without an installer at the request. Shell demo declares `no_install()`.
+### `@decryp7/paddock-ui` (`shell/about`): the Updates dialog follows `canInstall`
+- A build with `canInstall: false` offers no Download, "Restart to update" or "Install when the app quits"; an available update
+  says to download the new version from the releases page. `UpdateStatus.canInstall` is required on the wire.
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.

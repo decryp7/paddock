@@ -38,7 +38,12 @@ lastChecked: number | null, autoCheck: boolean, channel: string, channels: Array
 /**
  * The host a check contacts (`None` in a build without updates).
  */
-endpointHost: string | null, releasesPage: string | null, };
+endpointHost: string | null, releasesPage: string | null, 
+/**
+ * Whether this build can install what it downloads (an [`Installer`] is set). The dialog offers Download, "Restart to
+ * update" and "Install when the app quits" only when it can; a build that only notifies points to the releases page.
+ */
+canInstall: boolean, };
 
 export type Preferences = { 
 /**

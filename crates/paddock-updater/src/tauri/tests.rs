@@ -97,6 +97,7 @@ const CHANGELOG: &str = "# Changelog\n\n## Unreleased\n\n### Added\n- later\n\n#
 
 fn builder(dir: &Path) -> UpdatesBuilder {
     UpdatesBuilder::new("Demo")
+        .no_install()
         .dirs(dir.join("config"), dir.join("cache"))
         .downloader(downloader())
         .background(false)
@@ -338,6 +339,7 @@ fn cancel_preferences_and_restart_go_through_the_commands() {
     let app = app(None);
     let dir = tempfile::tempdir().unwrap();
     let b = builder(dir.path())
+        .installer(Arc::new(FakeInstaller::default()))
         .channel("stable", "Stable", MANIFEST)
         .channel("beta", "Beta", MANIFEST)
         .public_key(Some(&fixture("key.pub")));
@@ -353,12 +355,8 @@ fn cancel_preferences_and_restart_go_through_the_commands() {
         invoke(&w, "updates_cancel", json!({})).unwrap()["phase"]["kind"],
         "available"
     );
-    // Without an installer Restart is refused with a next step.
     invoke(&w, "updates_download", json!({})).unwrap();
     wait_for(&rx, "ready");
-    let e = invoke(&w, "updates_restart", json!({})).unwrap_err();
-    assert_eq!(e["kind"], "installFailed");
-    assert!(e["nextStep"].as_str().unwrap().contains("releases page"));
     let prefs = |channel: &str| json!({ "preferences": { "autoCheck": true, "channel": channel } });
     assert_eq!(
         invoke(&w, "updates_set_preferences", prefs("beta")).unwrap_err()["kind"],
@@ -427,11 +425,13 @@ fn defaults_come_from_the_app_and_a_bad_legal_id_is_refused() {
     // No downloader given and none managed: a new HTTPS one (nothing is contacted).
     let dir = tempfile::tempdir().unwrap();
     let plain = UpdatesBuilder::new("Demo")
+        .no_install()
         .background(false)
         .dirs(dir.path().join("c"), dir.path().join("d"));
     assert!(install(first.handle(), plain).is_ok());
     let second = app(None);
     let bad = UpdatesBuilder::new("Demo")
+        .no_install()
         .background(false)
         .dirs(dir.path().join("c2"), dir.path().join("d2"))
         .legal("Bad Id", "x", "y");
@@ -449,6 +449,7 @@ fn defaults_come_from_the_app_and_a_bad_legal_id_is_refused() {
     let third = app(None);
     let shared = paddock_download::tauri::manage(third.handle(), Downloader::new(Arc::new(Server)));
     let b = UpdatesBuilder::new("Demo")
+        .no_install()
         .background(true)
         .dirs(dir.path().join("c3"), dir.path().join("d3"));
     let updates = install(third.handle(), b).unwrap();
@@ -514,6 +515,7 @@ fn an_update_over_the_limit_or_a_closed_pool_ends_the_step_at_once() {
     let app = app(None);
     let dir = tempfile::tempdir().unwrap();
     let b = builder(dir.path())
+        .installer(Arc::new(FakeInstaller::default()))
         .channel("stable", "Stable", MANIFEST)
         .public_key(Some(&fixture("key.pub")))
         .max_download_bytes(1000);
@@ -581,4 +583,187 @@ impl Installer for FailingInstaller {
             detail: "read-only volume".into(),
         })
     }
+}
+
+#[test]
+fn a_builder_that_does_not_say_how_it_installs_is_refused_with_or_without_a_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let bare = |n: &str| {
+        UpdatesBuilder::new("Demo")
+            .background(false)
+            .dirs(
+                dir.path().join(format!("c{n}")),
+                dir.path().join(format!("d{n}")),
+            )
+            .downloader(downloader())
+    };
+    for (n, b) in [
+        ("1", bare("1")),
+        (
+            "2",
+            bare("2")
+                .channel("stable", "Stable", MANIFEST)
+                .public_key(Some(&fixture("key.pub"))),
+        ),
+    ] {
+        let app = app(None);
+        assert_eq!(
+            install(app.handle(), b).err(),
+            Some(InstallError::InstallerUndeclared),
+            "{n}"
+        );
+        assert!(
+            app.try_state::<Arc<Updates>>().is_none(),
+            "nothing is managed"
+        );
+    }
+    assert!(
+        InstallError::InstallerUndeclared
+            .to_string()
+            .contains("no_install")
+    );
+    assert!(
+        bare("7")
+            .installer(Arc::new(FakeInstaller::default()))
+            .has_installer()
+    );
+    assert!(!bare("8").no_install().has_installer());
+    // An installer, or the explicit declaration, is enough; the last one said wins.
+    for (n, b, can) in [
+        (
+            "3",
+            bare("3").installer(Arc::new(FakeInstaller::default())),
+            true,
+        ),
+        ("4", bare("4").no_install(), false),
+        (
+            "5",
+            bare("5")
+                .installer(Arc::new(FakeInstaller::default()))
+                .no_install(),
+            false,
+        ),
+        (
+            "6",
+            bare("6")
+                .no_install()
+                .installer(Arc::new(FakeInstaller::default())),
+            true,
+        ),
+    ] {
+        let app = app(None);
+        let updates = install(app.handle(), b).unwrap();
+        assert_eq!(updates.updater.status().can_install, can, "{n}");
+    }
+}
+
+#[test]
+fn a_build_that_declared_no_install_downloads_and_installs_nothing() {
+    let app = app(None);
+    let dir = tempfile::tempdir().unwrap();
+    let b = builder(dir.path())
+        .channel("stable", "Stable", MANIFEST)
+        .public_key(Some(&fixture("key.pub")));
+    install(app.handle(), b).unwrap();
+    let rx = statuses(&app);
+    let w = window(&app, "main");
+    invoke(&w, "updates_check", json!({})).unwrap();
+    let available = wait_for(&rx, "available");
+    assert_eq!(available["canInstall"], false);
+    let e = invoke(&w, "updates_download", json!({})).unwrap_err();
+    assert_eq!(e["kind"], "installFailed");
+    assert!(e["nextStep"].as_str().unwrap().contains("releases page"));
+    // Nothing is ready to install, so the install steps are out of turn (busy) before they are impossible.
+    for (command, args) in [
+        ("updates_restart", json!({})),
+        ("updates_install_on_quit", json!({ "enabled": true })),
+    ] {
+        assert_eq!(
+            invoke(&w, command, args).unwrap_err()["kind"],
+            "busy",
+            "{command}"
+        );
+    }
+    assert_eq!(
+        invoke(&w, "updates_status", json!({})).unwrap()["phase"]["kind"],
+        "available"
+    );
+}
+
+/// Records what would be started instead of starting it.
+#[derive(Default)]
+struct Recorded(Mutex<Vec<String>>);
+
+impl paddock_files::open::Launcher for Recorded {
+    fn start(&self, invocation: &paddock_files::open::Invocation) -> std::io::Result<()> {
+        let all = std::iter::once(invocation.program.clone())
+            .chain(invocation.args.iter().cloned())
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        self.0.lock().unwrap().push(all.join(" "));
+        Ok(())
+    }
+}
+
+#[test]
+fn the_dialog_opens_the_builders_releases_page_and_nothing_a_window_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let launched = Arc::new(Recorded::default());
+    let files = paddock_files::Files::new(paddock_files::Recents::open(None, &[]))
+        .launcher(launched.clone());
+    let app = app(None);
+    app.manage(Arc::new(files));
+    install(app.handle(), builder(dir.path())).unwrap();
+    let w = window(&app, "d-main-1");
+    // The window sends no address; one it adds is not read.
+    invoke(
+        &w,
+        "updates_open_releases",
+        json!({ "url": "https://evil.example/" }),
+    )
+    .unwrap();
+    let seen = launched.0.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert!(seen[0].contains("https://example.net/releases"), "{seen:?}");
+    assert!(!seen[0].contains("evil"));
+}
+
+#[test]
+fn opening_the_releases_page_says_why_when_it_cannot() {
+    let dir = tempfile::tempdir().unwrap();
+    // No releases page in the build.
+    let app = app(None);
+    app.manage(Arc::new(
+        paddock_files::Files::new(paddock_files::Recents::open(None, &[]))
+            .launcher(Arc::new(Recorded::default())),
+    ));
+    let mut b = builder(dir.path());
+    b.releases_page = None;
+    install(app.handle(), b).unwrap();
+    let e = invoke(
+        &window(&app, "d-main-1"),
+        "updates_open_releases",
+        json!({}),
+    )
+    .unwrap_err();
+    assert_eq!(e["kind"], "invalid");
+    assert!(e["message"].as_str().unwrap().contains("releases page"));
+    // No files service in the app.
+    let app = app_without_files();
+    let e = invoke(
+        &window(&app, "d-main-1"),
+        "updates_open_releases",
+        json!({}),
+    )
+    .unwrap_err();
+    assert_eq!(e["kind"], "invalid");
+    assert!(e["message"].as_str().unwrap().contains("cannot open"));
+}
+
+fn app_without_files() -> App {
+    let app = app(None);
+    let dir = tempfile::tempdir().unwrap();
+    install(app.handle(), builder(dir.path())).unwrap();
+    std::mem::forget(dir);
+    app
 }

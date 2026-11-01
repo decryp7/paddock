@@ -96,11 +96,11 @@ test('the download shows a determinate Material progress bar, and an indetermina
   await expect(dialog.getByTestId('updates-phase')).toContainText('downloaded and its signature verified');
 });
 
-test('a build without an update key says updates are not available, with nothing to press but Close', async ({ app, page }) => {
+test('a build without an update key says updates are not available, with only Open releases page and Close', async ({ app, page }) => {
   await app.dialogs.openWindow('pd.updates', {}, { query: '?updates=unavailable' });
   await expect(page.getByTestId('updates-phase')).toHaveText('Updates are not available in this build.');
   await expect(page.getByText('without an update signing key')).toBeVisible();
-  await expect(page.locator('pd-updates-dialog').getByRole('button')).toHaveCount(0);
+  await expect(page.locator('pd-updates-dialog').getByRole('button')).toHaveText(['Open releases page']);
   expect(await axeViolations(page, { idsOnly: true })).toEqual([]);
 });
 
@@ -114,6 +114,7 @@ const status = (phase: unknown) => ({
   channels: [{ id: 'stable', label: 'Stable' }],
   endpointHost: 'updates.test',
   releasesPage: null,
+  canInstall: true,
 });
 const INFO = { version: '99.0.0', currentVersion: VERSION, notes: 'From the fake server.', pubDate: null, size: 1_000 };
 

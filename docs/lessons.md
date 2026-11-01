@@ -1195,3 +1195,12 @@ something other than a spy, after every `afterEach` (a throw inside the hook cha
 failed the next TestBed test too). Never `vi.spyOn` a timer while fake timers are on; count timers with
 `vi.getTimerCount()`. Measure inside the failing run before fixing the suspected cost: the leading hypothesis (CSS piling
 up) was wrong.
+
+## Pitcrew 1.1 could download an update it could never install (2026-10-31, family)
+Pitcrew 1.1 built the shared `UpdatesBuilder` with a public key but no `.installer(..)`. The update checked and downloaded; then
+"Restart to update" failed with "this build has no installer", and "Install when the app quits" recorded a failed install the user
+saw at the next start. A second app had the same wiring, and Dyno, Pitwall and Spotter had wired it by hand. The builder allowed
+the state and nothing but a reviewer's memory prevented it. **Rule (ER-21, no new number):** a shared builder makes the wiring
+choice explicit and refuses the unchosen one at the app's start, independent of the CI's secrets (`tauri::install` returns
+`InstallerUndeclared` unless `.installer(..)` or `.no_install()` was called), the status says what the build can do
+(`canInstall`) so the UI offers only that, and a conformance check (C59) covers every app.

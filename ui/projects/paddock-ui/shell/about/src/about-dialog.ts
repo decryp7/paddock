@@ -2,6 +2,8 @@ import { ChangeDetectionStrategy, Component, computed, inject, resource, signal 
 import { AboutBackend } from './backend';
 import { systemText } from './format';
 import { ABOUT_STYLES } from './styles';
+import { toUpdateError } from './wire';
+import type { UpdateErrorDto } from '../generated/about';
 
 /**
  * About (a viewer: modeless, grows only; the dialog shell adds Close). The version is the engine's (rule 6), and each
@@ -37,7 +39,7 @@ import { ABOUT_STYLES } from './styles';
             }
           </dl>
           @if (openFailed(); as reason) {
-            <p class="pd-error" role="alert" data-testid="about-open-failed">{{ t.openFailed }} {{ reason }}</p>
+            <p class="pd-error" role="alert" data-testid="about-open-failed">{{ t.openFailed }} {{ reason.message }} {{ reason.nextStep }}</p>
           }
           @if (a.legal.length) {
             <section aria-labelledby="pd-about-legal">
@@ -112,7 +114,7 @@ export class PdAboutDialog {
   }
 
   /** Why the releases page did not open, in the engine's words; null when it did. */
-  protected readonly openFailed = signal<string | null>(null);
+  protected readonly openFailed = signal<UpdateErrorDto | null>(null);
 
   /** A webview window opens no links itself: the engine opens the page in the system browser (`files_open_url`). */
   protected async openReleases(event: MouseEvent, url: string): Promise<void> {
@@ -121,7 +123,7 @@ export class PdAboutDialog {
     try {
       await this.backend.openUrl(url);
     } catch (e) {
-      this.openFailed.set(e instanceof Error ? e.message : String(e));
+      this.openFailed.set(toUpdateError(e));
     }
   }
 

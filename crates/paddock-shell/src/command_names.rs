@@ -80,6 +80,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "updates_check",
     "updates_download",
     "updates_install_on_quit",
+    "updates_open_releases",
     "updates_restart",
     "updates_set_preferences",
     "updates_status",
