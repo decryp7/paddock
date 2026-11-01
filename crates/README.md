@@ -301,8 +301,8 @@ Dialogs as real OS windows (ADR 0009, rule 17), ported from Debrief's `dialog_co
   `dialog_open`, `dialog_take_input`, `dialog_close`, `dialog_ready { measure }` (sizes, then shows and focuses the
   pending window), `dialog_fit { measure }` (refits), `on_window_event` (close request, move/resize, scale-factor change
   refits from the last measure, destroyed dialog or host), `page_unresponsive`, `close_all_of`, `set_visible`, `grant_of` for `Guard::dialog_grants`. Events
-  `paddock://dialog-result`, `paddock://dialog-closed` (to the opener), `paddock://dialog-close-requested` (to the
-  dialog). The lifecycle: a window is pending until `dialog_ready`, or until `Dialogs::show_deadline` (1 s;
+  `paddock://dialog-result`, `paddock://dialog-closed` (to the opener), `paddock://dialog-close-requested` and `paddock://dialog-inputs` (to the
+  dialog; the opener's page sends the second with `emitTo` when it opens an open dialog again with new inputs). The lifecycle: a window is pending until `dialog_ready`, or until `Dialogs::show_deadline` (1 s;
   `with_show_deadline`, `paddock-startup`'s `Config::dialog_show_deadline`) passes and it is shown at the placed size
   (a late `dialog_ready` then fits it once); a modal's parent is disabled when the window is shown, never at creation (the registry records only the desired state, a parent is disabled iff a shown modal of it is open, and one queued main-thread task reads the latest of it and applies it; no window API runs under the registry lock);
   opening a pending dialog again creates no window and does not focus (show) it early. The deadline runs through a

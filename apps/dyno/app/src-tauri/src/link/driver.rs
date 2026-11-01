@@ -139,6 +139,7 @@ impl Executor {
                 cpu,
                 lock: probe_lock,
                 deciding,
+                recheck,
             } => {
                 let (link, events, held, seen) = (self.link.clone(), self.events.clone(), *lock(&self.held), self.seen.clone());
                 let gate = self.look_gate.clone();
@@ -156,6 +157,7 @@ impl Executor {
                             cpu,
                             lock: probe_lock,
                             deciding,
+                            recheck,
                         },
                     );
                     *lock(&seen) = found.map(|d| (seq, d));

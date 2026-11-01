@@ -19,8 +19,8 @@ const INPUTS = {
 };
 
 describe('Dyno dialogs boot as their windows do', () => {
-  it('are the shared confirmation, the Settings window, the four own dialogs and the shell’s About, Updates and What’s New', () => {
-    expect(ALL.map((d) => d.id).sort()).toEqual(['dy.alert-rule', 'dy.file-hash', 'dy.lockers', 'dy.web-search', 'pd.about', 'pd.confirm', 'pd.settings', 'pd.updates', 'pd.whats-new']);
+  it('are the shared confirmation, the Settings window, the four own dialogs and the shell’s About, Updates, What’s New and Report a problem', () => {
+    expect(ALL.map((d) => d.id).sort()).toEqual(['dy.alert-rule', 'dy.file-hash', 'dy.lockers', 'dy.web-search', 'pd.about', 'pd.confirm', 'pd.report-problem', 'pd.settings', 'pd.updates', 'pd.whats-new']);
   });
 
   for (const def of ALL) {

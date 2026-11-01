@@ -12,5 +12,8 @@ export function dialogBaseProviders(): (Provider | EnvironmentProviders)[] {
   return [provideStartupBackend(() => (ipc ? new TauriStartupBackend(ipc) : new MockStartupBackend())), provideStartupContract()];
 }
 
-/** The commands the base providers send: the `base` of Dyno's Rust dialog table (`src-tauri/src/dialogs.rs`). */
-export const DIALOG_BASE_COMMANDS = ['window_pong', 'window_ready'] as const;
+/**
+ * The commands the base providers send: the `base` of Dyno's Rust dialog table (`src-tauri/src/dialogs.rs`). `log_from_webview`
+ * is the dialog layer's log line (`DialogIo.log`, through `tauriBridge`).
+ */
+export const DIALOG_BASE_COMMANDS = ['window_pong', 'window_ready', 'log_from_webview'] as const;

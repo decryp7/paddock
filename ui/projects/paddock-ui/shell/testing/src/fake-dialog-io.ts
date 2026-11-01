@@ -5,6 +5,8 @@ import type { DialogIo, DialogMeasure, Unlisten } from '@decryp7/paddock-ui/shel
 export class FakeDialogIo implements DialogIo {
   readonly opened: DialogRequest[] = [];
   readonly closeRequests: string[] = [];
+  /** The inputs sent to open dialog windows (`sendInputs`), in order. */
+  readonly inputsSent: { label: string; dialogId: string; inputs: Readonly<Record<string, unknown>> }[] = [];
   /** The results the dialog closed with, in order (`undefined`: dismissed). */
   readonly closedWith: unknown[] = [];
   /** The titles the dialog set at run time, in order. */
@@ -52,6 +54,9 @@ export class FakeDialogIo implements DialogIo {
   }
   async requestClose(label: string): Promise<void> {
     this.closeRequests.push(label);
+  }
+  async sendInputs(label: string, dialogId: string, inputs: Readonly<Record<string, unknown>>): Promise<void> {
+    this.inputsSent.push({ label, dialogId, inputs });
   }
   async setTitle(title: string): Promise<void> {
     this.titles.push(title);

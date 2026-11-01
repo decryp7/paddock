@@ -7,6 +7,7 @@ import {
   Component,
   computed,
   DestroyRef,
+  effect,
   ElementRef,
   EnvironmentInjector,
   inject,
@@ -17,6 +18,7 @@ import {
   signal,
   type Signal,
   type Type,
+  untracked,
 } from '@angular/core';
 import { loadPart, type SettingsPageDef } from '@decryp7/paddock-ui/shell';
 import { DIALOG_REF, type DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
@@ -238,7 +240,7 @@ export class PdSettingsWindow implements DialogContent {
   // page's `when` is not evaluated here; a page that depends on a condition says so in its own content.
   protected readonly nav = computed(() => settingsNav(this.pages, this.store.sections()));
   private readonly items = computed(() => this.nav().flatMap((g) => g.items));
-  /** The page shown: the one chosen, else the dialog's input, else the first. */
+  /** The page shown: the one chosen (by the user, or by the last `page` input), else the first. */
   protected readonly current = computed<SettingsNavItem | null>(() => {
     const items = this.items();
     const want = this.store.selected() ?? this.page();
@@ -300,6 +302,14 @@ export class PdSettingsWindow implements DialogContent {
 
   constructor() {
     inject(DestroyRef).onDestroy(() => this.replaceEnvironment(null));
+    // The `page` input is a request, like a click in the navigation: when the open window is asked again (a new page, or a new
+    // anchor on the same page: "Customize widgets…" while Settings is open), it goes there even if the user had chosen
+    // another page since. Read only on a change of the inputs, so it never undoes the user's later choice.
+    effect(() => {
+      const page = this.page();
+      this.anchor();
+      if (page) untracked(() => this.store.select(page));
+    });
   }
 
   /** A page's own providers live in an injector of their own; the previous page's goes when the next one loads. */

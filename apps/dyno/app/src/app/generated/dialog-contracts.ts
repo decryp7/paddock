@@ -11,7 +11,7 @@ export const DIALOG_CONTRACTS = {
     height: 700,
     instanced: false,
     requiredChoice: false,
-    commands: ['dyno', 'settings_*'],
+    commands: ['dyno', 'edit_widget_layout', 'popover_preview', 'popover_snapshot', 'settings_*', 'widget_choices', 'widget_layout'],
   },
   'dy.alert-rule': {
     id: 'dy.alert-rule',
@@ -63,4 +63,4 @@ export type DialogId = keyof typeof DIALOG_CONTRACTS;
 export type DialogCommandOf<Id extends DialogId> = (typeof DIALOG_CONTRACTS)[Id]['commands'][number];
 
 /** The commands every dialog window of this owner's app may call besides the shell's base set. */
-export const DIALOG_BASE = ['window_pong', 'window_ready'] as const;
+export const DIALOG_BASE = ['log_from_webview', 'window_pong', 'window_ready'] as const;

@@ -236,7 +236,14 @@ pub fn app<R: Runtime>(
     tray_backend: impl paddock_window::tauri::TrayBackend<R>,
 ) -> tauri::Builder<R> {
     // The shell opens both after every plugin is set up (ADR 0029: a window built inside a plugin hook deadlocks).
-    shell.tray(move |_| tray::tray(tray_backend)).launch(launch).add_to(builder)
+    // The popover a tray click opens is registered with the tray (the shell finds it by name when the icon is clicked).
+    shell
+        .tray(move |app| {
+            tauri::Manager::manage(app, tray::popovers());
+            tray::tray(tray_backend)
+        })
+        .launch(launch)
+        .add_to(builder)
 }
 
 /// No agent program in a test: the link reports it as not running (nothing is started, rule 7).
