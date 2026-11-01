@@ -81,8 +81,10 @@ pub struct Session {
     last_url: Mutex<Option<String>>,
     /// Why this browser got a throwaway profile although the kept one is on (told once; see [`Session::profile_note`]).
     profile_note: Option<String>,
-    /// This browser uses the kept research profile; released when the browser is gone (dropped after `chromium`).
-    _kept: Option<KeptHold>,
+    /// This browser uses the kept research profile; released as soon as Debrief ends the browser ([`Session::close`],
+    /// [`Session::kill`]), not when the last holder lets go of the session: the watcher holds it for a moment on every
+    /// tick. Otherwise released when the session is dropped (after `chromium`).
+    kept: Mutex<Option<KeptHold>>,
 }
 
 /// The kept research profile is in use by `owner`'s browser until this is dropped (then the listeners hear it).
@@ -148,16 +150,24 @@ impl Session {
 
     fn kill(&self) {
         crate::sync::lock(&self.chromium).kill();
+        self.release_kept();
     }
 
     /// Closes the browser (gracefully, then by force) and removes its throwaway profile.
     fn close(&self, grace: Duration) {
         crate::sync::lock(&self.chromium).close_gracefully(grace);
+        self.release_kept();
+    }
+
+    /// The browser is ended: the kept research profile is free (the listeners hear it; no lock of ours is held then).
+    fn release_kept(&self) {
+        let hold = crate::sync::lock(&self.kept).take();
+        drop(hold);
     }
 
     /// This browser's own close grace: longer on the kept research profile.
     fn close_grace(&self) -> Duration {
-        close_grace_for(self._kept.is_some())
+        close_grace_for(crate::sync::lock(&self.kept).is_some())
     }
 
     /// Why this browser got a throwaway profile although the kept research profile is on (damaged, too large, did not
@@ -169,7 +179,7 @@ impl Session {
     /// Whether this browser uses the kept research profile.
     #[cfg(all(test, unix))]
     pub fn kept_profile(&self) -> bool {
-        self._kept.is_some()
+        crate::sync::lock(&self.kept).is_some()
     }
 
     pub(super) fn remember_url(&self) {
@@ -675,7 +685,7 @@ impl Renderers {
             handed_off: AtomicBool::new(false),
             last_url: Mutex::new(None),
             profile_note: note,
-            _kept: kept,
+            kept: Mutex::new(kept),
         }))
     }
 
