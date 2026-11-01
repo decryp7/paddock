@@ -12,7 +12,7 @@ use paddock_shell::dialog_commands as shell;
 
 paddock_dialogs::dialogs! {
     /// Dyno's dialogs, and the commands every one of its dialog windows may call (the start-up handshake).
-    pub static DIALOGS, base &[shell::startup::window_pong, shell::startup::window_ready];
+    pub static DIALOGS, base &[shell::startup::window_pong, shell::startup::window_ready, shell::diag::log_from_webview];
     // The settings commands, and the engine for Dyno's page of the window (its settings, the tray items, the plugins).
     // Dyno's page also edits the popup and menu-bar widget layouts (their editors read the layouts, the engine's choices and the
     // popup preview): those commands are open to dialogs in `COMMANDS` and must be named here too, or the window may not call them.

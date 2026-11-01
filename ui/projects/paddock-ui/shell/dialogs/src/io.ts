@@ -46,6 +46,11 @@ export interface DialogIo {
    */
   sendInputs?(label: string, dialogId: string, inputs: Readonly<Record<string, unknown>>): Promise<void>;
   /**
+   * A line for the app's log (rule 56: what the dialog layer did across windows, never user content). Optional: without it
+   * the line goes to the console only. Never throws and never waits.
+   */
+  log?(level: 'info' | 'warn', message: string): void;
+  /**
    * The ready handshake (ADR 0026 §4.2): the frame measured its content after the content and `document.fonts.ready`,
    * synchronously, without waiting for a frame (the 1.1-0 spike: a hidden window never runs `requestAnimationFrame` on a
    * sleeping Mac). The window system sizes the window and shows it. Sent once.
@@ -70,6 +75,8 @@ export interface TauriBridge {
    * capability). Optional: without it a runtime title changes the page's title and heading but not the OS title bar.
    */
   setWindowTitle?(title: string): Promise<void>;
+  /** `log_from_webview` (the window's contract must name it). Optional: without it the dialog layer logs to the console only. */
+  log?(level: 'info' | 'warn', message: string): Promise<unknown>;
 }
 
 /**
@@ -90,6 +97,7 @@ export function tauriDialogIo(tauri: TauriBridge): DialogIo {
     ready: (measure) => tauri.invoke<void>('dialog_ready', { measure }),
     fit: (measure) => tauri.invoke<void>('dialog_fit', { measure }),
     ...(tauri.setWindowTitle ? { setTitle: (title: string) => tauri.setWindowTitle!(title) } : {}),
+    ...(tauri.log ? { log: (level: 'info' | 'warn', message: string) => void tauri.log!(level, message).catch(() => undefined) } : {}),
   };
 }
 
