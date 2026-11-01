@@ -525,29 +525,59 @@ mod tests {
         path
     }
 
-    /// A first start that takes far longer than the old fixed 15 s but keeps working is waited for and answers.
+    /// A pace that releases the fake browser (creates `go`) once `after` ticks have passed, so how long the "slow" start lasts is
+    /// counted in ticks, not in host speed (a loaded host stretches a 1 ms tick several times over).
+    #[cfg(unix)]
+    struct ReleaseAfter {
+        after: u32,
+        go: PathBuf,
+        ticks: u32,
+    }
+
+    #[cfg(unix)]
+    impl paddock_proc::Pace for &mut ReleaseAfter {
+        fn wait(&mut self, _tick: Duration) -> bool {
+            std::thread::sleep(Duration::from_millis(1));
+            self.ticks += 1;
+            if self.ticks == self.after {
+                std::fs::write(&self.go, b"go").unwrap();
+            }
+            self.ticks < 20_000
+        }
+    }
+
+    /// A first start that takes far longer than the old fixed 15 s but keeps working is waited for and answers. The browser
+    /// finishes only after more ticks than the idle limit, and its CPU use grows at every reading, so only run state keeps it alive.
     #[cfg(unix)]
     #[test]
     fn a_slow_self_test_that_keeps_working_is_waited_for() {
         let dir = tempfile::tempdir().unwrap();
-        let exe = fake_browser(dir.path(), "sleep 2; echo 'Chromium 1.2.3'");
+        let go = dir.path().join("go");
+        let exe = fake_browser(
+            dir.path(),
+            &format!("while [ ! -e '{}' ]; do sleep 0.01; done; echo 'Chromium 1.2.3'", go.display()),
+        );
         let mut n = 0u64;
-        let mut ticks = FastTicks(0);
+        let mut pace = ReleaseAfter {
+            after: idle_ticks() + 100,
+            go,
+            ticks: 0,
+        };
         let out = self_test_with(
             &exe,
             move |_| {
                 n += 1;
                 Some(Duration::from_micros(n))
             },
-            &mut ticks,
+            &mut pace,
             || false,
         )
         .unwrap();
         assert_eq!(out, "Chromium 1.2.3");
         assert!(
-            ticks.0 > idle_ticks(),
-            "waited {} ticks, longer than the idle limit, because it was working",
-            ticks.0
+            pace.ticks > idle_ticks(),
+            "waited {} ticks, past the idle limit, because it was working",
+            pace.ticks
         );
     }
 

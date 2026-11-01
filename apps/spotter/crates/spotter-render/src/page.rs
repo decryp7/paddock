@@ -918,6 +918,10 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     impl Drop for ChildGuard {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "a test of the parent and a re-run of this test binary: std Command, no console, bounded by the guard"
+        )]
         fn drop(&mut self) {
             // Signal only a child that is still unreaped: once it was waited for, its pid may belong to another process.
             if let Ok(None) = self.0.try_wait() {
@@ -937,6 +941,10 @@ mod tests {
     /// through files in a temporary folder: `ready` (the child's connection is up) and `go` (the stops are over).
     #[cfg(target_os = "linux")]
     #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a test of the parent and a re-run of this test binary: std Command, no console, bounded by the guard"
+    )]
     fn a_stopped_and_continued_process_keeps_its_browser_connection() {
         const CHILD: &str = "SPOTTER_RENDER_STOP_CHILD";
         // The wait is on the condition; the short sleep only keeps the poll from spinning (a hang guard bounds it).
