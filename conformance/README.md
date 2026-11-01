@@ -114,6 +114,19 @@ Debrief's `install-test-browser.mjs`; `--pin` and `--rust-source` stay until the
 in `.gitea/actions/` run (see its README); they are plain Node and bash, tested here, and work from a Paddock checkout. A
 workflow that uses the actions can drop the steps they replace, and C03, C04 and C15 accept them.
 
+**Diagnostics (rule 56).** `ci-log.sh` (bash, sourced) and `ci-log.mjs` (Node) are the one way a CI step or tool reports:
+`ci_error`/`ciError` prints exactly one `::error::` line, the cause then `Next step:`, with the prefix built at run time so a
+grep for `::error::` finds failures and never a step's echoed script; `ci_step` runs a command as a timed log group and on
+failure names the command, its folder, the exit status in words (127 may be a hidden Windows crash, 128+n a signal) and a
+reproduction line that can be pasted (shell-quoted); it works with or without `set -e`. Secrets go to commands through the
+environment, never as arguments; `CI_MASK` names variables whose values are masked in everything the helpers print; `ci_skip` records what did not run and why; `ci_summary_flush`/`writeSummary` write one table to the log and to
+`$GITHUB_STEP_SUMMARY` (whether Gitea renders it depends on the server and runner version, so the log always has it);
+`phase` logs a Node phase with its duration. `run-commands.sh` and app-gates' Rust step use them. To learn a native
+program's real exit code (NTSTATUS on Windows) and its stderr tail, wrap it in `run-native.mjs`. Checklist for a new step or
+tool: one `::error::` with cause and next step per failure; phases with durations in a long step; a wrapped program's exact
+command, exit code and stderr tail; a summary of what ran, was skipped and why; a leak check names the test or process that
+leaked; a test runner prints slow tests and the order of tests around a failure.
+
 ## Release scripts (`release/`)
 
 `publish.mjs`, `latest-json.mjs` (the apps' copies, unified; output equals Pitwall's), `strip-keys.mjs`
