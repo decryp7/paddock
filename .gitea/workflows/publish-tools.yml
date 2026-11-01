@@ -255,16 +255,9 @@ jobs:
         with:
           app-dir: .
       - uses: ./.gitea/actions/setup-rust
+      # The registry's index needs no credential (auth-required: false), so this job holds no secret.
       - name: Verifying dry run (cargo package, nothing is uploaded)
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
-          DOCKER_USERNAME=$(printf '%s' "$DOCKER_USERNAME" | tr -d '[:space:]')
-          DOCKER_PASSWORD=$(printf '%s' "$DOCKER_PASSWORD" | tr -d '[:space:]')
-          PACKAGE_AUTH=$(printf '%s:%s' "$DOCKER_USERNAME" "$DOCKER_PASSWORD" | base64 | tr -d '\n')
-          echo "::add-mask::$PACKAGE_AUTH"
-          export PACKAGE_AUTH
           node scripts/publish.mjs --tool "${{ needs.plan.outputs.tool }}" || {
             echo "::error::the dry run of tools/${{ needs.plan.outputs.tool }} failed; next step: read the cargo error above (an unresolved paddock-proc or paddock-cli means the shared-crates v* tag has not published them yet)"; exit 1; }
 

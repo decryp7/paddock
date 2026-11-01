@@ -45,3 +45,4 @@ node_modules
 /engineering-rules/
 # The heavy tool's local build folder.
 /tools/heavy/target/
+/tools/wiki/target/
