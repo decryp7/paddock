@@ -279,7 +279,8 @@ It flags:
   WAIT, LIMIT, GRACE or BUDGET.
 
 A flagged site passes when its bound comes from `Patience`, or when the line or the item above it carries `// cap:`,
-`// external:`, `// shutdown:`, `// ui:` or **`// pace:`** with a reason. `pace` is for throttles and intervals that bound
+`// external:`, `// shutdown:`, `// ui:`, `// hang-guard:` (a test-only guard against a hang) or **`// pace:`** with a reason; the
+comment may be anywhere in the comment block directly above the line. `pace` is for throttles and intervals that bound
 nothing (a poll interval, a progress throttle, a debounce): they decide how often, not how long. Test code is exempt
 from the comment, not from ER-12. Today's sites are a waiver list that may only shrink, as C40-C42 do, with targets:
 
@@ -479,6 +480,13 @@ reads the handshake first. Measurements are recorded when the apps adopt it (rul
 spawn* waits only (names with START, SPAWN, LAUNCH or READY, and waits inside `start*`, `spawn*`, `launch*` and `boot*`
 functions), not every `Duration` wait the section lists. It widens to section 8's patterns and turns to failing with the
 waiver-list targets above.
+
+*Amendment 2026-10-31 (C51 widened, still report-only).* C51 also flags a readiness poll by shape in any function (a
+deadline in a loop that checks a child's liveness or reads readiness), the start-like names connect, handshake, wait_for,
+ready and await, and `Timeout("... start ...")` literals. A run limit that kills its child on timeout is still a fixed wait:
+it says so with `// cap: <why>`. The skips (cdp.rs, run/kill/close/stop-style function names, test files and items,
+fake and fixture binaries) are listed in `conformance/README.md` and the check's header. Cause: a fixed 20 s in a browser
+driver's `connect()` failed CI three times and the check missed it.
 
 **Semantics of the shared judge, for adopters.** A stall is reported once per episode (the slow note once ever), so a
 watch that returned a stall waits for the next event when called again. The hang guard also counts ticks in which the
