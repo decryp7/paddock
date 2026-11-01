@@ -74,6 +74,8 @@ const SAMPLES: &[&[&str]] = &[
     &["conformance/src/index.mjs"],
     &["package-lock.json"],
     &["tools/paddock-dev/src/lib.rs", "tools/test/x.test.mjs"],
+    &["tools/heavy/src/lib.rs"],
+    &["crates/paddock-proc/src/lib.rs"],
     &["totally-unknown-root-file"],
     &["scripts/affected.mjs", "scripts/affected.test.mjs"],
     &[".cargo/config.toml"],

@@ -8,6 +8,7 @@
  "icons": false,
  "ciImage": false,
  "paddockDev": false,
+ "heavy": true,
  "docs": false,
  "apps": [
   "x"
@@ -24,6 +25,9 @@
   ],
   "apps/x/app/src-tauri": [
    "x"
+  ],
+  "tools/heavy": [
+   "fx-heavy"
   ]
  },
  "why": {
@@ -32,6 +36,9 @@
   ],
   "crates": [
    "crates/Cargo.toml"
+  ],
+  "heavy": [
+   "cargo tools/heavy reaches crates/a, crates/b"
   ]
  }
 }

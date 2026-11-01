@@ -130,5 +130,11 @@
   "name": "range-from-an-unknown-base",
   "base": "no-such-revision",
   "head": "fixture-head"
+ },
+ {
+  "name": "heavy-tool-source",
+  "files": [
+   "tools/heavy/src/lib.rs"
+  ]
  }
 ]

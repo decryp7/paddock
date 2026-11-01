@@ -108,6 +108,8 @@ export const CI_JOBS = {
   commits: ['tools'], // pull requests only; the tools job checks the rest of the file's contract
   app: ['apps'],
   'paddock-dev': ['paddock-dev'],
+  heavy: ['heavy'], // tools/heavy, the heavy-step lock (and crates/paddock-proc, which it uses by path): fmt, clippy, nextest, deny on three OS
+  wiki: ['tools'], // tools/wiki, the LLM-wiki tool
 };
 
 /** YAML anchors, aliases and merge keys: a job may then depend on text outside its block, so the split refuses the file. */
@@ -277,6 +279,7 @@ const OWNERS = [
   [/^conformance\//, ['conformance']],
   [/^paddock\.(conformance\.json|waivers\.toml)$/, ['conformance']],
   [/^(tools\/paddock-dev\/|dev$|dev\.cmd$)/, ['paddock-dev']], // the developer tool (ADR 0022): its own three-OS leg
+  [/^tools\/heavy\//, ['heavy']], // the heavy-step lock: its own three-OS leg; crates/paddock-proc reaches it through the Cargo graph
   [/^(tools|templates)\//, ['tools']],
   // The scripts' tests run in the ui job (`npm run test:scripts`) and in the tools job.
   [/^scripts\//, ['tools', 'ui']],
@@ -453,7 +456,7 @@ export function lockDiff(before, after) {
 
 // ------------------------------------------------------------------------------------------------------------- plan
 
-const PROJECTS = ['crates', 'ui', 'eslint', 'conformance', 'tools', 'icons', 'ci-image', 'paddock-dev'];
+const PROJECTS = ['crates', 'ui', 'eslint', 'conformance', 'tools', 'icons', 'ci-image', 'paddock-dev', 'heavy'];
 
 /**
  * The [project, reason] pairs a changed `.gitea` file or shared script reaches, or null when that cannot be told (fail safe:
@@ -493,7 +496,7 @@ export function giteaTargets(f, gitea) {
 
 /**
  * The plan for a list of changed files. `graph` is { cargo, npm, apps } from the readers above; `all` selects everything.
- * Result: { all, crates, ui, eslint, conformance, tools, icons, ciImage, paddockDev, docs, apps: [name], kinds: { app: ['rust','ui'] },
+ * Result: { all, crates, ui, eslint, conformance, tools, icons, ciImage, paddockDev, heavy, docs, apps: [name], kinds: { app: ['rust','ui'] },
  * packages: { workspace: [crate] } } and `why` with `explain`.
  */
 export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockAfter = null, all = false, explain = false, gitea = null } = {}) {
@@ -567,7 +570,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     }
     if (PLANNER_FILES.test(f)) mark('paddock-dev', `its golden test compares ${f} (tools/paddock-dev/tests/it/golden.rs)`);
     if (RUST_INPUTS.some((r) => r.test(f))) {
-      for (const p of ['crates', 'paddock-dev']) mark(p, `rust input ${f}`);
+      for (const p of ['crates', 'paddock-dev', 'heavy']) mark(p, `rust input ${f}`);
       if (f.startsWith('lint/')) mark('conformance', `C13 reads ${f}`);
       for (const [name, app] of apps) {
         if (!app.cargo) continue;
@@ -685,6 +688,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     icons: set.has('icons'),
     ciImage: set.has('ci-image'),
     paddockDev: set.has('paddock-dev'),
+    heavy: set.has('heavy'),
     docs,
     apps: [...set].filter((p) => p.startsWith('app:') && apps.has(p.slice(4))).map((p) => p.slice(4)).sort(),
     kinds: Object.fromEntries([...kinds].filter(([p]) => apps.has(p.slice(4))).map(([p, k]) => [p.slice(4), [...k].sort()]).sort()),
@@ -801,6 +805,7 @@ export function onlyApp(plan, app) {
     icons: false,
     ciImage: false,
     paddockDev: false,
+    heavy: false,
     docs: false,
     apps: [app],
     kinds: { [app]: ['rust', 'ui'] },
@@ -918,6 +923,7 @@ export function ciOutputs(plan, legs, base = null) {
     tools: plan.tools,
     icons: plan.icons,
     paddock_dev: plan.paddockDev,
+    heavy: plan.heavy,
     apps: JSON.stringify(legs),
     any_app: legs.length > 0,
     // The commit lint's range start (empty: no base, only the head commit is linted).
@@ -952,7 +958,7 @@ export function summary(plan, reason, legs) {
     '',
     '| Project | Runs |',
     '|---|---|',
-    ...['crates', 'ui', 'eslint', 'conformance', 'tools', 'paddockDev'].map((p) => `| ${p} | ${yes(plan[p])} |`),
+    ...['crates', 'ui', 'eslint', 'conformance', 'tools', 'paddockDev', 'heavy'].map((p) => `| ${p} | ${yes(plan[p])} |`),
     ...legs.map((l) => `| app ${l.app}${l.os === LINUX ? '' : ` (${l.os})`} | ${l.e2e_leg ? `${l.e2e_leg.replace('-', ' ')}${l.e2e_shard ? ` ${l.e2e_shard}` : ''}` : [l.rust && 'rust', l.ui && 'ui'].filter(Boolean).join(' + ') || 'checks only'}${l.filter ? ` (\`${l.filter}\`)` : ''} |`),
   ];
   if (plan.docs && !legs.length && !plan.crates && !plan.ui) lines.push('', 'Docs only: nothing to build.');

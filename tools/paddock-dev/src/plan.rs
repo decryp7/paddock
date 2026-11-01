@@ -15,7 +15,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(120);
-const PROJECTS: [&str; 8] = ["crates", "ui", "eslint", "conformance", "tools", "icons", "ci-image", "paddock-dev"];
+const PROJECTS: [&str; 9] = ["crates", "ui", "eslint", "conformance", "tools", "icons", "ci-image", "paddock-dev", "heavy"];
 
 fn re(pattern: &str) -> Regex {
     // The patterns are literals of this file, checked by the tests below.
@@ -99,6 +99,7 @@ static OWNERS: LazyLock<Vec<(Regex, &'static [&'static str])>> = LazyLock::new(|
         (re(r"^conformance/"), &["conformance"]),
         (re(r"^paddock\.(conformance\.json|waivers\.toml)$"), &["conformance"]),
         (re(r"^(tools/paddock-dev/|dev$|dev\.cmd$)"), &["paddock-dev"]),
+        (re(r"^tools/heavy/"), &["heavy"]),
         (re(r"^(tools|templates)/"), &["tools"]),
         (re(r"^scripts/"), &["tools", "ui"]),
         (re(r"^icons/"), &["icons"]),
@@ -230,7 +231,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
             );
         }
         if RUST_INPUTS.iter().any(|r| r.is_match(f)) {
-            for p in ["crates", "paddock-dev"] {
+            for p in ["crates", "paddock-dev", "heavy"] {
                 st.mark(Some(p.to_string()), format!("rust input {f}"));
             }
             if f.starts_with("lint/") {
@@ -380,6 +381,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         ("icons", "icons"),
         ("ciImage", "ci-image"),
         ("paddockDev", "paddock-dev"),
+        ("heavy", "heavy"),
     ] {
         out.insert(key.into(), json!(has(project)));
     }
@@ -547,6 +549,7 @@ mod tests {
         assert_eq!(owners("scripts/a.mjs"), Some(vec!["tools".to_string(), "ui".to_string()]));
         assert_eq!(owners("tools/paddock-dev/src/lib.rs"), Some(vec!["paddock-dev".to_string()]));
         assert_eq!(owners("dev"), Some(vec!["paddock-dev".to_string()]));
+        assert_eq!(owners("tools/heavy/src/lib.rs"), Some(vec!["heavy".to_string()]));
         assert_eq!(owners("tools/bootstrap.sh"), Some(vec!["tools".to_string()]));
         assert_eq!(owners("Cargo.lock.unknown"), None);
         assert_eq!(owners("apps/loose-file"), None);
@@ -605,6 +608,20 @@ mod tests {
             assert_eq!(p["conformance"], json!(f.starts_with("lint/")), "{f}");
             assert_eq!(p["kinds"], json!({"dyno": ["rust"]}), "{f}");
         }
+    }
+
+    #[test]
+    fn heavy_is_its_own_project_reached_by_its_folder_and_the_rust_inputs() {
+        let p = plan(&["tools/heavy/src/lib.rs"]);
+        assert_eq!(
+            (p["heavy"].clone(), p["tools"].clone(), p["crates"].clone(), p["paddockDev"].clone(), p["all"].clone()),
+            (json!(true), json!(false), json!(false), json!(false), json!(false))
+        );
+        for f in [".cargo/config.toml", "lint/clippy.toml"] {
+            assert_eq!(plan(&[f])["heavy"], true, "{f}");
+        }
+        assert_eq!(plan(&["tools/bootstrap.sh"])["heavy"], false);
+        assert_eq!(plan(&["rust-toolchain.toml"])["heavy"], true);
     }
 
     #[test]

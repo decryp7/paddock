@@ -1,0 +1,25 @@
+{
+ "all": false,
+ "crates": false,
+ "ui": false,
+ "eslint": false,
+ "conformance": false,
+ "tools": false,
+ "icons": false,
+ "ciImage": false,
+ "paddockDev": false,
+ "heavy": true,
+ "docs": false,
+ "apps": [],
+ "kinds": {},
+ "packages": {
+  "tools/heavy": [
+   "fx-heavy"
+  ]
+ },
+ "why": {
+  "heavy": [
+   "tools/heavy/src/lib.rs"
+  ]
+ }
+}

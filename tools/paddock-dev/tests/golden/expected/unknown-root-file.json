@@ -8,6 +8,7 @@
  "icons": true,
  "ciImage": true,
  "paddockDev": true,
+ "heavy": true,
  "docs": false,
  "apps": [
   "x",
@@ -49,6 +50,9 @@
    "unknown root file Mystery"
   ],
   "eslint": [
+   "unknown root file Mystery"
+  ],
+  "heavy": [
    "unknown root file Mystery"
   ],
   "icons": [

@@ -161,6 +161,16 @@ describe('the graph of this tree', () => {
     assert.equal(run('tools/bootstrap.sh').paddockDev, false);
   });
 
+  test('heavy is its own project: its folder marks it, the crate it uses by path and the Rust inputs reach it, nothing else does', () => {
+    const own = run('tools/heavy/src/lib.rs');
+    assert.deepEqual([own.heavy, own.tools, own.crates, own.paddockDev, own.apps], [true, false, false, false, []]);
+    assert.ok(run('crates/paddock-proc/src/lib.rs').heavy, 'paddock-proc is a path dependency of heavy');
+    assert.ok(run('.cargo/config.toml').heavy && run('lint/clippy.toml').heavy, 'the Rust inputs reach it');
+    assert.ok(run('rust-toolchain.toml').heavy, 'global inputs reach it');
+    for (const f of ['tools/paddock-dev/src/lib.rs', 'tools/wiki/src/main.rs', 'tools/bootstrap.sh', 'crates/paddock-cli/src/lib.rs', 'dev']) assert.equal(run(f).heavy, false, f);
+    assert.equal(ciOutputs({ heavy: true }, []).heavy, true);
+  });
+
   test('every project of a changed file is in the plan, and no app outside apps/ appears', () => {
     for (const f of tracked) {
       const own = owners(f);
@@ -376,7 +386,7 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     const ci = readFileSync(join(ROOT, CI_FILE), 'utf8');
     const planJob = workflowJobs(ci).jobs.get('plan');
     const declared = [...planJob.matchAll(/^ {6}([a-z_]+): \$\{\{ steps\.plan\.outputs\.([a-z_]+) \}\}/gm)];
-    const written = Object.keys(ciOutputs({ paddockDev: false }, []));
+    const written = Object.keys(ciOutputs({ paddockDev: false, heavy: false }, []));
     for (const [, name, step] of declared) {
       assert.equal(name, step, `output ${name} reads steps.plan.outputs.${step}`);
       assert.ok(written.includes(step), `--ci writes ${step}`);
@@ -858,6 +868,7 @@ describe('contracts', () => {
       if (/^\s*(\/\/|\*|#)/.test(text)) continue; // a comment names the file, nothing reads it
       if (DOCS.some((r) => r.test(file))) continue; // a docs tool (docs/images/src) reading docs is docs
       if (file === 'scripts/affected.test.mjs') continue; // this file names docs as test data
+      if (file === 'conformance/test/c66-markdown-rendering.test.mjs') continue; // names crates/README.md as lint test data
       for (const m of text.matchAll(new RegExp(re, 'g'))) {
         const inc = /include_str!\("([^"]+)"\)/.exec(m[0]);
         const path = inc ? posix.normalize(posix.join(posix.dirname(file), inc[1])) : m[0].slice(1, -1);

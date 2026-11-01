@@ -8,6 +8,7 @@
  "icons": true,
  "ciImage": true,
  "paddockDev": true,
+ "heavy": true,
  "docs": false,
  "apps": [
   "x",
@@ -49,6 +50,9 @@
    "global .gitea/workflows/ci.yml"
   ],
   "eslint": [
+   "global .gitea/workflows/ci.yml"
+  ],
+  "heavy": [
    "global .gitea/workflows/ci.yml"
   ],
   "icons": [

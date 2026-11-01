@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["."]
+
+[package]
+name = "fx-heavy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fx-a = { path = "../../crates/a" }

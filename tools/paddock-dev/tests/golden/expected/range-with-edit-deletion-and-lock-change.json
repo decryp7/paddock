@@ -8,6 +8,7 @@
  "icons": false,
  "ciImage": false,
  "paddockDev": false,
+ "heavy": true,
  "docs": true,
  "apps": [
   "x",
@@ -32,6 +33,9 @@
    "fx-a",
    "fx-b"
   ],
+  "tools/heavy": [
+   "fx-heavy"
+  ],
   "apps/x/app/src-tauri": [
    "x"
   ]
@@ -51,6 +55,9 @@
    "crates/a/src/lib.rs",
    "crates/a/src/removed.rs",
    "cargo crates/b reaches crates/a"
+  ],
+  "heavy": [
+   "cargo tools/heavy reaches crates/a"
   ],
   "ui": [
    "lock ui"

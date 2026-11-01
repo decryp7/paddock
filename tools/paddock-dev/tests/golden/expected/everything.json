@@ -8,6 +8,7 @@
  "icons": true,
  "ciImage": true,
  "paddockDev": true,
+ "heavy": true,
  "docs": false,
  "apps": [
   "x",
@@ -49,6 +50,9 @@
    "everything (no base)"
   ],
   "eslint": [
+   "everything (no base)"
+  ],
+  "heavy": [
    "everything (no base)"
   ],
   "icons": [
