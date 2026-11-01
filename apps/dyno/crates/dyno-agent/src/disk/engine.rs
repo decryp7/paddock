@@ -10,7 +10,7 @@ use dyno_core::disk::source::{DirEntryInfo, DirSource, EntryKind, ReadError};
 use dyno_core::time::Timestamp;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -134,11 +134,29 @@ struct Task {
     track: bool,
 }
 
+/// The work of one pass. It names its pass, and counts that pass's workers, under its own lock: a worker of an earlier pass that
+/// comes back late (from a read that outlived a cancel) sees at once that the queue is not its own, whatever moment it comes back.
 #[derive(Default)]
 struct Queue {
+    /// The pass this queue belongs to.
+    epoch: u64,
     stack: Vec<Task>,
     in_flight: usize,
+    /// Every folder was read (set by the worker that saw the queue run dry).
     finished: bool,
+    /// Workers of this pass that have not exited yet.
+    alive: usize,
+}
+
+impl Queue {
+    fn for_pass(epoch: u64, stack: Vec<Task>, workers: usize) -> Queue {
+        Queue {
+            epoch,
+            stack,
+            alive: workers,
+            ..Queue::default()
+        }
+    }
 }
 
 #[derive(Default)]
@@ -155,10 +173,6 @@ pub struct Walk {
     wake: Condvar,
     stopped: AtomicBool,
     finishing: AtomicBool,
-    /// Worker threads that have not exited yet.
-    alive: AtomicUsize,
-    /// Every folder was read (set by the worker that saw the queue run dry).
-    completed: AtomicBool,
     root_dev: u64,
     /// Counts the passes; a worker of an earlier one is told apart from the current ones by it.
     epoch: AtomicU64,
@@ -234,20 +248,19 @@ impl Walk {
             root: root.clone(),
             source,
             index: Mutex::new(index),
-            queue: Mutex::new(Queue {
-                stack: vec![Task {
+            queue: Mutex::new(Queue::for_pass(
+                0,
+                vec![Task {
                     node: root_node,
                     path: root,
                     retry: false,
                     track: false,
                 }],
-                ..Queue::default()
-            }),
+                cfg.threads.max(1),
+            )),
             wake: Condvar::new(),
             stopped: AtomicBool::new(false),
             finishing: AtomicBool::new(false),
-            alive: AtomicUsize::new(cfg.threads.max(1)),
-            completed: AtomicBool::new(false),
             root_dev: me.dev,
             gate: Mutex::new(()),
             retry_pass: AtomicBool::new(false),
@@ -268,11 +281,11 @@ impl Walk {
             },
         });
         let failed = walk.launch(walk.cfg.threads)?;
-        walk.forget_unstarted(failed);
+        walk.forget_unstarted(0, failed);
         Ok(walk)
     }
 
-    /// Starts `threads` workers (the caller has set `alive` to the same number); returns how many could not start. Fails only
+    /// Starts `threads` workers (the caller has handed over a queue that counts the same number); returns how many could not start. Fails only
     /// when not even the first starts.
     fn launch(self: &Arc<Self>, threads: usize) -> Result<usize, ReadError> {
         let mut failed = 0;
@@ -285,7 +298,14 @@ impl Walk {
                 Box::new(move || {
                     dyno_platform::priority::lower_current_thread();
                     // A bug in one reader ends the scan with a message; it never takes the agent down.
-                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| w.worker(epoch))).is_err() {
+                    if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| w.worker(epoch))) {
+                        // The cause goes to the log (the agent's stderr is not in a diagnostic bundle); it names code, not files.
+                        let cause = panic
+                            .downcast_ref::<&str>()
+                            .map(|s| (*s).to_string())
+                            .or_else(|| panic.downcast_ref::<String>().cloned())
+                            .unwrap_or_default();
+                        log::error!(Pass = epoch, Cause = cause.as_str(); "A disk reader thread panicked; the scan ends as failed");
                         w.fail(ScanFailure::Internal {
                             detail: "a reader thread stopped unexpectedly".into(),
                         });
@@ -293,9 +313,7 @@ impl Walk {
                     // Done is announced by the last worker out, after its thread has left the host's count: a finished scan
                     // never looks like one with threads still stuck in calls.
                     drop(guard);
-                    if w.epoch.load(Ordering::SeqCst) == epoch {
-                        w.worker_exited();
-                    }
+                    w.worker_exited(epoch);
                 }),
             );
             if spawned.is_err() {
@@ -310,9 +328,9 @@ impl Walk {
 
     /// Accounts for `failed` workers that never started, as if they had started and ended at once: if the others have finished
     /// the walk already, the last one to be accounted for announces it. Called without the gate held.
-    fn forget_unstarted(&self, failed: usize) {
+    fn forget_unstarted(&self, epoch: u64, failed: usize) {
         for _ in 0..failed {
-            self.worker_exited();
+            self.worker_exited(epoch);
         }
     }
 
@@ -357,17 +375,13 @@ impl Walk {
             .iter()
             .map(|t| (t.node, (t.path.clone(), refused.contains(&t.node))))
             .collect();
-        *lock(&self.queue) = Queue {
-            stack: tasks,
-            ..Queue::default()
-        };
-        self.epoch.fetch_add(1, Ordering::SeqCst);
+        // The new pass's number first (the commit of a late reader checks it), then its queue, which carries the number too.
+        let epoch = self.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+        *lock(&self.queue) = Queue::for_pass(epoch, tasks, threads);
         self.stopped.store(false, Ordering::SeqCst);
-        self.completed.store(false, Ordering::SeqCst);
-        self.alive.store(threads, Ordering::SeqCst);
         // The folders about to be read again are no longer counted as refused; any that is refused again is counted anew.
         let taken = u64::try_from(tasks_len).unwrap_or(u64::MAX);
-        // No worker is alive between passes, so nothing else changes the count.
+        // A late reader of an earlier pass counts nothing: refusals are counted only by a listing that is committed.
         self.unreadable
             .store(self.unreadable.load(Ordering::Relaxed).saturating_sub(taken), Ordering::Relaxed);
         lock(&self.problems).unreadable_first.retain(|p| !again.contains(p));
@@ -379,7 +393,7 @@ impl Walk {
         match self.launch(threads) {
             Ok(failed) => {
                 drop(gate);
-                self.forget_unstarted(failed);
+                self.forget_unstarted(epoch, failed);
                 Ok(())
             }
             Err(_) => {
@@ -511,21 +525,31 @@ impl Walk {
         self.wake_workers();
     }
 
-    fn worker_exited(&self) {
-        if self.alive.fetch_sub(1, Ordering::SeqCst) == 1 && self.completed.load(Ordering::SeqCst) {
-            self.finish(End::Done);
+    /// A worker of pass `epoch` has left. The last one out of a pass that read everything announces Done. A worker of an earlier
+    /// pass counts nothing; the check and the count are made under the gate, so no retry can begin between them.
+    fn worker_exited(&self, epoch: u64) {
+        let _gate = lock(&self.gate);
+        let last = {
+            let mut q = lock(&self.queue);
+            if q.epoch != epoch {
+                return;
+            }
+            q.alive = q.alive.saturating_sub(1);
+            q.alive == 0 && q.finished
+        };
+        if last {
+            self.finish_locked(End::Done);
         }
     }
 
     /// One worker of the pass `epoch`. A worker left over from an earlier pass (it was inside a call that did not return when the
     /// pass was cancelled) finds the epoch changed when it comes back and leaves without touching the new pass.
     fn worker(&self, epoch: u64) {
-        let stale = || self.epoch.load(Ordering::SeqCst) != epoch;
         loop {
             let task = {
                 let mut q = lock(&self.queue);
                 loop {
-                    if stale() || self.stopped.load(Ordering::SeqCst) || q.finished {
+                    if q.epoch != epoch || self.stopped.load(Ordering::SeqCst) || q.finished {
                         return;
                     }
                     if let Some(t) = q.stack.pop() {
@@ -534,7 +558,6 @@ impl Walk {
                     }
                     if q.in_flight == 0 {
                         q.finished = true;
-                        self.completed.store(true, Ordering::SeqCst);
                         drop(q);
                         self.wake.notify_all();
                         return;
@@ -543,14 +566,10 @@ impl Walk {
                 }
             };
             let children = self.process(&task, epoch);
-            if stale() {
-                return;
-            }
             {
                 let mut q = lock(&self.queue);
-                // Looked at again under the lock that a new pass resets: a worker of an earlier pass must not count itself out of
-                // the new pass's queue.
-                if stale() {
+                // The queue says whose it is: a worker of an earlier pass must not count itself out of the new pass's queue.
+                if q.epoch != epoch {
                     return;
                 }
                 q.in_flight -= 1;
@@ -668,18 +687,13 @@ impl Walk {
             // Gone since it was listed: nothing to read. On a retry the path was rebuilt from the index, so "not found" may mean
             // the path is wrong; the folder then stays refused rather than being called complete and empty.
             Err(ReadError::NotFound) if !task.retry => None,
-            Err(e) => {
-                self.note_unreadable(&task.path);
-                Some(unreadable_reason(e, &self.cfg.reasons, &task.path))
-            }
+            Err(e) => Some(unreadable_reason(e, &self.cfg.reasons, &task.path)),
         };
         // A folder that listed but had entries the OS refused is partial: counted once, and incomplete for good.
         let partial = entry_denied.filter(|_| unreadable_here.is_none());
-        if partial.is_some() {
-            self.note_unreadable(&task.path);
-        }
 
         let mut next = Vec::with_capacity(dirs.len());
+        let refused: bool;
         {
             let mut i = lock(&self.index);
             if self.stopped.load(Ordering::SeqCst) || self.epoch.load(Ordering::SeqCst) != epoch {
@@ -736,6 +750,7 @@ impl Walk {
             if small_items > 0 {
                 i.add_folded_files(task.node, small, small_items, small_newest);
             }
+            refused = unreadable_here.is_some() || partial.is_some();
             if let Some(reason) = unreadable_here {
                 i.mark_unreadable(task.node, reason);
             }
@@ -746,6 +761,11 @@ impl Walk {
             // Taken off and put in the index in one step (the lock is held), so the count shown never dips or doubles.
             self.pending_items.fetch_sub(seen, Ordering::Relaxed);
             i.finish_listing(task.node);
+        }
+        // Counted only once the listing is known to count (and after the index lock, which `snapshot` takes after `problems`): a
+        // reader of a cancelled pass that meets a refusal after the cancel has put the folder back as refused counts nothing.
+        if refused {
+            self.note_unreadable(&task.path);
         }
         self.folders.fetch_add(1, Ordering::Relaxed);
         next
@@ -1346,6 +1366,57 @@ mod tests {
         w.retry().unwrap();
         assert_eq!(w.wait(), End::Done, "the next retry reads it");
         assert!(w.with_index(DiskIndex::is_complete));
+    }
+
+    /// What a retry does first: hands the queue to the next pass (the reader of the cancelled pass may still be out).
+    fn hand_over_to_the_next_pass(w: &Walk) {
+        let next = lock(&w.queue).epoch + 1;
+        *lock(&w.queue) = Queue::for_pass(next, Vec::new(), 1);
+    }
+
+    #[test]
+    fn a_reader_of_a_cancelled_retry_that_comes_back_late_leaves_the_queue_of_the_next_pass_alone() {
+        let (fs, lib, _) = with_two_refused();
+        let c = cfg(1);
+        let live = c.live.clone();
+        let (w, _, _) = run(fs.clone(), fs.root(), c);
+        let gate = Gate::new();
+        let g = gate.clone();
+        fs.on_read(move |_| g.pass());
+        fs.allow_open(&lib);
+        w.retry().unwrap();
+        gate.wait_arrived(1);
+        w.cancel();
+        assert_eq!(w.wait(), End::Cancelled);
+        // The next retry has handed the queue over when the reader of the cancelled pass comes back from its read.
+        hand_over_to_the_next_pass(&w);
+        gate.open();
+        live.wait_zero();
+        assert_eq!(
+            lock(&w.queue).in_flight,
+            0,
+            "the late reader does not count itself out of the next pass"
+        );
+        assert_eq!(lock(&w.problems).failure, None, "no reader stopped unexpectedly");
+    }
+
+    #[test]
+    fn a_refusal_met_by_a_reader_of_a_cancelled_retry_is_not_counted_twice() {
+        let (fs, _, _) = with_two_refused();
+        let c = cfg(1);
+        let live = c.live.clone();
+        let (w, _, _) = run(fs.clone(), fs.root(), c);
+        let gate = Gate::new();
+        let g = gate.clone();
+        fs.on_read(move |_| g.pass());
+        // Library is still refused: the reader held in the read gets the refusal after the cancel has counted it again.
+        w.retry().unwrap();
+        gate.wait_arrived(1);
+        w.cancel();
+        gate.open();
+        live.wait_zero();
+        let s = w.snapshot();
+        assert_eq!((s.progress.unreadable, s.unreadable_first.len()), (1, 1), "Library is counted once");
     }
 
     /// Records the order of what the hooks are told; `restarted` can be held at a known point.
