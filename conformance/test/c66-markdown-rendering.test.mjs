@@ -53,6 +53,33 @@ test('HTML: unclosed and stray tags, void tags, comments and code are ignored', 
   assert.deepEqual(lint('<details>\n<summary>S</summary>\nbody\n</details>\n'), []);
 });
 
+test('a percent sign in an anchor does not throw', () => {
+  assert.deepEqual(lint('# Top\n\n[x](#100%) [y](a%zz.md)\n'), [['anchor', 3], ['link', 3]]);
+});
+
+test('heading slugs: underscores in code spans stay, emphasis goes, setext headings count', () => {
+  assert.deepEqual(lint('## `paddock_log` setup\n\n[a](#paddock_log-setup)\n'), []);
+  assert.deepEqual(lint('## _Fast_ and *loud*\n\n[a](#fast-and-loud)\n'), []);
+  assert.deepEqual(lint('## snake_case_word\n\n[a](#snake_case_word)\n'), []);
+  assert.deepEqual(lint('Title here\n==========\n\nSub head\n--------\n\n[a](#title-here) [b](#sub-head)\n'), []);
+  assert.deepEqual(lint('- item\n---\n\n[a](#item)\n'), [['anchor', 4]]);
+});
+
+test('a fence indented four spaces is indented code, not a fence', () => {
+  assert.deepEqual(lint('Text\n\n    ```sh\n    ls\n'), []);
+  assert.deepEqual(lint('Text\n\n   ```sh\n   ls\n'), [['fence', 3]]);
+});
+
+test('HTML check ignores link destinations in angle brackets', () => {
+  assert.deepEqual(lint('[x](<b c.md>)\n', ['docs/b c.md']), []);
+});
+
+test('a very long line is scanned in bounded time', () => {
+  const t = Date.now();
+  lint(`${'['.repeat(200000)}\n`);
+  assert.ok(Date.now() - t < 2000);
+});
+
 test('C66 through the runner: the crates README split is an error, THIRD_PARTY_NOTICES.md is skipped', async () => {
   const bad = '| A | B |\n|---|---|\n| 1 | 2 |\n\n| 3 | 4 |\n';
   const root = makeApp({ 'crates/README.md': bad, 'x/THIRD_PARTY_NOTICES.md': bad, 'ok.md': '# Fine\n\n| A |\n|---|\n| 1 |\n' });

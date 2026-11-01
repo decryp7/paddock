@@ -37,7 +37,7 @@ function scanFences(lines, problems) {
   const inFence = new Array(lines.length).fill(false);
   let open = null;
   for (let i = 0; i < lines.length; i++) {
-    const m = /^\s*(`{3,}|~{3,})(.*)$/.exec(lines[i]);
+    const m = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(lines[i]);
     if (open) {
       inFence[i] = true;
       if (m && m[1][0] === open.ch && m[1].length >= open.len && m[2].trim() === '') open = null;
@@ -91,11 +91,22 @@ function checkTables(lines, inFence, problems) {
   }
 }
 
+/** `decodeURIComponent`, or the text as written when it is not valid percent-encoding (`#100%`). */
+function safeDecode(t) {
+  try {
+    return decodeURIComponent(t);
+  } catch {
+    return t;
+  }
+}
+
 function slug(text) {
   return text
     .replace(/<[^>]*>/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[`*_~]/g, '')
+    .split(/(`+[^`]*`+)/)
+    .map((part, i) => (i % 2 === 1 ? part.replace(/^`+|`+$/g, '') : part.replace(/(^|[\s(])_+([^_\s](?:[^_]*[^_\s])?)_+(?=$|[\s).,:;!?])/g, '$1$2')))
+    .join('')
     .trim()
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s_-]/gu, '')
@@ -106,9 +117,17 @@ function headingSlugs(lines, inFence) {
   const seen = new Map();
   const out = new Set();
   lines.forEach((l, i) => {
-    const m = !inFence[i] && /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(l);
-    if (!m) return;
-    const base = slug(m[1]);
+    let text = null;
+    if (!inFence[i]) {
+      const m = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(l);
+      if (m) text = m[1];
+      else if (
+        l.trim() !== '' && !inFence[i + 1] && /^ {0,3}(=+|-+)\s*$/.test(lines[i + 1] ?? '') &&
+        (i === 0 || lines[i - 1].trim() === '') && !/^\s*([-*+>|#]|\d+[.)]\s|<)/.test(l)
+      ) text = l.trim();
+    }
+    if (text === null) return;
+    const base = slug(text);
     const n = seen.get(base) ?? 0;
     seen.set(base, n + 1);
     out.add(n === 0 ? base : `${base}-${n}`);
@@ -117,12 +136,15 @@ function headingSlugs(lines, inFence) {
   return out;
 }
 
+/** Longest stretch of one line that is scanned for links. */
+const MAX_SCAN = 8000;
+
 function checkLinks(lines, inFence, file, exists, problems) {
   const slugs = headingSlugs(lines, inFence);
   const dir = posix.dirname(file);
   lines.forEach((raw, i) => {
     if (inFence[i]) return;
-    const line = stripCode(raw);
+    const line = stripCode(raw).slice(0, MAX_SCAN); // bounds the bracket scan below: linear in the line length
     const targets = [];
     for (const m of line.matchAll(/!?\[(?:[^\]\\]|\\.)*\]\(\s*<?([^)\s>]*)>?(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g)) targets.push(m[1]);
     const ref = /^\s{0,3}\[[^\]]+\]:\s+<?(\S+?)>?(?:\s+.*)?$/.exec(line);
@@ -131,16 +153,11 @@ function checkLinks(lines, inFence, file, exists, problems) {
       if (t === '' || /^[a-z][a-z0-9+.-]*:/i.test(t) || t.startsWith('//') || t.startsWith('/') || t.startsWith('~') || /[{}$]|<|>/.test(t)) continue;
       const [pathPart, frag] = [t.split('#')[0].split('?')[0], t.includes('#') ? t.slice(t.indexOf('#') + 1) : null];
       if (pathPart === '') {
-        if (frag && frag !== '' && !/^(L\d+|top)/.test(frag) && !slugs.has(decodeURIComponent(frag).toLowerCase()))
+        if (frag && frag !== '' && !/^(L\d+|top)/.test(frag) && !slugs.has(safeDecode(frag).toLowerCase()))
           problems.push({ line: i + 1, kind: 'anchor', message: `anchor #${frag} matches no heading in this file` });
         continue;
       }
-      let decoded = pathPart;
-      try {
-        decoded = decodeURIComponent(pathPart);
-      } catch {
-        /* keep as written */
-      }
+      const decoded = safeDecode(pathPart);
       const target = posix.normalize(posix.join(dir, decoded));
       if (target.startsWith('..')) continue;
       if (!exists(target.replace(/\/$/, ''))) problems.push({ line: i + 1, kind: 'link', message: `link target ${t} does not exist (${target})` });
@@ -164,7 +181,7 @@ function checkLists(lines, inFence, problems) {
 }
 
 function checkHtml(lines, inFence, problems) {
-  const masked = lines.map((l, i) => (inFence[i] ? '' : stripCode(l))).join('\n').replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ' '));
+  const masked = lines.map((l, i) => (inFence[i] ? '' : stripCode(l).slice(0, MAX_SCAN).replace(/\]\([^)]*\)/g, (d) => ' '.repeat(d.length)))).join('\n').replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ' '));
   const stack = [];
   for (const m of masked.matchAll(/<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[^<>]*?)?)(\/?)>/g)) {
     const name = m[2].toLowerCase();

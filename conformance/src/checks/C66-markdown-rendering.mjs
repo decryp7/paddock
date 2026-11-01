@@ -9,11 +9,8 @@ import { lintMarkdown } from '../util/markdown-lint.mjs';
 /** Files that come from a tool. */
 export const SKIPPED = /(^|\/)THIRD_PARTY_NOTICES\.md$/;
 
-/** Link targets (as `file -> target`) that may be missing for now, with the reason. Empty is the goal. */
-export const ALLOWED_MISSING_LINKS = {
-  // the note lands with branch docs/embeddings-for-logs; delete this entry when it is on main
-  'docs/plans/shared-next.md': ['docs/research/2026-10-embeddings-for-logs.md'],
-};
+/** Link targets (as `file -> targets`) that may be missing for good, with the reason. Temporary gaps are dated waivers in paddock.waivers.toml. */
+export const ALLOWED_MISSING_LINKS = {};
 
 export default {
   id: 'C66',
