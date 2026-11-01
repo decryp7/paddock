@@ -69,8 +69,10 @@ fn contracts() -> Arc<Contracts> {
     Arc::new(Contracts::from_entries(&e, &[]).expect("test contracts"))
 }
 
-/// Every log record of the guard, as (level, message, dialog, command).
-static LOGGED: Mutex<Vec<(log::Level, String, String, String, String)>> = Mutex::new(Vec::new());
+/// A log record: (level, message, dialog, command, inputs).
+type Logged = (log::Level, String, String, String, String);
+/// Every log record of the guard and the dialog layer.
+static LOGGED: Mutex<Vec<Logged>> = Mutex::new(Vec::new());
 
 struct Capture;
 
