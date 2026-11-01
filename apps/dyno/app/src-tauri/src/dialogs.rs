@@ -14,10 +14,20 @@ paddock_dialogs::dialogs! {
     /// Dyno's dialogs, and the commands every one of its dialog windows may call (the start-up handshake).
     pub static DIALOGS, base &[shell::startup::window_pong, shell::startup::window_ready];
     // The settings commands, and the engine for Dyno's page of the window (its settings, the tray items, the plugins).
+    // Dyno's page also edits the popup and menu-bar widget layouts (their editors read the layouts, the engine's choices and the
+    // popup preview): those commands are open to dialogs in `COMMANDS` and must be named here too, or the window may not call them.
     "pd.settings" => Tool {
         width: Some(Px(880)),
         height: Some(700),
-        commands: &[prefix(shell::settings::ALL, "settings_"), app::dyno],
+        commands: &[
+            prefix(shell::settings::ALL, "settings_"),
+            app::dyno,
+            app::widget_layout,
+            app::edit_widget_layout,
+            app::widget_choices,
+            app::popover_preview,
+            app::popover_snapshot,
+        ],
     },
     // Adding or changing an alert rule: validated by the engine on save.
     "dy.alert-rule" => Form(Modal) {
