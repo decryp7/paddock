@@ -142,10 +142,12 @@ development and UI tests only; features are not done until they work against the
   cause and next step; long steps log phases with durations; wrappers log the exact command (secrets masked), exit code (NTSTATUS on
   Windows) and stderr tail; each job summarises what ran, was skipped and why.
 - A cause is confirmed only by a run without it (rule 57, ER-28): list every plausible cause with the observation that
-  rules it out and record the list in the commit or lesson; a cause is confirmed when the reproduction, run without it,
-  stays green n = ceil(ln 0.05 / ln(1-p)) times and fails again with it put back; "flaky", "load" and "timing" are symptoms.
-- Shared-state suites run shuffled every night (rule 58, ER-29): Vitest with `isolate: false` and single-process test
-  binaries run nightly in random order with an explicit printed seed (`--sequence.shuffle --sequence.seed=<n>`); an order-dependent failure is bisected with
+  rules it out and measure each in the failing run; record the list in the commit or lesson. A cause is confirmed when the
+  reproduction, run without it, stays green n = max(1, ceil(ln 0.05 / ln(1-p))) times, with p measured on the failing
+  run, and fails again with it put back. "Flaky", "load" and "timing" are symptoms, not causes.
+- Shared-state suites run shuffled every night (rule 58, ER-29): Vitest suites with `isolate: false` and
+  `harness = false` Rust test binaries run nightly in random order with an explicit printed seed (`--sequence.shuffle
+  --sequence.seed=<n>`), effective when nightly.yml's shuffled job lands; an order-dependent failure is bisected with
   `scripts/find-polluter.mjs` (the polluting file) and `scripts/bisect-flaky.sh` (the commit).
 - Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
