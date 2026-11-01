@@ -1,7 +1,7 @@
 // Tests of scripts/publish.mjs (pure parts) and of the repository facts it relies on: `node --test scripts/`.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, test } from 'node:test';
@@ -23,9 +23,13 @@ import {
   missingExports,
   npmPackages,
   parseArgs,
+  parseToolTag,
   planRows,
   publishOrder,
   tagProblems,
+  toolFolders,
+  toolProblems,
+  toolTagProblems,
   workspaceCrates,
   WORKSPACE_HACK,
 } from './publish.mjs';
@@ -37,8 +41,8 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 const crate = (name, deps = [], extra = {}) => ({ name, version: '0.1.0', publish: ['decryp7'], scaffold: false, deps, ...extra });
 
 describe('parseArgs', () => {
-  test('dry run is the default', () => assert.deepEqual(parseArgs([]), { publish: false, skipBuild: false, offline: false }));
-  test('flags', () => assert.deepEqual(parseArgs(['--skip-build', '--offline']), { publish: false, skipBuild: true, offline: true }));
+  test('dry run is the default', () => assert.deepEqual(parseArgs([]), { publish: false, skipBuild: false, offline: false, tool: null }));
+  test('flags', () => assert.deepEqual(parseArgs(['--skip-build', '--offline']), { publish: false, skipBuild: true, offline: true, tool: null }));
   test('unknown flag fails', () => assert.throws(() => parseArgs(['--dry-run']), /unknown option --dry-run/));
   test('publish cannot skip the build or the registries', () => {
     assert.throws(() => parseArgs(['--publish', '--skip-build']), /dry run/);
@@ -339,5 +343,90 @@ describe('linking published packages to the paddock repository', () => {
     const src = readFileSync(join(root, 'scripts/publish.mjs'), 'utf8');
     assert.match(src, /would link \$\{/);
     assert.ok(src.indexOf('await linkPackages(todo, env)') < src.indexOf('await createRelease(lead.version, todo, env)'));
+  });
+});
+
+describe('publishing a tool from its tag (ADR 0022 amendment)', () => {
+  const meta = (extra = {}, dep = {}) => ({
+    workspace_members: ['t 0.1.0'],
+    packages: [
+      {
+        id: 't 0.1.0',
+        name: 'paddock-t',
+        version: '0.1.0',
+        publish: ['decryp7'],
+        metadata: null,
+        manifest_path: '/w/tools/t/Cargo.toml',
+        dependencies: [{ name: 'paddock-proc', kind: null, req: '^0.1', path: '/w/crates/paddock-proc', registry: 'https://x', ...dep }],
+        ...extra,
+      },
+    ],
+  });
+
+  test('parseArgs takes --tool <name> and refuses a bad name or the npm-only flag', () => {
+    assert.deepEqual(parseArgs(['--tool', 'heavy', '--offline']), { publish: false, skipBuild: false, offline: true, tool: 'heavy' });
+    assert.equal(parseArgs([]).tool, null);
+    assert.throws(() => parseArgs(['--tool']), /--tool needs/);
+    assert.throws(() => parseArgs(['--tool', '../x']), /--tool needs/);
+    assert.throws(() => parseArgs(['--tool', 'heavy', '--skip-build']), /npm build/);
+  });
+
+  test('parseToolTag reads <tool>-vX.Y.Z and nothing else', () => {
+    assert.deepEqual(parseToolTag('refs/tags/heavy-v0.1.0'), { tool: 'heavy', version: '0.1.0' });
+    assert.deepEqual(parseToolTag('refs/tags/wiki-v1.2.3-rc.1'), { tool: 'wiki', version: '1.2.3-rc.1' });
+    assert.equal(parseToolTag('refs/tags/v0.2.0'), null);
+    assert.equal(parseToolTag('refs/heads/heavy-v0.1.0'), null);
+    assert.equal(parseToolTag(undefined), null);
+  });
+
+  test('toolTagProblems: only CI on the tool\'s own tag and version', () => {
+    assert.deepEqual(toolTagProblems({ CI: 'true', GITHUB_REF: 'refs/tags/heavy-v0.1.0' }, 'heavy', '0.1.0'), []);
+    assert.equal(toolTagProblems({ GITHUB_REF: 'refs/tags/heavy-v0.1.0' }, 'heavy', '0.1.0').length, 1);
+    assert.equal(toolTagProblems({ CI: 'true', GITHUB_REF: 'refs/tags/wiki-v0.1.0' }, 'heavy', '0.1.0').length, 1);
+    assert.equal(toolTagProblems({ CI: 'true', GITHUB_REF: 'refs/tags/heavy-v0.2.0' }, 'heavy', '0.1.0').length, 1);
+    assert.equal(toolTagProblems({ CI: 'true', GITHUB_REF: 'refs/tags/v0.1.0' }, 'heavy', '0.1.0').length, 1);
+  });
+
+  test('toolProblems: publish setting, path dependencies need a version and the registry', () => {
+    assert.deepEqual(toolProblems('t', meta()), []);
+    assert.match(toolProblems('t', meta({ publish: [] }))[0], /publish = false/);
+    assert.match(toolProblems('t', meta({ publish: null }))[0], /publish = \["decryp7"\]/);
+    assert.match(toolProblems('t', meta({}, { req: '*' }))[0], /path without a version/);
+    assert.match(toolProblems('t', meta({}, { registry: null }))[0], /registry = "decryp7"/);
+    assert.deepEqual(toolProblems('t', meta({}, { req: '*', registry: null, kind: 'dev' })), []);
+  });
+
+  test('dry-run plan on the real tools: heavy and wiki publish alone, paddock-dev is refused', () => {
+    const plan = (tool) => {
+      try {
+        return { out: execFileSync('node', [join(root, 'scripts/publish.mjs'), '--tool', tool, '--offline'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
+      } catch (e) {
+        return { err: String(e.stderr) };
+      }
+    };
+    for (const [tool, name] of [['heavy', 'paddock-heavy'], ['wiki', 'paddock-wiki']]) {
+      const { out, err } = plan(tool);
+      assert.ok(out, err);
+      assert.match(out, new RegExp(`crate\\s+${name}\\s+0\\.1\\.0\\s+publish`));
+      assert.match(out, new RegExp(`the tag ${tool}-v\\d+\\.\\d+\\.\\d+ would publish 1 of 1; nothing was uploaded`));
+      assert.doesNotMatch(out, /paddock-ui|npm /);
+    }
+    assert.match(plan('paddock-dev').err, /publish = false/);
+    assert.match(plan('nosuchtool').err, /no tools\/nosuchtool/);
+  });
+
+  test('every publishable tool passes toolProblems and has its tag trigger in publish-tools.yml', () => {
+    const workflow = readFileSync(join(root, '.gitea/workflows/publish-tools.yml'), 'utf8');
+    const publishable = [];
+    for (const tool of toolFolders(join(root, 'tools'))) {
+      const metadata = JSON.parse(execFileSync('cargo', ['metadata', '--format-version', '1', '--no-deps'], { cwd: join(root, 'tools', tool), encoding: 'utf8' }));
+      const [pkg] = workspaceCrates(metadata);
+      if (!pkg || pkg.publish.length === 0) continue;
+      publishable.push(tool);
+      assert.deepEqual(toolProblems(tool, metadata), [], `tools/${tool}`);
+      assert.ok(workflow.includes(`"${tool}-v*"`), `publish-tools.yml has no "${tool}-v*" trigger`);
+    }
+    assert.deepEqual(publishable, ['heavy', 'wiki']);
+    assert.ok(existsSync(join(root, '.gitea/workflows/publish-tools.yml')));
   });
 });

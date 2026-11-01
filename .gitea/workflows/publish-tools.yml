@@ -1,0 +1,78 @@
+# Publishes one tool of tools/<tool>/ to the Gitea cargo registry `decryp7` from its tag `<tool>-vX.Y.Z`, and only from one
+# (rule 9; ADR 0022's accepted amendment, G.4): `heavy-v*` publishes paddock-heavy, `wiki-v*` paddock-wiki. Each tool is its
+# own Cargo workspace, so a tag publishes that tool alone (scripts/publish.mjs --tool <tool>); the crates and npm packages
+# belong to publish.yml and its v* tags. A new publishable tool adds its `<tool>-v*` line here (scripts/publish.test.mjs
+# fails when a publishable tool has no trigger). Nothing is published from a workstation: `node scripts/publish.mjs --tool
+# heavy` is the dry run.
+#
+# The tool's gates run again here on the tagged commit before anything is uploaded (a workflow cannot wait for ci.yml).
+# Secrets: DOCKER_USERNAME / DOCKER_PASSWORD (basic auth for the registry), the job token for the release.
+
+name: publish-tools
+
+on:
+  push:
+    tags: ["heavy-v*", "wiki-v*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish (tool, cargo registry, release)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      # The whole history: the wiki tool's tests lint this repository's docs/wiki against the rules on other branches.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ./.gitea/actions/build-jobs
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          components: clippy,rustfmt
+
+      - name: Tool from the tag
+        id: tool
+        run: |
+          tool="${GITHUB_REF_NAME%-v*}"
+          [ -f "tools/$tool/Cargo.toml" ] || { echo "::error::tag $GITHUB_REF_NAME names no tool: tools/$tool/Cargo.toml is missing; next step: tag <tool>-vX.Y.Z"; exit 1; }
+          echo "tool=$tool" >> "$GITHUB_OUTPUT"
+          echo "- publishing tool \`$tool\` from tag \`$GITHUB_REF_NAME\`" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+      - name: Gates (lockfile, fmt, clippy, tests)
+        working-directory: tools/${{ steps.tool.outputs.tool }}
+        run: |
+          cargo metadata --locked --format-version 1 > /dev/null || {
+            echo "::error::tools/${{ steps.tool.outputs.tool }}/Cargo.lock is stale, run cargo update -w there and commit it"; exit 1; }
+          cargo fmt --check
+          cargo clippy --all-targets --locked -- -D warnings
+          cargo nextest run --profile ci --locked --no-fail-fast
+
+      - name: Publish the tool, create the release
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          GITEA_TOKEN: ${{ github.token }}
+        run: |
+          # Basic-auth credential for the registry, built here, masked and never printed. Whitespace is stripped from the
+          # secrets first (a trailing newline in a pasted secret breaks the credential: lessons).
+          DOCKER_USERNAME=$(printf '%s' "$DOCKER_USERNAME" | tr -d '[:space:]')
+          DOCKER_PASSWORD=$(printf '%s' "$DOCKER_PASSWORD" | tr -d '[:space:]')
+          PACKAGE_AUTH=$(printf '%s:%s' "$DOCKER_USERNAME" "$DOCKER_PASSWORD" | base64 | tr -d '\n')
+          echo "::add-mask::$PACKAGE_AUTH"
+          export PACKAGE_AUTH
+          node scripts/publish.mjs --tool "${{ steps.tool.outputs.tool }}" --publish

@@ -7,6 +7,11 @@
 //   node scripts/publish.mjs --skip-build  dry run on the existing ui/dist (CI, after its build steps)
 //   node scripts/publish.mjs --offline     dry run without asking the registries which versions they already have
 //   node scripts/publish.mjs --publish     only in CI on a v* tag (.gitea/workflows/publish.yml, rule 9); refuses elsewhere
+//   node scripts/publish.mjs --tool <name> [--offline] [--publish]
+//                                          one tool of tools/<name>/ (its own cargo workspace, ADR 0022 amendment) to the
+//                                          `decryp7` registry, and nothing else: no crates, no npm packages. --publish only in
+//                                          CI on the tag `<name>-vX.Y.Z` (.gitea/workflows/publish-tools.yml); the tag's
+//                                          version must be the tool's own. A tool with `publish = false` is refused.
 //
 // Held back, never published: crates and npm packages still marked as scaffolds (`[package.metadata.paddock] scaffold =
 // true` in Cargo.toml, `"paddock": { "scaffold": true }` in package.json; the work package that fills one removes the
@@ -37,19 +42,29 @@ export const LINK_REPO = 'paddock';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const crates = join(root, 'crates');
 const ui = join(root, 'ui');
+const tools = join(root, 'tools');
 
 // ---------------------------------------------------------------------------------------------------------------- pure
 
 /** Parses the command line; unknown flags fail fast. */
 export function parseArgs(argv) {
   const known = new Set(['--publish', '--skip-build', '--offline']);
-  const unknown = argv.filter((a) => !known.has(a));
-  if (unknown.length) throw new Error(`unknown option ${unknown.join(' ')} (use --publish, --skip-build or --offline)`);
-  const publish = argv.includes('--publish');
-  if (publish && (argv.includes('--offline') || argv.includes('--skip-build'))) {
+  const args = [...argv];
+  let tool = null;
+  const t = args.indexOf('--tool');
+  if (t >= 0) {
+    tool = args[t + 1] ?? '';
+    if (!/^[a-z][a-z0-9-]*$/.test(tool)) throw new Error(`--tool needs a tool folder name below tools/ (like "heavy"), got "${tool}"`);
+    args.splice(t, 2);
+  }
+  const unknown = args.filter((a) => !known.has(a));
+  if (unknown.length) throw new Error(`unknown option ${unknown.join(' ')} (use --publish, --skip-build, --offline or --tool <name>)`);
+  const publish = args.includes('--publish');
+  if (publish && (args.includes('--offline') || args.includes('--skip-build'))) {
     throw new Error('--publish always builds and asks the registries; --skip-build and --offline are for the dry run');
   }
-  return { publish, skipBuild: argv.includes('--skip-build'), offline: argv.includes('--offline') };
+  if (tool && args.includes('--skip-build')) throw new Error('--skip-build is for the npm build; a tool has none');
+  return { publish, skipBuild: args.includes('--skip-build'), offline: args.includes('--offline'), tool };
 }
 
 /** The path of a crate's file in a cargo (sparse) index: `1/a`, `2/ab`, `3/a/abc`, `pa/dd/paddock-jobs`. */
@@ -162,6 +177,48 @@ export function shellVersionProblems(crateList, packages) {
   const lead = packages.find((p) => p.name === '@decryp7/paddock-ui');
   if (!shell || !lead || shell.version === lead.version) return [];
   return [`paddock-shell is ${shell.version}; it carries @decryp7/paddock-ui's version ${lead.version} (bump both together)`];
+}
+
+/** A tool tag `refs/tags/<tool>-vX.Y.Z` as `{ tool, version }`, or null for any other ref (`v0.2.0`, `debrief-v1.0.0` is a tool tag by shape). */
+export function parseToolTag(ref) {
+  const m = /^refs\/tags\/([a-z][a-z0-9-]*)-v(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/.exec(ref ?? '');
+  return m ? { tool: m[1], version: m[2] } : null;
+}
+
+/** The tool folders below `toolsDir`: every folder with a Cargo.toml, sorted. */
+export function toolFolders(toolsDir) {
+  return readdirSync(toolsDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && existsSync(join(toolsDir, e.name, 'Cargo.toml')))
+    .map((e) => e.name)
+    .sort();
+}
+
+/**
+ * Why a tool cannot be published from its own workspace: it must be one package published to `decryp7`, and every
+ * non-dev path dependency needs a version and `registry = "decryp7"` (cargo publish rejects a path-only dependency, and
+ * looks a versioned one up on crates.io without the registry key). `metadata` is `cargo metadata --no-deps` of the tool.
+ */
+export function toolProblems(tool, metadata) {
+  const list = workspaceCrates(metadata);
+  if (list.length !== 1) return [`tools/${tool} must be one package, found ${list.length}`];
+  const [pkg] = list;
+  if (Array.isArray(pkg.publish) && pkg.publish.length === 0) return [`tools/${tool}: ${pkg.name} has publish = false; set publish = ["${REGISTRY_NAME}"] to publish it`];
+  const problems = crateProblems(list);
+  const own = metadata.packages.find((p) => p.name === pkg.name);
+  for (const d of own.dependencies.filter((x) => x.path && x.kind !== 'dev')) {
+    if ((d.req ?? '*') === '*') problems.push(`${pkg.name}: dependency ${d.name} is a path without a version; add version = "x.y" for cargo publish`);
+    else if (d.registry == null) problems.push(`${pkg.name}: dependency ${d.name} needs registry = "${REGISTRY_NAME}" next to its path and version`);
+  }
+  return problems;
+}
+
+/** Publishing a tool runs only in CI on the tag `<tool>-v<version>` (rule 9). */
+export function toolTagProblems(env, tool, version) {
+  const problems = [];
+  if (env.CI !== 'true' && env.GITEA_ACTIONS !== 'true') problems.push('--publish runs only in CI (publish-tools.yml on a tool tag), never on a workstation');
+  const ref = env.GITHUB_REF ?? '';
+  if (ref !== `refs/tags/${tool}-v${version}`) problems.push(`--publish needs the tag ${tool}-v${version} (GITHUB_REF is "${ref}")`);
+  return problems;
 }
 
 /** Publishing runs only in CI on the tag of this version (rule 9). */
@@ -314,8 +371,8 @@ function prepareNpm(skipBuild) {
   return dist;
 }
 
-function listCrate(c) {
-  const files = capture('cargo', ['package', '-p', c.name, '--list', '--allow-dirty', '--registry', REGISTRY_NAME], crates)
+function listCrate(c, cwd = crates) {
+  const files = capture('cargo', ['package', '-p', c.name, '--list', '--allow-dirty', '--registry', REGISTRY_NAME], cwd)
     .split('\n')
     .filter(Boolean);
   console.log(`\ncrate ${c.name} ${c.version} (${files.length} files${c.deps.length ? `; after ${c.deps.join(', ')}` : ''})`);
@@ -329,11 +386,13 @@ function listNpm(p) {
   for (const f of info.files) console.log(`  ${f.path}`);
 }
 
-function publishCrate(c, token) {
+function publishCrate(c, token, toolDir = null) {
   // `cargo hakari publish` removes the dependency on the workspace-hack crate for the upload and puts it back. That edits a
   // manifest, so `--locked` cannot be passed here: main() checks the lock file before anything is published.
-  const res = spawnSync('cargo', ['hakari', 'publish', '-p', c.name, '--', '--registry', REGISTRY_NAME], {
-    cwd: crates,
+  // A tool has no workspace-hack: a plain locked `cargo publish` in its own workspace.
+  const args = toolDir ? ['publish', '--locked', '-p', c.name, '--registry', REGISTRY_NAME] : ['hakari', 'publish', '-p', c.name, '--', '--registry', REGISTRY_NAME];
+  const res = spawnSync('cargo', args, {
+    cwd: toolDir ?? crates,
     encoding: 'utf8',
     env: { ...process.env, CARGO_REGISTRIES_DECRYP7_TOKEN: token },
   });
@@ -360,10 +419,9 @@ function publishNpm(p, env) {
   }
 }
 
-async function createRelease(version, published, env) {
+async function createRelease(version, published, env, tag = `v${version}`) {
   const token = env.GITEA_TOKEN || env.PACKAGE_TOKEN;
   const headers = token ? { Authorization: `token ${token}` } : { Authorization: `Basic ${env.PACKAGE_AUTH}` };
-  const tag = `v${version}`;
   let res = await fetch(`${GITEA_API}/releases/tags/${tag}`, { headers });
   if (res.ok) return console.log(`release ${tag} already exists`);
   const list = published.length ? published.map((r) => `- ${r.kind === 'crate' ? 'crate' : 'npm'} \`${r.name}\` ${r.version}`).join('\n') : '- nothing new';
@@ -380,9 +438,38 @@ async function createRelease(version, published, env) {
   console.log(`created release ${tag}`);
 }
 
+/** One tool of tools/<name>/ to the registry (the `--tool` mode): its own workspace, its own tag, nothing else. */
+async function mainTool(opts, env) {
+  const dir = join(tools, opts.tool);
+  if (!existsSync(join(dir, 'Cargo.toml'))) throw new Error(`no tools/${opts.tool}/Cargo.toml (tools: ${toolFolders(tools).join(', ')})`);
+  if (opts.publish) capture('cargo', ['metadata', '--format-version', '1', '--locked'], dir);
+  const metadata = JSON.parse(capture('cargo', ['metadata', '--format-version', '1', '--no-deps'], dir));
+  const problems = toolProblems(opts.tool, metadata);
+  const list = problems.length ? [] : workspaceCrates(metadata);
+  if (!problems.length && opts.publish) problems.push(...toolTagProblems(env, opts.tool, list[0].version));
+  if (problems.length) throw new Error(`refusing to continue:\n  ${problems.join('\n  ')}`);
+
+  listCrate(list[0], dir);
+  const published = opts.offline ? null : await registryVersions(list, [], opts.publish);
+  const rows = planRows(list, [], published);
+  console.log(`\n${opts.publish ? 'Publishing' : 'Dry run (nothing is published)'} tool ${opts.tool}:\n${formatTable(rows)}`);
+  const todo = rows.filter((r) => r.action === 'publish');
+  const tag = `${opts.tool}-v${list[0].version}`;
+  if (!opts.publish) {
+    for (const r of todo) console.log(`would link crate ${r.name} to ${LINK_REPO}`);
+    return console.log(`\ndry run: the tag ${tag} would publish ${todo.length} of ${rows.length}; nothing was uploaded`);
+  }
+  const token = cargoToken(env);
+  if (todo.length && !token) throw new Error('no cargo registry token (CARGO_REGISTRIES_DECRYP7_TOKEN, PACKAGE_AUTH or PACKAGE_TOKEN)');
+  for (const r of todo) publishCrate(list.find((c) => c.name === r.name), token, dir);
+  await linkPackages(todo, env);
+  await createRelease(list[0].version, todo, env, tag);
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const env = process.env;
+  if (opts.tool) return mainTool(opts, env);
 
   // The lock file is current (publishCrate cannot pass --locked): cargo metadata fails when it would have to change it.
   if (opts.publish) capture('cargo', ['metadata', '--format-version', '1', '--locked'], crates);
