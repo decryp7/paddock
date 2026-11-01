@@ -52,6 +52,7 @@ export {
   type BoundsStorage,
 } from './src/bounds';
 export { sendDialogInputs, followDialogInputs } from './src/retarget';
+export { afterWindowActive, type ActiveWindow } from './src/window-active';
 export { ModalGate } from './src/modal-gate';
 export { DeniedCommands, isDenial } from './src/denied';
 export {

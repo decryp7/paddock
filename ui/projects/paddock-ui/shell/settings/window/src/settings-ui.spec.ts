@@ -257,6 +257,26 @@ describe('pd-settings-window', () => {
     expect(restart).toHaveBeenCalled();
   });
 
+  it('follows a re-target to a page and anchor although the user chose another page (Customize widgets… while open)', async () => {
+    const bed = await open({ page: 'sd.storage' });
+    await go(bed, 'pd.appearance');
+    expect($(bed.el, '.pd-item[aria-current="page"]').dataset['page']).toBe('pd.appearance');
+    // Opened again from the tray: the same window gets the page and a fresh anchor.
+    bed.fixture.componentRef.setInput('page', 'sd.general');
+    bed.fixture.componentRef.setInput('anchor', { id: 'popup-widgets', at: 1 });
+    await settle();
+    await bed.fixture.whenStable();
+    await settle();
+    expect($(bed.el, '.pd-item[aria-current="page"]').dataset['page'], 'the open window stayed on the page the user had chosen').toBe('sd.general');
+    // The user moves away; the same page asked again (only the anchor's time is new) brings it back.
+    await go(bed, 'pd.appearance');
+    bed.fixture.componentRef.setInput('anchor', { id: 'popup-widgets', at: 2 });
+    await settle();
+    await bed.fixture.whenStable();
+    await settle();
+    expect($(bed.el, '.pd-item[aria-current="page"]').dataset['page']).toBe('sd.general');
+  });
+
   it('moves between pages with the arrow keys', async () => {
     const { el, fixture } = await open();
     document.body.appendChild(el);

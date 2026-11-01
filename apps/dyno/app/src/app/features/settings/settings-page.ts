@@ -11,6 +11,7 @@ import { SettingsStore } from '../../state/settings.store';
 import { LOOKUP_PRESETS, presetIdFor, templateProblem } from './ip-lookup-presets';
 import { SETTINGS_ANCHOR } from '@decryp7/paddock-ui/shell/settings/window';
 import { scrollToSection } from './scroll-to-section';
+import { tauriIpc } from '../../shell/ipc';
 import { MenuBarItems } from './menu-bar-items';
 import { PopupWidgets } from './popup-widgets';
 import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
@@ -366,7 +367,7 @@ export class SettingsPage implements OnInit {
       const wanted = this.anchor?.();
       if (!wanted || this.draft() === null) return;
       this.stopScrolling?.();
-      afterNextRender(() => (this.stopScrolling = scrollToSection(wanted.id)), { injector: this.injector });
+      afterNextRender(() => (this.stopScrolling = scrollToSection(wanted.id, { log: logLine })), { injector: this.injector });
     });
     // A fresh copy whenever the saved settings change (first load, after saving).
     effect(() => {
@@ -483,4 +484,10 @@ export class SettingsPage implements OnInit {
 /** Auto, then 1 to `most`: the choices of a thread count setting. */
 function threadChoices(most: number): PdSelectOption[] {
   return [{ value: 'auto', label: 'Auto' }, ...Array.from({ length: most }, (_, i): PdSelectOption => ({ value: String(i + 1), label: String(i + 1) }))];
+}
+
+const ipc = tauriIpc();
+/** A line for the app's log from the Settings window (every Dyno dialog may call `log_from_webview`); none in the browser build. */
+function logLine(message: string): void {
+  void ipc?.invoke('log_from_webview', { level: 'info', message }).catch(() => undefined);
 }
