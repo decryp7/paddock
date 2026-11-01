@@ -10,6 +10,9 @@
 # Exit 0 and nothing written: this is not a first release (an earlier PREFIXv* tag exists) or no CHANGELOG is configured,
 # so git-cliff takes over. Exit 0 with the section written: the first release. Exit 1: the first release has no usable
 # section (missing, an Unreleased heading, or nothing but blank lines and link references).
+#
+# The awk program stays inside what POSIX awk, mawk (Ubuntu's default), gawk and BSD awk all read the same: no bracket
+# expression that holds a ']' (the test lints for it and runs the script under every awk it finds).
 set -euo pipefail
 
 changelog=${FIRST_CHANGELOG:-}
@@ -46,10 +49,11 @@ fi
 section=$(awk -v h="## [$version]" '
   index($0, h) == 1 { on = 1; next }
   on && /^## / { exit }
-  on && /^\[[^]]+\]: / { next }
+  on && substr($0, 1, 1) == "[" && index($0, "]: ") > 2 { next }
   on
 ' "$changelog")
-if ! printf '%s\n' "$section" | grep -q '[^[:space:]]'; then
+# No pipe into grep -q here: under pipefail a reader that quits early (SIGPIPE) would report a non-empty section as empty.
+if [[ ! $section =~ [^[:space:]] ]]; then
   echo "::error::the '## [$version]' section of $changelog is empty"
   exit 1
 fi

@@ -2,7 +2,7 @@
 // app-release.yml. The steps are read out of the workflow with parseSteps and run for real in a scratch repository.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
@@ -164,4 +164,49 @@ test('an origin that cannot be reached fails loudly and blames the tag listing, 
 
 test('the workflow does not fetch tags (the full history behind every tag)', () => {
   assert.doesNotMatch(failFastStep.run, /git fetch/);
+});
+
+// The awk program must read the same under mawk (Ubuntu's default awk), gawk and BSD awk. Every awk found on this machine
+// runs the script on a fixture with link references; a bracket expression that holds ']' (`[^]]`, mawk and old BSD awks
+// differ on it) is rejected by a lint of the script itself.
+const awks = [];
+for (const name of ['awk', 'mawk', 'gawk', 'original-awk', 'nawk', 'busybox']) {
+  const found = spawnSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).stdout.trim();
+  if (found && !awks.some((a) => a.real === found)) awks.push({ name, real: found });
+}
+
+for (const awk of awks) {
+  test(`first-release-notes.sh gives the same section under ${awk.name} (${awk.real})`, () => {
+    const shim = join(scratch, `awk-${awk.name}`);
+    mkdirSync(shim, { recursive: true });
+    const target = awk.name === 'busybox' ? `#!/bin/sh\nexec ${awk.real} awk "$@"\n` : `#!/bin/sh\nexec ${awk.real} "$@"\n`;
+    writeFileSync(join(shim, 'awk'), target);
+    chmodSync(join(shim, 'awk'), 0o755);
+    const dir = repo(GOOD + '\n[unreleased]: https://example.invalid/u\n');
+    const r = spawnSync('bash', ['-c', notesStep.run], {
+      cwd: dir,
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${shim}:${bin}:${process.env.PATH}`, FIRST_CHANGELOG: 'CHANGELOG.md', TAG: 'dyno-v1.0.0', PREFIX: 'dyno-', CONFIG: '', PATHS: '' },
+    });
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.equal(notes(dir), '\n### Added\n\n- Dyno measures.\n- It explains.\n');
+  });
+}
+
+test('the CI shell scripts have no awk bracket expression that holds a closing bracket', () => {
+  const dirs = ['conformance/ci', 'scripts'];
+  const bad = [];
+  const walk = (rel) => {
+    for (const e of readdirSync(join(PADDOCK, rel), { withFileTypes: true })) {
+      const p = join(rel, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.sh')) {
+        readFileSync(join(PADDOCK, p), 'utf8').split('\n').forEach((line, i) => {
+          if (/\[\^\]/.test(line)) bad.push(`${p}:${i + 1}`);
+        });
+      }
+    }
+  };
+  dirs.forEach(walk);
+  assert.deepEqual(bad, []);
 });
