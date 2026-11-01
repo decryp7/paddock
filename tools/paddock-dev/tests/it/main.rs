@@ -8,6 +8,7 @@ mod golden;
 mod hostile;
 mod inputs;
 mod isolation;
+mod prune;
 mod repo;
 mod slots;
 mod wrapper;

@@ -241,6 +241,18 @@ expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
+path = "tools/paddock-dev/tests/it/prune.rs"
+reason = "ADR 0033 WP-9 (test): a file-wide allow of disallowed_methods; allow it on the items that start programs"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C53"
+path = "tools/paddock-dev/tests/it/repo.rs"
+reason = "ADR 0033 WP-9 (test): a file-wide allow of disallowed_methods; allow it on the items that start programs"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C53"
 path = "tools/paddock-dev/tests/it/isolation.rs"
 reason = "ADR 0033 WP-9 (test): a file-wide allow of disallowed_methods; allow it on the items that start programs"
 expires = "2026-12-31"

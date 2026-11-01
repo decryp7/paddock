@@ -2,12 +2,12 @@
 // (a blank line or a non-pipe line inside, a cell count that differs from the header, an unescaped `|` in a cell, a table glued
 // to a paragraph), unclosed code fences, broken relative links and same-file anchors, list continuations that lost their
 // indent, unclosed HTML tags. The case that prompted it: a blank line split the table in crates/README.md. Generated files
-// (THIRD_PARTY_NOTICES.md) are skipped.
+// (THIRD_PARTY_NOTICES.md) and the golden fixtures of tools/wiki (copies of wiki trees, some broken on purpose) are skipped.
 import { error } from '../finding.mjs';
 import { lintMarkdown } from '../util/markdown-lint.mjs';
 
-/** Files that come from a tool. */
-export const SKIPPED = /(^|\/)THIRD_PARTY_NOTICES\.md$/;
+/** Files that come from a tool, and test fixtures that hold Markdown on purpose (tools/wiki's golden cases). */
+export const SKIPPED = /(^|\/)THIRD_PARTY_NOTICES\.md$|^tools\/wiki\/tests\/golden\/cases\//;
 
 /** Link targets (as `file -> targets`) that may be missing for good, with the reason. Temporary gaps are dated waivers in paddock.waivers.toml. */
 export const ALLOWED_MISSING_LINKS = {};

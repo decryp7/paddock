@@ -80,6 +80,13 @@ test('a very long line is scanned in bounded time', () => {
   assert.ok(Date.now() - t < 2000);
 });
 
+test('C66 skips the golden fixtures of tools/wiki (wiki trees, some broken on purpose)', async () => {
+  const bad = '| A | B |\n|---|---|\n| 1 | 2 |\n\n| 3 | 4 |\n';
+  const root = makeApp({ 'tools/wiki/tests/golden/cases/x/docs/a.md': bad, 'tools/wiki/README.md': bad });
+  const f = await findingsOf('C66', root);
+  assert.deepEqual(f.map((x) => x.file), ['tools/wiki/README.md']);
+});
+
 test('C66 through the runner: the crates README split is an error, THIRD_PARTY_NOTICES.md is skipped', async () => {
   const bad = '| A | B |\n|---|---|\n| 1 | 2 |\n\n| 3 | 4 |\n';
   const root = makeApp({ 'crates/README.md': bad, 'x/THIRD_PARTY_NOTICES.md': bad, 'ok.md': '# Fine\n\n| A |\n|---|\n| 1 |\n' });
