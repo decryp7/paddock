@@ -124,7 +124,9 @@ fn native(op: &str, label: &str) {
 /// The names of an input's top-level fields, for the log (never their values: they may be user content).
 fn input_keys(input: Option<&Value>) -> String {
     match input {
-        Some(Value::Object(map)) if !map.is_empty() => map.keys().map(String::as_str).collect::<Vec<_>>().join(","),
+        Some(Value::Object(map)) if !map.is_empty() => {
+            map.keys().map(String::as_str).collect::<Vec<_>>().join(",")
+        }
         Some(Value::Object(_)) | Some(Value::Null) | None => "(none)".to_string(),
         Some(_) => "(not an object)".to_string(),
     }

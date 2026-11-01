@@ -112,12 +112,13 @@ export class WindowDialogBackend extends DialogPresenter {
       shown: onScreen,
       isOpen: () => open,
       // Opening it again focuses the window Rust has open for it.
-      focus: () =>
+      focus: (inputs) =>
         void opened.then(() => {
           if (fallback) return fallback.focus();
           if (!label) return undefined;
-          this.io.log?.('info', `[paddock-dialogs] focusing the open window ${label} of ${request.def.id} (this window opened it)`);
-          return this.io.open(sent).then(() => undefined, () => undefined);
+          const again = inputs && Object.keys(inputs).length > 0 && !request.def.instanced ? { ...sent, input: inputs } : sent;
+          this.io.log?.('info', `[paddock-dialogs] focusing the open window ${label} of ${request.def.id} (this window opened it): ${Object.keys(isRecordInput(again.input)).join(',') || '(no inputs)'}`);
+          return this.io.open(again).then(() => undefined, () => undefined);
         }),
       dismiss: () => void opened.then(() => (fallback ? fallback.dismiss() : label ? this.io.requestClose(label).catch(() => undefined) : undefined)),
     };
@@ -157,4 +158,8 @@ export class WindowDialogBackend extends DialogPresenter {
     );
     return this.listening;
   }
+}
+
+function isRecordInput(v: unknown): Readonly<Record<string, unknown>> {
+  return isRecord(v) ? v : {};
 }
