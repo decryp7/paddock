@@ -163,7 +163,7 @@ jobs:
           dir: apps/shell-demo/src-tauri/binaries
           sidecars: shell-demo-agent
 
-      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+      - uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
           name: paddock-shell-demo-${{ runner.os }}
           path: apps/shell-demo/dist/*
@@ -190,7 +190,7 @@ jobs:
         with:
           node-version: 24
 
-      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3
+      - uses: ChristopherHX/gitea-download-artifact@75635f32b4c1c41c4b3d64e8f85210112ed4c9c7 # v4
         with:
           path: artifacts
 

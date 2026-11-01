@@ -201,7 +201,7 @@ jobs:
 
       - name: Test report (JUnit)
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
           name: rust-tests-junit
           path: apps/debrief/target/nextest/ci/junit.xml
@@ -538,7 +538,7 @@ jobs:
 
       - name: Upload Playwright report
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
           name: playwright-report-${{ matrix.shard }}
           path: apps/debrief/app/playwright-report
@@ -753,7 +753,7 @@ jobs:
       # Screenshots and page sources of failed smoke tests (wdio.conf.ts `afterTest`).
       - name: Smoke test failures
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
           name: tauri-smoke-${{ runner.os }}
           path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app/e2e-tauri/.artifacts
@@ -787,7 +787,7 @@ jobs:
 
       - name: Start-up timings
         if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os != 'Windows'
-        uses: actions/upload-artifact@v3
+        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
           name: startup-timings-${{ runner.os }}
           path: ${{ runner.temp }}/startup-timings.json
@@ -1029,8 +1029,8 @@ jobs:
           stale="$(ls dist | grep -E '_[0-9]+\.[0-9]+\.[0-9]+' | grep -v "_${version}_" || true)"
           if [ -n "$stale" ]; then echo "::error::Installers from another version: $stale"; exit 1; fi
 
-      # Gitea Actions supports upload/download-artifact v3.
-      - uses: actions/upload-artifact@v3
+      # Gitea 28 lists only v4 artifacts: the Gitea fork of the v4 actions (docs/research/2026-11-ci-artifacts-v4.md).
+      - uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
           name: debrief-${{ runner.os }}
           path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/dist/*
@@ -1065,7 +1065,7 @@ jobs:
       # CARGO_BUILD_JOBS: this runner's share of the host (conformance/ci/build-jobs.sh; Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
 
-      - uses: actions/download-artifact@v3
+      - uses: ChristopherHX/gitea-download-artifact@75635f32b4c1c41c4b3d64e8f85210112ed4c9c7 # v4
         with:
           path: apps/debrief/artifacts
 

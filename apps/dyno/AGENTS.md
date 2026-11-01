@@ -169,7 +169,7 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
 
 - Prefer well-maintained, permissively licensed (MIT/Apache-2.0) dependencies (`deny.toml` lists the allowed
   licences). Commit `Cargo.lock` and `package-lock.json`; install with `npm ci` in CI.
-- Renovate updates dependencies and pins CI actions to commit digests. Gitea Actions needs the v3 artifact actions.
+- Renovate updates dependencies and pins CI actions to commit digests. Gitea 28 lists only v4 artifacts, so CI uses the Gitea fork of the v4 actions (ChristopherHX/gitea-upload-artifact, gitea-download-artifact; docs/research/2026-11-ci-artifacts-v4.md).
 - Use Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`, `chore:`) so changelogs can be
   generated (`cliff.toml`); `paddock-conformance commit-lint` checks them (CI's `commits` job on pull requests). Never add Co-Authored-By or AI attribution
   trailers. Releases are `dyno-v*` tags following semver (`docs/releasing.md`).
