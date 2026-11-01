@@ -178,7 +178,7 @@
   --mat-radio-label-text-size: var(--pd-text-body);
 
   // ---- Form field and input (outlined). A labelled field is --pd-field-height (the control height plus 8 px above and below the
-  // text row, so the floated label clears the text); a field without a label stays the control height (.mdc-text-field--no-label below).
+  // text row, so the floated label clears the text); a field without a label stays the control height (.mdc-text-field--no-label, family section).
   --mat-form-field-input-text-color: var(--pd-text);
   --mat-form-field-input-text-placeholder-color: var(--pd-text-subtle);
   --mat-form-field-outlined-input-text-color: var(--pd-text);
@@ -576,6 +576,10 @@ body {
   --mat-slide-toggle-label-text-font: var(--pd-font-sans);
   --mat-slide-toggle-label-text-size: var(--pd-text-body);
 }
+// A field without a label (a toolbar filter, the paginator's select) has nothing to clear: it stays the control height.
+body .mat-mdc-form-field .mdc-text-field--no-label {
+  --mat-form-field-container-height: var(--pd-control-height);
+}
 // family-controls:end
 
 // A projected glyph (pd-glyph, mat-icon, an svg) sits centred on the label with a 4 px gap: the label is a flex row, not a text line
@@ -713,10 +717,6 @@ html .mat-mdc-form-field-hint {
 // 28 px field without one. A textarea keeps the same top and bottom padding and grows from there, so its first line starts below the
 // floated label, never under it. The floated label is the 12 px label size; Material places it on the top border from the same
 // container height, and sizes the notch to it. A suffix icon (datepicker, timepicker) is a 16 px glyph with room from the border.
-html .mat-mdc-form-field .mdc-text-field--no-label {
-  --mat-form-field-container-height: var(--pd-control-height);
-}
-
 html .mat-mdc-form-field .mat-mdc-form-field-infix {
   display: flex;
   align-items: center;
