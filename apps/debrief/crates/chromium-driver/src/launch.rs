@@ -1168,6 +1168,11 @@ mod tests {
             // another process's, so nothing is sent.
             if let Ok(None) = self.0.try_wait() {
                 // SAFETY: our own child, checked unreaped just above; nothing else reaps it, so the pid is still its.
+                // conformance: pid-kill — the guard's own child, checked unreaped by try_wait just above
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "a signal to the unreaped child this test spawned and holds; its pid cannot have been handed on"
+                )]
                 unsafe {
                     libc::kill(self.0.id() as libc::pid_t, libc::SIGCONT);
                 }
@@ -1196,6 +1201,8 @@ mod tests {
             return;
         }
         let dir = tempfile::tempdir().unwrap();
+        // This crate is copied between apps and has no process helper (see `launch_with`): the test starts its own test binary.
+        #[allow(clippy::disallowed_methods, reason = "the test starts its own test binary as a child")]
         let mut child = ChildGuard(
             std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
@@ -1223,9 +1230,21 @@ mod tests {
         };
         for _ in 0..5 {
             // SAFETY: signals to our own child, which is not reaped yet.
-            assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
+            // conformance: pid-kill — the test's own child, not reaped until the end of this test
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "a signal to the unreaped child this test spawned and holds; its pid cannot have been handed on"
+            )]
+            let stop = unsafe { libc::kill(pid, libc::SIGSTOP) };
+            assert_eq!(stop, 0);
             wait_for("the child stopped", stopped);
-            assert_eq!(unsafe { libc::kill(pid, libc::SIGCONT) }, 0);
+            // conformance: pid-kill — the test's own child, not reaped until the end of this test
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "a signal to the unreaped child this test spawned and holds; its pid cannot have been handed on"
+            )]
+            let cont = unsafe { libc::kill(pid, libc::SIGCONT) };
+            assert_eq!(cont, 0);
         }
         std::fs::write(dir.path().join("go"), "").unwrap();
         assert!(child.0.wait().unwrap().success(), "the child's checks failed (its output is above)");
