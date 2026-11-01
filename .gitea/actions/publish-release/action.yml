@@ -47,7 +47,7 @@ runs:
         node "$P/ci/release-notes.mjs" --app "$APP_NAME" --changelog "$CHANGELOG" --out "$DIR/RELEASE_NOTES.md" --extra "$EXTRA"
         # Inside the runners github.server_url is Gitea's internal http address, which the updater must never be given.
         base="${BASE:-https://dev.decryptology.net/${{ github.repository }}/releases/download}/$tag"
-        if find "$DIR" -name '*.sig' | grep -q .; then
+        if [ -n "$(find "$DIR" -name '*.sig')" ]; then  # no `| grep -q .`: under pipefail it can fail on a match (C62)
           node "$P/release/latest-json.mjs" --dir "$DIR" --version "$version" --notes "$DIR/RELEASE_NOTES.md" --base-url "$base" --out "$DIR/latest.json"
           # The signatures are in latest.json; the .sig files are not release assets.
           find "$DIR" -name '*.sig' -delete

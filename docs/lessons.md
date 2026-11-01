@@ -1178,3 +1178,12 @@ log's times were labels, some duplicated) and rule text restated as paraphrase. 
 a new or changed page independently, cite log entries by file and line with dates from the clock, link rules instead of
 restating them, age facts out with `verified:` and re-verify the touched pages on each ingest, and compare the lint against the
 rules on main, on open rule branches and the ER text.
+
+## An echoed script in a CI log is not a failure (2026-10-31, CI)
+Three jobs were filed as "sccache checksum mismatch" (23982, 24210, 24144). The runner echoes every step's script into the
+log, so the text `checksum mismatch` was there in all three, but the sccache step had passed. The jobs failed on a stale
+`tools/paddock-dev/Cargo.lock` and on a Dyno clippy error and test. When triaging a log, grep for the `::error::` lines and
+`##[error]Process completed` (the step that failed and the message it printed), never for words that also occur in the
+scripts. In the same change, `| grep -q` under pipefail was found a second time (setup-rust read an installed component as
+missing): **check C62** (report-only) now flags a pipe-fed quiet grep in every pipefail script and bash step; match with
+`grep -q … <<<"$out"` instead.

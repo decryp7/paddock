@@ -36,39 +36,178 @@ runs:
         TOOLCHAIN: ${{ inputs.toolchain }}
         COMPONENTS: ${{ inputs.components }}
         TARGETS: ${{ inputs.targets }}
+        NATIVE: ${{ github.action_path }}/../../../conformance/ci/run-native.mjs
       run: |
         set -euo pipefail
         command -v rustup >/dev/null || { echo "::error::rustup is not installed on this runner"; exit 1; }
-        # In the Paddock CI image (it writes /etc/paddock-ci-release) the stable toolchain and its components are already
-        # there: skip the network round trip unless this job asks for extra targets or a component the image lacks.
-        if [ -f /etc/paddock-ci-release ] && [ "$TOOLCHAIN" = stable ] && [ -z "$TARGETS" ]; then
-          installed=$(rustup component list --installed 2>/dev/null || true)
-          missing=0
-          for c in $COMPONENTS; do printf '%s\n' "$installed" | grep -q "^$c-" || missing=1; done
-          if [ "$missing" = 0 ]; then
-            echo "Rust toolchain from the Paddock CI image (components: ${COMPONENTS:-none})"
-            rustc --version
-            cargo --version
-            exit 0
-          fi
+        COMPONENTS="${COMPONENTS//,/ }"  # ci.yml passes "clippy,rustfmt"; rustup takes both forms
+        RUSTUP_DIR="${RUSTUP_HOME:-$HOME/.rustup}"
+        STAMP="$RUSTUP_DIR/paddock-ci-synced-$TOOLCHAIN"
+        LOCK="$RUSTUP_DIR/paddock-ci-sync.lock"
+        HOURS="${PADDOCK_RUSTUP_SYNC_HOURS:-24}"
+        case "$HOURS" in '' | *[!0-9]*) HOURS=24 ;; esac
+        WAIT="${PADDOCK_RUSTUP_LOCK_WAIT:-900}"
+        case "$WAIT" in '' | *[!0-9]*) WAIT=900 ;; esac
+        IMAGE="${PADDOCK_CI_RELEASE_FILE:-/etc/paddock-ci-release}"  # overridable so the step's test never reads the real file
+        # Everything this job asks for is installed: no network sync. `rustup toolchain install` crashed on the Windows host
+        # 0.5 s into "syncing channel updates" (runs 6460 and 7267); a job that does not sync cannot hit that. A channel (stable,
+        # beta, nightly) still syncs when the host's last sync is older than PADDOCK_RUSTUP_SYNC_HOURS (default 24, 0 always),
+        # so host runners follow new releases; an exact version, or the Paddock CI image (/etc/paddock-ci-release), never does.
+        why=""
+        fresh() {
+          if [ -f "$IMAGE" ] || grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"$TOOLCHAIN"; then return 0; fi
+          if [ "$HOURS" -gt 0 ] && [ -f "$STAMP" ] && [ -n "$(find "$STAMP" -mmin "-$((HOURS * 60))" 2>/dev/null)" ]; then return 0; fi
+          if [ "$HOURS" = 0 ]; then why="PADDOCK_RUSTUP_SYNC_HOURS is 0"
+          elif [ -f "$STAMP" ]; then why="last sync older than $HOURS h"
+          else why="no sync recorded on this host yet"; fi
+          return 1
+        }
+        # Here-strings, not `printf | grep -q`: under pipefail, grep -q quitting at the first match can SIGPIPE the writer and
+        # fail the pipeline, which read an installed component as missing (conformance C62).
+        installed() {
+          local list host c t
+          # Exactly this toolchain: `rustup run` resolves "nightly" to nightly-<host>, never to a dated nightly-2026-10-01-<host>
+          # or another host's; RUSTUP_AUTO_INSTALL=0 keeps rustup 1.28+ from installing (and syncing) it here.
+          if ! RUSTUP_AUTO_INSTALL=0 rustup run "$TOOLCHAIN" rustc --version >/dev/null 2>&1; then why="missing the $TOOLCHAIN toolchain"; return 1; fi
+          why=""
+          list=$(rustup component list --installed --toolchain "$TOOLCHAIN" 2>/dev/null || true)
+          # A component is listed as <name>-<host triple>, or as the bare name (rust-src); cargo is always the host's.
+          host=$(sed -n 's/^cargo-//p' <<<"$list" | sed -n 1p)
+          for c in $COMPONENTS; do grep -Fxq -e "$c" -e "$c-${host:-?}" <<<"$list" || why="$why component $c"; done
+          list=$(rustup target list --installed --toolchain "$TOOLCHAIN" 2>/dev/null || true)
+          for t in $TARGETS; do grep -Fxq "$t" <<<"$list" || why="$why target $t"; done
+          if [ -n "$why" ]; then why="missing$why"; return 1; fi
+        }
+        # The toolchain for this job's later steps, without changing the host's default (other jobs share it).
+        use_toolchain() {
+          echo "RUSTUP_TOOLCHAIN=$TOOLCHAIN" >> "$GITHUB_ENV"
+          export RUSTUP_TOOLCHAIN="$TOOLCHAIN"
+          rustc --version
+          cargo --version
+        }
+        if fresh && installed; then
+          echo "Rust $TOOLCHAIN already installed with components '${COMPONENTS:-none}' and targets '${TARGETS:-none}': no sync"
+          use_toolchain
+          exit 0
         fi
+        echo "Syncing Rust $TOOLCHAIN: $why"
+
+        # One sync per host at a time (the host's jobs share RUSTUP_HOME): a mkdir lock with its owner recorded (its job's
+        # RUNNER_TEMP, pid, host and start time). A live owner is waited for by polling, at most PADDOCK_RUSTUP_LOCK_WAIT s
+        # (default 900); then the job syncs without the lock. A lock is stale when its owner's RUNNER_TEMP is gone (the runner
+        # deletes it after the job and never reuses the name), when it was taken more than 2 x WAIT s ago (at least 60 s: a
+        # runner that crashed or rebooted leaves its folder behind), or when it has no owner file and is more than 60 s old
+        # (a job that died between mkdir and writing it). A stale lock is moved to a name of this job's own and deleted only
+        # if it still has the owner read (or still none); one that changed hands meanwhile is left under its new name and
+        # logged, never moved back (rule 53). Only this job's own lock is removed.
+        OWNER="$(printf '%s\n' "temp=${RUNNER_TEMP:-}" "pid=$$" "host=$(hostname 2>/dev/null || echo unknown)" "since=$(date +%s)")"
+        MAX_AGE=$((2 * WAIT)); if [ "$MAX_AGE" -lt 60 ]; then MAX_AGE=60; fi
+        locked=0
+        codes=""
+        unlock() {
+          if [ "$locked" = 1 ] && [ "$(cat "$LOCK/owner" 2>/dev/null)" = "$OWNER" ]; then rm -rf "$LOCK"; fi
+          locked=0
+        }
+        trap 'unlock; if [ -n "$codes" ]; then rm -rf "$codes"; fi' EXIT
+        mkdir -p "$RUSTUP_DIR"
+        deadline=$(($(date +%s) + WAIT))
+        n=0
+        held=""
+        while :; do
+          if mkdir "$LOCK" 2>/dev/null; then
+            if printf '%s\n' "$OWNER" >"$LOCK/owner" 2>/dev/null; then
+              locked=1
+              break
+            fi
+            rmdir "$LOCK" 2>/dev/null || true  # this job's own, still empty: an ownerless lock would hold everyone up
+            echo "could not record the sync lock's owner; waiting as if it were held"
+          else
+            held="$(cat "$LOCK/owner" 2>/dev/null || true)"
+            stale=""
+            now=$(date +%s)
+            if [ -z "$held" ]; then
+              if [ -d "$LOCK" ] && [ -z "$(find "$LOCK" -maxdepth 0 -mmin -1 2>/dev/null)" ]; then stale="it has no owner and is more than 60 s old"; fi
+            else
+              held_temp="$(sed -n 's/^temp=//p' <<<"$held")"
+              held_since="$(sed -n 's/^since=//p' <<<"$held")"
+              if [ -n "$held_temp" ] && [ ! -d "$held_temp" ]; then stale="its job's folder $held_temp is gone"
+              elif [[ "$held_since" =~ ^[0-9]+$ ]] && [ $((now - held_since)) -gt "$MAX_AGE" ]; then stale="it was taken $((now - held_since)) s ago, more than $MAX_AGE s"; fi
+            fi
+            if [ -n "$stale" ]; then
+              n=$((n + 1))
+              grave="$LOCK.stale.$$.$n"
+              if [ ! -e "$grave" ] && mv "$LOCK" "$grave" 2>/dev/null; then
+                if [ "$(cat "$grave/owner" 2>/dev/null || true)" = "$held" ]; then
+                  rm -rf "$grave"
+                  echo "Removed a stale Rust sync lock: $stale"
+                else
+                  echo "::warning::the Rust sync lock changed hands while it was reclaimed; left as $grave ($(tr '\n' ' ' <"$grave/owner" 2>/dev/null || true))"
+                fi
+              fi
+              continue
+            fi
+          fi
+          if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "::warning::the Rust sync lock $LOCK is still held after ${WAIT}s (${held//$'\n'/ }); syncing without it"
+            break
+          fi
+          sleep 2  # waiting on the lock's holder, a condition with a deadline; never a fixed delay before a retry
+        done
+        # Another job may have synced while this one waited.
+        if [ "$locked" = 1 ] && fresh && installed; then
+          echo "Rust $TOOLCHAIN was synced by another job meanwhile: no sync"
+          unlock
+          use_toolchain
+          exit 0
+        fi
+
         args=(--profile minimal)
         for c in $COMPONENTS; do args+=(--component "$c"); done
         for t in $TARGETS; do args+=(--target "$t"); done
-        rc=0
-        rustup toolchain install "$TOOLCHAIN" "${args[@]}" --no-self-update || rc=$?
-        if [ "$rc" != 0 ]; then
-          why="exit $rc"
-          # Git Bash reports 127 for a Windows program that ended with an NTSTATUS crash code, not only for a missing one.
-          if [ "$rc" = 127 ] && [ "$RUNNER_OS" = Windows ]; then
-            why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
+        # Through run-native when Node is there: Git Bash reports any NTSTATUS crash as 127, run-native prints the raw code (hex,
+        # NTSTATUS name) and rustup's last stderr lines. A crash (never an error rustup reports) gets one more try: a stated
+        # mitigation for an intermittent crash whose cause the logged code is to name, not a fix.
+        codes="$(mktemp -d "${TMPDIR:-/tmp}/rustup-codes.XXXXXX")"  # macOS mktemp -d alone ignores TMPDIR
+        how=""
+        for try in 1 2; do
+          rc=0
+          if command -v node >/dev/null 2>&1; then
+            cf="$codes/$try"
+            if [ "$RUNNER_OS" = Windows ] && command -v cygpath >/dev/null 2>&1; then cf="$(cygpath -m "$cf")"; fi  # node.exe reads C:/ paths
+            node "$NATIVE" --code-file "$cf" -- rustup toolchain install "$TOOLCHAIN" "${args[@]}" --no-self-update || rc=$?
+          else
+            rustup toolchain install "$TOOLCHAIN" "${args[@]}" --no-self-update || rc=$?
           fi
+          [ "$rc" = 0 ] && break
+          crash=0
+          if [ -s "$codes/$try" ]; then
+            how="$(head -1 "$codes/$try")"
+            case "$how" in signal* | *NTSTATUS* | *STATUS_*) crash=1 ;; esac
+          else
+            how="exit $rc"
+            # Git Bash reports 127 for a Windows program that ended with an NTSTATUS crash code, not only for a missing one.
+            if [ "$rc" = 127 ] && [ "$RUNNER_OS" = Windows ]; then
+              crash=1
+              how="$how: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
+            fi
+          fi
+          echo "rustup toolchain install, try $try of 2: $how"
+          if [ "$crash" != 1 ] || [ "$try" = 2 ]; then break; fi
+          echo "::warning::rustup crashed ($how); trying once more"
+        done
+        if [ "$rc" != 0 ]; then
+          case "$how" in exit*) why="$how" ;; *) why="ended with $how" ;; esac
           echo "::error::rustup could not install the $TOOLCHAIN toolchain ($why). Run 'rustup toolchain install $TOOLCHAIN' on the runner to see why."
           exit 1
         fi
-        rustup default "$TOOLCHAIN"
-        rustc --version
-        cargo --version
+        touch "$STAMP"
+        # A host with no default yet (a fresh runner) gets this one, for steps that run before setup-rust (job-isolation's
+        # paddock-dev build); a host that has one keeps it. Only stable or an exact version: never a dated nightly.
+        if [ "$TOOLCHAIN" = stable ] || grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$' <<<"$TOOLCHAIN"; then
+          if ! rustup default >/dev/null 2>&1; then rustup default "$TOOLCHAIN"; fi
+        fi
+        unlock
+        use_toolchain
     - name: Install sccache
       shell: bash
       run: |
@@ -85,26 +224,54 @@ runs:
         esac
         DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
         BIN=sccache; [ "$RUNNER_OS" = "Windows" ] && BIN=sccache.exe
-        if [ ! -x "$DEST/$BIN" ]; then
-          dl=$(mktemp -d)
+        # The shared tool cache keeps a copy only while it runs and reports the pin: a copy an older install left half-written,
+        # or any other version, is replaced by a verified download.
+        if [ ! -x "$DEST/$BIN" ] || [ "$("$DEST/$BIN" --version 2>/dev/null | awk '{print $2}')" != "$VERSION" ]; then
+          # A fresh folder of this job's own (mktemp -d, under the job's TMPDIR where job-tmpdir or job-isolation set one): the
+          # archive is downloaded, verified and unpacked where no other job reads or writes; only a verified binary is renamed
+          # into the shared cache.
+          PART="$DEST/$BIN.part.$$"
+          dl=""
+          trap 'if [ -n "$dl" ]; then rm -rf "$dl"; fi; rm -f "$PART"' EXIT
+          dl=$(mktemp -d "${TMPDIR:-/tmp}/sccache.XXXXXX")  # macOS mktemp -d alone ignores TMPDIR
           NAME="sccache-v$VERSION-$T"
-          # A failed download must not fail the job: the build runs without the cache.
-          if ! curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"; then
-            echo "::warning::could not download sccache $VERSION; building without the compile cache."; exit 0
+          URL="https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
+          sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
+          # A mismatch is deleted and fetched once more, with both hashes, the size and the first bytes logged: an error page
+          # from a proxy or a cut-off transfer shows there; a wrong pin or a changed release asset mismatches twice.
+          GOT=""; GOT1=""
+          for try in 1 2; do
+            rm -f "$dl/$NAME.$EXT"
+            # A failed download must not fail the job: the build runs without the cache.
+            if ! curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "$URL"; then
+              echo "::warning::could not download sccache $VERSION; building without the compile cache."; exit 0
+            fi
+            GOT=$(sha256 "$dl/$NAME.$EXT")
+            [ "$GOT" = "$SUM" ] && break
+            [ -z "$GOT1" ] && GOT1="$GOT"
+            echo "sccache $VERSION download $try of 2 for $T: expected SHA-256 $SUM, got $GOT ($(wc -c < "$dl/$NAME.$EXT" | tr -d ' ') bytes from $URL)"
+            echo "  first bytes: $(head -c 160 "$dl/$NAME.$EXT" | LC_ALL=C tr -c '[:print:]' '.')"
+          done
+          if [ "$GOT" != "$SUM" ]; then
+            echo "::error::sccache $VERSION checksum mismatch for $T: expected $SUM, got $GOT1 and $GOT on both downloads (a wrong pin or a changed release asset; .gitea/actions/setup-rust)"
+            exit 1
           fi
-          if command -v sha256sum >/dev/null 2>&1; then GOT=$(sha256sum "$dl/$NAME.$EXT" | cut -d' ' -f1); else GOT=$(shasum -a 256 "$dl/$NAME.$EXT" | cut -d' ' -f1); fi
-          [ "$GOT" = "$SUM" ] || { echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"; exit 1; }
           if [ "$EXT" = zip ]; then
             if command -v unzip >/dev/null 2>&1; then unzip -q "$dl/$NAME.$EXT" -d "$dl"; else powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"; fi
           else
             tar -xzf "$dl/$NAME.$EXT" -C "$dl"
           fi
-          mkdir -p "$DEST"
-          # Renamed into place whole: a runner with a shared tool cache may run two jobs that install it at once.
-          cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
-          chmod +x "$DEST/$BIN.part.$$"
-          mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
-          rm -rf "$dl"
+          # Renamed into place whole: a runner with a shared tool cache may run two jobs that install it at once. On Windows
+          # the rename fails while another job's sccache server runs the installed copy: that copy is used when it reports
+          # the pin; otherwise the job builds without the cache (the EXIT trap removes the part file and the download).
+          if mkdir -p "$DEST" && cp "$dl/$NAME/$BIN" "$PART" && chmod +x "$PART" && mv -f "$PART" "$DEST/$BIN"; then
+            echo "sccache $VERSION installed in $DEST"
+          elif [ "$("$DEST/$BIN" --version 2>/dev/null | awk '{print $2}')" = "$VERSION" ]; then
+            echo "sccache $VERSION was installed in $DEST by another job meanwhile: using that copy"
+          else
+            echo "::warning::could not put sccache $VERSION into $DEST; building without the compile cache."
+            exit 0
+          fi
         fi
         echo "$DEST" >> "$GITHUB_PATH"
     - name: sccache

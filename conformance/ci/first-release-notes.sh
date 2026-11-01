@@ -38,7 +38,7 @@ version=${tag#"${prefix}v"}
 
 heading=$(grep -m1 -F "## [$version]" "$changelog" || true)
 [ -n "$heading" ] || { echo "::error::$changelog has no '## [$version]' section: write the release notes there before tagging"; exit 1; }
-if printf '%s' "$heading" | grep -qi 'unreleased'; then
+if grep -qi 'unreleased' <<<"$heading"; then
   echo "::error::$changelog still says '$heading': date the section (bump the version, then tag)"
   exit 1
 fi
@@ -49,7 +49,7 @@ section=$(awk -v h="## [$version]" '
   on && /^\[[^]]+\]: / { next }
   on
 ' "$changelog")
-if ! printf '%s\n' "$section" | grep -q '[^[:space:]]'; then
+if ! grep -q '[^[:space:]]' <<<"$section"; then
   echo "::error::the '## [$version]' section of $changelog is empty"
   exit 1
 fi
