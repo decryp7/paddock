@@ -466,7 +466,7 @@ history-preserving import into `apps/debrief` with tags renamed to `debrief-v*`;
 `debrief-v*` tags; the one endpoint `debrief-latest` (§4; installs from before the move are reinstalled once, last
 amendment); and the pointer commit in the old repo (§3 stage 1) last, after the import's CI is green. Before the import, Debrief's
 `test/x50-shell-baseline` is merged into its `main`, and `perf/test-speed` is rebased or merged if it still applies
-cleanly and passes Debrief's affected tests (otherwise it stays a hand-off branch, [monorepo-handoff.md](../plans/monorepo-handoff.md)).
+cleanly and passes Debrief's affected tests (otherwise it stays a hand-off branch; the imports are recorded in [history.md](../history.md)).
 The other six apps (Pacenotes and Sighter, then Spotter, Pitcrew, Dyno and Pitwall) are imported after that Debrief
 release. The frame and the Debrief import land on `main` as two separate merges, each verified locally and by one CI run.
 
